@@ -5,8 +5,9 @@ const { authenticateJWT } = require('../middleware/jwt-auth');
 
 router.use(authenticateJWT);
 
-// Config
-router.get('/', configController.getAllConfig);
-router.put('/:key', configController.updateConfig);
+router.get('/', configController.getProjects);
+router.post('/', configController.createProject);
+router.put('/:id', configController.updateProject);
+router.delete('/:id', configController.deleteProject);
 
 module.exports = router;

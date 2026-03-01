@@ -2,11 +2,11 @@
  * HeaderBar — progress bar, menu, dark mode toggle
  */
 
-import React, { useMemo } from 'react';
+import React from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import { getTheme } from '../../theme/colors';
 
-export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, onReschedule, onShowHelp }) {
+export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onReschedule, onShowHelp }) {
   var theme = getTheme(darkMode);
   var { user, logout } = useAuth();
 
@@ -16,6 +16,8 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
   var pct = totalCount > 0 ? Math.round(doneCount / totalCount * 100) : 0;
 
   return (
+    <>
+    {gcalSyncing && <style>{`@keyframes gcal-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>}
     <div style={{
       display: 'flex', alignItems: 'center', gap: 12, padding: '8px 16px',
       background: theme.headerBg, borderBottom: `1px solid ${theme.border}`,
@@ -37,7 +39,12 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
       {onReschedule && <button onClick={onReschedule} style={btnStyle(theme)} title="Reschedule">&#x1F504;</button>}
       <button onClick={onShowSettings} style={btnStyle(theme)} title="Settings">&#x2699;&#xFE0F;</button>
       <button onClick={onShowExport} style={btnStyle(theme)} title="Import/Export">&#x1F4E6;</button>
-      {onShowGCalSync && <button onClick={onShowGCalSync} style={btnStyle(theme)} title="Google Calendar Sync">&#x1F4C5;</button>}
+      {onShowGCalSync && (
+        <button onClick={onShowGCalSync} style={{ ...btnStyle(theme), position: 'relative' }} title="Google Calendar Sync">
+          <span style={gcalSyncing ? { display: 'inline-block', animation: 'gcal-spin 1s linear infinite' } : undefined}>&#x1F4C5;</span>
+          {gcalSyncing && <span style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: '#3B82F6' }} />}
+        </button>
+      )}
       {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme)} title="Help & Shortcuts">&#x2753;</button>}
       <button onClick={() => setDarkMode(d => !d)} style={btnStyle(theme)} title="Toggle dark mode">
         {darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19'}
@@ -52,6 +59,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
         </div>
       )}
     </div>
+    </>
   );
 }
 

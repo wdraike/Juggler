@@ -9,6 +9,8 @@ const gcalApi = require('../lib/gcal-api');
 
 const TIMEZONE = 'America/New_York';
 
+function delay(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+
 // --- Date conversion helpers ---
 
 /**
@@ -45,6 +47,16 @@ function jugglerDateToISO(date, time, year) {
  */
 function isoToJugglerDate(isoString) {
   if (!isoString) return { date: null, time: null };
+
+  // Date-only strings (YYYY-MM-DD) from all-day events: parse directly to avoid UTC shift
+  if (/^\d{4}-\d{2}-\d{2}$/.test(isoString)) {
+    var parts = isoString.split('-');
+    return {
+      date: parseInt(parts[1], 10) + '/' + parseInt(parts[2], 10),
+      time: null
+    };
+  }
+
   var d = new Date(isoString);
   // Use Intl to get parts in the right timezone
   try {
@@ -106,8 +118,10 @@ async function getValidAccessToken(user) {
   }
 
   // Check if token is still valid (with 5 min buffer)
+  // DB stores dates in UTC but without 'Z' suffix, so append it for correct parsing
   if (user.gcal_access_token && user.gcal_token_expiry) {
-    var expiry = new Date(user.gcal_token_expiry);
+    var expiryStr = String(user.gcal_token_expiry);
+    var expiry = new Date(expiryStr.endsWith('Z') ? expiryStr : expiryStr + 'Z');
     if (expiry.getTime() > Date.now() + 5 * 60 * 1000) {
       return user.gcal_access_token;
     }
@@ -431,6 +445,7 @@ async function sync(req, res) {
     for (var del of deletionQueue) {
       try {
         await gcalApi.deleteEvent(accessToken, del.gcal_event_id);
+        await delay(100);
       } catch (e) {
         // 404/410 = already gone, that's fine
         if (!e.message.includes('404') && !e.message.includes('410')) {
@@ -486,10 +501,12 @@ async function sync(req, res) {
             updated_at: db.fn.now()
           });
           stats.pushed++;
+          await delay(100);
         } else if (lastSynced && task.updated_at && new Date(task.updated_at) > lastSynced) {
           // Existing task modified since last sync → patch
           await gcalApi.patchEvent(accessToken, task.gcal_event_id, eventBody);
           stats.patched++;
+          await delay(100);
         }
       } catch (e) {
         stats.errors.push({ phase: 'push', taskId: task.id, error: e.message });

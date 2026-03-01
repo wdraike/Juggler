@@ -57,14 +57,27 @@ async function calendarFetch(accessToken, path, options = {}) {
 }
 
 async function listEvents(accessToken, timeMin, timeMax) {
-  const params = new URLSearchParams({
-    timeMin,
-    timeMax,
-    singleEvents: 'true',
-    orderBy: 'startTime',
-    maxResults: '250'
-  });
-  return calendarFetch(accessToken, '/calendars/primary/events?' + params.toString());
+  var allItems = [];
+  var pageToken = null;
+
+  do {
+    var params = new URLSearchParams({
+      timeMin,
+      timeMax,
+      singleEvents: 'true',
+      orderBy: 'startTime',
+      maxResults: '250'
+    });
+    if (pageToken) params.append('pageToken', pageToken);
+
+    var data = await calendarFetch(accessToken, '/calendars/primary/events?' + params.toString());
+    if (data && data.items) {
+      allItems = allItems.concat(data.items);
+    }
+    pageToken = data && data.nextPageToken ? data.nextPageToken : null;
+  } while (pageToken);
+
+  return { items: allItems };
 }
 
 async function insertEvent(accessToken, event) {

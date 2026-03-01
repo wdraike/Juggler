@@ -9,12 +9,12 @@ export const PRI_COLORS = {
 export const PRI_RANK = { P1: 100, P2: 80, P3: 50, P4: 20 };
 
 export const STATUS_OPTIONS = [
-  { value: "", label: "\u2014", bg: "#FFFFFF", color: "#9CA3AF", tip: "Open \u2014 not started" },
-  { value: "done", label: "\u2713", bg: "#D1FAE5", color: "#065F46", tip: "Done \u2014 completed" },
-  { value: "wip", label: "\u231B", bg: "#FEF3C7", color: "#92400E", tip: "WIP \u2014 work in progress" },
-  { value: "cancel", label: "\u2715", bg: "#FEE2E2", color: "#991B1B", tip: "Cancelled \u2014 won't do" },
-  { value: "skip", label: "\u23ED", bg: "#F1F5F9", color: "#64748B", tip: "Skipped \u2014 not today" },
-  { value: "other", label: "\u2192", bg: "#EDE9FE", color: "#5B21B6", tip: "Redirected \u2014 doing something else" },
+  { value: "", label: "\u2014", bg: "#FFFFFF", bgDark: "#1E293B", color: "#9CA3AF", colorDark: "#7E8FA6", tip: "Open \u2014 not started" },
+  { value: "done", label: "\u2713", bg: "#D1FAE5", bgDark: "#064E3B", color: "#065F46", colorDark: "#6EE7B7", tip: "Done \u2014 completed" },
+  { value: "wip", label: "\u231B", bg: "#FEF3C7", bgDark: "#78350F", color: "#92400E", colorDark: "#FCD34D", tip: "WIP \u2014 work in progress" },
+  { value: "cancel", label: "\u2715", bg: "#FEE2E2", bgDark: "#7F1D1D", color: "#991B1B", colorDark: "#FCA5A5", tip: "Cancelled \u2014 won't do" },
+  { value: "skip", label: "\u23ED", bg: "#F1F5F9", bgDark: "#334155", color: "#64748B", colorDark: "#94A3B8", tip: "Skipped \u2014 not today" },
+  { value: "other", label: "\u2192", bg: "#EDE9FE", bgDark: "#4C1D95", color: "#5B21B6", colorDark: "#C4B5FD", tip: "Redirected \u2014 doing something else" },
 ];
 
 export const STATUS_MAP = Object.fromEntries(STATUS_OPTIONS.map(s => [s.value, s]));

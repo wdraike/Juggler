@@ -5,8 +5,7 @@ const { authenticateJWT } = require('../middleware/jwt-auth');
 
 router.use(authenticateJWT);
 
-// Config
-router.get('/', configController.getAllConfig);
-router.put('/:key', configController.updateConfig);
+router.get('/', configController.getTools);
+router.put('/', configController.replaceTools);
 
 module.exports = router;

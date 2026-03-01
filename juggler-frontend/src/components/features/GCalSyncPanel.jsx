@@ -19,7 +19,7 @@ function formatRelativeTime(isoString) {
   return days + 'd ago';
 }
 
-export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, lastSyncedAt, onAutoSyncChange, onSyncComplete }) {
+export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, lastSyncedAt, onAutoSyncChange, onSyncStart, onSyncComplete }) {
   var theme = getTheme(darkMode);
   var [syncing, setSyncing] = useState(false);
   var [connected, setConnected] = useState(null); // null = loading
@@ -97,6 +97,7 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
     try {
       setSyncing(true);
       setResults(null);
+      if (onSyncStart) onSyncStart();
       var { data } = await apiClient.post('/gcal/sync');
       setResults(data);
       var parts = [];

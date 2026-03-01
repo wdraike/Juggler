@@ -62,6 +62,7 @@ export default function AppLayout() {
   var [showHelp, setShowHelp] = useState(false);
   var [gcalAutoSync, setGcalAutoSync] = useState(false);
   var [gcalLastSyncedAt, setGcalLastSyncedAt] = useState(null);
+  var [gcalSyncing, setGcalSyncing] = useState(false);
 
   var theme = getTheme(darkMode);
   var statuses = taskState.statuses;
@@ -108,23 +109,20 @@ export default function AppLayout() {
   useEffect(() => {
     if (!gcalAutoSync) return;
 
-    var initialTimer = setTimeout(function() {
+    function runAutoSync() {
+      setGcalSyncing(true);
       apiClient.post('/gcal/sync').then(function(r) {
         setGcalLastSyncedAt(new Date().toISOString());
         if (r.data.pushed || r.data.pulled || r.data.patched || r.data.deleted) {
           loadTasks();
         }
-      }).catch(function() { /* silent */ });
-    }, 5000);
+      }).catch(function() { /* silent */ }).finally(function() {
+        setGcalSyncing(false);
+      });
+    }
 
-    var intervalId = setInterval(function() {
-      apiClient.post('/gcal/sync').then(function(r) {
-        setGcalLastSyncedAt(new Date().toISOString());
-        if (r.data.pushed || r.data.pulled || r.data.patched || r.data.deleted) {
-          loadTasks();
-        }
-      }).catch(function() { /* silent */ });
-    }, 5 * 60 * 1000);
+    var initialTimer = setTimeout(runAutoSync, 5000);
+    var intervalId = setInterval(runAutoSync, 5 * 60 * 1000);
 
     return function() {
       clearTimeout(initialTimer);
@@ -356,6 +354,20 @@ export default function AppLayout() {
     onStatusChange: handleStatusChange, popUndo, showToast
   });
 
+  // Zoom change handler (pinch / ctrl+wheel on grid) — debounce the persist
+  var zoomSaveTimerRef = useRef(null);
+  var handleZoomChange = useCallback(function(newZoom) {
+    config.setGridZoom(newZoom);
+    if (zoomSaveTimerRef.current) clearTimeout(zoomSaveTimerRef.current);
+    zoomSaveTimerRef.current = setTimeout(function() {
+      config.updatePreferences({
+        gridZoom: newZoom, splitDefault: config.splitDefault,
+        splitMinDefault: config.splitMinDefault, schedFloor: config.schedFloor,
+        fontSize: config.fontSize
+      });
+    }, 500);
+  }, [config]);
+
   // Drag and drop handlers
   var { handleGridDrop, handleDateDrop, handlePriorityDrop } = useDragDrop({
     allTasks, onUpdate: handleUpdateTask, gridZoom: config.gridZoom, showToast
@@ -379,6 +391,7 @@ export default function AppLayout() {
         selectedDateKey={selectedDateKey} statuses={statuses} tasksByDate={tasksByDate}
         onShowSettings={() => setShowSettings(true)} onShowExport={() => setShowExport(true)}
         onShowGCalSync={() => setShowGCalSync(true)}
+        gcalSyncing={gcalSyncing}
         onReschedule={handleReschedule}
         onShowHelp={() => setShowHelp(true)}
       />
@@ -415,6 +428,7 @@ export default function AppLayout() {
               allTasks={allTasks} onBatchHabitsDone={handleBatchHabitsDone}
               locations={config.locations} onHourLocationOverride={handleHourLocationOverride}
               blockedTaskIds={blockedTaskIds}
+              onZoomChange={handleZoomChange}
             />
           )}
           {viewMode === '3day' && (
@@ -424,6 +438,7 @@ export default function AppLayout() {
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               gridZoom={config.gridZoom} darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins}
               onGridDrop={handleGridDrop} blockedTaskIds={blockedTaskIds}
+              onZoomChange={handleZoomChange}
             />
           )}
           {viewMode === 'week' && (
@@ -433,6 +448,7 @@ export default function AppLayout() {
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               gridZoom={config.gridZoom} darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins}
               onGridDrop={handleGridDrop} blockedTaskIds={blockedTaskIds}
+              onZoomChange={handleZoomChange}
             />
           )}
           {viewMode === 'month' && (
@@ -493,7 +509,7 @@ export default function AppLayout() {
 
       {/* Settings panel */}
       {showSettings && (
-        <SettingsPanel onClose={() => setShowSettings(false)} darkMode={darkMode} config={config} />
+        <SettingsPanel onClose={() => setShowSettings(false)} darkMode={darkMode} config={config} allProjectNames={allProjectNames} />
       )}
 
       {/* Import/Export panel */}
@@ -514,7 +530,9 @@ export default function AppLayout() {
             setGcalAutoSync(val);
             if (!val) setGcalLastSyncedAt(gcalLastSyncedAt); // keep last value
           }}
+          onSyncStart={function() { setGcalSyncing(true); }}
           onSyncComplete={function() {
+            setGcalSyncing(false);
             setGcalLastSyncedAt(new Date().toISOString());
             loadTasks();
           }}

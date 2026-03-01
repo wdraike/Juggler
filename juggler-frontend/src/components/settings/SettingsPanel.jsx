@@ -15,7 +15,7 @@ var TABS = [
   { id: 'preferences', label: 'Preferences' },
 ];
 
-export default function SettingsPanel({ onClose, darkMode, config }) {
+export default function SettingsPanel({ onClose, darkMode, config, allProjectNames }) {
   var theme = getTheme(darkMode);
   var [tab, setTab] = useState('locations');
 
@@ -65,7 +65,7 @@ export default function SettingsPanel({ onClose, darkMode, config }) {
           {tab === 'locations' && <LocationsTab config={config} theme={theme} />}
           {tab === 'tools' && <ToolsTab config={config} theme={theme} />}
           {tab === 'matrix' && <MatrixTab config={config} theme={theme} />}
-          {tab === 'projects' && <ProjectsTab config={config} theme={theme} />}
+          {tab === 'projects' && <ProjectsTab config={config} theme={theme} allProjectNames={allProjectNames} />}
           {tab === 'preferences' && <PreferencesTab config={config} theme={theme} />}
           {tab === 'timeblocks' && <TimeBlocksTab config={config} theme={theme} />}
           {tab === 'schedules' && <SchedulesTab config={config} theme={theme} />}
@@ -180,21 +180,43 @@ function MatrixTab({ config, theme }) {
   );
 }
 
-function ProjectsTab({ config, theme }) {
+function ProjectsTab({ config, theme, allProjectNames }) {
   var [newName, setNewName] = useState('');
   var [newColor, setNewColor] = useState('#3B82F6');
+
+  // Merge DB projects with task-derived project names
+  var dbProjectNames = new Set(config.projects.map(function(p) { return p.name; }));
+  var taskOnlyNames = (allProjectNames || []).filter(function(n) { return !dbProjectNames.has(n); });
 
   return (
     <div>
       <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>Projects</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
         {config.projects.map(p => (
-          <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13 }}>
+          <div key={p.id || p.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13 }}>
             {p.color && <div style={{ width: 12, height: 12, borderRadius: 3, background: p.color }} />}
             <span style={{ color: theme.text, flex: 1 }}>{p.name}</span>
+            <button onClick={async () => {
+              if (!p.id) return;
+              try {
+                var { default: apiClient } = await import('../../services/apiClient');
+                await apiClient.delete('/projects/' + p.id);
+                config.setProjects(config.projects.filter(function(x) { return x.id !== p.id; }));
+              } catch (e) { console.error(e); }
+            }} style={{ border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 14 }}>&times;</button>
+          </div>
+        ))}
+        {taskOnlyNames.map(name => (
+          <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13, opacity: 0.7 }}>
+            <div style={{ width: 12, height: 12, borderRadius: 3, background: theme.textMuted, opacity: 0.3 }} />
+            <span style={{ color: theme.text, flex: 1 }}>{name}</span>
+            <span style={{ fontSize: 10, color: theme.textMuted }}>from tasks</span>
           </div>
         ))}
       </div>
+      {config.projects.length === 0 && taskOnlyNames.length === 0 && (
+        <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 12 }}>No projects yet. Add one below or assign a project to a task.</div>
+      )}
       <div style={{ display: 'flex', gap: 6 }}>
         <input type="color" value={newColor} onChange={e => setNewColor(e.target.value)} style={{ width: 32, height: 28, border: 'none', cursor: 'pointer' }} />
         <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Project name" style={{ flex: 1, padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />

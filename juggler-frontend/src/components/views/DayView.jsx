@@ -9,7 +9,7 @@ import { getTheme } from '../../theme/colors';
 import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES } from '../../state/constants';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
-export default function DayView({ selectedDate, selectedDateKey, placements, statuses, directions, onStatusChange, onExpand, onCreate, gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchHabitsDone, locations, onHourLocationOverride, blockedTaskIds }) {
+export default function DayView({ selectedDate, selectedDateKey, placements, statuses, directions, onStatusChange, onExpand, onCreate, gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchHabitsDone, locations, onHourLocationOverride, blockedTaskIds, onZoomChange }) {
   var theme = getTheme(darkMode);
   var scrollRef = useRef(null);
   var loc = getLocationForDatePure(selectedDateKey, schedCfg);
@@ -119,6 +119,7 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
           locations={locations}
           onHourLocationOverride={onHourLocationOverride}
           blockedTaskIds={blockedTaskIds}
+          onZoomChange={onZoomChange}
         />
       </div>
       <div style={{ padding: '8px 12px' }}>

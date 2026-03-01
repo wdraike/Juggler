@@ -2,7 +2,7 @@
  * CalendarGrid — reusable time grid (6am-11pm) for day/multi-day views
  */
 
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { GRID_START, GRID_END, GRID_HOURS_COUNT, locBgTint, locIcon } from '../../state/constants';
 import { formatHour } from '../../scheduler/dateHelpers';
 import { getTheme } from '../../theme/colors';
@@ -12,12 +12,71 @@ import ScheduledTaskBlock from './ScheduledTaskBlock';
 
 export default function CalendarGrid({
   dateKey, placements, statuses, directions, onStatusChange, onExpand,
-  gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locations, onHourLocationOverride, blockedTaskIds
+  gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locations, onHourLocationOverride, blockedTaskIds,
+  onZoomChange
 }) {
   var theme = getTheme(darkMode);
   var hourHeight = gridZoom || 60;
   var totalHeight = GRID_HOURS_COUNT * hourHeight;
   var blocks = getBlocksForDate(dateKey, schedCfg.timeBlocks);
+  var gridRef = useRef(null);
+  var pinchRef = useRef({ startDist: 0, startZoom: 0 });
+  var zoomRef = useRef(gridZoom);
+  zoomRef.current = gridZoom;
+  var onZoomRef = useRef(onZoomChange);
+  onZoomRef.current = onZoomChange;
+
+  // Native touch + wheel listeners (must be non-passive to preventDefault)
+  useEffect(function() {
+    var el = gridRef.current;
+    if (!el) return;
+
+    function handleTouchStart(e) {
+      if (e.touches.length === 2 && onZoomRef.current) {
+        var dx = e.touches[0].clientX - e.touches[1].clientX;
+        var dy = e.touches[0].clientY - e.touches[1].clientY;
+        pinchRef.current.startDist = Math.hypot(dx, dy);
+        pinchRef.current.startZoom = zoomRef.current || 60;
+      }
+    }
+
+    function handleTouchMove(e) {
+      if (e.touches.length === 2 && onZoomRef.current && pinchRef.current.startDist > 0) {
+        e.preventDefault();
+        var dx = e.touches[0].clientX - e.touches[1].clientX;
+        var dy = e.touches[0].clientY - e.touches[1].clientY;
+        var dist = Math.hypot(dx, dy);
+        var scale = dist / pinchRef.current.startDist;
+        var newZoom = Math.round(Math.min(180, Math.max(20, pinchRef.current.startZoom * scale)));
+        onZoomRef.current(newZoom);
+      }
+    }
+
+    function handleTouchEnd() {
+      pinchRef.current.startDist = 0;
+    }
+
+    function handleWheel(e) {
+      if ((e.ctrlKey || e.metaKey) && onZoomRef.current) {
+        e.preventDefault();
+        var delta = e.deltaY > 0 ? -4 : 4;
+        var current = zoomRef.current || 60;
+        var newZoom = Math.round(Math.min(180, Math.max(20, current + delta)));
+        onZoomRef.current(newZoom);
+      }
+    }
+
+    el.addEventListener('touchstart', handleTouchStart, { passive: true });
+    el.addEventListener('touchmove', handleTouchMove, { passive: false });
+    el.addEventListener('touchend', handleTouchEnd, { passive: true });
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return function() {
+      el.removeEventListener('touchstart', handleTouchStart);
+      el.removeEventListener('touchmove', handleTouchMove);
+      el.removeEventListener('touchend', handleTouchEnd);
+      el.removeEventListener('wheel', handleWheel);
+    };
+  }, []);
 
   // Map block starts to hours for boundary labels
   var blockStartsByHour = {};
@@ -27,7 +86,7 @@ export default function CalendarGrid({
   });
 
   return (
-    <div style={{ position: 'relative', height: totalHeight, minHeight: totalHeight }}
+    <div ref={gridRef} style={{ position: 'relative', height: totalHeight, minHeight: totalHeight, touchAction: 'pan-y' }}
       onDragOver={onGridDrop ? (e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }) : undefined}
       onDrop={onGridDrop ? (e => onGridDrop(e, dateKey)) : undefined}
     >

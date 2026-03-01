@@ -7,6 +7,8 @@ import { STATUS_OPTIONS } from '../../state/constants';
 
 export default function TaskStatusSelect({ value, onChange, darkMode }) {
   var current = STATUS_OPTIONS.find(s => s.value === (value || '')) || STATUS_OPTIONS[0];
+  var bg = darkMode ? current.bgDark : current.bg;
+  var color = darkMode ? current.colorDark : current.color;
 
   return (
     <div style={{ position: 'relative', display: 'inline-block' }}>
@@ -17,7 +19,7 @@ export default function TaskStatusSelect({ value, onChange, darkMode }) {
         style={{
           appearance: 'none', border: 'none', borderRadius: 4,
           padding: '2px 6px', fontSize: 14, cursor: 'pointer',
-          background: current.bg, color: current.color,
+          background: bg, color: color,
           fontFamily: 'inherit', fontWeight: 600, textAlign: 'center',
           minWidth: 28
         }}

@@ -86,12 +86,14 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           {STATUS_OPTIONS.map(s => {
             var isActive = (status || '') === s.value;
+            var sBg = darkMode ? s.bgDark : s.bg;
+            var sColor = darkMode ? s.colorDark : s.color;
             return (
               <button key={s.value} onClick={() => { if (onStatusChange) onStatusChange(s.value); }} title={s.tip} style={{
-                border: `1px solid ${isActive ? s.color : theme.border}`,
+                border: `1px solid ${isActive ? sColor : theme.border}`,
                 borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
-                background: isActive ? s.bg : 'transparent',
-                color: isActive ? s.color : theme.textMuted,
+                background: isActive ? sBg : 'transparent',
+                color: isActive ? sColor : theme.textMuted,
                 fontSize: 11, fontWeight: isActive ? 700 : 500, fontFamily: 'inherit',
                 display: 'flex', alignItems: 'center', gap: 3
               }}>
