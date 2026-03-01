@@ -1,0 +1,253 @@
+/**
+ * Task Controller — CRUD operations for tasks
+ */
+
+const db = require('../db');
+
+// Map task row from DB to API format
+function rowToTask(row) {
+  return {
+    id: row.id,
+    text: row.text,
+    date: row.date,
+    day: row.day,
+    time: row.time,
+    dur: row.dur,
+    timeRemaining: row.time_remaining,
+    pri: row.pri,
+    project: row.project,
+    status: row.status || '',
+    direction: row.direction,
+    section: row.section,
+    notes: row.notes,
+    due: row.due,
+    startAfter: row.start_after,
+    location: typeof row.location === 'string' ? JSON.parse(row.location || '[]') : (row.location || []),
+    tools: typeof row.tools === 'string' ? JSON.parse(row.tools || '[]') : (row.tools || []),
+    when: row.when,
+    dayReq: row.day_req,
+    habit: !!row.habit,
+    rigid: !!row.rigid,
+    split: row.split === null ? undefined : !!row.split,
+    splitMin: row.split_min,
+    recur: typeof row.recur === 'string' ? JSON.parse(row.recur || 'null') : row.recur,
+    sourceId: row.source_id,
+    generated: !!row.generated,
+    gcalEventId: row.gcal_event_id,
+    dependsOn: typeof row.depends_on === 'string' ? JSON.parse(row.depends_on || '[]') : (row.depends_on || [])
+  };
+}
+
+// Map API task to DB row
+function taskToRow(task, userId) {
+  const row = { user_id: userId };
+  if (task.id !== undefined) row.id = task.id;
+  if (task.text !== undefined) row.text = task.text;
+  if (task.date !== undefined) row.date = task.date;
+  if (task.day !== undefined) row.day = task.day;
+  if (task.time !== undefined) row.time = task.time;
+  if (task.dur !== undefined) row.dur = task.dur;
+  if (task.timeRemaining !== undefined) row.time_remaining = task.timeRemaining;
+  if (task.pri !== undefined) row.pri = task.pri;
+  if (task.project !== undefined) row.project = task.project;
+  if (task.status !== undefined) row.status = task.status;
+  if (task.direction !== undefined) row.direction = task.direction;
+  if (task.section !== undefined) row.section = task.section;
+  if (task.notes !== undefined) row.notes = task.notes;
+  if (task.due !== undefined) row.due = task.due;
+  if (task.startAfter !== undefined) row.start_after = task.startAfter;
+  if (task.location !== undefined) row.location = JSON.stringify(task.location);
+  if (task.tools !== undefined) row.tools = JSON.stringify(task.tools);
+  if (task.when !== undefined) row.when = task.when;
+  if (task.dayReq !== undefined) row.day_req = task.dayReq;
+  if (task.habit !== undefined) row.habit = task.habit ? 1 : 0;
+  if (task.rigid !== undefined) row.rigid = task.rigid ? 1 : 0;
+  if (task.split !== undefined) row.split = task.split === null ? null : (task.split ? 1 : 0);
+  if (task.splitMin !== undefined) row.split_min = task.splitMin;
+  if (task.recur !== undefined) row.recur = task.recur ? JSON.stringify(task.recur) : null;
+  if (task.sourceId !== undefined) row.source_id = task.sourceId;
+  if (task.generated !== undefined) row.generated = task.generated ? 1 : 0;
+  if (task.gcalEventId !== undefined) row.gcal_event_id = task.gcalEventId;
+  if (task.dependsOn !== undefined) row.depends_on = JSON.stringify(task.dependsOn || []);
+  row.updated_at = db.fn.now();
+  return row;
+}
+
+/**
+ * GET /api/tasks — all tasks for user
+ */
+async function getAllTasks(req, res) {
+  try {
+    const rows = await db('tasks').where('user_id', req.user.id).orderBy('created_at', 'asc');
+    const tasks = rows.map(rowToTask);
+    res.json({ tasks });
+  } catch (error) {
+    console.error('Get tasks error:', error);
+    res.status(500).json({ error: 'Failed to fetch tasks' });
+  }
+}
+
+/**
+ * POST /api/tasks — create single task
+ */
+async function createTask(req, res) {
+  try {
+    const row = taskToRow(req.body, req.user.id);
+    row.created_at = db.fn.now();
+    await db('tasks').insert(row);
+    const created = await db('tasks').where('id', row.id).first();
+    res.status(201).json({ task: rowToTask(created) });
+  } catch (error) {
+    console.error('Create task error:', error);
+    res.status(500).json({ error: 'Failed to create task' });
+  }
+}
+
+/**
+ * PUT /api/tasks/:id — update task fields
+ */
+async function updateTask(req, res) {
+  try {
+    const { id } = req.params;
+    const existing = await db('tasks').where({ id, user_id: req.user.id }).first();
+    if (!existing) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    const row = taskToRow(req.body, req.user.id);
+    delete row.id;
+    delete row.user_id;
+    delete row.created_at;
+    await db('tasks').where({ id, user_id: req.user.id }).update(row);
+
+    const updated = await db('tasks').where('id', id).first();
+    res.json({ task: rowToTask(updated) });
+  } catch (error) {
+    console.error('Update task error:', error);
+    res.status(500).json({ error: 'Failed to update task' });
+  }
+}
+
+/**
+ * DELETE /api/tasks/:id — delete task
+ * If task has gcal_event_id, queue it for deletion from GCal on next sync.
+ */
+async function deleteTask(req, res) {
+  try {
+    const { id } = req.params;
+    const task = await db('tasks').where({ id, user_id: req.user.id }).first();
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    // Queue GCal event deletion if linked
+    if (task.gcal_event_id) {
+      await db('gcal_deleted_events').insert({
+        user_id: req.user.id,
+        gcal_event_id: task.gcal_event_id
+      });
+    }
+
+    await db('tasks').where({ id, user_id: req.user.id }).del();
+    res.json({ message: 'Task deleted', id });
+  } catch (error) {
+    console.error('Delete task error:', error);
+    res.status(500).json({ error: 'Failed to delete task' });
+  }
+}
+
+/**
+ * PUT /api/tasks/:id/status — update status + direction
+ */
+async function updateTaskStatus(req, res) {
+  try {
+    const { id } = req.params;
+    const { status, direction } = req.body;
+
+    const existing = await db('tasks').where({ id, user_id: req.user.id }).first();
+    if (!existing) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    const update = { status: status || '', updated_at: db.fn.now() };
+    if (direction !== undefined) update.direction = direction;
+
+    await db('tasks').where({ id, user_id: req.user.id }).update(update);
+    const updated = await db('tasks').where('id', id).first();
+    res.json({ task: rowToTask(updated) });
+  } catch (error) {
+    console.error('Update task status error:', error);
+    res.status(500).json({ error: 'Failed to update task status' });
+  }
+}
+
+/**
+ * POST /api/tasks/batch — batch create tasks
+ */
+async function batchCreateTasks(req, res) {
+  try {
+    const { tasks } = req.body;
+    if (!Array.isArray(tasks) || tasks.length === 0) {
+      return res.status(400).json({ error: 'Tasks array required' });
+    }
+
+    const rows = tasks.map(t => {
+      const row = taskToRow(t, req.user.id);
+      row.created_at = db.fn.now();
+      return row;
+    });
+
+    // Insert in chunks to avoid MySQL packet limits
+    const chunkSize = 100;
+    for (let i = 0; i < rows.length; i += chunkSize) {
+      await db('tasks').insert(rows.slice(i, i + chunkSize));
+    }
+
+    res.status(201).json({ created: rows.length });
+  } catch (error) {
+    console.error('Batch create error:', error);
+    res.status(500).json({ error: 'Failed to batch create tasks' });
+  }
+}
+
+/**
+ * PUT /api/tasks/batch — batch update tasks
+ */
+async function batchUpdateTasks(req, res) {
+  try {
+    const { updates } = req.body;
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ error: 'Updates array required' });
+    }
+
+    let updatedCount = 0;
+    for (const update of updates) {
+      const { id, ...fields } = update;
+      if (!id) continue;
+
+      const row = taskToRow(fields, req.user.id);
+      delete row.user_id;
+      delete row.created_at;
+
+      await db('tasks').where({ id, user_id: req.user.id }).update(row);
+      updatedCount++;
+    }
+
+    res.json({ updated: updatedCount });
+  } catch (error) {
+    console.error('Batch update error:', error);
+    res.status(500).json({ error: 'Failed to batch update tasks' });
+  }
+}
+
+module.exports = {
+  getAllTasks,
+  createTask,
+  updateTask,
+  deleteTask,
+  updateTaskStatus,
+  batchCreateTasks,
+  batchUpdateTasks,
+  rowToTask,
+  taskToRow
+};

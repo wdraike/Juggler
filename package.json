@@ -1,0 +1,22 @@
+{
+  "name": "juggler",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Juggler task tracker - full-stack application",
+  "scripts": {
+    "backend": "cd juggler-backend && npm run dev",
+    "frontend": "cd juggler-frontend && npm start",
+    "install:all": "cd juggler-backend && npm install && cd ../juggler-frontend && npm install",
+    "migrate": "cd juggler-backend && npm run migrate",
+    "migrate:rollback": "cd juggler-backend && npm run migrate:rollback",
+    "start:dev": "./start-dev.sh",
+    "stop:dev": "./stop-dev.sh",
+    "test:seed": "cd juggler-backend && node scripts/seed-test-user.js",
+    "test:api": "cd juggler-backend && node scripts/test-api.js",
+    "test:e2e": "npx playwright test",
+    "test:e2e:headed": "npx playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.42.0"
+  }
+}

@@ -5,3 +5,8 @@ dist/
 build/
 .env
 .env.local
+.env.production
+coverage/
+.cache/
+test-results/
+playwright-report/
