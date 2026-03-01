@@ -4,8 +4,10 @@
 
 import axios from 'axios';
 
+const API_BASE = process.env.REACT_APP_API_URL || '/api';
+
 const apiClient = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE,
   withCredentials: true
 });
 
@@ -46,7 +48,7 @@ apiClient.interceptors.response.use(
       try {
         // Deduplicate refresh requests
         if (!refreshPromise) {
-          refreshPromise = axios.post('/api/auth/refresh', {}, { withCredentials: true });
+          refreshPromise = axios.post(API_BASE + '/auth/refresh', {}, { withCredentials: true });
         }
 
         const { data } = await refreshPromise;
