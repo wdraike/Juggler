@@ -130,7 +130,7 @@ async function updateTask(req, res) {
 
 /**
  * DELETE /api/tasks/:id — delete task
- * If task has gcal_event_id, queue it for deletion from GCal on next sync.
+ * If task has a ledger record, null out task_id so sync will delete the GCal event.
  */
 async function deleteTask(req, res) {
   try {
@@ -140,12 +140,11 @@ async function deleteTask(req, res) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    // Queue GCal event deletion if linked
+    // Mark ledger record so sync will delete the GCal event
     if (task.gcal_event_id) {
-      await db('gcal_deleted_events').insert({
-        user_id: req.user.id,
-        gcal_event_id: task.gcal_event_id
-      });
+      await db('gcal_sync_ledger')
+        .where({ user_id: req.user.id, task_id: id })
+        .update({ task_id: null, synced_at: db.fn.now() });
     }
 
     await db('tasks').where({ id, user_id: req.user.id }).del();

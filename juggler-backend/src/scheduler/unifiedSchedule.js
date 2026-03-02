@@ -1,5 +1,5 @@
 /**
- * Unified Scheduler — extracted from task_tracker_v7_28 lines 592-1423
+ * Unified Scheduler — CJS port of juggler-frontend/src/scheduler/unifiedSchedule.js
  * ONE algorithm: day-by-day, slot-by-slot.
  * 1. Habits stagger around each other
  * 2. Fixed overlay on top (can overlap, reserve time)
@@ -8,14 +8,27 @@
  * 5. Non-splittable tasks overflow with warning if deadline forces it
  */
 
-import { GRID_START, GRID_END, DAY_NAMES } from '../state/constants';
-import { parseDate, formatDateKey, parseTimeToMinutes } from './dateHelpers';
-import { getBlocksForDate, buildWindowsFromBlocks, hasWhen, getWhenWindows } from './timeBlockHelpers';
-import { resolveLocationId, canTaskRun } from './locationHelpers';
-import { getTaskDeps } from './dependencyHelpers';
+var constants = require('./constants');
+var GRID_START = constants.GRID_START;
+var GRID_END = constants.GRID_END;
+var DAY_NAMES = constants.DAY_NAMES;
+var dateHelpers = require('./dateHelpers');
+var parseDate = dateHelpers.parseDate;
+var formatDateKey = dateHelpers.formatDateKey;
+var parseTimeToMinutes = dateHelpers.parseTimeToMinutes;
+var timeBlockHelpers = require('./timeBlockHelpers');
+var getBlocksForDate = timeBlockHelpers.getBlocksForDate;
+var buildWindowsFromBlocks = timeBlockHelpers.buildWindowsFromBlocks;
+var hasWhen = timeBlockHelpers.hasWhen;
+var getWhenWindows = timeBlockHelpers.getWhenWindows;
+var locationHelpers = require('./locationHelpers');
+var resolveLocationId = locationHelpers.resolveLocationId;
+var canTaskRun = locationHelpers.canTaskRun;
+var dependencyHelpers = require('./dependencyHelpers');
+var getTaskDeps = dependencyHelpers.getTaskDeps;
 
-export default function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
-  var PERF = performance.now();
+function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
+  var PERF = Date.now();
   var dayNames = DAY_NAMES;
   var MIN_CHUNK = cfg.splitMinDefault || 15;
   var WALK_END = 23 * 60;
@@ -222,6 +235,9 @@ export default function unifiedSchedule(allTasks, statuses, effectiveTodayKey, n
       }
       var maxPlace = lEnd - scanStart;
       var placeLen = Math.min(item.remaining, maxPlace);
+
+      // Non-splittable tasks must fit entirely — don't place partial chunks
+      if (!item.splittable && maxPlace < item.remaining) { scanStart = lEnd; continue; }
 
       if (item.remaining - placeLen > 0 && item.remaining - placeLen < item.minChunk) {
         if (maxPlace >= item.remaining) placeLen = item.remaining;
@@ -687,6 +703,8 @@ export default function unifiedSchedule(allTasks, statuses, effectiveTodayKey, n
 
   var placedCount = Object.keys(taskUpdates).length;
   var deadlineMisses = unplaced.filter(function(t) { return t._unplacedReason === "deadline"; });
-  console.log("[SCHED] unified: " + dates.length + " days, " + pool.length + " pool tasks, " + placedCount + " placed, " + unplaced.length + " unplaced in " + Math.round(performance.now() - PERF) + "ms");
+  console.log("[SCHED] unified: " + dates.length + " days, " + pool.length + " pool tasks, " + placedCount + " placed, " + unplaced.length + " unplaced in " + Math.round(Date.now() - PERF) + "ms");
   return { dayPlacements: dayPlacements, taskUpdates: taskUpdates, newStatuses: newSt, unplaced: unplaced, deadlineMisses: deadlineMisses, placedCount: placedCount };
 }
+
+module.exports = unifiedSchedule;

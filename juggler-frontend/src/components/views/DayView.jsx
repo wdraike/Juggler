@@ -102,6 +102,35 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
           </select>
         )}
       </div>
+      {/* All-day events banner */}
+      {(() => {
+        var allDayTasks = (allTasks || []).filter(t => t.date === selectedDateKey && (t.when === 'allday' || (!t.time && (t.dur === 0 || t.dur === null))));
+        if (allDayTasks.length === 0) return null;
+        return (
+          <div style={{ padding: '0 12px 4px 12px' }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: theme.textMuted, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 }}>All Day</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {allDayTasks.map(t => {
+                var st = statuses[t.id] || '';
+                var isDone = st === 'done' || st === 'cancel' || st === 'skip';
+                return (
+                  <div key={t.id} onClick={() => onExpand(t.id)}
+                    style={{
+                      padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 12,
+                      background: isDone ? (darkMode ? '#1E293B' : '#F1F5F9') : (darkMode ? '#1E3A5F' : '#DBEAFE'),
+                      color: isDone ? theme.textMuted : (darkMode ? '#93C5FD' : '#1E40AF'),
+                      border: '1px solid ' + (isDone ? theme.border : (darkMode ? '#3B82F640' : '#93C5FD')),
+                      opacity: isDone ? 0.5 : 1,
+                      textDecoration: isDone ? 'line-through' : 'none'
+                    }}>
+                    {t.text}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
       <div style={{ padding: '0 12px' }}>
         <CalendarGrid
           dateKey={selectedDateKey}

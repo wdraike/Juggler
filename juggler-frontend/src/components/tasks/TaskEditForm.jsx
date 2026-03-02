@@ -1,5 +1,5 @@
 /**
- * TaskEditForm — full editor with all task fields
+ * TaskEditForm — full editor matching the original JSX inline design
  */
 
 import React, { useState } from 'react';
@@ -9,7 +9,7 @@ import { getTheme } from '../../theme/colors';
 import ConfirmDialog from '../features/ConfirmDialog';
 
 export default function TaskEditForm({ task, status, direction, onUpdate, onStatusChange, onDirectionChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, darkMode }) {
-  var theme = getTheme(darkMode);
+  var TH = getTheme(darkMode);
   var [text, setText] = useState(task.text || '');
   var [project, setProject] = useState(task.project || '');
   var [pri, setPri] = useState(task.pri || 'P3');
@@ -24,14 +24,17 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
   var [dayReq, setDayReq] = useState(task.dayReq || 'any');
   var [habit, setHabit] = useState(!!task.habit);
   var [rigid, setRigid] = useState(!!task.rigid);
-  var [split, setSplit] = useState(task.split);
-  var [splitMin, setSplitMin] = useState(task.splitMin || '');
+  var [split, setSplit] = useState(task.split !== undefined ? task.split : false);
+  var [splitMin, setSplitMin] = useState(task.splitMin || 15);
   var [taskLoc, setTaskLoc] = useState(task.location || []);
   var [taskTools, setTaskTools] = useState(task.tools || []);
   var [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   var [recurType, setRecurType] = useState(task.recur?.type || 'none');
   var [recurDays, setRecurDays] = useState(task.recur?.days || 'MTWRF');
   var [recurEvery, setRecurEvery] = useState(task.recur?.every || 2);
+
+  var iStyle = { fontSize: 11, padding: '3px 4px', border: '1px solid ' + TH.inputBorder, borderRadius: 4, background: TH.inputBg, color: TH.inputText, fontFamily: 'inherit' };
+  var lStyle = { fontSize: 8, color: TH.textMuted, display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 600 };
 
   function save() {
     var d = fromDateISO(date);
@@ -50,8 +53,8 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
       due: fromDateISO(due),
       startAfter: fromDateISO(startAfter),
       notes, when, dayReq, habit, rigid,
-      split: split === undefined ? undefined : split,
-      splitMin: splitMin ? parseInt(splitMin) : null,
+      split: split || undefined,
+      splitMin: split ? (parseInt(splitMin) || 15) : null,
       location: taskLoc,
       tools: taskTools,
       recur: recurType === 'none' ? null : {
@@ -63,327 +66,376 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
     onClose();
   }
 
-  var inputStyle = {
-    padding: '6px 10px', border: `1px solid ${theme.inputBorder}`, borderRadius: 6,
-    background: theme.input, color: theme.text, fontSize: 13, fontFamily: 'inherit', width: '100%', outline: 'none'
-  };
-  var labelStyle = { fontSize: 11, color: theme.textMuted, marginBottom: 2, display: 'block' };
+  var durOptions = [5,10,15,20,30,45,60,90,120,180,240];
+  if (durOptions.indexOf(parseInt(dur)) === -1) durOptions = durOptions.concat([parseInt(dur)]);
+  durOptions.sort(function(a,b) { return a - b; });
+
+  var remOptions = [0,5,10,15,20,30,45,60,90,120,180,240];
+  var remVal = timeRemaining === '' ? dur : parseInt(timeRemaining);
+  if (remOptions.indexOf(remVal) === -1) remOptions = remOptions.concat([remVal]);
+  if (remOptions.indexOf(parseInt(dur)) === -1) remOptions = remOptions.concat([parseInt(dur)]);
+  remOptions = remOptions.filter(function(v, i, a) { return a.indexOf(v) === i; }).sort(function(a,b) { return a - b; });
+
+  function durLabel(v) {
+    if (v === 0) return 'Done (0)';
+    if (v < 60) return v + ' min';
+    if (v === 60) return '1 hour';
+    if (v === 90) return '1.5 hrs';
+    return (v/60) + ' hrs';
+  }
 
   return (
     <div style={{
-      position: 'fixed', top: 0, right: 0, bottom: 0, width: 400, maxWidth: '100vw',
-      background: theme.bgSecondary, borderLeft: `1px solid ${theme.border}`,
-      zIndex: 200, overflow: 'auto', padding: 16, boxShadow: `-4px 0 20px ${theme.shadow}`
+      position: 'fixed', top: 0, right: 0, bottom: 0, width: 420, maxWidth: '100vw',
+      background: TH.bgCard, borderLeft: '1px solid ' + TH.border,
+      zIndex: 200, overflow: 'auto', boxShadow: '-4px 0 20px ' + TH.shadow
     }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: theme.text }}>Edit Task</div>
-        <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: theme.textMuted, fontSize: 18, cursor: 'pointer' }}>&times;</button>
+      {/* Top bar with Save / Delete / Close */}
+      <div style={{
+        display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap',
+        background: darkMode ? '#1E293B' : '#F1F5F9',
+        padding: '8px 12px', borderBottom: '1px solid ' + TH.border
+      }}>
+        <button onClick={save} style={{
+          fontSize: 10, fontWeight: 700, padding: '4px 14px', border: 'none', borderRadius: 4,
+          background: '#10B981', color: 'white', cursor: 'pointer'
+        }}>{'\u2714'} Save</button>
+        {onDelete && (
+          <button onClick={() => setShowDeleteConfirm(true)} style={{
+            fontSize: 10, fontWeight: 600, padding: '4px 10px',
+            border: '1px solid #DC2626', borderRadius: 4,
+            background: TH.redBg, color: TH.redText, cursor: 'pointer'
+          }}>{'\uD83D\uDDD1'} Delete</button>
+        )}
+        <div style={{ flex: 1 }} />
+        <button onClick={onClose} style={{
+          border: 'none', background: 'transparent', color: TH.textMuted,
+          fontSize: 16, cursor: 'pointer', padding: '2px 6px'
+        }}>&times;</button>
       </div>
 
-      {/* Status buttons */}
-      <div style={{ marginBottom: 12 }}>
-        <label style={labelStyle}>Status</label>
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {STATUS_OPTIONS.map(s => {
-            var isActive = (status || '') === s.value;
-            var sBg = darkMode ? s.bgDark : s.bg;
-            var sColor = darkMode ? s.colorDark : s.color;
-            return (
-              <button key={s.value} onClick={() => { if (onStatusChange) onStatusChange(s.value); }} title={s.tip} style={{
-                border: `1px solid ${isActive ? sColor : theme.border}`,
-                borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
-                background: isActive ? sBg : 'transparent',
-                color: isActive ? sColor : theme.textMuted,
-                fontSize: 11, fontWeight: isActive ? 700 : 500, fontFamily: 'inherit',
-                display: 'flex', alignItems: 'center', gap: 3
-              }}>
-                <span style={{ fontSize: 13 }}>{s.label}</span> {s.tip.split(' \u2014 ')[0]}
-              </button>
-            );
-          })}
-        </div>
-        {status === 'other' && (
-          <div style={{ marginTop: 6 }}>
+      <div style={{ padding: '10px 12px' }}>
+        {/* Status buttons */}
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ ...lStyle, marginBottom: 3 }}>Status</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+            {STATUS_OPTIONS.map(s => {
+              var isActive = (status || '') === s.value;
+              var sBg = darkMode ? s.bgDark : s.bg;
+              var sColor = darkMode ? s.colorDark : s.color;
+              return (
+                <button key={s.value} onClick={() => { if (onStatusChange) onStatusChange(s.value); }} title={s.tip} style={{
+                  border: '1px solid ' + (isActive ? sColor : TH.btnBorder),
+                  borderRadius: 4, padding: '3px 8px', cursor: 'pointer',
+                  background: isActive ? sBg : 'transparent',
+                  color: isActive ? sColor : TH.textMuted,
+                  fontSize: 10, fontWeight: isActive ? 700 : 500, fontFamily: 'inherit'
+                }}>
+                  {s.label} {s.tip.split(' \u2014 ')[0]}
+                </button>
+              );
+            })}
+          </div>
+          {status === 'other' && (
             <input
               value={direction || ''}
               onChange={e => { if (onDirectionChange) onDirectionChange(e.target.value); }}
               placeholder="What are you doing instead?"
-              style={{ ...inputStyle, fontSize: 12 }}
+              style={{ ...iStyle, width: '100%', marginTop: 4 }}
             />
-          </div>
-        )}
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div>
-          <label style={labelStyle}>Task</label>
-          <input value={text} onChange={e => setText(e.target.value)} style={inputStyle} autoFocus />
+          )}
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1 }}>
-            <label style={labelStyle}>Project</label>
-            <input value={project} onChange={e => setProject(e.target.value)} list="project-list" style={inputStyle} />
-            <datalist id="project-list">
-              {(allProjectNames || []).map(n => <option key={n} value={n} />)}
-            </datalist>
-          </div>
-          <div style={{ width: 80 }}>
-            <label style={labelStyle}>Priority</label>
-            <select value={pri} onChange={e => setPri(e.target.value)} style={{ ...inputStyle, cursor: 'pointer' }}>
-              {['P1','P2','P3','P4'].map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1 }}>
-            <label style={labelStyle}>Date</label>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} style={inputStyle} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label style={labelStyle}>Time</label>
-            <input type="time" value={time} onChange={e => setTime(e.target.value)} style={inputStyle} />
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1 }}>
-            <label style={labelStyle}>Duration (min)</label>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <input type="number" value={dur} onChange={e => setDur(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-              <select value="" onChange={e => { if (e.target.value) setDur(parseInt(e.target.value)); }}
-                style={{ ...inputStyle, width: 'auto', minWidth: 60, cursor: 'pointer' }}>
-                <option value="">Preset</option>
-                <option value="15">15m</option>
-                <option value="30">30m</option>
-                <option value="45">45m</option>
-                <option value="60">1h</option>
-                <option value="90">1.5h</option>
-                <option value="120">2h</option>
-                <option value="180">3h</option>
-                <option value="240">4h</option>
+        {/* Row 1: Task + Project */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
+          <label style={{ ...lStyle, flex: 1, minWidth: 200 }}>
+            Task
+            <input type="text" value={text} onChange={e => setText(e.target.value)}
+              style={{ ...iStyle, width: '100%' }} autoFocus />
+          </label>
+          <label style={lStyle}>
+            Project
+            <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+              <select value={project} onChange={e => setProject(e.target.value)}
+                style={{ ...iStyle, width: 120 }}>
+                <option value="">— none —</option>
+                {(allProjectNames || []).map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
               </select>
             </div>
-          </div>
-          <div style={{ flex: 1 }}>
-            <label style={labelStyle}>Remaining (min)</label>
-            <input type="number" value={timeRemaining} onChange={e => setTimeRemaining(e.target.value)} placeholder="—" style={inputStyle} />
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1 }}>
-            <label style={labelStyle}>Due Date</label>
-            <input type="date" value={due} onChange={e => setDue(e.target.value)} style={inputStyle} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label style={labelStyle}>Start After</label>
-            <input type="date" value={startAfter} onChange={e => setStartAfter(e.target.value)} style={inputStyle} />
-          </div>
-        </div>
-
-        <div>
-          <label style={labelStyle}>When (time blocks)</label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {(uniqueTags || []).map(tag => {
-              var selected = when && when.split(',').map(s => s.trim()).includes(tag.tag);
-              return (
-                <button key={tag.tag} onClick={() => {
-                  var parts = when ? when.split(',').map(s => s.trim()).filter(Boolean) : [];
-                  if (selected) { parts = parts.filter(p => p !== tag.tag); }
-                  else { parts.push(tag.tag); }
-                  setWhen(parts.join(','));
-                }} style={{
-                  border: `1px solid ${selected ? tag.color : theme.border}`,
-                  background: selected ? tag.color + '30' : 'transparent',
-                  color: selected ? tag.color : theme.textMuted,
-                  borderRadius: 12, padding: '3px 10px', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit'
-                }}>
-                  {tag.icon} {tag.name}
-                </button>
-              );
-            })}
-            <button onClick={() => {
-              var parts = when ? when.split(',').map(s => s.trim()).filter(Boolean) : [];
-              var hasFix = parts.includes('fixed');
-              if (hasFix) parts = parts.filter(p => p !== 'fixed');
-              else parts.push('fixed');
-              setWhen(parts.join(','));
-            }} style={{
-              border: `1px solid ${when && when.includes('fixed') ? '#EF4444' : theme.border}`,
-              background: when && when.includes('fixed') ? '#EF444430' : 'transparent',
-              color: when && when.includes('fixed') ? '#EF4444' : theme.textMuted,
-              borderRadius: 12, padding: '3px 10px', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit'
-            }}>
-              &#x1F4CC; Fixed
-            </button>
-          </div>
-        </div>
-
-        <div>
-          <label style={labelStyle}>Day requirement</label>
-          <select value={dayReq} onChange={e => setDayReq(e.target.value)} style={inputStyle}>
-            <option value="any">Any day</option>
-            <option value="weekday">Weekday</option>
-            <option value="weekend">Weekend</option>
-            <option value="M">Monday</option>
-            <option value="T">Tuesday</option>
-            <option value="W">Wednesday</option>
-            <option value="R">Thursday</option>
-            <option value="F">Friday</option>
-            <option value="Sa">Saturday</option>
-            <option value="Su">Sunday</option>
-          </select>
-        </div>
-
-        <div>
-          <label style={labelStyle}>Location</label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {(locations || []).map(loc => {
-              var selected = taskLoc.includes(loc.id);
-              return (
-                <button key={loc.id} onClick={() => {
-                  setTaskLoc(selected ? taskLoc.filter(l => l !== loc.id) : [...taskLoc, loc.id]);
-                }} style={{
-                  border: `1px solid ${selected ? theme.accent : theme.border}`,
-                  background: selected ? theme.accent + '20' : 'transparent',
-                  color: selected ? theme.accent : theme.textMuted,
-                  borderRadius: 12, padding: '3px 10px', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit'
-                }}>
-                  {loc.icon} {loc.name}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div>
-          <label style={labelStyle}>Tools required</label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {(tools || []).map(tool => {
-              var selected = taskTools.includes(tool.id);
-              return (
-                <button key={tool.id} onClick={() => {
-                  setTaskTools(selected ? taskTools.filter(t => t !== tool.id) : [...taskTools, tool.id]);
-                }} style={{
-                  border: `1px solid ${selected ? theme.accent : theme.border}`,
-                  background: selected ? theme.accent + '20' : 'transparent',
-                  color: selected ? theme.accent : theme.textMuted,
-                  borderRadius: 12, padding: '3px 10px', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit'
-                }}>
-                  {tool.icon} {tool.name}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', gap: 16 }}>
-          <label style={{ fontSize: 12, color: theme.text, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input type="checkbox" checked={habit} onChange={e => setHabit(e.target.checked)} /> Habit
           </label>
-          <label style={{ fontSize: 12, color: theme.text, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input type="checkbox" checked={rigid} onChange={e => setRigid(e.target.checked)} /> Rigid
+        </div>
+
+        {/* Row 2: Date + Time + Duration + Remaining + Split + Due + Start After */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
+          <label style={lStyle}>
+            {'\uD83D\uDCC5'} Date
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} style={iStyle} />
           </label>
-          <label style={{ fontSize: 12, color: theme.text, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input type="checkbox" checked={split === true} onChange={e => setSplit(e.target.checked ? true : undefined)} /> Splittable
+          <label style={lStyle}>
+            {'\uD83D\uDD52'} Time
+            <input type="time" value={time || ''} onChange={e => setTime(e.target.value)} style={iStyle} />
           </label>
-          {split === true && (
-            <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 4 }}>
-              Min chunk:
-              <input type="number" value={splitMin} onChange={e => setSplitMin(e.target.value)} placeholder="15"
-                style={{ width: 50, padding: '2px 4px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 11 }} />
-              m
+          <label style={lStyle}>
+            {'\u23F1'} Duration
+            <select value={dur} onChange={e => setDur(parseInt(e.target.value))} style={iStyle}>
+              {durOptions.map(v => (
+                <option key={v} value={v}>{durLabel(v)}</option>
+              ))}
+            </select>
+          </label>
+          <label style={lStyle}>
+            {'\uD83D\uDCCA'} Remaining
+            <select value={remVal} onChange={e => setTimeRemaining(parseInt(e.target.value))}
+              style={{ ...iStyle, background: remVal < parseInt(dur) ? TH.purpleBg : TH.inputBg }}>
+              {remOptions.map(v => (
+                <option key={v} value={v}>{durLabel(v)}</option>
+              ))}
+            </select>
+          </label>
+          <label style={lStyle}>
+            {'\u2702'} Split
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <button onClick={() => setSplit(!split)} style={{
+                padding: '3px 8px', borderRadius: 4, fontSize: 10, cursor: 'pointer', fontWeight: 600,
+                border: '1px solid ' + (split ? TH.greenBorder : TH.btnBorder),
+                background: split ? TH.greenBg : TH.inputBg,
+                color: split ? TH.greenText : TH.textMuted,
+              }}>{split ? '\u2702 Yes' : 'No'}</button>
+              {split && (
+                <select value={splitMin} onChange={e => setSplitMin(parseInt(e.target.value))}
+                  style={{ ...iStyle, width: 'auto', minWidth: 60 }}>
+                  {[15,20,30,45,60].map(v => (
+                    <option key={v} value={v}>{v < 60 ? v + 'm min' : '1h min'}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </label>
+          <label style={lStyle}>
+            {'\uD83D\uDCC6'} Due
+            <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+              <input type="date" value={due} onChange={e => setDue(e.target.value)}
+                style={{ ...iStyle, ...(due ? { background: TH.amberBg } : {}) }} />
+              {due && (
+                <button onClick={() => setDue('')} style={{
+                  fontSize: 9, background: 'none', border: 'none', color: TH.redText,
+                  cursor: 'pointer', padding: 0, fontWeight: 700
+                }}>{'\u2715'}</button>
+              )}
+            </div>
+          </label>
+          <label style={lStyle}>
+            {'\u23F3'} Start after
+            <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+              <input type="date" value={startAfter} onChange={e => setStartAfter(e.target.value)}
+                style={{ ...iStyle, ...(startAfter ? { background: TH.blueBg } : {}) }} />
+              {startAfter && (
+                <button onClick={() => setStartAfter('')} style={{
+                  fontSize: 9, background: 'none', border: 'none', color: TH.redText,
+                  cursor: 'pointer', padding: 0, fontWeight: 700
+                }}>{'\u2715'}</button>
+              )}
+            </div>
+          </label>
+        </div>
+
+        {/* Row 3: Priority + Habit + Rigid + Location */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
+          <label style={lStyle}>
+            {'\uD83D\uDD25'} Priority
+            <select value={pri} onChange={e => setPri(e.target.value)} style={iStyle}>
+              <option value="P1">{'\uD83D\uDD34'} P1 Critical</option>
+              <option value="P2">{'\uD83D\uDFE0'} P2 High</option>
+              <option value="P3">{'\uD83D\uDD35'} P3 Medium</option>
+              <option value="P4">{'\u26AA'} P4 Low</option>
+            </select>
+          </label>
+          <label style={lStyle}>
+            {'\uD83D\uDD01'} Habit
+            <button onClick={() => { setHabit(!habit); if (habit) setRigid(false); }} style={{
+              padding: '3px 10px', borderRadius: 4, fontSize: 10, cursor: 'pointer', fontWeight: 600,
+              border: '1px solid ' + (habit ? TH.greenBorder : TH.btnBorder),
+              background: habit ? TH.greenBg : TH.inputBg,
+              color: habit ? TH.greenText : TH.textMuted,
+            }}>{habit ? '\uD83D\uDD01 Yes' : 'No'}</button>
+          </label>
+          {habit && (
+            <label style={lStyle}>
+              {'\uD83D\uDCCC'} Rigid
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <button onClick={() => setRigid(!rigid)} style={{
+                  padding: '3px 10px', borderRadius: 4, fontSize: 10, cursor: 'pointer', fontWeight: 600,
+                  border: '1px solid ' + (rigid ? TH.accent : TH.btnBorder),
+                  background: rigid ? TH.blueBg : TH.inputBg,
+                  color: rigid ? TH.blueText : TH.textMuted,
+                }}>{rigid ? '\uD83D\uDCCC Anchored' : '\uD83D\uDD01 Slidable'}</button>
+                <span style={{ fontSize: 8, color: TH.textDim }}>{rigid ? 'Stays at set time' : 'Moves to fit schedule'}</span>
+              </div>
+            </label>
+          )}
+          <label style={lStyle}>
+            {'\uD83D\uDCCD'} Location
+            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 2 }}>
+              {(locations || []).map(loc => {
+                var isOn = taskLoc.indexOf(loc.id) !== -1;
+                return (
+                  <button key={loc.id} onClick={() => {
+                    setTaskLoc(isOn ? taskLoc.filter(x => x !== loc.id) : [...taskLoc, loc.id]);
+                  }} style={{
+                    padding: '3px 6px', borderRadius: 5, fontSize: 10, cursor: 'pointer',
+                    fontWeight: isOn ? 600 : 400,
+                    border: isOn ? '2px solid ' + TH.accent : '1px solid ' + TH.btnBorder,
+                    background: isOn ? TH.blueBg : TH.bgCard,
+                  }}>{loc.icon} {loc.name}</button>
+                );
+              })}
+            </div>
+            {taskLoc.length === 0 && <div style={{ fontSize: 9, color: TH.muted2, marginTop: 1 }}>No selection = anywhere</div>}
+          </label>
+        </div>
+
+        {/* Row 4: Tools + When + Day req */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
+          <label style={lStyle}>
+            {'\uD83D\uDD27'} Tools needed
+            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 2 }}>
+              {(tools || []).map(tool => {
+                var isOn = taskTools.indexOf(tool.id) !== -1;
+                return (
+                  <button key={tool.id} onClick={() => {
+                    setTaskTools(isOn ? taskTools.filter(x => x !== tool.id) : [...taskTools, tool.id]);
+                  }} style={{
+                    padding: '3px 6px', borderRadius: 5, fontSize: 10, cursor: 'pointer',
+                    fontWeight: isOn ? 600 : 400,
+                    border: isOn ? '2px solid ' + TH.accent : '1px solid ' + TH.btnBorder,
+                    background: isOn ? TH.blueBg : TH.bgCard,
+                  }}>{tool.icon} {tool.name}</button>
+                );
+              })}
+            </div>
+          </label>
+          <label style={lStyle}>
+            {'\uD83D\uDCC6'} When
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+              {(uniqueTags || []).concat([{ tag: 'fixed', name: 'Fixed', icon: '\uD83D\uDCCC', color: TH.muted2 }]).map(tb => {
+                var parts = when ? when.split(',').map(s => s.trim()).filter(Boolean) : [];
+                var isOn = parts.indexOf(tb.tag) !== -1;
+                return (
+                  <button key={tb.tag} onClick={() => {
+                    var cur = when ? when.split(',').map(s => s.trim()).filter(Boolean) : [];
+                    if (isOn) { cur = cur.filter(v => v !== tb.tag); }
+                    else { cur.push(tb.tag); }
+                    setWhen(cur.length === 0 ? '' : cur.join(','));
+                  }} style={{
+                    padding: '4px 8px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                    fontWeight: isOn ? 600 : 400,
+                    border: isOn ? '2px solid ' + (tb.color || '#2563EB') : '1px solid ' + TH.btnBorder,
+                    background: isOn ? (tb.color || TH.accent) + '22' : TH.bgCard,
+                    color: isOn ? (tb.color || TH.accent) : TH.text,
+                  }}>{tb.icon} {tb.name}</button>
+                );
+              })}
+            </div>
+            {(!when || when === 'anytime') && <div style={{ fontSize: 9, color: TH.muted2, marginTop: 2 }}>No selection = anytime</div>}
+          </label>
+        </div>
+
+        {/* Row 5: Day req + Recurrence */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
+          <label style={lStyle}>
+            Day requirement
+            <select value={dayReq} onChange={e => setDayReq(e.target.value)} style={iStyle}>
+              <option value="any">Any day</option>
+              <option value="weekday">Weekday</option>
+              <option value="weekend">Weekend</option>
+              <option value="M">Monday</option>
+              <option value="T">Tuesday</option>
+              <option value="W">Wednesday</option>
+              <option value="R">Thursday</option>
+              <option value="F">Friday</option>
+              <option value="Sa">Saturday</option>
+              <option value="Su">Sunday</option>
+            </select>
+          </label>
+          <label style={lStyle}>
+            {'\uD83D\uDD01'} Recurrence
+            <select value={recurType} onChange={e => setRecurType(e.target.value)} style={iStyle}>
+              <option value="none">None</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="biweekly">Biweekly</option>
+              <option value="interval">Every N days</option>
+            </select>
+          </label>
+          {(recurType === 'weekly' || recurType === 'biweekly') && (
+            <label style={lStyle}>
+              Days
+              <div style={{ display: 'flex', gap: 3 }}>
+                {[['M','Mon'],['T','Tue'],['W','Wed'],['R','Thu'],['F','Fri'],['S','Sat'],['U','Sun']].map(([code, label]) => {
+                  var active = recurDays.includes(code);
+                  return (
+                    <button key={code} onClick={() => {
+                      setRecurDays(active ? recurDays.replace(code, '') : recurDays + code);
+                    }} style={{
+                      padding: '3px 6px', borderRadius: 4, fontSize: 10, cursor: 'pointer',
+                      fontWeight: active ? 600 : 400,
+                      border: '1px solid ' + (active ? TH.accent : TH.btnBorder),
+                      background: active ? TH.accent + '20' : 'transparent',
+                      color: active ? TH.accent : TH.textMuted,
+                    }}>{label}</button>
+                  );
+                })}
+              </div>
+            </label>
+          )}
+          {recurType === 'interval' && (
+            <label style={lStyle}>
+              Interval
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 10, color: TH.text }}>Every</span>
+                <input type="number" value={recurEvery} onChange={e => setRecurEvery(e.target.value)} min={2}
+                  style={{ ...iStyle, width: 50 }} />
+                <span style={{ fontSize: 10, color: TH.text }}>days</span>
+              </div>
             </label>
           )}
         </div>
 
-        {/* Recurrence editor */}
-        <div>
-          <label style={labelStyle}>Recurrence</label>
-          <select value={recurType} onChange={e => setRecurType(e.target.value)} style={inputStyle}>
-            <option value="none">None</option>
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="biweekly">Biweekly</option>
-            <option value="interval">Every N days</option>
-          </select>
-          {(recurType === 'weekly' || recurType === 'biweekly') && (
-            <div style={{ display: 'flex', gap: 3, marginTop: 6 }}>
-              {[['M','Mon'],['T','Tue'],['W','Wed'],['R','Thu'],['F','Fri'],['S','Sat'],['U','Sun']].map(([code, label]) => {
-                var active = recurDays.includes(code);
-                return (
-                  <button key={code} onClick={() => {
-                    setRecurDays(active ? recurDays.replace(code, '') : recurDays + code);
-                  }} style={{
-                    border: `1px solid ${active ? theme.accent : theme.border}`,
-                    background: active ? theme.accent + '20' : 'transparent',
-                    color: active ? theme.accent : theme.textMuted,
-                    borderRadius: 6, padding: '3px 8px', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit'
-                  }}>{label}</button>
-                );
-              })}
-            </div>
-          )}
-          {recurType === 'interval' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
-              <span style={{ fontSize: 12, color: theme.text }}>Every</span>
-              <input type="number" value={recurEvery} onChange={e => setRecurEvery(e.target.value)} min={2}
-                style={{ ...inputStyle, width: 60 }} />
-              <span style={{ fontSize: 12, color: theme.text }}>days</span>
-            </div>
-          )}
-        </div>
-
-        <div>
-          <label style={labelStyle}>Notes</label>
-          <textarea value={notes} onChange={e => setNotes(e.target.value)}
-            style={{ ...inputStyle, minHeight: 60, resize: 'vertical' }} />
+        {/* Notes */}
+        <div style={{ marginBottom: 5 }}>
+          <label style={lStyle}>
+            Notes
+            <textarea value={notes} onChange={e => setNotes(e.target.value)}
+              style={{ ...iStyle, minHeight: 50, resize: 'vertical', width: '100%' }} />
+          </label>
         </div>
 
         {/* Dependencies */}
         {task.dependsOn && task.dependsOn.length > 0 && (
-          <div>
-            <label style={labelStyle}>Dependencies ({task.dependsOn.length})</label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {task.dependsOn.map(depId => (
-                <span key={depId} style={{
-                  fontSize: 10, padding: '2px 8px', borderRadius: 4,
-                  background: theme.bgTertiary, color: theme.textMuted, fontFamily: 'monospace'
-                }}>{depId}</span>
-              ))}
-            </div>
+          <div style={{ marginBottom: 5 }}>
+            <label style={lStyle}>
+              {'\uD83D\uDD17'} Dependencies ({task.dependsOn.length})
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 2 }}>
+                {task.dependsOn.map(depId => (
+                  <span key={depId} style={{
+                    fontSize: 9, padding: '2px 6px', borderRadius: 4,
+                    background: TH.bgTertiary, color: TH.textMuted, fontFamily: 'monospace'
+                  }}>{depId}</span>
+                ))}
+              </div>
+            </label>
           </div>
         )}
 
         {onShowChain && (
           <button onClick={onShowChain} style={{
-            border: `1px solid #0EA5E9`, borderRadius: 8, padding: '8px 16px',
-            background: 'transparent', color: '#0EA5E9', fontSize: 12, fontWeight: 600,
-            cursor: 'pointer', fontFamily: 'inherit', width: '100%'
+            border: '1px solid #0EA5E9', borderRadius: 4, padding: '4px 10px',
+            background: 'transparent', color: '#0EA5E9', fontSize: 10, fontWeight: 600,
+            cursor: 'pointer', fontFamily: 'inherit', width: '100%', marginBottom: 5
           }}>Show Dependency Chain</button>
         )}
-
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-          <button onClick={save} style={{
-            flex: 1, border: 'none', borderRadius: 8, padding: '10px 16px',
-            background: theme.accent, color: '#FFF', fontWeight: 600, fontSize: 13,
-            cursor: 'pointer', fontFamily: 'inherit'
-          }}>Save</button>
-          <button onClick={onClose} style={{
-            border: `1px solid ${theme.border}`, borderRadius: 8, padding: '10px 16px',
-            background: 'transparent', color: theme.textSecondary, fontSize: 13,
-            cursor: 'pointer', fontFamily: 'inherit'
-          }}>Cancel</button>
-          {onDelete && (
-            <button onClick={() => setShowDeleteConfirm(true)} style={{
-              border: `1px solid #EF4444`, borderRadius: 8, padding: '10px 16px',
-              background: 'transparent', color: '#EF4444', fontSize: 13,
-              cursor: 'pointer', fontFamily: 'inherit'
-            }}>Delete</button>
-          )}
-        </div>
       </div>
 
       {showDeleteConfirm && (
