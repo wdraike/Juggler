@@ -1,0 +1,13 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--build-arg'
+      - 'REACT_APP_GOOGLE_CLIENT_ID=${_GOOGLE_CLIENT_ID}'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/juggler-frontend'
+      - '.'
+images:
+  - 'gcr.io/$PROJECT_ID/juggler-frontend'
+substitutions:
+  _GOOGLE_CLIENT_ID: ''

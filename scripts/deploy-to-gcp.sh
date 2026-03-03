@@ -208,9 +208,11 @@ deploy_frontend() {
 
     print_status "Backend API URL: $BACKEND_URL/api"
 
+    print_status "Google Client ID: ${GOOGLE_CLIENT_ID:0:20}..."
     print_status "Building frontend Docker image..."
     gcloud builds submit \
-        --tag gcr.io/$PROJECT_ID/$FRONTEND_SERVICE \
+        --config=cloudbuild.yaml \
+        --substitutions="_GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID" \
         --timeout=15m || {
         print_error "Frontend build failed!"
         exit 1
