@@ -1,5 +1,6 @@
 /**
  * WeekStrip — day selector strip with week navigation + date picker
+ * On mobile: no task counts, no date picker, reduced padding
  */
 
 import React from 'react';
@@ -23,7 +24,7 @@ export default function WeekStrip({ weekStripDates, selectedDate, dayOffset, set
   };
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '8px 12px', background: theme.bgSecondary, borderBottom: `1px solid ${theme.border}` }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: isMobile ? '4px 8px' : '8px 12px', background: theme.bgSecondary, borderBottom: `1px solid ${theme.border}` }}>
       {!isMobile && <button onClick={() => setDayOffset(d => d - 7)} style={navBtnStyle(theme, isMobile)} title="Previous week">&laquo;</button>}
       <button onClick={() => setDayOffset(d => d - 1)} style={navBtnStyle(theme, isMobile)} title="Previous day">&lsaquo;</button>
 
@@ -49,7 +50,8 @@ export default function WeekStrip({ weekStripDates, selectedDate, dayOffset, set
               }}>
               <div style={{ fontSize: 10, opacity: 0.7 }}>{isMobile ? SHORT_DAY[d.getDay()] : DAY_NAMES[d.getDay()]}</div>
               <div>{d.getDate()}</div>
-              {totalCount > 0 && (
+              {/* Task counts — desktop only */}
+              {!isMobile && totalCount > 0 && (
                 <div style={{ fontSize: 8, opacity: 0.6, marginTop: 1 }}>
                   {doneCount}/{totalCount}
                 </div>
@@ -61,15 +63,18 @@ export default function WeekStrip({ weekStripDates, selectedDate, dayOffset, set
 
       <button onClick={() => setDayOffset(d => d + 1)} style={navBtnStyle(theme, isMobile)} title="Next day">&rsaquo;</button>
       {!isMobile && <button onClick={() => setDayOffset(d => d + 7)} style={navBtnStyle(theme, isMobile)} title="Next week">&raquo;</button>}
-      <input type="date" value={dateInputValue} onChange={handleDatePick}
-        style={{
-          padding: '3px 4px', borderRadius: 6, fontSize: 10,
-          border: `1px solid ${theme.border}`,
-          background: theme.white || theme.bg, color: theme.textMuted,
-          cursor: 'pointer', fontFamily: 'inherit'
-        }}
-        title="Jump to any date"
-      />
+      {/* Date picker — desktop only */}
+      {!isMobile && (
+        <input type="date" value={dateInputValue} onChange={handleDatePick}
+          style={{
+            padding: '3px 4px', borderRadius: 6, fontSize: 10,
+            border: `1px solid ${theme.border}`,
+            background: theme.white || theme.bg, color: theme.textMuted,
+            cursor: 'pointer', fontFamily: 'inherit'
+          }}
+          title="Jump to any date"
+        />
+      )}
       <button onClick={() => setDayOffset(0)} style={{
         ...navBtnStyle(theme, isMobile), fontSize: 11, padding: isMobile ? '6px 10px' : '6px 12px', fontWeight: 600
       }} title="Go to today">Today</button>

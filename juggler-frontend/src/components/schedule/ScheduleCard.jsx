@@ -43,8 +43,13 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
       }}>
         <span style={{
           flex: 1, fontWeight: 600, color: theme.text,
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          textDecoration: isDone ? 'line-through' : 'none'
+          overflow: 'hidden', textDecoration: isDone ? 'line-through' : 'none',
+          ...(isMobile && !compact ? {
+            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+            whiteSpace: 'normal', lineHeight: 1.3
+          } : {
+            whiteSpace: 'nowrap', textOverflow: 'ellipsis'
+          })
         }}>
           {task.text}
         </span>

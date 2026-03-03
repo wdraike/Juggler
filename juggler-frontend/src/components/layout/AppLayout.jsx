@@ -39,6 +39,7 @@ import DependencyChainPopup from '../features/DependencyChainPopup';
 import GCalSyncPanel from '../features/GCalSyncPanel';
 import HelpModal from '../features/HelpModal';
 import AiCommandPanel from '../features/AiCommandPanel';
+import AppFooter from './AppFooter';
 import apiClient from '../../services/apiClient';
 
 export default function AppLayout() {
@@ -475,7 +476,7 @@ export default function AppLayout() {
   var expandedTaskObj = expandedTask ? allTasks.find(t => t.id === expandedTask) : null;
 
   return (
-    <div style={{ height: '100vh', overflow: 'hidden', background: theme.bg, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div style={{ height: '100vh', overflow: 'hidden', maxWidth: '100vw', background: theme.bg, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
     <div style={{ width: isMobile ? '100%' : (10000 / config.fontSize) + '%', height: isMobile ? '100%' : (10000 / config.fontSize) + '%', transform: isMobile ? undefined : 'scale(' + (config.fontSize / 100) + ')', transformOrigin: '0 0', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ flexShrink: 0, zIndex: 100, background: theme.bg }}>
         <HeaderBar
@@ -488,6 +489,7 @@ export default function AppLayout() {
           onShowHelp={() => setShowHelp(true)}
           onAddTask={() => { setShowCreateForm(true); setExpandedTask(null); }}
           isMobile={isMobile}
+          aiPanel={<AiCommandPanel darkMode={darkMode} isMobile={isMobile} allTasks={allTasks} statuses={statuses} config={config} onApplyOps={handleAiOps} showToast={showToast} />}
         />
         <WeekStrip
           weekStripDates={weekStripDates} selectedDate={selectedDate}
@@ -679,11 +681,7 @@ export default function AppLayout() {
         <HelpModal onClose={() => setShowHelp(false)} darkMode={darkMode} isMobile={isMobile} />
       )}
 
-      <AiCommandPanel
-        darkMode={darkMode} isMobile={isMobile}
-        allTasks={allTasks} statuses={statuses} config={config}
-        onApplyOps={handleAiOps} showToast={showToast}
-      />
+      <AppFooter darkMode={darkMode} />
 
       <ToastNotification
         toast={toast} toastHistory={toastHistory}

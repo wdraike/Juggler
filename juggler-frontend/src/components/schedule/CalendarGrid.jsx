@@ -5,6 +5,9 @@
  * Markers = duration-proportional on the timeline.
  * Cards = fixed height, distributed across up to 4 columns (2 per side)
  * so they never overlap and vertical space is used efficiently.
+ *
+ * On mobile: timeline strip pinned to left edge, all cards in a single
+ * column on the right for maximum card width.
  */
 
 import React, { useRef, useEffect, useMemo, useState } from 'react';
@@ -23,11 +26,11 @@ var STRIP_W_MINI = 24;
 var MARKER_W = 10;
 var MARKER_W_M = 8;
 var CARD_H = 52;        // fixed card height — enough for title + status row
-var CARD_H_M = 48;
+var CARD_H_M = 64;      // taller on mobile for wrapped titles
 var CARD_H_COMPACT = 40;
 var CARD_GAP = 4;
 var CONN_ZONE = 24;     // space between marker and card for bezier connector
-var CONN_ZONE_M = 16;
+var CONN_ZONE_M = 12;
 var CONN_ZONE_COMPACT = 14;
 
 function getDims(mode, isMobile) {
@@ -38,14 +41,17 @@ function getDims(mode, isMobile) {
 
 // Multi-column stagger: cards distributed across colsPerSide columns on each
 // side, picking whichever slot is closest to the ideal Y (centered on marker).
-function computeLayout(placements, hourHeight, cardH, gap, colsPerSide) {
+// rightOnly = true → all cards placed on the right side (mobile single-column)
+function computeLayout(placements, hourHeight, cardH, gap, colsPerSide, rightOnly) {
   var nCols = colsPerSide || 1;
   var sorted = (placements || []).slice().sort(function(a, b) { return a.start - b.start; });
   var result = [];
 
+  var sides = rightOnly ? ['right'] : ['left', 'right'];
+
   // Track bottom Y of each slot
   var bottoms = {};
-  ['left', 'right'].forEach(function(side) {
+  sides.forEach(function(side) {
     for (var c = 0; c < nCols; c++) {
       bottoms[side + '_' + c] = -Infinity;
     }
@@ -62,8 +68,8 @@ function computeLayout(placements, hourHeight, cardH, gap, colsPerSide) {
     var idealY = markerMidY - cardH / 2;
 
     // pick the slot with lowest candidate Y
-    var bestSide = 'left', bestCol = 0, bestY = Infinity;
-    ['left', 'right'].forEach(function(side) {
+    var bestSide = sides[0], bestCol = 0, bestY = Infinity;
+    sides.forEach(function(side) {
       for (var c = 0; c < nCols; c++) {
         var y = Math.max(idealY, bottoms[side + '_' + c] + gap);
         if (y < bestY) {
@@ -91,7 +97,13 @@ export default function CalendarGrid({
   var mode = layoutMode || 'full';
   var dm = getDims(mode, isMobile);
   var theme = getTheme(darkMode);
-  var hourHeight = gridZoom || 60;
+  var baseHourHeight = gridZoom || 60;
+
+  // On mobile, enforce a minimum zoom so taller cards have room to spread
+  if (isMobile && mode !== 'mini' && baseHourHeight < 80) baseHourHeight = 80;
+
+  // Mobile full-width mode: strip on left, all cards on right
+  var mobileFullWidth = isMobile && mode === 'full';
 
   // measure container
   var elRef = useRef(null);
@@ -105,19 +117,19 @@ export default function CalendarGrid({
   }, []);
 
   // positions
-  var stripX = Math.floor((cw - dm.STRIP_W) / 2);
+  var stripX = mobileFullWidth ? 2 : Math.floor((cw - dm.STRIP_W) / 2);
   var stripMid = stripX + dm.STRIP_W / 2;
 
   // cards fill from connector edge to container edge
   var leftCardLeft = 4;
   var leftCardRight = stripX - dm.MARKER_W - dm.CONN;
-  var leftCardW = leftCardRight - leftCardLeft;
+  var leftCardW = mobileFullWidth ? 0 : (leftCardRight - leftCardLeft);
   var rightCardLeft = stripX + dm.STRIP_W + dm.MARKER_W + dm.CONN;
   var rightCardW = cw - rightCardLeft - 4;
 
   // Determine columns per side based on available width
-  var colsPerSide = (leftCardW > 250 && mode === 'full' && !isMobile) ? 2 : 1;
-  var subColW_left = leftCardW / colsPerSide;
+  var colsPerSide = mobileFullWidth ? 1 : ((leftCardW > 250 && mode === 'full' && !isMobile) ? 2 : 1);
+  var subColW_left = colsPerSide > 0 ? leftCardW / colsPerSide : 0;
   var subColW_right = rightCardW / colsPerSide;
   var colGap = colsPerSide > 1 ? 2 : 0;
 
@@ -126,10 +138,35 @@ export default function CalendarGrid({
   var zoomRef = useRef(gridZoom); zoomRef.current = gridZoom;
   var onZoomRef = useRef(onZoomChange); onZoomRef.current = onZoomChange;
 
-  var layout = useMemo(function() {
-    if (mode === 'mini') return [];
-    return computeLayout(placements, hourHeight, dm.CARD_H, dm.CARD_GAP, colsPerSide);
-  }, [placements, hourHeight, mode, dm.CARD_H, dm.CARD_GAP, colsPerSide]);
+  // Layout computation with auto-scaling for mobile single-column.
+  // When cards stack vertically and extend past the grid, increase hourHeight
+  // so the timeline stretches and cards stay near their time markers.
+  var layoutResult = useMemo(function() {
+    if (mode === 'mini') return { items: [], hourHeight: baseHourHeight };
+
+    var h = baseHourHeight;
+    var result = computeLayout(placements, h, dm.CARD_H, dm.CARD_GAP, colsPerSide, mobileFullWidth);
+
+    // Auto-scale: if cards overflow the grid, bump hourHeight so they fit
+    if (mobileFullWidth && result.length > 1) {
+      var maxBot = 0;
+      for (var i = 0; i < result.length; i++) {
+        var b = result[i].cardY + dm.CARD_H;
+        if (b > maxBot) maxBot = b;
+      }
+      var gridH = GRID_HOURS_COUNT * h;
+      if (maxBot > gridH) {
+        // Scale up with a small buffer so cards aren't right at the edge
+        h = Math.min(Math.ceil((maxBot + dm.CARD_H) / GRID_HOURS_COUNT), 180);
+        result = computeLayout(placements, h, dm.CARD_H, dm.CARD_GAP, colsPerSide, mobileFullWidth);
+      }
+    }
+
+    return { items: result, hourHeight: h };
+  }, [placements, baseHourHeight, mode, dm.CARD_H, dm.CARD_GAP, colsPerSide, mobileFullWidth]);
+
+  var layout = layoutResult.items;
+  var hourHeight = layoutResult.hourHeight;
 
   var miniMarkers = useMemo(function() {
     if (mode !== 'mini') return [];
@@ -183,7 +220,7 @@ export default function CalendarGrid({
   blocks.forEach(function(bl) { var h = Math.floor(bl.start / 60); if (h >= GRID_START && h <= GRID_END) blockStartsByHour[h] = bl; });
 
   return (
-    <div ref={elRef} style={{ position: 'relative', height: totalH, minHeight: totalH, touchAction: 'pan-y' }}
+    <div ref={elRef} style={{ position: 'relative', height: totalH, minHeight: totalH, touchAction: 'pan-y', overflow: 'hidden' }}
       onDragOver={onGridDrop ? function(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } : undefined}
       onDrop={onGridDrop ? function(e) { onGridDrop(e, dateKey); } : undefined}
     >

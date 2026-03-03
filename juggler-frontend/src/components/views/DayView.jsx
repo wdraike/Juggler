@@ -4,7 +4,6 @@
 
 import React, { useRef, useEffect } from 'react';
 import CalendarGrid from '../schedule/CalendarGrid';
-import QuickAddTask from '../tasks/QuickAddTask';
 import { getTheme } from '../../theme/colors';
 import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES } from '../../state/constants';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
@@ -133,7 +132,7 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
         );
       })()}
       {/* Scrollable grid area */}
-      <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }} ref={scrollRef}>
+      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0 }} ref={scrollRef}>
         <div style={{ padding: isMobile ? '0 4px' : '0 12px' }}>
           <CalendarGrid
             dateKey={selectedDateKey}
@@ -154,9 +153,6 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
             onZoomChange={onZoomChange}
             isMobile={isMobile}
           />
-        </div>
-        <div style={{ padding: '8px 12px' }}>
-          <QuickAddTask date={selectedDate} onCreate={onCreate} darkMode={darkMode} isMobile={isMobile} />
         </div>
       </div>
     </div>

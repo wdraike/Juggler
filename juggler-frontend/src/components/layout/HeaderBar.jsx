@@ -1,19 +1,44 @@
 /**
- * HeaderBar — progress bar, menu, dark mode toggle
+ * HeaderBar — progress bar, AI input, menu buttons, dark mode toggle
+ * On mobile: overflow menu hides infrequent buttons behind "..."
  */
 
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import { getTheme } from '../../theme/colors';
 
-export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onReschedule, onShowHelp, onAddTask, isMobile }) {
+export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onReschedule, onShowHelp, onAddTask, isMobile, aiPanel }) {
   var theme = getTheme(darkMode);
   var { user, logout } = useAuth();
+  var [showOverflow, setShowOverflow] = useState(false);
+  var overflowRef = useRef(null);
+
+  // Close overflow on outside click
+  useEffect(function() {
+    if (!showOverflow) return;
+    function handleClick(e) {
+      if (overflowRef.current && !overflowRef.current.contains(e.target)) setShowOverflow(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return function() { document.removeEventListener('mousedown', handleClick); };
+  }, [showOverflow]);
 
   var dayTasks = tasksByDate[selectedDateKey] || [];
   var doneCount = dayTasks.filter(t => statuses[t.id] === 'done' || statuses[t.id] === 'cancel' || statuses[t.id] === 'skip').length;
   var totalCount = dayTasks.filter(t => statuses[t.id] !== 'cancel' && statuses[t.id] !== 'skip').length;
   var pct = totalCount > 0 ? Math.round(doneCount / totalCount * 100) : 0;
+
+  // Overflow menu items for mobile
+  var overflowItems = [];
+  if (isMobile) {
+    if (onReschedule) overflowItems.push({ label: 'Reschedule', icon: '\uD83D\uDD04', onClick: onReschedule });
+    overflowItems.push({ label: 'Settings', icon: '\u2699\uFE0F', onClick: onShowSettings });
+    overflowItems.push({ label: 'Import/Export', icon: '\uD83D\uDCE6', onClick: onShowExport });
+    if (onShowGCalSync) overflowItems.push({ label: 'GCal Sync', icon: '\uD83D\uDCC5', onClick: onShowGCalSync });
+    if (onShowHelp) overflowItems.push({ label: 'Help', icon: '\u2753', onClick: onShowHelp });
+    overflowItems.push({ label: darkMode ? 'Light Mode' : 'Dark Mode', icon: darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19', onClick: function() { setDarkMode(function(d) { return !d; }); } });
+    if (user) overflowItems.push({ label: 'Logout', icon: '\uD83D\uDEAA', onClick: logout });
+  }
 
   return (
     <>
@@ -27,36 +52,82 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
       {!isMobile && <div style={{ fontWeight: 700, fontSize: 16, color: theme.text }}>Juggler</div>}
 
       {/* Progress bar */}
-      <div style={{ flex: 1, maxWidth: isMobile ? 80 : 200, height: 6, background: theme.bgTertiary, borderRadius: 3, overflow: 'hidden' }}>
+      <div style={{ flex: 0, minWidth: isMobile ? 50 : 80, maxWidth: isMobile ? 80 : 140, height: 6, background: theme.bgTertiary, borderRadius: 3, overflow: 'hidden' }}>
         <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? '#10B981' : '#3B82F6', borderRadius: 3, transition: 'width 0.3s' }} />
       </div>
-      <span style={{ fontSize: 11, color: theme.textMuted, minWidth: 32 }}>{pct}%</span>
+      <span style={{ fontSize: 11, color: theme.textMuted, minWidth: 28 }}>{pct}%</span>
 
-      <div style={{ flex: 1 }} />
+      {/* AI command input — inline in header */}
+      {aiPanel}
 
       {saving && <span style={{ fontSize: 11, color: theme.textMuted }}>Saving...</span>}
 
       {onAddTask && <button onClick={onAddTask} style={{ ...btnStyle(theme, isMobile), fontSize: 20, fontWeight: 700, color: '#10B981' }} title="Add task">+</button>}
-      {onReschedule && <button onClick={onReschedule} style={btnStyle(theme, isMobile)} title="Reschedule">&#x1F504;</button>}
-      <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings">&#x2699;&#xFE0F;</button>
-      <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export">&#x1F4E6;</button>
-      {onShowGCalSync && (
-        <button onClick={onShowGCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title="Google Calendar Sync">
-          <span style={gcalSyncing ? { display: 'inline-block', animation: 'gcal-spin 1s linear infinite' } : undefined}>&#x1F4C5;</span>
-          {gcalSyncing && <span style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: '#3B82F6' }} />}
-        </button>
-      )}
-      {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help & Shortcuts">&#x2753;</button>}
-      <button onClick={() => setDarkMode(d => !d)} style={btnStyle(theme, isMobile)} title="Toggle dark mode">
-        {darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19'}
-      </button>
 
-      {user && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {user.picture && (
-            <img src={user.picture} alt="" style={{ width: 24, height: 24, borderRadius: 12 }} />
+      {/* Desktop: show all buttons inline */}
+      {!isMobile && (
+        <>
+          {onReschedule && <button onClick={onReschedule} style={btnStyle(theme, isMobile)} title="Reschedule">&#x1F504;</button>}
+          <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings">&#x2699;&#xFE0F;</button>
+          <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export">&#x1F4E6;</button>
+          {onShowGCalSync && (
+            <button onClick={onShowGCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title="Google Calendar Sync">
+              <span style={gcalSyncing ? { display: 'inline-block', animation: 'gcal-spin 1s linear infinite' } : undefined}>&#x1F4C5;</span>
+              {gcalSyncing && <span style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: '#3B82F6' }} />}
+            </button>
           )}
-          <button onClick={logout} style={{ ...btnStyle(theme, isMobile), fontSize: 11 }}>Logout</button>
+          {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help & Shortcuts">&#x2753;</button>}
+          <button onClick={() => setDarkMode(d => !d)} style={btnStyle(theme, isMobile)} title="Toggle dark mode">
+            {darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19'}
+          </button>
+          {user && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {user.picture && (
+                <img src={user.picture} alt="" style={{ width: 24, height: 24, borderRadius: 12 }} />
+              )}
+              <button onClick={logout} style={{ ...btnStyle(theme, isMobile), fontSize: 11 }}>Logout</button>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Mobile: overflow menu button */}
+      {isMobile && (
+        <div ref={overflowRef} style={{ position: 'relative' }}>
+          <button onClick={function() { setShowOverflow(function(v) { return !v; }); }} style={{ ...btnStyle(theme, isMobile), fontSize: 18, fontWeight: 700 }} title="More options">
+            &#x22EF;
+          </button>
+          {showOverflow && (
+            <div style={{
+              position: 'absolute', top: '100%', right: 0, marginTop: 4,
+              background: theme.bgSecondary, border: `1px solid ${theme.border}`,
+              borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+              zIndex: 200, minWidth: 180, overflow: 'hidden'
+            }}>
+              {user && user.picture && (
+                <div style={{ padding: '8px 14px', borderBottom: `1px solid ${theme.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <img src={user.picture} alt="" style={{ width: 24, height: 24, borderRadius: 12 }} />
+                  <span style={{ fontSize: 12, color: theme.textMuted }}>{user.name || user.email || ''}</span>
+                </div>
+              )}
+              {overflowItems.map(function(item, i) {
+                return (
+                  <button key={i} onClick={function() { setShowOverflow(false); item.onClick(); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                      border: 'none', background: 'transparent', cursor: 'pointer',
+                      padding: '12px 14px', fontSize: 14, color: theme.text,
+                      fontFamily: 'inherit', textAlign: 'left',
+                      minHeight: 44,
+                      borderTop: i === 0 && !(user && user.picture) ? 'none' : undefined
+                    }}>
+                    <span style={{ fontSize: 16, width: 24, textAlign: 'center' }}>{item.icon}</span>
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>
