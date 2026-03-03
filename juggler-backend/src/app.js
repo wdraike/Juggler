@@ -19,6 +19,7 @@ const dataRoutes = require('./routes/data.routes');
 const gcalRoutes = require('./routes/gcal.routes');
 const scheduleRoutes = require('./routes/schedule.routes');
 const healthRoutes = require('./routes/health.routes');
+const aiRoutes = require('./routes/ai.routes');
 
 const app = express();
 
@@ -56,6 +57,7 @@ app.use('/api/tools', toolRoutes);
 app.use('/api/data', dataRoutes);
 app.use('/api/gcal', gcalRoutes);
 app.use('/api/schedule', scheduleRoutes);
+app.use('/api/ai', aiRoutes);
 
 // 404 handler
 app.use((req, res) => {

@@ -76,7 +76,8 @@ async function googleLogin(req, res) {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+      path: '/',
+      maxAge: 90 * 24 * 60 * 60 * 1000 // 90 days
     });
 
     res.json({
@@ -107,6 +108,16 @@ async function refresh(req, res) {
     // req.user is set by validateRefreshToken middleware
     const user = req.user;
     const accessToken = generateAccessToken(user);
+    const newRefreshToken = generateRefreshToken(user);
+
+    // Rotate refresh token — issue a fresh one so the 90d clock resets
+    res.cookie('refreshToken', newRefreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      path: '/',
+      maxAge: 90 * 24 * 60 * 60 * 1000 // 90 days
+    });
 
     res.json({ accessToken });
   } catch (error) {
@@ -126,7 +137,8 @@ async function logout(req, res) {
   res.clearCookie('refreshToken', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    path: '/'
   });
   res.json({ message: 'Logged out' });
 }

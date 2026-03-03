@@ -13,6 +13,7 @@ import useConfig from '../../hooks/useConfig';
 import useUndo from '../../hooks/useUndo';
 import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts';
 import useDragDrop from '../../hooks/useDragDrop';
+import useIsMobile from '../../hooks/useIsMobile';
 import { getTheme } from '../../theme/colors';
 import { formatDateKey, getWeekStart, parseDate, parseTimeToMinutes } from '../../scheduler/dateHelpers';
 import { DAY_NAMES, GRID_START, GRID_END } from '../../state/constants';
@@ -37,11 +38,13 @@ import ImportExportPanel from '../features/ImportExportPanel';
 import DependencyChainPopup from '../features/DependencyChainPopup';
 import GCalSyncPanel from '../features/GCalSyncPanel';
 import HelpModal from '../features/HelpModal';
+import AiCommandPanel from '../features/AiCommandPanel';
 import apiClient from '../../services/apiClient';
 
 export default function AppLayout() {
   // State
   var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, setStatus, setDirection, updateTask, addTasks, deleteTask, createTask, taskStateRef } = useTaskState();
+  var isMobile = useIsMobile();
   var config = useConfig();
   var { toast, toastHistory, showToast } = useToast();
   var { pushUndo, popUndo } = useUndo(taskStateRef, dispatch, dispatchPersist);
@@ -63,6 +66,7 @@ export default function AppLayout() {
   var [chainPopupId, setChainPopupId] = useState(null);
   var [hideHabits, setHideHabits] = useState(false);
   var [showHelp, setShowHelp] = useState(false);
+  var [showCreateForm, setShowCreateForm] = useState(false);
   var [gcalAutoSync, setGcalAutoSync] = useState(false);
   var [gcalLastSyncedAt, setGcalLastSyncedAt] = useState(null);
   var [gcalSyncing, setGcalSyncing] = useState(false);
@@ -193,36 +197,11 @@ export default function AppLayout() {
       placements[t.date].push({ task: t, start: startMin, dur: dur, locked: locked, _dateKey: t.date });
     });
 
-    // Compute overlap columns for each day
+    // Sort and assign unique keys per day
     Object.keys(placements).forEach(dateKey => {
       var placed = placements[dateKey];
       placed.sort((a, b) => a.start - b.start);
-      placed.forEach(x => { x.col = 0; x.cols = 1; });
-      var colDone = {};
-      for (var i = 0; i < placed.length; i++) {
-        if (colDone[i]) continue;
-        var grp = [i], ge = placed[i].start + placed[i].dur;
-        for (var j = i + 1; j < placed.length; j++) {
-          if (placed[j].start < ge) { grp.push(j); ge = Math.max(ge, placed[j].start + placed[j].dur); }
-          else break;
-        }
-        if (grp.length > 1) {
-          var usedCols = [];
-          grp.forEach(idx => {
-            var x = placed[idx];
-            var c = 0;
-            while (usedCols[c] && usedCols[c] > x.start && c < 20) c++;
-            x.col = c; usedCols[c] = x.start + x.dur;
-            colDone[idx] = true;
-          });
-          var mc = 0;
-          grp.forEach(idx => { if (placed[idx].col > mc) mc = placed[idx].col; });
-          grp.forEach(idx => { placed[idx].cols = mc + 1; });
-        }
-        colDone[i] = true;
-      }
 
-      // Unique keys
       var idCount = {};
       placed.forEach(item => {
         var id = item.task.id;
@@ -234,9 +213,11 @@ export default function AppLayout() {
     return { dayPlacements: placements, unplaced: unplacedList };
   }, [allTasks, statuses]);
 
-  // Blocked tasks: tasks whose dependencies are not all done
+  // Blocked tasks: tasks whose dependencies are not all done AND whose
+  // date is today or in the past (future tasks with pending deps are expected)
   var blockedTaskIds = useMemo(() => {
     var ids = new Set();
+    var todayKey = formatDateKey(new Date());
     allTasks.forEach(t => {
       if (t.dependsOn && t.dependsOn.length > 0) {
         var allDepsDone = t.dependsOn.every(depId => {
@@ -244,7 +225,11 @@ export default function AppLayout() {
           return s === 'done';
         });
         if (!allDepsDone && (statuses[t.id] || '') === '') {
-          ids.add(t.id);
+          var td = parseDate(t.date);
+          var todayD = parseDate(todayKey);
+          if (td && todayD && td <= todayD) {
+            ids.add(t.id);
+          }
         }
       }
     });
@@ -408,6 +393,76 @@ export default function AppLayout() {
     allTasks, onUpdate: handleUpdateTask, gridZoom: config.gridZoom, showToast
   });
 
+  // AI ops handler — applies ops from AI command panel
+  var handleAiOps = useCallback(function(ops, msg) {
+    pushUndo('AI command');
+    var newSt = Object.assign({}, statuses);
+    var newTasks = allTasks.slice();
+    var taskEdits = {};
+    var newLocs = null, newTools = null, newMatrix = null, newBlocks = null;
+
+    (ops || []).forEach(function(op) {
+      if (op.op === 'status') {
+        if (op.value === '') { delete newSt[op.id]; } else { newSt[op.id] = op.value; }
+      } else if (op.op === 'edit') {
+        var editFields = Object.assign({}, op.fields);
+        var srcTask = allTasks.find(function(tt) { return tt.id === op.id; });
+        if (srcTask && srcTask.when && srcTask.when.indexOf('fixed') >= 0) {
+          delete editFields.date; delete editFields.day; delete editFields.time;
+        }
+        taskEdits[op.id] = Object.assign({}, taskEdits[op.id] || {}, editFields);
+      } else if (op.op === 'add' && op.task) {
+        op.task.created = new Date().toISOString();
+        newTasks = newTasks.concat([op.task]);
+      } else if (op.op === 'delete') {
+        newSt[op.id] = 'cancel';
+      } else if (op.op === 'set_weekly' && op.day && op.location) {
+        if (!newBlocks) newBlocks = JSON.parse(JSON.stringify(config.timeBlocks));
+        (newBlocks[op.day] || []).forEach(function(b) {
+          if (b.tag === 'biz' || b.tag === 'lunch') b.loc = op.location;
+        });
+      } else if (op.op === 'set_block_loc' && op.day && op.blockTag && op.location) {
+        if (!newBlocks) newBlocks = JSON.parse(JSON.stringify(config.timeBlocks));
+        (newBlocks[op.day] || []).forEach(function(b) {
+          if (b.tag === op.blockTag || b.id === op.blockId) b.loc = op.location;
+        });
+      } else if (op.op === 'add_location' && op.id && op.name) {
+        if (!newLocs) newLocs = config.locations.slice();
+        if (!newLocs.some(function(l) { return l.id === op.id; })) {
+          newLocs.push({ id: op.id, name: op.name, icon: op.icon || '\uD83D\uDCCD' });
+        }
+      } else if (op.op === 'add_tool' && op.id && op.name) {
+        if (!newTools) newTools = config.tools.slice();
+        if (!newTools.some(function(t) { return t.id === op.id; })) {
+          newTools.push({ id: op.id, name: op.name, icon: op.icon || '\uD83D\uDD27' });
+        }
+      } else if (op.op === 'set_tool_matrix' && op.location && op.tools) {
+        if (!newMatrix) newMatrix = Object.assign({}, config.toolMatrix);
+        newMatrix[op.location] = op.tools;
+      } else if (op.op === 'set_blocks' && op.day && op.blocks) {
+        if (!newBlocks) newBlocks = Object.assign({}, config.timeBlocks);
+        newBlocks[op.day] = op.blocks;
+      } else if (op.op === 'clone_blocks' && op.from && op.to) {
+        if (!newBlocks) newBlocks = JSON.parse(JSON.stringify(config.timeBlocks));
+        var src = newBlocks[op.from] || config.timeBlocks[op.from] || [];
+        op.to.forEach(function(d) { newBlocks[d] = JSON.parse(JSON.stringify(src)); });
+      }
+    });
+
+    // Apply edits to tasks
+    newTasks = newTasks.map(function(t) {
+      return taskEdits[t.id] ? Object.assign({}, t, taskEdits[t.id]) : t;
+    });
+
+    dispatchPersist({ type: 'SET_ALL', statuses: newSt, tasks: newTasks });
+    if (newLocs) config.updateLocations(newLocs);
+    if (newTools) config.updateTools(newTools);
+    if (newMatrix) config.updateToolMatrix(newMatrix);
+    if (newBlocks) config.updateTimeBlocks(newBlocks);
+
+    showToast(msg || 'AI: ' + ops.length + ' changes applied', 'success');
+  }, [allTasks, statuses, config, pushUndo, dispatchPersist, showToast]);
+
   if (loading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.bg, color: theme.textMuted, fontFamily: "'DM Sans', system-ui", fontSize: 14 }}>
@@ -420,7 +475,8 @@ export default function AppLayout() {
   var expandedTaskObj = expandedTask ? allTasks.find(t => t.id === expandedTask) : null;
 
   return (
-    <div style={{ height: '100vh', background: theme.bg, fontFamily: "'DM Sans', system-ui, sans-serif", display: 'flex', flexDirection: 'column', zoom: config.fontSize / 100 }}>
+    <div style={{ height: '100vh', overflow: 'hidden', background: theme.bg, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div style={{ width: isMobile ? '100%' : (10000 / config.fontSize) + '%', height: isMobile ? '100%' : (10000 / config.fontSize) + '%', transform: isMobile ? undefined : 'scale(' + (config.fontSize / 100) + ')', transformOrigin: '0 0', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ flexShrink: 0, zIndex: 100, background: theme.bg }}>
         <HeaderBar
           darkMode={darkMode} setDarkMode={function(v) { setDarkMode(function(prev) { var next = typeof v === 'function' ? v(prev) : v; localStorage.setItem('juggler-darkMode', String(next)); return next; }); }} saving={saving}
@@ -430,11 +486,14 @@ export default function AppLayout() {
           gcalSyncing={gcalSyncing}
           onReschedule={handleReschedule}
           onShowHelp={() => setShowHelp(true)}
+          onAddTask={() => { setShowCreateForm(true); setExpandedTask(null); }}
+          isMobile={isMobile}
         />
         <WeekStrip
           weekStripDates={weekStripDates} selectedDate={selectedDate}
           dayOffset={dayOffset} setDayOffset={setDayOffset} today={today}
           darkMode={darkMode} statuses={statuses} tasksByDate={tasksByDate}
+          isMobile={isMobile}
         />
         <NavigationBar
           viewMode={viewMode} setViewMode={setViewMode}
@@ -445,12 +504,13 @@ export default function AppLayout() {
           allProjectNames={allProjectNames}
           hideHabits={hideHabits} setHideHabits={setHideHabits}
           unplacedCount={unplacedCount} blockedCount={blockedCount}
+          isMobile={isMobile}
         />
       </div>
 
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative', minHeight: 0 }}>
         {/* Main content */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
           {viewMode === 'day' && (
             <DayView
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
@@ -466,6 +526,7 @@ export default function AppLayout() {
               locations={config.locations} onHourLocationOverride={handleHourLocationOverride}
               blockedTaskIds={blockedTaskIds}
               onZoomChange={handleZoomChange}
+              isMobile={isMobile}
             />
           )}
           {viewMode === '3day' && (
@@ -476,6 +537,7 @@ export default function AppLayout() {
               gridZoom={config.gridZoom} darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins}
               onGridDrop={handleGridDrop} blockedTaskIds={blockedTaskIds}
               onZoomChange={handleZoomChange}
+              isMobile={isMobile}
             />
           )}
           {viewMode === 'week' && (
@@ -486,6 +548,7 @@ export default function AppLayout() {
               gridZoom={config.gridZoom} darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins}
               onGridDrop={handleGridDrop} blockedTaskIds={blockedTaskIds}
               onZoomChange={handleZoomChange}
+              isMobile={isMobile}
             />
           )}
           {viewMode === 'month' && (
@@ -494,6 +557,7 @@ export default function AppLayout() {
               statuses={statuses} tasksByDate={tasksByDate}
               onExpand={handleExpand} setDayOffset={setDayOffset} today={today} darkMode={darkMode}
               onDateDrop={handleDateDrop}
+              isMobile={isMobile}
             />
           )}
           {viewMode === 'list' && (
@@ -503,6 +567,7 @@ export default function AppLayout() {
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               onCreate={handleCreate} darkMode={darkMode} schedCfg={schedCfg}
               hideHabits={hideHabits} blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds}
+              isMobile={isMobile}
             />
           )}
           {viewMode === 'priority' && (
@@ -512,6 +577,7 @@ export default function AppLayout() {
               onStatusChange={handleStatusChange} onExpand={handleExpand} darkMode={darkMode}
               onPriorityDrop={handlePriorityDrop}
               hideHabits={hideHabits} blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds}
+              isMobile={isMobile}
             />
           )}
           {viewMode === 'conflicts' && (
@@ -519,12 +585,13 @@ export default function AppLayout() {
               allTasks={allTasks} statuses={statuses} directions={directions}
               unplaced={unplaced}
               onStatusChange={handleStatusChange} onExpand={handleExpand} darkMode={darkMode}
+              isMobile={isMobile}
             />
           )}
         </div>
 
         {/* Task edit panel */}
-        {expandedTaskObj && (
+        {expandedTaskObj && !showCreateForm && (
           <TaskEditForm
             task={expandedTaskObj}
             status={statuses[expandedTask] || ''}
@@ -540,19 +607,36 @@ export default function AppLayout() {
             tools={config.tools}
             uniqueTags={uniqueTags}
             darkMode={darkMode}
+            isMobile={isMobile}
+          />
+        )}
+
+        {/* Task create panel */}
+        {showCreateForm && (
+          <TaskEditForm
+            mode="create"
+            onCreate={handleCreate}
+            onClose={() => setShowCreateForm(false)}
+            initialDate={selectedDate}
+            allProjectNames={allProjectNames}
+            locations={config.locations}
+            tools={config.tools}
+            uniqueTags={uniqueTags}
+            darkMode={darkMode}
+            isMobile={isMobile}
           />
         )}
       </div>
 
       {/* Settings panel */}
       {showSettings && (
-        <SettingsPanel onClose={() => setShowSettings(false)} darkMode={darkMode} config={config} allProjectNames={allProjectNames} />
+        <SettingsPanel onClose={() => setShowSettings(false)} darkMode={darkMode} config={config} allProjectNames={allProjectNames} isMobile={isMobile} />
       )}
 
       {/* Import/Export panel */}
       {showExport && (
         <ImportExportPanel onClose={() => setShowExport(false)} darkMode={darkMode} showToast={showToast}
-          allTasks={allTasks} statuses={statuses} dayPlacements={dayPlacements} />
+          allTasks={allTasks} statuses={statuses} dayPlacements={dayPlacements} isMobile={isMobile} />
       )}
 
       {/* GCal Sync panel */}
@@ -561,6 +645,7 @@ export default function AppLayout() {
           onClose={() => setShowGCalSync(false)}
           darkMode={darkMode}
           showToast={showToast}
+          isMobile={isMobile}
           autoSync={gcalAutoSync}
           lastSyncedAt={gcalLastSyncedAt}
           onAutoSyncChange={function(val) {
@@ -585,19 +670,27 @@ export default function AppLayout() {
           onUpdate={handleUpdateTask}
           onClose={() => setChainPopupId(null)}
           darkMode={darkMode}
+          isMobile={isMobile}
         />
       )}
 
       {/* Help modal */}
       {showHelp && (
-        <HelpModal onClose={() => setShowHelp(false)} darkMode={darkMode} />
+        <HelpModal onClose={() => setShowHelp(false)} darkMode={darkMode} isMobile={isMobile} />
       )}
+
+      <AiCommandPanel
+        darkMode={darkMode} isMobile={isMobile}
+        allTasks={allTasks} statuses={statuses} config={config}
+        onApplyOps={handleAiOps} showToast={showToast}
+      />
 
       <ToastNotification
         toast={toast} toastHistory={toastHistory}
         showHistory={showToastHistory}
         onToggleHistory={() => setShowToastHistory(v => !v)}
       />
+    </div>
     </div>
   );
 }

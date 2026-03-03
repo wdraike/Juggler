@@ -15,7 +15,7 @@ var TABS = [
   { id: 'preferences', label: 'Preferences' },
 ];
 
-export default function SettingsPanel({ onClose, darkMode, config, allProjectNames }) {
+export default function SettingsPanel({ onClose, darkMode, config, allProjectNames, isMobile }) {
   var theme = getTheme(darkMode);
   var [tab, setTab] = useState('locations');
 
@@ -26,9 +26,11 @@ export default function SettingsPanel({ onClose, darkMode, config, allProjectNam
       alignItems: 'center', justifyContent: 'center'
     }} onClick={onClose}>
       <div style={{
-        background: theme.bgSecondary, borderRadius: 12, width: 700, maxWidth: '95vw',
-        maxHeight: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
-        boxShadow: `0 8px 32px ${theme.shadow}`
+        background: theme.bgSecondary, borderRadius: isMobile ? 0 : 12,
+        width: isMobile ? '100%' : 700, maxWidth: isMobile ? '100%' : '95vw',
+        height: isMobile ? '100%' : undefined, maxHeight: isMobile ? '100%' : '85vh',
+        overflow: 'hidden', display: 'flex', flexDirection: 'column',
+        boxShadow: isMobile ? 'none' : `0 8px 32px ${theme.shadow}`
       }} onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div style={{

@@ -3,37 +3,39 @@
  */
 
 import React, { useState } from 'react';
-import { PRI_COLORS, STATUS_OPTIONS } from '../../state/constants';
-import { toTime24, fromTime24, toDateISO, fromDateISO } from '../../scheduler/dateHelpers';
+import { PRI_COLORS, STATUS_OPTIONS, applyDefaults } from '../../state/constants';
+import { toTime24, fromTime24, toDateISO, fromDateISO, formatDateKey } from '../../scheduler/dateHelpers';
 import { getTheme } from '../../theme/colors';
 import ConfirmDialog from '../features/ConfirmDialog';
 
-export default function TaskEditForm({ task, status, direction, onUpdate, onStatusChange, onDirectionChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, darkMode }) {
+export default function TaskEditForm({ task, status, direction, onUpdate, onStatusChange, onDirectionChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, darkMode, isMobile, mode, onCreate, initialDate }) {
+  var isCreate = mode === 'create';
   var TH = getTheme(darkMode);
-  var [text, setText] = useState(task.text || '');
-  var [project, setProject] = useState(task.project || '');
-  var [pri, setPri] = useState(task.pri || 'P3');
-  var [date, setDate] = useState(toDateISO(task.date));
-  var [time, setTime] = useState(toTime24(task.time));
-  var [dur, setDur] = useState(task.dur || 30);
-  var [timeRemaining, setTimeRemaining] = useState(task.timeRemaining != null ? task.timeRemaining : '');
-  var [due, setDue] = useState(toDateISO(task.due));
-  var [startAfter, setStartAfter] = useState(toDateISO(task.startAfter));
-  var [notes, setNotes] = useState(task.notes || '');
-  var [when, setWhen] = useState(task.when || '');
-  var [dayReq, setDayReq] = useState(task.dayReq || 'any');
-  var [habit, setHabit] = useState(!!task.habit);
-  var [rigid, setRigid] = useState(!!task.rigid);
-  var [split, setSplit] = useState(task.split !== undefined ? task.split : false);
-  var [splitMin, setSplitMin] = useState(task.splitMin || 15);
-  var [taskLoc, setTaskLoc] = useState(task.location || []);
-  var [taskTools, setTaskTools] = useState(task.tools || []);
+  var initDate = isCreate && initialDate ? toDateISO(formatDateKey(initialDate)) : '';
+  var [text, setText] = useState(isCreate ? '' : (task.text || ''));
+  var [project, setProject] = useState(isCreate ? '' : (task.project || ''));
+  var [pri, setPri] = useState(isCreate ? 'P3' : (task.pri || 'P3'));
+  var [date, setDate] = useState(isCreate ? initDate : toDateISO(task.date));
+  var [time, setTime] = useState(isCreate ? '' : toTime24(task.time));
+  var [dur, setDur] = useState(isCreate ? 30 : (task.dur || 30));
+  var [timeRemaining, setTimeRemaining] = useState(isCreate ? '' : (task.timeRemaining != null ? task.timeRemaining : ''));
+  var [due, setDue] = useState(isCreate ? '' : toDateISO(task.due));
+  var [startAfter, setStartAfter] = useState(isCreate ? '' : toDateISO(task.startAfter));
+  var [notes, setNotes] = useState(isCreate ? '' : (task.notes || ''));
+  var [when, setWhen] = useState(isCreate ? 'morning,lunch,afternoon,evening' : (task.when || ''));
+  var [dayReq, setDayReq] = useState(isCreate ? 'any' : (task.dayReq || 'any'));
+  var [habit, setHabit] = useState(isCreate ? false : !!task.habit);
+  var [rigid, setRigid] = useState(isCreate ? false : !!task.rigid);
+  var [split, setSplit] = useState(isCreate ? false : (task.split !== undefined ? task.split : false));
+  var [splitMin, setSplitMin] = useState(isCreate ? 15 : (task.splitMin || 15));
+  var [taskLoc, setTaskLoc] = useState(isCreate ? [] : (task.location || []));
+  var [taskTools, setTaskTools] = useState(isCreate ? [] : (task.tools || []));
   var [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  var [recurType, setRecurType] = useState(task.recur?.type || 'none');
-  var [recurDays, setRecurDays] = useState(task.recur?.days || 'MTWRF');
-  var [recurEvery, setRecurEvery] = useState(task.recur?.every || 2);
+  var [recurType, setRecurType] = useState(isCreate ? 'none' : (task.recur?.type || 'none'));
+  var [recurDays, setRecurDays] = useState(isCreate ? 'MTWRF' : (task.recur?.days || 'MTWRF'));
+  var [recurEvery, setRecurEvery] = useState(isCreate ? 2 : (task.recur?.every || 2));
 
-  var iStyle = { fontSize: 11, padding: '3px 4px', border: '1px solid ' + TH.inputBorder, borderRadius: 4, background: TH.inputBg, color: TH.inputText, fontFamily: 'inherit' };
+  var iStyle = { fontSize: isMobile ? 13 : 11, padding: isMobile ? '6px 8px' : '3px 4px', border: '1px solid ' + TH.inputBorder, borderRadius: 4, background: TH.inputBg, color: TH.inputText, fontFamily: 'inherit' };
   var lStyle = { fontSize: 8, color: TH.textMuted, display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 600 };
 
   function save() {
@@ -43,10 +45,10 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
       var pd = new Date(2026, parseInt(d.split('/')[0]) - 1, parseInt(d.split('/')[1]));
       dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][pd.getDay()];
     }
-    onUpdate(task.id, {
+    var fields = {
       text, project, pri,
-      date: d || task.date,
-      day: dayName || task.day,
+      date: d || (isCreate ? '' : task.date),
+      day: dayName || (isCreate ? '' : task.day),
       time: fromTime24(time),
       dur: parseInt(dur) || 30,
       timeRemaining: timeRemaining === '' ? null : parseInt(timeRemaining),
@@ -62,7 +64,14 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
         days: recurType === 'weekly' || recurType === 'biweekly' ? recurDays : undefined,
         every: recurType === 'interval' ? parseInt(recurEvery) || 2 : undefined
       }
-    });
+    };
+    if (isCreate) {
+      var newId = 't' + Date.now() + Math.random().toString(36).slice(2, 6);
+      var newTask = applyDefaults(Object.assign({ id: newId }, fields));
+      onCreate(newTask);
+    } else {
+      onUpdate(task.id, fields);
+    }
     onClose();
   }
 
@@ -86,9 +95,11 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
 
   return (
     <div style={{
-      position: 'fixed', top: 0, right: 0, bottom: 0, width: 420, maxWidth: '100vw',
-      background: TH.bgCard, borderLeft: '1px solid ' + TH.border,
-      zIndex: 200, overflow: 'auto', boxShadow: '-4px 0 20px ' + TH.shadow
+      position: 'fixed', top: 0, right: 0, bottom: 0,
+      width: isMobile ? '100vw' : 420, maxWidth: '100vw',
+      left: isMobile ? 0 : undefined,
+      background: TH.bgCard, borderLeft: isMobile ? 'none' : ('1px solid ' + TH.border),
+      zIndex: 200, overflow: 'auto', boxShadow: isMobile ? 'none' : ('-4px 0 20px ' + TH.shadow)
     }}>
       {/* Top bar with Save / Delete / Close */}
       <div style={{
@@ -99,8 +110,8 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
         <button onClick={save} style={{
           fontSize: 10, fontWeight: 700, padding: '4px 14px', border: 'none', borderRadius: 4,
           background: '#10B981', color: 'white', cursor: 'pointer'
-        }}>{'\u2714'} Save</button>
-        {onDelete && (
+        }}>{isCreate ? '\u2795 Create' : '\u2714 Save'}</button>
+        {!isCreate && onDelete && (
           <button onClick={() => setShowDeleteConfirm(true)} style={{
             fontSize: 10, fontWeight: 600, padding: '4px 10px',
             border: '1px solid #DC2626', borderRadius: 4,
@@ -110,13 +121,14 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
         <div style={{ flex: 1 }} />
         <button onClick={onClose} style={{
           border: 'none', background: 'transparent', color: TH.textMuted,
-          fontSize: 16, cursor: 'pointer', padding: '2px 6px'
+          fontSize: isMobile ? 24 : 16, cursor: 'pointer', padding: '2px 6px',
+          minWidth: isMobile ? 44 : undefined, minHeight: isMobile ? 44 : undefined
         }}>&times;</button>
       </div>
 
       <div style={{ padding: '10px 12px' }}>
-        {/* Status buttons */}
-        <div style={{ marginBottom: 8 }}>
+        {/* Status buttons — hidden in create mode */}
+        {!isCreate && <div style={{ marginBottom: 8 }}>
           <div style={{ ...lStyle, marginBottom: 3 }}>Status</div>
           <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
             {STATUS_OPTIONS.map(s => {
@@ -144,7 +156,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
               style={{ ...iStyle, width: '100%', marginTop: 4 }}
             />
           )}
-        </div>
+        </div>}
 
         {/* Row 1: Task + Project */}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
@@ -185,7 +197,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
               ))}
             </select>
           </label>
-          <label style={lStyle}>
+          {!isCreate && <label style={lStyle}>
             {'\uD83D\uDCCA'} Remaining
             <select value={remVal} onChange={e => setTimeRemaining(parseInt(e.target.value))}
               style={{ ...iStyle, background: remVal < parseInt(dur) ? TH.purpleBg : TH.inputBg }}>
@@ -193,7 +205,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
                 <option key={v} value={v}>{durLabel(v)}</option>
               ))}
             </select>
-          </label>
+          </label>}
           <label style={lStyle}>
             {'\u2702'} Split
             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -412,8 +424,8 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
           </label>
         </div>
 
-        {/* Dependencies */}
-        {task.dependsOn && task.dependsOn.length > 0 && (
+        {/* Dependencies — hidden in create mode */}
+        {!isCreate && task.dependsOn && task.dependsOn.length > 0 && (
           <div style={{ marginBottom: 5 }}>
             <label style={lStyle}>
               {'\uD83D\uDD17'} Dependencies ({task.dependsOn.length})
@@ -429,7 +441,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
           </div>
         )}
 
-        {onShowChain && (
+        {!isCreate && onShowChain && (
           <button onClick={onShowChain} style={{
             border: '1px solid #0EA5E9', borderRadius: 4, padding: '4px 10px',
             background: 'transparent', color: '#0EA5E9', fontSize: 10, fontWeight: 600,
@@ -444,6 +456,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
           onConfirm={() => { onDelete(task.id); onClose(); }}
           onCancel={() => setShowDeleteConfirm(false)}
           darkMode={darkMode}
+          isMobile={isMobile}
         />
       )}
     </div>

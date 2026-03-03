@@ -7,7 +7,7 @@ import { getTheme } from '../../theme/colors';
 import { DAY_NAMES, PRI_COLORS, STATUS_MAP } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 
-export default function MonthView({ selectedDate, dayPlacements, statuses, tasksByDate, onExpand, setDayOffset, today, darkMode, onDateDrop }) {
+export default function MonthView({ selectedDate, dayPlacements, statuses, tasksByDate, onExpand, setDayOffset, today, darkMode, onDateDrop, isMobile }) {
   var theme = getTheme(darkMode);
   var todayKey = formatDateKey(today);
   var year = selectedDate.getFullYear();
@@ -41,16 +41,16 @@ export default function MonthView({ selectedDate, dayPlacements, statuses, tasks
               onDrop={onDateDrop ? (e => { e.stopPropagation(); onDateDrop(e, key); }) : undefined}
               style={{
                 border: `1px solid ${isToday ? theme.accent : theme.border}`,
-                borderRadius: 6, padding: 4, minHeight: 80, cursor: 'pointer',
+                borderRadius: 6, padding: 4, minHeight: isMobile ? 50 : 80, cursor: 'pointer',
                 background: isToday ? theme.accent + '10' : theme.card,
-                fontSize: 11
+                fontSize: isMobile ? 9 : 11
               }}>
               <div style={{ fontWeight: isToday ? 700 : 500, color: isToday ? theme.accent : theme.text, marginBottom: 2 }}>
                 {day}
                 {tasks.length > 0 && <span style={{ fontSize: 9, color: theme.textMuted, marginLeft: 4 }}>{doneCount}/{tasks.length}</span>}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                {tasks.slice(0, 4).map(t => {
+                {tasks.slice(0, isMobile ? 2 : 4).map(t => {
                   var st = statuses[t.id] || '';
                   var isDone = st === 'done' || st === 'cancel' || st === 'skip';
                   return (
@@ -69,7 +69,7 @@ export default function MonthView({ selectedDate, dayPlacements, statuses, tasks
                     </div>
                   );
                 })}
-                {tasks.length > 4 && <div style={{ fontSize: 8, color: theme.textMuted }}>+{tasks.length - 4} more</div>}
+                {tasks.length > (isMobile ? 2 : 4) && <div style={{ fontSize: 8, color: theme.textMuted }}>+{tasks.length - (isMobile ? 2 : 4)} more</div>}
               </div>
             </div>
           );

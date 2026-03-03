@@ -8,14 +8,18 @@ import { parseWhen } from '../../scheduler/timeBlockHelpers';
 import TaskStatusSelect from '../tasks/TaskStatusSelect';
 import { getTheme } from '../../theme/colors';
 
-export default function ScheduledTaskBlock({ item, status, gridZoom, onStatusChange, onExpand, darkMode, isBlocked }) {
+export default function ScheduledTaskBlock({ item, status, gridZoom, gutter, hasBubbles, onStatusChange, onExpand, darkMode, isBlocked, isMobile }) {
   var theme = getTheme(darkMode);
   var task = item.task;
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
   var top = ((item.start - GRID_START * 60) / 60) * gridZoom;
-  var height = Math.max((item.dur / 60) * gridZoom - 2, 16);
-  var colWidth = 100 / (item.cols || 1);
+  var height = Math.max((item.dur / 60) * gridZoom - 2, 18);
+  var GUTTER = gutter || (isMobile ? 40 : 72);
+  var cols = item.cols || 1;
+  // When bubbles exist, blocks get the left 50%; otherwise blocks get 60%
+  var regionPct = hasBubbles ? 50 : 60;
+  var colWidth = regionPct / cols;
 
   var statusInfo = STATUS_MAP[status] || STATUS_MAP[''];
 
@@ -27,7 +31,7 @@ export default function ScheduledTaskBlock({ item, status, gridZoom, onStatusCha
       style={{
         position: 'absolute',
         top: top,
-        left: `calc(72px + ${(item.col || 0) * colWidth}%)`,
+        left: `calc(${GUTTER}px + ${(item.col || 0) * colWidth}%)`,
         width: `calc(${colWidth}% - 4px)`,
         height: height,
         borderRadius: 6,
@@ -39,7 +43,7 @@ export default function ScheduledTaskBlock({ item, status, gridZoom, onStatusCha
         overflow: 'hidden',
         opacity: isDone ? 0.5 : 1,
         zIndex: item.locked ? 10 : 20,
-        fontSize: 11,
+        fontSize: isMobile ? 10 : 11,
         lineHeight: 1.3,
         transition: 'box-shadow 0.15s',
         boxShadow: `0 1px 3px ${theme.shadow}`
@@ -56,7 +60,7 @@ export default function ScheduledTaskBlock({ item, status, gridZoom, onStatusCha
             <TaskStatusSelect value={status} onChange={onStatusChange} darkMode={darkMode} />
           </span>
         )}
-        {task.location?.length > 0 && <span style={{ fontSize: 9, marginRight: 2 }}>{task.location.map(lid => locIcon(lid)).join('')}</span>}
+        {task.location?.length > 0 && (function() { var ic = task.location.map(lid => locIcon(lid)).filter(Boolean); return ic.length > 0 ? <span style={{ fontSize: 9, marginRight: 2 }}>{ic.join('')}</span> : null; })()}
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{task.text}</span>
       </div>
       {height > 24 && (
@@ -66,7 +70,7 @@ export default function ScheduledTaskBlock({ item, status, gridZoom, onStatusCha
           {task.dur}m
           {status === 'wip' && task.timeRemaining != null && <span style={{ color: '#92400E', fontWeight: 600 }}> {task.timeRemaining}m left</span>}
           {isBlocked && <span style={{ color: '#EF4444' }}> &#x1F6AB;</span>}
-          {task.location?.length > 0 && <span> {task.location.map(lid => locIcon(lid)).join('')}</span>}
+          {task.location?.length > 0 && (function() { var ic = task.location.map(lid => locIcon(lid)).filter(Boolean); return ic.length > 0 ? <span> {ic.join('')}</span> : null; })()}
           {task.when && task.when !== 'anytime' && <span> {parseWhen(task.when).map(t => WHEN_TAG_ICONS[t] || '').join('')}</span>}
         </div>
       )}

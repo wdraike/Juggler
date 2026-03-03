@@ -8,7 +8,7 @@ import { getTheme } from '../../theme/colors';
 import { parseDate, formatDateKey } from '../../scheduler/dateHelpers';
 import { getDepsStatus } from '../../scheduler/dependencyHelpers';
 
-export default function ConflictsView({ allTasks, statuses, directions, unplaced, onStatusChange, onExpand, darkMode }) {
+export default function ConflictsView({ allTasks, statuses, directions, unplaced, onStatusChange, onExpand, darkMode, isMobile }) {
   var theme = getTheme(darkMode);
   var todayKey = formatDateKey(new Date());
   var today = new Date(); today.setHours(0, 0, 0, 0);
@@ -55,7 +55,7 @@ export default function ConflictsView({ allTasks, statuses, directions, unplaced
   ];
 
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: 12 }}>
+    <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? 8 : 12 }}>
       {sections.map(sec => (
         <div key={sec.title} style={{ marginBottom: 20 }}>
           <div style={{
@@ -80,6 +80,7 @@ export default function ConflictsView({ allTasks, statuses, directions, unplaced
                     onExpand={onExpand}
                     darkMode={darkMode}
                     showDate
+                    isMobile={isMobile}
                   />
                   {t._unplacedDetail && (
                     <div style={{ fontSize: 10, color: theme.textMuted, padding: '2px 12px', marginTop: -2 }}>

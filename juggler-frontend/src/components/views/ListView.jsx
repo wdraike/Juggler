@@ -10,7 +10,7 @@ import { DAY_NAMES, MONTH_NAMES } from '../../state/constants';
 import { parseDate, formatDateKey } from '../../scheduler/dateHelpers';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
-export default function ListView({ allTasks, statuses, directions, filter, search, projectFilter, onStatusChange, onExpand, onCreate, darkMode, schedCfg, hideHabits, blockedTaskIds, unplacedIds }) {
+export default function ListView({ allTasks, statuses, directions, filter, search, projectFilter, onStatusChange, onExpand, onCreate, darkMode, schedCfg, hideHabits, blockedTaskIds, unplacedIds, isMobile }) {
   var theme = getTheme(darkMode);
   var todayKey = formatDateKey(new Date());
 
@@ -49,7 +49,7 @@ export default function ListView({ allTasks, statuses, directions, filter, searc
   }, [filteredTasks]);
 
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: 12 }}>
+    <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? 8 : 12 }}>
       {grouped.map(([dateKey, tasks]) => {
         var d = parseDate(dateKey);
         var loc = dateKey !== 'TBD' ? getLocationForDatePure(dateKey, schedCfg) : null;
@@ -78,10 +78,11 @@ export default function ListView({ allTasks, statuses, directions, filter, searc
                   onExpand={onExpand}
                   darkMode={darkMode}
                   isBlocked={blockedTaskIds && blockedTaskIds.has(t.id)}
+                  isMobile={isMobile}
                 />
               ))}
             </div>
-            {d && <QuickAddTask date={d} onCreate={onCreate} darkMode={darkMode} />}
+            {d && <QuickAddTask date={d} onCreate={onCreate} darkMode={darkMode} isMobile={isMobile} />}
           </div>
         );
       })}

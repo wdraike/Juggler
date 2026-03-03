@@ -1,11 +1,12 @@
 /**
- * Unified Scheduler — CJS port of juggler-frontend/src/scheduler/unifiedSchedule.js
- * ONE algorithm: day-by-day, slot-by-slot.
- * 1. Habits stagger around each other
- * 2. Fixed overlay on top (can overlap, reserve time)
- * 3. Pool sorted by strict deadline tiers, then P1-P4
- * 4. Walk 15-min slots filling from pool; splitting happens naturally
- * 5. Non-splittable tasks overflow with warning if deadline forces it
+ * Unified Scheduler
+ * Phase 0: Fixed items + rigid habits (immovable anchors)
+ * Phase 1: Habits + deadline tasks late-placed at/before due date (P1→P4)
+ * Phase 2: Non-deadline flexible tasks fill remaining slots (P1→P4)
+ * Phase 3: Pull deadline tasks forward into gaps (P1→P4, earliest first)
+ *
+ * This order guarantees deadlines are met before flexible tasks consume
+ * capacity, and flexible tasks lock in before pull-forward can displace them.
  */
 
 var constants = require('./constants');
@@ -83,8 +84,14 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     }
 
     if (hasWhen(t.when, "fixed")) {
-      if (!isPast) { if (!fixedByDate[tdKey]) fixedByDate[tdKey] = []; fixedByDate[tdKey].push(t); }
-      return;
+      if (sm !== null) {
+        // Has a real clock time — anchor it as fixed
+        if (!isPast) { if (!fixedByDate[tdKey]) fixedByDate[tdKey] = []; fixedByDate[tdKey].push(t); }
+        return;
+      }
+      // No parseable time (e.g. "AM", "After appt", null) — fall through to pool
+      // Override when to "anytime" so getWhenWindows can find valid windows
+      t = Object.assign({}, t, { when: "anytime" });
     }
     if (t.habit) {
       if (!isPast) { if (!habitsByDate[tdKey]) habitsByDate[tdKey] = []; habitsByDate[tdKey].push(t); }
@@ -193,11 +200,11 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   }
 
   // EARLY PLACEMENT
-  function placeEarly(item, d, afterMin) {
+  function placeEarly(item, d, afterMin, whenOverride) {
     var t = item.task;
     var occ = dayOcc[d.key];
     var placed = dayPlaced[d.key];
-    var wins = getWhenWindows(t.when, dayWindows[d.key]);
+    var wins = getWhenWindows(whenOverride || t.when, dayWindows[d.key]);
     if (wins.length === 0) return false;
     var scanStart = Math.max(wins[0][0], afterMin || 0);
     var placedAny = false;
@@ -252,11 +259,11 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   }
 
   // LATE PLACEMENT
-  function placeLate(item, d, beforeMin) {
+  function placeLate(item, d, beforeMin, whenOverride) {
     var t = item.task;
     var occ = dayOcc[d.key];
     var placed = dayPlaced[d.key];
-    var wins = getWhenWindows(t.when, dayWindows[d.key]);
+    var wins = getWhenWindows(whenOverride || t.when, dayWindows[d.key]);
     if (wins.length === 0) return false;
     var maxEnd = beforeMin || WALK_END;
 
@@ -425,11 +432,13 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     }
   }
 
-  // STEPS 4-6: Priority loop
+  // PHASE 1: Habits + deadline late-placement (P1 first)
+  // Guarantee deadline tasks a spot at/before their deadline before anything
+  // flexible fills the calendar.
   var PRI_LEVELS = ["P1", "P2", "P3", "P4"];
 
   PRI_LEVELS.forEach(function(priLevel) {
-    // 3a. Non-rigid habits
+    // Non-rigid habits
     dates.forEach(function(d) {
       var habits = habitsByDate[d.key] || [];
       habits.filter(function(t) {
@@ -444,7 +453,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       });
     });
 
-    // 4. Late-place deadline tasks
+    // Late-place deadline tasks at/before their deadline
     var deadlineItems = pool.filter(function(item) {
       return item.deadline && item.remaining > 0 && (item.task.pri || "P3") === priLevel;
     });
@@ -512,12 +521,80 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         }
       }
     });
+  });
 
-    // 5. Pull forward
+  // PHASE 1.5: Past-deadline tasks — deadline already passed, place from today forward
+  PRI_LEVELS.forEach(function(priLevel) {
+    pool.filter(function(item) {
+      return item.deadline && item.remaining > 0 && item._parts.length === 0 && (item.task.pri || "P3") === priLevel;
+    }).forEach(function(item) {
+      placeVisited[item.task.id] = true; // Prevent Phase 2 from re-processing
+      for (var di = 0; di < dates.length; di++) {
+        if (item.remaining <= 0) break;
+        var d = dates[di];
+        if (d.date < localToday) continue;
+        if (!canPlaceOnDate(item.task, d)) continue;
+        if (!depsMetByDate(item.task, d)) continue;
+        var wins = getWhenWindows(item.task.when, dayWindows[d.key]);
+        if (wins.length === 0) continue;
+        placeEarly(item, d);
+      }
+    });
+  });
+
+  // PHASE 2: Non-deadline flexible tasks (P1 first)
+  // These lock into place before deadline pull-forward happens.
+  var placeVisited = {};
+
+  function placeWithDeps(item) {
+    if (!item || item.remaining <= 0) return;
+    if (placeVisited[item.task.id]) return;
+    placeVisited[item.task.id] = true;
+
+    getTaskDeps(item.task).forEach(function(depId) {
+      if (globalPlacedEnd[depId]) return;
+      var depItem = null;
+      for (var i = 0; i < pool.length; i++) { if (pool[i].task.id === depId) { depItem = pool[i]; break; } }
+      if (depItem && depItem.remaining > 0) placeWithDeps(depItem);
+    });
+
+    var t = item.task;
+    for (var di = 0; di < dates.length; di++) {
+      if (item.remaining <= 0) break;
+      var d = dates[di];
+      if (item.earliestDate && d.date < item.earliestDate) continue;
+      if (item.ceiling && d.date > item.ceiling) continue;
+      if (!canPlaceOnDate(t, d)) continue;
+      if (!depsMetByDate(t, d)) continue;
+      var wins = getWhenWindows(t.when, dayWindows[d.key]);
+      if (wins.length === 0) continue;
+      placeEarly(item, d);
+    }
+  }
+
+  PRI_LEVELS.forEach(function(priLevel) {
+    var items = pool.filter(function(item) {
+      return !item.deadline && item.remaining > 0 && (item.task.pri || "P3") === priLevel;
+    });
+    items.sort(function(a, b) {
+      var aDate = parseDate(a.task.date) || localToday;
+      var bDate = parseDate(b.task.date) || localToday;
+      var dd = aDate - bDate;
+      if (dd !== 0) return dd;
+      return whenOptionCount(a.task) - whenOptionCount(b.task);
+    });
+    items.forEach(function(item) { placeWithDeps(item); });
+  });
+
+  // PHASE 3: Pull deadline tasks forward into remaining gaps
+  // Flexible tasks are already locked in. Pull forward earliest-first within
+  // each priority level so higher-priority deadlines get the best gaps.
+  PRI_LEVELS.forEach(function(priLevel) {
     var pullItems = pool.filter(function(item) {
-      return item.deadline && item._parts.length > 0 && (item.task.pri || "P3") === priLevel;
+      return item.deadline && item.deadline >= localToday && item._parts.length > 0 && (item.task.pri || "P3") === priLevel;
     });
     pullItems.sort(function(a, b) {
+      // Earliest placement first — pull the soonest-due items forward first
       var aDate = parseDate(a._parts[0]._dateKey);
       var bDate = parseDate(b._parts[0]._dateKey);
       var dd = aDate - bDate;
@@ -559,47 +636,25 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     });
   });
 
-  // STEPS 7-8: Non-deadline tasks
-  var placeVisited = {};
-
-  function placeWithDeps(item) {
-    if (!item || item.remaining <= 0) return;
-    if (placeVisited[item.task.id]) return;
-    placeVisited[item.task.id] = true;
-
-    getTaskDeps(item.task).forEach(function(depId) {
-      if (globalPlacedEnd[depId]) return;
-      var depItem = null;
-      for (var i = 0; i < pool.length; i++) { if (pool[i].task.id === depId) { depItem = pool[i]; break; } }
-      if (depItem && depItem.remaining > 0) placeWithDeps(depItem);
-    });
-
-    var t = item.task;
-    for (var di = 0; di < dates.length; di++) {
-      if (item.remaining <= 0) break;
-      var d = dates[di];
-      if (item.earliestDate && d.date < item.earliestDate) continue;
-      if (item.ceiling && d.date > item.ceiling) continue;
-      if (!canPlaceOnDate(t, d)) continue;
-      if (!depsMetByDate(t, d)) continue;
-      var wins = getWhenWindows(t.when, dayWindows[d.key]);
-      if (wins.length === 0) continue;
-      placeEarly(item, d);
-    }
-  }
-
+  // PHASE 4 — RELAXATION: Unplaced items retry with 'anytime' windows.
+  // When a task's `when` preference (e.g. "biz") conflicts with its location/
+  // tool constraints (e.g. needs home but biz hours are at work), relax the
+  // time-of-day preference so the task can be placed wherever its constraints
+  // are actually met.
   PRI_LEVELS.forEach(function(priLevel) {
-    var items = pool.filter(function(item) {
-      return !item.deadline && item.remaining > 0 && (item.task.pri || "P3") === priLevel;
+    pool.filter(function(item) {
+      return item.remaining > 0 && item._parts.length === 0 && (item.task.pri || "P3") === priLevel;
+    }).forEach(function(item) {
+      for (var di = 0; di < dates.length; di++) {
+        if (item.remaining <= 0) break;
+        var d = dates[di];
+        if (item.earliestDate && d.date < item.earliestDate) continue;
+        if (d.date < localToday) continue;
+        if (!canPlaceOnDate(item.task, d)) continue;
+        if (!depsMetByDate(item.task, d)) continue;
+        placeEarly(item, d, 0, "anytime");
+      }
     });
-    items.sort(function(a, b) {
-      var aDate = parseDate(a.task.date) || localToday;
-      var bDate = parseDate(b.task.date) || localToday;
-      var dd = aDate - bDate;
-      if (dd !== 0) return dd;
-      return whenOptionCount(a.task) - whenOptionCount(b.task);
-    });
-    items.forEach(function(item) { placeWithDeps(item); });
   });
 
   // POST-PROCESSING: Overlap columns + unique keys

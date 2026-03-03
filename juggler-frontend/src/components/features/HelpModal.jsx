@@ -14,7 +14,7 @@ var SHORTCUTS = [
   { key: 'Esc', desc: 'Close expanded panel' },
 ];
 
-export default function HelpModal({ onClose, darkMode }) {
+export default function HelpModal({ onClose, darkMode, isMobile }) {
   var theme = getTheme(darkMode);
 
   return (
@@ -24,9 +24,11 @@ export default function HelpModal({ onClose, darkMode }) {
       alignItems: 'center', justifyContent: 'center'
     }} onClick={onClose}>
       <div style={{
-        background: theme.bgSecondary, borderRadius: 12, width: 480, maxWidth: '95vw',
-        maxHeight: '80vh', overflow: 'auto', padding: 20,
-        boxShadow: '0 8px 32px ' + theme.shadow
+        background: theme.bgSecondary, borderRadius: isMobile ? 0 : 12,
+        width: isMobile ? '100%' : 480, maxWidth: isMobile ? '100%' : '95vw',
+        height: isMobile ? '100%' : undefined, maxHeight: isMobile ? '100%' : '80vh',
+        overflow: 'auto', padding: 20,
+        boxShadow: isMobile ? 'none' : ('0 8px 32px ' + theme.shadow)
       }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>Help & Shortcuts</div>

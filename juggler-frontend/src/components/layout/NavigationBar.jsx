@@ -25,13 +25,14 @@ const FILTERS = [
   { id: 'unplaced', label: 'Unplaced' },
 ];
 
-export default function NavigationBar({ viewMode, setViewMode, filter, setFilter, search, setSearch, darkMode, projectFilter, setProjectFilter, allProjectNames, hideHabits, setHideHabits, unplacedCount, blockedCount }) {
+export default function NavigationBar({ viewMode, setViewMode, filter, setFilter, search, setSearch, darkMode, projectFilter, setProjectFilter, allProjectNames, hideHabits, setHideHabits, unplacedCount, blockedCount, isMobile }) {
   var theme = getTheme(darkMode);
 
   return (
     <div style={{
-      display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
-      padding: '8px 12px', background: theme.bgSecondary, borderBottom: `1px solid ${theme.border}`
+      display: 'flex', flexWrap: isMobile ? 'nowrap' : 'wrap', gap: 8, alignItems: 'center',
+      padding: '8px 12px', background: theme.bgSecondary, borderBottom: `1px solid ${theme.border}`,
+      overflowX: isMobile ? 'auto' : 'visible'
     }}>
       <div style={{ display: 'flex', gap: 2 }}>
         {VIEW_MODES.map(v => (
@@ -40,16 +41,17 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
               border: 'none', borderRadius: 6, padding: '5px 10px', cursor: 'pointer',
               background: viewMode === v.id ? theme.accent : 'transparent',
               color: viewMode === v.id ? '#FFF' : theme.textSecondary,
-              fontSize: 11, fontWeight: viewMode === v.id ? 600 : 400, fontFamily: 'inherit'
+              fontSize: 11, fontWeight: viewMode === v.id ? 600 : 400, fontFamily: 'inherit',
+              minHeight: isMobile ? 36 : undefined
             }}
             title={v.label}
           >
-            {v.label}
+            {isMobile ? v.icon : v.label}
           </button>
         ))}
       </div>
 
-      <div style={{ width: 1, height: 20, background: theme.border }} />
+      <div style={{ width: 1, height: 20, background: theme.border, flexShrink: 0 }} />
 
       <div style={{ display: 'flex', gap: 2 }}>
         {FILTERS.map(f => {
@@ -59,10 +61,11 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
             <button key={f.id} onClick={() => setFilter(f.id)}
               style={{
                 border: `1px solid ${filter === f.id ? theme.accent : theme.border}`,
-                borderRadius: 12, padding: '3px 10px', cursor: 'pointer',
+                borderRadius: 12, padding: isMobile ? '4px 6px' : '3px 10px', cursor: 'pointer',
                 background: filter === f.id ? theme.accent + '20' : 'transparent',
                 color: filter === f.id ? theme.accent : theme.textMuted,
-                fontSize: 11, fontFamily: 'inherit', position: 'relative'
+                fontSize: 11, fontFamily: 'inherit', position: 'relative',
+                whiteSpace: 'nowrap'
               }}
             >
               {f.label}
@@ -81,10 +84,10 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
         <button onClick={() => setHideHabits(h => !h)}
           style={{
             border: `1px solid ${hideHabits ? theme.accent : theme.border}`,
-            borderRadius: 12, padding: '3px 10px', cursor: 'pointer',
+            borderRadius: 12, padding: isMobile ? '4px 6px' : '3px 10px', cursor: 'pointer',
             background: hideHabits ? theme.accent + '20' : 'transparent',
             color: hideHabits ? theme.accent : theme.textMuted,
-            fontSize: 11, fontFamily: 'inherit'
+            fontSize: 11, fontFamily: 'inherit', whiteSpace: 'nowrap'
           }}
         >
           {hideHabits ? '🔁 Show Habits' : '🔁 Hide Habits'}
@@ -112,7 +115,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
         type="text" value={search} onChange={e => setSearch(e.target.value)}
         placeholder="Search tasks..."
         style={{
-          flex: 1, minWidth: 120, maxWidth: 240, padding: '5px 10px',
+          flex: 1, minWidth: isMobile ? 80 : 120, maxWidth: 240, padding: '5px 10px',
           border: `1px solid ${theme.inputBorder}`, borderRadius: 8,
           background: theme.input, color: theme.text, fontSize: 12,
           fontFamily: 'inherit', outline: 'none'

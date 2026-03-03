@@ -1,21 +1,28 @@
 /**
  * API Client — Axios instance with JWT bearer token + auto-refresh
+ * Access token persisted in localStorage for session survival across page reloads.
  */
 
 import axios from 'axios';
 
 const API_BASE = process.env.REACT_APP_API_URL || '/api';
+const TOKEN_KEY = 'juggler-access-token';
 
 const apiClient = axios.create({
   baseURL: API_BASE,
   withCredentials: true
 });
 
-let accessToken = null;
+let accessToken = localStorage.getItem(TOKEN_KEY);
 let refreshPromise = null;
 
 export function setAccessToken(token) {
   accessToken = token;
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+  }
 }
 
 export function getAccessToken() {
@@ -24,6 +31,7 @@ export function getAccessToken() {
 
 export function clearAccessToken() {
   accessToken = null;
+  localStorage.removeItem(TOKEN_KEY);
 }
 
 // Request interceptor — attach Bearer token

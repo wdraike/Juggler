@@ -5,7 +5,7 @@
 import React from 'react';
 import { getTheme } from '../../theme/colors';
 
-export default function ConfirmDialog({ message, onConfirm, onCancel, darkMode }) {
+export default function ConfirmDialog({ message, onConfirm, onCancel, darkMode, isMobile }) {
   var theme = getTheme(darkMode);
 
   return (
@@ -15,8 +15,12 @@ export default function ConfirmDialog({ message, onConfirm, onCancel, darkMode }
       alignItems: 'center', justifyContent: 'center'
     }} onClick={onCancel}>
       <div style={{
-        background: theme.bgSecondary, borderRadius: 12, width: 360, maxWidth: '90vw',
-        padding: 24, boxShadow: '0 8px 32px ' + theme.shadow
+        background: theme.bgSecondary, borderRadius: isMobile ? 0 : 12,
+        width: isMobile ? '100%' : 360, maxWidth: isMobile ? '100%' : '90vw',
+        height: isMobile ? '100%' : undefined,
+        padding: 24, boxShadow: isMobile ? 'none' : ('0 8px 32px ' + theme.shadow),
+        display: isMobile ? 'flex' : undefined, flexDirection: isMobile ? 'column' : undefined,
+        justifyContent: isMobile ? 'center' : undefined
       }} onClick={e => e.stopPropagation()}>
         <div style={{ fontSize: 14, color: theme.text, marginBottom: 20, lineHeight: 1.5 }}>
           {message}

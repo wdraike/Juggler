@@ -7,7 +7,7 @@ import { getTheme } from '../../theme/colors';
 import { formatDateKey, getDayName } from '../../scheduler/dateHelpers';
 import { applyDefaults } from '../../state/constants';
 
-export default function QuickAddTask({ date, onCreate, darkMode }) {
+export default function QuickAddTask({ date, onCreate, darkMode, isMobile }) {
   var theme = getTheme(darkMode);
   var [text, setText] = useState('');
   var [expanded, setExpanded] = useState(false);
@@ -55,13 +55,15 @@ export default function QuickAddTask({ date, onCreate, darkMode }) {
         style={{
           flex: 1, padding: '6px 10px', border: `1px solid ${theme.inputBorder}`,
           borderRadius: 6, background: theme.input, color: theme.text,
-          fontSize: 13, fontFamily: 'inherit', outline: 'none'
+          fontSize: isMobile ? 16 : 13, fontFamily: 'inherit', outline: 'none',
+          minHeight: isMobile ? 44 : undefined
         }}
       />
       <button type="submit" style={{
         border: 'none', borderRadius: 6, padding: '6px 12px',
-        background: theme.accent, color: '#FFF', fontSize: 12,
-        fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit'
+        background: theme.accent, color: '#FFF', fontSize: isMobile ? 14 : 12,
+        fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+        minHeight: isMobile ? 44 : undefined
       }}>Add</button>
     </form>
   );

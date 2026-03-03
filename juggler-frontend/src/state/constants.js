@@ -102,6 +102,12 @@ export function locBgTint(locId, alpha) {
   return (LOC_TINT[locId] || "#8B5CF6") + (alpha || "18");
 }
 
+var LOC_ICONS = {
+  home: "\uD83C\uDFE0", work: "\uD83C\uDFE2", transit: "\uD83D\uDE97",
+  downtown: "\uD83C\uDFD9\uFE0F", gym: "\uD83C\uDFCB\uFE0F",
+  phone: "\uD83D\uDCF1", personal_pc: "\uD83D\uDCBB", work_pc: "\uD83D\uDCBB",
+  tablet: "\uD83D\uDCF1", car: "\uD83D\uDE97"
+};
 export function locIcon(locId) {
-  return locId === "home" ? "\uD83C\uDFE0" : locId === "work" ? "\uD83C\uDFE2" : locId === "transit" ? "\uD83D\uDE97" : locId === "downtown" ? "\uD83C\uDFD9\uFE0F" : locId === "gym" ? "\uD83C\uDFCB\uFE0F" : "\uD83D\uDCCD";
+  return LOC_ICONS[locId] || "";
 }

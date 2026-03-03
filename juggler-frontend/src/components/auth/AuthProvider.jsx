@@ -3,7 +3,7 @@
  */
 
 import React, { createContext, useState, useEffect, useCallback, useContext } from 'react';
-import apiClient, { setAccessToken, clearAccessToken } from '../../services/apiClient';
+import apiClient, { setAccessToken, getAccessToken, clearAccessToken } from '../../services/apiClient';
 
 const AuthContext = createContext(null);
 
@@ -17,19 +17,33 @@ export default function AuthProvider({ children }) {
 
   // Try to restore session on mount
   useEffect(() => {
-    async function tryRefresh() {
+    async function restoreSession() {
       try {
+        // If we have a stored access token, try using it directly
+        if (getAccessToken()) {
+          try {
+            const meRes = await apiClient.get('/auth/me');
+            setUser(meRes.data.user);
+            setLoading(false);
+            return;
+          } catch {
+            // Token invalid/expired — fall through to refresh
+          }
+        }
+
+        // Try refresh via HTTP-only cookie
         const { data } = await apiClient.post('/auth/refresh');
         setAccessToken(data.accessToken);
         const meRes = await apiClient.get('/auth/me');
         setUser(meRes.data.user);
       } catch {
-        // No valid session — that's fine
+        // No valid session — clear stale token
+        clearAccessToken();
       } finally {
         setLoading(false);
       }
     }
-    tryRefresh();
+    restoreSession();
   }, []);
 
   // Listen for forced logout

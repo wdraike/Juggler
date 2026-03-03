@@ -1,76 +1,134 @@
 /**
- * TaskCard — compact card for list/grid views
+ * TaskCard — card for list/priority/conflicts views
+ * Styled to match ScheduleCard from calendar view:
+ *   Row 1: title + project badge + duration badge
+ *   Row 2: status toggle buttons + spacer + metadata badges
  */
 
 import React from 'react';
-import { PRI_COLORS, locIcon, WHEN_TAG_ICONS } from '../../state/constants';
-import { parseWhen } from '../../scheduler/timeBlockHelpers';
-import TaskStatusSelect from './TaskStatusSelect';
+import { PRI_COLORS, locIcon } from '../../state/constants';
 import { getTheme } from '../../theme/colors';
+import StatusToggle from '../schedule/StatusToggle';
 
-export default function TaskCard({ task, status, direction, onStatusChange, onExpand, darkMode, showDate, draggable, isBlocked }) {
+export default function TaskCard({ task, status, direction, onStatusChange, onExpand, darkMode, showDate, draggable, isBlocked, isMobile }) {
   var theme = getTheme(darkMode);
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
+  var durLabel = task.dur ? (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm') : '';
 
   return (
     <div
       draggable={draggable || false}
-      onDragStart={draggable ? (e => { e.dataTransfer.setData('text/plain', task.id); e.dataTransfer.effectAllowed = 'move'; }) : undefined}
-      onClick={() => onExpand && onExpand(task.id)}
+      onDragStart={draggable ? function(e) { e.dataTransfer.setData('text/plain', task.id); e.dataTransfer.effectAllowed = 'move'; } : undefined}
+      onClick={function() { if (onExpand) onExpand(task.id); }}
       style={{
-        display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
-        borderRadius: 8, cursor: 'pointer', fontSize: 13,
-        background: theme.card, border: `1px ${task.habit ? 'dashed' : 'solid'} ${theme.border}`,
-        opacity: isDone ? 0.5 : 1, transition: 'background 0.15s',
-        borderLeft: `3px solid ${priColor}`
+        borderRadius: 6, cursor: 'pointer', overflow: 'hidden',
+        background: isDone ? (darkMode ? '#1E293B' : '#F8FAFC') : (darkMode ? '#1E293B' : '#FFFFFF'),
+        border: '1px ' + (task.habit ? 'dashed' : 'solid') + ' ' + (isDone ? theme.border : priColor + '40'),
+        borderLeft: '3px solid ' + priColor,
+        opacity: isDone ? 0.5 : 1,
+        padding: isMobile ? '8px 10px' : '6px 10px',
+        boxShadow: '0 1px 3px ' + theme.shadow,
+        transition: 'box-shadow 0.15s'
       }}
     >
-      <div onClick={e => e.stopPropagation()} style={{ flexShrink: 0 }}>
-        <TaskStatusSelect value={status} onChange={onStatusChange} darkMode={darkMode} />
-      </div>
-
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          color: theme.text, fontWeight: 500,
-          textDecoration: isDone ? 'line-through' : 'none',
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
+      {/* Row 1: title + project + duration */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        fontSize: isMobile ? 13 : 12, lineHeight: 1.3
+      }}>
+        <span style={{
+          flex: 1, fontWeight: 600, color: theme.text,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          textDecoration: isDone ? 'line-through' : 'none'
         }}>
           {task.text}
-        </div>
-        <div style={{ display: 'flex', gap: 6, fontSize: 10, color: theme.textMuted, marginTop: 2 }}>
-          {task.project && <span>{task.project}</span>}
-          {showDate && task.date && <span>{task.date}</span>}
-          {task.time && <span>{task.time}</span>}
-          {task.dur && <span>{task.dur}m</span>}
-          {task.due && <span style={{ color: '#F59E0B' }}>Due {task.due}</span>}
-          {task.location?.length > 0 && <span>{task.location.map(lid => locIcon(lid)).join('')}</span>}
-          {task.when && task.when !== 'anytime' && <span>{parseWhen(task.when).map(t => WHEN_TAG_ICONS[t] || '').join('')}</span>}
-          {task.habit && <span>&#x1F504;</span>}
-          {task.dependsOn?.length > 0 && <span>&#x1F517;{task.dependsOn.length}</span>}
-          {isBlocked && <span title="Blocked by dependencies" style={{ color: '#EF4444' }}>&#x1F6AB;</span>}
-        </div>
+        </span>
+        {task.project && (
+          <span style={{
+            fontSize: 9, flexShrink: 0, fontWeight: 600,
+            background: darkMode ? '#1E3A5F' : '#DBEAFE',
+            color: darkMode ? '#93C5FD' : '#1E40AF',
+            borderRadius: 3, padding: '1px 5px'
+          }}>
+            {task.project}
+          </span>
+        )}
+        {durLabel && (
+          <span style={{
+            fontSize: 10, flexShrink: 0, fontWeight: 600,
+            color: darkMode ? '#94A3B8' : '#64748B',
+            background: darkMode ? '#334155' : '#F1F5F9',
+            borderRadius: 3, padding: '1px 5px'
+          }}>
+            {durLabel}
+          </span>
+        )}
       </div>
 
-      {status === 'wip' && task.timeRemaining != null && (
-        <div style={{
-          fontSize: 10, fontWeight: 600, color: '#92400E',
-          background: '#FEF3C7', borderRadius: 8, padding: '1px 6px',
-          flexShrink: 0
-        }}>
-          {task.timeRemaining}m left
-        </div>
-      )}
-
-      {status === 'other' && direction && (
-        <div style={{ fontSize: 10, color: '#7C3AED', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          &#x2192; {direction}
-        </div>
-      )}
-
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0 }}>
-        <div style={{ fontSize: 10, color: priColor, fontWeight: 700 }}>{task.pri}</div>
-        <div style={{ fontSize: 8, color: theme.textMuted, fontFamily: 'monospace', opacity: 0.6 }}>{(task.id || '').slice(0, 8)}</div>
+      {/* Row 2: status toggles + metadata */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+        {onStatusChange && (
+          <span onClick={function(e) { e.stopPropagation(); }}>
+            <StatusToggle value={status} onChange={onStatusChange} darkMode={darkMode} isMobile={isMobile} />
+          </span>
+        )}
+        <div style={{ flex: 1 }} />
+        {showDate && task.date && task.date !== 'TBD' && (
+          <span style={{
+            fontSize: 9, fontWeight: 600,
+            color: darkMode ? '#94A3B8' : '#64748B',
+            background: darkMode ? '#334155' : '#F1F5F9',
+            borderRadius: 3, padding: '1px 4px'
+          }}>
+            {task.date}
+          </span>
+        )}
+        {task.time && (
+          <span style={{ fontSize: 9, color: darkMode ? '#94A3B8' : '#64748B' }}>
+            {task.time}
+          </span>
+        )}
+        {task.location && task.location.length > 0 && (function() {
+          var icons = task.location.map(function(lid) { return locIcon(lid); }).filter(Boolean);
+          return icons.length > 0 ? <span style={{ fontSize: 10 }}>{icons.join(' ')}</span> : null;
+        })()}
+        {task.due && (
+          <span style={{
+            fontSize: 9, fontWeight: 600,
+            color: darkMode ? '#FCD34D' : '#B45309',
+            background: darkMode ? '#422006' : '#FEF3C7',
+            borderRadius: 3, padding: '1px 4px'
+          }}>
+            Due {task.due}
+          </span>
+        )}
+        {isBlocked && <span style={{ color: '#EF4444', fontSize: 11 }}>{'\uD83D\uDEAB'}</span>}
+        {task.pri && (
+          <span style={{
+            fontSize: 9, fontWeight: 700,
+            color: priColor,
+            background: priColor + '18',
+            borderRadius: 3, padding: '0 4px'
+          }}>
+            {task.pri}
+          </span>
+        )}
+        {status === 'wip' && task.timeRemaining != null && (
+          <span style={{
+            fontSize: 9, fontWeight: 700,
+            color: darkMode ? '#FCD34D' : '#B45309',
+            background: darkMode ? '#422006' : '#FEF3C7',
+            borderRadius: 3, padding: '1px 5px'
+          }}>
+            {task.timeRemaining}m left
+          </span>
+        )}
+        {status === 'other' && direction && (
+          <span style={{ fontSize: 9, color: darkMode ? '#C4B5FD' : '#7C3AED', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {'\u2192'} {direction}
+          </span>
+        )}
       </div>
     </div>
   );

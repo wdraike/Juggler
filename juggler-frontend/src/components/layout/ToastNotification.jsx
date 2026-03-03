@@ -3,6 +3,7 @@
  */
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import useIsMobile from '../../hooks/useIsMobile';
 
 export function useToast() {
   const [toast, setToast] = useState(null);
@@ -36,6 +37,8 @@ export function useToast() {
 }
 
 export default function ToastNotification({ toast, toastHistory, showHistory, onToggleHistory }) {
+  var isMobile = useIsMobile();
+
   if (!toast && !showHistory) return null;
 
   var colors = {
@@ -45,7 +48,11 @@ export default function ToastNotification({ toast, toastHistory, showHistory, on
   };
 
   return (
-    <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 9999 }}>
+    <div style={{
+      position: 'fixed', bottom: isMobile ? 10 : 20, right: isMobile ? 10 : 20,
+      left: isMobile ? 10 : undefined,
+      zIndex: 9999
+    }}>
       {toast && (
         <div style={{
           padding: '10px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500,

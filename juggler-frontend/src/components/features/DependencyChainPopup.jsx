@@ -10,7 +10,7 @@ import { PRI_COLORS, STATUS_MAP } from '../../state/constants';
 var STATUS_ICONS = { done: '\u2705', wip: '\u{1F7E1}', cancel: '\u274C', skip: '\u23ED\uFE0F', other: '\u27A1\uFE0F', '': '\u26AA' };
 var ARROW_COLORS = ['#3B82F6', '#7C3AED', '#059669', '#DC2626', '#D97706', '#DB2777', '#0891B2'];
 
-export default function DependencyChainPopup({ focusTaskId, allTasks, statuses, onUpdate, onClose, darkMode }) {
+export default function DependencyChainPopup({ focusTaskId, allTasks, statuses, onUpdate, onClose, darkMode, isMobile }) {
   var theme = getTheme(darkMode);
   var bodyRef = useRef(null);
 
@@ -201,9 +201,11 @@ export default function DependencyChainPopup({ focusTaskId, allTasks, statuses, 
       alignItems: 'center', justifyContent: 'center'
     }} onClick={onClose}>
       <div style={{
-        background: theme.bgSecondary, borderRadius: 12, width: 520, maxWidth: '95vw',
-        maxHeight: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column',
-        boxShadow: `0 8px 32px ${theme.shadow}`
+        background: theme.bgSecondary, borderRadius: isMobile ? 0 : 12,
+        width: isMobile ? '100%' : 520, maxWidth: isMobile ? '100%' : '95vw',
+        height: isMobile ? '100%' : undefined, maxHeight: isMobile ? '100%' : '85vh',
+        overflow: 'hidden', display: 'flex', flexDirection: 'column',
+        boxShadow: isMobile ? 'none' : `0 8px 32px ${theme.shadow}`
       }} onClick={e => e.stopPropagation()}>
         {/* Header */}
         <div style={{

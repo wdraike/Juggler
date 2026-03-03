@@ -19,7 +19,7 @@ function formatRelativeTime(isoString) {
   return days + 'd ago';
 }
 
-export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, lastSyncedAt, onAutoSyncChange, onSyncStart, onSyncComplete }) {
+export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, lastSyncedAt, onAutoSyncChange, onSyncStart, onSyncComplete, isMobile }) {
   var theme = getTheme(darkMode);
   var [syncing, setSyncing] = useState(false);
   var [connected, setConnected] = useState(null); // null = loading
@@ -122,9 +122,11 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
       alignItems: 'center', justifyContent: 'center'
     }} onClick={onClose}>
       <div style={{
-        background: theme.bgSecondary, borderRadius: 12, width: 420, maxWidth: '95vw',
-        maxHeight: '80vh', overflow: 'auto', padding: 20,
-        boxShadow: `0 8px 32px ${theme.shadow}`
+        background: theme.bgSecondary, borderRadius: isMobile ? 0 : 12,
+        width: isMobile ? '100%' : 420, maxWidth: isMobile ? '100%' : '95vw',
+        height: isMobile ? '100%' : undefined, maxHeight: isMobile ? '100%' : '80vh',
+        overflow: 'auto', padding: 20,
+        boxShadow: isMobile ? 'none' : `0 8px 32px ${theme.shadow}`
       }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>Google Calendar Sync</div>

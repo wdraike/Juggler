@@ -9,12 +9,23 @@ import { PRI_COLORS } from '../../state/constants';
 
 var PRI_LEVELS = ['P1', 'P2', 'P3', 'P4'];
 
-export default function PriorityView({ allTasks, statuses, directions, filter, search, projectFilter, onStatusChange, onExpand, darkMode, onPriorityDrop, hideHabits, blockedTaskIds, unplacedIds }) {
+export default function PriorityView({ allTasks, statuses, directions, filter, search, projectFilter, onStatusChange, onExpand, darkMode, onPriorityDrop, hideHabits, blockedTaskIds, unplacedIds, isMobile }) {
   var theme = getTheme(darkMode);
   var [dragOver, setDragOver] = useState(null);
 
   var filteredTasks = useMemo(() => {
-    return allTasks.filter(t => {
+    // Deduplicate habits: keep only the earliest-date instance of each habit text
+    var seenHabits = {};
+    var deduped = allTasks.filter(t => {
+      if (t.habit) {
+        var key = t.text || t.id;
+        if (seenHabits[key]) return false;
+        seenHabits[key] = true;
+      }
+      return true;
+    });
+
+    return deduped.filter(t => {
       if (hideHabits && t.habit) return false;
       var st = statuses[t.id] || '';
       if (filter === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip';
@@ -33,7 +44,7 @@ export default function PriorityView({ allTasks, statuses, directions, filter, s
   }, [allTasks, statuses, filter, search, projectFilter, hideHabits, blockedTaskIds, unplacedIds]);
 
   return (
-    <div style={{ display: 'flex', flex: 1, overflow: 'auto', gap: 8, padding: 12 }}>
+    <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', flex: 1, overflow: 'auto', gap: 8, padding: isMobile ? 8 : 12 }}>
       {PRI_LEVELS.map(pri => {
         var tasks = filteredTasks.filter(t => (t.pri || 'P3') === pri);
         var isOver = dragOver === pri;
@@ -69,6 +80,7 @@ export default function PriorityView({ allTasks, statuses, directions, filter, s
                   showDate
                   draggable
                   isBlocked={blockedTaskIds && blockedTaskIds.has(t.id)}
+                  isMobile={isMobile}
                 />
               ))}
               {tasks.length === 0 && (

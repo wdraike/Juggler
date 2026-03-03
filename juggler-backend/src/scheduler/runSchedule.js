@@ -65,33 +65,52 @@ async function loadConfig(userId) {
 
 /**
  * Run the scheduler and persist date moves to the DB.
- * Returns stats: { moved, tasks: [{id, from, to}] }
+ *
+ * Before each run, tasks that were previously moved by the scheduler are
+ * reset to their original_date / original_time so the algorithm starts
+ * from the user's intended placement every time.
+ *
+ * Returns stats: { updated, cleared, reset, tasks: [...] }
  */
 async function runScheduleAndPersist(userId) {
-  // 1. Load all tasks for user
+  // 1. Reset scheduler-moved tasks back to their original date/time
+  var resetCount = await db('tasks')
+    .where('user_id', userId)
+    .whereNotNull('original_date')
+    .update({
+      date: db.raw('original_date'),
+      day: db.raw('COALESCE(original_day, day)'),
+      time: db.raw('original_time'),
+      original_date: null,
+      original_time: null,
+      original_day: null,
+      updated_at: db.fn.now()
+    });
+  if (resetCount > 0) console.log('[SCHED] reset ' + resetCount + ' tasks to original dates');
+
+  // 2. Load all tasks for user (now with original dates restored)
   var taskRows = await db('tasks').where('user_id', userId).select();
   var allTasks = taskRows.map(rowToTask);
 
-  // 2. Build statuses map
+  // 3. Build statuses map
   var statuses = {};
   allTasks.forEach(function(t) {
     statuses[t.id] = t.status || '';
   });
 
-  // 3. Get current date/time in Eastern
+  // 4. Get current date/time in Eastern
   var timeInfo = getNowInTimezone();
 
-  // 4. Load config
+  // 5. Load config
   var cfg = await loadConfig(userId);
 
-  // 5. Run scheduler
+  // 6. Run scheduler
   var result = unifiedSchedule(allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg);
 
-  // 6. Persist schedule results from dayPlacements (covers all tasks: pool, habits, fixed)
+  // 7. Persist schedule results from dayPlacements
   var updated = 0;
   var updatedTasks = [];
 
-  // Build a lookup of original task data by id
   var taskById = {};
   allTasks.forEach(function(t) { taskById[t.id] = t; });
 
@@ -103,7 +122,6 @@ async function runScheduleAndPersist(userId) {
     if (!placements) return;
     placements.forEach(function(p) {
       if (!p.task || !p.task.id) return;
-      // Keep the first (earliest) placement per task
       if (!placementByTaskId[p.task.id]) {
         placementByTaskId[p.task.id] = { dateKey: dateKey, start: p.start, dur: p.dur };
       }
@@ -132,9 +150,18 @@ async function runScheduleAndPersist(userId) {
       if (dateChanged) {
         dbUpdate.date = newDate;
         dbUpdate.day = newDay;
+        // Save the user's original date so we can reset next run
+        dbUpdate.original_date = original.date;
+        dbUpdate.original_day = original.day;
       }
       if (timeChanged) {
         dbUpdate.time = newTime;
+        if (!dbUpdate.original_date) {
+          // Date didn't change but time did — still track original time
+          dbUpdate.original_time = original.time;
+        } else {
+          dbUpdate.original_time = original.time;
+        }
       }
 
       await db('tasks')
@@ -153,15 +180,13 @@ async function runScheduleAndPersist(userId) {
     }
   }
 
-  // 7. Clear time on unplaced tasks so they don't ghost-overlap in the UI
+  // 8. Clear time on unplaced tasks so they don't ghost-overlap in the UI
   var cleared = 0;
   result.unplaced.forEach(function(t) {
     if (!t || !t.id) return;
     var original = taskById[t.id];
     if (!original) return;
-    // Only clear if the task currently has a time set
     if (original.time) {
-      // Queue update (don't await in forEach)
       updatedTasks.push({
         id: t.id,
         text: original.text,
@@ -173,19 +198,18 @@ async function runScheduleAndPersist(userId) {
       });
     }
   });
-  // Persist time clears
   for (var ui = 0; ui < updatedTasks.length; ui++) {
     if (updatedTasks[ui].cleared) {
       await db('tasks')
         .where({ id: updatedTasks[ui].id, user_id: userId })
-        .update({ time: null, updated_at: db.fn.now() });
+        .update({ time: null, original_time: updatedTasks[ui].fromTime, updated_at: db.fn.now() });
       cleared++;
     }
   }
 
-  console.log('[SCHED] runScheduleAndPersist: updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
+  console.log('[SCHED] runScheduleAndPersist: reset ' + resetCount + ', updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
 
-  return { updated: updated, cleared: cleared, tasks: updatedTasks };
+  return { updated: updated, cleared: cleared, reset: resetCount, tasks: updatedTasks };
 }
 
 module.exports = { runScheduleAndPersist };

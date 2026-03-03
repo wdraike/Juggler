@@ -9,7 +9,7 @@ import { getTheme } from '../../theme/colors';
 import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES } from '../../state/constants';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
-export default function DayView({ selectedDate, selectedDateKey, placements, statuses, directions, onStatusChange, onExpand, onCreate, gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchHabitsDone, locations, onHourLocationOverride, blockedTaskIds, onZoomChange }) {
+export default function DayView({ selectedDate, selectedDateKey, placements, statuses, directions, onStatusChange, onExpand, onCreate, gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchHabitsDone, locations, onHourLocationOverride, blockedTaskIds, onZoomChange, isMobile }) {
   var theme = getTheme(darkMode);
   var scrollRef = useRef(null);
   var loc = getLocationForDatePure(selectedDateKey, schedCfg);
@@ -41,8 +41,9 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
   }, [selectedDateKey]);
 
   return (
-    <div style={{ flex: 1, overflow: 'auto' }} ref={scrollRef}>
-      <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      {/* Fixed header — outside scroll area so cards never overlap it */}
+      <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderBottom: `1px solid ${theme.border}`, background: theme.bg, flexShrink: 0 }}>
         <div style={{ fontWeight: 600, fontSize: 15, color: theme.text }}>
           {DAY_NAMES_FULL[selectedDate.getDay()]}, {MONTH_NAMES[selectedDate.getMonth()]} {selectedDate.getDate()}
         </div>
@@ -102,12 +103,12 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
           </select>
         )}
       </div>
-      {/* All-day events banner */}
+      {/* All-day events banner — also outside scroll */}
       {(() => {
         var allDayTasks = (allTasks || []).filter(t => t.date === selectedDateKey && (t.when === 'allday' || (!t.time && (t.dur === 0 || t.dur === null))));
         if (allDayTasks.length === 0) return null;
         return (
-          <div style={{ padding: '0 12px 4px 12px' }}>
+          <div style={{ padding: '4px 12px', borderBottom: `1px solid ${theme.border}`, flexShrink: 0 }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: theme.textMuted, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 }}>All Day</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {allDayTasks.map(t => {
@@ -131,28 +132,32 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
           </div>
         );
       })()}
-      <div style={{ padding: '0 12px' }}>
-        <CalendarGrid
-          dateKey={selectedDateKey}
-          placements={placements}
-          statuses={statuses}
-          directions={directions}
-          onStatusChange={onStatusChange}
-          onExpand={onExpand}
-          gridZoom={gridZoom}
-          darkMode={darkMode}
-          schedCfg={schedCfg}
-          nowMins={nowMins}
-          isToday={isToday}
-          onGridDrop={onGridDrop}
-          locations={locations}
-          onHourLocationOverride={onHourLocationOverride}
-          blockedTaskIds={blockedTaskIds}
-          onZoomChange={onZoomChange}
-        />
-      </div>
-      <div style={{ padding: '8px 12px' }}>
-        <QuickAddTask date={selectedDate} onCreate={onCreate} darkMode={darkMode} />
+      {/* Scrollable grid area */}
+      <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }} ref={scrollRef}>
+        <div style={{ padding: isMobile ? '0 4px' : '0 12px' }}>
+          <CalendarGrid
+            dateKey={selectedDateKey}
+            placements={placements}
+            statuses={statuses}
+            directions={directions}
+            onStatusChange={onStatusChange}
+            onExpand={onExpand}
+            gridZoom={gridZoom}
+            darkMode={darkMode}
+            schedCfg={schedCfg}
+            nowMins={nowMins}
+            isToday={isToday}
+            onGridDrop={onGridDrop}
+            locations={locations}
+            onHourLocationOverride={onHourLocationOverride}
+            blockedTaskIds={blockedTaskIds}
+            onZoomChange={onZoomChange}
+            isMobile={isMobile}
+          />
+        </div>
+        <div style={{ padding: '8px 12px' }}>
+          <QuickAddTask date={selectedDate} onCreate={onCreate} darkMode={darkMode} isMobile={isMobile} />
+        </div>
       </div>
     </div>
   );
