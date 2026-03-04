@@ -11,7 +11,7 @@
  */
 
 import React, { useRef, useEffect, useMemo, useState } from 'react';
-import { GRID_START, GRID_END, GRID_HOURS_COUNT, PRI_COLORS, locBgTint, locIcon } from '../../state/constants';
+import { GRID_START, GRID_END, GRID_HOURS_COUNT, PRI_COLORS, LOC_TINT, locBgTint, locIcon } from '../../state/constants';
 import { formatHour } from '../../scheduler/dateHelpers';
 import { getTheme } from '../../theme/colors';
 import { resolveLocationId } from '../../scheduler/locationHelpers';
@@ -25,8 +25,8 @@ var STRIP_W_COMPACT = 32;
 var STRIP_W_MINI = 24;
 var MARKER_W = 10;
 var MARKER_W_M = 8;
-var CARD_H = 52;        // fixed card height — enough for title + status row
-var CARD_H_M = 64;      // taller on mobile for wrapped titles
+var CARD_H = 68;        // fixed card height — title + status + details row
+var CARD_H_M = 78;      // taller on mobile for wrapped titles
 var CARD_H_COMPACT = 40;
 var CARD_GAP = 4;
 var CONN_ZONE = 24;     // space between marker and card for bezier connector
@@ -64,19 +64,14 @@ function computeLayout(placements, hourHeight, cardH, gap, colsPerSide, rightOnl
     var markerH = Math.max(4, (durMin / 60) * hourHeight);
     var markerMidY = markerY + markerH / 2;
 
-    // ideal: center card on marker midpoint
-    var idealY = markerMidY - cardH / 2;
+    // ideal: center card on marker midpoint, but keep below top padding
+    var topPad = Math.max(cardH * 0.5, 20);
+    var idealY = Math.max(markerMidY - cardH / 2, topPad);
 
-    // pick the slot with lowest candidate Y
-    var bestSide = sides[0], bestCol = 0, bestY = Infinity;
-    sides.forEach(function(side) {
-      for (var c = 0; c < nCols; c++) {
-        var y = Math.max(idealY, bottoms[side + '_' + c] + gap);
-        if (y < bestY) {
-          bestY = y; bestSide = side; bestCol = c;
-        }
-      }
-    });
+    // alternate left/right; single card or rightOnly → always right
+    var bestSide = rightOnly ? 'right' : (sorted.length === 1 ? 'right' : sides[i % sides.length]);
+    var bestCol = 0;
+    var bestY = Math.max(idealY, bottoms[bestSide + '_' + bestCol] + gap);
 
     bottoms[bestSide + '_' + bestCol] = bestY + cardH;
 
@@ -127,11 +122,11 @@ export default function CalendarGrid({
   var rightCardLeft = stripX + dm.STRIP_W + dm.MARKER_W + dm.CONN;
   var rightCardW = cw - rightCardLeft - 4;
 
-  // Determine columns per side based on available width
-  var colsPerSide = mobileFullWidth ? 1 : ((leftCardW > 250 && mode === 'full' && !isMobile) ? 2 : 1);
-  var subColW_left = colsPerSide > 0 ? leftCardW / colsPerSide : 0;
-  var subColW_right = rightCardW / colsPerSide;
-  var colGap = colsPerSide > 1 ? 2 : 0;
+  // Single column per side — alternating left/right gives each side ~n/2 cards
+  var colsPerSide = 1;
+  var subColW_left = leftCardW;
+  var subColW_right = rightCardW;
+  var colGap = 0;
 
   var blocks = getBlocksForDate(dateKey, schedCfg.timeBlocks);
   var pinchRef = useRef({ startDist: 0, startZoom: 0 });
@@ -174,6 +169,7 @@ export default function CalendarGrid({
   }, [placements, mode]);
 
   var [expandedMiniId, setExpandedMiniId] = useState(null);
+  var [locMenuHour, setLocMenuHour] = useState(null);
 
   // total height
   var gridH = GRID_HOURS_COUNT * hourHeight;
@@ -221,6 +217,7 @@ export default function CalendarGrid({
 
   return (
     <div ref={elRef} style={{ position: 'relative', height: totalH, minHeight: totalH, touchAction: 'pan-y', overflow: 'hidden' }}
+      onClick={locMenuHour !== null ? function() { setLocMenuHour(null); } : undefined}
       onDragOver={onGridDrop ? function(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } : undefined}
       onDrop={onGridDrop ? function(e) { onGridDrop(e, dateKey); } : undefined}
     >
@@ -236,7 +233,7 @@ export default function CalendarGrid({
       })}
 
       {/* Center strip */}
-      <div style={{ position: 'absolute', top: 0, bottom: 0, left: stripX, width: dm.STRIP_W, zIndex: 10, pointerEvents: 'none' }}>
+      <div style={{ position: 'absolute', top: 0, bottom: 0, left: stripX, width: dm.STRIP_W, zIndex: locMenuHour !== null ? 30 : 10, pointerEvents: 'none' }}>
         <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, marginLeft: -0.5, background: theme.border, opacity: 0.35 }} />
         {Array.from({ length: GRID_HOURS_COUNT }, function(_, i) {
           var hour = GRID_START + i;
@@ -246,16 +243,59 @@ export default function CalendarGrid({
             <div key={i}
               onClick={onHourLocationOverride && locations ? function(e) {
                 e.stopPropagation();
-                var ids = locations.map(function(l) { return l.id; });
-                onHourLocationOverride(dateKey, hour, ids[(ids.indexOf(locId) + 1) % ids.length]);
+                setLocMenuHour(locMenuHour === hour ? null : hour);
               } : undefined}
               style={{ position: 'absolute', top: i * hourHeight, left: 0, width: '100%', textAlign: 'center', pointerEvents: onHourLocationOverride ? 'auto' : 'none', cursor: onHourLocationOverride ? 'pointer' : 'default' }}
             >
               <div style={{ fontSize: mode === 'mini' ? 7 : (mode === 'compact' ? 8 : (isMobile ? 9 : 11)), color: theme.textMuted, userSelect: 'none', lineHeight: 1.2, marginTop: 1 }}>
                 {formatHour(hour)}
               </div>
-              {mode !== 'mini' && locIcon(locId) && <div style={{ fontSize: 8, color: theme.textMuted, opacity: 0.6 }}>{locIcon(locId)}</div>}
+              {mode !== 'mini' && locIcon(locId) && (
+                <div style={{
+                  width: isMobile ? 18 : 22, height: isMobile ? 18 : 22,
+                  borderRadius: '50%', background: locBgTint(locId, '25'),
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: isMobile ? 12 : 14, opacity: 0.9, margin: '1px auto 0'
+                }}>{locIcon(locId)}</div>
+              )}
               {bs && mode === 'full' && <div style={{ fontSize: 7, color: bs.color || theme.textMuted, opacity: 0.6 }}>{bs.icon}</div>}
+              {locMenuHour === hour && locations && (
+                <div style={{
+                  position: 'absolute', left: dm.STRIP_W + 4, top: 18,
+                  zIndex: 100, pointerEvents: 'auto',
+                  background: darkMode ? '#1E293B' : '#FFFFFF',
+                  border: '1px solid ' + theme.border,
+                  borderRadius: 8, padding: 4,
+                  boxShadow: '0 4px 12px ' + theme.shadow,
+                  display: 'flex', flexDirection: 'column', gap: 2,
+                  whiteSpace: 'nowrap'
+                }}>
+                  {locations.map(function(loc) {
+                    var isActive = loc.id === locId;
+                    var tint = LOC_TINT[loc.id] || '#8B5CF6';
+                    return (
+                      <button key={loc.id}
+                        onClick={function(ev) {
+                          ev.stopPropagation();
+                          onHourLocationOverride(dateKey, hour, loc.id);
+                          setLocMenuHour(null);
+                        }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 4,
+                          padding: '3px 8px', borderRadius: 6, cursor: 'pointer',
+                          fontSize: 11, fontFamily: 'inherit', fontWeight: isActive ? 600 : 400,
+                          background: isActive ? locBgTint(loc.id, '20') : 'transparent',
+                          color: isActive ? tint : theme.text,
+                          border: isActive ? ('2px solid ' + tint) : '1px solid transparent',
+                          textAlign: 'left'
+                        }}
+                      >
+                        {locIcon(loc.id)} {loc.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           );
         })}
@@ -307,9 +347,22 @@ export default function CalendarGrid({
 
             return (
               <React.Fragment key={e.item.key || e.item.task.id}>
-                {/* Duration-proportional marker */}
+                {/* Horizontal bar connecting markers behind the strip */}
                 <div style={{
-                  position: 'absolute', left: mLeft, top: e.markerY,
+                  position: 'absolute', left: stripX - dm.MARKER_W, top: e.markerY,
+                  width: dm.STRIP_W + dm.MARKER_W * 2, height: e.markerH,
+                  background: pc, opacity: 0.08, borderRadius: 3,
+                  zIndex: 5, pointerEvents: 'none'
+                }} />
+                {/* Duration-proportional markers on both sides of strip */}
+                <div style={{
+                  position: 'absolute', left: stripX - dm.MARKER_W, top: e.markerY,
+                  width: dm.MARKER_W, height: e.markerH,
+                  borderRadius: 3, background: pc, opacity: 0.65,
+                  zIndex: 15, pointerEvents: 'none'
+                }} />
+                <div style={{
+                  position: 'absolute', left: stripX + dm.STRIP_W, top: e.markerY,
                   width: dm.MARKER_W, height: e.markerH,
                   borderRadius: 3, background: pc, opacity: 0.65,
                   zIndex: 15, pointerEvents: 'none'

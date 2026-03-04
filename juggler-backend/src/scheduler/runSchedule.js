@@ -73,7 +73,7 @@ async function loadConfig(userId) {
  * Returns stats: { updated, cleared, reset, tasks: [...] }
  */
 async function runScheduleAndPersist(userId) {
-  // 1. Reset scheduler-moved tasks back to their original date/time
+  // 1a. Reset scheduler-moved tasks (date changed) back to their original date/time
   var resetCount = await db('tasks')
     .where('user_id', userId)
     .whereNotNull('original_date')
@@ -86,7 +86,19 @@ async function runScheduleAndPersist(userId) {
       original_day: null,
       updated_at: db.fn.now()
     });
-  if (resetCount > 0) console.log('[SCHED] reset ' + resetCount + ' tasks to original dates');
+
+  // 1b. Reset scheduler-moved tasks (time-only change) back to original time
+  var resetTimeCount = await db('tasks')
+    .where('user_id', userId)
+    .whereNull('original_date')
+    .whereNotNull('original_time')
+    .update({
+      time: db.raw('original_time'),
+      original_time: null,
+      updated_at: db.fn.now()
+    });
+
+  if (resetCount + resetTimeCount > 0) console.log('[SCHED] reset ' + resetCount + ' date moves, ' + resetTimeCount + ' time moves');
 
   // 2. Load all tasks for user (now with original dates restored)
   var taskRows = await db('tasks').where('user_id', userId).select();
@@ -144,6 +156,10 @@ async function runScheduleAndPersist(userId) {
 
     var dateChanged = newDate !== original.date;
     var timeChanged = newTime !== original.time;
+
+    // Rigid habits have a user-set preferred time — don't overwrite with placement time
+    // Non-rigid habits are scheduled flexibly, so their time should be updated
+    if (original.habit && original.rigid && !dateChanged) continue;
 
     if (dateChanged || timeChanged) {
       var dbUpdate = { updated_at: db.fn.now() };
@@ -212,4 +228,28 @@ async function runScheduleAndPersist(userId) {
   return { updated: updated, cleared: cleared, reset: resetCount, tasks: updatedTasks };
 }
 
-module.exports = { runScheduleAndPersist };
+/**
+ * Read-only: load data, run scheduler, return placements without DB writes.
+ */
+async function getSchedulePlacements(userId) {
+  var taskRows = await db('tasks').where('user_id', userId).select();
+  var allTasks = taskRows.map(rowToTask);
+
+  var statuses = {};
+  allTasks.forEach(function(t) {
+    statuses[t.id] = t.status || '';
+  });
+
+  var timeInfo = getNowInTimezone();
+  var cfg = await loadConfig(userId);
+  var result = unifiedSchedule(allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg);
+
+  return {
+    dayPlacements: result.dayPlacements,
+    unplaced: result.unplaced,
+    deadlineMisses: result.deadlineMisses,
+    placedCount: result.placedCount
+  };
+}
+
+module.exports = { runScheduleAndPersist, getSchedulePlacements };

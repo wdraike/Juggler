@@ -132,8 +132,8 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
         );
       })()}
       {/* Scrollable grid area */}
-      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0 }} ref={scrollRef}>
-        <div style={{ padding: isMobile ? '0 4px' : '0 12px' }}>
+      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0, maxWidth: '100%', width: '100%' }} ref={scrollRef}>
+        <div style={{ padding: isMobile ? '0 2px' : '0 12px', maxWidth: '100%', boxSizing: 'border-box' }}>
           <CalendarGrid
             dateKey={selectedDateKey}
             placements={placements}

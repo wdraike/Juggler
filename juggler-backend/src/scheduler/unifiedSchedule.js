@@ -28,6 +28,11 @@ var canTaskRun = locationHelpers.canTaskRun;
 var dependencyHelpers = require('./dependencyHelpers');
 var getTaskDeps = dependencyHelpers.getTaskDeps;
 
+function effectiveDuration(t) {
+  var rd = t.timeRemaining != null ? t.timeRemaining : t.dur;
+  return rd === 0 ? 0 : Math.min(rd || 30, 720);
+}
+
 function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   var PERF = Date.now();
   var dayNames = DAY_NAMES;
@@ -71,7 +76,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     if (t.section && (t.section.includes("PARKING") || t.section.includes("TO BE SCHEDULED"))) return;
     var td = parseDate(t.date);
     if (!td) return;
-    var effectiveDur = Math.min((t.timeRemaining != null ? t.timeRemaining : t.dur) || 30, 720);
+    var effectiveDur = effectiveDuration(t);
     if (effectiveDur <= 0) return;
 
     var sm = parseTimeToMinutes(t.time);
@@ -83,20 +88,28 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       isPast = true;
     }
 
+    // Fixed tasks: anchor at their time.
+    // On today, always show even if time has passed (user needs to see them to mark done).
+    // On past days, drop entirely.
     if (hasWhen(t.when, "fixed")) {
       if (sm !== null) {
-        // Has a real clock time — anchor it as fixed
-        if (!isPast) { if (!fixedByDate[tdKey]) fixedByDate[tdKey] = []; fixedByDate[tdKey].push(t); }
+        var fixedDropped = isPast && tdKey !== effectiveTodayKey;
+        if (!fixedDropped) { if (!fixedByDate[tdKey]) fixedByDate[tdKey] = []; fixedByDate[tdKey].push(t); }
         return;
       }
-      // No parseable time (e.g. "AM", "After appt", null) — fall through to pool
-      // Override when to "anytime" so getWhenWindows can find valid windows
+      // No parseable time — fall through to pool as "anytime"
       t = Object.assign({}, t, { when: "anytime" });
     }
-    if (t.habit) {
-      if (!isPast) { if (!habitsByDate[tdKey]) habitsByDate[tdKey] = []; habitsByDate[tdKey].push(t); }
+    // Rigid habits: anchor at preferred time.
+    // On today, always show even if time has passed (user needs to see them to mark done).
+    // On past days, drop entirely.
+    if (t.habit && t.rigid) {
+      var habitDropped = isPast && tdKey !== effectiveTodayKey;
+      if (!habitDropped) { if (!habitsByDate[tdKey]) habitsByDate[tdKey] = []; habitsByDate[tdKey].push(t); }
       return;
     }
+    // Non-rigid habits: go into the pool so the scheduler can place them
+    // optimally within their when windows (respects today's past-time blocking)
 
     if (isPast || st === "wip" || st === "" || st === "other") {
       var earliest = null;
@@ -246,8 +259,17 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       // Non-splittable tasks must fit entirely — don't place partial chunks
       if (!item.splittable && maxPlace < item.remaining) { scanStart = lEnd; continue; }
 
-      if (item.remaining - placeLen > 0 && item.remaining - placeLen < item.minChunk) {
-        if (maxPlace >= item.remaining) placeLen = item.remaining;
+      // Don't place a runt chunk smaller than minChunk when other parts exist
+      if (item.splittable && placeLen < item.minChunk && item._parts.length > 0) { scanStart = lEnd; continue; }
+
+      if (item.splittable && item.remaining - placeLen > 0 && item.remaining - placeLen < item.minChunk) {
+        if (maxPlace >= item.remaining) {
+          placeLen = item.remaining; // extend to consume all remaining
+        } else {
+          // Shrink current chunk to leave at least minChunk for next gap
+          var shrunk = item.remaining - item.minChunk;
+          if (shrunk >= item.minChunk) placeLen = shrunk;
+        }
       }
       if (placeLen <= 0) { scanStart++; continue; }
 
@@ -301,6 +323,20 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
             if (take < item.minChunk && needed > take) {
               pos--;
               continue;
+            }
+            // Don't place a runt chunk when other parts exist
+            if (take < item.minChunk && chunks.length > 0) {
+              pos = gapStart - 1;
+              continue;
+            }
+            // Shrink to avoid leaving a runt remainder
+            if (needed - take > 0 && needed - take < item.minChunk) {
+              if (gapSize >= needed) {
+                take = needed;
+              } else {
+                var shrunk2 = needed - item.minChunk;
+                if (shrunk2 >= item.minChunk) take = shrunk2;
+              }
             }
             var start2 = gapEnd - take;
             chunks.push({ start: start2, len: take });
@@ -367,7 +403,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     fixedTasks.forEach(function(t) {
       var sm = parseTimeToMinutes(t.time);
       if (sm === null) return;
-      var dur = Math.min((t.timeRemaining != null ? t.timeRemaining : t.dur) || 30, 720);
+      var dur = effectiveDuration(t);
       if (dur <= 0) return;
       sm = Math.max(DAY_START, Math.min(sm, GRID_END * 60));
       reserve(occ, sm, dur);
@@ -389,7 +425,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     var placed = dayPlaced[d.key];
     var dateBlocks_d = dayBlocks[d.key];
     var dateWindows_d = dayWindows[d.key];
-    var dur = Math.min((t.timeRemaining != null ? t.timeRemaining : t.dur) || 30, 720);
+    var dur = effectiveDuration(t);
     if (dur <= 0) return;
     var sm = parseTimeToMinutes(t.time);
     var mask = buildLocMask(t, d.key, dateBlocks_d);
@@ -401,9 +437,45 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       sm = Math.max(DAY_START, Math.min(sm, GRID_END * 60));
     }
 
+    // Check whether sm+dur fits inside one of the task's when-windows.
+    var hWinsPref = getWhenWindows(t.when, dateWindows_d, "morning");
+    var whenOk = false;
+    for (var wi2 = 0; wi2 < hWinsPref.length; wi2++) {
+      if (sm >= hWinsPref[wi2][0] && sm + dur <= hWinsPref[wi2][1]) { whenOk = true; break; }
+    }
+
+    // On today, force-place rigid habits whose preferred slot overlaps with the
+    // past-time blocked region. Without this, the scheduler pushes them to evening
+    // because the morning slots are occupied by the past-time fill.
+    // Shift earlier if needed so the full duration fits within the location and when windows.
+    var nowSlot = Math.ceil(nowMins / 15) * 15;
+    if (d.isToday && sm !== null && sm < nowSlot) {
+      var placeSm = sm;
+      var needsShift = !whenOk;
+      if (!needsShift) {
+        for (var lm = sm; lm < sm + dur; lm++) { if (mask[lm]) { needsShift = true; break; } }
+      }
+      if (needsShift) {
+        for (var ls = Math.floor(sm / 15) * 15; ls >= DAY_START; ls -= 15) {
+          var lOk = true;
+          for (var lc = ls; lc < ls + dur; lc++) { if (mask[lc]) { lOk = false; break; } }
+          if (!lOk) continue;
+          var wOk = false;
+          for (var wi3 = 0; wi3 < hWinsPref.length; wi3++) {
+            if (ls >= hWinsPref[wi3][0] && ls + dur <= hWinsPref[wi3][1]) { wOk = true; break; }
+          }
+          if (wOk) { placeSm = ls; break; }
+        }
+      }
+      reserve(occ, placeSm, dur);
+      placed.push({ task: t, start: placeSm, dur: dur, locked: true, _dateKey: d.key });
+      globalPlacedEnd[t.id] = { dateKey: d.key, endMin: placeSm + dur };
+      return;
+    }
+
     var locOk = true;
     for (var hm = sm; hm < sm + dur; hm++) { if (mask[hm]) { locOk = false; break; } }
-    if (locOk && isFree(occ, sm, dur)) {
+    if (whenOk && locOk && isFree(occ, sm, dur)) {
       reserve(occ, sm, dur);
       placed.push({ task: t, start: sm, dur: dur, locked: true, _dateKey: d.key });
       globalPlacedEnd[t.id] = { dateKey: d.key, endMin: sm + dur };
@@ -412,9 +484,20 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
 
     var hWins = getWhenWindows(t.when, dateWindows_d, "morning");
     if (hWins.length === 0) hWins = [[GRID_START * 60, DAY_END]];
+    // Sort windows by distance from preferred time so nearby slots are tried first
+    var prefMid = sm + dur / 2;
+    hWins.sort(function(a, b) {
+      var midA = (a[0] + a[1]) / 2, midB = (b[0] + b[1]) / 2;
+      return Math.abs(midA - prefMid) - Math.abs(midB - prefMid);
+    });
     var found = false;
     for (var wi = 0; wi < hWins.length && !found; wi++) {
-      for (var s = hWins[wi][0]; s + dur <= hWins[wi][1]; s += 15) {
+      // Within each window, scan from the point closest to preferred time
+      var winStart = hWins[wi][0], winEnd = hWins[wi][1];
+      var scanFrom = Math.max(winStart, Math.min(sm, winEnd - dur));
+      scanFrom = Math.floor(scanFrom / 15) * 15;
+      // Try from scanFrom forward, then from scanFrom backward
+      for (var s = scanFrom; s + dur <= winEnd; s += 15) {
         var ok = true;
         for (var cm = s; cm < s + dur; cm++) { if (occ[cm] || mask[cm]) { ok = false; break; } }
         if (ok) {
@@ -422,6 +505,18 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
           placed.push({ task: t, start: s, dur: dur, locked: true, _dateKey: d.key });
           globalPlacedEnd[t.id] = { dateKey: d.key, endMin: s + dur };
           found = true; break;
+        }
+      }
+      if (!found) {
+        for (var s2 = scanFrom - 15; s2 >= winStart; s2 -= 15) {
+          var ok2 = true;
+          for (var cm2 = s2; cm2 < s2 + dur; cm2++) { if (occ[cm2] || mask[cm2]) { ok2 = false; break; } }
+          if (ok2) {
+            reserve(occ, s2, dur);
+            placed.push({ task: t, start: s2, dur: dur, locked: true, _dateKey: d.key });
+            globalPlacedEnd[t.id] = { dateKey: d.key, endMin: s2 + dur };
+            found = true; break;
+          }
         }
       }
     }
@@ -438,20 +533,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   var PRI_LEVELS = ["P1", "P2", "P3", "P4"];
 
   PRI_LEVELS.forEach(function(priLevel) {
-    // Non-rigid habits
-    dates.forEach(function(d) {
-      var habits = habitsByDate[d.key] || [];
-      habits.filter(function(t) {
-        return !t.rigid && (t.pri || "P3") === priLevel && !globalPlacedEnd[t.id];
-      }).sort(function(a, b) {
-        var ca = whenOptionCount(a), cb = whenOptionCount(b);
-        if (ca !== cb) return ca - cb;
-        var ta = parseTimeToMinutes(a.time) || 0, tb = parseTimeToMinutes(b.time) || 0;
-        return ta - tb;
-      }).forEach(function(t) {
-        placeHabit(t, d);
-      });
-    });
+    // Non-rigid habits now go through the pool (placeEarly) so the scheduler
+    // can place them optimally and won't schedule in the past on today.
 
     // Late-place deadline tasks at/before their deadline
     var deadlineItems = pool.filter(function(item) {
@@ -523,6 +606,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     });
   });
 
+  // Track which tasks have been placed (shared between Phase 1.5 and Phase 2)
+  var placeVisited = {};
+
   // PHASE 1.5: Past-deadline tasks — deadline already passed, place from today forward
   PRI_LEVELS.forEach(function(priLevel) {
     pool.filter(function(item) {
@@ -544,7 +630,6 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
 
   // PHASE 2: Non-deadline flexible tasks (P1 first)
   // These lock into place before deadline pull-forward happens.
-  var placeVisited = {};
 
   function placeWithDeps(item) {
     if (!item || item.remaining <= 0) return;
@@ -577,6 +662,10 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       return !item.deadline && item.remaining > 0 && (item.task.pri || "P3") === priLevel;
     });
     items.sort(function(a, b) {
+      // Non-rigid habits go after regular tasks so they fill gaps
+      var aHabit = a.task.habit && !a.task.rigid ? 1 : 0;
+      var bHabit = b.task.habit && !b.task.rigid ? 1 : 0;
+      if (aHabit !== bHabit) return aHabit - bHabit;
       var aDate = parseDate(a.task.date) || localToday;
       var bDate = parseDate(b.task.date) || localToday;
       var dd = aDate - bDate;

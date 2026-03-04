@@ -698,7 +698,7 @@ async function sync(req, res) {
           var tDateParts = (task.date || '').split('/');
           if (/^\d{1,2}\/\d{1,2}$/.test(task.date || '')) {
             var tDateObj = new Date(year, parseInt(tDateParts[0], 10) - 1, parseInt(tDateParts[1], 10));
-            var taskIsPast = tDateObj <= todayStart;
+            var taskIsPast = tDateObj < todayStart;
             var taskNotDone = task.status !== 'done' && task.status !== 'skip';
             if (taskIsPast && taskNotDone) {
               try {
@@ -766,17 +766,26 @@ async function sync(req, res) {
           });
 
         } else if (task && !event) {
-          // Task exists but event gone from GCal → event was deleted remotely
-          // For events outside the fetch window, event won't appear — only delete
-          // if the ledger has a gcal_event_id (meaning it was synced before)
+          // Task exists but event gone from GCal
+          // Only treat as "deleted remotely" if the event's cached date falls
+          // within our fetch window. Events outside the window simply weren't
+          // returned by the API — they weren't deleted.
           if (ledger.gcal_event_id) {
-            await db('tasks').where('id', task.id).del();
-            await db('gcal_sync_ledger').where('id', ledger.id).update({
-              status: 'deleted_remote',
-              task_id: null,
-              synced_at: db.fn.now()
-            });
-            stats.deleted_remote++;
+            var cachedStart = ledger.gcal_start;
+            var eventInWindow = false;
+            if (cachedStart) {
+              var cachedDate = new Date(cachedStart);
+              eventInWindow = cachedDate >= windowStart && cachedDate <= windowEnd;
+            }
+            if (eventInWindow) {
+              await db('tasks').where('id', task.id).del();
+              await db('gcal_sync_ledger').where('id', ledger.id).update({
+                status: 'deleted_remote',
+                task_id: null,
+                synced_at: db.fn.now()
+              });
+              stats.deleted_remote++;
+            }
           }
 
         } else if (!task && event) {

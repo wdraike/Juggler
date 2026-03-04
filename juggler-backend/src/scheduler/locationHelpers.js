@@ -6,6 +6,7 @@ var dateHelpers = require('./dateHelpers');
 var parseDate = dateHelpers.parseDate;
 var timeBlockHelpers = require('./timeBlockHelpers');
 var getBlocksForDate = timeBlockHelpers.getBlocksForDate;
+var getBlockAtMinute = timeBlockHelpers.getBlockAtMinute;
 var buildWindowsFromBlocks = timeBlockHelpers.buildWindowsFromBlocks;
 var hasWhen = timeBlockHelpers.hasWhen;
 var getWhenWindows = timeBlockHelpers.getWhenWindows;
@@ -62,6 +63,11 @@ function resolveLocationId(dateStr, hourOrMin, cfg, blocks) {
       if (tmpl.hours[minSlot] !== undefined) return tmpl.hours[minSlot];
       if (tmpl.hours[hour] !== undefined) return tmpl.hours[hour];
     }
+  }
+  // Fall back to time block's loc field
+  if (blocks && blocks.length > 0) {
+    var block = getBlockAtMinute(blocks, minute);
+    if (block && block.loc) return block.loc;
   }
   return "home";
 }

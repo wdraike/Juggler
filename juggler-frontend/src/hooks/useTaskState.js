@@ -10,6 +10,7 @@ export default function useTaskState() {
   const [taskState, dispatch] = useReducer(taskReducer, TASK_STATE_INIT);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [placements, setPlacements] = useState({ dayPlacements: {}, unplaced: [] });
   const taskStateRef = useRef(taskState);
   taskStateRef.current = taskState;
   const saveTimerRef = useRef(null);
@@ -38,6 +39,16 @@ export default function useTaskState() {
       return null;
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  // Load placements from backend scheduler
+  const loadPlacements = useCallback(async () => {
+    try {
+      const res = await apiClient.get('/schedule/placements');
+      setPlacements({ dayPlacements: res.data.dayPlacements || {}, unplaced: res.data.unplaced || [] });
+    } catch (error) {
+      console.error('Failed to load placements:', error);
     }
   }, []);
 
@@ -76,13 +87,14 @@ export default function useTaskState() {
           dependsOn: t.dependsOn
         }));
         await apiClient.put('/tasks/batch', { updates });
+        await loadPlacements();
       } catch (error) {
         console.error('Save failed:', error);
       } finally {
         setSaving(false);
       }
     }, 1000);
-  }, []);
+  }, [loadPlacements]);
 
   // Dispatch + persist wrapper
   const dispatchPersist = useCallback((action) => {
@@ -112,28 +124,31 @@ export default function useTaskState() {
     dispatch({ type: 'ADD_TASKS', tasks });
     try {
       await apiClient.post('/tasks/batch', { tasks });
+      await loadPlacements();
     } catch (error) {
       console.error('Failed to add tasks:', error);
     }
-  }, []);
+  }, [loadPlacements]);
 
   const deleteTask = useCallback(async (id) => {
     dispatch({ type: 'DELETE_TASK', id });
     try {
       await apiClient.delete(`/tasks/${id}`);
+      await loadPlacements();
     } catch (error) {
       console.error('Failed to delete task:', error);
     }
-  }, []);
+  }, [loadPlacements]);
 
   const createTask = useCallback(async (task) => {
     dispatch({ type: 'ADD_TASKS', tasks: [task] });
     try {
       await apiClient.post('/tasks', task);
+      await loadPlacements();
     } catch (error) {
       console.error('Failed to create task:', error);
     }
-  }, []);
+  }, [loadPlacements]);
 
   // Cleanup
   useEffect(() => {
@@ -149,6 +164,8 @@ export default function useTaskState() {
     loading,
     saving,
     loadTasks,
+    placements,
+    loadPlacements,
     setStatus,
     setDirection,
     updateTask,

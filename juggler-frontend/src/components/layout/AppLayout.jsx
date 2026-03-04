@@ -15,9 +15,8 @@ import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts';
 import useDragDrop from '../../hooks/useDragDrop';
 import useIsMobile from '../../hooks/useIsMobile';
 import { getTheme } from '../../theme/colors';
-import { formatDateKey, getWeekStart, parseDate, parseTimeToMinutes } from '../../scheduler/dateHelpers';
-import { DAY_NAMES, GRID_START, GRID_END } from '../../state/constants';
-import { hasWhen } from '../../scheduler/timeBlockHelpers';
+import { formatDateKey, getWeekStart, parseDate } from '../../scheduler/dateHelpers';
+import { DAY_NAMES } from '../../state/constants';
 import { generateRecurringPure } from '../../scheduler/generateRecurring';
 
 // Views
@@ -44,7 +43,7 @@ import apiClient from '../../services/apiClient';
 
 export default function AppLayout() {
   // State
-  var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, setStatus, setDirection, updateTask, addTasks, deleteTask, createTask, taskStateRef } = useTaskState();
+  var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, setDirection, updateTask, addTasks, deleteTask, createTask, taskStateRef } = useTaskState();
   var isMobile = useIsMobile();
   var config = useConfig();
   var { toast, toastHistory, showToast } = useToast();
@@ -83,6 +82,7 @@ export default function AppLayout() {
       if (result?.config) {
         config.initFromConfig(result.config);
       }
+      loadPlacements();
     });
   }, []);
 
@@ -121,8 +121,8 @@ export default function AppLayout() {
       setGcalSyncing(true);
       apiClient.post('/gcal/sync').then(function(r) {
         setGcalLastSyncedAt(new Date().toISOString());
-        if (r.data.pushed || r.data.pulled || r.data.patched || r.data.deleted) {
-          loadTasks();
+        if (r.data.pushed || r.data.pulled || r.data.deleted_local || r.data.deleted_remote) {
+          loadTasks().then(function() { loadPlacements(); });
         }
       }).catch(function() { /* silent */ }).finally(function() {
         setGcalSyncing(false);
@@ -136,7 +136,7 @@ export default function AppLayout() {
       clearTimeout(initialTimer);
       clearInterval(intervalId);
     };
-  }, [gcalAutoSync, loadTasks]);
+  }, [gcalAutoSync, loadTasks, loadPlacements]);
 
   // Derived dates
   var today = useMemo(() => {
@@ -169,50 +169,9 @@ export default function AppLayout() {
     schedFloor: config.schedFloor
   }), [config.timeBlocks, config.locSchedules, config.locScheduleDefaults, config.locScheduleOverrides, config.hourLocationOverrides, config.toolMatrix, config.splitDefault, config.splitMinDefault, config.schedFloor]);
 
-  // Build placements from task data (pure view logic — no scheduling)
-  var { dayPlacements, unplaced } = useMemo(() => {
-    var placements = {};
-    var unplacedList = [];
-    var DAY_START = GRID_START * 60;
-    var DAY_END_MIN = GRID_END * 60;
-
-    allTasks.forEach(t => {
-      var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'skip') return;
-      if (!t.date || t.date === 'TBD') return;
-      if (t.section && (t.section.includes('PARKING') || t.section.includes('TO BE SCHEDULED'))) return;
-      if (hasWhen(t.when, 'allday')) return;
-
-      var startMin = parseTimeToMinutes(t.time);
-      if (startMin === null) {
-        unplacedList.push(t);
-        return;
-      }
-
-      var dur = Math.min((t.timeRemaining != null ? t.timeRemaining : t.dur) || 30, 720);
-      if (dur <= 0) return;
-      startMin = Math.max(DAY_START, Math.min(startMin, DAY_END_MIN));
-      var locked = !!t.rigid || hasWhen(t.when, 'fixed') || !!t.habit;
-
-      if (!placements[t.date]) placements[t.date] = [];
-      placements[t.date].push({ task: t, start: startMin, dur: dur, locked: locked, _dateKey: t.date });
-    });
-
-    // Sort and assign unique keys per day
-    Object.keys(placements).forEach(dateKey => {
-      var placed = placements[dateKey];
-      placed.sort((a, b) => a.start - b.start);
-
-      var idCount = {};
-      placed.forEach(item => {
-        var id = item.task.id;
-        idCount[id] = (idCount[id] || 0) + 1;
-        item.key = idCount[id] > 1 ? id + '_p' + idCount[id] : id;
-      });
-    });
-
-    return { dayPlacements: placements, unplaced: unplacedList };
-  }, [allTasks, statuses]);
+  // Placements come from the backend scheduler API
+  var dayPlacements = placements.dayPlacements;
+  var unplaced = placements.unplaced;
 
   // Blocked tasks: tasks whose dependencies are not all done AND whose
   // date is today or in the past (future tasks with pending deps are expected)
@@ -362,11 +321,11 @@ export default function AppLayout() {
     apiClient.post('/schedule/run').then(function(r) {
       var msg = 'Rescheduled: ' + (r.data.updated || 0) + ' tasks updated';
       showToast(msg, 'success');
-      loadTasks();
+      loadTasks().then(function() { loadPlacements(); });
     }).catch(function(err) {
       showToast('Reschedule error: ' + (err.response?.data?.error || err.message), 'error');
     });
-  }, [showToast, loadTasks]);
+  }, [showToast, loadTasks, loadPlacements]);
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
@@ -658,7 +617,7 @@ export default function AppLayout() {
           onSyncComplete={function() {
             setGcalSyncing(false);
             setGcalLastSyncedAt(new Date().toISOString());
-            loadTasks();
+            loadTasks().then(function() { loadPlacements(); });
           }}
         />
       )}

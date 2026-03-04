@@ -9,14 +9,37 @@ import { PRI_COLORS, locIcon } from '../../state/constants';
 import { getTheme } from '../../theme/colors';
 import StatusToggle from './StatusToggle';
 
-export default function ScheduleCard({ item, status, onStatusChange, onExpand, darkMode, isBlocked, isMobile, layoutMode }) {
+function formatStartTime(mins) {
+  var h = Math.floor(mins / 60);
+  var m = mins % 60;
+  var ampm = h >= 12 ? 'p' : 'a';
+  var h12 = h % 12 || 12;
+  return h12 + (m > 0 ? ':' + (m < 10 ? '0' : '') + m : '') + ampm;
+}
+
+export default function ScheduleCard({ item, status, onStatusChange, onExpand, darkMode, isBlocked, isMobile, layoutMode, cardHeight }) {
   var theme = getTheme(darkMode);
   var task = item.task;
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
   var compact = layoutMode === 'compact';
+  var showDetails = !compact && (cardHeight || 52) >= 60;
   var durLabel = task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm';
   var statusIcon = status === 'done' ? '\u2713' : status === 'wip' ? '\u231B' : status === 'cancel' ? '\u2715' : status === 'skip' ? '\u21ED' : null;
+  var startLabel = item.start != null ? formatStartTime(item.start) : null;
+  var typeBadges = [];
+  if (task.habit) typeBadges.push('\uD83D\uDD01');
+  if (task.rigid || task.fixed) typeBadges.push('\uD83D\uDCCC');
+  if (task.splittable) typeBadges.push('\u2702\uFE0F');
+
+  // Build details snippets for row 3
+  var details = [];
+  if (showDetails) {
+    if (task.notes) details.push(task.notes.replace(/\n/g, ' ').substring(0, 60));
+    if (task.due) details.push('\uD83D\uDCC5 ' + task.due);
+    if (task.section) details.push(task.section);
+    if (task.dependsOn && task.dependsOn.length > 0) details.push('\u26D3 ' + task.dependsOn.length + ' dep');
+  }
 
   return (
     <div
@@ -73,17 +96,24 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
         </span>
       </div>
 
-      {/* Row 2: status + metadata */}
+      {/* Row 2: status + start time + type badges + metadata */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: compact ? 1 : 3 }}>
         {compact ? (
           <span style={{ fontSize: 10, color: darkMode ? '#94A3B8' : '#475569', fontWeight: 700, display: 'flex', gap: 3, alignItems: 'center' }}>
             {statusIcon && <span>{statusIcon}</span>}
+            {startLabel && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted }}>{startLabel}</span>}
             {isBlocked && <span style={{ color: '#EF4444' }}>{'\uD83D\uDEAB'}</span>}
           </span>
         ) : (
           <>
             {onStatusChange && <StatusToggle value={status} onChange={onStatusChange} darkMode={darkMode} isMobile={isMobile} />}
+            {startLabel && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted }}>{startLabel}</span>}
             <div style={{ flex: 1 }} />
+            {typeBadges.length > 0 && (
+              <span style={{ fontSize: 9, display: 'flex', gap: 1, alignItems: 'center' }}>
+                {typeBadges.map(function(b, i) { return <span key={i}>{b}</span>; })}
+              </span>
+            )}
             {task.location && task.location.length > 0 && (function() {
               var icons = task.location.map(function(lid) { return locIcon(lid); }).filter(Boolean);
               return icons.length > 0 ? <span style={{ fontSize: 10 }}>{icons.join(' ')}</span> : null;
@@ -107,6 +137,17 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
           </>
         )}
       </div>
+
+      {/* Row 3: notes / due / details */}
+      {details.length > 0 && (
+        <div style={{
+          fontSize: 9, color: theme.textMuted, marginTop: 1,
+          overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+          lineHeight: 1.3, opacity: 0.75
+        }}>
+          {details.join(' \u00B7 ')}
+        </div>
+      )}
     </div>
   );
 }

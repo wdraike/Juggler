@@ -331,15 +331,20 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
           <label style={lStyle}>
             {'\uD83D\uDCC6'} When
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
-              {(uniqueTags || []).concat([{ tag: 'fixed', name: 'Fixed', icon: '\uD83D\uDCCC', color: TH.muted2 }]).map(tb => {
+              {[{ tag: 'allday', name: 'All Day', icon: '\u2600\uFE0F', color: '#F59E0B' }].concat(uniqueTags || []).concat([{ tag: 'fixed', name: 'Fixed', icon: '\uD83D\uDCCC', color: TH.muted2 }]).map(tb => {
                 var parts = when ? when.split(',').map(s => s.trim()).filter(Boolean) : [];
                 var isOn = parts.indexOf(tb.tag) !== -1;
                 return (
                   <button key={tb.tag} onClick={() => {
-                    var cur = when ? when.split(',').map(s => s.trim()).filter(Boolean) : [];
-                    if (isOn) { cur = cur.filter(v => v !== tb.tag); }
-                    else { cur.push(tb.tag); }
-                    setWhen(cur.length === 0 ? '' : cur.join(','));
+                    if (tb.tag === 'allday') {
+                      setWhen(isOn ? '' : 'allday');
+                    } else {
+                      var cur = when ? when.split(',').map(s => s.trim()).filter(Boolean) : [];
+                      cur = cur.filter(v => v !== 'allday');
+                      if (isOn) { cur = cur.filter(v => v !== tb.tag); }
+                      else { cur.push(tb.tag); }
+                      setWhen(cur.length === 0 ? '' : cur.join(','));
+                    }
                   }} style={{
                     padding: '4px 8px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
                     fontWeight: isOn ? 600 : 400,

@@ -102,9 +102,9 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
       setResults(data);
       var parts = [];
       if (data.pushed) parts.push(data.pushed + ' pushed');
-      if (data.patched) parts.push(data.patched + ' updated');
       if (data.pulled) parts.push(data.pulled + ' pulled');
-      if (data.deleted) parts.push(data.deleted + ' deleted');
+      var deleted = (data.deleted_local || 0) + (data.deleted_remote || 0);
+      if (deleted) parts.push(deleted + ' deleted');
       showToast(parts.length > 0 ? 'Synced: ' + parts.join(', ') : 'Already in sync', 'success');
       if (onSyncComplete) onSyncComplete();
     } catch (e) {
@@ -213,9 +213,8 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', fontSize: 11, color: theme.textSecondary }}>
                   <div>Pushed: <strong style={{ color: theme.text }}>{results.pushed || 0}</strong></div>
                   <div>Pulled: <strong style={{ color: theme.text }}>{results.pulled || 0}</strong></div>
-                  <div>Updated: <strong style={{ color: theme.text }}>{results.patched || 0}</strong></div>
-                  <div>Deleted: <strong style={{ color: theme.text }}>{results.deleted || 0}</strong></div>
-                  {results.unlinked > 0 && <div>Unlinked: <strong style={{ color: theme.text }}>{results.unlinked}</strong></div>}
+                  <div>Deleted (local): <strong style={{ color: theme.text }}>{results.deleted_local || 0}</strong></div>
+                  <div>Deleted (remote): <strong style={{ color: theme.text }}>{results.deleted_remote || 0}</strong></div>
                 </div>
                 {results.errors && results.errors.length > 0 && (
                   <div style={{ marginTop: 6, color: '#e74c3c', fontSize: 11 }}>
