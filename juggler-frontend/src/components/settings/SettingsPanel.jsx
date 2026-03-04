@@ -2,7 +2,7 @@
  * SettingsPanel — tabbed container for locations, tools, matrix, time blocks, etc.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { getTheme } from '../../theme/colors';
 
 var TABS = [
@@ -485,6 +485,418 @@ function TimeBlocksTab({ config, theme }) {
   );
 }
 
+var LOC_TINT = { home: '#3B82F6', work: '#F59E0B', transit: '#9CA3AF', downtown: '#10B981', gym: '#EF4444', errand: '#EC4899' };
+var TOTAL_MIN = 1080; // 6AM (360) to midnight (1440)
+var START_MIN = 360;
+var END_MIN = 1440;
+
+function buildSegments(hours) {
+  var segs = [];
+  for (var m = START_MIN; m < END_MIN; m += 15) {
+    var loc = hours[m] || 'unset';
+    var last = segs[segs.length - 1];
+    if (last && last.loc === loc && last.end === m) {
+      last.end = m + 15;
+    } else {
+      segs.push({ start: m, end: m + 15, loc: loc });
+    }
+  }
+  return segs;
+}
+
+function snapToSlot(clientX, barEl) {
+  var rect = barEl.getBoundingClientRect();
+  var ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  var raw = ratio * TOTAL_MIN + START_MIN;
+  var snapped = Math.round(raw / 15) * 15;
+  return Math.max(START_MIN, Math.min(END_MIN, snapped));
+}
+
+function ScheduleTemplateBar({ hours, locations, theme, onCommit }) {
+  var [activeLoc, setActiveLoc] = useState(locations[0]?.id || null);
+  var [, forceRender] = useState(0);
+  var barRef = useRef(null);
+  var previewRef = useRef(null);
+  var dragRef = useRef(null);
+
+  var segments = useMemo(function() { return buildSegments(hours); }, [hours]);
+
+  var locIds = useMemo(function() { return locations.map(function(l) { return l.id; }); }, [locations]);
+  var locMap = useMemo(function() {
+    var m = {};
+    locations.forEach(function(l) { m[l.id] = l; });
+    return m;
+  }, [locations]);
+
+  // Reset activeLoc if locations change
+  useEffect(function() {
+    if (activeLoc && !locMap[activeLoc] && locations.length > 0) {
+      setActiveLoc(locations[0].id);
+    }
+  }, [locations, activeLoc, locMap]);
+
+  var pctOf = useCallback(function(mins) {
+    return ((mins - START_MIN) / TOTAL_MIN) * 100;
+  }, []);
+
+  // --- Find segment at a minute ---
+  function segmentAt(minute) {
+    for (var i = 0; i < segments.length; i++) {
+      if (minute >= segments[i].start && minute < segments[i].end) return { seg: segments[i], idx: i };
+    }
+    return null;
+  }
+
+  // --- Hit test: near edge? ---
+  function hitTest(clientX) {
+    var bar = barRef.current;
+    if (!bar) return null;
+    var rect = bar.getBoundingClientRect();
+    var minute = snapToSlot(clientX, bar);
+    var pxPerMin = rect.width / TOTAL_MIN;
+
+    for (var i = 0; i < segments.length; i++) {
+      var seg = segments[i];
+      if (seg.loc === 'unset') continue;
+      // Check left edge (but not the very first segment edge at 360)
+      var leftPx = rect.left + (seg.start - START_MIN) * pxPerMin;
+      if (i > 0 && Math.abs(clientX - leftPx) < 8) {
+        return { type: 'resize', edge: 'left', segIdx: i, seg: seg };
+      }
+      // Check right edge
+      var rightPx = rect.left + (seg.end - START_MIN) * pxPerMin;
+      if (Math.abs(clientX - rightPx) < 8) {
+        return { type: 'resize', edge: 'right', segIdx: i, seg: seg };
+      }
+    }
+    // Check if on a segment body vs unset
+    var found = segmentAt(minute);
+    if (found && found.seg.loc !== 'unset') {
+      return { type: 'segment', segIdx: found.idx, seg: found.seg, minute: minute };
+    }
+    return { type: 'empty', minute: minute };
+  }
+
+  // --- Write slots into hours object ---
+  function writeSlots(startMin, endMin, locId) {
+    var newHours = {};
+    // Copy existing
+    Object.keys(hours).forEach(function(k) { newHours[parseInt(k)] = hours[k]; });
+    for (var m = startMin; m < endMin; m += 15) {
+      if (locId === 'unset') {
+        delete newHours[m];
+      } else {
+        newHours[m] = locId;
+      }
+    }
+    return newHours;
+  }
+
+  // --- Pointer handlers ---
+  function onPointerDown(e) {
+    if (e.button !== 0) return;
+    var bar = barRef.current;
+    if (!bar) return;
+    bar.setPointerCapture(e.pointerId);
+
+    var hit = hitTest(e.clientX);
+    if (!hit) return;
+
+    var startX = e.clientX;
+    var startMinute = snapToSlot(e.clientX, bar);
+
+    if (hit.type === 'resize') {
+      dragRef.current = {
+        mode: 'resize',
+        edge: hit.edge,
+        segIdx: hit.segIdx,
+        origStart: hit.seg.start,
+        origEnd: hit.seg.end,
+        loc: hit.seg.loc,
+        startX: startX,
+        currentMinute: hit.edge === 'left' ? hit.seg.start : hit.seg.end
+      };
+    } else if (hit.type === 'empty') {
+      if (!activeLoc) return;
+      dragRef.current = {
+        mode: 'create',
+        startMinute: startMinute,
+        currentMinute: startMinute,
+        loc: activeLoc,
+        startX: startX
+      };
+      // Show preview
+      if (previewRef.current) {
+        var tint = LOC_TINT[activeLoc] || '#8B5CF6';
+        previewRef.current.style.display = 'block';
+        previewRef.current.style.background = tint + '50';
+        previewRef.current.style.borderColor = tint;
+        previewRef.current.style.left = pctOf(startMinute) + '%';
+        previewRef.current.style.width = pctOf(startMinute + 15) - pctOf(startMinute) + '%';
+      }
+    } else if (hit.type === 'segment') {
+      dragRef.current = {
+        mode: 'click',
+        segIdx: hit.segIdx,
+        seg: hit.seg,
+        startX: startX,
+        minute: hit.minute
+      };
+    }
+  }
+
+  function onPointerMove(e) {
+    var drag = dragRef.current;
+    var bar = barRef.current;
+    if (!drag || !bar) return;
+
+    var currentMinute = snapToSlot(e.clientX, bar);
+
+    if (drag.mode === 'click') {
+      // Upgrade to drag if moved enough
+      if (Math.abs(e.clientX - drag.startX) > 4) {
+        // Cancel click, don't start drag from segment
+        dragRef.current = null;
+      }
+      return;
+    }
+
+    if (drag.mode === 'create') {
+      drag.currentMinute = currentMinute;
+      var minM = Math.min(drag.startMinute, currentMinute);
+      var maxM = Math.max(drag.startMinute, currentMinute);
+      if (maxM === minM) maxM = minM + 15;
+      // Clamp to not overlap existing segments
+      for (var i = 0; i < segments.length; i++) {
+        var s = segments[i];
+        if (s.loc === 'unset') continue;
+        if (s.start >= minM && s.start < maxM) { maxM = s.start; }
+        if (s.end > minM && s.end <= maxM) { minM = s.end; }
+        if (s.start <= minM && s.end >= maxM) { minM = maxM; break; }
+      }
+      if (previewRef.current) {
+        previewRef.current.style.left = pctOf(minM) + '%';
+        previewRef.current.style.width = (pctOf(maxM) - pctOf(minM)) + '%';
+      }
+      return;
+    }
+
+    if (drag.mode === 'resize') {
+      drag.currentMinute = currentMinute;
+      // Find neighbor constraints
+      var prevEnd = START_MIN;
+      var nextStart = END_MIN;
+      for (var j = 0; j < segments.length; j++) {
+        var seg = segments[j];
+        if (seg.loc === 'unset') continue;
+        if (j < drag.segIdx && seg.end > prevEnd) prevEnd = seg.end;
+        if (j > drag.segIdx && seg.start < nextStart) nextStart = seg.start;
+      }
+
+      if (drag.edge === 'left') {
+        var newStart = Math.max(prevEnd, Math.min(currentMinute, drag.origEnd - 15));
+        drag.currentMinute = newStart;
+      } else {
+        var newEnd = Math.min(nextStart, Math.max(currentMinute, drag.origStart + 15));
+        drag.currentMinute = newEnd;
+      }
+      forceRender(function(n) { return n + 1; });
+      return;
+    }
+  }
+
+  function onPointerUp(e) {
+    var drag = dragRef.current;
+    var bar = barRef.current;
+    dragRef.current = null;
+    if (previewRef.current) previewRef.current.style.display = 'none';
+    if (!drag || !bar) return;
+
+    if (drag.mode === 'click') {
+      // Cycle location
+      var seg = drag.seg;
+      var idx = locIds.indexOf(seg.loc);
+      var nextLoc = locIds[(idx + 1) % locIds.length];
+      onCommit(writeSlots(seg.start, seg.end, nextLoc));
+      return;
+    }
+
+    if (drag.mode === 'create') {
+      var minM = Math.min(drag.startMinute, drag.currentMinute);
+      var maxM = Math.max(drag.startMinute, drag.currentMinute);
+      if (maxM === minM) maxM = minM + 15;
+      // Re-clamp
+      for (var i = 0; i < segments.length; i++) {
+        var s = segments[i];
+        if (s.loc === 'unset') continue;
+        if (s.start >= minM && s.start < maxM) { maxM = s.start; }
+        if (s.end > minM && s.end <= maxM) { minM = s.end; }
+        if (s.start <= minM && s.end >= maxM) { minM = maxM; break; }
+      }
+      if (maxM > minM) {
+        onCommit(writeSlots(minM, maxM, drag.loc));
+      }
+      return;
+    }
+
+    if (drag.mode === 'resize') {
+      var newHours = {};
+      Object.keys(hours).forEach(function(k) { newHours[parseInt(k)] = hours[k]; });
+      // Clear old range
+      for (var m = drag.origStart; m < drag.origEnd; m += 15) {
+        delete newHours[m];
+      }
+      // Write new range
+      var nStart = drag.edge === 'left' ? drag.currentMinute : drag.origStart;
+      var nEnd = drag.edge === 'right' ? drag.currentMinute : drag.origEnd;
+      if (nEnd <= nStart) nEnd = nStart + 15;
+      for (var m2 = nStart; m2 < nEnd; m2 += 15) {
+        newHours[m2] = drag.loc;
+      }
+      onCommit(newHours);
+      return;
+    }
+  }
+
+  // --- Compute effective segments for rendering (account for in-progress resize) ---
+  var renderSegments = segments;
+  var drag = dragRef.current;
+  if (drag && drag.mode === 'resize') {
+    var tempHours = {};
+    Object.keys(hours).forEach(function(k) { tempHours[parseInt(k)] = hours[k]; });
+    for (var m = drag.origStart; m < drag.origEnd; m += 15) delete tempHours[m];
+    var ns = drag.edge === 'left' ? drag.currentMinute : drag.origStart;
+    var ne = drag.edge === 'right' ? drag.currentMinute : drag.origEnd;
+    if (ne <= ns) ne = ns + 15;
+    for (var m2 = ns; m2 < ne; m2 += 15) tempHours[m2] = drag.loc;
+    renderSegments = buildSegments(tempHours);
+  }
+
+  // --- Cursor logic ---
+  function onBarMouseMove(e) {
+    if (dragRef.current) return; // already dragging
+    var bar = barRef.current;
+    if (!bar) return;
+    var hit = hitTest(e.clientX);
+    if (hit && hit.type === 'resize') {
+      bar.style.cursor = 'col-resize';
+    } else if (hit && hit.type === 'empty') {
+      bar.style.cursor = activeLoc ? 'crosshair' : 'default';
+    } else {
+      bar.style.cursor = 'pointer';
+    }
+  }
+
+  return (
+    <div>
+      {/* Bar */}
+      <div ref={barRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={function(e) { onPointerMove(e); onBarMouseMove(e); }}
+        onPointerUp={onPointerUp}
+        style={{
+          position: 'relative', height: 48, background: theme.bgTertiary,
+          borderRadius: 8, touchAction: 'none', userSelect: 'none',
+          overflow: 'hidden'
+        }}>
+        {/* Rendered segments */}
+        {renderSegments.map(function(seg, i) {
+          var left = pctOf(seg.start);
+          var width = pctOf(seg.end) - pctOf(seg.start);
+          var isUnset = seg.loc === 'unset';
+          var loc = isUnset ? null : locMap[seg.loc];
+          var tint = LOC_TINT[seg.loc] || '#8B5CF6';
+          var widthMin = seg.end - seg.start;
+          var narrowThreshold = 60; // less than 60min = narrow
+
+          return (
+            <div key={i} style={{
+              position: 'absolute', top: 2, bottom: 2,
+              left: left + '%', width: width + '%',
+              background: isUnset ? 'transparent' : tint + '40',
+              borderLeft: isUnset ? '1px dashed ' + theme.border : '2px solid ' + tint,
+              borderRadius: 3,
+              display: 'flex', alignItems: 'center', paddingLeft: 4, gap: 3,
+              fontSize: 10, color: isUnset ? theme.textMuted : theme.text,
+              overflow: 'hidden', whiteSpace: 'nowrap',
+              pointerEvents: 'none'
+            }}>
+              {isUnset ? (
+                widthMin >= 120 ? <span style={{ opacity: 0.5, fontSize: 9 }}>drag to set</span> : null
+              ) : (
+                <>
+                  <span style={{ fontSize: 12 }}>{loc?.icon || ''}</span>
+                  {widthMin >= narrowThreshold && <span style={{ fontSize: 10 }}>{loc?.name || seg.loc}</span>}
+                </>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Resize handles (invisible hit zones) */}
+        {renderSegments.map(function(seg, i) {
+          if (seg.loc === 'unset') return null;
+          return [
+            <div key={'lh-' + i} style={{
+              position: 'absolute', top: 0, bottom: 0,
+              left: 'calc(' + pctOf(seg.start) + '% - 4px)', width: 8,
+              cursor: 'col-resize', pointerEvents: 'auto', zIndex: 2
+            }} />,
+            <div key={'rh-' + i} style={{
+              position: 'absolute', top: 0, bottom: 0,
+              left: 'calc(' + pctOf(seg.end) + '% - 4px)', width: 8,
+              cursor: 'col-resize', pointerEvents: 'auto', zIndex: 2
+            }} />
+          ];
+        })}
+
+        {/* Hour ticks */}
+        {[6,8,10,12,14,16,18,20,22].map(function(h) {
+          var left = pctOf(h * 60);
+          return (
+            <div key={h} style={{
+              position: 'absolute', top: 0, bottom: 0, left: left + '%',
+              borderLeft: '1px solid ' + theme.border, opacity: 0.3,
+              pointerEvents: 'none'
+            }}>
+              <span style={{ fontSize: 8, color: theme.textMuted, position: 'absolute', top: 1, left: 2 }}>
+                {minsToShort(h * 60)}
+              </span>
+            </div>
+          );
+        })}
+
+        {/* Preview overlay for drag-to-create */}
+        <div ref={previewRef} style={{
+          display: 'none', position: 'absolute', top: 2, bottom: 2,
+          borderRadius: 3, borderLeft: '2px solid transparent',
+          pointerEvents: 'none', zIndex: 3
+        }} />
+      </div>
+
+      {/* Legend row */}
+      <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: 10, color: theme.textMuted }}>Brush:</span>
+        {locations.map(function(loc) {
+          var tint = LOC_TINT[loc.id] || '#8B5CF6';
+          var isActive = activeLoc === loc.id;
+          return (
+            <button key={loc.id} onClick={function() { setActiveLoc(loc.id); }} style={{
+              border: isActive ? '2px solid ' + tint : '1px solid ' + theme.border,
+              borderRadius: 12, padding: '2px 10px', fontSize: 11,
+              background: isActive ? tint + '25' : 'transparent',
+              color: isActive ? tint : theme.textSecondary,
+              cursor: 'pointer', fontFamily: 'inherit', fontWeight: isActive ? 600 : 400
+            }}>
+              {loc.icon} {loc.name}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function SchedulesTab({ config, theme }) {
   var DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   var scheduleIds = Object.keys(config.locSchedules || {});
@@ -525,18 +937,11 @@ function SchedulesTab({ config, theme }) {
   var template = (config.locSchedules || {})[selectedTemplate];
   var hours = template?.hours || {};
 
-  // Build summary: group consecutive 15-min slots by location
-  var segments = [];
-  var sortedMins = Object.keys(hours).map(Number).sort(function(a, b) { return a - b; });
-  sortedMins.forEach(function(m) {
-    var loc = hours[m];
-    var last = segments[segments.length - 1];
-    if (last && last.loc === loc && last.end === m) {
-      last.end = m + 15;
-    } else {
-      segments.push({ start: m, end: m + 15, loc: loc });
-    }
-  });
+  function commitHours(newHours) {
+    var updated = { ...config.locSchedules };
+    updated[selectedTemplate] = { ...updated[selectedTemplate], hours: newHours };
+    config.updateLocSchedules(updated);
+  }
 
   // Date overrides
   var overrideEntries = Object.entries(config.locScheduleOverrides || {});
@@ -592,53 +997,18 @@ function SchedulesTab({ config, theme }) {
         })}
       </div>
 
-      {/* Template detail - location segments */}
+      {/* Template detail — interactive bar editor */}
       {template && (
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 6 }}>{template.icon} {template.name} — location by time of day</div>
-          {/* Visual bar */}
-          <div style={{ position: 'relative', height: 28, background: theme.bgTertiary, borderRadius: 6, marginBottom: 8, overflow: 'hidden' }}>
-            {segments.map(function(seg, i) {
-              var totalMin = 1080;
-              var left = ((seg.start - 360) / totalMin) * 100;
-              var width = ((seg.end - seg.start) / totalMin) * 100;
-              if (left < 0) { width += left; left = 0; }
-              if (left + width > 100) width = 100 - left;
-              var loc = config.locations.find(function(l) { return l.id === seg.loc; });
-              var tint = { home: '#3B82F6', work: '#F59E0B', transit: '#9CA3AF', downtown: '#10B981', gym: '#EF4444' };
-              var color = tint[seg.loc] || '#8B5CF6';
-              return (
-                <div key={i} title={seg.loc + ' ' + minsToTime(seg.start) + '-' + minsToTime(seg.end)}
-                  style={{
-                    position: 'absolute', top: 2, bottom: 2, left: left + '%', width: width + '%',
-                    background: color + '40', borderLeft: '2px solid ' + color, borderRadius: 3,
-                    display: 'flex', alignItems: 'center', paddingLeft: 3, fontSize: 9, color: theme.text, overflow: 'hidden', whiteSpace: 'nowrap'
-                  }}>
-                  {loc?.icon || ''} {width > 6 ? seg.loc : ''}
-                </div>
-              );
-            })}
-            {[6,8,10,12,14,16,18,20,22].map(function(h) {
-              var left = ((h * 60 - 360) / 1080) * 100;
-              return (
-                <div key={h} style={{ position: 'absolute', top: 0, bottom: 0, left: left + '%', borderLeft: '1px solid ' + theme.border, opacity: 0.3 }}>
-                  <span style={{ fontSize: 7, color: theme.textMuted, position: 'absolute', top: 0, left: 2 }}>{minsToShort(h * 60)}</span>
-                </div>
-              );
-            })}
+          <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 6 }}>
+            {template.icon} {template.name} — drag to create, drag edges to resize, click to cycle location
           </div>
-          {/* Segment list */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {segments.map(function(seg, i) {
-              var loc = config.locations.find(function(l) { return l.id === seg.loc; });
-              return (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 8px', fontSize: 12, background: theme.bgTertiary, borderRadius: 4 }}>
-                  <span style={{ fontSize: 11, color: theme.textMuted, width: 120 }}>{minsToTime(seg.start)} — {minsToTime(seg.end)}</span>
-                  <span>{loc?.icon || '\u{1F4CD}'} {loc?.name || seg.loc}</span>
-                </div>
-              );
-            })}
-          </div>
+          <ScheduleTemplateBar
+            hours={hours}
+            locations={config.locations}
+            theme={theme}
+            onCommit={commitHours}
+          />
         </div>
       )}
 
