@@ -9,7 +9,7 @@ import { DAY_NAMES, MONTH_NAMES } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
-export default function ThreeDayView({ selectedDate, dayPlacements, statuses, directions, onStatusChange, onExpand, gridZoom, darkMode, schedCfg, nowMins, onGridDrop, blockedTaskIds, onZoomChange, isMobile }) {
+export default function ThreeDayView({ selectedDate, dayPlacements, statuses, directions, onStatusChange, onExpand, gridZoom, darkMode, schedCfg, nowMins, onGridDrop, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag }) {
   var theme = getTheme(darkMode);
   var todayKey = formatDateKey(new Date());
 
@@ -59,6 +59,7 @@ export default function ThreeDayView({ selectedDate, dayPlacements, statuses, di
               onZoomChange={onZoomChange}
               isMobile={isMobile}
               layoutMode="compact"
+              onMarkerDrag={onMarkerDrag}
             />
           </div>
         ))}

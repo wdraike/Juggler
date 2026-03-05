@@ -43,7 +43,7 @@ import apiClient from '../../services/apiClient';
 
 export default function AppLayout() {
   // State
-  var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, setDirection, updateTask, addTasks, deleteTask, createTask, taskStateRef } = useTaskState();
+  var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, setDirection, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements } = useTaskState();
   var isMobile = useIsMobile();
   var config = useConfig();
   var { toast, toastHistory, showToast } = useToast();
@@ -389,6 +389,33 @@ export default function AppLayout() {
     allTasks, onUpdate: handleUpdateTask, gridZoom: config.gridZoom, showToast
   });
 
+  // Marker drag handler — convert minutes to time string and update task
+  var handleMarkerDrag = useCallback(function(taskId, totalMins) {
+    var hr = Math.floor(totalMins / 60);
+    var mn = totalMins % 60;
+    var ap = hr >= 12 ? 'PM' : 'AM';
+    var h12 = hr > 12 ? hr - 12 : (hr === 0 ? 12 : hr);
+    var newTime = h12 + ':' + (mn < 10 ? '0' : '') + mn + ' ' + ap;
+    pushUndo('drag marker');
+    updateTask(taskId, { time: newTime });
+
+    // Optimistically update placements so the marker stays where it was dropped
+    setPlacements(function(prev) {
+      var dp = Object.assign({}, prev.dayPlacements);
+      Object.keys(dp).forEach(function(dateKey) {
+        dp[dateKey] = dp[dateKey].map(function(p) {
+          if (p.task && p.task.id === taskId) {
+            return Object.assign({}, p, { start: totalMins });
+          }
+          return p;
+        });
+      });
+      return Object.assign({}, prev, { dayPlacements: dp });
+    });
+
+    showToast('Moved to ' + newTime, 'success');
+  }, [pushUndo, updateTask, showToast, setPlacements]);
+
   // AI ops handler — applies ops from AI command panel
   var handleAiOps = useCallback(function(ops, msg) {
     pushUndo('AI command');
@@ -525,6 +552,7 @@ export default function AppLayout() {
               blockedTaskIds={blockedTaskIds}
               onZoomChange={handleZoomChange}
               isMobile={isMobile}
+              onMarkerDrag={handleMarkerDrag}
             />
           )}
           {viewMode === '3day' && (
@@ -536,6 +564,7 @@ export default function AppLayout() {
               onGridDrop={handleGridDrop} blockedTaskIds={blockedTaskIds}
               onZoomChange={handleZoomChange}
               isMobile={isMobile}
+              onMarkerDrag={handleMarkerDrag}
             />
           )}
           {viewMode === 'week' && (
@@ -547,6 +576,7 @@ export default function AppLayout() {
               onGridDrop={handleGridDrop} blockedTaskIds={blockedTaskIds}
               onZoomChange={handleZoomChange}
               isMobile={isMobile}
+              onMarkerDrag={handleMarkerDrag}
             />
           )}
           {viewMode === 'month' && (

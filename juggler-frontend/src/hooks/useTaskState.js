@@ -172,6 +172,7 @@ export default function useTaskState() {
     addTasks,
     deleteTask,
     createTask,
-    taskStateRef
+    taskStateRef,
+    setPlacements
   };
 }

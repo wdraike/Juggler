@@ -10,7 +10,7 @@
  * column on the right for maximum card width.
  */
 
-import React, { useRef, useEffect, useMemo, useState } from 'react';
+import React, { useRef, useEffect, useMemo, useState, useCallback } from 'react';
 import { GRID_START, GRID_END, GRID_HOURS_COUNT, PRI_COLORS, LOC_TINT, locBgTint, locIcon } from '../../state/constants';
 import { formatHour } from '../../scheduler/dateHelpers';
 import { getTheme } from '../../theme/colors';
@@ -87,7 +87,7 @@ function computeLayout(placements, hourHeight, cardH, gap, colsPerSide, rightOnl
 export default function CalendarGrid({
   dateKey, placements, statuses, directions, onStatusChange, onExpand,
   gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locations, onHourLocationOverride, blockedTaskIds,
-  onZoomChange, isMobile, layoutMode
+  onZoomChange, isMobile, layoutMode, onMarkerDrag
 }) {
   var mode = layoutMode || 'full';
   var dm = getDims(mode, isMobile);
@@ -212,11 +212,64 @@ export default function CalendarGrid({
     return function() { el.removeEventListener('touchstart', ts); el.removeEventListener('touchmove', tm); el.removeEventListener('touchend', te); el.removeEventListener('wheel', wh); };
   }, []);
 
+  // --- Marker drag state ---
+  var [dragState, setDragState] = useState(null); // { taskId, startY, origStart, currentMins }
+  var dragRef = useRef(null); // mutable for mousemove perf
+  var gridElRef = elRef; // alias for clarity in handlers
+
+  var markerDragStart = useCallback(function(e, taskId, origStart) {
+    if (!onMarkerDrag) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    var state = { taskId: taskId, startClientY: clientY, origStart: origStart, currentMins: origStart };
+    dragRef.current = state;
+    setDragState(state);
+
+    function onMove(ev) {
+      var cy = ev.touches ? ev.touches[0].clientY : ev.clientY;
+      var dy = cy - dragRef.current.startClientY;
+      var deltaMins = (dy / hourHeight) * 60;
+      var newMins = Math.round((dragRef.current.origStart + deltaMins) / 5) * 5;
+      // Clamp to grid range
+      newMins = Math.max(GRID_START * 60, Math.min(GRID_END * 60 - 5, newMins));
+      if (newMins !== dragRef.current.currentMins) {
+        dragRef.current = Object.assign({}, dragRef.current, { currentMins: newMins });
+        setDragState(Object.assign({}, dragRef.current));
+      }
+    }
+    function onEnd() {
+      var final = dragRef.current;
+      if (final && final.currentMins !== final.origStart) {
+        onMarkerDrag(final.taskId, final.currentMins);
+      }
+      dragRef.current = null;
+      setDragState(null);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onEnd);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onEnd);
+    document.addEventListener('touchmove', onMove, { passive: false });
+    document.addEventListener('touchend', onEnd);
+  }, [onMarkerDrag, hourHeight]);
+
+  // Format minutes to time label for drag preview
+  function formatDragTime(totalMins) {
+    var h = Math.floor(totalMins / 60);
+    var m = totalMins % 60;
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    var h12 = h % 12 || 12;
+    return h12 + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm;
+  }
+
   var blockStartsByHour = {};
   blocks.forEach(function(bl) { var h = Math.floor(bl.start / 60); if (h >= GRID_START && h <= GRID_END) blockStartsByHour[h] = bl; });
 
   return (
-    <div ref={elRef} style={{ position: 'relative', height: totalH, minHeight: totalH, touchAction: 'pan-y', overflow: 'hidden' }}
+    <div ref={elRef} style={{ position: 'relative', height: totalH, minHeight: totalH, touchAction: 'pan-y', overflow: 'hidden', userSelect: dragState ? 'none' : undefined, cursor: dragState ? 'grabbing' : undefined }}
       onClick={locMenuHour !== null ? function() { setLocMenuHour(null); } : undefined}
       onDragOver={onGridDrop ? function(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } : undefined}
       onDrop={onGridDrop ? function(e) { onGridDrop(e, dateKey); } : undefined}
@@ -350,24 +403,52 @@ export default function CalendarGrid({
               <React.Fragment key={e.item.key || e.item.task.id}>
                 {/* Horizontal bar connecting markers behind the strip */}
                 <div style={{
-                  position: 'absolute', left: stripX - dm.MARKER_W, top: e.markerY,
+                  position: 'absolute', left: stripX - dm.MARKER_W,
+                  top: (dragState && dragState.taskId === e.item.task.id) ? ((dragState.currentMins - GRID_START * 60) / 60) * hourHeight : e.markerY,
                   width: dm.STRIP_W + dm.MARKER_W * 2, height: e.markerH,
                   background: pc, opacity: 0.08, borderRadius: 3,
                   zIndex: 5, pointerEvents: 'none'
                 }} />
-                {/* Duration-proportional markers on both sides of strip */}
-                <div style={{
-                  position: 'absolute', left: stripX - dm.MARKER_W, top: e.markerY,
-                  width: dm.MARKER_W, height: e.markerH,
-                  borderRadius: 3, background: pc, opacity: 0.65,
-                  zIndex: 15, pointerEvents: 'none'
-                }} />
-                <div style={{
-                  position: 'absolute', left: stripX + dm.STRIP_W, top: e.markerY,
-                  width: dm.MARKER_W, height: e.markerH,
-                  borderRadius: 3, background: pc, opacity: 0.65,
-                  zIndex: 15, pointerEvents: 'none'
-                }} />
+                {/* Duration-proportional markers on both sides of strip — draggable */}
+                {(function() {
+                  var isDragging = dragState && dragState.taskId === e.item.task.id;
+                  var markerTop = isDragging ? ((dragState.currentMins - GRID_START * 60) / 60) * hourHeight : e.markerY;
+                  var markerStyle = {
+                    position: 'absolute', top: markerTop,
+                    width: dm.MARKER_W, height: e.markerH,
+                    borderRadius: 3, background: pc,
+                    opacity: isDragging ? 0.9 : 0.65,
+                    zIndex: isDragging ? 55 : 15,
+                    cursor: onMarkerDrag ? 'grab' : 'default',
+                    transition: isDragging ? 'none' : undefined,
+                    boxShadow: isDragging ? '0 2px 8px rgba(0,0,0,0.3)' : undefined
+                  };
+                  var onDown = onMarkerDrag ? function(ev) { markerDragStart(ev, e.item.task.id, e.item.start); } : undefined;
+                  return (
+                    <>
+                      <div style={Object.assign({}, markerStyle, { left: stripX - dm.MARKER_W })}
+                        onMouseDown={onDown} onTouchStart={onDown} />
+                      <div style={Object.assign({}, markerStyle, { left: stripX + dm.STRIP_W })}
+                        onMouseDown={onDown} onTouchStart={onDown} />
+                      {isDragging && (
+                        <div style={{
+                          position: 'absolute',
+                          left: stripX + dm.STRIP_W + dm.MARKER_W + 6,
+                          top: markerTop - 10,
+                          background: darkMode ? '#1E293B' : '#FFFFFF',
+                          border: '2px solid ' + pc,
+                          borderRadius: 6, padding: '2px 8px',
+                          fontSize: 11, fontWeight: 700, color: pc,
+                          zIndex: 60, pointerEvents: 'none',
+                          whiteSpace: 'nowrap',
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+                        }}>
+                          {formatDragTime(dragState.currentMins)}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
                 {/* Fixed-height card */}
                 <div style={{
                   position: 'absolute', left: cLeft, top: e.cardY,
