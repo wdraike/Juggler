@@ -10,3 +10,5 @@ coverage/
 .cache/
 test-results/
 playwright-report/
+*.db
+scripts/db-backup/
