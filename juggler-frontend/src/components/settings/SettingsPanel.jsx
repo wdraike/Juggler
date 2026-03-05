@@ -22,12 +22,12 @@ var PRESET_BLOCKS = (function() {
 })();
 
 var TABS = [
-  { id: 'locations', label: 'Locations' },
-  { id: 'tools', label: 'Tools' },
-  { id: 'matrix', label: 'Tool Matrix' },
-  { id: 'templates', label: 'Templates' },
-  { id: 'projects', label: 'Projects' },
-  { id: 'preferences', label: 'Preferences' },
+  { id: 'locations', label: 'Locations', tip: 'Locations \u2014 define places you work (home, office, gym, etc.)' },
+  { id: 'tools', label: 'Tools', tip: 'Tools \u2014 define tools you use (laptop, phone, etc.)' },
+  { id: 'matrix', label: 'Tool Matrix', tip: 'Tool Matrix \u2014 which tools are available at each location' },
+  { id: 'templates', label: 'Templates', tip: 'Templates \u2014 define daily time blocks, locations, and schedule structure' },
+  { id: 'projects', label: 'Projects', tip: 'Projects \u2014 manage project names and colors' },
+  { id: 'preferences', label: 'Preferences', tip: 'Preferences \u2014 font size, grid zoom, task defaults' },
 ];
 
 export default function SettingsPanel({ onClose, darkMode, config, allProjectNames, isMobile }) {
@@ -65,7 +65,7 @@ export default function SettingsPanel({ onClose, darkMode, config, allProjectNam
           borderBottom: `1px solid ${theme.border}`, overflowX: 'auto'
         }}>
           {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} style={{
+            <button key={t.id} onClick={() => setTab(t.id)} title={t.tip} style={{
               border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
               background: tab === t.id ? theme.accent : 'transparent',
               color: tab === t.id ? '#FFF' : theme.textSecondary,
@@ -108,7 +108,7 @@ function LocationsTab({ config, theme }) {
             <button onClick={() => {
               var updated = config.locations.filter((_, idx) => idx !== i);
               config.updateLocations(updated);
-            }} style={{ border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 14 }}>&times;</button>
+            }} title={'Delete location ' + loc.name} style={{ border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 14 }}>&times;</button>
           </div>
         ))}
       </div>
@@ -120,7 +120,7 @@ function LocationsTab({ config, theme }) {
           if (!newId || !newName) return;
           config.updateLocations([...config.locations, { id: newId, name: newName, icon: newIcon || '\uD83D\uDCCD' }]);
           setNewId(''); setNewName(''); setNewIcon('');
-        }} style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FFF', fontSize: 12, cursor: 'pointer' }}>Add</button>
+        }} title="Add a new location" style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FFF', fontSize: 12, cursor: 'pointer' }}>Add</button>
       </div>
     </div>
   );
@@ -142,7 +142,7 @@ function ToolsTab({ config, theme }) {
             <span style={{ fontSize: 10, color: theme.textMuted }}>{tool.id}</span>
             <button onClick={() => {
               config.updateTools(config.tools.filter((_, idx) => idx !== i));
-            }} style={{ border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 14 }}>&times;</button>
+            }} title={'Delete tool ' + tool.name} style={{ border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 14 }}>&times;</button>
           </div>
         ))}
       </div>
@@ -154,7 +154,7 @@ function ToolsTab({ config, theme }) {
           if (!newId || !newName) return;
           config.updateTools([...config.tools, { id: newId, name: newName, icon: newIcon || '\uD83D\uDD27' }]);
           setNewId(''); setNewName(''); setNewIcon('');
-        }} style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FFF', fontSize: 12, cursor: 'pointer' }}>Add</button>
+        }} title="Add a new tool" style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FFF', fontSize: 12, cursor: 'pointer' }}>Add</button>
       </div>
     </div>
   );
@@ -179,7 +179,7 @@ function MatrixTab({ config, theme }) {
                   else { arr.push(tool.id); }
                   matrix[loc.id] = arr;
                   config.updateToolMatrix(matrix);
-                }} style={{
+                }} title={(available ? 'Remove' : 'Add') + ' ' + tool.name + ' from ' + loc.name} style={{
                   border: `1px solid ${available ? theme.accent : theme.border}`,
                   background: available ? theme.accent + '20' : 'transparent',
                   color: available ? theme.accent : theme.textMuted,
@@ -264,25 +264,25 @@ function PreferencesTab({ config, theme }) {
     <div>
       <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 12 }}>Preferences</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <label title="Scale the entire UI font size" style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
           Font size:
           <input type="range" min={80} max={140} value={config.fontSize} onChange={e => { var v = parseInt(e.target.value); config.setFontSize(v); savePrefs({ fontSize: v }); }} />
           <span style={{ fontSize: 11, color: theme.textMuted }}>{config.fontSize}%</span>
         </label>
-        <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <label title="Height in pixels per hour on the timeline grid" style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
           Grid zoom (px/hour):
           <input type="range" min={30} max={120} value={config.gridZoom} onChange={e => { var v = parseInt(e.target.value); config.setGridZoom(v); savePrefs({ gridZoom: v }); }} />
           <span style={{ fontSize: 11, color: theme.textMuted }}>{config.gridZoom}px</span>
         </label>
-        <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <label title="When enabled, new tasks default to splittable (can be broken into chunks)" style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
           <input type="checkbox" checked={config.splitDefault} onChange={e => { var v = e.target.checked; config.setSplitDefault(v); savePrefs({ splitDefault: v }); }} />
           Split tasks by default
         </label>
-        <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <label title="Smallest chunk size when splitting tasks" style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
           Min chunk (min):
           <input type="number" value={config.splitMinDefault} onChange={e => { var v = parseInt(e.target.value) || 15; config.setSplitMinDefault(v); savePrefs({ splitMinDefault: v }); }} style={{ width: 60, padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
         </label>
-        <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <label title="The scheduler won't place tasks earlier than this time" style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
           Earliest scheduling time:
           <select value={config.schedFloor} onChange={e => { var v = parseInt(e.target.value); config.setSchedFloor(v); savePrefs({ schedFloor: v }); }}
             style={{ padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }}>
@@ -638,7 +638,7 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBloc
           var tint = LOC_TINT[loc.id] || '#8B5CF6';
           var isActive = activeLoc === loc.id;
           return (
-            <button key={loc.id} onClick={function() { setActiveLoc(loc.id); }} style={{
+            <button key={loc.id} onClick={function() { setActiveLoc(loc.id); }} title={'Paint with ' + loc.name + ' \u2014 click/drag on timeline to set location'} style={{
               border: isActive ? '2px solid ' + tint : '1px solid ' + theme.border,
               borderRadius: 12, padding: '2px 10px', fontSize: 11,
               background: isActive ? tint + '25' : 'transparent',
@@ -963,6 +963,7 @@ function UnifiedTemplateTab({ config, theme }) {
             <div key={d} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 0 }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: theme.textSecondary }}>{d}</span>
               <select value={current} onChange={function(e) { setDayDefault(d, e.target.value); }}
+                title={'Default template for ' + d}
                 style={{ padding: '3px 4px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 11, width: '100%', minWidth: 0 }}>
                 {templateIds.map(function(id) {
                   var s = templates[id];
@@ -981,14 +982,14 @@ function UnifiedTemplateTab({ config, theme }) {
           var s = templates[id];
           return (
             <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <button onClick={function() { setSelectedTemplate(id); setEditingBlockIdx(null); }} style={{
+              <button onClick={function() { setSelectedTemplate(id); setEditingBlockIdx(null); }} title={'Edit template: ' + (s?.name || id)} style={{
                 border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
                 background: selectedTemplate === id ? theme.accent : theme.bgTertiary,
                 color: selectedTemplate === id ? '#FFF' : theme.textSecondary,
                 fontSize: 12, fontFamily: 'inherit'
               }}>{(s?.icon || '') + ' ' + (s?.name || id)}</button>
               {!s?.system && (
-                <button onClick={function() { removeTemplate(id); }} style={{
+                <button onClick={function() { removeTemplate(id); }} title={'Delete template ' + (s?.name || id)} style={{
                   border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 12
                 }}>&times;</button>
               )}
@@ -1001,7 +1002,7 @@ function UnifiedTemplateTab({ config, theme }) {
             style={{ width: 55, padding: '3px 5px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 10 }} />
           <input value={newName} onChange={function(e) { setNewName(e.target.value); }} placeholder="Name"
             style={{ width: 70, padding: '3px 5px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 10 }} />
-          <button onClick={addTemplate} style={{
+          <button onClick={addTemplate} title="Create a new schedule template" style={{
             border: 'none', borderRadius: 4, padding: '3px 8px', background: theme.accent, color: '#FFF', fontSize: 10, cursor: 'pointer', fontFamily: 'inherit'
           }}>+ New</button>
         </div>
@@ -1019,7 +1020,7 @@ function UnifiedTemplateTab({ config, theme }) {
             onBlocksChange={function(newBlocks) { saveTemplate(selectedTemplate, { blocks: newBlocks }); }}
           />
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-            <button onClick={function() { setShowExpanded(true); }} style={{
+            <button onClick={function() { setShowExpanded(true); }} title="Expand \u2014 open detailed slot-by-slot location editor" style={{
               border: '1px solid ' + theme.border, borderRadius: 4, padding: '2px 8px',
               background: 'transparent', color: theme.textSecondary, fontSize: 10,
               cursor: 'pointer', fontFamily: 'inherit'
@@ -1100,7 +1101,7 @@ function UnifiedTemplateTab({ config, theme }) {
             })}
           </div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
-            <button onClick={addBlock} style={{
+            <button onClick={addBlock} title="Add a custom time block" style={{
               border: 'none', borderRadius: 4, padding: '4px 10px', background: theme.accent, color: '#FFF', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit'
             }}>+ Custom</button>
             {PRESET_BLOCKS.map(function(preset) {
@@ -1108,7 +1109,7 @@ function UnifiedTemplateTab({ config, theme }) {
                 <button key={preset.tag + '_' + preset.start} onClick={function() {
                   var newBlock = Object.assign({}, preset, { id: preset.tag + '_' + Date.now(), loc: preset.loc || config.locations[0]?.id || 'home' });
                   saveTemplate(selectedTemplate, { blocks: blocks.concat([newBlock]) });
-                }} style={{
+                }} title={'Add preset block: ' + preset.name + ' (' + minsToTime(preset.start) + ' \u2013 ' + minsToTime(preset.end) + ')'} style={{
                   border: '1px solid ' + preset.color + '40', borderRadius: 4, padding: '3px 8px',
                   background: preset.color + '15', color: theme.text, fontSize: 10,
                   cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 3
@@ -1138,7 +1139,7 @@ function UnifiedTemplateTab({ config, theme }) {
                   var updated = Object.assign({}, config.templateOverrides);
                   delete updated[date];
                   config.updateTemplateOverrides(updated);
-                }} style={{ border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 12, marginLeft: 'auto' }}>&times;</button>
+                }} title={'Remove date override for ' + date} style={{ border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 12, marginLeft: 'auto' }}>&times;</button>
               </div>
             );
           })}
@@ -1159,7 +1160,7 @@ function UnifiedTemplateTab({ config, theme }) {
           var updated = Object.assign({}, config.templateOverrides, { [newOverrideDate]: newOverrideTemplate });
           config.updateTemplateOverrides(updated);
           setNewOverrideDate('');
-        }} style={{
+        }} title="Override the default template for a specific date" style={{
           border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FFF', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit'
         }}>Add Override</button>
       </div>

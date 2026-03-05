@@ -58,7 +58,7 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
           var totalDur = dayTasks.reduce((s, t) => s + (t.dur || 0), 0);
           var pct = total > 0 ? Math.round(done / total * 100) : 0;
           return (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: theme.textMuted }}>
+            <div title={done + ' of ' + total + ' tasks done (' + Math.round(doneDur / 60 * 10) / 10 + 'h / ' + Math.round(totalDur / 60 * 10) / 10 + 'h)'} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: theme.textMuted }}>
               <div style={{ width: 60, height: 5, background: theme.bgTertiary, borderRadius: 3, overflow: 'hidden' }}>
                 <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? '#10B981' : '#3B82F6', borderRadius: 3 }} />
               </div>
@@ -86,6 +86,7 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
           <select
             value={activeTemplate}
             onChange={handleTemplateChange}
+            title={isOverridden ? 'Schedule template (overridden for this date)' : 'Schedule template (day default: ' + defaultTemplate + ')'}
             style={{
               fontSize: 11, padding: '2px 4px', borderRadius: 4, cursor: 'pointer',
               background: isOverridden ? '#3B82F620' : (darkMode ? '#1E293B' : '#F8FAFC'),

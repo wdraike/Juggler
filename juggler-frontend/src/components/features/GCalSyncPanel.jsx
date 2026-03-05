@@ -147,7 +147,7 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
             <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 16 }}>
               Connect your Google Calendar to sync tasks and events bidirectionally.
             </div>
-            <button onClick={handleConnect} disabled={connecting} style={{
+            <button onClick={handleConnect} disabled={connecting} title="Authorize Juggler to read and write your Google Calendar" style={{
               border: 'none', borderRadius: 8, padding: '10px 24px',
               background: theme.accent, color: '#FFF', fontWeight: 600, fontSize: 13,
               cursor: 'pointer', fontFamily: 'inherit', opacity: connecting ? 0.5 : 1
@@ -171,7 +171,7 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
                   Sync every 5 minutes while app is open
                 </div>
               </div>
-              <label style={{ position: 'relative', display: 'inline-block', width: 40, height: 22, cursor: 'pointer' }}>
+              <label title={autoSync ? 'Disable auto-sync' : 'Enable auto-sync \u2014 syncs every 5 minutes'} style={{ position: 'relative', display: 'inline-block', width: 40, height: 22, cursor: 'pointer' }}>
                 <input type="checkbox" checked={!!autoSync} onChange={handleToggleAutoSync} style={{ opacity: 0, width: 0, height: 0 }} />
                 <span style={{
                   position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
@@ -195,7 +195,7 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
 
             {/* Sync Now button */}
             <div style={{ padding: '16px 0' }}>
-              <button onClick={handleSyncNow} disabled={syncing || scheduling} style={{
+              <button onClick={handleSyncNow} disabled={syncing || scheduling} title="Manually trigger a sync with Google Calendar now" style={{
                 border: 'none', borderRadius: 8, padding: '10px 20px', width: '100%',
                 background: theme.accent, color: '#FFF', fontWeight: 600, fontSize: 13,
                 cursor: 'pointer', fontFamily: 'inherit', opacity: (syncing || scheduling) ? 0.5 : 1
@@ -212,10 +212,10 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
               }}>
                 <div style={{ fontWeight: 600, marginBottom: 6 }}>Sync Results</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', fontSize: 11, color: theme.textSecondary }}>
-                  <div>Pushed: <strong style={{ color: theme.text }}>{results.pushed || 0}</strong></div>
-                  <div>Pulled: <strong style={{ color: theme.text }}>{results.pulled || 0}</strong></div>
-                  <div>Deleted (local): <strong style={{ color: theme.text }}>{results.deleted_local || 0}</strong></div>
-                  <div>Deleted (remote): <strong style={{ color: theme.text }}>{results.deleted_remote || 0}</strong></div>
+                  <div title="Tasks sent from Juggler to Google Calendar">Pushed: <strong style={{ color: theme.text }}>{results.pushed || 0}</strong></div>
+                  <div title="Events imported from Google Calendar into Juggler">Pulled: <strong style={{ color: theme.text }}>{results.pulled || 0}</strong></div>
+                  <div title="Items deleted locally to match Google Calendar">Deleted (local): <strong style={{ color: theme.text }}>{results.deleted_local || 0}</strong></div>
+                  <div title="Items deleted from Google Calendar to match Juggler">Deleted (remote): <strong style={{ color: theme.text }}>{results.deleted_remote || 0}</strong></div>
                 </div>
                 {results.errors && results.errors.length > 0 && (
                   <div style={{ marginTop: 6, color: '#e74c3c', fontSize: 11 }}>
@@ -227,7 +227,7 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
 
             {/* Disconnect */}
             <div style={{ textAlign: 'center' }}>
-              <button onClick={handleDisconnect} style={{
+              <button onClick={handleDisconnect} title="Revoke access and stop syncing with Google Calendar" style={{
                 border: 'none', background: 'transparent', color: theme.textMuted,
                 fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
                 textDecoration: 'underline'

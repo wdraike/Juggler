@@ -129,6 +129,7 @@ export default function AiCommandPanel({
         onFocus={function(e) { e.stopPropagation(); if (autoHideRef.current) clearTimeout(autoHideRef.current); }}
         onKeyDown={function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
         placeholder={aiLoading ? 'Thinking...' : 'Ask AI: "reschedule my day", "wfh"...'}
+        title='AI commands \u2014 type "wfh", "office", or natural language like "move groceries to Friday"'
         autoComplete="off" autoCorrect="off" spellCheck="false"
         style={{
           flex: 1, background: darkMode ? '#0F172A' : '#F1F5F9',
@@ -149,11 +150,12 @@ export default function AiCommandPanel({
               borderRadius: 6, padding: '4px 6px', fontSize: 14, cursor: 'pointer',
               flexShrink: 0, lineHeight: 1, fontFamily: 'inherit'
             }}
-            title="Clear"
+            title="Clear command input"
           >&times;</button>
           <button
             onClick={function(e) { e.stopPropagation(); handleSend(); }}
             disabled={aiLoading}
+            title="Send command"
             style={{
               background: aiLoading ? theme.bgTertiary : '#3B82F6', color: 'white', border: 'none',
               borderRadius: 6, padding: isMobile ? '8px 12px' : '4px 10px', fontSize: 12, fontWeight: 600,
@@ -165,6 +167,7 @@ export default function AiCommandPanel({
       {!aiCmd.trim() && aiLog.length > 0 && (
         <button
           onClick={function(e) { e.stopPropagation(); setShowLog(!showLog); if (autoHideRef.current) clearTimeout(autoHideRef.current); }}
+          title={showLog ? 'Hide command history' : 'Show command history'}
           style={{
             background: showLog ? '#3B82F6' : 'transparent', color: showLog ? 'white' : theme.textMuted,
             border: 'none', borderRadius: 6, padding: '4px 6px', fontSize: 12,

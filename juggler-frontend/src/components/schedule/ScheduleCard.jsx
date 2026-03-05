@@ -30,10 +30,10 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
   var statusIcon = status === 'done' ? '\u2713' : status === 'wip' ? '\u231B' : status === 'cancel' ? '\u2715' : status === 'skip' ? '\u21ED' : null;
   var startLabel = item.start != null ? formatStartTime(item.start) : null;
   var typeBadges = [];
-  if (task.datePinned) typeBadges.push('\uD83D\uDCCD');
-  if (task.habit) typeBadges.push('\uD83D\uDD01');
-  if (task.rigid || task.fixed) typeBadges.push('\uD83D\uDCCC');
-  if (item.splitTotal > 1) typeBadges.push('\u2702\uFE0F');
+  if (task.datePinned) typeBadges.push({ icon: '\uD83D\uDCCD', title: 'Date pinned \u2014 stays on this date, scheduler adjusts time only' });
+  if (task.habit) typeBadges.push({ icon: '\uD83D\uDD01', title: 'Habit \u2014 recurring daily task' });
+  if (task.rigid || task.fixed) typeBadges.push({ icon: '\uD83D\uDCCC', title: 'Rigid \u2014 locked to set date and time, scheduler won\u2019t move it' });
+  if (item.splitTotal > 1) typeBadges.push({ icon: '\u2702\uFE0F', title: 'Split \u2014 broken into ' + item.splitTotal + ' chunks' });
 
   // Build details snippets for row 3
   var details = [];
@@ -106,7 +106,7 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
           <span style={{ fontSize: 10, color: darkMode ? '#94A3B8' : '#475569', fontWeight: 700, display: 'flex', gap: 3, alignItems: 'center' }}>
             {statusIcon && <span>{statusIcon}</span>}
             {startLabel && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted }}>{startLabel}</span>}
-            {isBlocked && <span style={{ color: '#EF4444' }}>{'\uD83D\uDEAB'}</span>}
+            {isBlocked && <span style={{ color: '#EF4444' }} title="Blocked \u2014 waiting on incomplete dependencies">{'\uD83D\uDEAB'}</span>}
           </span>
         ) : (
           <>
@@ -115,16 +115,16 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
             <div style={{ flex: 1 }} />
             {typeBadges.length > 0 && (
               <span style={{ fontSize: 9, display: 'flex', gap: 1, alignItems: 'center' }}>
-                {typeBadges.map(function(b, i) { return <span key={i}>{b}</span>; })}
+                {typeBadges.map(function(b, i) { return <span key={i} title={b.title}>{b.icon}</span>; })}
               </span>
             )}
             {task.location && task.location.length > 0 && (function() {
               var icons = task.location.map(function(lid) { return locIcon(lid); }).filter(Boolean);
               return icons.length > 0 ? <span style={{ fontSize: 10 }}>{icons.join(' ')}</span> : null;
             })()}
-            {isBlocked && <span style={{ color: '#EF4444', fontSize: 11 }}>{'\uD83D\uDEAB'}</span>}
+            {isBlocked && <span style={{ color: '#EF4444', fontSize: 11 }} title="Blocked \u2014 waiting on incomplete dependencies">{'\uD83D\uDEAB'}</span>}
             {task.pri && (
-              <span style={{
+              <span title={'Priority ' + task.pri} style={{
                 fontSize: 9, fontWeight: 700,
                 color: priColor,
                 background: priColor + '18',

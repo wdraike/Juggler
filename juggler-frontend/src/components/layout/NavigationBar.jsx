@@ -7,23 +7,23 @@ import React, { useState, useRef, useEffect } from 'react';
 import { getTheme } from '../../theme/colors';
 
 const VIEW_MODES = [
-  { id: 'day', label: 'Day', icon: '1' },
-  { id: '3day', label: '3-Day', icon: '3' },
-  { id: 'week', label: 'Week', icon: '7' },
-  { id: 'month', label: 'Month', icon: 'M' },
-  { id: 'list', label: 'List', icon: '\u2261' },
-  { id: 'priority', label: 'Priority', icon: 'P' },
-  { id: 'conflicts', label: 'Issues', icon: '!' },
+  { id: 'day', label: 'Day', icon: '1', tip: 'Day view \u2014 single-day timeline grid' },
+  { id: '3day', label: '3-Day', icon: '3', tip: '3-Day view \u2014 three-day side-by-side timeline' },
+  { id: 'week', label: 'Week', icon: '7', tip: 'Week view \u2014 seven-day timeline overview' },
+  { id: 'month', label: 'Month', icon: 'M', tip: 'Month view \u2014 date grid, drag tasks between dates' },
+  { id: 'list', label: 'List', icon: '\u2261', tip: 'List view \u2014 all tasks grouped by date' },
+  { id: 'priority', label: 'Priority', icon: 'P', tip: 'Priority view \u2014 P1-P4 kanban columns' },
+  { id: 'conflicts', label: 'Issues', icon: '!', tip: 'Issues view \u2014 unplaced tasks, conflicts, and deadline misses' },
 ];
 
 const FILTERS = [
-  { id: 'open', label: 'Open' },
-  { id: 'action', label: 'Action' },
-  { id: 'all', label: 'All' },
-  { id: 'done', label: 'Done' },
-  { id: 'wip', label: 'WIP' },
-  { id: 'blocked', label: 'Blocked' },
-  { id: 'unplaced', label: 'Unplaced' },
+  { id: 'open', label: 'Open', tip: 'Tasks not done, cancelled, or skipped' },
+  { id: 'action', label: 'Action', tip: 'Open + in-progress tasks needing attention' },
+  { id: 'all', label: 'All', tip: 'All tasks regardless of status' },
+  { id: 'done', label: 'Done', tip: 'Completed tasks only' },
+  { id: 'wip', label: 'WIP', tip: 'Tasks currently in progress' },
+  { id: 'blocked', label: 'Blocked', tip: 'Tasks waiting on incomplete dependencies' },
+  { id: 'unplaced', label: 'Unplaced', tip: 'Tasks the scheduler couldn\u2019t place into any time slot' },
 ];
 
 export default function NavigationBar({ viewMode, setViewMode, filter, setFilter, search, setSearch, darkMode, projectFilter, setProjectFilter, allProjectNames, hideHabits, setHideHabits, unplacedCount, blockedCount, isMobile }) {
@@ -62,7 +62,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
               minHeight: isMobile ? 32 : undefined,
               flex: isMobile ? 1 : undefined, textAlign: 'center'
             }}
-            title={v.label}
+            title={v.tip}
           >
             {isMobile ? v.icon : v.label}
           </button>
@@ -80,6 +80,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
                 : f.id === 'blocked' && blockedCount > 0 ? blockedCount : null;
               return (
                 <button key={f.id} onClick={() => setFilter(f.id)}
+                  title={f.tip}
                   style={{
                     border: `1px solid ${filter === f.id ? theme.accent : theme.border}`,
                     borderRadius: 12, padding: '3px 10px', cursor: 'pointer',
@@ -103,6 +104,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
 
           {setHideHabits && (
             <button onClick={() => setHideHabits(h => !h)}
+              title={hideHabits ? 'Show recurring habit tasks' : 'Hide recurring habit tasks from view'}
               style={{
                 border: `1px solid ${hideHabits ? theme.accent : theme.border}`,
                 borderRadius: 12, padding: '3px 10px', cursor: 'pointer',
@@ -119,6 +121,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
             <select
               value={projectFilter || ''}
               onChange={e => setProjectFilter(e.target.value)}
+              title="Filter tasks by project"
               style={{
                 padding: '4px 8px', borderRadius: 8, fontSize: 11, cursor: 'pointer',
                 border: `1px solid ${projectFilter ? theme.accent : theme.border}`,
@@ -136,6 +139,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
             <input
               type="text" value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Search tasks..."
+              title="Search tasks by name, project, or notes"
               style={{
                 width: '100%', padding: '5px 28px 5px 10px',
                 border: `1px solid ${theme.inputBorder}`, borderRadius: 8,
@@ -158,6 +162,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
       {isMobile && (
         <div ref={filterRef} style={{ position: 'relative', flex: '1 1 100%', display: 'flex', gap: 6, alignItems: 'center' }}>
           <button onClick={function() { setShowFilterDropdown(function(v) { return !v; }); }}
+            title="Filter tasks by status"
             style={{
               border: `1px solid ${theme.accent}`, borderRadius: 12, padding: '4px 10px',
               cursor: 'pointer', background: theme.accent + '20', color: theme.accent,

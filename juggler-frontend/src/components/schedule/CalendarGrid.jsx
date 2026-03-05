@@ -245,6 +245,7 @@ export default function CalendarGrid({
                 e.stopPropagation();
                 setLocMenuHour(locMenuHour === hour ? null : hour);
               } : undefined}
+              title={onHourLocationOverride ? 'Click to change location for ' + formatHour(hour) : undefined}
               style={{ position: 'absolute', top: i * hourHeight, left: 0, width: '100%', textAlign: 'center', pointerEvents: onHourLocationOverride ? 'auto' : 'none', cursor: onHourLocationOverride ? 'pointer' : 'default' }}
             >
               <div style={{ fontSize: mode === 'mini' ? 7 : (mode === 'compact' ? 8 : (isMobile ? 9 : 11)), color: theme.textMuted, userSelect: 'none', lineHeight: 1.2, marginTop: 1 }}>

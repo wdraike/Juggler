@@ -52,10 +52,10 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
       {!isMobile && <div style={{ fontWeight: 700, fontSize: 16, color: theme.text }}>Juggler</div>}
 
       {/* Progress bar */}
-      <div style={{ flex: 0, minWidth: isMobile ? 50 : 80, maxWidth: isMobile ? 80 : 140, height: 6, background: theme.bgTertiary, borderRadius: 3, overflow: 'hidden' }}>
+      <div title={doneCount + ' of ' + totalCount + ' tasks done today (' + pct + '%)'} style={{ flex: 0, minWidth: isMobile ? 50 : 80, maxWidth: isMobile ? 80 : 140, height: 6, background: theme.bgTertiary, borderRadius: 3, overflow: 'hidden' }}>
         <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? '#10B981' : '#3B82F6', borderRadius: 3, transition: 'width 0.3s' }} />
       </div>
-      <span style={{ fontSize: 11, color: theme.textMuted, minWidth: 28 }}>{pct}%</span>
+      <span style={{ fontSize: 11, color: theme.textMuted, minWidth: 28 }} title={doneCount + ' of ' + totalCount + ' tasks done today'}>{pct}%</span>
 
       {/* AI command input — inline in header */}
       {aiPanel}
@@ -79,17 +79,17 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
                 }} />
               </span>
             ) : (
-              <button onClick={onReschedule} style={btnStyle(theme, isMobile)} title="Reschedule">&#x1F504;</button>
+              <button onClick={onReschedule} style={btnStyle(theme, isMobile)} title="Reschedule \u2014 re-run the scheduler to place flexible tasks into available slots">&#x1F504;</button>
             ))}
-            <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings">&#x2699;&#xFE0F;</button>
-            <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export">&#x1F4E6;</button>
+            <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings \u2014 locations, tools, templates, and preferences">&#x2699;&#xFE0F;</button>
+            <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export \u2014 save or load tasks as JSON">&#x1F4E6;</button>
             {onShowGCalSync && (
-              <button onClick={onShowGCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title="Google Calendar Sync">
+              <button onClick={onShowGCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title="Google Calendar Sync \u2014 bidirectional sync with Google Calendar">
                 <span style={gcalSyncing ? { display: 'inline-block', animation: 'gcal-spin 1s linear infinite' } : undefined}>&#x1F4C5;</span>
                 {gcalSyncing && <span style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: '#3B82F6' }} />}
               </button>
             )}
-            {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help & Shortcuts">&#x2753;</button>}
+            {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help guide \u2014 how the scheduler works, task properties, keyboard shortcuts">&#x2753;</button>}
             <button onClick={() => setDarkMode(d => !d)} style={btnStyle(theme, isMobile)} title="Toggle dark mode">
               {darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19'}
             </button>

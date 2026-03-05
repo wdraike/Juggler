@@ -219,12 +219,17 @@ export default function DependencyChainPopup({ focusTaskId, allTasks, statuses, 
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '10px 16px', borderBottom: '1px solid ' + theme.border
         }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: theme.text }}>
-            Dependency Chain ({orderedTasks.length} tasks)
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: theme.text }}>
+              Dependency Chain ({orderedTasks.length} tasks)
+            </div>
+            <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>
+              Drag a task onto another to link. Click <span style={{ fontWeight: 600 }}>+ dep</span> to add. Click a chip to remove.
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             {chainDirty && (
-              <button onClick={chainSave} style={{
+              <button onClick={chainSave} title="Save dependency changes to all tasks in the chain" style={{
                 border: 'none', borderRadius: 6, padding: '4px 12px',
                 background: '#10B981', color: '#FFF', fontSize: 11, fontWeight: 600,
                 cursor: 'pointer', fontFamily: 'inherit'
@@ -386,6 +391,7 @@ function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor,
             <div
               key={ct.id}
               data-chain-id={ct.id}
+              title={ct.text + (dateLabel ? ' (' + dateLabel + ')' : '') + ' \u2014 drag onto another task to add dependency'}
               draggable
               onDragStart={function(e) {
                 dragModeRef.current = 'link';
@@ -442,7 +448,7 @@ function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor,
                     var depTask = allTasks.find(function(x) { return x.id === depId; });
                     var depDone = (statuses[depId] || '') === 'done';
                     return (
-                      <span key={depId} onClick={function(e) { e.stopPropagation(); chainRemoveDep(ct.id, depId); }} style={{
+                      <span key={depId} onClick={function(e) { e.stopPropagation(); chainRemoveDep(ct.id, depId); }} title={'Click to remove dependency on \u201C' + (depTask ? depTask.text : depId) + '\u201D'} style={{
                         display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 9, padding: '0px 4px', borderRadius: 3,
                         background: depDone ? '#10B98118' : '#F59E0B18', color: depDone ? '#10B981' : '#D97706',
                         fontWeight: 500, cursor: 'pointer'
@@ -455,7 +461,7 @@ function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor,
                     );
                   });
                 })()}
-                <button onClick={function(e) { e.stopPropagation(); setChainAddDepFor(chainAddDepFor === ct.id ? null : ct.id); }} style={{
+                <button onClick={function(e) { e.stopPropagation(); setChainAddDepFor(chainAddDepFor === ct.id ? null : ct.id); }} title={chainAddDepFor === ct.id ? 'Cancel adding dependency' : 'Add a dependency to this task'} style={{
                   fontSize: 8, padding: '0px 4px', borderRadius: 3,
                   border: '1px dashed ' + (chainAddDepFor === ct.id ? theme.accent : theme.border),
                   background: chainAddDepFor === ct.id ? theme.accent + '15' : 'transparent',
@@ -556,6 +562,7 @@ function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor,
                 <div
                   key={pt.id}
                   data-chain-id={pt.id}
+                  title={pt.text + ' \u2014 drag onto a task to add as dependency'}
                   draggable
                   onMouseDown={function() { dragModeRef.current = 'link'; }}
                   onDragStart={function(e) {
