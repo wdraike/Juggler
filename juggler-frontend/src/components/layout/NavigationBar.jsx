@@ -132,16 +132,25 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
             </select>
           )}
 
-          <input
-            type="text" value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search tasks..."
-            style={{
-              flex: 1, minWidth: 120, maxWidth: 240, padding: '5px 10px',
-              border: `1px solid ${theme.inputBorder}`, borderRadius: 8,
-              background: theme.input, color: theme.text, fontSize: 12,
-              fontFamily: 'inherit', outline: 'none'
-            }}
-          />
+          <div style={{ position: 'relative', flex: 1, minWidth: 120, maxWidth: 240 }}>
+            <input
+              type="text" value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search tasks..."
+              style={{
+                width: '100%', padding: '5px 28px 5px 10px',
+                border: `1px solid ${theme.inputBorder}`, borderRadius: 8,
+                background: theme.input, color: theme.text, fontSize: 12,
+                fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box'
+              }}
+            />
+            {search && (
+              <button onClick={() => setSearch('')} style={{
+                position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+                border: 'none', background: 'transparent', cursor: 'pointer',
+                color: theme.textMuted, fontSize: 14, padding: 0, lineHeight: 1, fontFamily: 'inherit'
+              }} title="Clear search">&times;</button>
+            )}
+          </div>
         </>
       )}
 
@@ -160,16 +169,25 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
           </button>
 
           {/* Search inline on mobile — full remaining width */}
-          <input
-            type="text" value={search} onChange={function(e) { setSearch(e.target.value); }}
-            placeholder="Search..."
-            style={{
-              flex: 1, minWidth: 80, padding: '5px 10px',
-              border: `1px solid ${theme.inputBorder}`, borderRadius: 8,
-              background: theme.input, color: theme.text, fontSize: 12,
-              fontFamily: 'inherit', outline: 'none'
-            }}
-          />
+          <div style={{ position: 'relative', flex: 1, minWidth: 80 }}>
+            <input
+              type="text" value={search} onChange={function(e) { setSearch(e.target.value); }}
+              placeholder="Search..."
+              style={{
+                width: '100%', padding: '5px 28px 5px 10px',
+                border: `1px solid ${theme.inputBorder}`, borderRadius: 8,
+                background: theme.input, color: theme.text, fontSize: 12,
+                fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box'
+              }}
+            />
+            {search && (
+              <button onClick={function() { setSearch(''); }} style={{
+                position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+                border: 'none', background: 'transparent', cursor: 'pointer',
+                color: theme.textMuted, fontSize: 14, padding: 0, lineHeight: 1, fontFamily: 'inherit'
+              }} title="Clear search">&times;</button>
+            )}
+          </div>
 
           {showFilterDropdown && (
             <div style={{

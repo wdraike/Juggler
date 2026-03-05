@@ -11,9 +11,19 @@ export function cloneBlocks(blocks) {
   });
 }
 
-export function getBlocksForDate(dateStr, blocksMap) {
+export function getBlocksForDate(dateStr, blocksMap, cfg) {
   var d = parseDate(dateStr);
   if (!d) return blocksMap.Mon || [];
+  // Check for date-specific template override
+  if (cfg && cfg.scheduleTemplates) {
+    var templateId = null;
+    if (cfg.locScheduleOverrides && cfg.locScheduleOverrides[dateStr]) {
+      templateId = cfg.locScheduleOverrides[dateStr];
+    }
+    if (templateId && cfg.scheduleTemplates[templateId]) {
+      return cfg.scheduleTemplates[templateId].blocks || [];
+    }
+  }
   var dayName = DAY_NAMES[d.getDay()];
   return blocksMap[dayName] || [];
 }

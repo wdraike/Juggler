@@ -108,8 +108,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (!habitDropped) { if (!habitsByDate[tdKey]) habitsByDate[tdKey] = []; habitsByDate[tdKey].push(t); }
       return;
     }
-    // Non-rigid habits: go into the pool so the scheduler can place them
-    // optimally within their when windows (respects today's past-time blocking)
+    // Non-rigid habits on past days: drop them (missed day = missed day).
+    // Only today's and future habits enter the pool.
+    if (t.habit && isPast && tdKey !== effectiveTodayKey) return;
 
     if (isPast || st === "wip" || st === "" || st === "other") {
       var earliest = null;
@@ -118,10 +119,20 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         var saDate = parseDate(t.startAfter);
         if (saDate) { saDate.setHours(0, 0, 0, 0); earliest = earliest ? (saDate > earliest ? saDate : earliest) : saDate; }
       }
-      if (!isPast && td >= localToday) {
+      // Pinned tasks: user explicitly set the date, so honor it as a floor.
+      // Generated recurring instances: their date is the intended occurrence day,
+      // so treat it as a floor to prevent pulling future instances into earlier days.
+      // Unpinned flexible tasks: scheduler-controlled, only startAfter constrains.
+      if ((t.datePinned || t.generated) && !isPast && td >= localToday) {
         if (!earliest || earliest <= td) {
           earliest = td;
         }
+      }
+      // Habits are day-specific: pin them to their date (floor + ceiling).
+      // If they can't fit on their day, they go unplaced (missed).
+      if (t.habit && td) {
+        if (!earliest || td > earliest) earliest = td;
+        ceiling = td;
       }
       var deadline = t.due ? parseDate(t.due) : null;
       if (deadline) deadline.setHours(23, 59, 59, 999);
@@ -165,7 +176,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     var occ = {};
     dayOcc[d.key] = occ;
     dayPlaced[d.key] = [];
-    dayBlocks[d.key] = getBlocksForDate(d.key, cfg.timeBlocks);
+    dayBlocks[d.key] = getBlocksForDate(d.key, cfg.timeBlocks, cfg);
     dayWindows[d.key] = buildWindowsFromBlocks(dayBlocks[d.key]);
     if (d.isToday) {
       var nowSlot = Math.ceil(nowMins / 15) * 15;
@@ -569,6 +580,13 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
           continue;
         }
 
+        // Non-deadline dependencies: defer to Phase 2 (early-placed from today)
+        // instead of late-placing them near the deadline.  Phase 2's depsMetByDate
+        // ensures they're placed before any task that depends on them.
+        if (!cItem.deadline) {
+          continue;
+        }
+
         var targetDate = null;
         if (ci === 0) {
           targetDate = cItem.deadline;
@@ -619,6 +637,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         if (item.remaining <= 0) break;
         var d = dates[di];
         if (d.date < localToday) continue;
+        if (item.earliestDate && d.date < item.earliestDate) continue;
+        if (item.ceiling && d.date > item.ceiling) continue;
         if (!canPlaceOnDate(item.task, d)) continue;
         if (!depsMetByDate(item.task, d)) continue;
         var wins = getWhenWindows(item.task.when, dayWindows[d.key]);
@@ -662,12 +682,14 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       return !item.deadline && item.remaining > 0 && (item.task.pri || "P3") === priLevel;
     });
     items.sort(function(a, b) {
-      // Non-rigid habits go after regular tasks so they fill gaps
-      var aHabit = a.task.habit && !a.task.rigid ? 1 : 0;
-      var bHabit = b.task.habit && !b.task.rigid ? 1 : 0;
+      // Habits before regular tasks — daily commitments get first pick
+      var aHabit = a.task.habit ? 0 : 1;
+      var bHabit = b.task.habit ? 0 : 1;
       if (aHabit !== bHabit) return aHabit - bHabit;
-      var aDate = parseDate(a.task.date) || localToday;
-      var bDate = parseDate(b.task.date) || localToday;
+      // Pinned tasks sort by their date; unpinned tasks sort as "today"
+      // so they compete fairly regardless of prior scheduler-assigned dates.
+      var aDate = a.task.datePinned ? (parseDate(a.task.date) || localToday) : localToday;
+      var bDate = b.task.datePinned ? (parseDate(b.task.date) || localToday) : localToday;
       var dd = aDate - bDate;
       if (dd !== 0) return dd;
       return whenOptionCount(a.task) - whenOptionCount(b.task);
@@ -738,6 +760,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         if (item.remaining <= 0) break;
         var d = dates[di];
         if (item.earliestDate && d.date < item.earliestDate) continue;
+        if (item.ceiling && d.date > item.ceiling) continue;
         if (d.date < localToday) continue;
         if (!canPlaceOnDate(item.task, d)) continue;
         if (!depsMetByDate(item.task, d)) continue;
@@ -794,6 +817,34 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       item._parts[p].splitPart = p + 1;
       item._parts[p].splitTotal = item._parts.length;
     }
+  });
+
+  // Annotate move reasons for rescheduled tasks
+  pool.forEach(function(item) {
+    if (item._parts.length === 0) return;
+    var t = item.task;
+    var origKey = t.date ? t.date.replace(/^0/, '') : null;
+    item._parts.forEach(function(part) {
+      if (!origKey || origKey === part._dateKey) return;
+      var reasons = [];
+      var origDate = parseDate(t.date);
+      if (origDate && origDate < localToday) reasons.push('from ' + origKey);
+      if (t.dayReq && t.dayReq !== 'any') {
+        var dayLabels = {M:'Mon',T:'Tue',W:'Wed',R:'Thu',F:'Fri',Sa:'Sat',Su:'Sun',weekday:'weekday',weekend:'weekend'};
+        reasons.push((dayLabels[t.dayReq] || t.dayReq) + ' only');
+      }
+      if (t.startAfter) reasons.push('after ' + t.startAfter);
+      var deps = getTaskDeps(t);
+      if (deps.length > 0) {
+        var depNames = deps.slice(0, 2).map(function(did) {
+          var dt = allTasks.find(function(at) { return at.id === did; });
+          return dt ? dt.text.substring(0, 20) : did;
+        });
+        reasons.push('after ' + depNames.join(', '));
+      }
+      if (t.due) reasons.push('due ' + t.due);
+      if (reasons.length > 0) part._moveReason = reasons.join(' \u00B7 ');
+    });
   });
 
   // Collect unplaced

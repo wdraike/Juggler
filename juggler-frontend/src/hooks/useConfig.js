@@ -1,56 +1,137 @@
 /**
- * useConfig — manages locations, tools, matrix, time blocks, schedules, preferences
+ * useConfig — manages locations, tools, matrix, schedule templates, preferences
  */
 
 import { useState, useCallback } from 'react';
 import apiClient from '../services/apiClient';
 import {
   DEFAULT_LOCATIONS, DEFAULT_TOOLS, DEFAULT_TOOL_MATRIX,
-  DEFAULT_TIME_BLOCKS, DEFAULT_WEEKDAY_BLOCKS, DEFAULT_WEEKEND_BLOCKS
+  DEFAULT_TIME_BLOCKS, DEFAULT_WEEKDAY_BLOCKS, DEFAULT_WEEKEND_BLOCKS,
+  DEFAULT_SCHEDULE_TEMPLATES, DEFAULT_TEMPLATE_DEFAULTS
 } from '../state/constants';
 
-export default function useConfig() {
-  const [locations, setLocations] = useState(DEFAULT_LOCATIONS);
-  const [tools, setTools] = useState(DEFAULT_TOOLS);
-  const [toolMatrix, setToolMatrix] = useState(DEFAULT_TOOL_MATRIX);
-  const [timeBlocks, setTimeBlocks] = useState(DEFAULT_TIME_BLOCKS);
-  const [projects, setProjects] = useState([]);
-  const [locSchedules, setLocSchedules] = useState(function() {
-    var weekdayHours = {}, weekendHours = {};
-    DEFAULT_WEEKDAY_BLOCKS.forEach(function(b) {
-      for (var m = b.start; m < b.end; m += 15) weekdayHours[m] = b.loc || "home";
+/** Derive legacy timeBlocks from unified templates + day defaults */
+function deriveTimeBlocks(templates, defaults) {
+  var result = {};
+  ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(function(day) {
+    var tmplId = defaults[day] || 'weekday';
+    var tmpl = templates[tmplId];
+    result[day] = tmpl ? tmpl.blocks.map(function(b) { return Object.assign({}, b); }) : [];
+  });
+  return result;
+}
+
+/** Derive legacy locSchedules from unified templates */
+function deriveLocSchedules(templates) {
+  var result = {};
+  Object.keys(templates).forEach(function(id) {
+    var tmpl = templates[id];
+    var hours = {};
+    // Fill from blocks
+    (tmpl.blocks || []).forEach(function(b) {
+      for (var m = b.start; m < b.end; m += 15) {
+        hours[m] = b.loc || 'home';
+      }
     });
-    DEFAULT_WEEKEND_BLOCKS.forEach(function(b) {
-      for (var m = b.start; m < b.end; m += 15) weekendHours[m] = b.loc || "home";
-    });
-    return {
-      weekday: { name: "Weekday", icon: "\uD83C\uDFE2", system: true, hours: weekdayHours },
-      weekend: { name: "Weekend", icon: "\uD83C\uDFE0", system: true, hours: weekendHours },
+    // Apply overrides
+    if (tmpl.locOverrides) {
+      Object.keys(tmpl.locOverrides).forEach(function(k) {
+        hours[parseInt(k)] = tmpl.locOverrides[k];
+      });
+    }
+    result[id] = { name: tmpl.name, icon: tmpl.icon, system: !!tmpl.system, hours: hours };
+  });
+  return result;
+}
+
+/** Migrate old timeBlocks + locSchedules into unified format */
+function migrateToUnified(timeBlocks, locSchedules, locScheduleDefaults) {
+  // Map template IDs to which days use them
+  var templateDays = {};
+  Object.keys(locScheduleDefaults || {}).forEach(function(day) {
+    var tmplId = locScheduleDefaults[day];
+    if (!templateDays[tmplId]) templateDays[tmplId] = [];
+    templateDays[tmplId].push(day);
+  });
+
+  var result = {};
+  var locSchedKeys = Object.keys(locSchedules || {});
+
+  // Ensure weekday/weekend exist
+  if (locSchedKeys.indexOf('weekday') < 0) locSchedKeys.push('weekday');
+  if (locSchedKeys.indexOf('weekend') < 0) locSchedKeys.push('weekend');
+
+  locSchedKeys.forEach(function(tmplId) {
+    var tmpl = (locSchedules || {})[tmplId] || {};
+    // Find a representative day to get blocks from
+    var sampleDay = (templateDays[tmplId] || [])[0];
+    if (!sampleDay) {
+      if (tmplId === 'weekday') sampleDay = 'Mon';
+      else if (tmplId === 'weekend') sampleDay = 'Sat';
+    }
+    var blocks = sampleDay ? (timeBlocks[sampleDay] || []).map(function(b) { return Object.assign({}, b); }) : [];
+
+    // Compute locOverrides: slots where location differs from block's loc
+    var locOverrides = {};
+    if (tmpl.hours) {
+      Object.keys(tmpl.hours).forEach(function(k) {
+        var m = parseInt(k);
+        var hourLoc = tmpl.hours[k];
+        var block = null;
+        for (var i = 0; i < blocks.length; i++) {
+          if (m >= blocks[i].start && m < blocks[i].end) { block = blocks[i]; break; }
+        }
+        if (block) {
+          if (hourLoc !== (block.loc || 'home')) locOverrides[m] = hourLoc;
+        } else {
+          // Slot outside any block — store as override
+          locOverrides[m] = hourLoc;
+        }
+      });
+    }
+
+    result[tmplId] = {
+      name: tmpl.name || (tmplId === 'weekday' ? 'Weekday' : tmplId === 'weekend' ? 'Weekend' : tmplId),
+      icon: tmpl.icon || (tmplId === 'weekday' ? '\uD83C\uDFE2' : tmplId === 'weekend' ? '\uD83C\uDFE0' : '\uD83D\uDCC5'),
+      system: tmpl.system !== undefined ? tmpl.system : (tmplId === 'weekday' || tmplId === 'weekend'),
+      blocks: blocks,
+      locOverrides: locOverrides
     };
   });
-  const [locScheduleDefaults, setLocScheduleDefaults] = useState({
-    Mon: "weekday", Tue: "weekday", Wed: "weekday", Thu: "weekday", Fri: "weekday",
-    Sat: "weekend", Sun: "weekend",
+
+  return result;
+}
+
+export default function useConfig() {
+  var [locations, setLocations] = useState(DEFAULT_LOCATIONS);
+  var [tools, setTools] = useState(DEFAULT_TOOLS);
+  var [toolMatrix, setToolMatrix] = useState(DEFAULT_TOOL_MATRIX);
+  var [timeBlocks, setTimeBlocks] = useState(DEFAULT_TIME_BLOCKS);
+  var [projects, setProjects] = useState([]);
+  var [locSchedules, setLocSchedules] = useState(function() {
+    return deriveLocSchedules(DEFAULT_SCHEDULE_TEMPLATES);
   });
-  const [locScheduleOverrides, setLocScheduleOverrides] = useState({});
-  const [hourLocationOverrides, setHourLocationOverrides] = useState({});
-  const [splitDefault, setSplitDefault] = useState(false);
-  const [splitMinDefault, setSplitMinDefault] = useState(15);
-  const [gridZoom, setGridZoom] = useState(60);
-  const [schedFloor, setSchedFloor] = useState(480);
-  const [fontSize, setFontSize] = useState(100);
+  var [locScheduleDefaults, setLocScheduleDefaults] = useState(DEFAULT_TEMPLATE_DEFAULTS);
+  var [locScheduleOverrides, setLocScheduleOverrides] = useState({});
+  var [hourLocationOverrides, setHourLocationOverrides] = useState({});
+  var [splitDefault, setSplitDefault] = useState(false);
+  var [splitMinDefault, setSplitMinDefault] = useState(15);
+  var [gridZoom, setGridZoom] = useState(60);
+  var [schedFloor, setSchedFloor] = useState(480);
+  var [fontSize, setFontSize] = useState(100);
+
+  // Unified template state
+  var [scheduleTemplates, setScheduleTemplates] = useState(DEFAULT_SCHEDULE_TEMPLATES);
+  var [templateDefaults, setTemplateDefaults] = useState(DEFAULT_TEMPLATE_DEFAULTS);
+  var [templateOverrides, setTemplateOverrides] = useState({});
 
   // Initialize from API response
-  const initFromConfig = useCallback((config) => {
+  var initFromConfig = useCallback(function(config) {
     if (!config) return;
     if (config.locations?.length > 0) setLocations(config.locations);
     if (config.tools?.length > 0) setTools(config.tools);
     if (config.projects) setProjects(config.projects);
     if (config.toolMatrix) setToolMatrix(config.toolMatrix);
-    if (config.timeBlocks) setTimeBlocks(config.timeBlocks);
-    if (config.locSchedules) setLocSchedules(config.locSchedules);
-    if (config.locScheduleDefaults) setLocScheduleDefaults(config.locScheduleDefaults);
-    if (config.locScheduleOverrides) setLocScheduleOverrides(config.locScheduleOverrides);
     if (config.hourLocationOverrides) setHourLocationOverrides(config.hourLocationOverrides);
     if (config.preferences) {
       var p = config.preferences;
@@ -60,53 +141,127 @@ export default function useConfig() {
       if (p.schedFloor !== undefined) setSchedFloor(p.schedFloor);
       if (p.fontSize !== undefined) setFontSize(p.fontSize);
     }
+
+    // Unified template migration
+    if (config.scheduleTemplates) {
+      // Already migrated — use directly
+      var tmpls = config.scheduleTemplates;
+      var tDefs = config.templateDefaults || DEFAULT_TEMPLATE_DEFAULTS;
+      var tOvr = config.templateOverrides || {};
+      setScheduleTemplates(tmpls);
+      setTemplateDefaults(tDefs);
+      setTemplateOverrides(tOvr);
+      // Derive legacy formats
+      setTimeBlocks(deriveTimeBlocks(tmpls, tDefs));
+      setLocSchedules(deriveLocSchedules(tmpls));
+      setLocScheduleDefaults(tDefs);
+      setLocScheduleOverrides(tOvr);
+    } else {
+      // Migrate from old format
+      var oldBlocks = config.timeBlocks || DEFAULT_TIME_BLOCKS;
+      var oldLocSchedules = config.locSchedules;
+      var oldLocDefaults = config.locScheduleDefaults || DEFAULT_TEMPLATE_DEFAULTS;
+      var oldLocOverrides = config.locScheduleOverrides || {};
+
+      if (oldBlocks) setTimeBlocks(oldBlocks);
+      if (oldLocSchedules) setLocSchedules(oldLocSchedules);
+      if (config.locScheduleDefaults) setLocScheduleDefaults(oldLocDefaults);
+      if (config.locScheduleOverrides) setLocScheduleOverrides(oldLocOverrides);
+
+      if (oldLocSchedules) {
+        var migrated = migrateToUnified(oldBlocks, oldLocSchedules, oldLocDefaults);
+        setScheduleTemplates(migrated);
+        setTemplateDefaults(oldLocDefaults);
+        setTemplateOverrides(oldLocOverrides);
+      }
+    }
   }, []);
 
   // Save a config key to backend
-  const saveConfig = useCallback(async (key, value) => {
+  var saveConfig = useCallback(async function(key, value) {
     try {
-      await apiClient.put(`/config/${key}`, { value });
+      await apiClient.put('/config/' + key, { value: value });
     } catch (error) {
-      console.error(`Failed to save config ${key}:`, error);
+      console.error('Failed to save config ' + key + ':', error);
     }
   }, []);
 
   // Wrapped setters that auto-persist
-  const updateToolMatrix = useCallback((val) => {
+  var updateToolMatrix = useCallback(function(val) {
     setToolMatrix(val);
     saveConfig('tool_matrix', val);
   }, [saveConfig]);
 
-  const updateTimeBlocks = useCallback((val) => {
+  var updateTimeBlocks = useCallback(function(val) {
     setTimeBlocks(val);
     saveConfig('time_blocks', val);
   }, [saveConfig]);
 
-  const updateLocSchedules = useCallback((val) => {
+  var updateLocSchedules = useCallback(function(val) {
     setLocSchedules(val);
     saveConfig('loc_schedules', val);
   }, [saveConfig]);
 
-  const updateLocScheduleDefaults = useCallback((val) => {
+  var updateLocScheduleDefaults = useCallback(function(val) {
     setLocScheduleDefaults(val);
     saveConfig('loc_schedule_defaults', val);
   }, [saveConfig]);
 
-  const updateLocScheduleOverrides = useCallback((val) => {
+  var updateLocScheduleOverrides = useCallback(function(val) {
     setLocScheduleOverrides(val);
     saveConfig('loc_schedule_overrides', val);
   }, [saveConfig]);
 
-  const updateHourLocationOverrides = useCallback((val) => {
+  var updateHourLocationOverrides = useCallback(function(val) {
     setHourLocationOverrides(val);
     saveConfig('hour_location_overrides', val);
   }, [saveConfig]);
 
-  const updatePreferences = useCallback((prefs) => {
+  var updatePreferences = useCallback(function(prefs) {
     saveConfig('preferences', prefs);
   }, [saveConfig]);
 
-  const updateLocations = useCallback(async (locs) => {
+  /** Save unified templates + auto-derive legacy formats */
+  var updateScheduleTemplates = useCallback(function(tmpls, tDefs, tOvr) {
+    // Use current values as fallback
+    var defs = tDefs || templateDefaults;
+    var ovr = tOvr !== undefined ? tOvr : templateOverrides;
+
+    setScheduleTemplates(tmpls);
+
+    // Derive and set legacy formats
+    var derivedBlocks = deriveTimeBlocks(tmpls, defs);
+    var derivedLoc = deriveLocSchedules(tmpls);
+    setTimeBlocks(derivedBlocks);
+    setLocSchedules(derivedLoc);
+
+    // Persist all
+    saveConfig('schedule_templates', tmpls);
+    saveConfig('time_blocks', derivedBlocks);
+    saveConfig('loc_schedules', derivedLoc);
+  }, [saveConfig, templateDefaults, templateOverrides]);
+
+  var updateTemplateDefaults = useCallback(function(defs) {
+    setTemplateDefaults(defs);
+    setLocScheduleDefaults(defs);
+
+    // Re-derive timeBlocks since day assignments changed
+    var derivedBlocks = deriveTimeBlocks(scheduleTemplates, defs);
+    setTimeBlocks(derivedBlocks);
+
+    saveConfig('template_defaults', defs);
+    saveConfig('loc_schedule_defaults', defs);
+    saveConfig('time_blocks', derivedBlocks);
+  }, [saveConfig, scheduleTemplates]);
+
+  var updateTemplateOverrides = useCallback(function(ovr) {
+    setTemplateOverrides(ovr);
+    setLocScheduleOverrides(ovr);
+    saveConfig('template_overrides', ovr);
+    saveConfig('loc_schedule_overrides', ovr);
+  }, [saveConfig]);
+
+  var updateLocations = useCallback(async function(locs) {
     setLocations(locs);
     try {
       await apiClient.put('/locations', { locations: locs });
@@ -115,7 +270,7 @@ export default function useConfig() {
     }
   }, []);
 
-  const updateTools = useCallback(async (tls) => {
+  var updateTools = useCallback(async function(tls) {
     setTools(tls);
     try {
       await apiClient.put('/tools', { tools: tls });
@@ -129,14 +284,17 @@ export default function useConfig() {
     locSchedules, locScheduleDefaults, locScheduleOverrides,
     hourLocationOverrides, splitDefault, splitMinDefault,
     gridZoom, schedFloor, fontSize,
+    scheduleTemplates, templateDefaults, templateOverrides,
     setLocations, setTools, setToolMatrix, setTimeBlocks, setProjects,
     setLocSchedules, setLocScheduleDefaults, setLocScheduleOverrides,
     setHourLocationOverrides, setSplitDefault, setSplitMinDefault,
     setGridZoom, setSchedFloor, setFontSize,
+    setScheduleTemplates, setTemplateDefaults, setTemplateOverrides,
     initFromConfig,
     updateToolMatrix, updateTimeBlocks,
     updateLocSchedules, updateLocScheduleDefaults,
     updateLocScheduleOverrides, updateHourLocationOverrides,
-    updatePreferences, updateLocations, updateTools
+    updatePreferences, updateLocations, updateTools,
+    updateScheduleTemplates, updateTemplateDefaults, updateTemplateOverrides
   };
 }

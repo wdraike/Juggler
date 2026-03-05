@@ -34,7 +34,8 @@ function rowToTask(row) {
     sourceId: row.source_id,
     generated: !!row.generated,
     gcalEventId: row.gcal_event_id,
-    dependsOn: typeof row.depends_on === 'string' ? JSON.parse(row.depends_on || '[]') : (row.depends_on || [])
+    dependsOn: typeof row.depends_on === 'string' ? JSON.parse(row.depends_on || '[]') : (row.depends_on || []),
+    datePinned: !!row.date_pinned
   };
 }
 
@@ -69,6 +70,7 @@ function taskToRow(task, userId) {
   if (task.generated !== undefined) row.generated = task.generated ? 1 : 0;
   if (task.gcalEventId !== undefined) row.gcal_event_id = task.gcalEventId;
   if (task.dependsOn !== undefined) row.depends_on = JSON.stringify(task.dependsOn || []);
+  if (task.datePinned !== undefined) row.date_pinned = task.datePinned ? 1 : 0;
   row.updated_at = db.fn.now();
   return row;
 }
@@ -118,6 +120,20 @@ async function updateTask(req, res) {
     delete row.id;
     delete row.user_id;
     delete row.created_at;
+
+    // When the user explicitly sets a date, pin it so the scheduler honors it.
+    // If datePinned is explicitly sent as false, this is a reset — clear the pin.
+    if (row.date !== undefined && row.date_pinned === undefined) {
+      row.date_pinned = 1;
+    }
+    // Always clear scheduler-tracked originals on user edit so the
+    // reset step won't revert back to a stale scheduler-assigned date.
+    if (row.date !== undefined) {
+      row.original_date = null;
+      row.original_day = null;
+      row.original_time = null;
+    }
+
     await db('tasks').where({ id, user_id: req.user.id }).update(row);
 
     const updated = await db('tasks').where('id', id).first();
@@ -138,6 +154,23 @@ async function deleteTask(req, res) {
     const task = await db('tasks').where({ id, user_id: req.user.id }).first();
     if (!task) {
       return res.status(404).json({ error: 'Task not found' });
+    }
+
+    // Remap dependencies: if downstream tasks depend on this task,
+    // replace that link with this task's own deps (chain link removal).
+    // e.g. A->B->C, delete B => C now depends on A
+    const deletedDeps = typeof task.depends_on === 'string'
+      ? JSON.parse(task.depends_on || '[]') : (task.depends_on || []);
+    const allUserTasks = await db('tasks').where('user_id', req.user.id).select('id', 'depends_on');
+    for (const other of allUserTasks) {
+      const deps = typeof other.depends_on === 'string'
+        ? JSON.parse(other.depends_on || '[]') : (other.depends_on || []);
+      if (!Array.isArray(deps) || deps.indexOf(id) === -1) continue;
+      // Remove the deleted task, add the deleted task's own deps (avoid duplicates)
+      const newDeps = deps.filter(d => d !== id);
+      deletedDeps.forEach(d => { if (newDeps.indexOf(d) === -1) newDeps.push(d); });
+      await db('tasks').where({ id: other.id, user_id: req.user.id })
+        .update({ depends_on: JSON.stringify(newDeps), updated_at: db.fn.now() });
     }
 
     // Mark ledger record so sync will delete the GCal event

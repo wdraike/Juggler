@@ -81,6 +81,24 @@ export const DEFAULT_TIME_BLOCKS = {
   Sat: DEFAULT_WEEKEND_BLOCKS, Sun: DEFAULT_WEEKEND_BLOCKS,
 };
 
+export const DEFAULT_SCHEDULE_TEMPLATES = {
+  weekday: {
+    name: "Weekday", icon: "\uD83C\uDFE2", system: true,
+    blocks: DEFAULT_WEEKDAY_BLOCKS.map(function(b) { return Object.assign({}, b); }),
+    locOverrides: {}
+  },
+  weekend: {
+    name: "Weekend", icon: "\uD83C\uDFE0", system: true,
+    blocks: DEFAULT_WEEKEND_BLOCKS.map(function(b) { return Object.assign({}, b); }),
+    locOverrides: {}
+  }
+};
+
+export const DEFAULT_TEMPLATE_DEFAULTS = {
+  Mon: "weekday", Tue: "weekday", Wed: "weekday", Thu: "weekday", Fri: "weekday",
+  Sat: "weekend", Sun: "weekend"
+};
+
 export const DEFAULT_WEEKLY_SCHEDULE = {
   Mon: "work", Tue: "work", Wed: "work", Thu: "work", Fri: "work",
   Sat: "home", Sun: "home",

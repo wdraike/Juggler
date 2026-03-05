@@ -24,16 +24,20 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
   var compact = layoutMode === 'compact';
   var showDetails = !compact && (cardHeight || 52) >= 60;
-  var durLabel = task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm';
+  var durLabel = item.splitTotal > 1
+    ? item.dur + ' of ' + task.dur + 'm'
+    : (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm');
   var statusIcon = status === 'done' ? '\u2713' : status === 'wip' ? '\u231B' : status === 'cancel' ? '\u2715' : status === 'skip' ? '\u21ED' : null;
   var startLabel = item.start != null ? formatStartTime(item.start) : null;
   var typeBadges = [];
+  if (task.datePinned) typeBadges.push('\uD83D\uDCCD');
   if (task.habit) typeBadges.push('\uD83D\uDD01');
   if (task.rigid || task.fixed) typeBadges.push('\uD83D\uDCCC');
-  if (task.splittable) typeBadges.push('\u2702\uFE0F');
+  if (item.splitTotal > 1) typeBadges.push('\u2702\uFE0F');
 
   // Build details snippets for row 3
   var details = [];
+  if (item._moveReason) details.push('\u2192 ' + item._moveReason);
   if (showDetails) {
     if (task.notes) details.push(task.notes.replace(/\n/g, ' ').substring(0, 60));
     if (task.due) details.push('\uD83D\uDCC5 ' + task.due);

@@ -110,18 +110,18 @@ function canTaskRunAtMin(task, dateStr, minute, cfg, toolMatrix, blocks) {
 }
 
 function getLocationForDatePure(dateStr, cfg) {
-  var blocks = getBlocksForDate(dateStr, cfg.timeBlocks);
+  var blocks = getBlocksForDate(dateStr, cfg.timeBlocks, cfg);
   return resolveDayLocation(dateStr, cfg, blocks);
 }
 
 function getLocationForHourPure(dateStr, hour, cfg) {
-  var blocks = getBlocksForDate(dateStr, cfg.timeBlocks);
+  var blocks = getBlocksForDate(dateStr, cfg.timeBlocks, cfg);
   return resolveLocationId(dateStr, hour, cfg, blocks);
 }
 
 function isTaskBlockedPure(task, dateStr, cfg) {
   if (hasWhen(task.when, "fixed")) return false;
-  var blocks = getBlocksForDate(dateStr, cfg.timeBlocks);
+  var blocks = getBlocksForDate(dateStr, cfg.timeBlocks, cfg);
   var dateWindows = buildWindowsFromBlocks(blocks);
   var taskWins = getWhenWindows(task.when, dateWindows);
   if (taskWins.length === 0) return true;

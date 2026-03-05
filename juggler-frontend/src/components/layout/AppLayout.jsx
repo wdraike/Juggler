@@ -70,11 +70,17 @@ export default function AppLayout() {
   var [gcalAutoSync, setGcalAutoSync] = useState(false);
   var [gcalLastSyncedAt, setGcalLastSyncedAt] = useState(null);
   var [gcalSyncing, setGcalSyncing] = useState(false);
+  var [scheduling, setScheduling] = useState(false);
+  var schedulingRef = useRef(false);
+  var editingRef = useRef(false);
 
   var theme = getTheme(darkMode);
   var statuses = taskState.statuses;
   var directions = taskState.directions;
   var allTasks = taskState.tasks;
+
+  // Track when editing UI is open to suspend background syncs/scheduling
+  editingRef.current = !!expandedTask || !!showCreateForm || !!chainPopupId || !!showSettings;
 
   // Load data on mount
   useEffect(() => {
@@ -118,6 +124,7 @@ export default function AppLayout() {
     if (!gcalAutoSync) return;
 
     function runAutoSync() {
+      if (schedulingRef.current || editingRef.current) return;
       setGcalSyncing(true);
       apiClient.post('/gcal/sync').then(function(r) {
         setGcalLastSyncedAt(new Date().toISOString());
@@ -166,8 +173,9 @@ export default function AppLayout() {
     toolMatrix: config.toolMatrix,
     splitDefault: config.splitDefault,
     splitMinDefault: config.splitMinDefault,
-    schedFloor: config.schedFloor
-  }), [config.timeBlocks, config.locSchedules, config.locScheduleDefaults, config.locScheduleOverrides, config.hourLocationOverrides, config.toolMatrix, config.splitDefault, config.splitMinDefault, config.schedFloor]);
+    schedFloor: config.schedFloor,
+    scheduleTemplates: config.scheduleTemplates
+  }), [config.timeBlocks, config.locSchedules, config.locScheduleDefaults, config.locScheduleOverrides, config.hourLocationOverrides, config.toolMatrix, config.splitDefault, config.splitMinDefault, config.schedFloor, config.scheduleTemplates]);
 
   // Placements come from the backend scheduler API
   var dayPlacements = placements.dayPlacements;
@@ -245,16 +253,38 @@ export default function AppLayout() {
     return () => clearInterval(id);
   }, []);
 
-  // All unique tags
+  // All unique tags — derived from scheduleTemplates if available, else legacy timeBlocks
   var uniqueTags = useMemo(() => {
     var seen = {}, result = [];
-    DAY_NAMES.forEach(dn => {
-      (config.timeBlocks[dn] || []).forEach(b => {
-        if (!seen[b.tag]) { seen[b.tag] = true; result.push({ tag: b.tag, name: b.name, icon: b.icon, color: b.color }); }
+    var templates = config.scheduleTemplates;
+    if (templates && Object.keys(templates).length > 0) {
+      Object.keys(templates).forEach(function(tmplId) {
+        (templates[tmplId].blocks || []).forEach(function(b) {
+          if (!seen[b.tag]) {
+            seen[b.tag] = true;
+            result.push({ tag: b.tag, name: b.name, icon: b.icon, color: b.color, _earliest: b.start });
+          } else {
+            var existing = result.find(function(r) { return r.tag === b.tag; });
+            if (existing && b.start < existing._earliest) existing._earliest = b.start;
+          }
+        });
       });
-    });
+    } else {
+      DAY_NAMES.forEach(function(dn) {
+        (config.timeBlocks[dn] || []).forEach(function(b) {
+          if (!seen[b.tag]) {
+            seen[b.tag] = true;
+            result.push({ tag: b.tag, name: b.name, icon: b.icon, color: b.color, _earliest: b.start });
+          } else {
+            var existing = result.find(function(r) { return r.tag === b.tag; });
+            if (existing && b.start < existing._earliest) existing._earliest = b.start;
+          }
+        });
+      });
+    }
+    result.sort((a, b) => a._earliest - b._earliest);
     return result;
-  }, [config.timeBlocks]);
+  }, [config.scheduleTemplates, config.timeBlocks]);
 
   // All project names
   var allProjectNames = useMemo(() => {
@@ -317,6 +347,9 @@ export default function AppLayout() {
 
   // Manual reschedule trigger — calls backend scheduler
   var handleReschedule = useCallback(() => {
+    if (scheduling || gcalSyncing || editingRef.current) return;
+    setScheduling(true);
+    schedulingRef.current = true;
     showToast('Rescheduling...', 'info');
     apiClient.post('/schedule/run').then(function(r) {
       var msg = 'Rescheduled: ' + (r.data.updated || 0) + ' tasks updated';
@@ -324,8 +357,11 @@ export default function AppLayout() {
       loadTasks().then(function() { loadPlacements(); });
     }).catch(function(err) {
       showToast('Reschedule error: ' + (err.response?.data?.error || err.message), 'error');
+    }).finally(function() {
+      setScheduling(false);
+      schedulingRef.current = false;
     });
-  }, [showToast, loadTasks, loadPlacements]);
+  }, [showToast, loadTasks, loadPlacements, scheduling, gcalSyncing]);
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
@@ -444,6 +480,7 @@ export default function AppLayout() {
           onShowSettings={() => setShowSettings(true)} onShowExport={() => setShowExport(true)}
           onShowGCalSync={() => setShowGCalSync(true)}
           gcalSyncing={gcalSyncing}
+          scheduling={scheduling}
           onReschedule={handleReschedule}
           onShowHelp={() => setShowHelp(true)}
           onAddTask={() => { setShowCreateForm(true); setExpandedTask(null); }}
@@ -482,7 +519,7 @@ export default function AppLayout() {
               darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
               onGridDrop={handleGridDrop}
               locSchedules={config.locSchedules}
-              onUpdateLocScheduleOverrides={config.updateLocScheduleOverrides}
+              onUpdateLocScheduleOverrides={config.updateTemplateOverrides}
               allTasks={allTasks} onBatchHabitsDone={handleBatchHabitsDone}
               locations={config.locations} onHourLocationOverride={handleHourLocationOverride}
               blockedTaskIds={blockedTaskIds}
@@ -613,6 +650,7 @@ export default function AppLayout() {
             setGcalAutoSync(val);
             if (!val) setGcalLastSyncedAt(gcalLastSyncedAt); // keep last value
           }}
+          scheduling={scheduling}
           onSyncStart={function() { setGcalSyncing(true); }}
           onSyncComplete={function() {
             setGcalSyncing(false);

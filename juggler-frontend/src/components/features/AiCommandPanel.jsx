@@ -141,15 +141,26 @@ export default function AiCommandPanel({
         }}
       />
       {aiCmd.trim() && (
-        <button
-          onClick={function(e) { e.stopPropagation(); handleSend(); }}
-          disabled={aiLoading}
-          style={{
-            background: aiLoading ? theme.bgTertiary : '#3B82F6', color: 'white', border: 'none',
-            borderRadius: 6, padding: isMobile ? '8px 12px' : '4px 10px', fontSize: 12, fontWeight: 600,
-            cursor: aiLoading ? 'wait' : 'pointer', flexShrink: 0, minHeight: isMobile ? 36 : 28
-          }}
-        >{aiLoading ? '...' : '\u23CE'}</button>
+        <>
+          <button
+            onClick={function(e) { e.stopPropagation(); setAiCmd(''); }}
+            style={{
+              background: 'transparent', color: theme.textMuted, border: 'none',
+              borderRadius: 6, padding: '4px 6px', fontSize: 14, cursor: 'pointer',
+              flexShrink: 0, lineHeight: 1, fontFamily: 'inherit'
+            }}
+            title="Clear"
+          >&times;</button>
+          <button
+            onClick={function(e) { e.stopPropagation(); handleSend(); }}
+            disabled={aiLoading}
+            style={{
+              background: aiLoading ? theme.bgTertiary : '#3B82F6', color: 'white', border: 'none',
+              borderRadius: 6, padding: isMobile ? '8px 12px' : '4px 10px', fontSize: 12, fontWeight: 600,
+              cursor: aiLoading ? 'wait' : 'pointer', flexShrink: 0, minHeight: isMobile ? 36 : 28
+            }}
+          >{aiLoading ? '...' : '\u23CE'}</button>
+        </>
       )}
       {!aiCmd.trim() && aiLog.length > 0 && (
         <button

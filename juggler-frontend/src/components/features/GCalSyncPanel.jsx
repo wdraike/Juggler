@@ -19,7 +19,7 @@ function formatRelativeTime(isoString) {
   return days + 'd ago';
 }
 
-export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, lastSyncedAt, onAutoSyncChange, onSyncStart, onSyncComplete, isMobile }) {
+export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, lastSyncedAt, onAutoSyncChange, onSyncStart, onSyncComplete, isMobile, scheduling }) {
   var theme = getTheme(darkMode);
   var [syncing, setSyncing] = useState(false);
   var [connected, setConnected] = useState(null); // null = loading
@@ -94,6 +94,7 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
   }
 
   async function handleSyncNow() {
+    if (scheduling) return;
     try {
       setSyncing(true);
       setResults(null);
@@ -194,12 +195,12 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
 
             {/* Sync Now button */}
             <div style={{ padding: '16px 0' }}>
-              <button onClick={handleSyncNow} disabled={syncing} style={{
+              <button onClick={handleSyncNow} disabled={syncing || scheduling} style={{
                 border: 'none', borderRadius: 8, padding: '10px 20px', width: '100%',
                 background: theme.accent, color: '#FFF', fontWeight: 600, fontSize: 13,
-                cursor: 'pointer', fontFamily: 'inherit', opacity: syncing ? 0.5 : 1
+                cursor: 'pointer', fontFamily: 'inherit', opacity: (syncing || scheduling) ? 0.5 : 1
               }}>
-                {syncing ? 'Syncing...' : 'Sync Now'}
+                {scheduling ? 'Scheduling\u2026' : syncing ? 'Syncing...' : 'Sync Now'}
               </button>
             </div>
 

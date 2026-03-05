@@ -7,7 +7,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import { getTheme } from '../../theme/colors';
 
-export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onReschedule, onShowHelp, onAddTask, isMobile, aiPanel }) {
+export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, scheduling, onReschedule, onShowHelp, onAddTask, isMobile, aiPanel }) {
   var theme = getTheme(darkMode);
   var { user, logout } = useAuth();
   var [showOverflow, setShowOverflow] = useState(false);
@@ -31,7 +31,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
   // Overflow menu items for mobile
   var overflowItems = [];
   if (isMobile) {
-    if (onReschedule) overflowItems.push({ label: 'Reschedule', icon: '\uD83D\uDD04', onClick: onReschedule });
+    if (onReschedule) overflowItems.push({ label: scheduling ? 'Scheduling\u2026' : 'Reschedule', icon: '\uD83D\uDD04', onClick: onReschedule, disabled: scheduling });
     overflowItems.push({ label: 'Settings', icon: '\u2699\uFE0F', onClick: onShowSettings });
     overflowItems.push({ label: 'Import/Export', icon: '\uD83D\uDCE6', onClick: onShowExport });
     if (onShowGCalSync) overflowItems.push({ label: 'GCal Sync', icon: '\uD83D\uDCC5', onClick: onShowGCalSync });
@@ -42,7 +42,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
 
   return (
     <>
-    {gcalSyncing && <style>{`@keyframes gcal-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>}
+    {(gcalSyncing || scheduling) && <style>{`@keyframes gcal-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>}
     <div style={{
       display: 'flex', alignItems: 'center', gap: isMobile ? 6 : 12, padding: isMobile ? '6px 8px' : '8px 16px',
       background: theme.headerBg, borderBottom: `1px solid ${theme.border}`,
@@ -60,76 +60,90 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
       {/* AI command input — inline in header */}
       {aiPanel}
 
-      {saving && <span style={{ fontSize: 11, color: theme.textMuted }}>Saving...</span>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'inherit', marginLeft: 'auto' }}>
+        {saving && <span style={{ fontSize: 11, color: theme.textMuted }}>Saving...</span>}
 
-      {onAddTask && <button onClick={onAddTask} style={{ ...btnStyle(theme, isMobile), fontSize: 20, fontWeight: 700, color: '#10B981' }} title="Add task">+</button>}
+        {onAddTask && <button onClick={onAddTask} style={{ ...btnStyle(theme, isMobile), fontSize: 20, fontWeight: 700, color: '#10B981' }} title="Add task">+</button>}
 
-      {/* Desktop: show all buttons inline */}
-      {!isMobile && (
-        <>
-          {onReschedule && <button onClick={onReschedule} style={btnStyle(theme, isMobile)} title="Reschedule">&#x1F504;</button>}
-          <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings">&#x2699;&#xFE0F;</button>
-          <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export">&#x1F4E6;</button>
-          {onShowGCalSync && (
-            <button onClick={onShowGCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title="Google Calendar Sync">
-              <span style={gcalSyncing ? { display: 'inline-block', animation: 'gcal-spin 1s linear infinite' } : undefined}>&#x1F4C5;</span>
-              {gcalSyncing && <span style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: '#3B82F6' }} />}
+        {/* Desktop: show all buttons inline */}
+        {!isMobile && (
+          <>
+            {onReschedule && (scheduling ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '4px 6px' }}>
+                <span style={{
+                  width: 18, height: 18, borderRadius: '50%',
+                  border: '2.5px solid ' + theme.border,
+                  borderTopColor: '#3B82F6',
+                  animation: 'gcal-spin 0.8s linear infinite',
+                  display: 'inline-block'
+                }} />
+              </span>
+            ) : (
+              <button onClick={onReschedule} style={btnStyle(theme, isMobile)} title="Reschedule">&#x1F504;</button>
+            ))}
+            <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings">&#x2699;&#xFE0F;</button>
+            <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export">&#x1F4E6;</button>
+            {onShowGCalSync && (
+              <button onClick={onShowGCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title="Google Calendar Sync">
+                <span style={gcalSyncing ? { display: 'inline-block', animation: 'gcal-spin 1s linear infinite' } : undefined}>&#x1F4C5;</span>
+                {gcalSyncing && <span style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: '#3B82F6' }} />}
+              </button>
+            )}
+            {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help & Shortcuts">&#x2753;</button>}
+            <button onClick={() => setDarkMode(d => !d)} style={btnStyle(theme, isMobile)} title="Toggle dark mode">
+              {darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19'}
             </button>
-          )}
-          {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help & Shortcuts">&#x2753;</button>}
-          <button onClick={() => setDarkMode(d => !d)} style={btnStyle(theme, isMobile)} title="Toggle dark mode">
-            {darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19'}
-          </button>
-          {user && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {user.picture && (
-                <img src={user.picture} alt="" style={{ width: 24, height: 24, borderRadius: 12 }} />
-              )}
-              <button onClick={logout} style={{ ...btnStyle(theme, isMobile), fontSize: 11 }}>Logout</button>
-            </div>
-          )}
-        </>
-      )}
-
-      {/* Mobile: overflow menu button */}
-      {isMobile && (
-        <div ref={overflowRef} style={{ position: 'relative' }}>
-          <button onClick={function() { setShowOverflow(function(v) { return !v; }); }} style={{ ...btnStyle(theme, isMobile), fontSize: 18, fontWeight: 700 }} title="More options">
-            &#x22EF;
-          </button>
-          {showOverflow && (
-            <div style={{
-              position: 'absolute', top: '100%', right: 0, marginTop: 4,
-              background: theme.bgSecondary, border: `1px solid ${theme.border}`,
-              borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
-              zIndex: 200, minWidth: 180, overflow: 'hidden'
-            }}>
-              {user && user.picture && (
-                <div style={{ padding: '8px 14px', borderBottom: `1px solid ${theme.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+            {user && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {user.picture && (
                   <img src={user.picture} alt="" style={{ width: 24, height: 24, borderRadius: 12 }} />
-                  <span style={{ fontSize: 12, color: theme.textMuted }}>{user.name || user.email || ''}</span>
-                </div>
-              )}
-              {overflowItems.map(function(item, i) {
-                return (
-                  <button key={i} onClick={function() { setShowOverflow(false); item.onClick(); }}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                      border: 'none', background: 'transparent', cursor: 'pointer',
-                      padding: '12px 14px', fontSize: 14, color: theme.text,
-                      fontFamily: 'inherit', textAlign: 'left',
-                      minHeight: 44,
-                      borderTop: i === 0 && !(user && user.picture) ? 'none' : undefined
-                    }}>
-                    <span style={{ fontSize: 16, width: 24, textAlign: 'center' }}>{item.icon}</span>
-                    {item.label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
+                )}
+                <button onClick={logout} style={{ ...btnStyle(theme, isMobile), fontSize: 11 }}>Logout</button>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Mobile: overflow menu button */}
+        {isMobile && (
+          <div ref={overflowRef} style={{ position: 'relative' }}>
+            <button onClick={function() { setShowOverflow(function(v) { return !v; }); }} style={{ ...btnStyle(theme, isMobile), fontSize: 18, fontWeight: 700 }} title="More options">
+              &#x22EF;
+            </button>
+            {showOverflow && (
+              <div style={{
+                position: 'absolute', top: '100%', right: 0, marginTop: 4,
+                background: theme.bgSecondary, border: `1px solid ${theme.border}`,
+                borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+                zIndex: 200, minWidth: 180, overflow: 'hidden'
+              }}>
+                {user && user.picture && (
+                  <div style={{ padding: '8px 14px', borderBottom: `1px solid ${theme.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <img src={user.picture} alt="" style={{ width: 24, height: 24, borderRadius: 12 }} />
+                    <span style={{ fontSize: 12, color: theme.textMuted }}>{user.name || user.email || ''}</span>
+                  </div>
+                )}
+                {overflowItems.map(function(item, i) {
+                  return (
+                    <button key={i} onClick={function() { if (item.disabled) return; setShowOverflow(false); item.onClick(); }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                        border: 'none', background: 'transparent', cursor: item.disabled ? 'default' : 'pointer',
+                        padding: '12px 14px', fontSize: 14, color: item.disabled ? theme.textMuted : theme.text,
+                        fontFamily: 'inherit', textAlign: 'left',
+                        minHeight: 44, opacity: item.disabled ? 0.6 : 1,
+                        borderTop: i === 0 && !(user && user.picture) ? 'none' : undefined
+                      }}>
+                      <span style={{ fontSize: 16, width: 24, textAlign: 'center' }}>{item.icon}</span>
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
     </>
   );

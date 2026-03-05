@@ -57,6 +57,7 @@ async function loadConfig(userId) {
     locScheduleDefaults: config.loc_schedule_defaults || {},
     locScheduleOverrides: config.loc_schedule_overrides || {},
     hourLocationOverrides: config.hour_location_overrides || {},
+    scheduleTemplates: config.schedule_templates || null,
     preferences: config.preferences || {},
     splitDefault: config.preferences ? config.preferences.splitDefault : undefined,
     splitMinDefault: config.preferences ? config.preferences.splitMinDefault : undefined
@@ -157,9 +158,10 @@ async function runScheduleAndPersist(userId) {
     var dateChanged = newDate !== original.date;
     var timeChanged = newTime !== original.time;
 
-    // Rigid habits have a user-set preferred time — don't overwrite with placement time
-    // Non-rigid habits are scheduled flexibly, so their time should be updated
-    if (original.habit && original.rigid && !dateChanged) continue;
+    // Habits should never have their date moved — they're day-specific.
+    // Rigid habits also keep their preferred time.
+    if (original.habit && dateChanged) continue;
+    if (original.habit && original.rigid) continue;
 
     if (dateChanged || timeChanged) {
       var dbUpdate = { updated_at: db.fn.now() };

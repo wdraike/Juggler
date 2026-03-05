@@ -4,13 +4,28 @@
 
 import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { getTheme } from '../../theme/colors';
+import { DEFAULT_WEEKDAY_BLOCKS, DEFAULT_WEEKEND_BLOCKS } from '../../state/constants';
+
+// Deduplicated preset blocks from weekday + weekend defaults
+var PRESET_BLOCKS = (function() {
+  var all = DEFAULT_WEEKDAY_BLOCKS.concat(DEFAULT_WEEKEND_BLOCKS);
+  var seen = {};
+  var result = [];
+  all.forEach(function(b) {
+    var key = b.tag + '_' + b.name;
+    if (!seen[key]) {
+      seen[key] = true;
+      result.push({ tag: b.tag, name: b.name, start: b.start, end: b.end, color: b.color, icon: b.icon, loc: b.loc });
+    }
+  });
+  return result;
+})();
 
 var TABS = [
   { id: 'locations', label: 'Locations' },
   { id: 'tools', label: 'Tools' },
   { id: 'matrix', label: 'Tool Matrix' },
-  { id: 'timeblocks', label: 'Time Blocks' },
-  { id: 'schedules', label: 'Schedules' },
+  { id: 'templates', label: 'Templates' },
   { id: 'projects', label: 'Projects' },
   { id: 'preferences', label: 'Preferences' },
 ];
@@ -69,8 +84,7 @@ export default function SettingsPanel({ onClose, darkMode, config, allProjectNam
           {tab === 'matrix' && <MatrixTab config={config} theme={theme} />}
           {tab === 'projects' && <ProjectsTab config={config} theme={theme} allProjectNames={allProjectNames} />}
           {tab === 'preferences' && <PreferencesTab config={config} theme={theme} />}
-          {tab === 'timeblocks' && <TimeBlocksTab config={config} theme={theme} />}
-          {tab === 'schedules' && <SchedulesTab config={config} theme={theme} />}
+          {tab === 'templates' && <UnifiedTemplateTab config={config} theme={theme} />}
         </div>
       </div>
     </div>
@@ -298,191 +312,18 @@ function minsToShort(m) {
   return mm === 0 ? hh + ampm : hh + ':' + (mm < 10 ? '0' : '') + mm + ampm;
 }
 
-function TimeBlocksTab({ config, theme }) {
-  var DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  var [selectedDay, setSelectedDay] = useState('Mon');
-  var [editingIdx, setEditingIdx] = useState(null);
-  var blocks = config.timeBlocks[selectedDay] || [];
+/** Convert minutes-since-midnight to HH:MM for <input type="time"> */
+function minsToTimeInput(m) {
+  var h = Math.floor(m / 60);
+  var mm = m % 60;
+  return (h < 10 ? '0' : '') + h + ':' + (mm < 10 ? '0' : '') + mm;
+}
 
-  function updateBlocks(day, newBlocks) {
-    var updated = { ...config.timeBlocks, [day]: newBlocks };
-    config.updateTimeBlocks(updated);
-  }
-
-  function addBlock() {
-    var last = blocks[blocks.length - 1];
-    var start = last ? last.end : 360;
-    var newBlock = {
-      id: 'block_' + Date.now(),
-      tag: 'custom',
-      name: 'New Block',
-      start: start,
-      end: Math.min(start + 60, 1440),
-      color: '#6B7280',
-      icon: '\u{1F4CB}',
-      loc: config.locations[0]?.id || 'home'
-    };
-    updateBlocks(selectedDay, [...blocks, newBlock]);
-    setEditingIdx(blocks.length);
-  }
-
-  function removeBlock(idx) {
-    updateBlocks(selectedDay, blocks.filter(function(_, i) { return i !== idx; }));
-    setEditingIdx(null);
-  }
-
-  function updateBlock(idx, field, value) {
-    var updated = blocks.map(function(b, i) {
-      if (i !== idx) return b;
-      var next = { ...b, [field]: value };
-      if (field === 'start' || field === 'end') next[field] = parseInt(value) || 0;
-      return next;
-    });
-    updateBlocks(selectedDay, updated);
-  }
-
-  function copyToAllWeekdays() {
-    var updated = { ...config.timeBlocks };
-    ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].forEach(function(d) { updated[d] = [...blocks]; });
-    config.updateTimeBlocks(updated);
-  }
-
-  function copyToWeekends() {
-    var updated = { ...config.timeBlocks };
-    ['Sat', 'Sun'].forEach(function(d) { updated[d] = [...blocks]; });
-    config.updateTimeBlocks(updated);
-  }
-
-  return (
-    <div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>Time Blocks</div>
-      <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 12 }}>Define time blocks for each day of the week</div>
-
-      {/* Day selector */}
-      <div style={{ display: 'flex', gap: 2, marginBottom: 12 }}>
-        {DAYS.map(function(d) {
-          return (
-            <button key={d} onClick={function() { setSelectedDay(d); setEditingIdx(null); }} style={{
-              border: 'none', borderRadius: 6, padding: '5px 10px', cursor: 'pointer',
-              background: selectedDay === d ? theme.accent : theme.bgTertiary,
-              color: selectedDay === d ? '#FFF' : theme.textSecondary,
-              fontSize: 12, fontWeight: selectedDay === d ? 600 : 400, fontFamily: 'inherit'
-            }}>{d}</button>
-          );
-        })}
-      </div>
-
-      {/* Visual timeline */}
-      <div style={{ position: 'relative', height: 36, background: theme.bgTertiary, borderRadius: 8, marginBottom: 12, overflow: 'hidden' }}>
-        {blocks.map(function(b, i) {
-          var totalMin = 1080; // 6am to midnight = 18 hours
-          var left = ((b.start - 360) / totalMin) * 100;
-          var width = ((b.end - b.start) / totalMin) * 100;
-          if (left < 0) left = 0;
-          if (left + width > 100) width = 100 - left;
-          return (
-            <div key={i} onClick={function() { setEditingIdx(editingIdx === i ? null : i); }}
-              title={b.name + ' (' + minsToTime(b.start) + ' - ' + minsToTime(b.end) + ')'}
-              style={{
-                position: 'absolute', top: 2, bottom: 2, left: left + '%', width: width + '%',
-                background: b.color + '40', borderLeft: '3px solid ' + b.color,
-                borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center',
-                paddingLeft: 4, fontSize: 10, color: theme.text, overflow: 'hidden', whiteSpace: 'nowrap',
-                outline: editingIdx === i ? '2px solid ' + theme.accent : 'none'
-              }}>
-              {b.icon} {width > 8 ? b.name : ''}
-            </div>
-          );
-        })}
-        {/* Hour markers */}
-        {[6,8,10,12,14,16,18,20,22].map(function(h) {
-          var left = ((h * 60 - 360) / 1080) * 100;
-          return (
-            <div key={h} style={{ position: 'absolute', top: 0, bottom: 0, left: left + '%', borderLeft: '1px solid ' + theme.border, opacity: 0.3 }}>
-              <span style={{ fontSize: 8, color: theme.textMuted, position: 'absolute', top: 0, left: 2 }}>{minsToShort(h * 60)}</span>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Block list */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
-        {blocks.map(function(b, i) {
-          var isEditing = editingIdx === i;
-          return (
-            <div key={i}>
-              <div onClick={function() { setEditingIdx(isEditing ? null : i); }} style={{
-                display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px',
-                background: isEditing ? b.color + '15' : theme.bgTertiary,
-                border: isEditing ? '1px solid ' + b.color : '1px solid transparent',
-                borderRadius: 6, fontSize: 13, cursor: 'pointer'
-              }}>
-                <div style={{ width: 4, height: 20, borderRadius: 2, background: b.color }} />
-                <span>{b.icon}</span>
-                <span style={{ color: theme.text, flex: 1, fontWeight: 500 }}>{b.name}</span>
-                <span style={{ fontSize: 11, color: theme.textMuted }}>{minsToTime(b.start)} - {minsToTime(b.end)}</span>
-                <span style={{ fontSize: 10, color: theme.textMuted, background: theme.bgTertiary, padding: '1px 6px', borderRadius: 8 }}>
-                  {config.locations.find(function(l) { return l.id === b.loc; })?.icon || ''} {b.loc}
-                </span>
-                <button onClick={function(e) { e.stopPropagation(); removeBlock(i); }} style={{
-                  border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 14
-                }}>&times;</button>
-              </div>
-              {isEditing && (
-                <div style={{ padding: '8px 12px', display: 'flex', flexWrap: 'wrap', gap: 8, background: theme.bgTertiary, borderRadius: '0 0 6px 6px', marginTop: -2 }}>
-                  <label style={{ fontSize: 11, color: theme.textSecondary }}>
-                    Name
-                    <input value={b.name} onChange={function(e) { updateBlock(i, 'name', e.target.value); }}
-                      style={{ display: 'block', width: 100, padding: '3px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
-                  </label>
-                  <label style={{ fontSize: 11, color: theme.textSecondary }}>
-                    Start (min)
-                    <input type="number" value={b.start} step={15} onChange={function(e) { updateBlock(i, 'start', e.target.value); }}
-                      style={{ display: 'block', width: 70, padding: '3px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
-                  </label>
-                  <label style={{ fontSize: 11, color: theme.textSecondary }}>
-                    End (min)
-                    <input type="number" value={b.end} step={15} onChange={function(e) { updateBlock(i, 'end', e.target.value); }}
-                      style={{ display: 'block', width: 70, padding: '3px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
-                  </label>
-                  <label style={{ fontSize: 11, color: theme.textSecondary }}>
-                    Location
-                    <select value={b.loc} onChange={function(e) { updateBlock(i, 'loc', e.target.value); }}
-                      style={{ display: 'block', padding: '3px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }}>
-                      {config.locations.map(function(l) { return <option key={l.id} value={l.id}>{l.icon} {l.name}</option>; })}
-                    </select>
-                  </label>
-                  <label style={{ fontSize: 11, color: theme.textSecondary }}>
-                    Color
-                    <input type="color" value={b.color} onChange={function(e) { updateBlock(i, 'color', e.target.value); }}
-                      style={{ display: 'block', width: 32, height: 24, border: 'none', cursor: 'pointer' }} />
-                  </label>
-                  <label style={{ fontSize: 11, color: theme.textSecondary }}>
-                    Icon
-                    <input value={b.icon} onChange={function(e) { updateBlock(i, 'icon', e.target.value); }}
-                      style={{ display: 'block', width: 40, padding: '3px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
-                  </label>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Actions */}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        <button onClick={addBlock} style={{
-          border: 'none', borderRadius: 4, padding: '5px 12px', background: theme.accent, color: '#FFF', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit'
-        }}>+ Add Block</button>
-        <button onClick={copyToAllWeekdays} style={{
-          border: '1px solid ' + theme.border, borderRadius: 4, padding: '5px 12px', background: 'transparent', color: theme.textSecondary, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit'
-        }}>Copy to Mon-Fri</button>
-        <button onClick={copyToWeekends} style={{
-          border: '1px solid ' + theme.border, borderRadius: 4, padding: '5px 12px', background: 'transparent', color: theme.textSecondary, fontSize: 11, cursor: 'pointer', fontFamily: 'inherit'
-        }}>Copy to Sat-Sun</button>
-      </div>
-    </div>
-  );
+/** Convert HH:MM from <input type="time"> to minutes-since-midnight */
+function timeInputToMins(val) {
+  if (!val) return 0;
+  var parts = val.split(':');
+  return parseInt(parts[0]) * 60 + parseInt(parts[1]);
 }
 
 var LOC_TINT = { home: '#3B82F6', work: '#F59E0B', transit: '#9CA3AF', downtown: '#10B981', gym: '#EF4444', errand: '#EC4899' };
@@ -490,6 +331,35 @@ var TOTAL_MIN = 1080; // 6AM (360) to midnight (1440)
 var START_MIN = 360;
 var END_MIN = 1440;
 
+function pctOf(mins) {
+  return ((mins - START_MIN) / TOTAL_MIN) * 100;
+}
+
+function snapToSlot(clientX, barEl) {
+  var rect = barEl.getBoundingClientRect();
+  var ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  var raw = ratio * TOTAL_MIN + START_MIN;
+  var snapped = Math.round(raw / 15) * 15;
+  return Math.max(START_MIN, Math.min(END_MIN, snapped));
+}
+
+/** Build effective hours map from blocks + locOverrides */
+function buildEffectiveHours(blocks, locOverrides) {
+  var hours = {};
+  (blocks || []).forEach(function(b) {
+    for (var m = b.start; m < b.end; m += 15) {
+      hours[m] = b.loc || 'home';
+    }
+  });
+  if (locOverrides) {
+    Object.keys(locOverrides).forEach(function(k) {
+      hours[parseInt(k)] = locOverrides[k];
+    });
+  }
+  return hours;
+}
+
+/** Build location segments from hours map */
 function buildSegments(hours) {
   var segs = [];
   for (var m = START_MIN; m < END_MIN; m += 15) {
@@ -504,314 +374,216 @@ function buildSegments(hours) {
   return segs;
 }
 
-function snapToSlot(clientX, barEl) {
-  var rect = barEl.getBoundingClientRect();
-  var ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-  var raw = ratio * TOTAL_MIN + START_MIN;
-  var snapped = Math.round(raw / 15) * 15;
-  return Math.max(START_MIN, Math.min(END_MIN, snapped));
-}
-
-function ScheduleTemplateBar({ hours, locations, theme, onCommit }) {
+/** ScheduleTemplateBar — paint locations onto a timeline with a brush.
+ *  Click or drag to paint 15-min slots with the active location.
+ *  Block overlay at top is draggable to adjust block start/end times.
+ */
+function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBlocksChange }) {
   var [activeLoc, setActiveLoc] = useState(locations[0]?.id || null);
-  var [, forceRender] = useState(0);
   var barRef = useRef(null);
-  var previewRef = useRef(null);
   var dragRef = useRef(null);
+  var hoursRef = useRef(hours);
+  var onCommitRef = useRef(onCommit);
+  hoursRef.current = hours;
+  onCommitRef.current = onCommit;
 
   var segments = useMemo(function() { return buildSegments(hours); }, [hours]);
 
-  var locIds = useMemo(function() { return locations.map(function(l) { return l.id; }); }, [locations]);
   var locMap = useMemo(function() {
     var m = {};
     locations.forEach(function(l) { m[l.id] = l; });
     return m;
   }, [locations]);
 
-  // Reset activeLoc if locations change
   useEffect(function() {
     if (activeLoc && !locMap[activeLoc] && locations.length > 0) {
       setActiveLoc(locations[0].id);
     }
   }, [locations, activeLoc, locMap]);
 
-  var pctOf = useCallback(function(mins) {
-    return ((mins - START_MIN) / TOTAL_MIN) * 100;
-  }, []);
-
-  // --- Find segment at a minute ---
-  function segmentAt(minute) {
-    for (var i = 0; i < segments.length; i++) {
-      if (minute >= segments[i].start && minute < segments[i].end) return { seg: segments[i], idx: i };
-    }
-    return null;
-  }
-
-  // --- Hit test: near edge? ---
-  function hitTest(clientX) {
+  /** Get the 15-min slot minute at a given clientX */
+  function slotAt(clientX) {
     var bar = barRef.current;
-    if (!bar) return null;
-    var rect = bar.getBoundingClientRect();
-    var minute = snapToSlot(clientX, bar);
-    var pxPerMin = rect.width / TOTAL_MIN;
-
-    for (var i = 0; i < segments.length; i++) {
-      var seg = segments[i];
-      if (seg.loc === 'unset') continue;
-      // Check left edge (but not the very first segment edge at 360)
-      var leftPx = rect.left + (seg.start - START_MIN) * pxPerMin;
-      if (i > 0 && Math.abs(clientX - leftPx) < 8) {
-        return { type: 'resize', edge: 'left', segIdx: i, seg: seg };
-      }
-      // Check right edge
-      var rightPx = rect.left + (seg.end - START_MIN) * pxPerMin;
-      if (Math.abs(clientX - rightPx) < 8) {
-        return { type: 'resize', edge: 'right', segIdx: i, seg: seg };
-      }
-    }
-    // Check if on a segment body vs unset
-    var found = segmentAt(minute);
-    if (found && found.seg.loc !== 'unset') {
-      return { type: 'segment', segIdx: found.idx, seg: found.seg, minute: minute };
-    }
-    return { type: 'empty', minute: minute };
+    if (!bar) return START_MIN;
+    return snapToSlot(clientX, bar);
   }
 
-  // --- Write slots into hours object ---
-  function writeSlots(startMin, endMin, locId) {
+  /** Paint a range of 15-min slots with a location and commit */
+  function commitPaint(fromMin, toMin, locId) {
+    var h = hoursRef.current;
+    var lo = Math.min(fromMin, toMin);
+    var hi = Math.max(fromMin, toMin) + 15; // inclusive of the slot at toMin
     var newHours = {};
-    // Copy existing
-    Object.keys(hours).forEach(function(k) { newHours[parseInt(k)] = hours[k]; });
-    for (var m = startMin; m < endMin; m += 15) {
-      if (locId === 'unset') {
-        delete newHours[m];
+    Object.keys(h).forEach(function(k) { newHours[parseInt(k)] = h[k]; });
+    for (var m = lo; m < hi; m += 15) {
+      newHours[m] = locId;
+    }
+    onCommitRef.current(newHours);
+  }
+
+  function onMouseDown(e) {
+    if (e.button !== 0 || !activeLoc) return;
+    e.preventDefault();
+    var minute = slotAt(e.clientX);
+    dragRef.current = { startMinute: minute, lastMinute: minute, loc: activeLoc };
+
+    // Immediately paint the clicked slot
+    commitPaint(minute, minute, activeLoc);
+
+    function onMove(ev) {
+      var drag = dragRef.current;
+      if (!drag) return;
+      var m = slotAt(ev.clientX);
+      if (m !== drag.lastMinute) {
+        drag.lastMinute = m;
+        commitPaint(drag.startMinute, m, drag.loc);
+      }
+    }
+    function onUp() {
+      dragRef.current = null;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  // Touch support for location painting
+  function onTouchStart(e) {
+    if (!activeLoc) return;
+    e.preventDefault();
+    var touch = e.touches[0];
+    var minute = slotAt(touch.clientX);
+    dragRef.current = { startMinute: minute, lastMinute: minute, loc: activeLoc };
+    commitPaint(minute, minute, activeLoc);
+
+    function onTouchMove(ev) {
+      var drag = dragRef.current;
+      if (!drag) return;
+      var t = ev.touches[0];
+      var m = slotAt(t.clientX);
+      if (m !== drag.lastMinute) {
+        drag.lastMinute = m;
+        commitPaint(drag.startMinute, m, drag.loc);
+      }
+    }
+    function onTouchEnd() {
+      dragRef.current = null;
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchend', onTouchEnd);
+    }
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+    document.addEventListener('touchend', onTouchEnd);
+  }
+
+  /** Start dragging a block edge to resize it */
+  function onBlockEdgeDown(e, blockIdx, edge) {
+    if (e.button !== 0 || !onBlocksChange) return;
+    e.preventDefault();
+    e.stopPropagation(); // don't trigger location painting
+
+    var origBlocks = blocks;
+    var b = origBlocks[blockIdx];
+    var origVal = edge === 'start' ? b.start : b.end;
+
+    function onMove(ev) {
+      var m = slotAt(ev.clientX);
+      // Clamp: start can't go past end-15, end can't go before start+15
+      if (edge === 'start') {
+        m = Math.min(m, b.end - 15);
+        m = Math.max(m, START_MIN);
       } else {
-        newHours[m] = locId;
+        m = Math.max(m, b.start + 15);
+        m = Math.min(m, END_MIN);
       }
+      if (m === (edge === 'start' ? b.start : b.end)) return;
+      var newBlocks = origBlocks.map(function(bl, idx) {
+        if (idx !== blockIdx) return bl;
+        var updated = Object.assign({}, bl);
+        updated[edge] = m;
+        return updated;
+      });
+      onBlocksChange(newBlocks);
     }
-    return newHours;
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   }
 
-  // --- Pointer handlers ---
-  function onPointerDown(e) {
-    if (e.button !== 0) return;
-    var bar = barRef.current;
-    if (!bar) return;
-    bar.setPointerCapture(e.pointerId);
-
-    var hit = hitTest(e.clientX);
-    if (!hit) return;
-
-    var startX = e.clientX;
-    var startMinute = snapToSlot(e.clientX, bar);
-
-    if (hit.type === 'resize') {
-      dragRef.current = {
-        mode: 'resize',
-        edge: hit.edge,
-        segIdx: hit.segIdx,
-        origStart: hit.seg.start,
-        origEnd: hit.seg.end,
-        loc: hit.seg.loc,
-        startX: startX,
-        currentMinute: hit.edge === 'left' ? hit.seg.start : hit.seg.end
-      };
-    } else if (hit.type === 'empty') {
-      if (!activeLoc) return;
-      dragRef.current = {
-        mode: 'create',
-        startMinute: startMinute,
-        currentMinute: startMinute,
-        loc: activeLoc,
-        startX: startX
-      };
-      // Show preview
-      if (previewRef.current) {
-        var tint = LOC_TINT[activeLoc] || '#8B5CF6';
-        previewRef.current.style.display = 'block';
-        previewRef.current.style.background = tint + '50';
-        previewRef.current.style.borderColor = tint;
-        previewRef.current.style.left = pctOf(startMinute) + '%';
-        previewRef.current.style.width = pctOf(startMinute + 15) - pctOf(startMinute) + '%';
-      }
-    } else if (hit.type === 'segment') {
-      dragRef.current = {
-        mode: 'click',
-        segIdx: hit.segIdx,
-        seg: hit.seg,
-        startX: startX,
-        minute: hit.minute
-      };
-    }
-  }
-
-  function onPointerMove(e) {
-    var drag = dragRef.current;
-    var bar = barRef.current;
-    if (!drag || !bar) return;
-
-    var currentMinute = snapToSlot(e.clientX, bar);
-
-    if (drag.mode === 'click') {
-      // Upgrade to drag if moved enough
-      if (Math.abs(e.clientX - drag.startX) > 4) {
-        // Cancel click, don't start drag from segment
-        dragRef.current = null;
-      }
-      return;
-    }
-
-    if (drag.mode === 'create') {
-      drag.currentMinute = currentMinute;
-      var minM = Math.min(drag.startMinute, currentMinute);
-      var maxM = Math.max(drag.startMinute, currentMinute);
-      if (maxM === minM) maxM = minM + 15;
-      // Clamp to not overlap existing segments
-      for (var i = 0; i < segments.length; i++) {
-        var s = segments[i];
-        if (s.loc === 'unset') continue;
-        if (s.start >= minM && s.start < maxM) { maxM = s.start; }
-        if (s.end > minM && s.end <= maxM) { minM = s.end; }
-        if (s.start <= minM && s.end >= maxM) { minM = maxM; break; }
-      }
-      if (previewRef.current) {
-        previewRef.current.style.left = pctOf(minM) + '%';
-        previewRef.current.style.width = (pctOf(maxM) - pctOf(minM)) + '%';
-      }
-      return;
-    }
-
-    if (drag.mode === 'resize') {
-      drag.currentMinute = currentMinute;
-      // Find neighbor constraints
-      var prevEnd = START_MIN;
-      var nextStart = END_MIN;
-      for (var j = 0; j < segments.length; j++) {
-        var seg = segments[j];
-        if (seg.loc === 'unset') continue;
-        if (j < drag.segIdx && seg.end > prevEnd) prevEnd = seg.end;
-        if (j > drag.segIdx && seg.start < nextStart) nextStart = seg.start;
-      }
-
-      if (drag.edge === 'left') {
-        var newStart = Math.max(prevEnd, Math.min(currentMinute, drag.origEnd - 15));
-        drag.currentMinute = newStart;
-      } else {
-        var newEnd = Math.min(nextStart, Math.max(currentMinute, drag.origStart + 15));
-        drag.currentMinute = newEnd;
-      }
-      forceRender(function(n) { return n + 1; });
-      return;
-    }
-  }
-
-  function onPointerUp(e) {
-    var drag = dragRef.current;
-    var bar = barRef.current;
-    dragRef.current = null;
-    if (previewRef.current) previewRef.current.style.display = 'none';
-    if (!drag || !bar) return;
-
-    if (drag.mode === 'click') {
-      // Cycle location
-      var seg = drag.seg;
-      var idx = locIds.indexOf(seg.loc);
-      var nextLoc = locIds[(idx + 1) % locIds.length];
-      onCommit(writeSlots(seg.start, seg.end, nextLoc));
-      return;
-    }
-
-    if (drag.mode === 'create') {
-      var minM = Math.min(drag.startMinute, drag.currentMinute);
-      var maxM = Math.max(drag.startMinute, drag.currentMinute);
-      if (maxM === minM) maxM = minM + 15;
-      // Re-clamp
-      for (var i = 0; i < segments.length; i++) {
-        var s = segments[i];
-        if (s.loc === 'unset') continue;
-        if (s.start >= minM && s.start < maxM) { maxM = s.start; }
-        if (s.end > minM && s.end <= maxM) { minM = s.end; }
-        if (s.start <= minM && s.end >= maxM) { minM = maxM; break; }
-      }
-      if (maxM > minM) {
-        onCommit(writeSlots(minM, maxM, drag.loc));
-      }
-      return;
-    }
-
-    if (drag.mode === 'resize') {
-      var newHours = {};
-      Object.keys(hours).forEach(function(k) { newHours[parseInt(k)] = hours[k]; });
-      // Clear old range
-      for (var m = drag.origStart; m < drag.origEnd; m += 15) {
-        delete newHours[m];
-      }
-      // Write new range
-      var nStart = drag.edge === 'left' ? drag.currentMinute : drag.origStart;
-      var nEnd = drag.edge === 'right' ? drag.currentMinute : drag.origEnd;
-      if (nEnd <= nStart) nEnd = nStart + 15;
-      for (var m2 = nStart; m2 < nEnd; m2 += 15) {
-        newHours[m2] = drag.loc;
-      }
-      onCommit(newHours);
-      return;
-    }
-  }
-
-  // --- Compute effective segments for rendering (account for in-progress resize) ---
-  var renderSegments = segments;
-  var drag = dragRef.current;
-  if (drag && drag.mode === 'resize') {
-    var tempHours = {};
-    Object.keys(hours).forEach(function(k) { tempHours[parseInt(k)] = hours[k]; });
-    for (var m = drag.origStart; m < drag.origEnd; m += 15) delete tempHours[m];
-    var ns = drag.edge === 'left' ? drag.currentMinute : drag.origStart;
-    var ne = drag.edge === 'right' ? drag.currentMinute : drag.origEnd;
-    if (ne <= ns) ne = ns + 15;
-    for (var m2 = ns; m2 < ne; m2 += 15) tempHours[m2] = drag.loc;
-    renderSegments = buildSegments(tempHours);
-  }
-
-  // --- Cursor logic ---
-  function onBarMouseMove(e) {
-    if (dragRef.current) return; // already dragging
-    var bar = barRef.current;
-    if (!bar) return;
-    var hit = hitTest(e.clientX);
-    if (hit && hit.type === 'resize') {
-      bar.style.cursor = 'col-resize';
-    } else if (hit && hit.type === 'empty') {
-      bar.style.cursor = activeLoc ? 'crosshair' : 'default';
-    } else {
-      bar.style.cursor = 'pointer';
-    }
-  }
+  var BLOCK_OVERLAY_H = blocks && blocks.length > 0 ? 20 : 0;
 
   return (
     <div>
-      {/* Bar */}
       <div ref={barRef}
-        onPointerDown={onPointerDown}
-        onPointerMove={function(e) { onPointerMove(e); onBarMouseMove(e); }}
-        onPointerUp={onPointerUp}
+        onMouseDown={onMouseDown}
+        onTouchStart={onTouchStart}
         style={{
-          position: 'relative', height: 48, background: theme.bgTertiary,
-          borderRadius: 8, touchAction: 'none', userSelect: 'none',
-          overflow: 'hidden'
+          position: 'relative', height: 48 + BLOCK_OVERLAY_H, background: theme.bgTertiary,
+          borderRadius: 8, touchAction: 'none', userSelect: 'none', overflow: 'hidden',
+          cursor: activeLoc ? 'crosshair' : 'default'
         }}>
-        {/* Rendered segments */}
-        {renderSegments.map(function(seg, i) {
+
+        {/* Block boundary overlay (top strip) — draggable edges */}
+        {blocks && blocks.map(function(b, i) {
+          var left = pctOf(b.start);
+          var width = pctOf(b.end) - left;
+          if (width <= 0) return null;
+          return (
+            <div key={'blk-' + i} style={{
+              position: 'absolute', top: 0, height: BLOCK_OVERLAY_H,
+              left: left + '%', width: width + '%',
+              background: b.color + '40',
+              borderBottom: '2px solid ' + b.color,
+              display: 'flex', alignItems: 'center', paddingLeft: 6, gap: 2,
+              fontSize: 9, color: theme.text, overflow: 'hidden', whiteSpace: 'nowrap',
+              pointerEvents: 'none'
+            }}>
+              <span>{b.icon}</span>
+              {width > 6 && <span style={{ fontWeight: 500 }}>{b.name}</span>}
+            </div>
+          );
+        })}
+
+        {/* Drag handles at block edges */}
+        {blocks && onBlocksChange && blocks.map(function(b, i) {
+          var handles = [];
+          // Left (start) handle
+          handles.push(
+            <div key={'bh-s-' + i}
+              onMouseDown={function(e) { onBlockEdgeDown(e, i, 'start'); }}
+              style={{
+                position: 'absolute', top: 0, height: BLOCK_OVERLAY_H,
+                left: 'calc(' + pctOf(b.start) + '% - 4px)', width: 8,
+                cursor: 'ew-resize', zIndex: 5
+              }} />
+          );
+          // Right (end) handle
+          handles.push(
+            <div key={'bh-e-' + i}
+              onMouseDown={function(e) { onBlockEdgeDown(e, i, 'end'); }}
+              style={{
+                position: 'absolute', top: 0, height: BLOCK_OVERLAY_H,
+                left: 'calc(' + pctOf(b.end) + '% - 4px)', width: 8,
+                cursor: 'ew-resize', zIndex: 5
+              }} />
+          );
+          return handles;
+        })}
+
+        {/* Location segments */}
+        {segments.map(function(seg, i) {
           var left = pctOf(seg.start);
           var width = pctOf(seg.end) - pctOf(seg.start);
           var isUnset = seg.loc === 'unset';
           var loc = isUnset ? null : locMap[seg.loc];
           var tint = LOC_TINT[seg.loc] || '#8B5CF6';
           var widthMin = seg.end - seg.start;
-          var narrowThreshold = 60; // less than 60min = narrow
-
           return (
             <div key={i} style={{
-              position: 'absolute', top: 2, bottom: 2,
+              position: 'absolute', top: 2 + BLOCK_OVERLAY_H, bottom: 2,
               left: left + '%', width: width + '%',
               background: isUnset ? 'transparent' : tint + '40',
               borderLeft: isUnset ? '1px dashed ' + theme.border : '2px solid ' + tint,
@@ -821,33 +593,26 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit }) {
               overflow: 'hidden', whiteSpace: 'nowrap',
               pointerEvents: 'none'
             }}>
-              {isUnset ? (
-                widthMin >= 120 ? <span style={{ opacity: 0.5, fontSize: 9 }}>drag to set</span> : null
-              ) : (
+              {isUnset ? null : (
                 <>
                   <span style={{ fontSize: 12 }}>{loc?.icon || ''}</span>
-                  {widthMin >= narrowThreshold && <span style={{ fontSize: 10 }}>{loc?.name || seg.loc}</span>}
+                  {widthMin >= 60 && <span style={{ fontSize: 10 }}>{loc?.name || seg.loc}</span>}
                 </>
               )}
             </div>
           );
         })}
 
-        {/* Resize handles (invisible hit zones) */}
-        {renderSegments.map(function(seg, i) {
-          if (seg.loc === 'unset') return null;
-          return [
-            <div key={'lh-' + i} style={{
-              position: 'absolute', top: 0, bottom: 0,
-              left: 'calc(' + pctOf(seg.start) + '% - 4px)', width: 8,
-              cursor: 'col-resize', pointerEvents: 'auto', zIndex: 2
-            }} />,
-            <div key={'rh-' + i} style={{
-              position: 'absolute', top: 0, bottom: 0,
-              left: 'calc(' + pctOf(seg.end) + '% - 4px)', width: 8,
-              cursor: 'col-resize', pointerEvents: 'auto', zIndex: 2
+        {/* Block boundary lines through location area */}
+        {blocks && blocks.map(function(b, i) {
+          if (i === 0) return null;
+          return (
+            <div key={'bline-' + i} style={{
+              position: 'absolute', top: BLOCK_OVERLAY_H, bottom: 0, left: pctOf(b.start) + '%',
+              borderLeft: '1px dashed ' + (b.color || theme.border),
+              opacity: 0.4, pointerEvents: 'none'
             }} />
-          ];
+          );
         })}
 
         {/* Hour ticks */}
@@ -856,25 +621,17 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit }) {
           return (
             <div key={h} style={{
               position: 'absolute', top: 0, bottom: 0, left: left + '%',
-              borderLeft: '1px solid ' + theme.border, opacity: 0.3,
-              pointerEvents: 'none'
+              borderLeft: '1px solid ' + theme.border, opacity: 0.3, pointerEvents: 'none'
             }}>
-              <span style={{ fontSize: 8, color: theme.textMuted, position: 'absolute', top: 1, left: 2 }}>
+              <span style={{ fontSize: 8, color: theme.textMuted, position: 'absolute', top: BLOCK_OVERLAY_H + 1, left: 2 }}>
                 {minsToShort(h * 60)}
               </span>
             </div>
           );
         })}
-
-        {/* Preview overlay for drag-to-create */}
-        <div ref={previewRef} style={{
-          display: 'none', position: 'absolute', top: 2, bottom: 2,
-          borderRadius: 3, borderLeft: '2px solid transparent',
-          pointerEvents: 'none', zIndex: 3
-        }} />
       </div>
 
-      {/* Legend row */}
+      {/* Brush selector */}
       <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ fontSize: 10, color: theme.textMuted }}>Brush:</span>
         {locations.map(function(loc) {
@@ -897,76 +654,319 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit }) {
   );
 }
 
-function SchedulesTab({ config, theme }) {
-  var DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  var scheduleIds = Object.keys(config.locSchedules || {});
-  var [selectedTemplate, setSelectedTemplate] = useState(scheduleIds[0] || 'weekday');
-  var [newId, setNewId] = useState('');
-  var [newName, setNewName] = useState('');
+/** Expanded location editor pop-out */
+function ExpandedLocationEditor({ blocks, locOverrides, locations, theme, onLocOverridesChange, onBlocksChange, onClose }) {
+  var hours = useMemo(function() { return buildEffectiveHours(blocks, locOverrides); }, [blocks, locOverrides]);
 
-  function setDayDefault(day, templateId) {
-    var updated = { ...config.locScheduleDefaults, [day]: templateId };
-    config.updateLocScheduleDefaults(updated);
+  var locMap = useMemo(function() {
+    var m = {};
+    locations.forEach(function(l) { m[l.id] = l; });
+    return m;
+  }, [locations]);
+
+  function setSlotLoc(minute, locId) {
+    var newOverrides = Object.assign({}, locOverrides || {});
+    var block = null;
+    for (var i = 0; i < blocks.length; i++) {
+      if (minute >= blocks[i].start && minute < blocks[i].end) { block = blocks[i]; break; }
+    }
+    if (block && locId === (block.loc || 'home')) {
+      delete newOverrides[minute];
+    } else {
+      newOverrides[minute] = locId;
+    }
+    onLocOverridesChange(newOverrides);
   }
 
+  // Group slots by block
+  var slotGroups = useMemo(function() {
+    var groups = [];
+    var uncovered = [];
+    blocks.forEach(function(b) {
+      var slots = [];
+      for (var m = b.start; m < b.end; m += 15) {
+        slots.push({ minute: m, loc: hours[m] || b.loc || 'home', isOverride: !!(locOverrides && locOverrides[m] !== undefined) });
+      }
+      groups.push({ block: b, slots: slots });
+    });
+    // Add slots outside blocks
+    for (var m = START_MIN; m < END_MIN; m += 15) {
+      var inBlock = false;
+      for (var i = 0; i < blocks.length; i++) {
+        if (m >= blocks[i].start && m < blocks[i].end) { inBlock = true; break; }
+      }
+      if (!inBlock && hours[m]) {
+        uncovered.push({ minute: m, loc: hours[m], isOverride: true });
+      }
+    }
+    if (uncovered.length > 0) {
+      groups.push({ block: { name: 'Other', icon: '', color: '#6B7280' }, slots: uncovered });
+    }
+    return groups;
+  }, [blocks, hours, locOverrides]);
+
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(0,0,0,0.6)', zIndex: 400,
+      display: 'flex', alignItems: 'center', justifyContent: 'center'
+    }} onClick={onClose}>
+      <div style={{
+        background: theme.bgSecondary, borderRadius: 12,
+        width: 650, maxWidth: '95vw', maxHeight: '80vh',
+        overflow: 'hidden', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 8px 32px ' + theme.shadow
+      }} onClick={function(e) { e.stopPropagation(); }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderBottom: '1px solid ' + theme.border }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: theme.text }}>Location Details</div>
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: theme.textMuted, fontSize: 18, cursor: 'pointer' }}>&times;</button>
+        </div>
+        <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+          {/* Full-width bar */}
+          <ScheduleTemplateBar
+            hours={hours}
+            locations={locations}
+            theme={theme}
+            onCommit={function(newHours) {
+              // Convert hours back to locOverrides
+              var newOverrides = {};
+              Object.keys(newHours).forEach(function(k) {
+                var m = parseInt(k);
+                var loc = newHours[k];
+                var block = null;
+                for (var i = 0; i < blocks.length; i++) {
+                  if (m >= blocks[i].start && m < blocks[i].end) { block = blocks[i]; break; }
+                }
+                if (block) {
+                  if (loc !== (block.loc || 'home')) newOverrides[m] = loc;
+                } else {
+                  newOverrides[m] = loc;
+                }
+              });
+              onLocOverridesChange(newOverrides);
+            }}
+            blocks={blocks}
+            onBlocksChange={onBlocksChange}
+          />
+
+          {/* Slot grid grouped by block */}
+          <div style={{ marginTop: 16 }}>
+            {slotGroups.map(function(group, gi) {
+              return (
+                <div key={gi} style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: group.block.color || theme.text, marginBottom: 4 }}>
+                    {group.block.icon} {group.block.name}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+                    {group.slots.map(function(slot) {
+                      var tint = LOC_TINT[slot.loc] || '#8B5CF6';
+                      var loc = locMap[slot.loc];
+                      return (
+                        <div key={slot.minute} style={{ position: 'relative' }}>
+                          <select value={slot.loc} onChange={function(e) { setSlotLoc(slot.minute, e.target.value); }}
+                            title={minsToTime(slot.minute)}
+                            style={{
+                              width: 50, padding: '2px 1px', fontSize: 9,
+                              border: slot.isOverride ? '2px solid ' + tint : '1px solid ' + theme.border,
+                              borderRadius: 3, background: tint + '20',
+                              color: theme.text, cursor: 'pointer', fontFamily: 'inherit'
+                            }}>
+                            {locations.map(function(l) { return <option key={l.id} value={l.id}>{l.icon}{l.name}</option>; })}
+                          </select>
+                          <div style={{ fontSize: 7, color: theme.textMuted, textAlign: 'center' }}>{minsToShort(slot.minute)}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UnifiedTemplateTab({ config, theme }) {
+  var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var templates = config.scheduleTemplates || {};
+  var templateIds = Object.keys(templates);
+  var [selectedTemplate, setSelectedTemplate] = useState(templateIds[0] || 'weekday');
+  var [editingBlockIdx, setEditingBlockIdx] = useState(null);
+  var [showExpanded, setShowExpanded] = useState(false);
+  var [newId, setNewId] = useState('');
+  var [newName, setNewName] = useState('');
+  var [newOverrideDate, setNewOverrideDate] = useState('');
+  var [newOverrideTemplate, setNewOverrideTemplate] = useState(templateIds[0] || 'weekday');
+
+  var tmpl = templates[selectedTemplate];
+  var blocks = tmpl?.blocks || [];
+  var locOverrides = tmpl?.locOverrides || {};
+
+  function saveTemplate(id, patch) {
+    var updated = {};
+    Object.keys(templates).forEach(function(k) { updated[k] = Object.assign({}, templates[k]); });
+    updated[id] = Object.assign({}, updated[id], patch);
+    config.updateScheduleTemplates(updated);
+  }
+
+  function saveAllTemplates(newTemplates) {
+    config.updateScheduleTemplates(newTemplates);
+  }
+
+  // --- Day defaults ---
+  function setDayDefault(day, tmplId) {
+    var updated = Object.assign({}, config.templateDefaults, { [day]: tmplId });
+    config.updateTemplateDefaults(updated);
+  }
+
+  // --- Template CRUD ---
   function addTemplate() {
     if (!newId || !newName) return;
-    var updated = { ...config.locSchedules };
-    updated[newId] = { name: newName, icon: '\u{1F4C5}', hours: {} };
-    config.updateLocSchedules(updated);
-    setNewId('');
-    setNewName('');
+    var updated = {};
+    Object.keys(templates).forEach(function(k) { updated[k] = templates[k]; });
+    // Clone blocks from weekday template as a starting point
+    var defaultBlocks = (templates['weekday']?.blocks || []).map(function(b) { return Object.assign({}, b, { id: b.id + '_' + Date.now() }); });
+    updated[newId] = { name: newName, icon: '\uD83D\uDCC5', system: false, blocks: defaultBlocks, locOverrides: {} };
+    saveAllTemplates(updated);
+    setNewId(''); setNewName('');
     setSelectedTemplate(newId);
   }
 
   function removeTemplate(id) {
-    if (id === 'weekday' || id === 'weekend') return; // protect system templates
-    var updated = { ...config.locSchedules };
-    delete updated[id];
-    config.updateLocSchedules(updated);
-    // Remove any defaults/overrides pointing to this template
-    var defs = { ...config.locScheduleDefaults };
+    if (templates[id]?.system) return;
+    var updated = {};
+    Object.keys(templates).forEach(function(k) { if (k !== id) updated[k] = templates[k]; });
+    saveAllTemplates(updated);
+    // Fix defaults/overrides
+    var defs = Object.assign({}, config.templateDefaults);
     Object.keys(defs).forEach(function(d) { if (defs[d] === id) defs[d] = 'weekday'; });
-    config.updateLocScheduleDefaults(defs);
-    var ovr = { ...config.locScheduleOverrides };
+    config.updateTemplateDefaults(defs);
+    var ovr = Object.assign({}, config.templateOverrides);
     Object.keys(ovr).forEach(function(d) { if (ovr[d] === id) delete ovr[d]; });
-    config.updateLocScheduleOverrides(ovr);
-    if (selectedTemplate === id) setSelectedTemplate(scheduleIds[0] || 'weekday');
+    config.updateTemplateOverrides(ovr);
+    if (selectedTemplate === id) setSelectedTemplate(Object.keys(updated)[0] || 'weekday');
   }
 
-  var template = (config.locSchedules || {})[selectedTemplate];
-  var hours = template?.hours || {};
+  // --- Block CRUD ---
+  function addBlock() {
+    var last = blocks[blocks.length - 1];
+    var start = last ? last.end : 360;
+    var newBlock = {
+      id: 'block_' + Date.now(),
+      tag: 'custom',
+      name: 'New Block',
+      start: start,
+      end: Math.min(start + 60, 1440),
+      color: '#6B7280',
+      icon: '\uD83D\uDCCB',
+      loc: config.locations[0]?.id || 'home'
+    };
+    saveTemplate(selectedTemplate, { blocks: blocks.concat([newBlock]) });
+    setEditingBlockIdx(blocks.length);
+  }
 
-  function commitHours(newHours) {
-    var updated = { ...config.locSchedules };
-    updated[selectedTemplate] = { ...updated[selectedTemplate], hours: newHours };
-    config.updateLocSchedules(updated);
+  function removeBlock(idx) {
+    var removed = blocks[idx];
+    var newBlocks = blocks.filter(function(_, i) { return i !== idx; });
+    // Clean up locOverrides in removed block's range
+    var newOverrides = Object.assign({}, locOverrides);
+    for (var m = removed.start; m < removed.end; m += 15) {
+      delete newOverrides[m];
+    }
+    saveTemplate(selectedTemplate, { blocks: newBlocks, locOverrides: newOverrides });
+    setEditingBlockIdx(null);
+  }
+
+  function updateBlock(idx, field, value) {
+    var oldBlock = blocks[idx];
+    var newBlocks = blocks.map(function(b, i) {
+      if (i !== idx) return b;
+      var next = Object.assign({}, b, { [field]: value });
+      if (field === 'start' || field === 'end') next[field] = parseInt(value) || 0;
+      return next;
+    });
+    var newBlock = newBlocks[idx];
+    var newOverrides = Object.assign({}, locOverrides);
+
+    if (field === 'loc') {
+      // When block loc changes, remove overrides in its range that now match new default
+      for (var m = newBlock.start; m < newBlock.end; m += 15) {
+        if (newOverrides[m] === value) delete newOverrides[m];
+      }
+    }
+    if (field === 'start' || field === 'end') {
+      // Fill newly covered time with block's loc, remove orphaned overrides
+      var oldStart = oldBlock.start, oldEnd = oldBlock.end;
+      var ns = newBlock.start, ne = newBlock.end;
+      // Remove overrides in old range that are now outside
+      for (var m2 = oldStart; m2 < oldEnd; m2 += 15) {
+        if (m2 < ns || m2 >= ne) {
+          delete newOverrides[m2];
+        }
+      }
+      // New slots that were not in old range: remove any override that matches block's loc
+      for (var m3 = ns; m3 < ne; m3 += 15) {
+        if (m3 < oldStart || m3 >= oldEnd) {
+          if (newOverrides[m3] === newBlock.loc) delete newOverrides[m3];
+        }
+      }
+    }
+    saveTemplate(selectedTemplate, { blocks: newBlocks, locOverrides: newOverrides });
+  }
+
+  function handleLocOverridesChange(newOverrides) {
+    saveTemplate(selectedTemplate, { locOverrides: newOverrides });
+  }
+
+  // Compute effective hours for the bar from blocks + locOverrides
+  var effectiveHours = useMemo(function() {
+    return buildEffectiveHours(blocks, locOverrides);
+  }, [blocks, locOverrides]);
+
+  // Convert flat hours map back to locOverrides by diffing against block defaults
+  function handleHoursCommit(newHours) {
+    var newOverrides = {};
+    Object.keys(newHours).forEach(function(k) {
+      var m = parseInt(k);
+      var loc = newHours[k];
+      var block = null;
+      for (var i = 0; i < blocks.length; i++) {
+        if (m >= blocks[i].start && m < blocks[i].end) { block = blocks[i]; break; }
+      }
+      if (block) {
+        if (loc !== (block.loc || 'home')) {
+          newOverrides[m] = loc;
+        }
+      } else {
+        newOverrides[m] = loc;
+      }
+    });
+    handleLocOverridesChange(newOverrides);
   }
 
   // Date overrides
-  var overrideEntries = Object.entries(config.locScheduleOverrides || {});
-  var [newOverrideDate, setNewOverrideDate] = useState('');
-  var [newOverrideTemplate, setNewOverrideTemplate] = useState(scheduleIds[0] || 'weekday');
+  var overrideEntries = Object.entries(config.templateOverrides || {});
 
   return (
     <div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>Schedule Templates</div>
-      <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 12 }}>Define location schedules and assign them to days</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 4 }}>Schedule Templates</div>
+      <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 12 }}>Define time blocks and locations for each template</div>
 
-      {/* Day defaults */}
+      {/* Day Defaults */}
       <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6 }}>Day Defaults</div>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 16, flexWrap: 'wrap' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginBottom: 16 }}>
         {DAYS.map(function(d) {
-          var current = config.locScheduleDefaults[d] || 'weekday';
-          var tmpl = (config.locSchedules || {})[current];
+          var current = (config.templateDefaults || {})[d] || 'weekday';
           return (
-            <div key={d} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+            <div key={d} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, minWidth: 0 }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: theme.textSecondary }}>{d}</span>
               <select value={current} onChange={function(e) { setDayDefault(d, e.target.value); }}
-                style={{ padding: '3px 4px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 11, width: 80 }}>
-                {scheduleIds.map(function(id) {
-                  var s = (config.locSchedules || {})[id];
-                  return <option key={id} value={id}>{s?.icon || ''} {s?.name || id}</option>;
+                style={{ padding: '3px 4px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 11, width: '100%', minWidth: 0 }}>
+                {templateIds.map(function(id) {
+                  var s = templates[id];
+                  return <option key={id} value={id}>{(s?.icon || '') + ' ' + (s?.name || id)}</option>;
                 })}
               </select>
             </div>
@@ -976,18 +976,18 @@ function SchedulesTab({ config, theme }) {
 
       {/* Template selector */}
       <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6 }}>Templates</div>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
-        {scheduleIds.map(function(id) {
-          var s = (config.locSchedules || {})[id];
+      <div style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        {templateIds.map(function(id) {
+          var s = templates[id];
           return (
             <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <button onClick={function() { setSelectedTemplate(id); }} style={{
+              <button onClick={function() { setSelectedTemplate(id); setEditingBlockIdx(null); }} style={{
                 border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
                 background: selectedTemplate === id ? theme.accent : theme.bgTertiary,
                 color: selectedTemplate === id ? '#FFF' : theme.textSecondary,
                 fontSize: 12, fontFamily: 'inherit'
-              }}>{s?.icon || ''} {s?.name || id}</button>
-              {id !== 'weekday' && id !== 'weekend' && (
+              }}>{(s?.icon || '') + ' ' + (s?.name || id)}</button>
+              {!s?.system && (
                 <button onClick={function() { removeTemplate(id); }} style={{
                   border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 12
                 }}>&times;</button>
@@ -995,51 +995,149 @@ function SchedulesTab({ config, theme }) {
             </div>
           );
         })}
+        {/* Inline add */}
+        <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+          <input value={newId} onChange={function(e) { setNewId(e.target.value.replace(/\s/g, '_').toLowerCase()); }} placeholder="id"
+            style={{ width: 55, padding: '3px 5px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 10 }} />
+          <input value={newName} onChange={function(e) { setNewName(e.target.value); }} placeholder="Name"
+            style={{ width: 70, padding: '3px 5px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 10 }} />
+          <button onClick={addTemplate} style={{
+            border: 'none', borderRadius: 4, padding: '3px 8px', background: theme.accent, color: '#FFF', fontSize: 10, cursor: 'pointer', fontFamily: 'inherit'
+          }}>+ New</button>
+        </div>
       </div>
 
-      {/* Template detail — interactive bar editor */}
-      {template && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 6 }}>
-            {template.icon} {template.name} — drag to create, drag edges to resize, click to cycle location
-          </div>
+      {/* Combined bar */}
+      {tmpl && (
+        <div style={{ marginBottom: 12 }}>
           <ScheduleTemplateBar
-            hours={hours}
+            hours={effectiveHours}
             locations={config.locations}
             theme={theme}
-            onCommit={commitHours}
+            onCommit={handleHoursCommit}
+            blocks={blocks}
+            onBlocksChange={function(newBlocks) { saveTemplate(selectedTemplate, { blocks: newBlocks }); }}
           />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+            <button onClick={function() { setShowExpanded(true); }} style={{
+              border: '1px solid ' + theme.border, borderRadius: 4, padding: '2px 8px',
+              background: 'transparent', color: theme.textSecondary, fontSize: 10,
+              cursor: 'pointer', fontFamily: 'inherit'
+            }}>Expand</button>
+          </div>
         </div>
       )}
 
-      {/* Add template */}
-      <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6, marginTop: 16 }}>Add Template</div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
-        <input value={newId} onChange={function(e) { setNewId(e.target.value); }} placeholder="ID (e.g. holiday)"
-          style={{ width: 100, padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
-        <input value={newName} onChange={function(e) { setNewName(e.target.value); }} placeholder="Name"
-          style={{ flex: 1, padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
-        <button onClick={addTemplate} style={{
-          border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FFF', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit'
-        }}>Add</button>
-      </div>
+      {/* Block list + editor */}
+      {tmpl && (
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6 }}>Blocks</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
+            {blocks.map(function(b, i) {
+              var isEditing = editingBlockIdx === i;
+              return (
+                <div key={b.id || i}>
+                  <div onClick={function() { setEditingBlockIdx(isEditing ? null : i); }} style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px',
+                    background: isEditing ? b.color + '15' : theme.bgTertiary,
+                    border: isEditing ? '1px solid ' + b.color : '1px solid transparent',
+                    borderRadius: 6, fontSize: 12, cursor: 'pointer'
+                  }}>
+                    <div style={{ width: 4, height: 18, borderRadius: 2, background: b.color }} />
+                    <span>{b.icon}</span>
+                    <span style={{ color: theme.text, flex: 1, fontWeight: 500 }}>{b.name}</span>
+                    <span style={{ fontSize: 10, color: theme.textMuted }}>{minsToTime(b.start)} - {minsToTime(b.end)}</span>
+                    <span style={{ fontSize: 10, color: theme.textMuted, background: theme.bgTertiary, padding: '1px 6px', borderRadius: 8 }}>
+                      {(config.locations.find(function(l) { return l.id === b.loc; }) || {}).icon || ''} {b.loc}
+                    </span>
+                    <button onClick={function(e) { e.stopPropagation(); removeBlock(i); }} style={{
+                      border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 13
+                    }}>&times;</button>
+                  </div>
+                  {isEditing && (
+                    <div style={{ padding: '6px 10px', display: 'flex', flexWrap: 'wrap', gap: 6, background: theme.bgTertiary, borderRadius: '0 0 6px 6px', marginTop: -2, alignItems: 'flex-end' }}>
+                      <label style={{ fontSize: 11, color: theme.textSecondary }}>
+                        Name
+                        <input value={b.name} onChange={function(e) { updateBlock(i, 'name', e.target.value); }}
+                          style={{ display: 'block', width: 80, padding: '3px 5px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 11 }} />
+                      </label>
+                      <label style={{ fontSize: 11, color: theme.textSecondary }}>
+                        Tag
+                        <input value={b.tag || ''} onChange={function(e) { updateBlock(i, 'tag', e.target.value); }}
+                          style={{ display: 'block', width: 60, padding: '3px 5px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 11 }} />
+                      </label>
+                      <label style={{ fontSize: 11, color: theme.textSecondary }}>
+                        Start
+                        <input type="time" value={minsToTimeInput(b.start)} onChange={function(e) { updateBlock(i, 'start', timeInputToMins(e.target.value)); }}
+                          style={{ display: 'block', padding: '3px 4px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 11 }} />
+                      </label>
+                      <label style={{ fontSize: 11, color: theme.textSecondary }}>
+                        End
+                        <input type="time" value={minsToTimeInput(b.end)} onChange={function(e) { updateBlock(i, 'end', timeInputToMins(e.target.value)); }}
+                          style={{ display: 'block', padding: '3px 4px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 11 }} />
+                      </label>
+                      <label style={{ fontSize: 11, color: theme.textSecondary }}>
+                        Loc
+                        <select value={b.loc} onChange={function(e) { updateBlock(i, 'loc', e.target.value); }}
+                          style={{ display: 'block', padding: '3px 4px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 11 }}>
+                          {config.locations.map(function(l) { return <option key={l.id} value={l.id}>{l.icon + ' ' + l.name}</option>; })}
+                        </select>
+                      </label>
+                      <label style={{ fontSize: 11, color: theme.textSecondary }}>
+                        <span style={{ visibility: 'hidden' }}>C</span>
+                        <input type="color" value={b.color} onChange={function(e) { updateBlock(i, 'color', e.target.value); }}
+                          style={{ display: 'block', width: 28, height: 24, border: 'none', cursor: 'pointer', padding: 0 }} />
+                      </label>
+                      <label style={{ fontSize: 11, color: theme.textSecondary }}>
+                        <span style={{ visibility: 'hidden' }}>I</span>
+                        <input value={b.icon} onChange={function(e) { updateBlock(i, 'icon', e.target.value); }}
+                          style={{ display: 'block', width: 34, padding: '3px 4px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12, textAlign: 'center' }} />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
+            <button onClick={addBlock} style={{
+              border: 'none', borderRadius: 4, padding: '4px 10px', background: theme.accent, color: '#FFF', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit'
+            }}>+ Custom</button>
+            {PRESET_BLOCKS.map(function(preset) {
+              return (
+                <button key={preset.tag + '_' + preset.start} onClick={function() {
+                  var newBlock = Object.assign({}, preset, { id: preset.tag + '_' + Date.now(), loc: preset.loc || config.locations[0]?.id || 'home' });
+                  saveTemplate(selectedTemplate, { blocks: blocks.concat([newBlock]) });
+                }} style={{
+                  border: '1px solid ' + preset.color + '40', borderRadius: 4, padding: '3px 8px',
+                  background: preset.color + '15', color: theme.text, fontSize: 10,
+                  cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 3
+                }}>
+                  <span>{preset.icon}</span>
+                  <span>{preset.name}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
-      {/* Date overrides */}
-      <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6 }}>Date Overrides</div>
+      {/* Date Overrides */}
+      <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6, marginTop: 8 }}>Date Overrides</div>
       <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 8 }}>Override the default template for specific dates</div>
       {overrideEntries.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 8 }}>
           {overrideEntries.map(function(entry) {
             var date = entry[0], tmplId = entry[1];
-            var tmpl2 = (config.locSchedules || {})[tmplId];
+            var t = templates[tmplId];
             return (
               <div key={date} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 8px', fontSize: 12, background: theme.bgTertiary, borderRadius: 4 }}>
                 <span style={{ color: theme.text, fontWeight: 500 }}>{date}</span>
-                <span style={{ color: theme.textMuted }}>{tmpl2?.icon || ''} {tmpl2?.name || tmplId}</span>
+                <span style={{ color: theme.textMuted }}>{(t?.icon || '') + ' ' + (t?.name || tmplId)}</span>
                 <button onClick={function() {
-                  var updated = { ...config.locScheduleOverrides };
+                  var updated = Object.assign({}, config.templateOverrides);
                   delete updated[date];
-                  config.updateLocScheduleOverrides(updated);
+                  config.updateTemplateOverrides(updated);
                 }} style={{ border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 12, marginLeft: 'auto' }}>&times;</button>
               </div>
             );
@@ -1051,20 +1149,33 @@ function SchedulesTab({ config, theme }) {
           style={{ width: 80, padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
         <select value={newOverrideTemplate} onChange={function(e) { setNewOverrideTemplate(e.target.value); }}
           style={{ padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }}>
-          {scheduleIds.map(function(id) {
-            var s = (config.locSchedules || {})[id];
-            return <option key={id} value={id}>{s?.icon || ''} {s?.name || id}</option>;
+          {templateIds.map(function(id) {
+            var s = templates[id];
+            return <option key={id} value={id}>{(s?.icon || '') + ' ' + (s?.name || id)}</option>;
           })}
         </select>
         <button onClick={function() {
           if (!newOverrideDate) return;
-          var updated = { ...config.locScheduleOverrides, [newOverrideDate]: newOverrideTemplate };
-          config.updateLocScheduleOverrides(updated);
+          var updated = Object.assign({}, config.templateOverrides, { [newOverrideDate]: newOverrideTemplate });
+          config.updateTemplateOverrides(updated);
           setNewOverrideDate('');
         }} style={{
           border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FFF', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit'
         }}>Add Override</button>
       </div>
+
+      {/* Expanded location editor */}
+      {showExpanded && tmpl && (
+        <ExpandedLocationEditor
+          blocks={blocks}
+          locOverrides={locOverrides}
+          locations={config.locations}
+          theme={theme}
+          onLocOverridesChange={handleLocOverridesChange}
+          onBlocksChange={function(newBlocks) { saveTemplate(selectedTemplate, { blocks: newBlocks }); }}
+          onClose={function() { setShowExpanded(false); }}
+        />
+      )}
     </div>
   );
 }

@@ -128,7 +128,7 @@ export default function CalendarGrid({
   var subColW_right = rightCardW;
   var colGap = 0;
 
-  var blocks = getBlocksForDate(dateKey, schedCfg.timeBlocks);
+  var blocks = getBlocksForDate(dateKey, schedCfg.timeBlocks, schedCfg);
   var pinchRef = useRef({ startDist: 0, startZoom: 0 });
   var zoomRef = useRef(gridZoom); zoomRef.current = gridZoom;
   var onZoomRef = useRef(onZoomChange); onZoomRef.current = onZoomChange;
