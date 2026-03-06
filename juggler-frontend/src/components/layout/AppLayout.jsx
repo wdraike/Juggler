@@ -27,6 +27,7 @@ import MonthView from '../views/MonthView';
 import ListView from '../views/ListView';
 import PriorityView from '../views/PriorityView';
 import ConflictsView from '../views/ConflictsView';
+import TimelineView from '../views/TimelineView';
 
 // Task components
 import TaskEditForm from '../tasks/TaskEditForm';
@@ -574,6 +575,25 @@ export default function AppLayout() {
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               gridZoom={config.gridZoom} darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins}
               onGridDrop={handleGridDrop} blockedTaskIds={blockedTaskIds}
+              onZoomChange={handleZoomChange}
+              isMobile={isMobile}
+              onMarkerDrag={handleMarkerDrag}
+            />
+          )}
+          {viewMode === 'timeline' && (
+            <TimelineView
+              selectedDate={selectedDate} selectedDateKey={selectedDateKey}
+              placements={dayPlacements[selectedDateKey] || []}
+              statuses={statuses} directions={directions}
+              onStatusChange={handleStatusChange} onExpand={handleExpand}
+              onCreate={handleCreate} gridZoom={config.gridZoom}
+              darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
+              onGridDrop={handleGridDrop}
+              locSchedules={config.locSchedules}
+              onUpdateLocScheduleOverrides={config.updateTemplateOverrides}
+              allTasks={allTasks} onBatchHabitsDone={handleBatchHabitsDone}
+              locations={config.locations} onHourLocationOverride={handleHourLocationOverride}
+              blockedTaskIds={blockedTaskIds}
               onZoomChange={handleZoomChange}
               isMobile={isMobile}
               onMarkerDrag={handleMarkerDrag}

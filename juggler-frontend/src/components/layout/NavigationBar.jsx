@@ -11,6 +11,7 @@ const VIEW_MODES = [
   { id: '3day', label: '3-Day', icon: '3', tip: '3-Day view \u2014 three-day side-by-side timeline' },
   { id: 'week', label: 'Week', icon: '7', tip: 'Week view \u2014 seven-day timeline overview' },
   { id: 'month', label: 'Month', icon: 'M', tip: 'Month view \u2014 date grid, drag tasks between dates' },
+  { id: 'timeline', label: 'Timeline', icon: '\u2194', tip: 'Timeline view \u2014 horizontal left-to-right timeline with cards above and below' },
   { id: 'list', label: 'List', icon: '\u2261', tip: 'List view \u2014 all tasks grouped by date' },
   { id: 'priority', label: 'Priority', icon: 'P', tip: 'Priority view \u2014 P1-P4 kanban columns' },
   { id: 'conflicts', label: 'Issues', icon: '!', tip: 'Issues view \u2014 unplaced tasks, conflicts, and deadline misses' },
