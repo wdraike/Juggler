@@ -16,19 +16,29 @@ import ScheduleCard from './ScheduleCard';
 // Dimensions
 var STRIP_H = 32;         // horizontal strip height
 var MARKER_H = 8;         // marker bar height (above/below strip)
-var CARD_W = 190;         // card width — wider to show more title
-var CARD_W_M = 160;       // mobile card width
-var CARD_H = 58;          // card height — shorter, less elongated
-var CARD_H_M = 62;
-var CARD_GAP = 6;         // gap between stacked cards
-var CONN_ZONE = 14;       // space between marker and card for connector
+var CARD_W = 210;         // card width — wide enough to show full titles
+var CARD_W_M = 170;       // mobile card width
+var CARD_H = 56;          // card height — compact
+var CARD_H_M = 60;
+var CARD_GAP = 5;         // gap between stacked cards
+var CONN_ZONE = 12;       // space between marker and card for connector
+var MAX_ROWS = 6;         // max rows per side (grows dynamically)
 
 function computeHLayout(placements, hourWidth, cardW, cardH, gap) {
   var sorted = (placements || []).slice().sort(function(a, b) { return a.start - b.start; });
   var result = [];
 
-  // Track rightmost edge of each of 4 slots: above_0, above_1, below_0, below_1
-  var rowRight = { above_0: -Infinity, above_1: -Infinity, below_0: -Infinity, below_1: -Infinity };
+  // Dynamic rows: start with 2 per side, grow as needed
+  var rowRight = {};
+  var sides = ['above', 'below'];
+  for (var si = 0; si < sides.length; si++) {
+    for (var ri = 0; ri < MAX_ROWS; ri++) {
+      rowRight[sides[si] + '_' + ri] = -Infinity;
+    }
+  }
+
+  // Track how many rows are actually used per side
+  var maxRowUsed = { above: 0, below: 0 };
 
   for (var i = 0; i < sorted.length; i++) {
     var item = sorted[i];
@@ -40,22 +50,27 @@ function computeHLayout(placements, hourWidth, cardW, cardH, gap) {
     // Ideal X: center card on marker midpoint
     var idealX = Math.max(markerMidX - cardW / 2, 4);
 
-    // Pick the best slot across all 4 rows — whichever places closest to idealX
+    // Pick the best slot across all available rows on both sides
+    // Prefer closer rows (lower row number) when distance is similar
     var bestSlot = null;
-    var bestDist = Infinity;
-    var sides = ['above', 'below'];
-    for (var si = 0; si < sides.length; si++) {
-      for (var ri = 0; ri < 2; ri++) {
-        var key = sides[si] + '_' + ri;
+    var bestScore = Infinity;
+    for (var s = 0; s < sides.length; s++) {
+      for (var r = 0; r < MAX_ROWS; r++) {
+        var key = sides[s] + '_' + r;
         var x = Math.max(idealX, rowRight[key] + gap);
         var dist = Math.abs(x - idealX);
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestSlot = { side: sides[si], row: ri, x: x };
+        // Penalize deeper rows slightly to prefer filling closer rows first
+        var score = dist + r * 20;
+        if (score < bestScore) {
+          bestScore = score;
+          bestSlot = { side: sides[s], row: r, x: x };
         }
       }
     }
 
+    if (bestSlot.row > maxRowUsed[bestSlot.side]) {
+      maxRowUsed[bestSlot.side] = bestSlot.row;
+    }
     rowRight[bestSlot.side + '_' + bestSlot.row] = bestSlot.x + cardW;
 
     result.push({
@@ -64,7 +79,7 @@ function computeHLayout(placements, hourWidth, cardW, cardH, gap) {
       cardX: bestSlot.x, cardMidX: bestSlot.x + cardW / 2
     });
   }
-  return result;
+  return { items: result, maxRowUsed: maxRowUsed };
 }
 
 export default function HorizontalTimeline({
@@ -93,9 +108,12 @@ export default function HorizontalTimeline({
   var blocks = getBlocksForDate(dateKey, schedCfg.timeBlocks, schedCfg);
 
   // Layout
-  var layout = useMemo(function() {
+  var layoutResult = useMemo(function() {
     return computeHLayout(placements, baseHourWidth, cardW, cardH, CARD_GAP);
   }, [placements, baseHourWidth, cardW, cardH]);
+
+  var layout = layoutResult.items;
+  var maxRowUsed = layoutResult.maxRowUsed;
 
   // Total width
   var gridW = GRID_HOURS_COUNT * baseHourWidth;
@@ -106,19 +124,20 @@ export default function HorizontalTimeline({
   }
   var totalW = Math.max(gridW, maxRight + 8);
 
-  // Vertical positions
-  // Strip is centered vertically; cards go above and below
-  var stripY = Math.floor(ch / 2) - STRIP_H / 2;
-  // Above cards: row 0 is closest to strip, row 1 is further up
-  var aboveRow0Top = stripY - MARKER_H - CONN_ZONE - cardH;
-  var aboveRow1Top = aboveRow0Top - CARD_GAP - cardH;
-  // Below cards: row 0 is closest to strip, row 1 is further down
-  var belowRow0Top = stripY + STRIP_H + MARKER_H + CONN_ZONE;
-  var belowRow1Top = belowRow0Top + cardH + CARD_GAP;
+  // Vertical positions — dynamic based on how many rows are used
+  var aboveRows = maxRowUsed.above + 1;
+  var belowRows = maxRowUsed.below + 1;
+  var aboveHeight = aboveRows * cardH + (aboveRows - 1) * CARD_GAP + MARKER_H + CONN_ZONE;
+  var belowHeight = belowRows * cardH + (belowRows - 1) * CARD_GAP + MARKER_H + CONN_ZONE;
+  var stripY = Math.max(aboveHeight + 16, Math.floor(ch / 2) - STRIP_H / 2);
 
   function getCardY(side, row) {
-    if (side === 'above') return row === 0 ? aboveRow0Top : aboveRow1Top;
-    return row === 0 ? belowRow0Top : belowRow1Top;
+    if (side === 'above') {
+      // Row 0 closest to strip, higher rows go further up
+      return stripY - MARKER_H - CONN_ZONE - cardH - row * (cardH + CARD_GAP);
+    }
+    // Below: row 0 closest to strip, higher rows go further down
+    return stripY + STRIP_H + MARKER_H + CONN_ZONE + row * (cardH + CARD_GAP);
   }
 
   // Pinch/wheel zoom (horizontal)
@@ -189,7 +208,7 @@ export default function HorizontalTimeline({
   return (
     <div ref={elRef} style={{
       position: 'relative', width: totalW, minWidth: totalW,
-      height: '100%', minHeight: (cardH * 2 + CARD_GAP) * 2 + STRIP_H + MARKER_H * 2 + CONN_ZONE * 2 + 40,
+      height: '100%', minHeight: aboveHeight + belowHeight + STRIP_H + 40,
       touchAction: 'pan-x', overflow: 'hidden',
       userSelect: dragState ? 'none' : undefined,
       cursor: dragState ? 'grabbing' : undefined
