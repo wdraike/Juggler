@@ -42,6 +42,7 @@ var FLOATERS = [
 
 export default function LoginPage() {
   var { login } = useAuth();
+  var [loginError, setLoginError] = React.useState(null);
 
   return (
     <div style={{
@@ -94,10 +95,10 @@ export default function LoginPage() {
       }}>
         <GoogleLogin
           onSuccess={async function(credentialResponse) {
-            try { await login(credentialResponse.credential); }
-            catch (err) { console.error('Login failed:', err); }
+            try { setLoginError(null); await login(credentialResponse.credential); }
+            catch (err) { console.error('Login failed:', err); setLoginError(err?.response?.data?.message || err.message || 'Login failed'); }
           }}
-          onError={function() { console.error('Google login failed'); }}
+          onError={function() { setLoginError('Google sign-in failed. Check your connection.'); }}
           theme="outline"
           size="medium"
           text="signin"
@@ -316,16 +317,25 @@ export default function LoginPage() {
           <div style={{ display: 'inline-block' }}>
             <GoogleLogin
               onSuccess={async function(credentialResponse) {
-                try { await login(credentialResponse.credential); }
-                catch (err) { console.error('Login failed:', err); }
+                try { setLoginError(null); await login(credentialResponse.credential); }
+                catch (err) { console.error('Login failed:', err); setLoginError(err?.response?.data?.message || err.message || 'Login failed'); }
               }}
-              onError={function() { console.error('Google login failed'); }}
+              onError={function() { setLoginError('Google sign-in failed. Check your connection.'); }}
               theme="filled_blue"
               size="large"
               text="signin_with"
               shape="pill"
             />
           </div>
+          {loginError && (
+            <div style={{
+              marginTop: 16, padding: '10px 20px', background: '#FEF2F2',
+              border: '1px solid #FECACA', borderRadius: 10, color: '#DC2626',
+              fontSize: 13, maxWidth: 400, margin: '16px auto 0'
+            }}>
+              {loginError}
+            </div>
+          )}
         </div>
 
         {/* Footer */}

@@ -16,15 +16,21 @@ export default function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   // Try to restore session on mount
+  // Uses a cancelled flag so StrictMode's double-mount doesn't clear a
+  // valid token that was set by login() between the two runs.
   useEffect(() => {
+    let cancelled = false;
+
     async function restoreSession() {
       try {
         // If we have a stored access token, try using it directly
         if (getAccessToken()) {
           try {
             const meRes = await apiClient.get('/auth/me');
-            setUser(meRes.data.user);
-            setLoading(false);
+            if (!cancelled) {
+              setUser(meRes.data.user);
+              setLoading(false);
+            }
             return;
           } catch {
             // Token invalid/expired — fall through to refresh
@@ -33,17 +39,27 @@ export default function AuthProvider({ children }) {
 
         // Try refresh via HTTP-only cookie
         const { data } = await apiClient.post('/auth/refresh');
-        setAccessToken(data.accessToken);
-        const meRes = await apiClient.get('/auth/me');
-        setUser(meRes.data.user);
+        if (!cancelled) {
+          setAccessToken(data.accessToken);
+          const meRes = await apiClient.get('/auth/me');
+          if (!cancelled) {
+            setUser(meRes.data.user);
+          }
+        }
       } catch {
-        // No valid session — clear stale token
-        clearAccessToken();
+        // No valid session — clear stale token only if this effect is still active
+        if (!cancelled) {
+          clearAccessToken();
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
     restoreSession();
+
+    return () => { cancelled = true; };
   }, []);
 
   // Listen for forced logout

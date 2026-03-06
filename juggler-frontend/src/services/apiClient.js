@@ -42,15 +42,16 @@ apiClient.interceptors.request.use(config => {
   return config;
 });
 
-// Response interceptor — auto-refresh on 401
+// Response interceptor — auto-refresh on any 401 (except the refresh endpoint itself)
 apiClient.interceptors.response.use(
   response => response,
   async error => {
     const originalRequest = error.config;
+    const isRefreshRequest = originalRequest.url?.includes('/auth/refresh');
 
     if (error.response?.status === 401 &&
-        error.response?.data?.code === 'TOKEN_EXPIRED' &&
-        !originalRequest._retry) {
+        !originalRequest._retry &&
+        !isRefreshRequest) {
       originalRequest._retry = true;
 
       try {
