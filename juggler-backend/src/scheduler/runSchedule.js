@@ -21,7 +21,7 @@ function getNowInTimezone() {
   var parts = new Intl.DateTimeFormat('en-US', {
     timeZone: TIMEZONE,
     year: 'numeric', month: 'numeric', day: 'numeric',
-    hour: 'numeric', minute: 'numeric', hour12: false
+    hour: 'numeric', minute: 'numeric', hourCycle: 'h23'
   }).formatToParts(now);
 
   var vals = {};
@@ -29,7 +29,7 @@ function getNowInTimezone() {
 
   var month = vals.month;
   var day = vals.day;
-  var hour = vals.hour;
+  var hour = vals.hour % 24; // Normalize: some runtimes return 24 for midnight
   var minute = vals.minute;
 
   return {
