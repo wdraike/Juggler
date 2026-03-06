@@ -29,8 +29,8 @@ var CARD_H = 68;        // fixed card height — title + status + details row
 var CARD_H_M = 78;      // taller on mobile for wrapped titles
 var CARD_H_COMPACT = 40;
 var CARD_GAP = 4;
-var CONN_ZONE = 24;     // space between marker and card for bezier connector
-var CONN_ZONE_M = 12;
+var CONN_ZONE = 36;     // space between marker and card for bezier connector
+var CONN_ZONE_M = 24;
 var CONN_ZONE_COMPACT = 14;
 
 function getDims(mode, isMobile) {
@@ -116,11 +116,12 @@ export default function CalendarGrid({
   var stripMid = stripX + dm.STRIP_W / 2;
 
   // cards fill from connector edge to container edge
-  var leftCardLeft = 4;
+  var edgePad = isMobile ? 6 : 8;
+  var leftCardLeft = edgePad;
   var leftCardRight = stripX - dm.MARKER_W - dm.CONN;
   var leftCardW = mobileFullWidth ? 0 : (leftCardRight - leftCardLeft);
   var rightCardLeft = stripX + dm.STRIP_W + dm.MARKER_W + dm.CONN;
-  var rightCardW = cw - rightCardLeft - 4;
+  var rightCardW = cw - rightCardLeft - edgePad;
 
   // Single column per side — alternating left/right gives each side ~n/2 cards
   var colsPerSide = 1;

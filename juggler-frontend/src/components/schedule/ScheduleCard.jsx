@@ -5,9 +5,13 @@
  */
 
 import React from 'react';
-import { PRI_COLORS, locIcon } from '../../state/constants';
+import { PRI_COLORS, locIcon, WHEN_TAG_ICONS, DEFAULT_TOOLS } from '../../state/constants';
 import { getTheme } from '../../theme/colors';
+import { parseWhen } from '../../scheduler/timeBlockHelpers';
 import StatusToggle from './StatusToggle';
+
+var TOOL_ICON_MAP = {};
+DEFAULT_TOOLS.forEach(function(t) { TOOL_ICON_MAP[t.id] = t.icon; });
 
 function formatStartTime(mins) {
   var h = Math.floor(mins / 60);
@@ -35,12 +39,36 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
   if (task.rigid || task.fixed) typeBadges.push({ icon: '\uD83D\uDCCC', title: 'Rigid \u2014 locked to set date and time, scheduler won\u2019t move it' });
   if (item.splitTotal > 1) typeBadges.push({ icon: '\u2702\uFE0F', title: 'Split \u2014 broken into ' + item.splitTotal + ' chunks' });
 
+  // Build end time label
+  var endLabel = item.start != null ? formatStartTime(item.start + item.dur) : null;
+  var timeRange = startLabel && endLabel ? startLabel + '\u2013' + endLabel : null;
+
   // Build details snippets for row 3
   var details = [];
   if (item._moveReason) details.push('\u2192 ' + item._moveReason);
   if (showDetails) {
-    if (task.notes) details.push(task.notes.replace(/\n/g, ' ').substring(0, 60));
-    if (task.due) details.push('\uD83D\uDCC5 ' + task.due);
+    // Time range
+    if (timeRange) details.push('\u23F0 ' + timeRange);
+    // Location names
+    if (task.location && task.location.length > 0) {
+      var locIcons = task.location.map(function(lid) { return locIcon(lid); }).filter(Boolean);
+      if (locIcons.length > 0) details.push(locIcons.join(' '));
+    }
+    // When preference
+    if (task.when && task.when !== 'anytime') {
+      var whenParts = parseWhen(task.when);
+      var whenIcons = whenParts.map(function(w) { return WHEN_TAG_ICONS[w] || ''; }).filter(Boolean);
+      if (whenIcons.length > 0) details.push(whenIcons.join(''));
+    }
+    // Tools required
+    if (task.tools && task.tools.length > 0) {
+      var toolIcons = task.tools.map(function(tid) { return TOOL_ICON_MAP[tid] || ''; }).filter(Boolean);
+      if (toolIcons.length > 0) details.push(toolIcons.join(' '));
+    }
+    // Date info
+    if (task.date) details.push('\uD83D\uDCC6 ' + task.date);
+    if (task.due && task.due !== task.date) details.push('\uD83D\uDCC5 due ' + task.due);
+    if (task.notes) details.push(task.notes.replace(/\n/g, ' ').substring(0, 40));
     if (task.section) details.push(task.section);
     if (task.dependsOn && task.dependsOn.length > 0) details.push('\u26D3 ' + task.dependsOn.length + ' dep');
   }
@@ -58,7 +86,7 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
         borderLeft: '3px solid ' + priColor,
         cursor: 'pointer', opacity: isDone ? 0.5 : 1,
         display: 'flex', flexDirection: 'column', justifyContent: 'center',
-        padding: compact ? '3px 6px' : '4px 8px',
+        padding: compact ? '3px 6px' : (isMobile ? '4px 6px' : '4px 8px'),
         boxShadow: '0 1px 3px ' + theme.shadow,
         boxSizing: 'border-box'
       }}
