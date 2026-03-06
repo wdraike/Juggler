@@ -92,10 +92,19 @@ async function getAllTasks(req, res) {
 /**
  * POST /api/tasks — create single task
  */
+async function ensureProject(userId, projectName) {
+  if (!projectName) return;
+  const exists = await db('projects').where({ user_id: userId, name: projectName }).first();
+  if (!exists) {
+    await db('projects').insert({ user_id: userId, name: projectName });
+  }
+}
+
 async function createTask(req, res) {
   try {
     const row = taskToRow(req.body, req.user.id);
     row.created_at = db.fn.now();
+    await ensureProject(req.user.id, req.body.project);
     await db('tasks').insert(row);
     const created = await db('tasks').where('id', row.id).first();
     res.status(201).json({ task: rowToTask(created) });
@@ -120,6 +129,8 @@ async function updateTask(req, res) {
     delete row.id;
     delete row.user_id;
     delete row.created_at;
+
+    if (req.body.project) await ensureProject(req.user.id, req.body.project);
 
     // When the user explicitly sets a date, pin it so the scheduler honors it.
     // If datePinned is explicitly sent as false, this is a reset — clear the pin.
@@ -156,31 +167,33 @@ async function deleteTask(req, res) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    // Remap dependencies: if downstream tasks depend on this task,
-    // replace that link with this task's own deps (chain link removal).
-    // e.g. A->B->C, delete B => C now depends on A
-    const deletedDeps = typeof task.depends_on === 'string'
-      ? JSON.parse(task.depends_on || '[]') : (task.depends_on || []);
-    const allUserTasks = await db('tasks').where('user_id', req.user.id).select('id', 'depends_on');
-    for (const other of allUserTasks) {
-      const deps = typeof other.depends_on === 'string'
-        ? JSON.parse(other.depends_on || '[]') : (other.depends_on || []);
-      if (!Array.isArray(deps) || deps.indexOf(id) === -1) continue;
-      // Remove the deleted task, add the deleted task's own deps (avoid duplicates)
-      const newDeps = deps.filter(d => d !== id);
-      deletedDeps.forEach(d => { if (newDeps.indexOf(d) === -1) newDeps.push(d); });
-      await db('tasks').where({ id: other.id, user_id: req.user.id })
-        .update({ depends_on: JSON.stringify(newDeps), updated_at: db.fn.now() });
-    }
+    await db.transaction(async (trx) => {
+      // Remap dependencies using JSON_CONTAINS to fetch only affected tasks
+      const deletedDeps = typeof task.depends_on === 'string'
+        ? JSON.parse(task.depends_on || '[]') : (task.depends_on || []);
+      const affected = await trx('tasks')
+        .where('user_id', req.user.id)
+        .whereRaw('JSON_CONTAINS(depends_on, ?)', [JSON.stringify(id)])
+        .select('id', 'depends_on');
+      for (const other of affected) {
+        const deps = typeof other.depends_on === 'string'
+          ? JSON.parse(other.depends_on || '[]') : (other.depends_on || []);
+        const newDeps = deps.filter(d => d !== id);
+        deletedDeps.forEach(d => { if (newDeps.indexOf(d) === -1) newDeps.push(d); });
+        await trx('tasks').where({ id: other.id, user_id: req.user.id })
+          .update({ depends_on: JSON.stringify(newDeps), updated_at: db.fn.now() });
+      }
 
-    // Mark ledger record so sync will delete the GCal event
-    if (task.gcal_event_id) {
-      await db('gcal_sync_ledger')
-        .where({ user_id: req.user.id, task_id: id })
-        .update({ task_id: null, synced_at: db.fn.now() });
-    }
+      // Mark ledger record so sync will delete the GCal event
+      if (task.gcal_event_id) {
+        await trx('gcal_sync_ledger')
+          .where({ user_id: req.user.id, task_id: id })
+          .update({ task_id: null, synced_at: db.fn.now() });
+      }
 
-    await db('tasks').where({ id, user_id: req.user.id }).del();
+      await trx('tasks').where({ id, user_id: req.user.id }).del();
+    });
+
     res.json({ message: 'Task deleted', id });
   } catch (error) {
     console.error('Delete task error:', error);
@@ -222,6 +235,9 @@ async function batchCreateTasks(req, res) {
     if (!Array.isArray(tasks) || tasks.length === 0) {
       return res.status(400).json({ error: 'Tasks array required' });
     }
+    if (tasks.length > 500) {
+      return res.status(400).json({ error: 'Batch limited to 500 items' });
+    }
 
     const rows = tasks.map(t => {
       const row = taskToRow(t, req.user.id);
@@ -229,11 +245,12 @@ async function batchCreateTasks(req, res) {
       return row;
     });
 
-    // Insert in chunks to avoid MySQL packet limits
-    const chunkSize = 100;
-    for (let i = 0; i < rows.length; i += chunkSize) {
-      await db('tasks').insert(rows.slice(i, i + chunkSize));
-    }
+    await db.transaction(async (trx) => {
+      const chunkSize = 100;
+      for (let i = 0; i < rows.length; i += chunkSize) {
+        await trx('tasks').insert(rows.slice(i, i + chunkSize));
+      }
+    });
 
     res.status(201).json({ created: rows.length });
   } catch (error) {
@@ -251,19 +268,24 @@ async function batchUpdateTasks(req, res) {
     if (!Array.isArray(updates) || updates.length === 0) {
       return res.status(400).json({ error: 'Updates array required' });
     }
+    if (updates.length > 500) {
+      return res.status(400).json({ error: 'Batch limited to 500 items' });
+    }
 
     let updatedCount = 0;
-    for (const update of updates) {
-      const { id, ...fields } = update;
-      if (!id) continue;
+    await db.transaction(async (trx) => {
+      for (const update of updates) {
+        const { id, ...fields } = update;
+        if (!id) continue;
 
-      const row = taskToRow(fields, req.user.id);
-      delete row.user_id;
-      delete row.created_at;
+        const row = taskToRow(fields, req.user.id);
+        delete row.user_id;
+        delete row.created_at;
 
-      await db('tasks').where({ id, user_id: req.user.id }).update(row);
-      updatedCount++;
-    }
+        await trx('tasks').where({ id, user_id: req.user.id }).update(row);
+        updatedCount++;
+      }
+    });
 
     res.json({ updated: updatedCount });
   } catch (error) {

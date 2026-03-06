@@ -49,7 +49,7 @@ test.describe('Juggler E2E', () => {
   });
 
   test('2. View switching — all 7 view tabs render', async ({ page }) => {
-    const views = ['Day', '3-Day', 'Week', 'Month', 'List', 'Priority', 'Issues'];
+    const views = ['Day', '3-Day', 'Week', 'Month', 'List', 'Priority', 'Issues', 'Timeline'];
     for (const view of views) {
       await page.locator(`button:has-text("${view}")`).first().click();
       // Give it a moment to render
@@ -246,5 +246,12 @@ test.describe('Juggler E2E', () => {
     const count = await nowLine.count();
     // It should exist (at least the line or the dot)
     expect(count).toBeGreaterThan(0);
+  });
+
+  test('15. Timeline view — renders strip and cards', async ({ page }) => {
+    await page.locator('button:has-text("Timeline")').first().click();
+    await page.waitForTimeout(500);
+    // Header should still be visible (no crash)
+    await expect(page.locator('text=Juggler')).toBeVisible();
   });
 });

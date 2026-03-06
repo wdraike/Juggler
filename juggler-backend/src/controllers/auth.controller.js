@@ -94,7 +94,7 @@ async function googleLogin(req, res) {
     console.error('Google login error:', error);
     res.status(401).json({
       error: 'Authentication failed',
-      message: error.message
+      message: process.env.NODE_ENV === 'development' ? error.message : 'Authentication failed'
     });
   }
 }
@@ -124,7 +124,7 @@ async function refresh(req, res) {
     console.error('Token refresh error:', error);
     res.status(401).json({
       error: 'Refresh failed',
-      message: error.message
+      message: process.env.NODE_ENV === 'development' ? error.message : 'Refresh failed'
     });
   }
 }

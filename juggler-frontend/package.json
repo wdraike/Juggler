@@ -4,9 +4,9 @@
   "private": true,
   "dependencies": {
     "@react-oauth/google": "^0.12.1",
-    "@xyflow/react": "^12.10.1",
     "axios": "^1.6.7",
     "dagre": "^0.8.5",
+    "juggler-shared": "file:../shared",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1"

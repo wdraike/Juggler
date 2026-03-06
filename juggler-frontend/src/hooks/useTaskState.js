@@ -14,6 +14,7 @@ export default function useTaskState() {
   const taskStateRef = useRef(taskState);
   taskStateRef.current = taskState;
   const saveTimerRef = useRef(null);
+  const placementTimerRef = useRef(null);
 
   // Load tasks from API
   const loadTasks = useCallback(async () => {
@@ -42,14 +43,17 @@ export default function useTaskState() {
     }
   }, []);
 
-  // Load placements from backend scheduler
-  const loadPlacements = useCallback(async () => {
-    try {
-      const res = await apiClient.get('/schedule/placements');
-      setPlacements({ dayPlacements: res.data.dayPlacements || {}, unplaced: res.data.unplaced || [] });
-    } catch (error) {
-      console.error('Failed to load placements:', error);
-    }
+  // Load placements from backend scheduler (debounced)
+  const loadPlacements = useCallback(() => {
+    if (placementTimerRef.current) clearTimeout(placementTimerRef.current);
+    placementTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await apiClient.get('/schedule/placements');
+        setPlacements({ dayPlacements: res.data.dayPlacements || {}, unplaced: res.data.unplaced || [] });
+      } catch (error) {
+        console.error('Failed to load placements:', error);
+      }
+    }, 300);
   }, []);
 
   // Debounced save — batches updates
@@ -154,6 +158,7 @@ export default function useTaskState() {
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (placementTimerRef.current) clearTimeout(placementTimerRef.current);
     };
   }, []);
 

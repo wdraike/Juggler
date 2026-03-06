@@ -4,10 +4,12 @@
 
 const express = require('express');
 const compression = require('compression');
+const helmet = require('helmet');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const bodyParser = require('body-parser');
 const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
 
 const authRoutes = require('./routes/auth.routes');
 const taskRoutes = require('./routes/task.routes');
@@ -27,6 +29,7 @@ const app = express();
 app.set('trust proxy', 1);
 
 // Middleware
+app.use(helmet());
 app.use(compression());
 
 const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000').split(',');
@@ -42,13 +45,21 @@ app.use(cors({
 }));
 
 app.use(cookieParser());
-app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.json({ limit: '1mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(morgan('dev'));
 
+// Rate limiting
+const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false });
+const authLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
+const aiLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
+
 // Routes
 app.use('/health', healthRoutes);
-app.use('/api/auth', authRoutes);
+app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/ai', aiLimiter, aiRoutes);
+app.use('/api/data/import', bodyParser.json({ limit: '2mb' }));
+app.use('/api', apiLimiter);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/projects', projectRoutes);
@@ -57,7 +68,6 @@ app.use('/api/tools', toolRoutes);
 app.use('/api/data', dataRoutes);
 app.use('/api/gcal', gcalRoutes);
 app.use('/api/schedule', scheduleRoutes);
-app.use('/api/ai', aiRoutes);
 
 // 404 handler
 app.use((req, res) => {

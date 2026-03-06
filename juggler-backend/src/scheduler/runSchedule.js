@@ -74,8 +74,10 @@ async function loadConfig(userId) {
  * Returns stats: { updated, cleared, reset, tasks: [...] }
  */
 async function runScheduleAndPersist(userId) {
+  return db.transaction(async function(trx) {
+
   // 1a. Reset scheduler-moved tasks (date changed) back to their original date/time
-  var resetCount = await db('tasks')
+  var resetCount = await trx('tasks')
     .where('user_id', userId)
     .whereNotNull('original_date')
     .update({
@@ -89,7 +91,7 @@ async function runScheduleAndPersist(userId) {
     });
 
   // 1b. Reset scheduler-moved tasks (time-only change) back to original time
-  var resetTimeCount = await db('tasks')
+  var resetTimeCount = await trx('tasks')
     .where('user_id', userId)
     .whereNull('original_date')
     .whereNotNull('original_time')
@@ -102,7 +104,7 @@ async function runScheduleAndPersist(userId) {
   if (resetCount + resetTimeCount > 0) console.log('[SCHED] reset ' + resetCount + ' date moves, ' + resetTimeCount + ' time moves');
 
   // 2. Load all tasks for user (now with original dates restored)
-  var taskRows = await db('tasks').where('user_id', userId).select();
+  var taskRows = await trx('tasks').where('user_id', userId).select();
   var allTasks = taskRows.map(rowToTask);
 
   // 3. Build statuses map
@@ -153,7 +155,8 @@ async function runScheduleAndPersist(userId) {
     var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
     var newTime = dh + ':' + (mm < 10 ? '0' : '') + mm + ' ' + ampm;
     var newDate = placement.dateKey;
-    var newDay = DAY_NAMES[new Date(2026, parseInt(newDate.split('/')[0]) - 1, parseInt(newDate.split('/')[1])).getDay()];
+    var dateHelpers = require('./dateHelpers');
+    var newDay = DAY_NAMES[dateHelpers.parseDate(newDate).getDay()];
 
     var dateChanged = newDate !== original.date;
     var timeChanged = newTime !== original.time;
@@ -182,7 +185,7 @@ async function runScheduleAndPersist(userId) {
         }
       }
 
-      await db('tasks')
+      await trx('tasks')
         .where({ id: taskId, user_id: userId })
         .update(dbUpdate);
 
@@ -218,7 +221,7 @@ async function runScheduleAndPersist(userId) {
   });
   for (var ui = 0; ui < updatedTasks.length; ui++) {
     if (updatedTasks[ui].cleared) {
-      await db('tasks')
+      await trx('tasks')
         .where({ id: updatedTasks[ui].id, user_id: userId })
         .update({ time: null, original_time: updatedTasks[ui].fromTime, updated_at: db.fn.now() });
       cleared++;
@@ -228,6 +231,8 @@ async function runScheduleAndPersist(userId) {
   console.log('[SCHED] runScheduleAndPersist: reset ' + resetCount + ', updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
 
   return { updated: updated, cleared: cleared, reset: resetCount, tasks: updatedTasks };
+
+  }); // end transaction
 }
 
 /**

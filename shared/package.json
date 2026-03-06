@@ -1,0 +1,6 @@
+{
+  "name": "juggler-shared",
+  "version": "1.0.0",
+  "description": "Shared scheduler modules for Juggler frontend and backend",
+  "main": "scheduler/dateHelpers.js"
+}

@@ -178,7 +178,9 @@ function eventHash(event) {
 // --- Token management ---
 
 function getJwtSecret() {
-  return process.env.JWT_SECRET || 'local-dev-jwt-secret-juggler';
+  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  if (process.env.NODE_ENV === 'production') throw new Error('JWT_SECRET required in production');
+  return 'local-dev-jwt-secret-juggler';
 }
 
 /**
@@ -1073,5 +1075,10 @@ module.exports = {
   push,
   pull,
   sync,
-  setAutoSync
+  setAutoSync,
+  // Exported for testing
+  jugglerDateToISO,
+  isoToJugglerDate,
+  taskHash,
+  eventHash
 };

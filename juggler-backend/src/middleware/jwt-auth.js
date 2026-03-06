@@ -14,19 +14,23 @@ let secretsLoaded = false;
  * Load JWT secrets at startup
  */
 async function loadJWTSecrets() {
-  try {
-    JWT_SECRET = process.env.JWT_SECRET || 'local-dev-jwt-secret-juggler';
-    secretsLoaded = true;
-    console.log('JWT secret loaded');
-  } catch (error) {
-    console.error('Failed to load JWT secrets:', error.message);
+  if (process.env.JWT_SECRET) {
+    JWT_SECRET = process.env.JWT_SECRET;
+  } else if (process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET environment variable is required in production');
+  } else {
     JWT_SECRET = 'local-dev-jwt-secret-juggler';
-    secretsLoaded = true;
+    console.warn('Using default JWT secret — development only');
   }
+  secretsLoaded = true;
+  console.log('JWT secret loaded');
 }
 
 function getSecret() {
-  return JWT_SECRET || process.env.JWT_SECRET || 'local-dev-jwt-secret-juggler';
+  if (!JWT_SECRET) {
+    throw new Error('JWT secrets not loaded — call loadJWTSecrets() first');
+  }
+  return JWT_SECRET;
 }
 
 /**
@@ -135,7 +139,7 @@ const authenticateJWT = async (req, res, next) => {
 
     res.status(500).json({
       error: 'Authentication error',
-      message: error.message
+      message: process.env.NODE_ENV === 'development' ? error.message : 'Authentication error'
     });
   }
 };
@@ -145,7 +149,7 @@ const authenticateJWT = async (req, res, next) => {
  */
 const validateRefreshToken = async (req, res, next) => {
   try {
-    const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
+    const refreshToken = req.cookies?.refreshToken;
 
     if (!refreshToken) {
       return res.status(401).json({ error: 'Refresh token required' });
@@ -169,7 +173,7 @@ const validateRefreshToken = async (req, res, next) => {
   } catch (error) {
     res.status(401).json({
       error: 'Invalid refresh token',
-      message: error.message
+      message: process.env.NODE_ENV === 'development' ? error.message : 'Invalid refresh token'
     });
   }
 };
