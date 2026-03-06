@@ -16,18 +16,18 @@ import ScheduleCard from './ScheduleCard';
 // Dimensions
 var STRIP_H = 32;         // horizontal strip height
 var MARKER_H = 8;         // marker bar height (above/below strip)
-var CARD_W = 140;         // card width
-var CARD_W_M = 120;       // mobile card width
-var CARD_H = 72;          // card height
-var CARD_H_M = 78;
+var CARD_W = 190;         // card width — wider to show more title
+var CARD_W_M = 160;       // mobile card width
+var CARD_H = 58;          // card height — shorter, less elongated
+var CARD_H_M = 62;
 var CARD_GAP = 6;         // gap between stacked cards
-var CONN_ZONE = 16;       // space between marker and card for connector
+var CONN_ZONE = 14;       // space between marker and card for connector
 
 function computeHLayout(placements, hourWidth, cardW, cardH, gap) {
   var sorted = (placements || []).slice().sort(function(a, b) { return a.start - b.start; });
   var result = [];
 
-  // Track rightmost edge of each row: above0, above1, below0, below1
+  // Track rightmost edge of each of 4 slots: above_0, above_1, below_0, below_1
   var rowRight = { above_0: -Infinity, above_1: -Infinity, below_0: -Infinity, below_1: -Infinity };
 
   for (var i = 0; i < sorted.length; i++) {
@@ -40,24 +40,28 @@ function computeHLayout(placements, hourWidth, cardW, cardH, gap) {
     // Ideal X: center card on marker midpoint
     var idealX = Math.max(markerMidX - cardW / 2, 4);
 
-    // Alternate above/below
-    var side = i % 2 === 0 ? 'above' : 'below';
-
-    // Pick whichever row (0 or 1) the card fits earliest
-    var row = 0;
-    var bestX = Math.max(idealX, rowRight[side + '_0'] + gap);
-    var altX = Math.max(idealX, rowRight[side + '_1'] + gap);
-    if (altX < bestX) {
-      row = 1;
-      bestX = altX;
+    // Pick the best slot across all 4 rows — whichever places closest to idealX
+    var bestSlot = null;
+    var bestDist = Infinity;
+    var sides = ['above', 'below'];
+    for (var si = 0; si < sides.length; si++) {
+      for (var ri = 0; ri < 2; ri++) {
+        var key = sides[si] + '_' + ri;
+        var x = Math.max(idealX, rowRight[key] + gap);
+        var dist = Math.abs(x - idealX);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestSlot = { side: sides[si], row: ri, x: x };
+        }
+      }
     }
 
-    rowRight[side + '_' + row] = bestX + cardW;
+    rowRight[bestSlot.side + '_' + bestSlot.row] = bestSlot.x + cardW;
 
     result.push({
-      item: item, side: side, row: row,
+      item: item, side: bestSlot.side, row: bestSlot.row,
       markerX: markerX, markerW: markerW, markerMidX: markerMidX,
-      cardX: bestX, cardMidX: bestX + cardW / 2
+      cardX: bestSlot.x, cardMidX: bestSlot.x + cardW / 2
     });
   }
   return result;
@@ -71,7 +75,7 @@ export default function HorizontalTimeline({
   var theme = getTheme(darkMode);
   var baseHourWidth = gridZoom || 60;
   // Use wider hour widths for horizontal mode to give cards room
-  if (baseHourWidth < 100) baseHourWidth = 100;
+  if (baseHourWidth < 120) baseHourWidth = 120;
 
   var cardW = isMobile ? CARD_W_M : CARD_W;
   var cardH = isMobile ? CARD_H_M : CARD_H;
@@ -327,6 +331,7 @@ export default function HorizontalTimeline({
                 darkMode={darkMode}
                 isBlocked={blockedTaskIds && blockedTaskIds.has(e.item.task.id)}
                 isMobile={isMobile}
+                layoutMode="compact"
                 cardHeight={cardH}
               />
             </div>
