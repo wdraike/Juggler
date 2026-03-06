@@ -18,8 +18,8 @@ var STRIP_H = 32;         // horizontal strip height
 var MARKER_H = 8;         // marker bar height (above/below strip)
 var CARD_W = 210;         // card width — wide enough to show full titles
 var CARD_W_M = 170;       // mobile card width
-var CARD_H = 56;          // card height — compact
-var CARD_H_M = 60;
+var CARD_H = 82;          // card height — room for 3 rows of info
+var CARD_H_M = 86;
 var CARD_GAP = 5;         // gap between stacked cards
 var CONN_ZONE = 12;       // space between marker and card for connector
 var MAX_ROWS = 6;         // max rows per side (grows dynamically)
@@ -350,7 +350,7 @@ export default function HorizontalTimeline({
                 darkMode={darkMode}
                 isBlocked={blockedTaskIds && blockedTaskIds.has(e.item.task.id)}
                 isMobile={isMobile}
-                layoutMode="compact"
+                layoutMode="normal"
                 cardHeight={cardH}
               />
             </div>
