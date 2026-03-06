@@ -37,7 +37,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
   var [recurEvery, setRecurEvery] = useState(isCreate ? 2 : (task.recur?.every || 2));
 
   var BTN_H = isMobile ? 30 : 26;
-  var iStyle = { fontSize: isMobile ? 13 : 11, padding: isMobile ? '6px 8px' : '3px 4px', border: '1px solid ' + TH.inputBorder, borderRadius: 4, background: TH.inputBg, color: TH.inputText, fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box' };
+  var iStyle = { fontSize: isMobile ? 13 : 11, padding: isMobile ? '6px 8px' : '3px 4px', border: '1px solid ' + TH.inputBorder, borderRadius: 4, background: TH.inputBg, color: TH.inputText, fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box', maxWidth: '100%' };
   var lStyle = { fontSize: 8, color: TH.textMuted, display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 600 };
   function togStyle(on, color) {
     return {
@@ -129,7 +129,8 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
       width: isMobile ? '100vw' : 420, maxWidth: '100vw',
       left: isMobile ? 0 : undefined,
       background: TH.bgCard, borderLeft: isMobile ? 'none' : ('1px solid ' + TH.border),
-      zIndex: 200, overflow: 'auto', boxShadow: isMobile ? 'none' : ('-4px 0 20px ' + TH.shadow)
+      zIndex: 200, overflowX: 'hidden', overflowY: 'auto', boxShadow: isMobile ? 'none' : ('-4px 0 20px ' + TH.shadow),
+      boxSizing: 'border-box'
     }}>
       {/* Top bar with Save / Delete / Close */}
       <div style={{
@@ -163,7 +164,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
         }}>&times;</button>
       </div>
 
-      <div style={{ padding: '10px 12px' }}>
+      <div style={{ padding: '10px 12px', maxWidth: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
         {/* Status buttons — hidden in create mode */}
         {!isCreate && <div style={{ marginBottom: 8 }}>
           <div style={{ ...lStyle, marginBottom: 3 }}>Status</div>
@@ -197,7 +198,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
 
         {/* Row 1: Task + Project */}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
-          <label style={{ ...lStyle, flex: 1, minWidth: 200 }}>
+          <label style={{ ...lStyle, flex: 1, minWidth: isMobile ? 0 : 200, width: isMobile ? '100%' : undefined }}>
             Task
             <input type="text" value={text} onChange={e => setText(e.target.value)}
               style={{ ...iStyle, width: '100%' }} autoFocus />
@@ -217,8 +218,8 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
         </div>
 
         {/* Row 2a: Date/Time + Duration + Remaining */}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
-          <label style={lStyle}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, maxWidth: '100%' }}>
+          <label style={{ ...lStyle, maxWidth: '100%', minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {'\uD83D\uDCC5'} Date / Time
               {!isCreate && !isFixed && date && (
@@ -238,7 +239,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
                   } else { setDate(''); setTime(''); }
                   if (!isCreate && !isFixed) setDatePinned(!!v);
                 }}
-                style={{ ...iStyle, ...(datePinned && date ? { borderColor: '#D97706' } : {}) }} />
+                style={{ ...iStyle, width: isMobile ? '100%' : undefined, minWidth: 0, ...(datePinned && date ? { borderColor: '#D97706' } : {}) }} />
               {!isCreate && !isFixed && datePinned && date && (
                 <button onClick={() => { setDatePinned(false); setDate(''); setTime(''); }} title="Let scheduler control date"
                   style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
@@ -269,7 +270,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
         </div>
 
         {/* Row 2b: Split + Due + Start after */}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, alignItems: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, alignItems: 'flex-end', maxWidth: '100%' }}>
           <label style={lStyle}>
             <span title="Allow the scheduler to split this task into smaller chunks across time slots">{'\u2702'} Split OK</span>
             <button title={split ? 'Task can be split into chunks' : 'Task must be scheduled as one block'} onClick={() => setSplit(!split)}
@@ -291,7 +292,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
             <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
               <input type="datetime-local" value={due ? due + 'T23:59' : ''}
                 onChange={e => { var v = e.target.value; setDue(v ? v.split('T')[0] : ''); }}
-                style={{ ...iStyle, ...(due ? { background: TH.amberBg } : {}) }} />
+                style={{ ...iStyle, minWidth: 0, flex: 1, ...(due ? { background: TH.amberBg } : {}) }} />
               {due && (
                 <button onClick={() => setDue('')} style={{
                   fontSize: 9, background: 'none', border: 'none', color: TH.redText,
@@ -305,7 +306,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
             <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
               <input type="datetime-local" value={startAfter ? startAfter + 'T00:00' : ''}
                 onChange={e => { var v = e.target.value; setStartAfter(v ? v.split('T')[0] : ''); }}
-                style={{ ...iStyle, ...(startAfter ? { background: TH.blueBg } : {}) }} />
+                style={{ ...iStyle, minWidth: 0, flex: 1, ...(startAfter ? { background: TH.blueBg } : {}) }} />
               {startAfter && (
                 <button onClick={() => setStartAfter('')} style={{
                   fontSize: 9, background: 'none', border: 'none', color: TH.redText,
