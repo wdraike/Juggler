@@ -14,7 +14,7 @@ const VIEW_MODES = [
   { id: 'timeline', label: 'Timeline', icon: '\u2194', tip: 'Timeline view \u2014 horizontal left-to-right timeline with cards above and below' },
   { id: 'list', label: 'List', icon: '\u2261', tip: 'List view \u2014 all tasks grouped by date' },
   { id: 'priority', label: 'Priority', icon: 'P', tip: 'Priority view \u2014 P1-P4 kanban columns' },
-  { id: 'scurve', label: 'S-Curve', icon: '~', tip: 'S-Curve view \u2014 figure-8 timeline with day/night semicircles' },
+  { id: 'scurve', label: 'AM/PM', icon: '\u25D1', tip: 'AM/PM view \u2014 dual-circle timeline with morning and afternoon clocks' },
   { id: 'conflicts', label: 'Issues', icon: '!', tip: 'Issues view \u2014 unplaced tasks, conflicts, and deadline misses' },
 ];
 
