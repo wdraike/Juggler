@@ -1,0 +1,140 @@
+/**
+ * SCurveView — S-Curve timeline for a single day.
+ * Same header chrome as TimelineView (date, location, progress, habits, template).
+ */
+
+import React, { useRef, useState, useEffect } from 'react';
+import SCurveTimeline from '../schedule/SCurveTimeline';
+import { getTheme } from '../../theme/colors';
+import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES } from '../../state/constants';
+import { getLocationForDatePure } from '../../scheduler/locationHelpers';
+
+export default function SCurveView({ selectedDate, selectedDateKey, placements, statuses, directions, onStatusChange, onExpand, darkMode, schedCfg, nowMins, isToday, blockedTaskIds, isMobile, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchHabitsDone }) {
+  var theme = getTheme(darkMode);
+  var loc = getLocationForDatePure(selectedDateKey, schedCfg);
+  var scrollRef = useRef(null);
+  var [viewportSize, setViewportSize] = useState({ width: 800, height: 600 });
+
+  useEffect(function() {
+    function measure() {
+      if (scrollRef.current) {
+        setViewportSize({
+          width: scrollRef.current.clientWidth,
+          height: scrollRef.current.clientHeight
+        });
+      }
+    }
+    measure();
+    var ro = new ResizeObserver(measure);
+    if (scrollRef.current) ro.observe(scrollRef.current);
+    return function() { ro.disconnect(); };
+  }, []);
+
+  // Template override state
+  var dayName = DAY_NAMES[selectedDate.getDay()];
+  var defaultTemplate = (schedCfg.locScheduleDefaults || {})[dayName] || 'weekday';
+  var overrideTemplate = (schedCfg.locScheduleOverrides || {})[selectedDateKey];
+  var activeTemplate = overrideTemplate || defaultTemplate;
+  var isOverridden = !!overrideTemplate;
+  var templateEntries = locSchedules ? Object.entries(locSchedules) : [];
+
+  var handleTemplateChange = function(e) {
+    var val = e.target.value;
+    var overrides = Object.assign({}, schedCfg.locScheduleOverrides || {});
+    if (val === defaultTemplate) {
+      delete overrides[selectedDateKey];
+    } else {
+      overrides[selectedDateKey] = val;
+    }
+    if (onUpdateLocScheduleOverrides) onUpdateLocScheduleOverrides(overrides);
+  };
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      {/* Fixed header — matches TimelineView exactly */}
+      <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderBottom: '1px solid ' + theme.border, background: theme.bg, flexShrink: 0 }}>
+        <div style={{ fontWeight: 600, fontSize: 15, color: theme.text }}>
+          {DAY_NAMES_FULL[selectedDate.getDay()]}, {MONTH_NAMES[selectedDate.getMonth()]} {selectedDate.getDate()}
+        </div>
+        <div style={{ fontSize: 12, color: theme.textMuted }}>
+          {loc.icon} {loc.name}
+        </div>
+        {/* Progress bar */}
+        {(function() {
+          var dayTasks = placements.map(function(p) { return p.task; });
+          var total = dayTasks.filter(function(t) { return (statuses[t.id] || '') !== 'cancel' && (statuses[t.id] || '') !== 'skip'; }).length;
+          var done = dayTasks.filter(function(t) { return statuses[t.id] === 'done'; }).length;
+          var doneDur = dayTasks.filter(function(t) { return statuses[t.id] === 'done'; }).reduce(function(s, t) { return s + (t.dur || 0); }, 0);
+          var totalDur = dayTasks.reduce(function(s, t) { return s + (t.dur || 0); }, 0);
+          var pct = total > 0 ? Math.round(done / total * 100) : 0;
+          return (
+            <div title={done + ' of ' + total + ' tasks done (' + Math.round(doneDur / 60 * 10) / 10 + 'h / ' + Math.round(totalDur / 60 * 10) / 10 + 'h)'} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: theme.textMuted }}>
+              <div style={{ width: 60, height: 5, background: theme.bgTertiary, borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? '#10B981' : '#3B82F6', borderRadius: 3 }} />
+              </div>
+              <span>{done}/{total}</span>
+              <span>({Math.round(doneDur / 60 * 10) / 10}h / {Math.round(totalDur / 60 * 10) / 10}h)</span>
+            </div>
+          );
+        })()}
+        {/* Batch mark habits done */}
+        {onBatchHabitsDone && (function() {
+          var habitTasks = (allTasks || []).filter(function(t) { return t.habit && t.date === selectedDateKey && (statuses[t.id] || '') !== 'done'; });
+          return habitTasks.length > 0 ? (
+            <button onClick={function() { onBatchHabitsDone(selectedDateKey); }}
+              title={'Mark ' + habitTasks.length + ' habits done'}
+              style={{
+                border: '1px solid #10B981', borderRadius: 8, padding: '2px 8px',
+                background: '#10B98115', color: '#10B981', fontSize: 11,
+                cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600
+              }}>
+              {'\u2713'}hab ({habitTasks.length})
+            </button>
+          ) : null;
+        })()}
+        {templateEntries.length > 0 && (
+          <select
+            value={activeTemplate}
+            onChange={handleTemplateChange}
+            title={isOverridden ? 'Schedule template (overridden for this date)' : 'Schedule template (day default: ' + defaultTemplate + ')'}
+            style={{
+              fontSize: 11, padding: '2px 4px', borderRadius: 4, cursor: 'pointer',
+              background: isOverridden ? '#3B82F620' : (darkMode ? '#1E293B' : '#F8FAFC'),
+              color: isOverridden ? '#3B82F6' : theme.textMuted,
+              border: '1px solid ' + (isOverridden ? '#3B82F6' : theme.border),
+              outline: 'none', marginLeft: 4
+            }}
+          >
+            {templateEntries.map(function(entry) {
+              var id = entry[0], tmpl = entry[1];
+              return (
+                <option key={id} value={id}>
+                  {(tmpl.icon || '') + ' ' + tmpl.name + (id === defaultTemplate ? ' (default)' : '')}
+                </option>
+              );
+            })}
+          </select>
+        )}
+      </div>
+      {/* Scrollable S-Curve timeline */}
+      <div ref={scrollRef} style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+        <SCurveTimeline
+          dateKey={selectedDateKey}
+          schedCfg={schedCfg}
+          placements={placements}
+          statuses={statuses}
+          directions={directions}
+          onStatusChange={onStatusChange}
+          onExpand={onExpand}
+          darkMode={darkMode}
+          nowMins={nowMins}
+          isToday={isToday}
+          blockedTaskIds={blockedTaskIds}
+          isMobile={isMobile}
+          viewportWidth={viewportSize.width}
+          viewportHeight={viewportSize.height}
+        />
+      </div>
+    </div>
+  );
+}

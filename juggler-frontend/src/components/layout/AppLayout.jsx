@@ -28,6 +28,7 @@ import ListView from '../views/ListView';
 import PriorityView from '../views/PriorityView';
 import ConflictsView from '../views/ConflictsView';
 import TimelineView from '../views/TimelineView';
+import SCurveView from '../views/SCurveView';
 
 // Task components
 import TaskEditForm from '../tasks/TaskEditForm';
@@ -597,6 +598,20 @@ export default function AppLayout() {
               onZoomChange={handleZoomChange}
               isMobile={isMobile}
               onMarkerDrag={handleMarkerDrag}
+            />
+          )}
+          {viewMode === 'scurve' && (
+            <SCurveView
+              selectedDate={selectedDate} selectedDateKey={selectedDateKey}
+              placements={dayPlacements[selectedDateKey] || []}
+              statuses={statuses} directions={directions}
+              onStatusChange={handleStatusChange} onExpand={handleExpand}
+              darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
+              blockedTaskIds={blockedTaskIds}
+              locSchedules={config.locSchedules}
+              onUpdateLocScheduleOverrides={config.updateTemplateOverrides}
+              allTasks={allTasks} onBatchHabitsDone={handleBatchHabitsDone}
+              isMobile={isMobile}
             />
           )}
           {viewMode === 'month' && (
