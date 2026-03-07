@@ -3,10 +3,13 @@ FROM node:18-alpine AS build
 
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
+# Copy shared module first (referenced as file:../shared in package.json)
+COPY shared /shared
+
+COPY juggler-frontend/package.json juggler-frontend/package-lock.json* ./
 RUN npm ci
 
-COPY . .
+COPY juggler-frontend/. .
 
 ARG REACT_APP_API_URL
 ARG REACT_APP_GOOGLE_CLIENT_ID
@@ -21,7 +24,7 @@ RUN npm run build
 FROM nginx:alpine
 
 COPY --from=build /app/build /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/templates/default.conf.template
+COPY juggler-frontend/nginx.conf /etc/nginx/templates/default.conf.template
 
 EXPOSE 8080
 

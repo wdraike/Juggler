@@ -1,5 +1,9 @@
 .git
 .env
-node_modules
-build
+**/node_modules
+**/build
 .DS_Store
+juggler-backend
+scripts
+tests
+Juggler.code-workspace

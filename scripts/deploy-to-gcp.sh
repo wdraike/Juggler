@@ -201,7 +201,7 @@ deploy_backend() {
 deploy_frontend() {
     print_header "DEPLOYING FRONTEND TO CLOUD RUN"
 
-    cd "$PROJECT_ROOT/juggler-frontend"
+    cd "$PROJECT_ROOT"
 
     BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE --region $REGION --format 'value(status.url)')
     GOOGLE_CLIENT_ID=$(gcloud secrets versions access latest --secret=juggler-google-client-id 2>/dev/null || echo "")
@@ -211,8 +211,9 @@ deploy_frontend() {
     print_status "Google Client ID: ${GOOGLE_CLIENT_ID:0:20}..."
     print_status "Building frontend Docker image..."
     gcloud builds submit \
-        --config=cloudbuild.yaml \
+        --config=juggler-frontend/cloudbuild.yaml \
         --substitutions="_GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID" \
+        --ignore-file=juggler-frontend/.gcloudignore \
         --timeout=15m || {
         print_error "Frontend build failed!"
         exit 1
