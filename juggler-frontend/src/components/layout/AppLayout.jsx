@@ -699,7 +699,8 @@ export default function AppLayout() {
       {/* Import/Export panel */}
       {showExport && (
         <ImportExportPanel onClose={() => setShowExport(false)} darkMode={darkMode} showToast={showToast}
-          allTasks={allTasks} statuses={statuses} dayPlacements={dayPlacements} isMobile={isMobile} />
+          allTasks={allTasks} statuses={statuses} dayPlacements={dayPlacements} isMobile={isMobile}
+          addTasks={addTasks} />
       )}
 
       {/* GCal Sync panel */}
