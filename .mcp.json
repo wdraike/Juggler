@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "juggler": {
+      "command": "node",
+      "args": ["juggler-mcp/index.js"],
+      "env": {
+        "JUGGLER_API_URL": "http://localhost:5002",
+        "JUGGLER_TOKEN": ""
+      }
+    }
+  }
+}

@@ -23,6 +23,13 @@ const scheduleRoutes = require('./routes/schedule.routes');
 const healthRoutes = require('./routes/health.routes');
 const aiRoutes = require('./routes/ai.routes');
 
+// MCP + OAuth
+const { oauthMetadata } = require('./oauth/metadata');
+const oauthAuthorize = require('./oauth/authorize');
+const { tokenEndpoint } = require('./oauth/token');
+const oauthClients = require('./oauth/clients');
+const mcpTransport = require('./mcp/transport');
+
 const app = express();
 
 // Trust proxy for Cloud Run
@@ -53,6 +60,19 @@ app.use(morgan('dev'));
 const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false });
 const authLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
 const aiLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
+const mcpLimiter = rateLimit({ windowMs: 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
+
+// OAuth for MCP Custom Connectors (no JWT auth — these ARE the auth flow)
+app.get('/.well-known/oauth-authorization-server', oauthMetadata);
+app.get('/oauth/authorize', oauthAuthorize.authorize);
+app.get('/oauth/google-callback', oauthAuthorize.googleCallback);
+app.post('/oauth/token', tokenEndpoint);
+app.post('/oauth/register', oauthClients.register);
+
+// MCP Streamable HTTP (stateless, own rate limit)
+app.post('/mcp', mcpLimiter, mcpTransport.handlePost);
+app.get('/mcp', mcpTransport.handleMethodNotAllowed);
+app.delete('/mcp', mcpTransport.handleMethodNotAllowed);
 
 // Routes
 app.use('/health', healthRoutes);

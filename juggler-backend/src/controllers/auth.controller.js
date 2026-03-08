@@ -10,6 +10,47 @@ const { generateAccessToken, generateRefreshToken, validateRefreshToken } = requ
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 /**
+ * Find or create a user from Google OAuth profile data.
+ * Shared by googleLogin (frontend flow) and OAuth callback (MCP flow).
+ */
+async function findOrCreateGoogleUser({ googleId, email, name, picture }) {
+  let user = await db('users').where('google_id', googleId).first();
+
+  if (!user) {
+    user = await db('users').where('email', email).first();
+
+    if (user) {
+      await db('users').where('id', user.id).update({
+        google_id: googleId,
+        picture_url: picture,
+        updated_at: db.fn.now()
+      });
+      user = await db('users').where('id', user.id).first();
+    } else {
+      const userId = uuidv4();
+      await db('users').insert({
+        id: userId,
+        email,
+        name,
+        picture_url: picture,
+        google_id: googleId,
+        timezone: 'America/New_York'
+      });
+      user = await db('users').where('id', userId).first();
+    }
+  } else {
+    await db('users').where('id', user.id).update({
+      name,
+      picture_url: picture,
+      updated_at: db.fn.now()
+    });
+    user = await db('users').where('id', user.id).first();
+  }
+
+  return user;
+}
+
+/**
  * POST /api/auth/google
  * Receive Google ID token, verify, find-or-create user, return JWT
  */
@@ -30,42 +71,7 @@ async function googleLogin(req, res) {
     const payload = ticket.getPayload();
     const { sub: googleId, email, name, picture } = payload;
 
-    // Find or create user
-    let user = await db('users').where('google_id', googleId).first();
-
-    if (!user) {
-      // Check if user exists by email (might have been created differently)
-      user = await db('users').where('email', email).first();
-
-      if (user) {
-        // Update with Google ID
-        await db('users').where('id', user.id).update({
-          google_id: googleId,
-          picture_url: picture,
-          updated_at: db.fn.now()
-        });
-        user = await db('users').where('id', user.id).first();
-      } else {
-        // Create new user
-        const userId = uuidv4();
-        await db('users').insert({
-          id: userId,
-          email,
-          name,
-          picture_url: picture,
-          google_id: googleId,
-          timezone: 'America/New_York'
-        });
-        user = await db('users').where('id', userId).first();
-      }
-    } else {
-      // Update name/picture if changed
-      await db('users').where('id', user.id).update({
-        name,
-        picture_url: picture,
-        updated_at: db.fn.now()
-      });
-    }
+    const user = await findOrCreateGoogleUser({ googleId, email, name, picture });
 
     // Generate tokens
     const accessToken = generateAccessToken(user);
@@ -163,5 +169,6 @@ module.exports = {
   googleLogin,
   refresh,
   logout,
-  getMe
+  getMe,
+  findOrCreateGoogleUser
 };

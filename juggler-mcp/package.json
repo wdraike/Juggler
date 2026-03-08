@@ -1,0 +1,10 @@
+{
+  "name": "juggler-mcp",
+  "version": "1.0.0",
+  "description": "Juggler MCP server for Claude Code (stdio transport, HTTP backend calls)",
+  "main": "index.js",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.0"
+  }
+}
