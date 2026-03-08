@@ -1,14 +1,45 @@
 /**
  * Task Controller — CRUD operations for tasks
  *
- * The DB stores scheduled_at (DATETIME, UTC) as the single source of truth
- * for task date+time. The API layer exposes date/time/day as human-readable
- * strings derived via utcToLocal(). Incoming date/time from the frontend is
- * converted to scheduled_at via localToUtc().
+ * The DB stores scheduled_at (DATETIME, UTC) as the single source of truth.
+ *
+ * API accepts BOTH formats:
+ *   - UTC ISO: scheduledAt ("2026-03-08T22:45:00Z"), dueAt, startAfterAt
+ *   - Local strings: date ("3/8") + time ("6:45 PM") — converted server-side
+ *   UTC takes precedence if both are provided.
+ *
+ * API always returns both: scheduledAt (UTC ISO) + date/time/day (local derived).
  */
 
 const db = require('../db');
 const { localToUtc, utcToLocal, toDateISO, fromDateISO, getDayName } = require('../scheduler/dateHelpers');
+
+/**
+ * Convert a DB scheduled_at value to an ISO UTC string.
+ */
+function scheduledAtToISO(val) {
+  if (!val) return null;
+  if (val instanceof Date) return val.toISOString();
+  var s = String(val);
+  // MySQL dateStrings mode returns "YYYY-MM-DD HH:MM:SS"
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
+    return s.replace(' ', 'T') + 'Z';
+  }
+  // Already ISO
+  if (s.endsWith('Z') || s.includes('+')) return s;
+  return s + 'Z';
+}
+
+/**
+ * Parse an ISO timestamp string into a Date for DB storage.
+ * Accepts UTC ("2026-03-10T14:30:00Z") or with offset ("2026-03-10T10:30:00-04:00").
+ */
+function parseISOToDate(iso) {
+  if (!iso) return null;
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return d;
+}
 
 /**
  * Map task row from DB to API format.
@@ -42,9 +73,30 @@ function rowToTask(row, timezone) {
       : String(row.start_after_at).split('T')[0]);
   }
 
+  // Build dueAt / startAfterAt ISO strings
+  var dueAtISO = null;
+  if (row.due_at) {
+    var dueStr = row.due_at instanceof Date
+      ? row.due_at.toISOString().split('T')[0]
+      : String(row.due_at).split('T')[0];
+    dueAtISO = dueStr;
+  }
+  var startAfterAtISO = null;
+  if (row.start_after_at) {
+    var saStr = row.start_after_at instanceof Date
+      ? row.start_after_at.toISOString().split('T')[0]
+      : String(row.start_after_at).split('T')[0];
+    startAfterAtISO = saStr;
+  }
+
   return {
     id: row.id,
     text: row.text,
+    // UTC source of truth
+    scheduledAt: scheduledAtToISO(row.scheduled_at),
+    dueAt: dueAtISO,
+    startAfterAt: startAfterAtISO,
+    // Derived local convenience fields
     date: date,
     day: day,
     time: time,
@@ -92,10 +144,15 @@ function taskToRow(task, userId, timezone) {
   if (task.direction !== undefined) row.direction = task.direction;
   if (task.section !== undefined) row.section = task.section;
   if (task.notes !== undefined) row.notes = task.notes;
-  if (task.due !== undefined) {
+  // UTC ISO fields take precedence over local string fields
+  if (task.dueAt !== undefined) {
+    row.due_at = task.dueAt || null;
+  } else if (task.due !== undefined) {
     row.due_at = task.due ? toDateISO(task.due) || null : null;
   }
-  if (task.startAfter !== undefined) {
+  if (task.startAfterAt !== undefined) {
+    row.start_after_at = task.startAfterAt || null;
+  } else if (task.startAfter !== undefined) {
     row.start_after_at = task.startAfter ? toDateISO(task.startAfter) || null : null;
   }
   if (task.location !== undefined) row.location = JSON.stringify(task.location);
@@ -114,8 +171,10 @@ function taskToRow(task, userId, timezone) {
   if (task.dependsOn !== undefined) row.depends_on = JSON.stringify(task.dependsOn || []);
   if (task.datePinned !== undefined) row.date_pinned = task.datePinned ? 1 : 0;
 
-  // Compute scheduled_at from date+time if timezone is provided
-  if (timezone && (task.date !== undefined || task.time !== undefined)) {
+  // scheduledAt (UTC ISO) takes precedence over date+time (local strings)
+  if (task.scheduledAt !== undefined) {
+    row.scheduled_at = task.scheduledAt ? parseISOToDate(task.scheduledAt) : null;
+  } else if (timezone && (task.date !== undefined || task.time !== undefined)) {
     var dateVal = task.date !== undefined ? task.date : null;
     var timeVal = task.time !== undefined ? task.time : null;
     if (dateVal) {
@@ -198,13 +257,15 @@ async function updateTask(req, res) {
 
     if (req.body.project) await ensureProject(req.user.id, req.body.project);
 
-    // When the user explicitly sets a date, pin it so the scheduler honors it.
-    if (req.body.date !== undefined && row.date_pinned === undefined) {
+    // When the user explicitly sets a date/scheduledAt, pin it so the scheduler honors it.
+    var dateWasSet = req.body.date !== undefined || req.body.scheduledAt !== undefined;
+    var timeWasSet = req.body.time !== undefined || req.body.scheduledAt !== undefined;
+    if (dateWasSet && row.date_pinned === undefined) {
       row.date_pinned = 1;
     }
     // Clear scheduler-tracked original on user edit so the reset step
     // won't revert back to a stale scheduler-assigned value.
-    if (req.body.date !== undefined || req.body.time !== undefined) {
+    if (dateWasSet || timeWasSet) {
       row.original_scheduled_at = null;
     }
 

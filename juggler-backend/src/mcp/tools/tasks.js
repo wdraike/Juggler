@@ -1,23 +1,61 @@
 /**
  * MCP Task Tools — expose task CRUD as MCP tools
+ *
+ * Accepts BOTH UTC ISO timestamps (scheduledAt, dueAt, startAfterAt)
+ * and local strings (date, time, due, startAfter). UTC takes precedence.
+ * Always returns both formats in responses.
  */
 
 const { z } = require('zod');
 const db = require('../../db');
 const { rowToTask, taskToRow, ensureProject, applySplitDefault } = require('../../controllers/task.controller');
 
+// Shared Zod fields for task input (used by create_task, create_tasks, update_task)
+var taskInputFields = {
+  text: z.string().optional(),
+  project: z.string().optional().describe('Project name'),
+  pri: z.number().optional().describe('Priority (1=highest, 5=lowest)'),
+  dur: z.number().optional().describe('Duration in minutes'),
+  when: z.string().optional().describe('Time preference: "morning", "afternoon", "evening", or null'),
+  dayReq: z.string().optional().describe('Day requirement: "any", "weekday", "weekend", or specific day letter'),
+  dependsOn: z.array(z.string()).optional().describe('Array of task IDs this task depends on'),
+  // UTC ISO fields (preferred)
+  scheduledAt: z.string().optional().describe('Scheduled date+time as ISO string — UTC ("2026-03-08T22:45:00Z") or with offset ("2026-03-08T18:45:00-04:00"). Takes precedence over date/time.'),
+  dueAt: z.string().optional().describe('Due date as ISO date string (e.g. "2026-03-15"). Takes precedence over due.'),
+  startAfterAt: z.string().optional().describe('Start-after date as ISO date string (e.g. "2026-03-10"). Takes precedence over startAfter.'),
+  // Local string fields (convenience, converted server-side using user timezone)
+  date: z.string().optional().describe('Scheduled date in M/D format (e.g. "3/8"). Use scheduledAt for UTC.'),
+  time: z.string().optional().describe('Scheduled time (e.g. "9:00 AM"). Use scheduledAt for UTC.'),
+  due: z.string().optional().describe('Due date in M/D format. Use dueAt for ISO.'),
+  startAfter: z.string().optional().describe('Start-after date in M/D format. Use startAfterAt for ISO.'),
+  // Other fields
+  location: z.array(z.string()).optional().describe('Location IDs'),
+  tools: z.array(z.string()).optional().describe('Tool IDs'),
+  notes: z.string().optional().describe('Additional notes'),
+  habit: z.boolean().optional().describe('Whether this is a recurring habit'),
+  rigid: z.boolean().optional().describe('Whether time is fixed/rigid'),
+  split: z.boolean().optional().describe('Whether task can be split across time blocks'),
+  splitMin: z.number().optional().describe('Minimum split chunk in minutes'),
+  recur: z.object({
+    type: z.string(),
+    days: z.string().optional(),
+    every: z.number().optional()
+  }).optional().describe('Recurrence pattern'),
+  datePinned: z.boolean().optional().describe('Whether date is pinned (won\'t be moved by scheduler)')
+};
+
 function registerTaskTools(server, userId) {
 
   // Helper: get user timezone
   async function getUserTimezone() {
-    const user = await db('users').where('id', userId).select('timezone').first();
+    var user = await db('users').where('id', userId).select('timezone').first();
     return (user && user.timezone) || 'America/New_York';
   }
 
   // ── list_tasks ──
   server.tool(
     'list_tasks',
-    'List tasks. Filter by status, project, date, or limit results.',
+    'List tasks. Filter by status, project, date, or limit results. Returns both UTC (scheduledAt) and local (date/time/day) fields.',
     {
       status: z.string().optional().describe('Filter by status (e.g. "", "done", "dropped")'),
       project: z.string().optional().describe('Filter by project name'),
@@ -25,16 +63,15 @@ function registerTaskTools(server, userId) {
       limit: z.number().optional().describe('Max number of tasks to return')
     },
     async ({ status, project, date, limit }) => {
-      const tz = await getUserTimezone();
-      let query = db('tasks').where('user_id', userId);
+      var tz = await getUserTimezone();
+      var query = db('tasks').where('user_id', userId);
       if (status !== undefined) query = query.where('status', status);
       if (project) query = query.where('project', project);
       query = query.orderBy('created_at', 'asc');
       if (limit && !date) query = query.limit(limit);
 
-      const rows = await query;
-      let tasks = rows.map(function(r) { return rowToTask(r, tz); });
-      // Filter by derived local date if requested
+      var rows = await query;
+      var tasks = rows.map(function(r) { return rowToTask(r, tz); });
       if (date) {
         tasks = tasks.filter(function(t) { return t.date === date; });
         if (limit) tasks = tasks.slice(0, limit);
@@ -46,48 +83,21 @@ function registerTaskTools(server, userId) {
   // ── create_task ──
   server.tool(
     'create_task',
-    'Create a single task. Returns the created task.',
-    {
-      id: z.string().optional().describe('Task ID (auto-generated UUID if omitted)'),
-      text: z.string().describe('Task description/title'),
-      project: z.string().optional().describe('Project name'),
-      pri: z.number().optional().describe('Priority (1=highest, 5=lowest)'),
-      dur: z.number().optional().describe('Duration in minutes'),
-      when: z.string().optional().describe('Time preference: "morning", "afternoon", "evening", or null'),
-      dayReq: z.string().optional().describe('Day requirement: "any", "weekday", "weekend", or specific day letter'),
-      dependsOn: z.array(z.string()).optional().describe('Array of task IDs this task depends on'),
-      due: z.string().optional().describe('Due date in M/D format'),
-      date: z.string().optional().describe('Scheduled date in M/D format'),
-      day: z.string().optional().describe('Day of week (Mon, Tue, etc.)'),
-      time: z.string().optional().describe('Scheduled time (e.g. "9:00 AM")'),
-      startAfter: z.string().optional().describe('Don\'t schedule before this date (M/D format)'),
-      location: z.array(z.string()).optional().describe('Location IDs'),
-      tools: z.array(z.string()).optional().describe('Tool IDs'),
-      notes: z.string().optional().describe('Additional notes'),
-      habit: z.boolean().optional().describe('Whether this is a recurring habit'),
-      rigid: z.boolean().optional().describe('Whether time is fixed/rigid'),
-      split: z.boolean().optional().describe('Whether task can be split across time blocks'),
-      splitMin: z.number().optional().describe('Minimum split chunk in minutes'),
-      recur: z.object({
-        type: z.string(),
-        days: z.string().optional(),
-        every: z.number().optional()
-      }).optional().describe('Recurrence pattern'),
-      datePinned: z.boolean().optional().describe('Whether date is pinned (won\'t be moved by scheduler)')
-    },
+    'Create a single task. Accepts UTC ISO (scheduledAt) or local strings (date+time). Returns both formats.',
+    Object.assign({ id: z.string().optional().describe('Task ID (auto-generated UUID if omitted)'), text: z.string().describe('Task description/title') }, taskInputFields),
     async (params) => {
-      const tz = await getUserTimezone();
-      const task = { ...params };
+      var tz = await getUserTimezone();
+      var task = Object.assign({}, params);
       if (!task.id) {
-        const { v4: uuidv4 } = require('uuid');
+        var uuidv4 = require('uuid').v4;
         task.id = uuidv4();
       }
-      const row = taskToRow(task, userId, tz);
+      var row = taskToRow(task, userId, tz);
       row.created_at = db.fn.now();
       await applySplitDefault(row, userId);
       await ensureProject(userId, task.project);
       await db('tasks').insert(row);
-      const created = await db('tasks').where('id', row.id).first();
+      var created = await db('tasks').where('id', row.id).first();
       return { content: [{ type: 'text', text: JSON.stringify(rowToTask(created, tz), null, 2) }] };
     }
   );
@@ -95,48 +105,23 @@ function registerTaskTools(server, userId) {
   // ── create_tasks (batch) ──
   server.tool(
     'create_tasks',
-    'Create multiple tasks at once. Each task object has the same fields as create_task. Returns count of created tasks.',
+    'Create multiple tasks at once. Each task accepts UTC ISO (scheduledAt) or local strings (date+time). Returns count.',
     {
-      tasks: z.array(z.object({
-        id: z.string().optional(),
-        text: z.string(),
-        project: z.string().optional(),
-        pri: z.number().optional(),
-        dur: z.number().optional(),
-        when: z.string().optional(),
-        dayReq: z.string().optional(),
-        dependsOn: z.array(z.string()).optional(),
-        due: z.string().optional(),
-        date: z.string().optional(),
-        day: z.string().optional(),
-        time: z.string().optional(),
-        startAfter: z.string().optional(),
-        location: z.array(z.string()).optional(),
-        tools: z.array(z.string()).optional(),
-        notes: z.string().optional(),
-        habit: z.boolean().optional(),
-        rigid: z.boolean().optional(),
-        split: z.boolean().optional(),
-        splitMin: z.number().optional(),
-        recur: z.object({
-          type: z.string(),
-          days: z.string().optional(),
-          every: z.number().optional()
-        }).optional(),
-        datePinned: z.boolean().optional()
-      })).describe('Array of task objects to create')
+      tasks: z.array(z.object(
+        Object.assign({ id: z.string().optional(), text: z.string() }, taskInputFields)
+      )).describe('Array of task objects to create')
     },
     async ({ tasks }) => {
-      const tz = await getUserTimezone();
-      const { v4: uuidv4 } = require('uuid');
-      const prefs = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
-      const splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
+      var tz = await getUserTimezone();
+      var uuidv4 = require('uuid').v4;
+      var prefs = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
+      var splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
 
-      const projects = new Set();
-      const rows = tasks.map(t => {
+      var projects = new Set();
+      var rows = tasks.map(function(t) {
         if (!t.id) t.id = uuidv4();
         if (t.project) projects.add(t.project);
-        const row = taskToRow(t, userId, tz);
+        var row = taskToRow(t, userId, tz);
         row.created_at = db.fn.now();
         if (row.split === undefined || row.split === null) {
           row.split = splitDefault ? 1 : 0;
@@ -144,73 +129,55 @@ function registerTaskTools(server, userId) {
         return row;
       });
 
-      for (const p of projects) {
+      for (var p of projects) {
         await ensureProject(userId, p);
       }
 
-      await db.transaction(async (trx) => {
-        const chunkSize = 100;
-        for (let i = 0; i < rows.length; i += chunkSize) {
+      await db.transaction(async function(trx) {
+        var chunkSize = 100;
+        for (var i = 0; i < rows.length; i += chunkSize) {
           await trx('tasks').insert(rows.slice(i, i + chunkSize));
         }
       });
 
-      return { content: [{ type: 'text', text: JSON.stringify({ created: rows.length, ids: rows.map(r => r.id) }) }] };
+      return { content: [{ type: 'text', text: JSON.stringify({ created: rows.length, ids: rows.map(function(r) { return r.id; }) }) }] };
     }
   );
 
   // ── update_task ──
   server.tool(
     'update_task',
-    'Update fields on an existing task. Only provided fields are changed.',
-    {
+    'Update fields on an existing task. Accepts UTC ISO (scheduledAt) or local strings (date+time). Only provided fields are changed.',
+    Object.assign({
       id: z.string().describe('Task ID to update'),
-      text: z.string().optional(),
-      project: z.string().optional(),
-      pri: z.number().optional(),
-      dur: z.number().optional(),
-      when: z.string().optional(),
-      dayReq: z.string().optional(),
-      dependsOn: z.array(z.string()).optional(),
-      due: z.string().optional(),
-      date: z.string().optional(),
-      day: z.string().optional(),
-      time: z.string().optional(),
-      startAfter: z.string().optional(),
-      location: z.array(z.string()).optional(),
-      tools: z.array(z.string()).optional(),
-      notes: z.string().optional(),
-      habit: z.boolean().optional(),
-      rigid: z.boolean().optional(),
-      split: z.boolean().optional(),
-      splitMin: z.number().optional(),
-      datePinned: z.boolean().optional(),
       status: z.string().optional(),
       direction: z.string().optional()
-    },
+    }, taskInputFields),
     async ({ id, ...fields }) => {
-      const tz = await getUserTimezone();
-      const existing = await db('tasks').where({ id, user_id: userId }).first();
+      var tz = await getUserTimezone();
+      var existing = await db('tasks').where({ id: id, user_id: userId }).first();
       if (!existing) {
         return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
       }
 
-      const row = taskToRow(fields, userId, tz);
+      var row = taskToRow(fields, userId, tz);
       delete row.user_id;
       delete row.created_at;
 
       if (fields.project) await ensureProject(userId, fields.project);
 
-      // Auto-pin logic (same as REST controller)
-      if (fields.date !== undefined && row.date_pinned === undefined) {
+      // Auto-pin logic
+      var dateWasSet = fields.date !== undefined || fields.scheduledAt !== undefined;
+      var timeWasSet = fields.time !== undefined || fields.scheduledAt !== undefined;
+      if (dateWasSet && row.date_pinned === undefined) {
         row.date_pinned = 1;
       }
-      if (fields.date !== undefined || fields.time !== undefined) {
+      if (dateWasSet || timeWasSet) {
         row.original_scheduled_at = null;
       }
 
-      await db('tasks').where({ id, user_id: userId }).update(row);
-      const updated = await db('tasks').where('id', id).first();
+      await db('tasks').where({ id: id, user_id: userId }).update(row);
+      var updated = await db('tasks').where('id', id).first();
       return { content: [{ type: 'text', text: JSON.stringify(rowToTask(updated, tz), null, 2) }] };
     }
   );
@@ -225,17 +192,17 @@ function registerTaskTools(server, userId) {
       direction: z.string().optional().describe('Direction: "fwd" or "back"')
     },
     async ({ id, status, direction }) => {
-      const tz = await getUserTimezone();
-      const existing = await db('tasks').where({ id, user_id: userId }).first();
+      var tz = await getUserTimezone();
+      var existing = await db('tasks').where({ id: id, user_id: userId }).first();
       if (!existing) {
         return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
       }
 
-      const update = { status: status || '', updated_at: db.fn.now() };
+      var update = { status: status || '', updated_at: db.fn.now() };
       if (direction !== undefined) update.direction = direction;
 
-      await db('tasks').where({ id, user_id: userId }).update(update);
-      const updated = await db('tasks').where('id', id).first();
+      await db('tasks').where({ id: id, user_id: userId }).update(update);
+      var updated = await db('tasks').where('id', id).first();
       return { content: [{ type: 'text', text: JSON.stringify(rowToTask(updated, tz), null, 2) }] };
     }
   );
@@ -248,39 +215,38 @@ function registerTaskTools(server, userId) {
       id: z.string().describe('Task ID to delete')
     },
     async ({ id }) => {
-      const task = await db('tasks').where({ id, user_id: userId }).first();
+      var task = await db('tasks').where({ id: id, user_id: userId }).first();
       if (!task) {
         return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
       }
 
-      await db.transaction(async (trx) => {
-        // Remap dependencies
-        const deletedDeps = typeof task.depends_on === 'string'
+      await db.transaction(async function(trx) {
+        var deletedDeps = typeof task.depends_on === 'string'
           ? JSON.parse(task.depends_on || '[]') : (task.depends_on || []);
-        const affected = await trx('tasks')
+        var affected = await trx('tasks')
           .where('user_id', userId)
           .whereRaw('JSON_CONTAINS(depends_on, ?)', [JSON.stringify(id)])
           .select('id', 'depends_on');
-        for (const other of affected) {
-          const deps = typeof other.depends_on === 'string'
+        for (var i = 0; i < affected.length; i++) {
+          var other = affected[i];
+          var deps = typeof other.depends_on === 'string'
             ? JSON.parse(other.depends_on || '[]') : (other.depends_on || []);
-          const newDeps = deps.filter(d => d !== id);
-          deletedDeps.forEach(d => { if (newDeps.indexOf(d) === -1) newDeps.push(d); });
+          var newDeps = deps.filter(function(d) { return d !== id; });
+          deletedDeps.forEach(function(d) { if (newDeps.indexOf(d) === -1) newDeps.push(d); });
           await trx('tasks').where({ id: other.id, user_id: userId })
             .update({ depends_on: JSON.stringify(newDeps), updated_at: db.fn.now() });
         }
 
-        // Mark ledger record for GCal deletion
         if (task.gcal_event_id) {
           await trx('gcal_sync_ledger')
             .where({ user_id: userId, task_id: id })
             .update({ task_id: null, synced_at: db.fn.now() });
         }
 
-        await trx('tasks').where({ id, user_id: userId }).del();
+        await trx('tasks').where({ id: id, user_id: userId }).del();
       });
 
-      return { content: [{ type: 'text', text: JSON.stringify({ deleted: true, id }) }] };
+      return { content: [{ type: 'text', text: JSON.stringify({ deleted: true, id: id }) }] };
     }
   );
 }

@@ -12,7 +12,7 @@
 var constants = require('./constants');
 var GRID_START = constants.GRID_START;
 var GRID_END = constants.GRID_END;
-var DAY_NAMES = constants.DAY_NAMES;
+
 var dateHelpers = require('./dateHelpers');
 var parseDate = dateHelpers.parseDate;
 var formatDateKey = dateHelpers.formatDateKey;
@@ -37,7 +37,7 @@ function effectiveDuration(t) {
 
 function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   var PERF = Date.now();
-  var dayNames = DAY_NAMES;
+
   var MIN_CHUNK = cfg.splitMinDefault || 15;
   var WALK_END = 23 * 60;
   var DAY_START = GRID_START * 60;
@@ -259,7 +259,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var hh = Math.floor(start / 60), mm = start % 60;
       var ampm = hh >= 12 ? "PM" : "AM";
       var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
-      taskUpdates[t.id] = { date: dateKey, day: dayNames[new Date(parseDate(dateKey)).getDay()], time: dh + ":" + (mm < 10 ? "0" : "") + mm + " " + ampm };
+      taskUpdates[t.id] = { date: dateKey, time: dh + ":" + (mm < 10 ? "0" : "") + mm + " " + ampm };
     }
     return part;
   }
@@ -1208,7 +1208,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         var hh = Math.floor(a.newStart / 60), mm2 = a.newStart % 60;
         var ampm = hh >= 12 ? 'PM' : 'AM';
         var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
-        taskUpdates[pr.task.id] = { date: d.key, day: dayNames[d.date.getDay()], time: dh + ':' + (mm2 < 10 ? '0' : '') + mm2 + ' ' + ampm };
+        taskUpdates[pr.task.id] = { date: d.key, time: dh + ':' + (mm2 < 10 ? '0' : '') + mm2 + ' ' + ampm };
         globalPlacedEnd[pr.task.id] = { dateKey: d.key, endMin: a.newStart + pr.dur };
 
         for (var pi = 0; pi < pool.length; pi++) {

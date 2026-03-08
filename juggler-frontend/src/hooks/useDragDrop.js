@@ -3,8 +3,7 @@
  */
 
 import { useCallback } from 'react';
-import { parseDate, formatDateKey } from '../scheduler/dateHelpers';
-import { DAY_NAMES, GRID_START } from '../state/constants';
+import { GRID_START } from '../state/constants';
 
 export default function useDragDrop({ allTasks, onUpdate, gridZoom, showToast }) {
   var PX_PER_HOUR = gridZoom;
@@ -30,8 +29,6 @@ export default function useDragDrop({ allTasks, onUpdate, gridZoom, showToast })
     var task = allTasks.find(t => t.id === taskId);
     if (task && task.date !== targetDateKey) {
       fields.date = targetDateKey;
-      var dd = parseDate(targetDateKey);
-      if (dd) fields.day = DAY_NAMES[dd.getDay()];
     }
 
     onUpdate(taskId, fields);
@@ -47,9 +44,7 @@ export default function useDragDrop({ allTasks, onUpdate, gridZoom, showToast })
     var task = allTasks.find(t => t.id === taskId);
     if (!task || task.date === targetDateKey) return;
 
-    var dd = parseDate(targetDateKey);
     var fields = { date: targetDateKey };
-    if (dd) fields.day = DAY_NAMES[dd.getDay()];
 
     onUpdate(taskId, fields);
     if (showToast) showToast('Moved to ' + targetDateKey, 'success');

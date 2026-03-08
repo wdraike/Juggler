@@ -69,7 +69,6 @@ export default function useTaskState() {
           status: state.statuses[t.id] || '',
           direction: state.directions[t.id] || null,
           date: t.date,
-          day: t.day,
           time: t.time,
           dur: t.dur,
           timeRemaining: t.timeRemaining,
