@@ -241,6 +241,20 @@ server.tool(
   }
 );
 
+server.tool(
+  'list_projects',
+  'List all projects, optionally filtered by name. Returns task counts.',
+  {
+    name: z.string().optional().describe('Filter by project name (exact match)')
+  },
+  async ({ name }) => {
+    const data = await apiCall('GET', '/api/projects');
+    let projects = data.projects || [];
+    if (name) projects = projects.filter(p => p.name === name);
+    return { content: [{ type: 'text', text: JSON.stringify(projects, null, 2) }] };
+  }
+);
+
 // ── Start ──
 
 async function main() {

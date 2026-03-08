@@ -42,6 +42,42 @@ function registerConfigTools(server, userId) {
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     }
   );
+
+  // ── list_projects ──
+  server.tool(
+    'list_projects',
+    'List all projects, optionally filtered by name. Returns project name, color, icon, and task count.',
+    {
+      name: z.string().optional().describe('Filter by project name (exact match)')
+    },
+    async ({ name }) => {
+      let query = db('projects').where('user_id', userId).orderBy('sort_order');
+      if (name) query = query.where('name', name);
+      const projects = await query;
+
+      // Get task counts per project
+      const projectNames = projects.map(p => p.name);
+      const counts = await db('tasks')
+        .where('user_id', userId)
+        .whereIn('project', projectNames)
+        .groupBy('project')
+        .select('project', db.raw('COUNT(*) as total'), db.raw("SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) as done"));
+
+      const countMap = {};
+      counts.forEach(c => { countMap[c.project] = { total: c.total, done: c.done }; });
+
+      const result = projects.map(p => ({
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        icon: p.icon,
+        taskCount: countMap[p.name]?.total || 0,
+        doneCount: countMap[p.name]?.done || 0
+      }));
+
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    }
+  );
 }
 
 module.exports = { registerConfigTools };

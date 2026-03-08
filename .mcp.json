@@ -5,7 +5,7 @@
       "args": ["juggler-mcp/index.js"],
       "env": {
         "JUGGLER_API_URL": "http://localhost:5002",
-        "JUGGLER_TOKEN": ""
+        "JUGGLER_TOKEN": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiIyNDI5N2Q0ZS02ZDc0LTQ1MzAtYWNlZS1kNDE1ZTY3YzlhOGYiLCJlbWFpbCI6IndkcmFpa2VAZ21haWwuY29tIiwibmFtZSI6IkRhdmlkIFJhaWtlIiwidHlwZSI6ImFjY2VzcyIsImp0aSI6IjlkMjk2NzA0M2Y0ZDdlNzVjMzg2Yjc4YjY5MTE0ZjY0IiwiaWF0IjoxNzcyOTY2ODI0LCJleHAiOjE3NzU1NTg4MjQsImlzcyI6Imp1Z2dsZXIiLCJzdWIiOiIyNDI5N2Q0ZS02ZDc0LTQ1MzAtYWNlZS1kNDE1ZTY3YzlhOGYifQ._OhuZyRJ46OPdj4t7lOHYMHBOCsAqtMedbB_jla4JQc"
       }
     }
   }

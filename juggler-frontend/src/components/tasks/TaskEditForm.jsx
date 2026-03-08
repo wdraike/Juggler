@@ -8,12 +8,12 @@ import { toTime24, fromTime24, toDateISO, fromDateISO, formatDateKey } from '../
 import { getTheme } from '../../theme/colors';
 import ConfirmDialog from '../features/ConfirmDialog';
 
-export default function TaskEditForm({ task, status, direction, onUpdate, onStatusChange, onDirectionChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, darkMode, isMobile, mode, onCreate, initialDate, stackIndex }) {
+export default function TaskEditForm({ task, status, direction, onUpdate, onStatusChange, onDirectionChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex }) {
   var isCreate = mode === 'create';
   var TH = getTheme(darkMode);
   var initDate = isCreate && initialDate ? toDateISO(formatDateKey(initialDate)) : '';
   var [text, setText] = useState(isCreate ? '' : (task.text || ''));
-  var [project, setProject] = useState(isCreate ? '' : (task.project || ''));
+  var [project, setProject] = useState(isCreate ? (initialProject || '') : (task.project || ''));
   var [pri, setPri] = useState(isCreate ? 'P3' : (task.pri || 'P3'));
   var [date, setDate] = useState(isCreate ? initDate : toDateISO(task.date));
   var [time, setTime] = useState(isCreate ? '' : toTime24(task.time));
@@ -500,29 +500,13 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
           </label>
         </div>
 
-        {/* Dependencies — hidden in create mode */}
-        {!isCreate && task.dependsOn && task.dependsOn.length > 0 && (
-          <div style={{ marginBottom: 5 }}>
-            <label style={lStyle}>
-              {'\uD83D\uDD17'} Dependencies ({task.dependsOn.length})
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 2 }}>
-                {task.dependsOn.map(depId => (
-                  <span key={depId} style={{
-                    fontSize: 9, padding: '2px 6px', borderRadius: 4,
-                    background: TH.bgTertiary, color: TH.textMuted, fontFamily: 'monospace'
-                  }}>{depId}</span>
-                ))}
-              </div>
-            </label>
-          </div>
-        )}
-
+        {/* Dependencies — link to Deps view */}
         {!isCreate && onShowChain && (
           <button onClick={onShowChain} style={{
             border: '1px solid #0EA5E9', borderRadius: 4, padding: '4px 10px',
             background: 'transparent', color: '#0EA5E9', fontSize: 10, fontWeight: 600,
             cursor: 'pointer', fontFamily: 'inherit', width: '100%', marginBottom: 5
-          }}>Show Dependency Chain</button>
+          }}>{'\uD83D\uDD17'} View Dependencies{task.dependsOn && task.dependsOn.length > 0 ? ' (' + task.dependsOn.length + ')' : ''}</button>
         )}
       </div>
 
@@ -538,36 +522,25 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
     </>
   );
 
-  var dialogStyle = {
-    width: isMobile ? '100vw' : 460, maxWidth: '100vw',
-    maxHeight: isMobile ? '100vh' : 'calc(100vh - 48px)',
-    background: TH.bgCard, border: isMobile ? 'none' : ('1px solid ' + TH.border),
-    borderRadius: isMobile ? 0 : 12,
-    overflowX: 'hidden', overflowY: 'auto',
-    boxShadow: '0 16px 48px rgba(0,0,0,0.4)',
-    boxSizing: 'border-box'
-  };
-
-  if (hasStack) {
+  // Sidebar mode (desktop): render inline, no overlay
+  if (!isMobile) {
     return (
-      <div style={Object.assign({}, dialogStyle, {
-        position: 'fixed', top: isMobile ? 0 : 24, right: isMobile ? 0 : 24,
-        zIndex: 700 + (stackIndex || 0)
-      })}>
+      <div style={{
+        height: '100%', overflowX: 'hidden', overflowY: 'auto',
+        background: TH.bgCard, boxSizing: 'border-box'
+      }}>
         {dialogContent}
       </div>
     );
   }
 
+  // Mobile: full-screen overlay
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      zIndex: 600, display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(0,0,0,0.5)', padding: isMobile ? 0 : 24
-    }} onClick={function(e) { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={dialogStyle}>
-        {dialogContent}
-      </div>
+      zIndex: 600, background: TH.bgCard, overflowY: 'auto'
+    }}>
+      {dialogContent}
     </div>
   );
 }

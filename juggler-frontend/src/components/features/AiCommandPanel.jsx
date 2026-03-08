@@ -108,16 +108,18 @@ export default function AiCommandPanel({
           timeBlocks: config.timeBlocks, locSchedules: config.locSchedules,
           locScheduleDefaults: config.locScheduleDefaults, locScheduleOverrides: config.locScheduleOverrides
         }
-      });
+      }, { timeout: 55000 });
       var data = resp.data;
       if (onApplyOps && data.ops && data.ops.length > 0) onApplyOps(data.ops, data.msg);
       setAiLog(function(prev) { return prev.concat([{ role: 'ai', text: data.msg || 'Done.', ops: data.ops || [] }]); });
+      var hideDelay = (data.ops || []).some(function(o) { return o.op === 'add'; }) ? 30000 : 8000;
+      autoHideRef.current = setTimeout(function() { setShowLog(false); }, hideDelay);
     } catch (err) {
       var errMsg = (err.response && err.response.data && err.response.data.error) || err.message || 'API call failed';
       setAiLog(function(prev) { return prev.concat([{ role: 'ai', text: 'Error: ' + errMsg }]); });
+      autoHideRef.current = setTimeout(function() { setShowLog(false); }, 8000);
     }
     setAiLoading(false);
-    autoHideRef.current = setTimeout(function() { setShowLog(false); }, 8000);
   };
 
   return (

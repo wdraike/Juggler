@@ -15,6 +15,7 @@ const VIEW_MODES = [
   { id: 'list', label: 'List', icon: '\u2261', tip: 'List view \u2014 all tasks grouped by date' },
   { id: 'priority', label: 'Priority', icon: 'P', tip: 'Priority view \u2014 P1-P4 kanban columns' },
   { id: 'scurve', label: 'AM/PM', icon: '\u25D1', tip: 'AM/PM view \u2014 dual-circle timeline with morning and afternoon clocks' },
+  { id: 'deps', label: 'Deps', icon: '\u2192', tip: 'Dependencies view \u2014 DAG graph of task dependencies, filter by project' },
   { id: 'conflicts', label: 'Issues', icon: '!', tip: 'Issues view \u2014 unplaced tasks, conflicts, and deadline misses' },
 ];
 

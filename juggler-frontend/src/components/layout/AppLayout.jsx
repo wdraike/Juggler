@@ -16,7 +16,7 @@ import useDragDrop from '../../hooks/useDragDrop';
 import useIsMobile from '../../hooks/useIsMobile';
 import { getTheme } from '../../theme/colors';
 import { formatDateKey, getWeekStart, parseDate } from '../../scheduler/dateHelpers';
-import { DAY_NAMES } from '../../state/constants';
+import { DAY_NAMES, applyDefaults } from '../../state/constants';
 
 // Views
 import DayView from '../views/DayView';
@@ -26,6 +26,7 @@ import MonthView from '../views/MonthView';
 import ListView from '../views/ListView';
 import PriorityView from '../views/PriorityView';
 import ConflictsView from '../views/ConflictsView';
+import DependencyView from '../views/DependencyView';
 import TimelineView from '../views/TimelineView';
 import SCurveView from '../views/SCurveView';
 
@@ -35,7 +36,7 @@ import TaskEditForm from '../tasks/TaskEditForm';
 // Advanced features
 import SettingsPanel from '../settings/SettingsPanel';
 import ImportExportPanel from '../features/ImportExportPanel';
-import DependencyChainPopup from '../features/DependencyChainPopup';
+
 import GCalSyncPanel from '../features/GCalSyncPanel';
 import HelpModal from '../features/HelpModal';
 import AiCommandPanel from '../features/AiCommandPanel';
@@ -64,7 +65,6 @@ export default function AppLayout() {
   var [showExport, setShowExport] = useState(false);
   var [showGCalSync, setShowGCalSync] = useState(false);
   var [showToastHistory, setShowToastHistory] = useState(false);
-  var [chainPopupId, setChainPopupId] = useState(null);
   var [hideHabits, setHideHabits] = useState(false);
   var [showHelp, setShowHelp] = useState(false);
   var [showCreateForm, setShowCreateForm] = useState(false);
@@ -81,7 +81,7 @@ export default function AppLayout() {
   var allTasks = taskState.tasks;
 
   // Track when editing UI is open to suspend background syncs/scheduling
-  editingRef.current = expandedTasks.length > 0 || !!showCreateForm || !!chainPopupId || !!showSettings;
+  editingRef.current = expandedTasks.length > 0 || !!showCreateForm || !!showSettings;
 
   // Load data on mount
   useEffect(() => {
@@ -312,12 +312,6 @@ export default function AppLayout() {
     setExpandedTasks(function(prev) { return prev.length === 1 && prev[0] === id ? [] : [id]; });
   }, []);
 
-  // Task expand handler — from dependency chain (multi open)
-  var handleChainExpand = useCallback((id) => {
-    setExpandedTasks(function(prev) {
-      return prev.indexOf(id) >= 0 ? prev.filter(function(x) { return x !== id; }) : prev.concat([id]);
-    });
-  }, []);
 
   // Task create handler
   var handleCreate = useCallback((task) => {
@@ -438,6 +432,15 @@ export default function AppLayout() {
     var taskEdits = {};
     var newLocs = null, newTools = null, newMatrix = null, newBlocks = null;
 
+    // First pass: collect temp AI IDs and generate real IDs for new tasks
+    var aiIdMap = {}; // maps temp IDs (ai001) to real IDs
+    (ops || []).forEach(function(op) {
+      if (op.op === 'add' && op.task && op.task.id) {
+        var realId = 't' + Date.now() + Math.random().toString(36).slice(2, 6);
+        aiIdMap[op.task.id] = realId;
+      }
+    });
+
     (ops || []).forEach(function(op) {
       if (op.op === 'status') {
         if (op.value === '') { delete newSt[op.id]; } else { newSt[op.id] = op.value; }
@@ -447,10 +450,14 @@ export default function AppLayout() {
         if (srcTask && srcTask.when && srcTask.when.indexOf('fixed') >= 0) {
           delete editFields.date; delete editFields.day; delete editFields.time;
         }
+        // Resolve any temp AI IDs in dependsOn
+        if (editFields.dependsOn) {
+          editFields.dependsOn = editFields.dependsOn.map(function(d) { return aiIdMap[d] || d; });
+        }
         taskEdits[op.id] = Object.assign({}, taskEdits[op.id] || {}, editFields);
       } else if (op.op === 'add' && op.task) {
-        op.task.created = new Date().toISOString();
-        newTasks = newTasks.concat([op.task]);
+        // New tasks are collected separately and sent via addTasks (POST)
+        // Skip adding to newTasks here to avoid double-add
       } else if (op.op === 'delete') {
         newSt[op.id] = 'cancel';
       } else if (op.op === 'set_weekly' && op.day && op.location) {
@@ -491,14 +498,34 @@ export default function AppLayout() {
       return taskEdits[t.id] ? Object.assign({}, t, taskEdits[t.id]) : t;
     });
 
+    // Collect newly added tasks (they need POST, not PUT)
+    var addedTasks = [];
+    (ops || []).forEach(function(op) {
+      if (op.op === 'add' && op.task) {
+        var task = applyDefaults(Object.assign({}, op.task));
+        task.id = aiIdMap[task.id] || task.id;
+        task.created = new Date().toISOString();
+        if (op.task.dependsOn) {
+          task.dependsOn = op.task.dependsOn.map(function(d) { return aiIdMap[d] || d; });
+        }
+        addedTasks.push(task);
+      }
+    });
+
+    // For status/edit ops, use dispatchPersist (PUT /tasks/batch)
     dispatchPersist({ type: 'SET_ALL', statuses: newSt, tasks: newTasks });
     if (newLocs) config.updateLocations(newLocs);
     if (newTools) config.updateTools(newTools);
     if (newMatrix) config.updateToolMatrix(newMatrix);
     if (newBlocks) config.updateTimeBlocks(newBlocks);
 
+    // For new tasks, use addTasks which does POST /tasks/batch + loadPlacements
+    if (addedTasks.length > 0) {
+      addTasks(addedTasks);
+    }
+
     showToast(msg || 'AI: ' + ops.length + ' changes applied', 'success');
-  }, [allTasks, statuses, config, pushUndo, dispatchPersist, showToast]);
+  }, [allTasks, statuses, config, pushUndo, dispatchPersist, showToast, addTasks]);
 
   if (loading) {
     return (
@@ -549,7 +576,8 @@ export default function AppLayout() {
         />
       </div>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', minHeight: 0 }}>
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative', minHeight: 0 }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
           {viewMode === 'day' && (
             <DayView
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
@@ -655,6 +683,14 @@ export default function AppLayout() {
               isMobile={isMobile}
             />
           )}
+          {viewMode === 'deps' && (
+            <DependencyView
+              allTasks={allTasks} statuses={statuses}
+              projectFilter={projectFilter} filter={filter}
+              onUpdate={handleUpdateTask} onExpand={handleExpand}
+              darkMode={darkMode} isMobile={isMobile}
+            />
+          )}
           {viewMode === 'conflicts' && (
             <ConflictsView
               allTasks={allTasks} statuses={statuses} directions={directions}
@@ -663,15 +699,62 @@ export default function AppLayout() {
               isMobile={isMobile}
             />
           )}
+        </div>
+
+        {/* Right sidebar — task edit / create */}
+        {!isMobile && (showCreateForm || expandedTaskObjs.length > 0) && (
+          <div style={{ width: 380, flexShrink: 0, borderLeft: '1px solid ' + theme.border, overflowY: 'auto', overflowX: 'hidden', background: theme.bgCard }}>
+            {showCreateForm ? (
+              <TaskEditForm
+                mode="create"
+                onCreate={handleCreate}
+                onClose={() => setShowCreateForm(false)}
+                initialDate={selectedDate}
+                initialProject={viewMode === 'deps' ? projectFilter : undefined}
+                allProjectNames={allProjectNames}
+                locations={config.locations}
+                tools={config.tools}
+                uniqueTags={uniqueTags}
+                darkMode={darkMode}
+                isMobile={isMobile}
+              />
+            ) : (
+              expandedTaskObjs.map(function(taskObj, idx) {
+                var taskId = taskObj.id;
+                return (
+                  <TaskEditForm
+                    key={taskId}
+                    task={taskObj}
+                    status={statuses[taskId] || ''}
+                    direction={directions[taskId]}
+                    onUpdate={handleUpdateTask}
+                    onStatusChange={function(val) { handleStatusChange(taskId, val); }}
+                    onDirectionChange={function(val) { setDirection(taskId, val); }}
+                    onDelete={deleteTask}
+                    onClose={function() { setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== taskId; }); }); }}
+                    onShowChain={function() { setViewMode('deps'); setProjectFilter(taskObj.project || ''); setExpandedTasks([]); }}
+                    allProjectNames={allProjectNames}
+                    locations={config.locations}
+                    tools={config.tools}
+                    uniqueTags={uniqueTags}
+                    darkMode={darkMode}
+                    isMobile={isMobile}
+                  />
+                );
+              })
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Task create dialog */}
-      {showCreateForm && (
+      {/* Mobile: task edit / create as full-screen overlay */}
+      {isMobile && showCreateForm && (
         <TaskEditForm
           mode="create"
           onCreate={handleCreate}
           onClose={() => setShowCreateForm(false)}
           initialDate={selectedDate}
+          initialProject={viewMode === 'deps' ? projectFilter : undefined}
           allProjectNames={allProjectNames}
           locations={config.locations}
           tools={config.tools}
@@ -680,6 +763,29 @@ export default function AppLayout() {
           isMobile={isMobile}
         />
       )}
+      {isMobile && !showCreateForm && expandedTaskObjs.map(function(taskObj, idx) {
+        var taskId = taskObj.id;
+        return (
+          <TaskEditForm
+            key={taskId}
+            task={taskObj}
+            status={statuses[taskId] || ''}
+            direction={directions[taskId]}
+            onUpdate={handleUpdateTask}
+            onStatusChange={function(val) { handleStatusChange(taskId, val); }}
+            onDirectionChange={function(val) { setDirection(taskId, val); }}
+            onDelete={deleteTask}
+            onClose={function() { setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== taskId; }); }); }}
+            onShowChain={function() { setViewMode('deps'); setProjectFilter(taskObj.project || ''); setExpandedTasks([]); }}
+            allProjectNames={allProjectNames}
+            locations={config.locations}
+            tools={config.tools}
+            uniqueTags={uniqueTags}
+            darkMode={darkMode}
+            isMobile={isMobile}
+          />
+        );
+      })}
 
       {/* Settings panel */}
       {showSettings && (
@@ -716,46 +822,6 @@ export default function AppLayout() {
           }}
         />
       )}
-
-      {/* Dependency chain popup */}
-      {chainPopupId && (
-        <DependencyChainPopup
-          focusTaskId={chainPopupId}
-          allTasks={allTasks}
-          statuses={statuses}
-          onUpdate={handleUpdateTask}
-          onClose={() => { setChainPopupId(null); setExpandedTasks([]); }}
-          onExpand={handleChainExpand}
-          darkMode={darkMode}
-          isMobile={isMobile}
-        />
-      )}
-
-      {/* Task edit dialog(s) — renders after chain popup so they appear on top */}
-      {!showCreateForm && expandedTaskObjs.map(function(taskObj, idx) {
-        var taskId = taskObj.id;
-        return (
-          <TaskEditForm
-            key={taskId}
-            task={taskObj}
-            status={statuses[taskId] || ''}
-            direction={directions[taskId]}
-            onUpdate={handleUpdateTask}
-            onStatusChange={function(val) { handleStatusChange(taskId, val); }}
-            onDirectionChange={function(val) { setDirection(taskId, val); }}
-            onDelete={deleteTask}
-            onClose={function() { setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== taskId; }); }); }}
-            onShowChain={chainPopupId ? undefined : function() { setChainPopupId(taskId); setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== taskId; }); }); }}
-            allProjectNames={allProjectNames}
-            locations={config.locations}
-            tools={config.tools}
-            uniqueTags={uniqueTags}
-            darkMode={darkMode}
-            isMobile={isMobile}
-            stackIndex={idx}
-          />
-        );
-      })}
 
       {/* Help modal */}
       {showHelp && (
