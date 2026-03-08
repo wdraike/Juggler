@@ -1,0 +1,11 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'juggler-backend/Dockerfile'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/juggler-backend'
+      - '.'
+images:
+  - 'gcr.io/$PROJECT_ID/juggler-backend'

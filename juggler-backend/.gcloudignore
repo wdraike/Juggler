@@ -1,4 +1,10 @@
 .git
 .env
-node_modules
+**/node_modules
+**/build
 .DS_Store
+juggler-frontend
+scripts
+tests
+Juggler.code-workspace
+.playwright-mcp

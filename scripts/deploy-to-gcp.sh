@@ -103,7 +103,7 @@ backup_production_database() {
     BACKUP_FILE="$BACKUP_DIR/juggler-pre-deploy-$TIMESTAMP.sql"
 
     print_status "Starting Cloud SQL proxy..."
-    $PROXY_CMD $CLOUD_SQL_CONNECTION --port=3308 &
+    $PROXY_CMD -instances=$CLOUD_SQL_CONNECTION=tcp:3308 &
     PROXY_PID=$!
     sleep 5
 
@@ -133,7 +133,7 @@ run_database_migrations() {
     cd "$PROJECT_ROOT/juggler-backend"
 
     print_status "Starting Cloud SQL proxy..."
-    $PROXY_CMD $CLOUD_SQL_CONNECTION --port=3308 &
+    $PROXY_CMD -instances=$CLOUD_SQL_CONNECTION=tcp:3308 &
     PROXY_PID=$!
     sleep 5
 
@@ -158,11 +158,13 @@ run_database_migrations() {
 deploy_backend() {
     print_header "DEPLOYING BACKEND TO CLOUD RUN"
 
-    cd "$PROJECT_ROOT/juggler-backend"
+    cd "$PROJECT_ROOT"
 
     print_status "Building backend Docker image..."
     gcloud builds submit \
-        --tag gcr.io/$PROJECT_ID/$BACKEND_SERVICE \
+        --config=juggler-backend/cloudbuild.yaml \
+        --gcs-source-staging-dir=gs://${PROJECT_ID}_cloudbuild/source \
+        --ignore-file=juggler-backend/.gcloudignore \
         --timeout=15m || {
         print_error "Backend build failed!"
         exit 1
