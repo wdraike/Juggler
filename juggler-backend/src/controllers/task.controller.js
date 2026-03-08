@@ -264,6 +264,12 @@ async function batchCreateTasks(req, res) {
       return row;
     });
 
+    // Ensure all referenced projects exist
+    const projectNames = [...new Set(tasks.map(t => t.project).filter(Boolean))];
+    for (const p of projectNames) {
+      await ensureProject(req.user.id, p);
+    }
+
     await db.transaction(async (trx) => {
       const chunkSize = 100;
       for (let i = 0; i < rows.length; i += chunkSize) {
