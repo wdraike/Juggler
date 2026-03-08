@@ -161,7 +161,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       pool.push({
         task: t, remaining: effectiveDur, totalDur: effectiveDur,
         earliestDate: earliest, deadline: deadline, ceiling: ceiling,
-        splittable: t.split != null ? t.split : (t.habit ? false : cfg.splitDefault),
+        splittable: t.habit ? false : !!t.split,
         minChunk: t.splitMin || MIN_CHUNK,
         _parts: []
       });

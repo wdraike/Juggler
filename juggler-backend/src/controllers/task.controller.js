@@ -3,15 +3,45 @@
  */
 
 const db = require('../db');
+const { localToUtc, utcToLocal, toDateISO, fromDateISO } = require('../scheduler/dateHelpers');
 
-// Map task row from DB to API format
-function rowToTask(row) {
+/**
+ * Map task row from DB to API format.
+ * If timezone is provided and scheduled_at exists, derive date/time/day from UTC.
+ */
+function rowToTask(row, timezone) {
+  let date = row.date;
+  let time = row.time;
+  let day = row.day;
+  let due = row.due;
+  let startAfter = row.start_after;
+
+  // Derive date/time/day from scheduled_at (UTC source of truth)
+  if (timezone && row.scheduled_at) {
+    const local = utcToLocal(row.scheduled_at, timezone);
+    if (local.date) date = local.date;
+    if (local.time) time = local.time;
+    if (local.day) day = local.day;
+  }
+
+  // Derive due/startAfter from DATE columns if available
+  if (row.due_at) {
+    due = fromDateISO(row.due_at instanceof Date
+      ? row.due_at.toISOString().split('T')[0]
+      : String(row.due_at).split('T')[0]);
+  }
+  if (row.start_after_at) {
+    startAfter = fromDateISO(row.start_after_at instanceof Date
+      ? row.start_after_at.toISOString().split('T')[0]
+      : String(row.start_after_at).split('T')[0]);
+  }
+
   return {
     id: row.id,
     text: row.text,
-    date: row.date,
-    day: row.day,
-    time: row.time,
+    date: date,
+    day: day,
+    time: time,
     dur: row.dur,
     timeRemaining: row.time_remaining,
     pri: row.pri,
@@ -20,8 +50,8 @@ function rowToTask(row) {
     direction: row.direction,
     section: row.section,
     notes: row.notes,
-    due: row.due,
-    startAfter: row.start_after,
+    due: due,
+    startAfter: startAfter,
     location: typeof row.location === 'string' ? JSON.parse(row.location || '[]') : (row.location || []),
     tools: typeof row.tools === 'string' ? JSON.parse(row.tools || '[]') : (row.tools || []),
     when: row.when,
@@ -40,8 +70,12 @@ function rowToTask(row) {
   };
 }
 
-// Map API task to DB row
-function taskToRow(task, userId) {
+/**
+ * Map API task to DB row.
+ * If timezone is provided, compute scheduled_at (UTC) from date+time,
+ * and due_at/start_after_at from due/startAfter.
+ */
+function taskToRow(task, userId, timezone) {
   const row = { user_id: userId };
   if (task.id !== undefined) row.id = task.id;
   if (task.text !== undefined) row.text = task.text;
@@ -56,8 +90,14 @@ function taskToRow(task, userId) {
   if (task.direction !== undefined) row.direction = task.direction;
   if (task.section !== undefined) row.section = task.section;
   if (task.notes !== undefined) row.notes = task.notes;
-  if (task.due !== undefined) row.due = task.due;
-  if (task.startAfter !== undefined) row.start_after = task.startAfter;
+  if (task.due !== undefined) {
+    row.due = task.due;
+    row.due_at = task.due ? toDateISO(task.due) || null : null;
+  }
+  if (task.startAfter !== undefined) {
+    row.start_after = task.startAfter;
+    row.start_after_at = task.startAfter ? toDateISO(task.startAfter) || null : null;
+  }
   if (task.location !== undefined) row.location = JSON.stringify(task.location);
   if (task.tools !== undefined) row.tools = JSON.stringify(task.tools);
   if (task.when !== undefined) row.when = task.when;
@@ -73,6 +113,18 @@ function taskToRow(task, userId) {
   if (task.gcalEventId !== undefined) row.gcal_event_id = task.gcalEventId;
   if (task.dependsOn !== undefined) row.depends_on = JSON.stringify(task.dependsOn || []);
   if (task.datePinned !== undefined) row.date_pinned = task.datePinned ? 1 : 0;
+
+  // Compute scheduled_at from date+time if timezone is provided
+  if (timezone && (task.date !== undefined || task.time !== undefined)) {
+    const dateVal = task.date !== undefined ? task.date : null;
+    const timeVal = task.time !== undefined ? task.time : null;
+    if (dateVal) {
+      row.scheduled_at = localToUtc(dateVal, timeVal, timezone) || null;
+    } else if (dateVal === null || dateVal === '') {
+      row.scheduled_at = null;
+    }
+  }
+
   row.updated_at = db.fn.now();
   return row;
 }
@@ -83,7 +135,8 @@ function taskToRow(task, userId) {
 async function getAllTasks(req, res) {
   try {
     const rows = await db('tasks').where('user_id', req.user.id).orderBy('created_at', 'asc');
-    const tasks = rows.map(rowToTask);
+    const tz = req.user.timezone || 'America/New_York';
+    const tasks = rows.map(r => rowToTask(r, tz));
     res.json({ tasks });
   } catch (error) {
     console.error('Get tasks error:', error);
@@ -102,14 +155,24 @@ async function ensureProject(userId, projectName) {
   }
 }
 
+async function applySplitDefault(row, userId) {
+  if (row.split === undefined || row.split === null) {
+    const prefs = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
+    const splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
+    row.split = splitDefault ? 1 : 0;
+  }
+}
+
 async function createTask(req, res) {
   try {
-    const row = taskToRow(req.body, req.user.id);
+    const tz = req.user.timezone || 'America/New_York';
+    const row = taskToRow(req.body, req.user.id, tz);
     row.created_at = db.fn.now();
+    await applySplitDefault(row, req.user.id);
     await ensureProject(req.user.id, req.body.project);
     await db('tasks').insert(row);
     const created = await db('tasks').where('id', row.id).first();
-    res.status(201).json({ task: rowToTask(created) });
+    res.status(201).json({ task: rowToTask(created, tz) });
   } catch (error) {
     console.error('Create task error:', error);
     res.status(500).json({ error: 'Failed to create task' });
@@ -127,7 +190,8 @@ async function updateTask(req, res) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    const row = taskToRow(req.body, req.user.id);
+    const tz = req.user.timezone || 'America/New_York';
+    const row = taskToRow(req.body, req.user.id, tz);
     delete row.id;
     delete row.user_id;
     delete row.created_at;
@@ -167,7 +231,7 @@ async function updateTask(req, res) {
     });
 
     const updated = await db('tasks').where('id', id).first();
-    res.json({ task: rowToTask(updated) });
+    res.json({ task: rowToTask(updated, tz) });
   } catch (error) {
     console.error('Update task error:', error);
     res.status(500).json({ error: 'Failed to update task' });
@@ -238,7 +302,8 @@ async function updateTaskStatus(req, res) {
 
     await db('tasks').where({ id, user_id: req.user.id }).update(update);
     const updated = await db('tasks').where('id', id).first();
-    res.json({ task: rowToTask(updated) });
+    const tz = req.user.timezone || 'America/New_York';
+    res.json({ task: rowToTask(updated, tz) });
   } catch (error) {
     console.error('Update task status error:', error);
     res.status(500).json({ error: 'Failed to update task status' });
@@ -258,9 +323,18 @@ async function batchCreateTasks(req, res) {
       return res.status(400).json({ error: 'Batch limited to 500 items' });
     }
 
+    const tz = req.user.timezone || 'America/New_York';
+
+    // Look up splitDefault once for the batch
+    const prefs = await db('user_config').where({ user_id: req.user.id, config_key: 'preferences' }).first();
+    const splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
+
     const rows = tasks.map(t => {
-      const row = taskToRow(t, req.user.id);
+      const row = taskToRow(t, req.user.id, tz);
       row.created_at = db.fn.now();
+      if (row.split === undefined || row.split === null) {
+        row.split = splitDefault ? 1 : 0;
+      }
       return row;
     });
 
@@ -297,6 +371,7 @@ async function batchUpdateTasks(req, res) {
       return res.status(400).json({ error: 'Batch limited to 500 items' });
     }
 
+    const tz = req.user.timezone || 'America/New_York';
     let updatedCount = 0;
     const MAX_RETRIES = 3;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -307,7 +382,7 @@ async function batchUpdateTasks(req, res) {
             const { id, ...fields } = update;
             if (!id) continue;
 
-            const row = taskToRow(fields, req.user.id);
+            const row = taskToRow(fields, req.user.id, tz);
             delete row.user_id;
             delete row.created_at;
 

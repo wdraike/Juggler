@@ -101,6 +101,92 @@ function getDayName(dateStr) {
   return DAY_NAMES[d.getDay()];
 }
 
+/**
+ * Convert local date+time strings to a UTC Date.
+ * dateStr: "M/D" (no year — inferred), timeStr: "H:MM AM/PM", timezone: IANA string
+ * Returns a Date in UTC, or null if inputs are insufficient.
+ */
+function localToUtc(dateStr, timeStr, timezone) {
+  if (!dateStr) return null;
+  var d = parseDate(dateStr);
+  if (!d) return null;
+  var year = d.getFullYear(), month = d.getMonth(), day = d.getDate();
+  var hours = 0, mins = 0;
+  if (timeStr) {
+    var totalMins = parseTimeToMinutes(timeStr);
+    if (totalMins != null) {
+      hours = Math.floor(totalMins / 60);
+      mins = totalMins % 60;
+    }
+  }
+  // Build an ISO string representing the local time, then use timezone offset
+  // to find the UTC equivalent
+  var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
+  var localISO = year + '-' + pad(month + 1) + '-' + pad(day) + 'T' + pad(hours) + ':' + pad(mins) + ':00';
+  // Use Intl to find the UTC offset for this local time in the given timezone
+  var tempDate = new Date(localISO + 'Z'); // treat as UTC temporarily
+  var formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone, year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', second: 'numeric', hourCycle: 'h23'
+  });
+  // Binary search for offset: find UTC time that displays as our target local time
+  // Start with a rough estimate using the current offset
+  var testParts = {};
+  formatter.formatToParts(tempDate).forEach(function(p) { testParts[p.type] = parseInt(p.value, 10); });
+  var testLocalH = testParts.hour % 24;
+  var testLocalM = testParts.minute;
+  var testLocalDay = testParts.day;
+  var testLocalMonth = testParts.month;
+  // Offset in minutes = (localTime - utcTime)
+  var diffMins = ((testLocalH * 60 + testLocalM) - (hours * 60 + mins));
+  // Handle day boundary
+  if (testLocalDay !== day || testLocalMonth !== month + 1) {
+    diffMins += (testLocalDay > day || testLocalMonth > month + 1) ? 1440 : -1440;
+  }
+  var utcMs = tempDate.getTime() - diffMins * 60000;
+  var result = new Date(utcMs);
+  // Verify and adjust if DST boundary caused off-by-one
+  var verifyParts = {};
+  formatter.formatToParts(result).forEach(function(p) { verifyParts[p.type] = parseInt(p.value, 10); });
+  if (verifyParts.hour % 24 !== hours || verifyParts.minute !== mins) {
+    var diff2 = ((verifyParts.hour % 24) * 60 + verifyParts.minute) - (hours * 60 + mins);
+    result = new Date(result.getTime() - diff2 * 60000);
+  }
+  return result;
+}
+
+/**
+ * Convert a UTC Date to local date/time/day strings.
+ * Returns { date: "M/D", time: "H:MM AM/PM", day: "Mon" } or null fields if utcDate is null.
+ */
+function utcToLocal(utcDate, timezone) {
+  if (!utcDate) return { date: null, time: null, day: null };
+  var d;
+  if (utcDate instanceof Date) {
+    d = utcDate;
+  } else if (typeof utcDate === 'string') {
+    // MySQL returns "YYYY-MM-DD HH:MM:SS" — ensure UTC interpretation
+    d = new Date(utcDate.replace(' ', 'T') + 'Z');
+  } else {
+    d = new Date(utcDate);
+  }
+  if (isNaN(d.getTime())) return { date: null, time: null, day: null };
+  var parts = {};
+  new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone, year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', hourCycle: 'h23', weekday: 'short'
+  }).formatToParts(d).forEach(function(p) { parts[p.type] = p.value; });
+  var h = parseInt(parts.hour) % 24;
+  var m = parseInt(parts.minute);
+  var ampm = h >= 12 ? 'PM' : 'AM';
+  var dh = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+  return {
+    date: parseInt(parts.month) + '/' + parseInt(parts.day),
+    time: dh + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm,
+    day: parts.weekday
+  };
+}
+
 module.exports = {
   inferYear,
   parseDate,
@@ -113,5 +199,7 @@ module.exports = {
   toDateISO,
   fromDateISO,
   formatHour,
-  getDayName
+  getDayName,
+  localToUtc,
+  utcToLocal
 };

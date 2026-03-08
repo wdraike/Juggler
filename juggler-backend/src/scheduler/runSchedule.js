@@ -11,18 +11,20 @@ var DAY_NAMES = constants.DAY_NAMES;
 var dateHelpers = require('./dateHelpers');
 var parseDate = dateHelpers.parseDate;
 var formatDateKey = dateHelpers.formatDateKey;
+var localToUtc = dateHelpers.localToUtc;
 var taskController = require('../controllers/task.controller');
 var rowToTask = taskController.rowToTask;
 
-var TIMEZONE = 'America/New_York';
+var DEFAULT_TIMEZONE = 'America/New_York';
 
 /**
  * Get current date/time in America/New_York timezone
  */
-function getNowInTimezone() {
+function getNowInTimezone(timezone) {
+  var tz = timezone || DEFAULT_TIMEZONE;
   var now = new Date();
   var parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: TIMEZONE,
+    timeZone: tz,
     year: 'numeric', month: 'numeric', day: 'numeric',
     hour: 'numeric', minute: 'numeric', hourCycle: 'h23'
   }).formatToParts(now);
@@ -153,6 +155,11 @@ async function loadConfig(userId) {
 async function runScheduleAndPersist(userId, _retries) {
   var retries = _retries || 0;
   var MAX_RETRIES = 3;
+
+  // Load user timezone
+  var userRow = await db('users').where('id', userId).select('timezone').first();
+  var TIMEZONE = (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
+
   try {
   return await db.transaction(async function(trx) {
 
@@ -185,7 +192,20 @@ async function runScheduleAndPersist(userId, _retries) {
 
   // 2. Load all tasks for user (now with original dates restored)
   var taskRows = await trx('tasks').where('user_id', userId).select();
-  var allTasks = taskRows.map(rowToTask);
+  var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE); });
+
+  // 2b. Recompute scheduled_at for tasks that were reset (their date/time changed)
+  if (resetCount + resetTimeCount > 0) {
+    for (var ri = 0; ri < taskRows.length; ri++) {
+      var tr = taskRows[ri];
+      if (tr.date && tr.time) {
+        var utcReset = localToUtc(tr.date, tr.time, TIMEZONE);
+        if (utcReset) {
+          await trx('tasks').where({ id: tr.id, user_id: userId }).update({ scheduled_at: utcReset });
+        }
+      }
+    }
+  }
 
   // 3. Build statuses map
   var statuses = {};
@@ -194,7 +214,7 @@ async function runScheduleAndPersist(userId, _retries) {
   });
 
   // 4. Get current date/time in Eastern
-  var timeInfo = getNowInTimezone();
+  var timeInfo = getNowInTimezone(TIMEZONE);
 
   // 5. Load config
   var cfg = await loadConfig(userId);
@@ -274,6 +294,14 @@ async function runScheduleAndPersist(userId, _retries) {
         }
       }
 
+      // Compute scheduled_at from the new date+time
+      var finalDate = dbUpdate.date || original.date;
+      var finalTime = dbUpdate.time || original.time;
+      if (finalDate && finalTime) {
+        var utc = localToUtc(finalDate, finalTime, TIMEZONE);
+        if (utc) dbUpdate.scheduled_at = utc;
+      }
+
       await trx('tasks')
         .where({ id: taskId, user_id: userId })
         .update(dbUpdate);
@@ -310,9 +338,16 @@ async function runScheduleAndPersist(userId, _retries) {
   });
   for (var ui = 0; ui < updatedTasks.length; ui++) {
     if (updatedTasks[ui].cleared) {
+      var clearUpdate = { time: null, original_time: updatedTasks[ui].fromTime, updated_at: db.fn.now() };
+      // Recompute scheduled_at as date-only (midnight local → UTC)
+      var clearOriginal = taskById[updatedTasks[ui].id];
+      if (clearOriginal && clearOriginal.date) {
+        var utcMidnight = localToUtc(clearOriginal.date, '12:00 AM', TIMEZONE);
+        if (utcMidnight) clearUpdate.scheduled_at = utcMidnight;
+      }
       await trx('tasks')
         .where({ id: updatedTasks[ui].id, user_id: userId })
-        .update({ time: null, original_time: updatedTasks[ui].fromTime, updated_at: db.fn.now() });
+        .update(clearUpdate);
       cleared++;
     }
   }
@@ -336,15 +371,18 @@ async function runScheduleAndPersist(userId, _retries) {
  * Read-only: load data, run scheduler, return placements without DB writes.
  */
 async function getSchedulePlacements(userId) {
+  var userRow = await db('users').where('id', userId).select('timezone').first();
+  var TIMEZONE = (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
+
   var taskRows = await db('tasks').where('user_id', userId).select();
-  var allTasks = taskRows.map(rowToTask);
+  var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE); });
 
   var statuses = {};
   allTasks.forEach(function(t) {
     statuses[t.id] = t.status || '';
   });
 
-  var timeInfo = getNowInTimezone();
+  var timeInfo = getNowInTimezone(TIMEZONE);
   var cfg = await loadConfig(userId);
 
   var today = parseDate(timeInfo.todayKey) || new Date();

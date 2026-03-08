@@ -80,6 +80,11 @@ function registerTaskTools(server, userId) {
       }
       const row = taskToRow(task, userId);
       row.created_at = db.fn.now();
+      if (row.split === undefined || row.split === null) {
+        const prefs = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
+        const splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
+        row.split = splitDefault ? 1 : 0;
+      }
       await ensureProject(userId, task.project);
       await db('tasks').insert(row);
       const created = await db('tasks').where('id', row.id).first();
@@ -123,12 +128,18 @@ function registerTaskTools(server, userId) {
     },
     async ({ tasks }) => {
       const { v4: uuidv4 } = require('uuid');
+      const prefs = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
+      const splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
+
       const projects = new Set();
       const rows = tasks.map(t => {
         if (!t.id) t.id = uuidv4();
         if (t.project) projects.add(t.project);
         const row = taskToRow(t, userId);
         row.created_at = db.fn.now();
+        if (row.split === undefined || row.split === null) {
+          row.split = splitDefault ? 1 : 0;
+        }
         return row;
       });
 
