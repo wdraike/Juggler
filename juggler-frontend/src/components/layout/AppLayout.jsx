@@ -687,6 +687,7 @@ export default function AppLayout() {
             <DependencyView
               allTasks={allTasks} statuses={statuses}
               projectFilter={projectFilter} filter={filter}
+              search={search} hideHabits={hideHabits}
               onUpdate={handleUpdateTask} onExpand={handleExpand}
               darkMode={darkMode} isMobile={isMobile}
             />

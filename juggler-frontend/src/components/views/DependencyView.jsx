@@ -55,7 +55,7 @@ function hitTestNode(x, y, positions) {
   return null;
 }
 
-export default function DependencyView({ allTasks, statuses, projectFilter, filter, onUpdate, onExpand, darkMode, isMobile }) {
+export default function DependencyView({ allTasks, statuses, projectFilter, filter, search, hideHabits, onUpdate, onExpand, darkMode, isMobile }) {
   var theme = getTheme(darkMode);
   var bodyRef = useRef(null);
   var graphRef = useRef(null);
@@ -86,10 +86,32 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
   var [arrowHoverId, setArrowHoverId] = useState(null);
   var arrowDragRef = useRef(null);
 
-  // Build the set of tasks to display — show ALL, highlight filtered matches
+  // Build the set of tasks to display, applying all active filters
   var graphData = useMemo(function() {
-    var candidateTasks;
+    // Helper: does a task match the status filter?
+    function matchesStatus(t) {
+      var s = statuses[t.id] || '';
+      if (filter === 'all') return true;
+      if (filter === 'open') return s !== 'done' && s !== 'cancel' && s !== 'skip';
+      if (filter === 'done') return s === 'done';
+      if (filter === 'wip') return s === 'wip';
+      if (filter === 'blocked') return s !== 'done' && s !== 'cancel';
+      if (filter === 'action') return s !== 'done' && s !== 'cancel' && s !== 'skip';
+      if (filter === 'unplaced') return !t.date && s !== 'done' && s !== 'cancel' && s !== 'skip';
+      return true;
+    }
 
+    // Helper: does a task match the search query?
+    var searchLower = search ? search.toLowerCase() : '';
+    function matchesSearch(t) {
+      if (!searchLower) return true;
+      return (t.text && t.text.toLowerCase().indexOf(searchLower) >= 0)
+        || (t.project && t.project.toLowerCase().indexOf(searchLower) >= 0)
+        || (t.notes && t.notes.toLowerCase().indexOf(searchLower) >= 0);
+    }
+
+    // Step 1: Start with base candidates (project or has-deps)
+    var candidateTasks;
     if (projectFilter) {
       candidateTasks = allTasks.filter(function(t) { return t.project === projectFilter; });
     } else {
@@ -104,50 +126,45 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
       candidateTasks = allTasks.filter(function(t) { return hasDeps[t.id]; });
     }
 
-    // Pull in direct dependencies of visible tasks
-    var visibleIds = {};
-    candidateTasks.forEach(function(t) { visibleIds[t.id] = true; });
+    // Step 2: Apply filters (status, search, hideHabits) to find matching tasks
+    var matchingIds = {};
     candidateTasks.forEach(function(t) {
+      if (hideHabits && t.habit) return;
+      if (!matchesStatus(t)) return;
+      if (!matchesSearch(t)) return;
+      matchingIds[t.id] = true;
+    });
+
+    // Step 3: Pull in connected tasks (deps/dependents) of matching tasks so the graph stays connected
+    var visibleIds = {};
+    Object.keys(matchingIds).forEach(function(id) { visibleIds[id] = true; });
+
+    // Pull in direct dependencies
+    candidateTasks.forEach(function(t) {
+      if (!visibleIds[t.id]) return;
       getTaskDeps(t).forEach(function(depId) {
-        if (!visibleIds[depId]) {
-          var depTask = allTasks.find(function(x) { return x.id === depId; });
-          if (depTask) { visibleIds[depId] = true; candidateTasks.push(depTask); }
-        }
+        visibleIds[depId] = true;
       });
     });
-    // Pull in dependents that point to visible tasks
+    // Pull in dependents pointing to visible tasks
     allTasks.forEach(function(t) {
       if (visibleIds[t.id]) return;
       var deps = getTaskDeps(t);
       for (var i = 0; i < deps.length; i++) {
-        if (visibleIds[deps[i]]) { visibleIds[t.id] = true; candidateTasks.push(t); break; }
+        if (visibleIds[deps[i]]) { visibleIds[t.id] = true; break; }
       }
     });
 
-    // Deduplicate
+    // Collect visible tasks, deduplicate
     var seen = {};
-    candidateTasks = candidateTasks.filter(function(t) {
-      if (seen[t.id]) return false;
+    var visibleTasks = allTasks.filter(function(t) {
+      if (!visibleIds[t.id] || seen[t.id]) return false;
       seen[t.id] = true;
       return true;
     });
 
-    // Build highlight set — tasks matching the active filter
-    var highlightIds = {};
-    candidateTasks.forEach(function(t) {
-      var s = statuses[t.id] || '';
-      var match = false;
-      if (filter === 'all') match = true;
-      else if (filter === 'open') match = s !== 'done' && s !== 'cancel' && s !== 'skip';
-      else if (filter === 'done') match = s === 'done';
-      else if (filter === 'wip') match = s === 'wip';
-      else if (filter === 'blocked') match = s !== 'done' && s !== 'cancel';
-      else match = true;
-      if (match) highlightIds[t.id] = true;
-    });
-
-    return { tasks: topoSortTasks(candidateTasks), highlightIds: highlightIds };
-  }, [allTasks, statuses, projectFilter, filter]);
+    return { tasks: topoSortTasks(visibleTasks), matchingIds: matchingIds };
+  }, [allTasks, statuses, projectFilter, filter, search, hideHabits]);
 
   // Chain order and deps state
   var [chainOrder, setChainOrder] = useState(null);
@@ -376,7 +393,8 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
         padding: '4px 12px', borderBottom: '1px solid ' + theme.border, flexShrink: 0
       }}>
         <div style={{ fontSize: 11, color: theme.textMuted }}>
-          {treeIds.length} tasks {projectFilter ? 'in ' + projectFilter : 'with dependencies'}
+          {treeIds.length} tasks{projectFilter ? ' in ' + projectFilter : ' with dependencies'}
+          {search ? ' matching "' + search + '"' : ''}
           {' \u2014 drag the handle below a card to draw an arrow'}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -456,26 +474,26 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
             var icon = STATUS_ICONS[st] || '\u26AA';
             var dateLabel = ct.date && ct.date !== 'TBD' ? ct.date : null;
             var isExternal = projectFilter && ct.project !== projectFilter;
-            var isHighlighted = !graphData.highlightIds || graphData.highlightIds[ct.id];
-            var isDimmed = filter !== 'all' && !isHighlighted;
+            var isMatched = graphData.matchingIds[ct.id];
+            var isDimmed = (filter !== 'all' || search || hideHabits) && !isMatched;
             var isHoverTarget = arrowHoverId === ct.id;
             var isCycleDrop = isHoverTarget && arrowDrag && wouldCycle(chainDeps, ct.id, arrowDrag.fromId);
             var isArrowSource = arrowDrag && arrowDrag.fromId === ct.id;
 
             return (
-              <div key={ct.id} style={{ position: 'absolute', left: pos.x, top: pos.y, width: NODE_W }}>
+              <div key={ct.id} onClick={function(e) { e.stopPropagation(); if (onExpand) onExpand(ct.id); }}
+                style={{ position: 'absolute', left: pos.x, top: pos.y, width: NODE_W }}>
                 {/* Card */}
                 <div
-                  onClick={function(e) { e.stopPropagation(); if (onExpand) onExpand(ct.id); }}
                   style={{
                     padding: '4px 6px', borderRadius: 5, cursor: 'pointer',
                     border: isHoverTarget
                       ? '2px solid ' + (isCycleDrop ? '#DC2626' : '#3B82F6')
                       : isArrowSource ? '2px solid ' + theme.accent
-                      : isHighlighted && !isDimmed && filter !== 'all' ? '2px solid ' + theme.accent
+                      : isMatched && !isDimmed && (filter !== 'all' || search || hideHabits) ? '2px solid ' + theme.accent
                       : '1px solid ' + (isClosed ? theme.border + '88' : theme.border),
                     background: isHoverTarget ? (isCycleDrop ? '#DC262612' : '#3B82F612')
-                      : isHighlighted && !isDimmed && filter !== 'all' ? theme.accent + '12'
+                      : isMatched && !isDimmed && (filter !== 'all' || search || hideHabits) ? theme.accent + '12'
                       : isExternal ? (darkMode ? '#1E293B' : '#F8FAFC')
                       : isClosed ? theme.bgSecondary + '88' : theme.bgSecondary,
                     opacity: isDimmed ? 0.3 : isClosed ? 0.6 : isExternal ? 0.75 : 1,
