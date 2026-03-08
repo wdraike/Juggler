@@ -440,26 +440,27 @@ async function push(req, res) {
         var eventBody = buildEventBody(task, year);
         var created = await gcalApi.insertEvent(accessToken, eventBody);
 
-        await db('tasks').where('id', task.id).update({
-          gcal_event_id: created.id,
-          updated_at: db.fn.now()
-        });
+        await db.transaction(async function(trx) {
+          await trx('tasks').where('id', task.id).update({
+            gcal_event_id: created.id,
+            updated_at: db.fn.now()
+          });
 
-        // Create ledger record
-        await db('gcal_sync_ledger').insert({
-          user_id: userId,
-          task_id: task.id,
-          gcal_event_id: created.id,
-          origin: 'juggler',
-          last_pushed_hash: taskHash(task),
-          last_pulled_hash: eventHash(created),
-          gcal_summary: task.text,
-          gcal_start: created.start?.dateTime || created.start?.date || null,
-          gcal_end: created.end?.dateTime || created.end?.date || null,
-          gcal_all_day: !created.start?.dateTime ? 1 : 0,
-          status: 'active',
-          synced_at: db.fn.now(),
-          created_at: db.fn.now()
+          await trx('gcal_sync_ledger').insert({
+            user_id: userId,
+            task_id: task.id,
+            gcal_event_id: created.id,
+            origin: 'juggler',
+            last_pushed_hash: taskHash(task),
+            last_pulled_hash: eventHash(created),
+            gcal_summary: task.text,
+            gcal_start: created.start?.dateTime || created.start?.date || null,
+            gcal_end: created.end?.dateTime || created.end?.date || null,
+            gcal_all_day: !created.start?.dateTime ? 1 : 0,
+            status: 'active',
+            synced_at: db.fn.now(),
+            created_at: db.fn.now()
+          });
         });
 
         pushed++;
@@ -553,23 +554,24 @@ async function pull(req, res) {
         row.notes = event.description;
       }
 
-      await db('tasks').insert(row);
+      await db.transaction(async function(trx) {
+        await trx('tasks').insert(row);
 
-      // Create ledger record
-      await db('gcal_sync_ledger').insert({
-        user_id: userId,
-        task_id: taskId,
-        gcal_event_id: event.id,
-        origin: 'gcal',
-        last_pushed_hash: null,
-        last_pulled_hash: eventHash(event),
-        gcal_summary: event.summary || '(No title)',
-        gcal_start: startStr || null,
-        gcal_end: endStr || null,
-        gcal_all_day: isAllDay ? 1 : 0,
-        status: 'active',
-        synced_at: db.fn.now(),
-        created_at: db.fn.now()
+        await trx('gcal_sync_ledger').insert({
+          user_id: userId,
+          task_id: taskId,
+          gcal_event_id: event.id,
+          origin: 'gcal',
+          last_pushed_hash: null,
+          last_pulled_hash: eventHash(event),
+          gcal_summary: event.summary || '(No title)',
+          gcal_start: startStr || null,
+          gcal_end: endStr || null,
+          gcal_all_day: isAllDay ? 1 : 0,
+          status: 'active',
+          synced_at: db.fn.now(),
+          created_at: db.fn.now()
+        });
       });
 
       pulled++;
@@ -674,22 +676,26 @@ async function sync(req, res) {
           } catch (e2) {
             if (!e2.message.includes('404') && !e2.message.includes('410')) throw e2;
           }
-          await db('tasks').where('id', task.id).update({
-            gcal_event_id: null, updated_at: db.fn.now()
-          });
-          await db('gcal_sync_ledger').where('id', ledger.id).update({
-            status: 'deleted_local', gcal_event_id: null, synced_at: db.fn.now()
+          await db.transaction(async function(trx) {
+            await trx('tasks').where('id', task.id).update({
+              gcal_event_id: null, updated_at: db.fn.now()
+            });
+            await trx('gcal_sync_ledger').where('id', ledger.id).update({
+              status: 'deleted_local', gcal_event_id: null, synced_at: db.fn.now()
+            });
           });
           stats.deleted_local++;
           continue;
         }
         if (task && (task.habit || task.generated) && !event) {
           // Habit task, event already gone — just clean up ledger
-          await db('tasks').where('id', task.id).update({
-            gcal_event_id: null, updated_at: db.fn.now()
-          });
-          await db('gcal_sync_ledger').where('id', ledger.id).update({
-            status: 'deleted_local', gcal_event_id: null, synced_at: db.fn.now()
+          await db.transaction(async function(trx) {
+            await trx('tasks').where('id', task.id).update({
+              gcal_event_id: null, updated_at: db.fn.now()
+            });
+            await trx('gcal_sync_ledger').where('id', ledger.id).update({
+              status: 'deleted_local', gcal_event_id: null, synced_at: db.fn.now()
+            });
           });
           continue;
         }
@@ -709,9 +715,11 @@ async function sync(req, res) {
               } catch (e3) {
                 if (!e3.message.includes('404') && !e3.message.includes('410')) throw e3;
               }
-              await db('tasks').where('id', task.id).update({ gcal_event_id: null, updated_at: db.fn.now() });
-              await db('gcal_sync_ledger').where('id', ledger.id).update({
-                status: 'deleted_local', gcal_event_id: null, synced_at: db.fn.now()
+              await db.transaction(async function(trx) {
+                await trx('tasks').where('id', task.id).update({ gcal_event_id: null, updated_at: db.fn.now() });
+                await trx('gcal_sync_ledger').where('id', ledger.id).update({
+                  status: 'deleted_local', gcal_event_id: null, synced_at: db.fn.now()
+                });
               });
               stats.deleted_local++;
               continue;
@@ -780,11 +788,28 @@ async function sync(req, res) {
               eventInWindow = cachedDate >= windowStart && cachedDate <= windowEnd;
             }
             if (eventInWindow) {
-              await db('tasks').where('id', task.id).del();
-              await db('gcal_sync_ledger').where('id', ledger.id).update({
-                status: 'deleted_remote',
-                task_id: null,
-                synced_at: db.fn.now()
+              await db.transaction(async function(trx) {
+                // Clean up dependsOn references in other tasks (same as deleteTask)
+                var deletedDeps = typeof task.depends_on === 'string'
+                  ? JSON.parse(task.depends_on || '[]') : (task.depends_on || []);
+                var affected = await trx('tasks')
+                  .where('user_id', userId)
+                  .whereRaw('JSON_CONTAINS(depends_on, ?)', [JSON.stringify(task.id)])
+                  .select('id', 'depends_on');
+                for (var a of affected) {
+                  var deps = typeof a.depends_on === 'string'
+                    ? JSON.parse(a.depends_on || '[]') : (a.depends_on || []);
+                  var newDeps = deps.filter(function(d) { return d !== task.id; });
+                  deletedDeps.forEach(function(d) { if (newDeps.indexOf(d) === -1) newDeps.push(d); });
+                  await trx('tasks').where({ id: a.id, user_id: userId })
+                    .update({ depends_on: JSON.stringify(newDeps), updated_at: db.fn.now() });
+                }
+                await trx('tasks').where('id', task.id).del();
+                await trx('gcal_sync_ledger').where('id', ledger.id).update({
+                  status: 'deleted_remote',
+                  task_id: null,
+                  synced_at: db.fn.now()
+                });
               });
               stats.deleted_remote++;
             }
@@ -801,6 +826,7 @@ async function sync(req, res) {
               throw e;
             }
           }
+          // Single write — no transaction needed
           await db('gcal_sync_ledger').where('id', ledger.id).update({
             status: 'deleted_local',
             gcal_event_id: null,
@@ -809,7 +835,7 @@ async function sync(req, res) {
           stats.deleted_local++;
 
         } else {
-          // Both gone → clean up ledger record
+          // Both gone — single write, no transaction needed
           await db('gcal_sync_ledger').where('id', ledger.id).update({
             status: 'deleted_local',
             synced_at: db.fn.now()
@@ -854,28 +880,30 @@ async function sync(req, res) {
         var created = await gcalApi.insertEvent(accessToken, newEventBody);
         await delay(100);
 
-        await db('tasks').where('id', newTask.id).update({
-          gcal_event_id: created.id,
-          updated_at: db.fn.now()
-        });
-
         var createdStart = created.start?.dateTime || created.start?.date || null;
         var createdEnd = created.end?.dateTime || created.end?.date || null;
 
-        await db('gcal_sync_ledger').insert({
-          user_id: userId,
-          task_id: newTask.id,
-          gcal_event_id: created.id,
-          origin: 'juggler',
-          last_pushed_hash: taskHash(newTask),
-          last_pulled_hash: eventHash(created),
-          gcal_summary: newTask.text,
-          gcal_start: createdStart,
-          gcal_end: createdEnd,
-          gcal_all_day: !created.start?.dateTime ? 1 : 0,
-          status: 'active',
-          synced_at: db.fn.now(),
-          created_at: db.fn.now()
+        await db.transaction(async function(trx) {
+          await trx('tasks').where('id', newTask.id).update({
+            gcal_event_id: created.id,
+            updated_at: db.fn.now()
+          });
+
+          await trx('gcal_sync_ledger').insert({
+            user_id: userId,
+            task_id: newTask.id,
+            gcal_event_id: created.id,
+            origin: 'juggler',
+            last_pushed_hash: taskHash(newTask),
+            last_pulled_hash: eventHash(created),
+            gcal_summary: newTask.text,
+            gcal_start: createdStart,
+            gcal_end: createdEnd,
+            gcal_all_day: !created.start?.dateTime ? 1 : 0,
+            status: 'active',
+            synced_at: db.fn.now(),
+            created_at: db.fn.now()
+          });
         });
 
         stats.pushed++;
@@ -994,22 +1022,24 @@ async function sync(req, res) {
         if (newEvent.description) {
           taskRow.notes = newEvent.description;
         }
-        await db('tasks').insert(taskRow);
+        await db.transaction(async function(trx) {
+          await trx('tasks').insert(taskRow);
 
-        await db('gcal_sync_ledger').insert({
-          user_id: userId,
-          task_id: newTaskId,
-          gcal_event_id: newEvent.id,
-          origin: 'gcal',
-          last_pushed_hash: taskHash(taskRow),
-          last_pulled_hash: eventHash(newEvent),
-          gcal_summary: newEvent.summary || '(No title)',
-          gcal_start: newEvent.start?.dateTime || newEvent.start?.date || null,
-          gcal_end: newEvent.end?.dateTime || newEvent.end?.date || null,
-          gcal_all_day: evIsAllDay ? 1 : 0,
-          status: 'active',
-          synced_at: db.fn.now(),
-          created_at: db.fn.now()
+          await trx('gcal_sync_ledger').insert({
+            user_id: userId,
+            task_id: newTaskId,
+            gcal_event_id: newEvent.id,
+            origin: 'gcal',
+            last_pushed_hash: taskHash(taskRow),
+            last_pulled_hash: eventHash(newEvent),
+            gcal_summary: newEvent.summary || '(No title)',
+            gcal_start: newEvent.start?.dateTime || newEvent.start?.date || null,
+            gcal_end: newEvent.end?.dateTime || newEvent.end?.date || null,
+            gcal_all_day: evIsAllDay ? 1 : 0,
+            status: 'active',
+            synced_at: db.fn.now(),
+            created_at: db.fn.now()
+          });
         });
 
         stats.pulled++;

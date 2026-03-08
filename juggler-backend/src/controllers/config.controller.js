@@ -119,13 +119,21 @@ async function createProject(req, res) {
 async function updateProject(req, res) {
   try {
     const { id } = req.params;
-    const { name, color, icon } = req.body;
+    const { name, color, icon, oldName } = req.body;
 
-    await db('projects').where({ id, user_id: req.user.id }).update({
-      name, color, icon, updated_at: db.fn.now()
+    await db.transaction(async (trx) => {
+      await trx('projects').where({ id, user_id: req.user.id }).update({
+        name, color, icon, updated_at: db.fn.now()
+      });
+      // If the name changed, rename the project on all tasks that reference it
+      if (oldName && name && oldName !== name) {
+        await trx('tasks').where({ user_id: req.user.id, project: oldName }).update({
+          project: name, updated_at: db.fn.now()
+        });
+      }
     });
 
-    res.json({ project: { id: parseInt(id), name, color, icon } });
+    res.json({ project: { id: parseInt(id), name, color, icon }, renamed: oldName && name && oldName !== name ? { from: oldName, to: name } : null });
   } catch (error) {
     console.error('Update project error:', error);
     res.status(500).json({ error: 'Failed to update project' });
@@ -160,16 +168,18 @@ async function replaceLocations(req, res) {
     const { locations } = req.body;
     if (!Array.isArray(locations)) return res.status(400).json({ error: 'Locations array required' });
 
-    await db('locations').where('user_id', req.user.id).del();
-    if (locations.length > 0) {
-      await db('locations').insert(locations.map((l, i) => ({
-        user_id: req.user.id,
-        location_id: l.id,
-        name: l.name,
-        icon: l.icon || '',
-        sort_order: i
-      })));
-    }
+    await db.transaction(async (trx) => {
+      await trx('locations').where('user_id', req.user.id).del();
+      if (locations.length > 0) {
+        await trx('locations').insert(locations.map((l, i) => ({
+          user_id: req.user.id,
+          location_id: l.id,
+          name: l.name,
+          icon: l.icon || '',
+          sort_order: i
+        })));
+      }
+    });
 
     res.json({ locations });
   } catch (error) {
@@ -195,16 +205,18 @@ async function replaceTools(req, res) {
     const { tools } = req.body;
     if (!Array.isArray(tools)) return res.status(400).json({ error: 'Tools array required' });
 
-    await db('tools').where('user_id', req.user.id).del();
-    if (tools.length > 0) {
-      await db('tools').insert(tools.map((t, i) => ({
-        user_id: req.user.id,
-        tool_id: t.id,
-        name: t.name,
-        icon: t.icon || '',
-        sort_order: i
-      })));
-    }
+    await db.transaction(async (trx) => {
+      await trx('tools').where('user_id', req.user.id).del();
+      if (tools.length > 0) {
+        await trx('tools').insert(tools.map((t, i) => ({
+          user_id: req.user.id,
+          tool_id: t.id,
+          name: t.name,
+          icon: t.icon || '',
+          sort_order: i
+        })));
+      }
+    });
 
     res.json({ tools });
   } catch (error) {

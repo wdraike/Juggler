@@ -8,7 +8,7 @@ import { toTime24, fromTime24, toDateISO, fromDateISO, formatDateKey } from '../
 import { getTheme } from '../../theme/colors';
 import ConfirmDialog from '../features/ConfirmDialog';
 
-export default function TaskEditForm({ task, status, direction, onUpdate, onStatusChange, onDirectionChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, darkMode, isMobile, mode, onCreate, initialDate }) {
+export default function TaskEditForm({ task, status, direction, onUpdate, onStatusChange, onDirectionChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, darkMode, isMobile, mode, onCreate, initialDate, stackIndex }) {
   var isCreate = mode === 'create';
   var TH = getTheme(darkMode);
   var initDate = isCreate && initialDate ? toDateISO(formatDateKey(initialDate)) : '';
@@ -26,6 +26,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
   var [dayReq, setDayReq] = useState(isCreate ? 'any' : (task.dayReq || 'any'));
   var [habit, setHabit] = useState(isCreate ? false : !!task.habit);
   var [rigid, setRigid] = useState(isCreate ? false : !!task.rigid);
+  var [timeFlex, setTimeFlex] = useState(isCreate ? 60 : (task.timeFlex != null ? task.timeFlex : 60));
   var [split, setSplit] = useState(isCreate ? false : (task.split !== undefined ? task.split : false));
   var [splitMin, setSplitMin] = useState(isCreate ? 15 : (task.splitMin || 15));
   var [taskLoc, setTaskLoc] = useState(isCreate ? [] : (task.location || []));
@@ -70,6 +71,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
       due: fromDateISO(due),
       startAfter: fromDateISO(startAfter),
       notes, when, dayReq, habit, rigid,
+      timeFlex: habit && !rigid ? timeFlex : undefined,
       split: split || undefined,
       splitMin: split ? (parseInt(splitMin) || 15) : null,
       location: taskLoc,
@@ -81,7 +83,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
         every: recurType === 'interval' ? parseInt(recurEvery) || 2 : undefined
       }
     };
-  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, split, splitMin, taskLoc, taskTools, datePinned, recurType, recurDays, recurEvery, isCreate, task]);
+  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, taskLoc, taskTools, datePinned, recurType, recurDays, recurEvery, isCreate, task]);
 
   // Auto-save on field changes (edit mode only)
   useEffect(function() {
@@ -95,7 +97,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
       setTimeout(function() { setSaveStatus(null); }, 1500);
     }, 600);
     return function() { if (saveTimer.current) clearTimeout(saveTimer.current); };
-  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, split, splitMin, taskLoc, taskTools, datePinned, recurType, recurDays, recurEvery]);
+  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, taskLoc, taskTools, datePinned, recurType, recurDays, recurEvery]);
 
   function handleCreate() {
     var fields = buildFields();
@@ -123,15 +125,10 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
     return (v/60) + ' hrs';
   }
 
-  return (
-    <div style={{
-      position: 'fixed', top: 0, right: 0, bottom: 0,
-      width: isMobile ? '100vw' : 420, maxWidth: '100vw',
-      left: isMobile ? 0 : undefined,
-      background: TH.bgCard, borderLeft: isMobile ? 'none' : ('1px solid ' + TH.border),
-      zIndex: 200, overflowX: 'hidden', overflowY: 'auto', boxShadow: isMobile ? 'none' : ('-4px 0 20px ' + TH.shadow),
-      boxSizing: 'border-box'
-    }}>
+  var hasStack = (stackIndex || 0) > 0;
+
+  var dialogContent = (
+    <>
       {/* Top bar with Save / Delete / Close */}
       <div style={{
         display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap',
@@ -290,8 +287,8 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
           <label style={lStyle}>
             <span title="Deadline — scheduler places the task before this date">{'\uD83D\uDCC6'} Due</span>
             <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-              <input type="datetime-local" value={due ? due + 'T23:59' : ''}
-                onChange={e => { var v = e.target.value; setDue(v ? v.split('T')[0] : ''); }}
+              <input type="date" value={due || ''}
+                onChange={e => setDue(e.target.value || '')}
                 style={{ ...iStyle, minWidth: 0, flex: 1, ...(due ? { background: TH.amberBg } : {}) }} />
               {due && (
                 <button onClick={() => setDue('')} style={{
@@ -304,8 +301,8 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
           <label style={lStyle}>
             <span title="Don't schedule before this date">{'\u23F3'} Start after</span>
             <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-              <input type="datetime-local" value={startAfter ? startAfter + 'T00:00' : ''}
-                onChange={e => { var v = e.target.value; setStartAfter(v ? v.split('T')[0] : ''); }}
+              <input type="date" value={startAfter || ''}
+                onChange={e => setStartAfter(e.target.value || '')}
                 style={{ ...iStyle, minWidth: 0, flex: 1, ...(startAfter ? { background: TH.blueBg } : {}) }} />
               {startAfter && (
                 <button onClick={() => setStartAfter('')} style={{
@@ -338,6 +335,21 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
               <span title="Rigid = locked to its set time. Flexible = scheduler picks the best slot.">{'\uD83D\uDCCC'} Rigid</span>
               <button title={rigid ? 'Stays at its exact set time' : 'Scheduler moves it to fit'} onClick={() => setRigid(!rigid)}
                 style={togStyle(rigid, '#3B82F6')}>{rigid ? '\uD83D\uDCCC Anchored' : '\uD83D\uDD01 Flexible'}</button>
+            </label>
+          )}
+          {habit && !rigid && (
+            <label style={lStyle}>
+              <span title="How far from the preferred time the scheduler can move this habit">{'\u00B1'} Flex</span>
+              <select value={timeFlex} onChange={e => setTimeFlex(parseInt(e.target.value))}
+                style={{ background: TH.inputBg, color: TH.text, border: '1px solid ' + TH.border, borderRadius: 4, padding: '2px 4px', fontSize: 13 }}>
+                <option value={15}>15 min</option>
+                <option value={30}>30 min</option>
+                <option value={60}>1 hr</option>
+                <option value={90}>1.5 hr</option>
+                <option value={120}>2 hr</option>
+                <option value={180}>3 hr</option>
+                <option value={240}>4 hr</option>
+              </select>
             </label>
           )}
           <label style={lStyle}>
@@ -523,6 +535,39 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
           isMobile={isMobile}
         />
       )}
+    </>
+  );
+
+  var dialogStyle = {
+    width: isMobile ? '100vw' : 460, maxWidth: '100vw',
+    maxHeight: isMobile ? '100vh' : 'calc(100vh - 48px)',
+    background: TH.bgCard, border: isMobile ? 'none' : ('1px solid ' + TH.border),
+    borderRadius: isMobile ? 0 : 12,
+    overflowX: 'hidden', overflowY: 'auto',
+    boxShadow: '0 16px 48px rgba(0,0,0,0.4)',
+    boxSizing: 'border-box'
+  };
+
+  if (hasStack) {
+    return (
+      <div style={Object.assign({}, dialogStyle, {
+        position: 'fixed', top: isMobile ? 0 : 24, right: isMobile ? 0 : 24,
+        zIndex: 700 + (stackIndex || 0)
+      })}>
+        {dialogContent}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      zIndex: 600, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(0,0,0,0.5)', padding: isMobile ? 0 : 24
+    }} onClick={function(e) { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={dialogStyle}>
+        {dialogContent}
+      </div>
     </div>
   );
 }

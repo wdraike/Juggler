@@ -27,6 +27,8 @@ var resolveLocationId = locationHelpers.resolveLocationId;
 var canTaskRun = locationHelpers.canTaskRun;
 var dependencyHelpers = require('./dependencyHelpers');
 var getTaskDeps = dependencyHelpers.getTaskDeps;
+var scoreSchedule = require('./scoreSchedule');
+var hillClimb = require('./hillClimb');
 
 function effectiveDuration(t) {
   var rd = t.timeRemaining != null ? t.timeRemaining : t.dur;
@@ -62,6 +64,25 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     });
     cursor.setDate(cursor.getDate() + 1);
   }
+
+  // Build habit template lookup so instances inherit current template fields.
+  // Instances may have stale values from when they were generated; the template
+  // represents the user's current intent for the habit.
+  var habitTemplates = {};
+  allTasks.forEach(function(t) {
+    if (t.id && t.id.indexOf("ht_") === 0 && t.habit) {
+      habitTemplates[t.text] = t;
+    }
+  });
+  var HABIT_INHERIT_FIELDS = ["location", "when", "where", "tools", "rigid", "split", "pri", "dayReq", "timeFlex"];
+  allTasks.forEach(function(t) {
+    if (t.habit && t.id && t.id.indexOf("dh") === 0 && habitTemplates[t.text]) {
+      var tmpl = habitTemplates[t.text];
+      HABIT_INHERIT_FIELDS.forEach(function(f) {
+        if (tmpl[f] !== undefined) t[f] = tmpl[f];
+      });
+    }
+  });
 
   // Categorize tasks
   var habitsByDate = {};
@@ -140,7 +161,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       pool.push({
         task: t, remaining: effectiveDur, totalDur: effectiveDur,
         earliestDate: earliest, deadline: deadline, ceiling: ceiling,
-        splittable: t.split !== undefined ? t.split : cfg.splitDefault,
+        splittable: t.split != null ? t.split : (t.habit ? false : cfg.splitDefault),
         minChunk: t.splitMin || MIN_CHUNK,
         _parts: []
       });
@@ -149,6 +170,50 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
 
   var poolIds = {};
   pool.forEach(function(item) { poolIds[item.task.id] = true; });
+
+  // ── Backward scheduling: compute downstream date ceilings ──
+  // If task B depends on task A and B is dated 3/27, then A must be
+  // scheduled on or before 3/27.  Walk the reverse dependency graph
+  // to propagate the earliest downstream date as a ceiling on each
+  // ancestor pool item.
+  var dependedOnBy = {};
+  allTasks.forEach(function(t) {
+    getTaskDeps(t).forEach(function(depId) {
+      if (!dependedOnBy[depId]) dependedOnBy[depId] = [];
+      dependedOnBy[depId].push(t.id);
+    });
+  });
+
+  function computeDownstreamCeiling(taskId, visited) {
+    if (visited[taskId]) return null;
+    visited[taskId] = true;
+    var children = dependedOnBy[taskId] || [];
+    var earliest = null;
+    for (var ci = 0; ci < children.length; ci++) {
+      var childId = children[ci];
+      var childTask = null;
+      for (var ti = 0; ti < allTasks.length; ti++) {
+        if (allTasks[ti].id === childId) { childTask = allTasks[ti]; break; }
+      }
+      if (!childTask) continue;
+      var childSt = newSt[childId] || '';
+      if (childSt === 'done' || childSt === 'cancel' || childSt === 'skip') continue;
+      var childDate = parseDate(childTask.date);
+      if (childDate && (!earliest || childDate < earliest)) earliest = childDate;
+      var childCeiling = computeDownstreamCeiling(childId, visited);
+      if (childCeiling && (!earliest || childCeiling < earliest)) earliest = childCeiling;
+    }
+    return earliest;
+  }
+
+  pool.forEach(function(item) {
+    var ceiling = computeDownstreamCeiling(item.task.id, {});
+    if (ceiling) {
+      if (!item.ceiling || ceiling < item.ceiling) {
+        item.ceiling = ceiling;
+      }
+    }
+  });
 
   // Helpers
   function reserve(occ, s, d) { for (var i = Math.max(0, s); i < Math.min(s + d, 1440); i++) occ[i] = true; }
@@ -223,12 +288,36 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     return ok;
   }
 
+  // For flexible habits with a preferred time, compute a narrow window
+  // [time - flex, time + flex + dur] so they stay near their preferred slot.
+  var DEFAULT_TIME_FLEX = 60; // minutes
+  function getHabitFlexWindows(t, dateWindows) {
+    if (!t.habit || t.rigid) return null;
+    var sm = parseTimeToMinutes(t.time);
+    if (sm === null) return null;
+    var flex = t.timeFlex != null ? t.timeFlex : DEFAULT_TIME_FLEX;
+    if (flex <= 0) return null;
+    var lo = Math.max(DAY_START, sm - flex);
+    var hi = Math.min(WALK_END, sm + flex);
+    // Intersect with the task's when windows so a morning habit can't leak into evening
+    var whenWins = getWhenWindows(t.when, dateWindows);
+    if (whenWins.length === 0) return [[lo, hi]];
+    var result = [];
+    for (var i = 0; i < whenWins.length; i++) {
+      var wLo = Math.max(lo, whenWins[i][0]);
+      var wHi = Math.min(hi, whenWins[i][1]);
+      if (wHi > wLo) result.push([wLo, wHi]);
+    }
+    return result.length > 0 ? result : null;
+  }
+
   // EARLY PLACEMENT
   function placeEarly(item, d, afterMin, whenOverride) {
     var t = item.task;
     var occ = dayOcc[d.key];
     var placed = dayPlaced[d.key];
-    var wins = getWhenWindows(whenOverride || t.when, dayWindows[d.key]);
+    // whenOverride can be an array of windows or a string
+    var wins = Array.isArray(whenOverride) ? whenOverride : getWhenWindows(whenOverride || t.when, dayWindows[d.key]);
     if (wins.length === 0) return false;
     var scanStart = Math.max(wins[0][0], afterMin || 0);
     var placedAny = false;
@@ -296,7 +385,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     var t = item.task;
     var occ = dayOcc[d.key];
     var placed = dayPlaced[d.key];
-    var wins = getWhenWindows(whenOverride || t.when, dayWindows[d.key]);
+    var wins = Array.isArray(whenOverride) ? whenOverride : getWhenWindows(whenOverride || t.when, dayWindows[d.key]);
     if (wins.length === 0) return false;
     var maxEnd = beforeMin || WALK_END;
 
@@ -531,22 +620,45 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         }
       }
     }
-    if (!found) {
-      reserve(occ, sm, dur);
-      placed.push({ task: t, start: sm, dur: dur, locked: true, _dateKey: d.key, overflow: true });
-      globalPlacedEnd[t.id] = { dateKey: d.key, endMin: sm + dur };
-    }
+    // If no slot was found, do NOT force-place (which creates overlaps).
+    // The task will remain unplaced for this day.
   }
 
-  // PHASE 1: Habits + deadline late-placement (P1 first)
-  // Guarantee deadline tasks a spot at/before their deadline before anything
-  // flexible fills the calendar.
   var PRI_LEVELS = ["P1", "P2", "P3", "P4"];
 
+  // PHASE 0.5: Place non-rigid habits first — daily commitments get priority
+  // over deadline tasks so a deadline doesn't steal a habit's preferred slot.
   PRI_LEVELS.forEach(function(priLevel) {
-    // Non-rigid habits now go through the pool (placeEarly) so the scheduler
-    // can place them optimally and won't schedule in the past on today.
+    var habitItems = pool.filter(function(item) {
+      return item.task.habit && item.remaining > 0 && (item.task.pri || "P3") === priLevel;
+    });
+    habitItems.sort(function(a, b) {
+      var aDate = parseDate(a.task.date) || localToday;
+      var bDate = parseDate(b.task.date) || localToday;
+      return aDate - bDate;
+    });
+    habitItems.forEach(function(item) {
+      if (item.remaining <= 0) return;
+      var t = item.task;
+      for (var di = 0; di < dates.length; di++) {
+        if (item.remaining <= 0) break;
+        var d = dates[di];
+        if (item.earliestDate && d.date < item.earliestDate) continue;
+        if (item.ceiling && d.date > item.ceiling) continue;
+        if (!canPlaceOnDate(t, d)) continue;
+        var flexWins = getHabitFlexWindows(t, dayWindows[d.key]);
+        var wins = flexWins || getWhenWindows(t.when, dayWindows[d.key]);
+        if (wins.length === 0) continue;
+        placeEarly(item, d, 0, flexWins);
+      }
+    });
+  });
 
+  // PHASE 1: Deadline late-placement (P1 first)
+  // Guarantee deadline tasks a spot at/before their deadline before anything
+  // else flexible fills the calendar.
+
+  PRI_LEVELS.forEach(function(priLevel) {
     // Late-place deadline tasks at/before their deadline
     var deadlineItems = pool.filter(function(item) {
       return item.deadline && item.remaining > 0 && (item.task.pri || "P3") === priLevel;
@@ -624,8 +736,12 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     });
   });
 
-  // Track which tasks have been placed (shared between Phase 1.5 and Phase 2)
+  // Track which tasks have been placed (shared across phases)
   var placeVisited = {};
+  // Mark habits placed in Phase 0.5 so Phase 2 won't re-process them
+  pool.forEach(function(item) {
+    if (item.task.habit) placeVisited[item.task.id] = true;
+  });
 
   // PHASE 1.5: Past-deadline tasks — deadline already passed, place from today forward
   PRI_LEVELS.forEach(function(priLevel) {
@@ -664,6 +780,41 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     });
 
     var t = item.task;
+
+    // Backward scheduling: if this task has a downstream ceiling (dependants
+    // need it done by a certain date) and is not pinned/generated, schedule
+    // it late — close to when it's actually needed rather than ASAP.
+    var hasDownstreamCeiling = item.ceiling && !item.deadline && !t.datePinned && !t.generated && !t.habit;
+    if (hasDownstreamCeiling) {
+      // Try late-placement near the ceiling first
+      for (var di = dates.length - 1; di >= 0; di--) {
+        if (item.remaining <= 0) break;
+        var d = dates[di];
+        if (d.date > item.ceiling) continue;
+        if (d.date < localToday) break;
+        if (item.earliestDate && d.date < item.earliestDate) continue;
+        if (!canPlaceOnDate(t, d)) continue;
+        if (!depsMetByDate(t, d)) continue;
+        var wins = getWhenWindows(t.when, dayWindows[d.key]);
+        if (wins.length === 0) continue;
+        if (placeLate(item, d)) break;
+      }
+      // Fallback: if late-placement failed, try early placement (better placed early than unplaced)
+      if (item.remaining > 0 && item._parts.length === 0) {
+        for (var di2 = 0; di2 < dates.length; di2++) {
+          if (item.remaining <= 0) break;
+          var d2 = dates[di2];
+          if (item.earliestDate && d2.date < item.earliestDate) continue;
+          if (!canPlaceOnDate(t, d2)) continue;
+          if (!depsMetByDate(t, d2)) continue;
+          var wins2 = getWhenWindows(t.when, dayWindows[d2.key]);
+          if (wins2.length === 0) continue;
+          placeEarly(item, d2);
+        }
+      }
+      return;
+    }
+
     for (var di = 0; di < dates.length; di++) {
       if (item.remaining <= 0) break;
       var d = dates[di];
@@ -671,23 +822,20 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (item.ceiling && d.date > item.ceiling) continue;
       if (!canPlaceOnDate(t, d)) continue;
       if (!depsMetByDate(t, d)) continue;
-      var wins = getWhenWindows(t.when, dayWindows[d.key]);
+      var flexWins = getHabitFlexWindows(t, dayWindows[d.key]);
+      var wins = flexWins || getWhenWindows(t.when, dayWindows[d.key]);
       if (wins.length === 0) continue;
-      placeEarly(item, d);
+      placeEarly(item, d, 0, flexWins);
     }
   }
 
+  // Phase 2: Non-habit, non-deadline flexible tasks (P1→P4).
+  // Habits were already placed in Phase 0.5.
   PRI_LEVELS.forEach(function(priLevel) {
     var items = pool.filter(function(item) {
       return !item.deadline && item.remaining > 0 && (item.task.pri || "P3") === priLevel;
     });
     items.sort(function(a, b) {
-      // Habits before regular tasks — daily commitments get first pick
-      var aHabit = a.task.habit ? 0 : 1;
-      var bHabit = b.task.habit ? 0 : 1;
-      if (aHabit !== bHabit) return aHabit - bHabit;
-      // Pinned tasks sort by their date; unpinned tasks sort as "today"
-      // so they compete fairly regardless of prior scheduler-assigned dates.
       var aDate = a.task.datePinned ? (parseDate(a.task.date) || localToday) : localToday;
       var bDate = b.task.datePinned ? (parseDate(b.task.date) || localToday) : localToday;
       var dd = aDate - bDate;
@@ -767,6 +915,314 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         placeEarly(item, d, 0, "anytime");
       }
     });
+  });
+
+  // PHASE 5 — HABIT RESCUE: Reflow days that have unplaced habits.
+  // If a habit couldn't fit on its day, try bumping one non-habit task
+  // off that day to make room — but only if the bumped task successfully
+  // re-places elsewhere (net improvement, never net worse).
+  var unplacedHabits = pool.filter(function(item) {
+    return item.task.habit && item.remaining > 0 && item._parts.length === 0;
+  });
+  unplacedHabits.forEach(function(hItem) {
+    var td = parseDate(hItem.task.date);
+    if (!td) return;
+    var dayKey = formatDateKey(td);
+    var d = getDateObj(dayKey);
+    if (!d) return;
+
+    // Collect displaceable items: non-locked, non-habit, non-deadline on this day
+    // Prefer items that occupy time in the habit's required location window
+    var habitLoc = hItem.task.location || [];
+    var candidates = [];
+    pool.forEach(function(pItem) {
+      if (pItem.task.habit) return;
+      if (pItem.deadline) return;
+      if (pItem._parts.length === 0) return;
+      var onDay = pItem._parts.filter(function(p) { return p._dateKey === dayKey && !p.locked; });
+      if (onDay.length === 0) return;
+      // Check if any of the item's parts overlap with a location-compatible window
+      var locOverlap = habitLoc.length === 0; // no constraint = any overlap is fine
+      if (!locOverlap) {
+        for (var pi = 0; pi < onDay.length; pi++) {
+          var partMid = onDay[pi].start + Math.floor(onDay[pi].dur / 2);
+          var locId = resolveLocationId(dayKey, partMid, cfg, dayBlocks[dayKey]);
+          if (canTaskRun(hItem.task, locId, cfg.toolMatrix)) { locOverlap = true; break; }
+        }
+      }
+      pItem._locOverlap = locOverlap;
+      candidates.push(pItem);
+    });
+    // Sort: location-overlapping first, then lowest priority, then largest duration
+    candidates.sort(function(a, b) {
+      if (a._locOverlap !== b._locOverlap) return a._locOverlap ? -1 : 1;
+      var ap = (a.task.pri || "P3"); var bp = (b.task.pri || "P3");
+      if (ap !== bp) return ap > bp ? -1 : 1;
+      return (b.totalDur || 0) - (a.totalDur || 0);
+    });
+
+    // Accumulate bumps until the habit fits, then verify all bumped items re-place
+    var bumpedStack = [];
+    var habitPlaced = false;
+    for (var ci = 0; ci < candidates.length && !habitPlaced; ci++) {
+      var bumpItem = candidates[ci];
+
+      // Save state for rollback
+      var savedParts = bumpItem._parts.slice();
+      var savedRemaining = bumpItem.remaining;
+      var savedUpdates = taskUpdates[bumpItem.task.id];
+      var savedEnd = globalPlacedEnd[bumpItem.task.id];
+      bumpedStack.push({ item: bumpItem, savedParts: savedParts, savedRemaining: savedRemaining, savedUpdates: savedUpdates, savedEnd: savedEnd });
+
+      // Unplace the bump candidate entirely
+      unplaceItem(bumpItem);
+
+      // Try placing the habit
+      var flexWins = getHabitFlexWindows(hItem.task, dayWindows[dayKey]);
+      placeEarly(hItem, d, 0, flexWins);
+      if (hItem.remaining > 0) placeEarly(hItem, d, 0, "anytime");
+
+      if (hItem.remaining <= 0) {
+        // Habit placed! Now verify all bumped items can re-place
+        var allReplace = true;
+        for (var ri = 0; ri < bumpedStack.length; ri++) {
+          var rb = bumpedStack[ri].item;
+          if (rb.remaining <= 0) continue;
+          for (var di = 0; di < dates.length; di++) {
+            if (rb.remaining <= 0) break;
+            var rd = dates[di];
+            if (rb.earliestDate && rd.date < rb.earliestDate) continue;
+            if (rb.ceiling && rd.date > rb.ceiling) continue;
+            if (rd.date < localToday) continue;
+            if (!canPlaceOnDate(rb.task, rd)) continue;
+            if (!depsMetByDate(rb.task, rd)) continue;
+            var wins = getWhenWindows(rb.task.when, dayWindows[rd.key]);
+            if (wins.length === 0) continue;
+            placeEarly(rb, rd);
+          }
+          if (rb.remaining > 0) { allReplace = false; break; }
+        }
+        if (allReplace) {
+          habitPlaced = true;
+        } else {
+          // Revert everything — habit and all bumped items
+          unplaceItem(hItem);
+          for (var vi = 0; vi < bumpedStack.length; vi++) {
+            var vb = bumpedStack[vi];
+            unplaceItem(vb.item);
+            vb.savedParts.forEach(function(part) {
+              recordPlace(dayOcc[part._dateKey], dayPlaced[part._dateKey], vb.item.task, part.start, part.dur, part.locked, part._dateKey, vb.item);
+            });
+            if (vb.savedUpdates) taskUpdates[vb.item.task.id] = vb.savedUpdates;
+            if (vb.savedEnd) globalPlacedEnd[vb.item.task.id] = vb.savedEnd;
+          }
+          bumpedStack = [];
+        }
+      }
+      // If habit still not placed, keep bumping (accumulate freed space)
+    }
+    // If we exhausted candidates without success, unplace the partially-placed
+    // habit and revert any leftover bumps
+    if (!habitPlaced && bumpedStack.length > 0) {
+      unplaceItem(hItem);
+      for (var vi2 = 0; vi2 < bumpedStack.length; vi2++) {
+        var vb2 = bumpedStack[vi2];
+        unplaceItem(vb2.item);
+        vb2.savedParts.forEach(function(part) {
+          recordPlace(dayOcc[part._dateKey], dayPlaced[part._dateKey], vb2.item.task, part.start, part.dur, part.locked, part._dateKey, vb2.item);
+        });
+        if (vb2.savedUpdates) taskUpdates[vb2.item.task.id] = vb2.savedUpdates;
+        if (vb2.savedEnd) globalPlacedEnd[vb2.item.task.id] = vb2.savedEnd;
+      }
+    }
+  });
+
+  // PHASE 5.5: Priority-aware re-sort (same-duration slot swaps)
+  // For each day, group non-locked same-duration placements and reassign
+  // the best-quality time slots to the highest-priority tasks. Pure slot
+  // swaps preserve gap structure — no tasks become unplaced.
+  function resortPriRank(pri) {
+    if (pri === 'P1') return 4;
+    if (pri === 'P2') return 3;
+    if (pri === 'P4') return 1;
+    return 2;
+  }
+  function resortSlotQuality(startMin) {
+    if (startMin >= 540 && startMin < 720) return 3;  // 9am-12pm prime
+    if (startMin >= 720 && startMin < 1020) return 2;  // 12pm-5pm
+    return 1;
+  }
+
+  // Build set of task IDs that have multiple parts (split tasks) — exclude from re-sort
+  var splitTaskIds = {};
+  pool.forEach(function(item) {
+    if (item._parts.length > 1) splitTaskIds[item.task.id] = true;
+  });
+
+  dates.forEach(function(d) {
+    var placed = dayPlaced[d.key];
+    if (!placed || placed.length < 2) return;
+
+    // Collect movable placements: non-locked, non-habit, non-split
+    var movable = [];
+    for (var i = 0; i < placed.length; i++) {
+      var p = placed[i];
+      if (p.locked) continue;
+      if (!p.task) continue;
+      if (p.task.rigid) continue;
+      if (hasWhen(p.task.when, 'fixed')) continue;
+      if (splitTaskIds[p.task.id]) continue;
+      movable.push(p);
+    }
+    if (movable.length < 2) return;
+
+    // Group by duration
+    var durGroups = {};
+    movable.forEach(function(p) {
+      if (!durGroups[p.dur]) durGroups[p.dur] = [];
+      durGroups[p.dur].push(p);
+    });
+
+    for (var durKey in durGroups) {
+      var group = durGroups[durKey];
+      if (group.length < 2) continue;
+
+      // Check if group has mixed priorities (otherwise nothing to re-sort)
+      var hasMixed = false;
+      var firstPri = group[0].task.pri || 'P3';
+      for (var gi = 1; gi < group.length; gi++) {
+        if ((group[gi].task.pri || 'P3') !== firstPri) { hasMixed = true; break; }
+      }
+      if (!hasMixed) continue;
+
+      // Extract slots, sorted by quality (best first)
+      var slots = group.map(function(p) { return { start: p.start, dur: p.dur }; });
+      slots.sort(function(a, b) {
+        var qa = resortSlotQuality(a.start), qb = resortSlotQuality(b.start);
+        if (qa !== qb) return qb - qa;
+        return a.start - b.start;
+      });
+
+      // Sort tasks by priority (P1 first), then fewer when-options as tiebreaker
+      var tasks = group.slice();
+      tasks.sort(function(a, b) {
+        var pa = resortPriRank(a.task.pri), pb = resortPriRank(b.task.pri);
+        if (pa !== pb) return pb - pa;
+        return whenOptionCount(a.task) - whenOptionCount(b.task);
+      });
+
+      // Greedy assignment: highest priority gets best compatible slot
+      var usedSlots = {};
+      var assignments = [];
+
+      for (var ti = 0; ti < tasks.length; ti++) {
+        var p2 = tasks[ti];
+        var assigned = false;
+        for (var si = 0; si < slots.length; si++) {
+          if (usedSlots[si]) continue;
+          var newStart = slots[si].start;
+
+          // Check when-windows (habits use flex windows to stay near preferred time)
+          var wins = p2.task.habit
+            ? (getHabitFlexWindows(p2.task, dayWindows[d.key]) || getWhenWindows(p2.task.when, dayWindows[d.key]))
+            : getWhenWindows(p2.task.when, dayWindows[d.key]);
+          var inWin = wins.length === 0;
+          for (var wi = 0; wi < wins.length; wi++) {
+            if (newStart >= wins[wi][0] && newStart + p2.dur <= wins[wi][1]) { inWin = true; break; }
+          }
+          if (!inWin) continue;
+
+          // Check location
+          var locOk = true;
+          for (var m = newStart; m < newStart + p2.dur; m += 15) {
+            var locId = resolveLocationId(d.key, m, cfg, dayBlocks[d.key]);
+            if (!canTaskRun(p2.task, locId, cfg.toolMatrix)) { locOk = false; break; }
+          }
+          if (!locOk) continue;
+
+          usedSlots[si] = true;
+          assignments.push({ placement: p2, newStart: newStart });
+          assigned = true;
+          break;
+        }
+        if (!assigned) {
+          // Fall back to original slot
+          for (var si2 = 0; si2 < slots.length; si2++) {
+            if (!usedSlots[si2] && slots[si2].start === p2.start) {
+              usedSlots[si2] = true;
+              assignments.push({ placement: p2, newStart: p2.start });
+              break;
+            }
+          }
+        }
+      }
+
+      // If any group member didn't get an assignment, skip this group
+      // to prevent overlaps (unassigned tasks stay at original slot which
+      // may have been given to another task)
+      if (assignments.length !== group.length) continue;
+
+      // Verify dependency ordering before applying
+      var proposedStarts = {};
+      assignments.forEach(function(a) { proposedStarts[a.placement.task.id] = a.newStart; });
+
+      var depsOk = true;
+      for (var ai = 0; ai < assignments.length && depsOk; ai++) {
+        var t = assignments[ai].placement.task;
+        var deps = getTaskDeps(t);
+        for (var dii = 0; dii < deps.length; dii++) {
+          if (proposedStarts[deps[dii]] !== undefined) {
+            var depEndMin = proposedStarts[deps[dii]] + parseInt(durKey);
+            if (depEndMin > assignments[ai].newStart) { depsOk = false; break; }
+          }
+        }
+        var depChildren = dependedOnBy[t.id] || [];
+        for (var chi = 0; chi < depChildren.length; chi++) {
+          if (proposedStarts[depChildren[chi]] !== undefined) {
+            var myEnd = assignments[ai].newStart + parseInt(durKey);
+            if (myEnd > proposedStarts[depChildren[chi]]) { depsOk = false; break; }
+          }
+        }
+      }
+
+      if (!depsOk) continue;
+
+      // Apply assignments — batch free all old slots before reserving new ones
+      // to prevent corruption when tasks swap positions
+      var occ = dayOcc[d.key];
+      var changedAssignments = assignments.filter(function(a) { return a.placement.start !== a.newStart; });
+
+      // Step 1: Free ALL old slots
+      changedAssignments.forEach(function(a) {
+        var pr = a.placement;
+        for (var m = pr.start; m < pr.start + pr.dur; m++) delete occ[m];
+      });
+
+      // Step 2: Reserve ALL new slots and update placements
+      changedAssignments.forEach(function(a) {
+        var pr = a.placement;
+        for (var m2 = a.newStart; m2 < a.newStart + pr.dur; m2++) occ[m2] = true;
+
+        pr.start = a.newStart;
+
+        var hh = Math.floor(a.newStart / 60), mm2 = a.newStart % 60;
+        var ampm = hh >= 12 ? 'PM' : 'AM';
+        var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
+        taskUpdates[pr.task.id] = { date: d.key, day: dayNames[d.date.getDay()], time: dh + ':' + (mm2 < 10 ? '0' : '') + mm2 + ' ' + ampm };
+        globalPlacedEnd[pr.task.id] = { dateKey: d.key, endMin: a.newStart + pr.dur };
+
+        for (var pi = 0; pi < pool.length; pi++) {
+          if (pool[pi].task.id !== pr.task.id) continue;
+          for (var ppi = 0; ppi < pool[pi]._parts.length; ppi++) {
+            if (pool[pi]._parts[ppi] === pr) {
+              pool[pi]._parts[ppi].start = a.newStart;
+            }
+          }
+          break;
+        }
+      });
+    }
+
   });
 
   // POST-PROCESSING: Overlap columns + unique keys
@@ -884,6 +1340,24 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (item.earliestDate) detail.push("Earliest: " + formatDateKey(item.earliestDate));
       if (item.deadline) detail.push("Deadline: " + formatDateKey(item.deadline));
       detail.push("Duration: " + item.totalDur + "m, splittable: " + (item.splittable ? "yes" : "no"));
+      if (t.location && t.location.length > 0) {
+        detail.push("Requires: " + t.location.join("/"));
+        // Check if location is available on the target day(s)
+        var targetKey = item.earliestDate ? formatDateKey(item.earliestDate) : null;
+        if (targetKey && dayBlocks[targetKey]) {
+          var locAvail = 0;
+          var wins2 = getWhenWindows(t.when, dayWindows[targetKey]);
+          for (var wi2 = 0; wi2 < wins2.length; wi2++) {
+            for (var m2 = wins2[wi2][0]; m2 < wins2[wi2][1]; m2 += 15) {
+              var lid = resolveLocationId(targetKey, m2, cfg, dayBlocks[targetKey]);
+              if (canTaskRun(t, lid, cfg.toolMatrix)) locAvail += 15;
+            }
+          }
+          if (locAvail < item.totalDur) {
+            detail.push("Only " + locAvail + "m of " + t.location.join("/") + " time available on " + targetKey);
+          }
+        }
+      }
       detail.push("When: " + (t.when || "any") + ", DayReq: " + (t.dayReq || "any"));
 
       t._unplacedDetail = detail.join(" \u00B7 ");
@@ -898,8 +1372,23 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
 
   var placedCount = Object.keys(taskUpdates).length;
   var deadlineMisses = unplaced.filter(function(t) { return t._unplacedReason === "deadline"; });
-  console.log("[SCHED] unified: " + dates.length + " days, " + pool.length + " pool tasks, " + placedCount + " placed, " + unplaced.length + " unplaced in " + Math.round(Date.now() - PERF) + "ms");
-  return { dayPlacements: dayPlacements, taskUpdates: taskUpdates, newStatuses: newSt, unplaced: unplaced, deadlineMisses: deadlineMisses, placedCount: placedCount };
+  var greedyMs = Math.round(Date.now() - PERF);
+
+  // Score the greedy+resort result
+  var score = scoreSchedule(dayPlacements, unplaced, allTasks);
+  var greedyScore = score.total;
+
+  // Phase 6: Hill-climbing optimization
+  var hcResult = hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTasks, cfg);
+  var totalMs = Math.round(Date.now() - PERF);
+
+  // Re-score after hill-climbing if it improved
+  if (hcResult.improved) {
+    score = scoreSchedule(dayPlacements, unplaced, allTasks);
+  }
+
+  console.log("[SCHED] unified: " + dates.length + " days, " + pool.length + " pool, " + placedCount + " placed, " + unplaced.length + " unplaced | " + greedyMs + "ms greedy (score=" + Math.round(greedyScore) + ") + " + hcResult.elapsed + "ms hill-climb (" + hcResult.iterations + " iters" + (hcResult.improved ? ", " + Math.round(hcResult.scoreBefore) + "->" + Math.round(hcResult.scoreAfter) : ", no change") + ") = " + totalMs + "ms | final=" + score.total);
+  return { dayPlacements: dayPlacements, taskUpdates: taskUpdates, newStatuses: newSt, unplaced: unplaced, deadlineMisses: deadlineMisses, placedCount: placedCount, score: score };
 }
 
 module.exports = unifiedSchedule;

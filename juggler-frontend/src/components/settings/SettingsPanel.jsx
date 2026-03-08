@@ -30,7 +30,7 @@ var TABS = [
   { id: 'preferences', label: 'Preferences', tip: 'Preferences \u2014 font size, grid zoom, task defaults' },
 ];
 
-export default function SettingsPanel({ onClose, darkMode, config, allProjectNames, isMobile }) {
+export default function SettingsPanel({ onClose, darkMode, config, allProjectNames, isMobile, onRenameProject }) {
   var theme = getTheme(darkMode);
   var [tab, setTab] = useState('locations');
 
@@ -82,7 +82,7 @@ export default function SettingsPanel({ onClose, darkMode, config, allProjectNam
           {tab === 'locations' && <LocationsTab config={config} theme={theme} />}
           {tab === 'tools' && <ToolsTab config={config} theme={theme} />}
           {tab === 'matrix' && <MatrixTab config={config} theme={theme} />}
-          {tab === 'projects' && <ProjectsTab config={config} theme={theme} allProjectNames={allProjectNames} />}
+          {tab === 'projects' && <ProjectsTab config={config} theme={theme} allProjectNames={allProjectNames} onRenameProject={onRenameProject} />}
           {tab === 'preferences' && <PreferencesTab config={config} theme={theme} />}
           {tab === 'templates' && <UnifiedTemplateTab config={config} theme={theme} />}
         </div>
@@ -196,7 +196,60 @@ function MatrixTab({ config, theme }) {
   );
 }
 
-function ProjectsTab({ config, theme, allProjectNames }) {
+function ProjectRow({ p, config, theme, onRename }) {
+  var [editing, setEditing] = useState(false);
+  var [editName, setEditName] = useState(p.name);
+  var [editColor, setEditColor] = useState(p.color || '#3B82F6');
+
+  async function handleSave() {
+    if (!editName || editName === p.name && editColor === p.color) { setEditing(false); return; }
+    try {
+      var { default: apiClient } = await import('../../services/apiClient');
+      var oldName = p.name;
+      await apiClient.put('/projects/' + p.id, { name: editName, color: editColor, icon: p.icon, oldName: oldName });
+      config.setProjects(config.projects.map(function(x) {
+        return x.id === p.id ? { ...x, name: editName, color: editColor } : x;
+      }));
+      if (editName !== oldName && onRename) onRename(oldName, editName);
+      setEditing(false);
+    } catch (e) { console.error(e); }
+  }
+
+  if (editing) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13 }}>
+        <input type="color" value={editColor} onChange={function(e) { setEditColor(e.target.value); }}
+          style={{ width: 24, height: 24, border: 'none', cursor: 'pointer', padding: 0 }} />
+        <input value={editName} onChange={function(e) { setEditName(e.target.value); }}
+          onKeyDown={function(e) { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setEditing(false); }}
+          autoFocus
+          style={{ flex: 1, padding: '2px 4px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
+        <button onClick={handleSave} style={{ border: 'none', borderRadius: 4, padding: '2px 8px', background: '#10B981', color: '#FFF', fontSize: 11, cursor: 'pointer' }}>Save</button>
+        <button onClick={function() { setEditing(false); setEditName(p.name); setEditColor(p.color || '#3B82F6'); }}
+          style={{ border: 'none', background: 'transparent', color: theme.textMuted, cursor: 'pointer', fontSize: 12 }}>Cancel</button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13 }}>
+      {p.color && <div style={{ width: 12, height: 12, borderRadius: 3, background: p.color }} />}
+      <span style={{ color: theme.text, flex: 1 }}>{p.name}</span>
+      <button onClick={function() { setEditing(true); }} title="Edit project"
+        style={{ border: 'none', background: 'transparent', color: theme.textMuted, cursor: 'pointer', fontSize: 12 }}>&#x270E;</button>
+      <button onClick={async function() {
+        if (!p.id) return;
+        try {
+          var { default: apiClient } = await import('../../services/apiClient');
+          await apiClient.delete('/projects/' + p.id);
+          config.setProjects(config.projects.filter(function(x) { return x.id !== p.id; }));
+        } catch (e) { console.error(e); }
+      }} style={{ border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 14 }}>&times;</button>
+    </div>
+  );
+}
+
+function ProjectsTab({ config, theme, allProjectNames, onRenameProject }) {
   var [newName, setNewName] = useState('');
   var [newColor, setNewColor] = useState('#3B82F6');
 
@@ -204,39 +257,42 @@ function ProjectsTab({ config, theme, allProjectNames }) {
   var dbProjectNames = new Set(config.projects.map(function(p) { return p.name; }));
   var taskOnlyNames = (allProjectNames || []).filter(function(n) { return !dbProjectNames.has(n); });
 
+  async function promoteTaskProject(name) {
+    try {
+      var { default: apiClient } = await import('../../services/apiClient');
+      var res = await apiClient.post('/projects', { name: name, color: '#3B82F6' });
+      config.setProjects([...config.projects, res.data.project]);
+    } catch (e) { console.error(e); }
+  }
+
   return (
     <div>
       <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>Projects</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
-        {config.projects.map(p => (
-          <div key={p.id || p.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13 }}>
-            {p.color && <div style={{ width: 12, height: 12, borderRadius: 3, background: p.color }} />}
-            <span style={{ color: theme.text, flex: 1 }}>{p.name}</span>
-            <button onClick={async () => {
-              if (!p.id) return;
-              try {
-                var { default: apiClient } = await import('../../services/apiClient');
-                await apiClient.delete('/projects/' + p.id);
-                config.setProjects(config.projects.filter(function(x) { return x.id !== p.id; }));
-              } catch (e) { console.error(e); }
-            }} style={{ border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 14 }}>&times;</button>
-          </div>
-        ))}
-        {taskOnlyNames.map(name => (
-          <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13, opacity: 0.7 }}>
-            <div style={{ width: 12, height: 12, borderRadius: 3, background: theme.textMuted, opacity: 0.3 }} />
-            <span style={{ color: theme.text, flex: 1 }}>{name}</span>
-            <span style={{ fontSize: 10, color: theme.textMuted }}>from tasks</span>
-          </div>
-        ))}
+        {config.projects.map(function(p) {
+          return <ProjectRow key={p.id || p.name} p={p} config={config} theme={theme} onRename={onRenameProject} />;
+        })}
+        {taskOnlyNames.map(function(name) {
+          return (
+            <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13, opacity: 0.7 }}>
+              <div style={{ width: 12, height: 12, borderRadius: 3, background: theme.textMuted, opacity: 0.3 }} />
+              <span style={{ color: theme.text, flex: 1 }}>{name}</span>
+              <button onClick={function() { promoteTaskProject(name); }} title="Add as managed project"
+                style={{ border: 'none', background: 'transparent', color: theme.accent, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>+ Add</button>
+              <span style={{ fontSize: 10, color: theme.textMuted }}>from tasks</span>
+            </div>
+          );
+        })}
       </div>
       {config.projects.length === 0 && taskOnlyNames.length === 0 && (
         <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 12 }}>No projects yet. Add one below or assign a project to a task.</div>
       )}
       <div style={{ display: 'flex', gap: 6 }}>
         <input type="color" value={newColor} onChange={e => setNewColor(e.target.value)} style={{ width: 32, height: 28, border: 'none', cursor: 'pointer' }} />
-        <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Project name" style={{ flex: 1, padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
-        <button onClick={async () => {
+        <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Project name"
+          onKeyDown={function(e) { if (e.key === 'Enter') document.getElementById('add-project-btn').click(); }}
+          style={{ flex: 1, padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
+        <button id="add-project-btn" onClick={async () => {
           if (!newName) return;
           try {
             var { default: apiClient } = await import('../../services/apiClient');

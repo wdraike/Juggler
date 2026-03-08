@@ -135,14 +135,18 @@ export default function useTaskState() {
   }, [loadPlacements]);
 
   const deleteTask = useCallback(async (id) => {
+    // Cancel any pending save that has stale dependsOn data
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     dispatch({ type: 'DELETE_TASK', id });
     try {
       await apiClient.delete(`/tasks/${id}`);
+      // Schedule a save so the cleaned-up dependsOn arrays get persisted
+      scheduleSave();
       await loadPlacements();
     } catch (error) {
       console.error('Failed to delete task:', error);
     }
-  }, [loadPlacements]);
+  }, [loadPlacements, scheduleSave]);
 
   const createTask = useCallback(async (task) => {
     dispatch({ type: 'ADD_TASKS', tasks: [task] });

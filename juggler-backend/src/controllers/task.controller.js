@@ -28,6 +28,7 @@ function rowToTask(row) {
     dayReq: row.day_req,
     habit: !!row.habit,
     rigid: !!row.rigid,
+    timeFlex: row.time_flex != null ? row.time_flex : undefined,
     split: row.split === null ? undefined : !!row.split,
     splitMin: row.split_min,
     recur: typeof row.recur === 'string' ? JSON.parse(row.recur || 'null') : row.recur,
@@ -63,6 +64,7 @@ function taskToRow(task, userId) {
   if (task.dayReq !== undefined) row.day_req = task.dayReq;
   if (task.habit !== undefined) row.habit = task.habit ? 1 : 0;
   if (task.rigid !== undefined) row.rigid = task.rigid ? 1 : 0;
+  if (task.timeFlex !== undefined) row.time_flex = task.timeFlex;
   if (task.split !== undefined) row.split = task.split === null ? null : (task.split ? 1 : 0);
   if (task.splitMin !== undefined) row.split_min = task.splitMin;
   if (task.recur !== undefined) row.recur = task.recur ? JSON.stringify(task.recur) : null;
@@ -145,7 +147,24 @@ async function updateTask(req, res) {
       row.original_time = null;
     }
 
-    await db('tasks').where({ id, user_id: req.user.id }).update(row);
+    await db.transaction(async (trx) => {
+      await trx('tasks').where({ id, user_id: req.user.id }).update(row);
+
+      // When a habit template (ht_*) is updated, propagate inheritable fields
+      // to all its dh* instances so they stay in sync.
+      if (id.indexOf('ht_') === 0 && existing.habit) {
+        const PROPAGATE = ['location', 'when', 'where', 'tools', 'pri', 'rigid', 'split', 'day_req', 'time_flex'];
+        const instanceUpdate = {};
+        PROPAGATE.forEach(f => { if (row[f] !== undefined) instanceUpdate[f] = row[f]; });
+        if (Object.keys(instanceUpdate).length > 0) {
+          instanceUpdate.updated_at = db.fn.now();
+          await trx('tasks')
+            .where({ user_id: req.user.id, text: existing.text, habit: 1 })
+            .andWhere('id', 'like', 'dh%')
+            .update(instanceUpdate);
+        }
+      }
+    });
 
     const updated = await db('tasks').where('id', id).first();
     res.json({ task: rowToTask(updated) });
@@ -273,19 +292,33 @@ async function batchUpdateTasks(req, res) {
     }
 
     let updatedCount = 0;
-    await db.transaction(async (trx) => {
-      for (const update of updates) {
-        const { id, ...fields } = update;
-        if (!id) continue;
+    const MAX_RETRIES = 3;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        updatedCount = 0;
+        await db.transaction(async (trx) => {
+          for (const update of updates) {
+            const { id, ...fields } = update;
+            if (!id) continue;
 
-        const row = taskToRow(fields, req.user.id);
-        delete row.user_id;
-        delete row.created_at;
+            const row = taskToRow(fields, req.user.id);
+            delete row.user_id;
+            delete row.created_at;
 
-        await trx('tasks').where({ id, user_id: req.user.id }).update(row);
-        updatedCount++;
+            await trx('tasks').where({ id, user_id: req.user.id }).update(row);
+            updatedCount++;
+          }
+        });
+        break; // success
+      } catch (err) {
+        if (err.code === 'ER_LOCK_DEADLOCK' && attempt < MAX_RETRIES) {
+          console.log('[BATCH] deadlock, retry ' + (attempt + 1) + '/' + MAX_RETRIES);
+          await new Promise(r => setTimeout(r, 200 * (attempt + 1)));
+          continue;
+        }
+        throw err;
       }
-    });
+    }
 
     res.json({ updated: updatedCount });
   } catch (error) {

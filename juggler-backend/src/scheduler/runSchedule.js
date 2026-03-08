@@ -8,6 +8,9 @@ var constants = require('./constants');
 var DEFAULT_TIME_BLOCKS = constants.DEFAULT_TIME_BLOCKS;
 var DEFAULT_TOOL_MATRIX = constants.DEFAULT_TOOL_MATRIX;
 var DAY_NAMES = constants.DAY_NAMES;
+var dateHelpers = require('./dateHelpers');
+var parseDate = dateHelpers.parseDate;
+var formatDateKey = dateHelpers.formatDateKey;
 var taskController = require('../controllers/task.controller');
 var rowToTask = taskController.rowToTask;
 
@@ -36,6 +39,80 @@ function getNowInTimezone() {
     todayKey: month + '/' + day,
     nowMins: hour * 60 + minute
   };
+}
+
+/**
+ * Expand recurring habits into per-day instances so the scheduler always has
+ * tasks to work with, even if the frontend hasn't generated them yet.
+ */
+function expandRecurring(allTasks, startDate, endDate) {
+  var dayMap = { U: 0, M: 1, T: 2, W: 3, R: 4, F: 5, S: 6 };
+  var existingIds = {};
+  allTasks.forEach(function(t) { existingIds[t.id] = true; });
+  var existingByDateText = {};
+  allTasks.forEach(function(t) {
+    if (t.date && t.text) existingByDateText[t.date + '|' + t.text] = true;
+  });
+
+  var sources = allTasks.filter(function(t) { return t.recur && t.recur.type !== 'none'; });
+  if (sources.length === 0) return [];
+
+  var newTasks = [];
+  var cursor = new Date(startDate); cursor.setHours(0, 0, 0, 0);
+  var end = new Date(endDate); end.setHours(23, 59, 59, 999);
+
+  while (cursor <= end) {
+    var dateStr = formatDateKey(cursor);
+    var dow = cursor.getDay();
+    var dayName = DAY_NAMES[dow];
+
+    sources.forEach(function(src) {
+      var r = src.recur;
+      var srcDate = parseDate(src.date);
+      if (!srcDate) srcDate = new Date(startDate);
+      if (cursor < srcDate) return;
+      if (dateStr === src.date) return;
+
+      var match = false;
+      if (r.type === 'daily') {
+        match = true;
+      } else if (r.type === 'weekly' || r.type === 'biweekly') {
+        var days = r.days || 'MTWRF';
+        var found = false;
+        for (var i = 0; i < days.length; i++) {
+          if (dayMap[days[i]] === dow) { found = true; break; }
+        }
+        if (!found) return;
+        if (r.type === 'biweekly') {
+          var daysDiff = Math.round((cursor.getTime() - srcDate.getTime()) / 86400000);
+          if (Math.floor(daysDiff / 7) % 2 !== 0) return;
+        }
+        match = true;
+      } else if (r.type === 'interval') {
+        var between = Math.round((cursor.getTime() - srcDate.getTime()) / 86400000);
+        if (between > 0 && between % (r.every || 2) === 0) match = true;
+      }
+      if (!match) return;
+
+      var id = 'rc_' + src.id + '_' + dateStr.replace(/\//g, '');
+      if (existingIds[id]) return;
+      if (existingByDateText[dateStr + '|' + src.text]) return;
+      existingIds[id] = true;
+      existingByDateText[dateStr + '|' + src.text] = true;
+      newTasks.push({
+        id: id, date: dateStr, day: dayName, project: src.project, text: src.text,
+        pri: src.pri, habit: src.habit || false, rigid: src.rigid || false,
+        time: src.time, dur: src.dur, where: src.where, when: src.when,
+        location: src.location, tools: src.tools, split: src.split,
+        timeFlex: src.timeFlex,
+        dayReq: src.dayReq || 'any', section: '', notes: '',
+        sourceId: src.id, generated: true
+      });
+    });
+
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return newTasks;
 }
 
 /**
@@ -73,8 +150,11 @@ async function loadConfig(userId) {
  *
  * Returns stats: { updated, cleared, reset, tasks: [...] }
  */
-async function runScheduleAndPersist(userId) {
-  return db.transaction(async function(trx) {
+async function runScheduleAndPersist(userId, _retries) {
+  var retries = _retries || 0;
+  var MAX_RETRIES = 3;
+  try {
+  return await db.transaction(async function(trx) {
 
   // 1a. Reset scheduler-moved tasks (date changed) back to their original date/time
   var resetCount = await trx('tasks')
@@ -118,6 +198,15 @@ async function runScheduleAndPersist(userId) {
 
   // 5. Load config
   var cfg = await loadConfig(userId);
+
+  // 5b. Expand recurring habits into per-day instances
+  var today = parseDate(timeInfo.todayKey) || new Date();
+  var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + 56);
+  var expanded = expandRecurring(allTasks, today, expandEnd);
+  if (expanded.length > 0) {
+    allTasks = allTasks.concat(expanded);
+    expanded.forEach(function(t) { statuses[t.id] = ''; });
+  }
 
   // 6. Run scheduler
   var result = unifiedSchedule(allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg);
@@ -230,9 +319,17 @@ async function runScheduleAndPersist(userId) {
 
   console.log('[SCHED] runScheduleAndPersist: reset ' + resetCount + ', updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
 
-  return { updated: updated, cleared: cleared, reset: resetCount, tasks: updatedTasks };
+  return { updated: updated, cleared: cleared, reset: resetCount, tasks: updatedTasks, score: result.score };
 
   }); // end transaction
+  } catch (err) {
+    if (err.code === 'ER_LOCK_DEADLOCK' && retries < MAX_RETRIES) {
+      console.log('[SCHED] deadlock detected, retry ' + (retries + 1) + '/' + MAX_RETRIES);
+      await new Promise(function(r) { setTimeout(r, 200 * (retries + 1)); });
+      return runScheduleAndPersist(userId, retries + 1);
+    }
+    throw err;
+  }
 }
 
 /**
@@ -249,13 +346,23 @@ async function getSchedulePlacements(userId) {
 
   var timeInfo = getNowInTimezone();
   var cfg = await loadConfig(userId);
+
+  var today = parseDate(timeInfo.todayKey) || new Date();
+  var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + 56);
+  var expanded = expandRecurring(allTasks, today, expandEnd);
+  if (expanded.length > 0) {
+    allTasks = allTasks.concat(expanded);
+    expanded.forEach(function(t) { statuses[t.id] = ''; });
+  }
+
   var result = unifiedSchedule(allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg);
 
   return {
     dayPlacements: result.dayPlacements,
     unplaced: result.unplaced,
     deadlineMisses: result.deadlineMisses,
-    placedCount: result.placedCount
+    placedCount: result.placedCount,
+    score: result.score
   };
 }
 

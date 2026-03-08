@@ -6,8 +6,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import { getTheme } from '../../theme/colors';
+import { DAY_NAMES } from '../../state/constants';
+import { formatDateKey } from '../../scheduler/dateHelpers';
 
-export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, scheduling, onReschedule, onShowHelp, onAddTask, isMobile, aiPanel }) {
+export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, scheduling, onReschedule, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today }) {
   var theme = getTheme(darkMode);
   var { user, logout } = useAuth();
   var [showOverflow, setShowOverflow] = useState(false);
@@ -60,7 +62,62 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
       {/* AI command input — inline in header */}
       {aiPanel}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'inherit', marginLeft: 'auto' }}>
+      {/* Inline week strip — fills the gap between AI input and action buttons */}
+      {!isMobile && weekStripDates && (function() {
+        var todayKey = formatDateKey(today);
+        var SHORT_DAY = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+        var dateInputValue = selectedDate.getFullYear() + '-' +
+          String(selectedDate.getMonth() + 1).padStart(2, '0') + '-' +
+          String(selectedDate.getDate()).padStart(2, '0');
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, justifyContent: 'center' }}>
+            <button onClick={function() { setDayOffset(function(d) { return d - 7; }); }} style={weekNavBtn(theme)} title="Previous week">&laquo;</button>
+            <button onClick={function() { setDayOffset(function(d) { return d - 1; }); }} style={weekNavBtn(theme)} title="Previous day">&lsaquo;</button>
+            {weekStripDates.map(function(d, i) {
+              var key = formatDateKey(d);
+              var isSelected = d.getTime() === selectedDate.getTime();
+              var isToday = key === todayKey;
+              var dayTasks = tasksByDate[key] || [];
+              var doneCount = dayTasks.filter(function(t) { return statuses[t.id] === 'done'; }).length;
+              var totalCount = dayTasks.length;
+              return (
+                <button key={i} onClick={function() { setDayOffset(Math.round((d - today) / 86400000)); }}
+                  title={DAY_NAMES[d.getDay()] + ' ' + (d.getMonth()+1) + '/' + d.getDate() + (totalCount > 0 ? ' (' + doneCount + '/' + totalCount + ')' : '')}
+                  style={{
+                    border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer',
+                    background: isSelected ? theme.accent : 'transparent',
+                    color: isSelected ? '#FFFFFF' : isToday ? theme.accent : theme.text,
+                    fontWeight: isSelected || isToday ? 700 : 400,
+                    fontSize: 11, fontFamily: 'inherit', textAlign: 'center',
+                    minWidth: 36, lineHeight: 1.2
+                  }}>
+                  <div style={{ fontSize: 9, opacity: 0.6 }}>{DAY_NAMES[d.getDay()]}</div>
+                  <div>{d.getDate()}</div>
+                  {totalCount > 0 && (
+                    <div style={{ fontSize: 7, opacity: 0.5 }}>{doneCount}/{totalCount}</div>
+                  )}
+                </button>
+              );
+            })}
+            <button onClick={function() { setDayOffset(function(d) { return d + 1; }); }} style={weekNavBtn(theme)} title="Next day">&rsaquo;</button>
+            <button onClick={function() { setDayOffset(function(d) { return d + 7; }); }} style={weekNavBtn(theme)} title="Next week">&raquo;</button>
+            <input type="date" value={dateInputValue} onChange={function(e) {
+              var d2 = new Date(e.target.value + 'T12:00:00');
+              if (!isNaN(d2)) setDayOffset(Math.round((d2 - today) / 86400000));
+            }} style={{
+              padding: '2px 3px', borderRadius: 4, fontSize: 10,
+              border: '1px solid ' + theme.border,
+              background: theme.white || theme.bg, color: theme.textMuted,
+              cursor: 'pointer', fontFamily: 'inherit'
+            }} title="Jump to any date" />
+            <button onClick={function() { setDayOffset(0); }} style={{
+              ...weekNavBtn(theme), fontSize: 10, padding: '3px 8px', fontWeight: 600
+            }} title="Go to today">Today</button>
+          </div>
+        );
+      })()}
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'inherit', ...(isMobile ? { marginLeft: 'auto' } : {}) }}>
         {saving && <span style={{ fontSize: 11, color: theme.textMuted }}>Saving...</span>}
 
         {onAddTask && <button onClick={onAddTask} style={{ ...btnStyle(theme, isMobile), fontSize: 20, fontWeight: 700, color: '#10B981' }} title="Add task">+</button>}
@@ -157,5 +214,15 @@ function btnStyle(theme, isMobile) {
     borderRadius: 6, fontFamily: 'inherit',
     minWidth: isMobile ? 36 : undefined,
     minHeight: isMobile ? 36 : undefined
+  };
+}
+
+function weekNavBtn(theme) {
+  return {
+    border: '1px solid ' + theme.border, borderRadius: 4, background: 'transparent',
+    color: theme.textSecondary, cursor: 'pointer',
+    padding: '3px 6px', fontSize: 14, fontFamily: 'inherit', fontWeight: 600,
+    minHeight: 28, minWidth: 24,
+    display: 'flex', alignItems: 'center', justifyContent: 'center'
   };
 }

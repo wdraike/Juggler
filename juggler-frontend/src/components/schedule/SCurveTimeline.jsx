@@ -2,7 +2,7 @@
  * SCurveTimeline — dual-circle 24-hour clock timeline.
  * AM circle on the left (12AM–12PM), PM circle on the right (12PM–12AM).
  * Cards placed in the gap between circles and around the edges.
- * Hexagonal cards with colored accents matching time-block bands.
+ * Rectangular cards with colored accents matching time-block bands.
  */
 
 import React, { useMemo } from 'react';
@@ -81,72 +81,46 @@ function getBlockAtMinute(mins, blocks) {
   return null;
 }
 
-/* ── Hexagon geometry ──────────────────────────────────── */
-var HEX_INDENT = 0.4;
+/* ── Card geometry (rectangular) ──────────────────────── */
 
-function hexVertices(x, y, w, h) {
-  var pd = Math.round(h * HEX_INDENT);
-  return [
-    [x + pd, y],           // 0: top-left
-    [x + w - pd, y],       // 1: top-right
-    [x + w, y + h / 2],    // 2: right point
-    [x + w - pd, y + h],   // 3: bottom-right
-    [x + pd, y + h],       // 4: bottom-left
-    [x, y + h / 2]         // 5: left point
+function rectsOverlap(x1, y1, w1, h1, x2, y2, w2, h2) {
+  return !(x1 + w1 + CARD_GAP <= x2 || x2 + w2 + CARD_GAP <= x1 ||
+           y1 + h1 + CARD_GAP <= y2 || y2 + h2 + CARD_GAP <= y1);
+}
+
+function segHitsRect(ax, ay, bx, by, rx, ry, rw, rh) {
+  var edges = [
+    [rx, ry, rx + rw, ry],         // top
+    [rx + rw, ry, rx + rw, ry + rh], // right
+    [rx + rw, ry + rh, rx, ry + rh], // bottom
+    [rx, ry + rh, rx, ry]           // left
   ];
-}
-
-function hexsOverlap(x1, y1, w1, h1, x2, y2, w2, h2) {
-  var v1 = hexVertices(x1, y1, w1, h1);
-  var v2 = hexVertices(x2, y2, w2, h2);
-  for (var i = 0; i < 6; i++) {
-    var j = (i + 1) % 6;
-    var ex = v1[j][0] - v1[i][0], ey = v1[j][1] - v1[i][1];
-    var len = Math.sqrt(ex * ex + ey * ey);
-    if (len < 0.001) continue;
-    var nx = -ey / len, ny = ex / len;
-    var min1 = Infinity, max1 = -Infinity;
-    var min2 = Infinity, max2 = -Infinity;
-    for (var k = 0; k < 6; k++) {
-      var d1 = v1[k][0] * nx + v1[k][1] * ny;
-      if (d1 < min1) min1 = d1;
-      if (d1 > max1) max1 = d1;
-      var d2 = v2[k][0] * nx + v2[k][1] * ny;
-      if (d2 < min2) min2 = d2;
-      if (d2 > max2) max2 = d2;
-    }
-    if (max1 + CARD_GAP <= min2 || max2 + CARD_GAP <= min1) return false;
-  }
-  return true;
-}
-
-function segHitsHex(ax, ay, bx, by, hx, hy, hw, hh) {
-  var v = hexVertices(hx, hy, hw, hh);
-  for (var i = 0; i < 6; i++) {
-    var j = (i + 1) % 6;
-    if (segsIntersect(ax, ay, bx, by, v[i][0], v[i][1], v[j][0], v[j][1])) return true;
+  for (var i = 0; i < 4; i++) {
+    if (segsIntersect(ax, ay, bx, by, edges[i][0], edges[i][1], edges[i][2], edges[i][3])) return true;
   }
   return false;
 }
 
-function hexOverlapsCurveBand(x, y, w, h, R, CX, CY) {
+function rectOverlapsCurveBand(x, y, w, h, R, CX, CY) {
   var bandMin = R - BAND_W / 2 - CURVE_MARGIN;
   var bandMax = R + BAND_W / 2 + CURVE_MARGIN;
   if (bandMin < 0) bandMin = 0;
-  var v = hexVertices(x, y, w, h);
+  var corners = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
   var minDist = Infinity, maxDist = 0;
-  for (var i = 0; i < 6; i++) {
-    var d = Math.sqrt((v[i][0] - CX) * (v[i][0] - CX) + (v[i][1] - CY) * (v[i][1] - CY));
+  for (var i = 0; i < 4; i++) {
+    var d = Math.sqrt((corners[i][0] - CX) * (corners[i][0] - CX) + (corners[i][1] - CY) * (corners[i][1] - CY));
     if (d < minDist) minDist = d;
     if (d > maxDist) maxDist = d;
   }
-  for (var i = 0; i < 6; i++) {
-    var j = (i + 1) % 6;
-    var ex = v[j][0] - v[i][0], ey = v[j][1] - v[i][1];
+  // Check closest point on each edge to the circle center
+  var edges = [[0,1],[1,2],[2,3],[3,0]];
+  for (var i = 0; i < 4; i++) {
+    var c0 = corners[edges[i][0]], c1 = corners[edges[i][1]];
+    var ex = c1[0] - c0[0], ey = c1[1] - c0[1];
     var len2 = ex * ex + ey * ey;
     if (len2 > 0.001) {
-      var t = Math.max(0, Math.min(1, ((CX - v[i][0]) * ex + (CY - v[i][1]) * ey) / len2));
-      var px = v[i][0] + t * ex, py = v[i][1] + t * ey;
+      var t = Math.max(0, Math.min(1, ((CX - c0[0]) * ex + (CY - c0[1]) * ey) / len2));
+      var px = c0[0] + t * ex, py = c0[1] + t * ey;
       var d = Math.sqrt((px - CX) * (px - CX) + (py - CY) * (py - CY));
       if (d < minDist) minDist = d;
     }
@@ -154,25 +128,20 @@ function hexOverlapsCurveBand(x, y, w, h, R, CX, CY) {
   return minDist <= bandMax && maxDist >= bandMin;
 }
 
-/* Check overlap against BOTH circles */
-function hexOverlapsEitherBand(x, y, w, h, amR, amCX, amCY, pmR, pmCX, pmCY) {
-  return hexOverlapsCurveBand(x, y, w, h, amR, amCX, amCY) ||
-         hexOverlapsCurveBand(x, y, w, h, pmR, pmCX, pmCY);
+function rectOverlapsEitherBand(x, y, w, h, amR, amCX, amCY, pmR, pmCX, pmCY) {
+  return rectOverlapsCurveBand(x, y, w, h, amR, amCX, amCY) ||
+         rectOverlapsCurveBand(x, y, w, h, pmR, pmCX, pmCY);
 }
 
-function hexEdgePoint(hx, hy, hw, hh, tx, ty) {
-  var v = hexVertices(hx, hy, hw, hh);
-  var bestX = v[0][0], bestY = v[0][1], bestDist = Infinity;
-  for (var i = 0; i < 6; i++) {
-    var j = (i + 1) % 6;
-    var ex = v[j][0] - v[i][0], ey = v[j][1] - v[i][1];
-    var len2 = ex * ex + ey * ey;
-    var t = len2 > 0.001 ? Math.max(0, Math.min(1, ((tx - v[i][0]) * ex + (ty - v[i][1]) * ey) / len2)) : 0;
-    var px = v[i][0] + t * ex, py = v[i][1] + t * ey;
-    var d = (px - tx) * (px - tx) + (py - ty) * (py - ty);
-    if (d < bestDist) { bestDist = d; bestX = px; bestY = py; }
-  }
-  return { x: bestX, y: bestY };
+function rectEdgePoint(rx, ry, rw, rh, tx, ty) {
+  // Find the closest point on the rectangle border to (tx, ty)
+  var cx = rx + rw / 2, cy = ry + rh / 2;
+  var dx = tx - cx, dy = ty - cy;
+  if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return { x: rx + rw / 2, y: ry };
+  var scaleX = Math.abs(dx) > 0.001 ? (rw / 2) / Math.abs(dx) : Infinity;
+  var scaleY = Math.abs(dy) > 0.001 ? (rh / 2) / Math.abs(dy) : Infinity;
+  var scale = Math.min(scaleX, scaleY);
+  return { x: cx + dx * scale, y: cy + dy * scale };
 }
 
 /* ── Layout helpers ───────────────────────────────────── */
@@ -204,7 +173,7 @@ function computeConnector(cardX, cardY, cW, cH, curveX, curveY, R, CX, CY) {
   var td = Math.sqrt(tdx * tdx + tdy * tdy) || 1;
   var iBx = CX + (tdx / td) * bandOuter;
   var iBy = CY + (tdy / td) * bandOuter;
-  var iEdge = hexEdgePoint(cardX, cardY, cW, cH, iBx, iBy);
+  var iEdge = rectEdgePoint(cardX, cardY, cW, cH, iBx, iBy);
   var minD = minDistToSeg(iEdge.x, iEdge.y, iBx, iBy, CX, CY);
   if (minD >= R) {
     return { ex: iEdge.x, ey: iEdge.y, bx: iBx, by: iBy };
@@ -214,7 +183,7 @@ function computeConnector(cardX, cardY, cW, cH, curveX, curveY, R, CX, CY) {
   var cd = Math.sqrt(cdx * cdx + cdy * cdy) || 1;
   var fBx = CX + (cdx / cd) * bandOuter;
   var fBy = CY + (cdy / cd) * bandOuter;
-  var fEdge = hexEdgePoint(cardX, cardY, cW, cH, fBx, fBy);
+  var fEdge = rectEdgePoint(cardX, cardY, cW, cH, fBx, fBy);
   return { ex: fEdge.x, ey: fEdge.y, bx: fBx, by: fBy };
 }
 
@@ -308,11 +277,11 @@ function placeCards(items, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY, vpW, vpH) {
   // Remove slots that overlap either circle band
   var slots = [];
   for (var i = 0; i < raw.length; i++) {
-    if (hexOverlapsEitherBand(raw[i].x, raw[i].y, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY)) continue;
+    if (rectOverlapsEitherBand(raw[i].x, raw[i].y, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY)) continue;
     // Check no overlap with already accepted slots
     var ok = true;
     for (var j = 0; j < slots.length; j++) {
-      if (hexsOverlap(raw[i].x, raw[i].y, cW, cH, slots[j].x, slots[j].y, cW, cH)) { ok = false; break; }
+      if (rectsOverlap(raw[i].x, raw[i].y, cW, cH, slots[j].x, slots[j].y, cW, cH)) { ok = false; break; }
     }
     if (ok) slots.push(raw[i]);
   }
@@ -445,10 +414,10 @@ function placeCards(items, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY, vpW, vpH) {
       if (cards[skipIdx].isAM && cardCenterX > halfX) return false;
       if (!cards[skipIdx].isAM && cardCenterX < halfX) return false;
     }
-    if (hexOverlapsEitherBand(nx, ny, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY)) return false;
+    if (rectOverlapsEitherBand(nx, ny, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY)) return false;
     for (var j = 0; j < cards.length; j++) {
       if (j === skipIdx) continue;
-      if (hexsOverlap(nx, ny, cW, cH, cards[j].x, cards[j].y, cW, cH)) return false;
+      if (rectsOverlap(nx, ny, cW, cH, cards[j].x, cards[j].y, cW, cH)) return false;
     }
     // Connector accuracy check
     if (skipIdx >= 0 && skipIdx < cards.length) {
@@ -471,8 +440,8 @@ function placeCards(items, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY, vpW, vpH) {
     for (var j = 0; j < cards.length; j++) {
       if (j === skipIdx) continue;
       var ol = cardLine(cards[j]);
-      if (segHitsHex(ol.ex, ol.ey, ol.bx, ol.by, nx, ny, cW, cH)) return false;
-      if (segHitsHex(ml.ex, ml.ey, ml.bx, ml.by, cards[j].x, cards[j].y, cW, cH)) return false;
+      if (segHitsRect(ol.ex, ol.ey, ol.bx, ol.by, nx, ny, cW, cH)) return false;
+      if (segHitsRect(ml.ex, ml.ey, ml.bx, ml.by, cards[j].x, cards[j].y, cW, cH)) return false;
     }
     return true;
   }
@@ -485,8 +454,8 @@ function placeCards(items, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY, vpW, vpH) {
       if (j === idx) continue;
       var ol = cardLine(cards[j]);
       if (segsIntersect(cl.ex, cl.ey, cl.bx, cl.by, ol.ex, ol.ey, ol.bx, ol.by)) count++;
-      if (segHitsHex(cl.ex, cl.ey, cl.bx, cl.by, cards[j].x, cards[j].y, cW, cH)) count++;
-      if (segHitsHex(ol.ex, ol.ey, ol.bx, ol.by, c.x, c.y, cW, cH)) count++;
+      if (segHitsRect(cl.ex, cl.ey, cl.bx, cl.by, cards[j].x, cards[j].y, cW, cH)) count++;
+      if (segHitsRect(ol.ex, ol.ey, ol.bx, ol.by, c.x, c.y, cW, cH)) count++;
     }
     return count;
   }
@@ -558,7 +527,7 @@ function placeCards(items, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY, vpW, vpH) {
 
         var validA = posValidBasic(cards[a].x, cards[a].y, a);
         var validB = posValidBasic(cards[b].x, cards[b].y, b);
-        var abOvlp = hexsOverlap(cards[a].x, cards[a].y, cW, cH, cards[b].x, cards[b].y, cW, cH);
+        var abOvlp = rectsOverlap(cards[a].x, cards[a].y, cW, cH, cards[b].x, cards[b].y, cW, cH);
         var sumAfter = validA && validB && !abOvlp ? cardCrossings(a) + cardCrossings(b) : sumBefore + 1;
 
         if (sumAfter < sumBefore) {
@@ -967,14 +936,8 @@ export default function SCurveTimeline(props) {
         )}
       </svg>
 
-      {/* Task cards — hexagonal */}
+      {/* Task cards */}
       {cards.map(function (c) {
-        var hexPd = Math.round(cH * HEX_INDENT);
-        var pdPct = (hexPd / cW * 100).toFixed(1);
-        var rPct = (100 - hexPd / cW * 100).toFixed(1);
-        var clipPath = 'polygon(' +
-          pdPct + '% 0%, ' + rPct + '% 0%, 100% 50%, ' +
-          rPct + '% 100%, ' + pdPct + '% 100%, 0% 50%)';
         var bc = c.blockColor || (darkMode ? '#475569' : '#CBD5E1');
         return (
           <div key={c.item.key || c.item.task.id} style={{
@@ -983,9 +946,9 @@ export default function SCurveTimeline(props) {
             width: cW, height: cH,
             boxSizing: 'border-box',
             zIndex: 20,
-            clipPath: clipPath,
-            WebkitClipPath: clipPath,
-            overflow: 'hidden'
+            borderRadius: 6,
+            overflow: 'hidden',
+            border: darkMode ? '1px solid #334155' : '1px solid #E2E8F0'
           }}>
             <div style={{
               position: 'absolute', left: 0, top: 0, right: 0, bottom: 0,
@@ -993,13 +956,13 @@ export default function SCurveTimeline(props) {
             }} />
             <div style={{
               position: 'absolute', left: 0, top: 0, bottom: 0,
-              width: hexPd + 3,
+              width: 4,
               background: bc,
-              opacity: 0.55
+              opacity: 0.75
             }} />
             <div style={{
               position: 'relative',
-              paddingLeft: hexPd + 4, paddingRight: hexPd + 2,
+              paddingLeft: 8, paddingRight: 6,
               height: '100%'
             }}>
               <ScheduleCard

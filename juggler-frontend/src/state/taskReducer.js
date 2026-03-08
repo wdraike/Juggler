@@ -49,7 +49,12 @@ export default function taskReducer(state, action) {
       return {
         statuses: state.statuses,
         directions: state.directions,
-        tasks: state.tasks.filter(function(t) { return t.id !== action.id; })
+        tasks: state.tasks.filter(function(t) { return t.id !== action.id; }).map(function(t) {
+          if (t.dependsOn && t.dependsOn.indexOf(action.id) >= 0) {
+            return Object.assign({}, t, { dependsOn: t.dependsOn.filter(function(d) { return d !== action.id; }) });
+          }
+          return t;
+        })
       };
     case 'SET_ALL':
       return {

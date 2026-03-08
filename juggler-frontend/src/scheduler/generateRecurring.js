@@ -27,7 +27,8 @@ export function generateRecurringPure(taskList, startDate, endDate) {
     sources.forEach(function(src) {
       var r = src.recur;
       var srcDate = parseDate(src.date);
-      if (!srcDate) return;
+      // Habits with TBD/missing date: treat as always active (generate from startDate)
+      if (!srcDate) srcDate = new Date(startDate);
       if (cursor < srcDate) return;
       if (dateStr === src.date) return;
 
@@ -65,6 +66,7 @@ export function generateRecurringPure(taskList, startDate, endDate) {
         id: id, date: dateStr, day: dayName, project: src.project, text: src.text,
         pri: src.pri, habit: src.habit || false, rigid: src.rigid || false,
         time: src.time, dur: src.dur, where: src.where, when: src.when,
+        location: src.location, tools: src.tools,
         dayReq: src.dayReq || "any", section: "", notes: "",
         sourceId: src.id, generated: true,
       }));

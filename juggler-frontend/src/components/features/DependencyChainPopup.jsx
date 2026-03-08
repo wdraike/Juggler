@@ -38,17 +38,18 @@ function computeDagreLayout(taskIds, deps) {
   return { positions: positions, width: maxX + 16, height: maxY + 16 };
 }
 
-export default function DependencyChainPopup({ focusTaskId, allTasks, statuses, onUpdate, onClose, darkMode, isMobile }) {
+export default function DependencyChainPopup({ focusTaskId, allTasks, statuses, onUpdate, onClose, onExpand, darkMode, isMobile }) {
   var theme = getTheme(darkMode);
   var bodyRef = useRef(null);
 
-  // Build chain data: BFS to find all tasks connected to focus (both directions)
+  // Build chain data: BFS from focus + all same-project open tasks
   var chainData = useMemo(function() {
     if (!focusTaskId) return null;
-    var MAX_CHAIN = 60;
+    var MAX_CHAIN = 100;
     var chainIds = {};
     chainIds[focusTaskId] = true;
     var queue = [focusTaskId];
+    // BFS: find all dependency-connected tasks
     while (queue.length > 0 && Object.keys(chainIds).length < MAX_CHAIN) {
       var id = queue.shift();
       var tt = allTasks.find(function(x) { return x.id === id; });
@@ -63,6 +64,18 @@ export default function DependencyChainPopup({ focusTaskId, allTasks, statuses, 
         }
       });
     }
+    // Also include same-project open tasks
+    var focusTask = allTasks.find(function(x) { return x.id === focusTaskId; });
+    if (focusTask && focusTask.project) {
+      allTasks.forEach(function(t) {
+        if (t.project === focusTask.project && !chainIds[t.id] && Object.keys(chainIds).length < MAX_CHAIN) {
+          var st = statuses[t.id] || '';
+          if (st !== 'done' && st !== 'cancel') {
+            chainIds[t.id] = true;
+          }
+        }
+      });
+    }
     var seen = {};
     var chainTasks = allTasks.filter(function(t) {
       if (!chainIds[t.id] || seen[t.id]) return false;
@@ -71,7 +84,7 @@ export default function DependencyChainPopup({ focusTaskId, allTasks, statuses, 
     });
     var sorted = topoSortTasks(chainTasks);
     return { tasks: sorted, focusId: focusTaskId };
-  }, [focusTaskId, allTasks]);
+  }, [focusTaskId, allTasks, statuses]);
 
   // Chain order and deps state
   var [chainOrder, setChainOrder] = useState(null);
@@ -182,29 +195,14 @@ export default function DependencyChainPopup({ focusTaskId, allTasks, statuses, 
     setChainDirty(false);
   }, [chainOrder, chainDeps, allTasks, onUpdate]);
 
-  var chainSet = useMemo(function() {
-    var s = {};
-    if (chainOrder) chainOrder.forEach(function(id) { s[String(id)] = true; });
-    return s;
-  }, [chainOrder]);
-
   if (!chainData || !chainOrder) return null;
 
   var orderedTasks = chainOrder.map(function(id) { return allTasks.find(function(t) { return t.id === id; }); }).filter(Boolean);
-  var focusTask = allTasks.find(function(t) { return t.id === focusTaskId; });
-  var focusProject = focusTask ? focusTask.project : null;
-
-  var poolTasks = allTasks.filter(function(t) {
-    if (!focusProject || t.project !== focusProject) return false;
-    if (chainSet[String(t.id)]) return false;
-    var st = statuses[t.id] || '';
-    return st !== 'done' && st !== 'cancel';
-  });
 
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      background: 'rgba(0,0,0,0.5)', zIndex: 350, display: 'flex',
+      background: 'rgba(0,0,0,0.5)', zIndex: 500, display: 'flex',
       alignItems: 'center', justifyContent: 'center'
     }} onClick={onClose}>
       <div style={{
@@ -262,8 +260,7 @@ export default function DependencyChainPopup({ focusTaskId, allTasks, statuses, 
           statuses={statuses}
           theme={theme}
           focusTaskId={focusTaskId}
-          poolTasks={poolTasks}
-          focusProject={focusProject}
+          onExpand={onExpand}
         />
       </div>
     </div>
@@ -271,25 +268,12 @@ export default function DependencyChainPopup({ focusTaskId, allTasks, statuses, 
 }
 
 /** Tree column: dagre-positioned divs + SVG edge overlay */
-function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor, setChainAddDepFor, chainDropIdx, setChainDropIdx, wouldCycle, linkDragId, setLinkDragId, dragModeRef, chainAddDep, chainRemoveDep, allTasks, statuses, theme, focusTaskId, poolTasks, focusProject }) {
+function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor, setChainAddDepFor, chainDropIdx, setChainDropIdx, wouldCycle, linkDragId, setLinkDragId, dragModeRef, chainAddDep, chainRemoveDep, allTasks, statuses, theme, focusTaskId, onExpand }) {
 
-  // Dagre layout
+  // Dagre layout — include ALL tasks in chainOrder
   var layout = useMemo(function() {
     if (!chainOrder) return { positions: {}, width: 0, height: 0 };
-    // Only include tasks that participate in deps (or all if none have deps)
-    var inTree = {};
-    chainOrder.forEach(function(taskId) {
-      var deps = (chainDeps[taskId] || []).filter(function(d) { return chainOrder.indexOf(d) >= 0; });
-      if (deps.length > 0) {
-        inTree[taskId] = true;
-        deps.forEach(function(d) { inTree[d] = true; });
-      }
-    });
-    if (Object.keys(inTree).length === 0) {
-      chainOrder.forEach(function(id) { inTree[id] = true; });
-    }
-    var treeIds = chainOrder.filter(function(id) { return inTree[id]; });
-    return computeDagreLayout(treeIds, chainDeps);
+    return computeDagreLayout(chainOrder, chainDeps);
   }, [chainOrder, chainDeps]);
 
   var treeIds = useMemo(function() {
@@ -328,17 +312,27 @@ function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor,
     if (!bodyRef.current) return;
     var body = bodyRef.current;
     var rect = body.getBoundingClientRect();
+    var x = e.clientX;
     var y = e.clientY;
     var edge = 50;
-    var speed = 0;
+    var speedY = 0;
+    var speedX = 0;
     if (y < rect.top + edge) {
-      speed = -Math.max(3, ((rect.top + edge - y) / edge) * 12);
+      speedY = -Math.max(3, ((rect.top + edge - y) / edge) * 12);
     } else if (y > rect.bottom - edge) {
-      speed = Math.max(3, ((y - (rect.bottom - edge)) / edge) * 12);
+      speedY = Math.max(3, ((y - (rect.bottom - edge)) / edge) * 12);
     }
-    if (speed !== 0) {
+    if (x < rect.left + edge) {
+      speedX = -Math.max(3, ((rect.left + edge - x) / edge) * 12);
+    } else if (x > rect.right - edge) {
+      speedX = Math.max(3, ((x - (rect.right - edge)) / edge) * 12);
+    }
+    if (speedX !== 0 || speedY !== 0) {
       if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current);
-      scrollRafRef.current = requestAnimationFrame(function() { body.scrollTop += speed; });
+      scrollRafRef.current = requestAnimationFrame(function() {
+        body.scrollTop += speedY;
+        body.scrollLeft += speedX;
+      });
     }
   }, [bodyRef]);
 
@@ -429,11 +423,12 @@ function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor,
               {/* Row 1: status + name */}
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 3 }}>
                 <span style={{ fontSize: 10, flexShrink: 0, marginTop: 1 }}>{icon}</span>
-                <div style={{
+                <div onClick={function(e) { e.stopPropagation(); if (onExpand) onExpand(ct.id); }} style={{
                   fontSize: 10, fontWeight: isFocus ? 700 : 600,
                   color: isClosed ? theme.textMuted : theme.text,
                   textDecoration: isClosed ? 'line-through' : 'none',
-                  lineHeight: '13px', minWidth: 0
+                  lineHeight: '13px', minWidth: 0,
+                  cursor: onExpand ? 'pointer' : undefined
                 }}>
                   {ct.text}
                 </div>
@@ -486,29 +481,8 @@ function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor,
               {/* Add dep dropdown */}
               {chainAddDepFor === ct.id && (function() {
                 var myDeps = chainDeps[ct.id] || [];
-                var inChain = chainOrder.filter(function(oid) { return oid !== ct.id && myDeps.indexOf(oid) < 0; })
+                var candidates = chainOrder.filter(function(oid) { return oid !== ct.id && myDeps.indexOf(oid) < 0; })
                   .map(function(oid) { return allTasks.find(function(x) { return x.id === oid; }); }).filter(Boolean);
-                var sameProj = allTasks.filter(function(ot) {
-                  if (!ot.project || ot.project !== ct.project) return false;
-                  if (ot.id === ct.id) return false;
-                  if (chainOrder.indexOf(ot.id) >= 0) return false;
-                  if (myDeps.indexOf(ot.id) >= 0) return false;
-                  var st2 = statuses[ot.id] || '';
-                  return st2 !== 'done' && st2 !== 'cancel';
-                });
-
-                var renderRow = function(ot, isExternal) {
-                  return (
-                    <div key={ot.id} onClick={function() { chainAddDep(ct.id, ot.id); }} style={{
-                      padding: '4px 5px', borderRadius: 4, cursor: 'pointer', fontSize: 11,
-                      display: 'flex', gap: 5, alignItems: 'center', marginBottom: 1
-                    }}>
-                      <span style={{ fontSize: 9, opacity: 0.7 }}>{(statuses[ot.id] || '') === 'done' ? '\u2705' : '\u26AA'}</span>
-                      <span style={{ fontWeight: 500, color: theme.text, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ot.text}</span>
-                      {isExternal && <span style={{ fontSize: 8, padding: '0 3px', borderRadius: 2, background: '#F59E0B20', color: '#F59E0B', fontWeight: 600 }}>NEW</span>}
-                    </div>
-                  );
-                };
 
                 return (
                   <div onClick={function(e) { e.stopPropagation(); }} style={{
@@ -517,20 +491,17 @@ function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor,
                     position: 'absolute', bottom: '100%', left: 0, width: 260, marginBottom: 4,
                     zIndex: 100, boxShadow: '0 4px 16px rgba(0,0,0,0.18)'
                   }}>
-                    {inChain.length > 0 && (
-                      <div>
-                        <div style={{ fontSize: 9, color: theme.textMuted, marginBottom: 3, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>In chain</div>
-                        {inChain.map(function(ot) { return renderRow(ot, false); })}
-                      </div>
-                    )}
-                    {sameProj.length > 0 && (
-                      <div>
-                        {inChain.length > 0 && <div style={{ height: 1, background: theme.border, margin: '4px 0' }} />}
-                        <div style={{ fontSize: 9, color: theme.textMuted, marginBottom: 3, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>Same project</div>
-                        {sameProj.map(function(ot) { return renderRow(ot, true); })}
-                      </div>
-                    )}
-                    {inChain.length === 0 && sameProj.length === 0 && (
+                    {candidates.length > 0 ? candidates.map(function(ot) {
+                      return (
+                        <div key={ot.id} onClick={function() { chainAddDep(ct.id, ot.id); }} style={{
+                          padding: '4px 5px', borderRadius: 4, cursor: 'pointer', fontSize: 11,
+                          display: 'flex', gap: 5, alignItems: 'center', marginBottom: 1
+                        }}>
+                          <span style={{ fontSize: 9, opacity: 0.7 }}>{(statuses[ot.id] || '') === 'done' ? '\u2705' : '\u26AA'}</span>
+                          <span style={{ fontWeight: 500, color: theme.text, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ot.text}</span>
+                        </div>
+                      );
+                    }) : (
                       <div style={{ fontSize: 9, color: theme.textMuted, padding: 6, textAlign: 'center' }}>No candidates</div>
                     )}
                   </div>
@@ -541,83 +512,6 @@ function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor,
         })}
       </div>
 
-      {/* Pool: available tasks not yet in chain */}
-      {poolTasks && poolTasks.length > 0 && (
-        <>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8, margin: '20px 0 12px',
-            color: theme.textMuted, fontSize: 10, fontWeight: 600, letterSpacing: 0.5, textTransform: 'uppercase'
-          }}>
-            <div style={{ flex: 1, height: 1, background: theme.border }} />
-            <span>Available tasks</span>
-            <div style={{ flex: 1, height: 1, background: theme.border }} />
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
-            {poolTasks.map(function(pt) {
-              var ptSt = statuses[pt.id] || '';
-              var ptIcon = STATUS_ICONS[ptSt] || '\u26AA';
-              var isPoolDragging = linkDragId === pt.id;
-              var isPoolDropTarget = linkDragId && linkDragId !== pt.id && chainDropIdx === pt.id;
-              return (
-                <div
-                  key={pt.id}
-                  data-chain-id={pt.id}
-                  title={pt.text + ' \u2014 drag onto a task to add as dependency'}
-                  draggable
-                  onMouseDown={function() { dragModeRef.current = 'link'; }}
-                  onDragStart={function(e) {
-                    dragModeRef.current = 'link';
-                    setLinkDragId(pt.id);
-                    e.dataTransfer.effectAllowed = 'link';
-                    e.dataTransfer.setData('text/plain', pt.id);
-                  }}
-                  onDragEnd={function() { setLinkDragId(null); setChainDropIdx(null); dragModeRef.current = null; }}
-                  onDragOver={function(e) {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'link';
-                    if (linkDragId && linkDragId !== pt.id) setChainDropIdx(pt.id);
-                  }}
-                  onDragLeave={function() { setChainDropIdx(function(prev) { return prev === pt.id ? null : prev; }); }}
-                  onDrop={function(e) {
-                    e.preventDefault();
-                    if (linkDragId && linkDragId !== pt.id) {
-                      chainAddDep(pt.id, linkDragId);
-                    }
-                    setChainDropIdx(null); setLinkDragId(null); dragModeRef.current = null;
-                  }}
-                  style={{
-                    width: 155, flexShrink: 0, padding: '4px 7px', borderRadius: 6, cursor: 'grab',
-                    border: isPoolDropTarget ? '2px dashed #3B82F6'
-                      : '1px solid ' + (isPoolDragging ? '#3B82F6' : theme.border),
-                    background: isPoolDragging ? '#3B82F620' : isPoolDropTarget ? '#3B82F610' : theme.bgTertiary,
-                    opacity: isPoolDragging ? 0.6 : 1,
-                    transition: 'all 0.15s ease', userSelect: 'none',
-                    display: 'flex', flexDirection: 'column', gap: 2
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 3 }}>
-                    <span style={{ fontSize: 10, flexShrink: 0, marginTop: 1 }}>{ptIcon}</span>
-                    <div style={{ fontSize: 10, fontWeight: 600, color: theme.text, flex: 1, minWidth: 0, lineHeight: '13px' }}>
-                      {pt.text}
-                    </div>
-                  </div>
-                  {isPoolDropTarget && (function() {
-                    var draggedTask = allTasks.find(function(x) { return x.id === linkDragId; });
-                    var isCycle = wouldCycle(chainDeps, pt.id, linkDragId);
-                    return (
-                      <div style={{ fontSize: 8, color: isCycle ? '#DC2626' : '#3B82F6', padding: '2px 0', marginTop: 2, borderTop: '1px dashed ' + (isCycle ? '#DC262644' : '#3B82F644') }}>
-                        {isCycle
-                          ? '\u26D4 circular dependency!'
-                          : '\u21B3 depends on \u201C' + (draggedTask ? draggedTask.text.substring(0, 18) : linkDragId) + '\u201D'}
-                      </div>
-                    );
-                  })()}
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
     </div>
   );
 }

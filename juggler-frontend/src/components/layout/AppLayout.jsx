@@ -17,7 +17,6 @@ import useIsMobile from '../../hooks/useIsMobile';
 import { getTheme } from '../../theme/colors';
 import { formatDateKey, getWeekStart, parseDate } from '../../scheduler/dateHelpers';
 import { DAY_NAMES } from '../../state/constants';
-import { generateRecurringPure } from '../../scheduler/generateRecurring';
 
 // Views
 import DayView from '../views/DayView';
@@ -60,7 +59,7 @@ export default function AppLayout() {
   var [search, setSearch] = useState('');
   var [projectFilter, setProjectFilter] = useState('');
   var [dayOffset, setDayOffset] = useState(0);
-  var [expandedTask, setExpandedTask] = useState(null);
+  var [expandedTasks, setExpandedTasks] = useState([]);
   var [showSettings, setShowSettings] = useState(false);
   var [showExport, setShowExport] = useState(false);
   var [showGCalSync, setShowGCalSync] = useState(false);
@@ -82,7 +81,7 @@ export default function AppLayout() {
   var allTasks = taskState.tasks;
 
   // Track when editing UI is open to suspend background syncs/scheduling
-  editingRef.current = !!expandedTask || !!showCreateForm || !!chainPopupId || !!showSettings;
+  editingRef.current = expandedTasks.length > 0 || !!showCreateForm || !!chainPopupId || !!showSettings;
 
   // Load data on mount
   useEffect(() => {
@@ -188,6 +187,9 @@ export default function AppLayout() {
   var blockedTaskIds = useMemo(() => {
     var ids = new Set();
     var todayKey = formatDateKey(new Date());
+    var todayD = parseDate(todayKey);
+    var taskMap = {};
+    allTasks.forEach(function(t) { taskMap[t.id] = t; });
     allTasks.forEach(t => {
       if (t.dependsOn && t.dependsOn.length > 0) {
         var allDepsDone = t.dependsOn.every(depId => {
@@ -196,9 +198,20 @@ export default function AppLayout() {
         });
         if (!allDepsDone && (statuses[t.id] || '') === '') {
           var td = parseDate(t.date);
-          var todayD = parseDate(todayKey);
           if (td && todayD && td <= todayD) {
-            ids.add(t.id);
+            // Only blocked if at least one undone dep is due today or past
+            // (if all undone deps are future-dated, the task is just waiting)
+            var hasOverdueDep = t.dependsOn.some(function(depId) {
+              var s = statuses[depId] || '';
+              if (s === 'done') return false;
+              var dep = taskMap[depId];
+              if (!dep) return true; // missing dep counts as overdue
+              var depDate = parseDate(dep.date);
+              return depDate && depDate <= todayD;
+            });
+            if (hasOverdueDep) {
+              ids.add(t.id);
+            }
           }
         }
       }
@@ -216,20 +229,7 @@ export default function AppLayout() {
     return ids;
   }, [unplaced]);
 
-  // Item 6: Generate recurring instances on load
-  var recurGenRef = useRef(false);
-  useEffect(() => {
-    if (allTasks.length === 0 || recurGenRef.current) return;
-    recurGenRef.current = true;
-    var startDate = new Date();
-    var endDate = new Date();
-    endDate.setDate(endDate.getDate() + 14);
-    var newTasks = generateRecurringPure(allTasks, startDate, endDate);
-    if (newTasks.length > 0) {
-      addTasks(newTasks);
-      showToast('Generated ' + newTasks.length + ' recurring tasks', 'info');
-    }
-  }, [allTasks.length]);
+  // Recurring habit expansion is handled server-side in runSchedule.js
 
   // Tasks by date map
   var tasksByDate = useMemo(() => {
@@ -307,9 +307,16 @@ export default function AppLayout() {
     showToast((labels[val] || val) + ': ' + (allTasks.find(t => t.id === id)?.text || id).slice(0, 40), 'success');
   }, [pushUndo, setStatus, allTasks, showToast]);
 
-  // Task expand handler
+  // Task expand handler — from main views (single open)
   var handleExpand = useCallback((id) => {
-    setExpandedTask(prev => prev === id ? null : id);
+    setExpandedTasks(function(prev) { return prev.length === 1 && prev[0] === id ? [] : [id]; });
+  }, []);
+
+  // Task expand handler — from dependency chain (multi open)
+  var handleChainExpand = useCallback((id) => {
+    setExpandedTasks(function(prev) {
+      return prev.indexOf(id) >= 0 ? prev.filter(function(x) { return x !== id; }) : prev.concat([id]);
+    });
   }, []);
 
   // Task create handler
@@ -367,8 +374,13 @@ export default function AppLayout() {
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
-    selectedDate, tasksByDate, statuses, allTasks, expandedTask, filter,
-    setExpandedTask, setDayOffset, setShowSettings, setShowExport,
+    selectedDate, tasksByDate, statuses, allTasks, filter,
+    expandedTask: expandedTasks.length > 0 ? expandedTasks[expandedTasks.length - 1] : null,
+    setExpandedTask: function(v) {
+      if (v === null) setExpandedTasks([]);
+      else setExpandedTasks([v]);
+    },
+    setDayOffset, setShowSettings, setShowExport,
     onStatusChange: handleStatusChange, popUndo, showToast
   });
 
@@ -497,7 +509,7 @@ export default function AppLayout() {
   }
 
   var isToday = selectedDateKey === formatDateKey(new Date());
-  var expandedTaskObj = expandedTask ? allTasks.find(t => t.id === expandedTask) : null;
+  var expandedTaskObjs = expandedTasks.map(function(id) { return allTasks.find(function(t) { return t.id === id; }); }).filter(Boolean);
 
   return (
     <div style={{ height: '100vh', overflow: 'hidden', maxWidth: '100vw', background: theme.bg, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
@@ -512,16 +524,18 @@ export default function AppLayout() {
           scheduling={scheduling}
           onReschedule={handleReschedule}
           onShowHelp={() => setShowHelp(true)}
-          onAddTask={() => { setShowCreateForm(true); setExpandedTask(null); }}
+          onAddTask={() => { setShowCreateForm(true); setExpandedTasks([]); }}
           isMobile={isMobile}
           aiPanel={<AiCommandPanel darkMode={darkMode} isMobile={isMobile} allTasks={allTasks} statuses={statuses} config={config} onApplyOps={handleAiOps} showToast={showToast} />}
+          weekStripDates={weekStripDates} selectedDate={selectedDate}
+          dayOffset={dayOffset} setDayOffset={setDayOffset} today={today}
         />
-        <WeekStrip
+        {isMobile && <WeekStrip
           weekStripDates={weekStripDates} selectedDate={selectedDate}
           dayOffset={dayOffset} setDayOffset={setDayOffset} today={today}
           darkMode={darkMode} statuses={statuses} tasksByDate={tasksByDate}
           isMobile={isMobile}
-        />
+        />}
         <NavigationBar
           viewMode={viewMode} setViewMode={setViewMode}
           filter={filter} setFilter={setFilter}
@@ -535,9 +549,7 @@ export default function AppLayout() {
         />
       </div>
 
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative', minHeight: 0 }}>
-        {/* Main content */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative', minHeight: 0 }}>
           {viewMode === 'day' && (
             <DayView
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
@@ -651,49 +663,28 @@ export default function AppLayout() {
               isMobile={isMobile}
             />
           )}
-        </div>
-
-        {/* Task edit panel */}
-        {expandedTaskObj && !showCreateForm && (
-          <TaskEditForm
-            task={expandedTaskObj}
-            status={statuses[expandedTask] || ''}
-            direction={directions[expandedTask]}
-            onUpdate={handleUpdateTask}
-            onStatusChange={val => handleStatusChange(expandedTask, val)}
-            onDirectionChange={val => setDirection(expandedTask, val)}
-            onDelete={deleteTask}
-            onClose={() => setExpandedTask(null)}
-            onShowChain={() => setChainPopupId(expandedTask)}
-            allProjectNames={allProjectNames}
-            locations={config.locations}
-            tools={config.tools}
-            uniqueTags={uniqueTags}
-            darkMode={darkMode}
-            isMobile={isMobile}
-          />
-        )}
-
-        {/* Task create panel */}
-        {showCreateForm && (
-          <TaskEditForm
-            mode="create"
-            onCreate={handleCreate}
-            onClose={() => setShowCreateForm(false)}
-            initialDate={selectedDate}
-            allProjectNames={allProjectNames}
-            locations={config.locations}
-            tools={config.tools}
-            uniqueTags={uniqueTags}
-            darkMode={darkMode}
-            isMobile={isMobile}
-          />
-        )}
       </div>
+
+      {/* Task create dialog */}
+      {showCreateForm && (
+        <TaskEditForm
+          mode="create"
+          onCreate={handleCreate}
+          onClose={() => setShowCreateForm(false)}
+          initialDate={selectedDate}
+          allProjectNames={allProjectNames}
+          locations={config.locations}
+          tools={config.tools}
+          uniqueTags={uniqueTags}
+          darkMode={darkMode}
+          isMobile={isMobile}
+        />
+      )}
 
       {/* Settings panel */}
       {showSettings && (
-        <SettingsPanel onClose={() => setShowSettings(false)} darkMode={darkMode} config={config} allProjectNames={allProjectNames} isMobile={isMobile} />
+        <SettingsPanel onClose={() => setShowSettings(false)} darkMode={darkMode} config={config} allProjectNames={allProjectNames} isMobile={isMobile}
+          onRenameProject={function(oldName, newName) { loadTasks(); }} />
       )}
 
       {/* Import/Export panel */}
@@ -733,11 +724,38 @@ export default function AppLayout() {
           allTasks={allTasks}
           statuses={statuses}
           onUpdate={handleUpdateTask}
-          onClose={() => setChainPopupId(null)}
+          onClose={() => { setChainPopupId(null); setExpandedTasks([]); }}
+          onExpand={handleChainExpand}
           darkMode={darkMode}
           isMobile={isMobile}
         />
       )}
+
+      {/* Task edit dialog(s) — renders after chain popup so they appear on top */}
+      {!showCreateForm && expandedTaskObjs.map(function(taskObj, idx) {
+        var taskId = taskObj.id;
+        return (
+          <TaskEditForm
+            key={taskId}
+            task={taskObj}
+            status={statuses[taskId] || ''}
+            direction={directions[taskId]}
+            onUpdate={handleUpdateTask}
+            onStatusChange={function(val) { handleStatusChange(taskId, val); }}
+            onDirectionChange={function(val) { setDirection(taskId, val); }}
+            onDelete={deleteTask}
+            onClose={function() { setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== taskId; }); }); }}
+            onShowChain={chainPopupId ? undefined : function() { setChainPopupId(taskId); setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== taskId; }); }); }}
+            allProjectNames={allProjectNames}
+            locations={config.locations}
+            tools={config.tools}
+            uniqueTags={uniqueTags}
+            darkMode={darkMode}
+            isMobile={isMobile}
+            stackIndex={idx}
+          />
+        );
+      })}
 
       {/* Help modal */}
       {showHelp && (
