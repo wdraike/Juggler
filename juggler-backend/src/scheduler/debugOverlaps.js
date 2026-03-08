@@ -76,8 +76,10 @@ function checkOverlaps(dayPlacements) {
 
 async function main() {
   var userId = '24297d4e-6d74-4530-acee-d415e67c9a8f';
+  var userRow = await db('users').where('id', userId).select('timezone').first();
+  var userTz = (userRow && userRow.timezone) || TIMEZONE;
   var taskRows = await db('tasks').where('user_id', userId).select();
-  var allTasks = taskRows.map(rowToTask);
+  var allTasks = taskRows.map(function(r) { return rowToTask(r, userTz); });
   var statuses = {};
   allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
   var timeInfo = getNowInTimezone();

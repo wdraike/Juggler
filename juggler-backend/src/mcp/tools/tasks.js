@@ -4,17 +4,15 @@
 
 const { z } = require('zod');
 const db = require('../../db');
-const { rowToTask, taskToRow } = require('../../controllers/task.controller');
-
-async function ensureProject(userId, projectName) {
-  if (!projectName) return;
-  const exists = await db('projects').where({ user_id: userId, name: projectName }).first();
-  if (!exists) {
-    await db('projects').insert({ user_id: userId, name: projectName });
-  }
-}
+const { rowToTask, taskToRow, ensureProject, applySplitDefault } = require('../../controllers/task.controller');
 
 function registerTaskTools(server, userId) {
+
+  // Helper: get user timezone
+  async function getUserTimezone() {
+    const user = await db('users').where('id', userId).select('timezone').first();
+    return (user && user.timezone) || 'America/New_York';
+  }
 
   // ── list_tasks ──
   server.tool(
@@ -23,19 +21,24 @@ function registerTaskTools(server, userId) {
     {
       status: z.string().optional().describe('Filter by status (e.g. "", "done", "dropped")'),
       project: z.string().optional().describe('Filter by project name'),
-      date: z.string().optional().describe('Filter by date (M/D format, e.g. "3/8")'),
+      date: z.string().optional().describe('Filter by date (M/D format, e.g. "3/8") — matched against derived local date'),
       limit: z.number().optional().describe('Max number of tasks to return')
     },
     async ({ status, project, date, limit }) => {
+      const tz = await getUserTimezone();
       let query = db('tasks').where('user_id', userId);
       if (status !== undefined) query = query.where('status', status);
       if (project) query = query.where('project', project);
-      if (date) query = query.where('date', date);
       query = query.orderBy('created_at', 'asc');
-      if (limit) query = query.limit(limit);
+      if (limit && !date) query = query.limit(limit);
 
       const rows = await query;
-      const tasks = rows.map(rowToTask);
+      let tasks = rows.map(function(r) { return rowToTask(r, tz); });
+      // Filter by derived local date if requested
+      if (date) {
+        tasks = tasks.filter(function(t) { return t.date === date; });
+        if (limit) tasks = tasks.slice(0, limit);
+      }
       return { content: [{ type: 'text', text: JSON.stringify(tasks, null, 2) }] };
     }
   );
@@ -73,22 +76,19 @@ function registerTaskTools(server, userId) {
       datePinned: z.boolean().optional().describe('Whether date is pinned (won\'t be moved by scheduler)')
     },
     async (params) => {
+      const tz = await getUserTimezone();
       const task = { ...params };
       if (!task.id) {
         const { v4: uuidv4 } = require('uuid');
         task.id = uuidv4();
       }
-      const row = taskToRow(task, userId);
+      const row = taskToRow(task, userId, tz);
       row.created_at = db.fn.now();
-      if (row.split === undefined || row.split === null) {
-        const prefs = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
-        const splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
-        row.split = splitDefault ? 1 : 0;
-      }
+      await applySplitDefault(row, userId);
       await ensureProject(userId, task.project);
       await db('tasks').insert(row);
       const created = await db('tasks').where('id', row.id).first();
-      return { content: [{ type: 'text', text: JSON.stringify(rowToTask(created), null, 2) }] };
+      return { content: [{ type: 'text', text: JSON.stringify(rowToTask(created, tz), null, 2) }] };
     }
   );
 
@@ -127,6 +127,7 @@ function registerTaskTools(server, userId) {
       })).describe('Array of task objects to create')
     },
     async ({ tasks }) => {
+      const tz = await getUserTimezone();
       const { v4: uuidv4 } = require('uuid');
       const prefs = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
       const splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
@@ -135,7 +136,7 @@ function registerTaskTools(server, userId) {
       const rows = tasks.map(t => {
         if (!t.id) t.id = uuidv4();
         if (t.project) projects.add(t.project);
-        const row = taskToRow(t, userId);
+        const row = taskToRow(t, userId, tz);
         row.created_at = db.fn.now();
         if (row.split === undefined || row.split === null) {
           row.split = splitDefault ? 1 : 0;
@@ -188,30 +189,29 @@ function registerTaskTools(server, userId) {
       direction: z.string().optional()
     },
     async ({ id, ...fields }) => {
+      const tz = await getUserTimezone();
       const existing = await db('tasks').where({ id, user_id: userId }).first();
       if (!existing) {
         return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
       }
 
-      const row = taskToRow(fields, userId);
+      const row = taskToRow(fields, userId, tz);
       delete row.user_id;
       delete row.created_at;
 
       if (fields.project) await ensureProject(userId, fields.project);
 
       // Auto-pin logic (same as REST controller)
-      if (row.date !== undefined && row.date_pinned === undefined) {
+      if (fields.date !== undefined && row.date_pinned === undefined) {
         row.date_pinned = 1;
       }
-      if (row.date !== undefined) {
-        row.original_date = null;
-        row.original_day = null;
-        row.original_time = null;
+      if (fields.date !== undefined || fields.time !== undefined) {
+        row.original_scheduled_at = null;
       }
 
       await db('tasks').where({ id, user_id: userId }).update(row);
       const updated = await db('tasks').where('id', id).first();
-      return { content: [{ type: 'text', text: JSON.stringify(rowToTask(updated), null, 2) }] };
+      return { content: [{ type: 'text', text: JSON.stringify(rowToTask(updated, tz), null, 2) }] };
     }
   );
 
@@ -225,6 +225,7 @@ function registerTaskTools(server, userId) {
       direction: z.string().optional().describe('Direction: "fwd" or "back"')
     },
     async ({ id, status, direction }) => {
+      const tz = await getUserTimezone();
       const existing = await db('tasks').where({ id, user_id: userId }).first();
       if (!existing) {
         return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
@@ -235,7 +236,7 @@ function registerTaskTools(server, userId) {
 
       await db('tasks').where({ id, user_id: userId }).update(update);
       const updated = await db('tasks').where('id', id).first();
-      return { content: [{ type: 'text', text: JSON.stringify(rowToTask(updated), null, 2) }] };
+      return { content: [{ type: 'text', text: JSON.stringify(rowToTask(updated, tz), null, 2) }] };
     }
   );
 

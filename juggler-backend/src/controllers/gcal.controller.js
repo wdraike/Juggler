@@ -1,21 +1,27 @@
 /**
  * Google Calendar Controller — OAuth flow + ledger-based bidirectional sync
+ *
+ * Tasks are stored with scheduled_at (UTC DATETIME) as the single source of truth.
+ * This controller derives local date/time via rowToTask() for building GCal events,
+ * and computes scheduled_at via localToUtc() when pulling events from GCal.
  */
 
-const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
-const db = require('../db');
-const gcalApi = require('../lib/gcal-api');
-const { runScheduleAndPersist } = require('../scheduler/runSchedule');
+var crypto = require('crypto');
+var jwt = require('jsonwebtoken');
+var db = require('../db');
+var gcalApi = require('../lib/gcal-api');
+var { runScheduleAndPersist } = require('../scheduler/runSchedule');
+var { rowToTask } = require('./task.controller');
+var { localToUtc } = require('../scheduler/dateHelpers');
 
-const TIMEZONE = 'America/New_York';
+var DEFAULT_TIMEZONE = 'America/New_York';
 
 function delay(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
 // --- Date conversion helpers ---
 
 /**
- * Convert Juggler date "M/D" + time "H:MM AM/PM" → ISO datetime string
+ * Convert Juggler task date "M/D" + time "H:MM AM/PM" → ISO datetime string (local, no Z)
  * If no time provided, defaults to 9:00 AM
  */
 function jugglerDateToISO(date, time, year) {
@@ -29,7 +35,6 @@ function jugglerDateToISO(date, time, year) {
   if (time) {
     var parsed = false;
 
-    // Named times
     var namedTimes = {
       'morning': [9, 0], 'evening': [18, 0], 'afternoon': [13, 0],
       'night': [20, 0], 'noon': [12, 0], 'lunch': [12, 0]
@@ -41,7 +46,6 @@ function jugglerDateToISO(date, time, year) {
       parsed = true;
     }
 
-    // Standard "H:MM AM/PM"
     if (!parsed) {
       var match = time.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
       if (match) {
@@ -54,7 +58,6 @@ function jugglerDateToISO(date, time, year) {
       }
     }
 
-    // Range with AM/PM: "H:MM-H:MM AM/PM" — use start time with the suffix
     if (!parsed) {
       var rangeMatch = time.match(/^(\d{1,2}):(\d{2})\s*-\s*\d{1,2}:\d{2}\s*(AM|PM)$/i);
       if (rangeMatch) {
@@ -67,13 +70,11 @@ function jugglerDateToISO(date, time, year) {
       }
     }
 
-    // Range without AM/PM: "H:MM-H:MM" — assume AM
     if (!parsed) {
       var bareRange = time.match(/^(\d{1,2}):(\d{2})\s*-\s*\d{1,2}:\d{2}$/);
       if (bareRange) {
         hours = parseInt(bareRange[1], 10);
         minutes = parseInt(bareRange[2], 10);
-        parsed = true;
       }
     }
   }
@@ -86,10 +87,11 @@ function jugglerDateToISO(date, time, year) {
 /**
  * Convert ISO datetime → { date: "M/D", time: "H:MM AM/PM" }
  */
-function isoToJugglerDate(isoString) {
+function isoToJugglerDate(isoString, timezone) {
   if (!isoString) return { date: null, time: null };
+  var tz = timezone || DEFAULT_TIMEZONE;
 
-  // Date-only strings (YYYY-MM-DD) from all-day events: parse directly to avoid UTC shift
+  // Date-only strings (YYYY-MM-DD) from all-day events: parse directly
   if (/^\d{4}-\d{2}-\d{2}$/.test(isoString)) {
     var parts = isoString.split('-');
     return {
@@ -101,17 +103,17 @@ function isoToJugglerDate(isoString) {
   var d = new Date(isoString);
   try {
     var dateParts = new Intl.DateTimeFormat('en-US', {
-      timeZone: TIMEZONE, month: 'numeric', day: 'numeric'
+      timeZone: tz, month: 'numeric', day: 'numeric'
     }).formatToParts(d);
     var timeParts = new Intl.DateTimeFormat('en-US', {
-      timeZone: TIMEZONE, hour: 'numeric', minute: '2-digit', hour12: true
+      timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true
     }).formatToParts(d);
 
-    var month = dateParts.find(p => p.type === 'month').value;
-    var day = dateParts.find(p => p.type === 'day').value;
-    var hour = timeParts.find(p => p.type === 'hour').value;
-    var minute = timeParts.find(p => p.type === 'minute').value;
-    var dayPeriod = timeParts.find(p => p.type === 'dayPeriod').value.toUpperCase();
+    var month = dateParts.find(function(p) { return p.type === 'month'; }).value;
+    var day = dateParts.find(function(p) { return p.type === 'day'; }).value;
+    var hour = timeParts.find(function(p) { return p.type === 'hour'; }).value;
+    var minute = timeParts.find(function(p) { return p.type === 'minute'; }).value;
+    var dayPeriod = timeParts.find(function(p) { return p.type === 'dayPeriod'; }).value.toUpperCase();
 
     return {
       date: month + '/' + day,
@@ -145,7 +147,8 @@ function computeDurationMinutes(start, end) {
 // --- Hash helpers for change detection ---
 
 /**
- * Hash the task fields we sync to GCal. If any of these change, we need to push.
+ * Hash the task fields we sync to GCal. Uses in-memory task object properties
+ * (date/time derived from scheduled_at by rowToTask).
  */
 function taskHash(task) {
   var str = [
@@ -161,7 +164,7 @@ function taskHash(task) {
 }
 
 /**
- * Hash the GCal event fields we care about. If any of these change, we need to pull.
+ * Hash the GCal event fields we care about.
  */
 function eventHash(event) {
   var startStr = event.start?.dateTime || event.start?.date || '';
@@ -183,9 +186,6 @@ function getJwtSecret() {
   return 'local-dev-jwt-secret-juggler';
 }
 
-/**
- * Get a valid access token for a user, refreshing if expired
- */
 async function getValidAccessToken(user) {
   if (!user.gcal_refresh_token) {
     throw new Error('Google Calendar not connected');
@@ -215,21 +215,20 @@ async function getValidAccessToken(user) {
   return credentials.access_token;
 }
 
-// --- Build GCal event body from a task ---
+// --- Build GCal event body from a task object (with date/time from rowToTask) ---
 
-function buildEventBody(task, year) {
+function buildEventBody(task, year, timezone) {
+  var tz = timezone || DEFAULT_TIMEZONE;
   var startISO = jugglerDateToISO(task.date, task.time, year);
   var dur = task.dur || 30;
   var isAllDay = task.when === 'allday' || !task.time;
 
   if (isAllDay) {
-    // All-day event: use date format
     var dateParts = (task.date || '').split('/');
     var month = parseInt(dateParts[0], 10);
     var day = parseInt(dateParts[1], 10);
     var y = year || new Date().getFullYear();
     var startDate = y + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
-    // All-day end is exclusive, so add one day
     var endObj = new Date(y, month - 1, day + 1);
     var endDate = endObj.getFullYear() + '-' + String(endObj.getMonth() + 1).padStart(2, '0') + '-' + String(endObj.getDate()).padStart(2, '0');
 
@@ -265,18 +264,19 @@ function buildEventBody(task, year) {
   return {
     summary: task.text,
     description: descParts2.join('\n'),
-    start: { dateTime: startISO, timeZone: TIMEZONE },
-    end: { dateTime: endISO, timeZone: TIMEZONE }
+    start: { dateTime: startISO, timeZone: tz },
+    end: { dateTime: endISO, timeZone: tz }
   };
 }
 
-// --- Apply GCal event data to a task row ---
+// --- Apply GCal event data → DB update fields ---
 
-function applyEventToTask(event) {
+function applyEventToTask(event, timezone) {
+  var tz = timezone || DEFAULT_TIMEZONE;
   var startStr = event.start?.dateTime || event.start?.date;
   var endStr = event.end?.dateTime || event.end?.date;
   var isAllDay = !event.start?.dateTime;
-  var jd = isoToJugglerDate(startStr);
+  var jd = isoToJugglerDate(startStr, tz);
   var eventDur = isAllDay ? 0 : 30;
   if (!isAllDay && startStr && endStr) {
     eventDur = computeDurationMinutes(startStr, endStr);
@@ -284,11 +284,19 @@ function applyEventToTask(event) {
 
   var fields = {
     text: event.summary || '(No title)',
-    date: jd.date,
-    time: isAllDay ? null : jd.time,
     dur: eventDur,
     updated_at: db.fn.now()
   };
+
+  // Compute scheduled_at from the event's local date+time
+  if (jd.date) {
+    if (isAllDay) {
+      fields.scheduled_at = localToUtc(jd.date, '12:00 AM', tz);
+    } else if (jd.time) {
+      fields.scheduled_at = localToUtc(jd.date, jd.time, tz);
+    }
+  }
+
   if (isAllDay) {
     fields.when = 'allday';
   }
@@ -297,9 +305,6 @@ function applyEventToTask(event) {
 
 // --- Endpoints ---
 
-/**
- * GET /api/gcal/status — check if user has GCal connected
- */
 async function getStatus(req, res) {
   try {
     var connected = !!req.user.gcal_refresh_token;
@@ -315,34 +320,29 @@ async function getStatus(req, res) {
       autoSync = !!val;
     }
 
-    res.json({ connected, email: req.user.email, lastSyncedAt, autoSync });
+    res.json({ connected: connected, email: req.user.email, lastSyncedAt: lastSyncedAt, autoSync: autoSync });
   } catch (error) {
     console.error('GCal status error:', error);
     res.status(500).json({ error: 'Failed to check GCal status' });
   }
 }
 
-/**
- * GET /api/gcal/connect — start OAuth2 flow, return auth URL
- */
 async function connect(req, res) {
   try {
     var oauth2Client = gcalApi.createOAuth2Client();
     var state = jwt.sign({ userId: req.user.id }, getJwtSecret(), { expiresIn: '10m' });
     var authUrl = gcalApi.getAuthUrl(oauth2Client, state);
-    res.json({ authUrl });
+    res.json({ authUrl: authUrl });
   } catch (error) {
     console.error('GCal connect error:', error);
     res.status(500).json({ error: 'Failed to generate auth URL' });
   }
 }
 
-/**
- * GET /api/gcal/callback — OAuth2 callback (no auth middleware — browser redirect)
- */
 async function callback(req, res) {
   try {
-    var { code, state } = req.query;
+    var code = req.query.code;
+    var state = req.query.state;
 
     if (!code || !state) {
       return res.status(400).send('Missing code or state parameter');
@@ -380,9 +380,6 @@ async function callback(req, res) {
   }
 }
 
-/**
- * POST /api/gcal/disconnect — clear GCal tokens
- */
 async function disconnect(req, res) {
   try {
     await db('users').where('id', req.user.id).update({
@@ -399,45 +396,45 @@ async function disconnect(req, res) {
 }
 
 /**
- * POST /api/gcal/push — push tasks as GCal events (with ledger tracking)
+ * POST /api/gcal/push — push done tasks as GCal events
  * Body: { from: "YYYY-MM-DD", to: "YYYY-MM-DD" }
  */
 async function push(req, res) {
   try {
-    var { from, to } = req.body;
+    var from = req.body.from;
+    var to = req.body.to;
     if (!from || !to) {
       return res.status(400).json({ error: 'from and to date range required' });
     }
 
     var accessToken = await getValidAccessToken(req.user);
     var userId = req.user.id;
+    var userRow = await db('users').where('id', userId).select('timezone').first();
+    var tz = (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
     var year = new Date().getFullYear();
 
-    var fromDate = new Date(from + 'T00:00:00');
-    var toDate = new Date(to + 'T00:00:00');
+    // Filter by scheduled_at range in the query
+    var fromUTC = new Date(from + 'T00:00:00Z');
+    var toUTC = new Date(to + 'T23:59:59Z');
 
-    // Get done tasks in range that haven't been pushed yet
-    var tasks = await db('tasks')
+    var taskRows = await db('tasks')
       .where('user_id', userId)
       .where('status', 'done')
       .whereNull('gcal_event_id')
+      .whereNotNull('scheduled_at')
+      .where('scheduled_at', '>=', fromUTC)
+      .where('scheduled_at', '<=', toUTC)
       .select();
 
-    var tasksInRange = tasks.filter(function(t) {
-      if (!t.date) return false;
-      var parts = t.date.split('/');
-      var m = parseInt(parts[0], 10) - 1;
-      var d = parseInt(parts[1], 10);
-      var taskDate = new Date(year, m, d);
-      return taskDate >= fromDate && taskDate <= toDate;
-    });
+    var tasksInRange = taskRows.map(function(r) { return rowToTask(r, tz); });
 
     var pushed = 0;
     var errors = [];
 
-    for (var task of tasksInRange) {
+    for (var i = 0; i < tasksInRange.length; i++) {
+      var task = tasksInRange[i];
       try {
-        var eventBody = buildEventBody(task, year);
+        var eventBody = buildEventBody(task, year, tz);
         var created = await gcalApi.insertEvent(accessToken, eventBody);
 
         await db.transaction(async function(trx) {
@@ -469,7 +466,7 @@ async function push(req, res) {
       }
     }
 
-    res.json({ pushed, errors, total: tasksInRange.length });
+    res.json({ pushed: pushed, errors: errors, total: tasksInRange.length });
   } catch (error) {
     if (error.message === 'Google Calendar not connected') {
       return res.status(400).json({ error: error.message });
@@ -480,18 +477,21 @@ async function push(req, res) {
 }
 
 /**
- * POST /api/gcal/pull — pull GCal events as Juggler tasks (with ledger tracking)
+ * POST /api/gcal/pull — pull GCal events as Juggler tasks
  * Body: { from: "YYYY-MM-DD", to: "YYYY-MM-DD" }
  */
 async function pull(req, res) {
   try {
-    var { from, to } = req.body;
+    var from = req.body.from;
+    var to = req.body.to;
     if (!from || !to) {
       return res.status(400).json({ error: 'from and to date range required' });
     }
 
     var accessToken = await getValidAccessToken(req.user);
     var userId = req.user.id;
+    var userRow = await db('users').where('id', userId).select('timezone').first();
+    var tz = (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
 
     var timeMin = from + 'T00:00:00Z';
     var timeMax = to + 'T23:59:59Z';
@@ -499,14 +499,12 @@ async function pull(req, res) {
     var result = await gcalApi.listEvents(accessToken, timeMin, timeMax);
     var events = (result && result.items) || [];
 
-    // Build set of gcal_event_ids already in ledger
     var existingLedger = await db('gcal_sync_ledger')
       .where('user_id', userId)
       .whereNotNull('gcal_event_id')
       .pluck('gcal_event_id');
     var ledgerSet = new Set(existingLedger);
 
-    // Also check tasks directly for backwards compat
     var existingTaskIds = await db('tasks')
       .where('user_id', userId)
       .whereNotNull('gcal_event_id')
@@ -516,17 +514,18 @@ async function pull(req, res) {
     var pulled = 0;
     var skipped = 0;
 
-    for (var event of events) {
+    for (var i = 0; i < events.length; i++) {
+      var event = events[i];
       if (ledgerSet.has(event.id) || taskSet.has(event.id)) {
         skipped++;
         continue;
       }
 
       var startStr = event.start?.dateTime || event.start?.date;
-      var endStr = event.end?.dateTime || event.end?.date;
       var isAllDay = !event.start?.dateTime;
+      var endStr = event.end?.dateTime || event.end?.date;
 
-      var jugglerDate = isoToJugglerDate(startStr);
+      var jugglerDate = isoToJugglerDate(startStr, tz);
       var dur = isAllDay ? 0 : 30;
       if (!isAllDay && startStr && endStr) {
         dur = computeDurationMinutes(startStr, endStr);
@@ -534,12 +533,21 @@ async function pull(req, res) {
 
       var taskId = 'gcal_' + crypto.randomBytes(8).toString('hex');
 
+      // Compute scheduled_at
+      var scheduledAt = null;
+      if (jugglerDate.date) {
+        if (isAllDay) {
+          scheduledAt = localToUtc(jugglerDate.date, '12:00 AM', tz);
+        } else if (jugglerDate.time) {
+          scheduledAt = localToUtc(jugglerDate.date, jugglerDate.time, tz);
+        }
+      }
+
       var row = {
         id: taskId,
         user_id: userId,
         text: event.summary || '(No title)',
-        date: jugglerDate.date,
-        time: isAllDay ? null : jugglerDate.time,
+        scheduled_at: scheduledAt,
         dur: dur,
         pri: 'P3',
         status: '',
@@ -577,7 +585,7 @@ async function pull(req, res) {
       pulled++;
     }
 
-    res.json({ pulled, skipped, total: events.length });
+    res.json({ pulled: pulled, skipped: skipped, total: events.length });
   } catch (error) {
     if (error.message === 'Google Calendar not connected') {
       return res.status(400).json({ error: error.message });
@@ -595,11 +603,12 @@ async function sync(req, res) {
   try {
     var accessToken = await getValidAccessToken(req.user);
     var userId = req.user.id;
+    var userRow = await db('users').where('id', userId).select('timezone').first();
+    var tz = (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
     var year = new Date().getFullYear();
     var now = new Date();
     var todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    // Wide sync window: 90 days back, 60 days forward
     var windowStart = new Date(now);
     windowStart.setDate(windowStart.getDate() - 90);
     var windowEnd = new Date(now);
@@ -607,7 +616,7 @@ async function sync(req, res) {
 
     var stats = { pushed: 0, pulled: 0, deleted_local: 0, deleted_remote: 0, errors: [] };
 
-    // === Phase 0: Run scheduler to persist date moves ===
+    // === Phase 0: Run scheduler ===
     try {
       var schedResult = await runScheduleAndPersist(userId);
       stats.scheduler = { moved: schedResult.moved, tasks: schedResult.tasks };
@@ -618,25 +627,32 @@ async function sync(req, res) {
 
     // === Phase 1: Build state maps ===
 
-    // Load all active ledger records for the user
     var ledgerRecords = await db('gcal_sync_ledger')
       .where('user_id', userId)
       .where('status', 'active')
       .select();
 
-    // Fetch ALL GCal events in the wide window
     var timeMin = windowStart.toISOString();
     var timeMax = windowEnd.toISOString();
     var result = await gcalApi.listEvents(accessToken, timeMin, timeMax);
     var gcalEvents = (result && result.items) || [];
 
-    // Load all user tasks that have a date
-    var allTasks = await db('tasks')
+    // Load all user tasks that have a scheduled date
+    var allTaskRows = await db('tasks')
       .where('user_id', userId)
-      .whereNotNull('date')
+      .whereNotNull('scheduled_at')
       .select();
 
-    // Build lookup maps
+    // Map through rowToTask to get date/time/day properties
+    var allTasks = allTaskRows.map(function(r) {
+      var t = rowToTask(r, tz);
+      // Carry over raw DB fields needed for sync logic
+      t._habit = r.habit;
+      t._generated = r.generated;
+      t._scheduled_at = r.scheduled_at;
+      return t;
+    });
+
     var ledgerByTaskId = {};
     var ledgerByGcalId = {};
     for (var lr of ledgerRecords) {
@@ -650,17 +666,17 @@ async function sync(req, res) {
     }
 
     var tasksById = {};
-    for (var t of allTasks) {
-      tasksById[t.id] = t;
+    for (var ti = 0; ti < allTasks.length; ti++) {
+      tasksById[allTasks[ti].id] = allTasks[ti];
     }
 
-    // Track which tasks and events have been processed via ledger
     var processedTaskIds = new Set();
     var processedGcalIds = new Set();
 
     // === Phase 2: Process existing ledger records ===
 
-    for (var ledger of ledgerRecords) {
+    for (var li = 0; li < ledgerRecords.length; li++) {
+      var ledger = ledgerRecords[li];
       var task = ledger.task_id ? tasksById[ledger.task_id] : null;
       var event = ledger.gcal_event_id ? gcalEventsById[ledger.gcal_event_id] : null;
 
@@ -668,8 +684,8 @@ async function sync(req, res) {
       if (ledger.gcal_event_id) processedGcalIds.add(ledger.gcal_event_id);
 
       try {
-        // Habit/generated tasks should NOT be on GCal — remove them
-        if (task && (task.habit || task.generated) && event) {
+        // Habit/generated tasks should NOT be on GCal
+        if (task && (task._habit || task._generated) && event) {
           try {
             await gcalApi.deleteEvent(accessToken, ledger.gcal_event_id);
             await delay(100);
@@ -687,8 +703,7 @@ async function sync(req, res) {
           stats.deleted_local++;
           continue;
         }
-        if (task && (task.habit || task.generated) && !event) {
-          // Habit task, event already gone — just clean up ledger
+        if (task && (task._habit || task._generated) && !event) {
           await db.transaction(async function(trx) {
             await trx('tasks').where('id', task.id).update({
               gcal_event_id: null, updated_at: db.fn.now()
@@ -700,69 +715,57 @@ async function sync(req, res) {
           continue;
         }
 
-        // Juggler-origin tasks whose date is today or past and not done/skip →
-        // the scheduler will reschedule these to future dates, so remove from GCal
-        if (task && event && ledger.origin === 'juggler') {
-          var tDateParts = (task.date || '').split('/');
-          if (/^\d{1,2}\/\d{1,2}$/.test(task.date || '')) {
-            var tDateObj = new Date(year, parseInt(tDateParts[0], 10) - 1, parseInt(tDateParts[1], 10));
-            var taskIsPast = tDateObj < todayStart;
-            var taskNotDone = task.status !== 'done' && task.status !== 'skip';
-            if (taskIsPast && taskNotDone) {
-              try {
-                await gcalApi.deleteEvent(accessToken, ledger.gcal_event_id);
-                await delay(100);
-              } catch (e3) {
-                if (!e3.message.includes('404') && !e3.message.includes('410')) throw e3;
-              }
-              await db.transaction(async function(trx) {
-                await trx('tasks').where('id', task.id).update({ gcal_event_id: null, updated_at: db.fn.now() });
-                await trx('gcal_sync_ledger').where('id', ledger.id).update({
-                  status: 'deleted_local', gcal_event_id: null, synced_at: db.fn.now()
-                });
-              });
-              stats.deleted_local++;
-              continue;
+        // Past juggler-origin tasks that aren't done → remove from GCal
+        if (task && event && ledger.origin === 'juggler' && task._scheduled_at) {
+          var taskScheduledAt = task._scheduled_at instanceof Date ? task._scheduled_at : new Date(String(task._scheduled_at).replace(' ', 'T') + 'Z');
+          var taskIsPast = taskScheduledAt < todayStart;
+          var taskNotDone = task.status !== 'done' && task.status !== 'skip';
+          if (taskIsPast && taskNotDone) {
+            try {
+              await gcalApi.deleteEvent(accessToken, ledger.gcal_event_id);
+              await delay(100);
+            } catch (e3) {
+              if (!e3.message.includes('404') && !e3.message.includes('410')) throw e3;
             }
+            await db.transaction(async function(trx) {
+              await trx('tasks').where('id', task.id).update({ gcal_event_id: null, updated_at: db.fn.now() });
+              await trx('gcal_sync_ledger').where('id', ledger.id).update({
+                status: 'deleted_local', gcal_event_id: null, synced_at: db.fn.now()
+              });
+            });
+            stats.deleted_local++;
+            continue;
           }
         }
 
         if (task && event) {
-          // Both exist — compare hashes for changes
           var currentTaskHash = taskHash(task);
           var currentEventHash = eventHash(event);
           var taskChanged = currentTaskHash !== ledger.last_pushed_hash;
           var eventChanged = currentEventHash !== ledger.last_pulled_hash;
 
           if (taskChanged && eventChanged) {
-            // Both changed — origin wins
             if (ledger.origin === 'juggler') {
-              // Push task → GCal
-              var eventBody = buildEventBody(task, year);
+              var eventBody = buildEventBody(task, year, tz);
               await gcalApi.patchEvent(accessToken, ledger.gcal_event_id, eventBody);
               await delay(100);
               stats.pushed++;
             } else {
-              // Pull GCal → task
-              var updateFields = applyEventToTask(event);
+              var updateFields = applyEventToTask(event, tz);
               await db('tasks').where('id', task.id).update(updateFields);
               stats.pulled++;
             }
           } else if (taskChanged) {
-            // Only task changed → push to GCal
-            var eventBody2 = buildEventBody(task, year);
+            var eventBody2 = buildEventBody(task, year, tz);
             await gcalApi.patchEvent(accessToken, ledger.gcal_event_id, eventBody2);
             await delay(100);
             stats.pushed++;
           } else if (eventChanged) {
-            // Only event changed → pull to task
-            var updateFields2 = applyEventToTask(event);
+            var updateFields2 = applyEventToTask(event, tz);
             await db('tasks').where('id', task.id).update(updateFields2);
             stats.pulled++;
           }
-          // else: neither changed, nothing to do
 
-          // Update ledger hashes and cached fields
           var startStr = event.start?.dateTime || event.start?.date || null;
           var endStr = event.end?.dateTime || event.end?.date || null;
           await db('gcal_sync_ledger').where('id', ledger.id).update({
@@ -776,10 +779,6 @@ async function sync(req, res) {
           });
 
         } else if (task && !event) {
-          // Task exists but event gone from GCal
-          // Only treat as "deleted remotely" if the event's cached date falls
-          // within our fetch window. Events outside the window simply weren't
-          // returned by the API — they weren't deleted.
           if (ledger.gcal_event_id) {
             var cachedStart = ledger.gcal_start;
             var eventInWindow = false;
@@ -789,14 +788,13 @@ async function sync(req, res) {
             }
             if (eventInWindow) {
               await db.transaction(async function(trx) {
-                // Clean up dependsOn references in other tasks (same as deleteTask)
-                var deletedDeps = typeof task.depends_on === 'string'
-                  ? JSON.parse(task.depends_on || '[]') : (task.depends_on || []);
+                var deletedDeps = typeof task.dependsOn === 'object' ? task.dependsOn : [];
                 var affected = await trx('tasks')
                   .where('user_id', userId)
                   .whereRaw('JSON_CONTAINS(depends_on, ?)', [JSON.stringify(task.id)])
                   .select('id', 'depends_on');
-                for (var a of affected) {
+                for (var ai = 0; ai < affected.length; ai++) {
+                  var a = affected[ai];
                   var deps = typeof a.depends_on === 'string'
                     ? JSON.parse(a.depends_on || '[]') : (a.depends_on || []);
                   var newDeps = deps.filter(function(d) { return d !== task.id; });
@@ -816,17 +814,14 @@ async function sync(req, res) {
           }
 
         } else if (!task && event) {
-          // Task deleted from Juggler (task_id is null or task row gone) → delete GCal event
           try {
             await gcalApi.deleteEvent(accessToken, ledger.gcal_event_id);
             await delay(100);
           } catch (e) {
-            // 404/410 = already gone
             if (!e.message.includes('404') && !e.message.includes('410')) {
               throw e;
             }
           }
-          // Single write — no transaction needed
           await db('gcal_sync_ledger').where('id', ledger.id).update({
             status: 'deleted_local',
             gcal_event_id: null,
@@ -835,7 +830,6 @@ async function sync(req, res) {
           stats.deleted_local++;
 
         } else {
-          // Both gone — single write, no transaction needed
           await db('gcal_sync_ledger').where('id', ledger.id).update({
             status: 'deleted_local',
             synced_at: db.fn.now()
@@ -855,28 +849,22 @@ async function sync(req, res) {
 
     // === Phase 3: Handle new items (no ledger record) ===
 
-    // 3a: Tasks with date + time and no ledger record → push to GCal
-    for (var taskId in tasksById) {
-      if (processedTaskIds.has(taskId)) continue;
-      var newTask = tasksById[taskId];
+    // 3a: Tasks with scheduled_at and no ledger record → push to GCal
+    for (var ti2 = 0; ti2 < allTasks.length; ti2++) {
+      var newTask = allTasks[ti2];
+      if (processedTaskIds.has(newTask.id)) continue;
 
-      // Skip habit and generated tasks — they clutter GCal
-      if (newTask.habit || newTask.generated) continue;
-
-      // Only push tasks that have a valid M/D date + time
-      if (!newTask.date || !/^\d{1,2}\/\d{1,2}$/.test(newTask.date)) continue;
+      if (newTask._habit || newTask._generated) continue;
+      if (!newTask.date) continue;
       if (!newTask.time && newTask.when !== 'allday') continue;
 
-      // Only push future tasks (from today forward)
-      var taskParts = newTask.date.split('/');
-      var taskMonth = parseInt(taskParts[0], 10) - 1;
-      var taskDay = parseInt(taskParts[1], 10);
-      var taskDate = new Date(year, taskMonth, taskDay);
-      if (taskDate < todayStart) continue;
-      if (taskDate > windowEnd) continue;
+      // Only push future tasks
+      var taskSA = newTask._scheduled_at instanceof Date ? newTask._scheduled_at : new Date(String(newTask._scheduled_at).replace(' ', 'T') + 'Z');
+      if (taskSA < todayStart) continue;
+      if (taskSA > windowEnd) continue;
 
       try {
-        var newEventBody = buildEventBody(newTask, year);
+        var newEventBody = buildEventBody(newTask, year, tz);
         var created = await gcalApi.insertEvent(accessToken, newEventBody);
         await delay(100);
 
@@ -912,15 +900,16 @@ async function sync(req, res) {
       }
     }
 
-    // 3b: GCal events not in any ledger record → create task (future only)
-    for (var evId in gcalEventsById) {
+    // 3b: GCal events not in any ledger record → create task
+    var gcalEventIds = Object.keys(gcalEventsById);
+    for (var ei = 0; ei < gcalEventIds.length; ei++) {
+      var evId = gcalEventIds[ei];
       if (processedGcalIds.has(evId)) continue;
       var newEvent = gcalEventsById[evId];
 
-      // Check if this event is already linked to a task (pre-ledger)
-      var existingTask = allTasks.find(function(t) { return t.gcal_event_id === evId; });
+      // Check if already linked to a task (pre-ledger)
+      var existingTask = allTasks.find(function(t) { return t.gcalEventId === evId; });
       if (existingTask) {
-        // Create a ledger record for this pre-existing link
         var origin = existingTask.id.startsWith('gcal_') ? 'gcal' : 'juggler';
         await db('gcal_sync_ledger').insert({
           user_id: userId,
@@ -949,7 +938,6 @@ async function sync(req, res) {
       }
 
       if (isPast) {
-        // Past event — create ledger record but no task
         await db('gcal_sync_ledger').insert({
           user_id: userId,
           task_id: null,
@@ -968,23 +956,22 @@ async function sync(req, res) {
         continue;
       }
 
-      // Future event — check for existing task with same text+date before creating
+      // Future event — create task
       try {
         var evStartStr2 = newEvent.start?.dateTime || newEvent.start?.date;
         var evEndStr = newEvent.end?.dateTime || newEvent.end?.date;
         var evIsAllDay = !newEvent.start?.dateTime;
-        var jd = isoToJugglerDate(evStartStr2);
+        var jd = isoToJugglerDate(evStartStr2, tz);
         var evDur = evIsAllDay ? 0 : 30;
         if (!evIsAllDay && evStartStr2 && evEndStr) {
           evDur = computeDurationMinutes(evStartStr2, evEndStr);
         }
 
-        // Skip if a task with the same text and date already exists (prevent duplicates)
+        // Skip if a task with same text and date already exists
         var dupTask = allTasks.find(function(t) {
           return t.text === (newEvent.summary || '') && t.date === jd.date;
         });
         if (dupTask) {
-          // Link existing task to this GCal event via ledger (don't create a new task)
           await db('gcal_sync_ledger').insert({
             user_id: userId,
             task_id: dupTask.id,
@@ -1004,12 +991,22 @@ async function sync(req, res) {
         }
 
         var newTaskId = 'gcal_' + crypto.randomBytes(8).toString('hex');
+
+        // Compute scheduled_at
+        var newScheduledAt = null;
+        if (jd.date) {
+          if (evIsAllDay) {
+            newScheduledAt = localToUtc(jd.date, '12:00 AM', tz);
+          } else if (jd.time) {
+            newScheduledAt = localToUtc(jd.date, jd.time, tz);
+          }
+        }
+
         var taskRow = {
           id: newTaskId,
           user_id: userId,
           text: newEvent.summary || '(No title)',
-          date: jd.date,
-          time: evIsAllDay ? null : jd.time,
+          scheduled_at: newScheduledAt,
           dur: evDur,
           pri: 'P3',
           rigid: 1,
@@ -1022,6 +1019,10 @@ async function sync(req, res) {
         if (newEvent.description) {
           taskRow.notes = newEvent.description;
         }
+
+        // Build a task object for hashing
+        var newTaskObj = rowToTask(taskRow, tz);
+
         await db.transaction(async function(trx) {
           await trx('tasks').insert(taskRow);
 
@@ -1030,7 +1031,7 @@ async function sync(req, res) {
             task_id: newTaskId,
             gcal_event_id: newEvent.id,
             origin: 'gcal',
-            last_pushed_hash: taskHash(taskRow),
+            last_pushed_hash: taskHash(newTaskObj),
             last_pulled_hash: eventHash(newEvent),
             gcal_summary: newEvent.summary || '(No title)',
             gcal_start: newEvent.start?.dateTime || newEvent.start?.date || null,
@@ -1064,13 +1065,9 @@ async function sync(req, res) {
   }
 }
 
-/**
- * POST /api/gcal/auto-sync — toggle auto-sync setting
- * Body: { enabled: true/false }
- */
 async function setAutoSync(req, res) {
   try {
-    var { enabled } = req.body;
+    var enabled = req.body.enabled;
     var userId = req.user.id;
     var value = !!enabled;
 
@@ -1106,7 +1103,6 @@ module.exports = {
   pull,
   sync,
   setAutoSync,
-  // Exported for testing
   jugglerDateToISO,
   isoToJugglerDate,
   taskHash,

@@ -3,7 +3,8 @@
  */
 
 const db = require('../db');
-const { rowToTask } = require('./task.controller');
+const { rowToTask, taskToRow } = require('./task.controller');
+const { localToUtc, toDateISO } = require('../scheduler/dateHelpers');
 
 /**
  * POST /api/data/import
@@ -11,26 +12,27 @@ const { rowToTask } = require('./task.controller');
  */
 async function importData(req, res) {
   try {
-    const userId = req.user.id;
-    const data = req.body;
+    var userId = req.user.id;
+    var tz = req.user.timezone || 'America/New_York';
+    var data = req.body;
 
     if (!data || !data.extraTasks) {
       return res.status(400).json({ error: 'Invalid import data — expected v7 format with extraTasks' });
     }
 
-    const tasks = data.extraTasks || [];
-    const statuses = data.statuses || {};
-    const directions = data.directions || {};
-    const locations = data.locations || [];
-    const tools = data.tools || [];
-    const toolMatrix = data.toolMatrix || {};
-    const locSchedules = data.locSchedules || {};
-    const locScheduleDefaults = data.locScheduleDefaults || {};
-    const locScheduleOverrides = data.locScheduleOverrides || {};
-    const hourLocationOverrides = data.hourLocationOverrides || {};
-    const timeBlocks = data.timeBlocks || {};
-    const explicitProjects = data.projects || [];
-    const preferences = {
+    var tasks = data.extraTasks || [];
+    var statuses = data.statuses || {};
+    var directions = data.directions || {};
+    var locations = data.locations || [];
+    var tools = data.tools || [];
+    var toolMatrix = data.toolMatrix || {};
+    var locSchedules = data.locSchedules || {};
+    var locScheduleDefaults = data.locScheduleDefaults || {};
+    var locScheduleOverrides = data.locScheduleOverrides || {};
+    var hourLocationOverrides = data.hourLocationOverrides || {};
+    var timeBlocks = data.timeBlocks || {};
+    var explicitProjects = data.projects || [];
+    var preferences = {
       gridZoom: data.gridZoom || 60,
       splitDefault: data.splitDefault || false,
       splitMinDefault: data.splitMinDefault || 15,
@@ -38,25 +40,24 @@ async function importData(req, res) {
     };
 
     // Deduplicate tasks by ID — keep last occurrence (newer data wins)
-    const deduped = new Map();
-    for (const t of tasks) {
+    var deduped = new Map();
+    for (var t of tasks) {
       deduped.set(t.id, t);
     }
-    const uniqueTasks = Array.from(deduped.values());
+    var uniqueTasks = Array.from(deduped.values());
 
-    // Merge explicit projects with names extracted from tasks (before transaction so it's in scope for response)
-    const explicitNames = new Set(explicitProjects.map(p => p.name));
-    const extractedNames = new Set();
-    uniqueTasks.forEach(t => {
+    // Merge explicit projects with names extracted from tasks
+    var explicitNames = new Set(explicitProjects.map(function(p) { return p.name; }));
+    var extractedNames = new Set();
+    uniqueTasks.forEach(function(t) {
       if (t.project && !explicitNames.has(t.project)) extractedNames.add(t.project);
     });
-    const mergedProjects = [
-      ...explicitProjects,
-      ...Array.from(extractedNames).map(name => ({ name, color: null, icon: null }))
-    ];
+    var mergedProjects = explicitProjects.concat(
+      Array.from(extractedNames).map(function(name) { return { name: name, color: null, icon: null }; })
+    );
 
     // Use a transaction for atomicity
-    await db.transaction(async (trx) => {
+    await db.transaction(async function(trx) {
       // Clear existing data for user
       await trx('user_config').where('user_id', userId).del();
       await trx('tools').where('user_id', userId).del();
@@ -64,21 +65,30 @@ async function importData(req, res) {
       await trx('projects').where('user_id', userId).del();
       await trx('tasks').where('user_id', userId).del();
 
-      // Import tasks — merge status/direction into each task
+      // Import tasks — compute scheduled_at from date+time
       if (uniqueTasks.length > 0) {
-        const taskRows = uniqueTasks.map(t => {
+        var taskRows = uniqueTasks.map(function(t) {
           // Resolve location: try t.location first, fall back to t.where (old format)
-          const loc = t.location || t.where;
-          const locationArr = Array.isArray(loc) ? loc
+          var loc = t.location || t.where;
+          var locationArr = Array.isArray(loc) ? loc
             : (loc && loc !== 'anywhere' ? [loc] : []);
+
+          // Compute scheduled_at (UTC) from local date+time
+          var scheduledAt = null;
+          if (t.date && t.date !== 'TBD') {
+            var timeStr = t.time ? String(t.time).slice(0, 20) : null;
+            scheduledAt = localToUtc(t.date, timeStr || '12:00 AM', tz);
+          }
+
+          // Compute due_at and start_after_at
+          var dueAt = t.due ? toDateISO(t.due) || null : null;
+          var startAfterAt = (t.startAfter || t.start_after) ? toDateISO(t.startAfter || t.start_after) || null : null;
 
           return {
             id: t.id,
             user_id: userId,
             text: t.text || '',
-            date: t.date || null,
-            day: t.day || null,
-            time: t.time ? String(t.time).slice(0, 20) : null,
+            scheduled_at: scheduledAt,
             dur: t.dur || 30,
             time_remaining: t.timeRemaining != null ? t.timeRemaining : null,
             pri: t.pri || 'P3',
@@ -87,8 +97,8 @@ async function importData(req, res) {
             direction: directions[t.id] || t.direction || null,
             section: t.section || null,
             notes: t.notes || null,
-            due: t.due || null,
-            start_after: t.startAfter || null,
+            due_at: dueAt,
+            start_after_at: startAfterAt,
             location: JSON.stringify(locationArr),
             tools: JSON.stringify(t.tools || []),
             when: t.when || null,
@@ -108,47 +118,53 @@ async function importData(req, res) {
         });
 
         // Insert in chunks
-        const chunkSize = 100;
-        for (let i = 0; i < taskRows.length; i += chunkSize) {
+        var chunkSize = 100;
+        for (var i = 0; i < taskRows.length; i += chunkSize) {
           await trx('tasks').insert(taskRows.slice(i, i + chunkSize));
         }
       }
 
       // Import locations
       if (locations.length > 0) {
-        await trx('locations').insert(locations.map((l, i) => ({
-          user_id: userId,
-          location_id: l.id,
-          name: l.name,
-          icon: l.icon || '',
-          sort_order: i
-        })));
+        await trx('locations').insert(locations.map(function(l, i) {
+          return {
+            user_id: userId,
+            location_id: l.id,
+            name: l.name,
+            icon: l.icon || '',
+            sort_order: i
+          };
+        }));
       }
 
       // Import tools
       if (tools.length > 0) {
-        await trx('tools').insert(tools.map((t, i) => ({
-          user_id: userId,
-          tool_id: t.id,
-          name: t.name,
-          icon: t.icon || '',
-          sort_order: i
-        })));
+        await trx('tools').insert(tools.map(function(t, i) {
+          return {
+            user_id: userId,
+            tool_id: t.id,
+            name: t.name,
+            icon: t.icon || '',
+            sort_order: i
+          };
+        }));
       }
 
       // Import projects
       if (mergedProjects.length > 0) {
-        await trx('projects').insert(mergedProjects.map((p, i) => ({
-          user_id: userId,
-          name: p.name,
-          color: p.color || null,
-          icon: p.icon || null,
-          sort_order: i
-        })));
+        await trx('projects').insert(mergedProjects.map(function(p, i) {
+          return {
+            user_id: userId,
+            name: p.name,
+            color: p.color || null,
+            icon: p.icon || null,
+            sort_order: i
+          };
+        }));
       }
 
       // Import config values
-      const configs = [
+      var configs = [
         { key: 'tool_matrix', value: toolMatrix },
         { key: 'time_blocks', value: timeBlocks },
         { key: 'loc_schedules', value: locSchedules },
@@ -158,11 +174,13 @@ async function importData(req, res) {
         { key: 'preferences', value: preferences }
       ];
 
-      await trx('user_config').insert(configs.map(c => ({
-        user_id: userId,
-        config_key: c.key,
-        config_value: JSON.stringify(c.value)
-      })));
+      await trx('user_config').insert(configs.map(function(c) {
+        return {
+          user_id: userId,
+          config_key: c.key,
+          config_value: JSON.stringify(c.value)
+        };
+      }));
     });
 
     res.json({
@@ -187,9 +205,10 @@ async function importData(req, res) {
  */
 async function exportData(req, res) {
   try {
-    const userId = req.user.id;
+    var userId = req.user.id;
+    var tz = req.user.timezone || 'America/New_York';
 
-    const [taskRows, locationRows, toolRows, projectRows, configRows] = await Promise.all([
+    var results = await Promise.all([
       db('tasks').where('user_id', userId).orderBy('created_at', 'asc'),
       db('locations').where('user_id', userId).orderBy('sort_order'),
       db('tools').where('user_id', userId).orderBy('sort_order'),
@@ -197,30 +216,36 @@ async function exportData(req, res) {
       db('user_config').where('user_id', userId)
     ]);
 
-    const tasks = taskRows.map(rowToTask);
-    const statuses = {};
-    const directions = {};
-    tasks.forEach(t => {
+    var taskRows = results[0];
+    var locationRows = results[1];
+    var toolRows = results[2];
+    var projectRows = results[3];
+    var configRows = results[4];
+
+    var tasks = taskRows.map(function(r) { return rowToTask(r, tz); });
+    var statuses = {};
+    var directions = {};
+    tasks.forEach(function(t) {
       if (t.status) statuses[t.id] = t.status;
       if (t.direction) directions[t.id] = t.direction;
     });
 
-    const config = {};
-    configRows.forEach(row => {
+    var config = {};
+    configRows.forEach(function(row) {
       config[row.config_key] = typeof row.config_value === 'string'
         ? JSON.parse(row.config_value) : row.config_value;
     });
 
-    const prefs = config.preferences || {};
+    var prefs = config.preferences || {};
 
     res.json({
       v7: true,
       extraTasks: tasks,
-      statuses,
-      directions,
-      locations: locationRows.map(l => ({ id: l.location_id, name: l.name, icon: l.icon })),
-      tools: toolRows.map(t => ({ id: t.tool_id, name: t.name, icon: t.icon })),
-      projects: projectRows.map(p => ({ id: p.id, name: p.name, color: p.color, icon: p.icon })),
+      statuses: statuses,
+      directions: directions,
+      locations: locationRows.map(function(l) { return { id: l.location_id, name: l.name, icon: l.icon }; }),
+      tools: toolRows.map(function(t) { return { id: t.tool_id, name: t.name, icon: t.icon }; }),
+      projects: projectRows.map(function(p) { return { id: p.id, name: p.name, color: p.color, icon: p.icon }; }),
       toolMatrix: config.tool_matrix || {},
       timeBlocks: config.time_blocks || {},
       locSchedules: config.loc_schedules || {},

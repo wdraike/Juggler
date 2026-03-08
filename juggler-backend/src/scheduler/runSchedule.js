@@ -1,5 +1,9 @@
 /**
  * runSchedule.js — Load data, run scheduler, persist date moves
+ *
+ * The DB stores scheduled_at (UTC DATETIME) as the single source of truth.
+ * The scheduler works with in-memory task objects that have local date/time/day
+ * properties, derived from scheduled_at via rowToTask().
  */
 
 var db = require('../db');
@@ -12,13 +16,14 @@ var dateHelpers = require('./dateHelpers');
 var parseDate = dateHelpers.parseDate;
 var formatDateKey = dateHelpers.formatDateKey;
 var localToUtc = dateHelpers.localToUtc;
+var utcToLocal = dateHelpers.utcToLocal;
 var taskController = require('../controllers/task.controller');
 var rowToTask = taskController.rowToTask;
 
 var DEFAULT_TIMEZONE = 'America/New_York';
 
 /**
- * Get current date/time in America/New_York timezone
+ * Get current date/time in user's timezone
  */
 function getNowInTimezone(timezone) {
   var tz = timezone || DEFAULT_TIMEZONE;
@@ -34,7 +39,7 @@ function getNowInTimezone(timezone) {
 
   var month = vals.month;
   var day = vals.day;
-  var hour = vals.hour % 24; // Normalize: some runtimes return 24 for midnight
+  var hour = vals.hour % 24;
   var minute = vals.minute;
 
   return {
@@ -147,8 +152,8 @@ async function loadConfig(userId) {
  * Run the scheduler and persist date moves to the DB.
  *
  * Before each run, tasks that were previously moved by the scheduler are
- * reset to their original_date / original_time so the algorithm starts
- * from the user's intended placement every time.
+ * reset to their original_scheduled_at so the algorithm starts from the
+ * user's intended placement every time.
  *
  * Returns stats: { updated, cleared, reset, tasks: [...] }
  */
@@ -163,49 +168,21 @@ async function runScheduleAndPersist(userId, _retries) {
   try {
   return await db.transaction(async function(trx) {
 
-  // 1a. Reset scheduler-moved tasks (date changed) back to their original date/time
+  // 1. Reset scheduler-moved tasks back to their original scheduled_at
   var resetCount = await trx('tasks')
     .where('user_id', userId)
-    .whereNotNull('original_date')
+    .whereNotNull('original_scheduled_at')
     .update({
-      date: db.raw('original_date'),
-      day: db.raw('COALESCE(original_day, day)'),
-      time: db.raw('original_time'),
-      original_date: null,
-      original_time: null,
-      original_day: null,
+      scheduled_at: db.raw('original_scheduled_at'),
+      original_scheduled_at: null,
       updated_at: db.fn.now()
     });
 
-  // 1b. Reset scheduler-moved tasks (time-only change) back to original time
-  var resetTimeCount = await trx('tasks')
-    .where('user_id', userId)
-    .whereNull('original_date')
-    .whereNotNull('original_time')
-    .update({
-      time: db.raw('original_time'),
-      original_time: null,
-      updated_at: db.fn.now()
-    });
+  if (resetCount > 0) console.log('[SCHED] reset ' + resetCount + ' tasks to original_scheduled_at');
 
-  if (resetCount + resetTimeCount > 0) console.log('[SCHED] reset ' + resetCount + ' date moves, ' + resetTimeCount + ' time moves');
-
-  // 2. Load all tasks for user (now with original dates restored)
+  // 2. Load all tasks for user (now with originals restored)
   var taskRows = await trx('tasks').where('user_id', userId).select();
   var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE); });
-
-  // 2b. Recompute scheduled_at for tasks that were reset (their date/time changed)
-  if (resetCount + resetTimeCount > 0) {
-    for (var ri = 0; ri < taskRows.length; ri++) {
-      var tr = taskRows[ri];
-      if (tr.date && tr.time) {
-        var utcReset = localToUtc(tr.date, tr.time, TIMEZONE);
-        if (utcReset) {
-          await trx('tasks').where({ id: tr.id, user_id: userId }).update({ scheduled_at: utcReset });
-        }
-      }
-    }
-  }
 
   // 3. Build statuses map
   var statuses = {};
@@ -213,7 +190,7 @@ async function runScheduleAndPersist(userId, _retries) {
     statuses[t.id] = t.status || '';
   });
 
-  // 4. Get current date/time in Eastern
+  // 4. Get current date/time in user's timezone
   var timeInfo = getNowInTimezone(TIMEZONE);
 
   // 5. Load config
@@ -237,6 +214,10 @@ async function runScheduleAndPersist(userId, _retries) {
 
   var taskById = {};
   allTasks.forEach(function(t) { taskById[t.id] = t; });
+
+  // Build a map of raw rows by ID for accessing scheduled_at
+  var rawRowById = {};
+  taskRows.forEach(function(r) { rawRowById[r.id] = r; });
 
   // Extract the first placement per task from dayPlacements
   var placementByTaskId = {};
@@ -264,8 +245,6 @@ async function runScheduleAndPersist(userId, _retries) {
     var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
     var newTime = dh + ':' + (mm < 10 ? '0' : '') + mm + ' ' + ampm;
     var newDate = placement.dateKey;
-    var dateHelpers = require('./dateHelpers');
-    var newDay = DAY_NAMES[dateHelpers.parseDate(newDate).getDay()];
 
     var dateChanged = newDate !== original.date;
     var timeChanged = newTime !== original.time;
@@ -276,31 +255,16 @@ async function runScheduleAndPersist(userId, _retries) {
     if (original.habit && original.rigid) continue;
 
     if (dateChanged || timeChanged) {
-      var dbUpdate = { updated_at: db.fn.now() };
-      if (dateChanged) {
-        dbUpdate.date = newDate;
-        dbUpdate.day = newDay;
-        // Save the user's original date so we can reset next run
-        dbUpdate.original_date = original.date;
-        dbUpdate.original_day = original.day;
-      }
-      if (timeChanged) {
-        dbUpdate.time = newTime;
-        if (!dbUpdate.original_date) {
-          // Date didn't change but time did — still track original time
-          dbUpdate.original_time = original.time;
-        } else {
-          dbUpdate.original_time = original.time;
-        }
-      }
+      // Compute the new scheduled_at from the placement's local date+time
+      var newScheduledAt = localToUtc(newDate, newTime, TIMEZONE);
+      if (!newScheduledAt) continue;
 
-      // Compute scheduled_at from the new date+time
-      var finalDate = dbUpdate.date || original.date;
-      var finalTime = dbUpdate.time || original.time;
-      if (finalDate && finalTime) {
-        var utc = localToUtc(finalDate, finalTime, TIMEZONE);
-        if (utc) dbUpdate.scheduled_at = utc;
-      }
+      var rawRow = rawRowById[taskId];
+      var dbUpdate = {
+        scheduled_at: newScheduledAt,
+        original_scheduled_at: rawRow ? rawRow.scheduled_at : null,
+        updated_at: db.fn.now()
+      };
 
       await trx('tasks')
         .where({ id: taskId, user_id: userId })
@@ -338,9 +302,13 @@ async function runScheduleAndPersist(userId, _retries) {
   });
   for (var ui = 0; ui < updatedTasks.length; ui++) {
     if (updatedTasks[ui].cleared) {
-      var clearUpdate = { time: null, original_time: updatedTasks[ui].fromTime, updated_at: db.fn.now() };
+      var rawRowClr = rawRowById[updatedTasks[ui].id];
       // Recompute scheduled_at as date-only (midnight local → UTC)
       var clearOriginal = taskById[updatedTasks[ui].id];
+      var clearUpdate = {
+        original_scheduled_at: rawRowClr ? rawRowClr.scheduled_at : null,
+        updated_at: db.fn.now()
+      };
       if (clearOriginal && clearOriginal.date) {
         var utcMidnight = localToUtc(clearOriginal.date, '12:00 AM', TIMEZONE);
         if (utcMidnight) clearUpdate.scheduled_at = utcMidnight;

@@ -1,35 +1,41 @@
 /**
  * Task Controller — CRUD operations for tasks
+ *
+ * The DB stores scheduled_at (DATETIME, UTC) as the single source of truth
+ * for task date+time. The API layer exposes date/time/day as human-readable
+ * strings derived via utcToLocal(). Incoming date/time from the frontend is
+ * converted to scheduled_at via localToUtc().
  */
 
 const db = require('../db');
-const { localToUtc, utcToLocal, toDateISO, fromDateISO } = require('../scheduler/dateHelpers');
+const { localToUtc, utcToLocal, toDateISO, fromDateISO, getDayName } = require('../scheduler/dateHelpers');
 
 /**
  * Map task row from DB to API format.
- * If timezone is provided and scheduled_at exists, derive date/time/day from UTC.
+ * Derives date/time/day from scheduled_at (UTC) using the user's timezone.
  */
 function rowToTask(row, timezone) {
-  let date = row.date;
-  let time = row.time;
-  let day = row.day;
-  let due = row.due;
-  let startAfter = row.start_after;
+  var date = null;
+  var time = null;
+  var day = null;
+  var due = null;
+  var startAfter = null;
 
   // Derive date/time/day from scheduled_at (UTC source of truth)
   if (timezone && row.scheduled_at) {
-    const local = utcToLocal(row.scheduled_at, timezone);
+    var local = utcToLocal(row.scheduled_at, timezone);
     if (local.date) date = local.date;
     if (local.time) time = local.time;
     if (local.day) day = local.day;
   }
 
-  // Derive due/startAfter from DATE columns if available
+  // Derive due from due_at DATE column
   if (row.due_at) {
     due = fromDateISO(row.due_at instanceof Date
       ? row.due_at.toISOString().split('T')[0]
       : String(row.due_at).split('T')[0]);
   }
+  // Derive startAfter from start_after_at DATE column
   if (row.start_after_at) {
     startAfter = fromDateISO(row.start_after_at instanceof Date
       ? row.start_after_at.toISOString().split('T')[0]
@@ -72,16 +78,12 @@ function rowToTask(row, timezone) {
 
 /**
  * Map API task to DB row.
- * If timezone is provided, compute scheduled_at (UTC) from date+time,
- * and due_at/start_after_at from due/startAfter.
+ * Converts date+time → scheduled_at (UTC) and due/startAfter → due_at/start_after_at.
  */
 function taskToRow(task, userId, timezone) {
-  const row = { user_id: userId };
+  var row = { user_id: userId };
   if (task.id !== undefined) row.id = task.id;
   if (task.text !== undefined) row.text = task.text;
-  if (task.date !== undefined) row.date = task.date;
-  if (task.day !== undefined) row.day = task.day;
-  if (task.time !== undefined) row.time = task.time;
   if (task.dur !== undefined) row.dur = task.dur;
   if (task.timeRemaining !== undefined) row.time_remaining = task.timeRemaining;
   if (task.pri !== undefined) row.pri = task.pri;
@@ -91,11 +93,9 @@ function taskToRow(task, userId, timezone) {
   if (task.section !== undefined) row.section = task.section;
   if (task.notes !== undefined) row.notes = task.notes;
   if (task.due !== undefined) {
-    row.due = task.due;
     row.due_at = task.due ? toDateISO(task.due) || null : null;
   }
   if (task.startAfter !== undefined) {
-    row.start_after = task.startAfter;
     row.start_after_at = task.startAfter ? toDateISO(task.startAfter) || null : null;
   }
   if (task.location !== undefined) row.location = JSON.stringify(task.location);
@@ -116,8 +116,8 @@ function taskToRow(task, userId, timezone) {
 
   // Compute scheduled_at from date+time if timezone is provided
   if (timezone && (task.date !== undefined || task.time !== undefined)) {
-    const dateVal = task.date !== undefined ? task.date : null;
-    const timeVal = task.time !== undefined ? task.time : null;
+    var dateVal = task.date !== undefined ? task.date : null;
+    var timeVal = task.time !== undefined ? task.time : null;
     if (dateVal) {
       row.scheduled_at = localToUtc(dateVal, timeVal, timezone) || null;
     } else if (dateVal === null || dateVal === '') {
@@ -134,10 +134,10 @@ function taskToRow(task, userId, timezone) {
  */
 async function getAllTasks(req, res) {
   try {
-    const rows = await db('tasks').where('user_id', req.user.id).orderBy('created_at', 'asc');
-    const tz = req.user.timezone || 'America/New_York';
-    const tasks = rows.map(r => rowToTask(r, tz));
-    res.json({ tasks });
+    var rows = await db('tasks').where('user_id', req.user.id).orderBy('created_at', 'asc');
+    var tz = req.user.timezone || 'America/New_York';
+    var tasks = rows.map(function(r) { return rowToTask(r, tz); });
+    res.json({ tasks: tasks });
   } catch (error) {
     console.error('Get tasks error:', error);
     res.status(500).json({ error: 'Failed to fetch tasks' });
@@ -149,7 +149,7 @@ async function getAllTasks(req, res) {
  */
 async function ensureProject(userId, projectName) {
   if (!projectName) return;
-  const exists = await db('projects').where({ user_id: userId, name: projectName }).first();
+  var exists = await db('projects').where({ user_id: userId, name: projectName }).first();
   if (!exists) {
     await db('projects').insert({ user_id: userId, name: projectName });
   }
@@ -157,21 +157,21 @@ async function ensureProject(userId, projectName) {
 
 async function applySplitDefault(row, userId) {
   if (row.split === undefined || row.split === null) {
-    const prefs = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
-    const splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
+    var prefs = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
+    var splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
     row.split = splitDefault ? 1 : 0;
   }
 }
 
 async function createTask(req, res) {
   try {
-    const tz = req.user.timezone || 'America/New_York';
-    const row = taskToRow(req.body, req.user.id, tz);
+    var tz = req.user.timezone || 'America/New_York';
+    var row = taskToRow(req.body, req.user.id, tz);
     row.created_at = db.fn.now();
     await applySplitDefault(row, req.user.id);
     await ensureProject(req.user.id, req.body.project);
     await db('tasks').insert(row);
-    const created = await db('tasks').where('id', row.id).first();
+    var created = await db('tasks').where('id', row.id).first();
     res.status(201).json({ task: rowToTask(created, tz) });
   } catch (error) {
     console.error('Create task error:', error);
@@ -184,14 +184,14 @@ async function createTask(req, res) {
  */
 async function updateTask(req, res) {
   try {
-    const { id } = req.params;
-    const existing = await db('tasks').where({ id, user_id: req.user.id }).first();
+    var id = req.params.id;
+    var existing = await db('tasks').where({ id: id, user_id: req.user.id }).first();
     if (!existing) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    const tz = req.user.timezone || 'America/New_York';
-    const row = taskToRow(req.body, req.user.id, tz);
+    var tz = req.user.timezone || 'America/New_York';
+    var row = taskToRow(req.body, req.user.id, tz);
     delete row.id;
     delete row.user_id;
     delete row.created_at;
@@ -199,27 +199,24 @@ async function updateTask(req, res) {
     if (req.body.project) await ensureProject(req.user.id, req.body.project);
 
     // When the user explicitly sets a date, pin it so the scheduler honors it.
-    // If datePinned is explicitly sent as false, this is a reset — clear the pin.
-    if (row.date !== undefined && row.date_pinned === undefined) {
+    if (req.body.date !== undefined && row.date_pinned === undefined) {
       row.date_pinned = 1;
     }
-    // Always clear scheduler-tracked originals on user edit so the
-    // reset step won't revert back to a stale scheduler-assigned date.
-    if (row.date !== undefined) {
-      row.original_date = null;
-      row.original_day = null;
-      row.original_time = null;
+    // Clear scheduler-tracked original on user edit so the reset step
+    // won't revert back to a stale scheduler-assigned value.
+    if (req.body.date !== undefined || req.body.time !== undefined) {
+      row.original_scheduled_at = null;
     }
 
-    await db.transaction(async (trx) => {
-      await trx('tasks').where({ id, user_id: req.user.id }).update(row);
+    await db.transaction(async function(trx) {
+      await trx('tasks').where({ id: id, user_id: req.user.id }).update(row);
 
       // When a habit template (ht_*) is updated, propagate inheritable fields
       // to all its dh* instances so they stay in sync.
       if (id.indexOf('ht_') === 0 && existing.habit) {
-        const PROPAGATE = ['location', 'when', 'where', 'tools', 'pri', 'rigid', 'split', 'day_req', 'time_flex'];
-        const instanceUpdate = {};
-        PROPAGATE.forEach(f => { if (row[f] !== undefined) instanceUpdate[f] = row[f]; });
+        var PROPAGATE = ['location', 'when', 'where', 'tools', 'pri', 'rigid', 'split', 'day_req', 'time_flex'];
+        var instanceUpdate = {};
+        PROPAGATE.forEach(function(f) { if (row[f] !== undefined) instanceUpdate[f] = row[f]; });
         if (Object.keys(instanceUpdate).length > 0) {
           instanceUpdate.updated_at = db.fn.now();
           await trx('tasks')
@@ -230,7 +227,7 @@ async function updateTask(req, res) {
       }
     });
 
-    const updated = await db('tasks').where('id', id).first();
+    var updated = await db('tasks').where('id', id).first();
     res.json({ task: rowToTask(updated, tz) });
   } catch (error) {
     console.error('Update task error:', error);
@@ -240,44 +237,42 @@ async function updateTask(req, res) {
 
 /**
  * DELETE /api/tasks/:id — delete task
- * If task has a ledger record, null out task_id so sync will delete the GCal event.
  */
 async function deleteTask(req, res) {
   try {
-    const { id } = req.params;
-    const task = await db('tasks').where({ id, user_id: req.user.id }).first();
+    var id = req.params.id;
+    var task = await db('tasks').where({ id: id, user_id: req.user.id }).first();
     if (!task) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    await db.transaction(async (trx) => {
-      // Remap dependencies using JSON_CONTAINS to fetch only affected tasks
-      const deletedDeps = typeof task.depends_on === 'string'
+    await db.transaction(async function(trx) {
+      var deletedDeps = typeof task.depends_on === 'string'
         ? JSON.parse(task.depends_on || '[]') : (task.depends_on || []);
-      const affected = await trx('tasks')
+      var affected = await trx('tasks')
         .where('user_id', req.user.id)
         .whereRaw('JSON_CONTAINS(depends_on, ?)', [JSON.stringify(id)])
         .select('id', 'depends_on');
-      for (const other of affected) {
-        const deps = typeof other.depends_on === 'string'
+      for (var i = 0; i < affected.length; i++) {
+        var other = affected[i];
+        var deps = typeof other.depends_on === 'string'
           ? JSON.parse(other.depends_on || '[]') : (other.depends_on || []);
-        const newDeps = deps.filter(d => d !== id);
-        deletedDeps.forEach(d => { if (newDeps.indexOf(d) === -1) newDeps.push(d); });
+        var newDeps = deps.filter(function(d) { return d !== id; });
+        deletedDeps.forEach(function(d) { if (newDeps.indexOf(d) === -1) newDeps.push(d); });
         await trx('tasks').where({ id: other.id, user_id: req.user.id })
           .update({ depends_on: JSON.stringify(newDeps), updated_at: db.fn.now() });
       }
 
-      // Mark ledger record so sync will delete the GCal event
       if (task.gcal_event_id) {
         await trx('gcal_sync_ledger')
           .where({ user_id: req.user.id, task_id: id })
           .update({ task_id: null, synced_at: db.fn.now() });
       }
 
-      await trx('tasks').where({ id, user_id: req.user.id }).del();
+      await trx('tasks').where({ id: id, user_id: req.user.id }).del();
     });
 
-    res.json({ message: 'Task deleted', id });
+    res.json({ message: 'Task deleted', id: id });
   } catch (error) {
     console.error('Delete task error:', error);
     res.status(500).json({ error: 'Failed to delete task' });
@@ -289,20 +284,21 @@ async function deleteTask(req, res) {
  */
 async function updateTaskStatus(req, res) {
   try {
-    const { id } = req.params;
-    const { status, direction } = req.body;
+    var id = req.params.id;
+    var status = req.body.status;
+    var direction = req.body.direction;
 
-    const existing = await db('tasks').where({ id, user_id: req.user.id }).first();
+    var existing = await db('tasks').where({ id: id, user_id: req.user.id }).first();
     if (!existing) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    const update = { status: status || '', updated_at: db.fn.now() };
+    var update = { status: status || '', updated_at: db.fn.now() };
     if (direction !== undefined) update.direction = direction;
 
-    await db('tasks').where({ id, user_id: req.user.id }).update(update);
-    const updated = await db('tasks').where('id', id).first();
-    const tz = req.user.timezone || 'America/New_York';
+    await db('tasks').where({ id: id, user_id: req.user.id }).update(update);
+    var updated = await db('tasks').where('id', id).first();
+    var tz = req.user.timezone || 'America/New_York';
     res.json({ task: rowToTask(updated, tz) });
   } catch (error) {
     console.error('Update task status error:', error);
@@ -315,7 +311,7 @@ async function updateTaskStatus(req, res) {
  */
 async function batchCreateTasks(req, res) {
   try {
-    const { tasks } = req.body;
+    var tasks = req.body.tasks;
     if (!Array.isArray(tasks) || tasks.length === 0) {
       return res.status(400).json({ error: 'Tasks array required' });
     }
@@ -323,14 +319,13 @@ async function batchCreateTasks(req, res) {
       return res.status(400).json({ error: 'Batch limited to 500 items' });
     }
 
-    const tz = req.user.timezone || 'America/New_York';
+    var tz = req.user.timezone || 'America/New_York';
 
-    // Look up splitDefault once for the batch
-    const prefs = await db('user_config').where({ user_id: req.user.id, config_key: 'preferences' }).first();
-    const splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
+    var prefs = await db('user_config').where({ user_id: req.user.id, config_key: 'preferences' }).first();
+    var splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
 
-    const rows = tasks.map(t => {
-      const row = taskToRow(t, req.user.id, tz);
+    var rows = tasks.map(function(t) {
+      var row = taskToRow(t, req.user.id, tz);
       row.created_at = db.fn.now();
       if (row.split === undefined || row.split === null) {
         row.split = splitDefault ? 1 : 0;
@@ -338,15 +333,18 @@ async function batchCreateTasks(req, res) {
       return row;
     });
 
-    // Ensure all referenced projects exist
-    const projectNames = [...new Set(tasks.map(t => t.project).filter(Boolean))];
-    for (const p of projectNames) {
-      await ensureProject(req.user.id, p);
+    var projectNames = [];
+    var seen = {};
+    tasks.forEach(function(t) {
+      if (t.project && !seen[t.project]) { projectNames.push(t.project); seen[t.project] = true; }
+    });
+    for (var i = 0; i < projectNames.length; i++) {
+      await ensureProject(req.user.id, projectNames[i]);
     }
 
-    await db.transaction(async (trx) => {
-      const chunkSize = 100;
-      for (let i = 0; i < rows.length; i += chunkSize) {
+    await db.transaction(async function(trx) {
+      var chunkSize = 100;
+      for (var i = 0; i < rows.length; i += chunkSize) {
         await trx('tasks').insert(rows.slice(i, i + chunkSize));
       }
     });
@@ -363,7 +361,7 @@ async function batchCreateTasks(req, res) {
  */
 async function batchUpdateTasks(req, res) {
   try {
-    const { updates } = req.body;
+    var updates = req.body.updates;
     if (!Array.isArray(updates) || updates.length === 0) {
       return res.status(400).json({ error: 'Updates array required' });
     }
@@ -371,30 +369,33 @@ async function batchUpdateTasks(req, res) {
       return res.status(400).json({ error: 'Batch limited to 500 items' });
     }
 
-    const tz = req.user.timezone || 'America/New_York';
-    let updatedCount = 0;
-    const MAX_RETRIES = 3;
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    var tz = req.user.timezone || 'America/New_York';
+    var updatedCount = 0;
+    var MAX_RETRIES = 3;
+    for (var attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         updatedCount = 0;
-        await db.transaction(async (trx) => {
-          for (const update of updates) {
-            const { id, ...fields } = update;
+        await db.transaction(async function(trx) {
+          for (var i = 0; i < updates.length; i++) {
+            var update = updates[i];
+            var id = update.id;
             if (!id) continue;
 
-            const row = taskToRow(fields, req.user.id, tz);
+            var fields = {};
+            Object.keys(update).forEach(function(k) { if (k !== 'id') fields[k] = update[k]; });
+            var row = taskToRow(fields, req.user.id, tz);
             delete row.user_id;
             delete row.created_at;
 
-            await trx('tasks').where({ id, user_id: req.user.id }).update(row);
+            await trx('tasks').where({ id: id, user_id: req.user.id }).update(row);
             updatedCount++;
           }
         });
-        break; // success
+        break;
       } catch (err) {
         if (err.code === 'ER_LOCK_DEADLOCK' && attempt < MAX_RETRIES) {
           console.log('[BATCH] deadlock, retry ' + (attempt + 1) + '/' + MAX_RETRIES);
-          await new Promise(r => setTimeout(r, 200 * (attempt + 1)));
+          await new Promise(function(r) { setTimeout(r, 200 * (attempt + 1)); });
           continue;
         }
         throw err;
@@ -417,5 +418,7 @@ module.exports = {
   batchCreateTasks,
   batchUpdateTasks,
   rowToTask,
-  taskToRow
+  taskToRow,
+  ensureProject,
+  applySplitDefault
 };
