@@ -462,8 +462,11 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
             )}
           </svg>
 
-          {/* Nodes */}
-          {treeIds.map(function(taskId) {
+          {/* Nodes — render in reverse-Y order so upper cards stack on top */}
+          {treeIds.slice().sort(function(a, b) {
+            var pa = layout.positions[a], pb = layout.positions[b];
+            return (pb ? pb.y : 0) - (pa ? pa.y : 0);
+          }).map(function(taskId) {
             var pos = layout.positions[taskId];
             if (!pos) return null;
             var ct = allTasks.find(function(t) { return t.id === taskId; });
@@ -481,12 +484,13 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
             var isArrowSource = arrowDrag && arrowDrag.fromId === ct.id;
 
             return (
-              <div key={ct.id} onClick={function(e) { e.stopPropagation(); if (onExpand) onExpand(ct.id); }}
-                style={{ position: 'absolute', left: pos.x, top: pos.y, width: NODE_W }}>
+              <div key={ct.id}
+                onClick={function(e) { e.stopPropagation(); if (onExpand) onExpand(ct.id); }}
+                style={{ position: 'absolute', left: pos.x, top: pos.y, width: NODE_W, cursor: 'pointer' }}>
                 {/* Card */}
                 <div
                   style={{
-                    padding: '4px 6px', borderRadius: 5, cursor: 'pointer',
+                    padding: '4px 6px', borderRadius: 5,
                     border: isHoverTarget
                       ? '2px solid ' + (isCycleDrop ? '#DC2626' : '#3B82F6')
                       : isArrowSource ? '2px solid ' + theme.accent
