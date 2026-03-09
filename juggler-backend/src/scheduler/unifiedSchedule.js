@@ -141,6 +141,13 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
           earliest = td;
         }
       }
+      // Past-time-today tasks: set floor to today so remaining capacity is
+      // used before overflowing to future days.  Without this, the scheduler
+      // freely moves all of today's tasks to tomorrow where there's more room,
+      // leaving the user with an empty today.
+      if (isPast && tdKey === effectiveTodayKey && td) {
+        if (!earliest || earliest < td) earliest = td;
+      }
       // Habits are day-specific: pin them to their date (floor + ceiling).
       // If they can't fit on their day, they go unplaced (missed).
       if (t.habit && td) {
