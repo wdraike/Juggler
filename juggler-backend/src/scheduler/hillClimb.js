@@ -203,6 +203,12 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       if (p.locked || p.task.habit || p.task.rigid || p.task.datePinned) continue;
       if (hasWhen(p.task.when, 'fixed')) continue;
       if (p._dateKey !== p.task.date) {
+        // Don't drift back to original date if it's before startAfter
+        if (p.task.startAfter) {
+          var saDate = parseDate(p.task.startAfter);
+          var origDate = parseDate(p.task.date);
+          if (saDate && origDate && origDate < saDate) continue;
+        }
         driftCandidates.push({ placement: p, currentDateKey: dateKeys[di] });
       }
     }
@@ -382,6 +388,14 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
 
       // Try placing on original date
       var targetDateKey = origDateKey;
+
+      // Enforce startAfter constraint — never move before startAfter date
+      if (pl.task.startAfter) {
+        var saD = parseDate(pl.task.startAfter);
+        var tgtD = parseDate(targetDateKey);
+        if (saD && tgtD && tgtD < saD) continue;
+      }
+
       if (!dayOcc[targetDateKey]) continue;
       if (!dayWindows[targetDateKey]) continue;
 

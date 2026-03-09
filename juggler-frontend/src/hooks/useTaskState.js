@@ -16,8 +16,13 @@ export default function useTaskState() {
   const saveTimerRef = useRef(null);
   const placementTimerRef = useRef(null);
 
-  // Load tasks from API
+  // Load tasks from API — cancels any pending debounced save first
+  // to prevent stale local state from overwriting server data after reload
   const loadTasks = useCallback(async () => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
     try {
       setLoading(true);
       const [tasksRes, configRes] = await Promise.all([
@@ -105,15 +110,26 @@ export default function useTaskState() {
     scheduleSave();
   }, [scheduleSave]);
 
-  // Convenience setters
+  // Status changes save immediately (not debounced) to prevent race conditions
+  // with loadTasks/GCal sync that could overwrite in-memory state
   const setStatus = useCallback((id, val, opts = {}) => {
-    dispatchPersist({
+    dispatch({
       type: 'SET_STATUS',
       id, val,
       deleteDirection: opts.deleteDirection,
       taskFields: opts.taskFields
     });
-  }, [dispatchPersist]);
+    // Save status immediately via dedicated endpoint
+    apiClient.put(`/tasks/${id}/status`, {
+      status: val || '',
+      direction: opts.deleteDirection ? null : undefined
+    }).then(() => {
+      // Clear dirty flag once server confirms the save
+      dispatch({ type: 'CLEAR_DIRTY_STATUS', id });
+    }).catch(err => console.error('Failed to save status:', err));
+    // If there are also taskFields (e.g. date changes on habit completion), save those too
+    if (opts.taskFields) scheduleSave();
+  }, [scheduleSave]);
 
   const setDirection = useCallback((id, val) => {
     dispatchPersist({ type: 'SET_DIRECTION', id, val });

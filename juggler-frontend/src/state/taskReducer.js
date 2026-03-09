@@ -3,16 +3,25 @@
  * Extracted from task_tracker_v7_28 lines 1424-1445
  */
 
-export const TASK_STATE_INIT = { statuses: {}, directions: {}, tasks: [] };
+export const TASK_STATE_INIT = { statuses: {}, directions: {}, tasks: [], _dirtyStatuses: {} };
 
 export default function taskReducer(state, action) {
   switch (action.type) {
-    case 'INIT':
+    case 'INIT': {
+      // Merge: preserve any locally-changed statuses that haven't round-tripped yet
+      var merged = Object.assign({}, action.statuses || {});
+      var dirty = state._dirtyStatuses || {};
+      Object.keys(dirty).forEach(function(id) {
+        // Keep the local status if it was changed after the last INIT
+        merged[id] = dirty[id];
+      });
       return {
-        statuses: action.statuses || {},
+        statuses: merged,
         directions: action.directions || {},
-        tasks: action.tasks || []
+        tasks: action.tasks || [],
+        _dirtyStatuses: dirty
       };
+    }
     case 'SET_STATUS': {
       var ns = Object.assign({}, state.statuses);
       if (!action.val || action.val === "") { delete ns[action.id]; } else { ns[action.id] = action.val; }
@@ -24,7 +33,10 @@ export default function taskReducer(state, action) {
           return t.id === action.id ? Object.assign({}, t, action.taskFields) : t;
         });
       }
-      return { statuses: ns, directions: nd, tasks: nt };
+      // Track dirty status so INIT won't overwrite it
+      var ds = Object.assign({}, state._dirtyStatuses || {});
+      ds[action.id] = action.val || '';
+      return { statuses: ns, directions: nd, tasks: nt, _dirtyStatuses: ds };
     }
     case 'SET_DIRECTION': {
       var nd2 = Object.assign({}, state.directions);
@@ -66,8 +78,14 @@ export default function taskReducer(state, action) {
       return {
         statuses: action.statuses,
         directions: action.directions,
-        tasks: action.extraTasks
+        tasks: action.extraTasks,
+        _dirtyStatuses: {}
       };
+    case 'CLEAR_DIRTY_STATUS': {
+      var cd = Object.assign({}, state._dirtyStatuses || {});
+      delete cd[action.id];
+      return Object.assign({}, state, { _dirtyStatuses: cd });
+    }
     default:
       return state;
   }

@@ -125,7 +125,7 @@ export default function AppLayout() {
     if (!gcalAutoSync) return;
 
     function runAutoSync() {
-      if (schedulingRef.current || editingRef.current) return;
+      if (schedulingRef.current || editingRef.current || saving) return;
       setGcalSyncing(true);
       apiClient.post('/gcal/sync').then(function(r) {
         setGcalLastSyncedAt(new Date().toISOString());
@@ -144,7 +144,7 @@ export default function AppLayout() {
       clearTimeout(initialTimer);
       clearInterval(intervalId);
     };
-  }, [gcalAutoSync, loadTasks, loadPlacements]);
+  }, [gcalAutoSync, loadTasks, loadPlacements, saving]);
 
   // Derived dates
   var today = useMemo(() => {
@@ -350,7 +350,7 @@ export default function AppLayout() {
 
   // Manual reschedule trigger — calls backend scheduler
   var handleReschedule = useCallback(() => {
-    if (scheduling || gcalSyncing || editingRef.current) return;
+    if (scheduling || gcalSyncing || editingRef.current || saving) return;
     setScheduling(true);
     schedulingRef.current = true;
     showToast('Rescheduling...', 'info');
