@@ -460,6 +460,34 @@ async function getSchedulePlacements(userId) {
     }
   }
 
+  // If cache is stale (different day or >30 min old), re-run the scheduler
+  var cacheStale = false;
+  if (cache && cache.generatedAt) {
+    var genTime = new Date(cache.generatedAt);
+    var ageMs = Date.now() - genTime.getTime();
+    var genDateKey = formatDateKey(genTime);
+    if (genDateKey !== timeInfo.todayKey || ageMs > 30 * 60 * 1000) {
+      cacheStale = true;
+    }
+  }
+  if (hasPastTasks) cacheStale = true;
+
+  if (cacheStale && cache) {
+    console.log('[SCHED] cache stale (age=' + Math.round((Date.now() - new Date(cache.generatedAt).getTime()) / 60000) + 'm), re-running scheduler');
+    try {
+      var freshResult = await runScheduleAndPersist(userId);
+      return {
+        dayPlacements: freshResult.dayPlacements,
+        unplaced: freshResult.unplaced,
+        score: freshResult.score,
+        hasPastTasks: false
+      };
+    } catch (err) {
+      console.error('[SCHED] stale re-run failed, using cached:', err.message);
+      // Fall through to cached hydration
+    }
+  }
+
   if (cache && cache.dayPlacements) {
     // Hydrate cached placements with current task data
     var dayPlacements = {};
