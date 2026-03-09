@@ -30,6 +30,14 @@ var getTaskDeps = dependencyHelpers.getTaskDeps;
 var scoreSchedule = require('./scoreSchedule');
 var hillClimb = require('./hillClimb');
 
+function normalizePri(pri) {
+  if (!pri) return 'P3';
+  var s = String(pri).trim();
+  if (/^P[1-4]$/i.test(s)) return s.toUpperCase();
+  if (/^[1-4]$/.test(s)) return 'P' + s;
+  return 'P3';
+}
+
 function effectiveDuration(t) {
   var rd = t.timeRemaining != null ? t.timeRemaining : t.dur;
   return rd === 0 ? 0 : Math.min(rd || 30, 720);
@@ -44,6 +52,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   var DAY_END = GRID_END * 60 + 59;
   var newSt = Object.assign({}, statuses);
   var taskUpdates = {};
+
+  // Normalize priorities (accept both "1" and "P1" formats)
+  allTasks.forEach(function(t) { t.pri = normalizePri(t.pri); });
 
   // Build date range
   var dates = [];
@@ -64,25 +75,6 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     });
     cursor.setDate(cursor.getDate() + 1);
   }
-
-  // Build habit template lookup so instances inherit current template fields.
-  // Instances may have stale values from when they were generated; the template
-  // represents the user's current intent for the habit.
-  var habitTemplates = {};
-  allTasks.forEach(function(t) {
-    if (t.id && t.id.indexOf("ht_") === 0 && t.habit) {
-      habitTemplates[t.text] = t;
-    }
-  });
-  var HABIT_INHERIT_FIELDS = ["location", "when", "where", "tools", "rigid", "split", "pri", "dayReq", "timeFlex"];
-  allTasks.forEach(function(t) {
-    if (t.habit && t.id && t.id.indexOf("dh") === 0 && habitTemplates[t.text]) {
-      var tmpl = habitTemplates[t.text];
-      HABIT_INHERIT_FIELDS.forEach(function(f) {
-        if (tmpl[f] !== undefined) t[f] = tmpl[f];
-      });
-    }
-  });
 
   // Categorize tasks
   var habitsByDate = {};
@@ -269,7 +261,12 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (t.dayReq === "weekday" && !d.isWeekday) return false;
       if (t.dayReq === "weekend" && d.isWeekday) return false;
       var dm = { M: 1, T: 2, W: 3, R: 4, F: 5, Sa: 6, Su: 0, S: 6 };
-      if (dm[t.dayReq] !== undefined && dm[t.dayReq] !== d.dow) return false;
+      // Support comma-separated multi-day values (e.g. "M,W,F")
+      var parts = t.dayReq.split(",");
+      if (parts.length > 1 || dm[parts[0]] !== undefined) {
+        var match = parts.some(function(p) { return dm[p] !== undefined && dm[p] === d.dow; });
+        if (!match) return false;
+      }
     }
     return true;
   }
@@ -707,11 +704,30 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         }
         if (!targetDate) continue;
 
+        // Constrain spread for lower-priority deadline tasks to prevent
+        // them from landing far before their deadline and stealing early slots.
+        var spreadFloor = localToday;
+        var deadlineDays = Math.max(0, Math.round((targetDate - localToday) / 86400000));
+        var cPri = cItem.task.pri || 'P3';
+        if (cPri === 'P3' && deadlineDays > 1) {
+          var spreadDays3 = Math.ceil(deadlineDays / 2);
+          var floor3 = new Date(targetDate);
+          floor3.setDate(floor3.getDate() - spreadDays3);
+          floor3.setHours(0, 0, 0, 0);
+          if (floor3 > spreadFloor) spreadFloor = floor3;
+        } else if (cPri === 'P4' && deadlineDays > 1) {
+          var spreadDays4 = Math.ceil(deadlineDays / 3);
+          var floor4 = new Date(targetDate);
+          floor4.setDate(floor4.getDate() - spreadDays4);
+          floor4.setHours(0, 0, 0, 0);
+          if (floor4 > spreadFloor) spreadFloor = floor4;
+        }
+
         var placed2 = false;
         for (var di = dates.length - 1; di >= 0; di--) {
           var d = dates[di];
           if (d.date > targetDate) continue;
-          if (d.date < localToday) break;
+          if (d.date < spreadFloor) break;
           if (!canPlaceOnDate(cItem.task, d)) continue;
           var wins = getWhenWindows(cItem.task.when, dayWindows[d.key]);
           if (wins.length === 0) continue;
@@ -845,6 +861,113 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     items.forEach(function(item) { placeWithDeps(item); });
   });
 
+  // PHASE 2.5: Priority compaction — swap lower-pri tasks on earlier days
+  // with higher-pri tasks on later days when possible.
+  var compactAttempts = 0;
+  var MAX_COMPACT = 20;
+  var sortedDates = dates.filter(function(d) { return d.date >= localToday; });
+  for (var earlyIdx = 0; earlyIdx < sortedDates.length - 1 && compactAttempts < MAX_COMPACT; earlyIdx++) {
+    var earlyD = sortedDates[earlyIdx];
+    var earlyPlaced = dayPlaced[earlyD.key];
+    if (!earlyPlaced) continue;
+
+    // Find low-pri tasks on this early day
+    for (var epi = 0; epi < earlyPlaced.length && compactAttempts < MAX_COMPACT; epi++) {
+      var earlyP = earlyPlaced[epi];
+      if (earlyP.locked || !earlyP.task) continue;
+      if (earlyP.task.habit || earlyP.task.rigid) continue;
+      if (hasWhen(earlyP.task.when, 'fixed')) continue;
+      var earlyPri = earlyP.task.pri || 'P3';
+      var earlyRank = earlyPri === 'P1' ? 4 : earlyPri === 'P2' ? 3 : earlyPri === 'P4' ? 1 : 2;
+
+      // Look for higher-pri tasks on later days
+      for (var lateIdx = earlyIdx + 1; lateIdx < sortedDates.length && compactAttempts < MAX_COMPACT; lateIdx++) {
+        var lateD = sortedDates[lateIdx];
+        var latePlaced = dayPlaced[lateD.key];
+        if (!latePlaced) continue;
+
+        for (var lpi = 0; lpi < latePlaced.length && compactAttempts < MAX_COMPACT; lpi++) {
+          var lateP = latePlaced[lpi];
+          if (lateP.locked || !lateP.task) continue;
+          if (lateP.task.habit || lateP.task.rigid) continue;
+          if (hasWhen(lateP.task.when, 'fixed')) continue;
+          var latePri = lateP.task.pri || 'P3';
+          var lateRank = latePri === 'P1' ? 4 : latePri === 'P2' ? 3 : latePri === 'P4' ? 1 : 2;
+          if (lateRank <= earlyRank) continue;
+
+          compactAttempts++;
+
+          // Find pool items for both
+          var earlyItem = null, lateItem = null;
+          for (var pi = 0; pi < pool.length; pi++) {
+            if (pool[pi].task.id === earlyP.task.id) earlyItem = pool[pi];
+            if (pool[pi].task.id === lateP.task.id) lateItem = pool[pi];
+          }
+          if (!earlyItem || !lateItem) continue;
+
+          // Check constraints: lateItem can go on earlyD, earlyItem can go on lateD
+          if (!canPlaceOnDate(lateP.task, earlyD)) continue;
+          if (!canPlaceOnDate(earlyP.task, lateD)) continue;
+          if (lateItem.earliestDate && earlyD.date < lateItem.earliestDate) continue;
+          if (earlyItem.ceiling && lateD.date > earlyItem.ceiling) continue;
+
+          // Save state for rollback
+          var eSavedParts = earlyItem._parts.slice();
+          var eSavedRemaining = earlyItem.remaining;
+          var eSavedUpdates = taskUpdates[earlyItem.task.id];
+          var eSavedEnd = globalPlacedEnd[earlyItem.task.id];
+          var lSavedParts = lateItem._parts.slice();
+          var lSavedRemaining = lateItem.remaining;
+          var lSavedUpdates = taskUpdates[lateItem.task.id];
+          var lSavedEnd = globalPlacedEnd[lateItem.task.id];
+
+          unplaceItem(earlyItem);
+          unplaceItem(lateItem);
+
+          // Try placing higher-pri on earlier day
+          var lateWins = getWhenWindows(lateP.task.when, dayWindows[earlyD.key]);
+          var latePlacedOk = lateWins.length > 0 && placeEarly(lateItem, earlyD);
+
+          // Try placing lower-pri on later day
+          var earlyPlacedOk = false;
+          if (latePlacedOk) {
+            for (var cdi = 0; cdi < dates.length; cdi++) {
+              if (earlyItem.remaining <= 0) break;
+              var cd = dates[cdi];
+              if (earlyItem.earliestDate && cd.date < earlyItem.earliestDate) continue;
+              if (earlyItem.ceiling && cd.date > earlyItem.ceiling) continue;
+              if (cd.date < localToday) continue;
+              if (!canPlaceOnDate(earlyItem.task, cd)) continue;
+              var cWins = getWhenWindows(earlyItem.task.when, dayWindows[cd.key]);
+              if (cWins.length === 0) continue;
+              placeEarly(earlyItem, cd);
+            }
+            earlyPlacedOk = earlyItem.remaining <= 0;
+          }
+
+          if (latePlacedOk && earlyPlacedOk) {
+            // Success — keep the swap
+            break; // move to next early placement
+          } else {
+            // Rollback
+            unplaceItem(earlyItem);
+            unplaceItem(lateItem);
+            eSavedParts.forEach(function(part) {
+              recordPlace(dayOcc[part._dateKey], dayPlaced[part._dateKey], earlyItem.task, part.start, part.dur, part.locked, part._dateKey, earlyItem);
+            });
+            if (eSavedUpdates) taskUpdates[earlyItem.task.id] = eSavedUpdates;
+            if (eSavedEnd) globalPlacedEnd[earlyItem.task.id] = eSavedEnd;
+            lSavedParts.forEach(function(part) {
+              recordPlace(dayOcc[part._dateKey], dayPlaced[part._dateKey], lateItem.task, part.start, part.dur, part.locked, part._dateKey, lateItem);
+            });
+            if (lSavedUpdates) taskUpdates[lateItem.task.id] = lSavedUpdates;
+            if (lSavedEnd) globalPlacedEnd[lateItem.task.id] = lSavedEnd;
+          }
+        }
+      }
+    }
+  }
+
   // PHASE 3: Pull deadline tasks forward into remaining gaps
   // Flexible tasks are already locked in. Pull forward earliest-first within
   // each priority level so higher-priority deadlines get the best gaps.
@@ -869,6 +992,24 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (t.startAfter) {
         var saDate = parseDate(t.startAfter);
         if (saDate && saDate > pullFloor) pullFloor = saDate;
+      }
+
+      // Respect spread constraint: don't pull low-priority deadline tasks
+      // earlier than Phase 1 would allow.
+      var pullPri = t.pri || 'P3';
+      var pullDeadlineDays = Math.max(0, Math.round((dueDate - localToday) / 86400000));
+      if (pullPri === 'P3' && pullDeadlineDays > 1) {
+        var pullSpread3 = Math.ceil(pullDeadlineDays / 2);
+        var pullFloor3 = new Date(dueDate);
+        pullFloor3.setDate(pullFloor3.getDate() - pullSpread3);
+        pullFloor3.setHours(0, 0, 0, 0);
+        if (pullFloor3 > pullFloor) pullFloor = pullFloor3;
+      } else if (pullPri === 'P4' && pullDeadlineDays > 1) {
+        var pullSpread4 = Math.ceil(pullDeadlineDays / 3);
+        var pullFloor4 = new Date(dueDate);
+        pullFloor4.setDate(pullFloor4.getDate() - pullSpread4);
+        pullFloor4.setHours(0, 0, 0, 0);
+        if (pullFloor4 > pullFloor) pullFloor = pullFloor4;
       }
 
       var savedParts = item._parts.slice();
@@ -1287,7 +1428,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (origDate && origDate < localToday) reasons.push('from ' + origKey);
       if (t.dayReq && t.dayReq !== 'any') {
         var dayLabels = {M:'Mon',T:'Tue',W:'Wed',R:'Thu',F:'Fri',Sa:'Sat',Su:'Sun',weekday:'weekday',weekend:'weekend'};
-        reasons.push((dayLabels[t.dayReq] || t.dayReq) + ' only');
+        var dayParts = t.dayReq.split(',');
+        var dayNames = dayParts.map(function(p) { return dayLabels[p] || p; });
+        reasons.push(dayNames.join('/') + ' only');
       }
       if (t.startAfter) reasons.push('after ' + t.startAfter);
       var deps = getTaskDeps(t);

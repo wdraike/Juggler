@@ -936,11 +936,11 @@ export default function SCurveTimeline(props) {
         )}
       </svg>
 
-      {/* Task cards */}
-      {cards.map(function (c) {
+      {/* Task cards — render lower cards first so upper cards sit on top and are clickable */}
+      {cards.slice().sort(function (a, b) { return b.cardY - a.cardY; }).map(function (c) {
         var bc = c.blockColor || (darkMode ? '#475569' : '#CBD5E1');
         return (
-          <div key={c.item.key || c.item.task.id} style={{
+          <div key={c.item.key || c.item.task.id} onClick={function () { onExpand(c.item.task.id); }} style={{
             position: 'absolute',
             left: c.cardX, top: c.cardY,
             width: cW, height: cH,
@@ -948,17 +948,20 @@ export default function SCurveTimeline(props) {
             zIndex: 20,
             borderRadius: 6,
             overflow: 'hidden',
+            cursor: 'pointer',
             border: darkMode ? '1px solid #334155' : '1px solid #E2E8F0'
           }}>
             <div style={{
               position: 'absolute', left: 0, top: 0, right: 0, bottom: 0,
-              background: darkMode ? '#1E293B' : '#FFFFFF'
+              background: darkMode ? '#1E293B' : '#FFFFFF',
+              pointerEvents: 'none'
             }} />
             <div style={{
               position: 'absolute', left: 0, top: 0, bottom: 0,
               width: 4,
               background: bc,
-              opacity: 0.75
+              opacity: 0.75,
+              pointerEvents: 'none'
             }} />
             <div style={{
               position: 'relative',

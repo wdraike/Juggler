@@ -8,7 +8,7 @@
 
 const { z } = require('zod');
 const db = require('../../db');
-const { rowToTask, taskToRow, ensureProject, applySplitDefault } = require('../../controllers/task.controller');
+const { rowToTask, taskToRow, ensureProject, applySplitDefault, buildSourceMap } = require('../../controllers/task.controller');
 
 // Shared Zod fields for task input (used by create_task, create_tasks, update_task)
 var taskInputFields = {
@@ -17,7 +17,7 @@ var taskInputFields = {
   pri: z.number().optional().describe('Priority (1=highest, 5=lowest)'),
   dur: z.number().optional().describe('Duration in minutes'),
   when: z.string().optional().describe('Time preference: "morning", "afternoon", "evening", or null'),
-  dayReq: z.string().optional().describe('Day requirement: "any", "weekday", "weekend", or specific day letter'),
+  dayReq: z.string().optional().describe('Day requirement: "any", "weekday", "weekend", a single day letter (M,T,W,R,F,Sa,Su), or comma-separated for multiple days (e.g. "M,W,F")'),
   dependsOn: z.array(z.string()).optional().describe('Array of task IDs this task depends on'),
   // UTC ISO fields (preferred)
   scheduledAt: z.string().optional().describe('Scheduled date+time as ISO string — UTC ("2026-03-08T22:45:00Z") or with offset ("2026-03-08T18:45:00-04:00"). Takes precedence over date/time.'),
@@ -71,7 +71,8 @@ function registerTaskTools(server, userId) {
       if (limit && !date) query = query.limit(limit);
 
       var rows = await query;
-      var tasks = rows.map(function(r) { return rowToTask(r, tz); });
+      var srcMap = buildSourceMap(rows);
+      var tasks = rows.map(function(r) { return rowToTask(r, tz, srcMap); });
       if (date) {
         tasks = tasks.filter(function(t) { return t.date === date; });
         if (limit) tasks = tasks.slice(0, limit);
@@ -89,10 +90,11 @@ function registerTaskTools(server, userId) {
       var tz = await getUserTimezone();
       var task = Object.assign({}, params);
       if (!task.id) {
-        var uuidv4 = require('uuid').v4;
-        task.id = uuidv4();
+        var uuidv7 = require('uuid').v7;
+        task.id = uuidv7();
       }
       var row = taskToRow(task, userId, tz);
+      if (!row.task_type) row.task_type = 'task';
       row.created_at = db.fn.now();
       await applySplitDefault(row, userId);
       await ensureProject(userId, task.project);
@@ -113,13 +115,13 @@ function registerTaskTools(server, userId) {
     },
     async ({ tasks }) => {
       var tz = await getUserTimezone();
-      var uuidv4 = require('uuid').v4;
+      var uuidv7 = require('uuid').v7;
       var prefs = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
       var splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
 
       var projects = new Set();
       var rows = tasks.map(function(t) {
-        if (!t.id) t.id = uuidv4();
+        if (!t.id) t.id = uuidv7();
         if (t.project) projects.add(t.project);
         var row = taskToRow(t, userId, tz);
         row.created_at = db.fn.now();
@@ -176,9 +178,42 @@ function registerTaskTools(server, userId) {
         row.original_scheduled_at = null;
       }
 
-      await db('tasks').where({ id: id, user_id: userId }).update(row);
-      var updated = await db('tasks').where('id', id).first();
-      return { content: [{ type: 'text', text: JSON.stringify(rowToTask(updated, tz), null, 2) }] };
+      // Route template fields to source for habit instances
+      var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
+        'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
+        'recur', 'depends_on'];
+      var taskType = existing.task_type || 'task';
+      var isHabitInstance = taskType === 'habit_instance' && existing.source_id;
+
+      if (isHabitInstance) {
+        var templateUpdate = {};
+        var instanceUpdate = {};
+        Object.keys(row).forEach(function(k) {
+          if (k === 'updated_at') return;
+          if (TEMPLATE_ROW_FIELDS.indexOf(k) >= 0) {
+            templateUpdate[k] = row[k];
+          } else {
+            instanceUpdate[k] = row[k];
+          }
+        });
+        if (Object.keys(templateUpdate).length > 0) {
+          templateUpdate.updated_at = db.fn.now();
+          await db('tasks').where({ id: existing.source_id, user_id: userId }).update(templateUpdate);
+        }
+        if (Object.keys(instanceUpdate).length > 0) {
+          instanceUpdate.updated_at = db.fn.now();
+          await db('tasks').where({ id: id, user_id: userId }).update(instanceUpdate);
+        } else {
+          await db('tasks').where({ id: id, user_id: userId }).update({ updated_at: db.fn.now() });
+        }
+      } else {
+        await db('tasks').where({ id: id, user_id: userId }).update(row);
+      }
+
+      var allRows = await db('tasks').where('user_id', userId).select();
+      var srcMap = buildSourceMap(allRows);
+      var updatedRow = allRows.find(function(r) { return r.id === id; });
+      return { content: [{ type: 'text', text: JSON.stringify(rowToTask(updatedRow, tz, srcMap), null, 2) }] };
     }
   );
 

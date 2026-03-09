@@ -19,6 +19,7 @@ var localToUtc = dateHelpers.localToUtc;
 var utcToLocal = dateHelpers.utcToLocal;
 var taskController = require('../controllers/task.controller');
 var rowToTask = taskController.rowToTask;
+var buildSourceMap = taskController.buildSourceMap;
 
 var DEFAULT_TIMEZONE = 'America/New_York';
 
@@ -113,7 +114,7 @@ function expandRecurring(allTasks, startDate, endDate) {
         location: src.location, tools: src.tools, split: src.split,
         timeFlex: src.timeFlex,
         dayReq: src.dayReq || 'any', section: '', notes: '',
-        sourceId: src.id, generated: true
+        taskType: 'generated', sourceId: src.id, generated: true
       });
     });
 
@@ -182,7 +183,8 @@ async function runScheduleAndPersist(userId, _retries) {
 
   // 2. Load all tasks for user (now with originals restored)
   var taskRows = await trx('tasks').where('user_id', userId).select();
-  var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE); });
+  var srcMap = buildSourceMap(taskRows);
+  var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
 
   // 3. Build statuses map
   var statuses = {};
@@ -233,6 +235,9 @@ async function runScheduleAndPersist(userId, _retries) {
     });
   });
 
+  // Collect all updates, then batch them to minimize lock contention
+  var pendingUpdates = []; // { id, dbUpdate }
+
   for (var taskId in placementByTaskId) {
     var placement = placementByTaskId[taskId];
     var original = taskById[taskId];
@@ -260,15 +265,14 @@ async function runScheduleAndPersist(userId, _retries) {
       if (!newScheduledAt) continue;
 
       var rawRow = rawRowById[taskId];
-      var dbUpdate = {
-        scheduled_at: newScheduledAt,
-        original_scheduled_at: rawRow ? rawRow.scheduled_at : null,
-        updated_at: db.fn.now()
-      };
-
-      await trx('tasks')
-        .where({ id: taskId, user_id: userId })
-        .update(dbUpdate);
+      pendingUpdates.push({
+        id: taskId,
+        dbUpdate: {
+          scheduled_at: newScheduledAt,
+          original_scheduled_at: rawRow ? rawRow.scheduled_at : null,
+          updated_at: db.fn.now()
+        }
+      });
 
       updatedTasks.push({
         id: taskId,
@@ -289,6 +293,17 @@ async function runScheduleAndPersist(userId, _retries) {
     var original = taskById[t.id];
     if (!original) return;
     if (original.time) {
+      var rawRowClr = rawRowById[t.id];
+      var clearUpdate = {
+        original_scheduled_at: rawRowClr ? rawRowClr.scheduled_at : null,
+        updated_at: db.fn.now()
+      };
+      var clearOriginal = taskById[t.id];
+      if (clearOriginal && clearOriginal.date) {
+        var utcMidnight = localToUtc(clearOriginal.date, '12:00 AM', TIMEZONE);
+        if (utcMidnight) clearUpdate.scheduled_at = utcMidnight;
+      }
+      pendingUpdates.push({ id: t.id, dbUpdate: clearUpdate });
       updatedTasks.push({
         id: t.id,
         text: original.text,
@@ -298,31 +313,83 @@ async function runScheduleAndPersist(userId, _retries) {
         toTime: null,
         cleared: true
       });
-    }
-  });
-  for (var ui = 0; ui < updatedTasks.length; ui++) {
-    if (updatedTasks[ui].cleared) {
-      var rawRowClr = rawRowById[updatedTasks[ui].id];
-      // Recompute scheduled_at as date-only (midnight local → UTC)
-      var clearOriginal = taskById[updatedTasks[ui].id];
-      var clearUpdate = {
-        original_scheduled_at: rawRowClr ? rawRowClr.scheduled_at : null,
-        updated_at: db.fn.now()
-      };
-      if (clearOriginal && clearOriginal.date) {
-        var utcMidnight = localToUtc(clearOriginal.date, '12:00 AM', TIMEZONE);
-        if (utcMidnight) clearUpdate.scheduled_at = utcMidnight;
-      }
-      await trx('tasks')
-        .where({ id: updatedTasks[ui].id, user_id: userId })
-        .update(clearUpdate);
       cleared++;
     }
+  });
+
+  // 9. Move remaining past-dated tasks to today
+  //    Past habits missed their day — mark as 'skip'.
+  //    Past non-habit tasks that weren't placed — move date to today.
+  var todayMidnight = localToUtc(timeInfo.todayKey, '12:00 AM', TIMEZONE);
+  if (todayMidnight) {
+    var movedPast = 0;
+    allTasks.forEach(function(t) {
+      // Skip generated recurring instances (not real DB rows)
+      if (t.generated) return;
+      var st = statuses[t.id] || '';
+      if (st === 'done' || st === 'cancel' || st === 'skip') return;
+      if (!t.date || t.date === 'TBD') return;
+      var td = parseDate(t.date);
+      if (!td || td >= today) return;  // not past
+      // Already handled by placement persistence above
+      if (placementByTaskId[t.id]) return;
+
+      var rawRowPast = rawRowById[t.id];
+      if (!rawRowPast) return;  // not a real DB task
+
+      if (t.habit) {
+        // Past habit — day was missed, mark as skipped
+        pendingUpdates.push({
+          id: t.id,
+          dbUpdate: { status: 'skip', updated_at: db.fn.now() }
+        });
+      } else {
+        // Past non-habit — move date forward to today
+        pendingUpdates.push({
+          id: t.id,
+          dbUpdate: {
+            scheduled_at: todayMidnight,
+            original_scheduled_at: rawRowPast.scheduled_at,
+            updated_at: db.fn.now()
+          }
+        });
+      }
+      movedPast++;
+    });
+    if (movedPast > 0) console.log('[SCHED] moved/skipped ' + movedPast + ' past-dated tasks');
+  }
+
+  // Execute all updates in sorted order to avoid deadlocks
+  pendingUpdates.sort(function(a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
+  for (var pi = 0; pi < pendingUpdates.length; pi++) {
+    await trx('tasks')
+      .where({ id: pendingUpdates[pi].id, user_id: userId })
+      .update(pendingUpdates[pi].dbUpdate);
   }
 
   console.log('[SCHED] runScheduleAndPersist: reset ' + resetCount + ', updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
 
-  return { updated: updated, cleared: cleared, reset: resetCount, tasks: updatedTasks, score: result.score };
+  // 10. Cache the placement result so GET /placements doesn't re-run the scheduler
+  var placementCache = { dayPlacements: {}, unplaced: [], score: result.score, generatedAt: new Date().toISOString() };
+  Object.keys(result.dayPlacements).forEach(function(dk) {
+    placementCache.dayPlacements[dk] = result.dayPlacements[dk].map(function(p) {
+      return { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };
+    });
+  });
+  placementCache.unplaced = result.unplaced.map(function(t) { return t.id; });
+  var cacheJson = JSON.stringify(placementCache);
+  var existingCache = await trx('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
+  if (existingCache) {
+    await trx('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).update({ config_value: cacheJson });
+  } else {
+    await trx('user_config').insert({ user_id: userId, config_key: 'schedule_cache', config_value: cacheJson });
+  }
+
+  return {
+    updated: updated, cleared: cleared, reset: resetCount, tasks: updatedTasks, score: result.score,
+    dayPlacements: result.dayPlacements,
+    unplaced: result.unplaced.filter(function(t) { return !t.generated; })
+  };
 
   }); // end transaction
   } catch (err) {
@@ -336,23 +403,27 @@ async function runScheduleAndPersist(userId, _retries) {
 }
 
 /**
- * Read-only: load data, run scheduler, return placements without DB writes.
+ * Read-only: return cached placements from the last scheduler run.
+ * Falls back to running the scheduler if no cache exists (first load).
+ *
+ * This ensures the schedule is stable across page loads — only an explicit
+ * POST /schedule/run changes task placements.
  */
 async function getSchedulePlacements(userId) {
   var userRow = await db('users').where('id', userId).select('timezone').first();
   var TIMEZONE = (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
 
+  // Load all tasks (needed for hydration and hasPastTasks check)
   var taskRows = await db('tasks').where('user_id', userId).select();
-  var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE); });
+  var srcMap = buildSourceMap(taskRows);
+  var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
 
   var statuses = {};
-  allTasks.forEach(function(t) {
-    statuses[t.id] = t.status || '';
-  });
+  allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
 
   var timeInfo = getNowInTimezone(TIMEZONE);
-  var cfg = await loadConfig(userId);
 
+  // Expand recurring so generated instances can be hydrated from cache
   var today = parseDate(timeInfo.todayKey) || new Date();
   var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + 56);
   var expanded = expandRecurring(allTasks, today, expandEnd);
@@ -361,14 +432,114 @@ async function getSchedulePlacements(userId) {
     expanded.forEach(function(t) { statuses[t.id] = ''; });
   }
 
+  var taskById = {};
+  allTasks.forEach(function(t) { taskById[t.id] = t; });
+
+  // Try cached placements
+  var cacheRow = await db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
+  var cache = null;
+  if (cacheRow) {
+    try {
+      cache = typeof cacheRow.config_value === 'string' ? JSON.parse(cacheRow.config_value) : cacheRow.config_value;
+    } catch (e) { cache = null; }
+  }
+
+  // Check for past tasks (same logic regardless of cache)
+  var hasPastTasks = false;
+  var todayDate = parseDate(timeInfo.todayKey);
+  if (todayDate) {
+    for (var ti = 0; ti < allTasks.length; ti++) {
+      var t = allTasks[ti];
+      if (t.generated) continue;
+      if (t.taskType === 'habit_template') continue;
+      var tSt = statuses[t.id] || '';
+      if (tSt === 'done' || tSt === 'cancel' || tSt === 'skip') continue;
+      if (!t.date || t.date === 'TBD') continue;
+      var tDate = parseDate(t.date);
+      if (tDate && tDate < todayDate) { hasPastTasks = true; break; }
+    }
+  }
+
+  if (cache && cache.dayPlacements) {
+    // Hydrate cached placements with current task data
+    var dayPlacements = {};
+    var cachedIds = {};
+    Object.keys(cache.dayPlacements).forEach(function(dk) {
+      dayPlacements[dk] = [];
+      cache.dayPlacements[dk].forEach(function(p) {
+        var task = taskById[p.taskId];
+        if (!task) return; // task was deleted since last run
+        var st = statuses[p.taskId] || '';
+        if (st === 'done' || st === 'cancel' || st === 'skip') return; // completed since last run
+        dayPlacements[dk].push({ task: task, start: p.start, dur: p.dur });
+        cachedIds[p.taskId] = true;
+      });
+      if (dayPlacements[dk].length === 0) delete dayPlacements[dk];
+    });
+
+    // Collect unplaced: cached unplaced + any new tasks not in cache.
+    // Mirror the same exclusions that unifiedSchedule applies so tasks the
+    // scheduler would silently drop don't inflate the unplaced count.
+    var cachedUnplacedSet = {};
+    (cache.unplaced || []).forEach(function(id) { cachedUnplacedSet[id] = true; });
+    var unplaced = [];
+    allTasks.forEach(function(t) {
+      if (t.generated) return;
+      if (t.taskType === 'habit_template') return;
+      var st = statuses[t.id] || '';
+      if (st === 'done' || st === 'cancel' || st === 'skip') return;
+      // Already placed in a day slot — not unplaced
+      if (cachedIds[t.id]) return;
+      // Known unplaced from cache — include it
+      if (cachedUnplacedSet[t.id]) { unplaced.push(t); return; }
+      // New task not in cache at all — apply scheduler exclusion rules
+      if (t.when && t.when.indexOf('allday') >= 0) return;
+      if (t.section && (t.section.indexOf('PARKING') >= 0 || t.section.indexOf('TO BE SCHEDULED') >= 0)) return;
+      if (!t.date || t.date === 'TBD') return;
+      var td = parseDate(t.date);
+      if (!td) return;
+      var isPast = td < todayDate;
+      // Past habits missed their day — not schedulable
+      if (t.habit && isPast) return;
+      // Past fixed tasks — not schedulable
+      if (isPast && t.when && t.when.indexOf('fixed') >= 0) return;
+      unplaced.push(t);
+    });
+
+    return {
+      dayPlacements: dayPlacements,
+      unplaced: unplaced,
+      score: cache.score || {},
+      hasPastTasks: hasPastTasks
+    };
+  }
+
+  // No cache — first load, run scheduler and cache the result
+  console.log('[SCHED] no placement cache, running scheduler for first load');
+  var cfg = await loadConfig(userId);
   var result = unifiedSchedule(allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg);
+
+  // Save cache
+  var newCache = { dayPlacements: {}, unplaced: [], score: result.score, generatedAt: new Date().toISOString() };
+  Object.keys(result.dayPlacements).forEach(function(dk) {
+    newCache.dayPlacements[dk] = result.dayPlacements[dk].map(function(p) {
+      return { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };
+    });
+  });
+  newCache.unplaced = result.unplaced.map(function(t) { return t.id; });
+  var cacheJson = JSON.stringify(newCache);
+  var existingRow = await db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
+  if (existingRow) {
+    await db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).update({ config_value: cacheJson });
+  } else {
+    await db('user_config').insert({ user_id: userId, config_key: 'schedule_cache', config_value: cacheJson });
+  }
 
   return {
     dayPlacements: result.dayPlacements,
-    unplaced: result.unplaced,
-    deadlineMisses: result.deadlineMisses,
-    placedCount: result.placedCount,
-    score: result.score
+    unplaced: result.unplaced.filter(function(t) { return !t.generated; }),
+    score: result.score,
+    hasPastTasks: hasPastTasks
   };
 }
 

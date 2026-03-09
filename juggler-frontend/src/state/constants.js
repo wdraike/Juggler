@@ -129,3 +129,9 @@ var LOC_ICONS = {
 export function locIcon(locId) {
   return LOC_ICONS[locId] || "";
 }
+export function registerLocations(locations) {
+  if (!locations) return;
+  locations.forEach(function(l) {
+    if (l.id && l.icon && !LOC_ICONS[l.id]) LOC_ICONS[l.id] = l.icon;
+  });
+}

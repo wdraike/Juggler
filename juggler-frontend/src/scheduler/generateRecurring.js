@@ -68,7 +68,7 @@ export function generateRecurringPure(taskList, startDate, endDate) {
         time: src.time, dur: src.dur, where: src.where, when: src.when,
         location: src.location, tools: src.tools,
         dayReq: src.dayReq || "any", section: "", notes: "",
-        sourceId: src.id, generated: true,
+        taskType: 'generated', sourceId: src.id, generated: true,
       }));
     });
 

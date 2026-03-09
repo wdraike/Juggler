@@ -45,7 +45,7 @@ import apiClient from '../../services/apiClient';
 
 export default function AppLayout() {
   // State
-  var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, setDirection, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements } = useTaskState();
+  var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, setDirection, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements, flushNow } = useTaskState();
   var isMobile = useIsMobile();
   var config = useConfig();
   var { toast, toastHistory, showToast } = useToast();
@@ -125,7 +125,7 @@ export default function AppLayout() {
     if (!gcalAutoSync) return;
 
     function runAutoSync() {
-      if (schedulingRef.current || editingRef.current || saving) return;
+      if (schedulingRef.current || editingRef.current) return;
       setGcalSyncing(true);
       apiClient.post('/gcal/sync').then(function(r) {
         setGcalLastSyncedAt(new Date().toISOString());
@@ -144,7 +144,7 @@ export default function AppLayout() {
       clearTimeout(initialTimer);
       clearInterval(intervalId);
     };
-  }, [gcalAutoSync, loadTasks, loadPlacements, saving]);
+  }, [gcalAutoSync, loadTasks, loadPlacements]);
 
   // Derived dates
   var today = useMemo(() => {
@@ -308,9 +308,15 @@ export default function AppLayout() {
   }, [pushUndo, setStatus, allTasks, showToast]);
 
   // Task expand handler — from main views (single open)
+  // Generated/instance tasks — open the source habit instead
   var handleExpand = useCallback((id) => {
-    setExpandedTasks(function(prev) { return prev.length === 1 && prev[0] === id ? [] : [id]; });
-  }, []);
+    var effectiveId = id;
+    var task = allTasks.find(function(t) { return t.id === id; });
+    if (task && task.sourceId) {
+      effectiveId = task.sourceId;
+    }
+    setExpandedTasks(function(prev) { return prev.length === 1 && prev[0] === effectiveId ? [] : [effectiveId]; });
+  }, [allTasks]);
 
 
   // Task create handler
@@ -348,22 +354,26 @@ export default function AppLayout() {
     config.updateHourLocationOverrides(overrides);
   }, [config]);
 
-  // Manual reschedule trigger — calls backend scheduler
-  var handleReschedule = useCallback(() => {
-    if (scheduling || gcalSyncing || editingRef.current || saving) return;
+  // Manual reschedule trigger — flush pending saves first, then call backend scheduler
+  var handleReschedule = useCallback(async () => {
+    if (scheduling || gcalSyncing || editingRef.current) return;
     setScheduling(true);
     schedulingRef.current = true;
     showToast('Rescheduling...', 'info');
-    apiClient.post('/schedule/run').then(function(r) {
+    try {
+      // Flush any pending dirty-task saves so the scheduler sees current data
+      await flushNow();
+      var r = await apiClient.post('/schedule/run');
       var msg = 'Rescheduled: ' + (r.data.updated || 0) + ' tasks updated';
       showToast(msg, 'success');
-      loadTasks().then(function() { loadPlacements(); });
-    }).catch(function(err) {
+      await loadTasks();
+      loadPlacements();
+    } catch (err) {
       showToast('Reschedule error: ' + (err.response?.data?.error || err.message), 'error');
-    }).finally(function() {
+    } finally {
       setScheduling(false);
       schedulingRef.current = false;
-    });
+    }
   }, [showToast, loadTasks, loadPlacements, scheduling, gcalSyncing]);
 
   // Keyboard shortcuts
@@ -536,7 +546,19 @@ export default function AppLayout() {
   }
 
   var isToday = selectedDateKey === formatDateKey(new Date());
-  var expandedTaskObjs = expandedTasks.map(function(id) { return allTasks.find(function(t) { return t.id === id; }); }).filter(Boolean);
+  var expandedTaskObjs = expandedTasks.map(function(id) {
+    var found = allTasks.find(function(t) { return t.id === id; });
+    if (found) return found;
+    // Check placements for generated recurrence tasks
+    var keys = Object.keys(dayPlacements);
+    for (var i = 0; i < keys.length; i++) {
+      var pls = dayPlacements[keys[i]];
+      for (var j = 0; j < pls.length; j++) {
+        if (pls[j].task && pls[j].task.id === id) return pls[j].task;
+      }
+    }
+    return null;
+  }).filter(Boolean);
 
   return (
     <div style={{ height: '100vh', overflow: 'hidden', maxWidth: '100vw', background: theme.bg, fontFamily: "'DM Sans', system-ui, sans-serif" }}>

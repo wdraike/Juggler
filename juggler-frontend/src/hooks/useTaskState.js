@@ -1,10 +1,24 @@
 /**
  * useTaskState — manages task state with useReducer + API sync
+ *
+ * Field-level dirty tracking: only sends changed fields per task to the server,
+ * preventing overwrites of concurrent changes from MCP, GCal sync, etc.
+ *
+ * Change polling: polls GET /tasks/version every 10s to detect external changes
+ * (MCP, GCal, another tab) and reloads when needed.
  */
 
 import { useReducer, useCallback, useRef, useEffect, useState } from 'react';
 import taskReducer, { TASK_STATE_INIT } from '../state/taskReducer';
 import apiClient from '../services/apiClient';
+
+// Fields that map to task object properties for partial saves
+var SAVE_FIELDS = [
+  'text', 'status', 'direction', 'date', 'time', 'dur', 'timeRemaining',
+  'pri', 'project', 'section', 'notes', 'due', 'startAfter',
+  'location', 'tools', 'when', 'dayReq', 'habit', 'rigid',
+  'split', 'splitMin', 'recur', 'dependsOn', 'datePinned'
+];
 
 export default function useTaskState() {
   const [taskState, dispatch] = useReducer(taskReducer, TASK_STATE_INIT);
@@ -15,13 +29,105 @@ export default function useTaskState() {
   taskStateRef.current = taskState;
   const saveTimerRef = useRef(null);
   const placementTimerRef = useRef(null);
+  const flushSaveRef = useRef(null);
+  const flushPromiseRef = useRef(null);
+  const lastVersionRef = useRef(null);
+  const autoRescheduleRef = useRef(false);
+  const loadTasksRef = useRef(null);
 
-  // Load tasks from API — cancels any pending debounced save first
-  // to prevent stale local state from overwriting server data after reload
+  // Load placements from backend scheduler (debounced)
+  const loadPlacements = useCallback(() => {
+    if (placementTimerRef.current) clearTimeout(placementTimerRef.current);
+    placementTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await apiClient.get('/schedule/placements');
+        setPlacements({ dayPlacements: res.data.dayPlacements || {}, unplaced: res.data.unplaced || [] });
+
+        // Auto-reschedule if past tasks detected (once per session)
+        if (res.data.hasPastTasks && !autoRescheduleRef.current) {
+          autoRescheduleRef.current = true;
+          try {
+            await apiClient.post('/schedule/run');
+            // Reload tasks so task.date reflects the new persisted dates
+            if (loadTasksRef.current) await loadTasksRef.current();
+            const res2 = await apiClient.get('/schedule/placements');
+            setPlacements({ dayPlacements: res2.data.dayPlacements || {}, unplaced: res2.data.unplaced || [] });
+          } catch (err) {
+            console.error('Auto-reschedule failed:', err);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load placements:', error);
+      }
+    }, 300);
+  }, []);
+
+  // Core save logic — sends only dirty fields per task to server
+  const flushSave = useCallback(async () => {
+    // Concurrency guard: if a save is already in flight, return the existing promise
+    if (flushPromiseRef.current) return flushPromiseRef.current;
+
+    const state = taskStateRef.current;
+    const dirtyIds = state._dirtyTaskIds || {};
+    const dirtyKeys = Object.keys(dirtyIds);
+    if (dirtyKeys.length === 0) return;
+
+    // Snapshot the dirty fields we're about to save
+    const savingIds = dirtyKeys.slice();
+    const savedFields = {};
+    dirtyKeys.forEach(function(id) {
+      savedFields[id] = Object.assign({}, dirtyIds[id]);
+    });
+
+    setSaving(true);
+    const promise = (async () => {
+      try {
+        const taskMap = {};
+        state.tasks.forEach(function(t) { taskMap[t.id] = t; });
+
+        const updates = savingIds.map(function(id) {
+          var t = taskMap[id];
+          if (!t) return null;
+          var dirtyFieldMap = savedFields[id] || {};
+          // Build partial update with only dirty fields + id
+          var partial = { id: t.id };
+          SAVE_FIELDS.forEach(function(f) {
+            if (dirtyFieldMap[f]) {
+              // Special cases: status/direction come from state maps
+              if (f === 'status') { partial.status = state.statuses[id] || ''; }
+              else if (f === 'direction') { partial.direction = state.directions[id] || null; }
+              else { partial[f] = t[f]; }
+            }
+          });
+          return partial;
+        }).filter(Boolean);
+
+        if (updates.length > 0) {
+          await apiClient.put('/tasks/batch', { updates });
+        }
+        // Only clear the specific fields we saved — preserve any dirtied during the await
+        dispatch({ type: 'CLEAR_DIRTY_TASKS', ids: savingIds, savedFields: savedFields });
+        await loadPlacements();
+      } catch (error) {
+        console.error('Save failed:', error);
+      } finally {
+        flushPromiseRef.current = null;
+        setSaving(false);
+      }
+    })();
+
+    flushPromiseRef.current = promise;
+    return promise;
+  }, [loadPlacements]);
+  flushSaveRef.current = flushSave;
+
+  // Load tasks from API — flushes any pending save first
+  // so local changes aren't lost when reloading from server
   const loadTasks = useCallback(async () => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
+      await flushSaveRef.current();
     }
     try {
       setLoading(true);
@@ -39,6 +145,10 @@ export default function useTaskState() {
       });
 
       dispatch({ type: 'INIT', tasks, statuses, directions });
+      // Update version watermark so polling doesn't immediately re-trigger
+      if (tasksRes.data.version) {
+        lastVersionRef.current = tasksRes.data.version;
+      }
       return { tasks, config: configRes.data };
     } catch (error) {
       console.error('Failed to load tasks:', error);
@@ -47,62 +157,13 @@ export default function useTaskState() {
       setLoading(false);
     }
   }, []);
-
-  // Load placements from backend scheduler (debounced)
-  const loadPlacements = useCallback(() => {
-    if (placementTimerRef.current) clearTimeout(placementTimerRef.current);
-    placementTimerRef.current = setTimeout(async () => {
-      try {
-        const res = await apiClient.get('/schedule/placements');
-        setPlacements({ dayPlacements: res.data.dayPlacements || {}, unplaced: res.data.unplaced || [] });
-      } catch (error) {
-        console.error('Failed to load placements:', error);
-      }
-    }, 300);
-  }, []);
+  loadTasksRef.current = loadTasks;
 
   // Debounced save — batches updates
   const scheduleSave = useCallback(() => {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(async () => {
-      const state = taskStateRef.current;
-      if (state.tasks.length === 0) return;
-      setSaving(true);
-      try {
-        const updates = state.tasks.map(t => ({
-          id: t.id,
-          status: state.statuses[t.id] || '',
-          direction: state.directions[t.id] || null,
-          date: t.date,
-          time: t.time,
-          dur: t.dur,
-          timeRemaining: t.timeRemaining,
-          pri: t.pri,
-          project: t.project,
-          section: t.section,
-          notes: t.notes,
-          due: t.due,
-          startAfter: t.startAfter,
-          location: t.location,
-          tools: t.tools,
-          when: t.when,
-          dayReq: t.dayReq,
-          habit: t.habit,
-          rigid: t.rigid,
-          split: t.split,
-          splitMin: t.splitMin,
-          recur: t.recur,
-          dependsOn: t.dependsOn
-        }));
-        await apiClient.put('/tasks/batch', { updates });
-        await loadPlacements();
-      } catch (error) {
-        console.error('Save failed:', error);
-      } finally {
-        setSaving(false);
-      }
-    }, 1000);
-  }, [loadPlacements]);
+    saveTimerRef.current = setTimeout(() => { flushSaveRef.current(); }, 1000);
+  }, []);
 
   // Dispatch + persist wrapper
   const dispatchPersist = useCallback((action) => {
@@ -173,12 +234,56 @@ export default function useTaskState() {
     }
   }, [loadPlacements]);
 
+  // Poll for external changes (MCP, GCal, another tab)
+  useEffect(() => {
+    var intervalId = setInterval(async () => {
+      try {
+        var res = await apiClient.get('/tasks/version');
+        var serverVersion = res.data.version;
+        if (lastVersionRef.current !== null && serverVersion !== lastVersionRef.current) {
+          // External change detected — reload if no dirty edits pending
+          var state = taskStateRef.current;
+          var hasDirty = Object.keys(state._dirtyTaskIds || {}).length > 0;
+          if (!hasDirty) {
+            lastVersionRef.current = serverVersion;
+            var [tasksRes] = await Promise.all([
+              apiClient.get('/tasks')
+            ]);
+            var tasks = tasksRes.data.tasks || [];
+            var statuses = {};
+            var directions = {};
+            tasks.forEach(function(t) {
+              if (t.status) statuses[t.id] = t.status;
+              if (t.direction) directions[t.id] = t.direction;
+            });
+            dispatch({ type: 'INIT', tasks, statuses, directions });
+            loadPlacements();
+          }
+        }
+        lastVersionRef.current = serverVersion;
+      } catch (e) {
+        // Silently ignore — network errors, etc.
+      }
+    }, 10000);
+
+    return function() { clearInterval(intervalId); };
+  }, [loadPlacements]);
+
   // Cleanup
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       if (placementTimerRef.current) clearTimeout(placementTimerRef.current);
     };
+  }, []);
+
+  // Flush pending saves immediately (cancels debounce timer)
+  const flushNow = useCallback(async () => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    await flushSaveRef.current();
   }, []);
 
   return {
@@ -197,6 +302,7 @@ export default function useTaskState() {
     deleteTask,
     createTask,
     taskStateRef,
-    setPlacements
+    setPlacements,
+    flushNow
   };
 }

@@ -53,6 +53,53 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
   var [saveStatus, setSaveStatus] = useState(null); // null | 'saving' | 'saved'
   var saveTimer = useRef(null);
   var firstRender = useRef(true);
+  // Track the task prop snapshot so we can detect external changes and diff for saves
+  var taskSnapshotRef = useRef(null);
+  var userDirtyRef = useRef(false); // true when user has unsaved edits
+
+  // Build a comparable snapshot from a task object (same shape as form state)
+  function snapshotFromTask(t) {
+    return {
+      text: t.text || '', project: t.project || '', pri: t.pri || 'P3',
+      date: toDateISO(t.date) || '', time: toTime24(t.time) || '',
+      dur: t.dur || 30, timeRemaining: t.timeRemaining != null ? t.timeRemaining : '',
+      due: toDateISO(t.due) || '', startAfter: toDateISO(t.startAfter) || '',
+      notes: t.notes || '', when: t.when || '', dayReq: t.dayReq || 'any',
+      habit: !!t.habit, rigid: !!t.rigid,
+      timeFlex: t.timeFlex != null ? t.timeFlex : 60,
+      split: t.split !== undefined ? !!t.split : false, splitMin: t.splitMin || 15,
+      location: t.location || [], tools: t.tools || [],
+      datePinned: !!t.datePinned,
+      recurType: t.recur?.type || 'none', recurDays: t.recur?.days || 'MTWRF',
+      recurEvery: t.recur?.every || 2
+    };
+  }
+  if (!taskSnapshotRef.current && !isCreate && task) {
+    taskSnapshotRef.current = snapshotFromTask(task);
+  }
+
+  // Sync form state from task prop when it changes externally (e.g. INIT reload)
+  // Only sync if the user doesn't have unsaved edits
+  useEffect(function() {
+    if (isCreate || !task) return;
+    var newSnap = snapshotFromTask(task);
+    var oldSnap = taskSnapshotRef.current;
+    if (!oldSnap || JSON.stringify(newSnap) === JSON.stringify(oldSnap)) return;
+    if (userDirtyRef.current) return; // don't overwrite user's in-progress edits
+    taskSnapshotRef.current = newSnap;
+    setText(newSnap.text); setProject(newSnap.project); setPri(newSnap.pri);
+    setDate(newSnap.date); setTime(newSnap.time); setDur(newSnap.dur);
+    setTimeRemaining(newSnap.timeRemaining); setDue(newSnap.due);
+    setStartAfter(newSnap.startAfter); setNotes(newSnap.notes);
+    setWhen(newSnap.when); setDayReq(newSnap.dayReq);
+    setHabit(newSnap.habit); setRigid(newSnap.rigid); setTimeFlex(newSnap.timeFlex);
+    setSplit(newSnap.split); setSplitMin(newSnap.splitMin);
+    setTaskLoc(newSnap.location); setTaskTools(newSnap.tools);
+    setDatePinned(newSnap.datePinned);
+    setRecurType(newSnap.recurType); setRecurDays(newSnap.recurDays);
+    setRecurEvery(newSnap.recurEvery);
+    firstRender.current = true; // prevent auto-save from firing for this sync
+  }, [task, isCreate]);
 
   var buildFields = useCallback(function() {
     var d = fromDateISO(date);
@@ -85,14 +132,59 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
     };
   }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, taskLoc, taskTools, datePinned, recurType, recurDays, recurEvery, isCreate, task]);
 
-  // Auto-save on field changes (edit mode only)
+  // Build only the fields that changed from the initial snapshot (prevents marking unchanged fields dirty)
+  var buildChangedFields = useCallback(function() {
+    var all = buildFields();
+    var snap = taskSnapshotRef.current;
+    if (!snap) return all; // no snapshot = send everything
+    var changed = {};
+    // Compare form state values directly against snapshot (avoids buildFields' || undefined transforms)
+    if (text !== snap.text) changed.text = all.text;
+    if (project !== snap.project) changed.project = all.project;
+    if (pri !== snap.pri) changed.pri = all.pri;
+    if (notes !== snap.notes) changed.notes = all.notes;
+    if (when !== snap.when) changed.when = all.when;
+    if (dayReq !== snap.dayReq) changed.dayReq = all.dayReq;
+    if (habit !== snap.habit) changed.habit = all.habit;
+    if (rigid !== snap.rigid) changed.rigid = all.rigid;
+    if (parseInt(dur) !== snap.dur) changed.dur = all.dur;
+    if (timeFlex !== snap.timeFlex) changed.timeFlex = all.timeFlex;
+    if (!!split !== snap.split) changed.split = all.split;
+    if (parseInt(splitMin) !== snap.splitMin) changed.splitMin = all.splitMin;
+    if (!!datePinned !== snap.datePinned) changed.datePinned = all.datePinned;
+    // Date/time (compare in form format)
+    if (date !== (snap.date || '')) { changed.date = all.date; changed.day = all.day; }
+    if (time !== (snap.time || '')) changed.time = all.time;
+    if (due !== (snap.due || '')) changed.due = all.due;
+    if (startAfter !== (snap.startAfter || '')) changed.startAfter = all.startAfter;
+    // timeRemaining
+    var snapRem = snap.timeRemaining === '' ? null : parseInt(snap.timeRemaining);
+    if (all.timeRemaining !== snapRem) changed.timeRemaining = all.timeRemaining;
+    // Array fields (location, tools)
+    if (JSON.stringify(taskLoc) !== JSON.stringify(snap.location)) changed.location = all.location;
+    if (JSON.stringify(taskTools) !== JSON.stringify(snap.tools)) changed.tools = all.tools;
+    // Recurrence
+    if (recurType !== snap.recurType || recurDays !== snap.recurDays || String(recurEvery) !== String(snap.recurEvery)) {
+      changed.recur = all.recur;
+    }
+    return Object.keys(changed).length > 0 ? changed : null;
+  }, [buildFields, text, project, pri, notes, when, dayReq, habit, rigid, dur, timeFlex, split, splitMin, datePinned, date, time, due, startAfter, taskLoc, taskTools, recurType, recurDays, recurEvery]);
+
+  // Auto-save on field changes (edit mode only) — only sends changed fields
   useEffect(function() {
     if (isCreate) return;
     if (firstRender.current) { firstRender.current = false; return; }
+    userDirtyRef.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     setSaveStatus('saving');
     saveTimer.current = setTimeout(function() {
-      onUpdate(task.id, buildFields());
+      var changed = buildChangedFields();
+      if (changed) {
+        onUpdate(task.id, changed);
+        // Update snapshot so next save only sends new changes
+        taskSnapshotRef.current = snapshotFromTask(Object.assign({}, task, buildFields()));
+      }
+      userDirtyRef.current = false;
       setSaveStatus('saved');
       setTimeout(function() { setSaveStatus(null); }, 1500);
     }, 600);
@@ -444,10 +536,17 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
                 style={togStyle(dayReq === 'weekend', '#8B5CF6')}>Wkend</button>
               {[['Su','Su'],['M','Mo'],['T','Tu'],['W','We'],['R','Th'],['F','Fr'],['Sa','Sa']].map(function(pair) {
                 var code = pair[0], label = pair[1];
+                var selected = dayReq ? dayReq.split(',') : [];
+                var isOn = selected.indexOf(code) >= 0;
                 return (
-                  <button key={code} title={({Su:'Sunday only',M:'Monday only',T:'Tuesday only',W:'Wednesday only',R:'Thursday only',F:'Friday only',Sa:'Saturday only'})[code]}
-                    onClick={function() { setDayReq(dayReq === code ? 'any' : code); }}
-                    style={togStyle(dayReq === code)}>{label}</button>
+                  <button key={code} title={({Su:'Sunday',M:'Monday',T:'Tuesday',W:'Wednesday',R:'Thursday',F:'Friday',Sa:'Saturday'})[code]}
+                    onClick={function() {
+                      var cur = dayReq && dayReq !== 'any' && dayReq !== 'weekday' && dayReq !== 'weekend' ? dayReq.split(',') : [];
+                      if (isOn) { cur = cur.filter(function(v) { return v !== code; }); }
+                      else { cur.push(code); }
+                      setDayReq(cur.length === 0 ? 'any' : cur.join(','));
+                    }}
+                    style={togStyle(isOn)}>{label}</button>
                 );
               })}
             </div>

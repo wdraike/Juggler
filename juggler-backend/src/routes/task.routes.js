@@ -6,6 +6,7 @@ const { authenticateJWT } = require('../middleware/jwt-auth');
 router.use(authenticateJWT);
 
 router.get('/', taskController.getAllTasks);
+router.get('/version', taskController.getVersion);
 router.post('/', taskController.createTask);
 router.post('/batch', taskController.batchCreateTasks);
 router.put('/batch', taskController.batchUpdateTasks);

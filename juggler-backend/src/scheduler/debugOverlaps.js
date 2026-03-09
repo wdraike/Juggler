@@ -141,7 +141,7 @@ async function main() {
         location: src.location, tools: src.tools, split: src.split,
         timeFlex: src.timeFlex,
         dayReq: src.dayReq || 'any', section: '', notes: '',
-        sourceId: src.id, generated: true
+        taskType: 'generated', sourceId: src.id, generated: true
       });
     });
     cursor.setDate(cursor.getDate() + 1);

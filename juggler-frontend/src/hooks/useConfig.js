@@ -7,7 +7,8 @@ import apiClient from '../services/apiClient';
 import {
   DEFAULT_LOCATIONS, DEFAULT_TOOLS, DEFAULT_TOOL_MATRIX,
   DEFAULT_TIME_BLOCKS, DEFAULT_WEEKDAY_BLOCKS, DEFAULT_WEEKEND_BLOCKS,
-  DEFAULT_SCHEDULE_TEMPLATES, DEFAULT_TEMPLATE_DEFAULTS
+  DEFAULT_SCHEDULE_TEMPLATES, DEFAULT_TEMPLATE_DEFAULTS,
+  registerLocations
 } from '../state/constants';
 
 /** Derive legacy timeBlocks from unified templates + day defaults */
@@ -128,7 +129,10 @@ export default function useConfig() {
   // Initialize from API response
   var initFromConfig = useCallback(function(config) {
     if (!config) return;
-    if (config.locations?.length > 0) setLocations(config.locations);
+    if (config.locations?.length > 0) {
+      registerLocations(config.locations);
+      setLocations(config.locations);
+    }
     if (config.tools?.length > 0) setTools(config.tools);
     if (config.projects) setProjects(config.projects);
     if (config.toolMatrix) setToolMatrix(config.toolMatrix);
@@ -262,6 +266,7 @@ export default function useConfig() {
   }, [saveConfig]);
 
   var updateLocations = useCallback(async function(locs) {
+    registerLocations(locs);
     setLocations(locs);
     try {
       await apiClient.put('/locations', { locations: locs });

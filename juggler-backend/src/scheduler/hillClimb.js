@@ -9,6 +9,7 @@
  *  0 - Swap: two non-locked tasks on same day (any duration)
  *  1 - Shift: move task to different gap on same day
  *  2 - Date shift: move non-pinned, non-habit task closer to original date
+ *  3 - Cross-day swap: swap higher-pri task on later day with lower-pri on earlier day
  */
 
 var dateHelpers = require('./dateHelpers');
@@ -226,9 +227,9 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       bestTotal = scoreSchedule(dayPlacements, unplaced, allTasks).total;
     }
 
-    // Pick move type: 0=swap(40%), 1=shift(30%), 2=date-shift(30%)
+    // Pick move type: 0=swap(30%), 1=shift(25%), 2=date-shift(20%), 3=cross-day-swap(25%)
     var r = Math.random();
-    var moveType = r < 0.4 ? 0 : r < 0.7 ? 1 : 2;
+    var moveType = r < 0.3 ? 0 : r < 0.55 ? 1 : r < 0.75 ? 2 : 3;
 
     if (moveType === 0) {
       // SWAP: two non-locked tasks on same day (any duration)
@@ -366,7 +367,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
         reserve(dayOcc[dk2], oldStart, dur);
       }
 
-    } else {
+    } else if (moveType === 2) {
       // DATE SHIFT: move a drifted task closer to its original date
       if (driftCandidates.length === 0) continue;
 
@@ -461,6 +462,124 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
         if (plIdx !== -1) oldPls.splice(plIdx, 0, pl);
         else oldPls.push(pl);
         reserve(dayOcc[oldDk], oldSt, plDur);
+      }
+
+    } else {
+      // CROSS-DAY SWAP: swap a higher-pri task on a later day with a lower-pri task on an earlier day
+      if (dateKeys.length < 2) continue;
+
+      // Pick two random different days
+      var dayIdxA = Math.floor(Math.random() * dateKeys.length);
+      var dayIdxB = Math.floor(Math.random() * dateKeys.length);
+      if (dayIdxA === dayIdxB) continue;
+
+      // Ensure A is earlier, B is later
+      var dkA = dateKeys[dayIdxA], dkB = dateKeys[dayIdxB];
+      var dateA = parseDate(dkA), dateB = parseDate(dkB);
+      if (!dateA || !dateB) continue;
+      if (dateA > dateB) { var tmpDk = dkA; dkA = dkB; dkB = tmpDk; var tmpDate = dateA; dateA = dateB; dateB = tmpDate; }
+
+      var plsA = dayPlacements[dkA], plsB = dayPlacements[dkB];
+      if (!plsA || !plsB || plsA.length === 0 || plsB.length === 0) continue;
+
+      // Find a lower-pri movable task on earlier day A
+      var movA = [];
+      for (var mai = 0; mai < plsA.length; mai++) {
+        if (isMovable(plsA[mai]) && !plsA[mai].task.habit) movA.push(plsA[mai]);
+      }
+      if (movA.length === 0) continue;
+
+      // Find a higher-pri movable task on later day B
+      var movB = [];
+      for (var mbi = 0; mbi < plsB.length; mbi++) {
+        if (isMovable(plsB[mbi]) && !plsB[mbi].task.habit) movB.push(plsB[mbi]);
+      }
+      if (movB.length === 0) continue;
+
+      var plLow = movA[Math.floor(Math.random() * movA.length)];
+      var plHigh = movB[Math.floor(Math.random() * movB.length)];
+
+      // Only proceed if plHigh has strictly higher priority than plLow
+      var priLow = plLow.task.pri || 'P3', priHigh = plHigh.task.pri || 'P3';
+      var rankLow = priLow === 'P1' ? 4 : priLow === 'P2' ? 3 : priLow === 'P4' ? 1 : 2;
+      var rankHigh = priHigh === 'P1' ? 4 : priHigh === 'P2' ? 3 : priHigh === 'P4' ? 1 : 2;
+      if (rankHigh <= rankLow) continue;
+
+      // Free both from their current positions
+      var occA = dayOcc[dkA], occB = dayOcc[dkB];
+      var oldStartLow = plLow.start, oldStartHigh = plHigh.start;
+      free(occA, oldStartLow, plLow.dur);
+      free(occB, oldStartHigh, plHigh.dur);
+
+      // Try placing plHigh on day A, plLow on day B
+      var newStartHigh = findRandomGap(plHigh.task, plHigh.dur, dkA, dayOcc, dayWindows, dayBlocks, cfg);
+      if (newStartHigh < 0) {
+        reserve(occA, oldStartLow, plLow.dur);
+        reserve(occB, oldStartHigh, plHigh.dur);
+        continue;
+      }
+      reserve(occA, newStartHigh, plHigh.dur);
+
+      var newStartLow = findRandomGap(plLow.task, plLow.dur, dkB, dayOcc, dayWindows, dayBlocks, cfg);
+      if (newStartLow < 0) {
+        free(occA, newStartHigh, plHigh.dur);
+        reserve(occA, oldStartLow, plLow.dur);
+        reserve(occB, oldStartHigh, plHigh.dur);
+        continue;
+      }
+
+      // Temporarily apply for dep check
+      var idxLowInA = plsA.indexOf(plLow);
+      var idxHighInB = plsB.indexOf(plHigh);
+
+      plLow.start = newStartLow; plLow._dateKey = dkB;
+      plHigh.start = newStartHigh; plHigh._dateKey = dkA;
+      if (idxLowInA !== -1) plsA.splice(idxLowInA, 1);
+      if (idxHighInB !== -1) plsB.splice(idxHighInB, 1);
+      plsA.push(plHigh);
+      plsB.push(plLow);
+
+      reserve(occB, newStartLow, plLow.dur);
+
+      var cdPlacIdx = buildPlacementIndex();
+      var cdDepsOk = checkDeps(plHigh.task.id, dkA, newStartHigh, plHigh.dur, cdPlacIdx)
+        && checkDeps(plLow.task.id, dkB, newStartLow, plLow.dur, cdPlacIdx);
+
+      if (!cdDepsOk) {
+        // Revert
+        free(occA, newStartHigh, plHigh.dur);
+        free(occB, newStartLow, plLow.dur);
+        var idxHighInA = plsA.indexOf(plHigh);
+        if (idxHighInA !== -1) plsA.splice(idxHighInA, 1);
+        var idxLowInB = plsB.indexOf(plLow);
+        if (idxLowInB !== -1) plsB.splice(idxLowInB, 1);
+        plLow.start = oldStartLow; plLow._dateKey = dkA;
+        plHigh.start = oldStartHigh; plHigh._dateKey = dkB;
+        if (idxLowInA !== -1) plsA.splice(idxLowInA, 0, plLow); else plsA.push(plLow);
+        if (idxHighInB !== -1) plsB.splice(idxHighInB, 0, plHigh); else plsB.push(plHigh);
+        reserve(occA, oldStartLow, plLow.dur);
+        reserve(occB, oldStartHigh, plHigh.dur);
+        continue;
+      }
+
+      var cdNewScore = scoreSchedule(dayPlacements, unplaced, allTasks);
+      if (cdNewScore.total < bestTotal) {
+        bestTotal = cdNewScore.total;
+        improved = true;
+      } else {
+        // Revert
+        free(occA, newStartHigh, plHigh.dur);
+        free(occB, newStartLow, plLow.dur);
+        var idxHighInA2 = plsA.indexOf(plHigh);
+        if (idxHighInA2 !== -1) plsA.splice(idxHighInA2, 1);
+        var idxLowInB2 = plsB.indexOf(plLow);
+        if (idxLowInB2 !== -1) plsB.splice(idxLowInB2, 1);
+        plLow.start = oldStartLow; plLow._dateKey = dkA;
+        plHigh.start = oldStartHigh; plHigh._dateKey = dkB;
+        if (idxLowInA !== -1) plsA.splice(idxLowInA, 0, plLow); else plsA.push(plLow);
+        if (idxHighInB !== -1) plsB.splice(idxHighInB, 0, plHigh); else plsB.push(plHigh);
+        reserve(occA, oldStartLow, plLow.dur);
+        reserve(occB, oldStartHigh, plHigh.dur);
       }
     }
   }

@@ -12,9 +12,9 @@ var { runScheduleAndPersist, getSchedulePlacements } = require('../scheduler/run
  */
 router.post('/run', authenticateJWT, async function(req, res) {
   try {
-    var stats = await runScheduleAndPersist(req.user.id);
-    var placements = await getSchedulePlacements(req.user.id);
-    res.json(Object.assign({}, stats, { dayPlacements: placements.dayPlacements, unplaced: placements.unplaced }));
+    var result = await runScheduleAndPersist(req.user.id);
+    // result now includes dayPlacements and unplaced from the same run (cached)
+    res.json(result);
   } catch (error) {
     console.error('Schedule run error:', error);
     res.status(500).json({ error: 'Failed to run scheduler' });

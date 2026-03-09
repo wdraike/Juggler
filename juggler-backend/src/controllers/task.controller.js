@@ -12,6 +12,7 @@
  */
 
 const db = require('../db');
+const { v7: uuidv7 } = require('uuid');
 const { localToUtc, utcToLocal, toDateISO, fromDateISO, getDayName } = require('../scheduler/dateHelpers');
 
 /**
@@ -41,11 +42,47 @@ function parseISOToDate(iso) {
   return d;
 }
 
+// Fields that live on the source template and are inherited by habit instances.
+// If an instance row has NULL for these, the value is read from the source.
+var TEMPLATE_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
+  'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
+  'recur', 'depends_on'];
+
+/**
+ * Build a { sourceId: row } lookup from an array of task rows.
+ * Includes habit_template rows so instances can inherit their fields.
+ */
+function buildSourceMap(rows) {
+  var map = {};
+  rows.forEach(function(r) {
+    if (r.task_type === 'habit_template') {
+      map[r.id] = r;
+    }
+  });
+  return map;
+}
+
 /**
  * Map task row from DB to API format.
  * Derives date/time/day from scheduled_at (UTC) using the user's timezone.
+ * If sourceMap is provided, habit instances inherit template fields from their source.
  */
-function rowToTask(row, timezone) {
+function rowToTask(row, timezone, sourceMap) {
+  // Merge template fields from source for thin habit instances
+  var src = sourceMap && row.source_id ? sourceMap[row.source_id] : null;
+  if (src) {
+    // Create a merged row so downstream logic sees complete data
+    var merged = {};
+    Object.keys(row).forEach(function(k) { merged[k] = row[k]; });
+    TEMPLATE_FIELDS.forEach(function(f) {
+      var v = merged[f];
+      // Treat null, empty string, and empty arrays/objects as "inherit from source"
+      var isEmpty = v == null || v === '' || v === '[]' || v === '{}';
+      if (!isEmpty && Array.isArray(v) && v.length === 0) isEmpty = true;
+      if (isEmpty) merged[f] = src[f];
+    });
+    row = merged;
+  }
   var date = null;
   var time = null;
   var day = null;
@@ -91,6 +128,7 @@ function rowToTask(row, timezone) {
 
   return {
     id: row.id,
+    taskType: row.task_type || 'task',
     text: row.text,
     // UTC source of truth
     scheduledAt: scheduledAtToISO(row.scheduled_at),
@@ -135,6 +173,7 @@ function rowToTask(row, timezone) {
 function taskToRow(task, userId, timezone) {
   var row = { user_id: userId };
   if (task.id !== undefined) row.id = task.id;
+  if (task.taskType !== undefined) row.task_type = task.taskType;
   if (task.text !== undefined) row.text = task.text;
   if (task.dur !== undefined) row.dur = task.dur;
   if (task.timeRemaining !== undefined) row.time_remaining = task.timeRemaining;
@@ -189,17 +228,48 @@ function taskToRow(task, userId, timezone) {
 }
 
 /**
+ * Compute a version string from the most recent updated_at across all tasks.
+ * Used for change-detection polling so the frontend knows when to reload.
+ */
+async function getTasksVersion(userId) {
+  var row = await db('tasks')
+    .where('user_id', userId)
+    .max('updated_at as max_updated')
+    .count('* as cnt')
+    .first();
+  // Combine max timestamp + count so additions/deletions also change the version
+  var ts = row && row.max_updated ? String(row.max_updated) : '0';
+  var cnt = row ? String(row.cnt) : '0';
+  return ts + ':' + cnt;
+}
+
+/**
  * GET /api/tasks — all tasks for user
  */
 async function getAllTasks(req, res) {
   try {
     var rows = await db('tasks').where('user_id', req.user.id).orderBy('created_at', 'asc');
     var tz = req.user.timezone || 'America/New_York';
-    var tasks = rows.map(function(r) { return rowToTask(r, tz); });
-    res.json({ tasks: tasks });
+    var srcMap = buildSourceMap(rows);
+    var tasks = rows.map(function(r) { return rowToTask(r, tz, srcMap); });
+    var version = await getTasksVersion(req.user.id);
+    res.json({ tasks: tasks, version: version });
   } catch (error) {
     console.error('Get tasks error:', error);
     res.status(500).json({ error: 'Failed to fetch tasks' });
+  }
+}
+
+/**
+ * GET /api/tasks/version — lightweight change-detection endpoint
+ */
+async function getVersion(req, res) {
+  try {
+    var version = await getTasksVersion(req.user.id);
+    res.json({ version: version });
+  } catch (error) {
+    console.error('Get version error:', error);
+    res.status(500).json({ error: 'Failed to get version' });
   }
 }
 
@@ -226,6 +296,8 @@ async function createTask(req, res) {
   try {
     var tz = req.user.timezone || 'America/New_York';
     var row = taskToRow(req.body, req.user.id, tz);
+    if (!row.id) row.id = uuidv7();
+    if (!row.task_type) row.task_type = 'task';
     row.created_at = db.fn.now();
     await applySplitDefault(row, req.user.id);
     await ensureProject(req.user.id, req.body.project);
@@ -269,27 +341,58 @@ async function updateTask(req, res) {
       row.original_scheduled_at = null;
     }
 
-    await db.transaction(async function(trx) {
-      await trx('tasks').where({ id: id, user_id: req.user.id }).update(row);
+    // Fields that belong on the source template (shared across all instances).
+    var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
+      'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
+      'recur', 'depends_on'];
 
-      // When a habit template (ht_*) is updated, propagate inheritable fields
-      // to all its dh* instances so they stay in sync.
-      if (id.indexOf('ht_') === 0 && existing.habit) {
-        var PROPAGATE = ['location', 'when', 'where', 'tools', 'pri', 'rigid', 'split', 'day_req', 'time_flex'];
+    var taskType = existing.task_type || 'task';
+
+    await db.transaction(async function(trx) {
+      if (taskType === 'habit_instance' && existing.source_id) {
+        // Route template fields to the source, keep instance fields on this row
+        var templateUpdate = {};
         var instanceUpdate = {};
-        PROPAGATE.forEach(function(f) { if (row[f] !== undefined) instanceUpdate[f] = row[f]; });
+
+        Object.keys(row).forEach(function(k) {
+          if (k === 'updated_at') return; // added to both
+          if (TEMPLATE_ROW_FIELDS.indexOf(k) >= 0) {
+            templateUpdate[k] = row[k];
+          } else {
+            instanceUpdate[k] = row[k];
+          }
+        });
+
+        // Update the source template with template fields
+        if (Object.keys(templateUpdate).length > 0) {
+          templateUpdate.updated_at = db.fn.now();
+          await trx('tasks')
+            .where({ id: existing.source_id, user_id: req.user.id })
+            .update(templateUpdate);
+        }
+
+        // Update instance-specific fields on this row
         if (Object.keys(instanceUpdate).length > 0) {
           instanceUpdate.updated_at = db.fn.now();
-          await trx('tasks')
-            .where({ user_id: req.user.id, text: existing.text, habit: 1 })
-            .andWhere('id', 'like', 'dh%')
-            .update(instanceUpdate);
+          await trx('tasks').where({ id: id, user_id: req.user.id }).update(instanceUpdate);
+        } else {
+          // Still touch updated_at so version changes
+          await trx('tasks').where({ id: id, user_id: req.user.id }).update({ updated_at: db.fn.now() });
         }
+      } else if (taskType === 'habit_template') {
+        // Editing the template directly — just update the template row
+        await trx('tasks').where({ id: id, user_id: req.user.id }).update(row);
+      } else {
+        // Normal (non-habit) task — update directly
+        await trx('tasks').where({ id: id, user_id: req.user.id }).update(row);
       }
     });
 
-    var updated = await db('tasks').where('id', id).first();
-    res.json({ task: rowToTask(updated, tz) });
+    // Re-read with sourceMap so the response includes merged fields
+    var allRows = await db('tasks').where('user_id', req.user.id).select();
+    var srcMap = buildSourceMap(allRows);
+    var updatedRow = allRows.find(function(r) { return r.id === id; });
+    res.json({ task: rowToTask(updatedRow, tz, srcMap) });
   } catch (error) {
     console.error('Update task error:', error);
     res.status(500).json({ error: 'Failed to update task' });
@@ -426,17 +529,32 @@ async function batchUpdateTasks(req, res) {
     if (!Array.isArray(updates) || updates.length === 0) {
       return res.status(400).json({ error: 'Updates array required' });
     }
-    if (updates.length > 500) {
-      return res.status(400).json({ error: 'Batch limited to 500 items' });
+    if (updates.length > 2000) {
+      return res.status(400).json({ error: 'Batch limited to 2000 items' });
     }
 
     var tz = req.user.timezone || 'America/New_York';
     var updatedCount = 0;
     var MAX_RETRIES = 3;
+
+    // Template fields that should be routed to the source for habit instances
+    var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
+      'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
+      'recur', 'depends_on'];
+
     for (var attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         updatedCount = 0;
         await db.transaction(async function(trx) {
+          // Pre-load task_type and source_id for all IDs being updated
+          var idsToUpdate = updates.map(function(u) { return u.id; }).filter(Boolean);
+          var existingRows = await trx('tasks')
+            .where('user_id', req.user.id)
+            .whereIn('id', idsToUpdate)
+            .select('id', 'task_type', 'source_id');
+          var existingById = {};
+          existingRows.forEach(function(r) { existingById[r.id] = r; });
+
           for (var i = 0; i < updates.length; i++) {
             var update = updates[i];
             var id = update.id;
@@ -448,7 +566,36 @@ async function batchUpdateTasks(req, res) {
             delete row.user_id;
             delete row.created_at;
 
-            await trx('tasks').where({ id: id, user_id: req.user.id }).update(row);
+            var existing = existingById[id];
+            var taskType = existing ? (existing.task_type || 'task') : 'task';
+
+            if (taskType === 'habit_instance' && existing && existing.source_id) {
+              // Route template fields to source, instance fields to this row
+              var templateUpdate = {};
+              var instanceUpdate = {};
+              Object.keys(row).forEach(function(k) {
+                if (k === 'updated_at') return;
+                if (TEMPLATE_ROW_FIELDS.indexOf(k) >= 0) {
+                  templateUpdate[k] = row[k];
+                } else {
+                  instanceUpdate[k] = row[k];
+                }
+              });
+              if (Object.keys(templateUpdate).length > 0) {
+                templateUpdate.updated_at = db.fn.now();
+                await trx('tasks')
+                  .where({ id: existing.source_id, user_id: req.user.id })
+                  .update(templateUpdate);
+              }
+              if (Object.keys(instanceUpdate).length > 0) {
+                instanceUpdate.updated_at = db.fn.now();
+                await trx('tasks').where({ id: id, user_id: req.user.id }).update(instanceUpdate);
+              } else {
+                await trx('tasks').where({ id: id, user_id: req.user.id }).update({ updated_at: db.fn.now() });
+              }
+            } else {
+              await trx('tasks').where({ id: id, user_id: req.user.id }).update(row);
+            }
             updatedCount++;
           }
         });
@@ -472,6 +619,7 @@ async function batchUpdateTasks(req, res) {
 
 module.exports = {
   getAllTasks,
+  getVersion,
   createTask,
   updateTask,
   deleteTask,
@@ -480,6 +628,7 @@ module.exports = {
   batchUpdateTasks,
   rowToTask,
   taskToRow,
+  buildSourceMap,
   ensureProject,
   applySplitDefault
 };

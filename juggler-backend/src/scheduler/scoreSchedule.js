@@ -15,6 +15,7 @@ var getTaskDeps = dependencyHelpers.getTaskDeps;
 var W_UNPLACED = 1000;
 var W_DEADLINE_MISS = 500;
 var W_PRIORITY_DRIFT = 50;
+var W_CROSS_DAY_PRI = 30;
 var W_HABIT_TIME_DRIFT = 10;
 var W_FRAGMENTATION = 20;
 var W_DEPENDENCY_SLACK = 5;
@@ -203,7 +204,46 @@ function scoreSchedule(dayPlacements, unplaced, allTasks) {
     }
   }
 
-  // 7. Date Drift Penalty
+  // 7. Cross-Day Priority Inversion Penalty
+  // Penalize when a lower-priority task is on an earlier day than a higher-priority task.
+  // Excludes habits and locked tasks.
+  var crossDayPriPenalty = 0;
+  var sortedDateKeys = dateKeys.slice().sort(function(a, b) {
+    return dateDiffDays(a, b);
+  });
+  // Walk backward through dates, tracking the max priority rank seen on later days
+  var maxPriSeenLater = 0;
+  for (var sdi = sortedDateKeys.length - 1; sdi >= 0; sdi--) {
+    var sdKey = sortedDateKeys[sdi];
+    var sdPlacements = dayPlacements[sdKey];
+    if (!sdPlacements) continue;
+    // First pass: update maxPriSeenLater from tasks on this day
+    var dayMaxPri = 0;
+    for (var spi = 0; spi < sdPlacements.length; spi++) {
+      var sp = sdPlacements[spi];
+      if (!sp.task || sp.locked) continue;
+      if (sp.task.habit) continue;
+      var spPri = priMultiplier(sp.task.pri);
+      if (spPri > dayMaxPri) dayMaxPri = spPri;
+    }
+    // If tasks on this day have lower priority than tasks on later days, penalize
+    if (maxPriSeenLater > 0) {
+      for (var spi2 = 0; spi2 < sdPlacements.length; spi2++) {
+        var sp2 = sdPlacements[spi2];
+        if (!sp2.task || sp2.locked) continue;
+        if (sp2.task.habit) continue;
+        var sp2Pri = priMultiplier(sp2.task.pri);
+        if (sp2Pri < maxPriSeenLater) {
+          var priDiff = maxPriSeenLater - sp2Pri;
+          crossDayPriPenalty += priDiff;
+          details.push({ type: 'crossDayPri', taskId: sp2.task.id, text: sp2.task.text, date: sdKey, priDiff: priDiff, penalty: priDiff });
+        }
+      }
+    }
+    if (dayMaxPri > maxPriSeenLater) maxPriSeenLater = dayMaxPri;
+  }
+
+  // 8. Date Drift Penalty
   var dateDriftPenalty = 0;
   for (var tid5 in placementsByTask) {
     var task5 = taskById[tid5];
@@ -225,6 +265,7 @@ function scoreSchedule(dayPlacements, unplaced, allTasks) {
   var total = W_UNPLACED * unplacedPenalty
     + W_DEADLINE_MISS * deadlineMissPenalty
     + W_PRIORITY_DRIFT * priorityDriftPenalty
+    + W_CROSS_DAY_PRI * crossDayPriPenalty
     + W_HABIT_TIME_DRIFT * habitTimeDriftPenalty
     + W_FRAGMENTATION * fragmentationPenalty
     + W_DEPENDENCY_SLACK * dependencySlackPenalty
@@ -236,6 +277,7 @@ function scoreSchedule(dayPlacements, unplaced, allTasks) {
       unplaced: Math.round(W_UNPLACED * unplacedPenalty * 100) / 100,
       deadlineMiss: Math.round(W_DEADLINE_MISS * deadlineMissPenalty * 100) / 100,
       priorityDrift: Math.round(W_PRIORITY_DRIFT * priorityDriftPenalty * 100) / 100,
+      crossDayPri: Math.round(W_CROSS_DAY_PRI * crossDayPriPenalty * 100) / 100,
       habitTimeDrift: Math.round(W_HABIT_TIME_DRIFT * habitTimeDriftPenalty * 100) / 100,
       fragmentation: Math.round(W_FRAGMENTATION * fragmentationPenalty * 100) / 100,
       dependencySlack: Math.round(W_DEPENDENCY_SLACK * dependencySlackPenalty * 100) / 100,
