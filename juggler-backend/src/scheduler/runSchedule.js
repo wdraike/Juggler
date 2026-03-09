@@ -373,7 +373,9 @@ async function runScheduleAndPersist(userId, _retries) {
   var placementCache = { dayPlacements: {}, unplaced: [], score: result.score, generatedAt: new Date().toISOString() };
   Object.keys(result.dayPlacements).forEach(function(dk) {
     placementCache.dayPlacements[dk] = result.dayPlacements[dk].map(function(p) {
-      return { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };
+      var entry = { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };
+      if (p.locked) entry.locked = true;
+      return entry;
     });
   });
   placementCache.unplaced = result.unplaced.map(function(t) { return t.id; });
@@ -460,17 +462,35 @@ async function getSchedulePlacements(userId) {
     }
   }
 
-  // If cache is stale (different day or >30 min old), re-run the scheduler
+  // If cache is stale, re-run the scheduler.
+  // Stale conditions: different day, >30 min old, past-dated tasks,
+  // or today's cached placements include past-time slots.
   var cacheStale = false;
   if (cache && cache.generatedAt) {
     var genTime = new Date(cache.generatedAt);
     var ageMs = Date.now() - genTime.getTime();
-    var genDateKey = formatDateKey(genTime);
+    // Use Intl to get the generated date in the user's timezone (server may run in UTC)
+    var genParts = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, month: 'numeric', day: 'numeric' }).formatToParts(genTime);
+    var genVals = {}; genParts.forEach(function(p) { genVals[p.type] = p.value; });
+    var genDateKey = genVals.month + '/' + genVals.day;
     if (genDateKey !== timeInfo.todayKey || ageMs > 30 * 60 * 1000) {
       cacheStale = true;
     }
   }
   if (hasPastTasks) cacheStale = true;
+  // Check if any cached today placements are now in the past
+  if (!cacheStale && cache && cache.dayPlacements && cache.dayPlacements[timeInfo.todayKey]) {
+    var nowSlotCheck = Math.ceil(timeInfo.nowMins / 15) * 15;
+    var todayCache = cache.dayPlacements[timeInfo.todayKey];
+    for (var ci = 0; ci < todayCache.length; ci++) {
+      // Skip locked (fixed/rigid) placements — they're always shown at their time
+      if (todayCache[ci].locked) continue;
+      if (todayCache[ci].start + todayCache[ci].dur <= nowSlotCheck) {
+        cacheStale = true;
+        break;
+      }
+    }
+  }
 
   if (cacheStale && cache) {
     console.log('[SCHED] cache stale (age=' + Math.round((Date.now() - new Date(cache.generatedAt).getTime()) / 60000) + 'm), re-running scheduler');
@@ -499,7 +519,9 @@ async function getSchedulePlacements(userId) {
         if (!task) return; // task was deleted since last run
         var st = statuses[p.taskId] || '';
         if (st === 'done' || st === 'cancel' || st === 'skip') return; // completed since last run
-        dayPlacements[dk].push({ task: task, start: p.start, dur: p.dur });
+        var hydrated = { task: task, start: p.start, dur: p.dur };
+        if (p.locked) hydrated.locked = true;
+        dayPlacements[dk].push(hydrated);
         cachedIds[p.taskId] = true;
       });
       if (dayPlacements[dk].length === 0) delete dayPlacements[dk];
