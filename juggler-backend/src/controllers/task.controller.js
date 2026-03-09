@@ -16,6 +16,17 @@ const { v7: uuidv7 } = require('uuid');
 const { localToUtc, utcToLocal, toDateISO, fromDateISO, getDayName } = require('../scheduler/dateHelpers');
 
 /**
+ * Normalize priority to P1-P4 format. Accepts "P1", "1", "p2", etc.
+ */
+function normalizePri(pri) {
+  if (!pri) return 'P3';
+  var s = String(pri).trim();
+  if (/^P[1-4]$/i.test(s)) return s.toUpperCase();
+  if (/^[1-4]$/.test(s)) return 'P' + s;
+  return 'P3';
+}
+
+/**
  * Convert a DB scheduled_at value to an ISO UTC string.
  */
 function scheduledAtToISO(val) {
@@ -177,7 +188,7 @@ function taskToRow(task, userId, timezone) {
   if (task.text !== undefined) row.text = task.text;
   if (task.dur !== undefined) row.dur = task.dur;
   if (task.timeRemaining !== undefined) row.time_remaining = task.timeRemaining;
-  if (task.pri !== undefined) row.pri = task.pri;
+  if (task.pri !== undefined) row.pri = normalizePri(task.pri);
   if (task.project !== undefined) row.project = task.project;
   if (task.status !== undefined) row.status = task.status;
   if (task.direction !== undefined) row.direction = task.direction;

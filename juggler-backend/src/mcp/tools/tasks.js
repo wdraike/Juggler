@@ -14,7 +14,7 @@ const { rowToTask, taskToRow, ensureProject, applySplitDefault, buildSourceMap }
 var taskInputFields = {
   text: z.string().optional(),
   project: z.string().optional().describe('Project name'),
-  pri: z.number().optional().describe('Priority (1=highest, 5=lowest)'),
+  pri: z.string().optional().describe('Priority: "P1" (highest), "P2", "P3" (default), "P4" (lowest)'),
   dur: z.number().optional().describe('Duration in minutes'),
   when: z.string().optional().describe('Time preference: "morning", "afternoon", "evening", or null'),
   dayReq: z.string().optional().describe('Day requirement: "any", "weekday", "weekend", a single day letter (M,T,W,R,F,Sa,Su), or comma-separated for multiple days (e.g. "M,W,F")'),
