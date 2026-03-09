@@ -9,7 +9,7 @@ import { getTheme } from '../../theme/colors';
 import { DAY_NAMES } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 
-export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, scheduling, onReschedule, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today }) {
+export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today }) {
   var theme = getTheme(darkMode);
   var { user, logout } = useAuth();
   var [showOverflow, setShowOverflow] = useState(false);
@@ -33,7 +33,6 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
   // Overflow menu items for mobile
   var overflowItems = [];
   if (isMobile) {
-    if (onReschedule) overflowItems.push({ label: scheduling ? 'Scheduling\u2026' : 'Reschedule', icon: '\uD83D\uDD04', onClick: onReschedule, disabled: scheduling });
     overflowItems.push({ label: 'Settings', icon: '\u2699\uFE0F', onClick: onShowSettings });
     overflowItems.push({ label: 'Import/Export', icon: '\uD83D\uDCE6', onClick: onShowExport });
     if (onShowGCalSync) overflowItems.push({ label: 'GCal Sync', icon: '\uD83D\uDCC5', onClick: onShowGCalSync });
@@ -44,7 +43,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
 
   return (
     <>
-    {(gcalSyncing || scheduling) && <style>{`@keyframes gcal-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>}
+    {gcalSyncing && <style>{`@keyframes gcal-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>}
     <div style={{
       display: 'flex', alignItems: 'center', gap: isMobile ? 6 : 12, padding: isMobile ? '6px 8px' : '8px 16px',
       background: theme.headerBg, borderBottom: `1px solid ${theme.border}`,
@@ -125,19 +124,6 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
         {/* Desktop: show all buttons inline */}
         {!isMobile && (
           <>
-            {onReschedule && (scheduling ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '4px 6px' }}>
-                <span style={{
-                  width: 18, height: 18, borderRadius: '50%',
-                  border: '2.5px solid ' + theme.border,
-                  borderTopColor: '#3B82F6',
-                  animation: 'gcal-spin 0.8s linear infinite',
-                  display: 'inline-block'
-                }} />
-              </span>
-            ) : (
-              <button onClick={onReschedule} style={btnStyle(theme, isMobile)} title="Reschedule \u2014 re-run the scheduler to place flexible tasks into available slots">&#x1F504;</button>
-            ))}
             <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings \u2014 locations, tools, templates, and preferences">&#x2699;&#xFE0F;</button>
             <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export \u2014 save or load tasks as JSON">&#x1F4E6;</button>
             {onShowGCalSync && (

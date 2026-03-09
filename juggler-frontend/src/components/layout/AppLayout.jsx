@@ -71,8 +71,6 @@ export default function AppLayout() {
   var [gcalAutoSync, setGcalAutoSync] = useState(false);
   var [gcalLastSyncedAt, setGcalLastSyncedAt] = useState(null);
   var [gcalSyncing, setGcalSyncing] = useState(false);
-  var [scheduling, setScheduling] = useState(false);
-  var schedulingRef = useRef(false);
   var editingRef = useRef(false);
 
   var theme = getTheme(darkMode);
@@ -125,7 +123,7 @@ export default function AppLayout() {
     if (!gcalAutoSync) return;
 
     function runAutoSync() {
-      if (schedulingRef.current || editingRef.current) return;
+      if (editingRef.current) return;
       setGcalSyncing(true);
       apiClient.post('/gcal/sync').then(function(r) {
         setGcalLastSyncedAt(new Date().toISOString());
@@ -354,28 +352,6 @@ export default function AppLayout() {
     config.updateHourLocationOverrides(overrides);
   }, [config]);
 
-  // Manual reschedule trigger — flush pending saves first, then call backend scheduler
-  var handleReschedule = useCallback(async () => {
-    if (scheduling || gcalSyncing || editingRef.current) return;
-    setScheduling(true);
-    schedulingRef.current = true;
-    showToast('Rescheduling...', 'info');
-    try {
-      // Flush any pending dirty-task saves so the scheduler sees current data
-      await flushNow();
-      var r = await apiClient.post('/schedule/run');
-      var msg = 'Rescheduled: ' + (r.data.updated || 0) + ' tasks updated';
-      showToast(msg, 'success');
-      await loadTasks();
-      loadPlacements();
-    } catch (err) {
-      showToast('Reschedule error: ' + (err.response?.data?.error || err.message), 'error');
-    } finally {
-      setScheduling(false);
-      schedulingRef.current = false;
-    }
-  }, [showToast, loadTasks, loadPlacements, scheduling, gcalSyncing]);
-
   // Keyboard shortcuts
   useKeyboardShortcuts({
     selectedDate, tasksByDate, statuses, allTasks, filter,
@@ -570,8 +546,6 @@ export default function AppLayout() {
           onShowSettings={() => setShowSettings(true)} onShowExport={() => setShowExport(true)}
           onShowGCalSync={() => setShowGCalSync(true)}
           gcalSyncing={gcalSyncing}
-          scheduling={scheduling}
-          onReschedule={handleReschedule}
           onShowHelp={() => setShowHelp(true)}
           onAddTask={() => { setShowCreateForm(true); setExpandedTasks([]); }}
           isMobile={isMobile}
@@ -836,7 +810,6 @@ export default function AppLayout() {
             setGcalAutoSync(val);
             if (!val) setGcalLastSyncedAt(gcalLastSyncedAt); // keep last value
           }}
-          scheduling={scheduling}
           onSyncStart={function() { setGcalSyncing(true); }}
           onSyncComplete={function() {
             setGcalSyncing(false);

@@ -32,7 +32,6 @@ export default function useTaskState() {
   const flushSaveRef = useRef(null);
   const flushPromiseRef = useRef(null);
   const lastVersionRef = useRef(null);
-  const autoRescheduleRef = useRef(false);
   const loadTasksRef = useRef(null);
 
   // Load placements from backend scheduler (debounced)
@@ -42,20 +41,6 @@ export default function useTaskState() {
       try {
         const res = await apiClient.get('/schedule/placements');
         setPlacements({ dayPlacements: res.data.dayPlacements || {}, unplaced: res.data.unplaced || [] });
-
-        // Auto-reschedule if past tasks detected (once per session)
-        if (res.data.hasPastTasks && !autoRescheduleRef.current) {
-          autoRescheduleRef.current = true;
-          try {
-            await apiClient.post('/schedule/run');
-            // Reload tasks so task.date reflects the new persisted dates
-            if (loadTasksRef.current) await loadTasksRef.current();
-            const res2 = await apiClient.get('/schedule/placements');
-            setPlacements({ dayPlacements: res2.data.dayPlacements || {}, unplaced: res2.data.unplaced || [] });
-          } catch (err) {
-            console.error('Auto-reschedule failed:', err);
-          }
-        }
       } catch (error) {
         console.error('Failed to load placements:', error);
       }
