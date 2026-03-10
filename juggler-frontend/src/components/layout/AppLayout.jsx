@@ -137,57 +137,49 @@ export default function AppLayout() {
       .catch(function() { /* not connected */ });
   }, []);
 
-  // Auto-sync polling: initial sync at 5s, then every 5 minutes
+  // Combined calendar auto-sync: runs GCal then Microsoft sequentially
   useEffect(() => {
-    if (!gcalAutoSync) return;
+    if (!gcalAutoSync && !msftCalAutoSync) return;
 
-    function runAutoSync() {
+    function runCombinedSync() {
       if (editingRef.current) return;
-      setGcalSyncing(true);
-      apiClient.post('/gcal/sync').then(function(r) {
-        setGcalLastSyncedAt(new Date().toISOString());
-        if (r.data.pushed || r.data.pulled || r.data.deleted_local || r.data.deleted_remote) {
-          loadTasks().then(function() { loadPlacements(); });
+      var changed = false;
+
+      var gcalPromise = Promise.resolve();
+      if (gcalAutoSync) {
+        setGcalSyncing(true);
+        gcalPromise = apiClient.post('/gcal/sync').then(function(r) {
+          setGcalLastSyncedAt(new Date().toISOString());
+          if (r.data.pushed || r.data.pulled || r.data.deleted_local || r.data.deleted_remote) changed = true;
+        }).catch(function() { /* silent */ }).finally(function() {
+          setGcalSyncing(false);
+        });
+      }
+
+      gcalPromise.then(function() {
+        if (!msftCalAutoSync) {
+          if (changed) loadTasks().then(function() { loadPlacements(); });
+          return;
         }
-      }).catch(function() { /* silent */ }).finally(function() {
-        setGcalSyncing(false);
+        setMsftCalSyncing(true);
+        apiClient.post('/msft-cal/sync').then(function(r) {
+          setMsftCalLastSyncedAt(new Date().toISOString());
+          if (r.data.pushed || r.data.pulled || r.data.deleted_local || r.data.deleted_remote) changed = true;
+        }).catch(function() { /* silent */ }).finally(function() {
+          setMsftCalSyncing(false);
+          if (changed) loadTasks().then(function() { loadPlacements(); });
+        });
       });
     }
 
-    var initialTimer = setTimeout(runAutoSync, 5000);
-    var intervalId = setInterval(runAutoSync, 5 * 60 * 1000);
+    var initialTimer = setTimeout(runCombinedSync, 5000);
+    var intervalId = setInterval(runCombinedSync, 5 * 60 * 1000);
 
     return function() {
       clearTimeout(initialTimer);
       clearInterval(intervalId);
     };
-  }, [gcalAutoSync, loadTasks, loadPlacements]);
-
-  // Microsoft Calendar auto-sync polling
-  useEffect(() => {
-    if (!msftCalAutoSync) return;
-
-    function runMsftAutoSync() {
-      if (editingRef.current) return;
-      setMsftCalSyncing(true);
-      apiClient.post('/msft-cal/sync').then(function(r) {
-        setMsftCalLastSyncedAt(new Date().toISOString());
-        if (r.data.pushed || r.data.pulled || r.data.deleted_local || r.data.deleted_remote) {
-          loadTasks().then(function() { loadPlacements(); });
-        }
-      }).catch(function() { /* silent */ }).finally(function() {
-        setMsftCalSyncing(false);
-      });
-    }
-
-    var initialTimer = setTimeout(runMsftAutoSync, 7000);
-    var intervalId = setInterval(runMsftAutoSync, 5 * 60 * 1000);
-
-    return function() {
-      clearTimeout(initialTimer);
-      clearInterval(intervalId);
-    };
-  }, [msftCalAutoSync, loadTasks, loadPlacements]);
+  }, [gcalAutoSync, msftCalAutoSync, loadTasks, loadPlacements]);
 
   // Derived dates
   var today = useMemo(() => {
