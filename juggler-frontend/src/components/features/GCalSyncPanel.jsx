@@ -108,8 +108,12 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
       showToast(parts.length > 0 ? 'Synced: ' + parts.join(', ') : 'Already in sync', 'success');
       if (onSyncComplete) onSyncComplete();
     } catch (e) {
-      var msg = e.response?.data?.error || e.message;
-      showToast('Sync failed: ' + msg, 'error');
+      if (e.response?.status === 409) {
+        showToast('Sync already in progress, please wait', 'info');
+      } else {
+        var msg = e.response?.data?.error || e.message;
+        showToast('Sync failed: ' + msg, 'error');
+      }
     } finally {
       setSyncing(false);
     }

@@ -108,6 +108,10 @@ export default function MsftCalSyncPanel({ onClose, darkMode, showToast, autoSyn
       showToast(parts.length > 0 ? 'Synced: ' + parts.join(', ') : 'Already in sync', 'success');
       if (onSyncComplete) onSyncComplete();
     } catch (e) {
+      if (e.response?.status === 409) {
+        showToast('Sync already in progress, please wait', 'info');
+        return;
+      }
       var msg = e.response?.data?.error || e.message;
       showToast('Sync failed: ' + msg, 'error');
     } finally {
