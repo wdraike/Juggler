@@ -29,10 +29,129 @@ const FILTERS = [
   { id: 'unplaced', label: 'Unplaced', tip: 'Tasks the scheduler couldn\u2019t place into any time slot' },
 ];
 
+// Which filter controls are relevant per view
+var GRID_VIEWS = { day: 1, '3day': 1, week: 1, timeline: 1, scurve: 1 };
+var FILTER_VISIBILITY = {
+  // Status pills only make sense for task-list views, not time grids
+  showStatusFilters: function(v) { return !GRID_VIEWS[v] && v !== 'conflicts'; },
+  // Project, search, and habits apply to most views
+  showProjectFilter: function(v) { return v !== 'conflicts'; },
+  showSearch: function(v) { return v !== 'conflicts'; },
+  showHideHabits: function(v) { return v !== 'conflicts'; },
+};
+
+function ProjectCombobox({ value, onChange, allProjectNames, theme, isMobile }) {
+  var [text, setText] = useState(value || '');
+  var [open, setOpen] = useState(false);
+  var ref = useRef(null);
+
+  // Sync external value changes
+  useEffect(function() { setText(value || ''); }, [value]);
+
+  useEffect(function() {
+    if (!open) return;
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return function() { document.removeEventListener('mousedown', handleClick); };
+  }, [open]);
+
+  var filtered = allProjectNames.filter(function(p) {
+    if (!text) return true;
+    return p.toLowerCase().indexOf(text.toLowerCase()) !== -1;
+  });
+
+  function select(p) {
+    setText(p); onChange(p); setOpen(false);
+  }
+
+  function handleInput(e) {
+    var v = e.target.value;
+    setText(v);
+    setOpen(true);
+    // If cleared or matches no project, clear the filter
+    if (!v) onChange('');
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter' && filtered.length === 1) {
+      select(filtered[0]);
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+    }
+  }
+
+  var isActive = !!value;
+  var fontSize = isMobile ? 12 : 11;
+
+  return (
+    <div ref={ref} style={{ position: 'relative', width: isMobile ? '100%' : undefined }}>
+      <div style={{ position: 'relative' }}>
+        <input
+          type="text" value={text}
+          onChange={handleInput}
+          onFocus={function() { setOpen(true); }}
+          onKeyDown={handleKeyDown}
+          placeholder="All Projects"
+          title="Filter tasks by project — type to search"
+          style={{
+            padding: isMobile ? '6px 28px 6px 8px' : '4px 24px 4px 8px',
+            borderRadius: 8, fontSize: fontSize, cursor: 'pointer',
+            border: '1px solid ' + (isActive ? theme.accent : theme.border),
+            background: isActive ? theme.accent + '20' : theme.input,
+            color: isActive ? theme.accent : theme.textMuted,
+            fontFamily: 'inherit', outline: 'none',
+            width: isMobile ? '100%' : 120, boxSizing: 'border-box'
+          }}
+        />
+        {value && (
+          <button onClick={function() { setText(''); onChange(''); setOpen(false); }} style={{
+            position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
+            border: 'none', background: 'transparent', cursor: 'pointer',
+            color: theme.textMuted, fontSize: 13, padding: 0, lineHeight: 1, fontFamily: 'inherit'
+          }} title="Clear project filter">&times;</button>
+        )}
+      </div>
+      {open && filtered.length > 0 && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, marginTop: 2,
+          background: theme.bgSecondary, border: '1px solid ' + theme.border,
+          borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          zIndex: 300, minWidth: isMobile ? '100%' : 140, maxHeight: 200, overflowY: 'auto'
+        }}>
+          <button onClick={function() { select(''); }}
+            style={{
+              display: 'block', width: '100%', border: 'none', cursor: 'pointer',
+              padding: '6px 10px', fontSize: fontSize, fontFamily: 'inherit', textAlign: 'left',
+              background: !value ? theme.accent + '15' : 'transparent',
+              color: !value ? theme.accent : theme.textMuted
+            }}>All Projects</button>
+          {filtered.map(function(p) {
+            return (
+              <button key={p} onClick={function() { select(p); }}
+                style={{
+                  display: 'block', width: '100%', border: 'none', cursor: 'pointer',
+                  padding: '6px 10px', fontSize: fontSize, fontFamily: 'inherit', textAlign: 'left',
+                  background: value === p ? theme.accent + '15' : 'transparent',
+                  color: value === p ? theme.accent : theme.text
+                }}>{p}</button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function NavigationBar({ viewMode, setViewMode, filter, setFilter, search, setSearch, darkMode, projectFilter, setProjectFilter, allProjectNames, hideHabits, setHideHabits, unplacedCount, blockedCount, isMobile }) {
   var theme = getTheme(darkMode);
   var [showFilterDropdown, setShowFilterDropdown] = useState(false);
   var filterRef = useRef(null);
+  var showStatus = FILTER_VISIBILITY.showStatusFilters(viewMode);
+  var showProject = FILTER_VISIBILITY.showProjectFilter(viewMode);
+  var showSearch = FILTER_VISIBILITY.showSearch(viewMode);
+  var showHabits = FILTER_VISIBILITY.showHideHabits(viewMode);
 
   // Close filter dropdown on outside click
   useEffect(function() {
@@ -72,40 +191,42 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
         ))}
       </div>
 
-      {!isMobile && <div style={{ width: 1, height: 20, background: theme.border, flexShrink: 0 }} />}
+      {!isMobile && (showStatus || showHabits || showProject || showSearch) && <div style={{ width: 1, height: 20, background: theme.border, flexShrink: 0 }} />}
 
       {/* Desktop: inline filter pills */}
-      {!isMobile && (
+      {!isMobile && (showStatus || showHabits || showProject || showSearch) && (
         <>
-          <div style={{ display: 'flex', gap: 2 }}>
-            {FILTERS.map(f => {
-              var badge = f.id === 'unplaced' && unplacedCount > 0 ? unplacedCount
-                : f.id === 'blocked' && blockedCount > 0 ? blockedCount : null;
-              return (
-                <button key={f.id} onClick={() => setFilter(f.id)}
-                  title={f.tip}
-                  style={{
-                    border: `1px solid ${filter === f.id ? theme.accent : theme.border}`,
-                    borderRadius: 12, padding: '3px 10px', cursor: 'pointer',
-                    background: filter === f.id ? theme.accent + '20' : 'transparent',
-                    color: filter === f.id ? theme.accent : theme.textMuted,
-                    fontSize: 11, fontFamily: 'inherit', position: 'relative',
-                    whiteSpace: 'nowrap'
-                  }}
-                >
-                  {f.label}
-                  {badge != null && (
-                    <span style={{
-                      marginLeft: 3, background: '#EF4444', color: '#FFF', borderRadius: 8,
-                      padding: '0 5px', fontSize: 9, fontWeight: 700, verticalAlign: 'top'
-                    }}>{badge}</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          {showStatus && (
+            <div style={{ display: 'flex', gap: 2 }}>
+              {FILTERS.map(f => {
+                var badge = f.id === 'unplaced' && unplacedCount > 0 ? unplacedCount
+                  : f.id === 'blocked' && blockedCount > 0 ? blockedCount : null;
+                return (
+                  <button key={f.id} onClick={() => setFilter(f.id)}
+                    title={f.tip}
+                    style={{
+                      border: `1px solid ${filter === f.id ? theme.accent : theme.border}`,
+                      borderRadius: 12, padding: '3px 10px', cursor: 'pointer',
+                      background: filter === f.id ? theme.accent + '20' : 'transparent',
+                      color: filter === f.id ? theme.accent : theme.textMuted,
+                      fontSize: 11, fontFamily: 'inherit', position: 'relative',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {f.label}
+                    {badge != null && (
+                      <span style={{
+                        marginLeft: 3, background: '#EF4444', color: '#FFF', borderRadius: 8,
+                        padding: '0 5px', fontSize: 9, fontWeight: 700, verticalAlign: 'top'
+                      }}>{badge}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
-          {setHideHabits && (
+          {showHabits && setHideHabits && (
             <button onClick={() => setHideHabits(h => !h)}
               title={hideHabits ? 'Show recurring habit tasks' : 'Hide recurring habit tasks from view'}
               style={{
@@ -120,82 +241,77 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
             </button>
           )}
 
-          {allProjectNames && allProjectNames.length > 0 && (
-            <select
-              value={projectFilter || ''}
-              onChange={e => setProjectFilter(e.target.value)}
-              title="Filter tasks by project"
-              style={{
-                padding: '4px 8px', borderRadius: 8, fontSize: 11, cursor: 'pointer',
-                border: `1px solid ${projectFilter ? theme.accent : theme.border}`,
-                background: projectFilter ? theme.accent + '20' : theme.input,
-                color: projectFilter ? theme.accent : theme.textMuted,
-                fontFamily: 'inherit', outline: 'none'
-              }}
-            >
-              <option value="">All Projects</option>
-              {allProjectNames.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
+          {showProject && allProjectNames && allProjectNames.length > 0 && (
+            <ProjectCombobox
+              value={projectFilter} onChange={setProjectFilter}
+              allProjectNames={allProjectNames} theme={theme} isMobile={false}
+            />
           )}
 
-          <div style={{ position: 'relative', flex: 1, minWidth: 120, maxWidth: 240 }}>
-            <input
-              type="text" value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search tasks..."
-              title="Search tasks by name, project, or notes"
-              style={{
-                width: '100%', padding: '5px 28px 5px 10px',
-                border: `1px solid ${theme.inputBorder}`, borderRadius: 8,
-                background: theme.input, color: theme.text, fontSize: 12,
-                fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box'
-              }}
-            />
-            {search && (
-              <button onClick={() => setSearch('')} style={{
-                position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
-                border: 'none', background: 'transparent', cursor: 'pointer',
-                color: theme.textMuted, fontSize: 14, padding: 0, lineHeight: 1, fontFamily: 'inherit'
-              }} title="Clear search">&times;</button>
-            )}
-          </div>
+          {showSearch && (
+            <div style={{ position: 'relative', flex: 1, minWidth: 120, maxWidth: 240 }}>
+              <input
+                type="text" value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="Search tasks..."
+                title="Search tasks by name, project, or notes"
+                style={{
+                  width: '100%', padding: '5px 28px 5px 10px',
+                  border: `1px solid ${theme.inputBorder}`, borderRadius: 8,
+                  background: theme.input, color: theme.text, fontSize: 12,
+                  fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box'
+                }}
+              />
+              {search && (
+                <button onClick={() => setSearch('')} style={{
+                  position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+                  border: 'none', background: 'transparent', cursor: 'pointer',
+                  color: theme.textMuted, fontSize: 14, padding: 0, lineHeight: 1, fontFamily: 'inherit'
+                }} title="Clear search">&times;</button>
+              )}
+            </div>
+          )}
         </>
       )}
 
       {/* Mobile row 2: filter dropdown + search */}
-      {isMobile && (
+      {isMobile && (showStatus || showHabits || showProject || showSearch) && (
         <div ref={filterRef} style={{ position: 'relative', flex: '1 1 100%', display: 'flex', gap: 6, alignItems: 'center' }}>
-          <button onClick={function() { setShowFilterDropdown(function(v) { return !v; }); }}
-            title="Filter tasks by status"
-            style={{
-              border: `1px solid ${theme.accent}`, borderRadius: 12, padding: '4px 10px',
-              cursor: 'pointer', background: theme.accent + '20', color: theme.accent,
-              fontSize: 11, fontFamily: 'inherit', whiteSpace: 'nowrap',
-              display: 'flex', alignItems: 'center', gap: 4, minHeight: 32
-            }}
-          >
-            {activeFilterLabel} &#x25BE;
-          </button>
+          {(showStatus || showHabits || showProject) && (
+            <button onClick={function() { setShowFilterDropdown(function(v) { return !v; }); }}
+              title="Filter tasks by status"
+              style={{
+                border: `1px solid ${theme.accent}`, borderRadius: 12, padding: '4px 10px',
+                cursor: 'pointer', background: theme.accent + '20', color: theme.accent,
+                fontSize: 11, fontFamily: 'inherit', whiteSpace: 'nowrap',
+                display: 'flex', alignItems: 'center', gap: 4, minHeight: 32
+              }}
+            >
+              {activeFilterLabel} &#x25BE;
+            </button>
+          )}
 
           {/* Search inline on mobile — full remaining width */}
-          <div style={{ position: 'relative', flex: 1, minWidth: 80 }}>
-            <input
-              type="text" value={search} onChange={function(e) { setSearch(e.target.value); }}
-              placeholder="Search..."
-              style={{
-                width: '100%', padding: '5px 28px 5px 10px',
-                border: `1px solid ${theme.inputBorder}`, borderRadius: 8,
-                background: theme.input, color: theme.text, fontSize: 12,
-                fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box'
-              }}
-            />
-            {search && (
-              <button onClick={function() { setSearch(''); }} style={{
-                position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
-                border: 'none', background: 'transparent', cursor: 'pointer',
-                color: theme.textMuted, fontSize: 14, padding: 0, lineHeight: 1, fontFamily: 'inherit'
-              }} title="Clear search">&times;</button>
-            )}
-          </div>
+          {showSearch && (
+            <div style={{ position: 'relative', flex: 1, minWidth: 80 }}>
+              <input
+                type="text" value={search} onChange={function(e) { setSearch(e.target.value); }}
+                placeholder="Search..."
+                style={{
+                  width: '100%', padding: '5px 28px 5px 10px',
+                  border: `1px solid ${theme.inputBorder}`, borderRadius: 8,
+                  background: theme.input, color: theme.text, fontSize: 12,
+                  fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box'
+                }}
+              />
+              {search && (
+                <button onClick={function() { setSearch(''); }} style={{
+                  position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+                  border: 'none', background: 'transparent', cursor: 'pointer',
+                  color: theme.textMuted, fontSize: 14, padding: 0, lineHeight: 1, fontFamily: 'inherit'
+                }} title="Clear search">&times;</button>
+              )}
+            </div>
+          )}
 
           {showFilterDropdown && (
             <div style={{
@@ -205,7 +321,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
               zIndex: 200, minWidth: 200, overflow: 'hidden'
             }}>
               {/* Filter options */}
-              {FILTERS.map(function(f) {
+              {showStatus && FILTERS.map(function(f) {
                 var badge = f.id === 'unplaced' && unplacedCount > 0 ? unplacedCount
                   : f.id === 'blocked' && blockedCount > 0 ? blockedCount : null;
                 var isActive = filter === f.id;
@@ -234,11 +350,13 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
                 );
               })}
 
-              {/* Divider */}
-              <div style={{ height: 1, background: theme.border, margin: '4px 0' }} />
+              {/* Divider — only if status filters shown above and habits/project below */}
+              {showStatus && (showHabits || showProject) && (
+                <div style={{ height: 1, background: theme.border, margin: '4px 0' }} />
+              )}
 
               {/* Hide habits toggle */}
-              {setHideHabits && (
+              {showHabits && setHideHabits && (
                 <button onClick={function() { setHideHabits(function(h) { return !h; }); setShowFilterDropdown(false); }}
                   style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -252,22 +370,12 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
               )}
 
               {/* Project filter */}
-              {allProjectNames && allProjectNames.length > 0 && (
+              {showProject && allProjectNames && allProjectNames.length > 0 && (
                 <div style={{ padding: '8px 14px' }}>
-                  <select
-                    value={projectFilter || ''}
-                    onChange={function(e) { setProjectFilter(e.target.value); setShowFilterDropdown(false); }}
-                    style={{
-                      width: '100%', padding: '6px 8px', borderRadius: 8, fontSize: 12, cursor: 'pointer',
-                      border: `1px solid ${projectFilter ? theme.accent : theme.border}`,
-                      background: projectFilter ? theme.accent + '20' : theme.input,
-                      color: projectFilter ? theme.accent : theme.textMuted,
-                      fontFamily: 'inherit', outline: 'none'
-                    }}
-                  >
-                    <option value="">All Projects</option>
-                    {allProjectNames.map(function(p) { return <option key={p} value={p}>{p}</option>; })}
-                  </select>
+                  <ProjectCombobox
+                    value={projectFilter} onChange={function(v) { setProjectFilter(v); setShowFilterDropdown(false); }}
+                    allProjectNames={allProjectNames} theme={theme} isMobile={true}
+                  />
                 </div>
               )}
             </div>

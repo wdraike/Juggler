@@ -38,6 +38,7 @@ import SettingsPanel from '../settings/SettingsPanel';
 import ImportExportPanel from '../features/ImportExportPanel';
 
 import GCalSyncPanel from '../features/GCalSyncPanel';
+import MsftCalSyncPanel from '../features/MsftCalSyncPanel';
 import HelpModal from '../features/HelpModal';
 import AiCommandPanel from '../features/AiCommandPanel';
 import AppFooter from './AppFooter';
@@ -64,6 +65,7 @@ export default function AppLayout() {
   var [showSettings, setShowSettings] = useState(false);
   var [showExport, setShowExport] = useState(false);
   var [showGCalSync, setShowGCalSync] = useState(false);
+  var [showMsftCalSync, setShowMsftCalSync] = useState(false);
   var [showToastHistory, setShowToastHistory] = useState(false);
   var [hideHabits, setHideHabits] = useState(false);
   var [showHelp, setShowHelp] = useState(false);
@@ -71,6 +73,9 @@ export default function AppLayout() {
   var [gcalAutoSync, setGcalAutoSync] = useState(false);
   var [gcalLastSyncedAt, setGcalLastSyncedAt] = useState(null);
   var [gcalSyncing, setGcalSyncing] = useState(false);
+  var [msftCalAutoSync, setMsftCalAutoSync] = useState(false);
+  var [msftCalLastSyncedAt, setMsftCalLastSyncedAt] = useState(null);
+  var [msftCalSyncing, setMsftCalSyncing] = useState(false);
   var editingRef = useRef(false);
 
   var theme = getTheme(darkMode);
@@ -91,29 +96,43 @@ export default function AppLayout() {
     });
   }, []);
 
-  // Handle ?gcal=connected redirect from OAuth callback
+  // Handle ?gcal=connected or ?msftcal=connected redirect from OAuth callback
   useEffect(() => {
     var params = new URLSearchParams(window.location.search);
     if (params.get('gcal') === 'connected') {
       showToast('Google Calendar connected!', 'success');
-      // Strip the param from URL without reload
       params.delete('gcal');
       var newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
       window.history.replaceState({}, '', newUrl);
-      // Notify any open popup parent
       if (window.opener) {
         window.opener.postMessage('gcal-connected', '*');
         window.close();
       }
     }
+    if (params.get('msftcal') === 'connected') {
+      showToast('Microsoft Calendar connected!', 'success');
+      params.delete('msftcal');
+      var newUrl2 = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+      window.history.replaceState({}, '', newUrl2);
+      if (window.opener) {
+        window.opener.postMessage('msftcal-connected', '*');
+        window.close();
+      }
+    }
   }, []);
 
-  // Fetch GCal status on mount
+  // Fetch GCal + MsftCal status on mount
   useEffect(() => {
     apiClient.get('/gcal/status')
       .then(function(r) {
         setGcalAutoSync(!!r.data.autoSync);
         setGcalLastSyncedAt(r.data.lastSyncedAt || null);
+      })
+      .catch(function() { /* not connected */ });
+    apiClient.get('/msft-cal/status')
+      .then(function(r) {
+        setMsftCalAutoSync(!!r.data.autoSync);
+        setMsftCalLastSyncedAt(r.data.lastSyncedAt || null);
       })
       .catch(function() { /* not connected */ });
   }, []);
@@ -143,6 +162,32 @@ export default function AppLayout() {
       clearInterval(intervalId);
     };
   }, [gcalAutoSync, loadTasks, loadPlacements]);
+
+  // Microsoft Calendar auto-sync polling
+  useEffect(() => {
+    if (!msftCalAutoSync) return;
+
+    function runMsftAutoSync() {
+      if (editingRef.current) return;
+      setMsftCalSyncing(true);
+      apiClient.post('/msft-cal/sync').then(function(r) {
+        setMsftCalLastSyncedAt(new Date().toISOString());
+        if (r.data.pushed || r.data.pulled || r.data.deleted_local || r.data.deleted_remote) {
+          loadTasks().then(function() { loadPlacements(); });
+        }
+      }).catch(function() { /* silent */ }).finally(function() {
+        setMsftCalSyncing(false);
+      });
+    }
+
+    var initialTimer = setTimeout(runMsftAutoSync, 7000);
+    var intervalId = setInterval(runMsftAutoSync, 5 * 60 * 1000);
+
+    return function() {
+      clearTimeout(initialTimer);
+      clearInterval(intervalId);
+    };
+  }, [msftCalAutoSync, loadTasks, loadPlacements]);
 
   // Derived dates
   var today = useMemo(() => {
@@ -179,6 +224,29 @@ export default function AppLayout() {
   // Placements come from the backend scheduler API
   var dayPlacements = placements.dayPlacements;
   var unplaced = placements.unplaced;
+
+  // Filtered placements for grid views (hideHabits, projectFilter, search)
+  var filteredDayPlacements = useMemo(function() {
+    if (!hideHabits && !projectFilter && !search) return dayPlacements;
+    var searchLower = search ? search.toLowerCase() : '';
+    var result = {};
+    var keys = Object.keys(dayPlacements);
+    for (var i = 0; i < keys.length; i++) {
+      var arr = dayPlacements[keys[i]];
+      var filtered = arr.filter(function(p) {
+        if (!p.task) return true;
+        if (hideHabits && p.task.habit) return false;
+        if (projectFilter && (p.task.project || '') !== projectFilter) return false;
+        if (searchLower) {
+          var text = ((p.task.text || '') + ' ' + (p.task.project || '') + ' ' + (p.task.notes || '')).toLowerCase();
+          if (text.indexOf(searchLower) === -1) return false;
+        }
+        return true;
+      });
+      result[keys[i]] = filtered;
+    }
+    return result;
+  }, [dayPlacements, hideHabits, projectFilter, search]);
 
   // Blocked tasks: tasks whose dependencies are not all done AND whose
   // date is today or in the past (future tasks with pending deps are expected)
@@ -546,6 +614,8 @@ export default function AppLayout() {
           onShowSettings={() => setShowSettings(true)} onShowExport={() => setShowExport(true)}
           onShowGCalSync={() => setShowGCalSync(true)}
           gcalSyncing={gcalSyncing}
+          onShowMsftCalSync={() => setShowMsftCalSync(true)}
+          msftCalSyncing={msftCalSyncing}
           onShowHelp={() => setShowHelp(true)}
           onAddTask={() => { setShowCreateForm(true); setExpandedTasks([]); }}
           isMobile={isMobile}
@@ -577,7 +647,7 @@ export default function AppLayout() {
           {viewMode === 'day' && (
             <DayView
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
-              placements={dayPlacements[selectedDateKey] || []}
+              placements={filteredDayPlacements[selectedDateKey] || []}
               statuses={statuses} directions={directions}
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               onCreate={handleCreate} gridZoom={config.gridZoom}
@@ -595,7 +665,7 @@ export default function AppLayout() {
           )}
           {viewMode === '3day' && (
             <ThreeDayView
-              selectedDate={selectedDate} dayPlacements={dayPlacements}
+              selectedDate={selectedDate} dayPlacements={filteredDayPlacements}
               statuses={statuses} directions={directions}
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               gridZoom={config.gridZoom} darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins}
@@ -607,7 +677,7 @@ export default function AppLayout() {
           )}
           {viewMode === 'week' && (
             <WeekView
-              selectedDate={selectedDate} dayPlacements={dayPlacements}
+              selectedDate={selectedDate} dayPlacements={filteredDayPlacements}
               statuses={statuses} directions={directions}
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               gridZoom={config.gridZoom} darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins}
@@ -620,7 +690,7 @@ export default function AppLayout() {
           {viewMode === 'timeline' && (
             <TimelineView
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
-              placements={dayPlacements[selectedDateKey] || []}
+              placements={filteredDayPlacements[selectedDateKey] || []}
               statuses={statuses} directions={directions}
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               onCreate={handleCreate} gridZoom={config.gridZoom}
@@ -639,7 +709,7 @@ export default function AppLayout() {
           {viewMode === 'scurve' && (
             <SCurveView
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
-              placements={dayPlacements[selectedDateKey] || []}
+              placements={filteredDayPlacements[selectedDateKey] || []}
               statuses={statuses} directions={directions}
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
@@ -652,7 +722,7 @@ export default function AppLayout() {
           )}
           {viewMode === 'month' && (
             <MonthView
-              selectedDate={selectedDate} dayPlacements={dayPlacements}
+              selectedDate={selectedDate} dayPlacements={filteredDayPlacements}
               statuses={statuses} tasksByDate={tasksByDate}
               onExpand={handleExpand} setDayOffset={setDayOffset} today={today} darkMode={darkMode}
               onDateDrop={handleDateDrop}
@@ -814,6 +884,28 @@ export default function AppLayout() {
           onSyncComplete={function() {
             setGcalSyncing(false);
             setGcalLastSyncedAt(new Date().toISOString());
+            loadTasks().then(function() { loadPlacements(); });
+          }}
+        />
+      )}
+
+      {/* Microsoft Calendar Sync panel */}
+      {showMsftCalSync && (
+        <MsftCalSyncPanel
+          onClose={() => setShowMsftCalSync(false)}
+          darkMode={darkMode}
+          showToast={showToast}
+          isMobile={isMobile}
+          autoSync={msftCalAutoSync}
+          lastSyncedAt={msftCalLastSyncedAt}
+          onAutoSyncChange={function(val) {
+            setMsftCalAutoSync(val);
+            if (!val) setMsftCalLastSyncedAt(msftCalLastSyncedAt);
+          }}
+          onSyncStart={function() { setMsftCalSyncing(true); }}
+          onSyncComplete={function() {
+            setMsftCalSyncing(false);
+            setMsftCalLastSyncedAt(new Date().toISOString());
             loadTasks().then(function() { loadPlacements(); });
           }}
         />

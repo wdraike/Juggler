@@ -179,7 +179,7 @@ deploy_backend() {
         --allow-unauthenticated \
         --set-cloudsql-instances $CLOUD_SQL_CONNECTION \
         --set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$CLOUD_SQL_CONNECTION,DB_NAME=$DATABASE_NAME,DB_USER=root,DB_PASSWORD=" \
-        --set-secrets="JWT_SECRET=juggler-jwt-secret:latest,GOOGLE_CLIENT_ID=juggler-google-client-id:latest,GOOGLE_CLIENT_SECRET=juggler-google-client-secret:latest,GEMINI_API_KEY=juggler-gemini-api-key:latest" \
+        --set-secrets="JWT_SECRET=juggler-jwt-secret:latest,GOOGLE_CLIENT_ID=juggler-google-client-id:latest,GOOGLE_CLIENT_SECRET=juggler-google-client-secret:latest,GEMINI_API_KEY=juggler-gemini-api-key:latest,MICROSOFT_CLIENT_ID=juggler-microsoft-client-id:latest,MICROSOFT_CLIENT_SECRET=juggler-microsoft-client-secret:latest" \
         --memory 512Mi \
         --cpu 1 \
         --timeout 300 \
@@ -192,12 +192,13 @@ deploy_backend() {
     BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE --region $REGION --format 'value(status.url)')
     print_success "Backend deployed: $BACKEND_URL"
 
-    # Update backend with its own URL for CORS and GCal redirect
+    # Update backend with its own URL for CORS and calendar redirect URIs
     GCAL_REDIRECT="${BACKEND_URL}/api/gcal/callback"
-    print_status "Updating GCal redirect URI..."
+    MSFT_CAL_REDIRECT="${BACKEND_URL}/api/msft-cal/callback"
+    print_status "Updating calendar redirect URIs..."
     gcloud run services update $BACKEND_SERVICE \
         --region $REGION \
-        --update-env-vars="FRONTEND_URL=PENDING,GCAL_REDIRECT_URI=$GCAL_REDIRECT" || true
+        --update-env-vars="FRONTEND_URL=PENDING,GCAL_REDIRECT_URI=$GCAL_REDIRECT,MSFT_CAL_REDIRECT_URI=$MSFT_CAL_REDIRECT" || true
 }
 
 deploy_frontend() {
@@ -286,7 +287,7 @@ setup_secrets() {
     print_status "You'll be prompted for each secret value."
     echo
 
-    for SECRET_NAME in juggler-jwt-secret juggler-google-client-id juggler-google-client-secret juggler-gemini-api-key; do
+    for SECRET_NAME in juggler-jwt-secret juggler-google-client-id juggler-google-client-secret juggler-gemini-api-key juggler-microsoft-client-id juggler-microsoft-client-secret; do
         if gcloud secrets describe $SECRET_NAME &>/dev/null; then
             print_success "$SECRET_NAME already exists"
         else
@@ -301,7 +302,7 @@ setup_secrets() {
     # Grant Cloud Run access
     PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
     SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-    for SECRET_NAME in juggler-jwt-secret juggler-google-client-id juggler-google-client-secret juggler-gemini-api-key; do
+    for SECRET_NAME in juggler-jwt-secret juggler-google-client-id juggler-google-client-secret juggler-gemini-api-key juggler-microsoft-client-id juggler-microsoft-client-secret; do
         gcloud secrets add-iam-policy-binding $SECRET_NAME \
             --member="serviceAccount:$SA" \
             --role="roles/secretmanager.secretAccessor" --quiet || true

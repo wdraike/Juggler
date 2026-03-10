@@ -13,6 +13,7 @@
     "verify-sync": "node ../shared/verify-sync.js"
   },
   "dependencies": {
+    "@azure/msal-node": "^5.0.6",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "body-parser": "^1.20.2",
     "compression": "^1.7.4",

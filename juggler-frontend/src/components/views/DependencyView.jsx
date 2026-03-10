@@ -1,44 +1,54 @@
 /**
- * DependencyView — full-screen dagre-layout dependency graph.
+ * DependencyView — full-screen dependency graph using ELK for layout.
  * Shows all tasks that have dependencies (or belong to the selected project).
  * Uses the project filter from NavigationBar to focus on specific projects.
  * Arrow-drag from connector handles to create new dependency links.
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import dagre from 'dagre';
+import ELK from 'elkjs/lib/elk.bundled.js';
 import { getTheme } from '../../theme/colors';
 import { getTaskDeps, topoSortTasks } from '../../scheduler/dependencyHelpers';
 import { PRI_COLORS } from '../../state/constants';
 
 var STATUS_ICONS = { done: '\u2705', wip: '\u{1F7E1}', cancel: '\u274C', skip: '\u23ED\uFE0F', other: '\u27A1\uFE0F', '': '\u26AA' };
 var ARROW_COLORS = ['#3B82F6', '#7C3AED', '#059669', '#DC2626', '#D97706', '#DB2777', '#0891B2'];
-var NODE_W = 180;
-var NODE_H = 48;
+var NODE_W = 150;
+var NODE_H = 28;
 var HANDLE_R = 5;
 
-function computeDagreLayout(taskIds, deps) {
-  if (!taskIds || !taskIds.length) return { positions: {}, width: 0, height: 0 };
-  var g = new dagre.graphlib.Graph().setDefaultEdgeLabel(function() { return {}; });
-  g.setGraph({ rankdir: 'TB', nodesep: 16, ranksep: 40, marginx: 16, marginy: 16 });
-  taskIds.forEach(function(id) { g.setNode(id, { width: NODE_W, height: NODE_H }); });
-  taskIds.forEach(function(id) {
-    (deps[id] || []).filter(function(d) { return taskIds.indexOf(d) >= 0; }).forEach(function(d) {
-      g.setEdge(d, id);
-    });
-  });
-  dagre.layout(g);
-  var positions = {};
-  var maxX = 0, maxY = 0;
-  taskIds.forEach(function(id) {
-    var n = g.node(id);
-    if (n) {
-      positions[id] = { x: n.x - NODE_W / 2, y: n.y - NODE_H / 2 };
-      if (n.x + NODE_W / 2 > maxX) maxX = n.x + NODE_W / 2;
-      if (n.y + NODE_H / 2 > maxY) maxY = n.y + NODE_H / 2;
+var elk = new ELK();
+
+/** Compute the closest edge connection points between two rectangles.
+ *  Returns { x1, y1, x2, y2 } — exit point on source, entry point on target. */
+function closestEdgePoints(fromPos, toPos) {
+  // Centers
+  var cx1 = fromPos.x + NODE_W / 2, cy1 = fromPos.y + NODE_H / 2;
+  var cx2 = toPos.x + NODE_W / 2, cy2 = toPos.y + NODE_H / 2;
+  var dx = cx2 - cx1, dy = cy2 - cy1;
+
+  // Pick exit point on source rect edge closest to target center
+  var x1, y1, x2, y2;
+  if (Math.abs(dx) * NODE_H > Math.abs(dy) * NODE_W) {
+    // Horizontal dominant — exit left or right side
+    if (dx > 0) {
+      x1 = fromPos.x + NODE_W; y1 = cy1;
+      x2 = toPos.x; y2 = cy2;
+    } else {
+      x1 = fromPos.x; y1 = cy1;
+      x2 = toPos.x + NODE_W; y2 = cy2;
     }
-  });
-  return { positions: positions, width: maxX + 16, height: maxY + 16 };
+  } else {
+    // Vertical dominant — exit top or bottom
+    if (dy > 0) {
+      x1 = cx1; y1 = fromPos.y + NODE_H;
+      x2 = cx2; y2 = toPos.y;
+    } else {
+      x1 = cx1; y1 = fromPos.y;
+      x2 = cx2; y2 = toPos.y + NODE_H;
+    }
+  }
+  return { x1: x1, y1: y1, x2: x2, y2: y2 };
 }
 
 /** Find which task node (if any) is under a point, given layout positions.
@@ -53,6 +63,193 @@ function hitTestNode(x, y, positions) {
     }
   }
   return null;
+}
+
+/** Compact node with hover/focus popup for details */
+function DepNode({ ct, pos, st, icon, isDone, isClosed, dateLabel, isExternal, isMatched, isDimmed,
+  isHoverTarget, isCycleDrop, isArrowSource, priColor, theme, darkMode, filter, search, hideHabits,
+  arrowDrag, chainDeps, chainOrder, chainAddDepFor, allTasks, statuses,
+  onExpand, setChainAddDepFor, chainAddDep, chainRemoveDep, handleConnectorMouseDown }) {
+
+  var [hovered, setHovered] = useState(false);
+  var leaveTimer = useRef(null);
+  var hasFilters = filter !== 'all' || search || hideHabits;
+  var showPopup = hovered || chainAddDepFor === ct.id;
+
+  function onEnter() {
+    if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null; }
+    setHovered(true);
+  }
+  function onLeave() {
+    leaveTimer.current = setTimeout(function() { setHovered(false); }, 200);
+  }
+
+  var borderColor = isHoverTarget
+    ? (isCycleDrop ? '#DC2626' : '#3B82F6')
+    : isArrowSource ? theme.accent
+    : isMatched && !isDimmed && hasFilters ? theme.accent
+    : isClosed ? theme.border + '88' : theme.border;
+  var borderWidth = (isHoverTarget || isArrowSource || (isMatched && !isDimmed && hasFilters)) ? 2 : 1;
+
+  var bgColor = isHoverTarget ? (isCycleDrop ? '#DC262612' : '#3B82F612')
+    : isMatched && !isDimmed && hasFilters ? theme.accent + '12'
+    : isExternal ? (darkMode ? '#1E293B' : '#F8FAFC')
+    : isClosed ? theme.bgSecondary + '88' : theme.bgSecondary;
+
+  return (
+    <div
+      onMouseEnter={onEnter} onMouseLeave={onLeave}
+      onFocus={onEnter} onBlur={onLeave}
+      tabIndex={0}
+      onClick={function(e) { e.stopPropagation(); if (onExpand) onExpand(ct.id); }}
+      style={{ position: 'absolute', left: pos.x, top: pos.y, width: NODE_W, cursor: 'pointer', outline: 'none', zIndex: 2 }}>
+      {/* Compact card */}
+      <div style={{
+        padding: '4px 8px', borderRadius: 5, height: NODE_H, boxSizing: 'border-box',
+        border: borderWidth + 'px solid ' + borderColor,
+        background: bgColor,
+        opacity: isDimmed ? 0.3 : isClosed ? 0.6 : isExternal ? 0.75 : 1,
+        transition: 'border 0.1s, background 0.1s, opacity 0.2s', userSelect: 'none',
+        display: 'flex', alignItems: 'center', gap: 4
+      }}>
+        <span style={{ fontSize: 9, flexShrink: 0 }}>{icon}</span>
+        {ct.pri && ct.pri !== 'P3' && (
+          <span style={{ fontSize: 8, fontWeight: 700, color: priColor, flexShrink: 0 }}>{ct.pri}</span>
+        )}
+        <div style={{
+          fontSize: 10, fontWeight: 600, flex: 1, minWidth: 0,
+          color: isClosed ? theme.textMuted : theme.text,
+          textDecoration: isClosed ? 'line-through' : 'none',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          lineHeight: NODE_H - 8 + 'px'
+        }}>
+          {ct.text}
+        </div>
+      </div>
+
+      {/* Hover label during arrow drag */}
+      {isHoverTarget && (
+        <div style={{ fontSize: 8, color: isCycleDrop ? '#DC2626' : '#3B82F6', marginTop: 1, textAlign: 'center' }}>
+          {isCycleDrop ? '\u26D4 cycle!' : '\u21B3 will depend on source'}
+        </div>
+      )}
+
+      {/* Detail popup on hover/focus */}
+      {showPopup && !arrowDrag && (
+        <div
+          onMouseEnter={onEnter} onMouseLeave={onLeave}
+          onClick={function(e) { e.stopPropagation(); }}
+          style={{
+            position: 'absolute', left: -10, top: NODE_H + 4, width: NODE_W + 60,
+            padding: '8px 10px', borderRadius: 8,
+            background: theme.bgCard || theme.bgSecondary,
+            border: '1px solid ' + theme.border,
+            boxShadow: '0 6px 20px rgba(0,0,0,0.22)',
+            zIndex: 150, boxSizing: 'border-box'
+          }}>
+          {/* Task name */}
+          <div style={{ fontSize: 11, fontWeight: 600, color: theme.text, marginBottom: 4, lineHeight: '14px' }}>
+            {icon} {ct.text}
+          </div>
+          {/* Badges row */}
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center', marginBottom: 4 }}>
+            {ct.project && (
+              <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: theme.accent + '18', color: theme.accent, fontWeight: 600 }}>{ct.project}</span>
+            )}
+            {dateLabel && <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: theme.bgTertiary, color: theme.textMuted, fontWeight: 500 }}>{dateLabel}</span>}
+            {ct.pri && (
+              <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: priColor + '20', color: priColor, fontWeight: 600 }}>{ct.pri}</span>
+            )}
+            {st && <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: theme.bgTertiary, color: theme.textMuted }}>{st || 'open'}</span>}
+            {ct.dur && <span style={{ fontSize: 8, padding: '1px 4px', borderRadius: 3, background: theme.bgTertiary, color: theme.textMuted }}>{ct.dur}m</span>}
+          </div>
+          {/* Dep chips */}
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+            {(function() {
+              var myDeps = (chainDeps[ct.id] || []).filter(function(d) { return chainOrder.indexOf(d) >= 0; });
+              return myDeps.map(function(depId) {
+                var depTask = allTasks.find(function(x) { return x.id === depId; });
+                var depDone = (statuses[depId] || '') === 'done';
+                return (
+                  <span key={depId} onClick={function(e) { e.stopPropagation(); chainRemoveDep(ct.id, depId); }}
+                    title={'Remove dep on \u201C' + (depTask ? depTask.text : depId) + '\u201D'}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 8, padding: '1px 4px', borderRadius: 3,
+                      background: depDone ? '#10B98118' : '#F59E0B18', color: depDone ? '#10B981' : '#D97706',
+                      fontWeight: 500, cursor: 'pointer'
+                    }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 80 }}>
+                      {depDone ? '\u2713' : '\u23F3'} {depTask ? depTask.text.substring(0, 20) : depId}
+                    </span>
+                    <span style={{ opacity: 0.5, fontSize: 7, flexShrink: 0 }}>{'\u2715'}</span>
+                  </span>
+                );
+              });
+            })()}
+            <button onClick={function(e) { e.stopPropagation(); setChainAddDepFor(chainAddDepFor === ct.id ? null : ct.id); }} style={{
+              fontSize: 8, padding: '1px 4px', borderRadius: 3,
+              border: '1px dashed ' + (chainAddDepFor === ct.id ? theme.accent : theme.border),
+              background: chainAddDepFor === ct.id ? theme.accent + '15' : 'transparent',
+              color: chainAddDepFor === ct.id ? theme.accent : theme.textMuted,
+              cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit'
+            }}>{chainAddDepFor === ct.id ? 'cancel' : '+ dep'}</button>
+          </div>
+          {/* Notes preview */}
+          {ct.notes && (
+            <div style={{ fontSize: 9, color: theme.textMuted, marginTop: 4, lineHeight: '12px',
+              overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical'
+            }}>{ct.notes}</div>
+          )}
+          {/* Add dep dropdown */}
+          {chainAddDepFor === ct.id && (function() {
+            var myDeps = chainDeps[ct.id] || [];
+            var candidates = chainOrder.filter(function(oid) { return oid !== ct.id && myDeps.indexOf(oid) < 0; })
+              .map(function(oid) { return allTasks.find(function(x) { return x.id === oid; }); }).filter(Boolean);
+            return (
+              <div onClick={function(e) { e.stopPropagation(); }} style={{
+                marginTop: 4, padding: '4px 6px', background: theme.bgTertiary,
+                borderRadius: 5, border: '1px solid ' + theme.border, maxHeight: 160, overflowY: 'auto'
+              }}>
+                {candidates.length > 0 ? candidates.slice(0, 30).map(function(ot) {
+                  return (
+                    <div key={ot.id} onClick={function() { chainAddDep(ct.id, ot.id); }} style={{
+                      padding: '3px 4px', borderRadius: 3, cursor: 'pointer', fontSize: 10,
+                      display: 'flex', gap: 4, alignItems: 'center', marginBottom: 1
+                    }}>
+                      <span style={{ fontSize: 8, opacity: 0.7 }}>{(statuses[ot.id] || '') === 'done' ? '\u2705' : '\u26AA'}</span>
+                      <span style={{ fontWeight: 500, color: theme.text, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ot.text}</span>
+                    </div>
+                  );
+                }) : (
+                  <div style={{ fontSize: 9, color: theme.textMuted, padding: 4, textAlign: 'center' }}>No candidates</div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* Connector handle: circle at bottom-center of card */}
+      <div
+        onMouseDown={function(e) { handleConnectorMouseDown(ct.id, e); }}
+        title="Drag to connect"
+        style={{
+          position: 'absolute',
+          left: NODE_W / 2 - HANDLE_R,
+          bottom: -HANDLE_R,
+          width: HANDLE_R * 2, height: HANDLE_R * 2,
+          borderRadius: '50%',
+          background: isArrowSource ? theme.accent : (darkMode ? '#475569' : '#94A3B8'),
+          border: '2px solid ' + (isArrowSource ? theme.accent : theme.bgSecondary),
+          cursor: 'crosshair',
+          zIndex: 2,
+          transition: 'background 0.15s, transform 0.15s'
+        }}
+        onMouseEnter={function(e) { e.currentTarget.style.transform = 'scale(1.4)'; e.currentTarget.style.background = theme.accent; }}
+        onMouseLeave={function(e) { if (!arrowDrag) { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.background = darkMode ? '#475569' : '#94A3B8'; } }}
+      />
+    </div>
+  );
 }
 
 export default function DependencyView({ allTasks, statuses, projectFilter, filter, search, hideHabits, onUpdate, onExpand, darkMode, isMobile }) {
@@ -254,17 +451,66 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
     persistDeps(taskId, cur);
   }, [chainDeps, persistDeps]);
 
-  // Dagre layout
-  var layout = useMemo(function() {
-    if (!chainOrder) return { positions: {}, width: 0, height: 0 };
-    return computeDagreLayout(chainOrder, chainDeps);
+  // ELK layout (async)
+  var [layout, setLayout] = useState({ positions: {}, width: 0, height: 0 });
+
+  useEffect(function() {
+    if (!chainOrder || chainOrder.length === 0) {
+      setLayout({ positions: {}, width: 0, height: 0 });
+      return;
+    }
+
+    var cancelled = false;
+    var idSet = {};
+    chainOrder.forEach(function(id) { idSet[id] = true; });
+
+    var children = chainOrder.map(function(id) {
+      return { id: String(id), width: NODE_W, height: NODE_H };
+    });
+    var edges = [];
+    chainOrder.forEach(function(id) {
+      (chainDeps[id] || []).forEach(function(d) {
+        if (idSet[d]) {
+          edges.push({ id: d + '->' + id, sources: [String(d)], targets: [String(id)] });
+        }
+      });
+    });
+
+    var graph = {
+      id: 'root',
+      layoutOptions: {
+        'elk.algorithm': 'layered',
+        'elk.direction': 'DOWN',
+        'elk.layered.spacing.nodeNodeBetweenLayers': '50',
+        'elk.spacing.nodeNode': '20',
+        'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
+        'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
+        'elk.edgeRouting': 'SPLINES'
+      },
+      children: children,
+      edges: edges
+    };
+
+    elk.layout(graph).then(function(result) {
+      if (cancelled) return;
+      var positions = {};
+      var maxX = 0, maxY = 0;
+      (result.children || []).forEach(function(node) {
+        positions[node.id] = { x: node.x, y: node.y };
+        if (node.x + NODE_W > maxX) maxX = node.x + NODE_W;
+        if (node.y + NODE_H > maxY) maxY = node.y + NODE_H;
+      });
+      setLayout({ positions: positions, width: maxX + 20, height: maxY + 20 });
+    });
+
+    return function() { cancelled = true; };
   }, [chainOrder, chainDeps]);
 
   var treeIds = useMemo(function() {
     return Object.keys(layout.positions);
   }, [layout]);
 
-  // SVG edge paths
+  // SVG edge paths — simple closest-side bezier curves
   var edgePaths = useMemo(function() {
     if (!chainOrder) return [];
     var paths = [];
@@ -272,14 +518,20 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
     chainOrder.forEach(function(taskId) {
       if (!layout.positions[taskId]) return;
       (chainDeps[taskId] || []).filter(function(d) { return layout.positions[d]; }).forEach(function(depId) {
-        var from = layout.positions[depId];
-        var to = layout.positions[taskId];
-        var x1 = from.x + NODE_W / 2;
-        var y1 = from.y + NODE_H;
-        var x2 = to.x + NODE_W / 2;
-        var y2 = to.y;
-        var midY = (y1 + y2) / 2;
-        var d = 'M ' + x1 + ' ' + y1 + ' C ' + x1 + ' ' + midY + ', ' + x2 + ' ' + midY + ', ' + x2 + ' ' + y2;
+        var ep = closestEdgePoints(layout.positions[depId], layout.positions[taskId]);
+        var dx = ep.x2 - ep.x1, dy = ep.y2 - ep.y1;
+        var len = Math.sqrt(dx * dx + dy * dy) || 1;
+        var pull = Math.min(len * 0.4, 50);
+        var isHoriz = Math.abs(dx) * NODE_H > Math.abs(dy) * NODE_W;
+        var cp1x, cp1y, cp2x, cp2y;
+        if (isHoriz) {
+          cp1x = ep.x1 + (dx > 0 ? pull : -pull); cp1y = ep.y1;
+          cp2x = ep.x2 + (dx > 0 ? -pull : pull); cp2y = ep.y2;
+        } else {
+          cp1x = ep.x1; cp1y = ep.y1 + (dy > 0 ? pull : -pull);
+          cp2x = ep.x2; cp2y = ep.y2 + (dy > 0 ? -pull : pull);
+        }
+        var d = 'M ' + ep.x1 + ' ' + ep.y1 + ' C ' + cp1x + ' ' + cp1y + ', ' + cp2x + ' ' + cp2y + ', ' + ep.x2 + ' ' + ep.y2;
         var color = ARROW_COLORS[colorIdx % ARROW_COLORS.length];
         paths.push({ d: d, color: color, key: depId + '->' + taskId });
         colorIdx++;
@@ -307,6 +559,7 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
     e.stopPropagation();
     var pos = layout.positions[taskId];
     if (!pos) return;
+    // Start from bottom-center; will be re-routed dynamically during drag
     var startX = pos.x + NODE_W / 2;
     var startY = pos.y + NODE_H;
     var gPt = clientToGraph(e.clientX, e.clientY);
@@ -347,29 +600,34 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
     };
   }, [layout.positions, clientToGraph, chainAddDep]);
 
-  // Build the live drag arrow path — arrow tip lands at cursor (or target top-center)
+  // Build the live drag arrow path — uses closest-side when hovering a target
   var dragArrowPath = useMemo(function() {
     if (!arrowDrag) return null;
-    var x1 = arrowDrag.fromX, y1 = arrowDrag.fromY;
-    var x2 = arrowDrag.toX, y2 = arrowDrag.toY;
-    // When hovering a target, snap arrow tip to its top-center
-    if (arrowHoverId && layout.positions[arrowHoverId]) {
-      var tp = layout.positions[arrowHoverId];
-      x2 = tp.x + NODE_W / 2;
-      y2 = tp.y;
+    var fromPos = layout.positions[arrowDrag.fromId];
+    var x1, y1, x2, y2;
+
+    if (arrowHoverId && layout.positions[arrowHoverId] && fromPos) {
+      // Snap to closest edges between source and target
+      var ep = closestEdgePoints(fromPos, layout.positions[arrowHoverId]);
+      x1 = ep.x1; y1 = ep.y1; x2 = ep.x2; y2 = ep.y2;
+    } else {
+      x1 = arrowDrag.fromX; y1 = arrowDrag.fromY;
+      x2 = arrowDrag.toX; y2 = arrowDrag.toY;
     }
-    // Control points: cp1 leaves the source downward, cp2 arrives at the
-    // endpoint from the source direction so the arrowhead points correctly.
+
     var dx = x2 - x1, dy = y2 - y1;
     var len = Math.sqrt(dx * dx + dy * dy) || 1;
-    var pull = Math.min(len * 0.35, 60); // how far control points pull away
-    // cp1: depart source going straight down
-    var cp1x = x1;
-    var cp1y = y1 + pull;
-    // cp2: arrive at endpoint from behind (along the source→endpoint direction)
-    // This makes the tangent at the tip point from source toward endpoint
-    var cp2x = x2 - (dx / len) * pull;
-    var cp2y = y2 - (dy / len) * pull;
+    var pull = Math.min(len * 0.4, 50);
+    var isHoriz = fromPos && arrowHoverId && layout.positions[arrowHoverId]
+      ? Math.abs(dx) * NODE_H > Math.abs(dy) * NODE_W : false;
+    var cp1x, cp1y, cp2x, cp2y;
+    if (isHoriz) {
+      cp1x = x1 + (dx > 0 ? pull : -pull); cp1y = y1;
+      cp2x = x2 + (dx > 0 ? -pull : pull); cp2y = y2;
+    } else {
+      cp1x = x1; cp1y = y1 + pull;
+      cp2x = x2 - (dx / len) * pull; cp2y = y2 - (dy / len) * pull;
+    }
     var d = 'M ' + x1 + ' ' + y1 + ' C ' + cp1x + ' ' + cp1y + ', ' + cp2x + ' ' + cp2y + ', ' + x2 + ' ' + y2;
     var isCycle = arrowHoverId && wouldCycle(chainDeps, arrowHoverId, arrowDrag.fromId);
     return { d: d, isCycle: isCycle };
@@ -424,7 +682,7 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
           transformOrigin: '0 0'
         }}>
           {/* SVG edge layer */}
-          <svg ref={svgRef} style={{ position: 'absolute', top: 0, left: 0, width: Math.max(layout.width, 1), height: Math.max(layout.height, 1), pointerEvents: 'none', overflow: 'visible' }}>
+          <svg ref={svgRef} style={{ position: 'absolute', top: 0, left: 0, width: Math.max(layout.width, 1), height: Math.max(layout.height, 1), pointerEvents: 'none', overflow: 'visible', zIndex: 0 }}>
             <defs>
               {ARROW_COLORS.map(function(color, i) {
                 return (
@@ -482,136 +740,21 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
             var isHoverTarget = arrowHoverId === ct.id;
             var isCycleDrop = isHoverTarget && arrowDrag && wouldCycle(chainDeps, ct.id, arrowDrag.fromId);
             var isArrowSource = arrowDrag && arrowDrag.fromId === ct.id;
+            var priColor = PRI_COLORS[ct.pri] || '#888';
 
             return (
-              <div key={ct.id}
-                onClick={function(e) { e.stopPropagation(); if (onExpand) onExpand(ct.id); }}
-                style={{ position: 'absolute', left: pos.x, top: pos.y, width: NODE_W, cursor: 'pointer' }}>
-                {/* Card */}
-                <div
-                  style={{
-                    padding: '4px 6px', borderRadius: 5,
-                    border: isHoverTarget
-                      ? '2px solid ' + (isCycleDrop ? '#DC2626' : '#3B82F6')
-                      : isArrowSource ? '2px solid ' + theme.accent
-                      : isMatched && !isDimmed && (filter !== 'all' || search || hideHabits) ? '2px solid ' + theme.accent
-                      : '1px solid ' + (isClosed ? theme.border + '88' : theme.border),
-                    background: isHoverTarget ? (isCycleDrop ? '#DC262612' : '#3B82F612')
-                      : isMatched && !isDimmed && (filter !== 'all' || search || hideHabits) ? theme.accent + '12'
-                      : isExternal ? (darkMode ? '#1E293B' : '#F8FAFC')
-                      : isClosed ? theme.bgSecondary + '88' : theme.bgSecondary,
-                    opacity: isDimmed ? 0.3 : isClosed ? 0.6 : isExternal ? 0.75 : 1,
-                    transition: 'border 0.1s, background 0.1s, opacity 0.2s', userSelect: 'none',
-                    display: 'flex', flexDirection: 'column', gap: 1, boxSizing: 'border-box'
-                  }}
-                >
-                  {/* Row 1: status + name */}
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 3 }}>
-                    <span style={{ fontSize: 9, flexShrink: 0, marginTop: 1 }}>{icon}</span>
-                    <div style={{
-                      fontSize: 10, fontWeight: 600,
-                      color: isClosed ? theme.textMuted : theme.text,
-                      textDecoration: isClosed ? 'line-through' : 'none',
-                      lineHeight: '12px', minWidth: 0,
-                      overflow: 'hidden', textOverflow: 'ellipsis',
-                      display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical'
-                    }}>
-                      {ct.text}
-                    </div>
-                  </div>
-                  {/* Row 2: badges + dep chips */}
-                  <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
-                    {ct.project && (
-                      <span style={{ fontSize: 7, padding: '0px 3px', borderRadius: 2, background: theme.accent + '18', color: theme.accent, fontWeight: 600 }}>{ct.project}</span>
-                    )}
-                    {dateLabel && <span style={{ fontSize: 7, padding: '0px 3px', borderRadius: 2, background: theme.bgTertiary, color: theme.textMuted, fontWeight: 500 }}>{dateLabel}</span>}
-                    {ct.pri && ct.pri !== 'P3' && (
-                      <span style={{ fontSize: 7, padding: '0px 3px', borderRadius: 2, background: (PRI_COLORS[ct.pri] || '#888') + '20', color: PRI_COLORS[ct.pri] || '#888', fontWeight: 600 }}>{ct.pri}</span>
-                    )}
-                    {(function() {
-                      var myDeps = (chainDeps[ct.id] || []).filter(function(d) { return chainOrder.indexOf(d) >= 0; });
-                      return myDeps.map(function(depId) {
-                        var depTask = allTasks.find(function(x) { return x.id === depId; });
-                        var depDone = (statuses[depId] || '') === 'done';
-                        return (
-                          <span key={depId} onClick={function(e) { e.stopPropagation(); chainRemoveDep(ct.id, depId); }} title={'Remove dep on \u201C' + (depTask ? depTask.text : depId) + '\u201D'} style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 1, fontSize: 7, padding: '0px 3px', borderRadius: 2,
-                            background: depDone ? '#10B98118' : '#F59E0B18', color: depDone ? '#10B981' : '#D97706',
-                            fontWeight: 500, cursor: 'pointer'
-                          }}>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 55 }}>
-                              {depDone ? '\u2713' : '\u23F3'} {depTask ? depTask.text.substring(0, 12) : depId}
-                            </span>
-                            <span style={{ opacity: 0.5, fontSize: 6, flexShrink: 0 }}>{'\u2715'}</span>
-                          </span>
-                        );
-                      });
-                    })()}
-                    <button onClick={function(e) { e.stopPropagation(); setChainAddDepFor(chainAddDepFor === ct.id ? null : ct.id); }} style={{
-                      fontSize: 7, padding: '0px 3px', borderRadius: 2,
-                      border: '1px dashed ' + (chainAddDepFor === ct.id ? theme.accent : theme.border),
-                      background: chainAddDepFor === ct.id ? theme.accent + '15' : 'transparent',
-                      color: chainAddDepFor === ct.id ? theme.accent : theme.textMuted,
-                      cursor: 'pointer', fontWeight: 600, fontFamily: 'inherit'
-                    }}>{chainAddDepFor === ct.id ? 'cancel' : '+ dep'}</button>
-                  </div>
-                  {/* Hover label during arrow drag */}
-                  {isHoverTarget && (
-                    <div style={{ fontSize: 8, color: isCycleDrop ? '#DC2626' : '#3B82F6', marginTop: 1 }}>
-                      {isCycleDrop ? '\u26D4 cycle!' : '\u21B3 will depend on source'}
-                    </div>
-                  )}
-                  {/* Add dep dropdown */}
-                  {chainAddDepFor === ct.id && (function() {
-                    var myDeps = chainDeps[ct.id] || [];
-                    var candidates = chainOrder.filter(function(oid) { return oid !== ct.id && myDeps.indexOf(oid) < 0; })
-                      .map(function(oid) { return allTasks.find(function(x) { return x.id === oid; }); }).filter(Boolean);
-
-                    return (
-                      <div onClick={function(e) { e.stopPropagation(); }} style={{
-                        padding: '4px 6px', background: theme.bgTertiary,
-                        borderRadius: 5, border: '1px solid ' + theme.border, maxHeight: 180, overflowY: 'auto',
-                        position: 'absolute', bottom: '100%', left: 0, width: 240, marginBottom: 4,
-                        zIndex: 100, boxShadow: '0 4px 16px rgba(0,0,0,0.18)'
-                      }}>
-                        {candidates.length > 0 ? candidates.slice(0, 30).map(function(ot) {
-                          return (
-                            <div key={ot.id} onClick={function() { chainAddDep(ct.id, ot.id); }} style={{
-                              padding: '3px 4px', borderRadius: 3, cursor: 'pointer', fontSize: 10,
-                              display: 'flex', gap: 4, alignItems: 'center', marginBottom: 1
-                            }}>
-                              <span style={{ fontSize: 8, opacity: 0.7 }}>{(statuses[ot.id] || '') === 'done' ? '\u2705' : '\u26AA'}</span>
-                              <span style={{ fontWeight: 500, color: theme.text, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ot.text}</span>
-                            </div>
-                          );
-                        }) : (
-                          <div style={{ fontSize: 9, color: theme.textMuted, padding: 4, textAlign: 'center' }}>No candidates</div>
-                        )}
-                      </div>
-                    );
-                  })()}
-                </div>
-
-                {/* Connector handle: circle at bottom-center of card */}
-                <div
-                  onMouseDown={function(e) { handleConnectorMouseDown(ct.id, e); }}
-                  title="Drag to connect"
-                  style={{
-                    position: 'absolute',
-                    left: NODE_W / 2 - HANDLE_R,
-                    bottom: -HANDLE_R,
-                    width: HANDLE_R * 2, height: HANDLE_R * 2,
-                    borderRadius: '50%',
-                    background: isArrowSource ? theme.accent : (darkMode ? '#475569' : '#94A3B8'),
-                    border: '2px solid ' + (isArrowSource ? theme.accent : theme.bgSecondary),
-                    cursor: 'crosshair',
-                    zIndex: 2,
-                    transition: 'background 0.15s, transform 0.15s'
-                  }}
-                  onMouseEnter={function(e) { e.currentTarget.style.transform = 'scale(1.4)'; e.currentTarget.style.background = theme.accent; }}
-                  onMouseLeave={function(e) { if (!arrowDrag) { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.background = darkMode ? '#475569' : '#94A3B8'; } }}
-                />
-              </div>
+              <DepNode key={ct.id}
+                ct={ct} pos={pos} st={st} icon={icon} isDone={isDone} isClosed={isClosed}
+                dateLabel={dateLabel} isExternal={isExternal} isMatched={isMatched} isDimmed={isDimmed}
+                isHoverTarget={isHoverTarget} isCycleDrop={isCycleDrop} isArrowSource={isArrowSource}
+                priColor={priColor} theme={theme} darkMode={darkMode} filter={filter} search={search}
+                hideHabits={hideHabits} arrowDrag={arrowDrag}
+                chainDeps={chainDeps} chainOrder={chainOrder} chainAddDepFor={chainAddDepFor}
+                allTasks={allTasks} statuses={statuses}
+                onExpand={onExpand} setChainAddDepFor={setChainAddDepFor}
+                chainAddDep={chainAddDep} chainRemoveDep={chainRemoveDep}
+                handleConnectorMouseDown={handleConnectorMouseDown}
+              />
             );
           })}
         </div>

@@ -172,6 +172,7 @@ function rowToTask(row, timezone, sourceMap) {
     sourceId: row.source_id,
     generated: !!row.generated,
     gcalEventId: row.gcal_event_id,
+    msftEventId: row.msft_event_id,
     dependsOn: typeof row.depends_on === 'string' ? JSON.parse(row.depends_on || '[]') : (row.depends_on || []),
     datePinned: !!row.date_pinned
   };
@@ -218,6 +219,7 @@ function taskToRow(task, userId, timezone) {
   if (task.sourceId !== undefined) row.source_id = task.sourceId;
   if (task.generated !== undefined) row.generated = task.generated ? 1 : 0;
   if (task.gcalEventId !== undefined) row.gcal_event_id = task.gcalEventId;
+  if (task.msftEventId !== undefined) row.msft_event_id = task.msftEventId;
   if (task.dependsOn !== undefined) row.depends_on = JSON.stringify(task.dependsOn || []);
   if (task.datePinned !== undefined) row.date_pinned = task.datePinned ? 1 : 0;
 
@@ -440,6 +442,11 @@ async function deleteTask(req, res) {
 
       if (task.gcal_event_id) {
         await trx('gcal_sync_ledger')
+          .where({ user_id: req.user.id, task_id: id })
+          .update({ task_id: null, synced_at: db.fn.now() });
+      }
+      if (task.msft_event_id) {
+        await trx('msft_cal_sync_ledger')
           .where({ user_id: req.user.id, task_id: id })
           .update({ task_id: null, synced_at: db.fn.now() });
       }

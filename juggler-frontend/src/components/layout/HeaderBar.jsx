@@ -9,7 +9,7 @@ import { getTheme } from '../../theme/colors';
 import { DAY_NAMES } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 
-export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today }) {
+export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today }) {
   var theme = getTheme(darkMode);
   var { user, logout } = useAuth();
   var [showOverflow, setShowOverflow] = useState(false);
@@ -36,6 +36,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
     overflowItems.push({ label: 'Settings', icon: '\u2699\uFE0F', onClick: onShowSettings });
     overflowItems.push({ label: 'Import/Export', icon: '\uD83D\uDCE6', onClick: onShowExport });
     if (onShowGCalSync) overflowItems.push({ label: 'GCal Sync', icon: '\uD83D\uDCC5', onClick: onShowGCalSync });
+    if (onShowMsftCalSync) overflowItems.push({ label: 'Outlook Sync', icon: '\uD83D\uDCC6', onClick: onShowMsftCalSync });
     if (onShowHelp) overflowItems.push({ label: 'Help', icon: '\u2753', onClick: onShowHelp });
     overflowItems.push({ label: darkMode ? 'Light Mode' : 'Dark Mode', icon: darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19', onClick: function() { setDarkMode(function(d) { return !d; }); } });
     if (user) overflowItems.push({ label: 'Logout', icon: '\uD83D\uDEAA', onClick: logout });
@@ -130,6 +131,12 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
               <button onClick={onShowGCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title="Google Calendar Sync \u2014 bidirectional sync with Google Calendar">
                 <span style={gcalSyncing ? { display: 'inline-block', animation: 'gcal-spin 1s linear infinite' } : undefined}>&#x1F4C5;</span>
                 {gcalSyncing && <span style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: '#3B82F6' }} />}
+              </button>
+            )}
+            {onShowMsftCalSync && (
+              <button onClick={onShowMsftCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title="Microsoft Calendar Sync \u2014 bidirectional sync with Outlook Calendar">
+                <span style={msftCalSyncing ? { display: 'inline-block', animation: 'gcal-spin 1s linear infinite' } : undefined}>&#x1F4C6;</span>
+                {msftCalSyncing && <span style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: '#0078D4' }} />}
               </button>
             )}
             {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help guide \u2014 how the scheduler works, task properties, keyboard shortcuts">&#x2753;</button>}
