@@ -717,13 +717,16 @@ async function sync(req, res) {
         }
 
         if (task && event) {
+          // Never apply calendar changes to habit source templates
+          var isHabitSource = task._habit && !task._generated;
+
           var currentTaskHash = taskHash(task);
           var currentEventHash = msftEventHash(event);
           var taskChanged = currentTaskHash !== ledger.last_pushed_hash;
           var eventChanged = currentEventHash !== ledger.last_pulled_hash;
 
           if (taskChanged && eventChanged) {
-            if (ledger.origin === 'juggler') {
+            if (ledger.origin === 'juggler' || isHabitSource) {
               var eventBody = buildMsftEventBody(task, year, tz);
               await msftCalApi.patchEvent(accessToken, ledger.msft_event_id, eventBody);
               await delay(100);
@@ -739,9 +742,11 @@ async function sync(req, res) {
             await delay(100);
             stats.pushed++;
           } else if (eventChanged) {
-            var updateFields2 = applyMsftEventToTask(event, tz);
-            await db('tasks').where('id', task.id).update(updateFields2);
-            stats.pulled++;
+            if (!isHabitSource) {
+              var updateFields2 = applyMsftEventToTask(event, tz);
+              await db('tasks').where('id', task.id).update(updateFields2);
+              stats.pulled++;
+            }
           }
 
           var startStr = event.start?.dateTime || null;
