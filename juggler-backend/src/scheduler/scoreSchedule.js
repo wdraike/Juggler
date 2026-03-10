@@ -14,7 +14,7 @@ var getTaskDeps = dependencyHelpers.getTaskDeps;
 // Weights
 var W_UNPLACED = 1000;
 var W_DEADLINE_MISS = 500;
-var W_PRIORITY_DRIFT = 50;
+var W_PRIORITY_DRIFT = 200;
 var W_CROSS_DAY_PRI = 30;
 var W_HABIT_TIME_DRIFT = 10;
 var W_FRAGMENTATION = 20;
@@ -36,9 +36,9 @@ function dateDiffDays(dateKeyA, dateKeyB) {
 }
 
 function slotQuality(startMin) {
-  if (startMin >= 540 && startMin < 720) return 3;  // 9am-12pm prime
-  if (startMin >= 720 && startMin < 1020) return 2;  // 12pm-5pm afternoon
-  return 1; // evening/early morning
+  // Priority ordering matters equally at all times of day.
+  // Higher-pri tasks should always come first on a given day.
+  return 1;
 }
 
 /**

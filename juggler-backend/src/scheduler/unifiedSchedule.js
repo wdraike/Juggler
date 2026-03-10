@@ -1201,17 +1201,20 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     return 1;
   }
 
-  // Build set of task IDs that have multiple parts (split tasks) — exclude from re-sort
-  var splitTaskIds = {};
-  pool.forEach(function(item) {
-    if (item._parts.length > 1) splitTaskIds[item.task.id] = true;
-  });
-
   dates.forEach(function(d) {
     var placed = dayPlaced[d.key];
     if (!placed || placed.length < 2) return;
 
-    // Collect movable placements: non-locked, non-habit, non-split
+    // Count parts per task on THIS day — only exclude tasks split within the same day
+    var partsOnDay = {};
+    for (var ci = 0; ci < placed.length; ci++) {
+      if (placed[ci].task) {
+        var cid = placed[ci].task.id;
+        partsOnDay[cid] = (partsOnDay[cid] || 0) + 1;
+      }
+    }
+
+    // Collect movable placements: non-locked, non-habit, not multi-part on this day
     var movable = [];
     for (var i = 0; i < placed.length; i++) {
       var p = placed[i];
@@ -1219,7 +1222,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (!p.task) continue;
       if (p.task.rigid) continue;
       if (hasWhen(p.task.when, 'fixed')) continue;
-      if (splitTaskIds[p.task.id]) continue;
+      if (partsOnDay[p.task.id] > 1) continue;
       movable.push(p);
     }
     if (movable.length < 2) return;

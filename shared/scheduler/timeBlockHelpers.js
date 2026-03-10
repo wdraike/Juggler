@@ -101,7 +101,15 @@ function getWhenWindows(whenVal, windowsMap, fallback) {
     }
   });
   if (result.length > 0) return result;
-  if (isExplicit) return [];
+  // If the day has no tagged blocks (only anytime), fall back to anytime
+  // even for explicit when-tags.  Returning [] would skip the day entirely,
+  // causing priority inversions when only some tasks have when-tags.
+  if (isExplicit) {
+    var hasTaggedBlocks = false;
+    for (var k in windowsMap) { if (k !== 'anytime') { hasTaggedBlocks = true; break; } }
+    if (hasTaggedBlocks) return [];
+    // fall through to anytime
+  }
   var all = windowsMap.anytime || windowsMap[fallback || "anytime"] || [];
   if (all.length > 0) {
     return all.map(function(w) {

@@ -251,6 +251,12 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       var pa = dayPls[ai], pb = dayPls[bi];
       var oldStartA = pa.start, oldStartB = pb.start;
 
+      // Never swap a higher-pri task to a later slot — preserve priority ordering
+      var priRankA = pa.task.pri === 'P1' ? 4 : pa.task.pri === 'P2' ? 3 : pa.task.pri === 'P4' ? 1 : 2;
+      var priRankB = pb.task.pri === 'P1' ? 4 : pb.task.pri === 'P2' ? 3 : pb.task.pri === 'P4' ? 1 : 2;
+      if (priRankA > priRankB && oldStartA < oldStartB) continue; // A is higher-pri and earlier — don't move it later
+      if (priRankB > priRankA && oldStartB < oldStartA) continue; // B is higher-pri and earlier — don't move it later
+
       // For unequal durations: check both fit at new positions
       // Free both first, then check
       var occ = dayOcc[dk];
