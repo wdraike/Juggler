@@ -3,6 +3,7 @@ const router = express.Router();
 const taskController = require('../controllers/task.controller');
 const { authenticateJWT } = require('../middleware/jwt-auth');
 const { runScheduleAndPersist } = require('../scheduler/runSchedule');
+const { withLock } = require('../lib/sync-lock');
 
 router.use(authenticateJWT);
 
@@ -22,7 +23,9 @@ function scheduleAfterMutation(req, res, next) {
       // Small delay so batch saves within the same request cycle settle
       setTimeout(function() {
         delete pendingSchedule[uid];
-        runScheduleAndPersist(uid).catch(function(err) {
+        withLock(uid, function() {
+          return runScheduleAndPersist(uid);
+        }).catch(function(err) {
           console.error('[SCHED] auto-schedule after mutation failed:', err.message);
         });
       }, 500);

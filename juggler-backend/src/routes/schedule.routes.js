@@ -6,11 +6,12 @@ var express = require('express');
 var router = express.Router();
 var { authenticateJWT } = require('../middleware/jwt-auth');
 var { runScheduleAndPersist, getSchedulePlacements } = require('../scheduler/runSchedule');
+var { withSyncLock } = require('../lib/sync-lock');
 
 /**
  * POST /api/schedule/run — run scheduler, persist date moves, return placements
  */
-router.post('/run', authenticateJWT, async function(req, res) {
+router.post('/run', authenticateJWT, withSyncLock(async function(req, res) {
   try {
     var result = await runScheduleAndPersist(req.user.id);
     // result now includes dayPlacements and unplaced from the same run (cached)
@@ -19,7 +20,7 @@ router.post('/run', authenticateJWT, async function(req, res) {
     console.error('Schedule run error:', error);
     res.status(500).json({ error: 'Failed to run scheduler' });
   }
-});
+}));
 
 /**
  * GET /api/schedule/placements — read-only: return scheduler placements
