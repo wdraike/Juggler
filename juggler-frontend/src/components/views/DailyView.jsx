@@ -133,9 +133,11 @@ function FixedPopup({ anchorRect, item, status, theme, darkMode }) {
   return ReactDOM.createPortal(popup, document.body);
 }
 
-/* ── Overlap layout: assign columns to overlapping tasks ── */
+/* ── Overlap layout: assign columns + enforce minimum block height ── */
+var MIN_BLOCK_H = 22; // minimum px height so text is readable
+var BLOCK_GAP = 2;    // gap between nudged blocks
+
 function computeColumns(placements, hourHeight) {
-  // Each item gets { start, end, top, height, col, totalCols }
   var items = placements.map(function (p) {
     var s = p.start;
     var e = p.end || s + (p.task ? p.task.dur || 30 : 30);
@@ -157,8 +159,8 @@ function computeColumns(placements, hourHeight) {
 
   var result = [];
   clusters.forEach(function (cluster) {
-    // Greedy column assignment within the cluster
-    var cols = []; // cols[c] = end time of last item in that column
+    // Greedy column assignment
+    var cols = [];
     cluster.items.forEach(function (it) {
       var placed = false;
       for (var c = 0; c < cols.length; c++) {
@@ -175,10 +177,21 @@ function computeColumns(placements, hourHeight) {
       }
     });
     var totalCols = cols.length;
+
+    // Within each column, compute top/height and nudge down if blocks
+    // would visually overlap due to minimum height enforcement
+    var colBottoms = {}; // track the visual bottom px of the last block per column
     cluster.items.forEach(function (it) {
-      var top = ((it.start - GRID_START * 60) / 60) * hourHeight;
-      var h = ((it.end - it.start) / 60) * hourHeight;
-      result.push({ p: it.p, top: top, height: h, col: it.col, totalCols: totalCols });
+      var naturalTop = ((it.start - GRID_START * 60) / 60) * hourHeight;
+      var naturalH = Math.max(((it.end - it.start) / 60) * hourHeight, MIN_BLOCK_H);
+      var colKey = it.col;
+      var top = naturalTop;
+      // If the previous block in this column extends past where we'd start, nudge down
+      if (colBottoms[colKey] != null && colBottoms[colKey] + BLOCK_GAP > top) {
+        top = colBottoms[colKey] + BLOCK_GAP;
+      }
+      colBottoms[colKey] = top + naturalH;
+      result.push({ p: it.p, top: top, height: naturalH, col: it.col, totalCols: totalCols });
     });
   });
 

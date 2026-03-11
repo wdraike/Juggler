@@ -229,7 +229,7 @@ export default function CalendarView({
     e.dataTransfer.effectAllowed = 'move';
   }, []);
 
-  var maxVisible = isMobile ? 3 : 5;
+  var maxVisible = isMobile ? 4 : 8;
   var rows = [];
   for (var r = 0; r < cells.length; r += 7) rows.push(cells.slice(r, r + 7));
 
@@ -313,28 +313,41 @@ export default function CalendarView({
                       )}
                     </div>
 
-                    {/* Task entries */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, overflow: 'visible' }}>
-                      {items.slice(0, maxVisible).map(function (it) {
-                        return (
-                          <TaskEntry
-                            key={it.task.id}
-                            item={it}
-                            status={statuses[it.task.id] || ''}
-                            onExpand={onExpand}
-                            onDragStart={handleDragStart}
-                            theme={theme}
-                            darkMode={darkMode}
-                            isMobile={isMobile}
-                          />
+                    {/* Task entries — stagger into columns when many */}
+                    {(function () {
+                      var visible = items.slice(0, maxVisible);
+                      var cols = visible.length > (isMobile ? 2 : 3) ? 2 : 1;
+                      return (
+                        <div style={{
+                          display: 'flex',
+                          flexDirection: cols > 1 ? 'row' : 'column',
+                          flexWrap: cols > 1 ? 'wrap' : 'nowrap',
+                          gap: 1, flex: 1, overflow: 'visible'
+                        }}>
+                          {visible.map(function (it) {
+                            return (
+                              <div key={it.task.id} style={{ width: cols > 1 ? 'calc(50% - 1px)' : '100%', minWidth: 0 }}>
+                                <TaskEntry
+                                  item={it}
+                                  status={statuses[it.task.id] || ''}
+                                  onExpand={onExpand}
+                                  onDragStart={handleDragStart}
+                                  theme={theme}
+                                  darkMode={darkMode}
+                                  isMobile={isMobile}
+                                />
                         );
-                      })}
-                      {items.length > maxVisible && (
-                        <div style={{ fontSize: isMobile ? 8 : 9, color: theme.textMuted, paddingLeft: 4 }}>
-                          +{items.length - maxVisible} more
+                              </div>
+                            );
+                          })}
+                          {items.length > maxVisible && (
+                            <div style={{ fontSize: isMobile ? 8 : 9, color: theme.textMuted, paddingLeft: 4, width: '100%' }}>
+                              +{items.length - maxVisible} more
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
+                      );
+                    })()}
                   </div>
                 );
               })}
