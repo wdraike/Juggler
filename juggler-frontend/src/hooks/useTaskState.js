@@ -34,17 +34,15 @@ export default function useTaskState() {
   const lastVersionRef = useRef(null);
   const loadTasksRef = useRef(null);
 
-  // Load placements from backend scheduler (debounced)
-  const loadPlacements = useCallback(() => {
+  // Load placements from backend scheduler (immediate)
+  const loadPlacements = useCallback(async () => {
     if (placementTimerRef.current) clearTimeout(placementTimerRef.current);
-    placementTimerRef.current = setTimeout(async () => {
-      try {
-        const res = await apiClient.get('/schedule/placements');
-        setPlacements({ dayPlacements: res.data.dayPlacements || {}, unplaced: res.data.unplaced || [] });
-      } catch (error) {
-        console.error('Failed to load placements:', error);
-      }
-    }, 300);
+    try {
+      const res = await apiClient.get('/schedule/placements');
+      setPlacements({ dayPlacements: res.data.dayPlacements || {}, unplaced: res.data.unplaced || [] });
+    } catch (error) {
+      console.error('Failed to load placements:', error);
+    }
   }, []);
 
   // Core save logic — sends only dirty fields per task to server
@@ -181,9 +179,23 @@ export default function useTaskState() {
     dispatchPersist({ type: 'SET_DIRECTION', id, val });
   }, [dispatchPersist]);
 
-  const updateTask = useCallback((id, fields) => {
-    dispatchPersist({ type: 'UPDATE_TASK', id, fields });
-  }, [dispatchPersist]);
+  const updateTask = useCallback(async (id, fields) => {
+    dispatch({ type: 'UPDATE_TASK', id, fields });
+    // Cancel any pending debounced save
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+    // Immediately save to API + reload placements (no debounce)
+    setSaving(true);
+    try {
+      var partial = Object.assign({ id: id }, fields);
+      await apiClient.put('/tasks/batch', { updates: [partial] });
+      dispatch({ type: 'CLEAR_DIRTY_TASKS', ids: [id], savedFields: { [id]: fields } });
+      await loadPlacements();
+    } catch (error) {
+      console.error('Save failed:', error);
+    } finally {
+      setSaving(false);
+    }
+  }, [loadPlacements]);
 
   const addTasks = useCallback(async (tasks) => {
     dispatch({ type: 'ADD_TASKS', tasks });

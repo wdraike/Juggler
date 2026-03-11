@@ -40,7 +40,7 @@ function normalizePri(pri) {
 
 function effectiveDuration(t) {
   var rd = t.timeRemaining != null ? t.timeRemaining : t.dur;
-  return rd === 0 ? 0 : Math.min(rd || 30, 720);
+  return Math.min(rd || 30, 720);
 }
 
 function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
@@ -93,6 +93,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     if (effectiveDur <= 0) return;
 
     var sm = parseTimeToMinutes(t.time);
+    // Treat midnight (0) as "no specific time" — it's the default for unscheduled tasks
+    if (sm === 0 && !hasWhen(t.when, 'fixed')) sm = null;
     var tdKey = formatDateKey(td);
     var isPast = false;
     if (tdKey === effectiveTodayKey) {
@@ -198,6 +200,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var childSt = newSt[childId] || '';
       if (childSt === 'done' || childSt === 'cancel' || childSt === 'skip') continue;
       var childDate = parseDate(childTask.date);
+      // Ignore past-dated children — they'll be moved forward by the scheduler,
+      // so they shouldn't constrain the ancestor to an impossible past ceiling.
+      if (childDate && childDate < localToday) continue;
       if (childDate && (!earliest || childDate < earliest)) earliest = childDate;
       var childCeiling = computeDownstreamCeiling(childId, visited);
       if (childCeiling && (!earliest || childCeiling < earliest)) earliest = childCeiling;
@@ -509,8 +514,10 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (sm === null) return;
       var dur = effectiveDuration(t);
       if (dur <= 0) return;
-      sm = Math.max(DAY_START, Math.min(sm, GRID_END * 60));
-      reserve(occ, sm, dur);
+      // Don't clamp fixed tasks — honor the user's exact time.
+      // Only reserve occupancy within the grid range.
+      var reserveStart = Math.max(0, sm);
+      reserve(occ, reserveStart, Math.min(dur, 1440 - reserveStart));
       placed.push({ task: t, start: sm, dur: dur, locked: true, _dateKey: d.key });
       globalPlacedEnd[t.id] = { dateKey: d.key, endMin: sm + dur };
     });

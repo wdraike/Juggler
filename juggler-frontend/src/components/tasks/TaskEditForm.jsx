@@ -170,26 +170,29 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
     return Object.keys(changed).length > 0 ? changed : null;
   }, [buildFields, text, project, pri, notes, when, dayReq, habit, rigid, dur, timeFlex, split, splitMin, datePinned, date, time, due, startAfter, taskLoc, taskTools, recurType, recurDays, recurEvery]);
 
-  // Auto-save on field changes (edit mode only) — only sends changed fields
+  // Dirty detection — compare current fields to snapshot
+  var [isDirty, setIsDirty] = useState(false);
   useEffect(function() {
     if (isCreate) return;
     if (firstRender.current) { firstRender.current = false; return; }
     userDirtyRef.current = true;
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    setSaveStatus('saving');
-    saveTimer.current = setTimeout(function() {
-      var changed = buildChangedFields();
-      if (changed) {
-        onUpdate(task.id, changed);
-        // Update snapshot so next save only sends new changes
-        taskSnapshotRef.current = snapshotFromTask(Object.assign({}, task, buildFields()));
-      }
-      userDirtyRef.current = false;
-      setSaveStatus('saved');
-      setTimeout(function() { setSaveStatus(null); }, 1500);
-    }, 600);
-    return function() { if (saveTimer.current) clearTimeout(saveTimer.current); };
+    var changed = buildChangedFields();
+    setIsDirty(!!changed);
   }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, taskLoc, taskTools, datePinned, recurType, recurDays, recurEvery]);
+
+  // Manual save handler
+  function handleSave() {
+    var changed = buildChangedFields();
+    if (changed) {
+      onUpdate(task.id, changed);
+      // Update snapshot so next save only sends new changes
+      taskSnapshotRef.current = snapshotFromTask(Object.assign({}, task, buildFields()));
+    }
+    userDirtyRef.current = false;
+    setIsDirty(false);
+    setSaveStatus('saved');
+    setTimeout(function() { setSaveStatus(null); }, 1500);
+  }
 
   function handleCreate() {
     var fields = buildFields();
@@ -233,10 +236,16 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
             background: '#10B981', color: 'white', cursor: 'pointer'
           }}>{'\u2795 Create'}</button>
         ) : (
-          saveStatus && <span style={{
-            fontSize: 10, fontWeight: 600, color: saveStatus === 'saving' ? TH.textMuted : '#10B981',
-            padding: '4px 8px'
-          }}>{saveStatus === 'saving' ? 'Saving\u2026' : '\u2714 Saved'}</span>
+          <>
+            {isDirty && <button onClick={handleSave} style={{
+              fontSize: 10, fontWeight: 700, padding: '4px 14px', border: 'none', borderRadius: 4,
+              background: TH.accent, color: 'white', cursor: 'pointer'
+            }}>{'\uD83D\uDCBE'} Save</button>}
+            {saveStatus && <span style={{
+              fontSize: 10, fontWeight: 600, color: saveStatus === 'saving' ? TH.textMuted : '#10B981',
+              padding: '4px 8px'
+            }}>{saveStatus === 'saving' ? 'Saving\u2026' : '\u2714 Saved'}</span>}
+          </>
         )}
         {!isCreate && onDelete && (
           <button onClick={() => setShowDeleteConfirm(true)} style={{

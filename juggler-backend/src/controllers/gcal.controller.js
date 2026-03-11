@@ -221,7 +221,7 @@ function buildEventBody(task, year, timezone) {
   var tz = timezone || DEFAULT_TIMEZONE;
   var startISO = jugglerDateToISO(task.date, task.time, year);
   var dur = task.dur || 30;
-  var isAllDay = task.when === 'allday' || !task.time;
+  var isAllDay = task.when === 'allday';
 
   if (isAllDay) {
     var dateParts = (task.date || '').split('/');
@@ -277,7 +277,7 @@ function applyEventToTask(event, timezone) {
   var endStr = event.end?.dateTime || event.end?.date;
   var isAllDay = !event.start?.dateTime;
   var jd = isoToJugglerDate(startStr, tz);
-  var eventDur = isAllDay ? 0 : 30;
+  var eventDur = 30;
   if (!isAllDay && startStr && endStr) {
     eventDur = computeDurationMinutes(startStr, endStr);
   }
@@ -526,7 +526,7 @@ async function pull(req, res) {
       var endStr = event.end?.dateTime || event.end?.date;
 
       var jugglerDate = isoToJugglerDate(startStr, tz);
-      var dur = isAllDay ? 0 : 30;
+      var dur = 30;
       if (!isAllDay && startStr && endStr) {
         dur = computeDurationMinutes(startStr, endStr);
       }

@@ -760,6 +760,9 @@ export default function AppLayout() {
               onExpand={handleExpand}
               darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
               allTasks={allTasks}
+              filter={filter}
+              blockedTaskIds={blockedTaskIds}
+              unplacedIds={unplacedIds}
               isMobile={isMobile}
             />
           )}

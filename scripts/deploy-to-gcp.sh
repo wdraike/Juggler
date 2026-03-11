@@ -198,7 +198,7 @@ deploy_backend() {
     print_status "Updating calendar redirect URIs..."
     gcloud run services update $BACKEND_SERVICE \
         --region $REGION \
-        --update-env-vars="FRONTEND_URL=PENDING,GCAL_REDIRECT_URI=$GCAL_REDIRECT,MSFT_CAL_REDIRECT_URI=$MSFT_CAL_REDIRECT" || true
+        --update-env-vars="FRONTEND_URL=PENDING,GCAL_REDIRECT_URI=$GCAL_REDIRECT,MSFT_CAL_REDIRECT_URI=$MSFT_CAL_REDIRECT,MCP_ISSUER_URL=$BACKEND_URL" || true
 }
 
 deploy_frontend() {

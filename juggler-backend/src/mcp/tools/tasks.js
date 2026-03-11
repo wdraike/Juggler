@@ -19,15 +19,15 @@ var taskInputFields = {
   when: z.string().optional().describe('Time preference: "morning", "afternoon", "evening", or null'),
   dayReq: z.string().optional().describe('Day requirement: "any", "weekday", "weekend", a single day letter (M,T,W,R,F,Sa,Su), or comma-separated for multiple days (e.g. "M,W,F")'),
   dependsOn: z.array(z.string()).optional().describe('Array of task IDs this task depends on'),
-  // UTC ISO fields (preferred)
-  scheduledAt: z.string().optional().describe('Scheduled date+time as ISO string — UTC ("2026-03-08T22:45:00Z") or with offset ("2026-03-08T18:45:00-04:00"). Takes precedence over date/time.'),
-  dueAt: z.string().optional().describe('Due date as ISO date string (e.g. "2026-03-15"). Takes precedence over due.'),
-  startAfterAt: z.string().optional().describe('Start-after date as ISO date string (e.g. "2026-03-10"). Takes precedence over startAfter.'),
-  // Local string fields (convenience, converted server-side using user timezone)
-  date: z.string().optional().describe('Scheduled date in M/D format (e.g. "3/8"). Use scheduledAt for UTC.'),
-  time: z.string().optional().describe('Scheduled time (e.g. "9:00 AM"). Use scheduledAt for UTC.'),
-  due: z.string().optional().describe('Due date in M/D format. Use dueAt for ISO.'),
-  startAfter: z.string().optional().describe('Start-after date in M/D format. Use startAfterAt for ISO.'),
+  // Local string fields (PREFERRED — server converts using user's timezone automatically)
+  date: z.string().optional().describe('Scheduled date in M/D format (e.g. "3/8"). PREFERRED over scheduledAt — server handles timezone conversion.'),
+  time: z.string().optional().describe('Scheduled time in h:mm AM/PM format (e.g. "9:30 PM"). PREFERRED over scheduledAt — server handles timezone conversion.'),
+  due: z.string().optional().describe('Due date in M/D format (e.g. "3/15"). PREFERRED over dueAt.'),
+  startAfter: z.string().optional().describe('Start-after date in M/D format (e.g. "3/10"). PREFERRED over startAfterAt.'),
+  // UTC ISO fields (use ONLY if you already have a correct UTC timestamp — avoid manual timezone math)
+  scheduledAt: z.string().optional().describe('UTC ISO timestamp. AVOID — use date+time instead to prevent timezone errors. Only use if you already have a verified UTC value.'),
+  dueAt: z.string().optional().describe('Due date as ISO string. AVOID — use due instead.'),
+  startAfterAt: z.string().optional().describe('Start-after as ISO string. AVOID — use startAfter instead.'),
   // Other fields
   location: z.array(z.string()).optional().describe('Location IDs'),
   tools: z.array(z.string()).optional().describe('Tool IDs'),
@@ -84,7 +84,7 @@ function registerTaskTools(server, userId) {
   // ── create_task ──
   server.tool(
     'create_task',
-    'Create a single task. Accepts UTC ISO (scheduledAt) or local strings (date+time). Returns both formats.',
+    'Create a single task. Use date+time for scheduling (server converts timezone automatically). Returns both UTC and local fields.',
     Object.assign({ id: z.string().optional().describe('Task ID (auto-generated UUID if omitted)'), text: z.string().describe('Task description/title') }, taskInputFields),
     async (params) => {
       var tz = await getUserTimezone();
@@ -107,7 +107,7 @@ function registerTaskTools(server, userId) {
   // ── create_tasks (batch) ──
   server.tool(
     'create_tasks',
-    'Create multiple tasks at once. Each task accepts UTC ISO (scheduledAt) or local strings (date+time). Returns count.',
+    'Create multiple tasks at once. Use date+time for scheduling (server converts timezone automatically). Returns count.',
     {
       tasks: z.array(z.object(
         Object.assign({ id: z.string().optional(), text: z.string() }, taskInputFields)
@@ -149,7 +149,7 @@ function registerTaskTools(server, userId) {
   // ── update_task ──
   server.tool(
     'update_task',
-    'Update fields on an existing task. Accepts UTC ISO (scheduledAt) or local strings (date+time). Only provided fields are changed.',
+    'Update fields on an existing task. Use date+time for scheduling (server converts timezone automatically). Only provided fields are changed.',
     Object.assign({
       id: z.string().describe('Task ID to update'),
       status: z.string().optional(),

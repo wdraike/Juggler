@@ -146,9 +146,9 @@ async function getValidAccessToken(user) {
 function buildMsftEventBody(task, year, timezone) {
   var tz = timezone || DEFAULT_TIMEZONE;
   var dur = task.dur || 30;
-  // Detect all-day: explicit allday, no time, or midnight-scheduled non-fixed tasks
-  var isMidnight = task.time === '12:00 AM' && task.when !== 'fixed';
-  var isAllDay = task.when === 'allday' || !task.time || isMidnight;
+  // Only treat as all-day if explicitly marked allday — midnight or missing time
+  // just means "not yet scheduled", not "all-day event"
+  var isAllDay = task.when === 'allday';
 
   var descParts = [];
   if (task.project) descParts.push('Project: ' + task.project);
@@ -234,7 +234,7 @@ function applyMsftEventToTask(event, timezone) {
     }
   }
 
-  var eventDur = isAllDay ? 0 : 30;
+  var eventDur = 30;
   if (!isAllDay && startStr && endStr) {
     eventDur = computeDurationMinutes(startStr, endStr);
   }
@@ -508,7 +508,7 @@ async function pull(req, res) {
         jugglerDate = isoToJugglerDate(startStr, event.start?.timeZone || tz);
       }
 
-      var dur = isAllDay ? 0 : 30;
+      var dur = 30;
       if (!isAllDay && startStr && endStr) {
         dur = computeDurationMinutes(startStr, endStr);
       }

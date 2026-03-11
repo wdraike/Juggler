@@ -158,7 +158,7 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
           background: show ? priColor + '22' : priColor + '10',
           color: isDone ? theme.textMuted : theme.text,
           textDecoration: isDone ? 'line-through' : 'none',
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          whiteSpace: 'normal', overflow: 'hidden', wordBreak: 'break-word',
           cursor: 'pointer', lineHeight: 1.4,
           outline: show ? '2px solid ' + theme.accent : 'none',
           outlineOffset: -1,
@@ -229,12 +229,11 @@ export default function CalendarView({
     e.dataTransfer.effectAllowed = 'move';
   }, []);
 
-  var maxVisible = isMobile ? 4 : 8;
   var rows = [];
   for (var r = 0; r < cells.length; r += 7) rows.push(cells.slice(r, r + 7));
 
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? 6 : 12, display: 'flex', flexDirection: 'column' }}>
+    <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? 6 : 12, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       {/* Month header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: 8 }}>
         <button onClick={function () { setMonthOffset(function (o) { return o - 1; }); }}
@@ -253,108 +252,98 @@ export default function CalendarView({
         )}
       </div>
 
-      {/* Day-of-week header */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1 }}>
-        {DAY_NAMES.map(function (dn, i) {
-          return (
-            <div key={dn} style={{
-              textAlign: 'center', fontSize: isMobile ? 10 : 12, fontWeight: 600,
-              color: (i === 0 || i === 6) ? theme.accent : theme.textMuted,
-              padding: '4px 0'
-            }}>{dn}</div>
-          );
-        })}
-      </div>
+      {/* Calendar table — fixed layout forces equal column widths */}
+      <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'separate', borderSpacing: 1, flex: 1 }}>
+        <thead>
+          <tr>
+            {DAY_NAMES.map(function (dn, i) {
+              return (
+                <th key={dn} style={{
+                  textAlign: 'center', fontSize: isMobile ? 10 : 12, fontWeight: 600,
+                  color: (i === 0 || i === 6) ? theme.accent : theme.textMuted,
+                  padding: '4px 0'
+                }}>{dn}</th>
+              );
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(function (row, ri) {
+            return (
+              <tr key={ri}>
+                {row.map(function (cell, ci) {
+                  var key = formatDateKey(cell.date);
+                  var isToday = key === todayKey;
+                  var items = dayData[key] || [];
+                  var doneCount = items.filter(function (it) { return (statuses[it.task.id] || '') === 'done'; }).length;
 
-      {/* Grid */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-        {rows.map(function (row, ri) {
-          return (
-            <div key={ri} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, flex: 1, minHeight: isMobile ? 70 : 110 }}>
-              {row.map(function (cell, ci) {
-                var key = formatDateKey(cell.date);
-                var isToday = key === todayKey;
-                var items = dayData[key] || [];
-                var doneCount = items.filter(function (it) { return (statuses[it.task.id] || '') === 'done'; }).length;
-
-                return (
-                  <div key={ci}
-                    onClick={function () {
-                      setDayOffset(Math.round((cell.date - today) / 86400000));
-                      setMonthOffset(0);
-                    }}
-                    onDragOver={onDateDrop ? function (e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } : undefined}
-                    onDrop={onDateDrop ? function (e) { e.stopPropagation(); onDateDrop(e, key); } : undefined}
-                    style={{
-                      border: '1px solid ' + (isToday ? theme.accent : theme.border),
-                      borderRadius: 4, padding: isMobile ? 3 : 4,
-                      cursor: 'pointer',
-                      background: isToday ? theme.accent + '0C' : (!cell.inMonth ? (theme.bgTertiary || theme.bgSecondary) : theme.card),
-                      opacity: cell.inMonth ? 1 : 0.5,
-                      overflow: 'visible', position: 'relative',
-                      display: 'flex', flexDirection: 'column'
-                    }}>
-                    {/* Day number */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                      <span style={{
-                        fontSize: isMobile ? 11 : 13,
-                        fontWeight: isToday ? 700 : (cell.day === 1 ? 600 : 400),
-                        background: isToday ? theme.accent : 'transparent',
-                        color: isToday ? '#FFF' : (!cell.inMonth ? theme.textMuted : theme.text),
-                        borderRadius: '50%',
-                        width: isMobile ? 20 : 24, height: isMobile ? 20 : 24,
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        lineHeight: 1
+                  return (
+                    <td key={ci}
+                      onClick={function () {
+                        setDayOffset(Math.round((cell.date - today) / 86400000));
+                        setMonthOffset(0);
+                      }}
+                      onDragOver={onDateDrop ? function (e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } : undefined}
+                      onDrop={onDateDrop ? function (e) { e.stopPropagation(); onDateDrop(e, key); } : undefined}
+                      style={{
+                        border: '1px solid ' + (isToday ? theme.accent : theme.border),
+                        borderRadius: 4, padding: isMobile ? 3 : 4,
+                        cursor: 'pointer',
+                        background: isToday ? theme.accent + '0C' : (!cell.inMonth ? (theme.bgTertiary || theme.bgSecondary) : theme.card),
+                        opacity: cell.inMonth ? 1 : 0.5,
+                        verticalAlign: 'top',
+                        height: isMobile ? 70 : 110,
+                        overflow: 'hidden', position: 'relative'
                       }}>
-                        {cell.day === 1 && !isToday ? MONTH_NAMES[cell.date.getMonth()] + ' ' + cell.day : cell.day}
-                      </span>
-                      {items.length > 0 && (
-                        <span style={{ fontSize: 9, color: theme.textMuted }}>{doneCount}/{items.length}</span>
-                      )}
-                    </div>
-
-                    {/* Task entries — stagger into columns when many */}
-                    {(function () {
-                      var visible = items.slice(0, maxVisible);
-                      var cols = visible.length > (isMobile ? 2 : 3) ? 2 : 1;
-                      return (
-                        <div style={{
-                          display: 'flex',
-                          flexDirection: cols > 1 ? 'row' : 'column',
-                          flexWrap: cols > 1 ? 'wrap' : 'nowrap',
-                          gap: 1, flex: 1, overflow: 'visible'
+                      {/* Day number */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                        <span style={{
+                          fontSize: isMobile ? 11 : 13,
+                          fontWeight: isToday ? 700 : (cell.day === 1 ? 600 : 400),
+                          background: isToday ? theme.accent : 'transparent',
+                          color: isToday ? '#FFF' : (!cell.inMonth ? theme.textMuted : theme.text),
+                          borderRadius: '50%',
+                          width: isMobile ? 20 : 24, height: isMobile ? 20 : 24,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          lineHeight: 1, flexShrink: 0
                         }}>
-                          {visible.map(function (it) {
-                            return (
-                              <div key={it.task.id} style={{ width: cols > 1 ? 'calc(50% - 1px)' : '100%', minWidth: 0 }}>
-                                <TaskEntry
-                                  item={it}
-                                  status={statuses[it.task.id] || ''}
-                                  onExpand={onExpand}
-                                  onDragStart={handleDragStart}
-                                  theme={theme}
-                                  darkMode={darkMode}
-                                  isMobile={isMobile}
-                                />
-                        );
-                              </div>
-                            );
-                          })}
-                          {items.length > maxVisible && (
-                            <div style={{ fontSize: isMobile ? 8 : 9, color: theme.textMuted, paddingLeft: 4, width: '100%' }}>
-                              +{items.length - maxVisible} more
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
-      </div>
+                          {cell.day === 1 && !isToday ? MONTH_NAMES[cell.date.getMonth()] + ' ' + cell.day : cell.day}
+                        </span>
+                        {items.length > 0 && (
+                          <span style={{ fontSize: 9, color: theme.textMuted, flexShrink: 0 }}>{doneCount}/{items.length}</span>
+                        )}
+                      </div>
+
+                      {/* Task entries — scrollable within the day cell */}
+                      <div style={{
+                        display: 'flex', flexDirection: 'column', gap: 1,
+                        overflowY: 'auto', overflowX: 'hidden',
+                        maxHeight: isMobile ? 44 : 80,
+                        minWidth: 0
+                      }}>
+                        {items.map(function (it) {
+                          return (
+                            <TaskEntry
+                              key={it.task.id}
+                              item={it}
+                              status={statuses[it.task.id] || ''}
+                              onExpand={onExpand}
+                              onDragStart={handleDragStart}
+                              theme={theme}
+                              darkMode={darkMode}
+                              isMobile={isMobile}
+                            />
+                          );
+                        })}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

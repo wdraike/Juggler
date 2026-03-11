@@ -187,7 +187,7 @@ function taskToRow(task, userId, timezone) {
   if (task.id !== undefined) row.id = task.id;
   if (task.taskType !== undefined) row.task_type = task.taskType;
   if (task.text !== undefined) row.text = task.text;
-  if (task.dur !== undefined) row.dur = task.dur;
+  if (task.dur !== undefined) row.dur = task.dur || 30;
   if (task.timeRemaining !== undefined) row.time_remaining = task.timeRemaining;
   if (task.pri !== undefined) row.pri = normalizePri(task.pri);
   if (task.project !== undefined) row.project = task.project;

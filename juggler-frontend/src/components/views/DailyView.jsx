@@ -316,7 +316,8 @@ function UnschedEntry({ task, status, onExpand, theme, darkMode, isMobile }) {
 /* ── Main DailyView ── */
 export default function DailyView({
   selectedDate, selectedDateKey, placements, statuses,
-  onExpand, darkMode, schedCfg, nowMins, isToday, allTasks, isMobile
+  onExpand, darkMode, schedCfg, nowMins, isToday, allTasks,
+  filter, blockedTaskIds, unplacedIds, isMobile
 }) {
   var theme = getTheme(darkMode);
   var scrollRef = useRef(null);
@@ -349,17 +350,32 @@ export default function DailyView({
     return getBlocksForDate(selectedDateKey, schedCfg) || [];
   }, [selectedDateKey, schedCfg]);
 
+  // Status filter
+  var matchesFilter = useCallback(function (taskId) {
+    if (!filter || filter === 'all') return true;
+    var st = statuses[taskId] || '';
+    if (filter === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip';
+    if (filter === 'action') return st === '' || st === 'wip';
+    if (filter === 'done') return st === 'done';
+    if (filter === 'wip') return st === 'wip';
+    if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(taskId);
+    if (filter === 'unplaced') return unplacedIds && unplacedIds.has(taskId);
+    return true;
+  }, [filter, statuses, blockedTaskIds, unplacedIds]);
+
   var scheduled = useMemo(function () {
-    return (placements || []).filter(function (p) { return p.start != null; }).sort(function (a, b) { return a.start - b.start; });
-  }, [placements]);
+    return (placements || []).filter(function (p) {
+      return p.start != null && matchesFilter(p.task.id);
+    }).sort(function (a, b) { return a.start - b.start; });
+  }, [placements, matchesFilter]);
 
   var unscheduled = useMemo(function () {
     var scheduledIds = {};
     (placements || []).forEach(function (p) { scheduledIds[p.task.id] = true; });
     return (allTasks || []).filter(function (t) {
-      return t.date === selectedDateKey && !scheduledIds[t.id];
+      return t.date === selectedDateKey && !scheduledIds[t.id] && matchesFilter(t.id);
     });
-  }, [allTasks, selectedDateKey, placements]);
+  }, [allTasks, selectedDateKey, placements, matchesFilter]);
 
   var nowY = isToday ? ((nowMins - GRID_START * 60) / 60) * hourHeight : null;
 

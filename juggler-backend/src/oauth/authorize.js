@@ -14,8 +14,8 @@ const { OAuth2Client } = require('google-auth-library');
 const db = require('../db');
 const { findOrCreateGoogleUser } = require('../controllers/auth.controller');
 
-function getGoogleClient() {
-  const issuer = process.env.MCP_ISSUER_URL || 'http://localhost:5002';
+function getGoogleClient(req) {
+  const issuer = process.env.MCP_ISSUER_URL || `${req.protocol}://${req.get('host')}`;
   return new OAuth2Client(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
@@ -55,7 +55,7 @@ async function authorize(req, res) {
     });
 
     // Redirect to Google OAuth consent
-    const googleClient = getGoogleClient();
+    const googleClient = getGoogleClient(req);
     const googleAuthUrl = googleClient.generateAuthUrl({
       access_type: 'offline',
       scope: ['openid', 'email', 'profile'],
@@ -101,7 +101,7 @@ async function googleCallback(req, res) {
     }
 
     // Exchange Google auth code for tokens
-    const googleClient = getGoogleClient();
+    const googleClient = getGoogleClient(req);
     const { tokens } = await googleClient.getToken(googleCode);
     googleClient.setCredentials(tokens);
 

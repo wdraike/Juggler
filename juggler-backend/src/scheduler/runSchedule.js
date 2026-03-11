@@ -170,9 +170,13 @@ async function runScheduleAndPersist(userId, _retries) {
   return await db.transaction(async function(trx) {
 
   // 1. Reset scheduler-moved tasks back to their original scheduled_at
+  //    Fixed tasks are user-anchored and should never be reset.
   var resetCount = await trx('tasks')
     .where('user_id', userId)
     .whereNotNull('original_scheduled_at')
+    .where(function() {
+      this.whereNull('when').orWhere('when', 'not like', '%fixed%');
+    })
     .update({
       scheduled_at: db.raw('original_scheduled_at'),
       original_scheduled_at: null,
@@ -254,6 +258,8 @@ async function runScheduleAndPersist(userId, _retries) {
     var dateChanged = newDate !== original.date;
     var timeChanged = newTime !== original.time;
 
+    // Fixed tasks are user-anchored — never override their time/date.
+    if (original.when && original.when.indexOf('fixed') >= 0) continue;
     // Habits should never have their date moved — they're day-specific.
     // Rigid habits also keep their preferred time.
     if (original.habit && dateChanged) continue;
@@ -292,6 +298,8 @@ async function runScheduleAndPersist(userId, _retries) {
     if (!t || !t.id) return;
     var original = taskById[t.id];
     if (!original) return;
+    // Fixed tasks are user-anchored — never clear their time.
+    if (original.when && original.when.indexOf('fixed') >= 0) return;
     if (original.time) {
       var rawRowClr = rawRowById[t.id];
       var clearUpdate = {
@@ -336,6 +344,9 @@ async function runScheduleAndPersist(userId, _retries) {
 
       var rawRowPast = rawRowById[t.id];
       if (!rawRowPast) return;  // not a real DB task
+
+      // Fixed tasks are user-anchored — never move them, even if past.
+      if (t.when && t.when.indexOf('fixed') >= 0) return;
 
       if (t.habit) {
         // Past habit — day was missed, mark as skipped

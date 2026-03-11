@@ -269,6 +269,16 @@ export default function CalendarGrid({
   var blockStartsByHour = {};
   blocks.forEach(function(bl) { var h = Math.floor(bl.start / 60); if (h >= GRID_START && h <= GRID_END) blockStartsByHour[h] = bl; });
 
+  // Map each hour to its block (for gutter when/where labels)
+  var blockByHour = {};
+  blocks.forEach(function(bl) {
+    var startH = Math.floor(bl.start / 60);
+    var endH = Math.ceil(bl.end / 60);
+    for (var h = Math.max(startH, GRID_START); h < Math.min(endH, GRID_END + 1); h++) {
+      blockByHour[h] = bl;
+    }
+  });
+
   return (
     <div ref={elRef} style={{ position: 'relative', height: totalH, minHeight: totalH, touchAction: 'pan-y', overflow: 'hidden', userSelect: dragState ? 'none' : undefined, cursor: dragState ? 'grabbing' : undefined }}
       onClick={locMenuHour !== null ? function() { setLocMenuHour(null); } : undefined}
@@ -314,6 +324,26 @@ export default function CalendarGrid({
                 }}>{locIcon(locId)}</div>
               )}
               {bs && mode === 'full' && <div style={{ fontSize: 7, color: bs.color || theme.textMuted, opacity: 0.6 }}>{bs.icon}</div>}
+              {mode !== 'mini' && (function() {
+                var bl = blockByHour[hour];
+                if (!bl) return null;
+                var blStartH = Math.floor(bl.start / 60);
+                var isFirst = hour === Math.max(blStartH, GRID_START);
+                if (!isFirst) return null;
+                var label = bl.name || bl.tag || '';
+                if (!label) return null;
+                return (
+                  <div style={{
+                    fontSize: isMobile ? 7 : 8, color: bl.color || theme.textMuted,
+                    opacity: 0.7, fontWeight: 600, lineHeight: 1.1,
+                    marginTop: 1, userSelect: 'none',
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    maxWidth: dm.STRIP_W - 4
+                  }} title={label}>
+                    {label}
+                  </div>
+                );
+              })()}
               {locMenuHour === hour && locations && (
                 <div style={{
                   position: 'absolute', left: dm.STRIP_W + 4, top: 18,
