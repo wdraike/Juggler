@@ -22,13 +22,14 @@ import { DAY_NAMES, applyDefaults } from '../../state/constants';
 import DayView from '../views/DayView';
 import ThreeDayView from '../views/ThreeDayView';
 import WeekView from '../views/WeekView';
-import MonthView from '../views/MonthView';
 import ListView from '../views/ListView';
 import PriorityView from '../views/PriorityView';
 import ConflictsView from '../views/ConflictsView';
 import DependencyView from '../views/DependencyView';
 import TimelineView from '../views/TimelineView';
 import SCurveView from '../views/SCurveView';
+import CalendarView from '../views/CalendarView';
+import DailyView from '../views/DailyView';
 
 // Task components
 import TaskEditForm from '../tasks/TaskEditForm';
@@ -52,22 +53,38 @@ export default function AppLayout() {
   var { toast, toastHistory, showToast } = useToast();
   var { pushUndo, popUndo } = useUndo(taskStateRef, dispatch, dispatchPersist);
 
+  // ── Persisted UI state ──
+  var _savedUI = useMemo(function () {
+    try { return JSON.parse(localStorage.getItem('juggler-ui-state')) || {}; }
+    catch (e) { return {}; }
+  }, []);
+
   var [darkMode, setDarkMode] = useState(function() {
     var saved = localStorage.getItem('juggler-darkMode');
     return saved !== null ? saved === 'true' : true;
   });
-  var [viewMode, setViewMode] = useState('day');
-  var [filter, setFilter] = useState('open');
-  var [search, setSearch] = useState('');
-  var [projectFilter, setProjectFilter] = useState('');
-  var [dayOffset, setDayOffset] = useState(0);
+  var [viewMode, setViewMode] = useState(_savedUI.viewMode || 'daily');
+  var [filter, setFilter] = useState(_savedUI.filter || 'open');
+  var [search, setSearch] = useState(_savedUI.search || '');
+  var [projectFilter, setProjectFilter] = useState(_savedUI.projectFilter || '');
+  var [dayOffset, setDayOffset] = useState(function () {
+    // Restore saved date as offset from today
+    if (_savedUI.selectedDate) {
+      var saved = new Date(_savedUI.selectedDate + 'T12:00:00');
+      var today = new Date(); today.setHours(12, 0, 0, 0);
+      var diff = Math.round((saved - today) / 86400000);
+      // Only restore if within reasonable range (±90 days)
+      if (Math.abs(diff) <= 90) return diff;
+    }
+    return 0;
+  });
   var [expandedTasks, setExpandedTasks] = useState([]);
   var [showSettings, setShowSettings] = useState(false);
   var [showExport, setShowExport] = useState(false);
   var [showGCalSync, setShowGCalSync] = useState(false);
   var [showMsftCalSync, setShowMsftCalSync] = useState(false);
   var [showToastHistory, setShowToastHistory] = useState(false);
-  var [hideHabits, setHideHabits] = useState(false);
+  var [hideHabits, setHideHabits] = useState(_savedUI.hideHabits || false);
   var [showHelp, setShowHelp] = useState(false);
   var [showCreateForm, setShowCreateForm] = useState(false);
   var [gcalAutoSync, setGcalAutoSync] = useState(false);
@@ -191,6 +208,20 @@ export default function AppLayout() {
   }, [today, dayOffset]);
 
   var selectedDateKey = useMemo(() => formatDateKey(selectedDate), [selectedDate]);
+
+  // Persist UI state to localStorage on change
+  useEffect(function () {
+    try {
+      localStorage.setItem('juggler-ui-state', JSON.stringify({
+        viewMode: viewMode,
+        filter: filter,
+        search: search,
+        projectFilter: projectFilter,
+        selectedDate: selectedDateKey,
+        hideHabits: hideHabits
+      }));
+    } catch (e) { /* quota exceeded — ignore */ }
+  }, [viewMode, filter, search, projectFilter, selectedDateKey, hideHabits]);
 
   var weekStripDates = useMemo(() => {
     var start = getWeekStart(selectedDate);
@@ -713,11 +744,22 @@ export default function AppLayout() {
             />
           )}
           {viewMode === 'month' && (
-            <MonthView
+            <CalendarView
               selectedDate={selectedDate} dayPlacements={filteredDayPlacements}
               statuses={statuses} tasksByDate={tasksByDate}
               onExpand={handleExpand} setDayOffset={setDayOffset} today={today} darkMode={darkMode}
               onDateDrop={handleDateDrop}
+              isMobile={isMobile}
+            />
+          )}
+          {viewMode === 'daily' && (
+            <DailyView
+              selectedDate={selectedDate} selectedDateKey={selectedDateKey}
+              placements={filteredDayPlacements[selectedDateKey] || []}
+              statuses={statuses}
+              onExpand={handleExpand}
+              darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
+              allTasks={allTasks}
               isMobile={isMobile}
             />
           )}

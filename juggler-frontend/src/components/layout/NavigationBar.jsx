@@ -7,10 +7,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import { getTheme } from '../../theme/colors';
 
 const VIEW_MODES = [
-  { id: 'day', label: 'Day', icon: '1', tip: 'Day view \u2014 single-day timeline grid' },
+  { id: 'daily', label: 'Day', icon: '\uD83D\uDCC4', tip: 'Day view \u2014 plain hour grid with hover details' },
+  { id: 'day', label: 'Flex', icon: '\u2194', tip: 'Flex view \u2014 single-day timeline with bezier connectors' },
   { id: '3day', label: '3-Day', icon: '3', tip: '3-Day view \u2014 three-day side-by-side timeline' },
   { id: 'week', label: 'Week', icon: '7', tip: 'Week view \u2014 seven-day timeline overview' },
-  { id: 'month', label: 'Month', icon: 'M', tip: 'Month view \u2014 date grid, drag tasks between dates' },
+  { id: 'month', label: 'Month', icon: 'M', tip: 'Month view \u2014 calendar with hover details' },
   { id: 'timeline', label: 'Timeline', icon: '\u2194', tip: 'Timeline view \u2014 horizontal left-to-right timeline with cards above and below' },
   { id: 'list', label: 'List', icon: '\u2261', tip: 'List view \u2014 all tasks grouped by date' },
   { id: 'priority', label: 'Priority', icon: 'P', tip: 'Priority view \u2014 P1-P4 kanban columns' },
@@ -30,7 +31,7 @@ const FILTERS = [
 ];
 
 // Which filter controls are relevant per view
-var GRID_VIEWS = { day: 1, '3day': 1, week: 1, timeline: 1, scurve: 1 };
+var GRID_VIEWS = { daily: 1, day: 1, '3day': 1, week: 1, timeline: 1, scurve: 1 };
 var FILTER_VISIBILITY = {
   // Status pills only make sense for task-list views, not time grids
   showStatusFilters: function(v) { return !GRID_VIEWS[v] && v !== 'conflicts'; },
