@@ -372,7 +372,7 @@ async function callback(req, res) {
 
     await db('users').where('id', userId).update(update);
 
-    var frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
+    var frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3001').split(',')[0];
     res.redirect(frontendUrl + '/?gcal=connected');
   } catch (error) {
     console.error('GCal callback error:', error);
@@ -747,8 +747,11 @@ async function sync(req, res) {
           var taskChanged = currentTaskHash !== ledger.last_pushed_hash;
           var eventChanged = currentEventHash !== ledger.last_pulled_hash;
 
+          // Skip overwriting scheduled_at for fixed tasks
+          var isFixed = task.when && task.when.indexOf('fixed') >= 0;
+
           if (taskChanged && eventChanged) {
-            if (ledger.origin === 'juggler' || isHabitSource) {
+            if (ledger.origin === 'juggler' || isHabitSource || isFixed) {
               var eventBody = buildEventBody(task, year, tz);
               await gcalApi.patchEvent(accessToken, ledger.gcal_event_id, eventBody);
               await delay(100);
@@ -764,7 +767,7 @@ async function sync(req, res) {
             await delay(100);
             stats.pushed++;
           } else if (eventChanged) {
-            if (!isHabitSource) {
+            if (!isHabitSource && !isFixed) {
               var updateFields2 = applyEventToTask(event, tz);
               await db('tasks').where('id', task.id).update(updateFields2);
               stats.pulled++;
