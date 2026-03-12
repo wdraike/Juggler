@@ -231,8 +231,14 @@ function taskToRow(task, userId, timezone) {
     var timeVal = task.time !== undefined ? task.time : null;
     if (dateVal) {
       row.scheduled_at = localToUtc(dateVal, timeVal, timezone) || null;
-    } else if (dateVal === null || dateVal === '') {
+    } else if (task.date !== undefined && !dateVal) {
+      // date was explicitly sent as null/empty → clear scheduled_at
       row.scheduled_at = null;
+    }
+    // If only time was sent (no date field), scheduled_at is handled in the
+    // caller which can read the existing row's date and combine with the new time.
+    if (task.date === undefined && task.time !== undefined) {
+      row._pendingTimeOnly = timeVal;
     }
   }
 
@@ -339,6 +345,15 @@ async function updateTask(req, res) {
     delete row.id;
     delete row.user_id;
     delete row.created_at;
+
+    // Time-only update: combine new time with existing date
+    if (row._pendingTimeOnly && existing.scheduled_at) {
+      var existingLocal = utcToLocal(existing.scheduled_at, tz);
+      if (existingLocal && existingLocal.date) {
+        row.scheduled_at = localToUtc(existingLocal.date, row._pendingTimeOnly, tz) || null;
+      }
+    }
+    delete row._pendingTimeOnly;
 
     if (req.body.project) await ensureProject(req.user.id, req.body.project);
 
@@ -569,7 +584,7 @@ async function batchUpdateTasks(req, res) {
           var existingRows = await trx('tasks')
             .where('user_id', req.user.id)
             .whereIn('id', idsToUpdate)
-            .select('id', 'task_type', 'source_id');
+            .select('id', 'task_type', 'source_id', 'scheduled_at');
           var existingById = {};
           existingRows.forEach(function(r) { existingById[r.id] = r; });
 
@@ -585,6 +600,17 @@ async function batchUpdateTasks(req, res) {
             delete row.created_at;
 
             var existing = existingById[id];
+
+            // Time-only update: combine new time with existing date
+            if (row._pendingTimeOnly && existing && existing.scheduled_at) {
+              var existingDt = new Date(existing.scheduled_at);
+              var existingLocal = utcToLocal(existingDt, tz);
+              if (existingLocal) {
+                var existingDate = existingLocal.date; // e.g. "3/12"
+                row.scheduled_at = localToUtc(existingDate, row._pendingTimeOnly, tz) || null;
+              }
+            }
+            delete row._pendingTimeOnly;
             var taskType = existing ? (existing.task_type || 'task') : 'task';
 
             if (taskType === 'habit_instance' && existing && existing.source_id) {
