@@ -988,9 +988,11 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         }
         if (!targetDate) continue;
 
-        // Lower bound: don't place before today or task's earliest date
+        // Lower bound: don't place before today, task's earliest date,
+        // or the dependency's placement date (would violate dep ordering)
         var lowerBound = localToday;
         if (cItem.earliestDate && cItem.earliestDate > lowerBound) lowerBound = cItem.earliestDate;
+        if (nextBeforeDate && nextBeforeDate > lowerBound) lowerBound = nextBeforeDate;
 
         var placed2 = false;
         for (var di = dates.length - 1; di >= 0; di--) {
@@ -998,6 +1000,10 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
           if (d.date > targetDate) continue;
           if (d.date < lowerBound) break;
           if (!canPlaceOnDate(cItem.task, d)) continue;
+          // Check deps (including fixed/pre-placed items not in pool)
+          var depResult1 = depsMetByDate(cItem.task, d);
+          if (!depResult1) continue;
+          var depAfter1 = depAfterFrom(depResult1);
           var wins = getWhenWindows(cItem.task.when, dayWindows[d.key]);
           if (wins.length === 0) continue;
 
@@ -1006,7 +1012,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
             beforeMin2 = nextBeforeMin;
           }
 
-          if (placeLate(cItem, d, beforeMin2)) {
+          if (placeLate(cItem, d, beforeMin2, undefined, depAfter1)) {
             placed2 = true;
             var myStart = null;
             cItem._parts.forEach(function(p) {
