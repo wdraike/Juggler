@@ -252,7 +252,7 @@ function DepNode({ ct, pos, st, icon, isDone, isClosed, dateLabel, isExternal, i
   );
 }
 
-export default function DependencyView({ allTasks, statuses, projectFilter, filter, search, hideHabits, onUpdate, onExpand, darkMode, isMobile }) {
+export default function DependencyView({ allTasks, statuses, projectFilter, filter, search, hideHabits, pastDueIds, fixedIds, onUpdate, onExpand, darkMode, isMobile }) {
   var theme = getTheme(darkMode);
   var bodyRef = useRef(null);
   var graphRef = useRef(null);
@@ -294,6 +294,8 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
       if (filter === 'wip') return s === 'wip';
       if (filter === 'blocked') return s !== 'done' && s !== 'cancel';
       if (filter === 'action') return s !== 'done' && s !== 'cancel' && s !== 'skip';
+      if (filter === 'pastdue') return pastDueIds && pastDueIds.has(t.id);
+      if (filter === 'fixed') return fixedIds && fixedIds.has(t.id);
       if (filter === 'unplaced') return !t.date && s !== 'done' && s !== 'cancel' && s !== 'skip';
       return true;
     }

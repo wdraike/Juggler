@@ -20,6 +20,8 @@ var utcToLocal = dateHelpers.utcToLocal;
 var taskController = require('../controllers/task.controller');
 var rowToTask = taskController.rowToTask;
 var buildSourceMap = taskController.buildSourceMap;
+var expandRecurringShared = require('../../../shared/scheduler/expandRecurring');
+var expandRecurring = expandRecurringShared.expandRecurring;
 
 var DEFAULT_TIMEZONE = 'America/New_York';
 
@@ -47,80 +49,6 @@ function getNowInTimezone(timezone) {
     todayKey: month + '/' + day,
     nowMins: hour * 60 + minute
   };
-}
-
-/**
- * Expand recurring habits into per-day instances so the scheduler always has
- * tasks to work with, even if the frontend hasn't generated them yet.
- */
-function expandRecurring(allTasks, startDate, endDate) {
-  var dayMap = { U: 0, M: 1, T: 2, W: 3, R: 4, F: 5, S: 6 };
-  var existingIds = {};
-  allTasks.forEach(function(t) { existingIds[t.id] = true; });
-  var existingByDateText = {};
-  allTasks.forEach(function(t) {
-    if (t.date && t.text) existingByDateText[t.date + '|' + t.text] = true;
-  });
-
-  var sources = allTasks.filter(function(t) { return t.recur && t.recur.type !== 'none'; });
-  if (sources.length === 0) return [];
-
-  var newTasks = [];
-  var cursor = new Date(startDate); cursor.setHours(0, 0, 0, 0);
-  var end = new Date(endDate); end.setHours(23, 59, 59, 999);
-
-  while (cursor <= end) {
-    var dateStr = formatDateKey(cursor);
-    var dow = cursor.getDay();
-    var dayName = DAY_NAMES[dow];
-
-    sources.forEach(function(src) {
-      var r = src.recur;
-      var srcDate = parseDate(src.date);
-      if (!srcDate) srcDate = new Date(startDate);
-      if (cursor < srcDate) return;
-      if (dateStr === src.date) return;
-
-      var match = false;
-      if (r.type === 'daily') {
-        match = true;
-      } else if (r.type === 'weekly' || r.type === 'biweekly') {
-        var days = r.days || 'MTWRF';
-        var found = false;
-        for (var i = 0; i < days.length; i++) {
-          if (dayMap[days[i]] === dow) { found = true; break; }
-        }
-        if (!found) return;
-        if (r.type === 'biweekly') {
-          var daysDiff = Math.round((cursor.getTime() - srcDate.getTime()) / 86400000);
-          if (Math.floor(daysDiff / 7) % 2 !== 0) return;
-        }
-        match = true;
-      } else if (r.type === 'interval') {
-        var between = Math.round((cursor.getTime() - srcDate.getTime()) / 86400000);
-        if (between > 0 && between % (r.every || 2) === 0) match = true;
-      }
-      if (!match) return;
-
-      var id = 'rc_' + src.id + '_' + dateStr.replace(/\//g, '');
-      if (existingIds[id]) return;
-      if (existingByDateText[dateStr + '|' + src.text]) return;
-      existingIds[id] = true;
-      existingByDateText[dateStr + '|' + src.text] = true;
-      newTasks.push({
-        id: id, date: dateStr, day: dayName, project: src.project, text: src.text,
-        pri: src.pri, habit: src.habit || false, rigid: src.rigid || false,
-        time: src.time, dur: src.dur, where: src.where, when: src.when,
-        location: src.location, tools: src.tools, split: src.split,
-        timeFlex: src.timeFlex,
-        dayReq: src.dayReq || 'any', section: '', notes: '',
-        taskType: 'generated', sourceId: src.id, generated: true
-      });
-    });
-
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return newTasks;
 }
 
 /**
@@ -260,6 +188,8 @@ async function runScheduleAndPersist(userId, _retries) {
 
     // Fixed tasks are user-anchored — never override their time/date.
     if (original.when && original.when.indexOf('fixed') >= 0) continue;
+    // Markers are non-blocking — never move them.
+    if (original.marker) continue;
     // Habits should never have their date moved — they're day-specific.
     // Rigid habits also keep their preferred time.
     if (original.habit && dateChanged) continue;
@@ -300,6 +230,8 @@ async function runScheduleAndPersist(userId, _retries) {
     if (!original) return;
     // Fixed tasks are user-anchored — never clear their time.
     if (original.when && original.when.indexOf('fixed') >= 0) return;
+    // Markers are non-blocking — never clear their time.
+    if (original.marker) return;
     if (original.time) {
       var rawRowClr = rawRowById[t.id];
       var clearUpdate = {
@@ -347,6 +279,8 @@ async function runScheduleAndPersist(userId, _retries) {
 
       // Fixed tasks are user-anchored — never move them, even if past.
       if (t.when && t.when.indexOf('fixed') >= 0) return;
+      // Markers are non-blocking — never move them.
+      if (t.marker) return;
 
       if (t.habit) {
         // Past habit — day was missed, mark as skipped
@@ -381,15 +315,31 @@ async function runScheduleAndPersist(userId, _retries) {
   console.log('[SCHED] runScheduleAndPersist: reset ' + resetCount + ', updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
 
   // 10. Cache the placement result so GET /placements doesn't re-run the scheduler
-  var placementCache = { dayPlacements: {}, unplaced: [], score: result.score, generatedAt: new Date().toISOString() };
+  var placementCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date().toISOString() };
   Object.keys(result.dayPlacements).forEach(function(dk) {
     placementCache.dayPlacements[dk] = result.dayPlacements[dk].map(function(p) {
       var entry = { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };
       if (p.locked) entry.locked = true;
+      if (p.marker) entry.marker = true;
+      if (p._whenRelaxed) entry.whenRelaxed = true;
+      if (p.splitPart) { entry.splitPart = p.splitPart; entry.splitTotal = p.splitTotal; }
       return entry;
     });
   });
+  // Store unplaced IDs + diagnostic info in cache
+  var unplacedMeta = {};
+  result.unplaced.forEach(function(t) {
+    if (t._unplacedDetail || t._suggestions) {
+      var meta = {};
+      if (t._unplacedDetail) meta.detail = t._unplacedDetail;
+      if (t._unplacedReason) meta.reason = t._unplacedReason;
+      if (t._suggestions) meta.suggestions = t._suggestions;
+      if (t._whenBlocked) meta.whenBlocked = true;
+      unplacedMeta[t.id] = meta;
+    }
+  });
   placementCache.unplaced = result.unplaced.map(function(t) { return t.id; });
+  placementCache.unplacedMeta = unplacedMeta;
   var cacheJson = JSON.stringify(placementCache);
   var existingCache = await trx('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
   if (existingCache) {
@@ -401,7 +351,8 @@ async function runScheduleAndPersist(userId, _retries) {
   return {
     updated: updated, cleared: cleared, reset: resetCount, tasks: updatedTasks, score: result.score,
     dayPlacements: result.dayPlacements,
-    unplaced: result.unplaced.filter(function(t) { return !t.generated; })
+    unplaced: result.unplaced.filter(function(t) { return !t.generated; }),
+    warnings: result.warnings || []
   };
 
   }); // end transaction
@@ -511,6 +462,7 @@ async function getSchedulePlacements(userId) {
         dayPlacements: freshResult.dayPlacements,
         unplaced: freshResult.unplaced,
         score: freshResult.score,
+        warnings: freshResult.warnings || [],
         hasPastTasks: false
       };
     } catch (err) {
@@ -532,6 +484,9 @@ async function getSchedulePlacements(userId) {
         if (st === 'done' || st === 'cancel' || st === 'skip') return; // completed since last run
         var hydrated = { task: task, start: p.start, dur: p.dur };
         if (p.locked) hydrated.locked = true;
+        if (p.marker) hydrated.marker = true;
+        if (p.whenRelaxed) hydrated._whenRelaxed = true;
+        if (p.splitPart) { hydrated.splitPart = p.splitPart; hydrated.splitTotal = p.splitTotal; }
         dayPlacements[dk].push(hydrated);
         cachedIds[p.taskId] = true;
       });
@@ -543,6 +498,7 @@ async function getSchedulePlacements(userId) {
     // scheduler would silently drop don't inflate the unplaced count.
     var cachedUnplacedSet = {};
     (cache.unplaced || []).forEach(function(id) { cachedUnplacedSet[id] = true; });
+    var cachedMeta = cache.unplacedMeta || {};
     var unplaced = [];
     allTasks.forEach(function(t) {
       if (t.generated) return;
@@ -551,9 +507,20 @@ async function getSchedulePlacements(userId) {
       if (st === 'done' || st === 'cancel' || st === 'skip') return;
       // Already placed in a day slot — not unplaced
       if (cachedIds[t.id]) return;
-      // Known unplaced from cache — include it
-      if (cachedUnplacedSet[t.id]) { unplaced.push(t); return; }
+      // Known unplaced from cache — include it with cached diagnostics
+      if (cachedUnplacedSet[t.id]) {
+        var meta = cachedMeta[t.id];
+        if (meta) {
+          if (meta.detail) t._unplacedDetail = meta.detail;
+          if (meta.reason) t._unplacedReason = meta.reason;
+          if (meta.suggestions) t._suggestions = meta.suggestions;
+          if (meta.whenBlocked) t._whenBlocked = true;
+        }
+        unplaced.push(t);
+        return;
+      }
       // New task not in cache at all — apply scheduler exclusion rules
+      if (t.marker) return;
       if (t.when && t.when.indexOf('allday') >= 0) return;
       if (t.section && (t.section.indexOf('PARKING') >= 0 || t.section.indexOf('TO BE SCHEDULED') >= 0)) return;
       if (!t.date || t.date === 'TBD') return;
@@ -571,6 +538,7 @@ async function getSchedulePlacements(userId) {
       dayPlacements: dayPlacements,
       unplaced: unplaced,
       score: cache.score || {},
+      warnings: cache.warnings || [],
       hasPastTasks: hasPastTasks
     };
   }
@@ -581,13 +549,30 @@ async function getSchedulePlacements(userId) {
   var result = unifiedSchedule(allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg);
 
   // Save cache
-  var newCache = { dayPlacements: {}, unplaced: [], score: result.score, generatedAt: new Date().toISOString() };
+  var newCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date().toISOString() };
   Object.keys(result.dayPlacements).forEach(function(dk) {
     newCache.dayPlacements[dk] = result.dayPlacements[dk].map(function(p) {
-      return { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };
+      var entry = { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };
+      if (p.locked) entry.locked = true;
+      if (p.marker) entry.marker = true;
+      if (p._whenRelaxed) entry.whenRelaxed = true;
+      if (p.splitPart) { entry.splitPart = p.splitPart; entry.splitTotal = p.splitTotal; }
+      return entry;
     });
   });
   newCache.unplaced = result.unplaced.map(function(t) { return t.id; });
+  var unplacedMeta2 = {};
+  result.unplaced.forEach(function(t) {
+    if (t._unplacedDetail || t._suggestions) {
+      var meta = {};
+      if (t._unplacedDetail) meta.detail = t._unplacedDetail;
+      if (t._unplacedReason) meta.reason = t._unplacedReason;
+      if (t._suggestions) meta.suggestions = t._suggestions;
+      if (t._whenBlocked) meta.whenBlocked = true;
+      unplacedMeta2[t.id] = meta;
+    }
+  });
+  newCache.unplacedMeta = unplacedMeta2;
   var cacheJson = JSON.stringify(newCache);
   var existingRow = await db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
   if (existingRow) {
@@ -600,6 +585,7 @@ async function getSchedulePlacements(userId) {
     dayPlacements: result.dayPlacements,
     unplaced: result.unplaced.filter(function(t) { return !t.generated; }),
     score: result.score,
+    warnings: result.warnings || [],
     hasPastTasks: hasPastTasks
   };
 }

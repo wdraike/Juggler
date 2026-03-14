@@ -85,11 +85,15 @@ function rowToTask(row, timezone, sourceMap) {
     // Create a merged row so downstream logic sees complete data
     var merged = {};
     Object.keys(row).forEach(function(k) { merged[k] = row[k]; });
+    // Boolean DB columns where 0 means "inherit from source" (not "explicitly false")
+    var BOOL_TEMPLATE_FIELDS = { split: true, rigid: true, habit: true, time_flex: true };
     TEMPLATE_FIELDS.forEach(function(f) {
       var v = merged[f];
       // Treat null, empty string, and empty arrays/objects as "inherit from source"
       var isEmpty = v == null || v === '' || v === '[]' || v === '{}';
       if (!isEmpty && Array.isArray(v) && v.length === 0) isEmpty = true;
+      // For boolean columns, 0/false also means "inherit from source"
+      if (!isEmpty && BOOL_TEMPLATE_FIELDS[f] && (v === 0 || v === false)) isEmpty = true;
       if (isEmpty) merged[f] = src[f];
     });
     row = merged;
@@ -174,7 +178,9 @@ function rowToTask(row, timezone, sourceMap) {
     gcalEventId: row.gcal_event_id,
     msftEventId: row.msft_event_id,
     dependsOn: typeof row.depends_on === 'string' ? JSON.parse(row.depends_on || '[]') : (row.depends_on || []),
-    datePinned: !!row.date_pinned
+    datePinned: !!row.date_pinned,
+    marker: !!row.marker,
+    flexWhen: !!row.flex_when
   };
 }
 
@@ -222,6 +228,8 @@ function taskToRow(task, userId, timezone) {
   if (task.msftEventId !== undefined) row.msft_event_id = task.msftEventId;
   if (task.dependsOn !== undefined) row.depends_on = JSON.stringify(task.dependsOn || []);
   if (task.datePinned !== undefined) row.date_pinned = task.datePinned ? 1 : 0;
+  if (task.marker !== undefined) row.marker = task.marker ? 1 : 0;
+  if (task.flexWhen !== undefined) row.flex_when = task.flexWhen ? 1 : 0;
 
   // scheduledAt (UTC ISO) takes precedence over date+time (local strings)
   if (task.scheduledAt !== undefined) {

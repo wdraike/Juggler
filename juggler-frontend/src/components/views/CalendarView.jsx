@@ -128,6 +128,9 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
   var t = item.task;
   var priColor = PRI_COLORS[t.pri] || PRI_COLORS.P3;
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
+  var isMarker = !!t.marker;
+  var isWhenRelaxed = !!item._whenRelaxed;
+  var borderColor = isWhenRelaxed ? '#F59E0B' : (isMarker ? '#8B5CF6' : priColor);
   var [show, setShow] = useState(false);
   var entryRef = useRef(null);
   var [anchorRect, setAnchorRect] = useState(null);
@@ -154,18 +157,22 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
           fontSize: isMobile ? 9 : 10,
           padding: isMobile ? '1px 3px' : '2px 4px',
           borderRadius: 3,
-          borderLeft: '3px solid ' + priColor,
-          background: show ? priColor + '22' : priColor + '10',
+          borderLeft: '3px solid ' + borderColor,
+          border: '1px ' + (isMarker ? 'dotted' : 'solid') + ' ' + borderColor + (isMarker ? '40' : '00'),
+          borderLeftWidth: 3, borderLeftColor: borderColor,
+          background: show ? borderColor + '22' : borderColor + '10',
           color: isDone ? theme.textMuted : theme.text,
           textDecoration: isDone ? 'line-through' : 'none',
           whiteSpace: 'normal', overflow: 'hidden', wordBreak: 'break-word',
           cursor: 'pointer', lineHeight: 1.4,
           outline: show ? '2px solid ' + theme.accent : 'none',
           outlineOffset: -1,
-          transition: 'background 0.1s'
+          transition: 'background 0.1s',
+          opacity: isMarker ? 0.65 : 1
         }}
       >
-        {t.text}
+        {isWhenRelaxed && <span style={{ fontSize: 8, color: '#F59E0B', fontWeight: 700 }}>{'~'} </span>}
+        {isMarker && !isWhenRelaxed && <span style={{ fontSize: 8, opacity: 0.7 }}>{'\u25C7'} </span>}{t.text}
       </div>
       {show && <FixedPopup anchorRect={anchorRect} item={item} status={status} theme={theme} darkMode={darkMode} />}
     </div>
@@ -213,7 +220,9 @@ export default function CalendarView({
       (dayPlacements[key] || []).forEach(function (p) { plMap[p.task.id] = p; });
       result[key] = tasks.map(function (t) {
         var pl = plMap[t.id];
-        return { task: t, start: pl ? pl.start : null, end: pl ? pl.end : null };
+        var item = { task: t, start: pl ? pl.start : null, end: pl ? pl.end : null };
+        if (pl && pl._whenRelaxed) item._whenRelaxed = true;
+        return item;
       }).sort(function (a, b) {
         if (a.start != null && b.start != null) return a.start - b.start;
         if (a.start != null) return -1;
@@ -246,9 +255,9 @@ export default function CalendarView({
           style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: theme.text, fontSize: 18, padding: '4px 8px', fontFamily: 'inherit' }}
           title="Next month">&rsaquo;</button>
         {monthOffset !== 0 && (
-          <button onClick={function () { setMonthOffset(0); }}
+          <button onClick={function () { setMonthOffset(0); setDayOffset(0); }}
             style={{ border: '1px solid ' + theme.border, borderRadius: 6, background: 'transparent', cursor: 'pointer', color: theme.textMuted, fontSize: 11, padding: '2px 8px', fontFamily: 'inherit' }}
-            title="Back to current month">Today</button>
+            title="Back to today">Today</button>
         )}
       </div>
 

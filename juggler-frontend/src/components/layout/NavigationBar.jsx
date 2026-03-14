@@ -26,6 +26,8 @@ const FILTERS = [
   { id: 'all', label: 'All', tip: 'All tasks regardless of status' },
   { id: 'done', label: 'Done', tip: 'Completed tasks only' },
   { id: 'wip', label: 'WIP', tip: 'Tasks currently in progress' },
+  { id: 'pastdue', label: 'Past Due', tip: 'Tasks past their due date or scheduled date' },
+  { id: 'fixed', label: 'Fixed', tip: 'Tasks pinned to a specific date/time (not moved by scheduler)' },
   { id: 'blocked', label: 'Blocked', tip: 'Tasks waiting on incomplete dependencies' },
   { id: 'unplaced', label: 'Unplaced', tip: 'Tasks the scheduler couldn\u2019t place into any time slot' },
 ];
@@ -145,7 +147,7 @@ function ProjectCombobox({ value, onChange, allProjectNames, theme, isMobile }) 
   );
 }
 
-export default function NavigationBar({ viewMode, setViewMode, filter, setFilter, search, setSearch, darkMode, projectFilter, setProjectFilter, allProjectNames, hideHabits, setHideHabits, unplacedCount, blockedCount, isMobile }) {
+export default function NavigationBar({ viewMode, setViewMode, filter, setFilter, search, setSearch, darkMode, projectFilter, setProjectFilter, allProjectNames, hideHabits, setHideHabits, unplacedCount, blockedCount, pastDueCount, fixedCount, issuesCount, isMobile }) {
   var theme = getTheme(darkMode);
   var [showFilterDropdown, setShowFilterDropdown] = useState(false);
   var filterRef = useRef(null);
@@ -188,6 +190,13 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
             title={v.tip}
           >
             {isMobile ? v.icon : v.label}
+            {v.id === 'conflicts' && issuesCount > 0 && (
+              <span style={{
+                marginLeft: 2, background: '#EF4444', color: '#FFF', borderRadius: 8,
+                padding: '0 4px', fontSize: 9, fontWeight: 700, verticalAlign: 'top',
+                lineHeight: '14px', minWidth: 14, textAlign: 'center', display: 'inline-block'
+              }}>{issuesCount}</span>
+            )}
           </button>
         ))}
       </div>
@@ -201,7 +210,9 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
             <div style={{ display: 'flex', gap: 2 }}>
               {FILTERS.map(f => {
                 var badge = f.id === 'unplaced' && unplacedCount > 0 ? unplacedCount
-                  : f.id === 'blocked' && blockedCount > 0 ? blockedCount : null;
+                  : f.id === 'blocked' && blockedCount > 0 ? blockedCount
+                  : f.id === 'pastdue' && pastDueCount > 0 ? pastDueCount
+                  : f.id === 'fixed' && fixedCount > 0 ? fixedCount : null;
                 return (
                   <button key={f.id} onClick={() => setFilter(f.id)}
                     title={f.tip}
@@ -324,7 +335,9 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
               {/* Filter options */}
               {showStatus && FILTERS.map(function(f) {
                 var badge = f.id === 'unplaced' && unplacedCount > 0 ? unplacedCount
-                  : f.id === 'blocked' && blockedCount > 0 ? blockedCount : null;
+                  : f.id === 'blocked' && blockedCount > 0 ? blockedCount
+                  : f.id === 'pastdue' && pastDueCount > 0 ? pastDueCount
+                  : f.id === 'fixed' && fixedCount > 0 ? fixedCount : null;
                 var isActive = filter === f.id;
                 return (
                   <button key={f.id} onClick={function() { setFilter(f.id); setShowFilterDropdown(false); }}

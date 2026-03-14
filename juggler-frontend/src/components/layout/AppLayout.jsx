@@ -247,6 +247,7 @@ export default function AppLayout() {
   // Placements come from the backend scheduler API
   var dayPlacements = placements.dayPlacements;
   var unplaced = placements.unplaced;
+  var schedulerWarnings = placements.warnings || [];
 
   // Filtered placements for grid views (hideHabits, projectFilter, search)
   var filteredDayPlacements = useMemo(function() {
@@ -273,43 +274,66 @@ export default function AppLayout() {
 
   // Blocked tasks: tasks whose dependencies are not all done AND whose
   // date is today or in the past (future tasks with pending deps are expected)
+  // Blocked tasks: open tasks with at least one overdue undone dependency
   var blockedTaskIds = useMemo(() => {
     var ids = new Set();
-    var todayKey = formatDateKey(new Date());
-    var todayD = parseDate(todayKey);
+    var today = new Date(); today.setHours(0, 0, 0, 0);
     var taskMap = {};
     allTasks.forEach(function(t) { taskMap[t.id] = t; });
     allTasks.forEach(t => {
-      if (t.dependsOn && t.dependsOn.length > 0) {
-        var allDepsDone = t.dependsOn.every(depId => {
-          var s = statuses[depId] || '';
-          return s === 'done';
-        });
-        if (!allDepsDone && (statuses[t.id] || '') === '') {
-          var td = parseDate(t.date);
-          if (td && todayD && td <= todayD) {
-            // Only blocked if at least one undone dep is due today or past
-            // (if all undone deps are future-dated, the task is just waiting)
-            var hasOverdueDep = t.dependsOn.some(function(depId) {
-              var s = statuses[depId] || '';
-              if (s === 'done') return false;
-              var dep = taskMap[depId];
-              if (!dep) return true; // missing dep counts as overdue
-              var depDate = parseDate(dep.date);
-              return depDate && depDate <= todayD;
-            });
-            if (hasOverdueDep) {
-              ids.add(t.id);
-            }
-          }
-        }
+      if (!t.dependsOn || t.dependsOn.length === 0) return;
+      var st = statuses[t.id] || '';
+      if (st === 'done' || st === 'cancel' || st === 'skip') return;
+      var hasOverdueDep = t.dependsOn.some(function(depId) {
+        if ((statuses[depId] || '') === 'done') return false;
+        var dep = taskMap[depId];
+        if (!dep) return true; // missing dep counts as overdue
+        // Overdue if dep's date or due date is in the past
+        var depDate = dep.date && dep.date !== 'TBD' ? parseDate(dep.date) : null;
+        var depDue = dep.due ? parseDate(dep.due) : null;
+        return (depDate && depDate < today) || (depDue && depDue < today);
+      });
+      if (hasOverdueDep) ids.add(t.id);
+    });
+    return ids;
+  }, [allTasks, statuses]);
+
+  // Past-due tasks: due date or scheduled date in the past, still open
+  var pastDueIds = useMemo(() => {
+    var ids = new Set();
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    allTasks.forEach(t => {
+      var st = statuses[t.id] || '';
+      if (st === 'done' || st === 'cancel' || st === 'skip') return;
+      if (t.due) {
+        var dd = parseDate(t.due);
+        if (dd && dd < today) { ids.add(t.id); return; }
       }
+      if (t.date && t.date !== 'TBD') {
+        var td = parseDate(t.date);
+        if (td && td < today) ids.add(t.id);
+      }
+    });
+    return ids;
+  }, [allTasks, statuses]);
+
+  // Fixed tasks: when contains 'fixed'
+  var fixedIds = useMemo(() => {
+    var ids = new Set();
+    allTasks.forEach(t => {
+      var st = statuses[t.id] || '';
+      if (st === 'done' || st === 'cancel' || st === 'skip') return;
+      if (t.when && t.when.indexOf('fixed') >= 0) ids.add(t.id);
     });
     return ids;
   }, [allTasks, statuses]);
 
   var unplacedCount = unplaced.length;
   var blockedCount = blockedTaskIds.size;
+  var pastDueCount = pastDueIds.size;
+  var fixedCount = fixedIds.size;
+  var warningCount = schedulerWarnings.length;
+  var issuesCount = unplacedCount + pastDueCount + warningCount;
 
   // Unplaced task IDs set for fast lookup
   var unplacedIds = useMemo(() => {
@@ -660,7 +684,8 @@ export default function AppLayout() {
           projectFilter={projectFilter} setProjectFilter={setProjectFilter}
           allProjectNames={allProjectNames}
           hideHabits={hideHabits} setHideHabits={setHideHabits}
-          unplacedCount={unplacedCount} blockedCount={blockedCount}
+          unplacedCount={unplacedCount} blockedCount={blockedCount} pastDueCount={pastDueCount} fixedCount={fixedCount}
+          issuesCount={issuesCount}
           isMobile={isMobile}
         />
       </div>
@@ -757,13 +782,19 @@ export default function AppLayout() {
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
               placements={filteredDayPlacements[selectedDateKey] || []}
               statuses={statuses}
+              onStatusChange={handleStatusChange}
               onExpand={handleExpand}
               darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
               allTasks={allTasks}
               filter={filter}
               blockedTaskIds={blockedTaskIds}
               unplacedIds={unplacedIds}
+              pastDueIds={pastDueIds} fixedIds={fixedIds}
               isMobile={isMobile}
+              onUpdate={handleUpdateTask}
+              showToast={showToast}
+              locations={config.locations}
+              onHourLocationOverride={handleHourLocationOverride}
             />
           )}
           {viewMode === 'list' && (
@@ -772,7 +803,7 @@ export default function AppLayout() {
               filter={filter} search={search} projectFilter={projectFilter}
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               onCreate={handleCreate} darkMode={darkMode} schedCfg={schedCfg}
-              hideHabits={hideHabits} blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds}
+              hideHabits={hideHabits} blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
               isMobile={isMobile}
             />
           )}
@@ -782,7 +813,7 @@ export default function AppLayout() {
               filter={filter} search={search} projectFilter={projectFilter}
               onStatusChange={handleStatusChange} onExpand={handleExpand} darkMode={darkMode}
               onPriorityDrop={handlePriorityDrop}
-              hideHabits={hideHabits} blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds}
+              hideHabits={hideHabits} blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
               isMobile={isMobile}
             />
           )}
@@ -791,6 +822,7 @@ export default function AppLayout() {
               allTasks={allTasks} statuses={statuses}
               projectFilter={projectFilter} filter={filter}
               search={search} hideHabits={hideHabits}
+              pastDueIds={pastDueIds} fixedIds={fixedIds}
               onUpdate={handleUpdateTask} onExpand={handleExpand}
               darkMode={darkMode} isMobile={isMobile}
             />
@@ -798,9 +830,9 @@ export default function AppLayout() {
           {viewMode === 'conflicts' && (
             <ConflictsView
               allTasks={allTasks} statuses={statuses} directions={directions}
-              unplaced={unplaced}
-              onStatusChange={handleStatusChange} onExpand={handleExpand} darkMode={darkMode}
-              isMobile={isMobile}
+              unplaced={unplaced} schedulerWarnings={schedulerWarnings}
+              onStatusChange={handleStatusChange} onExpand={handleExpand} onUpdateTask={handleUpdateTask}
+              darkMode={darkMode} isMobile={isMobile}
             />
           )}
         </div>
@@ -819,6 +851,8 @@ export default function AppLayout() {
                 locations={config.locations}
                 tools={config.tools}
                 uniqueTags={uniqueTags}
+                scheduleTemplates={config.scheduleTemplates}
+                templateDefaults={config.templateDefaults}
                 darkMode={darkMode}
                 isMobile={isMobile}
               />
@@ -841,6 +875,8 @@ export default function AppLayout() {
                     locations={config.locations}
                     tools={config.tools}
                     uniqueTags={uniqueTags}
+                    scheduleTemplates={config.scheduleTemplates}
+                    templateDefaults={config.templateDefaults}
                     darkMode={darkMode}
                     isMobile={isMobile}
                   />
@@ -863,6 +899,8 @@ export default function AppLayout() {
           locations={config.locations}
           tools={config.tools}
           uniqueTags={uniqueTags}
+          scheduleTemplates={config.scheduleTemplates}
+          templateDefaults={config.templateDefaults}
           darkMode={darkMode}
           isMobile={isMobile}
         />
@@ -885,6 +923,8 @@ export default function AppLayout() {
             locations={config.locations}
             tools={config.tools}
             uniqueTags={uniqueTags}
+            scheduleTemplates={config.scheduleTemplates}
+            templateDefaults={config.templateDefaults}
             darkMode={darkMode}
             isMobile={isMobile}
           />

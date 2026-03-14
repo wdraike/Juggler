@@ -10,7 +10,7 @@ import { DAY_NAMES, MONTH_NAMES } from '../../state/constants';
 import { parseDate, formatDateKey } from '../../scheduler/dateHelpers';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
-export default function ListView({ allTasks, statuses, directions, filter, search, projectFilter, onStatusChange, onExpand, onCreate, darkMode, schedCfg, hideHabits, blockedTaskIds, unplacedIds, isMobile }) {
+export default function ListView({ allTasks, statuses, directions, filter, search, projectFilter, onStatusChange, onExpand, onCreate, darkMode, schedCfg, hideHabits, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile }) {
   var theme = getTheme(darkMode);
   var todayKey = formatDateKey(new Date());
 
@@ -22,6 +22,8 @@ export default function ListView({ allTasks, statuses, directions, filter, searc
       if (filter === 'action') return st === '' || st === 'wip';
       if (filter === 'done') return st === 'done';
       if (filter === 'wip') return st === 'wip';
+      if (filter === 'pastdue') return pastDueIds && pastDueIds.has(t.id);
+      if (filter === 'fixed') return fixedIds && fixedIds.has(t.id);
       if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(t.id);
       if (filter === 'unplaced') return unplacedIds && unplacedIds.has(t.id);
       return true;
@@ -31,7 +33,7 @@ export default function ListView({ allTasks, statuses, directions, filter, searc
       var s = search.toLowerCase();
       return (t.text || '').toLowerCase().includes(s) || (t.project || '').toLowerCase().includes(s);
     });
-  }, [allTasks, statuses, filter, search, projectFilter, hideHabits, blockedTaskIds, unplacedIds]);
+  }, [allTasks, statuses, filter, search, projectFilter, hideHabits, blockedTaskIds, unplacedIds, pastDueIds, fixedIds]);
 
   var grouped = useMemo(() => {
     var map = {};
@@ -74,11 +76,12 @@ export default function ListView({ allTasks, statuses, directions, filter, searc
                   task={t}
                   status={statuses[t.id] || ''}
                   direction={directions[t.id]}
-                  onStatusChange={val => onStatusChange(t.id, val)}
+                  onStatusChange={onStatusChange}
                   onExpand={onExpand}
                   darkMode={darkMode}
                   isBlocked={blockedTaskIds && blockedTaskIds.has(t.id)}
                   isMobile={isMobile}
+                  allTasks={allTasks} statuses={statuses}
                 />
               ))}
             </div>

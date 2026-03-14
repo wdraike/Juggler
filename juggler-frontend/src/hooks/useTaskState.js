@@ -39,7 +39,7 @@ export default function useTaskState() {
     if (placementTimerRef.current) clearTimeout(placementTimerRef.current);
     try {
       const res = await apiClient.get('/schedule/placements');
-      setPlacements({ dayPlacements: res.data.dayPlacements || {}, unplaced: res.data.unplaced || [] });
+      setPlacements({ dayPlacements: res.data.dayPlacements || {}, unplaced: res.data.unplaced || [], warnings: res.data.warnings || [] });
     } catch (error) {
       console.error('Failed to load placements:', error);
     }
@@ -183,16 +183,27 @@ export default function useTaskState() {
     dispatch({ type: 'UPDATE_TASK', id, fields });
     // Cancel any pending debounced save
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
-    // Immediately save to API + reload placements (no debounce)
+    // Immediately save to API, then refresh placements in background (non-blocking)
     setSaving(true);
     try {
-      var partial = Object.assign({ id: id }, fields);
+      // Resolve generated/instance tasks to their source template for API persistence
+      var effectiveId = id;
+      var task = taskStateRef.current.tasks.find(function(t) { return t.id === id; });
+      if (task && task.sourceId) effectiveId = task.sourceId;
+      var partial = Object.assign({ id: effectiveId }, fields);
       await apiClient.put('/tasks/batch', { updates: [partial] });
       dispatch({ type: 'CLEAR_DIRTY_TASKS', ids: [id], savedFields: { [id]: fields } });
-      await loadPlacements();
+      // If a scheduling-relevant field changed, wait for the backend's
+      // auto-reschedule (500ms debounce + run time) before refreshing placements
+      var schedFields = ['split', 'flexWhen', 'dur', 'when', 'dayReq', 'date', 'due', 'pri', 'dependsOn', 'location', 'time', 'timeFlex'];
+      var needsResched = schedFields.some(function(f) { return f in fields; });
+      if (needsResched) {
+        setTimeout(function() { loadPlacements().finally(function() { setSaving(false); }); }, 3500);
+      } else {
+        loadPlacements().finally(function() { setSaving(false); });
+      }
     } catch (error) {
       console.error('Save failed:', error);
-    } finally {
       setSaving(false);
     }
   }, [loadPlacements]);

@@ -9,7 +9,7 @@ import { PRI_COLORS } from '../../state/constants';
 
 var PRI_LEVELS = ['P1', 'P2', 'P3', 'P4'];
 
-export default function PriorityView({ allTasks, statuses, directions, filter, search, projectFilter, onStatusChange, onExpand, darkMode, onPriorityDrop, hideHabits, blockedTaskIds, unplacedIds, isMobile }) {
+export default function PriorityView({ allTasks, statuses, directions, filter, search, projectFilter, onStatusChange, onExpand, darkMode, onPriorityDrop, hideHabits, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile }) {
   var theme = getTheme(darkMode);
   var [dragOver, setDragOver] = useState(null);
 
@@ -32,6 +32,8 @@ export default function PriorityView({ allTasks, statuses, directions, filter, s
       if (filter === 'action') return st === '' || st === 'wip';
       if (filter === 'done') return st === 'done';
       if (filter === 'wip') return st === 'wip';
+      if (filter === 'pastdue') return pastDueIds && pastDueIds.has(t.id);
+      if (filter === 'fixed') return fixedIds && fixedIds.has(t.id);
       if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(t.id);
       if (filter === 'unplaced') return unplacedIds && unplacedIds.has(t.id);
       return true;
@@ -41,7 +43,7 @@ export default function PriorityView({ allTasks, statuses, directions, filter, s
       var s = search.toLowerCase();
       return (t.text || '').toLowerCase().includes(s) || (t.project || '').toLowerCase().includes(s);
     });
-  }, [allTasks, statuses, filter, search, projectFilter, hideHabits, blockedTaskIds, unplacedIds]);
+  }, [allTasks, statuses, filter, search, projectFilter, hideHabits, blockedTaskIds, unplacedIds, pastDueIds, fixedIds]);
 
   return (
     <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', flex: 1, overflow: 'auto', gap: 8, padding: isMobile ? 8 : 12 }}>
@@ -74,13 +76,14 @@ export default function PriorityView({ allTasks, statuses, directions, filter, s
                   task={t}
                   status={statuses[t.id] || ''}
                   direction={directions[t.id]}
-                  onStatusChange={val => onStatusChange(t.id, val)}
+                  onStatusChange={onStatusChange}
                   onExpand={onExpand}
                   darkMode={darkMode}
                   showDate
                   draggable
                   isBlocked={blockedTaskIds && blockedTaskIds.has(t.id)}
                   isMobile={isMobile}
+                  allTasks={allTasks} statuses={statuses}
                 />
               ))}
               {tasks.length === 0 && (

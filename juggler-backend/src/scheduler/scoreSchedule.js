@@ -103,23 +103,46 @@ function scoreSchedule(dayPlacements, unplaced, allTasks) {
   }
 
   // 3. Priority Drift Penalty
+  // Build transitive ancestor map: ancestors[tid] = Set of all transitive dep IDs
+  var ancestors = {};
+  function getAncestors(tid) {
+    if (ancestors[tid]) return ancestors[tid];
+    var result = {};
+    ancestors[tid] = result; // set early to handle cycles
+    var task = taskById[tid];
+    if (!task) return result;
+    var deps = getTaskDeps(task);
+    for (var di2 = 0; di2 < deps.length; di2++) {
+      result[deps[di2]] = true;
+      var grandparents = getAncestors(deps[di2]);
+      for (var gp in grandparents) result[gp] = true;
+    }
+    return result;
+  }
+  allTasks.forEach(function(t) { getAncestors(t.id); });
+
   var priorityDriftPenalty = 0;
   dateKeys.forEach(function(dateKey) {
     var placements = dayPlacements[dateKey];
     if (!placements || placements.length < 2) return;
-    // Compare each pair
+    // Compare each pair — skip locked/marker items since their placement
+    // is fixed and can't be optimized (e.g. GCal events, rigid habits)
     for (var i = 0; i < placements.length; i++) {
       for (var j = i + 1; j < placements.length; j++) {
         var a = placements[i], b = placements[j];
         if (!a.task || !b.task) continue;
+        if (a.locked || a.marker || b.locked || b.marker) continue;
         var priA = priMultiplier(a.task.pri);
         var priB = priMultiplier(b.task.pri);
         // If lower-pri task is in an earlier (better) slot than higher-pri task
         if (priA < priB && a.start < b.start) {
+          // Exempt if the earlier task is an ancestor of the later task (dep-forced ordering)
+          if (ancestors[b.task.id] && ancestors[b.task.id][a.task.id]) continue;
           var diff = priB - priA;
           var p = diff * slotQuality(a.start);
           priorityDriftPenalty += p;
         } else if (priB < priA && b.start < a.start) {
+          if (ancestors[a.task.id] && ancestors[a.task.id][b.task.id]) continue;
           var diff2 = priA - priB;
           var p2 = diff2 * slotQuality(b.start);
           priorityDriftPenalty += p2;
@@ -196,6 +219,27 @@ function scoreSchedule(dayPlacements, unplaced, allTasks) {
       if (slack < 0) {
         dependencySlackPenalty += 100;
         details.push({ type: 'depViolation', taskId: tid4, dependant: dependants[di], slack: slack, penalty: 100 });
+      } else if (slack === 0) {
+        // Same-day: check minute-level ordering
+        // Find latest end minute of the dependency on this day
+        var depLatestEnd = 0;
+        for (var i5 = 0; i5 < taskParts.length; i5++) {
+          if (taskParts[i5].dateKey === lastDateKey) {
+            var end5 = taskParts[i5].start + taskParts[i5].dur;
+            if (end5 > depLatestEnd) depLatestEnd = end5;
+          }
+        }
+        // Find earliest start minute of the dependant on this day
+        var depantEarliestStart = Infinity;
+        for (var i6 = 0; i6 < depParts.length; i6++) {
+          if (depParts[i6].dateKey === earliestDepKey) {
+            if (depParts[i6].start < depantEarliestStart) depantEarliestStart = depParts[i6].start;
+          }
+        }
+        if (depLatestEnd > depantEarliestStart) {
+          dependencySlackPenalty += 100;
+          details.push({ type: 'depViolation', taskId: tid4, dependant: dependants[di], slack: 0, penalty: 100, note: 'same-day minute ordering' });
+        }
       } else if (slack > 7) {
         var p4 = (slack - 7) * 0.5;
         dependencySlackPenalty += p4;
@@ -206,18 +250,18 @@ function scoreSchedule(dayPlacements, unplaced, allTasks) {
 
   // 7. Cross-Day Priority Inversion Penalty
   // Penalize when a lower-priority task is on an earlier day than a higher-priority task.
-  // Excludes habits and locked tasks.
+  // Excludes habits, locked tasks, and dep-constrained orderings.
   var crossDayPriPenalty = 0;
   var sortedDateKeys = dateKeys.slice().sort(function(a, b) {
     return dateDiffDays(a, b);
   });
-  // Walk backward through dates, tracking the max priority rank seen on later days
+  // Track high-pri task IDs seen on later days (for dep exemption checks)
   var maxPriSeenLater = 0;
+  var laterHighPriTaskIds = []; // [{id, pri}] — tasks on later days
   for (var sdi = sortedDateKeys.length - 1; sdi >= 0; sdi--) {
     var sdKey = sortedDateKeys[sdi];
     var sdPlacements = dayPlacements[sdKey];
     if (!sdPlacements) continue;
-    // First pass: update maxPriSeenLater from tasks on this day
     var dayMaxPri = 0;
     for (var spi = 0; spi < sdPlacements.length; spi++) {
       var sp = sdPlacements[spi];
@@ -226,7 +270,6 @@ function scoreSchedule(dayPlacements, unplaced, allTasks) {
       var spPri = priMultiplier(sp.task.pri);
       if (spPri > dayMaxPri) dayMaxPri = spPri;
     }
-    // If tasks on this day have lower priority than tasks on later days, penalize
     if (maxPriSeenLater > 0) {
       for (var spi2 = 0; spi2 < sdPlacements.length; spi2++) {
         var sp2 = sdPlacements[spi2];
@@ -234,11 +277,26 @@ function scoreSchedule(dayPlacements, unplaced, allTasks) {
         if (sp2.task.habit) continue;
         var sp2Pri = priMultiplier(sp2.task.pri);
         if (sp2Pri < maxPriSeenLater) {
-          var priDiff = maxPriSeenLater - sp2Pri;
-          crossDayPriPenalty += priDiff;
-          details.push({ type: 'crossDayPri', taskId: sp2.task.id, text: sp2.task.text, date: sdKey, priDiff: priDiff, penalty: priDiff });
+          // Check if this low-pri task is a dep ancestor of any high-pri task on a later day
+          var depExempt = false;
+          for (var lti = 0; lti < laterHighPriTaskIds.length && !depExempt; lti++) {
+            if (laterHighPriTaskIds[lti].pri > sp2Pri && ancestors[laterHighPriTaskIds[lti].id] && ancestors[laterHighPriTaskIds[lti].id][sp2.task.id]) {
+              depExempt = true;
+            }
+          }
+          if (!depExempt) {
+            var priDiff = maxPriSeenLater - sp2Pri;
+            crossDayPriPenalty += priDiff;
+            details.push({ type: 'crossDayPri', taskId: sp2.task.id, text: sp2.task.text, date: sdKey, priDiff: priDiff, penalty: priDiff });
+          }
         }
       }
+    }
+    // Add this day's tasks to the later-tasks list and update max
+    for (var spi3 = 0; spi3 < sdPlacements.length; spi3++) {
+      var sp3 = sdPlacements[spi3];
+      if (!sp3.task || sp3.locked || sp3.task.habit) continue;
+      laterHighPriTaskIds.push({ id: sp3.task.id, pri: priMultiplier(sp3.task.pri) });
     }
     if (dayMaxPri > maxPriSeenLater) maxPriSeenLater = dayMaxPri;
   }

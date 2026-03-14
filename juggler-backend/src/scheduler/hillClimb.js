@@ -62,6 +62,17 @@ function fitsWhenWindows(task, dateKey, startMin, dur, dayWindows) {
   return false;
 }
 
+function fitsDayReq(task, dateKey) {
+  if (!task.dayReq || task.dayReq === 'any') return true;
+  var d = parseDate(dateKey);
+  if (!d) return true;
+  var dow = d.getDay();
+  var isWeekday = dow >= 1 && dow <= 5;
+  if (task.dayReq === 'weekday' && !isWeekday) return false;
+  if (task.dayReq === 'weekend' && isWeekday) return false;
+  return true;
+}
+
 function fitsLocation(task, dateKey, startMin, dur, dayBlocks, cfg) {
   for (var m = startMin; m < startMin + dur; m += 15) {
     var locId = resolveLocationId(dateKey, m, cfg, dayBlocks[dateKey]);
@@ -405,6 +416,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
 
       if (!dayOcc[targetDateKey]) continue;
       if (!dayWindows[targetDateKey]) continue;
+      if (!fitsDayReq(pl.task, targetDateKey)) continue;
 
       var oldDk = pl._dateKey;
       var oldSt = pl.start;
@@ -488,28 +500,49 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       var plsA = dayPlacements[dkA], plsB = dayPlacements[dkB];
       if (!plsA || !plsB || plsA.length === 0 || plsB.length === 0) continue;
 
-      // Find a lower-pri movable task on earlier day A
+      // Find a lower-pri movable task on earlier day A (can move to later day B)
       var movA = [];
       for (var mai = 0; mai < plsA.length; mai++) {
-        if (isMovable(plsA[mai]) && !plsA[mai].task.habit) movA.push(plsA[mai]);
+        if (!isMovable(plsA[mai]) || plsA[mai].task.habit) continue;
+        // datePinned/generated tasks can't move to a different day
+        if (plsA[mai].task.datePinned || plsA[mai].task.generated) continue;
+        movA.push(plsA[mai]);
       }
       if (movA.length === 0) continue;
 
-      // Find a higher-pri movable task on later day B
+      // Find a higher-pri movable task on later day B (can move to earlier day A)
       var movB = [];
       for (var mbi = 0; mbi < plsB.length; mbi++) {
-        if (isMovable(plsB[mbi]) && !plsB[mbi].task.habit) movB.push(plsB[mbi]);
+        if (!isMovable(plsB[mbi]) || plsB[mbi].task.habit) continue;
+        // datePinned/generated tasks can't move to a different day
+        if (plsB[mbi].task.datePinned || plsB[mbi].task.generated) continue;
+        // Enforce earliestDate floor — can't move to day A if it's before startAfter
+        if (plsB[mbi].task.startAfter) {
+          var saDateX = parseDate(plsB[mbi].task.startAfter);
+          if (saDateX && dateA < saDateX) continue;
+        }
+        movB.push(plsB[mbi]);
       }
       if (movB.length === 0) continue;
 
       var plLow = movA[Math.floor(Math.random() * movA.length)];
       var plHigh = movB[Math.floor(Math.random() * movB.length)];
 
+      // Enforce startAfter on the low-pri task moving to later day B
+      if (plLow.task.startAfter) {
+        var saLow = parseDate(plLow.task.startAfter);
+        if (saLow && dateB < saLow) continue;
+      }
+
       // Only proceed if plHigh has strictly higher priority than plLow
       var priLow = plLow.task.pri || 'P3', priHigh = plHigh.task.pri || 'P3';
       var rankLow = priLow === 'P1' ? 4 : priLow === 'P2' ? 3 : priLow === 'P4' ? 1 : 2;
       var rankHigh = priHigh === 'P1' ? 4 : priHigh === 'P2' ? 3 : priHigh === 'P4' ? 1 : 2;
       if (rankHigh <= rankLow) continue;
+
+      // Check day requirements for both tasks on their new days
+      if (!fitsDayReq(plHigh.task, dkA)) continue;
+      if (!fitsDayReq(plLow.task, dkB)) continue;
 
       // Free both from their current positions
       var occA = dayOcc[dkA], occB = dayOcc[dkB];

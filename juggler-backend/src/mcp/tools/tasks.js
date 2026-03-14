@@ -41,7 +41,9 @@ var taskInputFields = {
     days: z.string().optional(),
     every: z.number().optional()
   }).optional().describe('Recurrence pattern'),
-  datePinned: z.boolean().optional().describe('Whether date is pinned (won\'t be moved by scheduler)')
+  datePinned: z.boolean().optional().describe('Whether date is pinned (won\'t be moved by scheduler)'),
+  marker: z.boolean().optional().describe('Non-blocking calendar marker — shows on calendar at its time but does not prevent tasks from being scheduled in the same slot. Use for events you want to see but not block time for (e.g. TV game windows, reminders).'),
+  flexWhen: z.boolean().optional().describe('Allow the scheduler to relax this task\'s "when" time-of-day preference if it can\'t be placed within those windows. When false (default), the task stays unplaced if its when windows are full.')
 };
 
 function registerTaskTools(server, userId) {
