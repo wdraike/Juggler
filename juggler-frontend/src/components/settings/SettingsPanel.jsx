@@ -311,7 +311,7 @@ function PreferencesTab({ config, theme }) {
     config.updatePreferences({
       gridZoom: config.gridZoom, splitDefault: config.splitDefault,
       splitMinDefault: config.splitMinDefault, schedFloor: config.schedFloor,
-      fontSize: config.fontSize,
+      fontSize: config.fontSize, pullForwardDampening: config.pullForwardDampening,
       ...patch
     });
   }
@@ -346,6 +346,13 @@ function PreferencesTab({ config, theme }) {
               <option key={m} value={m}>{Math.floor(m/60) % 12 || 12}:{(m%60) < 10 ? '0' : ''}{m%60} {m < 720 ? 'AM' : 'PM'}</option>
             ))}
           </select>
+        </label>
+        <label title="When enabled, tasks pull forward less aggressively when the calendar has plenty of free time"
+          style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input type="checkbox"
+            checked={config.pullForwardDampening || false}
+            onChange={e => { var v = e.target.checked; config.setPullForwardDampening(v); savePrefs({ pullForwardDampening: v }); }} />
+          Dampen pull-forward (less aggressive when calendar is open)
         </label>
       </div>
     </div>

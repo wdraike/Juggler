@@ -6,7 +6,7 @@
 **Tagline:** "Old school hustle. New school AI."  
 **Domain:** raikeandsons.ai  
 **Founded:** Est. 2025  
-**Products:** WorkRS (AI task manager) + ClimbRS (AI career/resume tool)  
+**Products:** StriverRS (AI task manager) + ClimbRS (AI career/resume tool)  
 **Product Naming System:** RS suffix = Raike & Sons initials hidden in every product name  
 **Audience:** Ambitious professionals, job seekers, busy executives  
 
@@ -182,7 +182,7 @@ There are five logo components. Use the right one for the right context:
 | Crest — medium | Cards, sidebars, email headers |
 | Crest — small/icon | Favicon, app icon, social avatar |
 | Wordmark compact | Navigation bar |
-| WorkRS badge | WorkRS product pages and marketing |
+| StriverRS badge | StriverRS product pages and marketing |
 | ClimbRS badge | ClimbRS product pages and marketing |
 
 ---
@@ -582,23 +582,23 @@ The crest uses the letterpress block style — R&S monogram with the faded S, di
 
 ---
 
-### 4. WorkRS Product Badge
+### 4. StriverRS Product Badge
 
 ```html
 <!-- Light version -->
 <div class="product-badge product-badge-light">
   <div class="pb-parent">Raike &amp; Sons</div>
-  <div class="pb-name">Work<span class="pb-rs">RS</span></div>
+  <div class="pb-name">Striver<span class="pb-rs">RS</span></div>
   <div class="pb-rule"></div>
-  <div class="pb-tagline">Never stops working.</div>
+  <div class="pb-tagline">Never stops striving.</div>
 </div>
 
 <!-- Dark version -->
 <div class="product-badge product-badge-dark">
   <div class="pb-parent">Raike &amp; Sons</div>
-  <div class="pb-name">Work<span class="pb-rs">RS</span></div>
+  <div class="pb-name">Striver<span class="pb-rs">RS</span></div>
   <div class="pb-rule"></div>
-  <div class="pb-tagline">Never stops working.</div>
+  <div class="pb-tagline">Never stops striving.</div>
 </div>
 ```
 
@@ -660,7 +660,7 @@ The crest uses the letterpress block style — R&S monogram with the faded S, di
 
 ### 5. ClimbRS Product Badge
 
-Same HTML/CSS as WorkRS badge above. Just change the text content:
+Same HTML/CSS as StriverRS badge above. Just change the text content:
 
 ```html
 <!-- Light version -->
@@ -838,7 +838,7 @@ Use the **compact wordmark** on the left.
 
   <!-- CENTER: Nav links -->
   <nav class="navbar-nav">
-    <a href="/workrs" class="nav-link">WorkRS</a>
+    <a href="/striverrs" class="nav-link">StriverRS</a>
     <a href="/climbrs" class="nav-link">ClimbRS</a>
     <a href="/about" class="nav-link">About</a>
     <a href="/pricing" class="nav-link">Pricing</a>
@@ -854,31 +854,31 @@ Use the **compact wordmark** on the left.
 
 ---
 
-#### WorkRS Product Header
+#### StriverRS Product Header
 
-Use the **WorkRS product badge (compact)** on the left, with a small "by Raike & Sons" attribution below.
+Use the **StriverRS product badge (compact)** on the left, with a small "by Raike & Sons" attribution below.
 
 ```html
-<header class="navbar navbar-product navbar-workrs">
+<header class="navbar navbar-product navbar-strivers">
   <!-- LEFT: Product badge — compact version -->
-  <a href="/workrs" class="navbar-brand">
+  <a href="/striverrs" class="navbar-brand">
     <div class="product-badge-nav product-badge-nav-light">
       <div class="pbn-parent">by Raike &amp; Sons</div>
-      <div class="pbn-name">Work<span class="pbn-rs">RS</span></div>
+      <div class="pbn-name">Striver<span class="pbn-rs">RS</span></div>
     </div>
   </a>
 
   <!-- CENTER: Nav links -->
   <nav class="navbar-nav">
-    <a href="/workrs/features" class="nav-link">Features</a>
-    <a href="/workrs/pricing" class="nav-link">Pricing</a>
-    <a href="/workrs/docs" class="nav-link">Docs</a>
+    <a href="/striverrs/features" class="nav-link">Features</a>
+    <a href="/striverrs/pricing" class="nav-link">Pricing</a>
+    <a href="/striverrs/docs" class="nav-link">Docs</a>
   </nav>
 
   <!-- RIGHT: CTA -->
   <div class="navbar-cta">
     <a href="/login" class="nav-link" style="margin-right: 1.5rem">Sign in</a>
-    <button class="btn-primary btn-sm">Start working</button>
+    <button class="btn-primary btn-sm">Start striving</button>
   </div>
 </header>
 ```
@@ -887,7 +887,7 @@ Use the **WorkRS product badge (compact)** on the left, with a small "by Raike &
 
 #### ClimbRS Product Header
 
-Same structure as WorkRS, different badge.
+Same structure as StriverRS, different badge.
 
 ```html
 <header class="navbar navbar-product navbar-climbrs">
@@ -1109,7 +1109,7 @@ if (navbar) {
 | Page / Context | Header style | Notes |
 |---|---|---|
 | Main marketing homepage | `navbar navbar-transparent` → scrolls to `navbar-scrolled` | Overlays dark hero, transitions on scroll |
-| WorkRS marketing page | `navbar navbar-product navbar-workrs` | Dark, copper border, WorkRS badge |
+| StriverRS marketing page | `navbar navbar-product navbar-strivers` | Dark, copper border, StriverRS badge |
 | ClimbRS marketing page | `navbar navbar-product navbar-climbrs` | Dark, gold border, ClimbRS badge |
 | Docs / blog (light bg) | `navbar navbar-light` | Parchment bg, navy text — respects light page |
 | Dashboard / app shell | `navbar` (default dark) | Always dark for app UI |
@@ -1125,17 +1125,183 @@ if (navbar) {
 │  Main site:                                                      │
 │  [ Raike & Sons ]    Features  Products  About    [ Get started ]│
 ├─────────────────────────────────────────────────────────────────┤
-│  WorkRS product page:                                            │
-│  [ by Raike & Sons ]   Features  Pricing  Docs   [ Start working]│
-│  [ Work RS       ]                                               │
+│  StriverRS product page:                                          │
+│  [ by Raike & Sons ]   Features  Pricing  Docs  [ Start striving]│
+│  [ StriverRS       ]                                              │
 ├─────────────────────────────────────────────────────────────────┤
 │  ClimbRS product page:                                           │
 │  [ by Raike & Sons ]   Features  Pricing  Docs  [ Start climbing]│
-│  [ Climb RS      ]                                               │
+│  [ ClimbRS        ]                                              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 The gold left border on the product badge nav version creates a visual anchor on the left edge — it's the craftsman equivalent of a product ribbon.
+
+---
+
+### Full Logo Suite — Standalone HTML File
+
+Save this as `logo-suite.html` in your project root. It is a fully self-contained reference file with all logo variants rendered live. Open in any browser to see exactly how everything looks. Hand this file directly to Claude Code.
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Raike &amp; Sons — Logo Suite</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400&family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#F5F0E8;padding:40px;display:flex;flex-direction:column;gap:48px;align-items:center}
+.label{font-size:10px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:#9E6B3B;margin-bottom:12px;text-align:center}
+.row{display:flex;gap:32px;align-items:flex-start;justify-content:center;flex-wrap:wrap}
+/* Wordmark */
+.wordmark{display:inline-flex;flex-direction:column;align-items:center;gap:0;padding:40px 60px;position:relative;border:1px solid #E8E0D0;background:#F5F0E8}
+.wordmark::before{content:'';position:absolute;inset:5px;border:0.5px solid #C8942A;opacity:0.3;pointer-events:none}
+.wordmark::after{content:'';position:absolute;inset:8px;border:0.5px solid #C8942A;opacity:0.15;pointer-events:none}
+.wordmark-dark{background:#1A2B4A;border-color:#2E4A7A}
+.wordmark-main{display:flex;align-items:baseline;gap:4px}
+.wm-raike,.wm-sons{font-family:'Playfair Display',serif;font-weight:700;font-size:48px;color:#1A2B4A;line-height:1;letter-spacing:-0.01em}
+.wm-sons{font-weight:400}
+.wm-amp{font-family:'Cormorant Garamond',serif;font-style:italic;font-weight:300;font-size:60px;color:#C8942A;line-height:1;margin:0 2px}
+.wm-rule{width:100%;height:1px;background:#C8942A;opacity:0.4;margin:8px 0 6px}
+.wm-tagline{font-family:'Cormorant Garamond',serif;font-style:italic;font-weight:300;font-size:14px;color:#9E6B3B;letter-spacing:0.08em}
+.wm-est{font-family:'Inter',sans-serif;font-size:9px;font-weight:600;letter-spacing:0.3em;text-transform:uppercase;color:#C8942A;opacity:0.7;margin-top:4px}
+.wordmark-dark .wm-raike,.wordmark-dark .wm-sons{color:#F5F0E8}
+.wordmark-dark .wm-tagline{color:#E8C878}
+/* Compact */
+.wordmark-compact{display:inline-flex;align-items:baseline;gap:0;padding:12px 24px;background:#1A2B4A}
+.wc-raike,.wc-sons{font-family:'Playfair Display',serif;font-weight:700;font-size:24px;color:#F5F0E8;letter-spacing:-0.01em}
+.wc-sons{font-weight:400}
+.wc-amp{font-family:'Cormorant Garamond',serif;font-style:italic;font-weight:300;font-size:30px;color:#C8942A;margin:0 3px;line-height:1}
+/* Crest */
+.crest{display:inline-flex;flex-direction:column;align-items:center;gap:0;background:#1A2B4A;position:relative}
+.crest::before{content:'';position:absolute;inset:6px;border:0.75px solid #C8942A;opacity:0.25;pointer-events:none}
+.crest-lg{padding:28px 36px}
+.crest-md{padding:20px 26px}
+.crest-sm{padding:12px 14px}
+.crest-top-row{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.crest-diamond{width:7px;height:7px;background:#C8942A;transform:rotate(45deg);opacity:0.65;flex-shrink:0}
+.crest-top-text{font-family:'Inter',sans-serif;font-size:8.5px;font-weight:600;letter-spacing:0.32em;text-transform:uppercase;color:#C8942A;opacity:0.8}
+.crest-monogram{display:flex;align-items:baseline;gap:0;margin:2px 0 10px}
+.crest-r,.crest-s{font-family:'Playfair Display',serif;font-weight:700;font-size:72px;color:#F5F0E8;line-height:0.9;letter-spacing:-0.02em}
+.crest-s{font-weight:400;opacity:0.28}
+.crest-amp{font-family:'Cormorant Garamond',serif;font-style:italic;font-weight:300;font-size:46px;color:#C8942A;line-height:0.9;margin:0 1px;padding-bottom:4px}
+.crest-md .crest-r,.crest-md .crest-s{font-size:48px}
+.crest-md .crest-amp{font-size:32px;padding-bottom:3px}
+.crest-md .crest-top-text{font-size:7px;letter-spacing:0.28em}
+.crest-md .crest-top-row{gap:7px;margin-bottom:10px}
+.crest-md .crest-diamond{width:5px;height:5px}
+.crest-md .crest-monogram{margin:0 0 8px}
+.crest-sm .crest-r,.crest-sm .crest-s{font-size:28px}
+.crest-sm .crest-amp{font-size:18px;padding-bottom:2px}
+.crest-sm .crest-monogram{margin:0}
+.crest-rule{width:100%;height:1px;background:#C8942A;opacity:0.28;margin:4px 0}
+.crest-rule-double{width:100%;height:3px;background:transparent;border-top:0.75px solid rgba(200,148,42,0.28);border-bottom:0.75px solid rgba(200,148,42,0.28);margin:4px 0}
+.crest-brand-name{font-family:'Playfair Display',serif;font-weight:400;font-size:15px;color:#F5F0E8;letter-spacing:0.22em;text-transform:uppercase;opacity:0.9;margin:6px 0 4px}
+.crest-md .crest-brand-name{font-size:11px;letter-spacing:0.2em;margin:5px 0 3px}
+.crest-est-row{display:flex;align-items:center;gap:8px;margin-top:4px}
+.crest-dot{width:3px;height:3px;background:#C8942A;border-radius:50%;opacity:0.5;flex-shrink:0}
+.crest-est-text{font-family:'Inter',sans-serif;font-size:8px;font-weight:600;letter-spacing:0.25em;text-transform:uppercase;color:#C8942A;opacity:0.6}
+.crest-md .crest-dot{width:2.5px;height:2.5px}
+.crest-md .crest-est-text{font-size:6.5px;letter-spacing:0.22em}
+/* Product badges */
+.product-badge{display:inline-flex;flex-direction:column;align-items:center;gap:6px;padding:20px 28px;min-width:160px;border:1px solid #E8E0D0}
+.product-badge-light{background:#F5F0E8}
+.product-badge-dark{background:#1A2B4A;border-color:#2E4A7A}
+.pb-parent{font-family:'Playfair Display',serif;font-size:11px;font-weight:400;color:#9E6B3B;letter-spacing:0.2em;text-transform:uppercase}
+.product-badge-dark .pb-parent{color:#C8942A}
+.pb-name{font-family:'Playfair Display',serif;font-weight:700;font-size:28px;color:#1A2B4A;letter-spacing:-0.02em}
+.product-badge-dark .pb-name{color:#F5F0E8}
+.pb-rs{color:#C8942A}
+.product-badge-dark .pb-rs{color:#E8C878}
+.pb-rule{width:100%;height:1px;background:#C8942A;opacity:0.3}
+.pb-tagline{font-family:'Cormorant Garamond',serif;font-style:italic;font-size:12px;color:#9E6B3B;letter-spacing:0.05em}
+.product-badge-dark .pb-tagline{color:#C8942A;opacity:0.8}
+</style>
+</head>
+<body>
+
+<div><div class="label">Primary wordmark — light</div>
+<div class="wordmark">
+  <div class="wordmark-main"><span class="wm-raike">Raike</span><span class="wm-amp">&amp;</span><span class="wm-sons">Sons</span></div>
+  <div class="wm-rule"></div>
+  <div class="wm-tagline">Old school hustle. New school AI.</div>
+  <div class="wm-est">Est. 2025</div>
+</div></div>
+
+<div><div class="label">Primary wordmark — dark</div>
+<div class="wordmark wordmark-dark">
+  <div class="wordmark-main"><span class="wm-raike">Raike</span><span class="wm-amp">&amp;</span><span class="wm-sons">Sons</span></div>
+  <div class="wm-rule"></div>
+  <div class="wm-tagline">Old school hustle. New school AI.</div>
+  <div class="wm-est">Est. 2025</div>
+</div></div>
+
+<div><div class="label">Compact — navigation bar</div>
+<div class="wordmark-compact">
+  <span class="wc-raike">Raike</span><span class="wc-amp">&amp;</span><span class="wc-sons">Sons</span>
+</div></div>
+
+<div><div class="label">Crest — large</div>
+<div class="crest crest-lg">
+  <div class="crest-top-row"><div class="crest-diamond"></div><span class="crest-top-text">Raike &amp; Sons</span><div class="crest-diamond"></div></div>
+  <div class="crest-monogram"><span class="crest-r">R</span><span class="crest-amp">&amp;</span><span class="crest-s">S</span></div>
+  <div class="crest-rule-double"></div>
+  <div class="crest-brand-name">Raike &amp; Sons</div>
+  <div class="crest-rule"></div>
+  <div class="crest-est-row"><div class="crest-dot"></div><span class="crest-est-text">Est. 2025</span><div class="crest-dot"></div><span class="crest-est-text">New school AI</span><div class="crest-dot"></div></div>
+</div></div>
+
+<div class="row">
+<div><div class="label">Crest — medium</div>
+<div class="crest crest-md">
+  <div class="crest-top-row"><div class="crest-diamond"></div><span class="crest-top-text">Raike &amp; Sons</span><div class="crest-diamond"></div></div>
+  <div class="crest-monogram"><span class="crest-r">R</span><span class="crest-amp">&amp;</span><span class="crest-s">S</span></div>
+  <div class="crest-rule"></div>
+  <div class="crest-brand-name">Raike &amp; Sons</div>
+  <div class="crest-rule"></div>
+  <div class="crest-est-row"><div class="crest-dot"></div><span class="crest-est-text">Est. 2025</span><div class="crest-dot"></div></div>
+</div></div>
+<div><div class="label">Crest — small / icon</div>
+<div class="crest crest-sm">
+  <div class="crest-monogram"><span class="crest-r">R</span><span class="crest-amp">&amp;</span><span class="crest-s">S</span></div>
+</div></div>
+</div>
+
+<div><div class="label">Product sub-brands — all variants</div>
+<div class="row">
+  <div class="product-badge product-badge-light">
+    <div class="pb-parent">Raike &amp; Sons</div>
+    <div class="pb-name">Striver<span class="pb-rs">RS</span></div>
+    <div class="pb-rule"></div>
+    <div class="pb-tagline">Never stops striving.</div>
+  </div>
+  <div class="product-badge product-badge-dark">
+    <div class="pb-parent">Raike &amp; Sons</div>
+    <div class="pb-name">Striver<span class="pb-rs">RS</span></div>
+    <div class="pb-rule"></div>
+    <div class="pb-tagline">Never stops striving.</div>
+  </div>
+  <div class="product-badge product-badge-light">
+    <div class="pb-parent">Raike &amp; Sons</div>
+    <div class="pb-name">Climb<span class="pb-rs">RS</span></div>
+    <div class="pb-rule"></div>
+    <div class="pb-tagline">Always climbing.</div>
+  </div>
+  <div class="product-badge product-badge-dark">
+    <div class="pb-parent">Raike &amp; Sons</div>
+    <div class="pb-name">Climb<span class="pb-rs">RS</span></div>
+    <div class="pb-rule"></div>
+    <div class="pb-tagline">Always climbing.</div>
+  </div>
+</div></div>
+
+</body>
+</html>
+```
+
 
 ### Hero Section Pattern
 
@@ -1215,7 +1381,7 @@ Write like a craftsman describing their product. Short, proud, no buzzwords.
 - GOOD: "Tells AI what you need. Gets it done."
 
 **Product Names in Context:**
-- "Raike & Sons WorkRS" — never stops working
+- "Raike & Sons StriverRS" — never stops striving
 - "Raike & Sons ClimbRS" — always climbing
 
 **The Self-Aware Wink:**
@@ -1292,7 +1458,7 @@ For the Raike & Sons brand, look for:
 - **Vintage business certificates** — the ornate border style
 - **Woodcut-style imagery** — black and white high-contrast illustrations
 
-For **WorkRS** specifically:
+For **StriverRS** specifically:
 - "grindstone wheel engraving" — spinning grinding wheel with sparks
 - "blacksmith workshop vintage illustration" — craftsman at work
 - "spinning wheel woodcut" — circular motion, relentless turning
@@ -1417,34 +1583,36 @@ For **ClimbRS** specifically:
 Every Raike & Sons product ends in **RS** — the initials of Raike & Sons hidden inside a plain English word. The RS suffix makes every product name instantly recognizable as part of the family, while the word itself tells you exactly what the product does.
 
 **The system scales infinitely:**
-- WorkRS — task management
+- StriverRS — task management
 - ClimbRS — career/resume
-- Future: NetworkRS, LearnRS, TrackRS, BuildRS...
+- Future: NetworkRS, LearnRS, TrackRS, BuildRS, EarnRS...
 
 ---
 
-### WorkRS — AI Task Manager
+### StriverRS — AI Task Manager
 
-**Full product name:** Raike & Sons WorkRS
-**Reads as:** "Workers"
-**Tagline:** "Never stops working."
-**Sub-tagline:** "While you sleep, WorkRS works."
+**Full product name:** Raike & Sons StriverRS
+**Reads as:** "StriverRS" — Striver + RS (Raike & Sons)
+**Tagline:** "Never stops striving."
+**Sub-tagline:** "Built for people who don't sit still."
 **Sub-brand color accent:** Copper `#9E6B3B`
-**Domain:** workrs.ai + workrs.com
+**Domain:** striverrs.ai + striverrs.com
 
 **The concept:**
-WorkRS never sits still. It's the AI that handles your daily work — tasks dispatched, priorities managed, nothing piling up. The name says it all: it's your workers, always on, always moving. The RS is Raike & Sons baked right into the word.
+A striver never settles, never sits still, never accepts "good enough." StriverRS is the AI that embodies that energy — relentless, always pushing tasks forward, never letting work pile up. The name says it: you're a striver, and this is the tool built for people like you. The RS is Raike & Sons baked right into the word.
 
-**Voice for WorkRS:**
-- Short, action-oriented, restless energy
+**Voice for StriverRS:**
+- Short, ambitious, restless energy
+- Speaks to the person's drive, not just the tool's features
 - Examples:
   - "On it."
   - "Already handled."
   - "3 tasks cleared while you were in that meeting."
-  - "WorkRS never stops."
-  - "Put your WorkRS to work."
+  - "Strivers never stop."
+  - "Built for people who don't sit still."
+  - "Put your StriverRS to work."
 
-**Icon concept:** A vintage gear or crank wheel — always in motion. Or a craftsman's hand tools arranged in a working pattern. Look for public domain workshop engravings showing tools in use.
+**Icon concept:** A vintage figure in motion — always moving forward. Or a craftsman's hand tools arranged in a working pattern. Look for public domain workshop engravings showing craftsmen at work.
 
 ---
 
@@ -1476,10 +1644,10 @@ ClimbRS takes your raw experience and shapes it into something that gets you hir
 ### Product Pairing (when showing both together)
 
 **Combined tagline:**
-> *"WorkRS handles the daily grind. ClimbRS gets you to the top."*
+> *"StriverRS keeps you moving. ClimbRS gets you rising."*
 
 **Extended brand narrative:**
-> *At Raike & Sons, we built two tools for people who don't sit still. WorkRS keeps the work moving — relentless, handled, never piling up. ClimbRS shapes your career — taking raw experience and making something that gets you in the room. Both powered by AI. Both built by Raike & Sons. Both carry our initials — because everything we make, we stand behind.*
+> *At Raike & Sons, we built two tools for people who don't sit still. StriverRS keeps the work moving — relentless, handled, never piling up. ClimbRS shapes your career — taking raw experience and making something that gets you in the room. Both powered by AI. Both built by Raike & Sons. Both carry our initials — because everything we make, we stand behind.*
 
 **Future product reserve:**
 - **EarnRS** — earnings/financial tracking (earnrs.ai available)
@@ -1780,7 +1948,7 @@ Alternate between three background treatments to create visual rhythm without us
 **Recommended page section order:**
 1. Hero — navy with texture
 2. Features — parchment with grid
-3. Product 1 (WorkRS) — cream
+3. Product 1 (StriverRS) — cream
 4. Product 2 (ClimbRS) — parchment
 5. Testimonials — navy lined
 6. CTA — navy solid
@@ -1865,7 +2033,7 @@ The hero is the one place you can be bold. Navy background, large Playfair headl
 
   <!-- Product badges -->
   <div style="display: flex; gap: 1rem; justify-content: center; margin: 2rem 0">
-    <span class="badge-stamp">WorkRS</span>
+    <span class="badge-stamp">StriverRS</span>
     <span class="badge-stamp">ClimbRS</span>
   </div>
 
@@ -1905,9 +2073,9 @@ The hero is the one place you can be bold. Navy background, large Playfair headl
 
 ---
 
-*Raike & Sons Brand Guide v6.0 — Est. 2025*
+*Raike & Sons Brand Guide v7.1 — Est. 2025*
 *"Old school hustle. New school AI."*
-*Products: WorkRS + ClimbRS*
+*Products: StriverRS + ClimbRS*
 *RS suffix = Raike & Sons in every product name*
 
 ---
@@ -1968,4 +2136,4 @@ The hero is the one place you can be bold. Navy background, large Playfair headl
 
 *Raike & Sons Brand Guide v2.0 — Est. 2025*  
 *"Old school hustle. New school AI."*  
-*Products: WorkRS + ClimbRS*
+*Products: StriverRS + ClimbRS*

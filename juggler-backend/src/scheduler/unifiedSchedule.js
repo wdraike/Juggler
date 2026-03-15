@@ -1417,6 +1417,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     var savedEnd = globalPlacedEnd[item.task.id];
     var savedUpdates = taskUpdates[item.task.id];
 
+    // Capture original placement date BEFORE unplacing
+    var originalDateKey = item._parts.length > 0 ? item._parts[0]._dateKey : null;
+
     unplaceItem(item);
 
     // Determine pull-forward floor
@@ -1426,6 +1429,34 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (saDate && saDate > pullFloor) pullFloor = saDate;
     }
     if (item.earliestDate && item.earliestDate > pullFloor) pullFloor = item.earliestDate;
+
+    // Dampening: raise pullFloor when intervening days are mostly free
+    if (originalDateKey && cfg.preferences && cfg.preferences.pullForwardDampening) {
+      var origDate = parseDate(originalDateKey);
+      if (origDate) {
+        var dayGap = Math.round((origDate - localToday) / 86400000);
+        if (dayGap > 1) {
+          var totalAvail = 0, totalUsed = 0;
+          for (var ddi = 0; ddi < dates.length; ddi++) {
+            var dd = dates[ddi];
+            if (dd.date <= localToday || dd.date >= origDate) continue;
+            var awins = dayWindows[dd.key] && dayWindows[dd.key].anytime ? dayWindows[dd.key].anytime : [];
+            var dayAvail = 0;
+            for (var wi = 0; wi < awins.length; wi++) dayAvail += (awins[wi][1] - awins[wi][0]);
+            totalAvail += dayAvail;
+            var occ = dayOcc[dd.key];
+            if (occ) { for (var mk in occ) { if (occ[mk]) totalUsed++; } }
+          }
+          var freeRatio = totalAvail > 0 ? Math.max(0, totalAvail - totalUsed) / totalAvail : 0;
+          var skipDays = Math.floor(freeRatio * dayGap);
+          if (skipDays > 0) {
+            var dampenedFloor = new Date(localToday);
+            dampenedFloor.setDate(dampenedFloor.getDate() + skipDays);
+            if (dampenedFloor > pullFloor) pullFloor = dampenedFloor;
+          }
+        }
+      }
+    }
 
     var dueDate = item.deadline;
 
