@@ -783,6 +783,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     var dateWindows_d = dayWindows[d.key];
     var dur = effectiveDuration(t);
     if (dur <= 0) return;
+    // Default missing when to standard day windows so habits don't get "anytime" placement
+    if (!t.when) t.when = 'morning,lunch,afternoon,evening';
     var sm = parseTimeToMinutes(t.time);
     var mask = buildLocMask(t, d.key, dateBlocks_d);
 

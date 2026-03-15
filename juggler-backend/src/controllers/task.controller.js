@@ -82,19 +82,12 @@ function rowToTask(row, timezone, sourceMap) {
   // Merge template fields from source for thin habit instances
   var src = sourceMap && row.source_id ? sourceMap[row.source_id] : null;
   if (src) {
-    // Create a merged row so downstream logic sees complete data
+    // Habit instances always inherit template fields from the source template.
+    // The template is the single source of truth — instances never override.
     var merged = {};
     Object.keys(row).forEach(function(k) { merged[k] = row[k]; });
-    // Boolean DB columns where 0 means "inherit from source" (not "explicitly false")
-    var BOOL_TEMPLATE_FIELDS = { split: true, rigid: true, habit: true, time_flex: true };
     TEMPLATE_FIELDS.forEach(function(f) {
-      var v = merged[f];
-      // Treat null, empty string, and empty arrays/objects as "inherit from source"
-      var isEmpty = v == null || v === '' || v === '[]' || v === '{}';
-      if (!isEmpty && Array.isArray(v) && v.length === 0) isEmpty = true;
-      // For boolean columns, 0/false also means "inherit from source"
-      if (!isEmpty && BOOL_TEMPLATE_FIELDS[f] && (v === 0 || v === false)) isEmpty = true;
-      if (isEmpty) merged[f] = src[f];
+      merged[f] = src[f];
     });
     row = merged;
   }
@@ -428,7 +421,8 @@ async function updateTask(req, res) {
           await trx('tasks').where({ id: id, user_id: req.user.id }).update({ updated_at: db.fn.now() });
         }
       } else if (taskType === 'habit_template') {
-        // Editing the template directly — just update the template row
+        // Editing the template directly — just update the template row.
+        // Instances always inherit template fields via rowToTask.
         await trx('tasks').where({ id: id, user_id: req.user.id }).update(row);
       } else {
         // Normal (non-habit) task — update directly
