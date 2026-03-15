@@ -175,14 +175,19 @@ function checkLocationViolations(dayPlacements, cfg) {
       if (!p.task || p.locked || p.marker) return; // skip rigid/fixed/marker items
       var t = p.task;
       if (!t.location || t.location.length === 0) return; // no location constraint
-      // Check at placement start
-      var locId = resolveLocationId(dk, p.start, cfg, blocks);
-      if (!canTaskRun(t, locId, cfg.toolMatrix)) {
-        issues.push({
-          date: dk,
-          msg: '"' + t.text + '" (' + t.id + ') at ' + fmtRange(p.start, p.dur) +
-            ' requires ' + JSON.stringify(t.location) + ' but location is "' + locId + '"'
-        });
+      // Check at start AND end of placement
+      var checkPoints = [p.start, p.start + p.dur - 1];
+      for (var ci = 0; ci < checkPoints.length; ci++) {
+        var min = checkPoints[ci];
+        var locId = resolveLocationId(dk, min, cfg, blocks);
+        if (!canTaskRun(t, locId, cfg.toolMatrix)) {
+          issues.push({
+            date: dk,
+            msg: '"' + t.text + '" (' + t.id + ') at ' + fmtRange(p.start, p.dur) +
+              ' requires ' + JSON.stringify(t.location) + ' but location at ' + fmtTime(min) + ' is "' + locId + '"'
+          });
+          break; // one per placement
+        }
       }
     });
   });
@@ -265,9 +270,13 @@ function checkDeadlineMisses(dayPlacements, allTasks, todayKey) {
   return issues;
 }
 
-function checkDependencyOrder(dayPlacements) {
+function checkDependencyOrder(dayPlacements, allTasks, statuses) {
   var issues = [];
-  // Build earliest placement per task: { dateKey, startMin } — skip markers
+  // Build task lookup
+  var taskById = {};
+  allTasks.forEach(function(t) { taskById[t.id] = t; });
+
+  // Build earliest placement per task: { dateKey, startMin } — include ALL placements (locked too)
   var firstPlace = {};
   Object.keys(dayPlacements).forEach(function(dk) {
     var dkDate = parseDate(dk);
@@ -279,7 +288,7 @@ function checkDependencyOrder(dayPlacements) {
       }
     });
   });
-  // Also build last placement per task (for endMin) — skip markers
+  // Also build last placement per task (for endMin) — include ALL placements
   var lastPlace = {};
   Object.keys(dayPlacements).forEach(function(dk) {
     var dkDate = parseDate(dk);
@@ -291,30 +300,223 @@ function checkDependencyOrder(dayPlacements) {
       }
     });
   });
-  // Check each placed task's dependencies finish before it starts — skip markers
+
+  // Deduplicate: only check each task's deps once (not per-placement)
+  var checked = {};
   Object.keys(dayPlacements).forEach(function(dk) {
     (dayPlacements[dk] || []).forEach(function(p) {
       if (!p.task || p.marker) return;
+      if (checked[p.task.id]) return;
+      checked[p.task.id] = true;
       var deps = getTaskDeps(p.task);
       deps.forEach(function(depId) {
         var depEnd = lastPlace[depId];
-        if (!depEnd) return; // dep not placed — might be done/skipped
+        var depTask = taskById[depId];
+        var depStatus = statuses ? (statuses[depId] || '') : '';
+        if (!depEnd) {
+          // Dep not placed — flag if it's active (not done/skip/cancel)
+          if (depTask && depStatus !== 'done' && depStatus !== 'cancel' && depStatus !== 'skip') {
+            issues.push({
+              msg: '"' + p.task.text + '" (' + p.task.id + ') depends on "' +
+                (depTask ? depTask.text : depId) + '" (' + depId + ') which is NOT PLACED (status: ' + (depStatus || 'none') + ')'
+            });
+          }
+          return;
+        }
         var taskFirst = firstPlace[p.task.id];
         if (!taskFirst) return;
         // Dependency must end before (or on same day, before start of) dependant
         if (depEnd.date > taskFirst.date) {
           issues.push({
-            msg: '"' + p.task.text + '" (' + p.task.id + ') depends on "' + depId +
-              '" but dep ends ' + depEnd.dateKey + ' after task starts ' + taskFirst.dateKey
+            msg: '"' + p.task.text + '" (' + p.task.id + ') on ' + taskFirst.dateKey +
+              ' depends on "' + (depTask ? depTask.text : depId) + '" (' + depId +
+              ') which ends ' + depEnd.dateKey + ' (after task starts)'
           });
         } else if (depEnd.dateKey === taskFirst.dateKey && depEnd.endMin > taskFirst.startMin) {
           issues.push({
             msg: '"' + p.task.text + '" (' + p.task.id + ') at ' + fmtTime(taskFirst.startMin) +
-              ' depends on "' + depId + '" which ends at ' + fmtTime(depEnd.endMin) + ' on ' + dk
+              ' depends on "' + (depTask ? depTask.text : depId) + '" (' + depId +
+              ') which ends at ' + fmtTime(depEnd.endMin) + ' on ' + taskFirst.dateKey
           });
         }
       });
     });
+  });
+  return issues;
+}
+
+function checkStartAfterViolations(dayPlacements, allTasks) {
+  var issues = [];
+  // Build earliest placement per task
+  var firstPlace = {};
+  Object.keys(dayPlacements).forEach(function(dk) {
+    var dkDate = parseDate(dk);
+    (dayPlacements[dk] || []).forEach(function(p) {
+      if (!p.task || p.marker) return;
+      var prev = firstPlace[p.task.id];
+      if (!prev || dkDate < prev.date) {
+        firstPlace[p.task.id] = { date: dkDate, dateKey: dk };
+      }
+    });
+  });
+
+  allTasks.forEach(function(t) {
+    if (!t.startAfter) return;
+    var fp = firstPlace[t.id];
+    if (!fp) return; // not placed
+    var saDate = parseDate(t.startAfter);
+    if (!saDate) return;
+    saDate.setHours(0, 0, 0, 0);
+    if (fp.date < saDate) {
+      issues.push({
+        msg: '"' + t.text + '" (' + t.id + ') placed on ' + fp.dateKey +
+          ' but has startAfter ' + t.startAfter
+      });
+    }
+  });
+  return issues;
+}
+
+function checkDayReqViolations(dayPlacements) {
+  var issues = [];
+  var dm = { M: 1, T: 2, W: 3, R: 4, F: 5, Sa: 6, Su: 0, S: 6 };
+  Object.keys(dayPlacements).forEach(function(dk) {
+    var dkDate = parseDate(dk);
+    if (!dkDate) return;
+    var dow = dkDate.getDay();
+    var isWeekday = dow >= 1 && dow <= 5;
+    (dayPlacements[dk] || []).forEach(function(p) {
+      if (!p.task || p.locked || p.marker) return;
+      var dr = p.task.dayReq;
+      if (!dr || dr === 'any') return;
+      var violated = false;
+      if (dr === 'weekday' && !isWeekday) violated = true;
+      if (dr === 'weekend' && isWeekday) violated = true;
+      if (!violated) {
+        var parts = dr.split(',');
+        if (parts.length > 1 || dm[parts[0]] !== undefined) {
+          var match = parts.some(function(pp) { return dm[pp] !== undefined && dm[pp] === dow; });
+          if (!match) violated = true;
+        }
+      }
+      if (violated) {
+        issues.push({
+          date: dk,
+          msg: '"' + p.task.text + '" (' + p.task.id + ') placed on ' + dk +
+            ' (dow=' + dow + ') but dayReq="' + dr + '"'
+        });
+      }
+    });
+  });
+  return issues;
+}
+
+function checkSplitMinViolations(dayPlacements) {
+  var issues = [];
+  Object.keys(dayPlacements).forEach(function(dk) {
+    (dayPlacements[dk] || []).forEach(function(p) {
+      if (!p.task || p.marker) return;
+      var t = p.task;
+      if (!t.split) return; // only check splittable tasks
+      var minChunk = t.splitMin || 15;
+      // A chunk smaller than splitMin is only valid if it's the entire remaining duration
+      // (i.e., the task had less than splitMin left). Check if task has multiple parts.
+      if (p.dur < minChunk) {
+        issues.push({
+          date: dk,
+          msg: '"' + t.text + '" (' + t.id + ') has chunk of ' + p.dur +
+            'min which is below splitMin=' + minChunk
+        });
+      }
+    });
+  });
+  return issues;
+}
+
+function checkLocationFullDuration(dayPlacements, cfg) {
+  var issues = [];
+  Object.keys(dayPlacements).forEach(function(dk) {
+    var blocks = getBlocksForDate(dk, cfg.timeBlocks, cfg);
+    (dayPlacements[dk] || []).forEach(function(p) {
+      if (!p.task || p.locked || p.marker) return;
+      var t = p.task;
+      if (!t.location || t.location.length === 0) return;
+      // Check at start, middle, and end of placement
+      var checkPoints = [p.start, p.start + Math.floor(p.dur / 2), p.start + p.dur - 1];
+      for (var ci = 0; ci < checkPoints.length; ci++) {
+        var min = checkPoints[ci];
+        if (min < 0) continue;
+        var locId = resolveLocationId(dk, min, cfg, blocks);
+        if (!canTaskRun(t, locId, cfg.toolMatrix)) {
+          issues.push({
+            date: dk,
+            msg: '"' + t.text + '" (' + t.id + ') at ' + fmtRange(p.start, p.dur) +
+              ' requires ' + JSON.stringify(t.location) + ' but location at ' + fmtTime(min) +
+              ' is "' + locId + '"'
+          });
+          break; // one issue per placement is enough
+        }
+      }
+    });
+  });
+  return issues;
+}
+
+function checkEarliestDateViolations(dayPlacements, allTasks, todayKey) {
+  var issues = [];
+  var localToday = parseDate(todayKey) || new Date();
+  localToday.setHours(0, 0, 0, 0);
+
+  // Build earliest placement per task
+  var firstPlace = {};
+  Object.keys(dayPlacements).forEach(function(dk) {
+    var dkDate = parseDate(dk);
+    (dayPlacements[dk] || []).forEach(function(p) {
+      if (!p.task || p.marker) return;
+      var prev = firstPlace[p.task.id];
+      if (!prev || dkDate < prev.date) {
+        firstPlace[p.task.id] = { date: dkDate, dateKey: dk };
+      }
+    });
+  });
+
+  allTasks.forEach(function(t) {
+    var fp = firstPlace[t.id];
+    if (!fp) return;
+    // Pinned or generated tasks have their date as a floor
+    if ((t.datePinned || t.generated) && !fp.date < localToday) {
+      var td = parseDate(t.date);
+      if (td && td >= localToday && fp.date < td) {
+        issues.push({
+          msg: '"' + t.text + '" (' + t.id + ') placed on ' + fp.dateKey +
+            ' but is ' + (t.datePinned ? 'pinned' : 'generated') + ' to ' + t.date
+        });
+      }
+    }
+  });
+  return issues;
+}
+
+function checkNonSplitFragmentation(dayPlacements) {
+  var issues = [];
+  // Count parts per task
+  var partsByTask = {};
+  Object.keys(dayPlacements).forEach(function(dk) {
+    (dayPlacements[dk] || []).forEach(function(p) {
+      if (!p.task || p.marker) return;
+      if (!partsByTask[p.task.id]) partsByTask[p.task.id] = { task: p.task, parts: [] };
+      partsByTask[p.task.id].parts.push({ date: dk, start: p.start, dur: p.dur });
+    });
+  });
+  Object.keys(partsByTask).forEach(function(id) {
+    var entry = partsByTask[id];
+    if (entry.parts.length > 1 && !entry.task.split) {
+      issues.push({
+        msg: '"' + entry.task.text + '" (' + id + ') split=' + entry.task.split +
+          ' but has ' + entry.parts.length + ' parts: ' +
+          entry.parts.map(function(pp) { return pp.date + ' ' + fmtTime(pp.start) + ' (' + pp.dur + 'm)'; }).join(', ')
+      });
+    }
   });
   return issues;
 }
@@ -406,8 +608,8 @@ async function main() {
     totalIssues += deadlineIssues.length;
   }
 
-  // 7. Dependency ordering
-  var depIssues = checkDependencyOrder(result.dayPlacements);
+  // 7. Dependency ordering (now includes unplaced dep detection and Phase 0 items)
+  var depIssues = checkDependencyOrder(result.dayPlacements, allTasks, statuses);
   if (depIssues.length === 0) {
     console.log('✅ No dependency ordering issues');
   } else {
@@ -416,7 +618,65 @@ async function main() {
     totalIssues += depIssues.length;
   }
 
-  // 8. Split tasks
+  // 8. startAfter violations
+  var startAfterIssues = checkStartAfterViolations(result.dayPlacements, allTasks);
+  if (startAfterIssues.length === 0) {
+    console.log('✅ No startAfter violations');
+  } else {
+    console.log('\n❌ ' + startAfterIssues.length + ' startAfter violations:');
+    startAfterIssues.forEach(function(o) { console.log('  ' + o.msg); });
+    totalIssues += startAfterIssues.length;
+  }
+
+  // 9. dayReq violations
+  var dayReqIssues = checkDayReqViolations(result.dayPlacements);
+  if (dayReqIssues.length === 0) {
+    console.log('✅ No dayReq violations');
+  } else {
+    console.log('\n❌ ' + dayReqIssues.length + ' dayReq violations:');
+    dayReqIssues.forEach(function(o) { console.log('  ' + o.date + ': ' + o.msg); });
+    totalIssues += dayReqIssues.length;
+  }
+
+  // 10. splitMin violations
+  var splitMinIssues = checkSplitMinViolations(result.dayPlacements);
+  if (splitMinIssues.length === 0) {
+    console.log('✅ No splitMin violations');
+  } else {
+    console.log('\n⚠️  ' + splitMinIssues.length + ' splitMin violations:');
+    splitMinIssues.forEach(function(o) { console.log('  ' + o.date + ': ' + o.msg); });
+  }
+
+  // 11. Location full-duration check (not just start minute)
+  var locFullIssues = checkLocationFullDuration(result.dayPlacements, cfg);
+  if (locFullIssues.length === 0) {
+    console.log('✅ No location full-duration violations');
+  } else {
+    console.log('\n❌ ' + locFullIssues.length + ' location full-duration violations:');
+    locFullIssues.forEach(function(o) { console.log('  ' + o.date + ': ' + o.msg); });
+    totalIssues += locFullIssues.length;
+  }
+
+  // 12. Earliest date / pinned date violations
+  var earliestIssues = checkEarliestDateViolations(result.dayPlacements, allTasks, timeInfo.todayKey);
+  if (earliestIssues.length === 0) {
+    console.log('✅ No earliest date violations');
+  } else {
+    console.log('\n⚠️  ' + earliestIssues.length + ' earliest date violations:');
+    earliestIssues.forEach(function(o) { console.log('  ' + o.msg); });
+  }
+
+  // 13. Non-split tasks with multiple parts (should never happen)
+  var nonSplitIssues = checkNonSplitFragmentation(result.dayPlacements);
+  if (nonSplitIssues.length === 0) {
+    console.log('✅ No non-split fragmentation');
+  } else {
+    console.log('\n❌ ' + nonSplitIssues.length + ' non-split tasks with multiple parts:');
+    nonSplitIssues.forEach(function(o) { console.log('  ' + o.msg); });
+    totalIssues += nonSplitIssues.length;
+  }
+
+  // 14. Split tasks info
   var partsByTask = {};
   Object.keys(result.dayPlacements).forEach(function(dk) {
     (result.dayPlacements[dk] || []).forEach(function(p) {
@@ -439,10 +699,11 @@ async function main() {
   // Summary
   console.log('\nScore:', result.score.total);
   console.log('Breakdown:', JSON.stringify(result.score.breakdown));
+  var softIssues = inversions.length + whenIssues.length + splitMinIssues.length + earliestIssues.length;
   if (totalIssues === 0) {
-    console.log('\n✅ Schedule is clean (' + unplaced.length + ' unplaced, ' + inversions.length + ' inversions, ' + whenIssues.length + ' when-window issues)');
+    console.log('\n✅ Schedule is clean (' + unplaced.length + ' unplaced, ' + softIssues + ' soft warnings)');
   } else {
-    console.log('\n❌ ' + totalIssues + ' hard issues found');
+    console.log('\n❌ ' + totalIssues + ' hard issues found (' + softIssues + ' soft warnings)');
   }
 
   await db.destroy();

@@ -406,33 +406,32 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
                   borderRadius: 4, padding: '3px 8px', cursor: 'pointer',
                   background: isActive ? sBg : 'transparent',
                   color: isActive ? sColor : TH.textMuted,
-                  fontSize: 10, fontWeight: isActive ? 700 : 500, fontFamily: 'inherit'
+                  fontSize: 10, fontWeight: isActive ? 700 : 500, fontFamily: 'inherit',
+                  height: BTN_H, boxSizing: 'border-box'
                 }}>
                   {s.label} {s.tip.split(' \u2014 ')[0]}
                 </button>
               );
             })}
           </div>
-          {status === 'other' && (
-            <input
-              value={direction || ''}
-              onChange={e => { if (onDirectionChange) onDirectionChange(e.target.value); }}
-              placeholder="What are you doing instead?"
-              style={{ ...iStyle, width: '100%', marginTop: 4 }}
-            />
-          )}
         </div>}
 
-        {/* Row 1: Task + Project */}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
-          <label style={{ ...lStyle, flex: 1, minWidth: isMobile ? 0 : 200, width: isMobile ? '100%' : undefined }}>
-            Task
-            <input type="text" value={text} onChange={e => setText(e.target.value)}
-              style={{ ...iStyle, width: '100%' }} autoFocus />
-          </label>
-          <label style={lStyle}>
-            Project
-            <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+        {/* ═══ SECTION: Task Description ═══ */}
+        {(function() {
+          var secStyle = { border: '1px solid ' + TH.border, borderRadius: 6, padding: '8px 10px', marginBottom: 8 };
+          var secHead = { fontSize: 9, fontWeight: 700, color: TH.textMuted, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 };
+          return (<>
+
+        <div style={secStyle}>
+          <div style={secHead}>Task</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
+            <label style={{ ...lStyle, flex: 1, minWidth: isMobile ? 0 : 200, width: isMobile ? '100%' : undefined }}>
+              Name
+              <input type="text" value={text} onChange={e => setText(e.target.value)}
+                style={{ ...iStyle, width: '100%' }} autoFocus />
+            </label>
+            <label style={lStyle}>
+              Project
               <select value={project} onChange={e => setProject(e.target.value)}
                 style={{ ...iStyle, width: 120 }}>
                 <option value="">— none —</option>
@@ -440,255 +439,182 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
                   <option key={name} value={name}>{name}</option>
                 ))}
               </select>
-            </div>
-          </label>
-        </div>
-
-        {/* Row 2a: Date/Time + Duration + Remaining */}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, maxWidth: '100%' }}>
-          <label style={{ ...lStyle, maxWidth: '100%', minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span title="The date/time for this task. For habits: sets the preferred time the scheduler targets. For pinned tasks: the scheduler keeps this exact date. For unpinned tasks: the scheduler may move it to a better slot.">{'\uD83D\uDCC5'} Date / Time</span>
-              {!isCreate && !isFixed && !marker && date && (
-                datePinned
-                  ? <span style={{ fontSize: 7, color: '#D97706', fontWeight: 700 }}>{'\uD83D\uDCCC'} pinned</span>
-                  : <span style={{ fontSize: 7, color: TH.muted2 }}>set by scheduler</span>
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-              <input type="datetime-local" value={date && time ? date + 'T' + time : date ? date + 'T00:00' : ''}
-                onChange={e => {
-                  var v = e.target.value;
-                  if (v) {
-                    var parts = v.split('T');
-                    setDate(parts[0]);
-                    setTime(parts[1] || '');
-                  } else { setDate(''); setTime(''); }
-                  if (!isCreate && !isFixed) setDatePinned(!!v);
-                }}
-                style={{ ...iStyle, width: isMobile ? '100%' : undefined, minWidth: 0, ...(datePinned && date ? { borderColor: '#D97706' } : {}) }} />
-              {!isCreate && !isFixed && !marker && datePinned && date && (
-                <button onClick={() => { setDatePinned(false); setDate(''); setTime(''); }} title="Let scheduler control date"
-                  style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
-                    border: '1px solid ' + TH.btnBorder, background: TH.inputBg, color: TH.textMuted, fontWeight: 600,
-                    height: BTN_H, boxSizing: 'border-box' }}>
-                  Unpin
-                </button>
-              )}
-            </div>
-          </label>
-          <label style={lStyle}>
-            <span title="Total time needed. The scheduler reserves this much time in your schedule. If 'Split OK' is on, it can be broken into smaller chunks.">{'\u23F1'} Duration</span>
-            <select value={dur} onChange={e => setDur(parseInt(e.target.value))} style={iStyle}>
-              {durOptions.map(v => (
-                <option key={v} value={v}>{durLabel(v)}</option>
-              ))}
-            </select>
-          </label>
-          {!isCreate && !marker && <label style={lStyle}>
-            <span title="Time left on a partially completed task. Set this lower than Duration to tell the scheduler you've already done some of the work. The scheduler will only reserve the remaining time.">{'\uD83D\uDCCA'} Remaining</span>
-            <select value={remVal} onChange={e => setTimeRemaining(parseInt(e.target.value))}
-              style={{ ...iStyle, background: remVal < parseInt(dur) ? TH.purpleBg : TH.inputBg }}>
-              {remOptions.map(v => (
-                <option key={v} value={v}>{durLabel(v)}</option>
-              ))}
-            </select>
-          </label>}
-        </div>
-
-        {/* Row 2b: Split + Due + Start after — hidden for markers */}
-        {!marker && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, alignItems: 'flex-end', maxWidth: '100%' }}>
-          <label style={lStyle}>
-            <span title="Allow the scheduler to break this task into smaller chunks that fit into available gaps. Without splitting, the scheduler needs one contiguous block big enough for the full duration. For habits, this applies to all future instances.">{'\u2702'} Split OK</span>
-            <button title={split ? 'Task can be split into chunks' : 'Task must be scheduled as one block'} onClick={() => setSplit(!split)}
-              style={togStyle(split, '#10B981')}>{split ? '\u2702 Yes' : 'No'}</button>
-          </label>
-          {split && (
+            </label>
+          </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 5 }}>
             <label style={lStyle}>
-              <span title="Smallest chunk the scheduler will create when splitting. For example, 30m means the scheduler won't create any piece shorter than 30 minutes.">Min block</span>
-              <select value={splitMin} onChange={e => setSplitMin(parseInt(e.target.value))}
-                style={{ ...iStyle, width: 'auto', minWidth: 60 }}>
-                {[15,20,30,45,60].map(v => (
-                  <option key={v} value={v}>{v < 60 ? v + 'm' : '1h'}</option>
+              <span title="Controls scheduling order: P1 tasks are placed first and get the best time slots, then P2, P3, P4.">{'\uD83D\uDD25'} Priority</span>
+              <select value={pri} onChange={e => setPri(e.target.value)} style={{ ...iStyle, minWidth: 80 }}>
+                <option value="P1">{'\uD83D\uDD34'} P1 Critical</option>
+                <option value="P2">{'\uD83D\uDFE0'} P2 High</option>
+                <option value="P3">{'\uD83D\uDD35'} P3 Medium</option>
+                <option value="P4">{'\u26AA'} P4 Low</option>
+              </select>
+            </label>
+            <label style={lStyle}>
+              <span title="Non-blocking reminder — shows on the calendar but doesn't block time. Other tasks can overlap it.">{'\u25C7'} Reminder</span>
+              <button title={marker ? 'This is a non-blocking reminder' : 'Make this a non-blocking calendar reminder'} onClick={() => setMarker(!marker)}
+                style={{ ...togStyle(marker, '#8B5CF6'), minWidth: 50 }}>{marker ? '\u25C7 Yes' : 'No'}</button>
+            </label>
+            {!marker && <>
+            <label style={lStyle}>
+              <span title="Habits are scheduled before regular tasks and pinned to their date.">{'\uD83D\uDD01'} Habit</span>
+              <button title={habit ? 'This is a recurring habit' : 'Mark as a daily habit'} onClick={() => { var next = !habit; setHabit(next); if (habit) setRigid(false); if (next) setDayReq('any'); }}
+                style={{ ...togStyle(habit, '#10B981'), minWidth: 50 }}>{habit ? '\uD83D\uDD01 Yes' : 'No'}</button>
+            </label>
+            {habit && (
+              <label style={lStyle}>
+                <span title="How far from the preferred time the scheduler can move this habit. 0 = locked to exact time (rigid).">{'\u00B1'} Flex</span>
+                <select value={rigid ? 0 : timeFlex} onChange={e => {
+                  var v = parseInt(e.target.value);
+                  if (v === 0) { setRigid(true); } else { setRigid(false); setTimeFlex(v); }
+                }} style={{ ...iStyle, minWidth: 70 }}>
+                  <option value={0}>0 (rigid)</option>
+                  <option value={15}>15 min</option>
+                  <option value={30}>30 min</option>
+                  <option value={60}>1 hr</option>
+                  <option value={90}>1.5 hr</option>
+                  <option value={120}>2 hr</option>
+                  <option value={180}>3 hr</option>
+                  <option value={240}>4 hr</option>
+                </select>
+              </label>
+            )}
+            </>}
+          </div>
+          {!isCreate && onShowChain && (
+            <button onClick={onShowChain} style={{
+              border: '1px solid #0EA5E9', borderRadius: 4, padding: '4px 10px',
+              background: 'transparent', color: '#0EA5E9', fontSize: 10, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'inherit', width: '100%', marginBottom: 5,
+              height: BTN_H, boxSizing: 'border-box'
+            }}>{'\uD83D\uDD17'} Dependencies{task.dependsOn && task.dependsOn.length > 0 ? ' (' + task.dependsOn.length + ')' : ''}</button>
+          )}
+          <label style={lStyle}>
+            <span title="Free-text notes for your reference. Not used by the scheduler.">Notes</span>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)}
+              style={{ ...iStyle, minHeight: 40, resize: 'vertical', width: '100%' }} />
+          </label>
+        </div>
+
+        {/* ═══ SECTION: When (Scheduling) ═══ */}
+        <div style={secStyle}>
+          <div style={secHead}>When</div>
+
+          {/* Date/Time + Duration + Remaining */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, maxWidth: '100%' }}>
+            <label style={{ ...lStyle, maxWidth: '100%', minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span title="The date/time for this task. For fixed tasks: anchored exactly here. For pinned tasks: the scheduler keeps this date. For unpinned tasks: the scheduler may move it.">{'\uD83D\uDCC5'} Date / Time</span>
+                {!isCreate && !isFixed && !marker && date && (
+                  datePinned
+                    ? <span style={{ fontSize: 7, color: '#D97706', fontWeight: 700 }}>{'\uD83D\uDCCC'} pinned</span>
+                    : <span style={{ fontSize: 7, color: TH.muted2 }}>set by scheduler</span>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                <input type="datetime-local" value={date && time ? date + 'T' + time : date ? date + 'T00:00' : ''}
+                  onChange={e => {
+                    var v = e.target.value;
+                    if (v) {
+                      var parts = v.split('T');
+                      setDate(parts[0]);
+                      setTime(parts[1] || '');
+                    } else { setDate(''); setTime(''); }
+                    if (!isCreate && !isFixed) setDatePinned(!!v);
+                  }}
+                  style={{ ...iStyle, width: isMobile ? '100%' : undefined, minWidth: 0, ...(datePinned && date ? { borderColor: '#D97706' } : {}) }} />
+                {!isCreate && !isFixed && !marker && datePinned && date && (
+                  <button onClick={() => { setDatePinned(false); setDate(''); setTime(''); }} title="Let scheduler control date"
+                    style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
+                      border: '1px solid ' + TH.btnBorder, background: TH.inputBg, color: TH.textMuted, fontWeight: 600,
+                      height: BTN_H, boxSizing: 'border-box' }}>
+                    Unpin
+                  </button>
+                )}
+              </div>
+            </label>
+            <label style={lStyle}>
+              <span title="Total time needed. The scheduler reserves this much time.">{'\u23F1'} Duration</span>
+              <select value={dur} onChange={e => setDur(parseInt(e.target.value))} style={iStyle}>
+                {durOptions.map(v => (
+                  <option key={v} value={v}>{durLabel(v)}</option>
                 ))}
               </select>
             </label>
-          )}
-          <label style={lStyle}>
-            <span title="Hard deadline. The scheduler guarantees this task is placed before this date. Tasks with deadlines get priority over tasks without them. If the task has dependencies, they'll also be placed before this date.">{'\uD83D\uDCC6'} Due</span>
-            <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-              <input type="date" value={due || ''}
-                onChange={e => setDue(e.target.value || '')}
-                style={{ ...iStyle, minWidth: 0, flex: 1, ...(due ? { background: TH.amberBg } : {}) }} />
-              {due && (
-                <button onClick={() => setDue('')} style={{
-                  fontSize: 9, background: 'none', border: 'none', color: TH.redText,
-                  cursor: 'pointer', padding: 0, fontWeight: 700
-                }}>{'\u2715'}</button>
-              )}
-            </div>
-          </label>
-          <label style={lStyle}>
-            <span title="Earliest date this task can be scheduled. The scheduler won't place it before this date. Useful for tasks that depend on a future event or aren't relevant yet.">{'\u23F3'} Start after</span>
-            <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-              <input type="date" value={startAfter || ''}
-                onChange={e => setStartAfter(e.target.value || '')}
-                style={{ ...iStyle, minWidth: 0, flex: 1, ...(startAfter ? { background: TH.blueBg } : {}) }} />
-              {startAfter && (
-                <button onClick={() => setStartAfter('')} style={{
-                  fontSize: 9, background: 'none', border: 'none', color: TH.redText,
-                  cursor: 'pointer', padding: 0, fontWeight: 700
-                }}>{'\u2715'}</button>
-              )}
-            </div>
-          </label>
-        </div>}
-
-        {/* Row 3: Priority + Marker + Habit + Rigid + Location */}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
-          <label style={lStyle}>
-            <span title="Controls scheduling order: P1 tasks are placed first and get the best time slots, then P2, P3, P4. Higher priority tasks can also displace lower priority ones during schedule optimization.">{'\uD83D\uDD25'} Priority</span>
-            <select value={pri} onChange={e => setPri(e.target.value)} style={iStyle}>
-              <option value="P1">{'\uD83D\uDD34'} P1 Critical</option>
-              <option value="P2">{'\uD83D\uDFE0'} P2 High</option>
-              <option value="P3">{'\uD83D\uDD35'} P3 Medium</option>
-              <option value="P4">{'\u26AA'} P4 Low</option>
-            </select>
-          </label>
-          <label style={lStyle}>
-            <span title="Non-blocking calendar entry. Markers show on the calendar but don't block time — other tasks can overlap them. Use for reminders, FYIs, or events you want to see but don't need time reserved for.">{'\u25C7'} Marker</span>
-            <button title={marker ? 'This is a non-blocking marker' : 'Make this a non-blocking calendar marker'} onClick={() => setMarker(!marker)}
-              style={togStyle(marker, '#8B5CF6')}>{marker ? '\u25C7 Yes' : 'No'}</button>
-          </label>
-          {!marker && <>
-          <label style={lStyle}>
-            <span title="Habits are scheduled before regular tasks and are pinned to their assigned date. Use with Recurrence to auto-generate daily/weekly instances. Non-recurring habits can float to nearby days if their date is full.">{'\uD83D\uDD01'} Habit</span>
-            <button title={habit ? 'This is a recurring habit' : 'Mark as a daily habit'} onClick={() => { var next = !habit; setHabit(next); if (habit) setRigid(false); if (next) setDayReq('any'); }}
-              style={togStyle(habit, '#10B981')}>{habit ? '\uD83D\uDD01 Yes' : 'No'}</button>
-          </label>
-          {habit && (
-            <label style={lStyle}>
-              <span title="Rigid: locked to its exact set time — the scheduler will never move it. Flexible: the scheduler picks the best available slot near the preferred time, within the Flex window.">{'\uD83D\uDCCC'} Rigid</span>
-              <button title={rigid ? 'Stays at its exact set time' : 'Scheduler moves it to fit'} onClick={() => setRigid(!rigid)}
-                style={togStyle(rigid, '#3B82F6')}>{rigid ? '\uD83D\uDCCC Anchored' : '\uD83D\uDD01 Flexible'}</button>
-            </label>
-          )}
-          {habit && !rigid && (
-            <label style={lStyle}>
-              <span title="How far from the preferred time (set in Date/Time) the scheduler can move this habit. Example: if time is 9:00 AM and flex is 1hr, the scheduler can place it between 8:00-10:00 AM. If the flex window is too narrow, it falls back to the When windows.">{'\u00B1'} Flex</span>
-              <select value={timeFlex} onChange={e => setTimeFlex(parseInt(e.target.value))}
-                style={{ background: TH.inputBg, color: TH.text, border: '1px solid ' + TH.border, borderRadius: 4, padding: '2px 4px', fontSize: 13 }}>
-                <option value={15}>15 min</option>
-                <option value={30}>30 min</option>
-                <option value={60}>1 hr</option>
-                <option value={90}>1.5 hr</option>
-                <option value={120}>2 hr</option>
-                <option value={180}>3 hr</option>
-                <option value={240}>4 hr</option>
+            {!isCreate && !marker && <label style={lStyle}>
+              <span title="Time left on a partially completed task.">{'\uD83D\uDCCA'} Remaining</span>
+              <select value={remVal} onChange={e => setTimeRemaining(parseInt(e.target.value))}
+                style={{ ...iStyle, background: remVal < parseInt(dur) ? TH.purpleBg : TH.inputBg }}>
+                {remOptions.map(v => (
+                  <option key={v} value={v}>{durLabel(v)}</option>
+                ))}
               </select>
-            </label>
-          )}
-          <label style={lStyle}>
-            <span title="Where this task can be done. The scheduler only places it in time blocks where you're at a matching location. 'Anywhere' removes the constraint. If no matching location is available in your time blocks, the task goes unplaced.">{'\uD83D\uDCCD'} Location</span>
-            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 2 }}>
-              <button onClick={() => setTaskLoc([])} title="Task can be done at any location"
-                style={togStyle(taskLoc.length === 0, '#10B981')}>{'\uD83C\uDF0D'} Anywhere</button>
-              {(locations || []).map(loc => {
-                var isOn = taskLoc.indexOf(loc.id) !== -1;
-                var anywhere = taskLoc.length === 0;
-                return (
-                  <button key={loc.id} title={'Restrict to ' + loc.name} onClick={() => {
-                    if (anywhere) { setTaskLoc([loc.id]); }
-                    else { setTaskLoc(isOn ? taskLoc.filter(x => x !== loc.id) : [...taskLoc, loc.id]); }
-                  }} style={{
-                    ...togStyle(isOn && !anywhere),
-                    opacity: anywhere ? 0.4 : 1,
-                  }}>{loc.icon} {loc.name}</button>
-                );
-              })}
-            </div>
-          </label>
-          </>}
-        </div>
+            </label>}
+          </div>
 
-        {/* Row 4: Tools + When — hidden for markers */}
-        {!marker &&
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
-          <label style={lStyle}>
-            <span title="Equipment required for this task. The scheduler checks which tools are available at each location and only places the task in time slots where all required tools are present.">{'\uD83D\uDD27'} Tools needed</span>
-            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 2 }}>
-              {(tools || []).map(tool => {
-                var isOn = taskTools.indexOf(tool.id) !== -1;
-                return (
-                  <button key={tool.id} title={'Requires ' + tool.name} onClick={() => {
-                    setTaskTools(isOn ? taskTools.filter(x => x !== tool.id) : [...taskTools, tool.id]);
-                  }} style={togStyle(isOn)}>{tool.icon} {tool.name}</button>
-                );
-              })}
-            </div>
-          </label>
-          <label style={lStyle}>
-            <span title="Controls which time blocks the scheduler can use. Anytime: no restriction. All Day: spans the whole day (e.g. travel). Fixed: locked to the exact Date/Time — won't be moved. Windows: pick specific blocks (morning, afternoon, etc.).">{'\uD83D\uDCC6'} When</span>
+          {/* When mode selector — hidden for markers */}
+          {!marker && <label style={{ ...lStyle, marginBottom: 5 }}>
+            <span title="Controls which time blocks the scheduler can use.">{'\uD83D\uDCC6'} Scheduling mode</span>
             {(function() {
               var parts = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
-              var isAnytime = parts.length === 0 || (parts.length === 1 && parts[0] === 'anytime');
               var isAllDay = parts.indexOf('allday') !== -1;
               var isFixed = parts.indexOf('fixed') !== -1;
-              var isWindows = !isAnytime && !isAllDay && !isFixed;
+              // Window tags are everything that isn't a mode keyword
+              var tagParts = parts.filter(function(p) { return p !== 'anytime' && p !== 'allday' && p !== 'fixed'; });
+              var isWindows = tagParts.length > 0;
+              var isAnytime = !isAllDay && !isFixed && !isWindows;
               return (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    <button title="No time restriction — the scheduler can place this in any available slot across the day" onClick={function() { setWhen(''); }}
-                      style={togStyle(isAnytime, '#10B981')}>{'\uD83D\uDD04'} Anytime</button>
-                    <button title="Spans the entire day — blocks the full calendar day. Use for travel days, vacations, or events that consume the whole day" onClick={function() { setWhen('allday'); }}
-                      style={togStyle(isAllDay, '#F59E0B')}>{'\u2600\uFE0F'} All Day</button>
-                    <button title="Locked to the exact Date/Time set above. The scheduler will never move it. Other tasks schedule around it" onClick={function() { setWhen('fixed'); }}
-                      style={togStyle(isFixed, '#EF4444')}>{'\uD83D\uDCCC'} Fixed</button>
-                    <button title="Pick specific time blocks (morning, biz, afternoon, etc.). The task will only be placed during selected windows" onClick={function() {
-                      if (!isWindows) setWhen('morning,afternoon,evening');
-                    }} style={togStyle(isWindows)}>{'\uD83D\uDDD3'} Windows</button>
-                  </div>
-                  {isWindows && (
-                    <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
-                      {(uniqueTags || []).map(function(tb) {
-                        var isOn = parts.indexOf(tb.tag) !== -1;
-                        return (
-                          <button key={tb.tag} title={tb.name + ' time window'} onClick={function() {
-                            var cur = parts.slice();
-                            if (isOn) { cur = cur.filter(function(v) { return v !== tb.tag; }); }
-                            else { cur.push(tb.tag); }
-                            setWhen(cur.length === 0 ? '' : cur.join(','));
-                          }} style={togStyle(isOn, tb.color)}>{tb.icon} {tb.name}</button>
-                        );
-                      })}
-                      <span style={{ width: 1, height: 18, background: TH.border, margin: '0 2px' }} />
-                      <button title={flexWhen ? 'Flex mode: if the selected windows are full, the scheduler will try other time slots rather than leaving the task unplaced' : 'Strict mode: the task will ONLY be placed in the selected windows. If they are full, the task goes unplaced'}
-                        onClick={function() { setFlexWhen(!flexWhen); }}
-                        style={togStyle(flexWhen, '#F59E0B')}>
-                        {flexWhen ? '~ Flex' : 'Strict'}
-                      </button>
-                    </div>
-                  )}
+                <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center', marginTop: 4 }}>
+                  <button title="No time restriction — the scheduler can place this in any available slot" onClick={function() { setWhen(''); }}
+                    style={togStyle(isAnytime, '#10B981')}>{'\uD83D\uDD04'} Anytime</button>
+                  <button title="Spans the entire day" onClick={function() { setWhen('allday'); }}
+                    style={togStyle(isAllDay, '#F59E0B')}>{'\u2600\uFE0F'} All Day</button>
+                  <button title="Locked to the exact Date/Time. The scheduler will never move it" onClick={function() { setWhen('fixed'); }}
+                    style={togStyle(isFixed, '#EF4444')}>{'\uD83D\uDCCC'} Fixed</button>
+                  <span style={{ width: 1, height: 18, background: TH.border, margin: '0 2px' }} />
+                  {(uniqueTags || []).map(function(tb) {
+                    var isOn = tagParts.indexOf(tb.tag) !== -1;
+                    return (
+                      <button key={tb.tag} title={tb.name + ' time window — selecting any window disables Anytime'} onClick={function() {
+                        if (isAllDay || isFixed) {
+                          // Switch from allday/fixed to this single window
+                          setWhen(tb.tag);
+                        } else {
+                          var cur = tagParts.slice();
+                          if (isOn) { cur = cur.filter(function(v) { return v !== tb.tag; }); }
+                          else { cur.push(tb.tag); }
+                          setWhen(cur.length === 0 ? '' : cur.join(','));
+                        }
+                      }} style={{
+                        ...togStyle(isOn && !isAllDay && !isFixed, tb.color),
+                        opacity: isAllDay || isFixed ? 0.4 : 1
+                      }}>{tb.icon} {tb.name}</button>
+                    );
+                  })}
+                  {isWindows && <>
+                    <span style={{ width: 1, height: 18, background: TH.border, margin: '0 2px' }} />
+                    <button title={flexWhen ? 'Flex: scheduler tries other slots if selected windows are full' : 'Strict: only placed in selected windows'}
+                      onClick={function() { setFlexWhen(!flexWhen); }}
+                      style={togStyle(flexWhen, '#F59E0B')}>
+                      {flexWhen ? '~ Flex' : 'Strict'}
+                    </button>
+                  </>}
                 </div>
               );
             })()}
-          </label>
-        </div>}
+          </label>}
 
-        {/* Row 5: Day req + Recurrence — hidden for markers */}
-        {!marker &&
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
-          {/* Day requirement — hidden when habit (date-pinned) or weekly/biweekly recurrence
-              (recurrence days already control which days instances appear) */}
-          {!habit && recurType !== 'weekly' && recurType !== 'biweekly' && (
-          <label style={lStyle}>
-            <span title="Restrict which days the scheduler can place this task. 'Any' = all days. 'Wkday' = Mon-Fri only. 'Wkend' = Sat-Sun only. Pick specific days for more control. If no eligible day has room, the task goes unplaced.">Day requirement</span>
+          {/* Day req — hidden for markers, habits, and weekly/biweekly recurrence */}
+          {!marker && !habit && recurType !== 'weekly' && recurType !== 'biweekly' && (
+          <label style={{ ...lStyle, marginBottom: 5 }}>
+            <span title="Restrict which days the scheduler can place this task.">Day requirement</span>
             <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-              <button title="No day restriction — task can be placed on any day" onClick={function() { setDayReq('any'); }}
+              <button title="No day restriction" onClick={function() { setDayReq('any'); }}
                 style={togStyle(dayReq === 'any', '#10B981')}>Any</button>
-              <button title="Monday through Friday only — won't be placed on weekends" onClick={function() { setDayReq(dayReq === 'weekday' ? 'any' : 'weekday'); }}
+              <button title="Monday through Friday only" onClick={function() { setDayReq(dayReq === 'weekday' ? 'any' : 'weekday'); }}
                 style={togStyle(dayReq === 'weekday', '#6366F1')}>Wkday</button>
-              <button title="Saturday or Sunday only — won't be placed on weekdays" onClick={function() { setDayReq(dayReq === 'weekend' ? 'any' : 'weekend'); }}
+              <button title="Saturday or Sunday only" onClick={function() { setDayReq(dayReq === 'weekend' ? 'any' : 'weekend'); }}
                 style={togStyle(dayReq === 'weekend', '#8B5CF6')}>Wkend</button>
               {[['Su','Su'],['M','Mo'],['T','Tu'],['W','We'],['R','Th'],['F','Fr'],['Sa','Sa']].map(function(pair) {
                 var code = pair[0], label = pair[1];
@@ -707,99 +633,178 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
               })}
             </div>
           </label>)}
-          <label style={lStyle}>
-            <span title="Automatically generate copies of this task on a schedule. Each generated instance is scheduled independently. Changes to template fields (duration, priority, location, etc.) apply to all instances.">{'\uD83D\uDD01'} Recurrence</span>
-            <select value={recurType} onChange={e => { setRecurType(e.target.value); if (e.target.value === 'weekly' || e.target.value === 'biweekly') setDayReq('any'); }} style={iStyle}>
-              <option value="none">None</option>
-              <option value="daily">Daily</option>
-              <option value="weekly">Weekly</option>
-              <option value="biweekly">Biweekly</option>
-              <option value="monthly">Monthly (pick days)</option>
-              <option value="interval">Every N (days/wks/mo/yr)</option>
-            </select>
-          </label>
-          {(recurType === 'weekly' || recurType === 'biweekly') && (
+
+          {/* Due + Start after + Split — hidden for markers */}
+          {!marker && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, alignItems: 'flex-end', maxWidth: '100%' }}>
             <label style={lStyle}>
-              Days
-              <div style={{ display: 'flex', gap: 3 }}>
-                {[['U','Su'],['M','Mo'],['T','Tu'],['W','We'],['R','Th'],['F','Fr'],['S','Sa']].map(function(pair) {
-                  var code = pair[0], label = pair[1];
-                  var active = recurDays.includes(code);
-                  return (
-                    <button key={code} onClick={function() {
-                      setRecurDays(active ? recurDays.replace(code, '') : recurDays + code);
-                    }} style={togStyle(active)}>{label}</button>
-                  );
-                })}
+              <span title="Hard deadline. The scheduler places this task before this date.">{'\uD83D\uDCC6'} Due</span>
+              <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                <input type="date" value={due || ''}
+                  onChange={e => setDue(e.target.value || '')}
+                  style={{ ...iStyle, minWidth: 0, flex: 1, ...(due ? { background: TH.amberBg } : {}) }} />
+                {due && (
+                  <button onClick={() => setDue('')} style={{
+                    fontSize: 9, background: 'none', border: 'none', color: TH.redText,
+                    cursor: 'pointer', padding: 0, fontWeight: 700
+                  }}>{'\u2715'}</button>
+                )}
               </div>
             </label>
-          )}
-          {recurType === 'monthly' && (
             <label style={lStyle}>
-              Days of month
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, maxWidth: 260 }}>
-                {[['first', '1st'], ['last', 'Last']].concat(
-                  Array.from({ length: 28 }, function(_, i) { return [String(i + 1), String(i + 1)]; })
-                ).map(function(pair) {
-                  var val = pair[0], label = pair[1];
-                  var active = recurMonthDays.indexOf(val) >= 0 || recurMonthDays.indexOf(Number(val)) >= 0;
-                  return (
-                    <button key={val} onClick={function() {
-                      setRecurMonthDays(function(prev) {
-                        var norm = prev.map(String);
-                        var sv = String(val);
-                        return norm.indexOf(sv) >= 0 ? prev.filter(function(d) { return String(d) !== sv; }) : prev.concat([val]);
-                      });
-                    }} style={{ ...togStyle(active), minWidth: label.length > 2 ? 32 : 22, fontSize: 9 }}>{label}</button>
-                  );
-                })}
+              <span title="Earliest date this task can be scheduled.">{'\u23F3'} Start after</span>
+              <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                <input type="date" value={startAfter || ''}
+                  onChange={e => setStartAfter(e.target.value || '')}
+                  style={{ ...iStyle, minWidth: 0, flex: 1, ...(startAfter ? { background: TH.blueBg } : {}) }} />
+                {startAfter && (
+                  <button onClick={() => setStartAfter('')} style={{
+                    fontSize: 9, background: 'none', border: 'none', color: TH.redText,
+                    cursor: 'pointer', padding: 0, fontWeight: 700
+                  }}>{'\u2715'}</button>
+                )}
               </div>
             </label>
-          )}
-          {recurType === 'interval' && (
             <label style={lStyle}>
-              Interval
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ fontSize: 10, color: TH.text }}>Every</span>
-                <input type="number" value={recurEvery} onChange={e => setRecurEvery(e.target.value)} min={1}
-                  style={{ ...iStyle, width: 50 }} />
-                <select value={recurUnit} onChange={e => setRecurUnit(e.target.value)} style={{ ...iStyle, width: 'auto' }}>
-                  <option value="days">day(s)</option>
-                  <option value="weeks">week(s)</option>
-                  <option value="months">month(s)</option>
-                  <option value="years">year(s)</option>
+              <span title="Allow the scheduler to break this task into smaller chunks.">{'\u2702'} Split OK</span>
+              <button title={split ? 'Task can be split into chunks' : 'Task must be scheduled as one block'} onClick={() => setSplit(!split)}
+                style={togStyle(split, '#10B981')}>{split ? '\u2702 Yes' : 'No'}</button>
+            </label>
+            {split && (
+              <label style={lStyle}>
+                <span title="Smallest chunk when splitting.">Min block</span>
+                <select value={splitMin} onChange={e => setSplitMin(parseInt(e.target.value))}
+                  style={{ ...iStyle, width: 'auto', minWidth: 60 }}>
+                  {[15,20,30,45,60].map(v => (
+                    <option key={v} value={v}>{v < 60 ? v + 'm' : '1h'}</option>
+                  ))}
                 </select>
-              </div>
+              </label>
+            )}
+          </div>}
+
+          {/* Recurrence */}
+          {!marker &&
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <label style={lStyle}>
+              <span title="Automatically generate copies of this task on a schedule.">{'\uD83D\uDD01'} Recurrence</span>
+              <select value={recurType} onChange={e => { setRecurType(e.target.value); if (e.target.value === 'weekly' || e.target.value === 'biweekly') setDayReq('any'); }} style={iStyle}>
+                <option value="none">None</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="biweekly">Biweekly</option>
+                <option value="monthly">Monthly (pick days)</option>
+                <option value="interval">Every N (days/wks/mo/yr)</option>
+              </select>
             </label>
+            {(recurType === 'weekly' || recurType === 'biweekly') && (
+              <label style={lStyle}>
+                Days
+                <div style={{ display: 'flex', gap: 3 }}>
+                  {[['U','Su'],['M','Mo'],['T','Tu'],['W','We'],['R','Th'],['F','Fr'],['S','Sa']].map(function(pair) {
+                    var code = pair[0], label = pair[1];
+                    var active = recurDays.includes(code);
+                    return (
+                      <button key={code} onClick={function() {
+                        setRecurDays(active ? recurDays.replace(code, '') : recurDays + code);
+                      }} style={togStyle(active)}>{label}</button>
+                    );
+                  })}
+                </div>
+              </label>
+            )}
+            {recurType === 'monthly' && (
+              <label style={lStyle}>
+                Days of month
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, maxWidth: 260 }}>
+                  {[['first', '1st'], ['last', 'Last']].concat(
+                    Array.from({ length: 28 }, function(_, i) { return [String(i + 1), String(i + 1)]; })
+                  ).map(function(pair) {
+                    var val = pair[0], label = pair[1];
+                    var active = recurMonthDays.indexOf(val) >= 0 || recurMonthDays.indexOf(Number(val)) >= 0;
+                    return (
+                      <button key={val} onClick={function() {
+                        setRecurMonthDays(function(prev) {
+                          var norm = prev.map(String);
+                          var sv = String(val);
+                          return norm.indexOf(sv) >= 0 ? prev.filter(function(d) { return String(d) !== sv; }) : prev.concat([val]);
+                        });
+                      }} style={{ ...togStyle(active), minWidth: label.length > 2 ? 32 : 22, fontSize: 9 }}>{label}</button>
+                    );
+                  })}
+                </div>
+              </label>
+            )}
+            {recurType === 'interval' && (
+              <label style={lStyle}>
+                Interval
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ fontSize: 10, color: TH.text }}>Every</span>
+                  <input type="number" value={recurEvery} onChange={e => setRecurEvery(e.target.value)} min={1}
+                    style={{ ...iStyle, width: 50 }} />
+                  <select value={recurUnit} onChange={e => setRecurUnit(e.target.value)} style={{ ...iStyle, width: 'auto' }}>
+                    <option value="days">day(s)</option>
+                    <option value="weeks">week(s)</option>
+                    <option value="months">month(s)</option>
+                    <option value="years">year(s)</option>
+                  </select>
+                </div>
+              </label>
+            )}
+          </div>}
+
+          {/* Configuration warnings */}
+          {configWarnings.length > 0 && (
+            <div style={{ background: darkMode ? '#422006' : '#FEF3C7', border: '1px solid #F59E0B', borderRadius: 4, padding: '4px 8px', marginTop: 5, fontSize: 10, color: darkMode ? '#FCD34D' : '#92400E', lineHeight: 1.4 }}>
+              {configWarnings.map(function(w, i) {
+                return <div key={i}>{'\u26A0\uFE0F'} {w}</div>;
+              })}
+            </div>
           )}
-        </div>}
-
-        {/* Configuration warnings */}
-        {configWarnings.length > 0 && (
-          <div style={{ background: darkMode ? '#422006' : '#FEF3C7', border: '1px solid #F59E0B', borderRadius: 4, padding: '4px 8px', marginBottom: 5, fontSize: 10, color: darkMode ? '#FCD34D' : '#92400E', lineHeight: 1.4 }}>
-            {configWarnings.map(function(w, i) {
-              return <div key={i}>{'\u26A0\uFE0F'} {w}</div>;
-            })}
-          </div>
-        )}
-
-        {/* Notes */}
-        <div style={{ marginBottom: 5 }}>
-          <label style={lStyle}>
-            <span title="Free-text notes for your reference. Not used by the scheduler.">Notes</span>
-            <textarea value={notes} onChange={e => setNotes(e.target.value)}
-              style={{ ...iStyle, minHeight: 50, resize: 'vertical', width: '100%' }} />
-          </label>
         </div>
 
-        {/* Dependencies — link to Deps view */}
-        {!isCreate && onShowChain && (
-          <button onClick={onShowChain} style={{
-            border: '1px solid #0EA5E9', borderRadius: 4, padding: '4px 10px',
-            background: 'transparent', color: '#0EA5E9', fontSize: 10, fontWeight: 600,
-            cursor: 'pointer', fontFamily: 'inherit', width: '100%', marginBottom: 5
-          }}>{'\uD83D\uDD17'} View Dependencies{task.dependsOn && task.dependsOn.length > 0 ? ' (' + task.dependsOn.length + ')' : ''}</button>
-        )}
+        {/* ═══ SECTION: Where & Tools ═══ */}
+        {!marker &&
+        <div style={secStyle}>
+          <div style={secHead}>Where & Tools</div>
+          <label style={{ ...lStyle, marginBottom: 5 }}>
+            <span title="Where this task can be done. The scheduler only places it where you're at a matching location.">{'\uD83D\uDCCD'} Location</span>
+            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 2 }}>
+              <button onClick={() => setTaskLoc([])} title="Task can be done at any location"
+                style={togStyle(taskLoc.length === 0, '#10B981')}>{'\uD83C\uDF0D'} Anywhere</button>
+              {(locations || []).map(loc => {
+                var isOn = taskLoc.indexOf(loc.id) !== -1;
+                var anywhere = taskLoc.length === 0;
+                return (
+                  <button key={loc.id} title={'Restrict to ' + loc.name} onClick={() => {
+                    if (anywhere) { setTaskLoc([loc.id]); }
+                    else { setTaskLoc(isOn ? taskLoc.filter(x => x !== loc.id) : [...taskLoc, loc.id]); }
+                  }} style={{
+                    ...togStyle(isOn && !anywhere),
+                    opacity: anywhere ? 0.4 : 1,
+                  }}>{loc.icon} {loc.name}</button>
+                );
+              })}
+            </div>
+          </label>
+          <label style={lStyle}>
+            <span title="Equipment required. The scheduler checks which tools are at each location.">{'\uD83D\uDD27'} Tools needed</span>
+            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 2 }}>
+              {(tools || []).map(tool => {
+                var isOn = taskTools.indexOf(tool.id) !== -1;
+                return (
+                  <button key={tool.id} title={'Requires ' + tool.name} onClick={() => {
+                    setTaskTools(isOn ? taskTools.filter(x => x !== tool.id) : [...taskTools, tool.id]);
+                  }} style={togStyle(isOn)}>{tool.icon} {tool.name}</button>
+                );
+              })}
+            </div>
+          </label>
+        </div>}
+
+        {/* (Dependencies moved into Task section above) */}
+
+          </>);
+        })()}
       </div>
 
       {showDeleteConfirm && (

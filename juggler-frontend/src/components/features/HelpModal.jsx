@@ -17,7 +17,7 @@ var SHORTCUTS = [
 function Section({ title, children, theme }) {
   return (
     <div style={{ marginBottom: 20 }}>
-      <div style={{ fontSize: 14, fontWeight: 700, color: theme.text, marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid ' + theme.border }}>{title}</div>
+      <div style={{ fontFamily: "'EB Garamond', serif", fontSize: 16, fontWeight: 500, color: theme.text, marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid ' + theme.border }}>{title}</div>
       <div style={{ fontSize: 12, color: theme.textSecondary, lineHeight: 1.7 }}>{children}</div>
     </div>
   );
@@ -50,20 +50,20 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
       alignItems: 'center', justifyContent: 'center'
     }} onClick={onClose}>
       <div style={{
-        background: theme.bgSecondary, borderRadius: isMobile ? 0 : 12,
+        background: theme.bgSecondary, borderRadius: isMobile ? 0 : 2,
         width: isMobile ? '100%' : 560, maxWidth: isMobile ? '100%' : '95vw',
         height: isMobile ? '100%' : undefined, maxHeight: isMobile ? '100%' : '85vh',
         overflow: 'auto', padding: 20,
-        boxShadow: isMobile ? 'none' : ('0 8px 32px ' + theme.shadow)
+        boxShadow: isMobile ? 'none' : ('0 2px 8px ' + theme.shadow)
       }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>Juggler Help Guide</div>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 700, color: theme.text }}>Help Guide</div>
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: theme.textMuted, fontSize: 20, cursor: 'pointer' }}>&times;</button>
         </div>
 
         {/* 1. Getting Started */}
         <Section title="1. Getting Started" theme={theme}>
-          <P>Juggler is an auto-scheduling task manager. You create tasks with time windows, locations, tool requirements, priorities, and deadlines — then Juggler&apos;s scheduler places them into available time slots on your calendar.</P>
+          <P>Raike &amp; Sons WorkRS is an auto-scheduling task manager. You create tasks with time windows, locations, tool requirements, priorities, and deadlines — then the scheduler places them into available time slots on your calendar. Never stops working.</P>
           <P>The basic workflow is: <B>add tasks</B> with constraints (when, where, how long), then hit <B>Reschedule</B> to let the scheduler place them automatically. You can also drag tasks manually and mark them done/wip/skipped as you go.</P>
           <P>Tasks that the scheduler can&apos;t place (due to conflicts, lack of available time, or missing tools at a location) appear in the <B>Unplaced</B> filter and the <B>Issues</B> view.</P>
         </Section>
@@ -158,22 +158,37 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
           <P>The chat log dropdown (&#x1F4AC;) shows command history and AI responses. It auto-hides after 8 seconds.</P>
         </Section>
 
-        {/* 8. Google Calendar Sync */}
-        <Section title="8. Google Calendar Sync" theme={theme}>
+        {/* 8. Calendar Sync */}
+        <Section title="8. Calendar Sync" theme={theme}>
           <P><B>Connect:</B> Click the calendar icon (&#x1F4C5;) in the header, then &quot;Connect Google Calendar&quot; to authorize with your Google account via OAuth.</P>
-          <P><B>Auto-sync:</B> When enabled, Juggler syncs with Google Calendar every 5 minutes while the app is open. Toggle this on/off in the sync panel.</P>
+          <P><B>Auto-sync:</B> When enabled, Raike &amp; Sons syncs with your calendars every 5 minutes while the app is open. Toggle this on/off in the sync panel.</P>
           <P><B>Sync Now:</B> Manually trigger a sync at any time.</P>
           <P><B>Bidirectional:</B> Changes flow both ways:</P>
           <P style={{ paddingLeft: 12 }}>
-            &bull; <B>Pushed</B> = Juggler tasks sent to Google Calendar<br />
-            &bull; <B>Pulled</B> = Google Calendar events imported into Juggler<br />
+            &bull; <B>Pushed</B> = Tasks sent to your calendar<br />
+            &bull; <B>Pulled</B> = Calendar events imported into your tasks<br />
             &bull; <B>Deleted</B> = Removed items synced in both directions
           </P>
-          <P><B>Disconnect:</B> Revokes access and stops syncing. Your tasks remain in Juggler.</P>
+          <P><B>Disconnect:</B> Revokes access and stops syncing. Your tasks remain safe.</P>
         </Section>
 
-        {/* 9. Keyboard Shortcuts */}
-        <Section title="9. Keyboard Shortcuts" theme={theme}>
+        {/* 9. MCP Integration */}
+        <Section title="9. MCP Integration" theme={theme}>
+          <P><B>What is MCP?</B> Model Context Protocol lets AI assistants like Claude, Cursor, and others connect directly to WorkRS. Your AI can manage your tasks and schedule through natural conversation.</P>
+          <P><B>Capabilities:</B> Through MCP, an AI assistant can:</P>
+          <P style={{ paddingLeft: 12 }}>
+            &bull; Create, update, and delete tasks with full scheduling options<br />
+            &bull; Run the scheduler to auto-place tasks<br />
+            &bull; Query your schedule, projects, and configuration<br />
+            &bull; Set task statuses and manage dependencies<br />
+            &bull; Batch create multiple tasks at once
+          </P>
+          <P><B>Compatible with:</B> Claude Code, Claude Desktop, Cursor, and any MCP-compatible client.</P>
+          <P><B>Setup:</B> The MCP server runs locally and connects to your WorkRS backend. Add the server config to your AI client&apos;s MCP settings and authenticate with your token.</P>
+        </Section>
+
+        {/* 10. Keyboard Shortcuts */}
+        <Section title="10. Keyboard Shortcuts" theme={theme}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {SHORTCUTS.map(function(s, i) {
               return (
@@ -191,8 +206,8 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
           </div>
         </Section>
 
-        {/* Tips */}
-        <Section title="Tips" theme={theme}>
+        {/* 11. Tips */}
+        <Section title="11. Tips" theme={theme}>
           <P>&bull; Click hour labels in Day view to change the location for that hour.</P>
           <P>&bull; Drag tasks between days, times, or priority columns.</P>
           <P>&bull; Use &#x2713;hab to batch-mark all habits done for the day.</P>

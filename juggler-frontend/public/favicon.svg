@@ -1,1 +1,36 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🤹</text></svg>
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="200" height="200" fill="#1A2B4A"/>
+
+  <!-- Inner border rule -->
+  <rect x="6" y="6" width="188" height="188" fill="none" stroke="#C8942A" stroke-width="0.75" opacity="0.25"/>
+
+  <!-- Top row: diamonds + text -->
+  <rect x="58" y="28" width="7" height="7" fill="#C8942A" opacity="0.65" transform="rotate(45 61.5 31.5)"/>
+  <text x="100" y="35" text-anchor="middle" font-family="'Inter', sans-serif" font-size="8.5" font-weight="600" letter-spacing="3.5" fill="#C8942A" opacity="0.8" text-transform="uppercase">RAIKE &amp; SONS</text>
+  <rect x="135" y="28" width="7" height="7" fill="#C8942A" opacity="0.65" transform="rotate(45 138.5 31.5)"/>
+
+  <!-- Monogram R -->
+  <text x="72" y="130" font-family="'Playfair Display', serif" font-size="100" fill="#F5F0E8" font-weight="700" letter-spacing="-2">R</text>
+
+  <!-- Monogram & -->
+  <text x="110" y="118" font-family="'Cormorant Garamond', serif" font-size="56" fill="#C8942A" font-style="italic" font-weight="300">&amp;</text>
+
+  <!-- Monogram S (faded) -->
+  <text x="130" y="130" font-family="'Playfair Display', serif" font-size="100" fill="#F5F0E8" font-weight="400" letter-spacing="-2" opacity="0.28">S</text>
+
+  <!-- Double rule -->
+  <line x1="30" y1="143" x2="170" y2="143" stroke="#C8942A" stroke-width="0.75" opacity="0.28"/>
+  <line x1="30" y1="147" x2="170" y2="147" stroke="#C8942A" stroke-width="0.75" opacity="0.28"/>
+
+  <!-- Brand name -->
+  <text x="100" y="163" text-anchor="middle" font-family="'Playfair Display', serif" font-size="15" fill="#F5F0E8" font-weight="400" letter-spacing="3.5" opacity="0.9">RAIKE &amp; SONS</text>
+
+  <!-- Single rule -->
+  <line x1="30" y1="170" x2="170" y2="170" stroke="#C8942A" stroke-width="0.75" opacity="0.28"/>
+
+  <!-- Est row -->
+  <circle cx="60" cy="182" r="1.5" fill="#C8942A" opacity="0.5"/>
+  <text x="100" y="185" text-anchor="middle" font-family="'Inter', sans-serif" font-size="8" font-weight="600" letter-spacing="2.5" fill="#C8942A" opacity="0.6">EST. 2025</text>
+  <circle cx="140" cy="182" r="1.5" fill="#C8942A" opacity="0.5"/>
+</svg>

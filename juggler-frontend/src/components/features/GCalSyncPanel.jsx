@@ -98,7 +98,7 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
       setSyncing(true);
       setResults(null);
       if (onSyncStart) onSyncStart();
-      var { data } = await apiClient.post('/gcal/sync');
+      var { data } = await apiClient.post('/cal/sync');
       setResults(data);
       var parts = [];
       if (data.pushed) parts.push(data.pushed + ' pushed');
@@ -150,7 +150,7 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
             <div style={{ fontSize: 13, color: theme.textMuted, marginBottom: 16 }}>
               Connect your Google Calendar to sync tasks and events bidirectionally.
             </div>
-            <button onClick={handleConnect} disabled={connecting} title="Authorize Juggler to read and write your Google Calendar" style={{
+            <button onClick={handleConnect} disabled={connecting} title="Authorize Raike &amp; Sons to read and write your Google Calendar" style={{
               border: 'none', borderRadius: 8, padding: '10px 24px',
               background: theme.accent, color: '#FFF', fontWeight: 600, fontSize: 13,
               cursor: 'pointer', fontFamily: 'inherit', opacity: connecting ? 0.5 : 1
@@ -215,10 +215,10 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
               }}>
                 <div style={{ fontWeight: 600, marginBottom: 6 }}>Sync Results</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', fontSize: 11, color: theme.textSecondary }}>
-                  <div title="Tasks sent from Juggler to Google Calendar">Pushed: <strong style={{ color: theme.text }}>{results.pushed || 0}</strong></div>
-                  <div title="Events imported from Google Calendar into Juggler">Pulled: <strong style={{ color: theme.text }}>{results.pulled || 0}</strong></div>
+                  <div title="Tasks sent to Google Calendar">Pushed: <strong style={{ color: theme.text }}>{results.pushed || 0}</strong></div>
+                  <div title="Events imported from Google Calendar">Pulled: <strong style={{ color: theme.text }}>{results.pulled || 0}</strong></div>
                   <div title="Items deleted locally to match Google Calendar">Deleted (local): <strong style={{ color: theme.text }}>{results.deleted_local || 0}</strong></div>
-                  <div title="Items deleted from Google Calendar to match Juggler">Deleted (remote): <strong style={{ color: theme.text }}>{results.deleted_remote || 0}</strong></div>
+                  <div title="Items deleted from Google Calendar">Deleted (remote): <strong style={{ color: theme.text }}>{results.deleted_remote || 0}</strong></div>
                 </div>
                 {results.errors && results.errors.length > 0 && (
                   <div style={{ marginTop: 6, color: '#e74c3c', fontSize: 11 }}>

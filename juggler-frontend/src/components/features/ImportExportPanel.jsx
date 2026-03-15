@@ -117,7 +117,7 @@ function buildICS(tasks, statuses) {
   var lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Juggler//Task Tracker//EN',
+    'PRODID:-//Raike and Sons//WorkRS//EN',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH'
   ];
@@ -139,7 +139,7 @@ function buildICS(tasks, statuses) {
     var endH = Math.floor(totalEndM / 60), endM = totalEndM % 60;
 
     lines.push('BEGIN:VEVENT');
-    lines.push('UID:' + t.id + '@juggler');
+    lines.push('UID:' + t.id + '@raikeandsons');
     lines.push('DTSTAMP:' + stamp);
     lines.push('DTSTART:' + dateToICS(year, month, day, startH, startM));
     lines.push('DTEND:' + dateToICS(year, month, day, endH, endM));
@@ -442,7 +442,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = url;
-      a.download = 'juggler-' + new Date().toISOString().slice(0, 10) + '.ics';
+      a.download = 'workrs-' + new Date().toISOString().slice(0, 10) + '.ics';
       a.click();
       URL.revokeObjectURL(url);
       showToast('Exported .ics file', 'success');
@@ -514,7 +514,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = url;
-      a.download = 'juggler-export-' + new Date().toISOString().slice(0, 10) + '.json';
+      a.download = 'workrs-export-' + new Date().toISOString().slice(0, 10) + '.json';
       a.click();
       URL.revokeObjectURL(url);
       showToast('Exported successfully', 'success');
@@ -526,7 +526,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
   }
 
   var btnStyle = {
-    border: '1px solid ' + theme.border, borderRadius: 8, padding: '10px 20px',
+    border: '1px solid ' + theme.border, borderRadius: 2, padding: '10px 20px',
     background: 'transparent', color: theme.text, fontWeight: 600, fontSize: 13,
     cursor: 'pointer', fontFamily: 'inherit'
   };
@@ -538,14 +538,14 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
       alignItems: 'center', justifyContent: 'center'
     }} onClick={onClose}>
       <div style={{
-        background: theme.bgSecondary, borderRadius: isMobile ? 0 : 12,
+        background: theme.bgSecondary, borderRadius: isMobile ? 0 : 2,
         width: isMobile ? '100%' : 560, maxWidth: isMobile ? '100%' : '95vw',
         height: isMobile ? '100%' : undefined, maxHeight: isMobile ? '100%' : '80vh',
         overflow: 'auto', padding: 20,
-        boxShadow: isMobile ? 'none' : '0 8px 32px ' + theme.shadow
+        boxShadow: isMobile ? 'none' : '0 2px 8px ' + theme.shadow
       }} onClick={function(e) { e.stopPropagation(); }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: theme.text }}>Import / Export</div>
+          <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 700, color: theme.text }}>Import / Export</div>
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', color: theme.textMuted, fontSize: 20, cursor: 'pointer' }}>&times;</button>
         </div>
 
@@ -554,7 +554,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
           <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>Export</div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button onClick={handleExport} disabled={exporting} style={{
-              border: 'none', borderRadius: 8, padding: '10px 20px',
+              border: 'none', borderRadius: 2, padding: '10px 20px',
               background: theme.accent, color: '#FFF', fontWeight: 600, fontSize: 13,
               cursor: 'pointer', fontFamily: 'inherit', opacity: exporting ? 0.5 : 1
             }}>
@@ -589,7 +589,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
 
           {/* ICS Preview */}
           {icsPreview && (
-            <div style={{ marginTop: 12, border: '1px solid ' + theme.border, borderRadius: 8, padding: 12 }}>
+            <div style={{ marginTop: 12, border: '1px solid ' + theme.border, borderRadius: 2, padding: 12 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 8 }}>
                 {icsPreview.fileName}: {icsPreview.tasks.length} event{icsPreview.tasks.length !== 1 ? 's' : ''} found
               </div>
@@ -607,14 +607,14 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={handleICSImportConfirm} disabled={icsImporting} style={{
-                  border: 'none', borderRadius: 8, padding: '8px 16px',
+                  border: 'none', borderRadius: 2, padding: '8px 16px',
                   background: '#10B981', color: '#FFF', fontWeight: 600, fontSize: 12,
                   cursor: 'pointer', fontFamily: 'inherit', opacity: icsImporting ? 0.5 : 1
                 }}>
                   {icsImporting ? 'Importing...' : 'Import ' + icsPreview.tasks.length + ' Events'}
                 </button>
                 <button onClick={function() { setIcsPreview(null); }} style={{
-                  border: '1px solid ' + theme.border, borderRadius: 8, padding: '8px 16px',
+                  border: '1px solid ' + theme.border, borderRadius: 2, padding: '8px 16px',
                   background: 'transparent', color: theme.textMuted, fontWeight: 600, fontSize: 12,
                   cursor: 'pointer', fontFamily: 'inherit'
                 }}>
@@ -638,7 +638,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
             placeholder='Paste JSON here...'
             style={{
               width: '100%', minHeight: 120, padding: '8px 10px',
-              border: '1px solid ' + theme.inputBorder, borderRadius: 8,
+              border: '1px solid ' + theme.inputBorder, borderRadius: 2,
               background: theme.input, color: theme.text, fontSize: 12,
               fontFamily: 'monospace', resize: 'vertical', outline: 'none',
               boxSizing: 'border-box'
@@ -646,7 +646,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
           />
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
             <button onClick={handleImport} disabled={importing || !importText.trim()} style={{
-              border: 'none', borderRadius: 8, padding: '10px 20px',
+              border: 'none', borderRadius: 2, padding: '10px 20px',
               background: '#10B981', color: '#FFF', fontWeight: 600, fontSize: 13,
               cursor: 'pointer', fontFamily: 'inherit',
               opacity: importing || !importText.trim() ? 0.5 : 1

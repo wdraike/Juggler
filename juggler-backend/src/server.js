@@ -1,5 +1,5 @@
 /**
- * Juggler Backend Server
+ * Raike & Sons Backend Server
  */
 
 require('dotenv').config();
@@ -10,7 +10,7 @@ const { loadJWTSecrets } = require('./middleware/jwt-auth');
 const PORT = process.env.PORT || 5002;
 
 async function start() {
-  console.log('Starting Juggler backend...');
+  console.log('Starting Raike & Sons backend...');
   console.log(`  NODE_ENV: ${process.env.NODE_ENV}`);
   console.log(`  DB_HOST: ${process.env.DB_HOST}`);
   console.log(`  DB_NAME: ${process.env.DB_NAME}`);
@@ -20,7 +20,7 @@ async function start() {
   await loadJWTSecrets();
 
   app.listen(PORT, () => {
-    console.log(`Juggler backend running on port ${PORT}`);
+    console.log(`Raike & Sons backend running on port ${PORT}`);
   });
 }
 

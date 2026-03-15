@@ -100,7 +100,7 @@ function ProjectCombobox({ value, onChange, allProjectNames, theme, isMobile }) 
           title="Filter tasks by project — type to search"
           style={{
             padding: isMobile ? '6px 28px 6px 8px' : '4px 24px 4px 8px',
-            borderRadius: 8, fontSize: fontSize, cursor: 'pointer',
+            borderRadius: 2, fontSize: fontSize, cursor: 'pointer',
             border: '1px solid ' + (isActive ? theme.accent : theme.border),
             background: isActive ? theme.accent + '20' : theme.input,
             color: isActive ? theme.accent : theme.textMuted,
@@ -120,7 +120,7 @@ function ProjectCombobox({ value, onChange, allProjectNames, theme, isMobile }) 
         <div style={{
           position: 'absolute', top: '100%', left: 0, marginTop: 2,
           background: theme.bgSecondary, border: '1px solid ' + theme.border,
-          borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          borderRadius: 2, boxShadow: '0 2px 8px rgba(26,43,74,0.08)',
           zIndex: 300, minWidth: isMobile ? '100%' : 140, maxHeight: 200, overflowY: 'auto'
         }}>
           <button onClick={function() { select(''); }}
@@ -180,19 +180,20 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
         {VIEW_MODES.map(v => (
           <button key={v.id} onClick={() => setViewMode(v.id)}
             style={{
-              border: 'none', borderRadius: 6, padding: isMobile ? '5px 0' : '5px 10px', cursor: 'pointer',
+              border: 'none', borderRadius: 2, padding: isMobile ? '5px 0' : '5px 10px', cursor: 'pointer',
               background: viewMode === v.id ? theme.accent : 'transparent',
-              color: viewMode === v.id ? '#FFF' : theme.textSecondary,
-              fontSize: isMobile ? 13 : 11, fontWeight: viewMode === v.id ? 600 : 400, fontFamily: 'inherit',
+              color: viewMode === v.id ? '#1A2B4A' : theme.textSecondary,
+              fontSize: isMobile ? 13 : 11, fontWeight: viewMode === v.id ? 700 : 400, fontFamily: "'Inter', sans-serif",
               minHeight: isMobile ? 32 : undefined,
-              flex: isMobile ? 1 : undefined, textAlign: 'center'
+              flex: isMobile ? 1 : undefined, textAlign: 'center',
+              letterSpacing: '0.03em'
             }}
             title={v.tip}
           >
             {isMobile ? v.icon : v.label}
             {v.id === 'conflicts' && issuesCount > 0 && (
               <span style={{
-                marginLeft: 2, background: '#EF4444', color: '#FFF', borderRadius: 8,
+                marginLeft: 2, background: '#8B2635', color: '#FFF', borderRadius: 2,
                 padding: '0 4px', fontSize: 9, fontWeight: 700, verticalAlign: 'top',
                 lineHeight: '14px', minWidth: 14, textAlign: 'center', display: 'inline-block'
               }}>{issuesCount}</span>
@@ -217,11 +218,11 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
                   <button key={f.id} onClick={() => setFilter(f.id)}
                     title={f.tip}
                     style={{
-                      border: `1px solid ${filter === f.id ? theme.accent : theme.border}`,
-                      borderRadius: 12, padding: '3px 10px', cursor: 'pointer',
+                      border: '1px solid ' + (filter === f.id ? theme.accent : theme.border),
+                      borderRadius: 2, padding: '3px 10px', cursor: 'pointer',
                       background: filter === f.id ? theme.accent + '20' : 'transparent',
                       color: filter === f.id ? theme.accent : theme.textMuted,
-                      fontSize: 11, fontFamily: 'inherit', position: 'relative',
+                      fontSize: 11, fontFamily: "'Inter', sans-serif", position: 'relative',
                       whiteSpace: 'nowrap'
                     }}
                   >
@@ -242,11 +243,11 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
             <button onClick={() => setHideHabits(h => !h)}
               title={hideHabits ? 'Show recurring habit tasks' : 'Hide recurring habit tasks from view'}
               style={{
-                border: `1px solid ${hideHabits ? theme.accent : theme.border}`,
-                borderRadius: 12, padding: '3px 10px', cursor: 'pointer',
+                border: '1px solid ' + (hideHabits ? theme.accent : theme.border),
+                borderRadius: 2, padding: '3px 10px', cursor: 'pointer',
                 background: hideHabits ? theme.accent + '20' : 'transparent',
                 color: hideHabits ? theme.accent : theme.textMuted,
-                fontSize: 11, fontFamily: 'inherit', whiteSpace: 'nowrap'
+                fontSize: 11, fontFamily: "'Inter', sans-serif", whiteSpace: 'nowrap'
               }}
             >
               {hideHabits ? '\uD83D\uDD01 Show Habits' : '\uD83D\uDD01 Hide Habits'}
@@ -268,7 +269,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
                 title="Search tasks by name, project, or notes"
                 style={{
                   width: '100%', padding: '5px 28px 5px 10px',
-                  border: `1px solid ${theme.inputBorder}`, borderRadius: 8,
+                  border: '1px solid ' + theme.inputBorder, borderRadius: 2,
                   background: theme.input, color: theme.text, fontSize: 12,
                   fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box'
                 }}
@@ -292,9 +293,9 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
             <button onClick={function() { setShowFilterDropdown(function(v) { return !v; }); }}
               title="Filter tasks by status"
               style={{
-                border: `1px solid ${theme.accent}`, borderRadius: 12, padding: '4px 10px',
+                border: '1px solid ' + theme.accent, borderRadius: 2, padding: '4px 10px',
                 cursor: 'pointer', background: theme.accent + '20', color: theme.accent,
-                fontSize: 11, fontFamily: 'inherit', whiteSpace: 'nowrap',
+                fontSize: 11, fontFamily: "'Inter', sans-serif", whiteSpace: 'nowrap',
                 display: 'flex', alignItems: 'center', gap: 4, minHeight: 32
               }}
             >
@@ -310,7 +311,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
                 placeholder="Search..."
                 style={{
                   width: '100%', padding: '5px 28px 5px 10px',
-                  border: `1px solid ${theme.inputBorder}`, borderRadius: 8,
+                  border: '1px solid ' + theme.inputBorder, borderRadius: 2,
                   background: theme.input, color: theme.text, fontSize: 12,
                   fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box'
                 }}
@@ -328,8 +329,8 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
           {showFilterDropdown && (
             <div style={{
               position: 'absolute', top: '100%', left: 0, marginTop: 4,
-              background: theme.bgSecondary, border: `1px solid ${theme.border}`,
-              borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+              background: theme.bgSecondary, border: '1px solid ' + theme.border,
+              borderRadius: 2, boxShadow: '0 2px 8px rgba(26,43,74,0.08)',
               zIndex: 200, minWidth: 200, overflow: 'hidden'
             }}>
               {/* Filter options */}
@@ -354,7 +355,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       {badge != null && (
                         <span style={{
-                          background: '#EF4444', color: '#FFF', borderRadius: 8,
+                          background: '#8B2635', color: '#FFF', borderRadius: 2,
                           padding: '0 6px', fontSize: 10, fontWeight: 700
                         }}>{badge}</span>
                       )}

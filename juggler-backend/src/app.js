@@ -20,6 +20,7 @@ const toolRoutes = require('./routes/tool.routes');
 const dataRoutes = require('./routes/data.routes');
 const gcalRoutes = require('./routes/gcal.routes');
 const msftCalRoutes = require('./routes/msft-cal.routes');
+const calSyncRoutes = require('./routes/cal-sync.routes');
 const scheduleRoutes = require('./routes/schedule.routes');
 const healthRoutes = require('./routes/health.routes');
 const aiRoutes = require('./routes/ai.routes');
@@ -89,6 +90,7 @@ app.use('/api/tools', toolRoutes);
 app.use('/api/data', dataRoutes);
 app.use('/api/gcal', gcalRoutes);
 app.use('/api/msft-cal', msftCalRoutes);
+app.use('/api/cal', calSyncRoutes);
 app.use('/api/schedule', scheduleRoutes);
 
 // 404 handler

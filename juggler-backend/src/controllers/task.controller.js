@@ -326,6 +326,18 @@ async function createTask(req, res) {
     if (!row.id) row.id = uuidv7();
     if (!row.task_type) row.task_type = 'task';
     row.created_at = db.fn.now();
+    // When a user explicitly provides a date/scheduledAt on creation, pin it
+    // so the scheduler doesn't drift the task to a different day.
+    var dateWasSet = req.body.date !== undefined || req.body.scheduledAt !== undefined;
+    if (dateWasSet && row.date_pinned === undefined) {
+      row.date_pinned = 1;
+    }
+    // When a user creates a task with an explicit time, make it fixed so the
+    // scheduler anchors it at that time. User can remove the fixed setting later.
+    var timeWasSet = req.body.time !== undefined || req.body.scheduledAt !== undefined;
+    if (timeWasSet && row.when === undefined) {
+      row.when = 'fixed';
+    }
     await applySplitDefault(row, req.user.id);
     await ensureProject(req.user.id, req.body.project);
     await db('tasks').insert(row);

@@ -154,7 +154,7 @@ function buildMsftEventBody(task, year, timezone) {
   if (task.project) descParts.push('Project: ' + task.project);
   if (task.pri) descParts.push('Priority: ' + task.pri);
   if (task.notes) descParts.push('Notes: ' + task.notes);
-  descParts.push('', 'Synced from Juggler');
+  descParts.push('', 'Synced from Raike & Sons');
 
   if (isAllDay) {
     var dateParts = (task.date || '').split('/');

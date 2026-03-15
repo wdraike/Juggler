@@ -764,44 +764,52 @@ export default function DailyView({
                 >
                   {locIconStr || '\u00B7'}
                 </div>
-                {/* Location override menu */}
-                {locMenuHour === hour && onHourLocationOverride && locations && (
-                  <div style={{
-                    position: 'absolute', left: GUTTER_W + 2, top: -4, zIndex: 100,
-                    pointerEvents: 'auto',
-                    background: darkMode ? '#1E293B' : '#FFFFFF',
-                    border: '1px solid ' + theme.border,
-                    borderRadius: 8, padding: 4,
-                    boxShadow: '0 4px 12px ' + theme.shadow,
-                    display: 'flex', flexDirection: 'column', gap: 2,
-                    whiteSpace: 'nowrap'
-                  }}>
-                    {locations.map(function (loc) {
-                      var isActive = loc.id === locId;
-                      var tint = LOC_TINT[loc.id] || '#8B5CF6';
-                      return (
-                        <button key={loc.id}
-                          onClick={function (ev) {
-                            ev.stopPropagation();
-                            onHourLocationOverride(selectedDateKey, hour, loc.id);
-                            setLocMenuHour(null);
-                          }}
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 4,
-                            padding: '3px 8px', borderRadius: 6, cursor: 'pointer',
-                            fontSize: 11, fontFamily: 'inherit', fontWeight: isActive ? 600 : 400,
-                            background: isActive ? locBgTint(loc.id, '20') : 'transparent',
-                            color: isActive ? tint : theme.text,
-                            border: isActive ? ('2px solid ' + tint) : '1px solid transparent',
-                            textAlign: 'left'
-                          }}
-                        >
-                          {locIcon(loc.id)} {loc.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                {/* Location override menu — portal to body so it's above task tiles */}
+                {locMenuHour === hour && onHourLocationOverride && locations && (function () {
+                  var gridEl = scrollRef.current && scrollRef.current.querySelector('[data-grid-area]');
+                  if (!gridEl) return null;
+                  var gridRect = gridEl.getBoundingClientRect();
+                  var menuTop = gridRect.top + (i * hourHeight) - 4;
+                  var menuLeft = gridRect.left + (isMobile ? 4 : 12) + GUTTER_W + 2;
+                  return ReactDOM.createPortal(
+                    <div style={{
+                      position: 'fixed', left: menuLeft, top: menuTop, zIndex: 10000,
+                      pointerEvents: 'auto',
+                      background: darkMode ? '#1E293B' : '#FFFFFF',
+                      border: '1px solid ' + theme.border,
+                      borderRadius: 2, padding: 4,
+                      boxShadow: '0 4px 12px ' + theme.shadow,
+                      display: 'flex', flexDirection: 'column', gap: 2,
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {locations.map(function (loc) {
+                        var isActive = loc.id === locId;
+                        var tint = LOC_TINT[loc.id] || '#8B5CF6';
+                        return (
+                          <button key={loc.id}
+                            onClick={function (ev) {
+                              ev.stopPropagation();
+                              onHourLocationOverride(selectedDateKey, hour, loc.id);
+                              setLocMenuHour(null);
+                            }}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 4,
+                              padding: '3px 8px', borderRadius: 2, cursor: 'pointer',
+                              fontSize: 11, fontFamily: 'inherit', fontWeight: isActive ? 600 : 400,
+                              background: isActive ? locBgTint(loc.id, '20') : 'transparent',
+                              color: isActive ? tint : theme.text,
+                              border: isActive ? ('2px solid ' + tint) : '1px solid transparent',
+                              textAlign: 'left'
+                            }}
+                          >
+                            {locIcon(loc.id)} {loc.name}
+                          </button>
+                        );
+                      })}
+                    </div>,
+                    document.body
+                  );
+                })()}
               </div>
             ];
 

@@ -839,7 +839,7 @@ export default function SCurveTimeline(props) {
             textAnchor="middle" dominantBaseline="middle"
             fill={darkMode ? '#E2E8F0' : '#334155'}
             fontSize={isMobile ? 9 : 11} fontWeight={700}
-            fontFamily="'DM Sans', system-ui" opacity={0.8}>
+            fontFamily="'Inter', system-ui" opacity={0.8}>
             {seg.whenLabel}
           </text>
         </g>
@@ -861,14 +861,14 @@ export default function SCurveTimeline(props) {
           textAnchor="middle" dominantBaseline="middle"
           fill={darkMode ? '#94A3B8' : '#64748B'}
           fontSize={isMobile ? 11 : 14} fontWeight={700}
-          fontFamily="'DM Sans', system-ui" opacity={0.7}>
+          fontFamily="'Inter', system-ui" opacity={0.7}>
           AM
         </text>
         <text x={pmCX} y={pmCY - pmR - BAND_W / 2 - 28}
           textAnchor="middle" dominantBaseline="middle"
           fill={darkMode ? '#94A3B8' : '#64748B'}
           fontSize={isMobile ? 11 : 14} fontWeight={700}
-          fontFamily="'DM Sans', system-ui" opacity={0.7}>
+          fontFamily="'Inter', system-ui" opacity={0.7}>
           PM
         </text>
 
@@ -899,7 +899,7 @@ export default function SCurveTimeline(props) {
                   textAnchor="middle" dominantBaseline="middle"
                   fill={darkMode ? '#CBD5E1' : '#475569'}
                   fontSize={isMobile ? 9 : 11} fontWeight={700}
-                  fontFamily="'DM Sans', system-ui">
+                  fontFamily="'Inter', system-ui">
                   {formatHour(m.hour)}
                 </text>
               ) : null}

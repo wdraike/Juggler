@@ -21,9 +21,9 @@ function AppContent() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: '#0F172A',
-        color: '#94A3B8',
-        fontFamily: "'DM Sans', system-ui, sans-serif",
+        background: '#1A2B4A',
+        color: '#E8E0D0',
+        fontFamily: "'Inter', system-ui, sans-serif",
         fontSize: 14
       }}>
         Loading...

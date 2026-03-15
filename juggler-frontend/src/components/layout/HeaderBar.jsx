@@ -9,7 +9,7 @@ import { getTheme } from '../../theme/colors';
 import { DAY_NAMES } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 
-export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today }) {
+export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, onShowCalSync, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today }) {
   var theme = getTheme(darkMode);
   var { user, logout } = useAuth();
   var [showOverflow, setShowOverflow] = useState(false);
@@ -35,8 +35,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
   if (isMobile) {
     overflowItems.push({ label: 'Settings', icon: '\u2699\uFE0F', onClick: onShowSettings });
     overflowItems.push({ label: 'Import/Export', icon: '\uD83D\uDCE6', onClick: onShowExport });
-    if (onShowGCalSync) overflowItems.push({ label: 'GCal Sync', icon: '\uD83D\uDCC5', onClick: onShowGCalSync });
-    if (onShowMsftCalSync) overflowItems.push({ label: 'Outlook Sync', icon: '\uD83D\uDCC6', onClick: onShowMsftCalSync });
+    if (onShowCalSync || onShowGCalSync || onShowMsftCalSync) overflowItems.push({ label: 'Calendar Sync', icon: '\uD83D\uDCC5', onClick: onShowCalSync || onShowGCalSync || onShowMsftCalSync });
     if (onShowHelp) overflowItems.push({ label: 'Help', icon: '\u2753', onClick: onShowHelp });
     overflowItems.push({ label: darkMode ? 'Light Mode' : 'Dark Mode', icon: darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19', onClick: function() { setDarkMode(function(d) { return !d; }); } });
     if (user) overflowItems.push({ label: 'Logout', icon: '\uD83D\uDEAA', onClick: logout });
@@ -47,17 +46,23 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
     {gcalSyncing && <style>{`@keyframes gcal-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>}
     <div style={{
       display: 'flex', alignItems: 'center', gap: isMobile ? 6 : 12, padding: isMobile ? '6px 8px' : '8px 16px',
-      background: theme.headerBg, borderBottom: `1px solid ${theme.border}`,
+      background: darkMode ? '#0F1520' : '#1A2B4A', borderBottom: '2px solid rgba(200, 148, 42, 0.3)',
       position: 'sticky', top: 0, zIndex: 100
     }}>
-      <div style={{ fontSize: 20 }}>&#x1F939;</div>
-      {!isMobile && <div style={{ fontWeight: 700, fontSize: 16, color: theme.text }}>Juggler</div>}
+      {!isMobile && <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, padding: '4px 10px', borderLeft: '2px solid #C8942A' }}>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 8, fontWeight: 600, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#C8942A', opacity: 0.7 }}>by Raike &amp; Sons</div>
+        <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 20, color: darkMode ? '#F5F0E8' : '#F5F0E8', letterSpacing: '-0.02em', lineHeight: 1.1 }}>Work<span style={{ color: '#C8942A' }}>RS</span></div>
+      </div>}
+      {isMobile && <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0, padding: '2px 6px', borderLeft: '2px solid #C8942A' }}>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 6, fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#C8942A', opacity: 0.7 }}>R&amp;S</div>
+        <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 15, color: '#F5F0E8', letterSpacing: '-0.02em', lineHeight: 1.1 }}>Work<span style={{ color: '#C8942A' }}>RS</span></div>
+      </div>}
 
       {/* Progress bar */}
-      <div title={doneCount + ' of ' + totalCount + ' tasks done today (' + pct + '%)'} style={{ flex: 0, minWidth: isMobile ? 50 : 80, maxWidth: isMobile ? 80 : 140, height: 6, background: theme.bgTertiary, borderRadius: 3, overflow: 'hidden' }}>
-        <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? '#10B981' : '#3B82F6', borderRadius: 3, transition: 'width 0.3s' }} />
+      <div title={doneCount + ' of ' + totalCount + ' tasks done today (' + pct + '%)'} style={{ flex: 0, minWidth: isMobile ? 50 : 80, maxWidth: isMobile ? 80 : 140, height: 6, background: 'rgba(255,255,255,0.15)', borderRadius: 2, overflow: 'hidden' }}>
+        <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? '#2D6A4F' : '#C8942A', borderRadius: 2, transition: 'width 0.3s' }} />
       </div>
-      <span style={{ fontSize: 11, color: theme.textMuted, minWidth: 28 }} title={doneCount + ' of ' + totalCount + ' tasks done today'}>{pct}%</span>
+      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', minWidth: 28 }} title={doneCount + ' of ' + totalCount + ' tasks done today'}>{pct}%</span>
 
       {/* AI command input — inline in header */}
       {aiPanel}
@@ -84,11 +89,11 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
                 <button key={i} onClick={function() { setDayOffset(Math.round((d - today) / 86400000)); }}
                   title={DAY_NAMES[d.getDay()] + ' ' + (d.getMonth()+1) + '/' + d.getDate() + (totalCount > 0 ? ' (' + doneCount + '/' + totalCount + ')' : '')}
                   style={{
-                    border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer',
-                    background: isSelected ? theme.accent : 'transparent',
-                    color: isSelected ? '#FFFFFF' : isToday ? theme.accent : theme.text,
+                    border: 'none', borderRadius: 2, padding: '2px 6px', cursor: 'pointer',
+                    background: isSelected ? '#C8942A' : 'transparent',
+                    color: isSelected ? '#1A2B4A' : isToday ? '#E8C878' : 'rgba(255,255,255,0.7)',
                     fontWeight: isSelected || isToday ? 700 : 400,
-                    fontSize: 11, fontFamily: 'inherit', textAlign: 'center',
+                    fontSize: 11, fontFamily: "'Inter', sans-serif", textAlign: 'center',
                     minWidth: 36, lineHeight: 1.2
                   }}>
                   <div style={{ fontSize: 9, opacity: 0.6 }}>{DAY_NAMES[d.getDay()]}</div>
@@ -105,10 +110,10 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
               var d2 = new Date(e.target.value + 'T12:00:00');
               if (!isNaN(d2)) setDayOffset(Math.round((d2 - today) / 86400000));
             }} style={{
-              padding: '2px 3px', borderRadius: 4, fontSize: 10,
-              border: '1px solid ' + theme.border,
-              background: theme.white || theme.bg, color: theme.textMuted,
-              cursor: 'pointer', fontFamily: 'inherit'
+              padding: '2px 3px', borderRadius: 2, fontSize: 10,
+              border: '1px solid rgba(255,255,255,0.2)',
+              background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)',
+              cursor: 'pointer', fontFamily: "'Inter', sans-serif"
             }} title="Jump to any date" />
             <button onClick={function() { setDayOffset(0); }} style={{
               ...weekNavBtn(theme), fontSize: 10, padding: '3px 8px', fontWeight: 600
@@ -127,16 +132,10 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
           <>
             <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings \u2014 locations, tools, templates, and preferences">&#x2699;&#xFE0F;</button>
             <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export \u2014 save or load tasks as JSON">&#x1F4E6;</button>
-            {onShowGCalSync && (
-              <button onClick={onShowGCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title="Google Calendar Sync \u2014 bidirectional sync with Google Calendar">
-                <span style={gcalSyncing ? { display: 'inline-block', animation: 'gcal-spin 1s linear infinite' } : undefined}>&#x1F4C5;</span>
-                {gcalSyncing && <span style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: '#3B82F6' }} />}
-              </button>
-            )}
-            {onShowMsftCalSync && (
-              <button onClick={onShowMsftCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title="Microsoft Calendar Sync \u2014 bidirectional sync with Outlook Calendar">
-                <span style={msftCalSyncing ? { display: 'inline-block', animation: 'gcal-spin 1s linear infinite' } : undefined}>&#x1F4C6;</span>
-                {msftCalSyncing && <span style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: '#0078D4' }} />}
+            {(onShowGCalSync || onShowMsftCalSync) && (
+              <button onClick={onShowCalSync || onShowGCalSync || onShowMsftCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title="Calendar Sync \u2014 bidirectional sync with connected calendars">
+                <span style={calSyncing ? { display: 'inline-block', animation: 'gcal-spin 1s linear infinite' } : undefined}>&#x1F4C5;</span>
+                {calSyncing && <span style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: '#C8942A' }} />}
               </button>
             )}
             {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help guide \u2014 how the scheduler works, task properties, keyboard shortcuts">&#x2753;</button>}
@@ -163,8 +162,8 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
             {showOverflow && (
               <div style={{
                 position: 'absolute', top: '100%', right: 0, marginTop: 4,
-                background: theme.bgSecondary, border: `1px solid ${theme.border}`,
-                borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+                background: theme.bgSecondary, border: '1px solid ' + theme.border,
+                borderRadius: 2, boxShadow: '0 2px 8px rgba(26,43,74,0.08)',
                 zIndex: 200, minWidth: 180, overflow: 'hidden'
               }}>
                 {user && user.picture && (
@@ -202,9 +201,9 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
 function btnStyle(theme, isMobile) {
   return {
     border: 'none', background: 'transparent', cursor: 'pointer',
-    color: theme.textSecondary, fontSize: 16,
+    color: 'rgba(255,255,255,0.7)', fontSize: 16,
     padding: isMobile ? '8px' : '4px 6px',
-    borderRadius: 6, fontFamily: 'inherit',
+    borderRadius: 2, fontFamily: "'Inter', sans-serif",
     minWidth: isMobile ? 36 : undefined,
     minHeight: isMobile ? 36 : undefined
   };
@@ -212,9 +211,9 @@ function btnStyle(theme, isMobile) {
 
 function weekNavBtn(theme) {
   return {
-    border: '1px solid ' + theme.border, borderRadius: 4, background: 'transparent',
-    color: theme.textSecondary, cursor: 'pointer',
-    padding: '3px 6px', fontSize: 14, fontFamily: 'inherit', fontWeight: 600,
+    border: '1px solid rgba(255,255,255,0.2)', borderRadius: 2, background: 'transparent',
+    color: 'rgba(255,255,255,0.6)', cursor: 'pointer',
+    padding: '3px 6px', fontSize: 14, fontFamily: "'Inter', sans-serif", fontWeight: 600,
     minHeight: 28, minWidth: 24,
     display: 'flex', alignItems: 'center', justifyContent: 'center'
   };

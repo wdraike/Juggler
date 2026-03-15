@@ -1,0 +1,456 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 2800" font-family="Inter, -apple-system, system-ui, sans-serif" font-size="13">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <marker id="arrow-white" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8"/>
+    </marker>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="2800" fill="url(#bg)" rx="12"/>
+
+  <!-- Title -->
+  <text x="600" y="50" text-anchor="middle" fill="#f8fafc" font-size="28" font-weight="700" letter-spacing="1">Juggler Scheduler Algorithm</text>
+  <text x="600" y="75" text-anchor="middle" fill="#64748b" font-size="14">Complete scheduling pipeline from trigger to output</text>
+
+  <!-- ========== ENTRY POINTS ========== -->
+  <text x="80" y="120" fill="#94a3b8" font-size="11" font-weight="600" letter-spacing="2">ENTRY POINTS</text>
+
+  <rect x="80" y="135" width="200" height="50" rx="8" fill="#1e3a5f" stroke="#3b82f6" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="180" y="156" text-anchor="middle" fill="#93c5fd" font-size="12" font-weight="600">POST /schedule/run</text>
+  <text x="180" y="172" text-anchor="middle" fill="#64748b" font-size="10">API endpoint</text>
+
+  <rect x="310" y="135" width="200" height="50" rx="8" fill="#1e3a5f" stroke="#3b82f6" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="410" y="156" text-anchor="middle" fill="#93c5fd" font-size="12" font-weight="600">MCP: run_schedule</text>
+  <text x="410" y="172" text-anchor="middle" fill="#64748b" font-size="10">Tool invocation</text>
+
+  <rect x="540" y="135" width="200" height="50" rx="8" fill="#1e3a5f" stroke="#3b82f6" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="640" y="156" text-anchor="middle" fill="#93c5fd" font-size="12" font-weight="600">GET /schedule/placements</text>
+  <text x="640" y="172" text-anchor="middle" fill="#64748b" font-size="10">Cache-aware retrieval</text>
+
+  <!-- Arrows to main function -->
+  <line x1="180" y1="185" x2="420" y2="220" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="410" y1="185" x2="420" y2="220" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="640" y1="185" x2="640" y2="220" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)" stroke-dasharray="6,4"/>
+  <text x="680" y="210" fill="#64748b" font-size="10" font-style="italic">if stale</text>
+
+  <!-- Main function box -->
+  <rect x="320" y="220" width="260" height="40" rx="8" fill="#7c3aed" filter="url(#shadow)"/>
+  <text x="450" y="245" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">runScheduleAndPersist()</text>
+
+  <line x1="450" y1="260" x2="450" y2="290" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ========== PHASE 1: DATA LOADING ========== -->
+  <text x="80" y="305" fill="#fbbf24" font-size="11" font-weight="700" letter-spacing="2">PHASE 1 — DATA LOADING</text>
+  <rect x="80" y="315" width="1040" height="165" rx="10" fill="none" stroke="#fbbf2433" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <rect x="100" y="330" width="220" height="65" rx="8" fill="#1c1917" stroke="#a16207" stroke-width="1" filter="url(#shadow)"/>
+  <text x="210" y="352" text-anchor="middle" fill="#fbbf24" font-size="12" font-weight="600">1. Reset Moved Tasks</text>
+  <text x="210" y="368" text-anchor="middle" fill="#a8a29e" font-size="10">Restore original_scheduled_at</text>
+  <text x="210" y="382" text-anchor="middle" fill="#a8a29e" font-size="10">Skip fixed tasks</text>
+
+  <rect x="340" y="330" width="220" height="65" rx="8" fill="#1c1917" stroke="#a16207" stroke-width="1" filter="url(#shadow)"/>
+  <text x="450" y="352" text-anchor="middle" fill="#fbbf24" font-size="12" font-weight="600">2. Load Tasks + Config</text>
+  <text x="450" y="368" text-anchor="middle" fill="#a8a29e" font-size="10">DB rows → task objects</text>
+  <text x="450" y="382" text-anchor="middle" fill="#a8a29e" font-size="10">Time blocks, tool matrix, prefs</text>
+
+  <rect x="580" y="330" width="220" height="65" rx="8" fill="#1c1917" stroke="#a16207" stroke-width="1" filter="url(#shadow)"/>
+  <text x="690" y="352" text-anchor="middle" fill="#fbbf24" font-size="12" font-weight="600">3. Expand Recurring</text>
+  <text x="690" y="368" text-anchor="middle" fill="#a8a29e" font-size="10">Generate habit instances</text>
+  <text x="690" y="382" text-anchor="middle" fill="#a8a29e" font-size="10">56-day window, skip dupes</text>
+
+  <rect x="820" y="330" width="280" height="65" rx="8" fill="#1c1917" stroke="#a16207" stroke-width="1" filter="url(#shadow)"/>
+  <text x="960" y="352" text-anchor="middle" fill="#fbbf24" font-size="12" font-weight="600">4. Get Time Context</text>
+  <text x="960" y="368" text-anchor="middle" fill="#a8a29e" font-size="10">Today's date, current time (user TZ)</text>
+  <text x="960" y="382" text-anchor="middle" fill="#a8a29e" font-size="10">Weekday/weekend classification</text>
+
+  <!-- Arrows between phase 1 boxes -->
+  <line x1="320" y1="362" x2="340" y2="362" stroke="#a1620777" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="560" y1="362" x2="580" y2="362" stroke="#a1620777" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="800" y1="362" x2="820" y2="362" stroke="#a1620777" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <!-- Passes into unifiedSchedule -->
+  <line x1="450" y1="395" x2="450" y2="420" stroke="#475569" stroke-width="1.5"/>
+  <rect x="300" y="420" width="300" height="40" rx="8" fill="#7c3aed" filter="url(#shadow)"/>
+  <text x="450" y="445" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">unifiedSchedule(tasks, config)</text>
+
+  <line x1="450" y1="460" x2="450" y2="490" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ========== PHASE 2: CATEGORIZE ========== -->
+  <text x="80" y="505" fill="#34d399" font-size="11" font-weight="700" letter-spacing="2">PHASE 2 — CATEGORIZE &amp; CONSTRAIN</text>
+  <rect x="80" y="515" width="1040" height="200" rx="10" fill="none" stroke="#34d39933" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- Filter box -->
+  <rect x="100" y="530" width="300" height="80" rx="8" fill="#022c22" stroke="#059669" stroke-width="1" filter="url(#shadow)"/>
+  <text x="250" y="552" text-anchor="middle" fill="#34d399" font-size="12" font-weight="600">Filter &amp; Categorize Tasks</text>
+  <text x="250" y="570" text-anchor="middle" fill="#a8a29e" font-size="10">Exclude: done, cancelled, all-day, parking</text>
+  <text x="250" y="584" text-anchor="middle" fill="#a8a29e" font-size="10">Extract: fixed tasks, rigid habits</text>
+  <text x="250" y="598" text-anchor="middle" fill="#a8a29e" font-size="10">Pool: everything else → schedulable</text>
+
+  <!-- Outputs of filter -->
+  <rect x="440" y="530" width="160" height="35" rx="6" fill="#14532d" stroke="#16a34a" stroke-width="1"/>
+  <text x="520" y="552" text-anchor="middle" fill="#4ade80" font-size="11" font-weight="600">Fixed Tasks</text>
+
+  <rect x="440" y="575" width="160" height="35" rx="6" fill="#14532d" stroke="#16a34a" stroke-width="1"/>
+  <text x="520" y="597" text-anchor="middle" fill="#4ade80" font-size="11" font-weight="600">Rigid Habits</text>
+
+  <rect x="440" y="620" width="160" height="35" rx="6" fill="#14532d" stroke="#16a34a" stroke-width="1"/>
+  <text x="520" y="642" text-anchor="middle" fill="#4ade80" font-size="11" font-weight="600">Flexible Pool</text>
+
+  <line x1="400" y1="555" x2="440" y2="547" stroke="#16a34a88" stroke-width="1"/>
+  <line x1="400" y1="575" x2="440" y2="592" stroke="#16a34a88" stroke-width="1"/>
+  <line x1="400" y1="590" x2="440" y2="637" stroke="#16a34a88" stroke-width="1"/>
+
+  <!-- Backward scheduling -->
+  <rect x="650" y="530" width="300" height="80" rx="8" fill="#022c22" stroke="#059669" stroke-width="1" filter="url(#shadow)"/>
+  <text x="800" y="552" text-anchor="middle" fill="#34d399" font-size="12" font-weight="600">Backward Scheduling</text>
+  <text x="800" y="570" text-anchor="middle" fill="#a8a29e" font-size="10">Walk dependency graph backwards</text>
+  <text x="800" y="584" text-anchor="middle" fill="#a8a29e" font-size="10">Propagate deadline ceilings to ancestors</text>
+  <text x="800" y="598" text-anchor="middle" fill="#a8a29e" font-size="10">B depends on A, B due 3/27 → A ≤ 3/27</text>
+
+  <!-- Build time windows -->
+  <rect x="650" y="625" width="300" height="45" rx="8" fill="#022c22" stroke="#059669" stroke-width="1" filter="url(#shadow)"/>
+  <text x="800" y="647" text-anchor="middle" fill="#34d399" font-size="12" font-weight="600">Build Time Windows</text>
+  <text x="800" y="661" text-anchor="middle" fill="#a8a29e" font-size="10">Per-date blocks → morning/biz/lunch/eve/night slots</text>
+
+  <line x1="800" y1="610" x2="800" y2="625" stroke="#05966955" stroke-width="1"/>
+
+  <!-- ========== GREEDY PLACEMENT PIPELINE ========== -->
+  <line x1="450" y1="715" x2="450" y2="745" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <text x="80" y="755" fill="#f472b6" font-size="11" font-weight="700" letter-spacing="2">GREEDY PLACEMENT PIPELINE (6 phases)</text>
+  <rect x="80" y="765" width="1040" height="680" rx="10" fill="none" stroke="#f472b633" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- Phase 0: Fixed & Rigid -->
+  <rect x="100" y="785" width="480" height="90" rx="8" fill="#1a0a2e" stroke="#a855f7" stroke-width="1.5" filter="url(#shadow)"/>
+  <rect x="100" y="785" width="480" height="24" rx="8" fill="#a855f7"/>
+  <rect x="100" y="797" width="480" height="12" fill="#a855f7"/>
+  <text x="340" y="802" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">Phase 0 — Anchor Fixed &amp; Rigid</text>
+  <text x="340" y="830" text-anchor="middle" fill="#d8b4fe" font-size="11">Place fixed tasks at exact specified times → locked</text>
+  <text x="340" y="848" text-anchor="middle" fill="#d8b4fe" font-size="11">Place rigid habits at preferred time (flex if past) → locked</text>
+  <text x="340" y="864" text-anchor="middle" fill="#78716c" font-size="10">These never move again. Reserve occupancy in day grid.</text>
+
+  <!-- Priority legend -->
+  <rect x="620" y="785" width="490" height="90" rx="8" fill="#0c0a09" stroke="#44403c" stroke-width="1" filter="url(#shadow)"/>
+  <text x="865" y="805" text-anchor="middle" fill="#a8a29e" font-size="11" font-weight="600">Priority Processing Order (all phases)</text>
+  <circle cx="660" cy="828" r="12" fill="#ef4444"/>
+  <text x="660" y="832" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">P1</text>
+  <text x="695" y="832" fill="#fca5a5" font-size="10">Critical</text>
+  <circle cx="770" cy="828" r="12" fill="#f97316"/>
+  <text x="770" y="832" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">P2</text>
+  <text x="805" y="832" fill="#fdba74" font-size="10">High</text>
+  <circle cx="870" cy="828" r="12" fill="#3b82f6"/>
+  <text x="870" y="832" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">P3</text>
+  <text x="905" y="832" fill="#93c5fd" font-size="10">Normal</text>
+  <circle cx="980" cy="828" r="12" fill="#6b7280"/>
+  <text x="980" y="832" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">P4</text>
+  <text x="1015" y="832" fill="#9ca3af" font-size="10">Low</text>
+  <text x="865" y="862" text-anchor="middle" fill="#78716c" font-size="10">Each phase processes P1→P2→P3→P4 in order</text>
+
+  <!-- Phase 0.5: Habits -->
+  <rect x="100" y="895" width="480" height="70" rx="8" fill="#1a0a2e" stroke="#a855f7" stroke-width="1" filter="url(#shadow)"/>
+  <rect x="100" y="895" width="480" height="24" rx="8" fill="#7c3aed"/>
+  <rect x="100" y="907" width="480" height="12" fill="#7c3aed"/>
+  <text x="340" y="912" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">Phase 0.5 — Non-Rigid Habits</text>
+  <text x="340" y="938" text-anchor="middle" fill="#d8b4fe" font-size="11">Place habits early at preferred time windows (by priority)</text>
+  <text x="340" y="954" text-anchor="middle" fill="#78716c" font-size="10">Secures daily habit slots before flexible tasks claim capacity</text>
+
+  <line x1="340" y1="875" x2="340" y2="895" stroke="#a855f755" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Phase 1: Deadline Late-Place -->
+  <rect x="100" y="985" width="480" height="90" rx="8" fill="#1a0a2e" stroke="#a855f7" stroke-width="1" filter="url(#shadow)"/>
+  <rect x="100" y="985" width="480" height="24" rx="8" fill="#6d28d9"/>
+  <rect x="100" y="997" width="480" height="12" fill="#6d28d9"/>
+  <text x="340" y="1002" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">Phase 1 — Deadline Late-Placement</text>
+  <text x="340" y="1028" text-anchor="middle" fill="#d8b4fe" font-size="11">Place deadline tasks as late as possible (at/before due date)</text>
+  <text x="340" y="1044" text-anchor="middle" fill="#d8b4fe" font-size="11">Walk dependency chain: deps placed first</text>
+  <text x="340" y="1060" text-anchor="middle" fill="#78716c" font-size="10">Spread control: P3/P4 don't start too far before deadline</text>
+
+  <line x1="340" y1="965" x2="340" y2="985" stroke="#a855f755" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Spread constraint detail -->
+  <rect x="620" y="895" width="490" height="80" rx="8" fill="#0c0a09" stroke="#44403c" stroke-width="1"/>
+  <text x="865" y="915" text-anchor="middle" fill="#a8a29e" font-size="11" font-weight="600">Spread Constraint (prevents hoarding)</text>
+  <text x="865" y="935" text-anchor="middle" fill="#78716c" font-size="10">P3: earliest = deadline - 50% of deadline window</text>
+  <text x="865" y="950" text-anchor="middle" fill="#78716c" font-size="10">P4: earliest = deadline - 33% of deadline window</text>
+  <text x="865" y="965" text-anchor="middle" fill="#78716c" font-size="10">Keeps low-priority work from consuming early capacity</text>
+
+  <!-- Phase 1.5 + 2 side by side -->
+  <rect x="100" y="1095" width="480" height="70" rx="8" fill="#1a0a2e" stroke="#a855f7" stroke-width="1" filter="url(#shadow)"/>
+  <rect x="100" y="1095" width="480" height="24" rx="8" fill="#5b21b6"/>
+  <rect x="100" y="1107" width="480" height="12" fill="#5b21b6"/>
+  <text x="340" y="1112" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">Phase 1.5 — Past-Deadline Rescue</text>
+  <text x="340" y="1138" text-anchor="middle" fill="#d8b4fe" font-size="11">Missed deadlines → place forward from today</text>
+  <text x="340" y="1154" text-anchor="middle" fill="#78716c" font-size="10">These are failures, but still attempt to schedule</text>
+
+  <line x1="340" y1="1075" x2="340" y2="1095" stroke="#a855f755" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Phase 2: Flexible -->
+  <rect x="100" y="1185" width="480" height="90" rx="8" fill="#1a0a2e" stroke="#a855f7" stroke-width="1" filter="url(#shadow)"/>
+  <rect x="100" y="1185" width="480" height="24" rx="8" fill="#4c1d95"/>
+  <rect x="100" y="1197" width="480" height="12" fill="#4c1d95"/>
+  <text x="340" y="1202" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">Phase 2 — Flexible Non-Deadline Tasks</text>
+  <text x="340" y="1228" text-anchor="middle" fill="#d8b4fe" font-size="11">placeWithDeps(): recursively place dependencies first</text>
+  <text x="340" y="1244" text-anchor="middle" fill="#d8b4fe" font-size="11">Early-place from today forward into available gaps</text>
+  <text x="340" y="1260" text-anchor="middle" fill="#78716c" font-size="10">Tasks with downstream deps: late-place near dependency ceiling</text>
+
+  <line x1="340" y1="1165" x2="340" y2="1185" stroke="#a855f755" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Placement detail box -->
+  <rect x="620" y="1005" width="490" height="165" rx="8" fill="#0c0a09" stroke="#44403c" stroke-width="1"/>
+  <text x="865" y="1025" text-anchor="middle" fill="#a8a29e" font-size="11" font-weight="600">Placement Functions</text>
+
+  <text x="640" y="1050" fill="#22d3ee" font-size="11" font-weight="600">placeEarly(task, startDate)</text>
+  <text x="640" y="1065" fill="#78716c" font-size="10">Scan forward from date, find gaps, place at start of gap</text>
+  <text x="640" y="1078" fill="#78716c" font-size="10">Respect: when-windows, location, min chunk, split rules</text>
+
+  <text x="640" y="1103" fill="#22d3ee" font-size="11" font-weight="600">placeLate(task, deadline)</text>
+  <text x="640" y="1118" fill="#78716c" font-size="10">Scan backward from deadline, find gaps, place at end of gap</text>
+  <text x="640" y="1131" fill="#78716c" font-size="10">Splittable tasks broken across multiple gaps</text>
+
+  <text x="640" y="1156" fill="#22d3ee" font-size="11" font-weight="600">canTaskRun(task, date, time)</text>
+  <text x="640" y="1168" fill="#78716c" font-size="10">Check location availability via tool matrix</text>
+
+  <!-- Phase 2.5: Compaction -->
+  <rect x="100" y="1295" width="480" height="70" rx="8" fill="#1a0a2e" stroke="#a855f7" stroke-width="1" filter="url(#shadow)"/>
+  <rect x="100" y="1295" width="480" height="24" rx="8" fill="#3b0764"/>
+  <rect x="100" y="1307" width="480" height="12" fill="#3b0764"/>
+  <text x="340" y="1312" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">Phase 2.5 — Priority Compaction</text>
+  <text x="340" y="1338" text-anchor="middle" fill="#d8b4fe" font-size="11">Swap low-priority early tasks with high-priority later tasks</text>
+  <text x="340" y="1354" text-anchor="middle" fill="#78716c" font-size="10">Push urgent work forward, defer less-urgent. Max 20 swaps.</text>
+
+  <line x1="340" y1="1275" x2="340" y2="1295" stroke="#a855f755" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Phase 3: Pull-forward -->
+  <rect x="100" y="1385" width="480" height="70" rx="8" fill="#1a0a2e" stroke="#a855f7" stroke-width="1" filter="url(#shadow)"/>
+  <rect x="100" y="1385" width="480" height="24" rx="8" fill="#2e1065"/>
+  <rect x="100" y="1397" width="480" height="12" fill="#2e1065"/>
+  <text x="340" y="1402" text-anchor="middle" fill="#fff" font-size="12" font-weight="700">Phase 3 — Deadline Pull-Forward</text>
+  <text x="340" y="1428" text-anchor="middle" fill="#d8b4fe" font-size="11">Move deadline tasks into earlier gaps (compress work)</text>
+  <text x="340" y="1444" text-anchor="middle" fill="#78716c" font-size="10">Respects spread constraint. Restores original if can't fit.</text>
+
+  <line x1="340" y1="1365" x2="340" y2="1385" stroke="#a855f755" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ========== REFINEMENT PHASES ========== -->
+  <line x1="450" y1="1455" x2="450" y2="1490" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <text x="80" y="1505" fill="#22d3ee" font-size="11" font-weight="700" letter-spacing="2">REFINEMENT &amp; RESCUE</text>
+  <rect x="80" y="1515" width="1040" height="330" rx="10" fill="none" stroke="#22d3ee33" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- Phase 4: Relaxation -->
+  <rect x="100" y="1530" width="320" height="70" rx="8" fill="#042f2e" stroke="#14b8a6" stroke-width="1" filter="url(#shadow)"/>
+  <text x="260" y="1552" text-anchor="middle" fill="#5eead4" font-size="12" font-weight="600">Phase 4 — Relaxation</text>
+  <text x="260" y="1570" text-anchor="middle" fill="#a8a29e" font-size="10">Retry unplaced tasks with when="anytime"</text>
+  <text x="260" y="1584" text-anchor="middle" fill="#a8a29e" font-size="10">Drop time-of-day preference constraints</text>
+
+  <!-- Phase 5: Habit Rescue -->
+  <rect x="450" y="1530" width="320" height="70" rx="8" fill="#042f2e" stroke="#14b8a6" stroke-width="1" filter="url(#shadow)"/>
+  <text x="610" y="1552" text-anchor="middle" fill="#5eead4" font-size="12" font-weight="600">Phase 5 — Habit Rescue</text>
+  <text x="610" y="1570" text-anchor="middle" fill="#a8a29e" font-size="10">Bump non-habit tasks off day to fit habits</text>
+  <text x="610" y="1584" text-anchor="middle" fill="#a8a29e" font-size="10">All-or-nothing: rollback if bumped can't refit</text>
+
+  <!-- Phase 5.5: Re-sort -->
+  <rect x="800" y="1530" width="310" height="70" rx="8" fill="#042f2e" stroke="#14b8a6" stroke-width="1" filter="url(#shadow)"/>
+  <text x="955" y="1552" text-anchor="middle" fill="#5eead4" font-size="12" font-weight="600">Phase 5.5 — Priority Re-sort</text>
+  <text x="955" y="1570" text-anchor="middle" fill="#a8a29e" font-size="10">Within each day, assign best time slots</text>
+  <text x="955" y="1584" text-anchor="middle" fill="#a8a29e" font-size="10">to highest-priority tasks</text>
+
+  <line x1="420" y1="1565" x2="450" y2="1565" stroke="#14b8a655" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="770" y1="1565" x2="800" y2="1565" stroke="#14b8a655" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <!-- Hill Climbing -->
+  <rect x="200" y="1630" width="700" height="200" rx="10" fill="#0c1a2e" stroke="#0ea5e9" stroke-width="2" filter="url(#shadow)"/>
+  <rect x="200" y="1630" width="700" height="30" rx="10" fill="#0ea5e9"/>
+  <rect x="200" y="1648" width="700" height="12" fill="#0ea5e9"/>
+  <text x="550" y="1652" text-anchor="middle" fill="#fff" font-size="14" font-weight="700">Hill-Climbing Optimizer (500 iterations, 800ms budget)</text>
+
+  <text x="550" y="1680" text-anchor="middle" fill="#7dd3fc" font-size="11">Post-greedy refinement — try random moves, keep if score improves</text>
+
+  <!-- 4 move types -->
+  <rect x="220" y="1700" width="150" height="55" rx="6" fill="#0c4a6e" stroke="#0284c7" stroke-width="1"/>
+  <text x="295" y="1718" text-anchor="middle" fill="#38bdf8" font-size="11" font-weight="600">Swap (30%)</text>
+  <text x="295" y="1733" text-anchor="middle" fill="#94a3b8" font-size="9">Swap 2 tasks on</text>
+  <text x="295" y="1745" text-anchor="middle" fill="#94a3b8" font-size="9">same day</text>
+
+  <rect x="385" y="1700" width="150" height="55" rx="6" fill="#0c4a6e" stroke="#0284c7" stroke-width="1"/>
+  <text x="460" y="1718" text-anchor="middle" fill="#38bdf8" font-size="11" font-weight="600">Shift (25%)</text>
+  <text x="460" y="1733" text-anchor="middle" fill="#94a3b8" font-size="9">Move task to different</text>
+  <text x="460" y="1745" text-anchor="middle" fill="#94a3b8" font-size="9">gap on same day</text>
+
+  <rect x="550" y="1700" width="165" height="55" rx="6" fill="#0c4a6e" stroke="#0284c7" stroke-width="1"/>
+  <text x="632" y="1718" text-anchor="middle" fill="#38bdf8" font-size="11" font-weight="600">Date Shift (20%)</text>
+  <text x="632" y="1733" text-anchor="middle" fill="#94a3b8" font-size="9">Move drifted task back</text>
+  <text x="632" y="1745" text-anchor="middle" fill="#94a3b8" font-size="9">toward original date</text>
+
+  <rect x="730" y="1700" width="155" height="55" rx="6" fill="#0c4a6e" stroke="#0284c7" stroke-width="1"/>
+  <text x="807" y="1718" text-anchor="middle" fill="#38bdf8" font-size="11" font-weight="600">Cross-Day (25%)</text>
+  <text x="807" y="1733" text-anchor="middle" fill="#94a3b8" font-size="9">Swap hi-pri later with</text>
+  <text x="807" y="1745" text-anchor="middle" fill="#94a3b8" font-size="9">lo-pri earlier</text>
+
+  <!-- Score check -->
+  <text x="550" y="1790" text-anchor="middle" fill="#7dd3fc" font-size="11">Each move: validate constraints → score → keep if improved, revert if not</text>
+  <text x="550" y="1808" text-anchor="middle" fill="#64748b" font-size="10">Re-score fully every 100 iterations to correct drift</text>
+
+  <!-- ========== SCORING ========== -->
+  <line x1="550" y1="1845" x2="550" y2="1880" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <text x="80" y="1895" fill="#fb923c" font-size="11" font-weight="700" letter-spacing="2">SCORING — 8-DIMENSIONAL PENALTY FUNCTION</text>
+  <rect x="80" y="1905" width="1040" height="240" rx="10" fill="none" stroke="#fb923c33" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <rect x="100" y="1920" width="1000" height="210" rx="8" fill="#1c1917" stroke="#c2410c" stroke-width="1" filter="url(#shadow)"/>
+  <text x="600" y="1945" text-anchor="middle" fill="#fb923c" font-size="13" font-weight="700">scoreSchedule() — lower is better</text>
+
+  <!-- Score dimensions as a grid -->
+  <rect x="120" y="1960" width="230" height="40" rx="4" fill="#292524"/>
+  <text x="135" y="1978" fill="#ef4444" font-size="11" font-weight="700">W=1000</text>
+  <text x="210" y="1978" fill="#e7e5e4" font-size="11">Unplaced tasks</text>
+  <text x="135" y="1993" fill="#78716c" font-size="9">× priority × 1.5 if habit</text>
+
+  <rect x="365" y="1960" width="230" height="40" rx="4" fill="#292524"/>
+  <text x="380" y="1978" fill="#f97316" font-size="11" font-weight="700">W=500</text>
+  <text x="450" y="1978" fill="#e7e5e4" font-size="11">Deadline misses</text>
+  <text x="380" y="1993" fill="#78716c" font-size="9">days late × priority</text>
+
+  <rect x="610" y="1960" width="230" height="40" rx="4" fill="#292524"/>
+  <text x="625" y="1978" fill="#eab308" font-size="11" font-weight="700">W=200</text>
+  <text x="695" y="1978" fill="#e7e5e4" font-size="11">Priority drift</text>
+  <text x="625" y="1993" fill="#78716c" font-size="9">priority diff × slot quality</text>
+
+  <rect x="855" y="1960" width="230" height="40" rx="4" fill="#292524"/>
+  <text x="870" y="1978" fill="#a3e635" font-size="11" font-weight="700">W=30</text>
+  <text x="925" y="1978" fill="#e7e5e4" font-size="11">Cross-day priority</text>
+  <text x="870" y="1993" fill="#78716c" font-size="9">lo-pri before hi-pri</text>
+
+  <rect x="120" y="2010" width="230" height="40" rx="4" fill="#292524"/>
+  <text x="135" y="2028" fill="#22d3ee" font-size="11" font-weight="700">W=20</text>
+  <text x="195" y="2028" fill="#e7e5e4" font-size="11">Fragmentation</text>
+  <text x="135" y="2043" fill="#78716c" font-size="9">extra parts + runt penalty</text>
+
+  <rect x="365" y="2010" width="230" height="40" rx="4" fill="#292524"/>
+  <text x="380" y="2028" fill="#818cf8" font-size="11" font-weight="700">W=10</text>
+  <text x="435" y="2028" fill="#e7e5e4" font-size="11">Habit time drift</text>
+  <text x="380" y="2043" fill="#78716c" font-size="9">hours from preferred × priority</text>
+
+  <rect x="610" y="2010" width="230" height="40" rx="4" fill="#292524"/>
+  <text x="625" y="2028" fill="#c084fc" font-size="11" font-weight="700">W=10</text>
+  <text x="685" y="2028" fill="#e7e5e4" font-size="11">Date drift</text>
+  <text x="625" y="2043" fill="#78716c" font-size="9">days moved × 3 if pinned</text>
+
+  <rect x="855" y="2010" width="230" height="40" rx="4" fill="#292524"/>
+  <text x="870" y="2028" fill="#9ca3af" font-size="11" font-weight="700">W=5</text>
+  <text x="935" y="2028" fill="#e7e5e4" font-size="11">Dependency slack</text>
+  <text x="870" y="2043" fill="#78716c" font-size="9">excess slack >7d × 0.5</text>
+
+  <!-- Formula -->
+  <text x="600" y="2085" text-anchor="middle" fill="#fb923c" font-size="11" font-weight="600">total = Σ (weight × penalty) for all 8 dimensions</text>
+  <text x="600" y="2105" text-anchor="middle" fill="#78716c" font-size="10">Used by hill-climber to evaluate moves and as final quality metric</text>
+
+  <!-- ========== PERSISTENCE ========== -->
+  <line x1="550" y1="2145" x2="550" y2="2180" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <text x="80" y="2195" fill="#a78bfa" font-size="11" font-weight="700" letter-spacing="2">PERSISTENCE &amp; OUTPUT</text>
+  <rect x="80" y="2205" width="1040" height="250" rx="10" fill="none" stroke="#a78bfa33" stroke-width="1" stroke-dasharray="4,4"/>
+
+  <!-- Persist steps -->
+  <rect x="100" y="2220" width="300" height="100" rx="8" fill="#1e1b4b" stroke="#6366f1" stroke-width="1" filter="url(#shadow)"/>
+  <text x="250" y="2242" text-anchor="middle" fill="#a5b4fc" font-size="12" font-weight="600">Batch DB Updates</text>
+  <text x="250" y="2262" text-anchor="middle" fill="#a8a29e" font-size="10">Convert placement times → UTC scheduled_at</text>
+  <text x="250" y="2278" text-anchor="middle" fill="#a8a29e" font-size="10">Save old time as original_scheduled_at</text>
+  <text x="250" y="2294" text-anchor="middle" fill="#a8a29e" font-size="10">Unplaced → clear time to midnight</text>
+  <text x="250" y="2310" text-anchor="middle" fill="#a8a29e" font-size="10">Sorted by ID to avoid deadlocks</text>
+
+  <rect x="430" y="2220" width="260" height="100" rx="8" fill="#1e1b4b" stroke="#6366f1" stroke-width="1" filter="url(#shadow)"/>
+  <text x="560" y="2242" text-anchor="middle" fill="#a5b4fc" font-size="12" font-weight="600">Move Past Tasks</text>
+  <text x="560" y="2262" text-anchor="middle" fill="#a8a29e" font-size="10">Non-habit past tasks → today</text>
+  <text x="560" y="2278" text-anchor="middle" fill="#a8a29e" font-size="10">Past habits → mark as skip</text>
+  <text x="560" y="2294" text-anchor="middle" fill="#a8a29e" font-size="10">Fixed tasks → never move</text>
+
+  <rect x="720" y="2220" width="390" height="100" rx="8" fill="#1e1b4b" stroke="#6366f1" stroke-width="1" filter="url(#shadow)"/>
+  <text x="915" y="2242" text-anchor="middle" fill="#a5b4fc" font-size="12" font-weight="600">Cache &amp; Return</text>
+  <text x="915" y="2262" text-anchor="middle" fill="#a8a29e" font-size="10">Save to user_config.schedule_cache</text>
+  <text x="915" y="2278" text-anchor="middle" fill="#a8a29e" font-size="10">Includes generatedAt for staleness check</text>
+  <text x="915" y="2294" text-anchor="middle" fill="#a8a29e" font-size="10">GET /placements returns cached without re-run</text>
+  <text x="915" y="2310" text-anchor="middle" fill="#a8a29e" font-size="10">Re-runs if: new day, >30min, past tasks, new tasks</text>
+
+  <line x1="400" y1="2270" x2="430" y2="2270" stroke="#6366f155" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="690" y1="2270" x2="720" y2="2270" stroke="#6366f155" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <!-- Output format -->
+  <rect x="250" y="2340" width="600" height="95" rx="8" fill="#0f172a" stroke="#475569" stroke-width="2" filter="url(#shadow)"/>
+  <text x="550" y="2365" text-anchor="middle" fill="#f8fafc" font-size="13" font-weight="700">Output Format</text>
+  <text x="290" y="2390" fill="#94a3b8" font-family="monospace" font-size="10">{"{"} dayPlacements: {"{"} "3/12": [{"{"} task, start, dur, locked {"}"}], ... {"}"},</text>
+  <text x="290" y="2405" fill="#94a3b8" font-family="monospace" font-size="10">  unplaced: [{"{"} id, text, ... {"}"}],</text>
+  <text x="290" y="2420" fill="#94a3b8" font-family="monospace" font-size="10">  score: {"{"} total, breakdown, details {"}"}, hasPastTasks {"}"}</text>
+
+  <!-- Constraint legend at bottom -->
+  <text x="80" y="2480" fill="#64748b" font-size="11" font-weight="700" letter-spacing="2">CONSTRAINT TYPES</text>
+  <rect x="80" y="2490" width="1040" height="90" rx="10" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+
+  <text x="100" y="2515" fill="#fbbf24" font-size="10" font-weight="600">Fixed Time</text>
+  <text x="100" y="2528" fill="#78716c" font-size="9">Locked at exact time</text>
+
+  <text x="220" y="2515" fill="#fbbf24" font-size="10" font-weight="600">Deadline</text>
+  <text x="220" y="2528" fill="#78716c" font-size="9">Must finish by due date</text>
+
+  <text x="340" y="2515" fill="#fbbf24" font-size="10" font-weight="600">Dependencies</text>
+  <text x="340" y="2528" fill="#78716c" font-size="9">A before B (backward prop)</text>
+
+  <text x="480" y="2515" fill="#fbbf24" font-size="10" font-weight="600">Location</text>
+  <text x="480" y="2528" fill="#78716c" font-size="9">Tool matrix per location</text>
+
+  <text x="590" y="2515" fill="#fbbf24" font-size="10" font-weight="600">When Pref</text>
+  <text x="590" y="2528" fill="#78716c" font-size="9">morning/biz/eve windows</text>
+
+  <text x="700" y="2515" fill="#fbbf24" font-size="10" font-weight="600">Day Req</text>
+  <text x="700" y="2528" fill="#78716c" font-size="9">weekday/weekend/specific</text>
+
+  <text x="800" y="2515" fill="#fbbf24" font-size="10" font-weight="600">Split</text>
+  <text x="800" y="2528" fill="#78716c" font-size="9">Break into chunks ≥ min</text>
+
+  <text x="880" y="2515" fill="#fbbf24" font-size="10" font-weight="600">Start After</text>
+  <text x="880" y="2528" fill="#78716c" font-size="9">Floor date constraint</text>
+
+  <text x="990" y="2515" fill="#fbbf24" font-size="10" font-weight="600">Pinned</text>
+  <text x="990" y="2528" fill="#78716c" font-size="9">Stay near original date</text>
+
+  <text x="100" y="2555" fill="#34d399" font-size="10" font-weight="600">Rigid Habit</text>
+  <text x="100" y="2568" fill="#78716c" font-size="9">Locked at preferred time</text>
+
+  <text x="220" y="2555" fill="#34d399" font-size="10" font-weight="600">Non-Rigid Habit</text>
+  <text x="220" y="2568" fill="#78716c" font-size="9">Flex within when-windows</text>
+
+  <text x="370" y="2555" fill="#34d399" font-size="10" font-weight="600">Recurring</text>
+  <text x="370" y="2568" fill="#78716c" font-size="9">Auto-expand 56-day window</text>
+
+  <!-- Key files -->
+  <text x="80" y="2615" fill="#64748b" font-size="11" font-weight="700" letter-spacing="2">KEY FILES</text>
+  <rect x="80" y="2625" width="1040" height="50" rx="10" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+  <text x="100" y="2648" fill="#94a3b8" font-family="monospace" font-size="10">runSchedule.js</text>
+  <text x="100" y="2663" fill="#64748b" font-size="9">Entry + persist</text>
+  <text x="260" y="2648" fill="#94a3b8" font-family="monospace" font-size="10">unifiedSchedule.js</text>
+  <text x="260" y="2663" fill="#64748b" font-size="9">Main algorithm</text>
+  <text x="440" y="2648" fill="#94a3b8" font-family="monospace" font-size="10">scoreSchedule.js</text>
+  <text x="440" y="2663" fill="#64748b" font-size="9">8D penalty scoring</text>
+  <text x="620" y="2648" fill="#94a3b8" font-family="monospace" font-size="10">hillClimb.js</text>
+  <text x="620" y="2663" fill="#64748b" font-size="9">Post-greedy optimizer</text>
+  <text x="770" y="2648" fill="#94a3b8" font-family="monospace" font-size="10">locationHelpers.js</text>
+  <text x="770" y="2663" fill="#64748b" font-size="9">Location + tools</text>
+  <text x="940" y="2648" fill="#94a3b8" font-family="monospace" font-size="10">timeBlockHelpers.js</text>
+  <text x="940" y="2663" fill="#64748b" font-size="9">Time windows</text>
+
+  <!-- Footer -->
+  <text x="600" y="2750" text-anchor="middle" fill="#334155" font-size="10">Generated from Juggler codebase — juggler-backend/src/scheduler/</text>
+</svg>

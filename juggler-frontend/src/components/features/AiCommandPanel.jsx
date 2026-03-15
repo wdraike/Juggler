@@ -135,11 +135,11 @@ export default function AiCommandPanel({
         autoComplete="off" autoCorrect="off" spellCheck="false"
         style={{
           flex: 1, background: darkMode ? '#0F172A' : '#F1F5F9',
-          color: darkMode ? '#E2E8F0' : '#1E293B',
-          border: '1px solid ' + (darkMode ? '#334155' : '#CBD5E1'),
-          borderRadius: 6, padding: isMobile ? '8px 10px' : '5px 10px',
+          color: darkMode ? '#E8E0D0' : '#1A2B4A',
+          border: '1px solid ' + (darkMode ? '#2E4A7A' : '#E8E0D0'),
+          borderRadius: 2, padding: isMobile ? '8px 10px' : '5px 10px',
           fontSize: isMobile ? 16 : 12, outline: 'none',
-          fontFamily: "'DM Sans', system-ui, sans-serif",
+          fontFamily: "'Inter', system-ui, sans-serif",
           WebkitAppearance: 'none', minHeight: isMobile ? 36 : 28
         }}
       />

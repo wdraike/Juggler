@@ -40,6 +40,7 @@ import ImportExportPanel from '../features/ImportExportPanel';
 
 import GCalSyncPanel from '../features/GCalSyncPanel';
 import MsftCalSyncPanel from '../features/MsftCalSyncPanel';
+import CalSyncPanel from '../features/CalSyncPanel';
 import HelpModal from '../features/HelpModal';
 import AiCommandPanel from '../features/AiCommandPanel';
 import AppFooter from './AppFooter';
@@ -83,6 +84,7 @@ export default function AppLayout() {
   var [showExport, setShowExport] = useState(false);
   var [showGCalSync, setShowGCalSync] = useState(false);
   var [showMsftCalSync, setShowMsftCalSync] = useState(false);
+  var [showCalSync, setShowCalSync] = useState(false);
   var [showToastHistory, setShowToastHistory] = useState(false);
   var [hideHabits, setHideHabits] = useState(_savedUI.hideHabits || false);
   var [showHelp, setShowHelp] = useState(false);
@@ -160,32 +162,19 @@ export default function AppLayout() {
 
     function runCombinedSync() {
       if (editingRef.current) return;
-      var changed = false;
 
-      var gcalPromise = Promise.resolve();
-      if (gcalAutoSync) {
-        setGcalSyncing(true);
-        gcalPromise = apiClient.post('/gcal/sync').then(function(r) {
-          setGcalLastSyncedAt(new Date().toISOString());
-          if (r.data.pushed || r.data.pulled || r.data.deleted_local || r.data.deleted_remote) changed = true;
-        }).catch(function() { /* silent */ }).finally(function() {
-          setGcalSyncing(false);
-        });
-      }
-
-      gcalPromise.then(function() {
-        if (!msftCalAutoSync) {
-          if (changed) loadTasks().then(function() { loadPlacements(); });
-          return;
+      setGcalSyncing(true);
+      setMsftCalSyncing(true);
+      apiClient.post('/cal/sync').then(function(r) {
+        var now = new Date().toISOString();
+        if (gcalAutoSync) setGcalLastSyncedAt(now);
+        if (msftCalAutoSync) setMsftCalLastSyncedAt(now);
+        if (r.data.pushed || r.data.pulled || r.data.deleted_local || r.data.deleted_remote) {
+          loadTasks().then(function() { loadPlacements(); });
         }
-        setMsftCalSyncing(true);
-        apiClient.post('/msft-cal/sync').then(function(r) {
-          setMsftCalLastSyncedAt(new Date().toISOString());
-          if (r.data.pushed || r.data.pulled || r.data.deleted_local || r.data.deleted_remote) changed = true;
-        }).catch(function() { /* silent */ }).finally(function() {
-          setMsftCalSyncing(false);
-          if (changed) loadTasks().then(function() { loadPlacements(); });
-        });
+      }).catch(function() { /* silent */ }).finally(function() {
+        setGcalSyncing(false);
+        setMsftCalSyncing(false);
       });
     }
 
@@ -630,7 +619,7 @@ export default function AppLayout() {
 
   if (loading) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.bg, color: theme.textMuted, fontFamily: "'DM Sans', system-ui", fontSize: 14 }}>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.bg, color: theme.textMuted, fontFamily: "'Inter', system-ui", fontSize: 14 }}>
         Loading tasks...
       </div>
     );
@@ -652,7 +641,7 @@ export default function AppLayout() {
   }).filter(Boolean);
 
   return (
-    <div style={{ height: '100vh', overflow: 'hidden', maxWidth: '100vw', background: theme.bg, fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div style={{ height: '100vh', overflow: 'hidden', maxWidth: '100vw', background: theme.bg, fontFamily: "'Inter', system-ui, sans-serif" }}>
     <div style={{ width: isMobile ? '100%' : (10000 / config.fontSize) + '%', height: isMobile ? '100%' : (10000 / config.fontSize) + '%', transform: isMobile ? undefined : 'scale(' + (config.fontSize / 100) + ')', transformOrigin: '0 0', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ flexShrink: 0, zIndex: 100, background: theme.bg }}>
         <HeaderBar
@@ -663,6 +652,8 @@ export default function AppLayout() {
           gcalSyncing={gcalSyncing}
           onShowMsftCalSync={() => setShowMsftCalSync(true)}
           msftCalSyncing={msftCalSyncing}
+          calSyncing={gcalSyncing || msftCalSyncing}
+          onShowCalSync={() => setShowCalSync(true)}
           onShowHelp={() => setShowHelp(true)}
           onAddTask={() => { setShowCreateForm(true); setExpandedTasks([]); }}
           isMobile={isMobile}
@@ -944,45 +935,28 @@ export default function AppLayout() {
           addTasks={addTasks} />
       )}
 
-      {/* GCal Sync panel */}
-      {showGCalSync && (
-        <GCalSyncPanel
-          onClose={() => setShowGCalSync(false)}
+      {/* Unified Calendar Sync panel */}
+      {(showCalSync || showGCalSync || showMsftCalSync) && (
+        <CalSyncPanel
+          onClose={() => { setShowCalSync(false); setShowGCalSync(false); setShowMsftCalSync(false); }}
           darkMode={darkMode}
           showToast={showToast}
           isMobile={isMobile}
-          autoSync={gcalAutoSync}
-          lastSyncedAt={gcalLastSyncedAt}
-          onAutoSyncChange={function(val) {
+          gcalAutoSync={gcalAutoSync}
+          gcalLastSyncedAt={gcalLastSyncedAt}
+          onGcalAutoSyncChange={function(val) {
             setGcalAutoSync(val);
-            if (!val) setGcalLastSyncedAt(gcalLastSyncedAt); // keep last value
           }}
-          onSyncStart={function() { setGcalSyncing(true); }}
-          onSyncComplete={function() {
-            setGcalSyncing(false);
-            setGcalLastSyncedAt(new Date().toISOString());
-            loadTasks().then(function() { loadPlacements(); });
-          }}
-        />
-      )}
-
-      {/* Microsoft Calendar Sync panel */}
-      {showMsftCalSync && (
-        <MsftCalSyncPanel
-          onClose={() => setShowMsftCalSync(false)}
-          darkMode={darkMode}
-          showToast={showToast}
-          isMobile={isMobile}
-          autoSync={msftCalAutoSync}
-          lastSyncedAt={msftCalLastSyncedAt}
-          onAutoSyncChange={function(val) {
+          msftAutoSync={msftCalAutoSync}
+          msftLastSyncedAt={msftCalLastSyncedAt}
+          onMsftAutoSyncChange={function(val) {
             setMsftCalAutoSync(val);
-            if (!val) setMsftCalLastSyncedAt(msftCalLastSyncedAt);
           }}
-          onSyncStart={function() { setMsftCalSyncing(true); }}
+          onSyncStart={function() { setGcalSyncing(true); setMsftCalSyncing(true); }}
           onSyncComplete={function() {
-            setMsftCalSyncing(false);
-            setMsftCalLastSyncedAt(new Date().toISOString());
+            setGcalSyncing(false); setMsftCalSyncing(false);
+            var now = new Date().toISOString();
+            setGcalLastSyncedAt(now); setMsftCalLastSyncedAt(now);
             loadTasks().then(function() { loadPlacements(); });
           }}
         />

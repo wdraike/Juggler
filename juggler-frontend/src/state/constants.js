@@ -14,7 +14,6 @@ export const STATUS_OPTIONS = [
   { value: "wip", label: "\u231B", bg: "#FEF3C7", bgDark: "#78350F", color: "#92400E", colorDark: "#FCD34D", tip: "WIP \u2014 work in progress" },
   { value: "cancel", label: "\u2715", bg: "#FEE2E2", bgDark: "#7F1D1D", color: "#991B1B", colorDark: "#FCA5A5", tip: "Cancelled \u2014 won't do" },
   { value: "skip", label: "\u23ED", bg: "#F1F5F9", bgDark: "#334155", color: "#64748B", colorDark: "#94A3B8", tip: "Skipped \u2014 not today" },
-  { value: "other", label: "\u2192", bg: "#EDE9FE", bgDark: "#4C1D95", color: "#5B21B6", colorDark: "#C4B5FD", tip: "Redirected \u2014 doing something else" },
 ];
 
 export const STATUS_MAP = Object.fromEntries(STATUS_OPTIONS.map(s => [s.value, s]));
