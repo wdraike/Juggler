@@ -454,7 +454,9 @@ export default function AppLayout() {
     if (!overrides[dateKey]) overrides[dateKey] = {};
     overrides[dateKey][hour] = locId;
     config.updateHourLocationOverrides(overrides);
-  }, [config]);
+    // Backend auto-reschedules after config save; reload placements after delay
+    setTimeout(function() { loadPlacements(); }, 2000);
+  }, [config, loadPlacements]);
 
   // Keyboard shortcuts
   useKeyboardShortcuts({

@@ -63,7 +63,7 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
 
         {/* 1. Getting Started */}
         <Section title="1. Getting Started" theme={theme}>
-          <P>Raike &amp; Sons StriverRS is an auto-scheduling task manager. You create tasks with time windows, locations, tool requirements, priorities, and deadlines — then the scheduler places them into available time slots on your calendar. Never stops striving.</P>
+          <P>Raike &amp; Sons StriveRS is an auto-scheduling task manager. You create tasks with time windows, locations, tool requirements, priorities, and deadlines — then the scheduler places them into available time slots on your calendar. Never stops striving.</P>
           <P>The basic workflow is: <B>add tasks</B> with constraints (when, where, how long), then hit <B>Reschedule</B> to let the scheduler place them automatically. You can also drag tasks manually and mark them done/wip/skipped as you go.</P>
           <P>Tasks that the scheduler can&apos;t place (due to conflicts, lack of available time, or missing tools at a location) appear in the <B>Unplaced</B> filter and the <B>Issues</B> view.</P>
         </Section>
@@ -174,7 +174,7 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
 
         {/* 9. MCP Integration */}
         <Section title="9. MCP Integration" theme={theme}>
-          <P><B>What is MCP?</B> Model Context Protocol lets AI assistants like Claude, Cursor, and others connect directly to StriverRS. Your AI can manage your tasks and schedule through natural conversation.</P>
+          <P><B>What is MCP?</B> Model Context Protocol lets AI assistants like Claude, Cursor, and others connect directly to StriveRS. Your AI can manage your tasks and schedule through natural conversation.</P>
           <P><B>Capabilities:</B> Through MCP, an AI assistant can:</P>
           <P style={{ paddingLeft: 12 }}>
             &bull; Create, update, and delete tasks with full scheduling options<br />
@@ -184,7 +184,7 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
             &bull; Batch create multiple tasks at once
           </P>
           <P><B>Compatible with:</B> Claude Code, Claude Desktop, Cursor, and any MCP-compatible client.</P>
-          <P><B>Setup:</B> The MCP server runs locally and connects to your StriverRS backend. Add the server config to your AI client&apos;s MCP settings and authenticate with your token.</P>
+          <P><B>Setup:</B> The MCP server runs locally and connects to your StriveRS backend. Add the server config to your AI client&apos;s MCP settings and authenticate with your token.</P>
         </Section>
 
         {/* 10. Keyboard Shortcuts */}

@@ -117,7 +117,7 @@ function buildICS(tasks, statuses) {
   var lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Raike and Sons//StriverRS//EN',
+    'PRODID:-//Raike and Sons//StriveRS//EN',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH'
   ];
@@ -442,7 +442,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = url;
-      a.download = 'striverrs-' + new Date().toISOString().slice(0, 10) + '.ics';
+      a.download = 'strivers-' + new Date().toISOString().slice(0, 10) + '.ics';
       a.click();
       URL.revokeObjectURL(url);
       showToast('Exported .ics file', 'success');
@@ -514,7 +514,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = url;
-      a.download = 'striverrs-export-' + new Date().toISOString().slice(0, 10) + '.json';
+      a.download = 'strivers-export-' + new Date().toISOString().slice(0, 10) + '.json';
       a.click();
       URL.revokeObjectURL(url);
       showToast('Exported successfully', 'success');

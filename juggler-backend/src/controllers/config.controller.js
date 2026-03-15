@@ -3,6 +3,7 @@
  */
 
 const db = require('../db');
+const { runScheduleAndPersist } = require('../scheduler/runSchedule');
 
 /**
  * GET /api/config — all config for user
@@ -77,6 +78,17 @@ async function updateConfig(req, res) {
     }
 
     res.json({ key, value });
+
+    // Schedule-affecting keys: reschedule in the background after responding
+    var schedKeys = [
+      'hour_location_overrides', 'time_blocks', 'loc_schedules',
+      'loc_schedule_defaults', 'loc_schedule_overrides', 'tool_matrix', 'preferences'
+    ];
+    if (schedKeys.includes(key)) {
+      runScheduleAndPersist(userId).catch(function(err) {
+        console.error('Auto-reschedule after config update failed:', err);
+      });
+    }
   } catch (error) {
     console.error('Update config error:', error);
     res.status(500).json({ error: 'Failed to update config' });

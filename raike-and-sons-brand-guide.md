@@ -6,7 +6,7 @@
 **Tagline:** "Old school hustle. New school AI."  
 **Domain:** raikeandsons.ai  
 **Founded:** Est. 2025  
-**Products:** StriverRS (AI task manager) + ClimbRS (AI career/resume tool)  
+**Products:** StriveRS (AI task manager) + ClimbRS (AI career/resume tool)  
 **Product Naming System:** RS suffix = Raike & Sons initials hidden in every product name  
 **Audience:** Ambitious professionals, job seekers, busy executives  
 
@@ -182,7 +182,7 @@ There are five logo components. Use the right one for the right context:
 | Crest — medium | Cards, sidebars, email headers |
 | Crest — small/icon | Favicon, app icon, social avatar |
 | Wordmark compact | Navigation bar |
-| StriverRS badge | StriverRS product pages and marketing |
+| StriveRS badge | StriveRS product pages and marketing |
 | ClimbRS badge | ClimbRS product pages and marketing |
 
 ---
@@ -582,13 +582,13 @@ The crest uses the letterpress block style — R&S monogram with the faded S, di
 
 ---
 
-### 4. StriverRS Product Badge
+### 4. StriveRS Product Badge
 
 ```html
 <!-- Light version -->
 <div class="product-badge product-badge-light">
   <div class="pb-parent">Raike &amp; Sons</div>
-  <div class="pb-name">Striver<span class="pb-rs">RS</span></div>
+  <div class="pb-name">Strive<span class="pb-rs">RS</span></div>
   <div class="pb-rule"></div>
   <div class="pb-tagline">Never stops striving.</div>
 </div>
@@ -596,7 +596,7 @@ The crest uses the letterpress block style — R&S monogram with the faded S, di
 <!-- Dark version -->
 <div class="product-badge product-badge-dark">
   <div class="pb-parent">Raike &amp; Sons</div>
-  <div class="pb-name">Striver<span class="pb-rs">RS</span></div>
+  <div class="pb-name">Strive<span class="pb-rs">RS</span></div>
   <div class="pb-rule"></div>
   <div class="pb-tagline">Never stops striving.</div>
 </div>
@@ -660,7 +660,7 @@ The crest uses the letterpress block style — R&S monogram with the faded S, di
 
 ### 5. ClimbRS Product Badge
 
-Same HTML/CSS as StriverRS badge above. Just change the text content:
+Same HTML/CSS as StriveRS badge above. Just change the text content:
 
 ```html
 <!-- Light version -->
@@ -838,7 +838,7 @@ Use the **compact wordmark** on the left.
 
   <!-- CENTER: Nav links -->
   <nav class="navbar-nav">
-    <a href="/striverrs" class="nav-link">StriverRS</a>
+    <a href="/strivers" class="nav-link">StriveRS</a>
     <a href="/climbrs" class="nav-link">ClimbRS</a>
     <a href="/about" class="nav-link">About</a>
     <a href="/pricing" class="nav-link">Pricing</a>
@@ -854,25 +854,25 @@ Use the **compact wordmark** on the left.
 
 ---
 
-#### StriverRS Product Header
+#### StriveRS Product Header
 
-Use the **StriverRS product badge (compact)** on the left, with a small "by Raike & Sons" attribution below.
+Use the **StriveRS product badge (compact)** on the left, with a small "by Raike & Sons" attribution below.
 
 ```html
 <header class="navbar navbar-product navbar-strivers">
   <!-- LEFT: Product badge — compact version -->
-  <a href="/striverrs" class="navbar-brand">
+  <a href="/strivers" class="navbar-brand">
     <div class="product-badge-nav product-badge-nav-light">
       <div class="pbn-parent">by Raike &amp; Sons</div>
-      <div class="pbn-name">Striver<span class="pbn-rs">RS</span></div>
+      <div class="pbn-name">Strive<span class="pbn-rs">RS</span></div>
     </div>
   </a>
 
   <!-- CENTER: Nav links -->
   <nav class="navbar-nav">
-    <a href="/striverrs/features" class="nav-link">Features</a>
-    <a href="/striverrs/pricing" class="nav-link">Pricing</a>
-    <a href="/striverrs/docs" class="nav-link">Docs</a>
+    <a href="/strivers/features" class="nav-link">Features</a>
+    <a href="/strivers/pricing" class="nav-link">Pricing</a>
+    <a href="/strivers/docs" class="nav-link">Docs</a>
   </nav>
 
   <!-- RIGHT: CTA -->
@@ -887,7 +887,7 @@ Use the **StriverRS product badge (compact)** on the left, with a small "by Raik
 
 #### ClimbRS Product Header
 
-Same structure as StriverRS, different badge.
+Same structure as StriveRS, different badge.
 
 ```html
 <header class="navbar navbar-product navbar-climbrs">
@@ -1109,7 +1109,7 @@ if (navbar) {
 | Page / Context | Header style | Notes |
 |---|---|---|
 | Main marketing homepage | `navbar navbar-transparent` → scrolls to `navbar-scrolled` | Overlays dark hero, transitions on scroll |
-| StriverRS marketing page | `navbar navbar-product navbar-strivers` | Dark, copper border, StriverRS badge |
+| StriveRS marketing page | `navbar navbar-product navbar-strivers` | Dark, copper border, StriveRS badge |
 | ClimbRS marketing page | `navbar navbar-product navbar-climbrs` | Dark, gold border, ClimbRS badge |
 | Docs / blog (light bg) | `navbar navbar-light` | Parchment bg, navy text — respects light page |
 | Dashboard / app shell | `navbar` (default dark) | Always dark for app UI |
@@ -1125,9 +1125,9 @@ if (navbar) {
 │  Main site:                                                      │
 │  [ Raike & Sons ]    Features  Products  About    [ Get started ]│
 ├─────────────────────────────────────────────────────────────────┤
-│  StriverRS product page:                                          │
+│  StriveRS product page:                                          │
 │  [ by Raike & Sons ]   Features  Pricing  Docs  [ Start striving]│
-│  [ StriverRS       ]                                              │
+│  [ StriveRS       ]                                              │
 ├─────────────────────────────────────────────────────────────────┤
 │  ClimbRS product page:                                           │
 │  [ by Raike & Sons ]   Features  Pricing  Docs  [ Start climbing]│
@@ -1274,13 +1274,13 @@ body{font-family:'Inter',sans-serif;background:#F5F0E8;padding:40px;display:flex
 <div class="row">
   <div class="product-badge product-badge-light">
     <div class="pb-parent">Raike &amp; Sons</div>
-    <div class="pb-name">Striver<span class="pb-rs">RS</span></div>
+    <div class="pb-name">Strive<span class="pb-rs">RS</span></div>
     <div class="pb-rule"></div>
     <div class="pb-tagline">Never stops striving.</div>
   </div>
   <div class="product-badge product-badge-dark">
     <div class="pb-parent">Raike &amp; Sons</div>
-    <div class="pb-name">Striver<span class="pb-rs">RS</span></div>
+    <div class="pb-name">Strive<span class="pb-rs">RS</span></div>
     <div class="pb-rule"></div>
     <div class="pb-tagline">Never stops striving.</div>
   </div>
@@ -1381,7 +1381,7 @@ Write like a craftsman describing their product. Short, proud, no buzzwords.
 - GOOD: "Tells AI what you need. Gets it done."
 
 **Product Names in Context:**
-- "Raike & Sons StriverRS" — never stops striving
+- "Raike & Sons StriveRS" — never stops striving
 - "Raike & Sons ClimbRS" — always climbing
 
 **The Self-Aware Wink:**
@@ -1458,7 +1458,7 @@ For the Raike & Sons brand, look for:
 - **Vintage business certificates** — the ornate border style
 - **Woodcut-style imagery** — black and white high-contrast illustrations
 
-For **StriverRS** specifically:
+For **StriveRS** specifically:
 - "grindstone wheel engraving" — spinning grinding wheel with sparks
 - "blacksmith workshop vintage illustration" — craftsman at work
 - "spinning wheel woodcut" — circular motion, relentless turning
@@ -1583,34 +1583,34 @@ For **ClimbRS** specifically:
 Every Raike & Sons product ends in **RS** — the initials of Raike & Sons hidden inside a plain English word. The RS suffix makes every product name instantly recognizable as part of the family, while the word itself tells you exactly what the product does.
 
 **The system scales infinitely:**
-- StriverRS — task management
+- StriveRS — task management
 - ClimbRS — career/resume
 - Future: NetworkRS, LearnRS, TrackRS, BuildRS, EarnRS...
 
 ---
 
-### StriverRS — AI Task Manager
+### StriveRS — AI Task Manager
 
-**Full product name:** Raike & Sons StriverRS
-**Reads as:** "StriverRS" — Striver + RS (Raike & Sons)
+**Full product name:** Raike & Sons StriveRS
+**Reads as:** "StriveRS" — Striver + RS (Raike & Sons)
 **Tagline:** "Never stops striving."
 **Sub-tagline:** "Built for people who don't sit still."
 **Sub-brand color accent:** Copper `#9E6B3B`
-**Domain:** striverrs.ai + striverrs.com
+**Domain:** strivers.ai + strivers.com
 
 **The concept:**
-A striver never settles, never sits still, never accepts "good enough." StriverRS is the AI that embodies that energy — relentless, always pushing tasks forward, never letting work pile up. The name says it: you're a striver, and this is the tool built for people like you. The RS is Raike & Sons baked right into the word.
+A striver never settles, never sits still, never accepts "good enough." StriveRS is the AI that embodies that energy — relentless, always pushing tasks forward, never letting work pile up. The name says it: you're a striver, and this is the tool built for people like you. The RS is Raike & Sons baked right into the word.
 
-**Voice for StriverRS:**
+**Voice for StriveRS:**
 - Short, ambitious, restless energy
 - Speaks to the person's drive, not just the tool's features
 - Examples:
   - "On it."
   - "Already handled."
   - "3 tasks cleared while you were in that meeting."
-  - "Strivers never stop."
+  - "StriveRS never stops."
   - "Built for people who don't sit still."
-  - "Put your StriverRS to work."
+  - "Put your StriveRS to work."
 
 **Icon concept:** A vintage figure in motion — always moving forward. Or a craftsman's hand tools arranged in a working pattern. Look for public domain workshop engravings showing craftsmen at work.
 
@@ -1644,10 +1644,10 @@ ClimbRS takes your raw experience and shapes it into something that gets you hir
 ### Product Pairing (when showing both together)
 
 **Combined tagline:**
-> *"StriverRS keeps you moving. ClimbRS gets you rising."*
+> *"StriveRS keeps you moving. ClimbRS gets you rising."*
 
 **Extended brand narrative:**
-> *At Raike & Sons, we built two tools for people who don't sit still. StriverRS keeps the work moving — relentless, handled, never piling up. ClimbRS shapes your career — taking raw experience and making something that gets you in the room. Both powered by AI. Both built by Raike & Sons. Both carry our initials — because everything we make, we stand behind.*
+> *At Raike & Sons, we built two tools for people who don't sit still. StriveRS keeps the work moving — relentless, handled, never piling up. ClimbRS shapes your career — taking raw experience and making something that gets you in the room. Both powered by AI. Both built by Raike & Sons. Both carry our initials — because everything we make, we stand behind.*
 
 **Future product reserve:**
 - **EarnRS** — earnings/financial tracking (earnrs.ai available)
@@ -1948,7 +1948,7 @@ Alternate between three background treatments to create visual rhythm without us
 **Recommended page section order:**
 1. Hero — navy with texture
 2. Features — parchment with grid
-3. Product 1 (StriverRS) — cream
+3. Product 1 (StriveRS) — cream
 4. Product 2 (ClimbRS) — parchment
 5. Testimonials — navy lined
 6. CTA — navy solid
@@ -2033,7 +2033,7 @@ The hero is the one place you can be bold. Navy background, large Playfair headl
 
   <!-- Product badges -->
   <div style="display: flex; gap: 1rem; justify-content: center; margin: 2rem 0">
-    <span class="badge-stamp">StriverRS</span>
+    <span class="badge-stamp">StriveRS</span>
     <span class="badge-stamp">ClimbRS</span>
   </div>
 
@@ -2073,9 +2073,9 @@ The hero is the one place you can be bold. Navy background, large Playfair headl
 
 ---
 
-*Raike & Sons Brand Guide v7.1 — Est. 2025*
+*Raike & Sons Brand Guide v7.2 — Est. 2025*
 *"Old school hustle. New school AI."*
-*Products: StriverRS + ClimbRS*
+*Products: StriveRS + ClimbRS*
 *RS suffix = Raike & Sons in every product name*
 
 ---
@@ -2136,4 +2136,4 @@ The hero is the one place you can be bold. Navy background, large Playfair headl
 
 *Raike & Sons Brand Guide v2.0 — Est. 2025*  
 *"Old school hustle. New school AI."*  
-*Products: StriverRS + ClimbRS*
+*Products: StriveRS + ClimbRS*

@@ -497,6 +497,13 @@ async function pull(req, res) {
         continue;
       }
 
+      // Skip events that originated from Juggler (round-trip prevention)
+      var evBodyContent = (event.body && event.body.content) || '';
+      if (evBodyContent.indexOf('Synced from Raike & Sons') !== -1 || evBodyContent.indexOf('Synced from Juggler') !== -1) {
+        skipped++;
+        continue;
+      }
+
       var isAllDay = !!event.isAllDay;
       var startStr = event.start?.dateTime;
       var endStr = event.end?.dateTime;

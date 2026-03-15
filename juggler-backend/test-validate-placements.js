@@ -1790,6 +1790,77 @@ scenarios['deadline-pull-forward'] = function() {
   });
 };
 
+// ── Scenario 34b: Pull-forward dampening ──
+scenarios['pull-forward-dampening'] = function() {
+  // With dampening ON and a mostly-free calendar, deadline tasks should stay
+  // closer to their deadlines (not flood today).
+  // Without dampening, same tasks should pull forward more aggressively.
+  var tasks = [
+    makeTask({ id: 'pfd_a', text: 'Deadline +10', pri: 'P2', dur: 60, due: dayOffset(10) }),
+    makeTask({ id: 'pfd_b', text: 'Deadline +8', pri: 'P3', dur: 60, due: dayOffset(8) }),
+  ];
+  var statuses = {};
+  tasks.forEach(function(t) { statuses[t.id] = ''; });
+
+  // Run WITHOUT dampening
+  var cfgOff = makeCfg({ preferences: {} });
+  var resultOff = unifiedSchedule(tasks.map(function(t) { return Object.assign({}, t); }), statuses, todayKey, 0, cfgOff);
+  validate(resultOff, tasks, cfgOff, 'Pull-forward dampening OFF', { statuses: statuses });
+
+  // Run WITH dampening
+  var cfgOn = makeCfg({ preferences: { pullForwardDampening: true } });
+  var resultOn = unifiedSchedule(tasks.map(function(t) { return Object.assign({}, t); }), statuses, todayKey, 0, cfgOn);
+  validate(resultOn, tasks, cfgOn, 'Pull-forward dampening ON', { statuses: statuses });
+
+  // Find earliest placement date for each run
+  function earliestDate(result, taskId) {
+    var earliest = null;
+    Object.keys(result.dayPlacements).forEach(function(dk) {
+      result.dayPlacements[dk].forEach(function(p) {
+        if (p.task && p.task.id === taskId) {
+          var d = parseDate(dk);
+          if (!earliest || d < earliest) earliest = d;
+        }
+      });
+    });
+    return earliest;
+  }
+
+  ['pfd_a', 'pfd_b'].forEach(function(id) {
+    var dateOff = earliestDate(resultOff, id);
+    var dateOn = earliestDate(resultOn, id);
+    if (!dateOff || !dateOn) {
+      console.log('  WARN: ' + id + ' not placed in one or both runs');
+      totalWarnings++;
+      return;
+    }
+    if (dateOn >= dateOff) {
+      console.log('  PASS: ' + id + ' dampened — placed on ' + formatDateKey(dateOn) + ' (vs ' + formatDateKey(dateOff) + ' undampened)');
+      totalPassed++;
+    } else {
+      console.log('  FAIL: ' + id + ' dampened date ' + formatDateKey(dateOn) + ' is earlier than undampened ' + formatDateKey(dateOff));
+      totalFailed++;
+    }
+  });
+
+  // Tasks due tomorrow should NOT be dampened
+  var urgentTasks = [
+    makeTask({ id: 'pfd_urgent', text: 'Due tomorrow', pri: 'P1', dur: 60, due: dayOffset(1) }),
+  ];
+  var urgentStatuses = { pfd_urgent: '' };
+  var resultUrgentOn = unifiedSchedule(urgentTasks.map(function(t) { return Object.assign({}, t); }), urgentStatuses, todayKey, 0, cfgOn);
+  var resultUrgentOff = unifiedSchedule(urgentTasks.map(function(t) { return Object.assign({}, t); }), urgentStatuses, todayKey, 0, cfgOff);
+  var urgentDateOn = earliestDate(resultUrgentOn, 'pfd_urgent');
+  var urgentDateOff = earliestDate(resultUrgentOff, 'pfd_urgent');
+  if (urgentDateOn && urgentDateOff && urgentDateOn.getTime() === urgentDateOff.getTime()) {
+    console.log('  PASS: due-tomorrow task not dampened (same placement: ' + formatDateKey(urgentDateOn) + ')');
+    totalPassed++;
+  } else {
+    console.log('  WARN: due-tomorrow placement differs — on=' + (urgentDateOn ? formatDateKey(urgentDateOn) : 'unplaced') + ' off=' + (urgentDateOff ? formatDateKey(urgentDateOff) : 'unplaced'));
+    totalWarnings++;
+  }
+};
+
 // ── Scenario 35: Hill-climb dep preservation ──
 scenarios['hill-climb-deps'] = function() {
   // Tasks with same-day deps — hill climbing should not break ordering

@@ -481,6 +481,29 @@ async function sync(req, res) {
           continue;
         }
 
+        // Skip events that originated from Juggler (round-trip prevention)
+        var evDesc = newEvent.description || '';
+        if (evDesc.indexOf('Synced from Raike & Sons') !== -1 || evDesc.indexOf('Synced from Juggler') !== -1) {
+          await db('cal_sync_ledger').insert({
+            user_id: userId,
+            provider: pid2,
+            task_id: null,
+            provider_event_id: evId,
+            origin: 'juggler',
+            last_pushed_hash: null,
+            last_pulled_hash: pAdapter2.eventHash(newEvent),
+            event_summary: newEvent.title,
+            event_start: newEvent.startDateTime || null,
+            event_end: newEvent.endDateTime || null,
+            event_all_day: newEvent.isAllDay ? 1 : 0,
+            last_modified_at: newEvent.lastModified || null,
+            status: 'active',
+            synced_at: db.fn.now(),
+            created_at: db.fn.now()
+          });
+          continue;
+        }
+
         // Future event — create task
         try {
           var jd = isoToJugglerDate(newEvent.startDateTime, newEvent.startTimezone || tz);

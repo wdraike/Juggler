@@ -51,11 +51,11 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
     }}>
       {!isMobile && <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, padding: '4px 10px', borderLeft: '2px solid #C8942A' }}>
         <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 8, fontWeight: 600, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#C8942A', opacity: 0.7 }}>by Raike &amp; Sons</div>
-        <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 20, color: darkMode ? '#F5F0E8' : '#F5F0E8', letterSpacing: '-0.02em', lineHeight: 1.1 }}>Striver<span style={{ color: '#C8942A' }}>RS</span></div>
+        <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 20, color: darkMode ? '#F5F0E8' : '#F5F0E8', letterSpacing: '-0.02em', lineHeight: 1.1 }}>Strive<span style={{ color: '#C8942A' }}>RS</span></div>
       </div>}
       {isMobile && <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0, padding: '2px 6px', borderLeft: '2px solid #C8942A' }}>
         <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 6, fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#C8942A', opacity: 0.7 }}>R&amp;S</div>
-        <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 15, color: '#F5F0E8', letterSpacing: '-0.02em', lineHeight: 1.1 }}>Striver<span style={{ color: '#C8942A' }}>RS</span></div>
+        <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 15, color: '#F5F0E8', letterSpacing: '-0.02em', lineHeight: 1.1 }}>Strive<span style={{ color: '#C8942A' }}>RS</span></div>
       </div>}
 
       {/* Progress bar */}

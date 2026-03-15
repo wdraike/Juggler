@@ -168,7 +168,7 @@ export default function LoginPage() {
             <span style={{
               fontFamily: "'Playfair Display', serif",
               fontSize: 28, fontWeight: 700, color: '#1A2B4A', letterSpacing: '-0.02em'
-            }}>Striver<span style={{ color: '#C8942A' }}>RS</span></span>
+            }}>Strive<span style={{ color: '#C8942A' }}>RS</span></span>
           </div>
 
           {/* Product tagline */}
@@ -188,7 +188,7 @@ export default function LoginPage() {
             lineHeight: 1.7
           }}>
             Tell us what you need to do, where you'll be, and when you're free.
-            StriverRS never stops &mdash; priorities first, constraints respected, zero overlap.
+            StriveRS never stops &mdash; priorities first, constraints respected, zero overlap.
           </p>
 
           {/* CTA — gold accent button */}
@@ -320,7 +320,7 @@ export default function LoginPage() {
                 fontSize: 24, fontWeight: 700, color: '#FDFAF5', marginBottom: 12
               }}>MCP Integration</h3>
               <p style={{ fontSize: 14, color: '#E8E0D0', lineHeight: 1.7, marginBottom: 20, maxWidth: 520, opacity: 0.9 }}>
-                Connect Claude, Cursor, or any MCP-compatible AI directly to StriverRS.
+                Connect Claude, Cursor, or any MCP-compatible AI directly to StriveRS.
                 Your AI assistant can create tasks, run the scheduler, check your schedule, and manage
                 your entire day &mdash; all through natural conversation.
               </p>
@@ -458,7 +458,7 @@ export default function LoginPage() {
             textAlign: 'center', fontFamily: "'Playfair Display', serif",
             fontSize: 24, fontWeight: 700, marginBottom: 4, color: '#1A2B4A'
           }}>
-            StriverRS keeps you moving.
+            StriveRS keeps you moving.
           </h2>
           <h2 style={{
             textAlign: 'center', fontFamily: "'Playfair Display', serif",
@@ -476,7 +476,7 @@ export default function LoginPage() {
             display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
             gap: 16
           }}>
-            {/* StriverRS */}
+            {/* StriveRS */}
             <div style={{
               background: '#FDFAF5', borderRadius: 2, padding: '28px 24px',
               border: '1px solid #E8E0D0', borderTop: '3px solid #9E6B3B'
@@ -485,13 +485,13 @@ export default function LoginPage() {
                 <span style={{
                   fontFamily: "'Playfair Display', serif",
                   fontSize: 22, fontWeight: 700, color: '#9E6B3B'
-                }}>Striver<span style={{ color: '#1A2B4A' }}>RS</span></span>
+                }}>Strive<span style={{ color: '#1A2B4A' }}>RS</span></span>
                 <span style={{
                   fontFamily: "'Inter', sans-serif", fontSize: 9,
                   fontWeight: 600, letterSpacing: '0.15em',
                   textTransform: 'uppercase', color: '#9E6B3B',
                   border: '1px solid #9E6B3B', padding: '1px 6px', borderRadius: 1
-                }}>Striver</span>
+                }}>Strive</span>
               </div>
               <div style={{
                 fontFamily: "'Cormorant Garamond', serif",
@@ -555,7 +555,7 @@ export default function LoginPage() {
             Don't sit still. Neither do we.
           </h2>
           <p style={{ fontSize: 14, color: '#5C5A55', marginBottom: 24 }}>
-            Free to use. Sign in with Google and put your StriverRS to work.
+            Free to use. Sign in with Google and put your StriveRS to work.
           </p>
           <div style={{ display: 'inline-block' }}>
             <GoogleLogin
