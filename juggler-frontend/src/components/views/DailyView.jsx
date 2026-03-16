@@ -630,8 +630,8 @@ export default function DailyView({
     });
     return (allTasks || []).filter(function (t) {
       if (t.date !== selectedDateKey || scheduledIds[t.id]) return false;
-      // Hide habit templates — their instances are what get scheduled
-      if (t.taskType === 'habit_template') return false;
+      // Hide habit templates and generated instances — only the scheduler places these
+      if (t.taskType === 'habit_template' || t.generated) return false;
       // Hide completed/cancelled/skipped tasks — check both statuses map and task object
       var st = statuses[t.id] || t.status || '';
       if (st === 'done' || st === 'cancel' || st === 'skip') return false;
