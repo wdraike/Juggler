@@ -263,6 +263,178 @@ server.tool(
   }
 );
 
+// ── Task tools (additional) ──
+
+server.tool(
+  'get_task',
+  'Get a single task by ID.',
+  { id: z.string().describe('Task ID') },
+  async ({ id }) => {
+    const data = await apiCall('GET', '/api/tasks');
+    const task = (data.tasks || []).find(t => t.id === id);
+    if (!task) return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
+    return { content: [{ type: 'text', text: JSON.stringify(task, null, 2) }] };
+  }
+);
+
+server.tool(
+  'search_tasks',
+  'Search tasks by text across task names and notes.',
+  {
+    query: z.string().describe('Search text (case-insensitive)'),
+    status: z.string().optional().describe('Filter by status'),
+    project: z.string().optional().describe('Filter by project name'),
+    limit: z.number().optional().describe('Max results (default 20)')
+  },
+  async ({ query, status, project, limit }) => {
+    const data = await apiCall('GET', '/api/tasks');
+    let tasks = data.tasks || [];
+    const q = query.toLowerCase();
+    tasks = tasks.filter(t =>
+      (t.text && t.text.toLowerCase().includes(q)) ||
+      (t.notes && t.notes.toLowerCase().includes(q))
+    );
+    if (status !== undefined) tasks = tasks.filter(t => t.status === status);
+    if (project) tasks = tasks.filter(t => t.project === project);
+    tasks = tasks.slice(0, limit || 20);
+    return { content: [{ type: 'text', text: JSON.stringify(tasks, null, 2) }] };
+  }
+);
+
+server.tool(
+  'batch_update_tasks',
+  'Update multiple tasks at once. Each entry needs an id and the fields to change.',
+  {
+    updates: z.array(z.object({
+      id: z.string(),
+      text: z.string().optional(),
+      project: z.string().optional(),
+      pri: z.number().optional(),
+      dur: z.number().optional(),
+      when: z.string().optional(),
+      dayReq: z.string().optional(),
+      dependsOn: z.array(z.string()).optional(),
+      scheduledAt: z.string().optional(),
+      dueAt: z.string().optional(),
+      startAfterAt: z.string().optional(),
+      due: z.string().optional(),
+      date: z.string().optional(),
+      time: z.string().optional(),
+      startAfter: z.string().optional(),
+      location: z.array(z.string()).optional(),
+      tools: z.array(z.string()).optional(),
+      notes: z.string().optional(),
+      habit: z.boolean().optional(),
+      rigid: z.boolean().optional(),
+      split: z.boolean().optional(),
+      splitMin: z.number().optional(),
+      datePinned: z.boolean().optional(),
+      status: z.string().optional(),
+      direction: z.string().optional()
+    }))
+  },
+  async ({ updates }) => {
+    const data = await apiCall('PUT', '/api/tasks/batch', { updates });
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+// ── Project tools ──
+
+server.tool(
+  'create_project',
+  'Create a new project with optional color and icon.',
+  {
+    name: z.string().describe('Project name (must be unique)'),
+    color: z.string().optional().describe('Project color (e.g. "#4A90D9")'),
+    icon: z.string().optional().describe('Project icon identifier')
+  },
+  async ({ name, color, icon }) => {
+    const data = await apiCall('POST', '/api/projects', { name, color, icon });
+    return { content: [{ type: 'text', text: JSON.stringify(data.project, null, 2) }] };
+  }
+);
+
+server.tool(
+  'update_project',
+  'Update a project name, color, or icon. Renaming updates all associated tasks.',
+  {
+    id: z.number().describe('Project ID'),
+    name: z.string().optional().describe('New project name'),
+    color: z.string().optional().describe('New project color'),
+    icon: z.string().optional().describe('New project icon')
+  },
+  async ({ id, name, color, icon }) => {
+    // Fetch current project to get oldName for rename support
+    const allProjects = await apiCall('GET', '/api/projects');
+    const current = (allProjects.projects || []).find(p => p.id === id);
+    const body = { name, color, icon };
+    if (current && name && current.name !== name) body.oldName = current.name;
+    const data = await apiCall('PUT', `/api/projects/${id}`, body);
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  'delete_project',
+  'Delete a project. Tasks in this project are kept but lose their project association.',
+  {
+    id: z.number().describe('Project ID to delete')
+  },
+  async ({ id }) => {
+    const data = await apiCall('DELETE', `/api/projects/${id}`);
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  'update_config',
+  'Update a user configuration value. Valid keys: time_blocks, preferences, loc_schedules, loc_schedule_defaults, loc_schedule_overrides, hour_location_overrides, tool_matrix.',
+  {
+    key: z.enum(['time_blocks', 'preferences', 'loc_schedules', 'loc_schedule_defaults', 'loc_schedule_overrides', 'hour_location_overrides', 'tool_matrix']).describe('Configuration key to update'),
+    value: z.any().describe('New configuration value (object or array)')
+  },
+  async ({ key, value }) => {
+    const data = await apiCall('PUT', `/api/config/${key}`, { value });
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+// ── Data & Calendar tools ──
+
+server.tool(
+  'export_data',
+  'Export all user data as JSON (tasks, projects, locations, tools, config). Useful for backups.',
+  {},
+  async () => {
+    const data = await apiCall('GET', '/api/data/export');
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
+server.tool(
+  'get_calendar_status',
+  'Check Google/Microsoft Calendar connection status and last sync time.',
+  {},
+  async () => {
+    const [gcal, msft] = await Promise.all([
+      apiCall('GET', '/api/gcal/status').catch(e => ({ error: e.message })),
+      apiCall('GET', '/api/msft-cal/status').catch(e => ({ error: e.message }))
+    ]);
+    return { content: [{ type: 'text', text: JSON.stringify({ googleCalendar: gcal, microsoftCalendar: msft }, null, 2) }] };
+  }
+);
+
+server.tool(
+  'sync_calendar',
+  'Trigger a calendar sync (push and pull). Calls the unified cal-sync endpoint.',
+  {},
+  async () => {
+    const data = await apiCall('POST', '/api/cal-sync/sync');
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  }
+);
+
 // ── Start ──
 
 async function main() {

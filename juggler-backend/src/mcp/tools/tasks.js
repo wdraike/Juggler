@@ -286,6 +286,136 @@ function registerTaskTools(server, userId) {
       return { content: [{ type: 'text', text: JSON.stringify({ deleted: true, id: id }) }] };
     }
   );
+
+  // ── get_task ──
+  server.tool(
+    'get_task',
+    'Get a single task by ID. Returns full task details including both UTC and local fields.',
+    {
+      id: z.string().describe('Task ID')
+    },
+    async ({ id }) => {
+      var tz = await getUserTimezone();
+      var rows = await db('tasks').where('user_id', userId);
+      var srcMap = buildSourceMap(rows);
+      var row = rows.find(function(r) { return r.id === id; });
+      if (!row) {
+        return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(rowToTask(row, tz, srcMap), null, 2) }] };
+    }
+  );
+
+  // ── search_tasks ──
+  server.tool(
+    'search_tasks',
+    'Search tasks by text across task names and notes. Supports optional status and project filters.',
+    {
+      query: z.string().describe('Search text (case-insensitive, matched against task text and notes)'),
+      status: z.string().optional().describe('Filter by status (e.g. "", "done", "dropped")'),
+      project: z.string().optional().describe('Filter by project name'),
+      limit: z.number().optional().describe('Max results (default 20)')
+    },
+    async ({ query, status, project, limit }) => {
+      var tz = await getUserTimezone();
+      var dbQuery = db('tasks').where('user_id', userId);
+      if (status !== undefined) dbQuery = dbQuery.where('status', status);
+      if (project) dbQuery = dbQuery.where('project', project);
+      dbQuery = dbQuery.where(function() {
+        this.where('text', 'like', '%' + query + '%')
+            .orWhere('notes', 'like', '%' + query + '%');
+      });
+      dbQuery = dbQuery.orderBy('created_at', 'asc').limit(limit || 20);
+
+      var rows = await dbQuery;
+      // Also load all rows for sourceMap (habit inheritance)
+      var allRows = await db('tasks').where('user_id', userId);
+      var srcMap = buildSourceMap(allRows);
+      var tasks = rows.map(function(r) { return rowToTask(r, tz, srcMap); });
+      return { content: [{ type: 'text', text: JSON.stringify(tasks, null, 2) }] };
+    }
+  );
+
+  // ── batch_update_tasks ──
+  server.tool(
+    'batch_update_tasks',
+    'Update multiple tasks at once. Each entry needs an id and the fields to change. Max 200 tasks per call.',
+    {
+      updates: z.array(z.object(
+        Object.assign({
+          id: z.string().describe('Task ID to update'),
+          status: z.string().optional(),
+          direction: z.string().optional()
+        }, taskInputFields)
+      )).describe('Array of task updates, each with an id and fields to change')
+    },
+    async ({ updates }) => {
+      if (updates.length > 200) {
+        return { content: [{ type: 'text', text: 'Error: Batch limited to 200 items' }], isError: true };
+      }
+
+      var tz = await getUserTimezone();
+      var updatedCount = 0;
+
+      var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
+        'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
+        'recur', 'depends_on'];
+
+      await db.transaction(async function(trx) {
+        var idsToUpdate = updates.map(function(u) { return u.id; });
+        var existingRows = await trx('tasks')
+          .where('user_id', userId)
+          .whereIn('id', idsToUpdate)
+          .select('id', 'task_type', 'source_id', 'scheduled_at');
+        var existingById = {};
+        existingRows.forEach(function(r) { existingById[r.id] = r; });
+
+        for (var i = 0; i < updates.length; i++) {
+          var update = updates[i];
+          var id = update.id;
+          if (!id || !existingById[id]) continue;
+
+          var fields = {};
+          Object.keys(update).forEach(function(k) { if (k !== 'id') fields[k] = update[k]; });
+          var row = taskToRow(fields, userId, tz);
+          delete row.user_id;
+          delete row.created_at;
+          delete row._pendingTimeOnly;
+
+          var existing = existingById[id];
+          var taskType = existing.task_type || 'task';
+
+          if (taskType === 'habit_instance' && existing.source_id) {
+            var templateUpdate = {};
+            var instanceUpdate = {};
+            Object.keys(row).forEach(function(k) {
+              if (k === 'updated_at') return;
+              if (TEMPLATE_ROW_FIELDS.indexOf(k) >= 0) {
+                templateUpdate[k] = row[k];
+              } else {
+                instanceUpdate[k] = row[k];
+              }
+            });
+            if (Object.keys(templateUpdate).length > 0) {
+              templateUpdate.updated_at = db.fn.now();
+              await trx('tasks').where({ id: existing.source_id, user_id: userId }).update(templateUpdate);
+            }
+            if (Object.keys(instanceUpdate).length > 0) {
+              instanceUpdate.updated_at = db.fn.now();
+              await trx('tasks').where({ id: id, user_id: userId }).update(instanceUpdate);
+            } else {
+              await trx('tasks').where({ id: id, user_id: userId }).update({ updated_at: db.fn.now() });
+            }
+          } else {
+            await trx('tasks').where({ id: id, user_id: userId }).update(row);
+          }
+          updatedCount++;
+        }
+      });
+
+      return { content: [{ type: 'text', text: JSON.stringify({ updated: updatedCount }) }] };
+    }
+  );
 }
 
 module.exports = { registerTaskTools };
