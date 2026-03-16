@@ -624,8 +624,14 @@ export default function DailyView({
   var unscheduled = useMemo(function () {
     var scheduledIds = {};
     (placements || []).forEach(function (p) { scheduledIds[p.task.id] = true; });
+    // Also mark source templates as "scheduled" if any of their instances are placed
+    (placements || []).forEach(function (p) {
+      if (p.task && p.task.sourceId) scheduledIds[p.task.sourceId] = true;
+    });
     return (allTasks || []).filter(function (t) {
       if (t.date !== selectedDateKey || scheduledIds[t.id]) return false;
+      // Hide habit templates — their instances are what get scheduled
+      if (t.taskType === 'habit_template') return false;
       // Hide completed/cancelled/skipped tasks — check both statuses map and task object
       var st = statuses[t.id] || t.status || '';
       if (st === 'done' || st === 'cancel' || st === 'skip') return false;
