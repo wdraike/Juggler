@@ -33,7 +33,7 @@ const FILTERS = [
 ];
 
 // Which filter controls are relevant per view
-var GRID_VIEWS = { day: 1, '3day': 1, week: 1, timeline: 1, scurve: 1 };
+var GRID_VIEWS = { '3day': 1, week: 1, timeline: 1, scurve: 1 };
 var FILTER_VISIBILITY = {
   // Status pills only make sense for task-list views, not time grids
   showStatusFilters: function(v) { return !GRID_VIEWS[v] && v !== 'conflicts'; },

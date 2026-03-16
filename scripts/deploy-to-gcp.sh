@@ -184,7 +184,7 @@ deploy_backend() {
         --cpu 1 \
         --timeout 300 \
         --max-instances 5 \
-        --min-instances 0 || {
+        --min-instances 1 || {
         print_error "Backend deployment failed!"
         exit 1
     }

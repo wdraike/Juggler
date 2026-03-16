@@ -1,5 +1,24 @@
 require('dotenv').config();
 
+// Keep-alive: validate connections before use and periodically ping idle ones
+var poolConfig = {
+  min: 2,
+  max: 10,
+  acquireTimeoutMillis: 30000,
+  idleTimeoutMillis: 60000,
+  reapIntervalMillis: 1000,
+  createRetryIntervalMillis: 200,
+  // Validate connection on checkout — catches silently dropped connections
+  afterCreate: function(conn, done) {
+    conn.query('SET SESSION wait_timeout=28800', function(err) {
+      if (err) return done(err, conn);
+      conn.query('SELECT 1', function(err2) {
+        done(err2, conn);
+      });
+    });
+  }
+};
+
 module.exports = {
   development: {
     client: 'mysql2',
@@ -14,17 +33,7 @@ module.exports = {
       multipleStatements: true,
       dateStrings: true
     },
-    pool: {
-      min: 2,
-      max: 10,
-      acquireTimeoutMillis: 30000,
-      idleTimeoutMillis: 30000,
-      reapIntervalMillis: 1000,
-      createRetryIntervalMillis: 100,
-      afterCreate: (conn, done) => {
-        conn.query('SELECT 1', (err) => done(err, conn));
-      }
-    },
+    pool: poolConfig,
     migrations: {
       directory: './src/db/migrations',
       tableName: 'knex_migrations'
@@ -54,17 +63,7 @@ module.exports = {
         rejectUnauthorized: false
       } : undefined
     },
-    pool: {
-      min: 2,
-      max: 25,
-      acquireTimeoutMillis: 30000,
-      idleTimeoutMillis: 30000,
-      reapIntervalMillis: 1000,
-      createRetryIntervalMillis: 100,
-      afterCreate: (conn, done) => {
-        conn.query('SELECT 1', (err) => done(err, conn));
-      }
-    },
+    pool: Object.assign({}, poolConfig, { max: 20 }),
     migrations: {
       directory: './src/db/migrations',
       tableName: 'knex_migrations'

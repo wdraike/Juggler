@@ -114,7 +114,7 @@ export default function TaskCard({ task, status, direction, onStatusChange, onEx
             color: darkMode ? '#C4B5FD' : '#6D28D9',
             borderRadius: 3, padding: '1px 4px'
           }}>
-            {'\u25C7'} marker
+            {'\u25C7'} reminder
           </span>
         )}
         {task._whenRelaxed && (

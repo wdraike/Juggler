@@ -182,7 +182,7 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
 /* ── Main CalendarView ── */
 export default function CalendarView({
   selectedDate, dayPlacements, statuses, tasksByDate,
-  onExpand, setDayOffset, today, darkMode, onDateDrop, isMobile
+  onExpand, setDayOffset, setViewMode, today, darkMode, onDateDrop, isMobile
 }) {
   var theme = getTheme(darkMode);
   var todayKey = formatDateKey(today);
@@ -291,6 +291,7 @@ export default function CalendarView({
                       onClick={function () {
                         setDayOffset(Math.round((cell.date - today) / 86400000));
                         setMonthOffset(0);
+                        if (setViewMode) setViewMode('daily');
                       }}
                       onDragOver={onDateDrop ? function (e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } : undefined}
                       onDrop={onDateDrop ? function (e) { e.stopPropagation(); onDateDrop(e, key); } : undefined}

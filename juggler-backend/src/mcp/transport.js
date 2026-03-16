@@ -10,6 +10,8 @@ const { createMcpServerForUser } = require('./server');
 const { verifyToken } = require('../middleware/jwt-auth');
 const db = require('../db');
 
+var MCP_TIMEOUT = 120000; // 2 minutes max per MCP request
+
 /**
  * Authenticate the request and return the user ID.
  * Throws if authentication fails.
@@ -45,23 +47,44 @@ async function authenticateRequest(req) {
  * POST /mcp — handle MCP request (stateless mode)
  */
 async function handlePost(req, res) {
+  var server;
+  var transport;
+  var timeout;
+
+  function cleanup() {
+    clearTimeout(timeout);
+    if (transport) transport.close().catch(function() {});
+    if (server) server.close().catch(function() {});
+  }
+
   try {
     const userId = await authenticateRequest(req);
 
-    const server = createMcpServerForUser(userId);
-    const transport = new StreamableHTTPServerTransport({
+    server = createMcpServerForUser(userId);
+    transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined // stateless — no session tracking
     });
+
+    // Timeout: kill the request if it takes too long
+    timeout = setTimeout(function() {
+      console.warn('[mcp] Request timeout after ' + MCP_TIMEOUT + 'ms');
+      cleanup();
+      if (!res.headersSent) {
+        res.status(504).json({
+          jsonrpc: '2.0',
+          error: { code: -32000, message: 'Request timed out' },
+          id: null
+        });
+      }
+    }, MCP_TIMEOUT);
 
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
 
     // Clean up after response is sent
-    res.on('finish', () => {
-      transport.close().catch(() => {});
-      server.close().catch(() => {});
-    });
+    res.on('finish', cleanup);
   } catch (error) {
+    cleanup();
     if (!res.headersSent) {
       const status = error.status || 500;
       res.status(status).json({

@@ -6,10 +6,10 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { getTheme } from '../../theme/colors';
-import { GRID_START, GRID_END, PRI_COLORS, STATUS_MAP, MONTH_NAMES, DAY_NAMES_FULL, locIcon, LOC_TINT, locBgTint, DEFAULT_LOCATIONS } from '../../state/constants';
+import { GRID_START, GRID_END, PRI_COLORS, STATUS_MAP, MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, locIcon, LOC_TINT, locBgTint, DEFAULT_LOCATIONS } from '../../state/constants';
 import { formatHour, formatDateKey } from '../../scheduler/dateHelpers';
 import { getBlocksForDate } from '../../scheduler/timeBlockHelpers';
-import { resolveLocationId } from '../../scheduler/locationHelpers';
+import { resolveLocationId, getLocationForDatePure } from '../../scheduler/locationHelpers';
 import StatusToggle from '../schedule/StatusToggle';
 
 var MIN_PX_PER_HOUR = 30;
@@ -30,7 +30,7 @@ function durLabel(dur) {
 
 /* ── Task nature → background tint ── */
 function tileBg(task, darkMode, hover) {
-  // Markers — subtle purple/violet
+  // Reminder events — subtle purple/violet
   if (task.marker) {
     if (darkMode) return hover ? '#581C8730' : '#581C871C';
     return hover ? '#F5F3FF20' : '#F5F3FF12';
@@ -453,10 +453,44 @@ export default function DailyView({
   selectedDate, selectedDateKey, placements, statuses, onStatusChange,
   onExpand, darkMode, schedCfg, nowMins, isToday, allTasks,
   filter, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile,
-  onUpdate, showToast, locations, onHourLocationOverride
+  onUpdate, showToast, locations, onHourLocationOverride,
+  locSchedules, onUpdateLocScheduleOverrides, onUpdateLocScheduleDefaults, onBatchHabitsDone
 }) {
   var theme = getTheme(darkMode);
   var scrollRef = useRef(null);
+  var loc = getLocationForDatePure(selectedDateKey, schedCfg);
+
+  // Schedule template state
+  var dayName = DAY_NAMES[selectedDate.getDay()];
+  var defaultTemplate = (schedCfg.locScheduleDefaults || {})[dayName] || 'weekday';
+  var overrideTemplate = (schedCfg.locScheduleOverrides || {})[selectedDateKey];
+  var activeTemplate = overrideTemplate || defaultTemplate;
+  var isOverridden = !!overrideTemplate;
+  var templateEntries = locSchedules ? Object.entries(locSchedules) : [];
+
+  var handleTemplateChange = function(e) {
+    var val = e.target.value;
+    var overrides = Object.assign({}, schedCfg.locScheduleOverrides || {});
+    if (val === defaultTemplate) {
+      delete overrides[selectedDateKey];
+    } else {
+      overrides[selectedDateKey] = val;
+    }
+    if (onUpdateLocScheduleOverrides) onUpdateLocScheduleOverrides(overrides);
+  };
+
+  var handleSetDefault = function() {
+    if (!onUpdateLocScheduleDefaults) return;
+    var defs = Object.assign({}, schedCfg.locScheduleDefaults || {});
+    defs[dayName] = activeTemplate;
+    onUpdateLocScheduleDefaults(defs);
+    // Clear the override since it's now the default
+    if (isOverridden && onUpdateLocScheduleOverrides) {
+      var overrides = Object.assign({}, schedCfg.locScheduleOverrides || {});
+      delete overrides[selectedDateKey];
+      onUpdateLocScheduleOverrides(overrides);
+    }
+  };
 
   // Continuous zoom via pinch/wheel, with preset buttons as shortcuts
   var [hourHeight, setHourHeight] = useState(function () {
@@ -575,7 +609,7 @@ export default function DailyView({
     }).sort(function (a, b) { return a.start - b.start; });
   }, [placements, matchesFilter]);
 
-  // Separate markers from regular tasks — markers don't participate in column layout
+  // Separate reminder events from regular tasks — reminders don't participate in column layout
   var scheduled = useMemo(function () {
     return allScheduled.filter(function (p) { return !p.task.marker; });
   }, [allScheduled]);
@@ -587,9 +621,13 @@ export default function DailyView({
     var scheduledIds = {};
     (placements || []).forEach(function (p) { scheduledIds[p.task.id] = true; });
     return (allTasks || []).filter(function (t) {
-      return t.date === selectedDateKey && !scheduledIds[t.id] && matchesFilter(t.id);
+      if (t.date !== selectedDateKey || scheduledIds[t.id]) return false;
+      // Hide completed/cancelled/skipped tasks from unscheduled — they're done, no action needed
+      var st = statuses[t.id] || '';
+      if (st === 'done' || st === 'cancel' || st === 'skip') return false;
+      return matchesFilter(t.id);
     });
-  }, [allTasks, selectedDateKey, placements, matchesFilter]);
+  }, [allTasks, selectedDateKey, placements, statuses, matchesFilter]);
 
   var nowY = isToday ? ((nowMins - GRID_START * 60) / 60) * hourHeight : null;
 
@@ -611,21 +649,79 @@ export default function DailyView({
         <div style={{ fontWeight: 600, fontSize: 15, color: theme.text }}>
           {DAY_NAMES_FULL[selectedDate.getDay()]}, {MONTH_NAMES[selectedDate.getMonth()]} {selectedDate.getDate()}
         </div>
+        <div style={{ fontSize: 12, color: theme.textMuted }}>
+          {loc.icon} {loc.name}
+        </div>
         {/* Progress */}
         {(function () {
-          var total = scheduled.filter(function (p) { var s = statuses[p.task.id] || ''; return s !== 'cancel' && s !== 'skip'; }).length;
-          var done = scheduled.filter(function (p) { return statuses[p.task.id] === 'done'; }).length;
+          var dayTasks = allScheduled.map(function (p) { return p.task; });
+          var total = dayTasks.filter(function (t) { var s = statuses[t.id] || ''; return s !== 'cancel' && s !== 'skip'; }).length;
+          var done = dayTasks.filter(function (t) { return statuses[t.id] === 'done'; }).length;
+          var doneDur = dayTasks.filter(function (t) { return statuses[t.id] === 'done'; }).reduce(function (s, t) { return s + (t.dur || 0); }, 0);
+          var totalDur = dayTasks.reduce(function (s, t) { return s + (t.dur || 0); }, 0);
           var pct = total > 0 ? Math.round(done / total * 100) : 0;
-          if (total === 0) return null;
           return (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: theme.textMuted }}>
+            <div title={done + ' of ' + total + ' tasks done (' + Math.round(doneDur / 60 * 10) / 10 + 'h / ' + Math.round(totalDur / 60 * 10) / 10 + 'h)'} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: theme.textMuted }}>
               <div style={{ width: 60, height: 5, background: theme.bgTertiary, borderRadius: 3, overflow: 'hidden' }}>
                 <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? '#10B981' : '#3B82F6', borderRadius: 3 }} />
               </div>
               <span>{done}/{total}</span>
+              <span>({Math.round(doneDur / 60 * 10) / 10}h / {Math.round(totalDur / 60 * 10) / 10}h)</span>
             </div>
           );
         })()}
+        {/* Batch mark habits done */}
+        {onBatchHabitsDone && (function () {
+          var habitTasks = (allTasks || []).filter(function (t) { return t.habit && t.date === selectedDateKey && (statuses[t.id] || '') !== 'done'; });
+          return habitTasks.length > 0 ? (
+            <button onClick={function () { onBatchHabitsDone(selectedDateKey); }}
+              title={'Mark ' + habitTasks.length + ' habits done'}
+              style={{
+                border: '1px solid #10B981', borderRadius: 8, padding: '2px 8px',
+                background: '#10B98115', color: '#10B981', fontSize: 11,
+                cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600
+              }}>
+              {'\u2713'}hab ({habitTasks.length})
+            </button>
+          ) : null;
+        })()}
+        {/* Schedule template selector */}
+        {templateEntries.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <select
+              value={activeTemplate}
+              onChange={handleTemplateChange}
+              title={isOverridden ? 'Schedule template (overridden for this date)' : 'Schedule template (day default: ' + defaultTemplate + ')'}
+              style={{
+                fontSize: 11, padding: '2px 4px', borderRadius: 4, cursor: 'pointer',
+                background: isOverridden ? '#3B82F620' : (darkMode ? '#1E293B' : '#F8FAFC'),
+                color: isOverridden ? '#3B82F6' : theme.textMuted,
+                border: '1px solid ' + (isOverridden ? '#3B82F6' : theme.border),
+                outline: 'none'
+              }}
+            >
+              {templateEntries.map(function (entry) {
+                var id = entry[0], tmpl = entry[1];
+                return (
+                  <option key={id} value={id}>
+                    {tmpl.icon || ''} {tmpl.name}{id === defaultTemplate ? ' (default)' : ''}
+                  </option>
+                );
+              })}
+            </select>
+            {isOverridden && onUpdateLocScheduleDefaults && (
+              <button onClick={handleSetDefault}
+                title={'Make "' + activeTemplate + '" the default for all ' + DAY_NAMES_FULL[selectedDate.getDay()] + 's'}
+                style={{
+                  fontSize: 9, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
+                  border: '1px solid ' + theme.border, background: 'transparent',
+                  color: theme.textMuted, fontFamily: 'inherit', fontWeight: 600
+                }}>
+                Set as {dayName} default
+              </button>
+            )}
+          </div>
+        )}
         <div style={{ flex: 1 }} />
         {/* Zoom presets */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -899,7 +995,7 @@ export default function DailyView({
             );
           })}
 
-          {/* Marker overlays — rendered full-width, don't affect task column layout */}
+          {/* Reminder event overlays — rendered full-width, don't affect task column layout */}
           {markers.map(function (p) {
             var mTop = ((p.start - GRID_START * 60) / 60) * hourHeight;
             var mDur = p.end ? p.end - p.start : (p.task.dur || 30);

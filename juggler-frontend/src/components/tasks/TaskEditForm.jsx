@@ -367,7 +367,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
         }}>&times;</button>
       </div>
 
-      <div style={{ padding: '10px 12px', maxWidth: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
+      <div style={{ padding: '10px 12px', maxWidth: '100%', boxSizing: 'border-box', overflowX: 'hidden', overflowY: 'visible' }}>
         {/* Unplaced reason banner */}
         {!isCreate && task && task._unplacedDetail && (
           <div style={{
@@ -392,8 +392,8 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
           </div>
         )}
 
-        {/* Status buttons — hidden in create mode and for markers */}
-        {!isCreate && !marker && <div style={{ marginBottom: 8 }}>
+        {/* Status buttons — hidden in create mode */}
+        {!isCreate && <div style={{ marginBottom: 8 }}>
           <div style={{ ...lStyle, marginBottom: 3 }}>Status</div>
           <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
             {STATUS_OPTIONS.map(s => {
@@ -418,7 +418,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
 
         {/* ═══ SECTION: Task Description ═══ */}
         {(function() {
-          var secStyle = { border: '1px solid ' + TH.border, borderRadius: 6, padding: '8px 10px', marginBottom: 8 };
+          var secStyle = { border: '1px solid ' + TH.border, borderRadius: 6, padding: '8px 10px', marginBottom: 8, maxWidth: '100%', boxSizing: 'border-box', overflow: 'hidden' };
           var secHead = { fontSize: 9, fontWeight: 700, color: TH.textMuted, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 };
           return (<>
 
@@ -430,15 +430,17 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
               <input type="text" value={text} onChange={e => setText(e.target.value)}
                 style={{ ...iStyle, width: '100%' }} autoFocus />
             </label>
-            <label style={lStyle}>
+            <label style={{ ...lStyle, width: isMobile ? '100%' : undefined }}>
               Project
-              <select value={project} onChange={e => setProject(e.target.value)}
-                style={{ ...iStyle, width: 120 }}>
-                <option value="">— none —</option>
+              <input type="text" list="project-options" value={project}
+                onChange={e => setProject(e.target.value)}
+                placeholder="— none —"
+                style={{ ...iStyle, width: isMobile ? '100%' : 120 }} />
+              <datalist id="project-options">
                 {(allProjectNames || []).map(name => (
-                  <option key={name} value={name}>{name}</option>
+                  <option key={name} value={name} />
                 ))}
-              </select>
+              </datalist>
             </label>
           </div>
           <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 5 }}>
@@ -452,8 +454,8 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
               </select>
             </label>
             <label style={lStyle}>
-              <span title="Non-blocking reminder — shows on the calendar but doesn't block time. Other tasks can overlap it.">{'\u25C7'} Reminder</span>
-              <button title={marker ? 'This is a non-blocking reminder' : 'Make this a non-blocking calendar reminder'} onClick={() => setMarker(!marker)}
+              <span title="Non-blocking reminder event — shows on the calendar but doesn't block time. Other tasks can overlap it.">{'\u25C7'} Reminder event</span>
+              <button title={marker ? 'This is a non-blocking reminder event' : 'Make this a non-blocking reminder event'} onClick={() => setMarker(!marker)}
                 style={{ ...togStyle(marker, '#8B5CF6'), minWidth: 50 }}>{marker ? '\u25C7 Yes' : 'No'}</button>
             </label>
             {!marker && <>

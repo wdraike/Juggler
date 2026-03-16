@@ -496,7 +496,7 @@ export default function AppLayout() {
     var ap = hr >= 12 ? 'PM' : 'AM';
     var h12 = hr > 12 ? hr - 12 : (hr === 0 ? 12 : hr);
     var newTime = h12 + ':' + (mn < 10 ? '0' : '') + mn + ' ' + ap;
-    pushUndo('drag marker');
+    pushUndo('drag time');
     updateTask(taskId, { time: newTime });
 
     // Optimistically update placements so the marker stays where it was dropped
@@ -696,9 +696,12 @@ export default function AppLayout() {
               onGridDrop={handleGridDrop}
               locSchedules={config.locSchedules}
               onUpdateLocScheduleOverrides={config.updateTemplateOverrides}
+              onUpdateLocScheduleDefaults={config.updateTemplateDefaults}
               allTasks={allTasks} onBatchHabitsDone={handleBatchHabitsDone}
               locations={config.locations} onHourLocationOverride={handleHourLocationOverride}
               blockedTaskIds={blockedTaskIds}
+              unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
+              filter={filter}
               onZoomChange={handleZoomChange}
               isMobile={isMobile}
               onMarkerDrag={handleMarkerDrag}
@@ -765,7 +768,7 @@ export default function AppLayout() {
             <CalendarView
               selectedDate={selectedDate} dayPlacements={filteredDayPlacements}
               statuses={statuses} tasksByDate={tasksByDate}
-              onExpand={handleExpand} setDayOffset={setDayOffset} today={today} darkMode={darkMode}
+              onExpand={handleExpand} setDayOffset={setDayOffset} setViewMode={setViewMode} today={today} darkMode={darkMode}
               onDateDrop={handleDateDrop}
               isMobile={isMobile}
             />
@@ -788,6 +791,10 @@ export default function AppLayout() {
               showToast={showToast}
               locations={config.locations}
               onHourLocationOverride={handleHourLocationOverride}
+              locSchedules={config.locSchedules}
+              onUpdateLocScheduleOverrides={config.updateTemplateOverrides}
+              onUpdateLocScheduleDefaults={config.updateTemplateDefaults}
+              onBatchHabitsDone={handleBatchHabitsDone}
             />
           )}
           {viewMode === 'list' && (
