@@ -626,8 +626,8 @@ export default function DailyView({
     (placements || []).forEach(function (p) { scheduledIds[p.task.id] = true; });
     return (allTasks || []).filter(function (t) {
       if (t.date !== selectedDateKey || scheduledIds[t.id]) return false;
-      // Hide completed/cancelled/skipped tasks from unscheduled — they're done, no action needed
-      var st = statuses[t.id] || '';
+      // Hide completed/cancelled/skipped tasks — check both statuses map and task object
+      var st = statuses[t.id] || t.status || '';
       if (st === 'done' || st === 'cancel' || st === 'skip') return false;
       return matchesFilter(t.id);
     });
