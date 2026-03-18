@@ -64,6 +64,15 @@ export const THEME_DARK = {
   purpleBg: '#2E1065',
   purpleText: '#C4B5FD',
   purpleBorder: '#7C3AED',
+  // Badge system
+  badgeBg: '#334155',
+  badgeText: '#94A3B8',
+  projectBadgeBg: '#1E3A5F',
+  projectBadgeText: '#93C5FD',
+  // Header (always dark bg regardless of theme)
+  headerText: '#F5F0E8',
+  headerTextMuted: 'rgba(255,255,255,0.7)',
+  headerTrack: 'rgba(255,255,255,0.15)',
 };
 
 export const THEME_LIGHT = {
@@ -110,6 +119,15 @@ export const THEME_LIGHT = {
   purpleBg: '#EDE9FE',
   purpleText: '#5B21B6',
   purpleBorder: '#7C3AED',
+  // Badge system
+  badgeBg: '#F1F5F9',
+  badgeText: '#64748B',
+  projectBadgeBg: '#DBEAFE',
+  projectBadgeText: '#1E40AF',
+  // Header (always dark bg regardless of theme)
+  headerText: '#F5F0E8',
+  headerTextMuted: 'rgba(255,255,255,0.7)',
+  headerTrack: 'rgba(255,255,255,0.15)',
 };
 
 export function getTheme(darkMode) {

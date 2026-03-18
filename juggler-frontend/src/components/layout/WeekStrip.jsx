@@ -42,7 +42,7 @@ export default function WeekStrip({ weekStripDates, selectedDate, dayOffset, set
               style={{
                 border: 'none', borderRadius: 8, padding: isMobile ? '4px 2px' : '6px 10px', cursor: 'pointer',
                 background: isSelected ? theme.accent : 'transparent',
-                color: isSelected ? '#FFFFFF' : isToday ? theme.accent : theme.text,
+                color: isSelected ? theme.bg : isToday ? theme.accent : theme.text,
                 fontWeight: isSelected || isToday ? 600 : 400,
                 fontSize: 12, fontFamily: 'inherit', textAlign: 'center',
                 minWidth: isMobile ? 38 : 48, position: 'relative',
@@ -69,7 +69,7 @@ export default function WeekStrip({ weekStripDates, selectedDate, dayOffset, set
           style={{
             padding: '3px 4px', borderRadius: 6, fontSize: 10,
             border: `1px solid ${theme.border}`,
-            background: theme.white || theme.bg, color: theme.textMuted,
+            background: theme.input, color: theme.textMuted,
             cursor: 'pointer', fontFamily: 'inherit'
           }}
           title="Jump to any date"

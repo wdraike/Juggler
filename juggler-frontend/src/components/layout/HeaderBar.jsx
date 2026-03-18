@@ -5,7 +5,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../auth/AuthProvider';
-import { getTheme } from '../../theme/colors';
+import { getTheme, BRAND } from '../../theme/colors';
 import { DAY_NAMES } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 
@@ -46,23 +46,23 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
     {gcalSyncing && <style>{`@keyframes gcal-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>}
     <div style={{
       display: 'flex', alignItems: 'center', gap: isMobile ? 6 : 12, padding: isMobile ? '6px 8px' : '8px 16px',
-      background: darkMode ? '#0F1520' : '#1A2B4A', borderBottom: '2px solid rgba(200, 148, 42, 0.3)',
+      background: theme.headerBg, borderBottom: '2px solid ' + theme.accent + '4D',
       position: 'sticky', top: 0, zIndex: 100
     }}>
-      {!isMobile && <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, padding: '4px 10px', borderLeft: '2px solid #C8942A' }}>
-        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 8, fontWeight: 600, letterSpacing: '0.18em', textTransform: 'uppercase', color: '#C8942A', opacity: 0.7 }}>by Raike &amp; Sons</div>
-        <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 20, color: darkMode ? '#F5F0E8' : '#F5F0E8', letterSpacing: '-0.02em', lineHeight: 1.1 }}>Strive<span style={{ color: '#C8942A' }}>RS</span></div>
+      {!isMobile && <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, padding: '4px 10px', borderLeft: '2px solid ' + theme.accent }}>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 8, fontWeight: 600, letterSpacing: '0.18em', textTransform: 'uppercase', color: theme.accent, opacity: 0.7 }}>by Raike &amp; Sons</div>
+        <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 20, color: theme.headerText, letterSpacing: '-0.02em', lineHeight: 1.1 }}>Strive<span style={{ color: theme.accent }}>RS</span></div>
       </div>}
-      {isMobile && <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0, padding: '2px 6px', borderLeft: '2px solid #C8942A' }}>
-        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 6, fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#C8942A', opacity: 0.7 }}>R&amp;S</div>
-        <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 15, color: '#F5F0E8', letterSpacing: '-0.02em', lineHeight: 1.1 }}>Strive<span style={{ color: '#C8942A' }}>RS</span></div>
+      {isMobile && <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 0, padding: '2px 6px', borderLeft: '2px solid ' + theme.accent }}>
+        <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 6, fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', color: theme.accent, opacity: 0.7 }}>R&amp;S</div>
+        <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 15, color: theme.headerText, letterSpacing: '-0.02em', lineHeight: 1.1 }}>Strive<span style={{ color: theme.accent }}>RS</span></div>
       </div>}
 
       {/* Progress bar */}
-      <div title={doneCount + ' of ' + totalCount + ' tasks done today (' + pct + '%)'} style={{ flex: 0, minWidth: isMobile ? 50 : 80, maxWidth: isMobile ? 80 : 140, height: 6, background: 'rgba(255,255,255,0.15)', borderRadius: 2, overflow: 'hidden' }}>
-        <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? '#2D6A4F' : '#C8942A', borderRadius: 2, transition: 'width 0.3s' }} />
+      <div title={doneCount + ' of ' + totalCount + ' tasks done today (' + pct + '%)'} style={{ flex: 0, minWidth: isMobile ? 50 : 80, maxWidth: isMobile ? 80 : 140, height: 6, background: theme.headerTrack, borderRadius: 2, overflow: 'hidden' }}>
+        <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? theme.success : theme.accent, borderRadius: 2, transition: 'width 0.3s' }} />
       </div>
-      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', minWidth: 28 }} title={doneCount + ' of ' + totalCount + ' tasks done today'}>{pct}%</span>
+      <span style={{ fontSize: 11, color: theme.headerTextMuted, minWidth: 28 }} title={doneCount + ' of ' + totalCount + ' tasks done today'}>{pct}%</span>
 
       {/* AI command input — inline in header */}
       {aiPanel}
@@ -90,8 +90,8 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
                   title={DAY_NAMES[d.getDay()] + ' ' + (d.getMonth()+1) + '/' + d.getDate() + (totalCount > 0 ? ' (' + doneCount + '/' + totalCount + ')' : '')}
                   style={{
                     border: 'none', borderRadius: 2, padding: '2px 6px', cursor: 'pointer',
-                    background: isSelected ? '#C8942A' : 'transparent',
-                    color: isSelected ? '#1A2B4A' : isToday ? '#E8C878' : 'rgba(255,255,255,0.7)',
+                    background: isSelected ? theme.accent : 'transparent',
+                    color: isSelected ? BRAND.navy : isToday ? BRAND.goldLight : theme.headerTextMuted,
                     fontWeight: isSelected || isToday ? 700 : 400,
                     fontSize: 11, fontFamily: "'Inter', sans-serif", textAlign: 'center',
                     minWidth: 36, lineHeight: 1.2
@@ -111,8 +111,8 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
               if (!isNaN(d2)) setDayOffset(Math.round((d2 - today) / 86400000));
             }} style={{
               padding: '2px 3px', borderRadius: 2, fontSize: 10,
-              border: '1px solid rgba(255,255,255,0.2)',
-              background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)',
+              border: '1px solid ' + theme.headerTrack,
+              background: theme.headerTrack, color: theme.headerTextMuted,
               cursor: 'pointer', fontFamily: "'Inter', sans-serif"
             }} title="Jump to any date" />
             <button onClick={function() { setDayOffset(0); }} style={{
@@ -135,7 +135,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
             {(onShowGCalSync || onShowMsftCalSync) && (
               <button onClick={onShowCalSync || onShowGCalSync || onShowMsftCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title="Calendar Sync \u2014 bidirectional sync with connected calendars">
                 <span style={calSyncing ? { display: 'inline-block', animation: 'gcal-spin 1s linear infinite' } : undefined}>&#x1F4C5;</span>
-                {calSyncing && <span style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: '#C8942A' }} />}
+                {calSyncing && <span style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: theme.accent }} />}
               </button>
             )}
             {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help guide \u2014 how the scheduler works, task properties, keyboard shortcuts">&#x2753;</button>}
@@ -163,7 +163,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
               <div style={{
                 position: 'absolute', top: '100%', right: 0, marginTop: 4,
                 background: theme.bgSecondary, border: '1px solid ' + theme.border,
-                borderRadius: 2, boxShadow: '0 2px 8px rgba(26,43,74,0.08)',
+                borderRadius: 2, boxShadow: '0 2px 8px ' + theme.shadow,
                 zIndex: 200, minWidth: 180, overflow: 'hidden'
               }}>
                 {user && user.picture && (
@@ -201,7 +201,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
 function btnStyle(theme, isMobile) {
   return {
     border: 'none', background: 'transparent', cursor: 'pointer',
-    color: 'rgba(255,255,255,0.7)', fontSize: 16,
+    color: theme.headerTextMuted, fontSize: 16,
     padding: isMobile ? '8px' : '4px 6px',
     borderRadius: 2, fontFamily: "'Inter', sans-serif",
     minWidth: isMobile ? 36 : undefined,
@@ -211,8 +211,8 @@ function btnStyle(theme, isMobile) {
 
 function weekNavBtn(theme) {
   return {
-    border: '1px solid rgba(255,255,255,0.2)', borderRadius: 2, background: 'transparent',
-    color: 'rgba(255,255,255,0.6)', cursor: 'pointer',
+    border: '1px solid ' + theme.headerTrack, borderRadius: 2, background: 'transparent',
+    color: theme.headerTextMuted, cursor: 'pointer',
     padding: '3px 6px', fontSize: 14, fontFamily: "'Inter', sans-serif", fontWeight: 600,
     minHeight: 28, minWidth: 24,
     display: 'flex', alignItems: 'center', justifyContent: 'center'

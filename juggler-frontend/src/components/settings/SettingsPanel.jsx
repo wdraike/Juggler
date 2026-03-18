@@ -108,7 +108,7 @@ function LocationsTab({ config, theme }) {
             <button onClick={() => {
               var updated = config.locations.filter((_, idx) => idx !== i);
               config.updateLocations(updated);
-            }} title={'Delete location ' + loc.name} style={{ border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 14 }}>&times;</button>
+            }} title={'Delete location ' + loc.name} style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 14 }}>&times;</button>
           </div>
         ))}
       </div>
@@ -142,7 +142,7 @@ function ToolsTab({ config, theme }) {
             <span style={{ fontSize: 10, color: theme.textMuted }}>{tool.id}</span>
             <button onClick={() => {
               config.updateTools(config.tools.filter((_, idx) => idx !== i));
-            }} title={'Delete tool ' + tool.name} style={{ border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 14 }}>&times;</button>
+            }} title={'Delete tool ' + tool.name} style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 14 }}>&times;</button>
           </div>
         ))}
       </div>
@@ -244,7 +244,7 @@ function ProjectRow({ p, config, theme, onRename }) {
           await apiClient.delete('/projects/' + p.id);
           config.setProjects(config.projects.filter(function(x) { return x.id !== p.id; }));
         } catch (e) { console.error(e); }
-      }} style={{ border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 14 }}>&times;</button>
+      }} style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 14 }}>&times;</button>
     </div>
   );
 }
@@ -1053,7 +1053,7 @@ function UnifiedTemplateTab({ config, theme }) {
               }}>{(s?.icon || '') + ' ' + (s?.name || id)}</button>
               {!s?.system && (
                 <button onClick={function() { removeTemplate(id); }} title={'Delete template ' + (s?.name || id)} style={{
-                  border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 12
+                  border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 12
                 }}>&times;</button>
               )}
             </div>
@@ -1115,7 +1115,7 @@ function UnifiedTemplateTab({ config, theme }) {
                       {(config.locations.find(function(l) { return l.id === b.loc; }) || {}).icon || ''} {b.loc}
                     </span>
                     <button onClick={function(e) { e.stopPropagation(); removeBlock(i); }} style={{
-                      border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 13
+                      border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 13
                     }}>&times;</button>
                   </div>
                   {isEditing && (
@@ -1202,7 +1202,7 @@ function UnifiedTemplateTab({ config, theme }) {
                   var updated = Object.assign({}, config.templateOverrides);
                   delete updated[date];
                   config.updateTemplateOverrides(updated);
-                }} title={'Remove date override for ' + date} style={{ border: 'none', background: 'transparent', color: '#EF4444', cursor: 'pointer', fontSize: 12, marginLeft: 'auto' }}>&times;</button>
+                }} title={'Remove date override for ' + date} style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 12, marginLeft: 'auto' }}>&times;</button>
               </div>
             );
           })}

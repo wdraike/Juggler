@@ -332,7 +332,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
       {/* Top bar with Save / Delete / Close */}
       <div style={{
         display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap',
-        background: darkMode ? '#1E293B' : '#F1F5F9',
+        background: TH.badgeBg,
         padding: '8px 12px', borderBottom: '1px solid ' + TH.border
       }}>
         {isCreate ? (
@@ -372,9 +372,9 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
         {!isCreate && task && task._unplacedDetail && (
           <div style={{
             fontSize: 10, padding: '6px 10px', marginBottom: 8, borderRadius: 4,
-            background: darkMode ? '#78350F30' : '#FEF3C7',
-            color: darkMode ? '#FCD34D' : '#92400E',
-            border: '1px solid ' + (darkMode ? '#78350F' : '#F59E0B40'),
+            background: TH.amberBg,
+            color: TH.amberText,
+            border: '1px solid ' + TH.amberBorder,
             display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap'
           }}>
             <span style={{ fontWeight: 600 }}>{'\u26A0'} Not placed:</span>
@@ -756,7 +756,7 @@ export default function TaskEditForm({ task, status, direction, onUpdate, onStat
 
           {/* Configuration warnings */}
           {configWarnings.length > 0 && (
-            <div style={{ background: darkMode ? '#422006' : '#FEF3C7', border: '1px solid #F59E0B', borderRadius: 4, padding: '4px 8px', marginTop: 5, fontSize: 10, color: darkMode ? '#FCD34D' : '#92400E', lineHeight: 1.4 }}>
+            <div style={{ background: TH.amberBg, border: '1px solid ' + TH.amberBorder, borderRadius: 4, padding: '4px 8px', marginTop: 5, fontSize: 10, color: TH.amberText, lineHeight: 1.4 }}>
               {configWarnings.map(function(w, i) {
                 return <div key={i}>{'\u26A0\uFE0F'} {w}</div>;
               })}

@@ -85,12 +85,12 @@ export default function ConflictsView({ allTasks, statuses, directions, unplaced
 
   var actionSections = [
     {
-      key: 'overdue', title: 'Overdue', tasks: issues.overdue, color: '#EF4444',
+      key: 'overdue', title: 'Overdue', tasks: issues.overdue, color: theme.redText,
       tip: 'Tasks past their due date or scheduled date that haven\'t been completed',
       help: 'These tasks are past their scheduled or due date and still open. Mark them done, reschedule to a new date, or cancel them.'
     },
     {
-      key: 'unplaced', title: 'Unplaced', tasks: unplaced || [], color: '#F59E0B',
+      key: 'unplaced', title: 'Unplaced', tasks: unplaced || [], color: theme.amberText,
       tip: 'Tasks the scheduler couldn\'t fit into any available time slot',
       help: 'The scheduler tried to place these tasks but ran out of room. Common causes: the day is too full, time window constraints are too narrow, or a non-splittable task is too long for any available gap. Try shortening the task, enabling splitting, relaxing the time window, or moving other tasks to free up space.'
     },
@@ -98,12 +98,12 @@ export default function ConflictsView({ allTasks, statuses, directions, unplaced
 
   var infoSections = [
     {
-      key: 'blocked', title: 'Blocked by Dependencies', tasks: issues.blocked, color: '#7C3AED',
+      key: 'blocked', title: 'Blocked by Dependencies', tasks: issues.blocked, color: theme.purpleText,
       tip: 'Tasks waiting on other tasks to be completed first',
       help: 'These tasks depend on other tasks that aren\'t done yet. They\'ll become schedulable once their prerequisites are completed.'
     },
     {
-      key: 'unscheduled', title: 'Backlog (no date)', tasks: issues.unscheduled, color: '#6B7280',
+      key: 'unscheduled', title: 'Backlog (no date)', tasks: issues.unscheduled, color: theme.muted2,
       tip: 'Tasks with no date assigned \u2014 not on the schedule yet',
       help: 'These tasks have no date set, so they don\'t appear on the schedule. This is normal for backlog items. Assign a date when you\'re ready to work on them.'
     },
@@ -115,7 +115,7 @@ export default function ConflictsView({ allTasks, statuses, directions, unplaced
   var helpStyle = { fontSize: 11, color: theme.textMuted, padding: '2px 0 6px 0', lineHeight: 1.4 };
   var sugBtnStyle = {
     fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 4,
-    border: '1px solid #F59E0B', background: '#F59E0B18', color: '#F59E0B',
+    border: '1px solid ' + theme.amberBorder, background: theme.amberBg, color: theme.amberText,
     cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap'
   };
   var taskLinkStyle = {
@@ -256,7 +256,7 @@ export default function ConflictsView({ allTasks, statuses, directions, unplaced
                 return (
                   <div key={i} style={{
                     fontSize: 12, padding: '6px 10px', borderRadius: 6,
-                    background: darkMode ? '#78350F20' : '#FEF3C7',
+                    background: theme.amberBg,
                     border: '1px solid #D9770630',
                     color: theme.text
                   }}>
@@ -336,7 +336,7 @@ export default function ConflictsView({ allTasks, statuses, directions, unplaced
           </span>
           {actionCount > 0 ? (
             <span style={{
-              background: '#EF4444', color: '#FFF', borderRadius: 8,
+              background: theme.error, color: '#FFF', borderRadius: 8,
               padding: '0 6px', fontSize: 10, fontWeight: 700, lineHeight: '16px',
               minWidth: 18, textAlign: 'center'
             }}>{actionCount}</span>

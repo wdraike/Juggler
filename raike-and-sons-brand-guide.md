@@ -2073,7 +2073,7 @@ The hero is the one place you can be bold. Navy background, large Playfair headl
 
 ---
 
-*Raike & Sons Brand Guide v7.2 — Est. 2025*
+*Raike & Sons Brand Guide v8.0 — Est. 2025*
 *"Old school hustle. New school AI."*
 *Products: StriveRS + ClimbRS*
 *RS suffix = Raike & Sons in every product name*
@@ -2108,7 +2108,7 @@ The hero is the one place you can be bold. Navy background, large Playfair headl
 ### Tech Stack Recommendations
 - **CSS Framework:** Tailwind CSS (configure with custom colors) or vanilla CSS with the custom properties above
 - **Font Loading:** Use Google Fonts with `display=swap` for performance
-- **Icons:** Lucide icons for UI elements; supplement with SVG versions of vintage imagery
+- **Icons:** Marketing site: Lucide icons for UI elements; supplement with SVG versions of vintage imagery. **StriveRS app: emoji-based icons only** (see Application Design System §11)
 - **Images:** WebP format, lazy loading, with fallback to vintage-treated JPG
 
 ### Key Files to Create
@@ -2134,6 +2134,898 @@ The hero is the one place you can be bold. Navy background, large Playfair headl
 
 ---
 
-*Raike & Sons Brand Guide v2.0 — Est. 2025*  
-*"Old school hustle. New school AI."*  
+*Raike & Sons Brand Guide v8.0 — Est. 2025*
+*"Old school hustle. New school AI."*
 *Products: StriveRS + ClimbRS*
+
+---
+
+## Application Design System (StriveRS)
+
+> This section documents the design tokens, component patterns, and responsive rules used in the **StriveRS application UI**. The marketing site sections above use CSS-based styling with Tailwind classes; the app itself uses **React inline styles** with a JavaScript theme system. These are two distinct design vocabularies — this section is the single source of truth for the application.
+
+**Source of truth files:**
+- `juggler-frontend/src/theme/colors.js` — theme tokens
+- `juggler-frontend/src/state/constants.js` — priority colors, status options, location tints
+- `juggler-frontend/src/hooks/useIsMobile.js` — mobile breakpoint
+
+#### Dark / Light Mode Architecture
+
+The app ships with **two complete visual themes** toggled by a single boolean (`darkMode`). Dark mode is the default. The toggle lives in the header bar.
+
+**How it works:**
+1. `getTheme(darkMode)` returns either `THEME_DARK` or `THEME_LIGHT` — an object with 50+ color properties
+2. Every component receives `darkMode` as a prop and calls `getTheme()` to get the active theme
+3. All styling references `theme.propertyName` — components never hardcode light vs dark values
+4. The `BRAND` constants (gold, navy, parchment, etc.) are shared across both themes for brand identity elements
+
+**Design philosophy by mode:**
+
+| Aspect | Dark Mode (default) | Light Mode |
+|--------|-------------------|------------|
+| **Primary bg** | Deep navy `#0F1520` | Warm parchment `#F5F0E8` |
+| **Card surfaces** | Dark navy `#162035` | Warm cream `#FDFAF5` |
+| **Text** | Parchment `#E8E0D0` | Navy `#1A2B4A` |
+| **Borders** | Navy-light `#2E4A7A` | Parchment-dark `#E8E0D0` |
+| **Shadows** | Heavy `rgba(0,0,0,0.3)` | Subtle `rgba(26,43,74,0.08)` |
+| **Accent** | Gold `#C8942A` (both) | Gold `#C8942A` (both) |
+| **Accent hover** | Lighter gold `#E8C878` | Darker copper `#9E6B3B` |
+| **Semantic colors** | Bright on dark (e.g., green `#6EE7B7` on `#0A3622`) | Dark on light (e.g., green `#2D6A4F` on `#D1FAE5`) |
+| **Header** | Always dark — bg `#0F1520` | Always dark — bg `#1A2B4A` |
+| **Personality** | Rich, moody, cinematic | Warm, papery, vintage office |
+
+**Three categories of color in the app:**
+1. **Theme tokens** (`theme.bg`, `theme.text`, etc.) — change between dark/light. Used for all UI chrome.
+2. **BRAND constants** (`BRAND.gold`, `BRAND.navy`) — fixed regardless of theme. Used for brand identity (logo, footer, accent).
+3. **Semantic constants** (`PRI_COLORS`, `STATUS_OPTIONS`, `LOC_TINT`) — fixed regardless of theme. Used for data-driven UI (priority badges, status toggles, location tints). These use paired light/dark values internally (e.g., `bg` vs `bgDark`).
+
+---
+
+### 1. Theme Tokens (Dark / Light)
+
+The app supports two themes. **Dark mode is the default.** Themes are selected via `getTheme(darkMode)` from `colors.js`. All component styles reference theme properties — never raw color values (except for shared constants like `PRI_COLORS`).
+
+#### BRAND Constants (shared between themes)
+
+| Token | Value | Usage |
+|-------|-------|-------|
+| `navy` | `#1A2B4A` | Light-mode header bg, text color |
+| `navyLight` | `#2E4A7A` | Borders, secondary navy |
+| `gold` | `#C8942A` | Accent / brand color (both themes) |
+| `goldLight` | `#E8C878` | Accent hover (dark), highlight |
+| `copper` | `#9E6B3B` | Accent hover (light), secondary warm |
+| `parchment` | `#F5F0E8` | Light-mode primary bg |
+| `parchmentDark` | `#E8E0D0` | Light-mode borders, tertiary bg |
+| `cream` | `#FDFAF5` | Light-mode card bg, input bg |
+| `charcoal` | `#2C2B28` | Light-mode secondary text |
+| `charcoalMuted` | `#5C5A55` | Light-mode muted text |
+| `success` | `#2D6A4F` | Semantic green |
+| `warning` | `#C8942A` | Semantic amber (same as gold) |
+| `error` | `#8B2635` | Semantic red |
+
+#### Dark Theme (`THEME_DARK`)
+
+| Token | Value | Usage |
+|-------|-------|-------|
+| `bg` | `#0F1520` | Primary background |
+| `bgSecondary` | `#162035` | Modal/panel backgrounds |
+| `bgTertiary` | `#1E2D4A` | Hover states, kbd backgrounds |
+| `bgCard` | `#162035` | Card surfaces |
+| `bgHover` | `#1E2D4A` | Hover highlight |
+| `text` | `#E8E0D0` | Primary text |
+| `textSecondary` | `#B0A898` | Secondary text |
+| `textMuted` | `#8A8070` | Muted / label text |
+| `textDim` | `#6A6055` | Very low-contrast text |
+| `muted2` | `#6B7280` | Additional muted gray |
+| `border` | `#2E4A7A` | Primary borders |
+| `borderLight` | `#1E2D4A` | Subtle borders |
+| `accent` | `#C8942A` | Brand accent (gold) |
+| `accentHover` | `#E8C878` | Accent hover state |
+| `success` | `#2D6A4F` | Success semantic |
+| `warning` | `#C8942A` | Warning semantic |
+| `error` | `#8B2635` | Error semantic |
+| `card` | `#162035` | Card background |
+| `cardHover` | `#1E2D4A` | Card hover |
+| `input` | `#0F1520` | Input background |
+| `inputBg` | `#0F1520` | Input background (alias) |
+| `inputBorder` | `#2E4A7A` | Input border |
+| `inputText` | `#E8E0D0` | Input text color |
+| `headerBg` | `#0F1520` | App header background |
+| `shadow` | `rgba(0,0,0,0.3)` | Shadow color |
+| `btnBg` | `#1E2D4A` | Button background |
+| `btnBorder` | `#2E4A7A` | Button border |
+| `btnText` | `#E8E0D0` | Button text |
+| `blueBg` | `#1A2B4A` | Blue semantic bg |
+| `blueText` | `#E8C878` | Blue semantic text |
+| `blueBorder` | `#2E4A7A` | Blue semantic border |
+| `greenBg` | `#0A3622` | Green semantic bg |
+| `greenText` | `#6EE7B7` | Green semantic text |
+| `greenBorder` | `#2D6A4F` | Green semantic border |
+| `amberBg` | `#3A2A08` | Amber semantic bg |
+| `amberText` | `#E8C878` | Amber semantic text |
+| `amberBorder` | `#C8942A` | Amber semantic border |
+| `redBg` | `#3A0A10` | Red semantic bg |
+| `redText` | `#FCA5A5` | Red semantic text |
+| `redBorder` | `#8B2635` | Red semantic border |
+| `purpleBg` | `#2E1065` | Purple semantic bg |
+| `purpleText` | `#C4B5FD` | Purple semantic text |
+| `purpleBorder` | `#7C3AED` | Purple semantic border |
+| `badgeBg` | `#334155` | Neutral badge background (duration, date) |
+| `badgeText` | `#94A3B8` | Neutral badge text |
+| `projectBadgeBg` | `#1E3A5F` | Project badge background |
+| `projectBadgeText` | `#93C5FD` | Project badge text |
+| `headerText` | `#F5F0E8` | Text on header (always light) |
+| `headerTextMuted` | `rgba(255,255,255,0.7)` | Muted text on header |
+| `headerTrack` | `rgba(255,255,255,0.15)` | Progress bar track / subtle header borders |
+
+#### Light Theme (`THEME_LIGHT`)
+
+| Token | Value | Usage |
+|-------|-------|-------|
+| `bg` | `#F5F0E8` | Primary background (parchment) |
+| `bgSecondary` | `#FDFAF5` | Modal/panel backgrounds (cream) |
+| `bgTertiary` | `#E8E0D0` | Hover states, kbd backgrounds |
+| `bgCard` | `#FDFAF5` | Card surfaces |
+| `bgHover` | `#E8E0D0` | Hover highlight |
+| `text` | `#1A2B4A` | Primary text (navy) |
+| `textSecondary` | `#2C2B28` | Secondary text (charcoal) |
+| `textMuted` | `#5C5A55` | Muted / label text |
+| `textDim` | `#8A8070` | Very low-contrast text |
+| `muted2` | `#6B7280` | Additional muted gray |
+| `border` | `#E8E0D0` | Primary borders |
+| `borderLight` | `#F5F0E8` | Subtle borders |
+| `accent` | `#C8942A` | Brand accent (gold) |
+| `accentHover` | `#9E6B3B` | Accent hover state (copper) |
+| `success` | `#2D6A4F` | Success semantic |
+| `warning` | `#C8942A` | Warning semantic |
+| `error` | `#8B2635` | Error semantic |
+| `card` | `#FDFAF5` | Card background |
+| `cardHover` | `#F5F0E8` | Card hover |
+| `input` | `#FDFAF5` | Input background |
+| `inputBg` | `#FDFAF5` | Input background (alias) |
+| `inputBorder` | `#E8E0D0` | Input border |
+| `inputText` | `#1A2B4A` | Input text color |
+| `headerBg` | `#1A2B4A` | App header background (navy) |
+| `shadow` | `rgba(26,43,74,0.08)` | Shadow color |
+| `btnBg` | `#FDFAF5` | Button background |
+| `btnBorder` | `#E8E0D0` | Button border |
+| `btnText` | `#1A2B4A` | Button text |
+| `blueBg` | `#E8E0D0` | Blue semantic bg |
+| `blueText` | `#1A2B4A` | Blue semantic text |
+| `blueBorder` | `#C8942A` | Blue semantic border |
+| `greenBg` | `#D1FAE5` | Green semantic bg |
+| `greenText` | `#2D6A4F` | Green semantic text |
+| `greenBorder` | `#2D6A4F` | Green semantic border |
+| `amberBg` | `#FEF3C7` | Amber semantic bg |
+| `amberText` | `#9E6B3B` | Amber semantic text |
+| `amberBorder` | `#C8942A` | Amber semantic border |
+| `redBg` | `#FEE2E2` | Red semantic bg |
+| `redText` | `#8B2635` | Red semantic text |
+| `redBorder` | `#8B2635` | Red semantic border |
+| `purpleBg` | `#EDE9FE` | Purple semantic bg |
+| `purpleText` | `#5B21B6` | Purple semantic text |
+| `purpleBorder` | `#7C3AED` | Purple semantic border |
+| `badgeBg` | `#F1F5F9` | Neutral badge background (duration, date) |
+| `badgeText` | `#64748B` | Neutral badge text |
+| `projectBadgeBg` | `#DBEAFE` | Project badge background |
+| `projectBadgeText` | `#1E40AF` | Project badge text |
+| `headerText` | `#F5F0E8` | Text on header (always light) |
+| `headerTextMuted` | `rgba(255,255,255,0.7)` | Muted text on header |
+| `headerTrack` | `rgba(255,255,255,0.15)` | Progress bar track / subtle header borders |
+
+---
+
+### 2. App Typography Scale
+
+The app uses a **pixel-based type scale** (not rem/clamp like the marketing site). Font sizes increase on mobile for touch readability.
+
+#### Font Families
+
+| Font | Usage | Where |
+|------|-------|-------|
+| `'Inter', sans-serif` | Primary UI font — controls, tabs, pills, labels | NavigationBar, filter pills, throughout |
+| `'Playfair Display', serif` | Logo text and modal titles only | HelpModal title, ImportExportPanel title |
+| `'EB Garamond', serif` | Help modal section headers | HelpModal section headings |
+| `'inherit'` | Buttons and inputs (inherits Inter from body) | TaskEditForm, ConfirmDialog |
+| `monospace` | Code/data display, JSON preview, kbd shortcuts | ImportExportPanel textarea, HelpModal kbd |
+
+#### Type Scale
+
+| Size | Weight | Usage | Mobile Override |
+|------|--------|-------|-----------------|
+| 8px | 600 | Form field labels (`lStyle`) | — |
+| 9px | 600–700 | Badge text (project, duration, priority, due, status) | — |
+| 10px | 600–700 | Small button text (save, delete, toggle), location icons, WIP badge | — |
+| 11px | 400–600 | Base input text, filter pills, nav tabs (desktop), settings tabs | — |
+| 12px | 400–600 | Task card title (desktop), settings tab text, textarea, import buttons | 13px on mobile |
+| 13px | 500–600 | Nav tab text (mobile), confirm dialog buttons, toast text, input text (mobile) | — |
+| 14px | 400 | Confirm dialog message text | — |
+| 16px | 700 | Settings panel title, section headers | — |
+| 18px | 700 | Modal titles (Playfair Display), help section headers (EB Garamond) | — |
+| 20px | — | Close button (×) character | 24px on mobile |
+
+#### Letter Spacing
+
+- `0.03em` — Navigation tabs (subtle widening for legibility at small sizes)
+
+---
+
+### 3. Button System
+
+All buttons use `cursor: 'pointer'` and `fontFamily: 'inherit'`. No global button reset — all styling is inline. Button colors reference theme tokens and automatically adapt to dark/light mode. The gold accent (`theme.accent`) is the primary action color in both themes.
+
+#### Primary Action Button
+> Save, Create task
+
+```
+fontSize: 10
+fontWeight: 700
+padding: '4px 14px'
+border: 'none'
+borderRadius: 4
+background: theme.accent (#C8942A)  |  #10B981 for Create
+color: 'white'
+```
+
+#### Destructive Button
+> Delete task
+
+```
+fontSize: 10
+fontWeight: 600
+padding: '4px 10px'
+border: '1px solid #DC2626'
+borderRadius: 4
+background: theme.redBg
+color: theme.redText
+```
+
+#### Cancel / Secondary Button (Dialog)
+> Cancel in ConfirmDialog
+
+```
+fontSize: 13
+padding: '8px 20px'
+border: '1px solid ' + theme.border
+borderRadius: 8
+background: 'transparent'
+color: theme.textSecondary
+```
+
+#### Confirm Button (Dialog)
+> Destructive confirm action
+
+```
+fontSize: 13
+fontWeight: 600
+padding: '8px 20px'
+border: 'none'
+borderRadius: 8
+background: theme.error
+color: '#FFF'
+```
+
+#### Status Toggle Buttons
+> 5-state toggle row (Open, Done, WIP, Cancel, Skip)
+
+```
+Compact:  width/height: 16, fontSize: 8, gap: 1
+Desktop:  width/height: 22, fontSize: 12, gap: 3
+Mobile:   width/height: 28, fontSize: 14, gap: 3
+borderRadius: 4
+fontWeight: 700
+transition: 'background 0.1s, color 0.1s, border-color 0.1s'
+Active border:   1.5px solid [status color]
+Inactive border: 1px solid (dark: #475569 | light: #94A3B8)
+Active bg:       [status-specific, see Status Colors section]
+Inactive bg:     dark: #1E293B | light: #FFFFFF
+```
+
+#### Navigation View Tabs
+> Day, Week, List, Priority, Conflicts tabs
+
+```
+fontSize: desktop 11 | mobile 13
+fontWeight: 700 (active) | 400 (inactive)
+padding: desktop '5px 10px' | mobile '5px 0'
+borderRadius: 2
+letterSpacing: '0.03em'
+fontFamily: "'Inter', sans-serif"
+Active:   background: theme.accent, color: '#1A2B4A'
+Inactive: background: 'transparent', color: theme.textMuted
+Mobile: minHeight: 32, flex: 1, textAlign: 'center'
+```
+
+#### Filter Pills
+> Project filter, status filter, priority filter
+
+```
+fontSize: 11
+padding: '3px 10px'
+borderRadius: 2
+fontFamily: "'Inter', sans-serif"
+whiteSpace: 'nowrap'
+Active:   border: '1px solid ' + theme.accent, background: theme.accent + '20', color: theme.accent
+Inactive: border: '1px solid ' + theme.border, background: 'transparent', color: theme.textMuted
+```
+
+#### Icon / Close Button
+> Modal close (×)
+
+```
+fontSize: 20
+border: 'none'
+background: 'transparent'
+color: theme.textMuted
+```
+
+#### Settings Tabs
+> Locations, Tools, Matrix, Projects, Templates, Preferences
+
+```
+fontSize: 12
+fontWeight: active 600 | inactive 400
+padding: '5px 12px'
+borderRadius: 6
+border: 'none'
+fontFamily: 'inherit'
+whiteSpace: 'nowrap'
+Active:   background: theme.accent, color: '#FFF'
+Inactive: background: 'transparent', color: theme.textSecondary
+```
+
+#### Toggle Button (Form)
+> When-tags, location/tool toggles in TaskEditForm
+
+```
+height: desktop 26 | mobile 30
+padding: '0 8px'
+borderRadius: 4
+fontSize: 10
+fontWeight: on 600 | off 400
+fontFamily: 'inherit'
+On:  border: '2px solid [color]', background: [color] + '22', color: [color]
+Off: border: '1px solid ' + theme.btnBorder, background: theme.bgCard, color: theme.textMuted
+```
+
+#### Import/Export Panel Buttons
+> Export JSON, Export ICS, Import
+
+```
+fontSize: 13
+fontWeight: 600
+padding: '10px 20px'
+borderRadius: 2
+fontFamily: 'inherit'
+Default:  border: '1px solid ' + theme.border, background: 'transparent', color: theme.text
+Primary:  border: 'none', background: theme.accent, color: '#FFF'
+Success:  border: 'none', background: theme.success, color: '#FFF' (fontSize: 12, padding: '8px 16px')
+```
+
+#### Dark/Light Note: Header Bar
+
+The **header bar is always dark** regardless of theme — it uses `theme.headerBg` (dark: `#0F1520`, light: `#1A2B4A`). Text and icons inside the header use dedicated header tokens that always render as light-on-dark:
+- `theme.headerText` (`#F5F0E8`) — primary text, logo
+- `theme.headerTextMuted` (`rgba(255,255,255,0.7)`) — secondary text, icon buttons
+- `theme.headerTrack` (`rgba(255,255,255,0.15)`) — progress bar track, subtle borders
+- `theme.accent` — gold elements (logo "RS", selected day, progress fill, sync indicator)
+- `BRAND.goldLight` (`#E8C878`) — today highlight in the inline week strip
+
+Header icon buttons (settings, export, help, dark mode toggle) use `theme.headerTextMuted` for their color. The add-task button (+) keeps a bright green for visibility. The overflow menu dropdown on mobile uses standard theme tokens (it pops over the content area, not the header).
+
+---
+
+### 4. Dialog / Modal System
+
+All modals use a fixed-position overlay with centered content. **On mobile, all modals go full-screen** (width/height: 100%, borderRadius: 0, no shadow). Modal backgrounds use `theme.bgSecondary` which resolves to dark navy (`#162035`) in dark mode and warm cream (`#FDFAF5`) in light mode. The backdrop overlay (`rgba(0,0,0,0.5)`) is the same in both themes.
+
+#### Common Overlay
+
+```
+position: 'fixed'
+top: 0, left: 0, right: 0, bottom: 0
+background: 'rgba(0,0,0,0.5)'
+display: 'flex'
+alignItems: 'center'
+justifyContent: 'center'
+```
+
+#### Settings Panel
+> `zIndex: 300`
+
+```
+Desktop: width: 700, maxWidth: '95vw', maxHeight: '85vh', borderRadius: 12
+Mobile:  width: '100%', height: '100%', borderRadius: 0
+background: theme.bgSecondary
+boxShadow: desktop '0 8px 32px ' + theme.shadow | mobile 'none'
+overflow: 'hidden'
+display: 'flex', flexDirection: 'column'
+```
+
+#### Help Modal
+> `zIndex: 300`
+
+```
+Desktop: width: 560, maxWidth: '95vw', maxHeight: '85vh', borderRadius: 2
+Mobile:  width: '100%', height: '100%', borderRadius: 0
+background: theme.bgSecondary
+boxShadow: desktop '0 2px 8px ' + theme.shadow | mobile 'none'
+overflow: 'auto'
+padding: 20
+Title font: 'Playfair Display', serif — 18px, weight 700
+Section font: 'EB Garamond', serif — 16px, weight 500
+```
+
+#### Confirm Dialog
+> `zIndex: 400`
+
+```
+Desktop: width: 360, maxWidth: '90vw', borderRadius: 12
+Mobile:  width: '100%', height: '100%', borderRadius: 0
+background: theme.bgSecondary
+boxShadow: desktop '0 8px 32px ' + theme.shadow | mobile 'none'
+padding: 24
+Message: fontSize 14, lineHeight 1.5
+```
+
+#### Import/Export Panel
+> `zIndex: 300`
+
+```
+Desktop: width: 560, maxWidth: '95vw', maxHeight: '80vh', borderRadius: 2
+Mobile:  width: '100%', height: '100%', borderRadius: 0
+background: theme.bgSecondary
+boxShadow: desktop '0 2px 8px ' + theme.shadow | mobile 'none'
+overflow: 'auto'
+padding: 20
+Title font: 'Playfair Display', serif — 18px, weight 700
+```
+
+#### Task Edit Sidebar (Desktop)
+> Renders inline within the layout (no overlay), embedded in the right panel
+
+```
+height: '100%'
+background: theme.bgCard
+overflowX: 'hidden'
+overflowY: 'auto'
+```
+
+#### Task Edit Mobile Overlay
+> `zIndex: 600`
+
+```
+position: 'fixed'
+top: 0, left: 0, right: 0, bottom: 0
+background: theme.bgCard
+overflowY: 'auto'
+```
+
+#### Toast Notification
+> `zIndex: 9999` — always on top
+
+```
+position: 'fixed'
+bottom: desktop 20 | mobile 10
+right: desktop 20 | mobile 10
+left: mobile 10 | desktop undefined
+padding: '10px 16px'
+borderRadius: 8
+fontSize: 13
+fontWeight: 500
+color: THEME_DARK.text
+boxShadow: '0 4px 12px ' + THEME_DARK.shadow
+cursor: 'pointer'
+
+Type colors (always dark-mode styled, uses THEME_DARK/BRAND constants):
+  success: bg THEME_DARK.greenBg, border THEME_DARK.greenBorder
+  error:   bg THEME_DARK.redBg, border THEME_DARK.redBorder
+  info:    bg BRAND.navy, border BRAND.navyLight
+
+History panel:
+  background: THEME_DARK.bgSecondary, border: '1px solid ' + THEME_DARK.border
+  borderRadius: 8, padding: 8, maxHeight: 200, overflow: 'auto', fontSize: 11
+  Entry color: THEME_DARK.badgeText
+```
+
+---
+
+### 5. Form Inputs
+
+All form inputs in the app use a base style object (`iStyle`) defined in `TaskEditForm.jsx`.
+
+#### Base Input Style
+
+```
+fontSize: desktop 11 | mobile 13
+padding: desktop '3px 4px' | mobile '6px 8px'
+border: '1px solid ' + theme.inputBorder
+borderRadius: 4
+background: theme.inputBg
+color: theme.inputText
+fontFamily: 'inherit'
+height: desktop 26 | mobile 30
+boxSizing: 'border-box'
+maxWidth: '100%'
+```
+
+#### Textarea (Import/Export)
+
+```
+width: '100%'
+minHeight: 120
+padding: '8px 10px'
+border: '1px solid ' + theme.inputBorder
+borderRadius: 2
+background: theme.input
+color: theme.text
+fontSize: 12
+fontFamily: 'monospace'
+resize: 'vertical'
+outline: 'none'
+boxSizing: 'border-box'
+```
+
+#### Select Inputs
+
+Same as base input style. Native `<select>` elements, no custom dropdowns (except project combobox).
+
+#### Project Combobox
+
+Text input with a dropdown suggestion list. The dropdown appears as an absolute-positioned div below the input with:
+
+```
+background: theme.bgCard
+border: '1px solid ' + theme.inputBorder
+borderRadius: 4
+boxShadow: '0 2px 8px ' + theme.shadow
+maxHeight: 120, overflow: 'auto'
+Each item: padding '3px 8px', fontSize 11, cursor 'pointer'
+Hover: background theme.bgHover
+```
+
+#### Form Labels
+
+```
+fontSize: 8
+fontWeight: 600
+color: theme.textMuted
+display: 'flex'
+flexDirection: 'column'
+gap: 2
+```
+
+---
+
+### 6. Card / Tile System
+
+#### TaskCard
+
+The primary card component used in List, Priority, and Conflicts views. Cards use `theme.bgCard` for their surface — dark navy (`#162035`) in dark mode, warm cream (`#FDFAF5`) in light mode. All badge colors within cards use theme tokens that automatically adapt to the active theme.
+
+```
+borderRadius: 6
+padding: desktop '6px 10px' | mobile '8px 10px'
+background: theme.bgCard (all states — active and done use the same card surface)
+boxShadow: '0 1px 3px ' + theme.shadow
+transition: 'box-shadow 0.15s'
+cursor: 'pointer'
+overflow: 'hidden'
+
+Border styles (left border is always 3px solid):
+  Normal task:  '1px solid [priColor]40' (40 = 25% alpha hex suffix)
+  Habit task:   '1px dashed [priColor]40'
+  Marker task:  '1px dotted #8B5CF640'
+  Done task:    '1px [style] ' + theme.border
+
+Left accent: '3px solid [priColor]'  (marker: #8B5CF6)
+Opacity: done 0.5, marker 0.7, normal 1
+Done title: textDecoration 'line-through'
+```
+
+**Row 1 — Title + Badges:**
+```
+fontSize: desktop 12 | mobile 13, lineHeight: 1.3
+Title: fontWeight 600, color: theme.text, ellipsis overflow
+```
+
+**Badge Sub-Elements (all badges):**
+
+All badges use theme tokens rather than hardcoded colors.
+
+| Badge | fontSize | fontWeight | Theme tokens | borderRadius | padding |
+|-------|----------|------------|-------------|--------------|---------|
+| Project | 9 | 600 | bg `theme.projectBadgeBg`, text `theme.projectBadgeText` | 3 | `1px 5px` |
+| Duration | 10 | 600 | bg `theme.badgeBg`, text `theme.badgeText` | 3 | `1px 5px` |
+| Priority | 9 | 700 | bg `[priColor]18`, text `[priColor]` | 3 | `0 4px` |
+| Due date | 9 | 600 | bg `theme.amberBg`, text `theme.amberText` | 3 | `1px 4px` |
+| Overdue | 9 | 600 | bg `theme.error`, text `#FFF` | 3 | `1px 4px` |
+| Reminder | 9 | 600 | bg `theme.purpleBg`, text `theme.purpleText` | 3 | `1px 4px` |
+| Flexed | 9 | 600 | bg `theme.amberBg`, text `theme.amberText` | 3 | `1px 4px` |
+| WIP remaining | 9 | 700 | bg `theme.amberBg`, text `theme.amberText` | 3 | `1px 5px` |
+| Blocked | 10 | 600 | text `theme.redText` | — | — |
+| Date | 9 | 600 | bg `theme.badgeBg`, text `theme.badgeText` | 3 | `1px 4px` |
+
+**Blocker Row (overdue dependencies):**
+```
+marginTop: 4, paddingTop: 4
+borderTop: '1px dashed ' + theme.borderLight
+fontSize: desktop 10 | mobile 11
+Link color: theme.projectBadgeText
+textDecoration: 'underline', textDecorationStyle: 'dotted'
+Quick-complete button: fontSize desktop 9 | mobile 10, borderRadius 3, padding '0 5px'
+  border: '1px solid ' + theme.greenBorder
+  background: theme.greenBg
+  color: theme.greenText
+```
+
+#### Schedule Blocks (Day/Week views)
+
+Schedule blocks in the timeline use absolute positioning within the time grid. They share the card's left-border accent pattern and badge system but are positioned and sized based on time calculations.
+
+#### Unscheduled Entries
+
+Appear below the scheduled timeline. Same card styling as TaskCard but may use a lighter border treatment to visually separate from scheduled items.
+
+---
+
+### 7. Status & State Colors
+
+This section covers colors that are **semantic** — they represent data states (priority, status, location) rather than UI chrome. These colors are defined in `constants.js` and `StatusToggle.jsx`, not in the theme system. Priority colors and location tints are the same in both themes. Status colors and StatusToggle buttons have explicit light/dark variants built into their own definitions (separate from the theme tokens).
+
+#### Priority Colors (`PRI_COLORS`)
+
+| Priority | Color | Usage |
+|----------|-------|-------|
+| P1 | `#DC2626` | Critical — red |
+| P2 | `#D97706` | High — amber |
+| P3 | `#2563EB` | Medium — blue (default) |
+| P4 | `#6B7280` | Low — gray |
+
+Priority colors are used for the card left border, priority badge bg (at 18 hex alpha = ~9% opacity), and priority badge text.
+
+#### Task Status Colors (`STATUS_OPTIONS`)
+
+| Status | Light bg | Dark bg | Light text | Dark text | Icon |
+|--------|----------|---------|------------|-----------|------|
+| Open (empty) | `#FFFFFF` | `#1E293B` | `#9CA3AF` | `#7E8FA6` | `—` |
+| Done | `#D1FAE5` | `#064E3B` | `#065F46` | `#6EE7B7` | `✓` |
+| WIP | `#FEF3C7` | `#78350F` | `#92400E` | `#FCD34D` | `⌛` |
+| Cancel | `#FEE2E2` | `#7F1D1D` | `#991B1B` | `#FCA5A5` | `✕` |
+| Skip | `#F1F5F9` | `#334155` | `#64748B` | `#94A3B8` | `⏭` |
+
+#### StatusToggle Button Colors (visual button states)
+
+| Status | Light activeBg | Dark activeBg | Light color | Dark color |
+|--------|---------------|---------------|-------------|------------|
+| Open | `#E5E7EB` | `#374151` | `#4B5563` | `#9CA3AF` |
+| Done | `#BBF7D0` | `#064E3B` | `#15803D` | `#6EE7B7` |
+| WIP | `#FDE68A` | `#78350F` | `#B45309` | `#FCD34D` |
+| Cancel | `#FECACA` | `#7F1D1D` | `#DC2626` | `#FCA5A5` |
+| Skip | `#E2E8F0` | `#334155` | `#475569` | `#94A3B8` |
+
+Inactive button: bg `dark: #1E293B | light: #FFFFFF`, color `dark: #64748B | light: #6B7280`, border `dark: #475569 | light: #94A3B8`
+
+#### Location Tints (`LOC_TINT`)
+
+| Location | Color | Alpha | Usage |
+|----------|-------|-------|-------|
+| Home | `#3B82F6` | `18` (hex) | Blue tint for home blocks |
+| Work | `#F59E0B` | `18` | Amber tint for work blocks |
+| Transit | `#9CA3AF` | `18` | Gray tint for transit |
+| Downtown | `#10B981` | `18` | Green tint for downtown |
+| Gym | `#EF4444` | `18` | Red tint for gym |
+| Unknown/other | `#8B5CF6` | `18` | Purple fallback |
+
+Alpha is appended as a 2-character hex suffix to the color (e.g., `#3B82F618` = ~9% opacity). Used via `locBgTint(locId, alpha)`.
+
+#### Special State Colors
+
+All special states use theme tokens for automatic dark/light support.
+
+| State | Indicator | Theme Tokens |
+|-------|-----------|-------------|
+| Blocked | `🚫 blocked` text | `theme.redText` |
+| Overdue | `OVERDUE [date]` badge | bg `theme.error`, text `#FFF` |
+| Due (not overdue) | `Due [date]` badge | bg `theme.amberBg`, text `theme.amberText` |
+| Reminder/Marker | `◇ reminder` badge | bg `theme.purpleBg`, text `theme.purpleText` |
+| Flexed | `~ flexed` badge | bg `theme.amberBg`, text `theme.amberText` |
+| Marker task | Dotted border, purple accent | borderColor `#8B5CF6`, opacity 0.7 |
+| Habit task | Dashed border | Normal priority color, dashed border style |
+
+---
+
+### 8. Spacing System
+
+The app does not use a formal spacing scale — values are chosen per-component. However, these sizes recur consistently:
+
+| Token | Value | Typical Usage |
+|-------|-------|---------------|
+| xs | 1–2px | StatusToggle gap (compact), badge internal padding |
+| sm | 3–4px | Input padding (desktop), badge padding, small gaps |
+| md | 6–8px | Card padding, input padding (mobile), inter-element gaps |
+| lg | 10–12px | Section padding, card internal padding, modal content spacing |
+| xl | 16px | Modal/panel content padding, settings content padding |
+| 2xl | 20px | Modal padding (Help, Import/Export) |
+| 3xl | 24px | Confirm dialog padding |
+| 4xl | 32px | Large layout spacing (rare) |
+
+Common gap values: `1, 2, 3, 4, 6, 8` (used in flex layouts via `gap` property).
+
+---
+
+### 9. Animation / Transition System
+
+All transitions use inline `transition` properties. No CSS keyframe animations.
+
+| Duration | Easing | Property | Usage |
+|----------|--------|----------|-------|
+| 0.1s | default (ease) | `background`, `color`, `border-color` | StatusToggle button state changes |
+| 0.15s | default | `background` | Card/button hover feedback |
+| 0.15s | default | `box-shadow` | Card elevation change on hover |
+| 0.15s | default | `transform` | Scale/rotation micro-interactions |
+| 0.15s | ease | `all` | General smooth transitions |
+| 0.2s | default | `all` | Slightly slower all-property transitions |
+| 0.2s | default | `background` | Slower background color transitions |
+| 0.2s | default | `left` | Positional slide animations |
+| 0.3s | default | `width` | Expansion/collapse animations |
+| 0.3s | ease | `transform` | Drag-and-drop movement effects |
+
+**Rule:** No transition exceeds 0.3s in the app UI. Use `transition: 'none'` during active drag operations to prevent lag.
+
+---
+
+### 10. Responsive / Mobile System
+
+The app uses a **single breakpoint at 600px** defined via `matchMedia` in `useIsMobile.js`:
+
+```js
+var QUERY = '(max-width: 600px)';
+```
+
+**This is NOT CSS media queries.** The `isMobile` boolean is passed as a prop throughout the component tree. All responsive behavior is prop-driven in inline styles.
+
+#### Mobile Adaptations
+
+| Pattern | Desktop | Mobile |
+|---------|---------|--------|
+| Input height | 26px | 30px |
+| Input font size | 11px | 13px |
+| Input padding | `3px 4px` | `6px 8px` |
+| Card title font | 12px | 13px |
+| Nav tab font | 11px | 13px |
+| Nav tab padding | `5px 10px` | `5px 0` (flex: 1) |
+| Nav tab height | auto | minHeight: 32 |
+| StatusToggle size | 22×22, font 12 | 28×28, font 14 |
+| Close button font | 20px | 24px |
+| Blocker row font | 10px | 11px |
+| Card padding | `6px 10px` | `8px 10px` |
+| Toast position | bottom: 20, right: 20 | bottom: 10, right: 10, left: 10 |
+
+#### Mobile Modal Behavior
+
+All modals and dialogs become **full-screen** on mobile:
+- `width: '100%'`, `height: '100%'`
+- `borderRadius: 0`
+- `boxShadow: 'none'`
+
+The TaskEditForm uses a dedicated full-screen overlay (`zIndex: 600`) on mobile instead of the sidebar panel used on desktop.
+
+#### Touch Targets
+
+Minimum interactive element sizes on mobile:
+- StatusToggle buttons: 28×28px
+- Nav tabs: minHeight 32px, flex: 1 (full-width)
+- Input fields: height 30px
+- Toggle buttons: height 30px
+
+---
+
+### 11. Icon System
+
+The app uses **emoji characters** for all icons — there is no icon library (Lucide, FontAwesome, etc.). This keeps the bundle size zero for icons and ensures cross-platform rendering.
+
+> **Note:** The "Lucide icons" recommendation in the Implementation Notes section above applies to the **marketing site only**, not the StriveRS application.
+
+#### Status Icons
+
+| Icon | Character | Unicode | Usage |
+|------|-----------|---------|-------|
+| Open | ○ | U+25CB | StatusToggle open state |
+| Done | ✓ | U+2713 | StatusToggle done state |
+| WIP | ⌛ | U+231B | StatusToggle WIP state |
+| Cancel | ✕ | U+2715 | StatusToggle cancel state |
+| Skip | ⏭ | U+23ED | StatusToggle skip state (STATUS_OPTIONS) |
+| Skip (alt) | ⇭ | U+21ED | StatusToggle skip state (StatusToggle.jsx) |
+| Dash | — | U+2014 | Open status label |
+
+#### Navigation & Action Icons
+
+| Icon | Character | Usage |
+|------|-----------|-------|
+| × | &times; | Close button (modal/panel) |
+| → | U+2192 | Direction indicator |
+| ◇ | U+25C7 | Reminder/marker badge |
+| ~ | Tilde | Flexed badge prefix |
+| 🚫 | U+1F6AB | Blocked indicator |
+| 📌 | U+1F4CC | Fixed time tag |
+
+#### Location Icons
+
+| Icon | Character | Location |
+|------|-----------|----------|
+| 🏠 | U+1F3E0 | Home |
+| 🏢 | U+1F3E2 | Work |
+| 🚗 | U+1F697 | Transit / Car |
+| 🏙️ | U+1F3D9+FE0F | Downtown |
+| 🏋️ | U+1F3CB+FE0F | Gym |
+
+#### Tool Icons
+
+| Icon | Character | Tool |
+|------|-----------|------|
+| 📱 | U+1F4F1 | Phone / Tablet |
+| 💻 | U+1F4BB | Personal PC / Work PC |
+| 🖥️ | U+1F5A5+FE0F | Work PC (alt) |
+| 🖨️ | U+1F5A8+FE0F | Printer |
+
+#### Time Block Icons
+
+| Icon | Character | Block |
+|------|-----------|-------|
+| ☀️ | U+2600+FE0F | Morning |
+| 💼 | U+1F4BC | Business/Biz |
+| 🍽️ | U+1F37D+FE0F | Lunch |
+| 🌤️ | U+1F324+FE0F | Afternoon |
+| 🌙 | U+1F319 | Evening |
+| 🌑 | U+1F311 | Night |
+
+---
+
+### 12. Z-Index System
+
+Layering is managed via inline `zIndex` values. The scale ensures predictable stacking.
+
+| Layer | Z-Index Range | Usage |
+|-------|---------------|-------|
+| Base content | 0–2 | Default flow, minimal stacking |
+| Task blocks | 10–20 | Schedule grid items, timeline blocks |
+| Elevated content | 30–60 | Tooltips within content, dropdown triggers |
+| Header / Nav | 100 | App header, navigation bar |
+| Elevated nav | 150 | Sticky/floating nav elements |
+| Dropdowns | 200 | Combobox dropdowns, context menus |
+| Modals (standard) | 300 | HelpModal, ImportExportPanel, SettingsPanel |
+| Modals (confirm) | 400 | ConfirmDialog (must overlay other modals) |
+| Modals (high) | 500 | Stacked/nested modal scenarios |
+| Full-screen overlays | 600 | TaskEditForm mobile overlay |
+| Toast notifications | 9999 | Always on top |
+| System-critical | 10000 | Highest priority (rare) |
+
+**Rule:** Modals requiring user confirmation (ConfirmDialog) must layer above content modals. The TaskEditForm mobile overlay at 600 sits above standard modals because it replaces the entire view. Toasts at 9999 are always visible.
+
+---
+
+### 13. Shadow / Elevation System
+
+Shadows use `theme.shadow` for theme-aware opacity. Dark theme shadows are more opaque (`rgba(0,0,0,0.3)`) than light theme (`rgba(26,43,74,0.08)`).
+
+| Level | Shadow Value | Usage |
+|-------|-------------|-------|
+| **Level 0** — Flat | `none` | Mobile modals, disabled states |
+| **Level 1** — Card | `0 1px 3px [theme.shadow]` | TaskCard, small elements |
+| **Level 2** — Dropdown | `0 2px 8px [theme.shadow]` | HelpModal, ImportExportPanel, combobox dropdown |
+| **Level 3** — Modal | `0 8px 32px [theme.shadow]` | SettingsPanel, ConfirmDialog |
+| **Level 4** — Toast | `0 4px 12px THEME_DARK.shadow` | Toast notifications (always dark-styled) |
+
+Additional shadow values used in specific contexts:
+- `0 1px 2px [theme.shadow]` — Minimal depth
+- `0 1px 4px [theme.shadow]` — Subtle elevation
+- `0 4px 16px [theme.shadow]` — Prominent floating elements
+- `0 6px 20px [theme.shadow]` — Highly elevated elements
+- `inset 0 0 0 4px #F5F0E8, inset 0 0 0 5px #C8942A` — Focus ring (marketing site pattern)
+
+**Rule:** On mobile, all modals use `boxShadow: 'none'` since they go full-screen and don't need depth cues.
+
+---
+
+*End of Application Design System section*

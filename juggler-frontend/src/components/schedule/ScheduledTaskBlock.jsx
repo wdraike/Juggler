@@ -37,7 +37,7 @@ export default function ScheduledTaskBlock({ item, status, gridZoom, gutter, has
         borderRadius: 6,
         padding: '2px 6px',
         cursor: 'pointer',
-        background: isDone ? (darkMode ? '#1E293B' : '#F1F5F9') : (darkMode ? '#1E293B' : '#FFFFFF'),
+        background: isDone ? theme.badgeBg : theme.bgCard,
         border: `1px ${task.habit ? 'dashed' : 'solid'} ${isDone ? theme.border : priColor}`,
         borderLeft: `3px solid ${priColor}`,
         overflow: 'hidden',
@@ -68,8 +68,8 @@ export default function ScheduledTaskBlock({ item, status, gridZoom, gutter, has
           {task.project && <span>{task.project} </span>}
           {item.splitPart && <span>Part {item.splitPart}/{item.splitTotal} </span>}
           {task.dur}m
-          {status === 'wip' && task.timeRemaining != null && <span style={{ color: '#92400E', fontWeight: 600 }}> {task.timeRemaining}m left</span>}
-          {isBlocked && <span style={{ color: '#EF4444' }}> &#x1F6AB;</span>}
+          {status === 'wip' && task.timeRemaining != null && <span style={{ color: theme.amberText, fontWeight: 600 }}> {task.timeRemaining}m left</span>}
+          {isBlocked && <span style={{ color: theme.redText }}> &#x1F6AB;</span>}
           {task.location?.length > 0 && (function() { var ic = task.location.map(lid => locIcon(lid)).filter(Boolean); return ic.length > 0 ? <span> {ic.join('')}</span> : null; })()}
           {task.when && task.when !== 'anytime' && <span> {parseWhen(task.when).map(t => WHEN_TAG_ICONS[t] || '').join('')}</span>}
         </div>

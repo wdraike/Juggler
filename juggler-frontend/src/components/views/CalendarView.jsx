@@ -47,11 +47,11 @@ function FixedPopup({ anchorRect, item, status, theme, darkMode }) {
   var popup = (
     <div style={Object.assign({
       position: 'fixed', zIndex: 9999, left: left,
-      background: darkMode ? '#1E293B' : '#FFF',
+      background: theme.bgCard,
       border: '1px solid ' + theme.border,
       borderLeft: '3px solid ' + priColor,
       borderRadius: 8,
-      boxShadow: '0 8px 24px rgba(0,0,0,' + (darkMode ? '0.5' : '0.18') + ')',
+      boxShadow: '0 8px 24px ' + theme.shadow,
       padding: '8px 10px',
       minWidth: 200, maxWidth: 280,
       pointerEvents: 'none',
@@ -82,8 +82,8 @@ function FixedPopup({ anchorRect, item, status, theme, darkMode }) {
         {t.project && (
           <span style={{
             fontSize: 9, fontWeight: 600,
-            background: darkMode ? '#1E3A5F' : '#DBEAFE',
-            color: darkMode ? '#93C5FD' : '#1E40AF',
+            background: theme.projectBadgeBg,
+            color: theme.projectBadgeText,
             borderRadius: 3, padding: '1px 5px'
           }}>
             {t.project}
@@ -104,7 +104,7 @@ function FixedPopup({ anchorRect, item, status, theme, darkMode }) {
         </div>
       )}
       {t.due && (
-        <div style={{ marginTop: 2, fontSize: 10, color: darkMode ? '#FCD34D' : '#B45309' }}>
+        <div style={{ marginTop: 2, fontSize: 10, color: theme.amberText }}>
           Due {t.due}
         </div>
       )}

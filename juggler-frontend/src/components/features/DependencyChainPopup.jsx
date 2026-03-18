@@ -229,7 +229,7 @@ export default function DependencyChainPopup({ focusTaskId, allTasks, statuses, 
             {chainDirty && (
               <button onClick={chainSave} title="Save dependency changes to all tasks in the chain" style={{
                 border: 'none', borderRadius: 6, padding: '4px 12px',
-                background: '#10B981', color: '#FFF', fontSize: 11, fontWeight: 600,
+                background: theme.success, color: '#FFF', fontSize: 11, fontWeight: 600,
                 cursor: 'pointer', fontFamily: 'inherit'
               }}>Save Changes</button>
             )}
@@ -411,7 +411,7 @@ function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor,
                 position: 'absolute', left: pos.x, top: pos.y, width: NODE_W,
                 padding: '4px 7px', borderRadius: 6, cursor: 'grab',
                 border: isFocus ? '2px solid ' + theme.accent
-                  : isLinkDropTarget ? (dropWouldCycle ? '2px dashed #DC2626' : '2px dashed #3B82F6')
+                  : isLinkDropTarget ? (dropWouldCycle ? '2px dashed ' + theme.redBorder : '2px dashed ' + theme.blueBorder)
                   : '1px solid ' + (isClosed ? theme.border + '88' : theme.border),
                 background: isDragging ? theme.accent + '18' : isFocus ? theme.accent + '12' : isClosed ? theme.bgSecondary + '88' : theme.bgSecondary,
                 opacity: isDragging ? 0.5 : isClosed && !isFocus ? 0.65 : 1,
@@ -445,7 +445,7 @@ function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor,
                     return (
                       <span key={depId} onClick={function(e) { e.stopPropagation(); chainRemoveDep(ct.id, depId); }} title={'Click to remove dependency on \u201C' + (depTask ? depTask.text : depId) + '\u201D'} style={{
                         display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 9, padding: '0px 4px', borderRadius: 3,
-                        background: depDone ? '#10B98118' : '#F59E0B18', color: depDone ? '#10B981' : '#D97706',
+                        background: depDone ? theme.greenBg : theme.amberBg, color: depDone ? theme.greenText : theme.amberText,
                         fontWeight: 500, cursor: 'pointer'
                       }}>
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 100 }}>
@@ -471,7 +471,7 @@ function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor,
                 if (alreadyDep) return null;
                 var isCycle = wouldCycle(chainDeps, ct.id, linkDragId);
                 return (
-                  <div style={{ fontSize: 9, color: isCycle ? '#DC2626' : '#3B82F6', padding: '2px 0', borderTop: '1px dashed ' + (isCycle ? '#DC262644' : '#3B82F644') }}>
+                  <div style={{ fontSize: 9, color: isCycle ? theme.redText : theme.blueText, padding: '2px 0', borderTop: '1px dashed ' + (isCycle ? theme.redBorder + '44' : theme.blueBorder + '44') }}>
                     {isCycle
                       ? '\u26D4 circular dependency!'
                       : '\u21B3 depends on \u201C' + (draggedTask ? draggedTask.text.substring(0, 22) : linkDragId) + '\u201D'}
@@ -489,7 +489,7 @@ function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor,
                     padding: '6px 8px', background: theme.bgTertiary,
                     borderRadius: 6, border: '1px solid ' + theme.border, maxHeight: 200, overflowY: 'auto',
                     position: 'absolute', bottom: '100%', left: 0, width: 260, marginBottom: 4,
-                    zIndex: 100, boxShadow: '0 4px 16px rgba(0,0,0,0.18)'
+                    zIndex: 100, boxShadow: '0 4px 16px ' + theme.shadow
                   }}>
                     {candidates.length > 0 ? candidates.map(function(ot) {
                       return (

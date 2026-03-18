@@ -29,7 +29,7 @@ function durLabel(dur) {
 }
 
 /* ── Task nature → background tint ── */
-function tileBg(task, darkMode, hover) {
+function tileBg(task, darkMode, hover, theme) {
   // Reminder events — subtle purple/violet
   if (task.marker) {
     if (darkMode) return hover ? '#581C8730' : '#581C871C';
@@ -46,8 +46,7 @@ function tileBg(task, darkMode, hover) {
     return hover ? '#CCFBF120' : '#CCFBF112';
   }
   // Default flexible — very subtle neutral
-  if (darkMode) return hover ? '#1E293B' : '#1E293B';
-  return hover ? '#FFFFFF' : '#FFFFFF';
+  return theme.bgCard;
 }
 
 /* ── Popup card rendered via portal ── */
@@ -76,11 +75,11 @@ function FixedPopup({ anchorRect, item, status, theme, darkMode }) {
     <div style={Object.assign({
       position: 'fixed', zIndex: 9999,
       left: left,
-      background: darkMode ? '#1E293B' : '#FFF',
+      background: theme.bgCard,
       border: '1px solid ' + theme.border,
       borderLeft: '3px solid ' + priColor,
       borderRadius: 8,
-      boxShadow: '0 8px 24px rgba(0,0,0,' + (darkMode ? '0.5' : '0.18') + ')',
+      boxShadow: '0 8px 24px ' + theme.shadow,
       padding: '8px 10px',
       minWidth: 200, maxWidth: 280,
       pointerEvents: 'none',
@@ -111,8 +110,8 @@ function FixedPopup({ anchorRect, item, status, theme, darkMode }) {
         {t.project && (
           <span style={{
             fontSize: 9, fontWeight: 600,
-            background: darkMode ? '#1E3A5F' : '#DBEAFE',
-            color: darkMode ? '#93C5FD' : '#1E40AF',
+            background: theme.projectBadgeBg,
+            color: theme.projectBadgeText,
             borderRadius: 3, padding: '1px 5px'
           }}>
             {t.project}
@@ -133,7 +132,7 @@ function FixedPopup({ anchorRect, item, status, theme, darkMode }) {
         </div>
       )}
       {t.due && (
-        <div style={{ marginTop: 2, fontSize: 10, color: darkMode ? '#FCD34D' : '#B45309' }}>
+        <div style={{ marginTop: 2, fontSize: 10, color: theme.amberText }}>
           Due {t.due}
         </div>
       )}
@@ -278,7 +277,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
           border: '1px ' + (isMarker ? 'dotted' : (t.habit ? 'dashed' : 'solid')) + ' ' + (isDone ? theme.border : (isMarker ? '#8B5CF640' : priColor + '30')),
           borderLeftWidth: 3, borderLeftColor: isWhenRelaxed ? '#F59E0B' : (isMarker ? '#8B5CF6' : priColor),
           borderRadius: 5,
-          background: tileBg(t, darkMode, show),
+          background: tileBg(t, darkMode, show, theme),
           padding: height >= 42 ? '3px 6px' : '2px 6px',
           cursor: canDrag ? 'grab' : 'pointer',
           overflow: 'hidden',
@@ -316,8 +315,8 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
             {showProjectDur && t.project && (
               <span style={{
                 fontSize: 8, fontWeight: 600, flexShrink: 0,
-                background: darkMode ? '#1E3A5F' : '#DBEAFE',
-                color: darkMode ? '#93C5FD' : '#1E40AF',
+                background: theme.projectBadgeBg,
+                color: theme.projectBadgeText,
                 borderRadius: 3, padding: '0 4px'
               }}>
                 {t.project}
@@ -326,8 +325,8 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
             {showProjectDur && t.dur > 0 && (
               <span style={{
                 fontSize: 8, flexShrink: 0, fontWeight: 600,
-                color: darkMode ? '#94A3B8' : '#64748B',
-                background: darkMode ? '#334155' : '#F1F5F9',
+                color: theme.badgeText,
+                background: theme.badgeBg,
                 borderRadius: 3, padding: '0 4px'
               }}>
                 {durLabel(t.dur)}
@@ -354,8 +353,8 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
             {t.due && (
               <span style={{
                 fontSize: 8, fontWeight: 600,
-                color: darkMode ? '#FCD34D' : '#B45309',
-                background: darkMode ? '#422006' : '#FEF3C7',
+                color: theme.amberText,
+                background: theme.amberBg,
                 borderRadius: 3, padding: '0 4px'
               }}>
                 Due {t.due}
@@ -372,7 +371,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
             {isWhenRelaxed && <span style={{ color: '#F59E0B', fontWeight: 600 }}>{'~'} flexed</span>}
             {t.when && t.when !== 'anytime' && !isWhenRelaxed && <span>{t.when}</span>}
             {status === 'wip' && t.timeRemaining != null && (
-              <span style={{ fontWeight: 700, color: darkMode ? '#FCD34D' : '#B45309' }}>
+              <span style={{ fontWeight: 700, color: theme.amberText }}>
                 {t.timeRemaining}m left
               </span>
             )}
@@ -425,7 +424,7 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, theme, darkMode,
           display: 'flex', alignItems: 'center', gap: 6,
           fontSize: isMobile ? 10 : 11, padding: '4px 6px', borderRadius: 4,
           borderLeft: '3px solid ' + priColor,
-          background: tileBg(task, darkMode, show),
+          background: tileBg(task, darkMode, show, theme),
           color: isDone ? theme.textMuted : theme.text,
           textDecoration: isDone ? 'line-through' : 'none',
           cursor: canDrag ? 'grab' : 'pointer',
@@ -704,9 +703,9 @@ export default function DailyView({
               title={isOverridden ? 'Schedule template (overridden for this date)' : 'Schedule template (day default: ' + defaultTemplate + ')'}
               style={{
                 fontSize: 11, padding: '2px 4px', borderRadius: 4, cursor: 'pointer',
-                background: isOverridden ? '#3B82F620' : (darkMode ? '#1E293B' : '#F8FAFC'),
-                color: isOverridden ? '#3B82F6' : theme.textMuted,
-                border: '1px solid ' + (isOverridden ? '#3B82F6' : theme.border),
+                background: isOverridden ? theme.accent + '20' : theme.bgCard,
+                color: isOverridden ? theme.accent : theme.textMuted,
+                border: '1px solid ' + (isOverridden ? theme.accent : theme.border),
                 outline: 'none'
               }}
             >
@@ -881,7 +880,7 @@ export default function DailyView({
                     <div style={{
                       position: 'fixed', left: menuLeft, top: menuTop, zIndex: 10000,
                       pointerEvents: 'auto',
-                      background: darkMode ? '#1E293B' : '#FFFFFF',
+                      background: theme.bgCard,
                       border: '1px solid ' + theme.border,
                       borderRadius: 2, padding: 4,
                       boxShadow: '0 4px 12px ' + theme.shadow,
@@ -972,11 +971,11 @@ export default function DailyView({
           {nowY != null && nowY >= 0 && nowY <= gridHeight && (
             <div style={{
               position: 'absolute', top: nowY, left: GUTTER_W, right: 0,
-              height: 2, background: '#EF4444', zIndex: 30, borderRadius: 1
+              height: 2, background: theme.redText, zIndex: 30, borderRadius: 1
             }}>
               <div style={{
                 position: 'absolute', left: -4, top: -3, width: 8, height: 8,
-                background: '#EF4444', borderRadius: '50%'
+                background: theme.redText, borderRadius: '50%'
               }} />
             </div>
           )}

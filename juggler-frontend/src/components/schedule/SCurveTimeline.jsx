@@ -653,8 +653,8 @@ export default function SCurveTimeline(props) {
 
   /* ── Curve samples for both circles ── */
   var curveSamples = useMemo(function () {
-    var defColor   = darkMode ? '#475569' : '#CBD5E1';
-    var nightColor = darkMode ? '#1E293B' : '#E2E8F0';
+    var defColor   = theme.badgeText;
+    var nightColor = darkMode ? theme.bgCard : theme.bgTertiary;
     var am = [], pm = [];
 
     for (var m = 0; m <= 720; m += SAMPLE_STEP) {
@@ -717,8 +717,8 @@ export default function SCurveTimeline(props) {
       return {
         locPath: arcPath(innerLocR),
         whenPath: arcPath(innerWhenR),
-        locColor: (blk.loc && LOC_TINT[blk.loc]) || (darkMode ? '#475569' : '#CBD5E1'),
-        whenColor: blk.color || (darkMode ? '#475569' : '#CBD5E1'),
+        locColor: (blk.loc && LOC_TINT[blk.loc]) || theme.badgeText,
+        whenColor: blk.color || theme.badgeText,
         locLabel: blk.loc ? locIcon(blk.loc) : '',
         locX: locX, locY: locY,
         whenLabel: (blk.icon || '') + ' ' + (blk.name || blk.tag || ''),
@@ -763,7 +763,7 @@ export default function SCurveTimeline(props) {
   var cardLayout = useMemo(function () {
     var sorted = (placements || []).slice().sort(function (a, b) { return a.start - b.start; });
 
-    var defColor = darkMode ? '#475569' : '#94A3B8';
+    var defColor = theme.badgeText;
     var allItems = [];
     for (var i = 0; i < sorted.length; i++) {
       var item = sorted[i];
@@ -811,7 +811,7 @@ export default function SCurveTimeline(props) {
             stroke={s.color} strokeWidth={BAND_W}
             strokeLinecap="round" opacity={0.55} />
           <line x1={p.x} y1={p.y} x2={s.x} y2={s.y}
-            stroke={darkMode ? '#64748B' : '#94A3B8'} strokeWidth={2}
+            stroke={theme.badgeText} strokeWidth={2}
             strokeLinecap="round" />
         </g>
       );
@@ -837,7 +837,7 @@ export default function SCurveTimeline(props) {
           ) : null}
           <text x={seg.whenX} y={seg.whenY}
             textAnchor="middle" dominantBaseline="middle"
-            fill={darkMode ? '#E2E8F0' : '#334155'}
+            fill={theme.text}
             fontSize={isMobile ? 9 : 11} fontWeight={700}
             fontFamily="'Inter', system-ui" opacity={0.8}>
             {seg.whenLabel}
@@ -859,14 +859,14 @@ export default function SCurveTimeline(props) {
         {/* Circle labels */}
         <text x={amCX} y={amCY - amR - BAND_W / 2 - 28}
           textAnchor="middle" dominantBaseline="middle"
-          fill={darkMode ? '#94A3B8' : '#64748B'}
+          fill={theme.badgeText}
           fontSize={isMobile ? 11 : 14} fontWeight={700}
           fontFamily="'Inter', system-ui" opacity={0.7}>
           AM
         </text>
         <text x={pmCX} y={pmCY - pmR - BAND_W / 2 - 28}
           textAnchor="middle" dominantBaseline="middle"
-          fill={darkMode ? '#94A3B8' : '#64748B'}
+          fill={theme.badgeText}
           fontSize={isMobile ? 11 : 14} fontWeight={700}
           fontFamily="'Inter', system-ui" opacity={0.7}>
           PM
@@ -891,13 +891,13 @@ export default function SCurveTimeline(props) {
           return (
             <g key={'h' + m.hour}>
               <circle cx={m.x} cy={m.y} r={m.showLabel ? 3 : 2}
-                fill={darkMode ? '#94A3B8' : '#64748B'}
+                fill={theme.badgeText}
                 opacity={m.showLabel ? 0.7 : 0.4} />
               {m.showLabel ? (
                 <text x={m.x + outX * (BAND_W / 2 + 16)}
                   y={m.y + outY * (BAND_W / 2 + 16)}
                   textAnchor="middle" dominantBaseline="middle"
-                  fill={darkMode ? '#CBD5E1' : '#475569'}
+                  fill={theme.textSecondary}
                   fontSize={isMobile ? 9 : 11} fontWeight={700}
                   fontFamily="'Inter', system-ui">
                   {formatHour(m.hour)}
@@ -923,22 +923,22 @@ export default function SCurveTimeline(props) {
           return <circle key={'mk' + (c.item.key || c.item.task.id)}
             cx={c.curveX} cy={c.curveY} r={5}
             fill={pc} opacity={0.9}
-            stroke={darkMode ? '#0F172A' : '#FFFFFF'} strokeWidth={2} />;
+            stroke={theme.bg} strokeWidth={2} />;
         })}
 
         {/* Now indicator */}
         {nowPos && (
           <g>
-            <circle cx={nowPos.x} cy={nowPos.y} r={7} fill="#EF4444" />
+            <circle cx={nowPos.x} cy={nowPos.y} r={7} fill={theme.redText} />
             <circle cx={nowPos.x} cy={nowPos.y} r={12}
-              fill="none" stroke="#EF4444" strokeWidth={2} opacity={0.4} />
+              fill="none" stroke={theme.redText} strokeWidth={2} opacity={0.4} />
           </g>
         )}
       </svg>
 
       {/* Task cards — render lower cards first so upper cards sit on top and are clickable */}
       {cards.slice().sort(function (a, b) { return b.cardY - a.cardY; }).map(function (c) {
-        var bc = c.blockColor || (darkMode ? '#475569' : '#CBD5E1');
+        var bc = c.blockColor || theme.badgeText;
         return (
           <div key={c.item.key || c.item.task.id} onClick={function () { onExpand(c.item.task.id); }} style={{
             position: 'absolute',
@@ -949,11 +949,11 @@ export default function SCurveTimeline(props) {
             borderRadius: 6,
             overflow: 'hidden',
             cursor: 'pointer',
-            border: darkMode ? '1px solid #334155' : '1px solid #E2E8F0'
+            border: '1px solid ' + theme.border
           }}>
             <div style={{
               position: 'absolute', left: 0, top: 0, right: 0, bottom: 0,
-              background: darkMode ? '#1E293B' : '#FFFFFF',
+              background: theme.bgCard,
               pointerEvents: 'none'
             }} />
             <div style={{

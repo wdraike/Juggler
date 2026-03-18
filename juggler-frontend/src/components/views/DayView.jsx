@@ -93,7 +93,7 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
           return (
             <div title={done + ' of ' + total + ' tasks done (' + Math.round(doneDur / 60 * 10) / 10 + 'h / ' + Math.round(totalDur / 60 * 10) / 10 + 'h)'} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: theme.textMuted }}>
               <div style={{ width: 60, height: 5, background: theme.bgTertiary, borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? '#10B981' : '#3B82F6', borderRadius: 3 }} />
+                <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? theme.success : theme.accent, borderRadius: 3 }} />
               </div>
               <span>{done}/{total}</span>
               <span>({Math.round(doneDur / 60 * 10) / 10}h / {Math.round(totalDur / 60 * 10) / 10}h)</span>
@@ -107,8 +107,8 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
             <button onClick={() => onBatchHabitsDone(selectedDateKey)}
               title={'Mark ' + habitTasks.length + ' habits done'}
               style={{
-                border: '1px solid #10B981', borderRadius: 8, padding: '2px 8px',
-                background: '#10B98115', color: '#10B981', fontSize: 11,
+                border: '1px solid ' + theme.greenBorder, borderRadius: 8, padding: '2px 8px',
+                background: theme.greenBg, color: theme.greenText, fontSize: 11,
                 cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600
               }}>
               &#x2713;hab ({habitTasks.length})
@@ -123,9 +123,9 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
               title={isOverridden ? 'Schedule template (overridden for this date)' : 'Schedule template (day default: ' + defaultTemplate + ')'}
               style={{
                 fontSize: 11, padding: '2px 4px', borderRadius: 4, cursor: 'pointer',
-                background: isOverridden ? '#3B82F620' : (darkMode ? '#1E293B' : '#F8FAFC'),
-                color: isOverridden ? '#3B82F6' : theme.textMuted,
-                border: `1px solid ${isOverridden ? '#3B82F6' : theme.border}`,
+                background: isOverridden ? theme.accent + '20' : theme.bgCard,
+                color: isOverridden ? theme.accent : theme.textMuted,
+                border: '1px solid ' + (isOverridden ? theme.accent : theme.border),
                 outline: 'none'
               }}
             >
@@ -164,9 +164,9 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
                   <div key={t.id} onClick={() => onExpand(t.id)}
                     style={{
                       padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 12,
-                      background: isDone ? (darkMode ? '#1E293B' : '#F1F5F9') : (darkMode ? '#1E3A5F' : '#DBEAFE'),
-                      color: isDone ? theme.textMuted : (darkMode ? '#93C5FD' : '#1E40AF'),
-                      border: '1px solid ' + (isDone ? theme.border : (darkMode ? '#3B82F640' : '#93C5FD')),
+                      background: isDone ? theme.badgeBg : theme.projectBadgeBg,
+                      color: isDone ? theme.textMuted : theme.projectBadgeText,
+                      border: '1px solid ' + (isDone ? theme.border : theme.projectBadgeText + '40'),
                       opacity: isDone ? 0.5 : 1,
                       textDecoration: isDone ? 'line-through' : 'none'
                     }}>

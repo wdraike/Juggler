@@ -194,7 +194,7 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
               return (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6 }}>
                   <kbd style={{
-                    background: darkMode ? '#334155' : '#E2E8F0', color: theme.text,
+                    background: theme.badgeBg, color: theme.text,
                     padding: '2px 8px', borderRadius: 4, fontSize: 12, fontFamily: 'monospace',
                     fontWeight: 600, minWidth: 120, textAlign: 'center',
                     border: '1px solid ' + theme.border

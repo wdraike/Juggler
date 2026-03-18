@@ -81,7 +81,7 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
       style={{
         width: '100%', height: '100%',
         borderRadius: 6, overflow: 'hidden',
-        background: isDone ? (darkMode ? '#1E293B' : '#F8FAFC') : (darkMode ? '#1E293B' : '#FFFFFF'),
+        background: theme.bgCard,
         border: '1px ' + (task.habit ? 'dashed' : 'solid') + ' ' + (isDone ? theme.border : priColor + '40'),
         borderLeft: '3px solid ' + priColor,
         cursor: 'pointer', opacity: isDone ? 0.5 : 1,
@@ -111,8 +111,8 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
         {task.project && (
           <span style={{
             fontSize: 9, flexShrink: 0, fontWeight: 600,
-            background: darkMode ? '#1E3A5F' : '#DBEAFE',
-            color: darkMode ? '#93C5FD' : '#1E40AF',
+            background: theme.projectBadgeBg,
+            color: theme.projectBadgeText,
             borderRadius: 3, padding: '0 4px'
           }}>
             {task.project}
@@ -120,8 +120,8 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
         )}
         <span style={{
           fontSize: compact ? 8 : 10, flexShrink: 0, fontWeight: 600,
-          color: darkMode ? '#94A3B8' : '#64748B',
-          background: darkMode ? '#334155' : '#F1F5F9',
+          color: theme.badgeText,
+          background: theme.badgeBg,
           borderRadius: 3, padding: '1px 4px'
         }}>
           {durLabel}
@@ -131,10 +131,10 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
       {/* Row 2: status + start time + type badges + metadata */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: compact ? 1 : 3 }}>
         {compact ? (
-          <span style={{ fontSize: 10, color: darkMode ? '#94A3B8' : '#475569', fontWeight: 700, display: 'flex', gap: 3, alignItems: 'center' }}>
+          <span style={{ fontSize: 10, color: theme.badgeText, fontWeight: 700, display: 'flex', gap: 3, alignItems: 'center' }}>
             {statusIcon && <span>{statusIcon}</span>}
             {startLabel && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted }}>{startLabel}</span>}
-            {isBlocked && <span style={{ color: '#EF4444' }} title="Blocked \u2014 waiting on incomplete dependencies">{'\uD83D\uDEAB'}</span>}
+            {isBlocked && <span style={{ color: theme.redText }} title="Blocked \u2014 waiting on incomplete dependencies">{'\uD83D\uDEAB'}</span>}
           </span>
         ) : (
           <>
@@ -150,7 +150,7 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
               var icons = task.location.map(function(lid) { return locIcon(lid); }).filter(Boolean);
               return icons.length > 0 ? <span style={{ fontSize: 10 }}>{icons.join(' ')}</span> : null;
             })()}
-            {isBlocked && <span style={{ color: '#EF4444', fontSize: 11 }} title="Blocked \u2014 waiting on incomplete dependencies">{'\uD83D\uDEAB'}</span>}
+            {isBlocked && <span style={{ color: theme.redText, fontSize: 11 }} title="Blocked \u2014 waiting on incomplete dependencies">{'\uD83D\uDEAB'}</span>}
             {task.pri && (
               <span title={'Priority ' + task.pri} style={{
                 fontSize: 9, fontWeight: 700,
@@ -162,7 +162,7 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
               </span>
             )}
             {status === 'wip' && task.timeRemaining != null && (
-              <span style={{ fontSize: 9, fontWeight: 700, color: darkMode ? '#FCD34D' : '#B45309' }}>
+              <span style={{ fontSize: 9, fontWeight: 700, color: theme.amberText }}>
                 {task.timeRemaining}m left
               </span>
             )}

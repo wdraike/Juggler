@@ -355,7 +355,7 @@ export default function CalendarGrid({
                   <div style={{
                     position: 'fixed', left: menuLeft, top: menuTop,
                     zIndex: 10000, pointerEvents: 'auto',
-                    background: darkMode ? '#1E293B' : '#FFFFFF',
+                    background: theme.bgCard,
                     border: '1px solid ' + theme.border,
                     borderRadius: 2, padding: 4,
                     boxShadow: '0 4px 12px ' + theme.shadow,
@@ -397,8 +397,8 @@ export default function CalendarGrid({
 
       {/* Now indicator */}
       {isToday && nowMins >= GRID_START * 60 && nowMins <= GRID_END * 60 && (
-        <div style={{ position: 'absolute', left: 0, right: 0, top: ((nowMins - GRID_START * 60) / 60) * hourHeight, height: 2, background: '#EF4444', zIndex: 50, pointerEvents: 'none' }}>
-          <div style={{ position: 'absolute', left: stripMid - 4, top: -3, width: 8, height: 8, borderRadius: '50%', background: '#EF4444' }} />
+        <div style={{ position: 'absolute', left: 0, right: 0, top: ((nowMins - GRID_START * 60) / 60) * hourHeight, height: 2, background: theme.redText, zIndex: 50, pointerEvents: 'none' }}>
+          <div style={{ position: 'absolute', left: stripMid - 4, top: -3, width: 8, height: 8, borderRadius: '50%', background: theme.redText }} />
         </div>
       )}
 
@@ -461,7 +461,7 @@ export default function CalendarGrid({
                     zIndex: isDragging ? 55 : 15,
                     cursor: onMarkerDrag ? 'grab' : 'default',
                     transition: isDragging ? 'none' : undefined,
-                    boxShadow: isDragging ? '0 2px 8px rgba(0,0,0,0.3)' : undefined
+                    boxShadow: isDragging ? '0 2px 8px ' + theme.shadow : undefined
                   };
                   var onDown = onMarkerDrag ? function(ev) { markerDragStart(ev, e.item.task.id, e.item.start); } : undefined;
                   return (
@@ -475,13 +475,13 @@ export default function CalendarGrid({
                           position: 'absolute',
                           left: stripX + dm.STRIP_W + dm.MARKER_W + 6,
                           top: markerTop - 10,
-                          background: darkMode ? '#1E293B' : '#FFFFFF',
+                          background: theme.bgCard,
                           border: '2px solid ' + pc,
                           borderRadius: 6, padding: '2px 8px',
                           fontSize: 11, fontWeight: 700, color: pc,
                           zIndex: 60, pointerEvents: 'none',
                           whiteSpace: 'nowrap',
-                          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+                          boxShadow: '0 2px 8px ' + theme.shadow
                         }}>
                           {formatDragTime(dragState.currentMins)}
                         </div>
@@ -526,7 +526,7 @@ export default function CalendarGrid({
               style={{ position: 'absolute', left: ml, top: my, width: dm.MARKER_W, height: mh, borderRadius: 2, background: pc, opacity: done ? 0.3 : 0.75, zIndex: 15, cursor: 'pointer' }}
               title={item.task.text + ' (' + item.dur + 'm)'} />
             {exp && (
-              <div style={{ position: 'absolute', left: stripX + dm.STRIP_W + 4, top: my - 2, zIndex: 30, background: darkMode ? '#1E293B' : '#FFFFFF', border: '1px solid ' + pc + '60', borderRadius: 6, padding: '4px 8px', fontSize: 10, color: theme.text, whiteSpace: 'nowrap', boxShadow: '0 2px 8px ' + theme.shadow, cursor: 'pointer', maxWidth: 'calc(100% - ' + (stripX + dm.STRIP_W + 12) + 'px)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <div style={{ position: 'absolute', left: stripX + dm.STRIP_W + 4, top: my - 2, zIndex: 30, background: theme.bgCard, border: '1px solid ' + pc + '60', borderRadius: 6, padding: '4px 8px', fontSize: 10, color: theme.text, whiteSpace: 'nowrap', boxShadow: '0 2px 8px ' + theme.shadow, cursor: 'pointer', maxWidth: 'calc(100% - ' + (stripX + dm.STRIP_W + 12) + 'px)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: pc, marginRight: 4, verticalAlign: 'middle' }} />
                 {item.task.text}
                 <span style={{ color: theme.textMuted, marginLeft: 4 }}>{item.dur}m</span>

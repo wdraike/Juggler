@@ -608,7 +608,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={handleICSImportConfirm} disabled={icsImporting} style={{
                   border: 'none', borderRadius: 2, padding: '8px 16px',
-                  background: '#10B981', color: '#FFF', fontWeight: 600, fontSize: 12,
+                  background: theme.success, color: '#FFF', fontWeight: 600, fontSize: 12,
                   cursor: 'pointer', fontFamily: 'inherit', opacity: icsImporting ? 0.5 : 1
                 }}>
                   {icsImporting ? 'Importing...' : 'Import ' + icsPreview.tasks.length + ' Events'}
@@ -647,7 +647,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
             <button onClick={handleImport} disabled={importing || !importText.trim()} style={{
               border: 'none', borderRadius: 2, padding: '10px 20px',
-              background: '#10B981', color: '#FFF', fontWeight: 600, fontSize: 13,
+              background: theme.success, color: '#FFF', fontWeight: 600, fontSize: 13,
               cursor: 'pointer', fontFamily: 'inherit',
               opacity: importing || !importText.trim() ? 0.5 : 1
             }}>

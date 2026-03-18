@@ -3,6 +3,7 @@
  */
 
 import React from 'react';
+import { BRAND, THEME_DARK } from '../theme/colors';
 
 export default class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -23,24 +24,24 @@ export default class ErrorBoundary extends React.Component {
       return (
         <div style={{
           minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: '#1A2B4A', color: '#E8E0D0', fontFamily: "'Inter', system-ui"
+          background: BRAND.navy, color: THEME_DARK.text, fontFamily: "'Inter', system-ui"
         }}>
           <div style={{ textAlign: 'center', maxWidth: 480, padding: 32 }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>&#x1F6A8;</div>
             <h2 style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, fontWeight: 700, marginBottom: 8 }}>Something went wrong</h2>
-            <p style={{ fontSize: 13, color: '#B0A898', marginBottom: 16, lineHeight: 1.5 }}>
+            <p style={{ fontSize: 13, color: THEME_DARK.textSecondary, marginBottom: 16, lineHeight: 1.5 }}>
               Raike &amp; Sons encountered an unexpected error. Your data is safe.
             </p>
             <pre style={{
-              textAlign: 'left', fontSize: 11, background: '#0F1520', padding: 12,
-              borderRadius: 2, overflow: 'auto', maxHeight: 120, color: '#FCA5A5',
-              marginBottom: 16, border: '1px solid #2E4A7A'
+              textAlign: 'left', fontSize: 11, background: THEME_DARK.bg, padding: 12,
+              borderRadius: 2, overflow: 'auto', maxHeight: 120, color: THEME_DARK.redText,
+              marginBottom: 16, border: '1px solid ' + BRAND.navyLight
             }}>
               {this.state.error?.message || 'Unknown error'}
             </pre>
             <button onClick={() => window.location.reload()} style={{
-              border: '1.5px solid #C8942A', borderRadius: 2, padding: '10px 24px',
-              background: '#C8942A', color: '#1A2B4A', fontWeight: 700, fontSize: 14,
+              border: '1.5px solid ' + BRAND.gold, borderRadius: 2, padding: '10px 24px',
+              background: BRAND.gold, color: BRAND.navy, fontWeight: 700, fontSize: 14,
               cursor: 'pointer', fontFamily: "'Inter', sans-serif",
               letterSpacing: '0.08em', textTransform: 'uppercase'
             }}>

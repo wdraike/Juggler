@@ -4,6 +4,7 @@
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import useIsMobile from '../../hooks/useIsMobile';
+import { BRAND, THEME_DARK } from '../../theme/colors';
 
 export function useToast() {
   const [toast, setToast] = useState(null);
@@ -42,9 +43,9 @@ export default function ToastNotification({ toast, toastHistory, showHistory, on
   if (!toast && !showHistory) return null;
 
   var colors = {
-    success: { bg: '#065F46', border: '#10B981' },
-    error: { bg: '#991B1B', border: '#EF4444' },
-    info: { bg: '#1E3A5F', border: '#3B82F6' }
+    success: { bg: THEME_DARK.greenBg, border: THEME_DARK.greenBorder },
+    error: { bg: THEME_DARK.redBg, border: THEME_DARK.redBorder },
+    info: { bg: BRAND.navy, border: BRAND.navyLight }
   };
 
   return (
@@ -58,7 +59,7 @@ export default function ToastNotification({ toast, toastHistory, showHistory, on
           padding: '10px 16px', borderRadius: 8, fontSize: 13, fontWeight: 500,
           background: (colors[toast.type] || colors.info).bg,
           border: `1px solid ${(colors[toast.type] || colors.info).border}`,
-          color: '#E2E8F0', boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+          color: THEME_DARK.text, boxShadow: '0 4px 12px ' + THEME_DARK.shadow,
           marginBottom: showHistory ? 8 : 0, cursor: 'pointer'
         }} onClick={onToggleHistory}>
           {toast.msg}
@@ -66,11 +67,11 @@ export default function ToastNotification({ toast, toastHistory, showHistory, on
       )}
       {showHistory && toastHistory.length > 0 && (
         <div style={{
-          background: '#1E293B', border: '1px solid #334155', borderRadius: 8,
+          background: THEME_DARK.bgSecondary, border: '1px solid ' + THEME_DARK.border, borderRadius: 8,
           padding: 8, maxHeight: 200, overflow: 'auto', fontSize: 11
         }}>
           {toastHistory.map((t, i) => (
-            <div key={i} style={{ color: '#94A3B8', padding: '2px 0' }}>
+            <div key={i} style={{ color: THEME_DARK.badgeText, padding: '2px 0' }}>
               {new Date(t.ts).toLocaleTimeString()} — {t.msg}
             </div>
           ))}

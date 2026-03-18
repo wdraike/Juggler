@@ -93,7 +93,7 @@ function DepNode({ ct, pos, st, icon, isDone, isClosed, dateLabel, isExternal, i
 
   var bgColor = isHoverTarget ? (isCycleDrop ? '#DC262612' : '#3B82F612')
     : isMatched && !isDimmed && hasFilters ? theme.accent + '12'
-    : isExternal ? (darkMode ? '#1E293B' : '#F8FAFC')
+    : isExternal ? theme.bgCard
     : isClosed ? theme.bgSecondary + '88' : theme.bgSecondary;
 
   return (
@@ -144,7 +144,7 @@ function DepNode({ ct, pos, st, icon, isDone, isClosed, dateLabel, isExternal, i
             padding: '8px 10px', borderRadius: 8,
             background: theme.bgCard || theme.bgSecondary,
             border: '1px solid ' + theme.border,
-            boxShadow: '0 6px 20px rgba(0,0,0,0.22)',
+            boxShadow: '0 6px 20px ' + theme.shadow,
             zIndex: 150, boxSizing: 'border-box'
           }}>
           {/* Task name */}
@@ -239,14 +239,14 @@ function DepNode({ ct, pos, st, icon, isDone, isClosed, dateLabel, isExternal, i
           bottom: -HANDLE_R,
           width: HANDLE_R * 2, height: HANDLE_R * 2,
           borderRadius: '50%',
-          background: isArrowSource ? theme.accent : (darkMode ? '#475569' : '#94A3B8'),
+          background: isArrowSource ? theme.accent : theme.badgeText,
           border: '2px solid ' + (isArrowSource ? theme.accent : theme.bgSecondary),
           cursor: 'crosshair',
           zIndex: 2,
           transition: 'background 0.15s, transform 0.15s'
         }}
         onMouseEnter={function(e) { e.currentTarget.style.transform = 'scale(1.4)'; e.currentTarget.style.background = theme.accent; }}
-        onMouseLeave={function(e) { if (!arrowDrag) { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.background = darkMode ? '#475569' : '#94A3B8'; } }}
+        onMouseLeave={function(e) { if (!arrowDrag) { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.background = theme.badgeText; } }}
       />
     </div>
   );

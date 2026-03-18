@@ -27,7 +27,7 @@ export default function TaskCard({ task, status, direction, onStatusChange, onEx
       onClick={function() { if (onExpand) onExpand(task.id); }}
       style={{
         borderRadius: 6, cursor: 'pointer', overflow: 'hidden',
-        background: isDone ? (darkMode ? '#1E293B' : '#F8FAFC') : (darkMode ? '#1E293B' : '#FFFFFF'),
+        background: theme.bgCard,
         border: '1px ' + (isMarker ? 'dotted' : (task.habit ? 'dashed' : 'solid')) + ' ' + (isDone ? theme.border : borderColor + '40'),
         borderLeft: '3px solid ' + borderColor,
         opacity: isDone ? 0.5 : (isMarker ? 0.7 : 1),
@@ -51,8 +51,8 @@ export default function TaskCard({ task, status, direction, onStatusChange, onEx
         {task.project && (
           <span style={{
             fontSize: 9, flexShrink: 0, fontWeight: 600,
-            background: darkMode ? '#1E3A5F' : '#DBEAFE',
-            color: darkMode ? '#93C5FD' : '#1E40AF',
+            background: theme.projectBadgeBg,
+            color: theme.projectBadgeText,
             borderRadius: 3, padding: '1px 5px'
           }}>
             {task.project}
@@ -61,8 +61,8 @@ export default function TaskCard({ task, status, direction, onStatusChange, onEx
         {durLabel && (
           <span style={{
             fontSize: 10, flexShrink: 0, fontWeight: 600,
-            color: darkMode ? '#94A3B8' : '#64748B',
-            background: darkMode ? '#334155' : '#F1F5F9',
+            color: theme.badgeText,
+            background: theme.badgeBg,
             borderRadius: 3, padding: '1px 5px'
           }}>
             {durLabel}
@@ -81,15 +81,15 @@ export default function TaskCard({ task, status, direction, onStatusChange, onEx
         {showDate && task.date && task.date !== 'TBD' && (
           <span style={{
             fontSize: 9, fontWeight: 600,
-            color: darkMode ? '#94A3B8' : '#64748B',
-            background: darkMode ? '#334155' : '#F1F5F9',
+            color: theme.badgeText,
+            background: theme.badgeBg,
             borderRadius: 3, padding: '1px 4px'
           }}>
             {task.date}
           </span>
         )}
         {task.time && (
-          <span style={{ fontSize: 9, color: darkMode ? '#94A3B8' : '#64748B' }}>
+          <span style={{ fontSize: 9, color: theme.badgeText }}>
             {task.time}
           </span>
         )}
@@ -100,8 +100,8 @@ export default function TaskCard({ task, status, direction, onStatusChange, onEx
         {task.due && (
           <span style={{
             fontSize: 9, fontWeight: 600,
-            color: isPastDue ? '#FFF' : (darkMode ? '#FCD34D' : '#B45309'),
-            background: isPastDue ? '#EF4444' : (darkMode ? '#422006' : '#FEF3C7'),
+            color: isPastDue ? '#FFF' : theme.amberText,
+            background: isPastDue ? theme.error : theme.amberBg,
             borderRadius: 3, padding: '1px 4px'
           }}>
             {isPastDue ? 'OVERDUE ' : 'Due '}{task.due}
@@ -110,8 +110,8 @@ export default function TaskCard({ task, status, direction, onStatusChange, onEx
         {isMarker && (
           <span style={{
             fontSize: 9, fontWeight: 600,
-            background: darkMode ? '#581C87' : '#EDE9FE',
-            color: darkMode ? '#C4B5FD' : '#6D28D9',
+            background: theme.purpleBg,
+            color: theme.purpleText,
             borderRadius: 3, padding: '1px 4px'
           }}>
             {'\u25C7'} reminder
@@ -120,14 +120,14 @@ export default function TaskCard({ task, status, direction, onStatusChange, onEx
         {task._whenRelaxed && (
           <span style={{
             fontSize: 9, fontWeight: 600,
-            background: darkMode ? '#78350F' : '#FEF3C7',
-            color: darkMode ? '#FCD34D' : '#D97706',
+            background: theme.amberBg,
+            color: theme.amberText,
             borderRadius: 3, padding: '1px 4px'
           }}>
             {'~'} flexed
           </span>
         )}
-        {isBlocked && <span style={{ color: '#EF4444', fontSize: 10, fontWeight: 600 }}>{'\uD83D\uDEAB'} blocked</span>}
+        {isBlocked && <span style={{ color: theme.redText, fontSize: 10, fontWeight: 600 }}>{'\uD83D\uDEAB'} blocked</span>}
         {task.pri && (
           <span style={{
             fontSize: 9, fontWeight: 700,
@@ -141,15 +141,15 @@ export default function TaskCard({ task, status, direction, onStatusChange, onEx
         {status === 'wip' && task.timeRemaining != null && (
           <span style={{
             fontSize: 9, fontWeight: 700,
-            color: darkMode ? '#FCD34D' : '#B45309',
-            background: darkMode ? '#422006' : '#FEF3C7',
+            color: theme.amberText,
+            background: theme.amberBg,
             borderRadius: 3, padding: '1px 5px'
           }}>
             {task.timeRemaining}m left
           </span>
         )}
         {status === 'other' && direction && (
-          <span style={{ fontSize: 9, color: darkMode ? '#C4B5FD' : '#7C3AED', maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: 9, color: theme.purpleText, maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {'\u2192'} {direction}
           </span>
         )}
@@ -171,11 +171,11 @@ export default function TaskCard({ task, status, direction, onStatusChange, onEx
         if (blockers.length === 0) return null;
         return (
           <div style={{
-            marginTop: 4, paddingTop: 4, borderTop: '1px dashed ' + (darkMode ? '#374151' : '#E5E7EB'),
+            marginTop: 4, paddingTop: 4, borderTop: '1px dashed ' + theme.borderLight,
             fontSize: isMobile ? 11 : 10, color: theme.textMuted,
             display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4
           }}>
-            <span style={{ fontWeight: 600, color: '#EF4444', flexShrink: 0 }}>Overdue dep:</span>
+            <span style={{ fontWeight: 600, color: theme.redText, flexShrink: 0 }}>Overdue dep:</span>
             {blockers.map(function(dep) {
               return (
                 <span key={dep.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
@@ -183,7 +183,7 @@ export default function TaskCard({ task, status, direction, onStatusChange, onEx
                     onClick={function(e) { e.stopPropagation(); if (onExpand) onExpand(dep.id); }}
                     style={{
                       cursor: 'pointer', fontWeight: 600,
-                      color: darkMode ? '#93C5FD' : '#2563EB',
+                      color: theme.projectBadgeText,
                       textDecoration: 'underline', textDecorationStyle: 'dotted'
                     }}
                   >
@@ -197,9 +197,9 @@ export default function TaskCard({ task, status, direction, onStatusChange, onEx
                       }}
                       style={{
                         fontSize: isMobile ? 10 : 9, fontWeight: 600, padding: '0 5px', borderRadius: 3,
-                        border: '1px solid ' + (darkMode ? '#22C55E' : '#16A34A'),
-                        background: darkMode ? '#052E16' : '#F0FDF4',
-                        color: darkMode ? '#4ADE80' : '#16A34A',
+                        border: '1px solid ' + theme.greenBorder,
+                        background: theme.greenBg,
+                        color: theme.greenText,
                         cursor: 'pointer', fontFamily: 'inherit', lineHeight: '16px'
                       }}
                       title={'Mark "' + dep.text + '" as done'}

@@ -134,9 +134,9 @@ export default function AiCommandPanel({
         title='AI commands \u2014 type "wfh", "office", or natural language like "move groceries to Friday"'
         autoComplete="off" autoCorrect="off" spellCheck="false"
         style={{
-          flex: 1, background: darkMode ? '#0F172A' : '#F1F5F9',
-          color: darkMode ? '#E8E0D0' : '#1A2B4A',
-          border: '1px solid ' + (darkMode ? '#2E4A7A' : '#E8E0D0'),
+          flex: 1, background: theme.input,
+          color: theme.inputText,
+          border: '1px solid ' + theme.inputBorder,
           borderRadius: 2, padding: isMobile ? '8px 10px' : '5px 10px',
           fontSize: isMobile ? 16 : 12, outline: 'none',
           fontFamily: "'Inter', system-ui, sans-serif",
@@ -159,7 +159,7 @@ export default function AiCommandPanel({
             disabled={aiLoading}
             title="Send command"
             style={{
-              background: aiLoading ? theme.bgTertiary : '#3B82F6', color: 'white', border: 'none',
+              background: aiLoading ? theme.bgTertiary : theme.accent, color: 'white', border: 'none',
               borderRadius: 6, padding: isMobile ? '8px 12px' : '4px 10px', fontSize: 12, fontWeight: 600,
               cursor: aiLoading ? 'wait' : 'pointer', flexShrink: 0, minHeight: isMobile ? 36 : 28
             }}
@@ -171,7 +171,7 @@ export default function AiCommandPanel({
           onClick={function(e) { e.stopPropagation(); setShowLog(!showLog); if (autoHideRef.current) clearTimeout(autoHideRef.current); }}
           title={showLog ? 'Hide command history' : 'Show command history'}
           style={{
-            background: showLog ? '#3B82F6' : 'transparent', color: showLog ? 'white' : theme.textMuted,
+            background: showLog ? theme.accent : 'transparent', color: showLog ? 'white' : theme.textMuted,
             border: 'none', borderRadius: 6, padding: '4px 6px', fontSize: 12,
             cursor: 'pointer', flexShrink: 0
           }}
@@ -183,9 +183,9 @@ export default function AiCommandPanel({
         <div ref={logRef} style={{
           position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
           maxHeight: '50vh', overflowY: 'auto', zIndex: 200,
-          background: darkMode ? '#0F172A' : '#FFFFFF',
-          border: '1px solid ' + (darkMode ? '#334155' : '#CBD5E1'),
-          borderRadius: 8, boxShadow: '0 8px 24px ' + (darkMode ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.15)'),
+          background: theme.bgSecondary,
+          border: '1px solid ' + theme.border,
+          borderRadius: 8, boxShadow: '0 8px 24px ' + theme.shadow,
           padding: 8, minWidth: 280
         }}>
           {aiLog.length === 0 && (
@@ -198,7 +198,7 @@ export default function AiCommandPanel({
               <div key={i} style={{
                 marginBottom: 4, padding: '5px 8px', borderRadius: 6,
                 fontSize: 11, lineHeight: 1.4, maxWidth: '90%',
-                background: entry.role === 'user' ? '#3B82F6' : (darkMode ? '#1E293B' : '#F1F5F9'),
+                background: entry.role === 'user' ? theme.accent : theme.badgeBg,
                 color: entry.role === 'user' ? 'white' : theme.text,
                 border: entry.role === 'user' ? 'none' : '1px solid ' + theme.border,
                 marginLeft: entry.role === 'user' ? 'auto' : undefined,

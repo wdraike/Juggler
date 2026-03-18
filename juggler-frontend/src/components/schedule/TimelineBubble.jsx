@@ -68,7 +68,7 @@ export default function TimelineBubble({ item, status, side, topPx, onStatusChan
           width: BUBBLE_W,
           height: BUBBLE_H,
           borderRadius: 8,
-          background: isDone ? (darkMode ? '#1E293B' : '#F1F5F9') : (darkMode ? '#1E293B' : '#FFFFFF'),
+          background: isDone ? theme.badgeBg : theme.bgCard,
           border: '1px ' + (task.habit ? 'dashed' : 'solid') + ' ' + (isDone ? theme.border : priColor),
           borderLeft: side === 'left' ? undefined : '3px solid ' + priColor,
           borderRight: side === 'right' ? undefined : '3px solid ' + priColor,
@@ -100,7 +100,7 @@ export default function TimelineBubble({ item, status, side, topPx, onStatusChan
         <span style={{ flexShrink: 0, fontSize: 8, color: theme.textMuted, marginLeft: 3 }}>
           {task.dur}m
           {task.project && <span> {task.project}</span>}
-          {isBlocked && <span style={{ color: '#EF4444' }}> &#x1F6AB;</span>}
+          {isBlocked && <span style={{ color: theme.redText }}> &#x1F6AB;</span>}
         </span>
       </div>
     </div>

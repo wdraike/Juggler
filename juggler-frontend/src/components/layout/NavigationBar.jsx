@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { getTheme } from '../../theme/colors';
+import { getTheme, BRAND } from '../../theme/colors';
 
 const VIEW_MODES = [
   { id: 'daily', label: 'Day', icon: '\uD83D\uDCC4', tip: 'Day view \u2014 plain hour grid with hover details' },
@@ -120,7 +120,7 @@ function ProjectCombobox({ value, onChange, allProjectNames, theme, isMobile }) 
         <div style={{
           position: 'absolute', top: '100%', left: 0, marginTop: 2,
           background: theme.bgSecondary, border: '1px solid ' + theme.border,
-          borderRadius: 2, boxShadow: '0 2px 8px rgba(26,43,74,0.08)',
+          borderRadius: 2, boxShadow: '0 2px 8px ' + theme.shadow,
           zIndex: 300, minWidth: isMobile ? '100%' : 140, maxHeight: 200, overflowY: 'auto'
         }}>
           <button onClick={function() { select(''); }}
@@ -182,7 +182,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
             style={{
               border: 'none', borderRadius: 2, padding: isMobile ? '5px 0' : '5px 10px', cursor: 'pointer',
               background: viewMode === v.id ? theme.accent : 'transparent',
-              color: viewMode === v.id ? '#1A2B4A' : theme.textSecondary,
+              color: viewMode === v.id ? BRAND.navy : theme.textSecondary,
               fontSize: isMobile ? 13 : 11, fontWeight: viewMode === v.id ? 700 : 400, fontFamily: "'Inter', sans-serif",
               minHeight: isMobile ? 32 : undefined,
               flex: isMobile ? 1 : undefined, textAlign: 'center',
@@ -193,7 +193,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
             {isMobile ? v.icon : v.label}
             {v.id === 'conflicts' && issuesCount > 0 && (
               <span style={{
-                marginLeft: 2, background: '#8B2635', color: '#FFF', borderRadius: 2,
+                marginLeft: 2, background: theme.error, color: '#FFF', borderRadius: 2,
                 padding: '0 4px', fontSize: 9, fontWeight: 700, verticalAlign: 'top',
                 lineHeight: '14px', minWidth: 14, textAlign: 'center', display: 'inline-block'
               }}>{issuesCount}</span>
@@ -229,7 +229,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
                     {f.label}
                     {badge != null && (
                       <span style={{
-                        marginLeft: 3, background: '#EF4444', color: '#FFF', borderRadius: 8,
+                        marginLeft: 3, background: theme.error, color: '#FFF', borderRadius: 8,
                         padding: '0 5px', fontSize: 9, fontWeight: 700, verticalAlign: 'top'
                       }}>{badge}</span>
                     )}
@@ -330,7 +330,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
             <div style={{
               position: 'absolute', top: '100%', left: 0, marginTop: 4,
               background: theme.bgSecondary, border: '1px solid ' + theme.border,
-              borderRadius: 2, boxShadow: '0 2px 8px rgba(26,43,74,0.08)',
+              borderRadius: 2, boxShadow: '0 2px 8px ' + theme.shadow,
               zIndex: 200, minWidth: 200, overflow: 'hidden'
             }}>
               {/* Filter options */}
@@ -355,7 +355,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       {badge != null && (
                         <span style={{
-                          background: '#8B2635', color: '#FFF', borderRadius: 2,
+                          background: theme.error, color: '#FFF', borderRadius: 2,
                           padding: '0 6px', fontSize: 10, fontWeight: 700
                         }}>{badge}</span>
                       )}

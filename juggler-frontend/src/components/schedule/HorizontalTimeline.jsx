@@ -233,7 +233,7 @@ export default function HorizontalTimeline({
       <div style={{
         position: 'absolute', left: 0, top: stripY,
         width: totalW, height: STRIP_H,
-        background: darkMode ? '#1E293B' : '#F1F5F9',
+        background: theme.badgeBg,
         borderTop: '1px solid ' + theme.border,
         borderBottom: '1px solid ' + theme.border,
         zIndex: 5
@@ -262,11 +262,11 @@ export default function HorizontalTimeline({
         <div style={{
           position: 'absolute', top: 0, bottom: 0,
           left: ((nowMins - GRID_START * 60) / 60) * baseHourWidth,
-          width: 2, background: '#EF4444', zIndex: 50, pointerEvents: 'none'
+          width: 2, background: theme.redText, zIndex: 50, pointerEvents: 'none'
         }}>
           <div style={{
             position: 'absolute', top: stripY - 4, left: -3,
-            width: 8, height: 8, borderRadius: '50%', background: '#EF4444'
+            width: 8, height: 8, borderRadius: '50%', background: theme.redText
           }} />
         </div>
       )}
@@ -320,19 +320,19 @@ export default function HorizontalTimeline({
               zIndex: isDragging ? 55 : 15,
               cursor: onMarkerDrag ? 'grab' : 'default',
               transition: isDragging ? 'none' : undefined,
-              boxShadow: isDragging ? '0 2px 8px rgba(0,0,0,0.3)' : undefined
+              boxShadow: isDragging ? '0 2px 8px ' + theme.shadow : undefined
             }} onMouseDown={onDown} onTouchStart={onDown} />
             {/* Drag time label */}
             {isDragging && (
               <div style={{
                 position: 'absolute', left: mx + e.markerW + 6,
                 top: markerTop - 10,
-                background: darkMode ? '#1E293B' : '#FFFFFF',
+                background: theme.bgCard,
                 border: '2px solid ' + pc,
                 borderRadius: 6, padding: '2px 8px',
                 fontSize: 11, fontWeight: 700, color: pc,
                 zIndex: 60, pointerEvents: 'none', whiteSpace: 'nowrap',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+                boxShadow: '0 2px 8px ' + theme.shadow
               }}>
                 {formatDragTime(dragState.currentMins)}
               </div>

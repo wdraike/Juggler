@@ -99,9 +99,9 @@ export default function SCurveView({ selectedDate, selectedDateKey, placements, 
             title={isOverridden ? 'Schedule template (overridden for this date)' : 'Schedule template (day default: ' + defaultTemplate + ')'}
             style={{
               fontSize: 11, padding: '2px 4px', borderRadius: 4, cursor: 'pointer',
-              background: isOverridden ? '#3B82F620' : (darkMode ? '#1E293B' : '#F8FAFC'),
-              color: isOverridden ? '#3B82F6' : theme.textMuted,
-              border: '1px solid ' + (isOverridden ? '#3B82F6' : theme.border),
+              background: isOverridden ? theme.accent + '20' : theme.bgCard,
+              color: isOverridden ? theme.accent : theme.textMuted,
+              border: '1px solid ' + (isOverridden ? theme.accent : theme.border),
               outline: 'none', marginLeft: 4
             }}
           >
