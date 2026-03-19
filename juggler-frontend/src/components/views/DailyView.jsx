@@ -441,6 +441,11 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, theme, darkMode,
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.text}</span>
         {task.dur > 0 && <span style={{ fontSize: 9, color: theme.textMuted, flexShrink: 0 }}>{durLabel(task.dur)}</span>}
         {task.pri && <span style={{ fontSize: 8, fontWeight: 700, color: priColor, flexShrink: 0 }}>{task.pri}</span>}
+        {onStatusChange && (
+          <span onClick={function (e) { e.stopPropagation(); }}>
+            <StatusToggle value={status} onChange={onStatusChange} darkMode={darkMode} compact />
+          </span>
+        )}
       </div>
       {show && <FixedPopup anchorRect={anchorRect} item={{ task: task, start: null, end: null }} status={status} theme={theme} darkMode={darkMode} />}
     </div>

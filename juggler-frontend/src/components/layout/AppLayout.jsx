@@ -415,7 +415,18 @@ export default function AppLayout() {
     var effectiveId = id;
     var task = allTasks.find(function(t) { return t.id === id; });
     if (task && task.sourceId) {
-      effectiveId = task.sourceId;
+      // Prefer opening the source template, but fall back to the instance
+      // if the template no longer exists in allTasks
+      var sourceExists = allTasks.some(function(t) { return t.id === task.sourceId; });
+      if (sourceExists) {
+        effectiveId = task.sourceId;
+      }
+    } else if (task && task.habit) {
+      // Fallback: find template by text for instances missing sourceId
+      var tmpl = allTasks.find(function(t) {
+        return t.taskType === 'habit_template' && t.text === task.text;
+      });
+      if (tmpl) effectiveId = tmpl.id;
     }
     setExpandedTasks(function(prev) { return prev.length === 1 && prev[0] === effectiveId ? [] : [effectiveId]; });
   }, [allTasks]);

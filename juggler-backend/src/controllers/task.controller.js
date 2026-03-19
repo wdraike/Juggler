@@ -57,7 +57,7 @@ function parseISOToDate(iso) {
 // If an instance row has NULL for these, the value is read from the source.
 var TEMPLATE_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
   'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
-  'recur', 'depends_on'];
+  'depends_on'];
 
 /**
  * Build a { sourceId: row } lookup from an array of task rows.
@@ -385,7 +385,7 @@ async function updateTask(req, res) {
     // Fields that belong on the source template (shared across all instances).
     var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
       'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
-      'recur', 'depends_on'];
+      'depends_on'];
 
     var taskType = existing.task_type || 'task';
 
@@ -498,10 +498,52 @@ async function updateTaskStatus(req, res) {
     var id = req.params.id;
     var status = req.body.status;
     var direction = req.body.direction;
+    var tz = req.user.timezone || 'America/New_York';
 
     var existing = await db('tasks').where({ id: id, user_id: req.user.id }).first();
+
+    // Generated habit instances (rc_<sourceId>_<dateDigits>) may not yet have
+    // a DB row if the scheduler hasn't run since they were expanded.
+    // Materialize them on demand so the status change can be persisted.
+    if (!existing && id.startsWith('rc_')) {
+      var parts = id.split('_');
+      var dateDigits = parts[parts.length - 1];
+      var sourceId = parts.slice(1, -1).join('_');
+      var source = await db('tasks').where({ id: sourceId, user_id: req.user.id }).first();
+      if (source) {
+        // Parse date from concatenated M+D digits (e.g. "318" → "3/18")
+        var first2 = parseInt(dateDigits.substring(0, 2), 10);
+        var localDate;
+        if (dateDigits.length >= 3 && first2 >= 10 && first2 <= 12) {
+          localDate = dateDigits.substring(0, 2) + '/' + dateDigits.substring(2);
+        } else {
+          localDate = dateDigits.substring(0, 1) + '/' + dateDigits.substring(1);
+        }
+        var srcTime = source.scheduled_at ? utcToLocal(source.scheduled_at, tz).time : null;
+        var scheduledAt = localToUtc(localDate, srcTime, tz);
+        await db('tasks').insert({
+          id: id,
+          user_id: req.user.id,
+          task_type: 'habit_instance',
+          source_id: sourceId,
+          generated: 0,
+          habit: 1,
+          scheduled_at: scheduledAt || null,
+          status: '',
+          created_at: db.fn.now(),
+          updated_at: db.fn.now()
+        });
+        existing = await db('tasks').where({ id: id, user_id: req.user.id }).first();
+      }
+    }
+
     if (!existing) {
       return res.status(404).json({ error: 'Task not found' });
+    }
+
+    // Never set status on a habit template — status belongs on instances only
+    if (existing.task_type === 'habit_template') {
+      return res.status(400).json({ error: 'Cannot set status on a habit template' });
     }
 
     var update = { status: status || '', updated_at: db.fn.now() };
@@ -509,8 +551,8 @@ async function updateTaskStatus(req, res) {
 
     await db('tasks').where({ id: id, user_id: req.user.id }).update(update);
     var updated = await db('tasks').where('id', id).first();
-    var tz = req.user.timezone || 'America/New_York';
-    res.json({ task: rowToTask(updated, tz) });
+    var srcMap = buildSourceMap(await db('tasks').where({ user_id: req.user.id, task_type: 'habit_template' }).select());
+    res.json({ task: rowToTask(updated, tz, srcMap) });
   } catch (error) {
     console.error('Update task status error:', error);
     res.status(500).json({ error: 'Failed to update task status' });
@@ -587,7 +629,7 @@ async function batchUpdateTasks(req, res) {
     // Template fields that should be routed to the source for habit instances
     var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
       'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
-      'recur', 'depends_on'];
+      'depends_on'];
 
     for (var attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {

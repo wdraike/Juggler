@@ -39,7 +39,7 @@ router.get('/version', taskController.getVersion);
 router.post('/', scheduleAfterMutation, taskController.createTask);
 router.post('/batch', scheduleAfterMutation, taskController.batchCreateTasks);
 router.put('/batch', scheduleAfterMutation, taskController.batchUpdateTasks);
-router.put('/:id/status', scheduleAfterMutation, taskController.updateTaskStatus);
+router.put('/:id/status', taskController.updateTaskStatus);
 router.put('/:id', scheduleAfterMutation, taskController.updateTask);
 router.delete('/:id', scheduleAfterMutation, taskController.deleteTask);
 

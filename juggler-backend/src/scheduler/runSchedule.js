@@ -20,6 +20,7 @@ var utcToLocal = dateHelpers.utcToLocal;
 var taskController = require('../controllers/task.controller');
 var rowToTask = taskController.rowToTask;
 var buildSourceMap = taskController.buildSourceMap;
+var taskToRow = taskController.taskToRow;
 var expandRecurringShared = require('../../../shared/scheduler/expandRecurring');
 var expandRecurring = expandRecurringShared.expandRecurring;
 
@@ -130,13 +131,39 @@ async function runScheduleAndPersist(userId, _retries) {
   // 5. Load config
   var cfg = await loadConfig(userId);
 
-  // 5b. Expand recurring habits into per-day instances
+  // 5b. Expand recurring habits into per-day instances and persist them
   var today = parseDate(timeInfo.todayKey) || new Date();
   var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + 56);
   var expanded = expandRecurring(allTasks, today, expandEnd);
   if (expanded.length > 0) {
-    allTasks = allTasks.concat(expanded);
-    expanded.forEach(function(t) { statuses[t.id] = ''; });
+    // Persist generated instances as real habit_instance rows so they can be
+    // interacted with (status changes, edits, etc.) without 404 errors.
+    var insertRows = expanded.map(function(t) {
+      var scheduledAt = t.date ? localToUtc(t.date, t.time || null, TIMEZONE) : null;
+      return {
+        id: t.id,
+        user_id: userId,
+        task_type: 'habit_instance',
+        source_id: t.sourceId,
+        generated: 0,
+        habit: 1,
+        scheduled_at: scheduledAt || null,
+        status: '',
+        created_at: db.fn.now(),
+        updated_at: db.fn.now()
+      };
+    });
+    var chunkSize = 100;
+    for (var ci = 0; ci < insertRows.length; ci += chunkSize) {
+      await trx('tasks').insert(insertRows.slice(ci, ci + chunkSize));
+    }
+    // Re-read all tasks so the newly persisted instances are included with full data
+    taskRows = await trx('tasks').where('user_id', userId).select();
+    srcMap = buildSourceMap(taskRows);
+    allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
+    statuses = {};
+    allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
+    console.log('[SCHED] persisted ' + insertRows.length + ' expanded habit instances');
   }
 
   // 6. Run scheduler

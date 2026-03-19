@@ -14,14 +14,25 @@ export default function PriorityView({ allTasks, statuses, directions, filter, s
   var [dragOver, setDragOver] = useState(null);
 
   var filteredTasks = useMemo(() => {
-    // Deduplicate habits: keep only the earliest-date instance of each habit text
-    var seenHabits = {};
-    var deduped = allTasks.filter(t => {
-      if (t.habit) {
-        var key = t.text || t.id;
-        if (seenHabits[key]) return false;
-        seenHabits[key] = true;
+    // Exclude habit templates — only show instances.
+    // Deduplicate habits: for each habit text, pick the best representative instance.
+    // Prefer open instances over done/skipped/cancelled ones so today's habit is shown.
+    var habitBest = {};
+    allTasks.forEach(t => {
+      if (!t.habit || t.taskType === 'habit_template') return;
+      var key = t.text || t.id;
+      var st = statuses[t.id] || '';
+      var isOpen = st !== 'done' && st !== 'cancel' && st !== 'skip';
+      var prev = habitBest[key];
+      if (!prev || (isOpen && !prev.isOpen)) {
+        habitBest[key] = { id: t.id, isOpen: isOpen };
       }
+    });
+    var habitKeepIds = {};
+    Object.keys(habitBest).forEach(k => { habitKeepIds[habitBest[k].id] = true; });
+    var deduped = allTasks.filter(t => {
+      if (t.taskType === 'habit_template') return false;
+      if (t.habit) return !!habitKeepIds[t.id];
       return true;
     });
 
@@ -51,7 +62,7 @@ export default function PriorityView({ allTasks, statuses, directions, filter, s
         var tasks = filteredTasks.filter(t => (t.pri || 'P3') === pri);
         var isOver = dragOver === pri;
         return (
-          <div key={pri} style={{ flex: 1, minWidth: 180 }}
+          <div key={pri} style={{ flex: 1, minWidth: 180, display: 'flex', flexDirection: 'column' }}
             onDragOver={onPriorityDrop ? (e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDragOver(pri); }) : undefined}
             onDragLeave={onPriorityDrop ? (() => setDragOver(null)) : undefined}
             onDrop={onPriorityDrop ? (e => {
@@ -69,7 +80,7 @@ export default function PriorityView({ allTasks, statuses, directions, filter, s
             }}>
               {pri} <span style={{ fontSize: 10, fontWeight: 400, color: theme.textMuted }}>({tasks.length})</span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1 }}>
               {tasks.map(t => (
                 <TaskCard
                   key={t.id}

@@ -17,7 +17,11 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
     if (t.date && t.text) existingByDateText[t.date + '|' + t.text] = true;
   });
 
-  var sources = allTasks.filter(function(t) { return t.recur && t.recur.type !== 'none'; });
+  var sources = allTasks.filter(function(t) {
+    if (!t.recur || t.recur.type === 'none') return false;
+    if (t.taskType === 'habit_instance') return false;
+    return true;
+  });
   if (sources.length === 0) return [];
 
   var newTasks = [];
