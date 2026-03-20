@@ -8,7 +8,7 @@ import { toTime24, fromTime24, toDateISO, fromDateISO, formatDateKey } from '../
 import { getTheme } from '../../theme/colors';
 import ConfirmDialog from '../features/ConfirmDialog';
 
-export default function TaskEditForm({ task, status, direction, onUpdate, onStatusChange, onDirectionChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, scheduleTemplates, templateDefaults, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex }) {
+export default function TaskEditForm({ task, status, onUpdate, onStatusChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, scheduleTemplates, templateDefaults, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex }) {
   var isCreate = mode === 'create';
   var TH = getTheme(darkMode);
   var initDate = isCreate && initialDate ? toDateISO(formatDateKey(initialDate)) : '';

@@ -86,7 +86,7 @@ function computeLayout(placements, hourHeight, cardH, gap, colsPerSide, rightOnl
 }
 
 export default function CalendarGrid({
-  dateKey, placements, statuses, directions, onStatusChange, onExpand,
+  dateKey, placements, statuses, onStatusChange, onExpand,
   gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locations, onHourLocationOverride, blockedTaskIds,
   onZoomChange, isMobile, layoutMode, onMarkerDrag
 }) {

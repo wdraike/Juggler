@@ -22,7 +22,6 @@ async function importData(req, res) {
 
     var tasks = data.extraTasks || [];
     var statuses = data.statuses || {};
-    var directions = data.directions || {};
     var locations = data.locations || [];
     var tools = data.tools || [];
     var toolMatrix = data.toolMatrix || {};
@@ -94,7 +93,6 @@ async function importData(req, res) {
             pri: t.pri || 'P3',
             project: t.project || null,
             status: statuses[t.id] || t.status || '',
-            direction: directions[t.id] || t.direction || null,
             section: t.section || null,
             notes: t.notes || null,
             due_at: dueAt,
@@ -224,10 +222,8 @@ async function exportData(req, res) {
 
     var tasks = taskRows.map(function(r) { return rowToTask(r, tz); });
     var statuses = {};
-    var directions = {};
     tasks.forEach(function(t) {
       if (t.status) statuses[t.id] = t.status;
-      if (t.direction) directions[t.id] = t.direction;
     });
 
     var config = {};
@@ -242,7 +238,6 @@ async function exportData(req, res) {
       v7: true,
       extraTasks: tasks,
       statuses: statuses,
-      directions: directions,
       locations: locationRows.map(function(l) { return { id: l.location_id, name: l.name, icon: l.icon }; }),
       tools: toolRows.map(function(t) { return { id: t.tool_id, name: t.name, icon: t.icon }; }),
       projects: projectRows.map(function(p) { return { id: p.id, name: p.name, color: p.color, icon: p.icon }; }),

@@ -11,7 +11,7 @@ import { getTheme } from '../../theme/colors';
 import StatusToggle from '../schedule/StatusToggle';
 import { parseDate } from '../../scheduler/dateHelpers';
 
-export default function TaskCard({ task, status, direction, onStatusChange, onExpand, darkMode, showDate, draggable, isBlocked, isMobile, allTasks, statuses }) {
+export default function TaskCard({ task, status, onStatusChange, onExpand, darkMode, showDate, draggable, isBlocked, isMobile, allTasks, statuses }) {
   var theme = getTheme(darkMode);
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
@@ -146,11 +146,6 @@ export default function TaskCard({ task, status, direction, onStatusChange, onEx
             borderRadius: 3, padding: '1px 5px'
           }}>
             {task.timeRemaining}m left
-          </span>
-        )}
-        {status === 'other' && direction && (
-          <span style={{ fontSize: 9, color: theme.purpleText, maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {'\u2192'} {direction}
           </span>
         )}
       </div>

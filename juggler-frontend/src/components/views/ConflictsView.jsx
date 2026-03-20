@@ -23,7 +23,7 @@ function saveCollapsed(state) {
   catch (e) { /* quota exceeded */ }
 }
 
-export default function ConflictsView({ allTasks, statuses, directions, unplaced, schedulerWarnings, onStatusChange, onExpand, onUpdateTask, darkMode, isMobile }) {
+export default function ConflictsView({ allTasks, statuses, unplaced, schedulerWarnings, onStatusChange, onExpand, onUpdateTask, darkMode, isMobile }) {
   var theme = getTheme(darkMode);
   var today = new Date(); today.setHours(0, 0, 0, 0);
 
@@ -173,7 +173,7 @@ export default function ConflictsView({ allTasks, statuses, directions, unplaced
                     <TaskCard
                       task={t}
                       status={statuses[t.id] || ''}
-                      direction={directions[t.id]}
+
                       onStatusChange={onStatusChange}
                       onExpand={onExpand}
                       darkMode={darkMode}

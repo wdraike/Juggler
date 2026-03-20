@@ -9,7 +9,7 @@ import { PRI_COLORS } from '../../state/constants';
 
 var PRI_LEVELS = ['P1', 'P2', 'P3', 'P4'];
 
-export default function PriorityView({ allTasks, statuses, directions, filter, search, projectFilter, onStatusChange, onExpand, darkMode, onPriorityDrop, hideHabits, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile }) {
+export default function PriorityView({ allTasks, statuses, filter, search, projectFilter, onStatusChange, onExpand, darkMode, onPriorityDrop, hideHabits, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile }) {
   var theme = getTheme(darkMode);
   var [dragOver, setDragOver] = useState(null);
 
@@ -86,7 +86,7 @@ export default function PriorityView({ allTasks, statuses, directions, filter, s
                   key={t.id}
                   task={t}
                   status={statuses[t.id] || ''}
-                  direction={directions[t.id]}
+
                   onStatusChange={onStatusChange}
                   onExpand={onExpand}
                   darkMode={darkMode}

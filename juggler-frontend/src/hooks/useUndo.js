@@ -15,7 +15,6 @@ export default function useUndo(taskStateRef, dispatch, dispatchPersist) {
       label: label || "action",
       extraTasks: JSON.parse(JSON.stringify(s.tasks)),
       statuses: Object.assign({}, s.statuses),
-      directions: Object.assign({}, s.directions),
     }]);
     if (undoStackRef.current.length > MAX_UNDO) {
       undoStackRef.current = undoStackRef.current.slice(-MAX_UNDO);
@@ -29,7 +28,6 @@ export default function useUndo(taskStateRef, dispatch, dispatchPersist) {
     dispatchPersist({
       type: 'RESTORE',
       statuses: snap.statuses,
-      directions: snap.directions,
       extraTasks: snap.extraTasks
     });
     return snap.label;

@@ -10,7 +10,7 @@ import { DAY_NAMES, MONTH_NAMES } from '../../state/constants';
 import { parseDate, formatDateKey } from '../../scheduler/dateHelpers';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
-export default function ListView({ allTasks, statuses, directions, filter, search, projectFilter, onStatusChange, onExpand, onCreate, darkMode, schedCfg, hideHabits, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile }) {
+export default function ListView({ allTasks, statuses, filter, search, projectFilter, onStatusChange, onExpand, onCreate, darkMode, schedCfg, hideHabits, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile }) {
   var theme = getTheme(darkMode);
   var todayKey = formatDateKey(new Date());
 
@@ -75,7 +75,7 @@ export default function ListView({ allTasks, statuses, directions, filter, searc
                   key={t.id}
                   task={t}
                   status={statuses[t.id] || ''}
-                  direction={directions[t.id]}
+
                   onStatusChange={onStatusChange}
                   onExpand={onExpand}
                   darkMode={darkMode}

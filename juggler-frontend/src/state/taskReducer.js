@@ -1,5 +1,5 @@
 /**
- * Task state reducer — single source of truth for statuses + directions + tasks
+ * Task state reducer — single source of truth for statuses + tasks
  *
  * _dirtyTaskIds tracks which fields changed per task:
  *   { taskId: { field1: true, field2: true }, ... }
@@ -7,7 +7,7 @@
  * don't have their changes overwritten.
  */
 
-export const TASK_STATE_INIT = { statuses: {}, directions: {}, tasks: [], _dirtyStatuses: {}, _dirtyTaskIds: {} };
+export const TASK_STATE_INIT = { statuses: {}, tasks: [], _dirtyStatuses: {}, _dirtyTaskIds: {} };
 
 // Merge new dirty fields into existing dirty entry for a task
 function markDirtyFields(dirtyTaskIds, id, fields) {
@@ -51,7 +51,6 @@ export default function taskReducer(state, action) {
       }
       return {
         statuses: merged,
-        directions: action.directions || {},
         tasks: tasks,
         _dirtyStatuses: dirty,
         _dirtyTaskIds: dirtyTaskIds
@@ -60,8 +59,6 @@ export default function taskReducer(state, action) {
     case 'SET_STATUS': {
       var ns = Object.assign({}, state.statuses);
       if (!action.val || action.val === "") { delete ns[action.id]; } else { ns[action.id] = action.val; }
-      var nd = state.directions;
-      if (action.deleteDirection) { nd = Object.assign({}, nd); delete nd[action.id]; }
       var nt = state.tasks;
       if (action.taskFields) {
         nt = nt.map(function(t) {
@@ -76,13 +73,7 @@ export default function taskReducer(state, action) {
       if (action.taskFields) {
         dtIds = markDirtyFields(dtIds, action.id, action.taskFields);
       }
-      return { statuses: ns, directions: nd, tasks: nt, _dirtyStatuses: ds, _dirtyTaskIds: dtIds };
-    }
-    case 'SET_DIRECTION': {
-      var nd2 = Object.assign({}, state.directions);
-      nd2[action.id] = action.val;
-      var dt2 = markDirtyFields(state._dirtyTaskIds, action.id, { direction: true });
-      return { statuses: state.statuses, directions: nd2, tasks: state.tasks, _dirtyStatuses: state._dirtyStatuses, _dirtyTaskIds: dt2 };
+      return { statuses: ns, tasks: nt, _dirtyStatuses: ds, _dirtyTaskIds: dtIds };
     }
     case 'UPDATE_TASK': {
       var dt3 = markDirtyFields(state._dirtyTaskIds, action.id, action.fields);
@@ -103,7 +94,6 @@ export default function taskReducer(state, action) {
       }
       return {
         statuses: state.statuses,
-        directions: state.directions,
         tasks: state.tasks.map(function(t) {
           if (t.id === action.id) return Object.assign({}, t, action.fields);
           // Propagate template fields to siblings (same sourceId) and the source itself
@@ -119,7 +109,6 @@ export default function taskReducer(state, action) {
     case 'ADD_TASKS':
       return {
         statuses: state.statuses,
-        directions: state.directions,
         tasks: state.tasks.concat(action.tasks),
         _dirtyStatuses: state._dirtyStatuses,
         _dirtyTaskIds: state._dirtyTaskIds
@@ -134,7 +123,6 @@ export default function taskReducer(state, action) {
       });
       return {
         statuses: state.statuses,
-        directions: state.directions,
         tasks: state.tasks.filter(function(t) { return t.id !== action.id; }).map(function(t) {
           if (t.dependsOn && t.dependsOn.indexOf(action.id) >= 0) {
             return Object.assign({}, t, { dependsOn: t.dependsOn.filter(function(d) { return d !== action.id; }) });
@@ -166,7 +154,6 @@ export default function taskReducer(state, action) {
       }
       return {
         statuses: action.statuses != null ? action.statuses : state.statuses,
-        directions: action.directions != null ? action.directions : state.directions,
         tasks: action.tasks != null ? action.tasks : state.tasks,
         _dirtyStatuses: state._dirtyStatuses,
         _dirtyTaskIds: dt5
@@ -175,7 +162,6 @@ export default function taskReducer(state, action) {
     case 'RESTORE':
       return {
         statuses: action.statuses,
-        directions: action.directions,
         tasks: action.extraTasks,
         _dirtyStatuses: {},
         _dirtyTaskIds: {}

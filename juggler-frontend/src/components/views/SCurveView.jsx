@@ -9,7 +9,7 @@ import { getTheme } from '../../theme/colors';
 import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES } from '../../state/constants';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
-export default function SCurveView({ selectedDate, selectedDateKey, placements, statuses, directions, onStatusChange, onExpand, darkMode, schedCfg, nowMins, isToday, blockedTaskIds, isMobile, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchHabitsDone }) {
+export default function SCurveView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onExpand, darkMode, schedCfg, nowMins, isToday, blockedTaskIds, isMobile, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchHabitsDone }) {
   var theme = getTheme(darkMode);
   var loc = getLocationForDatePure(selectedDateKey, schedCfg);
   var scrollRef = useRef(null);
@@ -123,7 +123,7 @@ export default function SCurveView({ selectedDate, selectedDateKey, placements, 
           schedCfg={schedCfg}
           placements={placements}
           statuses={statuses}
-          directions={directions}
+
           onStatusChange={onStatusChange}
           onExpand={onExpand}
           darkMode={darkMode}

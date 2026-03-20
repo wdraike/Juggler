@@ -151,7 +151,6 @@ function rowToTask(row, timezone, sourceMap) {
     pri: row.pri,
     project: row.project,
     status: row.status || '',
-    direction: row.direction,
     section: row.section,
     notes: row.notes,
     due: due,
@@ -191,7 +190,6 @@ function taskToRow(task, userId, timezone) {
   if (task.pri !== undefined) row.pri = normalizePri(task.pri);
   if (task.project !== undefined) row.project = task.project;
   if (task.status !== undefined) row.status = task.status;
-  if (task.direction !== undefined) row.direction = task.direction;
   if (task.section !== undefined) row.section = task.section;
   if (task.notes !== undefined) row.notes = task.notes;
   // UTC ISO fields take precedence over local string fields
@@ -497,7 +495,6 @@ async function updateTaskStatus(req, res) {
   try {
     var id = req.params.id;
     var status = req.body.status;
-    var direction = req.body.direction;
     var tz = req.user.timezone || 'America/New_York';
 
     var existing = await db('tasks').where({ id: id, user_id: req.user.id }).first();
@@ -547,7 +544,6 @@ async function updateTaskStatus(req, res) {
     }
 
     var update = { status: status || '', updated_at: db.fn.now() };
-    if (direction !== undefined) update.direction = direction;
 
     await db('tasks').where({ id: id, user_id: req.user.id }).update(update);
     var updated = await db('tasks').where('id', id).first();

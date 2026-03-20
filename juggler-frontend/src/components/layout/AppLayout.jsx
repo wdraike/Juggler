@@ -48,7 +48,7 @@ import apiClient from '../../services/apiClient';
 
 export default function AppLayout() {
   // State
-  var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, setDirection, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements, flushNow } = useTaskState();
+  var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements, flushNow } = useTaskState();
   var isMobile = useIsMobile();
   var config = useConfig();
   var { toast, toastHistory, showToast } = useToast();
@@ -99,7 +99,6 @@ export default function AppLayout() {
 
   var theme = getTheme(darkMode);
   var statuses = taskState.statuses;
-  var directions = taskState.directions;
   var allTasks = taskState.tasks;
 
   // Track when editing UI is open to suspend background syncs/scheduling
@@ -402,10 +401,9 @@ export default function AppLayout() {
   var handleStatusChange = useCallback((id, val) => {
     pushUndo('status change');
     setStatus(id, val, {
-      deleteDirection: val !== 'other',
       taskFields: { status: val }
     });
-    var labels = { done: 'Done', wip: 'WIP', cancel: 'Cancelled', skip: 'Skipped', other: 'Redirected', '': 'Reopened' };
+    var labels = { done: 'Done', wip: 'WIP', cancel: 'Cancelled', skip: 'Skipped', '': 'Reopened' };
     showToast((labels[val] || val) + ': ' + (allTasks.find(t => t.id === id)?.text || id).slice(0, 40), 'success');
   }, [pushUndo, setStatus, allTasks, showToast]);
 
@@ -700,7 +698,7 @@ export default function AppLayout() {
             <DayView
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
               placements={filteredDayPlacements[selectedDateKey] || []}
-              statuses={statuses} directions={directions}
+              statuses={statuses}
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               onCreate={handleCreate} gridZoom={config.gridZoom}
               darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
@@ -721,7 +719,7 @@ export default function AppLayout() {
           {viewMode === '3day' && (
             <ThreeDayView
               selectedDate={selectedDate} dayPlacements={filteredDayPlacements}
-              statuses={statuses} directions={directions}
+              statuses={statuses}
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               gridZoom={config.gridZoom} darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins}
               onGridDrop={handleGridDrop} blockedTaskIds={blockedTaskIds}
@@ -733,7 +731,7 @@ export default function AppLayout() {
           {viewMode === 'week' && (
             <WeekView
               selectedDate={selectedDate} dayPlacements={filteredDayPlacements}
-              statuses={statuses} directions={directions}
+              statuses={statuses}
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               gridZoom={config.gridZoom} darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins}
               onGridDrop={handleGridDrop} blockedTaskIds={blockedTaskIds}
@@ -746,7 +744,7 @@ export default function AppLayout() {
             <TimelineView
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
               placements={filteredDayPlacements[selectedDateKey] || []}
-              statuses={statuses} directions={directions}
+              statuses={statuses}
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               onCreate={handleCreate} gridZoom={config.gridZoom}
               darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
@@ -765,7 +763,7 @@ export default function AppLayout() {
             <SCurveView
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
               placements={filteredDayPlacements[selectedDateKey] || []}
-              statuses={statuses} directions={directions}
+              statuses={statuses}
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
               blockedTaskIds={blockedTaskIds}
@@ -810,7 +808,7 @@ export default function AppLayout() {
           )}
           {viewMode === 'list' && (
             <ListView
-              allTasks={allTasks} statuses={statuses} directions={directions}
+              allTasks={allTasks} statuses={statuses}
               filter={filter} search={search} projectFilter={projectFilter}
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               onCreate={handleCreate} darkMode={darkMode} schedCfg={schedCfg}
@@ -820,7 +818,7 @@ export default function AppLayout() {
           )}
           {viewMode === 'priority' && (
             <PriorityView
-              allTasks={allTasks} statuses={statuses} directions={directions}
+              allTasks={allTasks} statuses={statuses}
               filter={filter} search={search} projectFilter={projectFilter}
               onStatusChange={handleStatusChange} onExpand={handleExpand} darkMode={darkMode}
               onPriorityDrop={handlePriorityDrop}
@@ -840,7 +838,7 @@ export default function AppLayout() {
           )}
           {viewMode === 'conflicts' && (
             <ConflictsView
-              allTasks={allTasks} statuses={statuses} directions={directions}
+              allTasks={allTasks} statuses={statuses}
               unplaced={unplaced} schedulerWarnings={schedulerWarnings}
               onStatusChange={handleStatusChange} onExpand={handleExpand} onUpdateTask={handleUpdateTask}
               darkMode={darkMode} isMobile={isMobile}
@@ -875,10 +873,8 @@ export default function AppLayout() {
                     key={taskId}
                     task={taskObj}
                     status={statuses[taskId] || ''}
-                    direction={directions[taskId]}
                     onUpdate={handleUpdateTask}
                     onStatusChange={function(val) { handleStatusChange(taskId, val); }}
-                    onDirectionChange={function(val) { setDirection(taskId, val); }}
                     onDelete={deleteTask}
                     onClose={function() { setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== taskId; }); }); }}
                     onShowChain={function() { setViewMode('deps'); setProjectFilter(taskObj.project || ''); setExpandedTasks([]); }}
@@ -923,10 +919,8 @@ export default function AppLayout() {
             key={taskId}
             task={taskObj}
             status={statuses[taskId] || ''}
-            direction={directions[taskId]}
             onUpdate={handleUpdateTask}
             onStatusChange={function(val) { handleStatusChange(taskId, val); }}
-            onDirectionChange={function(val) { setDirection(taskId, val); }}
             onDelete={deleteTask}
             onClose={function() { setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== taskId; }); }); }}
             onShowChain={function() { setViewMode('deps'); setProjectFilter(taskObj.project || ''); setExpandedTasks([]); }}

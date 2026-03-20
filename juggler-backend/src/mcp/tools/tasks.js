@@ -154,8 +154,7 @@ function registerTaskTools(server, userId) {
     'Update fields on an existing task. Use date+time for scheduling (server converts timezone automatically). Only provided fields are changed.',
     Object.assign({
       id: z.string().describe('Task ID to update'),
-      status: z.string().optional(),
-      direction: z.string().optional()
+      status: z.string().optional()
     }, taskInputFields),
     async ({ id, ...fields }) => {
       var tz = await getUserTimezone();
@@ -222,13 +221,12 @@ function registerTaskTools(server, userId) {
   // ── set_task_status ──
   server.tool(
     'set_task_status',
-    'Set task status (e.g. "", "done", "dropped") and optional direction ("fwd", "back").',
+    'Set task status (e.g. "", "done", "dropped").',
     {
       id: z.string().describe('Task ID'),
-      status: z.string().describe('New status: "" (active), "done", "dropped"'),
-      direction: z.string().optional().describe('Direction: "fwd" or "back"')
+      status: z.string().describe('New status: "" (active), "done", "dropped"')
     },
-    async ({ id, status, direction }) => {
+    async ({ id, status }) => {
       var tz = await getUserTimezone();
       var existing = await db('tasks').where({ id: id, user_id: userId }).first();
       if (!existing) {
@@ -236,7 +234,6 @@ function registerTaskTools(server, userId) {
       }
 
       var update = { status: status || '', updated_at: db.fn.now() };
-      if (direction !== undefined) update.direction = direction;
 
       await db('tasks').where({ id: id, user_id: userId }).update(update);
       var updated = await db('tasks').where('id', id).first();
@@ -344,8 +341,7 @@ function registerTaskTools(server, userId) {
       updates: z.array(z.object(
         Object.assign({
           id: z.string().describe('Task ID to update'),
-          status: z.string().optional(),
-          direction: z.string().optional()
+          status: z.string().optional()
         }, taskInputFields)
       )).describe('Array of task updates, each with an id and fields to change')
     },

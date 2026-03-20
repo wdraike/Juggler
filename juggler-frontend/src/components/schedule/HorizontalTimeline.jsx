@@ -83,7 +83,7 @@ function computeHLayout(placements, hourWidth, cardW, cardH, gap) {
 }
 
 export default function HorizontalTimeline({
-  dateKey, placements, statuses, directions, onStatusChange, onExpand,
+  dateKey, placements, statuses, onStatusChange, onExpand,
   gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locations, onHourLocationOverride, blockedTaskIds,
   onZoomChange, isMobile, onMarkerDrag
 }) {

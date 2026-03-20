@@ -14,7 +14,7 @@ import apiClient from '../services/apiClient';
 
 // Fields that map to task object properties for partial saves
 var SAVE_FIELDS = [
-  'text', 'status', 'direction', 'date', 'time', 'dur', 'timeRemaining',
+  'text', 'status', 'date', 'time', 'dur', 'timeRemaining',
   'pri', 'project', 'section', 'notes', 'due', 'startAfter',
   'location', 'tools', 'when', 'dayReq', 'habit', 'rigid',
   'split', 'splitMin', 'recur', 'dependsOn', 'datePinned'
@@ -76,9 +76,8 @@ export default function useTaskState() {
           var partial = { id: t.id };
           SAVE_FIELDS.forEach(function(f) {
             if (dirtyFieldMap[f]) {
-              // Special cases: status/direction come from state maps
+              // Special case: status comes from state map
               if (f === 'status') { partial.status = state.statuses[id] || ''; }
-              else if (f === 'direction') { partial.direction = state.directions[id] || null; }
               else { partial[f] = t[f]; }
             }
           });
@@ -121,13 +120,11 @@ export default function useTaskState() {
 
       const tasks = tasksRes.data.tasks || [];
       const statuses = {};
-      const directions = {};
       tasks.forEach(t => {
         if (t.status) statuses[t.id] = t.status;
-        if (t.direction) directions[t.id] = t.direction;
       });
 
-      dispatch({ type: 'INIT', tasks, statuses, directions });
+      dispatch({ type: 'INIT', tasks, statuses });
       // Update version watermark so polling doesn't immediately re-trigger
       if (tasksRes.data.version) {
         lastVersionRef.current = tasksRes.data.version;
@@ -160,13 +157,11 @@ export default function useTaskState() {
     dispatch({
       type: 'SET_STATUS',
       id, val,
-      deleteDirection: opts.deleteDirection,
       taskFields: opts.taskFields
     });
     // Save status immediately via dedicated endpoint
     apiClient.put(`/tasks/${id}/status`, {
-      status: val || '',
-      direction: opts.deleteDirection ? null : undefined
+      status: val || ''
     }).then(() => {
       // Clear dirty flag once server confirms the save
       dispatch({ type: 'CLEAR_DIRTY_STATUS', id });
@@ -174,10 +169,6 @@ export default function useTaskState() {
     // If there are also taskFields (e.g. date changes on habit completion), save those too
     if (opts.taskFields) scheduleSave();
   }, [scheduleSave]);
-
-  const setDirection = useCallback((id, val) => {
-    dispatchPersist({ type: 'SET_DIRECTION', id, val });
-  }, [dispatchPersist]);
 
   const updateTask = useCallback(async (id, fields) => {
     dispatch({ type: 'UPDATE_TASK', id, fields });
@@ -259,12 +250,10 @@ export default function useTaskState() {
             ]);
             var tasks = tasksRes.data.tasks || [];
             var statuses = {};
-            var directions = {};
             tasks.forEach(function(t) {
               if (t.status) statuses[t.id] = t.status;
-              if (t.direction) directions[t.id] = t.direction;
             });
-            dispatch({ type: 'INIT', tasks, statuses, directions });
+            dispatch({ type: 'INIT', tasks, statuses });
             loadPlacements();
           }
         }
@@ -304,7 +293,6 @@ export default function useTaskState() {
     placements,
     loadPlacements,
     setStatus,
-    setDirection,
     updateTask,
     addTasks,
     deleteTask,

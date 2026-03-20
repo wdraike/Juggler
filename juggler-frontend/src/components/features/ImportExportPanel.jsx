@@ -492,7 +492,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
       for (var i = 0; i < statusUpdates.length; i++) {
         try {
           await apiClient.put('/tasks/' + statusUpdates[i].id + '/status', {
-            status: statusUpdates[i].status, direction: ''
+            status: statusUpdates[i].status
           });
         } catch (_) { /* ignore individual status failures */ }
       }
