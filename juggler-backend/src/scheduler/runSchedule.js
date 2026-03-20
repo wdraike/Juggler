@@ -213,6 +213,8 @@ async function runScheduleAndPersist(userId, _retries) {
     var dateChanged = newDate !== original.date;
     var timeChanged = newTime !== original.time;
 
+    // Never touch habit templates — they're blueprints, not schedulable tasks.
+    if (original.taskType === 'habit_template') continue;
     // Fixed tasks are user-anchored — never override their time/date.
     if (original.when && original.when.indexOf('fixed') >= 0) continue;
     // Markers are non-blocking — never move them.
@@ -255,6 +257,8 @@ async function runScheduleAndPersist(userId, _retries) {
     if (!t || !t.id) return;
     var original = taskById[t.id];
     if (!original) return;
+    // Never touch habit templates.
+    if (original.taskType === 'habit_template') return;
     // Fixed tasks are user-anchored — never clear their time.
     if (original.when && original.when.indexOf('fixed') >= 0) return;
     // Markers are non-blocking — never clear their time.
@@ -293,6 +297,8 @@ async function runScheduleAndPersist(userId, _retries) {
     allTasks.forEach(function(t) {
       // Skip generated recurring instances (not real DB rows)
       if (t.generated) return;
+      // Never touch habit templates — they're blueprints, not schedulable tasks
+      if (t.taskType === 'habit_template') return;
       var st = statuses[t.id] || '';
       if (st === 'done' || st === 'cancel' || st === 'skip') return;
       if (!t.date || t.date === 'TBD') return;
