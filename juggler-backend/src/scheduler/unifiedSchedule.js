@@ -43,6 +43,9 @@ function effectiveDuration(t) {
   return Math.min(rd > 0 ? rd : (rd === 0 ? 0 : 30), 720);
 }
 
+function getTravelBefore(t) { return t.travelBefore > 0 ? t.travelBefore : 0; }
+function getTravelAfter(t) { return t.travelAfter > 0 ? t.travelAfter : 0; }
+
 function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   var PERF = Date.now();
 
@@ -347,20 +350,30 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   });
 
   function recordPlace(occ, placed, t, start, dur, locked, dateKey, item) {
+    // Determine travel buffers — for split tasks, only first chunk gets travelBefore
+    // and only last chunk gets travelAfter
+    var tb = 0, ta = 0;
+    var isFirstPart = !item || item._parts.length === 0;
+    var isLastPart = !item || (item.remaining - dur <= 0);
+    if (isFirstPart) tb = getTravelBefore(t);
+    if (isLastPart) ta = getTravelAfter(t);
+    // Reserve travel buffer zones in the occupancy grid
+    if (tb > 0) reserve(occ, Math.max(0, start - tb), tb);
     reserve(occ, start, dur);
-    var part = { task: t, start: start, dur: dur, locked: locked, _dateKey: dateKey };
+    if (ta > 0) reserve(occ, start + dur, ta);
+    var part = { task: t, start: start, dur: dur, locked: locked, _dateKey: dateKey, travelBefore: tb, travelAfter: ta };
     placed.push(part);
     if (item) { item._parts.push(part); item.remaining -= dur; }
+    var effectiveStart = start - tb;
+    var effectiveEnd = start + dur + ta;
     var gpe = globalPlacedEnd[t.id];
     if (!gpe) {
-      globalPlacedEnd[t.id] = { dateKey: dateKey, endMin: start + dur, startMin: start };
+      globalPlacedEnd[t.id] = { dateKey: dateKey, endMin: effectiveEnd, startMin: effectiveStart };
     } else if (gpe.dateKey === dateKey) {
-      // Same day: update end (max) and start (min)
-      if (start + dur > gpe.endMin) gpe.endMin = start + dur;
-      if (start < gpe.startMin || gpe.startMin == null) gpe.startMin = start;
+      if (effectiveEnd > gpe.endMin) gpe.endMin = effectiveEnd;
+      if (effectiveStart < gpe.startMin || gpe.startMin == null) gpe.startMin = effectiveStart;
     } else if (parseDate(dateKey) > parseDate(gpe.dateKey)) {
-      // Later day: replace entirely
-      globalPlacedEnd[t.id] = { dateKey: dateKey, endMin: start + dur, startMin: start };
+      globalPlacedEnd[t.id] = { dateKey: dateKey, endMin: effectiveEnd, startMin: effectiveStart };
     }
     if (!locked && !taskUpdates[t.id]) {
       var hh = Math.floor(start / 60), mm = start % 60;
@@ -462,6 +475,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     var t = item.task;
     var occ = dayOcc[d.key];
     var placed = dayPlaced[d.key];
+    // Travel buffers — first chunk needs travelBefore, last needs travelAfter
+    var tb = getTravelBefore(t);
+    var ta = getTravelAfter(t);
     // whenOverride can be an array of windows or a string
     var wins = Array.isArray(whenOverride) ? whenOverride : getWhenWindows(whenOverride || t.when, dayWindows[d.key]);
     if (wins.length === 0) return false;
@@ -470,6 +486,10 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     var placedAny = false;
 
     while (item.remaining > 0 && scanStart < scanLimit) {
+      // For the first chunk, the travel-before zone must also be free
+      var needTb = item._parts.length === 0 ? tb : 0;
+      var effectiveScan = scanStart - needTb;
+      if (needTb > 0 && effectiveScan >= 0 && !isFree(occ, effectiveScan, needTb)) { scanStart++; continue; }
       if (occ[scanStart]) { scanStart++; continue; }
       var gEnd = scanStart + 1;
       while (gEnd < scanLimit && !occ[gEnd]) gEnd++;
@@ -491,7 +511,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var locId = resolveLocationId(d.key, scanStart, cfg, dayBlocks[d.key]);
       if (!canTaskRun(t, locId, cfg.toolMatrix)) { scanStart = Math.floor(scanStart / 15) * 15 + 15; continue; }
 
-      if (!item.splittable && gapSize < item.remaining) { scanStart = gEnd; continue; }
+      // For non-splittable tasks, gap must also fit travel-after
+      var needTa = item.remaining <= (item.splittable ? gapSize : item.remaining) ? ta : 0;
+      if (!item.splittable && gapSize < item.remaining + needTa) { scanStart = gEnd; continue; }
       if (item.splittable && gapSize < item.minChunk && item.remaining > gapSize) { scanStart = gEnd; continue; }
 
       var placeEnd = Math.min(gEnd, winEnd);
@@ -627,6 +649,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     if (wins.length === 0) return false;
     var dur = item.remaining;
     if (dur <= 0) return false;
+    var tb = getTravelBefore(t);
+    var ta = getTravelAfter(t);
+    var totalNeeded = tb + dur + ta;
 
     var candidates = [];
     for (var wi = 0; wi < wins.length; wi++) {
@@ -638,15 +663,25 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         var gEnd = pos + 1;
         while (gEnd < wEnd && !occ[gEnd]) gEnd++;
         var gapSize = gEnd - pos;
-        if (gapSize >= dur) {
-          var idealStart = Math.max(pos, Math.min(preferredMin, gEnd - dur));
-          var locOk = true;
-          for (var cm = idealStart; cm < idealStart + dur; cm++) {
-            var locId = resolveLocationId(d.key, cm, cfg, dayBlocks[d.key]);
-            if (!canTaskRun(t, locId, cfg.toolMatrix)) { locOk = false; break; }
-          }
-          if (locOk) {
-            candidates.push({ start: idealStart, dist: Math.abs(idealStart - preferredMin) });
+        // Gap must fit travel-before + task body + travel-after
+        // Also check that travel-before zone before the gap is free
+        if (gapSize >= totalNeeded || (tb === 0 && ta === 0 && gapSize >= dur)) {
+          var bodyStart = pos + tb;
+          var idealStart = Math.max(bodyStart, Math.min(preferredMin, gEnd - dur - ta));
+          // Verify travel-before zone is free (it may be before gap start)
+          var tbStart = idealStart - tb;
+          var tbOk = tb === 0 || (tbStart >= 0 && isFree(occ, tbStart, tb));
+          // Verify travel-after zone is free
+          var taOk = ta === 0 || isFree(occ, idealStart + dur, ta);
+          if (tbOk && taOk) {
+            var locOk = true;
+            for (var cm = idealStart; cm < idealStart + dur; cm++) {
+              var locId = resolveLocationId(d.key, cm, cfg, dayBlocks[d.key]);
+              if (!canTaskRun(t, locId, cfg.toolMatrix)) { locOk = false; break; }
+            }
+            if (locOk) {
+              candidates.push({ start: idealStart, dist: Math.abs(idealStart - preferredMin) });
+            }
           }
         }
         pos = gEnd;
@@ -662,7 +697,11 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   function unplaceItem(item) {
     item._parts.forEach(function(part) {
       var occ = dayOcc[part._dateKey];
-      if (occ) { for (var m = part.start; m < part.start + part.dur; m++) delete occ[m]; }
+      if (occ) {
+        var freeStart = part.start - (part.travelBefore || 0);
+        var freeEnd = part.start + part.dur + (part.travelAfter || 0);
+        for (var m = Math.max(0, freeStart); m < freeEnd; m++) delete occ[m];
+      }
       var pl = dayPlaced[part._dateKey];
       if (pl) { var idx = pl.indexOf(part); if (idx !== -1) pl.splice(idx, 1); }
     });
@@ -743,12 +782,16 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (sm === null) return;
       var dur = effectiveDuration(t);
       if (dur <= 0) return;
+      var tb = getTravelBefore(t);
+      var ta = getTravelAfter(t);
       // Don't clamp fixed tasks — honor the user's exact time.
-      // Only reserve occupancy within the grid range.
+      // Reserve travel buffer zones plus the task body.
+      if (tb > 0) reserve(occ, Math.max(0, sm - tb), tb);
       var reserveStart = Math.max(0, sm);
       reserve(occ, reserveStart, Math.min(dur, 1440 - reserveStart));
-      placed.push({ task: t, start: sm, dur: dur, locked: true, _dateKey: d.key });
-      globalPlacedEnd[t.id] = { dateKey: d.key, endMin: sm + dur, startMin: sm };
+      if (ta > 0) reserve(occ, sm + dur, Math.min(ta, 1440 - sm - dur));
+      placed.push({ task: t, start: sm, dur: dur, locked: true, _dateKey: d.key, travelBefore: tb, travelAfter: ta });
+      globalPlacedEnd[t.id] = { dateKey: d.key, endMin: sm + dur + ta, startMin: sm - tb };
     });
   });
 

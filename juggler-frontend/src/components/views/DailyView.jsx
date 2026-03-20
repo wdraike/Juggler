@@ -217,7 +217,7 @@ function computeColumns(placements, hourHeight) {
 }
 
 /* ── Reactive task block — shows more info as height increases ── */
-function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStatusChange, theme, darkMode, isMobile, isBlocked, canDrag, gutterW }) {
+function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStatusChange, theme, darkMode, isMobile, isBlocked, canDrag, gutterW, hourHeight }) {
   var t = item.task || item;
   var priColor = PRI_COLORS[t.pri] || PRI_COLORS.P3;
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
@@ -390,6 +390,27 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
         )}
       </div>
       {show && <FixedPopup anchorRect={anchorRect} item={item} status={status} theme={theme} darkMode={darkMode} />}
+      {/* Travel buffer zones — hatched strips above/below the task card */}
+      {item.travelBefore > 0 && hourHeight > 0 && (
+        <div style={{
+          position: 'absolute', bottom: '100%', left: 0, right: 0,
+          height: (item.travelBefore / 60) * hourHeight,
+          background: 'repeating-linear-gradient(45deg, transparent, transparent 3px, ' + priColor + '18 3px, ' + priColor + '18 5px)',
+          borderRadius: '4px 4px 0 0',
+          borderLeft: '3px solid ' + priColor + '40',
+          pointerEvents: 'none'
+        }} />
+      )}
+      {item.travelAfter > 0 && hourHeight > 0 && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0,
+          height: (item.travelAfter / 60) * hourHeight,
+          background: 'repeating-linear-gradient(45deg, transparent, transparent 3px, ' + priColor + '18 3px, ' + priColor + '18 5px)',
+          borderRadius: '0 0 4px 4px',
+          borderLeft: '3px solid ' + priColor + '40',
+          pointerEvents: 'none'
+        }} />
+      )}
     </div>
   );
 }
@@ -1005,6 +1026,7 @@ export default function DailyView({
                 isBlocked={blockedTaskIds && blockedTaskIds.has(taskId)}
                 canDrag={canDrag}
                 gutterW={GUTTER_W}
+                hourHeight={hourHeight}
               />
             );
           })}
@@ -1031,6 +1053,7 @@ export default function DailyView({
                 isBlocked={false}
                 canDrag={canDrag}
                 gutterW={GUTTER_W}
+                hourHeight={hourHeight}
               />
             );
           })}

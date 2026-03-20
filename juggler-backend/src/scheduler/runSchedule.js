@@ -356,6 +356,8 @@ async function runScheduleAndPersist(userId, _retries) {
       if (p.marker) entry.marker = true;
       if (p._whenRelaxed) entry.whenRelaxed = true;
       if (p.splitPart) { entry.splitPart = p.splitPart; entry.splitTotal = p.splitTotal; }
+      if (p.travelBefore) entry.travelBefore = p.travelBefore;
+      if (p.travelAfter) entry.travelAfter = p.travelAfter;
       return entry;
     });
   });
@@ -520,6 +522,8 @@ async function getSchedulePlacements(userId) {
         if (p.marker) hydrated.marker = true;
         if (p.whenRelaxed) hydrated._whenRelaxed = true;
         if (p.splitPart) { hydrated.splitPart = p.splitPart; hydrated.splitTotal = p.splitTotal; }
+        if (p.travelBefore) hydrated.travelBefore = p.travelBefore;
+        if (p.travelAfter) hydrated.travelAfter = p.travelAfter;
         dayPlacements[dk].push(hydrated);
         cachedIds[p.taskId] = true;
       });
@@ -590,6 +594,8 @@ async function getSchedulePlacements(userId) {
       if (p.marker) entry.marker = true;
       if (p._whenRelaxed) entry.whenRelaxed = true;
       if (p.splitPart) { entry.splitPart = p.splitPart; entry.splitTotal = p.splitTotal; }
+      if (p.travelBefore) entry.travelBefore = p.travelBefore;
+      if (p.travelAfter) entry.travelAfter = p.travelAfter;
       return entry;
     });
   });

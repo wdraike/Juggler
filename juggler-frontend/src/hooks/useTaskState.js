@@ -17,7 +17,7 @@ var SAVE_FIELDS = [
   'text', 'status', 'date', 'time', 'dur', 'timeRemaining',
   'pri', 'project', 'section', 'notes', 'due', 'startAfter',
   'location', 'tools', 'when', 'dayReq', 'habit', 'rigid',
-  'split', 'splitMin', 'recur', 'dependsOn', 'datePinned'
+  'split', 'splitMin', 'travelBefore', 'travelAfter', 'recur', 'dependsOn', 'datePinned'
 ];
 
 export default function useTaskState() {
@@ -186,7 +186,7 @@ export default function useTaskState() {
       dispatch({ type: 'CLEAR_DIRTY_TASKS', ids: [id], savedFields: { [id]: fields } });
       // If a scheduling-relevant field changed, wait for the backend's
       // auto-reschedule (500ms debounce + run time) before refreshing placements
-      var schedFields = ['split', 'flexWhen', 'dur', 'when', 'dayReq', 'date', 'due', 'pri', 'dependsOn', 'location', 'time', 'timeFlex'];
+      var schedFields = ['split', 'flexWhen', 'dur', 'when', 'dayReq', 'date', 'due', 'pri', 'dependsOn', 'location', 'time', 'timeFlex', 'travelBefore', 'travelAfter'];
       var needsResched = schedFields.some(function(f) { return f in fields; });
       if (needsResched) {
         setTimeout(function() { loadPlacements().finally(function() { setSaving(false); }); }, 3500);

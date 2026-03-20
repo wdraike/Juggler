@@ -57,7 +57,7 @@ function parseISOToDate(iso) {
 // If an instance row has NULL for these, the value is read from the source.
 var TEMPLATE_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
   'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
-  'depends_on'];
+  'travel_before', 'travel_after', 'depends_on'];
 
 /**
  * Build a { sourceId: row } lookup from an array of task rows.
@@ -172,7 +172,9 @@ function rowToTask(row, timezone, sourceMap) {
     dependsOn: typeof row.depends_on === 'string' ? JSON.parse(row.depends_on || '[]') : (row.depends_on || []),
     datePinned: !!row.date_pinned,
     marker: !!row.marker,
-    flexWhen: !!row.flex_when
+    flexWhen: !!row.flex_when,
+    travelBefore: row.travel_before != null ? row.travel_before : undefined,
+    travelAfter: row.travel_after != null ? row.travel_after : undefined
   };
 }
 
@@ -221,6 +223,8 @@ function taskToRow(task, userId, timezone) {
   if (task.datePinned !== undefined) row.date_pinned = task.datePinned ? 1 : 0;
   if (task.marker !== undefined) row.marker = task.marker ? 1 : 0;
   if (task.flexWhen !== undefined) row.flex_when = task.flexWhen ? 1 : 0;
+  if (task.travelBefore !== undefined) row.travel_before = task.travelBefore || null;
+  if (task.travelAfter !== undefined) row.travel_after = task.travelAfter || null;
 
   // scheduledAt (UTC ISO) takes precedence over date+time (local strings)
   if (task.scheduledAt !== undefined) {
@@ -383,7 +387,7 @@ async function updateTask(req, res) {
     // Fields that belong on the source template (shared across all instances).
     var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
       'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
-      'depends_on'];
+      'travel_before', 'travel_after', 'depends_on'];
 
     var taskType = existing.task_type || 'task';
 
@@ -625,7 +629,7 @@ async function batchUpdateTasks(req, res) {
     // Template fields that should be routed to the source for habit instances
     var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
       'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
-      'depends_on'];
+      'travel_before', 'travel_after', 'depends_on'];
 
     for (var attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {

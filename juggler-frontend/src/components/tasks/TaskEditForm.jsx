@@ -31,6 +31,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [splitMin, setSplitMin] = useState(isCreate ? 15 : (task.splitMin || 15));
   var [taskLoc, setTaskLoc] = useState(isCreate ? [] : (task.location || []));
   var [taskTools, setTaskTools] = useState(isCreate ? [] : (task.tools || []));
+  var [travelBefore, setTravelBefore] = useState(isCreate ? 0 : (task.travelBefore || 0));
+  var [travelAfter, setTravelAfter] = useState(isCreate ? 0 : (task.travelAfter || 0));
   var [marker, setMarker] = useState(isCreate ? false : !!task.marker);
   var [flexWhen, setFlexWhen] = useState(isCreate ? false : !!task.flexWhen);
   var [datePinned, setDatePinned] = useState(isCreate ? false : !!task.datePinned);
@@ -149,6 +151,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       timeFlex: t.timeFlex != null ? t.timeFlex : 60,
       split: t.split !== undefined ? !!t.split : false, splitMin: t.splitMin || 15,
       location: t.location || [], tools: t.tools || [],
+      travelBefore: t.travelBefore || 0, travelAfter: t.travelAfter || 0,
       marker: !!t.marker,
       flexWhen: !!t.flexWhen,
       datePinned: !!t.datePinned,
@@ -188,6 +191,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setHabit(newSnap.habit); setRigid(newSnap.rigid); setTimeFlex(newSnap.timeFlex);
     setSplit(newSnap.split); setSplitMin(newSnap.splitMin);
     setTaskLoc(newSnap.location); setTaskTools(newSnap.tools);
+    setTravelBefore(newSnap.travelBefore); setTravelAfter(newSnap.travelAfter);
     setMarker(newSnap.marker);
     setFlexWhen(newSnap.flexWhen);
     setDatePinned(newSnap.datePinned);
@@ -219,6 +223,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       splitMin: split ? (parseInt(splitMin) || 15) : null,
       location: taskLoc,
       tools: taskTools,
+      travelBefore: parseInt(travelBefore) || 0,
+      travelAfter: parseInt(travelAfter) || 0,
       marker: marker,
       flexWhen: flexWhen,
       datePinned: datePinned,
@@ -230,7 +236,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         monthDays: recurType === 'monthly' ? recurMonthDays : undefined
       }
     };
-  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurEvery, recurUnit, recurMonthDays, isCreate, task]);
+  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurEvery, recurUnit, recurMonthDays, isCreate, task]);
 
   // Build only the fields that changed from the initial snapshot (prevents marking unchanged fields dirty)
   var buildChangedFields = useCallback(function() {
@@ -254,6 +260,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (!!marker !== snap.marker) changed.marker = all.marker;
     if (!!flexWhen !== snap.flexWhen) changed.flexWhen = all.flexWhen;
     if (!!datePinned !== snap.datePinned) changed.datePinned = all.datePinned;
+    if (parseInt(travelBefore) !== snap.travelBefore) changed.travelBefore = all.travelBefore;
+    if (parseInt(travelAfter) !== snap.travelAfter) changed.travelAfter = all.travelAfter;
     // Date/time (compare in form format)
     if (date !== (snap.date || '')) { changed.date = all.date; changed.day = all.day; }
     if (time !== (snap.time || '')) changed.time = all.time;
@@ -270,7 +278,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       changed.recur = all.recur;
     }
     return Object.keys(changed).length > 0 ? changed : null;
-  }, [buildFields, text, project, pri, notes, when, dayReq, habit, rigid, dur, timeFlex, split, splitMin, marker, flexWhen, datePinned, date, time, due, startAfter, taskLoc, taskTools, recurType, recurDays, recurEvery, recurUnit, recurMonthDays]);
+  }, [buildFields, text, project, pri, notes, when, dayReq, habit, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, due, startAfter, taskLoc, taskTools, recurType, recurDays, recurEvery, recurUnit, recurMonthDays]);
 
   // Dirty detection — compare current fields to snapshot
   var [isDirty, setIsDirty] = useState(false);
@@ -280,7 +288,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     userDirtyRef.current = true;
     var changed = buildChangedFields();
     setIsDirty(!!changed);
-  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurEvery, recurUnit, recurMonthDays]);
+  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurEvery, recurUnit, recurMonthDays]);
 
   // Manual save handler
   function handleSave() {
@@ -554,6 +562,26 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               </select>
             </label>}
           </div>
+
+          {/* Travel time buffers */}
+          {!marker && <div style={{ display: 'flex', gap: 6, marginBottom: 5 }}>
+            <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
+              <span title="Travel buffer before the task — scheduler prevents overlaps">{'\uD83D\uDE97'} Travel before</span>
+              <select value={travelBefore} onChange={e => setTravelBefore(parseInt(e.target.value))} style={iStyle}>
+                {[0, 5, 10, 15, 20, 30, 45, 60, 90].map(v => (
+                  <option key={v} value={v}>{v === 0 ? 'None' : v + ' min'}</option>
+                ))}
+              </select>
+            </label>
+            <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
+              <span title="Travel buffer after the task — scheduler prevents overlaps">Travel after</span>
+              <select value={travelAfter} onChange={e => setTravelAfter(parseInt(e.target.value))} style={iStyle}>
+                {[0, 5, 10, 15, 20, 30, 45, 60, 90].map(v => (
+                  <option key={v} value={v}>{v === 0 ? 'None' : v + ' min'}</option>
+                ))}
+              </select>
+            </label>
+          </div>}
 
           {/* When mode selector — hidden for markers */}
           {!marker && <label style={{ ...lStyle, marginBottom: 5 }}>
