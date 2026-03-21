@@ -12,3 +12,4 @@ test-results/
 playwright-report/
 *.db
 scripts/db-backup/
+.playwright-mcp/
