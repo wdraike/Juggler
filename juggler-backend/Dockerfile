@@ -2,17 +2,18 @@ FROM node:20-slim
 
 WORKDIR /app
 
+# Copy shared modules
+COPY shared/ /shared/
+COPY auth-client/ /auth-client/
+
 # Install dependencies
 COPY juggler-backend/package.json juggler-backend/package-lock.json* ./
-RUN npm ci --production
-
-# Copy shared module (referenced via ../../../shared from src/scheduler/)
-COPY shared/ /shared/
+RUN sed -i 's|file:../../auth-service/shared|file:/auth-client|g' package.json && \
+    npm ci --production --ignore-scripts
 
 # Copy backend source
 COPY juggler-backend/ .
 
-# Cloud Run uses port 8080
 ENV PORT=8080
 EXPOSE 8080
 
