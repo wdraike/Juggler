@@ -14,15 +14,17 @@ const db = require('../db');
 // Verify JWT via JWKS then load full user from local DB
 // (auth-client only puts id/email/name from JWT claims on req.user,
 // but Juggler controllers need timezone, picture_url, etc.)
+// Verify JWT via auth-client, then resolve local user by email
+// (auth-service user IDs may differ from local Juggler user IDs)
 const jwtMiddleware = createAuthMiddleware('juggler');
 const authenticateJWT = async (req, res, next) => {
   jwtMiddleware(req, res, async (err) => {
     if (err) return next(err);
-    if (!req.user?.id) return; // jwtMiddleware already sent 401
+    if (!req.user?.email) return; // jwtMiddleware already sent 401
     try {
-      const fullUser = await db('users').where('id', req.user.id).first();
-      if (fullUser) {
-        req.user = fullUser;
+      const localUser = await db('users').where('email', req.user.email).first();
+      if (localUser) {
+        req.user = { ...localUser, authServiceId: req.user.id };
       }
     } catch (dbErr) {
       // DB lookup failed — continue with JWT-only user data
