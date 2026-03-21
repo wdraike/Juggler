@@ -9,7 +9,7 @@ import { PRI_COLORS } from '../../state/constants';
 
 var PRI_LEVELS = ['P1', 'P2', 'P3', 'P4'];
 
-export default function PriorityView({ allTasks, statuses, filter, search, projectFilter, onStatusChange, onExpand, darkMode, onPriorityDrop, hideHabits, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile }) {
+export default function PriorityView({ allTasks, statuses, filter, search, projectFilter, onStatusChange, onExpand, darkMode, onPriorityDrop, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile }) {
   var theme = getTheme(darkMode);
   var [dragOver, setDragOver] = useState(null);
 
@@ -37,7 +37,6 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
     });
 
     return deduped.filter(t => {
-      if (hideHabits && t.habit) return false;
       var st = statuses[t.id] || '';
       if (filter === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip';
       if (filter === 'action') return st === '' || st === 'wip';
@@ -54,7 +53,7 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
       var s = search.toLowerCase();
       return (t.text || '').toLowerCase().includes(s) || (t.project || '').toLowerCase().includes(s);
     });
-  }, [allTasks, statuses, filter, search, projectFilter, hideHabits, blockedTaskIds, unplacedIds, pastDueIds, fixedIds]);
+  }, [allTasks, statuses, filter, search, projectFilter, blockedTaskIds, unplacedIds, pastDueIds, fixedIds]);
 
   return (
     <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', flex: 1, overflow: 'auto', gap: 8, padding: isMobile ? 8 : 12 }}>

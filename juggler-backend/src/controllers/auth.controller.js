@@ -1,17 +1,16 @@
 /**
- * Auth Controller — Google OAuth + JWT for Juggler
+ * Auth Controller — Legacy functions kept for MCP OAuth compatibility
+ *
+ * Login, refresh, logout, and profile are now handled by auth-service.
+ * Only findOrCreateGoogleUser remains — used by MCP OAuth authorize flow.
  */
 
-const { OAuth2Client } = require('google-auth-library');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../db');
-const { generateAccessToken, generateRefreshToken, validateRefreshToken } = require('../middleware/jwt-auth');
-
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 /**
  * Find or create a user from Google OAuth profile data.
- * Shared by googleLogin (frontend flow) and OAuth callback (MCP flow).
+ * Used by the MCP OAuth callback (oauth/authorize.js).
  */
 async function findOrCreateGoogleUser({ googleId, email, name, picture }) {
   let user = await db('users').where('google_id', googleId).first();
@@ -50,125 +49,6 @@ async function findOrCreateGoogleUser({ googleId, email, name, picture }) {
   return user;
 }
 
-/**
- * POST /api/auth/google
- * Receive Google ID token, verify, find-or-create user, return JWT
- */
-async function googleLogin(req, res) {
-  try {
-    const { idToken } = req.body;
-
-    if (!idToken) {
-      return res.status(400).json({ error: 'Google ID token required' });
-    }
-
-    // Verify the Google ID token
-    const ticket = await googleClient.verifyIdToken({
-      idToken,
-      audience: process.env.GOOGLE_CLIENT_ID
-    });
-
-    const payload = ticket.getPayload();
-    const { sub: googleId, email, name, picture } = payload;
-
-    const user = await findOrCreateGoogleUser({ googleId, email, name, picture });
-
-    // Generate tokens
-    const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
-
-    // Set refresh token as HTTP-only cookie
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      path: '/',
-      maxAge: 90 * 24 * 60 * 60 * 1000 // 90 days
-    });
-
-    res.json({
-      accessToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        picture: user.picture_url,
-        timezone: user.timezone
-      }
-    });
-  } catch (error) {
-    console.error('Google login error:', error);
-    res.status(401).json({
-      error: 'Authentication failed',
-      message: process.env.NODE_ENV === 'development' ? error.message : 'Authentication failed'
-    });
-  }
-}
-
-/**
- * POST /api/auth/refresh
- * Validate refresh token, issue new access token
- */
-async function refresh(req, res) {
-  try {
-    // req.user is set by validateRefreshToken middleware
-    const user = req.user;
-    const accessToken = generateAccessToken(user);
-    const newRefreshToken = generateRefreshToken(user);
-
-    // Rotate refresh token — issue a fresh one so the 90d clock resets
-    res.cookie('refreshToken', newRefreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      path: '/',
-      maxAge: 90 * 24 * 60 * 60 * 1000 // 90 days
-    });
-
-    res.json({ accessToken });
-  } catch (error) {
-    console.error('Token refresh error:', error);
-    res.status(401).json({
-      error: 'Refresh failed',
-      message: process.env.NODE_ENV === 'development' ? error.message : 'Refresh failed'
-    });
-  }
-}
-
-/**
- * POST /api/auth/logout
- * Clear refresh token cookie
- */
-async function logout(req, res) {
-  res.clearCookie('refreshToken', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    path: '/'
-  });
-  res.json({ message: 'Logged out' });
-}
-
-/**
- * GET /api/auth/me
- * Return current user profile
- */
-async function getMe(req, res) {
-  res.json({
-    user: {
-      id: req.user.id,
-      email: req.user.email,
-      name: req.user.name,
-      picture: req.user.picture_url,
-      timezone: req.user.timezone
-    }
-  });
-}
-
 module.exports = {
-  googleLogin,
-  refresh,
-  logout,
-  getMe,
   findOrCreateGoogleUser
 };

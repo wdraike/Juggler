@@ -30,7 +30,7 @@ var TABS = [
   { id: 'preferences', label: 'Preferences', tip: 'Preferences \u2014 font size, grid zoom, task defaults' },
 ];
 
-export default function SettingsPanel({ onClose, darkMode, config, allProjectNames, isMobile, onRenameProject }) {
+export default function SettingsPanel({ onClose, darkMode, config, allProjectNames, allTasks, isMobile, onRenameProject }) {
   var theme = getTheme(darkMode);
   var [tab, setTab] = useState('locations');
 
@@ -82,7 +82,7 @@ export default function SettingsPanel({ onClose, darkMode, config, allProjectNam
           {tab === 'locations' && <LocationsTab config={config} theme={theme} />}
           {tab === 'tools' && <ToolsTab config={config} theme={theme} />}
           {tab === 'matrix' && <MatrixTab config={config} theme={theme} />}
-          {tab === 'projects' && <ProjectsTab config={config} theme={theme} allProjectNames={allProjectNames} onRenameProject={onRenameProject} />}
+          {tab === 'projects' && <ProjectsTab config={config} theme={theme} allProjectNames={allProjectNames} allTasks={allTasks || []} onRenameProject={onRenameProject} />}
           {tab === 'preferences' && <PreferencesTab config={config} theme={theme} />}
           {tab === 'templates' && <UnifiedTemplateTab config={config} theme={theme} />}
         </div>
@@ -196,7 +196,7 @@ function MatrixTab({ config, theme }) {
   );
 }
 
-function ProjectRow({ p, config, theme, onRename }) {
+function ProjectRow({ p, config, theme, onRename, taskCount }) {
   var [editing, setEditing] = useState(false);
   var [editName, setEditName] = useState(p.name);
   var [editColor, setEditColor] = useState(p.color || '#3B82F6');
@@ -235,6 +235,7 @@ function ProjectRow({ p, config, theme, onRename }) {
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13 }}>
       {p.color && <div style={{ width: 12, height: 12, borderRadius: 3, background: p.color }} />}
       <span style={{ color: theme.text, flex: 1 }}>{p.name}</span>
+      <span style={{ fontSize: 11, color: theme.textMuted, minWidth: 28, textAlign: 'right' }}>{taskCount}</span>
       <button onClick={function() { setEditing(true); }} title="Edit project"
         style={{ border: 'none', background: 'transparent', color: theme.textMuted, cursor: 'pointer', fontSize: 12 }}>&#x270E;</button>
       <button onClick={async function() {
@@ -249,13 +250,60 @@ function ProjectRow({ p, config, theme, onRename }) {
   );
 }
 
-function ProjectsTab({ config, theme, allProjectNames, onRenameProject }) {
+function ProjectsTab({ config, theme, allProjectNames, allTasks, onRenameProject }) {
   var [newName, setNewName] = useState('');
   var [newColor, setNewColor] = useState('#3B82F6');
+  var [sortBy, setSortBy] = useState('name'); // name, tasks, color
+  var [sortDir, setSortDir] = useState('asc');
+  var [filter, setFilter] = useState('');
+
+  // Build task counts per project
+  var taskCounts = useMemo(function() {
+    var counts = {};
+    (allTasks || []).forEach(function(t) {
+      if (t.project) counts[t.project] = (counts[t.project] || 0) + 1;
+    });
+    return counts;
+  }, [allTasks]);
 
   // Merge DB projects with task-derived project names
   var dbProjectNames = new Set(config.projects.map(function(p) { return p.name; }));
   var taskOnlyNames = (allProjectNames || []).filter(function(n) { return !dbProjectNames.has(n); });
+
+  // Filter projects
+  var filterLower = filter.toLowerCase();
+  var filteredProjects = config.projects.filter(function(p) {
+    return !filter || p.name.toLowerCase().includes(filterLower);
+  });
+  var filteredTaskOnly = taskOnlyNames.filter(function(n) {
+    return !filter || n.toLowerCase().includes(filterLower);
+  });
+
+  // Sort managed projects
+  var sortedProjects = filteredProjects.slice().sort(function(a, b) {
+    var dir = sortDir === 'asc' ? 1 : -1;
+    if (sortBy === 'tasks') {
+      return ((taskCounts[a.name] || 0) - (taskCounts[b.name] || 0)) * dir;
+    }
+    if (sortBy === 'color') {
+      return (a.color || '').localeCompare(b.color || '') * dir;
+    }
+    return a.name.localeCompare(b.name) * dir;
+  });
+
+  // Sort task-only names
+  var sortedTaskOnly = filteredTaskOnly.slice().sort(function(a, b) {
+    var dir = sortDir === 'asc' ? 1 : -1;
+    if (sortBy === 'tasks') {
+      return ((taskCounts[a] || 0) - (taskCounts[b] || 0)) * dir;
+    }
+    return a.localeCompare(b) * dir;
+  });
+
+  function toggleSort(field) {
+    if (sortBy === field) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+    else { setSortBy(field); setSortDir('asc'); }
+  }
 
   async function promoteTaskProject(name) {
     try {
@@ -265,18 +313,42 @@ function ProjectsTab({ config, theme, allProjectNames, onRenameProject }) {
     } catch (e) { console.error(e); }
   }
 
+  var sortArrow = sortDir === 'asc' ? ' \u25B2' : ' \u25BC';
+  var btnStyle = function(active) {
+    return {
+      border: 'none', background: active ? theme.accent + '22' : 'transparent',
+      color: active ? theme.accent : theme.textMuted, cursor: 'pointer',
+      fontSize: 11, fontWeight: active ? 600 : 400, borderRadius: 4, padding: '2px 6px'
+    };
+  };
+
   return (
     <div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>Projects</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>Projects</div>
+        <span style={{ fontSize: 11, color: theme.textMuted }}>({config.projects.length + taskOnlyNames.length})</span>
+      </div>
+
+      {/* Filter + Sort controls */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <input value={filter} onChange={function(e) { setFilter(e.target.value); }} placeholder="Filter projects\u2026"
+          style={{ flex: 1, padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
+        {filter && <button onClick={function() { setFilter(''); }} style={{ border: 'none', background: 'transparent', color: theme.textMuted, cursor: 'pointer', fontSize: 14 }}>&times;</button>}
+        <span style={{ fontSize: 11, color: theme.textMuted }}>Sort:</span>
+        <button onClick={function() { toggleSort('name'); }} style={btnStyle(sortBy === 'name')}>Name{sortBy === 'name' ? sortArrow : ''}</button>
+        <button onClick={function() { toggleSort('tasks'); }} style={btnStyle(sortBy === 'tasks')}>Tasks{sortBy === 'tasks' ? sortArrow : ''}</button>
+      </div>
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
-        {config.projects.map(function(p) {
-          return <ProjectRow key={p.id || p.name} p={p} config={config} theme={theme} onRename={onRenameProject} />;
+        {sortedProjects.map(function(p) {
+          return <ProjectRow key={p.id || p.name} p={p} config={config} theme={theme} onRename={onRenameProject} taskCount={taskCounts[p.name] || 0} />;
         })}
-        {taskOnlyNames.map(function(name) {
+        {sortedTaskOnly.map(function(name) {
           return (
             <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13, opacity: 0.7 }}>
               <div style={{ width: 12, height: 12, borderRadius: 3, background: theme.textMuted, opacity: 0.3 }} />
               <span style={{ color: theme.text, flex: 1 }}>{name}</span>
+              <span style={{ fontSize: 11, color: theme.textMuted, minWidth: 28, textAlign: 'right' }}>{taskCounts[name] || 0}</span>
               <button onClick={function() { promoteTaskProject(name); }} title="Add as managed project"
                 style={{ border: 'none', background: 'transparent', color: theme.accent, cursor: 'pointer', fontSize: 10, fontWeight: 600 }}>+ Add</button>
               <span style={{ fontSize: 10, color: theme.textMuted }}>from tasks</span>

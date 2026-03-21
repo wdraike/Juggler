@@ -631,12 +631,12 @@ export default function DailyView({
   var allScheduled = useMemo(function () {
     return (placements || []).filter(function (p) {
       if (p.start == null) return false;
-      // Always hide done/cancelled/skipped tasks from the timeline
       var st = statuses[p.task.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'skip') return false;
+      // Only hide done/cancelled/skipped when filter is not 'all'
+      if (filter !== 'all' && (st === 'done' || st === 'cancel' || st === 'skip')) return false;
       return matchesFilter(p.task.id);
     }).sort(function (a, b) { return a.start - b.start; });
-  }, [placements, statuses, matchesFilter]);
+  }, [placements, statuses, matchesFilter, filter]);
 
   // Separate reminder events from regular tasks — reminders don't participate in column layout
   var scheduled = useMemo(function () {

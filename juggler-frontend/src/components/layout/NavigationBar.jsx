@@ -40,7 +40,6 @@ var FILTER_VISIBILITY = {
   // Project, search, and habits apply to most views
   showProjectFilter: function(v) { return v !== 'conflicts'; },
   showSearch: function(v) { return v !== 'conflicts'; },
-  showHideHabits: function(v) { return v !== 'conflicts'; },
 };
 
 function ProjectCombobox({ value, onChange, allProjectNames, theme, isMobile }) {
@@ -147,14 +146,14 @@ function ProjectCombobox({ value, onChange, allProjectNames, theme, isMobile }) 
   );
 }
 
-export default function NavigationBar({ viewMode, setViewMode, filter, setFilter, search, setSearch, darkMode, projectFilter, setProjectFilter, allProjectNames, hideHabits, setHideHabits, unplacedCount, blockedCount, pastDueCount, fixedCount, issuesCount, isMobile }) {
+export default function NavigationBar({ viewMode, setViewMode, filter, setFilter, search, setSearch, darkMode, projectFilter, setProjectFilter, allProjectNames, unplacedCount, blockedCount, pastDueCount, fixedCount, issuesCount, isMobile }) {
   var theme = getTheme(darkMode);
   var [showFilterDropdown, setShowFilterDropdown] = useState(false);
   var filterRef = useRef(null);
   var showStatus = FILTER_VISIBILITY.showStatusFilters(viewMode);
   var showProject = FILTER_VISIBILITY.showProjectFilter(viewMode);
   var showSearch = FILTER_VISIBILITY.showSearch(viewMode);
-  var showHabits = FILTER_VISIBILITY.showHideHabits(viewMode);
+
 
   // Close filter dropdown on outside click
   useEffect(function() {
@@ -202,56 +201,36 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
         ))}
       </div>
 
-      {!isMobile && (showStatus || showHabits || showProject || showSearch) && <div style={{ width: 1, height: 20, background: theme.border, flexShrink: 0 }} />}
+      {!isMobile && (showStatus || showProject || showSearch) && <div style={{ width: 1, height: 20, background: theme.border, flexShrink: 0 }} />}
 
       {/* Desktop: inline filter pills */}
-      {!isMobile && (showStatus || showHabits || showProject || showSearch) && (
+      {!isMobile && (showStatus || showProject || showSearch) && (
         <>
           {showStatus && (
-            <div style={{ display: 'flex', gap: 2 }}>
+            <select
+              value={filter}
+              onChange={e => setFilter(e.target.value)}
+              title={((FILTERS.find(f => f.id === filter) || {}).tip) || ''}
+              style={{
+                border: '1px solid ' + theme.accent, borderRadius: 2,
+                padding: '3px 8px', cursor: 'pointer',
+                background: theme.accent + '20', color: theme.accent,
+                fontSize: 11, fontFamily: "'Inter', sans-serif",
+                outline: 'none', appearance: 'auto'
+              }}
+            >
               {FILTERS.map(f => {
                 var badge = f.id === 'unplaced' && unplacedCount > 0 ? unplacedCount
                   : f.id === 'blocked' && blockedCount > 0 ? blockedCount
                   : f.id === 'pastdue' && pastDueCount > 0 ? pastDueCount
                   : f.id === 'fixed' && fixedCount > 0 ? fixedCount : null;
                 return (
-                  <button key={f.id} onClick={() => setFilter(f.id)}
-                    title={f.tip}
-                    style={{
-                      border: '1px solid ' + (filter === f.id ? theme.accent : theme.border),
-                      borderRadius: 2, padding: '3px 10px', cursor: 'pointer',
-                      background: filter === f.id ? theme.accent + '20' : 'transparent',
-                      color: filter === f.id ? theme.accent : theme.textMuted,
-                      fontSize: 11, fontFamily: "'Inter', sans-serif", position: 'relative',
-                      whiteSpace: 'nowrap'
-                    }}
-                  >
-                    {f.label}
-                    {badge != null && (
-                      <span style={{
-                        marginLeft: 3, background: theme.error, color: '#FFF', borderRadius: 8,
-                        padding: '0 5px', fontSize: 9, fontWeight: 700, verticalAlign: 'top'
-                      }}>{badge}</span>
-                    )}
-                  </button>
+                  <option key={f.id} value={f.id}>
+                    {f.label}{badge != null ? ' (' + badge + ')' : ''}
+                  </option>
                 );
               })}
-            </div>
-          )}
-
-          {showHabits && setHideHabits && (
-            <button onClick={() => setHideHabits(h => !h)}
-              title={hideHabits ? 'Show recurring habit tasks' : 'Hide recurring habit tasks from view'}
-              style={{
-                border: '1px solid ' + (hideHabits ? theme.accent : theme.border),
-                borderRadius: 2, padding: '3px 10px', cursor: 'pointer',
-                background: hideHabits ? theme.accent + '20' : 'transparent',
-                color: hideHabits ? theme.accent : theme.textMuted,
-                fontSize: 11, fontFamily: "'Inter', sans-serif", whiteSpace: 'nowrap'
-              }}
-            >
-              {hideHabits ? '\uD83D\uDD01 Show Habits' : '\uD83D\uDD01 Hide Habits'}
-            </button>
+            </select>
           )}
 
           {showProject && allProjectNames && allProjectNames.length > 0 && (
@@ -287,9 +266,9 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
       )}
 
       {/* Mobile row 2: filter dropdown + search */}
-      {isMobile && (showStatus || showHabits || showProject || showSearch) && (
+      {isMobile && (showStatus || showProject || showSearch) && (
         <div ref={filterRef} style={{ position: 'relative', flex: '1 1 100%', display: 'flex', gap: 6, alignItems: 'center' }}>
-          {(showStatus || showHabits || showProject) && (
+          {(showStatus || showProject) && (
             <button onClick={function() { setShowFilterDropdown(function(v) { return !v; }); }}
               title="Filter tasks by status"
               style={{
@@ -365,23 +344,9 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
                 );
               })}
 
-              {/* Divider — only if status filters shown above and habits/project below */}
-              {showStatus && (showHabits || showProject) && (
+              {/* Divider — only if status filters shown above and project below */}
+              {showStatus && showProject && (
                 <div style={{ height: 1, background: theme.border, margin: '4px 0' }} />
-              )}
-
-              {/* Hide habits toggle */}
-              {showHabits && setHideHabits && (
-                <button onClick={function() { setHideHabits(function(h) { return !h; }); setShowFilterDropdown(false); }}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    width: '100%', border: 'none', cursor: 'pointer',
-                    padding: '10px 14px', fontSize: 13, fontFamily: 'inherit', textAlign: 'left',
-                    background: 'transparent', color: theme.text, minHeight: 40
-                  }}>
-                  <span>{hideHabits ? '\uD83D\uDD01 Show Habits' : '\uD83D\uDD01 Hide Habits'}</span>
-                  {hideHabits && <span style={{ color: theme.accent }}>&#x2713;</span>}
-                </button>
               )}
 
               {/* Project filter */}

@@ -11,7 +11,6 @@ const bodyParser = require('body-parser');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 
-const authRoutes = require('./routes/auth.routes');
 const taskRoutes = require('./routes/task.routes');
 const configRoutes = require('./routes/config.routes');
 const projectRoutes = require('./routes/project.routes');
@@ -60,7 +59,6 @@ app.use(morgan('dev'));
 
 // Rate limiting
 const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false });
-const authLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
 const aiLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
 const mcpLimiter = rateLimit({ windowMs: 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
 
@@ -76,9 +74,26 @@ app.post('/mcp', mcpLimiter, mcpTransport.handlePost);
 app.get('/mcp', mcpTransport.handleMethodNotAllowed);
 app.delete('/mcp', mcpTransport.handleMethodNotAllowed);
 
+// Minimal auth profile endpoint (auth handled by auth-service, but frontend needs /auth/me)
+const { authenticateJWT } = require('./middleware/jwt-auth');
+const db = require('./db');
+app.get('/api/auth/me', authenticateJWT, async (req, res) => {
+  // Load full user from DB (auth-client only puts id/email/name on req.user from JWT)
+  const user = await db('users').where('id', req.user.id).first();
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      picture: user.picture_url,
+      timezone: user.timezone
+    }
+  });
+});
+
 // Routes
 app.use('/health', healthRoutes);
-app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/ai', aiLimiter, aiRoutes);
 app.use('/api/data/import', bodyParser.json({ limit: '2mb' }));
 app.use('/api', apiLimiter);

@@ -492,7 +492,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             )}
             </>}
           </div>
-          {!isCreate && onShowChain && (
+          {!isCreate && onShowChain && !task.habit && (
             <button onClick={onShowChain} style={{
               border: '1px solid #0EA5E9', borderRadius: 4, padding: '4px 10px',
               background: 'transparent', color: '#0EA5E9', fontSize: 10, fontWeight: 600,

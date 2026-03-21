@@ -333,6 +333,10 @@ async function createTask(req, res) {
     if (timeWasSet && row.when === undefined) {
       row.when = 'fixed';
     }
+    // Habits cannot have dependencies — clear if provided
+    if (row.habit || row.task_type === 'habit_template' || row.task_type === 'habit_instance') {
+      delete row.depends_on;
+    }
     await applySplitDefault(row, req.user.id);
     await ensureProject(req.user.id, req.body.project);
     await db('tasks').insert(row);
@@ -360,6 +364,11 @@ async function updateTask(req, res) {
     delete row.id;
     delete row.user_id;
     delete row.created_at;
+
+    // Habits cannot have dependencies — strip if provided
+    if (existing.habit || existing.task_type === 'habit_template' || existing.task_type === 'habit_instance') {
+      delete row.depends_on;
+    }
 
     // Time-only update: combine new time with existing date
     if (row._pendingTimeOnly && existing.scheduled_at) {
@@ -667,6 +676,12 @@ async function batchUpdateTasks(req, res) {
               }
             }
             delete row._pendingTimeOnly;
+
+            // Habits cannot have dependencies — strip if provided
+            if (existing && (existing.task_type === 'habit_template' || existing.task_type === 'habit_instance')) {
+              delete row.depends_on;
+            }
+
             var taskType = existing ? (existing.task_type || 'task') : 'task';
 
             if (taskType === 'habit_instance' && existing && existing.source_id) {

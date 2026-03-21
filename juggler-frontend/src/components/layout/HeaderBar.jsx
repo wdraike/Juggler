@@ -107,7 +107,9 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
             <button onClick={function() { setDayOffset(function(d) { return d + 1; }); }} style={weekNavBtn(theme)} title="Next day">&rsaquo;</button>
             <button onClick={function() { setDayOffset(function(d) { return d + 7; }); }} style={weekNavBtn(theme)} title="Next week">&raquo;</button>
             <input type="date" value={dateInputValue} onChange={function(e) {
-              var d2 = new Date(e.target.value + 'T12:00:00');
+              var parts = e.target.value.split('-');
+              var d2 = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+              d2.setHours(0, 0, 0, 0);
               if (!isNaN(d2)) setDayOffset(Math.round((d2 - today) / 86400000));
             }} style={{
               padding: '2px 3px', borderRadius: 2, fontSize: 10,

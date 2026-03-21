@@ -25,7 +25,7 @@ async function authenticateRequest(req) {
   }
 
   const token = authHeader.substring(7);
-  const decoded = verifyToken(token);
+  const decoded = await verifyToken(token);
 
   if (decoded.type !== 'access') {
     const err = new Error('Invalid token type');
@@ -33,7 +33,9 @@ async function authenticateRequest(req) {
     throw err;
   }
 
-  const user = await db('users').where('id', decoded.userId).first();
+  // auth-service JWTs use 'sub' for user ID
+  const userId = decoded.sub || decoded.userId;
+  const user = await db('users').where('id', userId).first();
   if (!user) {
     const err = new Error('User not found');
     err.status = 401;

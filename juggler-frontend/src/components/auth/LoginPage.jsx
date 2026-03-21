@@ -3,7 +3,6 @@
  */
 
 import React from 'react';
-import { GoogleLogin } from '@react-oauth/google';
 import { useAuth } from './AuthProvider';
 
 var FEATURES = [
@@ -45,16 +44,9 @@ export default function LoginPage() {
   var { login } = useAuth();
   var [loginError, setLoginError] = React.useState(null);
 
-  function handleLogin(credentialResponse) {
+  function handleLogin() {
     setLoginError(null);
-    login(credentialResponse.credential).catch(function(err) {
-      console.error('Login failed:', err);
-      setLoginError(err?.response?.data?.message || err.message || 'Login failed');
-    });
-  }
-
-  function handleLoginError() {
-    setLoginError('Google sign-in failed. Check your connection.');
+    login(); // Redirects to auth-service
   }
 
   return (
@@ -90,14 +82,12 @@ export default function LoginPage() {
         padding: '16px 20px',
         display: 'flex', alignItems: 'center', gap: 12,
       }}>
-        <GoogleLogin
-          onSuccess={handleLogin}
-          onError={handleLoginError}
-          theme="outline"
-          size="medium"
-          text="signin"
-          shape="rectangular"
-        />
+        <button onClick={handleLogin} style={{
+          background: '#C8942A', border: '1.5px solid #C8942A', borderRadius: 2,
+          padding: '8px 20px', fontSize: 13, color: '#1A2B4A', fontWeight: 700,
+          letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer',
+          fontFamily: "'Inter', sans-serif"
+        }}>Sign In</button>
       </div>
 
       {/* Content */}
@@ -558,14 +548,17 @@ export default function LoginPage() {
             Free to use. Sign in with Google and put your StriveRS to work.
           </p>
           <div style={{ display: 'inline-block' }}>
-            <GoogleLogin
-              onSuccess={handleLogin}
-              onError={handleLoginError}
-              theme="filled_blue"
-              size="large"
-              text="signin_with"
-              shape="rectangular"
-            />
+            <button onClick={handleLogin} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              background: '#C8942A', borderRadius: 2, padding: '12px 28px',
+              fontSize: 14, color: '#1A2B4A', fontWeight: 700,
+              letterSpacing: '0.08em', textTransform: 'uppercase',
+              fontFamily: "'Inter', sans-serif",
+              border: '1.5px solid #C8942A', cursor: 'pointer'
+            }}>
+              <span>Sign In</span>
+              <span style={{ fontSize: 16 }}>&#x2197;</span>
+            </button>
           </div>
           {loginError && (
             <div style={{

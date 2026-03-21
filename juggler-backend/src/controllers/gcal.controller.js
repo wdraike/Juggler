@@ -7,7 +7,7 @@
  */
 
 var crypto = require('crypto');
-var jwt = require('jsonwebtoken');
+var { SignJWT, jwtVerify } = require('jose');
 var db = require('../db');
 var gcalApi = require('../lib/gcal-api');
 var { runScheduleAndPersist } = require('../scheduler/runSchedule');
@@ -38,9 +38,12 @@ function eventHash(event) {
 // --- Token management ---
 
 function getJwtSecret() {
-  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
-  if (process.env.NODE_ENV === 'production') throw new Error('JWT_SECRET required in production');
-  return 'local-dev-jwt-secret-juggler';
+  var secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') throw new Error('JWT_SECRET required in production');
+    secret = 'local-dev-jwt-secret-juggler';
+  }
+  return new TextEncoder().encode(secret);
 }
 
 async function getValidAccessToken(user) {
@@ -187,7 +190,10 @@ async function getStatus(req, res) {
 async function connect(req, res) {
   try {
     var oauth2Client = gcalApi.createOAuth2Client();
-    var state = jwt.sign({ userId: req.user.id }, getJwtSecret(), { expiresIn: '10m' });
+    var state = await new SignJWT({ userId: req.user.id })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setExpirationTime('10m')
+      .sign(getJwtSecret());
     var authUrl = gcalApi.getAuthUrl(oauth2Client, state);
     res.json({ authUrl: authUrl });
   } catch (error) {
@@ -207,7 +213,8 @@ async function callback(req, res) {
 
     var decoded;
     try {
-      decoded = jwt.verify(state, getJwtSecret());
+      var result = await jwtVerify(state, getJwtSecret());
+      decoded = result.payload;
     } catch (e) {
       return res.status(400).send('Invalid or expired state parameter');
     }

@@ -2,9 +2,10 @@
  * Integration tests for critical API routes
  */
 
-const jwt = require('jsonwebtoken');
+const { SignJWT } = require('jose');
 
 const TEST_SECRET = 'test-jwt-secret';
+const TEST_SECRET_KEY = new TextEncoder().encode(TEST_SECRET);
 process.env.JWT_SECRET = TEST_SECRET;
 process.env.NODE_ENV = 'test';
 
@@ -50,12 +51,13 @@ beforeAll(async () => {
 
 const TEST_USER = { id: 'user-123', email: 'test@test.com', name: 'Test', timezone: 'America/New_York' };
 
-function makeToken() {
-  return jwt.sign(
-    { userId: TEST_USER.id, email: TEST_USER.email, type: 'access', jti: 'jti' },
-    TEST_SECRET,
-    { expiresIn: '1h', issuer: 'juggler', subject: TEST_USER.id }
-  );
+async function makeToken() {
+  return new SignJWT({ userId: TEST_USER.id, email: TEST_USER.email, type: 'access', jti: 'jti' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setExpirationTime('1h')
+    .setIssuer('juggler')
+    .setSubject(TEST_USER.id)
+    .sign(TEST_SECRET_KEY);
 }
 
 beforeEach(() => {
@@ -86,7 +88,7 @@ describe('API routes', () => {
 
     const res = await request(app)
       .get('/api/tasks')
-      .set('Authorization', `Bearer ${makeToken()}`);
+      .set('Authorization', `Bearer ${await makeToken()}`);
 
     expect(res.status).toBe(200);
     expect(res.body.tasks).toEqual([]);
@@ -99,7 +101,7 @@ describe('API routes', () => {
 
     const res = await request(app)
       .post('/api/tasks')
-      .set('Authorization', `Bearer ${makeToken()}`)
+      .set('Authorization', `Bearer ${await makeToken()}`)
       .send({ id: 't01', text: 'New', date: '3/15' });
 
     expect(res.status).toBe(201);
@@ -110,7 +112,7 @@ describe('API routes', () => {
     resolveQueue = [TEST_USER];
     const res = await request(app)
       .post('/api/tasks/batch')
-      .set('Authorization', `Bearer ${makeToken()}`)
+      .set('Authorization', `Bearer ${await makeToken()}`)
       .send({ tasks: [] });
     expect(res.status).toBe(400);
   });
@@ -120,7 +122,7 @@ describe('API routes', () => {
     const tasks = Array.from({ length: 501 }, (_, i) => ({ id: `t${i}`, text: `T${i}` }));
     const res = await request(app)
       .post('/api/tasks/batch')
-      .set('Authorization', `Bearer ${makeToken()}`)
+      .set('Authorization', `Bearer ${await makeToken()}`)
       .send({ tasks });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('500');
@@ -131,7 +133,7 @@ describe('API routes', () => {
     const updates = Array.from({ length: 501 }, (_, i) => ({ id: `t${i}`, status: 'done' }));
     const res = await request(app)
       .put('/api/tasks/batch')
-      .set('Authorization', `Bearer ${makeToken()}`)
+      .set('Authorization', `Bearer ${await makeToken()}`)
       .send({ updates });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain('500');
@@ -141,7 +143,7 @@ describe('API routes', () => {
     resolveQueue = [TEST_USER, null]; // auth → user, task lookup → null
     const res = await request(app)
       .delete('/api/tasks/missing')
-      .set('Authorization', `Bearer ${makeToken()}`);
+      .set('Authorization', `Bearer ${await makeToken()}`);
     expect(res.status).toBe(404);
   });
 

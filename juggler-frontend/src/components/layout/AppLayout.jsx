@@ -64,10 +64,16 @@ export default function AppLayout() {
     var saved = localStorage.getItem('juggler-darkMode');
     return saved !== null ? saved === 'true' : true;
   });
-  var [viewMode, setViewMode] = useState(_savedUI.viewMode || 'daily');
+  var [viewMode, setViewModeRaw] = useState(_savedUI.viewMode || 'daily');
   var [filter, setFilter] = useState(_savedUI.filter || 'open');
   var [search, setSearch] = useState(_savedUI.search || '');
   var [projectFilter, setProjectFilter] = useState(_savedUI.projectFilter || '');
+  var setViewMode = useCallback(function(v) {
+    setViewModeRaw(function(prev) {
+      if (prev === 'deps' && v !== 'deps') setProjectFilter('');
+      return v;
+    });
+  }, []);
   var [dayOffset, setDayOffset] = useState(function () {
     // Restore saved date as offset from today
     if (_savedUI.selectedDate) {
@@ -86,7 +92,7 @@ export default function AppLayout() {
   var [showMsftCalSync, setShowMsftCalSync] = useState(false);
   var [showCalSync, setShowCalSync] = useState(false);
   var [showToastHistory, setShowToastHistory] = useState(false);
-  var [hideHabits, setHideHabits] = useState(_savedUI.hideHabits || false);
+
   var [showHelp, setShowHelp] = useState(false);
   var [showCreateForm, setShowCreateForm] = useState(false);
   var [gcalAutoSync, setGcalAutoSync] = useState(false);
@@ -205,11 +211,10 @@ export default function AppLayout() {
         filter: filter,
         search: search,
         projectFilter: projectFilter,
-        selectedDate: selectedDateKey,
-        hideHabits: hideHabits
+        selectedDate: selectedDateKey
       }));
     } catch (e) { /* quota exceeded — ignore */ }
-  }, [viewMode, filter, search, projectFilter, selectedDateKey, hideHabits]);
+  }, [viewMode, filter, search, projectFilter, selectedDateKey]);
 
   var weekStripDates = useMemo(() => {
     var start = getWeekStart(selectedDate);
@@ -237,9 +242,9 @@ export default function AppLayout() {
   var unplaced = placements.unplaced;
   var schedulerWarnings = placements.warnings || [];
 
-  // Filtered placements for grid views (hideHabits, projectFilter, search)
+  // Filtered placements for grid views (projectFilter, search)
   var filteredDayPlacements = useMemo(function() {
-    if (!hideHabits && !projectFilter && !search) return dayPlacements;
+    if (!projectFilter && !search) return dayPlacements;
     var searchLower = search ? search.toLowerCase() : '';
     var result = {};
     var keys = Object.keys(dayPlacements);
@@ -247,7 +252,6 @@ export default function AppLayout() {
       var arr = dayPlacements[keys[i]];
       var filtered = arr.filter(function(p) {
         if (!p.task) return true;
-        if (hideHabits && p.task.habit) return false;
         if (projectFilter && (p.task.project || '') !== projectFilter) return false;
         if (searchLower) {
           var text = ((p.task.text || '') + ' ' + (p.task.project || '') + ' ' + (p.task.notes || '')).toLowerCase();
@@ -258,7 +262,7 @@ export default function AppLayout() {
       result[keys[i]] = filtered;
     }
     return result;
-  }, [dayPlacements, hideHabits, projectFilter, search]);
+  }, [dayPlacements, projectFilter, search]);
 
   // Blocked tasks: tasks whose dependencies are not all done AND whose
   // date is today or in the past (future tasks with pending deps are expected)
@@ -685,7 +689,7 @@ export default function AppLayout() {
           darkMode={darkMode}
           projectFilter={projectFilter} setProjectFilter={setProjectFilter}
           allProjectNames={allProjectNames}
-          hideHabits={hideHabits} setHideHabits={setHideHabits}
+
           unplacedCount={unplacedCount} blockedCount={blockedCount} pastDueCount={pastDueCount} fixedCount={fixedCount}
           issuesCount={issuesCount}
           isMobile={isMobile}
@@ -812,7 +816,7 @@ export default function AppLayout() {
               filter={filter} search={search} projectFilter={projectFilter}
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               onCreate={handleCreate} darkMode={darkMode} schedCfg={schedCfg}
-              hideHabits={hideHabits} blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
+              blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
               isMobile={isMobile}
             />
           )}
@@ -822,7 +826,7 @@ export default function AppLayout() {
               filter={filter} search={search} projectFilter={projectFilter}
               onStatusChange={handleStatusChange} onExpand={handleExpand} darkMode={darkMode}
               onPriorityDrop={handlePriorityDrop}
-              hideHabits={hideHabits} blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
+              blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
               isMobile={isMobile}
             />
           )}
@@ -830,7 +834,7 @@ export default function AppLayout() {
             <DependencyView
               allTasks={allTasks} statuses={statuses}
               projectFilter={projectFilter} filter={filter}
-              search={search} hideHabits={hideHabits}
+              search={search}
               pastDueIds={pastDueIds} fixedIds={fixedIds}
               onUpdate={handleUpdateTask} onExpand={handleExpand}
               darkMode={darkMode} isMobile={isMobile}
@@ -938,7 +942,7 @@ export default function AppLayout() {
 
       {/* Settings panel */}
       {showSettings && (
-        <SettingsPanel onClose={() => setShowSettings(false)} darkMode={darkMode} config={config} allProjectNames={allProjectNames} isMobile={isMobile}
+        <SettingsPanel onClose={() => setShowSettings(false)} darkMode={darkMode} config={config} allProjectNames={allProjectNames} allTasks={allTasks} isMobile={isMobile}
           onRenameProject={function(oldName, newName) { loadTasks(); }} />
       )}
 

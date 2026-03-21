@@ -9,14 +9,14 @@ require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
 const knexConfig = require('../knexfile');
 const knex = require('knex')(knexConfig.development);
-const jwt = require('jsonwebtoken');
+const { SignJWT } = require('jose');
 const crypto = require('crypto');
 
 const TEST_USER_ID = 'test-user-00000000-0000-0000-0000';
 const TEST_EMAIL = 'test@juggler.local';
 const TEST_NAME = 'Test User';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'local-dev-jwt-secret-juggler';
+const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'local-dev-jwt-secret-juggler');
 
 async function main() {
   try {
@@ -44,21 +44,18 @@ async function main() {
 
     // Generate 30-day access token (same shape as authenticateJWT expects)
     const jti = crypto.randomBytes(16).toString('hex');
-    const token = jwt.sign(
-      {
+    const token = await new SignJWT({
         userId: TEST_USER_ID,
         email: TEST_EMAIL,
         name: TEST_NAME,
         type: 'access',
         jti
-      },
-      JWT_SECRET,
-      {
-        expiresIn: '30d',
-        issuer: 'juggler',
-        subject: TEST_USER_ID
-      }
-    );
+      })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setExpirationTime('30d')
+      .setIssuer('juggler')
+      .setSubject(TEST_USER_ID)
+      .sign(JWT_SECRET);
 
     // Print token to stdout (info to stderr so piping works)
     console.error('Token expires in 30 days');

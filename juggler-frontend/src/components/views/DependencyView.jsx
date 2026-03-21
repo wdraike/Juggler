@@ -67,13 +67,13 @@ function hitTestNode(x, y, positions) {
 
 /** Compact node with hover/focus popup for details */
 function DepNode({ ct, pos, st, icon, isDone, isClosed, dateLabel, isExternal, isMatched, isDimmed,
-  isHoverTarget, isCycleDrop, isArrowSource, priColor, theme, darkMode, filter, search, hideHabits,
+  isHoverTarget, isCycleDrop, isArrowSource, priColor, theme, darkMode, filter, search,
   arrowDrag, chainDeps, chainOrder, chainAddDepFor, allTasks, statuses,
   onExpand, setChainAddDepFor, chainAddDep, chainRemoveDep, handleConnectorMouseDown }) {
 
   var [hovered, setHovered] = useState(false);
   var leaveTimer = useRef(null);
-  var hasFilters = filter !== 'all' || search || hideHabits;
+  var hasFilters = filter !== 'all' || search;
   var showPopup = hovered || chainAddDepFor === ct.id;
 
   function onEnter() {
@@ -252,7 +252,7 @@ function DepNode({ ct, pos, st, icon, isDone, isClosed, dateLabel, isExternal, i
   );
 }
 
-export default function DependencyView({ allTasks, statuses, projectFilter, filter, search, hideHabits, pastDueIds, fixedIds, onUpdate, onExpand, darkMode, isMobile }) {
+export default function DependencyView({ allTasks, statuses, projectFilter, filter, search, pastDueIds, fixedIds, onUpdate, onExpand, darkMode, isMobile }) {
   var theme = getTheme(darkMode);
   var bodyRef = useRef(null);
   var graphRef = useRef(null);
@@ -325,10 +325,9 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
       candidateTasks = allTasks.filter(function(t) { return hasDeps[t.id]; });
     }
 
-    // Step 2: Apply filters (status, search, hideHabits) to find matching tasks
+    // Step 2: Apply filters (status, search) to find matching tasks
     var matchingIds = {};
     candidateTasks.forEach(function(t) {
-      if (hideHabits && t.habit) return;
       if (!matchesStatus(t)) return;
       if (!matchesSearch(t)) return;
       matchingIds[t.id] = true;
@@ -363,7 +362,7 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
     });
 
     return { tasks: topoSortTasks(visibleTasks), matchingIds: matchingIds };
-  }, [allTasks, statuses, projectFilter, filter, search, hideHabits]);
+  }, [allTasks, statuses, projectFilter, filter, search]);
 
   // Chain order and deps state
   var [chainOrder, setChainOrder] = useState(null);
@@ -420,6 +419,9 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
 
   var chainAddDep = useCallback(function(taskId, depId) {
     if (taskId === depId) return;
+    // Habits cannot have dependencies
+    var targetTask = allTasks.find(function(t) { return t.id === taskId; });
+    if (targetTask && targetTask.habit) return;
     if (wouldCycle(chainDeps, taskId, depId)) return;
     var newDeps;
     setChainDeps(function(prev) {
@@ -738,7 +740,7 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
             var dateLabel = ct.date && ct.date !== 'TBD' ? ct.date : null;
             var isExternal = projectFilter && ct.project !== projectFilter;
             var isMatched = graphData.matchingIds[ct.id];
-            var isDimmed = (filter !== 'all' || search || hideHabits) && !isMatched;
+            var isDimmed = (filter !== 'all' || search) && !isMatched;
             var isHoverTarget = arrowHoverId === ct.id;
             var isCycleDrop = isHoverTarget && arrowDrag && wouldCycle(chainDeps, ct.id, arrowDrag.fromId);
             var isArrowSource = arrowDrag && arrowDrag.fromId === ct.id;
@@ -750,7 +752,7 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
                 dateLabel={dateLabel} isExternal={isExternal} isMatched={isMatched} isDimmed={isDimmed}
                 isHoverTarget={isHoverTarget} isCycleDrop={isCycleDrop} isArrowSource={isArrowSource}
                 priColor={priColor} theme={theme} darkMode={darkMode} filter={filter} search={search}
-                hideHabits={hideHabits} arrowDrag={arrowDrag}
+                arrowDrag={arrowDrag}
                 chainDeps={chainDeps} chainOrder={chainOrder} chainAddDepFor={chainAddDepFor}
                 allTasks={allTasks} statuses={statuses}
                 onExpand={onExpand} setChainAddDepFor={setChainAddDepFor}

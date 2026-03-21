@@ -4,7 +4,7 @@
  * Field-level dirty tracking: only sends changed fields per task to the server,
  * preventing overwrites of concurrent changes from MCP, GCal sync, etc.
  *
- * Change polling: polls GET /tasks/version every 10s to detect external changes
+ * Change polling: polls GET /tasks/version every 5s to detect external changes
  * (MCP, GCal, another tab) and reloads when needed.
  */
 
@@ -165,10 +165,11 @@ export default function useTaskState() {
     }).then(() => {
       // Clear dirty flag once server confirms the save
       dispatch({ type: 'CLEAR_DIRTY_STATUS', id });
+      loadPlacements();  // Refresh schedule immediately — freed/occupied slots
     }).catch(err => console.error('Failed to save status:', err));
     // If there are also taskFields (e.g. date changes on habit completion), save those too
     if (opts.taskFields) scheduleSave();
-  }, [scheduleSave]);
+  }, [scheduleSave, loadPlacements]);
 
   const updateTask = useCallback(async (id, fields) => {
     dispatch({ type: 'UPDATE_TASK', id, fields });
@@ -240,28 +241,26 @@ export default function useTaskState() {
         var res = await apiClient.get('/tasks/version');
         var serverVersion = res.data.version;
         if (lastVersionRef.current !== null && serverVersion !== lastVersionRef.current) {
-          // External change detected — reload if no dirty edits pending
-          var state = taskStateRef.current;
-          var hasDirty = Object.keys(state._dirtyTaskIds || {}).length > 0;
-          if (!hasDirty) {
-            lastVersionRef.current = serverVersion;
-            var [tasksRes] = await Promise.all([
-              apiClient.get('/tasks')
-            ]);
-            var tasks = tasksRes.data.tasks || [];
-            var statuses = {};
-            tasks.forEach(function(t) {
-              if (t.status) statuses[t.id] = t.status;
-            });
-            dispatch({ type: 'INIT', tasks, statuses });
-            loadPlacements();
-          }
+          lastVersionRef.current = serverVersion;
+          // External change detected — reload tasks (INIT preserves dirty local fields)
+          var [tasksRes] = await Promise.all([
+            apiClient.get('/tasks')
+          ]);
+          var tasks = tasksRes.data.tasks || [];
+          var statuses = {};
+          tasks.forEach(function(t) {
+            if (t.status) statuses[t.id] = t.status;
+          });
+          dispatch({ type: 'INIT', tasks, statuses });
         }
         lastVersionRef.current = serverVersion;
+        // Always refresh placements — catches scheduler cache updates
+        // that don't change the task version
+        loadPlacements();
       } catch (e) {
         // Silently ignore — network errors, etc.
       }
-    }, 10000);
+    }, 5000);
 
     return function() { clearInterval(intervalId); };
   }, [loadPlacements]);

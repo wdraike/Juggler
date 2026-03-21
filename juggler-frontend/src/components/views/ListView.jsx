@@ -10,13 +10,12 @@ import { DAY_NAMES, MONTH_NAMES } from '../../state/constants';
 import { parseDate, formatDateKey } from '../../scheduler/dateHelpers';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
-export default function ListView({ allTasks, statuses, filter, search, projectFilter, onStatusChange, onExpand, onCreate, darkMode, schedCfg, hideHabits, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile }) {
+export default function ListView({ allTasks, statuses, filter, search, projectFilter, onStatusChange, onExpand, onCreate, darkMode, schedCfg, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile }) {
   var theme = getTheme(darkMode);
   var todayKey = formatDateKey(new Date());
 
   var filteredTasks = useMemo(() => {
     return allTasks.filter(t => {
-      if (hideHabits && t.habit) return false;
       var st = statuses[t.id] || '';
       if (filter === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip';
       if (filter === 'action') return st === '' || st === 'wip';
@@ -33,7 +32,7 @@ export default function ListView({ allTasks, statuses, filter, search, projectFi
       var s = search.toLowerCase();
       return (t.text || '').toLowerCase().includes(s) || (t.project || '').toLowerCase().includes(s);
     });
-  }, [allTasks, statuses, filter, search, projectFilter, hideHabits, blockedTaskIds, unplacedIds, pastDueIds, fixedIds]);
+  }, [allTasks, statuses, filter, search, projectFilter, blockedTaskIds, unplacedIds, pastDueIds, fixedIds]);
 
   var grouped = useMemo(() => {
     var map = {};

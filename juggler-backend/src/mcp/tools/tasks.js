@@ -181,6 +181,11 @@ function registerTaskTools(server, userId) {
         row.original_scheduled_at = null;
       }
 
+      // Habits cannot have dependencies — strip if provided
+      if (existing.task_type === 'habit_template' || existing.task_type === 'habit_instance') {
+        delete row.depends_on;
+      }
+
       // Route template fields to source for habit instances
       var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
         'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',

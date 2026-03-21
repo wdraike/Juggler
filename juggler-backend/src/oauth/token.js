@@ -1,19 +1,16 @@
 /**
- * OAuth Token Endpoint
- * POST /oauth/token
+ * OAuth Token Endpoint for MCP
  *
- * Supports:
- * - grant_type=authorization_code (with PKCE)
- * - grant_type=refresh_token
+ * Proxies token requests to auth-service, which issues RS256 JWTs.
+ * The MCP client (Claude/Cursor) exchanges auth codes here,
+ * and we forward to auth-service for actual token issuance.
  */
 
 const crypto = require('crypto');
 const db = require('../db');
-const { generateAccessToken, generateRefreshToken, verifyToken } = require('../middleware/jwt-auth');
 
-/**
- * Verify PKCE code_verifier against stored code_challenge (S256)
- */
+const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:5010';
+
 function verifyPKCE(codeVerifier, codeChallenge) {
   const hash = crypto
     .createHash('sha256')
@@ -46,7 +43,6 @@ async function handleAuthorizationCode(req, res) {
     return res.status(400).json({ error: 'invalid_request', error_description: 'code is required' });
   }
 
-  // Look up the auth code
   const authCode = await db('oauth_auth_codes')
     .where('code', code)
     .where('used', false)
@@ -60,12 +56,10 @@ async function handleAuthorizationCode(req, res) {
     return res.status(400).json({ error: 'invalid_grant', error_description: 'Authorization code expired' });
   }
 
-  // Verify redirect_uri matches
   if (redirect_uri && authCode.redirect_uri !== redirect_uri) {
     return res.status(400).json({ error: 'invalid_grant', error_description: 'redirect_uri mismatch' });
   }
 
-  // Verify PKCE if code_challenge was stored
   if (authCode.code_challenge) {
     if (!code_verifier) {
       return res.status(400).json({ error: 'invalid_request', error_description: 'code_verifier required' });
@@ -75,25 +69,31 @@ async function handleAuthorizationCode(req, res) {
     }
   }
 
-  // Mark code as used
   await db('oauth_auth_codes').where('code', code).update({ used: true });
 
-  // Load user
-  const user = await db('users').where('id', authCode.user_id).first();
-  if (!user) {
-    return res.status(400).json({ error: 'invalid_grant', error_description: 'User not found' });
+  // Exchange code for tokens via auth-service
+  try {
+    const response = await fetch(`${AUTH_SERVICE_URL}/api/auth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, app: 'juggler' })
+    });
+
+    if (!response.ok) {
+      return res.status(400).json({ error: 'invalid_grant', error_description: 'Token exchange failed' });
+    }
+
+    const data = await response.json();
+    res.json({
+      access_token: data.access_token,
+      token_type: 'Bearer',
+      expires_in: data.expires_in || 3600,
+      refresh_token: data.refresh_token
+    });
+  } catch (fetchError) {
+    console.error('Auth-service token exchange failed:', fetchError);
+    return res.status(500).json({ error: 'server_error', error_description: 'Auth service unavailable' });
   }
-
-  // Issue tokens
-  const accessToken = generateAccessToken(user);
-  const refreshToken = generateRefreshToken(user);
-
-  res.json({
-    access_token: accessToken,
-    token_type: 'Bearer',
-    expires_in: 604800, // 7 days in seconds
-    refresh_token: refreshToken
-  });
 }
 
 async function handleRefreshToken(req, res) {
@@ -103,31 +103,29 @@ async function handleRefreshToken(req, res) {
     return res.status(400).json({ error: 'invalid_request', error_description: 'refresh_token is required' });
   }
 
-  let decoded;
+  // Proxy refresh to auth-service
   try {
-    decoded = verifyToken(refresh_token);
-  } catch (e) {
-    return res.status(400).json({ error: 'invalid_grant', error_description: 'Invalid refresh token' });
+    const response = await fetch(`${AUTH_SERVICE_URL}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: refresh_token })
+    });
+
+    if (!response.ok) {
+      return res.status(400).json({ error: 'invalid_grant', error_description: 'Invalid refresh token' });
+    }
+
+    const data = await response.json();
+    res.json({
+      access_token: data.tokens.accessToken,
+      token_type: 'Bearer',
+      expires_in: 3600,
+      refresh_token: data.tokens.refreshToken
+    });
+  } catch (fetchError) {
+    console.error('Auth-service refresh failed:', fetchError);
+    return res.status(500).json({ error: 'server_error', error_description: 'Auth service unavailable' });
   }
-
-  if (decoded.type !== 'refresh') {
-    return res.status(400).json({ error: 'invalid_grant', error_description: 'Not a refresh token' });
-  }
-
-  const user = await db('users').where('id', decoded.userId).first();
-  if (!user) {
-    return res.status(400).json({ error: 'invalid_grant', error_description: 'User not found' });
-  }
-
-  const accessToken = generateAccessToken(user);
-  const newRefreshToken = generateRefreshToken(user);
-
-  res.json({
-    access_token: accessToken,
-    token_type: 'Bearer',
-    expires_in: 604800,
-    refresh_token: newRefreshToken
-  });
 }
 
 module.exports = { tokenEndpoint };

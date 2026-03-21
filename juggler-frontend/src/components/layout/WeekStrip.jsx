@@ -19,7 +19,9 @@ export default function WeekStrip({ weekStripDates, selectedDate, dayOffset, set
     String(selectedDate.getDate()).padStart(2, '0');
 
   var handleDatePick = function(e) {
-    var d = new Date(e.target.value + 'T12:00:00');
+    var parts = e.target.value.split('-');
+    var d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    d.setHours(0, 0, 0, 0);
     if (!isNaN(d)) setDayOffset(Math.round((d - today) / 86400000));
   };
 

@@ -1,11 +1,12 @@
 /**
- * API Client — Axios instance with JWT bearer token + auto-refresh
+ * API Client — Axios instance with JWT bearer token + auto-refresh via auth-service
  * Access token persisted in localStorage for session survival across page reloads.
  */
 
 import axios from 'axios';
 
 const API_BASE = process.env.REACT_APP_API_URL || '/api';
+const AUTH_SERVICE_URL = process.env.REACT_APP_AUTH_SERVICE_URL || 'http://localhost:5010';
 const TOKEN_KEY = 'juggler-access-token';
 
 const apiClient = axios.create({
@@ -42,12 +43,12 @@ apiClient.interceptors.request.use(config => {
   return config;
 });
 
-// Response interceptor — auto-refresh on any 401 (except the refresh endpoint itself)
+// Response interceptor — auto-refresh on any 401 via auth-service
 apiClient.interceptors.response.use(
   response => response,
   async error => {
     const originalRequest = error.config;
-    const isRefreshRequest = originalRequest.url?.includes('/auth/refresh');
+    const isRefreshRequest = originalRequest._isRefreshAttempt;
 
     if (error.response?.status === 401 &&
         !originalRequest._retry &&
@@ -57,18 +58,28 @@ apiClient.interceptors.response.use(
       try {
         // Deduplicate refresh requests
         if (!refreshPromise) {
-          refreshPromise = axios.post(API_BASE + '/auth/refresh', {}, { withCredentials: true });
+          const refreshToken = localStorage.getItem('juggler-refresh-token');
+          if (!refreshToken) throw new Error('No refresh token');
+
+          refreshPromise = axios.post(`${AUTH_SERVICE_URL}/api/auth/refresh`, {
+            refreshToken
+          });
         }
 
         const { data } = await refreshPromise;
         refreshPromise = null;
 
-        setAccessToken(data.accessToken);
-        originalRequest.headers.Authorization = `Bearer ${data.accessToken}`;
+        setAccessToken(data.tokens.accessToken);
+        if (data.tokens.refreshToken) {
+          localStorage.setItem('juggler-refresh-token', data.tokens.refreshToken);
+        }
+
+        originalRequest.headers.Authorization = `Bearer ${data.tokens.accessToken}`;
         return apiClient(originalRequest);
       } catch (refreshError) {
         refreshPromise = null;
         clearAccessToken();
+        localStorage.removeItem('juggler-refresh-token');
         window.dispatchEvent(new Event('auth:logout'));
         return Promise.reject(refreshError);
       }
