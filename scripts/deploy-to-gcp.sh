@@ -178,13 +178,13 @@ deploy_backend() {
         --region $REGION \
         --allow-unauthenticated \
         --set-cloudsql-instances $CLOUD_SQL_CONNECTION \
-        --set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$CLOUD_SQL_CONNECTION,DB_NAME=$DATABASE_NAME,DB_USER=root,DB_PASSWORD=" \
+        --set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$CLOUD_SQL_CONNECTION,DB_NAME=$DATABASE_NAME,DB_USER=root,DB_PASSWORD=,AUTH_JWKS_URL=$(gcloud run services describe auth-backend --region $REGION --format 'value(status.url)' 2>/dev/null || echo 'https://auth-backend')/.well-known/jwks.json" \
         --set-secrets="JWT_SECRET=juggler-jwt-secret:latest,GOOGLE_CLIENT_ID=juggler-google-client-id:latest,GOOGLE_CLIENT_SECRET=juggler-google-client-secret:latest,GEMINI_API_KEY=juggler-gemini-api-key:latest,MICROSOFT_CLIENT_ID=juggler-microsoft-client-id:latest,MICROSOFT_CLIENT_SECRET=juggler-microsoft-client-secret:latest" \
         --memory 512Mi \
         --cpu 1 \
         --timeout 300 \
-        --max-instances 5 \
-        --min-instances 1 || {
+        --max-instances 3 \
+        --min-instances 0 || {
         print_error "Backend deployment failed!"
         exit 1
     }
@@ -232,7 +232,7 @@ deploy_frontend() {
         --set-env-vars="NODE_ENV=production,BACKEND_URL=$BACKEND_URL" \
         --memory 256Mi \
         --timeout 60 \
-        --max-instances 5 \
+        --max-instances 2 \
         --min-instances 0 || {
         print_error "Frontend deployment failed!"
         exit 1
