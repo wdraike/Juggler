@@ -4,10 +4,19 @@
 
 var DAY_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
-function inferYear(month) {
+function inferYear(month, timezone) {
   var now = new Date();
-  var currentMonth = now.getMonth() + 1;
-  var year = now.getFullYear();
+  var currentMonth, year;
+  if (timezone) {
+    var parts = {};
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone, month: 'numeric', year: 'numeric' })
+      .formatToParts(now).forEach(function(p) { parts[p.type] = parseInt(p.value, 10); });
+    currentMonth = parts.month;
+    year = parts.year;
+  } else {
+    currentMonth = now.getMonth() + 1;
+    year = now.getFullYear();
+  }
   if (month < currentMonth - 6) return year + 1;
   return year;
 }

@@ -1,39 +1,77 @@
 /**
  * Feature Catalog Controller
  *
- * Exposes Juggler's configurable features in a pricing-agnostic format.
+ * Exposes StriveRS's configurable features in a pricing-agnostic format.
  * The payment service fetches this to know what can be configured
  * when building pricing tiers.
  *
  * ONLY features with actual implementation are listed here.
- * Removed: limits.active_tasks, limits.ai_commands_per_month, limits.projects,
- *          limits.locations, limits.tools (no enforcement code),
- *          scheduling.task_splitting (schema field exists but no logic),
- *          support.priority (label only, no enforcement)
+ * value_order: higher = more prominent in plan cards (100+ headline, 50-99 important, 1-49 secondary)
  */
 
 const CATALOG = {
   product_slug: 'juggler',
-  catalog_version: '2026-03-22T00:00:00Z',
+  product_name: 'StriveRS',
+  catalog_version: '2026-03-22T18:00:00Z',
   groups: [
     {
-      key: 'ai',
-      label: 'AI Features',
+      key: 'limits',
+      label: 'Usage Limits',
       sort_order: 0,
       features: [
         {
-          key: 'ai.natural_language_commands',
-          type: 'boolean',
-          display_name: 'Natural Language Commands',
-          description: 'AI-powered task creation and management via conversational input',
-          default_unrestricted_value: true
+          key: 'limits.active_tasks',
+          type: 'numeric',
+          display_name: 'Active Tasks',
+          description: 'Maximum number of tasks you can have active at once',
+          value_order: 100,
+          constraints: { min: 10, max: 1000, unlimited_value: -1, step: 10 },
+          default_unrestricted_value: -1
         },
         {
-          key: 'ai.bulk_project_creation',
-          type: 'boolean',
-          display_name: 'Bulk Project Creation',
-          description: 'Create entire projects with dependent tasks via AI',
-          default_unrestricted_value: true
+          key: 'limits.ai_commands_per_month',
+          type: 'numeric',
+          display_name: 'AI Commands / Month',
+          description: 'Monthly AI-powered task creation and management commands',
+          value_order: 95,
+          constraints: { min: 0, max: 1000, unlimited_value: -1, step: 10 },
+          default_unrestricted_value: -1
+        },
+        {
+          key: 'limits.habit_templates',
+          type: 'numeric',
+          display_name: 'Recurring Habits',
+          description: 'Templates for daily, weekly, or custom recurring tasks',
+          value_order: 85,
+          constraints: { min: 1, max: 100, unlimited_value: -1, step: 1 },
+          default_unrestricted_value: -1
+        },
+        {
+          key: 'limits.projects',
+          type: 'numeric',
+          display_name: 'Projects',
+          description: 'Organize tasks into separate projects',
+          value_order: 80,
+          constraints: { min: 1, max: 100, unlimited_value: -1, step: 1 },
+          default_unrestricted_value: -1
+        },
+        {
+          key: 'limits.locations',
+          type: 'numeric',
+          display_name: 'Locations',
+          description: 'Saved locations for travel time scheduling',
+          value_order: 50,
+          constraints: { min: 1, max: 50, unlimited_value: -1, step: 1 },
+          default_unrestricted_value: -1
+        },
+        {
+          key: 'limits.schedule_templates',
+          type: 'numeric',
+          display_name: 'Schedule Templates',
+          description: 'Custom day schedules (weekday, weekend, remote day)',
+          value_order: 45,
+          constraints: { min: 1, max: 20, unlimited_value: -1, step: 1 },
+          default_unrestricted_value: -1
         }
       ]
     },
@@ -46,22 +84,17 @@ const CATALOG = {
           key: 'calendar.max_providers',
           type: 'numeric',
           display_name: 'Calendar Providers',
-          description: 'Number of calendar providers that can be connected (Google, Microsoft). Free: 1, Pro+: unlimited.',
+          description: 'Connect Google Calendar, Microsoft Outlook, or both',
+          value_order: 90,
           constraints: { min: 1, max: 2, unlimited_value: -1, step: 1 },
           default_unrestricted_value: -1
         },
         {
-          key: 'calendar.unified_sync',
-          type: 'boolean',
-          display_name: 'Unified Calendar Sync',
-          description: 'Bidirectional sync across all connected calendar providers simultaneously',
-          default_unrestricted_value: true
-        },
-        {
           key: 'calendar.auto_sync',
           type: 'boolean',
-          display_name: 'Auto Sync',
-          description: 'Automatic periodic calendar synchronization',
+          display_name: 'Auto Calendar Sync',
+          description: 'Automatic periodic sync with connected calendars',
+          value_order: 55,
           default_unrestricted_value: true
         }
       ]
@@ -72,53 +105,42 @@ const CATALOG = {
       sort_order: 2,
       features: [
         {
-          key: 'scheduling.priority_optimization',
-          type: 'boolean',
-          display_name: 'Priority Optimization',
-          description: 'Hill-climb optimization algorithm for task placement based on priorities',
-          default_unrestricted_value: true
-        },
-        {
           key: 'scheduling.dependencies',
           type: 'boolean',
           display_name: 'Task Dependencies',
-          description: 'Define and enforce task dependency chains',
+          description: 'Chain tasks so one must complete before another starts',
+          value_order: 75,
           default_unrestricted_value: true
         },
         {
           key: 'scheduling.travel_time',
           type: 'boolean',
-          display_name: 'Travel Time Buffers',
-          description: 'Automatic travel time before/after tasks based on location changes',
+          display_name: 'Travel Time',
+          description: 'Automatic travel buffers between tasks at different locations',
+          value_order: 70,
           default_unrestricted_value: true
-        },
-        {
-          key: 'scheduling.time_blocks',
-          type: 'numeric',
-          display_name: 'Custom Time Blocks',
-          description: 'Maximum number of custom time block configurations per day',
-          constraints: { min: 1, max: 20, unlimited_value: -1, step: 1 },
-          default_unrestricted_value: -1
         }
       ]
     },
     {
-      key: 'tasks',
-      label: 'Task Features',
+      key: 'ai',
+      label: 'AI Features',
       sort_order: 3,
       features: [
         {
-          key: 'tasks.habits',
+          key: 'ai.natural_language_commands',
           type: 'boolean',
-          display_name: 'Habit/Recurring Tasks',
-          description: 'Create recurring task templates with automatic instances',
+          display_name: 'AI Commands',
+          description: 'Create and manage tasks using natural language',
+          value_order: 65,
           default_unrestricted_value: true
         },
         {
-          key: 'tasks.rigid',
+          key: 'ai.bulk_project_creation',
           type: 'boolean',
-          display_name: 'Rigid Tasks',
-          description: 'Pin tasks to specific times that cannot be moved by the scheduler',
+          display_name: 'AI Project Builder',
+          description: 'Let AI create entire projects with dependent tasks',
+          value_order: 60,
           default_unrestricted_value: true
         }
       ]
@@ -132,21 +154,39 @@ const CATALOG = {
           key: 'data.export',
           type: 'boolean',
           display_name: 'Data Export',
-          description: 'Export all task and configuration data',
+          description: 'Export all tasks and configuration',
+          value_order: 40,
           default_unrestricted_value: true
         },
         {
           key: 'data.import',
           type: 'boolean',
           display_name: 'Data Import',
-          description: 'Import tasks and configuration from file',
+          description: 'Import tasks from file',
+          value_order: 35,
           default_unrestricted_value: true
         },
         {
           key: 'data.mcp_access',
           type: 'boolean',
-          display_name: 'MCP Tool Access',
-          description: 'Access Juggler via MCP protocol for external AI integrations',
+          display_name: 'MCP Integration',
+          description: 'Connect AI assistants like Claude directly to StriveRS',
+          value_order: 30,
+          default_unrestricted_value: true
+        }
+      ]
+    },
+    {
+      key: 'tasks',
+      label: 'Task Features',
+      sort_order: 5,
+      features: [
+        {
+          key: 'tasks.rigid',
+          type: 'boolean',
+          display_name: 'Pinned Tasks',
+          description: 'Lock tasks to specific times on the calendar',
+          value_order: 25,
           default_unrestricted_value: true
         }
       ]

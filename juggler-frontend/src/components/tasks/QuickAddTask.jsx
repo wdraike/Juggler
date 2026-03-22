@@ -7,7 +7,7 @@ import { getTheme } from '../../theme/colors';
 import { formatDateKey, getDayName } from '../../scheduler/dateHelpers';
 import { applyDefaults } from '../../state/constants';
 
-export default function QuickAddTask({ date, onCreate, darkMode, isMobile }) {
+export default function QuickAddTask({ date, onCreate, darkMode, isMobile, todayDate }) {
   var theme = getTheme(darkMode);
   var [text, setText] = useState('');
   var [expanded, setExpanded] = useState(false);
@@ -15,7 +15,7 @@ export default function QuickAddTask({ date, onCreate, darkMode, isMobile }) {
   function handleSubmit(e) {
     e.preventDefault();
     if (!text.trim()) return;
-    var dateKey = date ? formatDateKey(date) : formatDateKey(new Date());
+    var dateKey = date ? formatDateKey(date) : (todayDate ? formatDateKey(todayDate) : formatDateKey(new Date()));
     var id = 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
     var task = applyDefaults({
       id,

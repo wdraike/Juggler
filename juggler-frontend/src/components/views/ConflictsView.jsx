@@ -23,9 +23,9 @@ function saveCollapsed(state) {
   catch (e) { /* quota exceeded */ }
 }
 
-export default function ConflictsView({ allTasks, statuses, unplaced, schedulerWarnings, onStatusChange, onExpand, onUpdateTask, darkMode, isMobile }) {
+export default function ConflictsView({ allTasks, statuses, unplaced, schedulerWarnings, onStatusChange, onExpand, onUpdateTask, darkMode, isMobile, todayDate }) {
   var theme = getTheme(darkMode);
-  var today = new Date(); today.setHours(0, 0, 0, 0);
+  var today = todayDate || (function() { var d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
 
   var [collapsed, setCollapsed] = useState(function() {
     var saved = loadCollapsed();
@@ -55,6 +55,10 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
     allTasks.forEach(t => {
       var st = statuses[t.id] || '';
       if (st === 'done' || st === 'cancel' || st === 'skip') return;
+      // Habit templates are blueprints, not actionable — skip for issues
+      if (t.taskType === 'habit_template') return;
+      // Generated/expanded habit instances are managed by the scheduler
+      if (t.generated) return;
 
       if (t.due) {
         var dd = parseDate(t.due);
@@ -72,7 +76,6 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
       if (!deps.satisfied) blocked.push(t);
 
       if (!t.date || t.date === 'TBD') {
-        if (t.taskType === 'habit_template') return;
         if (t.section && (t.section.indexOf('PARKING') >= 0 || t.section.indexOf('TO BE SCHEDULED') >= 0)) return;
         unscheduled.push(t);
       }
@@ -180,6 +183,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
                       showDate
                       isMobile={isMobile}
                       allTasks={allTasks} statuses={statuses}
+                      todayDate={todayDate}
                     />
                     {t._unplacedDetail && (
                       <div style={{ fontSize: 10, color: theme.textMuted, padding: '2px 12px', marginTop: -2 }}>

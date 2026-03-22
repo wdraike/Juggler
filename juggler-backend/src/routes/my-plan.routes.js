@@ -8,6 +8,23 @@ const router = require('express').Router();
 const { authenticateJWT } = require('../middleware/jwt-auth');
 const { resolvePlanFeatures, PRODUCT_SLUG } = require('../middleware/plan-features.middleware');
 const db = require('../db');
+const { countActiveTasks, countHabitTemplates, countProjects, countLocations, countScheduleTemplates } = require('../middleware/entity-limits');
+
+// Fetch plan name from payment service
+async function getPlanName(planSlug) {
+  try {
+    const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
+    const res = await fetch(`${paymentUrl}/api/plans?product=${PRODUCT_SLUG}&include_all=true`, {
+      signal: AbortSignal.timeout(3000)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const plan = data.plans?.find(p => p.slug === planSlug);
+      return plan?.name || planSlug;
+    }
+  } catch {}
+  return planSlug;
+}
 
 function getCurrentPeriodBounds(featureKey) {
   const now = new Date();
@@ -46,16 +63,39 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
     }
     findLimits(features);
 
+    // Entity count functions for count-based limits
+    const entityCounters = {
+      'limits.active_tasks': countActiveTasks,
+      'limits.habit_templates': countHabitTemplates,
+      'limits.projects': countProjects,
+      'limits.locations': countLocations,
+      'limits.schedule_templates': countScheduleTemplates
+    };
+
     for (const [key, limit] of Object.entries(allLimits)) {
       if (limit === -1) {
-        usage[key] = { used: 0, limit: null, unlimited: true, resets_at: null };
+        // Still fetch actual count for unlimited users (for display)
+        let used = 0;
+        if (entityCounters[key]) {
+          try { used = await entityCounters[key](userId); } catch {}
+        }
+        usage[key] = { used, limit: null, unlimited: true, resets_at: null };
         continue;
       }
 
-      const isCountBased = !key.includes('per_');
-      const { start: periodStart, end: periodEnd } = isCountBased
-        ? { start: new Date(0), end: null }
-        : getCurrentPeriodBounds(key);
+      // Entity-based limits: count from actual tables
+      if (entityCounters[key]) {
+        try {
+          const count = await entityCounters[key](userId);
+          usage[key] = { used: count, limit, unlimited: false, resets_at: null };
+        } catch {
+          usage[key] = { used: 0, limit, unlimited: false, resets_at: null };
+        }
+        continue;
+      }
+
+      // Rate-based limits (per_month, per_hour): count from plan_usage table
+      const { start: periodStart, end: periodEnd } = getCurrentPeriodBounds(key);
 
       const row = await db('plan_usage')
         .where('user_id', userId)
@@ -71,18 +111,7 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
       };
     }
 
-    let planName = planSlug;
-    try {
-      const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
-      const plansRes = await fetch(`${paymentUrl}/api/plans?product=${PRODUCT_SLUG}`, {
-        signal: AbortSignal.timeout(3000)
-      });
-      if (plansRes.ok) {
-        const plansData = await plansRes.json();
-        const plan = plansData.plans?.find(p => p.slug === planSlug);
-        if (plan) planName = plan.name;
-      }
-    } catch { /* use slug as fallback */ }
+    const planName = await getPlanName(planSlug);
 
     res.json({
       plan_name: planName,

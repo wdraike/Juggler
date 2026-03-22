@@ -1,48 +1,21 @@
 /**
- * Plan Features Middleware for Juggler
+ * Plan Features Middleware for StriveRS
  *
  * Resolves the user's subscription plan into a features object.
- * Reads plan slug from JWT, fetches features from payment-service,
- * attaches to req.planFeatures.
+ * Always fetches from the payment service — no hardcoded fallbacks.
+ * Caches the full plan catalog for 5 minutes.
  */
 
 const PRODUCT_SLUG = 'juggler';
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-// Updated 2026-03-22: Scheduling fully free, one calendar free, AI Pro+.
-const FREE_PLAN_FEATURES = {
-  ai: {
-    natural_language_commands: false,
-    bulk_project_creation: false
-  },
-  calendar: {
-    max_providers: 1,
-    unified_sync: false,
-    auto_sync: false
-  },
-  scheduling: {
-    priority_optimization: true,
-    dependencies: true,
-    travel_time: true,
-    time_blocks: -1
-  },
-  tasks: {
-    habits: true,
-    rigid: true
-  },
-  data: {
-    export: true,
-    import: false,
-    mcp_access: false
-  }
-};
-
 let _planFeaturesCache = null;
 let _cacheTimestamp = 0;
+let _fetchPromise = null;
 
 async function fetchPlanFeatures() {
   const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
-  const response = await fetch(`${paymentUrl}/api/plans?product=${PRODUCT_SLUG}`, {
+  const response = await fetch(`${paymentUrl}/api/plans?product=${PRODUCT_SLUG}&include_all=true`, {
     headers: { 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(5000)
   });
@@ -64,14 +37,30 @@ async function getCachedPlanFeatures() {
   if (_planFeaturesCache && (now - _cacheTimestamp) < CACHE_TTL_MS) {
     return _planFeaturesCache;
   }
-  try {
-    _planFeaturesCache = await fetchPlanFeatures();
-    _cacheTimestamp = now;
-  } catch (err) {
-    console.warn('[plan-features] Failed to fetch:', err.message);
-    if (!_planFeaturesCache) _planFeaturesCache = {};
-  }
-  return _planFeaturesCache;
+
+  // Deduplicate concurrent fetches
+  if (_fetchPromise) return _fetchPromise;
+
+  _fetchPromise = fetchPlanFeatures().then(cache => {
+    _planFeaturesCache = cache;
+    _cacheTimestamp = Date.now();
+    _fetchPromise = null;
+    return cache;
+  }).catch(err => {
+    _fetchPromise = null;
+    console.error('[plan-features] Failed to fetch from payment service:', err.message);
+    // Return stale cache if available, otherwise throw
+    if (_planFeaturesCache) return _planFeaturesCache;
+    throw err;
+  });
+
+  return _fetchPromise;
+}
+
+// Force refresh — called on app startup and can be called externally
+async function refreshPlanFeatures() {
+  _cacheTimestamp = 0;
+  return getCachedPlanFeatures();
 }
 
 const resolvePlanFeatures = async (req, res, next) => {
@@ -79,20 +68,24 @@ const resolvePlanFeatures = async (req, res, next) => {
     const planSlug = req.auth?.plans?.[PRODUCT_SLUG] || 'free';
     req.planSlug = planSlug;
 
-    if (planSlug === 'free') {
-      req.planFeatures = FREE_PLAN_FEATURES;
-      return next();
+    const allFeatures = await getCachedPlanFeatures();
+    req.planFeatures = allFeatures[planSlug];
+
+    if (!req.planFeatures) {
+      console.warn(`[plan-features] No features found for plan "${planSlug}", falling back to "free"`);
+      req.planFeatures = allFeatures['free'];
+      req.planSlug = 'free';
     }
 
-    const allFeatures = await getCachedPlanFeatures();
-    req.planFeatures = allFeatures[planSlug] || FREE_PLAN_FEATURES;
+    if (!req.planFeatures) {
+      return res.status(503).json({ error: 'Plan configuration unavailable. Please try again.' });
+    }
+
     next();
   } catch (err) {
     console.error('[plan-features] Error:', err.message);
-    req.planSlug = 'free';
-    req.planFeatures = FREE_PLAN_FEATURES;
-    next();
+    return res.status(503).json({ error: 'Payment service unavailable. Please try again.' });
   }
 };
 
-module.exports = { resolvePlanFeatures, FREE_PLAN_FEATURES, PRODUCT_SLUG };
+module.exports = { resolvePlanFeatures, PRODUCT_SLUG, refreshPlanFeatures, getCachedPlanFeatures };

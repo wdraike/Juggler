@@ -13,6 +13,8 @@
     "stop:dev": "./stop-dev.sh",
     "test:seed": "cd juggler-backend && node scripts/seed-test-user.js",
     "test:api": "cd juggler-backend && node scripts/test-api.js",
+    "test:limits": "node ../payment-service/scripts/test-plan-limits.js",
+    "test:regression": "npm run test:api && npm run test:limits",
     "test:e2e": "npx playwright test",
     "test:e2e:headed": "npx playwright test --headed"
   },

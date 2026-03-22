@@ -2,10 +2,12 @@ const express = require('express');
 const router = express.Router();
 const taskController = require('../controllers/task.controller');
 const { authenticateJWT } = require('../middleware/jwt-auth');
+const { resolvePlanFeatures } = require('../middleware/plan-features.middleware');
+const { checkTaskOrHabitLimit, checkBatchTaskLimits } = require('../middleware/entity-limits');
 const { runScheduleAndPersist } = require('../scheduler/runSchedule');
 const { withLock } = require('../lib/sync-lock');
 
-router.use(authenticateJWT);
+router.use(authenticateJWT, resolvePlanFeatures);
 
 // After any mutating request succeeds, re-run the scheduler in the background
 // so the placement cache stays current without a manual "reschedule" button.
@@ -36,8 +38,8 @@ function scheduleAfterMutation(req, res, next) {
 
 router.get('/', taskController.getAllTasks);
 router.get('/version', taskController.getVersion);
-router.post('/', scheduleAfterMutation, taskController.createTask);
-router.post('/batch', scheduleAfterMutation, taskController.batchCreateTasks);
+router.post('/', checkTaskOrHabitLimit, scheduleAfterMutation, taskController.createTask);
+router.post('/batch', checkBatchTaskLimits, scheduleAfterMutation, taskController.batchCreateTasks);
 router.put('/batch', scheduleAfterMutation, taskController.batchUpdateTasks);
 router.put('/:id/status', taskController.updateTaskStatus);
 router.put('/:id', scheduleAfterMutation, taskController.updateTask);

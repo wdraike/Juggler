@@ -11,14 +11,14 @@ import { getTheme } from '../../theme/colors';
 import StatusToggle from '../schedule/StatusToggle';
 import { parseDate } from '../../scheduler/dateHelpers';
 
-export default function TaskCard({ task, status, onStatusChange, onExpand, darkMode, showDate, draggable, isBlocked, isMobile, allTasks, statuses }) {
+export default function TaskCard({ task, status, onStatusChange, onExpand, darkMode, showDate, draggable, isBlocked, isMobile, allTasks, statuses, todayDate }) {
   var theme = getTheme(darkMode);
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
   var isMarker = !!task.marker;
   var borderColor = isMarker ? '#4338CA' : priColor;
   var durLabel = task.dur ? (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm') : '';
-  var isPastDue = !isDone && task.due && (function() { var d = parseDate(task.due); var t = new Date(); t.setHours(0,0,0,0); return d && d < t; })();
+  var isPastDue = !isDone && task.due && (function() { var d = parseDate(task.due); var t = todayDate || new Date(); if (!todayDate) t.setHours(0,0,0,0); return d && d < t; })();
 
   return (
     <div
@@ -152,7 +152,7 @@ export default function TaskCard({ task, status, onStatusChange, onExpand, darkM
 
       {/* Blocker row: show overdue undone deps with quick-complete buttons */}
       {isBlocked && allTasks && statuses && task.dependsOn && task.dependsOn.length > 0 && (function() {
-        var today = new Date(); today.setHours(0,0,0,0);
+        var today = todayDate || (function() { var d = new Date(); d.setHours(0,0,0,0); return d; })();
         var blockers = task.dependsOn.map(function(depId) {
           var s = statuses[depId] || '';
           if (s === 'done') return null;

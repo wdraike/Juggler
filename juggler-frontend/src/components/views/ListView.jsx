@@ -10,9 +10,9 @@ import { DAY_NAMES, MONTH_NAMES } from '../../state/constants';
 import { parseDate, formatDateKey } from '../../scheduler/dateHelpers';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
-export default function ListView({ allTasks, statuses, filter, search, projectFilter, onStatusChange, onExpand, onCreate, darkMode, schedCfg, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile }) {
+export default function ListView({ allTasks, statuses, filter, search, projectFilter, onStatusChange, onExpand, onCreate, darkMode, schedCfg, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile, todayDate }) {
   var theme = getTheme(darkMode);
-  var todayKey = formatDateKey(new Date());
+  var todayKey = todayDate ? formatDateKey(todayDate) : formatDateKey(new Date());
 
   var filteredTasks = useMemo(() => {
     return allTasks.filter(t => {
@@ -55,7 +55,7 @@ export default function ListView({ allTasks, statuses, filter, search, projectFi
         var d = parseDate(dateKey);
         var loc = dateKey !== 'TBD' ? getLocationForDatePure(dateKey, schedCfg) : null;
         var isToday = dateKey === todayKey;
-        var isPast = d && d < new Date(new Date().setHours(0, 0, 0, 0));
+        var isPast = d && d < (todayDate || new Date(new Date().setHours(0, 0, 0, 0)));
 
         return (
           <div key={dateKey} style={{ marginBottom: 16 }}>
@@ -81,6 +81,7 @@ export default function ListView({ allTasks, statuses, filter, search, projectFi
                   isBlocked={blockedTaskIds && blockedTaskIds.has(t.id)}
                   isMobile={isMobile}
                   allTasks={allTasks} statuses={statuses}
+                  todayDate={todayDate}
                 />
               ))}
             </div>

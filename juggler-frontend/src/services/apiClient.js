@@ -95,6 +95,15 @@ apiClient.interceptors.response.use(
       }));
     }
 
+    // Handle 403/429 limit errors — dispatch event for limit prompt
+    if (error.response?.data?.code === 'ENTITY_LIMIT_REACHED' ||
+        error.response?.data?.code === 'USAGE_LIMIT_REACHED' ||
+        error.response?.data?.code === 'FEATURE_NOT_AVAILABLE') {
+      window.dispatchEvent(new CustomEvent('plan:limit-reached', {
+        detail: error.response.data
+      }));
+    }
+
     return Promise.reject(error);
   }
 );

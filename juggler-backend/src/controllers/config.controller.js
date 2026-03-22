@@ -4,6 +4,7 @@
 
 const db = require('../db');
 const { runScheduleAndPersist } = require('../scheduler/runSchedule');
+const cache = require('../lib/redis');
 
 /**
  * GET /api/config — all config for user
@@ -11,6 +12,9 @@ const { runScheduleAndPersist } = require('../scheduler/runSchedule');
 async function getAllConfig(req, res) {
   try {
     const userId = req.user.id;
+    const cacheKey = `user:${userId}:config`;
+    const cached = await cache.get(cacheKey);
+    if (cached) return res.json(cached);
 
     const [locations, tools, projects, configRows] = await Promise.all([
       db('locations').where('user_id', userId).orderBy('sort_order'),
@@ -25,7 +29,7 @@ async function getAllConfig(req, res) {
       config[row.config_key] = val;
     });
 
-    res.json({
+    const result = {
       locations: locations.map(l => ({ id: l.location_id, name: l.name, icon: l.icon })),
       tools: tools.map(t => ({ id: t.tool_id, name: t.name, icon: t.icon })),
       projects: projects.map(p => ({ id: p.id, name: p.name, color: p.color, icon: p.icon })),
@@ -36,7 +40,9 @@ async function getAllConfig(req, res) {
       locScheduleOverrides: config.loc_schedule_overrides || null,
       hourLocationOverrides: config.hour_location_overrides || null,
       preferences: config.preferences || null
-    });
+    };
+    await cache.set(cacheKey, result, 3600); // 1 hour TTL
+    res.json(result);
   } catch (error) {
     console.error('Get config error:', error);
     res.status(500).json({ error: 'Failed to fetch config' });
@@ -77,6 +83,7 @@ async function updateConfig(req, res) {
       });
     }
 
+    await cache.invalidateConfig(userId);
     res.json({ key, value });
 
     // Schedule-affecting keys: reschedule in the background after responding
@@ -121,6 +128,7 @@ async function createProject(req, res) {
       sort_order: (maxOrder?.max || 0) + 1
     });
 
+    await cache.invalidateConfig(req.user.id);
     res.status(201).json({ project: { id, name, color, icon } });
   } catch (error) {
     console.error('Create project error:', error);
@@ -145,6 +153,8 @@ async function updateProject(req, res) {
       }
     });
 
+    await cache.invalidateConfig(req.user.id);
+    if (oldName && name && oldName !== name) await cache.invalidateTasks(req.user.id); // project rename cascades to tasks
     res.json({ project: { id: parseInt(id), name, color, icon }, renamed: oldName && name && oldName !== name ? { from: oldName, to: name } : null });
   } catch (error) {
     console.error('Update project error:', error);
@@ -156,6 +166,7 @@ async function deleteProject(req, res) {
   try {
     const { id } = req.params;
     await db('projects').where({ id, user_id: req.user.id }).del();
+    await cache.invalidateConfig(req.user.id);
     res.json({ message: 'Project deleted', id });
   } catch (error) {
     console.error('Delete project error:', error);
@@ -193,6 +204,7 @@ async function replaceLocations(req, res) {
       }
     });
 
+    await cache.invalidateConfig(req.user.id);
     res.json({ locations });
   } catch (error) {
     console.error('Replace locations error:', error);
@@ -230,6 +242,7 @@ async function replaceTools(req, res) {
       }
     });
 
+    await cache.invalidateConfig(req.user.id);
     res.json({ tools });
   } catch (error) {
     console.error('Replace tools error:', error);

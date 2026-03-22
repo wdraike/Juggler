@@ -14,6 +14,7 @@
 const db = require('../db');
 const { v7: uuidv7 } = require('uuid');
 const { localToUtc, utcToLocal, toDateISO, fromDateISO, getDayName } = require('../scheduler/dateHelpers');
+const cache = require('../lib/redis');
 
 /**
  * Normalize priority to P1-P4 format. Accepts "P1", "1", "p2", etc.
@@ -270,12 +271,18 @@ async function getTasksVersion(userId) {
  */
 async function getAllTasks(req, res) {
   try {
+    var cacheKey = `user:${req.user.id}:tasks`;
+    var cached = await cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
     var rows = await db('tasks').where('user_id', req.user.id).orderBy('created_at', 'asc');
     var tz = req.user.timezone || 'America/New_York';
     var srcMap = buildSourceMap(rows);
     var tasks = rows.map(function(r) { return rowToTask(r, tz, srcMap); });
     var version = await getTasksVersion(req.user.id);
-    res.json({ tasks: tasks, version: version });
+    var result = { tasks: tasks, version: version };
+    await cache.set(cacheKey, result, 300); // 5 min TTL
+    res.json(result);
   } catch (error) {
     console.error('Get tasks error:', error);
     res.status(500).json({ error: 'Failed to fetch tasks' });
@@ -287,8 +294,14 @@ async function getAllTasks(req, res) {
  */
 async function getVersion(req, res) {
   try {
+    var cacheKey = `user:${req.user.id}:version`;
+    var cached = await cache.get(cacheKey);
+    if (cached) return res.json(cached);
+
     var version = await getTasksVersion(req.user.id);
-    res.json({ version: version });
+    var result = { version: version };
+    await cache.set(cacheKey, result, 30); // 30s TTL — polled every 5-10s
+    res.json(result);
   } catch (error) {
     console.error('Get version error:', error);
     res.status(500).json({ error: 'Failed to get version' });
@@ -341,6 +354,7 @@ async function createTask(req, res) {
     await ensureProject(req.user.id, req.body.project);
     await db('tasks').insert(row);
     var created = await db('tasks').where('id', row.id).first();
+    await cache.invalidateTasks(req.user.id);
     res.status(201).json({ task: rowToTask(created, tz) });
   } catch (error) {
     console.error('Create task error:', error);
@@ -445,6 +459,7 @@ async function updateTask(req, res) {
     var allRows = await db('tasks').where('user_id', req.user.id).select();
     var srcMap = buildSourceMap(allRows);
     var updatedRow = allRows.find(function(r) { return r.id === id; });
+    await cache.invalidateTasks(req.user.id);
     res.json({ task: rowToTask(updatedRow, tz, srcMap) });
   } catch (error) {
     console.error('Update task error:', error);
@@ -494,6 +509,7 @@ async function deleteTask(req, res) {
       await trx('tasks').where({ id: id, user_id: req.user.id }).del();
     });
 
+    await cache.invalidateTasks(req.user.id);
     res.json({ message: 'Task deleted', id: id });
   } catch (error) {
     console.error('Delete task error:', error);
@@ -561,6 +577,7 @@ async function updateTaskStatus(req, res) {
     await db('tasks').where({ id: id, user_id: req.user.id }).update(update);
     var updated = await db('tasks').where('id', id).first();
     var srcMap = buildSourceMap(await db('tasks').where({ user_id: req.user.id, task_type: 'habit_template' }).select());
+    await cache.invalidateTasks(req.user.id);
     res.json({ task: rowToTask(updated, tz, srcMap) });
   } catch (error) {
     console.error('Update task status error:', error);
@@ -611,6 +628,7 @@ async function batchCreateTasks(req, res) {
       }
     });
 
+    await cache.invalidateTasks(req.user.id);
     res.status(201).json({ created: rows.length });
   } catch (error) {
     console.error('Batch create error:', error);
@@ -742,6 +760,7 @@ async function batchUpdateTasks(req, res) {
       }
     }
 
+    await cache.invalidateTasks(req.user.id);
     res.json({ updated: updatedCount });
   } catch (error) {
     console.error('Batch update error:', error);

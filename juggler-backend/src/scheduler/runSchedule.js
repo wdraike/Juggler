@@ -23,6 +23,7 @@ var buildSourceMap = taskController.buildSourceMap;
 var taskToRow = taskController.taskToRow;
 var expandRecurringShared = require('../../../shared/scheduler/expandRecurring');
 var expandRecurring = expandRecurringShared.expandRecurring;
+var cache = require('../lib/redis');
 
 var DEFAULT_TIMEZONE = 'America/New_York';
 
@@ -87,6 +88,22 @@ async function loadConfig(userId) {
  *
  * Returns stats: { updated, cleared, reset, tasks: [...] }
  */
+// Per-user mutex to prevent concurrent scheduler runs
+var _schedulerLocks = {};
+function acquireSchedulerLock(userId) {
+  if (_schedulerLocks[userId]) return _schedulerLocks[userId];
+  var resolve;
+  var p = new Promise(function(r) { resolve = r; });
+  _schedulerLocks[userId] = p;
+  p._resolve = resolve;
+  return null; // null means lock acquired
+}
+function releaseSchedulerLock(userId) {
+  var p = _schedulerLocks[userId];
+  delete _schedulerLocks[userId];
+  if (p && p._resolve) p._resolve();
+}
+
 async function runScheduleAndPersist(userId, _retries) {
   var retries = _retries || 0;
   var MAX_RETRIES = 3;
@@ -383,6 +400,9 @@ async function runScheduleAndPersist(userId, _retries) {
     await trx('user_config').insert({ user_id: userId, config_key: 'schedule_cache', config_value: cacheJson });
   }
 
+  // Invalidate Redis caches — scheduler modified tasks
+  cache.invalidateTasks(userId).catch(function() {});
+
   return {
     updated: updated, cleared: cleared, reset: resetCount, tasks: updatedTasks, score: result.score,
     dayPlacements: result.dayPlacements,
@@ -460,8 +480,7 @@ async function getSchedulePlacements(userId) {
   }
 
   // If cache is stale, re-run the scheduler.
-  // Stale conditions: different day, >30 min old, past-dated tasks,
-  // or today's cached placements include past-time slots.
+  // Stale conditions: different day, >30 min old, or tasks modified since cache was generated.
   var cacheStale = false;
   if (cache && cache.generatedAt) {
     var genTime = new Date(cache.generatedAt);
@@ -473,36 +492,63 @@ async function getSchedulePlacements(userId) {
     if (genDateKey !== timeInfo.todayKey || ageMs > 30 * 60 * 1000) {
       cacheStale = true;
     }
-  }
-  if (hasPastTasks) cacheStale = true;
-  // Check if any cached today placements are now in the past
-  if (!cacheStale && cache && cache.dayPlacements && cache.dayPlacements[timeInfo.todayKey]) {
-    var nowSlotCheck = Math.ceil(timeInfo.nowMins / 15) * 15;
-    var todayCache = cache.dayPlacements[timeInfo.todayKey];
-    for (var ci = 0; ci < todayCache.length; ci++) {
-      // Skip locked (fixed/rigid) placements — they're always shown at their time
-      if (todayCache[ci].locked) continue;
-      if (todayCache[ci].start + todayCache[ci].dur <= nowSlotCheck) {
+    // Check if any tasks were modified since the cache was generated
+    if (!cacheStale) {
+      var maxRow = await db('tasks').where('user_id', userId)
+        .max('updated_at as max_updated').first();
+      if (maxRow && maxRow.max_updated) {
+        var lastModified = new Date(String(maxRow.max_updated).replace(' ', 'T') + 'Z');
+        if (lastModified > genTime) {
+          console.log('[SCHED] cache stale: tasks modified since cache (' + Math.round((lastModified - genTime) / 1000) + 's newer)');
+          cacheStale = true;
+        }
+      }
+    }
+    // Check if cache has no placements for today but tasks exist for today
+    if (!cacheStale && cache.dayPlacements && !cache.dayPlacements[timeInfo.todayKey]) {
+      var todayTasks = allTasks.filter(function(t) { return t.date === timeInfo.todayKey; });
+      var activeTodayTasks = todayTasks.filter(function(t) {
+        var st = statuses[t.id] || '';
+        return st !== 'done' && st !== 'cancel' && st !== 'skip';
+      });
+      if (activeTodayTasks.length > 0) {
+        console.log('[SCHED] cache stale: no placements for today but ' + activeTodayTasks.length + ' active tasks exist');
         cacheStale = true;
-        break;
       }
     }
   }
 
   if (cacheStale && cache) {
-    console.log('[SCHED] cache stale (age=' + Math.round((Date.now() - new Date(cache.generatedAt).getTime()) / 60000) + 'm), re-running scheduler');
-    try {
-      var freshResult = await runScheduleAndPersist(userId);
-      return {
-        dayPlacements: freshResult.dayPlacements,
-        unplaced: freshResult.unplaced,
-        score: freshResult.score,
-        warnings: freshResult.warnings || [],
-        hasPastTasks: false
-      };
-    } catch (err) {
-      console.error('[SCHED] stale re-run failed, using cached:', err.message);
-      // Fall through to cached hydration
+    // Check if another request is already re-running the scheduler
+    var existingLock = acquireSchedulerLock(userId);
+    if (existingLock) {
+      console.log('[SCHED] cache stale but scheduler already running, waiting...');
+      await existingLock;
+      // Re-read the cache that the other run produced
+      var freshCacheRow = await db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
+      if (freshCacheRow) {
+        try {
+          cache = typeof freshCacheRow.config_value === 'string' ? JSON.parse(freshCacheRow.config_value) : freshCacheRow.config_value;
+        } catch (e) { /* fall through */ }
+      }
+    } else {
+      // We hold the lock — run the scheduler
+      console.log('[SCHED] cache stale (age=' + Math.round((Date.now() - new Date(cache.generatedAt).getTime()) / 60000) + 'm), re-running scheduler');
+      try {
+        var freshResult = await runScheduleAndPersist(userId);
+        releaseSchedulerLock(userId);
+        return {
+          dayPlacements: freshResult.dayPlacements,
+          unplaced: freshResult.unplaced,
+          score: freshResult.score,
+          warnings: freshResult.warnings || [],
+          hasPastTasks: hasPastTasks
+        };
+      } catch (err) {
+        releaseSchedulerLock(userId);
+        console.error('[SCHED] stale re-run failed, using cached:', err.message);
+        // Fall through to cached hydration
+      }
     }
   }
 

@@ -10,12 +10,14 @@ jest.mock('../src/db', () => {
 const { rowToTask, taskToRow } = require('../src/controllers/task.controller');
 
 describe('task mapping', () => {
+  const TZ = 'America/New_York';
+  // scheduled_at is the UTC source of truth; date/time/day are derived from it
+  // MySQL returns "YYYY-MM-DD HH:MM:SS" format (UTC)
+  // 2026-03-15 13:00:00 UTC = 9:00 AM EDT (March 15 is in EDT, UTC-4)
   const sampleRow = {
     id: 't01',
     text: 'Test task',
-    date: '3/15',
-    day: 'Sun',
-    time: '9:00 AM',
+    scheduled_at: '2026-03-15 13:00:00',
     dur: 30,
     time_remaining: null,
     pri: 'P2',
@@ -24,8 +26,8 @@ describe('task mapping', () => {
     direction: 'some dir',
     section: 'sec',
     notes: 'some notes',
-    due: '3/20',
-    start_after: '3/10',
+    due_at: '2026-03-20',
+    start_after_at: '2026-03-10',
     location: '["home","work"]',
     tools: '["phone"]',
     when: 'morning',
@@ -44,10 +46,11 @@ describe('task mapping', () => {
 
   describe('rowToTask', () => {
     it('maps DB row to API format', () => {
-      const task = rowToTask(sampleRow);
+      const task = rowToTask(sampleRow, TZ);
       expect(task.id).toBe('t01');
       expect(task.text).toBe('Test task');
       expect(task.date).toBe('3/15');
+      expect(task.time).toBe('9:00 AM');
       expect(task.timeRemaining).toBeNull();
       expect(task.location).toEqual(['home', 'work']);
       expect(task.tools).toEqual(['phone']);
@@ -58,12 +61,13 @@ describe('task mapping', () => {
       expect(task.dependsOn).toEqual(['t00']);
       expect(task.datePinned).toBe(true);
       expect(task.gcalEventId).toBe('gcal_123');
+      expect(task.due).toBe('3/20');
       expect(task.startAfter).toBe('3/10');
     });
 
     it('handles already-parsed JSON fields', () => {
       const row = { ...sampleRow, location: ['home'], tools: [], depends_on: [], recur: null };
-      const task = rowToTask(row);
+      const task = rowToTask(row, TZ);
       expect(task.location).toEqual(['home']);
       expect(task.tools).toEqual([]);
       expect(task.dependsOn).toEqual([]);
@@ -108,8 +112,8 @@ describe('task mapping', () => {
         when: 'morning', habit: true, rigid: false, split: false,
         dependsOn: ['t00'], datePinned: true
       };
-      const row = taskToRow(original, 'user1');
-      const result = rowToTask(row);
+      const row = taskToRow(original, 'user1', TZ);
+      const result = rowToTask(row, TZ);
       expect(result.id).toBe(original.id);
       expect(result.text).toBe(original.text);
       expect(result.location).toEqual(original.location);

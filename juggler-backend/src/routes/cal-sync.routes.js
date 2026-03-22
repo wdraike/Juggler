@@ -10,6 +10,7 @@ var { resolvePlanFeatures } = require('../middleware/plan-features.middleware');
 var { requireFeature } = require('../middleware/feature-gate');
 var { withSyncLock } = require('../lib/sync-lock');
 
-router.post('/sync', authenticateJWT, resolvePlanFeatures, requireFeature('calendar.unified_sync'), withSyncLock(calSyncController.sync));
+// Manual sync available to all users (auto_sync gates periodic background sync, not manual triggers)
+router.post('/sync', authenticateJWT, withSyncLock(calSyncController.sync));
 
 module.exports = router;

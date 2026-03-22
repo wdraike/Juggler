@@ -8,6 +8,10 @@ import { useAuth } from '../auth/AuthProvider';
 import { getTheme, BRAND } from '../../theme/colors';
 import { DAY_NAMES } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
+import usePlanInfo from '../../hooks/usePlanInfo';
+import PlanUsagePanel from '../billing/PlanUsagePanel';
+import FeedbackButton from '../feedback/FeedbackButton';
+import FeedbackDialog from '../feedback/FeedbackDialog';
 
 var BILLING_URL = process.env.REACT_APP_BILLING_URL || 'http://localhost:3003';
 
@@ -15,7 +19,21 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
   var theme = getTheme(darkMode);
   var { user, logout } = useAuth();
   var [showOverflow, setShowOverflow] = useState(false);
+  var [showPlanPanel, setShowPlanPanel] = useState(false);
+  var [showFeedback, setShowFeedback] = useState(false);
+  var planPanelRef = useRef(null);
   var overflowRef = useRef(null);
+  var { planName, usageSummary, loading: planLoading } = usePlanInfo();
+
+  // Close plan panel on outside click
+  useEffect(function() {
+    if (!showPlanPanel) return;
+    function handleClick(e) {
+      if (planPanelRef.current && !planPanelRef.current.contains(e.target)) setShowPlanPanel(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return function() { document.removeEventListener('mousedown', handleClick); };
+  }, [showPlanPanel]);
 
   // Close overflow on outside click
   useEffect(function() {
@@ -39,7 +57,8 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
     overflowItems.push({ label: 'Import/Export', icon: '\uD83D\uDCE6', onClick: onShowExport });
     if (onShowCalSync || onShowGCalSync || onShowMsftCalSync) overflowItems.push({ label: 'Calendar Sync', icon: '\uD83D\uDCC5', onClick: onShowCalSync || onShowGCalSync || onShowMsftCalSync });
     if (onShowHelp) overflowItems.push({ label: 'Help', icon: '\u2753', onClick: onShowHelp });
-    overflowItems.push({ label: 'Billing', icon: '\uD83D\uDCB3', onClick: function() { window.open(BILLING_URL + '/plans', '_blank'); } });
+    overflowItems.push({ label: 'Report Issue', icon: '\uD83D\uDC1B', onClick: function() { setShowFeedback(true); } });
+    overflowItems.push({ label: (planName || 'Free') + ' Plan', icon: '\uD83D\uDCB3', onClick: function() { setShowPlanPanel(function(v) { return !v; }); } });
     overflowItems.push({ label: darkMode ? 'Light Mode' : 'Dark Mode', icon: darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19', onClick: function() { setDarkMode(function(d) { return !d; }); } });
     if (user) overflowItems.push({ label: 'Sign Out', icon: '\uD83D\uDEAA', onClick: logout });
   }
@@ -144,7 +163,16 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
               </button>
             )}
             {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help guide \u2014 how the scheduler works, task properties, keyboard shortcuts">&#x2753;</button>}
-            <button onClick={() => { window.open(BILLING_URL + '/plans', '_blank'); }} style={btnStyle(theme, isMobile)} title="Billing &amp; Subscription">&#x1F4B3;</button>
+            <FeedbackButton darkMode={darkMode} theme={theme} isMobile={isMobile} />
+            <div ref={planPanelRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+              <button onClick={function() { setShowPlanPanel(function(v) { return !v; }); }} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title={'Plan: ' + (planName || 'Free')}>
+                &#x1F4B3;
+                {usageSummary.some(function(u) { return u.nearLimit || u.atLimit; }) && (
+                  <span style={{ position: 'absolute', top: -1, right: -1, width: 7, height: 7, borderRadius: '50%', background: usageSummary.some(function(u) { return u.atLimit; }) ? '#C62828' : '#E65100' }} />
+                )}
+              </button>
+              {showPlanPanel && <PlanUsagePanel planName={planName} usageSummary={usageSummary} loading={planLoading} theme={theme} onClose={function() { setShowPlanPanel(false); }} />}
+            </div>
             <button onClick={() => setDarkMode(d => !d)} style={btnStyle(theme, isMobile)} title="Toggle dark mode">
               {darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19'}
             </button>
@@ -211,6 +239,14 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
         )}
       </div>
     </div>
+    {showFeedback && (
+      <FeedbackDialog
+        open={showFeedback}
+        onClose={function() { setShowFeedback(false); }}
+        darkMode={darkMode}
+        theme={theme}
+      />
+    )}
     </>
   );
 }

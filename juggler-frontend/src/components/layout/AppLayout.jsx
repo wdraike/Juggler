@@ -17,6 +17,8 @@ import useIsMobile from '../../hooks/useIsMobile';
 import { getTheme } from '../../theme/colors';
 import { formatDateKey, getWeekStart, parseDate } from '../../scheduler/dateHelpers';
 import { DAY_NAMES, applyDefaults } from '../../state/constants';
+import { useAuth } from '../auth/AuthProvider';
+import { getNowInTimezone } from '../../utils/timezone';
 
 // Views
 import DayView from '../views/DayView';
@@ -47,6 +49,10 @@ import AppFooter from './AppFooter';
 import apiClient from '../../services/apiClient';
 
 export default function AppLayout() {
+  // Auth & timezone
+  var { user: authUser } = useAuth();
+  var userTimezone = authUser?.timezone || null;
+
   // State
   var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements, flushNow } = useTaskState();
   var isMobile = useIsMobile();
@@ -73,6 +79,9 @@ export default function AppLayout() {
       if (prev === 'deps' && v !== 'deps') setProjectFilter('');
       return v;
     });
+    setFilter('open');
+    setSearch('');
+    setProjectFilter('');
   }, []);
   var [dayOffset, setDayOffset] = useState(function () {
     // Restore saved date as offset from today
@@ -110,6 +119,10 @@ export default function AppLayout() {
   var theme = getTheme(darkMode);
   var statuses = taskState.statuses;
   var allTasks = taskState.tasks;
+  // Visible tasks excludes habit templates (blueprints, not user-actionable)
+  var visibleTasks = useMemo(function() {
+    return allTasks.filter(function(t) { return t.taskType !== 'habit_template'; });
+  }, [allTasks]);
 
   // Track when editing UI is open to suspend background syncs/scheduling
   editingRef.current = expandedTasks.length > 0 || !!showCreateForm || !!showSettings;
@@ -198,8 +211,8 @@ export default function AppLayout() {
 
   // Derived dates
   var today = useMemo(() => {
-    var d = new Date(); d.setHours(0, 0, 0, 0); return d;
-  }, []);
+    return getNowInTimezone(userTimezone).todayDate;
+  }, [userTimezone]);
 
   var selectedDate = useMemo(() => {
     var d = new Date(today); d.setDate(d.getDate() + dayOffset); return d;
@@ -273,10 +286,10 @@ export default function AppLayout() {
   // Blocked tasks: open tasks with at least one overdue undone dependency
   var blockedTaskIds = useMemo(() => {
     var ids = new Set();
-    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var today = getNowInTimezone(userTimezone).todayDate;
     var taskMap = {};
-    allTasks.forEach(function(t) { taskMap[t.id] = t; });
-    allTasks.forEach(t => {
+    visibleTasks.forEach(function(t) { taskMap[t.id] = t; });
+    visibleTasks.forEach(t => {
       if (!t.dependsOn || t.dependsOn.length === 0) return;
       var st = statuses[t.id] || '';
       if (st === 'done' || st === 'cancel' || st === 'skip') return;
@@ -292,13 +305,13 @@ export default function AppLayout() {
       if (hasOverdueDep) ids.add(t.id);
     });
     return ids;
-  }, [allTasks, statuses]);
+  }, [visibleTasks, statuses]);
 
   // Past-due tasks: due date or scheduled date in the past, still open
   var pastDueIds = useMemo(() => {
     var ids = new Set();
-    var today = new Date(); today.setHours(0, 0, 0, 0);
-    allTasks.forEach(t => {
+    var today = getNowInTimezone(userTimezone).todayDate;
+    visibleTasks.forEach(t => {
       var st = statuses[t.id] || '';
       if (st === 'done' || st === 'cancel' || st === 'skip') return;
       if (t.due) {
@@ -311,7 +324,7 @@ export default function AppLayout() {
       }
     });
     return ids;
-  }, [allTasks, statuses]);
+  }, [visibleTasks, statuses]);
 
   // Fixed tasks: when contains 'fixed'
   var fixedIds = useMemo(() => {
@@ -353,13 +366,12 @@ export default function AppLayout() {
 
   // Now minutes (ET) — update every minute
   var [nowMins, setNowMins] = useState(() => {
-    var n = new Date(); return n.getHours() * 60 + n.getMinutes();
+    return getNowInTimezone(userTimezone).nowMins;
   });
 
   useEffect(() => {
     var id = setInterval(() => {
-      var n = new Date();
-      setNowMins(n.getHours() * 60 + n.getMinutes());
+      setNowMins(getNowInTimezone(userTimezone).nowMins);
     }, 60000);
     return () => clearInterval(id);
   }, []);
@@ -651,7 +663,7 @@ export default function AppLayout() {
     );
   }
 
-  var isToday = selectedDateKey === formatDateKey(new Date());
+  var isToday = selectedDateKey === getNowInTimezone(userTimezone).todayKey;
   var expandedTaskObjs = expandedTasks.map(function(id) {
     var found = allTasks.find(function(t) { return t.id === id; });
     if (found) return found;
@@ -805,7 +817,7 @@ export default function AppLayout() {
               onStatusChange={handleStatusChange}
               onExpand={handleExpand}
               darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
-              allTasks={allTasks}
+              allTasks={visibleTasks}
               filter={filter}
               blockedTaskIds={blockedTaskIds}
               unplacedIds={unplacedIds}
@@ -823,27 +835,27 @@ export default function AppLayout() {
           )}
           {viewMode === 'list' && (
             <ListView
-              allTasks={allTasks} statuses={statuses}
+              allTasks={visibleTasks} statuses={statuses}
               filter={filter} search={search} projectFilter={projectFilter}
               onStatusChange={handleStatusChange} onExpand={handleExpand}
               onCreate={handleCreate} darkMode={darkMode} schedCfg={schedCfg}
               blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
-              isMobile={isMobile}
+              isMobile={isMobile} todayDate={today}
             />
           )}
           {viewMode === 'priority' && (
             <PriorityView
-              allTasks={allTasks} statuses={statuses}
+              allTasks={visibleTasks} statuses={statuses}
               filter={filter} search={search} projectFilter={projectFilter}
               onStatusChange={handleStatusChange} onExpand={handleExpand} darkMode={darkMode}
               onPriorityDrop={handlePriorityDrop}
               blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
-              isMobile={isMobile}
+              isMobile={isMobile} todayDate={today}
             />
           )}
           {viewMode === 'deps' && (
             <DependencyView
-              allTasks={allTasks} statuses={statuses}
+              allTasks={visibleTasks} statuses={statuses}
               projectFilter={projectFilter} filter={filter}
               search={search}
               pastDueIds={pastDueIds} fixedIds={fixedIds}
@@ -853,10 +865,10 @@ export default function AppLayout() {
           )}
           {viewMode === 'conflicts' && (
             <ConflictsView
-              allTasks={allTasks} statuses={statuses}
+              allTasks={visibleTasks} statuses={statuses}
               unplaced={unplaced} schedulerWarnings={schedulerWarnings}
               onStatusChange={handleStatusChange} onExpand={handleExpand} onUpdateTask={handleUpdateTask}
-              darkMode={darkMode} isMobile={isMobile}
+              darkMode={darkMode} isMobile={isMobile} todayDate={today}
             />
           )}
         </div>

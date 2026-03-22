@@ -129,10 +129,10 @@ async function checkAndIncrement(userId, usageKey, limit, periodStart, periodEnd
     INSERT INTO plan_usage (user_id, usage_key, period_start, period_end, \`count\`, limit_value, updated_at)
     VALUES (?, ?, ?, ?, 1, ?, NOW())
     ON DUPLICATE KEY UPDATE
-      \`count\` = IF(\`count\` < ?, \`count\` + 1, \`count\`),
+      \`count\` = \`count\` + 1,
       limit_value = ?,
       updated_at = NOW()
-  `, [userId, usageKey, periodStart, periodEnd, limit, limit, limit]);
+  `, [userId, usageKey, periodStart, periodEnd, limit, limit]);
 
   const row = await db('plan_usage')
     .where('user_id', userId)
