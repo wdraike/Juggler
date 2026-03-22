@@ -12,8 +12,14 @@ COPY package.json package-lock.json* ./
 RUN sed -i 's|"file:../shared"|"file:/shared"|g' package.json package-lock.json && \
     npm ci --legacy-peer-deps && \
     mkdir -p node_modules/bug-reporter-client && \
-    echo "module.exports={BugReporterClient:function(){return{submitReport:function(){return Promise.resolve()}}}};" > node_modules/bug-reporter-client/index.js && \
-    echo '{"name":"bug-reporter-client","version":"1.0.0","main":"index.js"}' > node_modules/bug-reporter-client/package.json
+    echo "module.exports.createBugReporterClient=function(){return{submitReport:function(){return Promise.resolve()},init:function(){}}};" > node_modules/bug-reporter-client/index.js && \
+    echo '{"name":"bug-reporter-client","version":"1.0.0","main":"index.js"}' > node_modules/bug-reporter-client/package.json && \
+    mkdir -p node_modules/html2canvas && \
+    echo "module.exports=function(){return Promise.resolve(document.createElement('canvas'))};" > node_modules/html2canvas/index.js && \
+    echo '{"name":"html2canvas","version":"1.0.0","main":"index.js"}' > node_modules/html2canvas/package.json && \
+    mkdir -p node_modules/react-konva && \
+    echo "var R=require('react');var e=function(p){return R.createElement('div',null)};module.exports={Stage:e,Layer:e,Image:e,Line:e,Arrow:e,Text:e,Rect:e};" > node_modules/react-konva/index.js && \
+    echo '{"name":"react-konva","version":"1.0.0","main":"index.js"}' > node_modules/react-konva/package.json
 
 # Copy application code
 COPY . .
