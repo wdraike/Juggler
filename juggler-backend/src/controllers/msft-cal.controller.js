@@ -276,8 +276,37 @@ function markCodeUsed(code) {
 
 async function getStatus(req, res) {
   try {
-    var connected = !!req.user.msft_cal_refresh_token;
+    var hasToken = !!req.user.msft_cal_refresh_token;
     var lastSyncedAt = req.user.msft_cal_last_synced_at || null;
+    var connected = false;
+    var tokenExpired = false;
+
+    if (hasToken) {
+      try {
+        var creds = await msftCalApi.refreshAccessToken(req.user.msft_cal_refresh_token);
+
+        var update = { msft_cal_access_token: creds.accessToken, updated_at: db.fn.now() };
+        if (creds.expiresOn) update.msft_cal_token_expiry = new Date(creds.expiresOn);
+        if (creds.refreshToken) update.msft_cal_refresh_token = creds.refreshToken;
+        await db('users').where('id', req.user.id).update(update);
+
+        connected = true;
+      } catch (tokenErr) {
+        var msg = tokenErr.message || '';
+        if (msg.includes('invalid_grant') || msg.includes('AADSTS') || msg.includes('expired')) {
+          await db('users').where('id', req.user.id).update({
+            msft_cal_access_token: null,
+            msft_cal_refresh_token: null,
+            msft_cal_token_expiry: null,
+            updated_at: db.fn.now()
+          });
+          tokenExpired = true;
+          connected = false;
+        } else {
+          connected = true;
+        }
+      }
+    }
 
     var autoSyncRow = await db('user_config')
       .where({ user_id: req.user.id, config_key: 'msft_cal_auto_sync' })
@@ -289,7 +318,13 @@ async function getStatus(req, res) {
       autoSync = !!val;
     }
 
-    res.json({ connected: connected, email: req.user.email, lastSyncedAt: lastSyncedAt, autoSync: autoSync });
+    res.json({
+      connected: connected,
+      tokenExpired: tokenExpired,
+      email: req.user.email,
+      lastSyncedAt: lastSyncedAt,
+      autoSync: autoSync
+    });
   } catch (error) {
     console.error('MsftCal status error:', error);
     res.status(500).json({ error: 'Failed to check Microsoft Calendar status' });

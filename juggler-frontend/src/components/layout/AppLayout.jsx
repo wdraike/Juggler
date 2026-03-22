@@ -168,23 +168,27 @@ export default function AppLayout() {
       .then(function(r) {
         setGcalAutoSync(!!r.data.autoSync);
         setGcalLastSyncedAt(r.data.lastSyncedAt || null);
+        if (r.data.tokenExpired) {
+          showToast('Google Calendar connection expired. Please reconnect in Calendar Sync settings.', 'error');
+        }
       })
       .catch(function() { /* not connected */ });
     apiClient.get('/msft-cal/status')
       .then(function(r) {
         setMsftCalAutoSync(!!r.data.autoSync);
         setMsftCalLastSyncedAt(r.data.lastSyncedAt || null);
+        if (r.data.tokenExpired) {
+          showToast('Microsoft Calendar connection expired. Please reconnect in Calendar Sync settings.', 'error');
+        }
       })
       .catch(function() { /* not connected */ });
   }, []);
 
-  // Combined calendar auto-sync: runs GCal then Microsoft sequentially
+  // Combined calendar auto-sync: lightweight check every 2 min, full sync only when changes detected
   useEffect(() => {
     if (!gcalAutoSync && !msftCalAutoSync) return;
 
-    function runCombinedSync() {
-      if (editingRef.current) return;
-
+    function runFullSync() {
       setGcalSyncing(true);
       setMsftCalSyncing(true);
       apiClient.post('/cal/sync').then(function(r) {
@@ -194,14 +198,38 @@ export default function AppLayout() {
         if (r.data.pushed || r.data.pulled || r.data.deleted_local || r.data.deleted_remote) {
           loadTasks().then(function() { loadPlacements(); });
         }
-      }).catch(function() { /* silent */ }).finally(function() {
+        if (r.data.errors && r.data.errors.some(function(e) { return e.tokenExpired; })) {
+          showToast('Calendar connection expired. Please reconnect in Calendar Sync settings.', 'error');
+        }
+      }).catch(function(e) {
+        var hasTokenExpiry = e.response?.data?.errors?.some(function(err) { return err.tokenExpired; });
+        if (hasTokenExpiry) {
+          showToast('Calendar connection expired. Please reconnect in Calendar Sync settings.', 'error');
+        }
+      }).finally(function() {
         setGcalSyncing(false);
         setMsftCalSyncing(false);
       });
     }
 
-    var initialTimer = setTimeout(runCombinedSync, 5000);
-    var intervalId = setInterval(runCombinedSync, 5 * 60 * 1000);
+    function checkAndSync() {
+      if (editingRef.current) return;
+
+      // Lightweight check first — only full sync if something changed
+      apiClient.get('/cal/has-changes').then(function(r) {
+        if (r.data.hasChanges) {
+          runFullSync();
+        }
+      }).catch(function() {
+        // If the check fails, fall back to a full sync
+        runFullSync();
+      });
+    }
+
+    // Initial sync on load (full sync to catch up)
+    var initialTimer = setTimeout(runFullSync, 5000);
+    // Then lightweight check every 2 minutes
+    var intervalId = setInterval(checkAndSync, 2 * 60 * 1000);
 
     return function() {
       clearTimeout(initialTimer);

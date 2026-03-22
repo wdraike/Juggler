@@ -46,11 +46,36 @@ async function getValidAccessToken(user) {
 
 /**
  * Fetch events from GCal and normalize to unified shape.
+ * Also saves the nextSyncToken to the user record for future lightweight checks.
  */
-async function listEvents(token, timeMin, timeMax) {
+async function listEvents(token, timeMin, timeMax, userId) {
   var result = await gcalApi.listEvents(token, timeMin, timeMax);
   var events = (result && result.items) || [];
+
+  // Store the sync token for future lightweight change detection
+  if (result.nextSyncToken && userId) {
+    await db('users').where('id', userId).update({ gcal_sync_token: result.nextSyncToken });
+  }
+
   return events.map(normalizeEvent);
+}
+
+/**
+ * Lightweight check: ask Google if anything changed since the last sync.
+ * Uses the stored sync token. Returns { hasChanges, nextSyncToken }.
+ */
+async function hasChanges(token, user) {
+  var syncToken = user.gcal_sync_token;
+  if (!syncToken) return { hasChanges: true }; // No token yet — need full sync
+
+  var result = await gcalApi.checkForChanges(token, syncToken);
+
+  // If Google returned a new sync token with no changes, save it
+  if (!result.hasChanges && result.nextSyncToken && result.nextSyncToken !== syncToken) {
+    await db('users').where('id', user.id).update({ gcal_sync_token: result.nextSyncToken });
+  }
+
+  return result;
 }
 
 /**
@@ -220,6 +245,7 @@ module.exports = {
   isConnected,
   getValidAccessToken,
   listEvents,
+  hasChanges,
   normalizeEvent,
   createEvent,
   updateEvent,

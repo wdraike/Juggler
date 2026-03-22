@@ -173,12 +173,44 @@ async function deleteEvent(accessToken, eventId) {
   });
 }
 
+/**
+ * Lightweight check using Microsoft Graph delta query.
+ * Returns { hasChanges, deltaLink }.
+ * If the deltaLink is invalid/expired, returns { hasChanges: true, tokenInvalid: true }.
+ */
+async function checkForChanges(accessToken, deltaLink) {
+  try {
+    // deltaLink is a full URL — extract the path after the Graph base
+    var path = deltaLink;
+    if (path.startsWith(GRAPH_BASE)) {
+      path = path.substring(GRAPH_BASE.length);
+    }
+
+    var data = await graphFetch(accessToken, path);
+    var items = (data && data.value) || [];
+    var newDeltaLink = data && data['@odata.deltaLink'] ? data['@odata.deltaLink'] : deltaLink;
+
+    return {
+      hasChanges: items.length > 0,
+      changedCount: items.length,
+      deltaLink: newDeltaLink
+    };
+  } catch (err) {
+    // Expired delta token — need full sync
+    if (err.message && (err.message.includes('410') || err.message.includes('syncStateNotFound'))) {
+      return { hasChanges: true, tokenInvalid: true };
+    }
+    throw err;
+  }
+}
+
 module.exports = {
   generatePkce,
   getAuthUrl,
   getTokensFromCode,
   refreshAccessToken,
   listEvents,
+  checkForChanges,
   insertEvent,
   patchEvent,
   deleteEvent

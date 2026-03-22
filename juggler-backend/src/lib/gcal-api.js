@@ -59,6 +59,7 @@ async function calendarFetch(accessToken, path, options = {}) {
 async function listEvents(accessToken, timeMin, timeMax) {
   var allItems = [];
   var pageToken = null;
+  var nextSyncToken = null;
 
   do {
     var params = new URLSearchParams({
@@ -75,9 +76,35 @@ async function listEvents(accessToken, timeMin, timeMax) {
       allItems = allItems.concat(data.items);
     }
     pageToken = data && data.nextPageToken ? data.nextPageToken : null;
+    if (data && data.nextSyncToken) nextSyncToken = data.nextSyncToken;
   } while (pageToken);
 
-  return { items: allItems };
+  return { items: allItems, nextSyncToken: nextSyncToken };
+}
+
+/**
+ * Lightweight check: use a sync token to ask Google if anything changed.
+ * Returns { hasChanges, changedCount, nextSyncToken, items }.
+ * If the sync token is invalid/expired (410), returns { hasChanges: true, tokenInvalid: true }.
+ */
+async function checkForChanges(accessToken, syncToken) {
+  try {
+    var params = new URLSearchParams({ syncToken: syncToken, maxResults: '1' });
+    var data = await calendarFetch(accessToken, '/calendars/primary/events?' + params.toString());
+
+    var items = (data && data.items) || [];
+    return {
+      hasChanges: items.length > 0,
+      changedCount: items.length,
+      nextSyncToken: data && data.nextSyncToken ? data.nextSyncToken : syncToken
+    };
+  } catch (err) {
+    // 410 Gone = sync token expired, need full sync
+    if (err.message && err.message.includes('410')) {
+      return { hasChanges: true, tokenInvalid: true };
+    }
+    throw err;
+  }
 }
 
 async function insertEvent(accessToken, event) {
@@ -106,6 +133,7 @@ module.exports = {
   getTokensFromCode,
   refreshAccessToken,
   listEvents,
+  checkForChanges,
   insertEvent,
   patchEvent,
   deleteEvent

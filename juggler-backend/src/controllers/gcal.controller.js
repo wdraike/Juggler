@@ -167,8 +167,42 @@ function applyEventToTask(event, timezone) {
 
 async function getStatus(req, res) {
   try {
-    var connected = !!req.user.gcal_refresh_token;
+    var hasToken = !!req.user.gcal_refresh_token;
     var lastSyncedAt = req.user.gcal_last_synced_at || null;
+    var connected = false;
+    var tokenExpired = false;
+
+    if (hasToken) {
+      // Validate the token by attempting a refresh
+      try {
+        var gcalApi = require('../lib/gcal-api');
+        var oauth2Client = gcalApi.createOAuth2Client();
+        var creds = await gcalApi.refreshAccessToken(oauth2Client, req.user.gcal_refresh_token);
+
+        // Token is valid — update it in DB
+        var update = { gcal_access_token: creds.access_token, updated_at: db.fn.now() };
+        if (creds.expiry_date) update.gcal_token_expiry = new Date(creds.expiry_date);
+        await db('users').where('id', req.user.id).update(update);
+
+        connected = true;
+      } catch (tokenErr) {
+        var msg = tokenErr.message || '';
+        if (msg.includes('invalid_grant') || msg.includes('Token has been expired or revoked')) {
+          // Token is dead — clear it so the user can reconnect
+          await db('users').where('id', req.user.id).update({
+            gcal_access_token: null,
+            gcal_refresh_token: null,
+            gcal_token_expiry: null,
+            updated_at: db.fn.now()
+          });
+          tokenExpired = true;
+          connected = false;
+        } else {
+          // Transient error (network, etc.) — report connected but note the error
+          connected = true;
+        }
+      }
+    }
 
     var autoSyncRow = await db('user_config')
       .where({ user_id: req.user.id, config_key: 'gcal_auto_sync' })
@@ -180,7 +214,13 @@ async function getStatus(req, res) {
       autoSync = !!val;
     }
 
-    res.json({ connected: connected, email: req.user.email, lastSyncedAt: lastSyncedAt, autoSync: autoSync });
+    res.json({
+      connected: connected,
+      tokenExpired: tokenExpired,
+      email: req.user.email,
+      lastSyncedAt: lastSyncedAt,
+      autoSync: autoSync
+    });
   } catch (error) {
     console.error('GCal status error:', error);
     res.status(500).json({ error: 'Failed to check GCal status' });

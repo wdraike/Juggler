@@ -84,7 +84,7 @@ async function sync(req, res) {
         var token = await adapter.getValidAccessToken(req.user);
         var timeMin = windowStart.toISOString();
         var timeMax = windowEnd.toISOString();
-        var events = await adapter.listEvents(token, timeMin, timeMax);
+        var events = await adapter.listEvents(token, timeMin, timeMax, userId);
 
         var eventsById = {};
         for (var ei = 0; ei < events.length; ei++) {
@@ -94,8 +94,29 @@ async function sync(req, res) {
         providerData[adapter.providerId] = { token: token, events: events, eventsById: eventsById, adapter: adapter };
         stats.providers[adapter.providerId] = { pushed: 0, pulled: 0, deleted_local: 0, deleted_remote: 0, errors: [] };
       } catch (err) {
-        stats.errors.push({ phase: 'fetch', provider: adapter.providerId, error: err.message });
-        stats.providers[adapter.providerId] = { error: err.message };
+        var errMsg = err.message || '';
+        var isTokenExpired = errMsg.includes('invalid_grant') || errMsg.includes('Token has been expired or revoked');
+
+        if (isTokenExpired) {
+          // Clear dead token so status endpoint reports disconnected
+          var eventIdCol = adapter.getEventIdColumn();
+          var tokenCols = eventIdCol === 'gcal_event_id'
+            ? { gcal_access_token: null, gcal_refresh_token: null, gcal_token_expiry: null }
+            : { msft_access_token: null, msft_refresh_token: null, msft_token_expiry: null };
+          await db('users').where('id', userId).update({ ...tokenCols, updated_at: db.fn.now() });
+        }
+
+        stats.errors.push({
+          phase: 'fetch',
+          provider: adapter.providerId,
+          error: errMsg,
+          tokenExpired: isTokenExpired,
+          action: isTokenExpired ? 'Please reconnect your calendar in Settings' : undefined
+        });
+        stats.providers[adapter.providerId] = {
+          error: errMsg,
+          tokenExpired: isTokenExpired
+        };
       }
     }
 
@@ -617,4 +638,66 @@ async function sync(req, res) {
   }
 }
 
-module.exports = { sync };
+/**
+ * GET /api/cal/has-changes — lightweight check if any connected calendar has changes.
+ * Uses Google sync tokens to avoid fetching all events.
+ * Returns { hasChanges: true/false, providers: { gcal: { hasChanges }, ... } }
+ */
+async function hasChanges(req, res) {
+  try {
+    var connectedAdapters = getConnectedAdapters(req.user);
+    if (connectedAdapters.length === 0) {
+      return res.json({ hasChanges: false, providers: {} });
+    }
+
+    var result = { hasChanges: false, providers: {} };
+
+    for (var i = 0; i < connectedAdapters.length; i++) {
+      var adapter = connectedAdapters[i];
+      try {
+        if (!adapter.hasChanges) {
+          // Adapter doesn't support lightweight check — assume changes
+          result.providers[adapter.providerId] = { hasChanges: true, reason: 'no_sync_token_support' };
+          result.hasChanges = true;
+          continue;
+        }
+
+        var token = await adapter.getValidAccessToken(req.user);
+        var check = await adapter.hasChanges(token, req.user);
+        result.providers[adapter.providerId] = check;
+        if (check.hasChanges) result.hasChanges = true;
+      } catch (err) {
+        var msg = err.message || '';
+        if (msg.includes('invalid_grant') || msg.includes('Token has been expired or revoked')) {
+          result.providers[adapter.providerId] = { hasChanges: false, tokenExpired: true };
+        } else {
+          result.providers[adapter.providerId] = { hasChanges: true, error: msg };
+          result.hasChanges = true;
+        }
+      }
+    }
+
+    // Also check if there are local task changes since last sync
+    var userId = req.user.id;
+    var lastSynced = req.user.gcal_last_synced_at;
+    if (lastSynced) {
+      var localChanges = await db('tasks')
+        .where('user_id', userId)
+        .whereNotNull('scheduled_at')
+        .where('updated_at', '>', lastSynced)
+        .count('* as cnt')
+        .first();
+      if (localChanges && parseInt(localChanges.cnt) > 0) {
+        result.hasChanges = true;
+        result.localChanges = parseInt(localChanges.cnt);
+      }
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('Cal has-changes error:', error);
+    res.status(500).json({ error: 'Failed to check for changes' });
+  }
+}
+
+module.exports = { sync, hasChanges };

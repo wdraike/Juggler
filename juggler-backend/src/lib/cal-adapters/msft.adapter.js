@@ -104,10 +104,27 @@ async function getValidAccessToken(user) {
 /**
  * Fetch events from Microsoft Calendar and normalize to unified shape.
  */
-async function listEvents(token, timeMin, timeMax) {
+async function listEvents(token, timeMin, timeMax, userId) {
   var result = await msftCalApi.listEvents(token, timeMin, timeMax);
   var events = (result && result.items) || [];
   return events.map(normalizeEvent);
+}
+
+/**
+ * Lightweight check: ask Microsoft if anything changed since the last sync.
+ * Uses delta link. Returns { hasChanges, deltaLink }.
+ */
+async function hasChanges(token, user) {
+  var deltaLink = user.msft_cal_delta_link;
+  if (!deltaLink) return { hasChanges: true }; // No delta link yet — need full sync
+
+  var result = await msftCalApi.checkForChanges(token, deltaLink);
+
+  if (!result.hasChanges && result.deltaLink && result.deltaLink !== deltaLink) {
+    await db('users').where('id', user.id).update({ msft_cal_delta_link: result.deltaLink });
+  }
+
+  return result;
 }
 
 /**
@@ -309,6 +326,7 @@ module.exports = {
   isConnected,
   getValidAccessToken,
   listEvents,
+  hasChanges,
   normalizeEvent,
   createEvent,
   updateEvent,

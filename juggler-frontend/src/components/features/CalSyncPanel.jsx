@@ -32,16 +32,24 @@ export default function CalSyncPanel({
   // Per-provider connection state
   var [gcalConnected, setGcalConnected] = useState(null);
   var [gcalConnecting, setGcalConnecting] = useState(false);
+  var [gcalTokenExpired, setGcalTokenExpired] = useState(false);
   var [msftConnected, setMsftConnected] = useState(null);
   var [msftConnecting, setMsftConnecting] = useState(false);
+  var [msftTokenExpired, setMsftTokenExpired] = useState(false);
 
   // Check connection status on mount
   useEffect(() => {
     apiClient.get('/gcal/status')
-      .then(function(r) { setGcalConnected(r.data.connected); })
+      .then(function(r) {
+        setGcalConnected(r.data.connected);
+        setGcalTokenExpired(!!r.data.tokenExpired);
+      })
       .catch(function() { setGcalConnected(false); });
     apiClient.get('/msft-cal/status')
-      .then(function(r) { setMsftConnected(r.data.connected); })
+      .then(function(r) {
+        setMsftConnected(r.data.connected);
+        setMsftTokenExpired(!!r.data.tokenExpired);
+      })
       .catch(function() { setMsftConnected(false); });
   }, []);
 
@@ -175,7 +183,23 @@ export default function CalSyncPanel({
       if (e.response?.status === 409) {
         showToast('Sync already in progress, please wait', 'info');
       } else {
-        showToast('Sync failed: ' + (e.response?.data?.error || e.message), 'error');
+        // Check if any provider had a token expiry
+        var respData = e.response?.data;
+        var hasTokenExpiry = respData?.errors?.some(function(err) { return err.tokenExpired; });
+        if (hasTokenExpiry) {
+          showToast('Calendar connection expired. Please reconnect below.', 'error');
+          // Refresh connection status
+          apiClient.get('/gcal/status').then(function(r) {
+            setGcalConnected(r.data.connected);
+            setGcalTokenExpired(!!r.data.tokenExpired);
+          }).catch(function() {});
+          apiClient.get('/msft-cal/status').then(function(r) {
+            setMsftConnected(r.data.connected);
+            setMsftTokenExpired(!!r.data.tokenExpired);
+          }).catch(function() {});
+        } else {
+          showToast('Sync failed: ' + (respData?.error || e.message), 'error');
+        }
       }
     } finally {
       setSyncing(false);
@@ -200,18 +224,20 @@ export default function CalSyncPanel({
     );
   }
 
-  function renderProvider(label, connected, connecting, accentColor, autoSync, onConnect, onDisconnect, onToggleAutoSync) {
+  function renderProvider(label, connected, connecting, accentColor, autoSync, onConnect, onDisconnect, onToggleAutoSync, tokenExpired) {
+    var statusColor = tokenExpired ? '#C8942A' : connected ? '#2D6A4F' : theme.border;
     return (
       <div style={{
         padding: '12px 0', borderBottom: '1px solid ' + theme.border
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: connected ? 8 : 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: (connected || tokenExpired) ? 8 : 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{
               display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-              background: connected ? '#2D6A4F' : theme.border
+              background: statusColor
             }} />
             <span style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>{label}</span>
+            {tokenExpired && <span style={{ fontSize: 10, color: '#C8942A', fontWeight: 600 }}>Expired</span>}
           </div>
           {connected === null && (
             <span style={{ fontSize: 11, color: theme.textMuted }}>Checking...</span>
@@ -268,9 +294,23 @@ export default function CalSyncPanel({
 
         {/* Provider sections */}
         {renderProvider('Google Calendar', gcalConnected, gcalConnecting, theme.accent,
-          gcalAutoSync, handleGcalConnect, handleGcalDisconnect, handleGcalAutoSync)}
+          gcalAutoSync, handleGcalConnect, handleGcalDisconnect, handleGcalAutoSync, gcalTokenExpired)}
         {renderProvider('Microsoft Calendar', msftConnected, msftConnecting, '#2E4A7A',
-          msftAutoSync, handleMsftConnect, handleMsftDisconnect, handleMsftAutoSync)}
+          msftAutoSync, handleMsftConnect, handleMsftDisconnect, handleMsftAutoSync, msftTokenExpired)}
+
+        {/* Token expired warning */}
+        {(gcalTokenExpired || msftTokenExpired) && (
+          <div style={{
+            padding: '10px 12px', margin: '12px 0 0', borderRadius: 2,
+            background: '#FEF3C7', border: '1px solid #C8942A',
+            color: '#92400E', fontSize: 12, lineHeight: 1.5
+          }}>
+            <strong style={{ display: 'block', marginBottom: 2 }}>Calendar connection expired</strong>
+            {gcalTokenExpired && 'Google Calendar authorization has expired. '}
+            {msftTokenExpired && 'Microsoft Calendar authorization has expired. '}
+            Please disconnect and reconnect to restore sync.
+          </div>
+        )}
 
         {/* Last synced */}
         <div style={{ padding: '12px 0', borderBottom: '1px solid ' + theme.border }}>
