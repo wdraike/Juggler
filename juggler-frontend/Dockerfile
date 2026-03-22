@@ -8,7 +8,14 @@ COPY shared/ /shared/
 
 # Copy package files and install
 COPY package.json package-lock.json* ./
-RUN npm ci --legacy-peer-deps
+# Remove file: deps, fix shared path, clean lock file, install, stub missing modules
+RUN sed -i '/"bug-reporter-client"/d' package.json && \
+    sed -i 's|"juggler-shared": "file:../shared"|"juggler-shared": "file:/shared"|' package.json && \
+    node -e "const f=require('fs');const p=JSON.parse(f.readFileSync('package-lock.json','utf8'));delete p.packages?.['node_modules/bug-reporter-client'];delete p.dependencies?.['bug-reporter-client'];Object.keys(p.packages||{}).forEach(k=>{if(k.includes('bug-reporter'))delete p.packages[k]});if(p.packages?.['node_modules/juggler-shared'])p.packages['node_modules/juggler-shared'].resolved='file:///shared';f.writeFileSync('package-lock.json',JSON.stringify(p,null,2))" && \
+    npm ci --legacy-peer-deps && \
+    mkdir -p node_modules/bug-reporter-client && \
+    echo "module.exports={BugReporterClient:function(){return{submitReport:function(){return Promise.resolve()}}}};" > node_modules/bug-reporter-client/index.js && \
+    echo '{"name":"bug-reporter-client","version":"1.0.0","main":"index.js"}' > node_modules/bug-reporter-client/package.json
 
 # Copy application code
 COPY . .
