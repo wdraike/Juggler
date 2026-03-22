@@ -11,6 +11,7 @@ export default function useKeyboardShortcuts({
   statuses,
   allTasks,
   expandedTask,
+  expandedInstanceMap,
   setExpandedTask,
   setDayOffset,
   setShowSettings,
@@ -25,7 +26,7 @@ export default function useKeyboardShortcuts({
   popUndoRef.current = popUndo;
 
   stateRef.current = {
-    selectedDate, tasksByDate, expandedTask, allTasks, statuses, filter
+    selectedDate, tasksByDate, expandedTask, expandedInstanceMap, allTasks, statuses, filter
   };
 
   useEffect(() => {
@@ -88,11 +89,13 @@ export default function useKeyboardShortcuts({
       // S: cycle status on expanded task
       if (e.key === 's' && st.expandedTask) {
         var cycle = ['', 'wip', 'done'];
-        var ct = st.allTasks.find(t => t.id === st.expandedTask);
+        // For habit templates opened via an instance, use the instance ID for status
+        var statusTarget = (st.expandedInstanceMap && st.expandedInstanceMap[st.expandedTask]) || st.expandedTask;
+        var ct = st.allTasks.find(t => t.id === statusTarget);
         if (ct) {
           var curSt = st.statuses[ct.id] || '';
           var ci = cycle.indexOf(curSt);
-          onStatusChange(st.expandedTask, cycle[(ci + 1) % cycle.length]);
+          onStatusChange(statusTarget, cycle[(ci + 1) % cycle.length]);
         }
       }
     }

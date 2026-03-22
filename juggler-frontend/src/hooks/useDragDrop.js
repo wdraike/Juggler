@@ -1,11 +1,51 @@
 /**
  * useDragDrop — grid drag (reschedule time/date), date drag (month view), priority drag
+ *
+ * When a recurring habit is moved to a day outside its recurrence pattern,
+ * onRecurDayConflict is called instead of onUpdate, giving the caller a
+ * chance to prompt the user before committing the change.
  */
 
 import { useCallback } from 'react';
 import { GRID_START } from '../state/constants';
+import { parseDate } from '../scheduler/dateHelpers';
 
-export default function useDragDrop({ allTasks, onUpdate, gridZoom, showToast }) {
+var DAY_CODES = ['U', 'M', 'T', 'W', 'R', 'F', 'S']; // Sun=0 … Sat=6
+var DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/**
+ * Check if moving a task to targetDateKey conflicts with its recurrence days.
+ * Returns { conflicting: true, dayCode, dayLabel, recurDays } or null.
+ */
+function checkRecurDayConflict(task, targetDateKey, allTasks) {
+  if (!task || !task.habit) return null;
+  // Resolve recur from task or its source template
+  var recur = task.recur;
+  if (!recur && task.sourceId) {
+    var src = allTasks.find(function(t) { return t.id === task.sourceId; });
+    if (src) recur = src.recur;
+  }
+  if (!recur) return null;
+  if (recur.type !== 'weekly' && recur.type !== 'biweekly') return null;
+  if (!recur.days) return null;
+
+  var targetDate = parseDate(targetDateKey);
+  if (!targetDate) return null;
+  var targetDow = targetDate.getDay(); // 0=Sun … 6=Sat
+  var targetDayCode = DAY_CODES[targetDow];
+
+  if (recur.days.indexOf(targetDayCode) >= 0) return null; // day is already allowed
+
+  return {
+    conflicting: true,
+    dayCode: targetDayCode,
+    dayLabel: DAY_LABELS[targetDow],
+    recurDays: recur.days,
+    recur: recur
+  };
+}
+
+export default function useDragDrop({ allTasks, onUpdate, gridZoom, showToast, onRecurDayConflict }) {
   var PX_PER_HOUR = gridZoom;
   var PX_PER_MIN = PX_PER_HOUR / 60;
 
@@ -29,11 +69,23 @@ export default function useDragDrop({ allTasks, onUpdate, gridZoom, showToast })
     var task = allTasks.find(t => t.id === taskId);
     if (task && task.date !== targetDateKey) {
       fields.date = targetDateKey;
+
+      // Check if the move conflicts with recurrence days
+      var conflict = checkRecurDayConflict(task, targetDateKey, allTasks);
+      if (conflict && onRecurDayConflict) {
+        onRecurDayConflict({
+          taskId: taskId,
+          task: task,
+          fields: fields,
+          conflict: conflict
+        });
+        return;
+      }
     }
 
     onUpdate(taskId, fields);
     if (showToast) showToast('Moved to ' + newTime, 'success');
-  }, [allTasks, onUpdate, PX_PER_MIN, showToast]);
+  }, [allTasks, onUpdate, PX_PER_MIN, showToast, onRecurDayConflict]);
 
   // Date-only drop: for month view — just change date
   var handleDateDrop = useCallback((e, targetDateKey) => {
@@ -46,9 +98,21 @@ export default function useDragDrop({ allTasks, onUpdate, gridZoom, showToast })
 
     var fields = { date: targetDateKey };
 
+    // Check if the move conflicts with recurrence days
+    var conflict = checkRecurDayConflict(task, targetDateKey, allTasks);
+    if (conflict && onRecurDayConflict) {
+      onRecurDayConflict({
+        taskId: taskId,
+        task: task,
+        fields: fields,
+        conflict: conflict
+      });
+      return;
+    }
+
     onUpdate(taskId, fields);
     if (showToast) showToast('Moved to ' + targetDateKey, 'success');
-  }, [allTasks, onUpdate, showToast]);
+  }, [allTasks, onUpdate, showToast, onRecurDayConflict]);
 
   // Priority drop: change task's priority level
   var handlePriorityDrop = useCallback((taskId, newPri) => {

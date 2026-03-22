@@ -677,12 +677,29 @@ async function batchUpdateTasks(req, res) {
             }
             delete row._pendingTimeOnly;
 
+            // Date-only update: combine new date with existing time
+            // When only date was sent (no time field in the update), scheduled_at
+            // would default to midnight. Preserve the existing time instead.
+            if (row.scheduled_at && existing && existing.scheduled_at
+                && update.date !== undefined && update.time === undefined) {
+              var existLocal = utcToLocal(existing.scheduled_at, tz);
+              if (existLocal && existLocal.time) {
+                var newDate = update.date;
+                row.scheduled_at = localToUtc(newDate, existLocal.time, tz) || row.scheduled_at;
+              }
+            }
+
             // Habits cannot have dependencies — strip if provided
             if (existing && (existing.task_type === 'habit_template' || existing.task_type === 'habit_instance')) {
               delete row.depends_on;
             }
 
             var taskType = existing ? (existing.task_type || 'task') : 'task';
+
+            // Never set status on a habit template — status belongs on instances only
+            if (taskType === 'habit_template' && row.status !== undefined) {
+              delete row.status;
+            }
 
             if (taskType === 'habit_instance' && existing && existing.source_id) {
               // Route template fields to source, instance fields to this row

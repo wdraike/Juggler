@@ -152,7 +152,7 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
             </div>
             <button onClick={handleConnect} disabled={connecting} title="Authorize Raike &amp; Sons to read and write your Google Calendar" style={{
               border: 'none', borderRadius: 8, padding: '10px 24px',
-              background: theme.accent, color: '#FFF', fontWeight: 600, fontSize: 13,
+              background: theme.accent, color: '#FDFAF5', fontWeight: 600, fontSize: 13,
               cursor: 'pointer', fontFamily: 'inherit', opacity: connecting ? 0.5 : 1
             }}>
               {connecting ? 'Connecting...' : 'Connect Google Calendar'}
@@ -183,7 +183,7 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
                 }} />
                 <span style={{
                   position: 'absolute', top: 2, left: autoSync ? 20 : 2,
-                  width: 18, height: 18, background: '#FFF', borderRadius: '50%',
+                  width: 18, height: 18, background: '#FDFAF5', borderRadius: '50%',
                   transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
                 }} />
               </label>
@@ -200,7 +200,7 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
             <div style={{ padding: '16px 0' }}>
               <button onClick={handleSyncNow} disabled={syncing} title="Manually trigger a sync with Google Calendar now" style={{
                 border: 'none', borderRadius: 8, padding: '10px 20px', width: '100%',
-                background: theme.accent, color: '#FFF', fontWeight: 600, fontSize: 13,
+                background: theme.accent, color: '#FDFAF5', fontWeight: 600, fontSize: 13,
                 cursor: 'pointer', fontFamily: 'inherit', opacity: syncing ? 0.5 : 1
               }}>
                 {syncing ? 'Syncing...' : 'Sync Now'}

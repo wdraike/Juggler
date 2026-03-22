@@ -178,11 +178,9 @@ export default function useTaskState() {
     // Immediately save to API, then refresh placements in background (non-blocking)
     setSaving(true);
     try {
-      // Resolve generated/instance tasks to their source template for API persistence
-      var effectiveId = id;
-      var task = taskStateRef.current.tasks.find(function(t) { return t.id === id; });
-      if (task && task.sourceId) effectiveId = task.sourceId;
-      var partial = Object.assign({ id: effectiveId }, fields);
+      // Send the actual task ID — the backend routes template fields to the
+      // source and instance fields to the instance for habit_instance tasks.
+      var partial = Object.assign({ id: id }, fields);
       await apiClient.put('/tasks/batch', { updates: [partial] });
       dispatch({ type: 'CLEAR_DIRTY_TASKS', ids: [id], savedFields: { [id]: fields } });
       // If a scheduling-relevant field changed, wait for the backend's

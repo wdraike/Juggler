@@ -18,6 +18,12 @@ export var BRAND = {
   success: '#2D6A4F',
   warning: '#C8942A',
   error: '#8B2635',
+  // Extended UI palette (functional accents, not for marketing)
+  indigo: '#4338CA',
+  teal: '#0D9488',
+  amber: '#D97706',
+  slate: '#475569',
+  rose: '#E11D48',
 };
 
 export const THEME_DARK = {

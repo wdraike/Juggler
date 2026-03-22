@@ -9,6 +9,8 @@ import { getTheme, BRAND } from '../../theme/colors';
 import { DAY_NAMES } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 
+var BILLING_URL = process.env.REACT_APP_BILLING_URL || 'http://localhost:3003';
+
 export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, onShowCalSync, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today }) {
   var theme = getTheme(darkMode);
   var { user, logout } = useAuth();
@@ -37,8 +39,9 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
     overflowItems.push({ label: 'Import/Export', icon: '\uD83D\uDCE6', onClick: onShowExport });
     if (onShowCalSync || onShowGCalSync || onShowMsftCalSync) overflowItems.push({ label: 'Calendar Sync', icon: '\uD83D\uDCC5', onClick: onShowCalSync || onShowGCalSync || onShowMsftCalSync });
     if (onShowHelp) overflowItems.push({ label: 'Help', icon: '\u2753', onClick: onShowHelp });
+    overflowItems.push({ label: 'Billing', icon: '\uD83D\uDCB3', onClick: function() { window.open(BILLING_URL + '/plans', '_blank'); } });
     overflowItems.push({ label: darkMode ? 'Light Mode' : 'Dark Mode', icon: darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19', onClick: function() { setDarkMode(function(d) { return !d; }); } });
-    if (user) overflowItems.push({ label: 'Logout', icon: '\uD83D\uDEAA', onClick: logout });
+    if (user) overflowItems.push({ label: 'Sign Out', icon: '\uD83D\uDEAA', onClick: logout });
   }
 
   return (
@@ -127,7 +130,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
       <div style={{ display: 'flex', alignItems: 'center', gap: 'inherit', ...(isMobile ? { marginLeft: 'auto' } : {}) }}>
         {saving && <span style={{ fontSize: 11, color: theme.textMuted }}>Saving...</span>}
 
-        {onAddTask && <button onClick={onAddTask} style={{ ...btnStyle(theme, isMobile), fontSize: 20, fontWeight: 700, color: '#10B981' }} title="Add task">+</button>}
+        {onAddTask && <button onClick={onAddTask} style={{ ...btnStyle(theme, isMobile), fontSize: 20, fontWeight: 700, color: '#2D6A4F' }} title="Add task">+</button>}
 
         {/* Desktop: show all buttons inline */}
         {!isMobile && (
@@ -141,6 +144,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
               </button>
             )}
             {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help guide \u2014 how the scheduler works, task properties, keyboard shortcuts">&#x2753;</button>}
+            <button onClick={() => { window.open(BILLING_URL + '/plans', '_blank'); }} style={btnStyle(theme, isMobile)} title="Billing &amp; Subscription">&#x1F4B3;</button>
             <button onClick={() => setDarkMode(d => !d)} style={btnStyle(theme, isMobile)} title="Toggle dark mode">
               {darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19'}
             </button>
@@ -149,7 +153,18 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
                 {user.picture && (
                   <img src={user.picture} alt="" style={{ width: 24, height: 24, borderRadius: 12 }} />
                 )}
-                <button onClick={logout} style={{ ...btnStyle(theme, isMobile), fontSize: 11 }}>Logout</button>
+                <button onClick={logout} title="Sign out of your account" style={{
+                  ...btnStyle(theme, isMobile), fontSize: 11, display: 'flex', alignItems: 'center', gap: 4,
+                  transition: 'color 0.2s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.color = '#8B2635'}
+                onMouseLeave={e => e.currentTarget.style.color = theme.headerTextMuted}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.59L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
+                  </svg>
+                  Sign Out
+                </button>
               </div>
             )}
           </>

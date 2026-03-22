@@ -107,6 +107,9 @@ app.use('/api/gcal', gcalRoutes);
 app.use('/api/msft-cal', msftCalRoutes);
 app.use('/api/cal', calSyncRoutes);
 app.use('/api/schedule', scheduleRoutes);
+app.use('/api/feature-catalog', require('./routes/feature-catalog.routes'));
+app.use('/api/feature-events', require('./routes/feature-events.routes'));
+app.use('/api/my-plan', require('./routes/my-plan.routes'));
 
 // 404 handler
 app.use((req, res) => {

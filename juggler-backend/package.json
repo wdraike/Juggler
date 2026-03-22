@@ -14,7 +14,9 @@
   },
   "dependencies": {
     "@azure/msal-node": "^5.0.6",
+    "@google/genai": "^1.46.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "auth-client": "file:../../auth-service/shared",
     "body-parser": "^1.20.2",
     "compression": "^1.7.4",
     "cookie-parser": "^1.4.6",
@@ -22,7 +24,6 @@
     "dotenv": "^16.4.5",
     "express": "^4.18.2",
     "express-rate-limit": "^8.3.0",
-    "auth-client": "file:../../auth-service/shared",
     "google-auth-library": "^9.6.3",
     "helmet": "^8.1.0",
     "jose": "^5.2.0",

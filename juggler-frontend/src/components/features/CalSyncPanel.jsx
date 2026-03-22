@@ -193,7 +193,7 @@ export default function CalSyncPanel({
         }} />
         <span style={{
           position: 'absolute', top: 2, left: checked ? 20 : 2,
-          width: 18, height: 18, background: '#FFF', borderRadius: '50%',
+          width: 18, height: 18, background: '#FDFAF5', borderRadius: '50%',
           transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
         }} />
       </label>
@@ -219,7 +219,7 @@ export default function CalSyncPanel({
           {connected === false && (
             <button onClick={onConnect} disabled={connecting} style={{
               border: '1.5px solid ' + accentColor, borderRadius: 2, padding: '5px 14px',
-              background: accentColor, color: '#FFF', fontWeight: 600, fontSize: 11,
+              background: accentColor, color: '#FDFAF5', fontWeight: 600, fontSize: 11,
               cursor: 'pointer', fontFamily: "'Inter', sans-serif", opacity: connecting ? 0.5 : 1,
               letterSpacing: '0.05em', textTransform: 'uppercase'
             }}>
@@ -269,7 +269,7 @@ export default function CalSyncPanel({
         {/* Provider sections */}
         {renderProvider('Google Calendar', gcalConnected, gcalConnecting, theme.accent,
           gcalAutoSync, handleGcalConnect, handleGcalDisconnect, handleGcalAutoSync)}
-        {renderProvider('Microsoft Calendar', msftConnected, msftConnecting, '#0078D4',
+        {renderProvider('Microsoft Calendar', msftConnected, msftConnecting, '#2E4A7A',
           msftAutoSync, handleMsftConnect, handleMsftDisconnect, handleMsftAutoSync)}
 
         {/* Last synced */}

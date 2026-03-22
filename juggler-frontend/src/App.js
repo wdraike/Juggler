@@ -4,10 +4,12 @@
  */
 
 import React from 'react';
+import './theme/typography.css';
 import AuthProvider, { useAuth } from './components/auth/AuthProvider';
 import LoginPage from './components/auth/LoginPage';
 import AppLayout from './components/layout/AppLayout';
 import ErrorBoundary from './components/ErrorBoundary';
+import UpgradePrompt from './components/billing/UpgradePrompt';
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -51,7 +53,12 @@ function AppContent() {
     return <LoginPage />;
   }
 
-  return <AppLayout />;
+  return (
+    <>
+      <AppLayout />
+      <UpgradePrompt />
+    </>
+  );
 }
 
 export default function App() {

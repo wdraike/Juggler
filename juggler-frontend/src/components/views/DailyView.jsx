@@ -32,12 +32,12 @@ function durLabel(dur) {
 function tileBg(task, darkMode, hover, theme) {
   // Reminder events — subtle purple/violet
   if (task.marker) {
-    if (darkMode) return hover ? '#581C8730' : '#581C871C';
-    return hover ? '#F5F3FF20' : '#F5F3FF12';
+    if (darkMode) return hover ? '#4338CA30' : '#4338CA1C';
+    return hover ? '#EEF2FF20' : '#EEF2FF12';
   }
   // Fixed/rigid tasks — subtle amber/orange
   if (task.fixed || task.rigid || (task.when && task.when.indexOf('fixed') >= 0)) {
-    if (darkMode) return hover ? '#78350F30' : '#78350F1C';
+    if (darkMode) return hover ? '#9E6B3B30' : '#9E6B3B1C';
     return hover ? '#FEF3C720' : '#FEF3C712';
   }
   // Habits — subtle teal
@@ -274,8 +274,8 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
         style={{
           height: '100%', boxSizing: 'border-box',
           borderLeft: '3px solid ' + priColor,
-          border: '1px ' + (isMarker ? 'dotted' : (t.habit ? 'dashed' : 'solid')) + ' ' + (isDone ? theme.border : (isMarker ? '#8B5CF640' : priColor + '30')),
-          borderLeftWidth: 3, borderLeftColor: isWhenRelaxed ? '#F59E0B' : (isMarker ? '#8B5CF6' : priColor),
+          border: '1px ' + (isMarker ? 'dotted' : (t.habit ? 'dashed' : 'solid')) + ' ' + (isDone ? theme.border : (isMarker ? '#4338CA40' : priColor + '30')),
+          borderLeftWidth: 3, borderLeftColor: isWhenRelaxed ? '#C8942A' : (isMarker ? '#4338CA' : priColor),
           borderRadius: 5,
           background: tileBg(t, darkMode, show, theme),
           padding: height >= 42 ? '3px 6px' : '2px 6px',
@@ -368,7 +368,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1, fontSize: 8, color: theme.textMuted, overflow: 'hidden' }}>
             {t.habit && <span>{'\uD83D\uDD01'} habit</span>}
             {item.splitPart && <span>Part {item.splitPart}/{item.splitTotal}</span>}
-            {isWhenRelaxed && <span style={{ color: '#F59E0B', fontWeight: 600 }}>{'~'} flexed</span>}
+            {isWhenRelaxed && <span style={{ color: '#C8942A', fontWeight: 600 }}>{'~'} flexed</span>}
             {t.when && t.when !== 'anytime' && !isWhenRelaxed && <span>{t.when}</span>}
             {status === 'wip' && t.timeRemaining != null && (
               <span style={{ fontWeight: 700, color: theme.amberText }}>
@@ -657,8 +657,8 @@ export default function DailyView({
       if (t.date !== selectedDateKey || scheduledIds[t.id]) return false;
       // Hide habit templates and generated instances — only the scheduler places these
       if (t.taskType === 'habit_template' || t.generated) return false;
-      // Hide completed/cancelled/skipped tasks — check both statuses map and task object
-      var st = statuses[t.id] || t.status || '';
+      // Hide completed/cancelled/skipped tasks
+      var st = statuses[t.id] || '';
       if (st === 'done' || st === 'cancel' || st === 'skip') return false;
       return matchesFilter(t.id);
     });
@@ -698,7 +698,7 @@ export default function DailyView({
           return (
             <div title={done + ' of ' + total + ' tasks done (' + Math.round(doneDur / 60 * 10) / 10 + 'h / ' + Math.round(totalDur / 60 * 10) / 10 + 'h)'} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: theme.textMuted }}>
               <div style={{ width: 60, height: 5, background: theme.bgTertiary, borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? '#10B981' : '#3B82F6', borderRadius: 3 }} />
+                <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? '#2D6A4F' : '#2E4A7A', borderRadius: 3 }} />
               </div>
               <span>{done}/{total}</span>
               <span>({Math.round(doneDur / 60 * 10) / 10}h / {Math.round(totalDur / 60 * 10) / 10}h)</span>
@@ -712,8 +712,8 @@ export default function DailyView({
             <button onClick={function () { onBatchHabitsDone(selectedDateKey); }}
               title={'Mark ' + habitTasks.length + ' habits done'}
               style={{
-                border: '1px solid #10B981', borderRadius: 8, padding: '2px 8px',
-                background: '#10B98115', color: '#10B981', fontSize: 11,
+                border: '1px solid #2D6A4F', borderRadius: 8, padding: '2px 8px',
+                background: '#2D6A4F15', color: '#2D6A4F', fontSize: 11,
                 cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600
               }}>
               {'\u2713'}hab ({habitTasks.length})
@@ -849,7 +849,7 @@ export default function DailyView({
             return (
               <div key={'blk-' + i} style={{
                 position: 'absolute', top: top, left: 0, width: 3, height: h,
-                background: (b.color || '#8B5CF6') + '60',
+                background: (b.color || '#4338CA') + '60',
                 borderRadius: '0 2px 2px 0',
                 pointerEvents: 'none', zIndex: 1
               }} />
@@ -861,7 +861,7 @@ export default function DailyView({
             var hour = GRID_START + i;
             var y = i * hourHeight;
             var locId = hourLocations[hour];
-            var locColor = LOC_TINT[locId] || '#8B5CF6';
+            var locColor = LOC_TINT[locId] || '#4338CA';
             var locIconStr = locIcon(locId);
 
             var lines = [
@@ -915,7 +915,7 @@ export default function DailyView({
                     }}>
                       {locations.map(function (loc) {
                         var isActive = loc.id === locId;
-                        var tint = LOC_TINT[loc.id] || '#8B5CF6';
+                        var tint = LOC_TINT[loc.id] || '#4338CA';
                         return (
                           <button key={loc.id}
                             onClick={function (ev) {

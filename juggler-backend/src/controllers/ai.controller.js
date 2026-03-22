@@ -1,56 +1,61 @@
 /**
  * AI Controller — Gemini-powered natural language task commands
+ *
+ * Supports two backends:
+ *   1. Vertex AI (USE_VERTEX_AI=true) — GCP service account, no rate limits
+ *   2. Gemini API (default) — API key, has rate limits
  */
 
 const db = require('../db');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = 'gemini-2.0-flash';
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const USE_VERTEX_AI = process.env.USE_VERTEX_AI === 'true';
 
-async function callGemini(prompt, systemPrompt) {
-  if (!GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY not configured');
+let _genAIClient = null;
+
+function getGenAIClient() {
+  if (_genAIClient) return _genAIClient;
+
+  const { GoogleGenAI } = require('@google/genai');
+
+  if (USE_VERTEX_AI) {
+    const project = process.env.GOOGLE_CLOUD_PROJECT;
+    const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
+    if (!project) throw new Error('GOOGLE_CLOUD_PROJECT required for Vertex AI');
+    _genAIClient = new GoogleGenAI({ vertexai: true, project, location });
+    console.log('🤖 Juggler AI: Using Vertex AI (project:', project + ')');
+  } else {
+    if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY not configured');
+    _genAIClient = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+    console.log('🤖 Juggler AI: Using Gemini API with API key');
   }
 
-  const payload = {
-    contents: [
-      { role: 'user', parts: [{ text: systemPrompt + '\n\n---\nUser request:\n' + prompt }] }
-    ],
-    generationConfig: {
+  return _genAIClient;
+}
+
+async function callGemini(prompt, systemPrompt) {
+  const client = getGenAIClient();
+
+  const result = await client.models.generateContent({
+    model: GEMINI_MODEL,
+    contents: systemPrompt + '\n\n---\nUser request:\n' + prompt,
+    config: {
       temperature: 0.2,
       topP: 0.8,
       topK: 40,
       maxOutputTokens: 8192
     }
-  };
+  });
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 50000); // 50s timeout
-  let resp;
-  try {
-    resp = await fetch(GEMINI_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': GEMINI_API_KEY
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
-  } finally {
-    clearTimeout(timeout);
+  if (result.text) {
+    return result.text;
   }
 
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`Gemini API error ${resp.status}: ${errText}`);
+  if (result.candidates?.[0]?.content?.parts) {
+    return result.candidates[0].content.parts.map(p => p.text || '').join('');
   }
 
-  const data = await resp.json();
-  if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) {
-    return data.candidates[0].content.parts.map(p => p.text || '').join('');
-  }
   throw new Error('Unexpected Gemini response structure');
 }
 

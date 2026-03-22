@@ -65,7 +65,7 @@ export default function ListView({ allTasks, statuses, filter, search, projectFi
               display: 'flex', alignItems: 'center', gap: 6
             }}>
               {d ? `${DAY_NAMES[d.getDay()]} ${MONTH_NAMES[d.getMonth()]} ${d.getDate()}` : 'TBD'}
-              {isToday && <span style={{ fontSize: 10, background: theme.accent, color: '#FFF', borderRadius: 4, padding: '1px 6px' }}>Today</span>}
+              {isToday && <span style={{ fontSize: 10, background: theme.accent, color: '#FDFAF5', borderRadius: 4, padding: '1px 6px' }}>Today</span>}
               {loc && <span style={{ fontSize: 10, color: theme.textMuted }}>{loc.icon}</span>}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

@@ -10,14 +10,15 @@ PROJECT_ID="lexical-period-466519-s0"
 REGION="us-central1"
 CLOUD_SQL_CONNECTION="lexical-period-466519-s0:us-central1:resume-optimizer-db"
 DATABASE_NAME="juggler"
-BACKUP_DIR="/Users/david/Offline Coding/Juggler/scripts/db-backup"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKUP_DIR="$SCRIPT_DIR/db-backup"
 
 # Service names
 BACKEND_SERVICE="juggler-backend"
 FRONTEND_SERVICE="juggler-frontend"
 
 # Project root
-PROJECT_ROOT="/Users/david/Offline Coding/Juggler"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # Colors
 RED='\033[0;31m'

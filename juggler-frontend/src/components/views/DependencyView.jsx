@@ -12,7 +12,7 @@ import { getTaskDeps, topoSortTasks } from '../../scheduler/dependencyHelpers';
 import { PRI_COLORS } from '../../state/constants';
 
 var STATUS_ICONS = { done: '\u2705', wip: '\u{1F7E1}', cancel: '\u274C', skip: '\u23ED\uFE0F', other: '\u27A1\uFE0F', '': '\u26AA' };
-var ARROW_COLORS = ['#3B82F6', '#7C3AED', '#059669', '#DC2626', '#D97706', '#DB2777', '#0891B2'];
+var ARROW_COLORS = ['#2E4A7A', '#4338CA', '#2D6A4F', '#8B2635', '#D97706', '#9E6B3B', '#0D9488'];
 var NODE_W = 150;
 var NODE_H = 28;
 var HANDLE_R = 5;
@@ -85,13 +85,13 @@ function DepNode({ ct, pos, st, icon, isDone, isClosed, dateLabel, isExternal, i
   }
 
   var borderColor = isHoverTarget
-    ? (isCycleDrop ? '#DC2626' : '#3B82F6')
+    ? (isCycleDrop ? '#8B2635' : '#2E4A7A')
     : isArrowSource ? theme.accent
     : isMatched && !isDimmed && hasFilters ? theme.accent
     : isClosed ? theme.border + '88' : theme.border;
   var borderWidth = (isHoverTarget || isArrowSource || (isMatched && !isDimmed && hasFilters)) ? 2 : 1;
 
-  var bgColor = isHoverTarget ? (isCycleDrop ? '#DC262612' : '#3B82F612')
+  var bgColor = isHoverTarget ? (isCycleDrop ? '#8B263512' : '#2E4A7A12')
     : isMatched && !isDimmed && hasFilters ? theme.accent + '12'
     : isExternal ? theme.bgCard
     : isClosed ? theme.bgSecondary + '88' : theme.bgSecondary;
@@ -129,7 +129,7 @@ function DepNode({ ct, pos, st, icon, isDone, isClosed, dateLabel, isExternal, i
 
       {/* Hover label during arrow drag */}
       {isHoverTarget && (
-        <div style={{ fontSize: 8, color: isCycleDrop ? '#DC2626' : '#3B82F6', marginTop: 1, textAlign: 'center' }}>
+        <div style={{ fontSize: 8, color: isCycleDrop ? '#8B2635' : '#2E4A7A', marginTop: 1, textAlign: 'center' }}>
           {isCycleDrop ? '\u26D4 cycle!' : '\u21B3 will depend on source'}
         </div>
       )}
@@ -175,7 +175,7 @@ function DepNode({ ct, pos, st, icon, isDone, isClosed, dateLabel, isExternal, i
                     title={'Remove dep on \u201C' + (depTask ? depTask.text : depId) + '\u201D'}
                     style={{
                       display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 8, padding: '1px 4px', borderRadius: 3,
-                      background: depDone ? '#10B98118' : '#F59E0B18', color: depDone ? '#10B981' : '#D97706',
+                      background: depDone ? '#2D6A4F18' : '#C8942A18', color: depDone ? '#2D6A4F' : '#D97706',
                       fontWeight: 500, cursor: 'pointer'
                     }}>
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 80 }}>
@@ -696,10 +696,10 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
                 );
               })}
               <marker id="dep-arrow-drag" viewBox="0 0 10 8" refX="10" refY="4" markerWidth="10" markerHeight="8" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 4 L 0 8 z" fill="#3B82F6" />
+                <path d="M 0 0 L 10 4 L 0 8 z" fill="#2E4A7A" />
               </marker>
               <marker id="dep-arrow-drag-err" viewBox="0 0 10 8" refX="10" refY="4" markerWidth="10" markerHeight="8" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 4 L 0 8 z" fill="#DC2626" />
+                <path d="M 0 0 L 10 4 L 0 8 z" fill="#8B2635" />
               </marker>
             </defs>
             {/* Existing edges */}
@@ -714,7 +714,7 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
             {/* Live drag arrow */}
             {dragArrowPath && (
               <path d={dragArrowPath.d} fill="none"
-                stroke={dragArrowPath.isCycle ? '#DC2626' : '#3B82F6'}
+                stroke={dragArrowPath.isCycle ? '#8B2635' : '#2E4A7A'}
                 strokeWidth={2.2}
                 strokeDasharray={arrowHoverId ? 'none' : '6 4'}
                 opacity={0.8}

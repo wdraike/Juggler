@@ -85,6 +85,16 @@ apiClient.interceptors.response.use(
       }
     }
 
+    // Handle 403 subscription required — dispatch event for upgrade prompt
+    if (error.response?.status === 403 && error.response?.data?.error === 'Subscription required') {
+      window.dispatchEvent(new CustomEvent('subscription:required', {
+        detail: {
+          product: error.response.data.product || 'juggler',
+          required_plans: error.response.data.required_plans
+        }
+      }));
+    }
+
     return Promise.reject(error);
   }
 );

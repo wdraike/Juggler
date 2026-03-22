@@ -152,7 +152,7 @@ export default function MsftCalSyncPanel({ onClose, darkMode, showToast, autoSyn
             </div>
             <button onClick={handleConnect} disabled={connecting} title="Authorize Raike &amp; Sons to read and write your Microsoft Calendar" style={{
               border: 'none', borderRadius: 8, padding: '10px 24px',
-              background: '#0078D4', color: '#FFF', fontWeight: 600, fontSize: 13,
+              background: '#2E4A7A', color: '#FDFAF5', fontWeight: 600, fontSize: 13,
               cursor: 'pointer', fontFamily: 'inherit', opacity: connecting ? 0.5 : 1
             }}>
               {connecting ? 'Connecting...' : 'Connect Microsoft Calendar'}
@@ -178,12 +178,12 @@ export default function MsftCalSyncPanel({ onClose, darkMode, showToast, autoSyn
                 <input type="checkbox" checked={!!autoSync} onChange={handleToggleAutoSync} style={{ opacity: 0, width: 0, height: 0 }} />
                 <span style={{
                   position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                  background: autoSync ? '#0078D4' : theme.border,
+                  background: autoSync ? '#2E4A7A' : theme.border,
                   borderRadius: 11, transition: 'background 0.2s'
                 }} />
                 <span style={{
                   position: 'absolute', top: 2, left: autoSync ? 20 : 2,
-                  width: 18, height: 18, background: '#FFF', borderRadius: '50%',
+                  width: 18, height: 18, background: '#FDFAF5', borderRadius: '50%',
                   transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
                 }} />
               </label>
@@ -200,7 +200,7 @@ export default function MsftCalSyncPanel({ onClose, darkMode, showToast, autoSyn
             <div style={{ padding: '16px 0' }}>
               <button onClick={handleSyncNow} disabled={syncing} title="Manually trigger a sync with Microsoft Calendar now" style={{
                 border: 'none', borderRadius: 8, padding: '10px 20px', width: '100%',
-                background: '#0078D4', color: '#FFF', fontWeight: 600, fontSize: 13,
+                background: '#2E4A7A', color: '#FDFAF5', fontWeight: 600, fontSize: 13,
                 cursor: 'pointer', fontFamily: 'inherit', opacity: syncing ? 0.5 : 1
               }}>
                 {syncing ? 'Syncing...' : 'Sync Now'}

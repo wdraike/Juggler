@@ -68,7 +68,7 @@ export default function SettingsPanel({ onClose, darkMode, config, allProjectNam
             <button key={t.id} onClick={() => setTab(t.id)} title={t.tip} style={{
               border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
               background: tab === t.id ? theme.accent : 'transparent',
-              color: tab === t.id ? '#FFF' : theme.textSecondary,
+              color: tab === t.id ? '#FDFAF5' : theme.textSecondary,
               fontSize: 12, fontWeight: tab === t.id ? 600 : 400, fontFamily: 'inherit',
               whiteSpace: 'nowrap'
             }}>
@@ -120,7 +120,7 @@ function LocationsTab({ config, theme }) {
           if (!newId || !newName) return;
           config.updateLocations([...config.locations, { id: newId, name: newName, icon: newIcon || '\uD83D\uDCCD' }]);
           setNewId(''); setNewName(''); setNewIcon('');
-        }} title="Add a new location" style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FFF', fontSize: 12, cursor: 'pointer' }}>Add</button>
+        }} title="Add a new location" style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FDFAF5', fontSize: 12, cursor: 'pointer' }}>Add</button>
       </div>
     </div>
   );
@@ -154,7 +154,7 @@ function ToolsTab({ config, theme }) {
           if (!newId || !newName) return;
           config.updateTools([...config.tools, { id: newId, name: newName, icon: newIcon || '\uD83D\uDD27' }]);
           setNewId(''); setNewName(''); setNewIcon('');
-        }} title="Add a new tool" style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FFF', fontSize: 12, cursor: 'pointer' }}>Add</button>
+        }} title="Add a new tool" style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FDFAF5', fontSize: 12, cursor: 'pointer' }}>Add</button>
       </div>
     </div>
   );
@@ -199,7 +199,7 @@ function MatrixTab({ config, theme }) {
 function ProjectRow({ p, config, theme, onRename, taskCount }) {
   var [editing, setEditing] = useState(false);
   var [editName, setEditName] = useState(p.name);
-  var [editColor, setEditColor] = useState(p.color || '#3B82F6');
+  var [editColor, setEditColor] = useState(p.color || '#2E4A7A');
 
   async function handleSave() {
     if (!editName || editName === p.name && editColor === p.color) { setEditing(false); return; }
@@ -224,8 +224,8 @@ function ProjectRow({ p, config, theme, onRename, taskCount }) {
           onKeyDown={function(e) { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setEditing(false); }}
           autoFocus
           style={{ flex: 1, padding: '2px 4px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
-        <button onClick={handleSave} style={{ border: 'none', borderRadius: 4, padding: '2px 8px', background: '#10B981', color: '#FFF', fontSize: 11, cursor: 'pointer' }}>Save</button>
-        <button onClick={function() { setEditing(false); setEditName(p.name); setEditColor(p.color || '#3B82F6'); }}
+        <button onClick={handleSave} style={{ border: 'none', borderRadius: 4, padding: '2px 8px', background: '#2D6A4F', color: '#FDFAF5', fontSize: 11, cursor: 'pointer' }}>Save</button>
+        <button onClick={function() { setEditing(false); setEditName(p.name); setEditColor(p.color || '#2E4A7A'); }}
           style={{ border: 'none', background: 'transparent', color: theme.textMuted, cursor: 'pointer', fontSize: 12 }}>Cancel</button>
       </div>
     );
@@ -252,7 +252,7 @@ function ProjectRow({ p, config, theme, onRename, taskCount }) {
 
 function ProjectsTab({ config, theme, allProjectNames, allTasks, onRenameProject }) {
   var [newName, setNewName] = useState('');
-  var [newColor, setNewColor] = useState('#3B82F6');
+  var [newColor, setNewColor] = useState('#2E4A7A');
   var [sortBy, setSortBy] = useState('name'); // name, tasks, color
   var [sortDir, setSortDir] = useState('asc');
   var [filter, setFilter] = useState('');
@@ -308,7 +308,7 @@ function ProjectsTab({ config, theme, allProjectNames, allTasks, onRenameProject
   async function promoteTaskProject(name) {
     try {
       var { default: apiClient } = await import('../../services/apiClient');
-      var res = await apiClient.post('/projects', { name: name, color: '#3B82F6' });
+      var res = await apiClient.post('/projects', { name: name, color: '#2E4A7A' });
       config.setProjects([...config.projects, res.data.project]);
     } catch (e) { console.error(e); }
   }
@@ -372,7 +372,7 @@ function ProjectsTab({ config, theme, allProjectNames, allTasks, onRenameProject
             config.setProjects([...config.projects, res.data.project]);
             setNewName('');
           } catch (e) { console.error(e); }
-        }} style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FFF', fontSize: 12, cursor: 'pointer' }}>Add</button>
+        }} style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FDFAF5', fontSize: 12, cursor: 'pointer' }}>Add</button>
       </div>
     </div>
   );
@@ -461,7 +461,7 @@ function timeInputToMins(val) {
   return parseInt(parts[0]) * 60 + parseInt(parts[1]);
 }
 
-var LOC_TINT = { home: '#3B82F6', work: '#F59E0B', transit: '#9CA3AF', downtown: '#10B981', gym: '#EF4444', errand: '#EC4899' };
+var LOC_TINT = { home: '#2E4A7A', work: '#C8942A', transit: '#5C5A55', downtown: '#2D6A4F', gym: '#8B2635', errand: '#EC4899' };
 var TOTAL_MIN = 1080; // 6AM (360) to midnight (1440)
 var START_MIN = 360;
 var END_MIN = 1440;
@@ -714,7 +714,7 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBloc
           var width = pctOf(seg.end) - pctOf(seg.start);
           var isUnset = seg.loc === 'unset';
           var loc = isUnset ? null : locMap[seg.loc];
-          var tint = LOC_TINT[seg.loc] || '#8B5CF6';
+          var tint = LOC_TINT[seg.loc] || '#9E6B3B';
           var widthMin = seg.end - seg.start;
           return (
             <div key={i} style={{
@@ -770,7 +770,7 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBloc
       <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ fontSize: 10, color: theme.textMuted }}>Brush:</span>
         {locations.map(function(loc) {
-          var tint = LOC_TINT[loc.id] || '#8B5CF6';
+          var tint = LOC_TINT[loc.id] || '#9E6B3B';
           var isActive = activeLoc === loc.id;
           return (
             <button key={loc.id} onClick={function() { setActiveLoc(loc.id); }} title={'Paint with ' + loc.name + ' \u2014 click/drag on timeline to set location'} style={{
@@ -835,7 +835,7 @@ function ExpandedLocationEditor({ blocks, locOverrides, locations, theme, onLocO
       }
     }
     if (uncovered.length > 0) {
-      groups.push({ block: { name: 'Other', icon: '', color: '#6B7280' }, slots: uncovered });
+      groups.push({ block: { name: 'Other', icon: '', color: '#5C5A55' }, slots: uncovered });
     }
     return groups;
   }, [blocks, hours, locOverrides]);
@@ -894,7 +894,7 @@ function ExpandedLocationEditor({ blocks, locOverrides, locations, theme, onLocO
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
                     {group.slots.map(function(slot) {
-                      var tint = LOC_TINT[slot.loc] || '#8B5CF6';
+                      var tint = LOC_TINT[slot.loc] || '#9E6B3B';
                       var loc = locMap[slot.loc];
                       return (
                         <div key={slot.minute} style={{ position: 'relative' }}>
@@ -994,7 +994,7 @@ function UnifiedTemplateTab({ config, theme }) {
       name: 'New Block',
       start: start,
       end: Math.min(start + 60, 1440),
-      color: '#6B7280',
+      color: '#5C5A55',
       icon: '\uD83D\uDCCB',
       loc: config.locations[0]?.id || 'home'
     };
@@ -1120,7 +1120,7 @@ function UnifiedTemplateTab({ config, theme }) {
               <button onClick={function() { setSelectedTemplate(id); setEditingBlockIdx(null); }} title={'Edit template: ' + (s?.name || id)} style={{
                 border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
                 background: selectedTemplate === id ? theme.accent : theme.bgTertiary,
-                color: selectedTemplate === id ? '#FFF' : theme.textSecondary,
+                color: selectedTemplate === id ? '#FDFAF5' : theme.textSecondary,
                 fontSize: 12, fontFamily: 'inherit'
               }}>{(s?.icon || '') + ' ' + (s?.name || id)}</button>
               {!s?.system && (
@@ -1138,7 +1138,7 @@ function UnifiedTemplateTab({ config, theme }) {
           <input value={newName} onChange={function(e) { setNewName(e.target.value); }} placeholder="Name"
             style={{ width: 70, padding: '3px 5px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 10 }} />
           <button onClick={addTemplate} title="Create a new schedule template" style={{
-            border: 'none', borderRadius: 4, padding: '3px 8px', background: theme.accent, color: '#FFF', fontSize: 10, cursor: 'pointer', fontFamily: 'inherit'
+            border: 'none', borderRadius: 4, padding: '3px 8px', background: theme.accent, color: '#FDFAF5', fontSize: 10, cursor: 'pointer', fontFamily: 'inherit'
           }}>+ New</button>
         </div>
       </div>
@@ -1237,7 +1237,7 @@ function UnifiedTemplateTab({ config, theme }) {
           </div>
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
             <button onClick={addBlock} title="Add a custom time block" style={{
-              border: 'none', borderRadius: 4, padding: '4px 10px', background: theme.accent, color: '#FFF', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit'
+              border: 'none', borderRadius: 4, padding: '4px 10px', background: theme.accent, color: '#FDFAF5', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit'
             }}>+ Custom</button>
             {PRESET_BLOCKS.map(function(preset) {
               return (
@@ -1296,7 +1296,7 @@ function UnifiedTemplateTab({ config, theme }) {
           config.updateTemplateOverrides(updated);
           setNewOverrideDate('');
         }} title="Override the default template for a specific date" style={{
-          border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FFF', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit'
+          border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FDFAF5', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit'
         }}>Add Override</button>
       </div>
 

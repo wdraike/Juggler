@@ -4,11 +4,11 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { PRI_COLORS, STATUS_OPTIONS, applyDefaults } from '../../state/constants';
-import { toTime24, fromTime24, toDateISO, fromDateISO, formatDateKey } from '../../scheduler/dateHelpers';
+import { toTime24, fromTime24, toDateISO, fromDateISO, formatDateKey, parseDate } from '../../scheduler/dateHelpers';
 import { getTheme } from '../../theme/colors';
 import ConfirmDialog from '../features/ConfirmDialog';
 
-export default function TaskEditForm({ task, status, onUpdate, onStatusChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, scheduleTemplates, templateDefaults, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex }) {
+export default function TaskEditForm({ task, status, onUpdate, onStatusChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, scheduleTemplates, templateDefaults, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex, onRecurDayConflict }) {
   var isCreate = mode === 'create';
   var TH = getTheme(darkMode);
   var initDate = isCreate && initialDate ? toDateISO(formatDateKey(initialDate)) : '';
@@ -293,11 +293,48 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   // Manual save handler
   function handleSave() {
     var changed = buildChangedFields();
-    if (changed) {
-      onUpdate(task.id, changed);
-      // Update snapshot so next save only sends new changes
-      taskSnapshotRef.current = snapshotFromTask(Object.assign({}, task, buildFields()));
+    if (!changed) return;
+
+    // Check if a date change conflicts with recurrence days
+    if (changed.date && onRecurDayConflict && task.habit) {
+      var recur = task.recur || (recurType !== 'none' ? { type: recurType, days: recurDays } : null);
+      if (recur && (recur.type === 'weekly' || recur.type === 'biweekly') && recur.days) {
+        var DAY_CODES = ['U', 'M', 'T', 'W', 'R', 'F', 'S'];
+        var td = parseDate(changed.date);
+        if (td) {
+          var dow = td.getDay();
+          var dayCode = DAY_CODES[dow];
+          // Only if user didn't also update the recurrence days to include the new day
+          var effectiveDays = changed.recur ? (changed.recur.days || '') : recur.days;
+          if (effectiveDays.indexOf(dayCode) < 0) {
+            var DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            // Immediately show the proposed new day in the form's recurrence toggles
+            setRecurDays(recur.days + dayCode);
+            onRecurDayConflict({
+              taskId: task.id,
+              task: task,
+              fields: changed,
+              conflict: {
+                conflicting: true,
+                dayCode: dayCode,
+                dayLabel: DAY_LABELS[dow],
+                recurDays: recur.days,
+                recur: recur
+              }
+            });
+            return;
+          }
+        }
+      }
     }
+
+    commitSave(changed);
+  }
+
+  function commitSave(changed) {
+    onUpdate(task.id, changed);
+    // Update snapshot so next save only sends new changes
+    taskSnapshotRef.current = snapshotFromTask(Object.assign({}, task, buildFields()));
     userDirtyRef.current = false;
     setIsDirty(false);
     setSaveStatus('saved');
@@ -346,16 +383,16 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         {isCreate ? (
           <button onClick={handleCreate} style={{
             fontSize: 10, fontWeight: 700, padding: '4px 14px', border: 'none', borderRadius: 4,
-            background: '#10B981', color: 'white', cursor: 'pointer'
+            background: '#2D6A4F', color: '#FDFAF5', cursor: 'pointer'
           }}>{'\u2795 Create'}</button>
         ) : (
           <>
             {isDirty && <button onClick={handleSave} style={{
               fontSize: 10, fontWeight: 700, padding: '4px 14px', border: 'none', borderRadius: 4,
-              background: TH.accent, color: 'white', cursor: 'pointer'
+              background: TH.accent, color: '#FDFAF5', cursor: 'pointer'
             }}>{'\uD83D\uDCBE'} Save</button>}
             {saveStatus && <span style={{
-              fontSize: 10, fontWeight: 600, color: saveStatus === 'saving' ? TH.textMuted : '#10B981',
+              fontSize: 10, fontWeight: 600, color: saveStatus === 'saving' ? TH.textMuted : '#2D6A4F',
               padding: '4px 8px'
             }}>{saveStatus === 'saving' ? 'Saving\u2026' : '\u2714 Saved'}</span>}
           </>
@@ -363,7 +400,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         {!isCreate && onDelete && (
           <button onClick={() => setShowDeleteConfirm(true)} style={{
             fontSize: 10, fontWeight: 600, padding: '4px 10px',
-            border: '1px solid #DC2626', borderRadius: 4,
+            border: '1px solid #8B2635', borderRadius: 4,
             background: TH.redBg, color: TH.redText, cursor: 'pointer'
           }}>{'\uD83D\uDDD1'} Delete</button>
         )}
@@ -391,7 +428,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               <button onClick={function() { setFlexWhen(true); }}
                 style={{
                   fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 4,
-                  border: '1px solid #F59E0B', background: '#F59E0B18', color: '#F59E0B',
+                  border: '1px solid #C8942A', background: '#C8942A18', color: '#C8942A',
                   cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap'
                 }}>
                 Enable Flex
@@ -464,13 +501,13 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             <label style={lStyle}>
               <span title="Non-blocking reminder event — shows on the calendar but doesn't block time. Other tasks can overlap it.">{'\u25C7'} Reminder event</span>
               <button title={marker ? 'This is a non-blocking reminder event' : 'Make this a non-blocking reminder event'} onClick={() => setMarker(!marker)}
-                style={{ ...togStyle(marker, '#8B5CF6'), minWidth: 50 }}>{marker ? '\u25C7 Yes' : 'No'}</button>
+                style={{ ...togStyle(marker, '#4338CA'), minWidth: 50 }}>{marker ? '\u25C7 Yes' : 'No'}</button>
             </label>
             {!marker && <>
             <label style={lStyle}>
               <span title="Habits are scheduled before regular tasks and pinned to their date.">{'\uD83D\uDD01'} Habit</span>
               <button title={habit ? 'This is a recurring habit' : 'Mark as a daily habit'} onClick={() => { var next = !habit; setHabit(next); if (habit) setRigid(false); if (next) setDayReq('any'); }}
-                style={{ ...togStyle(habit, '#10B981'), minWidth: 50 }}>{habit ? '\uD83D\uDD01 Yes' : 'No'}</button>
+                style={{ ...togStyle(habit, '#2D6A4F'), minWidth: 50 }}>{habit ? '\uD83D\uDD01 Yes' : 'No'}</button>
             </label>
             {habit && (
               <label style={lStyle}>
@@ -597,11 +634,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               return (
                 <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center', marginTop: 4 }}>
                   <button title="No time restriction — the scheduler can place this in any available slot" onClick={function() { setWhen(''); }}
-                    style={togStyle(isAnytime, '#10B981')}>{'\uD83D\uDD04'} Anytime</button>
+                    style={togStyle(isAnytime, '#2D6A4F')}>{'\uD83D\uDD04'} Anytime</button>
                   <button title="Spans the entire day" onClick={function() { setWhen('allday'); }}
-                    style={togStyle(isAllDay, '#F59E0B')}>{'\u2600\uFE0F'} All Day</button>
+                    style={togStyle(isAllDay, '#C8942A')}>{'\u2600\uFE0F'} All Day</button>
                   <button title="Locked to the exact Date/Time. The scheduler will never move it" onClick={function() { setWhen('fixed'); }}
-                    style={togStyle(isFixed, '#EF4444')}>{'\uD83D\uDCCC'} Fixed</button>
+                    style={togStyle(isFixed, '#8B2635')}>{'\uD83D\uDCCC'} Fixed</button>
                   <span style={{ width: 1, height: 18, background: TH.border, margin: '0 2px' }} />
                   {(uniqueTags || []).map(function(tb) {
                     var isOn = tagParts.indexOf(tb.tag) !== -1;
@@ -626,7 +663,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                     <span style={{ width: 1, height: 18, background: TH.border, margin: '0 2px' }} />
                     <button title={flexWhen ? 'Flex: scheduler tries other slots if selected windows are full' : 'Strict: only placed in selected windows'}
                       onClick={function() { setFlexWhen(!flexWhen); }}
-                      style={togStyle(flexWhen, '#F59E0B')}>
+                      style={togStyle(flexWhen, '#C8942A')}>
                       {flexWhen ? '~ Flex' : 'Strict'}
                     </button>
                   </>}
@@ -641,11 +678,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             <span title="Restrict which days the scheduler can place this task.">Day requirement</span>
             <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
               <button title="No day restriction" onClick={function() { setDayReq('any'); }}
-                style={togStyle(dayReq === 'any', '#10B981')}>Any</button>
+                style={togStyle(dayReq === 'any', '#2D6A4F')}>Any</button>
               <button title="Monday through Friday only" onClick={function() { setDayReq(dayReq === 'weekday' ? 'any' : 'weekday'); }}
-                style={togStyle(dayReq === 'weekday', '#6366F1')}>Wkday</button>
+                style={togStyle(dayReq === 'weekday', '#4338CA')}>Wkday</button>
               <button title="Saturday or Sunday only" onClick={function() { setDayReq(dayReq === 'weekend' ? 'any' : 'weekend'); }}
-                style={togStyle(dayReq === 'weekend', '#8B5CF6')}>Wkend</button>
+                style={togStyle(dayReq === 'weekend', '#4338CA')}>Wkend</button>
               {[['Su','Su'],['M','Mo'],['T','Tu'],['W','We'],['R','Th'],['F','Fr'],['Sa','Sa']].map(function(pair) {
                 var code = pair[0], label = pair[1];
                 var selected = dayReq ? dayReq.split(',') : [];
@@ -697,7 +734,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             <label style={lStyle}>
               <span title="Allow the scheduler to break this task into smaller chunks.">{'\u2702'} Split OK</span>
               <button title={split ? 'Task can be split into chunks' : 'Task must be scheduled as one block'} onClick={() => setSplit(!split)}
-                style={togStyle(split, '#10B981')}>{split ? '\u2702 Yes' : 'No'}</button>
+                style={togStyle(split, '#2D6A4F')}>{split ? '\u2702 Yes' : 'No'}</button>
             </label>
             {split && (
               <label style={lStyle}>
@@ -800,7 +837,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             <span title="Where this task can be done. The scheduler only places it where you're at a matching location.">{'\uD83D\uDCCD'} Location</span>
             <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 2 }}>
               <button onClick={() => setTaskLoc([])} title="Task can be done at any location"
-                style={togStyle(taskLoc.length === 0, '#10B981')}>{'\uD83C\uDF0D'} Anywhere</button>
+                style={togStyle(taskLoc.length === 0, '#2D6A4F')}>{'\uD83C\uDF0D'} Anywhere</button>
               {(locations || []).map(loc => {
                 var isOn = taskLoc.indexOf(loc.id) !== -1;
                 var anywhere = taskLoc.length === 0;

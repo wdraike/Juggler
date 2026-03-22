@@ -192,7 +192,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
             {isMobile ? v.icon : v.label}
             {v.id === 'conflicts' && issuesCount > 0 && (
               <span style={{
-                marginLeft: 2, background: theme.error, color: '#FFF', borderRadius: 2,
+                marginLeft: 2, background: theme.error, color: '#FDFAF5', borderRadius: 2,
                 padding: '0 4px', fontSize: 9, fontWeight: 700, verticalAlign: 'top',
                 lineHeight: '14px', minWidth: 14, textAlign: 'center', display: 'inline-block'
               }}>{issuesCount}</span>
@@ -334,7 +334,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
                     <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       {badge != null && (
                         <span style={{
-                          background: theme.error, color: '#FFF', borderRadius: 2,
+                          background: theme.error, color: '#FDFAF5', borderRadius: 2,
                           padding: '0 6px', fontSize: 10, fontWeight: 700
                         }}>{badge}</span>
                       )}

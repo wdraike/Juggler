@@ -61,7 +61,7 @@ export default function QuickAddTask({ date, onCreate, darkMode, isMobile }) {
       />
       <button type="submit" style={{
         border: 'none', borderRadius: 6, padding: '6px 12px',
-        background: theme.accent, color: '#FFF', fontSize: isMobile ? 14 : 12,
+        background: theme.accent, color: '#FDFAF5', fontSize: isMobile ? 14 : 12,
         fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
         minHeight: isMobile ? 44 : undefined
       }}>Add</button>

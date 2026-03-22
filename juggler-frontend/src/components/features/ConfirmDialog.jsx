@@ -33,7 +33,7 @@ export default function ConfirmDialog({ message, onConfirm, onCancel, darkMode, 
           }}>Cancel</button>
           <button onClick={onConfirm} style={{
             border: 'none', borderRadius: 8, padding: '8px 20px',
-            background: theme.error, color: '#FFF', fontWeight: 600, fontSize: 13,
+            background: theme.error, color: '#FDFAF5', fontWeight: 600, fontSize: 13,
             cursor: 'pointer', fontFamily: 'inherit'
           }}>Confirm</button>
         </div>

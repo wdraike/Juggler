@@ -63,7 +63,7 @@ export default function TimelineView({ selectedDate, selectedDateKey, placements
           return (
             <div title={done + ' of ' + total + ' tasks done (' + Math.round(doneDur / 60 * 10) / 10 + 'h / ' + Math.round(totalDur / 60 * 10) / 10 + 'h)'} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: theme.textMuted }}>
               <div style={{ width: 60, height: 5, background: theme.bgTertiary, borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? '#10B981' : '#3B82F6', borderRadius: 3 }} />
+                <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? '#2D6A4F' : '#2E4A7A', borderRadius: 3 }} />
               </div>
               <span>{done}/{total}</span>
               <span>({Math.round(doneDur / 60 * 10) / 10}h / {Math.round(totalDur / 60 * 10) / 10}h)</span>
@@ -77,8 +77,8 @@ export default function TimelineView({ selectedDate, selectedDateKey, placements
             <button onClick={function() { onBatchHabitsDone(selectedDateKey); }}
               title={'Mark ' + habitTasks.length + ' habits done'}
               style={{
-                border: '1px solid #10B981', borderRadius: 8, padding: '2px 8px',
-                background: '#10B98115', color: '#10B981', fontSize: 11,
+                border: '1px solid #2D6A4F', borderRadius: 8, padding: '2px 8px',
+                background: '#2D6A4F15', color: '#2D6A4F', fontSize: 11,
                 cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600
               }}>
               {'\u2713'}hab ({habitTasks.length})

@@ -16,7 +16,7 @@ export default function TaskCard({ task, status, onStatusChange, onExpand, darkM
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
   var isMarker = !!task.marker;
-  var borderColor = isMarker ? '#8B5CF6' : priColor;
+  var borderColor = isMarker ? '#4338CA' : priColor;
   var durLabel = task.dur ? (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm') : '';
   var isPastDue = !isDone && task.due && (function() { var d = parseDate(task.due); var t = new Date(); t.setHours(0,0,0,0); return d && d < t; })();
 
@@ -100,7 +100,7 @@ export default function TaskCard({ task, status, onStatusChange, onExpand, darkM
         {task.due && (
           <span style={{
             fontSize: 9, fontWeight: 600,
-            color: isPastDue ? '#FFF' : theme.amberText,
+            color: isPastDue ? '#FDFAF5' : theme.amberText,
             background: isPastDue ? theme.error : theme.amberBg,
             borderRadius: 3, padding: '1px 4px'
           }}>

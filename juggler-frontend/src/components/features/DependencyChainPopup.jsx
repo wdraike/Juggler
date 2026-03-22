@@ -9,7 +9,7 @@ import { getTaskDeps, topoSortTasks } from '../../scheduler/dependencyHelpers';
 import { PRI_COLORS, STATUS_MAP } from '../../state/constants';
 
 var STATUS_ICONS = { done: '\u2705', wip: '\u{1F7E1}', cancel: '\u274C', skip: '\u23ED\uFE0F', other: '\u27A1\uFE0F', '': '\u26AA' };
-var ARROW_COLORS = ['#3B82F6', '#7C3AED', '#059669', '#DC2626', '#D97706', '#DB2777', '#0891B2'];
+var ARROW_COLORS = ['#2E4A7A', '#4338CA', '#2D6A4F', '#8B2635', '#D97706', '#9E6B3B', '#0D9488'];
 var NODE_W = 190;
 var NODE_H = 54;
 
@@ -232,7 +232,7 @@ export default function DependencyChainPopup({ focusTaskId, allTasks, statuses, 
             {chainDirty && (
               <button onClick={chainSave} title="Save dependency changes to all tasks in the chain" style={{
                 border: 'none', borderRadius: 6, padding: '4px 12px',
-                background: theme.success, color: '#FFF', fontSize: 11, fontWeight: 600,
+                background: theme.success, color: '#FDFAF5', fontSize: 11, fontWeight: 600,
                 cursor: 'pointer', fontFamily: 'inherit'
               }}>Save Changes</button>
             )}
@@ -439,7 +439,7 @@ function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor,
               {/* Row 2: badges + dep chips */}
               <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
                 {dateLabel && <span style={{ fontSize: 9, padding: '0px 4px', borderRadius: 3, background: theme.bgTertiary, color: theme.textMuted, fontWeight: 500 }}>{dateLabel}</span>}
-                {isFocus && <span style={{ fontSize: 8, padding: '0px 4px', borderRadius: 3, background: theme.accent, color: 'white', fontWeight: 700 }}>FOCUS</span>}
+                {isFocus && <span style={{ fontSize: 8, padding: '0px 4px', borderRadius: 3, background: theme.accent, color: '#FDFAF5', fontWeight: 700 }}>FOCUS</span>}
                 {(function() {
                   var myDeps = (chainDeps[ct.id] || []).filter(function(d) { return chainOrder.indexOf(d) >= 0; });
                   return myDeps.map(function(depId) {

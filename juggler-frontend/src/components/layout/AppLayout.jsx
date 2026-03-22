@@ -86,6 +86,8 @@ export default function AppLayout() {
     return 0;
   });
   var [expandedTasks, setExpandedTasks] = useState([]);
+  // Maps template ID → instance ID that was clicked, so status changes target the instance
+  var expandedInstanceRef = useRef({});
   var [showSettings, setShowSettings] = useState(false);
   var [showExport, setShowExport] = useState(false);
   var [showGCalSync, setShowGCalSync] = useState(false);
@@ -95,6 +97,8 @@ export default function AppLayout() {
 
   var [showHelp, setShowHelp] = useState(false);
   var [showCreateForm, setShowCreateForm] = useState(false);
+  // Pending recurrence-day conflict confirmation from drag-drop
+  var [recurDayConfirm, setRecurDayConfirm] = useState(null);
   var [gcalAutoSync, setGcalAutoSync] = useState(false);
   var [gcalLastSyncedAt, setGcalLastSyncedAt] = useState(null);
   var [gcalSyncing, setGcalSyncing] = useState(false);
@@ -422,13 +426,18 @@ export default function AppLayout() {
       var sourceExists = allTasks.some(function(t) { return t.id === task.sourceId; });
       if (sourceExists) {
         effectiveId = task.sourceId;
+        // Track which instance was clicked so status changes target the instance
+        expandedInstanceRef.current[effectiveId] = id;
       }
     } else if (task && task.habit) {
       // Fallback: find template by text for instances missing sourceId
       var tmpl = allTasks.find(function(t) {
         return t.taskType === 'habit_template' && t.text === task.text;
       });
-      if (tmpl) effectiveId = tmpl.id;
+      if (tmpl) {
+        effectiveId = tmpl.id;
+        expandedInstanceRef.current[effectiveId] = id;
+      }
     }
     setExpandedTasks(function(prev) { return prev.length === 1 && prev[0] === effectiveId ? [] : [effectiveId]; });
   }, [allTasks]);
@@ -475,6 +484,7 @@ export default function AppLayout() {
   useKeyboardShortcuts({
     selectedDate, tasksByDate, statuses, allTasks, filter,
     expandedTask: expandedTasks.length > 0 ? expandedTasks[expandedTasks.length - 1] : null,
+    expandedInstanceMap: expandedInstanceRef.current,
     setExpandedTask: function(v) {
       if (v === null) setExpandedTasks([]);
       else setExpandedTasks([v]);
@@ -499,7 +509,8 @@ export default function AppLayout() {
 
   // Drag and drop handlers
   var { handleGridDrop, handleDateDrop, handlePriorityDrop } = useDragDrop({
-    allTasks, onUpdate: handleUpdateTask, gridZoom: config.gridZoom, showToast
+    allTasks, onUpdate: handleUpdateTask, gridZoom: config.gridZoom, showToast,
+    onRecurDayConflict: setRecurDayConfirm
   });
 
   // Marker drag handler — convert minutes to time string and update task
@@ -872,13 +883,15 @@ export default function AppLayout() {
             ) : (
               expandedTaskObjs.map(function(taskObj, idx) {
                 var taskId = taskObj.id;
+                // For habit templates opened via an instance, use the instance ID for status
+                var statusId = expandedInstanceRef.current[taskId] || taskId;
                 return (
                   <TaskEditForm
                     key={taskId}
                     task={taskObj}
-                    status={statuses[taskId] || ''}
+                    status={statuses[statusId] || ''}
                     onUpdate={handleUpdateTask}
-                    onStatusChange={function(val) { handleStatusChange(taskId, val); }}
+                    onStatusChange={function(val) { handleStatusChange(statusId, val); }}
                     onDelete={deleteTask}
                     onClose={function() { setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== taskId; }); }); }}
                     onShowChain={function() { setViewMode('deps'); setProjectFilter(taskObj.project || ''); setExpandedTasks([]); }}
@@ -890,6 +903,11 @@ export default function AppLayout() {
                     templateDefaults={config.templateDefaults}
                     darkMode={darkMode}
                     isMobile={isMobile}
+                    onRecurDayConflict={function(data) {
+                      // Inject the instance ID so the confirm handler moves the instance, not the template
+                      data.instanceId = statusId;
+                      setRecurDayConfirm(data);
+                    }}
                   />
                 );
               })
@@ -918,13 +936,15 @@ export default function AppLayout() {
       )}
       {isMobile && !showCreateForm && expandedTaskObjs.map(function(taskObj, idx) {
         var taskId = taskObj.id;
+        // For habit templates opened via an instance, use the instance ID for status
+        var statusId = expandedInstanceRef.current[taskId] || taskId;
         return (
           <TaskEditForm
             key={taskId}
             task={taskObj}
-            status={statuses[taskId] || ''}
+            status={statuses[statusId] || ''}
             onUpdate={handleUpdateTask}
-            onStatusChange={function(val) { handleStatusChange(taskId, val); }}
+            onStatusChange={function(val) { handleStatusChange(statusId, val); }}
             onDelete={deleteTask}
             onClose={function() { setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== taskId; }); }); }}
             onShowChain={function() { setViewMode('deps'); setProjectFilter(taskObj.project || ''); setExpandedTasks([]); }}
@@ -936,6 +956,10 @@ export default function AppLayout() {
             templateDefaults={config.templateDefaults}
             darkMode={darkMode}
             isMobile={isMobile}
+            onRecurDayConflict={function(data) {
+              data.instanceId = statusId;
+              setRecurDayConfirm(data);
+            }}
           />
         );
       })}
@@ -992,6 +1016,73 @@ export default function AppLayout() {
         showHistory={showToastHistory}
         onToggleHistory={() => setShowToastHistory(v => !v)}
       />
+
+      {/* Recurrence day conflict confirmation dialog */}
+      {recurDayConfirm && (function() {
+        var c = recurDayConfirm;
+        var taskName = (c.task.text || c.taskId).slice(0, 40);
+        return (
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 10000,
+            background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }} onClick={function() { setRecurDayConfirm(null); }}>
+            <div style={{
+              background: theme.bgCard, border: '1px solid ' + theme.border,
+              borderRadius: 12, padding: 24, maxWidth: 380, width: '90%',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)', color: theme.text
+            }} onClick={function(e) { e.stopPropagation(); }}>
+              <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 12 }}>
+                Move to {c.conflict.dayLabel}?
+              </div>
+              <div style={{ fontSize: 13, lineHeight: 1.5, marginBottom: 20, color: theme.textSecondary }}>
+                <strong>{taskName}</strong> is set to recur on{' '}
+                {c.conflict.recurDays.split('').map(function(code) {
+                  var labels = { U: 'Sun', M: 'Mon', T: 'Tue', W: 'Wed', R: 'Thu', F: 'Fri', S: 'Sat' };
+                  return labels[code] || code;
+                }).join(', ')}
+                {' '}only. Add <strong>{c.conflict.dayLabel}</strong> as a recurring day?
+              </div>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button onClick={function() { setRecurDayConfirm(null); }}
+                  style={{
+                    padding: '8px 16px', borderRadius: 6, border: '1px solid ' + theme.border,
+                    background: 'transparent', color: theme.text, cursor: 'pointer', fontSize: 13
+                  }}>Cancel</button>
+                <button onClick={function() {
+                  pushUndo('move habit');
+                  // Resolve the correct IDs: prefer explicit instanceId (from detail view),
+                  // then expandedInstanceRef, then fall back to taskId
+                  var instanceId = c.instanceId || expandedInstanceRef.current[c.taskId] || c.taskId;
+                  var templateId = c.task.sourceId || c.taskId;
+                  console.log('[RECUR-CONFIRM]', { instanceId, templateId, taskId: c.taskId, cInstanceId: c.instanceId, fields: c.fields });
+                  // If instanceId still points to a template (no instance mapping),
+                  // use taskId as-is — the backend will update the template's date
+                  if (instanceId === templateId) {
+                    // Editing the template directly — just update it with all fields
+                    var combined = Object.assign({}, c.fields, {
+                      recur: Object.assign({}, c.conflict.recur, { days: c.conflict.recurDays + c.conflict.dayCode })
+                    });
+                    updateTask(templateId, combined);
+                  } else {
+                    // Move the instance
+                    updateTask(instanceId, c.fields);
+                    // Add the new day to the template's recurrence
+                    var newDays = c.conflict.recurDays + c.conflict.dayCode;
+                    updateTask(templateId, { recur: Object.assign({}, c.conflict.recur, { days: newDays }) });
+                  }
+                  showToast('Moved and added ' + c.conflict.dayLabel + ' to schedule', 'success');
+                  setRecurDayConfirm(null);
+                }}
+                  style={{
+                    padding: '8px 16px', borderRadius: 6, border: 'none',
+                    background: theme.accent || '#3B82F6', color: '#fff', cursor: 'pointer',
+                    fontSize: 13, fontWeight: 600
+                  }}>Yes, add {c.conflict.dayLabel}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
     </div>
   );

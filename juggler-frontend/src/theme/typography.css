@@ -1,0 +1,16 @@
+/* Raike & Sons — Brand Typography Rules
+   Maps heading levels to brand fonts per the brand guide. */
+
+h1, h6 {
+  font-family: 'Playfair Display', serif;
+}
+
+h2, h3, h4, h5 {
+  font-family: 'EB Garamond', serif;
+}
+
+body, p, span, li, td, th,
+button, input, select, textarea,
+label, a {
+  font-family: 'Inter', sans-serif;
+}

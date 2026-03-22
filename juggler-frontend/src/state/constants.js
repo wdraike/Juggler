@@ -3,17 +3,17 @@
  */
 
 export const PRI_COLORS = {
-  P1: "#DC2626", P2: "#D97706", P3: "#2563EB", P4: "#6B7280",
+  P1: "#E11D48", P2: "#D97706", P3: "#2E4A7A", P4: "#5C5A55",
 };
 
 export const PRI_RANK = { P1: 100, P2: 80, P3: 50, P4: 20 };
 
 export const STATUS_OPTIONS = [
-  { value: "", label: "\u2014", bg: "#FFFFFF", bgDark: "#1E293B", color: "#9CA3AF", colorDark: "#7E8FA6", tip: "Open \u2014 not started" },
-  { value: "done", label: "\u2713", bg: "#D1FAE5", bgDark: "#064E3B", color: "#065F46", colorDark: "#6EE7B7", tip: "Done \u2014 completed" },
-  { value: "wip", label: "\u231B", bg: "#FEF3C7", bgDark: "#78350F", color: "#92400E", colorDark: "#FCD34D", tip: "WIP \u2014 work in progress" },
-  { value: "cancel", label: "\u2715", bg: "#FEE2E2", bgDark: "#7F1D1D", color: "#991B1B", colorDark: "#FCA5A5", tip: "Cancelled \u2014 won't do" },
-  { value: "skip", label: "\u23ED", bg: "#F1F5F9", bgDark: "#334155", color: "#64748B", colorDark: "#94A3B8", tip: "Skipped \u2014 not today" },
+  { value: "", label: "\u2014", bg: "#F5F0E8", bgDark: "#1E2D4A", color: "#5C5A55", colorDark: "#B0A898", tip: "Open \u2014 not started" },
+  { value: "done", label: "\u2713", bg: "#D1FAE5", bgDark: "#0A3622", color: "#2D6A4F", colorDark: "#6EE7B7", tip: "Done \u2014 completed" },
+  { value: "wip", label: "\u231B", bg: "#FEF3C7", bgDark: "#3A2A08", color: "#9E6B3B", colorDark: "#E8C878", tip: "WIP \u2014 work in progress" },
+  { value: "cancel", label: "\u2715", bg: "#FEE2E2", bgDark: "#3A0A10", color: "#8B2635", colorDark: "#FCA5A5", tip: "Cancelled \u2014 won't do" },
+  { value: "skip", label: "\u23ED", bg: "#E8E0D0", bgDark: "#2C2B28", color: "#5C5A55", colorDark: "#B0A898", tip: "Skipped \u2014 not today" },
 ];
 
 export const STATUS_MAP = Object.fromEntries(STATUS_OPTIONS.map(s => [s.value, s]));
@@ -32,7 +32,7 @@ export const GRID_START = 6;  // 6 AM
 export const GRID_END = 23;   // 11 PM
 export const GRID_HOURS_COUNT = GRID_END - GRID_START + 1;
 
-export const LOC_TINT = { home: "#3B82F6", work: "#F59E0B", transit: "#9CA3AF", downtown: "#10B981", gym: "#EF4444" };
+export const LOC_TINT = { home: "#2E4A7A", work: "#C8942A", transit: "#5C5A55", downtown: "#2D6A4F", gym: "#8B2635" };
 
 export const DEFAULT_LOCATIONS = [
   { id: "home", name: "Home", icon: "\uD83C\uDFE0" },
@@ -59,18 +59,18 @@ export const DEFAULT_TOOL_MATRIX = {
 };
 
 export const DEFAULT_WEEKDAY_BLOCKS = [
-  { id: "morning", tag: "morning", name: "Morning", start: 360, end: 480, color: "#F59E0B", icon: "\u2600\uFE0F", loc: "home" },
-  { id: "biz1", tag: "biz", name: "Biz", start: 480, end: 720, color: "#2563EB", icon: "\uD83D\uDCBC", loc: "work" },
-  { id: "lunch", tag: "lunch", name: "Lunch", start: 720, end: 780, color: "#059669", icon: "\uD83C\uDF7D\uFE0F", loc: "work" },
-  { id: "biz2", tag: "biz", name: "Biz", start: 780, end: 1020, color: "#2563EB", icon: "\uD83D\uDCBC", loc: "work" },
-  { id: "evening", tag: "evening", name: "Evening", start: 1020, end: 1260, color: "#7C3AED", icon: "\uD83C\uDF19", loc: "home" },
+  { id: "morning", tag: "morning", name: "Morning", start: 360, end: 480, color: "#C8942A", icon: "\u2600\uFE0F", loc: "home" },
+  { id: "biz1", tag: "biz", name: "Biz", start: 480, end: 720, color: "#2E4A7A", icon: "\uD83D\uDCBC", loc: "work" },
+  { id: "lunch", tag: "lunch", name: "Lunch", start: 720, end: 780, color: "#2D6A4F", icon: "\uD83C\uDF7D\uFE0F", loc: "work" },
+  { id: "biz2", tag: "biz", name: "Biz", start: 780, end: 1020, color: "#2E4A7A", icon: "\uD83D\uDCBC", loc: "work" },
+  { id: "evening", tag: "evening", name: "Evening", start: 1020, end: 1260, color: "#9E6B3B", icon: "\uD83C\uDF19", loc: "home" },
   { id: "night", tag: "night", name: "Night", start: 1260, end: 1380, color: "#475569", icon: "\uD83C\uDF11", loc: "home" },
 ];
 
 export const DEFAULT_WEEKEND_BLOCKS = [
-  { id: "morning", tag: "morning", name: "Morning", start: 420, end: 720, color: "#F59E0B", icon: "\u2600\uFE0F", loc: "home" },
-  { id: "afternoon", tag: "afternoon", name: "Afternoon", start: 720, end: 1020, color: "#F59E0B", icon: "\uD83C\uDF24\uFE0F", loc: "home" },
-  { id: "evening", tag: "evening", name: "Evening", start: 1020, end: 1260, color: "#7C3AED", icon: "\uD83C\uDF19", loc: "home" },
+  { id: "morning", tag: "morning", name: "Morning", start: 420, end: 720, color: "#C8942A", icon: "\u2600\uFE0F", loc: "home" },
+  { id: "afternoon", tag: "afternoon", name: "Afternoon", start: 720, end: 1020, color: "#C8942A", icon: "\uD83C\uDF24\uFE0F", loc: "home" },
+  { id: "evening", tag: "evening", name: "Evening", start: 1020, end: 1260, color: "#9E6B3B", icon: "\uD83C\uDF19", loc: "home" },
   { id: "night", tag: "night", name: "Night", start: 1260, end: 1380, color: "#475569", icon: "\uD83C\uDF11", loc: "home" },
 ];
 
@@ -116,7 +116,7 @@ export function applyDefaults(t) {
 }
 
 export function locBgTint(locId, alpha) {
-  return (LOC_TINT[locId] || "#8B5CF6") + (alpha || "18");
+  return (LOC_TINT[locId] || "#9E6B3B") + (alpha || "18");
 }
 
 var LOC_ICONS = {
