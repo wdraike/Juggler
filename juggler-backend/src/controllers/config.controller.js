@@ -68,6 +68,12 @@ async function updateConfig(req, res) {
       return res.status(400).json({ error: `Invalid config key: ${key}` });
     }
 
+    // Prevent DoS via oversized config values
+    const serialized = JSON.stringify(value);
+    if (serialized.length > 102400) { // 100KB max
+      return res.status(400).json({ error: 'Config value too large (max 100KB)' });
+    }
+
     const existing = await db('user_config').where({ user_id: userId, config_key: key }).first();
 
     if (existing) {
