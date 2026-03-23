@@ -110,6 +110,7 @@ app.use('/api/schedule', scheduleRoutes);
 app.use('/api/feature-catalog', require('./routes/feature-catalog.routes'));
 app.use('/api/feature-events', require('./routes/feature-events.routes'));
 app.use('/api/my-plan', require('./routes/my-plan.routes'));
+app.use('/api/billing-webhooks', require('./routes/billing-webhooks.routes'));
 
 // 404 handler
 app.use((req, res) => {
