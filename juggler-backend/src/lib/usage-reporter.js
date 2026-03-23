@@ -1,24 +1,28 @@
 /**
  * Usage Reporter — batches usage events and sends to payment service
  *
- * Events are buffered in memory and flushed every 30 seconds or when
- * the buffer hits 50 events. Fire-and-forget — failures are logged
- * but never block the request.
+ * Uses ServiceJWT authentication for service-to-service calls.
+ * Falls back to X-Internal-Key if service-auth not initialized.
  */
 
 const PRODUCT_SLUG = 'juggler';
 const FLUSH_INTERVAL = 30000;
 const FLUSH_SIZE = 50;
 
-const PAYMENT_URL = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
-const INTERNAL_KEY = process.env.INTERNAL_SERVICE_KEY;
-
 const buffer = [];
 let flushTimer = null;
+let _serviceAuthReady = false;
+
+try {
+  const { initServiceAuth } = require('../../vendor/service-auth');
+  initServiceAuth({ serviceName: PRODUCT_SLUG }).then(() => {
+    _serviceAuthReady = true;
+  }).catch(err => {
+    console.warn('[usage-reporter] Service auth init failed, using legacy key:', err.message);
+  });
+} catch { /* service-auth not available */ }
 
 function reportUsage({ userId, planSlug, featureKey, eventType, quantity, inputTokens, outputTokens, endpoint }) {
-  if (!INTERNAL_KEY) return;
-
   buffer.push({
     user_id: userId,
     plan_slug: planSlug || 'free',
@@ -42,15 +46,26 @@ async function flush() {
   const events = buffer.splice(0);
 
   try {
-    await fetch(`${PAYMENT_URL}/api/usage/report`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Internal-Key': INTERNAL_KEY
-      },
-      body: JSON.stringify({ product_slug: PRODUCT_SLUG, events }),
-      signal: AbortSignal.timeout(5000)
-    });
+    if (_serviceAuthReady) {
+      const { serviceRequest } = require('../../vendor/service-auth');
+      await serviceRequest('payment-service', '/api/usage/report', {
+        method: 'POST',
+        body: { product_slug: PRODUCT_SLUG, events }
+      });
+    } else {
+      const PAYMENT_URL = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
+      const INTERNAL_KEY = process.env.INTERNAL_SERVICE_KEY;
+      if (!INTERNAL_KEY) return;
+      await fetch(`${PAYMENT_URL}/api/usage/report`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Internal-Key': INTERNAL_KEY
+        },
+        body: JSON.stringify({ product_slug: PRODUCT_SLUG, events }),
+        signal: AbortSignal.timeout(5000)
+      });
+    }
   } catch (err) {
     console.warn(`[usage-reporter] Failed to flush ${events.length} events: ${err.message}`);
   }
