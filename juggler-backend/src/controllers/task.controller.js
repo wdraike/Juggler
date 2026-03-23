@@ -598,6 +598,14 @@ async function batchCreateTasks(req, res) {
       return res.status(400).json({ error: 'Batch limited to 500 items' });
     }
 
+    // Validate field lengths to prevent oversized data
+    for (var i = 0; i < tasks.length; i++) {
+      var t = tasks[i];
+      if (t.title && t.title.length > 500) return res.status(400).json({ error: `Task ${i}: title too long (max 500 chars)` });
+      if (t.notes && t.notes.length > 5000) return res.status(400).json({ error: `Task ${i}: notes too long (max 5000 chars)` });
+      if (t.depends_on && Array.isArray(t.depends_on) && t.depends_on.length > 50) return res.status(400).json({ error: `Task ${i}: too many dependencies (max 50)` });
+    }
+
     var tz = req.user.timezone || 'America/New_York';
 
     var prefs = await db('user_config').where({ user_id: req.user.id, config_key: 'preferences' }).first();

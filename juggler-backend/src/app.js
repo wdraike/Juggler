@@ -57,6 +57,20 @@ app.use(bodyParser.json({ limit: '1mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(morgan('dev'));
 
+// Sanitize error responses in production
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    const originalJson = res.json.bind(res);
+    res.json = function(body) {
+      if (res.statusCode >= 500 && body && body.message) {
+        body.message = 'An error occurred processing your request';
+      }
+      return originalJson(body);
+    };
+    next();
+  });
+}
+
 // Rate limiting
 const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false });
 const aiLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
