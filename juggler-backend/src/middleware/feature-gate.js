@@ -10,6 +10,7 @@
  */
 
 const db = require('../db');
+const { reportUsage } = require('../lib/usage-reporter');
 
 function getNestedValue(obj, path) {
   return path.split('.').reduce((o, key) => o?.[key], obj);
@@ -68,6 +69,7 @@ function requireFeature(featurePath) {
       logFeatureEvent(req, featurePath, 'blocked', {
         current_plan: req.planSlug || 'free'
       });
+      reportUsage({ userId: req.user?.id, planSlug: req.planSlug, featureKey: featurePath, eventType: 'blocked', endpoint: `${req.method} ${req.originalUrl}` });
       return res.status(403).json({
         error: 'Feature not available on your plan',
         code: 'FEATURE_NOT_AVAILABLE',
@@ -78,6 +80,7 @@ function requireFeature(featurePath) {
     }
 
     logFeatureEvent(req, featurePath, 'used', null);
+    reportUsage({ userId: req.user?.id, planSlug: req.planSlug, featureKey: featurePath, eventType: 'used', endpoint: `${req.method} ${req.originalUrl}` });
     next();
   };
 }
@@ -178,6 +181,7 @@ function checkUsageLimit(limitKey, options = {}) {
         logFeatureEvent(req, limitKey, 'limit_reached', {
           current_usage: result.currentCount, limit
         });
+        reportUsage({ userId, planSlug: req.planSlug, featureKey: limitKey, eventType: 'limit_reached', endpoint: `${req.method} ${req.originalUrl}` });
         return res.status(429).json({
           error: 'Usage limit reached',
           code: 'USAGE_LIMIT_REACHED',
@@ -193,6 +197,7 @@ function checkUsageLimit(limitKey, options = {}) {
       logFeatureEvent(req, limitKey, 'used', {
         count_after: result.currentCount
       });
+      reportUsage({ userId, planSlug: req.planSlug, featureKey: limitKey, eventType: 'used', endpoint: `${req.method} ${req.originalUrl}` });
 
       next();
     } catch (err) {
