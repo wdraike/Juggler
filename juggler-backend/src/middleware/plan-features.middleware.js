@@ -67,20 +67,9 @@ async function getUserPlanSlug(userId) {
     return cached.slug;
   }
 
-  const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
-  const internalKey = process.env.INTERNAL_SERVICE_KEY;
-  if (!internalKey) return null;
-
   try {
-    const response = await fetch(
-      `${paymentUrl}/internal/users/${userId}/active-plans`,
-      {
-        headers: { 'X-Internal-Key': internalKey },
-        signal: AbortSignal.timeout(3000)
-      }
-    );
-    if (!response.ok) return null;
-    const data = await response.json();
+    const { serviceRequest } = require('../../vendor/service-auth');
+    const data = await serviceRequest('payment-service', `/internal/users/${userId}/active-plans`, { timeout: 3000 });
     const slug = data.plans?.[PRODUCT_SLUG] || null;
     _userPlanCache.set(userId, { slug, timestamp: Date.now() });
     return slug;
