@@ -18,13 +18,13 @@ function getNestedValue(obj, path) {
 
 function logFeatureEvent(req, featureKey, eventType, value) {
   const userId = typeof req === 'object' ? req.user?.id : req;
-  const planSlug = typeof req === 'object' ? req.planSlug : 'free';
+  const planId = typeof req === 'object' ? req.planId : 'free';
 
   db('feature_events').insert({
     user_id: userId,
     feature_key: featureKey,
     event_type: eventType,
-    plan_slug: planSlug || 'free',
+    planId: planId || 'free',
     plan_id: typeof req === 'object' ? (req.auth?.plans?.['juggler'] || null) : null,
     endpoint: typeof req === 'object' ? `${req.method} ${req.originalUrl || req.url}` : null,
     ip_address: typeof req === 'object' ? (req.ip || req.headers?.['x-forwarded-for'] || null) : null,
@@ -67,20 +67,20 @@ function requireFeature(featurePath) {
 
     if (!value) {
       logFeatureEvent(req, featurePath, 'blocked', {
-        current_plan: req.planSlug || 'free'
+        current_plan: req.planId || 'free'
       });
-      reportUsage({ userId: req.user?.id, planSlug: req.planSlug, featureKey: featurePath, eventType: 'blocked', endpoint: `${req.method} ${req.originalUrl}` });
+      reportUsage({ userId: req.user?.id, planId: req.planId, featureKey: featurePath, eventType: 'blocked', endpoint: `${req.method} ${req.originalUrl}` });
       return res.status(403).json({
         error: 'Feature not available on your plan',
         code: 'FEATURE_NOT_AVAILABLE',
         feature: featurePath,
-        current_plan: req.planSlug || 'free',
+        current_plan: req.planId || 'free',
         upgrade_required: true
       });
     }
 
     logFeatureEvent(req, featurePath, 'used', null);
-    reportUsage({ userId: req.user?.id, planSlug: req.planSlug, featureKey: featurePath, eventType: 'used', endpoint: `${req.method} ${req.originalUrl}` });
+    reportUsage({ userId: req.user?.id, planId: req.planId, featureKey: featurePath, eventType: 'used', endpoint: `${req.method} ${req.originalUrl}` });
     next();
   };
 }
@@ -109,7 +109,7 @@ function requireFeatureIncludes(featurePath, valueOrExtractor) {
       logFeatureEvent(req, featurePath, 'blocked', {
         requested: requestedValue,
         available: allowedValues || [],
-        current_plan: req.planSlug || 'free'
+        current_plan: req.planId || 'free'
       });
       return res.status(403).json({
         error: 'Option not available on your plan',
@@ -117,12 +117,12 @@ function requireFeatureIncludes(featurePath, valueOrExtractor) {
         feature: featurePath,
         requested: requestedValue,
         available: allowedValues || [],
-        current_plan: req.planSlug || 'free',
+        current_plan: req.planId || 'free',
         upgrade_required: true
       });
     }
 
-    logFeatureEvent(req.user?.id, featurePath, 'used', req.planSlug, { selected: requestedValue });
+    logFeatureEvent(req.user?.id, featurePath, 'used', req.planId, { selected: requestedValue });
     next();
   };
 }
@@ -181,14 +181,14 @@ function checkUsageLimit(limitKey, options = {}) {
         logFeatureEvent(req, limitKey, 'limit_reached', {
           current_usage: result.currentCount, limit
         });
-        reportUsage({ userId, planSlug: req.planSlug, featureKey: limitKey, eventType: 'limit_reached', endpoint: `${req.method} ${req.originalUrl}` });
+        reportUsage({ userId, planId: req.planId, featureKey: limitKey, eventType: 'limit_reached', endpoint: `${req.method} ${req.originalUrl}` });
         return res.status(429).json({
           error: 'Usage limit reached',
           code: 'USAGE_LIMIT_REACHED',
           limit_key: limitKey,
           current_usage: result.currentCount,
           limit,
-          current_plan: req.planSlug || 'free',
+          current_plan: req.planId || 'free',
           upgrade_required: true,
           resets_at: periodEnd ? periodEnd.toISOString() : null
         });
@@ -197,7 +197,7 @@ function checkUsageLimit(limitKey, options = {}) {
       logFeatureEvent(req, limitKey, 'used', {
         count_after: result.currentCount
       });
-      reportUsage({ userId, planSlug: req.planSlug, featureKey: limitKey, eventType: 'used', endpoint: `${req.method} ${req.originalUrl}` });
+      reportUsage({ userId, planId: req.planId, featureKey: limitKey, eventType: 'used', endpoint: `${req.method} ${req.originalUrl}` });
 
       next();
     } catch (err) {

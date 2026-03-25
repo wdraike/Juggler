@@ -104,13 +104,13 @@ function releaseSchedulerLock(userId) {
   if (p && p._resolve) p._resolve();
 }
 
-async function runScheduleAndPersist(userId, _retries) {
+async function runScheduleAndPersist(userId, _retries, options) {
   var retries = _retries || 0;
   var MAX_RETRIES = 3;
 
-  // Load user timezone
+  // Load user timezone — allow override from options (active timezone from frontend)
   var userRow = await db('users').where('id', userId).select('timezone').first();
-  var TIMEZONE = (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
+  var TIMEZONE = (options && options.timezone) || (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
 
   try {
   return await db.transaction(async function(trx) {
@@ -147,6 +147,7 @@ async function runScheduleAndPersist(userId, _retries) {
 
   // 5. Load config
   var cfg = await loadConfig(userId);
+  cfg.timezone = TIMEZONE;
 
   // 5b. Expand recurring habits into per-day instances and persist them
   var today = parseDate(timeInfo.todayKey) || new Date();
@@ -428,9 +429,9 @@ async function runScheduleAndPersist(userId, _retries) {
  * This ensures the schedule is stable across page loads — only an explicit
  * POST /schedule/run changes task placements.
  */
-async function getSchedulePlacements(userId) {
+async function getSchedulePlacements(userId, options) {
   var userRow = await db('users').where('id', userId).select('timezone').first();
-  var TIMEZONE = (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
+  var TIMEZONE = (options && options.timezone) || (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
 
   // Load all tasks (needed for hydration and hasPastTasks check)
   var taskRows = await db('tasks').where('user_id', userId).select();
@@ -629,6 +630,7 @@ async function getSchedulePlacements(userId) {
   // No cache — first load, run scheduler and cache the result
   console.log('[SCHED] no placement cache, running scheduler for first load');
   var cfg = await loadConfig(userId);
+  cfg.timezone = TIMEZONE;
   var result = unifiedSchedule(allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg);
 
   // Save cache

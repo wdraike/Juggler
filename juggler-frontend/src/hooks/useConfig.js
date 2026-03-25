@@ -121,6 +121,7 @@ export default function useConfig() {
   var [schedFloor, setSchedFloor] = useState(480);
   var [fontSize, setFontSize] = useState(100);
   var [pullForwardDampening, setPullForwardDampening] = useState(false);
+  var [timezoneOverride, setTimezoneOverride] = useState(null);
 
   // Unified template state
   var [scheduleTemplates, setScheduleTemplates] = useState(DEFAULT_SCHEDULE_TEMPLATES);
@@ -146,6 +147,7 @@ export default function useConfig() {
       if (p.schedFloor !== undefined) setSchedFloor(p.schedFloor);
       if (p.fontSize !== undefined) setFontSize(p.fontSize);
       if (p.pullForwardDampening !== undefined) setPullForwardDampening(p.pullForwardDampening);
+      if (p.timezoneOverride !== undefined) setTimezoneOverride(p.timezoneOverride);
     }
 
     // Unified template migration
@@ -290,12 +292,12 @@ export default function useConfig() {
     locations, tools, toolMatrix, timeBlocks, projects,
     locSchedules, locScheduleDefaults, locScheduleOverrides,
     hourLocationOverrides, splitDefault, splitMinDefault,
-    gridZoom, schedFloor, fontSize, pullForwardDampening,
+    gridZoom, schedFloor, fontSize, pullForwardDampening, timezoneOverride,
     scheduleTemplates, templateDefaults, templateOverrides,
     setLocations, setTools, setToolMatrix, setTimeBlocks, setProjects,
     setLocSchedules, setLocScheduleDefaults, setLocScheduleOverrides,
     setHourLocationOverrides, setSplitDefault, setSplitMinDefault,
-    setGridZoom, setSchedFloor, setFontSize, setPullForwardDampening,
+    setGridZoom, setSchedFloor, setFontSize, setPullForwardDampening, setTimezoneOverride,
     setScheduleTemplates, setTemplateDefaults, setTemplateOverrides,
     initFromConfig,
     updateToolMatrix, updateTimeBlocks,

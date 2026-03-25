@@ -17,7 +17,8 @@ var SAVE_FIELDS = [
   'text', 'status', 'date', 'time', 'dur', 'timeRemaining',
   'pri', 'project', 'section', 'notes', 'due', 'startAfter',
   'location', 'tools', 'when', 'dayReq', 'habit', 'rigid',
-  'split', 'splitMin', 'travelBefore', 'travelAfter', 'recur', 'dependsOn', 'datePinned'
+  'split', 'splitMin', 'travelBefore', 'travelAfter', 'recur', 'dependsOn', 'datePinned',
+  'tz', '_timezone'
 ];
 
 export default function useTaskState() {

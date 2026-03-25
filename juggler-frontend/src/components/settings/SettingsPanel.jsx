@@ -384,14 +384,63 @@ function PreferencesTab({ config, theme }) {
       gridZoom: config.gridZoom, splitDefault: config.splitDefault,
       splitMinDefault: config.splitMinDefault, schedFloor: config.schedFloor,
       fontSize: config.fontSize, pullForwardDampening: config.pullForwardDampening,
+      timezoneOverride: config.timezoneOverride,
       ...patch
     });
   }
+
+  // Common timezones for the dropdown
+  var commonTimezones = [
+    'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+    'America/Anchorage', 'Pacific/Honolulu', 'America/Phoenix',
+    'America/Toronto', 'America/Vancouver', 'America/Edmonton',
+    'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Madrid',
+    'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Kolkata', 'Asia/Dubai',
+    'Australia/Sydney', 'Australia/Melbourne', 'Pacific/Auckland',
+    'America/Sao_Paulo', 'America/Mexico_City', 'America/Bogota'
+  ];
+  // Try to get full list from browser, fall back to common list
+  var allTimezones = commonTimezones;
+  try {
+    if (typeof Intl !== 'undefined' && Intl.supportedValuesOf) {
+      allTimezones = Intl.supportedValuesOf('timeZone');
+    }
+  } catch (e) { /* ignore */ }
+
+  var browserTz = null;
+  try { browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { /* ignore */ }
 
   return (
     <div>
       <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 12 }}>Preferences</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+
+        <div style={{ fontSize: 12, color: theme.text }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ fontWeight: 500 }}>Timezone:</span>
+            <select
+              value={config.timezoneOverride || ''}
+              onChange={e => {
+                var v = e.target.value || null;
+                config.setTimezoneOverride(v);
+                savePrefs({ timezoneOverride: v });
+              }}
+              style={{ flex: 1, padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }}>
+              <option value="">Use browser timezone{browserTz ? ' (' + browserTz + ')' : ''}</option>
+              {allTimezones.map(function(tz) {
+                return <option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>;
+              })}
+            </select>
+          </div>
+          <div style={{ fontSize: 10, color: theme.textMuted }}>
+            {config.timezoneOverride
+              ? 'Manual override active. Templates interpret as ' + config.timezoneOverride + ' local time.'
+              : browserTz
+                ? 'Auto-detected: ' + browserTz + '. Templates interpret as local time.'
+                : 'No timezone detected. Using profile default.'}
+          </div>
+        </div>
+
         <label title="Scale the entire UI font size" style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
           Font size:
           <input type="range" min={80} max={140} value={config.fontSize} onChange={e => { var v = parseInt(e.target.value); config.setFontSize(v); savePrefs({ fontSize: v }); }} />

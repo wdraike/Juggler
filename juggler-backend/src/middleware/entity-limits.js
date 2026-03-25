@@ -46,7 +46,7 @@ function checkEntityLimit(limitKey, countFn, options = {}) {
           current_count: currentCount,
           limit,
           attempting_to_add: batchSize,
-          current_plan: req.planSlug || 'free',
+          current_plan: req.planId || 'free',
           upgrade_required: true
         });
       }
@@ -153,7 +153,7 @@ const checkLocationLimit = (req, res, next) => {
       limit_key: 'limits.locations',
       current_count: locations.length,
       limit,
-      current_plan: req.planSlug || 'free',
+      current_plan: req.planId || 'free',
       upgrade_required: true
     });
   }
@@ -205,7 +205,7 @@ async function checkBatchTaskLimits(req, res, next) {
           current_count: currentTasks,
           limit: taskLimit,
           attempting_to_add: tasks.length,
-          current_plan: req.planSlug || 'free',
+          current_plan: req.planId || 'free',
           upgrade_required: true
         });
       }
@@ -223,7 +223,7 @@ async function checkBatchTaskLimits(req, res, next) {
           current_count: currentHabits,
           limit: habitLimit,
           attempting_to_add: habits.length,
-          current_plan: req.planSlug || 'free',
+          current_plan: req.planId || 'free',
           upgrade_required: true
         });
       }

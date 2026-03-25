@@ -22,13 +22,31 @@ export default function usePlanInfo() {
   var [usage, setUsage] = useState({});
   var [loading, setLoading] = useState(true);
 
+  var [trialInfo, setTrialInfo] = useState(null);
+
   var load = useCallback(function() {
     apiClient.get('/my-plan').then(function(res) {
       setPlanName(res.data.plan_name || res.data.plan_id || 'Free');
       setFeatures(res.data.features);
       setUsage(res.data.usage || {});
+      if (res.data.trial_end && res.data.subscription_status === 'trialing') {
+        var trialEnd = new Date(res.data.trial_end);
+        var daysLeft = Math.max(0, Math.round((trialEnd - new Date()) / (1000 * 60 * 60 * 24)));
+        setTrialInfo({ daysLeft: daysLeft, endsAt: res.data.trial_end });
+      } else {
+        setTrialInfo(null);
+      }
       setLoading(false);
-    }).catch(function() {
+    }).catch(function(err) {
+      if (err.response?.status === 402) {
+        var errorData = err.response?.data || {};
+        window.dispatchEvent(new CustomEvent('subscription:required', {
+          detail: {
+            plans_url: errorData.plans_url,
+            message: errorData.message,
+          }
+        }));
+      }
       setLoading(false);
     });
   }, []);
@@ -63,5 +81,5 @@ export default function usePlanInfo() {
     });
   });
 
-  return { planName, features, usage, usageSummary, loading, refresh: load };
+  return { planName, features, usage, usageSummary, trialInfo, loading, refresh: load };
 }

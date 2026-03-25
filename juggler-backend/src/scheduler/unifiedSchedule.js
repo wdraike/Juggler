@@ -284,6 +284,129 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     }
   });
 
+  // ── Backward deadline propagation ──
+  // If task A → task B and B has due=4/15, then A inherits an effective
+  // deadline of 4/15 (the latest it could start without risking B's deadline).
+  // Walk the reverse dep graph to find the earliest downstream due date.
+  var taskById = {};
+  allTasks.forEach(function(t) { taskById[t.id] = t; });
+
+  // Static pre-computation: walk the chain backward, subtracting durations
+  // of intervening tasks to get approximate effective deadlines.
+  // E.g., chain A → B → C → D(due 3/27, 60m): D's deadline is 3/27,
+  // C's effective deadline ≈ 3/27 minus D's 60m, B's ≈ C's minus C's dur, etc.
+  function computeDownstreamDeadline(taskId, visited) {
+    if (visited[taskId]) return null;
+    visited[taskId] = true;
+    var children = dependedOnBy[taskId] || [];
+    var earliest = null;
+    for (var ci = 0; ci < children.length; ci++) {
+      var childId = children[ci];
+      if (isBackwardsDep(childId, taskId)) continue;
+      var childTask = taskById[childId];
+      if (!childTask) continue;
+      var childSt = newSt[childId] || '';
+      if (childSt === 'done' || childSt === 'cancel' || childSt === 'skip') continue;
+      var childDur = effectiveDuration(childTask);
+      // Use child's own due date, offset by child's duration
+      if (childTask.due) {
+        var childDue = parseDate(childTask.due);
+        if (childDue) {
+          // Subtract child's duration from its due date to get our effective deadline.
+          // Convert to day-level: if the child takes 120m, that's roughly 1 day buffer
+          // on a schedule with ~480m of work time per day.
+          var bufferDays = Math.ceil(childDur / 480);
+          var adjusted = new Date(childDue);
+          adjusted.setDate(adjusted.getDate() - bufferDays);
+          adjusted.setHours(23, 59, 59, 999);
+          if (!earliest || adjusted < earliest) earliest = adjusted;
+        }
+      }
+      // Recurse: child's downstream deadline (already duration-adjusted) may be earlier
+      var childDeadline = computeDownstreamDeadline(childId, visited);
+      if (childDeadline) {
+        // Further subtract this child's own duration from the downstream deadline
+        var bufferDays2 = Math.ceil(childDur / 480);
+        var adjusted2 = new Date(childDeadline);
+        adjusted2.setDate(adjusted2.getDate() - bufferDays2);
+        adjusted2.setHours(23, 59, 59, 999);
+        if (!earliest || adjusted2 < earliest) earliest = adjusted2;
+      }
+    }
+    return earliest;
+  }
+
+  pool.forEach(function(item) {
+    var downstreamDue = computeDownstreamDeadline(item.task.id, {});
+    if (downstreamDue) {
+      if (!item.deadline || downstreamDue < item.deadline) {
+        item.deadline = downstreamDue;
+      }
+    }
+  });
+
+  // Dynamic deadline recomputation: once a downstream task is placed at a
+  // specific time, the upstream task's effective deadline tightens to the
+  // actual placement start. Called after each placement to keep deadlines fresh.
+  function recomputeEffectiveDeadline(taskId) {
+    var children = dependedOnBy[taskId] || [];
+    var earliest = null;
+    for (var ci = 0; ci < children.length; ci++) {
+      var childId = children[ci];
+      if (isBackwardsDep(childId, taskId)) continue;
+      var childSt = newSt[childId] || '';
+      if (childSt === 'done' || childSt === 'cancel' || childSt === 'skip') continue;
+      // If child is placed, use its actual start as a hard deadline
+      var childPlacement = globalPlacedEnd[childId];
+      if (childPlacement && childPlacement.startMin != null) {
+        var placedDate = parseDate(childPlacement.dateKey);
+        if (placedDate) {
+          // Effective deadline = start of placed child (we must finish before it)
+          // Convert startMin back to a date ceiling (use the day, minus any buffer)
+          var placedDeadline = new Date(placedDate);
+          placedDeadline.setHours(23, 59, 59, 999);
+          if (!earliest || placedDeadline < earliest) earliest = placedDeadline;
+        }
+      } else {
+        // Child not yet placed — use its due date (or downstream deadline) minus duration
+        var childTask = taskById[childId];
+        if (childTask) {
+          var childDur = effectiveDuration(childTask);
+          var bufferDays = Math.ceil(childDur / 480);
+          if (childTask.due) {
+            var childDue = parseDate(childTask.due);
+            if (childDue) {
+              var adj = new Date(childDue);
+              adj.setDate(adj.getDate() - bufferDays);
+              adj.setHours(23, 59, 59, 999);
+              if (!earliest || adj < earliest) earliest = adj;
+            }
+          }
+          // Recurse to get child's downstream deadline
+          var childDL = recomputeEffectiveDeadline(childId);
+          if (childDL) {
+            var adj2 = new Date(childDL);
+            adj2.setDate(adj2.getDate() - bufferDays);
+            adj2.setHours(23, 59, 59, 999);
+            if (!earliest || adj2 < earliest) earliest = adj2;
+          }
+        }
+      }
+    }
+    return earliest;
+  }
+
+  // Helper: update a pool item's deadline from its downstream placements
+  function refreshDeadline(item) {
+    var dynamic = recomputeEffectiveDeadline(item.task.id);
+    if (dynamic) {
+      // Use the tighter of own due date vs dynamic downstream deadline
+      var ownDue = item.task.due ? parseDate(item.task.due) : null;
+      if (ownDue) ownDue.setHours(23, 59, 59, 999);
+      item.deadline = ownDue && ownDue < dynamic ? ownDue : dynamic;
+    }
+  }
+
   // ── Detect impossible constraint combinations ──
   pool.forEach(function(item) {
     var t = item.task;
@@ -361,7 +484,10 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     if (tb > 0) reserve(occ, Math.max(0, start - tb), tb);
     reserve(occ, start, dur);
     if (ta > 0) reserve(occ, start + dur, ta);
-    var part = { task: t, start: start, dur: dur, locked: locked, _dateKey: dateKey, travelBefore: tb, travelAfter: ta };
+    // Per-placement timezone: fixed/locked tasks carry their own tz (if set on the task),
+    // otherwise inherit the schedule-level timezone from cfg.
+    var placeTz = (t.tz && (locked || hasWhen(t.when, 'fixed'))) ? t.tz : (cfg.timezone || null);
+    var part = { task: t, start: start, dur: dur, locked: locked, _dateKey: dateKey, travelBefore: tb, travelAfter: ta, tz: placeTz };
     placed.push(part);
     if (item) { item._parts.push(part); item.remaining -= dur; }
     var effectiveStart = start - tb;
@@ -379,8 +505,27 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var hh = Math.floor(start / 60), mm = start % 60;
       var ampm = hh >= 12 ? "PM" : "AM";
       var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
-      taskUpdates[t.id] = { date: dateKey, time: dh + ":" + (mm < 10 ? "0" : "") + mm + " " + ampm };
+      taskUpdates[t.id] = { date: dateKey, time: dh + ":" + (mm < 10 ? "0" : "") + mm + " " + ampm, tz: placeTz };
     }
+    // Dynamic deadline propagation: this task being placed tightens the
+    // effective deadline of all upstream ancestors. Walk deps backward
+    // through the full chain so all unplaced ancestors get updated.
+    function propagateDeadlineUp(taskId, visited) {
+      var deps = taskById[taskId] ? getTaskDeps(taskById[taskId]) : [];
+      for (var dai = 0; dai < deps.length; dai++) {
+        var depId = deps[dai];
+        if (visited[depId]) continue;
+        visited[depId] = true;
+        for (var pii = 0; pii < pool.length; pii++) {
+          if (pool[pii].task.id === depId && pool[pii].remaining > 0) {
+            refreshDeadline(pool[pii]);
+            break;
+          }
+        }
+        propagateDeadlineUp(depId, visited);
+      }
+    }
+    propagateDeadlineUp(t.id, {});
     return part;
   }
 
@@ -790,7 +935,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var reserveStart = Math.max(0, sm);
       reserve(occ, reserveStart, Math.min(dur, 1440 - reserveStart));
       if (ta > 0) reserve(occ, sm + dur, Math.min(ta, 1440 - sm - dur));
-      placed.push({ task: t, start: sm, dur: dur, locked: true, _dateKey: d.key, travelBefore: tb, travelAfter: ta });
+      var fixedTz = t.tz || cfg.timezone || null;
+      placed.push({ task: t, start: sm, dur: dur, locked: true, _dateKey: d.key, travelBefore: tb, travelAfter: ta, tz: fixedTz });
       globalPlacedEnd[t.id] = { dateKey: d.key, endMin: sm + dur + ta, startMin: sm - tb };
     });
   });
@@ -805,7 +951,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var dur = effectiveDuration(t);
       if (dur <= 0) return;
       // No reserve() call — markers don't block time slots
-      placed.push({ task: t, start: sm, dur: dur, locked: true, marker: true, _dateKey: d.key });
+      placed.push({ task: t, start: sm, dur: dur, locked: true, marker: true, _dateKey: d.key, tz: t.tz || cfg.timezone || null });
       // Register in globalPlacedEnd so dependent tasks respect the marker's date
       globalPlacedEnd[t.id] = { dateKey: d.key, endMin: sm + dur, startMin: sm };
     });
@@ -869,7 +1015,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         }
       }
       reserve(occ, placeSm, dur);
-      placed.push({ task: t, start: placeSm, dur: dur, locked: true, _dateKey: d.key });
+      placed.push({ task: t, start: placeSm, dur: dur, locked: true, _dateKey: d.key, tz: t.tz || cfg.timezone || null });
       globalPlacedEnd[t.id] = { dateKey: d.key, endMin: placeSm + dur, startMin: placeSm };
       return;
     }
@@ -878,7 +1024,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     for (var hm = sm; hm < sm + dur; hm++) { if (mask[hm]) { locOk = false; break; } }
     if (whenOk && locOk && isFree(occ, sm, dur)) {
       reserve(occ, sm, dur);
-      placed.push({ task: t, start: sm, dur: dur, locked: true, _dateKey: d.key });
+      placed.push({ task: t, start: sm, dur: dur, locked: true, _dateKey: d.key, tz: t.tz || cfg.timezone || null });
       globalPlacedEnd[t.id] = { dateKey: d.key, endMin: sm + dur, startMin: sm };
       return;
     }
@@ -903,7 +1049,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         for (var cm = s; cm < s + dur; cm++) { if (occ[cm] || mask[cm]) { ok = false; break; } }
         if (ok) {
           reserve(occ, s, dur);
-          placed.push({ task: t, start: s, dur: dur, locked: true, _dateKey: d.key });
+          placed.push({ task: t, start: s, dur: dur, locked: true, _dateKey: d.key, tz: t.tz || cfg.timezone || null });
           globalPlacedEnd[t.id] = { dateKey: d.key, endMin: s + dur, startMin: s };
           found = true; break;
         }
@@ -914,7 +1060,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
           for (var cm2 = s2; cm2 < s2 + dur; cm2++) { if (occ[cm2] || mask[cm2]) { ok2 = false; break; } }
           if (ok2) {
             reserve(occ, s2, dur);
-            placed.push({ task: t, start: s2, dur: dur, locked: true, _dateKey: d.key });
+            placed.push({ task: t, start: s2, dur: dur, locked: true, _dateKey: d.key, tz: t.tz || cfg.timezone || null });
             globalPlacedEnd[t.id] = { dateKey: d.key, endMin: s2 + dur, startMin: s2 };
             found = true; break;
           }
@@ -1109,6 +1255,35 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   // PHASE 2: Non-deadline flexible tasks (P1 first)
   // These lock into place before deadline pull-forward happens.
 
+  // Today capacity reservation: estimate high-pri demand on today.
+  // If P1/P2 tasks need most of today's capacity, P3/P4 flexible tasks
+  // should defer to tomorrow so they don't consume today's limited slots.
+  var todayReserved = false;
+  var todayDateObj = dates.length > 0 && dates[0].isToday ? dates[0] : null;
+  if (todayDateObj) {
+    var highPriDemand = 0;
+    pool.forEach(function(item) {
+      if (item.remaining <= 0) return;
+      var pri = item.task.pri || 'P3';
+      if (pri !== 'P1' && pri !== 'P2') return;
+      // Only count if eligible for today
+      if (item.earliestDate && todayDateObj.date < item.earliestDate) return;
+      if (item.ceiling && todayDateObj.date > item.ceiling) return;
+      if (!canPlaceOnDate(item.task, todayDateObj)) return;
+      highPriDemand += item.remaining;
+    });
+    // Compute today's remaining free capacity (after Phase 0/0.5/1)
+    var todayOcc = dayOcc[todayDateObj.key];
+    var todayFree = 0;
+    var todayWins = dayWindows[todayDateObj.key] && dayWindows[todayDateObj.key].anytime ? dayWindows[todayDateObj.key].anytime : [];
+    for (var twi = 0; twi < todayWins.length; twi++) {
+      for (var tm = todayWins[twi][0]; tm < todayWins[twi][1]; tm++) {
+        if (!todayOcc[tm]) todayFree++;
+      }
+    }
+    todayReserved = todayFree > 0 && highPriDemand > todayFree * 0.6;
+  }
+
   function placeWithDeps(item) {
     if (!item || item.remaining <= 0) return;
     if (placeVisited[item.task.id]) return;
@@ -1127,7 +1302,10 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     // Backward scheduling: if this task has a downstream ceiling (dependants
     // need it done by a certain date) and is not pinned/generated, schedule
     // it late — close to when it's actually needed rather than ASAP.
-    // Deadline tasks: late-place toward their due date
+    // Deadline tasks: late-place toward their due date.
+    // Deadlines govern placement — if the math demands today, it goes today
+    // regardless of priority. The backward scan naturally places near the
+    // deadline and only reaches today when capacity requires it.
     if (item.deadline && !t.datePinned && !t.generated && !t.habit) {
       for (var di = dates.length - 1; di >= 0; di--) {
         if (item.remaining <= 0) break;
@@ -1142,7 +1320,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         var depBeforeDL = depBeforeFrom(depResultDL);
         var wins = getWhenWindows(t.when, dayWindows[d.key]);
         if (wins.length === 0) continue;
-        if (placeLate(item, d, depBeforeDL < 1440 ? depBeforeDL : undefined, undefined, depAfterDL)) break;
+        placeLate(item, d, depBeforeDL < 1440 ? depBeforeDL : undefined, undefined, depAfterDL);
+        if (item.remaining <= 0) break;
       }
       // Fallback: early placement if late-place failed
       if (item.remaining > 0 && item._parts.length === 0) {
@@ -1196,7 +1375,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         var depBeforeDC = depBeforeFrom(depResultDC);
         var wins = getWhenWindows(t.when, dayWindows[d.key]);
         if (wins.length === 0) continue;
-        if (placeLate(item, d, depBeforeDC < 1440 ? depBeforeDC : undefined, undefined, depAfterDC)) break;
+        placeLate(item, d, depBeforeDC < 1440 ? depBeforeDC : undefined, undefined, depAfterDC);
+        if (item.remaining <= 0) break;
       }
       // Fallback: if late-placement failed, try early placement (better placed early than unplaced)
       if (item.remaining > 0 && item._parts.length === 0) {
@@ -1217,9 +1397,29 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       return;
     }
 
+    // Today reservation: two distinct rules.
+    //
+    // 1. Tasks WITH a deadline (own or inherited from dep chain): the deadline
+    //    governs placement. The late-placement path already handles this — it
+    //    places backward from the due date. skipToday is NOT applied; if the
+    //    math demands today, it goes today regardless of priority.
+    //
+    // 2. Tasks WITHOUT any deadline: priority decides. P3/P4 without deadlines
+    //    should not claim today's scarce capacity when higher-priority tasks
+    //    could use it. P1/P2 without deadlines stay.
+    var skipToday = false;
+    if (todayReserved && !t.habit && !t.datePinned && !t.generated) {
+      if (!item.deadline) {
+        var tPri = t.pri || 'P3';
+        if (tPri === 'P4' || tPri === 'P3') skipToday = true;
+      }
+      // Tasks with deadlines: skipToday stays false — deadline math governs
+    }
+
     for (var di = 0; di < dates.length; di++) {
       if (item.remaining <= 0) break;
       var d = dates[di];
+      if (skipToday && d.isToday) continue;
       if (item.earliestDate && d.date < item.earliestDate) continue;
       if (item.ceiling && d.date > item.ceiling) continue;
       if (!canPlaceOnDate(t, d)) continue;
@@ -1281,7 +1481,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   // PHASE 2.5: Priority compaction — swap lower-pri tasks on earlier days
   // with higher-pri tasks on later days when possible.
   var compactAttempts = 0;
-  var MAX_COMPACT = 20;
+  var MAX_COMPACT = 50;
   var sortedDates = dates.filter(function(d) { return d.date >= localToday; });
   for (var earlyIdx = 0; earlyIdx < sortedDates.length - 1 && compactAttempts < MAX_COMPACT; earlyIdx++) {
     var earlyD = sortedDates[earlyIdx];
@@ -1311,6 +1511,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
           var latePri = lateP.task.pri || 'P3';
           var lateRank = latePri === 'P1' ? 4 : latePri === 'P2' ? 3 : latePri === 'P4' ? 1 : 2;
           if (lateRank <= earlyRank) continue;
+          // Only attempt swaps with a meaningful priority gap (>= 2 levels)
+          // to avoid wasting budget on marginal improvements
+          if (lateRank - earlyRank < 2) continue;
 
           compactAttempts++;
 
@@ -1414,8 +1617,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
           }
 
           if (latePlacedOk && earlyPlacedOk && compactDepsOk) {
-            // Success — keep the swap
-            break; // move to next early placement
+            // Success — keep the swap, continue checking for more inversions
+            continue;
           } else {
             // Rollback
             unplaceItem(earlyItem);
@@ -1476,7 +1679,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     if (item.earliestDate && item.earliestDate > pullFloor) pullFloor = item.earliestDate;
 
     // Dampening: raise pullFloor when intervening days are mostly free
-    if (originalDateKey && cfg.preferences && cfg.preferences.pullForwardDampening) {
+    // Default ON — only skip if explicitly disabled via pullForwardDampening: false
+    var dampeningEnabled = !(cfg.preferences && cfg.preferences.pullForwardDampening === false);
+    if (originalDateKey && dampeningEnabled) {
       var origDate = parseDate(originalDateKey);
       if (origDate) {
         var dayGap = Math.round((origDate - localToday) / 86400000);
@@ -1760,27 +1965,22 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     }
   });
 
-  // PHASE 5.5: Priority-aware re-sort (same-duration slot swaps)
-  // For each day, group non-locked same-duration placements and reassign
-  // the best-quality time slots to the highest-priority tasks. Pure slot
-  // swaps preserve gap structure — no tasks become unplaced.
-  function resortPriRank(pri) {
+  // PHASE 5.5: Intraday packing — unplace movable tasks, sort by priority,
+  // re-pack tightly into earliest valid slots within their when-windows.
+  // This consolidates scattered gaps into contiguous free blocks at the end
+  // of each window, making room for larger or split tasks.
+  function packPriRank(pri) {
     if (pri === 'P1') return 4;
     if (pri === 'P2') return 3;
     if (pri === 'P4') return 1;
     return 2;
-  }
-  function resortSlotQuality(startMin) {
-    if (startMin >= 540 && startMin < 720) return 3;  // 9am-12pm prime
-    if (startMin >= 720 && startMin < 1020) return 2;  // 12pm-5pm
-    return 1;
   }
 
   dates.forEach(function(d) {
     var placed = dayPlaced[d.key];
     if (!placed || placed.length < 2) return;
 
-    // Count parts per task on THIS day — only exclude tasks split within the same day
+    // Count parts per task on THIS day
     var partsOnDay = {};
     for (var ci = 0; ci < placed.length; ci++) {
       if (placed[ci].task) {
@@ -1789,178 +1989,153 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       }
     }
 
-    // Collect movable placements: non-locked, non-habit, not multi-part on this day
+    // Collect movable placements: non-locked, non-rigid, not fixed, not multi-part
     var movable = [];
+    var immovable = [];
     for (var i = 0; i < placed.length; i++) {
       var p = placed[i];
-      if (p.locked) continue;
       if (!p.task) continue;
-      if (p.task.rigid) continue;
-      if (hasWhen(p.task.when, 'fixed')) continue;
-      if (partsOnDay[p.task.id] > 1) continue;
-      movable.push(p);
+      if (p.locked || p.task.rigid || hasWhen(p.task.when, 'fixed') || partsOnDay[p.task.id] > 1) {
+        immovable.push(p);
+      } else {
+        movable.push(p);
+      }
     }
     if (movable.length < 2) return;
 
-    // Group by duration
-    var durGroups = {};
+    // Save old positions for rollback
+    var saved = movable.map(function(p) { return { placement: p, oldStart: p.start }; });
+
+    // Step 1: Free all movable slots from occupancy
+    var occ = dayOcc[d.key];
     movable.forEach(function(p) {
-      if (!durGroups[p.dur]) durGroups[p.dur] = [];
-      durGroups[p.dur].push(p);
+      for (var m = p.start; m < p.start + p.dur; m++) delete occ[m];
     });
 
-    for (var durKey in durGroups) {
-      var group = durGroups[durKey];
-      if (group.length < 2) continue;
+    // Step 2: Sort by priority (P1 first), then tighter constraints first
+    movable.sort(function(a, b) {
+      var pa = packPriRank(a.task.pri), pb = packPriRank(b.task.pri);
+      if (pa !== pb) return pb - pa;
+      // Tighter when-windows first (fewer available minutes = harder to place)
+      return whenAvailableMinutes(a.task) - whenAvailableMinutes(b.task);
+    });
 
-      // Check if group has mixed priorities (otherwise nothing to re-sort)
-      var hasMixed = false;
-      var firstPri = group[0].task.pri || 'P3';
-      for (var gi = 1; gi < group.length; gi++) {
-        if ((group[gi].task.pri || 'P3') !== firstPri) { hasMixed = true; break; }
-      }
-      if (!hasMixed) continue;
+    // Step 3: Pack each task into earliest valid slot
+    var allPlaced = true;
+    var assignments = [];
 
-      // Extract slots, sorted earliest first — highest-priority tasks get earliest slots
-      var slots = group.map(function(p) { return { start: p.start, dur: p.dur }; });
-      slots.sort(function(a, b) { return a.start - b.start; });
+    for (var ti = 0; ti < movable.length; ti++) {
+      var p2 = movable[ti];
+      var t = p2.task;
+      var dur = p2.dur;
 
-      // Sort tasks by priority (P1 first), then fewer when-options as tiebreaker
-      var tasks = group.slice();
-      tasks.sort(function(a, b) {
-        var pa = resortPriRank(a.task.pri), pb = resortPriRank(b.task.pri);
-        if (pa !== pb) return pb - pa;
-        return whenAvailableMinutes(a.task) - whenAvailableMinutes(b.task);
+      // Determine valid when-windows for this task
+      var wins = t.habit
+        ? (getHabitFlexWindows(t, dayWindows[d.key]) || getWhenWindows(t.when, dayWindows[d.key]))
+        : getWhenWindows(t.when, dayWindows[d.key]);
+      if (wins.length === 0) wins = [[DAY_START, WALK_END]];
+
+      // Determine dependency constraints on this day
+      var afterMin = 0;
+      var beforeMin = 1440;
+      getTaskDeps(t).forEach(function(depId) {
+        if (isBackwardsDep(t.id, depId)) return;
+        var info = globalPlacedEnd[depId];
+        if (info && info.dateKey === d.key && info.endMin > afterMin) {
+          afterMin = info.endMin;
+        }
       });
-
-      // Greedy assignment: highest priority gets best compatible slot
-      var usedSlots = {};
-      var assignments = [];
-
-      for (var ti = 0; ti < tasks.length; ti++) {
-        var p2 = tasks[ti];
-        var assigned = false;
-        for (var si = 0; si < slots.length; si++) {
-          if (usedSlots[si]) continue;
-          var newStart = slots[si].start;
-
-          // Check when-windows (habits use flex windows to stay near preferred time)
-          var wins = p2.task.habit
-            ? (getHabitFlexWindows(p2.task, dayWindows[d.key]) || getWhenWindows(p2.task.when, dayWindows[d.key]))
-            : getWhenWindows(p2.task.when, dayWindows[d.key]);
-          var inWin = wins.length === 0;
-          for (var wi = 0; wi < wins.length; wi++) {
-            if (newStart >= wins[wi][0] && newStart + p2.dur <= wins[wi][1]) { inWin = true; break; }
+      var children = dependedOnBy[t.id] || [];
+      for (var cci = 0; cci < children.length; cci++) {
+        if (isBackwardsDep(children[cci], t.id)) continue;
+        // Check immovable placements for children
+        for (var ipi = 0; ipi < immovable.length; ipi++) {
+          if (immovable[ipi].task && immovable[ipi].task.id === children[cci]) {
+            if (immovable[ipi].start < beforeMin) beforeMin = immovable[ipi].start;
           }
-          if (!inWin) continue;
+        }
+        // Check already-packed movable assignments for children
+        for (var api = 0; api < assignments.length; api++) {
+          if (assignments[api].placement.task.id === children[cci]) {
+            if (assignments[api].newStart < beforeMin) beforeMin = assignments[api].newStart;
+          }
+        }
+      }
 
-          // Check location
+      // Scan for earliest valid slot within when-windows
+      var bestStart = -1;
+      for (var wi = 0; wi < wins.length && bestStart < 0; wi++) {
+        var wStart = Math.max(wins[wi][0], afterMin);
+        var wEnd = Math.min(wins[wi][1], beforeMin);
+        if (wEnd - wStart < dur) continue;
+
+        for (var scan = wStart; scan + dur <= wEnd; scan++) {
+          if (occ[scan]) { scan = scan; continue; } // occupied minute
+          // Check contiguous gap
+          var gapOk = true;
+          for (var gm = scan; gm < scan + dur; gm++) {
+            if (occ[gm]) { scan = gm; gapOk = false; break; }
+          }
+          if (!gapOk) continue;
+          // Check location for full duration
           var locOk = true;
-          for (var m = newStart; m < newStart + p2.dur; m += 15) {
-            var locId = resolveLocationId(d.key, m, cfg, dayBlocks[d.key]);
-            if (!canTaskRun(p2.task, locId, cfg.toolMatrix)) { locOk = false; break; }
+          for (var lm = scan; lm < scan + dur; lm += 15) {
+            var locId = resolveLocationId(d.key, lm, cfg, dayBlocks[d.key]);
+            if (!canTaskRun(t, locId, cfg.toolMatrix)) { locOk = false; break; }
           }
           if (!locOk) continue;
-
-          usedSlots[si] = true;
-          assignments.push({ placement: p2, newStart: newStart });
-          assigned = true;
+          bestStart = scan;
           break;
-        }
-        if (!assigned) {
-          // Fall back to original slot
-          for (var si2 = 0; si2 < slots.length; si2++) {
-            if (!usedSlots[si2] && slots[si2].start === p2.start) {
-              usedSlots[si2] = true;
-              assignments.push({ placement: p2, newStart: p2.start });
-              break;
-            }
-          }
         }
       }
 
-      // If any group member didn't get an assignment, skip this group
-      // to prevent overlaps (unassigned tasks stay at original slot which
-      // may have been given to another task)
-      if (assignments.length !== group.length) continue;
-
-      // Verify dependency ordering before applying
-      var proposedStarts = {};
-      assignments.forEach(function(a) { proposedStarts[a.placement.task.id] = a.newStart; });
-
-      var depsOk = true;
-      for (var ai = 0; ai < assignments.length && depsOk; ai++) {
-        var t = assignments[ai].placement.task;
-        var deps = getTaskDeps(t);
-        for (var dii = 0; dii < deps.length; dii++) {
-          if (proposedStarts[deps[dii]] !== undefined) {
-            // Dep is in this duration group
-            var depEndMin = proposedStarts[deps[dii]] + parseInt(durKey);
-            if (depEndMin > assignments[ai].newStart) { depsOk = false; break; }
-          } else {
-            // Dep is NOT in this group — check globalPlacedEnd for same-day conflict
-            var depInfo = globalPlacedEnd[deps[dii]];
-            if (depInfo && depInfo.dateKey === d.key && depInfo.endMin > assignments[ai].newStart) {
-              depsOk = false; break;
-            }
-          }
-        }
-        var depChildren = dependedOnBy[t.id] || [];
-        for (var chi = 0; chi < depChildren.length; chi++) {
-          if (proposedStarts[depChildren[chi]] !== undefined) {
-            // Child is in this duration group
-            var myEnd = assignments[ai].newStart + parseInt(durKey);
-            if (myEnd > proposedStarts[depChildren[chi]]) { depsOk = false; break; }
-          } else {
-            // Child is NOT in this group — check placements on this day
-            var myEnd2 = assignments[ai].newStart + parseInt(durKey);
-            for (var cpi = 0; cpi < placed.length; cpi++) {
-              if (placed[cpi].task && placed[cpi].task.id === depChildren[chi]) {
-                if (myEnd2 > placed[cpi].start) { depsOk = false; break; }
-              }
-            }
-            if (!depsOk) break;
-          }
-        }
+      if (bestStart < 0) {
+        // Can't fit — rollback entire day
+        allPlaced = false;
+        break;
       }
 
-      if (!depsOk) continue;
-
-      // Apply assignments — batch free all old slots before reserving new ones
-      // to prevent corruption when tasks swap positions
-      var occ = dayOcc[d.key];
-      var changedAssignments = assignments.filter(function(a) { return a.placement.start !== a.newStart; });
-
-      // Step 1: Free ALL old slots
-      changedAssignments.forEach(function(a) {
-        var pr = a.placement;
-        for (var m = pr.start; m < pr.start + pr.dur; m++) delete occ[m];
-      });
-
-      // Step 2: Reserve ALL new slots and update placements
-      changedAssignments.forEach(function(a) {
-        var pr = a.placement;
-        for (var m2 = a.newStart; m2 < a.newStart + pr.dur; m2++) occ[m2] = true;
-
-        pr.start = a.newStart;
-
-        var hh = Math.floor(a.newStart / 60), mm2 = a.newStart % 60;
-        var ampm = hh >= 12 ? 'PM' : 'AM';
-        var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
-        taskUpdates[pr.task.id] = { date: d.key, time: dh + ':' + (mm2 < 10 ? '0' : '') + mm2 + ' ' + ampm };
-        globalPlacedEnd[pr.task.id] = { dateKey: d.key, endMin: a.newStart + pr.dur, startMin: a.newStart };
-
-        for (var pi = 0; pi < pool.length; pi++) {
-          if (pool[pi].task.id !== pr.task.id) continue;
-          for (var ppi = 0; ppi < pool[pi]._parts.length; ppi++) {
-            if (pool[pi]._parts[ppi] === pr) {
-              pool[pi]._parts[ppi].start = a.newStart;
-            }
-          }
-          break;
-        }
-      });
+      // Reserve the slot
+      for (var rm = bestStart; rm < bestStart + dur; rm++) occ[rm] = true;
+      assignments.push({ placement: p2, newStart: bestStart });
     }
+
+    if (!allPlaced) {
+      // Rollback: restore all original positions
+      // First free any partially packed slots
+      assignments.forEach(function(a) {
+        for (var fm = a.newStart; fm < a.newStart + a.placement.dur; fm++) delete occ[fm];
+      });
+      saved.forEach(function(s) {
+        for (var rm2 = s.oldStart; rm2 < s.oldStart + s.placement.dur; rm2++) occ[rm2] = true;
+      });
+      return;
+    }
+
+    // Step 4: Apply — update placement start times and metadata
+    assignments.forEach(function(a) {
+      var pr = a.placement;
+      if (pr.start === a.newStart) return; // no change
+
+      pr.start = a.newStart;
+
+      var hh = Math.floor(a.newStart / 60), mm2 = a.newStart % 60;
+      var ampm = hh >= 12 ? 'PM' : 'AM';
+      var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
+      var packTz = (pr.task.tz && (pr.locked || hasWhen(pr.task.when, 'fixed'))) ? pr.task.tz : (cfg.timezone || null);
+      taskUpdates[pr.task.id] = { date: d.key, time: dh + ':' + (mm2 < 10 ? '0' : '') + mm2 + ' ' + ampm, tz: packTz };
+      globalPlacedEnd[pr.task.id] = { dateKey: d.key, endMin: a.newStart + pr.dur, startMin: a.newStart };
+
+      for (var pi = 0; pi < pool.length; pi++) {
+        if (pool[pi].task.id !== pr.task.id) continue;
+        for (var ppi = 0; ppi < pool[pi]._parts.length; ppi++) {
+          if (pool[pi]._parts[ppi] === pr) {
+            pool[pi]._parts[ppi].start = a.newStart;
+          }
+        }
+        break;
+      }
+    });
 
   });
 
@@ -2243,16 +2418,17 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   var greedyMs = Math.round(Date.now() - PERF);
 
   // Score the greedy+resort result
-  var score = scoreSchedule(dayPlacements, unplaced, allTasks);
+  var scoreOpts = { todayKey: effectiveTodayKey };
+  var score = scoreSchedule(dayPlacements, unplaced, allTasks, scoreOpts);
   var greedyScore = score.total;
 
   // Phase 6: Hill-climbing optimization
-  var hcResult = hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTasks, cfg);
+  var hcResult = hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTasks, cfg, scoreOpts);
   var totalMs = Math.round(Date.now() - PERF);
 
   // Re-score after hill-climbing if it improved
   if (hcResult.improved) {
-    score = scoreSchedule(dayPlacements, unplaced, allTasks);
+    score = scoreSchedule(dayPlacements, unplaced, allTasks, scoreOpts);
   }
 
   // Rebuild taskUpdates from final placements so they reflect the actual
@@ -2277,7 +2453,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var hh = Math.floor(p.start / 60), mm = p.start % 60;
       var ampm = hh >= 12 ? 'PM' : 'AM';
       var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
-      taskUpdates[tid] = { date: dk, time: dh + ':' + (mm < 10 ? '0' : '') + mm + ' ' + ampm, _startMin: p.start };
+      var rebuildTz = p.tz || (p.task.tz && (p.locked || hasWhen(p.task.when, 'fixed'))) ? (p.tz || p.task.tz) : (cfg.timezone || null);
+      taskUpdates[tid] = { date: dk, time: dh + ':' + (mm < 10 ? '0' : '') + mm + ' ' + ampm, tz: rebuildTz, _startMin: p.start };
     });
   });
   // Strip the internal _startMin field
@@ -2332,7 +2509,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     console.log("[SCHED] " + schedulerWarnings.length + " warning(s): " + schedulerWarnings.map(function(w) { return w.type + '(' + (w.taskId || w.taskA) + ')'; }).join(', '));
   }
   console.log("[SCHED] unified: " + dates.length + " days, " + pool.length + " pool, " + placedCount + " placed, " + unplaced.length + " unplaced | " + greedyMs + "ms greedy (score=" + Math.round(greedyScore) + ") + " + hcResult.elapsed + "ms hill-climb (" + hcResult.iterations + " iters" + (hcResult.improved ? ", " + Math.round(hcResult.scoreBefore) + "->" + Math.round(hcResult.scoreAfter) : ", no change") + ") = " + totalMs + "ms | final=" + score.total);
-  return { dayPlacements: dayPlacements, taskUpdates: taskUpdates, newStatuses: newSt, unplaced: unplaced, deadlineMisses: deadlineMisses, placedCount: placedCount, score: score, warnings: schedulerWarnings };
+  return { dayPlacements: dayPlacements, taskUpdates: taskUpdates, newStatuses: newSt, unplaced: unplaced, deadlineMisses: deadlineMisses, placedCount: placedCount, score: score, warnings: schedulerWarnings, timezone: cfg.timezone || null };
 }
 
 module.exports = unifiedSchedule;

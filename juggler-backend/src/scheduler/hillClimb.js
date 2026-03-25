@@ -27,8 +27,8 @@ var dateHelpers2 = require('./dateHelpers');
 var parseTimeToMinutes = dateHelpers2.parseTimeToMinutes;
 var scoreSchedule = require('./scoreSchedule');
 
-var MAX_ITERATIONS = 500;
-var TIME_LIMIT_MS = 800;
+var MAX_ITERATIONS = 750;
+var TIME_LIMIT_MS = 1200;
 var DEFAULT_TIME_FLEX = 60;
 var FULL_RESCORE_INTERVAL = 100;
 
@@ -130,7 +130,7 @@ function findRandomGap(task, dur, dateKey, dayOcc, dayWindows, dayBlocks, cfg) {
 /**
  * Run hill-climbing optimization on a schedule.
  */
-function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTasks, cfg) {
+function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTasks, cfg, scoreOpts) {
   var startTime = Date.now();
 
   var allTasksById = {};
@@ -144,7 +144,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
     });
   });
 
-  var baseScore = scoreSchedule(dayPlacements, unplaced, allTasks);
+  var baseScore = scoreSchedule(dayPlacements, unplaced, allTasks, scoreOpts);
   var bestTotal = baseScore.total;
   var scoreBefore = bestTotal;
 
@@ -235,12 +235,12 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
 
     // Periodic full re-score to correct any drift in running total
     if (iter > 0 && iter % FULL_RESCORE_INTERVAL === 0) {
-      bestTotal = scoreSchedule(dayPlacements, unplaced, allTasks).total;
+      bestTotal = scoreSchedule(dayPlacements, unplaced, allTasks, scoreOpts).total;
     }
 
-    // Pick move type: 0=swap(30%), 1=shift(25%), 2=date-shift(20%), 3=cross-day-swap(25%)
+    // Pick move type: 0=swap(25%), 1=shift(25%), 2=date-shift(20%), 3=cross-day-swap(30%)
     var r = Math.random();
-    var moveType = r < 0.3 ? 0 : r < 0.55 ? 1 : r < 0.75 ? 2 : 3;
+    var moveType = r < 0.25 ? 0 : r < 0.50 ? 1 : r < 0.70 ? 2 : 3;
 
     if (moveType === 0) {
       // SWAP: two non-locked tasks on same day (any duration)
@@ -318,7 +318,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       reserve(occ, oldStartB, pa.dur);
       reserve(occ, oldStartA, pb.dur);
 
-      var newScore = scoreSchedule(dayPlacements, unplaced, allTasks);
+      var newScore = scoreSchedule(dayPlacements, unplaced, allTasks, scoreOpts);
       if (newScore.total < bestTotal) {
         bestTotal = newScore.total;
         improved = true;
@@ -374,7 +374,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       placement.start = newStart;
       reserve(dayOcc[dk2], newStart, dur);
 
-      var newScore2 = scoreSchedule(dayPlacements, unplaced, allTasks);
+      var newScore2 = scoreSchedule(dayPlacements, unplaced, allTasks, scoreOpts);
       if (newScore2.total < bestTotal) {
         bestTotal = newScore2.total;
         improved = true;
@@ -406,6 +406,18 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
 
       // Try placing on original date
       var targetDateKey = origDateKey;
+
+      // Don't move no-deadline P3/P4 tasks back to today — the greedy phase
+      // deferred them because higher-priority work needs the capacity.
+      // Deadline tasks are fine to move back (deadline math governs).
+      var hcTodayKey = scoreOpts && scoreOpts.todayKey;
+      if (hcTodayKey && targetDateKey === hcTodayKey && currDateKey !== hcTodayKey) {
+        var taskHasDeadline = !!pl.task.due;
+        if (!taskHasDeadline) {
+          var hcPri = pl.task.pri || 'P3';
+          if (hcPri === 'P3' || hcPri === 'P4') continue;
+        }
+      }
 
       // Enforce startAfter constraint — never move before startAfter date
       if (pl.task.startAfter) {
@@ -460,7 +472,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
 
       reserve(dayOcc[targetDateKey], newSt2, plDur);
 
-      var newScore3 = scoreSchedule(dayPlacements, unplaced, allTasks);
+      var newScore3 = scoreSchedule(dayPlacements, unplaced, allTasks, scoreOpts);
       if (newScore3.total < bestTotal) {
         bestTotal = newScore3.total;
         improved = true;
@@ -540,6 +552,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       var rankHigh = priHigh === 'P1' ? 4 : priHigh === 'P2' ? 3 : priHigh === 'P4' ? 1 : 2;
       if (rankHigh <= rankLow) continue;
 
+
       // Check day requirements for both tasks on their new days
       if (!fitsDayReq(plHigh.task, dkA)) continue;
       if (!fitsDayReq(plLow.task, dkB)) continue;
@@ -601,7 +614,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
         continue;
       }
 
-      var cdNewScore = scoreSchedule(dayPlacements, unplaced, allTasks);
+      var cdNewScore = scoreSchedule(dayPlacements, unplaced, allTasks, scoreOpts);
       if (cdNewScore.total < bestTotal) {
         bestTotal = cdNewScore.total;
         improved = true;

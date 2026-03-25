@@ -37,7 +37,7 @@ function UsageBar({ item, theme }) {
   );
 }
 
-export default function PlanUsagePanel({ planName, usageSummary, loading, theme, onClose }) {
+export default function PlanUsagePanel({ planName, usageSummary, trialInfo, loading, theme, onClose }) {
   if (loading) {
     return (
       <div style={panelStyle(theme)}>
@@ -60,6 +60,18 @@ export default function PlanUsagePanel({ planName, usageSummary, loading, theme,
         </div>
         <button onClick={onClose} style={{ background: 'none', border: 'none', color: theme.textMuted, cursor: 'pointer', fontSize: 16, padding: 4 }}>&times;</button>
       </div>
+
+      {/* Trial banner */}
+      {trialInfo && (
+        <div style={{ padding: '10px 16px', background: '#E3F2FD', borderBottom: '1px solid ' + theme.border }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#1565C0' }}>
+            Free trial — {trialInfo.daysLeft} {trialInfo.daysLeft === 1 ? 'day' : 'days'} remaining
+          </div>
+          <div style={{ fontSize: 11, color: '#1976D2', marginTop: 2 }}>
+            Ends {new Date(trialInfo.endsAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+          </div>
+        </div>
+      )}
 
       {/* Near-limit warnings */}
       {nearLimitItems.length > 0 && (

@@ -18,6 +18,7 @@ import { getTheme } from '../../theme/colors';
 import { formatDateKey, getWeekStart, parseDate } from '../../scheduler/dateHelpers';
 import { DAY_NAMES, applyDefaults } from '../../state/constants';
 import { useAuth } from '../auth/AuthProvider';
+import { useTimezone } from '../../hooks/useTimezone';
 import { getNowInTimezone } from '../../utils/timezone';
 
 // Views
@@ -51,12 +52,13 @@ import apiClient from '../../services/apiClient';
 export default function AppLayout() {
   // Auth & timezone
   var { user: authUser } = useAuth();
-  var userTimezone = authUser?.timezone || null;
+  var config = useConfig();
+  var { activeTimezone, source: tzSource, browserTimezone, profileTimezone } = useTimezone(authUser, config);
+  var userTimezone = activeTimezone;
 
   // State
   var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements, flushNow } = useTaskState();
   var isMobile = useIsMobile();
-  var config = useConfig();
   var { toast, toastHistory, showToast } = useToast();
   var { pushUndo, popUndo } = useUndo(taskStateRef, dispatch, dispatchPersist);
 
@@ -919,6 +921,7 @@ export default function AppLayout() {
                 templateDefaults={config.templateDefaults}
                 darkMode={darkMode}
                 isMobile={isMobile}
+                activeTimezone={userTimezone}
               />
             ) : (
               expandedTaskObjs.map(function(taskObj, idx) {
@@ -943,6 +946,7 @@ export default function AppLayout() {
                     templateDefaults={config.templateDefaults}
                     darkMode={darkMode}
                     isMobile={isMobile}
+                    activeTimezone={userTimezone}
                     onRecurDayConflict={function(data) {
                       // Inject the instance ID so the confirm handler moves the instance, not the template
                       data.instanceId = statusId;

@@ -54,7 +54,7 @@ function checkCalendarLimit(provider) {
           code: 'CALENDAR_LIMIT_REACHED',
           connected: connectedCount,
           limit,
-          current_plan: req.planSlug || 'free',
+          current_plan: req.planId || 'free',
           upgrade_required: true,
           message: `Your plan allows ${limit} calendar provider${limit > 1 ? 's' : ''}. Upgrade to connect additional providers.`
         });

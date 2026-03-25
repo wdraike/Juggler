@@ -1,0 +1,9 @@
+{
+  "name": "auth-client",
+  "version": "1.0.0",
+  "description": "Shared auth client for Raike applications — JWT verification via JWKS",
+  "main": "auth-client.js",
+  "dependencies": {
+    "jose": "^5.2.0"
+  }
+}

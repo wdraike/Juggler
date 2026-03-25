@@ -15,7 +15,7 @@ var getTaskDeps = dependencyHelpers.getTaskDeps;
 var W_UNPLACED = 1000;
 var W_DEADLINE_MISS = 500;
 var W_PRIORITY_DRIFT = 200;
-var W_CROSS_DAY_PRI = 30;
+var W_CROSS_DAY_PRI = 80;
 var W_HABIT_TIME_DRIFT = 10;
 var W_FRAGMENTATION = 20;
 var W_DEPENDENCY_SLACK = 5;
@@ -49,7 +49,8 @@ function slotQuality(startMin) {
  * @param {Array}  allTasks       - all task objects (for dependency lookups)
  * @returns {{ total, breakdown, details }}
  */
-function scoreSchedule(dayPlacements, unplaced, allTasks) {
+function scoreSchedule(dayPlacements, unplaced, allTasks, options) {
+  var todayKey = options && options.todayKey || null;
   var details = [];
 
   // Build task lookup
@@ -286,8 +287,11 @@ function scoreSchedule(dayPlacements, unplaced, allTasks) {
           }
           if (!depExempt) {
             var priDiff = maxPriSeenLater - sp2Pri;
-            crossDayPriPenalty += priDiff;
-            details.push({ type: 'crossDayPri', taskId: sp2.task.id, text: sp2.task.text, date: sdKey, priDiff: priDiff, penalty: priDiff });
+            // Premium: low-pri tasks on today are more costly to waste
+            var todayPremium = (todayKey && sdKey === todayKey) ? 1.5 : 1.0;
+            var adjustedDiff = priDiff * todayPremium;
+            crossDayPriPenalty += adjustedDiff;
+            details.push({ type: 'crossDayPri', taskId: sp2.task.id, text: sp2.task.text, date: sdKey, priDiff: priDiff, penalty: adjustedDiff });
           }
         }
       }

@@ -521,6 +521,170 @@ function checkNonSplitFragmentation(dayPlacements) {
   return issues;
 }
 
+function checkTodayOverload(dayPlacements, allTasks, todayKey, cfg) {
+  var issues = [];
+  var todayPlacements = dayPlacements[todayKey] || [];
+  if (todayPlacements.length === 0) return { issues: issues, summary: null };
+
+  // Per-priority breakdown of minutes on today
+  var minsByPri = { P1: 0, P2: 0, P3: 0, P4: 0 };
+  var tasksByPri = { P1: [], P2: [], P3: [], P4: [] };
+  todayPlacements.forEach(function(p) {
+    if (!p.task || p.marker) return;
+    var pri = p.task.pri || 'P3';
+    minsByPri[pri] = (minsByPri[pri] || 0) + p.dur;
+    tasksByPri[pri].push(p);
+  });
+
+  // Today's total available capacity
+  var blocks = getBlocksForDate(todayKey, cfg.timeBlocks, cfg);
+  var dateWindows = buildWindowsFromBlocks(blocks);
+  var anyWins = dateWindows.anytime || [];
+  var totalAvail = 0;
+  for (var wi = 0; wi < anyWins.length; wi++) totalAvail += (anyWins[wi][1] - anyWins[wi][0]);
+  var totalPlaced = minsByPri.P1 + minsByPri.P2 + minsByPri.P3 + minsByPri.P4;
+  var loadRatio = totalAvail > 0 ? (totalPlaced / totalAvail) : 0;
+
+  // Identify "non-urgent" tasks on today: no deadline within 3 days, not pinned, not habit, no dep forcing
+  var todayDate = parseDate(todayKey);
+  var threeDaysOut = new Date(todayDate); threeDaysOut.setDate(threeDaysOut.getDate() + 3);
+  var nonUrgent = [];
+  todayPlacements.forEach(function(p) {
+    if (!p.task || p.marker || p.locked) return;
+    var t = p.task;
+    if (t.habit) return; // habits are expected on their day
+    if (t.datePinned) return; // user explicitly pinned
+    if (hasWhen(t.when, 'fixed')) return;
+    var hasNearDeadline = false;
+    if (t.due) {
+      var dueDate = parseDate(t.due);
+      if (dueDate && dueDate <= threeDaysOut) hasNearDeadline = true;
+    }
+    if (hasNearDeadline) return;
+    // Check if task was pulled forward (original date != today)
+    var pulledForward = false;
+    if (t.date && t.date !== todayKey) {
+      var origDate = parseDate(t.date);
+      if (origDate && origDate > todayDate) pulledForward = true;
+    }
+    nonUrgent.push({
+      task: t, dur: p.dur, pri: t.pri || 'P3', pulledForward: pulledForward,
+      originalDate: t.date
+    });
+  });
+
+  // Cross-day inversions involving today: P3/P4 on today while P1/P2 on future days
+  var crossDayPairs = [];
+  var priRank = { P1: 1, P2: 2, P3: 3, P4: 4 };
+  var todayLowPri = todayPlacements.filter(function(p) {
+    return p.task && !p.marker && !p.locked && !p.task.habit && (priRank[p.task.pri || 'P3'] >= 3);
+  });
+  var futureDateKeys = Object.keys(dayPlacements).filter(function(dk) {
+    var d = parseDate(dk);
+    return d && d > todayDate;
+  });
+  futureDateKeys.forEach(function(dk) {
+    (dayPlacements[dk] || []).forEach(function(fp) {
+      if (!fp.task || fp.marker || fp.locked || fp.task.habit) return;
+      var fpRank = priRank[fp.task.pri || 'P3'] || 3;
+      if (fpRank > 2) return; // only flag P1/P2 on future days
+      todayLowPri.forEach(function(tp) {
+        var tpRank = priRank[tp.task.pri || 'P3'] || 3;
+        if (tpRank > fpRank) {
+          crossDayPairs.push({
+            todayTask: tp.task.text + ' (' + (tp.task.pri || 'P3') + ')',
+            todayTaskId: tp.task.id,
+            futureTask: fp.task.text + ' (' + (fp.task.pri || 'P3') + ')',
+            futureTaskId: fp.task.id,
+            futureDate: dk
+          });
+        }
+      });
+    });
+  });
+
+  return {
+    issues: issues,
+    summary: {
+      minsByPri: minsByPri,
+      totalPlaced: totalPlaced,
+      totalAvail: totalAvail,
+      loadRatio: Math.round(loadRatio * 100),
+      nonUrgent: nonUrgent,
+      crossDayPairs: crossDayPairs
+    }
+  };
+}
+
+function checkHighPriDisplacement(dayPlacements, unplaced, allTasks, todayKey) {
+  var issues = [];
+  var todayDate = parseDate(todayKey);
+  var priRank = { P1: 1, P2: 2, P3: 3, P4: 4 };
+  var threeDaysOut = new Date(todayDate); threeDaysOut.setDate(threeDaysOut.getDate() + 3);
+
+  // Collect P3/P4 tasks on today that could be deferred
+  var todayDeferrable = [];
+  (dayPlacements[todayKey] || []).forEach(function(p) {
+    if (!p.task || p.marker || p.locked) return;
+    var t = p.task;
+    if (t.habit || t.datePinned || hasWhen(t.when, 'fixed')) return;
+    var rank = priRank[t.pri || 'P3'] || 3;
+    if (rank < 3) return; // P1/P2 are not deferrable
+    var hasNearDeadline = false;
+    if (t.due) {
+      var dueDate = parseDate(t.due);
+      if (dueDate && dueDate <= threeDaysOut) hasNearDeadline = true;
+    }
+    if (hasNearDeadline) return;
+    var pulledForward = false;
+    if (t.date && t.date !== todayKey) {
+      var origDate = parseDate(t.date);
+      if (origDate && origDate > todayDate) pulledForward = true;
+    }
+    todayDeferrable.push({ task: t, dur: p.dur, pulledForward: pulledForward });
+  });
+
+  if (todayDeferrable.length === 0) return issues;
+
+  // Find P1/P2 tasks placed on future days
+  var futureDateKeys = Object.keys(dayPlacements).filter(function(dk) {
+    var d = parseDate(dk);
+    return d && d > todayDate;
+  });
+  futureDateKeys.forEach(function(dk) {
+    (dayPlacements[dk] || []).forEach(function(fp) {
+      if (!fp.task || fp.marker || fp.locked) return;
+      var fpRank = priRank[fp.task.pri || 'P3'] || 3;
+      if (fpRank > 2) return; // only P1/P2
+      if (fp.task.habit) return;
+      todayDeferrable.forEach(function(td) {
+        issues.push({
+          msg: (fp.task.pri || 'P3') + ' "' + fp.task.text + '" on ' + dk +
+            ' while ' + (td.task.pri || 'P3') + ' "' + td.task.text + '" is on today' +
+            (td.pulledForward ? ' (PULLED FORWARD from ' + td.task.date + ')' : '') +
+            ' — ' + td.dur + 'min could be deferred'
+        });
+      });
+    });
+  });
+
+  // Find unplaced P1/P2 tasks while deferrable P3/P4 are on today
+  (unplaced || []).forEach(function(u) {
+    var uRank = priRank[u.pri || 'P3'] || 3;
+    if (uRank > 2) return; // only P1/P2
+    todayDeferrable.forEach(function(td) {
+      issues.push({
+        msg: (u.pri || 'P3') + ' "' + u.text + '" is UNPLACED while ' +
+          (td.task.pri || 'P3') + ' "' + td.task.text + '" is on today' +
+          (td.pulledForward ? ' (PULLED FORWARD from ' + td.task.date + ')' : '') +
+          ' — ' + td.dur + 'min could be deferred'
+      });
+    });
+  });
+
+  return issues;
+}
+
 async function main() {
   var userId = '24297d4e-6d74-4530-acee-d415e67c9a8f';
   var userRow = await db('users').where('id', userId).select('timezone').first();
@@ -676,7 +840,50 @@ async function main() {
     totalIssues += nonSplitIssues.length;
   }
 
-  // 14. Split tasks info
+  // 14. Today Overload Analysis
+  var todayOverload = checkTodayOverload(result.dayPlacements, allTasks, timeInfo.todayKey, cfg);
+  if (todayOverload.summary) {
+    var s = todayOverload.summary;
+    console.log('\n── Today Overload Analysis (' + timeInfo.todayKey + ') ──');
+    console.log('  Capacity: ' + s.totalPlaced + 'min placed / ' + s.totalAvail + 'min available (' + s.loadRatio + '% load)');
+    console.log('  By priority: P1=' + s.minsByPri.P1 + 'min  P2=' + s.minsByPri.P2 + 'min  P3=' + s.minsByPri.P3 + 'min  P4=' + s.minsByPri.P4 + 'min');
+    if (s.nonUrgent.length > 0) {
+      console.log('  Non-urgent tasks on today (' + s.nonUrgent.length + '):');
+      s.nonUrgent.forEach(function(nu) {
+        console.log('    ' + nu.pri + ' "' + nu.task.text + '" ' + nu.dur + 'min' +
+          (nu.pulledForward ? ' [PULLED FORWARD from ' + nu.originalDate + ']' : '') +
+          (nu.task.due ? ' (due ' + nu.task.due + ')' : ' (no deadline)'));
+      });
+    } else {
+      console.log('  All tasks on today have urgency signals');
+    }
+    if (s.crossDayPairs.length > 0) {
+      // Deduplicate: show unique future high-pri tasks
+      var seenFuture = {};
+      var uniquePairs = s.crossDayPairs.filter(function(p) {
+        if (seenFuture[p.futureTaskId]) return false;
+        seenFuture[p.futureTaskId] = true;
+        return true;
+      });
+      console.log('  Cross-day inversions involving today (' + uniquePairs.length + ' high-pri tasks on future days):');
+      uniquePairs.forEach(function(p) {
+        console.log('    ' + p.futureTask + ' on ' + p.futureDate + '  while  ' + p.todayTask + ' is on today');
+      });
+    } else {
+      console.log('  No cross-day priority inversions involving today');
+    }
+  }
+
+  // 15. High-Priority Displacement Report
+  var displacement = checkHighPriDisplacement(result.dayPlacements, unplaced, allTasks, timeInfo.todayKey);
+  if (displacement.length === 0) {
+    console.log('\n✅ No high-priority displacement');
+  } else {
+    console.log('\n⚠️  ' + displacement.length + ' high-priority displacement issues:');
+    displacement.forEach(function(d) { console.log('  ' + d.msg); });
+  }
+
+  // Split tasks info
   var partsByTask = {};
   Object.keys(result.dayPlacements).forEach(function(dk) {
     (result.dayPlacements[dk] || []).forEach(function(p) {

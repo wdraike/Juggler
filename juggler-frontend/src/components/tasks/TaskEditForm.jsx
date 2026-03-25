@@ -6,23 +6,183 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { PRI_COLORS, STATUS_OPTIONS, applyDefaults } from '../../state/constants';
 import { toTime24, fromTime24, toDateISO, fromDateISO, formatDateKey, parseDate } from '../../scheduler/dateHelpers';
 import { getTheme } from '../../theme/colors';
+import { convertTimeForDisplay, getTimezoneAbbr, getUtcOffset } from '../../utils/timezone';
 import ConfirmDialog from '../features/ConfirmDialog';
 
-export default function TaskEditForm({ task, status, onUpdate, onStatusChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, scheduleTemplates, templateDefaults, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex, onRecurDayConflict }) {
+// Full IANA timezone list (browser-sourced or fallback)
+var ALL_TIMEZONES = (function() {
+  try {
+    if (typeof Intl !== 'undefined' && Intl.supportedValuesOf) {
+      return Intl.supportedValuesOf('timeZone');
+    }
+  } catch (e) { /* ignore */ }
+  return [
+    'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+    'America/Anchorage', 'America/Phoenix', 'Pacific/Honolulu',
+    'America/Toronto', 'America/Vancouver', 'America/Edmonton', 'America/Halifax',
+    'America/Mexico_City', 'America/Bogota', 'America/Sao_Paulo', 'America/Argentina/Buenos_Aires',
+    'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Madrid', 'Europe/Rome',
+    'Europe/Amsterdam', 'Europe/Moscow', 'Europe/Istanbul',
+    'Asia/Tokyo', 'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Kolkata', 'Asia/Dubai',
+    'Asia/Singapore', 'Asia/Seoul', 'Asia/Bangkok',
+    'Australia/Sydney', 'Australia/Melbourne', 'Australia/Perth',
+    'Pacific/Auckland', 'Pacific/Fiji',
+    'Africa/Cairo', 'Africa/Johannesburg', 'Africa/Lagos'
+  ];
+})();
+
+/**
+ * TimezoneViewer — searchable timezone selector for task-level "View in..." conversion.
+ * Read-only: doesn't change the task or app timezone.
+ */
+/**
+ * TimezoneSelector — searchable timezone dropdown for the "When" section header.
+ * Shows current task timezone with UTC offset. Selecting a new timezone converts
+ * all date/time values in the form to the new timezone.
+ */
+function TimezoneSelector({ taskTz, onChangeTz, TH }) {
+  var [tzSearch, setTzSearch] = React.useState('');
+  var [tzOpen, setTzOpen] = React.useState(false);
+  var dropdownRef = React.useRef(null);
+
+  React.useEffect(function() {
+    if (!tzOpen) return;
+    function handleClick(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setTzOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return function() { document.removeEventListener('mousedown', handleClick); };
+  }, [tzOpen]);
+
+  var searchLower = tzSearch.toLowerCase();
+  var filteredTzs = searchLower
+    ? ALL_TIMEZONES.filter(function(tz) { return tz.toLowerCase().includes(searchLower); })
+    : ALL_TIMEZONES;
+  var displayTzs = filteredTzs.slice(0, 50);
+
+  function selectTz(tz) {
+    onChangeTz(tz);
+    setTzOpen(false);
+    setTzSearch('');
+  }
+
+  var tzAbbr = getTimezoneAbbr(taskTz);
+  var utcOff = getUtcOffset(taskTz);
+
+  return (
+    <div ref={dropdownRef} style={{ position: 'relative' }}>
+      <button
+        onClick={function() { setTzOpen(!tzOpen); setTzSearch(''); }}
+        style={{
+          fontSize: 11, padding: '2px 8px', borderRadius: 4, cursor: 'pointer',
+          border: '1px solid ' + TH.inputBorder, background: TH.inputBg, color: TH.text,
+          fontFamily: 'inherit', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4
+        }}
+      >
+        {'\uD83C\uDF10'} {tzAbbr} <span style={{ fontSize: 9, color: TH.textMuted, fontFamily: 'monospace' }}>{utcOff}</span> {'\u25BE'}
+      </button>
+      {tzOpen && (
+        <div style={{
+          position: 'absolute', top: '100%', right: 0, zIndex: 200, width: 280,
+          background: TH.bgCard, border: '1px solid ' + TH.inputBorder, borderRadius: 6,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.2)'
+        }}>
+          <div style={{ padding: 6 }}>
+            <input
+              type="text" autoFocus
+              value={tzSearch}
+              placeholder="Search timezones..."
+              onChange={function(e) { setTzSearch(e.target.value); }}
+              style={{
+                width: '100%', fontSize: 12, padding: '5px 8px',
+                border: '1px solid ' + TH.inputBorder, borderRadius: 4,
+                background: TH.inputBg, color: TH.text, boxSizing: 'border-box'
+              }}
+            />
+          </div>
+          <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {displayTzs.length === 0 && (
+              <div style={{ padding: '8px 10px', fontSize: 11, color: TH.textMuted }}>No timezones match</div>
+            )}
+            {displayTzs.map(function(tz) {
+              var off = getUtcOffset(tz);
+              var isSelected = tz === taskTz;
+              return (
+                <div key={tz}
+                  onClick={function() { selectTz(tz); }}
+                  style={{
+                    padding: '6px 10px', fontSize: 12, cursor: 'pointer',
+                    background: isSelected ? TH.accent + '22' : 'transparent',
+                    color: TH.text,
+                    borderBottom: '1px solid ' + TH.inputBorder + '33',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                  }}
+                  onMouseEnter={function(e) { e.currentTarget.style.background = TH.accent + '15'; }}
+                  onMouseLeave={function(e) { e.currentTarget.style.background = isSelected ? TH.accent + '22' : 'transparent'; }}
+                >
+                  <span style={{ fontWeight: isSelected ? 600 : 400 }}>{tz.replace(/_/g, ' ')}</span>
+                  <span style={{ fontSize: 10, color: TH.textMuted, fontFamily: 'monospace' }}>{off}</span>
+                </div>
+              );
+            })}
+            {filteredTzs.length > 50 && (
+              <div style={{ padding: '6px 10px', fontSize: 10, color: TH.textMuted, textAlign: 'center' }}>
+                Type to narrow {filteredTzs.length} results...
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function TaskEditForm({ task, status, onUpdate, onStatusChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, scheduleTemplates, templateDefaults, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex, onRecurDayConflict, activeTimezone }) {
   var isCreate = mode === 'create';
   var TH = getTheme(darkMode);
   var initDate = isCreate && initialDate ? toDateISO(formatDateKey(initialDate)) : '';
   var [text, setText] = useState(isCreate ? '' : (task.text || ''));
   var [project, setProject] = useState(isCreate ? (initialProject || '') : (task.project || ''));
   var [pri, setPri] = useState(isCreate ? 'P3' : (task.pri || 'P3'));
-  var [date, setDate] = useState(isCreate ? initDate : toDateISO(task.date));
-  var [time, setTime] = useState(isCreate ? '' : toTime24(task.time));
+  // Task timezone: stored on the task, defaults to activeTimezone.
+  // ALL date/time display and editing happens in this timezone.
+  var [taskTz, setTaskTz] = useState(isCreate ? (activeTimezone || 'America/New_York') : (task.tz || activeTimezone || 'America/New_York'));
+
+  // Initialize date/time from UTC (scheduledAt) converted to taskTz.
+  // If no scheduledAt, fall back to task.date/time (already in profile tz — close enough for display).
+  var initDateTime = React.useMemo(function() {
+    if (isCreate) return { date: initDate, time: '' };
+    if (task.scheduledAt) {
+      var conv = convertTimeForDisplay(task.scheduledAt, task.tz || activeTimezone || 'America/New_York');
+      if (conv && conv.date) return { date: toDateISO(conv.date) || '', time: toTime24(conv.time) || '' };
+    }
+    return { date: toDateISO(task.date) || '', time: toTime24(task.time) || '' };
+  }, []); // only on mount
+
+  var [date, setDate] = useState(initDateTime.date);
+  var [time, setTime] = useState(initDateTime.time);
   var [dur, setDur] = useState(isCreate ? 30 : (task.dur || 30));
   var [timeRemaining, setTimeRemaining] = useState(isCreate ? '' : (task.timeRemaining != null ? task.timeRemaining : ''));
   var [due, setDue] = useState(isCreate ? '' : toDateISO(task.due));
   var [startAfter, setStartAfter] = useState(isCreate ? '' : toDateISO(task.startAfter));
   var [notes, setNotes] = useState(isCreate ? '' : (task.notes || ''));
   var [when, setWhen] = useState(isCreate ? 'morning,lunch,afternoon,evening' : (task.when || ''));
+
+  // Change timezone: convert displayed date/time to new timezone via UTC.
+  // scheduledAt is the UTC source of truth. Re-display it in the new timezone.
+  function changeTaskTimezone(newTz) {
+    if (newTz === taskTz) return;
+    // If we have scheduledAt (UTC), just re-display in new TZ
+    if (!isCreate && task && task.scheduledAt) {
+      var conv = convertTimeForDisplay(task.scheduledAt, newTz);
+      if (conv && conv.date) {
+        setDate(toDateISO(conv.date) || '');
+        setTime(toTime24(conv.time) || '');
+      }
+    }
+    setTaskTz(newTz);
+  }
+
   var [dayReq, setDayReq] = useState(isCreate ? 'any' : (task.dayReq || 'any'));
   var [habit, setHabit] = useState(isCreate ? false : !!task.habit);
   var [rigid, setRigid] = useState(isCreate ? false : !!task.rigid);
@@ -157,7 +317,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       datePinned: !!t.datePinned,
       recurType: t.recur?.type || 'none', recurDays: t.recur?.days || 'MTWRF',
       recurEvery: t.recur?.every || 2, recurUnit: t.recur?.unit || 'days',
-      recurMonthDays: t.recur?.monthDays || [1, 15]
+      recurMonthDays: t.recur?.monthDays || [1, 15],
+      tz: t.tz || activeTimezone || 'America/New_York'
     };
   }
   if (!taskSnapshotRef.current && !isCreate && task) {
@@ -234,9 +395,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         every: recurType === 'interval' ? parseInt(recurEvery) || 2 : undefined,
         unit: recurType === 'interval' ? recurUnit : undefined,
         monthDays: recurType === 'monthly' ? recurMonthDays : undefined
-      }
+      },
+      tz: taskTz,
+      _timezone: taskTz  // tells backend which timezone to use for date/time → UTC conversion
     };
-  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurEvery, recurUnit, recurMonthDays, isCreate, task]);
+  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz]);
 
   // Build only the fields that changed from the initial snapshot (prevents marking unchanged fields dirty)
   var buildChangedFields = useCallback(function() {
@@ -267,6 +430,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (time !== (snap.time || '')) changed.time = all.time;
     if (due !== (snap.due || '')) changed.due = all.due;
     if (startAfter !== (snap.startAfter || '')) changed.startAfter = all.startAfter;
+    // Timezone change — also sends converted date/time
+    if (taskTz !== (snap.tz || '')) { changed.tz = all.tz; changed.date = all.date; changed.day = all.day; changed.time = all.time; }
     // timeRemaining
     var snapRem = snap.timeRemaining === '' ? null : parseInt(snap.timeRemaining);
     if (all.timeRemaining !== snapRem) changed.timeRemaining = all.timeRemaining;
@@ -276,6 +441,12 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     // Recurrence
     if (recurType !== snap.recurType || recurDays !== snap.recurDays || String(recurEvery) !== String(snap.recurEvery) || recurUnit !== snap.recurUnit || JSON.stringify(recurMonthDays) !== JSON.stringify(snap.recurMonthDays)) {
       changed.recur = all.recur;
+    }
+    // Always include tz and _timezone when any field changed — the backend needs
+    // the timezone context for date/time → UTC conversion
+    if (Object.keys(changed).length > 0) {
+      changed.tz = all.tz;
+      changed._timezone = all._timezone;
     }
     return Object.keys(changed).length > 0 ? changed : null;
   }, [buildFields, text, project, pri, notes, when, dayReq, habit, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, due, startAfter, taskLoc, taskTools, recurType, recurDays, recurEvery, recurUnit, recurMonthDays]);
@@ -288,7 +459,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     userDirtyRef.current = true;
     var changed = buildChangedFields();
     setIsDirty(!!changed);
-  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurEvery, recurUnit, recurMonthDays]);
+  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurEvery, recurUnit, recurMonthDays, taskTz]);
 
   // Manual save handler
   function handleSave() {
@@ -546,7 +717,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
 
         {/* ═══ SECTION: When (Scheduling) ═══ */}
         <div style={secStyle}>
-          <div style={secHead}>When</div>
+          <div style={{ ...secHead, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+            <span>When</span>
+            <TimezoneSelector taskTz={taskTz} onChangeTz={changeTaskTimezone} TH={TH} />
+          </div>
 
           {/* Date/Time + Duration + Remaining */}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, maxWidth: '100%' }}>

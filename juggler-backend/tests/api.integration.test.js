@@ -62,7 +62,7 @@ jest.mock('../src/middleware/jwt-auth', () => ({
 // Mock plan features middleware
 jest.mock('../src/middleware/plan-features.middleware', () => ({
   resolvePlanFeatures: (req, res, next) => {
-    req.planSlug = 'enterprise';
+    req.planId = 'enterprise';
     req.planFeatures = {
       limits: { active_tasks: -1, habit_templates: -1, projects: -1, locations: -1, schedule_templates: -1, ai_commands_per_month: -1 },
       ai: { natural_language_commands: true, bulk_project_creation: true },
@@ -73,7 +73,7 @@ jest.mock('../src/middleware/plan-features.middleware', () => ({
     };
     next();
   },
-  PRODUCT_SLUG: 'juggler',
+  PRODUCT_ID: 'juggler',
   refreshPlanFeatures: jest.fn(),
   getCachedPlanFeatures: jest.fn()
 }));

@@ -10,7 +10,7 @@
  */
 
 const CATALOG = {
-  product_slug: 'juggler',
+  product_id: 'juggler',
   product_name: 'StriveRS',
   catalog_version: '2026-03-22T18:00:00Z',
   groups: [

@@ -141,6 +141,7 @@ function rowToTask(row, timezone, sourceMap) {
     text: row.text,
     // UTC source of truth
     scheduledAt: scheduledAtToISO(row.scheduled_at),
+    tz: row.tz || null,
     dueAt: dueAtISO,
     startAfterAt: startAfterAtISO,
     // Derived local convenience fields
@@ -226,6 +227,7 @@ function taskToRow(task, userId, timezone) {
   if (task.flexWhen !== undefined) row.flex_when = task.flexWhen ? 1 : 0;
   if (task.travelBefore !== undefined) row.travel_before = task.travelBefore || null;
   if (task.travelAfter !== undefined) row.travel_after = task.travelAfter || null;
+  if (task.tz !== undefined) row.tz = task.tz || null;
 
   // scheduledAt (UTC ISO) takes precedence over date+time (local strings)
   if (task.scheduledAt !== undefined) {
@@ -686,7 +688,11 @@ async function batchUpdateTasks(req, res) {
 
             var fields = {};
             Object.keys(update).forEach(function(k) { if (k !== 'id') fields[k] = update[k]; });
-            var row = taskToRow(fields, req.user.id, tz);
+            // Per-update timezone override: frontend can specify which timezone
+            // the date/time values are expressed in (e.g., active timezone from browser)
+            var updateTz = fields._timezone || tz;
+            delete fields._timezone;
+            var row = taskToRow(fields, req.user.id, updateTz);
             delete row.user_id;
             delete row.created_at;
 
@@ -695,10 +701,10 @@ async function batchUpdateTasks(req, res) {
             // Time-only update: combine new time with existing date
             if (row._pendingTimeOnly && existing && existing.scheduled_at) {
               var existingDt = new Date(existing.scheduled_at);
-              var existingLocal = utcToLocal(existingDt, tz);
+              var existingLocal = utcToLocal(existingDt, updateTz);
               if (existingLocal) {
                 var existingDate = existingLocal.date; // e.g. "3/12"
-                row.scheduled_at = localToUtc(existingDate, row._pendingTimeOnly, tz) || null;
+                row.scheduled_at = localToUtc(existingDate, row._pendingTimeOnly, updateTz) || null;
               }
             }
             delete row._pendingTimeOnly;
@@ -708,10 +714,10 @@ async function batchUpdateTasks(req, res) {
             // would default to midnight. Preserve the existing time instead.
             if (row.scheduled_at && existing && existing.scheduled_at
                 && update.date !== undefined && update.time === undefined) {
-              var existLocal = utcToLocal(existing.scheduled_at, tz);
+              var existLocal = utcToLocal(existing.scheduled_at, updateTz);
               if (existLocal && existLocal.time) {
                 var newDate = update.date;
-                row.scheduled_at = localToUtc(newDate, existLocal.time, tz) || row.scheduled_at;
+                row.scheduled_at = localToUtc(newDate, existLocal.time, updateTz) || row.scheduled_at;
               }
             }
 

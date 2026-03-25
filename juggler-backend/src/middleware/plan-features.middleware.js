@@ -7,7 +7,7 @@
  * so it stays accurate even when the JWT is stale.
  */
 
-const PRODUCT_SLUG = 'juggler';
+const PRODUCT_ID = 'juggler';
 const CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 const USER_PLAN_CACHE_TTL_MS = 2 * 60 * 1000;
 
@@ -18,7 +18,7 @@ let _fetchPromise = null;
 
 async function fetchPlanFeatures() {
   const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
-  const response = await fetch(`${paymentUrl}/api/plans?product=${PRODUCT_SLUG}&include_all=true`, {
+  const response = await fetch(`${paymentUrl}/api/plans?product=${PRODUCT_ID}&include_all=true`, {
     headers: { 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(5000)
   });
@@ -29,7 +29,7 @@ async function fetchPlanFeatures() {
   const cache = {};
   for (const plan of data.plans || []) {
     if (plan.features) {
-      cache[plan.slug] = typeof plan.features === 'string' ? JSON.parse(plan.features) : plan.features;
+      cache[plan.planId] = typeof plan.features === 'string' ? JSON.parse(plan.features) : plan.features;
     }
   }
   return cache;
@@ -61,18 +61,28 @@ async function getCachedPlanFeatures() {
 // ─── User plan cache (real-time from payment service) ──────────────────
 const _userPlanCache = new Map();
 
-async function getUserPlanSlug(userId) {
+async function getUserPlanId(userId) {
   const cached = _userPlanCache.get(userId);
   if (cached && (Date.now() - cached.timestamp) < USER_PLAN_CACHE_TTL_MS) {
-    return cached.slug;
+    return cached.planId;
   }
 
   try {
-    const { serviceRequest } = require('../../vendor/service-auth');
-    const data = await serviceRequest('payment-service', `/internal/users/${userId}/active-plans`, { timeout: 3000 });
-    const slug = data.plans?.[PRODUCT_SLUG] || null;
-    _userPlanCache.set(userId, { slug, timestamp: Date.now() });
-    return slug;
+    const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
+    const internalKey = process.env.INTERNAL_SERVICE_KEY || '';
+    const res = await fetch(`${paymentUrl}/internal/users/${userId}/active-plans`, {
+      headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(3000)
+    });
+    if (!res.ok) throw new Error(`Payment service returned ${res.status}`);
+    const data = await res.json();
+    const planId = data.plans?.[PRODUCT_ID] || null;
+    if (planId) {
+      _userPlanCache.set(userId, { planId, timestamp: Date.now() });
+    } else {
+      _userPlanCache.delete(userId);
+    }
+    return planId;
   } catch {
     return null;
   }
@@ -90,28 +100,31 @@ function invalidateUserPlanCache(userId) {
 // ─── Middleware ─────────────────────────────────────────────────────────
 const resolvePlanFeatures = async (req, res, next) => {
   try {
-    // Get the user's real plan from payment service (not from JWT)
-    let planSlug = 'free';
-
-    if (req.user?.id) {
-      const realSlug = await getUserPlanSlug(req.user.id);
-      if (realSlug) {
-        planSlug = realSlug;
-      } else {
-        // Fallback: JWT claim (may be stale but better than nothing)
-        planSlug = req.auth?.plans?.[PRODUCT_SLUG] || 'free';
-      }
+    if (!req.user?.id) {
+      return res.status(401).json({ error: 'Authentication required' });
     }
 
-    req.planSlug = planSlug;
+    const paymentUserId = req.user.authServiceId || req.user.id;
+    const realPlanId = await getUserPlanId(paymentUserId);
+
+    if (!realPlanId) {
+      return res.status(402).json({
+        error: 'Subscription required',
+        code: 'SUBSCRIPTION_REQUIRED',
+        message: 'You need an active subscription to use this app. Choose a plan to get started.',
+        plans_url: `${process.env.BILLING_FRONTEND_URL || 'http://localhost:3003'}/plans`,
+      });
+    }
+
+    req.planId = realPlanId;
 
     const allFeatures = await getCachedPlanFeatures();
-    req.planFeatures = allFeatures[planSlug];
+    req.planFeatures = allFeatures[realPlanId];
 
     if (!req.planFeatures) {
-      console.warn(`[plan-features] No features found for plan "${planSlug}", falling back to "free"`);
+      console.warn(`[plan-features] No features found for plan "${realPlanId}", falling back to "free"`);
       req.planFeatures = allFeatures['free'];
-      req.planSlug = 'free';
+      req.planId = 'free';
     }
 
     if (!req.planFeatures) {
@@ -125,4 +138,4 @@ const resolvePlanFeatures = async (req, res, next) => {
   }
 };
 
-module.exports = { resolvePlanFeatures, PRODUCT_SLUG, refreshPlanFeatures, invalidateUserPlanCache, getCachedPlanFeatures };
+module.exports = { resolvePlanFeatures, PRODUCT_ID, refreshPlanFeatures, invalidateUserPlanCache, getCachedPlanFeatures };

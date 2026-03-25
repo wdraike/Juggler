@@ -5,7 +5,7 @@
  * Falls back to X-Internal-Key if service-auth not initialized.
  */
 
-const PRODUCT_SLUG = 'juggler';
+const PRODUCT_ID = 'juggler';
 const FLUSH_INTERVAL = 30000;
 const FLUSH_SIZE = 50;
 
@@ -15,17 +15,17 @@ let _serviceAuthReady = false;
 
 try {
   const { initServiceAuth } = require('../../vendor/service-auth');
-  initServiceAuth({ serviceName: PRODUCT_SLUG }).then(() => {
+  initServiceAuth({ serviceName: PRODUCT_ID }).then(() => {
     _serviceAuthReady = true;
   }).catch(err => {
     console.warn('[usage-reporter] Service auth init failed, using legacy key:', err.message);
   });
 } catch { /* service-auth not available */ }
 
-function reportUsage({ userId, planSlug, featureKey, eventType, quantity, inputTokens, outputTokens, endpoint }) {
+function reportUsage({ userId, planId, featureKey, eventType, quantity, inputTokens, outputTokens, endpoint }) {
   buffer.push({
     user_id: userId,
-    plan_slug: planSlug || 'free',
+    planId: planId || 'free',
     feature_key: featureKey,
     event_type: eventType || 'used',
     quantity: quantity || 1,
@@ -50,7 +50,7 @@ async function flush() {
       const { serviceRequest } = require('../../vendor/service-auth');
       await serviceRequest('payment-service', '/api/usage/report', {
         method: 'POST',
-        body: { product_slug: PRODUCT_SLUG, events }
+        body: { productId: PRODUCT_ID, events }
       });
     } else {
       const PAYMENT_URL = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
@@ -62,7 +62,7 @@ async function flush() {
           'Content-Type': 'application/json',
           'X-Internal-Key': INTERNAL_KEY
         },
-        body: JSON.stringify({ product_slug: PRODUCT_SLUG, events }),
+        body: JSON.stringify({ productId: PRODUCT_ID, events }),
         signal: AbortSignal.timeout(5000)
       });
     }

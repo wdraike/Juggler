@@ -5,6 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { getTheme } from '../../theme/colors';
+import apiClient from '../../services/apiClient';
 
 var BILLING_URL = process.env.REACT_APP_BILLING_URL || 'http://localhost:3003';
 
@@ -40,6 +41,15 @@ export default function UpgradePrompt({ darkMode }) {
     }
     window.addEventListener('subscription:required', handleRequired);
     window.addEventListener('plan:limit-reached', handleLimit);
+
+    // Proactive check on mount — gate if no subscription
+    apiClient.get('/my-plan').catch(function(err) {
+      if (err.response?.status === 402) {
+        setDetail({ type: 'subscription', product: 'juggler' });
+        setShow(true);
+      }
+    });
+
     return function() {
       window.removeEventListener('subscription:required', handleRequired);
       window.removeEventListener('plan:limit-reached', handleLimit);
@@ -51,6 +61,11 @@ export default function UpgradePrompt({ darkMode }) {
   var title = 'Upgrade Your Plan';
   var desc = 'Upgrade to unlock more features and higher limits.';
   var extra = null;
+
+  if (detail.type === 'subscription') {
+    title = 'Subscription Required';
+    desc = 'You need an active subscription to use StriveRS. Start with a free trial to get full access.';
+  }
 
   if (detail.type === 'limit') {
     var key = detail.limit_key || detail.feature || '';
@@ -73,7 +88,7 @@ export default function UpgradePrompt({ darkMode }) {
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
       background: 'rgba(0,0,0,0.5)', zIndex: 10000,
       display: 'flex', alignItems: 'center', justifyContent: 'center'
-    }} onClick={function() { setShow(false); }}>
+    }} onClick={function() { if (detail?.type !== 'subscription') setShow(false); }}>
       <div style={{
         background: theme.bgSecondary, borderRadius: 12, padding: 32,
         maxWidth: 420, width: '90%', textAlign: 'center',
@@ -104,16 +119,18 @@ export default function UpgradePrompt({ darkMode }) {
           >
             View Plans
           </button>
-          <button
-            onClick={function() { setShow(false); }}
-            style={{
-              padding: '10px 24px', borderRadius: 6,
-              border: '1px solid ' + theme.border, background: 'transparent',
-              color: theme.textMuted, fontSize: 14, cursor: 'pointer'
-            }}
-          >
-            Not Now
-          </button>
+          {detail.type !== 'subscription' && (
+            <button
+              onClick={function() { setShow(false); }}
+              style={{
+                padding: '10px 24px', borderRadius: 6,
+                border: '1px solid ' + theme.border, background: 'transparent',
+                color: theme.textMuted, fontSize: 14, cursor: 'pointer'
+              }}
+            >
+              Not Now
+            </button>
+          )}
         </div>
       </div>
     </div>

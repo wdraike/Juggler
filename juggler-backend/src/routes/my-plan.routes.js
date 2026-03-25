@@ -6,24 +6,24 @@
 
 const router = require('express').Router();
 const { authenticateJWT } = require('../middleware/jwt-auth');
-const { resolvePlanFeatures, PRODUCT_SLUG } = require('../middleware/plan-features.middleware');
+const { resolvePlanFeatures, PRODUCT_ID } = require('../middleware/plan-features.middleware');
 const db = require('../db');
 const { countActiveTasks, countHabitTemplates, countProjects, countLocations, countScheduleTemplates } = require('../middleware/entity-limits');
 
 // Fetch plan name from payment service
-async function getPlanName(planSlug) {
+async function getPlanName(planId) {
   try {
     const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
-    const res = await fetch(`${paymentUrl}/api/plans?product=${PRODUCT_SLUG}&include_all=true`, {
+    const res = await fetch(`${paymentUrl}/api/plans?product=${PRODUCT_ID}&include_all=true`, {
       signal: AbortSignal.timeout(3000)
     });
     if (res.ok) {
       const data = await res.json();
-      const plan = data.plans?.find(p => p.slug === planSlug);
-      return plan?.name || planSlug;
+      const plan = data.plans?.find(p => p.planId === planId);
+      return plan?.name || planId;
     }
   } catch {}
-  return planSlug;
+  return planId;
 }
 
 function getCurrentPeriodBounds(featureKey) {
@@ -44,7 +44,7 @@ function getCurrentPeriodBounds(featureKey) {
 router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
   try {
     const userId = req.user?.id;
-    const planSlug = req.planSlug || 'free';
+    const planId = req.planId || 'free';
     const features = req.planFeatures;
 
     const usage = {};
@@ -111,13 +111,35 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
       };
     }
 
-    const planName = await getPlanName(planSlug);
+    const planName = await getPlanName(planId);
+
+    // Fetch subscription status (trial info) from payment service
+    let subscriptionStatus = null;
+    let trialEnd = null;
+    try {
+      const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
+      const internalKey = process.env.INTERNAL_SERVICE_KEY || '';
+      const subRes = await fetch(`${paymentUrl}/internal/users/${userId}/subscriptions?product=${PRODUCT_ID}`, {
+        headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(3000)
+      });
+      if (subRes.ok) {
+        const subData = await subRes.json();
+        const sub = subData.subscriptions?.[0];
+        if (sub) {
+          subscriptionStatus = sub.status;
+          trialEnd = sub.trial_end;
+        }
+      }
+    } catch {}
 
     res.json({
       plan_name: planName,
-      plan_id: planSlug,
+      plan_id: planId,
       features,
-      usage
+      usage,
+      subscription_status: subscriptionStatus,
+      trial_end: trialEnd,
     });
   } catch (error) {
     console.error('[my-plan] Error:', error.message);
