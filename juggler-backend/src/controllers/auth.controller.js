@@ -5,7 +5,7 @@
  * Only findOrCreateGoogleUser remains — used by MCP OAuth authorize flow.
  */
 
-const { v4: uuidv4 } = require('uuid');
+const { v7: uuidv7 } = require('uuid');
 const db = require('../db');
 
 /**
@@ -26,7 +26,7 @@ async function findOrCreateGoogleUser({ googleId, email, name, picture }) {
       });
       user = await db('users').where('id', user.id).first();
     } else {
-      const userId = uuidv4();
+      const userId = uuidv7();
       await db('users').insert({
         id: userId,
         email,
