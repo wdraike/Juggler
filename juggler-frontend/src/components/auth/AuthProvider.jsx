@@ -10,7 +10,7 @@ import apiClient, { setAccessToken, getAccessToken, clearAccessToken } from '../
 
 const AuthContext = createContext(null);
 
-const { authServiceUrl, authFrontendUrl } = require('../../proxy-config');
+const { authServiceUrl, authFrontendUrl, appId: APP_ID } = require('../../proxy-config');
 const AUTH_SERVICE_URL = authServiceUrl;
 const AUTH_FRONTEND_URL = authFrontendUrl;
 const APP_URL = window.location.origin;
@@ -33,7 +33,7 @@ export default function AuthProvider({ children }) {
       fetch(`${AUTH_SERVICE_URL}/api/auth/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, app: 'juggler' })
+        body: JSON.stringify({ code, app: APP_ID })
       })
         .then(res => res.json())
         .then(data => {
@@ -194,7 +194,7 @@ export default function AuthProvider({ children }) {
   // Redirect to auth-service login page
   const login = useCallback(() => {
     const callbackUrl = `${APP_URL}/auth/callback`;
-    window.location.href = `${AUTH_FRONTEND_URL}/login?app=juggler&redirect=${encodeURIComponent(callbackUrl)}`;
+    window.location.href = `${AUTH_FRONTEND_URL}/login?app=${APP_ID}&redirect=${encodeURIComponent(callbackUrl)}`;
   }, []);
 
   const logout = useCallback(async () => {

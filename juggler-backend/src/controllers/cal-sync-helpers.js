@@ -146,10 +146,22 @@ function taskHash(task) {
   return crypto.createHash('md5').update(str).digest('hex');
 }
 
+/**
+ * Convert an ISO 8601 string (e.g. from Microsoft Graph) to a Date object
+ * that Knex/mysql2 can serialize. Raw ISO strings with 'Z' or microseconds
+ * cause ER_TRUNCATED_WRONG_VALUE in MySQL DATETIME columns.
+ */
+function toMySQLDate(isoString) {
+  if (!isoString) return null;
+  var d = new Date(isoString);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 module.exports = {
   DEFAULT_TIMEZONE,
   jugglerDateToISO,
   isoToJugglerDate,
   computeDurationMinutes,
-  taskHash
+  taskHash,
+  toMySQLDate
 };

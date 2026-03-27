@@ -33,7 +33,7 @@ export default function UpgradePrompt({ darkMode }) {
 
   useEffect(function() {
     function handleRequired(e) {
-      setDetail({ type: 'subscription', product: e.detail?.product || 'juggler' });
+      setDetail({ type: 'subscription', product: e.detail?.product || require('../../proxy-config').appId });
       setShow(true);
     }
     function handleLimit(e) {
@@ -51,7 +51,7 @@ export default function UpgradePrompt({ darkMode }) {
         setDetail(null);
       }).catch(function(err) {
         if (err.response?.status === 402) {
-          setDetail({ type: 'subscription', product: 'juggler' });
+          setDetail({ type: 'subscription', product: require('../../proxy-config').appId });
           setShow(true);
         }
       });

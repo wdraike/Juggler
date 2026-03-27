@@ -117,6 +117,7 @@ export default function AppLayout() {
   var [msftCalLastSyncedAt, setMsftCalLastSyncedAt] = useState(null);
   var [msftCalSyncing, setMsftCalSyncing] = useState(false);
   var editingRef = useRef(false);
+  var [schedulerReady, setSchedulerReady] = useState(false);
 
   var theme = getTheme(darkMode);
   var statuses = taskState.statuses;
@@ -129,13 +130,15 @@ export default function AppLayout() {
   // Track when editing UI is open to suspend background syncs/scheduling
   editingRef.current = expandedTasks.length > 0 || !!showCreateForm || !!showSettings;
 
-  // Load data on mount
+  // Load data on mount — scheduler must finish before external syncs start
   useEffect(() => {
     loadTasks().then(result => {
       if (result?.config) {
         config.initFromConfig(result.config);
       }
-      loadPlacements();
+      loadPlacements().then(function() {
+        setSchedulerReady(true);
+      });
     });
   }, []);
 
@@ -187,8 +190,10 @@ export default function AppLayout() {
   }, []);
 
   // Combined calendar auto-sync: lightweight check every 2 min, full sync only when changes detected
+  // Waits for initial scheduler run to complete before starting any external syncs
   useEffect(() => {
     if (!gcalAutoSync && !msftCalAutoSync) return;
+    if (!schedulerReady) return;
 
     function runFullSync() {
       setGcalSyncing(true);
@@ -237,7 +242,7 @@ export default function AppLayout() {
       clearTimeout(initialTimer);
       clearInterval(intervalId);
     };
-  }, [gcalAutoSync, msftCalAutoSync, loadTasks, loadPlacements]);
+  }, [gcalAutoSync, msftCalAutoSync, schedulerReady, loadTasks, loadPlacements]);
 
   // Derived dates
   var today = useMemo(() => {

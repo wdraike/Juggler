@@ -90,7 +90,7 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 403 && error.response?.data?.error === 'Subscription required') {
       window.dispatchEvent(new CustomEvent('subscription:required', {
         detail: {
-          product: error.response.data.product || 'juggler',
+          product: error.response.data.product || require('../proxy-config').appId,
           required_plans: error.response.data.required_plans
         }
       }));

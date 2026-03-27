@@ -413,10 +413,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
   }); // end transaction
   } catch (err) {
-    if (err.code === 'ER_LOCK_DEADLOCK' && retries < MAX_RETRIES) {
-      console.log('[SCHED] deadlock detected, retry ' + (retries + 1) + '/' + MAX_RETRIES);
-      await new Promise(function(r) { setTimeout(r, 200 * (retries + 1)); });
-      return runScheduleAndPersist(userId, retries + 1);
+    if ((err.code === 'ER_LOCK_DEADLOCK' || err.code === 'ER_LOCK_WAIT_TIMEOUT') && retries < MAX_RETRIES) {
+      console.log('[SCHED] ' + err.code + ' detected, retry ' + (retries + 1) + '/' + MAX_RETRIES);
+      await new Promise(function(r) { setTimeout(r, 500 * (retries + 1)); });
+      return runScheduleAndPersist(userId, retries + 1, options);
     }
     throw err;
   }

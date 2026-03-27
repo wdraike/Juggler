@@ -44,7 +44,8 @@ async function apiCall(method, endpoint, body) {
   return JSON.parse(text);
 }
 
-const server = new McpServer({ name: 'juggler', version: '1.0.0' });
+const SERVICE_NAME = process.env.SERVICE_NAME || 'strivers';
+const server = new McpServer({ name: SERVICE_NAME, version: '1.0.0' });
 
 // ── Task tools ──
 

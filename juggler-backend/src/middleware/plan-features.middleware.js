@@ -11,7 +11,7 @@
  * lifetime of the process.
  */
 
-const PRODUCT_LABEL = 'juggler'; // Used only to discover the UUID at startup
+const { PRODUCT_LABEL } = require('../service-identity');
 const CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 const USER_PLAN_CACHE_TTL_MS = 2 * 60 * 1000;
 

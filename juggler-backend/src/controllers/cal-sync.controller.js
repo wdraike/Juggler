@@ -14,7 +14,7 @@ var { getConnectedAdapters } = require('../lib/cal-adapters');
 var { runScheduleAndPersist } = require('../scheduler/runSchedule');
 var { rowToTask } = require('./task.controller');
 var { localToUtc } = require('../scheduler/dateHelpers');
-var { taskHash, isoToJugglerDate, DEFAULT_TIMEZONE } = require('./cal-sync-helpers');
+var { taskHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE } = require('./cal-sync-helpers');
 
 function delay(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
@@ -61,10 +61,22 @@ async function sync(req, res) {
 
     var stats = { pushed: 0, pulled: 0, deleted_local: 0, deleted_remote: 0, errors: [], providers: {} };
 
-    // === Phase 0: Run scheduler once ===
+    // === Phase 0: Run scheduler (skip if it ran recently) ===
     try {
-      var schedResult = await runScheduleAndPersist(userId);
-      stats.scheduler = { moved: schedResult.moved, tasks: schedResult.tasks };
+      var cacheRow = await db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
+      var cacheAge = Infinity;
+      if (cacheRow) {
+        try {
+          var cached = JSON.parse(cacheRow.config_value);
+          if (cached.generatedAt) cacheAge = Date.now() - new Date(cached.generatedAt).getTime();
+        } catch (e) {}
+      }
+      if (cacheAge > 30000) {
+        var schedResult = await runScheduleAndPersist(userId);
+        stats.scheduler = { moved: schedResult.moved, tasks: schedResult.tasks };
+      } else {
+        console.log('[CAL-SYNC] scheduler cache is fresh (' + Math.round(cacheAge / 1000) + 's old), skipping Phase 0');
+      }
     } catch (schedErr) {
       console.error('Cal sync Phase 0 (scheduler) error:', schedErr);
       stats.errors.push({ phase: 'scheduler', error: schedErr.message });
@@ -291,7 +303,7 @@ async function sync(req, res) {
               event_start: event.startDateTime || null,
               event_end: event.endDateTime || null,
               event_all_day: event.isAllDay ? 1 : 0,
-              last_modified_at: event.lastModified || null,
+              last_modified_at: toMySQLDate(event.lastModified),
               task_updated_at: task._updated_at || null,
               synced_at: db.fn.now()
             });
@@ -392,6 +404,10 @@ async function sync(req, res) {
         if (!newTask.date) continue;
         if (!newTask.time && newTask.when !== 'allday') continue;
 
+        // Skip if task already has this provider's event ID (may have lost ledger record)
+        var existingEvId = newTask[eventIdCol === 'gcal_event_id' ? 'gcalEventId' : 'msftEventId'];
+        if (existingEvId) continue;
+
         // Only push future tasks
         var taskSA = newTask._scheduled_at instanceof Date ? newTask._scheduled_at : new Date(String(newTask._scheduled_at).replace(' ', 'T') + 'Z');
         if (taskSA < todayStart) continue;
@@ -423,12 +439,16 @@ async function sync(req, res) {
               event_end: createdNorm ? createdNorm.endDateTime : null,
               event_all_day: (newTask.when === 'allday') ? 1 : 0,
               task_updated_at: newTask._updated_at || null,
-              last_modified_at: createdNorm ? createdNorm.lastModified : null,
+              last_modified_at: toMySQLDate(createdNorm ? createdNorm.lastModified : null),
               status: 'active',
               synced_at: db.fn.now(),
               created_at: db.fn.now()
             });
           });
+
+          // Mark this event as processed so Phase 3b won't pull it back
+          processedEventIds2.add(result.providerEventId);
+          processedTaskIds2.add(newTask.id);
 
           pStats2.pushed++;
           stats.pushed++;
@@ -464,7 +484,7 @@ async function sync(req, res) {
             event_start: newEvent.startDateTime || null,
             event_end: newEvent.endDateTime || null,
             event_all_day: newEvent.isAllDay ? 1 : 0,
-            last_modified_at: newEvent.lastModified || null,
+            last_modified_at: toMySQLDate(newEvent.lastModified),
             task_updated_at: existingTask._updated_at || null,
             status: 'active',
             synced_at: db.fn.now(),
@@ -494,7 +514,7 @@ async function sync(req, res) {
             event_start: newEvent.startDateTime || null,
             event_end: newEvent.endDateTime || null,
             event_all_day: newEvent.isAllDay ? 1 : 0,
-            last_modified_at: newEvent.lastModified || null,
+            last_modified_at: toMySQLDate(newEvent.lastModified),
             status: 'active',
             synced_at: db.fn.now(),
             created_at: db.fn.now()
@@ -503,8 +523,11 @@ async function sync(req, res) {
         }
 
         // Skip events that originated from Juggler (round-trip prevention)
+        // Check both plain text and raw body (Microsoft may return HTML-wrapped content)
         var evDesc = newEvent.description || '';
-        if (evDesc.indexOf('Synced from Raike & Sons') !== -1 || evDesc.indexOf('Synced from Juggler') !== -1) {
+        var evRawBody = (newEvent._raw && newEvent._raw.body && newEvent._raw.body.content) || '';
+        if (evDesc.indexOf('Synced from Raike & Sons') !== -1 || evDesc.indexOf('Synced from Juggler') !== -1
+            || evRawBody.indexOf('Synced from Raike & Sons') !== -1 || evRawBody.indexOf('Synced from Juggler') !== -1) {
           await db('cal_sync_ledger').insert({
             user_id: userId,
             provider: pid2,
@@ -517,7 +540,7 @@ async function sync(req, res) {
             event_start: newEvent.startDateTime || null,
             event_end: newEvent.endDateTime || null,
             event_all_day: newEvent.isAllDay ? 1 : 0,
-            last_modified_at: newEvent.lastModified || null,
+            last_modified_at: toMySQLDate(newEvent.lastModified),
             status: 'active',
             synced_at: db.fn.now(),
             created_at: db.fn.now()
@@ -547,7 +570,7 @@ async function sync(req, res) {
               event_start: newEvent.startDateTime || null,
               event_end: newEvent.endDateTime || null,
               event_all_day: newEvent.isAllDay ? 1 : 0,
-              last_modified_at: newEvent.lastModified || null,
+              last_modified_at: toMySQLDate(newEvent.lastModified),
               task_updated_at: dupTask._updated_at || null,
               status: 'active',
               synced_at: db.fn.now(),
@@ -606,7 +629,7 @@ async function sync(req, res) {
               event_start: newEvent.startDateTime || null,
               event_end: newEvent.endDateTime || null,
               event_all_day: newEvent.isAllDay ? 1 : 0,
-              last_modified_at: newEvent.lastModified || null,
+              last_modified_at: toMySQLDate(newEvent.lastModified),
               status: 'active',
               synced_at: db.fn.now(),
               created_at: db.fn.now()

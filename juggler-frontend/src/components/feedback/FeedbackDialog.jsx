@@ -15,7 +15,7 @@ import AnnotationCanvas from './AnnotationCanvas';
 var bugReporter = createBugReporterClient({
   baseUrl: '/api',
   getToken: function() { return localStorage.getItem('token'); },
-  sourceApp: 'juggler'
+  sourceApp: require('../../proxy-config').appId
 });
 
 var TYPES = [

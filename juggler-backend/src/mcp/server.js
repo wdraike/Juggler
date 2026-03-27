@@ -13,7 +13,7 @@ const { registerDataTools } = require('./tools/data');
  */
 function createMcpServerForUser(userId) {
   const server = new McpServer({
-    name: 'juggler',
+    name: require('../service-identity').SERVICE_NAME,
     version: '1.0.0'
   });
 

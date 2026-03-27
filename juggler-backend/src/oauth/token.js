@@ -8,6 +8,7 @@
 
 const crypto = require('crypto');
 const db = require('../db');
+const { APP_ID } = require('../service-identity');
 
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://localhost:5010';
 
@@ -76,7 +77,7 @@ async function handleAuthorizationCode(req, res) {
     const response = await fetch(`${AUTH_SERVICE_URL}/api/auth/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, app: 'juggler' })
+      body: JSON.stringify({ code, app: APP_ID })
     });
 
     if (!response.ok) {

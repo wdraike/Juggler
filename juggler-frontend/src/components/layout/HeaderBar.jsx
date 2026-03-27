@@ -13,7 +13,7 @@ import PlanUsagePanel from '../billing/PlanUsagePanel';
 import FeedbackButton from '../feedback/FeedbackButton';
 import FeedbackDialog from '../feedback/FeedbackDialog';
 
-var { services } = require('../../proxy-config');
+var { services, homeUrl } = require('../../proxy-config');
 var BILLING_URL = services.billing.frontend;
 
 export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, onShowCalSync, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today }) {
@@ -72,6 +72,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
       background: theme.headerBg, borderBottom: '2px solid ' + theme.accent + '4D',
       position: 'sticky', top: 0, zIndex: 100
     }}>
+      <a href={homeUrl} style={{ textDecoration: 'none', display: 'inline-flex' }}>
       {!isMobile && <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, padding: '4px 10px', borderLeft: '2px solid ' + theme.accent }}>
         <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 8, fontWeight: 600, letterSpacing: '0.18em', textTransform: 'uppercase', color: theme.accent, opacity: 0.7 }}>by Raike &amp; Sons</div>
         <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 20, color: theme.headerText, letterSpacing: '-0.02em', lineHeight: 1.1 }}>Strive<span style={{ color: theme.accent }}>RS</span></div>
@@ -80,6 +81,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
         <div style={{ fontFamily: "'Inter', sans-serif", fontSize: 6, fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase', color: theme.accent, opacity: 0.7 }}>R&amp;S</div>
         <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 15, color: theme.headerText, letterSpacing: '-0.02em', lineHeight: 1.1 }}>Strive<span style={{ color: theme.accent }}>RS</span></div>
       </div>}
+      </a>
 
       {/* Progress bar */}
       <div title={doneCount + ' of ' + totalCount + ' tasks done today (' + pct + '%)'} style={{ flex: 0, minWidth: isMobile ? 50 : 80, maxWidth: isMobile ? 80 : 140, height: 6, background: theme.headerTrack, borderRadius: 2, overflow: 'hidden' }}>

@@ -10,13 +10,11 @@
 const { authenticateJWT: createAuthMiddleware } = require('auth-client');
 const { createRemoteJWKSet, jwtVerify } = require('jose');
 const db = require('../db');
+const { APP_ID } = require('../service-identity');
 
-// Verify JWT via JWKS then load full user from local DB
-// (auth-client only puts id/email/name from JWT claims on req.user,
-// but Juggler controllers need timezone, picture_url, etc.)
 // Verify JWT via auth-client, then resolve local user by email
-// (auth-service user IDs may differ from local Juggler user IDs)
-const jwtMiddleware = createAuthMiddleware('juggler');
+// (auth-service user IDs may differ from local user IDs)
+const jwtMiddleware = createAuthMiddleware(APP_ID);
 const authenticateJWT = async (req, res, next) => {
   jwtMiddleware(req, res, async (err) => {
     if (err) return next(err);
