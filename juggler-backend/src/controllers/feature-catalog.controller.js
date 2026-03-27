@@ -9,8 +9,10 @@
  * value_order: higher = more prominent in plan cards (100+ headline, 50-99 important, 1-49 secondary)
  */
 
+const { getProductId, PRODUCT_LABEL } = require('../middleware/plan-features.middleware');
+
 const CATALOG = {
-  product_id: 'juggler',
+  product_id: PRODUCT_LABEL, // Resolved to UUID at request time
   product_name: 'StriveRS',
   catalog_version: '2026-03-22T18:00:00Z',
   groups: [
@@ -194,6 +196,7 @@ const CATALOG = {
   ]
 };
 
-exports.getFeatureCatalog = (req, res) => {
-  res.json(CATALOG);
+exports.getFeatureCatalog = async (req, res) => {
+  const productId = await getProductId();
+  res.json({ ...CATALOG, product_id: productId || CATALOG.product_id });
 };

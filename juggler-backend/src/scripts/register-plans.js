@@ -304,6 +304,7 @@ const PLAN_CATALOG = [
 // ─── Sync Logic ────────────────────────────────────────────────────────
 
 async function syncPlans() {
+  // Product label in URL — payment service accepts both UUID and label
   const url = `${PAYMENT_SERVICE_URL}/api/products/juggler/plans/sync`;
 
   console.log(`Syncing ${PLAN_CATALOG.length} plans to ${url}...`);

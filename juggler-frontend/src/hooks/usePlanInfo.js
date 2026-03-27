@@ -21,6 +21,7 @@ export default function usePlanInfo() {
   var [features, setFeatures] = useState(null);
   var [usage, setUsage] = useState({});
   var [loading, setLoading] = useState(true);
+  var [hasSubscription, setHasSubscription] = useState(false);
 
   var [trialInfo, setTrialInfo] = useState(null);
 
@@ -29,6 +30,7 @@ export default function usePlanInfo() {
       setPlanName(res.data.plan_name || res.data.plan_id || 'Free');
       setFeatures(res.data.features);
       setUsage(res.data.usage || {});
+      setHasSubscription(true);
       if (res.data.trial_end && res.data.subscription_status === 'trialing') {
         var trialEnd = new Date(res.data.trial_end);
         var daysLeft = Math.max(0, Math.round((trialEnd - new Date()) / (1000 * 60 * 60 * 24)));
@@ -81,5 +83,5 @@ export default function usePlanInfo() {
     });
   });
 
-  return { planName, features, usage, usageSummary, trialInfo, loading, refresh: load };
+  return { planName, features, usage, usageSummary, trialInfo, loading, hasSubscription, refresh: load };
 }

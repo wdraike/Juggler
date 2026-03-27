@@ -13,7 +13,8 @@ import PlanUsagePanel from '../billing/PlanUsagePanel';
 import FeedbackButton from '../feedback/FeedbackButton';
 import FeedbackDialog from '../feedback/FeedbackDialog';
 
-var BILLING_URL = process.env.REACT_APP_BILLING_URL || 'http://localhost:3003';
+var { services } = require('../../proxy-config');
+var BILLING_URL = services.billing.frontend;
 
 export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, onShowCalSync, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today }) {
   var theme = getTheme(darkMode);
@@ -23,7 +24,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
   var [showFeedback, setShowFeedback] = useState(false);
   var planPanelRef = useRef(null);
   var overflowRef = useRef(null);
-  var { planName, usageSummary, trialInfo, loading: planLoading } = usePlanInfo();
+  var { planName, usageSummary, trialInfo, loading: planLoading, hasSubscription } = usePlanInfo();
 
   // Close plan panel on outside click
   useEffect(function() {
@@ -164,6 +165,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
             )}
             {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help guide \u2014 how the scheduler works, task properties, keyboard shortcuts">&#x2753;</button>}
             <FeedbackButton darkMode={darkMode} theme={theme} isMobile={isMobile} />
+            {hasSubscription && (
             <div ref={planPanelRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
               <button onClick={function() { setShowPlanPanel(function(v) { return !v; }); }} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title={'Plan: ' + (planName || 'Free')}>
                 &#x1F4B3;
@@ -173,6 +175,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
               </button>
               {showPlanPanel && <PlanUsagePanel planName={planName} usageSummary={usageSummary} trialInfo={trialInfo} loading={planLoading} theme={theme} onClose={function() { setShowPlanPanel(false); }} />}
             </div>
+            )}
             <button onClick={() => setDarkMode(d => !d)} style={btnStyle(theme, isMobile)} title="Toggle dark mode">
               {darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19'}
             </button>

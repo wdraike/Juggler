@@ -7,7 +7,8 @@ import React, { useState, useEffect } from 'react';
 import { getTheme } from '../../theme/colors';
 import apiClient from '../../services/apiClient';
 
-var BILLING_URL = process.env.REACT_APP_BILLING_URL || 'http://localhost:3003';
+var { services } = require('../../proxy-config');
+var BILLING_URL = services.billing.frontend;
 
 var LIMIT_MESSAGES = {
   'limits.active_tasks': { title: 'Task Limit Reached', desc: 'You\'ve reached the maximum number of active tasks on your plan.' },
@@ -43,16 +44,30 @@ export default function UpgradePrompt({ darkMode }) {
     window.addEventListener('plan:limit-reached', handleLimit);
 
     // Proactive check on mount — gate if no subscription
-    apiClient.get('/my-plan').catch(function(err) {
-      if (err.response?.status === 402) {
-        setDetail({ type: 'subscription', product: 'juggler' });
-        setShow(true);
-      }
-    });
+    function checkSubscription() {
+      apiClient.get('/my-plan').then(function() {
+        // Has subscription now — dismiss the gate
+        setShow(false);
+        setDetail(null);
+      }).catch(function(err) {
+        if (err.response?.status === 402) {
+          setDetail({ type: 'subscription', product: 'juggler' });
+          setShow(true);
+        }
+      });
+    }
+    checkSubscription();
+
+    // Re-check when user returns from another tab (may have just subscribed)
+    function onVisibilityChange() {
+      if (document.visibilityState === 'visible') checkSubscription();
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     return function() {
       window.removeEventListener('subscription:required', handleRequired);
       window.removeEventListener('plan:limit-reached', handleLimit);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, []);
 
@@ -110,7 +125,7 @@ export default function UpgradePrompt({ darkMode }) {
         )}
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 16 }}>
           <button
-            onClick={function() { window.open(BILLING_URL + '/plans?product=juggler', '_blank'); setShow(false); }}
+            onClick={function() { window.open(BILLING_URL + '/plans', '_blank'); }}
             style={{
               padding: '10px 24px', borderRadius: 6, border: 'none',
               background: theme.accent, color: '#fff', fontSize: 14,

@@ -276,7 +276,7 @@ async function callback(req, res) {
 
     await db('users').where('id', userId).update(update);
 
-    var frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3001').split(',')[0];
+    var frontendUrl = require('../proxy-config').services.juggler.frontend;
     res.redirect(frontendUrl + '/?gcal=connected');
   } catch (error) {
     console.error('GCal callback error:', error);

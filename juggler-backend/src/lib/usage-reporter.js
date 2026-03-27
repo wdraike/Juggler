@@ -5,7 +5,7 @@
  * Falls back to X-Internal-Key if service-auth not initialized.
  */
 
-const PRODUCT_ID = 'juggler';
+const { getProductId, PRODUCT_LABEL } = require('../middleware/plan-features.middleware');
 const FLUSH_INTERVAL = 30000;
 const FLUSH_SIZE = 50;
 
@@ -15,7 +15,7 @@ let _serviceAuthReady = false;
 
 try {
   const { initServiceAuth } = require('../../vendor/service-auth');
-  initServiceAuth({ serviceName: PRODUCT_ID }).then(() => {
+  initServiceAuth({ serviceName: PRODUCT_LABEL }).then(() => {
     _serviceAuthReady = true;
   }).catch(err => {
     console.warn('[usage-reporter] Service auth init failed, using legacy key:', err.message);
@@ -50,7 +50,7 @@ async function flush() {
       const { serviceRequest } = require('../../vendor/service-auth');
       await serviceRequest('payment-service', '/api/usage/report', {
         method: 'POST',
-        body: { productId: PRODUCT_ID, events }
+        body: { productId: await getProductId() || PRODUCT_LABEL, events }
       });
     } else {
       const PAYMENT_URL = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
@@ -62,7 +62,7 @@ async function flush() {
           'Content-Type': 'application/json',
           'X-Internal-Key': INTERNAL_KEY
         },
-        body: JSON.stringify({ productId: PRODUCT_ID, events }),
+        body: JSON.stringify({ productId: await getProductId() || PRODUCT_LABEL, events }),
         signal: AbortSignal.timeout(5000)
       });
     }

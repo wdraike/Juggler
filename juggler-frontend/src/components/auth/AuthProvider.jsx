@@ -10,8 +10,9 @@ import apiClient, { setAccessToken, getAccessToken, clearAccessToken } from '../
 
 const AuthContext = createContext(null);
 
-const AUTH_SERVICE_URL = process.env.REACT_APP_AUTH_SERVICE_URL || 'http://localhost:5010';
-const AUTH_FRONTEND_URL = process.env.REACT_APP_AUTH_FRONTEND_URL || 'http://localhost:3001';
+const { authServiceUrl, authFrontendUrl } = require('../../proxy-config');
+const AUTH_SERVICE_URL = authServiceUrl;
+const AUTH_FRONTEND_URL = authFrontendUrl;
 const APP_URL = window.location.origin;
 
 export function useAuth() {
@@ -109,6 +110,34 @@ export default function AuthProvider({ children }) {
           }
         }
 
+        // No local tokens — try SSO cookie (user may be logged in via another app)
+        try {
+          const ssoRes = await fetch(`${AUTH_SERVICE_URL}/api/auth/sso-check`, {
+            credentials: 'include'
+          });
+          if (ssoRes.ok) {
+            const ssoData = await ssoRes.json();
+            if (ssoData.authenticated) {
+              const tokenRes = await fetch(`${AUTH_SERVICE_URL}/api/auth/sso-token`, {
+                method: 'POST',
+                credentials: 'include'
+              });
+              if (tokenRes.ok) {
+                const tokenData = await tokenRes.json();
+                if (!cancelled && tokenData.tokens?.accessToken) {
+                  setAccessToken(tokenData.tokens.accessToken);
+                  if (tokenData.tokens.refreshToken) localStorage.setItem('juggler-refresh-token', tokenData.tokens.refreshToken);
+                  const meRes = await apiClient.get('/auth/me');
+                  if (!cancelled) setUser(meRes.data.user);
+                  return;
+                }
+              }
+            }
+          }
+        } catch {
+          // SSO check failed — not critical
+        }
+
         // No valid session
         if (!cancelled) {
           clearAccessToken();
@@ -136,6 +165,32 @@ export default function AuthProvider({ children }) {
     return () => window.removeEventListener('auth:logout', handleLogout);
   }, []);
 
+  // Session heartbeat — poll auth-service every 60s to detect sign-off from another app
+  useEffect(() => {
+    if (!user) return;
+
+    const interval = setInterval(async () => {
+      const token = getAccessToken();
+      if (!token) return;
+
+      try {
+        const res = await fetch(`${AUTH_SERVICE_URL}/api/auth/session-alive`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (res.status === 401) {
+          // Session ended from another app — clear local state and redirect through auth-service
+          window.dispatchEvent(new Event('auth:logout'));
+          window.location.href = `${AUTH_SERVICE_URL}/api/auth/logout-redirect?redirect=${encodeURIComponent(APP_URL)}`;
+        }
+      } catch {
+        // Network error — skip this check, try again next interval
+      }
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [user]);
+
   // Redirect to auth-service login page
   const login = useCallback(() => {
     const callbackUrl = `${APP_URL}/auth/callback`;
@@ -143,14 +198,19 @@ export default function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(async () => {
-    // Clear local tokens first
+    // Grab token before clearing so auth-service can identify the user
+    const token = getAccessToken();
+
+    // Clear local tokens
     clearAccessToken();
     localStorage.removeItem('juggler-refresh-token');
     setUser(null);
 
-    // Redirect to auth-service logout, which clears the auth-service session
-    // then redirects back to Juggler
-    window.location.href = `${AUTH_SERVICE_URL}/api/auth/logout-redirect?redirect=${encodeURIComponent(APP_URL)}`;
+    // Redirect to auth-service logout with token so it can deactivate the Redis session
+    const logoutUrl = new URL(`${AUTH_SERVICE_URL}/api/auth/logout-redirect`);
+    logoutUrl.searchParams.set('redirect', APP_URL);
+    if (token) logoutUrl.searchParams.set('token', token);
+    window.location.href = logoutUrl.toString();
   }, []);
 
   const value = {

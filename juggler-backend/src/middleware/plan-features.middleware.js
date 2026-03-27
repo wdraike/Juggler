@@ -5,11 +5,46 @@
  * Fetches plan catalog from payment service (cached 5 min).
  * Fetches user's actual plan from payment service internal API (cached 2 min)
  * so it stays accurate even when the JWT is stale.
+ *
+ * Product identity: uses the product UUID as the canonical ID.
+ * UUID is discovered at startup via payment service and cached for the
+ * lifetime of the process.
  */
 
-const PRODUCT_ID = 'juggler';
+const PRODUCT_LABEL = 'juggler'; // Used only to discover the UUID at startup
 const CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 const USER_PLAN_CACHE_TTL_MS = 2 * 60 * 1000;
+
+// ─── Product UUID discovery ─────────────────────────────────────────────
+let _productId = null; // Resolved UUID
+let _productDiscoveryPromise = null;
+
+async function getProductId() {
+  if (_productId) return _productId;
+  if (_productDiscoveryPromise) return _productDiscoveryPromise;
+
+  _productDiscoveryPromise = (async () => {
+    const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
+    const internalKey = process.env.INTERNAL_SERVICE_KEY || '';
+    try {
+      const res = await fetch(`${paymentUrl}/internal/products/${PRODUCT_LABEL}`, {
+        headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(5000)
+      });
+      if (!res.ok) throw new Error(`Product discovery failed (${res.status})`);
+      const data = await res.json();
+      _productId = data.product.id;
+      console.log(`[plan-features] Product "${PRODUCT_LABEL}" → ${_productId}`);
+      return _productId;
+    } catch (err) {
+      _productDiscoveryPromise = null;
+      console.error(`[plan-features] Product discovery failed:`, err.message);
+      return null;
+    }
+  })();
+
+  return _productDiscoveryPromise;
+}
 
 // ─── Plan catalog cache (all plans + features) ─────────────────────────
 let _planFeaturesCache = null;
@@ -18,7 +53,9 @@ let _fetchPromise = null;
 
 async function fetchPlanFeatures() {
   const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
-  const response = await fetch(`${paymentUrl}/api/plans?product=${PRODUCT_ID}&include_all=true`, {
+  const productId = await getProductId();
+  const filter = productId ? `?product=${productId}` : `?product=${PRODUCT_LABEL}`;
+  const response = await fetch(`${paymentUrl}/api/plans${filter}&include_all=true`, {
     headers: { 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(5000)
   });
@@ -76,7 +113,10 @@ async function getUserPlanId(userId) {
     });
     if (!res.ok) throw new Error(`Payment service returned ${res.status}`);
     const data = await res.json();
-    const planId = data.plans?.[PRODUCT_ID] || null;
+    const productId = await getProductId();
+    const planId = data.plans?.[productId] || null;
+    // Only cache when user has an active plan — don't cache null so that
+    // a user who just subscribed isn't blocked by stale cache
     if (planId) {
       _userPlanCache.set(userId, { planId, timestamp: Date.now() });
     } else {
@@ -88,6 +128,7 @@ async function getUserPlanId(userId) {
   }
 }
 
+// Force refresh — called externally when plan changes
 async function refreshPlanFeatures() {
   _cacheTimestamp = 0;
   return getCachedPlanFeatures();
@@ -112,7 +153,7 @@ const resolvePlanFeatures = async (req, res, next) => {
         error: 'Subscription required',
         code: 'SUBSCRIPTION_REQUIRED',
         message: 'You need an active subscription to use this app. Choose a plan to get started.',
-        plans_url: `${process.env.BILLING_FRONTEND_URL || 'http://localhost:3003'}/plans`,
+        plans_url: `${require('../proxy-config').services.billing.frontend}/plans`,
       });
     }
 
@@ -138,4 +179,4 @@ const resolvePlanFeatures = async (req, res, next) => {
   }
 };
 
-module.exports = { resolvePlanFeatures, PRODUCT_ID, refreshPlanFeatures, invalidateUserPlanCache, getCachedPlanFeatures };
+module.exports = { resolvePlanFeatures, PRODUCT_LABEL, getProductId, refreshPlanFeatures, invalidateUserPlanCache, getCachedPlanFeatures };

@@ -6,7 +6,7 @@
 
 const router = require('express').Router();
 const { authenticateJWT } = require('../middleware/jwt-auth');
-const { resolvePlanFeatures, PRODUCT_ID } = require('../middleware/plan-features.middleware');
+const { resolvePlanFeatures, getProductId, PRODUCT_LABEL } = require('../middleware/plan-features.middleware');
 const db = require('../db');
 const { countActiveTasks, countHabitTemplates, countProjects, countLocations, countScheduleTemplates } = require('../middleware/entity-limits');
 
@@ -14,7 +14,8 @@ const { countActiveTasks, countHabitTemplates, countProjects, countLocations, co
 async function getPlanName(planId) {
   try {
     const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
-    const res = await fetch(`${paymentUrl}/api/plans?product=${PRODUCT_ID}&include_all=true`, {
+    const productId = await getProductId() || PRODUCT_LABEL;
+    const res = await fetch(`${paymentUrl}/api/plans?product=${productId}&include_all=true`, {
       signal: AbortSignal.timeout(3000)
     });
     if (res.ok) {
@@ -119,7 +120,8 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
     try {
       const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
       const internalKey = process.env.INTERNAL_SERVICE_KEY || '';
-      const subRes = await fetch(`${paymentUrl}/internal/users/${userId}/subscriptions?product=${PRODUCT_ID}`, {
+      const productId = await getProductId() || PRODUCT_LABEL;
+      const subRes = await fetch(`${paymentUrl}/internal/users/${userId}/subscriptions?product=${productId}`, {
         headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(3000)
       });

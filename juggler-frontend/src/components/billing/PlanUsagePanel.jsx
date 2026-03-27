@@ -5,7 +5,8 @@
 
 import React from 'react';
 
-var BILLING_URL = process.env.REACT_APP_BILLING_URL || 'http://localhost:3003';
+var { services } = require('../../proxy-config');
+var BILLING_URL = services.billing.frontend;
 
 function UsageBar({ item, theme }) {
   var pct = item.pct;
@@ -96,7 +97,7 @@ export default function PlanUsagePanel({ planName, usageSummary, trialInfo, load
       {/* Footer */}
       <div style={{ padding: '10px 16px', borderTop: '1px solid ' + theme.border, display: 'flex', gap: 8 }}>
         <button
-          onClick={function() { window.open(BILLING_URL + '/plans?product=juggler', '_blank'); }}
+          onClick={function() { window.open(BILLING_URL + '/plans', '_blank'); }}
           style={{
             flex: 1, padding: '8px 0', borderRadius: 6, border: 'none',
             background: theme.accent, color: '#fff', fontSize: 12,

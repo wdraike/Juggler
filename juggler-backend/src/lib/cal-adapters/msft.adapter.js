@@ -11,6 +11,15 @@ var { localToUtc } = require('../../scheduler/dateHelpers');
 
 var providerId = 'msft';
 
+/**
+ * Truncate an ISO datetime string to MySQL-safe precision (6 fractional digits max).
+ * Microsoft Graph API returns 7+ digits (e.g. '.4777274Z') which MySQL rejects.
+ */
+function truncateDateTime(dt) {
+  if (!dt) return null;
+  return dt.replace(/(\.\d{6})\d+/, '$1');
+}
+
 var IANA_TO_WINDOWS = {
   'America/New_York': 'Eastern Standard Time',
   'America/Chicago': 'Central Standard Time',
@@ -143,12 +152,12 @@ function normalizeEvent(event) {
     id: event.id,
     title: event.subject || '(No title)',
     description: (event.body?.content) || '',
-    startDateTime: startStr,
-    endDateTime: endStr,
+    startDateTime: truncateDateTime(startStr),
+    endDateTime: truncateDateTime(endStr),
     startTimezone: event.start?.timeZone || null,
     isAllDay: isAllDay,
     durationMinutes: dur,
-    lastModified: event.lastModifiedDateTime || null,
+    lastModified: truncateDateTime(event.lastModifiedDateTime),
     isTransparent: event.showAs === 'free',
     _raw: event
   };

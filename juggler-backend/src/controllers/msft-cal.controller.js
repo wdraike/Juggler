@@ -361,7 +361,7 @@ async function callback(req, res) {
 
     if (!markCodeUsed(code)) {
       console.log('[MSFT CALLBACK] Duplicate code detected, redirecting without re-exchange');
-      var frontUrl = (process.env.FRONTEND_URL || 'http://localhost:3001').split(',')[0].trim();
+      var frontUrl = require('../proxy-config').services.juggler.frontend;
       return res.redirect(frontUrl + '/?msftcal=connected');
     }
 
@@ -393,7 +393,7 @@ async function callback(req, res) {
 
     await db('users').where('id', userId).update(update);
 
-    var frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3001').split(',')[0].trim();
+    var frontendUrl = require('../proxy-config').services.juggler.frontend;
     res.redirect(frontendUrl + '/?msftcal=connected');
   } catch (error) {
     console.error('MsftCal callback error:', error.message || error);

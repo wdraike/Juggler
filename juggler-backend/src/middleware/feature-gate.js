@@ -25,7 +25,7 @@ function logFeatureEvent(req, featureKey, eventType, value) {
     feature_key: featureKey,
     event_type: eventType,
     planId: planId || 'free',
-    plan_id: typeof req === 'object' ? (req.auth?.plans?.['juggler'] || null) : null,
+    plan_id: typeof req === 'object' ? (req.planId || null) : null,
     endpoint: typeof req === 'object' ? `${req.method} ${req.originalUrl || req.url}` : null,
     ip_address: typeof req === 'object' ? (req.ip || req.headers?.['x-forwarded-for'] || null) : null,
     request_id: typeof req === 'object' ? (req.headers?.['x-request-id'] || null) : null,

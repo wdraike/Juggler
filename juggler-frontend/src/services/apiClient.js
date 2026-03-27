@@ -5,8 +5,9 @@
 
 import axios from 'axios';
 
-const API_BASE = process.env.REACT_APP_API_URL || '/api';
-const AUTH_SERVICE_URL = process.env.REACT_APP_AUTH_SERVICE_URL || 'http://localhost:5010';
+const { apiBase, authServiceUrl } = require('../proxy-config');
+const API_BASE = apiBase;
+const AUTH_SERVICE_URL = authServiceUrl;
 const TOKEN_KEY = 'juggler-access-token';
 
 const apiClient = axios.create({
