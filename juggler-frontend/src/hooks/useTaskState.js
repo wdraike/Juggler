@@ -10,7 +10,51 @@
 
 import { useReducer, useCallback, useRef, useEffect, useState } from 'react';
 import taskReducer, { TASK_STATE_INIT } from '../state/taskReducer';
-import apiClient from '../services/apiClient';
+import apiClient, { TZ_OVERRIDE_KEY } from '../services/apiClient';
+import { getBrowserTimezone, hydrateTaskTimezones, convertTimeForDisplay } from '../utils/timezone';
+import { parseTimeToMinutes } from '../scheduler/dateHelpers';
+
+function getHydrationTimezone() {
+  try {
+    var override = localStorage.getItem(TZ_OVERRIDE_KEY);
+    if (override) return override;
+  } catch (e) { /* ignore */ }
+  return getBrowserTimezone() || 'America/New_York';
+}
+
+/**
+ * Convert placement start times from UTC (scheduledAtUtc) to local minutes
+ * in the browser timezone, and regroup by local dateKey.
+ */
+function hydratePlacements(data) {
+  var tz = getHydrationTimezone();
+  var srcPlacements = data.dayPlacements || {};
+  var localPlacements = {};
+
+  Object.keys(srcPlacements).forEach(function(dk) {
+    var arr = srcPlacements[dk];
+    if (!arr) return;
+    arr.forEach(function(p) {
+      if (p.scheduledAtUtc) {
+        var local = convertTimeForDisplay(p.scheduledAtUtc, tz);
+        if (local && local.time) {
+          var localMins = parseTimeToMinutes(local.time);
+          if (localMins !== null) p.start = localMins;
+          // Regroup by local dateKey (may differ from scheduler's dateKey)
+          var localDk = local.date || dk;
+          if (!localPlacements[localDk]) localPlacements[localDk] = [];
+          localPlacements[localDk].push(p);
+          return;
+        }
+      }
+      // Fallback: keep original dateKey and start
+      if (!localPlacements[dk]) localPlacements[dk] = [];
+      localPlacements[dk].push(p);
+    });
+  });
+
+  return { dayPlacements: localPlacements, unplaced: data.unplaced || [], warnings: data.warnings || [], hasPastTasks: data.hasPastTasks };
+}
 
 // Fields that map to task object properties for partial saves
 var SAVE_FIELDS = [
@@ -40,7 +84,7 @@ export default function useTaskState() {
     if (placementTimerRef.current) clearTimeout(placementTimerRef.current);
     try {
       const res = await apiClient.get('/schedule/placements');
-      setPlacements({ dayPlacements: res.data.dayPlacements || {}, unplaced: res.data.unplaced || [], warnings: res.data.warnings || [] });
+      setPlacements(hydratePlacements(res.data));
     } catch (error) {
       console.error('Failed to load placements:', error);
     }
@@ -120,6 +164,7 @@ export default function useTaskState() {
       ]);
 
       const tasks = tasksRes.data.tasks || [];
+      hydrateTaskTimezones(tasks, getHydrationTimezone());
       const statuses = {};
       tasks.forEach(t => {
         if (t.status) statuses[t.id] = t.status;
@@ -209,12 +254,29 @@ export default function useTaskState() {
     }
   }, [loadPlacements]);
 
-  const deleteTask = useCallback(async (id) => {
+  const deleteTask = useCallback(async (id, opts) => {
     // Cancel any pending save that has stale dependsOn data
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    dispatch({ type: 'DELETE_TASK', id });
+
+    var cascade = opts && opts.cascade;
+    if (cascade === 'habit') {
+      // Cascade habit delete: remove template + pending instances from state
+      var state = taskStateRef.current;
+      var task = state.tasks.find(function(t) { return t.id === id; });
+      var templateId = (task && (task.sourceId || task.source_id)) || id;
+      // Remove template and all its instances from local state
+      state.tasks.forEach(function(t) {
+        if (t.id === templateId || t.sourceId === templateId || t.source_id === templateId) {
+          dispatch({ type: 'DELETE_TASK', id: t.id });
+        }
+      });
+    } else {
+      dispatch({ type: 'DELETE_TASK', id });
+    }
+
     try {
-      await apiClient.delete(`/tasks/${id}`);
+      var url = cascade ? `/tasks/${id}?cascade=${cascade}` : `/tasks/${id}`;
+      await apiClient.delete(url);
       // Schedule a save so the cleaned-up dependsOn arrays get persisted
       scheduleSave();
       await loadPlacements();
@@ -246,6 +308,7 @@ export default function useTaskState() {
             apiClient.get('/tasks')
           ]);
           var tasks = tasksRes.data.tasks || [];
+          hydrateTaskTimezones(tasks, getHydrationTimezone());
           var statuses = {};
           tasks.forEach(function(t) {
             if (t.status) statuses[t.id] = t.status;

@@ -98,9 +98,13 @@ function rowToTask(row, timezone, sourceMap) {
   var due = null;
   var startAfter = null;
 
-  // Derive date/time/day from scheduled_at (UTC source of truth)
-  if (timezone && row.scheduled_at) {
-    var local = utcToLocal(row.scheduled_at, timezone);
+  // Derive date/time/day from scheduled_at (UTC source of truth).
+  // When timezone is null (API responses), skip derivation — the frontend
+  // hydrates local fields from scheduledAt using the browser timezone.
+  // When timezone is provided (scheduler), derive for internal use.
+  var displayTz = timezone || null;
+  if (displayTz && row.scheduled_at) {
+    var local = utcToLocal(row.scheduled_at, displayTz);
     if (local.date) date = local.date;
     if (local.time) time = local.time;
     if (local.day) day = local.day;
@@ -278,9 +282,8 @@ async function getAllTasks(req, res) {
     if (cached) return res.json(cached);
 
     var rows = await db('tasks').where('user_id', req.user.id).orderBy('created_at', 'asc');
-    var tz = req.user.timezone || 'America/New_York';
     var srcMap = buildSourceMap(rows);
-    var tasks = rows.map(function(r) { return rowToTask(r, tz, srcMap); });
+    var tasks = rows.map(function(r) { return rowToTask(r, null, srcMap); });
     var version = await getTasksVersion(req.user.id);
     var result = { tasks: tasks, version: version };
     await cache.set(cacheKey, result, 300); // 5 min TTL
@@ -331,7 +334,7 @@ async function applySplitDefault(row, userId) {
 
 async function createTask(req, res) {
   try {
-    var tz = req.user.timezone || 'America/New_York';
+    var tz = req.headers['x-timezone'] || 'America/New_York';
     var row = taskToRow(req.body, req.user.id, tz);
     if (!row.id) row.id = uuidv7();
     if (!row.task_type) row.task_type = 'task';
@@ -357,7 +360,7 @@ async function createTask(req, res) {
     await db('tasks').insert(row);
     var created = await db('tasks').where('id', row.id).first();
     await cache.invalidateTasks(req.user.id);
-    res.status(201).json({ task: rowToTask(created, tz) });
+    res.status(201).json({ task: rowToTask(created, null) });
   } catch (error) {
     console.error('Create task error:', error);
     res.status(500).json({ error: 'Failed to create task' });
@@ -375,7 +378,7 @@ async function updateTask(req, res) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    var tz = req.user.timezone || 'America/New_York';
+    var tz = req.headers['x-timezone'] || 'America/New_York';
     var row = taskToRow(req.body, req.user.id, tz);
     delete row.id;
     delete row.user_id;
@@ -462,7 +465,7 @@ async function updateTask(req, res) {
     var srcMap = buildSourceMap(allRows);
     var updatedRow = allRows.find(function(r) { return r.id === id; });
     await cache.invalidateTasks(req.user.id);
-    res.json({ task: rowToTask(updatedRow, tz, srcMap) });
+    res.json({ task: rowToTask(updatedRow, null, srcMap) });
   } catch (error) {
     console.error('Update task error:', error);
     res.status(500).json({ error: 'Failed to update task' });
@@ -475,11 +478,104 @@ async function updateTask(req, res) {
 async function deleteTask(req, res) {
   try {
     var id = req.params.id;
+    var cascade = req.query.cascade;
     var task = await db('tasks').where({ id: id, user_id: req.user.id }).first();
     if (!task) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
+    // Cascade habit delete: delete template + pending instances, keep completed
+    if (cascade === 'habit') {
+      // Resolve the template ID — caller may pass a template or an instance
+      var templateId = id;
+      if (task.task_type === 'habit_instance' || task.source_id) {
+        templateId = task.source_id || id;
+      }
+
+      var deletedCount = 0;
+      var keptCount = 0;
+
+      await db.transaction(async function(trx) {
+        // Find all instances of this habit
+        var instances = await trx('tasks')
+          .where({ user_id: req.user.id, source_id: templateId })
+          .select('id', 'status', 'gcal_event_id', 'msft_event_id');
+
+        // Delete pending instances (no status = never acted on)
+        var pendingIds = instances
+          .filter(function(inst) {
+            var st = inst.status || '';
+            return st !== 'done' && st !== 'cancel' && st !== 'skip';
+          })
+          .map(function(inst) { return inst.id; });
+
+        // Clean up calendar sync for pending instances
+        if (pendingIds.length > 0) {
+          await trx('gcal_sync_ledger')
+            .where('user_id', req.user.id)
+            .whereIn('task_id', pendingIds)
+            .update({ task_id: null, synced_at: db.fn.now() })
+            .catch(function() {});
+          await trx('msft_cal_sync_ledger')
+            .where('user_id', req.user.id)
+            .whereIn('task_id', pendingIds)
+            .update({ task_id: null, synced_at: db.fn.now() })
+            .catch(function() {});
+
+          await trx('tasks')
+            .where('user_id', req.user.id)
+            .whereIn('id', pendingIds)
+            .del();
+          deletedCount = pendingIds.length;
+        }
+
+        // Clear source_id on kept (completed) instances so they don't reference a dead template
+        var keptIds = instances
+          .filter(function(inst) {
+            var st = inst.status || '';
+            return st === 'done' || st === 'cancel' || st === 'skip';
+          })
+          .map(function(inst) { return inst.id; });
+
+        if (keptIds.length > 0) {
+          await trx('tasks')
+            .where('user_id', req.user.id)
+            .whereIn('id', keptIds)
+            .update({ source_id: null, updated_at: db.fn.now() });
+          keptCount = keptIds.length;
+        }
+
+        // Delete the template itself
+        // Clean up calendar sync for template
+        var template = await trx('tasks').where({ id: templateId, user_id: req.user.id }).first();
+        if (template) {
+          if (template.gcal_event_id) {
+            await trx('gcal_sync_ledger')
+              .where({ user_id: req.user.id, task_id: templateId })
+              .update({ task_id: null, synced_at: db.fn.now() })
+              .catch(function() {});
+          }
+          if (template.msft_event_id) {
+            await trx('msft_cal_sync_ledger')
+              .where({ user_id: req.user.id, task_id: templateId })
+              .update({ task_id: null, synced_at: db.fn.now() })
+              .catch(function() {});
+          }
+          await trx('tasks').where({ id: templateId, user_id: req.user.id }).del();
+        }
+      });
+
+      await cache.invalidateTasks(req.user.id);
+      res.json({
+        message: 'Habit deleted',
+        templateId: templateId,
+        deletedInstances: deletedCount,
+        keptInstances: keptCount,
+      });
+      return;
+    }
+
+    // Standard single-task delete
     await db.transaction(async function(trx) {
       var deletedDeps = typeof task.depends_on === 'string'
         ? JSON.parse(task.depends_on || '[]') : (task.depends_on || []);
@@ -526,7 +622,6 @@ async function updateTaskStatus(req, res) {
   try {
     var id = req.params.id;
     var status = req.body.status;
-    var tz = req.user.timezone || 'America/New_York';
 
     var existing = await db('tasks').where({ id: id, user_id: req.user.id }).first();
 
@@ -580,7 +675,7 @@ async function updateTaskStatus(req, res) {
     var updated = await db('tasks').where('id', id).first();
     var srcMap = buildSourceMap(await db('tasks').where({ user_id: req.user.id, task_type: 'habit_template' }).select());
     await cache.invalidateTasks(req.user.id);
-    res.json({ task: rowToTask(updated, tz, srcMap) });
+    res.json({ task: rowToTask(updated, null, srcMap) });
   } catch (error) {
     console.error('Update task status error:', error);
     res.status(500).json({ error: 'Failed to update task status' });
@@ -608,7 +703,7 @@ async function batchCreateTasks(req, res) {
       if (t.depends_on && Array.isArray(t.depends_on) && t.depends_on.length > 50) return res.status(400).json({ error: `Task ${i}: too many dependencies (max 50)` });
     }
 
-    var tz = req.user.timezone || 'America/New_York';
+    var tz = req.headers['x-timezone'] || 'America/New_York';
 
     var prefs = await db('user_config').where({ user_id: req.user.id, config_key: 'preferences' }).first();
     var splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
@@ -659,7 +754,7 @@ async function batchUpdateTasks(req, res) {
       return res.status(400).json({ error: 'Batch limited to 2000 items' });
     }
 
-    var tz = req.user.timezone || 'America/New_York';
+    var tz = req.headers['x-timezone'] || 'America/New_York';
     var updatedCount = 0;
     var MAX_RETRIES = 3;
 

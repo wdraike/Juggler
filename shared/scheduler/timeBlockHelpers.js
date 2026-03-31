@@ -39,6 +39,11 @@ function buildWindowsFromBlocks(blocks) {
     var e = Math.max(s, Math.min(b.end || 0, 1440));
     if (!windows[b.tag]) windows[b.tag] = [];
     windows[b.tag].push([s, e]);
+    // Alias: "biz" blocks starting at or after noon (720) also match "afternoon"
+    if (b.tag === 'biz' && s >= 720) {
+      if (!windows.afternoon) windows.afternoon = [];
+      windows.afternoon.push([s, e]);
+    }
   });
   var allWins = [];
   Object.values(windows).forEach(function(w) {

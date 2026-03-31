@@ -13,7 +13,7 @@ const { localToUtc, toDateISO } = require('../scheduler/dateHelpers');
 async function importData(req, res) {
   try {
     var userId = req.user.id;
-    var tz = req.user.timezone || 'America/New_York';
+    var tz = req.headers['x-timezone'] || 'America/New_York';
     var data = req.body;
 
     if (!data || !data.extraTasks) {
@@ -35,7 +35,8 @@ async function importData(req, res) {
       gridZoom: data.gridZoom || 60,
       splitDefault: data.splitDefault || false,
       splitMinDefault: data.splitMinDefault || 15,
-      schedFloor: data.schedFloor || 480
+      schedFloor: data.schedFloor || 480,
+      schedCeiling: data.schedCeiling || 1380
     };
 
     // Deduplicate tasks by ID — keep last occurrence (newer data wins)
@@ -204,7 +205,7 @@ async function importData(req, res) {
 async function exportData(req, res) {
   try {
     var userId = req.user.id;
-    var tz = req.user.timezone || 'America/New_York';
+    var tz = req.headers['x-timezone'] || 'America/New_York';
 
     var results = await Promise.all([
       db('tasks').where('user_id', userId).orderBy('created_at', 'asc'),
@@ -251,6 +252,7 @@ async function exportData(req, res) {
       splitDefault: prefs.splitDefault || false,
       splitMinDefault: prefs.splitMinDefault || 15,
       schedFloor: prefs.schedFloor || 480,
+      schedCeiling: prefs.schedCeiling || 1380,
       updated: new Date().toISOString()
     });
   } catch (error) {

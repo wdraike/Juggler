@@ -108,9 +108,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var retries = _retries || 0;
   var MAX_RETRIES = 3;
 
-  // Load user timezone — allow override from options (active timezone from frontend)
-  var userRow = await db('users').where('id', userId).select('timezone').first();
-  var TIMEZONE = (options && options.timezone) || (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
+  // Timezone from frontend (X-Timezone header) via options, or fallback
+  var TIMEZONE = (options && options.timezone) || DEFAULT_TIMEZONE;
 
   try {
   return await db.transaction(async function(trx) {
@@ -366,10 +365,18 @@ async function runScheduleAndPersist(userId, _retries, options) {
   console.log('[SCHED] runScheduleAndPersist: reset ' + resetCount + ', updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
 
   // 10. Cache the placement result so GET /placements doesn't re-run the scheduler
-  var placementCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date().toISOString() };
+  var placementCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date().toISOString(), timezone: TIMEZONE };
   Object.keys(result.dayPlacements).forEach(function(dk) {
     placementCache.dayPlacements[dk] = result.dayPlacements[dk].map(function(p) {
       var entry = { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };
+      // Convert local start to UTC ISO for timezone-independent display
+      var hh = Math.floor(p.start / 60);
+      var mm = p.start % 60;
+      var ampm = hh >= 12 ? 'PM' : 'AM';
+      var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
+      var timeStr = dh + ':' + (mm < 10 ? '0' : '') + mm + ' ' + ampm;
+      var utcDate = localToUtc(dk, timeStr, TIMEZONE);
+      if (utcDate) entry.scheduledAtUtc = utcDate.toISOString();
       if (p.locked) entry.locked = true;
       if (p.marker) entry.marker = true;
       if (p._whenRelaxed) entry.whenRelaxed = true;
@@ -404,9 +411,24 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // Invalidate Redis caches — scheduler modified tasks
   cache.invalidateTasks(userId).catch(function() {});
 
+  // Add scheduledAtUtc to placements for timezone-independent frontend display
+  var outPlacements = {};
+  Object.keys(result.dayPlacements).forEach(function(dk) {
+    outPlacements[dk] = result.dayPlacements[dk].map(function(p) {
+      var hh3 = Math.floor(p.start / 60);
+      var mm3 = p.start % 60;
+      var ampm3 = hh3 >= 12 ? 'PM' : 'AM';
+      var dh3 = hh3 > 12 ? hh3 - 12 : (hh3 === 0 ? 12 : hh3);
+      var ts3 = dh3 + ':' + (mm3 < 10 ? '0' : '') + mm3 + ' ' + ampm3;
+      var utc3 = localToUtc(dk, ts3, TIMEZONE);
+      if (utc3) p.scheduledAtUtc = utc3.toISOString();
+      return p;
+    });
+  });
+
   return {
     updated: updated, cleared: cleared, reset: resetCount, tasks: updatedTasks, score: result.score,
-    dayPlacements: result.dayPlacements,
+    dayPlacements: outPlacements,
     unplaced: result.unplaced.filter(function(t) { return !t.generated; }),
     warnings: result.warnings || []
   };
@@ -430,8 +452,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
  * POST /schedule/run changes task placements.
  */
 async function getSchedulePlacements(userId, options) {
-  var userRow = await db('users').where('id', userId).select('timezone').first();
-  var TIMEZONE = (options && options.timezone) || (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
+  var TIMEZONE = (options && options.timezone) || DEFAULT_TIMEZONE;
 
   // Load all tasks (needed for hydration and hasPastTasks check)
   var taskRows = await db('tasks').where('user_id', userId).select();
@@ -481,9 +502,13 @@ async function getSchedulePlacements(userId, options) {
   }
 
   // If cache is stale, re-run the scheduler.
-  // Stale conditions: different day, >30 min old, or tasks modified since cache was generated.
+  // Stale conditions: different timezone, different day, >30 min old, or tasks modified since cache was generated.
   var cacheStale = false;
-  if (cache && cache.generatedAt) {
+  if (cache && (!cache.timezone || cache.timezone !== TIMEZONE)) {
+    console.log('[SCHED] cache stale: timezone ' + (cache.timezone || 'missing') + ' → ' + TIMEZONE);
+    cacheStale = true;
+  }
+  if (!cacheStale && cache && cache.generatedAt) {
     var genTime = new Date(cache.generatedAt);
     var ageMs = Date.now() - genTime.getTime();
     // Use Intl to get the generated date in the user's timezone (server may run in UTC)
@@ -536,7 +561,7 @@ async function getSchedulePlacements(userId, options) {
       // We hold the lock — run the scheduler
       console.log('[SCHED] cache stale (age=' + Math.round((Date.now() - new Date(cache.generatedAt).getTime()) / 60000) + 'm), re-running scheduler');
       try {
-        var freshResult = await runScheduleAndPersist(userId);
+        var freshResult = await runScheduleAndPersist(userId, undefined, { timezone: TIMEZONE });
         releaseSchedulerLock(userId);
         return {
           dayPlacements: freshResult.dayPlacements,
@@ -563,8 +588,8 @@ async function getSchedulePlacements(userId, options) {
         var task = taskById[p.taskId];
         if (!task) return; // task was deleted since last run
         var st = statuses[p.taskId] || '';
-        if (st === 'done' || st === 'cancel' || st === 'skip') return; // completed since last run
         var hydrated = { task: task, start: p.start, dur: p.dur };
+        if (p.scheduledAtUtc) hydrated.scheduledAtUtc = p.scheduledAtUtc;
         if (p.locked) hydrated.locked = true;
         if (p.marker) hydrated.marker = true;
         if (p.whenRelaxed) hydrated._whenRelaxed = true;
@@ -634,10 +659,17 @@ async function getSchedulePlacements(userId, options) {
   var result = unifiedSchedule(allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg);
 
   // Save cache
-  var newCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date().toISOString() };
+  var newCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date().toISOString(), timezone: TIMEZONE };
   Object.keys(result.dayPlacements).forEach(function(dk) {
     newCache.dayPlacements[dk] = result.dayPlacements[dk].map(function(p) {
       var entry = { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };
+      var hh2 = Math.floor(p.start / 60);
+      var mm2 = p.start % 60;
+      var ampm2 = hh2 >= 12 ? 'PM' : 'AM';
+      var dh2 = hh2 > 12 ? hh2 - 12 : (hh2 === 0 ? 12 : hh2);
+      var timeStr2 = dh2 + ':' + (mm2 < 10 ? '0' : '') + mm2 + ' ' + ampm2;
+      var utcDate2 = localToUtc(dk, timeStr2, TIMEZONE);
+      if (utcDate2) entry.scheduledAtUtc = utcDate2.toISOString();
       if (p.locked) entry.locked = true;
       if (p.marker) entry.marker = true;
       if (p._whenRelaxed) entry.whenRelaxed = true;
@@ -668,8 +700,23 @@ async function getSchedulePlacements(userId, options) {
     await db('user_config').insert({ user_id: userId, config_key: 'schedule_cache', config_value: cacheJson });
   }
 
+  // Add scheduledAtUtc to placements for timezone-independent frontend display
+  var outPlacements2 = {};
+  Object.keys(result.dayPlacements).forEach(function(dk) {
+    outPlacements2[dk] = result.dayPlacements[dk].map(function(p) {
+      var hh4 = Math.floor(p.start / 60);
+      var mm4 = p.start % 60;
+      var ampm4 = hh4 >= 12 ? 'PM' : 'AM';
+      var dh4 = hh4 > 12 ? hh4 - 12 : (hh4 === 0 ? 12 : hh4);
+      var ts4 = dh4 + ':' + (mm4 < 10 ? '0' : '') + mm4 + ' ' + ampm4;
+      var utc4 = localToUtc(dk, ts4, TIMEZONE);
+      if (utc4) p.scheduledAtUtc = utc4.toISOString();
+      return p;
+    });
+  });
+
   return {
-    dayPlacements: result.dayPlacements,
+    dayPlacements: outPlacements2,
     unplaced: result.unplaced.filter(function(t) { return !t.generated; }),
     score: result.score,
     warnings: result.warnings || [],

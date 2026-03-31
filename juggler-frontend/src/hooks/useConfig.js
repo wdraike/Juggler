@@ -3,7 +3,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import apiClient from '../services/apiClient';
+import apiClient, { TZ_OVERRIDE_KEY } from '../services/apiClient';
 import {
   DEFAULT_LOCATIONS, DEFAULT_TOOLS, DEFAULT_TOOL_MATRIX,
   DEFAULT_TIME_BLOCKS, DEFAULT_WEEKDAY_BLOCKS, DEFAULT_WEEKEND_BLOCKS,
@@ -119,6 +119,7 @@ export default function useConfig() {
   var [splitMinDefault, setSplitMinDefault] = useState(15);
   var [gridZoom, setGridZoom] = useState(60);
   var [schedFloor, setSchedFloor] = useState(480);
+  var [schedCeiling, setSchedCeiling] = useState(1380);
   var [fontSize, setFontSize] = useState(100);
   var [pullForwardDampening, setPullForwardDampening] = useState(false);
   var [timezoneOverride, setTimezoneOverride] = useState(null);
@@ -145,15 +146,33 @@ export default function useConfig() {
       if (p.splitMinDefault !== undefined) setSplitMinDefault(p.splitMinDefault);
       if (p.gridZoom !== undefined) setGridZoom(p.gridZoom);
       if (p.schedFloor !== undefined) setSchedFloor(p.schedFloor);
+      if (p.schedCeiling !== undefined) setSchedCeiling(p.schedCeiling);
       if (p.fontSize !== undefined) setFontSize(p.fontSize);
       if (p.pullForwardDampening !== undefined) setPullForwardDampening(p.pullForwardDampening);
-      if (p.timezoneOverride !== undefined) setTimezoneOverride(p.timezoneOverride);
+      if (p.timezoneOverride !== undefined) {
+        setTimezoneOverride(p.timezoneOverride);
+        // Sync to localStorage so apiClient X-Timezone header picks it up
+        try {
+          if (p.timezoneOverride) localStorage.setItem(TZ_OVERRIDE_KEY, p.timezoneOverride);
+          else localStorage.removeItem(TZ_OVERRIDE_KEY);
+        } catch (e) { /* ignore */ }
+      }
     }
 
     // Unified template migration
     if (config.scheduleTemplates) {
-      // Already migrated — use directly
+      // Already migrated — use directly, auto-populate empty blocks
       var tmpls = config.scheduleTemplates;
+      var needsSave = false;
+      Object.keys(tmpls).forEach(function(id) {
+        if (!tmpls[id].blocks || tmpls[id].blocks.length === 0) {
+          var fallback = tmpls.weekday?.blocks || DEFAULT_WEEKDAY_BLOCKS;
+          tmpls[id] = Object.assign({}, tmpls[id], {
+            blocks: fallback.map(function(b) { return Object.assign({}, b, { id: b.id + '_' + Date.now() }); })
+          });
+          needsSave = true;
+        }
+      });
       var tDefs = config.templateDefaults || DEFAULT_TEMPLATE_DEFAULTS;
       var tOvr = config.templateOverrides || {};
       setScheduleTemplates(tmpls);
@@ -292,12 +311,12 @@ export default function useConfig() {
     locations, tools, toolMatrix, timeBlocks, projects,
     locSchedules, locScheduleDefaults, locScheduleOverrides,
     hourLocationOverrides, splitDefault, splitMinDefault,
-    gridZoom, schedFloor, fontSize, pullForwardDampening, timezoneOverride,
+    gridZoom, schedFloor, schedCeiling, fontSize, pullForwardDampening, timezoneOverride,
     scheduleTemplates, templateDefaults, templateOverrides,
     setLocations, setTools, setToolMatrix, setTimeBlocks, setProjects,
     setLocSchedules, setLocScheduleDefaults, setLocScheduleOverrides,
     setHourLocationOverrides, setSplitDefault, setSplitMinDefault,
-    setGridZoom, setSchedFloor, setFontSize, setPullForwardDampening, setTimezoneOverride,
+    setGridZoom, setSchedFloor, setSchedCeiling, setFontSize, setPullForwardDampening, setTimezoneOverride,
     setScheduleTemplates, setTemplateDefaults, setTemplateOverrides,
     initFromConfig,
     updateToolMatrix, updateTimeBlocks,

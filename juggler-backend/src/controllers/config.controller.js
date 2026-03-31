@@ -39,7 +39,10 @@ async function getAllConfig(req, res) {
       locScheduleDefaults: config.loc_schedule_defaults || null,
       locScheduleOverrides: config.loc_schedule_overrides || null,
       hourLocationOverrides: config.hour_location_overrides || null,
-      preferences: config.preferences || null
+      preferences: config.preferences || null,
+      scheduleTemplates: config.schedule_templates || null,
+      templateDefaults: config.template_defaults || null,
+      templateOverrides: config.template_overrides || null
     };
     await cache.set(cacheKey, result, 3600); // 1 hour TTL
     res.json(result);
@@ -61,7 +64,8 @@ async function updateConfig(req, res) {
     const validKeys = [
       'tool_matrix', 'time_blocks', 'loc_schedules',
       'loc_schedule_defaults', 'loc_schedule_overrides',
-      'hour_location_overrides', 'preferences'
+      'hour_location_overrides', 'preferences',
+      'schedule_templates', 'template_defaults', 'template_overrides'
     ];
 
     if (!validKeys.includes(key)) {

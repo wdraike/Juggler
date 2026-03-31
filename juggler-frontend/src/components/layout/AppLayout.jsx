@@ -53,7 +53,7 @@ export default function AppLayout() {
   // Auth & timezone
   var { user: authUser } = useAuth();
   var config = useConfig();
-  var { activeTimezone, source: tzSource, browserTimezone, profileTimezone } = useTimezone(authUser, config);
+  var { activeTimezone, source: tzSource, browserTimezone } = useTimezone(config);
   var userTimezone = activeTimezone;
 
   // State
@@ -130,14 +130,24 @@ export default function AppLayout() {
   // Track when editing UI is open to suspend background syncs/scheduling
   editingRef.current = expandedTasks.length > 0 || !!showCreateForm || !!showSettings;
 
-  // Load data on mount — scheduler must finish before external syncs start
+  // Load data on mount — run scheduler immediately, then start external syncs
   useEffect(() => {
     loadTasks().then(result => {
       if (result?.config) {
         config.initFromConfig(result.config);
       }
-      loadPlacements().then(function() {
+      // Run the scheduler (not just read cache) so placements are fresh on login
+      apiClient.post('/schedule/run').then(function(res) {
+        if (res.data?.dayPlacements) {
+          // Import hydration helper from useTaskState
+          loadPlacements();
+        }
         setSchedulerReady(true);
+      }).catch(function() {
+        // Fallback to cached placements if run fails
+        loadPlacements().then(function() {
+          setSchedulerReady(true);
+        });
       });
     });
   }, []);
@@ -286,8 +296,9 @@ export default function AppLayout() {
     splitDefault: config.splitDefault,
     splitMinDefault: config.splitMinDefault,
     schedFloor: config.schedFloor,
+    schedCeiling: config.schedCeiling,
     scheduleTemplates: config.scheduleTemplates
-  }), [config.timeBlocks, config.locSchedules, config.locScheduleDefaults, config.locScheduleOverrides, config.hourLocationOverrides, config.toolMatrix, config.splitDefault, config.splitMinDefault, config.schedFloor, config.scheduleTemplates]);
+  }), [config.timeBlocks, config.locSchedules, config.locScheduleDefaults, config.locScheduleOverrides, config.hourLocationOverrides, config.toolMatrix, config.splitDefault, config.splitMinDefault, config.schedFloor, config.schedCeiling, config.scheduleTemplates]);
 
   // Placements come from the backend scheduler API
   var dayPlacements = placements.dayPlacements;
@@ -343,12 +354,15 @@ export default function AppLayout() {
   }, [visibleTasks, statuses]);
 
   // Past-due tasks: due date or scheduled date in the past, still open
+  // Split into overdue (has due date) vs stale (only scheduled date) to match
+  // ConflictsView categories — only overdue counts as Action Required
   var pastDueIds = useMemo(() => {
     var ids = new Set();
     var today = getNowInTimezone(userTimezone).todayDate;
     visibleTasks.forEach(t => {
       var st = statuses[t.id] || '';
       if (st === 'done' || st === 'cancel' || st === 'skip') return;
+      if (t.generated) return;
       if (t.due) {
         var dd = parseDate(t.due);
         if (dd && dd < today) { ids.add(t.id); return; }
@@ -356,6 +370,21 @@ export default function AppLayout() {
       if (t.date && t.date !== 'TBD') {
         var td = parseDate(t.date);
         if (td && td < today) ids.add(t.id);
+      }
+    });
+    return ids;
+  }, [visibleTasks, statuses]);
+
+  var overdueIds = useMemo(() => {
+    var ids = new Set();
+    var today = getNowInTimezone(userTimezone).todayDate;
+    visibleTasks.forEach(t => {
+      var st = statuses[t.id] || '';
+      if (st === 'done' || st === 'cancel' || st === 'skip') return;
+      if (t.generated) return;
+      if (t.due) {
+        var dd = parseDate(t.due);
+        if (dd && dd < today) ids.add(t.id);
       }
     });
     return ids;
@@ -377,7 +406,8 @@ export default function AppLayout() {
   var pastDueCount = pastDueIds.size;
   var fixedCount = fixedIds.size;
   var warningCount = schedulerWarnings.length;
-  var issuesCount = unplacedCount + pastDueCount + warningCount;
+  var overdueCount = overdueIds.size;
+  var issuesCount = unplacedCount + overdueCount + warningCount;
 
   // Unplaced task IDs set for fast lookup
   var unplacedIds = useMemo(() => {
@@ -548,7 +578,7 @@ export default function AppLayout() {
     zoomSaveTimerRef.current = setTimeout(function() {
       config.updatePreferences({
         gridZoom: newZoom, splitDefault: config.splitDefault,
-        splitMinDefault: config.splitMinDefault, schedFloor: config.schedFloor,
+        splitMinDefault: config.splitMinDefault, schedFloor: config.schedFloor, schedCeiling: config.schedCeiling,
         fontSize: config.fontSize
       });
     }, 500);
@@ -719,6 +749,7 @@ export default function AppLayout() {
       <div style={{ flexShrink: 0, zIndex: 100, background: theme.bg }}>
         <HeaderBar
           darkMode={darkMode} setDarkMode={function(v) { setDarkMode(function(prev) { var next = typeof v === 'function' ? v(prev) : v; localStorage.setItem('juggler-darkMode', String(next)); return next; }); }} saving={saving}
+          activeTimezone={activeTimezone} tzSource={tzSource}
           selectedDateKey={selectedDateKey} statuses={statuses} tasksByDate={tasksByDate}
           onShowSettings={() => setShowSettings(true)} onShowExport={() => setShowExport(true)}
           onShowGCalSync={() => setShowGCalSync(true)}

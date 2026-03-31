@@ -633,7 +633,7 @@ export default function DailyView({
       if (p.start == null) return false;
       var st = statuses[p.task.id] || '';
       // Only hide done/cancelled/skipped when filter is not 'all'
-      if (filter !== 'all' && (st === 'done' || st === 'cancel' || st === 'skip')) return false;
+      if ((st === 'done' || st === 'cancel' || st === 'skip') && filter !== 'all' && filter !== 'done' && filter !== st) return false;
       return matchesFilter(p.task.id);
     }).sort(function (a, b) { return a.start - b.start; });
   }, [placements, statuses, matchesFilter, filter]);

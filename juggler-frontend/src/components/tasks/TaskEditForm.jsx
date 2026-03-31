@@ -9,6 +9,61 @@ import { getTheme } from '../../theme/colors';
 import { convertTimeForDisplay, getTimezoneAbbr, getUtcOffset } from '../../utils/timezone';
 import ConfirmDialog from '../features/ConfirmDialog';
 
+function HabitDeleteDialog({ taskName, onDeleteInstance, onDeleteHabit, onCancel, darkMode, isMobile }) {
+  var theme = getTheme(darkMode);
+  var btnBase = {
+    border: 'none', borderRadius: 8, padding: '10px 16px',
+    fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', width: '100%',
+    textAlign: 'left', lineHeight: 1.4,
+  };
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(0,0,0,0.5)', zIndex: 400, display: 'flex',
+      alignItems: 'center', justifyContent: 'center'
+    }} onClick={onCancel}>
+      <div style={{
+        background: theme.bgSecondary, borderRadius: isMobile ? 0 : 12,
+        width: isMobile ? '100%' : 360, maxWidth: isMobile ? '100%' : '90vw',
+        height: isMobile ? '100%' : undefined,
+        padding: 24, boxShadow: isMobile ? 'none' : ('0 8px 32px ' + theme.shadow),
+        display: isMobile ? 'flex' : undefined, flexDirection: isMobile ? 'column' : undefined,
+        justifyContent: isMobile ? 'center' : undefined
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: theme.text, marginBottom: 4 }}>
+          Delete "{taskName.slice(0, 50)}"
+        </div>
+        <div style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 16 }}>
+          This is a recurring habit. What would you like to delete?
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          <button onClick={onDeleteInstance} style={{
+            ...btnBase, background: theme.bgCard, border: '1px solid ' + theme.border, color: theme.text,
+          }}>
+            <span style={{ fontWeight: 600 }}>Delete this instance only</span>
+            <br />
+            <span style={{ fontSize: 11, color: theme.textSecondary }}>Remove just today's occurrence. The habit continues.</span>
+          </button>
+          <button onClick={onDeleteHabit} style={{
+            ...btnBase, background: theme.errorBg || '#fef2f2', border: '1px solid ' + (theme.errorBorder || '#fca5a5'), color: theme.error || '#991b1b',
+          }}>
+            <span style={{ fontWeight: 600 }}>Delete entire habit</span>
+            <br />
+            <span style={{ fontSize: 11, opacity: 0.8 }}>Remove the habit and all future instances. Completed history is kept.</span>
+          </button>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={onCancel} style={{
+            border: '1px solid ' + theme.border, borderRadius: 8, padding: '8px 20px',
+            background: 'transparent', color: theme.textSecondary, fontSize: 13,
+            cursor: 'pointer', fontFamily: 'inherit'
+          }}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Full IANA timezone list (browser-sourced or fallback)
 var ALL_TIMEZONES = (function() {
   try {
@@ -144,16 +199,17 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [text, setText] = useState(isCreate ? '' : (task.text || ''));
   var [project, setProject] = useState(isCreate ? (initialProject || '') : (task.project || ''));
   var [pri, setPri] = useState(isCreate ? 'P3' : (task.pri || 'P3'));
-  // Task timezone: stored on the task, defaults to activeTimezone.
-  // ALL date/time display and editing happens in this timezone.
+  // Task timezone: stored on the task, defaults to activeTimezone for new tasks.
+  // The editor shows times in this timezone (what the user originally entered).
   var [taskTz, setTaskTz] = useState(isCreate ? (activeTimezone || 'America/New_York') : (task.tz || activeTimezone || 'America/New_York'));
 
   // Initialize date/time from UTC (scheduledAt) converted to taskTz.
-  // If no scheduledAt, fall back to task.date/time (already in profile tz — close enough for display).
+  // Editor displays in task.tz so the user sees the time they originally entered.
   var initDateTime = React.useMemo(function() {
     if (isCreate) return { date: initDate, time: '' };
+    var tz = task.tz || activeTimezone || 'America/New_York';
     if (task.scheduledAt) {
-      var conv = convertTimeForDisplay(task.scheduledAt, task.tz || activeTimezone || 'America/New_York');
+      var conv = convertTimeForDisplay(task.scheduledAt, tz);
       if (conv && conv.date) return { date: toDateISO(conv.date) || '', time: toTime24(conv.time) || '' };
     }
     return { date: toDateISO(task.date) || '', time: toTime24(task.time) || '' };
@@ -166,7 +222,20 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [due, setDue] = useState(isCreate ? '' : toDateISO(task.due));
   var [startAfter, setStartAfter] = useState(isCreate ? '' : toDateISO(task.startAfter));
   var [notes, setNotes] = useState(isCreate ? '' : (task.notes || ''));
-  var [when, setWhen] = useState(isCreate ? 'morning,lunch,afternoon,evening' : (task.when || ''));
+  var [when, setWhen] = useState(function() {
+    if (isCreate) return 'morning,lunch,afternoon,evening';
+    var raw = task.when || '';
+    // Strip stale tags not in uniqueTags (e.g. "biz" when no biz button exists)
+    var special = ['anytime', 'allday', 'fixed'];
+    if (!raw || special.indexOf(raw) >= 0) return raw;
+    var knownTags = {};
+    (uniqueTags || []).forEach(function(tb) { knownTags[tb.tag] = true; });
+    if (Object.keys(knownTags).length === 0) return raw; // no tags loaded yet, keep as-is
+    var cleaned = raw.split(',').map(function(s) { return s.trim(); }).filter(function(t) {
+      return special.indexOf(t) >= 0 || knownTags[t];
+    });
+    return cleaned.length > 0 ? cleaned.join(',') : raw;
+  });
 
   // Change timezone: convert displayed date/time to new timezone via UTC.
   // scheduledAt is the UTC source of truth. Re-display it in the new timezone.
@@ -231,25 +300,21 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       eligibleDays = codes.map(function(c) { return dayCodeMap[c]; }).filter(Boolean);
     }
 
-    // Collect which tags exist on eligible days
+    // Collect which tags exist on eligible days (including aliases)
     var tagsOnEligibleDays = {};
     eligibleDays.forEach(function(dn) {
       var tmplId = templateDefaults[dn];
       var tmpl = tmplId && scheduleTemplates[tmplId];
       if (!tmpl) return;
-      (tmpl.blocks || []).forEach(function(b) { tagsOnEligibleDays[b.tag] = true; });
+      (tmpl.blocks || []).forEach(function(b) {
+        tagsOnEligibleDays[b.tag] = true;
+        // "biz" blocks after noon also match "afternoon"
+        if (b.tag === 'biz' && b.start >= 720) tagsOnEligibleDays['afternoon'] = true;
+      });
     });
 
-    // Check each selected when-tag
-    var missingTags = whenParts.filter(function(tag) { return !tagsOnEligibleDays[tag]; });
-    if (missingTags.length > 0 && missingTags.length === whenParts.length) {
-      var dayLabel = dayReq === 'weekday' ? 'weekdays' : dayReq === 'weekend' ? 'weekends' : 'selected days';
-      warnings.push('No "' + missingTags.join('", "') + '" time blocks exist on ' + dayLabel + '. This task can never be placed.');
-    } else if (missingTags.length > 0) {
-      var dayLabel2 = dayReq === 'weekday' ? 'weekdays' : dayReq === 'weekend' ? 'weekends' : 'selected days';
-      warnings.push('"' + missingTags.join('", "') + '" not available on ' + dayLabel2 + ' — only "' +
-        whenParts.filter(function(t) { return tagsOnEligibleDays[t]; }).join('", "') + '" will be used.');
-    }
+    // Silently strip stale when-tags that don't exist in any template
+    // (scheduler handles missing tags gracefully — no warning needed)
 
     // Check location feasibility: if task has location constraint, check if any eligible block has a matching location
     if (taskLoc.length > 0 && whenParts.length > 0) {
@@ -277,6 +342,24 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
 
     return warnings;
   })();
+
+  // Due date vs day requirement conflict (separate from config warnings so it always runs)
+  var dueDayWarning = (function() {
+    if (!due || !dayReq || dayReq === 'any') return null;
+    var dueDate = parseDate(due);
+    if (!dueDate) return null;
+    var dueDayCode = ['Su','M','T','W','R','F','Sa'][dueDate.getDay()];
+    var dueDayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dueDate.getDay()];
+    var allowed;
+    if (dayReq === 'weekday') allowed = ['M','T','W','R','F'];
+    else if (dayReq === 'weekend') allowed = ['Su','Sa'];
+    else allowed = dayReq.split(',');
+    if (allowed.indexOf(dueDayCode) === -1) {
+      return 'Due date (' + dueDayName + ') conflicts with day requirement \u2014 task may not be schedulable before the deadline.';
+    }
+    return null;
+  })();
+  if (dueDayWarning) configWarnings.push(dueDayWarning);
 
   var BTN_H = isMobile ? 30 : 26;
   var iStyle = { fontSize: isMobile ? 13 : 11, padding: isMobile ? '6px 8px' : '3px 4px', border: '1px solid ' + TH.inputBorder, borderRadius: 4, background: TH.inputBg, color: TH.inputText, fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box', maxWidth: '100%' };
@@ -680,24 +763,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               <button title={habit ? 'This is a recurring habit' : 'Mark as a daily habit'} onClick={() => { var next = !habit; setHabit(next); if (habit) setRigid(false); if (next) setDayReq('any'); }}
                 style={{ ...togStyle(habit, '#2D6A4F'), minWidth: 50 }}>{habit ? '\uD83D\uDD01 Yes' : 'No'}</button>
             </label>
-            {habit && (
-              <label style={lStyle}>
-                <span title="How far from the preferred time the scheduler can move this habit. 0 = locked to exact time (rigid).">{'\u00B1'} Flex</span>
-                <select value={rigid ? 0 : timeFlex} onChange={e => {
-                  var v = parseInt(e.target.value);
-                  if (v === 0) { setRigid(true); } else { setRigid(false); setTimeFlex(v); }
-                }} style={{ ...iStyle, minWidth: 70 }}>
-                  <option value={0}>0 (rigid)</option>
-                  <option value={15}>15 min</option>
-                  <option value={30}>30 min</option>
-                  <option value={60}>1 hr</option>
-                  <option value={90}>1.5 hr</option>
-                  <option value={120}>2 hr</option>
-                  <option value={180}>3 hr</option>
-                  <option value={240}>4 hr</option>
-                </select>
-              </label>
-            )}
             </>}
           </div>
           {!isCreate && onShowChain && !task.habit && (
@@ -846,8 +911,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             })()}
           </label>}
 
-          {/* Day req — hidden for markers, habits, and weekly/biweekly recurrence */}
-          {!marker && !habit && recurType !== 'weekly' && recurType !== 'biweekly' && (
+          {/* Day requirement */}
+          {!marker && (
           <label style={{ ...lStyle, marginBottom: 5 }}>
             <span title="Restrict which days the scheduler can place this task.">Day requirement</span>
             <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
@@ -874,6 +939,82 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               })}
             </div>
           </label>)}
+
+          {/* Time drift — scaled by recurrence frequency */}
+          {!marker && habit && (function() {
+            var driftOptions;
+            if (recurType === 'monthly' || (recurType === 'interval' && (recurUnit === 'months' || recurUnit === 'years'))) {
+              driftOptions = [
+                { value: 0, label: '0 (rigid)' },
+                { value: 1440, label: '1 day' },
+                { value: 2880, label: '2 days' },
+                { value: 4320, label: '3 days' },
+                { value: 7200, label: '5 days' },
+                { value: 10080, label: '7 days' },
+              ];
+            } else if (recurType === 'weekly' || recurType === 'biweekly' || (recurType === 'interval' && recurUnit === 'weeks')) {
+              driftOptions = [
+                { value: 0, label: '0 (rigid)' },
+                { value: 60, label: '1 hr' },
+                { value: 120, label: '2 hr' },
+                { value: 240, label: '4 hr' },
+                { value: 480, label: '8 hr' },
+                { value: 1440, label: '1 day' },
+                { value: 2880, label: '2 days' },
+              ];
+            } else if (recurType === 'interval' && recurUnit === 'days' && recurEvery <= 7) {
+              driftOptions = [
+                { value: 0, label: '0 (rigid)' },
+                { value: 60, label: '1 hr' },
+                { value: 120, label: '2 hr' },
+                { value: 240, label: '4 hr' },
+                { value: 480, label: '8 hr' },
+                { value: 1440, label: '1 day' },
+                { value: 2880, label: '2 days' },
+              ];
+            } else {
+              // daily, none, or short interval
+              driftOptions = [
+                { value: 0, label: '0 (rigid)' },
+                { value: 15, label: '15 min' },
+                { value: 30, label: '30 min' },
+                { value: 60, label: '1 hr' },
+                { value: 90, label: '1.5 hr' },
+                { value: 120, label: '2 hr' },
+                { value: 180, label: '3 hr' },
+                { value: 240, label: '4 hr' },
+              ];
+            }
+            var maxDrift = driftOptions[driftOptions.length - 1].value;
+            var currentVal = rigid ? 0 : timeFlex;
+            // Clamp if current value exceeds max for this recurrence
+            if (currentVal > maxDrift && !rigid) {
+              setTimeFlex(maxDrift);
+              currentVal = maxDrift;
+            }
+            // Ensure current value appears in options
+            var hasVal = driftOptions.some(function(o) { return o.value === currentVal; });
+            if (!hasVal && currentVal > 0) {
+              // Snap to nearest lower option
+              var snapped = 0;
+              driftOptions.forEach(function(o) { if (o.value <= currentVal) snapped = o.value; });
+              setTimeFlex(snapped);
+              currentVal = snapped;
+            }
+            return (
+              <label style={{ ...lStyle, marginBottom: 5 }}>
+                <span title="How far from the preferred time the scheduler can shift this habit. 0 = locked to exact time.">{'\u00B1'} Time drift</span>
+                <select value={currentVal} onChange={e => {
+                  var v = parseInt(e.target.value);
+                  if (v === 0) { setRigid(true); } else { setRigid(false); setTimeFlex(v); }
+                }} style={{ ...iStyle, minWidth: 90 }}>
+                  {driftOptions.map(function(o) {
+                    return <option key={o.value} value={o.value}>{o.label}</option>;
+                  })}
+                </select>
+              </label>
+            );
+          })()}
 
           {/* Due + Start after + Split — hidden for markers */}
           {!marker && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, alignItems: 'flex-end', maxWidth: '100%' }}>
@@ -1049,13 +1190,24 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       </div>
 
       {showDeleteConfirm && (
-        <ConfirmDialog
-          message={'Delete "' + (task.text || 'this task').slice(0, 60) + '"?'}
-          onConfirm={() => { onDelete(task.id); onClose(); }}
-          onCancel={() => setShowDeleteConfirm(false)}
-          darkMode={darkMode}
-          isMobile={isMobile}
-        />
+        task.habit || task.taskType === 'habit_instance' || task.taskType === 'habit_template' || task.sourceId || task.source_id ? (
+          <HabitDeleteDialog
+            taskName={task.text || 'this habit'}
+            onDeleteInstance={() => { onDelete(task.id); onClose(); }}
+            onDeleteHabit={() => { onDelete(task.id, { cascade: 'habit' }); onClose(); }}
+            onCancel={() => setShowDeleteConfirm(false)}
+            darkMode={darkMode}
+            isMobile={isMobile}
+          />
+        ) : (
+          <ConfirmDialog
+            message={'Delete "' + (task.text || 'this task').slice(0, 60) + '"?'}
+            onConfirm={() => { onDelete(task.id); onClose(); }}
+            onCancel={() => setShowDeleteConfirm(false)}
+            darkMode={darkMode}
+            isMobile={isMobile}
+          />
+        )
       )}
     </>
   );

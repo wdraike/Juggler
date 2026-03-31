@@ -5,6 +5,7 @@
 import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { getTheme } from '../../theme/colors';
 import { DEFAULT_WEEKDAY_BLOCKS, DEFAULT_WEEKEND_BLOCKS } from '../../state/constants';
+import { TZ_OVERRIDE_KEY } from '../../services/apiClient';
 
 // Deduplicated preset blocks from weekday + weekend defaults
 var PRESET_BLOCKS = (function() {
@@ -91,10 +92,98 @@ export default function SettingsPanel({ onClose, darkMode, config, allProjectNam
   );
 }
 
+// ─── Auto-ID and Icon Helpers ────────────────────────────────────
+
+function generateId(name, existingIds) {
+  var base = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+  if (!base) base = 'item';
+  var id = base;
+  var n = 2;
+  while (existingIds.indexOf(id) !== -1) { id = base + '_' + n; n++; }
+  return id;
+}
+
+function pickUniqueIcon(name, iconMap, usedIcons, fallbacks) {
+  var n = name.toLowerCase();
+  var picked = null;
+  for (var i = 0; i < iconMap.length; i++) {
+    for (var j = 0; j < iconMap[i][0].length; j++) {
+      if (n.includes(iconMap[i][0][j])) { picked = iconMap[i][1]; break; }
+    }
+    if (picked) break;
+  }
+  // If picked icon is unique, use it
+  if (picked && usedIcons.indexOf(picked) === -1) return picked;
+  // Otherwise cycle through fallbacks for a unique one
+  var all = (picked ? [picked] : []).concat(fallbacks);
+  for (var k = 0; k < all.length; k++) {
+    if (usedIcons.indexOf(all[k]) === -1) return all[k];
+  }
+  // Last resort — return the picked icon even if duplicate (shouldn't happen with enough fallbacks)
+  return picked || fallbacks[0];
+}
+
+var LOCATION_ICONS = [
+  [['home', 'house', 'apt', 'apartment'], '\uD83C\uDFE0'],
+  [['work', 'office', 'hq'], '\uD83C\uDFE2'],
+  [['gym', 'fitness', 'workout'], '\uD83C\uDFCB\uFE0F'],
+  [['school', 'university', 'campus', 'college'], '\uD83C\uDFEB'],
+  [['cafe', 'coffee', 'starbucks'], '\u2615'],
+  [['library'], '\uD83D\uDCDA'],
+  [['park', 'outdoor'], '\uD83C\uDF33'],
+  [['store', 'shop', 'mall'], '\uD83D\uDED2'],
+  [['hospital', 'clinic', 'doctor'], '\uD83C\uDFE5'],
+  [['church', 'temple', 'mosque'], '\u26EA'],
+  [['airport', 'terminal'], '\u2708\uFE0F'],
+  [['hotel', 'motel'], '\uD83C\uDFE8'],
+  [['restaurant', 'dining'], '\uD83C\uDF7D\uFE0F'],
+  [['transit', 'commute', 'bus', 'train', 'subway'], '\uD83D\uDE8C'],
+  [['car', 'drive', 'parking'], '\uD83D\uDE97'],
+  [['beach', 'pool'], '\uD83C\uDFD6\uFE0F'],
+  [['downtown', 'city', 'urban'], '\uD83C\uDFD9\uFE0F'],
+];
+var LOCATION_FALLBACKS = ['\uD83D\uDCCD', '\uD83D\uDCCC', '\uD83C\uDFF7\uFE0F', '\uD83D\uDD16', '\uD83D\uDDFA\uFE0F', '\uD83C\uDFE1', '\u2B50'];
+
+var TOOL_ICONS = [
+  [['phone', 'mobile', 'cell', 'iphone', 'android'], '\uD83D\uDCF1'],
+  [['laptop', 'macbook', 'notebook', 'personal pc', 'personal computer'], '\uD83D\uDCBB'],
+  [['desktop', 'imac', 'work pc', 'workstation', 'monitor'], '\uD83D\uDDA5\uFE0F'],
+  [['tablet', 'ipad'], '\uD83D\uDCF2'],
+  [['printer', 'print'], '\uD83D\uDDA8\uFE0F'],
+  [['car', 'vehicle'], '\uD83D\uDE97'],
+  [['camera'], '\uD83D\uDCF7'],
+  [['headphone', 'headset', 'earbuds'], '\uD83C\uDFA7'],
+  [['keyboard'], '\u2328\uFE0F'],
+  [['pen', 'pencil', 'stylus'], '\u270F\uFE0F'],
+  [['book', 'notebook', 'journal'], '\uD83D\uDCD3'],
+  [['key', 'badge', 'card'], '\uD83D\uDD11'],
+  [['wifi', 'internet', 'hotspot'], '\uD83D\uDCF6'],
+  [['charger', 'cable', 'adapter'], '\uD83D\uDD0C'],
+];
+var TOOL_FALLBACKS = ['\uD83D\uDD27', '\u2699\uFE0F', '\uD83D\uDEE0\uFE0F', '\uD83D\uDD29', '\uD83D\uDCE6', '\uD83D\uDCC0', '\uD83D\uDCBF'];
+
+// ─── Locations Tab ───────────────────────────────────────────────
+
 function LocationsTab({ config, theme }) {
   var [newName, setNewName] = useState('');
-  var [newId, setNewId] = useState('');
-  var [newIcon, setNewIcon] = useState('');
+  var [error, setError] = useState('');
+
+  function handleAdd() {
+    var name = newName.trim();
+    if (!name) return;
+    // Check name uniqueness (case-insensitive)
+    if (config.locations.some(function(l) { return l.name.toLowerCase() === name.toLowerCase(); })) {
+      setError('A location named "' + name + '" already exists');
+      return;
+    }
+    var existingIds = config.locations.map(function(l) { return l.id; });
+    var usedIcons = config.locations.map(function(l) { return l.icon; });
+    var id = generateId(name, existingIds);
+    var icon = pickUniqueIcon(name, LOCATION_ICONS, usedIcons, LOCATION_FALLBACKS);
+    config.updateLocations([...config.locations, { id: id, name: name, icon: icon }]);
+    setNewName('');
+    setError('');
+  }
 
   return (
     <div>
@@ -104,7 +193,6 @@ function LocationsTab({ config, theme }) {
           <div key={loc.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13 }}>
             <span>{loc.icon}</span>
             <span style={{ color: theme.text, flex: 1 }}>{loc.name}</span>
-            <span style={{ fontSize: 10, color: theme.textMuted }}>{loc.id}</span>
             <button onClick={() => {
               var updated = config.locations.filter((_, idx) => idx !== i);
               config.updateLocations(updated);
@@ -113,23 +201,36 @@ function LocationsTab({ config, theme }) {
         ))}
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
-        <input value={newIcon} onChange={e => setNewIcon(e.target.value)} placeholder="Icon" style={{ width: 40, padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
-        <input value={newId} onChange={e => setNewId(e.target.value)} placeholder="ID" style={{ width: 80, padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
-        <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Name" style={{ flex: 1, padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
-        <button onClick={() => {
-          if (!newId || !newName) return;
-          config.updateLocations([...config.locations, { id: newId, name: newName, icon: newIcon || '\uD83D\uDCCD' }]);
-          setNewId(''); setNewName(''); setNewIcon('');
-        }} title="Add a new location" style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FDFAF5', fontSize: 12, cursor: 'pointer' }}>Add</button>
+        <input value={newName} onChange={e => { setNewName(e.target.value); setError(''); }} placeholder="Location name" onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }}
+          style={{ flex: 1, padding: '4px 6px', border: `1px solid ${error ? theme.redText : theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
+        <button onClick={handleAdd} title="Add a new location" style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FDFAF5', fontSize: 12, cursor: 'pointer' }}>Add</button>
       </div>
+      {error && <div style={{ fontSize: 11, color: theme.redText, marginTop: 4 }}>{error}</div>}
     </div>
   );
 }
 
+// ─── Tools Tab ───────────────────────────────────────────────────
+
 function ToolsTab({ config, theme }) {
   var [newName, setNewName] = useState('');
-  var [newId, setNewId] = useState('');
-  var [newIcon, setNewIcon] = useState('');
+  var [error, setError] = useState('');
+
+  function handleAdd() {
+    var name = newName.trim();
+    if (!name) return;
+    if (config.tools.some(function(t) { return t.name.toLowerCase() === name.toLowerCase(); })) {
+      setError('A tool named "' + name + '" already exists');
+      return;
+    }
+    var existingIds = config.tools.map(function(t) { return t.id; });
+    var usedIcons = config.tools.map(function(t) { return t.icon; });
+    var id = generateId(name, existingIds);
+    var icon = pickUniqueIcon(name, TOOL_ICONS, usedIcons, TOOL_FALLBACKS);
+    config.updateTools([...config.tools, { id: id, name: name, icon: icon }]);
+    setNewName('');
+    setError('');
+  }
 
   return (
     <div>
@@ -139,7 +240,6 @@ function ToolsTab({ config, theme }) {
           <div key={tool.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13 }}>
             <span>{tool.icon}</span>
             <span style={{ color: theme.text, flex: 1 }}>{tool.name}</span>
-            <span style={{ fontSize: 10, color: theme.textMuted }}>{tool.id}</span>
             <button onClick={() => {
               config.updateTools(config.tools.filter((_, idx) => idx !== i));
             }} title={'Delete tool ' + tool.name} style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 14 }}>&times;</button>
@@ -147,15 +247,11 @@ function ToolsTab({ config, theme }) {
         ))}
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
-        <input value={newIcon} onChange={e => setNewIcon(e.target.value)} placeholder="Icon" style={{ width: 40, padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
-        <input value={newId} onChange={e => setNewId(e.target.value)} placeholder="ID" style={{ width: 80, padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
-        <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="Name" style={{ flex: 1, padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
-        <button onClick={() => {
-          if (!newId || !newName) return;
-          config.updateTools([...config.tools, { id: newId, name: newName, icon: newIcon || '\uD83D\uDD27' }]);
-          setNewId(''); setNewName(''); setNewIcon('');
-        }} title="Add a new tool" style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FDFAF5', fontSize: 12, cursor: 'pointer' }}>Add</button>
+        <input value={newName} onChange={e => { setNewName(e.target.value); setError(''); }} placeholder="Tool name" onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }}
+          style={{ flex: 1, padding: '4px 6px', border: `1px solid ${error ? theme.redText : theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
+        <button onClick={handleAdd} title="Add a new tool" style={{ border: 'none', borderRadius: 4, padding: '4px 12px', background: theme.accent, color: '#FDFAF5', fontSize: 12, cursor: 'pointer' }}>Add</button>
       </div>
+      {error && <div style={{ fontSize: 11, color: theme.redText, marginTop: 4 }}>{error}</div>}
     </div>
   );
 }
@@ -378,11 +474,100 @@ function ProjectsTab({ config, theme, allProjectNames, allTasks, onRenameProject
   );
 }
 
+function TimezoneCombobox({ value, browserTz, allTimezones, theme, onChange }) {
+  var [text, setText] = useState(value ? value.replace(/_/g, ' ') : '');
+  var [open, setOpen] = useState(false);
+  var ref = useRef(null);
+
+  useEffect(function() { setText(value ? value.replace(/_/g, ' ') : ''); }, [value]);
+
+  useEffect(function() {
+    if (!open) return;
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return function() { document.removeEventListener('mousedown', handleClick); };
+  }, [open]);
+
+  var filtered = allTimezones.filter(function(tz) {
+    if (!text) return true;
+    return tz.toLowerCase().indexOf(text.toLowerCase().replace(/ /g, '_')) !== -1
+      || tz.replace(/_/g, ' ').toLowerCase().indexOf(text.toLowerCase()) !== -1;
+  });
+  if (filtered.length > 50) filtered = filtered.slice(0, 50);
+
+  function select(tz) {
+    setText(tz ? tz.replace(/_/g, ' ') : '');
+    onChange(tz);
+    setOpen(false);
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+      <span style={{ fontWeight: 500 }}>Timezone:</span>
+      <div ref={ref} style={{ position: 'relative', flex: 1 }}>
+        <input
+          type="text" value={text}
+          onChange={function(e) { setText(e.target.value); setOpen(true); }}
+          onFocus={function() { setOpen(true); }}
+          onKeyDown={function(e) {
+            if (e.key === 'Enter' && filtered.length === 1) { select(filtered[0]); }
+            else if (e.key === 'Escape') { setOpen(false); }
+          }}
+          placeholder={'Browser' + (browserTz ? ' (' + browserTz + ')' : '')}
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            padding: '4px 24px 4px 6px', border: '1px solid ' + theme.inputBorder,
+            borderRadius: 4, background: theme.input, color: theme.text,
+            fontSize: 12, fontFamily: 'inherit', outline: 'none'
+          }}
+        />
+        {value && (
+          <button onClick={function() { select(''); }} style={{
+            position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
+            border: 'none', background: 'transparent', cursor: 'pointer',
+            color: theme.textMuted, fontSize: 14, padding: 0, lineHeight: 1, fontFamily: 'inherit'
+          }} title="Clear override">&times;</button>
+        )}
+        {open && (
+          <div style={{
+            position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 2,
+            background: theme.bgSecondary, border: '1px solid ' + theme.border,
+            borderRadius: 4, boxShadow: '0 2px 8px ' + theme.shadow,
+            zIndex: 300, maxHeight: 200, overflowY: 'auto'
+          }}>
+            <button onClick={function() { select(''); }} style={{
+              display: 'block', width: '100%', border: 'none', cursor: 'pointer',
+              padding: '5px 8px', fontSize: 11, fontFamily: 'inherit', textAlign: 'left',
+              background: !value ? theme.accent + '15' : 'transparent',
+              color: !value ? theme.accent : theme.textMuted
+            }}>Browser default{browserTz ? ' (' + browserTz + ')' : ''}</button>
+            {filtered.map(function(tz) {
+              return (
+                <button key={tz} onClick={function() { select(tz); }} style={{
+                  display: 'block', width: '100%', border: 'none', cursor: 'pointer',
+                  padding: '5px 8px', fontSize: 11, fontFamily: 'inherit', textAlign: 'left',
+                  background: value === tz ? theme.accent + '15' : 'transparent',
+                  color: value === tz ? theme.accent : theme.text
+                }}>{tz.replace(/_/g, ' ')}</button>
+              );
+            })}
+            {filtered.length === 0 && (
+              <div style={{ padding: '5px 8px', fontSize: 11, color: theme.textMuted }}>No matches</div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PreferencesTab({ config, theme }) {
   function savePrefs(patch) {
     config.updatePreferences({
       gridZoom: config.gridZoom, splitDefault: config.splitDefault,
-      splitMinDefault: config.splitMinDefault, schedFloor: config.schedFloor,
+      splitMinDefault: config.splitMinDefault, schedFloor: config.schedFloor, schedCeiling: config.schedCeiling,
       fontSize: config.fontSize, pullForwardDampening: config.pullForwardDampening,
       timezoneOverride: config.timezoneOverride,
       ...patch
@@ -418,26 +603,40 @@ function PreferencesTab({ config, theme }) {
         <div style={{ fontSize: 12, color: theme.text }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <span style={{ fontWeight: 500 }}>Timezone:</span>
-            <select
-              value={config.timezoneOverride || ''}
-              onChange={e => {
-                var v = e.target.value || null;
-                config.setTimezoneOverride(v);
-                savePrefs({ timezoneOverride: v });
-              }}
-              style={{ flex: 1, padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }}>
-              <option value="">Use browser timezone{browserTz ? ' (' + browserTz + ')' : ''}</option>
-              {allTimezones.map(function(tz) {
-                return <option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>;
-              })}
-            </select>
+            <div style={{ flex: 1, position: 'relative' }}>
+              <input
+                list="tz-list"
+                value={config.timezoneOverride ? config.timezoneOverride.replace(/_/g, ' ') : ''}
+                onChange={function(e) {
+                  var raw = e.target.value.replace(/ /g, '_');
+                  // Check if it's a valid timezone
+                  var match = allTimezones.find(function(tz) { return tz === raw; });
+                  if (match) {
+                    config.setTimezoneOverride(match);
+                    savePrefs({ timezoneOverride: match });
+                    try { localStorage.setItem(TZ_OVERRIDE_KEY, match); } catch (err) { /* ignore */ }
+                  } else if (!e.target.value) {
+                    config.setTimezoneOverride(null);
+                    savePrefs({ timezoneOverride: null });
+                    try { localStorage.removeItem(TZ_OVERRIDE_KEY); } catch (err) { /* ignore */ }
+                  }
+                }}
+                placeholder={'Browser' + (browserTz ? ' (' + browserTz + ')' : '')}
+                style={{ width: '100%', boxSizing: 'border-box', padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12, fontFamily: 'inherit' }}
+              />
+              <datalist id="tz-list">
+                {allTimezones.map(function(tz) {
+                  return <option key={tz} value={tz.replace(/_/g, ' ')} />;
+                })}
+              </datalist>
+            </div>
           </div>
           <div style={{ fontSize: 10, color: theme.textMuted }}>
             {config.timezoneOverride
-              ? 'Manual override active. Templates interpret as ' + config.timezoneOverride + ' local time.'
+              ? 'Manual override active. All times displayed as ' + config.timezoneOverride + '.'
               : browserTz
-                ? 'Auto-detected: ' + browserTz + '. Templates interpret as local time.'
-                : 'No timezone detected. Using profile default.'}
+                ? 'Auto-detected: ' + browserTz + '. All times displayed in local timezone.'
+                : 'No timezone detected. Defaulting to America/New_York.'}
           </div>
         </div>
 
@@ -465,6 +664,15 @@ function PreferencesTab({ config, theme }) {
             style={{ padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }}>
             {[360,420,480,540,600,660,720].map(m => (
               <option key={m} value={m}>{Math.floor(m/60) % 12 || 12}:{(m%60) < 10 ? '0' : ''}{m%60} {m < 720 ? 'AM' : 'PM'}</option>
+            ))}
+          </select>
+        </label>
+        <label title="The scheduler won't place tasks later than this time" style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+          Latest scheduling time:
+          <select value={config.schedCeiling} onChange={e => { var v = parseInt(e.target.value); config.setSchedCeiling(v); savePrefs({ schedCeiling: v }); }}
+            style={{ padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }}>
+            {[1080,1140,1200,1260,1320,1380,1440].map(m => (
+              <option key={m} value={m}>{m === 1440 ? '12:00 AM' : (Math.floor(m/60) % 12 || 12) + ':' + ((m%60) < 10 ? '0' : '') + (m%60) + (m < 720 ? ' AM' : ' PM')}</option>
             ))}
           </select>
         </label>
@@ -511,20 +719,36 @@ function timeInputToMins(val) {
 }
 
 var LOC_TINT = { home: '#2E4A7A', work: '#C8942A', transit: '#5C5A55', downtown: '#2D6A4F', gym: '#8B2635', errand: '#EC4899' };
-var TOTAL_MIN = 1080; // 6AM (360) to midnight (1440)
-var START_MIN = 360;
-var END_MIN = 1440;
 
-function pctOf(mins) {
-  return ((mins - START_MIN) / TOTAL_MIN) * 100;
+// Default fallbacks if no blocks configured
+var DEFAULT_START = 360;  // 6 AM
+var DEFAULT_END = 1380;   // 11 PM
+
+/** Compute timeline range from blocks — pad 1 hour before/after, snap to even hours */
+function getTimeRange(blocks) {
+  if (!blocks || blocks.length === 0) return { startMin: DEFAULT_START, endMin: DEFAULT_END };
+  var earliest = DEFAULT_END;
+  var latest = DEFAULT_START;
+  blocks.forEach(function(b) {
+    if (b.start < earliest) earliest = b.start;
+    if (b.end > latest) latest = b.end;
+  });
+  // Pad 1 hour and snap to even hours
+  var startMin = Math.max(0, Math.floor((earliest - 60) / 60) * 60);
+  var endMin = Math.min(1440, Math.ceil((latest + 60) / 60) * 60);
+  return { startMin: startMin, endMin: endMin };
 }
 
-function snapToSlot(clientX, barEl) {
+function pctOf(mins, startMin, totalMin) {
+  return ((mins - startMin) / totalMin) * 100;
+}
+
+function snapToSlot(clientX, barEl, startMin, endMin, totalMin) {
   var rect = barEl.getBoundingClientRect();
   var ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-  var raw = ratio * TOTAL_MIN + START_MIN;
+  var raw = ratio * totalMin + startMin;
   var snapped = Math.round(raw / 15) * 15;
-  return Math.max(START_MIN, Math.min(END_MIN, snapped));
+  return Math.max(startMin, Math.min(endMin, snapped));
 }
 
 /** Build effective hours map from blocks + locOverrides */
@@ -544,9 +768,9 @@ function buildEffectiveHours(blocks, locOverrides) {
 }
 
 /** Build location segments from hours map */
-function buildSegments(hours) {
+function buildSegments(hours, startMin, endMin) {
   var segs = [];
-  for (var m = START_MIN; m < END_MIN; m += 15) {
+  for (var m = startMin; m < endMin; m += 15) {
     var loc = hours[m] || 'unset';
     var last = segs[segs.length - 1];
     if (last && last.loc === loc && last.end === m) {
@@ -571,7 +795,29 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBloc
   hoursRef.current = hours;
   onCommitRef.current = onCommit;
 
-  var segments = useMemo(function() { return buildSegments(hours); }, [hours]);
+  // Dynamic time range based on configured blocks
+  var range = useMemo(function() { return getTimeRange(blocks); }, [blocks]);
+  var startMin = range.startMin;
+  var endMin = range.endMin;
+  var totalMin = endMin - startMin;
+  var rangeRef = useRef({ startMin: startMin, endMin: endMin, totalMin: totalMin });
+  rangeRef.current = { startMin: startMin, endMin: endMin, totalMin: totalMin };
+
+  // Helper to compute pct with current range
+  function pct(mins) { return pctOf(mins, startMin, totalMin); }
+
+  // Generate hour tick values for the current range
+  var hourTicks = useMemo(function() {
+    var ticks = [];
+    // Start at next even hour at or after startMin
+    var first = Math.ceil(startMin / 120) * 120;
+    for (var h = first; h <= endMin; h += 120) {
+      ticks.push(h);
+    }
+    return ticks;
+  }, [startMin, endMin]);
+
+  var segments = useMemo(function() { return buildSegments(hours, startMin, endMin); }, [hours, startMin, endMin]);
 
   var locMap = useMemo(function() {
     var m = {};
@@ -588,8 +834,9 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBloc
   /** Get the 15-min slot minute at a given clientX */
   function slotAt(clientX) {
     var bar = barRef.current;
-    if (!bar) return START_MIN;
-    return snapToSlot(clientX, bar);
+    var r = rangeRef.current;
+    if (!bar) return r.startMin;
+    return snapToSlot(clientX, bar, r.startMin, r.endMin, r.totalMin);
   }
 
   /** Paint a range of 15-min slots with a location and commit */
@@ -675,10 +922,10 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBloc
       // Clamp: start can't go past end-15, end can't go before start+15
       if (edge === 'start') {
         m = Math.min(m, b.end - 15);
-        m = Math.max(m, START_MIN);
+        m = Math.max(m, rangeRef.current.startMin);
       } else {
         m = Math.max(m, b.start + 15);
-        m = Math.min(m, END_MIN);
+        m = Math.min(m, rangeRef.current.endMin);
       }
       if (m === (edge === 'start' ? b.start : b.end)) return;
       var newBlocks = origBlocks.map(function(bl, idx) {
@@ -701,6 +948,21 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBloc
 
   return (
     <div>
+      {/* Time labels above the bar */}
+      <div style={{ position: 'relative', height: 16, marginBottom: 2 }}>
+        {hourTicks.map(function(mins) {
+          var left = pct(mins);
+          return (
+            <span key={mins} style={{
+              position: 'absolute', left: left + '%',
+              fontSize: 11, fontWeight: 700, color: '#333',
+              transform: 'translateX(-50%)'
+            }}>
+              {minsToShort(mins)}
+            </span>
+          );
+        })}
+      </div>
       <div ref={barRef}
         onMouseDown={onMouseDown}
         onTouchStart={onTouchStart}
@@ -712,8 +974,8 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBloc
 
         {/* Block boundary overlay (top strip) — draggable edges */}
         {blocks && blocks.map(function(b, i) {
-          var left = pctOf(b.start);
-          var width = pctOf(b.end) - left;
+          var left = pct(b.start);
+          var width = pct(b.end) - left;
           if (width <= 0) return null;
           return (
             <div key={'blk-' + i} style={{
@@ -740,7 +1002,7 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBloc
               onMouseDown={function(e) { onBlockEdgeDown(e, i, 'start'); }}
               style={{
                 position: 'absolute', top: 0, height: BLOCK_OVERLAY_H,
-                left: 'calc(' + pctOf(b.start) + '% - 4px)', width: 8,
+                left: 'calc(' + pct(b.start) + '% - 4px)', width: 8,
                 cursor: 'ew-resize', zIndex: 5
               }} />
           );
@@ -750,7 +1012,7 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBloc
               onMouseDown={function(e) { onBlockEdgeDown(e, i, 'end'); }}
               style={{
                 position: 'absolute', top: 0, height: BLOCK_OVERLAY_H,
-                left: 'calc(' + pctOf(b.end) + '% - 4px)', width: 8,
+                left: 'calc(' + pct(b.end) + '% - 4px)', width: 8,
                 cursor: 'ew-resize', zIndex: 5
               }} />
           );
@@ -759,8 +1021,8 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBloc
 
         {/* Location segments */}
         {segments.map(function(seg, i) {
-          var left = pctOf(seg.start);
-          var width = pctOf(seg.end) - pctOf(seg.start);
+          var left = pct(seg.start);
+          var width = pct(seg.end) - pct(seg.start);
           var isUnset = seg.loc === 'unset';
           var loc = isUnset ? null : locMap[seg.loc];
           var tint = LOC_TINT[seg.loc] || '#9E6B3B';
@@ -792,25 +1054,21 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBloc
           if (i === 0) return null;
           return (
             <div key={'bline-' + i} style={{
-              position: 'absolute', top: BLOCK_OVERLAY_H, bottom: 0, left: pctOf(b.start) + '%',
+              position: 'absolute', top: BLOCK_OVERLAY_H, bottom: 0, left: pct(b.start) + '%',
               borderLeft: '1px dashed ' + (b.color || theme.border),
               opacity: 0.4, pointerEvents: 'none'
             }} />
           );
         })}
 
-        {/* Hour ticks */}
-        {[6,8,10,12,14,16,18,20,22].map(function(h) {
-          var left = pctOf(h * 60);
+        {/* Hour tick lines */}
+        {hourTicks.map(function(mins) {
+          var left = pct(mins);
           return (
-            <div key={h} style={{
+            <div key={mins} style={{
               position: 'absolute', top: 0, bottom: 0, left: left + '%',
               borderLeft: '1px solid ' + theme.border, opacity: 0.3, pointerEvents: 'none'
-            }}>
-              <span style={{ fontSize: 8, color: theme.textMuted, position: 'absolute', top: BLOCK_OVERLAY_H + 1, left: 2 }}>
-                {minsToShort(h * 60)}
-              </span>
-            </div>
+            }} />
           );
         })}
       </div>
@@ -874,7 +1132,7 @@ function ExpandedLocationEditor({ blocks, locOverrides, locations, theme, onLocO
       groups.push({ block: b, slots: slots });
     });
     // Add slots outside blocks
-    for (var m = START_MIN; m < END_MIN; m += 15) {
+    for (var m = 0; m < 1440; m += 15) {
       var inBlock = false;
       for (var i = 0; i < blocks.length; i++) {
         if (m >= blocks[i].start && m < blocks[i].end) { inBlock = true; break; }
@@ -979,7 +1237,6 @@ function UnifiedTemplateTab({ config, theme }) {
   var [selectedTemplate, setSelectedTemplate] = useState(templateIds[0] || 'weekday');
   var [editingBlockIdx, setEditingBlockIdx] = useState(null);
   var [showExpanded, setShowExpanded] = useState(false);
-  var [newId, setNewId] = useState('');
   var [newName, setNewName] = useState('');
   var [newOverrideDate, setNewOverrideDate] = useState('');
   var [newOverrideTemplate, setNewOverrideTemplate] = useState(templateIds[0] || 'weekday');
@@ -1006,16 +1263,34 @@ function UnifiedTemplateTab({ config, theme }) {
   }
 
   // --- Template CRUD ---
+  var TEMPLATE_ICONS = [
+    [['work', 'office', 'biz'], '\uD83C\uDFE2'],
+    [['home', 'remote', 'wfh'], '\uD83C\uDFE0'],
+    [['travel', 'trip', 'flight'], '\u2708\uFE0F'],
+    [['vacation', 'holiday', 'pto', 'off'], '\uD83C\uDFD6\uFE0F'],
+    [['weekend'], '\u2600\uFE0F'],
+    [['school', 'class', 'study'], '\uD83C\uDFEB'],
+    [['meeting', 'conference'], '\uD83D\uDCBC'],
+    [['gym', 'fitness', 'training'], '\uD83C\uDFCB\uFE0F'],
+    [['night', 'late', 'evening'], '\uD83C\uDF19'],
+    [['early', 'morning'], '\uD83C\uDF05'],
+  ];
+  var TEMPLATE_FALLBACKS = ['\uD83D\uDCC5', '\uD83D\uDDD3\uFE0F', '\uD83D\uDCCB', '\uD83D\uDD52', '\u2B50', '\uD83D\uDCC6'];
+
   function addTemplate() {
-    if (!newId || !newName) return;
+    var name = newName.trim();
+    if (!name) return;
+    var existingIds = Object.keys(templates);
+    var usedIcons = existingIds.map(function(k) { return templates[k].icon; });
+    var id = generateId(name, existingIds);
+    var icon = pickUniqueIcon(name, TEMPLATE_ICONS, usedIcons, TEMPLATE_FALLBACKS);
     var updated = {};
     Object.keys(templates).forEach(function(k) { updated[k] = templates[k]; });
-    // Clone blocks from weekday template as a starting point
     var defaultBlocks = (templates['weekday']?.blocks || []).map(function(b) { return Object.assign({}, b, { id: b.id + '_' + Date.now() }); });
-    updated[newId] = { name: newName, icon: '\uD83D\uDCC5', system: false, blocks: defaultBlocks, locOverrides: {} };
+    updated[id] = { name: name, icon: icon, system: false, blocks: defaultBlocks, locOverrides: {} };
     saveAllTemplates(updated);
-    setNewId(''); setNewName('');
-    setSelectedTemplate(newId);
+    setNewName('');
+    setSelectedTemplate(id);
   }
 
   function removeTemplate(id) {
@@ -1159,35 +1434,36 @@ function UnifiedTemplateTab({ config, theme }) {
         })}
       </div>
 
-      {/* Template selector */}
+      {/* Template list */}
       <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6 }}>Templates</div>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 10 }}>
         {templateIds.map(function(id) {
           var s = templates[id];
+          var isSelected = selectedTemplate === id;
           return (
-            <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <button onClick={function() { setSelectedTemplate(id); setEditingBlockIdx(null); }} title={'Edit template: ' + (s?.name || id)} style={{
-                border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer',
-                background: selectedTemplate === id ? theme.accent : theme.bgTertiary,
-                color: selectedTemplate === id ? '#FDFAF5' : theme.textSecondary,
-                fontSize: 12, fontFamily: 'inherit'
-              }}>{(s?.icon || '') + ' ' + (s?.name || id)}</button>
+            <div key={id} onClick={function() { setSelectedTemplate(id); setEditingBlockIdx(null); }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px',
+                background: isSelected ? theme.accent + '18' : theme.bgTertiary,
+                border: isSelected ? '1px solid ' + theme.accent : '1px solid transparent',
+                borderRadius: 6, cursor: 'pointer', fontSize: 12
+              }}>
+              <span>{s?.icon || '\uD83D\uDCC5'}</span>
+              <span style={{ flex: 1, fontWeight: isSelected ? 600 : 400, color: theme.text }}>{s?.name || id}</span>
+              <span style={{ fontSize: 10, color: theme.textMuted }}>{(s?.blocks || []).length} blocks</span>
               {!s?.system && (
-                <button onClick={function() { removeTemplate(id); }} title={'Delete template ' + (s?.name || id)} style={{
-                  border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 12
-                }}>&times;</button>
+                <button onClick={function(e) { e.stopPropagation(); removeTemplate(id); }} title={'Delete ' + (s?.name || id)}
+                  style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 13, padding: '0 2px' }}>&times;</button>
               )}
             </div>
           );
         })}
-        {/* Inline add */}
-        <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-          <input value={newId} onChange={function(e) { setNewId(e.target.value.replace(/\s/g, '_').toLowerCase()); }} placeholder="id"
-            style={{ width: 55, padding: '3px 5px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 10 }} />
-          <input value={newName} onChange={function(e) { setNewName(e.target.value); }} placeholder="Name"
-            style={{ width: 70, padding: '3px 5px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 10 }} />
+        <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+          <input value={newName} onChange={function(e) { setNewName(e.target.value); }} placeholder="Template name"
+            onKeyDown={function(e) { if (e.key === 'Enter') addTemplate(); }}
+            style={{ flex: 1, padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 11 }} />
           <button onClick={addTemplate} title="Create a new schedule template" style={{
-            border: 'none', borderRadius: 4, padding: '3px 8px', background: theme.accent, color: '#FDFAF5', fontSize: 10, cursor: 'pointer', fontFamily: 'inherit'
+            border: 'none', borderRadius: 4, padding: '4px 10px', background: theme.accent, color: '#FDFAF5', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit'
           }}>+ New</button>
         </div>
       </div>
@@ -1218,7 +1494,8 @@ function UnifiedTemplateTab({ config, theme }) {
         <div>
           <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6 }}>Blocks</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
-            {blocks.map(function(b, i) {
+            {blocks.slice().sort(function(a, b) { return a.start - b.start || a.end - b.end; }).map(function(b) {
+              var i = blocks.indexOf(b);
               var isEditing = editingBlockIdx === i;
               return (
                 <div key={b.id || i}>
@@ -1330,8 +1607,8 @@ function UnifiedTemplateTab({ config, theme }) {
         </div>
       )}
       <div style={{ display: 'flex', gap: 6 }}>
-        <input value={newOverrideDate} onChange={function(e) { setNewOverrideDate(e.target.value); }} placeholder="M/D (e.g. 3/15)"
-          style={{ width: 80, padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
+        <input type="date" value={newOverrideDate} onChange={function(e) { setNewOverrideDate(e.target.value); }}
+          style={{ padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
         <select value={newOverrideTemplate} onChange={function(e) { setNewOverrideTemplate(e.target.value); }}
           style={{ padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }}>
           {templateIds.map(function(id) {
@@ -1341,7 +1618,10 @@ function UnifiedTemplateTab({ config, theme }) {
         </select>
         <button onClick={function() {
           if (!newOverrideDate) return;
-          var updated = Object.assign({}, config.templateOverrides, { [newOverrideDate]: newOverrideTemplate });
+          // Convert YYYY-MM-DD to M/D
+          var parts = newOverrideDate.split('-');
+          var dateKey = parseInt(parts[1]) + '/' + parseInt(parts[2]);
+          var updated = Object.assign({}, config.templateOverrides, { [dateKey]: newOverrideTemplate });
           config.updateTemplateOverrides(updated);
           setNewOverrideDate('');
         }} title="Override the default template for a specific date" style={{
