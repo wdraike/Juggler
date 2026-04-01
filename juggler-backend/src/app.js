@@ -100,8 +100,7 @@ app.get('/api/auth/me', authenticateJWT, async (req, res) => {
       id: user.id,
       email: user.email,
       name: user.name,
-      picture: user.picture_url,
-      timezone: user.timezone
+      picture: user.picture_url
     }
   });
 });

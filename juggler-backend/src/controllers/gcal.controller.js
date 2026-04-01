@@ -548,6 +548,13 @@ async function sync(req, res) {
     var result = await gcalApi.listEvents(accessToken, timeMin, timeMax);
     var gcalEvents = (result && result.items) || [];
 
+    // DEBUG: Log all-day events from GCal
+    var allDayFromGcal = gcalEvents.filter(function(e) { return !e.start?.dateTime; });
+    console.log('[GCal Sync] Total events fetched:', gcalEvents.length, '| All-day events:', allDayFromGcal.length);
+    allDayFromGcal.forEach(function(e) {
+      console.log('[GCal Sync] All-day event:', e.id, '|', e.summary, '| start.date:', e.start?.date);
+    });
+
     // Load all user tasks that have a scheduled date
     var allTaskRows = await db('tasks')
       .where('user_id', userId)
@@ -733,20 +740,84 @@ async function sync(req, res) {
           }
 
         } else if (!task && event) {
-          try {
-            await gcalApi.deleteEvent(accessToken, ledger.gcal_event_id);
-            await delay(100);
-          } catch (e) {
-            if (!e.message.includes('404') && !e.message.includes('410')) {
-              throw e;
+          // Ledger has no task but event exists on GCal.
+          // If the event is current/future and originated from GCal, create the missing task
+          // (this recovers all-day events that were incorrectly skipped due to timezone bug).
+          var recoverStart = event.start?.dateTime || event.start?.date;
+          var recoverIsAllDay = !event.start?.dateTime;
+          var recoverIsPast = false;
+          if (recoverStart) {
+            if (recoverIsAllDay) {
+              var rParts = recoverStart.split('-');
+              var rDateLocal = new Date(parseInt(rParts[0], 10), parseInt(rParts[1], 10) - 1, parseInt(rParts[2], 10));
+              recoverIsPast = rDateLocal < todayStart;
+            } else {
+              recoverIsPast = new Date(recoverStart) < todayStart;
             }
           }
-          await db('gcal_sync_ledger').where('id', ledger.id).update({
-            status: 'deleted_local',
-            gcal_event_id: null,
-            synced_at: db.fn.now()
-          });
-          stats.deleted_local++;
+
+          if (!recoverIsPast && ledger.origin === 'gcal') {
+            // Recover: create the missing task
+            var rJd = isoToJugglerDate(recoverStart, tz);
+            var rEndStr = event.end?.dateTime || event.end?.date;
+            var rDur = recoverIsAllDay ? 0 : 30;
+            if (!recoverIsAllDay && recoverStart && rEndStr) {
+              rDur = computeDurationMinutes(recoverStart, rEndStr);
+            }
+            var rTaskId = 'gcal_' + crypto.randomBytes(8).toString('hex');
+            var rScheduledAt = null;
+            if (rJd.date) {
+              if (recoverIsAllDay) {
+                rScheduledAt = localToUtc(rJd.date, '12:00 AM', tz);
+              } else if (rJd.time) {
+                rScheduledAt = localToUtc(rJd.date, rJd.time, tz);
+              }
+            }
+            var rRow = {
+              id: rTaskId,
+              user_id: userId,
+              text: event.summary || '(No title)',
+              scheduled_at: rScheduledAt,
+              dur: rDur,
+              pri: 'P3',
+              status: '',
+              when: recoverIsAllDay ? 'allday' : 'fixed',
+              rigid: 1,
+              gcal_event_id: event.id,
+              created_at: db.fn.now(),
+              updated_at: db.fn.now()
+            };
+            if (event.description) rRow.notes = event.description;
+
+            var rTaskObj = rowToTask(rRow, tz);
+            await db.transaction(async function(trx) {
+              await trx('tasks').insert(rRow);
+              await trx('gcal_sync_ledger').where('id', ledger.id).update({
+                task_id: rTaskId,
+                last_pushed_hash: taskHash(rTaskObj),
+                last_pulled_hash: eventHash(event),
+                status: 'active',
+                synced_at: db.fn.now()
+              });
+            });
+            stats.pulled++;
+          } else {
+            // Past or juggler-origin: clean up
+            try {
+              await gcalApi.deleteEvent(accessToken, ledger.gcal_event_id);
+              await delay(100);
+            } catch (e) {
+              if (!e.message.includes('404') && !e.message.includes('410')) {
+                throw e;
+              }
+            }
+            await db('gcal_sync_ledger').where('id', ledger.id).update({
+              status: 'deleted_local',
+              gcal_event_id: null,
+              synced_at: db.fn.now()
+            });
+            stats.deleted_local++;
+          }
 
         } else {
           await db('gcal_sync_ledger').where('id', ledger.id).update({
@@ -850,10 +921,19 @@ async function sync(req, res) {
 
       // Check if event is in the past
       var evStartStr = newEvent.start?.dateTime || newEvent.start?.date;
+      var evIsAllDay2 = !newEvent.start?.dateTime;
       var isPast = false;
       if (evStartStr) {
-        var evDate = new Date(evStartStr);
-        isPast = evDate < todayStart;
+        if (evIsAllDay2) {
+          // All-day events have date-only strings (e.g. "2026-03-30") which parse as
+          // midnight UTC. Compare date portions only to avoid timezone mismatch.
+          var evParts = evStartStr.split('-');
+          var evDateOnly = new Date(parseInt(evParts[0], 10), parseInt(evParts[1], 10) - 1, parseInt(evParts[2], 10));
+          isPast = evDateOnly < todayStart;
+        } else {
+          var evDate = new Date(evStartStr);
+          isPast = evDate < todayStart;
+        }
       }
 
       if (isPast) {

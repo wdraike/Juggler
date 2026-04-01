@@ -294,9 +294,13 @@ function icsEventsToTasks(events, existingIds) {
     var dateStr = start.month + '/' + start.day;
     var jsDate = new Date(start.year, start.month - 1, start.day);
 
-    var dur = 30; // default
+    // Detect all-day events: DTSTART is date-only (no time component)
+    // or DTEND is a different date with no time (multi-day or single all-day)
+    var isAllDay = start.hour == null;
+
+    var dur = isAllDay ? 0 : 30; // default
     var end = parseICSDate(ev.DTEND);
-    if (end && start.hour != null) {
+    if (!isAllDay && end && start.hour != null) {
       dur = (end.hour * 60 + end.min) - (start.hour * 60 + start.min);
       if (dur <= 0) dur = 30;
     } else if (ev.DURATION) {
@@ -313,7 +317,7 @@ function icsEventsToTasks(events, existingIds) {
     var pri = ev['X-JUGGLER-PRI'] || (ev.PRIORITY ? icalToPri(ev.PRIORITY) : 'P3');
     var status = icalToStatus(ev.STATUS);
     var project = ev.CATEGORIES ? unescICS(ev.CATEGORIES.split(',')[0]) : '';
-    var when = ev['X-JUGGLER-WHEN'] || '';
+    var when = ev['X-JUGGLER-WHEN'] || (isAllDay ? 'allday' : '');
     var dayReq = ev['X-JUGGLER-DAYREQ'] || '';
     var habit = ev['X-JUGGLER-HABIT'] === 'TRUE';
     var rigid = ev['X-JUGGLER-RIGID'] === 'TRUE';

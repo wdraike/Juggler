@@ -9,6 +9,7 @@ import { getTheme, BRAND } from '../../theme/colors';
 import { DAY_NAMES } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 import usePlanInfo from '../../hooks/usePlanInfo';
+import { getTimezoneAbbr } from '../../utils/timezone';
 import PlanUsagePanel from '../billing/PlanUsagePanel';
 import FeedbackButton from '../feedback/FeedbackButton';
 import FeedbackDialog from '../feedback/FeedbackDialog';
@@ -16,7 +17,7 @@ import FeedbackDialog from '../feedback/FeedbackDialog';
 var { services, homeUrl } = require('../../proxy-config');
 var BILLING_URL = services.billing.frontend;
 
-export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, onShowCalSync, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today }) {
+export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, onShowCalSync, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today, activeTimezone, tzSource }) {
   var theme = getTheme(darkMode);
   var { user, logout } = useAuth();
   var [showOverflow, setShowOverflow] = useState(false);
@@ -177,6 +178,17 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
               </button>
               {showPlanPanel && <PlanUsagePanel planName={planName} usageSummary={usageSummary} trialInfo={trialInfo} loading={planLoading} theme={theme} onClose={function() { setShowPlanPanel(false); }} />}
             </div>
+            )}
+            {activeTimezone && (
+              <span title={activeTimezone + ' (' + (tzSource || 'auto') + ')'}
+                style={{
+                  fontSize: 10, fontWeight: 600, color: theme.headerTextMuted,
+                  background: theme.headerBg, border: '1px solid ' + (theme.headerBorder || theme.border),
+                  borderRadius: 3, padding: '2px 5px', letterSpacing: '0.04em',
+                  cursor: 'default', whiteSpace: 'nowrap'
+                }}>
+                {getTimezoneAbbr(activeTimezone)}
+              </span>
             )}
             <button onClick={() => setDarkMode(d => !d)} style={btnStyle(theme, isMobile)} title="Toggle dark mode">
               {darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19'}

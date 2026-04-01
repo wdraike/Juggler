@@ -1,8 +1,8 @@
 /**
  * Timezone-aware date helpers for StriveRS frontend.
  *
- * Uses the user's profile timezone (from AuthContext) instead of
- * the browser's local timezone for "today" and "now" calculations.
+ * Uses the browser-detected timezone (or manual override) for
+ * "today", "now", and UTC ↔ local conversions.
  */
 
 import { formatDateKey } from '../scheduler/dateHelpers';
@@ -104,7 +104,32 @@ export function getUtcOffset(timezone) {
 }
 
 /**
- * Get "today" and "now" in the user's profile timezone.
+ * Hydrate local date/time/day fields on tasks from their UTC scheduledAt.
+ * Called after loading tasks from the API so display components can read
+ * task.date, task.time, task.day without knowing about timezones.
+ *
+ * @param {Array} tasks - Array of task objects with scheduledAt (UTC ISO string)
+ * @param {string} timezone - IANA timezone for local conversion
+ * @returns {Array} Same tasks array with date/time/day fields populated
+ */
+export function hydrateTaskTimezones(tasks, timezone) {
+  if (!tasks || !timezone) return tasks;
+  for (var i = 0; i < tasks.length; i++) {
+    var t = tasks[i];
+    if (t.scheduledAt) {
+      var local = convertTimeForDisplay(t.scheduledAt, timezone);
+      if (local.date) {
+        t.date = local.date;
+        t.time = local.time;
+        t.day = local.day;
+      }
+    }
+  }
+  return tasks;
+}
+
+/**
+ * Get "today" and "now" in the given timezone.
  * Falls back to browser local time if timezone is null/undefined.
  *
  * @param {string|null} timezone - IANA timezone (e.g. 'America/New_York')

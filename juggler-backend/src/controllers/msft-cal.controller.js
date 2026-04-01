@@ -886,6 +886,9 @@ async function sync(req, res) {
       var newTask = allTasks[ti2];
       if (processedTaskIds.has(newTask.id)) continue;
 
+      // Skip tasks already linked to a Microsoft Calendar event
+      if (newTask.msftEventId) continue;
+
       if (newTask._habit || newTask._generated) continue;
       if (!newTask.date) continue;
       if (!newTask.time && newTask.when !== 'allday') continue;

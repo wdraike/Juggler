@@ -4,8 +4,10 @@
  */
 
 import axios from 'axios';
+import { getBrowserTimezone } from '../utils/timezone';
 
 const { apiBase, authServiceUrl } = require('../proxy-config');
+const TZ_OVERRIDE_KEY = 'juggler-tz-override';
 const API_BASE = apiBase;
 const AUTH_SERVICE_URL = authServiceUrl;
 const TOKEN_KEY = 'juggler-access-token';
@@ -36,11 +38,26 @@ export function clearAccessToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-// Request interceptor — attach Bearer token
+/**
+ * Get the active timezone for API requests.
+ * Priority: manual override (localStorage) > browser detection > fallback.
+ */
+function getActiveTimezone() {
+  try {
+    var override = localStorage.getItem(TZ_OVERRIDE_KEY);
+    if (override) return override;
+  } catch (e) { /* ignore */ }
+  return getBrowserTimezone() || 'America/New_York';
+}
+
+export { TZ_OVERRIDE_KEY };
+
+// Request interceptor — attach Bearer token + timezone
 apiClient.interceptors.request.use(config => {
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`;
   }
+  config.headers['X-Timezone'] = getActiveTimezone();
   return config;
 });
 

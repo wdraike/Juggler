@@ -13,7 +13,7 @@ var { withSyncLock } = require('../lib/sync-lock');
  */
 router.post('/run', authenticateJWT, withSyncLock(async function(req, res) {
   try {
-    var opts = req.body && req.body.timezone ? { timezone: req.body.timezone } : undefined;
+    var opts = { timezone: req.headers['x-timezone'] || 'America/New_York' };
     var result = await runScheduleAndPersist(req.user.id, undefined, opts);
     // result now includes dayPlacements and unplaced from the same run (cached)
     res.json(result);
@@ -28,7 +28,7 @@ router.post('/run', authenticateJWT, withSyncLock(async function(req, res) {
  */
 router.get('/placements', authenticateJWT, async function(req, res) {
   try {
-    var opts = req.query && req.query.timezone ? { timezone: req.query.timezone } : undefined;
+    var opts = { timezone: req.headers['x-timezone'] || 'America/New_York' };
     var placements = await getSchedulePlacements(req.user.id, opts);
     res.json(placements);
   } catch (error) {

@@ -1,7 +1,7 @@
 /**
  * ConflictsView — two-tier collapsible tree:
  *   Action Required: overdue, unplaced, data issues
- *   Informational: blocked by deps, backlog
+ *   Informational: past scheduled date, blocked by deps, backlog
  * All nodes default to collapsed; state persists in localStorage.
  */
 
@@ -32,7 +32,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
     var defaults = {
       actionGroup: false, infoGroup: true,
       overdue: true, unplaced: true, dataIssues: true,
-      blocked: true, unscheduled: true
+      blocked: true, unscheduled: true, stale: true
     };
     return Object.assign(defaults, saved);
   });
@@ -49,6 +49,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
 
   var issues = useMemo(() => {
     var overdue = [];
+    var stale = [];
     var blocked = [];
     var unscheduled = [];
 
@@ -60,16 +61,16 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
       // Generated/expanded habit instances are managed by the scheduler
       if (t.generated) return;
 
+      // True overdue: explicit due date in the past
       if (t.due) {
         var dd = parseDate(t.due);
         if (dd && dd < today) overdue.push(t);
       }
 
-      if (t.date && t.date !== 'TBD') {
+      // Past scheduled date: no due date, but scheduled date is in the past
+      if (!t.due && t.date && t.date !== 'TBD') {
         var td = parseDate(t.date);
-        if (td && td < today) {
-          if (!overdue.includes(t)) overdue.push(t);
-        }
+        if (td && td < today) stale.push(t);
       }
 
       var deps = getDepsStatus(t, allTasks, statuses);
@@ -81,7 +82,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
       }
     });
 
-    return { overdue, blocked, unscheduled };
+    return { overdue, stale, blocked, unscheduled };
   }, [allTasks, statuses, today]);
 
   var warnings = schedulerWarnings || [];
@@ -89,8 +90,8 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
   var actionSections = [
     {
       key: 'overdue', title: 'Overdue', tasks: issues.overdue, color: theme.redText,
-      tip: 'Tasks past their due date or scheduled date that haven\'t been completed',
-      help: 'These tasks are past their scheduled or due date and still open. Mark them done, reschedule to a new date, or cancel them.'
+      tip: 'Tasks past their due date that haven\'t been completed',
+      help: 'These tasks are past their due date and still open. Mark them done, reschedule to a new date, or cancel them.'
     },
     {
       key: 'unplaced', title: 'Unplaced', tasks: unplaced || [], color: theme.amberText,
@@ -100,6 +101,11 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
   ];
 
   var infoSections = [
+    {
+      key: 'stale', title: 'Past Scheduled Date', tasks: issues.stale, color: theme.amberText,
+      tip: 'Tasks whose scheduled date has passed but have no hard deadline',
+      help: 'These tasks were scheduled for a past date but have no due date, so they aren\'t actually overdue. The scheduler will move them to today on its next run, or you can reschedule them manually.'
+    },
     {
       key: 'blocked', title: 'Blocked by Dependencies', tasks: issues.blocked, color: theme.purpleText,
       tip: 'Tasks waiting on other tasks to be completed first',
