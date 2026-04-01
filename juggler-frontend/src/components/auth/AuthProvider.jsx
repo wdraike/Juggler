@@ -10,7 +10,7 @@ import apiClient, { setAccessToken, getAccessToken, clearAccessToken } from '../
 
 const AuthContext = createContext(null);
 
-const { authServiceUrl, authFrontendUrl, appId: APP_ID } = require('../../proxy-config');
+import { authServiceUrl, authFrontendUrl, appId as APP_ID } from '../../proxy-config';
 const AUTH_SERVICE_URL = authServiceUrl;
 const AUTH_FRONTEND_URL = authFrontendUrl;
 const APP_URL = window.location.origin;

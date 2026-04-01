@@ -6,7 +6,7 @@
 import axios from 'axios';
 import { getBrowserTimezone } from '../utils/timezone';
 
-const { apiBase, authServiceUrl } = require('../proxy-config');
+import { apiBase, authServiceUrl, appId as _appId } from '../proxy-config';
 const TZ_OVERRIDE_KEY = 'juggler-tz-override';
 const API_BASE = apiBase;
 const AUTH_SERVICE_URL = authServiceUrl;
@@ -107,7 +107,7 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 403 && error.response?.data?.error === 'Subscription required') {
       window.dispatchEvent(new CustomEvent('subscription:required', {
         detail: {
-          product: error.response.data.product || require('../proxy-config').appId,
+          product: error.response.data.product || _appId,
           required_plans: error.response.data.required_plans
         }
       }));

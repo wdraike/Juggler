@@ -5,7 +5,7 @@
 
 import React from 'react';
 
-var { services } = require('../../proxy-config');
+import { services } from '../../proxy-config';
 var BILLING_URL = services.billing.frontend;
 
 function UsageBar({ item, theme }) {

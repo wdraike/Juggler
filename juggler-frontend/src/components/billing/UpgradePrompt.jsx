@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { getTheme } from '../../theme/colors';
 import apiClient from '../../services/apiClient';
 
-var { services } = require('../../proxy-config');
+import { services, appId as _appId } from '../../proxy-config';
 var BILLING_URL = services.billing.frontend;
 
 var LIMIT_MESSAGES = {
@@ -33,7 +33,7 @@ export default function UpgradePrompt({ darkMode }) {
 
   useEffect(function() {
     function handleRequired(e) {
-      setDetail({ type: 'subscription', product: e.detail?.product || require('../../proxy-config').appId });
+      setDetail({ type: 'subscription', product: e.detail?.product || _appId });
       setShow(true);
     }
     function handleLimit(e) {
@@ -51,7 +51,7 @@ export default function UpgradePrompt({ darkMode }) {
         setDetail(null);
       }).catch(function(err) {
         if (err.response?.status === 402) {
-          setDetail({ type: 'subscription', product: require('../../proxy-config').appId });
+          setDetail({ type: 'subscription', product: _appId });
           setShow(true);
         }
       });

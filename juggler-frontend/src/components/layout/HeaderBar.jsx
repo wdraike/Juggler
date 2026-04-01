@@ -14,7 +14,7 @@ import PlanUsagePanel from '../billing/PlanUsagePanel';
 import FeedbackButton from '../feedback/FeedbackButton';
 import FeedbackDialog from '../feedback/FeedbackDialog';
 
-var { services, homeUrl } = require('../../proxy-config');
+import { services, homeUrl } from '../../proxy-config';
 var BILLING_URL = services.billing.frontend;
 
 export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, onShowCalSync, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today, activeTimezone, tzSource }) {
