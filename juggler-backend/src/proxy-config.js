@@ -58,16 +58,26 @@ const ENVIRONMENTS = {
 // ─── Environment detection ──────────────────────────────────────────────
 
 function detect() {
-  // Browser: detect from hostname (must use bracket notation to avoid CRA inlining)
-  var w = typeof window !== 'undefined' ? window : null;
-  var hostname = w && w.location ? w.location.hostname : '';
-
-  // Check most-specific first (localdev before raikegroup.com)
-  if (hostname.indexOf('.localdev.raikegroup.com') >= 0) {
-    return { name: 'localdev', ...ENVIRONMENTS.localdev };
+  // Browser: detect from hostname
+  if (typeof window !== 'undefined' && window.location) {
+    var hostname = window.location.hostname;
+    if (hostname.indexOf('.localdev.raikegroup.com') >= 0) {
+      return { name: 'localdev', ...ENVIRONMENTS.localdev };
+    }
+    if (hostname.indexOf('.raikegroup.com') >= 0) {
+      return { name: 'production', ...ENVIRONMENTS.production };
+    }
   }
-  if (hostname.indexOf('.raikegroup.com') >= 0) {
-    return { name: 'production', ...ENVIRONMENTS.production };
+
+  // Node.js backend: detect from RAIKE_ENV or NODE_ENV
+  if (typeof process !== 'undefined' && process.env) {
+    var envName = process.env.RAIKE_ENV;
+    if (envName && ENVIRONMENTS[envName]) {
+      return { name: envName, ...ENVIRONMENTS[envName] };
+    }
+    if (process.env.NODE_ENV === 'production') {
+      return { name: 'production', ...ENVIRONMENTS.production };
+    }
   }
 
   return { name: 'localhost', ...ENVIRONMENTS.localhost };
