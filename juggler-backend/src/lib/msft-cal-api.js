@@ -105,7 +105,8 @@ async function graphFetch(accessToken, path, options) {
   var url = GRAPH_BASE + path;
   var headers = {
     'Authorization': 'Bearer ' + accessToken,
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    'Prefer': 'outlook.body-content-type="text"'
   };
 
   var fetchOpts = { method: options.method || 'GET', headers: headers };

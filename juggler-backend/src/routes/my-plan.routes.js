@@ -135,6 +135,15 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
       }
     } catch {}
 
+    // Count disabled items so the frontend can show a badge/notification
+    let disabledCount = 0;
+    try {
+      const disabledRow = await db('tasks')
+        .where({ user_id: userId, status: 'disabled' })
+        .count('* as count').first();
+      disabledCount = parseInt(disabledRow.count, 10);
+    } catch {}
+
     res.json({
       plan_name: planName,
       plan_id: planId,
@@ -142,6 +151,7 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
       usage,
       subscription_status: subscriptionStatus,
       trial_end: trialEnd,
+      disabled_items: disabledCount,
     });
   } catch (error) {
     console.error('[my-plan] Error:', error.message);

@@ -80,7 +80,7 @@ function registerDataTools(server, userId) {
   // ── sync_calendar ──
   server.tool(
     'sync_calendar',
-    'Trigger a calendar sync (push local changes to calendar and pull remote changes). Syncs whichever calendar provider is connected.',
+    'Trigger a calendar sync (push local changes to calendar and pull remote changes). Syncs all connected calendar providers via the unified sync engine.',
     {},
     async () => {
       var user = await db('users').where('id', userId).first();
@@ -88,50 +88,24 @@ function registerDataTools(server, userId) {
         return { content: [{ type: 'text', text: 'Error: User not found' }], isError: true };
       }
 
-      var results = {};
-
-      // Try Google Calendar
-      if (user.gcal_refresh_token) {
-        try {
-          var gcalController = require('../../controllers/gcal.controller');
-          // Create a minimal req/res to invoke the sync logic
-          var gcalResult = await new Promise(function(resolve, reject) {
-            var fakeReq = { user: user };
-            var fakeRes = {
-              json: function(data) { resolve(data); },
-              status: function(code) { return { json: function(data) { reject(new Error(data.error || 'Sync failed')); } }; }
-            };
-            gcalController.sync(fakeReq, fakeRes);
-          });
-          results.googleCalendar = gcalResult;
-        } catch (err) {
-          results.googleCalendar = { error: err.message };
-        }
-      }
-
-      // Try Microsoft Calendar
-      if (user.msft_cal_refresh_token) {
-        try {
-          var msftCalController = require('../../controllers/msft-cal.controller');
-          var msftResult = await new Promise(function(resolve, reject) {
-            var fakeReq = { user: user };
-            var fakeRes = {
-              json: function(data) { resolve(data); },
-              status: function(code) { return { json: function(data) { reject(new Error(data.error || 'Sync failed')); } }; }
-            };
-            msftCalController.sync(fakeReq, fakeRes);
-          });
-          results.microsoftCalendar = msftResult;
-        } catch (err) {
-          results.microsoftCalendar = { error: err.message };
-        }
-      }
-
       if (!user.gcal_refresh_token && !user.msft_cal_refresh_token) {
         return { content: [{ type: 'text', text: 'No calendar provider connected. Connect Google or Microsoft Calendar in the app first.' }] };
       }
 
-      return { content: [{ type: 'text', text: JSON.stringify(results, null, 2) }] };
+      try {
+        var calSyncController = require('../../controllers/cal-sync.controller');
+        var result = await new Promise(function(resolve, reject) {
+          var fakeReq = { user: user };
+          var fakeRes = {
+            json: function(data) { resolve(data); },
+            status: function(code) { return { json: function(data) { reject(new Error(data.error || 'Sync failed')); } }; }
+          };
+          calSyncController.sync(fakeReq, fakeRes);
+        });
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      } catch (err) {
+        return { content: [{ type: 'text', text: 'Sync error: ' + err.message }], isError: true };
+      }
     }
   );
 }

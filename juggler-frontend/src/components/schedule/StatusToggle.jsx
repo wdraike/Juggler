@@ -5,21 +5,32 @@
 
 import React from 'react';
 
-var STATUSES = [
+var ALL_STATUSES = [
   { value: '',       icon: '\u25CB', label: 'Open',   activeBg: '#F5F0E8', activeBgDark: '#2C2B28', color: '#5C5A55', colorDark: '#B0A898' },
   { value: 'done',   icon: '\u2713', label: 'Done',   activeBg: '#D1FAE5', activeBgDark: '#0A3622', color: '#2D6A4F', colorDark: '#6EE7B7' },
   { value: 'wip',    icon: '\u231B', label: 'WIP',    activeBg: '#FEF3C7', activeBgDark: '#3A2A08', color: '#9E6B3B', colorDark: '#E8C878' },
   { value: 'cancel', icon: '\u2715', label: 'Cancel', activeBg: '#FEE2E2', activeBgDark: '#3A0A10', color: '#8B2635', colorDark: '#FCA5A5' },
   { value: 'skip',   icon: '\u21ED', label: 'Skip',   activeBg: '#E8E0D0', activeBgDark: '#2C2B28', color: '#5C5A55', colorDark: '#B0A898' },
+  { value: 'pause',  icon: '\u23F8', label: 'Pause',  activeBg: '#E0E7FF', activeBgDark: '#1E1B4B', color: '#4338CA', colorDark: '#A5B4FC' },
 ];
 
-export default function StatusToggle({ value, onChange, darkMode, compact, isMobile }) {
+export default function StatusToggle({ value, onChange, darkMode, compact, isMobile, taskType }) {
   var size = compact ? 16 : (isMobile ? 28 : 22);
   var fontSize = compact ? 8 : (isMobile ? 14 : 12);
 
+  // Filter statuses based on task type
+  var statuses = ALL_STATUSES;
+  if (taskType === 'habit_template') {
+    // Templates can only be paused or unpaused
+    statuses = ALL_STATUSES.filter(function(s) { return s.value === '' || s.value === 'pause'; });
+  } else if (taskType === 'habit_instance') {
+    // Instances can't be paused — pause is template-level
+    statuses = ALL_STATUSES.filter(function(s) { return s.value !== 'pause'; });
+  }
+
   return (
     <div style={{ display: 'flex', gap: compact ? 1 : 3, alignItems: 'center' }}>
-      {STATUSES.map(function(s) {
+      {statuses.map(function(s) {
         var active = (value || '') === s.value;
         return (
           <button

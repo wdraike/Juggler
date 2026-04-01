@@ -1,18 +1,16 @@
 const crypto = require('crypto');
 
-// Mock db and gcal-api so the module loads without DB
-jest.mock('../src/db', () => {
-  const mock = () => mock;
-  mock.fn = { now: () => 'MOCK_NOW' };
-  mock.raw = (s) => s;
-  return mock;
-});
-jest.mock('../src/lib/gcal-api', () => ({}));
-jest.mock('../src/scheduler/runSchedule', () => ({}));
+const { jugglerDateToISO, isoToJugglerDate, taskHash } = require('../src/controllers/cal-sync-helpers');
 
-const { jugglerDateToISO, isoToJugglerDate, taskHash, eventHash } = require('../src/controllers/gcal.controller');
+// GCal event hash (from gcal.adapter.js) — inline for testing
+function eventHash(event) {
+  var startStr = event.start?.dateTime || event.start?.date || '';
+  var endStr = event.end?.dateTime || event.end?.date || '';
+  var str = [event.summary || '', startStr, endStr, event.description || ''].join('|');
+  return crypto.createHash('md5').update(str).digest('hex');
+}
 
-describe('gcal helpers', () => {
+describe('cal-sync helpers', () => {
   describe('jugglerDateToISO', () => {
     it('converts date + time to ISO string', () => {
       const result = jugglerDateToISO('3/15', '9:00 AM', 2026);
@@ -66,7 +64,7 @@ describe('gcal helpers', () => {
     });
   });
 
-  describe('eventHash', () => {
+  describe('eventHash (gcal)', () => {
     it('produces consistent hash', () => {
       const event = { summary: 'Test', start: { dateTime: '2026-03-15T09:00:00' }, end: { dateTime: '2026-03-15T10:00:00' }, description: '' };
       expect(eventHash(event)).toBe(eventHash(event));

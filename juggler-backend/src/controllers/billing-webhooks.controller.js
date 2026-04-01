@@ -3,9 +3,161 @@
  *
  * Receives subscription lifecycle events from the payment service.
  * Invalidates the plan features cache so the app picks up changes immediately.
+ * Enforces entity limits on downgrade by disabling excess items.
  */
 
-const { invalidateUserPlanCache } = require('../middleware/plan-features.middleware');
+const db = require('../db');
+const { invalidateUserPlanCache, getCachedPlanFeatures } = require('../middleware/plan-features.middleware');
+const { countActiveTasks, countHabitTemplates } = require('../middleware/entity-limits');
+const cache = require('../lib/redis');
+
+/**
+ * Enforce plan limits by disabling excess habits and tasks.
+ * Disables in reverse chronological order (newest first) to preserve the user's
+ * oldest/most established items.
+ *
+ * Order: habit templates first (with their instances), then regular tasks.
+ */
+async function enforceDowngradeLimits(userId, planFeatures) {
+  if (!planFeatures) return { disabledHabits: 0, disabledTasks: 0 };
+
+  var habitLimit = planFeatures.limits && planFeatures.limits.habit_templates;
+  var taskLimit = planFeatures.limits && planFeatures.limits.active_tasks;
+  var disabledHabits = 0;
+  var disabledTasks = 0;
+  var now = new Date();
+
+  await db.transaction(async function(trx) {
+    // --- Phase 1: Disable excess habit templates (newest first) ---
+    if (habitLimit !== -1 && habitLimit !== undefined && habitLimit !== null) {
+      var currentHabits = await trx('tasks')
+        .where('user_id', userId)
+        .where('task_type', 'habit_template')
+        .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
+        .count('* as count').first();
+      var habitCount = parseInt(currentHabits.count, 10);
+
+      if (habitCount > habitLimit) {
+        var excess = habitCount - habitLimit;
+        // Get the newest habit templates to disable
+        var habitsToDisable = await trx('tasks')
+          .where('user_id', userId)
+          .where('task_type', 'habit_template')
+          .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
+          .orderBy('created_at', 'desc')
+          .limit(excess)
+          .select('id');
+
+        var habitIds = habitsToDisable.map(function(h) { return h.id; });
+
+        if (habitIds.length > 0) {
+          // Disable the templates
+          await trx('tasks')
+            .where('user_id', userId)
+            .whereIn('id', habitIds)
+            .update({ status: 'disabled', disabled_at: now, disabled_reason: 'downgrade', updated_at: now });
+
+          // Disable all open instances of these templates
+          var disabledInstances = await trx('tasks')
+            .where('user_id', userId)
+            .whereIn('source_id', habitIds)
+            .where('status', '')
+            .update({ status: 'disabled', disabled_at: now, disabled_reason: 'downgrade', updated_at: now });
+
+          // Clean up calendar sync for disabled instances
+          var instanceIds = await trx('tasks')
+            .where('user_id', userId)
+            .whereIn('source_id', habitIds)
+            .where('status', 'disabled')
+            .select('id');
+          var allDisabledIds = habitIds.concat(instanceIds.map(function(i) { return i.id; }));
+
+          if (allDisabledIds.length > 0) {
+            await trx('cal_sync_ledger')
+              .where('user_id', userId)
+              .whereIn('task_id', allDisabledIds)
+              .where('status', 'active')
+              .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
+              .catch(function() {});
+          }
+
+          disabledHabits = habitIds.length;
+        }
+      }
+    }
+
+    // --- Phase 2: Disable excess active tasks (newest first) ---
+    if (taskLimit !== -1 && taskLimit !== undefined && taskLimit !== null) {
+      // Re-count after disabling habit instances (they count toward active tasks)
+      var currentTasks = await trx('tasks')
+        .where('user_id', userId)
+        .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
+        .where(function() {
+          this.whereNull('task_type').orWhereNot('task_type', 'habit_template');
+        })
+        .count('* as count').first();
+      var taskCount = parseInt(currentTasks.count, 10);
+
+      if (taskCount > taskLimit) {
+        var taskExcess = taskCount - taskLimit;
+        // Get newest regular tasks to disable (exclude habit instances — those are handled with templates)
+        var tasksToDisable = await trx('tasks')
+          .where('user_id', userId)
+          .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
+          .where(function() {
+            this.whereNull('task_type').orWhere('task_type', 'task');
+          })
+          .orderBy('created_at', 'desc')
+          .limit(taskExcess)
+          .select('id', 'depends_on');
+
+        var taskIds = tasksToDisable.map(function(t) { return t.id; });
+
+        if (taskIds.length > 0) {
+          // Re-link dependencies: remove disabled tasks from other tasks' depends_on
+          for (var i = 0; i < taskIds.length; i++) {
+            var taskId = taskIds[i];
+            var affected = await trx('tasks')
+              .where('user_id', userId)
+              .whereRaw('JSON_CONTAINS(depends_on, ?)', [JSON.stringify(taskId)])
+              .select('id', 'depends_on');
+            for (var j = 0; j < affected.length; j++) {
+              var other = affected[j];
+              var deps = typeof other.depends_on === 'string'
+                ? JSON.parse(other.depends_on || '[]') : (other.depends_on || []);
+              var newDeps = deps.filter(function(d) { return d !== taskId; });
+              await trx('tasks').where({ id: other.id, user_id: userId })
+                .update({ depends_on: JSON.stringify(newDeps), updated_at: db.fn.now() });
+            }
+          }
+
+          // Disable the tasks
+          await trx('tasks')
+            .where('user_id', userId)
+            .whereIn('id', taskIds)
+            .update({ status: 'disabled', disabled_at: now, disabled_reason: 'downgrade', updated_at: now });
+
+          // Clean up calendar sync
+          await trx('cal_sync_ledger')
+            .where('user_id', userId)
+            .whereIn('task_id', taskIds)
+            .where('status', 'active')
+            .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
+            .catch(function() {});
+
+          disabledTasks = taskIds.length;
+        }
+      }
+    }
+  });
+
+  if (disabledHabits > 0 || disabledTasks > 0) {
+    await cache.invalidateTasks(userId);
+    console.log(`[billing-webhook] Disabled ${disabledHabits} habits, ${disabledTasks} tasks for user ${userId}`);
+  }
+
+  return { disabledHabits, disabledTasks };
+}
 
 async function handleWebhook(req, res) {
   try {
@@ -24,6 +176,23 @@ async function handleWebhook(req, res) {
         if (userId) invalidateUserPlanCache(userId);
         break;
 
+      case 'subscription.downgrade_applied':
+        console.log(`[billing-webhook] Downgrade applied for user ${userId}`);
+        if (userId) {
+          invalidateUserPlanCache(userId);
+          // Fetch the new plan's features and enforce limits
+          try {
+            var allFeatures = await getCachedPlanFeatures();
+            var planFeatures = data.to_planId ? allFeatures[data.to_planId] : null;
+            if (planFeatures) {
+              await enforceDowngradeLimits(userId, planFeatures);
+            }
+          } catch (err) {
+            console.error('[billing-webhook] Downgrade enforcement failed:', err.message);
+          }
+        }
+        break;
+
       case 'subscription.canceled':
       case 'subscription.cancel_scheduled':
       case 'subscription.expired':
@@ -34,13 +203,9 @@ async function handleWebhook(req, res) {
       case 'subscription.rebundled':
       case 'subscription.discount_applied':
       case 'subscription.trial_extended':
-      case 'subscription.downgrade_applied':
+      case 'subscription.downgrade_scheduled':
         console.log(`[billing-webhook] ${event} for user ${userId}`);
         if (userId) invalidateUserPlanCache(userId);
-        break;
-
-      case 'subscription.downgrade_scheduled':
-        console.log(`[billing-webhook] Downgrade scheduled for user ${userId}`);
         break;
 
       default:
@@ -54,4 +219,4 @@ async function handleWebhook(req, res) {
   }
 }
 
-module.exports = { handleWebhook };
+module.exports = { handleWebhook, enforceDowngradeLimits };

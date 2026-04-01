@@ -12,6 +12,7 @@
  */
 
 const { PRODUCT_LABEL } = require('../service-identity');
+const _proxyConfig = require('../proxy-config');
 const CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
 const USER_PLAN_CACHE_TTL_MS = 2 * 60 * 1000;
 
@@ -138,6 +139,27 @@ function invalidateUserPlanCache(userId) {
   _userPlanCache.delete(userId);
 }
 
+// ─── Login reconciliation: enforce limits on stale plan changes ───────
+// Runs at most once per user plan cache refresh (2 min) to catch missed webhooks.
+const _reconciliationPending = new Map();
+
+async function reconcileLimitsIfNeeded(userId, planFeatures) {
+  const now = Date.now();
+  const last = _reconciliationPending.get(userId);
+  if (last && (now - last) < USER_PLAN_CACHE_TTL_MS) return; // debounce
+  _reconciliationPending.set(userId, now);
+
+  // Run async — don't block the request
+  setImmediate(async () => {
+    try {
+      const { enforceDowngradeLimits } = require('../controllers/billing-webhooks.controller');
+      await enforceDowngradeLimits(userId, planFeatures);
+    } catch (err) {
+      console.error('[plan-features] Reconciliation failed for user', userId, ':', err.message);
+    }
+  });
+}
+
 // ─── Middleware ─────────────────────────────────────────────────────────
 const resolvePlanFeatures = async (req, res, next) => {
   try {
@@ -153,7 +175,7 @@ const resolvePlanFeatures = async (req, res, next) => {
         error: 'Subscription required',
         code: 'SUBSCRIPTION_REQUIRED',
         message: 'You need an active subscription to use this app. Choose a plan to get started.',
-        plans_url: `${require('../proxy-config').services.billing.frontend}/plans`,
+        plans_url: `${_proxyConfig.services.billing.frontend}/plans`,
       });
     }
 
@@ -171,6 +193,9 @@ const resolvePlanFeatures = async (req, res, next) => {
     if (!req.planFeatures) {
       return res.status(503).json({ error: 'Plan configuration unavailable. Please try again.' });
     }
+
+    // Background reconciliation: verify user isn't over limits (catches missed webhooks)
+    reconcileLimitsIfNeeded(req.user.id, req.planFeatures);
 
     next();
   } catch (err) {

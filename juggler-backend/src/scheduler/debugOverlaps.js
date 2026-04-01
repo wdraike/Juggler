@@ -248,7 +248,7 @@ function checkDeadlineMisses(dayPlacements, allTasks, todayKey) {
   allTasks.forEach(function(t) {
     if (!t.due) return;
     var st = t.status || '';
-    if (st === 'done' || st === 'cancel' || st === 'skip') return;
+    if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'pause' || st === 'disabled') return;
     var deadline = parseDate(t.due);
     if (!deadline) return;
     var lastDate = lastDateByTask[t.id];
@@ -315,7 +315,7 @@ function checkDependencyOrder(dayPlacements, allTasks, statuses) {
         var depStatus = statuses ? (statuses[depId] || '') : '';
         if (!depEnd) {
           // Dep not placed — flag if it's active (not done/skip/cancel)
-          if (depTask && depStatus !== 'done' && depStatus !== 'cancel' && depStatus !== 'skip') {
+          if (depTask && depStatus !== 'done' && depStatus !== 'cancel' && depStatus !== 'skip' && depStatus !== 'disabled') {
             issues.push({
               msg: '"' + p.task.text + '" (' + p.task.id + ') depends on "' +
                 (depTask ? depTask.text : depId) + '" (' + depId + ') which is NOT PLACED (status: ' + (depStatus || 'none') + ')'

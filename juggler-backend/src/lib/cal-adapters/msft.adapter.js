@@ -268,6 +268,9 @@ function buildMsftEventBody(task, year, tz, opts) {
   if (task.notes) descParts.push('Notes: ' + task.notes);
   descParts.push('', 'Synced from Raike & Sons');
 
+  var isDone = task.status === 'done';
+  var subjectText = isDone ? '✓ ' + task.text : task.text;
+
   if (isAllDay) {
     var dateParts = (task.date || '').split('/');
     var month = parseInt(dateParts[0], 10);
@@ -278,13 +281,13 @@ function buildMsftEventBody(task, year, tz, opts) {
     var endDate = endObj.getFullYear() + '-' + String(endObj.getMonth() + 1).padStart(2, '0') + '-' + String(endObj.getDate()).padStart(2, '0');
 
     var body = {
-      subject: task.text,
+      subject: subjectText,
       body: { contentType: 'text', content: descParts.join('\n') },
       start: { dateTime: startDate + 'T00:00:00.0000000', timeZone: 'UTC' },
       end: { dateTime: endDate + 'T00:00:00.0000000', timeZone: 'UTC' },
       isAllDay: true
     };
-    if (task.marker) {
+    if (task.marker || isDone) {
       body.showAs = 'free';
     }
     return body;
@@ -297,12 +300,12 @@ function buildMsftEventBody(task, year, tz, opts) {
     var endUtc = new Date(startUtc.getTime() + dur * 60000);
 
     var body2 = {
-      subject: task.text,
+      subject: subjectText,
       body: { contentType: 'text', content: descParts.join('\n') },
       start: { dateTime: startUtc.toISOString().replace('Z', ''), timeZone: 'UTC' },
       end: { dateTime: endUtc.toISOString().replace('Z', ''), timeZone: 'UTC' }
     };
-    if (task.marker) {
+    if (task.marker || isDone) {
       body2.showAs = 'free';
     }
     return body2;
@@ -319,12 +322,12 @@ function buildMsftEventBody(task, year, tz, opts) {
   var endISO = sParts[0] + 'T' + String(eH).padStart(2, '0') + ':' + String(eM).padStart(2, '0') + ':00';
 
   var body3 = {
-    subject: task.text,
+    subject: subjectText,
     body: { contentType: 'text', content: descParts.join('\n') },
     start: { dateTime: startISO, timeZone: ianaToWindows(tz) },
     end: { dateTime: endISO, timeZone: ianaToWindows(tz) }
   };
-  if (task.marker) {
+  if (task.marker || isDone) {
     body3.showAs = 'free';
   }
   return body3;

@@ -198,6 +198,9 @@ function buildEventBody(task, year, tz, opts) {
   if (task.notes) descParts.push('Notes: ' + task.notes);
   descParts.push('', 'Synced from Raike & Sons');
 
+  var isDone = task.status === 'done';
+  var summaryText = isDone ? '✓ ' + task.text : task.text;
+
   if (isAllDay) {
     var dateParts = (task.date || '').split('/');
     var month = parseInt(dateParts[0], 10);
@@ -208,12 +211,12 @@ function buildEventBody(task, year, tz, opts) {
     var endDate = endObj.getFullYear() + '-' + String(endObj.getMonth() + 1).padStart(2, '0') + '-' + String(endObj.getDate()).padStart(2, '0');
 
     var body = {
-      summary: task.text,
+      summary: summaryText,
       description: descParts.join('\n'),
       start: { date: startDate },
       end: { date: endDate }
     };
-    if (task.marker) {
+    if (task.marker || isDone) {
       body.transparency = 'transparent';
     }
     return body;
@@ -229,12 +232,12 @@ function buildEventBody(task, year, tz, opts) {
   var endISO = sParts[0] + 'T' + String(eH).padStart(2, '0') + ':' + String(eM).padStart(2, '0') + ':00';
 
   var body2 = {
-    summary: task.text,
+    summary: summaryText,
     description: descParts.join('\n'),
     start: { dateTime: startISO, timeZone: tz },
     end: { dateTime: endISO, timeZone: tz }
   };
-  if (task.marker) {
+  if (task.marker || isDone) {
     body2.transparency = 'transparent';
   }
   return body2;

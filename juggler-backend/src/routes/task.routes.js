@@ -38,10 +38,12 @@ function scheduleAfterMutation(req, res, next) {
 
 router.get('/', taskController.getAllTasks);
 router.get('/version', taskController.getVersion);
+router.get('/disabled', taskController.getDisabledTasks);
 router.post('/', checkTaskOrHabitLimit, scheduleAfterMutation, taskController.createTask);
 router.post('/batch', checkBatchTaskLimits, scheduleAfterMutation, taskController.batchCreateTasks);
 router.put('/batch', scheduleAfterMutation, taskController.batchUpdateTasks);
 router.put('/:id/status', taskController.updateTaskStatus);
+router.put('/:id/re-enable', scheduleAfterMutation, taskController.reEnableTask);
 router.put('/:id', scheduleAfterMutation, taskController.updateTask);
 router.delete('/:id', scheduleAfterMutation, taskController.deleteTask);
 

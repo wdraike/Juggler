@@ -17,9 +17,12 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
     if (t.date && t.text) existingByDateText[t.date + '|' + t.text] = true;
   });
 
+  var statuses = opts && opts.statuses ? opts.statuses : {};
   var sources = allTasks.filter(function(t) {
     if (!t.recur || t.recur.type === 'none') return false;
     if (t.taskType === 'habit_instance') return false;
+    var st = statuses[t.id] || t.status || '';
+    if (st === 'pause' || st === 'disabled') return false;
     return true;
   });
   if (sources.length === 0) return [];

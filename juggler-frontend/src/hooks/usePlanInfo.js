@@ -22,6 +22,7 @@ export default function usePlanInfo() {
   var [usage, setUsage] = useState({});
   var [loading, setLoading] = useState(true);
   var [hasSubscription, setHasSubscription] = useState(false);
+  var [disabledItems, setDisabledItems] = useState(0);
 
   var [trialInfo, setTrialInfo] = useState(null);
 
@@ -30,6 +31,7 @@ export default function usePlanInfo() {
       setPlanName(res.data.plan_name || res.data.plan_id || 'Free');
       setFeatures(res.data.features);
       setUsage(res.data.usage || {});
+      setDisabledItems(res.data.disabled_items || 0);
       setHasSubscription(true);
       if (res.data.trial_end && res.data.subscription_status === 'trialing') {
         var trialEnd = new Date(res.data.trial_end);
@@ -83,5 +85,5 @@ export default function usePlanInfo() {
     });
   });
 
-  return { planName, features, usage, usageSummary, trialInfo, loading, hasSubscription, refresh: load };
+  return { planName, features, usage, usageSummary, trialInfo, loading, hasSubscription, disabledItems, refresh: load };
 }

@@ -123,6 +123,7 @@ export default function useConfig() {
   var [fontSize, setFontSize] = useState(100);
   var [pullForwardDampening, setPullForwardDampening] = useState(false);
   var [timezoneOverride, setTimezoneOverride] = useState(null);
+  var [calCompletedBehavior, setCalCompletedBehavior] = useState('update');
 
   // Unified template state
   var [scheduleTemplates, setScheduleTemplates] = useState(DEFAULT_SCHEDULE_TEMPLATES);
@@ -149,6 +150,7 @@ export default function useConfig() {
       if (p.schedCeiling !== undefined) setSchedCeiling(p.schedCeiling);
       if (p.fontSize !== undefined) setFontSize(p.fontSize);
       if (p.pullForwardDampening !== undefined) setPullForwardDampening(p.pullForwardDampening);
+      if (p.calCompletedBehavior !== undefined) setCalCompletedBehavior(p.calCompletedBehavior);
       if (p.timezoneOverride !== undefined) {
         setTimezoneOverride(p.timezoneOverride);
         // Sync to localStorage so apiClient X-Timezone header picks it up
@@ -207,9 +209,11 @@ export default function useConfig() {
   // Save a config key to backend
   var saveConfig = useCallback(async function(key, value) {
     try {
-      await apiClient.put('/config/' + key, { value: value });
+      var resp = await apiClient.put('/config/' + key, { value: value });
+      return resp.data;
     } catch (error) {
       console.error('Failed to save config ' + key + ':', error);
+      return null;
     }
   }, []);
 
@@ -249,7 +253,7 @@ export default function useConfig() {
   }, [saveConfig]);
 
   /** Save unified templates + auto-derive legacy formats */
-  var updateScheduleTemplates = useCallback(function(tmpls, tDefs, tOvr) {
+  var updateScheduleTemplates = useCallback(async function(tmpls, tDefs, tOvr) {
     // Use current values as fallback
     var defs = tDefs || templateDefaults;
     var ovr = tOvr !== undefined ? tOvr : templateOverrides;
@@ -262,10 +266,11 @@ export default function useConfig() {
     setTimeBlocks(derivedBlocks);
     setLocSchedules(derivedLoc);
 
-    // Persist all
-    saveConfig('schedule_templates', tmpls);
+    // Persist all — schedule_templates first to capture warnings
+    var result = await saveConfig('schedule_templates', tmpls);
     saveConfig('time_blocks', derivedBlocks);
     saveConfig('loc_schedules', derivedLoc);
+    return result;
   }, [saveConfig, templateDefaults, templateOverrides]);
 
   var updateTemplateDefaults = useCallback(function(defs) {
@@ -311,12 +316,12 @@ export default function useConfig() {
     locations, tools, toolMatrix, timeBlocks, projects,
     locSchedules, locScheduleDefaults, locScheduleOverrides,
     hourLocationOverrides, splitDefault, splitMinDefault,
-    gridZoom, schedFloor, schedCeiling, fontSize, pullForwardDampening, timezoneOverride,
+    gridZoom, schedFloor, schedCeiling, fontSize, pullForwardDampening, timezoneOverride, calCompletedBehavior,
     scheduleTemplates, templateDefaults, templateOverrides,
     setLocations, setTools, setToolMatrix, setTimeBlocks, setProjects,
     setLocSchedules, setLocScheduleDefaults, setLocScheduleOverrides,
     setHourLocationOverrides, setSplitDefault, setSplitMinDefault,
-    setGridZoom, setSchedFloor, setSchedCeiling, setFontSize, setPullForwardDampening, setTimezoneOverride,
+    setGridZoom, setSchedFloor, setSchedCeiling, setFontSize, setPullForwardDampening, setTimezoneOverride, setCalCompletedBehavior,
     setScheduleTemplates, setTemplateDefaults, setTemplateOverrides,
     initFromConfig,
     updateToolMatrix, updateTimeBlocks,

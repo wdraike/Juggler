@@ -278,10 +278,12 @@ function registerTaskTools(server, userId) {
             .update({ depends_on: JSON.stringify(newDeps), updated_at: db.fn.now() });
         }
 
-        if (task.gcal_event_id) {
-          await trx('gcal_sync_ledger')
+        if (task.gcal_event_id || task.msft_event_id) {
+          await trx('cal_sync_ledger')
             .where({ user_id: userId, task_id: id })
-            .update({ task_id: null, synced_at: db.fn.now() });
+            .where('status', 'active')
+            .update({ task_id: null, synced_at: db.fn.now() })
+            .catch(function() {});
         }
 
         await trx('tasks').where({ id: id, user_id: userId }).del();

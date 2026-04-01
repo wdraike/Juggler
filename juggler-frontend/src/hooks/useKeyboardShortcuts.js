@@ -33,9 +33,10 @@ export default function useKeyboardShortcuts({
     function filterTask(t) {
       var st = stateRef.current.statuses[t.id] || '';
       var f = stateRef.current.filter;
-      if (f === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip';
+      if (f === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause';
       if (f === 'done') return st === 'done';
       if (f === 'wip') return st === 'wip';
+      if (f === 'pause') return st === 'pause';
       return true;
     }
 

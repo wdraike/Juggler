@@ -31,7 +31,7 @@ var TABS = [
   { id: 'preferences', label: 'Preferences', tip: 'Preferences \u2014 font size, grid zoom, task defaults' },
 ];
 
-export default function SettingsPanel({ onClose, darkMode, config, allProjectNames, allTasks, isMobile, onRenameProject }) {
+export default function SettingsPanel({ onClose, darkMode, config, allProjectNames, allTasks, isMobile, onRenameProject, showToast }) {
   var theme = getTheme(darkMode);
   var [tab, setTab] = useState('locations');
 
@@ -85,7 +85,7 @@ export default function SettingsPanel({ onClose, darkMode, config, allProjectNam
           {tab === 'matrix' && <MatrixTab config={config} theme={theme} />}
           {tab === 'projects' && <ProjectsTab config={config} theme={theme} allProjectNames={allProjectNames} allTasks={allTasks || []} onRenameProject={onRenameProject} />}
           {tab === 'preferences' && <PreferencesTab config={config} theme={theme} />}
-          {tab === 'templates' && <UnifiedTemplateTab config={config} theme={theme} />}
+          {tab === 'templates' && <UnifiedTemplateTab config={config} theme={theme} showToast={showToast} allTasks={allTasks} />}
         </div>
       </div>
     </div>
@@ -569,7 +569,7 @@ function PreferencesTab({ config, theme }) {
       gridZoom: config.gridZoom, splitDefault: config.splitDefault,
       splitMinDefault: config.splitMinDefault, schedFloor: config.schedFloor, schedCeiling: config.schedCeiling,
       fontSize: config.fontSize, pullForwardDampening: config.pullForwardDampening,
-      timezoneOverride: config.timezoneOverride,
+      timezoneOverride: config.timezoneOverride, calCompletedBehavior: config.calCompletedBehavior,
       ...patch
     });
   }
@@ -683,6 +683,18 @@ function PreferencesTab({ config, theme }) {
             onChange={e => { var v = e.target.checked; config.setPullForwardDampening(v); savePrefs({ pullForwardDampening: v }); }} />
           Dampen pull-forward (less aggressive when calendar is open)
         </label>
+
+        <div style={{ fontSize: 12, color: theme.text }}>
+          <span style={{ fontWeight: 500 }}>Completed tasks on calendar:</span>
+          <select
+            value={config.calCompletedBehavior || 'update'}
+            onChange={function(e) { var v = e.target.value; config.setCalCompletedBehavior(v); savePrefs({ calCompletedBehavior: v }); }}
+            style={{ marginLeft: 8, padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12, fontFamily: 'inherit' }}>
+            <option value="update">Mark as done</option>
+            <option value="delete">Remove from calendar</option>
+            <option value="keep">Keep as-is</option>
+          </select>
+        </div>
       </div>
     </div>
   );
@@ -1230,7 +1242,7 @@ function ExpandedLocationEditor({ blocks, locOverrides, locations, theme, onLocO
   );
 }
 
-function UnifiedTemplateTab({ config, theme }) {
+function UnifiedTemplateTab({ config, theme, showToast, allTasks }) {
   var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   var templates = config.scheduleTemplates || {};
   var templateIds = Object.keys(templates);
@@ -1245,15 +1257,34 @@ function UnifiedTemplateTab({ config, theme }) {
   var blocks = tmpl?.blocks || [];
   var locOverrides = tmpl?.locOverrides || {};
 
-  function saveTemplate(id, patch) {
+  async function handleOrphanedWarnings(result) {
+    if (!result || !result.warnings || result.warnings.length === 0) return;
+    var warning = result.warnings.find(function(w) { return w.type === 'orphanedWhenTags'; });
+    if (!warning || warning.tasks.length === 0) return;
+    var names = warning.tasks.map(function(t) { return '"' + (t.text || '').slice(0, 30) + '"'; }).join(', ');
+    if (showToast) showToast(warning.tasks.length + ' task(s) reassigned to anytime: ' + names, 'info');
+    // Auto-fix: batch update orphaned tasks' when to empty (anytime)
+    try {
+      var { default: apiClient } = await import('../../services/apiClient');
+      await apiClient.put('/tasks/batch', {
+        updates: warning.tasks.map(function(t) { return { id: t.id, when: '' }; })
+      });
+    } catch (err) {
+      console.error('Failed to auto-fix orphaned when-tags:', err);
+    }
+  }
+
+  async function saveTemplate(id, patch) {
     var updated = {};
     Object.keys(templates).forEach(function(k) { updated[k] = Object.assign({}, templates[k]); });
     updated[id] = Object.assign({}, updated[id], patch);
-    config.updateScheduleTemplates(updated);
+    var result = await config.updateScheduleTemplates(updated);
+    handleOrphanedWarnings(result);
   }
 
-  function saveAllTemplates(newTemplates) {
-    config.updateScheduleTemplates(newTemplates);
+  async function saveAllTemplates(newTemplates) {
+    var result = await config.updateScheduleTemplates(newTemplates);
+    handleOrphanedWarnings(result);
   }
 
   // --- Day defaults ---

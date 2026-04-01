@@ -38,7 +38,7 @@ function UsageBar({ item, theme }) {
   );
 }
 
-export default function PlanUsagePanel({ planName, usageSummary, trialInfo, loading, theme, onClose }) {
+export default function PlanUsagePanel({ planName, usageSummary, trialInfo, loading, theme, onClose, disabledItems, onManageDisabled }) {
   if (loading) {
     return (
       <div style={panelStyle(theme)}>
@@ -80,6 +80,26 @@ export default function PlanUsagePanel({ planName, usageSummary, trialInfo, load
           <div style={{ fontSize: 11, color: '#E65100', fontWeight: 600 }}>
             Approaching limit{nearLimitItems.length > 1 ? 's' : ''}: {nearLimitItems.map(function(u) { return u.label; }).join(', ')}
           </div>
+        </div>
+      )}
+
+      {/* Disabled items banner */}
+      {disabledItems > 0 && (
+        <div style={{ padding: '8px 16px', background: '#FBE9E7', borderBottom: '1px solid ' + theme.border, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: 11, color: '#BF360C', fontWeight: 600 }}>
+            {disabledItems} item{disabledItems > 1 ? 's' : ''} disabled due to plan limits
+          </div>
+          {onManageDisabled && (
+            <button
+              onClick={onManageDisabled}
+              style={{
+                background: 'none', border: 'none', color: '#D84315',
+                fontSize: 11, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', padding: 0
+              }}
+            >
+              Manage
+            </button>
+          )}
         </div>
       )}
 

@@ -94,12 +94,53 @@ async function updateConfig(req, res) {
     }
 
     await cache.invalidateConfig(userId);
-    res.json({ key, value });
+
+    // Check for orphaned when-tags when templates are saved
+    var warnings = [];
+    if (key === 'schedule_templates' && value && typeof value === 'object') {
+      var newTags = {};
+      Object.values(value).forEach(function(tmpl) {
+        (tmpl.blocks || []).forEach(function(b) {
+          if (b.tag) newTags[b.tag] = true;
+        });
+      });
+
+      var activeTasks = await db('tasks')
+        .where('user_id', userId)
+        .whereNotIn('status', ['done', 'cancel', 'skip', 'pause'])
+        .whereNotNull('when')
+        .where('when', '!=', '')
+        .where('when', '!=', 'anytime')
+        .select('id', 'text', 'when');
+
+      var orphanedTasks = [];
+      activeTasks.forEach(function(t) {
+        var parts = (t.when || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+        // Skip special values
+        var nonSpecial = parts.filter(function(p) { return p !== 'fixed' && p !== 'allday' && p !== 'anytime'; });
+        if (nonSpecial.length === 0) return;
+        var hasValid = nonSpecial.some(function(p) { return newTags[p]; });
+        if (!hasValid) {
+          orphanedTasks.push({ id: t.id, text: t.text, when: t.when });
+        }
+      });
+
+      if (orphanedTasks.length > 0) {
+        warnings.push({
+          type: 'orphanedWhenTags',
+          tasks: orphanedTasks,
+          message: orphanedTasks.length + ' task(s) use time block tags that no longer exist in any template'
+        });
+      }
+    }
+
+    res.json({ key, value, warnings: warnings });
 
     // Schedule-affecting keys: reschedule in the background after responding
     var schedKeys = [
       'hour_location_overrides', 'time_blocks', 'loc_schedules',
-      'loc_schedule_defaults', 'loc_schedule_overrides', 'tool_matrix', 'preferences'
+      'loc_schedule_defaults', 'loc_schedule_overrides', 'tool_matrix', 'preferences',
+      'schedule_templates'
     ];
     if (schedKeys.includes(key)) {
       runScheduleAndPersist(userId).catch(function(err) {

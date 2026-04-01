@@ -14,7 +14,7 @@ import { parseDate } from '../../scheduler/dateHelpers';
 export default function TaskCard({ task, status, onStatusChange, onExpand, darkMode, showDate, draggable, isBlocked, isMobile, allTasks, statuses, todayDate }) {
   var theme = getTheme(darkMode);
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
-  var isDone = status === 'done' || status === 'cancel' || status === 'skip';
+  var isDone = status === 'done' || status === 'cancel' || status === 'skip' || status === 'pause';
   var isMarker = !!task.marker;
   var borderColor = isMarker ? '#4338CA' : priColor;
   var durLabel = task.dur ? (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm') : '';

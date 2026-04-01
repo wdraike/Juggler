@@ -22,7 +22,7 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
       if (!t.habit || t.taskType === 'habit_template') return;
       var key = t.text || t.id;
       var st = statuses[t.id] || '';
-      var isOpen = st !== 'done' && st !== 'cancel' && st !== 'skip';
+      var isOpen = st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause';
       var prev = habitBest[key];
       if (!prev || (isOpen && !prev.isOpen)) {
         habitBest[key] = { id: t.id, isOpen: isOpen };
@@ -38,10 +38,11 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
 
     return deduped.filter(t => {
       var st = statuses[t.id] || '';
-      if (filter === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip';
+      if (filter === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause';
       if (filter === 'action') return st === '' || st === 'wip';
       if (filter === 'done') return st === 'done';
       if (filter === 'wip') return st === 'wip';
+      if (filter === 'pause') return st === 'pause';
       if (filter === 'pastdue') return pastDueIds && pastDueIds.has(t.id);
       if (filter === 'fixed') return fixedIds && fixedIds.has(t.id);
       if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(t.id);

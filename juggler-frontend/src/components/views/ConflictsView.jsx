@@ -305,6 +305,16 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
                         </div>
                       </div>
                     )}
+                    {w.type === 'orphanedWhenTag' && (
+                      <div>
+                        <span style={{ fontWeight: 600 }}>Unknown time block: </span>
+                        <span style={taskLinkStyle} onClick={function() { if (w.taskId && onExpand) onExpand(w.taskId); }} title="Open task details">{taskA ? taskA.text : w.taskId}</span>
+                        <span style={{ color: theme.textMuted }}> has when="{w.originalWhen}"</span>
+                        <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>
+                          This tag doesn't match any time block in your schedule templates. The scheduler is treating it as "anytime". Update the task's time preference or add a matching template.
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}

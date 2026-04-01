@@ -40,11 +40,13 @@ import TaskEditForm from '../tasks/TaskEditForm';
 // Advanced features
 import SettingsPanel from '../settings/SettingsPanel';
 import ImportExportPanel from '../features/ImportExportPanel';
+import CompletionTimePicker from '../features/CompletionTimePicker';
 
 import GCalSyncPanel from '../features/GCalSyncPanel';
 import MsftCalSyncPanel from '../features/MsftCalSyncPanel';
 import CalSyncPanel from '../features/CalSyncPanel';
 import HelpModal from '../features/HelpModal';
+import DisabledItemsPanel from '../billing/DisabledItemsPanel';
 import AiCommandPanel from '../features/AiCommandPanel';
 import AppFooter from './AppFooter';
 import apiClient from '../../services/apiClient';
@@ -107,7 +109,9 @@ export default function AppLayout() {
   var [showToastHistory, setShowToastHistory] = useState(false);
 
   var [showHelp, setShowHelp] = useState(false);
+  var [showDisabledItems, setShowDisabledItems] = useState(false);
   var [showCreateForm, setShowCreateForm] = useState(false);
+  var [completionPickerTask, setCompletionPickerTask] = useState(null); // task being marked done
   // Pending recurrence-day conflict confirmation from drag-drop
   var [recurDayConfirm, setRecurDayConfirm] = useState(null);
   var [gcalAutoSync, setGcalAutoSync] = useState(false);
@@ -122,10 +126,12 @@ export default function AppLayout() {
   var theme = getTheme(darkMode);
   var statuses = taskState.statuses;
   var allTasks = taskState.tasks;
-  // Visible tasks excludes habit templates (blueprints, not user-actionable)
+  // Visible tasks excludes habit templates (blueprints) and disabled items (frozen by plan limits)
   var visibleTasks = useMemo(function() {
-    return allTasks.filter(function(t) { return t.taskType !== 'habit_template'; });
-  }, [allTasks]);
+    return allTasks.filter(function(t) {
+      return t.taskType !== 'habit_template' && (statuses[t.id] || '') !== 'disabled';
+    });
+  }, [allTasks, statuses]);
 
   // Track when editing UI is open to suspend background syncs/scheduling
   editingRef.current = expandedTasks.length > 0 || !!showCreateForm || !!showSettings;
@@ -217,6 +223,10 @@ export default function AppLayout() {
           showToast('Calendar connection expired. Please reconnect in Calendar Sync settings.', 'error');
         }
       }).catch(function(e) {
+        if (e.response?.status === 409) {
+          // Lock held — skip silently, the interval will retry later
+          return;
+        }
         var hasTokenExpiry = e.response?.data?.errors?.some(function(err) { return err.tokenExpired; });
         if (hasTokenExpiry) {
           showToast('Calendar connection expired. Please reconnect in Calendar Sync settings.', 'error');
@@ -482,6 +492,11 @@ export default function AppLayout() {
 
   // Status change handler
   var handleStatusChange = useCallback((id, val) => {
+    if (val === 'done') {
+      var task = allTasks.find(function(t) { return t.id === id; });
+      setCompletionPickerTask(task || { id: id });
+      return;
+    }
     pushUndo('status change');
     setStatus(id, val, {
       taskFields: { status: val }
@@ -489,6 +504,18 @@ export default function AppLayout() {
     var labels = { done: 'Done', wip: 'WIP', cancel: 'Cancelled', skip: 'Skipped', '': 'Reopened' };
     showToast((labels[val] || val) + ': ' + (allTasks.find(t => t.id === id)?.text || id).slice(0, 40), 'success');
   }, [pushUndo, setStatus, allTasks, showToast]);
+
+  var handleCompletionConfirm = useCallback(function(completedAt) {
+    var task = completionPickerTask;
+    if (!task) return;
+    setCompletionPickerTask(null);
+    pushUndo('status change');
+    setStatus(task.id, 'done', {
+      taskFields: { status: 'done' },
+      completedAt: completedAt
+    });
+    showToast('Done: ' + (task.text || task.id).slice(0, 40), 'success');
+  }, [completionPickerTask, pushUndo, setStatus, showToast]);
 
   // Task expand handler — from main views (single open)
   // Generated/instance tasks — open the source habit instead
@@ -762,6 +789,7 @@ export default function AppLayout() {
           aiPanel={<AiCommandPanel darkMode={darkMode} isMobile={isMobile} allTasks={allTasks} statuses={statuses} config={config} onApplyOps={handleAiOps} showToast={showToast} />}
           weekStripDates={weekStripDates} selectedDate={selectedDate}
           dayOffset={dayOffset} setDayOffset={setDayOffset} today={today}
+          onManageDisabled={function() { setShowDisabledItems(true); }}
         />
         {isMobile && <WeekStrip
           weekStripDates={weekStripDates} selectedDate={selectedDate}
@@ -1069,6 +1097,7 @@ export default function AppLayout() {
       {/* Settings panel */}
       {showSettings && (
         <SettingsPanel onClose={() => setShowSettings(false)} darkMode={darkMode} config={config} allProjectNames={allProjectNames} allTasks={allTasks} isMobile={isMobile}
+          showToast={showToast}
           onRenameProject={function(oldName, newName) { loadTasks(); }} />
       )}
 
@@ -1109,6 +1138,26 @@ export default function AppLayout() {
       {/* Help modal */}
       {showHelp && (
         <HelpModal onClose={() => setShowHelp(false)} darkMode={darkMode} isMobile={isMobile} />
+      )}
+
+      {/* Disabled items panel */}
+      {showDisabledItems && (
+        <DisabledItemsPanel
+          theme={theme}
+          onClose={function() { setShowDisabledItems(false); }}
+          onRefreshTasks={loadTasks}
+        />
+      )}
+
+      {/* Completion time picker */}
+      {completionPickerTask && (
+        <CompletionTimePicker
+          task={completionPickerTask}
+          onConfirm={handleCompletionConfirm}
+          onCancel={function() { setCompletionPickerTask(null); }}
+          darkMode={darkMode}
+          isMobile={isMobile}
+        />
       )}
 
       <AppFooter darkMode={darkMode} />

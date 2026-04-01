@@ -82,6 +82,16 @@ async function sync(req, res) {
       stats.errors.push({ phase: 'scheduler', error: schedErr.message });
     }
 
+    // Load user preferences for completed task behavior
+    var prefsRow = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
+    var calCompletedBehavior = 'update'; // default
+    if (prefsRow) {
+      try {
+        var prefs = JSON.parse(prefsRow.config_value);
+        if (prefs.calCompletedBehavior) calCompletedBehavior = prefs.calCompletedBehavior;
+      } catch (e) { /* ignore parse errors */ }
+    }
+
     // === Phase 1: Gather data from all connected providers ===
     var connectedAdapters = getConnectedAdapters(req.user);
     if (connectedAdapters.length === 0) {
@@ -196,6 +206,19 @@ async function sync(req, res) {
         if (ledger.task_id) processedTaskIds.add(ledger.task_id);
         if (ledger.provider_event_id) processedEventIds.add(ledger.provider_event_id);
 
+        // --- Consistency repair: ensure task's event ID column matches ledger ---
+        var eventIdCol = pAdapter.getEventIdColumn();
+        if (task && ledger.provider_event_id) {
+          var taskEventId = task[eventIdCol === 'gcal_event_id' ? 'gcalEventId' : 'msftEventId'];
+          if (taskEventId !== ledger.provider_event_id) {
+            await db('tasks').where('id', task.id).update({
+              [eventIdCol]: ledger.provider_event_id,
+              updated_at: db.fn.now()
+            });
+            task[eventIdCol === 'gcal_event_id' ? 'gcalEventId' : 'msftEventId'] = ledger.provider_event_id;
+          }
+        }
+
         try {
           // --- Habit/generated cleanup ---
           if (task && (task._habit || task._generated) && event) {
@@ -252,6 +275,47 @@ async function sync(req, res) {
               pStats.deleted_local++;
               stats.deleted_local++;
               continue;
+            }
+          }
+
+          // --- Terminal status handling (done/cancel/skip/pause) ---
+          if (task && event && ledger.origin === 'juggler' && calCompletedBehavior !== 'keep') {
+            var isTerminal = task.status === 'done' || task.status === 'cancel' || task.status === 'skip' || task.status === 'pause';
+            if (isTerminal) {
+              var shouldDelete = calCompletedBehavior === 'delete' || task.status !== 'done';
+              if (shouldDelete) {
+                // Delete cancel/skip/pause events (and done if preference is 'delete')
+                try {
+                  await pAdapter.deleteEvent(pToken, ledger.provider_event_id);
+                  await delay(100);
+                } catch (e4) {
+                  if (!e4.message.includes('404') && !e4.message.includes('410')) throw e4;
+                }
+                await db.transaction(async function(trx) {
+                  await trx('tasks').where('id', task.id).update({
+                    [pAdapter.getEventIdColumn()]: null, updated_at: db.fn.now()
+                  });
+                  await trx('cal_sync_ledger').where('id', ledger.id).update({
+                    status: 'deleted_local', provider_event_id: null, synced_at: db.fn.now()
+                  });
+                });
+                pStats.deleted_local++;
+                stats.deleted_local++;
+                continue;
+              } else {
+                // 'update' mode for done tasks: push ✓ prefix + transparency
+                var currentHash = taskHash(task);
+                if (currentHash !== ledger.last_pushed_hash) {
+                  await pAdapter.updateEvent(pToken, ledger.provider_event_id, task, year, tz);
+                  await delay(100);
+                  await db('cal_sync_ledger').where('id', ledger.id).update({
+                    last_pushed_hash: currentHash, synced_at: db.fn.now()
+                  });
+                  pStats.pushed++;
+                  stats.pushed++;
+                }
+                continue;
+              }
             }
           }
 
@@ -395,10 +459,19 @@ async function sync(req, res) {
       var processedEventIds2 = processedEventIdsByProvider[pid2];
       var eventIdCol = pAdapter2.getEventIdColumn();
 
+      // Build set of task IDs that already have active ledger records for this provider
+      // (defense against duplicate pushes when event_id column is stale)
+      var ledgeredTaskIds2 = new Set();
+      var pLedger2 = ledgerByProvider[pid2] || [];
+      for (var li2 = 0; li2 < pLedger2.length; li2++) {
+        if (pLedger2[li2].task_id) ledgeredTaskIds2.add(pLedger2[li2].task_id);
+      }
+
       // 3a: Push unledgered tasks to this provider
       for (var ti2 = 0; ti2 < allTasks.length; ti2++) {
         var newTask = allTasks[ti2];
         if (processedTaskIds2.has(newTask.id)) continue;
+        if (ledgeredTaskIds2.has(newTask.id)) continue;
 
         if (newTask._habit || newTask._generated) continue;
         if (!newTask.date) continue;
@@ -453,6 +526,14 @@ async function sync(req, res) {
           pStats2.pushed++;
           stats.pushed++;
         } catch (e) {
+          // If event was created but DB transaction failed, delete the orphaned event
+          if (result && result.providerEventId) {
+            try {
+              await pAdapter2.deleteEvent(pToken2, result.providerEventId);
+            } catch (cleanupErr) {
+              console.error('[CAL-SYNC] Failed to clean up orphaned event:', cleanupErr.message);
+            }
+          }
           var errObj2 = { phase: 'push_new', provider: pid2, taskId: newTask.id, error: e.message };
           pStats2.errors.push(errObj2);
           stats.errors.push(errObj2);
@@ -524,10 +605,50 @@ async function sync(req, res) {
 
         // Skip events that originated from Juggler (round-trip prevention)
         // Check both plain text and raw body (Microsoft may return HTML-wrapped content)
+        // Also check HTML-encoded '&amp;' variant because Graph API returns HTML by default
         var evDesc = newEvent.description || '';
         var evRawBody = (newEvent._raw && newEvent._raw.body && newEvent._raw.body.content) || '';
-        if (evDesc.indexOf('Synced from Raike & Sons') !== -1 || evDesc.indexOf('Synced from Juggler') !== -1
-            || evRawBody.indexOf('Synced from Raike & Sons') !== -1 || evRawBody.indexOf('Synced from Juggler') !== -1) {
+        var combinedBody = evDesc + ' ' + evRawBody;
+        if (combinedBody.indexOf('Synced from Raike & Sons') !== -1
+            || combinedBody.indexOf('Synced from Raike &amp; Sons') !== -1
+            || combinedBody.indexOf('Synced from Juggler') !== -1) {
+          // Try to match orphaned event back to its source task (dual-write recovery)
+          var jdOrphan = isoToJugglerDate(newEvent.startDateTime, newEvent.startTimezone || tz);
+          var orphanMatch = allTasks.find(function(t) {
+            return t.text === newEvent.title && t.date === jdOrphan.date && !processedTaskIds2.has(t.id);
+          });
+          if (orphanMatch) {
+            await db.transaction(async function(trx) {
+              await trx('tasks').where('id', orphanMatch.id).update({
+                [eventIdCol]: evId,
+                updated_at: db.fn.now()
+              });
+              await trx('cal_sync_ledger').insert({
+                user_id: userId,
+                provider: pid2,
+                task_id: orphanMatch.id,
+                provider_event_id: evId,
+                origin: 'juggler',
+                last_pushed_hash: taskHash(orphanMatch),
+                last_pulled_hash: pAdapter2.eventHash(newEvent),
+                event_summary: newEvent.title,
+                event_start: newEvent.startDateTime || null,
+                event_end: newEvent.endDateTime || null,
+                event_all_day: newEvent.isAllDay ? 1 : 0,
+                last_modified_at: toMySQLDate(newEvent.lastModified),
+                task_updated_at: orphanMatch._updated_at || null,
+                status: 'active',
+                synced_at: db.fn.now(),
+                created_at: db.fn.now()
+              });
+            });
+            processedTaskIds2.add(orphanMatch.id);
+            processedEventIds2.add(evId);
+            pStats2.pushed++;
+            stats.pushed++;
+            continue;
+          }
+          // No matching task — record as orphaned Juggler event
           await db('cal_sync_ledger').insert({
             user_id: userId,
             provider: pid2,

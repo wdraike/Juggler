@@ -152,7 +152,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // 5b. Expand recurring habits into per-day instances and persist them
   var today = parseDate(timeInfo.todayKey) || new Date();
   var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + 56);
-  var expanded = expandRecurring(allTasks, today, expandEnd);
+  var expanded = expandRecurring(allTasks, today, expandEnd, { statuses: statuses });
   if (expanded.length > 0) {
     // Persist generated instances as real habit_instance rows so they can be
     // interacted with (status changes, edits, etc.) without 404 errors.
@@ -326,7 +326,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // Never touch habit templates — they're blueprints, not schedulable tasks
       if (t.taskType === 'habit_template') return;
       var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'skip') return;
+      if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'pause' || st === 'disabled') return;
       if (!t.date || t.date === 'TBD') return;
       var td = parseDate(t.date);
       if (!td || td >= today) return;  // not past
@@ -505,7 +505,7 @@ async function getSchedulePlacements(userId, options) {
   // Expand recurring so generated instances can be hydrated from cache
   var today = parseDate(timeInfo.todayKey) || new Date();
   var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + 56);
-  var expanded = expandRecurring(allTasks, today, expandEnd);
+  var expanded = expandRecurring(allTasks, today, expandEnd, { statuses: statuses });
   if (expanded.length > 0) {
     allTasks = allTasks.concat(expanded);
     expanded.forEach(function(t) { statuses[t.id] = ''; });
@@ -532,7 +532,7 @@ async function getSchedulePlacements(userId, options) {
       if (t.generated) continue;
       if (t.taskType === 'habit_template') continue;
       var tSt = statuses[t.id] || '';
-      if (tSt === 'done' || tSt === 'cancel' || tSt === 'skip') continue;
+      if (tSt === 'done' || tSt === 'cancel' || tSt === 'skip' || tSt === 'pause' || tSt === 'disabled') continue;
       if (!t.date || t.date === 'TBD') continue;
       var tDate = parseDate(t.date);
       if (tDate && tDate < todayDate) { hasPastTasks = true; break; }
@@ -573,7 +573,7 @@ async function getSchedulePlacements(userId, options) {
       var todayTasks = allTasks.filter(function(t) { return t.date === timeInfo.todayKey; });
       var activeTodayTasks = todayTasks.filter(function(t) {
         var st = statuses[t.id] || '';
-        return st !== 'done' && st !== 'cancel' && st !== 'skip';
+        return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'disabled';
       });
       if (activeTodayTasks.length > 0) {
         console.log('[SCHED] cache stale: no placements for today but ' + activeTodayTasks.length + ' active tasks exist');
@@ -672,7 +672,7 @@ async function getSchedulePlacements(userId, options) {
       if (t.generated) return;
       if (t.taskType === 'habit_template') return;
       var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'skip') return;
+      if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'pause' || st === 'disabled') return;
       // Already placed in a day slot — not unplaced
       if (cachedIds[t.id]) return;
       // Known unplaced from cache — include it with cached diagnostics

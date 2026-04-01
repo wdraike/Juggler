@@ -21,6 +21,7 @@ var timeBlockHelpers = require('./timeBlockHelpers');
 var getBlocksForDate = timeBlockHelpers.getBlocksForDate;
 var buildWindowsFromBlocks = timeBlockHelpers.buildWindowsFromBlocks;
 var hasWhen = timeBlockHelpers.hasWhen;
+var parseWhen = timeBlockHelpers.parseWhen;
 var getWhenWindows = timeBlockHelpers.getWhenWindows;
 var locationHelpers = require('./locationHelpers');
 var resolveLocationId = locationHelpers.resolveLocationId;
@@ -88,7 +89,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
 
   allTasks.forEach(function(t) {
     var st = newSt[t.id] || "";
-    if (st === "done" || st === "cancel" || st === "skip") return;
+    if (st === "done" || st === "cancel" || st === "skip" || st === "pause" || st === "disabled") return;
     if (hasWhen(t.when, "allday")) return; // All-day events don't go on the time grid
     if (t.marker) {
       // Markers are non-blocking — shown on calendar but don't consume time slots
@@ -268,7 +269,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       }
       if (!childTask) continue;
       var childSt = newSt[childId] || '';
-      if (childSt === 'done' || childSt === 'cancel' || childSt === 'skip') continue;
+      if (childSt === 'done' || childSt === 'cancel' || childSt === 'skip' || childSt === 'pause' || childSt === 'disabled') continue;
       var childDate = parseDate(childTask.date);
       // Ignore past-dated children — they'll be moved forward by the scheduler,
       // so they shouldn't constrain the ancestor to an impossible past ceiling.
@@ -315,7 +316,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var childTask = taskById[childId];
       if (!childTask) continue;
       var childSt = newSt[childId] || '';
-      if (childSt === 'done' || childSt === 'cancel' || childSt === 'skip') continue;
+      if (childSt === 'done' || childSt === 'cancel' || childSt === 'skip' || childSt === 'pause' || childSt === 'disabled') continue;
       var childDur = effectiveDuration(childTask);
       // Use child's own due date, offset by child's duration
       if (childTask.due) {
@@ -364,7 +365,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var childId = children[ci];
       if (isBackwardsDep(childId, taskId)) continue;
       var childSt = newSt[childId] || '';
-      if (childSt === 'done' || childSt === 'cancel' || childSt === 'skip') continue;
+      if (childSt === 'done' || childSt === 'cancel' || childSt === 'skip' || childSt === 'pause' || childSt === 'disabled') continue;
       // If child is placed, use its actual start as a hard deadline
       var childPlacement = globalPlacedEnd[childId];
       if (childPlacement && childPlacement.startMin != null) {
@@ -480,6 +481,39 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       for (var pm = 0; pm < nowSlot; pm++) occ[pm] = true;
     }
   });
+
+  // ── Orphaned when-tag safety net ──
+  // Collect all tags that exist in ANY day's windows (excluding synthetic "anytime").
+  // If a task's when-tags don't match any global tag, override to "" in-memory
+  // so it falls through to default windows instead of being pushed to the horizon.
+  var globalAvailableTags = {};
+  dates.forEach(function(d) {
+    var wins = dayWindows[d.key];
+    for (var tag in wins) {
+      if (tag !== 'anytime') globalAvailableTags[tag] = true;
+    }
+  });
+  var SPECIAL_WHEN = { fixed: true, allday: true, anytime: true };
+  var orphanCount = 0;
+  allTasks.forEach(function(t) {
+    if (!t.when || t.when === '') return;
+    var parts = parseWhen(t.when);
+    if (parts.length === 1 && parts[0] === 'anytime') return;
+    var hasSpecial = parts.some(function(p) { return SPECIAL_WHEN[p]; });
+    if (hasSpecial) return;
+    var hasValid = parts.some(function(p) { return globalAvailableTags[p]; });
+    if (!hasValid) {
+      schedulerWarnings.push({
+        type: 'orphanedWhenTag',
+        taskId: t.id,
+        originalWhen: t.when,
+        message: 'Tag "' + t.when + '" not found in any template; defaulting to anytime'
+      });
+      t.when = '';
+      orphanCount++;
+    }
+  });
+  if (orphanCount > 0) console.log('[SCHED] reassigned ' + orphanCount + ' task(s) with orphaned when-tags to anytime');
 
   function recordPlace(occ, placed, t, start, dur, locked, dateKey, item) {
     // Determine travel buffers — for split tasks, only first chunk gets travelBefore
@@ -2265,7 +2299,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
             var found = allTasks.find(function(at) { return at.id === depId; });
             if (found) {
               var st = newSt[depId] || "";
-              if (st !== "done" && st !== "cancel" && st !== "skip") {
+              if (st !== "done" && st !== "cancel" && st !== "skip" && st !== "disabled") {
                 blockedDeps.push(depName(depId) + " (not scheduled)");
               }
             }

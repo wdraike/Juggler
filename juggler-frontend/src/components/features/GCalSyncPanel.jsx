@@ -109,7 +109,11 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
       if (onSyncComplete) onSyncComplete();
     } catch (e) {
       if (e.response?.status === 409) {
-        showToast('Sync already in progress, please wait', 'info');
+        var retryAfter = e.response?.data?.retryAfter || 60;
+        var jitter = Math.floor(Math.random() * 10);
+        showToast('Sync already in progress — retrying in ~' + (retryAfter + jitter) + 's', 'info');
+        setTimeout(function() { setSyncing(false); }, (retryAfter + jitter) * 1000);
+        return;
       } else {
         var msg = e.response?.data?.error || e.message;
         showToast('Sync failed: ' + msg, 'error');

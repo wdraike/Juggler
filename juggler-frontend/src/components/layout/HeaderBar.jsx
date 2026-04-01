@@ -17,7 +17,7 @@ import FeedbackDialog from '../feedback/FeedbackDialog';
 import { services, homeUrl } from '../../proxy-config';
 var BILLING_URL = services.billing.frontend;
 
-export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, onShowCalSync, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today, activeTimezone, tzSource }) {
+export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, onShowCalSync, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today, activeTimezone, tzSource, onManageDisabled }) {
   var theme = getTheme(darkMode);
   var { user, logout } = useAuth();
   var [showOverflow, setShowOverflow] = useState(false);
@@ -25,7 +25,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
   var [showFeedback, setShowFeedback] = useState(false);
   var planPanelRef = useRef(null);
   var overflowRef = useRef(null);
-  var { planName, usageSummary, trialInfo, loading: planLoading, hasSubscription } = usePlanInfo();
+  var { planName, usageSummary, trialInfo, loading: planLoading, hasSubscription, disabledItems } = usePlanInfo();
 
   // Close plan panel on outside click
   useEffect(function() {
@@ -176,7 +176,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
                   <span style={{ position: 'absolute', top: -1, right: -1, width: 7, height: 7, borderRadius: '50%', background: usageSummary.some(function(u) { return u.atLimit; }) ? '#C62828' : '#E65100' }} />
                 )}
               </button>
-              {showPlanPanel && <PlanUsagePanel planName={planName} usageSummary={usageSummary} trialInfo={trialInfo} loading={planLoading} theme={theme} onClose={function() { setShowPlanPanel(false); }} />}
+              {showPlanPanel && <PlanUsagePanel planName={planName} usageSummary={usageSummary} trialInfo={trialInfo} loading={planLoading} theme={theme} onClose={function() { setShowPlanPanel(false); }} disabledItems={disabledItems} onManageDisabled={onManageDisabled} />}
             </div>
             )}
             {activeTimezone && (

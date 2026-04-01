@@ -30,6 +30,7 @@ const FILTERS = [
   { id: 'fixed', label: 'Fixed', tip: 'Tasks pinned to a specific date/time (not moved by scheduler)' },
   { id: 'blocked', label: 'Blocked', tip: 'Tasks waiting on incomplete dependencies' },
   { id: 'unplaced', label: 'Unplaced', tip: 'Tasks the scheduler couldn\u2019t place into any time slot' },
+  { id: 'pause', label: 'Paused', tip: 'Tasks and habits temporarily paused' },
 ];
 
 // Which filter controls are relevant per view

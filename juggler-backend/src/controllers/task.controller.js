@@ -83,7 +83,8 @@ function buildSourceMap(rows) {
 function rowToTask(row, timezone, sourceMap) {
   // Merge template fields from source for thin habit instances
   var src = sourceMap && row.source_id ? sourceMap[row.source_id] : null;
-  if (src) {
+  // Disabled instances are frozen — do not inherit template fields so they stay locked in place
+  if (src && row.status !== 'disabled') {
     // Habit instances always inherit template fields from the source template.
     // The template is the single source of truth — instances never override.
     var merged = {};
@@ -93,6 +94,18 @@ function rowToTask(row, timezone, sourceMap) {
     });
     row = merged;
   }
+
+  // Terminal-status tasks must never appear in the future — clamp scheduled_at
+  // to updated_at (completion time) or now, whichever is earlier.
+  if (row.scheduled_at && (row.status === 'done' || row.status === 'cancel' || row.status === 'skip')) {
+    var sa = new Date(row.scheduled_at);
+    var now = new Date();
+    if (sa > now) {
+      var ua = row.updated_at ? new Date(row.updated_at) : now;
+      row.scheduled_at = ua <= now ? ua : now;
+    }
+  }
+
   var date = null;
   var time = null;
   var day = null;
@@ -183,7 +196,9 @@ function rowToTask(row, timezone, sourceMap) {
     travelBefore: row.travel_before != null ? row.travel_before : undefined,
     travelAfter: row.travel_after != null ? row.travel_after : undefined,
     habitStart: row.habit_start || null,
-    habitEnd: row.habit_end || null
+    habitEnd: row.habit_end || null,
+    disabledAt: row.disabled_at ? scheduledAtToISO(row.disabled_at) : null,
+    disabledReason: row.disabled_reason || null
   };
 }
 
@@ -382,6 +397,12 @@ async function updateTask(req, res) {
     if (!existing) {
       return res.status(404).json({ error: 'Task not found' });
     }
+    if (existing.status === 'disabled') {
+      return res.status(403).json({
+        error: 'This item is disabled. Re-enable it before making changes.',
+        code: 'TASK_DISABLED'
+      });
+    }
 
     var tz = req.headers['x-timezone'] || 'America/New_York';
     var row = taskToRow(req.body, req.user.id, tz);
@@ -563,14 +584,10 @@ async function deleteTask(req, res) {
 
         // Clean up calendar sync for pending instances
         if (pendingIds.length > 0) {
-          await trx('gcal_sync_ledger')
+          await trx('cal_sync_ledger')
             .where('user_id', req.user.id)
             .whereIn('task_id', pendingIds)
-            .update({ task_id: null, synced_at: db.fn.now() })
-            .catch(function() {});
-          await trx('msft_cal_sync_ledger')
-            .where('user_id', req.user.id)
-            .whereIn('task_id', pendingIds)
+            .where('status', 'active')
             .update({ task_id: null, synced_at: db.fn.now() })
             .catch(function() {});
 
@@ -601,15 +618,10 @@ async function deleteTask(req, res) {
         // Clean up calendar sync for template
         var template = await trx('tasks').where({ id: templateId, user_id: req.user.id }).first();
         if (template) {
-          if (template.gcal_event_id) {
-            await trx('gcal_sync_ledger')
+          if (template.gcal_event_id || template.msft_event_id) {
+            await trx('cal_sync_ledger')
               .where({ user_id: req.user.id, task_id: templateId })
-              .update({ task_id: null, synced_at: db.fn.now() })
-              .catch(function() {});
-          }
-          if (template.msft_event_id) {
-            await trx('msft_cal_sync_ledger')
-              .where({ user_id: req.user.id, task_id: templateId })
+              .where('status', 'active')
               .update({ task_id: null, synced_at: db.fn.now() })
               .catch(function() {});
           }
@@ -645,15 +657,12 @@ async function deleteTask(req, res) {
           .update({ depends_on: JSON.stringify(newDeps), updated_at: db.fn.now() });
       }
 
-      if (task.gcal_event_id) {
-        await trx('gcal_sync_ledger')
+      if (task.gcal_event_id || task.msft_event_id) {
+        await trx('cal_sync_ledger')
           .where({ user_id: req.user.id, task_id: id })
-          .update({ task_id: null, synced_at: db.fn.now() });
-      }
-      if (task.msft_event_id) {
-        await trx('msft_cal_sync_ledger')
-          .where({ user_id: req.user.id, task_id: id })
-          .update({ task_id: null, synced_at: db.fn.now() });
+          .where('status', 'active')
+          .update({ task_id: null, synced_at: db.fn.now() })
+          .catch(function() {});
       }
 
       await trx('tasks').where({ id: id, user_id: req.user.id }).del();
@@ -716,16 +725,77 @@ async function updateTaskStatus(req, res) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    // Never set status on a habit template — status belongs on instances only
+    if (existing.status === 'disabled') {
+      return res.status(403).json({
+        error: 'This item is disabled. Use the re-enable endpoint to restore it.',
+        code: 'TASK_DISABLED'
+      });
+    }
+
+    // Habit templates: only 'pause' and '' (unpause) are valid statuses
     if (existing.task_type === 'habit_template') {
-      // Clear any stale status that may have been set by a previous bug
-      if (existing.status) {
-        await db('tasks').where({ id: id, user_id: req.user.id }).update({ status: '', updated_at: db.fn.now() });
+      if (status !== 'pause' && status !== '') {
+        return res.status(400).json({ error: 'Habit templates can only be paused or unpaused' });
       }
-      return res.status(400).json({ error: 'Cannot set status on a habit template' });
+
+      await db('tasks').where({ id: id, user_id: req.user.id }).update({ status: status || '', updated_at: db.fn.now() });
+
+      // When pausing: delete future open instances and clean up their GCal events
+      if (status === 'pause') {
+        var futureInstances = await db('tasks')
+          .where({ source_id: id, user_id: req.user.id })
+          .where('status', '')
+          .where('scheduled_at', '>', new Date())
+          .select('id', 'gcal_event_id');
+
+        var instanceIds = futureInstances.map(function(i) { return i.id; });
+
+        if (instanceIds.length > 0) {
+          // Clean up calendar sync ledger entries for deleted instances
+          await db('cal_sync_ledger')
+            .where('user_id', req.user.id)
+            .whereIn('task_id', instanceIds)
+            .where('status', 'active')
+            .update({ status: 'deleted_local', task_id: null, provider_event_id: null, synced_at: db.fn.now() })
+            .catch(function() {});
+
+          await db('tasks')
+            .where({ user_id: req.user.id })
+            .whereIn('id', instanceIds)
+            .del();
+        }
+      }
+      // Unpausing: next scheduler run will regenerate instances via expandRecurring
+
+      var srcMap = buildSourceMap(await db('tasks').where({ user_id: req.user.id, task_type: 'habit_template' }).select());
+      await cache.invalidateTasks(req.user.id);
+      var updatedTemplate = await db('tasks').where('id', id).first();
+      return res.json({ task: rowToTask(updatedTemplate, null, srcMap), instancesRemoved: status === 'pause' ? (instanceIds || []).length : 0 });
     }
 
     var update = { status: status || '', updated_at: db.fn.now() };
+    var isFutureScheduled = existing.scheduled_at && new Date(existing.scheduled_at) > new Date();
+
+    // When marking done, stamp scheduled_at to the chosen completion time
+    if (status === 'done') {
+      var completedAt = req.body.completedAt;
+      if (completedAt === 'scheduled' && !isFutureScheduled) {
+        // Keep existing scheduled_at — no change (only if not in the future)
+      } else if (completedAt && completedAt !== 'now' && completedAt !== 'scheduled') {
+        // Custom datetime string from the user — clamp to now if in the future
+        var customDate = new Date(completedAt);
+        update.scheduled_at = customDate > new Date() ? db.fn.now() : customDate;
+      } else {
+        // Default: current time
+        update.scheduled_at = db.fn.now();
+      }
+    }
+
+    // For cancel/skip with a future scheduled_at, snap to now
+    if ((status === 'cancel' || status === 'skip') && isFutureScheduled) {
+      update.scheduled_at = db.fn.now();
+    }
+
 
     await db('tasks').where({ id: id, user_id: req.user.id }).update(update);
     var updated = await db('tasks').where('id', id).first();
@@ -829,7 +899,7 @@ async function batchUpdateTasks(req, res) {
           var existingRows = await trx('tasks')
             .where('user_id', req.user.id)
             .whereIn('id', idsToUpdate)
-            .select('id', 'task_type', 'source_id', 'scheduled_at');
+            .select('id', 'task_type', 'source_id', 'scheduled_at', 'status');
           var existingById = {};
           existingRows.forEach(function(r) { existingById[r.id] = r; });
 
@@ -849,6 +919,9 @@ async function batchUpdateTasks(req, res) {
             delete row.created_at;
 
             var existing = existingById[id];
+
+            // Skip disabled items — they cannot be modified
+            if (existing && existing.status === 'disabled') continue;
 
             // Time-only update: combine new time with existing date
             if (row._pendingTimeOnly && existing && existing.scheduled_at) {
@@ -934,6 +1007,130 @@ async function batchUpdateTasks(req, res) {
   }
 }
 
+/**
+ * GET /api/tasks/disabled — list all disabled items for the user
+ */
+async function getDisabledTasks(req, res) {
+  try {
+    var rows = await db('tasks')
+      .where({ user_id: req.user.id, status: 'disabled' })
+      .orderBy('disabled_at', 'desc');
+    var srcMap = buildSourceMap(
+      await db('tasks').where({ user_id: req.user.id, task_type: 'habit_template' }).select()
+    );
+    var tasks = rows.map(function(r) { return rowToTask(r, null, srcMap); });
+    res.json({ tasks: tasks });
+  } catch (error) {
+    console.error('Get disabled tasks error:', error);
+    res.status(500).json({ error: 'Failed to get disabled tasks' });
+  }
+}
+
+/**
+ * PUT /api/tasks/:id/re-enable — re-enable a disabled task or habit
+ * Checks entity limits before allowing re-enable.
+ */
+async function reEnableTask(req, res) {
+  try {
+    var id = req.params.id;
+    var existing = await db('tasks').where({ id: id, user_id: req.user.id }).first();
+    if (!existing) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    if (existing.status !== 'disabled') {
+      return res.status(400).json({ error: 'Task is not disabled' });
+    }
+
+    // Check entity limits before re-enabling
+    var { countActiveTasks, countHabitTemplates } = require('../middleware/entity-limits');
+    var isHabitTemplate = existing.task_type === 'habit_template';
+    var limitKey = isHabitTemplate ? 'limits.habit_templates' : 'limits.active_tasks';
+
+    if (req.planFeatures) {
+      var limit = limitKey.split('.').reduce(function(o, k) { return o && o[k]; }, req.planFeatures);
+      if (limit !== -1 && limit !== undefined && limit !== null) {
+        var currentCount = isHabitTemplate
+          ? await countHabitTemplates(req.user.id)
+          : await countActiveTasks(req.user.id);
+
+        // For habit templates, also count how many instances will be re-enabled
+        var instanceCount = 0;
+        if (isHabitTemplate) {
+          var disabledInstances = await db('tasks')
+            .where({ source_id: id, user_id: req.user.id, status: 'disabled' })
+            .count('* as count').first();
+          instanceCount = parseInt(disabledInstances.count, 10);
+        }
+
+        // Habit templates check against habit limit; instances check against task limit
+        if (currentCount + 1 > limit) {
+          return res.status(403).json({
+            error: "You've reached the limit for your plan",
+            code: 'ENTITY_LIMIT_REACHED',
+            limit_key: limitKey,
+            current_count: currentCount,
+            limit: limit,
+            current_plan: req.planId || 'free',
+            upgrade_required: true
+          });
+        }
+
+        // If re-enabling a habit template, also check task limit for its instances
+        if (isHabitTemplate && instanceCount > 0) {
+          var taskLimit = 'limits.active_tasks'.split('.').reduce(function(o, k) { return o && o[k]; }, req.planFeatures);
+          if (taskLimit !== -1 && taskLimit !== undefined && taskLimit !== null) {
+            var currentTasks = await countActiveTasks(req.user.id);
+            if (currentTasks + instanceCount > taskLimit) {
+              return res.status(403).json({
+                error: "Re-enabling this habit would exceed your active task limit",
+                code: 'ENTITY_LIMIT_REACHED',
+                limit_key: 'limits.active_tasks',
+                current_count: currentTasks,
+                limit: taskLimit,
+                attempting_to_add: instanceCount,
+                current_plan: req.planId || 'free',
+                upgrade_required: true
+              });
+            }
+          }
+        }
+      }
+    }
+
+    await db.transaction(async function(trx) {
+      // Re-enable the task/template itself
+      await trx('tasks').where({ id: id, user_id: req.user.id }).update({
+        status: '',
+        disabled_at: null,
+        disabled_reason: null,
+        updated_at: db.fn.now()
+      });
+
+      // If re-enabling a habit template, also re-enable its disabled instances
+      if (isHabitTemplate) {
+        await trx('tasks')
+          .where({ source_id: id, user_id: req.user.id, status: 'disabled' })
+          .update({
+            status: '',
+            disabled_at: null,
+            disabled_reason: null,
+            updated_at: db.fn.now()
+          });
+      }
+    });
+
+    var srcMap = buildSourceMap(
+      await db('tasks').where({ user_id: req.user.id, task_type: 'habit_template' }).select()
+    );
+    var updated = await db('tasks').where('id', id).first();
+    await cache.invalidateTasks(req.user.id);
+    res.json({ task: rowToTask(updated, null, srcMap) });
+  } catch (error) {
+    console.error('Re-enable task error:', error);
+    res.status(500).json({ error: 'Failed to re-enable task' });
+  }
+}
+
 module.exports = {
   getAllTasks,
   getVersion,
@@ -943,6 +1140,8 @@ module.exports = {
   updateTaskStatus,
   batchCreateTasks,
   batchUpdateTasks,
+  getDisabledTasks,
+  reEnableTask,
   rowToTask,
   taskToRow,
   buildSourceMap,

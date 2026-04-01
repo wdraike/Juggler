@@ -25,13 +25,13 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
   var theme = getTheme(darkMode);
   var task = item.task;
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
-  var isDone = status === 'done' || status === 'cancel' || status === 'skip';
+  var isDone = status === 'done' || status === 'cancel' || status === 'skip' || status === 'pause';
   var compact = layoutMode === 'compact';
   var showDetails = !compact && (cardHeight || 52) >= 60;
   var durLabel = item.splitTotal > 1
     ? item.dur + ' of ' + task.dur + 'm'
     : (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm');
-  var statusIcon = status === 'done' ? '\u2713' : status === 'wip' ? '\u231B' : status === 'cancel' ? '\u2715' : status === 'skip' ? '\u21ED' : null;
+  var statusIcon = status === 'done' ? '\u2713' : status === 'wip' ? '\u231B' : status === 'cancel' ? '\u2715' : status === 'skip' ? '\u21ED' : status === 'pause' ? '\u23F8' : null;
   var startLabel = item.start != null ? formatStartTime(item.start) : null;
   var typeBadges = [];
   if (task.datePinned) typeBadges.push({ icon: '\uD83D\uDCCD', title: 'Date pinned \u2014 stays on this date, scheduler adjusts time only' });

@@ -623,9 +623,10 @@ export default function DailyView({
   var matchesFilter = useCallback(function (taskId) {
     if (!filter || filter === 'all') return true;
     var st = statuses[taskId] || '';
-    if (filter === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip';
+    if (filter === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause';
     if (filter === 'action') return st === '' || st === 'wip';
     if (filter === 'done') return st === 'done';
+    if (filter === 'pause') return st === 'pause';
     if (filter === 'wip') return st === 'wip';
     if (filter === 'pastdue') return pastDueIds && pastDueIds.has(taskId);
     if (filter === 'fixed') return fixedIds && fixedIds.has(taskId);

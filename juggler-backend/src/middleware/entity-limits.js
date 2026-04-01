@@ -64,7 +64,7 @@ function checkEntityLimit(limitKey, countFn, options = {}) {
 async function countActiveTasks(userId) {
   const result = await db('tasks')
     .where('user_id', userId)
-    .whereNotIn('status', ['done', 'cancel', 'skip'])
+    .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
     .where(function () {
       this.whereNull('task_type').orWhereNot('task_type', 'habit_template');
     })
@@ -77,7 +77,7 @@ async function countHabitTemplates(userId) {
   const result = await db('tasks')
     .where('user_id', userId)
     .where('task_type', 'habit_template')
-    .whereNotIn('status', ['done', 'cancel', 'skip'])
+    .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
     .count('* as count')
     .first();
   return parseInt(result.count, 10);

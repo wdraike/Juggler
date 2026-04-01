@@ -461,8 +461,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     }
     return {
       text, project, pri,
-      date: d || (isCreate ? '' : task.date),
-      day: dayName || (isCreate ? '' : task.day),
+      date: d || '',
+      day: dayName || '',
       time: fromTime24(time),
       dur: parseInt(dur) || 30,
       timeRemaining: timeRemaining === '' ? null : parseInt(timeRemaining),

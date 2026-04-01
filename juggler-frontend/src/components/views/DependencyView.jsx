@@ -289,14 +289,15 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
     function matchesStatus(t) {
       var s = statuses[t.id] || '';
       if (filter === 'all') return true;
-      if (filter === 'open') return s !== 'done' && s !== 'cancel' && s !== 'skip';
+      if (filter === 'open') return s !== 'done' && s !== 'cancel' && s !== 'skip' && s !== 'pause';
       if (filter === 'done') return s === 'done';
       if (filter === 'wip') return s === 'wip';
+      if (filter === 'pause') return s === 'pause';
       if (filter === 'blocked') return s !== 'done' && s !== 'cancel';
-      if (filter === 'action') return s !== 'done' && s !== 'cancel' && s !== 'skip';
+      if (filter === 'action') return s !== 'done' && s !== 'cancel' && s !== 'skip' && s !== 'pause';
       if (filter === 'pastdue') return pastDueIds && pastDueIds.has(t.id);
       if (filter === 'fixed') return fixedIds && fixedIds.has(t.id);
-      if (filter === 'unplaced') return !t.date && s !== 'done' && s !== 'cancel' && s !== 'skip';
+      if (filter === 'unplaced') return !t.date && s !== 'done' && s !== 'cancel' && s !== 'skip' && s !== 'pause';
       return true;
     }
 

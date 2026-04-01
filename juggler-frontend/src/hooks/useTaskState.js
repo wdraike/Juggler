@@ -206,12 +206,23 @@ export default function useTaskState() {
       taskFields: opts.taskFields
     });
     // Save status immediately via dedicated endpoint
-    apiClient.put(`/tasks/${id}/status`, {
-      status: val || ''
-    }).then(() => {
+    var body = { status: val || '' };
+    if (opts.completedAt) body.completedAt = opts.completedAt;
+    apiClient.put(`/tasks/${id}/status`, body).then((res) => {
       // Clear dirty flag once server confirms the save
       dispatch({ type: 'CLEAR_DIRTY_STATUS', id });
-      loadPlacements();  // Refresh schedule immediately — freed/occupied slots
+      // Pausing a habit template deletes future instances server-side — reload all tasks
+      if (val === 'pause' && res.data && res.data.instancesRemoved > 0) {
+        loadTasks();
+      } else {
+        // For terminal statuses, reload tasks so the frontend picks up the
+        // clamped scheduledAt from the server (rowToTask enforces this).
+        if (val === 'done' || val === 'cancel' || val === 'skip') {
+          loadTasks();
+        } else {
+          loadPlacements();
+        }
+      }
     }).catch(err => console.error('Failed to save status:', err));
     // If there are also taskFields (e.g. date changes on habit completion), save those too
     if (opts.taskFields) scheduleSave();
