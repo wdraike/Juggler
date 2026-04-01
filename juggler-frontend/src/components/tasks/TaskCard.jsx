@@ -46,6 +46,9 @@ export default function TaskCard({ task, status, onStatusChange, onExpand, darkM
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           textDecoration: isDone ? 'line-through' : 'none'
         }}>
+          {status === 'done' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u2713'}</span>}
+          {status === 'skip' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u23ED'}</span>}
+          {status === 'cancel' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u2717'}</span>}
           {task.text}
         </span>
         {task.project && (

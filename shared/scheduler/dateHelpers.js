@@ -148,9 +148,11 @@ function localToUtc(dateStr, timeStr, timezone) {
   var testLocalMonth = testParts.month;
   // Offset in minutes = (localTime - utcTime)
   var diffMins = ((testLocalH * 60 + testLocalM) - (hours * 60 + mins));
-  // Handle day boundary
+  // Handle day boundary — compare full dates, not just day numbers, to handle month rollovers
   if (testLocalDay !== day || testLocalMonth !== month + 1) {
-    diffMins += (testLocalDay > day || testLocalMonth > month + 1) ? 1440 : -1440;
+    var targetDate = new Date(year, month, day);
+    var testDate = new Date(testParts.year || year, testLocalMonth - 1, testLocalDay);
+    diffMins += (testDate > targetDate) ? 1440 : -1440;
   }
   var utcMs = tempDate.getTime() - diffMins * 60000;
   var result = new Date(utcMs);

@@ -42,6 +42,15 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
       if (!srcDate) srcDate = new Date(startDate);
       if (cursor < srcDate) return;
       if (dateStr === src.date) return;
+      // Respect habit date range — don't generate outside start/end bounds
+      if (src.habitStart) {
+        var hs = parseDate(src.habitStart);
+        if (hs && cursor < hs) return;
+      }
+      if (src.habitEnd) {
+        var he = parseDate(src.habitEnd);
+        if (he && cursor > he) return;
+      }
 
       var match = false;
       if (r.type === 'daily') {
@@ -126,7 +135,7 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         time: src.time, dur: src.dur, where: src.where, when: src.when,
         location: src.location, tools: src.tools, split: src.split, splitMin: src.splitMin,
         timeFlex: src.timeFlex, marker: src.marker, flexWhen: src.flexWhen,
-        dayReq: src.dayReq || 'any', section: '', notes: '',
+        dayReq: src.dayReq || 'any', section: '', notes: src.notes || '',
         taskType: 'generated', sourceId: src.id, generated: true
       });
     });

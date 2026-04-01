@@ -89,7 +89,6 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   allTasks.forEach(function(t) {
     var st = newSt[t.id] || "";
     if (st === "done" || st === "cancel" || st === "skip") return;
-    if (!t.date || t.date === "TBD") return;
     if (hasWhen(t.when, "allday")) return; // All-day events don't go on the time grid
     if (t.marker) {
       // Markers are non-blocking — shown on calendar but don't consume time slots
@@ -102,8 +101,11 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       return;
     }
     if (t.section && (t.section.includes("PARKING") || t.section.includes("TO BE SCHEDULED"))) return;
-    var td = parseDate(t.date);
-    if (!td) return;
+    // Dateless tasks: scheduler owns placement — treat as starting from today
+    var td = t.date ? parseDate(t.date) : null;
+    if (!td) {
+      td = new Date(localToday);
+    }
     var effectiveDur = effectiveDuration(t);
     if (effectiveDur <= 0) return;
 
@@ -138,9 +140,16 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (!habitDropped) { if (!habitsByDate[tdKey]) habitsByDate[tdKey] = []; habitsByDate[tdKey].push(t); }
       return;
     }
-    // Non-rigid habits on past days: drop them (missed day = missed day).
-    // Only today's and future habits enter the pool.
-    if (t.habit && isPast && tdKey !== effectiveTodayKey) return;
+    // Non-rigid habits on past days: drop unless still within placement window.
+    if (t.habit && isPast && tdKey !== effectiveTodayKey) {
+      var flex = t.timeFlex != null ? t.timeFlex : 60;
+      var daysPast = Math.round((localToday.getTime() - td.getTime()) / 86400000);
+      if (flex < daysPast * 1440) return; // outside placement window — skip
+      // Still within window — redirect to today so the scheduler can place it
+      td = new Date(localToday);
+      tdKey = effectiveTodayKey;
+      isPast = false;
+    }
 
     if (isPast || st === "wip" || st === "" || st === "other") {
       var earliest = null;

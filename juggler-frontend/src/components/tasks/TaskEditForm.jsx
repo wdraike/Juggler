@@ -9,7 +9,7 @@ import { getTheme } from '../../theme/colors';
 import { convertTimeForDisplay, getTimezoneAbbr, getUtcOffset } from '../../utils/timezone';
 import ConfirmDialog from '../features/ConfirmDialog';
 
-function HabitDeleteDialog({ taskName, onDeleteInstance, onDeleteHabit, onCancel, darkMode, isMobile }) {
+function HabitDeleteDialog({ taskName, onSkipInstance, onDeleteHabit, onCancel, darkMode, isMobile }) {
   var theme = getTheme(darkMode);
   var btnBase = {
     border: 'none', borderRadius: 8, padding: '10px 16px',
@@ -34,20 +34,20 @@ function HabitDeleteDialog({ taskName, onDeleteInstance, onDeleteHabit, onCancel
           Delete "{taskName.slice(0, 50)}"
         </div>
         <div style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 16 }}>
-          This is a recurring habit. What would you like to delete?
+          This is a recurring habit. What would you like to do?
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-          <button onClick={onDeleteInstance} style={{
+          <button onClick={onSkipInstance} style={{
             ...btnBase, background: theme.bgCard, border: '1px solid ' + theme.border, color: theme.text,
           }}>
-            <span style={{ fontWeight: 600 }}>Delete this instance only</span>
+            <span style={{ fontWeight: 600 }}>{'\u23ED'} Skip this instance</span>
             <br />
-            <span style={{ fontSize: 11, color: theme.textSecondary }}>Remove just today's occurrence. The habit continues.</span>
+            <span style={{ fontSize: 11, color: theme.textSecondary }}>Mark this occurrence as skipped. The habit continues.</span>
           </button>
           <button onClick={onDeleteHabit} style={{
             ...btnBase, background: theme.errorBg || '#fef2f2', border: '1px solid ' + (theme.errorBorder || '#fca5a5'), color: theme.error || '#991b1b',
           }}>
-            <span style={{ fontWeight: 600 }}>Delete entire habit</span>
+            <span style={{ fontWeight: 600 }}>{'\uD83D\uDDD1'} Delete entire habit</span>
             <br />
             <span style={{ fontSize: 11, opacity: 0.8 }}>Remove the habit and all future instances. Completed history is kept.</span>
           </button>
@@ -271,16 +271,22 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [recurEvery, setRecurEvery] = useState(isCreate ? 2 : (task.recur?.every || 2));
   var [recurUnit, setRecurUnit] = useState(isCreate ? 'days' : (task.recur?.unit || 'days'));
   var [recurMonthDays, setRecurMonthDays] = useState(isCreate ? [1, 15] : (task.recur?.monthDays || [1, 15]));
+  var [habitStart, setHabitStart] = useState(isCreate ? '' : (task.habitStart || ''));
+  var [habitEnd, setHabitEnd] = useState(isCreate ? '' : (task.habitEnd || ''));
+
+  // --- Derived scheduling mode flags (used for field disable logic) ---
+  var whenParts = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+  var isAllDay = whenParts.indexOf('allday') !== -1;
+  var isFixed = whenParts.indexOf('fixed') !== -1;
+  var isRigid = habit && rigid;
+  var disSplit = isAllDay || isFixed || isRigid;
 
   // --- Configuration feasibility warnings ---
   var configWarnings = (function() {
     if (marker) return [];
     var warnings = [];
-    var whenParts = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
     var isAnytime = whenParts.length === 0 || (whenParts.length === 1 && whenParts[0] === 'anytime');
-    var isAllDay = whenParts.indexOf('allday') >= 0;
-    var isFixedWhen = whenParts.indexOf('fixed') >= 0;
-    if (isAnytime || isAllDay || isFixedWhen) return [];
+    if (isAnytime || isAllDay || isFixed) return [];
     if (!scheduleTemplates || !templateDefaults) return [];
 
     // Determine which day-names are eligible given dayReq
@@ -373,7 +379,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       color: on ? (color || TH.accent) : TH.textMuted,
     };
   }
-  var isFixed = !isCreate && when && when.indexOf('fixed') >= 0;
   var [saveStatus, setSaveStatus] = useState(null); // null | 'saving' | 'saved'
   var saveTimer = useRef(null);
   var firstRender = useRef(true);
@@ -401,7 +406,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       recurType: t.recur?.type || 'none', recurDays: t.recur?.days || 'MTWRF',
       recurEvery: t.recur?.every || 2, recurUnit: t.recur?.unit || 'days',
       recurMonthDays: t.recur?.monthDays || [1, 15],
-      tz: t.tz || activeTimezone || 'America/New_York'
+      tz: t.tz || activeTimezone || 'America/New_York',
+      habitStart: t.habitStart || '', habitEnd: t.habitEnd || ''
     };
   }
   if (!taskSnapshotRef.current && !isCreate && task) {
@@ -442,6 +448,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setRecurType(newSnap.recurType); setRecurDays(newSnap.recurDays);
     setRecurEvery(newSnap.recurEvery); setRecurUnit(newSnap.recurUnit);
     setRecurMonthDays(newSnap.recurMonthDays);
+    setHabitStart(newSnap.habitStart); setHabitEnd(newSnap.habitEnd);
     firstRender.current = true; // prevent auto-save from firing for this sync
   }, [task, isCreate]);
 
@@ -480,9 +487,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         monthDays: recurType === 'monthly' ? recurMonthDays : undefined
       },
       tz: taskTz,
-      _timezone: taskTz  // tells backend which timezone to use for date/time → UTC conversion
+      _timezone: taskTz,  // tells backend which timezone to use for date/time → UTC conversion
+      habitStart: habit ? (habitStart || null) : null,
+      habitEnd: habit ? (habitEnd || null) : null
     };
-  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz]);
+  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, habitStart, habitEnd]);
 
   // Build only the fields that changed from the initial snapshot (prevents marking unchanged fields dirty)
   var buildChangedFields = useCallback(function() {
@@ -525,6 +534,9 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (recurType !== snap.recurType || recurDays !== snap.recurDays || String(recurEvery) !== String(snap.recurEvery) || recurUnit !== snap.recurUnit || JSON.stringify(recurMonthDays) !== JSON.stringify(snap.recurMonthDays)) {
       changed.recur = all.recur;
     }
+    // Habit date range
+    if (habitStart !== (snap.habitStart || '')) changed.habitStart = all.habitStart;
+    if (habitEnd !== (snap.habitEnd || '')) changed.habitEnd = all.habitEnd;
     // Always include tz and _timezone when any field changed — the backend needs
     // the timezone context for date/time → UTC conversion
     if (Object.keys(changed).length > 0) {
@@ -532,7 +544,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       changed._timezone = all._timezone;
     }
     return Object.keys(changed).length > 0 ? changed : null;
-  }, [buildFields, text, project, pri, notes, when, dayReq, habit, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, due, startAfter, taskLoc, taskTools, recurType, recurDays, recurEvery, recurUnit, recurMonthDays]);
+  }, [buildFields, text, project, pri, notes, when, dayReq, habit, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, due, startAfter, taskLoc, taskTools, recurType, recurDays, recurEvery, recurUnit, recurMonthDays, habitStart, habitEnd]);
 
   // Dirty detection — compare current fields to snapshot
   var [isDirty, setIsDirty] = useState(false);
@@ -542,7 +554,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     userDirtyRef.current = true;
     var changed = buildChangedFields();
     setIsDirty(!!changed);
-  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurEvery, recurUnit, recurMonthDays, taskTz]);
+  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurEvery, recurUnit, recurMonthDays, taskTz, habitStart, habitEnd]);
 
   // Manual save handler
   function handleSave() {
@@ -651,6 +663,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             }}>{saveStatus === 'saving' ? 'Saving\u2026' : '\u2714 Saved'}</span>}
           </>
         )}
+        <div style={{ flex: 1 }} />
         {!isCreate && onDelete && (
           <button onClick={() => setShowDeleteConfirm(true)} style={{
             fontSize: 10, fontWeight: 600, padding: '4px 10px',
@@ -658,7 +671,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             background: TH.redBg, color: TH.redText, cursor: 'pointer'
           }}>{'\uD83D\uDDD1'} Delete</button>
         )}
-        <div style={{ flex: 1 }} />
         <button onClick={onClose} style={{
           border: 'none', background: 'transparent', color: TH.textMuted,
           fontSize: isMobile ? 24 : 16, cursor: 'pointer', padding: '2px 6px',
@@ -799,17 +811,27 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                 )}
               </div>
               <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                <input type="datetime-local" value={date && time ? date + 'T' + time : date ? date + 'T00:00' : ''}
-                  onChange={e => {
-                    var v = e.target.value;
-                    if (v) {
-                      var parts = v.split('T');
-                      setDate(parts[0]);
-                      setTime(parts[1] || '');
-                    } else { setDate(''); setTime(''); }
-                    if (!isCreate && !isFixed) setDatePinned(!!v);
-                  }}
-                  style={{ ...iStyle, width: isMobile ? '100%' : undefined, minWidth: 0, ...(datePinned && date ? { borderColor: '#D97706' } : {}) }} />
+                {isAllDay ? (
+                  <input type="date" value={date || ''}
+                    onChange={e => {
+                      setDate(e.target.value || '');
+                      setTime('');
+                      if (!isCreate && !isFixed) setDatePinned(!!e.target.value);
+                    }}
+                    style={{ ...iStyle, width: isMobile ? '100%' : undefined, minWidth: 0, ...(datePinned && date ? { borderColor: '#D97706' } : {}) }} />
+                ) : (
+                  <input type="datetime-local" value={date && time ? date + 'T' + time : date ? date + 'T00:00' : ''}
+                    onChange={e => {
+                      var v = e.target.value;
+                      if (v) {
+                        var parts = v.split('T');
+                        setDate(parts[0]);
+                        setTime(parts[1] || '');
+                      } else { setDate(''); setTime(''); }
+                      if (!isCreate && !isFixed) setDatePinned(!!v);
+                    }}
+                    style={{ ...iStyle, width: isMobile ? '100%' : undefined, minWidth: 0, ...(datePinned && date ? { borderColor: '#D97706' } : {}) }} />
+                )}
                 {!isCreate && !isFixed && !marker && datePinned && date && (
                   <button onClick={() => { setDatePinned(false); setDate(''); setTime(''); }} title="Let scheduler control date"
                     style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
@@ -821,17 +843,17 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               </div>
             </label>
             <label style={lStyle}>
-              <span title="Total time needed. The scheduler reserves this much time.">{'\u23F1'} Duration</span>
-              <select value={dur} onChange={e => setDur(parseInt(e.target.value))} style={iStyle}>
+              <span title={isAllDay ? 'Not applicable for all-day tasks' : 'Total time needed. The scheduler reserves this much time.'} style={isAllDay ? { opacity: 0.4 } : undefined}>{'\u23F1'} Duration</span>
+              <select value={dur} onChange={e => setDur(parseInt(e.target.value))} disabled={isAllDay} style={{ ...iStyle, ...(isAllDay ? { opacity: 0.4 } : {}) }}>
                 {durOptions.map(v => (
                   <option key={v} value={v}>{durLabel(v)}</option>
                 ))}
               </select>
             </label>
             {!isCreate && !marker && <label style={lStyle}>
-              <span title="Time left on a partially completed task.">{'\uD83D\uDCCA'} Remaining</span>
-              <select value={remVal} onChange={e => setTimeRemaining(parseInt(e.target.value))}
-                style={{ ...iStyle, background: remVal < parseInt(dur) ? TH.purpleBg : TH.inputBg }}>
+              <span title={isAllDay ? 'Not applicable for all-day tasks' : 'Time left on a partially completed task.'} style={isAllDay ? { opacity: 0.4 } : undefined}>{'\uD83D\uDCCA'} Remaining</span>
+              <select value={remVal} onChange={e => setTimeRemaining(parseInt(e.target.value))} disabled={isAllDay}
+                style={{ ...iStyle, background: remVal < parseInt(dur) ? TH.purpleBg : TH.inputBg, ...(isAllDay ? { opacity: 0.4 } : {}) }}>
                 {remOptions.map(v => (
                   <option key={v} value={v}>{durLabel(v)}</option>
                 ))}
@@ -842,16 +864,16 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           {/* Travel time buffers */}
           {!marker && <div style={{ display: 'flex', gap: 6, marginBottom: 5 }}>
             <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
-              <span title="Travel buffer before the task — scheduler prevents overlaps">{'\uD83D\uDE97'} Travel before</span>
-              <select value={travelBefore} onChange={e => setTravelBefore(parseInt(e.target.value))} style={iStyle}>
+              <span title={isAllDay ? 'Not applicable for all-day tasks' : 'Travel buffer before the task — scheduler prevents overlaps'} style={isAllDay ? { opacity: 0.4 } : undefined}>{'\uD83D\uDE97'} Travel before</span>
+              <select value={travelBefore} onChange={e => setTravelBefore(parseInt(e.target.value))} disabled={isAllDay} style={{ ...iStyle, ...(isAllDay ? { opacity: 0.4 } : {}) }}>
                 {[0, 5, 10, 15, 20, 30, 45, 60, 90].map(v => (
                   <option key={v} value={v}>{v === 0 ? 'None' : v + ' min'}</option>
                 ))}
               </select>
             </label>
             <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
-              <span title="Travel buffer after the task — scheduler prevents overlaps">Travel after</span>
-              <select value={travelAfter} onChange={e => setTravelAfter(parseInt(e.target.value))} style={iStyle}>
+              <span title={isAllDay ? 'Not applicable for all-day tasks' : 'Travel buffer after the task — scheduler prevents overlaps'} style={isAllDay ? { opacity: 0.4 } : undefined}>Travel after</span>
+              <select value={travelAfter} onChange={e => setTravelAfter(parseInt(e.target.value))} disabled={isAllDay} style={{ ...iStyle, ...(isAllDay ? { opacity: 0.4 } : {}) }}>
                 {[0, 5, 10, 15, 20, 30, 45, 60, 90].map(v => (
                   <option key={v} value={v}>{v === 0 ? 'None' : v + ' min'}</option>
                 ))}
@@ -863,20 +885,17 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           {!marker && <label style={{ ...lStyle, marginBottom: 5 }}>
             <span title="Controls which time blocks the scheduler can use.">{'\uD83D\uDCC6'} Scheduling mode</span>
             {(function() {
-              var parts = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
-              var isAllDay = parts.indexOf('allday') !== -1;
-              var isFixed = parts.indexOf('fixed') !== -1;
               // Window tags are everything that isn't a mode keyword
-              var tagParts = parts.filter(function(p) { return p !== 'anytime' && p !== 'allday' && p !== 'fixed'; });
+              var tagParts = whenParts.filter(function(p) { return p !== 'anytime' && p !== 'allday' && p !== 'fixed'; });
               var isWindows = tagParts.length > 0;
               var isAnytime = !isAllDay && !isFixed && !isWindows;
               return (
                 <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center', marginTop: 4 }}>
                   <button title="No time restriction — the scheduler can place this in any available slot" onClick={function() { setWhen(''); }}
                     style={togStyle(isAnytime, '#2D6A4F')}>{'\uD83D\uDD04'} Anytime</button>
-                  <button title="Spans the entire day" onClick={function() { setWhen('allday'); }}
+                  <button title="Spans the entire day" onClick={function() { setWhen('allday'); setSplit(false); setTravelBefore(0); setTravelAfter(0); }}
                     style={togStyle(isAllDay, '#C8942A')}>{'\u2600\uFE0F'} All Day</button>
-                  <button title="Locked to the exact Date/Time. The scheduler will never move it" onClick={function() { setWhen('fixed'); }}
+                  <button title="Locked to the exact Date/Time. The scheduler will never move it" onClick={function() { setWhen('fixed'); setSplit(false); }}
                     style={togStyle(isFixed, '#8B2635')}>{'\uD83D\uDCCC'} Fixed</button>
                   <span style={{ width: 1, height: 18, background: TH.border, margin: '0 2px' }} />
                   {(uniqueTags || []).map(function(tb) {
@@ -914,8 +933,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           {/* Day requirement */}
           {!marker && (
           <label style={{ ...lStyle, marginBottom: 5 }}>
-            <span title="Restrict which days the scheduler can place this task.">Day requirement</span>
-            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+            <span title={isFixed ? 'Day is determined by the fixed date' : 'Restrict which days the scheduler can place this task.'} style={isFixed ? { opacity: 0.4 } : undefined}>Day requirement</span>
+            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', ...(isFixed ? { opacity: 0.4, pointerEvents: 'none' } : {}) }}>
               <button title="No day restriction" onClick={function() { setDayReq('any'); }}
                 style={togStyle(dayReq === 'any', '#2D6A4F')}>Any</button>
               <button title="Monday through Friday only" onClick={function() { setDayReq(dayReq === 'weekday' ? 'any' : 'weekday'); }}
@@ -940,91 +959,15 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             </div>
           </label>)}
 
-          {/* Time drift — scaled by recurrence frequency */}
-          {!marker && habit && (function() {
-            var driftOptions;
-            if (recurType === 'monthly' || (recurType === 'interval' && (recurUnit === 'months' || recurUnit === 'years'))) {
-              driftOptions = [
-                { value: 0, label: '0 (rigid)' },
-                { value: 1440, label: '1 day' },
-                { value: 2880, label: '2 days' },
-                { value: 4320, label: '3 days' },
-                { value: 7200, label: '5 days' },
-                { value: 10080, label: '7 days' },
-              ];
-            } else if (recurType === 'weekly' || recurType === 'biweekly' || (recurType === 'interval' && recurUnit === 'weeks')) {
-              driftOptions = [
-                { value: 0, label: '0 (rigid)' },
-                { value: 60, label: '1 hr' },
-                { value: 120, label: '2 hr' },
-                { value: 240, label: '4 hr' },
-                { value: 480, label: '8 hr' },
-                { value: 1440, label: '1 day' },
-                { value: 2880, label: '2 days' },
-              ];
-            } else if (recurType === 'interval' && recurUnit === 'days' && recurEvery <= 7) {
-              driftOptions = [
-                { value: 0, label: '0 (rigid)' },
-                { value: 60, label: '1 hr' },
-                { value: 120, label: '2 hr' },
-                { value: 240, label: '4 hr' },
-                { value: 480, label: '8 hr' },
-                { value: 1440, label: '1 day' },
-                { value: 2880, label: '2 days' },
-              ];
-            } else {
-              // daily, none, or short interval
-              driftOptions = [
-                { value: 0, label: '0 (rigid)' },
-                { value: 15, label: '15 min' },
-                { value: 30, label: '30 min' },
-                { value: 60, label: '1 hr' },
-                { value: 90, label: '1.5 hr' },
-                { value: 120, label: '2 hr' },
-                { value: 180, label: '3 hr' },
-                { value: 240, label: '4 hr' },
-              ];
-            }
-            var maxDrift = driftOptions[driftOptions.length - 1].value;
-            var currentVal = rigid ? 0 : timeFlex;
-            // Clamp if current value exceeds max for this recurrence
-            if (currentVal > maxDrift && !rigid) {
-              setTimeFlex(maxDrift);
-              currentVal = maxDrift;
-            }
-            // Ensure current value appears in options
-            var hasVal = driftOptions.some(function(o) { return o.value === currentVal; });
-            if (!hasVal && currentVal > 0) {
-              // Snap to nearest lower option
-              var snapped = 0;
-              driftOptions.forEach(function(o) { if (o.value <= currentVal) snapped = o.value; });
-              setTimeFlex(snapped);
-              currentVal = snapped;
-            }
-            return (
-              <label style={{ ...lStyle, marginBottom: 5 }}>
-                <span title="How far from the preferred time the scheduler can shift this habit. 0 = locked to exact time.">{'\u00B1'} Time drift</span>
-                <select value={currentVal} onChange={e => {
-                  var v = parseInt(e.target.value);
-                  if (v === 0) { setRigid(true); } else { setRigid(false); setTimeFlex(v); }
-                }} style={{ ...iStyle, minWidth: 90 }}>
-                  {driftOptions.map(function(o) {
-                    return <option key={o.value} value={o.value}>{o.label}</option>;
-                  })}
-                </select>
-              </label>
-            );
-          })()}
-
-          {/* Due + Start after + Split — hidden for markers */}
-          {!marker && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, alignItems: 'flex-end', maxWidth: '100%' }}>
+          {/* Due + Start after — hidden for markers and habits */}
+          {!marker && !habit && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, alignItems: 'flex-end', maxWidth: '100%' }}>
             <label style={lStyle}>
-              <span title="Hard deadline. The scheduler places this task before this date.">{'\uD83D\uDCC6'} Due</span>
+              <span title={isFixed ? 'Fixed tasks are already placed at their exact time' : 'Hard deadline. The scheduler places this task before this date.'} style={isFixed ? { opacity: 0.4 } : undefined}>{'\uD83D\uDCC6'} Due</span>
               <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
                 <input type="date" value={due || ''}
-                  onChange={e => setDue(e.target.value || '')}
-                  style={{ ...iStyle, minWidth: 0, flex: 1, ...(due ? { background: TH.amberBg } : {}) }} />
-                {due && (
+                  onChange={e => setDue(e.target.value || '')} disabled={isFixed}
+                  style={{ ...iStyle, minWidth: 0, flex: 1, ...(due ? { background: TH.amberBg } : {}), ...(isFixed ? { opacity: 0.4 } : {}) }} />
+                {due && !isFixed && (
                   <button onClick={() => setDue('')} style={{
                     fontSize: 9, background: 'none', border: 'none', color: TH.redText,
                     cursor: 'pointer', padding: 0, fontWeight: 700
@@ -1033,12 +976,12 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               </div>
             </label>
             <label style={lStyle}>
-              <span title="Earliest date this task can be scheduled.">{'\u23F3'} Start after</span>
+              <span title={isFixed ? 'Fixed tasks are already placed at their exact time' : 'Earliest date this task can be scheduled.'} style={isFixed ? { opacity: 0.4 } : undefined}>{'\u23F3'} Start after</span>
               <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
                 <input type="date" value={startAfter || ''}
-                  onChange={e => setStartAfter(e.target.value || '')}
-                  style={{ ...iStyle, minWidth: 0, flex: 1, ...(startAfter ? { background: TH.blueBg } : {}) }} />
-                {startAfter && (
+                  onChange={e => setStartAfter(e.target.value || '')} disabled={isFixed}
+                  style={{ ...iStyle, minWidth: 0, flex: 1, ...(startAfter ? { background: TH.blueBg } : {}), ...(isFixed ? { opacity: 0.4 } : {}) }} />
+                {startAfter && !isFixed && (
                   <button onClick={() => setStartAfter('')} style={{
                     fontSize: 9, background: 'none', border: 'none', color: TH.redText,
                     cursor: 'pointer', padding: 0, fontWeight: 700
@@ -1046,12 +989,17 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                 )}
               </div>
             </label>
+          </div>}
+
+          {/* Split — hidden for markers */}
+          {!marker && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, alignItems: 'flex-end' }}>
             <label style={lStyle}>
-              <span title="Allow the scheduler to break this task into smaller chunks.">{'\u2702'} Split OK</span>
-              <button title={split ? 'Task can be split into chunks' : 'Task must be scheduled as one block'} onClick={() => setSplit(!split)}
-                style={togStyle(split, '#2D6A4F')}>{split ? '\u2702 Yes' : 'No'}</button>
+              <span title={disSplit ? (isAllDay ? 'Not applicable for all-day tasks' : isFixed ? 'Fixed tasks cannot be split' : 'Rigid habits cannot be split') : 'Allow the scheduler to break this task into smaller chunks.'} style={disSplit ? { opacity: 0.4 } : undefined}>{'\u2702'} Split OK</span>
+              <button title={disSplit ? 'Not available in this mode' : (split ? 'Task can be split into chunks' : 'Task must be scheduled as one block')}
+                onClick={disSplit ? undefined : () => setSplit(!split)}
+                style={{ ...togStyle(split, '#2D6A4F'), ...(disSplit ? { opacity: 0.4, pointerEvents: 'none' } : {}) }}>{split ? '\u2702 Yes' : 'No'}</button>
             </label>
-            {split && (
+            {split && !disSplit && (
               <label style={lStyle}>
                 <span title="Smallest chunk when splitting.">Min block</span>
                 <select value={splitMin} onChange={e => setSplitMin(parseInt(e.target.value))}
@@ -1134,6 +1082,133 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             )}
           </div>}
 
+          {/* Habit date range — when to start/stop generating instances */}
+          {habit && !marker && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
+              <label style={lStyle}>
+                <span title="Date to start generating instances for this habit">{'\uD83D\uDCC5'} Start generating</span>
+                <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                  <input type="date" value={habitStart || ''} onChange={e => setHabitStart(e.target.value || '')} style={iStyle} />
+                  {habitStart && (
+                    <button onClick={() => setHabitStart('')} style={{
+                      fontSize: 9, background: 'none', border: 'none', color: TH.redText,
+                      cursor: 'pointer', padding: 0, fontWeight: 700
+                    }}>{'\u2715'}</button>
+                  )}
+                </div>
+              </label>
+              <label style={lStyle}>
+                <span title="Date to stop generating new instances (discontinue the habit)">{'\u23F9'} Discontinue after</span>
+                <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                  <input type="date" value={habitEnd || ''} onChange={e => setHabitEnd(e.target.value || '')} style={iStyle} />
+                  {habitEnd && (
+                    <button onClick={() => setHabitEnd('')} style={{
+                      fontSize: 9, background: 'none', border: 'none', color: TH.redText,
+                      cursor: 'pointer', padding: 0, fontWeight: 700
+                    }}>{'\u2715'}</button>
+                  )}
+                </div>
+              </label>
+            </div>
+          )}
+
+          {/* Placement window — how far from preferred time the scheduler can shift */}
+          {!marker && habit && (function() {
+            var driftOptions;
+            // Normalize recurrence to effective days between occurrences
+            var effectiveDays = 1; // default: daily
+            if (recurType === 'daily') effectiveDays = 1;
+            else if (recurType === 'weekly') effectiveDays = 7;
+            else if (recurType === 'biweekly') effectiveDays = 14;
+            else if (recurType === 'monthly') effectiveDays = 30;
+            else if (recurType === 'interval') {
+              var n = parseInt(recurEvery) || 1;
+              if (recurUnit === 'days') effectiveDays = n;
+              else if (recurUnit === 'weeks') effectiveDays = n * 7;
+              else if (recurUnit === 'months') effectiveDays = n * 30;
+              else if (recurUnit === 'years') effectiveDays = n * 365;
+            }
+
+            if (effectiveDays >= 90) {
+              // Quarterly+ — very infrequent, wide window
+              driftOptions = [
+                { value: 0, label: 'exact (rigid)' },
+                { value: 1440, label: '+/- 1 day' },
+                { value: 4320, label: '+/- 3 days' },
+                { value: 7200, label: '+/- 5 days' },
+                { value: 10080, label: '+/- 7 days' },
+                { value: 20160, label: '+/- 14 days' },
+              ];
+            } else if (effectiveDays >= 21) {
+              // Monthly-ish (21-89 days)
+              driftOptions = [
+                { value: 0, label: 'exact (rigid)' },
+                { value: 240, label: '+/- 4 hr' },
+                { value: 1440, label: '+/- 1 day' },
+                { value: 2880, label: '+/- 2 days' },
+                { value: 4320, label: '+/- 3 days' },
+                { value: 7200, label: '+/- 5 days' },
+              ];
+            } else if (effectiveDays >= 7) {
+              // Weekly-ish (7-20 days)
+              driftOptions = [
+                { value: 0, label: 'exact (rigid)' },
+                { value: 60, label: '+/- 1 hr' },
+                { value: 120, label: '+/- 2 hr' },
+                { value: 240, label: '+/- 4 hr' },
+                { value: 480, label: '+/- 8 hr' },
+                { value: 1440, label: '+/- 1 day' },
+              ];
+            } else if (effectiveDays >= 2) {
+              // Every few days (2-6 days)
+              driftOptions = [
+                { value: 0, label: 'exact (rigid)' },
+                { value: 30, label: '+/- 30 min' },
+                { value: 60, label: '+/- 1 hr' },
+                { value: 120, label: '+/- 2 hr' },
+                { value: 240, label: '+/- 4 hr' },
+                { value: 480, label: '+/- 8 hr' },
+              ];
+            } else {
+              // Daily — tight window
+              driftOptions = [
+                { value: 0, label: 'exact (rigid)' },
+                { value: 15, label: '+/- 15 min' },
+                { value: 30, label: '+/- 30 min' },
+                { value: 60, label: '+/- 1 hr' },
+                { value: 90, label: '+/- 1.5 hr' },
+                { value: 120, label: '+/- 2 hr' },
+              ];
+            }
+            var maxDrift = driftOptions[driftOptions.length - 1].value;
+            var currentVal = rigid ? 0 : timeFlex;
+            if (currentVal > maxDrift && !rigid) {
+              setTimeFlex(maxDrift);
+              currentVal = maxDrift;
+            }
+            var hasVal = driftOptions.some(function(o) { return o.value === currentVal; });
+            if (!hasVal && currentVal > 0) {
+              var snapped = 0;
+              driftOptions.forEach(function(o) { if (o.value <= currentVal) snapped = o.value; });
+              setTimeFlex(snapped);
+              currentVal = snapped;
+            }
+            var disPlacement = isAllDay || isFixed;
+            return (
+              <label style={{ ...lStyle, marginBottom: 5 }}>
+                <span title={disPlacement ? (isAllDay ? 'Not applicable for all-day tasks' : 'Fixed tasks have no placement flexibility') : 'How far from the preferred time the scheduler can shift this habit. 0 = locked to exact time.'} style={disPlacement ? { opacity: 0.4 } : undefined}>Placement window</span>
+                <select value={currentVal} onChange={e => {
+                  var v = parseInt(e.target.value);
+                  if (v === 0) { setRigid(true); } else { setRigid(false); setTimeFlex(v); }
+                }} disabled={disPlacement} style={{ ...iStyle, minWidth: 90, ...(disPlacement ? { opacity: 0.4 } : {}) }}>
+                  {driftOptions.map(function(o) {
+                    return <option key={o.value} value={o.value}>{o.label}</option>;
+                  })}
+                </select>
+              </label>
+            );
+          })()}
+
           {/* Configuration warnings */}
           {configWarnings.length > 0 && (
             <div style={{ background: TH.amberBg, border: '1px solid ' + TH.amberBorder, borderRadius: 4, padding: '4px 8px', marginTop: 5, fontSize: 10, color: TH.amberText, lineHeight: 1.4 }}>
@@ -1193,7 +1268,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         task.habit || task.taskType === 'habit_instance' || task.taskType === 'habit_template' || task.sourceId || task.source_id ? (
           <HabitDeleteDialog
             taskName={task.text || 'this habit'}
-            onDeleteInstance={() => { onDelete(task.id); onClose(); }}
+            onSkipInstance={() => { if (onStatusChange) onStatusChange('skip'); setShowDeleteConfirm(false); }}
             onDeleteHabit={() => { onDelete(task.id, { cascade: 'habit' }); onClose(); }}
             onCancel={() => setShowDeleteConfirm(false)}
             darkMode={darkMode}

@@ -58,7 +58,8 @@ function parseISOToDate(iso) {
 // If an instance row has NULL for these, the value is read from the source.
 var TEMPLATE_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
   'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
-  'travel_before', 'travel_after', 'depends_on'];
+  'travel_before', 'travel_after', 'depends_on',
+  'notes', 'marker', 'flex_when', 'habit_start', 'habit_end'];
 
 /**
  * Build a { sourceId: row } lookup from an array of task rows.
@@ -180,7 +181,9 @@ function rowToTask(row, timezone, sourceMap) {
     marker: !!row.marker,
     flexWhen: !!row.flex_when,
     travelBefore: row.travel_before != null ? row.travel_before : undefined,
-    travelAfter: row.travel_after != null ? row.travel_after : undefined
+    travelAfter: row.travel_after != null ? row.travel_after : undefined,
+    habitStart: row.habit_start || null,
+    habitEnd: row.habit_end || null
   };
 }
 
@@ -232,6 +235,8 @@ function taskToRow(task, userId, timezone) {
   if (task.travelBefore !== undefined) row.travel_before = task.travelBefore || null;
   if (task.travelAfter !== undefined) row.travel_after = task.travelAfter || null;
   if (task.tz !== undefined) row.tz = task.tz || null;
+  if (task.habitStart !== undefined) row.habit_start = task.habitStart || null;
+  if (task.habitEnd !== undefined) row.habit_end = task.habitEnd || null;
 
   // scheduledAt (UTC ISO) takes precedence over date+time (local strings)
   if (task.scheduledAt !== undefined) {
@@ -415,7 +420,8 @@ async function updateTask(req, res) {
     // Fields that belong on the source template (shared across all instances).
     var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
       'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
-      'travel_before', 'travel_after', 'depends_on'];
+      'travel_before', 'travel_after', 'depends_on',
+      'notes', 'marker', 'flex_when', 'habit_start', 'habit_end'];
 
     var taskType = existing.task_type || 'task';
 
@@ -454,6 +460,52 @@ async function updateTask(req, res) {
         // Editing the template directly — just update the template row.
         // Instances always inherit template fields via rowToTask.
         await trx('tasks').where({ id: id, user_id: req.user.id }).update(row);
+
+        // If recurrence or habit date range changed, clean up pending instances
+        // that no longer match the new pattern.
+        var needsCleanup = row.recur !== undefined || row.habit_start !== undefined || row.habit_end !== undefined;
+        if (needsCleanup) {
+          var _dateMatch = require('../../shared/scheduler/dateMatchesRecurrence');
+          var _dateHelpers = require('../scheduler/dateHelpers');
+          var updatedTmpl = await trx('tasks').where({ id: id, user_id: req.user.id }).first();
+          var newRecur = typeof updatedTmpl.recur === 'string' ? JSON.parse(updatedTmpl.recur || 'null') : updatedTmpl.recur;
+          var srcDateStr = updatedTmpl.scheduled_at ? utcToLocal(updatedTmpl.scheduled_at, tz).date : null;
+
+          var pendingInstances = await trx('tasks')
+            .where({ source_id: id, user_id: req.user.id, task_type: 'habit_instance' })
+            .where('status', '');
+
+          var deleteIds = [];
+          pendingInstances.forEach(function(inst) {
+            var instDate = inst.scheduled_at ? utcToLocal(inst.scheduled_at, tz).date : null;
+            if (!instDate) { deleteIds.push(inst.id); return; }
+            // Check recurrence match
+            if (!newRecur || newRecur.type === 'none' ||
+                !_dateMatch.dateMatchesRecurrence(instDate, newRecur, srcDateStr, _dateHelpers.parseDate)) {
+              deleteIds.push(inst.id); return;
+            }
+            // Check habit date range
+            if (updatedTmpl.habit_start) {
+              var hs = _dateHelpers.parseDate(updatedTmpl.habit_start instanceof Date
+                ? _dateHelpers.formatDateKey(updatedTmpl.habit_start)
+                : String(updatedTmpl.habit_start).replace(/-/g, '/').replace(/^0/, ''));
+              var instD = _dateHelpers.parseDate(instDate);
+              if (hs && instD && instD < hs) { deleteIds.push(inst.id); return; }
+            }
+            if (updatedTmpl.habit_end) {
+              var he = _dateHelpers.parseDate(updatedTmpl.habit_end instanceof Date
+                ? _dateHelpers.formatDateKey(updatedTmpl.habit_end)
+                : String(updatedTmpl.habit_end).replace(/-/g, '/').replace(/^0/, ''));
+              var instD2 = _dateHelpers.parseDate(instDate);
+              if (he && instD2 && instD2 > he) { deleteIds.push(inst.id); return; }
+            }
+          });
+
+          if (deleteIds.length > 0) {
+            await trx('tasks').where('user_id', req.user.id).whereIn('id', deleteIds).del();
+            console.log('[HABIT] cleaned up ' + deleteIds.length + ' pending instances after recurrence/date-range change on ' + id);
+          }
+        }
       } else {
         // Normal (non-habit) task — update directly
         await trx('tasks').where({ id: id, user_id: req.user.id }).update(row);
@@ -666,6 +718,10 @@ async function updateTaskStatus(req, res) {
 
     // Never set status on a habit template — status belongs on instances only
     if (existing.task_type === 'habit_template') {
+      // Clear any stale status that may have been set by a previous bug
+      if (existing.status) {
+        await db('tasks').where({ id: id, user_id: req.user.id }).update({ status: '', updated_at: db.fn.now() });
+      }
       return res.status(400).json({ error: 'Cannot set status on a habit template' });
     }
 
@@ -761,7 +817,8 @@ async function batchUpdateTasks(req, res) {
     // Template fields that should be routed to the source for habit instances
     var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
       'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
-      'travel_before', 'travel_after', 'depends_on'];
+      'travel_before', 'travel_after', 'depends_on',
+      'notes', 'marker', 'flex_when', 'habit_start', 'habit_end'];
 
     for (var attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {

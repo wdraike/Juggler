@@ -15,6 +15,7 @@ var DAY_NAMES = constants.DAY_NAMES;
 var dateHelpers = require('./dateHelpers');
 var parseDate = dateHelpers.parseDate;
 var formatDateKey = dateHelpers.formatDateKey;
+var parseTimeToMinutes = dateHelpers.parseTimeToMinutes;
 var localToUtc = dateHelpers.localToUtc;
 var utcToLocal = dateHelpers.utcToLocal;
 var taskController = require('../controllers/task.controller');
@@ -237,9 +238,17 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // Markers are non-blocking — never move them.
     if (original.marker) continue;
     // Habits should never have their date moved — they're day-specific.
-    // Rigid habits also keep their preferred time.
-    if (original.habit && dateChanged) continue;
-    if (original.habit && original.rigid) continue;
+    // Exception: past habits within their placement window can be moved to today.
+    if (original.habit && dateChanged) {
+      var origTd = parseDate(original.date);
+      var isBehind = origTd && origTd < today;
+      var habitFlex = original.timeFlex != null ? original.timeFlex : 60;
+      var habitDaysPast = origTd ? Math.round((today.getTime() - origTd.getTime()) / 86400000) : 0;
+      if (!isBehind || habitFlex < habitDaysPast * 1440) continue;
+      // Within placement window — allow the date move to today
+    }
+    // Rigid habits keep their preferred time (unless redirected from past above).
+    if (original.habit && original.rigid && !dateChanged) continue;
 
     if (dateChanged || timeChanged) {
       // Compute the new scheduled_at from the placement's local date+time
@@ -333,7 +342,12 @@ async function runScheduleAndPersist(userId, _retries, options) {
       if (t.marker) return;
 
       if (t.habit) {
-        // Past habit — day was missed, mark as skipped
+        // Past habit — check placement window before auto-skipping.
+        // If still within timeFlex range, the scheduler can place it today.
+        var flex = t.timeFlex != null ? t.timeFlex : 60;
+        var daysPast = Math.round((today.getTime() - td.getTime()) / 86400000);
+        if (flex >= daysPast * 1440) return; // still within window, don't skip
+        // Outside placement window — day was missed, mark as skipped
         pendingUpdates.push({
           id: t.id,
           dbUpdate: { status: 'skip', updated_at: db.fn.now() }
@@ -424,6 +438,30 @@ async function runScheduleAndPersist(userId, _retries, options) {
       if (utc3) p.scheduledAtUtc = utc3.toISOString();
       return p;
     });
+  });
+
+  // Synthesize placements for finished tasks so they appear on the calendar
+  // when the "all" filter is active (scheduler only places active tasks).
+  var placedIds = {};
+  Object.keys(outPlacements).forEach(function(dk) {
+    outPlacements[dk].forEach(function(p) {
+      if (p.task) placedIds[p.task.id] = true;
+    });
+  });
+  allTasks.forEach(function(t) {
+    if (placedIds[t.id]) return;
+    if (t.generated || t.taskType === 'habit_template') return;
+    var st = statuses[t.id] || '';
+    if (st !== 'done' && st !== 'cancel' && st !== 'skip') return;
+    if (!t.date || t.date === 'TBD') return;
+    var startMin = t.time ? parseTimeToMinutes(t.time) : null;
+    if (startMin == null) return;
+    var dur = t.dur || 30;
+    var entry = { task: t, start: startMin, dur: dur };
+    var utcDate = localToUtc(t.date, t.time, TIMEZONE);
+    if (utcDate) entry.scheduledAtUtc = utcDate.toISOString();
+    if (!outPlacements[t.date]) outPlacements[t.date] = [];
+    outPlacements[t.date].push(entry);
   });
 
   return {
@@ -600,6 +638,27 @@ async function getSchedulePlacements(userId, options) {
         cachedIds[p.taskId] = true;
       });
       if (dayPlacements[dk].length === 0) delete dayPlacements[dk];
+    });
+
+    // Synthesize placements for finished tasks (done/cancel/skip) using their
+    // scheduled_at-derived date/time. The scheduler never places these, so without
+    // this they'd appear unscheduled when the "all" filter is active.
+    allTasks.forEach(function(t) {
+      if (cachedIds[t.id]) return;
+      if (t.generated || t.taskType === 'habit_template') return;
+      var st = statuses[t.id] || '';
+      if (st !== 'done' && st !== 'cancel' && st !== 'skip') return;
+      if (!t.date || t.date === 'TBD') return;
+      var startMin = t.time ? parseTimeToMinutes(t.time) : null;
+      if (startMin == null) return;
+      var dur = t.dur || 30;
+      var entry = { task: t, start: startMin, dur: dur };
+      // Add scheduledAtUtc for timezone-safe frontend hydration
+      var utcDate = localToUtc(t.date, t.time, TIMEZONE);
+      if (utcDate) entry.scheduledAtUtc = utcDate.toISOString();
+      if (!dayPlacements[t.date]) dayPlacements[t.date] = [];
+      dayPlacements[t.date].push(entry);
+      cachedIds[t.id] = true;
     });
 
     // Collect unplaced: cached unplaced + any new tasks not in cache.

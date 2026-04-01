@@ -130,24 +130,22 @@ export default function AppLayout() {
   // Track when editing UI is open to suspend background syncs/scheduling
   editingRef.current = expandedTasks.length > 0 || !!showCreateForm || !!showSettings;
 
-  // Load data on mount — run scheduler immediately, then start external syncs
+  // Load data on mount — show cached placements immediately, then refresh via scheduler
   useEffect(() => {
     loadTasks().then(result => {
       if (result?.config) {
         config.initFromConfig(result.config);
       }
-      // Run the scheduler (not just read cache) so placements are fresh on login
+      // Show cached placements right away so tasks aren't all "unscheduled"
+      loadPlacements();
+      // Then run the scheduler for a fresh result
       apiClient.post('/schedule/run').then(function(res) {
         if (res.data?.dayPlacements) {
-          // Import hydration helper from useTaskState
           loadPlacements();
         }
         setSchedulerReady(true);
       }).catch(function() {
-        // Fallback to cached placements if run fails
-        loadPlacements().then(function() {
-          setSchedulerReady(true);
-        });
+        setSchedulerReady(true);
       });
     });
   }, []);
@@ -964,10 +962,23 @@ export default function AppLayout() {
                 var taskId = taskObj.id;
                 // For habit templates opened via an instance, use the instance ID for status
                 var statusId = expandedInstanceRef.current[taskId] || taskId;
+                // If ref mapping was lost but this is a template, find the nearest instance
+                if (statusId === taskId && taskObj.taskType === 'habit_template') {
+                  var nearestInstance = allTasks.find(function(t) { return t.sourceId === taskId && t.date === selectedDateKey; });
+                  if (nearestInstance) {
+                    statusId = nearestInstance.id;
+                    expandedInstanceRef.current[taskId] = statusId;
+                  }
+                }
+                // Merge instance-specific fields (date, time) onto template for display
+                var instanceTask = statusId !== taskId ? allTasks.find(function(t) { return t.id === statusId; }) : null;
+                var displayTask = instanceTask
+                  ? Object.assign({}, taskObj, { date: instanceTask.date, time: instanceTask.time, scheduledAt: instanceTask.scheduledAt })
+                  : taskObj;
                 return (
                   <TaskEditForm
                     key={taskId}
-                    task={taskObj}
+                    task={displayTask}
                     status={statuses[statusId] || ''}
                     onUpdate={handleUpdateTask}
                     onStatusChange={function(val) { handleStatusChange(statusId, val); }}
@@ -1018,10 +1029,21 @@ export default function AppLayout() {
         var taskId = taskObj.id;
         // For habit templates opened via an instance, use the instance ID for status
         var statusId = expandedInstanceRef.current[taskId] || taskId;
+        if (statusId === taskId && taskObj.taskType === 'habit_template') {
+          var nearestInst = allTasks.find(function(t) { return t.sourceId === taskId && t.date === selectedDateKey; });
+          if (nearestInst) {
+            statusId = nearestInst.id;
+            expandedInstanceRef.current[taskId] = statusId;
+          }
+        }
+        var instTask = statusId !== taskId ? allTasks.find(function(t) { return t.id === statusId; }) : null;
+        var dispTask = instTask
+          ? Object.assign({}, taskObj, { date: instTask.date, time: instTask.time, scheduledAt: instTask.scheduledAt })
+          : taskObj;
         return (
           <TaskEditForm
             key={taskId}
-            task={taskObj}
+            task={dispTask}
             status={statuses[statusId] || ''}
             onUpdate={handleUpdateTask}
             onStatusChange={function(val) { handleStatusChange(statusId, val); }}

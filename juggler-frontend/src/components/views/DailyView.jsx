@@ -300,6 +300,9 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
           {isBlocked && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDEAB'}</span>}
           {isMarker && <span style={{ fontSize: 9, flexShrink: 0, opacity: 0.7 }}>{'\u25C7'}</span>}
           {isFixed && !isMarker && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDCCC'}</span>}
+          {status === 'done' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2713'}</span>}
+          {status === 'skip' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u23ED'}</span>}
+          {status === 'cancel' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2717'}</span>}
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.text}</span>
         </div>
 
@@ -459,6 +462,9 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, theme, darkMode,
       >
         {(task.fixed || task.rigid) && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDCCC'}</span>}
         {task.habit && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDD01'}</span>}
+        {status === 'done' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2713'}</span>}
+        {status === 'skip' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u23ED'}</span>}
+        {status === 'cancel' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2717'}</span>}
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.text}</span>
         {task.dur > 0 && <span style={{ fontSize: 9, color: theme.textMuted, flexShrink: 0 }}>{durLabel(task.dur)}</span>}
         {task.pri && <span style={{ fontSize: 8, fontWeight: 700, color: priColor, flexShrink: 0 }}>{task.pri}</span>}
@@ -657,9 +663,9 @@ export default function DailyView({
       if (t.date !== selectedDateKey || scheduledIds[t.id]) return false;
       // Hide habit templates and generated instances — only the scheduler places these
       if (t.taskType === 'habit_template' || t.generated) return false;
-      // Hide completed/cancelled/skipped tasks
+      // Only hide done/cancelled/skipped when filter is not 'all'
       var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'skip') return false;
+      if ((st === 'done' || st === 'cancel' || st === 'skip') && filter !== 'all' && filter !== 'done' && filter !== st) return false;
       return matchesFilter(t.id);
     });
   }, [allTasks, selectedDateKey, placements, statuses, matchesFilter]);

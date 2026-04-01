@@ -170,6 +170,9 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
                       opacity: isDone ? 0.5 : 1,
                       textDecoration: isDone ? 'line-through' : 'none'
                     }}>
+                    {st === 'done' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u2713'}</span>}
+                    {st === 'skip' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u23ED'}</span>}
+                    {st === 'cancel' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u2717'}</span>}
                     {t.text}
                   </div>
                 );
