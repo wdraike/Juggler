@@ -1,5 +1,5 @@
 /**
- * Express application setup for StriveRS backend
+ * StriveRS backend — Express application
  */
 
 const express = require('express');
