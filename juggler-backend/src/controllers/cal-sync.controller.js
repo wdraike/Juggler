@@ -16,6 +16,10 @@ var { rowToTask } = require('./task.controller');
 var { localToUtc } = require('../scheduler/dateHelpers');
 var { taskHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE } = require('./cal-sync-helpers');
 
+// Number of consecutive syncs an event must be missing before we delete the task.
+// Prevents data loss from transient calendarView failures or API propagation delays.
+var MISS_THRESHOLD = 3;
+
 function delay(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
 /**
@@ -359,7 +363,7 @@ async function sync(req, res) {
               }
             }
 
-            // Update ledger record
+            // Update ledger record (reset miss_count — event confirmed present)
             await db('cal_sync_ledger').where('id', ledger.id).update({
               last_pushed_hash: taskChanged ? taskHash(task) : (ledger.last_pushed_hash || taskHash(task)),
               last_pulled_hash: pAdapter.eventHash(event),
@@ -369,11 +373,15 @@ async function sync(req, res) {
               event_all_day: event.isAllDay ? 1 : 0,
               last_modified_at: toMySQLDate(event.lastModified),
               task_updated_at: task._updated_at || null,
+              miss_count: 0,
               synced_at: db.fn.now()
             });
 
           } else if (task && !event) {
-            // Event deleted from provider
+            // Event not found in provider's calendarView response.
+            // This could mean the event was genuinely deleted, OR the API
+            // transiently failed to return it. Use miss_count to avoid
+            // data loss from transient failures.
             if (ledger.provider_event_id) {
               var cachedStart = ledger.event_start;
               var eventInWindow = false;
@@ -382,31 +390,41 @@ async function sync(req, res) {
                 eventInWindow = cachedDate >= windowStart && cachedDate <= windowEnd;
               }
               if (eventInWindow) {
-                // Delete the task (event was deleted on provider side)
-                await db.transaction(async function(trx) {
-                  var deletedDeps = typeof task.dependsOn === 'object' ? task.dependsOn : [];
-                  var affected = await trx('tasks')
-                    .where('user_id', userId)
-                    .whereRaw('JSON_CONTAINS(depends_on, ?)', [JSON.stringify(task.id)])
-                    .select('id', 'depends_on');
-                  for (var ai2 = 0; ai2 < affected.length; ai2++) {
-                    var a = affected[ai2];
-                    var deps = typeof a.depends_on === 'string'
-                      ? JSON.parse(a.depends_on || '[]') : (a.depends_on || []);
-                    var newDeps = deps.filter(function(d) { return d !== task.id; });
-                    deletedDeps.forEach(function(d) { if (newDeps.indexOf(d) === -1) newDeps.push(d); });
-                    await trx('tasks').where({ id: a.id, user_id: userId })
-                      .update({ depends_on: JSON.stringify(newDeps), updated_at: db.fn.now() });
-                  }
-                  await trx('tasks').where('id', task.id).del();
-                  await trx('cal_sync_ledger').where('id', ledger.id).update({
-                    status: 'deleted_remote',
-                    task_id: null,
+                var newMissCount = (ledger.miss_count || 0) + 1;
+                if (newMissCount >= MISS_THRESHOLD) {
+                  // Confirmed missing after multiple syncs — delete the task
+                  await db.transaction(async function(trx) {
+                    var deletedDeps = typeof task.dependsOn === 'object' ? task.dependsOn : [];
+                    var affected = await trx('tasks')
+                      .where('user_id', userId)
+                      .whereRaw('JSON_CONTAINS(depends_on, ?)', [JSON.stringify(task.id)])
+                      .select('id', 'depends_on');
+                    for (var ai2 = 0; ai2 < affected.length; ai2++) {
+                      var a = affected[ai2];
+                      var deps = typeof a.depends_on === 'string'
+                        ? JSON.parse(a.depends_on || '[]') : (a.depends_on || []);
+                      var newDeps = deps.filter(function(d) { return d !== task.id; });
+                      deletedDeps.forEach(function(d) { if (newDeps.indexOf(d) === -1) newDeps.push(d); });
+                      await trx('tasks').where({ id: a.id, user_id: userId })
+                        .update({ depends_on: JSON.stringify(newDeps), updated_at: db.fn.now() });
+                    }
+                    await trx('tasks').where('id', task.id).del();
+                    await trx('cal_sync_ledger').where('id', ledger.id).update({
+                      status: 'deleted_remote',
+                      task_id: null,
+                      miss_count: newMissCount,
+                      synced_at: db.fn.now()
+                    });
+                  });
+                  pStats.deleted_remote++;
+                  stats.deleted_remote++;
+                } else {
+                  // Not yet confirmed — increment miss counter, keep task alive
+                  await db('cal_sync_ledger').where('id', ledger.id).update({
+                    miss_count: newMissCount,
                     synced_at: db.fn.now()
                   });
-                });
-                pStats.deleted_remote++;
-                stats.deleted_remote++;
+                }
               }
             }
 
@@ -541,10 +559,30 @@ async function sync(req, res) {
       }
 
       // 3b: Pull unledgered events from this provider
+      //
+      // Build a set of event IDs that already have ANY ledger entry (including
+      // deleted ones) to prevent the orphan-pull-delete loop: previously, a
+      // past event whose ledger was marked deleted_local would be re-pulled as
+      // "unledgered", creating a new active entry, which the next sync would
+      // try to delete again — ad infinitum.
+      var existingLedgerEventIds = new Set();
+      var allLedgerForProvider = await db('cal_sync_ledger')
+        .where('user_id', userId)
+        .where('provider', pid2)
+        .whereNotNull('provider_event_id')
+        .select('provider_event_id');
+      for (var ali = 0; ali < allLedgerForProvider.length; ali++) {
+        existingLedgerEventIds.add(allLedgerForProvider[ali].provider_event_id);
+      }
+
       var eventIds = Object.keys(pEventsById2);
       for (var ei2 = 0; ei2 < eventIds.length; ei2++) {
         var evId = eventIds[ei2];
         if (processedEventIds2.has(evId)) continue;
+
+        // Skip events that already have a ledger entry (active or deleted)
+        if (existingLedgerEventIds.has(evId)) continue;
+
         var newEvent = pEventsById2[evId];
 
         // Check if already linked to a task via the event ID column
