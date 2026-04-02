@@ -72,15 +72,21 @@ async function handleAuthorizationCode(req, res) {
 
   await db('oauth_auth_codes').where('code', code).update({ used: true });
 
-  // Exchange code for tokens via auth-service
+  // Issue tokens via auth-service internal endpoint (service-to-service)
   try {
-    const response = await fetch(`${AUTH_SERVICE_URL}/api/auth/token`, {
+    const INTERNAL_SERVICE_KEY = process.env.INTERNAL_SERVICE_KEY || '';
+    const response = await fetch(`${AUTH_SERVICE_URL}/internal/tokens/issue`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, app: APP_ID })
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Key': INTERNAL_SERVICE_KEY
+      },
+      body: JSON.stringify({ user_id: authCode.user_id })
     });
 
     if (!response.ok) {
+      const errBody = await response.text();
+      console.error('Auth-service token issue failed:', response.status, errBody);
       return res.status(400).json({ error: 'invalid_grant', error_description: 'Token exchange failed' });
     }
 
