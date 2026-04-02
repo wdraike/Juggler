@@ -24,11 +24,8 @@ const scheduleRoutes = require('./routes/schedule.routes');
 const healthRoutes = require('./routes/health.routes');
 const aiRoutes = require('./routes/ai.routes');
 
-// MCP + OAuth
-const { oauthMetadata } = require('./oauth/metadata');
-const oauthAuthorize = require('./oauth/authorize');
-const { tokenEndpoint } = require('./oauth/token');
-const oauthClients = require('./oauth/clients');
+// MCP + OAuth (shared module — auth-service handles OAuth, we proxy)
+const { createOAuthProxyRoutes } = require('auth-client/mcp-auth');
 const mcpTransport = require('./mcp/transport');
 
 const app = express();
@@ -76,12 +73,8 @@ const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 100, standardHeaders: t
 const aiLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
 const mcpLimiter = rateLimit({ windowMs: 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
 
-// OAuth for MCP Custom Connectors (no JWT auth — these ARE the auth flow)
-app.get('/.well-known/oauth-authorization-server', oauthMetadata);
-app.get('/oauth/authorize', oauthAuthorize.authorize);
-app.get('/oauth/google-callback', oauthAuthorize.googleCallback);
-app.post('/oauth/token', tokenEndpoint);
-app.post('/oauth/register', oauthClients.register);
+// OAuth proxy + discovery routes (auth-service handles Google SSO, etc.)
+createOAuthProxyRoutes(app, { mcpEndpoint: '/mcp' });
 
 // MCP Streamable HTTP (stateless, own rate limit)
 app.post('/mcp', mcpLimiter, mcpTransport.handlePost);

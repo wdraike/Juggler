@@ -3,46 +3,39 @@
  *
  * Each POST /mcp creates a fresh McpServer + transport, authenticated by Bearer JWT.
  * No session tracking needed — works across Cloud Run instances.
+ *
+ * Authentication delegated to shared mcp-auth module (JWT via JWKS + auto-provisioning).
  */
 
-const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
-const { createMcpServerForUser } = require('./server');
-const { verifyToken } = require('../middleware/jwt-auth');
-const db = require('../db');
+var StreamableHTTPServerTransport = require('@modelcontextprotocol/sdk/server/streamableHttp.js').StreamableHTTPServerTransport;
+var { createMcpServerForUser } = require('./server');
+var { authenticateMcpRequest, sendMcpUnauthorized } = require('auth-client/mcp-auth');
+var db = require('../db');
 
 var MCP_TIMEOUT = 120000; // 2 minutes max per MCP request
+var PUBLIC_URL = process.env.PUBLIC_URL || process.env.MCP_ISSUER_URL || '';
+var { APP_ID } = require('../service-identity');
 
 /**
- * Authenticate the request and return the user ID.
- * Throws if authentication fails.
+ * Check if user has an active plan for this app.
+ * Uses JWT claims first (fast), falls back gracefully if no plan info.
  */
-async function authenticateRequest(req) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    const err = new Error('Authentication required');
-    err.status = 401;
-    throw err;
+async function planCheck(authResult) {
+  var plans = authResult.plans || {};
+  if (plans[APP_ID]) return { hasActivePlan: true, planId: plans[APP_ID] };
+  // No plan claim — allow access (plan enforcement is optional during rollout)
+  return { hasActivePlan: true };
+}
+
+/**
+ * Extract Bearer token from request.
+ */
+function extractBearerToken(req) {
+  var authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.substring(7);
   }
-
-  const token = authHeader.substring(7);
-  const decoded = await verifyToken(token);
-
-  if (decoded.type !== 'access') {
-    const err = new Error('Invalid token type');
-    err.status = 401;
-    throw err;
-  }
-
-  // auth-service JWTs use 'sub' for user ID
-  const userId = decoded.sub || decoded.userId;
-  const user = await db('users').where('id', userId).first();
-  if (!user) {
-    const err = new Error('User not found');
-    err.status = 401;
-    throw err;
-  }
-
-  return user.id;
+  return null;
 }
 
 /**
@@ -60,9 +53,21 @@ async function handlePost(req, res) {
   }
 
   try {
-    const userId = await authenticateRequest(req);
+    var token = extractBearerToken(req);
+    if (!token) {
+      return sendMcpUnauthorized(res, PUBLIC_URL || req.protocol + '://' + req.get('host'));
+    }
 
-    server = createMcpServerForUser(userId);
+    var authResult = await authenticateMcpRequest(token, db, { planCheck: planCheck });
+    if (!authResult) {
+      return res.status(401).json({
+        jsonrpc: '2.0',
+        error: { code: -32000, message: 'Invalid or expired token' },
+        id: null
+      });
+    }
+
+    server = createMcpServerForUser(authResult.userId);
     transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined // stateless — no session tracking
     });
@@ -88,7 +93,7 @@ async function handlePost(req, res) {
   } catch (error) {
     cleanup();
     if (!res.headersSent) {
-      const status = error.status || 500;
+      var status = error.status || 500;
       res.status(status).json({
         jsonrpc: '2.0',
         error: { code: -32000, message: error.message },
