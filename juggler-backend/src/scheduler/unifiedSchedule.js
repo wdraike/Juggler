@@ -1116,56 +1116,18 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
 
   var PRI_LEVELS = ["P1", "P2", "P3", "P4"];
 
-  // PHASE 0.5: Place non-rigid habits first — daily commitments get priority
-  // over deadline tasks so a deadline doesn't steal a habit's preferred slot.
-  PRI_LEVELS.forEach(function(priLevel) {
-    var habitItems = pool.filter(function(item) {
-      return item.task.habit && item.remaining > 0 && (item.task.pri || "P3") === priLevel;
-    });
-    habitItems.sort(function(a, b) {
-      var aDate = parseDate(a.task.date) || localToday;
-      var bDate = parseDate(b.task.date) || localToday;
-      var dd = aDate - bDate;
-      if (dd !== 0) return dd;
-      // Within same date, narrower when-windows first so constrained
-      // habits get their slots before flexible ones consume them.
-      return whenAvailableMinutes(a.task) - whenAvailableMinutes(b.task);
-    });
-    habitItems.forEach(function(item) {
-      if (item.remaining <= 0) return;
-      var t = item.task;
-      for (var di = 0; di < dates.length; di++) {
-        if (item.remaining <= 0) break;
-        var d = dates[di];
-        if (item.earliestDate && d.date < item.earliestDate) continue;
-        if (item.ceiling && d.date > item.ceiling) continue;
-        if (!canPlaceOnDate(t, d)) continue;
-        var flexWins = getHabitFlexWindows(t, dayWindows[d.key]);
-        // If flex window has less free capacity than needed, fall back to when-windows
-        if (flexWins) {
-          var flexFree = 0;
-          var _occ = dayOcc[d.key];
-          for (var fi = 0; fi < flexWins.length; fi++) {
-            for (var fm = flexWins[fi][0]; fm < flexWins[fi][1]; fm++) {
-              if (!_occ[fm]) flexFree++;
-            }
-          }
-          if (flexFree < item.remaining) flexWins = null;
-        }
-        var wins = flexWins || getWhenWindows(t.when, dayWindows[d.key]);
-        if (wins.length === 0) continue;
-        placeEarly(item, d, 0, flexWins);
-      }
-    });
-  });
-
-
-  // PHASE 1: Deadline late-placement — pack ALL deadline tasks tight
-  // against their due dates (P1 first).  This reserves deadline capacity
-  // near due dates and leaves early calendar open for flexible tasks.
-  // Phase 3 will decompress these into earlier gaps afterward.
+  // PHASES 0.5 + 1 (merged): Interleave deadline tasks and habits by priority.
+  // Within each priority tier, deadline tasks are placed first (they have date
+  // constraints), then habits get remaining capacity.  This prevents habits
+  // from starving imminent deadlines while still giving habits good slots
+  // when there is no deadline pressure.
 
   PRI_LEVELS.forEach(function(priLevel) {
+
+    // --- Step A: Deadline late-placement for this priority level ---
+    // Pack deadline tasks tight against their due dates.  This reserves
+    // deadline capacity near due dates and leaves early calendar open for
+    // flexible tasks.  Phase 3 will decompress these into earlier gaps.
     var deadlineItems = pool.filter(function(item) {
       if (!item.deadline || item.remaining <= 0 || (item.task.pri || "P3") !== priLevel) return false;
       // Skip deadline tasks that have non-deadline dependencies — these need
@@ -1259,11 +1221,53 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         }
       }
     });
+
+    // --- Step B: Non-rigid habits for this priority level ---
+    // Habits get remaining capacity after deadline tasks at this priority
+    // tier have claimed their slots.
+    var habitItems = pool.filter(function(item) {
+      return item.task.habit && item.remaining > 0 && (item.task.pri || "P3") === priLevel;
+    });
+    habitItems.sort(function(a, b) {
+      var aDate = parseDate(a.task.date) || localToday;
+      var bDate = parseDate(b.task.date) || localToday;
+      var dd = aDate - bDate;
+      if (dd !== 0) return dd;
+      // Within same date, narrower when-windows first so constrained
+      // habits get their slots before flexible ones consume them.
+      return whenAvailableMinutes(a.task) - whenAvailableMinutes(b.task);
+    });
+    habitItems.forEach(function(item) {
+      if (item.remaining <= 0) return;
+      var t = item.task;
+      for (var di = 0; di < dates.length; di++) {
+        if (item.remaining <= 0) break;
+        var d = dates[di];
+        if (item.earliestDate && d.date < item.earliestDate) continue;
+        if (item.ceiling && d.date > item.ceiling) continue;
+        if (!canPlaceOnDate(t, d)) continue;
+        var flexWins = getHabitFlexWindows(t, dayWindows[d.key]);
+        // If flex window has less free capacity than needed, fall back to when-windows
+        if (flexWins) {
+          var flexFree = 0;
+          var _occ = dayOcc[d.key];
+          for (var fi = 0; fi < flexWins.length; fi++) {
+            for (var fm = flexWins[fi][0]; fm < flexWins[fi][1]; fm++) {
+              if (!_occ[fm]) flexFree++;
+            }
+          }
+          if (flexFree < item.remaining) flexWins = null;
+        }
+        var wins = flexWins || getWhenWindows(t.when, dayWindows[d.key]);
+        if (wins.length === 0) continue;
+        placeEarly(item, d, 0, flexWins);
+      }
+    });
   });
 
   // Track which tasks have been placed (shared across phases)
   var placeVisited = {};
-  // Mark placed habits (Phase 0.5) and placed critical deadline items (Phase 1).
+  // Mark placed habits and deadline items from the merged phase.
   // Unplaced habits fall through to Phase 2 where they can try other days.
   pool.forEach(function(item) {
     if (item.task.habit && item._parts.length > 0) placeVisited[item.task.id] = true;
