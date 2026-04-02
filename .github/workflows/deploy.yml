@@ -1,0 +1,16 @@
+name: Deploy to GCP
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - run: gcloud builds triggers run deploy-juggler-backend --project=${{ secrets.GCP_PROJECT_ID }}
