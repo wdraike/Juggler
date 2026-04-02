@@ -172,34 +172,33 @@ deploy_backend() {
     }
     print_success "Backend image built"
 
-    print_status "Deploying backend to Cloud Run..."
-    gcloud run deploy $BACKEND_SERVICE \
-        --image gcr.io/$PROJECT_ID/$BACKEND_SERVICE \
-        --platform managed \
-        --region $REGION \
-        --allow-unauthenticated \
-        --set-cloudsql-instances $CLOUD_SQL_CONNECTION \
-        --set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$CLOUD_SQL_CONNECTION,DB_NAME=$DATABASE_NAME,DB_USER=root,DB_PASSWORD=,AUTH_JWKS_URL=$(gcloud run services describe auth-backend --region $REGION --format 'value(status.url)' 2>/dev/null || echo 'https://auth-backend')/.well-known/jwks.json" \
-        --set-secrets="JWT_SECRET=juggler-jwt-secret:latest,GOOGLE_CLIENT_ID=juggler-google-client-id:latest,GOOGLE_CLIENT_SECRET=juggler-google-client-secret:latest,GEMINI_API_KEY=juggler-gemini-api-key:latest,MICROSOFT_CLIENT_ID=juggler-microsoft-client-id:latest,MICROSOFT_CLIENT_SECRET=juggler-microsoft-client-secret:latest" \
-        --memory 512Mi \
-        --cpu 1 \
-        --timeout 300 \
-        --max-instances 3 \
-        --min-instances 0 || {
-        print_error "Backend deployment failed!"
-        exit 1
-    }
+    # Deploy using service YAML — single source of truth for all env vars.
+    # The YAML lives at deploy/juggler-backend.yaml in the parent repo and
+    # contains the complete service spec (env vars, secrets, resources).
+    local YAML_FILE="$SCRIPT_DIR/../../deploy/$BACKEND_SERVICE.yaml"
+    if [ ! -f "$YAML_FILE" ]; then
+        print_error "Service YAML not found: $YAML_FILE"
+        print_status "Falling back to image-only deploy (preserves existing env vars)..."
+        gcloud run deploy $BACKEND_SERVICE \
+            --image gcr.io/$PROJECT_ID/$BACKEND_SERVICE \
+            --region $REGION \
+            --project $PROJECT_ID \
+            --quiet || {
+            print_error "Backend deployment failed!"
+            exit 1
+        }
+    else
+        print_status "Deploying backend via service YAML..."
+        gcloud run services replace "$YAML_FILE" \
+            --region $REGION \
+            --project $PROJECT_ID || {
+            print_error "Backend deployment failed!"
+            exit 1
+        }
+    fi
 
     BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE --region $REGION --format 'value(status.url)')
     print_success "Backend deployed: $BACKEND_URL"
-
-    # Update backend with its own URL for CORS and calendar redirect URIs
-    GCAL_REDIRECT="${BACKEND_URL}/api/gcal/callback"
-    MSFT_CAL_REDIRECT="${BACKEND_URL}/api/msft-cal/callback"
-    print_status "Updating calendar redirect URIs..."
-    gcloud run services update $BACKEND_SERVICE \
-        --region $REGION \
-        --update-env-vars="FRONTEND_URL=PENDING,GCAL_REDIRECT_URI=$GCAL_REDIRECT,MSFT_CAL_REDIRECT_URI=$MSFT_CAL_REDIRECT,MCP_ISSUER_URL=$BACKEND_URL" || true
 }
 
 deploy_frontend() {
