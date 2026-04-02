@@ -1,0 +1,16 @@
+node_modules/
+.DS_Store
+*.log
+dist/
+build/
+.env
+.env.local
+.env.production
+coverage/
+.cache/
+test-results/
+playwright-report/
+*.db
+scripts/db-backup/
+.playwright-mcp/
+# NOTE: auth-client/ is NOT excluded here — Cloud Build needs it
