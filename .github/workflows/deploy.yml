@@ -13,4 +13,6 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
-      - run: gcloud builds triggers run deploy-juggler-backend --project=${{ secrets.GCP_PROJECT_ID }}
+      - run: |
+          gcloud builds triggers run deploy-juggler-backend --project=${{ secrets.GCP_PROJECT_ID }}
+          gcloud builds triggers run deploy-juggler-frontend --project=${{ secrets.GCP_PROJECT_ID }}
