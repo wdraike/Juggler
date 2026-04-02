@@ -13,3 +13,4 @@ playwright-report/
 *.db
 scripts/db-backup/
 .playwright-mcp/
+auth-client/
