@@ -1,5 +1,5 @@
 /**
- * Express application setup for Juggler backend
+ * Express application setup for Juggler (StriveRS) backend
  */
 
 const express = require('express');
