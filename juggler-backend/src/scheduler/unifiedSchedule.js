@@ -1123,8 +1123,53 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         }
       }
     }
-    // If no slot was found, do NOT force-place (which creates overlaps).
-    // The task will remain unplaced for this day.
+    // If the preferred when-windows were fully blocked, try ALL day windows
+    // sorted by proximity to the preferred time.  This handles cases like
+    // "lunch block occupied by a fixed meeting — place lunch in adjacent block".
+    if (!found) {
+      var allWins = dateWindows_d.anytime || [[GRID_START * 60, DAY_END]];
+      allWins = allWins.slice().sort(function(a, b) {
+        var midA2 = (a[0] + a[1]) / 2, midB2 = (b[0] + b[1]) / 2;
+        return Math.abs(midA2 - prefMid) - Math.abs(midB2 - prefMid);
+      });
+      for (var wi2 = 0; wi2 < allWins.length && !found; wi2++) {
+        var ws2 = allWins[wi2][0], we2 = allWins[wi2][1];
+        var sf2 = Math.max(ws2, Math.min(sm, we2 - dur));
+        sf2 = Math.floor(sf2 / 15) * 15;
+        for (var s3 = sf2; s3 + dur <= we2; s3 += 15) {
+          var ok3 = true;
+          for (var cm3 = s3; cm3 < s3 + dur; cm3++) { if (occ[cm3] || mask[cm3]) { ok3 = false; break; } }
+          if (ok3) {
+            reserve(occ, s3, dur);
+            placed.push({ task: t, start: s3, dur: dur, locked: true, _dateKey: d.key, tz: t.tz || cfg.timezone || null });
+            globalPlacedEnd[t.id] = { dateKey: d.key, endMin: s3 + dur, startMin: s3 };
+            found = true; break;
+          }
+        }
+      }
+    }
+    // If still no slot found, force-place the rigid habit in its designated
+    // when-window as an overlap.  Rigid habits represent daily commitments
+    // (eat breakfast, take medication) that shouldn't vanish from the schedule
+    // just because a meeting conflicts.  The overlap column system will render
+    // them side-by-side, and the user can resolve the conflict manually.
+    if (!found) {
+      var conflictSm = sm; // Use the when-window start we computed earlier
+      reserve(occ, conflictSm, dur);
+      placed.push({
+        task: t, start: conflictSm, dur: dur, locked: true,
+        _dateKey: d.key, tz: t.tz || cfg.timezone || null,
+        _conflict: true
+      });
+      globalPlacedEnd[t.id] = { dateKey: d.key, endMin: conflictSm + dur, startMin: conflictSm };
+      schedulerWarnings.push({
+        type: 'habitConflict',
+        taskId: t.id,
+        text: t.text,
+        dateKey: d.key,
+        message: 'Rigid habit "' + t.text + '" overlaps with another task on ' + d.key + '. Consider adjusting one of them.'
+      });
+    }
   }
 
   var PRI_LEVELS = ["P1", "P2", "P3", "P4"];
