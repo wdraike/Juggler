@@ -712,21 +712,6 @@ export default function DailyView({
             </div>
           );
         })()}
-        {/* Batch mark habits done */}
-        {onBatchHabitsDone && (function () {
-          var habitTasks = (allTasks || []).filter(function (t) { return t.habit && t.date === selectedDateKey && (statuses[t.id] || '') !== 'done'; });
-          return habitTasks.length > 0 ? (
-            <button onClick={function () { onBatchHabitsDone(selectedDateKey); }}
-              title={'Mark ' + habitTasks.length + ' habits done'}
-              style={{
-                border: '1px solid #2D6A4F', borderRadius: 8, padding: '2px 8px',
-                background: '#2D6A4F15', color: '#2D6A4F', fontSize: 11,
-                cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600
-              }}>
-              {'\u2713'}hab ({habitTasks.length})
-            </button>
-          ) : null;
-        })()}
         {/* Schedule template selector */}
         {templateEntries.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
