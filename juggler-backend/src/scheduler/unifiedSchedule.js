@@ -1020,8 +1020,21 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     var sm = parseTimeToMinutes(t.time);
     var mask = buildLocMask(t, d.key, dateBlocks_d);
 
-    if (sm === null) {
-      var hw = getWhenWindows(t.when, dateWindows_d, "morning")[0];
+    // For habits with an explicit when-tag, derive sm from the when-window
+    // rather than the previously scheduled time (which may be stale/wrong).
+    // This prevents a feedback loop where a bad placement persists forever
+    // because scheduledAt is read back as t.time on the next run.
+    var hw = getWhenWindows(t.when, dateWindows_d, "morning")[0];
+    if (hw && t.when && t.when !== 'anytime' && !t.when.includes(',')) {
+      // Single explicit when-tag (e.g. "lunch"): prefer the when-window
+      if (sm !== null && sm >= hw[0] && sm + dur <= hw[1]) {
+        // t.time is inside the when-window — keep it
+        sm = Math.max(DAY_START, Math.min(sm, GRID_END * 60));
+      } else {
+        // t.time is outside the when-window — use window start
+        sm = hw[0];
+      }
+    } else if (sm === null) {
       sm = hw ? hw[0] : GRID_START * 60;
     } else {
       sm = Math.max(DAY_START, Math.min(sm, GRID_END * 60));
