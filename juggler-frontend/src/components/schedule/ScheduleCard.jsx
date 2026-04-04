@@ -46,6 +46,8 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
   // Build details snippets for row 3
   var details = [];
   if (item._moveReason) details.push('\u2192 ' + item._moveReason);
+  else if (item.placementReason) details.push(item.placementReason);
+  else if (item._placementReason) details.push(item._placementReason);
   if (showDetails) {
     // Time range
     if (timeRange) details.push('\u23F0 ' + timeRange);

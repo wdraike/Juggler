@@ -518,6 +518,14 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
         if (!isMovable(plsA[mai]) || plsA[mai].task.habit) continue;
         // datePinned/generated tasks can't move to a different day
         if (plsA[mai].task.datePinned || plsA[mai].task.generated) continue;
+        // Skip tasks whose deps include habits on this specific day (would break dep chain)
+        var aDeps = getTaskDeps(plsA[mai].task);
+        var hasDateHabitDep = false;
+        for (var adi = 0; adi < aDeps.length; adi++) {
+          var adTask = allTasksById[aDeps[adi]];
+          if (adTask && adTask.habit && adTask.date === dkA) { hasDateHabitDep = true; break; }
+        }
+        if (hasDateHabitDep) continue;
         movA.push(plsA[mai]);
       }
       if (movA.length === 0) continue;

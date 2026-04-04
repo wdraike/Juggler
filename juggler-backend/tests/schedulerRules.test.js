@@ -1429,8 +1429,8 @@ describe('Scheduler Rules', () => {
   });
 
   // ─── GROUP 61: TBD and null date tasks ───
-  describe('Group 61: TBD and null date tasks excluded', () => {
-    test('task with date=TBD is not scheduled', () => {
+  describe('Group 61: TBD and null date tasks', () => {
+    test('task with date=TBD is not scheduled (user deferred it)', () => {
       var tasks = [
         makeTask({ id: 'tbd_task', pri: 'P1', dur: 30, date: 'TBD', text: 'TBD task' }),
       ];
@@ -1438,12 +1438,14 @@ describe('Scheduler Rules', () => {
       expect(isPlaced(result, 'tbd_task')).toBe(false);
     });
 
-    test('task with null date is not scheduled', () => {
+    test('task with null date IS scheduled (scheduler picks a day)', () => {
+      // Null date means the task has no assigned date yet — the scheduler
+      // owns placement and treats it as available starting from today.
       var tasks = [
         makeTask({ id: 'null_date', pri: 'P1', dur: 30, date: null, text: 'Null date' }),
       ];
       var result = run(tasks);
-      expect(isPlaced(result, 'null_date')).toBe(false);
+      expect(isPlaced(result, 'null_date')).toBe(true);
     });
   });
 
@@ -1585,28 +1587,40 @@ describe('Scheduler Rules', () => {
 
   // ─── GROUP 70: Property-based fuzz testing ───
   describe('Group 70: Fuzz testing — random inputs, invariants hold', () => {
+    // Seeded PRNG for deterministic fuzz testing (avoids flaky CI).
+    // mulberry32: simple 32-bit seeded PRNG with full-period.
+    function mulberry32(seed) {
+      return function() {
+        seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+        var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+      };
+    }
+    var rng = mulberry32(42);
+
     test('50 random schedules: no overlaps, no dep violations, score non-negative', () => {
       var priorities = ['P1', 'P2', 'P3', 'P4'];
       var whens = ['', 'morning', 'evening', 'morning,evening'];
 
       for (var run_i = 0; run_i < 50; run_i++) {
         var tasks = [];
-        var taskCount = 5 + Math.floor(Math.random() * 20); // 5-24 tasks
+        var taskCount = 5 + Math.floor(rng() * 20); // 5-24 tasks
 
         for (var ti = 0; ti < taskCount; ti++) {
-          var hasDue = Math.random() < 0.3;
-          var hasDep = Math.random() < 0.2 && ti > 0;
-          var isSplit = Math.random() < 0.15;
+          var hasDue = rng() < 0.3;
+          var hasDep = rng() < 0.2 && ti > 0;
+          var isSplit = rng() < 0.15;
           var task = makeTask({
             id: 'fuzz_' + run_i + '_' + ti,
-            pri: priorities[Math.floor(Math.random() * 4)],
-            dur: 15 + Math.floor(Math.random() * 6) * 15, // 15-90m in 15m steps
-            when: whens[Math.floor(Math.random() * whens.length)],
-            date: dateKey(Math.floor(Math.random() * 5)), // today through +4
+            pri: priorities[Math.floor(rng() * 4)],
+            dur: 15 + Math.floor(rng() * 6) * 15, // 15-90m in 15m steps
+            when: whens[Math.floor(rng() * whens.length)],
+            date: dateKey(Math.floor(rng() * 5)), // today through +4
             text: 'Fuzz ' + run_i + '.' + ti,
           });
-          if (hasDue) task.due = dateKey(3 + Math.floor(Math.random() * 10));
-          if (hasDep) task.dependsOn = ['fuzz_' + run_i + '_' + Math.floor(Math.random() * ti)];
+          if (hasDue) task.due = dateKey(3 + Math.floor(rng() * 10));
+          if (hasDep) task.dependsOn = ['fuzz_' + run_i + '_' + Math.floor(rng() * ti)];
           if (isSplit) { task.split = true; task.splitMin = 15; }
           tasks.push(task);
         }

@@ -397,6 +397,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
       if (p.splitPart) { entry.splitPart = p.splitPart; entry.splitTotal = p.splitTotal; }
       if (p.travelBefore) entry.travelBefore = p.travelBefore;
       if (p.travelAfter) entry.travelAfter = p.travelAfter;
+      if (p._moveReason) entry.moveReason = p._moveReason;
+      if (p._conflict) entry.conflict = true;
+      if (p._placementReason) entry.placementReason = p._placementReason;
       return entry;
     });
   });

@@ -45,9 +45,12 @@ function buildWindowsFromBlocks(blocks) {
       windows.afternoon.push([s, e]);
     }
   });
-  var allWins = [];
-  Object.values(windows).forEach(function(w) {
-    w.forEach(function(x) { allWins.push(x); });
+  // Build anytime from the original blocks (not from tag windows, which may
+  // contain aliases/duplicates like biz→afternoon).
+  var allWins = blocks.map(function(b) {
+    var s = Math.max(0, Math.min(b.start || 0, 1440));
+    var e = Math.max(s, Math.min(b.end || 0, 1440));
+    return [s, e];
   });
   if (allWins.length === 0) allWins = [[360, 1380]];
   windows.anytime = allWins;

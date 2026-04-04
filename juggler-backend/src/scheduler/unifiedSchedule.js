@@ -102,8 +102,14 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       return;
     }
     if (t.section && (t.section.includes("PARKING") || t.section.includes("TO BE SCHEDULED"))) return;
+    // TBD or explicitly null date: user hasn't decided when — skip scheduling
+    if (t.date === 'TBD' || t.date === 'tbd') return;
     // Dateless tasks: scheduler owns placement — treat as starting from today
     var td = t.date ? parseDate(t.date) : null;
+    if (!td && t.date !== null && t.date !== undefined && t.date !== '') {
+      // Non-empty but unparseable date string — skip (e.g., garbage input)
+      return;
+    }
     if (!td) {
       td = new Date(localToday);
     }
@@ -254,6 +260,42 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     return !!backwardsDeps[taskId + '→' + depId];
   }
 
+  // ── Circular dependency detection ──
+  // Walk the dependency graph with DFS.  If we encounter a node already
+  // in the current stack, we have a cycle.  Remove one edge to break it
+  // and warn the user so both tasks can still be scheduled independently.
+  var circularBreaks = {};
+  (function detectCycles() {
+    var WHITE = 0, GRAY = 1, BLACK = 2;
+    var color = {};
+    allTasks.forEach(function(t) { color[t.id] = WHITE; });
+
+    function dfs(tid) {
+      color[tid] = GRAY;
+      var deps = dependedOnBy[tid] || [];
+      for (var i = 0; i < deps.length; i++) {
+        var cid = deps[i];
+        if (color[cid] === GRAY) {
+          // Cycle found: cid→...→tid→cid.  Break the edge tid→cid.
+          circularBreaks[tid + '→' + cid] = true;
+          schedulerWarnings.push({
+            type: 'circularDependency',
+            taskA: tid,
+            taskB: cid,
+            message: 'Circular dependency detected between ' + tid + ' and ' + cid + ' — ignoring one edge so both can be scheduled'
+          });
+        } else if (color[cid] === WHITE) {
+          dfs(cid);
+        }
+      }
+      color[tid] = BLACK;
+    }
+
+    allTasks.forEach(function(t) {
+      if (color[t.id] === WHITE) dfs(t.id);
+    });
+  })();
+
   function computeDownstreamCeiling(taskId, visited) {
     if (visited[taskId]) return null;
     visited[taskId] = true;
@@ -318,14 +360,14 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var childSt = newSt[childId] || '';
       if (childSt === 'done' || childSt === 'cancel' || childSt === 'skip' || childSt === 'pause' || childSt === 'disabled') continue;
       var childDur = effectiveDuration(childTask);
-      // Use child's own due date, offset by child's duration
+      // Use child's own due date, offset by child's duration.
+      // Tasks ≤4h (240m) fit in a single day — no day-level buffer needed,
+      // the deadline stays on the due date itself.  Longer tasks get
+      // proportional day buffers for the portion exceeding one day's work.
       if (childTask.due) {
         var childDue = parseDate(childTask.due);
         if (childDue) {
-          // Subtract child's duration from its due date to get our effective deadline.
-          // Convert to day-level: if the child takes 120m, that's roughly 1 day buffer
-          // on a schedule with ~480m of work time per day.
-          var bufferDays = Math.ceil(childDur / 480);
+          var bufferDays = childDur <= 240 ? 0 : Math.ceil((childDur - 240) / 480);
           var adjusted = new Date(childDue);
           adjusted.setDate(adjusted.getDate() - bufferDays);
           adjusted.setHours(23, 59, 59, 999);
@@ -335,8 +377,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       // Recurse: child's downstream deadline (already duration-adjusted) may be earlier
       var childDeadline = computeDownstreamDeadline(childId, visited);
       if (childDeadline) {
-        // Further subtract this child's own duration from the downstream deadline
-        var bufferDays2 = Math.ceil(childDur / 480);
+        var bufferDays2 = childDur <= 240 ? 0 : Math.ceil((childDur - 240) / 480);
         var adjusted2 = new Date(childDeadline);
         adjusted2.setDate(adjusted2.getDate() - bufferDays2);
         adjusted2.setHours(23, 59, 59, 999);
@@ -523,10 +564,20 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     var isLastPart = !item || (item.remaining - dur <= 0);
     if (isFirstPart) tb = getTravelBefore(t);
     if (isLastPart) ta = getTravelAfter(t);
-    // Reserve travel buffer zones in the occupancy grid
-    if (tb > 0) reserve(occ, Math.max(0, start - tb), tb);
+    // Reserve travel buffer zones in the occupancy grid.
+    // Travel buffers are transitional — only reserve minutes that aren't
+    // already occupied (don't double-reserve if an adjacent task abuts).
+    if (tb > 0) {
+      for (var tbi = Math.max(0, start - tb); tbi < start; tbi++) {
+        if (!occ[tbi]) occ[tbi] = true;
+      }
+    }
     reserve(occ, start, dur);
-    if (ta > 0) reserve(occ, start + dur, ta);
+    if (ta > 0) {
+      for (var tai = start + dur; tai < start + dur + ta && tai < 1440; tai++) {
+        if (!occ[tai]) occ[tai] = true;
+      }
+    }
     // Per-placement timezone: fixed/locked tasks carry their own tz (if set on the task),
     // otherwise inherit the schedule-level timezone from cfg.
     var placeTz = (t.tz && (locked || hasWhen(t.when, 'fixed'))) ? t.tz : (cfg.timezone || null);
@@ -1155,6 +1206,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     // them side-by-side, and the user can resolve the conflict manually.
     if (!found) {
       var conflictSm = sm; // Use the when-window start we computed earlier
+      // Reserve occupancy — even though this overlaps, we need to prevent
+      // later phases from placing additional tasks in this slot.
+      // The double-reservation is a minor capacity cost but prevents triple-booking.
       reserve(occ, conflictSm, dur);
       placed.push({
         task: t, start: conflictSm, dur: dur, locked: true,
@@ -1169,6 +1223,17 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         dateKey: d.key,
         message: 'Rigid habit "' + t.text + '" overlaps with another task on ' + d.key + '. Consider adjusting one of them.'
       });
+      // Persist _conflict flag in taskUpdates so the frontend can render
+      // overlap columns even after reconstructing from DB.
+      var hh2 = Math.floor(conflictSm / 60), mm2 = conflictSm % 60;
+      var ampm2 = hh2 >= 12 ? "PM" : "AM";
+      var dh2 = hh2 > 12 ? hh2 - 12 : (hh2 === 0 ? 12 : hh2);
+      taskUpdates[t.id] = {
+        date: d.key,
+        time: dh2 + ":" + (mm2 < 10 ? "0" : "") + mm2 + " " + ampm2,
+        tz: t.tz || cfg.timezone || null,
+        _conflict: true
+      };
     }
   }
 
@@ -1363,21 +1428,20 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   // Today capacity reservation: estimate high-pri demand on today.
   // If P1/P2 tasks need most of today's capacity, P3/P4 flexible tasks
   // should defer to tomorrow so they don't consume today's limited slots.
-  var todayReserved = false;
+  // Extracted into a function so it can be re-evaluated after Phase 1 placements.
   var todayDateObj = dates.length > 0 && dates[0].isToday ? dates[0] : null;
-  if (todayDateObj) {
+  function computeTodayReserved() {
+    if (!todayDateObj) return false;
     var highPriDemand = 0;
     pool.forEach(function(item) {
       if (item.remaining <= 0) return;
       var pri = item.task.pri || 'P3';
       if (pri !== 'P1' && pri !== 'P2') return;
-      // Only count if eligible for today
       if (item.earliestDate && todayDateObj.date < item.earliestDate) return;
       if (item.ceiling && todayDateObj.date > item.ceiling) return;
       if (!canPlaceOnDate(item.task, todayDateObj)) return;
       highPriDemand += item.remaining;
     });
-    // Compute today's remaining free capacity (after Phase 0/0.5/1)
     var todayOcc = dayOcc[todayDateObj.key];
     var todayFree = 0;
     var todayWins = dayWindows[todayDateObj.key] && dayWindows[todayDateObj.key].anytime ? dayWindows[todayDateObj.key].anytime : [];
@@ -1386,8 +1450,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         if (!todayOcc[tm]) todayFree++;
       }
     }
-    todayReserved = todayFree > 0 && highPriDemand > todayFree * 0.6;
+    return todayFree > 0 && highPriDemand > todayFree * 0.6;
   }
+  var todayReserved = computeTodayReserved();
 
   function placeWithDeps(item) {
     if (!item || item.remaining <= 0) return;
@@ -1548,6 +1613,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       placeEarly(item, d, depAfter, flexWins, depBefore);
     }
   }
+
+  // Re-evaluate today reservation after Phase 1 placements have changed occupancy
+  todayReserved = computeTodayReserved();
 
   // Phase 2: Unified placement by priority (P1→P4).
   // Deadline tasks go before free tasks within the same priority level —
@@ -1882,8 +1950,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     });
   });
 
-  // PHASE 4.5 — OVERFLOW: Unplaced non-pinned tasks try adjacent days (±1, ±2)
-  var overflowOffsets = [1, -1, 2, -2];
+  // PHASE 4.5 — OVERFLOW: Unplaced non-pinned tasks try nearby days (±1..±7)
+  // Extended range handles weekday→weekend gaps (e.g. Friday task with dayReq:weekday → Monday)
+  var overflowOffsets = [1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7];
   PRI_LEVELS.forEach(function(priLevel) {
     pool.filter(function(item) {
       return item.remaining > 0 && item._parts.length === 0 && (item.task.pri || "P3") === priLevel
@@ -2374,6 +2443,37 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         }
       }
 
+      // --- Infeasible chain analysis ---
+      // Walk the full dependency chain to compute total duration.  If the
+      // chain's aggregate work exceeds available time before the final
+      // deadline, surface a specific diagnostic instead of generic "no-capacity".
+      if (item.deadline) {
+        var chainDur = item.totalDur;
+        var visited = {};
+        var walkChain = function(tid) {
+          if (visited[tid]) return;
+          visited[tid] = true;
+          var children = dependedOnBy[tid] || [];
+          for (var ci2 = 0; ci2 < children.length; ci2++) {
+            var cid = children[ci2];
+            var ct = taskById[cid];
+            if (ct) { chainDur += effectiveDuration(ct); walkChain(cid); }
+          }
+        };
+        walkChain(t.id);
+
+        var daysToDeadline = Math.max(1, Math.round((item.deadline - localToday) / 86400000) + 1);
+        var estCapacity = daysToDeadline * 480; // ~8h usable per day
+        if (chainDur > estCapacity) {
+          t._unplacedReason = "chain_infeasible";
+          detail.push("Dependency chain needs " + chainDur + "m but only ~" + estCapacity + "m available before deadline");
+          suggestions.push({
+            type: 'chainInfeasible',
+            text: 'Dependency chain is too long for the deadline — extend the deadline, reduce task durations, or remove dependencies'
+          });
+        }
+      }
+
       if (item.earliestDate) detail.push("Earliest: " + formatDateKey(item.earliestDate));
       if (item.deadline) detail.push("Deadline: " + formatDateKey(item.deadline));
       detail.push("Duration: " + item.totalDur + "m, splittable: " + (item.splittable ? "yes" : "no"));
@@ -2609,6 +2709,102 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   });
 
   placedCount = Object.keys(taskUpdates).length;
+
+  // ── Annotate placement reasons ──
+  // Generate a short human-readable explanation for every placed task
+  // so users understand WHY the scheduler chose this specific time.
+  var whenLabels = { morning: 'Morning', lunch: 'Lunch', afternoon: 'Afternoon', evening: 'Evening', night: 'Night', biz: 'Business hours' };
+  function whenLabel(tag) {
+    if (!tag) return '';
+    var parts = tag.split(',').map(function(p) { return whenLabels[p.trim()] || p.trim(); });
+    return parts.join('/');
+  }
+  Object.keys(dayPlacements).forEach(function(dk) {
+    (dayPlacements[dk] || []).forEach(function(part) {
+      if (!part.task) return;
+      var t = part.task;
+
+      // 1. Fixed calendar event
+      if (part.locked && hasWhen(t.when, 'fixed')) {
+        part._placementReason = 'Fixed calendar event';
+        return;
+      }
+
+      // 2. Rigid habit
+      if (part.locked && t.rigid && t.habit) {
+        var block = whenLabel(t.when) || 'scheduled';
+        part._placementReason = 'Rigid habit \u2014 ' + block + ' block';
+        if (part._conflict) part._placementReason += ' (overlap \u2014 consider rescheduling one)';
+        return;
+      }
+
+      // 3. Marker
+      if (part.marker) {
+        part._placementReason = 'Marker \u2014 non-blocking';
+        return;
+      }
+
+      // 4. Has a _moveReason — that IS the reason (already well-formatted)
+      if (part._moveReason) {
+        part._placementReason = part._moveReason;
+        return;
+      }
+
+      // Build reason from task constraints
+      var reasons = [];
+
+      // 5. Dependencies
+      var deps = getTaskDeps(t);
+      if (deps.length > 0) {
+        var depNames = deps.slice(0, 2).map(function(did) {
+          var dt = taskByIdMap[did];
+          return dt ? '\u201C' + dt.text.substring(0, 25) + '\u201D' : did;
+        });
+        reasons.push('After ' + depNames.join(', '));
+      }
+
+      // 6. Deadline
+      if (t.due) {
+        var pri = t.pri || 'P3';
+        reasons.push(pri + ' deadline due ' + t.due);
+      }
+
+      // 7. When-window constraint
+      if (t.when && t.when !== '' && !hasWhen(t.when, 'fixed')) {
+        var wl = whenLabel(t.when);
+        if (wl && !t.when.includes(',') || (t.when.split(',').length <= 2)) {
+          reasons.push(wl + ' block');
+        }
+      }
+
+      // 8. Tool/location constraint
+      if (t.tools && t.tools.length > 0) {
+        reasons.push('Needs ' + t.tools.join(', '));
+      }
+
+      // 9. When-relaxed
+      if (part._whenRelaxed) {
+        reasons.push('Preferred blocks full \u2014 placed in next available');
+      }
+
+      // 10. Split part
+      if (part.splitPart) {
+        reasons.push('Part ' + part.splitPart + '/' + part.splitTotal);
+      }
+
+      // 11. Default
+      if (reasons.length === 0) {
+        var pri2 = t.pri || 'P3';
+        if (t.habit) {
+          reasons.push('Flexible habit \u2014 best available slot');
+        } else {
+          reasons.push('Best available slot \u2014 ' + pri2);
+        }
+      }
+
+      part._placementReason = reasons.join(' \u00B7 ');
+    });
+  });
 
   if (schedulerWarnings.length > 0) {
     console.log("[SCHED] " + schedulerWarnings.length + " warning(s): " + schedulerWarnings.map(function(w) { return w.type + '(' + (w.taskId || w.taskA) + ')'; }).join(', '));
