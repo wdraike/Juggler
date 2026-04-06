@@ -66,7 +66,7 @@ var templates = [
     dur: 30,
     pri: 'P3',
     project: 'Habits',
-    when: 'morning,lunch,afternoon,evening',
+    when: 'morning,lunch,afternoon,evening,night',
     day_req: 'any',
     location: JSON.stringify([]),
     tools: JSON.stringify([]),

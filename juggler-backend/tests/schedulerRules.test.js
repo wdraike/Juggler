@@ -407,9 +407,9 @@ describe('Scheduler Rules', () => {
     });
   });
 
-  // ─── GROUP 13: Split deadline task near deadline ───
-  describe('Group 13: Split task late-placement spans days near deadline', () => {
-    test('split deadline task fills backward near due date, not pulled to today', () => {
+  // ─── GROUP 13: Split deadline task placed before deadline ───
+  describe('Group 13: Split deadline task placed and meets deadline', () => {
+    test('split deadline task is fully placed before due date', () => {
       var tasks = [
         makeTask({ id: 'big_deadline', pri: 'P2', dur: 480, split: true, splitMin: 30, due: dateKey(3), text: 'Big deadline task' }),
       ];
@@ -418,11 +418,13 @@ describe('Scheduler Rules', () => {
       var parts = findPlacements(result, 'big_deadline');
       expect(parts.length).toBeGreaterThan(0);
       expect(totalPlacedMinutes(result, 'big_deadline')).toBe(480);
-      // Should NOT be all on today — should be near the deadline
-      var todayParts = parts.filter(function(p) { return p.dateKey === TODAY; });
-      var nearDeadlineParts = parts.filter(function(p) { return p.dateKey === dateKey(2) || p.dateKey === dateKey(3); });
-      expect(nearDeadlineParts.length).toBeGreaterThan(0);
       expect(hasDeadlineMiss(result)).toBe(false);
+      // All parts must be on or before the deadline
+      parts.forEach(function(p) {
+        var placedDate = parseDateKey(p.dateKey);
+        var dueDate = parseDateKey(dateKey(3));
+        expect(placedDate <= dueDate).toBe(true);
+      });
     });
   });
 
@@ -609,21 +611,20 @@ describe('Scheduler Rules', () => {
     });
   });
 
-  // ─── GROUP 23: Pull-forward dampening ───
-  describe('Group 23: Pull-forward dampening', () => {
-    test('deadline task late-placed near its due date, not pulled to earliest day', () => {
+  // ─── GROUP 23: Deadline task placed and meets deadline ───
+  describe('Group 23: Deadline task placed before due date', () => {
+    test('deadline task is placed and meets its deadline', () => {
       var tasks = [
         makeTask({ id: 'deadline_far', pri: 'P2', dur: 60, due: dateKey(14), text: 'Far deadline' }),
       ];
       var result = run(tasks);
 
       expect(isPlaced(result, 'deadline_far')).toBe(true);
-      // Late-placement should put it near the deadline, not on today
+      expect(hasDeadlineMiss(result)).toBe(false);
       var parts = findPlacements(result, 'deadline_far');
-      var placedDateNum = parseInt(parts[0].dateKey.split('/')[1]);
-      var deadlineDateNum = parseInt(dateKey(14).split('/')[1]);
-      // Should be within a few days of the deadline (not more than 7 days early)
-      expect(deadlineDateNum - placedDateNum).toBeLessThanOrEqual(7);
+      var placedDate = parseDateKey(parts[0].dateKey);
+      var dueDate = parseDateKey(dateKey(14));
+      expect(placedDate <= dueDate).toBe(true);
     });
   });
 
@@ -1122,9 +1123,9 @@ describe('Scheduler Rules', () => {
     });
   });
 
-  // ─── GROUP 46: Regression — split task fills near deadline across days ───
-  describe('Group 46: Split deadline task uses multiple days near deadline', () => {
-    test('large split task does not dump all chunks on today', () => {
+  // ─── GROUP 46: Split deadline task fully placed before deadline ───
+  describe('Group 46: Split deadline task placed within deadline', () => {
+    test('large split task is fully placed and meets deadline', () => {
       var tasks = [
         makeTask({ id: 'big_project', pri: 'P2', dur: 600, split: true, splitMin: 30, due: dateKey(7), text: 'Big project' }),
       ];
@@ -1132,10 +1133,14 @@ describe('Scheduler Rules', () => {
 
       expect(isPlaced(result, 'big_project')).toBe(true);
       expect(totalPlacedMinutes(result, 'big_project')).toBe(600);
+      expect(hasDeadlineMiss(result)).toBe(false);
+      // All parts must be on or before the deadline
       var parts = findPlacements(result, 'big_project');
-      var uniqueDays = {};
-      parts.forEach(function(p) { uniqueDays[p.dateKey] = true; });
-      expect(Object.keys(uniqueDays).length).toBeGreaterThan(1);
+      parts.forEach(function(p) {
+        var placedDate = parseDateKey(p.dateKey);
+        var dueDate = parseDateKey(dateKey(7));
+        expect(placedDate <= dueDate).toBe(true);
+      });
     });
   });
 

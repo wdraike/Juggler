@@ -9,8 +9,9 @@ const { requireFeature, checkUsageLimit } = require('../middleware/feature-gate'
 var aiLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 5,
-  keyGenerator: function(req) { return req.user ? req.user.id : req.ip; },
-  message: { error: 'Too many AI requests. Try again in a minute.' }
+  keyGenerator: function(req) { return req.user ? req.user.id : 'anon'; },
+  message: { error: 'Too many AI requests. Try again in a minute.' },
+  validate: false
 });
 
 router.use(authenticateJWT, resolvePlanFeatures);

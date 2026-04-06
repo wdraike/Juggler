@@ -38,12 +38,24 @@ const TODAY = '3/22'; // Sunday
 const NOW_MINS = 480; // 8:00 AM
 const cfg = makeCfg();
 
-function schedule(tasks, statuses, today, nowMins) {
-  return unifiedSchedule(tasks, statuses || {}, today || TODAY, nowMins || NOW_MINS, cfg);
+function schedule(tasks, statusesOrNowMins, today, nowMins) {
+  // Allow schedule(tasks, nowMins) shorthand for convenience
+  if (typeof statusesOrNowMins === 'number') {
+    return unifiedSchedule(tasks, {}, today || TODAY, statusesOrNowMins, cfg);
+  }
+  return unifiedSchedule(tasks, statusesOrNowMins || {}, today || TODAY, nowMins || NOW_MINS, cfg);
 }
 
 function getPlacementsForDay(result, dateKey) {
   return (result.dayPlacements[dateKey] || []).filter(p => !p.marker);
+}
+
+function getAllPlacements(result) {
+  var all = [];
+  Object.values(result.dayPlacements).forEach(function(day) {
+    day.forEach(function(p) { if (p.task) all.push(p); });
+  });
+  return all;
 }
 
 describe('unifiedSchedule', () => {
@@ -258,6 +270,73 @@ describe('unifiedSchedule', () => {
       const result = schedule(tasks);
       const placed = getPlacementsForDay(result, '3/22');
       expect(placed.find(p => p.task.id === 't1')).toBeDefined();
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════
+  // preferredTimeMins — Time Window mode
+  // ═══════════════════════════════════════════════════════════════
+
+  describe('preferredTimeMins', () => {
+    test('recurring task with preferredTimeMins is placed within flex window', () => {
+      var tasks = [
+        makeTask({ id: 'lunch', text: 'Lunch', recurring: true, generated: true,
+          preferredTimeMins: 720, timeFlex: 60, dur: 30, date: TODAY, time: '12:00 PM' })
+      ];
+      var result = schedule(tasks, 480); // 8am
+      var placed = getAllPlacements(result).filter(p => p.task.id === 'lunch');
+      expect(placed.length).toBe(1);
+      expect(placed[0].start).toBeGreaterThanOrEqual(660); // 11am
+      expect(placed[0].start).toBeLessThanOrEqual(780);    // 1pm
+    });
+
+    test('recurring task with preferredTimeMins=420 (7am) placed in morning', () => {
+      var tasks = [
+        makeTask({ id: 'bf', text: 'Breakfast', recurring: true, generated: true,
+          preferredTimeMins: 420, timeFlex: 60, dur: 20, date: TODAY, time: '7:00 AM' })
+      ];
+      var result = schedule(tasks, 360); // 6am
+      var placed = getAllPlacements(result).filter(p => p.task.id === 'bf');
+      expect(placed.length).toBe(1);
+      expect(placed[0].start).toBeGreaterThanOrEqual(360); // 6am
+      expect(placed[0].start).toBeLessThanOrEqual(480);    // 8am
+    });
+
+    test('preferredTimeMins takes precedence over parsed time string', () => {
+      // time says 9am but preferredTimeMins says noon — noon should win
+      var tasks = [
+        makeTask({ id: 'conflict', recurring: true, generated: true,
+          preferredTimeMins: 720, time: '9:00 AM', timeFlex: 30, dur: 30, date: TODAY })
+      ];
+      var result = schedule(tasks, 480);
+      var placed = getAllPlacements(result).filter(p => p.task.id === 'conflict');
+      expect(placed.length).toBe(1);
+      expect(placed[0].start).toBeGreaterThanOrEqual(690); // 11:30am
+      expect(placed[0].start).toBeLessThanOrEqual(750);    // 12:30pm
+    });
+
+    test('missed recurring: preferredTimeMins window entirely past → unplaced', () => {
+      var tasks = [
+        makeTask({ id: 'missed', text: 'Morning task', recurring: true, generated: true,
+          preferredTimeMins: 420, timeFlex: 60, dur: 20, date: TODAY, time: '7:00 AM' })
+      ];
+      var result = schedule(tasks, 540); // 9am — window [360,480] is past
+      var placed = getAllPlacements(result).filter(p => p.task.id === 'missed');
+      expect(placed.length).toBe(0);
+      var missed = result.unplaced.find(t => t.id === 'missed');
+      expect(missed).toBeDefined();
+      expect(missed._unplacedReason).toBe('missed');
+    });
+
+    test('non-recurring task ignores preferredTimeMins', () => {
+      var tasks = [
+        makeTask({ id: 'regular', recurring: false,
+          preferredTimeMins: 720, timeFlex: 60, dur: 30, date: TODAY })
+      ];
+      var result = schedule(tasks, 480);
+      // Should be placed normally (not constrained to noon window)
+      var placed = getAllPlacements(result).filter(p => p.task.id === 'regular');
+      expect(placed.length).toBe(1);
     });
   });
 });

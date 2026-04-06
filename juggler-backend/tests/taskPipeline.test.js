@@ -250,11 +250,11 @@ describe('rowToTask: template field inheritance', () => {
 // 3. Midnight Fallback for Recurring Instances
 // ═══════════════════════════════════════════════════════════════════
 
-describe('rowToTask: template preferred time override', () => {
-  test('instance always gets time from template (not from stale scheduled_at)', () => {
+describe('rowToTask: template preferred time override via preferred_time_mins', () => {
+  test('instance always gets time from template preferred_time_mins (not from stale scheduled_at)', () => {
     var template = makeTemplateRow({
       id: 'ht_lunch',
-      scheduled_at: new Date('2026-02-21T17:00:00Z'), // 12:00 PM ET
+      preferred_time_mins: 720, // 12:00 PM
       when: 'lunch',
       time_flex: 60,
     });
@@ -265,14 +265,14 @@ describe('rowToTask: template preferred time override', () => {
     var srcMap = {}; srcMap['ht_lunch'] = template;
     var task = rowToTask(instance, TZ, srcMap);
 
-    expect(task.time).toBe('12:00 PM');  // fell back to template
+    expect(task.time).toBe('12:00 PM');  // from template preferred_time_mins
     expect(task.date).toBe('4/4');       // date from instance (correct day)
   });
 
-  test('instance at midnight stays midnight when template is also midnight', () => {
+  test('instance at midnight stays midnight when template has preferred_time_mins=0', () => {
     var template = makeTemplateRow({
       id: 'ht_mid',
-      scheduled_at: new Date('2026-02-21T05:00:00Z'), // midnight ET
+      preferred_time_mins: 0, // midnight
     });
     var instance = makeInstanceRow('ht_mid', {
       id: 'rc_mid_44',
@@ -281,7 +281,7 @@ describe('rowToTask: template preferred time override', () => {
     var srcMap = {}; srcMap['ht_mid'] = template;
     var task = rowToTask(instance, TZ, srcMap);
 
-    expect(task.time).toBe('12:00 AM'); // both midnight, stays midnight
+    expect(task.time).toBe('12:00 AM');
   });
 
   test('instance at midnight stays midnight when no sourceMap', () => {
@@ -293,12 +293,10 @@ describe('rowToTask: template preferred time override', () => {
     expect(task.time).toBe('12:00 AM'); // no source to fall back to
   });
 
-  test('instance with stale scheduler time gets template time instead', () => {
-    // The scheduler previously placed lunch at 7am (stale). Template says noon.
-    // rowToTask should use the template's noon, not the stale 7am.
+  test('instance with stale scheduler time gets template preferred_time_mins instead', () => {
     var template = makeTemplateRow({
       id: 'ht_stale',
-      scheduled_at: new Date('2026-02-21T17:00:00Z'), // 12:00 PM ET
+      preferred_time_mins: 720, // 12:00 PM
       when: 'lunch',
       time_flex: 60,
     });
@@ -309,11 +307,11 @@ describe('rowToTask: template preferred time override', () => {
     var srcMap = {}; srcMap['ht_stale'] = template;
     var task = rowToTask(instance, TZ, srcMap);
 
-    expect(task.time).toBe('12:00 PM');  // template time, NOT 7:00 AM
+    expect(task.time).toBe('12:00 PM');  // template preferred_time_mins, NOT 7:00 AM
   });
 
-  test('instance at midnight stays midnight when source has null scheduled_at', () => {
-    var template = makeTemplateRow({ id: 'ht_nullsa', scheduled_at: null });
+  test('instance uses own time when source has null preferred_time_mins', () => {
+    var template = makeTemplateRow({ id: 'ht_nullsa', preferred_time_mins: null });
     var instance = makeInstanceRow('ht_nullsa', {
       id: 'rc_nullsa_44',
       scheduled_at: new Date('2026-04-04T04:00:00Z'),
@@ -321,7 +319,7 @@ describe('rowToTask: template preferred time override', () => {
     var srcMap = {}; srcMap['ht_nullsa'] = template;
     var task = rowToTask(instance, TZ, srcMap);
 
-    expect(task.time).toBe('12:00 AM');
+    expect(task.time).toBe('12:00 AM'); // no preferred_time_mins, uses own scheduled_at
   });
 });
 
@@ -419,7 +417,7 @@ describe('rowToTask: JSON field parsing', () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe('Full pipeline: rowToTask → scheduler', () => {
-  test('recurring instance with template time schedules at correct flex window', () => {
+  test('recurring instance with template preferred_time_mins schedules at correct flex window', () => {
     // Simulate: lunch template at noon, instance cleared to midnight by scheduler
     var template = makeTemplateRow({
       id: 'ht_lunch_pipe',
@@ -427,7 +425,7 @@ describe('Full pipeline: rowToTask → scheduler', () => {
       when: 'lunch',
       time_flex: 60,
       dur: 30,
-      scheduled_at: new Date('2026-02-21T17:00:00Z'), // noon ET
+      preferred_time_mins: 720, // 12:00 PM
     });
     var instance = makeInstanceRow('ht_lunch_pipe', {
       id: 'rc_lunch_pipe_44',
@@ -438,9 +436,10 @@ describe('Full pipeline: rowToTask → scheduler', () => {
     var srcMap = {}; srcMap['ht_lunch_pipe'] = template;
     var mapped = rowToTask(instance, TZ, srcMap);
 
-    // Verify time derived from template fallback
+    // Verify time derived from template preferred_time_mins
     expect(mapped.time).toBe('12:00 PM');
     expect(mapped.timeFlex).toBe(60);
+    expect(mapped.preferredTimeMins).toBe(720);
 
     // Run through scheduler
     var cfg = makeCfg();
@@ -460,14 +459,14 @@ describe('Full pipeline: rowToTask → scheduler', () => {
     expect(placed[0].start).toBeLessThanOrEqual(780);    // 1:00 PM
   });
 
-  test('breakfast recurring with template time at 7am, nowMins past flex → missed', () => {
+  test('breakfast recurring with preferred_time_mins at 7am, nowMins past flex → missed', () => {
     var template = makeTemplateRow({
       id: 'ht_bf_pipe',
       text: 'Eat Breakfast',
       when: 'morning',
       time_flex: 60,
       dur: 30,
-      scheduled_at: new Date('2026-02-21T12:00:00Z'), // 7:00 AM ET
+      preferred_time_mins: 420, // 7:00 AM
     });
     var instance = makeInstanceRow('ht_bf_pipe', {
       id: 'rc_bf_pipe_44',
@@ -479,6 +478,7 @@ describe('Full pipeline: rowToTask → scheduler', () => {
     var mapped = rowToTask(instance, TZ, srcMap);
 
     expect(mapped.time).toBe('7:00 AM');
+    expect(mapped.preferredTimeMins).toBe(420);
 
     // Run scheduler at 9am — flex window [360,480] is entirely past
     var cfg = makeCfg();

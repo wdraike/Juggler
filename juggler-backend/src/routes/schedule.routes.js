@@ -13,14 +13,16 @@ var { withSyncLock } = require('../lib/sync-lock');
 var schedulerLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 10, // max 10 scheduler runs per minute per user
-  keyGenerator: function(req) { return req.user ? req.user.id : req.ip; },
-  message: { error: 'Too many scheduler requests. Try again in a minute.' }
+  keyGenerator: function(req) { return req.user ? req.user.id : 'anon'; },
+  message: { error: 'Too many scheduler requests. Try again in a minute.' },
+  validate: false
 });
 var debugLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 5, // max 5 debug runs per minute
-  keyGenerator: function(req) { return req.user ? req.user.id : req.ip; },
-  message: { error: 'Too many debug requests. Try again in a minute.' }
+  keyGenerator: function(req) { return req.user ? req.user.id : 'anon'; },
+  message: { error: 'Too many debug requests. Try again in a minute.' },
+  validate: false
 });
 
 /**

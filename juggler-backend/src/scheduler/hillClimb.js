@@ -46,7 +46,7 @@ function isMovable(placement) {
  */
 function recurFlexOk(task, newStart, dur) {
   if (!task.recurring) return true;
-  var sm = parseTimeToMinutes(task.time);
+  var sm = task.preferredTimeMins != null ? task.preferredTimeMins : parseTimeToMinutes(task.time);
   if (sm === null) return true; // no preferred time
   var flex = task.timeFlex != null ? task.timeFlex : DEFAULT_TIME_FLEX;
   if (flex <= 0) return true;
@@ -452,7 +452,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       // Deadline tasks are fine to move back (deadline math governs).
       var hcTodayKey = scoreOpts && scoreOpts.todayKey;
       if (hcTodayKey && targetDateKey === hcTodayKey && currDateKey !== hcTodayKey) {
-        var taskHasDeadline = !!pl.task.due;
+        var taskHasDeadline = !!(pl.task.due || pl.task._fauxDeadline);
         if (!taskHasDeadline) {
           var hcPri = pl.task.pri || 'P3';
           if (hcPri === 'P3' || hcPri === 'P4') continue;
@@ -464,6 +464,14 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
         var saD = parseDate(pl.task.startAfter);
         var tgtD = parseDate(targetDateKey);
         if (saD && tgtD && tgtD < saD) continue;
+      }
+
+      // Enforce deadline constraints — never move past due date or faux-deadline
+      if (pl.task.due || pl.task._fauxDeadline) {
+        var dlStr = pl.task.due || pl.task._fauxDeadline;
+        var dlD = parseDate(dlStr);
+        var tgtD2 = parseDate(targetDateKey);
+        if (dlD && tgtD2 && tgtD2 > dlD) continue;
       }
 
       if (!dayOcc[targetDateKey]) continue;
@@ -592,6 +600,18 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       if (plLow.task.startAfter) {
         var saLow = parseDate(plLow.task.startAfter);
         if (saLow && dateB < saLow) continue;
+      }
+
+      // Enforce deadline constraints — don't move tasks past their deadlines
+      if (plLow.task.due || plLow.task._fauxDeadline) {
+        var lowDlStr = plLow.task.due || plLow.task._fauxDeadline;
+        var lowDlD = parseDate(lowDlStr);
+        if (lowDlD && dateB > lowDlD) continue;
+      }
+      if (plHigh.task.due || plHigh.task._fauxDeadline) {
+        var highDlStr = plHigh.task.due || plHigh.task._fauxDeadline;
+        var highDlD = parseDate(highDlStr);
+        if (highDlD && dateA > highDlD) continue;
       }
 
       // Only proceed if plHigh has strictly higher priority than plLow

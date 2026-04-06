@@ -235,11 +235,11 @@ describe('Tier 2: Recurrings with Preferred Time', () => {
     expect(isMissed(r, 'bf')).toBe(true);
   });
 
-  test('S9: Recurring instance inherits template time, not stale scheduler time', () => {
+  test('S9: Recurring instance inherits template time via preferred_time_mins, not stale scheduler time', () => {
     var template = makeDBRow({
       id: 'ht_lunchx', task_type: 'recurring_template', recurring: 1,
       when: 'lunch', time_flex: 60, dur: 30,
-      scheduled_at: new Date('2026-02-21T17:00:00Z'), // noon ET
+      preferred_time_mins: 720, // noon
       recur: JSON.stringify({ type: 'daily' }),
     });
     var instance = makeDBRow({
@@ -466,11 +466,11 @@ describe('Tier 5: Capacity Crunch', () => {
 
 describe('Tier 6: Full Pipeline (DB rows)', () => {
 
-  test('S24: Recurring instance at midnight → template time used → placed near noon', () => {
+  test('S24: Recurring instance at midnight → template preferred_time_mins used → placed near noon', () => {
     var template = makeDBRow({
       id: 'ht_s24', task_type: 'recurring_template', recurring: 1,
       when: 'lunch', time_flex: 60, dur: 30,
-      scheduled_at: new Date('2026-02-21T17:00:00Z'), // noon ET
+      preferred_time_mins: 720, // noon
       recur: JSON.stringify({ type: 'daily' }),
     });
     var instance = makeDBRow({
@@ -487,11 +487,11 @@ describe('Tier 6: Full Pipeline (DB rows)', () => {
     expect(p.start).toBeLessThanOrEqual(mins(13));
   });
 
-  test('S25: Recurring instance at stale 7am → template noon used → placed near noon', () => {
+  test('S25: Recurring instance at stale 7am → template preferred_time_mins noon → placed near noon', () => {
     var template = makeDBRow({
       id: 'ht_s25', task_type: 'recurring_template', recurring: 1,
       when: 'lunch', time_flex: 60, dur: 30,
-      scheduled_at: new Date('2026-02-21T17:00:00Z'),
+      preferred_time_mins: 720, // noon
     });
     var instance = makeDBRow({
       id: 'rc_s25_47', task_type: 'recurring_instance', recurring: 1,
@@ -500,7 +500,7 @@ describe('Tier 6: Full Pipeline (DB rows)', () => {
     });
     var srcMap = {}; srcMap['ht_s25'] = template;
     var mapped = rowToTask(instance, TZ, srcMap);
-    expect(mapped.time).toBe('12:00 PM'); // template time, not 7am
+    expect(mapped.time).toBe('12:00 PM'); // from preferred_time_mins, not 7am
     var r = schedule([mapped], 600); // 10am
     var p = placement(r, 'rc_s25_47');
     expect(p).not.toBeNull();
@@ -523,7 +523,7 @@ describe('Tier 6: Full Pipeline (DB rows)', () => {
     var template = makeDBRow({
       id: 'ht_s27', task_type: 'recurring_template', recurring: 1,
       when: 'evening', time_flex: 60,
-      scheduled_at: new Date('2026-04-07T22:00:00Z'), // 6pm ET (NEW time)
+      preferred_time_mins: 1080, // 6pm (NEW time)
     });
     var instance = makeDBRow({
       id: 'rc_s27_47', task_type: 'recurring_instance', recurring: 1,

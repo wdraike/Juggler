@@ -204,14 +204,31 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   // The editor shows times in this timezone (what the user originally entered).
   var [taskTz, setTaskTz] = useState(isCreate ? (activeTimezone || 'America/New_York') : (task.tz || activeTimezone || 'America/New_York'));
 
-  // Initialize date/time from UTC (scheduledAt) converted to taskTz.
-  // Editor displays in task.tz so the user sees the time they originally entered.
+  // Initialize date/time from task data.
+  // For recurring Time Window mode: derive time from preferredTimeMins (minutes since
+  // midnight, local tz — no timezone conversion needed).
+  // For all other tasks: convert scheduledAt (UTC) to display timezone.
   var initDateTime = React.useMemo(function() {
     if (isCreate) return { date: initDate, time: '' };
-    var tz = task.tz || activeTimezone || 'America/New_York';
+    // Recurring Time Window: use preferredTimeMins directly (no tz conversion)
+    if (task.recurring && task.preferredTime && task.preferredTimeMins != null) {
+      var h = Math.floor(task.preferredTimeMins / 60);
+      var m = task.preferredTimeMins % 60;
+      var time24 = (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+      // Date comes from instance's scheduledAt (if placed) or empty
+      var tz = task.tz || activeTimezone || 'America/New_York';
+      var dateStr = '';
+      if (task.scheduledAt) {
+        var conv = convertTimeForDisplay(task.scheduledAt, tz);
+        if (conv && conv.date) dateStr = toDateISO(conv.date) || '';
+      }
+      return { date: dateStr, time: time24 };
+    }
+    // Normal tasks: convert from UTC
+    var tz2 = task.tz || activeTimezone || 'America/New_York';
     if (task.scheduledAt) {
-      var conv = convertTimeForDisplay(task.scheduledAt, tz);
-      if (conv && conv.date) return { date: toDateISO(conv.date) || '', time: toTime24(conv.time) || '' };
+      var conv2 = convertTimeForDisplay(task.scheduledAt, tz2);
+      if (conv2 && conv2.date) return { date: toDateISO(conv2.date) || '', time: toTime24(conv2.time) || '' };
     }
     return { date: toDateISO(task.date) || '', time: toTime24(task.time) || '' };
   }, []); // only on mount
@@ -224,7 +241,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [startAfter, setStartAfter] = useState(isCreate ? '' : toDateISO(task.startAfter));
   var [notes, setNotes] = useState(isCreate ? '' : (task.notes || ''));
   var [when, setWhen] = useState(function() {
-    if (isCreate) return 'morning,lunch,afternoon,evening';
+    if (isCreate) return 'morning,lunch,afternoon,evening,night';
     var raw = task.when || '';
     // Strip stale tags not in uniqueTags (e.g. "biz" when no biz button exists)
     var special = ['anytime', 'allday', 'fixed'];
@@ -420,7 +437,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       due: toDateISO(t.due) || '', startAfter: toDateISO(t.startAfter) || '',
       notes: t.notes || '', when: t.when || '', dayReq: t.dayReq || 'any',
       recurring: !!t.recurring, rigid: !!t.rigid,
-      timeFlex: t.timeFlex != null ? t.timeFlex : 60,
+      timeFlex: t.timeFlex != null ? t.timeFlex : null,
       split: t.split !== undefined ? !!t.split : false, splitMin: t.splitMin || 15,
       location: t.location || [], tools: t.tools || [],
       travelBefore: t.travelBefore || 0, travelAfter: t.travelAfter || 0,
@@ -432,7 +449,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       recurMonthDays: t.recur?.monthDays || [1, 15],
       tz: t.tz || activeTimezone || 'America/New_York',
       recurStart: t.recurStart || '', recurEnd: t.recurEnd || '',
-      preferredTime: t.preferredTime != null ? !!t.preferredTime : null
+      preferredTime: t.preferredTime != null ? !!t.preferredTime : null,
+      preferredTimeMins: t.preferredTimeMins != null ? t.preferredTimeMins : null
     };
   }
   if (!taskSnapshotRef.current && !isCreate && task) {
@@ -523,7 +541,12 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       _timezone: taskTz,  // tells backend which timezone to use for date/time → UTC conversion
       recurStart: recurring ? (recurStart || null) : null,
       recurEnd: recurring ? (recurEnd || null) : null,
-      preferredTime: recurring ? hasPreferredTime : undefined
+      preferredTime: recurring ? hasPreferredTime : undefined,
+      // preferredTimeMins: minutes since midnight from 24h time input (no tz conversion)
+      preferredTimeMins: recurring && hasPreferredTime && time ? (function() {
+        var parts = time.split(':');
+        return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || '0', 10);
+      })() : undefined
     };
   }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, hasPreferredTime]);
 
@@ -545,6 +568,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (rigid !== snap.rigid) changed.rigid = all.rigid;
     if (parseInt(dur) !== snap.dur) changed.dur = all.dur;
     if (timeFlex !== snap.timeFlex) changed.timeFlex = all.timeFlex;
+    if (all.preferredTimeMins !== snap.preferredTimeMins) changed.preferredTimeMins = all.preferredTimeMins;
     if (!!split !== snap.split) changed.split = all.split;
     if (parseInt(splitMin) !== snap.splitMin) changed.splitMin = all.splitMin;
     if (!!marker !== snap.marker) changed.marker = all.marker;
@@ -872,7 +896,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                   setRecurringHasPreferredTime(false);
                   setTime('');
                   var tags = (when || '').split(',').filter(Boolean);
-                  if (tags.length <= 1) setWhen('morning,lunch,afternoon,evening');
+                  if (tags.length <= 1) setWhen('morning,lunch,afternoon,evening,night');
                 }} style={togStyle(!hasPreferredTime, '#2D6A4F')}>{'\uD83D\uDCC6'} Time blocks</button>
               </div>
 
@@ -931,12 +955,15 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           )}
 
           {/* Recurring instance: show read-only scheduled date/time from the scheduler */}
-          {recurring && !isCreate && !marker && date && (
+          {recurring && !isCreate && !marker && task.scheduledAt && (
             <div style={{ fontSize: 11, color: TH.textMuted, marginBottom: 5, padding: '4px 8px', background: TH.inputBg, borderRadius: 4, border: '1px solid ' + TH.border }}>
               {'\uD83D\uDCC5'} Scheduled: <span style={{ color: TH.text, fontWeight: 600 }}>{(function() {
-                // Format the instance's scheduled date/time nicely
-                var d = date; // ISO date string e.g. "2026-04-04"
-                var t = time; // 24h time e.g. "07:00"
+                // Format the instance's actual scheduled date/time (from scheduler, not desired)
+                var tz = task.tz || activeTimezone || 'America/New_York';
+                var conv = convertTimeForDisplay(task.scheduledAt, tz);
+                if (!conv || !conv.date) return 'Not scheduled';
+                var d = toDateISO(conv.date);
+                var t = toTime24(conv.time);
                 if (!d) return 'Not scheduled';
                 var dt = new Date(d + 'T' + (t || '00:00'));
                 var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

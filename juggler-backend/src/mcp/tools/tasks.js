@@ -8,7 +8,7 @@
 
 const { z } = require('zod');
 const db = require('../../db');
-const { rowToTask, taskToRow, ensureProject, applySplitDefault, buildSourceMap } = require('../../controllers/task.controller');
+const { rowToTask, taskToRow, ensureProject, applySplitDefault, buildSourceMap, TEMPLATE_FIELDS } = require('../../controllers/task.controller');
 const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
 
 // Shared Zod fields for task input (used by create_task, create_tasks, update_task)
@@ -48,7 +48,8 @@ var taskInputFields = {
   travelBefore: z.number().optional().describe('Travel buffer before task in minutes — scheduler reserves this time and prevents overlapping placements'),
   travelAfter: z.number().optional().describe('Travel buffer after task in minutes — scheduler reserves this time and prevents overlapping placements'),
   desiredAt: z.string().optional().describe('User intended date/time as UTC ISO. Usually set automatically from date+time — only provide if you need to set desired_at differently from scheduled_at.'),
-  desiredDate: z.string().optional().describe('User intended date only (YYYY-MM-DD). For tasks with a date preference but no specific time.')
+  desiredDate: z.string().optional().describe('User intended date only (YYYY-MM-DD). For tasks with a date preference but no specific time.'),
+  preferredTimeMins: z.number().optional().describe('Preferred time as minutes from midnight in user local timezone (e.g. 720 = 12:00 PM, 420 = 7:00 AM). For recurring tasks in Time Window mode.')
 };
 
 function registerTaskTools(server, userId) {
@@ -187,10 +188,7 @@ function registerTaskTools(server, userId) {
         delete row.depends_on;
       }
 
-      // Route template fields to source for recurring instances
-      var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
-        'when', 'day_req', 'recurring', 'rigid', 'time_flex', 'split', 'split_min',
-        'recur', 'depends_on'];
+      // Route template fields to source for recurring instances (uses module-level TEMPLATE_FIELDS)
       var taskType = existing.task_type || 'task';
       var isRecurringInstance = taskType === 'recurring_instance' && existing.source_id;
 
@@ -199,7 +197,7 @@ function registerTaskTools(server, userId) {
         var instanceUpdate = {};
         Object.keys(row).forEach(function(k) {
           if (k === 'updated_at') return;
-          if (TEMPLATE_ROW_FIELDS.indexOf(k) >= 0) {
+          if (TEMPLATE_FIELDS.indexOf(k) >= 0) {
             templateUpdate[k] = row[k];
           } else {
             instanceUpdate[k] = row[k];
@@ -367,9 +365,7 @@ function registerTaskTools(server, userId) {
       var tz = await getUserTimezone();
       var updatedCount = 0;
 
-      var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
-        'when', 'day_req', 'recurring', 'rigid', 'time_flex', 'split', 'split_min',
-        'recur', 'depends_on'];
+      // Uses module-level TEMPLATE_FIELDS imported from task.controller
 
       await db.transaction(async function(trx) {
         var idsToUpdate = updates.map(function(u) { return u.id; });
@@ -400,7 +396,7 @@ function registerTaskTools(server, userId) {
             var instanceUpdate = {};
             Object.keys(row).forEach(function(k) {
               if (k === 'updated_at') return;
-              if (TEMPLATE_ROW_FIELDS.indexOf(k) >= 0) {
+              if (TEMPLATE_FIELDS.indexOf(k) >= 0) {
                 templateUpdate[k] = row[k];
               } else {
                 instanceUpdate[k] = row[k];

@@ -5,7 +5,7 @@
 var PRI_RANK = { P1: 100, P2: 80, P3: 50, P4: 20 };
 
 var TASK_DEFAULTS = {
-  where: "anywhere", when: "morning,lunch,afternoon,evening",
+  where: "anywhere", when: "morning,lunch,afternoon,evening,night",
   dayReq: "any", dur: 30, notes: "", due: "", startAfter: "",
   section: "", dependsOn: []
 };

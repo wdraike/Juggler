@@ -68,5 +68,24 @@ module.exports = {
       directory: './src/db/migrations',
       tableName: 'knex_migrations'
     }
+  },
+
+  test: {
+    client: 'mysql2',
+    connection: {
+      host: '127.0.0.1',
+      port: 3308,
+      user: 'root',
+      password: '',
+      database: 'juggler_test',
+      charset: 'utf8mb4',
+      timezone: '+00:00',
+      dateStrings: true
+    },
+    pool: { min: 1, max: 5 },
+    migrations: {
+      directory: './src/db/migrations',
+      tableName: 'knex_migrations'
+    }
   }
 };

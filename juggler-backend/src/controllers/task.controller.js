@@ -65,10 +65,15 @@ function parseISOToDate(iso) {
 
 // Fields that live on the source template and are inherited by recurring instances.
 // If an instance row has NULL for these, the value is read from the source.
+// This is the SINGLE source of truth — used for rowToTask merge, updateTask routing,
+// batchUpdateTasks routing, and MCP update routing.
+// NOTE: scheduled_at and desired_at are NOT template fields — they belong on instances.
+// The template's preferred time is stored in preferred_time_mins (minutes since midnight).
 var TEMPLATE_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
   'when', 'day_req', 'recurring', 'rigid', 'time_flex', 'split', 'split_min',
   'travel_before', 'travel_after', 'depends_on',
-  'notes', 'marker', 'flex_when', 'recur_start', 'recur_end', 'preferred_time'];
+  'notes', 'marker', 'flex_when', 'recur_start', 'recur_end',
+  'preferred_time', 'preferred_time_mins'];
 
 /**
  * Build a { sourceId: row } lookup from an array of task rows.
@@ -136,17 +141,16 @@ function rowToTask(row, timezone, sourceMap) {
     if (local.day) day = local.day;
   }
 
-  // Recurring instances: the preferred time ALWAYS comes from the source template,
-  // not from the instance's scheduled_at (which is just where the scheduler
-  // last placed it, or midnight if it was cleared as unplaced).
-  // Without this, the flex window anchors at the scheduler's old placement time
-  // instead of the user's intended time (e.g., 7am instead of noon for lunch).
-  // Exception: disabled instances are frozen — don't override their time.
-  if (src && displayTz && src.scheduled_at && row.status !== 'disabled') {
-    var srcLocal = utcToLocal(src.scheduled_at, displayTz);
-    if (srcLocal && srcLocal.time) {
-      time = srcLocal.time;
-    }
+  // Recurring instances in Time Window mode: derive the preferred time from
+  // the template's preferred_time_mins (minutes since midnight, local tz).
+  // No timezone conversion needed — the value is already in local time.
+  // Exception: disabled instances are frozen.
+  if (src && src.preferred_time_mins != null && row.status !== 'disabled') {
+    var ptH = Math.floor(src.preferred_time_mins / 60);
+    var ptM = src.preferred_time_mins % 60;
+    var ptAmpm = ptH >= 12 ? 'PM' : 'AM';
+    var ptH12 = ptH % 12 || 12;
+    time = ptH12 + ':' + (ptM < 10 ? '0' : '') + ptM + ' ' + ptAmpm;
   }
 
   // Derive due from due_at DATE column
@@ -222,6 +226,7 @@ function rowToTask(row, timezone, sourceMap) {
     travelBefore: row.travel_before != null ? row.travel_before : undefined,
     travelAfter: row.travel_after != null ? row.travel_after : undefined,
     preferredTime: row.preferred_time != null ? !!row.preferred_time : null,
+    preferredTimeMins: row.preferred_time_mins != null ? row.preferred_time_mins : null,
     desiredAt: row.desired_at ? new Date(row.desired_at).toISOString() : null,
     desiredDate: row.desired_date || null,
     unscheduled: !!row.unscheduled,
@@ -283,6 +288,7 @@ function taskToRow(task, userId, timezone) {
   if (task.recurStart !== undefined) row.recur_start = task.recurStart || null;
   if (task.recurEnd !== undefined) row.recur_end = task.recurEnd || null;
   if (task.preferredTime !== undefined) row.preferred_time = task.preferredTime ? 1 : 0;
+  if (task.preferredTimeMins !== undefined) row.preferred_time_mins = task.preferredTimeMins;
 
   // Direct desired_at / desired_date mapping (if caller provides them explicitly)
   if (task.desiredAt !== undefined) {
@@ -328,13 +334,15 @@ function taskToRow(task, userId, timezone) {
   // Time mode field cleanup: clear fields irrelevant to the active mode.
   // Only applies when preferred_time is explicitly set in this update.
   if (row.preferred_time === 1) {
-    // Time Window mode: time blocks, splitting, and flex_when are irrelevant
-    row.when = null;
+    // Time Window mode: placement is anchor time ± time_flex.
+    // Time blocks (when), splitting, and flex_when are irrelevant.
     row.split = null;
     row.split_min = null;
     row.flex_when = null;
+    // Don't clear 'when' — it may carry the tag for the time window anchor
+    // Don't clear 'time_flex' — it IS the flexibility window for this mode
   } else if (row.preferred_time === 0) {
-    // Time Block mode: time_flex is irrelevant
+    // Time Block mode: placement uses when tags. time_flex is irrelevant.
     row.time_flex = null;
   }
 
@@ -510,6 +518,7 @@ async function createTask(req, res) {
  */
 async function updateTask(req, res) {
   try {
+    console.log('[UPDATE] id=' + req.params.id + ' body=' + JSON.stringify(req.body));
     var validationErrors = validateTaskInput(req.body);
     if (validationErrors.length > 0) {
       return res.status(400).json({ error: validationErrors.join('; ') });
@@ -572,11 +581,7 @@ async function updateTask(req, res) {
       row.date_pinned = 1;
     }
 
-    // Fields that belong on the source template (shared across all instances).
-    var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
-      'when', 'day_req', 'recurring', 'rigid', 'time_flex', 'split', 'split_min',
-      'travel_before', 'travel_after', 'depends_on',
-      'notes', 'marker', 'flex_when', 'recur_start', 'recur_end', 'preferred_time'];
+    // Use the single TEMPLATE_FIELDS array for routing (defined at module level)
 
     var taskType = existing.task_type || 'task';
 
@@ -594,7 +599,7 @@ async function updateTask(req, res) {
           // For drag-pin: when + prev_when stay on instance, not routed to template
           if (isDragPin && (k === 'when' || k === 'prev_when')) {
             instanceUpdate[k] = row[k];
-          } else if (TEMPLATE_ROW_FIELDS.indexOf(k) >= 0) {
+          } else if (TEMPLATE_FIELDS.indexOf(k) >= 0) {
             templateUpdate[k] = row[k];
           } else {
             instanceUpdate[k] = row[k];
@@ -1065,11 +1070,7 @@ async function batchUpdateTasks(req, res) {
     var updatedCount = 0;
     var MAX_RETRIES = 3;
 
-    // Template fields that should be routed to the source for recurring instances
-    var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
-      'when', 'day_req', 'recurring', 'rigid', 'time_flex', 'split', 'split_min',
-      'travel_before', 'travel_after', 'depends_on',
-      'notes', 'marker', 'flex_when', 'recur_start', 'recur_end', 'preferred_time'];
+    // Template fields use the module-level TEMPLATE_FIELDS array (single source of truth)
 
     for (var attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
@@ -1148,7 +1149,7 @@ async function batchUpdateTasks(req, res) {
               var instanceUpdate = {};
               Object.keys(row).forEach(function(k) {
                 if (k === 'updated_at') return;
-                if (TEMPLATE_ROW_FIELDS.indexOf(k) >= 0) {
+                if (TEMPLATE_FIELDS.indexOf(k) >= 0) {
                   templateUpdate[k] = row[k];
                 } else {
                   instanceUpdate[k] = row[k];
@@ -1380,5 +1381,6 @@ module.exports = {
   taskToRow,
   buildSourceMap,
   ensureProject,
-  applySplitDefault
+  applySplitDefault,
+  TEMPLATE_FIELDS
 };

@@ -1,25 +1,25 @@
 /**
  * Clean up time mode fields on existing tasks.
- * Time Window tasks (preferred_time=1) should not have when/split/split_min/flex_when.
- * Time Block tasks (preferred_time=0 or null) should not have time_flex.
+ * Time Window tasks (preferred_time=1): split/split_min/flex_when are irrelevant.
+ *   (when and time_flex ARE relevant — when carries the anchor tag, time_flex is the window)
+ * Time Block tasks (preferred_time=0 or null): time_flex is irrelevant.
  */
 exports.up = async function(knex) {
-  // Time Window tasks: clear time-block-only fields
+  // Time Window tasks: clear split/split_min/flex_when (block-only fields)
   var windowCleared = await knex('tasks')
     .where('preferred_time', 1)
     .where(function() {
-      this.whereNotNull('when')
-        .orWhereNotNull('split')
+      this.whereNotNull('split')
         .orWhereNotNull('split_min')
         .orWhereNotNull('flex_when');
     })
-    .update({ when: null, split: null, split_min: null, flex_when: null });
+    .update({ split: null, split_min: null, flex_when: null });
 
   if (windowCleared > 0) {
-    console.log('[MIGRATION] cleared block fields on ' + windowCleared + ' Time Window tasks');
+    console.log('[MIGRATION] cleared block-only fields on ' + windowCleared + ' Time Window tasks');
   }
 
-  // Time Block tasks: clear time-window-only fields
+  // Time Block tasks: clear time_flex (window-only field)
   var blockCleared = await knex('tasks')
     .where(function() {
       this.where('preferred_time', 0).orWhereNull('preferred_time');

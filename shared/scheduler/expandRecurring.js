@@ -277,7 +277,8 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         pri: src.pri, recurring: src.recurring || false, rigid: src.rigid || false,
         time: src.time, dur: src.dur, where: src.where, when: src.when,
         location: src.location, tools: src.tools, split: src.split, splitMin: src.splitMin,
-        timeFlex: src.timeFlex, marker: src.marker, flexWhen: src.flexWhen,
+        timeFlex: src.timeFlex, preferredTimeMins: src.preferredTimeMins,
+        marker: src.marker, flexWhen: src.flexWhen,
         dayReq: instanceDayReq, section: '', notes: src.notes || '',
         taskType: 'generated', sourceId: src.id, generated: true
       });

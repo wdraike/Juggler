@@ -134,7 +134,7 @@ async function withLock(userId, fn) {
 
 // ── background sweep ───────────────────────────────────────────────
 
-setInterval(function() {
+var sweepTimer = setInterval(function() {
   db('sync_locks')
     .where('expires_at', '<=', new Date())
     .del()
@@ -145,5 +145,6 @@ setInterval(function() {
       console.error('[sync-lock] Sweep error:', err.message);
     });
 }, SWEEP_INTERVAL);
+sweepTimer.unref(); // don't keep process alive for background sweep
 
 module.exports = { withSyncLock, withLock, acquireLock, releaseLock, refreshLock };

@@ -3,6 +3,9 @@
  *
  * Connects to Redis for read caching. Fails open — if Redis is unavailable,
  * all operations return null/false and the app falls through to MySQL.
+ *
+ * Lazy initialization — the connection is only created on first use,
+ * not on require(). This prevents open handles in test environments.
  */
 
 const Redis = require('ioredis');
@@ -10,34 +13,40 @@ const Redis = require('ioredis');
 const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 const KEY_PREFIX = 'strivers:';
 
+let client = null;
 let connected = false;
 
-const client = new Redis(REDIS_URL, {
-  keyPrefix: KEY_PREFIX,
-  maxRetriesPerRequest: 1,
-  enableOfflineQueue: false,
-  retryStrategy(times) {
-    if (times > 3) return null;
-    return Math.min(times * 200, 2000);
-  }
-});
+function ensureClient() {
+  if (client) return client;
+  client = new Redis(REDIS_URL, {
+    keyPrefix: KEY_PREFIX,
+    maxRetriesPerRequest: 1,
+    enableOfflineQueue: false,
+    retryStrategy(times) {
+      if (times > 3) return null;
+      return Math.min(times * 200, 2000);
+    }
+  });
 
-client.on('connect', () => {
-  connected = true;
-  console.log('[redis] Connected to', REDIS_URL);
-});
+  client.on('connect', () => {
+    connected = true;
+    console.log('[redis] Connected to', REDIS_URL);
+  });
 
-client.on('error', (err) => {
-  if (connected) console.warn('[redis] Error:', err.message);
-  connected = false;
-});
+  client.on('error', (err) => {
+    if (connected) console.warn('[redis] Error:', err.message);
+    connected = false;
+  });
 
-client.on('close', () => {
-  connected = false;
-});
+  client.on('close', () => {
+    connected = false;
+  });
+
+  return client;
+}
 
 function getClient() {
-  return client;
+  return ensureClient();
 }
 
 function isConnected() {
