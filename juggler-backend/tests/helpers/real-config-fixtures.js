@@ -6,7 +6,7 @@
  * - Locations: home, work, transit, Hotel, Airplane
  * - Tools: phone, personal_pc, work_pc, printer, car, TV
  * - Location schedules: weekday (all home), weekend (all home with gaps)
- * - Habits: morning prescriptions (rigid), lunch (rigid), breakfast (rigid),
+ * - Recurrings: morning prescriptions (rigid), lunch (rigid), breakfast (rigid),
  *           evening meds (rigid), exercise, apply for jobs, resume optimizer
  */
 
@@ -119,7 +119,7 @@ function makeTask(props) {
     tools: props.tools || [],
     when: props.when != null ? props.when : '',
     dayReq: props.dayReq || 'any',
-    habit: props.habit || false,
+    recurring: props.recurring || false,
     rigid: props.rigid || false,
     timeFlex: props.timeFlex != null ? props.timeFlex : undefined,
     split: props.split || false,
@@ -135,30 +135,30 @@ function makeTask(props) {
     flexWhen: props.flexWhen || false,
     travelBefore: props.travelBefore || undefined,
     travelAfter: props.travelAfter || undefined,
-    habitStart: props.habitStart || null,
-    habitEnd: props.habitEnd || null,
+    recurStart: props.recurStart || null,
+    recurEnd: props.recurEnd || null,
     disabledAt: props.disabledAt || null,
     disabledReason: props.disabledReason || null
   };
   return base;
 }
 
-/** Rigid habit — anchored at its when-block */
-function makeRigidHabit(props) {
+/** Rigid recurring — anchored at its when-block */
+function makeRigidRecurring(props) {
   return makeTask(Object.assign({
-    habit: true,
+    recurring: true,
     rigid: true,
-    taskType: 'habit_instance',
+    taskType: 'recurring_instance',
     generated: true
   }, props));
 }
 
-/** Non-rigid habit — scheduler chooses best slot within when-windows */
-function makeFlexHabit(props) {
+/** Non-rigid recurring — scheduler chooses best slot within when-windows */
+function makeFlexRecurring(props) {
   return makeTask(Object.assign({
-    habit: true,
+    recurring: true,
     rigid: false,
-    taskType: 'habit_instance',
+    taskType: 'recurring_instance',
     generated: true,
     flexWhen: true
   }, props));
@@ -177,11 +177,11 @@ function makeDeadlineTask(props) {
   return makeTask(Object.assign({}, props));
 }
 
-// ─── Real Habit Templates (from user's actual setup) ───────────────────
+// ─── Real Recurring Templates (from user's actual setup) ───────────────────
 
-function makeRealHabits(dateKey) {
+function makeRealRecurrings(dateKey) {
   return [
-    makeRigidHabit({
+    makeRigidRecurring({
       id: 'rc_ht_meds_' + dateKey.replace('/', ''),
       text: 'Take morning prescriptions',
       sourceId: 'ht_meds',
@@ -189,9 +189,9 @@ function makeRealHabits(dateKey) {
       when: 'morning',
       dur: 20,
       pri: 'P3',
-      project: 'Habits'
+      project: 'Recurrings'
     }),
-    makeRigidHabit({
+    makeRigidRecurring({
       id: 'rc_ht_breakfast_' + dateKey.replace('/', ''),
       text: 'Eat Breakfast',
       sourceId: 'ht_breakfast',
@@ -199,10 +199,10 @@ function makeRealHabits(dateKey) {
       when: 'morning',
       dur: 30,
       pri: 'P3',
-      project: 'Habits',
+      project: 'Recurrings',
       time: '10:56 AM'
     }),
-    makeRigidHabit({
+    makeRigidRecurring({
       id: 'rc_ht_lunch_' + dateKey.replace('/', ''),
       text: 'Lunch',
       sourceId: 'ht_lunch',
@@ -210,9 +210,9 @@ function makeRealHabits(dateKey) {
       when: 'lunch',
       dur: 30,
       pri: 'P3',
-      project: 'Habits'
+      project: 'Recurrings'
     }),
-    makeRigidHabit({
+    makeRigidRecurring({
       id: 'rc_ht_evening_meds_' + dateKey.replace('/', ''),
       text: 'Take Evening Medications',
       sourceId: 'ht_evening_meds',
@@ -220,9 +220,9 @@ function makeRealHabits(dateKey) {
       when: 'evening',
       dur: 10,
       pri: 'P3',
-      project: 'Habits'
+      project: 'Recurrings'
     }),
-    makeFlexHabit({
+    makeFlexRecurring({
       id: 'rc_ht_exercise_' + dateKey.replace('/', ''),
       text: 'Exercise',
       sourceId: 'ht_exercise',
@@ -230,11 +230,11 @@ function makeRealHabits(dateKey) {
       when: 'morning,lunch,afternoon,evening',
       dur: 30,
       pri: 'P3',
-      project: 'Habits',
+      project: 'Recurrings',
       split: true,
       splitMin: 15
     }),
-    makeFlexHabit({
+    makeFlexRecurring({
       id: 'rc_ht_apply_' + dateKey.replace('/', ''),
       text: 'Apply for Jobs',
       sourceId: 'ht_apply',
@@ -248,7 +248,7 @@ function makeRealHabits(dateKey) {
       splitMin: 30,
       flexWhen: true
     }),
-    makeFlexHabit({
+    makeFlexRecurring({
       id: 'rc_ht_resume_' + dateKey.replace('/', ''),
       text: 'Work on Resume Optimizer',
       sourceId: 'ht_resume',
@@ -340,11 +340,11 @@ module.exports = {
   WEEKEND_BLOCKS,
   makeRealConfig,
   makeTask,
-  makeRigidHabit,
-  makeFlexHabit,
+  makeRigidRecurring,
+  makeFlexRecurring,
   makeFixedEvent,
   makeDeadlineTask,
-  makeRealHabits,
+  makeRealRecurrings,
   findPlacement,
   findAllPlacements,
   placementTime,

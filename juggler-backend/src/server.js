@@ -7,6 +7,7 @@ require('dotenv').config();
 const app = require('./app');
 const { loadJWTSecrets } = require('./middleware/jwt-auth');
 const db = require('./db');
+const { enqueueScheduleRun } = require('./scheduler/scheduleQueue');
 
 const PORT = process.env.PORT || 5002;
 
@@ -24,6 +25,17 @@ async function start() {
 
   server = app.listen(PORT, () => {
     console.log(`Raike & Sons backend running on port ${PORT}`);
+
+    // Enqueue a scheduler run for all active users on startup
+    // so placements are fresh without waiting for the first mutation.
+    db('tasks').distinct('user_id').then(function(rows) {
+      rows.forEach(function(r) {
+        enqueueScheduleRun(r.user_id, 'startup');
+      });
+      if (rows.length > 0) console.log('[SCHED] enqueued startup runs for ' + rows.length + ' user(s)');
+    }).catch(function(err) {
+      console.error('[SCHED] startup enqueue failed:', err.message);
+    });
   });
 
   // Give in-flight requests time to finish on shutdown

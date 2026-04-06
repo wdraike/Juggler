@@ -9,14 +9,7 @@ var msftCalApi = require('../lib/msft-cal-api');
 
 // --- Token management ---
 
-function getJwtSecret() {
-  var secret = process.env.JWT_SECRET;
-  if (!secret) {
-    if (process.env.NODE_ENV === 'production') throw new Error('JWT_SECRET required in production');
-    secret = 'local-dev-jwt-secret-juggler';
-  }
-  return new TextEncoder().encode(secret);
-}
+var { getJwtSecret } = require('../lib/jwt-secret');
 
 async function getValidAccessToken(user) {
   if (!user.msft_cal_refresh_token) {
@@ -136,9 +129,8 @@ async function connect(req, res) {
 async function callback(req, res) {
   try {
     console.log('MsftCal callback hit at', new Date().toISOString());
-    console.log('  code:', req.query.code ? req.query.code.substring(0, 30) + '... (len=' + req.query.code.length + ')' : 'NONE');
+    console.log('  code:', req.query.code ? 'present (len=' + req.query.code.length + ')' : 'NONE');
     console.log('  state:', req.query.state ? 'present' : 'NONE');
-    console.log('  full URL:', req.originalUrl.substring(0, 100));
     var code = req.query.code;
     var state = req.query.state;
 
@@ -161,6 +153,9 @@ async function callback(req, res) {
     }
 
     var userId = decoded.userId;
+    if (req.user && req.user.id !== userId) {
+      return res.status(403).send('OAuth state does not match authenticated user');
+    }
     var codeVerifier = decoded.cv;
     if (!codeVerifier) {
       return res.status(400).send('Missing PKCE code_verifier in state');

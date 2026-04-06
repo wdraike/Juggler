@@ -90,7 +90,7 @@ export default function useKeyboardShortcuts({
       // S: cycle status on expanded task
       if (e.key === 's' && st.expandedTask) {
         var cycle = ['', 'wip', 'done'];
-        // For habit templates opened via an instance, use the instance ID for status
+        // For recurring templates opened via an instance, use the instance ID for status
         var statusTarget = (st.expandedInstanceMap && st.expandedInstanceMap[st.expandedTask]) || st.expandedTask;
         var ct = st.allTasks.find(t => t.id === statusTarget);
         if (ct) {

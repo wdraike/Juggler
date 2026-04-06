@@ -8,69 +8,69 @@
 
 const db = require('../db');
 const { invalidateUserPlanCache, getCachedPlanFeatures } = require('../middleware/plan-features.middleware');
-const { countActiveTasks, countHabitTemplates } = require('../middleware/entity-limits');
+const { countActiveTasks, countRecurringTemplates } = require('../middleware/entity-limits');
 const cache = require('../lib/redis');
 
 /**
- * Enforce plan limits by disabling excess habits and tasks.
+ * Enforce plan limits by disabling excess recurringTasks and tasks.
  * Disables in reverse chronological order (newest first) to preserve the user's
  * oldest/most established items.
  *
- * Order: habit templates first (with their instances), then regular tasks.
+ * Order: recurring templates first (with their instances), then regular tasks.
  */
 async function enforceDowngradeLimits(userId, planFeatures) {
-  if (!planFeatures) return { disabledHabits: 0, disabledTasks: 0 };
+  if (!planFeatures) return { disabledRecurrings: 0, disabledTasks: 0 };
 
-  var habitLimit = planFeatures.limits && planFeatures.limits.habit_templates;
+  var recurringLimit = planFeatures.limits && planFeatures.limits.recurring_templates;
   var taskLimit = planFeatures.limits && planFeatures.limits.active_tasks;
-  var disabledHabits = 0;
+  var disabledRecurrings = 0;
   var disabledTasks = 0;
   var now = new Date();
 
   await db.transaction(async function(trx) {
-    // --- Phase 1: Disable excess habit templates (newest first) ---
-    if (habitLimit !== -1 && habitLimit !== undefined && habitLimit !== null) {
-      var currentHabits = await trx('tasks')
+    // --- Phase 1: Disable excess recurring templates (newest first) ---
+    if (recurringLimit !== -1 && recurringLimit !== undefined && recurringLimit !== null) {
+      var currentRecurrings = await trx('tasks')
         .where('user_id', userId)
-        .where('task_type', 'habit_template')
+        .where('task_type', 'recurring_template')
         .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
         .count('* as count').first();
-      var habitCount = parseInt(currentHabits.count, 10);
+      var recurringCount = parseInt(currentRecurrings.count, 10);
 
-      if (habitCount > habitLimit) {
-        var excess = habitCount - habitLimit;
-        // Get the newest habit templates to disable
-        var habitsToDisable = await trx('tasks')
+      if (recurringCount > recurringLimit) {
+        var excess = recurringCount - recurringLimit;
+        // Get the newest recurring templates to disable
+        var recurringToDisable = await trx('tasks')
           .where('user_id', userId)
-          .where('task_type', 'habit_template')
+          .where('task_type', 'recurring_template')
           .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
           .orderBy('created_at', 'desc')
           .limit(excess)
           .select('id');
 
-        var habitIds = habitsToDisable.map(function(h) { return h.id; });
+        var recurringIds = recurringToDisable.map(function(h) { return h.id; });
 
-        if (habitIds.length > 0) {
+        if (recurringIds.length > 0) {
           // Disable the templates
           await trx('tasks')
             .where('user_id', userId)
-            .whereIn('id', habitIds)
+            .whereIn('id', recurringIds)
             .update({ status: 'disabled', disabled_at: now, disabled_reason: 'downgrade', updated_at: now });
 
           // Disable all open instances of these templates
           var disabledInstances = await trx('tasks')
             .where('user_id', userId)
-            .whereIn('source_id', habitIds)
+            .whereIn('source_id', recurringIds)
             .where('status', '')
             .update({ status: 'disabled', disabled_at: now, disabled_reason: 'downgrade', updated_at: now });
 
           // Clean up calendar sync for disabled instances
           var instanceIds = await trx('tasks')
             .where('user_id', userId)
-            .whereIn('source_id', habitIds)
+            .whereIn('source_id', recurringIds)
             .where('status', 'disabled')
             .select('id');
-          var allDisabledIds = habitIds.concat(instanceIds.map(function(i) { return i.id; }));
+          var allDisabledIds = recurringIds.concat(instanceIds.map(function(i) { return i.id; }));
 
           if (allDisabledIds.length > 0) {
             await trx('cal_sync_ledger')
@@ -78,29 +78,29 @@ async function enforceDowngradeLimits(userId, planFeatures) {
               .whereIn('task_id', allDisabledIds)
               .where('status', 'active')
               .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
-              .catch(function() {});
+              .catch(function(err) { console.error("[silent-catch]", err.message); });
           }
 
-          disabledHabits = habitIds.length;
+          disabledRecurrings = recurringIds.length;
         }
       }
     }
 
     // --- Phase 2: Disable excess active tasks (newest first) ---
     if (taskLimit !== -1 && taskLimit !== undefined && taskLimit !== null) {
-      // Re-count after disabling habit instances (they count toward active tasks)
+      // Re-count after disabling recurring instances (they count toward active tasks)
       var currentTasks = await trx('tasks')
         .where('user_id', userId)
         .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
         .where(function() {
-          this.whereNull('task_type').orWhereNot('task_type', 'habit_template');
+          this.whereNull('task_type').orWhereNot('task_type', 'recurring_template');
         })
         .count('* as count').first();
       var taskCount = parseInt(currentTasks.count, 10);
 
       if (taskCount > taskLimit) {
         var taskExcess = taskCount - taskLimit;
-        // Get newest regular tasks to disable (exclude habit instances — those are handled with templates)
+        // Get newest regular tasks to disable (exclude recurring instances — those are handled with templates)
         var tasksToDisable = await trx('tasks')
           .where('user_id', userId)
           .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
@@ -143,7 +143,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
             .whereIn('task_id', taskIds)
             .where('status', 'active')
             .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
-            .catch(function() {});
+            .catch(function(err) { console.error("[silent-catch]", err.message); });
 
           disabledTasks = taskIds.length;
         }
@@ -151,12 +151,12 @@ async function enforceDowngradeLimits(userId, planFeatures) {
     }
   });
 
-  if (disabledHabits > 0 || disabledTasks > 0) {
+  if (disabledRecurrings > 0 || disabledTasks > 0) {
     await cache.invalidateTasks(userId);
-    console.log(`[billing-webhook] Disabled ${disabledHabits} habits, ${disabledTasks} tasks for user ${userId}`);
+    console.log(`[billing-webhook] Disabled ${disabledRecurrings} recurringTasks, ${disabledTasks} tasks for user ${userId}`);
   }
 
-  return { disabledHabits, disabledTasks };
+  return { disabledRecurrings, disabledTasks };
 }
 
 async function handleWebhook(req, res) {

@@ -22,7 +22,7 @@ function registerConfigTools(server, userId) {
 
       const config = {};
       configRows.forEach(row => {
-        const val = typeof row.config_value === 'string' ? JSON.parse(row.config_value) : row.config_value;
+        const val = typeof row.config_value === 'string' ? (function() { try { return JSON.parse(row.config_value); } catch(e) { return row.config_value; } })() : row.config_value;
         config[row.config_key] = val;
       });
 
@@ -180,10 +180,8 @@ function registerConfigTools(server, userId) {
       }
 
       // Trigger reschedule for schedule-affecting keys
-      const { runScheduleAndPersist } = require('../../scheduler/runSchedule');
-      runScheduleAndPersist(userId).catch(err => {
-        console.error('Auto-reschedule after config update failed:', err);
-      });
+      const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
+      enqueueScheduleRun(userId, 'mcp:config');
 
       return { content: [{ type: 'text', text: JSON.stringify({ key, value }) }] };
     }

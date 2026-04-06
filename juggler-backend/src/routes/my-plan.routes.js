@@ -8,7 +8,7 @@ const router = require('express').Router();
 const { authenticateJWT } = require('../middleware/jwt-auth');
 const { resolvePlanFeatures, getProductId, PRODUCT_LABEL } = require('../middleware/plan-features.middleware');
 const db = require('../db');
-const { countActiveTasks, countHabitTemplates, countProjects, countLocations, countScheduleTemplates } = require('../middleware/entity-limits');
+const { countActiveTasks, countRecurringTemplates, countProjects, countLocations, countScheduleTemplates } = require('../middleware/entity-limits');
 
 // Fetch plan name from payment service
 async function getPlanName(planId) {
@@ -67,7 +67,7 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
     // Entity count functions for count-based limits
     const entityCounters = {
       'limits.active_tasks': countActiveTasks,
-      'limits.habit_templates': countHabitTemplates,
+      'limits.recurring_templates': countRecurringTemplates,
       'limits.projects': countProjects,
       'limits.locations': countLocations,
       'limits.schedule_templates': countScheduleTemplates

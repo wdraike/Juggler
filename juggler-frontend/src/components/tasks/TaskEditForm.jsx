@@ -8,8 +8,9 @@ import { toTime24, fromTime24, toDateISO, fromDateISO, formatDateKey, parseDate 
 import { getTheme } from '../../theme/colors';
 import { convertTimeForDisplay, getTimezoneAbbr, getUtcOffset } from '../../utils/timezone';
 import ConfirmDialog from '../features/ConfirmDialog';
+import apiClient from '../../services/apiClient';
 
-function HabitDeleteDialog({ taskName, onSkipInstance, onDeleteHabit, onCancel, darkMode, isMobile }) {
+function RecurringDeleteDialog({ taskName, onSkipInstance, onDeleteSeries, onCancel, darkMode, isMobile }) {
   var theme = getTheme(darkMode);
   var btnBase = {
     border: 'none', borderRadius: 8, padding: '10px 16px',
@@ -34,7 +35,7 @@ function HabitDeleteDialog({ taskName, onSkipInstance, onDeleteHabit, onCancel, 
           Delete "{taskName.slice(0, 50)}"
         </div>
         <div style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 16 }}>
-          This is a recurring habit. What would you like to do?
+          This is a recurring task. What would you like to do?
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
           <button onClick={onSkipInstance} style={{
@@ -42,14 +43,14 @@ function HabitDeleteDialog({ taskName, onSkipInstance, onDeleteHabit, onCancel, 
           }}>
             <span style={{ fontWeight: 600 }}>{'\u23ED'} Skip this instance</span>
             <br />
-            <span style={{ fontSize: 11, color: theme.textSecondary }}>Mark this occurrence as skipped. The habit continues.</span>
+            <span style={{ fontSize: 11, color: theme.textSecondary }}>Mark this occurrence as skipped. The recurring task continues.</span>
           </button>
-          <button onClick={onDeleteHabit} style={{
+          <button onClick={onDeleteSeries} style={{
             ...btnBase, background: theme.errorBg || '#fef2f2', border: '1px solid ' + (theme.errorBorder || '#fca5a5'), color: theme.error || '#991b1b',
           }}>
-            <span style={{ fontWeight: 600 }}>{'\uD83D\uDDD1'} Delete entire habit</span>
+            <span style={{ fontWeight: 600 }}>{'\uD83D\uDDD1'} Delete entire series</span>
             <br />
-            <span style={{ fontSize: 11, opacity: 0.8 }}>Remove the habit and all future instances. Completed history is kept.</span>
+            <span style={{ fontSize: 11, opacity: 0.8 }}>Remove the recurring task and all future instances. Completed history is kept.</span>
           </button>
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -253,7 +254,9 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   }
 
   var [dayReq, setDayReq] = useState(isCreate ? 'any' : (task.dayReq || 'any'));
-  var [habit, setHabit] = useState(isCreate ? false : !!task.habit);
+  // Recurring is derived from recurrence — any recurring task is a recurring task.
+  // Keep setRecurring for backward compat in buildFields, but the UI toggle is removed.
+  var [recurring, setRecurring] = useState(isCreate ? false : !!task.recurring);
   var [rigid, setRigid] = useState(isCreate ? false : !!task.rigid);
   var [timeFlex, setTimeFlex] = useState(isCreate ? 60 : (task.timeFlex != null ? task.timeFlex : 60));
   var [split, setSplit] = useState(isCreate ? false : (task.split !== undefined ? task.split : false));
@@ -267,19 +270,40 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [datePinned, setDatePinned] = useState(isCreate ? false : !!task.datePinned);
   var [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   var [recurType, setRecurType] = useState(isCreate ? 'none' : (task.recur?.type || 'none'));
-  var [recurDays, setRecurDays] = useState(isCreate ? 'MTWRF' : (task.recur?.days || 'MTWRF'));
+  var [recurDays, setRecurDays] = useState(isCreate ? 'MTWRF' : (function() {
+    var raw = task.recur?.days;
+    if (!raw) return 'MTWRF';
+    // Normalize object format back to string for backward compat
+    if (typeof raw === 'object' && !Array.isArray(raw)) return Object.keys(raw).join('');
+    return String(raw);
+  })());
+  var [recurTimesPerCycle, setRecurTimesPerCycle] = useState(isCreate ? 0 : (task.recur?.timesPerCycle || 0)); // 0 = all selected days
   var [recurEvery, setRecurEvery] = useState(isCreate ? 2 : (task.recur?.every || 2));
   var [recurUnit, setRecurUnit] = useState(isCreate ? 'days' : (task.recur?.unit || 'days'));
   var [recurMonthDays, setRecurMonthDays] = useState(isCreate ? [1, 15] : (task.recur?.monthDays || [1, 15]));
-  var [habitStart, setHabitStart] = useState(isCreate ? '' : (task.habitStart || ''));
-  var [habitEnd, setHabitEnd] = useState(isCreate ? '' : (task.habitEnd || ''));
+  var [recurStart, setRecurringStart] = useState(isCreate ? '' : (task.recurStart || ''));
+  var [recurEnd, setRecurringEnd] = useState(isCreate ? '' : (task.recurEnd || ''));
+
+  // --- Recurring preferred-time toggle ---
+  // For recurringTasks: does the user want a specific preferred time (fixed ± window)
+  // or flexible block-based scheduling?
+  var [hasPreferredTime, setRecurringHasPreferredTime] = useState(function() {
+    if (isCreate) return false;
+    if (!recurring || !task) return false;
+    // Use explicit preferredTime flag if persisted; fall back to tag-count heuristic
+    if (task.preferredTime != null) return !!task.preferredTime;
+    var w = task.when || '';
+    if (!w || w === 'fixed' || w === 'allday' || w === 'anytime') return false;
+    var tags = w.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+    return tags.length === 1;
+  });
 
   // --- Derived scheduling mode flags (used for field disable logic) ---
   var whenParts = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
   var isAllDay = whenParts.indexOf('allday') !== -1;
   var isFixed = whenParts.indexOf('fixed') !== -1;
-  var isRigid = habit && rigid;
-  var disSplit = isAllDay || isFixed || isRigid;
+  var isRigid = recurring && rigid;
+  var disSplit = isAllDay || isFixed || isRigid || (recurring && hasPreferredTime);
 
   // --- Configuration feasibility warnings ---
   var configWarnings = (function() {
@@ -395,7 +419,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       dur: t.dur || 30, timeRemaining: t.timeRemaining != null ? t.timeRemaining : '',
       due: toDateISO(t.due) || '', startAfter: toDateISO(t.startAfter) || '',
       notes: t.notes || '', when: t.when || '', dayReq: t.dayReq || 'any',
-      habit: !!t.habit, rigid: !!t.rigid,
+      recurring: !!t.recurring, rigid: !!t.rigid,
       timeFlex: t.timeFlex != null ? t.timeFlex : 60,
       split: t.split !== undefined ? !!t.split : false, splitMin: t.splitMin || 15,
       location: t.location || [], tools: t.tools || [],
@@ -403,11 +427,12 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       marker: !!t.marker,
       flexWhen: !!t.flexWhen,
       datePinned: !!t.datePinned,
-      recurType: t.recur?.type || 'none', recurDays: t.recur?.days || 'MTWRF',
+      recurType: t.recur?.type || 'none', recurDays: t.recur?.days || 'MTWRF', recurTimesPerCycle: t.recur?.timesPerCycle || 0,
       recurEvery: t.recur?.every || 2, recurUnit: t.recur?.unit || 'days',
       recurMonthDays: t.recur?.monthDays || [1, 15],
       tz: t.tz || activeTimezone || 'America/New_York',
-      habitStart: t.habitStart || '', habitEnd: t.habitEnd || ''
+      recurStart: t.recurStart || '', recurEnd: t.recurEnd || '',
+      preferredTime: t.preferredTime != null ? !!t.preferredTime : null
     };
   }
   if (!taskSnapshotRef.current && !isCreate && task) {
@@ -438,17 +463,20 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setTimeRemaining(newSnap.timeRemaining); setDue(newSnap.due);
     setStartAfter(newSnap.startAfter); setNotes(newSnap.notes);
     setWhen(newSnap.when); setDayReq(newSnap.dayReq);
-    setHabit(newSnap.habit); setRigid(newSnap.rigid); setTimeFlex(newSnap.timeFlex);
+    // Re-derive scheduling mode from synced value
+    var syncTags = (newSnap.when || '').split(',').filter(Boolean);
+    setRecurringHasPreferredTime(newSnap.preferredTime != null ? newSnap.preferredTime : (syncTags.length === 1 && newSnap.recurring));
+    setRecurring(newSnap.recurring); setRigid(newSnap.rigid); setTimeFlex(newSnap.timeFlex);
     setSplit(newSnap.split); setSplitMin(newSnap.splitMin);
     setTaskLoc(newSnap.location); setTaskTools(newSnap.tools);
     setTravelBefore(newSnap.travelBefore); setTravelAfter(newSnap.travelAfter);
     setMarker(newSnap.marker);
     setFlexWhen(newSnap.flexWhen);
     setDatePinned(newSnap.datePinned);
-    setRecurType(newSnap.recurType); setRecurDays(newSnap.recurDays);
+    setRecurType(newSnap.recurType); setRecurDays(newSnap.recurDays); setRecurTimesPerCycle(newSnap.recurTimesPerCycle || 0);
     setRecurEvery(newSnap.recurEvery); setRecurUnit(newSnap.recurUnit);
     setRecurMonthDays(newSnap.recurMonthDays);
-    setHabitStart(newSnap.habitStart); setHabitEnd(newSnap.habitEnd);
+    setRecurringStart(newSnap.recurStart); setRecurringEnd(newSnap.recurEnd);
     firstRender.current = true; // prevent auto-save from firing for this sync
   }, [task, isCreate]);
 
@@ -468,8 +496,12 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       timeRemaining: timeRemaining === '' ? null : parseInt(timeRemaining),
       due: fromDateISO(due),
       startAfter: fromDateISO(startAfter),
-      notes, when, dayReq, habit, rigid,
-      timeFlex: habit && !rigid ? timeFlex : undefined,
+      notes,
+      // Recurring tasks: auto-derive when/dayReq/rigid from mode
+      when: when,  // preserved as-is: single tag = time-window mode, multi = time-blocks mode
+      dayReq: recurring ? 'any' : dayReq,  // recurringTasks derive days from recurrence, not dayReq
+      recurring, rigid: recurring && hasPreferredTime && time ? false : rigid,
+      timeFlex: recurring && hasPreferredTime && time ? (timeFlex || 60) : (recurring && !rigid ? timeFlex : undefined),
       split: split || undefined,
       splitMin: split ? (parseInt(splitMin) || 15) : null,
       location: taskLoc,
@@ -482,16 +514,18 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       recur: recurType === 'none' ? null : {
         type: recurType,
         days: recurType === 'weekly' || recurType === 'biweekly' ? recurDays : undefined,
+        timesPerCycle: recurTimesPerCycle > 0 ? recurTimesPerCycle : undefined,
         every: recurType === 'interval' ? parseInt(recurEvery) || 2 : undefined,
         unit: recurType === 'interval' ? recurUnit : undefined,
         monthDays: recurType === 'monthly' ? recurMonthDays : undefined
       },
       tz: taskTz,
       _timezone: taskTz,  // tells backend which timezone to use for date/time → UTC conversion
-      habitStart: habit ? (habitStart || null) : null,
-      habitEnd: habit ? (habitEnd || null) : null
+      recurStart: recurring ? (recurStart || null) : null,
+      recurEnd: recurring ? (recurEnd || null) : null,
+      preferredTime: recurring ? hasPreferredTime : undefined
     };
-  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, habitStart, habitEnd]);
+  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, hasPreferredTime]);
 
   // Build only the fields that changed from the initial snapshot (prevents marking unchanged fields dirty)
   var buildChangedFields = useCallback(function() {
@@ -505,8 +539,9 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (pri !== snap.pri) changed.pri = all.pri;
     if (notes !== snap.notes) changed.notes = all.notes;
     if (when !== snap.when) changed.when = all.when;
+    if (recurring && hasPreferredTime !== snap.preferredTime) changed.preferredTime = all.preferredTime;
     if (dayReq !== snap.dayReq) changed.dayReq = all.dayReq;
-    if (habit !== snap.habit) changed.habit = all.habit;
+    if (recurring !== snap.recurring) changed.recurring = all.recurring;
     if (rigid !== snap.rigid) changed.rigid = all.rigid;
     if (parseInt(dur) !== snap.dur) changed.dur = all.dur;
     if (timeFlex !== snap.timeFlex) changed.timeFlex = all.timeFlex;
@@ -531,12 +566,12 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (JSON.stringify(taskLoc) !== JSON.stringify(snap.location)) changed.location = all.location;
     if (JSON.stringify(taskTools) !== JSON.stringify(snap.tools)) changed.tools = all.tools;
     // Recurrence
-    if (recurType !== snap.recurType || recurDays !== snap.recurDays || String(recurEvery) !== String(snap.recurEvery) || recurUnit !== snap.recurUnit || JSON.stringify(recurMonthDays) !== JSON.stringify(snap.recurMonthDays)) {
+    if (recurType !== snap.recurType || JSON.stringify(recurDays) !== JSON.stringify(snap.recurDays) || recurTimesPerCycle !== snap.recurTimesPerCycle || String(recurEvery) !== String(snap.recurEvery) || recurUnit !== snap.recurUnit || JSON.stringify(recurMonthDays) !== JSON.stringify(snap.recurMonthDays)) {
       changed.recur = all.recur;
     }
-    // Habit date range
-    if (habitStart !== (snap.habitStart || '')) changed.habitStart = all.habitStart;
-    if (habitEnd !== (snap.habitEnd || '')) changed.habitEnd = all.habitEnd;
+    // Recurring date range
+    if (recurStart !== (snap.recurStart || '')) changed.recurStart = all.recurStart;
+    if (recurEnd !== (snap.recurEnd || '')) changed.recurEnd = all.recurEnd;
     // Always include tz and _timezone when any field changed — the backend needs
     // the timezone context for date/time → UTC conversion
     if (Object.keys(changed).length > 0) {
@@ -544,7 +579,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       changed._timezone = all._timezone;
     }
     return Object.keys(changed).length > 0 ? changed : null;
-  }, [buildFields, text, project, pri, notes, when, dayReq, habit, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, due, startAfter, taskLoc, taskTools, recurType, recurDays, recurEvery, recurUnit, recurMonthDays, habitStart, habitEnd]);
+  }, [buildFields, text, project, pri, notes, when, dayReq, recurring, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, due, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime]);
 
   // Dirty detection — compare current fields to snapshot
   var [isDirty, setIsDirty] = useState(false);
@@ -553,16 +588,35 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (firstRender.current) { firstRender.current = false; return; }
     userDirtyRef.current = true;
     var changed = buildChangedFields();
+    console.log('[DIRTY]', !!changed, changed ? Object.keys(changed) : 'null', 'when=' + when, 'snapWhen=' + (taskSnapshotRef.current ? taskSnapshotRef.current.when : '?'));
     setIsDirty(!!changed);
-  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, habit, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurEvery, recurUnit, recurMonthDays, taskTz, habitStart, habitEnd]);
+  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, hasPreferredTime]);
 
   // Manual save handler
+  // Unpin: revert a drag-pinned task to scheduler control.
+  // For recurring instances: deletes the instance so the scheduler regenerates it.
+  var isPinned = !isCreate && task && task.prevWhen != null;
+  function handleUnpin() {
+    if (!task) return;
+    apiClient.put('/tasks/' + task.id + '/unpin').then(function(res) {
+      if (res.data.action === 'deleted') {
+        // Recurring instance deleted — close editor, refresh task list
+        if (onClose) onClose();
+      } else {
+        // Regular task unpinned — update local state
+        if (onUpdate) onUpdate(task.id, { when: res.data.when, datePinned: false, prevWhen: null });
+      }
+    }).catch(function(err) {
+      console.error('Unpin failed:', err);
+    });
+  }
+
   function handleSave() {
     var changed = buildChangedFields();
     if (!changed) return;
 
     // Check if a date change conflicts with recurrence days
-    if (changed.date && onRecurDayConflict && task.habit) {
+    if (changed.date && onRecurDayConflict && task.recurring) {
       var recur = task.recur || (recurType !== 'none' ? { type: recurType, days: recurDays } : null);
       if (recur && (recur.type === 'weekly' || recur.type === 'biweekly') && recur.days) {
         var DAY_CODES = ['U', 'M', 'T', 'W', 'R', 'F', 'S'];
@@ -598,16 +652,26 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   }
 
   function commitSave(changed) {
-    onUpdate(task.id, changed);
-    // Update snapshot so next save only sends new changes
-    taskSnapshotRef.current = snapshotFromTask(Object.assign({}, task, buildFields()));
-    userDirtyRef.current = false;
-    setIsDirty(false);
-    setSaveStatus('saved');
-    // Suppress external sync for 3s after save — scheduler response shouldn't disrupt the form
-    saveCooldownRef.current = true;
-    setTimeout(function() { saveCooldownRef.current = false; }, 3000);
-    setTimeout(function() { setSaveStatus(null); }, 1500);
+    console.log('[SAVE] commitSave for', task.id, 'changed keys:', Object.keys(changed), 'when:', changed.when);
+    setSaveStatus('saving');
+    var result = onUpdate(task.id, changed);
+    // Wait for the API call to confirm before showing "Saved"
+    Promise.resolve(result).then(function(ok) {
+      if (ok === false) {
+        setSaveStatus('failed');
+        setTimeout(function() { setSaveStatus(null); }, 3000);
+        return;
+      }
+      // Update snapshot so next save only sends new changes
+      taskSnapshotRef.current = snapshotFromTask(Object.assign({}, task, buildFields()));
+      userDirtyRef.current = false;
+      setIsDirty(false);
+      setSaveStatus('saved');
+      // Suppress external sync for 3s after save — scheduler response shouldn't disrupt the form
+      saveCooldownRef.current = true;
+      setTimeout(function() { saveCooldownRef.current = false; }, 3000);
+      setTimeout(function() { setSaveStatus(null); }, 1500);
+    });
   }
 
   function handleCreate() {
@@ -658,9 +722,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               background: TH.accent, color: '#FDFAF5', cursor: 'pointer'
             }}>{'\uD83D\uDCBE'} Save</button>}
             {saveStatus && <span style={{
-              fontSize: 10, fontWeight: 600, color: saveStatus === 'saving' ? TH.textMuted : '#2D6A4F',
+              fontSize: 10, fontWeight: 600,
+              color: saveStatus === 'failed' ? '#8B2635' : saveStatus === 'saving' ? TH.textMuted : '#2D6A4F',
               padding: '4px 8px'
-            }}>{saveStatus === 'saving' ? 'Saving\u2026' : '\u2714 Saved'}</span>}
+            }}>{saveStatus === 'saving' ? 'Saving\u2026' : saveStatus === 'failed' ? '\u2716 Save failed' : '\u2714 Saved'}</span>}
           </>
         )}
         <div style={{ flex: 1 }} />
@@ -769,15 +834,9 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               <button title={marker ? 'This is a non-blocking reminder event' : 'Make this a non-blocking reminder event'} onClick={() => setMarker(!marker)}
                 style={{ ...togStyle(marker, '#4338CA'), minWidth: 50 }}>{marker ? '\u25C7 Yes' : 'No'}</button>
             </label>
-            {!marker && <>
-            <label style={lStyle}>
-              <span title="Habits are scheduled before regular tasks and pinned to their date.">{'\uD83D\uDD01'} Habit</span>
-              <button title={habit ? 'This is a recurring habit' : 'Mark as a daily habit'} onClick={() => { var next = !habit; setHabit(next); if (habit) setRigid(false); if (next) setDayReq('any'); }}
-                style={{ ...togStyle(habit, '#2D6A4F'), minWidth: 50 }}>{habit ? '\uD83D\uDD01 Yes' : 'No'}</button>
-            </label>
-            </>}
+            {/* Recurring toggle removed — recurrence drives recurring status automatically */}
           </div>
-          {!isCreate && onShowChain && !task.habit && (
+          {!isCreate && onShowChain && !task.recurring && (
             <button onClick={onShowChain} style={{
               border: '1px solid #0EA5E9', borderRadius: 4, padding: '4px 10px',
               background: 'transparent', color: '#0EA5E9', fontSize: 10, fontWeight: 600,
@@ -799,8 +858,138 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             <TimezoneSelector taskTz={taskTz} onChangeTz={changeTaskTimezone} TH={TH} />
           </div>
 
-          {/* Date/Time + Duration + Remaining */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, maxWidth: '100%' }}>
+          {/* === RECURRING MODE: Fixed time ±window  OR  Time blocks === */}
+          {recurring && !marker && (
+            <div style={{ marginBottom: 5 }}>
+              <div style={{ display: 'flex', gap: 3, marginBottom: 6 }}>
+                <button onClick={function() {
+                  setRecurringHasPreferredTime(true);
+                  // Derive single when-tag from time or default to 'morning'
+                  var tags = (when || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+                  if (tags.length !== 1) setWhen('morning');
+                }} style={togStyle(hasPreferredTime, '#C8942A')}>{'\u23F0'} Time window</button>
+                <button onClick={function() {
+                  setRecurringHasPreferredTime(false);
+                  setTime('');
+                  var tags = (when || '').split(',').filter(Boolean);
+                  if (tags.length <= 1) setWhen('morning,lunch,afternoon,evening');
+                }} style={togStyle(!hasPreferredTime, '#2D6A4F')}>{'\uD83D\uDCC6'} Time blocks</button>
+              </div>
+
+              {hasPreferredTime ? (
+                /* Fixed time mode: time + ± window on one row */
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <label style={lStyle}>
+                    <span>{'\u23F0'} Time</span>
+                    <input type="time" value={time || ''}
+                      onChange={e => setTime(e.target.value || '')}
+                      style={{ ...iStyle, minWidth: 90 }} />
+                  </label>
+                  <label style={lStyle}>
+                    <span>{'\u00B1'} Window</span>
+                    {(function() {
+                      var opts = [
+                        { value: 0, label: 'exact' },
+                        { value: 15, label: '\u00b115m' },
+                        { value: 30, label: '\u00b130m' },
+                        { value: 60, label: '\u00b11hr' },
+                        { value: 90, label: '\u00b11.5hr' },
+                        { value: 120, label: '\u00b12hr' },
+                      ];
+                      var val = rigid ? 0 : (timeFlex || 60);
+                      return (
+                        <select value={val} onChange={e => {
+                          var v = parseInt(e.target.value);
+                          if (v === 0) { setRigid(true); setTimeFlex(0); } else { setRigid(false); setTimeFlex(v); }
+                        }} style={{ ...iStyle, minWidth: 80 }}>
+                          {opts.map(function(o) { return <option key={o.value} value={o.value}>{o.label}</option>; })}
+                        </select>
+                      );
+                    })()}
+                  </label>
+                </div>
+              ) : (
+                /* Time blocks mode: block buttons + flex toggle */
+                <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {(uniqueTags || []).map(function(tb) {
+                    var tagParts2 = when ? when.split(',').map(function(s) { return s.trim(); }) : [];
+                    var isOn = tagParts2.indexOf(tb.tag) !== -1;
+                    return (
+                      <button key={tb.tag} title={tb.name + ' time window'} onClick={function() {
+                        var cur = when ? when.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s && s !== 'fixed' && s !== 'allday' && s !== 'anytime'; }) : [];
+                        if (isOn) { cur = cur.filter(function(v) { return v !== tb.tag; }); }
+                        else { cur.push(tb.tag); }
+                        setWhen(cur.length === 0 ? '' : cur.join(','));
+                      }} style={togStyle(isOn, tb.color)}>{tb.icon} {tb.name}</button>
+                    );
+                  })}
+                  {/* Flex toggle removed — if selected blocks are full, recurring goes unplaced
+                       with a clear diagnostic. User can add more blocks explicitly. */}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Recurring instance: show read-only scheduled date/time from the scheduler */}
+          {recurring && !isCreate && !marker && date && (
+            <div style={{ fontSize: 11, color: TH.textMuted, marginBottom: 5, padding: '4px 8px', background: TH.inputBg, borderRadius: 4, border: '1px solid ' + TH.border }}>
+              {'\uD83D\uDCC5'} Scheduled: <span style={{ color: TH.text, fontWeight: 600 }}>{(function() {
+                // Format the instance's scheduled date/time nicely
+                var d = date; // ISO date string e.g. "2026-04-04"
+                var t = time; // 24h time e.g. "07:00"
+                if (!d) return 'Not scheduled';
+                var dt = new Date(d + 'T' + (t || '00:00'));
+                var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                var monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                var dayName = dayNames[dt.getDay()];
+                var month = monthNames[dt.getMonth()];
+                var day = dt.getDate();
+                var h = dt.getHours(), m = dt.getMinutes();
+                var ampm = h >= 12 ? 'PM' : 'AM';
+                var h12 = h % 12 || 12;
+                var timeStr = t ? (h12 + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm) : '';
+                return dayName + ', ' + month + ' ' + day + (timeStr ? ' at ' + timeStr : '');
+              })()}</span>
+              {isPinned ? (
+                <span style={{ marginLeft: 6 }}>
+                  <span style={{ fontSize: 9, color: '#D97706' }}>{'\uD83D\uDCCC'} pinned</span>
+                  <button onClick={handleUnpin} style={{
+                    fontSize: 9, marginLeft: 6, padding: '1px 6px', borderRadius: 3,
+                    background: TH.inputBg, border: '1px solid ' + TH.border, color: TH.redText,
+                    cursor: 'pointer', fontWeight: 600
+                  }}>{task.taskType === 'recurring_instance' ? 'Reset to template' : 'Unpin'}</button>
+                </span>
+              ) : (
+                <span style={{ color: TH.muted2, marginLeft: 6, fontSize: 9 }}>set by scheduler</span>
+              )}
+            </div>
+          )}
+
+          {/* Recurring instance: note when scheduler moved it from intended time */}
+          {recurring && !isCreate && task.desiredAt && task.scheduledAt && task.desiredAt !== task.scheduledAt && (function() {
+            var tz = task.tz || activeTimezone || 'America/New_York';
+            var intended = convertTimeForDisplay(task.desiredAt, tz);
+            var scheduled = convertTimeForDisplay(task.scheduledAt, tz);
+            if (!intended || !intended.time || !scheduled || intended.time === scheduled.time) return null;
+            return <div style={{ fontSize: 10, color: TH.textMuted, marginBottom: 5 }}>
+              Moved: {intended.time} {'\u2192'} <span style={{ color: TH.text }}>{scheduled.time}</span>
+            </div>;
+          })()}
+
+          {/* Non-recurring pinned task: show unpin option */}
+          {!recurring && !isCreate && isPinned && (
+            <div style={{ fontSize: 11, color: '#D97706', marginBottom: 5, padding: '4px 8px', background: TH.inputBg, borderRadius: 4, border: '1px solid #D97706', display: 'flex', alignItems: 'center', gap: 6 }}>
+              {'\uD83D\uDCCC'} Pinned by drag
+              <button onClick={handleUnpin} style={{
+                fontSize: 9, padding: '1px 8px', borderRadius: 3,
+                background: TH.inputBg, border: '1px solid ' + TH.border, color: TH.text,
+                cursor: 'pointer', fontWeight: 600
+              }}>Unpin — let scheduler control</button>
+            </div>
+          )}
+
+          {/* === NON-RECURRING: Original Date/Time field === */}
+          {!recurring && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, maxWidth: '100%' }}>
             <label style={{ ...lStyle, maxWidth: '100%', minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <span title="The date/time for this task. For fixed tasks: anchored exactly here. For pinned tasks: the scheduler keeps this date. For unpinned tasks: the scheduler may move it.">{'\uD83D\uDCC5'} Date / Time</span>
@@ -842,38 +1031,119 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                 )}
               </div>
             </label>
-            <label style={lStyle}>
-              <span title={isAllDay ? 'Not applicable for all-day tasks' : 'Total time needed. The scheduler reserves this much time.'} style={isAllDay ? { opacity: 0.4 } : undefined}>{'\u23F1'} Duration</span>
-              <select value={dur} onChange={e => setDur(parseInt(e.target.value))} disabled={isAllDay} style={{ ...iStyle, ...(isAllDay ? { opacity: 0.4 } : {}) }}>
+            {!isAllDay && <label style={lStyle}>
+              <span>{'\u23F1'} Duration</span>
+              <select value={dur} onChange={e => setDur(parseInt(e.target.value))} style={iStyle}>
                 {durOptions.map(v => (
                   <option key={v} value={v}>{durLabel(v)}</option>
                 ))}
               </select>
-            </label>
-            {!isCreate && !marker && <label style={lStyle}>
-              <span title={isAllDay ? 'Not applicable for all-day tasks' : 'Time left on a partially completed task.'} style={isAllDay ? { opacity: 0.4 } : undefined}>{'\uD83D\uDCCA'} Remaining</span>
-              <select value={remVal} onChange={e => setTimeRemaining(parseInt(e.target.value))} disabled={isAllDay}
-                style={{ ...iStyle, background: remVal < parseInt(dur) ? TH.purpleBg : TH.inputBg, ...(isAllDay ? { opacity: 0.4 } : {}) }}>
+            </label>}
+            {!isCreate && !marker && !isAllDay && <label style={lStyle}>
+              <span>{'\uD83D\uDCCA'} Remaining</span>
+              <select value={remVal} onChange={e => setTimeRemaining(parseInt(e.target.value))}
+                style={{ ...iStyle, background: remVal < parseInt(dur) ? TH.purpleBg : TH.inputBg }}>
                 {remOptions.map(v => (
                   <option key={v} value={v}>{durLabel(v)}</option>
                 ))}
               </select>
             </label>}
-          </div>
+            {!marker && !disSplit && <label style={lStyle}>
+              <span>{'\u2702'} Split</span>
+              <button title={split ? 'Can be split into chunks' : 'Scheduled as one block'}
+                onClick={() => setSplit(!split)}
+                style={togStyle(split, '#2D6A4F')}>{split ? '\u2702 Yes' : 'No'}</button>
+            </label>}
+            {split && !disSplit && !marker && (
+              <label style={lStyle}>
+                <span>Min</span>
+                <select value={splitMin} onChange={e => setSplitMin(parseInt(e.target.value))}
+                  style={{ ...iStyle, width: 'auto', minWidth: 55 }}>
+                  {[15,20,30,45,60].map(v => (
+                    <option key={v} value={v}>{v < 60 ? v + 'm' : '1h'}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>}
 
-          {/* Travel time buffers */}
-          {!marker && <div style={{ display: 'flex', gap: 6, marginBottom: 5 }}>
+          {/* Intended vs scheduled — only when scheduler moved the task */}
+          {!isCreate && !recurring && task.desiredAt && task.scheduledAt && task.desiredAt !== task.scheduledAt && !task.unscheduled && (function() {
+            var tz = task.tz || activeTimezone || 'America/New_York';
+            var intended = convertTimeForDisplay(task.desiredAt, tz);
+            var scheduled = convertTimeForDisplay(task.scheduledAt, tz);
+            if (!intended || !scheduled || (intended.date === scheduled.date && intended.time === scheduled.time)) return null;
+            var fmtTime = function(c) { return c && c.time ? c.time : ''; };
+            var sameDay = intended.date === scheduled.date;
+            return <div style={{ fontSize: 10, color: TH.textMuted, marginBottom: 5 }}>
+              {sameDay
+                ? <span>Moved: {fmtTime(intended)} {'\u2192'} <span style={{ color: TH.text }}>{fmtTime(scheduled)}</span></span>
+                : <span>Moved to <span style={{ color: TH.text }}>{scheduled.date}{fmtTime(scheduled) ? ' ' + fmtTime(scheduled) : ''}</span></span>}
+            </div>;
+          })()}
+
+          {/* Intended time for unscheduled tasks */}
+          {!isCreate && !recurring && task.desiredAt && task.unscheduled && (function() {
+            var tz = task.tz || activeTimezone || 'America/New_York';
+            var intended = convertTimeForDisplay(task.desiredAt, tz);
+            if (!intended) return null;
+            return <div style={{ fontSize: 10, marginBottom: 5 }}>
+              <span style={{ color: TH.redText }}>Unscheduled</span>
+              {intended.time ? <span style={{ color: TH.textMuted }}> — requested {intended.time}</span> : null}
+            </div>;
+          })()}
+
+          {/* Duration + Split for recurringTasks */}
+          {recurring && !marker && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, alignItems: 'flex-end' }}>
+            <label style={lStyle}>
+              <span>{'\u23F1'} Duration</span>
+              <select value={dur} onChange={e => setDur(parseInt(e.target.value))} style={iStyle}>
+                {durOptions.map(v => (
+                  <option key={v} value={v}>{durLabel(v)}</option>
+                ))}
+              </select>
+            </label>
+            {!isCreate && <label style={lStyle}>
+              <span>{'\uD83D\uDCCA'} Remaining</span>
+              <select value={remVal} onChange={e => setTimeRemaining(parseInt(e.target.value))}
+                style={{ ...iStyle, background: remVal < parseInt(dur) ? TH.purpleBg : TH.inputBg }}>
+                {remOptions.map(v => (
+                  <option key={v} value={v}>{durLabel(v)}</option>
+                ))}
+              </select>
+            </label>}
+            {!disSplit && <label style={lStyle}>
+              <span>{'\u2702'} Split</span>
+              <button title={split ? 'Can be split into chunks' : 'Scheduled as one block'}
+                onClick={() => setSplit(!split)}
+                style={togStyle(split, '#2D6A4F')}>{split ? '\u2702 Yes' : 'No'}</button>
+            </label>}
+            {split && !disSplit && (
+              <label style={lStyle}>
+                <span>Min</span>
+                <select value={splitMin} onChange={e => setSplitMin(parseInt(e.target.value))}
+                  style={{ ...iStyle, width: 'auto', minWidth: 55 }}>
+                  {[15,20,30,45,60].map(v => (
+                    <option key={v} value={v}>{v < 60 ? v + 'm' : '1h'}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>}
+
+          {/* Travel time buffers — hidden for all-day and markers */}
+          {!marker && !isAllDay && <div style={{ display: 'flex', gap: 6, marginBottom: 5 }}>
             <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
-              <span title={isAllDay ? 'Not applicable for all-day tasks' : 'Travel buffer before the task — scheduler prevents overlaps'} style={isAllDay ? { opacity: 0.4 } : undefined}>{'\uD83D\uDE97'} Travel before</span>
-              <select value={travelBefore} onChange={e => setTravelBefore(parseInt(e.target.value))} disabled={isAllDay} style={{ ...iStyle, ...(isAllDay ? { opacity: 0.4 } : {}) }}>
+              <span title="Travel buffer before the task — scheduler prevents overlaps">{'\uD83D\uDE97'} Travel before</span>
+              <select value={travelBefore} onChange={e => setTravelBefore(parseInt(e.target.value))} style={iStyle}>
                 {[0, 5, 10, 15, 20, 30, 45, 60, 90].map(v => (
                   <option key={v} value={v}>{v === 0 ? 'None' : v + ' min'}</option>
                 ))}
               </select>
             </label>
             <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
-              <span title={isAllDay ? 'Not applicable for all-day tasks' : 'Travel buffer after the task — scheduler prevents overlaps'} style={isAllDay ? { opacity: 0.4 } : undefined}>Travel after</span>
-              <select value={travelAfter} onChange={e => setTravelAfter(parseInt(e.target.value))} disabled={isAllDay} style={{ ...iStyle, ...(isAllDay ? { opacity: 0.4 } : {}) }}>
+              <span title="Travel buffer after the task — scheduler prevents overlaps">Travel after</span>
+              <select value={travelAfter} onChange={e => setTravelAfter(parseInt(e.target.value))} style={iStyle}>
                 {[0, 5, 10, 15, 20, 30, 45, 60, 90].map(v => (
                   <option key={v} value={v}>{v === 0 ? 'None' : v + ' min'}</option>
                 ))}
@@ -881,9 +1151,9 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             </label>
           </div>}
 
-          {/* When mode selector — hidden for markers */}
-          {!marker && <label style={{ ...lStyle, marginBottom: 5 }}>
-            <span title="Controls which time blocks the scheduler can use.">{'\uD83D\uDCC6'} Scheduling mode</span>
+          {/* When mode selector — hidden for markers and recurringTasks (recurrings use the preferred time toggle above) */}
+          {!marker && !recurring && <label style={{ ...lStyle, marginBottom: 5 }}>
+            <span title="Controls which time windows the scheduler can place this task in.">{'\uD83D\uDCC6'} Time window</span>
             {(function() {
               // Window tags are everything that isn't a mode keyword
               var tagParts = whenParts.filter(function(p) { return p !== 'anytime' && p !== 'allday' && p !== 'fixed'; });
@@ -930,11 +1200,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             })()}
           </label>}
 
-          {/* Day requirement */}
-          {!marker && (
+          {/* Day requirement — hidden for recurringTasks and fixed tasks */}
+          {!marker && !recurring && !isFixed && (
           <label style={{ ...lStyle, marginBottom: 5 }}>
-            <span title={isFixed ? 'Day is determined by the fixed date' : 'Restrict which days the scheduler can place this task.'} style={isFixed ? { opacity: 0.4 } : undefined}>Day requirement</span>
-            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', ...(isFixed ? { opacity: 0.4, pointerEvents: 'none' } : {}) }}>
+            <span title="Restrict which days the scheduler can place this task.">Day requirement</span>
+            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
               <button title="No day restriction" onClick={function() { setDayReq('any'); }}
                 style={togStyle(dayReq === 'any', '#2D6A4F')}>Any</button>
               <button title="Monday through Friday only" onClick={function() { setDayReq(dayReq === 'weekday' ? 'any' : 'weekday'); }}
@@ -959,15 +1229,15 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             </div>
           </label>)}
 
-          {/* Due + Start after — hidden for markers and habits */}
-          {!marker && !habit && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, alignItems: 'flex-end', maxWidth: '100%' }}>
+          {/* Due + Start after — hidden for markers, recurringTasks, and fixed tasks */}
+          {!marker && !recurring && !isFixed && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, alignItems: 'flex-end', maxWidth: '100%' }}>
             <label style={lStyle}>
-              <span title={isFixed ? 'Fixed tasks are already placed at their exact time' : 'Hard deadline. The scheduler places this task before this date.'} style={isFixed ? { opacity: 0.4 } : undefined}>{'\uD83D\uDCC6'} Due</span>
+              <span title="Hard deadline. The scheduler places this task before this date.">{'\uD83D\uDCC6'} Due</span>
               <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
                 <input type="date" value={due || ''}
-                  onChange={e => setDue(e.target.value || '')} disabled={isFixed}
-                  style={{ ...iStyle, minWidth: 0, flex: 1, ...(due ? { background: TH.amberBg } : {}), ...(isFixed ? { opacity: 0.4 } : {}) }} />
-                {due && !isFixed && (
+                  onChange={e => setDue(e.target.value || '')}
+                  style={{ ...iStyle, minWidth: 0, flex: 1, ...(due ? { background: TH.amberBg } : {}) }} />
+                {due && (
                   <button onClick={() => setDue('')} style={{
                     fontSize: 9, background: 'none', border: 'none', color: TH.redText,
                     cursor: 'pointer', padding: 0, fontWeight: 700
@@ -976,12 +1246,12 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               </div>
             </label>
             <label style={lStyle}>
-              <span title={isFixed ? 'Fixed tasks are already placed at their exact time' : 'Earliest date this task can be scheduled.'} style={isFixed ? { opacity: 0.4 } : undefined}>{'\u23F3'} Start after</span>
+              <span title="Earliest date this task can be scheduled.">{'\u23F3'} Start after</span>
               <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
                 <input type="date" value={startAfter || ''}
-                  onChange={e => setStartAfter(e.target.value || '')} disabled={isFixed}
-                  style={{ ...iStyle, minWidth: 0, flex: 1, ...(startAfter ? { background: TH.blueBg } : {}), ...(isFixed ? { opacity: 0.4 } : {}) }} />
-                {startAfter && !isFixed && (
+                  onChange={e => setStartAfter(e.target.value || '')}
+                  style={{ ...iStyle, minWidth: 0, flex: 1, ...(startAfter ? { background: TH.blueBg } : {}) }} />
+                {startAfter && (
                   <button onClick={() => setStartAfter('')} style={{
                     fontSize: 9, background: 'none', border: 'none', color: TH.redText,
                     cursor: 'pointer', padding: 0, fontWeight: 700
@@ -991,33 +1261,21 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             </label>
           </div>}
 
-          {/* Split — hidden for markers */}
-          {!marker && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, alignItems: 'flex-end' }}>
-            <label style={lStyle}>
-              <span title={disSplit ? (isAllDay ? 'Not applicable for all-day tasks' : isFixed ? 'Fixed tasks cannot be split' : 'Rigid habits cannot be split') : 'Allow the scheduler to break this task into smaller chunks.'} style={disSplit ? { opacity: 0.4 } : undefined}>{'\u2702'} Split OK</span>
-              <button title={disSplit ? 'Not available in this mode' : (split ? 'Task can be split into chunks' : 'Task must be scheduled as one block')}
-                onClick={disSplit ? undefined : () => setSplit(!split)}
-                style={{ ...togStyle(split, '#2D6A4F'), ...(disSplit ? { opacity: 0.4, pointerEvents: 'none' } : {}) }}>{split ? '\u2702 Yes' : 'No'}</button>
-            </label>
-            {split && !disSplit && (
-              <label style={lStyle}>
-                <span title="Smallest chunk when splitting.">Min block</span>
-                <select value={splitMin} onChange={e => setSplitMin(parseInt(e.target.value))}
-                  style={{ ...iStyle, width: 'auto', minWidth: 60 }}>
-                  {[15,20,30,45,60].map(v => (
-                    <option key={v} value={v}>{v < 60 ? v + 'm' : '1h'}</option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </div>}
+          {/* Split moved to be next to Duration */}
 
           {/* Recurrence */}
           {!marker &&
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <label style={lStyle}>
               <span title="Automatically generate copies of this task on a schedule.">{'\uD83D\uDD01'} Recurrence</span>
-              <select value={recurType} onChange={e => { setRecurType(e.target.value); if (e.target.value === 'weekly' || e.target.value === 'biweekly') setDayReq('any'); }} style={iStyle}>
+              <select value={recurType} onChange={e => {
+                var val = e.target.value;
+                setRecurType(val);
+                if (val === 'weekly' || val === 'biweekly') setDayReq('any');
+                // Recurrence drives recurring status: recurring = recurring, none = regular task
+                if (val === 'none') { setRecurring(false); setRigid(false); }
+                else { setRecurring(true); setDayReq('any'); }
+              }} style={iStyle}>
                 <option value="none">None</option>
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly</option>
@@ -1026,10 +1284,16 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                 <option value="interval">Every N (days/wks/mo/yr)</option>
               </select>
             </label>
-            {(recurType === 'weekly' || recurType === 'biweekly') && (
-              <label style={lStyle}>
+            {(recurType === 'weekly' || recurType === 'biweekly') && (function() {
+              var selectedCount = recurDays.length;
+              return <label style={lStyle}>
                 Days
-                <div style={{ display: 'flex', gap: 3 }}>
+                <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button onClick={function() { setRecurDays('MTWRF'); }}
+                    style={togStyle(recurDays === 'MTWRF', '#4338CA')}>Wkday</button>
+                  <button onClick={function() { setRecurDays('SU'); }}
+                    style={togStyle(recurDays === 'SU' || recurDays === 'US', '#4338CA')}>Wkend</button>
+                  <span style={{ width: 1, height: 18, background: TH.border, margin: '0 1px' }} />
                   {[['U','Su'],['M','Mo'],['T','Tu'],['W','We'],['R','Th'],['F','Fr'],['S','Sa']].map(function(pair) {
                     var code = pair[0], label = pair[1];
                     var active = recurDays.includes(code);
@@ -1040,30 +1304,61 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                     );
                   })}
                 </div>
-              </label>
-            )}
-            {recurType === 'monthly' && (
-              <label style={lStyle}>
+                {selectedCount > 1 && (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
+                    <span style={{ fontSize: 10, color: TH.textMuted }}>Times per {recurType === 'biweekly' ? '2 weeks' : 'week'}:</span>
+                    <select value={recurTimesPerCycle || selectedCount} onChange={function(e) { setRecurTimesPerCycle(parseInt(e.target.value)); }}
+                      style={{ ...iStyle, width: 'auto', minWidth: 50 }}>
+                      {Array.from({ length: selectedCount }, function(_, i) { return i + 1; }).map(function(n) {
+                        return <option key={n} value={n}>{n}{n === selectedCount ? ' (all)' : ''}</option>;
+                      })}
+                    </select>
+                    {(recurTimesPerCycle > 0 && recurTimesPerCycle < selectedCount) && (
+                      <span style={{ fontSize: 9, color: '#C8942A' }}>{'\u2248'}every {Math.round((recurType === 'biweekly' ? 14 : 7) / recurTimesPerCycle * 10) / 10} days</span>
+                    )}
+                  </div>
+                )}
+              </label>;
+            })()}
+            {recurType === 'monthly' && (function() {
+              var mdArr = Array.isArray(recurMonthDays) ? recurMonthDays : Object.keys(recurMonthDays || {});
+              var mdCount = mdArr.length;
+              return <label style={lStyle}>
                 Days of month
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, maxWidth: 260 }}>
                   {[['first', '1st'], ['last', 'Last']].concat(
                     Array.from({ length: 28 }, function(_, i) { return [String(i + 1), String(i + 1)]; })
                   ).map(function(pair) {
                     var val = pair[0], label = pair[1];
-                    var active = recurMonthDays.indexOf(val) >= 0 || recurMonthDays.indexOf(Number(val)) >= 0;
+                    var active = mdArr.indexOf(val) >= 0 || mdArr.indexOf(Number(val)) >= 0;
                     return (
                       <button key={val} onClick={function() {
                         setRecurMonthDays(function(prev) {
-                          var norm = prev.map(String);
+                          var arr = Array.isArray(prev) ? prev : Object.keys(prev || {});
+                          var norm = arr.map(String);
                           var sv = String(val);
-                          return norm.indexOf(sv) >= 0 ? prev.filter(function(d) { return String(d) !== sv; }) : prev.concat([val]);
+                          return norm.indexOf(sv) >= 0 ? arr.filter(function(d) { return String(d) !== sv; }) : arr.concat([val]);
                         });
                       }} style={{ ...togStyle(active), minWidth: label.length > 2 ? 32 : 22, fontSize: 9 }}>{label}</button>
                     );
                   })}
                 </div>
-              </label>
-            )}
+                {mdCount > 1 && (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
+                    <span style={{ fontSize: 10, color: TH.textMuted }}>Times per month:</span>
+                    <select value={recurTimesPerCycle || mdCount} onChange={function(e) { setRecurTimesPerCycle(parseInt(e.target.value)); }}
+                      style={{ ...iStyle, width: 'auto', minWidth: 50 }}>
+                      {Array.from({ length: mdCount }, function(_, i) { return i + 1; }).map(function(n) {
+                        return <option key={n} value={n}>{n}{n === mdCount ? ' (all)' : ''}</option>;
+                      })}
+                    </select>
+                    {(recurTimesPerCycle > 0 && recurTimesPerCycle < mdCount) && (
+                      <span style={{ fontSize: 9, color: '#C8942A' }}>{'\u2248'}every {Math.round((recurType === 'biweekly' ? 14 : 7) / recurTimesPerCycle * 10) / 10} days</span>
+                    )}
+                  </div>
+                )}
+              </label>;
+            })()}
             {recurType === 'interval' && (
               <label style={lStyle}>
                 Interval
@@ -1082,15 +1377,43 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             )}
           </div>}
 
-          {/* Habit date range — when to start/stop generating instances */}
-          {habit && !marker && (
+          {/* Anchor date — for interval/weekly/biweekly recurrence, the date from which cycles are counted */}
+          {!marker && (recurType === 'interval' || ((recurType === 'weekly' || recurType === 'biweekly') && recurTimesPerCycle > 0 && recurTimesPerCycle < recurDays.length)) && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 5 }}>
+              <label style={lStyle}>
+                <span title="The date from which the interval cycle counts. Change this to reset the cycle (e.g., after completing the task).">{'\u2693'} Anchor date</span>
+                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <input type="date" value={date || ''}
+                    onChange={e => { setDate(e.target.value || ''); setDatePinned(true); }}
+                    style={iStyle} />
+                  <button onClick={function() {
+                    // Reset anchor to today
+                    var now = new Date();
+                    var y = now.getFullYear();
+                    var m = String(now.getMonth() + 1).padStart(2, '0');
+                    var d = String(now.getDate()).padStart(2, '0');
+                    setDate(y + '-' + m + '-' + d);
+                    setDatePinned(true);
+                  }} title="Reset cycle to start from today"
+                    style={{ fontSize: 9, padding: '2px 8px', borderRadius: 3,
+                      background: TH.inputBg, border: '1px solid ' + TH.border, color: TH.text,
+                      cursor: 'pointer', fontWeight: 600, height: 26, boxSizing: 'border-box'
+                    }}>Today</button>
+                </div>
+              </label>
+              <span style={{ fontSize: 9, color: TH.muted2, paddingBottom: 4 }}>{recurType === 'interval' ? 'intervals count from this date' : 'cycle spacing starts from this date'}</span>
+            </div>
+          )}
+
+          {/* Recurrence date range — when to start/stop generating instances */}
+          {recurring && !marker && recurType !== 'none' && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
               <label style={lStyle}>
-                <span title="Date to start generating instances for this habit">{'\uD83D\uDCC5'} Start generating</span>
+                <span title="Date to start generating instances for this recurring task">{'\u23EF\uFE0F'} Recurrence starts</span>
                 <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                  <input type="date" value={habitStart || ''} onChange={e => setHabitStart(e.target.value || '')} style={iStyle} />
-                  {habitStart && (
-                    <button onClick={() => setHabitStart('')} style={{
+                  <input type="date" value={recurStart || ''} onChange={e => setRecurringStart(e.target.value || '')} style={iStyle} />
+                  {recurStart && (
+                    <button onClick={() => setRecurringStart('')} style={{
                       fontSize: 9, background: 'none', border: 'none', color: TH.redText,
                       cursor: 'pointer', padding: 0, fontWeight: 700
                     }}>{'\u2715'}</button>
@@ -1098,11 +1421,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                 </div>
               </label>
               <label style={lStyle}>
-                <span title="Date to stop generating new instances (discontinue the habit)">{'\u23F9'} Discontinue after</span>
+                <span title="Date to stop generating new instances">{'\u23F9'} Recurrence ends</span>
                 <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                  <input type="date" value={habitEnd || ''} onChange={e => setHabitEnd(e.target.value || '')} style={iStyle} />
-                  {habitEnd && (
-                    <button onClick={() => setHabitEnd('')} style={{
+                  <input type="date" value={recurEnd || ''} onChange={e => setRecurringEnd(e.target.value || '')} style={iStyle} />
+                  {recurEnd && (
+                    <button onClick={() => setRecurringEnd('')} style={{
                       fontSize: 9, background: 'none', border: 'none', color: TH.redText,
                       cursor: 'pointer', padding: 0, fontWeight: 700
                     }}>{'\u2715'}</button>
@@ -1112,8 +1435,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             </div>
           )}
 
-          {/* Placement window — how far from preferred time the scheduler can shift */}
-          {!marker && habit && (function() {
+          {/* Placement window removed — time-window recurringTasks have ± Window inline,
+               time-blocks recurringTasks don't need it (blocks ARE the window).
+               The timeFlex field still exists in the data model for backward compat. */}
+          {false && !marker && recurring && !hasPreferredTime && (function() {
             var driftOptions;
             // Normalize recurrence to effective days between occurrences
             var effectiveDays = 1; // default: daily
@@ -1196,7 +1521,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             var disPlacement = isAllDay || isFixed;
             return (
               <label style={{ ...lStyle, marginBottom: 5 }}>
-                <span title={disPlacement ? (isAllDay ? 'Not applicable for all-day tasks' : 'Fixed tasks have no placement flexibility') : 'How far from the preferred time the scheduler can shift this habit. 0 = locked to exact time.'} style={disPlacement ? { opacity: 0.4 } : undefined}>Placement window</span>
+                <span title={disPlacement ? (isAllDay ? 'Not applicable for all-day tasks' : 'Fixed tasks have no placement flexibility') : 'How far from the preferred time the scheduler can shift this task. 0 = locked to exact time.'} style={disPlacement ? { opacity: 0.4 } : undefined}>Placement window</span>
                 <select value={currentVal} onChange={e => {
                   var v = parseInt(e.target.value);
                   if (v === 0) { setRigid(true); } else { setRigid(false); setTimeFlex(v); }
@@ -1265,11 +1590,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       </div>
 
       {showDeleteConfirm && (
-        task.habit || task.taskType === 'habit_instance' || task.taskType === 'habit_template' || task.sourceId || task.source_id ? (
-          <HabitDeleteDialog
-            taskName={task.text || 'this habit'}
+        task.recurring || task.taskType === 'recurring_instance' || task.taskType === 'recurring_template' || task.sourceId || task.source_id ? (
+          <RecurringDeleteDialog
+            taskName={task.text || 'this task'}
             onSkipInstance={() => { if (onStatusChange) onStatusChange('skip'); setShowDeleteConfirm(false); }}
-            onDeleteHabit={() => { onDelete(task.id, { cascade: 'habit' }); onClose(); }}
+            onDeleteSeries={() => { onDelete(task.id, { cascade: 'recurring' }); onClose(); }}
             onCancel={() => setShowDeleteConfirm(false)}
             darkMode={darkMode}
             isMobile={isMobile}

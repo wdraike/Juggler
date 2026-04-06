@@ -40,11 +40,11 @@ export default function DisabledItemsPanel({ theme, onClose, onRefreshTasks }) {
     });
   }
 
-  function handleDelete(id, isHabit) {
-    if (!confirm('Permanently delete this ' + (isHabit ? 'habit' : 'task') + '? This cannot be undone.')) return;
+  function handleDelete(id, isRecurring) {
+    if (!confirm('Permanently delete this ' + (isRecurring ? 'recurring task' : 'task') + '? This cannot be undone.')) return;
     setActionPending(id);
     var url = '/tasks/' + id;
-    if (isHabit) url += '?cascade=habit';
+    if (isRecurring) url += '?cascade=recurring';
     apiClient.delete(url).then(function() {
       setItems(function(prev) { return prev.filter(function(t) { return t.id !== id && t.sourceId !== id; }); });
       setActionPending(null);
@@ -55,10 +55,10 @@ export default function DisabledItemsPanel({ theme, onClose, onRefreshTasks }) {
     });
   }
 
-  // Group by type: habits first, then tasks
-  var habits = items.filter(function(t) { return t.taskType === 'habit_template'; });
-  var tasks = items.filter(function(t) { return t.taskType !== 'habit_template' && t.taskType !== 'habit_instance'; });
-  var instances = items.filter(function(t) { return t.taskType === 'habit_instance'; });
+  // Group by type: recurringTasks first, then tasks
+  var recurringTasks = items.filter(function(t) { return t.taskType === 'recurring_template'; });
+  var tasks = items.filter(function(t) { return t.taskType !== 'recurring_template' && t.taskType !== 'recurring_instance'; });
+  var instances = items.filter(function(t) { return t.taskType === 'recurring_instance'; });
   // Count instances per template for display
   var instanceCounts = {};
   instances.forEach(function(inst) {
@@ -96,12 +96,12 @@ export default function DisabledItemsPanel({ theme, onClose, onRefreshTasks }) {
             <div style={{ textAlign: 'center', color: theme.textMuted, padding: 20, fontSize: 13 }}>No disabled items</div>
           ) : (
             <>
-              {habits.length > 0 && (
+              {recurrings.length > 0 && (
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
-                    Habits ({habits.length})
+                    Recurrings ({recurrings.length})
                   </div>
-                  {habits.map(function(item) {
+                  {recurrings.map(function(item) {
                     var instCount = instanceCounts[item.id] || 0;
                     return (
                       <ItemRow

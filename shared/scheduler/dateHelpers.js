@@ -198,6 +198,28 @@ function utcToLocal(utcDate, timezone) {
   };
 }
 
+var _validTimezones = null;
+function isValidTimezone(tz) {
+  if (!tz) return false;
+  if (!_validTimezones) {
+    try { _validTimezones = new Set(Intl.supportedValuesOf('timeZone')); }
+    catch (e) { return true; } // older runtimes: allow through
+  }
+  return _validTimezones.has(tz);
+}
+
+function safeTimezone(tz, fallback) {
+  return isValidTimezone(tz) ? tz : (fallback || 'America/New_York');
+}
+
+function formatMinutesToTime(startMin) {
+  var hh = Math.floor(startMin / 60);
+  var mm = startMin % 60;
+  var ampm = hh >= 12 ? 'PM' : 'AM';
+  var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
+  return dh + ':' + (mm < 10 ? '0' : '') + mm + ' ' + ampm;
+}
+
 module.exports = {
   inferYear,
   parseDate,
@@ -212,5 +234,8 @@ module.exports = {
   formatHour,
   getDayName,
   localToUtc,
-  utcToLocal
+  utcToLocal,
+  isValidTimezone,
+  safeTimezone,
+  formatMinutesToTime
 };

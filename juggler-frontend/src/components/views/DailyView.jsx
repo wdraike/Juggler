@@ -40,8 +40,8 @@ function tileBg(task, darkMode, hover, theme) {
     if (darkMode) return hover ? '#9E6B3B30' : '#9E6B3B1C';
     return hover ? '#FEF3C720' : '#FEF3C712';
   }
-  // Habits — subtle teal
-  if (task.habit) {
+  // Recurrings — subtle teal
+  if (task.recurring) {
     if (darkMode) return hover ? '#0D948830' : '#0D94881C';
     return hover ? '#CCFBF120' : '#CCFBF112';
   }
@@ -274,7 +274,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
         style={{
           height: '100%', boxSizing: 'border-box',
           borderLeft: '3px solid ' + priColor,
-          border: '1px ' + (isMarker ? 'dotted' : (t.habit ? 'dashed' : 'solid')) + ' ' + (isDone ? theme.border : (isMarker ? '#4338CA40' : priColor + '30')),
+          border: '1px ' + (isMarker ? 'dotted' : (t.recurring ? 'dashed' : 'solid')) + ' ' + (isDone ? theme.border : (isMarker ? '#4338CA40' : priColor + '30')),
           borderLeftWidth: 3, borderLeftColor: isWhenRelaxed ? '#C8942A' : (isMarker ? '#4338CA' : priColor),
           borderRadius: 5,
           background: tileBg(t, darkMode, show, theme),
@@ -366,10 +366,10 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
           </div>
         )}
 
-        {/* Row 4: Extra meta — habit, split, when (height >= 74) */}
+        {/* Row 4: Extra meta — recurring, split, when (height >= 74) */}
         {showMeta && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1, fontSize: 8, color: theme.textMuted, overflow: 'hidden' }}>
-            {t.habit && <span>{'\uD83D\uDD01'} habit</span>}
+            {t.recurring && <span>{'\uD83D\uDD01'} recurring</span>}
             {item.splitPart && <span>Part {item.splitPart}/{item.splitTotal}</span>}
             {isWhenRelaxed && <span style={{ color: '#C8942A', fontWeight: 600 }}>{'~'} flexed</span>}
             {t.when && t.when !== 'anytime' && !isWhenRelaxed && <span>{t.when}</span>}
@@ -454,14 +454,14 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, theme, darkMode,
           cursor: canDrag ? 'grab' : 'pointer',
           outline: show ? '2px solid ' + theme.accent : 'none',
           outlineOffset: -1, transition: 'background 0.1s',
-          border: '1px ' + (task.habit ? 'dashed' : 'solid') + ' ' + (isDone ? theme.border : priColor + '30'),
+          border: '1px ' + (task.recurring ? 'dashed' : 'solid') + ' ' + (isDone ? theme.border : priColor + '30'),
           borderLeftWidth: 3, borderLeftColor: priColor,
           boxShadow: '0 1px 2px ' + theme.shadow,
           opacity: isDone ? 0.5 : 1
         }}
       >
         {(task.fixed || task.rigid) && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDCCC'}</span>}
-        {task.habit && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDD01'}</span>}
+        {task.recurring && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDD01'}</span>}
         {status === 'done' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2713'}</span>}
         {status === 'skip' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u23ED'}</span>}
         {status === 'cancel' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2717'}</span>}
@@ -485,7 +485,7 @@ export default function DailyView({
   onExpand, darkMode, schedCfg, nowMins, isToday, allTasks,
   filter, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile,
   onUpdate, showToast, locations, onHourLocationOverride,
-  locSchedules, onUpdateLocScheduleOverrides, onUpdateLocScheduleDefaults, onBatchHabitsDone
+  locSchedules, onUpdateLocScheduleOverrides, onUpdateLocScheduleDefaults, onBatchRecurringsDone
 }) {
   var theme = getTheme(darkMode);
   var scrollRef = useRef(null);
@@ -662,8 +662,8 @@ export default function DailyView({
     });
     return (allTasks || []).filter(function (t) {
       if (t.date !== selectedDateKey || scheduledIds[t.id]) return false;
-      // Hide habit templates and generated instances — only the scheduler places these
-      if (t.taskType === 'habit_template' || t.generated) return false;
+      // Hide recurring templates and generated instances — only the scheduler places these
+      if (t.taskType === 'recurring_template' || t.generated) return false;
       // Only hide done/cancelled/skipped when filter is not 'all'
       var st = statuses[t.id] || '';
       if ((st === 'done' || st === 'cancel' || st === 'skip') && filter !== 'all' && filter !== 'done' && filter !== st) return false;

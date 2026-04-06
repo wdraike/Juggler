@@ -61,6 +61,8 @@ async function listEvents(accessToken, timeMin, timeMax) {
   var pageToken = null;
   var nextSyncToken = null;
 
+  var maxPages = 20; // Cap to prevent runaway pagination
+  var page = 0;
   do {
     var params = new URLSearchParams({
       timeMin,
@@ -77,7 +79,8 @@ async function listEvents(accessToken, timeMin, timeMax) {
     }
     pageToken = data && data.nextPageToken ? data.nextPageToken : null;
     if (data && data.nextSyncToken) nextSyncToken = data.nextSyncToken;
-  } while (pageToken);
+    page++;
+  } while (pageToken && page < maxPages);
 
   return { items: allItems, nextSyncToken: nextSyncToken };
 }

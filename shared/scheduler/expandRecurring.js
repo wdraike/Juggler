@@ -8,19 +8,33 @@ var parseDate = dateHelpers.parseDate;
 var formatDateKey = dateHelpers.formatDateKey;
 var DAY_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
+var DOW_TO_CODE = ['U', 'M', 'T', 'W', 'R', 'F', 'S'];
+
+function doesDayMatch(dow, daysSpec, dayMap) {
+  if (typeof daysSpec === 'object' && !Array.isArray(daysSpec)) {
+    return daysSpec[DOW_TO_CODE[dow]] ? { match: true, state: daysSpec[DOW_TO_CODE[dow]] } : { match: false };
+  }
+  for (var i = 0; i < daysSpec.length; i++) {
+    if (dayMap[daysSpec[i]] === dow) return { match: true, state: 'required' };
+  }
+  return { match: false };
+}
+
 function expandRecurring(allTasks, startDate, endDate, opts) {
   var dayMap = { U: 0, M: 1, T: 2, W: 3, R: 4, F: 5, S: 6 };
   var existingIds = {};
   allTasks.forEach(function(t) { existingIds[t.id] = true; });
   var existingByDateText = {};
+  var existingBySourceDate = {};
   allTasks.forEach(function(t) {
     if (t.date && t.text) existingByDateText[t.date + '|' + t.text] = true;
+    if (t.sourceId && t.date) existingBySourceDate[t.sourceId + '|' + t.date] = true;
   });
 
   var statuses = opts && opts.statuses ? opts.statuses : {};
   var sources = allTasks.filter(function(t) {
     if (!t.recur || t.recur.type === 'none') return false;
-    if (t.taskType === 'habit_instance') return false;
+    if (t.taskType === 'recurring_instance') return false;
     var st = statuses[t.id] || t.status || '';
     if (st === 'pause' || st === 'disabled') return false;
     return true;
@@ -31,6 +45,108 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
   var cursor = new Date(startDate); cursor.setHours(0, 0, 0, 0);
   var end = new Date(endDate); end.setHours(23, 59, 59, 999);
   var maxIter = opts && opts.maxIter ? opts.maxIter : 0; // 0 = unlimited
+
+  // For timesPerCycle sources: pre-compute which dates to generate using
+  // target-interval steering (collect candidates, then pick best N per cycle).
+  // Key: sourceId → { 'M/D': true }
+  var tpcPickedDates = {};
+
+  sources.forEach(function(src) {
+    var r = src.recur;
+    var tpc = r.timesPerCycle || 0;
+    if (tpc <= 0) return;
+    if (r.type !== 'weekly' && r.type !== 'biweekly') return;
+    var days = r.days || 'MTWRF';
+    var selectedDayCount = typeof days === 'object' && !Array.isArray(days)
+      ? Object.keys(days).length
+      : (typeof days === 'string' ? days.length : 0);
+    if (tpc >= selectedDayCount) return; // no filtering needed
+
+    var cycleDays = r.type === 'biweekly' ? 14 : 7;
+    var targetInterval = cycleDays / tpc;
+    var srcDate = parseDate(src.date);
+    if (!srcDate) srcDate = new Date(startDate);
+
+    // 1. Collect all candidate dates in the expansion window
+    var candidates = [];
+    var c = new Date(startDate); c.setHours(0, 0, 0, 0);
+    var e2 = new Date(endDate); e2.setHours(23, 59, 59, 999);
+    while (c <= e2) {
+      if (c >= srcDate) {
+        var cStr = formatDateKey(c);
+        if (cStr !== src.date) {
+          var cDow = c.getDay();
+          if (doesDayMatch(cDow, days, dayMap).match) {
+            if (r.type === 'biweekly') {
+              var dd = Math.round((c.getTime() - srcDate.getTime()) / 86400000);
+              if (Math.floor(dd / 7) % 2 === 0) {
+                candidates.push({ date: new Date(c), key: cStr });
+              }
+            } else {
+              candidates.push({ date: new Date(c), key: cStr });
+            }
+          }
+        }
+      }
+      c.setDate(c.getDate() + 1);
+    }
+
+    // 2. Find the last existing instance date (from DB) as the starting reference
+    var lastPlaced = null;
+    allTasks.forEach(function(t) {
+      if (t.sourceId !== src.id) return;
+      if (t.taskType !== 'recurring_instance' && !t.generated) return;
+      var d = parseDate(t.date);
+      if (!d) return;
+      if (!lastPlaced || d > lastPlaced) lastPlaced = d;
+    });
+
+    // 3. Pick best tpc dates per cycle using target-interval steering
+    var picked = {};
+    var ci = 0;
+    while (ci < candidates.length) {
+      // Determine cycle boundary: collect candidates within cycleDays of first
+      var cycleStart = candidates[ci].date;
+      var cycleEnd = new Date(cycleStart);
+      cycleEnd.setDate(cycleEnd.getDate() + cycleDays);
+      var cycleCandidates = [];
+      while (ci < candidates.length && candidates[ci].date < cycleEnd) {
+        cycleCandidates.push(candidates[ci]);
+        ci++;
+      }
+
+      // Skip candidates that already exist in DB
+      var available = cycleCandidates.filter(function(cd) {
+        var id = 'rc_' + src.id + '_' + cd.key.replace(/\//g, '');
+        return !existingIds[id];
+      });
+      // Count existing instances in this cycle
+      var existingInCycle = cycleCandidates.length - available.length;
+      var slotsNeeded = Math.max(0, tpc - existingInCycle);
+      if (slotsNeeded === 0 || available.length === 0) continue;
+
+      // Greedy pick: choose the candidate closest to lastPlaced + targetInterval
+      var ref = lastPlaced || srcDate;
+      for (var pi = 0; pi < slotsNeeded && available.length > 0; pi++) {
+        var idealDate = new Date(ref);
+        idealDate.setDate(idealDate.getDate() + Math.round(targetInterval));
+
+        // Find candidate closest to ideal date
+        var bestIdx = 0;
+        var bestDist = Infinity;
+        for (var ai = 0; ai < available.length; ai++) {
+          var dist = Math.abs(Math.round((available[ai].date.getTime() - idealDate.getTime()) / 86400000));
+          if (dist < bestDist) { bestDist = dist; bestIdx = ai; }
+        }
+        picked[available[bestIdx].key] = true;
+        ref = available[bestIdx].date;
+        lastPlaced = ref;
+        available.splice(bestIdx, 1);
+      }
+    }
+
+    tpcPickedDates[src.id] = picked;
+  });
 
   var iter = 0;
   while (cursor <= end && (maxIter === 0 || iter < maxIter)) {
@@ -45,13 +161,13 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
       if (!srcDate) srcDate = new Date(startDate);
       if (cursor < srcDate) return;
       if (dateStr === src.date) return;
-      // Respect habit date range — don't generate outside start/end bounds
-      if (src.habitStart) {
-        var hs = parseDate(src.habitStart);
+      // Respect recurring date range — don't generate outside start/end bounds
+      if (src.recurStart) {
+        var hs = parseDate(src.recurStart);
         if (hs && cursor < hs) return;
       }
-      if (src.habitEnd) {
-        var he = parseDate(src.habitEnd);
+      if (src.recurEnd) {
+        var he = parseDate(src.recurEnd);
         if (he && cursor > he) return;
       }
 
@@ -60,11 +176,9 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         match = true;
       } else if (r.type === 'weekly' || r.type === 'biweekly') {
         var days = r.days || 'MTWRF';
-        var found = false;
-        for (var i = 0; i < days.length; i++) {
-          if (dayMap[days[i]] === dow) { found = true; break; }
-        }
-        if (!found) return;
+        var dayResult = doesDayMatch(dow, days, dayMap);
+        if (!dayResult.match) return;
+        var dayState = dayResult.state;
         if (r.type === 'biweekly') {
           var daysDiff = Math.round((cursor.getTime() - srcDate.getTime()) / 86400000);
           if (Math.floor(daysDiff / 7) % 2 !== 0) return;
@@ -103,6 +217,16 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
       }
       if (!match) return;
 
+      // timesPerCycle: pre-computed optimal dates are in tpcPickedDates.
+      // If this source has tpc filtering, only generate on picked dates.
+      var selectedDayCount = typeof days === 'object' && !Array.isArray(days)
+        ? Object.keys(days).length
+        : (typeof days === 'string' ? days.length : 0);
+      var tpc = r.timesPerCycle || 0;
+      if (tpc > 0 && tpc < selectedDayCount) {
+        if (!tpcPickedDates[src.id] || !tpcPickedDates[src.id][dateStr]) return;
+      }
+
       // Respect day_req: skip days that don't match the constraint
       var dr = src.dayReq;
       if (dr && dr !== 'any') {
@@ -117,28 +241,44 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         }
       }
 
-      var id = 'rc_' + src.id + '_' + dateStr.replace(/\//g, '');
-      if (existingIds[id]) return;
-      // Legacy ID check (frontend only uses this)
-      if (opts && opts.checkLegacyIds) {
-        var oldId = 'gh_' + src.id.replace('ht_', '') + '_' + dateStr.replace(/\//g, '');
-        if (existingIds[oldId]) return;
-      }
+      // Dedup: skip if an instance already exists for this source + date
+      var sourceDate = src.id + '|' + dateStr;
+      if (existingBySourceDate[sourceDate]) return;
       if (existingByDateText[dateStr + '|' + src.text]) return;
       // Additional dupe check (frontend uses taskList.some)
       if (opts && opts.checkDupes) {
         var hasDupe = allTasks.some(function(et) { return et.date === dateStr && et.text === src.text && et.id !== src.id; });
         if (hasDupe) return;
       }
-      existingIds[id] = true;
+      // Generate UUIDv7 ID (or fallback for environments without crypto)
+      var id = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : 'g_' + Math.random().toString(36).slice(2, 10) + '_' + Date.now().toString(36);
+      existingBySourceDate[sourceDate] = true;
       existingByDateText[dateStr + '|' + src.text] = true;
+      // When timesPerCycle < selected days, set dayReq to all selected day codes
+      // so the scheduler can move the instance to whichever day has best availability.
+      var instanceDayReq = src.dayReq || 'any';
+      if (tpc > 0 && tpc < selectedDayCount) {
+        var dayReqParts = [];
+        var codeMap = { M: 'M', T: 'T', W: 'W', R: 'R', F: 'F', S: 'Sa', U: 'Su' };
+        if (typeof days === 'string') {
+          for (var dri = 0; dri < days.length; dri++) {
+            if (codeMap[days[dri]]) dayReqParts.push(codeMap[days[dri]]);
+          }
+        } else if (typeof days === 'object') {
+          Object.keys(days).forEach(function(k) { if (codeMap[k]) dayReqParts.push(codeMap[k]); });
+        }
+        if (dayReqParts.length > 0) instanceDayReq = dayReqParts.join(',');
+      }
+
       newTasks.push({
         id: id, date: dateStr, day: dayName, project: src.project, text: src.text,
-        pri: src.pri, habit: src.habit || false, rigid: src.rigid || false,
+        pri: src.pri, recurring: src.recurring || false, rigid: src.rigid || false,
         time: src.time, dur: src.dur, where: src.where, when: src.when,
         location: src.location, tools: src.tools, split: src.split, splitMin: src.splitMin,
         timeFlex: src.timeFlex, marker: src.marker, flexWhen: src.flexWhen,
-        dayReq: src.dayReq || 'any', section: '', notes: src.notes || '',
+        dayReq: instanceDayReq, section: '', notes: src.notes || '',
         taskType: 'generated', sourceId: src.id, generated: true
       });
     });

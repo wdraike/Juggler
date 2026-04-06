@@ -9,14 +9,7 @@ var gcalApi = require('../lib/gcal-api');
 
 // --- Token management ---
 
-function getJwtSecret() {
-  var secret = process.env.JWT_SECRET;
-  if (!secret) {
-    if (process.env.NODE_ENV === 'production') throw new Error('JWT_SECRET required in production');
-    secret = 'local-dev-jwt-secret-juggler';
-  }
-  return new TextEncoder().encode(secret);
-}
+var { getJwtSecret } = require('../lib/jwt-secret');
 
 async function getValidAccessToken(user) {
   if (!user.gcal_refresh_token) {
@@ -140,6 +133,10 @@ async function callback(req, res) {
     }
 
     var userId = decoded.userId;
+    // Verify the OAuth flow is for the authenticated user (prevent IDOR)
+    if (req.user && req.user.id !== userId) {
+      return res.status(403).send('OAuth state does not match authenticated user');
+    }
     var oauth2Client = gcalApi.createOAuth2Client();
     var tokens = await gcalApi.getTokensFromCode(oauth2Client, code);
 

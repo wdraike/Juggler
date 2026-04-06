@@ -7,7 +7,7 @@ const { expandRecurring } = require('../../shared/scheduler/expandRecurring');
 function makeSource(overrides) {
   return {
     id: 'ht_1', text: 'Daily workout', date: '3/20', dur: 30, pri: 'P1',
-    habit: true, rigid: false, recur: { type: 'daily' },
+    recurring: true, rigid: false, recur: { type: 'daily' },
     dayReq: 'any', ...overrides
   };
 }
@@ -190,10 +190,11 @@ describe('expandRecurring', () => {
       expect(result[0].project).toBe('Fitness');
     });
 
-    test('ID follows rc_<sourceId>_<dateDigits> format', () => {
+    test('ID is a valid UUID format', () => {
       const src = makeSource({ id: 'ht_workout' });
       const result = expandRecurring([src], new Date(2026, 2, 20), new Date(2026, 2, 21));
-      expect(result[0].id).toBe('rc_ht_workout_321');
+      expect(result[0].id).toMatch(/^[0-9a-f-]+$/i);
+      expect(result[0].id.length).toBeGreaterThanOrEqual(20);
     });
   });
 
@@ -207,10 +208,10 @@ describe('expandRecurring', () => {
       expect(expandRecurring([], new Date(2026, 2, 20), new Date(2026, 2, 25))).toEqual([]);
     });
 
-    test('habit_instance tasks are not treated as sources', () => {
+    test('recurring_instance tasks are not treated as sources', () => {
       const tasks = [
         makeSource(),
-        { id: 'rc_1', text: 'Instance', taskType: 'habit_instance', recur: { type: 'daily' } }
+        { id: 'rc_1', text: 'Instance', taskType: 'recurring_instance', recur: { type: 'daily' } }
       ];
       const result = expandRecurring(tasks, new Date(2026, 2, 20), new Date(2026, 2, 22));
       // Only the source should generate instances, not the instance itself

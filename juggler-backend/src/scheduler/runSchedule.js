@@ -16,6 +16,7 @@ var dateHelpers = require('./dateHelpers');
 var parseDate = dateHelpers.parseDate;
 var formatDateKey = dateHelpers.formatDateKey;
 var parseTimeToMinutes = dateHelpers.parseTimeToMinutes;
+var formatMinutesToTime = dateHelpers.formatMinutesToTime;
 var localToUtc = dateHelpers.localToUtc;
 var utcToLocal = dateHelpers.utcToLocal;
 var taskController = require('../controllers/task.controller');
@@ -26,7 +27,7 @@ var expandRecurringShared = require('../../../shared/scheduler/expandRecurring')
 var expandRecurring = expandRecurringShared.expandRecurring;
 var cache = require('../lib/redis');
 
-var DEFAULT_TIMEZONE = 'America/New_York';
+var DEFAULT_TIMEZONE = constants.DEFAULT_TIMEZONE;
 
 /**
  * Get current date/time in user's timezone
@@ -83,26 +84,26 @@ async function loadConfig(userId) {
 /**
  * Run the scheduler and persist date moves to the DB.
  *
- * Before each run, tasks that were previously moved by the scheduler are
- * reset to their original_scheduled_at so the algorithm starts from the
- * user's intended placement every time.
+ * The scheduler reads current scheduled_at values and places tasks from
+ * scratch. Only tasks whose scheduled_at actually changed are written back.
+ * Pinned, fixed, marker, and template tasks are never modified.
  *
- * Returns stats: { updated, cleared, reset, tasks: [...] }
+ * Returns stats: { updated, cleared, tasks: [...] }
  */
-// Per-user mutex to prevent concurrent scheduler runs
-var _schedulerLocks = {};
-function acquireSchedulerLock(userId) {
-  if (_schedulerLocks[userId]) return _schedulerLocks[userId];
-  var resolve;
-  var p = new Promise(function(r) { resolve = r; });
-  _schedulerLocks[userId] = p;
-  p._resolve = resolve;
-  return null; // null means lock acquired
+// Per-user mutex to prevent concurrent scheduler runs (Redis-based for multi-process safety)
+var LOCK_TTL_MS = 30000; // 30s max lock hold time
+async function acquireSchedulerLock(userId) {
+  var lockKey = 'sched_lock:' + userId;
+  try {
+    var acquired = await cache.getClient().set(lockKey, Date.now(), 'PX', LOCK_TTL_MS, 'NX');
+    return acquired ? null : 'locked'; // null = acquired, truthy = already locked
+  } catch (e) {
+    return null; // Redis down — allow through (fail open)
+  }
 }
-function releaseSchedulerLock(userId) {
-  var p = _schedulerLocks[userId];
-  delete _schedulerLocks[userId];
-  if (p && p._resolve) p._resolve();
+async function releaseSchedulerLock(userId) {
+  var lockKey = 'sched_lock:' + userId;
+  try { await cache.getClient().del(lockKey); } catch (e) { /* fail open */ }
 }
 
 async function runScheduleAndPersist(userId, _retries, options) {
@@ -115,23 +116,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   try {
   return await db.transaction(async function(trx) {
 
-  // 1. Reset scheduler-moved tasks back to their original scheduled_at
-  //    Fixed tasks are user-anchored and should never be reset.
-  var resetCount = await trx('tasks')
-    .where('user_id', userId)
-    .whereNotNull('original_scheduled_at')
-    .where(function() {
-      this.whereNull('when').orWhere('when', 'not like', '%fixed%');
-    })
-    .update({
-      scheduled_at: db.raw('original_scheduled_at'),
-      original_scheduled_at: null,
-      updated_at: db.fn.now()
-    });
-
-  if (resetCount > 0) console.log('[SCHED] reset ' + resetCount + ' tasks to original_scheduled_at');
-
-  // 2. Load all tasks for user (now with originals restored)
+  // 1. Load all tasks for user
   var taskRows = await trx('tasks').where('user_id', userId).select();
   var srcMap = buildSourceMap(taskRows);
   var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
@@ -149,22 +134,28 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var cfg = await loadConfig(userId);
   cfg.timezone = TIMEZONE;
 
-  // 5b. Expand recurring habits into per-day instances and persist them
+  // 5b. Expand recurring recurringTasks into per-day instances and persist them
   var today = parseDate(timeInfo.todayKey) || new Date();
   var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + 56);
   var expanded = expandRecurring(allTasks, today, expandEnd, { statuses: statuses });
+  // Cap expansion to prevent runaway instance generation
+  var MAX_EXPANDED = 500;
+  if (expanded.length > MAX_EXPANDED) {
+    console.warn('[SCHED] expansion capped: ' + expanded.length + ' → ' + MAX_EXPANDED);
+    expanded = expanded.slice(0, MAX_EXPANDED);
+  }
   if (expanded.length > 0) {
-    // Persist generated instances as real habit_instance rows so they can be
+    // Persist generated instances as real recurring_instance rows so they can be
     // interacted with (status changes, edits, etc.) without 404 errors.
     var insertRows = expanded.map(function(t) {
       var scheduledAt = t.date ? localToUtc(t.date, t.time || null, TIMEZONE) : null;
       return {
         id: t.id,
         user_id: userId,
-        task_type: 'habit_instance',
+        task_type: 'recurring_instance',
         source_id: t.sourceId,
         generated: 0,
-        habit: 1,
+        recurring: 1,
         scheduled_at: scheduledAt || null,
         status: '',
         created_at: db.fn.now(),
@@ -181,7 +172,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
     statuses = {};
     allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
-    console.log('[SCHED] persisted ' + insertRows.length + ' expanded habit instances');
+    console.log('[SCHED] persisted ' + insertRows.length + ' expanded recurring instances');
   }
 
   // 6. Run scheduler
@@ -220,47 +211,47 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var original = taskById[taskId];
     if (!original) continue;
 
-    // Convert start minutes to "H:MM AM/PM" time string
-    var hh = Math.floor(placement.start / 60);
-    var mm = placement.start % 60;
-    var ampm = hh >= 12 ? 'PM' : 'AM';
-    var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
-    var newTime = dh + ':' + (mm < 10 ? '0' : '') + mm + ' ' + ampm;
+    var newTime = formatMinutesToTime(placement.start);
     var newDate = placement.dateKey;
 
     var dateChanged = newDate !== original.date;
     var timeChanged = newTime !== original.time;
 
-    // Never touch habit templates — they're blueprints, not schedulable tasks.
-    if (original.taskType === 'habit_template') continue;
+    // Never touch recurring templates — they're blueprints, not schedulable tasks.
+    if (original.taskType === 'recurring_template') continue;
     // Fixed tasks are user-anchored — never override their time/date.
     if (original.when && original.when.indexOf('fixed') >= 0) continue;
+    // Date-pinned tasks are user-set — never override their date/time.
+    if (original.datePinned) continue;
     // Markers are non-blocking — never move them.
     if (original.marker) continue;
-    // Habits should never have their date moved — they're day-specific.
-    // Exception: past habits within their placement window can be moved to today.
-    if (original.habit && dateChanged) {
+    // Recurrings should never have their date moved — they're day-specific.
+    // Exception: past recurringTasks within their placement window can be moved to today.
+    if (original.recurring && dateChanged) {
       var origTd = parseDate(original.date);
       var isBehind = origTd && origTd < today;
-      var habitFlex = original.timeFlex != null ? original.timeFlex : 60;
-      var habitDaysPast = origTd ? Math.round((today.getTime() - origTd.getTime()) / 86400000) : 0;
-      if (!isBehind || habitFlex < habitDaysPast * 1440) continue;
+      var recurFlex = original.timeFlex != null ? original.timeFlex : 60;
+      var recurDaysPast = origTd ? Math.round((today.getTime() - origTd.getTime()) / 86400000) : 0;
+      if (!isBehind || recurFlex < recurDaysPast * 1440) continue;
       // Within placement window — allow the date move to today
     }
-    // Rigid habits keep their preferred time (unless redirected from past above).
-    if (original.habit && original.rigid && !dateChanged) continue;
+    // Rigid recurringTasks keep their preferred time (unless redirected from past above).
+    if (original.recurring && original.rigid && !dateChanged) continue;
 
     if (dateChanged || timeChanged) {
       // Compute the new scheduled_at from the placement's local date+time
       var newScheduledAt = localToUtc(newDate, newTime, TIMEZONE);
       if (!newScheduledAt) continue;
 
+      // Minimal-diff: skip write if scheduled_at hasn't actually changed
       var rawRow = rawRowById[taskId];
+      if (rawRow && rawRow.scheduled_at && newScheduledAt.getTime() === new Date(rawRow.scheduled_at).getTime()) continue;
+
       pendingUpdates.push({
         id: taskId,
         dbUpdate: {
           scheduled_at: newScheduledAt,
-          original_scheduled_at: rawRow ? rawRow.scheduled_at : null,
+          unscheduled: null,
           updated_at: db.fn.now()
         }
       });
@@ -277,54 +268,36 @@ async function runScheduleAndPersist(userId, _retries, options) {
     }
   }
 
-  // 8. Clear time on unplaced tasks so they don't ghost-overlap in the UI
+  // 8. Mark unplaced tasks — set unscheduled flag instead of overwriting scheduled_at
+  //    Skip future recurring instances — they'll be placed when their day arrives.
   var cleared = 0;
   result.unplaced.forEach(function(t) {
     if (!t || !t.id) return;
     var original = taskById[t.id];
     if (!original) return;
-    // Never touch habit templates.
-    if (original.taskType === 'habit_template') return;
-    // Fixed tasks are user-anchored — never clear their time.
+    if (original.taskType === 'recurring_template') return;
     if (original.when && original.when.indexOf('fixed') >= 0) return;
-    // Markers are non-blocking — never clear their time.
+    if (original.datePinned) return;
     if (original.marker) return;
-    if (original.time) {
-      var rawRowClr = rawRowById[t.id];
-      var clearUpdate = {
-        original_scheduled_at: rawRowClr ? rawRowClr.scheduled_at : null,
-        updated_at: db.fn.now()
-      };
-      var clearOriginal = taskById[t.id];
-      if (clearOriginal && clearOriginal.date) {
-        var utcMidnight = localToUtc(clearOriginal.date, '12:00 AM', TIMEZONE);
-        if (utcMidnight) clearUpdate.scheduled_at = utcMidnight;
-      }
-      pendingUpdates.push({ id: t.id, dbUpdate: clearUpdate });
-      updatedTasks.push({
-        id: t.id,
-        text: original.text,
-        from: original.date,
-        to: original.date,
-        fromTime: original.time,
-        toTime: null,
-        cleared: true
-      });
-      cleared++;
-    }
+    // Recurring instances that weren't placed by the algorithm should not be flagged
+    // as unscheduled — they'll be placed when their day comes, or auto-skipped if past.
+    if (original.taskType === 'recurring_instance') return;
+    // Mark as unscheduled — clear scheduled_at so the task shows as unscheduled, not at a fake time
+    pendingUpdates.push({ id: t.id, dbUpdate: { unscheduled: 1, scheduled_at: null, updated_at: db.fn.now() } });
+    cleared++;
   });
 
   // 9. Move remaining past-dated tasks to today
-  //    Past habits missed their day — mark as 'skip'.
-  //    Past non-habit tasks that weren't placed — move date to today.
+  //    Past recurringTasks missed their day — mark as 'skip'.
+  //    Past non-recurringTasks that weren't placed — move date to today.
   var todayMidnight = localToUtc(timeInfo.todayKey, '12:00 AM', TIMEZONE);
   if (todayMidnight) {
     var movedPast = 0;
     allTasks.forEach(function(t) {
       // Skip generated recurring instances (not real DB rows)
       if (t.generated) return;
-      // Never touch habit templates — they're blueprints, not schedulable tasks
-      if (t.taskType === 'habit_template') return;
+      // Never touch recurring templates — they're blueprints, not schedulable tasks
+      if (t.taskType === 'recurring_template') return;
       var st = statuses[t.id] || '';
       if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'pause' || st === 'disabled') return;
       if (!t.date || t.date === 'TBD') return;
@@ -338,11 +311,13 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
       // Fixed tasks are user-anchored — never move them, even if past.
       if (t.when && t.when.indexOf('fixed') >= 0) return;
+      // Date-pinned tasks are user-set — never move them.
+      if (t.datePinned) return;
       // Markers are non-blocking — never move them.
       if (t.marker) return;
 
-      if (t.habit) {
-        // Past habit — check placement window before auto-skipping.
+      if (t.recurring) {
+        // Past recurring — check placement window before auto-skipping.
         // If still within timeFlex range, the scheduler can place it today.
         var flex = t.timeFlex != null ? t.timeFlex : 60;
         var daysPast = Math.round((today.getTime() - td.getTime()) / 86400000);
@@ -353,12 +328,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
           dbUpdate: { status: 'skip', updated_at: db.fn.now() }
         });
       } else {
-        // Past non-habit — move date forward to today
+        // Past non-recurring — move date forward to today
         pendingUpdates.push({
           id: t.id,
           dbUpdate: {
             scheduled_at: todayMidnight,
-            original_scheduled_at: rawRowPast.scheduled_at,
             updated_at: db.fn.now()
           }
         });
@@ -368,15 +342,52 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (movedPast > 0) console.log('[SCHED] moved/skipped ' + movedPast + ' past-dated tasks');
   }
 
-  // Execute all updates in sorted order to avoid deadlocks
+  // Execute updates in batches to avoid long-running single-row UPDATEs.
+  // Group by identical dbUpdate shape, then batch with CASE expressions.
+  console.log('[SCHED] executing ' + pendingUpdates.length + ' DB updates');
   pendingUpdates.sort(function(a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
-  for (var pi = 0; pi < pendingUpdates.length; pi++) {
+
+  // Batch scheduled_at updates (the most common case)
+  var scheduledAtUpdates = [];
+  var otherUpdates = [];
+  pendingUpdates.forEach(function(pu) {
+    if (pu.dbUpdate.scheduled_at && !pu.dbUpdate.status) {
+      scheduledAtUpdates.push(pu);
+    } else {
+      otherUpdates.push(pu);
+    }
+  });
+
+  // Batch scheduled_at updates in chunks of 200 using CASE expressions
+  var CHUNK = 200;
+  for (var ci = 0; ci < scheduledAtUpdates.length; ci += CHUNK) {
+    var chunk = scheduledAtUpdates.slice(ci, ci + CHUNK);
+    var ids = chunk.map(function(pu) { return pu.id; });
+    var caseExpr = 'CASE id';
+    var bindings = [];
+    chunk.forEach(function(pu) {
+      caseExpr += ' WHEN ? THEN ?';
+      bindings.push(pu.id, pu.dbUpdate.scheduled_at);
+    });
+    caseExpr += ' END';
     await trx('tasks')
-      .where({ id: pendingUpdates[pi].id, user_id: userId })
-      .update(pendingUpdates[pi].dbUpdate);
+      .where('user_id', userId)
+      .whereIn('id', ids)
+      .update({
+        scheduled_at: trx.raw(caseExpr, bindings),
+        unscheduled: null,
+        updated_at: db.fn.now()
+      });
   }
 
-  console.log('[SCHED] runScheduleAndPersist: reset ' + resetCount + ', updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
+  // Run remaining updates individually (status changes, unscheduled flags, etc.)
+  for (var pi = 0; pi < otherUpdates.length; pi++) {
+    await trx('tasks')
+      .where({ id: otherUpdates[pi].id, user_id: userId })
+      .update(otherUpdates[pi].dbUpdate);
+  }
+
+  console.log('[SCHED] runScheduleAndPersist: updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
 
   // 10. Cache the placement result so GET /placements doesn't re-run the scheduler
   var placementCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date().toISOString(), timezone: TIMEZONE };
@@ -384,11 +395,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     placementCache.dayPlacements[dk] = result.dayPlacements[dk].map(function(p) {
       var entry = { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };
       // Convert local start to UTC ISO for timezone-independent display
-      var hh = Math.floor(p.start / 60);
-      var mm = p.start % 60;
-      var ampm = hh >= 12 ? 'PM' : 'AM';
-      var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
-      var timeStr = dh + ':' + (mm < 10 ? '0' : '') + mm + ' ' + ampm;
+      var timeStr = formatMinutesToTime(p.start);
       var utcDate = localToUtc(dk, timeStr, TIMEZONE);
       if (utcDate) entry.scheduledAtUtc = utcDate.toISOString();
       if (p.locked) entry.locked = true;
@@ -426,7 +433,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   }
 
   // Invalidate Redis caches — scheduler modified tasks
-  cache.invalidateTasks(userId).catch(function() {});
+  cache.invalidateTasks(userId).catch(function(err) { console.error("[silent-catch]", err.message); });
 
   // Add scheduledAtUtc to placements for timezone-independent frontend display
   var outPlacements = {};
@@ -453,7 +460,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   });
   allTasks.forEach(function(t) {
     if (placedIds[t.id]) return;
-    if (t.generated || t.taskType === 'habit_template') return;
+    if (t.generated || t.taskType === 'recurring_template') return;
     var st = statuses[t.id] || '';
     if (st !== 'done' && st !== 'cancel' && st !== 'skip') return;
     if (!t.date || t.date === 'TBD') return;
@@ -468,7 +475,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   });
 
   return {
-    updated: updated, cleared: cleared, reset: resetCount, tasks: updatedTasks, score: result.score,
+    updated: updated, cleared: cleared, tasks: updatedTasks, score: result.score,
     dayPlacements: outPlacements,
     unplaced: result.unplaced.filter(function(t) { return !t.generated; }),
     warnings: result.warnings || []
@@ -494,16 +501,53 @@ async function runScheduleAndPersist(userId, _retries, options) {
  */
 async function getSchedulePlacements(userId, options) {
   var TIMEZONE = (options && options.timezone) || DEFAULT_TIMEZONE;
+  var timeInfo = getNowInTimezone(TIMEZONE);
 
-  // Load all tasks (needed for hydration and hasPastTasks check)
+  // Fast path: check cache freshness with minimal DB queries BEFORE loading all tasks
+  var cacheRow = await db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
+  var cache = null;
+  if (cacheRow) {
+    try {
+      cache = typeof cacheRow.config_value === 'string' ? (function() { try { return JSON.parse(cacheRow.config_value); } catch(e) { return cacheRow.config_value; } })() : cacheRow.config_value;
+    } catch (e) { cache = null; }
+  }
+
+  // Quick staleness check — only needs cache metadata + one lightweight query
+  var cacheUsable = false;
+  if (cache && cache.generatedAt && cache.timezone === TIMEZONE) {
+    var genTime = new Date(cache.generatedAt);
+    var ageMs = Date.now() - genTime.getTime();
+    var genParts = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, month: 'numeric', day: 'numeric' }).formatToParts(genTime);
+    var genVals = {}; genParts.forEach(function(p) { genVals[p.type] = p.value; });
+    var genDateKey = genVals.month + '/' + genVals.day;
+    if (genDateKey === timeInfo.todayKey && ageMs <= 30 * 60 * 1000) {
+      // Check if tasks were modified since cache
+      var maxRow = await db('tasks').where('user_id', userId).max('updated_at as max_updated').first();
+      if (!maxRow || !maxRow.max_updated || new Date(maxRow.max_updated) <= genTime) {
+        cacheUsable = true;
+      }
+    }
+  }
+
+  // Fast return: if cache is fresh, hydrate and return without loading all tasks
+  if (cacheUsable && cache.dayPlacements) {
+    console.log('[SCHED] placements: returning fresh cache (age=' + Math.round((Date.now() - new Date(cache.generatedAt).getTime()) / 1000) + 's)');
+    return {
+      dayPlacements: cache.dayPlacements,
+      unplaced: cache.unplaced || [],
+      score: cache.score || {},
+      warnings: cache.warnings || [],
+      hasPastTasks: false // conservative — full check requires loading all tasks
+    };
+  }
+
+  // Slow path: cache stale — load everything and potentially re-run scheduler
   var taskRows = await db('tasks').where('user_id', userId).select();
   var srcMap = buildSourceMap(taskRows);
   var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
 
   var statuses = {};
   allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
-
-  var timeInfo = getNowInTimezone(TIMEZONE);
 
   // Expand recurring so generated instances can be hydrated from cache
   var today = parseDate(timeInfo.todayKey) || new Date();
@@ -517,15 +561,6 @@ async function getSchedulePlacements(userId, options) {
   var taskById = {};
   allTasks.forEach(function(t) { taskById[t.id] = t; });
 
-  // Try cached placements
-  var cacheRow = await db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
-  var cache = null;
-  if (cacheRow) {
-    try {
-      cache = typeof cacheRow.config_value === 'string' ? JSON.parse(cacheRow.config_value) : cacheRow.config_value;
-    } catch (e) { cache = null; }
-  }
-
   // Check for past tasks (same logic regardless of cache)
   var hasPastTasks = false;
   var todayDate = parseDate(timeInfo.todayKey);
@@ -533,7 +568,7 @@ async function getSchedulePlacements(userId, options) {
     for (var ti = 0; ti < allTasks.length; ti++) {
       var t = allTasks[ti];
       if (t.generated) continue;
-      if (t.taskType === 'habit_template') continue;
+      if (t.taskType === 'recurring_template') continue;
       var tSt = statuses[t.id] || '';
       if (tSt === 'done' || tSt === 'cancel' || tSt === 'skip' || tSt === 'pause' || tSt === 'disabled') continue;
       if (!t.date || t.date === 'TBD') continue;
@@ -542,14 +577,10 @@ async function getSchedulePlacements(userId, options) {
     }
   }
 
-  // If cache is stale, re-run the scheduler.
-  // Stale conditions: different timezone, different day, >30 min old, or tasks modified since cache was generated.
-  var cacheStale = false;
-  if (cache && (!cache.timezone || cache.timezone !== TIMEZONE)) {
-    console.log('[SCHED] cache stale: timezone ' + (cache.timezone || 'missing') + ' → ' + TIMEZONE);
-    cacheStale = true;
-  }
-  if (!cacheStale && cache && cache.generatedAt) {
+  // Cache was already checked in fast path above — if we reached here, it's stale.
+  // But we still need to decide whether to re-run the scheduler or hydrate from stale cache.
+  var cacheStale = true; // we know it's stale (fast path would have returned if fresh)
+  if (cache && cache.generatedAt) {
     var genTime = new Date(cache.generatedAt);
     var ageMs = Date.now() - genTime.getTime();
     // Use Intl to get the generated date in the user's timezone (server may run in UTC)
@@ -587,10 +618,10 @@ async function getSchedulePlacements(userId, options) {
 
   if (cacheStale && cache) {
     // Check if another request is already re-running the scheduler
-    var existingLock = acquireSchedulerLock(userId);
+    var existingLock = await acquireSchedulerLock(userId);
     if (existingLock) {
       console.log('[SCHED] cache stale but scheduler already running, waiting...');
-      await existingLock;
+      await new Promise(function(r) { setTimeout(r, 2000); }); // brief wait for other run
       // Re-read the cache that the other run produced
       var freshCacheRow = await db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
       if (freshCacheRow) {
@@ -648,7 +679,7 @@ async function getSchedulePlacements(userId, options) {
     // this they'd appear unscheduled when the "all" filter is active.
     allTasks.forEach(function(t) {
       if (cachedIds[t.id]) return;
-      if (t.generated || t.taskType === 'habit_template') return;
+      if (t.generated || t.taskType === 'recurring_template') return;
       var st = statuses[t.id] || '';
       if (st !== 'done' && st !== 'cancel' && st !== 'skip') return;
       if (!t.date || t.date === 'TBD') return;
@@ -673,7 +704,7 @@ async function getSchedulePlacements(userId, options) {
     var unplaced = [];
     allTasks.forEach(function(t) {
       if (t.generated) return;
-      if (t.taskType === 'habit_template') return;
+      if (t.taskType === 'recurring_template') return;
       var st = statuses[t.id] || '';
       if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'pause' || st === 'disabled') return;
       // Already placed in a day slot — not unplaced
@@ -693,13 +724,12 @@ async function getSchedulePlacements(userId, options) {
       // New task not in cache at all — apply scheduler exclusion rules
       if (t.marker) return;
       if (t.when && t.when.indexOf('allday') >= 0) return;
-      if (t.section && (t.section.indexOf('PARKING') >= 0 || t.section.indexOf('TO BE SCHEDULED') >= 0)) return;
       if (!t.date || t.date === 'TBD') return;
       var td = parseDate(t.date);
       if (!td) return;
       var isPast = td < todayDate;
-      // Past habits missed their day — not schedulable
-      if (t.habit && isPast) return;
+      // Past recurringTasks missed their day — not schedulable
+      if (t.recurring && isPast) return;
       // Past fixed tasks — not schedulable
       if (isPast && t.when && t.when.indexOf('fixed') >= 0) return;
       unplaced.push(t);

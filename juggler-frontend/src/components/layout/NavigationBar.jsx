@@ -30,7 +30,7 @@ const FILTERS = [
   { id: 'fixed', label: 'Fixed', tip: 'Tasks pinned to a specific date/time (not moved by scheduler)' },
   { id: 'blocked', label: 'Blocked', tip: 'Tasks waiting on incomplete dependencies' },
   { id: 'unplaced', label: 'Unplaced', tip: 'Tasks the scheduler couldn\u2019t place into any time slot' },
-  { id: 'pause', label: 'Paused', tip: 'Tasks and habits temporarily paused' },
+  { id: 'pause', label: 'Paused', tip: 'Tasks temporarily paused' },
 ];
 
 // Which filter controls are relevant per view
@@ -38,7 +38,7 @@ var GRID_VIEWS = { '3day': 1, week: 1, timeline: 1, scurve: 1 };
 var FILTER_VISIBILITY = {
   // Status pills only make sense for task-list views, not time grids
   showStatusFilters: function(v) { return !GRID_VIEWS[v] && v !== 'conflicts'; },
-  // Project, search, and habits apply to most views
+  // Project, search, and recurringTasks apply to most views
   showProjectFilter: function(v) { return v !== 'conflicts'; },
   showSearch: function(v) { return v !== 'conflicts'; },
 };

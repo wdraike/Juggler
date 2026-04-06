@@ -8,8 +8,8 @@
 var unifiedSchedule = require('../src/scheduler/unifiedSchedule');
 var { timeControl } = require('./helpers/time-control');
 var {
-  makeRealConfig, makeTask, makeRigidHabit, makeFlexHabit,
-  makeFixedEvent, makeDeadlineTask, makeRealHabits,
+  makeRealConfig, makeTask, makeRigidRecurring, makeFlexRecurring,
+  makeFixedEvent, makeDeadlineTask, makeRealRecurrings,
   findPlacement, findAllPlacements, placementTime,
   isInWindow, hasNoOverlaps, getDayPlacements, resetCounter
 } = require('./helpers/real-config-fixtures');
@@ -255,16 +255,16 @@ describe('UC-13: Scoring', function() {
 });
 
 // ═════════════════════════════════════════════════════════════════════
-// UC-2: Non-Rigid Habits (dayReq, habitStart/End)
+// UC-2: Non-Rigid Recurrings (dayReq, recurStart/End)
 // ═════════════════════════════════════════════════════════════════════
 
-describe('UC-2: Non-Rigid Habit Constraints', function() {
+describe('UC-2: Non-Rigid Recurring Constraints', function() {
 
-  test('UC-2.6: Habit with dayReq:"weekday" not placed on Saturday', function() {
+  test('UC-2.6: Recurring with dayReq:"weekday" not placed on Saturday', function() {
     var tc = timeControl('4/4/2026'); // Saturday
     tc.setTime('8:00 AM');
     var tasks = [
-      makeFlexHabit({ id: 'weekday_only', text: 'Weekday Habit', dur: 30, date: tc.todayKey, dayReq: 'weekday' })
+      makeFlexRecurring({ id: 'weekday_only', text: 'Weekday Recurring', dur: 30, date: tc.todayKey, dayReq: 'weekday' })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
     // Check it's not on Saturday
@@ -273,14 +273,14 @@ describe('UC-2: Non-Rigid Habit Constraints', function() {
     expect(onSat).toBe(false);
   });
 
-  test('UC-2.7: Daily habit generates for each day in range', function() {
+  test('UC-2.7: Daily recurring generates for each day in range', function() {
     var tc = timeControl('4/6/2026'); // Monday
     tc.setTime('8:00 AM');
     var tasks = [];
     for (var i = 0; i < 7; i++) {
-      tasks.push(makeFlexHabit({
+      tasks.push(makeFlexRecurring({
         id: 'daily_' + tc.dateKey(i).replace('/', ''),
-        text: 'Daily Habit',
+        text: 'Daily Recurring',
         dur: 15,
         date: tc.dateKey(i),
         sourceId: 'ht_daily'
@@ -301,14 +301,14 @@ describe('UC-10: Recurring Expansion Basics', function() {
   var expandRecurring = require('../../shared/scheduler/expandRecurring').expandRecurring;
   var skip = typeof expandRecurring !== 'function';
 
-  test('UC-10.1: Daily habit generates instances for 7 days', function() {
+  test('UC-10.1: Daily recurring generates instances for 7 days', function() {
     if (skip) return;
       var template = {
         id: 'ht_test',
-        taskType: 'habit_template',
-        text: 'Test Habit',
+        taskType: 'recurring_template',
+        text: 'Test Recurring',
         date: '4/6',
-        habit: true,
+        recurring: true,
         recur: { type: 'daily' },
         when: 'morning',
         dur: 30,
@@ -320,14 +320,14 @@ describe('UC-10: Recurring Expansion Basics', function() {
       expect(result.length).toBeGreaterThanOrEqual(6); // 6 or 7 depending on inclusive/exclusive end
     });
 
-  test('UC-10.2: Weekly habit M,W,F — 6 instances in 2 weeks', function() {
+  test('UC-10.2: Weekly recurring M,W,F — 6 instances in 2 weeks', function() {
     if (skip) return;
       var template = {
         id: 'ht_mwf',
-        taskType: 'habit_template',
-        text: 'MWF Habit',
+        taskType: 'recurring_template',
+        text: 'MWF Recurring',
         date: '4/6',
-        habit: true,
+        recurring: true,
         recur: { type: 'weekly', days: 'MWF' },
         when: 'morning',
         dur: 30,
@@ -344,15 +344,15 @@ describe('UC-10: Recurring Expansion Basics', function() {
 // Multi-day Stress Test
 // ═════════════════════════════════════════════════════════════════════
 
-describe('Stress: Full week with real habits + deadlines + calendar events', function() {
+describe('Stress: Full week with real recurringTasks + deadlines + calendar events', function() {
 
-  test('No overlaps and all rigid habits in correct blocks for 7 days', function() {
+  test('No overlaps and all rigid recurringTasks in correct blocks for 7 days', function() {
     var tc = timeControl('4/6/2026'); // Monday
     tc.setTime('8:00 AM');
 
     for (var day = 0; day < 7; day++) {
       var dk = tc.dateKey(day);
-      var tasks = makeRealHabits(dk);
+      var tasks = makeRealRecurrings(dk);
 
       // Add a couple calendar events
       if (day === 0) {
@@ -369,7 +369,7 @@ describe('Stress: Full week with real habits + deadlines + calendar events', fun
       expect(hasNoOverlaps(result, dk)).toBe(true);
 
       // Verify lunch is in lunch block
-      var lunchId = tasks[2].id; // 3rd habit is Lunch
+      var lunchId = tasks[2].id; // 3rd recurring task is Lunch
       var lunch = findPlacement(result, lunchId);
       expect(lunch).not.toBeNull();
       expect(isInWindow(lunch, 720, 780)).toBe(true);

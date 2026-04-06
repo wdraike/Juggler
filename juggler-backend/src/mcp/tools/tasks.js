@@ -9,6 +9,7 @@
 const { z } = require('zod');
 const db = require('../../db');
 const { rowToTask, taskToRow, ensureProject, applySplitDefault, buildSourceMap } = require('../../controllers/task.controller');
+const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
 
 // Shared Zod fields for task input (used by create_task, create_tasks, update_task)
 var taskInputFields = {
@@ -32,7 +33,7 @@ var taskInputFields = {
   location: z.array(z.string()).optional().describe('Location IDs'),
   tools: z.array(z.string()).optional().describe('Tool IDs'),
   notes: z.string().optional().describe('Additional notes'),
-  habit: z.boolean().optional().describe('Whether this is a recurring habit'),
+  recurring: z.boolean().optional().describe('Whether this is a recurring recurring'),
   rigid: z.boolean().optional().describe('Whether time is fixed/rigid'),
   split: z.boolean().optional().describe('Whether task can be split across time blocks'),
   splitMin: z.number().optional().describe('Minimum split chunk in minutes'),
@@ -45,7 +46,9 @@ var taskInputFields = {
   marker: z.boolean().optional().describe('Non-blocking reminder event — shows on calendar at its time but does not prevent tasks from being scheduled in the same slot. Use for events you want to see but not block time for (e.g. TV game windows, reminders). Can have status and dependencies like regular tasks.'),
   flexWhen: z.boolean().optional().describe('Allow the scheduler to relax this task\'s "when" time-of-day preference if it can\'t be placed within those windows. When false (default), the task stays unplaced if its when windows are full.'),
   travelBefore: z.number().optional().describe('Travel buffer before task in minutes — scheduler reserves this time and prevents overlapping placements'),
-  travelAfter: z.number().optional().describe('Travel buffer after task in minutes — scheduler reserves this time and prevents overlapping placements')
+  travelAfter: z.number().optional().describe('Travel buffer after task in minutes — scheduler reserves this time and prevents overlapping placements'),
+  desiredAt: z.string().optional().describe('User intended date/time as UTC ISO. Usually set automatically from date+time — only provide if you need to set desired_at differently from scheduled_at.'),
+  desiredDate: z.string().optional().describe('User intended date only (YYYY-MM-DD). For tasks with a date preference but no specific time.')
 };
 
 function registerTaskTools(server, userId) {
@@ -103,6 +106,7 @@ function registerTaskTools(server, userId) {
       await applySplitDefault(row, userId);
       await ensureProject(userId, task.project);
       await db('tasks').insert(row);
+      enqueueScheduleRun(userId, 'mcp:create_task');
       var created = await db('tasks').where('id', row.id).first();
       return { content: [{ type: 'text', text: JSON.stringify(rowToTask(created, tz), null, 2) }] };
     }
@@ -146,6 +150,7 @@ function registerTaskTools(server, userId) {
         }
       });
 
+      enqueueScheduleRun(userId, 'mcp:create_tasks');
       return { content: [{ type: 'text', text: JSON.stringify({ created: rows.length, ids: rows.map(function(r) { return r.id; }) }) }] };
     }
   );
@@ -173,27 +178,23 @@ function registerTaskTools(server, userId) {
 
       // Auto-pin logic
       var dateWasSet = fields.date !== undefined || fields.scheduledAt !== undefined;
-      var timeWasSet = fields.time !== undefined || fields.scheduledAt !== undefined;
       if (dateWasSet && row.date_pinned === undefined) {
         row.date_pinned = 1;
       }
-      if (dateWasSet || timeWasSet) {
-        row.original_scheduled_at = null;
-      }
 
-      // Habits cannot have dependencies — strip if provided
-      if (existing.task_type === 'habit_template' || existing.task_type === 'habit_instance') {
+      // Recurrings cannot have dependencies — strip if provided
+      if (existing.task_type === 'recurring_template' || existing.task_type === 'recurring_instance') {
         delete row.depends_on;
       }
 
-      // Route template fields to source for habit instances
+      // Route template fields to source for recurring instances
       var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
-        'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
+        'when', 'day_req', 'recurring', 'rigid', 'time_flex', 'split', 'split_min',
         'recur', 'depends_on'];
       var taskType = existing.task_type || 'task';
-      var isHabitInstance = taskType === 'habit_instance' && existing.source_id;
+      var isRecurringInstance = taskType === 'recurring_instance' && existing.source_id;
 
-      if (isHabitInstance) {
+      if (isRecurringInstance) {
         var templateUpdate = {};
         var instanceUpdate = {};
         Object.keys(row).forEach(function(k) {
@@ -218,6 +219,7 @@ function registerTaskTools(server, userId) {
         await db('tasks').where({ id: id, user_id: userId }).update(row);
       }
 
+      enqueueScheduleRun(userId, 'mcp:update_task');
       var allRows = await db('tasks').where('user_id', userId).select();
       var srcMap = buildSourceMap(allRows);
       var updatedRow = allRows.find(function(r) { return r.id === id; });
@@ -243,6 +245,7 @@ function registerTaskTools(server, userId) {
       var update = { status: status || '', updated_at: db.fn.now() };
 
       await db('tasks').where({ id: id, user_id: userId }).update(update);
+      enqueueScheduleRun(userId, 'mcp:set_task_status');
       var updated = await db('tasks').where('id', id).first();
       return { content: [{ type: 'text', text: JSON.stringify(rowToTask(updated, tz), null, 2) }] };
     }
@@ -283,12 +286,13 @@ function registerTaskTools(server, userId) {
             .where({ user_id: userId, task_id: id })
             .where('status', 'active')
             .update({ task_id: null, synced_at: db.fn.now() })
-            .catch(function() {});
+            .catch(function(err) { console.error("[silent-catch]", err.message); });
         }
 
         await trx('tasks').where({ id: id, user_id: userId }).del();
       });
 
+      enqueueScheduleRun(userId, 'mcp:delete_task');
       return { content: [{ type: 'text', text: JSON.stringify({ deleted: true, id: id }) }] };
     }
   );
@@ -327,14 +331,15 @@ function registerTaskTools(server, userId) {
       var dbQuery = db('tasks').where('user_id', userId);
       if (status !== undefined) dbQuery = dbQuery.where('status', status);
       if (project) dbQuery = dbQuery.where('project', project);
+      var escaped = query.replace(/%/g, '\\%').replace(/_/g, '\\_');
       dbQuery = dbQuery.where(function() {
-        this.where('text', 'like', '%' + query + '%')
-            .orWhere('notes', 'like', '%' + query + '%');
+        this.where('text', 'like', '%' + escaped + '%')
+            .orWhere('notes', 'like', '%' + escaped + '%');
       });
       dbQuery = dbQuery.orderBy('created_at', 'asc').limit(limit || 20);
 
       var rows = await dbQuery;
-      // Also load all rows for sourceMap (habit inheritance)
+      // Also load all rows for sourceMap (recurring inheritance)
       var allRows = await db('tasks').where('user_id', userId);
       var srcMap = buildSourceMap(allRows);
       var tasks = rows.map(function(r) { return rowToTask(r, tz, srcMap); });
@@ -363,7 +368,7 @@ function registerTaskTools(server, userId) {
       var updatedCount = 0;
 
       var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
-        'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
+        'when', 'day_req', 'recurring', 'rigid', 'time_flex', 'split', 'split_min',
         'recur', 'depends_on'];
 
       await db.transaction(async function(trx) {
@@ -390,7 +395,7 @@ function registerTaskTools(server, userId) {
           var existing = existingById[id];
           var taskType = existing.task_type || 'task';
 
-          if (taskType === 'habit_instance' && existing.source_id) {
+          if (taskType === 'recurring_instance' && existing.source_id) {
             var templateUpdate = {};
             var instanceUpdate = {};
             Object.keys(row).forEach(function(k) {
@@ -418,6 +423,7 @@ function registerTaskTools(server, userId) {
         }
       });
 
+      enqueueScheduleRun(userId, 'mcp:batch_update_tasks');
       return { content: [{ type: 'text', text: JSON.stringify({ updated: updatedCount }) }] };
     }
   );

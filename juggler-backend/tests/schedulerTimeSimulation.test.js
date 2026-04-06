@@ -12,8 +12,8 @@
 var unifiedSchedule = require('../src/scheduler/unifiedSchedule');
 var { timeControl } = require('./helpers/time-control');
 var {
-  makeRealConfig, makeTask, makeRigidHabit, makeFlexHabit,
-  makeFixedEvent, makeDeadlineTask, makeRealHabits,
+  makeRealConfig, makeTask, makeRigidRecurring, makeFlexRecurring,
+  makeFixedEvent, makeDeadlineTask, makeRealRecurrings,
   findPlacement, findAllPlacements, placementTime,
   isInWindow, hasNoOverlaps, getDayPlacements, resetCounter
 } = require('./helpers/real-config-fixtures');
@@ -29,16 +29,16 @@ function run(tasks, todayKey, nowMins, overrideCfg) {
 beforeEach(function() { resetCounter(); });
 
 // ═════════════════════════════════════════════════════════════════════
-// UC-1: Rigid Habit Feedback Loop Prevention
+// UC-1: Rigid Recurring Feedback Loop Prevention
 // ═════════════════════════════════════════════════════════════════════
 
-describe('UC-1: Rigid Habit Placement', function() {
+describe('UC-1: Rigid Recurring Placement', function() {
 
-  test('UC-1.1: Lunch habit placed in lunch block when free', function() {
+  test('UC-1.1: Lunch recurring placed in lunch block when free', function() {
     var tc = timeControl('4/3/2026'); // Friday
     tc.setTime('8:00 AM');
     var tasks = [
-      makeRigidHabit({ id: 'lunch', text: 'Lunch', when: 'lunch', dur: 30, date: tc.todayKey })
+      makeRigidRecurring({ id: 'lunch', text: 'Lunch', when: 'lunch', dur: 30, date: tc.todayKey })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
     var p = findPlacement(result, 'lunch');
@@ -46,12 +46,12 @@ describe('UC-1: Rigid Habit Placement', function() {
     expect(isInWindow(p, 720, 780)).toBe(true); // 12:00-1:00 PM
   });
 
-  test('UC-1.2: Lunch habit with stale time (7am) corrected to lunch block', function() {
+  test('UC-1.2: Lunch recurring with stale time (7am) corrected to lunch block', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('8:00 AM');
     // Simulate the feedback loop: t.time = "7:00 AM" from a previous bad run
     var tasks = [
-      makeRigidHabit({ id: 'lunch', text: 'Lunch', when: 'lunch', dur: 30, date: tc.todayKey, time: '7:00 AM' })
+      makeRigidRecurring({ id: 'lunch', text: 'Lunch', when: 'lunch', dur: 30, date: tc.todayKey, time: '7:00 AM' })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
     var p = findPlacement(result, 'lunch');
@@ -60,11 +60,11 @@ describe('UC-1: Rigid Habit Placement', function() {
     expect(p.start).not.toBe(420); // NOT 7:00 AM
   });
 
-  test('UC-1.3: Morning habit when morning is in the past (scheduler at noon)', function() {
+  test('UC-1.3: Morning recurring when morning is in the past (scheduler at noon)', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('12:30 PM'); // Past morning block
     var tasks = [
-      makeRigidHabit({ id: 'meds', text: 'Morning Meds', when: 'morning', dur: 20, date: tc.todayKey })
+      makeRigidRecurring({ id: 'meds', text: 'Morning Meds', when: 'morning', dur: 20, date: tc.todayKey })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
     var p = findPlacement(result, 'meds');
@@ -74,11 +74,11 @@ describe('UC-1: Rigid Habit Placement', function() {
     expect(p.locked).toBe(true);
   });
 
-  test('UC-1.4: Evening habit when morning — placed at evening start', function() {
+  test('UC-1.4: Evening recurring when morning — placed at evening start', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('8:00 AM');
     var tasks = [
-      makeRigidHabit({ id: 'eve_meds', text: 'Evening Meds', when: 'evening', dur: 10, date: tc.todayKey })
+      makeRigidRecurring({ id: 'eve_meds', text: 'Evening Meds', when: 'evening', dur: 10, date: tc.todayKey })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
     var p = findPlacement(result, 'eve_meds');
@@ -86,34 +86,34 @@ describe('UC-1: Rigid Habit Placement', function() {
     expect(isInWindow(p, 1020, 1260)).toBe(true); // 5:00-9:00 PM
   });
 
-  test('UC-1.5: Lunch block occupied by fixed event — lunch habit overlaps with conflict flag', function() {
+  test('UC-1.5: Lunch block occupied by fixed event — lunch recurring overlaps with conflict flag', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('8:00 AM');
     var tasks = [
       makeFixedEvent({ id: 'meeting', text: 'Meeting', time: '12:00 PM', dur: 60, date: tc.todayKey }),
-      makeRigidHabit({ id: 'lunch', text: 'Lunch', when: 'lunch', dur: 30, date: tc.todayKey })
+      makeRigidRecurring({ id: 'lunch', text: 'Lunch', when: 'lunch', dur: 30, date: tc.todayKey })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
     var p = findPlacement(result, 'lunch');
-    // Lunch should ALWAYS be placed — rigid habits don't vanish
+    // Lunch should ALWAYS be placed — rigid recurringTasks don't vanish
     expect(p).not.toBeNull();
     // If placed as an overlap, should have _conflict flag
     if (isInWindow(p, 720, 780)) {
       // Placed in the lunch block — check for conflict warning
       var hasConflictWarning = (result.warnings || []).some(function(w) {
-        return w.type === 'habitConflict' && w.taskId === 'lunch';
+        return w.type === 'recurringConflict' && w.taskId === 'lunch';
       });
       expect(hasConflictWarning).toBe(true);
     }
   });
 
-  test('UC-1.5b: Breakfast habit + morning meeting — breakfast shifts or overlaps', function() {
+  test('UC-1.5b: Breakfast recurring + morning meeting — breakfast shifts or overlaps', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('6:00 AM');
     var tasks = [
       // Meeting fills 6-8am
       makeFixedEvent({ id: 'mtg', text: 'Early Meeting', time: '6:00 AM', dur: 120, date: tc.todayKey }),
-      makeRigidHabit({ id: 'bfast', text: 'Eat Breakfast', when: 'morning', dur: 30, date: tc.todayKey })
+      makeRigidRecurring({ id: 'bfast', text: 'Eat Breakfast', when: 'morning', dur: 30, date: tc.todayKey })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
     var p = findPlacement(result, 'bfast');
@@ -129,7 +129,7 @@ describe('UC-1: Rigid Habit Placement', function() {
     }
   });
 
-  test('UC-1.5c: Rigid habit always placed even when day fully blocked', function() {
+  test('UC-1.5c: Rigid recurring always placed even when day fully blocked', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('8:00 AM');
     // Block every slot in the day with fixed events
@@ -141,21 +141,21 @@ describe('UC-1: Rigid Habit Placement', function() {
         dur: 60, date: tc.todayKey
       }));
     }
-    blockers.push(makeRigidHabit({ id: 'lunch', text: 'Lunch', when: 'lunch', dur: 30, date: tc.todayKey }));
+    blockers.push(makeRigidRecurring({ id: 'lunch', text: 'Lunch', when: 'lunch', dur: 30, date: tc.todayKey }));
     var result = run(blockers, tc.todayKey, tc.nowMins);
     var lunch = findPlacement(result, 'lunch');
-    // Rigid habit MUST appear — either in a gap between blocks, or as a conflict overlay
+    // Rigid recurring MUST appear — either in a gap between blocks, or as a conflict overlay
     expect(lunch).not.toBeNull();
     // If conflict-placed, it will have _conflict: true
     // If gap-placed, _conflict will be absent — both are acceptable
   });
 
-  test('UC-1.10: Two rigid lunch habits — only one fits in 30m lunch block', function() {
+  test('UC-1.10: Two rigid lunch recurringTasks — only one fits in 30m lunch block', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('8:00 AM');
     var tasks = [
-      makeRigidHabit({ id: 'lunch1', text: 'Lunch', when: 'lunch', dur: 30, date: tc.todayKey }),
-      makeRigidHabit({ id: 'lunch2', text: 'Lunch Prep', when: 'lunch', dur: 30, date: tc.todayKey })
+      makeRigidRecurring({ id: 'lunch1', text: 'Lunch', when: 'lunch', dur: 30, date: tc.todayKey }),
+      makeRigidRecurring({ id: 'lunch2', text: 'Lunch Prep', when: 'lunch', dur: 30, date: tc.todayKey })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
     var p1 = findPlacement(result, 'lunch1');
@@ -176,9 +176,9 @@ describe('UC-8: Time-of-Day Simulation', function() {
   test('UC-8.1: Scheduler at 6am — full day available', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('6:00 AM');
-    var tasks = makeRealHabits(tc.todayKey);
+    var tasks = makeRealRecurrings(tc.todayKey);
     var result = run(tasks, tc.todayKey, tc.nowMins);
-    // All habits should be placed
+    // All recurringTasks should be placed
     tasks.forEach(function(t) {
       var p = findPlacement(result, t.id);
       expect(p).not.toBeNull();
@@ -189,9 +189,9 @@ describe('UC-8: Time-of-Day Simulation', function() {
   test('UC-8.2: Scheduler at noon — morning past, afternoon available', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('12:00 PM');
-    var tasks = makeRealHabits(tc.todayKey);
+    var tasks = makeRealRecurrings(tc.todayKey);
     var result = run(tasks, tc.todayKey, tc.nowMins);
-    // Morning habits should still be placed (in past overlay)
+    // Morning recurringTasks should still be placed (in past overlay)
     var meds = findPlacement(result, tasks[0].id);
     expect(meds).not.toBeNull();
     // Lunch should be at noon
@@ -204,7 +204,7 @@ describe('UC-8: Time-of-Day Simulation', function() {
   test('UC-8.5: Scheduler runs twice same day — results consistent', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('8:00 AM');
-    var tasks = makeRealHabits(tc.todayKey);
+    var tasks = makeRealRecurrings(tc.todayKey);
     var result1 = run(tasks, tc.todayKey, tc.nowMins);
     // Run again at a later time
     tc.setTime('10:00 AM');
@@ -219,11 +219,11 @@ describe('UC-8: Time-of-Day Simulation', function() {
     expect(isInWindow(lunch2, 720, 780)).toBe(true);
   });
 
-  test('UC-8.6: Scheduler at noon — rigid morning habit in past overlay', function() {
+  test('UC-8.6: Scheduler at noon — rigid morning recurring in past overlay', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('12:30 PM');
     var tasks = [
-      makeRigidHabit({ id: 'meds', text: 'Morning Meds', when: 'morning', dur: 20, date: tc.todayKey })
+      makeRigidRecurring({ id: 'meds', text: 'Morning Meds', when: 'morning', dur: 20, date: tc.todayKey })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
     var p = findPlacement(result, 'meds');
@@ -232,11 +232,11 @@ describe('UC-8: Time-of-Day Simulation', function() {
     expect(p.locked).toBe(true);
   });
 
-  test('UC-8.7: Scheduler at 1pm — lunch habit placed at noon (past overlay)', function() {
+  test('UC-8.7: Scheduler at 1pm — lunch recurring placed at noon (past overlay)', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('1:00 PM');
     var tasks = [
-      makeRigidHabit({ id: 'lunch', text: 'Lunch', when: 'lunch', dur: 30, date: tc.todayKey })
+      makeRigidRecurring({ id: 'lunch', text: 'Lunch', when: 'lunch', dur: 30, date: tc.todayKey })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
     var p = findPlacement(result, 'lunch');
@@ -244,14 +244,14 @@ describe('UC-8: Time-of-Day Simulation', function() {
     expect(isInWindow(p, 720, 780)).toBe(true); // Should be in lunch block, not moved
   });
 
-  test('UC-8.9: Full week simulation — habits in correct blocks each day', function() {
+  test('UC-8.9: Full week simulation — recurringTasks in correct blocks each day', function() {
     var tc = timeControl('4/6/2026'); // Monday
     var weekResults = [];
     for (var i = 0; i < 7; i++) {
       tc.setTime('8:00 AM');
-      var tasks = makeRealHabits(tc.todayKey);
+      var tasks = makeRealRecurrings(tc.todayKey);
       var result = run(tasks, tc.todayKey, tc.nowMins);
-      var lunch = findPlacement(result, tasks[2].id); // Lunch habit
+      var lunch = findPlacement(result, tasks[2].id); // Lunch recurring
       weekResults.push({
         day: tc.dayName,
         dateKey: tc.todayKey,
@@ -273,7 +273,7 @@ describe('UC-8: Time-of-Day Simulation', function() {
     var driftDetected = false;
     for (var i = 0; i < 30; i++) {
       tc.setTime('8:00 AM');
-      var tasks = makeRealHabits(tc.todayKey);
+      var tasks = makeRealRecurrings(tc.todayKey);
       var result = run(tasks, tc.todayKey, tc.nowMins);
       var lunch = findPlacement(result, tasks[2].id);
       if (!lunch || !isInWindow(lunch, 720, 780)) {
@@ -290,18 +290,18 @@ describe('UC-8: Time-of-Day Simulation', function() {
 // UC-3 + UC-4: Deadline + Priority Interactions (from yesterday's bug)
 // ═════════════════════════════════════════════════════════════════════
 
-describe('UC-3/4: Deadline vs Habit Priority (Merged Phase)', function() {
+describe('UC-3/4: Deadline vs Recurring Priority (Merged Phase)', function() {
 
-  test('UC-3.4: P1 deadline due today placed before P1 habits', function() {
+  test('UC-3.4: P1 deadline due today placed before P1 recurringTasks', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('2:00 PM'); // Afternoon, limited time
     var tasks = [
       makeDeadlineTask({ id: 'unemployment', text: 'File for Unemployment', dur: 60, pri: 'P1', date: tc.todayKey, due: tc.todayKey, tools: ['personal_pc'] }),
-      makeFlexHabit({ id: 'apply', text: 'Apply for Jobs', dur: 60, pri: 'P1', date: tc.todayKey, tools: ['personal_pc'], when: '', split: true, splitMin: 30 }),
-      makeFlexHabit({ id: 'resume', text: 'Work on Resume Optimizer', dur: 120, pri: 'P1', date: tc.todayKey, tools: ['personal_pc'], when: '', split: true, splitMin: 15 })
+      makeFlexRecurring({ id: 'apply', text: 'Apply for Jobs', dur: 60, pri: 'P1', date: tc.todayKey, tools: ['personal_pc'], when: '', split: true, splitMin: 30 }),
+      makeFlexRecurring({ id: 'resume', text: 'Work on Resume Optimizer', dur: 120, pri: 'P1', date: tc.todayKey, tools: ['personal_pc'], when: '', split: true, splitMin: 15 })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
-    // Deadline task should be placed (not starved by habits)
+    // Deadline task should be placed (not starved by recurringTasks)
     var p = findPlacement(result, 'unemployment');
     expect(p).not.toBeNull();
   });
@@ -377,37 +377,37 @@ describe('UC-19: Real User Config Scenarios', function() {
     expect(isInWindow(p, 720, 780)).toBe(true);
   });
 
-  test('UC-19.3: P1 deadline due today + P1 habits — deadline gets priority', function() {
+  test('UC-19.3: P1 deadline due today + P1 recurringTasks — deadline gets priority', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('3:00 PM'); // Limited afternoon capacity
     var tasks = [
       makeDeadlineTask({ id: 'unemployment', text: 'File for Unemployment', dur: 60, pri: 'P1', date: tc.todayKey, due: tc.todayKey, tools: ['personal_pc'] }),
-      ...makeRealHabits(tc.todayKey)
+      ...makeRealRecurrings(tc.todayKey)
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
     var p = findPlacement(result, 'unemployment');
-    expect(p).not.toBeNull(); // Must be placed, not starved by habits
+    expect(p).not.toBeNull(); // Must be placed, not starved by recurringTasks
   });
 
-  test('UC-19.7: All rigid habits placed in correct blocks', function() {
+  test('UC-19.7: All rigid recurringTasks placed in correct blocks', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('8:00 AM');
-    var habits = makeRealHabits(tc.todayKey);
-    var result = run(habits, tc.todayKey, tc.nowMins);
+    var recurringTasks = makeRealRecurrings(tc.todayKey);
+    var result = run(recurringTasks, tc.todayKey, tc.nowMins);
 
     // Morning prescriptions — in morning block (360-720)
-    var meds = findPlacement(result, habits[0].id);
+    var meds = findPlacement(result, recurringTasks[0].id);
     expect(meds).not.toBeNull();
     expect(meds.start).toBeGreaterThanOrEqual(360);
     expect(meds.start).toBeLessThan(720);
 
     // Lunch — in lunch block (720-780)
-    var lunch = findPlacement(result, habits[2].id);
+    var lunch = findPlacement(result, recurringTasks[2].id);
     expect(lunch).not.toBeNull();
     expect(isInWindow(lunch, 720, 780)).toBe(true);
 
     // Evening meds — in evening block (1020-1260)
-    var eveMeds = findPlacement(result, habits[3].id);
+    var eveMeds = findPlacement(result, recurringTasks[3].id);
     expect(eveMeds).not.toBeNull();
     expect(isInWindow(eveMeds, 1020, 1260)).toBe(true);
 

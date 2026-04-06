@@ -31,7 +31,7 @@ function makeTask(overrides) {
     dependsOn: [],
     location: [],
     tools: [],
-    habit: false,
+    recurring: false,
     rigid: false,
     marker: false,
     split: false,
@@ -311,13 +311,13 @@ describe('Scheduler Rules', () => {
     });
   });
 
-  // ─── GROUP 9: Rigid vs flexible habits ───
-  describe('Group 9: Rigid vs flexible habits', () => {
-    test('rigid habit at exact time; flexible habit drifts within timeFlex', () => {
+  // ─── GROUP 9: Rigid vs flexible recurringTasks ───
+  describe('Group 9: Rigid vs flexible recurringTasks', () => {
+    test('rigid recurring at exact time; flexible recurring drifts within timeFlex', () => {
       var tasks = [
-        makeTask({ id: 'rigid_7am', habit: true, rigid: true, time: '7:00 AM', dur: 30, text: 'Rigid 7AM', pri: 'P1' }),
+        makeTask({ id: 'rigid_7am', recurring: true, rigid: true, time: '7:00 AM', dur: 30, text: 'Rigid 7AM', pri: 'P1' }),
         makeTask({ id: 'blocker', when: 'fixed', time: '8:00 AM', dur: 30, text: 'Blocker' }),
-        makeTask({ id: 'flex_8am', habit: true, rigid: false, time: '8:00 AM', dur: 30, timeFlex: 60, text: 'Flex 8AM', pri: 'P1' }),
+        makeTask({ id: 'flex_8am', recurring: true, rigid: false, time: '8:00 AM', dur: 30, timeFlex: 60, text: 'Flex 8AM', pri: 'P1' }),
       ];
       var result = run(tasks);
 
@@ -330,7 +330,7 @@ describe('Scheduler Rules', () => {
       expect(blockerParts.length).toBe(1);
       expect(blockerParts[0].start).toBe(480);
 
-      // Flex habit placed but NOT at 480 (blocked), within flex range
+      // Flex recurring placed but NOT at 480 (blocked), within flex range
       var flexParts = findPlacements(result, 'flex_8am');
       expect(flexParts.length).toBe(1);
       expect(flexParts[0].start).not.toBe(480);
@@ -524,7 +524,7 @@ describe('Scheduler Rules', () => {
 
   // ─── GROUP 18: Past tasks ───
   describe('Group 18: Past tasks move to today', () => {
-    test('non-habit past tasks enter pool with today as floor', () => {
+    test('non-recurring past tasks enter pool with today as floor', () => {
       var tasks = [
         makeTask({ id: 'past_task', pri: 'P2', dur: 30, date: '3/21', text: 'Past task' }),
         makeTask({ id: 'today_task', pri: 'P2', dur: 30, text: 'Today task' }),
@@ -539,17 +539,17 @@ describe('Scheduler Rules', () => {
     });
   });
 
-  // ─── GROUP 19: Past habits skipped ───
-  describe('Group 19: Past habits are skipped', () => {
-    test('habits on past dates are dropped', () => {
+  // ─── GROUP 19: Past recurringTasks skipped ───
+  describe('Group 19: Past recurringTasks are skipped', () => {
+    test('recurringTasks on past dates are dropped', () => {
       var tasks = [
-        makeTask({ id: 'past_habit', habit: true, date: '3/21', dur: 30, text: 'Past habit' }),
-        makeTask({ id: 'today_habit', habit: true, date: TODAY, dur: 30, text: 'Today habit' }),
+        makeTask({ id: 'past_recurring', recurring: true, date: '3/21', dur: 30, text: 'Past recurring' }),
+        makeTask({ id: 'today_recurring', recurring: true, date: TODAY, dur: 30, text: 'Today recurring' }),
       ];
       var result = run(tasks);
 
-      expect(isPlaced(result, 'past_habit')).toBe(false);
-      expect(isPlaced(result, 'today_habit')).toBe(true);
+      expect(isPlaced(result, 'past_recurring')).toBe(false);
+      expect(isPlaced(result, 'today_recurring')).toBe(true);
     });
   });
 
@@ -724,10 +724,10 @@ describe('Scheduler Rules', () => {
   describe('Group 27: Capacity stress test', () => {
     test('100+ tasks with mixed constraints complete quickly and correctly', () => {
       var tasks = [];
-      // 20x P1 habits
+      // 20x P1 recurringTasks
       for (var h = 0; h < 5; h++) {
         for (var d = 0; d < 4; d++) {
-          tasks.push(makeTask({ id: 'habit_' + h + '_' + d, pri: 'P1', dur: 30, habit: true, date: dateKey(d), text: 'Habit ' + h }));
+          tasks.push(makeTask({ id: 'recur_' + h + '_' + d, pri: 'P1', dur: 30, recurring: true, date: dateKey(d), text: 'Recurring ' + h }));
         }
       }
       // 30x P2 with deadlines
@@ -795,7 +795,7 @@ describe('Scheduler Rules', () => {
     });
 
     test('B: cross-day priority inversion penalized', () => {
-      // Force P4 on today, P1 on tomorrow by making P4 a pinned habit (always placed)
+      // Force P4 on today, P1 on tomorrow by making P4 a pinned recurring (always placed)
       // and P1 dated tomorrow
       var tasks = [
         makeTask({ id: 'p4_today', pri: 'P4', dur: 30, datePinned: true, text: 'P4 pinned today' }),
@@ -897,17 +897,17 @@ describe('Scheduler Rules', () => {
     });
   });
 
-  // ─── GROUP 33: Multiple habits competing for same slot ───
-  describe('Group 33: Multiple habits competing for same time slot', () => {
-    test('habits displace each other within timeFlex range', () => {
+  // ─── GROUP 33: Multiple recurringTasks competing for same slot ───
+  describe('Group 33: Multiple recurringTasks competing for same time slot', () => {
+    test('recurringTasks displace each other within timeFlex range', () => {
       var tasks = [
-        makeTask({ id: 'habit_a', habit: true, rigid: true, time: '8:00 AM', dur: 30, pri: 'P1', text: 'Habit A 8AM' }),
-        makeTask({ id: 'habit_b', habit: true, rigid: true, time: '8:00 AM', dur: 30, pri: 'P1', text: 'Habit B 8AM' }),
-        makeTask({ id: 'habit_c', habit: true, rigid: true, time: '8:00 AM', dur: 30, pri: 'P1', text: 'Habit C 8AM' }),
+        makeTask({ id: 'recur_a', recurring: true, rigid: true, time: '8:00 AM', dur: 30, pri: 'P1', text: 'Recurring A 8AM' }),
+        makeTask({ id: 'recur_b', recurring: true, rigid: true, time: '8:00 AM', dur: 30, pri: 'P1', text: 'Recurring B 8AM' }),
+        makeTask({ id: 'recur_c', recurring: true, rigid: true, time: '8:00 AM', dur: 30, pri: 'P1', text: 'Recurring C 8AM' }),
       ];
       var result = run(tasks);
       // All should be placed (scheduler must handle collision)
-      var placedCount = ['habit_a', 'habit_b', 'habit_c'].filter(function(id) { return isPlaced(result, id); }).length;
+      var placedCount = ['recur_a', 'recur_b', 'recur_c'].filter(function(id) { return isPlaced(result, id); }).length;
       expect(placedCount).toBeGreaterThanOrEqual(2);
       // No overlaps
       expect(hasOverlaps(result, TODAY)).toBe(false);
@@ -976,7 +976,7 @@ describe('Scheduler Rules', () => {
   describe('Group 37: Generated instances pinned to their date', () => {
     test('generated instance stays on its assigned day', () => {
       var tasks = [
-        makeTask({ id: 'gen_task', pri: 'P3', dur: 30, date: dateKey(3), generated: true, habit: true, text: 'Generated habit' }),
+        makeTask({ id: 'gen_task', pri: 'P3', dur: 30, date: dateKey(3), generated: true, recurring: true, text: 'Generated recurring' }),
       ];
       var result = run(tasks);
       expect(isPlaced(result, 'gen_task')).toBe(true);
@@ -984,20 +984,7 @@ describe('Scheduler Rules', () => {
     });
   });
 
-  // ─── GROUP 38: Section filtering ───
-  describe('Group 38: PARKING and TO BE SCHEDULED sections excluded', () => {
-    test('tasks in PARKING section are not scheduled', () => {
-      var tasks = [
-        makeTask({ id: 'parked', pri: 'P1', dur: 30, section: 'PARKING', text: 'Parked task' }),
-        makeTask({ id: 'tbs', pri: 'P1', dur: 30, section: 'TO BE SCHEDULED', text: 'TBS task' }),
-        makeTask({ id: 'normal', pri: 'P1', dur: 30, text: 'Normal task' }),
-      ];
-      var result = run(tasks);
-      expect(isPlaced(result, 'parked')).toBe(false);
-      expect(isPlaced(result, 'tbs')).toBe(false);
-      expect(isPlaced(result, 'normal')).toBe(true);
-    });
-  });
+  // GROUP 38: removed (PARKING/TO BE SCHEDULED section filtering no longer exists)
 
   // ─── GROUP 39: startAfter + due date (constrained window) ───
   describe('Group 39: Task with both startAfter and due date', () => {
@@ -1041,7 +1028,7 @@ describe('Scheduler Rules', () => {
         tasks.push(makeTask({ id: 'flex_' + i, pri: ['P1', 'P2', 'P3', 'P4'][i % 4], dur: 30 + (i * 10) }));
       }
       tasks.push(makeTask({ id: 'split1', pri: 'P2', dur: 240, split: true, splitMin: 30 }));
-      tasks.push(makeTask({ id: 'habit1', habit: true, time: '7:00 AM', dur: 20, pri: 'P1' }));
+      tasks.push(makeTask({ id: 'recur1', recurring: true, time: '7:00 AM', dur: 20, pri: 'P1' }));
       var result = run(tasks);
 
       Object.keys(result.dayPlacements).forEach(function(dk) {
@@ -1171,12 +1158,12 @@ describe('Scheduler Rules', () => {
     });
   });
 
-  // ─── GROUP 48: Habit-heavy schedule ───
-  describe('Group 48: Habit-heavy schedule leaves room for one-offs', () => {
-    test('one-off tasks still place when habits consume most capacity', () => {
+  // ─── GROUP 48: Recurring-heavy schedule ───
+  describe('Group 48: Recurring-heavy schedule leaves room for one-offs', () => {
+    test('one-off tasks still place when recurringTasks consume most capacity', () => {
       var tasks = [];
       for (var i = 0; i < 8; i++) {
-        tasks.push(makeTask({ id: 'habit_' + i, habit: true, dur: 60, pri: 'P1', text: 'Habit ' + i }));
+        tasks.push(makeTask({ id: 'recur_' + i, recurring: true, dur: 60, pri: 'P1', text: 'Recurring ' + i }));
       }
       tasks.push(makeTask({ id: 'oneoff_a', pri: 'P2', dur: 60, text: 'One-off A' }));
       tasks.push(makeTask({ id: 'oneoff_b', pri: 'P2', dur: 60, text: 'One-off B' }));
@@ -1214,18 +1201,7 @@ describe('Scheduler Rules', () => {
     });
   });
 
-  // ─── GROUP 51: Dependency on PARKING task ───
-  describe('Group 51: Dependency on parked task', () => {
-    test('scheduler does not crash when dep is parked', () => {
-      var tasks = [
-        makeTask({ id: 'parked_dep', pri: 'P2', dur: 30, section: 'PARKING', text: 'Parked task' }),
-        makeTask({ id: 'waiting_child', pri: 'P2', dur: 30, dependsOn: ['parked_dep'], text: 'Waiting on parked' }),
-      ];
-      var result = run(tasks);
-      expect(isPlaced(result, 'parked_dep')).toBe(false);
-      expect(result).toBeDefined();
-    });
-  });
+  // GROUP 51: removed (PARKING section filtering no longer exists)
 
   // ─── GROUP 52: Due date = today ───
   describe('Group 52: Due date is today', () => {
@@ -1492,18 +1468,18 @@ describe('Scheduler Rules', () => {
     });
   });
 
-  // ─── GROUP 64: Habit with dependency on non-habit ───
-  describe('Group 64: Habit depending on non-habit task', () => {
-    test('habit waits for its non-habit dependency', () => {
+  // ─── GROUP 64: Recurring with dependency on non-recurring ───
+  describe('Group 64: Recurring depending on non-recurring task', () => {
+    test('recurring task waits for its non-recurring dependency', () => {
       var tasks = [
         makeTask({ id: 'prep_report', pri: 'P2', dur: 60, date: TOMORROW, text: 'Prepare report' }),
-        makeTask({ id: 'review_habit', pri: 'P1', dur: 30, habit: true, date: TOMORROW, dependsOn: ['prep_report'], text: 'Review report' }),
+        makeTask({ id: 'review_recurring', pri: 'P1', dur: 30, recurring: true, date: TOMORROW, dependsOn: ['prep_report'], text: 'Review report' }),
       ];
       var result = run(tasks);
 
       expect(isPlaced(result, 'prep_report')).toBe(true);
-      expect(isPlaced(result, 'review_habit')).toBe(true);
-      expect(placedBefore(result, 'prep_report', 'review_habit')).toBe(true);
+      expect(isPlaced(result, 'review_recurring')).toBe(true);
+      expect(placedBefore(result, 'prep_report', 'review_recurring')).toBe(true);
     });
   });
 

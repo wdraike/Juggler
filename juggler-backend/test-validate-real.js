@@ -301,9 +301,6 @@ tasks.forEach(function(t) {
   if (hasWhen(t.when, 'allday') && placementsByTask[t.id]) {
     fail('[EXCL] ' + t.id + ' (' + t.text + ') is allday but placed');
   }
-  if (t.section && (t.section.includes('PARKING') || t.section.includes('TO BE SCHEDULED')) && placementsByTask[t.id]) {
-    fail('[EXCL] ' + t.id + ' (' + t.text + ') is PARKING/TBS but placed');
-  }
   if ((!t.date || t.date === 'TBD') && placementsByTask[t.id]) {
     fail('[EXCL] ' + t.id + ' (' + t.text + ') has no date but placed');
   }

@@ -68,7 +68,7 @@ export default function taskReducer(state, action) {
       // Track dirty status so INIT won't overwrite it
       var ds = Object.assign({}, state._dirtyStatuses || {});
       ds[action.id] = action.val || '';
-      // If taskFields were updated (e.g. habit completion date advance), mark those fields dirty
+      // If taskFields were updated (e.g. recurring completion date advance), mark those fields dirty
       var dtIds = state._dirtyTaskIds;
       if (action.taskFields) {
         dtIds = markDirtyFields(dtIds, action.id, action.taskFields);
@@ -77,12 +77,12 @@ export default function taskReducer(state, action) {
     }
     case 'UPDATE_TASK': {
       var dt3 = markDirtyFields(state._dirtyTaskIds, action.id, action.fields);
-      // Find the target task to check if it's a habit instance
+      // Find the target task to check if it's a recurring task instance
       var targetTask = state.tasks.find(function(t) { return t.id === action.id; });
       var sourceId = targetTask && targetTask.sourceId;
       // Template fields that propagate from source to all instances
       var TEMPLATE_PROPS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
-        'when', 'dayReq', 'habit', 'rigid', 'timeFlex', 'split', 'splitMin',
+        'when', 'dayReq', 'recurring', 'rigid', 'timeFlex', 'split', 'splitMin',
         'travelBefore', 'travelAfter', 'dependsOn'];
       // Extract template-level changes from the update
       var templatePatch = null;

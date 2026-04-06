@@ -3,7 +3,7 @@
  */
 
 import React from 'react';
-import { GRID_START, PRI_COLORS, STATUS_MAP, locIcon, WHEN_TAG_ICONS } from '../../state/constants';
+import { GRID_START, PRI_COLORS, STATUS_MAP, locIcon, WHEN_TAG_ICONS, isTerminalStatus } from '../../state/constants';
 import { parseWhen } from '../../scheduler/timeBlockHelpers';
 import TaskStatusSelect from '../tasks/TaskStatusSelect';
 import { getTheme } from '../../theme/colors';
@@ -38,7 +38,7 @@ export default function ScheduledTaskBlock({ item, status, gridZoom, gutter, has
         padding: '2px 6px',
         cursor: 'pointer',
         background: isDone ? theme.badgeBg : theme.bgCard,
-        border: `1px ${task.habit ? 'dashed' : 'solid'} ${isDone ? theme.border : priColor}`,
+        border: `1px ${task.recurring ? 'dashed' : 'solid'} ${isDone ? theme.border : priColor}`,
         borderLeft: `3px solid ${priColor}`,
         overflow: 'hidden',
         opacity: isDone ? 0.5 : 1,
@@ -61,6 +61,7 @@ export default function ScheduledTaskBlock({ item, status, gridZoom, gutter, has
           </span>
         )}
         {task.location?.length > 0 && (function() { var ic = task.location.map(lid => locIcon(lid)).filter(Boolean); return ic.length > 0 ? <span style={{ fontSize: 9, marginRight: 2 }}>{ic.join('')}</span> : null; })()}
+        {task.prevWhen != null && <span title="Pinned by drag — click to unpin" style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDCCC'}</span>}
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{task.text}</span>
       </div>
       {height > 24 && (

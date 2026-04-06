@@ -56,9 +56,9 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
     allTasks.forEach(t => {
       var st = statuses[t.id] || '';
       if (st === 'done' || st === 'cancel' || st === 'skip') return;
-      // Habit templates are blueprints, not actionable — skip for issues
-      if (t.taskType === 'habit_template') return;
-      // Generated/expanded habit instances are managed by the scheduler
+      // Recurring templates are blueprints, not actionable — skip for issues
+      if (t.taskType === 'recurring_template') return;
+      // Generated/expanded recurring instances are managed by the scheduler
       if (t.generated) return;
 
       // True overdue: explicit due date in the past
@@ -77,7 +77,6 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
       if (!deps.satisfied) blocked.push(t);
 
       if (!t.date || t.date === 'TBD') {
-        if (t.section && (t.section.indexOf('PARKING') >= 0 || t.section.indexOf('TO BE SCHEDULED') >= 0)) return;
         unscheduled.push(t);
       }
     });

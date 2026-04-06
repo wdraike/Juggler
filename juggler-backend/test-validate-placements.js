@@ -18,7 +18,7 @@
  *  12.  FlexWhen annotation — _whenRelaxed only on flexWhen tasks placed outside windows
  *  13.  Duration accuracy — placed duration matches expected (dur or timeRemaining)
  *  14.  Status filtering — done/cancel/skip tasks must NOT appear in placements
- *  15.  Exclusion rules — allday, PARKING, TBD tasks must NOT be placed
+ *  15.  Exclusion rules — allday, TBD tasks must NOT be placed
  *  16.  Priority ordering — higher-pri tasks should get earlier/better placement
  *  17.  Downstream ceiling — tasks placed on/before earliest dependant date
  *  18.  DatePinned immutability — pinned tasks stay on their declared date
@@ -579,13 +579,6 @@ function validate(result, tasks, cfg, label, options) {
     if (hasWhen(t.when, 'allday')) {
       if (placementsByTask[t.id] && placementsByTask[t.id].length > 0) {
         fail('[EXCL] ' + t.id + ' (' + t.text + ') is allday but appears in time-grid placements');
-      } else {
-        pass();
-      }
-    }
-    if (t.section && (t.section.includes('PARKING') || t.section.includes('TO BE SCHEDULED'))) {
-      if (placementsByTask[t.id] && placementsByTask[t.id].length > 0) {
-        fail('[EXCL] ' + t.id + ' (' + t.text + ') is in PARKING/TO BE SCHEDULED but appears in placements');
       } else {
         pass();
       }
@@ -1228,14 +1221,12 @@ scenarios['status-filtering'] = function() {
   validate(result, tasks, cfg, 'Status filtering (done/cancel/skip)', { statuses: statuses });
 };
 
-// ── Scenario 15: Exclusion rules (allday, PARKING, TBD) ──
+// ── Scenario 15: Exclusion rules (allday, TBD) ──
 scenarios['exclusions'] = function() {
   var tasks = [
     makeTask({ id: 'allday_task', text: 'All day event', pri: 'P2', dur: 480, when: 'allday' }),
-    makeTask({ id: 'parking_task', text: 'Parked task', pri: 'P3', dur: 60, section: 'PARKING LOT' }),
     makeTask({ id: 'tbd_task', text: 'TBD task', pri: 'P3', dur: 60, date: 'TBD' }),
     makeTask({ id: 'no_date', text: 'No date', pri: 'P3', dur: 60, date: '' }),
-    makeTask({ id: 'tbs_task', text: 'To be scheduled', pri: 'P3', dur: 60, section: 'TO BE SCHEDULED' }),
     // Normal task should still be placed
     makeTask({ id: 'normal', text: 'Normal', pri: 'P3', dur: 60 }),
   ];
@@ -1244,7 +1235,7 @@ scenarios['exclusions'] = function() {
   tasks.forEach(function(t) { statuses[t.id] = ''; });
   var cfg = makeCfg();
   var result = unifiedSchedule(tasks, statuses, todayKey, 0, cfg);
-  validate(result, tasks, cfg, 'Exclusion rules (allday, PARKING, TBD)', { statuses: statuses });
+  validate(result, tasks, cfg, 'Exclusion rules (allday, TBD)', { statuses: statuses });
 };
 
 // ── Scenario 16: Location constraints ──

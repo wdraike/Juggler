@@ -14,25 +14,25 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
   var [dragOver, setDragOver] = useState(null);
 
   var filteredTasks = useMemo(() => {
-    // Exclude habit templates — only show instances.
-    // Deduplicate habits: for each habit text, pick the best representative instance.
-    // Prefer open instances over done/skipped/cancelled ones so today's habit is shown.
-    var habitBest = {};
+    // Exclude recurring templates — only show instances.
+    // Deduplicate recurringTasks: for each recurring text, pick the best representative instance.
+    // Prefer open instances over done/skipped/cancelled ones so today's recurring task is shown.
+    var recurringBest = {};
     allTasks.forEach(t => {
-      if (!t.habit || t.taskType === 'habit_template') return;
+      if (!t.recurring || t.taskType === 'recurring_template') return;
       var key = t.text || t.id;
       var st = statuses[t.id] || '';
       var isOpen = st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause';
-      var prev = habitBest[key];
+      var prev = recurringBest[key];
       if (!prev || (isOpen && !prev.isOpen)) {
-        habitBest[key] = { id: t.id, isOpen: isOpen };
+        recurringBest[key] = { id: t.id, isOpen: isOpen };
       }
     });
-    var habitKeepIds = {};
-    Object.keys(habitBest).forEach(k => { habitKeepIds[habitBest[k].id] = true; });
+    var recurringKeepIds = {};
+    Object.keys(recurringBest).forEach(k => { recurringKeepIds[recurringBest[k].id] = true; });
     var deduped = allTasks.filter(t => {
-      if (t.taskType === 'habit_template') return false;
-      if (t.habit) return !!habitKeepIds[t.id];
+      if (t.taskType === 'recurring_template') return false;
+      if (t.recurring) return !!recurringKeepIds[t.id];
       return true;
     });
 

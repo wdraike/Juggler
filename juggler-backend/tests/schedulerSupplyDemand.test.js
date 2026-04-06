@@ -23,7 +23,7 @@ function makeTask(overrides) {
   return {
     id: 'sd_' + _id, text: 'Task ' + _id, date: TODAY, dur: 30, pri: 'P3',
     when: '', dayReq: 'any', status: '', dependsOn: [], location: [], tools: [],
-    habit: false, rigid: false, marker: false, split: false, datePinned: false,
+    recurring: false, rigid: false, marker: false, split: false, datePinned: false,
     generated: false, section: '', flexWhen: false, ...overrides
   };
 }
@@ -197,39 +197,39 @@ describe('Category B: Overlapping Fixed & Rigid Items', () => {
     expect(warning).toBeDefined();
   });
 
-  test('B2: Three rigid habits in same 30m block — overflow with _conflict', () => {
-    // All three rigid habits want lunch block (720-780, 60m window)
+  test('B2: Three rigid recurringTasks in same 30m block — overflow with _conflict', () => {
+    // All three rigid recurringTasks want lunch block (720-780, 60m window)
     // Each is 30m, but the block only fits 2 at most
     const tasks = [
-      makeTask({ id: 'habit1', habit: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
-      makeTask({ id: 'habit2', habit: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
-      makeTask({ id: 'habit3', habit: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'recur1', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'recur2', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'recur3', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
     ];
 
     const result = run(tasks);
 
-    // All three should be placed (rigid habits never vanish)
-    expect(isPlaced(result, 'habit1')).toBe(true);
-    expect(isPlaced(result, 'habit2')).toBe(true);
-    expect(isPlaced(result, 'habit3')).toBe(true);
+    // All three should be placed (rigid recurringTasks never vanish)
+    expect(isPlaced(result, 'recur1')).toBe(true);
+    expect(isPlaced(result, 'recur2')).toBe(true);
+    expect(isPlaced(result, 'recur3')).toBe(true);
 
     // At least one should have _conflict flag (third can't fit in 60m window)
     const allPlacements = [
-      ...findPlacements(result, 'habit1'),
-      ...findPlacements(result, 'habit2'),
-      ...findPlacements(result, 'habit3'),
+      ...findPlacements(result, 'recur1'),
+      ...findPlacements(result, 'recur2'),
+      ...findPlacements(result, 'recur3'),
     ];
     const conflicts = allPlacements.filter(p => p._conflict);
-    // The third habit may overflow to adjacent window or conflict
+    // The third recurring may overflow to adjacent window or conflict
     expect(allPlacements.length).toBe(3);
   });
 
-  test('B3: Fixed event + rigid habit competing for same hour', () => {
+  test('B3: Fixed event + rigid recurring competing for same hour', () => {
     const tasks = [
       // 1-hour meeting at noon blocks the entire lunch window
       makeTask({ id: 'meeting', when: 'fixed', date: TODAY, time: '12:00 PM', dur: 60, datePinned: true }),
-      // Rigid lunch habit wants lunch block
-      makeTask({ id: 'lunch', habit: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      // Rigid lunch recurring wants lunch block
+      makeTask({ id: 'lunch', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
     ];
 
     const result = run(tasks);
@@ -237,7 +237,7 @@ describe('Category B: Overlapping Fixed & Rigid Items', () => {
     expect(isPlaced(result, 'meeting')).toBe(true);
     expect(isPlaced(result, 'lunch')).toBe(true);
 
-    // Lunch habit should be displaced to adjacent window or force-placed with conflict
+    // Lunch recurring should be displaced to adjacent window or force-placed with conflict
     const lunchP = findPlacements(result, 'lunch')[0];
     const meetingP = findPlacements(result, 'meeting')[0];
 
@@ -248,12 +248,12 @@ describe('Category B: Overlapping Fixed & Rigid Items', () => {
     expect(displaced).toBe(true);
   });
 
-  test('B4: All-day event blocks entire day — rigid habits force-place, flex tasks overflow', () => {
+  test('B4: All-day event blocks entire day — rigid recurringTasks force-place, flex tasks overflow', () => {
     const tasks = [
       // All-day calendar event
       makeTask({ id: 'allday', when: 'fixed', date: TODAY, time: '8:00 AM', dur: 780, datePinned: true }),
-      // Rigid habit must still appear
-      makeTask({ id: 'meds', habit: true, rigid: true, when: 'morning', dur: 20, date: TODAY, generated: true }),
+      // Rigid recurring must still appear
+      makeTask({ id: 'meds', recurring: true, rigid: true, when: 'morning', dur: 20, date: TODAY, generated: true }),
       // Flexible task should overflow
       makeTask({ id: 'flex', pri: 'P3', dur: 60, date: TODAY }),
     ];
@@ -262,7 +262,7 @@ describe('Category B: Overlapping Fixed & Rigid Items', () => {
 
     // All-day event placed
     expect(isPlaced(result, 'allday')).toBe(true);
-    // Rigid habit placed (possibly with conflict)
+    // Rigid recurring placed (possibly with conflict)
     expect(isPlaced(result, 'meds')).toBe(true);
     // Flex task may overflow to another day or be unplaced
     const flexP = findPlacements(result, 'flex');
@@ -280,7 +280,7 @@ describe('Category C: Dependency Chain Under Pressure', () => {
 
   test('C1: Chain A→B→C, C due today, only partial capacity — tail placed, head dropped', () => {
     // Each task 180m (3h). Total chain = 540m (9h). Today has ~780m from 8am.
-    // But if we also have habits etc, may not all fit.
+    // But if we also have recurringTasks etc, may not all fit.
     // Make today tight: only 360m available (6h) by blocking morning
     const tasks = [
       makeTask({ id: 'block', when: 'fixed', date: TODAY, time: '8:00 AM', dur: 420, datePinned: true }),
@@ -391,14 +391,14 @@ describe('Category C: Dependency Chain Under Pressure', () => {
 
 describe('Category D: Combined Pressure', () => {
 
-  test('D1: Dependency chain + rigid habits + fixed events all on same day', () => {
+  test('D1: Dependency chain + rigid recurringTasks + fixed events all on same day', () => {
     const tasks = [
       // Fixed events eating 4 hours
       makeTask({ id: 'mtg_am', when: 'fixed', date: TODAY, time: '9:00 AM', dur: 120, datePinned: true }),
       makeTask({ id: 'mtg_pm', when: 'fixed', date: TODAY, time: '2:00 PM', dur: 120, datePinned: true }),
-      // Rigid habits
-      makeTask({ id: 'lunch_h', habit: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
-      makeTask({ id: 'meds_h', habit: true, rigid: true, when: 'morning', dur: 20, date: TODAY, generated: true }),
+      // Rigid recurringTasks
+      makeTask({ id: 'lunch_h', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'meds_h', recurring: true, rigid: true, when: 'morning', dur: 20, date: TODAY, generated: true }),
       // Dependency chain P1
       makeTask({ id: 'step1', pri: 'P1', dur: 90, date: TODAY }),
       makeTask({ id: 'step2', pri: 'P1', dur: 90, date: TODAY, due: dateKey(1), dependsOn: ['step1'] }),
@@ -409,7 +409,7 @@ describe('Category D: Combined Pressure', () => {
     // Fixed events always placed
     expect(isPlaced(result, 'mtg_am')).toBe(true);
     expect(isPlaced(result, 'mtg_pm')).toBe(true);
-    // Rigid habits always placed
+    // Rigid recurringTasks always placed
     expect(isPlaced(result, 'lunch_h')).toBe(true);
     expect(isPlaced(result, 'meds_h')).toBe(true);
     // Deadline task should be placed
@@ -503,13 +503,13 @@ describe('Category D: Combined Pressure', () => {
     expect(isPlaced(result, 'p1_flex')).toBe(true);
   });
 
-  test('D6: Habit-heavy day with deadline crunch — habits always appear', () => {
+  test('D6: Recurring-heavy day with deadline crunch — recurringTasks always appear', () => {
     const tasks = [
-      // 4 rigid habits (total 90m) spread across blocks
-      makeTask({ id: 'h1', habit: true, rigid: true, when: 'morning', dur: 20, date: TODAY, generated: true }),
-      makeTask({ id: 'h2', habit: true, rigid: true, when: 'morning', dur: 30, date: TODAY, generated: true }),
-      makeTask({ id: 'h3', habit: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
-      makeTask({ id: 'h4', habit: true, rigid: true, when: 'evening', dur: 10, date: TODAY, generated: true }),
+      // 4 rigid recurringTasks (total 90m) spread across blocks
+      makeTask({ id: 'h1', recurring: true, rigid: true, when: 'morning', dur: 20, date: TODAY, generated: true }),
+      makeTask({ id: 'h2', recurring: true, rigid: true, when: 'morning', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'h3', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'h4', recurring: true, rigid: true, when: 'evening', dur: 10, date: TODAY, generated: true }),
       // P1 deadline tasks filling the biz blocks
       makeTask({ id: 'crunch1', pri: 'P1', dur: 120, due: TODAY, date: TODAY }),
       makeTask({ id: 'crunch2', pri: 'P1', dur: 120, due: TODAY, date: TODAY }),
@@ -519,7 +519,7 @@ describe('Category D: Combined Pressure', () => {
 
     const result = run(tasks);
 
-    // ALL rigid habits should be placed (never vanish)
+    // ALL rigid recurringTasks should be placed (never vanish)
     expect(isPlaced(result, 'h1')).toBe(true);
     expect(isPlaced(result, 'h2')).toBe(true);
     expect(isPlaced(result, 'h3')).toBe(true);
@@ -547,14 +547,14 @@ describe('Category E: Placement Reasons', () => {
     expect(p._placementReason).toContain('Fixed calendar event');
   });
 
-  test('E2: Rigid habit gets reason with block name', () => {
+  test('E2: Rigid recurring gets reason with block name', () => {
     const tasks = [
-      makeTask({ id: 'lunch_h', habit: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'lunch_h', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
     ];
     const result = run(tasks);
     const p = findPlacements(result, 'lunch_h')[0];
     expect(p).toBeDefined();
-    expect(p._placementReason).toContain('Rigid habit');
+    expect(p._placementReason).toContain('Rigid recurring');
     expect(p._placementReason).toContain('Lunch');
   });
 
@@ -597,7 +597,7 @@ describe('Category E: Placement Reasons', () => {
   test('E6: Every placed task has a _placementReason', () => {
     const tasks = [
       makeTask({ id: 'fixed', when: 'fixed', date: TODAY, time: '9:00 AM', dur: 60, datePinned: true }),
-      makeTask({ id: 'habit', habit: true, rigid: true, when: 'morning', dur: 20, date: TODAY, generated: true }),
+      makeTask({ id: 'recurring', recurring: true, rigid: true, when: 'morning', dur: 20, date: TODAY, generated: true }),
       makeTask({ id: 'dl', pri: 'P1', dur: 60, date: TODAY, due: dateKey(2) }),
       makeTask({ id: 'flex', pri: 'P3', dur: 30, date: TODAY }),
     ];
@@ -613,13 +613,13 @@ describe('Category E: Placement Reasons', () => {
     });
   });
 
-  test('E7: Conflict habit reason mentions overlap', () => {
+  test('E7: Conflict recurring reason mentions overlap', () => {
     const tasks = [
-      // Block lunch with fixed event, force rigid habit into conflict
+      // Block lunch with fixed event, force rigid recurring into conflict
       makeTask({ id: 'mtg', when: 'fixed', date: TODAY, time: '12:00 PM', dur: 60, datePinned: true }),
       makeTask({ id: 'block_morn', when: 'fixed', date: TODAY, time: '6:00 AM', dur: 360, datePinned: true }),
       makeTask({ id: 'block_aft', when: 'fixed', date: TODAY, time: '1:00 PM', dur: 480, datePinned: true }),
-      makeTask({ id: 'lunch_h', habit: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'lunch_h', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
     ];
     const result = run(tasks);
     const p = findPlacements(result, 'lunch_h')[0];
@@ -627,6 +627,102 @@ describe('Category E: Placement Reasons', () => {
     if (p._conflict) {
       expect(p._placementReason).toContain('overlap');
     }
+  });
+
+  test('E8: Debug mode produces phase snapshots', () => {
+    const debugCfg = { ...cfg, _debug: true };
+    const tasks = [
+      makeTask({ id: 'fixed1', when: 'fixed', date: TODAY, time: '9:00 AM', dur: 60, datePinned: true }),
+      makeTask({ id: 'recur1', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'dl1', pri: 'P1', dur: 60, date: TODAY, due: dateKey(2) }),
+      makeTask({ id: 'flex1', pri: 'P3', dur: 30, date: TODAY }),
+    ];
+    const result = run(tasks, { cfg: debugCfg });
+
+    expect(result.phaseSnapshots).toBeDefined();
+    expect(result.phaseSnapshots.length).toBeGreaterThanOrEqual(6); // At least 6 phases captured
+
+    // Each snapshot should have days with items
+    result.phaseSnapshots.forEach(snap => {
+      expect(snap.phase).toBeDefined();
+      expect(snap.timestamp).toBeDefined();
+      expect(snap.days).toBeDefined();
+    });
+
+    // Final snapshot should have all 4 tasks
+    const finalSnap = result.phaseSnapshots[result.phaseSnapshots.length - 1];
+    const allItems = Object.values(finalSnap.days).flat();
+    expect(allItems.length).toBeGreaterThanOrEqual(4);
+
+    // Items should have type annotations
+    const types = allItems.map(i => i.type);
+    expect(types).toContain('fixed');
+  });
+
+  test('E9: Non-debug mode does NOT produce snapshots', () => {
+    const tasks = [makeTask({ id: 'x', dur: 30, date: TODAY })];
+    const result = run(tasks);
+    expect(result.phaseSnapshots).toBeUndefined();
+  });
+
+  test('E8a: Flexible recurring with flex window entirely past → missed (not placed)', () => {
+    // Preferred time 7:00am (420m), flex ±60m → window 360-480.
+    // nowMins=480 (8am) → entire window is past.
+    const tasks = [
+      makeTask({ id: 'breakfast', text: 'Eat Breakfast', recurring: true, rigid: false, when: 'morning', dur: 30, date: TODAY, time: '7:00 AM', generated: true }),
+    ];
+    // Run with nowMins=480 (8am) — flex window [360,480] is entirely past
+    const statuses = {}; tasks.forEach(t => statuses[t.id] = '');
+    const unifiedSchedule = require('../src/scheduler/unifiedSchedule');
+    const result = unifiedSchedule(tasks, statuses, TODAY, 480, cfg);
+
+    // Should NOT be placed
+    expect(isPlaced(result, 'breakfast')).toBe(false);
+    // Should be in unplaced with reason 'missed'
+    const missed = result.unplaced.find(t => t.id === 'breakfast');
+    expect(missed).toBeDefined();
+    expect(missed._unplacedReason).toBe('missed');
+    expect(missed._unplacedDetail).toContain('has passed');
+  });
+
+  test('E8b: Flexible recurring with flex window partially remaining → placed normally', () => {
+    // Preferred 7:00am, flex ±60m → window 360-480.
+    // nowMins=420 (7am) → half the window remains (420-480).
+    const tasks = [
+      makeTask({ id: 'breakfast', text: 'Eat Breakfast', recurring: true, rigid: false, when: 'morning', dur: 30, date: TODAY, time: '7:00 AM', generated: true }),
+    ];
+    const statuses = {}; tasks.forEach(t => statuses[t.id] = '');
+    const unifiedSchedule = require('../src/scheduler/unifiedSchedule');
+    const result = unifiedSchedule(tasks, statuses, TODAY, 420, cfg);
+
+    // Should be placed (window still partially open)
+    expect(isPlaced(result, 'breakfast')).toBe(true);
+  });
+
+  test('E8c: Flex window full (not past) → recurring unplaced, not drifted to 11am', () => {
+    // Breakfast preferred 7:00am, flex ±60m → window 360-480.
+    // Fill the entire flex window with a fixed meeting.
+    const tasks = [
+      makeTask({ id: 'meeting', when: 'fixed', date: TODAY, time: '6:00 AM', dur: 120, datePinned: true }), // fills 360-480
+      makeTask({ id: 'breakfast', text: 'Eat Breakfast', recurring: true, rigid: false, when: 'morning', dur: 30, date: TODAY, time: '7:00 AM', generated: true }),
+    ];
+    const result = run(tasks); // nowMins=480
+
+    // Breakfast should NOT be placed at 11am — should be unplaced
+    const placements = findPlacements(result, 'breakfast');
+    if (placements.length > 0) {
+      // If placed, should be within the flex window, not drifted
+      expect(placements[0].start).toBeLessThanOrEqual(480);
+    }
+  });
+
+  test('E8d: Recurring without preferred time → placed normally regardless of time', () => {
+    // No time set, so no flex window constraint — anytime is fine
+    const tasks = [
+      makeTask({ id: 'exercise', text: 'Exercise', recurring: true, rigid: false, when: 'morning,afternoon,evening', dur: 30, date: TODAY, generated: true }),
+    ];
+    const result = run(tasks);
+    expect(isPlaced(result, 'exercise')).toBe(true);
   });
 
   test('E8: Tool-constrained task reason mentions tool', () => {

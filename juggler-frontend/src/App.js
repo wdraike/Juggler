@@ -10,9 +10,15 @@ import LoginPage from './components/auth/LoginPage';
 import AppLayout from './components/layout/AppLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import UpgradePrompt from './components/billing/UpgradePrompt';
+import SchedulerDebug from './components/admin/SchedulerDebug';
 
 function AppContent() {
   const { user, loading } = useAuth();
+
+  // Hidden admin route — scheduler debug visualization
+  if (window.location.pathname === '/admin/scheduler-debug') {
+    return user ? <SchedulerDebug /> : <LoginPage />;
+  }
 
   // Handle auth callback route
   if (window.location.pathname === '/auth/callback') {

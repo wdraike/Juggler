@@ -8,7 +8,7 @@
  * Move types:
  *  0 - Swap: two non-locked tasks on same day (any duration)
  *  1 - Shift: move task to different gap on same day
- *  2 - Date shift: move non-pinned, non-habit task closer to original date
+ *  2 - Date shift: move non-pinned, non-recurring task closer to original date
  *  3 - Cross-day swap: swap higher-pri task on later day with lower-pri on earlier day
  */
 
@@ -42,10 +42,10 @@ function isMovable(placement) {
 }
 
 /**
- * For habits, check that new start is within flex window of preferred time.
+ * For recurringTasks, check that new start is within flex window of preferred time.
  */
-function habitFlexOk(task, newStart, dur) {
-  if (!task.habit) return true;
+function recurFlexOk(task, newStart, dur) {
+  if (!task.recurring) return true;
   var sm = parseTimeToMinutes(task.time);
   if (sm === null) return true; // no preferred time
   var flex = task.timeFlex != null ? task.timeFlex : DEFAULT_TIME_FLEX;
@@ -115,7 +115,7 @@ function findRandomGap(task, dur, dateKey, dayOcc, dayWindows, dayBlocks, cfg) {
     var wEnd = wins[wi][1];
     while (pos + dur <= wEnd) {
       if (occ[pos]) { pos++; continue; }
-      if (isFreeRange(occ, pos, dur) && fitsLocation(task, dateKey, pos, dur, dayBlocks, cfg) && habitFlexOk(task, pos, dur)) {
+      if (isFreeRange(occ, pos, dur) && fitsLocation(task, dateKey, pos, dur, dayBlocks, cfg) && recurFlexOk(task, pos, dur)) {
         candidates.push(pos);
         pos += 15; // skip ahead to avoid too many nearby candidates
       } else {
@@ -144,6 +144,27 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
     });
   });
 
+  // Pre-compute transitive ancestors once (used by all scoreSchedule calls)
+  var ancestors = {};
+  var taskById = {};
+  allTasks.forEach(function(t) { taskById[t.id] = t; });
+  function getAnc(tid) {
+    if (ancestors[tid]) return ancestors[tid];
+    var result = {};
+    ancestors[tid] = result;
+    var task = taskById[tid];
+    if (!task) return result;
+    var deps = getTaskDeps(task);
+    for (var d = 0; d < deps.length; d++) {
+      result[deps[d]] = true;
+      var gp = getAnc(deps[d]);
+      for (var g in gp) result[g] = true;
+    }
+    return result;
+  }
+  allTasks.forEach(function(t) { getAnc(t.id); });
+  scoreOpts = Object.assign({}, scoreOpts, { _ancestors: ancestors });
+
   var baseScore = scoreSchedule(dayPlacements, unplaced, allTasks, scoreOpts);
   var bestTotal = baseScore.total;
   var scoreBefore = bestTotal;
@@ -156,21 +177,38 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
     return { improved: false, iterations: 0, elapsed: 0, scoreBefore: scoreBefore, scoreAfter: scoreBefore };
   }
 
-  // Build placement index for dependency checks
-  function buildPlacementIndex() {
-    var idx = {};
-    for (var di = 0; di < dateKeys.length; di++) {
-      var dk = dateKeys[di];
-      var pls = dayPlacements[dk];
-      if (!pls) continue;
-      for (var pi = 0; pi < pls.length; pi++) {
-        var p = pls[pi];
-        if (!p.task) continue;
-        if (!idx[p.task.id]) idx[p.task.id] = [];
-        idx[p.task.id].push({ dateKey: dk, start: p.start, dur: p.dur });
+  // Build live placement index for dependency checks (updated incrementally)
+  var livePlacIdx = {};
+  for (var bpi = 0; bpi < dateKeys.length; bpi++) {
+    var bpk = dateKeys[bpi];
+    var bpls = dayPlacements[bpk];
+    if (!bpls) continue;
+    for (var bpj = 0; bpj < bpls.length; bpj++) {
+      var bp = bpls[bpj];
+      if (!bp.task) continue;
+      if (!livePlacIdx[bp.task.id]) livePlacIdx[bp.task.id] = [];
+      livePlacIdx[bp.task.id].push({ dateKey: bpk, start: bp.start, dur: bp.dur, _ref: bp });
+    }
+  }
+  function updatePlacIdx(taskId, dateKey, oldStart, newStart, dur) {
+    var entries = livePlacIdx[taskId];
+    if (!entries) return;
+    for (var ui = 0; ui < entries.length; ui++) {
+      if (entries[ui].dateKey === dateKey && entries[ui].start === oldStart) {
+        entries[ui].start = newStart;
+        break;
       }
     }
-    return idx;
+  }
+  function movePlacIdx(taskId, oldDateKey, newDateKey, start, dur, ref) {
+    var entries = livePlacIdx[taskId];
+    if (entries) {
+      for (var ri = entries.length - 1; ri >= 0; ri--) {
+        if (entries[ri].dateKey === oldDateKey) { entries.splice(ri, 1); break; }
+      }
+    }
+    if (!livePlacIdx[taskId]) livePlacIdx[taskId] = [];
+    livePlacIdx[taskId].push({ dateKey: newDateKey, start: start, dur: dur, _ref: ref });
   }
 
   function checkDeps(taskId, dateKey, startMin, dur, placIdx) {
@@ -212,7 +250,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
     for (var pi = 0; pi < pls.length; pi++) {
       var p = pls[pi];
       if (!p.task || !p.task.date) continue;
-      if (p.locked || p.task.habit || p.task.rigid || p.task.datePinned) continue;
+      if (p.locked || p.task.recurring || p.task.rigid || p.task.datePinned) continue;
       if (hasWhen(p.task.when, 'fixed')) continue;
       if (p._dateKey !== p.task.date) {
         // Don't drift back to original date if it's before startAfter
@@ -278,14 +316,14 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       var paFits = isFreeRange(occ, oldStartB, pa.dur)
         && fitsWhenWindows(pa.task, dk, oldStartB, pa.dur, dayWindows)
         && fitsLocation(pa.task, dk, oldStartB, pa.dur, dayBlocks, cfg)
-        && habitFlexOk(pa.task, oldStartB, pa.dur);
+        && recurFlexOk(pa.task, oldStartB, pa.dur);
       var pbFits = false;
       if (paFits) {
         reserve(occ, oldStartB, pa.dur);
         pbFits = isFreeRange(occ, oldStartA, pb.dur)
           && fitsWhenWindows(pb.task, dk, oldStartA, pb.dur, dayWindows)
           && fitsLocation(pb.task, dk, oldStartA, pb.dur, dayBlocks, cfg)
-          && habitFlexOk(pb.task, oldStartA, pb.dur);
+          && recurFlexOk(pb.task, oldStartA, pb.dur);
         free(occ, oldStartB, pa.dur);
       }
 
@@ -300,7 +338,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       // Temporarily apply swap for dep check
       pa.start = oldStartB;
       pb.start = oldStartA;
-      var placIdx = buildPlacementIndex();
+      var placIdx = livePlacIdx;
       var depsOk = checkDeps(pa.task.id, dk, oldStartB, pa.dur, placIdx)
         && checkDeps(pb.task.id, dk, oldStartA, pb.dur, placIdx);
       pa.start = oldStartA;
@@ -322,6 +360,8 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       if (newScore.total < bestTotal) {
         bestTotal = newScore.total;
         improved = true;
+        updatePlacIdx(pa.task.id, dk, oldStartA, oldStartB, pa.dur);
+        updatePlacIdx(pb.task.id, dk, oldStartB, oldStartA, pb.dur);
       } else {
         // Revert
         free(occ, oldStartB, pa.dur);
@@ -361,7 +401,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
 
       // Check dependencies
       placement.start = newStart;
-      var placIdx2 = buildPlacementIndex();
+      var placIdx2 = livePlacIdx;
       var depsOk2 = checkDeps(task.id, dk2, newStart, dur, placIdx2);
       placement.start = oldStart;
 
@@ -454,7 +494,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       if (!dayPlacements[targetDateKey]) dayPlacements[targetDateKey] = [];
       dayPlacements[targetDateKey].push(pl);
 
-      var placIdx3 = buildPlacementIndex();
+      var placIdx3 = livePlacIdx;
       var depsOk3 = checkDeps(pl.task.id, targetDateKey, newSt2, plDur, placIdx3);
 
       if (!depsOk3) {
@@ -515,17 +555,17 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       // Find a lower-pri movable task on earlier day A (can move to later day B)
       var movA = [];
       for (var mai = 0; mai < plsA.length; mai++) {
-        if (!isMovable(plsA[mai]) || plsA[mai].task.habit) continue;
+        if (!isMovable(plsA[mai]) || plsA[mai].task.recurring) continue;
         // datePinned/generated tasks can't move to a different day
         if (plsA[mai].task.datePinned || plsA[mai].task.generated) continue;
-        // Skip tasks whose deps include habits on this specific day (would break dep chain)
+        // Skip tasks whose deps include recurringTasks on this specific day (would break dep chain)
         var aDeps = getTaskDeps(plsA[mai].task);
-        var hasDateHabitDep = false;
+        var hasDateRecurringDep = false;
         for (var adi = 0; adi < aDeps.length; adi++) {
           var adTask = allTasksById[aDeps[adi]];
-          if (adTask && adTask.habit && adTask.date === dkA) { hasDateHabitDep = true; break; }
+          if (adTask && adTask.recurring && adTask.date === dkA) { hasDateRecurringDep = true; break; }
         }
-        if (hasDateHabitDep) continue;
+        if (hasDateRecurringDep) continue;
         movA.push(plsA[mai]);
       }
       if (movA.length === 0) continue;
@@ -533,7 +573,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       // Find a higher-pri movable task on later day B (can move to earlier day A)
       var movB = [];
       for (var mbi = 0; mbi < plsB.length; mbi++) {
-        if (!isMovable(plsB[mbi]) || plsB[mbi].task.habit) continue;
+        if (!isMovable(plsB[mbi]) || plsB[mbi].task.recurring) continue;
         // datePinned/generated tasks can't move to a different day
         if (plsB[mbi].task.datePinned || plsB[mbi].task.generated) continue;
         // Enforce earliestDate floor — can't move to day A if it's before startAfter
@@ -601,7 +641,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
 
       reserve(occB, newStartLow, plLow.dur);
 
-      var cdPlacIdx = buildPlacementIndex();
+      var cdPlacIdx = livePlacIdx;
       var cdDepsOk = checkDeps(plHigh.task.id, dkA, newStartHigh, plHigh.dur, cdPlacIdx)
         && checkDeps(plLow.task.id, dkB, newStartLow, plLow.dur, cdPlacIdx);
 

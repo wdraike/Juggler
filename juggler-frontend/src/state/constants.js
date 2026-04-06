@@ -135,3 +135,7 @@ export function registerLocations(locations) {
     if (l.id && l.icon && !LOC_ICONS[l.id]) LOC_ICONS[l.id] = l.icon;
   });
 }
+
+export function isTerminalStatus(st) {
+  return st === "done" || st === "cancel" || st === "skip" || st === "pause";
+}

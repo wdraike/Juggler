@@ -235,17 +235,17 @@ describe('unifiedSchedule', () => {
     });
   });
 
-  describe('habits', () => {
-    test('rigid habit placed at preferred time', () => {
+  describe('recurringTasks', () => {
+    test('rigid recurring placed at preferred time', () => {
       const tasks = [makeTask({
-        id: 'h1', date: '3/22', habit: true, rigid: true,
+        id: 'h1', date: '3/22', recurring: true, rigid: true,
         time: '7:00 AM', dur: 30
       })];
       const result = schedule(tasks);
       const placed = getPlacementsForDay(result, '3/22');
       const h = placed.find(p => p.task.id === 'h1');
       expect(h).toBeDefined();
-      // Rigid habit should be at or near 7:00 AM (420 mins)
+      // Rigid recurring should be at or near 7:00 AM (420 mins)
       if (h) {
         expect(h.start).toBe(420);
       }

@@ -13,8 +13,17 @@
 
 const db = require('../db');
 const { v7: uuidv7 } = require('uuid');
-const { localToUtc, utcToLocal, toDateISO, fromDateISO, getDayName } = require('../scheduler/dateHelpers');
+const { localToUtc, utcToLocal, toDateISO, fromDateISO, getDayName, safeTimezone } = require('../scheduler/dateHelpers');
 const cache = require('../lib/redis');
+const { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
+
+/** Safely parse a JSON string, returning fallback on any error. */
+function safeParseJSON(val, fallback) {
+  if (val === null || val === undefined) return fallback;
+  if (typeof val !== 'string') return val || fallback;
+  if (val === '' || val === 'null') return fallback;
+  try { return JSON.parse(val); } catch { return fallback; }
+}
 
 /**
  * Normalize priority to P1-P4 format. Accepts "P1", "1", "p2", etc.
@@ -54,21 +63,21 @@ function parseISOToDate(iso) {
   return d;
 }
 
-// Fields that live on the source template and are inherited by habit instances.
+// Fields that live on the source template and are inherited by recurring instances.
 // If an instance row has NULL for these, the value is read from the source.
 var TEMPLATE_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
-  'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
+  'when', 'day_req', 'recurring', 'rigid', 'time_flex', 'split', 'split_min',
   'travel_before', 'travel_after', 'depends_on',
-  'notes', 'marker', 'flex_when', 'habit_start', 'habit_end'];
+  'notes', 'marker', 'flex_when', 'recur_start', 'recur_end', 'preferred_time'];
 
 /**
  * Build a { sourceId: row } lookup from an array of task rows.
- * Includes habit_template rows so instances can inherit their fields.
+ * Includes recurring_template rows so instances can inherit their fields.
  */
 function buildSourceMap(rows) {
   var map = {};
   rows.forEach(function(r) {
-    if (r.task_type === 'habit_template') {
+    if (r.task_type === 'recurring_template') {
       map[r.id] = r;
     }
   });
@@ -78,14 +87,17 @@ function buildSourceMap(rows) {
 /**
  * Map task row from DB to API format.
  * Derives date/time/day from scheduled_at (UTC) using the user's timezone.
- * If sourceMap is provided, habit instances inherit template fields from their source.
+ * If sourceMap is provided, recurring instances inherit template fields from their source.
  */
 function rowToTask(row, timezone, sourceMap) {
-  // Merge template fields from source for thin habit instances
+  // Merge template fields from source for thin recurring instances
   var src = sourceMap && row.source_id ? sourceMap[row.source_id] : null;
+  if (!src && row.source_id && sourceMap) {
+    console.warn('[rowToTask] Orphaned instance: ' + row.id + ' references missing template ' + row.source_id);
+  }
   // Disabled instances are frozen — do not inherit template fields so they stay locked in place
   if (src && row.status !== 'disabled') {
-    // Habit instances always inherit template fields from the source template.
+    // Recurring instances always inherit template fields from the source template.
     // The template is the single source of truth — instances never override.
     var merged = {};
     Object.keys(row).forEach(function(k) { merged[k] = row[k]; });
@@ -122,6 +134,19 @@ function rowToTask(row, timezone, sourceMap) {
     if (local.date) date = local.date;
     if (local.time) time = local.time;
     if (local.day) day = local.day;
+  }
+
+  // Recurring instances: the preferred time ALWAYS comes from the source template,
+  // not from the instance's scheduled_at (which is just where the scheduler
+  // last placed it, or midnight if it was cleared as unplaced).
+  // Without this, the flex window anchors at the scheduler's old placement time
+  // instead of the user's intended time (e.g., 7am instead of noon for lunch).
+  // Exception: disabled instances are frozen — don't override their time.
+  if (src && displayTz && src.scheduled_at && row.status !== 'disabled') {
+    var srcLocal = utcToLocal(src.scheduled_at, displayTz);
+    if (srcLocal && srcLocal.time) {
+      time = srcLocal.time;
+    }
   }
 
   // Derive due from due_at DATE column
@@ -175,28 +200,33 @@ function rowToTask(row, timezone, sourceMap) {
     notes: row.notes,
     due: due,
     startAfter: startAfter,
-    location: typeof row.location === 'string' ? JSON.parse(row.location || '[]') : (row.location || []),
-    tools: typeof row.tools === 'string' ? JSON.parse(row.tools || '[]') : (row.tools || []),
+    location: safeParseJSON(row.location, []),
+    tools: safeParseJSON(row.tools, []),
     when: row.when,
     dayReq: row.day_req,
-    habit: !!row.habit,
+    recurring: !!row.recurring,
     rigid: !!row.rigid,
     timeFlex: row.time_flex != null ? row.time_flex : undefined,
     split: row.split === null ? undefined : !!row.split,
     splitMin: row.split_min,
-    recur: typeof row.recur === 'string' ? JSON.parse(row.recur || 'null') : row.recur,
+    recur: safeParseJSON(row.recur, null),
     sourceId: row.source_id,
     generated: !!row.generated,
     gcalEventId: row.gcal_event_id,
     msftEventId: row.msft_event_id,
-    dependsOn: typeof row.depends_on === 'string' ? JSON.parse(row.depends_on || '[]') : (row.depends_on || []),
+    dependsOn: safeParseJSON(row.depends_on, []),
     datePinned: !!row.date_pinned,
+    prevWhen: row.prev_when || null,
     marker: !!row.marker,
     flexWhen: !!row.flex_when,
     travelBefore: row.travel_before != null ? row.travel_before : undefined,
     travelAfter: row.travel_after != null ? row.travel_after : undefined,
-    habitStart: row.habit_start || null,
-    habitEnd: row.habit_end || null,
+    preferredTime: row.preferred_time != null ? !!row.preferred_time : null,
+    desiredAt: row.desired_at ? new Date(row.desired_at).toISOString() : null,
+    desiredDate: row.desired_date || null,
+    unscheduled: !!row.unscheduled,
+    recurStart: row.recur_start || null,
+    recurEnd: row.recur_end || null,
     disabledAt: row.disabled_at ? scheduledAtToISO(row.disabled_at) : null,
     disabledReason: row.disabled_reason || null
   };
@@ -233,7 +263,7 @@ function taskToRow(task, userId, timezone) {
   if (task.tools !== undefined) row.tools = JSON.stringify(task.tools);
   if (task.when !== undefined) row.when = task.when;
   if (task.dayReq !== undefined) row.day_req = task.dayReq;
-  if (task.habit !== undefined) row.habit = task.habit ? 1 : 0;
+  if (task.recurring !== undefined) row.recurring = task.recurring ? 1 : 0;
   if (task.rigid !== undefined) row.rigid = task.rigid ? 1 : 0;
   if (task.timeFlex !== undefined) row.time_flex = task.timeFlex;
   if (task.split !== undefined) row.split = task.split === null ? null : (task.split ? 1 : 0);
@@ -250,26 +280,62 @@ function taskToRow(task, userId, timezone) {
   if (task.travelBefore !== undefined) row.travel_before = task.travelBefore || null;
   if (task.travelAfter !== undefined) row.travel_after = task.travelAfter || null;
   if (task.tz !== undefined) row.tz = task.tz || null;
-  if (task.habitStart !== undefined) row.habit_start = task.habitStart || null;
-  if (task.habitEnd !== undefined) row.habit_end = task.habitEnd || null;
+  if (task.recurStart !== undefined) row.recur_start = task.recurStart || null;
+  if (task.recurEnd !== undefined) row.recur_end = task.recurEnd || null;
+  if (task.preferredTime !== undefined) row.preferred_time = task.preferredTime ? 1 : 0;
+
+  // Direct desired_at / desired_date mapping (if caller provides them explicitly)
+  if (task.desiredAt !== undefined) {
+    row.desired_at = task.desiredAt ? parseISOToDate(task.desiredAt) : null;
+  }
+  if (task.desiredDate !== undefined) {
+    row.desired_date = task.desiredDate || null;
+  }
 
   // scheduledAt (UTC ISO) takes precedence over date+time (local strings)
   if (task.scheduledAt !== undefined) {
     row.scheduled_at = task.scheduledAt ? parseISOToDate(task.scheduledAt) : null;
+    // Also set desired_at to preserve user intent (unless explicitly provided)
+    if (row.desired_at === undefined) {
+      row.desired_at = row.scheduled_at;
+    }
   } else if (timezone && (task.date !== undefined || task.time !== undefined)) {
     var dateVal = task.date !== undefined ? task.date : null;
     var timeVal = task.time !== undefined ? task.time : null;
     if (dateVal) {
       row.scheduled_at = localToUtc(dateVal, timeVal, timezone) || null;
+      // Also set desired_at to preserve user intent
+      if (row.desired_at === undefined) {
+        row.desired_at = row.scheduled_at;
+      }
+      // Set desired_date for date-only tasks (no time specified)
+      if (!timeVal && row.desired_date === undefined) {
+        row.desired_date = toDateISO(dateVal) || null;
+      }
     } else if (task.date !== undefined && !dateVal) {
-      // date was explicitly sent as null/empty → clear scheduled_at
+      // date was explicitly sent as null/empty → clear scheduled_at and desired_at
       row.scheduled_at = null;
+      if (row.desired_at === undefined) row.desired_at = null;
+      if (row.desired_date === undefined) row.desired_date = null;
     }
     // If only time was sent (no date field), scheduled_at is handled in the
     // caller which can read the existing row's date and combine with the new time.
     if (task.date === undefined && task.time !== undefined) {
       row._pendingTimeOnly = timeVal;
     }
+  }
+
+  // Time mode field cleanup: clear fields irrelevant to the active mode.
+  // Only applies when preferred_time is explicitly set in this update.
+  if (row.preferred_time === 1) {
+    // Time Window mode: time blocks, splitting, and flex_when are irrelevant
+    row.when = null;
+    row.split = null;
+    row.split_min = null;
+    row.flex_when = null;
+  } else if (row.preferred_time === 0) {
+    // Time Block mode: time_flex is irrelevant
+    row.time_flex = null;
   }
 
   row.updated_at = db.fn.now();
@@ -301,7 +367,10 @@ async function getAllTasks(req, res) {
     var cached = await cache.get(cacheKey);
     if (cached) return res.json(cached);
 
-    var rows = await db('tasks').where('user_id', req.user.id).orderBy('created_at', 'asc');
+    var query = db('tasks').where('user_id', req.user.id).orderBy('created_at', 'asc');
+    if (req.query.limit) query = query.limit(parseInt(req.query.limit) || 1000);
+    if (req.query.offset) query = query.offset(parseInt(req.query.offset) || 0);
+    var rows = await query;
     var srcMap = buildSourceMap(rows);
     var tasks = rows.map(function(r) { return rowToTask(r, null, srcMap); });
     var version = await getTasksVersion(req.user.id);
@@ -352,9 +421,57 @@ async function applySplitDefault(row, userId) {
   }
 }
 
+var VALID_WHEN_KEYWORDS = ['', 'fixed', 'allday', 'anytime'];
+var VALID_DAY_REQ = ['any', 'weekday', 'weekend'];
+var VALID_DAY_CODES = ['M', 'T', 'W', 'R', 'F', 'Sa', 'Su', 'S', 'U'];
+
+function validateTaskInput(body) {
+  var errors = [];
+  // text required for creation
+  if (body._requireText && (!body.text || !body.text.trim())) {
+    errors.push('Task name is required');
+  }
+  // text length limit
+  if (body.text && body.text.length > 500) {
+    errors.push('Task name must be 500 characters or less');
+  }
+  // notes length limit
+  if (body.notes && body.notes.length > 5000) {
+    errors.push('Notes must be 5000 characters or less');
+  }
+  // when validation
+  if (body.when !== undefined && body.when !== null) {
+    var whenParts = String(body.when).split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+    // Each part should be a known keyword or a time block tag (we allow any non-empty string for custom blocks)
+    // Just reject obviously bad values
+    if (whenParts.some(function(p) { return p.length > 30; })) {
+      errors.push('Invalid when value: tag names must be 30 characters or less');
+    }
+  }
+  // dayReq validation
+  if (body.dayReq !== undefined && body.dayReq !== null) {
+    var dr = String(body.dayReq);
+    if (VALID_DAY_REQ.indexOf(dr) === -1) {
+      // Check if it's comma-separated day codes
+      var dayParts = dr.split(',');
+      var allValid = dayParts.every(function(p) { return VALID_DAY_CODES.indexOf(p.trim()) !== -1; });
+      if (!allValid) errors.push('Invalid dayReq: must be any, weekday, weekend, or comma-separated day codes (M,T,W,R,F,Sa,Su)');
+    }
+  }
+  return errors;
+}
+
 async function createTask(req, res) {
   try {
-    var tz = req.headers['x-timezone'] || 'America/New_York';
+    // Validate input
+    req.body._requireText = true;
+    var validationErrors = validateTaskInput(req.body);
+    delete req.body._requireText;
+    if (validationErrors.length > 0) {
+      return res.status(400).json({ error: validationErrors.join('; ') });
+    }
+
+    var tz = safeTimezone(req.headers['x-timezone']);
     var row = taskToRow(req.body, req.user.id, tz);
     if (!row.id) row.id = uuidv7();
     if (!row.task_type) row.task_type = 'task';
@@ -371,8 +488,8 @@ async function createTask(req, res) {
     if (timeWasSet && row.when === undefined) {
       row.when = 'fixed';
     }
-    // Habits cannot have dependencies — clear if provided
-    if (row.habit || row.task_type === 'habit_template' || row.task_type === 'habit_instance') {
+    // Recurrings cannot have dependencies — clear if provided
+    if (row.recurring || row.task_type === 'recurring_template' || row.task_type === 'recurring_instance') {
       delete row.depends_on;
     }
     await applySplitDefault(row, req.user.id);
@@ -380,6 +497,7 @@ async function createTask(req, res) {
     await db('tasks').insert(row);
     var created = await db('tasks').where('id', row.id).first();
     await cache.invalidateTasks(req.user.id);
+    enqueueScheduleRun(req.user.id, 'api:createTask');
     res.status(201).json({ task: rowToTask(created, null) });
   } catch (error) {
     console.error('Create task error:', error);
@@ -392,6 +510,11 @@ async function createTask(req, res) {
  */
 async function updateTask(req, res) {
   try {
+    var validationErrors = validateTaskInput(req.body);
+    if (validationErrors.length > 0) {
+      return res.status(400).json({ error: validationErrors.join('; ') });
+    }
+
     var id = req.params.id;
     var existing = await db('tasks').where({ id: id, user_id: req.user.id }).first();
     if (!existing) {
@@ -404,14 +527,14 @@ async function updateTask(req, res) {
       });
     }
 
-    var tz = req.headers['x-timezone'] || 'America/New_York';
+    var tz = safeTimezone(req.headers['x-timezone']);
     var row = taskToRow(req.body, req.user.id, tz);
     delete row.id;
     delete row.user_id;
     delete row.created_at;
 
-    // Habits cannot have dependencies — strip if provided
-    if (existing.habit || existing.task_type === 'habit_template' || existing.task_type === 'habit_instance') {
+    // Recurrings cannot have dependencies — strip if provided
+    if (existing.recurring || existing.task_type === 'recurring_template' || existing.task_type === 'recurring_instance') {
       delete row.depends_on;
     }
 
@@ -420,6 +543,10 @@ async function updateTask(req, res) {
       var existingLocal = utcToLocal(existing.scheduled_at, tz);
       if (existingLocal && existingLocal.date) {
         row.scheduled_at = localToUtc(existingLocal.date, row._pendingTimeOnly, tz) || null;
+        // Also update desired_at to preserve user intent
+        if (row.desired_at === undefined) {
+          row.desired_at = row.scheduled_at;
+        }
       }
     }
     delete row._pendingTimeOnly;
@@ -432,29 +559,42 @@ async function updateTask(req, res) {
     if (dateWasSet && row.date_pinned === undefined) {
       row.date_pinned = 1;
     }
-    // Clear scheduler-tracked original on user edit so the reset step
-    // won't revert back to a stale scheduler-assigned value.
-    if (dateWasSet || timeWasSet) {
-      row.original_scheduled_at = null;
+    // Drag-pin: user dragged this task to a new time on the calendar.
+    // Convert to fixed mode so the scheduler won't overwrite the placement.
+    // Store the previous when so it can be restored on unpin.
+    if (req.body._dragPin) {
+      var currentWhen = existing.when || '';
+      // Only store prev_when if not already pinned (avoid overwriting the original)
+      if (!existing.prev_when && currentWhen !== 'fixed') {
+        row.prev_when = currentWhen;
+      }
+      row.when = 'fixed';
+      row.date_pinned = 1;
     }
 
     // Fields that belong on the source template (shared across all instances).
     var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
-      'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
+      'when', 'day_req', 'recurring', 'rigid', 'time_flex', 'split', 'split_min',
       'travel_before', 'travel_after', 'depends_on',
-      'notes', 'marker', 'flex_when', 'habit_start', 'habit_end'];
+      'notes', 'marker', 'flex_when', 'recur_start', 'recur_end', 'preferred_time'];
 
     var taskType = existing.task_type || 'task';
 
     await db.transaction(async function(trx) {
-      if (taskType === 'habit_instance' && existing.source_id) {
-        // Route template fields to the source, keep instance fields on this row
+      if (taskType === 'recurring_instance' && existing.source_id) {
+        // Route template fields to the source, keep instance fields on this row.
+        // Exception: drag-pin sets when='fixed' on the INSTANCE (not the template)
+        // so this specific instance is pinned without affecting other instances.
+        var isDragPin = !!req.body._dragPin;
         var templateUpdate = {};
         var instanceUpdate = {};
 
         Object.keys(row).forEach(function(k) {
           if (k === 'updated_at') return; // added to both
-          if (TEMPLATE_ROW_FIELDS.indexOf(k) >= 0) {
+          // For drag-pin: when + prev_when stay on instance, not routed to template
+          if (isDragPin && (k === 'when' || k === 'prev_when')) {
+            instanceUpdate[k] = row[k];
+          } else if (TEMPLATE_ROW_FIELDS.indexOf(k) >= 0) {
             templateUpdate[k] = row[k];
           } else {
             instanceUpdate[k] = row[k];
@@ -477,58 +617,82 @@ async function updateTask(req, res) {
           // Still touch updated_at so version changes
           await trx('tasks').where({ id: id, user_id: req.user.id }).update({ updated_at: db.fn.now() });
         }
-      } else if (taskType === 'habit_template') {
+      } else if (taskType === 'recurring_template') {
         // Editing the template directly — just update the template row.
         // Instances always inherit template fields via rowToTask.
         await trx('tasks').where({ id: id, user_id: req.user.id }).update(row);
 
-        // If recurrence or habit date range changed, clean up pending instances
+        // If recurrence or recurring date range changed, clean up pending instances
         // that no longer match the new pattern.
-        var needsCleanup = row.recur !== undefined || row.habit_start !== undefined || row.habit_end !== undefined;
+        var needsCleanup = row.recur !== undefined || row.recur_start !== undefined || row.recur_end !== undefined;
         if (needsCleanup) {
-          var _dateMatch = require('../../shared/scheduler/dateMatchesRecurrence');
           var _dateHelpers = require('../scheduler/dateHelpers');
           var updatedTmpl = await trx('tasks').where({ id: id, user_id: req.user.id }).first();
           var newRecur = typeof updatedTmpl.recur === 'string' ? JSON.parse(updatedTmpl.recur || 'null') : updatedTmpl.recur;
-          var srcDateStr = updatedTmpl.scheduled_at ? utcToLocal(updatedTmpl.scheduled_at, tz).date : null;
+          var oldRecur = typeof existing.recur === 'string' ? JSON.parse(existing.recur || 'null') : existing.recur;
 
-          var pendingInstances = await trx('tasks')
-            .where({ source_id: id, user_id: req.user.id, task_type: 'habit_instance' })
-            .where('status', '');
+          // Full cycle reset: if recurrence type, days, or timesPerCycle changed,
+          // delete ALL future active instances so they regenerate with new settings.
+          var recurChanged = row.recur !== undefined && (
+            (oldRecur && newRecur && (
+              oldRecur.type !== newRecur.type ||
+              JSON.stringify(oldRecur.days) !== JSON.stringify(newRecur.days) ||
+              (oldRecur.timesPerCycle || 0) !== (newRecur.timesPerCycle || 0)
+            )) ||
+            (!oldRecur && newRecur) ||
+            (oldRecur && !newRecur)
+          );
 
-          var deleteIds = [];
-          pendingInstances.forEach(function(inst) {
-            var instDate = inst.scheduled_at ? utcToLocal(inst.scheduled_at, tz).date : null;
-            if (!instDate) { deleteIds.push(inst.id); return; }
-            // Check recurrence match
-            if (!newRecur || newRecur.type === 'none' ||
-                !_dateMatch.dateMatchesRecurrence(instDate, newRecur, srcDateStr, _dateHelpers.parseDate)) {
-              deleteIds.push(inst.id); return;
+          if (recurChanged) {
+            // Full reset: delete all future active instances
+            var resetCount = await trx('tasks')
+              .where({ source_id: id, user_id: req.user.id, task_type: 'recurring_instance' })
+              .where('status', '')
+              .del();
+            if (resetCount > 0) {
+              console.log('[RECUR] cycle reset: deleted ' + resetCount + ' pending instances after recurrence change on ' + id);
             }
-            // Check habit date range
-            if (updatedTmpl.habit_start) {
-              var hs = _dateHelpers.parseDate(updatedTmpl.habit_start instanceof Date
-                ? _dateHelpers.formatDateKey(updatedTmpl.habit_start)
-                : String(updatedTmpl.habit_start).replace(/-/g, '/').replace(/^0/, ''));
-              var instD = _dateHelpers.parseDate(instDate);
-              if (hs && instD && instD < hs) { deleteIds.push(inst.id); return; }
-            }
-            if (updatedTmpl.habit_end) {
-              var he = _dateHelpers.parseDate(updatedTmpl.habit_end instanceof Date
-                ? _dateHelpers.formatDateKey(updatedTmpl.habit_end)
-                : String(updatedTmpl.habit_end).replace(/-/g, '/').replace(/^0/, ''));
-              var instD2 = _dateHelpers.parseDate(instDate);
-              if (he && instD2 && instD2 > he) { deleteIds.push(inst.id); return; }
-            }
-          });
+          } else {
+            // Incremental cleanup: only delete instances that no longer match
+            var _dateMatch = require('../../shared/scheduler/dateMatchesRecurrence');
+            var srcDateStr = updatedTmpl.scheduled_at ? utcToLocal(updatedTmpl.scheduled_at, tz).date : null;
 
-          if (deleteIds.length > 0) {
-            await trx('tasks').where('user_id', req.user.id).whereIn('id', deleteIds).del();
-            console.log('[HABIT] cleaned up ' + deleteIds.length + ' pending instances after recurrence/date-range change on ' + id);
+            var pendingInstances = await trx('tasks')
+              .where({ source_id: id, user_id: req.user.id, task_type: 'recurring_instance' })
+              .where('status', '');
+
+            var deleteIds = [];
+            pendingInstances.forEach(function(inst) {
+              var instDate = inst.scheduled_at ? utcToLocal(inst.scheduled_at, tz).date : null;
+              if (!instDate) { deleteIds.push(inst.id); return; }
+              if (!newRecur || newRecur.type === 'none' ||
+                  !_dateMatch.dateMatchesRecurrence(instDate, newRecur, srcDateStr, _dateHelpers.parseDate)) {
+                deleteIds.push(inst.id); return;
+              }
+              if (updatedTmpl.recur_start) {
+                var hs = _dateHelpers.parseDate(updatedTmpl.recur_start instanceof Date
+                  ? _dateHelpers.formatDateKey(updatedTmpl.recur_start)
+                  : String(updatedTmpl.recur_start).replace(/-/g, '/').replace(/^0/, ''));
+                var instD = _dateHelpers.parseDate(instDate);
+                if (hs && instD && instD < hs) { deleteIds.push(inst.id); return; }
+              }
+              if (updatedTmpl.recur_end) {
+                var he = _dateHelpers.parseDate(updatedTmpl.recur_end instanceof Date
+                  ? _dateHelpers.formatDateKey(updatedTmpl.recur_end)
+                  : String(updatedTmpl.recur_end).replace(/-/g, '/').replace(/^0/, ''));
+                var instD2 = _dateHelpers.parseDate(instDate);
+                if (he && instD2 && instD2 > he) { deleteIds.push(inst.id); return; }
+              }
+            });
+
+            if (deleteIds.length > 0) {
+              await trx('tasks').where('user_id', req.user.id).whereIn('id', deleteIds).del();
+              console.log('[RECUR] cleaned up ' + deleteIds.length + ' pending instances after date-range change on ' + id);
+            }
           }
         }
       } else {
-        // Normal (non-habit) task — update directly
+        // Normal (non-recurring) task — update directly
         await trx('tasks').where({ id: id, user_id: req.user.id }).update(row);
       }
     });
@@ -538,6 +702,7 @@ async function updateTask(req, res) {
     var srcMap = buildSourceMap(allRows);
     var updatedRow = allRows.find(function(r) { return r.id === id; });
     await cache.invalidateTasks(req.user.id);
+    enqueueScheduleRun(req.user.id, 'api:updateTask');
     res.json({ task: rowToTask(updatedRow, null, srcMap) });
   } catch (error) {
     console.error('Update task error:', error);
@@ -557,11 +722,11 @@ async function deleteTask(req, res) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    // Cascade habit delete: delete template + pending instances, keep completed
-    if (cascade === 'habit') {
+    // Cascade recurring delete: delete template + pending instances, keep completed
+    if (cascade === 'recurring') {
       // Resolve the template ID — caller may pass a template or an instance
       var templateId = id;
-      if (task.task_type === 'habit_instance' || task.source_id) {
+      if (task.task_type === 'recurring_instance' || task.source_id) {
         templateId = task.source_id || id;
       }
 
@@ -569,7 +734,7 @@ async function deleteTask(req, res) {
       var keptCount = 0;
 
       await db.transaction(async function(trx) {
-        // Find all instances of this habit
+        // Find all instances of this recurring task
         var instances = await trx('tasks')
           .where({ user_id: req.user.id, source_id: templateId })
           .select('id', 'status', 'gcal_event_id', 'msft_event_id');
@@ -589,7 +754,7 @@ async function deleteTask(req, res) {
             .whereIn('task_id', pendingIds)
             .where('status', 'active')
             .update({ task_id: null, synced_at: db.fn.now() })
-            .catch(function() {});
+            .catch(function(err) { console.error("[silent-catch]", err.message); });
 
           await trx('tasks')
             .where('user_id', req.user.id)
@@ -623,15 +788,16 @@ async function deleteTask(req, res) {
               .where({ user_id: req.user.id, task_id: templateId })
               .where('status', 'active')
               .update({ task_id: null, synced_at: db.fn.now() })
-              .catch(function() {});
+              .catch(function(err) { console.error("[silent-catch]", err.message); });
           }
           await trx('tasks').where({ id: templateId, user_id: req.user.id }).del();
         }
       });
 
       await cache.invalidateTasks(req.user.id);
+      enqueueScheduleRun(req.user.id, 'api:deleteTask:cascade');
       res.json({
-        message: 'Habit deleted',
+        message: 'Recurring deleted',
         templateId: templateId,
         deletedInstances: deletedCount,
         keptInstances: keptCount,
@@ -647,14 +813,18 @@ async function deleteTask(req, res) {
         .where('user_id', req.user.id)
         .whereRaw('JSON_CONTAINS(depends_on, ?)', [JSON.stringify(id)])
         .select('id', 'depends_on');
-      for (var i = 0; i < affected.length; i++) {
-        var other = affected[i];
-        var deps = typeof other.depends_on === 'string'
-          ? JSON.parse(other.depends_on || '[]') : (other.depends_on || []);
-        var newDeps = deps.filter(function(d) { return d !== id; });
-        deletedDeps.forEach(function(d) { if (newDeps.indexOf(d) === -1) newDeps.push(d); });
-        await trx('tasks').where({ id: other.id, user_id: req.user.id })
-          .update({ depends_on: JSON.stringify(newDeps), updated_at: db.fn.now() });
+      if (affected.length > 0) {
+        var depUpdates = affected.map(function(other) {
+          var deps = typeof other.depends_on === 'string'
+            ? JSON.parse(other.depends_on || '[]') : (other.depends_on || []);
+          var newDeps = deps.filter(function(d) { return d !== id; });
+          deletedDeps.forEach(function(d) { if (newDeps.indexOf(d) === -1) newDeps.push(d); });
+          return { id: other.id, depends_on: JSON.stringify(newDeps) };
+        });
+        await Promise.all(depUpdates.map(function(u) {
+          return trx('tasks').where({ id: u.id, user_id: req.user.id })
+            .update({ depends_on: u.depends_on, updated_at: db.fn.now() });
+        }));
       }
 
       if (task.gcal_event_id || task.msft_event_id) {
@@ -662,13 +832,14 @@ async function deleteTask(req, res) {
           .where({ user_id: req.user.id, task_id: id })
           .where('status', 'active')
           .update({ task_id: null, synced_at: db.fn.now() })
-          .catch(function() {});
+          .catch(function(err) { console.error("[silent-catch]", err.message); });
       }
 
       await trx('tasks').where({ id: id, user_id: req.user.id }).del();
     });
 
     await cache.invalidateTasks(req.user.id);
+    enqueueScheduleRun(req.user.id, 'api:deleteTask');
     res.json({ message: 'Task deleted', id: id });
   } catch (error) {
     console.error('Delete task error:', error);
@@ -679,14 +850,21 @@ async function deleteTask(req, res) {
 /**
  * PUT /api/tasks/:id/status — update status + direction
  */
+var VALID_STATUSES = ['', 'done', 'wip', 'cancel', 'skip', 'pause', 'disabled'];
+
 async function updateTaskStatus(req, res) {
   try {
     var id = req.params.id;
     var status = req.body.status;
 
+    // Validate status value
+    if (status !== undefined && VALID_STATUSES.indexOf(status) === -1) {
+      return res.status(400).json({ error: 'Invalid status. Valid values: ' + VALID_STATUSES.join(', ') });
+    }
+
     var existing = await db('tasks').where({ id: id, user_id: req.user.id }).first();
 
-    // Generated habit instances (rc_<sourceId>_<dateDigits>) may not yet have
+    // Generated recurring instances (rc_<sourceId>_<dateDigits>) may not yet have
     // a DB row if the scheduler hasn't run since they were expanded.
     // Materialize them on demand so the status change can be persisted.
     if (!existing && id.startsWith('rc_')) {
@@ -708,10 +886,10 @@ async function updateTaskStatus(req, res) {
         await db('tasks').insert({
           id: id,
           user_id: req.user.id,
-          task_type: 'habit_instance',
+          task_type: 'recurring_instance',
           source_id: sourceId,
           generated: 0,
-          habit: 1,
+          recurring: 1,
           scheduled_at: scheduledAt || null,
           status: '',
           created_at: db.fn.now(),
@@ -732,10 +910,10 @@ async function updateTaskStatus(req, res) {
       });
     }
 
-    // Habit templates: only 'pause' and '' (unpause) are valid statuses
-    if (existing.task_type === 'habit_template') {
+    // Recurring templates: only 'pause' and '' (unpause) are valid statuses
+    if (existing.task_type === 'recurring_template') {
       if (status !== 'pause' && status !== '') {
-        return res.status(400).json({ error: 'Habit templates can only be paused or unpaused' });
+        return res.status(400).json({ error: 'Recurring templates can only be paused or unpaused' });
       }
 
       await db('tasks').where({ id: id, user_id: req.user.id }).update({ status: status || '', updated_at: db.fn.now() });
@@ -757,7 +935,7 @@ async function updateTaskStatus(req, res) {
             .whereIn('task_id', instanceIds)
             .where('status', 'active')
             .update({ status: 'deleted_local', task_id: null, provider_event_id: null, synced_at: db.fn.now() })
-            .catch(function() {});
+            .catch(function(err) { console.error("[silent-catch]", err.message); });
 
           await db('tasks')
             .where({ user_id: req.user.id })
@@ -767,8 +945,9 @@ async function updateTaskStatus(req, res) {
       }
       // Unpausing: next scheduler run will regenerate instances via expandRecurring
 
-      var srcMap = buildSourceMap(await db('tasks').where({ user_id: req.user.id, task_type: 'habit_template' }).select());
+      var srcMap = buildSourceMap(await db('tasks').where({ user_id: req.user.id, task_type: 'recurring_template' }).select());
       await cache.invalidateTasks(req.user.id);
+      enqueueScheduleRun(req.user.id, 'api:updateTaskStatus:template');
       var updatedTemplate = await db('tasks').where('id', id).first();
       return res.json({ task: rowToTask(updatedTemplate, null, srcMap), instancesRemoved: status === 'pause' ? (instanceIds || []).length : 0 });
     }
@@ -799,8 +978,9 @@ async function updateTaskStatus(req, res) {
 
     await db('tasks').where({ id: id, user_id: req.user.id }).update(update);
     var updated = await db('tasks').where('id', id).first();
-    var srcMap = buildSourceMap(await db('tasks').where({ user_id: req.user.id, task_type: 'habit_template' }).select());
+    var srcMap = buildSourceMap(await db('tasks').where({ user_id: req.user.id, task_type: 'recurring_template' }).select());
     await cache.invalidateTasks(req.user.id);
+    enqueueScheduleRun(req.user.id, 'api:updateTaskStatus');
     res.json({ task: rowToTask(updated, null, srcMap) });
   } catch (error) {
     console.error('Update task status error:', error);
@@ -829,7 +1009,7 @@ async function batchCreateTasks(req, res) {
       if (t.depends_on && Array.isArray(t.depends_on) && t.depends_on.length > 50) return res.status(400).json({ error: `Task ${i}: too many dependencies (max 50)` });
     }
 
-    var tz = req.headers['x-timezone'] || 'America/New_York';
+    var tz = safeTimezone(req.headers['x-timezone']);
 
     var prefs = await db('user_config').where({ user_id: req.user.id, config_key: 'preferences' }).first();
     var splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
@@ -860,6 +1040,7 @@ async function batchCreateTasks(req, res) {
     });
 
     await cache.invalidateTasks(req.user.id);
+    enqueueScheduleRun(req.user.id, 'api:batchCreateTasks');
     res.status(201).json({ created: rows.length });
   } catch (error) {
     console.error('Batch create error:', error);
@@ -880,15 +1061,15 @@ async function batchUpdateTasks(req, res) {
       return res.status(400).json({ error: 'Batch limited to 2000 items' });
     }
 
-    var tz = req.headers['x-timezone'] || 'America/New_York';
+    var tz = safeTimezone(req.headers['x-timezone']);
     var updatedCount = 0;
     var MAX_RETRIES = 3;
 
-    // Template fields that should be routed to the source for habit instances
+    // Template fields that should be routed to the source for recurring instances
     var TEMPLATE_ROW_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
-      'when', 'day_req', 'habit', 'rigid', 'time_flex', 'split', 'split_min',
+      'when', 'day_req', 'recurring', 'rigid', 'time_flex', 'split', 'split_min',
       'travel_before', 'travel_after', 'depends_on',
-      'notes', 'marker', 'flex_when', 'habit_start', 'habit_end'];
+      'notes', 'marker', 'flex_when', 'recur_start', 'recur_end', 'preferred_time'];
 
     for (var attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
@@ -930,6 +1111,7 @@ async function batchUpdateTasks(req, res) {
               if (existingLocal) {
                 var existingDate = existingLocal.date; // e.g. "3/12"
                 row.scheduled_at = localToUtc(existingDate, row._pendingTimeOnly, updateTz) || null;
+                if (row.desired_at === undefined) row.desired_at = row.scheduled_at;
               }
             }
             delete row._pendingTimeOnly;
@@ -943,23 +1125,25 @@ async function batchUpdateTasks(req, res) {
               if (existLocal && existLocal.time) {
                 var newDate = update.date;
                 row.scheduled_at = localToUtc(newDate, existLocal.time, updateTz) || row.scheduled_at;
+                if (row.desired_at === undefined) row.desired_at = row.scheduled_at;
               }
             }
 
-            // Habits cannot have dependencies — strip if provided
-            if (existing && (existing.task_type === 'habit_template' || existing.task_type === 'habit_instance')) {
+            // Recurrings cannot have dependencies — strip if provided
+            if (existing && (existing.task_type === 'recurring_template' || existing.task_type === 'recurring_instance')) {
               delete row.depends_on;
             }
 
             var taskType = existing ? (existing.task_type || 'task') : 'task';
 
-            // Never set status on a habit template — status belongs on instances only
-            if (taskType === 'habit_template' && row.status !== undefined) {
+            // Never set status on a recurring task template — status belongs on instances only
+            if (taskType === 'recurring_template' && row.status !== undefined) {
               delete row.status;
             }
 
-            if (taskType === 'habit_instance' && existing && existing.source_id) {
+            if (taskType === 'recurring_instance' && existing && existing.source_id) {
               // Route template fields to source, instance fields to this row
+              console.log('[BATCH] routing instance ' + id + ' → template ' + existing.source_id + ', row keys:', Object.keys(row).join(','));
               var templateUpdate = {};
               var instanceUpdate = {};
               Object.keys(row).forEach(function(k) {
@@ -971,6 +1155,7 @@ async function batchUpdateTasks(req, res) {
                 }
               });
               if (Object.keys(templateUpdate).length > 0) {
+                console.log('[BATCH] template update:', JSON.stringify(templateUpdate));
                 templateUpdate.updated_at = db.fn.now();
                 await trx('tasks')
                   .where({ id: existing.source_id, user_id: req.user.id })
@@ -1000,6 +1185,7 @@ async function batchUpdateTasks(req, res) {
     }
 
     await cache.invalidateTasks(req.user.id);
+    enqueueScheduleRun(req.user.id, 'api:batchUpdateTasks');
     res.json({ updated: updatedCount });
   } catch (error) {
     console.error('Batch update error:', error);
@@ -1016,7 +1202,7 @@ async function getDisabledTasks(req, res) {
       .where({ user_id: req.user.id, status: 'disabled' })
       .orderBy('disabled_at', 'desc');
     var srcMap = buildSourceMap(
-      await db('tasks').where({ user_id: req.user.id, task_type: 'habit_template' }).select()
+      await db('tasks').where({ user_id: req.user.id, task_type: 'recurring_template' }).select()
     );
     var tasks = rows.map(function(r) { return rowToTask(r, null, srcMap); });
     res.json({ tasks: tasks });
@@ -1027,7 +1213,7 @@ async function getDisabledTasks(req, res) {
 }
 
 /**
- * PUT /api/tasks/:id/re-enable — re-enable a disabled task or habit
+ * PUT /api/tasks/:id/re-enable — re-enable a disabled task
  * Checks entity limits before allowing re-enable.
  */
 async function reEnableTask(req, res) {
@@ -1042,27 +1228,27 @@ async function reEnableTask(req, res) {
     }
 
     // Check entity limits before re-enabling
-    var { countActiveTasks, countHabitTemplates } = require('../middleware/entity-limits');
-    var isHabitTemplate = existing.task_type === 'habit_template';
-    var limitKey = isHabitTemplate ? 'limits.habit_templates' : 'limits.active_tasks';
+    var { countActiveTasks, countRecurringTemplates } = require('../middleware/entity-limits');
+    var isRecurringTemplate = existing.task_type === 'recurring_template';
+    var limitKey = isRecurringTemplate ? 'limits.recurring_templates' : 'limits.active_tasks';
 
     if (req.planFeatures) {
       var limit = limitKey.split('.').reduce(function(o, k) { return o && o[k]; }, req.planFeatures);
       if (limit !== -1 && limit !== undefined && limit !== null) {
-        var currentCount = isHabitTemplate
-          ? await countHabitTemplates(req.user.id)
+        var currentCount = isRecurringTemplate
+          ? await countRecurringTemplates(req.user.id)
           : await countActiveTasks(req.user.id);
 
-        // For habit templates, also count how many instances will be re-enabled
+        // For recurring templates, also count how many instances will be re-enabled
         var instanceCount = 0;
-        if (isHabitTemplate) {
+        if (isRecurringTemplate) {
           var disabledInstances = await db('tasks')
             .where({ source_id: id, user_id: req.user.id, status: 'disabled' })
             .count('* as count').first();
           instanceCount = parseInt(disabledInstances.count, 10);
         }
 
-        // Habit templates check against habit limit; instances check against task limit
+        // Recurring templates check against recurring limit; instances check against task limit
         if (currentCount + 1 > limit) {
           return res.status(403).json({
             error: "You've reached the limit for your plan",
@@ -1075,14 +1261,14 @@ async function reEnableTask(req, res) {
           });
         }
 
-        // If re-enabling a habit template, also check task limit for its instances
-        if (isHabitTemplate && instanceCount > 0) {
+        // If re-enabling a recurring task template, also check task limit for its instances
+        if (isRecurringTemplate && instanceCount > 0) {
           var taskLimit = 'limits.active_tasks'.split('.').reduce(function(o, k) { return o && o[k]; }, req.planFeatures);
           if (taskLimit !== -1 && taskLimit !== undefined && taskLimit !== null) {
             var currentTasks = await countActiveTasks(req.user.id);
             if (currentTasks + instanceCount > taskLimit) {
               return res.status(403).json({
-                error: "Re-enabling this habit would exceed your active task limit",
+                error: "Re-enabling this recurring task would exceed your active task limit",
                 code: 'ENTITY_LIMIT_REACHED',
                 limit_key: 'limits.active_tasks',
                 current_count: currentTasks,
@@ -1106,8 +1292,8 @@ async function reEnableTask(req, res) {
         updated_at: db.fn.now()
       });
 
-      // If re-enabling a habit template, also re-enable its disabled instances
-      if (isHabitTemplate) {
+      // If re-enabling a recurring task template, also re-enable its disabled instances
+      if (isRecurringTemplate) {
         await trx('tasks')
           .where({ source_id: id, user_id: req.user.id, status: 'disabled' })
           .update({
@@ -1120,14 +1306,61 @@ async function reEnableTask(req, res) {
     });
 
     var srcMap = buildSourceMap(
-      await db('tasks').where({ user_id: req.user.id, task_type: 'habit_template' }).select()
+      await db('tasks').where({ user_id: req.user.id, task_type: 'recurring_template' }).select()
     );
     var updated = await db('tasks').where('id', id).first();
     await cache.invalidateTasks(req.user.id);
+    enqueueScheduleRun(req.user.id, 'api:reEnableTask');
     res.json({ task: rowToTask(updated, null, srcMap) });
   } catch (error) {
     console.error('Re-enable task error:', error);
     res.status(500).json({ error: 'Failed to re-enable task' });
+  }
+}
+
+/**
+ * PUT /api/tasks/:id/unpin — Unpin a drag-pinned task
+ *
+ * For regular tasks: restores prev_when, clears date_pinned.
+ * For recurring instances: deletes the instance so the scheduler regenerates it.
+ */
+async function unpinTask(req, res) {
+  try {
+    var existing = await db('tasks')
+      .where({ id: req.params.id, user_id: req.user.id })
+      .first();
+
+    if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    var taskType = existing.task_type || 'task';
+
+    if (taskType === 'recurring_instance' && existing.source_id) {
+      // Recurring instance: delete it so the scheduler regenerates from template
+      await db('tasks')
+        .where({ id: req.params.id, user_id: req.user.id })
+        .del();
+
+      enqueueScheduleRun(req.user.id, 'api:unpinTask:delete');
+      return res.json({ success: true, action: 'deleted', message: 'Instance deleted — scheduler will regenerate from template' });
+    }
+
+    // Regular task: restore previous scheduling mode
+    var updates = {
+      when: existing.prev_when || '',
+      prev_when: null,
+      date_pinned: 0,
+      updated_at: db.fn.now()
+    };
+
+    await db('tasks')
+      .where({ id: req.params.id, user_id: req.user.id })
+      .update(updates);
+
+    enqueueScheduleRun(req.user.id, 'api:unpinTask');
+    res.json({ success: true, action: 'unpinned', when: updates.when });
+  } catch (error) {
+    console.error('Unpin error:', error);
+    res.status(500).json({ error: 'Failed to unpin task' });
   }
 }
 
@@ -1142,6 +1375,7 @@ module.exports = {
   batchUpdateTasks,
   getDisabledTasks,
   reEnableTask,
+  unpinTask,
   rowToTask,
   taskToRow,
   buildSourceMap,

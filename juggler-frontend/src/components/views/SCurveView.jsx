@@ -1,6 +1,6 @@
 /**
  * SCurveView — S-Curve timeline for a single day.
- * Same header chrome as TimelineView (date, location, progress, habits, template).
+ * Same header chrome as TimelineView (date, location, progress, recurringTasks, template).
  */
 
 import React, { useRef, useState, useEffect } from 'react';
@@ -9,7 +9,7 @@ import { getTheme } from '../../theme/colors';
 import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES } from '../../state/constants';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
-export default function SCurveView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onExpand, darkMode, schedCfg, nowMins, isToday, blockedTaskIds, isMobile, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchHabitsDone }) {
+export default function SCurveView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onExpand, darkMode, schedCfg, nowMins, isToday, blockedTaskIds, isMobile, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchRecurringsDone }) {
   var theme = getTheme(darkMode);
   var loc = getLocationForDatePure(selectedDateKey, schedCfg);
   var scrollRef = useRef(null);

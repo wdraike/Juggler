@@ -95,7 +95,7 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
           <P><B>Start after:</B> Earliest date the task can be scheduled.</P>
           <P><B>Rigid:</B> Locks the task to its set date and time — the scheduler won&apos;t move it.</P>
           <P><B>Date pinned:</B> Keeps the task on its assigned date, but the scheduler can still adjust the time within that day.</P>
-          <P><B>Habit:</B> Recurring daily task. Habit tasks appear every day and can be batch-marked done with the &#x2713;hab button.</P>
+          <P><B>Recurring:</B> Tasks with a recurrence pattern (daily, weekly, etc.) auto-generate instances. Batch-mark done with the &#x2713; button.</P>
           <P><B>Split:</B> Allows the scheduler to break this task into multiple smaller chunks. Set the minimum chunk size with <em>splitMin</em>.</P>
           <P><B>Depends on:</B> Other tasks that must complete before this one can start. Open the dependency chain editor to visualize and manage links.</P>
           <P><B>Day requirement (dayReq):</B> Restrict to weekdays, weekends, or a specific day of the week.</P>
@@ -135,7 +135,7 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
           <P><B>WIP:</B> Only tasks currently in progress.</P>
           <P><B>Blocked:</B> Tasks waiting on incomplete dependencies. The red badge shows how many. These can&apos;t proceed until their dependencies are done.</P>
           <P><B>Unplaced:</B> Tasks the scheduler couldn&apos;t place into any time slot. The red badge shows how many. Check the Issues view for details.</P>
-          <P><B>Hide Habits:</B> Toggle to hide recurring habit tasks from the view, reducing clutter when you want to focus on one-off tasks.</P>
+          <P><B>Hide Recurring:</B> Toggle to hide recurringTasks from the view, reducing clutter when you want to focus on one-off tasks.</P>
         </Section>
 
         {/* 7. AI Commands */}
@@ -210,7 +210,7 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
         <Section title="11. Tips" theme={theme}>
           <P>&bull; Click hour labels in Day view to change the location for that hour.</P>
           <P>&bull; Drag tasks between days, times, or priority columns.</P>
-          <P>&bull; Use &#x2713;hab to batch-mark all habits done for the day.</P>
+          <P>&bull; Use the batch-done button to mark all recurringTasks done for the day.</P>
           <P>&bull; Ctrl/Cmd + scroll to zoom the timeline grid.</P>
           <P>&bull; Pinch to zoom on mobile.</P>
           <P>&bull; Hover over any button or badge for a tooltip explaining what it does.</P>

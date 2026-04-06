@@ -5,13 +5,13 @@
  * Uses the provider adapter pattern for extensibility.
  *
  * Conflict resolution: last-modified-timestamp wins (newest wins).
- * Fixed tasks and habit sources always push (Juggler wins).
+ * Fixed tasks and recurring sources always push (Juggler wins).
  */
 
 var crypto = require('crypto');
 var db = require('../db');
 var { getConnectedAdapters } = require('../lib/cal-adapters');
-var { runScheduleAndPersist } = require('../scheduler/runSchedule');
+var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 var { rowToTask } = require('./task.controller');
 var { localToUtc } = require('../scheduler/dateHelpers');
 var { taskHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE } = require('./cal-sync-helpers');
@@ -27,10 +27,10 @@ function delay(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
  * Returns 'juggler' or 'provider'.
  */
 function resolveConflict(task, event, ledger) {
-  // Fixed tasks and habit sources always push Juggler's version
+  // Fixed tasks and recurring sources always push Juggler's version
   var isFixed = task.when && task.when.indexOf('fixed') >= 0;
-  var isHabitSource = task._habit && !task._generated;
-  if (isFixed || isHabitSource) return 'juggler';
+  var isRecurringSource = task._recurring && !task._generated;
+  if (isFixed || isRecurringSource) return 'juggler';
 
   // Last-modified wins
   if (task._updated_at && event.lastModified) {
@@ -65,26 +65,8 @@ async function sync(req, res) {
 
     var stats = { pushed: 0, pulled: 0, deleted_local: 0, deleted_remote: 0, errors: [], providers: {} };
 
-    // === Phase 0: Run scheduler (skip if it ran recently) ===
-    try {
-      var cacheRow = await db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
-      var cacheAge = Infinity;
-      if (cacheRow) {
-        try {
-          var cached = JSON.parse(cacheRow.config_value);
-          if (cached.generatedAt) cacheAge = Date.now() - new Date(cached.generatedAt).getTime();
-        } catch (e) {}
-      }
-      if (cacheAge > 30000) {
-        var schedResult = await runScheduleAndPersist(userId);
-        stats.scheduler = { moved: schedResult.moved, tasks: schedResult.tasks };
-      } else {
-        console.log('[CAL-SYNC] scheduler cache is fresh (' + Math.round(cacheAge / 1000) + 's old), skipping Phase 0');
-      }
-    } catch (schedErr) {
-      console.error('Cal sync Phase 0 (scheduler) error:', schedErr);
-      stats.errors.push({ phase: 'scheduler', error: schedErr.message });
-    }
+    // === Phase 0: Enqueue scheduler run (queue handles deduplication) ===
+    enqueueScheduleRun(userId, 'cal-sync');
 
     // Load user preferences for completed task behavior
     var prefsRow = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
@@ -159,7 +141,7 @@ async function sync(req, res) {
 
     var allTasks = allTaskRows.map(function(r) {
       var t = rowToTask(r, tz);
-      t._habit = r.habit;
+      t._recurring = r.recurring;
       t._generated = r.generated;
       t._scheduled_at = r.scheduled_at;
       t._updated_at = r.updated_at;
@@ -224,8 +206,8 @@ async function sync(req, res) {
         }
 
         try {
-          // --- Habit/generated cleanup ---
-          if (task && (task._habit || task._generated) && event) {
+          // --- Recurring/generated cleanup ---
+          if (task && (task._recurring || task._generated) && event) {
             try {
               await pAdapter.deleteEvent(pToken, ledger.provider_event_id);
               await delay(100);
@@ -244,7 +226,7 @@ async function sync(req, res) {
             stats.deleted_local++;
             continue;
           }
-          if (task && (task._habit || task._generated) && !event) {
+          if (task && (task._recurring || task._generated) && !event) {
             await db.transaction(async function(trx) {
               await trx('tasks').where('id', task.id).update({
                 [pAdapter.getEventIdColumn()]: null, updated_at: db.fn.now()
@@ -325,7 +307,7 @@ async function sync(req, res) {
 
           // --- Both exist: check for changes ---
           if (task && event) {
-            var isHabitSource = task._habit && !task._generated;
+            var isRecurringSource = task._recurring && !task._generated;
 
             var currentTaskHash = taskHash(task);
             var currentEventHash = pAdapter.eventHash(event);
@@ -342,7 +324,7 @@ async function sync(req, res) {
                 pStats.pushed++;
                 stats.pushed++;
               } else {
-                if (!isHabitSource && !isFixed) {
+                if (!isRecurringSource && !isFixed) {
                   var updateFields = pAdapter.applyEventToTaskFields(event, tz);
                   await db('tasks').where('id', task.id).update(updateFields);
                   pStats.pulled++;
@@ -355,7 +337,7 @@ async function sync(req, res) {
               pStats.pushed++;
               stats.pushed++;
             } else if (eventChanged) {
-              if (!isHabitSource && !isFixed) {
+              if (!isRecurringSource && !isFixed) {
                 var updateFields2 = pAdapter.applyEventToTaskFields(event, tz);
                 await db('tasks').where('id', task.id).update(updateFields2);
                 pStats.pulled++;
@@ -491,7 +473,7 @@ async function sync(req, res) {
         if (processedTaskIds2.has(newTask.id)) continue;
         if (ledgeredTaskIds2.has(newTask.id)) continue;
 
-        if (newTask._habit || newTask._generated) continue;
+        if (newTask._recurring || newTask._generated) continue;
         if (!newTask.date) continue;
         if (!newTask.time && newTask.when !== 'allday') continue;
 

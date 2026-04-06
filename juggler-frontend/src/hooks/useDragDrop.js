@@ -1,7 +1,7 @@
 /**
  * useDragDrop — grid drag (reschedule time/date), date drag (month view), priority drag
  *
- * When a recurring habit is moved to a day outside its recurrence pattern,
+ * When a recurring recurring task is moved to a day outside its recurrence pattern,
  * onRecurDayConflict is called instead of onUpdate, giving the caller a
  * chance to prompt the user before committing the change.
  */
@@ -18,7 +18,7 @@ var DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
  * Returns { conflicting: true, dayCode, dayLabel, recurDays } or null.
  */
 function checkRecurDayConflict(task, targetDateKey, allTasks) {
-  if (!task || !task.habit) return null;
+  if (!task || !task.recurring) return null;
   // Resolve recur from task or its source template
   var recur = task.recur;
   if (!recur && task.sourceId) {
@@ -83,8 +83,10 @@ export default function useDragDrop({ allTasks, onUpdate, gridZoom, showToast, o
       }
     }
 
+    // Mark as drag-pin so the backend converts to fixed mode
+    fields._dragPin = true;
     onUpdate(taskId, fields);
-    if (showToast) showToast('Moved to ' + newTime, 'success');
+    if (showToast) showToast('\uD83D\uDCCC Pinned at ' + newTime + ' \u00B7 Unpin in task details', 'success');
   }, [allTasks, onUpdate, PX_PER_MIN, showToast, onRecurDayConflict]);
 
   // Date-only drop: for month view — just change date

@@ -10,7 +10,6 @@ import { expandRecurring } from './expandRecurring';
 export function generateRecurringPure(taskList, startDate, endDate) {
   var results = expandRecurring(taskList, startDate, endDate, {
     maxIter: 400,
-    checkLegacyIds: true,
     checkDupes: true
   });
   return results.map(function(t) { return applyDefaults(t); });

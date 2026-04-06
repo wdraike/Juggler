@@ -60,9 +60,9 @@ function hydratePlacements(data) {
 var SAVE_FIELDS = [
   'text', 'status', 'date', 'time', 'dur', 'timeRemaining',
   'pri', 'project', 'section', 'notes', 'due', 'startAfter',
-  'location', 'tools', 'when', 'dayReq', 'habit', 'rigid',
+  'location', 'tools', 'when', 'dayReq', 'recurring', 'rigid',
   'split', 'splitMin', 'travelBefore', 'travelAfter', 'recur', 'dependsOn', 'datePinned',
-  'tz', '_timezone'
+  'preferredTime', 'tz', '_timezone'
 ];
 
 export default function useTaskState() {
@@ -211,7 +211,7 @@ export default function useTaskState() {
     apiClient.put(`/tasks/${id}/status`, body).then((res) => {
       // Clear dirty flag once server confirms the save
       dispatch({ type: 'CLEAR_DIRTY_STATUS', id });
-      // Pausing a habit template deletes future instances server-side — reload all tasks
+      // Pausing a recurring task template deletes future instances server-side — reload all tasks
       if (val === 'pause' && res.data && res.data.instancesRemoved > 0) {
         loadTasks();
       } else {
@@ -224,7 +224,7 @@ export default function useTaskState() {
         }
       }
     }).catch(err => console.error('Failed to save status:', err));
-    // If there are also taskFields (e.g. date changes on habit completion), save those too
+    // If there are also taskFields (e.g. date changes on recurring completion), save those too
     if (opts.taskFields) scheduleSave();
   }, [scheduleSave, loadPlacements]);
 
@@ -236,7 +236,7 @@ export default function useTaskState() {
     setSaving(true);
     try {
       // Send the actual task ID — the backend routes template fields to the
-      // source and instance fields to the instance for habit_instance tasks.
+      // source and instance fields to the instance for recurring_instance tasks.
       var partial = Object.assign({ id: id }, fields);
       await apiClient.put('/tasks/batch', { updates: [partial] });
       dispatch({ type: 'CLEAR_DIRTY_TASKS', ids: [id], savedFields: { [id]: fields } });
@@ -249,9 +249,11 @@ export default function useTaskState() {
       } else {
         loadPlacements().finally(function() { setSaving(false); });
       }
+      return true;
     } catch (error) {
       console.error('Save failed:', error);
       setSaving(false);
+      return false;
     }
   }, [loadPlacements]);
 
@@ -270,8 +272,8 @@ export default function useTaskState() {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
     var cascade = opts && opts.cascade;
-    if (cascade === 'habit') {
-      // Cascade habit delete: remove template + pending instances from state
+    if (cascade === 'recurring') {
+      // Cascade recurring delete: remove template + pending instances from state
       var state = taskStateRef.current;
       var task = state.tasks.find(function(t) { return t.id === id; });
       var templateId = (task && (task.sourceId || task.source_id)) || id;

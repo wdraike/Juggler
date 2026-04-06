@@ -40,10 +40,10 @@ const CATALOG = {
           default_unrestricted_value: -1
         },
         {
-          key: 'limits.habit_templates',
+          key: 'limits.recurring_templates',
           type: 'numeric',
-          display_name: 'Recurring Habits',
-          description: 'Templates for daily, weekly, or custom recurring tasks',
+          display_name: 'Recurring Recurrings',
+          description: 'Templates for daily, weekly, or custom recurringTasks',
           value_order: 85,
           constraints: { min: 1, max: 100, unlimited_value: -1, step: 1 },
           default_unrestricted_value: -1

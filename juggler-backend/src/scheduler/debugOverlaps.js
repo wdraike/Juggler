@@ -28,7 +28,7 @@ var buildSourceMap = taskController.buildSourceMap;
 var expandRecurringMod = require('../../../shared/scheduler/expandRecurring');
 var expandRecurring = expandRecurringMod.expandRecurring;
 
-var DEFAULT_TIMEZONE = 'America/New_York';
+var DEFAULT_TIMEZONE = constants.DEFAULT_TIMEZONE;
 
 function getNowInTimezone(tz) {
   var now = new Date();
@@ -47,7 +47,7 @@ async function loadConfig(userId) {
   var rows = await db('user_config').where('user_id', userId).select();
   var config = {};
   rows.forEach(function(row) {
-    var val = typeof row.config_value === 'string' ? JSON.parse(row.config_value) : row.config_value;
+    var val = typeof row.config_value === 'string' ? (function() { try { return JSON.parse(row.config_value); } catch(e) { return row.config_value; } })() : row.config_value;
     config[row.config_key] = val;
   });
   return {
@@ -545,14 +545,14 @@ function checkTodayOverload(dayPlacements, allTasks, todayKey, cfg) {
   var totalPlaced = minsByPri.P1 + minsByPri.P2 + minsByPri.P3 + minsByPri.P4;
   var loadRatio = totalAvail > 0 ? (totalPlaced / totalAvail) : 0;
 
-  // Identify "non-urgent" tasks on today: no deadline within 3 days, not pinned, not habit, no dep forcing
+  // Identify "non-urgent" tasks on today: no deadline within 3 days, not pinned, not recurring, no dep forcing
   var todayDate = parseDate(todayKey);
   var threeDaysOut = new Date(todayDate); threeDaysOut.setDate(threeDaysOut.getDate() + 3);
   var nonUrgent = [];
   todayPlacements.forEach(function(p) {
     if (!p.task || p.marker || p.locked) return;
     var t = p.task;
-    if (t.habit) return; // habits are expected on their day
+    if (t.recurring) return; // recurringTasks are expected on their day
     if (t.datePinned) return; // user explicitly pinned
     if (hasWhen(t.when, 'fixed')) return;
     var hasNearDeadline = false;
@@ -577,7 +577,7 @@ function checkTodayOverload(dayPlacements, allTasks, todayKey, cfg) {
   var crossDayPairs = [];
   var priRank = { P1: 1, P2: 2, P3: 3, P4: 4 };
   var todayLowPri = todayPlacements.filter(function(p) {
-    return p.task && !p.marker && !p.locked && !p.task.habit && (priRank[p.task.pri || 'P3'] >= 3);
+    return p.task && !p.marker && !p.locked && !p.task.recurring && (priRank[p.task.pri || 'P3'] >= 3);
   });
   var futureDateKeys = Object.keys(dayPlacements).filter(function(dk) {
     var d = parseDate(dk);
@@ -585,7 +585,7 @@ function checkTodayOverload(dayPlacements, allTasks, todayKey, cfg) {
   });
   futureDateKeys.forEach(function(dk) {
     (dayPlacements[dk] || []).forEach(function(fp) {
-      if (!fp.task || fp.marker || fp.locked || fp.task.habit) return;
+      if (!fp.task || fp.marker || fp.locked || fp.task.recurring) return;
       var fpRank = priRank[fp.task.pri || 'P3'] || 3;
       if (fpRank > 2) return; // only flag P1/P2 on future days
       todayLowPri.forEach(function(tp) {
@@ -627,7 +627,7 @@ function checkHighPriDisplacement(dayPlacements, unplaced, allTasks, todayKey) {
   (dayPlacements[todayKey] || []).forEach(function(p) {
     if (!p.task || p.marker || p.locked) return;
     var t = p.task;
-    if (t.habit || t.datePinned || hasWhen(t.when, 'fixed')) return;
+    if (t.recurring || t.datePinned || hasWhen(t.when, 'fixed')) return;
     var rank = priRank[t.pri || 'P3'] || 3;
     if (rank < 3) return; // P1/P2 are not deferrable
     var hasNearDeadline = false;
@@ -656,7 +656,7 @@ function checkHighPriDisplacement(dayPlacements, unplaced, allTasks, todayKey) {
       if (!fp.task || fp.marker || fp.locked) return;
       var fpRank = priRank[fp.task.pri || 'P3'] || 3;
       if (fpRank > 2) return; // only P1/P2
-      if (fp.task.habit) return;
+      if (fp.task.recurring) return;
       todayDeferrable.forEach(function(td) {
         issues.push({
           msg: (fp.task.pri || 'P3') + ' "' + fp.task.text + '" on ' + dk +

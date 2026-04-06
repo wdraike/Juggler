@@ -3,7 +3,7 @@
  */
 
 const db = require('../db');
-const { runScheduleAndPersist } = require('../scheduler/runSchedule');
+const { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 const cache = require('../lib/redis');
 
 /**
@@ -25,7 +25,7 @@ async function getAllConfig(req, res) {
 
     const config = {};
     configRows.forEach(row => {
-      const val = typeof row.config_value === 'string' ? JSON.parse(row.config_value) : row.config_value;
+      const val = typeof row.config_value === 'string' ? (function() { try { return JSON.parse(row.config_value); } catch(e) { return row.config_value; } })() : row.config_value;
       config[row.config_key] = val;
     });
 
@@ -143,9 +143,7 @@ async function updateConfig(req, res) {
       'schedule_templates'
     ];
     if (schedKeys.includes(key)) {
-      runScheduleAndPersist(userId).catch(function(err) {
-        console.error('Auto-reschedule after config update failed:', err);
-      });
+      enqueueScheduleRun(userId, 'config:' + key);
     }
   } catch (error) {
     console.error('Update config error:', error);

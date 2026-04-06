@@ -182,7 +182,7 @@ function buildICS(tasks, statuses) {
     if (t.pri) lines.push('X-JUGGLER-PRI:' + t.pri);
     if (t.when) lines.push('X-JUGGLER-WHEN:' + t.when);
     if (t.dayReq) lines.push('X-JUGGLER-DAYREQ:' + t.dayReq);
-    if (t.habit) lines.push('X-JUGGLER-HABIT:TRUE');
+    if (t.recurring) lines.push('X-JUGGLER-RECURRING:TRUE');
     if (t.rigid) lines.push('X-JUGGLER-RIGID:TRUE');
     if (t.split) lines.push('X-JUGGLER-SPLIT:TRUE');
     if (t.splitMin) lines.push('X-JUGGLER-SPLITMIN:' + t.splitMin);
@@ -319,7 +319,7 @@ function icsEventsToTasks(events, existingIds) {
     var project = ev.CATEGORIES ? unescICS(ev.CATEGORIES.split(',')[0]) : '';
     var when = ev['X-JUGGLER-WHEN'] || (isAllDay ? 'allday' : '');
     var dayReq = ev['X-JUGGLER-DAYREQ'] || '';
-    var habit = ev['X-JUGGLER-HABIT'] === 'TRUE';
+    var recurring = ev['X-JUGGLER-RECURRING'] === 'TRUE';
     var rigid = ev['X-JUGGLER-RIGID'] === 'TRUE';
     var split = ev['X-JUGGLER-SPLIT'] === 'TRUE';
     var splitMin = ev['X-JUGGLER-SPLITMIN'] ? parseInt(ev['X-JUGGLER-SPLITMIN']) : undefined;
@@ -370,7 +370,7 @@ function icsEventsToTasks(events, existingIds) {
       tools: tools,
       when: when,
       dayReq: dayReq,
-      habit: habit,
+      recurring: recurring,
       rigid: rigid,
       split: split,
       recur: recur || undefined,

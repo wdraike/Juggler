@@ -1,7 +1,7 @@
 /**
  * Entity Limit Middleware
  *
- * Enforces count-based limits on entities (tasks, habits, projects, locations, schedule templates).
+ * Enforces count-based limits on entities (tasks, recurringTasks, projects, locations, schedule templates).
  * Unlike rate limits (per_month), these check total active count vs plan limit.
  */
 
@@ -66,17 +66,17 @@ async function countActiveTasks(userId) {
     .where('user_id', userId)
     .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
     .where(function () {
-      this.whereNull('task_type').orWhereNot('task_type', 'habit_template');
+      this.whereNull('task_type').orWhereNot('task_type', 'recurring_template');
     })
     .count('* as count')
     .first();
   return parseInt(result.count, 10);
 }
 
-async function countHabitTemplates(userId) {
+async function countRecurringTemplates(userId) {
   const result = await db('tasks')
     .where('user_id', userId)
-    .where('task_type', 'habit_template')
+    .where('task_type', 'recurring_template')
     .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
     .count('* as count')
     .first();
@@ -130,9 +130,9 @@ const checkTaskBatchLimit = checkEntityLimit(
   { batchCountFn: (req) => Array.isArray(req.body) ? req.body.length : (req.body?.tasks?.length || 1) }
 );
 
-const checkHabitLimit = checkEntityLimit(
-  'limits.habit_templates',
-  countHabitTemplates
+const checkRecurringLimit = checkEntityLimit(
+  'limits.recurring_templates',
+  countRecurringTemplates
 );
 
 const checkProjectLimit = checkEntityLimit(
@@ -166,19 +166,19 @@ const checkScheduleTemplateLimit = checkEntityLimit(
 );
 
 /**
- * For task creation: checks if the task is a habit_template and enforces that limit,
+ * For task creation: checks if the task is a recurring_template and enforces that limit,
  * otherwise enforces the active_tasks limit.
  */
-function checkTaskOrHabitLimit(req, res, next) {
+function checkTaskOrRecurringLimit(req, res, next) {
   const taskType = req.body?.task_type || req.body?.taskType;
-  if (taskType === 'habit_template') {
-    return checkHabitLimit(req, res, next);
+  if (taskType === 'recurring_template') {
+    return checkRecurringLimit(req, res, next);
   }
   return checkTaskLimit(req, res, next);
 }
 
 /**
- * For batch task creation: separates habits vs regular tasks and checks both limits.
+ * For batch task creation: separates recurringTasks vs regular tasks and checks both limits.
  */
 async function checkBatchTaskLimits(req, res, next) {
   if (!req.planFeatures) {
@@ -189,8 +189,8 @@ async function checkBatchTaskLimits(req, res, next) {
   if (!userId) return res.status(401).json({ error: 'Authentication required' });
 
   const items = Array.isArray(req.body) ? req.body : (req.body?.tasks || []);
-  const habits = items.filter(t => (t.task_type || t.taskType) === 'habit_template');
-  const tasks = items.filter(t => (t.task_type || t.taskType) !== 'habit_template');
+  const recurringTasks = items.filter(t => (t.task_type || t.taskType) === 'recurring_template');
+  const tasks = items.filter(t => (t.task_type || t.taskType) !== 'recurring_template');
 
   try {
     // Check task limit
@@ -211,18 +211,18 @@ async function checkBatchTaskLimits(req, res, next) {
       }
     }
 
-    // Check habit limit
-    const habitLimit = getNestedValue(req.planFeatures, 'limits.habit_templates');
-    if (habitLimit !== -1 && habitLimit !== undefined && habits.length > 0) {
-      const currentHabits = await countHabitTemplates(userId);
-      if (currentHabits + habits.length > habitLimit) {
+    // Check recurring limit
+    const recurringLimit = getNestedValue(req.planFeatures, 'limits.recurring_templates');
+    if (recurringLimit !== -1 && recurringLimit !== undefined && recurringTasks.length > 0) {
+      const currentRecurrings = await countRecurringTemplates(userId);
+      if (currentRecurrings + recurringTasks.length > recurringLimit) {
         return res.status(403).json({
-          error: `You've reached the habit template limit for your plan`,
+          error: `You've reached the recurring task template limit for your plan`,
           code: 'ENTITY_LIMIT_REACHED',
-          limit_key: 'limits.habit_templates',
-          current_count: currentHabits,
-          limit: habitLimit,
-          attempting_to_add: habits.length,
+          limit_key: 'limits.recurring_templates',
+          current_count: currentRecurrings,
+          limit: recurringLimit,
+          attempting_to_add: recurringTasks.length,
           current_plan: req.planId || 'free',
           upgrade_required: true
         });
@@ -240,14 +240,14 @@ module.exports = {
   checkEntityLimit,
   checkTaskLimit,
   checkTaskBatchLimit,
-  checkHabitLimit,
+  checkRecurringLimit,
   checkProjectLimit,
   checkLocationLimit,
   checkScheduleTemplateLimit,
-  checkTaskOrHabitLimit,
+  checkTaskOrRecurringLimit,
   checkBatchTaskLimits,
   countActiveTasks,
-  countHabitTemplates,
+  countRecurringTemplates,
   countProjects,
   countLocations,
   countScheduleTemplates

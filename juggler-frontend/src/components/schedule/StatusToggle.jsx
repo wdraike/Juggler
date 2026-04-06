@@ -14,16 +14,16 @@ var ALL_STATUSES = [
   { value: 'pause',  icon: '\u23F8', label: 'Pause',  activeBg: '#E0E7FF', activeBgDark: '#1E1B4B', color: '#4338CA', colorDark: '#A5B4FC' },
 ];
 
-export default function StatusToggle({ value, onChange, darkMode, compact, isMobile, taskType }) {
+export default React.memo(function StatusToggle({ value, onChange, darkMode, compact, isMobile, taskType }) {
   var size = compact ? 16 : (isMobile ? 28 : 22);
   var fontSize = compact ? 8 : (isMobile ? 14 : 12);
 
   // Filter statuses based on task type
   var statuses = ALL_STATUSES;
-  if (taskType === 'habit_template') {
+  if (taskType === 'recurring_template') {
     // Templates can only be paused or unpaused
     statuses = ALL_STATUSES.filter(function(s) { return s.value === '' || s.value === 'pause'; });
-  } else if (taskType === 'habit_instance') {
+  } else if (taskType === 'recurring_instance') {
     // Instances can't be paused — pause is template-level
     statuses = ALL_STATUSES.filter(function(s) { return s.value !== 'pause'; });
   }
@@ -60,4 +60,4 @@ export default function StatusToggle({ value, onChange, darkMode, compact, isMob
       })}
     </div>
   );
-}
+})

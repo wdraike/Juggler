@@ -56,7 +56,7 @@ jest.mock('../src/middleware/jwt-auth', () => ({
 
 // Mock plan features — configurable per test
 let mockPlanFeatures = {
-  limits: { active_tasks: -1, habit_templates: -1, projects: -1, locations: -1, schedule_templates: -1 },
+  limits: { active_tasks: -1, recurring_templates: -1, projects: -1, locations: -1, schedule_templates: -1 },
   calendar: { max_providers: -1 },
   scheduling: { dependencies: true, travel_time: true },
   tasks: { rigid: true }
@@ -96,7 +96,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   // Reset to unlimited plan
   mockPlanFeatures = {
-    limits: { active_tasks: -1, habit_templates: -1, projects: -1, locations: -1, schedule_templates: -1 },
+    limits: { active_tasks: -1, recurring_templates: -1, projects: -1, locations: -1, schedule_templates: -1 },
     calendar: { max_providers: -1 },
     scheduling: { dependencies: true, travel_time: true },
     tasks: { rigid: true }
@@ -136,8 +136,8 @@ describe('Mutation guards for disabled items', () => {
     expect(res.body.code).toBe('TASK_DISABLED');
   });
 
-  test('PUT /api/tasks/:id/status rejects status change on disabled habit template', async () => {
-    resolveQueue.push({ id: 'ht01', user_id: 'user-123', status: 'disabled', task_type: 'habit_template' });
+  test('PUT /api/tasks/:id/status rejects status change on disabled recurring template', async () => {
+    resolveQueue.push({ id: 'ht01', user_id: 'user-123', status: 'disabled', task_type: 'recurring_template' });
 
     const res = await request(app)
       .put('/api/tasks/ht01/status')
@@ -161,9 +161,9 @@ describe('Mutation guards for disabled items', () => {
     expect(res.body.message).toBe('Task deleted');
   });
 
-  test('DELETE /api/tasks/:id?cascade=habit works on disabled habit', async () => {
+  test('DELETE /api/tasks/:id?cascade=recurring works on disabled recurring', async () => {
     // Task lookup
-    resolveQueue.push({ id: 'ht01', user_id: 'user-123', status: 'disabled', task_type: 'habit_template' });
+    resolveQueue.push({ id: 'ht01', user_id: 'user-123', status: 'disabled', task_type: 'recurring_template' });
     // Instances query
     resolveQueue.push([
       { id: 'hi01', status: 'disabled', gcal_event_id: null, msft_event_id: null },
@@ -173,11 +173,11 @@ describe('Mutation guards for disabled items', () => {
     resolveQueue.push({ id: 'ht01', gcal_event_id: null, msft_event_id: null });
 
     const res = await request(app)
-      .delete('/api/tasks/ht01?cascade=habit')
+      .delete('/api/tasks/ht01?cascade=recurring')
       .set('Authorization', `Bearer ${VALID_TOKEN}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.message).toBe('Habit deleted');
+    expect(res.body.message).toBe('Recurring deleted');
   });
 });
 
@@ -201,9 +201,9 @@ describe('GET /api/tasks/disabled', () => {
     expect(res.body.tasks).toEqual([]);
   });
 
-  test('returns disabled tasks and habits', async () => {
+  test('returns disabled tasks and recurringTasks', async () => {
     resolveQueue.push([
-      { id: 'ht01', user_id: 'user-123', text: 'Morning run', status: 'disabled', task_type: 'habit_template', disabled_at: '2026-04-01T12:00:00Z', disabled_reason: 'downgrade' },
+      { id: 'ht01', user_id: 'user-123', text: 'Morning run', status: 'disabled', task_type: 'recurring_template', disabled_at: '2026-04-01T12:00:00Z', disabled_reason: 'downgrade' },
       { id: 't05', user_id: 'user-123', text: 'Write report', status: 'disabled', task_type: 'task', disabled_at: '2026-04-01T12:00:00Z', disabled_reason: 'downgrade' }
     ]);
     // srcMap query (templates for instance inheritance)
@@ -259,7 +259,7 @@ describe('PUT /api/tasks/:id/re-enable', () => {
     // Set plan to free with 5 task limit
     mockPlanFeatures = {
       ...mockPlanFeatures,
-      limits: { ...mockPlanFeatures.limits, active_tasks: 5, habit_templates: 3 }
+      limits: { ...mockPlanFeatures.limits, active_tasks: 5, recurring_templates: 3 }
     };
     mockPlanId = 'free';
 
@@ -277,10 +277,10 @@ describe('PUT /api/tasks/:id/re-enable', () => {
     expect(res.body.limit).toBe(5);
   });
 
-  test('re-enables a disabled habit template and its instances', async () => {
-    // Task lookup — habit template
-    resolveQueue.push({ id: 'ht01', user_id: 'user-123', status: 'disabled', task_type: 'habit_template', disabled_at: '2026-04-01T12:00:00Z' });
-    // countHabitTemplates (under limit)
+  test('re-enables a disabled recurring template and its instances', async () => {
+    // Task lookup — recurring template
+    resolveQueue.push({ id: 'ht01', user_id: 'user-123', status: 'disabled', task_type: 'recurring_template', disabled_at: '2026-04-01T12:00:00Z' });
+    // countRecurringTemplates (under limit)
     resolveQueue.push({ count: 2 });
     // Count disabled instances for task limit check
     resolveQueue.push({ count: 3 });
@@ -289,11 +289,11 @@ describe('PUT /api/tasks/:id/re-enable', () => {
     // srcMap for response
     resolveQueue.push([]);
     // Updated row for response
-    resolveQueue.push({ id: 'ht01', user_id: 'user-123', status: '', task_type: 'habit_template', text: 'Morning run', disabled_at: null, disabled_reason: null });
+    resolveQueue.push({ id: 'ht01', user_id: 'user-123', status: '', task_type: 'recurring_template', text: 'Morning run', disabled_at: null, disabled_reason: null });
 
     mockPlanFeatures = {
       ...mockPlanFeatures,
-      limits: { ...mockPlanFeatures.limits, active_tasks: 50, habit_templates: 5 }
+      limits: { ...mockPlanFeatures.limits, active_tasks: 50, recurring_templates: 5 }
     };
     mockPlanId = 'pro';
 
@@ -305,16 +305,16 @@ describe('PUT /api/tasks/:id/re-enable', () => {
     expect(res.body.task.status).toBe('');
   });
 
-  test('rejects habit re-enable when instances would exceed task limit', async () => {
+  test('rejects recurring re-enable when instances would exceed task limit', async () => {
     mockPlanFeatures = {
       ...mockPlanFeatures,
-      limits: { ...mockPlanFeatures.limits, active_tasks: 50, habit_templates: 25 }
+      limits: { ...mockPlanFeatures.limits, active_tasks: 50, recurring_templates: 25 }
     };
     mockPlanId = 'pro';
 
-    // Task lookup — habit template
-    resolveQueue.push({ id: 'ht01', user_id: 'user-123', status: 'disabled', task_type: 'habit_template', disabled_at: '2026-04-01T12:00:00Z' });
-    // countHabitTemplates (under limit)
+    // Task lookup — recurring template
+    resolveQueue.push({ id: 'ht01', user_id: 'user-123', status: 'disabled', task_type: 'recurring_template', disabled_at: '2026-04-01T12:00:00Z' });
+    // countRecurringTemplates (under limit)
     resolveQueue.push({ count: 10 });
     // Count disabled instances — 15 instances
     resolveQueue.push({ count: 15 });
@@ -355,38 +355,38 @@ describe('enforceDowngradeLimits', () => {
   });
 
   test('does nothing when under limits', async () => {
-    const planFeatures = { limits: { habit_templates: 5, active_tasks: 50 } };
+    const planFeatures = { limits: { recurring_templates: 5, active_tasks: 50 } };
 
-    // countHabitTemplates
+    // countRecurringTemplates
     resolveQueue.push({ count: 3 });
     // countActiveTasks
     resolveQueue.push({ count: 20 });
 
     const result = await enforceDowngradeLimits('user-123', planFeatures);
-    expect(result.disabledHabits).toBe(0);
+    expect(result.disabledRecurrings).toBe(0);
     expect(result.disabledTasks).toBe(0);
   });
 
   test('does nothing when limits are unlimited (-1)', async () => {
-    const planFeatures = { limits: { habit_templates: -1, active_tasks: -1 } };
+    const planFeatures = { limits: { recurring_templates: -1, active_tasks: -1 } };
 
     const result = await enforceDowngradeLimits('user-123', planFeatures);
-    expect(result.disabledHabits).toBe(0);
+    expect(result.disabledRecurrings).toBe(0);
     expect(result.disabledTasks).toBe(0);
   });
 
   test('does nothing when planFeatures is null', async () => {
     const result = await enforceDowngradeLimits('user-123', null);
-    expect(result.disabledHabits).toBe(0);
+    expect(result.disabledRecurrings).toBe(0);
     expect(result.disabledTasks).toBe(0);
   });
 
-  test('disables excess habits (newest first)', async () => {
-    const planFeatures = { limits: { habit_templates: 3, active_tasks: 50 } };
+  test('disables excess recurringTasks (newest first)', async () => {
+    const planFeatures = { limits: { recurring_templates: 3, active_tasks: 50 } };
 
-    // Phase 1: count habit templates = 5 (2 over limit of 3)
+    // Phase 1: count recurring templates = 5 (2 over limit of 3)
     resolveQueue.push({ count: 5 });
-    // Newest 2 habit templates to disable
+    // Newest 2 recurring templates to disable
     resolveQueue.push([
       { id: 'ht05' },
       { id: 'ht04' }
@@ -396,18 +396,18 @@ describe('enforceDowngradeLimits', () => {
       { id: 'hi10' },
       { id: 'hi11' }
     ]);
-    // Phase 2: count active tasks (after disabling habit instances)
+    // Phase 2: count active tasks (after disabling recurring instances)
     resolveQueue.push({ count: 30 });
 
     const result = await enforceDowngradeLimits('user-123', planFeatures);
-    expect(result.disabledHabits).toBe(2);
+    expect(result.disabledRecurrings).toBe(2);
     expect(result.disabledTasks).toBe(0);
   });
 
-  test('disables excess tasks after habits', async () => {
-    const planFeatures = { limits: { habit_templates: 5, active_tasks: 10 } };
+  test('disables excess tasks after recurringTasks', async () => {
+    const planFeatures = { limits: { recurring_templates: 5, active_tasks: 10 } };
 
-    // Phase 1: habits under limit
+    // Phase 1: recurringTasks under limit
     resolveQueue.push({ count: 3 });
     // Phase 2: count active tasks = 15 (5 over limit of 10)
     resolveQueue.push({ count: 15 });
@@ -427,20 +427,20 @@ describe('enforceDowngradeLimits', () => {
     resolveQueue.push([]);
 
     const result = await enforceDowngradeLimits('user-123', planFeatures);
-    expect(result.disabledHabits).toBe(0);
+    expect(result.disabledRecurrings).toBe(0);
     expect(result.disabledTasks).toBe(5);
   });
 
-  test('disables both habits and tasks when both over limit', async () => {
-    const planFeatures = { limits: { habit_templates: 2, active_tasks: 5 } };
+  test('disables both recurringTasks and tasks when both over limit', async () => {
+    const planFeatures = { limits: { recurring_templates: 2, active_tasks: 5 } };
 
-    // Phase 1: count habits = 4 (2 over)
+    // Phase 1: count recurringTasks = 4 (2 over)
     resolveQueue.push({ count: 4 });
-    // Newest 2 habit templates
+    // Newest 2 recurring templates
     resolveQueue.push([{ id: 'ht04' }, { id: 'ht03' }]);
     // Disabled instances (select for cal cleanup)
     resolveQueue.push([{ id: 'hi08' }]);
-    // Phase 2: count active tasks = 8 (3 over limit of 5, after habit instance disabled)
+    // Phase 2: count active tasks = 8 (3 over limit of 5, after recurring instance disabled)
     resolveQueue.push({ count: 8 });
     // Newest 3 tasks
     resolveQueue.push([
@@ -454,19 +454,19 @@ describe('enforceDowngradeLimits', () => {
     resolveQueue.push([]);
 
     const result = await enforceDowngradeLimits('user-123', planFeatures);
-    expect(result.disabledHabits).toBe(2);
+    expect(result.disabledRecurrings).toBe(2);
     expect(result.disabledTasks).toBe(3);
   });
 
   test('is idempotent — running twice does not disable more', async () => {
-    const planFeatures = { limits: { habit_templates: 5, active_tasks: 50 } };
+    const planFeatures = { limits: { recurring_templates: 5, active_tasks: 50 } };
 
     // First run: already at limits (all excess already disabled from prior run)
-    resolveQueue.push({ count: 5 }); // habits exactly at limit
+    resolveQueue.push({ count: 5 }); // recurringTasks exactly at limit
     resolveQueue.push({ count: 50 }); // tasks exactly at limit
 
     const result = await enforceDowngradeLimits('user-123', planFeatures);
-    expect(result.disabledHabits).toBe(0);
+    expect(result.disabledRecurrings).toBe(0);
     expect(result.disabledTasks).toBe(0);
   });
 });
@@ -484,8 +484,8 @@ describe('rowToTask template inheritance', () => {
   });
 
   test('active instance inherits template fields', () => {
-    const template = { id: 'ht01', task_type: 'habit_template', text: 'Updated title', dur: 45, pri: 'P1', status: '' };
-    const instance = { id: 'hi01', task_type: 'habit_instance', source_id: 'ht01', text: null, dur: null, pri: null, status: '' };
+    const template = { id: 'ht01', task_type: 'recurring_template', text: 'Updated title', dur: 45, pri: 'P1', status: '' };
+    const instance = { id: 'hi01', task_type: 'recurring_instance', source_id: 'ht01', text: null, dur: null, pri: null, status: '' };
     const srcMap = { ht01: template };
 
     const result = rowToTask(instance, null, srcMap);
@@ -495,8 +495,8 @@ describe('rowToTask template inheritance', () => {
   });
 
   test('disabled instance does NOT inherit template fields', () => {
-    const template = { id: 'ht01', task_type: 'habit_template', text: 'Updated title', dur: 45, pri: 'P1', status: '' };
-    const instance = { id: 'hi01', task_type: 'habit_instance', source_id: 'ht01', text: 'Old title', dur: 30, pri: 'P2', status: 'disabled', disabled_at: '2026-04-01T12:00:00Z', disabled_reason: 'downgrade' };
+    const template = { id: 'ht01', task_type: 'recurring_template', text: 'Updated title', dur: 45, pri: 'P1', status: '' };
+    const instance = { id: 'hi01', task_type: 'recurring_instance', source_id: 'ht01', text: 'Old title', dur: 30, pri: 'P2', status: 'disabled', disabled_at: '2026-04-01T12:00:00Z', disabled_reason: 'downgrade' };
     const srcMap = { ht01: template };
 
     const result = rowToTask(instance, null, srcMap);
@@ -523,7 +523,7 @@ describe('expandRecurring with disabled status', () => {
   test('skips disabled templates', () => {
     const src = {
       id: 'ht_1', text: 'Daily workout', date: '3/20', dur: 30, pri: 'P1',
-      habit: true, rigid: false, recur: { type: 'daily' }, dayReq: 'any',
+      recurring: true, rigid: false, recur: { type: 'daily' }, dayReq: 'any',
       status: 'disabled'
     };
     const result = expandRecurring([src], new Date(2026, 2, 20), new Date(2026, 2, 25), {
@@ -534,12 +534,12 @@ describe('expandRecurring with disabled status', () => {
 
   test('still expands active templates alongside disabled ones', () => {
     const active = {
-      id: 'ht_1', text: 'Active habit', date: '3/20', dur: 30, pri: 'P1',
-      habit: true, rigid: false, recur: { type: 'daily' }, dayReq: 'any'
+      id: 'ht_1', text: 'Active recurring', date: '3/20', dur: 30, pri: 'P1',
+      recurring: true, rigid: false, recur: { type: 'daily' }, dayReq: 'any'
     };
     const disabled = {
-      id: 'ht_2', text: 'Disabled habit', date: '3/20', dur: 30, pri: 'P1',
-      habit: true, rigid: false, recur: { type: 'daily' }, dayReq: 'any',
+      id: 'ht_2', text: 'Disabled recurring', date: '3/20', dur: 30, pri: 'P1',
+      recurring: true, rigid: false, recur: { type: 'daily' }, dayReq: 'any',
       status: 'disabled'
     };
     const result = expandRecurring([active, disabled], new Date(2026, 2, 20), new Date(2026, 2, 25), {

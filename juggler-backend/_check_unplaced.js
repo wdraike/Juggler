@@ -11,7 +11,6 @@ const { rowToTask } = require('./src/controllers/task.controller');
     var st = t.status || '';
     if (st === 'done' || st === 'cancel' || st === 'skip') return false;
     if (!t.date || t.date === 'TBD') return false;
-    if (t.section && (t.section.includes('PARKING') || t.section.includes('TO BE SCHEDULED'))) return false;
     var w = t.when || '';
     if (w.split(',').map(s => s.trim()).indexOf('allday') !== -1) return false;
     if (!t.time || typeof t.time !== 'string') return true;

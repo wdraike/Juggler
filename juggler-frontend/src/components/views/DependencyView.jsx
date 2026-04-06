@@ -420,9 +420,9 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
 
   var chainAddDep = useCallback(function(taskId, depId) {
     if (taskId === depId) return;
-    // Habits cannot have dependencies
+    // Recurrings cannot have dependencies
     var targetTask = allTasks.find(function(t) { return t.id === taskId; });
-    if (targetTask && targetTask.habit) return;
+    if (targetTask && targetTask.recurring) return;
     if (wouldCycle(chainDeps, taskId, depId)) return;
     var newDeps;
     setChainDeps(function(prev) {

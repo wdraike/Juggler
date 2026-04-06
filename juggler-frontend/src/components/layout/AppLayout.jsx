@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import ErrorBoundary from '../ErrorBoundary';
 import HeaderBar from './HeaderBar';
 import WeekStrip from './WeekStrip';
 import NavigationBar from './NavigationBar';
@@ -126,25 +127,28 @@ export default function AppLayout() {
   var theme = getTheme(darkMode);
   var statuses = taskState.statuses;
   var allTasks = taskState.tasks;
-  // Visible tasks excludes habit templates (blueprints) and disabled items (frozen by plan limits)
+  // Visible tasks excludes recurring templates (blueprints) and disabled items (frozen by plan limits)
   var visibleTasks = useMemo(function() {
     return allTasks.filter(function(t) {
-      return t.taskType !== 'habit_template' && (statuses[t.id] || '') !== 'disabled';
+      return t.taskType !== 'recurring_template' && (statuses[t.id] || '') !== 'disabled';
     });
   }, [allTasks, statuses]);
 
   // Track when editing UI is open to suspend background syncs/scheduling
   editingRef.current = expandedTasks.length > 0 || !!showCreateForm || !!showSettings;
 
-  // Load data on mount — show cached placements immediately, then refresh via scheduler
+  // Load data on mount — tasks + cached placements in parallel, then scheduler in background
   useEffect(() => {
-    loadTasks().then(result => {
-      if (result?.config) {
-        config.initFromConfig(result.config);
+    // Parallel: load tasks and cached placements simultaneously
+    Promise.all([
+      loadTasks(),
+      loadPlacements()
+    ]).then(function(results) {
+      var taskResult = results[0];
+      if (taskResult?.config) {
+        config.initFromConfig(taskResult.config);
       }
-      // Show cached placements right away so tasks aren't all "unscheduled"
-      loadPlacements();
-      // Then run the scheduler for a fresh result
+      // Background: run scheduler for fresh result (doesn't block initial render)
       apiClient.post('/schedule/run').then(function(res) {
         if (res.data?.dayPlacements) {
           loadPlacements();
@@ -311,6 +315,18 @@ export default function AppLayout() {
   // Placements come from the backend scheduler API
   var dayPlacements = placements.dayPlacements;
   var unplaced = placements.unplaced;
+  // Include active tasks with no scheduled_at — these have no date and won't
+  // appear on any calendar day. Show them in the unplaced list so they're not lost.
+  var _unplacedIdSet = {};
+  (unplaced || []).forEach(function(t) { if (t && t.id) _unplacedIdSet[t.id] = true; });
+  var nullScheduled = allTasks.filter(function(t) {
+    if (!t || !t.id || _unplacedIdSet[t.id]) return false;
+    if (t.taskType === 'recurring_template') return false;
+    var st = statuses[t.id] || '';
+    if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'disabled' || st === 'pause') return false;
+    return !t.scheduledAt && !t.date;
+  });
+  if (nullScheduled.length > 0) unplaced = (unplaced || []).concat(nullScheduled);
   var schedulerWarnings = placements.warnings || [];
 
   // Filtered placements for grid views (projectFilter, search)
@@ -424,7 +440,7 @@ export default function AppLayout() {
     return ids;
   }, [unplaced]);
 
-  // Recurring habit expansion is handled server-side in runSchedule.js
+  // Recurring recurring expansion is handled server-side in runSchedule.js
 
   // Tasks by date map
   var tasksByDate = useMemo(() => {
@@ -478,7 +494,10 @@ export default function AppLayout() {
         });
       });
     }
-    result.sort((a, b) => a._earliest - b._earliest);
+    // Sort by canonical day order (morning→lunch→afternoon→evening→night).
+    // _earliest can be skewed by special-purpose templates (e.g., "car" has Night at midnight).
+    var TAG_ORDER = { morning: 1, lunch: 2, biz: 2.5, afternoon: 3, evening: 4, night: 5 };
+    result.sort((a, b) => (TAG_ORDER[a.tag] || 99) - (TAG_ORDER[b.tag] || 99));
     return result;
   }, [config.scheduleTemplates, config.timeBlocks]);
 
@@ -518,7 +537,7 @@ export default function AppLayout() {
   }, [completionPickerTask, pushUndo, setStatus, showToast]);
 
   // Task expand handler — from main views (single open)
-  // Generated/instance tasks — open the source habit instead
+  // Generated/instance tasks — open the source recurring instead
   var handleExpand = useCallback((id) => {
     var effectiveId = id;
     var task = allTasks.find(function(t) { return t.id === id; });
@@ -531,10 +550,10 @@ export default function AppLayout() {
         // Track which instance was clicked so status changes target the instance
         expandedInstanceRef.current[effectiveId] = id;
       }
-    } else if (task && task.habit) {
+    } else if (task && task.recurring) {
       // Fallback: find template by text for instances missing sourceId
       var tmpl = allTasks.find(function(t) {
-        return t.taskType === 'habit_template' && t.text === task.text;
+        return t.taskType === 'recurring_template' && t.text === task.text;
       });
       if (tmpl) {
         effectiveId = tmpl.id;
@@ -553,23 +572,26 @@ export default function AppLayout() {
   }, [pushUndo, createTask, showToast]);
 
   // Task update handler
-  var handleUpdateTask = useCallback((id, fields) => {
+  var handleUpdateTask = useCallback(async (id, fields) => {
     pushUndo('edit task');
-    updateTask(id, fields);
-    showToast('Updated task', 'success');
+    var ok = await updateTask(id, fields);
+    if (ok === false) {
+      showToast('Save failed — try again', 'error');
+    }
+    return ok;
   }, [pushUndo, updateTask, showToast]);
 
-  // Batch mark habits done for a given date
-  var handleBatchHabitsDone = useCallback((dateKey) => {
-    pushUndo('batch habits done');
+  // Batch mark recurringTasks done for a given date
+  var handleBatchRecurringDone = useCallback((dateKey) => {
+    pushUndo('batch recurring done');
     var count = 0;
     allTasks.forEach(t => {
-      if (t.habit && t.date === dateKey && (statuses[t.id] || '') !== 'done') {
+      if (t.recurring && t.date === dateKey && (statuses[t.id] || '') !== 'done') {
         setStatus(t.id, 'done', { taskFields: { status: 'done' } });
         count++;
       }
     });
-    showToast(count + ' habits marked done', 'success');
+    showToast(count + ' recurringTasks marked done', 'success');
   }, [allTasks, statuses, pushUndo, setStatus, showToast]);
 
   // Per-hour location override handler
@@ -825,7 +847,7 @@ export default function AppLayout() {
               locSchedules={config.locSchedules}
               onUpdateLocScheduleOverrides={config.updateTemplateOverrides}
               onUpdateLocScheduleDefaults={config.updateTemplateDefaults}
-              allTasks={allTasks} onBatchHabitsDone={handleBatchHabitsDone}
+              allTasks={allTasks} onBatchRecurringsDone={handleBatchRecurringDone}
               locations={config.locations} onHourLocationOverride={handleHourLocationOverride}
               blockedTaskIds={blockedTaskIds}
               unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
@@ -870,7 +892,7 @@ export default function AppLayout() {
               onGridDrop={handleGridDrop}
               locSchedules={config.locSchedules}
               onUpdateLocScheduleOverrides={config.updateTemplateOverrides}
-              allTasks={allTasks} onBatchHabitsDone={handleBatchHabitsDone}
+              allTasks={allTasks} onBatchRecurringsDone={handleBatchRecurringDone}
               locations={config.locations} onHourLocationOverride={handleHourLocationOverride}
               blockedTaskIds={blockedTaskIds}
               onZoomChange={handleZoomChange}
@@ -888,7 +910,7 @@ export default function AppLayout() {
               blockedTaskIds={blockedTaskIds}
               locSchedules={config.locSchedules}
               onUpdateLocScheduleOverrides={config.updateTemplateOverrides}
-              allTasks={allTasks} onBatchHabitsDone={handleBatchHabitsDone}
+              allTasks={allTasks} onBatchRecurringsDone={handleBatchRecurringDone}
               isMobile={isMobile}
             />
           )}
@@ -922,7 +944,7 @@ export default function AppLayout() {
               locSchedules={config.locSchedules}
               onUpdateLocScheduleOverrides={config.updateTemplateOverrides}
               onUpdateLocScheduleDefaults={config.updateTemplateDefaults}
-              onBatchHabitsDone={handleBatchHabitsDone}
+              onBatchRecurringsDone={handleBatchRecurringDone}
             />
           )}
           {viewMode === 'list' && (
@@ -988,10 +1010,10 @@ export default function AppLayout() {
             ) : (
               expandedTaskObjs.map(function(taskObj, idx) {
                 var taskId = taskObj.id;
-                // For habit templates opened via an instance, use the instance ID for status
+                // For recurring templates opened via an instance, use the instance ID for status
                 var statusId = expandedInstanceRef.current[taskId] || taskId;
                 // If ref mapping was lost but this is a template, find the nearest instance
-                if (statusId === taskId && taskObj.taskType === 'habit_template') {
+                if (statusId === taskId && taskObj.taskType === 'recurring_template') {
                   var nearestInstance = allTasks.find(function(t) { return t.sourceId === taskId && t.date === selectedDateKey; });
                   if (nearestInstance) {
                     statusId = nearestInstance.id;
@@ -1055,9 +1077,9 @@ export default function AppLayout() {
       )}
       {isMobile && !showCreateForm && expandedTaskObjs.map(function(taskObj, idx) {
         var taskId = taskObj.id;
-        // For habit templates opened via an instance, use the instance ID for status
+        // For recurring templates opened via an instance, use the instance ID for status
         var statusId = expandedInstanceRef.current[taskId] || taskId;
-        if (statusId === taskId && taskObj.taskType === 'habit_template') {
+        if (statusId === taskId && taskObj.taskType === 'recurring_template') {
           var nearestInst = allTasks.find(function(t) { return t.sourceId === taskId && t.date === selectedDateKey; });
           if (nearestInst) {
             statusId = nearestInst.id;
@@ -1096,20 +1118,25 @@ export default function AppLayout() {
 
       {/* Settings panel */}
       {showSettings && (
+        <ErrorBoundary>
         <SettingsPanel onClose={() => setShowSettings(false)} darkMode={darkMode} config={config} allProjectNames={allProjectNames} allTasks={allTasks} isMobile={isMobile}
           showToast={showToast}
           onRenameProject={function(oldName, newName) { loadTasks(); }} />
+        </ErrorBoundary>
       )}
 
       {/* Import/Export panel */}
       {showExport && (
+        <ErrorBoundary>
         <ImportExportPanel onClose={() => setShowExport(false)} darkMode={darkMode} showToast={showToast}
           allTasks={allTasks} statuses={statuses} dayPlacements={dayPlacements} isMobile={isMobile}
           addTasks={addTasks} />
+        </ErrorBoundary>
       )}
 
       {/* Unified Calendar Sync panel */}
       {(showCalSync || showGCalSync || showMsftCalSync) && (
+        <ErrorBoundary>
         <CalSyncPanel
           onClose={() => { setShowCalSync(false); setShowGCalSync(false); setShowMsftCalSync(false); }}
           darkMode={darkMode}
@@ -1133,6 +1160,7 @@ export default function AppLayout() {
             loadTasks().then(function() { loadPlacements(); });
           }}
         />
+        </ErrorBoundary>
       )}
 
       {/* Help modal */}
@@ -1200,7 +1228,7 @@ export default function AppLayout() {
                     background: 'transparent', color: theme.text, cursor: 'pointer', fontSize: 13
                   }}>Cancel</button>
                 <button onClick={function() {
-                  pushUndo('move habit');
+                  pushUndo('move recurring');
                   // Resolve the correct IDs: prefer explicit instanceId (from detail view),
                   // then expandedInstanceRef, then fall back to taskId
                   var instanceId = c.instanceId || expandedInstanceRef.current[c.taskId] || c.taskId;

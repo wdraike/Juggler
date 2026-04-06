@@ -6,15 +6,15 @@
  */
 
 import React from 'react';
-import { PRI_COLORS, locIcon } from '../../state/constants';
+import { PRI_COLORS, locIcon, isTerminalStatus } from '../../state/constants';
 import { getTheme } from '../../theme/colors';
 import StatusToggle from '../schedule/StatusToggle';
 import { parseDate } from '../../scheduler/dateHelpers';
 
-export default function TaskCard({ task, status, onStatusChange, onExpand, darkMode, showDate, draggable, isBlocked, isMobile, allTasks, statuses, todayDate }) {
+export default React.memo(function TaskCard({ task, status, onStatusChange, onExpand, darkMode, showDate, draggable, isBlocked, isMobile, allTasks, statuses, todayDate }) {
   var theme = getTheme(darkMode);
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
-  var isDone = status === 'done' || status === 'cancel' || status === 'skip' || status === 'pause';
+  var isDone = isTerminalStatus(status);
   var isMarker = !!task.marker;
   var borderColor = isMarker ? '#4338CA' : priColor;
   var durLabel = task.dur ? (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm') : '';
@@ -28,7 +28,7 @@ export default function TaskCard({ task, status, onStatusChange, onExpand, darkM
       style={{
         borderRadius: 6, cursor: 'pointer', overflow: 'hidden',
         background: theme.bgCard,
-        border: '1px ' + (isMarker ? 'dotted' : (task.habit ? 'dashed' : 'solid')) + ' ' + (isDone ? theme.border : borderColor + '40'),
+        border: '1px ' + (isMarker ? 'dotted' : (task.recurring ? 'dashed' : 'solid')) + ' ' + (isDone ? theme.border : borderColor + '40'),
         borderLeft: '3px solid ' + borderColor,
         opacity: isDone ? 0.5 : (isMarker ? 0.7 : 1),
         padding: isMobile ? '8px 10px' : '6px 10px',
@@ -213,4 +213,4 @@ export default function TaskCard({ task, status, onStatusChange, onExpand, darkM
       })()}
     </div>
   );
-}
+})

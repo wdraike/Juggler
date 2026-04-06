@@ -97,7 +97,7 @@ async function insertTask(taskData) {
     status: taskData.status || '',
     when: taskData.when || '',
     day_req: taskData.dayReq || 'any',
-    habit: taskData.habit ? 1 : 0,
+    recurring: taskData.recurring ? 1 : 0,
     rigid: taskData.rigid ? 1 : 0,
     split: taskData.split ? 1 : 0,
     marker: taskData.marker ? 1 : 0,
@@ -184,18 +184,18 @@ describe('UC-18: Full DB Pipeline', function() {
     if (!dbAvailable) return;
 
     await insertTask({
-      id: 'habit_done',
-      text: 'Habit Done',
-      taskType: 'habit_instance',
+      id: 'recur_done',
+      text: 'Recurring Done',
+      taskType: 'recurring_instance',
       dur: 30,
       status: 'done',
-      habit: true,
+      recurring: true,
       sourceId: 'ht_test'
     });
 
-    var row = await knex('tasks').where('id', 'habit_done').first();
+    var row = await knex('tasks').where('id', 'recur_done').first();
     expect(row.status).toBe('done');
-    expect(row.task_type).toBe('habit_instance');
+    expect(row.task_type).toBe('recurring_instance');
   });
 
   test('UC-18.7: Config loads from DB correctly', async function() {

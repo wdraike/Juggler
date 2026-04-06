@@ -5,7 +5,7 @@
 
 var crypto = require('crypto');
 
-var DEFAULT_TIMEZONE = 'America/New_York';
+var DEFAULT_TIMEZONE = require('../scheduler/constants').DEFAULT_TIMEZONE;
 
 /**
  * Convert Juggler task date "M/D" + time "H:MM AM/PM" to ISO datetime string (local, no Z).

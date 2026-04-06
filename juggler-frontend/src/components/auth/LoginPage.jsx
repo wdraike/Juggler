@@ -18,7 +18,7 @@ var FEATURES = [
 var STEPS = [
   { num: '1', title: 'Add your tasks', desc: 'Name it, set a duration, pick a priority. We fill in the rest.' },
   { num: '2', title: 'We schedule it', desc: 'Automatic. Every flexible task lands in the best available slot.' },
-  { num: '3', title: 'Cruise through your day', desc: 'Check things off, drag to adjust, let habits auto-repeat.' },
+  { num: '3', title: 'Cruise through your day', desc: 'Check things off, drag to adjust, recurringTasks auto-repeat.' },
 ];
 
 var VIEWS = [

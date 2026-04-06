@@ -19,6 +19,10 @@ async function importData(req, res) {
     if (!data || !data.extraTasks) {
       return res.status(400).json({ error: 'Invalid import data — expected v7 format with extraTasks' });
     }
+    // Safety: require explicit confirmation since import wipes all existing data
+    if (req.query.confirm !== 'delete_all') {
+      return res.status(400).json({ error: 'Import will DELETE all existing tasks, config, and projects. Pass ?confirm=delete_all to proceed.' });
+    }
 
     var tasks = data.extraTasks || [];
     var statuses = data.statuses || {};
@@ -102,7 +106,7 @@ async function importData(req, res) {
             tools: JSON.stringify(t.tools || []),
             when: t.when || null,
             day_req: t.dayReq || 'any',
-            habit: t.habit ? 1 : 0,
+            recurring: t.recurring ? 1 : 0,
             rigid: t.rigid ? 1 : 0,
             split: t.split === undefined || t.split === null ? null : (t.split ? 1 : 0),
             split_min: t.splitMin || null,

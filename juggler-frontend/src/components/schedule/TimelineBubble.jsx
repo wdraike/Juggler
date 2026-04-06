@@ -4,13 +4,14 @@
  */
 
 import React from 'react';
-import { PRI_COLORS } from '../../state/constants';
+import { PRI_COLORS, isTerminalStatus } from '../../state/constants';
+import { isTerminalStatus } from '../../state/constants';
 import TaskStatusSelect from '../tasks/TaskStatusSelect';
 import { getTheme } from '../../theme/colors';
 
 var DOT_SIZE = 6;
 
-export default function TimelineBubble({ item, status, side, topPx, onStatusChange, onExpand, darkMode, isBlocked, isMobile }) {
+export default React.memo(function TimelineBubble({ item, status, side, topPx, onStatusChange, onExpand, darkMode, isBlocked, isMobile }) {
   var theme = getTheme(darkMode);
   var task = item.task;
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
@@ -69,7 +70,7 @@ export default function TimelineBubble({ item, status, side, topPx, onStatusChan
           height: BUBBLE_H,
           borderRadius: 8,
           background: isDone ? theme.badgeBg : theme.bgCard,
-          border: '1px ' + (task.habit ? 'dashed' : 'solid') + ' ' + (isDone ? theme.border : priColor),
+          border: '1px ' + (task.recurring ? 'dashed' : 'solid') + ' ' + (isDone ? theme.border : priColor),
           borderLeft: side === 'left' ? undefined : '3px solid ' + priColor,
           borderRight: side === 'right' ? undefined : '3px solid ' + priColor,
           opacity: isDone ? 0.5 : 1,
@@ -105,4 +106,4 @@ export default function TimelineBubble({ item, status, side, topPx, onStatusChan
       </div>
     </div>
   );
-}
+})

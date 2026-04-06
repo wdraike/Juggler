@@ -12,7 +12,7 @@ var BILLING_URL = services.billing.frontend;
 
 var LIMIT_MESSAGES = {
   'limits.active_tasks': { title: 'Task Limit Reached', desc: 'You\'ve reached the maximum number of active tasks on your plan.' },
-  'limits.habit_templates': { title: 'Habit Limit Reached', desc: 'You\'ve reached the maximum number of recurring habits on your plan.' },
+  'limits.recurring_templates': { title: 'Recurring Task Limit Reached', desc: 'You\'ve reached the maximum number of recurringTasks on your plan.' },
   'limits.projects': { title: 'Project Limit Reached', desc: 'You\'ve reached the maximum number of projects on your plan.' },
   'limits.locations': { title: 'Location Limit Reached', desc: 'You\'ve reached the maximum number of locations on your plan.' },
   'limits.schedule_templates': { title: 'Schedule Template Limit', desc: 'You\'ve reached the maximum number of schedule templates on your plan.' },

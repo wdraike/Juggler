@@ -37,7 +37,7 @@ const PLAN_CATALOG = [
     features: {
       limits: {
         active_tasks: 50,
-        habit_templates: 5,
+        recurring_templates: 5,
         projects: 5,
         locations: 3,
         schedule_templates: 3,
@@ -91,7 +91,7 @@ const PLAN_CATALOG = [
     features: {
       limits: {
         active_tasks: 200,
-        habit_templates: 25,
+        recurring_templates: 25,
         projects: 20,
         locations: 10,
         schedule_templates: 10,
@@ -151,7 +151,7 @@ const PLAN_CATALOG = [
     features: {
       limits: {
         active_tasks: 200,
-        habit_templates: 25,
+        recurring_templates: 25,
         projects: 20,
         locations: 10,
         schedule_templates: 10,
@@ -205,7 +205,7 @@ const PLAN_CATALOG = [
     features: {
       limits: {
         active_tasks: -1,
-        habit_templates: -1,
+        recurring_templates: -1,
         projects: -1,
         locations: -1,
         schedule_templates: -1,
@@ -260,7 +260,7 @@ const PLAN_CATALOG = [
     features: {
       limits: {
         active_tasks: -1,
-        habit_templates: -1,
+        recurring_templates: -1,
         projects: -1,
         locations: -1,
         schedule_templates: -1,

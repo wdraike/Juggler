@@ -8,7 +8,7 @@ import apiClient from '../services/apiClient';
 
 const LABELS = {
   'limits.active_tasks': 'Tasks',
-  'limits.habit_templates': 'Habits',
+  'limits.recurring_templates': 'Recurrings',
   'limits.projects': 'Projects',
   'limits.locations': 'Locations',
   'limits.schedule_templates': 'Schedule Templates',

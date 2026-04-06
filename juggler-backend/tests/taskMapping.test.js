@@ -32,7 +32,7 @@ describe('task mapping', () => {
     tools: '["phone"]',
     when: 'morning',
     day_req: 'weekday',
-    habit: 1,
+    recurring: 1,
     rigid: 0,
     split: 1,
     split_min: 15,
@@ -54,7 +54,7 @@ describe('task mapping', () => {
       expect(task.timeRemaining).toBeNull();
       expect(task.location).toEqual(['home', 'work']);
       expect(task.tools).toEqual(['phone']);
-      expect(task.habit).toBe(true);
+      expect(task.recurring).toBe(true);
       expect(task.rigid).toBe(false);
       expect(task.split).toBe(true);
       expect(task.recur).toEqual({ type: 'daily' });
@@ -79,7 +79,7 @@ describe('task mapping', () => {
     it('maps API task to DB row', () => {
       const task = {
         id: 't01', text: 'Test', date: '3/15', location: ['home'],
-        tools: ['phone'], habit: true, rigid: false, dependsOn: ['t00'],
+        tools: ['phone'], recurring: true, rigid: false, dependsOn: ['t00'],
         recur: { type: 'daily' }, split: true, datePinned: true
       };
       const row = taskToRow(task, 'user1');
@@ -87,7 +87,7 @@ describe('task mapping', () => {
       expect(row.id).toBe('t01');
       expect(row.location).toBe('["home"]');
       expect(row.tools).toBe('["phone"]');
-      expect(row.habit).toBe(1);
+      expect(row.recurring).toBe(1);
       expect(row.rigid).toBe(0);
       expect(row.depends_on).toBe('["t00"]');
       expect(row.recur).toBe('{"type":"daily"}');
@@ -109,7 +109,7 @@ describe('task mapping', () => {
         id: 't01', text: 'Round trip', date: '3/15', day: 'Sun',
         time: '9:00 AM', dur: 45, pri: 'P1', project: 'test',
         status: 'wip', location: ['home', 'work'], tools: ['phone'],
-        when: 'morning', habit: true, rigid: false, split: false,
+        when: 'morning', recurring: true, rigid: false, split: false,
         dependsOn: ['t00'], datePinned: true
       };
       const row = taskToRow(original, 'user1', TZ);
@@ -118,7 +118,7 @@ describe('task mapping', () => {
       expect(result.text).toBe(original.text);
       expect(result.location).toEqual(original.location);
       expect(result.tools).toEqual(original.tools);
-      expect(result.habit).toBe(original.habit);
+      expect(result.recurring).toBe(original.recurring);
       expect(result.dependsOn).toEqual(original.dependsOn);
     });
   });

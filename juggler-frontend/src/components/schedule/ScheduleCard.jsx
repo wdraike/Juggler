@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { PRI_COLORS, locIcon, WHEN_TAG_ICONS, DEFAULT_TOOLS } from '../../state/constants';
+import { PRI_COLORS, locIcon, WHEN_TAG_ICONS, DEFAULT_TOOLS, isTerminalStatus } from '../../state/constants';
 import { getTheme } from '../../theme/colors';
 import { parseWhen } from '../../scheduler/timeBlockHelpers';
 import StatusToggle from './StatusToggle';
@@ -21,13 +21,25 @@ function formatStartTime(mins) {
   return h12 + (m > 0 ? ':' + (m < 10 ? '0' : '') + m : '') + ampm;
 }
 
-export default function ScheduleCard({ item, status, onStatusChange, onExpand, darkMode, isBlocked, isMobile, layoutMode, cardHeight }) {
+export default React.memo(function ScheduleCard({ item, status, onStatusChange, onExpand, darkMode, isBlocked, isMobile, layoutMode, cardHeight }) {
   var theme = getTheme(darkMode);
   var task = item.task;
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
-  var isDone = status === 'done' || status === 'cancel' || status === 'skip' || status === 'pause';
+  var isDone = isTerminalStatus(status);
   var compact = layoutMode === 'compact';
   var showDetails = !compact && (cardHeight || 52) >= 60;
+  var containerStyle = React.useMemo(function() {
+    return {
+      width: '100%', height: '100%', borderRadius: 6, overflow: 'hidden',
+      background: theme.bgCard,
+      border: '1px ' + (task.recurring ? 'dashed' : 'solid') + ' ' + (isDone ? theme.border : priColor + '40'),
+      borderLeft: '3px solid ' + priColor,
+      cursor: 'pointer', opacity: isDone ? 0.5 : 1,
+      display: 'flex', flexDirection: 'column', justifyContent: 'center',
+      padding: compact ? '3px 6px' : (isMobile ? '4px 6px' : '4px 8px'),
+      boxShadow: '0 1px 3px ' + theme.shadow, boxSizing: 'border-box'
+    };
+  }, [theme, task.recurring, isDone, priColor, compact, isMobile]);
   var durLabel = item.splitTotal > 1
     ? item.dur + ' of ' + task.dur + 'm'
     : (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm');
@@ -35,7 +47,7 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
   var startLabel = item.start != null ? formatStartTime(item.start) : null;
   var typeBadges = [];
   if (task.datePinned) typeBadges.push({ icon: '\uD83D\uDCCD', title: 'Date pinned \u2014 stays on this date, scheduler adjusts time only' });
-  if (task.habit) typeBadges.push({ icon: '\uD83D\uDD01', title: 'Habit \u2014 recurring daily task' });
+  if (task.recurring) typeBadges.push({ icon: '\uD83D\uDD01', title: 'Recurring \u2014 recurring daily task' });
   if (task.rigid || task.fixed) typeBadges.push({ icon: '\uD83D\uDCCC', title: 'Rigid \u2014 locked to set date and time, scheduler won\u2019t move it' });
   if (item.splitTotal > 1) typeBadges.push({ icon: '\u2702\uFE0F', title: 'Split \u2014 broken into ' + item.splitTotal + ' chunks' });
 
@@ -43,55 +55,45 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
   var endLabel = item.start != null ? formatStartTime(item.start + item.dur) : null;
   var timeRange = startLabel && endLabel ? startLabel + '\u2013' + endLabel : null;
 
-  // Build details snippets for row 3
-  var details = [];
-  if (item._moveReason) details.push('\u2192 ' + item._moveReason);
-  else if (item.placementReason) details.push(item.placementReason);
-  else if (item._placementReason) details.push(item._placementReason);
-  if (showDetails) {
-    // Time range
-    if (timeRange) details.push('\u23F0 ' + timeRange);
-    // Location names
-    if (task.location && task.location.length > 0) {
-      var locIcons = task.location.map(function(lid) { return locIcon(lid); }).filter(Boolean);
-      if (locIcons.length > 0) details.push(locIcons.join(' '));
+  // Build details snippets for row 3 (memoized to avoid recomputation)
+  var details = React.useMemo(function() {
+    var d = [];
+    if (item._moveReason) d.push('\u2192 ' + item._moveReason);
+    else if (item.placementReason) d.push(item.placementReason);
+    else if (item._placementReason) d.push(item._placementReason);
+    if (task.recurring && task.time && startLabel && task.time !== startLabel) {
+      d.push('Preferred: ' + task.time);
     }
-    // When preference
-    if (task.when && task.when !== 'anytime') {
-      var whenParts = parseWhen(task.when);
-      var whenIcons = whenParts.map(function(w) { return WHEN_TAG_ICONS[w] || ''; }).filter(Boolean);
-      if (whenIcons.length > 0) details.push(whenIcons.join(''));
+    if (showDetails) {
+      if (timeRange) d.push('\u23F0 ' + timeRange);
+      if (task.location && task.location.length > 0) {
+        var li = task.location.map(function(lid) { return locIcon(lid); }).filter(Boolean);
+        if (li.length > 0) d.push(li.join(' '));
+      }
+      if (task.when && task.when !== 'anytime') {
+        var wp = parseWhen(task.when);
+        var wi = wp.map(function(w) { return WHEN_TAG_ICONS[w] || ''; }).filter(Boolean);
+        if (wi.length > 0) d.push(wi.join(''));
+      }
+      if (task.tools && task.tools.length > 0) {
+        var ti = task.tools.map(function(tid) { return TOOL_ICON_MAP[tid] || ''; }).filter(Boolean);
+        if (ti.length > 0) d.push(ti.join(' '));
+      }
+      if (task.date) d.push('\uD83D\uDCC6 ' + task.date);
+      if (task.due && task.due !== task.date) d.push('\uD83D\uDCC5 due ' + task.due);
+      if (task.notes) d.push(task.notes.replace(/\n/g, ' ').substring(0, 40));
+      if (task.section) d.push(task.section);
+      if (task.dependsOn && task.dependsOn.length > 0) d.push('\u26D3 ' + task.dependsOn.length + ' dep');
     }
-    // Tools required
-    if (task.tools && task.tools.length > 0) {
-      var toolIcons = task.tools.map(function(tid) { return TOOL_ICON_MAP[tid] || ''; }).filter(Boolean);
-      if (toolIcons.length > 0) details.push(toolIcons.join(' '));
-    }
-    // Date info
-    if (task.date) details.push('\uD83D\uDCC6 ' + task.date);
-    if (task.due && task.due !== task.date) details.push('\uD83D\uDCC5 due ' + task.due);
-    if (task.notes) details.push(task.notes.replace(/\n/g, ' ').substring(0, 40));
-    if (task.section) details.push(task.section);
-    if (task.dependsOn && task.dependsOn.length > 0) details.push('\u26D3 ' + task.dependsOn.length + ' dep');
-  }
+    return d;
+  }, [item, task, startLabel, timeRange, showDetails]);
 
   return (
     <div
       draggable
       onDragStart={function(e) { e.dataTransfer.setData('text/plain', task.id); e.dataTransfer.effectAllowed = 'move'; }}
       onClick={onExpand}
-      style={{
-        width: '100%', height: '100%',
-        borderRadius: 6, overflow: 'hidden',
-        background: theme.bgCard,
-        border: '1px ' + (task.habit ? 'dashed' : 'solid') + ' ' + (isDone ? theme.border : priColor + '40'),
-        borderLeft: '3px solid ' + priColor,
-        cursor: 'pointer', opacity: isDone ? 0.5 : 1,
-        display: 'flex', flexDirection: 'column', justifyContent: 'center',
-        padding: compact ? '3px 6px' : (isMobile ? '4px 6px' : '4px 8px'),
-        boxShadow: '0 1px 3px ' + theme.shadow,
-        boxSizing: 'border-box'
-      }}
+      style={containerStyle}
     >
       {/* Row 1: title + duration + project */}
       <div style={{
@@ -184,4 +186,4 @@ export default function ScheduleCard({ item, status, onStatusChange, onExpand, d
       )}
     </div>
   );
-}
+})

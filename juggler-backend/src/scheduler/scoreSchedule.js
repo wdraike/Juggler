@@ -16,7 +16,7 @@ var W_UNPLACED = 1000;
 var W_DEADLINE_MISS = 500;
 var W_PRIORITY_DRIFT = 200;
 var W_CROSS_DAY_PRI = 80;
-var W_HABIT_TIME_DRIFT = 10;
+var W_RECUR_TIME_DRIFT = 10;
 var W_FRAGMENTATION = 20;
 var W_DEPENDENCY_SLACK = 5;
 var W_DATE_DRIFT = 10;
@@ -76,7 +76,7 @@ function scoreSchedule(dayPlacements, unplaced, allTasks, options) {
   if (unplaced && unplaced.length > 0) {
     unplaced.forEach(function(t) {
       var mult = priMultiplier(t.pri);
-      if (t.habit) mult *= 1.5;
+      if (t.recurring) mult *= 1.5;
       unplacedPenalty += mult;
       details.push({ type: 'unplaced', taskId: t.id, text: t.text, penalty: mult });
     });
@@ -104,59 +104,70 @@ function scoreSchedule(dayPlacements, unplaced, allTasks, options) {
   }
 
   // 3. Priority Drift Penalty
-  // Build transitive ancestor map: ancestors[tid] = Set of all transitive dep IDs
-  var ancestors = {};
-  function getAncestors(tid) {
-    if (ancestors[tid]) return ancestors[tid];
-    var result = {};
-    ancestors[tid] = result; // set early to handle cycles
-    var task = taskById[tid];
-    if (!task) return result;
-    var deps = getTaskDeps(task);
-    for (var di2 = 0; di2 < deps.length; di2++) {
-      result[deps[di2]] = true;
-      var grandparents = getAncestors(deps[di2]);
-      for (var gp in grandparents) result[gp] = true;
-    }
-    return result;
+  // Use pre-computed ancestors if provided (avoids recomputation during hill-climbing)
+  var ancestors = (options && options._ancestors) || {};
+  if (!options || !options._ancestors) {
+    (function buildAncestors() {
+      function getAnc(tid) {
+        if (ancestors[tid]) return ancestors[tid];
+        var result = {};
+        ancestors[tid] = result;
+        var task = taskById[tid];
+        if (!task) return result;
+        var deps = getTaskDeps(task);
+        for (var di2 = 0; di2 < deps.length; di2++) {
+          result[deps[di2]] = true;
+          var grandparents = getAnc(deps[di2]);
+          for (var gp in grandparents) result[gp] = true;
+        }
+        return result;
+      }
+      allTasks.forEach(function(t) { getAnc(t.id); });
+    })();
   }
-  allTasks.forEach(function(t) { getAncestors(t.id); });
 
   var priorityDriftPenalty = 0;
   dateKeys.forEach(function(dateKey) {
     var placements = dayPlacements[dateKey];
     if (!placements || placements.length < 2) return;
-    // Compare each pair — skip locked/marker items since their placement
-    // is fixed and can't be optimized (e.g. GCal events, rigid habits)
-    for (var i = 0; i < placements.length; i++) {
-      for (var j = i + 1; j < placements.length; j++) {
-        var a = placements[i], b = placements[j];
-        if (!a.task || !b.task) continue;
-        if (a.locked || a.marker || b.locked || b.marker) continue;
-        var priA = priMultiplier(a.task.pri);
-        var priB = priMultiplier(b.task.pri);
-        // If lower-pri task is in an earlier (better) slot than higher-pri task
-        if (priA < priB && a.start < b.start) {
-          // Exempt if the earlier task is an ancestor of the later task (dep-forced ordering)
-          if (ancestors[b.task.id] && ancestors[b.task.id][a.task.id]) continue;
-          var diff = priB - priA;
-          var p = diff * slotQuality(a.start);
-          priorityDriftPenalty += p;
-        } else if (priB < priA && b.start < a.start) {
-          if (ancestors[a.task.id] && ancestors[a.task.id][b.task.id]) continue;
-          var diff2 = priA - priB;
-          var p2 = diff2 * slotQuality(b.start);
-          priorityDriftPenalty += p2;
+    // Sort by start time, then scan for priority inversions (O(n log n) vs O(n²))
+    var movable = [];
+    for (var mi = 0; mi < placements.length; mi++) {
+      var mp = placements[mi];
+      if (!mp.task || mp.locked || mp.marker) continue;
+      movable.push(mp);
+    }
+    if (movable.length < 2) return;
+    movable.sort(function(a, b) { return a.start - b.start; });
+    // Build suffix max: maxPriAfter[i] = max priority of items at index > i
+    var maxPriAfter = new Array(movable.length);
+    maxPriAfter[movable.length - 1] = 0;
+    for (var ri = movable.length - 2; ri >= 0; ri--) {
+      maxPriAfter[ri] = Math.max(priMultiplier(movable[ri + 1].task.pri), maxPriAfter[ri + 1]);
+    }
+    // Scan: if this item's pri < max pri of later items, it's a drift
+    for (var si = 0; si < movable.length - 1; si++) {
+      var sp = movable[si];
+      var spPri = priMultiplier(sp.task.pri);
+      if (spPri < maxPriAfter[si]) {
+        // Scan forward to find the specific higher-pri items
+        for (var sj = si + 1; sj < movable.length; sj++) {
+          var sq = movable[sj];
+          var sqPri = priMultiplier(sq.task.pri);
+          if (sqPri > spPri) {
+            if (ancestors[sq.task.id] && ancestors[sq.task.id][sp.task.id]) continue;
+            priorityDriftPenalty += (sqPri - spPri);
+          }
         }
       }
     }
   });
 
-  // 4. Habit Time Drift
-  var habitTimeDriftPenalty = 0;
+  // 4. Recurring Time Drift
+  var recurTimeDriftPenalty = 0;
   for (var tid2 in placementsByTask) {
     var task2 = taskById[tid2];
-    if (!task2 || !task2.habit || !task2.time) continue;
+    if (!task2 || !task2.recurring || !task2.time) continue;
     var preferredMin = parseTimeToMinutes(task2.time);
     if (preferredMin === null) continue;
     var parts2 = placementsByTask[tid2];
@@ -164,8 +175,8 @@ function scoreSchedule(dayPlacements, unplaced, allTasks, options) {
       var drift = Math.abs(part.start - preferredMin);
       var p = (drift / 60) * priMultiplier(task2.pri);
       if (p > 0) {
-        habitTimeDriftPenalty += p;
-        details.push({ type: 'habitTimeDrift', taskId: tid2, text: task2.text, drift: drift, penalty: p });
+        recurTimeDriftPenalty += p;
+        details.push({ type: 'recurTimeDrift', taskId: tid2, text: task2.text, drift: drift, penalty: p });
       }
     });
   }
@@ -175,7 +186,7 @@ function scoreSchedule(dayPlacements, unplaced, allTasks, options) {
   for (var tid3 in placementsByTask) {
     var task3 = taskById[tid3];
     if (!task3) continue;
-    if (task3.habit) continue; // habits exempt
+    if (task3.recurring) continue; // recurringTasks exempt
     var parts3 = placementsByTask[tid3];
     if (parts3.length <= 1) continue;
     var numParts = parts3.length;
@@ -251,7 +262,7 @@ function scoreSchedule(dayPlacements, unplaced, allTasks, options) {
 
   // 7. Cross-Day Priority Inversion Penalty
   // Penalize when a lower-priority task is on an earlier day than a higher-priority task.
-  // Excludes habits, locked tasks, and dep-constrained orderings.
+  // Excludes recurringTasks, locked tasks, and dep-constrained orderings.
   var crossDayPriPenalty = 0;
   var sortedDateKeys = dateKeys.slice().sort(function(a, b) {
     return dateDiffDays(a, b);
@@ -267,7 +278,7 @@ function scoreSchedule(dayPlacements, unplaced, allTasks, options) {
     for (var spi = 0; spi < sdPlacements.length; spi++) {
       var sp = sdPlacements[spi];
       if (!sp.task || sp.locked) continue;
-      if (sp.task.habit) continue;
+      if (sp.task.recurring) continue;
       var spPri = priMultiplier(sp.task.pri);
       if (spPri > dayMaxPri) dayMaxPri = spPri;
     }
@@ -275,7 +286,7 @@ function scoreSchedule(dayPlacements, unplaced, allTasks, options) {
       for (var spi2 = 0; spi2 < sdPlacements.length; spi2++) {
         var sp2 = sdPlacements[spi2];
         if (!sp2.task || sp2.locked) continue;
-        if (sp2.task.habit) continue;
+        if (sp2.task.recurring) continue;
         var sp2Pri = priMultiplier(sp2.task.pri);
         if (sp2Pri < maxPriSeenLater) {
           // Check if this low-pri task is a dep ancestor of any high-pri task on a later day
@@ -299,7 +310,7 @@ function scoreSchedule(dayPlacements, unplaced, allTasks, options) {
     // Add this day's tasks to the later-tasks list and update max
     for (var spi3 = 0; spi3 < sdPlacements.length; spi3++) {
       var sp3 = sdPlacements[spi3];
-      if (!sp3.task || sp3.locked || sp3.task.habit) continue;
+      if (!sp3.task || sp3.locked || sp3.task.recurring) continue;
       laterHighPriTaskIds.push({ id: sp3.task.id, pri: priMultiplier(sp3.task.pri) });
     }
     if (dayMaxPri > maxPriSeenLater) maxPriSeenLater = dayMaxPri;
@@ -328,7 +339,7 @@ function scoreSchedule(dayPlacements, unplaced, allTasks, options) {
     + W_DEADLINE_MISS * deadlineMissPenalty
     + W_PRIORITY_DRIFT * priorityDriftPenalty
     + W_CROSS_DAY_PRI * crossDayPriPenalty
-    + W_HABIT_TIME_DRIFT * habitTimeDriftPenalty
+    + W_RECUR_TIME_DRIFT * recurTimeDriftPenalty
     + W_FRAGMENTATION * fragmentationPenalty
     + W_DEPENDENCY_SLACK * dependencySlackPenalty
     + W_DATE_DRIFT * dateDriftPenalty;
@@ -340,7 +351,7 @@ function scoreSchedule(dayPlacements, unplaced, allTasks, options) {
       deadlineMiss: Math.round(W_DEADLINE_MISS * deadlineMissPenalty * 100) / 100,
       priorityDrift: Math.round(W_PRIORITY_DRIFT * priorityDriftPenalty * 100) / 100,
       crossDayPri: Math.round(W_CROSS_DAY_PRI * crossDayPriPenalty * 100) / 100,
-      habitTimeDrift: Math.round(W_HABIT_TIME_DRIFT * habitTimeDriftPenalty * 100) / 100,
+      recurTimeDrift: Math.round(W_RECUR_TIME_DRIFT * recurTimeDriftPenalty * 100) / 100,
       fragmentation: Math.round(W_FRAGMENTATION * fragmentationPenalty * 100) / 100,
       dependencySlack: Math.round(W_DEPENDENCY_SLACK * dependencySlackPenalty * 100) / 100,
       dateDrift: Math.round(W_DATE_DRIFT * dateDriftPenalty * 100) / 100

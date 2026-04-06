@@ -64,7 +64,7 @@ jest.mock('../src/middleware/plan-features.middleware', () => ({
   resolvePlanFeatures: (req, res, next) => {
     req.planId = 'enterprise';
     req.planFeatures = {
-      limits: { active_tasks: -1, habit_templates: -1, projects: -1, locations: -1, schedule_templates: -1, ai_commands_per_month: -1 },
+      limits: { active_tasks: -1, recurring_templates: -1, projects: -1, locations: -1, schedule_templates: -1, ai_commands_per_month: -1 },
       ai: { natural_language_commands: true, bulk_project_creation: true },
       calendar: { max_providers: -1, auto_sync: true },
       scheduling: { dependencies: true, travel_time: true },
