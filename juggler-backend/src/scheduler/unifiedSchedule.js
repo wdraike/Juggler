@@ -175,14 +175,24 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     }
     // TBD or explicitly null date: user hasn't decided when — skip scheduling
     if (t.date === 'TBD' || t.date === 'tbd') return;
-    // Dateless tasks: scheduler owns placement — treat as starting from today
-    var td = t.date ? parseDate(t.date) : null;
-    if (!td && t.date !== null && t.date !== undefined && t.date !== '') {
-      // Non-empty but unparseable date string — skip (e.g., garbage input)
-      return;
-    }
-    if (!td) {
+    // Clear scheduler-set dates for flexible tasks — the scheduler should re-evaluate
+    // placement from scratch each run. Only preserve dates for tasks the USER anchored.
+    var isUserAnchored = t.datePinned || t.generated || t.recurring ||
+      hasWhen(t.when, 'fixed') || t.marker;
+    var td;
+    if (!isUserAnchored && t.date) {
+      // Non-pinned, non-recurring, non-fixed: scheduler previously placed this.
+      // Treat as dateless so it re-evaluates from today.
       td = new Date(localToday);
+    } else {
+      td = t.date ? parseDate(t.date) : null;
+      if (!td && t.date !== null && t.date !== undefined && t.date !== '') {
+        // Non-empty but unparseable date string — skip
+        return;
+      }
+      if (!td) {
+        td = new Date(localToday);
+      }
     }
     var effectiveDur = effectiveDuration(t);
     if (effectiveDur <= 0) return;
@@ -298,13 +308,44 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var deadline = t.due ? parseDate(t.due) : null;
       if (deadline) deadline.setHours(23, 59, 59, 999);
 
-      pool.push({
-        task: t, remaining: effectiveDur, totalDur: effectiveDur,
-        earliestDate: earliest, deadline: deadline, ceiling: ceiling,
-        splittable: !!t.split,
-        minChunk: t.splitMin || MIN_CHUNK,
-        _parts: []
-      });
+      // Split tasks: break into individual minChunk-sized pool items.
+      // Each chunk is scheduled independently. After placement, consecutive
+      // same-task chunks on the same day are merged for display.
+      if (t.split && effectiveDur > 0) {
+        var chunk = t.splitMin || MIN_CHUNK;
+        var numChunks = Math.ceil(effectiveDur / chunk);
+        for (var ci = 0; ci < numChunks; ci++) {
+          var chunkDur = (ci === numChunks - 1 && effectiveDur % chunk !== 0)
+            ? effectiveDur % chunk : chunk;
+          // If last chunk is smaller than minChunk, merge with previous
+          if (chunkDur < chunk && ci > 0) {
+            // Add remainder to the previous chunk instead
+            pool[pool.length - 1].remaining += chunkDur;
+            pool[pool.length - 1].totalDur += chunkDur;
+            break;
+          }
+          pool.push({
+            task: t, remaining: chunkDur, totalDur: chunkDur,
+            earliestDate: earliest, deadline: deadline, ceiling: ceiling,
+            splittable: false, // each chunk is atomic
+            minChunk: chunkDur,
+            _parts: [],
+            _poolId: t.id + '_chunk_' + (ci + 1),
+            _splitChunk: ci + 1,
+            _splitTotalChunks: numChunks,
+            _splitParentDur: effectiveDur
+          });
+        }
+      } else {
+        pool.push({
+          task: t, remaining: effectiveDur, totalDur: effectiveDur,
+          earliestDate: earliest, deadline: deadline, ceiling: ceiling,
+          splittable: false,
+          minChunk: effectiveDur,
+          _parts: [],
+          _poolId: t.id
+        });
+      }
     }
   });
 
@@ -1384,6 +1425,60 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
 
   captureSnapshot('Phase 1: Recurring tasks');
 
+  // ── PHASE 1.5: Recurring spacing enforcement ──
+  // Verify placed recurring instances maintain minimum spacing based on their
+  // recurrence type (weekly ~7d, biweekly ~14d, daily ~1d). If two instances
+  // of the same source are too close, unplace the later one.
+  (function enforceRecurringSpacing() {
+    // Group placed recurring instances by sourceId
+    var bySource = {};
+    pool.forEach(function(item) {
+      if (!item.task.recurring || !item.task.sourceId || item._parts.length === 0) return;
+      var sid = item.task.sourceId;
+      if (!bySource[sid]) bySource[sid] = [];
+      bySource[sid].push(item);
+    });
+
+    Object.keys(bySource).forEach(function(sid) {
+      var instances = bySource[sid];
+      if (instances.length < 2) return;
+
+      // Determine expected spacing from the template's recurrence type
+      var src = allTasks.find(function(at) { return at.id === sid; });
+      if (!src || !src.recur) return;
+      var recType = src.recur.type || 'daily';
+      var minDays;
+      if (recType === 'weekly') minDays = 5; // allow some flexibility (5 of 7)
+      else if (recType === 'biweekly') minDays = 10; // allow some flexibility (10 of 14)
+      else if (recType === 'monthly') minDays = 20;
+      else return; // daily, interval — no minimum spacing needed
+
+      // Sort by placed date
+      instances.sort(function(a, b) {
+        var aDate = a._parts.length > 0 ? parseDate(a._parts[0]._dateKey) : null;
+        var bDate = b._parts.length > 0 ? parseDate(b._parts[0]._dateKey) : null;
+        if (!aDate || !bDate) return 0;
+        return aDate - bDate;
+      });
+
+      // Check spacing between consecutive instances
+      for (var si = 1; si < instances.length; si++) {
+        var prevParts = instances[si - 1]._parts;
+        var currParts = instances[si]._parts;
+        if (prevParts.length === 0 || currParts.length === 0) continue;
+        var prevDate = parseDate(prevParts[0]._dateKey);
+        var currDate = parseDate(currParts[0]._dateKey);
+        if (!prevDate || !currDate) continue;
+        var daysBetween = Math.round((currDate - prevDate) / 86400000);
+        if (daysBetween < minDays) {
+          // Too close — unplace the later instance
+          unplaceItem(instances[si]);
+          instances[si].task._unplacedReason = 'spacing';
+          instances[si].task._unplacedDetail = 'Too close to previous instance (' + daysBetween + ' days, need ' + minDays + '+)';
+        }
+      }
+    });
+  })();
 
   // ── PHASE 2: Late-Place, Pull-Forward, Fill ──
   // See docs/SCHEDULER-PRIORITY-REDESIGN.md for full algorithm description.
@@ -1431,9 +1526,14 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   });
   constrainedPool = constrainedPool.filter(function(item) { return !item._impossible; });
 
+  // Separate split chunks from chainable items (split chunks share task IDs
+  // and can't go through buildChains — they're processed separately by priority)
+  var constrainedChunks = constrainedPool.filter(function(item) { return !!item._splitChunk; });
+  var constrainedNonChunks = constrainedPool.filter(function(item) { return !item._splitChunk; });
+
   // Step 2d: Group constrained tasks into dependency chains
   var constrainedById = {};
-  constrainedPool.forEach(function(item) { constrainedById[item.task.id] = item; });
+  constrainedNonChunks.forEach(function(item) { constrainedById[item.task.id] = item; });
 
   function buildChains(poolItems, itemById) {
     var visited = {};
@@ -1483,7 +1583,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     return chains;
   }
 
-  var constrainedChains = buildChains(constrainedPool, constrainedById);
+  var constrainedChains = buildChains(constrainedNonChunks, constrainedById);
 
   // Step 2e: Pull-forward by priority (multi-pass convergence)
   var MAX_PASSES = 10;
@@ -1719,26 +1819,47 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     prevPositions = currPositions;
   }
 
+  // Process constrained split chunks by priority (not chain-grouped)
+  [1, 2, 3, 4].forEach(function(priRank) {
+    constrainedChunks.filter(function(item) {
+      return (PRI_RANK[item.task.pri || 'P3'] || 3) === priRank && item.remaining > 0;
+    }).forEach(function(item) {
+      placeItemBackward(item);
+    });
+  });
+
   captureSnapshot('Phase 2: Pull-forward placement');
 
   // Step 2f: Mark unplaced constrained tasks with reason
   constrainedPool.forEach(function(item) {
     if (item.remaining > 0 && item._parts.length === 0) {
-      item.task._unplacedReason = 'capacity_conflict';
-      item.task._unplacedDetail = 'Could not fit within available capacity before deadline';
-      item.task._suggestions = [{ type: 'constraint', text: 'Reduce duration, extend deadline, or clear conflicting tasks' }];
+      if (!item.task._unplacedReason) {
+        item.task._unplacedReason = 'capacity_conflict';
+        item.task._unplacedDetail = 'Could not fit within available capacity before deadline';
+        item.task._suggestions = [{ type: 'constraint', text: 'Reduce duration, extend deadline, or clear conflicting tasks' }];
+      }
     }
   });
 
   // ── PHASE 3: Fill unconstrained tasks by priority ──
+  var unconstrainedChunks = unconstrainedPool.filter(function(item) { return !!item._splitChunk; });
+  var unconstrainedNonChunks = unconstrainedPool.filter(function(item) { return !item._splitChunk; });
   var unconstrainedById = {};
-  unconstrainedPool.forEach(function(item) { unconstrainedById[item.task.id] = item; });
-  var unconstrainedChains = buildChains(unconstrainedPool, unconstrainedById);
+  unconstrainedNonChunks.forEach(function(item) { unconstrainedById[item.task.id] = item; });
+  var unconstrainedChains = buildChains(unconstrainedNonChunks, unconstrainedById);
 
   [1, 2, 3, 4].forEach(function(priRank) {
     var tierChains = unconstrainedChains.filter(function(chain) {
       return chain.maxPri === priRank;
     });
+    // Process split chunks FIRST so their placements are available
+    // for dependency checking when chains are processed after.
+    unconstrainedChunks.filter(function(item) {
+      return (PRI_RANK[item.task.pri || 'P3'] || 3) === priRank && item.remaining > 0;
+    }).forEach(function(item) {
+      placeItemForward(item);
+    });
+
     tierChains.forEach(function(chain) {
       chain.forEach(function(item) {
         if (item.remaining <= 0) return;
@@ -1882,6 +2003,35 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       }
     }
   });
+  // POST-PROCESSING: Merge consecutive same-task split chunks on each day
+  dates.forEach(function(d) {
+    var placed = dayPlaced[d.key];
+    if (!placed || placed.length < 2) return;
+    placed.sort(function(a, b) { return a.start - b.start; });
+
+    var merged = [];
+    var i = 0;
+    while (i < placed.length) {
+      var curr = placed[i];
+      // Check if next placement is the same task and immediately adjacent
+      while (i + 1 < placed.length) {
+        var next = placed[i + 1];
+        if (next.task && curr.task && next.task.id === curr.task.id &&
+            next.start === curr.start + curr.dur) {
+          // Merge: extend current placement
+          curr.dur += next.dur;
+          // Remove next from placed array
+          placed.splice(i + 1, 1);
+        } else {
+          break;
+        }
+      }
+      merged.push(curr);
+      i++;
+    }
+    dayPlaced[d.key] = merged;
+  });
+
   // POST-PROCESSING: Overlap columns + unique keys
   dates.forEach(function(d) {
     var placed = dayPlaced[d.key];
@@ -1973,11 +2123,34 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   });
 
   // Collect unplaced with actionable suggestions
+  // First, aggregate unplaced split chunks by task ID
+  var unplacedChunksByTask = {};
+  pool.forEach(function(item) {
+    if (item.remaining > 0 && item._parts.length === 0 && item._splitChunk) {
+      var tid = item.task.id;
+      if (!unplacedChunksByTask[tid]) unplacedChunksByTask[tid] = { count: 0, totalMins: 0, parentDur: item._splitParentDur || 0 };
+      unplacedChunksByTask[tid].count++;
+      unplacedChunksByTask[tid].totalMins += item.totalDur;
+    }
+  });
+
   var unplaced = [];
+  var seenUnplacedSplit = {};
   pool.forEach(function(item) {
     if (item.remaining > 0 && item._parts.length === 0) {
       var t = item.task;
-      t._unplacedReason = item.deadline ? "deadline" : "no-capacity";
+
+      // For split chunks, only emit one unplaced entry per task
+      if (item._splitChunk) {
+        if (seenUnplacedSplit[t.id]) return;
+        seenUnplacedSplit[t.id] = true;
+        var info = unplacedChunksByTask[t.id];
+        t._unplacedReason = 'partial_split';
+        t._unplacedDetail = info.totalMins + ' of ' + info.parentDur + ' minutes could not be scheduled (' + info.count + ' chunk' + (info.count > 1 ? 's' : '') + ')';
+        t._suggestions = [{ type: 'split', text: 'Reduce duration, spread across more days, or clear other tasks' }];
+      } else {
+        t._unplacedReason = item.deadline ? "deadline" : "no-capacity";
+      }
 
       var detail = [];
       var suggestions = [];
