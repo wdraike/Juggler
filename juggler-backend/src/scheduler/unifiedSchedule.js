@@ -1877,31 +1877,31 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   });
 
   // ── PHASE 3: Fill unconstrained tasks by priority ──
-  var unconstrainedChunks = unconstrainedPool.filter(function(item) { return !!item._splitChunk; });
-  var unconstrainedNonChunks = unconstrainedPool.filter(function(item) { return !item._splitChunk; });
-  var unconstrainedById = {};
-  unconstrainedNonChunks.forEach(function(item) { unconstrainedById[item.task.id] = item; });
-  var unconstrainedChains = buildChains(unconstrainedNonChunks, unconstrainedById);
+  // No chain grouping — each task competes at its OWN priority level.
+  // Dependencies are resolved via depsMetByDate at placement time.
+  // Multi-pass iteration handles cross-priority deps (e.g., P1 child
+  // waiting for P3 parent to be placed in a later tier).
 
-  [1, 2, 3, 4].forEach(function(priRank) {
-    var tierChains = unconstrainedChains.filter(function(chain) {
-      return chain.maxPri === priRank;
-    });
-    // Process split chunks FIRST so their placements are available
-    // for dependency checking when chains are processed after.
-    unconstrainedChunks.filter(function(item) {
-      return (PRI_RANK[item.task.pri || 'P3'] || 3) === priRank && item.remaining > 0;
-    }).forEach(function(item) {
-      placeItemForward(item);
-    });
-
-    tierChains.forEach(function(chain) {
-      chain.forEach(function(item) {
-        if (item.remaining <= 0) return;
-        placeItemForward(item);
-      });
-    });
+  // Sort all unconstrained items by priority, then by tighter when-windows
+  unconstrainedPool.sort(function(a, b) {
+    var aPri = PRI_RANK[a.task.pri || 'P3'] || 3;
+    var bPri = PRI_RANK[b.task.pri || 'P3'] || 3;
+    if (aPri !== bPri) return aPri - bPri;
+    return whenAvailableMinutes(a.task) - whenAvailableMinutes(b.task);
   });
+
+  var maxPhase3Passes = 5;
+  for (var phase3Pass = 0; phase3Pass < maxPhase3Passes; phase3Pass++) {
+    var phase3Progress = false;
+    for (var ui = 0; ui < unconstrainedPool.length; ui++) {
+      var uItem = unconstrainedPool[ui];
+      if (uItem.remaining <= 0) continue;
+      if (uItem._parts.length > 0) continue; // already partially placed
+      placeItemForward(uItem);
+      if (uItem._parts.length > 0) phase3Progress = true;
+    }
+    if (!phase3Progress) break;
+  }
 
   captureSnapshot('Phase 3: Unconstrained fill');
 
