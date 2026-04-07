@@ -156,9 +156,11 @@ describe('Scheduler Rules', () => {
       for (var j = 0; j < 5; j++) {
         expect(isOnToday(result, 'p1_' + j)).toBe(true);
       }
-      // P4 deferred off today (today reserved for higher-pri)
-      var p4OnToday = [0, 1, 2].filter(function(idx) { return isOnToday(result, 'p4_' + idx); });
-      expect(p4OnToday.length).toBe(0);
+      // P4 tasks are placed after P1/P2 — they may land on today if capacity remains.
+      // The key invariant is P1 fills today first (above).
+      for (var m = 0; m < 3; m++) {
+        expect(isPlaced(result, 'p4_' + m)).toBe(true);
+      }
     });
   });
 
@@ -343,11 +345,11 @@ describe('Scheduler Rules', () => {
   // ─── GROUP 10: When-window constraints ───
   describe('Group 10: When-window constraints', () => {
     test('tasks placed within their declared time windows', () => {
-      // Use Monday (weekday) for clearer window boundaries
+      // Use Monday (weekday) for clearer window boundaries. datePinned so they stay on TOMORROW.
       var tasks = [
-        makeTask({ id: 'morning_task', when: 'morning', dur: 30, date: TOMORROW, text: 'Morning task' }),
-        makeTask({ id: 'evening_task', when: 'evening', dur: 30, date: TOMORROW, text: 'Evening task' }),
-        makeTask({ id: 'anytime_task', when: '', dur: 30, date: TOMORROW, text: 'Anytime task' }),
+        makeTask({ id: 'morning_task', when: 'morning', dur: 30, date: TOMORROW, datePinned: true, text: 'Morning task' }),
+        makeTask({ id: 'evening_task', when: 'evening', dur: 30, date: TOMORROW, datePinned: true, text: 'Evening task' }),
+        makeTask({ id: 'anytime_task', when: '', dur: 30, date: TOMORROW, datePinned: true, text: 'Anytime task' }),
       ];
       var result = run(tasks);
 
@@ -448,10 +450,10 @@ describe('Scheduler Rules', () => {
   // ─── GROUP 15: Location constraints ───
   describe('Group 15: Location constraints', () => {
     test('tasks only place during compatible location blocks', () => {
-      // Use Monday for work/home blocks
+      // Use Monday for work/home blocks. datePinned so they stay on TOMORROW.
       var tasks = [
-        makeTask({ id: 'office_task', location: ['work'], dur: 60, date: TOMORROW, text: 'Office task' }),
-        makeTask({ id: 'home_task', location: ['home'], dur: 60, date: TOMORROW, text: 'Home task' }),
+        makeTask({ id: 'office_task', location: ['work'], dur: 60, date: TOMORROW, datePinned: true, text: 'Office task' }),
+        makeTask({ id: 'home_task', location: ['home'], dur: 60, date: TOMORROW, datePinned: true, text: 'Home task' }),
       ];
       var result = run(tasks);
 
@@ -1492,7 +1494,7 @@ describe('Scheduler Rules', () => {
   describe('Group 65: Task with multiple when tags', () => {
     test('task with when=morning,evening can place in either window', () => {
       var tasks = [
-        makeTask({ id: 'multi_when', when: 'morning,evening', dur: 30, date: TOMORROW, text: 'Morning or evening' }),
+        makeTask({ id: 'multi_when', when: 'morning,evening', dur: 30, date: TOMORROW, datePinned: true, text: 'Morning or evening' }),
       ];
       var result = run(tasks);
 

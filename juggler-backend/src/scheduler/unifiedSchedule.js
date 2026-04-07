@@ -925,6 +925,75 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     return placedAny;
   }
 
+  // LATE PLACEMENT — scan backward through when-windows for the latest valid slot.
+  // Used by reverse-topo chain processing so deadline tasks land late, leaving room for parents.
+  function placeLate(item, d, beforeMin, whenOverride, afterMin) {
+    var t = item.task;
+    var occ = dayOcc[d.key];
+    var placed = dayPlaced[d.key];
+    var tb = getTravelBefore(t);
+    var ta = getTravelAfter(t);
+    var wins = Array.isArray(whenOverride) ? whenOverride : getWhenWindows(whenOverride || t.when, dayWindows[d.key]);
+    if (wins.length === 0) return false;
+    var scanLimit = beforeMin || WALK_END;
+    var scanFloor = afterMin || 0;
+    var dur = item.remaining;
+    if (dur <= 0) return false;
+
+    // For splittable tasks, fall back to placeEarly (late-split is complex)
+    if (item.splittable) return placeEarly(item, d, scanFloor, whenOverride, scanLimit);
+
+    // Scan backward through windows for the latest contiguous gap
+    var bestStart = -1;
+    for (var wi = wins.length - 1; wi >= 0; wi--) {
+      var wStart = Math.max(wins[wi][0], scanFloor);
+      var wEnd = Math.min(wins[wi][1], scanLimit);
+      if (wEnd - wStart < dur) continue;
+
+      // Scan backward from end of window
+      for (var scan = wEnd - dur; scan >= wStart; scan--) {
+        // Check travel-before zone
+        var needTb = item._parts.length === 0 ? tb : 0;
+        if (needTb > 0) {
+          var tbOk = true;
+          for (var tbi = scan - needTb; tbi < scan; tbi++) {
+            if (tbi < 0 || (occ[tbi] && occ[tbi] !== t.id)) { tbOk = false; break; }
+          }
+          if (!tbOk) continue;
+        }
+        // Check contiguous gap for task body
+        var gapOk = true;
+        for (var gm = scan; gm < scan + dur; gm++) {
+          if (occ[gm] && occ[gm] !== t.id) { gapOk = false; break; }
+        }
+        if (!gapOk) continue;
+        // Check travel-after zone
+        var needTa = ta;
+        if (needTa > 0) {
+          var taOk2 = true;
+          for (var tai = scan + dur; tai < scan + dur + needTa; tai++) {
+            if (occ[tai] && occ[tai] !== t.id) { taOk2 = false; break; }
+          }
+          if (!taOk2) continue;
+        }
+        // Check location
+        var locOk = true;
+        for (var lm = scan; lm < scan + dur; lm += 15) {
+          var locId = resolveLocationId(d.key, lm, cfg, dayBlocks[d.key]);
+          if (!canTaskRun(t, locId, cfg.toolMatrix)) { locOk = false; break; }
+        }
+        if (!locOk) continue;
+        bestStart = scan;
+        break; // First valid slot scanning backward = latest valid slot
+      }
+      if (bestStart >= 0) break;
+    }
+
+    if (bestStart < 0) return false;
+    recordPlace(occ, placed, t, bestStart, dur, false, d.key, item);
+    return true;
+  }
+
   // Place a task as close to a preferred minute as possible within when-windows
   function placeNearTime(item, d, preferredMin, whenOverride) {
     var t = item.task;
@@ -1315,106 +1384,228 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
 
   captureSnapshot('Phase 1: Recurring tasks');
 
-  // ── PHASE 2: Reserve-and-Place (single pass) ──
-  // Compute faux-deadlines, reserve capacity for deadline chains,
-  // then place all non-recurring tasks in a single topological pass.
+
+  // ── PHASE 2: Late-Place, Pull-Forward, Fill ──
+  // See docs/SCHEDULER-PRIORITY-REDESIGN.md for full algorithm description.
 
   // Step 2a: Compute faux-deadlines for dependency chain ancestors
   computeFauxDeadlines();
 
-  // Step 2b: Reserve capacity for deadline/faux-deadline chains
-  reserveCapacityForChains();
-
-  // Step 2c: Topological sort for placement ordering
-  var nonRecurringPool = pool.filter(function(item) {
-    return !item.task.recurring && item.remaining > 0;
-  });
-  var topoTasks = nonRecurringPool.map(function(item) { return item.task; });
-  var topoSorted = topoSortTasks(topoTasks);
-  var topoIndex = {};
-  topoSorted.forEach(function(t, idx) { topoIndex[t.id] = idx; });
-
-  // Step 2d: Sort by topo order + deadline urgency + priority
+  // Step 2b: Categorize non-recurring pool into constrained vs unconstrained
+  var constrainedPool = [];
+  var unconstrainedPool = [];
   var PRI_RANK = { P1: 1, P2: 2, P3: 3, P4: 4 };
-  nonRecurringPool.sort(function(a, b) {
-    // Topological order: deps before dependants
-    var ta = topoIndex[a.task.id] != null ? topoIndex[a.task.id] : 9999;
-    var tb = topoIndex[b.task.id] != null ? topoIndex[b.task.id] : 9999;
-    if (ta !== tb) return ta - tb;
-    // On-time trumps priority: deadline tasks before non-deadline
-    var aDL = a.deadline || a.fauxDeadline;
-    var bDL = b.deadline || b.fauxDeadline;
-    var aHasDL = aDL ? 0 : 1;
-    var bHasDL = bDL ? 0 : 1;
-    if (aHasDL !== bHasDL) return aHasDL - bHasDL;
-    // Soonest deadline first
-    if (aDL && bDL) { var dd = aDL - bDL; if (dd !== 0) return dd; }
-    // Ceiling tasks: earliest ceiling first
-    if (a.ceiling && b.ceiling) { var cc = a.ceiling - b.ceiling; if (cc !== 0) return cc; }
-    // Highest priority first
-    var aPri = PRI_RANK[a.task.pri || 'P3'] || 3;
-    var bPri = PRI_RANK[b.task.pri || 'P3'] || 3;
-    if (aPri !== bPri) return aPri - bPri;
-    // Pinned-date tasks first
-    var aDate = a.task.datePinned ? (parseDate(a.task.date) || localToday) : localToday;
-    var bDate = b.task.datePinned ? (parseDate(b.task.date) || localToday) : localToday;
-    var dd2 = aDate - bDate;
-    if (dd2 !== 0) return dd2;
-    // Tighter when-windows first
-    return whenAvailableMinutes(a.task) - whenAvailableMinutes(b.task);
+  pool.forEach(function(item) {
+    if (item.remaining <= 0 || item.task.recurring) return;
+    if (item.deadline || item.fauxDeadline || item.ceiling) {
+      constrainedPool.push(item);
+    } else {
+      unconstrainedPool.push(item);
+    }
   });
 
-  // Step 2e: Today capacity reservation
-  var todayDateObj = dates.length > 0 && dates[0].isToday ? dates[0] : null;
-  function computeTodayReserved() {
-    if (!todayDateObj) return false;
-    var highPriDemand = 0;
-    pool.forEach(function(item) {
-      if (item.remaining <= 0) return;
-      var pri = item.task.pri || 'P3';
-      if (pri !== 'P1' && pri !== 'P2') return;
-      if (item.earliestDate && todayDateObj.date < item.earliestDate) return;
-      if (item.ceiling && todayDateObj.date > item.ceiling) return;
-      if (!canPlaceOnDate(item.task, todayDateObj)) return;
-      highPriDemand += item.remaining;
+  // Step 2c: Compute placement windows [earliest, latest] for constrained tasks
+  var impossibleItems = [];
+  constrainedPool.forEach(function(item) {
+    var earliest = item.earliestDate || localToday;
+    var latestCandidates = [];
+    if (item.deadline) latestCandidates.push(item.deadline);
+    if (item.fauxDeadline) latestCandidates.push(item.fauxDeadline);
+    if (item.ceiling) latestCandidates.push(item.ceiling);
+    var latest = latestCandidates.reduce(function(min, d) {
+      return d < min ? d : min;
+    }, latestCandidates[0]);
+
+    if (earliest > latest) {
+      item._impossible = true;
+      item.task._unplacedReason = 'impossible_window';
+      item.task._unplacedDetail = 'Earliest placement (' + formatDateKey(earliest) +
+        ') is after latest (' + formatDateKey(latest) + ')';
+      item.task._suggestions = [{ type: 'constraint', text: 'Adjust start-after date, deadline, or dependencies' }];
+      impossibleItems.push(item);
+      return;
+    }
+    item._targetLatest = latest;
+    item._windowEarliest = earliest;
+    item._windowSize = latest.getTime() - earliest.getTime();
+  });
+  constrainedPool = constrainedPool.filter(function(item) { return !item._impossible; });
+
+  // Step 2d: Group constrained tasks into dependency chains
+  var constrainedById = {};
+  constrainedPool.forEach(function(item) { constrainedById[item.task.id] = item; });
+
+  function buildChains(poolItems, itemById) {
+    var visited = {};
+    var chains = [];
+
+    function walkChain(item, chain) {
+      if (visited[item.task.id]) return;
+      visited[item.task.id] = true;
+      chain.push(item);
+      getTaskDeps(item.task).forEach(function(depId) {
+        if (isBackwardsDep(item.task.id, depId)) return;
+        if (itemById[depId]) walkChain(itemById[depId], chain);
+      });
+      var children = dependedOnBy[item.task.id] || [];
+      children.forEach(function(childId) {
+        if (isBackwardsDep(childId, item.task.id)) return;
+        if (itemById[childId]) walkChain(itemById[childId], chain);
+      });
+    }
+
+    poolItems.forEach(function(item) {
+      if (visited[item.task.id]) return;
+      var chain = [];
+      walkChain(item, chain);
+      if (chain.length > 0) chains.push(chain);
     });
-    var todayOcc = dayOcc[todayDateObj.key];
-    var todayFree = 0;
-    var todayWins = dayWindows[todayDateObj.key] && dayWindows[todayDateObj.key].anytime ? dayWindows[todayDateObj.key].anytime : [];
-    for (var twi = 0; twi < todayWins.length; twi++) {
-      for (var tm = todayWins[twi][0]; tm < todayWins[twi][1]; tm++) {
-        if (!todayOcc[tm]) todayFree++;
-      }
-    }
-    return todayFree > 0 && highPriDemand > todayFree * 0.6;
+
+    chains.forEach(function(chain) {
+      var maxPriRank = 4;
+      chain.forEach(function(item) {
+        var r = PRI_RANK[item.task.pri || 'P3'] || 3;
+        if (r < maxPriRank) maxPriRank = r;
+      });
+      chain.maxPri = maxPriRank;
+
+      var chainTasks = chain.map(function(item) { return item.task; });
+      var sorted = topoSortTasks(chainTasks);
+      var topoIdx = {};
+      sorted.forEach(function(t, idx) { topoIdx[t.id] = idx; });
+      chain.sort(function(a, b) {
+        var ai = topoIdx[a.task.id] != null ? topoIdx[a.task.id] : 9999;
+        var bi = topoIdx[b.task.id] != null ? topoIdx[b.task.id] : 9999;
+        return ai - bi;
+      });
+    });
+
+    return chains;
   }
-  var todayReserved = computeTodayReserved();
 
-  // Step 2f: Single-pass placement
-  nonRecurringPool.forEach(function(item) {
-    if (item.remaining <= 0) return;
+  var constrainedChains = buildChains(constrainedPool, constrainedById);
+
+  // Step 2e: Pull-forward by priority (multi-pass convergence)
+  var MAX_PASSES = 10;
+  var prevPositions = {};
+
+  function placeItemBackward(item) {
     var t = item.task;
+    var latest = item._targetLatest;
+    // Use task's date as floor if no explicit earliestDate, so tasks stay on/after their assigned date
+    var earliest = item._windowEarliest || localToday;
 
-    // Release this task's reservation before placing (frees capacity for itself)
-    releaseReservation(t.id);
-
-    var effectiveDeadline = item.deadline || item.fauxDeadline;
-
-    // Today reservation: P3/P4 without deadlines skip today when P1/P2 demand is high
-    var skipToday = false;
-    if (todayReserved && !t.recurring && !t.datePinned && !t.generated) {
-      if (!effectiveDeadline) {
-        var tPri = t.pri || 'P3';
-        if (tPri === 'P4' || tPri === 'P3') skipToday = true;
+    for (var di = dates.length - 1; di >= 0; di--) {
+      if (item.remaining <= 0) break;
+      var d = dates[di];
+      if (d.date > latest) continue;
+      if (d.date < earliest) break;
+      if (d.date < localToday) break;
+      if (!canPlaceOnDate(t, d)) continue;
+      var depResult = depsMetByDate(t, d);
+      if (!depResult) continue;
+      var depAfter = depAfterFrom(depResult);
+      var depBefore = depBeforeFrom(depResult);
+      var flexWins = getRecurFlexWindows(t, dayWindows[d.key]);
+      if (flexWins) {
+        var flexFree = 0;
+        var _occ = dayOcc[d.key];
+        for (var fi = 0; fi < flexWins.length; fi++) {
+          for (var fm = flexWins[fi][0]; fm < flexWins[fi][1]; fm++) {
+            if (!_occ[fm]) flexFree++;
+          }
+        }
+        if (flexFree < item.remaining) continue;
       }
+      var wins = flexWins || getWhenWindows(t.when, dayWindows[d.key]);
+      if (wins.length === 0) continue;
+      placeEarly(item, d, depAfter, flexWins, depBefore);
     }
+  }
+
+  function placeItemBackwardConstrained(item, childBefore, chainTaskIds) {
+    // Like placeItemBackward but processes chains in reverse topo order.
+    // Uses childBefore constraint from already-placed children instead of
+    // depsMetByDate for same-chain deps. Cross-chain deps still checked.
+    var t = item.task;
+    var latest = item._targetLatest;
+    var earliest = item._windowEarliest || localToday;
+
+    // Check which deps are cross-chain (need depsMetByDate) vs same-chain (use childBefore)
+    var crossChainDeps = getTaskDeps(t).filter(function(depId) {
+      if (isBackwardsDep(t.id, depId)) return false;
+      return !chainTaskIds || !chainTaskIds[depId];
+    });
+
+    for (var di = dates.length - 1; di >= 0; di--) {
+      if (item.remaining <= 0) break;
+      var d = dates[di];
+      if (d.date > latest) continue;
+      if (d.date < earliest) break;
+      if (d.date < localToday) break;
+      if (!canPlaceOnDate(t, d)) continue;
+
+      // Check cross-chain deps are met
+      var crossOk = true;
+      var depAfter = 0;
+      for (var cdi = 0; cdi < crossChainDeps.length; cdi++) {
+        var cdInfo = globalPlacedEnd[crossChainDeps[cdi]];
+        if (!cdInfo) { crossOk = false; break; }
+        if (cdInfo.dateKey > d.key) { crossOk = false; break; }
+        if (cdInfo.dateKey === d.key && cdInfo.endMin > depAfter) depAfter = cdInfo.endMin;
+      }
+      if (!crossOk) continue;
+
+      // Apply childBefore constraint (same-chain) — must finish before earliest placed child
+      var beforeMin = undefined;
+      if (childBefore) {
+        if (d.key > childBefore.dateKey) continue; // this day is after child's day
+        if (d.key === childBefore.dateKey) beforeMin = childBefore.startMin;
+      }
+      // Also check cross-chain children (tasks that depend on us, already placed)
+      var crossChildren = dependedOnBy[t.id] || [];
+      var crossChildOk = true;
+      for (var cci = 0; cci < crossChildren.length; cci++) {
+        if (isBackwardsDep(crossChildren[cci], t.id)) continue;
+        if (chainTaskIds && chainTaskIds[crossChildren[cci]]) continue; // same-chain, handled by childBefore
+        var ccInfo = globalPlacedEnd[crossChildren[cci]];
+        if (!ccInfo) continue;
+        var ccDate = parseDate(ccInfo.dateKey);
+        if (ccDate && ccDate < d.date) { crossChildOk = false; break; } // child on earlier day — impossible
+        if (ccInfo.dateKey === d.key && ccInfo.startMin != null) {
+          if (beforeMin == null || ccInfo.startMin < beforeMin) beforeMin = ccInfo.startMin;
+        }
+      }
+      if (!crossChildOk) continue;
+
+      var flexWins = getRecurFlexWindows(t, dayWindows[d.key]);
+      if (flexWins) {
+        var flexFree = 0;
+        var _occ = dayOcc[d.key];
+        for (var fi = 0; fi < flexWins.length; fi++) {
+          for (var fm = flexWins[fi][0]; fm < flexWins[fi][1]; fm++) {
+            if (!_occ[fm]) flexFree++;
+          }
+        }
+        if (flexFree < item.remaining) continue;
+      }
+      var wins = flexWins || getWhenWindows(t.when, dayWindows[d.key]);
+      if (wins.length === 0) continue;
+      placeLate(item, d, beforeMin, flexWins, depAfter);
+    }
+  }
+
+  function placeItemForward(item) {
+    var t = item.task;
+    // Use task's date as floor if no explicit earliestDate, so tasks stay on/after their assigned date
+    var earliest = item.earliestDate || localToday;
+    var effectiveDeadline = item.deadline || item.fauxDeadline;
 
     for (var di = 0; di < dates.length; di++) {
       if (item.remaining <= 0) break;
       var d = dates[di];
-      if (skipToday && d.isToday) continue;
       if (d.date < localToday) continue;
-      if (item.earliestDate && d.date < item.earliestDate) continue;
+      if (d.date < earliest) continue;
       if (effectiveDeadline && d.date > effectiveDeadline) continue;
       if (item.ceiling && d.date > item.ceiling) continue;
       if (!canPlaceOnDate(t, d)) continue;
@@ -1424,58 +1615,136 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var depBefore = depBeforeFrom(depResult);
       var flexWins = getRecurFlexWindows(t, dayWindows[d.key]);
       if (flexWins) {
-        var flexFree2 = 0;
-        var _occ2 = dayOcc[d.key];
+        var flexFree = 0;
+        var _occ = dayOcc[d.key];
         for (var fi = 0; fi < flexWins.length; fi++) {
           for (var fm = flexWins[fi][0]; fm < flexWins[fi][1]; fm++) {
-            if (!_occ2[fm]) flexFree2++;
+            if (!_occ[fm]) flexFree++;
           }
         }
-        if (flexFree2 < item.remaining) continue;
+        if (flexFree < item.remaining) continue;
       }
       var wins = flexWins || getWhenWindows(t.when, dayWindows[d.key]);
       if (wins.length === 0) continue;
       placeEarly(item, d, depAfter, flexWins, depBefore);
     }
-  });
+  }
 
-  // Release any remaining reservations (safety net — all should be released by now)
-  dates.forEach(function(d) {
-    var occ = dayOcc[d.key];
-    if (!occ) return;
-    for (var m = 0; m < 1440; m++) {
-      if (typeof occ[m] === 'string') delete occ[m];
+  function capturePositions(items) {
+    var positions = {};
+    items.forEach(function(item) {
+      if (item._parts.length > 0) {
+        positions[item.task.id] = item._parts.map(function(p) {
+          return p._dateKey + ':' + p.start;
+        }).join(',');
+      } else {
+        positions[item.task.id] = 'unplaced';
+      }
+    });
+    return positions;
+  }
+
+  function positionsChanged(prev, curr) {
+    for (var id in curr) {
+      if (prev[id] !== curr[id]) return true;
+    }
+    for (var id2 in prev) {
+      if (prev[id2] !== curr[id2]) return true;
+    }
+    return false;
+  }
+
+  function chainWindowSize(chain) {
+    var minSize = Infinity;
+    chain.forEach(function(item) {
+      if (item._windowSize != null && item._windowSize < minSize) minSize = item._windowSize;
+    });
+    return minSize;
+  }
+
+  for (var pass = 0; pass < MAX_PASSES; pass++) {
+    if (pass > 0) {
+      constrainedPool.forEach(function(item) {
+        if (item._parts.length > 0) unplaceItem(item);
+      });
+    }
+
+    [1, 2, 3, 4].forEach(function(priRank) {
+      var tierChains = constrainedChains.filter(function(chain) {
+        return chain.maxPri === priRank;
+      });
+      tierChains.sort(function(a, b) {
+        return chainWindowSize(a) - chainWindowSize(b);
+      });
+
+      tierChains.forEach(function(chain) {
+        // Process in reverse topo order (deadline tasks first) so that the
+        // most constrained tasks get capacity. Then parents are placed
+        // before their children using the child's position as a ceiling.
+        var chainTaskIds = {};
+        chain.forEach(function(item) { chainTaskIds[item.task.id] = true; });
+
+        var chainBeforeMap = {}; // taskId -> { dateKey, startMin } of earliest child
+
+        for (var ci = chain.length - 1; ci >= 0; ci--) {
+          var item = chain[ci];
+          if (item.remaining <= 0) continue;
+
+          var childBefore = chainBeforeMap[item.task.id];
+          placeItemBackwardConstrained(item, childBefore, chainTaskIds);
+
+          // Record this task's position as a ceiling for its parents
+          if (item._parts.length > 0) {
+            var firstPart = item._parts[0];
+            getTaskDeps(item.task).forEach(function(depId) {
+              if (isBackwardsDep(item.task.id, depId)) return;
+              var existing = chainBeforeMap[depId];
+              if (!existing || firstPart._dateKey < existing.dateKey ||
+                  (firstPart._dateKey === existing.dateKey && firstPart.start < existing.startMin)) {
+                chainBeforeMap[depId] = { dateKey: firstPart._dateKey, startMin: firstPart.start };
+              }
+            });
+          }
+        }
+      });
+    });
+
+    var currPositions = capturePositions(constrainedPool);
+    if (pass > 0 && !positionsChanged(prevPositions, currPositions)) break;
+    prevPositions = currPositions;
+  }
+
+  captureSnapshot('Phase 2: Pull-forward placement');
+
+  // Step 2f: Mark unplaced constrained tasks with reason
+  constrainedPool.forEach(function(item) {
+    if (item.remaining > 0 && item._parts.length === 0) {
+      item.task._unplacedReason = 'capacity_conflict';
+      item.task._unplacedDetail = 'Could not fit within available capacity before deadline';
+      item.task._suggestions = [{ type: 'constraint', text: 'Reduce duration, extend deadline, or clear conflicting tasks' }];
     }
   });
 
-  // Phase 2b: Deadline rescue — unplaced deadline tasks get a second chance.
-  // If the full chain can't fit but there IS capacity, place the deadline
-  // task itself (ignoring deps) so it's not missed entirely.
-  PRI_LEVELS.forEach(function(priLevel) {
-    pool.filter(function(item) {
-      return item.deadline && item.remaining > 0 && item._parts.length === 0
-        && (item.task.pri || 'P3') === priLevel && !item.task.recurring;
-    }).forEach(function(item) {
-      for (var di = 0; di < dates.length; di++) {
-        if (item.remaining <= 0) break;
-        var d = dates[di];
-        if (d.date < localToday) continue;
-        if (item.earliestDate && d.date < item.earliestDate) continue;
-        if (item.deadline && d.date > item.deadline) continue;
-        if (item.ceiling && d.date > item.ceiling) continue;
-        if (!canPlaceOnDate(item.task, d)) continue;
-        var wins = getWhenWindows(item.task.when, dayWindows[d.key]);
-        if (wins.length === 0) continue;
-        placeEarly(item, d, 0, undefined, undefined);
-      }
+  // ── PHASE 3: Fill unconstrained tasks by priority ──
+  var unconstrainedById = {};
+  unconstrainedPool.forEach(function(item) { unconstrainedById[item.task.id] = item; });
+  var unconstrainedChains = buildChains(unconstrainedPool, unconstrainedById);
+
+  [1, 2, 3, 4].forEach(function(priRank) {
+    var tierChains = unconstrainedChains.filter(function(chain) {
+      return chain.maxPri === priRank;
+    });
+    tierChains.forEach(function(chain) {
+      chain.forEach(function(item) {
+        if (item.remaining <= 0) return;
+        placeItemForward(item);
+      });
     });
   });
 
-  captureSnapshot('Phase 2: Reserve-and-Place');
+  captureSnapshot('Phase 3: Unconstrained fill');
 
-  // PHASE 3 — RELAXATION + OVERFLOW: Unplaced items with flexWhen opt-in retry with
-  // 'anytime' windows.  Tasks without flexWhen stay unplaced and surface
-  // a diagnostic message so the user can enable the override if desired.
+  // ── PHASE 4: Relaxation — unplaced items with flexWhen retry with 'anytime' windows ──
   PRI_LEVELS.forEach(function(priLevel) {
     pool.filter(function(item) {
       return item.remaining > 0 && item._parts.length === 0 && item.task.flexWhen && (item.task.pri || "P3") === priLevel;
@@ -1494,80 +1763,13 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         var depBeforeR = depBeforeFrom(depResultR);
         placeEarly(item, d, depAfterR, "anytime", depBeforeR);
       }
-      // Tag newly placed parts as when-relaxed
       for (var ri = partsBeforeRelax; ri < item._parts.length; ri++) {
         item._parts[ri]._whenRelaxed = true;
       }
     });
   });
 
-  // PHASE 4.5 — OVERFLOW: Unplaced non-pinned tasks try nearby days (±1..±7)
-  // Extended range handles weekday→weekend gaps (e.g. Friday task with dayReq:weekday → Monday)
-  var overflowOffsets = [1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7];
-  PRI_LEVELS.forEach(function(priLevel) {
-    pool.filter(function(item) {
-      return item.remaining > 0 && item._parts.length === 0 && (item.task.pri || "P3") === priLevel
-        && !item.task.recurring && !item.task.datePinned && !item.task.generated;
-    }).forEach(function(item) {
-      var t = item.task;
-      var origDate = parseDate(t.date);
-      if (!origDate) return;
-      var origKey = formatDateKey(origDate);
-      var origIdx = -1;
-      for (var i = 0; i < dates.length; i++) {
-        if (dates[i].key === origKey) { origIdx = i; break; }
-      }
-      if (origIdx < 0) return;
-
-      for (var oi = 0; oi < overflowOffsets.length; oi++) {
-        if (item.remaining <= 0) break;
-        var tryIdx = origIdx + overflowOffsets[oi];
-        if (tryIdx < 0 || tryIdx >= dates.length) continue;
-        var d = dates[tryIdx];
-        if (d.date < localToday) continue;
-        if (item.earliestDate && d.date < item.earliestDate) continue;
-        if (item.deadline && d.date > item.deadline) continue;
-        if (item.ceiling && d.date > item.ceiling) continue;
-        if (!canPlaceOnDate(t, d)) continue;
-        var depResultO = depsMetByDate(t, d);
-        if (!depResultO) continue;
-        var depAfterO = depAfterFrom(depResultO);
-        var depBeforeO = depBeforeFrom(depResultO);
-        var wins = getWhenWindows(t.when, dayWindows[d.key]);
-        if (wins.length > 0) { if (placeEarly(item, d, depAfterO, undefined, depBeforeO)) break; }
-        if (t.flexWhen && placeEarly(item, d, depAfterO, "anytime", depBeforeO)) break;
-      }
-
-      // If still unplaced and has dayReq, try adjacent days relaxing dayReq
-      if (item.remaining > 0 && item._parts.length === 0 && t.dayReq && t.dayReq !== "any") {
-        for (var oi2 = 0; oi2 < overflowOffsets.length; oi2++) {
-          if (item.remaining <= 0) break;
-          var tryIdx2 = origIdx + overflowOffsets[oi2];
-          if (tryIdx2 < 0 || tryIdx2 >= dates.length) continue;
-          var d2 = dates[tryIdx2];
-          if (d2.date < localToday) continue;
-          if (item.earliestDate && d2.date < item.earliestDate) continue;
-          if (item.deadline && d2.date > item.deadline) continue;
-          if (item.ceiling && d2.date > item.ceiling) continue;
-          if (canPlaceOnDate(t, d2)) continue; // already tried above
-          var depResultO2 = depsMetByDate(t, d2);
-          if (!depResultO2) continue;
-          var depAfterO2 = depAfterFrom(depResultO2);
-          var depBeforeO2 = depBeforeFrom(depResultO2);
-          var wins2 = getWhenWindows(t.when, dayWindows[d2.key]);
-          if (wins2.length > 0) { if (placeEarly(item, d2, depAfterO2, undefined, depBeforeO2)) break; }
-          if (t.flexWhen && placeEarly(item, d2, depAfterO2, "anytime", depBeforeO2)) break;
-        }
-      }
-    });
-  });
-
-  captureSnapshot('Phase 3: Relaxation + overflow');
-
-  // PHASE 5 — RECURRING RESCUE: Reflow days that have unplaced recurringTasks.
-  // If a recurring task couldn't fit on its day, try bumping one non-recurring task
-  // off that day to make room — but only if the bumped task successfully
-  // re-places elsewhere (net improvement, never net worse).
+  // ── PHASE 5: Recurring rescue — bump non-recurring tasks to make room ──
   var unplacedRecurrings = pool.filter(function(item) {
     return item.task.recurring && item.remaining > 0 && item._parts.length === 0;
   });
@@ -1578,8 +1780,6 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     var d = getDateObj(dayKey);
     if (!d) return;
 
-    // Collect displaceable items: non-locked, non-recurring, non-deadline on this day
-    // Prefer items that occupy time in the recurring task's required location window
     var recurringLoc = hItem.task.location || [];
     var candidates = [];
     pool.forEach(function(pItem) {
@@ -1588,8 +1788,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (pItem._parts.length === 0) return;
       var onDay = pItem._parts.filter(function(p) { return p._dateKey === dayKey && !p.locked; });
       if (onDay.length === 0) return;
-      // Check if any of the item's parts overlap with a location-compatible window
-      var locOverlap = recurringLoc.length === 0; // no constraint = any overlap is fine
+      var locOverlap = recurringLoc.length === 0;
       if (!locOverlap) {
         for (var pi = 0; pi < onDay.length; pi++) {
           var partMid = onDay[pi].start + Math.floor(onDay[pi].dur / 2);
@@ -1600,7 +1799,6 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       pItem._locOverlap = locOverlap;
       candidates.push(pItem);
     });
-    // Sort: location-overlapping first, then lowest priority, then largest duration
     candidates.sort(function(a, b) {
       if (a._locOverlap !== b._locOverlap) return a._locOverlap ? -1 : 1;
       var ap = (a.task.pri || "P3"); var bp = (b.task.pri || "P3");
@@ -1608,41 +1806,33 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       return (b.totalDur || 0) - (a.totalDur || 0);
     });
 
-    // Accumulate bumps until the recurring task fits, then verify all bumped items re-place
     var bumpedStack = [];
     var recurringPlaced = false;
     for (var ci = 0; ci < candidates.length && !recurringPlaced; ci++) {
       var bumpItem = candidates[ci];
-
-      // Save state for rollback
       var savedParts = bumpItem._parts.slice();
       var savedRemaining = bumpItem.remaining;
       var savedUpdates = taskUpdates[bumpItem.task.id];
       var savedEnd = globalPlacedEnd[bumpItem.task.id];
       bumpedStack.push({ item: bumpItem, savedParts: savedParts, savedRemaining: savedRemaining, savedUpdates: savedUpdates, savedEnd: savedEnd });
 
-      // Unplace the bump candidate entirely
       unplaceItem(bumpItem);
 
-      // Try placing the recurring task
       var flexWins = getRecurFlexWindows(hItem.task, dayWindows[dayKey]);
       placeEarly(hItem, d, 0, flexWins);
-      // If flex windows didn't work, try the full when-windows (but NOT "anytime"
-      // — placing outside the task's when constraint creates invalid placements)
       if (hItem.remaining > 0) {
         var rescueWins = getWhenWindows(hItem.task.when, dayWindows[dayKey]);
         if (rescueWins.length > 0) placeEarly(hItem, d, 0, rescueWins);
       }
 
       if (hItem.remaining <= 0) {
-        // Recurring placed! Now verify all bumped items can re-place
         var allReplace = true;
         for (var ri = 0; ri < bumpedStack.length; ri++) {
           var rb = bumpedStack[ri].item;
           if (rb.remaining <= 0) continue;
-          for (var di = 0; di < dates.length; di++) {
+          for (var di2 = 0; di2 < dates.length; di2++) {
             if (rb.remaining <= 0) break;
-            var rd = dates[di];
+            var rd = dates[di2];
             if (rb.earliestDate && rd.date < rb.earliestDate) continue;
             if (rb.ceiling && rd.date > rb.ceiling) continue;
             if (rd.date < localToday) continue;
@@ -1660,7 +1850,6 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         if (allReplace) {
           recurringPlaced = true;
         } else {
-          // Revert everything — recurring task and all bumped items
           unplaceItem(hItem);
           for (var vi = 0; vi < bumpedStack.length; vi++) {
             var vb = bumpedStack[vi];
@@ -1674,10 +1863,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
           bumpedStack = [];
         }
       }
-      // If recurring still not placed, keep bumping (accumulate freed space)
     }
-    // If we exhausted candidates without success, unplace the partially-placed
-    // recurring task and revert any leftover bumps
     if (!recurringPlaced && bumpedStack.length > 0) {
       unplaceItem(hItem);
       for (var vi2 = 0; vi2 < bumpedStack.length; vi2++) {
@@ -1691,181 +1877,6 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       }
     }
   });
-
-  // PHASE 5.5: Intraday packing — unplace movable tasks, sort by priority,
-  // re-pack tightly into earliest valid slots within their when-windows.
-  // This consolidates scattered gaps into contiguous free blocks at the end
-  // of each window, making room for larger or split tasks.
-  function packPriRank(pri) {
-    if (pri === 'P1') return 4;
-    if (pri === 'P2') return 3;
-    if (pri === 'P4') return 1;
-    return 2;
-  }
-
-  dates.forEach(function(d) {
-    var placed = dayPlaced[d.key];
-    if (!placed || placed.length < 2) return;
-
-    // Count parts per task on THIS day
-    var partsOnDay = {};
-    for (var ci = 0; ci < placed.length; ci++) {
-      if (placed[ci].task) {
-        var cid = placed[ci].task.id;
-        partsOnDay[cid] = (partsOnDay[cid] || 0) + 1;
-      }
-    }
-
-    // Collect movable placements: non-locked, non-rigid, not fixed, not multi-part
-    var movable = [];
-    var immovable = [];
-    for (var i = 0; i < placed.length; i++) {
-      var p = placed[i];
-      if (!p.task) continue;
-      if (p.locked || p.task.rigid || hasWhen(p.task.when, 'fixed') || partsOnDay[p.task.id] > 1) {
-        immovable.push(p);
-      } else {
-        movable.push(p);
-      }
-    }
-    if (movable.length < 2) return;
-
-    // Save old positions for rollback
-    var saved = movable.map(function(p) { return { placement: p, oldStart: p.start }; });
-
-    // Step 1: Free all movable slots from occupancy
-    var occ = dayOcc[d.key];
-    movable.forEach(function(p) {
-      for (var m = p.start; m < p.start + p.dur; m++) delete occ[m];
-    });
-
-    // Step 2: Sort by priority (P1 first), then tighter constraints first
-    movable.sort(function(a, b) {
-      var pa = packPriRank(a.task.pri), pb = packPriRank(b.task.pri);
-      if (pa !== pb) return pb - pa;
-      // Tighter when-windows first (fewer available minutes = harder to place)
-      return whenAvailableMinutes(a.task) - whenAvailableMinutes(b.task);
-    });
-
-    // Step 3: Pack each task into earliest valid slot
-    var allPlaced = true;
-    var assignments = [];
-
-    for (var ti = 0; ti < movable.length; ti++) {
-      var p2 = movable[ti];
-      var t = p2.task;
-      var dur = p2.dur;
-
-      // Determine valid when-windows for this task
-      var wins = t.recurring
-        ? (getRecurFlexWindows(t, dayWindows[d.key]) || getWhenWindows(t.when, dayWindows[d.key]))
-        : getWhenWindows(t.when, dayWindows[d.key]);
-      if (wins.length === 0) wins = [[DAY_START, WALK_END]];
-
-      // Determine dependency constraints on this day
-      var afterMin = 0;
-      var beforeMin = 1440;
-      getTaskDeps(t).forEach(function(depId) {
-        if (isBackwardsDep(t.id, depId)) return;
-        var info = globalPlacedEnd[depId];
-        if (info && info.dateKey === d.key && info.endMin > afterMin) {
-          afterMin = info.endMin;
-        }
-      });
-      var children = dependedOnBy[t.id] || [];
-      for (var cci = 0; cci < children.length; cci++) {
-        if (isBackwardsDep(children[cci], t.id)) continue;
-        // Check immovable placements for children
-        for (var ipi = 0; ipi < immovable.length; ipi++) {
-          if (immovable[ipi].task && immovable[ipi].task.id === children[cci]) {
-            if (immovable[ipi].start < beforeMin) beforeMin = immovable[ipi].start;
-          }
-        }
-        // Check already-packed movable assignments for children
-        for (var api = 0; api < assignments.length; api++) {
-          if (assignments[api].placement.task.id === children[cci]) {
-            if (assignments[api].newStart < beforeMin) beforeMin = assignments[api].newStart;
-          }
-        }
-      }
-
-      // Scan for earliest valid slot within when-windows
-      var bestStart = -1;
-      for (var wi = 0; wi < wins.length && bestStart < 0; wi++) {
-        var wStart = Math.max(wins[wi][0], afterMin);
-        var wEnd = Math.min(wins[wi][1], beforeMin);
-        if (wEnd - wStart < dur) continue;
-
-        for (var scan = wStart; scan + dur <= wEnd; scan++) {
-          if (occ[scan]) { scan = scan; continue; } // occupied minute
-          // Check contiguous gap
-          var gapOk = true;
-          for (var gm = scan; gm < scan + dur; gm++) {
-            if (occ[gm]) { scan = gm; gapOk = false; break; }
-          }
-          if (!gapOk) continue;
-          // Check location for full duration
-          var locOk = true;
-          for (var lm = scan; lm < scan + dur; lm += 15) {
-            var locId = resolveLocationId(d.key, lm, cfg, dayBlocks[d.key]);
-            if (!canTaskRun(t, locId, cfg.toolMatrix)) { locOk = false; break; }
-          }
-          if (!locOk) continue;
-          bestStart = scan;
-          break;
-        }
-      }
-
-      if (bestStart < 0) {
-        // Can't fit — rollback entire day
-        allPlaced = false;
-        break;
-      }
-
-      // Reserve the slot
-      for (var rm = bestStart; rm < bestStart + dur; rm++) occ[rm] = true;
-      assignments.push({ placement: p2, newStart: bestStart });
-    }
-
-    if (!allPlaced) {
-      // Rollback: restore all original positions
-      // First free any partially packed slots
-      assignments.forEach(function(a) {
-        for (var fm = a.newStart; fm < a.newStart + a.placement.dur; fm++) delete occ[fm];
-      });
-      saved.forEach(function(s) {
-        for (var rm2 = s.oldStart; rm2 < s.oldStart + s.placement.dur; rm2++) occ[rm2] = true;
-      });
-      return;
-    }
-
-    // Step 4: Apply — update placement start times and metadata
-    assignments.forEach(function(a) {
-      var pr = a.placement;
-      if (pr.start === a.newStart) return; // no change
-
-      pr.start = a.newStart;
-
-      var hh = Math.floor(a.newStart / 60), mm2 = a.newStart % 60;
-      var ampm = hh >= 12 ? 'PM' : 'AM';
-      var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
-      var packTz = (pr.task.tz && (pr.locked || hasWhen(pr.task.when, 'fixed'))) ? pr.task.tz : (cfg.timezone || null);
-      taskUpdates[pr.task.id] = { date: d.key, time: dh + ':' + (mm2 < 10 ? '0' : '') + mm2 + ' ' + ampm, tz: packTz };
-      globalPlacedEnd[pr.task.id] = { dateKey: d.key, endMin: a.newStart + pr.dur, startMin: a.newStart };
-
-      for (var pi = 0; pi < pool.length; pi++) {
-        if (pool[pi].task.id !== pr.task.id) continue;
-        for (var ppi = 0; ppi < pool[pi]._parts.length; ppi++) {
-          if (pool[pi]._parts[ppi] === pr) {
-            pool[pi]._parts[ppi].start = a.newStart;
-          }
-        }
-        break;
-      }
-    });
-
-  });
-
   // POST-PROCESSING: Overlap columns + unique keys
   dates.forEach(function(d) {
     var placed = dayPlaced[d.key];
@@ -2183,19 +2194,12 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   var score = scoreSchedule(dayPlacements, unplaced, allTasks, scoreOpts);
   var greedyScore = score.total;
 
-  captureSnapshot('Phase 4: Recurring rescue + packing');
+  captureSnapshot('Phase 4: Recurring rescue');
 
-  // Phase 5: Hill-climbing optimization
-  var hcResult = hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTasks, cfg, scoreOpts);
   var totalMs = Math.round(Date.now() - PERF);
 
-  // Re-score after hill-climbing if it improved
-  if (hcResult.improved) {
-    score = scoreSchedule(dayPlacements, unplaced, allTasks, scoreOpts);
-  }
-
   // Rebuild taskUpdates from final placements so they reflect the actual
-  // positions after all phases (compaction, pull-forward, hill-climb).
+  // positions after all phases.
   // For each placed task, use the earliest placement's date and start time.
   taskUpdates = {};
   Object.keys(dayPlacements).forEach(function(dk) {
@@ -2227,7 +2231,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     if (hasWhen(ft.when, 'fixed') && taskUpdates[ft.id]) delete taskUpdates[ft.id];
   });
 
-  // Re-annotate move reasons from final placements (hill-climb may have moved tasks)
+  // Re-annotate move reasons from final placements
   var taskByIdMap = {};
   allTasks.forEach(function(at) { taskByIdMap[at.id] = at; });
   Object.keys(dayPlacements).forEach(function(dk) {
@@ -2367,8 +2371,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   if (schedulerWarnings.length > 0) {
     console.log("[SCHED] " + schedulerWarnings.length + " warning(s): " + schedulerWarnings.map(function(w) { return w.type + '(' + (w.taskId || w.taskA) + ')'; }).join(', '));
   }
-  console.log("[SCHED] unified: " + dates.length + " days, " + pool.length + " pool, " + placedCount + " placed, " + unplaced.length + " unplaced | " + greedyMs + "ms greedy (score=" + Math.round(greedyScore) + ") + " + hcResult.elapsed + "ms hill-climb (" + hcResult.iterations + " iters" + (hcResult.improved ? ", " + Math.round(hcResult.scoreBefore) + "->" + Math.round(hcResult.scoreAfter) : ", no change") + ") = " + totalMs + "ms | final=" + score.total);
-  captureSnapshot('Final: After hill-climb');
+  console.log("[SCHED] unified: " + dates.length + " days, " + pool.length + " pool, " + placedCount + " placed, " + unplaced.length + " unplaced | " + totalMs + "ms (score=" + Math.round(score.total) + ")");
+  captureSnapshot('Final');
 
   // Compute spacing stats for tpc recurringTasks
   var spacingStats = [];
