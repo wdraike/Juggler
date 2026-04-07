@@ -1550,7 +1550,12 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var depAfter = 0;
       for (var cdi = 0; cdi < crossChainDeps.length; cdi++) {
         var cdInfo = globalPlacedEnd[crossChainDeps[cdi]];
-        if (!cdInfo) { crossOk = false; break; }
+        if (!cdInfo) {
+          // Only block if dep is active (in pool) but not yet placed.
+          // Done/cancelled/paused deps are not in the pool — treat as met.
+          if (poolIds[crossChainDeps[cdi]]) { crossOk = false; break; }
+          continue;
+        }
         if (cdInfo.dateKey > d.key) { crossOk = false; break; }
         if (cdInfo.dateKey === d.key && cdInfo.endMin > depAfter) depAfter = cdInfo.endMin;
       }
