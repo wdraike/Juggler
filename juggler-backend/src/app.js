@@ -98,6 +98,35 @@ app.get('/api/auth/me', authenticateJWT, async (req, res) => {
   });
 });
 
+// SSE endpoint — real-time event stream for connected frontends
+// EventSource doesn't support custom headers, so accept token as query param
+const sseEmitter = require('./lib/sse-emitter');
+app.get('/api/events', (req, res, next) => {
+  // Accept token from query param (EventSource limitation) or Authorization header
+  if (req.query.token && !req.headers.authorization) {
+    req.headers.authorization = 'Bearer ' + req.query.token;
+  }
+  next();
+}, authenticateJWT, (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no' // disable nginx/Cloud Run buffering
+  });
+  // Send initial heartbeat so client knows connection is alive
+  res.write('event: connected\ndata: {}\n\n');
+
+  sseEmitter.addClient(req.user.id, res);
+
+  // Heartbeat every 30s to keep connection alive through proxies
+  const heartbeat = setInterval(() => {
+    try { res.write(':\n\n'); } catch (e) { clearInterval(heartbeat); }
+  }, 30000);
+
+  req.on('close', () => clearInterval(heartbeat));
+});
+
 // Routes
 app.use('/health', healthRoutes);
 app.use('/api/ai', aiLimiter, aiRoutes);

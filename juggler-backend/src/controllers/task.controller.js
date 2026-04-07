@@ -15,7 +15,13 @@ const db = require('../db');
 const { v7: uuidv7 } = require('uuid');
 const { localToUtc, utcToLocal, toDateISO, fromDateISO, getDayName, safeTimezone } = require('../scheduler/dateHelpers');
 const cache = require('../lib/redis');
-const { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
+const { enqueueScheduleRun: _enqueueScheduleRun } = require('../scheduler/scheduleQueue');
+const sseEmitter = require('../lib/sse-emitter');
+// Wrap enqueueScheduleRun to also emit SSE event so frontends refresh immediately
+function enqueueScheduleRun(userId, source) {
+  sseEmitter.emit(userId, 'tasks:changed', { source: source, timestamp: Date.now() });
+  _enqueueScheduleRun(userId, source);
+}
 
 /** Safely parse a JSON string, returning fallback on any error. */
 function safeParseJSON(val, fallback) {

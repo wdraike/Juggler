@@ -10,7 +10,8 @@
 
 import { useReducer, useCallback, useRef, useEffect, useState } from 'react';
 import taskReducer, { TASK_STATE_INIT } from '../state/taskReducer';
-import apiClient, { TZ_OVERRIDE_KEY } from '../services/apiClient';
+import apiClient, { TZ_OVERRIDE_KEY, getAccessToken } from '../services/apiClient';
+import { apiBase } from '../proxy-config';
 import { getBrowserTimezone, hydrateTaskTimezones, convertTimeForDisplay } from '../utils/timezone';
 import { parseTimeToMinutes } from '../scheduler/dateHelpers';
 
@@ -308,36 +309,76 @@ export default function useTaskState() {
     }
   }, [loadPlacements]);
 
-  // Poll for external changes (MCP, GCal, another tab)
+  // Real-time updates via SSE, with polling fallback
   useEffect(() => {
-    var intervalId = setInterval(async () => {
+    var sseActive = false;
+    var fallbackIntervalId = null;
+    var eventSource = null;
+    var reconnectTimer = null;
+
+    // Shared refresh logic — reload tasks + placements
+    async function refreshFromServer() {
       try {
         var res = await apiClient.get('/tasks/version');
         var serverVersion = res.data.version;
         if (lastVersionRef.current !== null && serverVersion !== lastVersionRef.current) {
           lastVersionRef.current = serverVersion;
-          // External change detected — reload tasks (INIT preserves dirty local fields)
-          var [tasksRes] = await Promise.all([
-            apiClient.get('/tasks')
-          ]);
+          var [tasksRes] = await Promise.all([apiClient.get('/tasks')]);
           var tasks = tasksRes.data.tasks || [];
           hydrateTaskTimezones(tasks, getHydrationTimezone());
           var statuses = {};
-          tasks.forEach(function(t) {
-            if (t.status) statuses[t.id] = t.status;
-          });
+          tasks.forEach(function(t) { if (t.status) statuses[t.id] = t.status; });
           dispatch({ type: 'INIT', tasks, statuses });
         }
         lastVersionRef.current = serverVersion;
-        // Always refresh placements — catches scheduler cache updates
-        // that don't change the task version
         loadPlacements();
-      } catch (e) {
-        // Silently ignore — network errors, etc.
-      }
-    }, 5000);
+      } catch (e) { /* silently ignore */ }
+    }
 
-    return function() { clearInterval(intervalId); };
+    // Start SSE connection
+    function connectSSE() {
+      var token = getAccessToken();
+      if (!token) { startPolling(); return; }
+
+      var url = apiBase + '/events?token=' + encodeURIComponent(token);
+      eventSource = new EventSource(url);
+
+      eventSource.addEventListener('connected', function() {
+        sseActive = true;
+        // Stop polling fallback if active
+        if (fallbackIntervalId) { clearInterval(fallbackIntervalId); fallbackIntervalId = null; }
+      });
+
+      eventSource.addEventListener('tasks:changed', function() {
+        refreshFromServer();
+      });
+
+      eventSource.addEventListener('schedule:changed', function() {
+        loadPlacements();
+      });
+
+      eventSource.onerror = function() {
+        sseActive = false;
+        if (eventSource) { eventSource.close(); eventSource = null; }
+        // Reconnect after 5s, fall back to polling in the meantime
+        startPolling();
+        reconnectTimer = setTimeout(connectSSE, 5000);
+      };
+    }
+
+    // Polling fallback (used when SSE is unavailable)
+    function startPolling() {
+      if (fallbackIntervalId) return;
+      fallbackIntervalId = setInterval(refreshFromServer, 5000);
+    }
+
+    connectSSE();
+
+    return function() {
+      if (eventSource) eventSource.close();
+      if (fallbackIntervalId) clearInterval(fallbackIntervalId);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+    };
   }, [loadPlacements]);
 
   // Cleanup

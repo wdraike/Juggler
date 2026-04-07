@@ -21,6 +21,11 @@ function getWithLock() {
   if (!_withLock) _withLock = require('../lib/sync-lock').withLock;
   return _withLock;
 }
+var _sseEmitter;
+function getSseEmitter() {
+  if (!_sseEmitter) _sseEmitter = require('../lib/sse-emitter');
+  return _sseEmitter;
+}
 
 // In-memory event queue per user
 var queue = {};    // { userId: [{ timestamp, source }] }
@@ -65,6 +70,9 @@ async function processScheduleQueue(userId) {
       }
       if (result === null) {
         console.warn('[SCHED-QUEUE] could not acquire lock for ' + userId + ' after ' + MAX_LOCK_RETRIES + ' attempts');
+      } else {
+        // Notify connected frontends that schedule has changed
+        getSseEmitter().emit(userId, 'schedule:changed', { timestamp: Date.now() });
       }
       // Loop back to check if new entries arrived during the run
     }
