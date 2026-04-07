@@ -1425,12 +1425,12 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
 
   captureSnapshot('Phase 1: Recurring tasks');
 
-  // ── PHASE 1.5: Recurring spacing enforcement ──
-  // Verify placed recurring instances maintain minimum spacing based on their
-  // recurrence type (weekly ~7d, biweekly ~14d, daily ~1d). If two instances
-  // of the same source are too close, unplace the later one.
+  // ── PHASE 1.5: Recurring spacing enforcement (average-based) ──
+  // Verify placed recurring instances maintain proper average spacing.
+  // Target spacing: cycleDays / occurrencesPerCycle.
+  // If average interval drops below 60% of target, iteratively unplace
+  // the instance with the smallest gap to its neighbor.
   (function enforceRecurringSpacing() {
-    // Group placed recurring instances by sourceId
     var bySource = {};
     pool.forEach(function(item) {
       if (!item.task.recurring || !item.task.sourceId || item._parts.length === 0) return;
@@ -1443,15 +1443,22 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var instances = bySource[sid];
       if (instances.length < 2) return;
 
-      // Determine expected spacing from the template's recurrence type
       var src = allTasks.find(function(at) { return at.id === sid; });
       if (!src || !src.recur) return;
       var recType = src.recur.type || 'daily';
-      var minDays;
-      if (recType === 'weekly') minDays = 5; // allow some flexibility (5 of 7)
-      else if (recType === 'biweekly') minDays = 10; // allow some flexibility (10 of 14)
-      else if (recType === 'monthly') minDays = 20;
-      else return; // daily, interval — no minimum spacing needed
+      if (recType === 'daily') return; // daily tasks don't need spacing enforcement
+
+      // Compute target spacing
+      var cycleDays;
+      if (recType === 'weekly') cycleDays = 7;
+      else if (recType === 'biweekly') cycleDays = 14;
+      else if (recType === 'monthly') cycleDays = 30;
+      else return;
+
+      var tpc = (src.recur.timesPerCycle && src.recur.timesPerCycle > 0)
+        ? src.recur.timesPerCycle : 1;
+      var targetDays = cycleDays / tpc;
+      var minAvg = targetDays * 0.6; // allow 40% compression before enforcing
 
       // Sort by placed date
       instances.sort(function(a, b) {
@@ -1461,21 +1468,49 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         return aDate - bDate;
       });
 
-      // Check spacing between consecutive instances
-      for (var si = 1; si < instances.length; si++) {
-        var prevParts = instances[si - 1]._parts;
-        var currParts = instances[si]._parts;
-        if (prevParts.length === 0 || currParts.length === 0) continue;
-        var prevDate = parseDate(prevParts[0]._dateKey);
-        var currDate = parseDate(currParts[0]._dateKey);
-        if (!prevDate || !currDate) continue;
-        var daysBetween = Math.round((currDate - prevDate) / 86400000);
-        if (daysBetween < minDays) {
-          // Too close — unplace the later instance
-          unplaceItem(instances[si]);
-          instances[si].task._unplacedReason = 'spacing';
-          instances[si].task._unplacedDetail = 'Too close to previous instance (' + daysBetween + ' days, need ' + minDays + '+)';
+      // Compute intervals and average
+      function computeAvg(items) {
+        if (items.length < 2) return Infinity;
+        var total = 0;
+        var count = 0;
+        for (var i = 1; i < items.length; i++) {
+          if (items[i]._parts.length === 0 || items[i - 1]._parts.length === 0) continue;
+          var d1 = parseDate(items[i - 1]._parts[0]._dateKey);
+          var d2 = parseDate(items[i]._parts[0]._dateKey);
+          if (!d1 || !d2) continue;
+          total += Math.round((d2 - d1) / 86400000);
+          count++;
         }
+        return count > 0 ? total / count : Infinity;
+      }
+
+      // Iteratively unplace the instance with the smallest gap until average is acceptable
+      var maxIter = instances.length;
+      for (var iter = 0; iter < maxIter; iter++) {
+        var placed = instances.filter(function(item) { return item._parts.length > 0; });
+        if (placed.length < 2) break;
+        var avg = computeAvg(placed);
+        if (avg >= minAvg) break; // average is acceptable
+
+        // Find the pair with the smallest gap
+        var smallestGap = Infinity;
+        var removeIdx = -1;
+        for (var si = 1; si < placed.length; si++) {
+          var d1 = parseDate(placed[si - 1]._parts[0]._dateKey);
+          var d2 = parseDate(placed[si]._parts[0]._dateKey);
+          if (!d1 || !d2) continue;
+          var gap = Math.round((d2 - d1) / 86400000);
+          if (gap < smallestGap) {
+            smallestGap = gap;
+            removeIdx = si; // unplace the later instance of the tightest pair
+          }
+        }
+        if (removeIdx < 0) break;
+
+        unplaceItem(placed[removeIdx]);
+        placed[removeIdx].task._unplacedReason = 'spacing';
+        placed[removeIdx].task._unplacedDetail = 'Average spacing (' + Math.round(avg * 10) / 10 +
+          'd) below target (' + Math.round(targetDays * 10) / 10 + 'd) — removed to improve distribution';
       }
     });
   })();
