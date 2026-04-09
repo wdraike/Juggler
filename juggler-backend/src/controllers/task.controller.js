@@ -78,7 +78,7 @@ function parseISOToDate(iso) {
 var TEMPLATE_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
   'when', 'day_req', 'recurring', 'rigid', 'time_flex', 'split', 'split_min',
   'travel_before', 'travel_after', 'depends_on',
-  'notes', 'marker', 'flex_when', 'recur_start', 'recur_end',
+  'notes', 'marker', 'flex_when', 'recur', 'recur_start', 'recur_end',
   'preferred_time', 'preferred_time_mins'];
 
 /**
@@ -239,7 +239,14 @@ function rowToTask(row, timezone, sourceMap) {
     recurStart: row.recur_start || null,
     recurEnd: row.recur_end || null,
     disabledAt: row.disabled_at ? scheduledAtToISO(row.disabled_at) : null,
-    disabledReason: row.disabled_reason || null
+    disabledReason: row.disabled_reason || null,
+    // Anchor date (date-only, YYYY-MM-DD): for instances, from the template; for templates, from self
+    anchorDate: (function() {
+      var sa = src ? src.scheduled_at : row.scheduled_at;
+      if (!sa) return null;
+      var iso = scheduledAtToISO(sa);
+      return iso ? iso.slice(0, 10) : null;
+    })()
   };
 }
 
@@ -398,6 +405,23 @@ async function getAllTasks(req, res) {
 }
 
 /**
+ * GET /api/tasks/:id — single task detail with full data (anchorDate, recur, notes, etc.)
+ */
+async function getTask(req, res) {
+  try {
+    var id = req.params.id;
+    var rows = await db('tasks').where('user_id', req.user.id).select();
+    var srcMap = buildSourceMap(rows);
+    var row = rows.find(function(r) { return r.id === id; });
+    if (!row) return res.status(404).json({ error: 'Task not found' });
+    res.json({ task: rowToTask(row, null, srcMap) });
+  } catch (error) {
+    console.error('Get task error:', error);
+    res.status(500).json({ error: 'Failed to fetch task' });
+  }
+}
+
+/**
  * GET /api/tasks/version — lightweight change-detection endpoint
  */
 async function getVersion(req, res) {
@@ -543,7 +567,10 @@ async function updateTask(req, res) {
     }
 
     var tz = safeTimezone(req.headers['x-timezone']);
-    var row = taskToRow(req.body, req.user.id, tz);
+    var anchorDateVal = req.body.anchorDate;
+    var bodyWithoutAnchor = Object.assign({}, req.body);
+    delete bodyWithoutAnchor.anchorDate;
+    var row = taskToRow(bodyWithoutAnchor, req.user.id, tz);
     delete row.id;
     delete row.user_id;
     delete row.created_at;
@@ -612,12 +639,30 @@ async function updateTask(req, res) {
           }
         });
 
+        // Route explicit anchor date to template's scheduled_at
+        if (anchorDateVal) {
+          templateUpdate.scheduled_at = localToUtc(anchorDateVal, null, tz) || null;
+          templateUpdate.desired_at = templateUpdate.scheduled_at;
+        }
+
         // Update the source template with template fields
         if (Object.keys(templateUpdate).length > 0) {
           templateUpdate.updated_at = db.fn.now();
           await trx('tasks')
             .where({ id: existing.source_id, user_id: req.user.id })
             .update(templateUpdate);
+        }
+
+        // If recurrence changed via instance edit, clean up pending instances on the template.
+        // Always do a full reset since we can't reliably compare old vs new recur here.
+        if (templateUpdate.recur !== undefined) {
+          var resetCount2 = await trx('tasks')
+            .where({ source_id: existing.source_id, user_id: req.user.id, task_type: 'recurring_instance' })
+            .where('status', '')
+            .del();
+          if (resetCount2 > 0) {
+            console.log('[RECUR] cycle reset via instance edit: deleted ' + resetCount2 + ' pending instances for template ' + existing.source_id);
+          }
         }
 
         // Update instance-specific fields on this row
@@ -1102,6 +1147,9 @@ async function batchUpdateTasks(req, res) {
             // the date/time values are expressed in (e.g., active timezone from browser)
             var updateTz = fields._timezone || tz;
             delete fields._timezone;
+            // Extract anchorDate before taskToRow — it routes directly to the template's scheduled_at
+            var anchorDateVal = fields.anchorDate;
+            delete fields.anchorDate;
             var row = taskToRow(fields, req.user.id, updateTz);
             delete row.user_id;
             delete row.created_at;
@@ -1161,12 +1209,28 @@ async function batchUpdateTasks(req, res) {
                   instanceUpdate[k] = row[k];
                 }
               });
+              // Route explicit anchor date to template's scheduled_at
+              if (anchorDateVal) {
+                templateUpdate.scheduled_at = localToUtc(anchorDateVal, null, updateTz) || null;
+                templateUpdate.desired_at = templateUpdate.scheduled_at;
+              }
+
               if (Object.keys(templateUpdate).length > 0) {
                 console.log('[BATCH] template update:', JSON.stringify(templateUpdate));
                 templateUpdate.updated_at = db.fn.now();
                 await trx('tasks')
                   .where({ id: existing.source_id, user_id: req.user.id })
                   .update(templateUpdate);
+              }
+              // If recurrence changed, delete all pending instances so they regenerate
+              if (templateUpdate.recur !== undefined) {
+                var resetCount = await trx('tasks')
+                  .where({ source_id: existing.source_id, user_id: req.user.id, task_type: 'recurring_instance' })
+                  .where('status', '')
+                  .del();
+                if (resetCount > 0) {
+                  console.log('[BATCH] cycle reset: deleted ' + resetCount + ' pending instances for template ' + existing.source_id);
+                }
               }
               if (Object.keys(instanceUpdate).length > 0) {
                 instanceUpdate.updated_at = db.fn.now();
@@ -1175,7 +1239,22 @@ async function batchUpdateTasks(req, res) {
                 await trx('tasks').where({ id: id, user_id: req.user.id }).update({ updated_at: db.fn.now() });
               }
             } else {
+              // Route anchor date to scheduled_at for templates
+              if (anchorDateVal && taskType === 'recurring_template') {
+                row.scheduled_at = localToUtc(anchorDateVal, null, updateTz) || null;
+                row.desired_at = row.scheduled_at;
+              }
               await trx('tasks').where({ id: id, user_id: req.user.id }).update(row);
+              // If recurrence changed on a template, delete pending instances
+              if (taskType === 'recurring_template' && row.recur !== undefined) {
+                var tplResetCount = await trx('tasks')
+                  .where({ source_id: id, user_id: req.user.id, task_type: 'recurring_instance' })
+                  .where('status', '')
+                  .del();
+                if (tplResetCount > 0) {
+                  console.log('[BATCH] cycle reset on template: deleted ' + tplResetCount + ' pending instances for ' + id);
+                }
+              }
             }
             updatedCount++;
           }
@@ -1373,6 +1452,7 @@ async function unpinTask(req, res) {
 
 module.exports = {
   getAllTasks,
+  getTask,
   getVersion,
   createTask,
   updateTask,

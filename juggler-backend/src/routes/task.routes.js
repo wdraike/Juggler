@@ -10,6 +10,7 @@ router.use(authenticateJWT, resolvePlanFeatures);
 router.get('/', taskController.getAllTasks);
 router.get('/version', taskController.getVersion);
 router.get('/disabled', taskController.getDisabledTasks);
+router.get('/:id', taskController.getTask);
 router.post('/', checkTaskOrRecurringLimit, taskController.createTask);
 router.post('/batch', checkBatchTaskLimits, taskController.batchCreateTasks);
 router.put('/batch', taskController.batchUpdateTasks);

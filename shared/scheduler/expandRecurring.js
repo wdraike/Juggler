@@ -27,6 +27,9 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
   var existingByDateText = {};
   var existingBySourceDate = {};
   allTasks.forEach(function(t) {
+    // Skip recurring templates — they're sources, not placed tasks.
+    // Their date is the anchor, not an instance that should block generation.
+    if (t.taskType === 'recurring_template') return;
     if (t.date && t.text) existingByDateText[t.date + '|' + t.text] = true;
     if (t.sourceId && t.date) existingBySourceDate[t.sourceId + '|' + t.date] = true;
   });
@@ -51,18 +54,34 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
   // Key: sourceId → { 'M/D': true }
   var tpcPickedDates = {};
 
+  // Helper: compute the number of candidate slots per cycle for a recurrence config
+  function getSelectedDayCount(r) {
+    if (r.type === 'weekly' || r.type === 'biweekly') {
+      var days = r.days || 'MTWRF';
+      return typeof days === 'object' && !Array.isArray(days)
+        ? Object.keys(days).length
+        : (typeof days === 'string' ? days.length : 0);
+    }
+    if (r.type === 'daily') return 7;
+    if (r.type === 'monthly') {
+      var md = r.monthDays || [1, 15];
+      return md.length;
+    }
+    return 0;
+  }
+
   sources.forEach(function(src) {
     var r = src.recur;
     var tpc = r.timesPerCycle || 0;
     if (tpc <= 0) return;
-    if (r.type !== 'weekly' && r.type !== 'biweekly') return;
-    var days = r.days || 'MTWRF';
-    var selectedDayCount = typeof days === 'object' && !Array.isArray(days)
-      ? Object.keys(days).length
-      : (typeof days === 'string' ? days.length : 0);
+    if (r.type !== 'weekly' && r.type !== 'biweekly' && r.type !== 'daily' && r.type !== 'monthly') return;
+    var selectedDayCount = getSelectedDayCount(r);
     if (tpc >= selectedDayCount) return; // no filtering needed
 
-    var cycleDays = r.type === 'biweekly' ? 14 : 7;
+    var cycleDays;
+    if (r.type === 'biweekly') cycleDays = 14;
+    else if (r.type === 'monthly') cycleDays = 30;
+    else cycleDays = 7; // daily and weekly
     var targetInterval = cycleDays / tpc;
     var srcDate = parseDate(src.date);
     if (!srcDate) srcDate = new Date(startDate);
@@ -74,17 +93,34 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
     while (c <= e2) {
       if (c >= srcDate) {
         var cStr = formatDateKey(c);
-        if (cStr !== src.date) {
+        {
           var cDow = c.getDay();
-          if (doesDayMatch(cDow, days, dayMap).match) {
-            if (r.type === 'biweekly') {
-              var dd = Math.round((c.getTime() - srcDate.getTime()) / 86400000);
-              if (Math.floor(dd / 7) % 2 === 0) {
-                candidates.push({ date: new Date(c), key: cStr });
+          var isCandidate = false;
+          if (r.type === 'daily') {
+            isCandidate = true;
+          } else if (r.type === 'weekly' || r.type === 'biweekly') {
+            var days = r.days || 'MTWRF';
+            if (doesDayMatch(cDow, days, dayMap).match) {
+              if (r.type === 'biweekly') {
+                var dd = Math.round((c.getTime() - srcDate.getTime()) / 86400000);
+                isCandidate = Math.floor(dd / 7) % 2 === 0;
+              } else {
+                isCandidate = true;
               }
-            } else {
-              candidates.push({ date: new Date(c), key: cStr });
             }
+          } else if (r.type === 'monthly') {
+            var md = r.monthDays || [1, 15];
+            var dom = c.getDate();
+            var lastDom = new Date(c.getFullYear(), c.getMonth() + 1, 0).getDate();
+            for (var mi = 0; mi < md.length; mi++) {
+              var v = md[mi];
+              if ((v === 'first' && dom === 1) || (v === 'last' && dom === lastDom) || Number(v) === dom) {
+                isCandidate = true; break;
+              }
+            }
+          }
+          if (isCandidate) {
+            candidates.push({ date: new Date(c), key: cStr });
           }
         }
       }
@@ -117,19 +153,25 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
 
       // Skip candidates that already exist in DB
       var available = cycleCandidates.filter(function(cd) {
-        var id = 'rc_' + src.id + '_' + cd.key.replace(/\//g, '');
-        return !existingIds[id];
+        return !existingBySourceDate[src.id + '|' + cd.key];
       });
       // Count existing instances in this cycle
       var existingInCycle = cycleCandidates.length - available.length;
       var slotsNeeded = Math.max(0, tpc - existingInCycle);
       if (slotsNeeded === 0 || available.length === 0) continue;
 
-      // Greedy pick: choose the candidate closest to lastPlaced + targetInterval
-      var ref = lastPlaced || srcDate;
+      // Greedy pick: choose the candidate closest to lastPlaced + targetInterval.
+      // For the very first pick (no lastPlaced), target the cycle start itself
+      // so the first instance lands on/near the anchor date, not a week later.
+      var ref = lastPlaced || null;
       for (var pi = 0; pi < slotsNeeded && available.length > 0; pi++) {
-        var idealDate = new Date(ref);
-        idealDate.setDate(idealDate.getDate() + Math.round(targetInterval));
+        var idealDate;
+        if (ref) {
+          idealDate = new Date(ref);
+          idealDate.setDate(idealDate.getDate() + Math.round(targetInterval));
+        } else {
+          idealDate = new Date(cycleStart);
+        }
 
         // Find candidate closest to ideal date
         var bestIdx = 0;
@@ -160,7 +202,6 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
       var srcDate = parseDate(src.date);
       if (!srcDate) srcDate = new Date(startDate);
       if (cursor < srcDate) return;
-      if (dateStr === src.date) return;
       // Respect recurring date range — don't generate outside start/end bounds
       if (src.recurStart) {
         var hs = parseDate(src.recurStart);
@@ -219,9 +260,7 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
 
       // timesPerCycle: pre-computed optimal dates are in tpcPickedDates.
       // If this source has tpc filtering, only generate on picked dates.
-      var selectedDayCount = typeof days === 'object' && !Array.isArray(days)
-        ? Object.keys(days).length
-        : (typeof days === 'string' ? days.length : 0);
+      var selectedDayCount = getSelectedDayCount(r);
       var tpc = r.timesPerCycle || 0;
       if (tpc > 0 && tpc < selectedDayCount) {
         if (!tpcPickedDates[src.id] || !tpcPickedDates[src.id][dateStr]) return;
@@ -250,10 +289,10 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         var hasDupe = allTasks.some(function(et) { return et.date === dateStr && et.text === src.text && et.id !== src.id; });
         if (hasDupe) return;
       }
-      // Generate UUIDv7 ID (or fallback for environments without crypto)
-      var id = typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : 'g_' + Math.random().toString(36).slice(2, 10) + '_' + Date.now().toString(36);
+      // Deterministic ID: sourceUUID-YYYYMMDD
+      var id = src.id + '-' + cursor.getFullYear()
+        + (cursor.getMonth() < 9 ? '0' : '') + (cursor.getMonth() + 1)
+        + (cursor.getDate() < 10 ? '0' : '') + cursor.getDate();
       existingBySourceDate[sourceDate] = true;
       existingByDateText[dateStr + '|' + src.text] = true;
       // When timesPerCycle < selected days, set dayReq to all selected day codes
@@ -262,12 +301,14 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
       if (tpc > 0 && tpc < selectedDayCount) {
         var dayReqParts = [];
         var codeMap = { M: 'M', T: 'T', W: 'W', R: 'R', F: 'F', S: 'Sa', U: 'Su' };
-        if (typeof days === 'string') {
-          for (var dri = 0; dri < days.length; dri++) {
-            if (codeMap[days[dri]]) dayReqParts.push(codeMap[days[dri]]);
+        var rDays = r.days || 'MTWRF';
+        if (r.type === 'daily') rDays = 'MTWRFSU';
+        if (typeof rDays === 'string') {
+          for (var dri = 0; dri < rDays.length; dri++) {
+            if (codeMap[rDays[dri]]) dayReqParts.push(codeMap[rDays[dri]]);
           }
-        } else if (typeof days === 'object') {
-          Object.keys(days).forEach(function(k) { if (codeMap[k]) dayReqParts.push(codeMap[k]); });
+        } else if (typeof rDays === 'object') {
+          Object.keys(rDays).forEach(function(k) { if (codeMap[k]) dayReqParts.push(codeMap[k]); });
         }
         if (dayReqParts.length > 0) instanceDayReq = dayReqParts.join(',');
       }

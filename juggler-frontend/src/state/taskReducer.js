@@ -114,6 +114,37 @@ export default function taskReducer(state, action) {
         _dirtyStatuses: state._dirtyStatuses,
         _dirtyTaskIds: state._dirtyTaskIds
       };
+    case 'REMOVE_TASKS': {
+      // Remove multiple tasks by ID (e.g., scheduler deleted recurring instances)
+      var removeSet = {};
+      action.ids.forEach(function(id) { removeSet[id] = true; });
+      return {
+        statuses: state.statuses,
+        tasks: state.tasks.filter(function(t) { return !removeSet[t.id]; }),
+        _dirtyStatuses: state._dirtyStatuses,
+        _dirtyTaskIds: state._dirtyTaskIds
+      };
+    }
+    case 'UPSERT_TASKS': {
+      // Insert or update tasks with complete API data
+      var upsertMap = {};
+      action.tasks.forEach(function(t) { upsertMap[t.id] = t; });
+      var updated6 = state.tasks.map(function(t) {
+        return upsertMap[t.id] ? upsertMap[t.id] : t;
+      });
+      // Add any genuinely new tasks not already in state
+      action.tasks.forEach(function(t) {
+        if (!state.tasks.some(function(st) { return st.id === t.id; })) {
+          updated6.push(t);
+        }
+      });
+      return {
+        statuses: state.statuses,
+        tasks: updated6,
+        _dirtyStatuses: state._dirtyStatuses,
+        _dirtyTaskIds: state._dirtyTaskIds
+      };
+    }
     case 'DELETE_TASK': {
       // Mark tasks whose dependsOn changed as dirty
       var dt4 = Object.assign({}, state._dirtyTaskIds || {});

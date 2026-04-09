@@ -285,6 +285,9 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [marker, setMarker] = useState(isCreate ? false : !!task.marker);
   var [flexWhen, setFlexWhen] = useState(isCreate ? false : !!task.flexWhen);
   var [datePinned, setDatePinned] = useState(isCreate ? false : !!task.datePinned);
+  // For recurring instances: the template's anchor date (separate from this instance's date)
+  // anchorDate from API is YYYY-MM-DD (date-only)
+  var [anchorDate, setAnchorDate] = useState(isCreate ? '' : (task.anchorDate || ''));
   var [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   var [recurType, setRecurType] = useState(isCreate ? 'none' : (task.recur?.type || 'none'));
   var [recurDays, setRecurDays] = useState(isCreate ? 'MTWRF' : (function() {
@@ -444,6 +447,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       marker: !!t.marker,
       flexWhen: !!t.flexWhen,
       datePinned: !!t.datePinned,
+      anchorDate: t.anchorDate || '',
       recurType: t.recur?.type || 'none', recurDays: t.recur?.days || 'MTWRF', recurTimesPerCycle: t.recur?.timesPerCycle || 0,
       recurEvery: t.recur?.every || 2, recurUnit: t.recur?.unit || 'days',
       recurMonthDays: t.recur?.monthDays || [1, 15],
@@ -491,6 +495,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setMarker(newSnap.marker);
     setFlexWhen(newSnap.flexWhen);
     setDatePinned(newSnap.datePinned);
+    setAnchorDate(newSnap.anchorDate);
     setRecurType(newSnap.recurType); setRecurDays(newSnap.recurDays); setRecurTimesPerCycle(newSnap.recurTimesPerCycle || 0);
     setRecurEvery(newSnap.recurEvery); setRecurUnit(newSnap.recurUnit);
     setRecurMonthDays(newSnap.recurMonthDays);
@@ -593,6 +598,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (recurType !== snap.recurType || JSON.stringify(recurDays) !== JSON.stringify(snap.recurDays) || recurTimesPerCycle !== snap.recurTimesPerCycle || String(recurEvery) !== String(snap.recurEvery) || recurUnit !== snap.recurUnit || JSON.stringify(recurMonthDays) !== JSON.stringify(snap.recurMonthDays)) {
       changed.recur = all.recur;
     }
+    // Anchor date (template's anchor, separate from instance date)
+    if (anchorDate !== (snap.anchorDate || '')) changed.anchorDate = fromDateISO(anchorDate);
     // Recurring date range
     if (recurStart !== (snap.recurStart || '')) changed.recurStart = all.recurStart;
     if (recurEnd !== (snap.recurEnd || '')) changed.recurEnd = all.recurEnd;
@@ -603,7 +610,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       changed._timezone = all._timezone;
     }
     return Object.keys(changed).length > 0 ? changed : null;
-  }, [buildFields, text, project, pri, notes, when, dayReq, recurring, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, due, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime]);
+  }, [buildFields, text, project, pri, notes, when, dayReq, recurring, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, due, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime, anchorDate]);
 
   // Dirty detection — compare current fields to snapshot
   var [isDirty, setIsDirty] = useState(false);
@@ -614,7 +621,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     var changed = buildChangedFields();
     console.log('[DIRTY]', !!changed, changed ? Object.keys(changed) : 'null', 'when=' + when, 'snapWhen=' + (taskSnapshotRef.current ? taskSnapshotRef.current.when : '?'));
     setIsDirty(!!changed);
-  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, hasPreferredTime]);
+  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, hasPreferredTime, anchorDate]);
 
   // Manual save handler
   // Unpin: revert a drag-pinned task to scheduler control.
@@ -677,6 +684,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
 
   function commitSave(changed) {
     console.log('[SAVE] commitSave for', task.id, 'changed keys:', Object.keys(changed), 'when:', changed.when);
+    // Anchor date or recurrence changes regenerate instances (new IDs) — close form after save
+    var willRegenerateInstances = changed.anchorDate !== undefined || changed.recur !== undefined;
     setSaveStatus('saving');
     var result = onUpdate(task.id, changed);
     // Wait for the API call to confirm before showing "Saved"
@@ -684,6 +693,16 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       if (ok === false) {
         setSaveStatus('failed');
         setTimeout(function() { setSaveStatus(null); }, 3000);
+        return;
+      }
+      if (willRegenerateInstances) {
+        // The SSE delta will update the task list when the scheduler finishes.
+        // Keep the form open — suppress external sync while scheduler runs.
+        setSaveStatus('saved');
+        userDirtyRef.current = false;
+        setIsDirty(false);
+        saveCooldownRef.current = true;
+        setTimeout(function() { saveCooldownRef.current = false; }, 10000);
         return;
       }
       // Update snapshot so next save only sends new changes
@@ -1078,7 +1097,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             {!marker && !disSplit && <label style={lStyle}>
               <span>{'\u2702'} Split</span>
               <button title={split ? 'Can be split into chunks' : 'Scheduled as one block'}
-                onClick={() => setSplit(!split)}
+                onClick={() => { var on = !split; setSplit(on); if (on) { setTravelBefore(0); setTravelAfter(0); } }}
                 style={togStyle(split, '#2D6A4F')}>{split ? '\u2702 Yes' : 'No'}</button>
             </label>}
             {split && !disSplit && !marker && (
@@ -1139,27 +1158,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                 ))}
               </select>
             </label>}
-            {!disSplit && <label style={lStyle}>
-              <span>{'\u2702'} Split</span>
-              <button title={split ? 'Can be split into chunks' : 'Scheduled as one block'}
-                onClick={() => setSplit(!split)}
-                style={togStyle(split, '#2D6A4F')}>{split ? '\u2702 Yes' : 'No'}</button>
-            </label>}
-            {split && !disSplit && (
-              <label style={lStyle}>
-                <span>Min</span>
-                <select value={splitMin} onChange={e => setSplitMin(parseInt(e.target.value))}
-                  style={{ ...iStyle, width: 'auto', minWidth: 55 }}>
-                  {[15,20,30,45,60].map(v => (
-                    <option key={v} value={v}>{v < 60 ? v + 'm' : '1h'}</option>
-                  ))}
-                </select>
-              </label>
-            )}
           </div>}
 
-          {/* Travel time buffers — hidden for all-day and markers */}
-          {!marker && !isAllDay && <div style={{ display: 'flex', gap: 6, marginBottom: 5 }}>
+          {/* Travel time buffers — hidden for all-day, markers, and split tasks */}
+          {!marker && !isAllDay && !split && <div style={{ display: 'flex', gap: 6, marginBottom: 5 }}>
             <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
               <span title="Travel buffer before the task — scheduler prevents overlaps">{'\uD83D\uDE97'} Travel before</span>
               <select value={travelBefore} onChange={e => setTravelBefore(parseInt(e.target.value))} style={iStyle}>
@@ -1301,7 +1303,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                 if (val === 'weekly' || val === 'biweekly') setDayReq('any');
                 // Recurrence drives recurring status: recurring = recurring, none = regular task
                 if (val === 'none') { setRecurring(false); setRigid(false); }
-                else { setRecurring(true); setDayReq('any'); }
+                else { setRecurring(true); setSplit(false); setDayReq('any'); }
               }} style={iStyle}>
                 <option value="none">None</option>
                 <option value="daily">Daily</option>
@@ -1410,8 +1412,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               <label style={lStyle}>
                 <span title="The date from which the interval cycle counts. Change this to reset the cycle (e.g., after completing the task).">{'\u2693'} Anchor date</span>
                 <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                  <input type="date" value={date || ''}
-                    onChange={e => { setDate(e.target.value || ''); setDatePinned(true); }}
+                  <input type="date" value={anchorDate || ''}
+                    onChange={e => { setAnchorDate(e.target.value || ''); }}
                     style={iStyle} />
                   <button onClick={function() {
                     // Reset anchor to today
@@ -1419,8 +1421,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                     var y = now.getFullYear();
                     var m = String(now.getMonth() + 1).padStart(2, '0');
                     var d = String(now.getDate()).padStart(2, '0');
-                    setDate(y + '-' + m + '-' + d);
-                    setDatePinned(true);
+                    setAnchorDate(y + '-' + m + '-' + d);
                   }} title="Reset cycle to start from today"
                     style={{ fontSize: 9, padding: '2px 8px', borderRadius: 3,
                       background: TH.inputBg, border: '1px solid ' + TH.border, color: TH.text,

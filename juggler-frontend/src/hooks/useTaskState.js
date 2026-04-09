@@ -63,7 +63,7 @@ var SAVE_FIELDS = [
   'pri', 'project', 'section', 'notes', 'due', 'startAfter',
   'location', 'tools', 'when', 'dayReq', 'recurring', 'rigid',
   'split', 'splitMin', 'travelBefore', 'travelAfter', 'recur', 'dependsOn', 'datePinned',
-  'preferredTime', 'tz', '_timezone'
+  'preferredTime', 'tz', '_timezone', 'anchorDate'
 ];
 
 export default function useTaskState() {
@@ -80,7 +80,7 @@ export default function useTaskState() {
   const lastVersionRef = useRef(null);
   const loadTasksRef = useRef(null);
 
-  // Load placements from backend scheduler (immediate)
+  // Load placements from backend scheduler
   const loadPlacements = useCallback(async () => {
     if (placementTimerRef.current) clearTimeout(placementTimerRef.current);
     try {
@@ -165,6 +165,8 @@ export default function useTaskState() {
       ]);
 
       const tasks = tasksRes.data.tasks || [];
+      var _ex = tasks.find(function(t) { return t.text === 'Exercise' && t.taskType === 'recurring_instance' && t.status === ''; });
+      console.log('[LOAD-RAW] Exercise anchorDate:', _ex ? _ex.anchorDate : 'NOT FOUND', 'total tasks:', tasks.length);
       hydrateTaskTimezones(tasks, getHydrationTimezone());
       const statuses = {};
       tasks.forEach(t => {
@@ -241,14 +243,14 @@ export default function useTaskState() {
       var partial = Object.assign({ id: id }, fields);
       await apiClient.put('/tasks/batch', { updates: [partial] });
       dispatch({ type: 'CLEAR_DIRTY_TASKS', ids: [id], savedFields: { [id]: fields } });
-      // If a scheduling-relevant field changed, wait for the backend's
-      // auto-reschedule (500ms debounce + run time) before refreshing placements
-      var schedFields = ['split', 'flexWhen', 'dur', 'when', 'dayReq', 'date', 'due', 'pri', 'dependsOn', 'location', 'time', 'timeFlex', 'travelBefore', 'travelAfter'];
+      // SSE will notify when scheduler finishes — triggers full reload.
+      // For non-scheduling changes, refresh placements immediately.
+      var schedFields = ['split', 'flexWhen', 'dur', 'when', 'dayReq', 'date', 'due', 'pri', 'dependsOn', 'location', 'time', 'timeFlex', 'travelBefore', 'travelAfter', 'anchorDate', 'recur'];
       var needsResched = schedFields.some(function(f) { return f in fields; });
-      if (needsResched) {
-        setTimeout(function() { loadPlacements().finally(function() { setSaving(false); }); }, 3500);
-      } else {
+      if (!needsResched) {
         loadPlacements().finally(function() { setSaving(false); });
+      } else {
+        setSaving(false);
       }
       return true;
     } catch (error) {
@@ -353,7 +355,37 @@ export default function useTaskState() {
         refreshFromServer();
       });
 
-      eventSource.addEventListener('schedule:changed', function() {
+      eventSource.addEventListener('schedule:changed', function(e) {
+        var data = null;
+        try { data = JSON.parse(e.data); } catch(err) {}
+        var cs = data && data.changeset;
+
+        if (cs) {
+          // Remove deleted tasks from state immediately
+          if (cs.removed && cs.removed.length > 0) {
+            dispatch({ type: 'REMOVE_TASKS', ids: cs.removed });
+          }
+          // Fetch added + changed tasks from API in parallel — always complete data
+          var fetchIds = (cs.added || []).concat(cs.changed || []);
+          if (fetchIds.length > 0) {
+            Promise.all(fetchIds.map(function(id) {
+              return apiClient.get('/tasks/' + id).then(function(res) {
+                return res.data.task;
+              }).catch(function() { return null; });
+            })).then(function(tasks) {
+              var valid = tasks.filter(Boolean);
+              if (valid.length > 0) {
+                hydrateTaskTimezones(valid, getHydrationTimezone());
+                dispatch({ type: 'UPSERT_TASKS', tasks: valid });
+              }
+            });
+          }
+        } else {
+          // Fallback: no changeset — full reload
+          if (loadTasksRef.current) loadTasksRef.current();
+        }
+
+        // Always reload placements (time-slot positions)
         loadPlacements();
       });
 

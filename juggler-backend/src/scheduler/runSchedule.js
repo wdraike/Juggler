@@ -134,19 +134,33 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var cfg = await loadConfig(userId);
   cfg.timezone = TIMEZONE;
 
-  // 5b. Expand recurring recurringTasks into per-day instances and persist them
+  // 5b. Clean-slate recurring expansion with deterministic IDs.
+  // Instance IDs are derived from sourceId + date, so they're stable across runs.
   var today = parseDate(timeInfo.todayKey) || new Date();
   var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + 56);
+
+  // Delete all pending instances — they'll be regenerated with deterministic IDs
+  var deadIds = await trx('tasks')
+    .where({ user_id: userId, task_type: 'recurring_instance' })
+    .where('status', '')
+    .pluck('id');
+  if (deadIds.length > 0) {
+    await trx('tasks').whereIn('id', deadIds).del();
+    console.log('[SCHED] cleared ' + deadIds.length + ' pending recurring instances');
+    taskRows = await trx('tasks').where('user_id', userId).select();
+    srcMap = buildSourceMap(taskRows);
+    allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
+    statuses = {};
+    allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
+  }
+
   var expanded = expandRecurring(allTasks, today, expandEnd, { statuses: statuses });
-  // Cap expansion to prevent runaway instance generation
   var MAX_EXPANDED = 500;
   if (expanded.length > MAX_EXPANDED) {
     console.warn('[SCHED] expansion capped: ' + expanded.length + ' → ' + MAX_EXPANDED);
     expanded = expanded.slice(0, MAX_EXPANDED);
   }
   if (expanded.length > 0) {
-    // Persist generated instances as real recurring_instance rows so they can be
-    // interacted with (status changes, edits, etc.) without 404 errors.
     var insertRows = expanded.map(function(t) {
       var scheduledAt = t.date ? localToUtc(t.date, t.time || null, TIMEZONE) : null;
       return {
@@ -166,14 +180,15 @@ async function runScheduleAndPersist(userId, _retries, options) {
     for (var ci = 0; ci < insertRows.length; ci += chunkSize) {
       await trx('tasks').insert(insertRows.slice(ci, ci + chunkSize));
     }
-    // Re-read all tasks so the newly persisted instances are included with full data
-    taskRows = await trx('tasks').where('user_id', userId).select();
-    srcMap = buildSourceMap(taskRows);
-    allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
-    statuses = {};
-    allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
-    console.log('[SCHED] persisted ' + insertRows.length + ' expanded recurring instances');
+    console.log('[SCHED] regenerated ' + expanded.length + ' recurring instances');
   }
+
+  // Re-read all tasks
+  taskRows = await trx('tasks').where('user_id', userId).select();
+  srcMap = buildSourceMap(taskRows);
+  allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
+  statuses = {};
+  allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
 
   // 6. Run scheduler
   var result = unifiedSchedule(allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg);
@@ -474,11 +489,38 @@ async function runScheduleAndPersist(userId, _retries, options) {
     outPlacements[t.date].push(entry);
   });
 
+  // Compute changeset: which task IDs were added, removed, or moved
+  var deadSet = {};
+  (deadIds || []).forEach(function(id) { deadSet[id] = true; });
+  var bornSet = {};
+  expanded.forEach(function(t) { bornSet[t.id] = true; });
+
+  // Removed: deleted but not regenerated with same ID
+  var removed = (deadIds || []).filter(function(id) { return !bornSet[id]; });
+  // Added: born but didn't exist before
+  var added = expanded.filter(function(t) { return !deadSet[t.id]; }).map(function(t) { return t.id; });
+  // Changed: tasks whose date/time was moved by the scheduler
+  var changed = updatedTasks.map(function(t) { return t.id; });
+
+  // Affected dates: all dates that had tasks added, removed, or moved
+  var affectedDates = {};
+  updatedTasks.forEach(function(t) {
+    if (t.from) affectedDates[t.from] = true;
+    if (t.to) affectedDates[t.to] = true;
+  });
+  Object.keys(outPlacements).forEach(function(dk) { affectedDates[dk] = true; });
+
   return {
     updated: updated, cleared: cleared, tasks: updatedTasks, score: result.score,
     dayPlacements: outPlacements,
     unplaced: result.unplaced.filter(function(t) { return !t.generated; }),
-    warnings: result.warnings || []
+    warnings: result.warnings || [],
+    changeset: {
+      added: added,
+      changed: changed,
+      removed: removed,
+      affectedDates: Object.keys(affectedDates)
+    }
   };
 
   }); // end transaction

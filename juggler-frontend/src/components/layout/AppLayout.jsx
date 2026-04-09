@@ -100,6 +100,8 @@ export default function AppLayout() {
     return 0;
   });
   var [expandedTasks, setExpandedTasks] = useState([]);
+  // Task detail fetched from API when expanding — always fresh, always complete
+  var [expandedTaskData, setExpandedTaskData] = useState({});
   // Maps template ID → instance ID that was clicked, so status changes target the instance
   var expandedInstanceRef = useRef({});
   var [showSettings, setShowSettings] = useState(false);
@@ -513,6 +515,14 @@ export default function AppLayout() {
   var handleStatusChange = useCallback((id, val) => {
     if (val === 'done') {
       var task = allTasks.find(function(t) { return t.id === id; });
+      // Block marking future recurring instances as done
+      if (task && task.recurring && task.taskType === 'recurring_instance') {
+        var taskDate = parseDate(task.date);
+        if (taskDate && today && taskDate > today) {
+          showToast('Can\'t mark a future recurring task as done — skip or cancel it instead', 'warning');
+          return;
+        }
+      }
       setCompletionPickerTask(task || { id: id });
       return;
     }
@@ -522,7 +532,7 @@ export default function AppLayout() {
     });
     var labels = { done: 'Done', wip: 'WIP', cancel: 'Cancelled', skip: 'Skipped', '': 'Reopened' };
     showToast((labels[val] || val) + ': ' + (allTasks.find(t => t.id === id)?.text || id).slice(0, 40), 'success');
-  }, [pushUndo, setStatus, allTasks, showToast]);
+  }, [pushUndo, setStatus, allTasks, showToast, today]);
 
   var handleCompletionConfirm = useCallback(function(completedAt) {
     var task = completionPickerTask;
@@ -542,16 +552,12 @@ export default function AppLayout() {
     var effectiveId = id;
     var task = allTasks.find(function(t) { return t.id === id; });
     if (task && task.sourceId) {
-      // Prefer opening the source template, but fall back to the instance
-      // if the template no longer exists in allTasks
       var sourceExists = allTasks.some(function(t) { return t.id === task.sourceId; });
       if (sourceExists) {
         effectiveId = task.sourceId;
-        // Track which instance was clicked so status changes target the instance
         expandedInstanceRef.current[effectiveId] = id;
       }
     } else if (task && task.recurring) {
-      // Fallback: find template by text for instances missing sourceId
       var tmpl = allTasks.find(function(t) {
         return t.taskType === 'recurring_template' && t.text === task.text;
       });
@@ -560,7 +566,23 @@ export default function AppLayout() {
         expandedInstanceRef.current[effectiveId] = id;
       }
     }
-    setExpandedTasks(function(prev) { return prev.length === 1 && prev[0] === effectiveId ? [] : [effectiveId]; });
+    // Toggle: close if already open
+    setExpandedTasks(function(prev) {
+      if (prev.length === 1 && prev[0] === effectiveId) return [];
+      return [effectiveId];
+    });
+    // Fetch full task detail from API — always fresh, always complete
+    apiClient.get('/tasks/' + effectiveId).then(function(res) {
+      if (res.data && res.data.task) {
+        setExpandedTaskData(function(prev) {
+          var next = Object.assign({}, prev);
+          next[effectiveId] = res.data.task;
+          return next;
+        });
+      }
+    }).catch(function(err) {
+      console.error('Failed to fetch task detail:', err);
+    });
   }, [allTasks]);
 
 
@@ -777,16 +799,11 @@ export default function AppLayout() {
 
   var isToday = selectedDateKey === getNowInTimezone(userTimezone).todayKey;
   var expandedTaskObjs = expandedTasks.map(function(id) {
+    // Prefer API-fetched detail (always complete) over task list
+    if (expandedTaskData[id]) return expandedTaskData[id];
+    // Fall back to task list while API fetch is in flight
     var found = allTasks.find(function(t) { return t.id === id; });
     if (found) return found;
-    // Check placements for generated recurrence tasks
-    var keys = Object.keys(dayPlacements);
-    for (var i = 0; i < keys.length; i++) {
-      var pls = dayPlacements[keys[i]];
-      for (var j = 0; j < pls.length; j++) {
-        if (pls[j].task && pls[j].task.id === id) return pls[j].task;
-      }
-    }
     return null;
   }).filter(Boolean);
 

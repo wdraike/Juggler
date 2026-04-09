@@ -1,0 +1,22 @@
+{
+  "watch": ["src/"],
+  "ext": "js,json,mjs",
+  "ignore": ["src/**/*.spec.js", "src/**/*.test.js", "node_modules/**", "logs/**", "tmp/**", ".git/**"],
+  "delay": "250",
+  "env": {
+    "NODE_ENV": "development"
+  },
+  "verbose": true,
+  "restartable": "rs",
+  "execMap": {
+    "js": "node"
+  },
+  "signal": "SIGTERM",
+  "stdout": true,
+  "colours": true,
+  "legacyWatch": false,
+  "pollingInterval": 0,
+  "events": {
+    "restart": "echo '🔄 Server restarting due to changes...'"
+  }
+}

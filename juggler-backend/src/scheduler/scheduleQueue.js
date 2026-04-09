@@ -72,7 +72,10 @@ async function processScheduleQueue(userId) {
         console.warn('[SCHED-QUEUE] could not acquire lock for ' + userId + ' after ' + MAX_LOCK_RETRIES + ' attempts');
       } else {
         // Notify connected frontends that schedule has changed
-        getSseEmitter().emit(userId, 'schedule:changed', { timestamp: Date.now() });
+        getSseEmitter().emit(userId, 'schedule:changed', {
+          timestamp: Date.now(),
+          changeset: result.changeset || null
+        });
       }
       // Loop back to check if new entries arrived during the run
     }
