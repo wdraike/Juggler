@@ -130,6 +130,79 @@ async function deleteEvent(accessToken, eventId) {
   });
 }
 
+/**
+ * Batch API: send up to 50 requests in a single HTTP call.
+ * Google uses multipart/mixed with a boundary for batch requests.
+ *
+ * @param {string} accessToken
+ * @param {Array<{method, path, body?, id?}>} requests — each is one sub-request
+ * @returns {Array<{id, status, body}>} — parsed responses in order
+ */
+async function batchRequest(accessToken, requests) {
+  if (requests.length === 0) return [];
+
+  var boundary = 'batch_' + Date.now();
+  var parts = requests.map(function(req, i) {
+    var id = req.id || String(i);
+    var method = req.method || 'GET';
+    var path = req.path.startsWith('http') ? req.path : CALENDAR_BASE + req.path;
+    var lines = [
+      '--' + boundary,
+      'Content-Type: application/http',
+      'Content-ID: <' + id + '>',
+      '',
+      method + ' ' + path + ' HTTP/1.1'
+    ];
+    if (req.body) {
+      lines.push('Content-Type: application/json');
+      lines.push('');
+      lines.push(JSON.stringify(req.body));
+    } else {
+      lines.push('');
+    }
+    return lines.join('\r\n');
+  });
+
+  var payload = parts.join('\r\n') + '\r\n--' + boundary + '--';
+
+  var res = await fetch('https://www.googleapis.com/batch/calendar/v3', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + accessToken,
+      'Content-Type': 'multipart/mixed; boundary=' + boundary
+    },
+    body: payload
+  });
+
+  var responseText = await res.text();
+
+  // Parse multipart response
+  var respBoundary = res.headers.get('content-type').match(/boundary=(.+)/);
+  var sep = respBoundary ? respBoundary[1] : boundary;
+  var responseParts = responseText.split('--' + sep).filter(function(p) {
+    return p.trim() && p.trim() !== '--';
+  });
+
+  return responseParts.map(function(part) {
+    // Extract Content-ID
+    var idMatch = part.match(/Content-ID:\s*<?\s*response-([^>\s]+)/i);
+    var id = idMatch ? idMatch[1] : null;
+
+    // Find the HTTP response line
+    var httpMatch = part.match(/HTTP\/1\.1\s+(\d+)/);
+    var status = httpMatch ? parseInt(httpMatch[1], 10) : 0;
+
+    // Extract JSON body (everything after the blank line following headers)
+    var bodyMatch = part.match(/\r?\n\r?\n\{[\s\S]*$/);
+    var body = null;
+    if (bodyMatch) {
+      try { body = JSON.parse(bodyMatch[0].trim()); } catch (e) { /* not JSON */ }
+    }
+
+    return { id: id, status: status, body: body };
+  });
+}
+
 module.exports = {
   createOAuth2Client,
   getAuthUrl,
@@ -139,5 +212,6 @@ module.exports = {
   checkForChanges,
   insertEvent,
   patchEvent,
-  deleteEvent
+  deleteEvent,
+  batchRequest
 };

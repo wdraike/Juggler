@@ -4,6 +4,24 @@
 
 require('dotenv').config();
 
+// Kill any zombie server processes from previous nodemon restarts.
+// Nodemon's SIGKILL doesn't reliably kill all child processes.
+// Use lsof to find processes holding our port — specific to this server, won't kill other backends.
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    var myPid = process.pid;
+    var port = process.env.PORT || 5002;
+    var pids = require('child_process')
+      .execSync('lsof -ti :' + port + ' 2>/dev/null || true')
+      .toString().trim().split('\n').filter(Boolean).map(Number)
+      .filter(function(p) { return p !== myPid && p > 0; });
+    if (pids.length > 0) {
+      pids.forEach(function(p) { try { process.kill(p, 'SIGKILL'); } catch (e) { /* already dead */ } });
+      console.log('[startup] Killed ' + pids.length + ' zombie process(es) on port ' + port + ': ' + pids.join(', '));
+    }
+  } catch (e) { /* lsof not available, skip */ }
+}
+
 const app = require('./app');
 const { loadJWTSecrets } = require('./middleware/jwt-auth');
 const db = require('./db');
@@ -19,6 +37,12 @@ async function start() {
   console.log(`  DB_HOST: ${process.env.DB_HOST}`);
   console.log(`  DB_NAME: ${process.env.DB_NAME}`);
   console.log(`  PORT: ${PORT}`);
+
+  // Clear stale sync locks before accepting requests
+  try {
+    var cleared = await db('sync_locks').del();
+    if (cleared > 0) console.log('[startup] Cleared ' + cleared + ' stale sync lock(s)');
+  } catch (e) { /* table might not exist yet */ }
 
   // Load JWT secrets
   await loadJWTSecrets();
@@ -49,13 +73,20 @@ var shuttingDown = false;
 function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`${signal} received — shutting down gracefully...`);
+  console.log(`${signal} received — shutting down`);
 
-  // Stop accepting new connections
+  if (process.env.NODE_ENV !== 'production') {
+    // Dev mode: exit immediately. Graceful shutdown is pointless when
+    // nodemon is about to spawn a replacement — lingering processes
+    // create zombie server instances that hold DB locks and ports.
+    process.exit(0);
+    return;
+  }
+
+  // Production: graceful shutdown
   if (server) {
     server.close(function() {
       console.log('HTTP server closed');
-      // Destroy database pool
       db.destroy().then(function() {
         console.log('Database pool destroyed');
         process.exit(0);
@@ -66,11 +97,10 @@ function shutdown(signal) {
     });
   }
 
-  // Force exit after 10 seconds if graceful shutdown stalls
   setTimeout(function() {
     console.error('Graceful shutdown timed out — forcing exit');
     process.exit(1);
-  }, 10000);
+  }, 5000);
 }
 
 process.on('SIGTERM', function() { shutdown('SIGTERM'); });

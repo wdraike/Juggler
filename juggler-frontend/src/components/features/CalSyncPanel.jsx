@@ -31,6 +31,28 @@ export default function CalSyncPanel({
   var [showHistory, setShowHistory] = useState(false);
   var [history, setHistory] = useState(null);
   var [loadingHistory, setLoadingHistory] = useState(false);
+  var [syncProgress, setSyncProgress] = useState(null); // { phase, detail, pct }
+
+  // Listen for sync:progress SSE events
+  useEffect(() => {
+    function handleSseMessage(e) {
+      try {
+        if (e.type === 'sync:progress') {
+          var data = JSON.parse(e.data);
+          setSyncProgress(data);
+          if (data.phase === 'done') {
+            setTimeout(function() { setSyncProgress(null); }, 1500);
+          }
+        }
+      } catch (err) { /* ignore */ }
+    }
+    // Find the existing EventSource from the app's SSE connection
+    var eventSources = window.__jugglerEventSource;
+    if (eventSources) {
+      eventSources.addEventListener('sync:progress', handleSseMessage);
+      return function() { eventSources.removeEventListener('sync:progress', handleSseMessage); };
+    }
+  }, []);
 
   function loadHistory() {
     setLoadingHistory(true);
@@ -209,10 +231,8 @@ export default function CalSyncPanel({
       if (onSyncComplete) onSyncComplete();
     } catch (e) {
       if (e.response?.status === 409) {
-        var retryAfter = e.response?.data?.retryAfter || 60;
-        var jitter = Math.floor(Math.random() * 10);
-        showToast('Sync already in progress — retrying in ~' + (retryAfter + jitter) + 's', 'info');
-        setTimeout(function() { setSyncing(false); }, (retryAfter + jitter) * 1000);
+        showToast('Sync is already running — please wait for it to finish', 'info');
+        setSyncing(false);
         return;
       } else {
         // Check if any provider had a token expiry
@@ -351,8 +371,24 @@ export default function CalSyncPanel({
           </div>
         </div>
 
+        {/* Progress bar */}
+        {syncing && syncProgress && (
+          <div style={{ padding: '8px 0 0' }}>
+            <div style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 4 }}>
+              {syncProgress.detail || 'Syncing...'}
+            </div>
+            <div style={{ height: 4, background: theme.border, borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', background: theme.accent, borderRadius: 2,
+                width: (syncProgress.pct || 0) + '%',
+                transition: 'width 0.3s ease'
+              }} />
+            </div>
+          </div>
+        )}
+
         {/* Sync Now button */}
-        <div style={{ padding: '16px 0' }}>
+        <div style={{ padding: syncing && syncProgress ? '8px 0 16px' : '16px 0' }}>
           <button onClick={handleSyncNow} disabled={syncing || !anyConnected}
             title={anyConnected ? 'Sync all connected calendars now' : 'Connect a calendar first'}
             style={{
@@ -362,7 +398,7 @@ export default function CalSyncPanel({
               opacity: (syncing || !anyConnected) ? 0.5 : 1,
               letterSpacing: '0.08em', textTransform: 'uppercase'
             }}>
-            {syncing ? 'Syncing...' : 'Sync Now'}
+            {syncing ? (syncProgress ? syncProgress.detail : 'Syncing...') : 'Sync Now'}
           </button>
         </div>
 

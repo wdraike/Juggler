@@ -16,4 +16,7 @@ router.get('/has-changes', authenticateJWT, calSyncController.hasChanges);
 // Manual sync available to all users (auto_sync gates periodic background sync, not manual triggers)
 router.post('/sync', authenticateJWT, withSyncLock(calSyncController.sync));
 
+// Sync history log
+router.get('/sync-history', authenticateJWT, calSyncController.getSyncHistory);
+
 module.exports = router;

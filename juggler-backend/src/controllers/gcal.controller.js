@@ -50,28 +50,17 @@ async function getStatus(req, res) {
     var tokenExpired = false;
 
     if (hasToken) {
-      try {
-        var gcalApi = require('../lib/gcal-api');
-        var oauth2Client = gcalApi.createOAuth2Client();
-        var creds = await gcalApi.refreshAccessToken(oauth2Client, req.user.gcal_refresh_token);
-
-        var update = { gcal_access_token: creds.access_token, updated_at: db.fn.now() };
-        if (creds.expiry_date) update.gcal_token_expiry = new Date(creds.expiry_date);
-        await db('users').where('id', req.user.id).update(update);
-
-        connected = true;
-      } catch (tokenErr) {
-        var msg = tokenErr.message || '';
-        if (msg.includes('invalid_grant') || msg.includes('Token has been expired or revoked')) {
-          await db('users').where('id', req.user.id).update({
-            gcal_access_token: null,
-            gcal_refresh_token: null,
-            gcal_token_expiry: null,
-            updated_at: db.fn.now()
-          });
-          tokenExpired = true;
-          connected = false;
-        } else {
+      // Don't refresh the token on status check — just verify it exists.
+      // Token refresh happens lazily when sync actually needs it.
+      // This makes the status endpoint instant instead of blocking on
+      // Google's auth server (which can take seconds or timeout).
+      connected = true;
+      if (req.user.gcal_token_expiry) {
+        var expiryStr = String(req.user.gcal_token_expiry);
+        var expiry = new Date(expiryStr.endsWith('Z') ? expiryStr : expiryStr + 'Z');
+        if (expiry.getTime() < Date.now()) {
+          // Token expired but refresh token exists — still "connected",
+          // will refresh lazily on next sync
           connected = true;
         }
       }

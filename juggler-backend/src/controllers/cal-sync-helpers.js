@@ -141,7 +141,8 @@ function taskHash(task) {
     String(task.dur || 0),
     task.status || '',
     task.when || '',
-    task.project || ''
+    task.project || '',
+    task.marker ? 'marker' : ''
   ].join('|');
   return crypto.createHash('md5').update(str).digest('hex');
 }

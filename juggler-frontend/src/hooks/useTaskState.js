@@ -36,6 +36,7 @@ function hydratePlacements(data) {
     var arr = srcPlacements[dk];
     if (!arr) return;
     arr.forEach(function(p) {
+      if (!p.task) return; // Skip orphaned placements (task was deleted)
       if (p.scheduledAtUtc) {
         var local = convertTimeForDisplay(p.scheduledAtUtc, tz);
         if (local && local.time) {
@@ -69,6 +70,11 @@ var SAVE_FIELDS = [
 export default function useTaskState() {
   const [taskState, dispatch] = useReducer(taskReducer, TASK_STATE_INIT);
   const [loading, setLoading] = useState(true);
+  // True once the first loadTasks() has completed. Subsequent calls are
+  // silent — they still dispatch INIT with fresh data but never flip the
+  // loading state back on, so the AppLayout "Loading tasks…" early-return
+  // doesn't unmount the entire UI on every refresh.
+  const initialLoadDoneRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [placements, setPlacements] = useState({ dayPlacements: {}, unplaced: [] });
   const taskStateRef = useRef(taskState);
@@ -158,7 +164,7 @@ export default function useTaskState() {
       await flushSaveRef.current();
     }
     try {
-      setLoading(true);
+      if (!initialLoadDoneRef.current) setLoading(true);
       const [tasksRes, configRes] = await Promise.all([
         apiClient.get('/tasks'),
         apiClient.get('/config')
@@ -183,7 +189,10 @@ export default function useTaskState() {
       console.error('Failed to load tasks:', error);
       return null;
     } finally {
-      setLoading(false);
+      if (!initialLoadDoneRef.current) {
+        setLoading(false);
+        initialLoadDoneRef.current = true;
+      }
     }
   }, []);
   loadTasksRef.current = loadTasks;
@@ -214,17 +223,20 @@ export default function useTaskState() {
     apiClient.put(`/tasks/${id}/status`, body).then((res) => {
       // Clear dirty flag once server confirms the save
       dispatch({ type: 'CLEAR_DIRTY_STATUS', id });
-      // Pausing a recurring task template deletes future instances server-side — reload all tasks
-      if (val === 'pause' && res.data && res.data.instancesRemoved > 0) {
-        loadTasks();
+      // For terminal statuses, the server may clamp scheduled_at to the
+      // completion time (rowToTask enforces this). Fetch just this task and
+      // upsert — do NOT do a full loadTasks() refresh, which causes a
+      // visible flash across the whole UI. The scheduler run triggered by
+      // the status change will also fire a schedule:changed SSE with its
+      // own sparse upsert; both are idempotent.
+      if (val === 'done' || val === 'cancel' || val === 'skip' || val === 'pause') {
+        apiClient.get('/tasks/' + id).then(function(r) {
+          if (r && r.data && r.data.task) {
+            dispatch({ type: 'UPSERT_TASKS', tasks: [r.data.task] });
+          }
+        }).catch(function() { /* SSE will catch up */ });
       } else {
-        // For terminal statuses, reload tasks so the frontend picks up the
-        // clamped scheduledAt from the server (rowToTask enforces this).
-        if (val === 'done' || val === 'cancel' || val === 'skip') {
-          loadTasks();
-        } else {
-          loadPlacements();
-        }
+        loadPlacements();
       }
     }).catch(err => console.error('Failed to save status:', err));
     // If there are also taskFields (e.g. date changes on recurring completion), save those too
@@ -344,6 +356,8 @@ export default function useTaskState() {
 
       var url = apiBase + '/events?token=' + encodeURIComponent(token);
       eventSource = new EventSource(url);
+      // Expose globally so other components (e.g. CalSyncPanel) can listen for events
+      window.__jugglerEventSource = eventSource;
 
       eventSource.addEventListener('connected', function() {
         sseActive = true;
@@ -351,8 +365,43 @@ export default function useTaskState() {
         if (fallbackIntervalId) { clearInterval(fallbackIntervalId); fallbackIntervalId = null; }
       });
 
-      eventSource.addEventListener('tasks:changed', function() {
-        refreshFromServer();
+      eventSource.addEventListener('tasks:changed', function(e) {
+        // Surgical path: if the server told us which ids changed, fetch just
+        // those and upsert. Ids that 404 (the underlying mutation was a
+        // delete) are removed from state. Otherwise fall back to the full
+        // version-check + reload path (covers old servers, sources like
+        // cal-sync and config that don't carry an ids payload).
+        var data = null;
+        try { data = JSON.parse(e.data); } catch(err) {}
+        var ids = data && Array.isArray(data.ids) ? data.ids : null;
+        if (ids && ids.length > 0) {
+          Promise.all(ids.map(function(id) {
+            return apiClient.get('/tasks/' + id)
+              .then(function(res) { return { id: id, task: res.data.task }; })
+              .catch(function(err) {
+                // 404 = deleted; any other error = leave state alone
+                if (err && err.response && err.response.status === 404) return { id: id, task: null };
+                return null;
+              });
+          })).then(function(results) {
+            var upserts = [];
+            var removals = [];
+            results.forEach(function(r) {
+              if (!r) return;
+              if (r.task) upserts.push(r.task);
+              else removals.push(r.id);
+            });
+            if (removals.length > 0) {
+              dispatch({ type: 'REMOVE_TASKS', ids: removals });
+            }
+            if (upserts.length > 0) {
+              hydrateTaskTimezones(upserts, getHydrationTimezone());
+              dispatch({ type: 'UPSERT_TASKS', tasks: upserts });
+            }
+          });
+        } else {
+          refreshFromServer();
+        }
       });
 
       eventSource.addEventListener('schedule:changed', function(e) {
@@ -361,8 +410,17 @@ export default function useTaskState() {
         var cs = data && data.changeset;
 
         if (cs) {
+          var addedLen = (cs.added || []).length;
+          var changedLen = (cs.changed || []).length;
+          var removedLen = (cs.removed || []).length;
+          // Nothing actually changed — skip placements reload too. This is
+          // the common "scheduler ran but nothing moved" case and it should
+          // be completely silent.
+          if (addedLen + changedLen + removedLen === 0) {
+            return;
+          }
           // Remove deleted tasks from state immediately
-          if (cs.removed && cs.removed.length > 0) {
+          if (removedLen > 0) {
             dispatch({ type: 'REMOVE_TASKS', ids: cs.removed });
           }
           // Fetch added + changed tasks from API in parallel — always complete data
@@ -385,7 +443,8 @@ export default function useTaskState() {
           if (loadTasksRef.current) loadTasksRef.current();
         }
 
-        // Always reload placements (time-slot positions)
+        // Reload placements (time-slot positions) — only when something
+        // actually moved on the schedule grid.
         loadPlacements();
       });
 

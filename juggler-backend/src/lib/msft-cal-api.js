@@ -205,6 +205,51 @@ async function checkForChanges(accessToken, deltaLink) {
   }
 }
 
+/**
+ * Batch API: send up to 20 requests in a single HTTP call.
+ * Microsoft Graph uses JSON $batch endpoint.
+ *
+ * @param {string} accessToken
+ * @param {Array<{method, url, body?, id?}>} requests — each is one sub-request
+ * @returns {Array<{id, status, body}>} — parsed responses
+ */
+async function batchRequest(accessToken, requests) {
+  if (requests.length === 0) return [];
+
+  var batchBody = {
+    requests: requests.map(function(req, i) {
+      var item = {
+        id: req.id || String(i),
+        method: req.method || 'GET',
+        url: req.url
+      };
+      if (req.body) {
+        item.body = req.body;
+        item.headers = { 'Content-Type': 'application/json' };
+      }
+      return item;
+    })
+  };
+
+  var res = await fetch(GRAPH_BASE + '/$batch', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + accessToken,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(batchBody)
+  });
+
+  var data = await res.json();
+  if (!res.ok) {
+    throw new Error('Graph batch error ' + res.status + ': ' + JSON.stringify(data));
+  }
+
+  return (data.responses || []).map(function(r) {
+    return { id: r.id, status: r.status, body: r.body || null };
+  });
+}
+
 module.exports = {
   generatePkce,
   getAuthUrl,
@@ -214,5 +259,6 @@ module.exports = {
   checkForChanges,
   insertEvent,
   patchEvent,
-  deleteEvent
+  deleteEvent,
+  batchRequest
 };

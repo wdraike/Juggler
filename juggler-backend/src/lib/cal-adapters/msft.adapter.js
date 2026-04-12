@@ -193,7 +193,7 @@ async function deleteEvent(token, eventId) {
 /**
  * Compute DB update fields from a normalized event.
  */
-function applyEventToTaskFields(event, tz) {
+function applyEventToTaskFields(event, tz, currentTask) {
   var isAllDay = event.isAllDay;
   var startStr = event.startDateTime;
 
@@ -232,6 +232,38 @@ function applyEventToTaskFields(event, tz) {
     fields.marker = true;
   }
 
+  // --- Promotion logic ---
+  // When the user moves a flexible task in the external calendar, promote it to
+  // fixed so the scheduler respects the user's intentional placement.
+  if (currentTask && !isAllDay) {
+    var wasFixed = currentTask.when && currentTask.when.indexOf('fixed') >= 0;
+    var wasAllDay = currentTask.when === 'allday';
+    if (!wasFixed) {
+      // Bug fix: all-day converted to timed — promote to fixed
+      if (wasAllDay) {
+        fields.when = 'fixed';
+      }
+      // Time changed on same day
+      else if (jd.time && jd.time !== currentTask.time) {
+        fields.when = 'fixed';
+      }
+      // Date changed — also pin the date
+      if (jd.date && jd.date !== currentTask.date) {
+        fields.when = 'fixed';
+        fields.date_pinned = 1;
+      }
+      // Preserve the original when-tag so un-fixing can restore it
+      if (fields.when === 'fixed' && currentTask.when !== 'fixed') {
+        fields.prev_when = currentTask.when || '';
+      }
+    }
+  }
+
+  // Clear marker if event is no longer transparent
+  if (currentTask && !event.isTransparent && currentTask.marker) {
+    fields.marker = false;
+  }
+
   return fields;
 }
 
@@ -243,7 +275,9 @@ function eventHash(event) {
     event.title || '',
     event.startDateTime || '',
     event.endDateTime || '',
-    event.description || ''
+    event.description || '',
+    event.isTransparent ? 'transparent' : 'opaque',
+    event.isAllDay ? 'allday' : 'timed'
   ].join('|');
   return crypto.createHash('md5').update(str).digest('hex');
 }
@@ -313,13 +347,14 @@ function buildMsftEventBody(task, year, tz, opts) {
 
   // Fallback: use local date/time with Windows timezone
   var startISO = jugglerDateToISO(task.date, task.time, year);
-  var sParts = startISO.split('T');
-  var tParts = sParts[1].split(':');
-  var sMins = parseInt(tParts[0], 10) * 60 + parseInt(tParts[1], 10);
-  var eMins = sMins + dur;
-  var eH = Math.floor(eMins / 60);
-  var eM = eMins % 60;
-  var endISO = sParts[0] + 'T' + String(eH).padStart(2, '0') + ':' + String(eM).padStart(2, '0') + ':00';
+  // Use Date math to handle events that span midnight
+  var startDate = new Date(startISO);
+  var endDate = new Date(startDate.getTime() + dur * 60000);
+  var endISO = endDate.getFullYear() + '-' +
+    String(endDate.getMonth() + 1).padStart(2, '0') + '-' +
+    String(endDate.getDate()).padStart(2, '0') + 'T' +
+    String(endDate.getHours()).padStart(2, '0') + ':' +
+    String(endDate.getMinutes()).padStart(2, '0') + ':00';
 
   var body3 = {
     subject: subjectText,
@@ -333,6 +368,52 @@ function buildMsftEventBody(task, year, tz, opts) {
   return body3;
 }
 
+/**
+ * Batch create events. Returns array of { taskId, providerEventId, raw, error }.
+ * Microsoft Graph batch limit is 20 per call.
+ */
+async function batchCreateEvents(token, taskEventPairs, year, tz) {
+  var results = [];
+  for (var ci = 0; ci < taskEventPairs.length; ci += 20) {
+    var chunk = taskEventPairs.slice(ci, ci + 20);
+    var requests = chunk.map(function(pair, i) {
+      var body = buildMsftEventBody(pair.task, year, tz);
+      return { id: String(ci + i), method: 'POST', url: '/me/events', body: body };
+    });
+    var responses = await msftCalApi.batchRequest(token, requests);
+    for (var ri = 0; ri < responses.length; ri++) {
+      var idx = parseInt(responses[ri].id, 10);
+      var pair = taskEventPairs[idx];
+      if (responses[ri].status >= 200 && responses[ri].status < 300 && responses[ri].body) {
+        results.push({ taskId: pair.task.id, providerEventId: responses[ri].body.id, raw: responses[ri].body, error: null });
+      } else {
+        results.push({ taskId: pair.task.id, providerEventId: null, raw: null, error: 'Batch create failed: HTTP ' + responses[ri].status });
+      }
+    }
+  }
+  return results;
+}
+
+/**
+ * Batch delete events. Returns array of { eventId, error }.
+ */
+async function batchDeleteEvents(token, eventIds) {
+  var results = [];
+  for (var ci = 0; ci < eventIds.length; ci += 20) {
+    var chunk = eventIds.slice(ci, ci + 20);
+    var requests = chunk.map(function(evId, i) {
+      return { id: String(ci + i), method: 'DELETE', url: '/me/events/' + encodeURIComponent(evId) };
+    });
+    var responses = await msftCalApi.batchRequest(token, requests);
+    for (var ri = 0; ri < responses.length; ri++) {
+      var idx = parseInt(responses[ri].id, 10);
+      var ok = responses[ri].status >= 200 && responses[ri].status < 300 || responses[ri].status === 404;
+      results.push({ eventId: eventIds[idx], error: ok ? null : 'Batch delete failed: HTTP ' + responses[ri].status });
+    }
+  }
+  return results;
+}
+
 module.exports = {
   providerId,
   isConnected,
@@ -343,8 +424,11 @@ module.exports = {
   createEvent,
   updateEvent,
   deleteEvent,
+  batchCreateEvents,
+  batchDeleteEvents,
   applyEventToTaskFields,
   eventHash,
+  buildMsftEventBody,
   getEventIdColumn,
   getLastSyncedColumn
 };

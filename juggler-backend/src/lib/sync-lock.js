@@ -2,52 +2,40 @@
  * Per-user sync lock backed by the database.
  *
  * Uses INSERT with duplicate-key rejection so the first writer wins
- * atomically — no check-then-set race. Expired locks are cleaned up
- * on acquire attempts and by a periodic sweep.
+ * atomically. All time comparisons use MySQL NOW() to avoid timezone
+ * mismatches between JS Date and the dateStrings knex config.
  *
- * The lock owner can call refreshLock(userId, token) to extend the
- * expiry while long-running work is still in progress.
+ * Safety cap: heartbeat stops after MAX_LOCK_AGE so a stuck handler
+ * can't hold the lock forever.
  */
 
 var crypto = require('crypto');
 var db = require('../db');
 
-var LOCK_TTL = 5 * 60 * 1000;       // default 5 minutes
-var REFRESH_TTL = 5 * 60 * 1000;    // each refresh extends by 5 minutes
-var SWEEP_INTERVAL = 30 * 1000;     // sweep expired locks every 30s
+var LOCK_TTL_SECONDS = 30;           // short TTL — heartbeat keeps it alive
+var REFRESH_TTL_SECONDS = 30;        // each heartbeat extends by 30s
+var SWEEP_INTERVAL = 15 * 1000;      // sweep expired locks every 15s
+var MAX_LOCK_AGE = 5 * 60 * 1000;    // stop heartbeat after 5 min
 
 // ── core primitives ────────────────────────────────────────────────
 
-/**
- * Try to acquire the lock for a user.
- * Returns { acquired: true, token } on success,
- *         { acquired: false } if someone else holds a live lock.
- */
 async function acquireLock(userId) {
   var token = crypto.randomUUID();
-  var now = new Date();
-  var expiresAt = new Date(now.getTime() + LOCK_TTL);
 
-  // Single atomic statement: delete any expired row, then insert.
-  // We run inside a transaction so the delete + insert are serialised.
   return db.transaction(async function(trx) {
-    // Clear expired lock for this user (if any)
-    await trx('sync_locks')
-      .where('user_id', userId)
-      .where('expires_at', '<=', now)
-      .del();
+    // Clear expired lock using MySQL's own clock — no JS Date timezone issues
+    await trx.raw(
+      'DELETE FROM sync_locks WHERE user_id = ? AND expires_at <= NOW()',
+      [userId]
+    );
 
-    // Try to insert — the PRIMARY KEY constraint rejects duplicates
     try {
-      await trx('sync_locks').insert({
-        user_id: userId,
-        lock_token: token,
-        acquired_at: now,
-        expires_at: expiresAt,
-      });
+      await trx.raw(
+        'INSERT INTO sync_locks (user_id, lock_token, acquired_at, expires_at) VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? SECOND))',
+        [userId, token, LOCK_TTL_SECONDS]
+      );
       return { acquired: true, token: token };
     } catch (err) {
-      // Duplicate key = someone else holds a live lock
       if (err.code === 'ER_DUP_ENTRY') {
         return { acquired: false };
       }
@@ -56,10 +44,6 @@ async function acquireLock(userId) {
   });
 }
 
-/**
- * Release the lock, but only if the token matches (prevents one
- * handler from releasing another handler's lock).
- */
 async function releaseLock(userId, token) {
   await db('sync_locks')
     .where('user_id', userId)
@@ -67,42 +51,33 @@ async function releaseLock(userId, token) {
     .del();
 }
 
-/**
- * Extend the lock expiry. Only succeeds if the caller still owns
- * the lock (token must match). Returns true if refreshed.
- */
 async function refreshLock(userId, token) {
-  var newExpiry = new Date(Date.now() + REFRESH_TTL);
-  var updated = await db('sync_locks')
-    .where('user_id', userId)
-    .where('lock_token', token)
-    .update({ expires_at: newExpiry });
-  return updated > 0;
+  var updated = await db.raw(
+    'UPDATE sync_locks SET expires_at = DATE_ADD(NOW(), INTERVAL ? SECOND) WHERE user_id = ? AND lock_token = ?',
+    [REFRESH_TTL_SECONDS, userId, token]
+  );
+  return (updated[0].affectedRows || 0) > 0;
 }
 
 // ── middleware / wrappers ──────────────────────────────────────────
 
-/**
- * Express middleware that wraps a handler with a per-user DB lock.
- * Returns 409 if a lock is already held for this user.
- *
- * The handler receives req.syncLock = { token, refresh() } so it
- * can extend the lock during long operations.
- */
 function withSyncLock(handler) {
   return async function(req, res) {
     var userId = req.user.id;
     var result = await acquireLock(userId);
     if (!result.acquired) {
-      // Tell the client how long to back off
-      var lock = await db('sync_locks').where('user_id', userId).first();
-      var retryAfter = lock
-        ? Math.max(1, Math.ceil((new Date(lock.expires_at).getTime() - Date.now()) / 1000))
-        : 60;
-      return res.status(409).json({ error: 'Sync already in progress', retryAfter: retryAfter });
+      return res.status(409).json({ error: 'Sync already in progress', retryAfter: LOCK_TTL_SECONDS });
     }
     var token = result.token;
-    // Expose refresh helper on the request
+    var lockStart = Date.now();
+    var heartbeat = setInterval(function() {
+      if (Date.now() - lockStart > MAX_LOCK_AGE) {
+        clearInterval(heartbeat);
+        console.warn('[sync-lock] Heartbeat stopped — lock held over ' + Math.round(MAX_LOCK_AGE / 1000) + 's, allowing expiry');
+        return;
+      }
+      refreshLock(userId, token).catch(function() {});
+    }, 10 * 1000);
     req.syncLock = {
       token: token,
       refresh: function() { return refreshLock(userId, token); },
@@ -110,41 +85,46 @@ function withSyncLock(handler) {
     try {
       await handler(req, res);
     } finally {
+      clearInterval(heartbeat);
       await releaseLock(userId, token);
     }
   };
 }
 
-/**
- * Run an async function under the per-user lock.
- * Returns null if lock can't be acquired (silent skip).
- */
 async function withLock(userId, fn) {
   var result = await acquireLock(userId);
   if (!result.acquired) return null;
   var token = result.token;
+  var lockStart = Date.now();
+  var heartbeat = setInterval(function() {
+    if (Date.now() - lockStart > MAX_LOCK_AGE) {
+      clearInterval(heartbeat);
+      return;
+    }
+    refreshLock(userId, token).catch(function() {});
+  }, 10 * 1000);
   try {
     return await fn({
       refresh: function() { return refreshLock(userId, token); },
     });
   } finally {
+    clearInterval(heartbeat);
     await releaseLock(userId, token);
   }
 }
 
-// ── background sweep ───────────────────────────────────────────────
+// ── background sweep using MySQL clock ─────────────────────────────
 
 var sweepTimer = setInterval(function() {
-  db('sync_locks')
-    .where('expires_at', '<=', new Date())
-    .del()
-    .then(function(count) {
+  db.raw('DELETE FROM sync_locks WHERE expires_at <= NOW()')
+    .then(function(result) {
+      var count = result[0].affectedRows || 0;
       if (count > 0) console.warn('[sync-lock] Swept ' + count + ' expired lock(s)');
     })
     .catch(function(err) {
       console.error('[sync-lock] Sweep error:', err.message);
     });
 }, SWEEP_INTERVAL);
-sweepTimer.unref(); // don't keep process alive for background sweep
+sweepTimer.unref();
 
 module.exports = { withSyncLock, withLock, acquireLock, releaseLock, refreshLock };

@@ -11,7 +11,7 @@
   "execMap": {
     "js": "node"
   },
-  "signal": "SIGTERM",
+  "signal": "SIGKILL",
   "stdout": true,
   "colours": true,
   "legacyWatch": false,

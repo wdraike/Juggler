@@ -62,30 +62,9 @@ async function getStatus(req, res) {
     var tokenExpired = false;
 
     if (hasToken) {
-      try {
-        var creds = await msftCalApi.refreshAccessToken(req.user.msft_cal_refresh_token);
-
-        var update = { msft_cal_access_token: creds.accessToken, updated_at: db.fn.now() };
-        if (creds.expiresOn) update.msft_cal_token_expiry = new Date(creds.expiresOn);
-        if (creds.refreshToken) update.msft_cal_refresh_token = creds.refreshToken;
-        await db('users').where('id', req.user.id).update(update);
-
-        connected = true;
-      } catch (tokenErr) {
-        var msg = tokenErr.message || '';
-        if (msg.includes('invalid_grant') || msg.includes('AADSTS') || msg.includes('expired')) {
-          await db('users').where('id', req.user.id).update({
-            msft_cal_access_token: null,
-            msft_cal_refresh_token: null,
-            msft_cal_token_expiry: null,
-            updated_at: db.fn.now()
-          });
-          tokenExpired = true;
-          connected = false;
-        } else {
-          connected = true;
-        }
-      }
+      // Don't refresh the token on status check — just verify it exists.
+      // Token refresh happens lazily when sync actually needs it.
+      connected = true;
     }
 
     var autoSyncRow = await db('user_config')
