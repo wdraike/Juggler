@@ -6,20 +6,28 @@
  */
 
 import React, { useMemo } from 'react';
-import { PRI_COLORS, locIcon, LOC_TINT } from '../../state/constants';
+import { PRI_COLORS, locIcon, LOC_TINT, isTerminalStatus } from '../../state/constants';
 import { getTheme } from '../../theme/colors';
 import { getBlocksForDate } from '../../scheduler/timeBlockHelpers';
-import { formatHour } from '../../scheduler/dateHelpers';
+
 import ScheduleCard from './ScheduleCard';
 
 /* ── Dimensions ────────────────────────────────────────── */
 var BAND_W      = 28;     // thick coloured time-block band
 var CURVE_MARGIN = 24;    // keep cards this far from the curve
+var CLOCK_BUFFER = 36;    // keep-out distance from the outer band edge of
+                          // EITHER circle (clears the hour labels that
+                          // sit ~21px outside the band with ~15px extra
+                          // for visual breathing room)
 var PADDING     = 10;
 var SAMPLE_STEP = 4;
 var CARD_GAP    = 8;
 var ASPECT_RATIO = 4;
-var CIRCLE_GAP  = 0.15;   // fraction of vpW between circles (where cards go)
+var CIRCLE_GAP  = 0.2;    // fraction of vpW between circle centres —
+                          // wide enough that cards breathe in the
+                          // central gap but leaves enough room on the
+                          // outer sides of each circle for horizontal
+                          // cards to reach the viewport edges
 
 /* ── Geometry ──────────────────────────────────────────── */
 
@@ -103,7 +111,7 @@ function segHitsRect(ax, ay, bx, by, rx, ry, rw, rh) {
 
 function rectOverlapsCurveBand(x, y, w, h, R, CX, CY) {
   var bandMin = R - BAND_W / 2 - CURVE_MARGIN;
-  var bandMax = R + BAND_W / 2 + CURVE_MARGIN;
+  var bandMax = R + BAND_W / 2 + CLOCK_BUFFER;
   if (bandMin < 0) bandMin = 0;
   var corners = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
   var minDist = Infinity, maxDist = 0;
@@ -133,6 +141,20 @@ function rectOverlapsEitherBand(x, y, w, h, amR, amCX, amCY, pmR, pmCX, pmCY) {
          rectOverlapsCurveBand(x, y, w, h, pmR, pmCX, pmCY);
 }
 
+// True iff all four corners of the card rect lie in the closed outward
+// tangent half-plane at P on circle (CX,CY,R). This is the necessary and
+// sufficient condition for every straight line from any point on the rect's
+// boundary to P to stay outside the disk interior.
+function cardOutsideTangent(rx, ry, rw, rh, PX, PY, CX, CY, R) {
+  var nx = PX - CX, ny = PY - CY;
+  var threshold = R * R - 0.5;
+  var cs = [[rx, ry], [rx + rw, ry], [rx + rw, ry + rh], [rx, ry + rh]];
+  for (var i = 0; i < 4; i++) {
+    if ((cs[i][0] - CX) * nx + (cs[i][1] - CY) * ny < threshold) return false;
+  }
+  return true;
+}
+
 function rectEdgePoint(rx, ry, rw, rh, tx, ty) {
   // Find the closest point on the rectangle border to (tx, ty)
   var cx = rx + rw / 2, cy = ry + rh / 2;
@@ -156,35 +178,17 @@ function segsIntersect(ax, ay, bx, by, cx, cy, dx, dy) {
   return t > 0.02 && t < 0.98 && u > 0.02 && u < 0.98;
 }
 
-function minDistToSeg(ax, ay, bx, by, cx, cy) {
-  var dx = bx - ax, dy = by - ay;
-  var lenSq = dx * dx + dy * dy;
-  if (lenSq < 0.001) return Math.sqrt((ax - cx) * (ax - cx) + (ay - cy) * (ay - cy));
-  var t = Math.max(0, Math.min(1, ((cx - ax) * dx + (cy - ay) * dy) / lenSq));
-  var px = ax + t * dx, py = ay + t * dy;
-  return Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
-}
-
-/* Connector: card edge → band outer edge.
- * Tries exact time position first, falls back to radial if line would cross circle. */
+// Connector: card edge → band outer edge, always at the item's exact time.
+// Placement enforces the outward-tangent rule, so this straight line is
+// guaranteed not to enter the disk interior.
 function computeConnector(cardX, cardY, cW, cH, curveX, curveY, R, CX, CY) {
   var bandOuter = R + BAND_W / 2 + 2;
   var tdx = curveX - CX, tdy = curveY - CY;
   var td = Math.sqrt(tdx * tdx + tdy * tdy) || 1;
-  var iBx = CX + (tdx / td) * bandOuter;
-  var iBy = CY + (tdy / td) * bandOuter;
-  var iEdge = rectEdgePoint(cardX, cardY, cW, cH, iBx, iBy);
-  var minD = minDistToSeg(iEdge.x, iEdge.y, iBx, iBy, CX, CY);
-  if (minD >= R) {
-    return { ex: iEdge.x, ey: iEdge.y, bx: iBx, by: iBy };
-  }
-  var ccx = cardX + cW / 2, ccy = cardY + cH / 2;
-  var cdx = ccx - CX, cdy = ccy - CY;
-  var cd = Math.sqrt(cdx * cdx + cdy * cdy) || 1;
-  var fBx = CX + (cdx / cd) * bandOuter;
-  var fBy = CY + (cdy / cd) * bandOuter;
-  var fEdge = rectEdgePoint(cardX, cardY, cW, cH, fBx, fBy);
-  return { ex: fEdge.x, ey: fEdge.y, bx: fBx, by: fBy };
+  var bx = CX + (tdx / td) * bandOuter;
+  var by = CY + (tdy / td) * bandOuter;
+  var edge = rectEdgePoint(cardX, cardY, cW, cH, bx, by);
+  return { ex: edge.x, ey: edge.y, bx: bx, by: by };
 }
 
 /* ── Area estimation for card sizing ── */
@@ -237,40 +241,54 @@ function placeCards(items, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY, vpW, vpH) {
   if (items.length === 0) return [];
 
   var P = PADDING;
+  var halfW = vpW / 2;
   var hStep = cW + CARD_GAP;
   var vStep = cH + CARD_GAP;
 
-  /* ── Generate frame slots (perimeter + gap between circles) ── */
+  /* ── Layout geometry (hoisted for slot generation) ── */
+  var amLeftX  = P;
+  var amRightX = Math.max(P, amCX + amR + BAND_W / 2 + CLOCK_BUFFER);
+  var pmLeftX  = Math.max(P, Math.min(vpW - cW - P,
+                           pmCX - pmR - BAND_W / 2 - CLOCK_BUFFER - cW));
+  var pmRightX = vpW - cW - P;
+
+  var vStepCol = cH + CARD_GAP;
+  var colYSt = P + vStepCol;
+  var colYEn = vpH - P - vStepCol;
+  var colHalfSpan = Math.min(amCY - colYSt, colYEn - amCY);
+  colYSt = Math.round(amCY - colHalfSpan);
+  colYEn = Math.round(amCY + colHalfSpan);
+
+  var amHalfSpan = Math.min(amCX - P, halfW - CARD_GAP - amCX);
+  var amRowXSt = Math.round(amCX - amHalfSpan);
+  var amRowXEn = Math.round(amCX + amHalfSpan);
+  var pmHalfSpan = Math.min(pmCX - halfW - CARD_GAP, vpW - P - pmCX);
+  var pmRowXSt = Math.round(pmCX - pmHalfSpan);
+  var pmRowXEn = Math.round(pmCX + pmHalfSpan);
+
+  /* ── Generate candidate slots ──
+   * Slots match the exact positions the sector layout uses so every
+   * card the monotone assignment needs has a valid slot. */
   var raw = [];
 
-  // Bottom: left → right
-  for (var x = P; x + cW <= vpW - P; x += hStep)
-    raw.push({ x: Math.round(x), y: vpH - P - cH });
-  // Right: bottom → top
-  for (var y = vpH - P - cH - vStep; y >= P; y -= vStep)
-    raw.push({ x: vpW - P - cW, y: Math.round(y) });
-  // Top: right → left
-  for (var x = vpW - P - cW - hStep; x >= P; x -= hStep)
-    raw.push({ x: Math.round(x), y: P });
-  // Left: top → bottom
-  for (var y = P + vStep; y + cH <= vpH - P; y += vStep)
-    raw.push({ x: P, y: Math.round(y) });
-
-  // Gap between circles: vertical column of slots
-  var gapCX = (amCX + pmCX) / 2;
-  var gapLeft = gapCX - cW / 2;
-  // Add slots in the gap column
-  for (var y = P; y + cH <= vpH - P; y += vStep) {
-    raw.push({ x: Math.round(gapLeft), y: Math.round(y) });
+  var colXs = [amLeftX, amRightX, pmLeftX, pmRightX];
+  for (var ci = 0; ci < colXs.length; ci++) {
+    for (var y = colYSt; y + cH <= colYEn; y += vStep) {
+      raw.push({ x: Math.round(colXs[ci]), y: Math.round(y) });
+    }
   }
-  // Also add a second column offset if there's room
-  var gapW = pmCX - pmR - BAND_W / 2 - CURVE_MARGIN - (amCX + amR + BAND_W / 2 + CURVE_MARGIN);
-  if (gapW > cW * 2 + CARD_GAP) {
-    var col1X = gapCX - cW - CARD_GAP / 2;
-    var col2X = gapCX + CARD_GAP / 2;
-    for (var y = P; y + cH <= vpH - P; y += vStep) {
-      raw.push({ x: Math.round(col1X), y: Math.round(y) });
-      raw.push({ x: Math.round(col2X), y: Math.round(y) });
+
+  var rowRanges = [
+    [amRowXSt, amRowXEn],
+    [pmRowXSt, pmRowXEn]
+  ];
+  for (var ri = 0; ri < rowRanges.length; ri++) {
+    var rxSt = rowRanges[ri][0], rxEn = rowRanges[ri][1];
+    for (var x = rxSt; x + cW <= rxEn; x += hStep) {
+      raw.push({ x: Math.round(x), y: P });
+      raw.push({ x: Math.round(x), y: vpH - P - cH });
+      raw.push({ x: Math.round(x), y: P + cH + CARD_GAP });
+      raw.push({ x: Math.round(x), y: vpH - P - 2 * cH - CARD_GAP });
     }
   }
 
@@ -288,115 +306,172 @@ function placeCards(items, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY, vpW, vpH) {
 
   if (slots.length === 0) return [];
 
-  /* ── Clock angle for slot assignment ── */
-  // For dual circles, we map everything to a 0–2π range over 24h.
-  // AM items: mins 0–720 → angle 0–π
-  // PM items: mins 720–1440 → angle π–2π
-  function timeAngle(mins) {
-    return (mins / 1440) * 2 * Math.PI;
+  /* ── Other-circle horizontal bound ──
+   * With the viewport split in half, the centre line is the boundary.
+   * AM cards stay entirely in the left half, PM cards in the right. */
+  var amRightLimit = halfW;   // AM cards: x + cW ≤ this
+  var pmLeftLimit  = halfW;   // PM cards: x ≥ this
+
+  /* ── Build item data, split by AM/PM ──
+   * itemAng is the clock angle of the task on its own circle (0-2π, with
+   * 12 at top and going clockwise). Used for the monotone matching below. */
+  function itemClockAngle(mins) {
+    var halfMins = mins < 720 ? mins : mins - 720;
+    return (halfMins / 720) * 2 * Math.PI;
   }
-
-  // Slot angle: based on position relative to both circles
-  function slotAngle(sx, sy) {
-    // If slot is closer to AM circle, compute angle within AM range (0–π)
-    // If closer to PM circle, compute angle within PM range (π–2π)
-    var dA = Math.sqrt((sx + cW / 2 - amCX) * (sx + cW / 2 - amCX) + (sy + cH / 2 - amCY) * (sy + cH / 2 - amCY));
-    var dP = Math.sqrt((sx + cW / 2 - pmCX) * (sx + cW / 2 - pmCX) + (sy + cH / 2 - pmCY) * (sy + cH / 2 - pmCY));
-
-    var R, CX, CY, offset;
-    if (dA <= dP) {
-      R = amR; CX = amCX; CY = amCY; offset = 0;
-    } else {
-      R = pmR; CX = pmCX; CY = pmCY; offset = Math.PI;
-    }
-
-    // Clock angle within this circle: 12 at top, clockwise
-    // mathAngle = atan2(-(y-CY), x-CX) → clock = π/2 - mathAngle
-    var ma = Math.atan2(-(sy + cH / 2 - CY), sx + cW / 2 - CX);
-    var ca = Math.PI / 2 - ma;
-    if (ca < 0) ca += 2 * Math.PI;
-    if (ca >= 2 * Math.PI) ca -= 2 * Math.PI;
-    // Scale to 0–π range, then add offset
-    var halfAngle = ca / 2;  // 0–π
-    return offset + halfAngle;
-  }
-
-  var slotAngles = [];
-  for (var i = 0; i < slots.length; i++) {
-    slotAngles.push(slotAngle(slots[i].x, slots[i].y));
-  }
-
-  /* ── Half-screen boundary: AM cards left, PM cards right ── */
-  var halfX = vpW / 2;
-
-  /* ── Build item data, split by AM/PM ── */
   var amItems = [], pmItems = [];
   for (var i = 0; i < items.length; i++) {
     var pos = minutesToDualPosition(items[i].mins, amR, amCX, amCY, pmR, pmCX, pmCY);
-    var entry = { item: items[i], pos: pos, angle: timeAngle(items[i].mins) };
+    var entry = { item: items[i], pos: pos, itemAng: itemClockAngle(items[i].mins) };
     if (pos.isAM) { amItems.push(entry); } else { pmItems.push(entry); }
   }
-  amItems.sort(function (a, b) { return a.angle - b.angle; });
-  pmItems.sort(function (a, b) { return a.angle - b.angle; });
+  amItems.sort(function (a, b) { return a.itemAng - b.itemAng; });
+  pmItems.sort(function (a, b) { return a.itemAng - b.itemAng; });
 
-  /* Split slots by half-screen */
-  var amSlots = [], pmSlots = [];
+  /* Slot eligibility by the other-circle horizontal rule */
+  var amSlotList = [], pmSlotList = [];
   for (var i = 0; i < slots.length; i++) {
-    var slotCenterX = slots[i].x + cW / 2;
-    if (slotCenterX <= halfX) { amSlots.push(i); } else { pmSlots.push(i); }
+    if (slots[i].x + cW <= amRightLimit) amSlotList.push(i);
+    if (slots[i].x >= pmLeftLimit)       pmSlotList.push(i);
   }
-  amSlots.sort(function (a, b) { return slotAngles[a] - slotAngles[b]; });
-  pmSlots.sort(function (a, b) { return slotAngles[a] - slotAngles[b]; });
 
-  /* Assign items to slots within their half */
-  function assignHalf(halfItems, halfSlotOrder) {
-    var result = [];
-    var HN = halfItems.length;
-    var HM = halfSlotOrder.length;
-    if (HN === 0 || HM === 0) return result;
+  /* Per-side slot clock angle (0-2π on that circle) */
+  function slotClockAngleRel(slotIdx, CX, CY) {
+    var scx = slots[slotIdx].x + cW / 2;
+    var scy = slots[slotIdx].y + cH / 2;
+    var ma = Math.atan2(-(scy - CY), scx - CX);
+    var ca = Math.PI / 2 - ma;
+    if (ca < 0) ca += 2 * Math.PI;
+    if (ca >= 2 * Math.PI) ca -= 2 * Math.PI;
+    return ca;
+  }
+  var amSlotEntries = amSlotList.map(function (k) {
+    return { k: k, ang: slotClockAngleRel(k, amCX, amCY) };
+  });
+  var pmSlotEntries = pmSlotList.map(function (k) {
+    return { k: k, ang: slotClockAngleRel(k, pmCX, pmCY) };
+  });
 
-    var bestOff = 0, bestCost = Infinity;
-    for (var off = 0; off < HM; off++) {
-      var cost = 0;
-      for (var i = 0; i < HN; i++) {
-        var si = (off + Math.round(i * HM / HN)) % HM;
-        var s = halfSlotOrder[si];
-        var diff = slotAngles[s] - halfItems[i].angle;
-        if (diff > Math.PI) diff -= 2 * Math.PI;
-        if (diff < -Math.PI) diff += 2 * Math.PI;
-        cost += diff * diff;
-      }
-      if (cost < bestCost) { bestCost = cost; bestOff = off; }
+  /* ── Monotone angular assignment ──
+   * With items and slots both sorted by clock angle on the same circle,
+   * assigning item i to a slot whose angle is ≥ item (i-1)'s slot angle
+   * produces crossing-free leader lines. To handle angular wrap, we cut the
+   * circle at the largest gap between consecutive items and linearize from
+   * there — so the "last" item in the walk sits just before the empty arc.
+   * Within that linearization we do a monotone greedy with a tangent-safety
+   * filter. If the monotone walk stalls for an item (no tangent-safe slot
+   * ahead of the pointer) we fall back to the globally nearest tangent-safe
+   * slot; if even that fails, we pick any unused slot and warn. */
+  function assignMonotoneSide(sortedItems, slotEntries, usedSlot) {
+    var n = sortedItems.length;
+    var assignments = new Array(n);
+    if (n === 0) return assignments;
+
+    // Find largest angular gap between consecutive items (wrap-aware).
+    var startIdx = 0;
+    var bestGap = 2 * Math.PI - (sortedItems[n - 1].itemAng - sortedItems[0].itemAng);
+    for (var i = 1; i < n; i++) {
+      var gap = sortedItems[i].itemAng - sortedItems[i - 1].itemAng;
+      if (gap > bestGap) { bestGap = gap; startIdx = i; }
+    }
+    var startAng = sortedItems[startIdx].itemAng;
+    function norm(a) {
+      var v = a - startAng;
+      while (v < 0) v += 2 * Math.PI;
+      while (v >= 2 * Math.PI) v -= 2 * Math.PI;
+      return v;
     }
 
-    var usedSlot = {};
-    for (var i = 0; i < HN; i++) {
-      var ideal = (bestOff + Math.round(i * HM / HN)) % HM;
-      var found = -1;
-      for (var d = 0; d < HM; d++) {
-        var t1 = (ideal + d) % HM;
-        if (!usedSlot[t1]) { found = t1; break; }
-        var t2 = (ideal - d + HM) % HM;
-        if (!usedSlot[t2]) { found = t2; break; }
-      }
-      if (found < 0) continue;
-      usedSlot[found] = true;
-      var s = halfSlotOrder[found];
+    // Linearize slots into normalized angle order, filtering already-used.
+    var linear = [];
+    for (var i = 0; i < slotEntries.length; i++) {
+      var e = slotEntries[i];
+      if (usedSlot[e.k]) continue;
+      linear.push({ k: e.k, ang: norm(e.ang) });
+    }
+    linear.sort(function (a, b) { return a.ang - b.ang; });
 
-      result.push({
+    function tangentSafeFor(it, k) {
+      var p = it.pos;
+      return cardOutsideTangent(slots[k].x, slots[k].y, cW, cH, p.x, p.y, p.circleCX, p.circleCY, p.circleR);
+    }
+
+    var ptr = 0;
+    for (var step = 0; step < n; step++) {
+      var itemIdx = (startIdx + step) % n;
+      var it = sortedItems[itemIdx];
+      var picked = -1;
+
+      // Monotone walk: first tangent-safe slot at or after ptr.
+      for (var j = ptr; j < linear.length; j++) {
+        if (usedSlot[linear[j].k]) continue;
+        if (!tangentSafeFor(it, linear[j].k)) continue;
+        picked = j;
+        break;
+      }
+
+      // Fallback 1: nearest tangent-safe slot anywhere (may break monotone).
+      if (picked < 0) {
+        var bestJ = -1, bestDiff = Infinity;
+        var target = norm(it.itemAng);
+        for (var j = 0; j < linear.length; j++) {
+          if (usedSlot[linear[j].k]) continue;
+          if (!tangentSafeFor(it, linear[j].k)) continue;
+          var d = linear[j].ang - target;
+          if (d < 0) d = -d;
+          if (d < bestDiff) { bestDiff = d; bestJ = j; }
+        }
+        picked = bestJ;
+      }
+
+      // Fallback 2: nearest unused slot regardless of tangent (warns; leader may chord).
+      if (picked < 0) {
+        var bestJ2 = -1, bestDiff2 = Infinity;
+        var target2 = norm(it.itemAng);
+        for (var j = 0; j < linear.length; j++) {
+          if (usedSlot[linear[j].k]) continue;
+          var d2 = linear[j].ang - target2;
+          if (d2 < 0) d2 = -d2;
+          if (d2 < bestDiff2) { bestDiff2 = d2; bestJ2 = j; }
+        }
+        picked = bestJ2;
+        if (picked >= 0 && typeof console !== 'undefined' && console.warn) {
+          console.warn('SCurveTimeline: no tangent-safe slot for item', it.item && it.item.id);
+        }
+      }
+
+      if (picked < 0) { assignments[itemIdx] = -1; continue; }
+      usedSlot[linear[picked].k] = true;
+      assignments[itemIdx] = linear[picked].k;
+      // Only advance pointer on a forward (monotone) pick.
+      if (picked >= ptr) ptr = picked + 1;
+    }
+    return assignments;
+  }
+
+  var usedSlot = {};
+  var amAssigns = assignMonotoneSide(amItems, amSlotEntries, usedSlot);
+  var pmAssigns = assignMonotoneSide(pmItems, pmSlotEntries, usedSlot);
+
+  var cards = [];
+  function pushAssigned(sortedItems, assigns) {
+    for (var i = 0; i < sortedItems.length; i++) {
+      var s = assigns[i];
+      if (s == null || s < 0) continue;
+      var it = sortedItems[i];
+      cards.push({
         x: slots[s].x, y: slots[s].y,
-        curveX: halfItems[i].pos.x, curveY: halfItems[i].pos.y,
-        circleR: halfItems[i].pos.circleR,
-        circleCX: halfItems[i].pos.circleCX,
-        circleCY: halfItems[i].pos.circleCY,
-        isAM: halfItems[i].pos.isAM,
-        item: halfItems[i].item
+        curveX: it.pos.x, curveY: it.pos.y,
+        circleR: it.pos.circleR,
+        circleCX: it.pos.circleCX,
+        circleCY: it.pos.circleCY,
+        isAM: it.pos.isAM,
+        item: it.item
       });
     }
-    return result;
   }
-
-  var cards = assignHalf(amItems, amSlots).concat(assignHalf(pmItems, pmSlots));
+  pushAssigned(amItems, amAssigns);
+  pushAssigned(pmItems, pmAssigns);
 
   /* ── Connector helpers ── */
   function cardLine(c) {
@@ -408,28 +483,20 @@ function placeCards(items, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY, vpW, vpH) {
 
   function posValidBasic(nx, ny, skipIdx) {
     if (nx < P || nx + cW > vpW - P || ny < P || ny + cH > vpH - P) return false;
-    // Keep card on its half of the screen (AM=left, PM=right)
+    // Don't cross into the other circle's horizontal column.
     if (skipIdx >= 0 && skipIdx < cards.length) {
-      var cardCenterX = nx + cW / 2;
-      if (cards[skipIdx].isAM && cardCenterX > halfX) return false;
-      if (!cards[skipIdx].isAM && cardCenterX < halfX) return false;
+      if (cards[skipIdx].isAM  && nx + cW > amRightLimit) return false;
+      if (!cards[skipIdx].isAM && nx      < pmLeftLimit)  return false;
     }
     if (rectOverlapsEitherBand(nx, ny, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY)) return false;
     for (var j = 0; j < cards.length; j++) {
       if (j === skipIdx) continue;
       if (rectsOverlap(nx, ny, cW, cH, cards[j].x, cards[j].y, cW, cH)) return false;
     }
-    // Connector accuracy check
+    // Tangent half-plane rule: guarantees the leader line can't chord the disk.
     if (skipIdx >= 0 && skipIdx < cards.length) {
       var c = cards[skipIdx];
-      var cn = computeConnector(nx, ny, cW, cH, c.curveX, c.curveY, c.circleR, c.circleCX, c.circleCY);
-      var tdx = c.curveX - c.circleCX, tdy = c.curveY - c.circleCY;
-      var td = Math.sqrt(tdx * tdx + tdy * tdy) || 1;
-      var bandOuter = c.circleR + BAND_W / 2 + 2;
-      var idealBx = c.circleCX + (tdx / td) * bandOuter;
-      var idealBy = c.circleCY + (tdy / td) * bandOuter;
-      var bpDist = Math.sqrt((cn.bx - idealBx) * (cn.bx - idealBx) + (cn.by - idealBy) * (cn.by - idealBy));
-      if (bpDist > BAND_W) return false;
+      if (!cardOutsideTangent(nx, ny, cW, cH, c.curveX, c.curveY, c.circleCX, c.circleCY, c.circleR)) return false;
     }
     return true;
   }
@@ -460,135 +527,215 @@ function placeCards(items, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY, vpW, vpH) {
     return count;
   }
 
-  var DIRS = [
-    { dx: 0, dy: -1 }, { dx: 0, dy: 1 },
-    { dx: -1, dy: 0 }, { dx: 1, dy: 0 },
-    { dx: -1, dy: -1 }, { dx: 1, dy: -1 },
-    { dx: -1, dy: 1 }, { dx: 1, dy: 1 }
-  ];
-
-  /* ── Phase 2a: Nudge toward curve ── */
-  for (var iter = 0; iter < NUDGE_ITERS; iter++) {
-    var improved = false;
-    for (var i = 0; i < cards.length; i++) {
-      var c = cards[i];
-      var ccx = c.x + cW / 2, ccy = c.y + cH / 2;
-      var toDist = Math.sqrt((c.curveX - ccx) * (c.curveX - ccx) + (c.curveY - ccy) * (c.curveY - ccy));
-      if (toDist < NUDGE_STEP) continue;
-
-      var crossBefore = cardCrossings(i);
-      var bestX = -1, bestY = -1, bestDist = toDist, bestCross = crossBefore;
-      var candidates = [{ dx: (c.curveX - ccx) / toDist, dy: (c.curveY - ccy) / toDist }];
-      for (var d = 0; d < DIRS.length; d++) candidates.push(DIRS[d]);
-
-      for (var d = 0; d < candidates.length; d++) {
-        var nx = c.x + candidates[d].dx * NUDGE_STEP;
-        var ny = c.y + candidates[d].dy * NUDGE_STEP;
-        if (!posValid(nx, ny, i)) continue;
-
-        var newCcx = nx + cW / 2, newCcy = ny + cH / 2;
-        var newDist = Math.sqrt((c.curveX - newCcx) * (c.curveX - newCcx) + (c.curveY - newCcy) * (c.curveY - newCcy));
-        if (newDist >= bestDist) continue;
-
-        var ox = c.x, oy = c.y;
-        c.x = nx; c.y = ny;
-        var crossAfter = cardCrossings(i);
-        c.x = ox; c.y = oy;
-
-        if (crossAfter > crossBefore) continue;
-        if (crossAfter < bestCross || (crossAfter === bestCross && newDist < bestDist)) {
-          bestDist = newDist; bestX = nx; bestY = ny; bestCross = crossAfter;
-        }
-      }
-      if (bestX >= 0) { c.x = bestX; c.y = bestY; improved = true; }
-    }
-    if (!improved) break;
+  /* ── Sector-based border layout ──
+   * Classify each card's connection-point angle into one of four
+   * sectors (right/top/left/bottom), then split top and bottom rows
+   * per-circle so AM and PM cards stay in their own halves. Columns
+   * start from the top, rows start from the left — no centering. */
+  function classifySector(c) {
+    var dy = c.curveY - c.circleCY;
+    var dx = c.curveX - c.circleCX;
+    var rad = Math.atan2(-dy, dx);
+    var deg = rad * 180 / Math.PI;
+    while (deg < 0) deg += 360;
+    while (deg >= 360) deg -= 360;
+    if (deg >= 315 || deg < 45) return 'right';
+    if (deg < 135) return 'top';
+    if (deg < 225) return 'left';
+    return 'bottom';
   }
-
-  /* ── Phase 2b: Resolve crossings ── */
-  var TIME_BUDGET = 600;
-  var tStart = Date.now();
-  function overBudget() { return Date.now() - tStart > TIME_BUDGET; }
-
-  /* Swap crossing pairs */
-  for (var sp = 0; sp < 10 && !overBudget(); sp++) {
-    var didSwap = false;
-    for (var a = 0; a < cards.length && !overBudget(); a++) {
-      if (cardCrossings(a) === 0) continue;
-      for (var b = a + 1; b < cards.length; b++) {
-        var crossA = cardCrossings(a), crossB = cardCrossings(b);
-        if (crossA === 0 && crossB === 0) continue;
-        var sumBefore = crossA + crossB;
-
-        var axOld = cards[a].x, ayOld = cards[a].y;
-        var bxOld = cards[b].x, byOld = cards[b].y;
-        cards[a].x = bxOld; cards[a].y = byOld;
-        cards[b].x = axOld; cards[b].y = ayOld;
-
-        var validA = posValidBasic(cards[a].x, cards[a].y, a);
-        var validB = posValidBasic(cards[b].x, cards[b].y, b);
-        var abOvlp = rectsOverlap(cards[a].x, cards[a].y, cW, cH, cards[b].x, cards[b].y, cW, cH);
-        var sumAfter = validA && validB && !abOvlp ? cardCrossings(a) + cardCrossings(b) : sumBefore + 1;
-
-        if (sumAfter < sumBefore) {
-          didSwap = true;
-        } else {
-          cards[a].x = axOld; cards[a].y = ayOld;
-          cards[b].x = bxOld; cards[b].y = byOld;
-        }
-      }
-    }
-    if (!didSwap) break;
-  }
-
-  /* Jiggle */
-  var jigSteps = [NUDGE_STEP, NUDGE_STEP * 3, NUDGE_STEP * 8, NUDGE_STEP * 16, NUDGE_STEP * 32];
-  for (var jp = 0; jp < 60 && !overBudget(); jp++) {
-    var jigDone = true, jigImproved = false;
-    for (var i = 0; i < cards.length; i++) {
-      var myC = cardCrossings(i);
-      if (myC === 0) continue;
-      jigDone = false;
-      var bestX2 = -1, bestY2 = -1, bestC2 = myC;
-      for (var si = 0; si < jigSteps.length; si++) {
-        var step = jigSteps[si];
-        for (var d = 0; d < DIRS.length; d++) {
-          var nx = cards[i].x + DIRS[d].dx * step;
-          var ny = cards[i].y + DIRS[d].dy * step;
-          if (!posValidBasic(nx, ny, i)) continue;
-          var ox = cards[i].x, oy = cards[i].y;
-          cards[i].x = nx; cards[i].y = ny;
-          var ca = cardCrossings(i);
-          cards[i].x = ox; cards[i].y = oy;
-          if (ca < bestC2) { bestC2 = ca; bestX2 = nx; bestY2 = ny; }
-        }
-      }
-      if (bestX2 >= 0) { cards[i].x = bestX2; cards[i].y = bestY2; jigImproved = true; }
-    }
-    if (jigDone || !jigImproved) break;
-  }
-
-  /* Viewport scan relocate */
-  var scanStep = Math.round(Math.max(cW, cH) * 0.75);
-  for (var i = 0; i < cards.length && !overBudget(); i++) {
-    var myC = cardCrossings(i);
-    if (myC === 0) continue;
+  var groups = {
+    amLeft: [], amRight: [], pmLeft: [], pmRight: [],
+    amTop: [], amBottom: [], pmTop: [], pmBottom: []
+  };
+  for (var i = 0; i < cards.length; i++) {
     var c = cards[i];
-    var bestRX = -1, bestRY = -1, bestRC = myC, bestRD = Infinity;
-    for (var sy = P; sy + cH <= vpH - P; sy += scanStep) {
-      for (var sx = P; sx + cW <= vpW - P; sx += scanStep) {
-        if (!posValidBasic(sx, sy, i)) continue;
-        var ox = c.x, oy = c.y;
-        c.x = sx; c.y = sy;
-        var cc = cardCrossings(i);
-        c.x = ox; c.y = oy;
-        if (cc > bestRC) continue;
-        var ddx = sx + cW / 2 - c.curveX, ddy = sy + cH / 2 - c.curveY;
-        var dd = ddx * ddx + ddy * ddy;
-        if (cc < bestRC || dd < bestRD) { bestRC = cc; bestRX = sx; bestRY = sy; bestRD = dd; }
+    var sector = classifySector(c);
+    if (c.isAM) {
+      if (sector === 'top')         groups.amTop.push(i);
+      else if (sector === 'bottom') groups.amBottom.push(i);
+      else if (sector === 'left')   groups.amLeft.push(i);
+      else                          groups.amRight.push(i);
+    } else {
+      if (sector === 'top')         groups.pmTop.push(i);
+      else if (sector === 'bottom') groups.pmBottom.push(i);
+      else if (sector === 'left')   groups.pmLeft.push(i);
+      else                          groups.pmRight.push(i);
+    }
+  }
+  function byCurveY(a, b) { return cards[a].curveY - cards[b].curveY; }
+  function byCurveX(a, b) { return cards[a].curveX - cards[b].curveX; }
+  groups.amLeft.sort(byCurveY);
+  groups.amRight.sort(byCurveY);
+  groups.pmLeft.sort(byCurveY);
+  groups.pmRight.sort(byCurveY);
+  groups.amTop.sort(byCurveX);
+  groups.amBottom.sort(byCurveX);
+  groups.pmTop.sort(byCurveX);
+  groups.pmBottom.sort(byCurveX);
+
+  /* ── Sector overflow redistribution ──
+   * Compute capacity for each row/column sector. When a sector has
+   * more cards than it can fit without overlap, spill the excess cards
+   * (those nearest the sector boundary) into the adjacent sector. */
+  function rowCapacity(xSt, xEn) {
+    var avail = xEn - xSt;
+    if (avail < cW) return 0;
+    var minStepX = (cW + CARD_GAP) / 2;
+    return Math.max(1, Math.floor((avail - cW) / minStepX) + 1);
+  }
+  function colCapacity(ySt, yEn) {
+    var avail = yEn - ySt;
+    if (avail < cH) return 0;
+    return Math.floor((avail + CARD_GAP) / (cH + CARD_GAP));
+  }
+
+  function spillOverflow(rowGroup, leftCol, rightCol, rowCap, colCap) {
+    if (rowGroup.length <= rowCap) return;
+    var excess = rowGroup.length - rowCap;
+    var leftRoom  = Math.max(0, colCap - leftCol.length);
+    var rightRoom = Math.max(0, colCap - rightCol.length);
+    var maxSpill = leftRoom + rightRoom;
+    if (excess > maxSpill) excess = maxSpill;
+    var leftLoad = leftCol.length;
+    var rightLoad = rightCol.length;
+    for (var sp = 0; sp < excess; sp++) {
+      var leftFree  = colCap - leftLoad;
+      var rightFree = colCap - rightLoad;
+      if (leftFree <= 0 && rightFree <= 0) break;
+      if (leftFree > 0 && (leftLoad <= rightLoad || rightFree <= 0)) {
+        leftCol.push(rowGroup.shift());
+        leftLoad++;
+      } else if (rightFree > 0) {
+        rightCol.push(rowGroup.pop());
+        rightLoad++;
+      } else {
+        break;
       }
     }
-    if (bestRX >= 0 && bestRC < myC) { c.x = bestRX; c.y = bestRY; }
+  }
+
+  var amRowCap = rowCapacity(amRowXSt, amRowXEn);
+  var pmRowCap = rowCapacity(pmRowXSt, pmRowXEn);
+  var colCap   = colCapacity(colYSt, colYEn);
+  spillOverflow(groups.amTop,    groups.amLeft, groups.amRight, amRowCap, colCap);
+  spillOverflow(groups.amBottom, groups.amLeft, groups.amRight, amRowCap, colCap);
+  spillOverflow(groups.pmTop,    groups.pmLeft, groups.pmRight, pmRowCap, colCap);
+  spillOverflow(groups.pmBottom, groups.pmLeft, groups.pmRight, pmRowCap, colCap);
+
+  // Re-sort after redistribution.
+  function byCurveY2(a, b) { return cards[a].curveY - cards[b].curveY; }
+  function byCurveX2(a, b) { return cards[a].curveX - cards[b].curveX; }
+  groups.amLeft.sort(byCurveY2);
+  groups.amRight.sort(byCurveY2);
+  groups.pmLeft.sort(byCurveY2);
+  groups.pmRight.sort(byCurveY2);
+  groups.amTop.sort(byCurveX2);
+  groups.amBottom.sort(byCurveX2);
+  groups.pmTop.sort(byCurveX2);
+  groups.pmBottom.sort(byCurveX2);
+
+  /* ── Layout helpers ── */
+  function layoutVerticalColumn(indices, colX, yStart, yEnd) {
+    var n = indices.length;
+    if (n === 0) return;
+    var avail = yEnd - yStart;
+    var step = cH + CARD_GAP;
+    var totalH = n * cH + (n - 1) * CARD_GAP;
+    // Centre when cards fit; overflow downward when they don't
+    // (no compression — contentH will grow and parent scrolls).
+    var startY = totalH <= avail
+      ? yStart + (avail - totalH) / 2
+      : yStart;
+    for (var k = 0; k < n; k++) {
+      cards[indices[k]].x = Math.round(colX);
+      cards[indices[k]].y = Math.round(startY + k * step);
+    }
+  }
+
+  function layoutHorizontalRow(indices, boundaryY, towardDir, xStart, xEnd) {
+    var n = indices.length;
+    if (n === 0) return;
+    var avail = xEnd - xStart;
+    var singleNeeded = n * cW + (n - 1) * CARD_GAP;
+    var useStep = (n > 1) && (singleNeeded > avail);
+    if (!useStep) {
+      var step = n > 1 ? Math.min(cW + CARD_GAP, (avail - cW) / (n - 1)) : 0;
+      var totalSpan = (n - 1) * step;
+      var startX = xStart + (avail - cW - totalSpan) / 2;
+      if (startX < xStart) startX = xStart;
+      for (var k = 0; k < n; k++) {
+        cards[indices[k]].x = Math.round(startX + k * step);
+        cards[indices[k]].y = boundaryY;
+      }
+      return;
+    }
+    // Step pattern: alternate between two y-levels. Enforce minimum
+    // stepX so same-row cards (2·stepX apart) don't overlap.
+    var minStepX = (cW + CARD_GAP) / 2;
+    var stepX = Math.max(minStepX, (avail - cW) / (n - 1));
+    var totalStepSpan = (n - 1) * stepX;
+    var startStepX = xStart + (avail - cW - totalStepSpan) / 2;
+    if (startStepX < xStart) startStepX = xStart;
+    var altY = boundaryY + towardDir * (cH + CARD_GAP);
+    for (var k = 0; k < n; k++) {
+      cards[indices[k]].x = Math.round(startStepX + k * stepX);
+      cards[indices[k]].y = (k % 2 === 0) ? boundaryY : altY;
+    }
+  }
+
+  // Columns — centred vertically on circleCY.
+  layoutVerticalColumn(groups.amLeft,  amLeftX,  colYSt, colYEn);
+  layoutVerticalColumn(groups.amRight, amRightX, colYSt, colYEn);
+  layoutVerticalColumn(groups.pmLeft,  pmLeftX,  colYSt, colYEn);
+  layoutVerticalColumn(groups.pmRight, pmRightX, colYSt, colYEn);
+
+  // Rows — centred horizontally on circleCX.
+  layoutHorizontalRow(groups.amTop,    P,            +1, amRowXSt, amRowXEn);
+  layoutHorizontalRow(groups.amBottom, vpH - cH - P, -1, amRowXSt, amRowXEn);
+  layoutHorizontalRow(groups.pmTop,    P,            +1, pmRowXSt, pmRowXEn);
+  layoutHorizontalRow(groups.pmBottom, vpH - cH - P, -1, pmRowXSt, pmRowXEn);
+
+  /* ── Final safety-net ──
+   * Clamp horizontally to viewport, push cards off circle bands,
+   * nudge stacked cards. No vertical ceiling — contentH grows to
+   * fit overflow and the parent container scrolls. */
+  for (var ci = 0; ci < cards.length; ci++) {
+    var cc = cards[ci];
+    if (cc.x < P)            cc.x = P;
+    if (cc.x + cW > vpW - P) cc.x = vpW - P - cW;
+    if (cc.y < P)            cc.y = P;
+
+    for (var pass = 0; pass < 5; pass++) {
+      if (!rectOverlapsEitherBand(cc.x, cc.y, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY)) break;
+      var dx = (cc.x + cW / 2) - (cc.isAM ? amCX : pmCX);
+      var dy = (cc.y + cH / 2) - (cc.isAM ? amCY : pmCY);
+      var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      cc.x += Math.round(dx / dist * 20);
+      cc.y += Math.round(dy / dist * 20);
+      if (cc.x < P)            cc.x = P;
+      if (cc.x + cW > vpW - P) cc.x = vpW - P - cW;
+      if (cc.y < P)            cc.y = P;
+    }
+  }
+
+  // Nudge stacked cards so no two occupy the exact same position.
+  for (var ci = 0; ci < cards.length; ci++) {
+    for (var cj = ci + 1; cj < cards.length; cj++) {
+      if (Math.abs(cards[ci].x - cards[cj].x) < 2 && Math.abs(cards[ci].y - cards[cj].y) < 2) {
+        cards[cj].y += cH + CARD_GAP;
+      }
+    }
+  }
+
+  /* ── Post-placement invariant check ── */
+  for (var i = 0; i < cards.length; i++) {
+    var c = cards[i];
+    if (!cardOutsideTangent(c.x, c.y, cW, cH, c.curveX, c.curveY, c.circleCX, c.circleCY, c.circleR)) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('SCurveTimeline: leader line will cross circle for item', c.item && c.item.item && c.item.item.id);
+      }
+    }
   }
 
   /* ── Build result ── */
@@ -618,29 +765,97 @@ export default function SCurveTimeline(props) {
   var isToday        = props.isToday;
   var blockedTaskIds = props.blockedTaskIds;
   var isMobile       = props.isMobile;
-  var vpW            = props.viewportWidth  || 800;
-  var vpH            = props.viewportHeight || 600;
   var dateKey        = props.dateKey;
   var schedCfg       = props.schedCfg || {};
 
+  var vpW            = props.viewportWidth  || 800;
+  var vpH            = props.viewportHeight || 600;
+
   var theme = getTheme(darkMode);
 
-  /* ── Circle sizing and positioning ── */
-  // Two circles side by side. Each takes up roughly 23% of width.
-  var circleW = vpW * 0.23;
-  var R = Math.max(29, Math.min(circleW / 2 - BAND_W, (vpH - 2 * PADDING) * 0.25));
+  /* ── Responsive card + circle sizing ──
+   * 1. Split viewport into two equal halves.
+   * 2. Circle diameter = 1/3 of min(halfW, layoutH), so the circle
+   *    scales proportionally and stays readable.
+   * 3. Remaining area (half minus circle footprint) × 75% is the
+   *    budget for task cards. Divide by the max task count on any
+   *    single sector to get per-card area, then derive cW/cH from
+   *    that. All cards use the same size.
+   */
 
-  // AM circle: left side, PM circle: right side
-  var gap = vpW * CIRCLE_GAP;
-  var amCX = vpW / 2 - gap / 2 - R;
-  var pmCX = vpW / 2 + gap / 2 + R;
-  var amCY = vpH / 2;
-  var pmCY = vpH / 2;
+  // Count visible tasks per half so we can size cards.
+  var amCount = 0, pmCount = 0;
+  var visiblePlacements = (placements || []).filter(function (p) {
+    var s = statuses && p.task ? statuses[p.task.id] : null;
+    return !isTerminalStatus(s);
+  });
+  for (var vi = 0; vi < visiblePlacements.length; vi++) {
+    var st = visiblePlacements[vi].start;
+    if (st != null && st < 720) amCount++;
+    else pmCount++;
+  }
+  var maxSideCount = Math.max(amCount, pmCount, 1);
 
-  // Clamp so circles don't go off-screen
+  var MIN_R  = 40;
+  var MAX_R  = 250;
+  var MIN_CW = 110;
+  var MAX_CW = 280;
+  var MIN_CH = 29;
+  var HALF_FIXED = PADDING + CARD_GAP + 2 * CLOCK_BUFFER + BAND_W;
+
+  // Minimum content dimensions for a comfortable layout.
+  var COMFORT_R  = 100;
+  var COMFORT_CW = 150;
+  var COMFORT_CH = Math.round(COMFORT_CW / ASPECT_RATIO);
+  var MIN_CONTENT_W = 2 * (HALF_FIXED + 2 * COMFORT_CW + 2 * COMFORT_R);
+  var MIN_CONTENT_H = 2 * (PADDING + 2 * COMFORT_CH + CARD_GAP + CLOCK_BUFFER + BAND_W / 2 + COMFORT_R) + 40;
+
+  var scrollMode = vpW < MIN_CONTENT_W || vpH < MIN_CONTENT_H;
+  var layoutW = Math.max(vpW, MIN_CONTENT_W);
+  var layoutH = Math.max(vpH, MIN_CONTENT_H);
+  var halfW = layoutW / 2;
+  var smallerDim = Math.min(halfW, layoutH);
+
+  // Step 1: circle radius from layout dimensions.
+  var R = Math.round(Math.max(MIN_R, Math.min(MAX_R, smallerDim * 0.225)));
+
+  // Step 2: max card width that fits geometrically.
+  var geoCW = Math.floor((halfW - HALF_FIXED - 2 * R) / 2);
+  if (geoCW < MIN_CW) {
+    R = Math.floor((halfW - HALF_FIXED - 2 * MIN_CW) / 2);
+    if (R < MIN_R) R = MIN_R;
+    geoCW = Math.floor((halfW - HALF_FIXED - 2 * R) / 2);
+  }
+
+  // Step 3: area budget caps cW when there are many tasks.
+  var halfArea = halfW * layoutH;
+  var circleArea = Math.PI * (R + BAND_W / 2) * (R + BAND_W / 2);
+  var cardBudgetArea = (halfArea - circleArea) * 0.75;
+  var perCardArea = cardBudgetArea / maxSideCount;
+  var areaCW = Math.sqrt(perCardArea * ASPECT_RATIO);
+
+  var cW = Math.round(Math.max(MIN_CW, Math.min(MAX_CW, geoCW, areaCW)));
+
+  // Step 4: card height, capped by vertical space above/below circle.
+  var cH = Math.max(MIN_CH, Math.min(70, Math.round(cW / ASPECT_RATIO)));
+  var rowSpace = layoutH / 2 - R - BAND_W / 2 - CLOCK_BUFFER - PADDING;
+  var maxRowCH = Math.floor((rowSpace - CARD_GAP) / 2);
+  if (maxRowCH >= MIN_CH && cH > maxRowCH) {
+    cH = maxRowCH;
+    cW = Math.round(Math.min(cW, cH * ASPECT_RATIO));
+    if (cW < MIN_CW) cW = MIN_CW;
+  }
+
+  // Circle centres (within layout dimensions, not viewport).
+  var amCX = halfW / 2;
+  var pmCX = halfW + halfW / 2;
+  var amCY = layoutH / 2;
+  var pmCY = layoutH / 2;
+
+  // Clamp so circles don't go off-screen.
   var minEdge = R + BAND_W / 2 + PADDING + 10;
   if (amCX < minEdge) amCX = minEdge;
-  if (pmCX > vpW - minEdge) pmCX = vpW - minEdge;
+  if (pmCX > layoutW - minEdge) pmCX = layoutW - minEdge;
 
   var amR = R;
   var pmR = R;
@@ -761,30 +976,35 @@ export default function SCurveTimeline(props) {
 
   /* ── Card layout ── */
   var cardLayout = useMemo(function () {
-    var sorted = (placements || []).slice().sort(function (a, b) { return a.start - b.start; });
+    // Hide terminal-status tasks (done / cancel / skip) from the clock view.
+    var visible = (placements || []).filter(function (p) {
+      var s = statuses && p.task ? statuses[p.task.id] : null;
+      return !isTerminalStatus(s);
+    });
+    var sorted = visible.slice().sort(function (a, b) { return a.start - b.start; });
 
     var defColor = theme.badgeText;
     var allItems = [];
     for (var i = 0; i < sorted.length; i++) {
       var item = sorted[i];
-      var mins = item.start != null ? item.start : 720;
-      var blk = getBlockAtMinute(mins, blocks);
+      var startMins = item.start != null ? item.start : 720;
+      var rawDur = (item.dur != null ? item.dur : (item.task && item.task.dur)) || 0;
+      if (rawDur < 5) rawDur = 5;
+      // Clamp the arc to its starting half-day circle and point the leader
+      // at the midpoint of the visible arc.
+      var halfCap = startMins < 720 ? 720 : 1440;
+      var endMins = Math.min(startMins + rawDur, halfCap);
+      var midMins = (startMins + endMins) / 2;
+      var blk = getBlockAtMinute(startMins, blocks);
       var blockColor = blk ? (blk.color || defColor) : defColor;
-      allItems.push({ item: item, mins: mins, blockColor: blockColor });
+      allItems.push({ item: item, mins: midMins, blockColor: blockColor });
     }
 
-    var area = estimateArea(amR, amCX, amCY, pmR, pmCX, pmCY, vpW, vpH);
-    var size = computeCardSize(allItems.length, area, isMobile);
-    var cW = size.w;
-    var cH = size.h;
-
-    var cards = placeCards(allItems, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY, vpW, vpH);
-    return { cards: cards, cW: cW, cH: cH };
-  }, [placements, amR, amCX, amCY, pmR, pmCX, pmCY, vpW, vpH, isMobile, blocks, darkMode]);
+    var cards = placeCards(allItems, cW, cH, amR, amCX, amCY, pmR, pmCX, pmCY, layoutW, layoutH);
+    return { cards: cards };
+  }, [placements, statuses, amR, amCX, amCY, pmR, pmCX, pmCY, cW, cH, layoutW, layoutH, isMobile, blocks, darkMode, scrollMode, R]);
 
   var cards = cardLayout.cards;
-  var cW = cardLayout.cW;
-  var cH = cardLayout.cH;
   var layoutMode = cH < 55 ? 'compact' : 'normal';
 
   /* ── Now indicator ── */
@@ -793,8 +1013,10 @@ export default function SCurveTimeline(props) {
     return minutesToDualPosition(nowMins, amR, amCX, amCY, pmR, pmCX, pmCY);
   }, [isToday, nowMins, amR, amCX, amCY, pmR, pmCX, pmCY]);
 
-  /* ── Content height ── */
-  var contentH = vpH;
+  /* ── Content dimensions ──
+   * contentH may grow beyond layoutH if cards overflow vertically. */
+  var contentW = layoutW;
+  var contentH = layoutH;
   for (var ci = 0; ci < cards.length; ci++) {
     var bot = cards[ci].cardY + cH + PADDING;
     if (bot > contentH) contentH = bot;
@@ -849,28 +1071,12 @@ export default function SCurveTimeline(props) {
 
   /* ── Render ── */
   return (
-    <div style={{ position: 'relative', width: vpW, height: contentH, minHeight: vpH, overflow: 'hidden' }}>
+    <div style={{ position: 'relative', width: contentW, height: contentH, minHeight: layoutH, overflow: 'visible' }}>
       <svg style={{
         position: 'absolute', left: 0, top: 0,
-        width: vpW, height: contentH,
+        width: contentW, height: contentH,
         pointerEvents: 'none'
       }}>
-
-        {/* Circle labels */}
-        <text x={amCX} y={amCY - amR - BAND_W / 2 - 28}
-          textAnchor="middle" dominantBaseline="middle"
-          fill={theme.badgeText}
-          fontSize={isMobile ? 11 : 14} fontWeight={700}
-          fontFamily="'Inter', system-ui" opacity={0.7}>
-          AM
-        </text>
-        <text x={pmCX} y={pmCY - pmR - BAND_W / 2 - 28}
-          textAnchor="middle" dominantBaseline="middle"
-          fill={theme.badgeText}
-          fontSize={isMobile ? 11 : 14} fontWeight={700}
-          fontFamily="'Inter', system-ui" opacity={0.7}>
-          PM
-        </text>
 
         {/* AM circle */}
         {renderCurve(curveSamples.am, 'am')}
@@ -879,6 +1085,22 @@ export default function SCurveTimeline(props) {
         {/* PM circle */}
         {renderCurve(curveSamples.pm, 'pm')}
         {renderBlockSegs(blockSegments.pm, 'pmSeg')}
+
+        {/* AM / PM center labels */}
+        <text x={amCX} y={amCY}
+          textAnchor="middle" dominantBaseline="middle"
+          fill={theme.textMuted}
+          fontSize={isMobile ? 16 : 22} fontWeight={700}
+          fontFamily="'Inter', system-ui" opacity={0.35}>
+          AM
+        </text>
+        <text x={pmCX} y={pmCY}
+          textAnchor="middle" dominantBaseline="middle"
+          fill={theme.textMuted}
+          fontSize={isMobile ? 16 : 22} fontWeight={700}
+          fontFamily="'Inter', system-ui" opacity={0.35}>
+          PM
+        </text>
 
         {/* Hour tick marks + labels */}
         {hourMarkers.map(function (m) {
@@ -900,40 +1122,90 @@ export default function SCurveTimeline(props) {
                   fill={theme.textSecondary}
                   fontSize={isMobile ? 9 : 11} fontWeight={700}
                   fontFamily="'Inter', system-ui">
-                  {formatHour(m.hour)}
+                  {m.hour % 12 || 12}
                 </text>
               ) : null}
             </g>
           );
         })}
 
-        {/* Connector lines */}
+        {/* Connector lines + arrowhead at the arc */}
         {cards.map(function (c) {
           var pc = PRI_COLORS[c.item.task.pri] || PRI_COLORS.P3;
           var cn = computeConnector(c.cardX, c.cardY, cW, cH,
                                     c.curveX, c.curveY, c.circleR, c.circleCX, c.circleCY);
-          return <line key={'cn' + (c.item.key || c.item.task.id)}
-            x1={cn.bx} y1={cn.by} x2={cn.ex} y2={cn.ey}
-            stroke={pc} strokeWidth={1.2} opacity={0.3} />;
+          var ndx = c.circleCX - cn.bx, ndy = c.circleCY - cn.by;
+          var nl  = Math.sqrt(ndx * ndx + ndy * ndy) || 1;
+          var nux = ndx / nl, nuy = ndy / nl;
+          var pxn = -nuy,      pyn = nux;
+          var aLen = 7, aHalfW = 3.5;
+          var tipX  = cn.bx + nux * 2;          var tipY  = cn.by + nuy * 2;
+          var baseX = cn.bx - nux * (aLen - 2); var baseY = cn.by - nuy * (aLen - 2);
+          var bLx = baseX + pxn * aHalfW, bLy = baseY + pyn * aHalfW;
+          var bRx = baseX - pxn * aHalfW, bRy = baseY - pyn * aHalfW;
+          var key = c.item.key || c.item.task.id;
+          return (
+            <g key={'cn' + key}>
+              <line
+                x1={baseX} y1={baseY} x2={cn.ex} y2={cn.ey}
+                stroke={pc} strokeWidth={1.2} opacity={0.45} />
+              <polygon
+                points={tipX + ',' + tipY + ' ' + bLx + ',' + bLy + ' ' + bRx + ',' + bRy}
+                fill={pc} opacity={0.75} />
+            </g>
+          );
         })}
 
-        {/* Task markers on the curve */}
+        {/* Task arcs — thick, semi-transparent arc spanning each task's
+            duration on the band, so hour ticks and the curve show through. */}
         {cards.map(function (c) {
           var pc = PRI_COLORS[c.item.task.pri] || PRI_COLORS.P3;
-          return <circle key={'mk' + (c.item.key || c.item.task.id)}
-            cx={c.curveX} cy={c.curveY} r={5}
-            fill={pc} opacity={0.9}
-            stroke={theme.bg} strokeWidth={2} />;
+          var startMins = c.item.start != null ? c.item.start : 720;
+          var dur = (c.item.dur != null ? c.item.dur : (c.item.task && c.item.task.dur)) || 0;
+          if (dur < 5) dur = 5;  // tiny tasks still visible
+          var isAM = startMins < 720;
+          var halfBase = isAM ? 0 : 720;
+          var halfCap  = 720;
+          var sHalf = startMins - halfBase;
+          var eHalf = Math.min(sHalf + dur, halfCap);
+          if (eHalf <= sHalf) return null;
+          var t1 = sHalf / 720, t2 = eHalf / 720;
+          var a1 = Math.PI / 2 - t1 * 2 * Math.PI;
+          var a2 = Math.PI / 2 - t2 * 2 * Math.PI;
+          var R = c.circleR, CX = c.circleCX, CY = c.circleCY;
+          var x1 = CX + R * Math.cos(a1), y1 = CY - R * Math.sin(a1);
+          var x2 = CX + R * Math.cos(a2), y2 = CY - R * Math.sin(a2);
+          var spanAngle = (eHalf - sHalf) / 720 * 2 * Math.PI;
+          var sweep = spanAngle > Math.PI ? 1 : 0;
+          var d = 'M ' + x1 + ' ' + y1 + ' A ' + R + ' ' + R + ' 0 ' + sweep + ' 1 ' + x2 + ' ' + y2;
+          return <path key={'arc' + (c.item.key || c.item.task.id)}
+            d={d} fill="none" stroke={pc} strokeWidth={BAND_W}
+            strokeLinecap="butt" opacity={0.45} />;
         })}
 
-        {/* Now indicator */}
-        {nowPos && (
-          <g>
-            <circle cx={nowPos.x} cy={nowPos.y} r={7} fill={theme.redText} />
-            <circle cx={nowPos.x} cy={nowPos.y} r={12}
-              fill="none" stroke={theme.redText} strokeWidth={2} opacity={0.4} />
-          </g>
-        )}
+        {/* Now indicator — tapered clock hand on the active circle */}
+        {nowPos && (function () {
+          var cx = nowPos.circleCX, cy = nowPos.circleCY;
+          var tx = nowPos.x,        ty = nowPos.y;
+          var dx = tx - cx, dy = ty - cy;
+          var L  = Math.sqrt(dx * dx + dy * dy) || 1;
+          var ux = dx / L, uy = dy / L;
+          var px = -uy,    py = ux;                  // perpendicular
+          var baseW = 7, tipW = 1.2, tailLen = 10;   // hand proportions
+          var bx = cx - ux * tailLen, by = cy - uy * tailLen;
+          var BL = (bx + px * baseW / 2) + ',' + (by + py * baseW / 2);
+          var BR = (bx - px * baseW / 2) + ',' + (by - py * baseW / 2);
+          var TL = (tx + px * tipW  / 2) + ',' + (ty + py * tipW  / 2);
+          var TR = (tx - px * tipW  / 2) + ',' + (ty - py * tipW  / 2);
+          return (
+            <g>
+              <polygon points={BL + ' ' + TL + ' ' + TR + ' ' + BR}
+                fill={theme.redText} opacity={0.95} />
+              <circle cx={cx} cy={cy} r={5} fill={theme.redText} />
+              <circle cx={cx} cy={cy} r={2} fill={theme.bg} />
+            </g>
+          );
+        })()}
       </svg>
 
       {/* Task cards — render lower cards first so upper cards sit on top and are clickable */}
@@ -972,7 +1244,6 @@ export default function SCurveTimeline(props) {
                 item={c.item}
                 status={statuses[c.item.task.id] || ''}
                 onStatusChange={function (val) { onStatusChange(c.item.task.id, val); }}
-                onExpand={function () { onExpand(c.item.task.id); }}
                 darkMode={darkMode}
                 isBlocked={blockedTaskIds && blockedTaskIds.has(c.item.task.id)}
                 isMobile={isMobile}
@@ -983,6 +1254,7 @@ export default function SCurveTimeline(props) {
           </div>
         );
       })}
+
     </div>
   );
 }

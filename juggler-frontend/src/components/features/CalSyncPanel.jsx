@@ -28,6 +28,20 @@ export default function CalSyncPanel({
   var theme = getTheme(darkMode);
   var [syncing, setSyncing] = useState(false);
   var [results, setResults] = useState(null);
+  var [showHistory, setShowHistory] = useState(false);
+  var [history, setHistory] = useState(null);
+  var [loadingHistory, setLoadingHistory] = useState(false);
+
+  function loadHistory() {
+    setLoadingHistory(true);
+    apiClient.get('/cal/sync-history?limit=100').then(function(r) {
+      setHistory(r.data.items || []);
+      setShowHistory(true);
+    }).catch(function() {
+      setHistory([]);
+      setShowHistory(true);
+    }).finally(function() { setLoadingHistory(false); });
+  }
 
   // Per-provider connection state
   var [gcalConnected, setGcalConnected] = useState(null);
@@ -172,12 +186,26 @@ export default function CalSyncPanel({
       if (onSyncStart) onSyncStart();
       var { data } = await apiClient.post('/cal/sync');
       setResults(data);
-      var parts = [];
-      if (data.pushed) parts.push(data.pushed + ' pushed');
-      if (data.pulled) parts.push(data.pulled + ' pulled');
-      var deleted = (data.deleted_local || 0) + (data.deleted_remote || 0);
-      if (deleted) parts.push(deleted + ' deleted');
-      showToast(parts.length > 0 ? 'Synced: ' + parts.join(', ') : 'Already in sync', 'success');
+      // Build smart toast from summary
+      var summary = data.summary || [];
+      var hasIssue = summary.some(function(s) { return s.hasIssue; });
+      var pins = summary.filter(function(s) { return s.type === 'pin'; });
+      var toastMsg;
+      if (summary.length === 0) {
+        toastMsg = 'Already in sync';
+      } else if (summary.length <= 2) {
+        toastMsg = 'Synced: ' + summary.map(function(s) { return s.text ? "'" + s.text + "' " + s.message.toLowerCase() : s.message; }).join('. ');
+      } else {
+        var counts = [];
+        var pullCount = summary.filter(function(s) { return s.type === 'pull' || s.type === 'create'; }).length;
+        var pushCount = summary.filter(function(s) { return s.type === 'push'; }).length;
+        if (pullCount) counts.push(pullCount + ' updated');
+        if (pushCount) counts.push(pushCount + ' pushed');
+        if (pins.length) counts.push(pins.length + ' pinned');
+        toastMsg = 'Synced: ' + counts.join(', ');
+      }
+      if (hasIssue) toastMsg += '. Check Conflicts for dependency issues.';
+      showToast(toastMsg, hasIssue ? 'warning' : 'success');
       if (onSyncComplete) onSyncComplete();
     } catch (e) {
       if (e.response?.status === 409) {
@@ -338,27 +366,155 @@ export default function CalSyncPanel({
           </button>
         </div>
 
-        {/* Results summary */}
-        {results && (
-          <div style={{
-            padding: 12, background: theme.bgTertiary,
-            borderRadius: 2, fontSize: 12, color: theme.text,
-            border: '1px solid ' + theme.border
-          }}>
-            <div style={{ fontWeight: 600, marginBottom: 6 }}>Sync Results</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 16px', fontSize: 11, color: theme.textSecondary }}>
-              <div>Pushed: <strong style={{ color: theme.text }}>{results.pushed || 0}</strong></div>
-              <div>Pulled: <strong style={{ color: theme.text }}>{results.pulled || 0}</strong></div>
-              <div>Deleted (local): <strong style={{ color: theme.text }}>{results.deleted_local || 0}</strong></div>
-              <div>Deleted (remote): <strong style={{ color: theme.text }}>{results.deleted_remote || 0}</strong></div>
-            </div>
-            {results.errors && results.errors.length > 0 && (
-              <div style={{ marginTop: 6, color: '#e74c3c', fontSize: 11 }}>
-                {results.errors.length} error(s) during sync
+        {/* Results — readable activity log */}
+        {results && !showHistory && (function() {
+          var summary = results.summary || [];
+          var icons = { pin: '\uD83D\uDCCC', pull: '\u2B07', push: '\u2B06', create: '\u2795', delete: '\uD83D\uDDD1', error: '\u26A0', info: '\u2139\uFE0F' };
+          var fromCal = summary.filter(function(s) { return s.type === 'pull' || s.type === 'pin' || s.type === 'create'; });
+          var pushed = summary.filter(function(s) { return s.type === 'push'; });
+          var deleted = summary.filter(function(s) { return s.type === 'delete'; });
+          var errors = summary.filter(function(s) { return s.type === 'error'; });
+          var issues = summary.filter(function(s) { return s.hasIssue && s.type !== 'error'; });
+
+          function renderEntry(s, i) {
+            var isError = s.type === 'error';
+            var isIssue = s.hasIssue;
+            return (
+              <div key={i} style={{
+                display: 'flex', gap: 6, alignItems: 'flex-start', padding: '4px 0',
+                fontSize: 11, color: isError ? '#DC2626' : isIssue ? '#92400E' : theme.text
+              }}>
+                <span style={{ flexShrink: 0, fontSize: 10 }}>{icons[s.type] || icons.info}</span>
+                <div>
+                  {s.text && <strong>{s.text}</strong>}
+                  {s.text && ' — '}
+                  <span style={{ color: isError ? '#DC2626' : isIssue ? '#B45309' : theme.textSecondary }}>{s.message}</span>
+                </div>
               </div>
-            )}
-          </div>
-        )}
+            );
+          }
+
+          function renderSection(label, items, bg) {
+            if (items.length === 0) return null;
+            return (
+              <div style={{ marginBottom: 6 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>{label}</div>
+                <div style={{ background: bg || 'transparent', borderRadius: 4, padding: bg ? '4px 8px' : 0, maxHeight: 200, overflowY: 'auto' }}>
+                  {items.map(renderEntry)}
+                </div>
+              </div>
+            );
+          }
+
+          return (
+            <div style={{
+              padding: 12, background: theme.bgTertiary,
+              borderRadius: 2, fontSize: 12, color: theme.text,
+              border: '1px solid ' + theme.border
+            }}>
+              {summary.length === 0 ? (
+                <div style={{ fontSize: 12, color: theme.textSecondary, textAlign: 'center', padding: 8 }}>
+                  Everything is in sync
+                </div>
+              ) : (
+                <>
+                  {renderSection('From your calendars', fromCal)}
+                  {renderSection('Pushed to calendars', pushed)}
+                  {renderSection('Removed', deleted)}
+                  {errors.length > 0 && renderSection('Errors', errors, '#FEE2E220')}
+                  {issues.length > 0 && renderSection('Issues', issues, '#FEF3C720')}
+                </>
+              )}
+            </div>
+          );
+        })()
+        }
+
+        {/* History view */}
+        {showHistory && (function() {
+          var icons = { pin: '\uD83D\uDCCC', pull: '\u2B07', push: '\u2B06', create: '\u2795', delete: '\uD83D\uDDD1', error: '\u26A0', info: '\u2139\uFE0F' };
+          var actionToIcon = { promoted: 'pin', pulled: 'pull', pushed: 'push', created: 'create', deleted_remote: 'delete', deleted_local: 'delete', conflict_juggler: 'push', conflict_provider: 'pull', error: 'error' };
+          // Group by sync_run_id
+          var runs = [];
+          var runMap = {};
+          (history || []).forEach(function(h) {
+            if (!runMap[h.sync_run_id]) {
+              runMap[h.sync_run_id] = { id: h.sync_run_id, time: h.created_at, items: [] };
+              runs.push(runMap[h.sync_run_id]);
+            }
+            runMap[h.sync_run_id].items.push(h);
+          });
+
+          return (
+            <div style={{
+              padding: 12, background: theme.bgTertiary,
+              borderRadius: 2, fontSize: 12, color: theme.text,
+              border: '1px solid ' + theme.border
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ fontWeight: 600, fontSize: 12 }}>Sync History</div>
+                <button onClick={function() { setShowHistory(false); }} style={{
+                  border: 'none', background: 'transparent', color: theme.textMuted,
+                  fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline'
+                }}>Back</button>
+              </div>
+              {runs.length === 0 ? (
+                <div style={{ fontSize: 11, color: theme.textSecondary, textAlign: 'center', padding: 8 }}>No sync history yet</div>
+              ) : (
+                <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                  {runs.map(function(run) {
+                    var errorCount = run.items.filter(function(h) { return h.action === 'error'; }).length;
+                    var pushCount = run.items.filter(function(h) { return h.action === 'pushed'; }).length;
+                    var pullCount = run.items.filter(function(h) { return h.action === 'pulled' || h.action === 'created'; }).length;
+                    var parts = [];
+                    if (pushCount) parts.push(pushCount + ' pushed');
+                    if (pullCount) parts.push(pullCount + ' pulled');
+                    if (errorCount) parts.push(errorCount + ' error' + (errorCount > 1 ? 's' : ''));
+                    return (
+                      <details key={run.id} style={{ marginBottom: 4 }}>
+                        <summary style={{ cursor: 'pointer', fontSize: 11, padding: '4px 0', color: theme.text }}>
+                          <span style={{ fontWeight: 600 }}>{formatRelativeTime(run.time)}</span>
+                          <span style={{ color: theme.textMuted }}> — {parts.join(', ') || run.items.length + ' actions'}</span>
+                        </summary>
+                        <div style={{ paddingLeft: 12, paddingBottom: 6 }}>
+                          {run.items.map(function(h, i) {
+                            var icon = icons[actionToIcon[h.action]] || icons.info;
+                            var isError = h.action === 'error';
+                            return (
+                              <div key={i} style={{
+                                display: 'flex', gap: 6, alignItems: 'flex-start', padding: '2px 0',
+                                fontSize: 10, color: isError ? '#DC2626' : theme.text
+                              }}>
+                                <span style={{ flexShrink: 0 }}>{icon}</span>
+                                <div>
+                                  {h.task_text && <strong>{h.task_text}</strong>}
+                                  {h.task_text && ' — '}
+                                  <span style={{ color: isError ? '#DC2626' : theme.textSecondary }}>{h.detail || h.action}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </details>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()
+        }
+
+        {/* View History button */}
+        <div style={{ padding: '8px 0 0', textAlign: 'center' }}>
+          <button onClick={showHistory ? function() { setShowHistory(false); } : loadHistory} disabled={loadingHistory} style={{
+            border: 'none', background: 'transparent', color: theme.textMuted,
+            fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline',
+            opacity: loadingHistory ? 0.5 : 1
+          }}>
+            {loadingHistory ? 'Loading...' : showHistory ? 'Hide History' : 'View Sync History'}
+          </button>
+        </div>
       </div>
     </div>
   );

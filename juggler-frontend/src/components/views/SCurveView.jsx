@@ -12,22 +12,36 @@ import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 export default function SCurveView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onExpand, darkMode, schedCfg, nowMins, isToday, blockedTaskIds, isMobile, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchRecurringsDone }) {
   var theme = getTheme(darkMode);
   var loc = getLocationForDatePure(selectedDateKey, schedCfg);
-  var scrollRef = useRef(null);
-  var [viewportSize, setViewportSize] = useState({ width: 800, height: 600 });
+  var wrapperRef = useRef(null);
+  var headerRef = useRef(null);
+  var [viewportSize, setViewportSize] = useState(null);
 
   useEffect(function() {
     function measure() {
-      if (scrollRef.current) {
-        setViewportSize({
-          width: scrollRef.current.clientWidth,
-          height: scrollRef.current.clientHeight
-        });
-      }
+      if (!wrapperRef.current) return;
+      // Measure the overflow:hidden wrapper (flex-constrained, definite height)
+      // and subtract the fixed header to get the available scroll area.
+      var wW = wrapperRef.current.clientWidth;
+      var wH = wrapperRef.current.clientHeight;
+      var hH = headerRef.current ? headerRef.current.offsetHeight : 0;
+      var w = wW;
+      var h = Math.max(0, wH - hH);
+      setViewportSize(function(prev) {
+        if (prev && prev.width === w && prev.height === h) return prev;
+        return { width: w, height: h };
+      });
     }
     measure();
+    // ResizeObserver on the wrapper catches ALL size changes (window resize,
+    // sidebar toggle, font-size change, etc.)
     var ro = new ResizeObserver(measure);
-    if (scrollRef.current) ro.observe(scrollRef.current);
-    return function() { ro.disconnect(); };
+    if (wrapperRef.current) ro.observe(wrapperRef.current);
+    // Belt-and-suspenders: also listen for window resize
+    window.addEventListener('resize', measure);
+    return function() {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
   }, []);
 
   // Template override state
@@ -50,9 +64,9 @@ export default function SCurveView({ selectedDate, selectedDateKey, placements, 
   };
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div ref={wrapperRef} style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
       {/* Fixed header — matches TimelineView exactly */}
-      <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderBottom: '1px solid ' + theme.border, background: theme.bg, flexShrink: 0 }}>
+      <div ref={headerRef} style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderBottom: '1px solid ' + theme.border, background: theme.bg, flexShrink: 0 }}>
         <div style={{ fontWeight: 600, fontSize: 15, color: theme.text }}>
           {DAY_NAMES_FULL[selectedDate.getDay()]}, {MONTH_NAMES[selectedDate.getMonth()]} {selectedDate.getDate()}
         </div>
@@ -102,8 +116,8 @@ export default function SCurveView({ selectedDate, selectedDateKey, placements, 
         )}
       </div>
       {/* Scrollable S-Curve timeline */}
-      <div ref={scrollRef} style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-        <SCurveTimeline
+      <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+        {viewportSize && <SCurveTimeline
           dateKey={selectedDateKey}
           schedCfg={schedCfg}
           placements={placements}
@@ -118,7 +132,7 @@ export default function SCurveView({ selectedDate, selectedDateKey, placements, 
           isMobile={isMobile}
           viewportWidth={viewportSize.width}
           viewportHeight={viewportSize.height}
-        />
+        />}
       </div>
     </div>
   );
