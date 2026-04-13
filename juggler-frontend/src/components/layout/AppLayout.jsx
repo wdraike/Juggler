@@ -123,6 +123,10 @@ export default function AppLayout() {
   var [msftCalAutoSync, setMsftCalAutoSync] = useState(false);
   var [msftCalLastSyncedAt, setMsftCalLastSyncedAt] = useState(null);
   var [msftCalSyncing, setMsftCalSyncing] = useState(false);
+  var [appleCalAutoSync, setAppleCalAutoSync] = useState(false);
+  var [appleCalLastSyncedAt, setAppleCalLastSyncedAt] = useState(null);
+  var [appleCalSyncing, setAppleCalSyncing] = useState(false);
+  var [appleCalConnected, setAppleCalConnected] = useState(null);
   var editingRef = useRef(false);
   var [schedulerReady, setSchedulerReady] = useState(false);
 
@@ -217,6 +221,13 @@ export default function AppLayout() {
         }
       })
       .catch(function() { /* not connected */ });
+    apiClient.get('/apple-cal/status')
+      .then(function(r) {
+        setAppleCalConnected(!!r.data.connected);
+        setAppleCalAutoSync(!!r.data.autoSync);
+        setAppleCalLastSyncedAt(r.data.lastSyncedAt || null);
+      })
+      .catch(function() { setAppleCalConnected(false); });
   }, []);
 
   // Combined calendar auto-sync: configurable frequency, full sync only when changes detected
@@ -1214,15 +1225,20 @@ export default function AppLayout() {
           onMsftAutoSyncChange={function(val) {
             setMsftCalAutoSync(val);
           }}
+          appleAutoSync={appleCalAutoSync}
+          appleLastSyncedAt={appleCalLastSyncedAt}
+          appleConnected={appleCalConnected}
+          onAppleAutoSyncChange={function(val) { setAppleCalAutoSync(val); }}
+          onAppleConnectedChange={function(val) { setAppleCalConnected(val); }}
           calSyncSettings={config.calSyncSettings}
           onCalSyncSettingsChange={function(val) {
             config.updateCalSyncSettings(val);
           }}
-          onSyncStart={function() { setGcalSyncing(true); setMsftCalSyncing(true); }}
+          onSyncStart={function() { setGcalSyncing(true); setMsftCalSyncing(true); setAppleCalSyncing(true); }}
           onSyncComplete={function() {
-            setGcalSyncing(false); setMsftCalSyncing(false);
+            setGcalSyncing(false); setMsftCalSyncing(false); setAppleCalSyncing(false);
             var now = new Date().toISOString();
-            setGcalLastSyncedAt(now); setMsftCalLastSyncedAt(now);
+            setGcalLastSyncedAt(now); setMsftCalLastSyncedAt(now); setAppleCalLastSyncedAt(now);
             // SSE events from the sync deliver task updates surgically —
             // no full reload needed.
           }}

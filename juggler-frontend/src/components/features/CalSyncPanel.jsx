@@ -32,6 +32,7 @@ export default function CalSyncPanel({
   onClose, darkMode, showToast, isMobile,
   gcalAutoSync, gcalLastSyncedAt, onGcalAutoSyncChange,
   msftAutoSync, msftLastSyncedAt, onMsftAutoSyncChange,
+  appleAutoSync, appleLastSyncedAt, appleConnected, onAppleAutoSyncChange, onAppleConnectedChange,
   calSyncSettings, onCalSyncSettingsChange,
   onSyncStart, onSyncComplete
 }) {
@@ -39,6 +40,11 @@ export default function CalSyncPanel({
   var [syncing, setSyncing] = useState(false);
   var [results, setResults] = useState(null);
   var [showHistory, setShowHistory] = useState(false);
+  // Apple Calendar connection state
+  var [appleUsername, setAppleUsername] = useState('');
+  var [applePassword, setApplePassword] = useState('');
+  var [appleConnecting, setAppleConnecting] = useState(false);
+  var [appleCalendars, setAppleCalendars] = useState(null); // discovered calendars
   var [history, setHistory] = useState(null);
   var [loadingHistory, setLoadingHistory] = useState(false);
   var [syncProgress, setSyncProgress] = useState(null); // { phase, detail, pct }
@@ -205,6 +211,63 @@ export default function CalSyncPanel({
     try {
       await apiClient.post('/msft-cal/auto-sync', { enabled: newVal });
       if (onMsftAutoSyncChange) onMsftAutoSyncChange(newVal);
+    } catch (e) {
+      showToast('Failed to toggle auto-sync: ' + e.message, 'error');
+    }
+  }
+
+  // --- Apple Calendar ---
+  async function handleAppleConnect() {
+    if (!appleUsername || !applePassword) {
+      showToast('Enter your Apple ID and app-specific password', 'error');
+      return;
+    }
+    setAppleConnecting(true);
+    try {
+      var r = await apiClient.post('/apple-cal/connect', {
+        username: appleUsername,
+        password: applePassword
+      });
+      setAppleCalendars(r.data.calendars || []);
+      showToast('Connected! Select a calendar below.', 'success');
+    } catch (e) {
+      var msg = e.response?.data?.error || e.message;
+      showToast('Apple Calendar: ' + msg, 'error');
+    } finally {
+      setAppleConnecting(false);
+    }
+  }
+
+  async function handleAppleSelectCalendar(url) {
+    try {
+      await apiClient.post('/apple-cal/select-calendar', { calendarUrl: url });
+      setAppleCalendars(null);
+      if (onAppleConnectedChange) onAppleConnectedChange(true);
+      showToast('Apple Calendar connected', 'success');
+    } catch (e) {
+      showToast('Failed to select calendar: ' + e.message, 'error');
+    }
+  }
+
+  async function handleAppleDisconnect() {
+    try {
+      await apiClient.post('/apple-cal/disconnect');
+      if (onAppleConnectedChange) onAppleConnectedChange(false);
+      if (onAppleAutoSyncChange) onAppleAutoSyncChange(false);
+      setAppleCalendars(null);
+      setAppleUsername('');
+      setApplePassword('');
+      showToast('Apple Calendar disconnected', 'success');
+    } catch (e) {
+      showToast('Failed to disconnect: ' + e.message, 'error');
+    }
+  }
+
+  async function handleAppleAutoSync() {
+    var newVal = !appleAutoSync;
+    try {
+      await apiClient.post('/apple-cal/auto-sync', { enabled: newVal });
+      if (onAppleAutoSyncChange) onAppleAutoSyncChange(newVal);
     } catch (e) {
       showToast('Failed to toggle auto-sync: ' + e.message, 'error');
     }
@@ -395,6 +458,114 @@ export default function CalSyncPanel({
           gcalAutoSync, handleGcalConnect, handleGcalDisconnect, handleGcalAutoSync, gcalTokenExpired, 'gcal')}
         {renderProvider('Microsoft Calendar', msftConnected, msftConnecting, '#2E4A7A',
           msftAutoSync, handleMsftConnect, handleMsftDisconnect, handleMsftAutoSync, msftTokenExpired, 'msft')}
+
+        {/* Apple Calendar — custom section (CalDAV credential auth, not OAuth) */}
+        <div style={{ padding: '12px 0', borderBottom: '1px solid ' + theme.border }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: appleConnected ? '#2D6A4F' : theme.border }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>Apple Calendar</span>
+            </div>
+            {appleConnected && <span style={{ fontSize: 11, color: '#2D6A4F', fontWeight: 500 }}>Connected</span>}
+          </div>
+
+          {appleConnected ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+              {(() => {
+                var provSettings = (calSyncSettings || {}).apple || { mode: 'full', frequency: 120 };
+                return <>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 11, color: theme.textMuted }}>Sync mode</span>
+                    <select value={provSettings.mode} onChange={function(e) {
+                      var newSettings = Object.assign({}, calSyncSettings || {});
+                      newSettings.apple = Object.assign({}, provSettings, { mode: e.target.value });
+                      if (onCalSyncSettingsChange) onCalSyncSettingsChange(newSettings);
+                    }} style={selectStyle}>
+                      <option value="full">Full sync</option>
+                      <option value="ingest">Ingest only</option>
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 11, color: theme.textMuted }}>Auto-sync</span>
+                    <select value={provSettings.frequency} onChange={function(e) {
+                      var freq = parseInt(e.target.value, 10);
+                      var newSettings = Object.assign({}, calSyncSettings || {});
+                      newSettings.apple = Object.assign({}, provSettings, { frequency: freq });
+                      if (onCalSyncSettingsChange) onCalSyncSettingsChange(newSettings);
+                      handleAppleAutoSync();
+                    }} style={selectStyle}>
+                      {FREQUENCY_OPTIONS.map(function(opt) {
+                        return <option key={opt.value} value={opt.value}>{opt.label}</option>;
+                      })}
+                    </select>
+                  </div>
+                  {provSettings.mode === 'ingest' && (
+                    <div style={{ fontSize: 10, color: theme.textMuted, fontStyle: 'italic' }}>
+                      One-way: pulls events from calendar, never writes back
+                    </div>
+                  )}
+                </>;
+              })()}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                <button onClick={handleAppleDisconnect} style={{
+                  border: 'none', background: 'transparent', color: theme.textMuted,
+                  fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline'
+                }}>Disconnect</button>
+              </div>
+            </div>
+          ) : appleCalendars ? (
+            /* Calendar selection after credential validation */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 11, color: theme.text, fontWeight: 500 }}>Select a calendar:</span>
+              {appleCalendars.map(function(cal) {
+                return (
+                  <button key={cal.url} onClick={function() { handleAppleSelectCalendar(cal.url); }} style={{
+                    border: '1px solid ' + theme.border, borderRadius: 4, padding: '6px 10px',
+                    background: theme.bgPrimary, color: theme.text, fontSize: 12,
+                    cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left'
+                  }}>{cal.displayName}{cal.description ? ' — ' + cal.description : ''}</button>
+                );
+              })}
+              <button onClick={function() { setAppleCalendars(null); }} style={{
+                border: 'none', background: 'transparent', color: theme.textMuted,
+                fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline'
+              }}>Cancel</button>
+            </div>
+          ) : (
+            /* Credential input form */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <input
+                type="email" placeholder="Apple ID email"
+                value={appleUsername} onChange={function(e) { setAppleUsername(e.target.value); }}
+                style={{
+                  fontSize: 12, fontFamily: 'inherit', padding: '6px 8px',
+                  borderRadius: 4, border: '1px solid ' + theme.border,
+                  background: theme.bgPrimary, color: theme.text
+                }}
+              />
+              <input
+                type="password" placeholder="App-specific password"
+                value={applePassword} onChange={function(e) { setApplePassword(e.target.value); }}
+                style={{
+                  fontSize: 12, fontFamily: 'inherit', padding: '6px 8px',
+                  borderRadius: 4, border: '1px solid ' + theme.border,
+                  background: theme.bgPrimary, color: theme.text
+                }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <a href="https://support.apple.com/en-us/102654" target="_blank" rel="noopener noreferrer"
+                   style={{ fontSize: 10, color: theme.accent }}>How to create an app-specific password</a>
+                <button onClick={handleAppleConnect} disabled={appleConnecting} style={{
+                  border: '1.5px solid #555', borderRadius: 2, padding: '5px 14px',
+                  background: '#333', color: '#FDFAF5', fontWeight: 600, fontSize: 11,
+                  cursor: 'pointer', fontFamily: "'Inter', sans-serif",
+                  opacity: appleConnecting ? 0.5 : 1,
+                  letterSpacing: '0.05em', textTransform: 'uppercase'
+                }}>{appleConnecting ? 'Connecting...' : 'Connect'}</button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Token expired warning */}
         {(gcalTokenExpired || msftTokenExpired) && (

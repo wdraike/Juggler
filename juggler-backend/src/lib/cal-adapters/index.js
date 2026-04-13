@@ -5,10 +5,12 @@
 
 var gcalAdapter = require('./gcal.adapter');
 var msftAdapter = require('./msft.adapter');
+var appleAdapter = require('./apple.adapter');
 
 var adapters = {
   gcal: gcalAdapter,
-  msft: msftAdapter
+  msft: msftAdapter,
+  apple: appleAdapter
 };
 
 /**

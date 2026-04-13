@@ -126,7 +126,8 @@ export default function useConfig() {
   var [calCompletedBehavior, setCalCompletedBehavior] = useState('update');
   var [calSyncSettings, setCalSyncSettings] = useState({
     gcal: { mode: 'full', frequency: 120 },
-    msft: { mode: 'full', frequency: 120 }
+    msft: { mode: 'full', frequency: 120 },
+    apple: { mode: 'full', frequency: 120 }
   });
 
   // Unified template state
