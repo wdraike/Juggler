@@ -17,6 +17,7 @@ const { localToUtc, utcToLocal, toDateISO, fromDateISO, getDayName, safeTimezone
 const cache = require('../lib/redis');
 const { enqueueScheduleRun: _enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 const sseEmitter = require('../lib/sse-emitter');
+const { isLocked, enqueueWrite, splitFields } = require('../lib/task-write-queue');
 // Wrap enqueueScheduleRun to also emit SSE event so frontends refresh
 // immediately. `ids` (optional) is the list of task ids the caller just
 // wrote — when present, the frontend can upsert only those rows instead of
@@ -25,6 +26,8 @@ function enqueueScheduleRun(userId, source, ids) {
   var payload = { source: source, timestamp: Date.now() };
   if (Array.isArray(ids) && ids.length > 0) payload.ids = ids;
   sseEmitter.emit(userId, 'tasks:changed', payload);
+  // Fire-and-forget — queue insert is async but non-blocking.
+  // Errors are logged inside enqueueScheduleRun.
   _enqueueScheduleRun(userId, source);
 }
 
@@ -564,6 +567,17 @@ async function createTask(req, res) {
     }
     await applySplitDefault(row, req.user.id);
     await ensureProject(req.user.id, req.body.project);
+
+    // Lock check: if scheduling lock is held, queue the create
+    var locked = await isLocked(req.user.id);
+    if (locked) {
+      row.user_id = req.user.id;
+      await enqueueWrite(req.user.id, row.id, 'create', row, 'api:createTask');
+      await cache.invalidateTasks(req.user.id);
+      enqueueScheduleRun(req.user.id, 'api:createTask', [row.id]);
+      return res.status(201).json({ task: rowToTask(row, null), queued: true });
+    }
+
     await db('tasks').insert(row);
     var created = await db('tasks').where('id', row.id).first();
     await cache.invalidateTasks(req.user.id);
@@ -657,6 +671,27 @@ async function updateTask(req, res) {
       }
       row.when = 'fixed';
       row.date_pinned = 1;
+    }
+
+    // Lock check: if scheduling lock is held, split and queue scheduling fields
+    var locked = await isLocked(req.user.id);
+    if (locked) {
+      var { schedulingFields, nonSchedulingFields } = splitFields(row);
+      // Write non-scheduling fields directly (safe during scheduler/cal-sync)
+      if (Object.keys(nonSchedulingFields).length > 0) {
+        nonSchedulingFields.updated_at = db.fn.now();
+        await db('tasks').where({ id: id, user_id: req.user.id }).update(nonSchedulingFields);
+      }
+      // Queue scheduling fields for flush
+      if (Object.keys(schedulingFields).length > 0) {
+        await enqueueWrite(req.user.id, id, 'update', schedulingFields, 'api:updateTask');
+      }
+      await cache.invalidateTasks(req.user.id);
+      enqueueScheduleRun(req.user.id, 'api:updateTask', [id]);
+      var currentRow = await db('tasks').where({ id: id, user_id: req.user.id }).first();
+      var allRows2 = await db('tasks').where('user_id', req.user.id).select();
+      var srcMap2 = buildSourceMap(allRows2);
+      return res.json({ task: rowToTask(currentRow, null, srcMap2), queued: true });
     }
 
     // Use the single TEMPLATE_FIELDS array for routing (defined at module level)
@@ -1135,6 +1170,18 @@ async function batchCreateTasks(req, res) {
       await ensureProject(req.user.id, projectNames[i]);
     }
 
+    // Lock check: if scheduling lock is held, queue all creates
+    var locked = await isLocked(req.user.id);
+    if (locked) {
+      for (var qi = 0; qi < rows.length; qi++) {
+        rows[qi].user_id = req.user.id;
+        await enqueueWrite(req.user.id, rows[qi].id, 'create', rows[qi], 'api:batchCreateTasks');
+      }
+      await cache.invalidateTasks(req.user.id);
+      enqueueScheduleRun(req.user.id, 'api:batchCreateTasks', rows.map(function(r) { return r.id; }));
+      return res.status(201).json({ created: rows.length, queued: true });
+    }
+
     await db.transaction(async function(trx) {
       var chunkSize = 100;
       for (var i = 0; i < rows.length; i += chunkSize) {
@@ -1166,9 +1213,61 @@ async function batchUpdateTasks(req, res) {
 
     var tz = safeTimezone(req.headers['x-timezone']);
     var updatedCount = 0;
+    var queuedCount = 0;
     var MAX_RETRIES = 3;
 
     // Template fields use the module-level TEMPLATE_FIELDS array (single source of truth)
+
+    // Lock check: if scheduling lock is held, process updates with split/queue logic
+    var locked = await isLocked(req.user.id);
+    if (locked) {
+      // Pre-load existing task info (same as the unlocked path below)
+      var idsToCheck = updates.map(function(u) { return u.id; }).filter(Boolean);
+      var existCheck = await db('tasks')
+        .where('user_id', req.user.id)
+        .whereIn('id', idsToCheck)
+        .select('id', 'task_type', 'source_id', 'scheduled_at', 'status',
+                'when', 'gcal_event_id', 'msft_event_id');
+      var existById = {};
+      existCheck.forEach(function(r) { existById[r.id] = r; });
+
+      for (var qi = 0; qi < updates.length; qi++) {
+        var qUpdate = updates[qi];
+        var qId = qUpdate.id;
+        if (!qId) continue;
+        var qExisting = existById[qId];
+        if (qExisting && qExisting.status === 'disabled') continue;
+
+        var qFields = {};
+        Object.keys(qUpdate).forEach(function(k) { if (k !== 'id') qFields[k] = qUpdate[k]; });
+        var qTz = qFields._timezone || tz;
+        delete qFields._timezone;
+        delete qFields.anchorDate;
+        var qRow = taskToRow(qFields, req.user.id, qTz);
+        delete qRow.user_id;
+        delete qRow.created_at;
+        delete qRow._pendingTimeOnly;
+
+        var { schedulingFields, nonSchedulingFields } = splitFields(qRow);
+
+        // Write non-scheduling fields directly
+        if (Object.keys(nonSchedulingFields).length > 0) {
+          nonSchedulingFields.updated_at = db.fn.now();
+          await db('tasks').where({ id: qId, user_id: req.user.id }).update(nonSchedulingFields);
+          updatedCount++;
+        }
+
+        // Queue scheduling fields
+        if (Object.keys(schedulingFields).length > 0) {
+          await enqueueWrite(req.user.id, qId, 'update', schedulingFields, 'api:batchUpdateTasks');
+          queuedCount++;
+        }
+      }
+
+      await cache.invalidateTasks(req.user.id);
+      enqueueScheduleRun(req.user.id, 'api:batchUpdateTasks', idsToCheck);
+      return res.json({ updated: updatedCount, queued: queuedCount });
+    }
 
     for (var attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {

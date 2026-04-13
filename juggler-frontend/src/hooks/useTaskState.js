@@ -141,7 +141,7 @@ export default function useTaskState() {
         }
         // Only clear the specific fields we saved — preserve any dirtied during the await
         dispatch({ type: 'CLEAR_DIRTY_TASKS', ids: savingIds, savedFields: savedFields });
-        await loadPlacements();
+        // Placements refresh via SSE schedule:changed — no blocking wait here
       } catch (error) {
         console.error('Save failed:', error);
       } finally {
@@ -152,7 +152,7 @@ export default function useTaskState() {
 
     flushPromiseRef.current = promise;
     return promise;
-  }, [loadPlacements]);
+  }, []);
   flushSaveRef.current = flushSave;
 
   // Load tasks from API — flushes any pending save first
@@ -235,19 +235,18 @@ export default function useTaskState() {
             dispatch({ type: 'UPSERT_TASKS', tasks: [r.data.task] });
           }
         }).catch(function() { /* SSE will catch up */ });
-      } else {
-        loadPlacements();
       }
+      // Placements refresh via SSE schedule:changed
     }).catch(err => console.error('Failed to save status:', err));
     // If there are also taskFields (e.g. date changes on recurring completion), save those too
     if (opts.taskFields) scheduleSave();
-  }, [scheduleSave, loadPlacements]);
+  }, [scheduleSave]);
 
   const updateTask = useCallback(async (id, fields) => {
     dispatch({ type: 'UPDATE_TASK', id, fields });
     // Cancel any pending debounced save
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
-    // Immediately save to API, then refresh placements in background (non-blocking)
+    // Immediately save to API — placements refresh via SSE schedule:changed
     setSaving(true);
     try {
       // Send the actual task ID — the backend routes template fields to the
@@ -255,32 +254,24 @@ export default function useTaskState() {
       var partial = Object.assign({ id: id }, fields);
       await apiClient.put('/tasks/batch', { updates: [partial] });
       dispatch({ type: 'CLEAR_DIRTY_TASKS', ids: [id], savedFields: { [id]: fields } });
-      // SSE will notify when scheduler finishes — triggers full reload.
-      // For non-scheduling changes, refresh placements immediately.
-      var schedFields = ['split', 'flexWhen', 'dur', 'when', 'dayReq', 'date', 'due', 'pri', 'dependsOn', 'location', 'time', 'timeFlex', 'travelBefore', 'travelAfter', 'anchorDate', 'recur'];
-      var needsResched = schedFields.some(function(f) { return f in fields; });
-      if (!needsResched) {
-        loadPlacements().finally(function() { setSaving(false); });
-      } else {
-        setSaving(false);
-      }
       return true;
     } catch (error) {
       console.error('Save failed:', error);
-      setSaving(false);
       return false;
+    } finally {
+      setSaving(false);
     }
-  }, [loadPlacements]);
+  }, []);
 
   const addTasks = useCallback(async (tasks) => {
     dispatch({ type: 'ADD_TASKS', tasks });
     try {
       await apiClient.post('/tasks/batch', { tasks });
-      await loadPlacements();
+      // Placements refresh via SSE schedule:changed
     } catch (error) {
       console.error('Failed to add tasks:', error);
     }
-  }, [loadPlacements]);
+  }, []);
 
   const deleteTask = useCallback(async (id, opts) => {
     // Cancel any pending save that has stale dependsOn data
@@ -307,21 +298,21 @@ export default function useTaskState() {
       await apiClient.delete(url);
       // Schedule a save so the cleaned-up dependsOn arrays get persisted
       scheduleSave();
-      await loadPlacements();
+      // Placements refresh via SSE schedule:changed
     } catch (error) {
       console.error('Failed to delete task:', error);
     }
-  }, [loadPlacements, scheduleSave]);
+  }, [scheduleSave]);
 
   const createTask = useCallback(async (task) => {
     dispatch({ type: 'ADD_TASKS', tasks: [task] });
     try {
       await apiClient.post('/tasks', task);
-      await loadPlacements();
+      // Placements refresh via SSE schedule:changed
     } catch (error) {
       console.error('Failed to create task:', error);
     }
-  }, [loadPlacements]);
+  }, []);
 
   // Real-time updates via SSE, with polling fallback
   useEffect(() => {

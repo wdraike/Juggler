@@ -16,6 +16,8 @@ var { rowToTask } = require('./task.controller');
 var { localToUtc } = require('../scheduler/dateHelpers');
 var { taskHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE } = require('./cal-sync-helpers');
 var sseEmitter = require('../lib/sse-emitter');
+var { acquireLock, releaseLock, refreshLock } = require('../lib/sync-lock');
+var { flushQueueInLock } = require('../lib/task-write-queue');
 
 // Number of consecutive syncs an event must be missing before we delete the task.
 // Prevents data loss from transient calendarView failures or API propagation delays.
@@ -1059,8 +1061,35 @@ async function sync(req, res) {
       }
     }
 
-    // === Write Phase: Flush all mutations in a single transaction ===
+    // === Write Phase: Acquire lock, flush pending writes, then apply ===
     emitProgress('finalize', 'Saving changes...', 85);
+
+    // Acquire per-user lock for the write phase only. During the API fetch
+    // phase above, user/MCP edits flowed normally. Now we lock so the
+    // scheduler doesn't start while we write.
+    var MAX_LOCK_ATTEMPTS = 5;
+    var lockResult = null;
+    for (var lockAttempt = 0; lockAttempt < MAX_LOCK_ATTEMPTS; lockAttempt++) {
+      lockResult = await acquireLock(userId);
+      if (lockResult.acquired) break;
+      console.log('[CAL-SYNC] lock held, retry ' + (lockAttempt + 1) + '/' + MAX_LOCK_ATTEMPTS);
+      await new Promise(function(r) { setTimeout(r, 2000); });
+    }
+    if (!lockResult || !lockResult.acquired) {
+      console.error('[CAL-SYNC] could not acquire lock for write phase after ' + MAX_LOCK_ATTEMPTS + ' attempts');
+      return res.status(409).json({ error: 'Scheduler is busy. Try again in a few seconds.', retryAfter: 5 });
+    }
+    var lockToken = lockResult.token;
+    var lockStart = Date.now();
+    var lockHeartbeat = setInterval(function() {
+      if (Date.now() - lockStart > 120000) { clearInterval(lockHeartbeat); return; }
+      refreshLock(userId, lockToken).catch(function() {});
+    }, 10000);
+
+    try {
+
+    // Flush any pending user/MCP writes so conflict detection sees fresh data
+    await flushQueueInLock(userId);
 
     // Snapshot watermark BEFORE writing so we can detect what we touched
     var syncStartWatermark = (await db('tasks')
@@ -1071,7 +1100,7 @@ async function sync(req, res) {
 
     // Conflict detection: if a task was modified by user/MCP during the API
     // phase, skip our update for that task to avoid clobbering their edit.
-    // Compare the current updated_at against what we loaded at sync start.
+    // Runs inside lock so the data is stable.
     var conflictSkipIds = new Set();
     var taskIdsToCheck = taskUpdates.map(function(u) { return u.id; });
     if (taskIdsToCheck.length > 0) {
@@ -1163,8 +1192,14 @@ async function sync(req, res) {
       await trx('users').where('id', userId).update(userUpdate);
     });
 
+    } finally {
+      // Release the write-phase lock
+      clearInterval(lockHeartbeat);
+      await releaseLock(userId, lockToken);
+    }
+
     // === Phase 5: Build the affected-task-id list and notify ===
-    // (runs AFTER transaction commits so scheduler doesn't contend)
+    // (runs AFTER lock release so scheduler can pick up)
     emitProgress('finalize', 'Finalizing...', 95);
 
     var deletedDuringSync = taskDeletes.map(function(d) { return d.id; });

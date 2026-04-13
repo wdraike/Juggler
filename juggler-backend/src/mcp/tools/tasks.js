@@ -10,6 +10,7 @@ const { z } = require('zod');
 const db = require('../../db');
 const { rowToTask, taskToRow, guardFixedCalendarWhen, ensureProject, applySplitDefault, buildSourceMap, TEMPLATE_FIELDS } = require('../../controllers/task.controller');
 const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
+const { isLocked, enqueueWrite, splitFields } = require('../../lib/task-write-queue');
 
 // Shared Zod fields for task input (used by create_task, create_tasks, update_task)
 var taskInputFields = {
@@ -106,6 +107,15 @@ function registerTaskTools(server, userId) {
       row.created_at = db.fn.now();
       await applySplitDefault(row, userId);
       await ensureProject(userId, task.project);
+
+      var locked = await isLocked(userId);
+      if (locked) {
+        row.user_id = userId;
+        await enqueueWrite(userId, row.id, 'create', row, 'mcp:create_task');
+        enqueueScheduleRun(userId, 'mcp:create_task', [row.id]);
+        return { content: [{ type: 'text', text: JSON.stringify(Object.assign(rowToTask(row, tz), { queued: true }), null, 2) }] };
+      }
+
       await db('tasks').insert(row);
       enqueueScheduleRun(userId, 'mcp:create_task', [row.id]);
       var created = await db('tasks').where('id', row.id).first();
@@ -142,6 +152,16 @@ function registerTaskTools(server, userId) {
 
       for (var p of projects) {
         await ensureProject(userId, p);
+      }
+
+      var locked = await isLocked(userId);
+      if (locked) {
+        for (var qi = 0; qi < rows.length; qi++) {
+          rows[qi].user_id = userId;
+          await enqueueWrite(userId, rows[qi].id, 'create', rows[qi], 'mcp:create_tasks');
+        }
+        enqueueScheduleRun(userId, 'mcp:create_tasks', rows.map(function(r) { return r.id; }));
+        return { content: [{ type: 'text', text: JSON.stringify({ created: rows.length, ids: rows.map(function(r) { return r.id; }), queued: true }) }] };
       }
 
       await db.transaction(async function(trx) {
@@ -202,6 +222,24 @@ function registerTaskTools(server, userId) {
         } else {
           guardFixedCalendarWhen(row, existing, _mGuardOpts);
         }
+      }
+
+      // Lock check: if scheduling lock is held, split and queue
+      var locked = await isLocked(userId);
+      if (locked) {
+        var { schedulingFields, nonSchedulingFields } = splitFields(row);
+        if (Object.keys(nonSchedulingFields).length > 0) {
+          nonSchedulingFields.updated_at = db.fn.now();
+          await db('tasks').where({ id: id, user_id: userId }).update(nonSchedulingFields);
+        }
+        if (Object.keys(schedulingFields).length > 0) {
+          await enqueueWrite(userId, id, 'update', schedulingFields, 'mcp:update_task');
+        }
+        enqueueScheduleRun(userId, 'mcp:update_task', [id]);
+        var allRows = await db('tasks').where('user_id', userId).select();
+        var srcMap = buildSourceMap(allRows);
+        var updatedRow = allRows.find(function(r) { return r.id === id; });
+        return { content: [{ type: 'text', text: JSON.stringify(Object.assign(rowToTask(updatedRow, tz, srcMap), { queued: true }), null, 2) }] };
       }
 
       if (isRecurringInstance) {
@@ -378,6 +416,44 @@ function registerTaskTools(server, userId) {
       var updatedCount = 0;
 
       // Uses module-level TEMPLATE_FIELDS imported from task.controller
+
+      // Lock check: if scheduling lock is held, split and queue
+      var locked = await isLocked(userId);
+      if (locked) {
+        var idsToCheck = updates.map(function(u) { return u.id; });
+        var existCheck = await db('tasks')
+          .where('user_id', userId)
+          .whereIn('id', idsToCheck)
+          .select('id', 'task_type', 'source_id', 'scheduled_at');
+        var existById = {};
+        existCheck.forEach(function(r) { existById[r.id] = r; });
+        var queuedCount = 0;
+
+        for (var qi = 0; qi < updates.length; qi++) {
+          var qUpdate = updates[qi];
+          var qId = qUpdate.id;
+          if (!qId || !existById[qId]) continue;
+          var qFields = {};
+          Object.keys(qUpdate).forEach(function(k) { if (k !== 'id') qFields[k] = qUpdate[k]; });
+          var qRow = taskToRow(qFields, userId, tz);
+          delete qRow.user_id;
+          delete qRow.created_at;
+          delete qRow._pendingTimeOnly;
+          var split = splitFields(qRow);
+          if (Object.keys(split.nonSchedulingFields).length > 0) {
+            split.nonSchedulingFields.updated_at = db.fn.now();
+            await db('tasks').where({ id: qId, user_id: userId }).update(split.nonSchedulingFields);
+            updatedCount++;
+          }
+          if (Object.keys(split.schedulingFields).length > 0) {
+            await enqueueWrite(userId, qId, 'update', split.schedulingFields, 'mcp:batch_update_tasks');
+            queuedCount++;
+          }
+        }
+
+        enqueueScheduleRun(userId, 'mcp:batch_update_tasks', idsToCheck);
+        return { content: [{ type: 'text', text: JSON.stringify({ updated: updatedCount, queued: queuedCount }) }] };
+      }
 
       await db.transaction(async function(trx) {
         var idsToUpdate = updates.map(function(u) { return u.id; });

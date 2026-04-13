@@ -1,5 +1,9 @@
 /**
- * Per-user sync lock backed by the database.
+ * Per-user lock backed by the database.
+ *
+ * Gates all scheduling-relevant writers: the scheduler, cal-sync,
+ * and (via task-write-queue) user/MCP task mutations. Only one of
+ * these can modify scheduling-relevant task fields at a time.
  *
  * Uses INSERT with duplicate-key rejection so the first writer wins
  * atomically. All time comparisons use MySQL NOW() to avoid timezone
@@ -59,6 +63,18 @@ async function refreshLock(userId, token) {
   return (updated[0].affectedRows || 0) > 0;
 }
 
+/**
+ * Fast non-blocking check: is the lock currently held for this user?
+ * PK lookup on a single-row table — sub-millisecond.
+ */
+async function isLocked(userId) {
+  var row = await db.raw(
+    'SELECT 1 FROM sync_locks WHERE user_id = ? AND expires_at > NOW() LIMIT 1',
+    [userId]
+  );
+  return (row[0] && row[0].length > 0);
+}
+
 // ── middleware / wrappers ──────────────────────────────────────────
 
 function withSyncLock(handler) {
@@ -91,7 +107,7 @@ function withSyncLock(handler) {
   };
 }
 
-async function withLock(userId, fn) {
+async function withLock(userId, fn, opts) {
   var result = await acquireLock(userId);
   if (!result.acquired) return null;
   var token = result.token;
@@ -110,6 +126,16 @@ async function withLock(userId, fn) {
   } finally {
     clearInterval(heartbeat);
     await releaseLock(userId, token);
+    // After releasing, flush any task writes that queued while we held the lock.
+    // Lazy require to avoid circular dependency (task-write-queue → sync-lock).
+    if (!opts || opts.flushOnRelease !== false) {
+      try {
+        var twq = require('./task-write-queue');
+        await twq.flushQueue(userId);
+      } catch (err) {
+        console.error('[sync-lock] post-release flush error:', err.message);
+      }
+    }
   }
 }
 
@@ -127,4 +153,4 @@ var sweepTimer = setInterval(function() {
 }, SWEEP_INTERVAL);
 sweepTimer.unref();
 
-module.exports = { withSyncLock, withLock, acquireLock, releaseLock, refreshLock };
+module.exports = { withSyncLock, withLock, acquireLock, releaseLock, refreshLock, isLocked };

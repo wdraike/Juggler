@@ -25,7 +25,7 @@ if (process.env.NODE_ENV !== 'production') {
 const app = require('./app');
 const { loadJWTSecrets } = require('./middleware/jwt-auth');
 const db = require('./db');
-const { enqueueScheduleRun } = require('./scheduler/scheduleQueue');
+const { enqueueScheduleRun, stopPollLoop } = require('./scheduler/scheduleQueue');
 
 const PORT = process.env.PORT || 5002;
 
@@ -74,6 +74,8 @@ function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`${signal} received — shutting down`);
+
+  stopPollLoop();
 
   if (process.env.NODE_ENV !== 'production') {
     // Dev mode: exit immediately. Graceful shutdown is pointless when
