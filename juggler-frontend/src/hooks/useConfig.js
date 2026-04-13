@@ -124,6 +124,10 @@ export default function useConfig() {
   var [pullForwardDampening, setPullForwardDampening] = useState(false);
   var [timezoneOverride, setTimezoneOverride] = useState(null);
   var [calCompletedBehavior, setCalCompletedBehavior] = useState('update');
+  var [calSyncSettings, setCalSyncSettings] = useState({
+    gcal: { mode: 'full', frequency: 120 },
+    msft: { mode: 'full', frequency: 120 }
+  });
 
   // Unified template state
   var [scheduleTemplates, setScheduleTemplates] = useState(DEFAULT_SCHEDULE_TEMPLATES);
@@ -159,6 +163,14 @@ export default function useConfig() {
           else localStorage.removeItem(TZ_OVERRIDE_KEY);
         } catch (e) { /* ignore */ }
       }
+    }
+
+    if (config.cal_sync_settings || config.calSyncSettings) {
+      var css = config.cal_sync_settings || config.calSyncSettings;
+      setCalSyncSettings(Object.assign(
+        { gcal: { mode: 'full', frequency: 120 }, msft: { mode: 'full', frequency: 120 } },
+        css
+      ));
     }
 
     // Unified template migration
@@ -293,6 +305,11 @@ export default function useConfig() {
     saveConfig('loc_schedule_overrides', ovr);
   }, [saveConfig]);
 
+  var updateCalSyncSettings = useCallback(function(val) {
+    setCalSyncSettings(val);
+    saveConfig('cal_sync_settings', val);
+  }, [saveConfig]);
+
   var updateLocations = useCallback(async function(locs) {
     registerLocations(locs);
     setLocations(locs);
@@ -316,18 +333,19 @@ export default function useConfig() {
     locations, tools, toolMatrix, timeBlocks, projects,
     locSchedules, locScheduleDefaults, locScheduleOverrides,
     hourLocationOverrides, splitDefault, splitMinDefault,
-    gridZoom, schedFloor, schedCeiling, fontSize, pullForwardDampening, timezoneOverride, calCompletedBehavior,
+    gridZoom, schedFloor, schedCeiling, fontSize, pullForwardDampening, timezoneOverride, calCompletedBehavior, calSyncSettings,
     scheduleTemplates, templateDefaults, templateOverrides,
     setLocations, setTools, setToolMatrix, setTimeBlocks, setProjects,
     setLocSchedules, setLocScheduleDefaults, setLocScheduleOverrides,
     setHourLocationOverrides, setSplitDefault, setSplitMinDefault,
-    setGridZoom, setSchedFloor, setSchedCeiling, setFontSize, setPullForwardDampening, setTimezoneOverride, setCalCompletedBehavior,
+    setGridZoom, setSchedFloor, setSchedCeiling, setFontSize, setPullForwardDampening, setTimezoneOverride, setCalCompletedBehavior, setCalSyncSettings,
     setScheduleTemplates, setTemplateDefaults, setTemplateOverrides,
     initFromConfig,
     updateToolMatrix, updateTimeBlocks,
     updateLocSchedules, updateLocScheduleDefaults,
     updateLocScheduleOverrides, updateHourLocationOverrides,
     updatePreferences, updateLocations, updateTools,
-    updateScheduleTemplates, updateTemplateDefaults, updateTemplateOverrides
+    updateScheduleTemplates, updateTemplateDefaults, updateTemplateOverrides,
+    updateCalSyncSettings
   };
 }

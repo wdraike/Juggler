@@ -312,6 +312,20 @@ function registerTaskTools(server, userId) {
         return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
       }
 
+      // In ingest-only mode, prevent deletion of calendar-linked tasks
+      if (task.gcal_event_id || task.msft_event_id) {
+        var _csRow = await db('user_config')
+          .where({ user_id: userId, config_key: 'cal_sync_settings' }).first();
+        var _csSettings = _csRow
+          ? (typeof _csRow.config_value === 'string' ? JSON.parse(_csRow.config_value) : _csRow.config_value)
+          : {};
+        var _isIngest = (task.gcal_event_id && _csSettings.gcal && _csSettings.gcal.mode === 'ingest')
+                     || (task.msft_event_id && _csSettings.msft && _csSettings.msft.mode === 'ingest');
+        if (_isIngest) {
+          return { content: [{ type: 'text', text: 'Error: Calendar-linked tasks cannot be deleted in ingest-only mode. Delete the event from your calendar instead.' }], isError: true };
+        }
+      }
+
       await db.transaction(async function(trx) {
         var deletedDeps = typeof task.depends_on === 'string'
           ? JSON.parse(task.depends_on || '[]') : (task.depends_on || []);

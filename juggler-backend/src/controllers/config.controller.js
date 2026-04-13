@@ -65,7 +65,8 @@ async function updateConfig(req, res) {
       'tool_matrix', 'time_blocks', 'loc_schedules',
       'loc_schedule_defaults', 'loc_schedule_overrides',
       'hour_location_overrides', 'preferences',
-      'schedule_templates', 'template_defaults', 'template_overrides'
+      'schedule_templates', 'template_defaults', 'template_overrides',
+      'cal_sync_settings'
     ];
 
     if (!validKeys.includes(key)) {

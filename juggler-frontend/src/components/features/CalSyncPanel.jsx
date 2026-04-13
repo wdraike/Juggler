@@ -19,10 +19,20 @@ function formatRelativeTime(isoString) {
   return days + 'd ago';
 }
 
+var FREQUENCY_OPTIONS = [
+  { value: 0, label: 'Manual only' },
+  { value: 60, label: 'Every 1 min' },
+  { value: 120, label: 'Every 2 min' },
+  { value: 300, label: 'Every 5 min' },
+  { value: 600, label: 'Every 10 min' },
+  { value: 1800, label: 'Every 30 min' }
+];
+
 export default function CalSyncPanel({
   onClose, darkMode, showToast, isMobile,
   gcalAutoSync, gcalLastSyncedAt, onGcalAutoSyncChange,
   msftAutoSync, msftLastSyncedAt, onMsftAutoSyncChange,
+  calSyncSettings, onCalSyncSettingsChange,
   onSyncStart, onSyncComplete
 }) {
   var theme = getTheme(darkMode);
@@ -276,7 +286,14 @@ export default function CalSyncPanel({
     );
   }
 
-  function renderProvider(label, connected, connecting, accentColor, autoSync, onConnect, onDisconnect, onToggleAutoSync, tokenExpired) {
+  var selectStyle = {
+    fontSize: 11, fontFamily: 'inherit', padding: '3px 6px',
+    borderRadius: 2, border: '1px solid ' + theme.border,
+    background: theme.bgPrimary, color: theme.text, cursor: 'pointer'
+  };
+
+  function renderProvider(label, connected, connecting, accentColor, autoSync, onConnect, onDisconnect, onToggleAutoSync, tokenExpired, providerId) {
+    var provSettings = (calSyncSettings || {})[providerId] || { mode: 'full', frequency: 120 };
     var statusColor = tokenExpired ? '#C8942A' : connected ? '#2D6A4F' : theme.border;
     return (
       <div style={{
@@ -305,21 +322,50 @@ export default function CalSyncPanel({
             </button>
           )}
           {connected === true && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: 11, color: theme.textMuted }}>Auto-sync</span>
-              {renderToggle(autoSync, onToggleAutoSync, accentColor)}
-            </div>
+            <span style={{ fontSize: 11, color: '#2D6A4F', fontWeight: 500 }}>Connected</span>
           )}
         </div>
         {connected === true && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 11, color: theme.textMuted }}>Connected</span>
-            <button onClick={onDisconnect} style={{
-              border: 'none', background: 'transparent', color: theme.textMuted,
-              fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline'
-            }}>
-              Disconnect
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 11, color: theme.textMuted }}>Sync mode</span>
+              <select value={provSettings.mode} onChange={function(e) {
+                var newSettings = Object.assign({}, calSyncSettings || {});
+                newSettings[providerId] = Object.assign({}, provSettings, { mode: e.target.value });
+                if (onCalSyncSettingsChange) onCalSyncSettingsChange(newSettings);
+              }} style={selectStyle}>
+                <option value="full">Full sync</option>
+                <option value="ingest">Ingest only</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 11, color: theme.textMuted }}>Auto-sync</span>
+              <select value={provSettings.frequency} onChange={function(e) {
+                var freq = parseInt(e.target.value, 10);
+                var newSettings = Object.assign({}, calSyncSettings || {});
+                newSettings[providerId] = Object.assign({}, provSettings, { frequency: freq });
+                if (onCalSyncSettingsChange) onCalSyncSettingsChange(newSettings);
+                // Also update the legacy auto-sync boolean
+                if (onToggleAutoSync) onToggleAutoSync(freq > 0);
+              }} style={selectStyle}>
+                {FREQUENCY_OPTIONS.map(function(opt) {
+                  return <option key={opt.value} value={opt.value}>{opt.label}</option>;
+                })}
+              </select>
+            </div>
+            {provSettings.mode === 'ingest' && (
+              <div style={{ fontSize: 10, color: theme.textMuted, fontStyle: 'italic' }}>
+                One-way: pulls events from calendar, never writes back
+              </div>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+              <button onClick={onDisconnect} style={{
+                border: 'none', background: 'transparent', color: theme.textMuted,
+                fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline'
+              }}>
+                Disconnect
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -346,9 +392,9 @@ export default function CalSyncPanel({
 
         {/* Provider sections */}
         {renderProvider('Google Calendar', gcalConnected, gcalConnecting, theme.accent,
-          gcalAutoSync, handleGcalConnect, handleGcalDisconnect, handleGcalAutoSync, gcalTokenExpired)}
+          gcalAutoSync, handleGcalConnect, handleGcalDisconnect, handleGcalAutoSync, gcalTokenExpired, 'gcal')}
         {renderProvider('Microsoft Calendar', msftConnected, msftConnecting, '#2E4A7A',
-          msftAutoSync, handleMsftConnect, handleMsftDisconnect, handleMsftAutoSync, msftTokenExpired)}
+          msftAutoSync, handleMsftConnect, handleMsftDisconnect, handleMsftAutoSync, msftTokenExpired, 'msft')}
 
         {/* Token expired warning */}
         {(gcalTokenExpired || msftTokenExpired) && (

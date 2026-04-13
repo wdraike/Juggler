@@ -193,7 +193,7 @@ function TimezoneSelector({ taskTz, onChangeTz, TH }) {
   );
 }
 
-export default function TaskEditForm({ task, status, onUpdate, onStatusChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, scheduleTemplates, templateDefaults, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex, onRecurDayConflict, activeTimezone }) {
+export default function TaskEditForm({ task, status, onUpdate, onStatusChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, scheduleTemplates, templateDefaults, calSyncSettings, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex, onRecurDayConflict, activeTimezone }) {
   var isCreate = mode === 'create';
   var TH = getTheme(darkMode);
   var initDate = isCreate && initialDate ? toDateISO(formatDateKey(initialDate)) : '';
@@ -789,13 +789,22 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           </>
         )}
         <div style={{ flex: 1 }} />
-        {!isCreate && onDelete && (
-          <button onClick={() => setShowDeleteConfirm(true)} style={{
-            fontSize: 10, fontWeight: 600, padding: '4px 10px',
-            border: '1px solid #8B2635', borderRadius: 4,
-            background: TH.redBg, color: TH.redText, cursor: 'pointer'
-          }}>{'\uD83D\uDDD1'} Delete</button>
-        )}
+        {!isCreate && onDelete && (() => {
+          // Hide delete for calendar-linked tasks when provider is in ingest-only mode
+          var css = calSyncSettings || {};
+          var isIngestBlocked = (task.gcalEventId && css.gcal && css.gcal.mode === 'ingest')
+                             || (task.msftEventId && css.msft && css.msft.mode === 'ingest');
+          if (isIngestBlocked) {
+            return <span style={{ fontSize: 10, color: TH.textMuted, fontStyle: 'italic' }} title="This event is managed by your calendar. Delete it there instead.">Calendar event</span>;
+          }
+          return (
+            <button onClick={() => setShowDeleteConfirm(true)} style={{
+              fontSize: 10, fontWeight: 600, padding: '4px 10px',
+              border: '1px solid #8B2635', borderRadius: 4,
+              background: TH.redBg, color: TH.redText, cursor: 'pointer'
+            }}>{'\uD83D\uDDD1'} Delete</button>
+          );
+        })()}
         <button onClick={onClose} style={{
           border: 'none', background: 'transparent', color: TH.textMuted,
           fontSize: isMobile ? 24 : 16, cursor: 'pointer', padding: '2px 6px',

@@ -219,10 +219,16 @@ export default function AppLayout() {
       .catch(function() { /* not connected */ });
   }, []);
 
-  // Combined calendar auto-sync: lightweight check every 2 min, full sync only when changes detected
+  // Combined calendar auto-sync: configurable frequency, full sync only when changes detected
   // Waits for initial scheduler run to complete before starting any external syncs
+  var calSyncSettings = config.calSyncSettings || { gcal: { mode: 'full', frequency: 120 }, msft: { mode: 'full', frequency: 120 } };
   useEffect(() => {
-    if (!gcalAutoSync && !msftCalAutoSync) return;
+    // Derive auto-sync from frequency: frequency > 0 means auto-sync is on
+    var gcalFreq = (calSyncSettings.gcal || {}).frequency || 0;
+    var msftFreq = (calSyncSettings.msft || {}).frequency || 0;
+    var gcalAuto = gcalAutoSync || gcalFreq > 0;
+    var msftAuto = msftCalAutoSync || msftFreq > 0;
+    if (!gcalAuto && !msftAuto) return;
     if (!schedulerReady) return;
 
     function runFullSync() {
@@ -284,14 +290,18 @@ export default function AppLayout() {
 
     // Initial sync on load (full sync to catch up)
     var initialTimer = setTimeout(runFullSync, 5000);
-    // Then lightweight check every 2 minutes
-    var intervalId = setInterval(checkAndSync, 2 * 60 * 1000);
+    // Use the shortest active provider frequency for the poll interval
+    var activeFreqs = [];
+    if (gcalAuto && gcalFreq > 0) activeFreqs.push(gcalFreq);
+    if (msftAuto && msftFreq > 0) activeFreqs.push(msftFreq);
+    var intervalMs = activeFreqs.length > 0 ? Math.min.apply(null, activeFreqs) * 1000 : 2 * 60 * 1000;
+    var intervalId = setInterval(checkAndSync, intervalMs);
 
     return function() {
       clearTimeout(initialTimer);
       clearInterval(intervalId);
     };
-  }, [gcalAutoSync, msftCalAutoSync, schedulerReady, loadTasks, loadPlacements]);
+  }, [gcalAutoSync, msftCalAutoSync, schedulerReady, loadTasks, loadPlacements, calSyncSettings]);
 
   // Derived dates
   var today = useMemo(() => {
@@ -1091,6 +1101,7 @@ export default function AppLayout() {
                     uniqueTags={uniqueTags}
                     scheduleTemplates={config.scheduleTemplates}
                     templateDefaults={config.templateDefaults}
+                    calSyncSettings={calSyncSettings}
                     darkMode={darkMode}
                     isMobile={isMobile}
                     activeTimezone={userTimezone}
@@ -1156,6 +1167,7 @@ export default function AppLayout() {
             uniqueTags={uniqueTags}
             scheduleTemplates={config.scheduleTemplates}
             templateDefaults={config.templateDefaults}
+            calSyncSettings={calSyncSettings}
             darkMode={darkMode}
             isMobile={isMobile}
             onRecurDayConflict={function(data) {
@@ -1201,6 +1213,10 @@ export default function AppLayout() {
           msftLastSyncedAt={msftCalLastSyncedAt}
           onMsftAutoSyncChange={function(val) {
             setMsftCalAutoSync(val);
+          }}
+          calSyncSettings={config.calSyncSettings}
+          onCalSyncSettingsChange={function(val) {
+            config.updateCalSyncSettings(val);
           }}
           onSyncStart={function() { setGcalSyncing(true); setMsftCalSyncing(true); }}
           onSyncComplete={function() {

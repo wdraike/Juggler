@@ -119,6 +119,17 @@ async function sync(req, res) {
       sseEmitter.emit(userId, 'sync:progress', { phase: phase, detail: detail, pct: pct || 0 });
     }
 
+    // Load per-provider sync mode (full vs ingest-only)
+    var calSyncSettingsRow = await db('user_config')
+      .where({ user_id: userId, config_key: 'cal_sync_settings' }).first();
+    var calSyncSettings = calSyncSettingsRow
+      ? (typeof calSyncSettingsRow.config_value === 'string'
+          ? JSON.parse(calSyncSettingsRow.config_value) : calSyncSettingsRow.config_value)
+      : {};
+    function isIngestOnly(providerId) {
+      return calSyncSettings[providerId] && calSyncSettings[providerId].mode === 'ingest';
+    }
+
     // === Phase 1: Gather data from all connected providers ===
     emitProgress('fetch', 'Fetching calendars...', 5);
     var connectedAdapters = getConnectedAdapters(req.user);
@@ -338,7 +349,7 @@ async function sync(req, res) {
 
         try {
           // --- Past non-done juggler-origin cleanup ---
-          if (task && event && ledger.origin === 'juggler' && task._scheduled_at) {
+          if (task && event && ledger.origin === 'juggler' && task._scheduled_at && !isIngestOnly(pid)) {
             var taskScheduledAt = task._scheduled_at instanceof Date ? task._scheduled_at : new Date(String(task._scheduled_at).replace(' ', 'T') + 'Z');
             var taskIsPast = taskScheduledAt < todayStart;
             var taskNotDone = task.status !== 'done' && task.status !== 'skip';
@@ -358,7 +369,7 @@ async function sync(req, res) {
           }
 
           // --- Terminal status handling (done/cancel/skip/pause) ---
-          if (task && event && ledger.origin === 'juggler' && calCompletedBehavior !== 'keep') {
+          if (task && event && ledger.origin === 'juggler' && calCompletedBehavior !== 'keep' && !isIngestOnly(pid)) {
             var isTerminal = task.status === 'done' || task.status === 'cancel' || task.status === 'skip' || task.status === 'pause';
             if (isTerminal) {
               var shouldDelete = calCompletedBehavior === 'delete' || task.status !== 'done';
@@ -402,7 +413,8 @@ async function sync(req, res) {
             var isFixed = task.when && task.when.indexOf('fixed') >= 0;
 
             if (taskChanged && eventChanged) {
-              var winner = resolveConflict(task, event, ledger);
+              // In ingest-only mode, provider always wins conflicts
+              var winner = isIngestOnly(pid) ? 'provider' : resolveConflict(task, event, ledger);
               if (winner === 'juggler') {
                 await pAdapter.updateEvent(pToken, ledger.provider_event_id, task, year, tz);
                 await throttle();
@@ -469,7 +481,7 @@ async function sync(req, res) {
                   stats.pulled++;
                 }
               }
-            } else if (taskChanged) {
+            } else if (taskChanged && !isIngestOnly(pid)) {
               await pAdapter.updateEvent(pToken, ledger.provider_event_id, task, year, tz);
               await throttle();
               pStats.pushed++;
@@ -597,20 +609,22 @@ async function sync(req, res) {
             }
 
           } else if (!task && event) {
-            // Task deleted from Juggler — delete from provider
-            try {
-              await pAdapter.deleteEvent(pToken, ledger.provider_event_id);
-              await throttle();
-            } catch (e) {
-              if (!e.message.includes('404') && !e.message.includes('410')) throw e;
+            // Task deleted from Juggler — delete from provider (skip in ingest-only)
+            if (!isIngestOnly(pid)) {
+              try {
+                await pAdapter.deleteEvent(pToken, ledger.provider_event_id);
+                await throttle();
+              } catch (e) {
+                if (!e.message.includes('404') && !e.message.includes('410')) throw e;
+              }
+              ledgerUpdates.push({ id: ledger.id, fields: { status: 'deleted_local', provider_event_id: null } });
+              pStats.deleted_local++;
+              stats.deleted_local++;
+              logSyncAction(pid, 'deleted_local', {
+                taskId: ledger.task_id, taskText: ledger.event_summary, eventId: ledger.provider_event_id,
+                detail: 'Task deleted in Juggler — event removed from ' + pid
+              });
             }
-            ledgerUpdates.push({ id: ledger.id, fields: { status: 'deleted_local', provider_event_id: null } });
-            pStats.deleted_local++;
-            stats.deleted_local++;
-            logSyncAction(pid, 'deleted_local', {
-              taskId: ledger.task_id, taskText: ledger.event_summary, eventId: ledger.provider_event_id,
-              detail: 'Task deleted in Juggler — event removed from ' + pid
-            });
 
           } else {
             // Both gone
@@ -634,11 +648,15 @@ async function sync(req, res) {
       }
     }
 
-    // === Phase 3: Handle new items (no ledger record) ===
+    // === Phase 3: Push new tasks to providers (skip for ingest-only) ===
     emitProgress('push', 'Syncing new tasks...', 50);
 
     for (var pi2 = 0; pi2 < providerIds.length; pi2++) {
       var pid2 = providerIds[pi2];
+      if (isIngestOnly(pid2)) {
+        console.log('[CAL-SYNC] skipping push phase for ' + pid2 + ' (ingest-only mode)');
+        continue;
+      }
       var pd2 = providerData[pid2];
       var pAdapter2 = pd2.adapter;
       var pToken2 = pd2.token;
