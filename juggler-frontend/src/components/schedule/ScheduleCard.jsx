@@ -16,7 +16,7 @@ DEFAULT_TOOLS.forEach(function(t) { TOOL_ICON_MAP[t.id] = t.icon; });
 function formatStartTime(mins) {
   var h = Math.floor(mins / 60);
   var m = mins % 60;
-  var ampm = h >= 12 ? 'p' : 'a';
+  var ampm = h >= 12 ? 'pm' : 'am';
   var h12 = h % 12 || 12;
   return h12 + (m > 0 ? ':' + (m < 10 ? '0' : '') + m : '') + ampm;
 }
