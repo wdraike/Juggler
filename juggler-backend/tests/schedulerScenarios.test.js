@@ -742,3 +742,109 @@ describe('Tier 10: Eligible Days Recurrence', () => {
     expect(result.length).toBe(3);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// TIER 11: RECURRING + SPLIT (day-boundary rule)
+// ═══════════════════════════════════════════════════════════════════
+//
+// For a recurring instance with split=true, chunks must stay on the
+// instance's assigned day. If a chunk doesn't fit, it's reported as
+// unplaced (partial_split) rather than rolled to the next day. Non-
+// recurring split tasks retain their existing "chunks can span days"
+// behavior. See plan /Users/david/.claude/plans/cheerful-bouncing-porcupine.md.
+
+describe('Tier 11: Recurring + Split (day-boundary rule)', () => {
+
+  test('S47: Recurring split task — full fit on instance day', () => {
+    // Daily recurring "stretching" in morning block, 60 min total,
+    // split into 15-min chunks, nothing competing for the morning.
+    // nowMins=300 (5 AM) so the morning block (6-8 AM) is still "future"
+    // from the scheduler's perspective.
+    var r = schedule([
+      task({
+        id: 'rec_stretch', text: 'Stretching',
+        recurring: true, generated: true, date: TODAY,
+        when: 'morning', dur: 60, split: true, splitMin: 15, pri: 'P3'
+      }),
+    ], 300);
+    var chunks = placements(r, 'rec_stretch');
+    // All chunks should fit; post-processing may merge them.
+    expect(chunks.length).toBeGreaterThan(0);
+    var totalDur = chunks.reduce(function(s, p) { return s + p.dur; }, 0);
+    expect(totalDur).toBe(60);
+    // Every chunk must be on the instance's assigned day.
+    chunks.forEach(function(p) { expect(p.day).toBe(TODAY); });
+    // No unplaced entry for this task.
+    expect(isUnplaced(r, 'rec_stretch')).toBe(false);
+  });
+
+  test('S48: Recurring split — partial fit, leftover chunks dropped (not rolled)', () => {
+    // Morning block on weekdays is 6:00-8:00 (120 min). Consume 90 min of
+    // it with a fixed task, leaving exactly 30 min free. The 60-min
+    // split task should fit 30 min (2 chunks) and report the other 30
+    // min as partial_split unplaced. Critically: NO chunks should appear
+    // on any day other than TODAY.
+    var r = schedule([
+      task({ id: 'block_am', when: 'fixed', time: '6:00 AM', dur: 90, datePinned: true }),
+      task({
+        id: 'rec_stretch', text: 'Stretching',
+        recurring: true, generated: true, date: TODAY,
+        when: 'morning', dur: 60, split: true, splitMin: 15, pri: 'P3'
+      }),
+    ], 300);
+    var chunks = placements(r, 'rec_stretch');
+    // Some chunks should be placed, totaling 30 minutes, all on TODAY.
+    var totalDur = chunks.reduce(function(s, p) { return s + p.dur; }, 0);
+    expect(totalDur).toBe(30);
+    chunks.forEach(function(p) { expect(p.day).toBe(TODAY); });
+    // Must be reported as partial_split in unplaced.
+    var u = (r.unplaced || []).find(function(t) { return t.id === 'rec_stretch'; });
+    expect(u).toBeDefined();
+    expect(u._unplacedReason).toBe('partial_split');
+  });
+
+  test('S49: Recurring split — zero fit, all chunks unplaced, no day leakage', () => {
+    // Fill the morning block entirely (120 min of fixed work starting at
+    // 6am). The 60-min split task has no room on its instance day, and
+    // its ceiling pins it to that day, so the entire task should land in
+    // unplaced with zero chunks scheduled anywhere.
+    var r = schedule([
+      task({ id: 'block_am_full', when: 'fixed', time: '6:00 AM', dur: 120, datePinned: true }),
+      task({
+        id: 'rec_stretch', text: 'Stretching',
+        recurring: true, generated: true, date: TODAY,
+        when: 'morning', dur: 60, split: true, splitMin: 15, pri: 'P3'
+      }),
+    ], 300);
+    var chunks = placements(r, 'rec_stretch');
+    // Zero chunks placed anywhere.
+    expect(chunks.length).toBe(0);
+    // Reported as unplaced.
+    expect(isUnplaced(r, 'rec_stretch')).toBe(true);
+    // Double-check: no chunks on any day (not just TODAY).
+    Object.keys(r.dayPlacements || {}).forEach(function(dk) {
+      (r.dayPlacements[dk] || []).forEach(function(p) {
+        expect(p.task && p.task.id).not.toBe('rec_stretch');
+      });
+    });
+  });
+
+  test('S50: Non-recurring split still spans days (regression)', () => {
+    // A 90-minute one-off split task. Today's morning block is mostly
+    // full (leaving 30 min), and the task has no day pin. The existing
+    // behavior allows chunks to span days — this test locks in that
+    // behavior so the day-boundary rule stays scoped to recurring.
+    var r = schedule([
+      task({ id: 'block_am', when: 'fixed', time: '6:00 AM', dur: 90, datePinned: true }),
+      task({
+        id: 'effort', text: '90-min effort',
+        dur: 90, split: true, splitMin: 30, pri: 'P3'
+        // not recurring, no date pin, so chunks are free to span days
+      }),
+    ], 300);
+    var chunks = placements(r, 'effort');
+    var totalDur = chunks.reduce(function(s, p) { return s + p.dur; }, 0);
+    expect(totalDur).toBe(90);
+    // No assertion that chunks stay on one day — this is the point.
+  });
+});

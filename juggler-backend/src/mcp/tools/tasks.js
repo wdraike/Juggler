@@ -8,7 +8,7 @@
 
 const { z } = require('zod');
 const db = require('../../db');
-const { rowToTask, taskToRow, ensureProject, applySplitDefault, buildSourceMap, TEMPLATE_FIELDS } = require('../../controllers/task.controller');
+const { rowToTask, taskToRow, guardFixedCalendarWhen, ensureProject, applySplitDefault, buildSourceMap, TEMPLATE_FIELDS } = require('../../controllers/task.controller');
 const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
 
 // Shared Zod fields for task input (used by create_task, create_tasks, update_task)
@@ -107,7 +107,7 @@ function registerTaskTools(server, userId) {
       await applySplitDefault(row, userId);
       await ensureProject(userId, task.project);
       await db('tasks').insert(row);
-      enqueueScheduleRun(userId, 'mcp:create_task');
+      enqueueScheduleRun(userId, 'mcp:create_task', [row.id]);
       var created = await db('tasks').where('id', row.id).first();
       return { content: [{ type: 'text', text: JSON.stringify(rowToTask(created, tz), null, 2) }] };
     }
@@ -151,7 +151,7 @@ function registerTaskTools(server, userId) {
         }
       });
 
-      enqueueScheduleRun(userId, 'mcp:create_tasks');
+      enqueueScheduleRun(userId, 'mcp:create_tasks', rows.map(function(r) { return r.id; }));
       return { content: [{ type: 'text', text: JSON.stringify({ created: rows.length, ids: rows.map(function(r) { return r.id; }) }) }] };
     }
   );
@@ -192,6 +192,18 @@ function registerTaskTools(server, userId) {
       var taskType = existing.task_type || 'task';
       var isRecurringInstance = taskType === 'recurring_instance' && existing.source_id;
 
+      // Guard: don't let calendar-linked fixed tasks lose their 'fixed' tag.
+      // Instance edits route `when` to the source template, so guard against it.
+      if (row.when !== undefined) {
+        var _mGuardOpts = { allowUnfix: !!fields._allowUnfix };
+        if (isRecurringInstance) {
+          var _srcT = await db('tasks').where({ id: existing.source_id, user_id: userId }).first();
+          guardFixedCalendarWhen(row, _srcT, _mGuardOpts);
+        } else {
+          guardFixedCalendarWhen(row, existing, _mGuardOpts);
+        }
+      }
+
       if (isRecurringInstance) {
         var templateUpdate = {};
         var instanceUpdate = {};
@@ -217,7 +229,7 @@ function registerTaskTools(server, userId) {
         await db('tasks').where({ id: id, user_id: userId }).update(row);
       }
 
-      enqueueScheduleRun(userId, 'mcp:update_task');
+      enqueueScheduleRun(userId, 'mcp:update_task', [id]);
       var allRows = await db('tasks').where('user_id', userId).select();
       var srcMap = buildSourceMap(allRows);
       var updatedRow = allRows.find(function(r) { return r.id === id; });
@@ -243,7 +255,7 @@ function registerTaskTools(server, userId) {
       var update = { status: status || '', updated_at: db.fn.now() };
 
       await db('tasks').where({ id: id, user_id: userId }).update(update);
-      enqueueScheduleRun(userId, 'mcp:set_task_status');
+      enqueueScheduleRun(userId, 'mcp:set_task_status', [id]);
       var updated = await db('tasks').where('id', id).first();
       return { content: [{ type: 'text', text: JSON.stringify(rowToTask(updated, tz), null, 2) }] };
     }
@@ -290,7 +302,7 @@ function registerTaskTools(server, userId) {
         await trx('tasks').where({ id: id, user_id: userId }).del();
       });
 
-      enqueueScheduleRun(userId, 'mcp:delete_task');
+      enqueueScheduleRun(userId, 'mcp:delete_task', [id]);
       return { content: [{ type: 'text', text: JSON.stringify({ deleted: true, id: id }) }] };
     }
   );
@@ -419,7 +431,7 @@ function registerTaskTools(server, userId) {
         }
       });
 
-      enqueueScheduleRun(userId, 'mcp:batch_update_tasks');
+      enqueueScheduleRun(userId, 'mcp:batch_update_tasks', updates.map(function(u) { return u.id; }).filter(Boolean));
       return { content: [{ type: 'text', text: JSON.stringify({ updated: updatedCount }) }] };
     }
   );

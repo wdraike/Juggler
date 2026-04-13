@@ -34,6 +34,11 @@ var running = {};  // { userId: true } — single-flight flag
 /**
  * Enqueue a scheduler run for a user. Fire-and-forget — the single-flight
  * runner picks it up. Safe to call from any mutation path.
+ *
+ * `changedIds` (optional) is the list of task ids the caller just wrote.
+ * It's attached to the `tasks:changed` SSE event the wrapper in
+ * task.controller.js emits, so listeners can do a sparse upsert instead of
+ * refetching the full task list.
  */
 function enqueueScheduleRun(userId, source) {
   if (!queue[userId]) queue[userId] = [];

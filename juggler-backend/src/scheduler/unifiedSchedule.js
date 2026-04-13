@@ -730,6 +730,10 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   if (orphanCount > 0) console.log('[SCHED] reassigned ' + orphanCount + ' task(s) with orphaned when-tags to anytime');
 
   function recordPlace(occ, placed, t, start, dur, locked, dateKey, item) {
+    // Hard floor: never place before DAY_START (6 AM) unless task is explicitly fixed
+    if (start < DAY_START && !locked && !(t.when && t.when.indexOf('fixed') >= 0)) {
+      return; // reject wee-hour placement
+    }
     // Determine travel buffers — for split tasks, only first chunk gets travelBefore
     // and only last chunk gets travelAfter
     var tb = 0, ta = 0;
@@ -882,8 +886,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     // whenOverride can be an array of windows or a string
     var wins = Array.isArray(whenOverride) ? whenOverride : getWhenWindows(whenOverride || t.when, dayWindows[d.key]);
     if (wins.length === 0) return false;
-    var scanStart = Math.max(wins[0][0], afterMin || 0);
-    var scanLimit = beforeMin || WALK_END;
+    var scanStart = Math.max(wins[0][0], afterMin || 0, DAY_START);
+    var scanLimit = (beforeMin != null && beforeMin < WALK_END) ? beforeMin : WALK_END;
     var placedAny = false;
 
     while (item.remaining > 0 && scanStart < scanLimit) {
@@ -976,8 +980,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     var ta = getTravelAfter(t);
     var wins = Array.isArray(whenOverride) ? whenOverride : getWhenWindows(whenOverride || t.when, dayWindows[d.key]);
     if (wins.length === 0) return false;
-    var scanLimit = beforeMin || WALK_END;
-    var scanFloor = afterMin || 0;
+    var scanLimit = (beforeMin != null && beforeMin < WALK_END) ? beforeMin : WALK_END;
+    var scanFloor = Math.max(afterMin || 0, DAY_START);
     var dur = item.remaining;
     if (dur <= 0) return false;
 

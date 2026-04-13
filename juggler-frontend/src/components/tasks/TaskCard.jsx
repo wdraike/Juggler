@@ -11,7 +11,7 @@ import { getTheme } from '../../theme/colors';
 import StatusToggle from '../schedule/StatusToggle';
 import { parseDate } from '../../scheduler/dateHelpers';
 
-export default React.memo(function TaskCard({ task, status, onStatusChange, onExpand, darkMode, showDate, draggable, isBlocked, isMobile, allTasks, statuses, todayDate }) {
+function TaskCard({ task, status, onStatusChange, onExpand, darkMode, showDate, draggable, isBlocked, isMobile, allTasks, statuses, todayDate }) {
   var theme = getTheme(darkMode);
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = isTerminalStatus(status);
@@ -213,4 +213,31 @@ export default React.memo(function TaskCard({ task, status, onStatusChange, onEx
       })()}
     </div>
   );
-})
+}
+
+// Custom memo comparator: most cards never read `allTasks` / `statuses` /
+// `onStatusChange` / `onExpand`, but those references change on every reducer
+// upsert because the parent rebuilds them. Default shallow compare busts the
+// memo and re-renders every card on any state change. Only compare the refs
+// that actually affect this card's output.
+export default React.memo(TaskCard, function arePropsEqual(prev, next) {
+  if (prev.task !== next.task) return false;
+  if (prev.status !== next.status) return false;
+  if (prev.isBlocked !== next.isBlocked) return false;
+  if (prev.darkMode !== next.darkMode) return false;
+  if (prev.showDate !== next.showDate) return false;
+  if (prev.draggable !== next.draggable) return false;
+  if (prev.isMobile !== next.isMobile) return false;
+  if (prev.todayDate !== next.todayDate) return false;
+  // Callbacks: identity may churn but the behavior doesn't. Ignore them —
+  // TaskCard only calls them on user click, and the parent's closure will
+  // read fresh state at click time (or via its own ref).
+  // allTasks / statuses: only used by the blocker UI branch. Ignore unless
+  // the card is actively showing that branch.
+  var needsBlockerCheck = next.isBlocked && next.task && next.task.dependsOn && next.task.dependsOn.length > 0;
+  if (needsBlockerCheck) {
+    if (prev.allTasks !== next.allTasks) return false;
+    if (prev.statuses !== next.statuses) return false;
+  }
+  return true;
+});

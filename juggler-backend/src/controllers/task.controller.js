@@ -17,9 +17,14 @@ const { localToUtc, utcToLocal, toDateISO, fromDateISO, getDayName, safeTimezone
 const cache = require('../lib/redis');
 const { enqueueScheduleRun: _enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 const sseEmitter = require('../lib/sse-emitter');
-// Wrap enqueueScheduleRun to also emit SSE event so frontends refresh immediately
-function enqueueScheduleRun(userId, source) {
-  sseEmitter.emit(userId, 'tasks:changed', { source: source, timestamp: Date.now() });
+// Wrap enqueueScheduleRun to also emit SSE event so frontends refresh
+// immediately. `ids` (optional) is the list of task ids the caller just
+// wrote — when present, the frontend can upsert only those rows instead of
+// refetching the full task list.
+function enqueueScheduleRun(userId, source, ids) {
+  var payload = { source: source, timestamp: Date.now() };
+  if (Array.isArray(ids) && ids.length > 0) payload.ids = ids;
+  sseEmitter.emit(userId, 'tasks:changed', payload);
   _enqueueScheduleRun(userId, source);
 }
 
@@ -83,12 +88,16 @@ var TEMPLATE_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', '
 
 /**
  * Build a { sourceId: row } lookup from an array of task rows.
- * Includes recurring_template rows so instances can inherit their fields.
+ * Includes both recurring_template rows AND legacy rows that act as
+ * recurring sources (task_type='task' with recurring=1), so instances
+ * generated against a legacy source still inherit text/fields.
  */
 function buildSourceMap(rows) {
   var map = {};
   rows.forEach(function(r) {
     if (r.task_type === 'recurring_template') {
+      map[r.id] = r;
+    } else if (r.recurring && r.task_type !== 'recurring_instance') {
       map[r.id] = r;
     }
   });
@@ -363,6 +372,29 @@ function taskToRow(task, userId, timezone) {
   return row;
 }
 
+// A calendar-synced timed event is inherently pinned to the calendar's time.
+// Stripping `fixed` from such a row makes the scheduler treat it as movable
+// while the external calendar still owns the time — a contradiction that
+// manifests as the scheduler "moving" fixed meetings. Require an explicit
+// _allowUnfix opt-in to remove `fixed` from a calendar-linked task. The
+// guardTarget arg is the row whose `when` column will actually be written
+// (the task itself for normal updates, the source template for recurring
+// instance edits since TEMPLATE_FIELDS routes `when` there).
+function guardFixedCalendarWhen(row, guardTarget, opts) {
+  if (!guardTarget) return;
+  if (row.when === undefined) return;
+  if (opts && opts.allowUnfix) return;
+  var wasFixed = guardTarget.when && String(guardTarget.when).indexOf('fixed') >= 0;
+  if (!wasFixed) return;
+  var isCalLinked = !!(guardTarget.gcal_event_id || guardTarget.msft_event_id);
+  if (!isCalLinked) return;
+  var willBeFixed = typeof row.when === 'string' && row.when.indexOf('fixed') >= 0;
+  if (willBeFixed) return;
+  console.log('[TASK-GUARD] preserving fixed tag on calendar-linked task ' + guardTarget.id +
+    ' (incoming when=' + JSON.stringify(row.when) + ')');
+  delete row.when;
+}
+
 /**
  * Compute a version string from the most recent updated_at across all tasks.
  * Used for change-detection polling so the frontend knows when to reload.
@@ -535,7 +567,7 @@ async function createTask(req, res) {
     await db('tasks').insert(row);
     var created = await db('tasks').where('id', row.id).first();
     await cache.invalidateTasks(req.user.id);
-    enqueueScheduleRun(req.user.id, 'api:createTask');
+    enqueueScheduleRun(req.user.id, 'api:createTask', [row.id]);
     res.status(201).json({ task: rowToTask(created, null) });
   } catch (error) {
     console.error('Create task error:', error);
@@ -592,6 +624,19 @@ async function updateTask(req, res) {
       }
     }
     delete row._pendingTimeOnly;
+
+    // Guard: don't let calendar-linked fixed tasks silently lose their 'fixed'
+    // tag. For recurring instances, `when` is routed to the source template,
+    // so check the template's calendar linkage.
+    if (row.when !== undefined && !req.body._dragPin) {
+      var _guardOpts = { allowUnfix: !!req.body._allowUnfix };
+      if ((existing.task_type || 'task') === 'recurring_instance' && existing.source_id) {
+        var _srcTmpl = await db('tasks').where({ id: existing.source_id, user_id: req.user.id }).first();
+        guardFixedCalendarWhen(row, _srcTmpl, _guardOpts);
+      } else {
+        guardFixedCalendarWhen(row, existing, _guardOpts);
+      }
+    }
 
     if (req.body.project) await ensureProject(req.user.id, req.body.project);
 
@@ -758,7 +803,7 @@ async function updateTask(req, res) {
     var srcMap = buildSourceMap(allRows);
     var updatedRow = allRows.find(function(r) { return r.id === id; });
     await cache.invalidateTasks(req.user.id);
-    enqueueScheduleRun(req.user.id, 'api:updateTask');
+    enqueueScheduleRun(req.user.id, 'api:updateTask', [id]);
     res.json({ task: rowToTask(updatedRow, null, srcMap) });
   } catch (error) {
     console.error('Update task error:', error);
@@ -788,6 +833,8 @@ async function deleteTask(req, res) {
 
       var deletedCount = 0;
       var keptCount = 0;
+      var pendingIds = [];
+      var keptIds = [];
 
       await db.transaction(async function(trx) {
         // Find all instances of this recurring task
@@ -796,7 +843,7 @@ async function deleteTask(req, res) {
           .select('id', 'status', 'gcal_event_id', 'msft_event_id');
 
         // Delete pending instances (no status = never acted on)
-        var pendingIds = instances
+        pendingIds = instances
           .filter(function(inst) {
             var st = inst.status || '';
             return st !== 'done' && st !== 'cancel' && st !== 'skip';
@@ -820,7 +867,7 @@ async function deleteTask(req, res) {
         }
 
         // Clear source_id on kept (completed) instances so they don't reference a dead template
-        var keptIds = instances
+        keptIds = instances
           .filter(function(inst) {
             var st = inst.status || '';
             return st === 'done' || st === 'cancel' || st === 'skip';
@@ -851,7 +898,7 @@ async function deleteTask(req, res) {
       });
 
       await cache.invalidateTasks(req.user.id);
-      enqueueScheduleRun(req.user.id, 'api:deleteTask:cascade');
+      enqueueScheduleRun(req.user.id, 'api:deleteTask:cascade', [templateId].concat(pendingIds).concat(keptIds));
       res.json({
         message: 'Recurring deleted',
         templateId: templateId,
@@ -895,7 +942,7 @@ async function deleteTask(req, res) {
     });
 
     await cache.invalidateTasks(req.user.id);
-    enqueueScheduleRun(req.user.id, 'api:deleteTask');
+    enqueueScheduleRun(req.user.id, 'api:deleteTask', [id]);
     res.json({ message: 'Task deleted', id: id });
   } catch (error) {
     console.error('Delete task error:', error);
@@ -1001,9 +1048,9 @@ async function updateTaskStatus(req, res) {
       }
       // Unpausing: next scheduler run will regenerate instances via expandRecurring
 
-      var srcMap = buildSourceMap(await db('tasks').where({ user_id: req.user.id, task_type: 'recurring_template' }).select());
+      var srcMap = buildSourceMap(await db('tasks').where('user_id', req.user.id).where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); }).select());
       await cache.invalidateTasks(req.user.id);
-      enqueueScheduleRun(req.user.id, 'api:updateTaskStatus:template');
+      enqueueScheduleRun(req.user.id, 'api:updateTaskStatus:template', [id].concat(instanceIds || []));
       var updatedTemplate = await db('tasks').where('id', id).first();
       return res.json({ task: rowToTask(updatedTemplate, null, srcMap), instancesRemoved: status === 'pause' ? (instanceIds || []).length : 0 });
     }
@@ -1034,9 +1081,9 @@ async function updateTaskStatus(req, res) {
 
     await db('tasks').where({ id: id, user_id: req.user.id }).update(update);
     var updated = await db('tasks').where('id', id).first();
-    var srcMap = buildSourceMap(await db('tasks').where({ user_id: req.user.id, task_type: 'recurring_template' }).select());
+    var srcMap = buildSourceMap(await db('tasks').where('user_id', req.user.id).where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); }).select());
     await cache.invalidateTasks(req.user.id);
-    enqueueScheduleRun(req.user.id, 'api:updateTaskStatus');
+    enqueueScheduleRun(req.user.id, 'api:updateTaskStatus', [id]);
     res.json({ task: rowToTask(updated, null, srcMap) });
   } catch (error) {
     console.error('Update task status error:', error);
@@ -1096,7 +1143,7 @@ async function batchCreateTasks(req, res) {
     });
 
     await cache.invalidateTasks(req.user.id);
-    enqueueScheduleRun(req.user.id, 'api:batchCreateTasks');
+    enqueueScheduleRun(req.user.id, 'api:batchCreateTasks', rows.map(function(r) { return r.id; }));
     res.status(201).json({ created: rows.length });
   } catch (error) {
     console.error('Batch create error:', error);
@@ -1132,9 +1179,28 @@ async function batchUpdateTasks(req, res) {
           var existingRows = await trx('tasks')
             .where('user_id', req.user.id)
             .whereIn('id', idsToUpdate)
-            .select('id', 'task_type', 'source_id', 'scheduled_at', 'status');
+            .select('id', 'task_type', 'source_id', 'scheduled_at', 'status',
+                    'when', 'gcal_event_id', 'msft_event_id');
           var existingById = {};
           existingRows.forEach(function(r) { existingById[r.id] = r; });
+
+          // Pre-load any source templates referenced by recurring instances in
+          // this batch, so the fixed-calendar guard can inspect the template's
+          // calendar linkage (that's where `when` edits on an instance route).
+          var srcIds = [];
+          existingRows.forEach(function(r) {
+            if (r.task_type === 'recurring_instance' && r.source_id && srcIds.indexOf(r.source_id) < 0) {
+              srcIds.push(r.source_id);
+            }
+          });
+          var templateById = {};
+          if (srcIds.length > 0) {
+            var tmplRows = await trx('tasks')
+              .where('user_id', req.user.id)
+              .whereIn('id', srcIds)
+              .select('id', 'when', 'gcal_event_id', 'msft_event_id');
+            tmplRows.forEach(function(r) { templateById[r.id] = r; });
+          }
 
           for (var i = 0; i < updates.length; i++) {
             var update = updates[i];
@@ -1194,6 +1260,17 @@ async function batchUpdateTasks(req, res) {
             // Never set status on a recurring task template — status belongs on instances only
             if (taskType === 'recurring_template' && row.status !== undefined) {
               delete row.status;
+            }
+
+            // Guard: don't let calendar-linked fixed tasks lose their 'fixed' tag.
+            // Recurring instances route `when` to the source template, so check it.
+            if (row.when !== undefined && !update._dragPin && existing) {
+              var _bGuardOpts = { allowUnfix: !!update._allowUnfix };
+              if (taskType === 'recurring_instance' && existing.source_id) {
+                guardFixedCalendarWhen(row, templateById[existing.source_id], _bGuardOpts);
+              } else {
+                guardFixedCalendarWhen(row, existing, _bGuardOpts);
+              }
             }
 
             if (taskType === 'recurring_instance' && existing && existing.source_id) {
@@ -1271,7 +1348,7 @@ async function batchUpdateTasks(req, res) {
     }
 
     await cache.invalidateTasks(req.user.id);
-    enqueueScheduleRun(req.user.id, 'api:batchUpdateTasks');
+    enqueueScheduleRun(req.user.id, 'api:batchUpdateTasks', updates.map(function(u) { return u.id; }).filter(Boolean));
     res.json({ updated: updatedCount });
   } catch (error) {
     console.error('Batch update error:', error);
@@ -1288,7 +1365,7 @@ async function getDisabledTasks(req, res) {
       .where({ user_id: req.user.id, status: 'disabled' })
       .orderBy('disabled_at', 'desc');
     var srcMap = buildSourceMap(
-      await db('tasks').where({ user_id: req.user.id, task_type: 'recurring_template' }).select()
+      await db('tasks').where('user_id', req.user.id).where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); }).select()
     );
     var tasks = rows.map(function(r) { return rowToTask(r, null, srcMap); });
     res.json({ tasks: tasks });
@@ -1392,11 +1469,11 @@ async function reEnableTask(req, res) {
     });
 
     var srcMap = buildSourceMap(
-      await db('tasks').where({ user_id: req.user.id, task_type: 'recurring_template' }).select()
+      await db('tasks').where('user_id', req.user.id).where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); }).select()
     );
     var updated = await db('tasks').where('id', id).first();
     await cache.invalidateTasks(req.user.id);
-    enqueueScheduleRun(req.user.id, 'api:reEnableTask');
+    enqueueScheduleRun(req.user.id, 'api:reEnableTask', [id]);
     res.json({ task: rowToTask(updated, null, srcMap) });
   } catch (error) {
     console.error('Re-enable task error:', error);
@@ -1426,7 +1503,7 @@ async function unpinTask(req, res) {
         .where({ id: req.params.id, user_id: req.user.id })
         .del();
 
-      enqueueScheduleRun(req.user.id, 'api:unpinTask:delete');
+      enqueueScheduleRun(req.user.id, 'api:unpinTask:delete', [req.params.id]);
       return res.json({ success: true, action: 'deleted', message: 'Instance deleted — scheduler will regenerate from template' });
     }
 
@@ -1442,7 +1519,7 @@ async function unpinTask(req, res) {
       .where({ id: req.params.id, user_id: req.user.id })
       .update(updates);
 
-    enqueueScheduleRun(req.user.id, 'api:unpinTask');
+    enqueueScheduleRun(req.user.id, 'api:unpinTask', [req.params.id]);
     res.json({ success: true, action: 'unpinned', when: updates.when });
   } catch (error) {
     console.error('Unpin error:', error);
@@ -1465,6 +1542,7 @@ module.exports = {
   unpinTask,
   rowToTask,
   taskToRow,
+  guardFixedCalendarWhen,
   buildSourceMap,
   ensureProject,
   applySplitDefault,

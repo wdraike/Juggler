@@ -26,6 +26,7 @@ var taskToRow = taskController.taskToRow;
 var expandRecurringShared = require('../../../shared/scheduler/expandRecurring');
 var expandRecurring = expandRecurringShared.expandRecurring;
 var cache = require('../lib/redis');
+var syncLock = require('../lib/sync-lock');
 
 var DEFAULT_TIMEZONE = constants.DEFAULT_TIMEZONE;
 
@@ -134,34 +135,61 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var cfg = await loadConfig(userId);
   cfg.timezone = TIMEZONE;
 
-  // 5b. Clean-slate recurring expansion with deterministic IDs.
-  // Instance IDs are derived from sourceId + date, so they're stable across runs.
+  // 5b. Reconcile recurring instance expansion.
+  // Instance IDs are derived from sourceId + date (see expandRecurring.js:293),
+  // so they're stable across runs. Rather than delete-all-then-regenerate
+  // (which bumps updated_at on every pending instance every run and triggers
+  // a full frontend refresh via /tasks/version), we diff the desired expansion
+  // against the existing pending set and only INSERT truly new instances and
+  // DELETE stale ones. Unchanged rows stay byte-identical — no write, no
+  // updated_at bump, no version bump, no SSE churn.
   var today = parseDate(timeInfo.todayKey) || new Date();
   var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + 56);
 
-  // Delete all pending instances — they'll be regenerated with deterministic IDs
-  var deadIds = await trx('tasks')
-    .where({ user_id: userId, task_type: 'recurring_instance' })
-    .where('status', '')
-    .pluck('id');
-  if (deadIds.length > 0) {
-    await trx('tasks').whereIn('id', deadIds).del();
-    console.log('[SCHED] cleared ' + deadIds.length + ' pending recurring instances');
-    taskRows = await trx('tasks').where('user_id', userId).select();
-    srcMap = buildSourceMap(taskRows);
-    allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
-    statuses = {};
-    allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
+  // Existing pending recurring instances keyed by id (from the in-memory load).
+  var existingPendingIds = {};
+  taskRows.forEach(function(r) {
+    if (r.task_type === 'recurring_instance' && (!r.status || r.status === '')) {
+      existingPendingIds[r.id] = true;
+    }
+  });
+
+  // expandRecurring() skips generating an instance whose (sourceId, date)
+  // already appears in allTasks (see expandRecurring.js:28-35). To learn the
+  // full desired set (not just the "missing" delta), hide existing pending
+  // instances from it — same effect as the old "delete first" sequence, but
+  // no DB round-trip.
+  var allTasksForExpand = allTasks.filter(function(t) {
+    if (t.taskType !== 'recurring_instance') return true;
+    return !existingPendingIds[t.id]; // keep non-pending (done/skipped) instances
+  });
+  var desired = expandRecurring(allTasksForExpand, today, expandEnd, { statuses: statuses });
+  var MAX_EXPANDED = 500;
+  if (desired.length > MAX_EXPANDED) {
+    console.warn('[SCHED] expansion capped: ' + desired.length + ' → ' + MAX_EXPANDED);
+    desired = desired.slice(0, MAX_EXPANDED);
   }
 
-  var expanded = expandRecurring(allTasks, today, expandEnd, { statuses: statuses });
-  var MAX_EXPANDED = 500;
-  if (expanded.length > MAX_EXPANDED) {
-    console.warn('[SCHED] expansion capped: ' + expanded.length + ' → ' + MAX_EXPANDED);
-    expanded = expanded.slice(0, MAX_EXPANDED);
+  // Diff desired vs existing pending.
+  var desiredIds = {};
+  desired.forEach(function(t) { desiredIds[t.id] = true; });
+  var toInsert = desired.filter(function(t) { return !existingPendingIds[t.id]; });
+  var toDeleteIds = Object.keys(existingPendingIds).filter(function(id) { return !desiredIds[id]; });
+
+  // Preserve the variable names the downstream changeset computation uses:
+  //   deadIds = ids that were actually deleted this run
+  //   expanded = instances that were actually inserted this run
+  var deadIds = toDeleteIds;
+  var expanded = toInsert;
+
+  var reconcileChanged = false;
+  if (toDeleteIds.length > 0) {
+    await trx('tasks').whereIn('id', toDeleteIds).del();
+    console.log('[SCHED] reconcile: deleted ' + toDeleteIds.length + ' stale recurring instances');
+    reconcileChanged = true;
   }
-  if (expanded.length > 0) {
-    var insertRows = expanded.map(function(t) {
+  if (toInsert.length > 0) {
+    var insertRows = toInsert.map(function(t) {
       var scheduledAt = t.date ? localToUtc(t.date, t.time || null, TIMEZONE) : null;
       return {
         id: t.id,
@@ -180,15 +208,18 @@ async function runScheduleAndPersist(userId, _retries, options) {
     for (var ci = 0; ci < insertRows.length; ci += chunkSize) {
       await trx('tasks').insert(insertRows.slice(ci, ci + chunkSize));
     }
-    console.log('[SCHED] regenerated ' + expanded.length + ' recurring instances');
+    console.log('[SCHED] reconcile: inserted ' + toInsert.length + ' new recurring instances');
+    reconcileChanged = true;
   }
 
-  // Re-read all tasks
-  taskRows = await trx('tasks').where('user_id', userId).select();
-  srcMap = buildSourceMap(taskRows);
-  allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
-  statuses = {};
-  allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
+  // Re-read all tasks only if the reconcile actually changed the set.
+  if (reconcileChanged) {
+    taskRows = await trx('tasks').where('user_id', userId).select();
+    srcMap = buildSourceMap(taskRows);
+    allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
+    statuses = {};
+    allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
+  }
 
   // 6. Run scheduler
   var result = unifiedSchedule(allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg);
@@ -302,6 +333,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
     cleared++;
   });
 
+  // Build unplaced lookup so Phase 9 doesn't overwrite Phase 8's null scheduled_at
+  var unplacedIds = {};
+  result.unplaced.forEach(function(t) { if (t && t.id) unplacedIds[t.id] = true; });
+
   // 9. Move remaining past-dated tasks to today
   //    Past recurringTasks missed their day — mark as 'skip'.
   //    Past non-recurringTasks that weren't placed — move date to today.
@@ -320,6 +355,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
       if (!td || td >= today) return;  // not past
       // Already handled by placement persistence above
       if (placementByTaskId[t.id]) return;
+      // Already marked unscheduled in Phase 8 — don't overwrite with midnight
+      if (unplacedIds[t.id]) return;
 
       var rawRowPast = rawRowById[t.id];
       if (!rawRowPast) return;  // not a real DB task
@@ -659,35 +696,44 @@ async function getSchedulePlacements(userId, options) {
   }
 
   if (cacheStale && cache) {
-    // Check if another request is already re-running the scheduler
-    var existingLock = await acquireSchedulerLock(userId);
-    if (existingLock) {
+    // Try to acquire the canonical per-user sync lock. If we get it, run
+    // the scheduler to refresh the cache. If another run holds the lock
+    // (queue worker, REST /schedule/run, or MCP run_schedule), wait briefly
+    // and re-read the cache that run produced. Previously this path used a
+    // separate Redis-based lock (acquireSchedulerLock/releaseSchedulerLock),
+    // which did not interlock with the table-based sync_locks used by the
+    // other paths — two scheduler runs could race and deadlock on row
+    // inserts. Unifying on withLock closes that hole.
+    var freshResult = null;
+    try {
+      freshResult = await syncLock.withLock(userId, function() {
+        console.log('[SCHED] cache stale (age=' + Math.round((Date.now() - new Date(cache.generatedAt).getTime()) / 60000) + 'm), re-running scheduler under sync lock');
+        return runScheduleAndPersist(userId, undefined, { timezone: TIMEZONE });
+      });
+    } catch (err) {
+      console.error('[SCHED] stale re-run failed, using cached:', err.message);
+      // Fall through to cached hydration
+    }
+    if (freshResult) {
+      return {
+        dayPlacements: freshResult.dayPlacements,
+        unplaced: freshResult.unplaced,
+        score: freshResult.score,
+        warnings: freshResult.warnings || [],
+        hasPastTasks: hasPastTasks
+      };
+    }
+    // Lock was held by another run (freshResult === null). Wait briefly
+    // and re-read the cache that run produced, then fall through to
+    // cached hydration below.
+    if (freshResult === null) {
       console.log('[SCHED] cache stale but scheduler already running, waiting...');
-      await new Promise(function(r) { setTimeout(r, 2000); }); // brief wait for other run
-      // Re-read the cache that the other run produced
+      await new Promise(function(r) { setTimeout(r, 2000); });
       var freshCacheRow = await db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
       if (freshCacheRow) {
         try {
           cache = typeof freshCacheRow.config_value === 'string' ? JSON.parse(freshCacheRow.config_value) : freshCacheRow.config_value;
         } catch (e) { /* fall through */ }
-      }
-    } else {
-      // We hold the lock — run the scheduler
-      console.log('[SCHED] cache stale (age=' + Math.round((Date.now() - new Date(cache.generatedAt).getTime()) / 60000) + 'm), re-running scheduler');
-      try {
-        var freshResult = await runScheduleAndPersist(userId, undefined, { timezone: TIMEZONE });
-        releaseSchedulerLock(userId);
-        return {
-          dayPlacements: freshResult.dayPlacements,
-          unplaced: freshResult.unplaced,
-          score: freshResult.score,
-          warnings: freshResult.warnings || [],
-          hasPastTasks: hasPastTasks
-        };
-      } catch (err) {
-        releaseSchedulerLock(userId);
-        console.error('[SCHED] stale re-run failed, using cached:', err.message);
-        // Fall through to cached hydration
       }
     }
   }

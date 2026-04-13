@@ -129,6 +129,16 @@ export default function AppLayout() {
   var theme = getTheme(darkMode);
   var statuses = taskState.statuses;
   var allTasks = taskState.tasks;
+  // Refs that always point at the latest tasks/statuses, so callbacks that
+  // only read them (never cause re-render) can be useCallback'd with an
+  // empty dep list and stay identity-stable across upserts. Without this,
+  // every status change rebuilds handleStatusChange, which cascades fresh
+  // props into every TaskCard and busts the memo.
+  var allTasksRef = useRef(allTasks);
+  var statusesRef = useRef(statuses);
+  useEffect(function() { allTasksRef.current = allTasks; }, [allTasks]);
+  useEffect(function() { statusesRef.current = statuses; }, [statuses]);
+
   // Visible tasks excludes recurring templates (blueprints) and disabled items (frozen by plan limits)
   var visibleTasks = useMemo(function() {
     return allTasks.filter(function(t) {
@@ -219,15 +229,27 @@ export default function AppLayout() {
       setGcalSyncing(true);
       setMsftCalSyncing(true);
       apiClient.post('/cal/sync').then(function(r) {
-        var now = new Date().toISOString();
-        if (gcalAutoSync) setGcalLastSyncedAt(now);
-        if (msftCalAutoSync) setMsftCalLastSyncedAt(now);
-        if (r.data.pushed || r.data.pulled || r.data.deleted_local || r.data.deleted_remote) {
-          loadTasks().then(function() { loadPlacements(); });
-        }
-        if (r.data.errors && r.data.errors.some(function(e) { return e.tokenExpired; })) {
+        var errors = r.data.errors || [];
+        var hasTokenExpiry = errors.some(function(e) { return e.tokenExpired; });
+        var nonTokenErrors = errors.filter(function(e) { return !e.tokenExpired; });
+
+        if (hasTokenExpiry) {
           showToast('Calendar connection expired. Please reconnect in Calendar Sync settings.', 'error');
+        } else if (nonTokenErrors.length > 0) {
+          showToast('Calendar sync completed with ' + nonTokenErrors.length + ' error(s). Open Calendar Sync for details.', 'error');
         }
+
+        // Only update last-synced timestamp if there were no errors
+        if (errors.length === 0) {
+          var now = new Date().toISOString();
+          if (gcalAutoSync) setGcalLastSyncedAt(now);
+          if (msftCalAutoSync) setMsftCalLastSyncedAt(now);
+        }
+        // Intentionally no loadTasks() here: the backend emits
+        // tasks:changed / schedule:changed over SSE when cal-sync touches
+        // rows, and the surgical handlers in useTaskState apply the
+        // deltas without re-dispatching INIT. The old full refresh here
+        // was legacy from before the SSE pipeline existed.
       }).catch(function(e) {
         if (e.response?.status === 409) {
           // Lock held — skip silently, the interval will retry later
@@ -236,6 +258,9 @@ export default function AppLayout() {
         var hasTokenExpiry = e.response?.data?.errors?.some(function(err) { return err.tokenExpired; });
         if (hasTokenExpiry) {
           showToast('Calendar connection expired. Please reconnect in Calendar Sync settings.', 'error');
+        } else {
+          var msg = e.response?.data?.error || e.message;
+          showToast('Calendar sync failed: ' + (msg || 'unknown error'), 'error');
         }
       }).finally(function() {
         setGcalSyncing(false);
@@ -511,14 +536,20 @@ export default function AppLayout() {
     return Object.keys(names).sort();
   }, [allTasks, config.projects]);
 
-  // Status change handler
+  // Status change handler. Reads allTasks through a ref so this callback's
+  // identity is stable across task upserts — that keeps memoized TaskCards
+  // from re-rendering on every scheduler run.
+  var todayRef = useRef(today);
+  useEffect(function() { todayRef.current = today; }, [today]);
   var handleStatusChange = useCallback((id, val) => {
+    var tasks = allTasksRef.current;
     if (val === 'done') {
-      var task = allTasks.find(function(t) { return t.id === id; });
+      var task = tasks.find(function(t) { return t.id === id; });
       // Block marking future recurring instances as done
       if (task && task.recurring && task.taskType === 'recurring_instance') {
         var taskDate = parseDate(task.date);
-        if (taskDate && today && taskDate > today) {
+        var nowDay = todayRef.current;
+        if (taskDate && nowDay && taskDate > nowDay) {
           showToast('Can\'t mark a future recurring task as done — skip or cancel it instead', 'warning');
           return;
         }
@@ -531,8 +562,8 @@ export default function AppLayout() {
       taskFields: { status: val }
     });
     var labels = { done: 'Done', wip: 'WIP', cancel: 'Cancelled', skip: 'Skipped', '': 'Reopened' };
-    showToast((labels[val] || val) + ': ' + (allTasks.find(t => t.id === id)?.text || id).slice(0, 40), 'success');
-  }, [pushUndo, setStatus, allTasks, showToast, today]);
+    showToast((labels[val] || val) + ': ' + (tasks.find(t => t.id === id)?.text || id).slice(0, 40), 'success');
+  }, [pushUndo, setStatus, showToast]);
 
   var handleCompletionConfirm = useCallback(function(completedAt) {
     var task = completionPickerTask;
@@ -546,19 +577,21 @@ export default function AppLayout() {
     showToast('Done: ' + (task.text || task.id).slice(0, 40), 'success');
   }, [completionPickerTask, pushUndo, setStatus, showToast]);
 
-  // Task expand handler — from main views (single open)
-  // Generated/instance tasks — open the source recurring instead
+  // Task expand handler — from main views (single open).
+  // Reads allTasks through a ref so this callback stays identity-stable
+  // across upserts (same reasoning as handleStatusChange above).
   var handleExpand = useCallback((id) => {
+    var tasks = allTasksRef.current;
     var effectiveId = id;
-    var task = allTasks.find(function(t) { return t.id === id; });
+    var task = tasks.find(function(t) { return t.id === id; });
     if (task && task.sourceId) {
-      var sourceExists = allTasks.some(function(t) { return t.id === task.sourceId; });
+      var sourceExists = tasks.some(function(t) { return t.id === task.sourceId; });
       if (sourceExists) {
         effectiveId = task.sourceId;
         expandedInstanceRef.current[effectiveId] = id;
       }
     } else if (task && task.recurring) {
-      var tmpl = allTasks.find(function(t) {
+      var tmpl = tasks.find(function(t) {
         return t.taskType === 'recurring_template' && t.text === task.text;
       });
       if (tmpl) {
@@ -583,7 +616,7 @@ export default function AppLayout() {
     }).catch(function(err) {
       console.error('Failed to fetch task detail:', err);
     });
-  }, [allTasks]);
+  }, []);
 
 
   // Task create handler
@@ -1174,7 +1207,8 @@ export default function AppLayout() {
             setGcalSyncing(false); setMsftCalSyncing(false);
             var now = new Date().toISOString();
             setGcalLastSyncedAt(now); setMsftCalLastSyncedAt(now);
-            loadTasks().then(function() { loadPlacements(); });
+            // SSE events from the sync deliver task updates surgically —
+            // no full reload needed.
           }}
         />
         </ErrorBoundary>

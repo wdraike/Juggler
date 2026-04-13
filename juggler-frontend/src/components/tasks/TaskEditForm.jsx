@@ -322,8 +322,17 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var whenParts = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
   var isAllDay = whenParts.indexOf('allday') !== -1;
   var isFixed = whenParts.indexOf('fixed') !== -1;
+  // Calendar-linked fixed tasks are pinned by the external calendar. Stripping
+  // 'fixed' from them creates a contradiction the backend guard will reject,
+  // so the When-mode selector locks those buttons out entirely.
+  var isCalLinkedFixed = isFixed && !!(task && (task.gcalEventId || task.msftEventId));
   var isRigid = recurring && rigid;
-  var disSplit = isAllDay || isFixed || isRigid || (recurring && hasPreferredTime);
+  // Split is allowed for non-recurring tasks (except all-day / fixed) and for
+  // recurring tasks only in Time Blocks mode (not Time Window, not rigid).
+  // For recurring Time Blocks, the scheduler enforces that chunks stay on
+  // the instance's assigned day — chunks that don't fit are dropped, not
+  // rolled to the next day. See the hint below the split toggle.
+  var disSplit = isAllDay || isFixed || (recurring && (hasPreferredTime || rigid));
 
   // --- Configuration feasibility warnings ---
   var configWarnings = (function() {
@@ -566,7 +575,15 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (project !== snap.project) changed.project = all.project;
     if (pri !== snap.pri) changed.pri = all.pri;
     if (notes !== snap.notes) changed.notes = all.notes;
-    if (when !== snap.when) changed.when = all.when;
+    if (when !== snap.when) {
+      changed.when = all.when;
+      // If the user is removing the 'fixed' tag, mark this edit as an explicit
+      // unfix so the backend guard (task.controller.js:guardFixedCalendarWhen)
+      // allows it through on calendar-linked tasks.
+      var hadFixed = snap.when && String(snap.when).indexOf('fixed') >= 0;
+      var hasFixed = typeof all.when === 'string' && all.when.indexOf('fixed') >= 0;
+      if (hadFixed && !hasFixed) changed._allowUnfix = true;
+    }
     if (recurring && hasPreferredTime !== snap.preferredTime) changed.preferredTime = all.preferredTime;
     if (dayReq !== snap.dayReq) changed.dayReq = all.dayReq;
     if (recurring !== snap.recurring) changed.recurring = all.recurring;
@@ -914,6 +931,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                 <button onClick={function() {
                   setRecurringHasPreferredTime(false);
                   setTime('');
+                  // Rigid is a Time Window concept (exact time, no \u00B1 flex).
+                  // Clear it when leaving that mode so the split toggle is
+                  // reachable and the meaning of "rigid" doesn't leak.
+                  setRigid(false);
                   var tags = (when || '').split(',').filter(Boolean);
                   if (tags.length <= 1) setWhen('morning,lunch,afternoon,evening,night');
                 }} style={togStyle(!hasPreferredTime, '#2D6A4F')}>{'\uD83D\uDCC6'} Time blocks</button>
@@ -1158,7 +1179,30 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                 ))}
               </select>
             </label>}
+            {!disSplit && <label style={lStyle}>
+              <span>{'\u2702'} Split</span>
+              <button title={split ? 'Can be split into chunks' : 'Scheduled as one block'}
+                onClick={() => { var on = !split; setSplit(on); if (on) { setTravelBefore(0); setTravelAfter(0); } }}
+                style={togStyle(split, '#2D6A4F')}>{split ? '\u2702 Yes' : 'No'}</button>
+            </label>}
+            {split && !disSplit && (
+              <label style={lStyle}>
+                <span>Min</span>
+                <select value={splitMin} onChange={e => setSplitMin(parseInt(e.target.value))}
+                  style={{ ...iStyle, width: 'auto', minWidth: 55 }}>
+                  {[15,20,30,45,60].map(v => (
+                    <option key={v} value={v}>{v < 60 ? v + 'm' : '1h'}</option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>}
+          {recurring && !marker && split && !disSplit && (
+            <div style={{ fontSize: 10, color: TH.textMuted, marginTop: -2, marginBottom: 5, lineHeight: 1.3 }}>
+              Chunks stay on the same day as the instance. If a chunk doesn't
+              fit, it's dropped rather than moved to a later day.
+            </div>
+          )}
 
           {/* Travel time buffers — hidden for all-day, markers, and split tasks */}
           {!marker && !isAllDay && !split && <div style={{ display: 'flex', gap: 6, marginBottom: 5 }}>
@@ -1188,32 +1232,41 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               var tagParts = whenParts.filter(function(p) { return p !== 'anytime' && p !== 'allday' && p !== 'fixed'; });
               var isWindows = tagParts.length > 0;
               var isAnytime = !isAllDay && !isFixed && !isWindows;
+              var calWarn = isCalLinkedFixed
+                ? ' — This event is synced to your external calendar; unpinning it may cause calendar/scheduler drift.'
+                : '';
               return (
                 <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center', marginTop: 4 }}>
-                  <button title="No time restriction — the scheduler can place this in any available slot" onClick={function() { setWhen(''); }}
+                  <button title={'No time restriction — the scheduler can place this in any available slot' + calWarn}
+                    onClick={function() { setWhen(''); }}
                     style={togStyle(isAnytime, '#2D6A4F')}>{'\uD83D\uDD04'} Anytime</button>
-                  <button title="Spans the entire day" onClick={function() { setWhen('allday'); setSplit(false); setTravelBefore(0); setTravelAfter(0); }}
+                  <button title={'Spans the entire day' + calWarn}
+                    onClick={function() { setWhen('allday'); setSplit(false); setTravelBefore(0); setTravelAfter(0); }}
                     style={togStyle(isAllDay, '#C8942A')}>{'\u2600\uFE0F'} All Day</button>
-                  <button title="Locked to the exact Date/Time. The scheduler will never move it" onClick={function() { setWhen('fixed'); setSplit(false); }}
+                  <button title={'Locked to the exact Date/Time. The scheduler will never move it' + calWarn}
+                    onClick={function() { setWhen('fixed'); setSplit(false); }}
                     style={togStyle(isFixed, '#8B2635')}>{'\uD83D\uDCCC'} Fixed</button>
                   <span style={{ width: 1, height: 18, background: TH.border, margin: '0 2px' }} />
                   {(uniqueTags || []).map(function(tb) {
                     var isOn = tagParts.indexOf(tb.tag) !== -1;
                     return (
-                      <button key={tb.tag} title={tb.name + ' time window — selecting any window disables Anytime'} onClick={function() {
-                        if (isAllDay || isFixed) {
-                          // Switch from allday/fixed to this single window
-                          setWhen(tb.tag);
-                        } else {
-                          var cur = tagParts.slice();
-                          if (isOn) { cur = cur.filter(function(v) { return v !== tb.tag; }); }
-                          else { cur.push(tb.tag); }
-                          setWhen(cur.length === 0 ? '' : cur.join(','));
-                        }
-                      }} style={{
-                        ...togStyle(isOn && !isAllDay && !isFixed, tb.color),
-                        opacity: isAllDay || isFixed ? 0.4 : 1
-                      }}>{tb.icon} {tb.name}</button>
+                      <button key={tb.tag}
+                        title={(isAllDay || isFixed)
+                          ? tb.name + ' time window — clicking will switch out of ' + (isFixed ? 'Fixed' : 'All Day') + ' mode'
+                          : tb.name + ' time window — selecting any window disables Anytime'}
+                        onClick={function() {
+                          if (isAllDay || isFixed) {
+                            setWhen(tb.tag);
+                          } else {
+                            var cur = tagParts.slice();
+                            if (isOn) { cur = cur.filter(function(v) { return v !== tb.tag; }); }
+                            else { cur.push(tb.tag); }
+                            setWhen(cur.length === 0 ? '' : cur.join(','));
+                          }
+                        }} style={{
+                          ...togStyle(isOn && !isAllDay && !isFixed, tb.color),
+                          opacity: (isAllDay || isFixed) ? 0.55 : 1
+                        }}>{tb.icon} {tb.name}</button>
                     );
                   })}
                   {isWindows && <>
