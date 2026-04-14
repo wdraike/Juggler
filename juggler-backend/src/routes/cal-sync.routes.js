@@ -18,4 +18,7 @@ router.post('/sync', authenticateJWT, calSyncController.sync);
 // Sync history log
 router.get('/sync-history', authenticateJWT, calSyncController.getSyncHistory);
 
+// Audit: compare Strive tasks against calendar events, report mismatches
+router.get('/audit', authenticateJWT, calSyncController.audit);
+
 module.exports = router;

@@ -8,6 +8,7 @@ var db = require('../src/db');
 var { runScheduleAndPersist } = require('../src/scheduler/runSchedule');
 var { rowToTask, buildSourceMap } = require('../src/controllers/task.controller');
 var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../src/scheduler/constants');
+var tasksWrite = require('../src/lib/tasks-write');
 
 var available = false;
 var USER_ID = 'run-sched-test-001';
@@ -35,14 +36,16 @@ afterAll(async () => {
 
 async function cleanup() {
   await db('cal_sync_ledger').where('user_id', USER_ID).del();
-  await db('tasks').where('user_id', USER_ID).del();
+  await db('task_instances').where('user_id', USER_ID).del();
+  await db('task_masters').where('user_id', USER_ID).del();
   await db('user_config').where('user_id', USER_ID).del();
   await db('users').where('id', USER_ID).del();
 }
 
 beforeEach(async () => {
   if (!available) return;
-  await db('tasks').where('user_id', USER_ID).del();
+  await db('task_instances').where('user_id', USER_ID).del();
+  await db('task_masters').where('user_id', USER_ID).del();
   // Keep user_config (time_blocks, tool_matrix) but clear schedule_cache
   await db('user_config').where({ user_id: USER_ID, config_key: 'schedule_cache' }).del();
 });
@@ -53,7 +56,7 @@ function seedTask(overrides) {
     user_id: USER_ID, task_type: 'task', text: 'Test', dur: 30, pri: 'P3',
     status: '', recurring: 0, created_at: db.fn.now(), updated_at: db.fn.now()
   }, overrides);
-  return db('tasks').insert(task).then(function() { return task; });
+  return tasksWrite.insertTask(db, task).then(function() { return task; });
 }
 
 function seedTemplate(overrides) {
@@ -79,7 +82,7 @@ describe('runScheduleAndPersist: basic', () => {
     var t = await seedTask({ text: 'Morning task', when: 'morning', dur: 30 });
     var result = await runScheduleAndPersist(USER_ID);
     expect(result.updated).toBeGreaterThanOrEqual(1);
-    var row = await db('tasks').where('id', t.id).first();
+    var row = await db('tasks_v').where('id', t.id).first();
     expect(row.scheduled_at).toBeTruthy();
   });
 
@@ -131,12 +134,12 @@ describe('runScheduleAndPersist: minimal diff', () => {
     if (!available) return;
     await seedTask({ id: 'nodiff', text: 'Stable', when: 'morning', dur: 30 });
     await runScheduleAndPersist(USER_ID);
-    var after1 = await db('tasks').where('id', 'nodiff').first();
+    var after1 = await db('tasks_v').where('id', 'nodiff').first();
     var ts1 = after1.updated_at;
 
     // Run again
     await runScheduleAndPersist(USER_ID);
-    var after2 = await db('tasks').where('id', 'nodiff').first();
+    var after2 = await db('tasks_v').where('id', 'nodiff').first();
     // scheduled_at should be identical
     expect(after2.scheduled_at).toBe(after1.scheduled_at);
   });
@@ -152,7 +155,7 @@ describe('runScheduleAndPersist: immutable tasks', () => {
     var fixedTime = '2026-04-10 18:00:00'; // 2pm ET
     await seedTask({ id: 'fixed-t', text: 'Fixed', when: 'fixed', scheduled_at: fixedTime, date_pinned: 1, dur: 30 });
     await runScheduleAndPersist(USER_ID);
-    var row = await db('tasks').where('id', 'fixed-t').first();
+    var row = await db('tasks_v').where('id', 'fixed-t').first();
     expect(row.scheduled_at).toBe(fixedTime);
   });
 
@@ -161,7 +164,7 @@ describe('runScheduleAndPersist: immutable tasks', () => {
     var markerTime = '2026-04-10 20:00:00';
     await seedTask({ id: 'marker-t', text: 'Reminder', marker: 1, scheduled_at: markerTime, dur: 0 });
     await runScheduleAndPersist(USER_ID);
-    var row = await db('tasks').where('id', 'marker-t').first();
+    var row = await db('tasks_v').where('id', 'marker-t').first();
     expect(row.scheduled_at).toBe(markerTime);
   });
 
@@ -169,7 +172,7 @@ describe('runScheduleAndPersist: immutable tasks', () => {
     if (!available) return;
     await seedTemplate({ id: 'tmpl-immut', text: 'Template', preferred_time_mins: 720 });
     await runScheduleAndPersist(USER_ID);
-    var row = await db('tasks').where('id', 'tmpl-immut').first();
+    var row = await db('tasks_v').where('id', 'tmpl-immut').first();
     expect(row.scheduled_at).toBeNull(); // scheduler never sets this on templates
   });
 
@@ -178,7 +181,7 @@ describe('runScheduleAndPersist: immutable tasks', () => {
     var pinnedTime = '2026-04-15 14:00:00';
     await seedTask({ id: 'pinned-t', text: 'Pinned', date_pinned: 1, scheduled_at: pinnedTime, dur: 30 });
     await runScheduleAndPersist(USER_ID);
-    var row = await db('tasks').where('id', 'pinned-t').first();
+    var row = await db('tasks_v').where('id', 'pinned-t').first();
     expect(row.scheduled_at).toBe(pinnedTime);
   });
 });
@@ -193,7 +196,7 @@ describe('runScheduleAndPersist: recurring instances', () => {
     await seedTemplate({ id: 'tmpl-expand', text: 'Daily task', dur: 20 });
     await runScheduleAndPersist(USER_ID);
 
-    var instances = await db('tasks')
+    var instances = await db('tasks_v')
       .where({ user_id: USER_ID, source_id: 'tmpl-expand', task_type: 'recurring_instance' });
     expect(instances.length).toBeGreaterThan(0);
     instances.forEach(function(inst) {
@@ -206,7 +209,7 @@ describe('runScheduleAndPersist: recurring instances', () => {
     await seedTemplate({ id: 'tmpl-nouns', text: 'No unscheduled', dur: 20 });
     await runScheduleAndPersist(USER_ID);
 
-    var unscheduled = await db('tasks')
+    var unscheduled = await db('tasks_v')
       .where({ user_id: USER_ID, source_id: 'tmpl-nouns', unscheduled: 1 });
     expect(unscheduled.length).toBe(0);
   });
@@ -217,8 +220,28 @@ describe('runScheduleAndPersist: recurring instances', () => {
     await seedInstance('tmpl-done', { id: 'inst-done', status: 'done', scheduled_at: '2026-04-06 12:00:00' });
     await runScheduleAndPersist(USER_ID);
 
-    var doneInst = await db('tasks').where('id', 'inst-done').first();
+    var doneInst = await db('tasks_v').where('id', 'inst-done').first();
     expect(doneInst.status).toBe('done'); // unchanged
+  });
+
+  test('skipped instances (soft-deleted) are not re-expanded', async () => {
+    // Regression: physically-deleted recurring instances regenerate by id;
+    // soft-delete via status='skip' must persist past scheduler runs.
+    if (!available) return;
+    await seedTemplate({ id: 'tmpl-skip-test', text: 'Skip test', dur: 20, recur: { type: 'daily' } });
+    var date = '2026-04-10';
+    var skipDigits = '20260410';
+    var skipId = 'tmpl-skip-test-' + skipDigits;
+    await seedInstance('tmpl-skip-test', {
+      id: skipId, status: 'skip', scheduled_at: date + ' 12:00:00'
+    });
+    await runScheduleAndPersist(USER_ID);
+    // The skip row stays; no duplicate insert happened
+    var rows = await db('tasks_v')
+      .where({ user_id: USER_ID, source_id: 'tmpl-skip-test' })
+      .where('scheduled_at', 'like', date + '%');
+    expect(rows.length).toBe(1);
+    expect(rows[0].status).toBe('skip');
   });
 });
 
@@ -277,7 +300,7 @@ describe('runScheduleAndPersist: terminal tasks', () => {
       day.forEach(function(p) { if (p.task && p.task.id === 'done-t') placed = true; });
     });
     // Done tasks appear in dayPlacements as synthesized entries, but scheduler doesn't move them
-    var row = await db('tasks').where('id', 'done-t').first();
+    var row = await db('tasks_v').where('id', 'done-t').first();
     expect(row.scheduled_at).toBe('2026-04-06 12:00:00'); // unchanged
   });
 
@@ -349,13 +372,13 @@ describe('runScheduleAndPersist: preferredTimeMins', () => {
     var result = await runScheduleAndPersist(USER_ID);
 
     // Check that instances were created and placed near noon
-    var instances = await db('tasks')
+    var instances = await db('tasks_v')
       .where({ user_id: USER_ID, source_id: 'tmpl-ptm-run', task_type: 'recurring_instance' })
       .whereNotNull('scheduled_at');
     expect(instances.length).toBeGreaterThan(0);
 
     // Verify at least one instance is near noon by reading via rowToTask
-    var rows = await db('tasks').where('user_id', USER_ID);
+    var rows = await db('tasks_v').where('user_id', USER_ID);
     var srcMap = buildSourceMap(rows);
     var placed = instances.map(function(inst) {
       return rowToTask(inst, TZ, srcMap);

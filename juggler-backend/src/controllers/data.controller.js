@@ -3,6 +3,7 @@
  */
 
 const db = require('../db');
+const tasksWrite = require('../lib/tasks-write');
 const { rowToTask, taskToRow } = require('./task.controller');
 const { localToUtc, toDateISO } = require('../scheduler/dateHelpers');
 
@@ -67,7 +68,8 @@ async function importData(req, res) {
       await trx('tools').where('user_id', userId).del();
       await trx('locations').where('user_id', userId).del();
       await trx('projects').where('user_id', userId).del();
-      await trx('tasks').where('user_id', userId).del();
+      // Wipe all tasks for this user
+      await tasksWrite.deleteTasksWhere(trx, userId, function(q) { return q; });
 
       // Import tasks — compute scheduled_at from date+time
       if (uniqueTasks.length > 0) {
@@ -120,10 +122,9 @@ async function importData(req, res) {
           };
         });
 
-        // Insert in chunks
-        var chunkSize = 100;
-        for (var i = 0; i < taskRows.length; i += chunkSize) {
-          await trx('tasks').insert(taskRows.slice(i, i + chunkSize));
+        // Insert via helper (routes each row to master/instance + legacy tasks)
+        for (var i = 0; i < taskRows.length; i++) {
+          await tasksWrite.insertTask(trx, taskRows[i]);
         }
       }
 
@@ -211,8 +212,9 @@ async function exportData(req, res) {
     var userId = req.user.id;
     var tz = req.headers['x-timezone'] || 'America/New_York';
 
+    var { fetchTasksWithEventIds } = require('./task.controller');
     var results = await Promise.all([
-      db('tasks').where('user_id', userId).orderBy('created_at', 'asc'),
+      fetchTasksWithEventIds(db, userId, function(q) { q.orderBy('created_at', 'asc'); }),
       db('locations').where('user_id', userId).orderBy('sort_order'),
       db('tools').where('user_id', userId).orderBy('sort_order'),
       db('projects').where('user_id', userId).orderBy('sort_order'),

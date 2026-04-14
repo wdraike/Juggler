@@ -232,38 +232,6 @@ function applyEventToTaskFields(event, tz, currentTask) {
     fields.marker = true;
   }
 
-  // --- Promotion logic ---
-  // When the user moves a flexible task in the external calendar, promote it to
-  // fixed so the scheduler respects the user's intentional placement.
-  if (currentTask && !isAllDay) {
-    var wasFixed = currentTask.when && currentTask.when.indexOf('fixed') >= 0;
-    var wasAllDay = currentTask.when === 'allday';
-    if (!wasFixed) {
-      // Bug fix: all-day converted to timed — promote to fixed
-      if (wasAllDay) {
-        fields.when = 'fixed';
-      }
-      // Time changed on same day
-      else if (jd.time && jd.time !== currentTask.time) {
-        fields.when = 'fixed';
-      }
-      // Date changed — also pin the date
-      if (jd.date && jd.date !== currentTask.date) {
-        fields.when = 'fixed';
-        fields.date_pinned = 1;
-      }
-      // Preserve the original when-tag so un-fixing can restore it
-      if (fields.when === 'fixed' && currentTask.when !== 'fixed') {
-        fields.prev_when = currentTask.when || '';
-      }
-    }
-  }
-
-  // Clear marker if event is no longer transparent
-  if (currentTask && !event.isTransparent && currentTask.marker) {
-    fields.marker = false;
-  }
-
   return fields;
 }
 
@@ -414,6 +382,28 @@ async function batchDeleteEvents(token, eventIds) {
   return results;
 }
 
+/**
+ * Batch update events. Returns array of { eventId, error }.
+ * Microsoft Graph batch limit is 20 per call.
+ */
+async function batchUpdateEvents(token, updatePairs, year, tz) {
+  var results = [];
+  for (var ci = 0; ci < updatePairs.length; ci += 20) {
+    var chunk = updatePairs.slice(ci, ci + 20);
+    var requests = chunk.map(function(pair, i) {
+      var body = buildMsftEventBody(pair.task, year, tz);
+      return { id: String(ci + i), method: 'PATCH', url: '/me/events/' + encodeURIComponent(pair.eventId), body: body };
+    });
+    var responses = await msftCalApi.batchRequest(token, requests);
+    for (var ri = 0; ri < responses.length; ri++) {
+      var idx = parseInt(responses[ri].id, 10);
+      var ok = responses[ri].status >= 200 && responses[ri].status < 300;
+      results.push({ eventId: updatePairs[idx].eventId, error: ok ? null : 'Batch update failed: HTTP ' + responses[ri].status });
+    }
+  }
+  return results;
+}
+
 module.exports = {
   providerId,
   isConnected,
@@ -426,6 +416,7 @@ module.exports = {
   deleteEvent,
   batchCreateEvents,
   batchDeleteEvents,
+  batchUpdateEvents,
   applyEventToTaskFields,
   eventHash,
   buildMsftEventBody,

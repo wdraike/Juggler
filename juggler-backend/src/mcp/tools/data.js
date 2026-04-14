@@ -22,8 +22,9 @@ function registerDataTools(server, userId) {
     async () => {
       var tz = await getUserTimezone();
 
+      var { fetchTasksWithEventIds } = require('../../controllers/task.controller');
       var [taskRows, locationRows, toolRows, projectRows, configRows] = await Promise.all([
-        db('tasks').where('user_id', userId).orderBy('created_at', 'asc'),
+        fetchTasksWithEventIds(db, userId, function(q) { q.orderBy('created_at', 'asc'); }),
         db('locations').where('user_id', userId).orderBy('sort_order'),
         db('tools').where('user_id', userId).orderBy('sort_order'),
         db('projects').where('user_id', userId).orderBy('sort_order'),

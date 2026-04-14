@@ -127,6 +127,7 @@ export default function AppLayout() {
   var [appleCalLastSyncedAt, setAppleCalLastSyncedAt] = useState(null);
   var [appleCalSyncing, setAppleCalSyncing] = useState(false);
   var [appleCalConnected, setAppleCalConnected] = useState(null);
+  var [calSyncProgress, setCalSyncProgress] = useState(null); // { phase, detail, pct, provider, calendar }
   var editingRef = useRef(false);
   var [schedulerReady, setSchedulerReady] = useState(false);
 
@@ -313,6 +314,40 @@ export default function AppLayout() {
       clearInterval(intervalId);
     };
   }, [gcalAutoSync, msftCalAutoSync, schedulerReady, loadTasks, loadPlacements, calSyncSettings]);
+
+  // Listen for sync:progress SSE events (shared with CalSyncPanel + HeaderBar)
+  useEffect(function() {
+    var attached = null;
+    function handleSyncProgress(e) {
+      try {
+        var data = JSON.parse(e.data);
+        setCalSyncProgress(data);
+        if (data.phase === 'done') {
+          setTimeout(function() { setCalSyncProgress(null); }, 2000);
+        }
+      } catch (err) { /* ignore */ }
+    }
+    // Poll until the event source appears (created asynchronously by useTaskState)
+    var poll = setInterval(function() {
+      var es = window.__jugglerEventSource;
+      if (es && !attached) {
+        attached = es;
+        es.addEventListener('sync:progress', handleSyncProgress);
+        clearInterval(poll);
+      }
+    }, 500);
+    // Also check immediately
+    var es = window.__jugglerEventSource;
+    if (es) {
+      attached = es;
+      es.addEventListener('sync:progress', handleSyncProgress);
+      clearInterval(poll);
+    }
+    return function() {
+      clearInterval(poll);
+      if (attached) attached.removeEventListener('sync:progress', handleSyncProgress);
+    };
+  }, []);
 
   // Derived dates
   var today = useMemo(() => {
@@ -874,7 +909,8 @@ export default function AppLayout() {
           gcalSyncing={gcalSyncing}
           onShowMsftCalSync={() => setShowMsftCalSync(true)}
           msftCalSyncing={msftCalSyncing}
-          calSyncing={gcalSyncing || msftCalSyncing}
+          calSyncing={gcalSyncing || msftCalSyncing || appleCalSyncing}
+          calSyncProgress={calSyncProgress}
           onShowCalSync={() => setShowCalSync(true)}
           onShowHelp={() => setShowHelp(true)}
           onAddTask={() => { setShowCreateForm(true); setExpandedTasks([]); }}

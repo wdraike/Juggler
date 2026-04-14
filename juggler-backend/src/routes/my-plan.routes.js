@@ -138,7 +138,7 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
     // Count disabled items so the frontend can show a badge/notification
     let disabledCount = 0;
     try {
-      const disabledRow = await db('tasks')
+      const disabledRow = await db('tasks_v')
         .where({ user_id: userId, status: 'disabled' })
         .count('* as count').first();
       disabledCount = parseInt(disabledRow.count, 10);

@@ -50,13 +50,19 @@ async function start() {
   server = app.listen(PORT, () => {
     console.log(`Raike & Sons backend running on port ${PORT}`);
 
-    // Enqueue a scheduler run for all active users on startup
-    // so placements are fresh without waiting for the first mutation.
-    db('tasks').distinct('user_id').then(function(rows) {
-      rows.forEach(function(r) {
-        enqueueScheduleRun(r.user_id, 'startup');
-      });
-      if (rows.length > 0) console.log('[SCHED] enqueued startup runs for ' + rows.length + ' user(s)');
+    // Startup scheduler refresh: only enqueue for users who don't already
+    // have pending queue entries. The scheduleQueue's own startup scan
+    // picks up anything already in the queue via the in-memory dirty flag;
+    // re-inserting here just duplicates rows on every restart.
+    Promise.all([
+      db('tasks_v').distinct('user_id'),
+      db('schedule_queue').distinct('user_id')
+    ]).then(function(results) {
+      var existing = {};
+      results[1].forEach(function(r) { existing[r.user_id] = true; });
+      var newUsers = results[0].filter(function(r) { return !existing[r.user_id]; });
+      newUsers.forEach(function(r) { enqueueScheduleRun(r.user_id, 'startup'); });
+      if (newUsers.length > 0) console.log('[SCHED] enqueued startup runs for ' + newUsers.length + ' user(s)');
     }).catch(function(err) {
       console.error('[SCHED] startup enqueue failed:', err.message);
     });

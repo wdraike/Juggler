@@ -134,6 +134,8 @@ async function deleteEvent(token, eventId) {
 
 /**
  * Compute DB update fields from a normalized event.
+ * Used ONLY when creating NEW tasks from pulled events (new design: no bidirectional sync).
+ * For new tasks from ingest-only calendars, tasks are created with when='fixed' by the sync controller.
  */
 function applyEventToTaskFields(event, tz, currentTask) {
   var isAllDay = event.isAllDay;
@@ -159,38 +161,6 @@ function applyEventToTaskFields(event, tz, currentTask) {
 
   if (event.isTransparent) {
     fields.marker = true;
-  }
-
-  // --- Promotion logic ---
-  // When the user moves a flexible task in the external calendar, promote it to
-  // fixed so the scheduler respects the user's intentional placement.
-  if (currentTask && !isAllDay) {
-    var wasFixed = currentTask.when && currentTask.when.indexOf('fixed') >= 0;
-    var wasAllDay = currentTask.when === 'allday';
-    if (!wasFixed) {
-      // Bug fix: all-day converted to timed — promote to fixed
-      if (wasAllDay) {
-        fields.when = 'fixed';
-      }
-      // Time changed on same day
-      else if (jd.time && jd.time !== currentTask.time) {
-        fields.when = 'fixed';
-      }
-      // Date changed — also pin the date
-      if (jd.date && jd.date !== currentTask.date) {
-        fields.when = 'fixed';
-        fields.date_pinned = 1;
-      }
-      // Preserve the original when-tag so un-fixing can restore it
-      if (fields.when === 'fixed' && currentTask.when !== 'fixed') {
-        fields.prev_when = currentTask.when || '';
-      }
-    }
-  }
-
-  // Clear marker if event is no longer transparent
-  if (currentTask && !event.isTransparent && currentTask.marker) {
-    fields.marker = false;
   }
 
   return fields;
@@ -324,6 +294,28 @@ async function batchDeleteEvents(token, eventIds) {
   return results;
 }
 
+/**
+ * Batch update events. Returns array of { eventId, error }.
+ * Google batch limit is 50 per call.
+ */
+async function batchUpdateEvents(token, updatePairs, year, tz) {
+  var results = [];
+  for (var ci = 0; ci < updatePairs.length; ci += 50) {
+    var chunk = updatePairs.slice(ci, ci + 50);
+    var requests = chunk.map(function(pair, i) {
+      var body = buildEventBody(pair.task, year, tz);
+      return { id: String(ci + i), method: 'PATCH', path: '/calendars/primary/events/' + encodeURIComponent(pair.eventId), body: body };
+    });
+    var responses = await gcalApi.batchRequest(token, requests);
+    for (var ri = 0; ri < responses.length; ri++) {
+      var idx = parseInt(responses[ri].id, 10);
+      var ok = responses[ri].status >= 200 && responses[ri].status < 300;
+      results.push({ eventId: updatePairs[idx].eventId, error: ok ? null : 'Batch update failed: HTTP ' + responses[ri].status });
+    }
+  }
+  return results;
+}
+
 module.exports = {
   providerId,
   isConnected,
@@ -336,6 +328,7 @@ module.exports = {
   deleteEvent,
   batchCreateEvents,
   batchDeleteEvents,
+  batchUpdateEvents,
   applyEventToTaskFields,
   eventHash,
   buildEventBody,

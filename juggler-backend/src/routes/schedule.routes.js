@@ -79,7 +79,7 @@ router.post('/debug', authenticateJWT, debugLimiter, async function(req, res) {
     };
 
     // Load tasks
-    var tasks = await db('tasks').where({ user_id: userId }).whereNot('status', 'disabled');
+    var tasks = await db('tasks_v').where({ user_id: userId }).whereNot('status', 'disabled');
 
     // Load config
     var configRows = await db('user_config').where({ user_id: userId });

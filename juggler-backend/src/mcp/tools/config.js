@@ -4,6 +4,7 @@
 
 const { z } = require('zod');
 const db = require('../../db');
+const tasksWrite = require('../../lib/tasks-write');
 
 function registerConfigTools(server, userId) {
 
@@ -57,7 +58,7 @@ function registerConfigTools(server, userId) {
 
       // Get task counts per project
       const projectNames = projects.map(p => p.name);
-      const counts = await db('tasks')
+      const counts = await db('tasks_v')
         .where('user_id', userId)
         .whereIn('project', projectNames)
         .groupBy('project')
@@ -125,9 +126,10 @@ function registerConfigTools(server, userId) {
       await db.transaction(async (trx) => {
         await trx('projects').where({ id, user_id: userId }).update(updates);
         if (name && existing.name !== name) {
-          await trx('tasks').where({ user_id: userId, project: existing.name }).update({
-            project: name, updated_at: db.fn.now()
-          });
+          // Project is a master-level field; helper routes accordingly
+          await tasksWrite.updateTasksWhere(trx, userId, function(q) {
+            return q.where('project', existing.name);
+          }, { project: name, updated_at: db.fn.now() });
           renamed = { from: existing.name, to: name };
         }
       });

@@ -10,6 +10,7 @@
 
 var crypto = require('crypto');
 var db = require('../db');
+var tasksWrite = require('../lib/tasks-write');
 var { getConnectedAdapters } = require('../lib/cal-adapters');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 var { rowToTask } = require('./task.controller');
@@ -35,33 +36,10 @@ function throttle() {
 }
 
 /**
- * Determine winner when both task and event have changed.
- * Returns 'juggler' or 'provider'.
- */
-function resolveConflict(task, event, ledger) {
-  // Fixed tasks always push Juggler's version.
-  // Recurring templates always push too, but they're already filtered out
-  // (no scheduled_at) so this is a safety net.
-  var isFixed = task.when && task.when.indexOf('fixed') >= 0;
-  var isRecurringTemplate = task.taskType === 'recurring_template';
-  if (isFixed || isRecurringTemplate) return 'juggler';
-
-  // Last-modified wins
-  if (task._updated_at && event.lastModified) {
-    var taskTime = new Date(task._updated_at).getTime();
-    var eventTime = new Date(event.lastModified).getTime();
-    if (!isNaN(taskTime) && !isNaN(eventTime)) {
-      return taskTime >= eventTime ? 'juggler' : 'provider';
-    }
-  }
-
-  // Fallback: origin wins
-  return ledger.origin === 'juggler' ? 'juggler' : 'provider';
-}
-
-/**
- * POST /api/cal/sync — unified bidirectional sync for all connected providers.
- * Sync window: 90 days back + 60 days forward.
+ * POST /api/cal/sync — one-way sync (Strive → calendars).
+ * Tasks push to their calendar events every sync (deterministic).
+ * Ingest-only providers pull events into tasks (as when='fixed').
+ * Sync window: 14 days back + 60 days forward.
  */
 async function sync(req, res) {
   try {
@@ -75,7 +53,7 @@ async function sync(req, res) {
     _throttleCount = 0; // reset per sync run
 
     var windowStart = new Date(now);
-    windowStart.setDate(windowStart.getDate() - 90);
+    windowStart.setDate(windowStart.getDate() - 14);
     var windowEnd = new Date(now);
     windowEnd.setDate(windowEnd.getDate() + 60);
 
@@ -109,14 +87,20 @@ async function sync(req, res) {
     var calCompletedBehavior = 'update'; // default
     if (prefsRow) {
       try {
-        var prefs = JSON.parse(prefsRow.config_value);
-        if (prefs.calCompletedBehavior) calCompletedBehavior = prefs.calCompletedBehavior;
+        var prefs = typeof prefsRow.config_value === 'string'
+          ? JSON.parse(prefsRow.config_value) : prefsRow.config_value;
+        if (prefs && prefs.calCompletedBehavior) calCompletedBehavior = prefs.calCompletedBehavior;
       } catch (e) { /* ignore parse errors */ }
     }
 
     // Progress helper — emits SSE events so frontend can show a progress bar
-    function emitProgress(phase, detail, pct) {
-      sseEmitter.emit(userId, 'sync:progress', { phase: phase, detail: detail, pct: pct || 0 });
+    var PROVIDER_LABELS = { gcal: 'Google Calendar', msft: 'Microsoft Calendar', apple: 'Apple Calendar' };
+    function emitProgress(phase, detail, pct, extra) {
+      sseEmitter.emit(userId, 'sync:progress', {
+        phase: phase, detail: detail, pct: pct || 0,
+        provider: extra && extra.provider || null,
+        calendar: extra && extra.calendar || null
+      });
     }
 
     // Load per-provider sync mode (full vs ingest-only)
@@ -131,7 +115,6 @@ async function sync(req, res) {
     }
 
     // === Phase 1: Gather data from all connected providers ===
-    emitProgress('fetch', 'Fetching calendars...', 5);
     var connectedAdapters = getConnectedAdapters(req.user);
     if (connectedAdapters.length === 0) {
       return res.json(stats);
@@ -144,6 +127,7 @@ async function sync(req, res) {
 
     await Promise.all(connectedAdapters.map(async function(adapter) {
       try {
+        emitProgress('fetch', 'Fetching events...', 5, { provider: adapter.providerId });
         var token = await adapter.getValidAccessToken(req.user);
         var events = await adapter.listEvents(token, timeMin, timeMax, userId);
 
@@ -186,10 +170,10 @@ async function sync(req, res) {
       .where('status', 'active')
       .select();
 
-    var allTaskRows = await db('tasks')
-      .where('user_id', userId)
-      .whereNotNull('scheduled_at')
-      .select();
+    var { fetchTasksWithEventIds } = require('./task.controller');
+    var allTaskRows = await fetchTasksWithEventIds(db, userId, function(q) {
+      q.whereNotNull('scheduled_at');
+    });
 
     var allTasks = allTaskRows.map(function(r) {
       var t = rowToTask(r, tz);
@@ -199,6 +183,7 @@ async function sync(req, res) {
       t._updated_at = r.updated_at;
       t._marker = r.marker;
       t.marker = !!r.marker;
+      t.user_id = r.user_id; // needed by Apple adapter's createEvent
       return t;
     });
 
@@ -217,7 +202,7 @@ async function sync(req, res) {
     });
     var templateTextById = {};
     if (sourceIds.length > 0) {
-      var templateRows = await db('tasks').whereIn('id', sourceIds).select('id', 'text');
+      var templateRows = await db('tasks_v').whereIn('id', sourceIds).select('id', 'text');
       templateRows.forEach(function(r) { templateTextById[r.id] = r.text; });
     }
     allTasks.forEach(function(t) {
@@ -300,7 +285,6 @@ async function sync(req, res) {
     });
 
     // === Phase 2: Process existing ledger records per provider ===
-    emitProgress('ledger', 'Checking for changes...', 20);
     // Group ledger by provider
     var ledgerByProvider = {};
     for (var li = 0; li < ledgerRecords.length; li++) {
@@ -317,6 +301,7 @@ async function sync(req, res) {
     var providerIds = Object.keys(providerData);
     for (var pi = 0; pi < providerIds.length; pi++) {
       var pid = providerIds[pi];
+      emitProgress('ledger', 'Checking for changes...', 20 + (pi * 5), { provider: pid });
       var pd = providerData[pid];
       var pAdapter = pd.adapter;
       var pToken = pd.token;
@@ -329,6 +314,9 @@ async function sync(req, res) {
       processedTaskIdsByProvider[pid] = processedTaskIds;
       processedEventIdsByProvider[pid] = processedEventIds;
 
+      // Collect event updates for batch execution at end of ledger phase
+      var pendingEventUpdates = []; // { eventId, task }
+
       for (var pli = 0; pli < pLedger.length; pli++) {
         var ledger = pLedger[pli];
         var task = ledger.task_id ? tasksById[ledger.task_id] : null;
@@ -340,14 +328,19 @@ async function sync(req, res) {
         // --- Consistency repair: ensure task's event ID column matches ledger ---
         var eventIdCol = pAdapter.getEventIdColumn();
         if (task && ledger.provider_event_id) {
-          var taskEventId = task[eventIdCol === 'gcal_event_id' ? 'gcalEventId' : 'msftEventId'];
+          var taskEventId = task[(eventIdCol === 'gcal_event_id' ? 'gcalEventId' : eventIdCol === 'msft_event_id' ? 'msftEventId' : 'appleEventId')];
           if (taskEventId !== ledger.provider_event_id) {
             taskUpdates.push({ id: task.id, fields: { [eventIdCol]: ledger.provider_event_id } });
-            task[eventIdCol === 'gcal_event_id' ? 'gcalEventId' : 'msftEventId'] = ledger.provider_event_id;
+            task[(eventIdCol === 'gcal_event_id' ? 'gcalEventId' : eventIdCol === 'msft_event_id' ? 'msftEventId' : 'appleEventId')] = ledger.provider_event_id;
           }
         }
 
         try {
+          // === NEW DESIGN: One-way sync (Strive → calendars).
+          // Sync never modifies task.scheduled_at, task.dur, task.when, etc.
+          // Sync only pushes the current task state to the calendar event.
+          // Exception: ingest-only providers pull event changes into the task. ===
+
           // --- Past non-done juggler-origin cleanup ---
           if (task && event && ledger.origin === 'juggler' && task._scheduled_at && !isIngestOnly(pid)) {
             var taskScheduledAt = task._scheduled_at instanceof Date ? task._scheduled_at : new Date(String(task._scheduled_at).replace(' ', 'T') + 'Z');
@@ -374,7 +367,6 @@ async function sync(req, res) {
             if (isTerminal) {
               var shouldDelete = calCompletedBehavior === 'delete' || task.status !== 'done';
               if (shouldDelete) {
-                // Delete cancel/skip/pause events (and done if preference is 'delete')
                 try {
                   await pAdapter.deleteEvent(pToken, ledger.provider_event_id);
                   await throttle();
@@ -386,181 +378,50 @@ async function sync(req, res) {
                 pStats.deleted_local++;
                 stats.deleted_local++;
                 continue;
-              } else {
-                // 'update' mode for done tasks: push ✓ prefix + transparency
-                var currentHash = taskHash(task);
-                if (currentHash !== ledger.last_pushed_hash) {
-                  await pAdapter.updateEvent(pToken, ledger.provider_event_id, task, year, tz);
-                  await throttle();
-                  ledgerUpdates.push({ id: ledger.id, fields: { last_pushed_hash: currentHash } });
-                  pStats.pushed++;
-                  stats.pushed++;
-                }
-                continue;
               }
+              // 'update' mode for done tasks: fall through to regular push so ✓ prefix + transparency propagate
             }
           }
 
-          // --- Both exist: check for changes ---
+          // --- Both exist ---
           if (task && event) {
             var isRecurringTemplate = task.taskType === 'recurring_template';
+            if (isRecurringTemplate) {
+              // Templates should never be on calendars; nothing to do here
+              continue;
+            }
 
-            var currentTaskHash = taskHash(task);
-            var currentEventHash = pAdapter.eventHash(event);
-            var taskChanged = currentTaskHash !== ledger.last_pushed_hash;
-            var eventChanged = currentEventHash !== ledger.last_pulled_hash;
-
-            var isFixed = task.when && task.when.indexOf('fixed') >= 0;
-
-            if (taskChanged && eventChanged) {
-              // In ingest-only mode, provider always wins conflicts
-              var winner = isIngestOnly(pid) ? 'provider' : resolveConflict(task, event, ledger);
-              if (winner === 'juggler') {
-                await pAdapter.updateEvent(pToken, ledger.provider_event_id, task, year, tz);
-                await throttle();
-                pStats.pushed++;
-                stats.pushed++;
-                logSyncAction(pid, 'conflict_juggler', {
-                  taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                  detail: 'Conflict resolved — kept Juggler version'
-                });
-              } else {
-                if (!isRecurringTemplate && !isFixed) {
-                  var oldValues = { when: task.when, time: task.time, date: task.date, date_pinned: task.datePinned };
-                  var updateFields = pAdapter.applyEventToTaskFields(event, tz, task);
-                  taskUpdates.push({ id: task.id, fields: updateFields });
-                  // Log promotion if task was promoted to fixed
-                  var wasPromoted = updateFields.when === 'fixed' && oldValues.when !== 'fixed';
-                  if (wasPromoted) {
-                    var depNote = '';
-                    var deps = task.dependsOn || [];
-                    for (var di = 0; di < deps.length; di++) {
-                      var depTask = tasksById[deps[di]];
-                      if (depTask && depTask._scheduled_at && updateFields.scheduled_at) {
-                        if (new Date(updateFields.scheduled_at) < new Date(depTask._scheduled_at)) {
-                          depNote += ' Now before dependency "' + depTask.text + '" (' + depTask.date + ').';
-                        }
-                      }
-                    }
-                    for (var cti = 0; cti < allTasks.length; cti++) {
-                      var child = allTasks[cti];
-                      if ((child.dependsOn || []).indexOf(task.id) >= 0 && child._scheduled_at && updateFields.scheduled_at) {
-                        if (new Date(child._scheduled_at) < new Date(updateFields.scheduled_at)) {
-                          depNote += ' Dependent "' + child.text + '" (' + child.date + ') is now before this task.';
-                        }
-                      }
-                    }
-                    logSyncAction(pid, 'promoted', {
-                      taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                      oldValues: oldValues,
-                      newValues: { when: 'fixed', date_pinned: !!updateFields.date_pinned },
-                      detail: 'Promoted to fixed: event moved in ' + pid + '.' + depNote
-                    });
-                  } else {
-                    logSyncAction(pid, 'conflict_provider', {
-                      taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                      oldValues: oldValues,
-                      newValues: { when: updateFields.when || task.when },
-                      detail: 'Conflict resolved — accepted provider version'
-                    });
-                  }
-                  // Refresh in-memory task for cross-provider consistency
-                  if (updateFields.when) task.when = updateFields.when;
-                  if (updateFields.date_pinned !== undefined) task.datePinned = !!updateFields.date_pinned;
-                  if (updateFields.marker !== undefined) task.marker = !!updateFields.marker;
-                  if (updateFields.scheduled_at) {
-                    task._scheduled_at = updateFields.scheduled_at;
-                    var refreshed = isoToJugglerDate(
-                      updateFields.scheduled_at instanceof Date
-                        ? updateFields.scheduled_at.toISOString()
-                        : String(updateFields.scheduled_at), tz);
-                    if (refreshed.date) task.date = refreshed.date;
-                    if (refreshed.time) task.time = refreshed.time;
-                  }
-                  pStats.pulled++;
-                  stats.pulled++;
-                }
-              }
-            } else if (taskChanged && !isIngestOnly(pid)) {
-              await pAdapter.updateEvent(pToken, ledger.provider_event_id, task, year, tz);
-              await throttle();
+            // Only push to events WE created (origin=juggler). Events pulled from
+            // a provider (origin=pid) are read-only from Juggler's perspective —
+            // we don't own them, can't PATCH them, and shouldn't try.
+            if (ledger.origin === 'juggler' && !isIngestOnly(pid)) {
+              // Push task state to event. Every sync, every task. Deterministic.
+              pendingEventUpdates.push({ eventId: ledger.provider_event_id, task: task });
               pStats.pushed++;
               stats.pushed++;
-              logSyncAction(pid, 'pushed', {
-                taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                detail: 'Task changed — pushed to ' + pid
-              });
-            } else if (eventChanged) {
-              if (!isRecurringTemplate && !isFixed) {
-                var oldValues2 = { when: task.when, time: task.time, date: task.date, date_pinned: task.datePinned };
-                var updateFields2 = pAdapter.applyEventToTaskFields(event, tz, task);
-                taskUpdates.push({ id: task.id, fields: updateFields2 });
-                // Log promotion if task was promoted to fixed
-                var wasPromoted2 = updateFields2.when === 'fixed' && oldValues2.when !== 'fixed';
-                if (wasPromoted2) {
-                  var depNote2 = '';
-                  var deps2 = task.dependsOn || [];
-                  for (var di2 = 0; di2 < deps2.length; di2++) {
-                    var depTask2 = tasksById[deps2[di2]];
-                    if (depTask2 && depTask2._scheduled_at && updateFields2.scheduled_at) {
-                      if (new Date(updateFields2.scheduled_at) < new Date(depTask2._scheduled_at)) {
-                        depNote2 += ' Now before dependency "' + depTask2.text + '" (' + depTask2.date + ').';
-                      }
-                    }
-                  }
-                  for (var cti2 = 0; cti2 < allTasks.length; cti2++) {
-                    var child2 = allTasks[cti2];
-                    if ((child2.dependsOn || []).indexOf(task.id) >= 0 && child2._scheduled_at && updateFields2.scheduled_at) {
-                      if (new Date(child2._scheduled_at) < new Date(updateFields2.scheduled_at)) {
-                        depNote2 += ' Dependent "' + child2.text + '" (' + child2.date + ') is now before this task.';
-                      }
-                    }
-                  }
-                  logSyncAction(pid, 'promoted', {
-                    taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                    oldValues: oldValues2,
-                    newValues: { when: 'fixed', date_pinned: !!updateFields2.date_pinned },
-                    detail: 'Promoted to fixed: event moved in ' + pid + '.' + depNote2
-                  });
-                } else {
-                  logSyncAction(pid, 'pulled', {
-                    taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                    detail: 'Event changed — pulled from ' + pid
-                  });
-                }
-                // Refresh in-memory task for cross-provider consistency
-                if (updateFields2.when) task.when = updateFields2.when;
-                if (updateFields2.date_pinned !== undefined) task.datePinned = !!updateFields2.date_pinned;
-                if (updateFields2.marker !== undefined) task.marker = !!updateFields2.marker;
-                if (updateFields2.scheduled_at) {
-                  task._scheduled_at = updateFields2.scheduled_at;
-                  var refreshed2 = isoToJugglerDate(
-                    updateFields2.scheduled_at instanceof Date
-                      ? updateFields2.scheduled_at.toISOString()
-                      : String(updateFields2.scheduled_at), tz);
-                  if (refreshed2.date) task.date = refreshed2.date;
-                  if (refreshed2.time) task.time = refreshed2.time;
-                }
-                pStats.pulled++;
-                stats.pulled++;
-              }
+            } else if (isIngestOnly(pid)) {
+              // Ingest-only: pull event changes into the task. Tasks created from
+              // ingest-only events are when='fixed' by design (never scheduled by
+              // Juggler), so we overwrite task fields from the event every sync.
+              var updateFields = pAdapter.applyEventToTaskFields(event, tz, task);
+              updateFields.when = 'fixed';
+              taskUpdates.push({ id: task.id, fields: updateFields });
+              pStats.pulled++;
+              stats.pulled++;
             }
+            // else: origin=provider in full-sync mode — we don't push, we don't pull,
+            // the ledger just exists to track that this task is linked to that event.
 
-            // Update ledger record — but ONLY if something actually changed.
-            // Skipping no-change rows eliminates ~1500 DB writes per steady-state sync.
-            if (taskChanged || eventChanged || ledger.miss_count > 0) {
-              ledgerUpdates.push({ id: ledger.id, fields: {
-                last_pushed_hash: taskChanged ? taskHash(task) : (ledger.last_pushed_hash || taskHash(task)),
-                last_pulled_hash: pAdapter.eventHash(event),
-                event_summary: event.title || task.text,
-                event_start: event.startDateTime || null,
-                event_end: event.endDateTime || null,
-                event_all_day: event.isAllDay ? 1 : 0,
-                last_modified_at: toMySQLDate(event.lastModified),
-                task_updated_at: task._updated_at || null,
-                miss_count: 0
-              }});
-            }
+            // Update ledger cached fields
+            ledgerUpdates.push({ id: ledger.id, fields: {
+              event_summary: event.title || task.text,
+              event_start: event.startDateTime || null,
+              event_end: event.endDateTime || null,
+              event_all_day: event.isAllDay ? 1 : 0,
+              last_modified_at: toMySQLDate(event.lastModified),
+              task_updated_at: task._updated_at || null,
+              miss_count: 0
+            }});
 
           } else if (task && !event) {
             // Event not found in provider's calendarView response.
@@ -646,17 +507,50 @@ async function sync(req, res) {
           });
         }
       }
+
+      // Flush batched event updates for this provider
+      if (pendingEventUpdates.length > 0) {
+        if (pAdapter.batchUpdateEvents) {
+          try {
+            var batchUpdateResults = await pAdapter.batchUpdateEvents(pToken, pendingEventUpdates, year, tz);
+            for (var bui = 0; bui < batchUpdateResults.length; bui++) {
+              if (batchUpdateResults[bui].error) {
+                pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: batchUpdateResults[bui].eventId, error: batchUpdateResults[bui].error });
+                stats.errors.push({ phase: 'ledger_update', provider: pid, eventId: batchUpdateResults[bui].eventId, error: batchUpdateResults[bui].error });
+              }
+            }
+          } catch (batchUpdateErr) {
+            // Fallback to sequential updates
+            console.error('[CAL-SYNC] Batch update failed for ' + pid + ', falling back to sequential:', batchUpdateErr.message);
+            for (var fui = 0; fui < pendingEventUpdates.length; fui++) {
+              try {
+                await pAdapter.updateEvent(pToken, pendingEventUpdates[fui].eventId, pendingEventUpdates[fui].task, year, tz);
+                await throttle();
+              } catch (e5) {
+                pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[fui].eventId, error: e5.message });
+                stats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[fui].eventId, error: e5.message });
+              }
+            }
+          }
+        } else {
+          // Provider doesn't support batch updates (e.g., Apple CalDAV) — sequential
+          for (var sui = 0; sui < pendingEventUpdates.length; sui++) {
+            try {
+              await pAdapter.updateEvent(pToken, pendingEventUpdates[sui].eventId, pendingEventUpdates[sui].task, year, tz);
+              await throttle();
+            } catch (e6) {
+              pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[sui].eventId, error: e6.message });
+              stats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[sui].eventId, error: e6.message });
+            }
+          }
+        }
+      }
     }
 
     // === Phase 3: Push new tasks to providers (skip for ingest-only) ===
-    emitProgress('push', 'Syncing new tasks...', 50);
-
     for (var pi2 = 0; pi2 < providerIds.length; pi2++) {
       var pid2 = providerIds[pi2];
-      if (isIngestOnly(pid2)) {
-        console.log('[CAL-SYNC] skipping push phase for ' + pid2 + ' (ingest-only mode)');
-        continue;
-      }
+      emitProgress('push', 'Syncing tasks...', 50 + (pi2 * 5), { provider: pid2 });
       var pd2 = providerData[pid2];
       var pAdapter2 = pd2.adapter;
       var pToken2 = pd2.token;
@@ -665,6 +559,11 @@ async function sync(req, res) {
       var processedTaskIds2 = processedTaskIdsByProvider[pid2];
       var processedEventIds2 = processedEventIdsByProvider[pid2];
       var eventIdCol = pAdapter2.getEventIdColumn();
+
+      // 3a: Push — skip entirely for ingest-only providers
+      if (isIngestOnly(pid2)) {
+        console.log('[CAL-SYNC] skipping push phase for ' + pid2 + ' (ingest-only mode)');
+      } else {
 
       // Build set of task IDs that already have active ledger records for this provider
       // (defense against duplicate pushes when event_id column is stale)
@@ -689,7 +588,7 @@ async function sync(req, res) {
         if (!sSplits || sSplits.length <= 1) continue;
         // Has split placements — check if there's a NON-split ledger entry
         var hasNonSplitLedger = ledgeredTaskIds2.has(sTask.id);
-        var hasEventId = !!(sTask[eventIdCol === 'gcal_event_id' ? 'gcalEventId' : 'msftEventId']);
+        var hasEventId = !!(sTask[(eventIdCol === 'gcal_event_id' ? 'gcalEventId' : eventIdCol === 'msft_event_id' ? 'msftEventId' : 'appleEventId')]);
         if (hasNonSplitLedger || hasEventId) {
           if (hasNonSplitLedger) {
             var oldLedger = (ledgerByProvider[pid2] || []).find(function(l) { return l.task_id === sTask.id; });
@@ -700,7 +599,7 @@ async function sync(req, res) {
           }
           // Clear task event_id in-memory (DB write deferred to write phase)
           taskUpdates.push({ id: sTask.id, fields: { [eventIdCol]: null } });
-          sTask[eventIdCol === 'gcal_event_id' ? 'gcalEventId' : 'msftEventId'] = null;
+          sTask[(eventIdCol === 'gcal_event_id' ? 'gcalEventId' : eventIdCol === 'msft_event_id' ? 'msftEventId' : 'appleEventId')] = null;
           // Unblock from all skip checks
           ledgeredTaskIds2.delete(sTask.id);
           processedTaskIds2.delete(sTask.id);
@@ -729,7 +628,7 @@ async function sync(req, res) {
         if (!newTask.time && newTask.when !== 'allday') continue;
 
         // Skip tasks with existing event IDs — unless they were just cleared for split replacement
-        var existingEvId = newTask[eventIdCol === 'gcal_event_id' ? 'gcalEventId' : 'msftEventId'];
+        var existingEvId = newTask[(eventIdCol === 'gcal_event_id' ? 'gcalEventId' : eventIdCol === 'msft_event_id' ? 'msftEventId' : 'appleEventId')];
         if (existingEvId && !splitReplacedIds.has(newTask.id)) continue;
 
         var taskSA = newTask._scheduled_at instanceof Date ? newTask._scheduled_at : new Date(String(newTask._scheduled_at).replace(' ', 'T') + 'Z');
@@ -767,8 +666,8 @@ async function sync(req, res) {
 
       // Batch create if adapter supports it, otherwise fall back to sequential
       if (pushQueue.length > 0 && pAdapter2.batchCreateEvents) {
-        var provLabel = pid2 === 'gcal' ? 'Google Calendar' : 'Microsoft Calendar';
-        emitProgress('push', 'Pushing ' + pushQueue.length + ' tasks to ' + provLabel + '...', 50 + (pi2 * 20));
+        var provLabel = PROVIDER_LABELS[pid2] || pid2;
+        emitProgress('push', 'Pushing ' + pushQueue.length + ' tasks...', 50 + (pi2 * 20), { provider: pid2 });
         try {
           var batchResults = await pAdapter2.batchCreateEvents(pToken2, pushQueue, year, tz);
           // Collect successful results into mutation buffers
@@ -845,6 +744,7 @@ async function sync(req, res) {
           }
         }
       }
+      } // end of !isIngestOnly push block
 
       // 3b: Pull unledgered events from this provider
       //
@@ -875,7 +775,7 @@ async function sync(req, res) {
 
         // Check if already linked to a task via the event ID column
         var existingTask = allTasks.find(function(t) {
-          return t[eventIdCol === 'gcal_event_id' ? 'gcalEventId' : 'msftEventId'] === evId;
+          return t[(eventIdCol === 'gcal_event_id' ? 'gcalEventId' : eventIdCol === 'msft_event_id' ? 'msftEventId' : 'appleEventId')] === evId;
         });
         if (existingTask) {
           var origin = existingTask.id.startsWith(pid2 + '_') ? pid2 : 'juggler';
@@ -963,21 +863,23 @@ async function sync(req, res) {
             stats.pushed++;
             continue;
           }
-          // No matching task — record as orphaned Juggler event
-          ledgerInserts.push({
-            user_id: userId,
-            provider: pid2,
-            task_id: null,
-            provider_event_id: evId,
-            origin: 'juggler',
-            last_pushed_hash: null,
-            last_pulled_hash: pAdapter2.eventHash(newEvent),
-            event_summary: newEvent.title,
-            event_start: newEvent.startDateTime || null,
-            event_end: newEvent.endDateTime || null,
-            event_all_day: newEvent.isAllDay ? 1 : 0,
-            last_modified_at: toMySQLDate(newEvent.lastModified),
-            status: 'active'
+          // No matching task — this is a stale Juggler event (e.g. from a
+          // recurring instance that was regenerated with a new ID). Delete it
+          // from the provider to prevent duplicates accumulating.
+          try {
+            await pAdapter2.deleteEvent(pToken2, evId);
+            await throttle();
+          } catch (e7) {
+            if (!e7.message.includes('404') && !e7.message.includes('410')) {
+              pStats2.errors.push({ phase: 'orphan_cleanup', provider: pid2, eventId: evId, error: e7.message });
+            }
+          }
+          processedEventIds2.add(evId);
+          pStats2.deleted_local++;
+          stats.deleted_local++;
+          logSyncAction(pid2, 'deleted_local', {
+            eventId: evId, taskText: newEvent.title,
+            detail: 'Stale Juggler event deleted (no matching task)'
           });
           continue;
         }
@@ -1110,7 +1012,7 @@ async function sync(req, res) {
     await flushQueueInLock(userId);
 
     // Snapshot watermark BEFORE writing so we can detect what we touched
-    var syncStartWatermark = (await db('tasks')
+    var syncStartWatermark = (await db('tasks_v')
       .where('user_id', userId)
       .max('updated_at as max_ts')
       .first()) || { max_ts: null };
@@ -1122,7 +1024,7 @@ async function sync(req, res) {
     var conflictSkipIds = new Set();
     var taskIdsToCheck = taskUpdates.map(function(u) { return u.id; });
     if (taskIdsToCheck.length > 0) {
-      var freshRows = await db('tasks')
+      var freshRows = await db('tasks_v')
         .whereIn('id', taskIdsToCheck)
         .select('id', 'updated_at');
       var freshById = {};
@@ -1143,12 +1045,15 @@ async function sync(req, res) {
     await db.transaction(async function(trx) {
       var now = db.fn.now();
 
-      // 1. Task inserts (new tasks from provider events)
-      for (var wi = 0; wi < taskInserts.length; wi++) {
-        var ins = taskInserts[wi];
-        ins.created_at = now;
-        ins.updated_at = now;
-        await trx('tasks').insert(ins);
+      // 1. Task inserts (new tasks from provider events) — bulk insert
+      if (taskInserts.length > 0) {
+        for (var wi = 0; wi < taskInserts.length; wi++) {
+          taskInserts[wi].created_at = now;
+          taskInserts[wi].updated_at = now;
+        }
+        for (var wi2 = 0; wi2 < taskInserts.length; wi2++) {
+          await tasksWrite.insertTask(trx, taskInserts[wi2]);
+        }
       }
 
       // 2. Task updates (event IDs, field changes from provider)
@@ -1164,7 +1069,7 @@ async function sync(req, res) {
       for (var wm = 0; wm < mergedIds.length; wm++) {
         var mid = mergedIds[wm];
         mergedTaskUpdates[mid].updated_at = now;
-        await trx('tasks').where('id', mid).update(mergedTaskUpdates[mid]);
+        await tasksWrite.updateTaskById(trx, mid, mergedTaskUpdates[mid], userId);
       }
 
       // 3. Task deletes (remote-deleted events past miss threshold)
@@ -1173,10 +1078,11 @@ async function sync(req, res) {
         // Transfer dependencies first
         for (var wdt = 0; wdt < del.dependencyTransfers.length; wdt++) {
           var dt = del.dependencyTransfers[wdt];
-          await trx('tasks').where({ id: dt.id, user_id: userId })
-            .update({ depends_on: dt.newDepsJson, updated_at: now });
+          await tasksWrite.updateTaskById(trx, dt.id, {
+            depends_on: dt.newDepsJson, updated_at: now
+          }, userId);
         }
-        await trx('tasks').where('id', del.id).del();
+        await tasksWrite.deleteTaskById(trx, del.id, userId);
       }
 
       // 4. Ledger updates
@@ -1186,19 +1092,21 @@ async function sync(req, res) {
         await trx('cal_sync_ledger').where('id', lu.id).update(lu.fields);
       }
 
-      // 5. Ledger inserts
-      for (var wli = 0; wli < ledgerInserts.length; wli++) {
-        var li3 = ledgerInserts[wli];
-        li3.synced_at = now;
-        li3.created_at = now;
-        await trx('cal_sync_ledger').insert(li3);
+      // 5. Ledger inserts — bulk insert
+      if (ledgerInserts.length > 0) {
+        for (var wli = 0; wli < ledgerInserts.length; wli++) {
+          ledgerInserts[wli].synced_at = now;
+          ledgerInserts[wli].created_at = now;
+        }
+        await trx('cal_sync_ledger').insert(ledgerInserts);
       }
 
-      // 6. Sync history inserts
-      for (var wh = 0; wh < historyInserts.length; wh++) {
-        var hi = historyInserts[wh];
-        hi.created_at = now;
-        await trx('sync_history').insert(hi);
+      // 6. Sync history inserts — bulk insert
+      if (historyInserts.length > 0) {
+        for (var wh = 0; wh < historyInserts.length; wh++) {
+          historyInserts[wh].created_at = now;
+        }
+        await trx('sync_history').insert(historyInserts);
       }
 
       // 7. Update last-synced timestamps for all providers
@@ -1223,12 +1131,12 @@ async function sync(req, res) {
     var deletedDuringSync = taskDeletes.map(function(d) { return d.id; });
     var touchedRows;
     if (preSyncMaxUpdatedAt) {
-      touchedRows = await db('tasks')
+      touchedRows = await db('tasks_v')
         .where('user_id', userId)
         .where('updated_at', '>', preSyncMaxUpdatedAt)
         .pluck('id');
     } else {
-      touchedRows = await db('tasks').where('user_id', userId).pluck('id');
+      touchedRows = await db('tasks_v').where('user_id', userId).pluck('id');
     }
     var affectedIds = touchedRows.concat(deletedDuringSync);
     var seenIds = {};
@@ -1320,7 +1228,7 @@ async function hasChanges(req, res) {
     var userId = req.user.id;
     var lastSynced = req.user.gcal_last_synced_at;
     if (lastSynced) {
-      var localChanges = await db('tasks')
+      var localChanges = await db('tasks_v')
         .where('user_id', userId)
         .whereNotNull('scheduled_at')
         .where('updated_at', '>', lastSynced)
@@ -1375,4 +1283,126 @@ async function getSyncHistory(req, res) {
   }
 }
 
-module.exports = { sync, hasChanges, getSyncHistory };
+/**
+ * GET /api/cal/audit — compare Strive tasks to calendar events and report mismatches.
+ * Query params: ?days=7 (window, default 7 days forward from today)
+ */
+async function audit(req, res) {
+  try {
+    var userId = req.user.id;
+    var userRow = await db('users').where('id', userId).first();
+    var tz = userRow.timezone || DEFAULT_TIMEZONE;
+
+    var days = Math.min(parseInt(req.query.days, 10) || 7, 60);
+    var now = new Date();
+    var end = new Date(now); end.setDate(end.getDate() + days);
+
+    var adapters = getConnectedAdapters(userRow);
+    var report = {
+      window: { startUTC: now.toISOString(), endUTC: end.toISOString(), days: days },
+      providers: {}
+    };
+
+    // Load Strive tasks in window
+    var { fetchTasksWithEventIds } = require('./task.controller');
+    var taskRows = await fetchTasksWithEventIds(db, userId, function(q) {
+      q.whereNotNull('scheduled_at')
+        .where('scheduled_at', '>=', now).where('scheduled_at', '<=', end)
+        .whereNot('status', 'done').whereNot('status', 'cancel').whereNot('status', 'skip')
+        .whereNot('status', 'pause').whereNot('status', 'disabled')
+        .whereNot('task_type', 'recurring_template')
+        .orderBy('scheduled_at');
+    });
+
+    // Resolve recurring instance text from templates
+    var srcIds = taskRows.filter(function(r){ return !r.text && r.source_id; }).map(function(r){ return r.source_id; });
+    var tpl = {};
+    if (srcIds.length > 0) {
+      (await db('tasks_v').whereIn('id', srcIds).select('id', 'text'))
+        .forEach(function(r) { tpl[r.id] = r.text; });
+    }
+    taskRows.forEach(function(r) { if (!r.text && r.source_id) r.text = tpl[r.source_id] || ''; });
+
+    for (var pi = 0; pi < adapters.length; pi++) {
+      var adapter = adapters[pi];
+      var pid = adapter.providerId;
+      var eventIdCol = adapter.getEventIdColumn();
+      var provReport = {
+        striveTasks: taskRows.length,
+        matched: 0,
+        missingFromCalendar: [],
+        timeMismatches: [],
+        durMismatches: [],
+        orphansOnCalendar: []
+      };
+
+      try {
+        var token = await adapter.getValidAccessToken(userRow);
+        var events = await adapter.listEvents(token, now.toISOString(), end.toISOString(), userId);
+
+        var eventsById = {};
+        events.forEach(function(e) { eventsById[e.id] = e; });
+        provReport.calendarEvents = events.length;
+
+        taskRows.forEach(function(r) {
+          var evId = r[eventIdCol];
+          var striveStart = new Date(String(r.scheduled_at).replace(' ', 'T') + 'Z');
+          var striveDur = r.dur || 30;
+
+          if (!evId) {
+            provReport.missingFromCalendar.push({
+              taskId: r.id, text: r.text, striveTime: striveStart.toISOString(), striveDur: striveDur, reason: 'no event ID'
+            });
+            return;
+          }
+          var ev = eventsById[evId];
+          if (!ev) {
+            provReport.missingFromCalendar.push({
+              taskId: r.id, text: r.text, striveTime: striveStart.toISOString(), striveDur: striveDur, reason: 'event ID not on calendar'
+            });
+            return;
+          }
+          var evStart = new Date(ev.startDateTime);
+          var timeDiffMin = Math.abs(striveStart.getTime() - evStart.getTime()) / 60000;
+          var evDur = ev.durationMinutes || 30;
+          var durDiff = Math.abs(striveDur - evDur);
+
+          if (timeDiffMin > 1) {
+            provReport.timeMismatches.push({
+              taskId: r.id, text: r.text,
+              striveTime: striveStart.toISOString(), calTime: evStart.toISOString(), diffMinutes: Math.round(timeDiffMin)
+            });
+          } else if (durDiff > 1 && striveDur > 0 && evDur > 0) {
+            provReport.durMismatches.push({
+              taskId: r.id, text: r.text, striveDur: striveDur, calDur: evDur
+            });
+          } else {
+            provReport.matched++;
+          }
+        });
+
+        var taskEventIds = new Set(taskRows.map(function(r) { return r[eventIdCol]; }).filter(Boolean));
+        events.forEach(function(e) {
+          if (!taskEventIds.has(e.id)) {
+            provReport.orphansOnCalendar.push({
+              eventId: e.id, title: e.title, calTime: e.startDateTime
+            });
+          }
+        });
+
+        provReport.mismatchCount = provReport.missingFromCalendar.length + provReport.timeMismatches.length + provReport.durMismatches.length + provReport.orphansOnCalendar.length;
+      } catch (err) {
+        provReport.error = err.message;
+      }
+
+      report.providers[pid] = provReport;
+    }
+
+    res.json(report);
+  } catch (error) {
+    console.error('Cal audit error:', error);
+    res.status(500).json({ error: 'Failed to audit calendar sync', detail: error.message });
+  }
+}
+
+module.exports = { sync, hasChanges, getSyncHistory, audit };

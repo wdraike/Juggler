@@ -4,6 +4,7 @@
  *
  * Uses CalDAV protocol via tsdav with basic auth (app-specific password).
  * Credentials are stored encrypted in the users table.
+ * Supports multi-calendar: reads enabled calendars from user_calendars table.
  */
 
 var crypto = require('crypto');
@@ -34,30 +35,85 @@ async function getValidAccessToken(user) {
 }
 
 /**
- * Fetch events from Apple Calendar and normalize to unified shape.
+ * Get enabled calendars from user_calendars table, falling back to legacy single URL.
  */
-async function listEvents(client, timeMin, timeMax, userId) {
-  var user = await db('users').where('id', userId).first();
-  if (!user || !user.apple_cal_calendar_url) {
-    throw new Error('Apple Calendar: no calendar selected');
+async function getEnabledCalendars(userId) {
+  var calendars = await db('user_calendars')
+    .where({ user_id: userId, provider: 'apple', enabled: true });
+
+  if (calendars.length > 0) {
+    return calendars;
   }
 
-  var events = await appleCalApi.listEvents(client, user.apple_cal_calendar_url, timeMin, timeMax);
+  // Fallback: legacy single-calendar from users table
+  var user = await db('users').where('id', userId).first();
+  if (user && user.apple_cal_calendar_url) {
+    return [{
+      id: null,
+      calendar_id: user.apple_cal_calendar_url,
+      display_name: null,
+      sync_direction: 'full'
+    }];
+  }
 
-  // Update sync token for change detection
-  try {
-    var calendars = await client.fetchCalendars();
-    var cal = calendars.find(function(c) { return c.url === user.apple_cal_calendar_url; });
-    if (cal && (cal.syncToken || cal.ctag)) {
-      await db('users').where('id', userId).update({
-        apple_cal_sync_token: cal.syncToken || cal.ctag
+  return [];
+}
+
+/**
+ * Get the default write calendar (first enabled full-sync calendar).
+ */
+async function getWriteCalendar(userId) {
+  var calendars = await getEnabledCalendars(userId);
+  // Prefer full-sync calendars for writing
+  var fullSync = calendars.filter(function(c) { return c.sync_direction === 'full'; });
+  return fullSync.length > 0 ? fullSync[0] : null;
+}
+
+/**
+ * Fetch events from all enabled Apple Calendars and normalize to unified shape.
+ */
+async function listEvents(client, timeMin, timeMax, userId) {
+  var calendars = await getEnabledCalendars(userId);
+  if (calendars.length === 0) {
+    throw new Error('Apple Calendar: no calendars enabled');
+  }
+
+  var allEvents = [];
+  for (var i = 0; i < calendars.length; i++) {
+    var cal = calendars[i];
+    try {
+      var events = await appleCalApi.listEvents(client, cal.calendar_id, timeMin, timeMax);
+      var normalized = events.map(function(e) {
+        var ne = normalizeEvent(e);
+        ne._calendarId = cal.calendar_id;
+        return ne;
       });
+      allEvents = allEvents.concat(normalized);
+    } catch (e) {
+      console.error('[APPLE-ADAPTER] Error fetching calendar ' + (cal.display_name || cal.calendar_id) + ':', e.message);
+    }
+  }
+
+  // Update sync tokens for all calendars
+  try {
+    var fetchedCalendars = await client.fetchCalendars();
+    for (var j = 0; j < calendars.length; j++) {
+      var userCal = calendars[j];
+      var remoteCal = fetchedCalendars.find(function(c) { return c.url === userCal.calendar_id; });
+      if (remoteCal && (remoteCal.syncToken || remoteCal.ctag)) {
+        // Store sync token per calendar — use the first one for legacy compat
+        if (j === 0) {
+          await db('users').where('id', userId).update({
+            apple_cal_sync_token: remoteCal.syncToken || remoteCal.ctag
+          });
+        }
+      }
     }
   } catch (e) {
     console.error('[APPLE-ADAPTER] sync token update failed:', e.message);
   }
 
-  return events.map(normalizeEvent);
+  return allEvents;
 }
 
 /**
@@ -67,8 +123,12 @@ async function hasChanges(client, user) {
   var syncToken = user.apple_cal_sync_token;
   if (!syncToken) return { hasChanges: true };
 
+  // Check the primary calendar (legacy field) for changes
+  var calendarUrl = user.apple_cal_calendar_url;
+  if (!calendarUrl) return { hasChanges: true };
+
   var result = await appleCalApi.checkForChanges(
-    client, user.apple_cal_calendar_url, syncToken
+    client, calendarUrl, syncToken
   );
 
   if (!result.hasChanges && result.syncToken && result.syncToken !== syncToken) {
@@ -105,16 +165,18 @@ function normalizeEvent(event) {
 
 /**
  * Create a calendar event from a task.
+ * Writes to the default write calendar (first enabled full-sync calendar).
  */
 async function createEvent(client, task, year, tz) {
-  var user = await db('users').where('id', task.userId || task.user_id).first();
-  if (!user) throw new Error('User not found');
-  var calendarUrl = user.apple_cal_calendar_url;
-  if (!calendarUrl) throw new Error('No Apple calendar selected');
+  var userId = task.userId || task.user_id;
+  var writeCal = await getWriteCalendar(userId);
+  if (!writeCal) throw new Error('No Apple calendar available for writing (all ingest-only?)');
 
+  var calendarUrl = writeCal.calendar_id;
   var result = await appleCalApi.createEvent(client, calendarUrl, task, year, tz);
   return {
     providerEventId: result.providerEventId,
+    calendarId: calendarUrl,
     raw: result
   };
 }
@@ -160,31 +222,6 @@ function applyEventToTaskFields(event, tz, currentTask) {
 
   if (event.isTransparent) {
     fields.marker = true;
-  }
-
-  // Promotion logic: when user moves a flexible task in Apple Calendar,
-  // promote it to fixed so the scheduler respects the placement.
-  if (currentTask && !isAllDay) {
-    var wasFixed = currentTask.when && currentTask.when.indexOf('fixed') >= 0;
-    var wasAllDay = currentTask.when === 'allday';
-    if (!wasFixed) {
-      if (wasAllDay) {
-        fields.when = 'fixed';
-      } else if (jd.time && jd.time !== currentTask.time) {
-        fields.when = 'fixed';
-      }
-      if (jd.date && jd.date !== currentTask.date) {
-        fields.when = 'fixed';
-        fields.date_pinned = 1;
-      }
-      if (fields.when === 'fixed' && currentTask.when !== 'fixed') {
-        fields.prev_when = currentTask.when || '';
-      }
-    }
-  }
-
-  if (currentTask && !event.isTransparent && currentTask.marker) {
-    fields.marker = false;
   }
 
   return fields;
@@ -265,6 +302,8 @@ module.exports = {
   providerId,
   isConnected,
   getValidAccessToken,
+  getEnabledCalendars,
+  getWriteCalendar,
   listEvents,
   hasChanges,
   normalizeEvent,

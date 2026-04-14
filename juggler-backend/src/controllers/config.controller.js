@@ -3,6 +3,7 @@
  */
 
 const db = require('../db');
+const tasksWrite = require('../lib/tasks-write');
 const { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 const cache = require('../lib/redis');
 
@@ -106,7 +107,7 @@ async function updateConfig(req, res) {
         });
       });
 
-      var activeTasks = await db('tasks')
+      var activeTasks = await db('tasks_v')
         .where('user_id', userId)
         .whereNotIn('status', ['done', 'cancel', 'skip', 'pause'])
         .whereNotNull('when')
@@ -197,9 +198,9 @@ async function updateProject(req, res) {
       });
       // If the name changed, rename the project on all tasks that reference it
       if (oldName && name && oldName !== name) {
-        await trx('tasks').where({ user_id: req.user.id, project: oldName }).update({
-          project: name, updated_at: db.fn.now()
-        });
+        await tasksWrite.updateTasksWhere(trx, req.user.id, function(q) {
+          return q.where('project', oldName);
+        }, { project: name, updated_at: db.fn.now() });
       }
     });
 

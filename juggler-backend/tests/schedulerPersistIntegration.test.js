@@ -6,6 +6,7 @@
  */
 
 var testDb = require('./helpers/testDb');
+var tasksWrite = require('../src/lib/tasks-write');
 var available = false;
 
 beforeAll(async () => {
@@ -26,7 +27,8 @@ afterAll(async () => {
 beforeEach(async () => {
   if (!available) return;
   var db = testDb.getDb();
-  await db('tasks').where('user_id', 'test-user-001').del();
+  await db('task_instances').where('user_id', 'test-user-001').del();
+  await db('task_masters').where('user_id', 'test-user-001').del();
   await db('user_config').where('user_id', 'test-user-001').del();
 });
 
@@ -38,7 +40,7 @@ describe('Task CRUD (real DB)', () => {
   test('seedTask creates a task in the DB', async () => { if (!available) return;
     var task = await testDb.seedTask({ text: 'Buy groceries' });
     var db = testDb.getDb();
-    var row = await db('tasks').where('id', task.id).first();
+    var row = await db('tasks_v').where('id', task.id).first();
     expect(row).toBeDefined();
     expect(row.text).toBe('Buy groceries');
   });
@@ -46,7 +48,7 @@ describe('Task CRUD (real DB)', () => {
   test('seedTemplate creates a recurring template', async () => { if (!available) return;
     var tmpl = await testDb.seedTemplate({ text: 'Lunch', preferred_time_mins: 720, time_flex: 60 });
     var db = testDb.getDb();
-    var row = await db('tasks').where('id', tmpl.id).first();
+    var row = await db('tasks_v').where('id', tmpl.id).first();
     expect(row.task_type).toBe('recurring_template');
     expect(row.preferred_time_mins).toBe(720);
     expect(row.time_flex).toBe(60);
@@ -56,7 +58,7 @@ describe('Task CRUD (real DB)', () => {
     var tmpl = await testDb.seedTemplate({ id: 'tmpl-001', text: 'Exercise' });
     var inst = await testDb.seedInstance('tmpl-001', { id: 'inst-001' });
     var db = testDb.getDb();
-    var row = await db('tasks').where('id', 'inst-001').first();
+    var row = await db('tasks_v').where('id', 'inst-001').first();
     expect(row.source_id).toBe('tmpl-001');
     expect(row.task_type).toBe('recurring_instance');
   });
@@ -64,7 +66,7 @@ describe('Task CRUD (real DB)', () => {
   test('template preferred_time_mins is stored correctly', async () => { if (!available) return;
     var tmpl = await testDb.seedTemplate({ id: 'tmpl-pt', preferred_time_mins: 450, time_flex: 90 });
     var db = testDb.getDb();
-    var row = await db('tasks').where('id', 'tmpl-pt').first();
+    var row = await db('tasks_v').where('id', 'tmpl-pt').first();
     expect(row.preferred_time_mins).toBe(450); // 7:30 AM
     expect(row.time_flex).toBe(90);
   });
@@ -73,7 +75,7 @@ describe('Task CRUD (real DB)', () => {
     var dt = new Date('2026-04-07T16:00:00Z');
     var task = await testDb.seedTask({ desired_at: dt, scheduled_at: dt });
     var db = testDb.getDb();
-    var row = await db('tasks').where('id', task.id).first();
+    var row = await db('tasks_v').where('id', task.id).first();
     // MySQL stores datetime as string without Z
     expect(row.desired_at).toBeTruthy();
     expect(row.scheduled_at).toBeTruthy();
@@ -82,11 +84,11 @@ describe('Task CRUD (real DB)', () => {
   test('cleanup removes all test data', async () => { if (!available) return;
     await testDb.seedTask({ text: 'Temp task' });
     var db = testDb.getDb();
-    var before = await db('tasks').where('user_id', 'test-user-001').count('* as c').first();
+    var before = await db('tasks_v').where('user_id', 'test-user-001').count('* as c').first();
     expect(parseInt(before.c)).toBeGreaterThan(0);
     await testDb.cleanup();
     await testDb.seedUser(); // re-seed for other tests
-    var after = await db('tasks').where('user_id', 'test-user-001').count('* as c').first();
+    var after = await db('tasks_v').where('user_id', 'test-user-001').count('* as c').first();
     expect(parseInt(after.c)).toBe(0);
   });
 });
@@ -103,7 +105,7 @@ describe('rowToTask with real DB rows', () => {
       pri: 'P2', dur: 45, when: 'afternoon', status: ''
     });
     var db = testDb.getDb();
-    var row = await db('tasks').where('id', 'rt-001').first();
+    var row = await db('tasks_v').where('id', 'rt-001').first();
     var task = rowToTask(row, 'America/New_York', {});
     expect(task.text).toBe('Real task');
     expect(task.pri).toBe('P2');
@@ -117,7 +119,7 @@ describe('rowToTask with real DB rows', () => {
     await testDb.seedInstance('tmpl-rt', { id: 'inst-rt', scheduled_at: '2026-04-07 11:00:00' });
 
     var db = testDb.getDb();
-    var rows = await db('tasks').where('user_id', 'test-user-001');
+    var rows = await db('tasks_v').where('user_id', 'test-user-001');
     var srcMap = buildSourceMap(rows);
     var instRow = rows.find(function(r) { return r.id === 'inst-rt'; });
     var task = rowToTask(instRow, 'America/New_York', srcMap);
@@ -151,7 +153,7 @@ describe('Scheduler persist (real DB)', () => {
 
     // Note: we can't easily test runScheduleAndPersist here because it imports
     // the production db module. Instead, verify the data model is correct.
-    var tasks = await db('tasks').where('user_id', 'test-user-001');
+    var tasks = await db('tasks_v').where('user_id', 'test-user-001');
     expect(tasks.length).toBe(2);
     expect(tasks[0].text).toBe('Morning task');
   });
@@ -178,17 +180,16 @@ describe('Scheduler persist (real DB)', () => {
     });
     caseExpr += ' END';
 
-    await db('tasks')
-      .where('user_id', 'test-user-001')
-      .whereIn('id', ids)
-      .update({
-        scheduled_at: db.raw(caseExpr, bindings),
-        unscheduled: null,
-        updated_at: db.fn.now()
-      });
+    await tasksWrite.updateTasksWhere(db, 'test-user-001', function(q) {
+      return q.whereIn('id', ids);
+    }, {
+      scheduled_at: db.raw(caseExpr, bindings),
+      unscheduled: null,
+      updated_at: db.fn.now()
+    });
 
     // Verify
-    var rows = await db('tasks').whereIn('id', ids).orderBy('id');
+    var rows = await db('tasks_v').whereIn('id', ids).orderBy('id');
     rows.forEach(function(r, i) {
       expect(r.scheduled_at).toBeTruthy();
     });
@@ -202,7 +203,7 @@ describe('Scheduler persist (real DB)', () => {
     await testDb.seedTask({ id: 'md-001', text: 'Already placed', scheduled_at: fixedTime });
 
     var db = testDb.getDb();
-    var before = await db('tasks').where('id', 'md-001').first();
+    var before = await db('tasks_v').where('id', 'md-001').first();
     var beforeUpdated = before.updated_at;
 
     // Simulate: scheduler computes same scheduled_at, skips write
@@ -216,9 +217,9 @@ describe('Scheduler persist (real DB)', () => {
     await testDb.seedTask({ id: 'us-001', text: 'Unplaceable' });
 
     var db = testDb.getDb();
-    await db('tasks').where('id', 'us-001').update({ unscheduled: 1, scheduled_at: null });
+    await tasksWrite.updateTaskById(db, 'us-001', { unscheduled: 1, scheduled_at: null }, 'test-user-001');
 
-    var row = await db('tasks').where('id', 'us-001').first();
+    var row = await db('tasks_v').where('id', 'us-001').first();
     expect(row.unscheduled).toBeTruthy();
     expect(row.scheduled_at).toBeNull();
   });
@@ -228,7 +229,7 @@ describe('Scheduler persist (real DB)', () => {
     await testDb.seedInstance('tmpl-us', { id: 'inst-us' });
 
     var db = testDb.getDb();
-    var row = await db('tasks').where('id', 'inst-us').first();
+    var row = await db('tasks_v').where('id', 'inst-us').first();
     expect(row.unscheduled).toBeNull(); // never set on instances
   });
 });
@@ -264,13 +265,13 @@ describe('TEMPLATE_FIELDS routing (real DB)', () => {
 
     // Apply to DB
     templateUpdate.updated_at = db.fn.now();
-    await db('tasks').where('id', 'tmpl-route').update(templateUpdate);
+    await tasksWrite.updateTaskById(db, 'tmpl-route', templateUpdate, 'test-user-001');
     instanceUpdate.updated_at = db.fn.now();
-    await db('tasks').where('id', 'inst-route').update(instanceUpdate);
+    await tasksWrite.updateTaskById(db, 'inst-route', instanceUpdate, 'test-user-001');
 
     // Verify
-    var tmpl = await db('tasks').where('id', 'tmpl-route').first();
-    var inst = await db('tasks').where('id', 'inst-route').first();
+    var tmpl = await db('tasks_v').where('id', 'tmpl-route').first();
+    var inst = await db('tasks_v').where('id', 'inst-route').first();
     expect(tmpl.text).toBe('Updated Name');
     expect(tmpl.dur).toBe(45);
     expect(inst.scheduled_at).toBe('2026-04-07 15:00:00');

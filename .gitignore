@@ -6,6 +6,7 @@ build/
 .env
 .env.local
 .env.production
+.env.test
 coverage/
 .cache/
 test-results/

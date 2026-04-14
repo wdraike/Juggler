@@ -11,6 +11,7 @@ const db = require('../../db');
 const { rowToTask, taskToRow, guardFixedCalendarWhen, ensureProject, applySplitDefault, buildSourceMap, TEMPLATE_FIELDS } = require('../../controllers/task.controller');
 const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
 const { isLocked, enqueueWrite, splitFields } = require('../../lib/task-write-queue');
+const tasksWrite = require('../../lib/tasks-write');
 
 // Shared Zod fields for task input (used by create_task, create_tasks, update_task)
 var taskInputFields = {
@@ -73,7 +74,7 @@ function registerTaskTools(server, userId) {
     },
     async ({ status, project, date, limit }) => {
       var tz = await getUserTimezone();
-      var query = db('tasks').where('user_id', userId);
+      var query = db('tasks_v').where('user_id', userId);
       if (status !== undefined) query = query.where('status', status);
       if (project) query = query.where('project', project);
       query = query.orderBy('created_at', 'asc');
@@ -116,9 +117,9 @@ function registerTaskTools(server, userId) {
         return { content: [{ type: 'text', text: JSON.stringify(Object.assign(rowToTask(row, tz), { queued: true }), null, 2) }] };
       }
 
-      await db('tasks').insert(row);
+      await tasksWrite.insertTask(db, row);
       enqueueScheduleRun(userId, 'mcp:create_task', [row.id]);
-      var created = await db('tasks').where('id', row.id).first();
+      var created = await db('tasks_with_sync_v').where('id', row.id).first();
       return { content: [{ type: 'text', text: JSON.stringify(rowToTask(created, tz), null, 2) }] };
     }
   );
@@ -165,9 +166,8 @@ function registerTaskTools(server, userId) {
       }
 
       await db.transaction(async function(trx) {
-        var chunkSize = 100;
-        for (var i = 0; i < rows.length; i += chunkSize) {
-          await trx('tasks').insert(rows.slice(i, i + chunkSize));
+        for (var i = 0; i < rows.length; i++) {
+          await tasksWrite.insertTask(trx, rows[i]);
         }
       });
 
@@ -186,7 +186,7 @@ function registerTaskTools(server, userId) {
     }, taskInputFields),
     async ({ id, ...fields }) => {
       var tz = await getUserTimezone();
-      var existing = await db('tasks').where({ id: id, user_id: userId }).first();
+      var existing = await db('tasks_with_sync_v').where({ id: id, user_id: userId }).first();
       if (!existing) {
         return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
       }
@@ -217,7 +217,7 @@ function registerTaskTools(server, userId) {
       if (row.when !== undefined) {
         var _mGuardOpts = { allowUnfix: !!fields._allowUnfix };
         if (isRecurringInstance) {
-          var _srcT = await db('tasks').where({ id: existing.source_id, user_id: userId }).first();
+          var _srcT = await db('tasks_with_sync_v').where({ id: existing.source_id, user_id: userId }).first();
           guardFixedCalendarWhen(row, _srcT, _mGuardOpts);
         } else {
           guardFixedCalendarWhen(row, existing, _mGuardOpts);
@@ -230,13 +230,13 @@ function registerTaskTools(server, userId) {
         var { schedulingFields, nonSchedulingFields } = splitFields(row);
         if (Object.keys(nonSchedulingFields).length > 0) {
           nonSchedulingFields.updated_at = db.fn.now();
-          await db('tasks').where({ id: id, user_id: userId }).update(nonSchedulingFields);
+          await tasksWrite.updateTaskById(db, id, nonSchedulingFields, userId);
         }
         if (Object.keys(schedulingFields).length > 0) {
           await enqueueWrite(userId, id, 'update', schedulingFields, 'mcp:update_task');
         }
         enqueueScheduleRun(userId, 'mcp:update_task', [id]);
-        var allRows = await db('tasks').where('user_id', userId).select();
+        var allRows = await db('tasks_with_sync_v').where('user_id', userId).select();
         var srcMap = buildSourceMap(allRows);
         var updatedRow = allRows.find(function(r) { return r.id === id; });
         return { content: [{ type: 'text', text: JSON.stringify(Object.assign(rowToTask(updatedRow, tz, srcMap), { queued: true }), null, 2) }] };
@@ -255,20 +255,20 @@ function registerTaskTools(server, userId) {
         });
         if (Object.keys(templateUpdate).length > 0) {
           templateUpdate.updated_at = db.fn.now();
-          await db('tasks').where({ id: existing.source_id, user_id: userId }).update(templateUpdate);
+          await tasksWrite.updateTaskById(db, existing.source_id, templateUpdate, userId);
         }
         if (Object.keys(instanceUpdate).length > 0) {
           instanceUpdate.updated_at = db.fn.now();
-          await db('tasks').where({ id: id, user_id: userId }).update(instanceUpdate);
+          await tasksWrite.updateTaskById(db, id, instanceUpdate, userId);
         } else {
-          await db('tasks').where({ id: id, user_id: userId }).update({ updated_at: db.fn.now() });
+          await tasksWrite.updateTaskById(db, id, { updated_at: db.fn.now() }, userId);
         }
       } else {
-        await db('tasks').where({ id: id, user_id: userId }).update(row);
+        await tasksWrite.updateTaskById(db, id, row, userId);
       }
 
       enqueueScheduleRun(userId, 'mcp:update_task', [id]);
-      var allRows = await db('tasks').where('user_id', userId).select();
+      var allRows = await db('tasks_with_sync_v').where('user_id', userId).select();
       var srcMap = buildSourceMap(allRows);
       var updatedRow = allRows.find(function(r) { return r.id === id; });
       return { content: [{ type: 'text', text: JSON.stringify(rowToTask(updatedRow, tz, srcMap), null, 2) }] };
@@ -285,16 +285,16 @@ function registerTaskTools(server, userId) {
     },
     async ({ id, status }) => {
       var tz = await getUserTimezone();
-      var existing = await db('tasks').where({ id: id, user_id: userId }).first();
+      var existing = await db('tasks_v').where({ id: id, user_id: userId }).first();
       if (!existing) {
         return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
       }
 
       var update = { status: status || '', updated_at: db.fn.now() };
 
-      await db('tasks').where({ id: id, user_id: userId }).update(update);
+      await tasksWrite.updateTaskById(db, id, update, userId);
       enqueueScheduleRun(userId, 'mcp:set_task_status', [id]);
-      var updated = await db('tasks').where('id', id).first();
+      var updated = await db('tasks_with_sync_v').where('id', id).first();
       return { content: [{ type: 'text', text: JSON.stringify(rowToTask(updated, tz), null, 2) }] };
     }
   );
@@ -307,7 +307,7 @@ function registerTaskTools(server, userId) {
       id: z.string().describe('Task ID to delete')
     },
     async ({ id }) => {
-      var task = await db('tasks').where({ id: id, user_id: userId }).first();
+      var task = await db('tasks_with_sync_v').where({ id: id, user_id: userId }).first();
       if (!task) {
         return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
       }
@@ -329,7 +329,7 @@ function registerTaskTools(server, userId) {
       await db.transaction(async function(trx) {
         var deletedDeps = typeof task.depends_on === 'string'
           ? JSON.parse(task.depends_on || '[]') : (task.depends_on || []);
-        var affected = await trx('tasks')
+        var affected = await trx('tasks_v')
           .where('user_id', userId)
           .whereRaw('JSON_CONTAINS(depends_on, ?)', [JSON.stringify(id)])
           .select('id', 'depends_on');
@@ -339,19 +339,22 @@ function registerTaskTools(server, userId) {
             ? JSON.parse(other.depends_on || '[]') : (other.depends_on || []);
           var newDeps = deps.filter(function(d) { return d !== id; });
           deletedDeps.forEach(function(d) { if (newDeps.indexOf(d) === -1) newDeps.push(d); });
-          await trx('tasks').where({ id: other.id, user_id: userId })
-            .update({ depends_on: JSON.stringify(newDeps), updated_at: db.fn.now() });
+          await tasksWrite.updateTaskById(trx, other.id, {
+            depends_on: JSON.stringify(newDeps), updated_at: db.fn.now()
+          }, userId);
         }
 
-        if (task.gcal_event_id || task.msft_event_id) {
+        if (task.gcal_event_id || task.msft_event_id || task.apple_event_id) {
+          // status='deleted_local' so the next sync doesn't recreate the task
+          // from the still-existing calendar event
           await trx('cal_sync_ledger')
             .where({ user_id: userId, task_id: id })
             .where('status', 'active')
-            .update({ task_id: null, synced_at: db.fn.now() })
+            .update({ status: 'deleted_local', task_id: null, provider_event_id: null, synced_at: db.fn.now() })
             .catch(function(err) { console.error("[silent-catch]", err.message); });
         }
 
-        await trx('tasks').where({ id: id, user_id: userId }).del();
+        await tasksWrite.deleteTaskById(trx, id, userId);
       });
 
       enqueueScheduleRun(userId, 'mcp:delete_task', [id]);
@@ -368,7 +371,7 @@ function registerTaskTools(server, userId) {
     },
     async ({ id }) => {
       var tz = await getUserTimezone();
-      var rows = await db('tasks').where('user_id', userId);
+      var rows = await db('tasks_v').where('user_id', userId);
       var srcMap = buildSourceMap(rows);
       var row = rows.find(function(r) { return r.id === id; });
       if (!row) {
@@ -390,7 +393,7 @@ function registerTaskTools(server, userId) {
     },
     async ({ query, status, project, limit }) => {
       var tz = await getUserTimezone();
-      var dbQuery = db('tasks').where('user_id', userId);
+      var dbQuery = db('tasks_v').where('user_id', userId);
       if (status !== undefined) dbQuery = dbQuery.where('status', status);
       if (project) dbQuery = dbQuery.where('project', project);
       var escaped = query.replace(/%/g, '\\%').replace(/_/g, '\\_');
@@ -402,7 +405,7 @@ function registerTaskTools(server, userId) {
 
       var rows = await dbQuery;
       // Also load all rows for sourceMap (recurring inheritance)
-      var allRows = await db('tasks').where('user_id', userId);
+      var allRows = await db('tasks_v').where('user_id', userId);
       var srcMap = buildSourceMap(allRows);
       var tasks = rows.map(function(r) { return rowToTask(r, tz, srcMap); });
       return { content: [{ type: 'text', text: JSON.stringify(tasks, null, 2) }] };
@@ -435,7 +438,7 @@ function registerTaskTools(server, userId) {
       var locked = await isLocked(userId);
       if (locked) {
         var idsToCheck = updates.map(function(u) { return u.id; });
-        var existCheck = await db('tasks')
+        var existCheck = await db('tasks_v')
           .where('user_id', userId)
           .whereIn('id', idsToCheck)
           .select('id', 'task_type', 'source_id', 'scheduled_at');
@@ -456,7 +459,7 @@ function registerTaskTools(server, userId) {
           var split = splitFields(qRow);
           if (Object.keys(split.nonSchedulingFields).length > 0) {
             split.nonSchedulingFields.updated_at = db.fn.now();
-            await db('tasks').where({ id: qId, user_id: userId }).update(split.nonSchedulingFields);
+            await tasksWrite.updateTaskById(db, qId, split.nonSchedulingFields, userId);
             updatedCount++;
           }
           if (Object.keys(split.schedulingFields).length > 0) {
@@ -471,7 +474,7 @@ function registerTaskTools(server, userId) {
 
       await db.transaction(async function(trx) {
         var idsToUpdate = updates.map(function(u) { return u.id; });
-        var existingRows = await trx('tasks')
+        var existingRows = await trx('tasks_v')
           .where('user_id', userId)
           .whereIn('id', idsToUpdate)
           .select('id', 'task_type', 'source_id', 'scheduled_at');
@@ -506,16 +509,16 @@ function registerTaskTools(server, userId) {
             });
             if (Object.keys(templateUpdate).length > 0) {
               templateUpdate.updated_at = db.fn.now();
-              await trx('tasks').where({ id: existing.source_id, user_id: userId }).update(templateUpdate);
+              await tasksWrite.updateTaskById(trx, existing.source_id, templateUpdate, userId);
             }
             if (Object.keys(instanceUpdate).length > 0) {
               instanceUpdate.updated_at = db.fn.now();
-              await trx('tasks').where({ id: id, user_id: userId }).update(instanceUpdate);
+              await tasksWrite.updateTaskById(trx, id, instanceUpdate, userId);
             } else {
-              await trx('tasks').where({ id: id, user_id: userId }).update({ updated_at: db.fn.now() });
+              await tasksWrite.updateTaskById(trx, id, { updated_at: db.fn.now() }, userId);
             }
           } else {
-            await trx('tasks').where({ id: id, user_id: userId }).update(row);
+            await tasksWrite.updateTaskById(trx, id, row, userId);
           }
           updatedCount++;
         }

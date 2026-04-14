@@ -4,6 +4,7 @@
  */
 var knex = require('knex');
 var config = require('../../knexfile').test;
+var tasksWrite = require('../../src/lib/tasks-write');
 
 var db = null;
 
@@ -25,9 +26,11 @@ async function isAvailable() {
 
 async function cleanup() {
   var d = getDb();
-  // Delete in dependency order
+  // Delete in dependency order. The legacy `tasks` table is gone — clean up
+  // the new two-table model (instances first to satisfy FK to masters).
   await d('cal_sync_ledger').del();
-  await d('tasks').del();
+  await d('task_instances').del();
+  await d('task_masters').del();
   await d('projects').del();
   await d('locations').del();
   await d('tools').del();
@@ -64,7 +67,9 @@ async function seedTask(overrides) {
     created_at: d.fn.now(),
     updated_at: d.fn.now()
   }, overrides);
-  await d('tasks').insert(task);
+  // Route through the helper so master + instance rows are created with
+  // matching ids, ordinals, and field routing.
+  await tasksWrite.insertTask(d, task);
   return task;
 }
 

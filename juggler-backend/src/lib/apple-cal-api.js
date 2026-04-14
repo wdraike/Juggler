@@ -26,19 +26,30 @@ async function createClient(serverUrl, username, password) {
 
 /**
  * Discover available calendars for the authenticated user.
+ * Filters to only VEVENT-capable calendars (excludes Reminders/VTODO lists).
  * Returns: [{ url, displayName, ctag, description }]
  */
 async function discoverCalendars(client) {
   var calendars = await client.fetchCalendars();
-  return calendars.map(function(cal) {
-    return {
-      url: cal.url,
-      displayName: cal.displayName || 'Unnamed Calendar',
-      ctag: cal.ctag || null,
-      description: cal.description || '',
-      syncToken: cal.syncToken || null
-    };
-  });
+  return calendars
+    .filter(function(cal) {
+      // tsdav returns a components array like ['VEVENT'] or ['VTODO']
+      // Only include calendars that support events
+      if (cal.components && Array.isArray(cal.components)) {
+        return cal.components.indexOf('VEVENT') >= 0;
+      }
+      // If no components info, include it (safer default)
+      return true;
+    })
+    .map(function(cal) {
+      return {
+        url: cal.url,
+        displayName: cal.displayName || 'Unnamed Calendar',
+        ctag: cal.ctag || null,
+        description: cal.description || '',
+        syncToken: cal.syncToken || null
+      };
+    });
 }
 
 /**

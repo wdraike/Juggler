@@ -7,6 +7,7 @@
 var db = require('../src/db');
 var { rowToTask, taskToRow, buildSourceMap, TEMPLATE_FIELDS } = require('../src/controllers/task.controller');
 var { enqueueScheduleRun } = require('../src/scheduler/scheduleQueue');
+var tasksWrite = require('../src/lib/tasks-write');
 
 var available = false;
 var USER_ID = 'crud-test-user-001';
@@ -25,7 +26,8 @@ beforeAll(async () => {
     return;
   }
   // Seed test user
-  await db('tasks').where('user_id', USER_ID).del();
+  await db('task_instances').where('user_id', USER_ID).del();
+  await db('task_masters').where('user_id', USER_ID).del();
   await db('projects').where('user_id', USER_ID).del();
   await db('users').where('id', USER_ID).del();
   await db('users').insert({
@@ -36,7 +38,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (available) {
-    await db('tasks').where('user_id', USER_ID).del();
+    await db('task_instances').where('user_id', USER_ID).del();
+    await db('task_masters').where('user_id', USER_ID).del();
     await db('projects').where('user_id', USER_ID).del();
     await db('users').where('id', USER_ID).del();
   }
@@ -45,7 +48,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   if (!available) return;
-  await db('tasks').where('user_id', USER_ID).del();
+  await db('task_instances').where('user_id', USER_ID).del();
+  await db('task_masters').where('user_id', USER_ID).del();
   await db('projects').where('user_id', USER_ID).del();
   enqueueScheduleRun.mockClear();
 });
@@ -195,14 +199,14 @@ describe('updateTask', () => {
   test('recurring instance routes template fields to source', async () => {
     if (!available) return;
     // Create template
-    await db('tasks').insert({
+    await tasksWrite.insertTask(db, {
       id: 'tmpl-crud', user_id: USER_ID, task_type: 'recurring_template',
       text: 'Template', dur: 30, pri: 'P3', recurring: 1, status: '',
       recur: JSON.stringify({ type: 'daily' }),
       created_at: db.fn.now(), updated_at: db.fn.now()
     });
     // Create instance
-    await db('tasks').insert({
+    await tasksWrite.insertTask(db, {
       id: 'inst-crud', user_id: USER_ID, task_type: 'recurring_instance',
       source_id: 'tmpl-crud', recurring: 1, status: '',
       scheduled_at: '2026-04-10 15:00:00',
@@ -214,20 +218,20 @@ describe('updateTask', () => {
     var res = mockRes();
     await controller.updateTask(req, res);
 
-    var tmpl = await db('tasks').where('id', 'tmpl-crud').first();
+    var tmpl = await db('tasks_v').where('id', 'tmpl-crud').first();
     expect(tmpl.text).toBe('New Name');
     expect(tmpl.dur).toBe(45);
   });
 
   test('preferred_time_mins routes to template', async () => {
     if (!available) return;
-    await db('tasks').insert({
+    await tasksWrite.insertTask(db, {
       id: 'tmpl-ptm-crud', user_id: USER_ID, task_type: 'recurring_template',
       text: 'Breakfast', dur: 20, pri: 'P3', recurring: 1, status: '',
       preferred_time: 1, recur: JSON.stringify({ type: 'daily' }),
       created_at: db.fn.now(), updated_at: db.fn.now()
     });
-    await db('tasks').insert({
+    await tasksWrite.insertTask(db, {
       id: 'inst-ptm-crud', user_id: USER_ID, task_type: 'recurring_instance',
       source_id: 'tmpl-ptm-crud', recurring: 1, status: '',
       scheduled_at: '2026-04-10 11:00:00',
@@ -238,11 +242,11 @@ describe('updateTask', () => {
     var res = mockRes();
     await controller.updateTask(req, res);
 
-    var tmpl = await db('tasks').where('id', 'tmpl-ptm-crud').first();
+    var tmpl = await db('tasks_v').where('id', 'tmpl-ptm-crud').first();
     expect(tmpl.preferred_time_mins).toBe(420);
     expect(tmpl.time_flex).toBe(60);
     // scheduled_at should NOT be on the template
-    var inst = await db('tasks').where('id', 'inst-ptm-crud').first();
+    var inst = await db('tasks_v').where('id', 'inst-ptm-crud').first();
     expect(inst.scheduled_at).toBe('2026-04-10 11:00:00'); // unchanged
   });
 });
@@ -265,7 +269,7 @@ describe('deleteTask', () => {
     expect(res2.statusCode).toBe(200);
     expect(res2._json.message).toBe('Task deleted');
 
-    var row = await db('tasks').where('id', id).first();
+    var row = await db('tasks_v').where('id', id).first();
     expect(row).toBeUndefined();
   });
 
@@ -279,12 +283,12 @@ describe('deleteTask', () => {
 
   test('remaps dependencies on delete', async () => {
     if (!available) return;
-    await db('tasks').insert({
+    await tasksWrite.insertTask(db, {
       id: 'dep-parent', user_id: USER_ID, task_type: 'task',
       text: 'Parent', status: '', depends_on: '[]',
       created_at: db.fn.now(), updated_at: db.fn.now()
     });
-    await db('tasks').insert({
+    await tasksWrite.insertTask(db, {
       id: 'dep-child', user_id: USER_ID, task_type: 'task',
       text: 'Child', status: '', depends_on: '["dep-parent"]',
       created_at: db.fn.now(), updated_at: db.fn.now()
@@ -294,7 +298,7 @@ describe('deleteTask', () => {
     var res = mockRes();
     await controller.deleteTask(req, res);
 
-    var child = await db('tasks').where('id', 'dep-child').first();
+    var child = await db('tasks_v').where('id', 'dep-child').first();
     var deps = typeof child.depends_on === 'string' ? JSON.parse(child.depends_on) : (child.depends_on || []);
     expect(deps).not.toContain('dep-parent');
   });
@@ -354,7 +358,7 @@ describe('batchCreateTasks', () => {
     expect(res.statusCode).toBe(201);
     expect(res._json.created).toBe(3);
 
-    var count = await db('tasks').where('user_id', USER_ID).count('* as c').first();
+    var count = await db('tasks_v').where('user_id', USER_ID).count('* as c').first();
     expect(parseInt(count.c)).toBe(3);
   });
 });
@@ -366,7 +370,7 @@ describe('batchCreateTasks', () => {
 describe('unpinTask', () => {
   test('restores prev_when and clears date_pinned', async () => {
     if (!available) return;
-    await db('tasks').insert({
+    await tasksWrite.insertTask(db, {
       id: 'unpin-test', user_id: USER_ID, task_type: 'task',
       text: 'Pinned task', when: 'fixed', prev_when: 'morning',
       date_pinned: 1, status: '',
@@ -380,7 +384,7 @@ describe('unpinTask', () => {
     expect(res._json.action).toBe('unpinned');
     expect(res._json.when).toBe('morning');
 
-    var row = await db('tasks').where('id', 'unpin-test').first();
+    var row = await db('tasks_v').where('id', 'unpin-test').first();
     expect(row.date_pinned).toBeFalsy();
     expect(row.when).toBe('morning');
   });

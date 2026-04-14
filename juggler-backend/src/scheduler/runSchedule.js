@@ -7,6 +7,8 @@
  */
 
 var db = require('../db');
+var tasksWrite = require('../lib/tasks-write');
+var { reconcileSplitsForUser } = require('../lib/reconcile-splits');
 var unifiedSchedule = require('./unifiedSchedule');
 var constants = require('./constants');
 var DEFAULT_TIME_BLOCKS = constants.DEFAULT_TIME_BLOCKS;
@@ -117,8 +119,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
   try {
   return await db.transaction(async function(trx) {
 
-  // 1. Load all tasks for user
-  var taskRows = await trx('tasks').where('user_id', userId).select();
+  // 1. Load all tasks for user (via the master/instance view; writes below still target `tasks`,
+  //    and the AFTER INSERT/UPDATE/DELETE triggers keep task_masters/task_instances in sync)
+  var taskRows = await trx('tasks_v').where('user_id', userId).select();
   var srcMap = buildSourceMap(taskRows);
   var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
 
@@ -184,7 +187,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
   var reconcileChanged = false;
   if (toDeleteIds.length > 0) {
-    await trx('tasks').whereIn('id', toDeleteIds).del();
+    await tasksWrite.deleteTasksWhere(trx, userId, function(q) { return q.whereIn('id', toDeleteIds); });
     console.log('[SCHED] reconcile: deleted ' + toDeleteIds.length + ' stale recurring instances');
     reconcileChanged = true;
   }
@@ -204,17 +207,49 @@ async function runScheduleAndPersist(userId, _retries, options) {
         updated_at: db.fn.now()
       };
     });
-    var chunkSize = 100;
-    for (var ci = 0; ci < insertRows.length; ci += chunkSize) {
-      await trx('tasks').insert(insertRows.slice(ci, ci + chunkSize));
-    }
+    await tasksWrite.insertTasksBatch(trx, insertRows);
     console.log('[SCHED] reconcile: inserted ' + toInsert.length + ' new recurring instances');
     reconcileChanged = true;
   }
 
-  // Re-read all tasks only if the reconcile actually changed the set.
-  if (reconcileChanged) {
-    taskRows = await trx('tasks').where('user_id', userId).select();
+  // 5c. Reconcile split chunks. Per-user batched: 2 queries to load all split
+  // masters and their instances, then all reconciles run from in-memory data.
+  var splitSummary = await reconcileSplitsForUser(trx, userId);
+  var splitReconcileChanged = (splitSummary.inserted + splitSummary.deleted + splitSummary.updated) > 0;
+  if (splitReconcileChanged) {
+    console.log('[SCHED] split reconcile: touched ' + splitSummary.mastersTouched +
+      ' master(s); +' + splitSummary.inserted + '/-' + splitSummary.deleted +
+      '/~' + splitSummary.updated);
+  }
+
+  // Narrowed re-read: only refetch rows that actually changed.
+  // Recurring deletions: drop in-memory; no DB roundtrip needed.
+  // Recurring inserts: fetch only the new ids.
+  // Split reconcile: fetch only the touched masters' instances + master rows.
+  if (reconcileChanged || splitReconcileChanged) {
+    var deletedIds = new Set(toDeleteIds);
+    if (deletedIds.size > 0) {
+      taskRows = taskRows.filter(function(r) { return !deletedIds.has(r.id); });
+    }
+
+    var idsToRefresh = new Set();
+    toInsert.forEach(function(t) { idsToRefresh.add(t.id); });
+    if (splitReconcileChanged && splitSummary.touchedMasterIds.length > 0) {
+      // For each touched split master, refresh the master row + all its instances.
+      var refreshIds = await trx('task_instances')
+        .whereIn('master_id', splitSummary.touchedMasterIds)
+        .pluck('id');
+      refreshIds.forEach(function(id) { idsToRefresh.add(id); });
+      splitSummary.touchedMasterIds.forEach(function(id) { idsToRefresh.add(id); });
+    }
+
+    if (idsToRefresh.size > 0) {
+      var fresh = await trx('tasks_v').whereIn('id', Array.from(idsToRefresh)).select();
+      var freshIdSet = new Set(fresh.map(function(r) { return r.id; }));
+      // Drop stale copies of refreshed ids and append fresh ones
+      taskRows = taskRows.filter(function(r) { return !freshIdSet.has(r.id); }).concat(fresh);
+    }
+
     srcMap = buildSourceMap(taskRows);
     allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
     statuses = {};
@@ -284,24 +319,26 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // Rigid recurringTasks keep their preferred time (unless redirected from past above).
     if (original.recurring && original.rigid && !dateChanged) continue;
 
+    // NEW DESIGN: write scheduled_at and dur for EVERY placed task, every run.
+    // This guarantees the DB matches what the scheduler decided. No minimal-diff
+    // optimization — the batch CASE update handles 200 rows per query, so cost is
+    // negligible, and it eliminates stale-DB states the sync used to compensate for.
+    var newScheduledAt = localToUtc(newDate, newTime, TIMEZONE);
+    if (!newScheduledAt) continue;
+
+    var dbUpdate = {
+      scheduled_at: newScheduledAt,
+      unscheduled: null,
+      updated_at: db.fn.now()
+    };
+    if (placement.dur) dbUpdate.dur = placement.dur;
+
+    pendingUpdates.push({
+      id: taskId,
+      dbUpdate: dbUpdate
+    });
+
     if (dateChanged || timeChanged) {
-      // Compute the new scheduled_at from the placement's local date+time
-      var newScheduledAt = localToUtc(newDate, newTime, TIMEZONE);
-      if (!newScheduledAt) continue;
-
-      // Minimal-diff: skip write if scheduled_at hasn't actually changed
-      var rawRow = rawRowById[taskId];
-      if (rawRow && rawRow.scheduled_at && newScheduledAt.getTime() === new Date(rawRow.scheduled_at).getTime()) continue;
-
-      pendingUpdates.push({
-        id: taskId,
-        dbUpdate: {
-          scheduled_at: newScheduledAt,
-          unscheduled: null,
-          updated_at: db.fn.now()
-        }
-      });
-
       updatedTasks.push({
         id: taskId,
         text: original.text,
@@ -399,44 +436,60 @@ async function runScheduleAndPersist(userId, _retries, options) {
   console.log('[SCHED] executing ' + pendingUpdates.length + ' DB updates');
   pendingUpdates.sort(function(a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
 
-  // Batch scheduled_at updates (the most common case)
+  // Batch scheduled_at + dur updates (the most common case)
   var scheduledAtUpdates = [];
   var otherUpdates = [];
   pendingUpdates.forEach(function(pu) {
-    if (pu.dbUpdate.scheduled_at && !pu.dbUpdate.status) {
+    if ((pu.dbUpdate.scheduled_at || pu.dbUpdate.dur) && !pu.dbUpdate.status) {
       scheduledAtUpdates.push(pu);
     } else {
       otherUpdates.push(pu);
     }
   });
 
-  // Batch scheduled_at updates in chunks of 200 using CASE expressions
+  // Batch scheduled_at + dur updates in chunks of 200 using CASE expressions
   var CHUNK = 200;
   for (var ci = 0; ci < scheduledAtUpdates.length; ci += CHUNK) {
     var chunk = scheduledAtUpdates.slice(ci, ci + CHUNK);
     var ids = chunk.map(function(pu) { return pu.id; });
-    var caseExpr = 'CASE id';
-    var bindings = [];
-    chunk.forEach(function(pu) {
-      caseExpr += ' WHEN ? THEN ?';
-      bindings.push(pu.id, pu.dbUpdate.scheduled_at);
-    });
-    caseExpr += ' END';
-    await trx('tasks')
-      .where('user_id', userId)
-      .whereIn('id', ids)
-      .update({
-        scheduled_at: trx.raw(caseExpr, bindings),
-        unscheduled: null,
-        updated_at: db.fn.now()
+
+    var updateFields = { unscheduled: null, updated_at: db.fn.now() };
+
+    // Build CASE for scheduled_at (only include tasks that have a new scheduled_at)
+    var saChunk = chunk.filter(function(pu) { return !!pu.dbUpdate.scheduled_at; });
+    if (saChunk.length > 0) {
+      var saCaseExpr = 'CASE id';
+      var saBindings = [];
+      saChunk.forEach(function(pu) {
+        saCaseExpr += ' WHEN ? THEN ?';
+        saBindings.push(pu.id, pu.dbUpdate.scheduled_at);
       });
+      saCaseExpr += ' ELSE scheduled_at END';
+      updateFields.scheduled_at = trx.raw(saCaseExpr, saBindings);
+    }
+
+    // Build CASE for dur (only include tasks that have a new dur)
+    var durChunk = chunk.filter(function(pu) { return !!pu.dbUpdate.dur; });
+    if (durChunk.length > 0) {
+      var durCaseExpr = 'CASE id';
+      var durBindings = [];
+      durChunk.forEach(function(pu) {
+        durCaseExpr += ' WHEN ? THEN ?';
+        durBindings.push(pu.id, pu.dbUpdate.dur);
+      });
+      durCaseExpr += ' ELSE dur END';
+      updateFields.dur = trx.raw(durCaseExpr, durBindings);
+    }
+
+    // Route `updateFields` across master/instance via helper.
+    await tasksWrite.updateTasksWhere(trx, userId, function(q) {
+      return q.whereIn('id', ids);
+    }, updateFields);
   }
 
   // Run remaining updates individually (status changes, unscheduled flags, etc.)
   for (var pi = 0; pi < otherUpdates.length; pi++) {
-    await trx('tasks')
-      .where({ id: otherUpdates[pi].id, user_id: userId })
-      .update(otherUpdates[pi].dbUpdate);
+    await tasksWrite.updateTaskById(trx, otherUpdates[pi].id, otherUpdates[pi].dbUpdate, userId);
   }
 
   console.log('[SCHED] runScheduleAndPersist: updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
@@ -601,7 +654,7 @@ async function getSchedulePlacements(userId, options) {
     var genDateKey = genVals.month + '/' + genVals.day;
     if (genDateKey === timeInfo.todayKey && ageMs <= 30 * 60 * 1000) {
       // Check if tasks were modified since cache
-      var maxRow = await db('tasks').where('user_id', userId).max('updated_at as max_updated').first();
+      var maxRow = await db('tasks_v').where('user_id', userId).max('updated_at as max_updated').first();
       if (!maxRow || !maxRow.max_updated || new Date(maxRow.max_updated) <= genTime) {
         cacheUsable = true;
       }
@@ -621,7 +674,7 @@ async function getSchedulePlacements(userId, options) {
   }
 
   // Slow path: cache stale — load everything and potentially re-run scheduler
-  var taskRows = await db('tasks').where('user_id', userId).select();
+  var taskRows = await db('tasks_v').where('user_id', userId).select();
   var srcMap = buildSourceMap(taskRows);
   var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
 
@@ -671,7 +724,7 @@ async function getSchedulePlacements(userId, options) {
     }
     // Check if any tasks were modified since the cache was generated
     if (!cacheStale) {
-      var maxRow = await db('tasks').where('user_id', userId)
+      var maxRow = await db('tasks_v').where('user_id', userId)
         .max('updated_at as max_updated').first();
       if (maxRow && maxRow.max_updated) {
         var lastModified = new Date(String(maxRow.max_updated).replace(' ', 'T') + 'Z');

@@ -190,11 +190,13 @@ describe('expandRecurring', () => {
       expect(result[0].project).toBe('Fitness');
     });
 
-    test('ID is a valid UUID format', () => {
-      const src = makeSource({ id: 'ht_workout' });
+    test('ID is sourceId-YYYYMMDD (deterministic per occurrence)', () => {
+      // Post-UUIDv7 migration (20260405100000) all source ids are UUIDv7.
+      // Use a representative one here — the date suffix is what we're pinning.
+      const sourceId = '019d5dfa-a97c-7152-a799-f21ba1026db2';
+      const src = makeSource({ id: sourceId });
       const result = expandRecurring([src], new Date(2026, 2, 20), new Date(2026, 2, 21));
-      expect(result[0].id).toMatch(/^[0-9a-f-]+$/i);
-      expect(result[0].id.length).toBeGreaterThanOrEqual(20);
+      expect(result[0].id).toBe(sourceId + '-20260321');
     });
   });
 

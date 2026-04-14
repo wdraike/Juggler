@@ -45,6 +45,9 @@ export default function CalSyncPanel({
   var [applePassword, setApplePassword] = useState('');
   var [appleConnecting, setAppleConnecting] = useState(false);
   var [appleCalendars, setAppleCalendars] = useState(null); // discovered calendars
+  var [appleCalendarSelections, setAppleCalendarSelections] = useState({}); // { url: { enabled, syncDirection } }
+  var [savingCalendars, setSavingCalendars] = useState(false);
+  var [connectedAppleCalendars, setConnectedAppleCalendars] = useState([]); // saved calendar rows from DB
   var [history, setHistory] = useState(null);
   var [loadingHistory, setLoadingHistory] = useState(false);
   var [syncProgress, setSyncProgress] = useState(null); // { phase, detail, pct }
@@ -103,7 +106,48 @@ export default function CalSyncPanel({
         setMsftTokenExpired(!!r.data.tokenExpired);
       })
       .catch(function() { setMsftConnected(false); });
-  }, []);
+    // Load connected Apple calendars
+    if (appleConnected) {
+      loadAppleCalendars();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function loadAppleCalendars() {
+    apiClient.get('/apple-cal/calendars')
+      .then(function(r) {
+        setConnectedAppleCalendars(r.data.calendars || []);
+      })
+      .catch(function() { setConnectedAppleCalendars([]); });
+  }
+
+  async function handleAppleCalendarUpdate(calId, updates) {
+    try {
+      await apiClient.put('/apple-cal/calendars/' + calId, updates);
+      loadAppleCalendars();
+      showToast('Calendar updated', 'success');
+    } catch (e) {
+      showToast('Failed to update calendar: ' + e.message, 'error');
+    }
+  }
+
+  async function handleAppleCalendarToggle(calId, currentlyEnabled) {
+    try {
+      await apiClient.put('/apple-cal/calendars/' + calId, { enabled: !currentlyEnabled });
+      loadAppleCalendars();
+    } catch (e) {
+      showToast('Failed to update calendar: ' + e.message, 'error');
+    }
+  }
+
+  async function handleAppleRefreshCalendars() {
+    try {
+      var r = await apiClient.get('/apple-cal/refresh-calendars');
+      setConnectedAppleCalendars(r.data.calendars || []);
+      showToast('Calendars refreshed', 'success');
+    } catch (e) {
+      showToast('Failed to refresh: ' + (e.response?.data?.error || e.message), 'error');
+    }
+  }
 
   // Listen for popup messages
   useEffect(() => {
@@ -228,8 +272,18 @@ export default function CalSyncPanel({
         username: appleUsername,
         password: applePassword
       });
-      setAppleCalendars(r.data.calendars || []);
-      showToast('Connected! Select a calendar below.', 'success');
+      var cals = r.data.calendars || [];
+      setAppleCalendars(cals);
+      // Initialize selections from server state (existing selections preserved)
+      var selections = {};
+      cals.forEach(function(c) {
+        selections[c.url] = {
+          enabled: c.enabled || false,
+          syncDirection: c.syncDirection || 'full'
+        };
+      });
+      setAppleCalendarSelections(selections);
+      showToast('Connected! Select calendars below.', 'success');
     } catch (e) {
       var msg = e.response?.data?.error || e.message;
       showToast('Apple Calendar: ' + msg, 'error');
@@ -238,14 +292,50 @@ export default function CalSyncPanel({
     }
   }
 
-  async function handleAppleSelectCalendar(url) {
+  function toggleAppleCalendar(url) {
+    setAppleCalendarSelections(function(prev) {
+      var next = Object.assign({}, prev);
+      next[url] = Object.assign({}, next[url], { enabled: !next[url].enabled });
+      return next;
+    });
+  }
+
+  function setAppleCalSyncDirection(url, direction) {
+    setAppleCalendarSelections(function(prev) {
+      var next = Object.assign({}, prev);
+      next[url] = Object.assign({}, next[url], { syncDirection: direction });
+      return next;
+    });
+  }
+
+  async function handleAppleSaveCalendars() {
+    var selected = appleCalendars.map(function(cal) {
+      var sel = appleCalendarSelections[cal.url] || {};
+      return {
+        url: cal.url,
+        displayName: cal.displayName,
+        enabled: !!sel.enabled,
+        syncDirection: sel.syncDirection || 'full'
+      };
+    });
+
+    var anyEnabled = selected.some(function(c) { return c.enabled; });
+    if (!anyEnabled) {
+      showToast('Select at least one calendar', 'error');
+      return;
+    }
+
+    setSavingCalendars(true);
     try {
-      await apiClient.post('/apple-cal/select-calendar', { calendarUrl: url });
+      await apiClient.post('/apple-cal/select-calendars', { calendars: selected });
       setAppleCalendars(null);
       if (onAppleConnectedChange) onAppleConnectedChange(true);
+      loadAppleCalendars();
       showToast('Apple Calendar connected', 'success');
     } catch (e) {
-      showToast('Failed to select calendar: ' + e.message, 'error');
+      showToast('Failed to save calendars: ' + e.message, 'error');
+    } finally {
+      setSavingCalendars(false);
     }
   }
 
@@ -470,22 +560,51 @@ export default function CalSyncPanel({
           </div>
 
           {appleConnected ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+              {/* Connected calendars list */}
+              {connectedAppleCalendars.length > 0 && connectedAppleCalendars.map(function(cal) {
+                var isEnabled = !!cal.enabled;
+                return (
+                  <div key={cal.id} style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '5px 8px', borderRadius: 4,
+                    background: isEnabled
+                      ? (darkMode ? 'rgba(200,175,120,0.06)' : 'rgba(200,175,120,0.04)')
+                      : 'transparent',
+                    border: '1px solid ' + (isEnabled ? theme.border : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)')),
+                    opacity: isEnabled ? 1 : 0.5
+                  }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', flex: 1, overflow: 'hidden' }}>
+                      <input type="checkbox" checked={isEnabled} onChange={function() {
+                        handleAppleCalendarToggle(cal.id, isEnabled);
+                      }} style={{ margin: 0, accentColor: theme.accent }} />
+                      <span style={{ fontSize: 11, color: theme.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {cal.display_name || cal.calendar_id}
+                      </span>
+                    </label>
+                    {isEnabled && (
+                      <div style={{ flexShrink: 0, marginLeft: 6 }}>
+                        <select value={cal.sync_direction} onChange={function(e) {
+                          handleAppleCalendarUpdate(cal.id, { syncDirection: e.target.value });
+                        }} style={Object.assign({}, selectStyle, { fontSize: 10 })}>
+                          <option value="full">Full</option>
+                          <option value="ingest">Ingest</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {connectedAppleCalendars.length === 0 && (
+                <div style={{ fontSize: 11, color: theme.textMuted, fontStyle: 'italic' }}>
+                  No calendars found
+                </div>
+              )}
+              {/* Auto-sync frequency */}
               {(() => {
                 var provSettings = (calSyncSettings || {}).apple || { mode: 'full', frequency: 120 };
-                return <>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 11, color: theme.textMuted }}>Sync mode</span>
-                    <select value={provSettings.mode} onChange={function(e) {
-                      var newSettings = Object.assign({}, calSyncSettings || {});
-                      newSettings.apple = Object.assign({}, provSettings, { mode: e.target.value });
-                      if (onCalSyncSettingsChange) onCalSyncSettingsChange(newSettings);
-                    }} style={selectStyle}>
-                      <option value="full">Full sync</option>
-                      <option value="ingest">Ingest only</option>
-                    </select>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                return (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
                     <span style={{ fontSize: 11, color: theme.textMuted }}>Auto-sync</span>
                     <select value={provSettings.frequency} onChange={function(e) {
                       var freq = parseInt(e.target.value, 10);
@@ -499,14 +618,14 @@ export default function CalSyncPanel({
                       })}
                     </select>
                   </div>
-                  {provSettings.mode === 'ingest' && (
-                    <div style={{ fontSize: 10, color: theme.textMuted, fontStyle: 'italic' }}>
-                      One-way: pulls events from calendar, never writes back
-                    </div>
-                  )}
-                </>;
+                );
               })()}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+              {/* Manage / Disconnect */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 }}>
+                <button onClick={handleAppleRefreshCalendars} style={{
+                  border: 'none', background: 'transparent', color: theme.accent,
+                  fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline'
+                }}>Refresh calendars</button>
                 <button onClick={handleAppleDisconnect} style={{
                   border: 'none', background: 'transparent', color: theme.textMuted,
                   fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline'
@@ -514,22 +633,54 @@ export default function CalSyncPanel({
               </div>
             </div>
           ) : appleCalendars ? (
-            /* Calendar selection after credential validation */
+            /* Calendar selection after credential validation — multi-select with toggles */
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <span style={{ fontSize: 11, color: theme.text, fontWeight: 500 }}>Select a calendar:</span>
+              <span style={{ fontSize: 11, color: theme.text, fontWeight: 500 }}>Select calendars to sync:</span>
               {appleCalendars.map(function(cal) {
+                var sel = appleCalendarSelections[cal.url] || { enabled: false, syncDirection: 'full' };
                 return (
-                  <button key={cal.url} onClick={function() { handleAppleSelectCalendar(cal.url); }} style={{
-                    border: '1px solid ' + theme.border, borderRadius: 4, padding: '6px 10px',
-                    background: theme.bgPrimary, color: theme.text, fontSize: 12,
-                    cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left'
-                  }}>{cal.displayName}{cal.description ? ' — ' + cal.description : ''}</button>
+                  <div key={cal.url} style={{
+                    border: '1px solid ' + (sel.enabled ? theme.accent : theme.border),
+                    borderRadius: 4, padding: '8px 10px',
+                    background: sel.enabled ? (darkMode ? 'rgba(200,175,120,0.08)' : 'rgba(200,175,120,0.05)') : theme.bgPrimary
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', flex: 1 }}>
+                        <input type="checkbox" checked={sel.enabled}
+                          onChange={function() { toggleAppleCalendar(cal.url); }}
+                          style={{ accentColor: theme.accent }} />
+                        <span style={{ fontSize: 12, color: theme.text }}>
+                          {cal.displayName}{cal.description ? ' — ' + cal.description : ''}
+                        </span>
+                      </label>
+                    </div>
+                    {sel.enabled && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, paddingLeft: 24 }}>
+                        <span style={{ fontSize: 10, color: theme.textMuted }}>Sync</span>
+                        <select value={sel.syncDirection}
+                          onChange={function(e) { setAppleCalSyncDirection(cal.url, e.target.value); }}
+                          style={selectStyle}>
+                          <option value="full">Full (read + write)</option>
+                          <option value="ingest">Ingest only (read)</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
-              <button onClick={function() { setAppleCalendars(null); }} style={{
-                border: 'none', background: 'transparent', color: theme.textMuted,
-                fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline'
-              }}>Cancel</button>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+                <button onClick={function() { setAppleCalendars(null); }} style={{
+                  border: 'none', background: 'transparent', color: theme.textMuted,
+                  fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline'
+                }}>Cancel</button>
+                <button onClick={handleAppleSaveCalendars} disabled={savingCalendars} style={{
+                  border: '1.5px solid #555', borderRadius: 2, padding: '5px 14px',
+                  background: '#333', color: '#FDFAF5', fontWeight: 600, fontSize: 11,
+                  cursor: 'pointer', fontFamily: "'Inter', sans-serif",
+                  opacity: savingCalendars ? 0.5 : 1,
+                  letterSpacing: '0.05em', textTransform: 'uppercase'
+                }}>{savingCalendars ? 'Saving...' : 'Save'}</button>
+              </div>
             </div>
           ) : (
             /* Credential input form */
@@ -591,8 +742,23 @@ export default function CalSyncPanel({
         {/* Progress bar */}
         {syncing && syncProgress && (
           <div style={{ padding: '8px 0 0' }}>
-            <div style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 4 }}>
-              {syncProgress.detail || 'Syncing...'}
+            <div style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {syncProgress.provider && (
+                <span style={{
+                  display: 'inline-block', width: 6, height: 6, borderRadius: '50%',
+                  background: syncProgress.provider === 'gcal' ? theme.accent
+                    : syncProgress.provider === 'msft' ? '#2E4A7A'
+                    : syncProgress.provider === 'apple' ? '#2D6A4F' : theme.textMuted
+                }} />
+              )}
+              <span>
+                {syncProgress.provider && <strong style={{ fontWeight: 600 }}>
+                  {syncProgress.provider === 'gcal' ? 'Google' : syncProgress.provider === 'msft' ? 'Microsoft' : syncProgress.provider === 'apple' ? 'Apple' : ''}
+                  {syncProgress.calendar ? ' (' + syncProgress.calendar + ')' : ''}
+                </strong>}
+                {syncProgress.provider && ' — '}
+                {syncProgress.detail || 'Syncing...'}
+              </span>
             </div>
             <div style={{ height: 4, background: theme.border, borderRadius: 2, overflow: 'hidden' }}>
               <div style={{

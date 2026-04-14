@@ -6,13 +6,15 @@
 var db = require('../src/db');
 var { runScheduleAndPersist, getSchedulePlacements } = require('../src/scheduler/runSchedule');
 var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../src/scheduler/constants');
+var tasksWrite = require('../src/lib/tasks-write');
 
 var available = false;
 var USER_ID = 'placements-test-001';
 
 beforeAll(async () => {
   try { await db.raw('SELECT 1'); available = true; } catch (e) { return; }
-  await db('tasks').where('user_id', USER_ID).del();
+  await db('task_instances').where('user_id', USER_ID).del();
+  await db('task_masters').where('user_id', USER_ID).del();
   await db('user_config').where('user_id', USER_ID).del();
   await db('users').where('id', USER_ID).del();
   await db('users').insert({ id: USER_ID, email: 'place@test.com', timezone: 'America/New_York', created_at: db.fn.now(), updated_at: db.fn.now() });
@@ -22,7 +24,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (available) {
-    await db('tasks').where('user_id', USER_ID).del();
+    await db('task_instances').where('user_id', USER_ID).del();
+  await db('task_masters').where('user_id', USER_ID).del();
     await db('user_config').where('user_id', USER_ID).del();
     await db('users').where('id', USER_ID).del();
   }
@@ -31,14 +34,15 @@ afterAll(async () => {
 
 beforeEach(async () => {
   if (!available) return;
-  await db('tasks').where('user_id', USER_ID).del();
+  await db('task_instances').where('user_id', USER_ID).del();
+  await db('task_masters').where('user_id', USER_ID).del();
   await db('user_config').where({ user_id: USER_ID, config_key: 'schedule_cache' }).del();
 });
 
 describe('getSchedulePlacements', () => {
   test('returns placements after scheduler run', async () => {
     if (!available) return;
-    await db('tasks').insert({ id: 'gp-001', user_id: USER_ID, task_type: 'task', text: 'Test', dur: 30, status: '', when: 'morning', created_at: db.fn.now(), updated_at: db.fn.now() });
+    await tasksWrite.insertTask(db, { id: 'gp-001', user_id: USER_ID, task_type: 'task', text: 'Test', dur: 30, status: '', when: 'morning', created_at: db.fn.now(), updated_at: db.fn.now() });
     // First run to populate cache
     await runScheduleAndPersist(USER_ID);
     // Get placements from cache
@@ -49,7 +53,7 @@ describe('getSchedulePlacements', () => {
 
   test('returns result with no cache (first load)', async () => {
     if (!available) return;
-    await db('tasks').insert({ id: 'gp-002', user_id: USER_ID, task_type: 'task', text: 'No cache', dur: 30, status: '', created_at: db.fn.now(), updated_at: db.fn.now() });
+    await tasksWrite.insertTask(db, { id: 'gp-002', user_id: USER_ID, task_type: 'task', text: 'No cache', dur: 30, status: '', created_at: db.fn.now(), updated_at: db.fn.now() });
     var result = await getSchedulePlacements(USER_ID, { timezone: 'America/New_York' });
     expect(result).toBeDefined();
     expect(result.dayPlacements).toBeDefined();
@@ -57,7 +61,7 @@ describe('getSchedulePlacements', () => {
 
   test('fresh cache returns quickly without re-running', async () => {
     if (!available) return;
-    await db('tasks').insert({ id: 'gp-003', user_id: USER_ID, task_type: 'task', text: 'Fast', dur: 30, status: '', created_at: db.fn.now(), updated_at: db.fn.now() });
+    await tasksWrite.insertTask(db, { id: 'gp-003', user_id: USER_ID, task_type: 'task', text: 'Fast', dur: 30, status: '', created_at: db.fn.now(), updated_at: db.fn.now() });
     await runScheduleAndPersist(USER_ID);
 
     var start = Date.now();
@@ -70,12 +74,12 @@ describe('getSchedulePlacements', () => {
 
   test('stale cache triggers re-run when task modified', async () => {
     if (!available) return;
-    await db('tasks').insert({ id: 'gp-004', user_id: USER_ID, task_type: 'task', text: 'Stale', dur: 30, status: '', created_at: db.fn.now(), updated_at: db.fn.now() });
+    await tasksWrite.insertTask(db, { id: 'gp-004', user_id: USER_ID, task_type: 'task', text: 'Stale', dur: 30, status: '', created_at: db.fn.now(), updated_at: db.fn.now() });
     await runScheduleAndPersist(USER_ID);
 
     // Modify task after cache was written
     await new Promise(r => setTimeout(r, 100));
-    await db('tasks').where('id', 'gp-004').update({ text: 'Modified', updated_at: db.fn.now() });
+    await tasksWrite.updateTaskById(db, 'gp-004', { text: 'Modified', updated_at: db.fn.now() }, USER_ID);
 
     var result = await getSchedulePlacements(USER_ID, { timezone: 'America/New_York' });
     expect(result).toBeDefined();
@@ -85,7 +89,7 @@ describe('getSchedulePlacements', () => {
   test('returns unplaced tasks list', async () => {
     if (!available) return;
     // Seed a task that can't be placed (TBD date)
-    await db('tasks').insert({ id: 'gp-005', user_id: USER_ID, task_type: 'task', text: 'Placeable', dur: 30, status: '', when: 'morning', created_at: db.fn.now(), updated_at: db.fn.now() });
+    await tasksWrite.insertTask(db, { id: 'gp-005', user_id: USER_ID, task_type: 'task', text: 'Placeable', dur: 30, status: '', when: 'morning', created_at: db.fn.now(), updated_at: db.fn.now() });
     await runScheduleAndPersist(USER_ID);
     var result = await getSchedulePlacements(USER_ID, { timezone: 'America/New_York' });
     expect(result.unplaced).toBeDefined();

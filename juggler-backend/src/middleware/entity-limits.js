@@ -62,7 +62,7 @@ function checkEntityLimit(limitKey, countFn, options = {}) {
 // --- Count functions for each entity type ---
 
 async function countActiveTasks(userId) {
-  const result = await db('tasks')
+  const result = await db('tasks_v')
     .where('user_id', userId)
     .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
     .where(function () {
@@ -74,7 +74,7 @@ async function countActiveTasks(userId) {
 }
 
 async function countRecurringTemplates(userId) {
-  const result = await db('tasks')
+  const result = await db('tasks_v')
     .where('user_id', userId)
     .where('task_type', 'recurring_template')
     .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])

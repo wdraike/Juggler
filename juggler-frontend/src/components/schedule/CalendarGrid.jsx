@@ -48,6 +48,42 @@ function computeLayout(placements, hourHeight, cardH, gap, colsPerSide, rightOnl
   var sorted = (placements || []).slice().sort(function(a, b) { return a.start - b.start; });
   var result = [];
 
+  // Marker overlap lanes: tasks that share a time range get narrowed,
+  // side-by-side markers so none are hidden behind each other.
+  // Standard greedy algorithm: assign each item to the first free column;
+  // within a cluster (transitively overlapping items) every item sees the
+  // cluster's total column count.
+  var markerLane = {};  // id → column index
+  var markerCols = {};  // id → total columns in cluster
+  (function() {
+    var cluster = [];
+    var clusterEnd = -Infinity;
+    var colEnds = [];
+    function flush() {
+      var n = colEnds.length;
+      for (var k = 0; k < cluster.length; k++) markerCols[cluster[k]] = n;
+      cluster = [];
+      colEnds = [];
+    }
+    for (var i = 0; i < sorted.length; i++) {
+      var it = sorted[i];
+      var id = it.key || (it.task && it.task.id) || i;
+      var s = it.start;
+      var e = it.start + (it.dur || 30);
+      if (s >= clusterEnd) flush();
+      var col = -1;
+      for (var c = 0; c < colEnds.length; c++) {
+        if (colEnds[c] <= s) { col = c; break; }
+      }
+      if (col === -1) { col = colEnds.length; colEnds.push(e); }
+      else colEnds[col] = e;
+      markerLane[id] = col;
+      cluster.push(id);
+      if (e > clusterEnd) clusterEnd = e;
+    }
+    flush();
+  })();
+
   var sides = rightOnly ? ['right'] : ['left', 'right'];
 
   // Track bottom Y of each slot
@@ -76,9 +112,12 @@ function computeLayout(placements, hourHeight, cardH, gap, colsPerSide, rightOnl
 
     bottoms[bestSide + '_' + bestCol] = bestY + cardH;
 
+    var itemId = item.key || (item.task && item.task.id) || i;
     result.push({
       item: item, side: bestSide, col: bestCol,
       markerY: markerY, markerH: markerH, markerMidY: markerMidY,
+      markerLane: markerLane[itemId] || 0,
+      markerCols: markerCols[itemId] || 1,
       cardY: bestY, cardMidY: bestY + cardH / 2
     });
   }
@@ -441,22 +480,33 @@ export default function CalendarGrid({
 
             return (
               <React.Fragment key={e.item.key || e.item.task.id}>
-                {/* Horizontal bar connecting markers behind the strip */}
-                <div style={{
-                  position: 'absolute', left: stripX - dm.MARKER_W,
-                  top: (dragState && dragState.taskId === e.item.task.id) ? ((dragState.currentMins - GRID_START * 60) / 60) * hourHeight : e.markerY,
-                  width: dm.STRIP_W + dm.MARKER_W * 2, height: e.markerH,
-                  background: pc, opacity: 0.08, borderRadius: 3,
-                  zIndex: 5, pointerEvents: 'none'
-                }} />
+                {/* Horizontal bar connecting markers behind the strip —
+                    only drawn for lane 0 of a cluster so overlapping halos
+                    don't mush colors together. */}
+                {(e.markerLane || 0) === 0 && (
+                  <div style={{
+                    position: 'absolute', left: stripX - dm.MARKER_W,
+                    top: (dragState && dragState.taskId === e.item.task.id) ? ((dragState.currentMins - GRID_START * 60) / 60) * hourHeight : e.markerY,
+                    width: dm.STRIP_W + dm.MARKER_W * 2, height: e.markerH,
+                    background: pc, opacity: 0.08, borderRadius: 3,
+                    zIndex: 5, pointerEvents: 'none'
+                  }} />
+                )}
                 {/* Duration-proportional markers on both sides of strip — draggable */}
                 {(function() {
                   var isDragging = dragState && dragState.taskId === e.item.task.id;
                   var markerTop = isDragging ? ((dragState.currentMins - GRID_START * 60) / 60) * hourHeight : e.markerY;
+                  // When multiple tasks overlap in time, split each marker bar
+                  // into N side-by-side lanes so none is hidden.
+                  var lanes = e.markerCols || 1;
+                  var lane = e.markerLane || 0;
+                  var laneW = dm.MARKER_W / lanes;
+                  var laneOffsetL = lane * laneW;             // leftmost lane closest to strip
+                  var laneOffsetR = (lanes - 1 - lane) * laneW; // on right side, mirror so lane 0 is closest to strip
                   var markerStyle = {
                     position: 'absolute', top: markerTop,
-                    width: dm.MARKER_W, height: e.markerH,
-                    borderRadius: 3, background: pc,
+                    width: laneW, height: e.markerH,
+                    borderRadius: lanes > 1 ? 2 : 3, background: pc,
                     opacity: isDragging ? 0.9 : 0.65,
                     zIndex: isDragging ? 55 : 15,
                     cursor: onMarkerDrag ? 'grab' : 'default',
@@ -466,9 +516,9 @@ export default function CalendarGrid({
                   var onDown = onMarkerDrag ? function(ev) { markerDragStart(ev, e.item.task.id, e.item.start); } : undefined;
                   return (
                     <>
-                      <div style={Object.assign({}, markerStyle, { left: stripX - dm.MARKER_W })}
+                      <div style={Object.assign({}, markerStyle, { left: stripX - dm.MARKER_W + laneOffsetL })}
                         onMouseDown={onDown} onTouchStart={onDown} />
-                      <div style={Object.assign({}, markerStyle, { left: stripX + dm.STRIP_W })}
+                      <div style={Object.assign({}, markerStyle, { left: stripX + dm.STRIP_W + laneOffsetR })}
                         onMouseDown={onDown} onTouchStart={onDown} />
                       {isDragging && (
                         <div style={{

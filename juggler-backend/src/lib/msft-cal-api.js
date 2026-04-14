@@ -128,8 +128,9 @@ async function listEvents(accessToken, startDateTime, endDateTime) {
   var params = new URLSearchParams({
     startDateTime: startDateTime,
     endDateTime: endDateTime,
-    '$top': '250',
-    '$orderby': 'start/dateTime'
+    '$top': '1000',
+    '$orderby': 'start/dateTime',
+    '$select': 'id,subject,start,end,isAllDay,showAs,lastModifiedDateTime,body'
   });
 
   var path = '/me/calendarView?' + params.toString();

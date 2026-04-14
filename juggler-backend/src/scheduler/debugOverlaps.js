@@ -691,7 +691,7 @@ async function main() {
   var userTz = (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
 
   // Use buildSourceMap for template inheritance — matches runSchedule.js path
-  var taskRows = await db('tasks').where('user_id', userId).select();
+  var taskRows = await db('tasks_v').where('user_id', userId).select();
   var srcMap = buildSourceMap(taskRows);
   var allTasks = taskRows.map(function(r) { return rowToTask(r, userTz, srcMap); });
   var statuses = {};

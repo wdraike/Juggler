@@ -7,6 +7,7 @@
  */
 
 const db = require('../db');
+const tasksWrite = require('../lib/tasks-write');
 const { invalidateUserPlanCache, getCachedPlanFeatures } = require('../middleware/plan-features.middleware');
 const { countActiveTasks, countRecurringTemplates } = require('../middleware/entity-limits');
 const cache = require('../lib/redis');
@@ -30,7 +31,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
   await db.transaction(async function(trx) {
     // --- Phase 1: Disable excess recurring templates (newest first) ---
     if (recurringLimit !== -1 && recurringLimit !== undefined && recurringLimit !== null) {
-      var currentRecurrings = await trx('tasks')
+      var currentRecurrings = await trx('tasks_v')
         .where('user_id', userId)
         .where('task_type', 'recurring_template')
         .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
@@ -40,7 +41,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
       if (recurringCount > recurringLimit) {
         var excess = recurringCount - recurringLimit;
         // Get the newest recurring templates to disable
-        var recurringToDisable = await trx('tasks')
+        var recurringToDisable = await trx('tasks_v')
           .where('user_id', userId)
           .where('task_type', 'recurring_template')
           .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
@@ -51,21 +52,18 @@ async function enforceDowngradeLimits(userId, planFeatures) {
         var recurringIds = recurringToDisable.map(function(h) { return h.id; });
 
         if (recurringIds.length > 0) {
-          // Disable the templates
-          await trx('tasks')
-            .where('user_id', userId)
-            .whereIn('id', recurringIds)
-            .update({ status: 'disabled', disabled_at: now, disabled_reason: 'downgrade', updated_at: now });
+          // Disable the templates (master-level fields)
+          await tasksWrite.updateTasksWhere(trx, userId, function(q) {
+            return q.whereIn('id', recurringIds);
+          }, { status: 'disabled', disabled_at: now, disabled_reason: 'downgrade', updated_at: now });
 
-          // Disable all open instances of these templates
-          var disabledInstances = await trx('tasks')
-            .where('user_id', userId)
-            .whereIn('source_id', recurringIds)
-            .where('status', '')
-            .update({ status: 'disabled', disabled_at: now, disabled_reason: 'downgrade', updated_at: now });
+          // Disable all open instances of these templates (instance-level status)
+          var disabledInstances = await tasksWrite.updateInstancesWhere(trx, userId, function(q) {
+            return q.whereIn('master_id', recurringIds).where('status', '');
+          }, { status: 'disabled', updated_at: now });
 
           // Clean up calendar sync for disabled instances
-          var instanceIds = await trx('tasks')
+          var instanceIds = await trx('tasks_v')
             .where('user_id', userId)
             .whereIn('source_id', recurringIds)
             .where('status', 'disabled')
@@ -89,7 +87,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
     // --- Phase 2: Disable excess active tasks (newest first) ---
     if (taskLimit !== -1 && taskLimit !== undefined && taskLimit !== null) {
       // Re-count after disabling recurring instances (they count toward active tasks)
-      var currentTasks = await trx('tasks')
+      var currentTasks = await trx('tasks_v')
         .where('user_id', userId)
         .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
         .where(function() {
@@ -101,7 +99,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
       if (taskCount > taskLimit) {
         var taskExcess = taskCount - taskLimit;
         // Get newest regular tasks to disable (exclude recurring instances — those are handled with templates)
-        var tasksToDisable = await trx('tasks')
+        var tasksToDisable = await trx('tasks_v')
           .where('user_id', userId)
           .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
           .where(function() {
@@ -117,7 +115,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
           // Re-link dependencies: remove disabled tasks from other tasks' depends_on
           for (var i = 0; i < taskIds.length; i++) {
             var taskId = taskIds[i];
-            var affected = await trx('tasks')
+            var affected = await trx('tasks_v')
               .where('user_id', userId)
               .whereRaw('JSON_CONTAINS(depends_on, ?)', [JSON.stringify(taskId)])
               .select('id', 'depends_on');
@@ -126,16 +124,16 @@ async function enforceDowngradeLimits(userId, planFeatures) {
               var deps = typeof other.depends_on === 'string'
                 ? JSON.parse(other.depends_on || '[]') : (other.depends_on || []);
               var newDeps = deps.filter(function(d) { return d !== taskId; });
-              await trx('tasks').where({ id: other.id, user_id: userId })
-                .update({ depends_on: JSON.stringify(newDeps), updated_at: db.fn.now() });
+              await tasksWrite.updateTaskById(trx, other.id, {
+                depends_on: JSON.stringify(newDeps), updated_at: db.fn.now()
+              }, userId);
             }
           }
 
-          // Disable the tasks
-          await trx('tasks')
-            .where('user_id', userId)
-            .whereIn('id', taskIds)
-            .update({ status: 'disabled', disabled_at: now, disabled_reason: 'downgrade', updated_at: now });
+          // Disable the tasks (master + instance via helper)
+          await tasksWrite.updateTasksWhere(trx, userId, function(q) {
+            return q.whereIn('id', taskIds);
+          }, { status: 'disabled', disabled_at: now, disabled_reason: 'downgrade', updated_at: now });
 
           // Clean up calendar sync
           await trx('cal_sync_ledger')

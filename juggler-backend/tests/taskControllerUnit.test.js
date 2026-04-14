@@ -23,7 +23,7 @@ function makeRow(overrides) {
     recur: null, source_id: null, generated: 0,
     gcal_event_id: null, msft_event_id: null, depends_on: '[]',
     date_pinned: 0, marker: 0, flex_when: 0, prev_when: null,
-    travel_before: null, travel_after: null, preferred_time: null,
+    travel_before: null, travel_after: null,
     preferred_time_mins: null, unscheduled: null,
     recur_start: null, recur_end: null,
     disabled_at: null, disabled_reason: null,
@@ -54,10 +54,6 @@ describe('TEMPLATE_FIELDS export', () => {
     expect(TEMPLATE_FIELDS).toContain('preferred_time_mins');
   });
 
-  test('includes preferred_time', () => {
-    expect(TEMPLATE_FIELDS).toContain('preferred_time');
-  });
-
   test('does NOT include scheduled_at (instance-only field)', () => {
     expect(TEMPLATE_FIELDS).not.toContain('scheduled_at');
   });
@@ -69,7 +65,7 @@ describe('TEMPLATE_FIELDS export', () => {
   test('includes all expected template fields', () => {
     var expected = ['text', 'dur', 'pri', 'project', 'when', 'day_req',
       'recurring', 'rigid', 'time_flex', 'split', 'split_min',
-      'notes', 'marker', 'flex_when', 'preferred_time', 'preferred_time_mins'];
+      'notes', 'marker', 'flex_when', 'preferred_time_mins'];
     expected.forEach(function(f) {
       expect(TEMPLATE_FIELDS).toContain(f);
     });
@@ -197,44 +193,11 @@ describe('rowToTask: return object', () => {
     expect(task).toHaveProperty('scheduledAt');
     expect(task).toHaveProperty('desiredAt');
     expect(task).toHaveProperty('desiredDate');
-    expect(task).toHaveProperty('preferredTime');
     expect(task).toHaveProperty('preferredTimeMins');
     expect(task).toHaveProperty('unscheduled');
     expect(task).toHaveProperty('datePinned');
     expect(task).toHaveProperty('marker');
     expect(task).toHaveProperty('flexWhen');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════
-// taskToRow: time mode cleanup
-// ═══════════════════════════════════════════════════════════════
-
-describe('taskToRow: time mode cleanup', () => {
-  test('preferred_time=1 clears split, split_min, flex_when', () => {
-    var row = taskToRow({
-      preferredTime: true, split: true, splitMin: 30, flexWhen: true, timeFlex: 60
-    }, 'u1', TZ);
-    expect(row.split).toBeNull();
-    expect(row.split_min).toBeNull();
-    expect(row.flex_when).toBeNull();
-    expect(row.time_flex).toBe(60); // kept — relevant in Time Window mode
-  });
-
-  test('preferred_time=0 clears time_flex', () => {
-    var row = taskToRow({
-      preferredTime: false, timeFlex: 60, split: true
-    }, 'u1', TZ);
-    expect(row.time_flex).toBeNull();
-    expect(row.split).toBe(1); // kept — relevant in Time Block mode
-  });
-
-  test('no preferred_time set → no cleanup', () => {
-    var row = taskToRow({
-      split: true, timeFlex: 60
-    }, 'u1', TZ);
-    expect(row.time_flex).toBe(60);
-    expect(row.split).toBe(1);
   });
 });
 
@@ -287,11 +250,6 @@ describe('taskToRow: preferredTimeMins', () => {
   test('maps preferredTimeMins to preferred_time_mins', () => {
     var row = taskToRow({ preferredTimeMins: 720 }, 'u1', TZ);
     expect(row.preferred_time_mins).toBe(720);
-  });
-
-  test('maps preferredTime to preferred_time', () => {
-    var row = taskToRow({ preferredTime: true }, 'u1', TZ);
-    expect(row.preferred_time).toBe(1);
   });
 });
 

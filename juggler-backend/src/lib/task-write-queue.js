@@ -11,6 +11,7 @@
  */
 
 var db = require('../db');
+var tasksWrite = require('./tasks-write');
 
 // Lazy require to avoid circular dependency
 var _acquireLock, _releaseLock, _refreshLock;
@@ -230,38 +231,44 @@ async function _doFlush(userId) {
     for (var i = 0; i < coalesced.length; i++) {
       var op = coalesced[i];
       var fields = op.fields;
+      // Fields came out of JSON, so datetime columns are ISO strings. MySQL
+      // rejects those literally; rehydrate to Date so the driver formats them.
+      var DATETIME_FIELDS = ['scheduled_at', 'desired_at', 'due_at', 'start_after_at', 'disabled_at', 'recur_start', 'recur_end'];
+      for (var dfi = 0; dfi < DATETIME_FIELDS.length; dfi++) {
+        var f = DATETIME_FIELDS[dfi];
+        if (fields && typeof fields[f] === 'string' && fields[f].length > 0) {
+          var parsed = new Date(fields[f]);
+          if (!isNaN(parsed.getTime())) fields[f] = parsed;
+        }
+      }
 
       if (op.operation === 'create') {
         fields.created_at = db.fn.now();
         fields.updated_at = db.fn.now();
-        await trx('tasks').insert(fields);
+        await tasksWrite.insertTask(trx, fields);
         affectedIds.push(op.taskId);
 
       } else if (op.operation === 'update') {
         fields.updated_at = db.fn.now();
-        await trx('tasks')
-          .where({ id: op.taskId, user_id: userId })
-          .update(fields);
+        await tasksWrite.updateTaskById(trx, op.taskId, fields, userId);
         affectedIds.push(op.taskId);
 
       } else if (op.operation === 'delete') {
         var cascade = fields && fields.cascade;
         if (cascade === 'recurring') {
           // Delete template + pending instances
-          var task = await trx('tasks').where({ id: op.taskId, user_id: userId }).first();
+          var task = await trx('tasks_v').where({ id: op.taskId, user_id: userId }).first();
           if (task) {
             var templateId = task.source_id || op.taskId;
-            await trx('tasks')
-              .where('user_id', userId)
-              .where(function() {
-                this.where('id', templateId).orWhere('source_id', templateId);
-              })
-              .where('status', '')
-              .del();
+            // Delete pending instances + the template master (FK SET NULL preserves completed)
+            await tasksWrite.deleteInstancesWhere(trx, userId, function(q) {
+              return q.where({ master_id: templateId, status: '' });
+            });
+            await tasksWrite.deleteTaskById(trx, templateId, userId);
             affectedIds.push(templateId);
           }
         } else {
-          await trx('tasks').where({ id: op.taskId, user_id: userId }).del();
+          await tasksWrite.deleteTaskById(trx, op.taskId, userId);
           affectedIds.push(op.taskId);
         }
       }
