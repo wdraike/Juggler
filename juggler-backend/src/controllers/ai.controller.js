@@ -77,7 +77,7 @@ exports.handleCommand = async (req, res) => {
     const taskLines = (tasks || []).map(t => {
       var st = (statuses || {})[t.id] || 'open';
       var deps = t.dependsOn || [];
-      return t.id + '|' + (t.date || 'TBD') + '|' + (t.time || '') + '|' + st + '|' + (t.project || '') + '|' + t.text + '|' + (t.where || '') + '|' + (t.when || '') + '|' + (t.pri || '') + (t.recurring ? '|recurring' : '') + '|' + (t.dur || 30) + 'm' + (t.due ? '|due:' + t.due : '') + (t.startAfter ? '|start:' + t.startAfter : '') + (deps.length ? '|deps:' + deps.join(',') : '');
+      return t.id + '|' + (t.date || 'TBD') + '|' + (t.time || '') + '|' + st + '|' + (t.project || '') + '|' + t.text + '|' + (t.where || '') + '|' + (t.when || '') + '|' + (t.pri || '') + (t.recurring ? '|recurring' : '') + '|' + (t.dur || 30) + 'm' + (t.deadline ? '|deadline:' + t.deadline : '') + (t.startAfter ? '|start:' + t.startAfter : '') + (deps.length ? '|deps:' + deps.join(',') : '');
     }).join('\n');
 
     // Build schedule info

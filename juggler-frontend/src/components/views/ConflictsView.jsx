@@ -62,13 +62,13 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
       if (t.generated) return;
 
       // True overdue: explicit due date in the past
-      if (t.due) {
-        var dd = parseDate(t.due);
+      if (t.deadline) {
+        var dd = parseDate(t.deadline);
         if (dd && dd < today) overdue.push(t);
       }
 
       // Past scheduled date: no due date, but scheduled date is in the past
-      if (!t.due && t.date && t.date !== 'TBD') {
+      if (!t.deadline && t.date && t.date !== 'TBD') {
         var td = parseDate(t.date);
         if (td && td < today) stale.push(t);
       }

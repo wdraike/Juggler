@@ -21,7 +21,7 @@ export const STATUS_MAP = Object.fromEntries(STATUS_OPTIONS.map(s => [s.value, s
 
 export const TASK_DEFAULTS = {
   where: "anywhere", when: "morning,lunch,afternoon,evening,night",
-  dayReq: "any", dur: 30, notes: "", due: "", startAfter: "",
+  dayReq: "any", dur: 30, notes: "", deadline: "", startAfter: "",
   section: "", dependsOn: []
 };
 

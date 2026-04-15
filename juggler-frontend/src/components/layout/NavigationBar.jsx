@@ -26,7 +26,7 @@ const FILTERS = [
   { id: 'all', label: 'All', tip: 'All tasks regardless of status' },
   { id: 'done', label: 'Done', tip: 'Completed tasks only' },
   { id: 'wip', label: 'WIP', tip: 'Tasks currently in progress' },
-  { id: 'pastdue', label: 'Past Due', tip: 'Tasks past their due date or scheduled date' },
+  { id: 'pastdue', label: 'Overdue', tip: 'Tasks past their deadline or scheduled date' },
   { id: 'fixed', label: 'Fixed', tip: 'Tasks pinned to a specific date/time (not moved by scheduler)' },
   { id: 'blocked', label: 'Blocked', tip: 'Tasks waiting on incomplete dependencies' },
   { id: 'unplaced', label: 'Unplaced', tip: 'Tasks the scheduler couldn\u2019t place into any time slot' },

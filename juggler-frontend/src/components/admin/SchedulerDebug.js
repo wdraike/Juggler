@@ -71,7 +71,7 @@ function DetailPanel({ item, onClose }) {
         <Row label="Duration" value={item.dur + 'm'} />
         <Row label="Priority" value={item.pri} highlight={item.pri === 'P1'} />
         {item.preferredTime && <Row label="Preferred" value={item.preferredTime + (item.timeFlex ? ' (\u00b1' + item.timeFlex + 'm)' : ' (\u00b160m default)')} />}
-        {item.due && <Row label="Deadline" value={item.due} highlight />}
+        {item.deadline && <Row label="Deadline" value={item.deadline} highlight />}
         {item.project && <Row label="Project" value={item.project} />}
         {item.when && <Row label="When" value={item.when} />}
         {item.dayReq && item.dayReq !== 'any' && <Row label="Day Req" value={item.dayReq} />}

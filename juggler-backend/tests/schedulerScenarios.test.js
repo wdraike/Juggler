@@ -102,7 +102,7 @@ function makeDBRow(overrides) {
     id: 'db_' + (++_n), task_type: 'task', user_id: 'u1', text: 'DB Task',
     scheduled_at: new Date('2026-04-07T14:00:00Z'), original_scheduled_at: null,
     dur: 30, time_remaining: null, pri: 'P3', project: null, status: '',
-    section: null, notes: '', due_at: null, start_after_at: null,
+    section: null, notes: '', deadline: null, start_after_at: null,
     location: '[]', tools: '[]', when: '', day_req: 'any',
     recurring: 0, rigid: 0, time_flex: null, split: 0, split_min: null,
     recur: null, source_id: null, generated: 0, gcal_event_id: null,
@@ -140,7 +140,7 @@ describe('Tier 1: Priority & Ordering', () => {
   test('S2: P4 with deadline today placed before P1 without deadline', () => {
     var r = schedule([
       task({ id: 'p1_free', pri: 'P1', dur: 60 }),
-      task({ id: 'p4_due', pri: 'P4', dur: 60, due: TODAY }),
+      task({ id: 'p4_due', pri: 'P4', dur: 60, deadline: TODAY }),
     ]);
     expect(isPlaced(r, 'p4_due')).toBe(true);
     expect(isPlaced(r, 'p1_free')).toBe(true);
@@ -165,7 +165,7 @@ describe('Tier 1: Priority & Ordering', () => {
     var r = schedule([
       task({ id: 'da', dur: 90 }),
       task({ id: 'db', dur: 90, dependsOn: ['da'] }),
-      task({ id: 'dc', dur: 90, due: TOMORROW, dependsOn: ['db'] }),
+      task({ id: 'dc', dur: 90, deadline: TOMORROW, dependsOn: ['db'] }),
     ]);
     expect(isPlaced(r, 'da')).toBe(true);
     expect(isPlaced(r, 'db')).toBe(true);
@@ -180,7 +180,7 @@ describe('Tier 1: Priority & Ordering', () => {
     // Upstream dep inherits effective deadline from downstream via propagation.
     var r = schedule([
       task({ id: 'prep', dur: 60 }),
-      task({ id: 'cook', dur: 60, due: TODAY, dependsOn: ['prep'] }),
+      task({ id: 'cook', dur: 60, deadline: TODAY, dependsOn: ['prep'] }),
     ]);
     expect(isPlaced(r, 'prep')).toBe(true);
     expect(isPlaced(r, 'cook')).toBe(true);
@@ -194,7 +194,7 @@ describe('Tier 1: Priority & Ordering', () => {
     var r = schedule([
       task({ id: 'p1_solo', pri: 'P1', dur: 60 }),
       task({ id: 'chain1', pri: 'P3', dur: 60 }),
-      task({ id: 'chain2', pri: 'P3', dur: 60, due: TOMORROW, dependsOn: ['chain1'] }),
+      task({ id: 'chain2', pri: 'P3', dur: 60, deadline: TOMORROW, dependsOn: ['chain1'] }),
     ]);
     expect(isPlaced(r, 'p1_solo')).toBe(true);
     expect(isPlaced(r, 'chain2')).toBe(true);
@@ -281,7 +281,7 @@ describe('Tier 2: Recurrings with Preferred Time', () => {
 
   test('S11: P1 deadline fills lunch window → lunch unplaced, not drifted to 3pm', () => {
     var r = schedule([
-      task({ id: 'deadline', pri: 'P1', dur: 120, due: TODAY }),
+      task({ id: 'deadline', pri: 'P1', dur: 120, deadline: TODAY }),
       task({ id: 'lunch', text: 'Lunch', recurring: true, when: 'lunch', time: '12:00 PM', timeFlex: 60, dur: 30, generated: true }),
     ], 600); // 10am
     expect(isPlaced(r, 'deadline')).toBe(true);
@@ -334,7 +334,7 @@ describe('Tier 3: Flexible Recurrings', () => {
   test('S15: P1 deadline + P3 exercise, limited capacity → deadline wins', () => {
     var r = schedule([
       task({ id: 'mtg', when: 'fixed', time: '8:00 AM', dur: 480, datePinned: true }), // blocks 8am-4pm
-      task({ id: 'dl', pri: 'P1', dur: 120, due: TODAY }),
+      task({ id: 'dl', pri: 'P1', dur: 120, deadline: TODAY }),
       task({ id: 'ex', text: 'Exercise', pri: 'P3', recurring: true, when: 'evening', dur: 60, generated: true }),
     ]);
     expect(isPlaced(r, 'dl')).toBe(true);
@@ -417,7 +417,7 @@ describe('Tier 5: Capacity Crunch', () => {
       task({ id: 'c2', pri: 'P1', dur: 120, dependsOn: ['c1'] }),
       task({ id: 'c3', pri: 'P1', dur: 120, dependsOn: ['c2'] }),
       task({ id: 'c4', pri: 'P1', dur: 120, dependsOn: ['c3'] }),
-      task({ id: 'c5', pri: 'P1', dur: 120, due: fri, dependsOn: ['c4'] }),
+      task({ id: 'c5', pri: 'P1', dur: 120, deadline: fri, dependsOn: ['c4'] }),
     ]);
     expect(isPlaced(r, 'c5')).toBe(true);
     // Verify ordering
@@ -573,7 +573,7 @@ describe('Tier 7: Multi-Day Patterns', () => {
       task({ id: 'proj2', pri: 'P2', dur: 120, dependsOn: ['proj1'] }),
       task({ id: 'proj3', pri: 'P2', dur: 120, dependsOn: ['proj2'] }),
       task({ id: 'proj4', pri: 'P2', dur: 120, dependsOn: ['proj3'] }),
-      task({ id: 'proj5', pri: 'P2', dur: 120, due: fri, dependsOn: ['proj4'] }),
+      task({ id: 'proj5', pri: 'P2', dur: 120, deadline: fri, dependsOn: ['proj4'] }),
     ]);
     // All should be placed
     for (var k = 1; k <= 5; k++) expect(isPlaced(r, 'proj' + k)).toBe(true);

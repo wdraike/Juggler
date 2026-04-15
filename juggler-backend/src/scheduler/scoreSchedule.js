@@ -86,7 +86,7 @@ function scoreSchedule(dayPlacements, unplaced, allTasks, options) {
   var deadlineMissPenalty = 0;
   for (var tid in placementsByTask) {
     var task = taskById[tid];
-    if (!task || !task.due) continue;
+    if (!task || !task.deadline) continue;
     var parts = placementsByTask[tid];
     // Use the latest placement date for this task
     var latestDateKey = parts[0].dateKey;
@@ -95,7 +95,7 @@ function scoreSchedule(dayPlacements, unplaced, allTasks, options) {
         latestDateKey = parts[i].dateKey;
       }
     }
-    var daysLate = dateDiffDays(latestDateKey, task.due);
+    var daysLate = dateDiffDays(latestDateKey, task.deadline);
     if (daysLate > 0) {
       var p = daysLate * priMultiplier(task.pri);
       deadlineMissPenalty += p;

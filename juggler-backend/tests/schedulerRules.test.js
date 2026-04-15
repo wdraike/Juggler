@@ -168,7 +168,7 @@ describe('Scheduler Rules', () => {
   describe('Group 2: Deadline governs over priority', () => {
     test('P4 task with imminent deadline is placed, not deferred', () => {
       var tasks = [
-        makeTask({ id: 'p4_due', pri: 'P4', dur: 60, due: TOMORROW, text: 'P4 due tomorrow' }),
+        makeTask({ id: 'p4_due', pri: 'P4', dur: 60, deadline: TOMORROW, text: 'P4 due tomorrow' }),
         makeTask({ id: 'p1_flex', pri: 'P1', dur: 60, text: 'P1 no deadline' }),
       ];
       // Fill capacity to create pressure
@@ -234,7 +234,7 @@ describe('Scheduler Rules', () => {
       var tasks = [
         makeTask({ id: 'research', pri: 'P2', dur: 120, text: 'Research' }),
         makeTask({ id: 'draft', pri: 'P2', dur: 120, text: 'Draft', dependsOn: ['research'] }),
-        makeTask({ id: 'review', pri: 'P2', dur: 60, text: 'Review', dependsOn: ['draft'], due: dateKey(5) }),
+        makeTask({ id: 'review', pri: 'P2', dur: 60, text: 'Review', dependsOn: ['draft'], deadline: dateKey(5) }),
       ];
       var result = run(tasks);
 
@@ -255,7 +255,7 @@ describe('Scheduler Rules', () => {
         makeTask({ id: 'step1', pri: 'P2', dur: 120, text: 'Step 1' }),
         makeTask({ id: 'step2', pri: 'P2', dur: 120, text: 'Step 2', dependsOn: ['step1'] }),
         makeTask({ id: 'step3', pri: 'P2', dur: 120, text: 'Step 3', dependsOn: ['step2'] }),
-        makeTask({ id: 'final', pri: 'P2', dur: 120, text: 'Final', dependsOn: ['step3'], due: dateKey(5) }),
+        makeTask({ id: 'final', pri: 'P2', dur: 120, text: 'Final', dependsOn: ['step3'], deadline: dateKey(5) }),
       ];
       var result = run(tasks);
 
@@ -274,7 +274,7 @@ describe('Scheduler Rules', () => {
       var tasks = [
         makeTask({ id: 'ancestor', pri: 'P3', dur: 60, text: 'Ancestor' }),
         makeTask({ id: 'middle', pri: 'P3', dur: 60, text: 'Middle', dependsOn: ['ancestor'] }),
-        makeTask({ id: 'leaf', pri: 'P3', dur: 60, text: 'Leaf', dependsOn: ['middle'], due: dateKey(2) }),
+        makeTask({ id: 'leaf', pri: 'P3', dur: 60, text: 'Leaf', dependsOn: ['middle'], deadline: dateKey(2) }),
         // Add P1 demand to trigger todayReserved
         makeTask({ id: 'p1_a', pri: 'P1', dur: 120 }),
         makeTask({ id: 'p1_b', pri: 'P1', dur: 120 }),
@@ -413,7 +413,7 @@ describe('Scheduler Rules', () => {
   describe('Group 13: Split deadline task placed and meets deadline', () => {
     test('split deadline task is fully placed before due date', () => {
       var tasks = [
-        makeTask({ id: 'big_deadline', pri: 'P2', dur: 480, split: true, splitMin: 30, due: dateKey(3), text: 'Big deadline task' }),
+        makeTask({ id: 'big_deadline', pri: 'P2', dur: 480, split: true, splitMin: 30, deadline: dateKey(3), text: 'Big deadline task' }),
       ];
       var result = run(tasks);
 
@@ -617,7 +617,7 @@ describe('Scheduler Rules', () => {
   describe('Group 23: Deadline task placed before due date', () => {
     test('deadline task is placed and meets its deadline', () => {
       var tasks = [
-        makeTask({ id: 'deadline_far', pri: 'P2', dur: 60, due: dateKey(14), text: 'Far deadline' }),
+        makeTask({ id: 'deadline_far', pri: 'P2', dur: 60, deadline: dateKey(14), text: 'Far deadline' }),
       ];
       var result = run(tasks);
 
@@ -686,8 +686,8 @@ describe('Scheduler Rules', () => {
         makeTask({ id: 'buy_gift', pri: 'P2', dur: 120, text: 'Buy wedding gift' }),
         makeTask({ id: 'wrap_gift', pri: 'P3', dur: 30, dependsOn: ['buy_gift'], text: 'Wrap gift' }),
         makeTask({ id: 'get_card', pri: 'P2', dur: 20, text: 'Get wedding card' }),
-        makeTask({ id: 'pack', pri: 'P2', dur: 45, due: dayBefore, text: 'Pack' }),
-        makeTask({ id: 'wedding', when: 'fixed', time: '2:00 PM', dur: 240, date: weddingDay, due: weddingDay, text: 'Wedding' }),
+        makeTask({ id: 'pack', pri: 'P2', dur: 45, deadline: dayBefore, text: 'Pack' }),
+        makeTask({ id: 'wedding', when: 'fixed', time: '2:00 PM', dur: 240, date: weddingDay, deadline: weddingDay, text: 'Wedding' }),
       ];
       var result = run(tasks);
 
@@ -735,7 +735,7 @@ describe('Scheduler Rules', () => {
       }
       // 30x P2 with deadlines
       for (var i = 0; i < 30; i++) {
-        tasks.push(makeTask({ id: 'deadline_' + i, pri: 'P2', dur: 30, due: dateKey(1 + (i % 14)), text: 'Deadline ' + i }));
+        tasks.push(makeTask({ id: 'deadline_' + i, pri: 'P2', dur: 30, deadline: dateKey(1 + (i % 14)), text: 'Deadline ' + i }));
       }
       // 20x P3 in chains of 4
       for (var c = 0; c < 5; c++) {
@@ -963,7 +963,7 @@ describe('Scheduler Rules', () => {
     test('impossible dayReq+deadline generates warning', () => {
       // Task needs weekday but only has Sunday before deadline
       var tasks = [
-        makeTask({ id: 'conflict_task', pri: 'P2', dur: 30, dayReq: 'weekday', due: TODAY, date: TODAY, text: 'Weekday due Sunday' }),
+        makeTask({ id: 'conflict_task', pri: 'P2', dur: 30, dayReq: 'weekday', deadline: TODAY, date: TODAY, text: 'Weekday due Sunday' }),
       ];
       var result = run(tasks);
       // Should generate a warning about impossible constraint
@@ -993,7 +993,7 @@ describe('Scheduler Rules', () => {
   describe('Group 39: Task with both startAfter and due date', () => {
     test('task places within the startAfter-to-due window', () => {
       var tasks = [
-        makeTask({ id: 'windowed', pri: 'P2', dur: 60, startAfter: dateKey(2), due: dateKey(5), text: 'Windowed task' }),
+        makeTask({ id: 'windowed', pri: 'P2', dur: 60, startAfter: dateKey(2), deadline: dateKey(5), text: 'Windowed task' }),
       ];
       var result = run(tasks);
 
@@ -1088,7 +1088,7 @@ describe('Scheduler Rules', () => {
       var tasks = [
         makeTask({ id: 'march_task', pri: 'P2', dur: 60, date: '3/30', text: 'March task' }),
         makeTask({ id: 'april_task', pri: 'P2', dur: 60, date: '4/1', text: 'April task' }),
-        makeTask({ id: 'chain_end', pri: 'P2', dur: 60, dependsOn: ['march_task'], due: '4/2', text: 'Chain across months' }),
+        makeTask({ id: 'chain_end', pri: 'P2', dur: 60, dependsOn: ['march_task'], deadline: '4/2', text: 'Chain across months' }),
       ];
       var result = run(tasks);
 
@@ -1103,7 +1103,7 @@ describe('Scheduler Rules', () => {
   describe('Group 45: Distant deadline task deferred from today', () => {
     test('P2 task due in 3 weeks placed near deadline, not on today', () => {
       var tasks = [
-        makeTask({ id: 'taxes', pri: 'P2', dur: 180, split: true, splitMin: 30, due: dateKey(21), text: 'File taxes' }),
+        makeTask({ id: 'taxes', pri: 'P2', dur: 180, split: true, splitMin: 30, deadline: dateKey(21), text: 'File taxes' }),
         // Add P1 demand to trigger todayReserved
         makeTask({ id: 'p1_a', pri: 'P1', dur: 120, text: 'P1 work A' }),
         makeTask({ id: 'p1_b', pri: 'P1', dur: 120, text: 'P1 work B' }),
@@ -1129,7 +1129,7 @@ describe('Scheduler Rules', () => {
   describe('Group 46: Split deadline task placed within deadline', () => {
     test('large split task is fully placed and meets deadline', () => {
       var tasks = [
-        makeTask({ id: 'big_project', pri: 'P2', dur: 600, split: true, splitMin: 30, due: dateKey(7), text: 'Big project' }),
+        makeTask({ id: 'big_project', pri: 'P2', dur: 600, split: true, splitMin: 30, deadline: dateKey(7), text: 'Big project' }),
       ];
       var result = run(tasks);
 
@@ -1214,8 +1214,8 @@ describe('Scheduler Rules', () => {
   describe('Group 52: Due date is today', () => {
     test('task due today placed on today regardless of priority', () => {
       var tasks = [
-        makeTask({ id: 'due_today_p4', pri: 'P4', dur: 30, due: TODAY, text: 'P4 due today' }),
-        makeTask({ id: 'due_today_p1', pri: 'P1', dur: 30, due: TODAY, text: 'P1 due today' }),
+        makeTask({ id: 'due_today_p4', pri: 'P4', dur: 30, deadline: TODAY, text: 'P4 due today' }),
+        makeTask({ id: 'due_today_p1', pri: 'P1', dur: 30, deadline: TODAY, text: 'P1 due today' }),
       ];
       var result = run(tasks);
       expect(isPlaced(result, 'due_today_p4')).toBe(true);
@@ -1544,7 +1544,7 @@ describe('Scheduler Rules', () => {
   describe('Group 68: Impossible startAfter > due date', () => {
     test('task with startAfter after due date handled gracefully', () => {
       var tasks = [
-        makeTask({ id: 'impossible_window', pri: 'P2', dur: 30, startAfter: dateKey(5), due: dateKey(2), text: 'Impossible window' }),
+        makeTask({ id: 'impossible_window', pri: 'P2', dur: 30, startAfter: dateKey(5), deadline: dateKey(2), text: 'Impossible window' }),
       ];
       var result = run(tasks);
       // Should not crash; task likely unplaced
@@ -1602,7 +1602,7 @@ describe('Scheduler Rules', () => {
             date: dateKey(Math.floor(rng() * 5)), // today through +4
             text: 'Fuzz ' + run_i + '.' + ti,
           });
-          if (hasDue) task.due = dateKey(3 + Math.floor(rng() * 10));
+          if (hasDue) task.deadline = dateKey(3 + Math.floor(rng() * 10));
           if (hasDep) task.dependsOn = ['fuzz_' + run_i + '_' + Math.floor(rng() * ti)];
           if (isSplit) { task.split = true; task.splitMin = 15; }
           tasks.push(task);
@@ -1624,8 +1624,8 @@ describe('Scheduler Rules', () => {
         // (check manually since hasDeadlineMiss uses score which may be 0)
         Object.keys(result.dayPlacements).forEach(function(dk) {
           (result.dayPlacements[dk] || []).forEach(function(p) {
-            if (p.task && p.task.due) {
-              var dueDate = parseDateKey(p.task.due);
+            if (p.task && p.task.deadline) {
+              var dueDate = parseDateKey(p.task.deadline);
               var placedDate = parseDateKey(dk);
               // Placed date should not be after due date
               expect(placedDate <= dueDate).toBe(true);

@@ -86,8 +86,8 @@ async function importData(req, res) {
             scheduledAt = localToUtc(t.date, timeStr || '12:00 AM', tz);
           }
 
-          // Compute due_at and start_after_at
-          var dueAt = t.due ? toDateISO(t.due) || null : null;
+          // Compute deadline and start_after_at
+          var deadline = t.deadline ? toDateISO(t.deadline) || null : null;
           var startAfterAt = (t.startAfter || t.start_after) ? toDateISO(t.startAfter || t.start_after) || null : null;
 
           return {
@@ -102,7 +102,7 @@ async function importData(req, res) {
             status: statuses[t.id] || t.status || '',
             section: t.section || null,
             notes: t.notes || null,
-            due_at: dueAt,
+            deadline: deadline,
             start_after_at: startAfterAt,
             location: JSON.stringify(locationArr),
             tools: JSON.stringify(t.tools || []),

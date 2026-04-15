@@ -1,9 +1,9 @@
 /**
  * MCP Task Tools — expose task CRUD as MCP tools
  *
- * Accepts BOTH UTC ISO timestamps (scheduledAt, dueAt, startAfterAt)
- * and local strings (date, time, due, startAfter). UTC takes precedence.
- * Always returns both formats in responses.
+ * Accepts both scheduledAt (UTC ISO) and date+time (local strings) —
+ * UTC takes precedence. `deadline` and `startAfter` are date-only
+ * (YYYY-MM-DD). Always returns both scheduled_at formats in responses.
  */
 
 const { z } = require('zod');
@@ -25,11 +25,10 @@ var taskInputFields = {
   // Local string fields (PREFERRED — server converts using user's timezone automatically)
   date: z.string().optional().describe('Scheduled date in M/D format (e.g. "3/8"). PREFERRED over scheduledAt — server handles timezone conversion.'),
   time: z.string().optional().describe('Scheduled time in h:mm AM/PM format (e.g. "9:30 PM"). PREFERRED over scheduledAt — server handles timezone conversion.'),
-  due: z.string().optional().describe('Due date in M/D format (e.g. "3/15"). PREFERRED over dueAt.'),
-  startAfter: z.string().optional().describe('Start-after date in M/D format (e.g. "3/10"). PREFERRED over startAfterAt.'),
+  deadline: z.string().optional().describe('Deadline (hard, non-negotiable). YYYY-MM-DD or M/D format. The scheduler places this task on or before this date.'),
+  startAfter: z.string().optional().describe('Start-after date (YYYY-MM-DD or M/D). PREFERRED over startAfterAt.'),
   // UTC ISO fields (use ONLY if you already have a correct UTC timestamp — avoid manual timezone math)
   scheduledAt: z.string().optional().describe('UTC ISO timestamp. AVOID — use date+time instead to prevent timezone errors. Only use if you already have a verified UTC value.'),
-  dueAt: z.string().optional().describe('Due date as ISO string. AVOID — use due instead.'),
   startAfterAt: z.string().optional().describe('Start-after as ISO string. AVOID — use startAfter instead.'),
   // Other fields
   location: z.array(z.string()).optional().describe('Location IDs'),

@@ -7,8 +7,8 @@ import { parseDate } from './dateHelpers';
 export function effectivePriority(task, refDate) {
   var priRank = { P1: 4000, P2: 3000, P3: 2000, P4: 1000 };
   var base = priRank[task.pri] || 0;
-  if (!task.due || !refDate) return base;
-  var dd = parseDate(task.due);
+  if (!task.deadline || !refDate) return base;
+  var dd = parseDate(task.deadline);
   if (!dd) return base;
   var ref = (refDate instanceof Date) ? refDate : parseDate(refDate);
   if (!ref) return base;

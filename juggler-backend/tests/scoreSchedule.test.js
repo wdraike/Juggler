@@ -49,7 +49,7 @@ describe('scoreSchedule', () => {
   });
 
   test('deadline miss adds penalty', () => {
-    const t = makeTask({ id: 't1', date: '3/20', due: '3/21' });
+    const t = makeTask({ id: 't1', date: '3/20', deadline: '3/21' });
     // Placed on 3/25 — after deadline of 3/21
     const placements = { '3/25': [makePlacement(t, 540, 30)] };
     const result = scoreSchedule(placements, [], [t]);
@@ -57,7 +57,7 @@ describe('scoreSchedule', () => {
   });
 
   test('no deadline miss when placed before due', () => {
-    const t = makeTask({ id: 't1', date: '3/22', due: '3/25' });
+    const t = makeTask({ id: 't1', date: '3/22', deadline: '3/25' });
     const placements = { '3/22': [makePlacement(t, 540, 30)] };
     const result = scoreSchedule(placements, [], [t]);
     expect(result.breakdown.deadlineMiss).toBe(0);

@@ -334,6 +334,47 @@ describe('updateTaskStatus', () => {
     await controller.updateTaskStatus(req2, res2);
     expect(res2.statusCode).toBe(400);
   });
+
+  test('split-chunk siblings receive the same status update', async () => {
+    if (!available) return;
+    var crypto = require('crypto');
+    // Simulate a recurring master with 2 split chunks on the same date. We
+    // create the rows directly (bypassing createTask) so the test exercises
+    // updateTaskStatus's sibling-propagation path without going through the
+    // full recurring expansion pipeline.
+    var masterId = crypto.randomUUID();
+    var chunk1Id = masterId + '-20260416';
+    var chunk2Id = masterId + '-20260416-2';
+    var now = new Date();
+
+    await db('task_masters').insert({
+      id: masterId, user_id: USER_ID, text: 'Split recurring', dur: 60,
+      pri: 'P3', recurring: 1, split: 1, split_min: 30,
+      recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU', every: 1 }),
+      created_at: now, updated_at: now,
+    });
+    for (var i = 0; i < 2; i++) {
+      await db('task_instances').insert({
+        id: i === 0 ? chunk1Id : chunk2Id,
+        master_id: masterId, user_id: USER_ID,
+        occurrence_ordinal: 1, split_ordinal: i + 1, split_total: 2,
+        scheduled_at: new Date(Date.parse('2026-04-16T14:00:00Z') + i * 3600000),
+        dur: 30, status: '', generated: 0,
+        created_at: now, updated_at: now,
+      });
+    }
+
+    // Mark chunk 1 done via updateTaskStatus.
+    var req = mockReq({ params: { id: chunk1Id }, body: { status: 'done' } });
+    var res = mockRes();
+    await controller.updateTaskStatus(req, res);
+    expect(res._json.task.status).toBe('done');
+    expect(res._json.siblingsUpdated).toBe(1);
+
+    // Chunk 2 should now also be 'done'.
+    var chunk2Row = await db('task_instances').where({ id: chunk2Id }).first();
+    expect(chunk2Row.status).toBe('done');
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════

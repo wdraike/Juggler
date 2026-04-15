@@ -103,9 +103,9 @@ function FixedPopup({ anchorRect, item, status, theme, darkMode }) {
           {locIcons.join(' ')} <span style={{ color: theme.textMuted }}>{(t.location || []).join(', ')}</span>
         </div>
       )}
-      {t.due && (
+      {t.deadline && (
         <div style={{ marginTop: 2, fontSize: 10, color: theme.amberText }}>
-          Due {t.due}
+          Deadline {t.deadline}
         </div>
       )}
       {t.notes && (

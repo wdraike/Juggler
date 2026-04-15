@@ -110,7 +110,7 @@ async function insertTask(taskData) {
   };
 
   if (taskData.scheduledAt) defaults.scheduled_at = taskData.scheduledAt;
-  if (taskData.dueAt) defaults.due_at = taskData.dueAt;
+  if (taskData.deadline) defaults.deadline = taskData.deadline;
   if (taskData.sourceId) defaults.source_id = taskData.sourceId;
   if (taskData.id) defaults.id = taskData.id;
   else defaults.id = 'test_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);

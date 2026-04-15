@@ -296,7 +296,7 @@ describe('UC-3/4: Deadline vs Recurring Priority (Merged Phase)', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('2:00 PM'); // Afternoon, limited time
     var tasks = [
-      makeDeadlineTask({ id: 'unemployment', text: 'File for Unemployment', dur: 60, pri: 'P1', date: tc.todayKey, due: tc.todayKey, tools: ['personal_pc'] }),
+      makeDeadlineTask({ id: 'unemployment', text: 'File for Unemployment', dur: 60, pri: 'P1', date: tc.todayKey, deadline: tc.todayKey, tools: ['personal_pc'] }),
       makeFlexRecurring({ id: 'apply', text: 'Apply for Jobs', dur: 60, pri: 'P1', date: tc.todayKey, tools: ['personal_pc'], when: '', split: true, splitMin: 30 }),
       makeFlexRecurring({ id: 'resume', text: 'Work on Resume Optimizer', dur: 120, pri: 'P1', date: tc.todayKey, tools: ['personal_pc'], when: '', split: true, splitMin: 15 })
     ];
@@ -310,7 +310,7 @@ describe('UC-3/4: Deadline vs Recurring Priority (Merged Phase)', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('8:00 AM');
     var tasks = [
-      makeDeadlineTask({ id: 'deadline', text: 'Deadline Task', dur: 60, pri: 'P3', date: tc.todayKey, due: tc.todayKey }),
+      makeDeadlineTask({ id: 'deadline', text: 'Deadline Task', dur: 60, pri: 'P3', date: tc.todayKey, deadline: tc.todayKey }),
       makeTask({ id: 'flex', text: 'Flexible Task', dur: 60, pri: 'P1', date: tc.todayKey })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
@@ -381,7 +381,7 @@ describe('UC-19: Real User Config Scenarios', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('3:00 PM'); // Limited afternoon capacity
     var tasks = [
-      makeDeadlineTask({ id: 'unemployment', text: 'File for Unemployment', dur: 60, pri: 'P1', date: tc.todayKey, due: tc.todayKey, tools: ['personal_pc'] }),
+      makeDeadlineTask({ id: 'unemployment', text: 'File for Unemployment', dur: 60, pri: 'P1', date: tc.todayKey, deadline: tc.todayKey, tools: ['personal_pc'] }),
       ...makeRealRecurrings(tc.todayKey)
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);

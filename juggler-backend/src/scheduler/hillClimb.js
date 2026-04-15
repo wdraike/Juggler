@@ -452,7 +452,7 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       // Deadline tasks are fine to move back (deadline math governs).
       var hcTodayKey = scoreOpts && scoreOpts.todayKey;
       if (hcTodayKey && targetDateKey === hcTodayKey && currDateKey !== hcTodayKey) {
-        var taskHasDeadline = !!(pl.task.due || pl.task._fauxDeadline);
+        var taskHasDeadline = !!(pl.task.deadline || pl.task._fauxDeadline);
         if (!taskHasDeadline) {
           var hcPri = pl.task.pri || 'P3';
           if (hcPri === 'P3' || hcPri === 'P4') continue;
@@ -467,8 +467,8 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       }
 
       // Enforce deadline constraints — never move past due date or faux-deadline
-      if (pl.task.due || pl.task._fauxDeadline) {
-        var dlStr = pl.task.due || pl.task._fauxDeadline;
+      if (pl.task.deadline || pl.task._fauxDeadline) {
+        var dlStr = pl.task.deadline || pl.task._fauxDeadline;
         var dlD = parseDate(dlStr);
         var tgtD2 = parseDate(targetDateKey);
         if (dlD && tgtD2 && tgtD2 > dlD) continue;
@@ -603,13 +603,13 @@ function hillClimb(dayPlacements, dayOcc, dayWindows, dayBlocks, unplaced, allTa
       }
 
       // Enforce deadline constraints — don't move tasks past their deadlines
-      if (plLow.task.due || plLow.task._fauxDeadline) {
-        var lowDlStr = plLow.task.due || plLow.task._fauxDeadline;
+      if (plLow.task.deadline || plLow.task._fauxDeadline) {
+        var lowDlStr = plLow.task.deadline || plLow.task._fauxDeadline;
         var lowDlD = parseDate(lowDlStr);
         if (lowDlD && dateB > lowDlD) continue;
       }
-      if (plHigh.task.due || plHigh.task._fauxDeadline) {
-        var highDlStr = plHigh.task.due || plHigh.task._fauxDeadline;
+      if (plHigh.task.deadline || plHigh.task._fauxDeadline) {
+        var highDlStr = plHigh.task.deadline || plHigh.task._fauxDeadline;
         var highDlD = parseDate(highDlStr);
         if (highDlD && dateA > highDlD) continue;
       }

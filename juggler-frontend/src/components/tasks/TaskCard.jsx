@@ -18,7 +18,7 @@ function TaskCard({ task, status, onStatusChange, onExpand, darkMode, showDate, 
   var isMarker = !!task.marker;
   var borderColor = isMarker ? '#4338CA' : priColor;
   var durLabel = task.dur ? (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm') : '';
-  var isPastDue = !isDone && task.due && (function() { var d = parseDate(task.due); var t = todayDate || new Date(); if (!todayDate) t.setHours(0,0,0,0); return d && d < t; })();
+  var isPastDue = !isDone && task.deadline && (function() { var d = parseDate(task.deadline); var t = todayDate || new Date(); if (!todayDate) t.setHours(0,0,0,0); return d && d < t; })();
 
   return (
     <div
@@ -100,14 +100,14 @@ function TaskCard({ task, status, onStatusChange, onExpand, darkMode, showDate, 
           var icons = task.location.map(function(lid) { return locIcon(lid); }).filter(Boolean);
           return icons.length > 0 ? <span style={{ fontSize: 10 }}>{icons.join(' ')}</span> : null;
         })()}
-        {task.due && (
+        {task.deadline && (
           <span style={{
             fontSize: 9, fontWeight: 600,
             color: isPastDue ? '#FDFAF5' : theme.amberText,
             background: isPastDue ? theme.error : theme.amberBg,
             borderRadius: 3, padding: '1px 4px'
           }}>
-            {isPastDue ? 'OVERDUE ' : 'Due '}{task.due}
+            {isPastDue ? 'OVERDUE ' : 'Deadline '}{task.deadline}
           </span>
         )}
         {isMarker && (
@@ -162,7 +162,7 @@ function TaskCard({ task, status, onStatusChange, onExpand, darkMode, showDate, 
           var dep = allTasks.find(function(t) { return t.id === depId; });
           if (!dep) return { id: depId, text: depId };
           var depDate = dep.date && dep.date !== 'TBD' ? parseDate(dep.date) : null;
-          var depDue = dep.due ? parseDate(dep.due) : null;
+          var depDue = dep.deadline ? parseDate(dep.deadline) : null;
           if ((depDate && depDate < today) || (depDue && depDue < today)) return dep;
           return null;
         }).filter(Boolean);

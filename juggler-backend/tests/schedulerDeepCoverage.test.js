@@ -61,7 +61,7 @@ describe('UC-5: Dependency Chains', function() {
   test('UC-5.3: Chain A→B→C with C having deadline', function() {
     var due = tc.dateKey(5);
     var tasks = [
-      makeTask({ id: 'C', text: 'Final Step', dur: 60, date: tc.todayKey, due: due, dependsOn: ['B'] }),
+      makeTask({ id: 'C', text: 'Final Step', dur: 60, date: tc.todayKey, deadline: due, dependsOn: ['B'] }),
       makeTask({ id: 'B', text: 'Middle Step', dur: 60, date: tc.todayKey, dependsOn: ['A'] }),
       makeTask({ id: 'A', text: 'First Step', dur: 60, date: tc.todayKey })
     ];
@@ -143,7 +143,7 @@ describe('UC-11: Pull-Forward & Dampening', function() {
     tc.setTime('8:00 AM');
     var due = tc.dateKey(10);
     var tasks = [
-      makeDeadlineTask({ id: 'dl', text: 'Deadline Work', dur: 120, date: tc.dateKey(8), due: due, pri: 'P2' })
+      makeDeadlineTask({ id: 'dl', text: 'Deadline Work', dur: 120, date: tc.dateKey(8), deadline: due, pri: 'P2' })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
     var p = findPlacement(result, 'dl');
@@ -157,7 +157,7 @@ describe('UC-11: Pull-Forward & Dampening', function() {
     var noDampeningCfg = makeRealConfig({ preferences: { pullForwardDampening: false } });
     var due = tc.dateKey(10);
     var tasks = [
-      makeDeadlineTask({ id: 'dl', text: 'Deadline Work', dur: 120, date: tc.dateKey(8), due: due, pri: 'P2' })
+      makeDeadlineTask({ id: 'dl', text: 'Deadline Work', dur: 120, date: tc.dateKey(8), deadline: due, pri: 'P2' })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins, noDampeningCfg);
     var p = findPlacement(result, 'dl');
@@ -171,7 +171,7 @@ describe('UC-11: Pull-Forward & Dampening', function() {
     var startAfter = tc.dateKey(5);
     var due = tc.dateKey(10);
     var tasks = [
-      makeDeadlineTask({ id: 'dl', text: 'Deadline', dur: 60, date: tc.dateKey(8), due: due, startAfter: startAfter, pri: 'P1' })
+      makeDeadlineTask({ id: 'dl', text: 'Deadline', dur: 60, date: tc.dateKey(8), deadline: due, startAfter: startAfter, pri: 'P1' })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
     var p = findPlacement(result, 'dl');
@@ -360,7 +360,7 @@ describe('Stress: Full week with real recurringTasks + deadlines + calendar even
       }
       if (day === 2) {
         tasks.push(makeFixedEvent({ id: 'dr_' + day, text: 'Doctor', time: '2:00 PM', dur: 60, date: dk }));
-        tasks.push(makeDeadlineTask({ id: 'urgent_' + day, text: 'Urgent Report', dur: 90, pri: 'P1', date: dk, due: dk }));
+        tasks.push(makeDeadlineTask({ id: 'urgent_' + day, text: 'Urgent Report', dur: 90, pri: 'P1', date: dk, deadline: dk }));
       }
 
       var result = run(tasks, tc.dateKey(day), tc.nowMins);

@@ -97,7 +97,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
           recurring: !!(t && t.recurring),
           rigid: !!(t && t.rigid),
           pri: t ? (t.pri || 'P3') : 'P3',
-          due: t ? t.due : null,
+          deadline: t ? t.deadline : null,
           when: t ? t.when : null,
           project: t ? t.project : null,
           split: !!(t && t.split),
@@ -118,7 +118,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
           type: p.locked && t && hasWhen(t.when, 'fixed') ? 'fixed'
             : p.locked && t && t.rigid && t.recurring ? 'recurring'
             : p.marker ? 'marker'
-            : t && t.due ? 'deadline'
+            : t && t.deadline ? 'deadline'
             : t && t.recurring ? 'flexRecurring'
             : 'flexible'
         };
@@ -138,7 +138,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   var endDate = new Date(cursor); endDate.setDate(endDate.getDate() + 37);
   allTasks.forEach(function(t) {
     var d = parseDate(t.date); if (d && d > endDate) { endDate = new Date(d); endDate.setDate(endDate.getDate() + 7); }
-    var dd = parseDate(t.due); if (dd && dd > endDate) { endDate = new Date(dd); endDate.setDate(endDate.getDate() + 3); }
+    var dd = parseDate(t.deadline); if (dd && dd > endDate) { endDate = new Date(dd); endDate.setDate(endDate.getDate() + 3); }
   });
   while (cursor <= endDate && dates.length < 400) {
     dates.push({
@@ -305,7 +305,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         if ((t.recur || t.generated) && !isTpcFlexible) ceiling = td;
         // tpc-flexible instances: no ceiling, but dayReq constrains which days
       }
-      var deadline = t.due ? parseDate(t.due) : null;
+      var deadline = t.deadline ? parseDate(t.deadline) : null;
       if (deadline) deadline.setHours(23, 59, 59, 999);
 
       // Each DB row is already the placeable unit. Recurring-split masters
@@ -469,8 +469,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     var poolByTaskId = {};
     pool.forEach(function(item) { poolByTaskId[item.task.id] = item; });
 
-    // Find all tasks with hard deadlines (own due_at)
-    var deadlineItems = pool.filter(function(item) { return item.task.due && item.deadline; });
+    // Find all tasks with hard deadlines (own deadline)
+    var deadlineItems = pool.filter(function(item) { return item.task.deadline && item.deadline; });
 
     // For each deadline task, walk backward through dep chain
     deadlineItems.forEach(function(dlItem) {
@@ -539,7 +539,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
 
           if (fauxDate) {
             // Only assign if tighter than existing deadline/faux-deadline
-            if (parentItem.task.due) {
+            if (parentItem.task.deadline) {
               // Task has its own deadline — don't override with faux
             } else {
               if (!parentItem.fauxDeadline || fauxDate < parentItem.fauxDeadline) {
@@ -1498,12 +1498,61 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   // Step 2a: Compute faux-deadlines for dependency chain ancestors
   computeFauxDeadlines();
 
-  // Step 2b: Categorize non-recurring pool into constrained vs unconstrained
+  // Step 2a: Chain membership classification.
+  // A task is a "chain member" if it has a hard deadline OR if any transitive
+  // descendant (walking depends_on links DOWN, i.e. from dependent → its deps)
+  // of it has a deadline. Solo tasks with a deadline but no deps and no dependents
+  // are anchors without a chain — they can shift forward freely.
+  var hasDeadline = {};
+  var chainMemberIds = {};
+  pool.forEach(function(item) {
+    var t = item.task;
+    if (t.deadline) hasDeadline[t.id] = true;
+  });
+  pool.forEach(function(item) {
+    var t = item.task;
+    if (!hasDeadline[t.id]) return;
+    // BFS the depends_on closure starting from this anchor
+    var stack = [t.id];
+    while (stack.length > 0) {
+      var id = stack.pop();
+      if (chainMemberIds[id]) continue;
+      chainMemberIds[id] = true;
+      // Find the task object and walk its depends_on
+      var found = pool.find(function(p) { return p.task.id === id; });
+      if (!found) continue;
+      getTaskDeps(found.task).forEach(function(depId) {
+        if (isBackwardsDep(id, depId)) return;
+        stack.push(depId);
+      });
+    }
+  });
+  // Count dependents per task so we can detect "solo anchor" (no chain deps, no dependents)
+  var hasAncestorsCount = {};
+  pool.forEach(function(item) {
+    getTaskDeps(item.task).forEach(function(depId) {
+      if (isBackwardsDep(item.task.id, depId)) return;
+      hasAncestorsCount[depId] = (hasAncestorsCount[depId] || 0) + 1;
+    });
+  });
+
+  // Step 2b: Categorize non-recurring pool into constrained vs unconstrained.
+  // Solo anchors (deadline set but no deps and no dependents) stay in
+  // constrainedPool — they still need the deadline clamp — but get flagged
+  // so the placement pass walks days FORWARD (earliest slot first) for them
+  // while leaving chain members on the original backward-from-deadline path.
   var constrainedPool = [];
   var unconstrainedPool = [];
   var PRI_RANK = { P1: 1, P2: 2, P3: 3, P4: 4 };
   pool.forEach(function(item) {
+    var t = item.task;
     if (item.remaining <= 0 || item.task.recurring) return;
+    var deps = getTaskDeps(t).filter(function(d) { return !isBackwardsDep(t.id, d); });
+    var isSoloAnchor = hasDeadline[t.id] && deps.length === 0 && !hasAncestorsCount[t.id];
+    if (isSoloAnchor) item._soloAnchor = true;
+    if (t.id === '019d83ac-9468-70de-9ea7-9aa6a0d91531' || t.id === '019d83ac-9469-721f-9bbc-58b59554d504') {
+      console.log('[POOL-CHECK]', t.id, 'text=', (t.text||'').slice(0,40), 'deadline=', t.deadline, 'hasDeadline=', !!hasDeadline[t.id], 'deps.len=', deps.length, 'ancestorsCount=', hasAncestorsCount[t.id], 'isSoloAnchor=', isSoloAnchor, 'remaining=', item.remaining, 'recurring=', t.recurring);
+    }
     if (item.deadline || item.fauxDeadline || item.ceiling) {
       constrainedPool.push(item);
     } else {
@@ -1523,6 +1572,23 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       return d < min ? d : min;
     }, latestCandidates[0]);
 
+    // Past-due rescue: missing a deadline doesn't remove the work, and "past"
+    // is meaningless as a future constraint — stop treating it as one.
+    // Reclassify this item as UNCONSTRAINED so it competes for placement by
+    // priority (P1 past-due lands before P2 on-time). Anchor earliestDate to
+    // today so the placement pass prefers *today* (or the first capacity slot
+    // going forward), not some arbitrary day far out in the horizon.
+    if (latest < localToday) {
+      item.task._pastDue = true;
+      item.task._originalDue = item.deadline ? formatDateKey(item.deadline) : null;
+      item._reclassifiedPastDue = true;
+      item.deadline = null;
+      item.fauxDeadline = null;
+      item.ceiling = null;
+      item.earliestDate = new Date(localToday); // land today or later, not in the distant future
+      return; // move on; this item is handled in the unconstrained pass
+    }
+
     if (earliest > latest) {
       item._impossible = true;
       item.task._unplacedReason = 'impossible_window';
@@ -1536,7 +1602,12 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     item._windowEarliest = earliest;
     item._windowSize = latest.getTime() - earliest.getTime();
   });
-  constrainedPool = constrainedPool.filter(function(item) { return !item._impossible; });
+  // Move past-due-reclassified items out of constrainedPool into unconstrainedPool.
+  var reclassified = constrainedPool.filter(function(item) { return item._reclassifiedPastDue; });
+  if (reclassified.length > 0) {
+    unconstrainedPool = unconstrainedPool.concat(reclassified);
+  }
+  constrainedPool = constrainedPool.filter(function(item) { return !item._impossible && !item._reclassifiedPastDue; });
 
   // Separate split chunks from chainable items (split chunks share task IDs
   // and can't go through buildChains — they're processed separately by priority)
@@ -1604,7 +1675,6 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   function placeItemBackward(item) {
     var t = item.task;
     var latest = item._targetLatest;
-    // Use task's date as floor if no explicit earliestDate, so tasks stay on/after their assigned date
     var earliest = item._windowEarliest || localToday;
 
     for (var di = dates.length - 1; di >= 0; di--) {
@@ -1639,9 +1709,16 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     // Like placeItemBackward but processes chains in reverse topo order.
     // Uses childBefore constraint from already-placed children instead of
     // depsMetByDate for same-chain deps. Cross-chain deps still checked.
+    //
+    // Solo-anchor special case: items flagged `_soloAnchor` (has deadline but
+    // no deps and no dependents) iterate FORWARD — earliest day, earliest
+    // slot within the day — so a P1 due Friday lands Monday if Monday has
+    // capacity, instead of sitting at Friday 10pm. The deadline still
+    // clamps the forward search via `latest`.
     var t = item.task;
     var latest = item._targetLatest;
     var earliest = item._windowEarliest || localToday;
+    var pullForward = !!item._soloAnchor;
 
     // Check which deps are cross-chain (need depsMetByDate) vs same-chain (use childBefore)
     var crossChainDeps = getTaskDeps(t).filter(function(depId) {
@@ -1649,12 +1726,21 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       return !chainTaskIds || !chainTaskIds[depId];
     });
 
-    for (var di = dates.length - 1; di >= 0; di--) {
+    var startIdx = pullForward ? 0 : dates.length - 1;
+    var endIdx = pullForward ? dates.length : -1;
+    var stepIdx = pullForward ? 1 : -1;
+    for (var di = startIdx; di !== endIdx; di += stepIdx) {
       if (item.remaining <= 0) break;
       var d = dates[di];
-      if (d.date > latest) continue;
-      if (d.date < earliest) break;
-      if (d.date < localToday) break;
+      if (pullForward) {
+        if (d.date < earliest) continue;
+        if (d.date < localToday) continue;
+        if (d.date > latest) break;
+      } else {
+        if (d.date > latest) continue;
+        if (d.date < earliest) break;
+        if (d.date < localToday) break;
+      }
       if (!canPlaceOnDate(t, d)) continue;
 
       // Check cross-chain deps are met
@@ -1708,7 +1794,11 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       }
       var wins = flexWins || getWhenWindows(t.when, dayWindows[d.key]);
       if (wins.length === 0) continue;
-      placeLate(item, d, beforeMin, flexWins, depAfter);
+      if (pullForward) {
+        placeEarly(item, d, depAfter, flexWins, beforeMin);
+      } else {
+        placeLate(item, d, beforeMin, flexWins, depAfter);
+      }
     }
   }
 
@@ -2119,7 +2209,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         });
         reasons.push('after ' + depNames.join(', '));
       }
-      if (t.due) reasons.push('due ' + t.due);
+      if (t.deadline) reasons.push('deadline ' + t.deadline);
       // Fallback: if task moved but no specific constraint explains why,
       // it was moved due to capacity (day full, priority compaction, etc.)
       if (reasons.length === 0) {
@@ -2448,7 +2538,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         });
         reasons.push('after ' + depNames.join(', '));
       }
-      if (t.due) reasons.push('due ' + t.due);
+      if (t.deadline) reasons.push('deadline ' + t.deadline);
       if (reasons.length === 0) {
         var partD = parseDate(dk);
         if (origDate && partD) {
@@ -2516,9 +2606,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       }
 
       // 6. Deadline
-      if (t.due) {
+      if (t.deadline) {
         var pri = t.pri || 'P3';
-        reasons.push(pri + ' deadline due ' + t.due);
+        reasons.push(pri + ' deadline due ' + t.deadline);
       }
 
       // 7. When-window constraint

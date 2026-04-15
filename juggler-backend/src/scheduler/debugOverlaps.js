@@ -246,22 +246,22 @@ function checkDeadlineMisses(dayPlacements, allTasks, todayKey) {
     });
   });
   allTasks.forEach(function(t) {
-    if (!t.due) return;
+    if (!t.deadline) return;
     var st = t.status || '';
     if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'pause' || st === 'disabled') return;
-    var deadline = parseDate(t.due);
+    var deadline = parseDate(t.deadline);
     if (!deadline) return;
     var lastDate = lastDateByTask[t.id];
     if (!lastDate) {
       // Not placed at all — is it past deadline?
       if (deadline < today) {
-        issues.push({ msg: '"' + t.text + '" (' + t.id + ') due ' + t.due + ' — UNPLACED past deadline' });
+        issues.push({ msg: '"' + t.text + '" (' + t.id + ') due ' + t.deadline + ' — UNPLACED past deadline' });
       }
       return;
     }
     if (lastDate > deadline) {
       issues.push({
-        msg: '"' + t.text + '" (' + t.id + ') due ' + t.due +
+        msg: '"' + t.text + '" (' + t.id + ') due ' + t.deadline +
           ' but placed on ' + formatDateKey(lastDate) + ' (' +
           Math.round((lastDate - deadline) / 86400000) + ' days late)'
       });
@@ -556,8 +556,8 @@ function checkTodayOverload(dayPlacements, allTasks, todayKey, cfg) {
     if (t.datePinned) return; // user explicitly pinned
     if (hasWhen(t.when, 'fixed')) return;
     var hasNearDeadline = false;
-    if (t.due) {
-      var dueDate = parseDate(t.due);
+    if (t.deadline) {
+      var dueDate = parseDate(t.deadline);
       if (dueDate && dueDate <= threeDaysOut) hasNearDeadline = true;
     }
     if (hasNearDeadline) return;
@@ -631,8 +631,8 @@ function checkHighPriDisplacement(dayPlacements, unplaced, allTasks, todayKey) {
     var rank = priRank[t.pri || 'P3'] || 3;
     if (rank < 3) return; // P1/P2 are not deferrable
     var hasNearDeadline = false;
-    if (t.due) {
-      var dueDate = parseDate(t.due);
+    if (t.deadline) {
+      var dueDate = parseDate(t.deadline);
       if (dueDate && dueDate <= threeDaysOut) hasNearDeadline = true;
     }
     if (hasNearDeadline) return;
@@ -852,7 +852,7 @@ async function main() {
       s.nonUrgent.forEach(function(nu) {
         console.log('    ' + nu.pri + ' "' + nu.task.text + '" ' + nu.dur + 'min' +
           (nu.pulledForward ? ' [PULLED FORWARD from ' + nu.originalDate + ']' : '') +
-          (nu.task.due ? ' (due ' + nu.task.due + ')' : ' (no deadline)'));
+          (nu.task.deadline ? ' (deadline ' + nu.task.deadline + ')' : ' (no deadline)'));
       });
     } else {
       console.log('  All tasks on today have urgency signals');

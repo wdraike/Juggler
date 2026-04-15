@@ -452,7 +452,7 @@ export default function AppLayout() {
         if (!dep) return true; // missing dep counts as overdue
         // Overdue if dep's date or due date is in the past
         var depDate = dep.date && dep.date !== 'TBD' ? parseDate(dep.date) : null;
-        var depDue = dep.due ? parseDate(dep.due) : null;
+        var depDue = dep.deadline ? parseDate(dep.deadline) : null;
         return (depDate && depDate < today) || (depDue && depDue < today);
       });
       if (hasOverdueDep) ids.add(t.id);
@@ -470,8 +470,8 @@ export default function AppLayout() {
       var st = statuses[t.id] || '';
       if (st === 'done' || st === 'cancel' || st === 'skip') return;
       if (t.generated) return;
-      if (t.due) {
-        var dd = parseDate(t.due);
+      if (t.deadline) {
+        var dd = parseDate(t.deadline);
         if (dd && dd < today) { ids.add(t.id); return; }
       }
       if (t.date && t.date !== 'TBD') {
@@ -489,8 +489,8 @@ export default function AppLayout() {
       var st = statuses[t.id] || '';
       if (st === 'done' || st === 'cancel' || st === 'skip') return;
       if (t.generated) return;
-      if (t.due) {
-        var dd = parseDate(t.due);
+      if (t.deadline) {
+        var dd = parseDate(t.deadline);
         if (dd && dd < today) ids.add(t.id);
       }
     });

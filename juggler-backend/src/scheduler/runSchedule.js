@@ -125,6 +125,14 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var srcMap = buildSourceMap(taskRows);
   var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
 
+  // 2a. Normalize empty `when` to all five standard day windows. Users treat
+  // no-when-set as "place whenever," not "skip scheduling" — the placement
+  // phase requires a non-empty when-tag to match against day windows.
+  var ALL_WINDOWS = 'morning,lunch,afternoon,evening,night';
+  allTasks.forEach(function(t) {
+    if (t.when == null || t.when === '') t.when = ALL_WINDOWS;
+  });
+
   // 2b. Derive per-chunk placement brackets for recurring instances.
   // Each instance's ID encodes its occurrence date as "<masterId>-YYYYMMDD[-N]".
   // Master.recur's type drives the flex window:
@@ -154,7 +162,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     }
     var dueDate = new Date(occ); dueDate.setDate(dueDate.getDate() + flex);
     t.startAfter = formatDateKey(occ);
-    t.due = formatDateKey(dueDate);
+    t.deadline = formatDateKey(dueDate);
     // Anchor the chunk to its occurrence day so pool construction recognises
     // it as day-specific. Without this, split_ordinal>=2 chunks have null
     // scheduled_at → null t.date → the `t.recurring && td` check in
@@ -196,9 +204,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // full set (any status) for ordinal preservation + existence lookup.
   var existingPendingIds = {};
   var existingById = {}; // id -> { occ, status, master_id }
+  var rowsByIdForReconcile = {}; // id -> full raw row (for dur/merge-survivor checks)
   var maxOrdByMaster = {};
   taskRows.forEach(function(r) {
     if (r.task_type !== 'recurring_instance') return;
+    rowsByIdForReconcile[r.id] = r;
     existingById[r.id] = {
       occ: Number(r.occurrence_ordinal) || 0,
       status: r.status,
@@ -243,6 +253,20 @@ async function runScheduleAndPersist(userId, _retries, options) {
       chunks = [{ splitOrdinal: 1, splitTotal: 1, dur: occ.dur || 30 }];
     }
 
+    // Merged-survivor guard: if the primary row already carries the full
+    // master dur (merge-back folded siblings into it on a prior run), treat
+    // this occurrence as already placed as one block — don't re-split, don't
+    // re-create deleted split_ordinal>=2 chunks. They'd just come back unplaced
+    // and clutter the "unscheduled" lane.
+    var primaryExisting = existingById[primaryId];
+    var primaryRow = rowsByIdForReconcile[primaryId];
+    var primaryIsMergedSurvivor = primaryExisting && primaryRow
+      && Number(primaryRow.dur) >= Number(occ.dur)
+      && chunks.length > 1;
+    if (primaryIsMergedSurvivor) {
+      chunks = [{ splitOrdinal: 1, splitTotal: 1, dur: Number(primaryRow.dur) }];
+    }
+
     // One occurrence ordinal shared by all chunks of this day.
     var occOrd;
     if (existingById[primaryId]) {
@@ -259,6 +283,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
         sourceId: masterId,
         date: occ.date,
         time: occ.time,
+        // Thread the master's preferred time through so the insert path can
+        // fall back to it when `time` is null. Without this, chunks of masters
+        // with ptm-but-no-time get stamped at midnight local by localToUtc.
+        preferredTimeMins: occ.preferredTimeMins,
         occurrence_ordinal: occOrd,
         split_ordinal: c.splitOrdinal,
         split_total: chunks.length,
@@ -330,8 +358,15 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var insertRows = toInsert.map(function(t) {
       // Only the primary chunk inherits the master's template time; later
       // chunks start unplaced and get their scheduled_at from the placement phase.
+      // Derive the time from preferredTimeMins when the master has no specific
+      // `time` string — without this fallback, localToUtc(date, null, tz) would
+      // stamp the row at midnight local (04:00 UTC in EDT) and downstream
+      // placement would see a "positioned" row and skip it, causing the entire
+      // master to sit at wall-clock midnight.
+      var ptm = t.preferredTimeMins;
+      var timeStr = t.time || (ptm != null && ptm >= 0 ? formatMinutesToTime(ptm) : null);
       var scheduledAt = (t.split_ordinal === 1 && t.date)
-        ? localToUtc(t.date, t.time || null, TIMEZONE)
+        ? localToUtc(t.date, timeStr, TIMEZONE)
         : null;
       return {
         id: t.id,
@@ -440,7 +475,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // Fixed tasks are user-anchored — never override their time/date.
     if (original.when && original.when.indexOf('fixed') >= 0) continue;
     // Date-pinned tasks are user-set — never override their date/time.
-    if (original.datePinned) continue;
+    // Exception: a datePinned flag without an actual date/scheduled_at is a
+    // stale artifact (user cleared the date but pin survived). Treat as
+    // unpinned — the scheduler is free to place.
+    if (original.datePinned && (original.date || original.time)) continue;
     // Markers are non-blocking — never move them.
     if (original.marker) continue;
     // Recurrings should never have their date moved — they're day-specific.
@@ -466,6 +504,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var dbUpdate = {
       scheduled_at: newScheduledAt,
       unscheduled: null,
+      // Scheduler-placed tasks are NOT user-pinned. If we reached this point
+      // the task passed the datePinned guard (either no user pin, or a stale
+      // pin on a null-scheduled row). Clear the flag so the next scheduler
+      // run treats it as freely placeable instead of routing it to fixedByDate.
+      date_pinned: 0,
       updated_at: db.fn.now()
     };
     if (placement.dur) dbUpdate.dur = placement.dur;
@@ -686,7 +729,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var chunk = scheduledAtUpdates.slice(ci, ci + CHUNK);
     var ids = chunk.map(function(pu) { return pu.id; });
 
-    var updateFields = { unscheduled: null, updated_at: db.fn.now() };
+    var updateFields = { unscheduled: null, date_pinned: 0, updated_at: db.fn.now() };
 
     // Build CASE for scheduled_at (only include tasks that have a new scheduled_at)
     var saChunk = chunk.filter(function(pu) { return !!pu.dbUpdate.scheduled_at; });

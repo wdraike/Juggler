@@ -48,7 +48,7 @@ function makeRow(overrides) {
     status: '',
     section: null,
     notes: '',
-    due_at: null,
+    deadline: null,
     start_after_at: null,
     location: '[]',
     tools: '[]',
@@ -146,11 +146,10 @@ describe('rowToTask: UTC derivation', () => {
     expect(task.scheduledAt).toBeTruthy();
   });
 
-  test('derives due from due_at DATE column', () => {
-    var row = makeRow({ due_at: '2026-04-10' });
+  test('derives deadline (YYYY-MM-DD) from the deadline DATE column', () => {
+    var row = makeRow({ deadline: '2026-04-10' });
     var task = rowToTask(row, TZ, {});
-    expect(task.due).toBe('4/10');
-    expect(task.dueAt).toBeTruthy();
+    expect(task.deadline).toBe('2026-04-10');
   });
 
   test('derives startAfter from start_after_at', () => {
@@ -159,10 +158,10 @@ describe('rowToTask: UTC derivation', () => {
     expect(task.startAfter).toBe('4/6');
   });
 
-  test('handles null due_at and start_after_at', () => {
-    var row = makeRow({ due_at: null, start_after_at: null });
+  test('handles null deadline and start_after_at', () => {
+    var row = makeRow({ deadline: null, start_after_at: null });
     var task = rowToTask(row, TZ, {});
-    expect(task.due).toBeNull();
+    expect(task.deadline).toBeNull();
     expect(task.startAfter).toBeNull();
   });
 });

@@ -10,6 +10,28 @@ import { convertTimeForDisplay, getTimezoneAbbr, getUtcOffset } from '../../util
 import ConfirmDialog from '../features/ConfirmDialog';
 import apiClient from '../../services/apiClient';
 
+// "hh:mm" (24h) + delta minutes → "hh:mm" (24h). Clamps to the day [00:00, 23:59].
+// Used by the start/finish/duration three-way binding below.
+function addMinutesTo24h(hhmm, mins) {
+  if (!hhmm) return '';
+  var parts = String(hhmm).split(':');
+  var h = parseInt(parts[0], 10); if (isNaN(h)) return '';
+  var m = parseInt(parts[1], 10); if (isNaN(m)) m = 0;
+  var total = h * 60 + m + (Number(mins) || 0);
+  if (total < 0) total = 0;
+  if (total > 23 * 60 + 59) total = 23 * 60 + 59;
+  var nh = Math.floor(total / 60), nm = total % 60;
+  return (nh < 10 ? '0' : '') + nh + ':' + (nm < 10 ? '0' : '') + nm;
+}
+
+function minutesFrom24h(hhmm) {
+  if (!hhmm) return null;
+  var parts = String(hhmm).split(':');
+  var h = parseInt(parts[0], 10); if (isNaN(h)) return null;
+  var m = parseInt(parts[1], 10); if (isNaN(m)) m = 0;
+  return h * 60 + m;
+}
+
 function RecurringDeleteDialog({ taskName, onSkipInstance, onDeleteSeries, onCancel, darkMode, isMobile }) {
   var theme = getTheme(darkMode);
   var btnBase = {
@@ -236,8 +258,17 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [date, setDate] = useState(initDateTime.date);
   var [time, setTime] = useState(initDateTime.time);
   var [dur, setDur] = useState(isCreate ? 30 : (task.dur || 30));
+  // Finish time is a UI-only projection of (start + dur). Three-way bound with
+  // `time` and `dur`: editing any one updates the other two to keep
+  // `finish = start + dur` invariant. Persisted to the backend via `time` +
+  // `dur` — there is no "finish" column in the DB.
+  var [endTime, setEndTime] = useState(function() {
+    var initDur = isCreate ? 30 : (task.dur || 30);
+    return initDateTime.time ? addMinutesTo24h(initDateTime.time, initDur) : '';
+  });
+  var [endTimeError, setEndTimeError] = useState(null);
   var [timeRemaining, setTimeRemaining] = useState(isCreate ? '' : (task.timeRemaining != null ? task.timeRemaining : ''));
-  var [due, setDue] = useState(isCreate ? '' : toDateISO(task.due));
+  var [deadline, setDeadline] = useState(isCreate ? '' : toDateISO(task.deadline));
   var [startAfter, setStartAfter] = useState(isCreate ? '' : toDateISO(task.startAfter));
   var [notes, setNotes] = useState(isCreate ? '' : (task.notes || ''));
   var [when, setWhen] = useState(function() {
@@ -402,23 +433,23 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     return warnings;
   })();
 
-  // Due date vs day requirement conflict (separate from config warnings so it always runs)
-  var dueDayWarning = (function() {
-    if (!due || !dayReq || dayReq === 'any') return null;
-    var dueDate = parseDate(due);
-    if (!dueDate) return null;
-    var dueDayCode = ['Su','M','T','W','R','F','Sa'][dueDate.getDay()];
-    var dueDayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dueDate.getDay()];
+  // Deadline vs day requirement conflict (separate from config warnings so it always runs)
+  var deadlineDayWarning = (function() {
+    if (!deadline || !dayReq || dayReq === 'any') return null;
+    var deadlineDate = parseDate(deadline);
+    if (!deadlineDate) return null;
+    var deadlineDayCode = ['Su','M','T','W','R','F','Sa'][deadlineDate.getDay()];
+    var deadlineDayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][deadlineDate.getDay()];
     var allowed;
     if (dayReq === 'weekday') allowed = ['M','T','W','R','F'];
     else if (dayReq === 'weekend') allowed = ['Su','Sa'];
     else allowed = dayReq.split(',');
-    if (allowed.indexOf(dueDayCode) === -1) {
-      return 'Due date (' + dueDayName + ') conflicts with day requirement \u2014 task may not be schedulable before the deadline.';
+    if (allowed.indexOf(deadlineDayCode) === -1) {
+      return 'Deadline (' + deadlineDayName + ') conflicts with day requirement \u2014 task may not be schedulable before the deadline.';
     }
     return null;
   })();
-  if (dueDayWarning) configWarnings.push(dueDayWarning);
+  if (deadlineDayWarning) configWarnings.push(deadlineDayWarning);
 
   var BTN_H = isMobile ? 30 : 26;
   var iStyle = { fontSize: isMobile ? 13 : 11, padding: isMobile ? '6px 8px' : '3px 4px', border: '1px solid ' + TH.inputBorder, borderRadius: 4, background: TH.inputBg, color: TH.inputText, fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box', maxWidth: '100%' };
@@ -446,7 +477,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       text: t.text || '', project: t.project || '', pri: t.pri || 'P3',
       date: toDateISO(t.date) || '', time: toTime24(t.time) || '',
       dur: t.dur || 30, timeRemaining: t.timeRemaining != null ? t.timeRemaining : '',
-      due: toDateISO(t.due) || '', startAfter: toDateISO(t.startAfter) || '',
+      deadline: toDateISO(t.deadline) || '', startAfter: toDateISO(t.startAfter) || '',
       notes: t.notes || '', when: t.when || '', dayReq: t.dayReq || 'any',
       recurring: !!t.recurring, rigid: !!t.rigid,
       timeFlex: t.timeFlex != null ? t.timeFlex : null,
@@ -491,7 +522,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     taskSnapshotRef.current = newSnap;
     setText(newSnap.text); setProject(newSnap.project); setPri(newSnap.pri);
     setDate(newSnap.date); setTime(newSnap.time); setDur(newSnap.dur);
-    setTimeRemaining(newSnap.timeRemaining); setDue(newSnap.due);
+    // Re-derive finish projection from the refreshed start+dur
+    setEndTime(newSnap.time ? addMinutesTo24h(newSnap.time, newSnap.dur || 0) : '');
+    setEndTimeError(null);
+    setTimeRemaining(newSnap.timeRemaining); setDeadline(newSnap.deadline);
     setStartAfter(newSnap.startAfter); setNotes(newSnap.notes);
     setWhen(newSnap.when); setDayReq(newSnap.dayReq);
     // Re-derive scheduling mode from synced value
@@ -526,7 +560,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       time: fromTime24(time),
       dur: parseInt(dur) || 30,
       timeRemaining: timeRemaining === '' ? null : parseInt(timeRemaining),
-      due: fromDateISO(due),
+      deadline: fromDateISO(deadline),
       startAfter: fromDateISO(startAfter),
       notes,
       // Recurring tasks: auto-derive when/dayReq/rigid from mode
@@ -562,7 +596,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || '0', 10);
       })() : undefined
     };
-  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, hasPreferredTime]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, hasPreferredTime]);
 
   // Build only the fields that changed from the initial snapshot (prevents marking unchanged fields dirty)
   var buildChangedFields = useCallback(function() {
@@ -601,7 +635,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     // Date/time (compare in form format)
     if (date !== (snap.date || '')) { changed.date = all.date; changed.day = all.day; }
     if (time !== (snap.time || '')) changed.time = all.time;
-    if (due !== (snap.due || '')) changed.due = all.due;
+    if (deadline !== (snap.deadline || '')) changed.deadline = all.deadline;
     if (startAfter !== (snap.startAfter || '')) changed.startAfter = all.startAfter;
     // Timezone change — also sends converted date/time
     if (taskTz !== (snap.tz || '')) { changed.tz = all.tz; changed.date = all.date; changed.day = all.day; changed.time = all.time; }
@@ -627,7 +661,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       changed._timezone = all._timezone;
     }
     return Object.keys(changed).length > 0 ? changed : null;
-  }, [buildFields, text, project, pri, notes, when, dayReq, recurring, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, due, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime, anchorDate]);
+  }, [buildFields, text, project, pri, notes, when, dayReq, recurring, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime, anchorDate]);
 
   // Dirty detection — compare current fields to snapshot
   var [isDirty, setIsDirty] = useState(false);
@@ -638,7 +672,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     var changed = buildChangedFields();
     console.log('[DIRTY]', !!changed, changed ? Object.keys(changed) : 'null', 'when=' + when, 'snapWhen=' + (taskSnapshotRef.current ? taskSnapshotRef.current.when : '?'));
     setIsDirty(!!changed);
-  }, [text, project, pri, date, time, dur, timeRemaining, due, startAfter, notes, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, hasPreferredTime, anchorDate]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, hasPreferredTime, anchorDate]);
 
   // Manual save handler
   // Unpin: revert a drag-pinned task to scheduler control.
@@ -661,6 +695,9 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   }
 
   function handleSave() {
+    // Suppress save while the start/finish pair is invalid — keeps the user's
+    // typed bad value visible so they can correct it without losing state.
+    if (endTimeError) return;
     var changed = buildChangedFields();
     if (!changed) return;
 
@@ -1092,14 +1129,19 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                       if (v) {
                         var parts = v.split('T');
                         setDate(parts[0]);
-                        setTime(parts[1] || '');
-                      } else { setDate(''); setTime(''); }
+                        var newStart = parts[1] || '';
+                        setTime(newStart);
+                        // Keep finish in sync: shift finish by the same delta as start,
+                        // preserving the current duration. Clears any stale validation error.
+                        if (newStart) setEndTime(addMinutesTo24h(newStart, dur));
+                        setEndTimeError(null);
+                      } else { setDate(''); setTime(''); setEndTime(''); setEndTimeError(null); }
                       if (!isCreate && !isFixed) setDatePinned(!!v);
                     }}
                     style={{ ...iStyle, width: isMobile ? '100%' : undefined, minWidth: 0, ...(datePinned && date ? { borderColor: '#D97706' } : {}) }} />
                 )}
                 {!isCreate && !isFixed && !marker && datePinned && date && (
-                  <button onClick={() => { setDatePinned(false); setDate(''); setTime(''); }} title="Let scheduler control date"
+                  <button onClick={() => { setDatePinned(false); setDate(''); setTime(''); setEndTime(''); setEndTimeError(null); }} title="Let scheduler control date"
                     style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
                       border: '1px solid ' + TH.btnBorder, background: TH.inputBg, color: TH.textMuted, fontWeight: 600,
                       height: BTN_H, boxSizing: 'border-box' }}>
@@ -1109,8 +1151,36 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               </div>
             </label>
             {!isAllDay && <label style={lStyle}>
+              <span>{'\uD83C\uDFC1'} Finish</span>
+              <input type="time" value={endTime || ''} step={60}
+                onChange={e => {
+                  var newEnd = e.target.value || '';
+                  setEndTime(newEnd);
+                  var startMin = minutesFrom24h(time);
+                  var endMin = minutesFrom24h(newEnd);
+                  if (startMin == null || endMin == null || endMin <= startMin) {
+                    setEndTimeError('Finish must be after start');
+                    return;
+                  }
+                  setEndTimeError(null);
+                  setDur(endMin - startMin);
+                  if (!isCreate && !isFixed) setDatePinned(true);
+                }}
+                style={{ ...iStyle, width: isMobile ? '100%' : undefined, minWidth: 0,
+                  ...(endTimeError ? { borderColor: '#DC2626' } : (datePinned && time ? { borderColor: '#D97706' } : {})) }} />
+              {endTimeError && (
+                <span style={{ fontSize: 10, color: '#DC2626', marginTop: 2 }}>{endTimeError}</span>
+              )}
+            </label>}
+            {!isAllDay && <label style={lStyle}>
               <span>{'\u23F1'} Duration</span>
-              <select value={dur} onChange={e => setDur(parseInt(e.target.value))} style={iStyle}>
+              <select value={dur} onChange={e => {
+                var newDur = parseInt(e.target.value);
+                setDur(newDur);
+                // Keep finish in sync when user changes duration directly.
+                if (time) setEndTime(addMinutesTo24h(time, newDur));
+                setEndTimeError(null);
+              }} style={iStyle}>
                 {durOptions.map(v => (
                   <option key={v} value={v}>{durLabel(v)}</option>
                 ))}
@@ -1321,16 +1391,16 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             </div>
           </label>)}
 
-          {/* Due + Start after — hidden for markers, recurringTasks, and fixed tasks */}
+          {/* Deadline + Start after — hidden for markers, recurringTasks, and fixed tasks */}
           {!marker && !recurring && !isFixed && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, alignItems: 'flex-end', maxWidth: '100%' }}>
             <label style={lStyle}>
-              <span title="Hard deadline. The scheduler places this task before this date.">{'\uD83D\uDCC6'} Due</span>
+              <span title="Hard deadline. The scheduler places this task on or before this date.">{'\uD83D\uDCC6'} Deadline</span>
               <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                <input type="date" value={due || ''}
-                  onChange={e => setDue(e.target.value || '')}
-                  style={{ ...iStyle, minWidth: 0, flex: 1, ...(due ? { background: TH.amberBg } : {}) }} />
-                {due && (
-                  <button onClick={() => setDue('')} style={{
+                <input type="date" value={deadline || ''}
+                  onChange={e => setDeadline(e.target.value || '')}
+                  style={{ ...iStyle, minWidth: 0, flex: 1, ...(deadline ? { background: TH.amberBg } : {}) }} />
+                {deadline && (
+                  <button onClick={() => setDeadline('')} style={{
                     fontSize: 9, background: 'none', border: 'none', color: TH.redText,
                     cursor: 'pointer', padding: 0, fontWeight: 700
                   }}>{'\u2715'}</button>

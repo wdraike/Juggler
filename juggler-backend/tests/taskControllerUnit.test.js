@@ -17,7 +17,7 @@ function makeRow(overrides) {
     id: 'test-001', user_id: 'u1', task_type: 'task', text: 'Test',
     scheduled_at: null, desired_at: null, desired_date: null, tz: null,
     dur: 30, time_remaining: null, pri: 'P3', project: null, status: '',
-    section: null, notes: null, due_at: null, start_after_at: null,
+    section: null, notes: null, deadline: null, start_after_at: null,
     location: '[]', tools: '[]', when: null, day_req: null,
     recurring: 0, rigid: 0, time_flex: null, split: null, split_min: null,
     recur: null, source_id: null, generated: 0,

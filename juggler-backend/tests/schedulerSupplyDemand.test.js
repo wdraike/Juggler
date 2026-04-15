@@ -113,10 +113,10 @@ describe('Category A: Capacity Crunch', () => {
   test('A2: Today heavily loaded by P1 deadlines — P3 deferred', () => {
     // Fill today with multiple P1 deadline tasks in different location blocks
     const tasks = [
-      makeTask({ id: 'p1a', pri: 'P1', dur: 120, due: TODAY, date: TODAY }), // fits in biz1 (480-720)
-      makeTask({ id: 'p1b', pri: 'P1', dur: 120, due: TODAY, date: TODAY }), // fits in biz1 remaining or biz2
-      makeTask({ id: 'p1c', pri: 'P1', dur: 120, due: TODAY, date: TODAY }), // fits in biz2 or evening
-      makeTask({ id: 'p1d', pri: 'P1', dur: 120, due: TODAY, date: TODAY }), // evening
+      makeTask({ id: 'p1a', pri: 'P1', dur: 120, deadline: TODAY, date: TODAY }), // fits in biz1 (480-720)
+      makeTask({ id: 'p1b', pri: 'P1', dur: 120, deadline: TODAY, date: TODAY }), // fits in biz1 remaining or biz2
+      makeTask({ id: 'p1c', pri: 'P1', dur: 120, deadline: TODAY, date: TODAY }), // fits in biz2 or evening
+      makeTask({ id: 'p1d', pri: 'P1', dur: 120, deadline: TODAY, date: TODAY }), // evening
       // P3 no-deadline should be deferred if today is tight
       makeTask({ id: 'p3_flex', pri: 'P3', dur: 60, date: TODAY }),
     ];
@@ -286,7 +286,7 @@ describe('Category C: Dependency Chain Under Pressure', () => {
       makeTask({ id: 'block', when: 'fixed', date: TODAY, time: '8:00 AM', dur: 420, datePinned: true }),
       makeTask({ id: 'chainA', pri: 'P1', dur: 180, date: TODAY, dependsOn: [] }),
       makeTask({ id: 'chainB', pri: 'P1', dur: 180, date: TODAY, dependsOn: ['chainA'] }),
-      makeTask({ id: 'chainC', pri: 'P1', dur: 180, date: TODAY, due: TODAY, dependsOn: ['chainB'] }),
+      makeTask({ id: 'chainC', pri: 'P1', dur: 180, date: TODAY, deadline: TODAY, dependsOn: ['chainB'] }),
     ];
 
     const result = run(tasks);
@@ -311,7 +311,7 @@ describe('Category C: Dependency Chain Under Pressure', () => {
       makeTask({ id: 'dc2', pri: 'P1', dur: 90, date: TODAY, dependsOn: ['dc1'] }),
       makeTask({ id: 'dc3', pri: 'P1', dur: 90, date: TODAY, dependsOn: ['dc2'] }),
       makeTask({ id: 'dc4', pri: 'P1', dur: 90, date: TODAY, dependsOn: ['dc3'] }),
-      makeTask({ id: 'dc5', pri: 'P1', dur: 90, date: TODAY, due: tomorrow, dependsOn: ['dc4'] }),
+      makeTask({ id: 'dc5', pri: 'P1', dur: 90, date: TODAY, deadline: tomorrow, dependsOn: ['dc4'] }),
     ];
 
     const result = run(tasks);
@@ -340,7 +340,7 @@ describe('Category C: Dependency Chain Under Pressure', () => {
     // If today is tight, A's deadline is already "past"
     const tasks = [
       makeTask({ id: 'parentA', pri: 'P1', dur: 120, date: TODAY }),
-      makeTask({ id: 'childB', pri: 'P1', dur: 120, date: TODAY, due: TODAY, dependsOn: ['parentA'] }),
+      makeTask({ id: 'childB', pri: 'P1', dur: 120, date: TODAY, deadline: TODAY, dependsOn: ['parentA'] }),
     ];
 
     const result = run(tasks);
@@ -361,7 +361,7 @@ describe('Category C: Dependency Chain Under Pressure', () => {
       makeTask({ id: 'dA', pri: 'P1', dur: 60, date: TODAY }),
       makeTask({ id: 'dB', pri: 'P1', dur: 60, date: TODAY }),
       makeTask({ id: 'dC', pri: 'P1', dur: 60, date: TODAY, dependsOn: ['dA', 'dB'] }),
-      makeTask({ id: 'dD', pri: 'P1', dur: 60, date: TODAY, due: tomorrow, dependsOn: ['dC'] }),
+      makeTask({ id: 'dD', pri: 'P1', dur: 60, date: TODAY, deadline: tomorrow, dependsOn: ['dC'] }),
     ];
 
     const result = run(tasks);
@@ -401,7 +401,7 @@ describe('Category D: Combined Pressure', () => {
       makeTask({ id: 'meds_h', recurring: true, rigid: true, when: 'morning', dur: 20, date: TODAY, generated: true }),
       // Dependency chain P1
       makeTask({ id: 'step1', pri: 'P1', dur: 90, date: TODAY }),
-      makeTask({ id: 'step2', pri: 'P1', dur: 90, date: TODAY, due: dateKey(1), dependsOn: ['step1'] }),
+      makeTask({ id: 'step2', pri: 'P1', dur: 90, date: TODAY, deadline: dateKey(1), dependsOn: ['step1'] }),
     ];
 
     const result = run(tasks);
@@ -488,9 +488,9 @@ describe('Category D: Combined Pressure', () => {
 
   test('D5: Multiple P1 deadlines consume today, P1 non-deadline still placed somewhere', () => {
     const tasks = [
-      makeTask({ id: 'dl1', pri: 'P1', dur: 120, due: TODAY, date: TODAY }),
-      makeTask({ id: 'dl2', pri: 'P1', dur: 120, due: TODAY, date: TODAY }),
-      makeTask({ id: 'dl3', pri: 'P1', dur: 120, due: TODAY, date: TODAY }),
+      makeTask({ id: 'dl1', pri: 'P1', dur: 120, deadline: TODAY, date: TODAY }),
+      makeTask({ id: 'dl2', pri: 'P1', dur: 120, deadline: TODAY, date: TODAY }),
+      makeTask({ id: 'dl3', pri: 'P1', dur: 120, deadline: TODAY, date: TODAY }),
       makeTask({ id: 'p1_flex', pri: 'P1', dur: 60, date: TODAY }),
     ];
 
@@ -511,8 +511,8 @@ describe('Category D: Combined Pressure', () => {
       makeTask({ id: 'h3', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
       makeTask({ id: 'h4', recurring: true, rigid: true, when: 'evening', dur: 10, date: TODAY, generated: true }),
       // P1 deadline tasks filling the biz blocks
-      makeTask({ id: 'crunch1', pri: 'P1', dur: 120, due: TODAY, date: TODAY }),
-      makeTask({ id: 'crunch2', pri: 'P1', dur: 120, due: TODAY, date: TODAY }),
+      makeTask({ id: 'crunch1', pri: 'P1', dur: 120, deadline: TODAY, date: TODAY }),
+      makeTask({ id: 'crunch2', pri: 'P1', dur: 120, deadline: TODAY, date: TODAY }),
       // P4 filler
       makeTask({ id: 'filler', pri: 'P4', dur: 60, date: TODAY }),
     ];
@@ -561,7 +561,7 @@ describe('Category E: Placement Reasons', () => {
   test('E3: Deadline task reason includes due date', () => {
     const tomorrow = dateKey(1);
     const tasks = [
-      makeTask({ id: 'dl', pri: 'P1', dur: 60, date: TODAY, due: tomorrow }),
+      makeTask({ id: 'dl', pri: 'P1', dur: 60, date: TODAY, deadline: tomorrow }),
     ];
     const result = run(tasks);
     const p = findPlacements(result, 'dl')[0];
@@ -599,7 +599,7 @@ describe('Category E: Placement Reasons', () => {
     const tasks = [
       makeTask({ id: 'fixed', when: 'fixed', date: TODAY, time: '9:00 AM', dur: 60, datePinned: true }),
       makeTask({ id: 'recurring', recurring: true, rigid: true, when: 'morning', dur: 20, date: TODAY, generated: true }),
-      makeTask({ id: 'dl', pri: 'P1', dur: 60, date: TODAY, due: dateKey(2) }),
+      makeTask({ id: 'dl', pri: 'P1', dur: 60, date: TODAY, deadline: dateKey(2) }),
       makeTask({ id: 'flex', pri: 'P3', dur: 30, date: TODAY }),
     ];
     const result = run(tasks);
@@ -635,7 +635,7 @@ describe('Category E: Placement Reasons', () => {
     const tasks = [
       makeTask({ id: 'fixed1', when: 'fixed', date: TODAY, time: '9:00 AM', dur: 60, datePinned: true }),
       makeTask({ id: 'recur1', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
-      makeTask({ id: 'dl1', pri: 'P1', dur: 60, date: TODAY, due: dateKey(2) }),
+      makeTask({ id: 'dl1', pri: 'P1', dur: 60, date: TODAY, deadline: dateKey(2) }),
       makeTask({ id: 'flex1', pri: 'P3', dur: 30, date: TODAY }),
     ];
     const result = run(tasks, { cfg: debugCfg });

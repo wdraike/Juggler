@@ -80,7 +80,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
         if (ti.length > 0) d.push(ti.join(' '));
       }
       if (task.date) d.push('\uD83D\uDCC6 ' + task.date);
-      if (task.due && task.due !== task.date) d.push('\uD83D\uDCC5 due ' + task.due);
+      if (task.deadline && task.deadline !== task.date) d.push('\uD83D\uDCC5 deadline ' + task.deadline);
       if (task.notes) d.push(task.notes.replace(/\n/g, ' ').substring(0, 40));
       if (task.section) d.push(task.section);
       if (task.dependsOn && task.dependsOn.length > 0) d.push('\u26D3 ' + task.dependsOn.length + ' dep');

@@ -26,7 +26,7 @@ describe('task mapping', () => {
     direction: 'some dir',
     section: 'sec',
     notes: 'some notes',
-    due_at: '2026-03-20',
+    deadline: '2026-03-20',
     start_after_at: '2026-03-10',
     location: '["home","work"]',
     tools: '["phone"]',
@@ -61,7 +61,7 @@ describe('task mapping', () => {
       expect(task.dependsOn).toEqual(['t00']);
       expect(task.datePinned).toBe(true);
       expect(task.gcalEventId).toBe('gcal_123');
-      expect(task.due).toBe('3/20');
+      expect(task.deadline).toBe('2026-03-20');
       expect(task.startAfter).toBe('3/10');
     });
 

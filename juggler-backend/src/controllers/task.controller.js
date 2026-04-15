@@ -4,7 +4,7 @@
  * The DB stores scheduled_at (DATETIME, UTC) as the single source of truth.
  *
  * API accepts BOTH formats:
- *   - UTC ISO: scheduledAt ("2026-03-08T22:45:00Z"), dueAt, startAfterAt
+ *   - UTC ISO: scheduledAt ("2026-03-08T22:45:00Z"), deadline (YYYY-MM-DD), startAfterAt
  *   - Local strings: date ("3/8") + time ("6:45 PM") — converted server-side
  *   UTC takes precedence if both are provided.
  *
@@ -221,7 +221,6 @@ function rowToTask(row, timezone, sourceMap) {
   var date = null;
   var time = null;
   var day = null;
-  var due = null;
   var startAfter = null;
 
   // Derive date/time/day from scheduled_at (UTC source of truth).
@@ -248,26 +247,18 @@ function rowToTask(row, timezone, sourceMap) {
     time = ptH12 + ':' + (ptM < 10 ? '0' : '') + ptM + ' ' + ptAmpm;
   }
 
-  // Derive due from due_at DATE column
-  if (row.due_at) {
-    due = fromDateISO(row.due_at instanceof Date
-      ? row.due_at.toISOString().split('T')[0]
-      : String(row.due_at).split('T')[0]);
+  // Derive deadline (ISO YYYY-MM-DD) from the DATE column.
+  var deadlineISO = null;
+  if (row.deadline) {
+    deadlineISO = row.deadline instanceof Date
+      ? row.deadline.toISOString().split('T')[0]
+      : String(row.deadline).split('T')[0];
   }
   // Derive startAfter from start_after_at DATE column
   if (row.start_after_at) {
     startAfter = fromDateISO(row.start_after_at instanceof Date
       ? row.start_after_at.toISOString().split('T')[0]
       : String(row.start_after_at).split('T')[0]);
-  }
-
-  // Build dueAt / startAfterAt ISO strings
-  var dueAtISO = null;
-  if (row.due_at) {
-    var dueStr = row.due_at instanceof Date
-      ? row.due_at.toISOString().split('T')[0]
-      : String(row.due_at).split('T')[0];
-    dueAtISO = dueStr;
   }
   var startAfterAtISO = null;
   if (row.start_after_at) {
@@ -284,7 +275,7 @@ function rowToTask(row, timezone, sourceMap) {
     // UTC source of truth
     scheduledAt: scheduledAtToISO(row.scheduled_at),
     tz: row.tz || null,
-    dueAt: dueAtISO,
+    deadline: deadlineISO,
     startAfterAt: startAfterAtISO,
     // Derived local convenience fields
     date: date,
@@ -297,7 +288,6 @@ function rowToTask(row, timezone, sourceMap) {
     status: row.status || '',
     section: row.section,
     notes: row.notes,
-    due: due,
     startAfter: startAfter,
     location: safeParseJSON(row.location, []),
     tools: safeParseJSON(row.tools, []),
@@ -347,7 +337,7 @@ function rowToTask(row, timezone, sourceMap) {
 
 /**
  * Map API task to DB row.
- * Converts date+time → scheduled_at (UTC) and due/startAfter → due_at/start_after_at.
+ * Converts date+time → scheduled_at (UTC) and deadline/startAfter → deadline/start_after_at.
  */
 function taskToRow(task, userId, timezone) {
   var row = { user_id: userId };
@@ -361,11 +351,8 @@ function taskToRow(task, userId, timezone) {
   if (task.status !== undefined) row.status = task.status;
   if (task.section !== undefined) row.section = task.section;
   if (task.notes !== undefined) row.notes = task.notes;
-  // UTC ISO fields take precedence over local string fields
-  if (task.dueAt !== undefined) {
-    row.due_at = task.dueAt || null;
-  } else if (task.due !== undefined) {
-    row.due_at = task.due ? toDateISO(task.due) || null : null;
+  if (task.deadline !== undefined) {
+    row.deadline = task.deadline ? toDateISO(task.deadline) || task.deadline : null;
   }
   if (task.startAfterAt !== undefined) {
     row.start_after_at = task.startAfterAt || null;
@@ -1339,11 +1326,30 @@ async function updateTaskStatus(req, res) {
 
 
     await tasksWrite.updateTaskById(db, id, update, req.user.id);
+
+    // Split-chunk sibling propagation: a split-enabled recurring master produces
+    // multiple virtual chunks per occurrence (same occurrence_ordinal, different
+    // split_ordinal, ids like "UUID-YYYYMMDD" and "UUID-YYYYMMDD-2"). The user's
+    // "mark done" intent applies to the occurrence, not the individual chunk.
+    // Without this, marking chunk 1 done leaves chunk 2 active and the task
+    // reappears later in the day.
+    var siblingIds = [];
+    if (Number(existing.split_total) > 1 && existing.source_id != null && existing.occurrence_ordinal != null) {
+      var siblings = await db('task_instances')
+        .where({ user_id: req.user.id, master_id: existing.source_id, occurrence_ordinal: existing.occurrence_ordinal })
+        .whereNot('id', id)
+        .select('id');
+      for (var si = 0; si < siblings.length; si++) {
+        siblingIds.push(siblings[si].id);
+        await tasksWrite.updateTaskById(db, siblings[si].id, update, req.user.id);
+      }
+    }
+
     var updated = await fetchTaskWithEventIds(db, id, req.user.id);
     var srcMap = buildSourceMap(await db('tasks_v').where('user_id', req.user.id).where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); }).select());
     await cache.invalidateTasks(req.user.id);
-    enqueueScheduleRun(req.user.id, 'api:updateTaskStatus', [id]);
-    res.json({ task: rowToTask(updated, null, srcMap) });
+    enqueueScheduleRun(req.user.id, 'api:updateTaskStatus', [id].concat(siblingIds));
+    res.json({ task: rowToTask(updated, null, srcMap), siblingsUpdated: siblingIds.length });
   } catch (error) {
     console.error('Update task status error:', error);
     res.status(500).json({ error: 'Failed to update task status' });

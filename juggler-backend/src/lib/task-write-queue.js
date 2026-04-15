@@ -233,7 +233,7 @@ async function _doFlush(userId) {
       var fields = op.fields;
       // Fields came out of JSON, so datetime columns are ISO strings. MySQL
       // rejects those literally; rehydrate to Date so the driver formats them.
-      var DATETIME_FIELDS = ['scheduled_at', 'desired_at', 'due_at', 'start_after_at', 'disabled_at', 'recur_start', 'recur_end'];
+      var DATETIME_FIELDS = ['scheduled_at', 'desired_at', 'deadline', 'start_after_at', 'disabled_at', 'recur_start', 'recur_end'];
       for (var dfi = 0; dfi < DATETIME_FIELDS.length; dfi++) {
         var f = DATETIME_FIELDS[dfi];
         if (fields && typeof fields[f] === 'string' && fields[f].length > 0) {

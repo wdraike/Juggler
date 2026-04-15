@@ -131,9 +131,9 @@ function FixedPopup({ anchorRect, item, status, theme, darkMode }) {
           {locIcons.join(' ')} <span style={{ color: theme.textMuted }}>{(t.location || []).join(', ')}</span>
         </div>
       )}
-      {t.due && (
+      {t.deadline && (
         <div style={{ marginTop: 2, fontSize: 10, color: theme.amberText }}>
-          Due {t.due}
+          Deadline {t.deadline}
         </div>
       )}
       {t.notes && (
@@ -353,14 +353,14 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
             )}
             <div style={{ flex: 1 }} />
             {locIcons.length > 0 && <span style={{ fontSize: 9 }}>{locIcons.join(' ')}</span>}
-            {t.due && (
+            {t.deadline && (
               <span style={{
                 fontSize: 8, fontWeight: 600,
                 color: theme.amberText,
                 background: theme.amberBg,
                 borderRadius: 3, padding: '0 4px'
               }}>
-                Due {t.due}
+                Deadline {t.deadline}
               </span>
             )}
           </div>

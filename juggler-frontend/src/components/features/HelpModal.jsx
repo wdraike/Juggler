@@ -91,7 +91,7 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
           <P><B>When:</B> Time windows the task can be scheduled in — morning, lunch, afternoon, evening. Select multiple for flexibility.</P>
           <P><B>Location:</B> Which locations this task can be done at. If none selected, any location works.</P>
           <P><B>Tools:</B> Tools required for this task (e.g., laptop, phone). The scheduler checks the Tool Matrix to see which locations have these tools.</P>
-          <P><B>Due date:</B> Deadline — the scheduler tries to place the task on or before this date.</P>
+          <P><B>Deadline:</B> Hard deadline — the scheduler places the task on or before this date. Not negotiable.</P>
           <P><B>Start after:</B> Earliest date the task can be scheduled.</P>
           <P><B>Rigid:</B> Locks the task to its set date and time — the scheduler won&apos;t move it.</P>
           <P><B>Date pinned:</B> Keeps the task on its assigned date, but the scheduler can still adjust the time within that day.</P>
