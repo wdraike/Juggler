@@ -308,44 +308,17 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var deadline = t.due ? parseDate(t.due) : null;
       if (deadline) deadline.setHours(23, 59, 59, 999);
 
-      // Split tasks: break into individual minChunk-sized pool items.
-      // Each chunk is scheduled independently. After placement, consecutive
-      // same-task chunks on the same day are merged for display.
-      if (t.split && effectiveDur > 0) {
-        var chunk = t.splitMin || MIN_CHUNK;
-        var numChunks = Math.ceil(effectiveDur / chunk);
-        for (var ci = 0; ci < numChunks; ci++) {
-          var chunkDur = (ci === numChunks - 1 && effectiveDur % chunk !== 0)
-            ? effectiveDur % chunk : chunk;
-          // If last chunk is smaller than minChunk, merge with previous
-          if (chunkDur < chunk && ci > 0) {
-            // Add remainder to the previous chunk instead
-            pool[pool.length - 1].remaining += chunkDur;
-            pool[pool.length - 1].totalDur += chunkDur;
-            break;
-          }
-          pool.push({
-            task: t, remaining: chunkDur, totalDur: chunkDur,
-            earliestDate: earliest, deadline: deadline, ceiling: ceiling,
-            splittable: false, // each chunk is atomic
-            minChunk: chunkDur,
-            _parts: [],
-            _poolId: t.id + '_chunk_' + (ci + 1),
-            _splitChunk: ci + 1,
-            _splitTotalChunks: numChunks,
-            _splitParentDur: effectiveDur
-          });
-        }
-      } else {
-        pool.push({
-          task: t, remaining: effectiveDur, totalDur: effectiveDur,
-          earliestDate: earliest, deadline: deadline, ceiling: ceiling,
-          splittable: false,
-          minChunk: effectiveDur,
-          _parts: [],
-          _poolId: t.id
-        });
-      }
+      // Each DB row is already the placeable unit. Recurring-split masters
+      // materialize one task_instances row per chunk at reconcile time; by the
+      // time we're here, t.dur is the chunk's duration. Don't re-chunk in memory.
+      pool.push({
+        task: t, remaining: effectiveDur, totalDur: effectiveDur,
+        earliestDate: earliest, deadline: deadline, ceiling: ceiling,
+        splittable: false,
+        minChunk: effectiveDur,
+        _parts: [],
+        _poolId: t.id
+      });
     }
   });
 

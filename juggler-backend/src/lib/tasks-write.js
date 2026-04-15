@@ -100,8 +100,8 @@ function pickInstance(row, id, masterId, occOrdinal) {
     master_id: masterId,
     user_id: row.user_id,
     occurrence_ordinal: occOrdinal,
-    split_ordinal: 1,
-    split_total: 1,
+    split_ordinal: row.split_ordinal != null ? row.split_ordinal : 1,
+    split_total: row.split_total != null ? row.split_total : 1,
     scheduled_at: row.scheduled_at || null,
     dur: row.dur != null ? row.dur : 30,
     date_pinned: row.date_pinned ? 1 : 0,
@@ -254,12 +254,20 @@ async function insertTasksBatch(dbOrTrx, rows) {
   // Source ids with zero existing instances (no row in the aggregate) start at 0.
 
   // Assign per-source incrementing ordinals while preserving input order.
+  // Caller may supply r.occurrence_ordinal explicitly (used when inserting
+  // multiple split chunks that must share one ordinal per occurrence).
   var nextByMaster = {};
   var recurringInstanceRows = recurringInstanceInputs.map(function(r) {
     var sid = r.source_id;
-    if (nextByMaster[sid] === undefined) nextByMaster[sid] = (maxByMaster[sid] || 0);
-    nextByMaster[sid] += 1;
-    return pickInstance(r, r.id, sid, nextByMaster[sid]);
+    var ord;
+    if (r.occurrence_ordinal != null) {
+      ord = r.occurrence_ordinal;
+    } else {
+      if (nextByMaster[sid] === undefined) nextByMaster[sid] = (maxByMaster[sid] || 0);
+      nextByMaster[sid] += 1;
+      ord = nextByMaster[sid];
+    }
+    return pickInstance(r, r.id, sid, ord);
   });
 
   if (masterRows.length > 0) {

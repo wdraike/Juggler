@@ -110,7 +110,7 @@ export default function CalSyncPanel({
     if (appleConnected) {
       loadAppleCalendars();
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line
 
   function loadAppleCalendars() {
     apiClient.get('/apple-cal/calendars')

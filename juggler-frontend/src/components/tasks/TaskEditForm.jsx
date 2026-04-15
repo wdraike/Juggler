@@ -646,15 +646,16 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var isPinned = !isCreate && task && task.prevWhen != null;
   function handleUnpin() {
     if (!task) return;
-    apiClient.put('/tasks/' + task.id + '/unpin').then(function(res) {
-      if (res.data.action === 'deleted') {
-        // Recurring instance deleted — close editor, refresh task list
-        if (onClose) onClose();
-      } else {
-        // Regular task unpinned — update local state
-        if (onUpdate) onUpdate(task.id, { when: res.data.when, datePinned: false, prevWhen: null });
-      }
-    }).catch(function(err) {
+    var isRecurringInstance = task.taskType === 'recurring_instance' && task.sourceId;
+    // Optimistic update: flip UI state immediately, let the scheduler's final
+    // placement arrive via SSE. For recurring instances, the row is deleted
+    // server-side, so close the form now.
+    if (isRecurringInstance) {
+      if (onClose) onClose();
+    } else if (onUpdate) {
+      onUpdate(task.id, { when: task.prevWhen || '', datePinned: false, prevWhen: null });
+    }
+    apiClient.put('/tasks/' + task.id + '/unpin').catch(function(err) {
       console.error('Unpin failed:', err);
     });
   }

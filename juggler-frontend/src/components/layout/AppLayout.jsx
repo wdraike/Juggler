@@ -674,6 +674,42 @@ export default function AppLayout() {
     });
   }, []);
 
+  // Keep the open detail view (expandedTaskData) in sync with SSE task mutations.
+  // expandedTaskData is otherwise populated only on form-open, so backend changes
+  // (scheduler re-runs, other-tab edits, MCP writes) wouldn't reach the open form.
+  useEffect(function() {
+    if (expandedTasks.length === 0) return;
+    var es = window.__jugglerEventSource;
+    if (!es) return;
+    var openIds = {};
+    expandedTasks.forEach(function(id) { openIds[id] = true; });
+    var refresh = function(id) {
+      apiClient.get('/tasks/' + id).then(function(res) {
+        if (!res.data || !res.data.task) return;
+        setExpandedTaskData(function(prev) {
+          var next = Object.assign({}, prev);
+          next[id] = res.data.task;
+          return next;
+        });
+      }).catch(function() { /* 404 = deleted; leave state as-is */ });
+    };
+    var handle = function(e) {
+      var data = null;
+      try { data = JSON.parse(e.data); } catch (err) {}
+      if (!data) return;
+      var ids = [];
+      if (Array.isArray(data.ids)) ids = data.ids;
+      else if (data.changeset) ids = (data.changeset.changed || []).concat(data.changeset.added || []);
+      ids.filter(function(id) { return openIds[id]; }).forEach(refresh);
+    };
+    es.addEventListener('tasks:changed', handle);
+    es.addEventListener('schedule:changed', handle);
+    return function() {
+      es.removeEventListener('tasks:changed', handle);
+      es.removeEventListener('schedule:changed', handle);
+    };
+  }, [expandedTasks]);
+
 
   // Task create handler
   var handleCreate = useCallback((task) => {

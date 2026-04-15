@@ -36,7 +36,12 @@ app.set('trust proxy', 1);
 
 // Middleware
 app.use(helmet());
-app.use(compression());
+app.use(compression({
+  filter: (req, res) => {
+    if (res.getHeader('Content-Type') === 'text/event-stream') return false;
+    return compression.filter(req, res);
+  }
+}));
 
 const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000').split(',');
 app.use(cors({
@@ -70,7 +75,7 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Rate limiting
-const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false });
+const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 1000, standardHeaders: true, legacyHeaders: false });
 const aiLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
 const mcpLimiter = rateLimit({ windowMs: 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
 

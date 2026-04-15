@@ -401,21 +401,44 @@ export default function useTaskState() {
         var cs = data && data.changeset;
 
         if (cs) {
-          var addedLen = (cs.added || []).length;
-          var changedLen = (cs.changed || []).length;
-          var removedLen = (cs.removed || []).length;
+          var addedArr = cs.added || [];
+          var changedArr = cs.changed || [];
+          var removedArr = cs.removed || [];
           // Nothing actually changed — skip placements reload too. This is
           // the common "scheduler ran but nothing moved" case and it should
           // be completely silent.
-          if (addedLen + changedLen + removedLen === 0) {
+          if (addedArr.length + changedArr.length + removedArr.length === 0) {
             return;
           }
           // Remove deleted tasks from state immediately
-          if (removedLen > 0) {
-            dispatch({ type: 'REMOVE_TASKS', ids: cs.removed });
+          if (removedArr.length > 0) {
+            dispatch({ type: 'REMOVE_TASKS', ids: removedArr });
           }
-          // Fetch added + changed tasks from API in parallel — always complete data
-          var fetchIds = (cs.added || []).concat(cs.changed || []);
+          // Patch path: changed entries may be either ids (legacy) or {id, patch}.
+          // New format ships with patches so we skip the per-task fetch entirely.
+          var changedPatches = [];
+          var changedFetchIds = [];
+          changedArr.forEach(function(c) {
+            if (c && typeof c === 'object' && c.id && c.patch) changedPatches.push(c);
+            else if (typeof c === 'string') changedFetchIds.push(c);
+          });
+          if (changedPatches.length > 0) {
+            dispatch({ type: 'PATCH_TASKS', patches: changedPatches });
+          }
+          // Added: backend now ships full task objects in the changeset so the
+          // frontend can upsert directly. Older payloads (or any added entry
+          // that's still a bare id string) fall back to the fetch path.
+          var addedFullRows = [];
+          var addedFetchIds = [];
+          addedArr.forEach(function(a) {
+            if (a && typeof a === 'object' && a.id) addedFullRows.push(a);
+            else if (typeof a === 'string') addedFetchIds.push(a);
+          });
+          if (addedFullRows.length > 0) {
+            hydrateTaskTimezones(addedFullRows, getHydrationTimezone());
+            dispatch({ type: 'UPSERT_TASKS', tasks: addedFullRows });
+          }
+          var fetchIds = addedFetchIds.concat(changedFetchIds);
           if (fetchIds.length > 0) {
             Promise.all(fetchIds.map(function(id) {
               return apiClient.get('/tasks/' + id).then(function(res) {

@@ -125,6 +125,21 @@ export default function taskReducer(state, action) {
         _dirtyTaskIds: state._dirtyTaskIds
       };
     }
+    case 'PATCH_TASKS': {
+      // Apply server-authoritative partial updates (e.g. scheduler moved a task).
+      // Does NOT mark tasks dirty — the backend already persisted these fields.
+      var patchMap = {};
+      action.patches.forEach(function(p) { if (p && p.id) patchMap[p.id] = p.patch || {}; });
+      return {
+        statuses: state.statuses,
+        tasks: state.tasks.map(function(t) {
+          var p = patchMap[t.id];
+          return p ? Object.assign({}, t, p) : t;
+        }),
+        _dirtyStatuses: state._dirtyStatuses,
+        _dirtyTaskIds: state._dirtyTaskIds
+      };
+    }
     case 'UPSERT_TASKS': {
       // Insert or update tasks with complete API data
       var upsertMap = {};

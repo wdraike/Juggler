@@ -8,7 +8,7 @@
 
 var db = require('../db');
 var tasksWrite = require('../lib/tasks-write');
-var { reconcileSplitsForUser } = require('../lib/reconcile-splits');
+var { computeChunks } = require('../lib/reconcile-splits');
 var unifiedSchedule = require('./unifiedSchedule');
 var constants = require('./constants');
 var DEFAULT_TIME_BLOCKS = constants.DEFAULT_TIME_BLOCKS;
@@ -125,6 +125,48 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var srcMap = buildSourceMap(taskRows);
   var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
 
+  // 2b. Derive per-chunk placement brackets for recurring instances.
+  // Each instance's ID encodes its occurrence date as "<masterId>-YYYYMMDD[-N]".
+  // Master.recur's type drives the flex window:
+  //   daily    → 0 days  (strict same-day)
+  //   weekly   → 6 days  (Mon→Sun anchor)
+  //   monthly  → 27 days (~end of month)
+  //   every_N  → N-1 days
+  // start_after = occurrence date; due = start_after + flex.
+  allTasks.forEach(function(t) {
+    if (t.taskType !== 'recurring_instance' || !t.sourceId) return;
+    var master = srcMap[t.sourceId];
+    if (!master) return;
+    var m = String(t.id).match(/-(\d{8})(?:-\d+)?$/);
+    if (!m) return;
+    var y = parseInt(m[1].slice(0, 4), 10);
+    var mo = parseInt(m[1].slice(4, 6), 10);
+    var d = parseInt(m[1].slice(6, 8), 10);
+    var occ = new Date(y, mo - 1, d);
+    var recur = master.recur || {};
+    var type = (recur.type || '').toLowerCase();
+    var flex = 0;
+    if (type === 'weekly') flex = 6;
+    else if (type === 'monthly') flex = 27;
+    else if (type === 'every' || type === 'every_n') {
+      var every = Number(recur.every) || 1;
+      flex = Math.max(0, every - 1);
+    }
+    var dueDate = new Date(occ); dueDate.setDate(dueDate.getDate() + flex);
+    t.startAfter = formatDateKey(occ);
+    t.due = formatDateKey(dueDate);
+    // Anchor the chunk to its occurrence day so pool construction recognises
+    // it as day-specific. Without this, split_ordinal>=2 chunks have null
+    // scheduled_at → null t.date → the `t.recurring && td` check in
+    // unifiedSchedule.js skips the floor/ceiling assignment and they never
+    // place. Setting t.date (and t.day) synthetically has the same effect
+    // as if reconcile had written scheduled_at for them.
+    if (!t.date) {
+      t.date = t.startAfter;
+      t.day = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][occ.getDay()];
+    }
+  });
+
   // 3. Build statuses map
   var statuses = {};
   allTasks.forEach(function(t) {
@@ -138,50 +180,122 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var cfg = await loadConfig(userId);
   cfg.timezone = TIMEZONE;
 
-  // 5b. Reconcile recurring instance expansion.
-  // Instance IDs are derived from sourceId + date (see expandRecurring.js:293),
-  // so they're stable across runs. Rather than delete-all-then-regenerate
-  // (which bumps updated_at on every pending instance every run and triggers
-  // a full frontend refresh via /tasks/version), we diff the desired expansion
-  // against the existing pending set and only INSERT truly new instances and
-  // DELETE stale ones. Unchanged rows stay byte-identical — no write, no
-  // updated_at bump, no version bump, no SSE churn.
+  // 5b. Unified reconcile — recurring-instance expansion PLUS split chunks
+  // in one pass. Each master with split=1 produces K chunks per occurrence
+  // (computeChunks derives {split_ordinal, dur}). Chunk IDs are deterministic:
+  //   split_ordinal=1 → "<masterId>-YYYYMMDD" (from expandRecurring)
+  //   split_ordinal=N>=2 → "<masterId>-YYYYMMDD-N"
+  // All chunks of one occurrence share the same occurrence_ordinal.
+  //
+  // This replaces the prior two-pass design (expand-then-split-reconcile) that
+  // thrashed because the expand pass deleted chunk rows it didn't recognize.
   var today = parseDate(timeInfo.todayKey) || new Date();
   var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + 56);
 
-  // Existing pending recurring instances keyed by id (from the in-memory load).
+  // Index existing recurring_instance rows. Track pending (placeable) and the
+  // full set (any status) for ordinal preservation + existence lookup.
   var existingPendingIds = {};
+  var existingById = {}; // id -> { occ, status, master_id }
+  var maxOrdByMaster = {};
   taskRows.forEach(function(r) {
-    if (r.task_type === 'recurring_instance' && (!r.status || r.status === '')) {
-      existingPendingIds[r.id] = true;
+    if (r.task_type !== 'recurring_instance') return;
+    existingById[r.id] = {
+      occ: Number(r.occurrence_ordinal) || 0,
+      status: r.status,
+      master_id: r.master_id || r.source_id
+    };
+    if (!r.status || r.status === '') existingPendingIds[r.id] = true;
+    var mid = r.master_id || r.source_id;
+    if (mid) {
+      var o = Number(r.occurrence_ordinal) || 0;
+      if (o > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = o;
     }
   });
 
-  // expandRecurring() skips generating an instance whose (sourceId, date)
-  // already appears in allTasks (see expandRecurring.js:28-35). To learn the
-  // full desired set (not just the "missing" delta), hide existing pending
-  // instances from it — same effect as the old "delete first" sequence, but
-  // no DB round-trip.
+  // expandRecurring skips generating an instance whose (sourceId, date) already
+  // appears in allTasks. Hide pending chunks from that input so the expansion
+  // is authoritative (we rebuild the full desired set below).
   var allTasksForExpand = allTasks.filter(function(t) {
     if (t.taskType !== 'recurring_instance') return true;
-    return !existingPendingIds[t.id]; // keep non-pending (done/skipped) instances
+    return !existingPendingIds[t.id];
   });
-  var desired = expandRecurring(allTasksForExpand, today, expandEnd, { statuses: statuses });
+  var desiredOccurrences = expandRecurring(allTasksForExpand, today, expandEnd, { statuses: statuses });
   var MAX_EXPANDED = 500;
-  if (desired.length > MAX_EXPANDED) {
-    console.warn('[SCHED] expansion capped: ' + desired.length + ' → ' + MAX_EXPANDED);
-    desired = desired.slice(0, MAX_EXPANDED);
+  if (desiredOccurrences.length > MAX_EXPANDED) {
+    console.warn('[SCHED] expansion capped: ' + desiredOccurrences.length + ' → ' + MAX_EXPANDED);
+    desiredOccurrences = desiredOccurrences.slice(0, MAX_EXPANDED);
   }
+
+  // Fan out each occurrence into K chunks based on master.split / splitMin.
+  var nextOrdByMaster = Object.assign({}, maxOrdByMaster);
+  var desiredRows = [];
+  desiredOccurrences.forEach(function(occ) {
+    var masterId = occ.sourceId;
+    var primaryId = occ.id; // <masterId>-YYYYMMDD
+
+    // Determine chunk plan. occ inherits master.split / master.splitMin via
+    // expandRecurring's newTasks copy.
+    var chunks;
+    if (occ.split && occ.dur) {
+      chunks = computeChunks(occ.dur, occ.splitMin);
+      if (chunks.length === 0) chunks = [{ splitOrdinal: 1, splitTotal: 1, dur: occ.dur || 30 }];
+    } else {
+      chunks = [{ splitOrdinal: 1, splitTotal: 1, dur: occ.dur || 30 }];
+    }
+
+    // One occurrence ordinal shared by all chunks of this day.
+    var occOrd;
+    if (existingById[primaryId]) {
+      occOrd = existingById[primaryId].occ;
+    } else {
+      nextOrdByMaster[masterId] = (nextOrdByMaster[masterId] || 0) + 1;
+      occOrd = nextOrdByMaster[masterId];
+    }
+
+    chunks.forEach(function(c) {
+      var chunkId = c.splitOrdinal === 1 ? primaryId : primaryId + '-' + c.splitOrdinal;
+      desiredRows.push({
+        id: chunkId,
+        sourceId: masterId,
+        date: occ.date,
+        time: occ.time,
+        occurrence_ordinal: occOrd,
+        split_ordinal: c.splitOrdinal,
+        split_total: chunks.length,
+        dur: c.dur
+      });
+    });
+  });
 
   // Diff desired vs existing pending.
   var desiredIds = {};
-  desired.forEach(function(t) { desiredIds[t.id] = true; });
-  var toInsert = desired.filter(function(t) { return !existingPendingIds[t.id]; });
+  var desiredById = {};
+  desiredRows.forEach(function(r) { desiredIds[r.id] = true; desiredById[r.id] = r; });
+  var toInsert = desiredRows.filter(function(r) { return !existingPendingIds[r.id]; });
   var toDeleteIds = Object.keys(existingPendingIds).filter(function(id) { return !desiredIds[id]; });
 
-  // Preserve the variable names the downstream changeset computation uses:
-  //   deadIds = ids that were actually deleted this run
-  //   expanded = instances that were actually inserted this run
+  // Drift fix: existing pending rows whose (split_ordinal, split_total, dur)
+  // don't match the current chunk plan get UPDATEd in place. Covers the case
+  // where master.dur or master.split_min changed, or where a prior bug wrote
+  // the wrong chunk dur.
+  var toUpdate = [];
+  taskRows.forEach(function(r) {
+    if (r.task_type !== 'recurring_instance') return;
+    if (r.status && r.status !== '') return;
+    var want = desiredById[r.id];
+    if (!want) return;
+    var curSo = Number(r.split_ordinal) || 1;
+    var curSt = Number(r.split_total) || 1;
+    var curDur = Number(r.dur);
+    if (curSo !== want.split_ordinal || curSt !== want.split_total || curDur !== want.dur) {
+      toUpdate.push({
+        id: r.id,
+        changes: { split_ordinal: want.split_ordinal, split_total: want.split_total, dur: want.dur }
+      });
+    }
+  });
+
+  // Preserve the variable names the downstream changeset computation uses.
   var deadIds = toDeleteIds;
   var expanded = toInsert;
 
@@ -191,14 +305,43 @@ async function runScheduleAndPersist(userId, _retries, options) {
     console.log('[SCHED] reconcile: deleted ' + toDeleteIds.length + ' stale recurring instances');
     reconcileChanged = true;
   }
+  if (toUpdate.length > 0) {
+    for (var ui = 0; ui < toUpdate.length; ui++) {
+      await trx('task_instances')
+        .where('id', toUpdate[ui].id)
+        .update(Object.assign({}, toUpdate[ui].changes, { updated_at: db.fn.now() }));
+    }
+    // Sync in-memory allTasks so placement sees the corrected dur/split fields.
+    // Without this, the scheduler would re-place using the old dur and the
+    // persist pass would overwrite the DB update we just made.
+    var updateById = {};
+    toUpdate.forEach(function(u) { updateById[u.id] = u.changes; });
+    allTasks.forEach(function(t) {
+      var ch = updateById[t.id];
+      if (!ch) return;
+      if (ch.dur != null) t.dur = ch.dur;
+      if (ch.split_ordinal != null) t.splitOrdinal = ch.split_ordinal;
+      if (ch.split_total != null) t.splitTotal = ch.split_total;
+    });
+    console.log('[SCHED] reconcile: updated ' + toUpdate.length + ' instance rows to match chunk plan');
+    reconcileChanged = true;
+  }
   if (toInsert.length > 0) {
     var insertRows = toInsert.map(function(t) {
-      var scheduledAt = t.date ? localToUtc(t.date, t.time || null, TIMEZONE) : null;
+      // Only the primary chunk inherits the master's template time; later
+      // chunks start unplaced and get their scheduled_at from the placement phase.
+      var scheduledAt = (t.split_ordinal === 1 && t.date)
+        ? localToUtc(t.date, t.time || null, TIMEZONE)
+        : null;
       return {
         id: t.id,
         user_id: userId,
         task_type: 'recurring_instance',
         source_id: t.sourceId,
+        occurrence_ordinal: t.occurrence_ordinal,
+        split_ordinal: t.split_ordinal,
+        split_total: t.split_total,
+        dur: t.dur,
         generated: 0,
         recurring: 1,
         scheduled_at: scheduledAt || null,
@@ -208,19 +351,13 @@ async function runScheduleAndPersist(userId, _retries, options) {
       };
     });
     await tasksWrite.insertTasksBatch(trx, insertRows);
-    console.log('[SCHED] reconcile: inserted ' + toInsert.length + ' new recurring instances');
+    console.log('[SCHED] reconcile: inserted ' + toInsert.length + ' new recurring instance rows (incl. chunks)');
     reconcileChanged = true;
   }
 
-  // 5c. Reconcile split chunks. Per-user batched: 2 queries to load all split
-  // masters and their instances, then all reconciles run from in-memory data.
-  var splitSummary = await reconcileSplitsForUser(trx, userId);
-  var splitReconcileChanged = (splitSummary.inserted + splitSummary.deleted + splitSummary.updated) > 0;
-  if (splitReconcileChanged) {
-    console.log('[SCHED] split reconcile: touched ' + splitSummary.mastersTouched +
-      ' master(s); +' + splitSummary.inserted + '/-' + splitSummary.deleted +
-      '/~' + splitSummary.updated);
-  }
+  // Split reconcile is now folded into the unified pass above — no separate step.
+  var splitReconcileChanged = false;
+  var splitSummary = { touchedMasterIds: [] };
 
   // Narrowed re-read: only refetch rows that actually changed.
   // Recurring deletions: drop in-memory; no DB roundtrip needed.
@@ -339,13 +476,27 @@ async function runScheduleAndPersist(userId, _retries, options) {
     });
 
     if (dateChanged || timeChanged) {
+      // Derive day-of-week label for the patch so the frontend can render
+      // without a lookup. parseDate handles both M/D and MM/DD.
+      var parsedForDay = parseDate(newDate);
+      var dayLabel = parsedForDay ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][parsedForDay.getDay()] : null;
       updatedTasks.push({
         id: taskId,
         text: original.text,
         from: original.date,
         to: newDate,
         fromTime: original.time,
-        toTime: newTime
+        toTime: newTime,
+        // Minimal patch for SSE — only the fields the scheduler actually mutated.
+        // Frontend merges this in without a re-fetch.
+        patch: {
+          date: newDate || null,
+          time: newTime || null,
+          day: dayLabel,
+          scheduledAt: newScheduledAt instanceof Date ? newScheduledAt.toISOString() : newScheduledAt,
+          dur: placement.dur || original.dur || null,
+          unscheduled: false
+        }
       });
       updated++;
     }
@@ -365,8 +516,27 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // Recurring instances that weren't placed by the algorithm should not be flagged
     // as unscheduled — they'll be placed when their day comes, or auto-skipped if past.
     if (original.taskType === 'recurring_instance') return;
-    // Mark as unscheduled — clear scheduled_at so the task shows as unscheduled, not at a fake time
-    pendingUpdates.push({ id: t.id, dbUpdate: { unscheduled: 1, scheduled_at: null, updated_at: db.fn.now() } });
+    // Mark as unscheduled but PRESERVE scheduled_at — it stays as the
+    // last-proposed time so the frontend can render the chunk in the
+    // unscheduled lane with a sensible "was supposed to be at" timestamp,
+    // and a future "mark done" click can infer a plausible done_at.
+    // The unscheduled=1 boolean is the sole signal that it's not on the calendar.
+    pendingUpdates.push({ id: t.id, dbUpdate: { unscheduled: 1, updated_at: db.fn.now() } });
+    // Emit SSE change only on the transition from placed → unscheduled.
+    var rawRow = rawRowById[t.id];
+    var wasPlaced = !!(original.date || original.time || (rawRow && rawRow.scheduled_at));
+    var wasAlreadyUnscheduled = !!(rawRow && rawRow.unscheduled);
+    if (wasPlaced && !wasAlreadyUnscheduled) {
+      updatedTasks.push({
+        id: t.id,
+        text: original.text,
+        from: original.date,
+        to: original.date, // proposed date stays
+        fromTime: original.time,
+        toTime: original.time,
+        patch: { unscheduled: true } // scheduled_at/date/time/day unchanged
+      });
+    }
     cleared++;
   });
 
@@ -429,6 +599,69 @@ async function runScheduleAndPersist(userId, _retries, options) {
       movedPast++;
     });
     if (movedPast > 0) console.log('[SCHED] moved/skipped ' + movedPast + ' past-dated tasks');
+  }
+
+  // 9b. Merge-back pass — fold same-master chunks that landed back-to-back on
+  // a day into a single row. The survivor's dur grows; the sibling row is
+  // deleted from the DB. Reconcile next run will re-split and re-place; if
+  // the chunks land adjacent again, they re-merge — idempotent end state.
+  // Skip done/cancel/skip rows: only reshape pending placements.
+  if (pendingUpdates.length > 0) {
+    var byPlacement = {}; // key: pendingUpdate index → metadata
+    var groupedByDayMaster = {}; // key: dateKey + '|' + masterId → [updateIndices]
+    pendingUpdates.forEach(function(pu, idx) {
+      var sa = pu.dbUpdate.scheduled_at;
+      if (!sa) return; // unscheduled or unrelated update — skip
+      var orig = taskById[pu.id];
+      if (!orig || orig.taskType !== 'recurring_instance' || !orig.sourceId) return;
+      if (orig.status && orig.status !== '') return;
+      // Derive local date + start minute from scheduled_at
+      var saDate = sa instanceof Date ? sa : new Date(sa);
+      var local = utcToLocal(saDate, TIMEZONE);
+      if (!local || !local.date) return;
+      var startMin = parseTimeToMinutes(local.time);
+      if (startMin == null) return;
+      var dur = Number(pu.dbUpdate.dur || orig.dur || 30);
+      byPlacement[idx] = { dateKey: local.date, sourceId: orig.sourceId, startMin: startMin, dur: dur };
+      var key = local.date + '|' + orig.sourceId;
+      if (!groupedByDayMaster[key]) groupedByDayMaster[key] = [];
+      groupedByDayMaster[key].push(idx);
+    });
+
+    var mergeDeleteIds = [];
+    var dropFromPending = {};
+    var mergedCount = 0;
+    Object.keys(groupedByDayMaster).forEach(function(key) {
+      var indices = groupedByDayMaster[key];
+      if (indices.length < 2) return;
+      // Sort by start time
+      indices.sort(function(a, b) { return byPlacement[a].startMin - byPlacement[b].startMin; });
+      // Walk pairs, fold adjacent into the survivor
+      var survivorIdx = indices[0];
+      for (var i = 1; i < indices.length; i++) {
+        var nextIdx = indices[i];
+        var sMeta = byPlacement[survivorIdx];
+        var nMeta = byPlacement[nextIdx];
+        // Adjacent if survivor's end == next's start (within 1 min tolerance)
+        if (Math.abs((sMeta.startMin + sMeta.dur) - nMeta.startMin) <= 1) {
+          // Fold: extend survivor's dur, mark next for delete
+          sMeta.dur += nMeta.dur;
+          pendingUpdates[survivorIdx].dbUpdate.dur = sMeta.dur;
+          mergeDeleteIds.push(pendingUpdates[nextIdx].id);
+          dropFromPending[nextIdx] = true;
+          mergedCount++;
+        } else {
+          // Not adjacent — start a new survivor for the next chunk
+          survivorIdx = nextIdx;
+        }
+      }
+    });
+
+    if (mergeDeleteIds.length > 0) {
+      pendingUpdates = pendingUpdates.filter(function(_, idx) { return !dropFromPending[idx]; });
+      await trx('task_instances').whereIn('id', mergeDeleteIds).del();
+      console.log('[SCHED] merge-back: folded ' + mergedCount + ' adjacent chunk(s); deleted ' + mergeDeleteIds.length + ' sibling row(s)');
+    }
   }
 
   // Execute updates in batches to avoid long-running single-row UPDATEs.
@@ -587,10 +820,23 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
   // Removed: deleted but not regenerated with same ID
   var removed = (deadIds || []).filter(function(id) { return !bornSet[id]; });
-  // Added: born but didn't exist before
-  var added = expanded.filter(function(t) { return !deadSet[t.id]; }).map(function(t) { return t.id; });
-  // Changed: tasks whose date/time was moved by the scheduler
-  var changed = updatedTasks.map(function(t) { return t.id; });
+  // Added: born but didn't exist before. Carry the full row so the frontend
+  // doesn't have to fetch — it has nothing to merge into and would otherwise
+  // do an N+1 GET per added row (catastrophic when reconcile inserts ~500).
+  var addedIdSet = {};
+  expanded.forEach(function(t) { if (!deadSet[t.id]) addedIdSet[t.id] = true; });
+  var rowsById = {};
+  taskRows.forEach(function(r) { rowsById[r.id] = r; });
+  var added = Object.keys(addedIdSet).map(function(id) {
+    var r = rowsById[id];
+    if (!r) return { id: id }; // fallback: id-only (frontend will fetch as before)
+    // Project a full task shape via rowToTask so the frontend gets exactly the
+    // same fields it would have received from GET /api/tasks/:id.
+    return rowToTask(r, null, srcMap);
+  });
+  // Changed: tasks whose date/time was moved (or cleared) by the scheduler.
+  // Send {id, patch} so the frontend can merge without re-fetching.
+  var changed = updatedTasks.map(function(t) { return { id: t.id, patch: t.patch || {} }; });
 
   // Affected dates: all dates that had tasks added, removed, or moved
   var affectedDates = {};

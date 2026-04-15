@@ -90,8 +90,16 @@ async function processUser(userId) {
       return;
     }
 
-    // Check if quiet period has elapsed since the newest entry
-    var newestTime = new Date(newest.created_at).getTime();
+    // Check if quiet period has elapsed since the newest entry.
+    // MySQL returns `created_at` as a tz-less string (dateStrings: true in
+    // knexfile) representing UTC wall time; `new Date(str)` without a tz
+    // designator parses as LOCAL time, which makes elapsed perpetually
+    // negative on non-UTC hosts. Append 'Z' to force UTC parsing.
+    var createdAt = newest.created_at;
+    if (typeof createdAt === 'string' && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(createdAt)) {
+      createdAt = createdAt.replace(' ', 'T') + 'Z';
+    }
+    var newestTime = new Date(createdAt).getTime();
     var elapsed = Date.now() - newestTime;
     if (elapsed < DEBOUNCE_MS) {
       // Still within quiet period — leave dirty, poll will re-check

@@ -195,9 +195,13 @@ function rowToTask(row, timezone, sourceMap) {
   if (src && row.status !== 'disabled') {
     // Recurring instances always inherit template fields from the source template.
     // The template is the single source of truth — instances never override.
+    // Exception: for split chunks (split_total > 1), the instance's per-chunk
+    // `dur` is the truth — each chunk is only part of the master's total dur.
+    var isSplitChunk = Number(row.split_total) > 1;
     var merged = {};
     Object.keys(row).forEach(function(k) { merged[k] = row[k]; });
     TEMPLATE_FIELDS.forEach(function(f) {
+      if (f === 'dur' && isSplitChunk) return; // keep the chunk's own dur
       merged[f] = src[f];
     });
     row = merged;
