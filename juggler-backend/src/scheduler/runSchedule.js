@@ -283,10 +283,6 @@ async function runScheduleAndPersist(userId, _retries, options) {
         sourceId: masterId,
         date: occ.date,
         time: occ.time,
-        // Thread the master's preferred time through so the insert path can
-        // fall back to it when `time` is null. Without this, chunks of masters
-        // with ptm-but-no-time get stamped at midnight local by localToUtc.
-        preferredTimeMins: occ.preferredTimeMins,
         occurrence_ordinal: occOrd,
         split_ordinal: c.splitOrdinal,
         split_total: chunks.length,
@@ -358,15 +354,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var insertRows = toInsert.map(function(t) {
       // Only the primary chunk inherits the master's template time; later
       // chunks start unplaced and get their scheduled_at from the placement phase.
-      // Derive the time from preferredTimeMins when the master has no specific
-      // `time` string — without this fallback, localToUtc(date, null, tz) would
-      // stamp the row at midnight local (04:00 UTC in EDT) and downstream
-      // placement would see a "positioned" row and skip it, causing the entire
-      // master to sit at wall-clock midnight.
-      var ptm = t.preferredTimeMins;
-      var timeStr = t.time || (ptm != null && ptm >= 0 ? formatMinutesToTime(ptm) : null);
       var scheduledAt = (t.split_ordinal === 1 && t.date)
-        ? localToUtc(t.date, timeStr, TIMEZONE)
+        ? localToUtc(t.date, t.time || null, TIMEZONE)
         : null;
       return {
         id: t.id,
