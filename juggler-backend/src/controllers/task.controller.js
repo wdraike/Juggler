@@ -226,9 +226,19 @@ function rowToTask(row, timezone, sourceMap) {
   // Derive date/time/day from scheduled_at (UTC source of truth).
   // When timezone is null (API responses), skip derivation — the frontend
   // hydrates local fields from scheduledAt using the browser timezone.
-  // When timezone is provided (scheduler), derive for internal use.
+  // When timezone is provided (scheduler), derive for internal use — but
+  // only for user-anchored tasks. For flexible tasks, the prior scheduled_at
+  // is a scheduler auto-placement that must not bias the next run (mirrors
+  // the isUserAnchored check in unifiedSchedule.js).
+  // Booleans from tasks_with_sync_v come back as strings like '0'/'1' in some code
+  // paths, so use a helper that treats only real truthy values as true.
+  function boolish(v) { return v === true || v === 1 || v === '1'; }
+  var whenStr = typeof row.when === 'string' ? row.when : '';
+  var whenParts = whenStr ? whenStr.split(',').map(function(s) { return s.trim(); }) : [];
+  var isUserAnchored = boolish(row.date_pinned) || boolish(row.generated) ||
+    boolish(row.recurring) || whenParts.indexOf('fixed') !== -1 || boolish(row.marker);
   var displayTz = timezone || null;
-  if (displayTz && row.scheduled_at) {
+  if (displayTz && row.scheduled_at && isUserAnchored) {
     var local = utcToLocal(row.scheduled_at, displayTz);
     if (local.date) date = local.date;
     if (local.time) time = local.time;

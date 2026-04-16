@@ -352,10 +352,15 @@ async function runScheduleAndPersist(userId, _retries, options) {
   }
   if (toInsert.length > 0) {
     var insertRows = toInsert.map(function(t) {
-      // Only the primary chunk inherits the master's template time; later
-      // chunks start unplaced and get their scheduled_at from the placement phase.
-      var scheduledAt = (t.split_ordinal === 1 && t.date)
-        ? localToUtc(t.date, t.time || null, TIMEZONE)
+      // All chunks inherit the occurrence's date so the scheduler knows
+      // which day each chunk belongs to. Only chunk 1 gets a preferred time;
+      // chunks 2..N are date-anchored but time-flexible (placed wherever on
+      // the day the scheduler finds room). Without a date anchor, chunks 2..N
+      // fall back to "today" and all pile onto one day.
+      var scheduledAt = t.date
+        ? (t.split_ordinal === 1
+            ? localToUtc(t.date, t.time || null, TIMEZONE)
+            : localToUtc(t.date, null, TIMEZONE))
         : null;
       return {
         id: t.id,
