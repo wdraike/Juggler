@@ -944,15 +944,40 @@ async function getSchedulePlacements(userId, options) {
     }
   }
 
-  // Fast return: if cache is fresh, hydrate and return without loading all tasks
+  // Fast return: if cache is fresh, hydrate task objects and return
   if (cacheUsable && cache.dayPlacements) {
     console.log('[SCHED] placements: returning fresh cache (age=' + Math.round((Date.now() - new Date(cache.generatedAt).getTime()) / 1000) + 's)');
+    // Load tasks to hydrate placements — cache stores taskId only
+    var fastRows = await db('tasks_v').where('user_id', userId).select();
+    var fastSrcMap = buildSourceMap(fastRows);
+    var fastTaskById = {};
+    fastRows.forEach(function(r) {
+      var t = rowToTask(r, TIMEZONE, fastSrcMap);
+      fastTaskById[t.id] = t;
+    });
+    var hydratedPlacements = {};
+    Object.keys(cache.dayPlacements).forEach(function(dk) {
+      hydratedPlacements[dk] = [];
+      (cache.dayPlacements[dk] || []).forEach(function(p) {
+        var task = fastTaskById[p.taskId];
+        if (!task) return;
+        var h = { task: task, start: p.start, dur: p.dur };
+        if (p.scheduledAtUtc) h.scheduledAtUtc = p.scheduledAtUtc;
+        if (p.locked) h.locked = true;
+        if (p.marker) h.marker = true;
+        if (p.travelBefore) h.travelBefore = p.travelBefore;
+        if (p.travelAfter) h.travelAfter = p.travelAfter;
+        if (p.placementReason) h.placementReason = p.placementReason;
+        hydratedPlacements[dk].push(h);
+      });
+      if (hydratedPlacements[dk].length === 0) delete hydratedPlacements[dk];
+    });
     return {
-      dayPlacements: cache.dayPlacements,
+      dayPlacements: hydratedPlacements,
       unplaced: cache.unplaced || [],
       score: cache.score || {},
       warnings: cache.warnings || [],
-      hasPastTasks: false // conservative — full check requires loading all tasks
+      hasPastTasks: false
     };
   }
 
