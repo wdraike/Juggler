@@ -5,8 +5,14 @@
 const { z } = require('zod');
 const { runScheduleAndPersist, getSchedulePlacements } = require('../../scheduler/runSchedule');
 const { withLock } = require('../../lib/sync-lock');
+const db = require('../../db');
 
 function registerScheduleTools(server, userId) {
+
+  async function getUserTimezone() {
+    var user = await db('users').where('id', userId).select('timezone').first();
+    return (user && user.timezone) || 'America/New_York';
+  }
 
   // ── get_schedule ──
   server.tool(
@@ -14,7 +20,8 @@ function registerScheduleTools(server, userId) {
     'Get the current schedule placements (read-only, does not modify tasks). Returns day-by-day placements, unplaced tasks, and deadline misses.',
     {},
     async () => {
-      const result = await getSchedulePlacements(userId);
+      var tz = await getUserTimezone();
+      const result = await getSchedulePlacements(userId, { timezone: tz });
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     }
   );
@@ -25,6 +32,7 @@ function registerScheduleTools(server, userId) {
     'Run the scheduler and persist date/time changes to tasks. Returns stats on tasks moved, cleared, and reset.',
     {},
     async () => {
+      var tz = await getUserTimezone();
       // Wrap the run in the per-user sync lock so this MCP path can't race
       // against the REST /schedule/run endpoint or the background queue
       // worker. Retry a few times with backoff if the lock is held, then
@@ -32,7 +40,7 @@ function registerScheduleTools(server, userId) {
       var attempts = 5;
       for (var i = 0; i < attempts; i++) {
         var result = await withLock(userId, function() {
-          return runScheduleAndPersist(userId);
+          return runScheduleAndPersist(userId, 0, { timezone: tz });
         });
         if (result !== null) {
           return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };

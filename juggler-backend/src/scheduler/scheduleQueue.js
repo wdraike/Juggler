@@ -118,6 +118,13 @@ async function processUser(userId) {
       .del();
     console.log('[SCHED-QUEUE] swept ' + swept + ' entry(ies) for ' + userId);
 
+    // Resolve the user's timezone so the scheduler computes todayKey and
+    // caches placements under the correct timezone — without this, the
+    // default 'America/New_York' can mismatch the browser-initiated cache,
+    // causing placements to flicker/disappear on the frontend.
+    var userRow = await db('users').where('id', userId).select('timezone').first();
+    var tz = (userRow && userRow.timezone) || 'America/New_York';
+
     // Run the scheduler with sync lock
     var MAX_LOCK_RETRIES = 3;
     var result = null;
@@ -126,7 +133,7 @@ async function processUser(userId) {
         // Flush any pending task writes before scheduling so the
         // scheduler reads the latest user-intended state.
         await getFlushQueueInLock()(userId);
-        return getRunScheduleAndPersist()(userId);
+        return getRunScheduleAndPersist()(userId, undefined, { timezone: tz });
       }, { flushOnRelease: false });
       if (result !== null) break;
       console.log('[SCHED-QUEUE] lock held for ' + userId + ', retry ' + (attempt + 1) + '/' + MAX_LOCK_RETRIES);
