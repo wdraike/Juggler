@@ -404,10 +404,11 @@ export default function useTaskState() {
           var addedArr = cs.added || [];
           var changedArr = cs.changed || [];
           var removedArr = cs.removed || [];
-          // Nothing actually changed — skip placements reload too. This is
-          // the common "scheduler ran but nothing moved" case and it should
-          // be completely silent.
+          // Nothing changed in the changeset — skip task upserts but still
+          // reload placements. The schedule cache includes newly-created
+          // tasks that the scheduler didn't move (already had scheduled_at).
           if (addedArr.length + changedArr.length + removedArr.length === 0) {
+            loadPlacements();
             return;
           }
           // Remove deleted tasks from state immediately
