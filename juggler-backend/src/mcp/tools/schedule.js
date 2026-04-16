@@ -3,6 +3,7 @@
  */
 
 const { z } = require('zod');
+const safeStringify = require('../safeStringify');
 const { runScheduleAndPersist, getSchedulePlacements } = require('../../scheduler/runSchedule');
 const { withLock } = require('../../lib/sync-lock');
 const db = require('../../db');
@@ -22,7 +23,7 @@ function registerScheduleTools(server, userId) {
     async () => {
       var tz = await getUserTimezone();
       const result = await getSchedulePlacements(userId, { timezone: tz });
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: 'text', text: safeStringify(result) }] };
     }
   );
 
@@ -43,7 +44,7 @@ function registerScheduleTools(server, userId) {
           return runScheduleAndPersist(userId, 0, { timezone: tz });
         });
         if (result !== null) {
-          return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+          return { content: [{ type: 'text', text: safeStringify(result) }] };
         }
         await new Promise(function(r) { setTimeout(r, 1000 * (i + 1)); });
       }

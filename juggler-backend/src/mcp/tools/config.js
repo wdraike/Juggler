@@ -3,6 +3,7 @@
  */
 
 const { z } = require('zod');
+const safeStringify = require('../safeStringify');
 const db = require('../../db');
 const tasksWrite = require('../../lib/tasks-write');
 
@@ -40,7 +41,7 @@ function registerConfigTools(server, userId) {
         preferences: config.preferences || null
       };
 
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: 'text', text: safeStringify(result) }] };
     }
   );
 
@@ -76,7 +77,7 @@ function registerConfigTools(server, userId) {
         doneCount: countMap[p.name]?.done || 0
       }));
 
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: 'text', text: safeStringify(result) }] };
     }
   );
   // ── create_project ──
@@ -98,7 +99,7 @@ function registerConfigTools(server, userId) {
         sort_order: (maxOrder?.max || 0) + 1
       });
 
-      return { content: [{ type: 'text', text: JSON.stringify({ id, name, color, icon }) }] };
+      return { content: [{ type: 'text', text: safeStringify({ id, name, color, icon }) }] };
     }
   );
 
@@ -114,7 +115,7 @@ function registerConfigTools(server, userId) {
     },
     async ({ id, name, color, icon }) => {
       const existing = await db('projects').where({ id, user_id: userId }).first();
-      if (!existing) return { content: [{ type: 'text', text: JSON.stringify({ error: 'Project not found' }) }] };
+      if (!existing) return { content: [{ type: 'text', text: safeStringify({ error: 'Project not found' }) }] };
 
       const updates = {};
       if (name !== undefined) updates.name = name;
@@ -134,7 +135,7 @@ function registerConfigTools(server, userId) {
         }
       });
 
-      return { content: [{ type: 'text', text: JSON.stringify({
+      return { content: [{ type: 'text', text: safeStringify({
         project: { id, name: name || existing.name, color: color !== undefined ? color : existing.color, icon: icon !== undefined ? icon : existing.icon },
         renamed
       }) }] };
@@ -150,10 +151,10 @@ function registerConfigTools(server, userId) {
     },
     async ({ id }) => {
       const existing = await db('projects').where({ id, user_id: userId }).first();
-      if (!existing) return { content: [{ type: 'text', text: JSON.stringify({ error: 'Project not found' }) }] };
+      if (!existing) return { content: [{ type: 'text', text: safeStringify({ error: 'Project not found' }) }] };
 
       await db('projects').where({ id, user_id: userId }).del();
-      return { content: [{ type: 'text', text: JSON.stringify({ message: 'Project deleted', id, name: existing.name }) }] };
+      return { content: [{ type: 'text', text: safeStringify({ message: 'Project deleted', id, name: existing.name }) }] };
     }
   );
 
@@ -185,7 +186,7 @@ function registerConfigTools(server, userId) {
       const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
       enqueueScheduleRun(userId, 'mcp:config');
 
-      return { content: [{ type: 'text', text: JSON.stringify({ key, value }) }] };
+      return { content: [{ type: 'text', text: safeStringify({ key, value }) }] };
     }
   );
 }

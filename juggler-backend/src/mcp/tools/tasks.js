@@ -7,6 +7,7 @@
  */
 
 const { z } = require('zod');
+const safeStringify = require('../safeStringify');
 const db = require('../../db');
 const { rowToTask, taskToRow, guardFixedCalendarWhen, ensureProject, applySplitDefault, buildSourceMap, TEMPLATE_FIELDS } = require('../../controllers/task.controller');
 const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
@@ -86,7 +87,7 @@ function registerTaskTools(server, userId) {
         tasks = tasks.filter(function(t) { return t.date === date; });
         if (limit) tasks = tasks.slice(0, limit);
       }
-      return { content: [{ type: 'text', text: JSON.stringify(tasks, null, 2) }] };
+      return { content: [{ type: 'text', text: safeStringify(tasks) }] };
     }
   );
 
@@ -113,13 +114,13 @@ function registerTaskTools(server, userId) {
         row.user_id = userId;
         await enqueueWrite(userId, row.id, 'create', row, 'mcp:create_task');
         enqueueScheduleRun(userId, 'mcp:create_task', [row.id]);
-        return { content: [{ type: 'text', text: JSON.stringify(Object.assign(rowToTask(row, tz), { queued: true }), null, 2) }] };
+        return { content: [{ type: 'text', text: safeStringify(Object.assign(rowToTask(row, tz), { queued: true })) }] };
       }
 
       await tasksWrite.insertTask(db, row);
       enqueueScheduleRun(userId, 'mcp:create_task', [row.id]);
       var created = await db('tasks_with_sync_v').where('id', row.id).first();
-      return { content: [{ type: 'text', text: JSON.stringify(rowToTask(created, tz), null, 2) }] };
+      return { content: [{ type: 'text', text: safeStringify(rowToTask(created, tz)) }] };
     }
   );
 
@@ -161,7 +162,7 @@ function registerTaskTools(server, userId) {
           await enqueueWrite(userId, rows[qi].id, 'create', rows[qi], 'mcp:create_tasks');
         }
         enqueueScheduleRun(userId, 'mcp:create_tasks', rows.map(function(r) { return r.id; }));
-        return { content: [{ type: 'text', text: JSON.stringify({ created: rows.length, ids: rows.map(function(r) { return r.id; }), queued: true }) }] };
+        return { content: [{ type: 'text', text: safeStringify({ created: rows.length, ids: rows.map(function(r) { return r.id; }), queued: true }) }] };
       }
 
       await db.transaction(async function(trx) {
@@ -171,7 +172,7 @@ function registerTaskTools(server, userId) {
       });
 
       enqueueScheduleRun(userId, 'mcp:create_tasks', rows.map(function(r) { return r.id; }));
-      return { content: [{ type: 'text', text: JSON.stringify({ created: rows.length, ids: rows.map(function(r) { return r.id; }) }) }] };
+      return { content: [{ type: 'text', text: safeStringify({ created: rows.length, ids: rows.map(function(r) { return r.id; }) }) }] };
     }
   );
 
@@ -238,7 +239,7 @@ function registerTaskTools(server, userId) {
         var allRows = await db('tasks_with_sync_v').where('user_id', userId).select();
         var srcMap = buildSourceMap(allRows);
         var updatedRow = allRows.find(function(r) { return r.id === id; });
-        return { content: [{ type: 'text', text: JSON.stringify(Object.assign(rowToTask(updatedRow, tz, srcMap), { queued: true }), null, 2) }] };
+        return { content: [{ type: 'text', text: safeStringify(Object.assign(rowToTask(updatedRow, tz, srcMap), { queued: true })) }] };
       }
 
       if (isRecurringInstance) {
@@ -270,7 +271,7 @@ function registerTaskTools(server, userId) {
       var allRows = await db('tasks_with_sync_v').where('user_id', userId).select();
       var srcMap = buildSourceMap(allRows);
       var updatedRow = allRows.find(function(r) { return r.id === id; });
-      return { content: [{ type: 'text', text: JSON.stringify(rowToTask(updatedRow, tz, srcMap), null, 2) }] };
+      return { content: [{ type: 'text', text: safeStringify(rowToTask(updatedRow, tz, srcMap)) }] };
     }
   );
 
@@ -294,7 +295,7 @@ function registerTaskTools(server, userId) {
       await tasksWrite.updateTaskById(db, id, update, userId);
       enqueueScheduleRun(userId, 'mcp:set_task_status', [id]);
       var updated = await db('tasks_with_sync_v').where('id', id).first();
-      return { content: [{ type: 'text', text: JSON.stringify(rowToTask(updated, tz), null, 2) }] };
+      return { content: [{ type: 'text', text: safeStringify(rowToTask(updated, tz)) }] };
     }
   );
 
@@ -357,7 +358,7 @@ function registerTaskTools(server, userId) {
       });
 
       enqueueScheduleRun(userId, 'mcp:delete_task', [id]);
-      return { content: [{ type: 'text', text: JSON.stringify({ deleted: true, id: id }) }] };
+      return { content: [{ type: 'text', text: safeStringify({ deleted: true, id: id }) }] };
     }
   );
 
@@ -376,7 +377,7 @@ function registerTaskTools(server, userId) {
       if (!row) {
         return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
       }
-      return { content: [{ type: 'text', text: JSON.stringify(rowToTask(row, tz, srcMap), null, 2) }] };
+      return { content: [{ type: 'text', text: safeStringify(rowToTask(row, tz, srcMap)) }] };
     }
   );
 
@@ -407,7 +408,7 @@ function registerTaskTools(server, userId) {
       var allRows = await db('tasks_v').where('user_id', userId);
       var srcMap = buildSourceMap(allRows);
       var tasks = rows.map(function(r) { return rowToTask(r, tz, srcMap); });
-      return { content: [{ type: 'text', text: JSON.stringify(tasks, null, 2) }] };
+      return { content: [{ type: 'text', text: safeStringify(tasks) }] };
     }
   );
 
@@ -468,7 +469,7 @@ function registerTaskTools(server, userId) {
         }
 
         enqueueScheduleRun(userId, 'mcp:batch_update_tasks', idsToCheck);
-        return { content: [{ type: 'text', text: JSON.stringify({ updated: updatedCount, queued: queuedCount }) }] };
+        return { content: [{ type: 'text', text: safeStringify({ updated: updatedCount, queued: queuedCount }) }] };
       }
 
       await db.transaction(async function(trx) {
@@ -524,7 +525,7 @@ function registerTaskTools(server, userId) {
       });
 
       enqueueScheduleRun(userId, 'mcp:batch_update_tasks', updates.map(function(u) { return u.id; }).filter(Boolean));
-      return { content: [{ type: 'text', text: JSON.stringify({ updated: updatedCount }) }] };
+      return { content: [{ type: 'text', text: safeStringify({ updated: updatedCount }) }] };
     }
   );
 }

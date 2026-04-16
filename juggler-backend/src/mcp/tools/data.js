@@ -3,6 +3,7 @@
  */
 
 const { z } = require('zod');
+const safeStringify = require('../safeStringify');
 const db = require('../../db');
 const { rowToTask } = require('../../controllers/task.controller');
 
@@ -47,7 +48,7 @@ function registerDataTools(server, userId) {
         exported: new Date().toISOString()
       };
 
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: 'text', text: safeStringify(result) }] };
     }
   );
 
@@ -71,10 +72,10 @@ function registerDataTools(server, userId) {
         ? (typeof autoSyncRow.config_value === 'string' ? JSON.parse(autoSyncRow.config_value) : autoSyncRow.config_value)
         : null;
 
-      return { content: [{ type: 'text', text: JSON.stringify({
+      return { content: [{ type: 'text', text: safeStringify({
         googleCalendar: { connected: gcalConnected, lastSyncedAt: gcalLastSynced, autoSync: autoSync },
         microsoftCalendar: { connected: msftConnected, lastSyncedAt: msftLastSynced }
-      }, null, 2) }] };
+      }) }] };
     }
   );
 
@@ -103,7 +104,7 @@ function registerDataTools(server, userId) {
           };
           calSyncController.sync(fakeReq, fakeRes);
         });
-        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+        return { content: [{ type: 'text', text: safeStringify(result) }] };
       } catch (err) {
         return { content: [{ type: 'text', text: 'Sync error: ' + err.message }], isError: true };
       }
