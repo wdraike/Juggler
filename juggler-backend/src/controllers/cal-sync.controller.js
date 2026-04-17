@@ -120,23 +120,58 @@ async function sync(req, res) {
       return res.json(stats);
     }
 
-    // Get tokens and fetch events for all providers IN PARALLEL
+    // Pre-validate tokens before fetching events. Adapters with invalid tokens
+    // are excluded so the ledger phase won't misinterpret missing events as deletions.
+    var validAdapters = [];
+    for (var vai = 0; vai < connectedAdapters.length; vai++) {
+      var va = connectedAdapters[vai];
+      try {
+        await va.getValidAccessToken(req.user);
+        validAdapters.push(va);
+      } catch (err) {
+        var vaErrMsg = err.message || '';
+        var vaIsTokenExpired = vaErrMsg.includes('invalid_grant') || vaErrMsg.includes('Token has been expired or revoked');
+        if (vaIsTokenExpired) {
+          var vaEventIdCol = va.getEventIdColumn();
+          var vaTokenCols = vaEventIdCol === 'gcal_event_id'
+            ? { gcal_access_token: null, gcal_refresh_token: null, gcal_token_expiry: null }
+            : { msft_access_token: null, msft_refresh_token: null, msft_token_expiry: null };
+          await db('users').where('id', userId).update({ ...vaTokenCols, updated_at: db.fn.now() });
+        }
+        stats.errors.push({
+          phase: 'token_validation',
+          provider: va.providerId,
+          error: vaErrMsg,
+          tokenExpired: vaIsTokenExpired,
+          action: vaIsTokenExpired ? 'Please reconnect your calendar in Settings' : undefined
+        });
+        stats.providers[va.providerId] = { error: vaErrMsg, tokenExpired: vaIsTokenExpired };
+        console.warn('[CAL-SYNC] Token validation failed for ' + va.providerId + ': ' + vaErrMsg);
+      }
+    }
+    if (validAdapters.length === 0) {
+      emitProgress('done', 'No valid calendar connections', 100);
+      return res.json(stats);
+    }
+
+    // Get tokens and fetch events for all validated providers IN PARALLEL
     var providerData = {}; // { providerId: { token, events, eventsById } }
     var timeMin = windowStart.toISOString();
     var timeMax = windowEnd.toISOString();
 
-    await Promise.all(connectedAdapters.map(async function(adapter) {
+    await Promise.all(validAdapters.map(async function(adapter) {
       try {
         emitProgress('fetch', 'Fetching events...', 5, { provider: adapter.providerId });
         var token = await adapter.getValidAccessToken(req.user);
         var events = await adapter.listEvents(token, timeMin, timeMax, userId);
+        emitProgress('fetch', 'Fetched ' + events.length + ' events', 15, { provider: adapter.providerId });
 
         var eventsById = {};
         for (var ei = 0; ei < events.length; ei++) {
           eventsById[events[ei].id] = events[ei];
         }
 
-        providerData[adapter.providerId] = { token: token, events: events, eventsById: eventsById, adapter: adapter };
+        providerData[adapter.providerId] = { token: token, events: events, eventsById: eventsById, adapter: adapter, partialFailure: !!events._hasPartialFailure };
         stats.providers[adapter.providerId] = { pushed: 0, pulled: 0, deleted_local: 0, deleted_remote: 0, errors: [] };
       } catch (err) {
         var errMsg = err.message || '';
@@ -428,7 +463,12 @@ async function sync(req, res) {
             // This could mean the event was genuinely deleted, OR the API
             // transiently failed to return it. Use miss_count to avoid
             // data loss from transient failures.
-            if (ledger.provider_event_id) {
+            // If the provider had a partial failure (e.g. one Apple calendar
+            // couldn't be fetched), skip miss-count entirely to avoid
+            // deleting tasks due to incomplete event data.
+            if (pd.partialFailure) {
+              // Do nothing — keep task alive until next clean sync
+            } else if (ledger.provider_event_id) {
               var cachedStart = ledger.event_start;
               var eventInWindow = false;
               if (cachedStart) {
@@ -513,10 +553,23 @@ async function sync(req, res) {
         if (pAdapter.batchUpdateEvents) {
           try {
             var batchUpdateResults = await pAdapter.batchUpdateEvents(pToken, pendingEventUpdates, year, tz);
+            var failedUpdates = [];
             for (var bui = 0; bui < batchUpdateResults.length; bui++) {
               if (batchUpdateResults[bui].error) {
-                pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: batchUpdateResults[bui].eventId, error: batchUpdateResults[bui].error });
-                stats.errors.push({ phase: 'ledger_update', provider: pid, eventId: batchUpdateResults[bui].eventId, error: batchUpdateResults[bui].error });
+                failedUpdates.push(pendingEventUpdates[bui]);
+              }
+            }
+            // Retry failed batch update items sequentially (single attempt)
+            if (failedUpdates.length > 0) {
+              console.log('[CAL-SYNC] Retrying ' + failedUpdates.length + ' failed batch updates sequentially for ' + pid);
+              for (var rui = 0; rui < failedUpdates.length; rui++) {
+                try {
+                  await pAdapter.updateEvent(pToken, failedUpdates[rui].eventId, failedUpdates[rui].task, year, tz);
+                  await throttle();
+                } catch (ruErr) {
+                  pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: failedUpdates[rui].eventId, error: ruErr.message });
+                  stats.errors.push({ phase: 'ledger_update', provider: pid, eventId: failedUpdates[rui].eventId, error: ruErr.message });
+                }
               }
             }
           } catch (batchUpdateErr) {
@@ -548,6 +601,20 @@ async function sync(req, res) {
     }
 
     // === Phase 3: Push new tasks to providers (skip for ingest-only) ===
+    // Load task IDs with error ledger records so we skip them in push.
+    // A manual sync clears error records to allow fresh retries.
+    var errorLedgerTaskIds = new Set();
+    var errorLedgerRows = await db('cal_sync_ledger')
+      .where('user_id', userId)
+      .where('status', 'error')
+      .select('task_id', 'id');
+    // Clear error records so this manual sync can retry them
+    if (errorLedgerRows.length > 0) {
+      var errorLedgerIds = errorLedgerRows.map(function(r) { return r.id; });
+      await db('cal_sync_ledger').whereIn('id', errorLedgerIds).del();
+      console.log('[CAL-SYNC] Cleared ' + errorLedgerIds.length + ' error ledger records for retry');
+    }
+
     for (var pi2 = 0; pi2 < providerIds.length; pi2++) {
       var pid2 = providerIds[pi2];
       emitProgress('push', 'Syncing tasks...', 50 + (pi2 * 5), { provider: pid2 });
@@ -704,6 +771,55 @@ async function sync(req, res) {
               last_modified_at: toMySQLDate(createdNorm ? createdNorm.lastModified : null),
               status: 'active'
             });
+          }
+          // Retry failed batch items sequentially (single attempt)
+          var failedItems = [];
+          for (var fbi = 0; fbi < batchResults.length; fbi++) {
+            if (batchResults[fbi].error) failedItems.push(pushQueue[fbi]);
+          }
+          if (failedItems.length > 0) {
+            console.log('[CAL-SYNC] Retrying ' + failedItems.length + ' failed batch items sequentially for ' + pid2);
+            for (var ri = 0; ri < failedItems.length; ri++) {
+              var rTask = failedItems[ri].task;
+              try {
+                var rResult = await pAdapter2.createEvent(pToken2, rTask, year, tz);
+                await throttle();
+                var rNorm = pAdapter2.normalizeEvent ? pAdapter2.normalizeEvent(rResult.raw) : null;
+                processedEventIds2.add(rResult.providerEventId);
+                processedTaskIds2.add(rResult.taskId || rTask.id);
+                if (rTask._originalId) processedTaskIds2.add(rTask._originalId);
+                pStats2.pushed++;
+                stats.pushed++;
+                batchPushCount++;
+                if (!rTask._originalId) {
+                  taskUpdates.push({ id: rTask.id, fields: { [eventIdCol]: rResult.providerEventId } });
+                }
+                ledgerInserts.push({
+                  user_id: userId, provider: pid2, task_id: rTask.id,
+                  provider_event_id: rResult.providerEventId, origin: 'juggler',
+                  last_pushed_hash: taskHash(rTask),
+                  last_pulled_hash: rNorm ? pAdapter2.eventHash(rNorm) : null,
+                  event_summary: rTask.text,
+                  event_start: rNorm ? rNorm.startDateTime : null,
+                  event_end: rNorm ? rNorm.endDateTime : null,
+                  event_all_day: (rTask.when === 'allday') ? 1 : 0,
+                  task_updated_at: rTask._updated_at || null,
+                  last_modified_at: toMySQLDate(rNorm ? rNorm.lastModified : null),
+                  status: 'active'
+                });
+              } catch (rErr) {
+                // Persistent failure — insert error ledger record so task is skipped next sync
+                console.warn('[CAL-SYNC] Retry failed for task ' + rTask.id + ' on ' + pid2 + ': ' + rErr.message);
+                ledgerInserts.push({
+                  user_id: userId, provider: pid2, task_id: rTask.id,
+                  provider_event_id: null, origin: 'juggler',
+                  last_pushed_hash: taskHash(rTask),
+                  event_summary: rTask.text,
+                  status: 'error',
+                  error_detail: rErr.message.substring(0, 1000)
+                });
+              }
+            }
           }
           if (batchPushCount > 0) {
             logSyncAction(pid2, 'pushed', {
@@ -987,23 +1103,40 @@ async function sync(req, res) {
     // Acquire per-user lock for the write phase only. During the API fetch
     // phase above, user/MCP edits flowed normally. Now we lock so the
     // scheduler doesn't start while we write.
-    var MAX_LOCK_ATTEMPTS = 5;
+    var MAX_LOCK_ATTEMPTS = 8;
     var lockResult = null;
     for (var lockAttempt = 0; lockAttempt < MAX_LOCK_ATTEMPTS; lockAttempt++) {
       lockResult = await acquireLock(userId);
       if (lockResult.acquired) break;
-      console.log('[CAL-SYNC] lock held, retry ' + (lockAttempt + 1) + '/' + MAX_LOCK_ATTEMPTS);
-      await new Promise(function(r) { setTimeout(r, 2000); });
+      var backoffMs = Math.min(1000 * Math.pow(1.5, lockAttempt), 10000) + Math.floor(Math.random() * 500);
+      console.log('[CAL-SYNC] lock held, retry ' + (lockAttempt + 1) + '/' + MAX_LOCK_ATTEMPTS + ' in ' + backoffMs + 'ms');
+      await new Promise(function(r) { setTimeout(r, backoffMs); });
     }
     if (!lockResult || !lockResult.acquired) {
       console.error('[CAL-SYNC] could not acquire lock for write phase after ' + MAX_LOCK_ATTEMPTS + ' attempts');
-      return res.status(409).json({ error: 'Scheduler is busy. Try again in a few seconds.', retryAfter: 5 });
+      return res.status(409).json({ error: 'Scheduler is busy. Try again in a few seconds.', retryAfter: 10 });
     }
     var lockToken = lockResult.token;
     var lockStart = Date.now();
+    var writePhaseLockLost = false;
     var lockHeartbeat = setInterval(function() {
-      if (Date.now() - lockStart > 120000) { clearInterval(lockHeartbeat); return; }
-      refreshLock(userId, lockToken).catch(function() {});
+      if (Date.now() - lockStart > 120000) {
+        clearInterval(lockHeartbeat);
+        writePhaseLockLost = true;
+        console.warn('[CAL-SYNC] Write-phase heartbeat stopped — held over 120s, allowing expiry');
+        return;
+      }
+      refreshLock(userId, lockToken).then(function(ok) {
+        if (!ok) {
+          writePhaseLockLost = true;
+          clearInterval(lockHeartbeat);
+          console.warn('[CAL-SYNC] Write-phase lock lost — refresh returned 0 rows');
+        }
+      }).catch(function(err) {
+        writePhaseLockLost = true;
+        clearInterval(lockHeartbeat);
+        console.error('[CAL-SYNC] Write-phase lock refresh failed:', err.message);
+      });
     }, 10000);
 
     try {
@@ -1040,6 +1173,13 @@ async function sync(req, res) {
           }
         }
       }
+    }
+
+    // Abort if the lock was lost during conflict detection
+    if (writePhaseLockLost) {
+      console.error('[CAL-SYNC] Aborting write phase — lock lost before transaction');
+      emitProgress('error', 'Sync aborted — lock lost', 0);
+      return res.status(503).json({ error: 'Sync lock lost. Please retry.', retryAfter: 5 });
     }
 
     await db.transaction(async function(trx) {
@@ -1150,7 +1290,17 @@ async function sync(req, res) {
     enqueueScheduleRun(userId, 'cal-sync', uniqueAffected);
 
     // Build human-readable summary from in-memory history
-    emitProgress('done', 'Sync complete', 100);
+    var doneSummaryParts = [];
+    Object.keys(stats.providers).forEach(function(pid) {
+      var ps = stats.providers[pid];
+      var label = PROVIDER_LABELS[pid] || pid;
+      var parts = [];
+      if (ps.pulled > 0) parts.push(ps.pulled + ' pulled');
+      if (ps.pushed > 0) parts.push(ps.pushed + ' pushed');
+      if (ps.deleted_local > 0) parts.push(ps.deleted_local + ' removed');
+      if (parts.length > 0) doneSummaryParts.push(label + ': ' + parts.join(', '));
+    });
+    emitProgress('done', doneSummaryParts.length > 0 ? doneSummaryParts.join(' | ') : 'Sync complete — no changes', 100);
     stats.syncRunId = syncRunId;
     stats.summary = historyInserts.map(function(h) {
       var provLabel = h.provider === 'gcal' ? 'Google Calendar' : 'Microsoft Calendar';
@@ -1181,6 +1331,7 @@ async function sync(req, res) {
     res.json(stats);
   } catch (error) {
     console.error('Cal sync error:', error);
+    sseEmitter.emit(userId, 'sync:error', { error: error.message || 'Unknown sync error' });
     res.status(500).json({ error: 'Failed to sync calendars' });
   }
 }

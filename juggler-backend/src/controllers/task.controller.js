@@ -819,6 +819,22 @@ async function updateTask(req, res) {
       });
     }
 
+    // Guard: calendar-synced tasks in ingest mode — block field edits that
+    // would create drift with the external calendar. Allow status and notes only.
+    var isCalSynced = !!(existing.gcal_event_id || existing.msft_event_id || existing.apple_event_id);
+    if (isCalSynced) {
+      var ALLOWED_SYNCED_FIELDS = ['status', 'notes', 'datePinned', '_dragPin', '_allowUnfix'];
+      var bodyKeys = Object.keys(req.body).filter(function(k) { return k !== 'id'; });
+      var blockedFields = bodyKeys.filter(function(k) { return ALLOWED_SYNCED_FIELDS.indexOf(k) === -1; });
+      if (blockedFields.length > 0) {
+        return res.status(403).json({
+          error: 'This task is synced from an external calendar. Only status and notes can be changed here.',
+          code: 'CAL_SYNCED_READONLY',
+          blockedFields: blockedFields
+        });
+      }
+    }
+
     var tz = safeTimezone(req.headers['x-timezone']);
     var anchorDateVal = req.body.anchorDate;
     var bodyWithoutAnchor = Object.assign({}, req.body);

@@ -205,6 +205,16 @@ function registerTaskTools(server, userId) {
         return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
       }
 
+      // Guard: calendar-synced tasks — only status and notes are editable
+      var isCalSynced = !!(existing.gcal_event_id || existing.msft_event_id || existing.apple_event_id);
+      if (isCalSynced) {
+        var allowedKeys = ['status', 'notes'];
+        var blocked = Object.keys(fields).filter(function(k) { return allowedKeys.indexOf(k) === -1; });
+        if (blocked.length > 0) {
+          return { content: [{ type: 'text', text: 'Error: This task is synced from an external calendar. Only status and notes can be changed. Blocked fields: ' + blocked.join(', ') }], isError: true };
+        }
+      }
+
       var row = taskToRow(fields, userId, tz);
       delete row.user_id;
       delete row.created_at;

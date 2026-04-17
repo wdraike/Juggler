@@ -82,7 +82,6 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
       if (task.date) d.push('\uD83D\uDCC6 ' + task.date);
       if (task.deadline && task.deadline !== task.date) d.push('\uD83D\uDCC5 deadline ' + task.deadline);
       if (task.notes) d.push(task.notes.replace(/\n/g, ' ').substring(0, 40));
-      if (task.section) d.push(task.section);
       if (task.dependsOn && task.dependsOn.length > 0) d.push('\u26D3 ' + task.dependsOn.length + ' dep');
     }
     return d;
