@@ -992,7 +992,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
   return {
     updated: updated, cleared: cleared, tasks: updatedTasks, score: result.score,
     dayPlacements: outPlacements,
-    unplaced: result.unplaced.filter(function(t) { return !t.generated; }),
+    unplaced: result.unplaced.filter(function(t) {
+      // Keep missed recurring instances (they have _unplacedReason) even if generated
+      if (t.generated && !t._unplacedReason) return false;
+      return true;
+    }),
     warnings: result.warnings || [],
     changeset: {
       added: added,
@@ -1379,7 +1383,10 @@ async function getSchedulePlacements(userId, options) {
 
   return {
     dayPlacements: outPlacements2,
-    unplaced: result.unplaced.filter(function(t) { return !t.generated; }),
+    unplaced: result.unplaced.filter(function(t) {
+      if (t.generated && !t._unplacedReason) return false;
+      return true;
+    }),
     score: result.score,
     warnings: result.warnings || [],
     hasPastTasks: hasPastTasks
