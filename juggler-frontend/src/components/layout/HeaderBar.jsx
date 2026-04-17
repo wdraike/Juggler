@@ -1,5 +1,5 @@
 /**
- * HeaderBar — progress bar, AI input, menu buttons, dark mode toggle
+ * HeaderBar — AI input, menu buttons, dark mode toggle
  * On mobile: overflow menu hides infrequent buttons behind "..."
  */
 
@@ -47,11 +47,6 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
     return function() { document.removeEventListener('mousedown', handleClick); };
   }, [showOverflow]);
 
-  var dayTasks = tasksByDate[selectedDateKey] || [];
-  var doneCount = dayTasks.filter(t => statuses[t.id] === 'done' || statuses[t.id] === 'cancel' || statuses[t.id] === 'skip').length;
-  var totalCount = dayTasks.filter(t => statuses[t.id] !== 'cancel' && statuses[t.id] !== 'skip').length;
-  var pct = totalCount > 0 ? Math.round(doneCount / totalCount * 100) : 0;
-
   // Overflow menu items for mobile
   var overflowItems = [];
   if (isMobile) {
@@ -83,12 +78,6 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
         <div style={{ fontFamily: "'Playfair Display', serif", fontWeight: 700, fontSize: 15, color: theme.headerText, letterSpacing: '-0.02em', lineHeight: 1.1 }}>Strive<span style={{ color: theme.accent }}>RS</span></div>
       </div>}
       </a>
-
-      {/* Progress bar */}
-      <div title={doneCount + ' of ' + totalCount + ' tasks done today (' + pct + '%)'} style={{ flex: 0, minWidth: isMobile ? 50 : 80, maxWidth: isMobile ? 80 : 140, height: 6, background: theme.headerTrack, borderRadius: 2, overflow: 'hidden' }}>
-        <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? theme.success : theme.accent, borderRadius: 2, transition: 'width 0.3s' }} />
-      </div>
-      <span style={{ fontSize: 11, color: theme.headerTextMuted, minWidth: 28 }} title={doneCount + ' of ' + totalCount + ' tasks done today'}>{pct}%</span>
 
       {/* AI command input — inline in header */}
       {aiPanel}
