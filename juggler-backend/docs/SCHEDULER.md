@@ -64,10 +64,10 @@ Each recurrence type has a different "valid days" rule. Within valid days, pick 
 
 If the occurrence day has already passed and the recurrence has no remaining flexibility, that occurrence is skipped.
 
-#### 4c. Deadline work (solo anchors + chains) — backward sweep, then forward pull  *(Phase 2)*
+#### 4c. Deadline work — slack-based left-to-right placement  *(Phase 2)*
 This is the heart of the scheduler. Fully completed before 4d, so free tasks fill around the committed chain layer.
 
-See **"Deep-dive: 4c"** below for the global backward sweep with tie-break rules and the per-member forward pull.
+See **"Deep-dive: 4c"** below for the slack computation, sort order, and forward placement pass.
 
 #### 4d. Free tasks  *(Phase 3 + Phase 4)*
 - **Phase 3** — walk priority tiers P1 → P2 → P3 → P4 (priority as tie-break only — these are all deadline-free, so nothing separates them beyond priority). For each task, place at the earliest free slot that respects its `when`, `dayReq`, `start_after`, and dependency constraints.
@@ -159,91 +159,71 @@ If the master's `dur` or `split_min` changes, reconcile recomputes `split_total`
 
 ## Deep-dive: 4c (deadline work)
 
-### 4c-1. Build the chain graph
-- Every task with `due_at` is a **chain tail**
-- A task is a **chain member** if it's a tail OR any task that transitively depends on it has `due_at`
+### 4c-1. Build the chain graph and compute slack
+- Every task with `deadline` is a **chain tail**
+- A task is a **chain member** if it's a tail OR any task that transitively depends on it has `deadline`
   - Walk `depends_on` upstream from each tail — every node visited is in the chain
 - A **chain** = {tail} ∪ {all transitive prerequisites of the tail via `depends_on`}
 - A **solo anchor** = 1-member chain (tail with no prereqs)
-- Past-due tails are remapped to due-today *before* this step (principle #2); their priority is also bumped to P1 for subsequent tie-breaks
+- Past-due tails get `slack=0` and priority bumped to P1 (principle #2)
 
-### 4c-2. Global backward sweep — one queue across all chains
+**Slack computation** — measures urgency as available capacity minus task duration:
 
-Chains aren't processed one at a time. A single chain can mix priorities (a P3 prereq feeding a P1 tail — the prereq inherits urgency from its consumer, not from its own priority). Per-chain processing would starve a high-priority chain whose tail is a month out while a low-priority chain whose tail is tomorrow grabs today's slots.
+- **Solo anchor (own deadline, no chain):** `slack = available_capacity(earliest..deadline) - duration`. Available capacity sums free minutes across eligible days in the task's `when`-windows.
+- **Chain member:** Walk backward from the chain tail's hard deadline. For each predecessor P of consumer C, compute `P.mustFinishBy` by subtracting C's duration from C's `mustFinishBy` using a constraint-aware capacity walk (same approach: walk eligible days backward, subtract available minutes). Then `P.slack = available_capacity(P.earliest..P.mustFinishBy) - P.duration`.
+- **Past-due:** `slack = 0` (most urgent).
+- **No deadline:** `slack = Infinity` (handled in Phase 3/4).
 
-Instead the scheduler maintains a **global ready queue** spanning every chain's members and walks them backward in time together.
+Slack is computed **once** after Phase 1 (recurring placement), using current occupancy. It determines placement *order*, not exact placement — the forward scan handles actual capacity at placement time.
 
-**`target_finish`** — the latest wall-clock time a task is allowed to end:
-- **Tail** (has `due_at`): `target_finish` = end of `due_at` day
-- **Prereq**: `target_finish` = `min(consumer.start, own due_at end-of-day)` once the consumer is placed
-- Initially only tails have `target_finish` known; prereqs join the queue as their consumers commit
+### 4c-2. Sort all constrained items by slack
 
-### 4c-3. The sweep algorithm
+All constrained items (solo anchors + chain members + constrained split chunks) are sorted into a single queue:
 
-```
-ready  ← { every tail, keyed by target_finish = end-of-(due_at) }
-while ready is non-empty:
-   candidate ← pick-one(ready)            // see tie-break below
-   place candidate backward from its target_finish:
-      walk days from target_finish day → earlier, picking the latest
-      slot that fits (when-window, capacity, day-of-week, etc.)
-      respecting already-placed work (fixed, pinned, recurring,
-      prior sweep placements)
-   if placed:
-      remove candidate from ready
-      for each direct prereq P of candidate:
-         add P to ready with
-           target_finish = min(candidate.start, P.due_at end-of-day)
-   else:
-      mark candidate unscheduled and roll back: any consumer
-      that already committed on the assumption this prereq
-      would fit is also unscheduled (see 4c-6).
-```
-
-**pick-one** — applied in order:
-
-1. **Latest `target_finish` first.** What has to end latest is committed first. Walking backward, later decisions constrain earlier ones. A Friday-due task is committed before a Wednesday-due task.
-2. **Highest priority wins ties on `target_finish`.** Principle #1's tie-break rule. Two tails sharing Friday → P1 picks before P2 before P3 before P4. The P1 gets first pick of Friday's latest slot.
-3. **Longest remaining duration wins ties on priority.** The bigger task is harder to fit, so letting it pick first prevents it from being the one that can't fit.
+1. **Lowest slack first.** Most urgent tasks get first pick of capacity.
+2. **Highest priority wins ties on slack.** Two tasks with identical slack → P1 places before P2.
+3. **Longest remaining duration wins ties on priority.** Harder-to-fit tasks pick first.
 4. **Deterministic `id` final tie-break** for repeatability.
 
-### 4c-4. Placement rules during the sweep
-For any candidate being placed (tail or prereq):
-- Honor `when`, day-of-week, day-of-month, location, tools — same as any placement
-- Never land after `target_finish`. If no slot fits ≤ target_finish on the target day, step to the previous day and try its latest slot. Keep walking back until placed or we pass the task's `start_after_at`
-- **Recurring prereqs stay on their occurrence day.** The sweep treats the recurring instance's position as a hard constraint. If the recurring instance ends after the consumer's start, the consumer's placement is redone under the new lower bound
-- **Fixed / pinned siblings are immovable** during the sweep (pinned is only dropped during 5b pile-up resolution, not during placement)
-- **Partial failure rollback:** if a prereq can't fit in `[start_after_at, target_finish]`, the prereq is marked `unscheduled=1` AND any descendant that already committed (whose placement assumed this prereq would fit before it) is also rolled back to unscheduled. Rationale: "Call attorney after reviewing contract" with the review unscheduled is nonsense; keeping just the call placed creates false confidence.
+### 4c-3. Forward placement pass
 
-### 4c-5. Forward pull — per-member, reverse topo order
-After the backward sweep, each chain sits "as late as possible within its deadline." Now pull each member forward to its earliest feasible position:
+```
+for each item in slack-sorted order:
+   place item forward from max(today, start_after_at):
+      walk days from earliest → effective_deadline, picking the
+      earliest slot that fits (when-window, capacity, day-of-week,
+      location, tools, dependency ordering via depsMetByDate)
+   if placed: record in globalPlacedEnd
+   else: leave for retry/rollback passes
+```
 
-1. Walk chain members in **reverse topological order** (tail first, then consumers of the tail, then their prereqs, etc. — innermost prereqs last)
-   - Why reverse topo: a consumer's forward pull depends on where its prereqs ended up; pulling the consumer forward first doesn't free space behind it. Pulling tail-first lets each prereq then pull forward into the freed gap.
-2. For each member:
-   - Find the earliest slot that:
-     - Is on or after `start_after_at` and today
-     - Is on or after `max(prereq.end)` across all its direct prereqs
-     - Respects `when`, `dayReq`, location, tools
-     - Isn't occupied by higher-priority placed work, another pulled chain member, fixed tasks, or recurring instances
-   - If earlier than the member's current slot, move it
-   - Delta is **per-member** — not a uniform chain shift. This is what makes diamond-shaped DAG chains tighten correctly: members with more slack move further, members with tight prereq bindings stay put
-3. Iterate until no member moved in a full pass (multi-pass convergence; typically 2–3 passes)
+### 4c-4. Retry pass
+Some items may not place on the first pass because dependencies weren't placed yet (e.g., diamond DAGs where the sort order doesn't perfectly match topological order). After the main pass, retry all unplaced items — their deps may now be satisfied.
 
-### 4c-6. Chain interaction — slot competition across chains
-Because the sweep interleaves members from all chains by `target_finish`, multiple chains' tails often compete for the same deadline-day slots. Tie-break rules from 4c-3 resolve every collision:
+### 4c-5. Chain rollback
+If a deadline task (chain tail) is still unplaced after the retry pass but its predecessors consumed the available capacity:
+1. Unplace all chain members
+2. Temporarily hide chain members from the dependency check
+3. Re-place in **reverse topological order** (tail first, head last)
+4. The tail gets first pick; predecessors fill remaining capacity
 
-- **Same `target_finish`, different priority**: higher priority places first and grabs its preferred slot. Lower priority takes what's left; if nothing's left, its sweep walks back a day.
-- **Same `target_finish`, same priority**: longer remaining duration picks first.
-- **Different `target_finish`**: always later first. Friday's chain commits on Friday before Thursday's chain even enters the picture.
-- **Shared prereq (P feeds both T1 and T2)**: P enters the ready queue when the *first* of T1 or T2 places. `target_finish` = `min(T1.start, T2.start)` — the tighter bound wins. Tie-break rules then decide P's slot.
+This ensures that under capacity pressure, the deadline task is prioritized over its prerequisites. Predecessors that don't fit are left unplaced.
 
-**Chain members don't compete with their own siblings** — dep ordering means their placement is sequential within the chain. Competition happens across chains and across consumers of the same shared prereq.
+### 4c-6. Past-due overflow
+Tasks that couldn't fit within their (expired) deadline window get their deadline ceiling removed and are placed ASAP going forward. They carry a `_pastDue` flag for UI display.
 
-### 4c-7. Output of 4c
+### 4c-7. Chain interaction — slot competition across chains
+Because the sort interleaves members from all chains by slack, multiple chains' tasks compete for the same slots. Sort rules from 4c-2 resolve every collision:
+
+- **Different slack**: lower slack places first. A task due tomorrow beats a task due next week.
+- **Same slack, different priority**: higher priority places first.
+- **Same slack, same priority**: longer duration places first.
+- **Shared prereq (P feeds both T1 and T2):** P gets the tighter `mustFinishBy` from whichever consumer imposes the stricter constraint, resulting in lower slack → earlier placement.
+
+### 4c-8. Output of 4c
 By the end of 4c:
-- Every deadline task (solo or tail) is either placed at its earliest feasible position ≤ its deadline, or flagged `unscheduled=1` with a past-due-style badge
-- Every chain prereq is either placed such that it ends ≤ its consumer's start, or flagged `unscheduled=1` (with any transitively-committed descendants rolled back)
+- Every deadline task is either placed at its earliest feasible position ≤ its deadline, or placed past-due (ASAP with no ceiling), or flagged `unscheduled=1`
+- Every chain prereq is either placed such that it ends ≤ its consumer's start, or unplaced (deadline task was prioritized during rollback)
 - The "committed" layer is complete. 4d fills remaining gaps with free tasks.
 
 ---
@@ -251,25 +231,25 @@ By the end of 4c:
 ## Edge cases
 
 ### Cycles in `depends_on`
-Detected **once, up front**, immediately after classification. Offending edges dropped deterministically (by `id` sort); a `backwardsDep` warning is logged. The sweep never sees cycles.
+Detected **once, up front**, immediately after classification. Offending edges dropped deterministically (by `id` sort); a `backwardsDep` warning is logged. The placement pass never sees cycles.
 
 ### Prereq with its own deadline
-`target_finish` for a prereq = `min(consumer.start, own due_at end-of-day)`. Handles the case where A (due Fri) depends on B (due Wed) — B is constrained to end by Wednesday even though A wants it by Thursday morning.
+A prereq's effective deadline = `min(consumer.effective_start, own deadline)`. Handles the case where A (due Fri) depends on B (due Wed) — B is constrained to end by Wednesday even though A wants it by Thursday morning.
 
 ### Recurring prereq blocks its consumer
-A recurring instance placed in 4b sits at a fixed time on its day. If a consumer needs to start before that recurring prereq ends, the consumer has no valid slot on the recurring's day and walks back to the previous day. If the recurring has no flex and the consumer has `start_after` on or after the recurring's day, the consumer is unscheduled. Rare but possible.
+A recurring instance placed in 4b sits at a fixed time on its day. If a consumer needs to start before that recurring prereq ends, the consumer skips to the next eligible day. If no eligible day exists within constraints, the consumer is unscheduled.
 
 ### Tail unscheduled because deadline day is full
-Even after past-due → today remap, today can be so full that the past-due task has no slot. Result: unscheduled with a past-due badge. User sees it in the unscheduled lane. Consistent with guard-rails behavior in section 8.
+Past-due overflow (4c-6) removes the deadline ceiling and places ASAP. If even then no capacity exists, the task is flagged `unscheduled=1` with a past-due badge.
 
 ### Very long chains that can't all fit in the allowed days
-The farthest-back prereqs spill out of [start_after, target_finish]; they get `unscheduled=1` and their consumers are rolled back (4c-6). Any portion of the chain that does fit still gets placed.
+Chain rollback (4c-5) prioritizes the tail. Farthest predecessors are left unplaced. Any portion of the chain that fits is placed.
 
 ### startAfter without deadline
 An unconstrained task whose `start_after_at` is in the future goes to 4d and the forward fill respects the floor.
 
 ### startAfter > deadline
-Impossible constraint. Detected at 4c-4's backward walk when no day in `[start_after_at, target_finish]` has a slot. Task unscheduled with `_unplacedReason: 'impossible_window'`.
+Impossible constraint. Detected during window computation. Task flagged with `_unplacedReason: 'impossible_window'`.
 
 ---
 
@@ -283,6 +263,9 @@ Impossible constraint. Detected at 4c-4's backward walk when no day in `[start_a
 | Past-due as a separate rescue phase | Folded into classification: past-due = due today + priority bumped to P1. |
 | Pinned tasks never evicted | Pinned tasks dropped **first** during pile-up resolution (5b). |
 | "If a prereq can't place, continue the chain" | **Roll back the consumer** (and its transitive ancestors) to unscheduled. Leaving a tail placed with its prereq unscheduled creates false confidence. |
+| Global backward sweep + forward pull (multi-pass convergence) | **Slack-based left-to-right placement.** Single forward pass sorted by constraint-aware slack. Chain rollback replaces backward sweep for capacity-constrained chains. |
+| Past-due reclassified to unconstrained pool | **Past-due stays in constrained pool** with slack=0, P1 boost. Overflow pass places ASAP with no deadline ceiling. |
+| Capacity reservation (reserve slots backward from deadline) | **Removed.** Slack-based ordering ensures urgent tasks get first pick naturally. |
 
 ---
 
@@ -302,9 +285,10 @@ Tests that prove each guiding principle is honored:
 - **Test:** Day over-committed with a pinned P2 and two on-time P1 chain members. Expected: pinned P2 evicted; both P1 chain members stay.
 
 ### Algorithmic invariants
-- **Backward sweep ordering:** two chains, one due Friday, one due Thursday. Expected: Friday tail placed first; Thursday tail placed after, working around Friday's commitments.
-- **Diamond DAG forward pull:** A depends on B and C; B and C both depend on D. Back-sweep places A → B/C → D tightly. Forward pull then moves each independently; members with slack pull further, the most-constrained member stays put.
-- **Shared prereq `target_finish`:** P feeds T1 (due Fri) and T2 (due Wed). Expected: P placed with `target_finish = min(T1.start, T2.start)` — almost certainly T2-adjacent.
+- **Slack ordering:** two chains, one due Friday, one due Thursday. Expected: Thursday chain has lower slack → placed first. Friday chain fills around Thursday's commitments.
+- **Diamond DAG:** A depends on B and C; B and C both depend on D. Slack sort places D earliest (tightest effective deadline), then B/C, then A. Forward placement satisfies deps naturally.
+- **Shared prereq slack:** P feeds T1 (due Fri) and T2 (due Wed). P's effective deadline = `min(T1's effective_start, T2's effective_start)` → tighter bound → lower slack → placed early.
+- **Chain rollback under pressure:** Chain A→B→C with C due today and insufficient capacity. Forward pass fills A/B but C can't fit. Rollback unplaces all, re-places C first (tail priority), then B fills remaining. A drops if no room.
 
 ### Regression
 1. Run full test suite: `cd juggler-backend && npm test`
@@ -320,7 +304,7 @@ Tests that prove each guiding principle is honored:
 
 | File | Change |
 |---|---|
-| `src/scheduler/unifiedSchedule.js` | Rewrite the constrained-placement section to implement the global backward sweep + per-member forward pull |
+| `src/scheduler/unifiedSchedule.js` | Rewrite the constrained-placement section to implement slack-based left-to-right placement with chain rollback |
 | `src/scheduler/runSchedule.js` | No change — already clears `date_pinned` on placed tasks; already preserves `scheduled_at` on unscheduled items |
 | `tests/schedulerScenarios.test.js`, `tests/schedulerDeepCoverage.test.js` | Add cases for each principle above; update any test that codified the old "priority is primary" behavior |
 
@@ -367,7 +351,7 @@ This section catalogs every use case the scheduler must handle correctly. Each c
 |----|------|----------|------|
 | UC-3.1 | P1 task due today — sufficient capacity | Placed on today | [UNIT] |
 | UC-3.2 | P1 task due today — today full, tomorrow available | Placed on today (displaces lower-pri if needed) or deadline miss | [UNIT] |
-| UC-3.3 | P1 task due in 5 days — plenty of capacity | Late-placed near due date (not pulled to today) | [UNIT] |
+| UC-3.3 | P1 task due in 5 days — plenty of capacity | Placed at earliest available slot (left-to-right), within deadline window | [UNIT] |
 | UC-3.4 | P1 task due today vs P1 habit — capacity for only one | Deadline task wins (merged phase: deadlines before habits within same priority) | [UNIT] |
 | UC-3.5 | P2 task due today vs P1 habit — capacity for both | Both placed (P1 habit first, P2 deadline second) | [UNIT] |
 | UC-3.6 | Past deadline (due yesterday) — today available | Placed on today (past-due → today remap) | [UNIT] |
@@ -461,14 +445,14 @@ This section catalogs every use case the scheduler must handle correctly. Each c
 | UC-10.9 | Instance marked done — not re-scheduled | Done status preserved across runs | [INT] |
 | UC-10.10 | DST spring forward — habit near 2am boundary | Instance generated with correct date | [UNIT] |
 
-## 11. Pull-Forward & Dampening
+## 11. Slack-Based Placement Ordering
 
 | ID | Case | Expected | Type |
 |----|------|----------|------|
-| UC-11.1 | Deadline task on day 10, days 1-9 mostly empty | With dampening: lands mid-range, not day 1 | [UNIT] |
-| UC-11.2 | Dampening disabled | Task pulled all the way to earliest available day | [UNIT] |
-| UC-11.3 | Deadline task with dependency — dep on day 5 | Task pulled forward but not before day 5 | [UNIT] |
-| UC-11.4 | `startAfter` constraint — can't pull before that date | Respected even with pull-forward | [UNIT] |
+| UC-11.1 | Deadline task on day 10, days 1-9 mostly empty | Placed at earliest available slot (left-to-right) within deadline window | [UNIT] |
+| UC-11.2 | Two tasks, same priority, different deadlines | Lower-slack task placed first | [UNIT] |
+| UC-11.3 | Deadline task with dependency — dep on day 5 | Task placed after day 5 (deps enforced at placement time) | [UNIT] |
+| UC-11.4 | `startAfter` constraint | Respected — no placement before startAfter date | [UNIT] |
 
 ## 12. Hill Climbing Optimization
 
@@ -569,24 +553,24 @@ This section catalogs every use case the scheduler must handle correctly. Each c
 
 ## 20. Priority / Deadline Algorithm Invariants
 
-These encode the three guiding principles at the top of this doc (deadlines over priority; past-due = today + P1; pinned-first eviction) and the global backward sweep.
+These encode the three guiding principles at the top of this doc (deadlines over priority; past-due = today + P1; pinned-first eviction) and the slack-based forward placement algorithm.
 
 ### Principle 1 — deadlines drive, priority tie-breaks
 
 | UC | Scenario | Expected |
 |----|----------|----------|
-| PDS-1 | P3 task due Thursday vs P1 task with no deadline. One slot free today. | P3 wins today (deadline > priority). P1 placed on next available day. |
-| PDS-2 | Two P2 tasks, both due Friday, different durations. | Longer-duration task gets first pick of Friday's latest slot (priority tied → duration tie-breaks). |
-| PDS-3 | Two P2 tasks, neither with a deadline. | Within P2 tier, longer-duration first. Same tie-break rules apply even without deadlines. |
-| PDS-4 | P1 task with `due_at` on the 56-day horizon edge vs P4 task with `due_at` tomorrow. | P4 tomorrow's tail is committed when backward sweep reaches it; P1 far-out tail already committed earlier. Neither starves the other — each owns its own deadline day. |
+| PDS-1 | P3 task due Thursday vs P1 task with no deadline. One slot free today. | P3 wins today (deadline → lower slack → placed first). P1 placed on next available day. |
+| PDS-2 | Two P2 tasks, both due Friday, different durations. | Longer-duration task placed first (priority tied → duration tie-breaks in slack sort). |
+| PDS-3 | Two P2 tasks, neither with a deadline. | Within P2 tier in Phase 3, longer-duration first. |
+| PDS-4 | P1 task due in 56 days vs P4 task due tomorrow. | P4 has lower slack → placed first. P1's distant deadline means high slack → placed later. Neither starves the other. |
 
-### Principle 2 — past-due tasks = due today + P1
+### Principle 2 — past-due tasks = slack 0 + P1
 
 | UC | Scenario | Expected |
 |----|----------|----------|
-| PDP-1 | Task due yesterday, own priority P3. | Classification remaps due_at → today AND bumps effective priority to P1 for tie-breaks. Placed on today's earliest free slot (competing with on-time P1 tasks). |
-| PDP-2 | Past-due P3 + on-time P1 both due today. One slot left. | Both tied on target_finish + effective priority; longer-duration wins. The loser goes unscheduled; past-due badge if it was the past-due one. |
-| PDP-3 | Past-due task that can't fit today either. | `unscheduled=1` with `scheduled_at` preserved as "last proposed time"; past-due badge remains. |
+| PDP-1 | Task due yesterday, own priority P3. | Gets slack=0 + P1 boost. Placed at today's earliest free slot. |
+| PDP-2 | Past-due P3 + on-time P1 both due today. One slot left. | Both have slack=0 + P1; longer-duration wins. Loser goes to overflow (placed ASAP with no ceiling) or unscheduled. |
+| PDP-3 | Past-due task that can't fit today either. | Overflow pass places ASAP on future day. If still can't fit: `unscheduled=1` with past-due badge. |
 
 ### Principle 3 — pinned eviction first
 
@@ -596,29 +580,29 @@ These encode the three guiding principles at the top of this doc (deadlines over
 | PE-2 | Pinned P1 vs unpinned P4 chain member, same slot. | Pinned P1 still evicted first — pinning trumps priority in eviction order. |
 | PE-3 | Two pinned tasks in the same slot. | Lower-priority pinned evicted first; ties on priority → longer-duration first; final tie-break `id`. |
 
-### Global backward sweep behavior
+### Slack-based placement ordering
 
 | UC | Scenario | Expected |
 |----|----------|----------|
-| SW-1 | Two chains: Chain A tail due Friday, Chain B tail due Thursday. | Friday tail placed first (latest target_finish); Thursday tail placed after, working around Friday's commitments. |
-| SW-2 | Chain A (P1 tail due Fri), Chain B (P3 tail due Fri). Both fit only one slot. | P1 chain wins its preferred slot (priority tie-break on equal target_finish). P3 chain walks back one day. |
-| SW-3 | Shared prereq P feeds T1 (due Fri) and T2 (due Wed). | P placed once with `target_finish = min(T1.start, T2.start)`. In practice T2-adjacent since its target is earlier. |
-| SW-4 | Prereq B (own due=Wed) feeds tail A (due Fri). | B's effective `target_finish = min(A.start, end-of-Wednesday)` — Wednesday in this case. B placed by Wed, not pulled forward to A's start. |
+| SL-1 | Two chains: Chain A tail due Friday, Chain B tail due Thursday. | Thursday chain has lower slack → placed first. Friday chain fills around Thursday's commitments. |
+| SL-2 | Chain A (P1 tail due Fri), Chain B (P3 tail due Fri). Both fit only one slot. | Same slack → P1 wins on priority tie-break. P3 chain placed on next available day. |
+| SL-3 | Shared prereq P feeds T1 (due Fri) and T2 (due Wed). | P's effective deadline = min(T1's effective_start, T2's effective_start) → lower slack → placed early. |
+| SL-4 | Prereq B (own due=Wed) feeds tail A (due Fri). | B's effective deadline = min(A's effective_start, end-of-Wednesday) = Wednesday. B placed by Wed. |
 
-### Forward pull — per-member, reverse topo
-
-| UC | Scenario | Expected |
-|----|----------|----------|
-| FP-1 | Diamond DAG: A→(B,C)→D, all P2, one-hour each, one-week deadline window. | After backward sweep places A latest, B/C stacked before, D farther back. Forward pull walks tail-first: A pulls forward, then B/C pull into the gap A vacated, then D pulls in after B/C's new positions. |
-| FP-2 | Chain with one member constrained by `start_after_at = 3 days out`. | Other members pull forward to today; the constrained member stays at its floor. Per-member delta, not uniform. |
-| FP-3 | Chain where earliest slots are blocked by a pinned task. | Forward pull stops at the pinned task's upper bound — chain members sit right after the pin. |
-
-### Rollback on failed prereq
+### Diamond DAG placement
 
 | UC | Scenario | Expected |
 |----|----------|----------|
-| RB-1 | Chain A→B; B can't fit anywhere in `[start_after, target_finish]`. | A also reverted to `unscheduled=1` (no false-confidence placement). Both surface in unscheduled lane with diagnostic reason. |
-| RB-2 | A→B→C chain; B fails, A and C independent of each other directly but both dependent through chain. | A (tail) unscheduled because its prereq B failed. C has no remaining consumer after B's failure; stays placed at its backward-sweep slot (effectively a solo until user repairs the chain). |
+| DD-1 | Diamond DAG: A→(B,C)→D, all P2, one-hour each, one-week deadline window. | D has tightest effective deadline → lowest slack → placed first. B/C placed after D. A placed last. All satisfy dep ordering. |
+| DD-2 | Chain with one member constrained by `start_after_at = 3 days out`. | Other members placed from today; constrained member waits for its floor date. |
+| DD-3 | Chain where earliest slots are blocked by a pinned task. | Tasks placed in earliest available slot after the pin. |
+
+### Chain rollback under capacity pressure
+
+| UC | Scenario | Expected |
+|----|----------|----------|
+| CR-1 | Chain A→B→C, C due today, only 360m capacity, chain needs 540m. | Forward pass fills A/B but C can't fit. Rollback unplaces all, places C first. B fills remaining. A unplaced. |
+| CR-2 | Chain A→B; B can't fit anywhere in deadline window. | B unplaced with diagnostic reason. A placed independently if it has capacity. |
 
 ### Idempotence
 

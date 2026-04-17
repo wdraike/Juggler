@@ -14,6 +14,7 @@ var constants = require('./constants');
 var DEFAULT_TIME_BLOCKS = constants.DEFAULT_TIME_BLOCKS;
 var DEFAULT_TOOL_MATRIX = constants.DEFAULT_TOOL_MATRIX;
 var DAY_NAMES = constants.DAY_NAMES;
+var SCHEDULER_VERSION = constants.SCHEDULER_VERSION;
 var dateHelpers = require('./dateHelpers');
 var parseDate = dateHelpers.parseDate;
 var formatDateKey = dateHelpers.formatDateKey;
@@ -253,19 +254,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
       chunks = [{ splitOrdinal: 1, splitTotal: 1, dur: occ.dur || 30 }];
     }
 
-    // Merged-survivor guard: if the primary row already carries the full
-    // master dur (merge-back folded siblings into it on a prior run), treat
-    // this occurrence as already placed as one block — don't re-split, don't
-    // re-create deleted split_ordinal>=2 chunks. They'd just come back unplaced
-    // and clutter the "unscheduled" lane.
-    var primaryExisting = existingById[primaryId];
-    var primaryRow = rowsByIdForReconcile[primaryId];
-    var primaryIsMergedSurvivor = primaryExisting && primaryRow
-      && Number(primaryRow.dur) >= Number(occ.dur)
-      && chunks.length > 1;
-    if (primaryIsMergedSurvivor) {
-      chunks = [{ splitOrdinal: 1, splitTotal: 1, dur: Number(primaryRow.dur) }];
-    }
+    // Always produce the correct chunk plan — even if a prior run merged
+    // chunks into one row. The scheduler places each chunk independently;
+    // the post-placement merge step (Phase 5a) recombines contiguous chunks.
+    // If the primary row carries the full master dur from a prior merge,
+    // the drift-fix below will correct it back to chunk 1's dur.
 
     // One occurrence ordinal shared by all chunks of this day.
     var occOrd;
@@ -323,6 +316,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var deadIds = toDeleteIds;
   var expanded = toInsert;
 
+  // ── DB reconcile: deletions and drift-fixes only ──
+  // Inserts are deferred — chunks are built in memory for the scheduler.
+  // Only delete stale rows and fix drifted rows in the DB.
   var reconcileChanged = false;
   if (toDeleteIds.length > 0) {
     await tasksWrite.deleteTasksWhere(trx, userId, function(q) { return q.whereIn('id', toDeleteIds); });
@@ -335,9 +331,6 @@ async function runScheduleAndPersist(userId, _retries, options) {
         .where('id', toUpdate[ui].id)
         .update(Object.assign({}, toUpdate[ui].changes, { updated_at: db.fn.now() }));
     }
-    // Sync in-memory allTasks so placement sees the corrected dur/split fields.
-    // Without this, the scheduler would re-place using the old dur and the
-    // persist pass would overwrite the DB update we just made.
     var updateById = {};
     toUpdate.forEach(function(u) { updateById[u.id] = u.changes; });
     allTasks.forEach(function(t) {
@@ -350,77 +343,121 @@ async function runScheduleAndPersist(userId, _retries, options) {
     console.log('[SCHED] reconcile: updated ' + toUpdate.length + ' instance rows to match chunk plan');
     reconcileChanged = true;
   }
-  if (toInsert.length > 0) {
-    var insertRows = toInsert.map(function(t) {
-      // All chunks inherit the occurrence's date so the scheduler knows
-      // which day each chunk belongs to. Only chunk 1 gets a preferred time;
-      // chunks 2..N are date-anchored but time-flexible (placed wherever on
-      // the day the scheduler finds room). Without a date anchor, chunks 2..N
-      // fall back to "today" and all pile onto one day.
-      var scheduledAt = t.date
-        ? (t.split_ordinal === 1
-            ? localToUtc(t.date, t.time || null, TIMEZONE)
-            : localToUtc(t.date, null, TIMEZONE))
-        : null;
-      return {
-        id: t.id,
-        user_id: userId,
-        task_type: 'recurring_instance',
-        source_id: t.sourceId,
-        occurrence_ordinal: t.occurrence_ordinal,
-        split_ordinal: t.split_ordinal,
-        split_total: t.split_total,
-        dur: t.dur,
-        generated: 0,
-        recurring: 1,
-        scheduled_at: scheduledAt || null,
-        status: '',
-        created_at: db.fn.now(),
-        updated_at: db.fn.now()
-      };
-    });
-    await tasksWrite.insertTasksBatch(trx, insertRows);
-    console.log('[SCHED] reconcile: inserted ' + toInsert.length + ' new recurring instance rows (incl. chunks)');
-    reconcileChanged = true;
-  }
-
-  // Split reconcile is now folded into the unified pass above — no separate step.
-  var splitReconcileChanged = false;
-  var splitSummary = { touchedMasterIds: [] };
-
-  // Narrowed re-read: only refetch rows that actually changed.
-  // Recurring deletions: drop in-memory; no DB roundtrip needed.
-  // Recurring inserts: fetch only the new ids.
-  // Split reconcile: fetch only the touched masters' instances + master rows.
-  if (reconcileChanged || splitReconcileChanged) {
+  if (reconcileChanged) {
     var deletedIds = new Set(toDeleteIds);
     if (deletedIds.size > 0) {
       taskRows = taskRows.filter(function(r) { return !deletedIds.has(r.id); });
     }
-
-    var idsToRefresh = new Set();
-    toInsert.forEach(function(t) { idsToRefresh.add(t.id); });
-    if (splitReconcileChanged && splitSummary.touchedMasterIds.length > 0) {
-      // For each touched split master, refresh the master row + all its instances.
-      var refreshIds = await trx('task_instances')
-        .whereIn('master_id', splitSummary.touchedMasterIds)
-        .pluck('id');
-      refreshIds.forEach(function(id) { idsToRefresh.add(id); });
-      splitSummary.touchedMasterIds.forEach(function(id) { idsToRefresh.add(id); });
-    }
-
-    if (idsToRefresh.size > 0) {
-      var fresh = await trx('tasks_v').whereIn('id', Array.from(idsToRefresh)).select();
-      var freshIdSet = new Set(fresh.map(function(r) { return r.id; }));
-      // Drop stale copies of refreshed ids and append fresh ones
-      taskRows = taskRows.filter(function(r) { return !freshIdSet.has(r.id); }).concat(fresh);
-    }
-
     srcMap = buildSourceMap(taskRows);
     allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
     statuses = {};
     allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
   }
+
+  // ── In-memory chunk expansion ──
+  // Build task objects for new/missing chunks directly from master fields.
+  // No DB insert — the scheduler works on these in memory. Persist step
+  // will INSERT placed chunks after scheduling completes.
+  var masterById = {};
+  allTasks.forEach(function(t) {
+    if (t.taskType === 'recurring_template') masterById[t.id] = t;
+  });
+  var existingTaskIds = {};
+  allTasks.forEach(function(t) { existingTaskIds[t.id] = true; });
+
+  var inMemoryChunks = [];
+  toInsert.forEach(function(row) {
+    if (existingTaskIds[row.id]) return; // already in allTasks
+    var master = masterById[row.sourceId];
+    if (!master) return;
+
+    // Build a task object inheriting master fields
+    var chunk = {
+      id: row.id,
+      taskType: 'recurring_instance',
+      text: master.text,
+      dur: row.dur,
+      pri: master.pri,
+      project: master.project,
+      section: master.section,
+      notes: master.notes,
+      location: master.location,
+      tools: master.tools,
+      when: master.when || ALL_WINDOWS,
+      dayReq: master.dayReq,
+      recurring: true,
+      rigid: master.rigid,
+      timeFlex: master.timeFlex,
+      split: master.split,
+      splitMin: master.splitMin,
+      travelBefore: master.travelBefore,
+      travelAfter: master.travelAfter,
+      dependsOn: master.dependsOn || [],
+      marker: master.marker,
+      flexWhen: master.flexWhen,
+      recur: master.recur,
+      recurStart: master.recurStart,
+      recurEnd: master.recurEnd,
+      preferredTimeMins: row.split_ordinal === 1 ? master.preferredTimeMins : null,
+      sourceId: row.sourceId,
+      generated: true,
+      date: row.date,
+      day: row.date ? DAY_NAMES[parseDate(row.date).getDay()] : null,
+      time: row.split_ordinal === 1 ? row.time : null,
+      status: '',
+      datePinned: false,
+      splitOrdinal: row.split_ordinal,
+      splitTotal: row.split_total,
+      occurrenceOrdinal: row.occurrence_ordinal,
+      startAfter: null,
+      deadline: null,
+      scheduledAt: null,
+      unscheduled: false,
+      _inMemoryChunk: true // flag for persist step
+    };
+    inMemoryChunks.push(chunk);
+  });
+
+  if (inMemoryChunks.length > 0) {
+    allTasks = allTasks.concat(inMemoryChunks);
+    inMemoryChunks.forEach(function(t) { statuses[t.id] = ''; });
+    console.log('[SCHED] in-memory: added ' + inMemoryChunks.length + ' chunk tasks for scheduling');
+  }
+
+  // Re-apply placement brackets (startAfter/deadline) for all recurring instances
+  // including in-memory chunks. This was done in step 2b but only for tasks that
+  // existed at that point — in-memory chunks need it too.
+  allTasks.forEach(function(t) {
+    if (t.taskType !== 'recurring_instance' || !t.sourceId) return;
+    if (t.startAfter && t.deadline) return; // already set from step 2b
+    var master = masterById[t.sourceId];
+    if (!master) { master = srcMap[t.sourceId]; }
+    if (!master) return;
+    var m = String(t.id).match(/-(\d{8})(?:-\d+)?$/);
+    if (!m) return;
+    var y = parseInt(m[1].slice(0, 4), 10);
+    var mo = parseInt(m[1].slice(4, 6), 10);
+    var dd = parseInt(m[1].slice(6, 8), 10);
+    var occ = new Date(y, mo - 1, dd);
+    var recur = (master.recur || master.recur_json) || {};
+    if (typeof recur === 'string') { try { recur = JSON.parse(recur); } catch(e) { recur = {}; } }
+    var type = (recur.type || '').toLowerCase();
+    var flex = 0;
+    if (type === 'weekly') flex = 6;
+    else if (type === 'monthly') flex = 27;
+    else if (type === 'every' || type === 'every_n') {
+      var every = Number(recur.every) || 1;
+      flex = Math.max(0, every - 1);
+    }
+    var dueDate = new Date(occ); dueDate.setDate(dueDate.getDate() + flex);
+    t.startAfter = formatDateKey(occ);
+    t.deadline = formatDateKey(dueDate);
+    if (!t.date) {
+      t.date = t.startAfter;
+      t.day = DAY_NAMES[occ.getDay()];
+    }
+    if (t.when == null || t.when === '') t.when = ALL_WINDOWS;
+  });
 
   // 6. Run scheduler
   var result = unifiedSchedule(allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg);
@@ -701,6 +738,39 @@ async function runScheduleAndPersist(userId, _retries, options) {
     }
   }
 
+  // INSERT in-memory chunks that got placed (they don't exist in the DB yet).
+  // Separate them from pendingUpdates since they need INSERT, not UPDATE.
+  var inMemoryInserts = [];
+  var inMemoryIds = {};
+  inMemoryChunks.forEach(function(t) { inMemoryIds[t.id] = t; });
+  pendingUpdates = pendingUpdates.filter(function(pu) {
+    var chunk = inMemoryIds[pu.id];
+    if (!chunk) return true; // not an in-memory chunk — keep in pendingUpdates
+    // This is an in-memory chunk that got placed — collect for INSERT
+    inMemoryInserts.push({
+      id: pu.id,
+      user_id: userId,
+      task_type: 'recurring_instance',
+      source_id: chunk.sourceId,
+      occurrence_ordinal: chunk.occurrenceOrdinal || 1,
+      split_ordinal: chunk.splitOrdinal || 1,
+      split_total: chunk.splitTotal || 1,
+      dur: pu.dbUpdate.dur || chunk.dur,
+      generated: 0,
+      recurring: 1,
+      scheduled_at: pu.dbUpdate.scheduled_at || null,
+      unscheduled: pu.dbUpdate.unscheduled || null,
+      status: '',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now()
+    });
+    return false; // remove from pendingUpdates
+  });
+  if (inMemoryInserts.length > 0) {
+    await tasksWrite.insertTasksBatch(trx, inMemoryInserts);
+    console.log('[SCHED] persist: inserted ' + inMemoryInserts.length + ' newly-placed chunk rows');
+  }
+
   // Execute updates in batches to avoid long-running single-row UPDATEs.
   // Group by identical dbUpdate shape, then batch with CASE expressions.
   console.log('[SCHED] executing ' + pendingUpdates.length + ' DB updates');
@@ -765,7 +835,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   console.log('[SCHED] runScheduleAndPersist: updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
 
   // 10. Cache the placement result so GET /placements doesn't re-run the scheduler
-  var placementCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date().toISOString(), timezone: TIMEZONE };
+  var placementCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date().toISOString(), timezone: TIMEZONE, schedulerVersion: SCHEDULER_VERSION };
   Object.keys(result.dayPlacements).forEach(function(dk) {
     placementCache.dayPlacements[dk] = result.dayPlacements[dk].map(function(p) {
       var entry = { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };
@@ -893,7 +963,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
       changed: changed,
       removed: removed,
       affectedDates: Object.keys(affectedDates)
-    }
+    },
+    _debug: { inMemoryChunks: inMemoryChunks.length, expandedOccurrences: desiredOccurrences.length }
   };
 
   }); // end transaction
@@ -929,7 +1000,7 @@ async function getSchedulePlacements(userId, options) {
 
   // Quick staleness check — only needs cache metadata + one lightweight query
   var cacheUsable = false;
-  if (cache && cache.generatedAt && cache.timezone === TIMEZONE) {
+  if (cache && cache.generatedAt && cache.timezone === TIMEZONE && cache.schedulerVersion === SCHEDULER_VERSION) {
     var genTime = new Date(cache.generatedAt);
     var ageMs = Date.now() - genTime.getTime();
     var genParts = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, month: 'numeric', day: 'numeric' }).formatToParts(genTime);
@@ -1200,7 +1271,7 @@ async function getSchedulePlacements(userId, options) {
   var result = unifiedSchedule(allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg);
 
   // Save cache
-  var newCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date().toISOString(), timezone: TIMEZONE };
+  var newCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date().toISOString(), timezone: TIMEZONE, schedulerVersion: SCHEDULER_VERSION };
   Object.keys(result.dayPlacements).forEach(function(dk) {
     newCache.dayPlacements[dk] = result.dayPlacements[dk].map(function(p) {
       var entry = { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };

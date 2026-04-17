@@ -53,6 +53,9 @@ var DEFAULT_TIME_BLOCKS = {
   Sat: DEFAULT_WEEKEND_BLOCKS, Sun: DEFAULT_WEEKEND_BLOCKS,
 };
 
+// Bump this when the placement algorithm changes to invalidate cached schedules.
+var SCHEDULER_VERSION = 2;
+
 module.exports = {
   PRI_RANK,
   TASK_DEFAULTS,
@@ -64,5 +67,6 @@ module.exports = {
   DEFAULT_WEEKDAY_BLOCKS,
   DEFAULT_WEEKEND_BLOCKS,
   DEFAULT_TIME_BLOCKS,
-  DEFAULT_TIMEZONE: 'America/New_York'
+  DEFAULT_TIMEZONE: 'America/New_York',
+  SCHEDULER_VERSION
 };

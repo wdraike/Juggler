@@ -1,15 +1,17 @@
 /**
- * Unified Scheduler — Reserve-and-Place
+ * Unified Scheduler — Slack-Based Forward Placement
  * Phase 0: Fixed items + rigid recurringTasks (immovable anchors)
- * Phase 1: Non-rigid recurring tasks by priority
- * Phase 2: Reserve-and-Place — faux-deadlines, capacity reservation,
- *          single topological pass with early-placement (all tasks)
+ * Phase 1: Non-rigid recurring tasks by slack within cycle windows
+ * Phase 2: Slack-sorted left-to-right placement — constraint-aware slack
+ *          computation, single forward pass, past-due overflow
  * Phase 3: Relaxation + overflow
  * Phase 4: Recurring rescue + intraday packing
  * Phase 5: Hill-climbing optimization
  *
  * Core rule: "On-time trumps priority" — meeting deadlines is more
- * important than respecting user-assigned priorities.
+ * important than respecting user-assigned priorities. Slack (available
+ * capacity before deadline minus task duration) determines placement
+ * order; priority is a tie-breaker when slack is equal.
  */
 
 var constants = require('./constants');
@@ -308,14 +310,17 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var deadline = t.deadline ? parseDate(t.deadline) : null;
       if (deadline) deadline.setHours(23, 59, 59, 999);
 
-      // Each DB row is already the placeable unit. Recurring-split masters
-      // materialize one task_instances row per chunk at reconcile time; by the
-      // time we're here, t.dur is the chunk's duration. Don't re-chunk in memory.
+      // Tasks with split=true can be placed in chunks of splitMin minutes.
+      // Recurring-split instances are normally pre-chunked by reconcile-splits
+      // in runSchedule.js, but when calling unifiedSchedule directly (e.g. tests
+      // or read-only schedule views), the full-duration row needs in-scheduler
+      // splitting. The splitTotal check avoids re-splitting pre-chunked rows.
+      var canSplit = !!(t.split && t.splitMin > 0 && (!t.splitTotal || t.splitTotal <= 1));
       pool.push({
         task: t, remaining: effectiveDur, totalDur: effectiveDur,
         earliestDate: earliest, deadline: deadline, ceiling: ceiling,
-        splittable: false,
-        minChunk: effectiveDur,
+        splittable: canSplit,
+        minChunk: canSplit ? t.splitMin : effectiveDur,
         _parts: [],
         _poolId: t.id
       });
@@ -460,21 +465,88 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   var taskById = {};
   allTasks.forEach(function(t) { taskById[t.id] = t; });
 
-  // computeFauxDeadlines: called after recurring placement to compute
-  // capacity-aware faux-deadlines for dependency chain ancestors.
-  // Walks backward from each hard deadline through the dep chain,
-  // subtracting available capacity per day to find the latest start date.
-  function computeFauxDeadlines() {
-    // Build pool lookup
+  // computeSlack: called after recurring placement to compute constraint-aware
+  // slack for every constrained pool item. Slack = available capacity between
+  // the task's earliest placement date and its effective deadline, minus its
+  // duration. Lower slack = more urgent. For dependency chain ancestors, the
+  // effective deadline is derived by walking backward from the chain tail's
+  // hard deadline, subtracting each consumer's capacity needs.
+  //
+  // Also computes faux-deadlines for chain ancestors (used as a placement ceiling
+  // by placeItemForward) and attaches _slack to each pool item.
+  function computeSlack() {
     var poolByTaskId = {};
     pool.forEach(function(item) { poolByTaskId[item.task.id] = item; });
 
-    // Find all tasks with hard deadlines (own deadline)
+    // Helper: compute available capacity (minutes) for a task between two dates.
+    // Walks days forward from startDate through endDate, summing free minutes
+    // in the task's when-windows on eligible days.
+    function availableCapacity(task, item, startDate, endDate) {
+      var total = 0;
+      for (var di = 0; di < dates.length; di++) {
+        var d = dates[di];
+        if (d.date < startDate) continue;
+        if (d.date > endDate) break;
+        if (!canPlaceOnDate(task, d)) continue;
+        var wins = getWhenWindows(task.when, dayWindows[d.key]);
+        if (wins.length === 0) continue;
+        var occ = dayOcc[d.key];
+        for (var wi = 0; wi < wins.length; wi++) {
+          for (var m = wins[wi][0]; m < wins[wi][1]; m++) {
+            if (!occ || !occ[m]) total++;
+          }
+        }
+      }
+      return total;
+    }
+
+    // Helper: walk days backward from mustFinishBy, subtracting available
+    // capacity for a consumer's duration to find the latest start date
+    // (the effective deadline for the consumer's parent).
+    function computeEffectiveStart(task, dur, mustFinishBy) {
+      var needed = dur;
+      var effectiveStart = null;
+      for (var di = dates.length - 1; di >= 0 && needed > 0; di--) {
+        var d = dates[di];
+        if (d.date > mustFinishBy) continue;
+        if (d.date < localToday) break;
+        if (!canPlaceOnDate(task, d)) continue;
+        var wins = getWhenWindows(task.when, dayWindows[d.key]);
+        if (wins.length === 0) continue;
+        var occ = dayOcc[d.key];
+        var dayFree = 0;
+        for (var wi = 0; wi < wins.length; wi++) {
+          for (var m = wins[wi][0]; m < wins[wi][1]; m++) {
+            if (!occ || !occ[m]) dayFree++;
+          }
+        }
+        needed -= dayFree;
+        if (needed <= 0) {
+          effectiveStart = new Date(d.date);
+        }
+      }
+      if (!effectiveStart && needed > 0) {
+        effectiveStart = new Date(localToday);
+      }
+      return effectiveStart;
+    }
+
+    // Step 1: Compute slack for tasks with their own hard deadline (no chain propagation)
+    pool.forEach(function(item) {
+      if (!item.deadline && !item.fauxDeadline && !item.ceiling) return;
+      var effectiveDL = item.deadline || item.fauxDeadline || item.ceiling;
+      var earliest = item.earliestDate || localToday;
+      if (earliest < localToday) earliest = localToday;
+      var cap = availableCapacity(item.task, item, earliest, effectiveDL);
+      item._slack = Math.max(0, cap - item.totalDur);
+    });
+
+    // Step 2: Walk backward from each deadline task through dependency chains
+    // to compute faux-deadlines and slack for chain ancestors.
     var deadlineItems = pool.filter(function(item) { return item.task.deadline && item.deadline; });
 
-    // For each deadline task, walk backward through dep chain
     deadlineItems.forEach(function(dlItem) {
-      var dlDate = dlItem.deadline; // already parsed Date with 23:59:59
+      var dlDate = dlItem.deadline;
 
       // BFS backward through dependency chain
       var queue = [{ taskId: dlItem.task.id, mustFinishBy: dlDate }];
@@ -487,10 +559,10 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
 
         var curTask = taskById[cur.taskId];
         if (!curTask) continue;
+        var curItem = poolByTaskId[cur.taskId];
 
-        // Find parents (tasks that this task depends on — i.e., tasks where
-        // cur.taskId appears in their dependedOnBy children)
-        var parentDeps = getTaskDeps(curTask); // tasks that curTask depends on
+        // Find parents (tasks that curTask depends on)
+        var parentDeps = getTaskDeps(curTask);
         for (var pi = 0; pi < parentDeps.length; pi++) {
           var parentId = parentDeps[pi];
           if (isBackwardsDep(cur.taskId, parentId)) continue;
@@ -501,58 +573,51 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
           if (parentItem.remaining <= 0) continue;
 
           var parentTask = parentItem.task;
-          var parentDur = parentItem.totalDur;
 
-          // Compute faux-deadline: walk days backward from mustFinishBy,
-          // subtracting available capacity until parentDur is accounted for
-          var needed = parentDur;
-          var fauxDate = null;
+          // Compute effective start of the consumer (cur) by walking backward
+          // from its mustFinishBy, then use that as the parent's mustFinishBy
+          var consumerDur = curItem ? curItem.totalDur : 30;
+          var parentMustFinishBy = computeEffectiveStart(curTask, consumerDur, cur.mustFinishBy);
+          if (!parentMustFinishBy) parentMustFinishBy = new Date(localToday);
 
-          for (var di = dates.length - 1; di >= 0 && needed > 0; di--) {
-            var d = dates[di];
-            if (d.date > cur.mustFinishBy) continue;
-            if (d.date < localToday) break;
-            if (!canPlaceOnDate(parentTask, d)) continue;
+          // If parent has its own deadline that's tighter, use that
+          if (parentItem.deadline && parentItem.deadline < parentMustFinishBy) {
+            parentMustFinishBy = parentItem.deadline;
+          }
 
-            // Compute available capacity on this day for this task's when-windows
-            var wins = getWhenWindows(parentTask.when, dayWindows[d.key]);
-            if (wins.length === 0) continue;
-            var dayFree = 0;
-            var occ = dayOcc[d.key];
-            for (var wi = 0; wi < wins.length; wi++) {
-              for (var m = wins[wi][0]; m < wins[wi][1]; m++) {
-                if (!occ || !occ[m]) dayFree++;
-              }
-            }
-            needed -= dayFree;
-            if (needed <= 0) {
-              fauxDate = new Date(d.date);
-              fauxDate.setHours(23, 59, 59, 999);
+          // Set faux-deadline on the parent (if it doesn't have its own hard deadline)
+          var fauxDate = new Date(parentMustFinishBy);
+          fauxDate.setHours(23, 59, 59, 999);
+
+          if (!parentItem.task.deadline) {
+            if (!parentItem.fauxDeadline || fauxDate < parentItem.fauxDeadline) {
+              parentItem.fauxDeadline = fauxDate;
+              parentItem.task._fauxDeadline = formatDateKey(fauxDate);
             }
           }
 
-          // If we couldn't fit the task, set faux-deadline to today
-          if (!fauxDate && needed > 0) {
-            fauxDate = new Date(localToday);
-            fauxDate.setHours(23, 59, 59, 999);
+          // Compute slack for this parent
+          var earliest = parentItem.earliestDate || localToday;
+          if (earliest < localToday) earliest = localToday;
+          var effectiveDL = parentItem.deadline || parentItem.fauxDeadline;
+          if (effectiveDL) {
+            var cap = availableCapacity(parentTask, parentItem, earliest, effectiveDL);
+            var newSlack = Math.max(0, cap - parentItem.totalDur);
+            // Take the tightest (lowest) slack from any chain
+            if (parentItem._slack == null || newSlack < parentItem._slack) {
+              parentItem._slack = newSlack;
+            }
           }
 
-          if (fauxDate) {
-            // Only assign if tighter than existing deadline/faux-deadline
-            if (parentItem.task.deadline) {
-              // Task has its own deadline — don't override with faux
-            } else {
-              if (!parentItem.fauxDeadline || fauxDate < parentItem.fauxDeadline) {
-                parentItem.fauxDeadline = fauxDate;
-                parentItem.task._fauxDeadline = formatDateKey(fauxDate);
-              }
-            }
-            // Continue walking backward — parent's faux-deadline becomes
-            // the mustFinishBy for its own parents
-            queue.push({ taskId: parentId, mustFinishBy: fauxDate });
-          }
+          // Continue walking backward
+          queue.push({ taskId: parentId, mustFinishBy: fauxDate });
         }
       }
+    });
+
+    // Step 3: Default slack for items without deadlines (unconstrained)
+    pool.forEach(function(item) {
+      if (item._slack == null) item._slack = Infinity;
     });
   }
 
@@ -591,53 +656,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   function reserve(occ, s, d) { for (var i = Math.max(0, s); i < Math.min(s + d, 1440); i++) occ[i] = true; }
   function isFree(occ, s, d) { for (var i = s; i < s + d && i < 1440; i++) { if (occ[i]) return false; } return true; }
 
-  // Reservation helpers: mark capacity with task ID (string) instead of true.
-  // isFree() already treats any truthy value as occupied, so non-owners are blocked.
-  // reserveCapacityForChains() and releaseReservation() manage the lifecycle.
-  function reserveCapacityForChains() {
-    pool.forEach(function(item) {
-      var effectiveDL = item.fauxDeadline || item.deadline;
-      if (!effectiveDL) return;
-      if (item.task.recurring) return; // already placed
-      if (item.remaining <= 0) return;
-
-      var needed = item.totalDur;
-      var taskId = item.task.id;
-      var t = item.task;
-
-      // Reserve backward from deadline
-      for (var di = dates.length - 1; di >= 0 && needed > 0; di--) {
-        var d = dates[di];
-        if (d.date > effectiveDL) continue;
-        if (d.date < localToday) break;
-        if (item.earliestDate && d.date < item.earliestDate) continue;
-        if (!canPlaceOnDate(t, d)) continue;
-
-        var wins = getWhenWindows(t.when, dayWindows[d.key]);
-        if (wins.length === 0) continue;
-        var occ = dayOcc[d.key];
-
-        for (var wi = 0; wi < wins.length && needed > 0; wi++) {
-          for (var m = wins[wi][0]; m < wins[wi][1] && needed > 0; m++) {
-            if (!occ[m]) {
-              occ[m] = taskId; // string marker = reserved for this task
-              needed--;
-            }
-          }
-        }
-      }
-    });
-  }
-
-  function releaseReservation(taskId) {
-    for (var di = 0; di < dates.length; di++) {
-      var occ = dayOcc[dates[di].key];
-      if (!occ) continue;
-      for (var m = 0; m < 1440; m++) {
-        if (occ[m] === taskId) delete occ[m];
-      }
-    }
-  }
+  // (Reservation helpers removed — slack-based forward placement handles
+  // capacity naturally via ordering: lower-slack tasks place first.)
   function buildLocMask(task, dateKey, dateBlocks) {
     var mask = {};
     for (var m = GRID_START * 60; m < (GRID_END + 1) * 60; m += 15) {
@@ -943,74 +963,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     return placedAny;
   }
 
-  // LATE PLACEMENT — scan backward through when-windows for the latest valid slot.
-  // Used by reverse-topo chain processing so deadline tasks land late, leaving room for parents.
-  function placeLate(item, d, beforeMin, whenOverride, afterMin) {
-    var t = item.task;
-    var occ = dayOcc[d.key];
-    var placed = dayPlaced[d.key];
-    var tb = getTravelBefore(t);
-    var ta = getTravelAfter(t);
-    var wins = Array.isArray(whenOverride) ? whenOverride : getWhenWindows(whenOverride || t.when, dayWindows[d.key]);
-    if (wins.length === 0) return false;
-    var scanLimit = (beforeMin != null && beforeMin < WALK_END) ? beforeMin : WALK_END;
-    var scanFloor = Math.max(afterMin || 0, DAY_START);
-    var dur = item.remaining;
-    if (dur <= 0) return false;
-
-    // For splittable tasks, fall back to placeEarly (late-split is complex)
-    if (item.splittable) return placeEarly(item, d, scanFloor, whenOverride, scanLimit);
-
-    // Scan backward through windows for the latest contiguous gap
-    var bestStart = -1;
-    for (var wi = wins.length - 1; wi >= 0; wi--) {
-      var wStart = Math.max(wins[wi][0], scanFloor);
-      var wEnd = Math.min(wins[wi][1], scanLimit);
-      if (wEnd - wStart < dur) continue;
-
-      // Scan backward from end of window
-      for (var scan = wEnd - dur; scan >= wStart; scan--) {
-        // Check travel-before zone
-        var needTb = item._parts.length === 0 ? tb : 0;
-        if (needTb > 0) {
-          var tbOk = true;
-          for (var tbi = scan - needTb; tbi < scan; tbi++) {
-            if (tbi < 0 || (occ[tbi] && occ[tbi] !== t.id)) { tbOk = false; break; }
-          }
-          if (!tbOk) continue;
-        }
-        // Check contiguous gap for task body
-        var gapOk = true;
-        for (var gm = scan; gm < scan + dur; gm++) {
-          if (occ[gm] && occ[gm] !== t.id) { gapOk = false; break; }
-        }
-        if (!gapOk) continue;
-        // Check travel-after zone
-        var needTa = ta;
-        if (needTa > 0) {
-          var taOk2 = true;
-          for (var tai = scan + dur; tai < scan + dur + needTa; tai++) {
-            if (occ[tai] && occ[tai] !== t.id) { taOk2 = false; break; }
-          }
-          if (!taOk2) continue;
-        }
-        // Check location
-        var locOk = true;
-        for (var lm = scan; lm < scan + dur; lm += 15) {
-          var locId = resolveLocationId(d.key, lm, cfg, dayBlocks[d.key]);
-          if (!canTaskRun(t, locId, cfg.toolMatrix)) { locOk = false; break; }
-        }
-        if (!locOk) continue;
-        bestStart = scan;
-        break; // First valid slot scanning backward = latest valid slot
-      }
-      if (bestStart >= 0) break;
-    }
-
-    if (bestStart < 0) return false;
-    recordPlace(occ, placed, t, bestStart, dur, false, d.key, item);
-    return true;
-  }
+  // (placeLate removed — all placement now uses forward scanning via placeEarly)
 
   // Place a task as close to a preferred minute as possible within when-windows
   function placeNearTime(item, d, preferredMin, whenOverride) {
@@ -1359,20 +1312,56 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
 
   captureSnapshot('Phase 0: + Rigid recurringTasks');
 
-  // PHASE 1: Non-rigid recurring tasks by priority.
-  // Recurrings are placed before the main pass so they get their preferred
-  // time windows without competing with deadline/flexible tasks.
-  PRI_LEVELS.forEach(function(priLevel) {
-    var recurringItems = pool.filter(function(item) {
-      return item.task.recurring && item.remaining > 0 && (item.task.pri || "P3") === priLevel;
-    });
-    recurringItems.sort(function(a, b) {
-      var aDate = parseDate(a.task.date) || localToday;
-      var bDate = parseDate(b.task.date) || localToday;
-      var dd = aDate - bDate;
-      if (dd !== 0) return dd;
-      return whenAvailableMinutes(a.task) - whenAvailableMinutes(b.task);
-    });
+  var PRI_RANK = { P1: 1, P2: 2, P3: 3, P4: 4 };
+
+  // PHASE 1: Non-rigid recurring tasks by slack (constrained-first).
+  // Sort by slack across ALL priority tiers so narrow-window tasks (e.g.
+  // "morning" only) place before wide-window tasks (e.g. "anytime") —
+  // the anytime task can find a slot later in the day, the morning task
+  // can't. Priority is a tiebreaker, not the primary grouping.
+  var recurringItems = pool.filter(function(item) {
+    return item.task && item.task.recurring && item.remaining > 0;
+  });
+  // Compute recurring slack: available capacity from earliestDate to ceiling minus duration.
+  // Treat cycle end (ceiling) as the deadline for the recurring instance.
+  recurringItems.forEach(function(item) {
+    var start = item.earliestDate || localToday;
+    if (start < localToday) start = localToday;
+    var end = item.ceiling;
+    if (!end) {
+      item._recurSlack = Infinity; // no cycle constraint — lowest urgency
+      return;
+    }
+    var cap = 0;
+    var t = item.task;
+    for (var di = 0; di < dates.length; di++) {
+      var d = dates[di];
+      if (d.date < start) continue;
+      if (d.date > end) break;
+      if (!canPlaceOnDate(t, d)) continue;
+      var wins = getWhenWindows(t.when, dayWindows[d.key]);
+      for (var wi = 0; wi < wins.length; wi++) {
+        var occ = dayOcc[d.key];
+        for (var m = wins[wi][0]; m < wins[wi][1]; m++) {
+          if (!occ || !occ[m]) cap++;
+        }
+      }
+    }
+    item._recurSlack = Math.max(0, cap - item.totalDur);
+  });
+  recurringItems.sort(function(a, b) {
+    // 1. Slack ascending — most constrained first
+    var aSlack = a._recurSlack != null ? a._recurSlack : Infinity;
+    var bSlack = b._recurSlack != null ? b._recurSlack : Infinity;
+    if (aSlack !== bSlack) return aSlack - bSlack;
+    // 2. Priority ascending as tiebreaker
+    var aPri = PRI_RANK[a.task.pri || 'P3'] || 3;
+    var bPri = PRI_RANK[b.task.pri || 'P3'] || 3;
+    if (aPri !== bPri) return aPri - bPri;
+    // 3. Narrower when-window first
+    return whenAvailableMinutes(a.task) - whenAvailableMinutes(b.task);
+  });
+  {
     recurringItems.forEach(function(item) {
       if (item.remaining <= 0) return;
       var t = item.task;
@@ -1398,7 +1387,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         placeEarly(item, d, 0, flexWins);
       }
     });
-  });
+  }
 
   captureSnapshot('Phase 1: Recurring tasks');
 
@@ -1492,11 +1481,11 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     });
   })();
 
-  // ── PHASE 2: Late-Place, Pull-Forward, Fill ──
-  // See docs/SCHEDULER-PRIORITY-REDESIGN.md for full algorithm description.
+  // ── PHASE 2: Slack-Based Forward Placement ──
+  // See docs/SCHEDULER.md for full algorithm description.
 
-  // Step 2a: Compute faux-deadlines for dependency chain ancestors
-  computeFauxDeadlines();
+  // Step 2a: Compute constraint-aware slack for all constrained pool items
+  computeSlack();
 
   // Step 2a: Chain membership classification.
   // A task is a "chain member" if it has a hard deadline OR if any transitive
@@ -1537,22 +1526,11 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   });
 
   // Step 2b: Categorize non-recurring pool into constrained vs unconstrained.
-  // Solo anchors (deadline set but no deps and no dependents) stay in
-  // constrainedPool — they still need the deadline clamp — but get flagged
-  // so the placement pass walks days FORWARD (earliest slot first) for them
-  // while leaving chain members on the original backward-from-deadline path.
   var constrainedPool = [];
   var unconstrainedPool = [];
-  var PRI_RANK = { P1: 1, P2: 2, P3: 3, P4: 4 };
   pool.forEach(function(item) {
     var t = item.task;
     if (item.remaining <= 0 || item.task.recurring) return;
-    var deps = getTaskDeps(t).filter(function(d) { return !isBackwardsDep(t.id, d); });
-    var isSoloAnchor = hasDeadline[t.id] && deps.length === 0 && !hasAncestorsCount[t.id];
-    if (isSoloAnchor) item._soloAnchor = true;
-    if (t.id === '019d83ac-9468-70de-9ea7-9aa6a0d91531' || t.id === '019d83ac-9469-721f-9bbc-58b59554d504') {
-      console.log('[POOL-CHECK]', t.id, 'text=', (t.text||'').slice(0,40), 'deadline=', t.deadline, 'hasDeadline=', !!hasDeadline[t.id], 'deps.len=', deps.length, 'ancestorsCount=', hasAncestorsCount[t.id], 'isSoloAnchor=', isSoloAnchor, 'remaining=', item.remaining, 'recurring=', t.recurring);
-    }
     if (item.deadline || item.fauxDeadline || item.ceiling) {
       constrainedPool.push(item);
     } else {
@@ -1560,7 +1538,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     }
   });
 
-  // Step 2c: Compute placement windows [earliest, latest] for constrained tasks
+  // Step 2c: Compute placement windows and handle past-due + impossible constraints
   var impossibleItems = [];
   constrainedPool.forEach(function(item) {
     var earliest = item.earliestDate || localToday;
@@ -1572,21 +1550,20 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       return d < min ? d : min;
     }, latestCandidates[0]);
 
-    // Past-due rescue: missing a deadline doesn't remove the work, and "past"
-    // is meaningless as a future constraint — stop treating it as one.
-    // Reclassify this item as UNCONSTRAINED so it competes for placement by
-    // priority (P1 past-due lands before P2 on-time). Anchor earliestDate to
-    // today so the placement pass prefers *today* (or the first capacity slot
-    // going forward), not some arbitrary day far out in the horizon.
+    // Past-due: task whose latest constraint is in the past.
+    // Keep in constrained pool with slack=0 and P1 priority boost.
+    // The overflow pass (step 2g) will place it ASAP if the normal pass can't.
     if (latest < localToday) {
       item.task._pastDue = true;
       item.task._originalDue = item.deadline ? formatDateKey(item.deadline) : null;
-      item._reclassifiedPastDue = true;
-      item.deadline = null;
-      item.fauxDeadline = null;
-      item.ceiling = null;
-      item.earliestDate = new Date(localToday); // land today or later, not in the distant future
-      return; // move on; this item is handled in the unconstrained pass
+      item.task.pri = 'P1'; // priority boost for tie-breaking
+      item._slack = 0; // most urgent
+      item._pastDueOverflow = true; // flag for overflow pass
+      item.earliestDate = new Date(localToday);
+      item._windowEarliest = new Date(localToday);
+      // Keep deadline/fauxDeadline for the normal pass attempt;
+      // overflow pass will remove them if needed.
+      return;
     }
 
     if (earliest > latest) {
@@ -1598,213 +1575,18 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       impossibleItems.push(item);
       return;
     }
-    item._targetLatest = latest;
     item._windowEarliest = earliest;
-    item._windowSize = latest.getTime() - earliest.getTime();
   });
-  // Move past-due-reclassified items out of constrainedPool into unconstrainedPool.
-  var reclassified = constrainedPool.filter(function(item) { return item._reclassifiedPastDue; });
-  if (reclassified.length > 0) {
-    unconstrainedPool = unconstrainedPool.concat(reclassified);
-  }
-  constrainedPool = constrainedPool.filter(function(item) { return !item._impossible && !item._reclassifiedPastDue; });
+  constrainedPool = constrainedPool.filter(function(item) { return !item._impossible; });
 
   // Separate split chunks from chainable items (split chunks share task IDs
-  // and can't go through buildChains — they're processed separately by priority)
+  // and can't go through buildChains — they're processed separately)
   var constrainedChunks = constrainedPool.filter(function(item) { return !!item._splitChunk; });
   var constrainedNonChunks = constrainedPool.filter(function(item) { return !item._splitChunk; });
 
-  // Step 2d: Group constrained tasks into dependency chains
-  var constrainedById = {};
-  constrainedNonChunks.forEach(function(item) { constrainedById[item.task.id] = item; });
-
-  function buildChains(poolItems, itemById) {
-    var visited = {};
-    var chains = [];
-
-    function walkChain(item, chain) {
-      if (visited[item.task.id]) return;
-      visited[item.task.id] = true;
-      chain.push(item);
-      getTaskDeps(item.task).forEach(function(depId) {
-        if (isBackwardsDep(item.task.id, depId)) return;
-        if (itemById[depId]) walkChain(itemById[depId], chain);
-      });
-      var children = dependedOnBy[item.task.id] || [];
-      children.forEach(function(childId) {
-        if (isBackwardsDep(childId, item.task.id)) return;
-        if (itemById[childId]) walkChain(itemById[childId], chain);
-      });
-    }
-
-    poolItems.forEach(function(item) {
-      if (visited[item.task.id]) return;
-      var chain = [];
-      walkChain(item, chain);
-      if (chain.length > 0) chains.push(chain);
-    });
-
-    chains.forEach(function(chain) {
-      var maxPriRank = 4;
-      chain.forEach(function(item) {
-        var r = PRI_RANK[item.task.pri || 'P3'] || 3;
-        if (r < maxPriRank) maxPriRank = r;
-      });
-      chain.maxPri = maxPriRank;
-
-      var chainTasks = chain.map(function(item) { return item.task; });
-      var sorted = topoSortTasks(chainTasks);
-      var topoIdx = {};
-      sorted.forEach(function(t, idx) { topoIdx[t.id] = idx; });
-      chain.sort(function(a, b) {
-        var ai = topoIdx[a.task.id] != null ? topoIdx[a.task.id] : 9999;
-        var bi = topoIdx[b.task.id] != null ? topoIdx[b.task.id] : 9999;
-        return ai - bi;
-      });
-    });
-
-    return chains;
-  }
-
-  var constrainedChains = buildChains(constrainedNonChunks, constrainedById);
-
-  // Step 2e: Pull-forward by priority (multi-pass convergence)
-  var MAX_PASSES = 10;
-  var prevPositions = {};
-
-  function placeItemBackward(item) {
-    var t = item.task;
-    var latest = item._targetLatest;
-    var earliest = item._windowEarliest || localToday;
-
-    for (var di = dates.length - 1; di >= 0; di--) {
-      if (item.remaining <= 0) break;
-      var d = dates[di];
-      if (d.date > latest) continue;
-      if (d.date < earliest) break;
-      if (d.date < localToday) break;
-      if (!canPlaceOnDate(t, d)) continue;
-      var depResult = depsMetByDate(t, d);
-      if (!depResult) continue;
-      var depAfter = depAfterFrom(depResult);
-      var depBefore = depBeforeFrom(depResult);
-      var flexWins = getRecurFlexWindows(t, dayWindows[d.key]);
-      if (flexWins) {
-        var flexFree = 0;
-        var _occ = dayOcc[d.key];
-        for (var fi = 0; fi < flexWins.length; fi++) {
-          for (var fm = flexWins[fi][0]; fm < flexWins[fi][1]; fm++) {
-            if (!_occ[fm]) flexFree++;
-          }
-        }
-        if (flexFree < item.remaining) continue;
-      }
-      var wins = flexWins || getWhenWindows(t.when, dayWindows[d.key]);
-      if (wins.length === 0) continue;
-      placeEarly(item, d, depAfter, flexWins, depBefore);
-    }
-  }
-
-  function placeItemBackwardConstrained(item, childBefore, chainTaskIds) {
-    // Like placeItemBackward but processes chains in reverse topo order.
-    // Uses childBefore constraint from already-placed children instead of
-    // depsMetByDate for same-chain deps. Cross-chain deps still checked.
-    //
-    // Solo-anchor special case: items flagged `_soloAnchor` (has deadline but
-    // no deps and no dependents) iterate FORWARD — earliest day, earliest
-    // slot within the day — so a P1 due Friday lands Monday if Monday has
-    // capacity, instead of sitting at Friday 10pm. The deadline still
-    // clamps the forward search via `latest`.
-    var t = item.task;
-    var latest = item._targetLatest;
-    var earliest = item._windowEarliest || localToday;
-    var pullForward = !!item._soloAnchor;
-
-    // Check which deps are cross-chain (need depsMetByDate) vs same-chain (use childBefore)
-    var crossChainDeps = getTaskDeps(t).filter(function(depId) {
-      if (isBackwardsDep(t.id, depId)) return false;
-      return !chainTaskIds || !chainTaskIds[depId];
-    });
-
-    var startIdx = pullForward ? 0 : dates.length - 1;
-    var endIdx = pullForward ? dates.length : -1;
-    var stepIdx = pullForward ? 1 : -1;
-    for (var di = startIdx; di !== endIdx; di += stepIdx) {
-      if (item.remaining <= 0) break;
-      var d = dates[di];
-      if (pullForward) {
-        if (d.date < earliest) continue;
-        if (d.date < localToday) continue;
-        if (d.date > latest) break;
-      } else {
-        if (d.date > latest) continue;
-        if (d.date < earliest) break;
-        if (d.date < localToday) break;
-      }
-      if (!canPlaceOnDate(t, d)) continue;
-
-      // Check cross-chain deps are met
-      var crossOk = true;
-      var depAfter = 0;
-      for (var cdi = 0; cdi < crossChainDeps.length; cdi++) {
-        var cdInfo = globalPlacedEnd[crossChainDeps[cdi]];
-        if (!cdInfo) {
-          // Only block if dep is active (in pool) but not yet placed.
-          // Done/cancelled/paused deps are not in the pool — treat as met.
-          if (poolIds[crossChainDeps[cdi]]) { crossOk = false; break; }
-          continue;
-        }
-        if (cdInfo.dateKey > d.key) { crossOk = false; break; }
-        if (cdInfo.dateKey === d.key && cdInfo.endMin > depAfter) depAfter = cdInfo.endMin;
-      }
-      if (!crossOk) continue;
-
-      // Apply childBefore constraint (same-chain) — must finish before earliest placed child
-      var beforeMin = undefined;
-      if (childBefore) {
-        if (d.key > childBefore.dateKey) continue; // this day is after child's day
-        if (d.key === childBefore.dateKey) beforeMin = childBefore.startMin;
-      }
-      // Also check cross-chain children (tasks that depend on us, already placed)
-      var crossChildren = dependedOnBy[t.id] || [];
-      var crossChildOk = true;
-      for (var cci = 0; cci < crossChildren.length; cci++) {
-        if (isBackwardsDep(crossChildren[cci], t.id)) continue;
-        if (chainTaskIds && chainTaskIds[crossChildren[cci]]) continue; // same-chain, handled by childBefore
-        var ccInfo = globalPlacedEnd[crossChildren[cci]];
-        if (!ccInfo) continue;
-        var ccDate = parseDate(ccInfo.dateKey);
-        if (ccDate && ccDate < d.date) { crossChildOk = false; break; } // child on earlier day — impossible
-        if (ccInfo.dateKey === d.key && ccInfo.startMin != null) {
-          if (beforeMin == null || ccInfo.startMin < beforeMin) beforeMin = ccInfo.startMin;
-        }
-      }
-      if (!crossChildOk) continue;
-
-      var flexWins = getRecurFlexWindows(t, dayWindows[d.key]);
-      if (flexWins) {
-        var flexFree = 0;
-        var _occ = dayOcc[d.key];
-        for (var fi = 0; fi < flexWins.length; fi++) {
-          for (var fm = flexWins[fi][0]; fm < flexWins[fi][1]; fm++) {
-            if (!_occ[fm]) flexFree++;
-          }
-        }
-        if (flexFree < item.remaining) continue;
-      }
-      var wins = flexWins || getWhenWindows(t.when, dayWindows[d.key]);
-      if (wins.length === 0) continue;
-      if (pullForward) {
-        placeEarly(item, d, depAfter, flexWins, beforeMin);
-      } else {
-        placeLate(item, d, beforeMin, flexWins, depAfter);
-      }
-    }
-  }
-
+  // Step 2d: Forward placement function (used for all constrained + unconstrained tasks)
   function placeItemForward(item) {
     var t = item.task;
-    // Use task's date as floor if no explicit earliestDate, so tasks stay on/after their assigned date
     var earliest = item.earliestDate || localToday;
     var effectiveDeadline = item.deadline || item.fauxDeadline;
 
@@ -1837,111 +1619,184 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     }
   }
 
-  function capturePositions(items) {
-    var positions = {};
-    items.forEach(function(item) {
-      if (item._parts.length > 0) {
-        positions[item.task.id] = item._parts.map(function(p) {
-          return p._dateKey + ':' + p.start;
-        }).join(',');
-      } else {
-        positions[item.task.id] = 'unplaced';
-      }
+  // Step 2e: Slack-based forward placement — sort all constrained items by
+  // slack ascending (most urgent first), then place left-to-right.
+  // No multi-pass convergence needed: slack ordering ensures the most
+  // constrained tasks get first pick; depsMetByDate() enforces ordering
+  // at placement time.
+
+  // Merge non-chunks and chunks into a single sorted pool
+  var allConstrained = constrainedNonChunks.concat(constrainedChunks);
+  allConstrained.sort(function(a, b) {
+    // 1. Slack ascending (most urgent first)
+    var aSlack = a._slack != null ? a._slack : Infinity;
+    var bSlack = b._slack != null ? b._slack : Infinity;
+    if (aSlack !== bSlack) return aSlack - bSlack;
+    // 2. Priority ascending (P1 before P4)
+    var aPri = PRI_RANK[a.task.pri || 'P3'] || 3;
+    var bPri = PRI_RANK[b.task.pri || 'P3'] || 3;
+    if (aPri !== bPri) return aPri - bPri;
+    // 3. Duration descending (longer tasks harder to fit)
+    if (b.totalDur !== a.totalDur) return b.totalDur - a.totalDur;
+    // 4. Deterministic id
+    return a.task.id < b.task.id ? -1 : (a.task.id > b.task.id ? 1 : 0);
+  });
+
+  // Main forward pass
+  for (var ci = 0; ci < allConstrained.length; ci++) {
+    var cItem = allConstrained[ci];
+    if (cItem.remaining <= 0) continue;
+    placeItemForward(cItem);
+  }
+
+  // Step 2f: Retry pass for dep-blocked items — some items may not have placed
+  // because their dependencies weren't placed yet (e.g., in diamond DAGs where
+  // sort order doesn't perfectly match topological order). Now that more tasks
+  // are placed, retry unplaced items.
+  var retryNeeded = false;
+  for (var ri = 0; ri < allConstrained.length; ri++) {
+    if (allConstrained[ri].remaining > 0 && allConstrained[ri]._parts.length === 0) {
+      retryNeeded = true;
+      break;
+    }
+  }
+  if (retryNeeded) {
+    for (var ri2 = 0; ri2 < allConstrained.length; ri2++) {
+      var rItem = allConstrained[ri2];
+      if (rItem.remaining <= 0 || rItem._parts.length > 0) continue;
+      placeItemForward(rItem);
+    }
+  }
+
+  // Step 2g: Chain rollback — if a deadline task (chain tail) couldn't fit
+  // because its prerequisites consumed all available capacity, unplace all
+  // chain members, then re-place in reverse dependency order (tail first).
+  // This ensures deadline tasks are prioritized when capacity is tight.
+  (function chainRollback() {
+    var itemById = {};
+    allConstrained.forEach(function(item) { itemById[item.task.id] = item; });
+
+    // Find unplaced deadline tasks whose chain predecessors ARE placed
+    var unplacedDeadlines = allConstrained.filter(function(item) {
+      return item.remaining > 0 && item._parts.length === 0 && item.task.deadline;
     });
-    return positions;
-  }
 
-  function positionsChanged(prev, curr) {
-    for (var id in curr) {
-      if (prev[id] !== curr[id]) return true;
-    }
-    for (var id2 in prev) {
-      if (prev[id2] !== curr[id2]) return true;
-    }
-    return false;
-  }
-
-  function chainWindowSize(chain) {
-    var minSize = Infinity;
-    chain.forEach(function(item) {
-      if (item._windowSize != null && item._windowSize < minSize) minSize = item._windowSize;
-    });
-    return minSize;
-  }
-
-  for (var pass = 0; pass < MAX_PASSES; pass++) {
-    if (pass > 0) {
-      constrainedPool.forEach(function(item) {
-        if (item._parts.length > 0) unplaceItem(item);
-      });
-    }
-
-    [1, 2, 3, 4].forEach(function(priRank) {
-      var tierChains = constrainedChains.filter(function(chain) {
-        return chain.maxPri === priRank;
-      });
-      tierChains.sort(function(a, b) {
-        return chainWindowSize(a) - chainWindowSize(b);
-      });
-
-      tierChains.forEach(function(chain) {
-        // Process in reverse topo order (deadline tasks first) so that the
-        // most constrained tasks get capacity. Then parents are placed
-        // before their children using the child's position as a ceiling.
-        var chainTaskIds = {};
-        chain.forEach(function(item) { chainTaskIds[item.task.id] = true; });
-
-        var chainBeforeMap = {}; // taskId -> { dateKey, startMin } of earliest child
-
-        for (var ci = chain.length - 1; ci >= 0; ci--) {
-          var item = chain[ci];
-          if (item.remaining <= 0) continue;
-
-          var childBefore = chainBeforeMap[item.task.id];
-          placeItemBackwardConstrained(item, childBefore, chainTaskIds);
-
-          // Record this task's position as a ceiling for its parents
-          if (item._parts.length > 0) {
-            var firstPart = item._parts[0];
-            getTaskDeps(item.task).forEach(function(depId) {
-              if (isBackwardsDep(item.task.id, depId)) return;
-              var existing = chainBeforeMap[depId];
-              if (!existing || firstPart._dateKey < existing.dateKey ||
-                  (firstPart._dateKey === existing.dateKey && firstPart.start < existing.startMin)) {
-                chainBeforeMap[depId] = { dateKey: firstPart._dateKey, startMin: firstPart.start };
-              }
-            });
+    unplacedDeadlines.forEach(function(dlItem) {
+      // Collect all chain members (including the tail)
+      var chainMembers = [];
+      var visited = {};
+      var stack = [dlItem.task.id];
+      while (stack.length > 0) {
+        var id = stack.pop();
+        if (visited[id]) continue;
+        visited[id] = true;
+        var found = itemById[id];
+        if (!found) continue;
+        chainMembers.push(found);
+        var foundDeps = getTaskDeps(found.task);
+        for (var fdi = 0; fdi < foundDeps.length; fdi++) {
+          if (!isBackwardsDep(found.task.id, foundDeps[fdi])) {
+            stack.push(foundDeps[fdi]);
           }
         }
-      });
-    });
+      }
 
-    var currPositions = capturePositions(constrainedPool);
-    if (pass > 0 && !positionsChanged(prevPositions, currPositions)) break;
-    prevPositions = currPositions;
+      // Only rollback if at least one predecessor is placed
+      var hasPlacedPred = false;
+      for (var ci = 0; ci < chainMembers.length; ci++) {
+        if (chainMembers[ci] !== dlItem && chainMembers[ci]._parts.length > 0) {
+          hasPlacedPred = true;
+          break;
+        }
+      }
+      if (!hasPlacedPred) return;
+
+      // Topologically sort chain members (prereqs first, tail last)
+      var chainTasks = chainMembers.map(function(item) { return item.task; });
+      var sorted = topoSortTasks(chainTasks);
+      var topoIdx = {};
+      sorted.forEach(function(t, idx) { topoIdx[t.id] = idx; });
+
+      // Unplace all chain members
+      chainMembers.forEach(function(item) {
+        if (item._parts.length > 0) unplaceItem(item);
+      });
+
+      // Temporarily hide chain members from poolIds so depsMetByDate
+      // doesn't block on unplaced chain siblings
+      var hiddenIds = {};
+      chainMembers.forEach(function(item) {
+        if (poolIds[item.task.id]) {
+          hiddenIds[item.task.id] = true;
+          delete poolIds[item.task.id];
+        }
+      });
+
+      // Re-place in reverse topo order (tail first, head last).
+      // The tail can now place without being blocked by unplaced deps
+      // (they're hidden from poolIds). Each predecessor places after
+      // the tail and checks that placed descendants have room.
+      var reverseOrder = chainMembers.slice().sort(function(a, b) {
+        var ai = topoIdx[a.task.id] != null ? topoIdx[a.task.id] : 0;
+        var bi = topoIdx[b.task.id] != null ? topoIdx[b.task.id] : 0;
+        return bi - ai; // reverse topo = tail first
+      });
+
+      for (var rci = 0; rci < reverseOrder.length; rci++) {
+        var item = reverseOrder[rci];
+        // Restore this item to poolIds before placing so ITS deps can see it
+        if (hiddenIds[item.task.id]) {
+          poolIds[item.task.id] = true;
+          delete hiddenIds[item.task.id];
+        }
+        if (item.remaining > 0) {
+          placeItemForward(item);
+        }
+      }
+
+      // Restore any remaining hidden IDs (shouldn't happen, but safety)
+      Object.keys(hiddenIds).forEach(function(id) { poolIds[id] = true; });
+    });
+  })();
+
+  // Step 2i: Past-due overflow — tasks that couldn't fit within their (expired)
+  // deadline window get placed ASAP with the deadline ceiling removed.
+  for (var oi = 0; oi < allConstrained.length; oi++) {
+    var oItem = allConstrained[oi];
+    if (oItem.remaining <= 0 || oItem._parts.length > 0) continue;
+    if (oItem._pastDueOverflow || oItem.task._pastDue) {
+      // Remove deadline ceiling so placeItemForward scans all future days
+      var savedDL = oItem.deadline;
+      oItem.deadline = null;
+      oItem.fauxDeadline = null;
+      oItem.ceiling = null;
+      oItem.task._pastDue = true;
+      if (!oItem.task._originalDue && savedDL) {
+        oItem.task._originalDue = formatDateKey(savedDL);
+      }
+      placeItemForward(oItem);
+    }
   }
 
-  // Process constrained split chunks by priority (not chain-grouped)
-  [1, 2, 3, 4].forEach(function(priRank) {
-    constrainedChunks.filter(function(item) {
-      return (PRI_RANK[item.task.pri || 'P3'] || 3) === priRank && item.remaining > 0;
-    }).forEach(function(item) {
-      placeItemBackward(item);
-    });
-  });
+  captureSnapshot('Phase 2: Slack-based forward placement');
 
-  captureSnapshot('Phase 2: Pull-forward placement');
-
-  // Step 2f: Mark unplaced constrained tasks with reason
-  constrainedPool.forEach(function(item) {
-    if (item.remaining > 0 && item._parts.length === 0) {
-      if (!item.task._unplacedReason) {
-        item.task._unplacedReason = 'capacity_conflict';
-        item.task._unplacedDetail = 'Could not fit within available capacity before deadline';
-        item.task._suggestions = [{ type: 'constraint', text: 'Reduce duration, extend deadline, or clear conflicting tasks' }];
+  // Step 2j: Mark remaining unplaced constrained tasks with reason
+  for (var mi = 0; mi < allConstrained.length; mi++) {
+    var mItem = allConstrained[mi];
+    if (mItem.remaining > 0 && mItem._parts.length === 0) {
+      if (!mItem.task._unplacedReason) {
+        if (mItem.task._pastDue) {
+          mItem.task._unplacedReason = 'past_due_no_capacity';
+          mItem.task._unplacedDetail = 'Past-due task could not be placed — no available capacity';
+          mItem.task._suggestions = [{ type: 'constraint', text: 'Clear conflicting tasks or mark as done/skip' }];
+        } else {
+          mItem.task._unplacedReason = 'capacity_conflict';
+          mItem.task._unplacedDetail = 'Could not fit within available capacity before deadline';
+          mItem.task._suggestions = [{ type: 'constraint', text: 'Reduce duration, extend deadline, or clear conflicting tasks' }];
+        }
       }
     }
-  });
+  }
 
   // ── PHASE 3: Fill unconstrained tasks by priority ──
   // No chain grouping — each task competes at its OWN priority level.
@@ -2239,16 +2094,19 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   var unplaced = [];
   var seenUnplacedSplit = {};
   pool.forEach(function(item) {
-    if (item.remaining > 0 && item._parts.length === 0) {
+    // Fully unplaced OR partially placed splittable task with remaining minutes
+    var fullyUnplaced = item.remaining > 0 && item._parts.length === 0;
+    var partialSplit = item.remaining > 0 && item._parts.length > 0 && item.splittable;
+    if (fullyUnplaced || partialSplit) {
       var t = item.task;
 
-      // For split chunks, only emit one unplaced entry per task
-      if (item._splitChunk) {
+      // For split chunks or partially placed split tasks, report as partial_split
+      if (item._splitChunk || partialSplit) {
         if (seenUnplacedSplit[t.id]) return;
         seenUnplacedSplit[t.id] = true;
-        var info = unplacedChunksByTask[t.id];
+        var placedMins = item.totalDur - item.remaining;
         t._unplacedReason = 'partial_split';
-        t._unplacedDetail = info.totalMins + ' of ' + info.parentDur + ' minutes could not be scheduled (' + info.count + ' chunk' + (info.count > 1 ? 's' : '') + ')';
+        t._unplacedDetail = item.remaining + ' of ' + item.totalDur + ' minutes could not be scheduled (' + placedMins + 'm placed)';
         t._suggestions = [{ type: 'split', text: 'Reduce duration, spread across more days, or clear other tasks' }];
       } else {
         t._unplacedReason = item.deadline ? "deadline" : "no-capacity";

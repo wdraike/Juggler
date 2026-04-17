@@ -737,3 +737,121 @@ describe('Category E: Placement Reasons', () => {
     }
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// CATEGORY F: Slack-Based Ordering
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Category F: Slack-Based Ordering', () => {
+
+  test('F1: Lower-slack task placed before higher-slack task (same priority)', () => {
+    // Task A due tomorrow (low slack), Task B due in 5 days (high slack)
+    const tasks = [
+      makeTask({ id: 'taskA', pri: 'P2', dur: 60, date: TODAY, deadline: dateKey(1) }),
+      makeTask({ id: 'taskB', pri: 'P2', dur: 60, date: TODAY, deadline: dateKey(5) }),
+    ];
+    const result = run(tasks);
+    expect(isPlaced(result, 'taskA')).toBe(true);
+    expect(isPlaced(result, 'taskB')).toBe(true);
+    // Both placed — A (lower slack) should land on an earlier or same day
+    const aP = findPlacements(result, 'taskA');
+    const bP = findPlacements(result, 'taskB');
+    expect(aP[0].dateKey <= bP[0].dateKey).toBe(true);
+  });
+
+  test('F2: Same slack, higher priority wins preferred slot', () => {
+    // Two tasks with same deadline, different priorities
+    // Fill most of today so only one fits
+    const tasks = [
+      makeTask({ id: 'block', when: 'fixed', date: TODAY, time: '8:00 AM', dur: 660, datePinned: true }),
+      makeTask({ id: 'hi_pri', pri: 'P1', dur: 60, date: TODAY, deadline: TODAY }),
+      makeTask({ id: 'lo_pri', pri: 'P3', dur: 60, date: TODAY, deadline: TODAY }),
+    ];
+    const result = run(tasks);
+    // P1 should be placed on today (lower slack + higher priority)
+    expect(isPlaced(result, 'hi_pri')).toBe(true);
+    const hiP = findPlacements(result, 'hi_pri');
+    expect(hiP[0].dateKey).toBe(TODAY);
+  });
+
+  test('F3: Past-due task gets slack=0 and places ASAP', () => {
+    const yesterday = dateKey(-1);
+    const tasks = [
+      makeTask({ id: 'past_due', pri: 'P3', dur: 30, date: TODAY, deadline: yesterday }),
+      makeTask({ id: 'normal', pri: 'P1', dur: 30, date: TODAY }),
+    ];
+    const result = run(tasks);
+    expect(isPlaced(result, 'past_due')).toBe(true);
+    // Past-due task should be placed (overflow pass places ASAP)
+    const pdP = findPlacements(result, 'past_due');
+    expect(pdP.length).toBeGreaterThan(0);
+  });
+
+  test('F4: Dependency chain — all members placed in correct order', () => {
+    const tasks = [
+      makeTask({ id: 'depA', pri: 'P2', dur: 60, date: TODAY }),
+      makeTask({ id: 'depB', pri: 'P2', dur: 60, date: TODAY, dependsOn: ['depA'] }),
+      makeTask({ id: 'depC', pri: 'P2', dur: 60, date: TODAY, deadline: dateKey(2), dependsOn: ['depB'] }),
+    ];
+    const result = run(tasks);
+    expect(isPlaced(result, 'depA')).toBe(true);
+    expect(isPlaced(result, 'depB')).toBe(true);
+    expect(isPlaced(result, 'depC')).toBe(true);
+    // A before B before C
+    const aP = findPlacements(result, 'depA');
+    const bP = findPlacements(result, 'depB');
+    const cP = findPlacements(result, 'depC');
+    if (aP[0].dateKey === bP[0].dateKey) {
+      expect(aP[0].start + aP[0].dur).toBeLessThanOrEqual(bP[0].start);
+    }
+    if (bP[0].dateKey === cP[0].dateKey) {
+      expect(bP[0].start + bP[0].dur).toBeLessThanOrEqual(cP[0].start);
+    }
+  });
+
+  test('F5: Diamond DAG — all members placed correctly', () => {
+    // D depends on B and C; B and C both depend on A
+    const tasks = [
+      makeTask({ id: 'diaA', pri: 'P2', dur: 30, date: TODAY }),
+      makeTask({ id: 'diaB', pri: 'P2', dur: 30, date: TODAY, dependsOn: ['diaA'] }),
+      makeTask({ id: 'diaC', pri: 'P2', dur: 30, date: TODAY, dependsOn: ['diaA'] }),
+      makeTask({ id: 'diaD', pri: 'P2', dur: 30, date: TODAY, deadline: dateKey(1), dependsOn: ['diaB', 'diaC'] }),
+    ];
+    const result = run(tasks);
+    expect(isPlaced(result, 'diaA')).toBe(true);
+    expect(isPlaced(result, 'diaB')).toBe(true);
+    expect(isPlaced(result, 'diaC')).toBe(true);
+    expect(isPlaced(result, 'diaD')).toBe(true);
+    // A must finish before B and C start
+    const aP = findPlacements(result, 'diaA');
+    const bP = findPlacements(result, 'diaB');
+    const cP = findPlacements(result, 'diaC');
+    const dP = findPlacements(result, 'diaD');
+    if (aP[0].dateKey === bP[0].dateKey) {
+      expect(aP[0].start + aP[0].dur).toBeLessThanOrEqual(bP[0].start);
+    }
+    if (aP[0].dateKey === cP[0].dateKey) {
+      expect(aP[0].start + aP[0].dur).toBeLessThanOrEqual(cP[0].start);
+    }
+    // B and C must finish before D starts
+    if (bP[0].dateKey === dP[0].dateKey) {
+      expect(bP[0].start + bP[0].dur).toBeLessThanOrEqual(dP[0].start);
+    }
+    if (cP[0].dateKey === dP[0].dateKey) {
+      expect(cP[0].start + cP[0].dur).toBeLessThanOrEqual(dP[0].start);
+    }
+  });
+
+  test('F6: Past-due deadline task still gets placed', () => {
+    // Task whose deadline was yesterday — should still be placed via overflow
+    const yesterday = dateKey(-1);
+    const tasks = [
+      makeTask({ id: 'overflow', pri: 'P2', dur: 60, date: TODAY, deadline: yesterday }),
+    ];
+    const result = run(tasks);
+    expect(isPlaced(result, 'overflow')).toBe(true);
+    // Should land on today or later (ASAP after deadline passed)
+    const p = findPlacements(result, 'overflow');
+    expect(p.length).toBeGreaterThan(0);
+  });
+});
