@@ -127,6 +127,22 @@ In both cases the task disappears from the calendar without appearing in the iss
 - Per-provider status visible simultaneously if multiple calendars sync
 **Files:** `cal-sync.controller.js` (SSE events), `CalSyncPanel.jsx` (progress UI), individual adapters (`gcal.controller.js`, `msft-cal.controller.js`, `apple.adapter.js`) for event counts
 
+## 17. MCP interface test suite
+**Current:** Zero MCP-specific tests exist. 20 tools across 4 modules (tasks, schedule, config, data) are untested at the MCP layer.
+**Change:** Create comprehensive test suite covering:
+- All 9 task tools (create, create_tasks, list, get, search, update, batch_update, set_status, delete)
+- 2 schedule tools (get_schedule, run_schedule)
+- 6 config tools (get_config, list/create/update/delete_project, update_config)
+- 3 data tools (export_data, get_calendar_status, sync_calendar)
+- Zod parameter validation (reject invalid inputs)
+- Lock contention behavior (queue vs direct write)
+- Recurring instance field routing (template vs instance)
+- Calendar-linked task guards
+- Timezone handling
+- Error responses (not found, validation, lock timeout)
+**Pattern:** Integration tests using real DB (same pattern as `runScheduleIntegration.test.js`). Create test user, seed data, invoke tools via `createMcpServerForUser()`, assert results.
+**Files:** New `tests/mcp/*.test.js` or `tests/mcp.test.js`
+
 ## 14. Collapse adjacent split chunks visually on the calendar
 **Current:** Split chunks of the same task placed back-to-back appear as separate cards on the calendar view. The scheduler's merge-back pass (Phase 5a) combines them in the DB, but either the merge isn't running or the frontend isn't reflecting merged chunks.
 **Change:** Frontend should detect adjacent chunks with the same `sourceId` (or `splitGroup`) on the same day and render them as a single card with combined duration. Alternatively, ensure the backend merge-back is working and the frontend reads the merged result.
