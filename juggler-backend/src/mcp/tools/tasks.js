@@ -9,7 +9,7 @@
 const { z } = require('zod');
 const safeStringify = require('../safeStringify');
 const db = require('../../db');
-const { rowToTask, taskToRow, guardFixedCalendarWhen, ensureProject, applySplitDefault, buildSourceMap, TEMPLATE_FIELDS } = require('../../controllers/task.controller');
+const { rowToTask, taskToRow, guardFixedCalendarWhen, ensureProject, applySplitDefault, buildSourceMap, TEMPLATE_FIELDS, validateTaskInput } = require('../../controllers/task.controller');
 const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
 const { isLocked, enqueueWrite, splitFields } = require('../../lib/task-write-queue');
 const tasksWrite = require('../../lib/tasks-write');
@@ -97,6 +97,11 @@ function registerTaskTools(server, userId) {
     'Create a single task. Use date+time for scheduling (server converts timezone automatically). Returns both UTC and local fields.',
     Object.assign({ id: z.string().optional().describe('Task ID (auto-generated UUID if omitted)'), text: z.string().describe('Task description/title') }, taskInputFields),
     async (params) => {
+      // Validate input
+      var valErrors = validateTaskInput(Object.assign({ _requireText: true }, params));
+      if (valErrors.length > 0) {
+        return { content: [{ type: 'text', text: 'Validation error: ' + valErrors.join('; ') }], isError: true };
+      }
       var tz = await getUserTimezone();
       var task = Object.assign({}, params);
       if (!task.id) {
@@ -106,6 +111,10 @@ function registerTaskTools(server, userId) {
       var row = taskToRow(task, userId, tz);
       if (!row.task_type) row.task_type = 'task';
       row.created_at = db.fn.now();
+      // Auto-pin when user explicitly provides date/time/scheduledAt
+      if (task.date || task.time || task.scheduledAt) {
+        row.date_pinned = 1;
+      }
       await applySplitDefault(row, userId);
       await ensureProject(userId, task.project);
 
@@ -185,6 +194,11 @@ function registerTaskTools(server, userId) {
       status: z.string().optional()
     }, taskInputFields),
     async ({ id, ...fields }) => {
+      // Validate input
+      var valErrors = validateTaskInput(fields);
+      if (valErrors.length > 0) {
+        return { content: [{ type: 'text', text: 'Validation error: ' + valErrors.join('; ') }], isError: true };
+      }
       var tz = await getUserTimezone();
       var existing = await db('tasks_with_sync_v').where({ id: id, user_id: userId }).first();
       if (!existing) {
@@ -197,9 +211,9 @@ function registerTaskTools(server, userId) {
 
       if (fields.project) await ensureProject(userId, fields.project);
 
-      // Auto-pin logic
-      var dateWasSet = fields.date !== undefined || fields.scheduledAt !== undefined;
-      if (dateWasSet && row.date_pinned === undefined) {
+      // Auto-pin when user explicitly provides date/time/scheduledAt
+      var dateOrTimeSet = fields.date !== undefined || fields.time !== undefined || fields.scheduledAt !== undefined;
+      if (dateOrTimeSet && row.date_pinned === undefined) {
         row.date_pinned = 1;
       }
 

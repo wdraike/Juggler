@@ -604,6 +604,44 @@ function validateTaskInput(body) {
       if (!allValid) errors.push('Invalid dayReq: must be any, weekday, weekend, or comma-separated day codes (M,T,W,R,F,Sa,Su)');
     }
   }
+  // dur validation
+  if (body.dur !== undefined && body.dur !== null) {
+    var durVal = Number(body.dur);
+    if (isNaN(durVal) || durVal <= 0) errors.push('Duration must be greater than 0');
+  }
+  // split validation
+  if (body.split && body.splitMin !== undefined) {
+    var smVal = Number(body.splitMin);
+    if (isNaN(smVal) || smVal <= 0) errors.push('Split minimum must be greater than 0');
+    if (body.dur && smVal > Number(body.dur)) errors.push('Split minimum must be less than or equal to duration');
+  }
+  // timeFlex validation
+  if (body.timeFlex !== undefined && body.timeFlex !== null) {
+    var tfVal = Number(body.timeFlex);
+    if (isNaN(tfVal) || tfVal < 0 || tfVal > 480) errors.push('Time flex must be between 0 and 480 minutes');
+  }
+  // deadline validation
+  if (body.deadline !== undefined && body.deadline !== null && body.deadline !== '') {
+    var dlDate = new Date(body.deadline);
+    if (isNaN(dlDate.getTime())) errors.push('Deadline must be a valid date');
+  }
+  // startAfter validation
+  if (body.startAfter !== undefined && body.startAfter !== null && body.startAfter !== '') {
+    var saDate = new Date(body.startAfter);
+    if (isNaN(saDate.getTime())) errors.push('Start-after must be a valid date');
+  }
+  // cross-field: deadline >= startAfter
+  if (body.deadline && body.startAfter) {
+    var dlD = new Date(body.deadline);
+    var saD = new Date(body.startAfter);
+    if (!isNaN(dlD.getTime()) && !isNaN(saD.getTime()) && dlD < saD) errors.push('Deadline must be on or after start-after date');
+  }
+  // recur config validation
+  if (body.recur && typeof body.recur === 'object') {
+    var validRecurTypes = ['daily', 'weekly', 'biweekly', 'monthly', 'interval', 'none'];
+    var rType = (body.recur.type || '').toLowerCase();
+    if (rType && validRecurTypes.indexOf(rType) === -1) errors.push('Invalid recurrence type: ' + rType);
+  }
   return errors;
 }
 
@@ -1876,5 +1914,6 @@ module.exports = {
   fetchTasksWithEventIds,
   ensureProject,
   applySplitDefault,
-  TEMPLATE_FIELDS
+  TEMPLATE_FIELDS,
+  validateTaskInput
 };

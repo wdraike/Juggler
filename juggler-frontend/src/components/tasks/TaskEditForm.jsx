@@ -1304,8 +1304,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             </label>
           </div>}
 
-          {/* When mode selector — hidden for markers and recurringTasks (recurrings use the preferred time toggle above) */}
-          {!marker && !recurring && <label style={{ ...lStyle, marginBottom: 5 }}>
+          {/* When mode selector — hidden for markers only */}
+          {!marker && <label style={{ ...lStyle, marginBottom: 5 }}>
             <span title="Controls which time windows the scheduler can place this task in.">{'\uD83D\uDCC6'} Time window</span>
             {(function() {
               // Window tags are everything that isn't a mode keyword

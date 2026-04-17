@@ -600,9 +600,13 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (original.when && original.when.indexOf('fixed') >= 0) return;
     if (original.datePinned) return;
     if (original.marker) return;
-    // Recurring instances that weren't placed by the algorithm should not be flagged
-    // as unscheduled — they'll be placed when their day comes, or auto-skipped if past.
-    if (original.taskType === 'recurring_instance') return;
+    // Future recurring instances: skip — they'll be placed when their day arrives.
+    // Past/today recurring instances that couldn't place: fall through to unscheduled
+    // marking so they show up in the issues tab instead of silently vanishing.
+    if (original.taskType === 'recurring_instance') {
+      var instDate = parseDate(original.date);
+      if (instDate && instDate > today) return;
+    }
     // Mark as unscheduled but PRESERVE scheduled_at — it stays as the
     // last-proposed time so the frontend can render the chunk in the
     // unscheduled lane with a sensible "was supposed to be at" timestamp,

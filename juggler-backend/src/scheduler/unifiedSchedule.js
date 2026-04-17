@@ -837,12 +837,12 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     return (result && typeof result === 'object') ? result.beforeMin : 1440;
   }
 
-  // For time-window mode recurringTasks (preferred time ± flex), compute a narrow window.
-  // Only applies when the task has a meaningful preferred time — NOT for time-blocks
-  // mode tasks (multi-when or no when) where the when-tags define placement.
+  // For time-window mode tasks (preferred time ± flex), compute a narrow window.
+  // Works for any task type — recurring or one-off. Rigid tasks are excluded
+  // (they're force-placed at exact time in Phase 0).
   var DEFAULT_TIME_FLEX = 60; // minutes
-  function getRecurFlexWindows(t, dateWindows) {
-    if (!t.recurring || t.rigid) return null;
+  function getFlexWindows(t, dateWindows) {
+    if (t.rigid) return null;
 
     // Use preferredTimeMins (authoritative) with fallback to parsed time string (legacy)
     var sm = t.preferredTimeMins != null ? t.preferredTimeMins : parseTimeToMinutes(t.time);
@@ -1371,7 +1371,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         if (item.earliestDate && d.date < item.earliestDate) continue;
         if (item.ceiling && d.date > item.ceiling) continue;
         if (!canPlaceOnDate(t, d)) continue;
-        var flexWins = getRecurFlexWindows(t, dayWindows[d.key]);
+        var flexWins = getFlexWindows(t, dayWindows[d.key]);
         if (flexWins) {
           var flexFree = 0;
           var _occ = dayOcc[d.key];
@@ -1602,7 +1602,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (!depResult) continue;
       var depAfter = depAfterFrom(depResult);
       var depBefore = depBeforeFrom(depResult);
-      var flexWins = getRecurFlexWindows(t, dayWindows[d.key]);
+      var flexWins = getFlexWindows(t, dayWindows[d.key]);
       if (flexWins) {
         var flexFree = 0;
         var _occ = dayOcc[d.key];
@@ -1901,7 +1901,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
 
       unplaceItem(bumpItem);
 
-      var flexWins = getRecurFlexWindows(hItem.task, dayWindows[dayKey]);
+      var flexWins = getFlexWindows(hItem.task, dayWindows[dayKey]);
       placeEarly(hItem, d, 0, flexWins);
       if (hItem.remaining > 0) {
         var rescueWins = getWhenWindows(hItem.task.when, dayWindows[dayKey]);
