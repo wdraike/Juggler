@@ -4,10 +4,14 @@
  * Used by the scheduler to group chunks for merge-back and status propagation.
  */
 exports.up = async function(knex) {
-  await knex.schema.alterTable('task_instances', function(table) {
-    table.string('split_group', 100).nullable().after('split_total')
-      .comment('Primary chunk ID linking split siblings');
-  });
+  // Idempotent: check if column exists before adding
+  var hasCol = await knex.schema.hasColumn('task_instances', 'split_group');
+  if (!hasCol) {
+    await knex.schema.alterTable('task_instances', function(table) {
+      table.string('split_group', 100).nullable().after('split_total')
+        .comment('Primary chunk ID linking split siblings');
+    });
+  }
 
   // Recreate views to expose the new column
   await knex.raw('DROP VIEW IF EXISTS tasks_with_sync_v');
@@ -73,9 +77,6 @@ exports.up = async function(knex) {
       m.updated_at                 AS updated_at,
       CONVERT(NULL USING utf8mb4) COLLATE utf8mb4_unicode_ci AS msft_event_id,
       CONVERT(NULL USING utf8mb4) COLLATE utf8mb4_unicode_ci AS apple_event_id,
-      CONVERT(NULL USING utf8mb4) COLLATE utf8mb4_unicode_ci AS original_date,
-      CONVERT(NULL USING utf8mb4) COLLATE utf8mb4_unicode_ci AS original_time,
-      CONVERT(NULL USING utf8mb4) COLLATE utf8mb4_unicode_ci AS original_day,
       m.id                         AS master_id
     FROM task_masters m
     WHERE m.recurring = 1
@@ -139,29 +140,48 @@ exports.up = async function(knex) {
       i.updated_at                 AS updated_at,
       CONVERT(NULL USING utf8mb4) COLLATE utf8mb4_unicode_ci AS msft_event_id,
       CONVERT(NULL USING utf8mb4) COLLATE utf8mb4_unicode_ci AS apple_event_id,
-      i.original_date              AS original_date,
-      i.original_time              AS original_time,
-      i.original_day               AS original_day,
       i.master_id                  AS master_id
     FROM task_instances i
     JOIN task_masters m ON m.id = i.master_id
   `);
 
-  // Rebuild tasks_with_sync_v (adds calendar event IDs)
+  // Rebuild tasks_with_sync_v — select explicit columns to avoid dupe names
+  // (tasks_v already has NULL gcal_event_id/msft_event_id/apple_event_id placeholders)
   await knex.raw(`
     CREATE VIEW tasks_with_sync_v AS
     SELECT
-      t.*,
-      cs_gcal.external_id AS gcal_event_id_sync,
-      cs_msft.external_id AS msft_event_id_sync,
-      cs_apple.external_id AS apple_event_id_sync
-    FROM tasks_v t
-    LEFT JOIN calendar_sync cs_gcal
-      ON cs_gcal.task_id = t.id AND cs_gcal.provider = 'google' AND cs_gcal.deleted_at IS NULL
-    LEFT JOIN calendar_sync cs_msft
-      ON cs_msft.task_id = t.id AND cs_msft.provider = 'microsoft' AND cs_msft.deleted_at IS NULL
-    LEFT JOIN calendar_sync cs_apple
-      ON cs_apple.task_id = t.id AND cs_apple.provider = 'apple' AND cs_apple.deleted_at IS NULL
+      v.id, v.user_id, v.task_type, v.text, v.dur, v.pri, v.project, v.section,
+      v.notes, v.location, v.tools, v.\`when\`, v.day_req, v.recurring, v.rigid,
+      v.time_flex, v.flex_when, v.split, v.split_min, v.recur, v.recur_start,
+      v.recur_end, v.marker, v.preferred_time_mins, v.travel_before, v.travel_after,
+      v.depends_on, v.desired_at, v.desired_date, v.disabled_at, v.disabled_reason,
+      v.deadline, v.start_after_at, v.prev_when, v.tz, v.source_id, v.scheduled_at,
+      v.date_pinned, v.\`date\`, v.\`day\`, v.\`time\`, v.\`status\`, v.time_remaining,
+      v.unscheduled, v.occurrence_ordinal, v.split_ordinal, v.split_total,
+      v.split_group, v.\`generated\`, v.depends_on AS depends_on_json,
+      v.created_at, v.updated_at, v.master_id,
+      gcl.provider_event_id AS gcal_event_id,
+      mcl.provider_event_id AS msft_event_id,
+      acl.provider_event_id AS apple_event_id
+    FROM tasks_v v
+    LEFT JOIN (
+      SELECT task_id, ANY_VALUE(provider_event_id) AS provider_event_id
+      FROM cal_sync_ledger
+      WHERE status = 'active' AND provider = 'gcal' AND task_id IS NOT NULL
+      GROUP BY task_id
+    ) gcl ON gcl.task_id = v.id
+    LEFT JOIN (
+      SELECT task_id, ANY_VALUE(provider_event_id) AS provider_event_id
+      FROM cal_sync_ledger
+      WHERE status = 'active' AND provider = 'msft' AND task_id IS NOT NULL
+      GROUP BY task_id
+    ) mcl ON mcl.task_id = v.id
+    LEFT JOIN (
+      SELECT task_id, ANY_VALUE(provider_event_id) AS provider_event_id
+      FROM cal_sync_ledger
+      WHERE status = 'active' AND provider = 'apple' AND task_id IS NOT NULL
+      GROUP BY task_id
+    ) acl ON acl.task_id = v.id
   `);
 };
 
