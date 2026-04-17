@@ -781,7 +781,12 @@ async function runScheduleAndPersist(userId, _retries, options) {
   pendingUpdates = pendingUpdates.filter(function(pu) {
     var chunk = inMemoryIds[pu.id];
     if (!chunk) return true; // not an in-memory chunk — keep in pendingUpdates
-    // This is an in-memory chunk that got placed — collect for INSERT
+    // This is an in-memory chunk that got placed — collect for INSERT.
+    // Derive local date from scheduled_at so the dedup query can match it.
+    var chunkLocal = pu.dbUpdate.scheduled_at ? utcToLocal(
+      pu.dbUpdate.scheduled_at instanceof Date ? pu.dbUpdate.scheduled_at : new Date(pu.dbUpdate.scheduled_at),
+      TIMEZONE
+    ) : null;
     inMemoryInserts.push({
       id: pu.id,
       user_id: userId,
@@ -795,6 +800,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
       generated: 0,
       recurring: 1,
       scheduled_at: pu.dbUpdate.scheduled_at || null,
+      date: chunkLocal ? chunkLocal.date : (chunk._candidateDate || chunk.date || null),
+      day: chunkLocal ? chunkLocal.day : null,
+      time: chunkLocal ? chunkLocal.time : null,
       unscheduled: pu.dbUpdate.unscheduled || null,
       status: '',
       created_at: db.fn.now(),
