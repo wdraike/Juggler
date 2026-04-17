@@ -322,7 +322,14 @@ export default function AppLayout() {
       try {
         var data = JSON.parse(e.data);
         setCalSyncProgress(data);
+        // Toast on fetch completion (shows event count per provider)
+        if (data.phase === 'fetch' && data.detail && data.detail.indexOf('Fetched') >= 0) {
+          var fetchLabel = data.provider === 'gcal' ? 'Google' : data.provider === 'msft' ? 'Microsoft' : data.provider === 'apple' ? 'Apple' : 'Calendar';
+          showToast(fetchLabel + ': ' + data.detail, 'info');
+        }
+        // Toast on completion with summary
         if (data.phase === 'done') {
+          showToast(data.detail || 'Sync complete', 'success');
           setTimeout(function() { setCalSyncProgress(null); }, 2000);
         }
       } catch (err) { /* ignore */ }

@@ -152,15 +152,33 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
             <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export \u2014 save or load tasks as JSON">&#x1F4E6;</button>
             {(onShowGCalSync || onShowMsftCalSync) && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <button onClick={onShowCalSync || onShowGCalSync || onShowMsftCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title="Calendar Sync">
-                  <span style={calSyncing ? { display: 'inline-block', animation: 'gcal-spin 1s linear infinite' } : undefined}>&#x1F4C5;</span>
-                  {calSyncing && <span style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: theme.accent }} />}
-                </button>
-                {calSyncing && (
+                {(function() {
+                  var syncProvider = calSyncing && calSyncProgress && calSyncProgress.provider;
+                  var syncIcon = syncProvider === 'gcal' ? 'G'
+                    : syncProvider === 'msft' ? 'M'
+                    : syncProvider === 'apple' ? '\uD83C\uDF4E'
+                    : '\uD83D\uDCC5';
+                  var iconColor = syncProvider === 'gcal' ? '#4285F4'
+                    : syncProvider === 'msft' ? '#00A4EF'
+                    : syncProvider === 'apple' ? '#A3AAAE'
+                    : undefined;
+                  var provLabel = syncProvider === 'gcal' ? 'Google' : syncProvider === 'msft' ? 'Microsoft' : syncProvider === 'apple' ? 'Apple' : '';
+                  var tipText = calSyncing && calSyncProgress
+                    ? provLabel + ': ' + (calSyncProgress.detail || 'Syncing...') + ' (' + (calSyncProgress.pct || 0) + '%)'
+                    : 'Calendar Sync';
+                  return (
+                    <button onClick={onShowCalSync || onShowGCalSync || onShowMsftCalSync} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title={tipText}>
+                      <span style={Object.assign(
+                        { fontWeight: iconColor ? 700 : undefined, color: iconColor || undefined },
+                        calSyncing ? { display: 'inline-block', animation: 'gcal-spin 1s linear infinite' } : {}
+                      )}>{syncIcon}</span>
+                      {calSyncing && <span style={{ position: 'absolute', top: -2, right: -2, width: 6, height: 6, borderRadius: '50%', background: iconColor || theme.accent }} />}
+                    </button>
+                  );
+                })()}
+                {calSyncing && !isMobile && (
                   <span style={{ fontSize: 10, color: theme.headerText, opacity: 0.7, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {calSyncProgress && calSyncProgress.provider
-                      ? (calSyncProgress.provider === 'gcal' ? 'Google' : calSyncProgress.provider === 'msft' ? 'Microsoft' : calSyncProgress.provider === 'apple' ? 'Apple' : '') + ': ' + (calSyncProgress.detail || 'Syncing...')
-                      : 'Syncing calendars...'}
+                    {calSyncProgress && calSyncProgress.detail || 'Syncing...'}
                   </span>
                 )}
               </div>
