@@ -117,7 +117,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
           timeFlex: t ? t.timeFlex : null,
           _whenRelaxed: !!p._whenRelaxed,
           _moveReason: p._moveReason || null,
-          type: p.locked && t && hasWhen(t.when, 'fixed') ? 'fixed'
+          type: p.locked && t && t.datePinned ? 'fixed'
             : p.locked && t && t.rigid && t.recurring ? 'recurring'
             : p.marker ? 'marker'
             : t && t.deadline ? 'deadline'
@@ -179,8 +179,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     if (t.date === 'TBD' || t.date === 'tbd') return;
     // Clear scheduler-set dates for flexible tasks — the scheduler should re-evaluate
     // placement from scratch each run. Only preserve dates for tasks the USER anchored.
-    var isUserAnchored = t.datePinned || t.generated || t.recurring ||
-      hasWhen(t.when, 'fixed') || t.marker;
+    var isUserAnchored = t.datePinned || t.generated || t.recurring || t.marker;
     var td;
     if (!isUserAnchored && t.date) {
       // Non-pinned, non-recurring, non-fixed: scheduler previously placed this.
@@ -203,7 +202,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     var sm = t.preferredTimeMins != null ? t.preferredTimeMins : parseTimeToMinutes(t.time);
     // Treat midnight (0) as "no specific time" — it's the default for unscheduled tasks
     // But not if preferredTimeMins is explicitly set to 0 (user wants midnight)
-    if (sm === 0 && t.preferredTimeMins == null && !hasWhen(t.when, 'fixed')) sm = null;
+    if (sm === 0 && t.preferredTimeMins == null && !t.datePinned) sm = null;
     var tdKey = formatDateKey(td);
     var isPast = false;
     if (tdKey === effectiveTodayKey) {
@@ -212,20 +211,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       isPast = true;
     }
 
-    // Fixed tasks: anchor at their time.
+    // Pinned tasks with a time: anchor at their time, immovable.
     // On today, always show even if time has passed (user needs to see them to mark done).
     // On past days, drop entirely.
-    if (hasWhen(t.when, "fixed")) {
-      if (sm !== null) {
-        var fixedDropped = isPast && tdKey !== effectiveTodayKey;
-        if (!fixedDropped) { if (!fixedByDate[tdKey]) fixedByDate[tdKey] = []; fixedByDate[tdKey].push(t); }
-        return;
-      }
-      // No parseable time — fall through to pool as "anytime"
-      t = Object.assign({}, t, { when: "anytime" });
-    }
-    // Date-pinned tasks with a time: treat as fixed (pre-placed, blocks their slot).
-    // The scheduler should never move these — they're user-anchored.
     if (t.datePinned && sm !== null) {
       var pinnedDropped = isPast && tdKey !== effectiveTodayKey;
       if (!pinnedDropped) { if (!fixedByDate[tdKey]) fixedByDate[tdKey] = []; fixedByDate[tdKey].push(t); }
@@ -700,7 +688,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (tag !== 'anytime') globalAvailableTags[tag] = true;
     }
   });
-  var SPECIAL_WHEN = { fixed: true, allday: true, anytime: true };
+  var SPECIAL_WHEN = { allday: true, anytime: true };
   var orphanCount = 0;
   allTasks.forEach(function(t) {
     if (!t.when || t.when === '') return;
@@ -724,7 +712,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
 
   function recordPlace(occ, placed, t, start, dur, locked, dateKey, item) {
     // Hard floor: never place before DAY_START (6 AM) unless task is explicitly fixed
-    if (start < DAY_START && !locked && !(t.when && t.when.indexOf('fixed') >= 0)) {
+    if (start < DAY_START && !locked && !t.datePinned) {
       return; // reject wee-hour placement
     }
     // Determine travel buffers — for split tasks, only first chunk gets travelBefore
@@ -750,7 +738,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     }
     // Per-placement timezone: fixed/locked tasks carry their own tz (if set on the task),
     // otherwise inherit the schedule-level timezone from cfg.
-    var placeTz = (t.tz && (locked || hasWhen(t.when, 'fixed'))) ? t.tz : (cfg.timezone || null);
+    var placeTz = (t.tz && (locked || t.datePinned)) ? t.tz : (cfg.timezone || null);
     var part = { task: t, start: start, dur: dur, locked: locked, _dateKey: dateKey, travelBefore: tb, travelAfter: ta, tz: placeTz };
     placed.push(part);
     if (item) { item._parts.push(part); item.remaining -= dur; }
@@ -2358,7 +2346,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var hh = Math.floor(p.start / 60), mm = p.start % 60;
       var ampm = hh >= 12 ? 'PM' : 'AM';
       var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
-      var rebuildTz = p.tz || (p.task.tz && (p.locked || hasWhen(p.task.when, 'fixed'))) ? (p.tz || p.task.tz) : (cfg.timezone || null);
+      var rebuildTz = p.tz || (p.task.tz && (p.locked || p.task.datePinned)) ? (p.tz || p.task.tz) : (cfg.timezone || null);
       taskUpdates[tid] = { date: dk, time: dh + ':' + (mm < 10 ? '0' : '') + mm + ' ' + ampm, tz: rebuildTz, _startMin: p.start };
     });
   });
@@ -2366,7 +2354,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   Object.keys(taskUpdates).forEach(function(tid) { delete taskUpdates[tid]._startMin; });
   // Strip changes from fixed tasks
   allTasks.forEach(function(ft) {
-    if (hasWhen(ft.when, 'fixed') && taskUpdates[ft.id]) delete taskUpdates[ft.id];
+    if (ft.datePinned && taskUpdates[ft.id]) delete taskUpdates[ft.id];
   });
 
   // Re-annotate move reasons from final placements
@@ -2425,7 +2413,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var t = part.task;
 
       // 1. Fixed calendar event
-      if (part.locked && hasWhen(t.when, 'fixed')) {
+      if (part.locked && t.datePinned) {
         part._placementReason = 'Fixed calendar event';
         return;
       }
@@ -2470,7 +2458,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       }
 
       // 7. When-window constraint
-      if (t.when && t.when !== '' && !hasWhen(t.when, 'fixed')) {
+      if (t.when && t.when !== '' && !t.datePinned) {
         var wl = whenLabel(t.when);
         if (wl && !t.when.includes(',') || (t.when.split(',').length <= 2)) {
           reasons.push(wl + ' block');

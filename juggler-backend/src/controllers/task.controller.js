@@ -449,19 +449,20 @@ function taskToRow(task, userId, timezone) {
 // guardTarget arg is the row whose `when` column will actually be written
 // (the task itself for normal updates, the source template for recurring
 // instance edits since TEMPLATE_FIELDS routes `when` there).
+// Guard: prevent unpinning calendar-linked tasks. Pinning is the mechanism
+// that keeps synced events immovable — removing it would let the scheduler
+// move calendar events. The broader ingested-task guard (#8) blocks most
+// field changes; this catches the specific case of date_pinned being cleared.
 function guardFixedCalendarWhen(row, guardTarget, opts) {
   if (!guardTarget) return;
-  if (row.when === undefined) return;
   if (opts && opts.allowUnfix) return;
-  var wasFixed = guardTarget.when && String(guardTarget.when).indexOf('fixed') >= 0;
-  if (!wasFixed) return;
-  var isCalLinked = !!(guardTarget.gcal_event_id || guardTarget.msft_event_id);
+  var isCalLinked = !!(guardTarget.gcal_event_id || guardTarget.msft_event_id || guardTarget.apple_event_id);
   if (!isCalLinked) return;
-  var willBeFixed = typeof row.when === 'string' && row.when.indexOf('fixed') >= 0;
-  if (willBeFixed) return;
-  console.log('[TASK-GUARD] preserving fixed tag on calendar-linked task ' + guardTarget.id +
-    ' (incoming when=' + JSON.stringify(row.when) + ')');
-  delete row.when;
+  // Prevent clearing date_pinned on calendar-linked tasks
+  if (row.date_pinned === 0 || row.date_pinned === false) {
+    console.log('[TASK-GUARD] preserving date_pinned on calendar-linked task ' + guardTarget.id);
+    delete row.date_pinned;
+  }
 }
 
 /**
@@ -884,15 +885,9 @@ async function updateTask(req, res) {
       row.date_pinned = 1;
     }
     // Drag-pin: user dragged this task to a new time on the calendar.
-    // Convert to fixed mode so the scheduler won't overwrite the placement.
-    // Store the previous when so it can be restored on unpin.
+    // Pin it so the scheduler respects the user's placement. The when-tags
+    // stay unchanged — pinning is handled by datePinned, not when:'fixed'.
     if (req.body._dragPin) {
-      var currentWhen = existing.when || '';
-      // Only store prev_when if not already pinned (avoid overwriting the original)
-      if (!existing.prev_when && currentWhen !== 'fixed') {
-        row.prev_when = currentWhen;
-      }
-      row.when = 'fixed';
       row.date_pinned = 1;
     }
 

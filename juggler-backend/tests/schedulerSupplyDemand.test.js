@@ -24,7 +24,8 @@ function makeTask(overrides) {
     id: 'sd_' + _id, text: 'Task ' + _id, date: TODAY, dur: 30, pri: 'P3',
     when: '', dayReq: 'any', status: '', dependsOn: [], location: [], tools: [],
     recurring: false, rigid: false, marker: false, split: false, datePinned: false,
-    generated: false, section: '', flexWhen: false, ...overrides
+    generated: false, section: '', flexWhen: false, ...overrides,
+    ...(overrides && overrides.when && String(overrides.when).indexOf('fixed') >= 0 && !overrides.datePinned ? { datePinned: true } : {})
   };
 }
 

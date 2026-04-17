@@ -535,7 +535,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // Never touch recurring templates — they're blueprints, not schedulable tasks.
     if (original.taskType === 'recurring_template') continue;
     // Fixed tasks are user-anchored — never override their time/date.
-    if (original.when && original.when.indexOf('fixed') >= 0) continue;
+    if (original.datePinned) continue;
     // Date-pinned tasks are user-set — never override their date/time.
     // Exception: a datePinned flag without an actual date/scheduled_at is a
     // stale artifact (user cleared the date but pin survived). Treat as
@@ -615,7 +615,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var original = taskById[t.id];
     if (!original) return;
     if (original.taskType === 'recurring_template') return;
-    if (original.when && original.when.indexOf('fixed') >= 0) return;
+    if (original.datePinned) return;
     if (original.datePinned) return;
     if (original.marker) return;
     // Future recurring instances: skip — they'll be placed when their day arrives.
@@ -678,7 +678,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       if (!rawRowPast) return;  // not a real DB task
 
       // Fixed tasks are user-anchored — never move them, even if past.
-      if (t.when && t.when.indexOf('fixed') >= 0) return;
+      if (t.datePinned) return;
       // Date-pinned tasks are user-set — never move them.
       if (t.datePinned) return;
       // Markers are non-blocking — never move them.
@@ -1301,7 +1301,7 @@ async function getSchedulePlacements(userId, options) {
       // Past recurringTasks missed their day — not schedulable
       if (t.recurring && isPast) return;
       // Past fixed tasks — not schedulable
-      if (isPast && t.when && t.when.indexOf('fixed') >= 0) return;
+      if (isPast && t.datePinned) return;
       unplaced.push(t);
     });
 

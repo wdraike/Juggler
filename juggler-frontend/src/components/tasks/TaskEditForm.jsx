@@ -352,11 +352,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   // --- Derived scheduling mode flags (used for field disable logic) ---
   var whenParts = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
   var isAllDay = whenParts.indexOf('allday') !== -1;
-  var isFixed = whenParts.indexOf('fixed') !== -1;
+  var isFixed = !!datePinned;
   // Calendar-linked fixed tasks are pinned by the external calendar. Stripping
   // 'fixed' from them creates a contradiction the backend guard will reject,
   // so the When-mode selector locks those buttons out entirely.
-  var isCalLinkedFixed = isFixed && !!(task && (task.gcalEventId || task.msftEventId));
+  var isCalLinkedFixed = isFixed && !!(task && (task.gcalEventId || task.msftEventId || task.appleEventId));
   var isRigid = recurring && rigid;
   // Split is allowed for non-recurring tasks (except all-day / fixed) and for
   // recurring tasks only in Time Blocks mode (not Time Window, not rigid).
@@ -612,11 +612,9 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (when !== snap.when) {
       changed.when = all.when;
       // If the user is removing the 'fixed' tag, mark this edit as an explicit
-      // unfix so the backend guard (task.controller.js:guardFixedCalendarWhen)
-      // allows it through on calendar-linked tasks.
-      var hadFixed = snap.when && String(snap.when).indexOf('fixed') >= 0;
-      var hasFixed = typeof all.when === 'string' && all.when.indexOf('fixed') >= 0;
-      if (hadFixed && !hasFixed) changed._allowUnfix = true;
+      // When unpinning a calendar-linked task, send _allowUnfix so the backend
+      // guard allows it through.
+      if (snap.datePinned && !all.datePinned) changed._allowUnfix = true;
     }
     if (recurring && hasPreferredTime !== snap.preferredTime) changed.preferredTime = all.preferredTime;
     if (dayReq !== snap.dayReq) changed.dayReq = all.dayReq;

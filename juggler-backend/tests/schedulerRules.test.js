@@ -38,7 +38,9 @@ function makeTask(overrides) {
     datePinned: false,
     generated: false,
     section: '',
-    ...overrides
+    ...overrides,
+    // Auto-pin when 'fixed' is in when (backward compat for tests)
+    ...(overrides && overrides.when && String(overrides.when).indexOf('fixed') >= 0 && !overrides.datePinned ? { datePinned: true } : {})
   };
 }
 
