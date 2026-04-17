@@ -23,7 +23,7 @@ function saveCollapsed(state) {
   catch (e) { /* quota exceeded */ }
 }
 
-export default function ConflictsView({ allTasks, statuses, unplaced, schedulerWarnings, onStatusChange, onExpand, onUpdateTask, darkMode, isMobile, todayDate }) {
+export default function ConflictsView({ allTasks, statuses, unplaced, backlog, schedulerWarnings, onStatusChange, onExpand, onUpdateTask, darkMode, isMobile, todayDate }) {
   var theme = getTheme(darkMode);
   var today = todayDate || (function() { var d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
 
@@ -51,7 +51,6 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
     var overdue = [];
     var stale = [];
     var blocked = [];
-    var unscheduled = [];
 
     allTasks.forEach(t => {
       var st = statuses[t.id] || '';
@@ -76,12 +75,9 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
       var deps = getDepsStatus(t, allTasks, statuses);
       if (!deps.satisfied) blocked.push(t);
 
-      if (!t.date || t.date === 'TBD') {
-        unscheduled.push(t);
-      }
     });
 
-    return { overdue, stale, blocked, unscheduled };
+    return { overdue, stale, blocked };
   }, [allTasks, statuses, today]);
 
   var warnings = schedulerWarnings || [];
@@ -111,7 +107,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, schedulerW
       help: 'These tasks depend on other tasks that aren\'t done yet. They\'ll become schedulable once their prerequisites are completed.'
     },
     {
-      key: 'unscheduled', title: 'Backlog (no date)', tasks: issues.unscheduled, color: theme.muted2,
+      key: 'unscheduled', title: 'Backlog (no date)', tasks: backlog || [], color: theme.muted2,
       tip: 'Tasks with no date assigned \u2014 not on the schedule yet',
       help: 'These tasks have no date set, so they don\'t appear on the schedule. This is normal for backlog items. Assign a date when you\'re ready to work on them.'
     },

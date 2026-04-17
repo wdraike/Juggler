@@ -160,12 +160,39 @@ function computeColumns(placements, hourHeight) {
   // are treated as overlapping during clustering
   var minVisualMin = hourHeight > 0 ? (MIN_BLOCK_H / hourHeight) * 60 : 0;
 
-  var items = placements.map(function (p) {
+  // Merge adjacent split chunks of the same task into a single visual block.
+  // Two chunks are "adjacent" if they share sourceId and one ends where the next starts.
+  var rawItems = placements.map(function (p) {
     var s = p.start;
     var e = p.end || s + (p.dur || (p.task ? p.task.dur || 30 : 30));
-    var visualEnd = Math.max(e, s + minVisualMin);
-    return { p: p, start: s, end: e, visualEnd: visualEnd };
+    return { p: p, start: s, end: e };
   }).sort(function (a, b) { return a.start - b.start || a.end - b.end; });
+
+  var mergedItems = [];
+  for (var mi = 0; mi < rawItems.length; mi++) {
+    var curr = rawItems[mi];
+    var src = curr.p.task && (curr.p.task.sourceId || curr.p.task.splitGroup);
+    // Try to merge with the previous merged item
+    if (src && mergedItems.length > 0) {
+      var prev = mergedItems[mergedItems.length - 1];
+      var prevSrc = prev.p.task && (prev.p.task.sourceId || prev.p.task.splitGroup);
+      if (prevSrc === src && curr.start === prev.end) {
+        // Merge: extend the previous block
+        prev.end = curr.end;
+        prev.p = Object.assign({}, prev.p, {
+          dur: prev.end - prev.start,
+          _mergedChunks: (prev.p._mergedChunks || 1) + 1
+        });
+        continue;
+      }
+    }
+    mergedItems.push({ p: curr.p, start: curr.start, end: curr.end });
+  }
+
+  var items = mergedItems.map(function(it) {
+    var visualEnd = Math.max(it.end, it.start + minVisualMin);
+    return { p: it.p, start: it.start, end: it.end, visualEnd: visualEnd };
+  });
 
   var clusters = [];
   var cur = null;

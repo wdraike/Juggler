@@ -398,18 +398,28 @@ export default function AppLayout() {
   // Placements come from the backend scheduler API
   var dayPlacements = placements.dayPlacements;
   var unplaced = placements.unplaced;
-  // Include active tasks with no scheduled_at — these have no date and won't
-  // appear on any calendar day. Show them in the unplaced list so they're not lost.
+  // Filter phantom unplaced entries — entries with no text or that can't be
+  // matched to a loaded task are stale cache references. Also exclude recurring
+  // templates which are blueprints, not schedulable tasks.
+  if (unplaced && unplaced.length > 0) {
+    unplaced = unplaced.filter(function(t) {
+      if (!t || !t.id) return false;
+      if (!t.text) return false; // phantom entry
+      if (t.taskType === 'recurring_template') return false;
+      return true;
+    });
+  }
+  // Backlog: active tasks with no date. Tracked separately from unplaced —
+  // these aren't scheduling failures, they're intentionally undated tasks.
   var _unplacedIdSet = {};
   (unplaced || []).forEach(function(t) { if (t && t.id) _unplacedIdSet[t.id] = true; });
-  var nullScheduled = allTasks.filter(function(t) {
+  var backlogTasks = allTasks.filter(function(t) {
     if (!t || !t.id || _unplacedIdSet[t.id]) return false;
     if (t.taskType === 'recurring_template') return false;
     var st = statuses[t.id] || '';
     if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'disabled' || st === 'pause') return false;
     return !t.scheduledAt && !t.date;
   });
-  if (nullScheduled.length > 0) unplaced = (unplaced || []).concat(nullScheduled);
   var schedulerWarnings = placements.warnings || [];
 
   // Filtered placements for grid views (projectFilter, search)
@@ -514,7 +524,9 @@ export default function AppLayout() {
   var fixedCount = fixedIds.size;
   var warningCount = schedulerWarnings.length;
   var overdueCount = overdueIds.size;
-  var issuesCount = unplacedCount + overdueCount + warningCount;
+  // Badge only counts Action Required items (overdue + warnings).
+  // Unplaced and backlog are informational — they shouldn't alarm the user.
+  var issuesCount = overdueCount + warningCount;
 
   // Unplaced task IDs set for fast lookup
   var unplacedIds = useMemo(() => {
@@ -1123,7 +1135,7 @@ export default function AppLayout() {
           {viewMode === 'conflicts' && (
             <ConflictsView
               allTasks={visibleTasks} statuses={statuses}
-              unplaced={unplaced} schedulerWarnings={schedulerWarnings}
+              unplaced={unplaced} backlog={backlogTasks} schedulerWarnings={schedulerWarnings}
               onStatusChange={handleStatusChange} onExpand={handleExpand} onUpdateTask={handleUpdateTask}
               darkMode={darkMode} isMobile={isMobile} todayDate={today}
             />
