@@ -1,5 +1,10 @@
 # Scheduler — Planned Changes
 
+**Status as of 2026-04-17:**
+- Items 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 — **Done**
+- Item 6 (unify fixed/pinned) — **Deferred** (large refactor, needs dedicated session)
+
+
 ## 1. Open time-window mode to all task types
 **Current:** `getRecurFlexWindows()` returns null for non-recurring tasks. The UI hides the when-selector for recurring tasks.
 **Change:** Remove the `!t.recurring` guard in `getRecurFlexWindows()`. Show the when-selector and flexWhen toggle for all task types (recurring and one-off). Any task should support "place around 2pm ± 30 min" or "morning only" constraints.
