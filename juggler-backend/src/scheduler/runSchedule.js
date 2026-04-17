@@ -120,11 +120,29 @@ async function runScheduleAndPersist(userId, _retries, options) {
   try {
   return await db.transaction(async function(trx) {
 
-  // 1. Load all tasks for user (via the master/instance view; writes below still target `tasks`,
-  //    and the AFTER INSERT/UPDATE/DELETE triggers keep task_masters/task_instances in sync)
-  var taskRows = await trx('tasks_v').where('user_id', userId).select();
+  // 1. Load schedulable tasks + templates (skip terminal-status rows at DB level).
+  //    This avoids loading the entire history (done/skip/cancel) into memory.
+  //    A separate lightweight query fetches just (source_id, date) for dedup.
+  var taskRows = await trx('tasks_v').where('user_id', userId)
+    .where(function() {
+      this.where('status', '').orWhere('status', 'wip').orWhereNull('status')
+        .orWhere('task_type', 'recurring_template');
+    })
+    .select();
+  // Dedup data for expandRecurring: which (source_id, date) combos already exist
+  // in terminal-status rows? Lightweight query — only two columns, no join needed.
+  var terminalDedupRows = await trx('task_instances').where('user_id', userId)
+    .whereNotNull('master_id')
+    .whereIn('status', ['done', 'skip', 'cancel'])
+    .select('master_id as source_id', 'date');
   var srcMap = buildSourceMap(taskRows);
   var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
+  // Inject terminal dedup data as synthetic entries so expandRecurring skips those dates
+  terminalDedupRows.forEach(function(r) {
+    if (r.source_id && r.date) {
+      allTasks.push({ id: '_dedup_' + r.source_id + '_' + r.date, sourceId: r.source_id, date: r.date, taskType: 'recurring_instance', text: '', status: 'done' });
+    }
+  });
 
   // 2a. Normalize empty `when` to all five standard day windows. Users treat
   // no-when-set as "place whenever," not "skip scheduling" — the placement
@@ -1070,10 +1088,24 @@ async function getSchedulePlacements(userId, options) {
     };
   }
 
-  // Slow path: cache stale — load everything and potentially re-run scheduler
-  var taskRows = await db('tasks_v').where('user_id', userId).select();
+  // Slow path: cache stale — load schedulable rows and re-run scheduler
+  var taskRows = await db('tasks_v').where('user_id', userId)
+    .where(function() {
+      this.where('status', '').orWhere('status', 'wip').orWhereNull('status')
+        .orWhere('task_type', 'recurring_template');
+    })
+    .select();
+  var terminalDedupRows2 = await db('task_instances').where('user_id', userId)
+    .whereNotNull('master_id')
+    .whereIn('status', ['done', 'skip', 'cancel'])
+    .select('master_id as source_id', 'date');
   var srcMap = buildSourceMap(taskRows);
   var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
+  terminalDedupRows2.forEach(function(r) {
+    if (r.source_id && r.date) {
+      allTasks.push({ id: '_dedup_' + r.source_id + '_' + r.date, sourceId: r.source_id, date: r.date, taskType: 'recurring_instance', text: '', status: 'done' });
+    }
+  });
 
   var statuses = {};
   allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });

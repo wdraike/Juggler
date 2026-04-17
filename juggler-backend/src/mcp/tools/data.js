@@ -110,6 +110,126 @@ function registerDataTools(server, userId) {
       }
     }
   );
+  // ── integrity_check ──
+  server.tool(
+    'integrity_check',
+    'Scan for data integrity issues: orphaned instances, empty text, broken dependencies, impossible constraints, duplicate instances. Returns a report with counts and details.',
+    {
+      autoFix: z.boolean().optional().describe('If true, auto-fix safe issues (delete orphans, clear broken deps). Default: false (report only).')
+    },
+    async ({ autoFix }) => {
+      var fix = !!autoFix;
+      var issues = [];
+      var fixed = [];
+
+      // 1. Orphaned instances: source_id points to non-existent master
+      var orphaned = await db('task_instances as i')
+        .leftJoin('task_masters as m', 'i.master_id', 'm.id')
+        .where('i.user_id', userId)
+        .whereNull('m.id')
+        .select('i.id', 'i.master_id');
+      if (orphaned.length > 0) {
+        issues.push({ type: 'orphaned_instance', count: orphaned.length, ids: orphaned.map(function(r) { return r.id; }).slice(0, 20) });
+        if (fix) {
+          await db('task_instances').whereIn('id', orphaned.map(function(r) { return r.id; })).del();
+          fixed.push('Deleted ' + orphaned.length + ' orphaned instances');
+        }
+      }
+
+      // 2. Tasks with empty/null text
+      var nameless = await db('task_masters').where('user_id', userId)
+        .where(function() { this.whereNull('text').orWhere('text', ''); })
+        .select('id');
+      if (nameless.length > 0) {
+        issues.push({ type: 'empty_text', count: nameless.length, ids: nameless.map(function(r) { return r.id; }).slice(0, 20) });
+      }
+
+      // 3. Instances with split_ordinal > split_total
+      var badSplit = await db('task_instances').where('user_id', userId)
+        .whereRaw('split_ordinal > split_total')
+        .select('id', 'split_ordinal', 'split_total');
+      if (badSplit.length > 0) {
+        issues.push({ type: 'split_ordinal_exceeds_total', count: badSplit.length, ids: badSplit.map(function(r) { return r.id; }).slice(0, 20) });
+      }
+
+      // 4. Orphaned calendar_sync rows (task deleted but sync record remains)
+      var orphanedSync = await db('calendar_sync as cs')
+        .leftJoin('task_instances as i', 'cs.task_id', 'i.id')
+        .where('cs.user_id', userId)
+        .whereNull('cs.deleted_at')
+        .whereNull('i.id')
+        .select('cs.id', 'cs.task_id', 'cs.provider');
+      if (orphanedSync.length > 0) {
+        issues.push({ type: 'orphaned_sync', count: orphanedSync.length, details: orphanedSync.slice(0, 20).map(function(r) { return { syncId: r.id, taskId: r.task_id, provider: r.provider }; }) });
+        if (fix) {
+          await db('calendar_sync').whereIn('id', orphanedSync.map(function(r) { return r.id; })).update({ deleted_at: db.fn.now() });
+          fixed.push('Soft-deleted ' + orphanedSync.length + ' orphaned sync records');
+        }
+      }
+
+      // 5. Duplicate active instances (same source_id + date with status='')
+      var dupes = await db('task_instances').where('user_id', userId)
+        .where('status', '')
+        .whereNotNull('master_id')
+        .whereNotNull('date')
+        .groupBy('master_id', 'date')
+        .havingRaw('COUNT(*) > 1')
+        .select('master_id', 'date', db.raw('COUNT(*) as cnt'));
+      if (dupes.length > 0) {
+        issues.push({ type: 'duplicate_instances', count: dupes.length, details: dupes.slice(0, 20).map(function(r) { return { masterId: r.master_id, date: r.date, count: r.cnt }; }) });
+      }
+
+      // 6. dependsOn referencing non-existent tasks
+      var allMasters = await db('task_masters').where('user_id', userId).select('id', 'depends_on');
+      var masterIds = new Set(allMasters.map(function(r) { return r.id; }));
+      var brokenDeps = [];
+      allMasters.forEach(function(r) {
+        if (!r.depends_on) return;
+        var deps;
+        try { deps = typeof r.depends_on === 'string' ? JSON.parse(r.depends_on) : r.depends_on; } catch(e) { return; }
+        if (!Array.isArray(deps)) return;
+        var broken = deps.filter(function(d) { return !masterIds.has(d); });
+        if (broken.length > 0) brokenDeps.push({ taskId: r.id, brokenIds: broken });
+      });
+      if (brokenDeps.length > 0) {
+        issues.push({ type: 'broken_dependencies', count: brokenDeps.length, details: brokenDeps.slice(0, 20) });
+        if (fix) {
+          for (var bi = 0; bi < brokenDeps.length; bi++) {
+            var bd = brokenDeps[bi];
+            var master = allMasters.find(function(m) { return m.id === bd.taskId; });
+            if (!master) continue;
+            var deps2;
+            try { deps2 = typeof master.depends_on === 'string' ? JSON.parse(master.depends_on) : master.depends_on; } catch(e) { continue; }
+            var cleaned = deps2.filter(function(d) { return masterIds.has(d); });
+            await db('task_masters').where('id', bd.taskId).update({ depends_on: JSON.stringify(cleaned), updated_at: db.fn.now() });
+          }
+          fixed.push('Cleaned broken deps from ' + brokenDeps.length + ' tasks');
+        }
+      }
+
+      // 7. Impossible constraints: startAfter > deadline
+      var impossible = await db('task_masters').where('user_id', userId)
+        .whereNotNull('start_after_at')
+        .whereNotNull('deadline')
+        .whereRaw('start_after_at > deadline')
+        .select('id', 'text', 'start_after_at', 'deadline');
+      if (impossible.length > 0) {
+        issues.push({ type: 'impossible_constraint', count: impossible.length, details: impossible.slice(0, 20).map(function(r) { return { id: r.id, text: r.text, startAfter: r.start_after_at, deadline: r.deadline }; }) });
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: safeStringify({
+            healthy: issues.length === 0,
+            issueCount: issues.length,
+            issues: issues,
+            fixed: fix ? fixed : undefined
+          })
+        }]
+      };
+    }
+  );
 }
 
 module.exports = { registerDataTools };
