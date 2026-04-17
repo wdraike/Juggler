@@ -190,13 +190,16 @@ describe('expandRecurring', () => {
       expect(result[0].project).toBe('Fitness');
     });
 
-    test('ID is sourceId-YYYYMMDD (deterministic per occurrence)', () => {
-      // Post-UUIDv7 migration (20260405100000) all source ids are UUIDv7.
-      // Use a representative one here — the date suffix is what we're pinning.
+    test('ID is sourceId-ordinal (date-agnostic, reusable)', () => {
       const sourceId = '019d5dfa-a97c-7152-a799-f21ba1026db2';
       const src = makeSource({ id: sourceId });
-      const result = expandRecurring([src], new Date(2026, 2, 20), new Date(2026, 2, 21));
-      expect(result[0].id).toBe(sourceId + '-20260321');
+      const result = expandRecurring([src], new Date(2026, 2, 20), new Date(2026, 2, 22));
+      // First instance gets ordinal 1, second gets ordinal 2
+      expect(result[0].id).toBe(sourceId + '-1');
+      expect(result[0]._candidateDate).toBeDefined();
+      if (result.length > 1) {
+        expect(result[1].id).toBe(sourceId + '-2');
+      }
     });
   });
 

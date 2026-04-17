@@ -135,8 +135,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
   });
 
   // 2b. Derive per-chunk placement brackets for recurring instances.
-  // Each instance's ID encodes its occurrence date as "<masterId>-YYYYMMDD[-N]".
-  // Master.recur's type drives the flex window:
+  // Use the task's date field (or _candidateDate from expandRecurring) to
+  // determine the occurrence date. Master.recur's type drives the flex window:
   //   daily    → 0 days  (strict same-day)
   //   weekly   → 6 days  (Mon→Sun anchor)
   //   monthly  → 27 days (~end of month)
@@ -146,12 +146,22 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (t.taskType !== 'recurring_instance' || !t.sourceId) return;
     var master = srcMap[t.sourceId];
     if (!master) return;
-    var m = String(t.id).match(/-(\d{8})(?:-\d+)?$/);
-    if (!m) return;
-    var y = parseInt(m[1].slice(0, 4), 10);
-    var mo = parseInt(m[1].slice(4, 6), 10);
-    var d = parseInt(m[1].slice(6, 8), 10);
-    var occ = new Date(y, mo - 1, d);
+    // Determine occurrence date from the task's date field or _candidateDate.
+    // Legacy IDs encode the date as YYYYMMDD suffix; new ordinal IDs don't.
+    var occDate = t._candidateDate || t.date;
+    if (!occDate) {
+      // Fallback: try parsing date from legacy ID format
+      var m = String(t.id).match(/-(\d{8})(?:-\d+)?$/);
+      if (m) {
+        var y = parseInt(m[1].slice(0, 4), 10);
+        var mo = parseInt(m[1].slice(4, 6), 10);
+        var dd = parseInt(m[1].slice(6, 8), 10);
+        occDate = formatDateKey(new Date(y, mo - 1, dd));
+      }
+    }
+    if (!occDate) return;
+    var occ = parseDate(occDate);
+    if (!occ) return;
     var recur = master.recur || {};
     var type = (recur.type || '').toLowerCase();
     var flex = 0;
@@ -164,12 +174,6 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var dueDate = new Date(occ); dueDate.setDate(dueDate.getDate() + flex);
     t.startAfter = formatDateKey(occ);
     t.deadline = formatDateKey(dueDate);
-    // Anchor the chunk to its occurrence day so pool construction recognises
-    // it as day-specific. Without this, split_ordinal>=2 chunks have null
-    // scheduled_at → null t.date → the `t.recurring && td` check in
-    // unifiedSchedule.js skips the floor/ceiling assignment and they never
-    // place. Setting t.date (and t.day) synthetically has the same effect
-    // as if reconcile had written scheduled_at for them.
     if (!t.date) {
       t.date = t.startAfter;
       t.day = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][occ.getDay()];
@@ -230,7 +234,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (t.taskType !== 'recurring_instance') return true;
     return !existingPendingIds[t.id];
   });
-  var desiredOccurrences = expandRecurring(allTasksForExpand, today, expandEnd, { statuses: statuses });
+  var desiredOccurrences = expandRecurring(allTasksForExpand, today, expandEnd, { statuses: statuses, maxOrdBySource: maxOrdByMaster });
   var MAX_EXPANDED = 500;
   if (desiredOccurrences.length > MAX_EXPANDED) {
     console.warn('[SCHED] expansion capped: ' + desiredOccurrences.length + ' → ' + MAX_EXPANDED);
@@ -242,7 +246,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var desiredRows = [];
   desiredOccurrences.forEach(function(occ) {
     var masterId = occ.sourceId;
-    var primaryId = occ.id; // <masterId>-YYYYMMDD
+    var primaryId = occ.id; // <masterId>-<ordinal> (date-agnostic)
 
     // Determine chunk plan. occ inherits master.split / master.splitMin via
     // expandRecurring's newTasks copy.
@@ -279,7 +283,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
         occurrence_ordinal: occOrd,
         split_ordinal: c.splitOrdinal,
         split_total: chunks.length,
-        dur: c.dur
+        split_group: chunks.length > 1 ? primaryId : null,
+        dur: c.dur,
+        _candidateDate: occ._candidateDate || occ.date
       });
     });
   });
@@ -408,11 +414,13 @@ async function runScheduleAndPersist(userId, _retries, options) {
       datePinned: false,
       splitOrdinal: row.split_ordinal,
       splitTotal: row.split_total,
+      splitGroup: row.split_group || null,
       occurrenceOrdinal: row.occurrence_ordinal,
       startAfter: null,
       deadline: null,
       scheduledAt: null,
       unscheduled: false,
+      _candidateDate: row._candidateDate || row.date,
       _inMemoryChunk: true // flag for persist step
     };
     inMemoryChunks.push(chunk);
@@ -433,12 +441,17 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var master = masterById[t.sourceId];
     if (!master) { master = srcMap[t.sourceId]; }
     if (!master) return;
-    var m = String(t.id).match(/-(\d{8})(?:-\d+)?$/);
-    if (!m) return;
-    var y = parseInt(m[1].slice(0, 4), 10);
-    var mo = parseInt(m[1].slice(4, 6), 10);
-    var dd = parseInt(m[1].slice(6, 8), 10);
-    var occ = new Date(y, mo - 1, dd);
+    // Use _candidateDate or date field; fallback to legacy ID parsing
+    var occDate = t._candidateDate || t.date;
+    if (!occDate) {
+      var m = String(t.id).match(/-(\d{8})(?:-\d+)?$/);
+      if (m) {
+        occDate = formatDateKey(new Date(parseInt(m[1].slice(0,4),10), parseInt(m[1].slice(4,6),10)-1, parseInt(m[1].slice(6,8),10)));
+      }
+    }
+    if (!occDate) return;
+    var occ = parseDate(occDate);
+    if (!occ) return;
     var recur = (master.recur || master.recur_json) || {};
     if (typeof recur === 'string') { try { recur = JSON.parse(recur); } catch(e) { recur = {}; } }
     var type = (recur.type || '').toLowerCase();
@@ -755,6 +768,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       occurrence_ordinal: chunk.occurrenceOrdinal || 1,
       split_ordinal: chunk.splitOrdinal || 1,
       split_total: chunk.splitTotal || 1,
+      split_group: chunk.splitGroup || null,
       dur: pu.dbUpdate.dur || chunk.dur,
       generated: 0,
       recurring: 1,

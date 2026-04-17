@@ -335,6 +335,7 @@ function rowToTask(row, timezone, sourceMap) {
     occurrenceOrdinal: row.occurrence_ordinal != null ? Number(row.occurrence_ordinal) : undefined,
     splitOrdinal: row.split_ordinal != null ? Number(row.split_ordinal) : undefined,
     splitTotal: row.split_total != null ? Number(row.split_total) : undefined,
+    splitGroup: row.split_group || null,
     // Anchor date (date-only, YYYY-MM-DD): for instances, from the template; for templates, from self
     anchorDate: (function() {
       var sa = src ? src.scheduled_at : row.scheduled_at;

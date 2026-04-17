@@ -34,6 +34,11 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
     if (t.sourceId && t.date) existingBySourceDate[t.sourceId + '|' + t.date] = true;
   });
 
+  // Ordinal counter per source — IDs are date-agnostic: <sourceId>-<ordinal>
+  var maxOrdBySource = (opts && opts.maxOrdBySource) || {};
+  var nextOrdBySource = {};
+  Object.keys(maxOrdBySource).forEach(function(k) { nextOrdBySource[k] = maxOrdBySource[k]; });
+
   var statuses = opts && opts.statuses ? opts.statuses : {};
   var sources = allTasks.filter(function(t) {
     if (!t.recur || t.recur.type === 'none') return false;
@@ -289,10 +294,9 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         var hasDupe = allTasks.some(function(et) { return et.date === dateStr && et.text === src.text && et.id !== src.id; });
         if (hasDupe) return;
       }
-      // Deterministic ID: sourceUUID-YYYYMMDD
-      var id = src.id + '-' + cursor.getFullYear()
-        + (cursor.getMonth() < 9 ? '0' : '') + (cursor.getMonth() + 1)
-        + (cursor.getDate() < 10 ? '0' : '') + cursor.getDate();
+      // Ordinal-based ID: sourceUUID-<ordinal> (date-agnostic, reusable)
+      nextOrdBySource[src.id] = (nextOrdBySource[src.id] || 0) + 1;
+      var id = src.id + '-' + nextOrdBySource[src.id];
       existingBySourceDate[sourceDate] = true;
       existingByDateText[dateStr + '|' + src.text] = true;
       // When timesPerCycle < selected days, set dayReq to all selected day codes
@@ -321,7 +325,9 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         timeFlex: src.timeFlex, preferredTimeMins: src.preferredTimeMins,
         marker: src.marker, flexWhen: src.flexWhen,
         dayReq: instanceDayReq, section: '', notes: src.notes || '',
-        taskType: 'generated', sourceId: src.id, generated: true
+        taskType: 'generated', sourceId: src.id, generated: true,
+        _candidateDate: dateStr,
+        _occurrenceOrdinal: nextOrdBySource[src.id]
       });
     });
 

@@ -128,7 +128,7 @@ Evicted tasks:
 - Queue poller runs every ~2 s; dirty users get processed
 
 ### 10. Safety — why repeated runs are cheap
-- Deterministic IDs (`masterId-YYYYMMDD-N`) — unchanged rows stay byte-identical across runs; no needless UPDATEs
+- Ordinal IDs (`masterId-N` for instances, `masterId-N-S` for split chunks) — date-agnostic, reusable across scheduler runs
 - One scheduler run per user at a time via `sync_locks`
 - Drift detection: if an instance's `(split_ordinal, split_total, dur)` doesn't match the chunk plan, reconcile fixes it before placement
 - Idempotent on stable input: back-to-back runs on the same data produce zero changes
@@ -140,8 +140,9 @@ Evicted tasks:
 A recurring task with `split=1` and `split_min=M` gets divided into chunks at reconcile time. Given a master duration `D`, `N = ceil(D / M)` chunks are produced per occurrence. Chunks share the same `occurrence_ordinal` and differ by `split_ordinal` (1..N).
 
 ### Row identity
-- Chunk 1 id: `masterUUID-YYYYMMDD`
-- Chunk 2+ id: `masterUUID-YYYYMMDD-2`, `masterUUID-YYYYMMDD-3`, …
+- Chunk 1 id: `masterUUID-<ordinal>` (e.g., `abc123-1`)
+- Chunk 2+ id: `masterUUID-<ordinal>-<splitOrdinal>` (e.g., `abc123-1-2`, `abc123-1-3`)
+- `split_group`: links chunks of the same occurrence (set to the primary chunk's ID)
 
 All chunks reference the same `master_id` and `occurrence_ordinal`.
 
