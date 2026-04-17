@@ -105,6 +105,28 @@ Returns a report; optionally auto-fixes safe issues (delete orphans, clear broke
 **Change:** Any manual move (drag-drop on calendar, time edit in form) should set `datePinned: true` on the task so the scheduler respects the user's intent. Only the user can unpin.
 **Files:** Calendar drag handler, task update path in `AppLayout.jsx` / `task.controller.js`
 
+## 15. Past-time tasks disappear from calendar and issues
+**Root cause:** Two code paths silently drop past-time tasks:
+1. **Recurring instances** (line 605 in `runSchedule.js`): unplaced recurring instances are skipped entirely — not marked `unscheduled`, not surfaced in issues. The comment says "they'll be placed when their day comes" but the day already came and passed.
+2. **Non-recurring** (Phase 9, line 636+): past non-recurring tasks get `scheduled_at` moved to midnight, which may not render on the calendar grid since no placement exists in `dayPlacements`.
+
+In both cases the task disappears from the calendar without appearing in the issues tab.
+
+**Change:**
+- Past-time-today tasks that can't be re-placed should remain visible on the calendar at their original time with a "past due" visual indicator (dimmed, strikethrough, or badge)
+- If truly unplaceable, they should appear in the issues tab under "Action Required"
+- Remove the `recurring_instance` skip at line 605 — recurring tasks that missed their slot need the same treatment as one-off tasks
+- Frontend: render past-time tasks on today's calendar even if the time has passed (already done for fixed tasks — line 216-221 in `unifiedSchedule.js` says "On today, always show even if time has passed")
+**Files:** `runSchedule.js` (line 605, Phase 9), `unifiedSchedule.js` (past-time handling), `DayView.jsx` / `DailyView.jsx` (visual indicator)
+
+## 16. Calendar sync progress visibility
+**Current:** Calendar sync runs in the background with minimal feedback. The UI shows a generic "syncing" indicator but no detail about which provider is active, how many events are being processed, or where it is in the sync cycle.
+**Change:**
+- **Backend:** Emit granular SSE events during sync: `sync:started {provider, calendarName}`, `sync:progress {provider, processed, total}`, `sync:completed {provider, added, updated, deleted, errors}`, `sync:error {provider, message}`
+- **Frontend:** CalSyncPanel shows live progress: which calendar (Google/Outlook/Apple), event count (e.g., "Processing 47 of 132 events"), progress bar or spinner with percentage, summary on completion ("Synced: 12 added, 3 updated, 1 removed")
+- Per-provider status visible simultaneously if multiple calendars sync
+**Files:** `cal-sync.controller.js` (SSE events), `CalSyncPanel.jsx` (progress UI), individual adapters (`gcal.controller.js`, `msft-cal.controller.js`, `apple.adapter.js`) for event counts
+
 ## 14. Collapse adjacent split chunks visually on the calendar
 **Current:** Split chunks of the same task placed back-to-back appear as separate cards on the calendar view. The scheduler's merge-back pass (Phase 5a) combines them in the DB, but either the merge isn't running or the frontend isn't reflecting merged chunks.
 **Change:** Frontend should detect adjacent chunks with the same `sourceId` (or `splitGroup`) on the same day and render them as a single card with combined duration. Alternatively, ensure the backend merge-back is working and the frontend reads the merged result.
