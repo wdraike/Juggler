@@ -244,7 +244,7 @@ function computeColumns(placements, hourHeight) {
 }
 
 /* ── Reactive task block — shows more info as height increases ── */
-function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStatusChange, theme, darkMode, isMobile, isBlocked, canDrag, gutterW, hourHeight }) {
+function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStatusChange, onDelete, theme, darkMode, isMobile, isBlocked, canDrag, gutterW, hourHeight }) {
   var t = item.task || item;
   var priColor = PRI_COLORS[t.pri] || PRI_COLORS.P3;
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
@@ -377,6 +377,11 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
               <span onClick={function (e) { e.stopPropagation(); }}>
                 <StatusToggle value={status} onChange={onStatusChange} darkMode={darkMode} compact />
               </span>
+            )}
+            {onDelete && (
+              <span onClick={function (e) { e.stopPropagation(); onDelete(t.id); }}
+                style={{ cursor: 'pointer', fontSize: 10, opacity: 0.5, padding: '0 2px' }}
+                title="Delete task">{'\uD83D\uDDD1'}</span>
             )}
             <div style={{ flex: 1 }} />
             {locIcons.length > 0 && <span style={{ fontSize: 9 }}>{locIcons.join(' ')}</span>}
@@ -511,7 +516,7 @@ export default function DailyView({
   selectedDate, selectedDateKey, placements, statuses, onStatusChange,
   onExpand, darkMode, schedCfg, nowMins, isToday, allTasks,
   filter, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile,
-  onUpdate, showToast, locations, onHourLocationOverride,
+  onUpdate, onDelete, showToast, locations, onHourLocationOverride,
   locSchedules, onUpdateLocScheduleOverrides, onUpdateLocScheduleDefaults, onBatchRecurringsDone
 }) {
   var theme = getTheme(darkMode);
@@ -1039,6 +1044,7 @@ export default function DailyView({
                 totalCols={layout.totalCols}
                 onExpand={onExpand}
                 onStatusChange={onStatusChange ? function (val) { onStatusChange(taskId, val); } : null}
+                onDelete={onDelete}
                 theme={theme}
                 darkMode={darkMode}
                 isMobile={isMobile}

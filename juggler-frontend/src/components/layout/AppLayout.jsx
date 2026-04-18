@@ -1100,6 +1100,7 @@ export default function AppLayout() {
               pastDueIds={pastDueIds} fixedIds={fixedIds}
               isMobile={isMobile}
               onUpdate={handleUpdateTask}
+              onDelete={deleteTask}
               showToast={showToast}
               locations={config.locations}
               onHourLocationOverride={handleHourLocationOverride}
@@ -1144,6 +1145,7 @@ export default function AppLayout() {
               allTasks={visibleTasks} statuses={statuses}
               unplaced={unplaced} backlog={backlogTasks} schedulerWarnings={schedulerWarnings}
               onStatusChange={handleStatusChange} onExpand={handleExpand} onUpdateTask={handleUpdateTask}
+              onDelete={deleteTask}
               darkMode={darkMode} isMobile={isMobile} todayDate={today}
             />
           )}
