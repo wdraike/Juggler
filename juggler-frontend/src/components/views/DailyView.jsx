@@ -330,12 +330,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
           {status === 'done' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2713'}</span>}
           {status === 'skip' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u23ED'}</span>}
           {status === 'cancel' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2717'}</span>}
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{t.text}</span>
-          {onDelete && (
-            <span onClick={function (e) { e.stopPropagation(); onDelete(t.id); }}
-              style={{ cursor: 'pointer', fontSize: 9, opacity: 0.3, flexShrink: 0, padding: '0 1px' }}
-              title="Delete">{'\u2715'}</span>
-          )}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.text}</span>
         </div>
 
         {/* Row 2: Time + project + duration (height >= 28) */}
@@ -382,6 +377,22 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
               <span onClick={function (e) { e.stopPropagation(); }}>
                 <StatusToggle value={status} onChange={onStatusChange} darkMode={darkMode} compact />
               </span>
+            )}
+            {onDelete && (
+              <button
+                onClick={function (e) { e.stopPropagation(); onDelete(t.id); }}
+                title="Delete"
+                style={{
+                  width: 16, height: 16, borderRadius: 4,
+                  border: '1px solid ' + (darkMode ? '#475569' : '#94A3B8'),
+                  cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 8, fontWeight: 700, padding: 0,
+                  background: darkMode ? '#1E293B' : '#F5F0E8',
+                  color: darkMode ? '#64748B' : '#6B7280',
+                  flexShrink: 0
+                }}
+              >{'\uD83D\uDDD1'}</button>
             )}
             <div style={{ flex: 1 }} />
             {locIcons.length > 0 && <span style={{ fontSize: 9 }}>{locIcons.join(' ')}</span>}
