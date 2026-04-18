@@ -1749,7 +1749,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       </div>
 
       {showDeleteConfirm && (
-        task.recurring || task.taskType === 'recurring_instance' || task.taskType === 'recurring_template' || task.sourceId || task.source_id ? (
+        task.recurring || task.taskType === 'recurring_instance' || task.taskType === 'recurring_template' ? (
           <RecurringDeleteDialog
             taskName={task.text || 'this task'}
             onSkipInstance={() => { if (onStatusChange) onStatusChange('skip'); setShowDeleteConfirm(false); }}
