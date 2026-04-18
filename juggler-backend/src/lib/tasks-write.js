@@ -63,7 +63,9 @@ var MASTER_UPDATE_FIELDS = [
 // Fields in the `tasks`-shape row that update INSTANCE only (placement fields).
 var INSTANCE_UPDATE_FIELDS = [
   'scheduled_at', 'dur', 'date_pinned',
-  'status', 'time_remaining', 'unscheduled', 'generated'
+  'date', 'day', 'time',
+  'status', 'time_remaining', 'unscheduled', 'generated',
+  'split_group'
 ];
 
 function isTemplate(row) {

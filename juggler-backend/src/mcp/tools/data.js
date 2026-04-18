@@ -207,7 +207,33 @@ function registerDataTools(server, userId) {
         }
       }
 
-      // 7. Impossible constraints: startAfter > deadline
+      // 7. Orphaned masters: non-recurring masters with no instance row
+      var orphanedMasters = await db('task_masters as m')
+        .leftJoin('task_instances as i', 'i.master_id', 'm.id')
+        .where('m.user_id', userId)
+        .where('m.recurring', 0)
+        .whereNull('i.id')
+        .select('m.id', 'm.text', 'm.status');
+      if (orphanedMasters.length > 0) {
+        issues.push({ type: 'orphaned_master', count: orphanedMasters.length, details: orphanedMasters.slice(0, 20).map(function(r) { return { id: r.id, text: r.text, status: r.status }; }) });
+        if (fix) {
+          // Recreate instance rows for orphaned one-off masters
+          var insertRows = orphanedMasters.map(function(m) {
+            return {
+              id: m.id, master_id: m.id, user_id: userId,
+              occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
+              dur: 30, status: m.status || '',
+              generated: 0, created_at: db.fn.now(), updated_at: db.fn.now()
+            };
+          });
+          for (var oi = 0; oi < insertRows.length; oi += 50) {
+            await db('task_instances').insert(insertRows.slice(oi, oi + 50));
+          }
+          fixed.push('Recreated ' + orphanedMasters.length + ' instance rows for orphaned masters');
+        }
+      }
+
+      // 8. Impossible constraints: startAfter > deadline
       var impossible = await db('task_masters').where('user_id', userId)
         .whereNotNull('start_after_at')
         .whereNotNull('deadline')

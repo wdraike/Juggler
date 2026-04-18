@@ -563,13 +563,15 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var newScheduledAt = localToUtc(newDate, newTime, TIMEZONE);
     if (!newScheduledAt) continue;
 
+    // Derive day-of-week for the DB write
+    var parsedNewDate = parseDate(newDate);
+    var newDay = parsedNewDate ? DAY_NAMES[parsedNewDate.getDay()] : null;
     var dbUpdate = {
       scheduled_at: newScheduledAt,
+      date: newDate || null,
+      day: newDay,
+      time: newTime || null,
       unscheduled: null,
-      // Scheduler-placed tasks are NOT user-pinned. If we reached this point
-      // the task passed the datePinned guard (either no user pin, or a stale
-      // pin on a null-scheduled row). Clear the flag so the next scheduler
-      // run treats it as freely placeable instead of routing it to fixedByDate.
       date_pinned: 0,
       updated_at: db.fn.now()
     };
@@ -812,6 +814,25 @@ async function runScheduleAndPersist(userId, _retries, options) {
       });
       durCaseExpr += ' ELSE dur END';
       updateFields.dur = trx.raw(durCaseExpr, durBindings);
+    }
+
+    // Build CASE for date/day/time (keep DB in sync with scheduled_at)
+    var dateChunk = chunk.filter(function(pu) { return pu.dbUpdate.date != null; });
+    if (dateChunk.length > 0) {
+      var dateCaseExpr = 'CASE id'; var dateBindings = [];
+      var dayCaseExpr = 'CASE id'; var dayBindings = [];
+      var timeCaseExpr = 'CASE id'; var timeBindings = [];
+      dateChunk.forEach(function(pu) {
+        dateCaseExpr += ' WHEN ? THEN ?'; dateBindings.push(pu.id, pu.dbUpdate.date);
+        dayCaseExpr += ' WHEN ? THEN ?'; dayBindings.push(pu.id, pu.dbUpdate.day || null);
+        timeCaseExpr += ' WHEN ? THEN ?'; timeBindings.push(pu.id, pu.dbUpdate.time || null);
+      });
+      dateCaseExpr += ' ELSE `date` END';
+      dayCaseExpr += ' ELSE `day` END';
+      timeCaseExpr += ' ELSE `time` END';
+      updateFields.date = trx.raw(dateCaseExpr, dateBindings);
+      updateFields.day = trx.raw(dayCaseExpr, dayBindings);
+      updateFields.time = trx.raw(timeCaseExpr, timeBindings);
     }
 
     // Route `updateFields` across master/instance via helper.
