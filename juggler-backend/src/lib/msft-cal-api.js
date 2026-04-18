@@ -114,13 +114,27 @@ async function graphFetch(accessToken, path, options) {
     fetchOpts.body = JSON.stringify(options.body);
   }
 
-  var res = await fetch(url, fetchOpts);
-  if (!res.ok) {
-    var text = await res.text();
-    throw new Error('Graph API error ' + res.status + ': ' + text);
+  var maxRetries = 3;
+  for (var attempt = 0; attempt <= maxRetries; attempt++) {
+    var res = await fetch(url, fetchOpts);
+    if (res.status === 429 || res.status === 503) {
+      if (attempt === maxRetries) {
+        var text = await res.text();
+        throw new Error('Graph API rate limited (status ' + res.status + ' after ' + (maxRetries + 1) + ' attempts): ' + text);
+      }
+      var retryAfter = parseInt(res.headers.get('Retry-After'), 10);
+      var delayMs = Math.min((retryAfter && retryAfter > 0 ? retryAfter * 1000 : Math.pow(2, attempt) * 1000), 30000);
+      console.warn('[MSFT-API] ' + res.status + ' on ' + (options.method || 'GET') + ' ' + path + ', retry ' + (attempt + 1) + '/' + maxRetries + ' in ' + delayMs + 'ms');
+      await new Promise(function(r) { setTimeout(r, delayMs); });
+      continue;
+    }
+    if (!res.ok) {
+      var text = await res.text();
+      throw new Error('Graph API error ' + res.status + ': ' + text);
+    }
+    if (res.status === 204) return null;
+    return res.json();
   }
-  if (res.status === 204) return null;
-  return res.json();
 }
 
 async function listEvents(accessToken, startDateTime, endDateTime) {

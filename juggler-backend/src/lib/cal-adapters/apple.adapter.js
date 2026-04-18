@@ -79,6 +79,7 @@ async function listEvents(client, timeMin, timeMax, userId) {
   }
 
   var allEvents = [];
+  var hasPartialFailure = false;
   for (var i = 0; i < calendars.length; i++) {
     var cal = calendars[i];
     try {
@@ -90,6 +91,7 @@ async function listEvents(client, timeMin, timeMax, userId) {
       });
       allEvents = allEvents.concat(normalized);
     } catch (e) {
+      hasPartialFailure = true;
       console.error('[APPLE-ADAPTER] Error fetching calendar ' + (cal.display_name || cal.calendar_id) + ':', e.message);
     }
   }
@@ -113,6 +115,9 @@ async function listEvents(client, timeMin, timeMax, userId) {
     console.error('[APPLE-ADAPTER] sync token update failed:', e.message);
   }
 
+  if (hasPartialFailure) {
+    allEvents._hasPartialFailure = true;
+  }
   return allEvents;
 }
 

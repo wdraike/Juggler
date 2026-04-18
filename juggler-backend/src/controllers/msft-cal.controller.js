@@ -7,40 +7,10 @@ var { SignJWT, jwtVerify } = require('jose');
 var db = require('../db');
 var msftCalApi = require('../lib/msft-cal-api');
 
-// --- Token management ---
+// --- Token management (canonical implementation in adapter) ---
 
 var { getJwtSecret } = require('../lib/jwt-secret');
-
-async function getValidAccessToken(user) {
-  if (!user.msft_cal_refresh_token) {
-    throw new Error('Microsoft Calendar not connected');
-  }
-
-  if (user.msft_cal_access_token && user.msft_cal_token_expiry) {
-    var expiryStr = String(user.msft_cal_token_expiry);
-    var expiry = new Date(expiryStr.endsWith('Z') ? expiryStr : expiryStr + 'Z');
-    if (expiry.getTime() > Date.now() + 5 * 60 * 1000) {
-      return user.msft_cal_access_token;
-    }
-  }
-
-  var credentials = await msftCalApi.refreshAccessToken(user.msft_cal_refresh_token);
-
-  var update = {
-    msft_cal_access_token: credentials.accessToken,
-    updated_at: db.fn.now()
-  };
-  if (credentials.expiresOn) {
-    update.msft_cal_token_expiry = new Date(credentials.expiresOn);
-  }
-  if (credentials.refreshToken) {
-    update.msft_cal_refresh_token = credentials.refreshToken;
-  }
-
-  await db('users').where('id', user.id).update(update);
-
-  return credentials.accessToken;
-}
+var { getValidAccessToken } = require('../lib/cal-adapters/msft.adapter');
 
 // Guard against duplicate callback hits (browser retries)
 var usedCodes = new Set();

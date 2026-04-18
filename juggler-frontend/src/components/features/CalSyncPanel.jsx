@@ -3,7 +3,7 @@
  * Single Sync Now button, per-provider connect/disconnect + auto-sync toggles
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import apiClient from '../../services/apiClient';
 import { getTheme } from '../../theme/colors';
 
@@ -52,26 +52,49 @@ export default function CalSyncPanel({
   var [loadingHistory, setLoadingHistory] = useState(false);
   var [syncProgress, setSyncProgress] = useState(null); // { phase, detail, pct }
 
-  // Listen for sync:progress SSE events
+  // Listen for sync:progress and sync:error SSE events
   useEffect(() => {
-    function handleSseMessage(e) {
+    function handleSseProgress(e) {
       try {
-        if (e.type === 'sync:progress') {
-          var data = JSON.parse(e.data);
-          setSyncProgress(data);
-          if (data.phase === 'done') {
-            setTimeout(function() { setSyncProgress(null); }, 1500);
-          }
+        var data = JSON.parse(e.data);
+        setSyncProgress(data);
+        if (data.phase === 'done') {
+          setTimeout(function() { setSyncProgress(null); }, 1500);
         }
       } catch (err) { /* ignore */ }
     }
-    // Find the existing EventSource from the app's SSE connection
+    function handleSseError(e) {
+      try {
+        var data = JSON.parse(e.data);
+        setSyncing(false);
+        setSyncProgress(null);
+        showToast('Sync failed: ' + (data.error || 'Unknown error'), 'error');
+      } catch (err) {
+        setSyncing(false);
+        setSyncProgress(null);
+      }
+    }
     var eventSources = window.__jugglerEventSource;
     if (eventSources) {
-      eventSources.addEventListener('sync:progress', handleSseMessage);
-      return function() { eventSources.removeEventListener('sync:progress', handleSseMessage); };
+      eventSources.addEventListener('sync:progress', handleSseProgress);
+      eventSources.addEventListener('sync:error', handleSseError);
+      return function() {
+        eventSources.removeEventListener('sync:progress', handleSseProgress);
+        eventSources.removeEventListener('sync:error', handleSseError);
+      };
     }
-  }, []);
+  }, []); // eslint-disable-line
+
+  // Safety timeout: if syncing stays true for 120s with no SSE events, auto-reset
+  useEffect(() => {
+    if (!syncing) return;
+    var timeout = setTimeout(function() {
+      setSyncing(false);
+      setSyncProgress(null);
+      showToast('Sync timed out — no response from server', 'warning');
+    }, 120000);
+    return function() { clearTimeout(timeout); };
+  }, [syncing]); // eslint-disable-line
 
   function loadHistory() {
     setLoadingHistory(true);
@@ -364,8 +387,10 @@ export default function CalSyncPanel({
   }
 
   // --- Unified sync ---
+  var syncRetryAttempted = useRef(false);
   async function handleSyncNow() {
     try {
+      syncRetryAttempted.current = false;
       setSyncing(true);
       setResults(null);
       if (onSyncStart) onSyncStart();
@@ -394,8 +419,17 @@ export default function CalSyncPanel({
       if (onSyncComplete) onSyncComplete();
     } catch (e) {
       if (e.response?.status === 409) {
-        showToast('Sync is already running — please wait for it to finish', 'info');
-        setSyncing(false);
+        var retryAfter = e.response?.data?.retryAfter || 30;
+        var jitter = Math.floor(Math.random() * 10);
+        var retryDelay = retryAfter + jitter;
+        if (!syncRetryAttempted.current) {
+          showToast('Sync in progress — retrying in ~' + retryDelay + 's', 'info');
+          syncRetryAttempted.current = true;
+          setTimeout(function() { handleSyncNow(); }, retryDelay * 1000);
+        } else {
+          showToast('Sync is busy — please try again later', 'info');
+          setSyncing(false);
+        }
         return;
       } else {
         // Check if any provider had a token expiry

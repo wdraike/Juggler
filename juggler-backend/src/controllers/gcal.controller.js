@@ -7,38 +7,10 @@ var { SignJWT, jwtVerify } = require('jose');
 var db = require('../db');
 var gcalApi = require('../lib/gcal-api');
 
-// --- Token management ---
+// --- Token management (canonical implementation in adapter) ---
 
 var { getJwtSecret } = require('../lib/jwt-secret');
-
-async function getValidAccessToken(user) {
-  if (!user.gcal_refresh_token) {
-    throw new Error('Google Calendar not connected');
-  }
-
-  if (user.gcal_access_token && user.gcal_token_expiry) {
-    var expiryStr = String(user.gcal_token_expiry);
-    var expiry = new Date(expiryStr.endsWith('Z') ? expiryStr : expiryStr + 'Z');
-    if (expiry.getTime() > Date.now() + 5 * 60 * 1000) {
-      return user.gcal_access_token;
-    }
-  }
-
-  var oauth2Client = gcalApi.createOAuth2Client();
-  var credentials = await gcalApi.refreshAccessToken(oauth2Client, user.gcal_refresh_token);
-
-  var update = {
-    gcal_access_token: credentials.access_token,
-    updated_at: db.fn.now()
-  };
-  if (credentials.expiry_date) {
-    update.gcal_token_expiry = new Date(credentials.expiry_date);
-  }
-
-  await db('users').where('id', user.id).update(update);
-
-  return credentials.access_token;
-}
+var { getValidAccessToken } = require('../lib/cal-adapters/gcal.adapter');
 
 // --- Endpoints ---
 

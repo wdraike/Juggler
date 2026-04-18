@@ -86,16 +86,29 @@ function withSyncLock(handler) {
     }
     var token = result.token;
     var lockStart = Date.now();
+    var lockLost = false;
     var heartbeat = setInterval(function() {
       if (Date.now() - lockStart > MAX_LOCK_AGE) {
         clearInterval(heartbeat);
+        lockLost = true;
         console.warn('[sync-lock] Heartbeat stopped — lock held over ' + Math.round(MAX_LOCK_AGE / 1000) + 's, allowing expiry');
         return;
       }
-      refreshLock(userId, token).catch(function() {});
+      refreshLock(userId, token).then(function(ok) {
+        if (!ok) {
+          lockLost = true;
+          clearInterval(heartbeat);
+          console.warn('[sync-lock] Lock lost — refresh returned 0 rows (expired or stolen)');
+        }
+      }).catch(function(err) {
+        lockLost = true;
+        clearInterval(heartbeat);
+        console.error('[sync-lock] Lock refresh failed:', err.message);
+      });
     }, 10 * 1000);
     req.syncLock = {
       token: token,
+      get lost() { return lockLost; },
       refresh: function() { return refreshLock(userId, token); },
     };
     try {
@@ -112,30 +125,43 @@ async function withLock(userId, fn, opts) {
   if (!result.acquired) return null;
   var token = result.token;
   var lockStart = Date.now();
+  var lockLost = false;
   var heartbeat = setInterval(function() {
     if (Date.now() - lockStart > MAX_LOCK_AGE) {
       clearInterval(heartbeat);
+      lockLost = true;
       return;
     }
-    refreshLock(userId, token).catch(function() {});
+    refreshLock(userId, token).then(function(ok) {
+      if (!ok) {
+        lockLost = true;
+        clearInterval(heartbeat);
+        console.warn('[sync-lock] Lock lost in withLock — refresh returned 0 rows');
+      }
+    }).catch(function(err) {
+      lockLost = true;
+      clearInterval(heartbeat);
+      console.error('[sync-lock] Lock refresh failed in withLock:', err.message);
+    });
   }, 10 * 1000);
   try {
     return await fn({
+      get lost() { return lockLost; },
       refresh: function() { return refreshLock(userId, token); },
     });
   } finally {
     clearInterval(heartbeat);
-    await releaseLock(userId, token);
-    // After releasing, flush any task writes that queued while we held the lock.
-    // Lazy require to avoid circular dependency (task-write-queue → sync-lock).
+    // Flush pending task writes BEFORE releasing the lock so the scheduler
+    // can't grab the lock between release and flush.
     if (!opts || opts.flushOnRelease !== false) {
       try {
         var twq = require('./task-write-queue');
-        await twq.flushQueue(userId);
+        await twq.flushQueueInLock(userId);
       } catch (err) {
-        console.error('[sync-lock] post-release flush error:', err.message);
+        console.error('[sync-lock] pre-release flush error:', err.message);
       }
     }
+    await releaseLock(userId, token);
   }
 }
 
