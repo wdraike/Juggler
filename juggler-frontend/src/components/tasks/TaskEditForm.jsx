@@ -1406,7 +1406,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               </div>
             </label>
             <label style={lStyle}>
-              <span title="Earliest date this task can be scheduled.">{'\u23F3'} Start after</span>
+              <span title="Task will not be scheduled before this date.">{'\u23F3'} Not before</span>
               <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
                 <input type="date" value={startAfter || ''}
                   onChange={e => setStartAfter(e.target.value || '')}
