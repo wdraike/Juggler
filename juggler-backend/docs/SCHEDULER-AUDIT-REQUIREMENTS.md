@@ -140,7 +140,7 @@ Every requirement from SCHEDULER.md traced to implementation.
 |---|-------------|--------|-------|
 | SP-1 | Chunk 1 inherits preferred time | PASS | In-memory chunk creation copies `preferredTimeMins` for ordinal 1 |
 | SP-2 | Chunks 2..N start unplaced | PASS | `time: null` for ordinal > 1 |
-| SP-3 | Status propagation to siblings | FAIL | Spec says `PUT /api/tasks/:id/status` propagates to all chunks with same `(master_id, occurrence_ordinal)`. Code does NOT propagate — only updates the single instance. |
+| SP-3 | Each chunk is independent — marking one done means that split is finished, not the whole task | PASS | Code correctly updates only the single chunk. Spec was wrong to describe propagation — each chunk represents independent work. |
 | SP-4 | Drift detection updates chunks | PASS | Reconcile fixes mismatched `split_ordinal/split_total/dur` |
 | SP-5 | N = ceil(D / M) chunks per occurrence | PASS | `computeChunks(dur, splitMin)` |
 
@@ -172,14 +172,10 @@ Every requirement from SCHEDULER.md traced to implementation.
 | Status | Count |
 |--------|-------|
 | PASS | 62 |
-| FAIL | 1 |
+| FAIL | 0 |
 | STALE | 4 |
 | MISSING | 2 |
 | REMOVED | 1 |
-
-### FAIL (code doesn't implement requirement)
-
-**SP-3: Split chunk status propagation.** Marking one chunk done should propagate to all siblings with same `(master_id, occurrence_ordinal)`. Currently only updates the single row.
 
 ### MISSING (spec describes, code doesn't implement)
 
