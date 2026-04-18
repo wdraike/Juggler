@@ -811,8 +811,15 @@ async function runScheduleAndPersist(userId, _retries, options) {
     return false; // remove from pendingUpdates
   });
   if (inMemoryInserts.length > 0) {
+    var nullDateCount = inMemoryInserts.filter(function(r) { return !r.date; }).length;
+    if (nullDateCount > 0) console.log('[SCHED] WARNING: ' + nullDateCount + ' of ' + inMemoryInserts.length + ' in-memory inserts have null date');
+    if (inMemoryInserts.length > 0 && inMemoryInserts[0]) {
+      console.log('[SCHED] sample insert: id=' + inMemoryInserts[0].id + ' sa=' + inMemoryInserts[0].scheduled_at + ' date=' + inMemoryInserts[0].date);
+    }
     await tasksWrite.insertTasksBatch(trx, inMemoryInserts);
     console.log('[SCHED] persist: inserted ' + inMemoryInserts.length + ' newly-placed chunk rows');
+  } else {
+    console.log('[SCHED] persist: 0 in-memory inserts (chunks matched ' + Object.keys(inMemoryIds).length + ' inMemoryIds, pendingUpdates had ' + pendingUpdates.length + ' entries)');
   }
 
   // Execute updates in batches to avoid long-running single-row UPDATEs.

@@ -110,6 +110,11 @@ function pickInstance(row, id, masterId, occOrdinal) {
     unscheduled: row.unscheduled != null ? row.unscheduled : null,
     generated: row.generated ? 1 : 0
   };
+  // Derived local-tz caches — written by the scheduler when placing chunks
+  if (row.date !== undefined) out.date = row.date;
+  if (row.day !== undefined) out.day = row.day;
+  if (row.time !== undefined) out.time = row.time;
+  if (row.split_group !== undefined) out.split_group = row.split_group;
   if (row.created_at !== undefined) out.created_at = row.created_at;
   if (row.updated_at !== undefined) out.updated_at = row.updated_at;
   return out;
