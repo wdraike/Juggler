@@ -1763,11 +1763,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (!oItem.task._originalDue && savedDL) {
         oItem.task._originalDue = formatDateKey(savedDL);
       }
-      // For non-recurring past-due: relax when-constraint to any window
-      if (!oItem.task.recurring && oItem.task.when) {
-        oItem.task._originalWhen = oItem.task.when;
-        oItem.task.when = '';
-      }
+      // Keep original when/where constraints — the user chose them.
+      // If the task can't fit, it goes to the issues log for the user to decide.
       placeItemForward(oItem);
     }
   }

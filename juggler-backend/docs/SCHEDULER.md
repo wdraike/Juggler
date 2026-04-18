@@ -111,8 +111,8 @@ Split chunks stay as separate DB rows. Adjacent chunks of the same task are visu
 
 Three rules govern incomplete tasks whose scheduled time has passed:
 
-**Rule 1: One-off past-due tasks → P1 boost, reschedule in any window, flag as past-due.**
-The task's priority is boosted to P1 and the scheduler places it in whatever time windows have capacity — not limited to its original `when` constraint. The task is marked `_pastDue` for visual indication on the calendar and added to the issues log.
+**Rule 1: One-off past-due tasks → P1 boost, reschedule within existing constraints, flag as past-due.**
+The task's priority is boosted to P1 and the scheduler tries to place it in its original `when` and `where` windows. If it can't fit, it goes to the issues log — the user decides whether to relax the constraints. The task is marked `_pastDue` for visual indication.
 
 **Rule 2: Recurring past-due instances → reschedule within recurrence window, or remove.**
 If the missed instance can be rescheduled before the next occurrence (e.g., a weekly task missed on Monday can place Tue–Sun), do so. If it can't fit before the next occurrence, mark it as `_pastDue`, remove it from the calendar, and add it to the issues log. The next occurrence starts fresh.
