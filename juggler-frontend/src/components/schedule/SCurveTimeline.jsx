@@ -1244,6 +1244,7 @@ export default function SCurveTimeline(props) {
                 item={c.item}
                 status={statuses[c.item.task.id] || ''}
                 onStatusChange={function (val) { onStatusChange(c.item.task.id, val); }}
+                onDelete={onDelete ? function() { onDelete(c.item.task.id); } : null}
                 darkMode={darkMode}
                 isBlocked={blockedTaskIds && blockedTaskIds.has(c.item.task.id)}
                 isMobile={isMobile}

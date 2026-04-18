@@ -174,26 +174,18 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {sec.tasks.map(t => (
                   <div key={t.id}>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-                      <div style={{ flex: 1 }}>
-                        <TaskCard
-                          task={t}
-                          status={statuses[t.id] || ''}
-                          onStatusChange={onStatusChange}
-                          onExpand={onExpand}
-                          darkMode={darkMode}
-                          showDate
-                          isMobile={isMobile}
-                          allTasks={allTasks} statuses={statuses}
-                          todayDate={todayDate}
-                        />
-                      </div>
-                      {onDelete && (
-                        <button onClick={function() { onDelete(t.id); }}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, opacity: 0.4, padding: '4px 2px', flexShrink: 0 }}
-                          title="Delete task">{'\uD83D\uDDD1'}</button>
-                      )}
-                    </div>
+                    <TaskCard
+                      task={t}
+                      status={statuses[t.id] || ''}
+                      onStatusChange={onStatusChange}
+                      onDelete={onDelete ? function(id) { onDelete(id); } : null}
+                      onExpand={onExpand}
+                      darkMode={darkMode}
+                      showDate
+                      isMobile={isMobile}
+                      allTasks={allTasks} statuses={statuses}
+                      todayDate={todayDate}
+                    />
                     {t._unplacedDetail && (
                       <div style={{ fontSize: 10, color: theme.textMuted, padding: '2px 12px', marginTop: -2 }}>
                         <span>{t._unplacedDetail}</span>

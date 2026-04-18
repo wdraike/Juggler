@@ -11,7 +11,7 @@ import { getTheme } from '../../theme/colors';
 import StatusToggle from '../schedule/StatusToggle';
 import { parseDate } from '../../scheduler/dateHelpers';
 
-function TaskCard({ task, status, onStatusChange, onExpand, darkMode, showDate, draggable, isBlocked, isMobile, allTasks, statuses, todayDate }) {
+function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, showDate, draggable, isBlocked, isMobile, allTasks, statuses, todayDate }) {
   var theme = getTheme(darkMode);
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = isTerminalStatus(status);
@@ -77,7 +77,7 @@ function TaskCard({ task, status, onStatusChange, onExpand, darkMode, showDate, 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
         {onStatusChange && (
           <span onClick={function(e) { e.stopPropagation(); }}>
-            <StatusToggle value={status} onChange={function(val) { onStatusChange(task.id, val); }} darkMode={darkMode} isMobile={isMobile} />
+            <StatusToggle value={status} onChange={function(val) { onStatusChange(task.id, val); }} onDelete={onDelete ? function() { onDelete(task.id); } : null} darkMode={darkMode} isMobile={isMobile} />
           </span>
         )}
         <div style={{ flex: 1 }} />

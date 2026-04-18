@@ -125,7 +125,7 @@ function computeLayout(placements, hourHeight, cardH, gap, colsPerSide, rightOnl
 }
 
 export default function CalendarGrid({
-  dateKey, placements, statuses, onStatusChange, onExpand,
+  dateKey, placements, statuses, onStatusChange, onDelete, onExpand,
   gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locations, onHourLocationOverride, blockedTaskIds,
   onZoomChange, isMobile, layoutMode, onMarkerDrag
 }) {
@@ -548,6 +548,7 @@ export default function CalendarGrid({
                     item={e.item}
                     status={statuses[e.item.task.id] || ''}
                     onStatusChange={function(val) { onStatusChange(e.item.task.id, val); }}
+                onDelete={onDelete ? function() { onDelete(e.item.task.id); } : null}
                     onExpand={function() { onExpand(e.item.task.id); }}
                     darkMode={darkMode}
                     isBlocked={blockedTaskIds && blockedTaskIds.has(e.item.task.id)}

@@ -9,7 +9,7 @@ import { DAY_NAMES } from '../../state/constants';
 import { formatDateKey, getWeekStart } from '../../scheduler/dateHelpers';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
-export default function WeekView({ selectedDate, dayPlacements, statuses, onStatusChange, onExpand, gridZoom, darkMode, schedCfg, nowMins, onGridDrop, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag }) {
+export default function WeekView({ selectedDate, dayPlacements, statuses, onStatusChange, onDelete, onExpand, gridZoom, darkMode, schedCfg, nowMins, onGridDrop, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag }) {
   var theme = getTheme(darkMode);
   var todayKey = formatDateKey(new Date());
   var weekStart = getWeekStart(selectedDate);
@@ -49,7 +49,7 @@ export default function WeekView({ selectedDate, dayPlacements, statuses, onStat
               placements={dayPlacements[d.key] || []}
               statuses={statuses}
 
-              onStatusChange={onStatusChange}
+              onStatusChange={onStatusChange} onDelete={onDelete}
               onExpand={onExpand}
               gridZoom={Math.max(gridZoom * 0.6, 30)}
               darkMode={darkMode}

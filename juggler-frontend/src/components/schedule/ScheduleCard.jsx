@@ -21,7 +21,7 @@ function formatStartTime(mins) {
   return h12 + (m > 0 ? ':' + (m < 10 ? '0' : '') + m : '') + ampm;
 }
 
-export default React.memo(function ScheduleCard({ item, status, onStatusChange, onExpand, darkMode, isBlocked, isMobile, layoutMode, cardHeight }) {
+export default React.memo(function ScheduleCard({ item, status, onStatusChange, onDelete, onExpand, darkMode, isBlocked, isMobile, layoutMode, cardHeight }) {
   var theme = getTheme(darkMode);
   var task = item.task;
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
@@ -141,7 +141,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
           </span>
         ) : (
           <>
-            {onStatusChange && <StatusToggle value={status} onChange={onStatusChange} darkMode={darkMode} isMobile={isMobile} />}
+            {onStatusChange && <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete} darkMode={darkMode} isMobile={isMobile} />}
             {startLabel && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted }}>{startLabel}</span>}
             <div style={{ flex: 1 }} />
             {typeBadges.length > 0 && (

@@ -8,7 +8,7 @@ import { getTheme } from '../../theme/colors';
 import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES } from '../../state/constants';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
-export default function DayView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onExpand, onCreate, gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locSchedules, onUpdateLocScheduleOverrides, onUpdateLocScheduleDefaults, allTasks, onBatchRecurringsDone, locations, onHourLocationOverride, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, filter, onZoomChange, isMobile, onMarkerDrag }) {
+export default function DayView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onDelete, onExpand, onCreate, gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locSchedules, onUpdateLocScheduleOverrides, onUpdateLocScheduleDefaults, allTasks, onBatchRecurringsDone, locations, onHourLocationOverride, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, filter, onZoomChange, isMobile, onMarkerDrag }) {
   var theme = getTheme(darkMode);
   var scrollRef = useRef(null);
   var loc = getLocationForDatePure(selectedDateKey, schedCfg);
@@ -175,7 +175,7 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
             placements={filteredPlacements}
             statuses={statuses}
 
-            onStatusChange={onStatusChange}
+            onStatusChange={onStatusChange} onDelete={onDelete}
             onExpand={onExpand}
             gridZoom={gridZoom}
             darkMode={darkMode}

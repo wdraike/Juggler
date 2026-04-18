@@ -1002,7 +1002,7 @@ export default function AppLayout() {
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
               placements={filteredDayPlacements[selectedDateKey] || []}
               statuses={statuses}
-              onStatusChange={handleStatusChange} onExpand={handleExpand}
+              onStatusChange={handleStatusChange} onDelete={deleteTask} onExpand={handleExpand}
               onCreate={handleCreate} gridZoom={config.gridZoom}
               darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
               onGridDrop={handleGridDrop}
@@ -1023,7 +1023,7 @@ export default function AppLayout() {
             <ThreeDayView
               selectedDate={selectedDate} dayPlacements={filteredDayPlacements}
               statuses={statuses}
-              onStatusChange={handleStatusChange} onExpand={handleExpand}
+              onStatusChange={handleStatusChange} onDelete={deleteTask} onExpand={handleExpand}
               gridZoom={config.gridZoom} darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins}
               onGridDrop={handleGridDrop} blockedTaskIds={blockedTaskIds}
               onZoomChange={handleZoomChange}
@@ -1035,7 +1035,7 @@ export default function AppLayout() {
             <WeekView
               selectedDate={selectedDate} dayPlacements={filteredDayPlacements}
               statuses={statuses}
-              onStatusChange={handleStatusChange} onExpand={handleExpand}
+              onStatusChange={handleStatusChange} onDelete={deleteTask} onExpand={handleExpand}
               gridZoom={config.gridZoom} darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins}
               onGridDrop={handleGridDrop} blockedTaskIds={blockedTaskIds}
               onZoomChange={handleZoomChange}
@@ -1048,7 +1048,7 @@ export default function AppLayout() {
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
               placements={filteredDayPlacements[selectedDateKey] || []}
               statuses={statuses}
-              onStatusChange={handleStatusChange} onExpand={handleExpand}
+              onStatusChange={handleStatusChange} onDelete={deleteTask} onExpand={handleExpand}
               onCreate={handleCreate} gridZoom={config.gridZoom}
               darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
               onGridDrop={handleGridDrop}
@@ -1067,7 +1067,7 @@ export default function AppLayout() {
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
               placements={filteredDayPlacements[selectedDateKey] || []}
               statuses={statuses}
-              onStatusChange={handleStatusChange} onExpand={handleExpand}
+              onStatusChange={handleStatusChange} onDelete={deleteTask} onExpand={handleExpand}
               darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
               blockedTaskIds={blockedTaskIds}
               locSchedules={config.locSchedules}

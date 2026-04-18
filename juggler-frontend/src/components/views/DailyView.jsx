@@ -375,24 +375,8 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
             {onStatusChange && (
               <span onClick={function (e) { e.stopPropagation(); }}>
-                <StatusToggle value={status} onChange={onStatusChange} darkMode={darkMode} compact />
+                <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete ? function() { onDelete(t.id); } : null} darkMode={darkMode} compact />
               </span>
-            )}
-            {onDelete && (
-              <button
-                onClick={function (e) { e.stopPropagation(); onDelete(t.id); }}
-                title="Delete"
-                style={{
-                  width: 16, height: 16, borderRadius: 4,
-                  border: '1px solid ' + (darkMode ? '#475569' : '#94A3B8'),
-                  cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 8, fontWeight: 700, padding: 0,
-                  background: darkMode ? '#1E293B' : '#F5F0E8',
-                  color: darkMode ? '#64748B' : '#6B7280',
-                  flexShrink: 0
-                }}
-              >{'\uD83D\uDDD1'}</button>
             )}
             <div style={{ flex: 1 }} />
             {locIcons.length > 0 && <span style={{ fontSize: 9 }}>{locIcons.join(' ')}</span>}
@@ -513,7 +497,7 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, theme, darkMode,
         {task.pri && <span style={{ fontSize: 8, fontWeight: 700, color: priColor, flexShrink: 0 }}>{task.pri}</span>}
         {onStatusChange && (
           <span onClick={function (e) { e.stopPropagation(); }}>
-            <StatusToggle value={status} onChange={onStatusChange} darkMode={darkMode} compact />
+            <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete ? function() { onDelete(t.id); } : null} darkMode={darkMode} compact />
           </span>
         )}
       </div>
