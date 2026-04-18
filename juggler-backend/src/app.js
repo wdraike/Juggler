@@ -43,14 +43,22 @@ app.use(compression({
   }
 }));
 
-const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000').split(',');
+// CORS. Allow configured FRONTEND_URL entries (trimmed, comma-split) +
+// any localhost/127.0.0.1/[::1] origin (dev loopback is never reachable
+// from outside the dev machine) + *.localdev.test + explicit
+// CORS_ALLOW_ANY_ORIGIN=true opt-in.
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+const LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i;
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      callback(null, false);
-    }
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) return callback(null, true);
+    if (LOOPBACK_ORIGIN.test(origin) || origin.includes('localdev')) return callback(null, true);
+    if (process.env.CORS_ALLOW_ANY_ORIGIN === 'true') return callback(null, true);
+    return callback(null, false);
   },
   credentials: true
 }));

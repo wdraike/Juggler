@@ -135,7 +135,7 @@ router.post('/debug', authenticateJWT, debugLimiter, async function(req, res) {
     });
   } catch (error) {
     console.error('Schedule debug error:', error);
-    res.status(500).json({ error: 'Failed to run debug scheduler: ' + error.message });
+    res.status(500).json({ error: 'Failed to run debug scheduler' });
   }
 });
 

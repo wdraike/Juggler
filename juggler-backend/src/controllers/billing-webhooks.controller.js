@@ -212,8 +212,8 @@ async function handleWebhook(req, res) {
 
     res.json({ success: true, event });
   } catch (error) {
-    console.error('[billing-webhook] Error:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('[billing-webhook] Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 }
 

@@ -1552,7 +1552,7 @@ async function audit(req, res) {
     res.json(report);
   } catch (error) {
     console.error('Cal audit error:', error);
-    res.status(500).json({ error: 'Failed to audit calendar sync', detail: error.message });
+    res.status(500).json({ error: 'Failed to audit calendar sync' });
   }
 }
 

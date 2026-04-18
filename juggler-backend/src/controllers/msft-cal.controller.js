@@ -127,8 +127,8 @@ async function callback(req, res) {
     var frontendUrl = require('../proxy-config').services.juggler.frontend;
     res.redirect(frontendUrl + '/?msftcal=connected');
   } catch (error) {
-    console.error('MsftCal callback error:', error.message || error);
-    res.status(500).send('Failed to complete Microsoft Calendar authorization: ' + (error.message || 'unknown error'));
+    console.error('MsftCal callback error:', error);
+    res.status(500).send('Failed to complete Microsoft Calendar authorization. Please try again.');
   }
 }
 

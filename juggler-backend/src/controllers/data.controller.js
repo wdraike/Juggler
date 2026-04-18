@@ -199,7 +199,7 @@ async function importData(req, res) {
     });
   } catch (error) {
     console.error('Import error:', error);
-    res.status(500).json({ error: 'Import failed', message: error.message });
+    res.status(500).json({ error: 'Import failed' });
   }
 }
 
