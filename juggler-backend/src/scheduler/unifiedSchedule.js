@@ -1749,11 +1749,12 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
 
   // Step 2i: Past-due overflow — tasks that couldn't fit within their (expired)
   // deadline window get placed ASAP with the deadline ceiling removed.
+  // Rule 1: One-off past-due tasks also get their when-constraint relaxed
+  // so they can fit in any available time window.
   for (var oi = 0; oi < allConstrained.length; oi++) {
     var oItem = allConstrained[oi];
     if (oItem.remaining <= 0 || oItem._parts.length > 0) continue;
     if (oItem._pastDueOverflow || oItem.task._pastDue) {
-      // Remove deadline ceiling so placeItemForward scans all future days
       var savedDL = oItem.deadline;
       oItem.deadline = null;
       oItem.fauxDeadline = null;
@@ -1761,6 +1762,11 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       oItem.task._pastDue = true;
       if (!oItem.task._originalDue && savedDL) {
         oItem.task._originalDue = formatDateKey(savedDL);
+      }
+      // For non-recurring past-due: relax when-constraint to any window
+      if (!oItem.task.recurring && oItem.task.when) {
+        oItem.task._originalWhen = oItem.task.when;
+        oItem.task.when = '';
       }
       placeItemForward(oItem);
     }

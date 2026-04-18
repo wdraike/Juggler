@@ -8,7 +8,7 @@
 These three principles resolve every ambiguity in the placement logic. When the algorithm has to make a choice, it works through them in order.
 
 1. **Deadlines drive the schedule; priority is a tie-breaker.** A P3 task due Thursday beats a P1 task with no deadline — the deadline is what gives the work urgency. Priority only decides the outcome when deadlines are equivalent (or both absent).
-2. **Past-due tasks are treated as due today AND promoted to P1 for tie-breaking.** "It needed to be done yesterday" is the strongest urgency signal. Classification folds past-due into due-today; the priority boost ensures they win tie-breaks on today's slots.
+2. **Past-due tasks are promoted to P1 and rescheduled aggressively.** One-off tasks get P1 boost and place in any available window. Recurring tasks try to fit within their recurrence window before the next occurrence; if they can't, they go to the issues log. Split tasks place what fits and log the rest. See §8 for full rules.
 3. **Overlaps are prevented, not resolved.** The occupancy grid blocks already-placed minutes. Each phase places around what previous phases committed. Pinned tasks are placed first (Phase 0) and all subsequent phases respect their slots.
 
 ---
@@ -107,7 +107,20 @@ Split chunks stay as separate DB rows. Adjacent chunks of the same task are visu
   - **Removed** — IDs of deleted rows
 - Frontend merges these into in-memory state; calendar re-renders without re-fetching
 
-### 8. Guard rails — what blocks placement
+### 8. Past-due handling — what happens when time passes
+
+Three rules govern incomplete tasks whose scheduled time has passed:
+
+**Rule 1: One-off past-due tasks → P1 boost, reschedule in any window, flag as past-due.**
+The task's priority is boosted to P1 and the scheduler places it in whatever time windows have capacity — not limited to its original `when` constraint. The task is marked `_pastDue` for visual indication on the calendar and added to the issues log.
+
+**Rule 2: Recurring past-due instances → reschedule within recurrence window, or remove.**
+If the missed instance can be rescheduled before the next occurrence (e.g., a weekly task missed on Monday can place Tue–Sun), do so. If it can't fit before the next occurrence, mark it as `_pastDue`, remove it from the calendar, and add it to the issues log. The next occurrence starts fresh.
+
+**Rule 3: Split tasks past-due → schedule what fits, unschedule the rest.**
+Place as many chunks as capacity allows. Chunks that can't fit are added to the unplaced/issues log with a `partial_split` reason. The user sees which chunks were placed and which weren't.
+
+### 9. Guard rails — what blocks placement
 - No free slot in any allowed when-window → unscheduled
 - Day-of-week / day-of-month restriction doesn't match any candidate day → unscheduled
 - Dependencies not yet placed → task waits; next scheduler run retries
