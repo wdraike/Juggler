@@ -9,7 +9,7 @@ These three principles resolve every ambiguity in the placement logic. When the 
 
 1. **Deadlines drive the schedule; priority is a tie-breaker.** A P3 task due Thursday beats a P1 task with no deadline — the deadline is what gives the work urgency. Priority only decides the outcome when deadlines are equivalent (or both absent).
 2. **Past-due tasks are treated as due today AND promoted to P1 for tie-breaking.** "It needed to be done yesterday" is the strongest urgency signal. Classification folds past-due into due-today; the priority boost ensures they win tie-breaks on today's slots.
-3. **Pinned items get dropped first during pile-up resolution.** Pinned work is user-anchored, but when the scheduler is resolving a pile-up it treats pinned tasks as the most expendable — the user can re-pin them if they still matter.
+3. **Overlaps are prevented, not resolved.** The occupancy grid blocks already-placed minutes. Each phase places around what previous phases committed. Pinned tasks are placed first (Phase 0) and all subsequent phases respect their slots.
 
 ---
 
@@ -27,9 +27,8 @@ These three principles resolve every ambiguity in the placement logic. When the 
 - If a recurring task has split enabled (e.g., 60 min ÷ 30 min chunks = 2), materialize one row per chunk per occurrence (via `reconcile-splits.js`)
 
 ### 3. Classify each task by how it can move
-- **Fixed** — user locked to a specific time (`when` includes `'fixed'`). Never moved
+- **Pinned** — user set `date_pinned=1` with a specific time. Never moved by the scheduler. Calendar-synced tasks are also pinned.
 - **Markers** — reminders at a time that don't occupy a slot. Never moved
-- **Pinned** — user set `date_pinned=1` with a specific `scheduled_at`. Never moved by the scheduler (though first to evict during pile-up cleanup)
 - **Recurring instances** — see 4b for per-frequency placement rules
 - **Deadline tasks** — anything with `due_at`. Past-due (due_at < today) is promoted here: `due_at` is remapped to today and priority is bumped to P1 for tie-breaking
   - A task is a **chain member** if it has `due_at` *or* any task transitively depending on it has `due_at`
@@ -38,19 +37,20 @@ These three principles resolve every ambiguity in the placement logic. When the 
 
 ### 4. Placement phase — figure out when each task goes
 
-> **Implementation note:** in code (`src/scheduler/unifiedSchedule.js`), these four
-> sub-phases are called Phase 0 / Phase 1 / Phase 2 / Phase 3+4. The mapping is:
-> 4a → Phase 0 (immovables), 4b → Phase 1 (recurring), 4c → Phase 2
-> (deadline work — reserve + forward-pull), 4d → Phase 3 (priority)
-> + Phase 4 (flexWhen relaxation). Section **4e** below documents Phase 5
-> (recurring rescue), which the earlier outline omitted.
+> **Implementation note:** in code (`src/scheduler/unifiedSchedule.js`), these
+> sub-phases are called Phase 0 / Phase 1 / Phase 2 / Phase 3+4 / Phase 5:
+> 4a → Phase 0 (pinned + markers), 4b → Phase 1 (recurring, slack-sorted),
+> 4c → Phase 2 (deadline work — slack-based forward placement),
+> 4d → Phase 3 (priority fill) + Phase 4 (flexWhen relaxation),
+> 4e → Phase 5 (recurring rescue).
 
 #### 4a. Immovable first  *(Phase 0)*
-- Fixed tasks at their locked times
+- Pinned tasks (`datePinned` + has time) at their locked times
 - Markers at their times (no occupancy)
-- Pinned tasks at their pinned times
 
-#### 4b. Recurring instances by frequency  *(Phase 1)*
+#### 4b. Recurring instances — constrained-first  *(Phase 1)*
+All recurring instances are sorted by **slack** (available capacity in cycle window minus duration) across ALL priority tiers, with priority as tiebreaker. This ensures narrow-window tasks (e.g., "morning" only) place before wide-window tasks (e.g., "anytime"), regardless of priority — the anytime task can go later in the day, the morning task can't.
+
 Each recurrence type has a different "valid days" rule. Within valid days, pick the best slot inside the task's `when` window (morning / lunch / afternoon / evening / night).
 
 | Frequency | Valid days | Time flexibility |
@@ -81,28 +81,23 @@ After Phase 4, look for recurring instances whose template requires placement to
 
 This is the last-chance pass before cleanup. Without it, a user who over-books a day loses their daily habit entirely instead of getting a "best effort" landing.
 
-### 5. Cleanup
+### 5. Overlap prevention
 
-#### 5a. Merge adjacent same-task chunks
-If two chunks of one split task landed back-to-back on the same day, fold them into a single longer block; delete the sibling row. Idempotent — reconcile re-splits and re-merges on the next run.
+The scheduler prevents overlaps during placement — the occupancy grid (`dayOcc`) blocks already-occupied minutes. There is no post-placement pile-up resolution. Each phase respects what previous phases placed:
 
-#### 5b. Resolve pile-ups by eviction order
-When multiple tasks overlap on a slot that can't fit them all:
+- Phase 0 locks pinned/marker slots
+- Phase 1 recurring fills around Phase 0
+- Phase 2 deadline tasks fill around Phase 0+1
+- Phase 3 free tasks fill remaining gaps
+- Phase 4/5 relaxation and rescue respect all prior placements
 
-1. **Pinned tasks first** — principle #3. User can re-pin if it still matters
-2. **Lowest effective priority next** — effective = own priority, with past-due bumped to P1 per principle #2
-3. **Longest-duration first among tied priorities** — the larger task is "more expensive" to reshuffle, so if we're going to evict let it be the one that frees more space
-4. **Deterministic `id` tie-break** for repeatability
-
-Evicted tasks:
-- Get `unscheduled=1`
-- Keep their last proposed `scheduled_at` so the UI can render "was supposed to be at…"
-- Carry a past-due badge if applicable
+Split chunks stay as separate DB rows. Adjacent chunks of the same task are visually collapsed in the frontend but remain independent in the database for correct scheduling and status tracking.
 
 ### 6. Persist
-- Batch-update every placed task's `scheduled_at` and `duration`
+- Batch-update every placed task's `scheduled_at`, `date`, `day`, `time`, and `dur`
 - Clear `date_pinned` on any task the scheduler placed (the scheduler moved it, so the old pin is stale)
-- Set `unscheduled=1` on evicted tasks
+- Set `unscheduled=1` on unplaced tasks (preserves `scheduled_at` for "was supposed to be at…" display)
+- INSERT new in-memory chunks that were placed (with full date/day/time fields)
 - All inside a single transaction per user
 
 ### 7. Notify
