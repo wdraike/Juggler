@@ -446,7 +446,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
 }
 
 /* ── Unscheduled task entry ── */
-function UnschedEntry({ task, status, onExpand, onStatusChange, theme, darkMode, isMobile, canDrag }) {
+function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme, darkMode, isMobile, canDrag }) {
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
   var [show, setShow] = useState(false);
@@ -497,7 +497,7 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, theme, darkMode,
         {task.pri && <span style={{ fontSize: 8, fontWeight: 700, color: priColor, flexShrink: 0 }}>{task.pri}</span>}
         {onStatusChange && (
           <span onClick={function (e) { e.stopPropagation(); }}>
-            <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete ? function() { onDelete(t.id); } : null} darkMode={darkMode} compact />
+            <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete ? function() { onDelete(task.id); } : null} darkMode={darkMode} compact />
           </span>
         )}
       </div>
@@ -1094,6 +1094,7 @@ export default function DailyView({
                     status={statuses[t.id] || ''}
                     onExpand={onExpand}
                     onStatusChange={onStatusChange ? function (val) { onStatusChange(t.id, val); } : null}
+                    onDelete={onDelete}
                     theme={theme}
                     darkMode={darkMode}
                     isMobile={isMobile}
