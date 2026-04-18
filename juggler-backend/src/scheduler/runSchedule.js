@@ -710,68 +710,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (movedPast > 0) console.log('[SCHED] moved/skipped ' + movedPast + ' past-dated tasks');
   }
 
-  // 9b. Merge-back pass — fold same-master chunks that landed back-to-back on
-  // a day into a single row. The survivor's dur grows; the sibling row is
-  // deleted from the DB. Reconcile next run will re-split and re-place; if
-  // the chunks land adjacent again, they re-merge — idempotent end state.
-  // Skip done/cancel/skip rows: only reshape pending placements.
-  if (pendingUpdates.length > 0) {
-    var byPlacement = {}; // key: pendingUpdate index → metadata
-    var groupedByDayMaster = {}; // key: dateKey + '|' + masterId → [updateIndices]
-    pendingUpdates.forEach(function(pu, idx) {
-      var sa = pu.dbUpdate.scheduled_at;
-      if (!sa) return; // unscheduled or unrelated update — skip
-      var orig = taskById[pu.id];
-      if (!orig || orig.taskType !== 'recurring_instance' || !orig.sourceId) return;
-      if (orig.status && orig.status !== '') return;
-      // Derive local date + start minute from scheduled_at
-      var saDate = sa instanceof Date ? sa : new Date(sa);
-      var local = utcToLocal(saDate, TIMEZONE);
-      if (!local || !local.date) return;
-      var startMin = parseTimeToMinutes(local.time);
-      if (startMin == null) return;
-      var dur = Number(pu.dbUpdate.dur || orig.dur || 30);
-      byPlacement[idx] = { dateKey: local.date, sourceId: orig.sourceId, startMin: startMin, dur: dur };
-      var key = local.date + '|' + orig.sourceId;
-      if (!groupedByDayMaster[key]) groupedByDayMaster[key] = [];
-      groupedByDayMaster[key].push(idx);
-    });
-
-    var mergeDeleteIds = [];
-    var dropFromPending = {};
-    var mergedCount = 0;
-    Object.keys(groupedByDayMaster).forEach(function(key) {
-      var indices = groupedByDayMaster[key];
-      if (indices.length < 2) return;
-      // Sort by start time
-      indices.sort(function(a, b) { return byPlacement[a].startMin - byPlacement[b].startMin; });
-      // Walk pairs, fold adjacent into the survivor
-      var survivorIdx = indices[0];
-      for (var i = 1; i < indices.length; i++) {
-        var nextIdx = indices[i];
-        var sMeta = byPlacement[survivorIdx];
-        var nMeta = byPlacement[nextIdx];
-        // Adjacent if survivor's end == next's start (within 1 min tolerance)
-        if (Math.abs((sMeta.startMin + sMeta.dur) - nMeta.startMin) <= 1) {
-          // Fold: extend survivor's dur, mark next for delete
-          sMeta.dur += nMeta.dur;
-          pendingUpdates[survivorIdx].dbUpdate.dur = sMeta.dur;
-          mergeDeleteIds.push(pendingUpdates[nextIdx].id);
-          dropFromPending[nextIdx] = true;
-          mergedCount++;
-        } else {
-          // Not adjacent — start a new survivor for the next chunk
-          survivorIdx = nextIdx;
-        }
-      }
-    });
-
-    if (mergeDeleteIds.length > 0) {
-      pendingUpdates = pendingUpdates.filter(function(_, idx) { return !dropFromPending[idx]; });
-      await trx('task_instances').whereIn('id', mergeDeleteIds).del();
-      console.log('[SCHED] merge-back: folded ' + mergedCount + ' adjacent chunk(s); deleted ' + mergeDeleteIds.length + ' sibling row(s)');
-    }
-  }
+  // Merge-back removed — adjacent split chunks stay as separate DB rows.
+  // Visual collapsing is handled in the frontend (DailyView). Backend merge
+  // was counterproductive: it folded 8x30m chunks into one 240m block,
+  // defeating the purpose of splitting for flexible intra-day placement.
 
   // INSERT in-memory chunks that got placed (they don't exist in the DB yet).
   // Separate them from pendingUpdates since they need INSERT, not UPDATE.
