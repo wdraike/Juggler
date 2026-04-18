@@ -278,27 +278,44 @@ export default function useTaskState() {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
 
     var cascade = opts && opts.cascade;
+    var idsToRemove = [id];
     if (cascade === 'recurring') {
       // Cascade recurring delete: remove template + pending instances from state
       var state = taskStateRef.current;
       var task = state.tasks.find(function(t) { return t.id === id; });
       var templateId = (task && (task.sourceId || task.source_id)) || id;
-      // Remove template and all its instances from local state
+      idsToRemove = [];
       state.tasks.forEach(function(t) {
         if (t.id === templateId || t.sourceId === templateId || t.source_id === templateId) {
           dispatch({ type: 'DELETE_TASK', id: t.id });
+          idsToRemove.push(t.id);
         }
       });
     } else {
       dispatch({ type: 'DELETE_TASK', id });
     }
 
+    // Optimistically remove from calendar placements so the card disappears immediately
+    var removeSet = {};
+    idsToRemove.forEach(function(rid) { removeSet[rid] = true; });
+    setPlacements(function(prev) {
+      var changed = false;
+      var newDayPlacements = {};
+      Object.keys(prev.dayPlacements).forEach(function(dk) {
+        var filtered = prev.dayPlacements[dk].filter(function(p) {
+          if (p.task && removeSet[p.task.id]) { changed = true; return false; }
+          return true;
+        });
+        newDayPlacements[dk] = filtered;
+      });
+      if (!changed) return prev;
+      return Object.assign({}, prev, { dayPlacements: newDayPlacements });
+    });
+
     try {
       var url = cascade ? `/tasks/${id}?cascade=${cascade}` : `/tasks/${id}`;
       await apiClient.delete(url);
-      // Schedule a save so the cleaned-up dependsOn arrays get persisted
       scheduleSave();
-      // Placements refresh via SSE schedule:changed
     } catch (error) {
       console.error('Failed to delete task:', error);
     }
