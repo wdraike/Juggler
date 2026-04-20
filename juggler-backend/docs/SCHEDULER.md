@@ -3,12 +3,30 @@
 ## Status
 **Current design.** Single source of truth for the scheduler placement algorithm and its test coverage. Consolidates the earlier `SCHEDULER-PRIORITY-REDESIGN.md`, `SCHEDULER-DEPENDENCY-REDESIGN.md`, and `SCHEDULER-TEST-CASES.md` drafts.
 
-## Guiding principles
+## Core principle
 
-These three principles resolve every ambiguity in the placement logic. When the algorithm has to make a choice, it works through them in order.
+**Tasks are scheduled in order most-to-least constrained. Tasks with no deadlines are placed last.**
 
-1. **Deadlines drive the schedule; priority is a tie-breaker.** A P3 task due Thursday beats a P1 task with no deadline — the deadline is what gives the work urgency. Priority only decides the outcome when deadlines are equivalent (or both absent).
-2. **Past-due tasks are promoted to P1 and rescheduled aggressively.** One-off tasks get P1 boost and place in any available window. Recurring tasks try to fit within their recurrence window before the next occurrence; if they can't, they go to the issues log. Split tasks place what fits and log the rest. See §8 for full rules.
+This is the unifying rule. Everything else (phase order, comparators, past-due boosts, rollback) exists to serve it.
+
+### Severity hierarchy (most → least constrained)
+1. **Pinned** — user locked to a specific date/time. Immovable.
+2. **Overdue** — past its deadline (or past its scheduled day for rigid recurrings). Must place ASAP; slack=0.
+3. **Explicit or implied deadline** — one-offs with `deadline`, chain members with `fauxDeadline`, recurring instances (cycle window's end = implied deadline). Sorted by slack within this band.
+4. **Free / backlog** — no deadline, no deps. Fills what's left.
+
+## Task-type terminology
+- **One-off** = a single task that is **non-recurring** AND has **no dependencies**. A one-off *may* carry an explicit `deadline`.
+- **Chain member** = non-recurring task with dependencies (or depended-on-by a deadline task). A chain tail has its own `deadline`; predecessors inherit a `fauxDeadline` propagated backward.
+- **Recurring instance** = expanded from a recurring template. **Always carries an implied deadline = the end of its cycle window** (the moment the next occurrence begins). An instance must finish before its next sibling starts — no overlap across occurrences.
+- **Split chunk** = one of N pieces a task was divided into during preprocessing. Durations sum to the original task's duration. Each chunk **inherits the original's priority, start time, and deadline** — the scheduler treats each chunk as a one-off task carrying the original's constraints, and the chunks compete individually in the severity order.
+
+## Secondary principles
+
+These resolve remaining ambiguity when the severity hierarchy alone isn't decisive.
+
+1. **Deadlines drive the schedule; priority is a tie-breaker.** A P3 task due Thursday beats a P1 task with no deadline. Priority only decides the outcome when deadlines (or slack) are equivalent.
+2. **Past-due tasks are promoted to P1 and rescheduled aggressively.** One-off past-due tasks get P1 boost and place in any available window. **Recurring past-due instances do NOT roll forward to the next day** — if they can't fit their original day, they go to the unscheduled/issues list and the user must mark them done or skipped. Split tasks place what fits and log the rest. See §8 for full rules.
 3. **Overlaps are prevented, not resolved.** The occupancy grid blocks already-placed minutes. Each phase places around what previous phases committed. Pinned tasks are placed first (Phase 0) and all subsequent phases respect their slots.
 
 ---
@@ -23,7 +41,7 @@ These three principles resolve every ambiguity in the placement logic. When the 
 
 ### 2. Load phase — gather what we're working with
 - Load every task the user owns (via `tasks_v` view)
-- For each recurring task, expand into one row per upcoming occurrence within the next 56 days
+- For each recurring task, expand into one row per upcoming occurrence within `RECUR_EXPAND_DAYS` (currently 14 days; see `src/scheduler/constants.js`). Existing pending instances dated beyond the horizon are grandfathered — `toDeleteIds` in `runSchedule.js` preserves them so a horizon shrink doesn't wipe legitimate rows.
 - If a recurring task has split enabled (e.g., 60 min ÷ 30 min chunks = 2), materialize one row per chunk per occurrence (via `reconcile-splits.js`)
 
 ### 3. Classify each task by how it can move
@@ -74,12 +92,12 @@ See **"Deep-dive: 4c"** below for the slack computation, sort order, and forward
 - **Phase 4** — retry any task that came in with `flexWhen=true` and didn't place in Phase 3, relaxing its `when` to `anytime`. Lets flexible tasks spill into non-preferred windows when capacity is tight.
 
 #### 4e. Recurring rescue  *(Phase 5)*
-After Phase 4, look for recurring instances whose template requires placement today (or within the recur window) but which didn't land in Phase 1. For each unplaced recurring:
+After Phase 4, look for recurring instances that didn't land in Phase 1. For each unplaced recurring, on its **assigned day only**:
 - Try any remaining gap in the valid window, ignoring the `when` preference
-- Try the next valid day if today has no capacity
-- Mark `unscheduled=1` with a `missedRecurring` reason if nothing works
+- Try bumping a lower-priority non-recurring task off that day to free up capacity, then re-place the bumped task elsewhere. If the bump can't be accommodated, revert.
+- If the recurring still can't fit **on its assigned day**, mark `unscheduled=1` with a `missedRecurring` reason.
 
-This is the last-chance pass before cleanup. Without it, a user who over-books a day loses their daily habit entirely instead of getting a "best effort" landing.
+**Recurrings do NOT roll forward.** A daily task that missed Monday is not attempted on Tuesday — it's left unscheduled for the user to mark done or skipped. This is by design: rolling a missed recurring into the next day double-books the user and silently erodes habit cadence.
 
 ### 5. Overlap prevention
 
@@ -114,8 +132,10 @@ Three rules govern incomplete tasks whose scheduled time has passed:
 **Rule 1: One-off past-due tasks → P1 boost, reschedule within existing constraints, flag as past-due.**
 The task's priority is boosted to P1 and the scheduler tries to place it in its original `when` and `where` windows. If it can't fit, it goes to the issues log — the user decides whether to relax the constraints. The task is marked `_pastDue` for visual indication.
 
-**Rule 2: Recurring past-due instances → reschedule within recurrence window, or remove.**
-If the missed instance can be rescheduled before the next occurrence (e.g., a weekly task missed on Monday can place Tue–Sun), do so. If it can't fit before the next occurrence, mark it as `_pastDue`, remove it from the calendar, and add it to the issues log. The next occurrence starts fresh.
+**Rule 2: Recurring past-due instances → unscheduled, no roll-forward.**
+A recurring instance that missed its assigned day is NOT rolled forward to a later day in the cycle window. It goes to the unscheduled/issues list with a `_pastDue` flag, and the user must mark it done or skipped to clear it. The next occurrence starts fresh on its own day. Rationale: rolling recurrings forward double-books the user and silently erodes habit cadence.
+
+Exception — tpc-flexible recurrings: a `timesPerCycle` template whose count is less than its allowed-days count can slide within the cycle window by design. These are flex-day templates (e.g. "3× per week on M/T/W/Th/F"), not rigid daily tasks.
 
 **Rule 3: Split tasks past-due → schedule what fits, unschedule the rest.**
 Place as many chunks as capacity allows. Chunks that can't fit are added to the unplaced/issues log with a `partial_split` reason. The user sees which chunks were placed and which weren't.
@@ -285,7 +305,7 @@ Tests that prove each guiding principle is honored:
 ### Principle 1 — deadlines drive, priority tie-breaks
 - **Test:** P3 task due Thursday vs P1 task with no deadline. Today has one slot. Expected: P3 (deadline) wins, P1 (no deadline) goes to tomorrow.
 - **Test:** Two P2 tasks, both due Friday. Expected: longer-duration task gets first pick of the latest Friday slot; shorter task follows.
-- **Test:** Two P2 tasks, no deadlines. Expected: longer-duration first within the priority tier; same priority = duration tie-breaks.
+- **Test:** Two P2 tasks, no deadlines. Expected: narrower when-window first within the priority tier (code uses when-width as the Phase 3 tie-break, not duration — see PDS-3 note).
 
 ### Principle 2 — past-due = due today + P1
 - **Test:** Task due yesterday, own priority P3. Today has a slot contested with on-time P1 task also due today. Expected: both are effective-P1-due-today; longer-duration wins.
@@ -374,9 +394,7 @@ This section catalogs every use case the scheduler must handle correctly. Each c
 |----|------|----------|------|
 | UC-4.1 | P1, P2, P3 tasks — no deadlines — sufficient capacity | All placed, P1 earliest, P3 latest | [UNIT] |
 | UC-4.2 | P3 task with deadline today vs P1 task no deadline | P3 deadline placed first (deadline governs) | [UNIT] |
-| UC-4.3 | Today nearly full — P3/P4 tasks without deadlines | Deferred to tomorrow (today reserved for P1/P2) | [UNIT] |
-| UC-4.4 | todayReserved threshold boundary — exactly 60% capacity demand | P3/P4 just barely deferred | [UNIT] |
-| UC-4.5 | All same priority — placement order stable | Deterministic (by constraint narrowness) | [UNIT] |
+| UC-4.3 | All same priority — placement order stable | Deterministic (by constraint narrowness) | [UNIT] |
 
 ## 5. Dependency Chains
 
@@ -570,7 +588,7 @@ These encode the three guiding principles at the top of this doc (deadlines over
 |----|----------|----------|
 | PDS-1 | P3 task due Thursday vs P1 task with no deadline. One slot free today. | P3 wins today (deadline → lower slack → placed first). P1 placed on next available day. |
 | PDS-2 | Two P2 tasks, both due Friday, different durations. | Longer-duration task placed first (priority tied → duration tie-breaks in slack sort). |
-| PDS-3 | Two P2 tasks, neither with a deadline. | Within P2 tier in Phase 3, longer-duration first. |
+| PDS-3 | Two P2 tasks, neither with a deadline. | Within P2 tier in Phase 3, narrower when-window first (code: `unifiedSchedule.js:1799-1804`). **Note: an earlier version of this table said "longer-duration first"; the code uses when-width. If duration-tie is desired, add a duration-desc step to the Phase 3 comparator.** |
 | PDS-4 | P1 task due in 56 days vs P4 task due tomorrow. | P4 has lower slack → placed first. P1's distant deadline means high slack → placed later. Neither starves the other. |
 
 ### Principle 2 — past-due tasks = slack 0 + P1

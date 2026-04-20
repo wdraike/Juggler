@@ -203,6 +203,49 @@ describe('expandRecurring', () => {
     });
   });
 
+  describe('timesPerCycle with future-only existing instances', () => {
+    // Repro: brand-new template, but prior scheduler runs persisted instances
+    // only in cycles 2 and 3. Cycle 1 (today) has no existing instance. The
+    // algorithm should still pick cycle 1's anchor (cycleStart = today), not
+    // project idealDate forward from the max-existing-date into the future.
+    test('cycle 1 picks cycleStart when no earlier placement exists', () => {
+      // 2026-04-19 is a Sunday. 14-day window → cycles start 4/19, 4/26, 5/3.
+      const src = {
+        id: 'swuc',
+        text: 'Submit Weekly UI Claim',
+        taskType: 'recurring_template',
+        date: '4/19',
+        dur: 30,
+        pri: 'P1',
+        recurring: true,
+        recur: { type: 'weekly', days: 'MWRFUT', timesPerCycle: 1 },
+        recurStart: '2026-04-19',
+        dayReq: 'any'
+      };
+      // Seed existing instances at 4/26 and 5/3 (the two later cycles).
+      const existingAt426 = {
+        id: 'swuc-20', sourceId: 'swuc', taskType: 'recurring_instance',
+        date: '4/26', text: 'Submit Weekly UI Claim'
+      };
+      const existingAt53 = {
+        id: 'swuc-21', sourceId: 'swuc', taskType: 'recurring_instance',
+        date: '5/3', text: 'Submit Weekly UI Claim'
+      };
+      const result = expandRecurring(
+        [src, existingAt426, existingAt53],
+        new Date(2026, 3, 19), // 4/19
+        new Date(2026, 4, 3)   // 5/3
+      );
+      const ours = result.filter(r => r.sourceId === 'swuc');
+      const dates = ours.map(r => r._candidateDate || r.date);
+      // Cycle 1 should produce an instance on 4/19 (today), not 4/24.
+      // Cycles 2 and 3 are already filled by existing rows → no new picks.
+      expect(dates).toContain('4/19');
+      expect(dates).not.toContain('4/24');
+      expect(ours).toHaveLength(1);
+    });
+  });
+
   describe('edge cases', () => {
     test('tasks without recur return empty', () => {
       const tasks = [{ id: 't1', text: 'Normal task', date: '3/20' }];

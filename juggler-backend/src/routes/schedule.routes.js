@@ -6,8 +6,10 @@ var express = require('express');
 var rateLimit = require('express-rate-limit');
 var router = express.Router();
 var { authenticateJWT } = require('../middleware/jwt-auth');
+var authenticateAdmin = require('../middleware/authenticateAdmin');
 var { runScheduleAndPersist, getSchedulePlacements } = require('../scheduler/runSchedule');
 var { withSyncLock } = require('../lib/sync-lock');
+var schedulerSession = require('../scheduler/schedulerSession');
 
 // Rate limit scheduler endpoints — expensive operations
 var schedulerLimiter = rateLimit({
@@ -58,7 +60,7 @@ router.get('/placements', authenticateJWT, async function(req, res) {
  * POST /api/schedule/debug — run scheduler in debug mode, return phase snapshots
  * Admin-only: hidden endpoint for visualizing the scheduler's decision process
  */
-router.post('/debug', authenticateJWT, debugLimiter, async function(req, res) {
+router.post('/debug', authenticateJWT, authenticateAdmin, debugLimiter, async function(req, res) {
   try {
     var unifiedSchedule = require('../scheduler/unifiedSchedule');
     var db = require('../db');
@@ -137,6 +139,59 @@ router.post('/debug', authenticateJWT, debugLimiter, async function(req, res) {
     console.error('Schedule debug error:', error);
     res.status(500).json({ error: 'Failed to run debug scheduler' });
   }
+});
+
+// ── Admin Stepper endpoints ──────────────────────────────────────────
+// Dry-run visualization: runs unifiedSchedule with a step recorder,
+// stores snapshots per session, serves them one-at-a-time to the admin
+// UI. Never persists placements. See schedulerSession.js.
+
+var stepperLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  keyGenerator: function(req) { return req.user ? req.user.id : 'anon'; },
+  message: { error: 'Too many stepper requests. Try again in a minute.' },
+  validate: false
+});
+
+router.post('/step/start', authenticateJWT, authenticateAdmin, stepperLimiter, async function(req, res) {
+  try {
+    var tz = req.headers['x-timezone'] || 'America/New_York';
+    var info = await schedulerSession.startSession(req.user.id, { timezone: tz });
+    res.json(info);
+  } catch (err) {
+    console.error('stepper start error:', err);
+    res.status(500).json({ error: 'Failed to start stepper session' });
+  }
+});
+
+// NB: declare /summary before the /:stepIndex pattern so the literal route
+// wins. Express matches in declaration order; a numeric-looking stepIndex
+// route would otherwise capture "summary".
+router.get('/step/:sessionId/summary', authenticateJWT, authenticateAdmin, function(req, res) {
+  var sessionId = req.params.sessionId;
+  var s = schedulerSession.getSession(sessionId);
+  if (!s || s.userId !== req.user.id) return res.status(404).json({ error: 'Session not found' });
+  res.json(schedulerSession.getSummary(sessionId));
+});
+
+router.get('/step/:sessionId/:stepIndex', authenticateJWT, authenticateAdmin, function(req, res) {
+  var sessionId = req.params.sessionId;
+  var idx = parseInt(req.params.stepIndex, 10);
+  if (Number.isNaN(idx)) return res.status(400).json({ error: 'stepIndex must be an integer' });
+  var s = schedulerSession.getSession(sessionId);
+  if (!s || s.userId !== req.user.id) return res.status(404).json({ error: 'Session not found' });
+  var step = schedulerSession.getStep(sessionId, idx);
+  if (!step) return res.status(404).json({ error: 'Step out of range' });
+  res.json(step);
+});
+
+router.post('/step/:sessionId/stop', authenticateJWT, authenticateAdmin, function(req, res) {
+  var sessionId = req.params.sessionId;
+  var s = schedulerSession.getSession(sessionId);
+  if (s && s.userId !== req.user.id) return res.status(403).json({ error: 'Not your session' });
+  schedulerSession.stopSession(sessionId);
+  res.json({ ok: true });
 });
 
 module.exports = router;

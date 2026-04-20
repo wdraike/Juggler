@@ -132,13 +132,21 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
       c.setDate(c.getDate() + 1);
     }
 
-    // 2. Find the last existing instance date (from DB) as the starting reference
+    // 2. Find the last existing instance date BEFORE the expansion window as
+    // the starting reference. Existing placements INSIDE the window are
+    // already accounted for by the per-cycle existingBySourceDate filter and
+    // slotsNeeded math; using them here would warp cycle 1's idealDate (e.g.,
+    // a placement at week+2 would push cycle 1's ideal into the future and
+    // cause the closest-candidate pick to land at the end of cycle 1 instead
+    // of its natural anchor).
+    var windowStart = new Date(startDate); windowStart.setHours(0, 0, 0, 0);
     var lastPlaced = null;
     allTasks.forEach(function(t) {
       if (t.sourceId !== src.id) return;
       if (t.taskType !== 'recurring_instance' && !t.generated) return;
       var d = parseDate(t.date);
       if (!d) return;
+      if (d >= windowStart) return;
       if (!lastPlaced || d > lastPlaced) lastPlaced = d;
     });
 

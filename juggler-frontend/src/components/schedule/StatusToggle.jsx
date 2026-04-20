@@ -14,35 +14,23 @@ var ALL_STATUSES = [
   { value: 'pause',  icon: '\u23F8', label: 'Pause',  activeBg: '#E0E7FF', activeBgDark: '#1E1B4B', color: '#4338CA', colorDark: '#A5B4FC' },
 ];
 
-function DeleteButton({ onDelete, size, fontSize, darkMode, compact, isMobile }) {
-  var [confirming, setConfirming] = React.useState(false);
-  React.useEffect(function() {
-    if (!confirming) return;
-    var timer = setTimeout(function() { setConfirming(false); }, 3000);
-    return function() { clearTimeout(timer); };
-  }, [confirming]);
+function DeleteButton({ onDelete, size, fontSize, darkMode }) {
   return (
     <button
-      onClick={function(e) {
-        e.stopPropagation();
-        if (confirming) { onDelete(); setConfirming(false); }
-        else { setConfirming(true); }
-      }}
-      title={confirming ? 'Click again to confirm delete' : 'Delete'}
+      onClick={function(e) { e.stopPropagation(); onDelete(); }}
+      title="Delete"
       style={{
-        width: confirming ? (compact ? 36 : (isMobile ? 56 : 44)) : size,
-        height: size, borderRadius: 4,
-        border: '1px solid ' + (confirming ? (darkMode ? '#FCA5A5' : '#8B2635') : (darkMode ? '#475569' : '#94A3B8')),
+        width: size, height: size, borderRadius: 4,
+        border: '1px solid ' + (darkMode ? '#475569' : '#94A3B8'),
         cursor: 'pointer',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: confirming ? (compact ? 7 : (isMobile ? 10 : 9)) : fontSize,
-        fontWeight: 700, padding: 0,
-        background: confirming ? (darkMode ? '#3A0A10' : '#FEE2E2') : (darkMode ? '#1E293B' : '#F5F0E8'),
-        color: confirming ? (darkMode ? '#FCA5A5' : '#8B2635') : (darkMode ? '#64748B' : '#6B7280'),
+        fontSize: fontSize, fontWeight: 700, padding: 0,
+        background: darkMode ? '#1E293B' : '#F5F0E8',
+        color: darkMode ? '#64748B' : '#6B7280',
         transition: 'all 0.15s',
         flexShrink: 0
       }}
-    >{confirming ? 'Delete?' : '\uD83D\uDDD1'}</button>
+    >{'\uD83D\uDDD1'}</button>
   );
 }
 

@@ -15,6 +15,7 @@ var DEFAULT_TIME_BLOCKS = constants.DEFAULT_TIME_BLOCKS;
 var DEFAULT_TOOL_MATRIX = constants.DEFAULT_TOOL_MATRIX;
 var DAY_NAMES = constants.DAY_NAMES;
 var SCHEDULER_VERSION = constants.SCHEDULER_VERSION;
+var RECUR_EXPAND_DAYS = constants.RECUR_EXPAND_DAYS;
 var dateHelpers = require('./dateHelpers');
 var parseDate = dateHelpers.parseDate;
 var formatDateKey = dateHelpers.formatDateKey;
@@ -221,7 +222,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // This replaces the prior two-pass design (expand-then-split-reconcile) that
   // thrashed because the expand pass deleted chunk rows it didn't recognize.
   var today = parseDate(timeInfo.todayKey) || new Date();
-  var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + 56);
+  var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + RECUR_EXPAND_DAYS);
 
   // Index existing recurring_instance rows. Track pending (placeable) and the
   // full set (any status) for ordinal preservation + existence lookup.
@@ -313,7 +314,21 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var desiredById = {};
   desiredRows.forEach(function(r) { desiredIds[r.id] = true; desiredById[r.id] = r; });
   var toInsert = desiredRows.filter(function(r) { return !existingPendingIds[r.id]; });
-  var toDeleteIds = Object.keys(existingPendingIds).filter(function(id) { return !desiredIds[id]; });
+  // Grandfather pending instances that fall beyond the expansion horizon.
+  // Without this, shrinking RECUR_EXPAND_DAYS would delete legitimate
+  // pending rows that were expanded under a prior (larger) horizon.
+  // "Reconstruct the sequence" paths (recur-config change in
+  // task.controller.js) delete pending rows directly via SQL before the
+  // scheduler runs, so they are unaffected by this grandfather clause.
+  var toDeleteIds = Object.keys(existingPendingIds).filter(function(id) {
+    if (desiredIds[id]) return false;
+    var row = rowsByIdForReconcile[id];
+    if (row && row.date) {
+      var rowDate = parseDate(row.date);
+      if (rowDate && rowDate > expandEnd) return false;
+    }
+    return true;
+  });
 
   // Drift fix: existing pending rows whose (split_ordinal, split_total, dur)
   // don't match the current chunk plan get UPDATEd in place. Covers the case
@@ -504,14 +519,22 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var rawRowById = {};
   taskRows.forEach(function(r) { rawRowById[r.id] = r; });
 
-  // Extract the first placement per task from dayPlacements
+  // Extract the first placement per task from dayPlacements. Also count
+  // placements per task so we can detect split masters: a non-recurring
+  // task split in-scheduler produces N placements that share task.id,
+  // each with p.dur = chunkSize (not the master total). Writing
+  // placement.dur back to the master row would shrink a 3:30 task to
+  // one chunk's 30 min. Below we use this count to skip the dur
+  // overwrite for split masters.
   var placementByTaskId = {};
+  var placementCountByTaskId = {};
   var dayPlacements = result.dayPlacements;
   Object.keys(dayPlacements).forEach(function(dateKey) {
     var placements = dayPlacements[dateKey];
     if (!placements) return;
     placements.forEach(function(p) {
       if (!p.task || !p.task.id) return;
+      placementCountByTaskId[p.task.id] = (placementCountByTaskId[p.task.id] || 0) + 1;
       if (!placementByTaskId[p.task.id]) {
         placementByTaskId[p.task.id] = { dateKey: dateKey, start: p.start, dur: p.dur };
       }
@@ -575,7 +598,14 @@ async function runScheduleAndPersist(userId, _retries, options) {
       date_pinned: 0,
       updated_at: db.fn.now()
     };
-    if (placement.dur) dbUpdate.dur = placement.dur;
+    // Skip dur overwrite for split masters (multiple placements for same
+    // task.id): each p.dur is a chunk size, not the master total.
+    if (placement.dur && placementCountByTaskId[taskId] === 1) {
+      dbUpdate.dur = placement.dur;
+    }
+    if (result.slackByTaskId && taskId in result.slackByTaskId) {
+      dbUpdate.slack_mins = result.slackByTaskId[taskId];
+    }
 
     pendingUpdates.push({
       id: taskId,
@@ -596,12 +626,14 @@ async function runScheduleAndPersist(userId, _retries, options) {
         toTime: newTime,
         // Minimal patch for SSE — only the fields the scheduler actually mutated.
         // Frontend merges this in without a re-fetch.
+        // For split masters, use the original dur (placement.dur is a chunk size).
         patch: {
           date: newDate || null,
           time: newTime || null,
           day: dayLabel,
           scheduledAt: newScheduledAt instanceof Date ? newScheduledAt.toISOString() : newScheduledAt,
-          dur: placement.dur || original.dur || null,
+          dur: (placementCountByTaskId[taskId] === 1 ? placement.dur : null) || original.dur || null,
+          slackMins: result.slackByTaskId && taskId in result.slackByTaskId ? result.slackByTaskId[taskId] : undefined,
           unscheduled: false
         }
       });
@@ -632,7 +664,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // unscheduled lane with a sensible "was supposed to be at" timestamp,
     // and a future "mark done" click can infer a plausible done_at.
     // The unscheduled=1 boolean is the sole signal that it's not on the calendar.
-    pendingUpdates.push({ id: t.id, dbUpdate: { unscheduled: 1, updated_at: db.fn.now() } });
+    var unplacedDbUpdate = { unscheduled: 1, updated_at: db.fn.now() };
+    if (result.slackByTaskId && t.id in result.slackByTaskId) {
+      unplacedDbUpdate.slack_mins = result.slackByTaskId[t.id];
+    }
+    pendingUpdates.push({ id: t.id, dbUpdate: unplacedDbUpdate });
     // Emit SSE change only on the transition from placed → unscheduled.
     var rawRow = rawRowById[t.id];
     var wasPlaced = !!(original.date || original.time || (rawRow && rawRow.scheduled_at));
@@ -1094,7 +1130,7 @@ async function getSchedulePlacements(userId, options) {
 
   // Expand recurring so generated instances can be hydrated from cache
   var today = parseDate(timeInfo.todayKey) || new Date();
-  var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + 56);
+  var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + RECUR_EXPAND_DAYS);
   var expanded = expandRecurring(allTasks, today, expandEnd, { statuses: statuses });
   if (expanded.length > 0) {
     allTasks = allTasks.concat(expanded);

@@ -7,7 +7,6 @@ import { PRI_COLORS, STATUS_OPTIONS, applyDefaults } from '../../state/constants
 import { toTime24, fromTime24, toDateISO, fromDateISO, formatDateKey, parseDate } from '../../scheduler/dateHelpers';
 import { getTheme } from '../../theme/colors';
 import { convertTimeForDisplay, getTimezoneAbbr, getUtcOffset } from '../../utils/timezone';
-import ConfirmDialog from '../features/ConfirmDialog';
 import apiClient from '../../services/apiClient';
 
 // "hh:mm" (24h) + delta minutes → "hh:mm" (24h). Clamps to the day [00:00, 23:59].
@@ -30,61 +29,6 @@ function minutesFrom24h(hhmm) {
   var h = parseInt(parts[0], 10); if (isNaN(h)) return null;
   var m = parseInt(parts[1], 10); if (isNaN(m)) m = 0;
   return h * 60 + m;
-}
-
-function RecurringDeleteDialog({ taskName, onSkipInstance, onDeleteSeries, onCancel, darkMode, isMobile }) {
-  var theme = getTheme(darkMode);
-  var btnBase = {
-    border: 'none', borderRadius: 8, padding: '10px 16px',
-    fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', width: '100%',
-    textAlign: 'left', lineHeight: 1.4,
-  };
-  return (
-    <div style={{
-      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      background: 'rgba(0,0,0,0.5)', zIndex: 400, display: 'flex',
-      alignItems: 'center', justifyContent: 'center'
-    }} onClick={onCancel}>
-      <div style={{
-        background: theme.bgSecondary, borderRadius: isMobile ? 0 : 12,
-        width: isMobile ? '100%' : 360, maxWidth: isMobile ? '100%' : '90vw',
-        height: isMobile ? '100%' : undefined,
-        padding: 24, boxShadow: isMobile ? 'none' : ('0 8px 32px ' + theme.shadow),
-        display: isMobile ? 'flex' : undefined, flexDirection: isMobile ? 'column' : undefined,
-        justifyContent: isMobile ? 'center' : undefined
-      }} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: theme.text, marginBottom: 4 }}>
-          Delete "{taskName.slice(0, 50)}"
-        </div>
-        <div style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 16 }}>
-          This is a recurring task. What would you like to do?
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-          <button onClick={onSkipInstance} style={{
-            ...btnBase, background: theme.bgCard, border: '1px solid ' + theme.border, color: theme.text,
-          }}>
-            <span style={{ fontWeight: 600 }}>{'\u23ED'} Skip this instance</span>
-            <br />
-            <span style={{ fontSize: 11, color: theme.textSecondary }}>Mark this occurrence as skipped. The recurring task continues.</span>
-          </button>
-          <button onClick={onDeleteSeries} style={{
-            ...btnBase, background: theme.errorBg || '#fef2f2', border: '1px solid ' + (theme.errorBorder || '#fca5a5'), color: theme.error || '#991b1b',
-          }}>
-            <span style={{ fontWeight: 600 }}>{'\uD83D\uDDD1'} Delete entire series</span>
-            <br />
-            <span style={{ fontSize: 11, opacity: 0.8 }}>Remove the recurring task and all future instances. Completed history is kept.</span>
-          </button>
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button onClick={onCancel} style={{
-            border: '1px solid ' + theme.border, borderRadius: 8, padding: '8px 20px',
-            background: 'transparent', color: theme.textSecondary, fontSize: 13,
-            cursor: 'pointer', fontFamily: 'inherit'
-          }}>Cancel</button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // Full IANA timezone list (browser-sourced or fallback)
@@ -227,13 +171,17 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [taskTz, setTaskTz] = useState(isCreate ? (activeTimezone || 'America/New_York') : (task.tz || activeTimezone || 'America/New_York'));
 
   // Initialize date/time from task data.
-  // For recurring Time Window mode: derive time from preferredTimeMins (minutes since
-  // midnight, local tz — no timezone conversion needed).
+  // For recurring tasks: derive Time from preferredTimeMins whenever it's
+  // set — NOT gated on the `preferredTime` boolean flag. That flag is
+  // legacy; older rows may have preferredTimeMins populated without the
+  // flag, and reading task.time instead leaks the last-placed time into
+  // the "Time" input, making it look like the preferred time changed
+  // when really it was just the scheduler's most-recent placement.
   // For all other tasks: convert scheduledAt (UTC) to display timezone.
   var initDateTime = React.useMemo(function() {
     if (isCreate) return { date: initDate, time: '' };
     // Recurring Time Window: use preferredTimeMins directly (no tz conversion)
-    if (task.recurring && task.preferredTime && task.preferredTimeMins != null) {
+    if (task.recurring && task.preferredTimeMins != null) {
       var h = Math.floor(task.preferredTimeMins / 60);
       var m = task.preferredTimeMins % 60;
       var time24 = (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
@@ -319,7 +267,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   // For recurring instances: the template's anchor date (separate from this instance's date)
   // anchorDate from API is YYYY-MM-DD (date-only)
   var [anchorDate, setAnchorDate] = useState(isCreate ? '' : (task.anchorDate || ''));
-  var [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   var [recurType, setRecurType] = useState(isCreate ? 'none' : (task.recur?.type || 'none'));
   var [recurDays, setRecurDays] = useState(isCreate ? 'MTWRF' : (function() {
     var raw = task.recur?.days;
@@ -568,7 +515,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       dayReq: recurring ? 'any' : dayReq,  // recurringTasks derive days from recurrence, not dayReq
       recurring, rigid: recurring && hasPreferredTime && time ? false : rigid,
       timeFlex: recurring && hasPreferredTime && time ? (timeFlex || 60) : (recurring && !rigid ? timeFlex : undefined),
-      split: split || undefined,
+      // Always send as an explicit boolean. The previous `split || undefined`
+      // collapsed `false` to `undefined`, which JSON-strips the key, which
+      // the backend reads as "no change" — so turning split OFF never stuck.
+      split: !!split,
       splitMin: split ? (parseInt(splitMin) || 15) : null,
       location: taskLoc,
       tools: taskTools,
@@ -834,7 +784,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             return <span style={{ fontSize: 10, color: TH.textMuted, fontStyle: 'italic' }} title="This event is managed by your calendar. Delete it there instead.">Calendar event</span>;
           }
           return (
-            <button onClick={() => setShowDeleteConfirm(true)} style={{
+            <button onClick={() => { if (onDelete) onDelete(task.id); }} style={{
               fontSize: 10, fontWeight: 600, padding: '4px 10px',
               border: '1px solid #8B2635', borderRadius: 4,
               background: TH.redBg, color: TH.redText, cursor: 'pointer'
@@ -1302,8 +1252,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             </label>
           </div>}
 
-          {/* When mode selector — hidden for markers only */}
-          {!marker && <label style={{ ...lStyle, marginBottom: 5 }}>
+          {/* When mode selector — hidden for markers and recurring tasks.
+              Recurring tasks use the upper "Time window / Time blocks" mode
+              selector instead; showing both produces two redundant controls
+              that write to the same `when` field (confusing). */}
+          {!marker && !recurring && <label style={{ ...lStyle, marginBottom: 5 }}>
             <span title="Controls which time windows the scheduler can place this task in.">{'\uD83D\uDCC6'} Time window</span>
             {(function() {
               // Window tags are everything that isn't a mode keyword
@@ -1746,28 +1699,65 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
 
           </>);
         })()}
+
+        {/* Metadata footer — created, scheduled window, slack */}
+        {!isCreate && (function() {
+          var mN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+          var created = task.createdAt ? new Date(task.createdAt) : null;
+          var createdStr = created
+            ? mN[created.getMonth()] + ' ' + created.getDate() + ', ' + created.getFullYear()
+            : '\u2014';
+
+          // Parse task.time ("2:00 PM") + task.dur (minutes) → "2:00 PM \u2192 3:30 PM"
+          var startStr = null, endStr = null;
+          if (task.time) startStr = task.time;
+          if (task.time && task.dur) {
+            var m = task.time.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+            if (m) {
+              var hh = parseInt(m[1], 10), mm = parseInt(m[2], 10), ap = (m[3] || '').toUpperCase();
+              if (ap === 'PM' && hh < 12) hh += 12;
+              if (ap === 'AM' && hh === 12) hh = 0;
+              var total = hh * 60 + mm + task.dur;
+              if (total < 24 * 60) {
+                var eh = Math.floor(total / 60), em = total % 60;
+                var eap = eh >= 12 ? 'PM' : 'AM';
+                var eh12 = eh % 12 || 12;
+                endStr = eh12 + ':' + (em < 10 ? '0' : '') + em + ' ' + eap;
+              }
+            }
+          }
+
+          // Slack: null means Infinity (no deadline / no constraint).
+          var s = task.slackMins;
+          var slackStr;
+          if (s == null) {
+            slackStr = '\u221E'; // ∞
+          } else if (s <= 0) {
+            slackStr = '0m';
+          } else if (s < 60) {
+            slackStr = s + 'm';
+          } else {
+            slackStr = Math.floor(s / 60) + 'h ' + (s % 60) + 'm';
+          }
+
+          var rowStyle = { display: 'flex', gap: 6, fontSize: 10, color: TH.textMuted, lineHeight: 1.5 };
+          var labelStyle = { minWidth: 64, fontWeight: 600, color: TH.textMuted };
+          return (
+            <div style={{
+              marginTop: 12, padding: '8px 12px', borderTop: '1px solid ' + TH.border,
+              fontFamily: 'inherit'
+            }}>
+              <div style={rowStyle}><span style={labelStyle}>Created</span><span>{createdStr}</span></div>
+              <div style={rowStyle}>
+                <span style={labelStyle}>Scheduled</span>
+                <span>{startStr ? (endStr ? startStr + ' \u2192 ' + endStr : startStr) : '\u2014'}</span>
+              </div>
+              <div style={rowStyle}><span style={labelStyle}>Slack</span><span>{slackStr}</span></div>
+            </div>
+          );
+        })()}
       </div>
 
-      {showDeleteConfirm && (
-        task.recurring || task.taskType === 'recurring_instance' || task.taskType === 'recurring_template' ? (
-          <RecurringDeleteDialog
-            taskName={task.text || 'this task'}
-            onSkipInstance={() => { if (onStatusChange) onStatusChange('skip'); setShowDeleteConfirm(false); }}
-            onDeleteSeries={() => { onDelete(task.id, { cascade: 'recurring' }); onClose(); }}
-            onCancel={() => setShowDeleteConfirm(false)}
-            darkMode={darkMode}
-            isMobile={isMobile}
-          />
-        ) : (
-          <ConfirmDialog
-            message={'Delete "' + (task.text || 'this task').slice(0, 60) + '"?'}
-            onConfirm={() => { onDelete(task.id); onClose(); }}
-            onCancel={() => setShowDeleteConfirm(false)}
-            darkMode={darkMode}
-            isMobile={isMobile}
-          />
-        )
-      )}
     </>
   );
 

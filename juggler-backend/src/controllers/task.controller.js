@@ -23,15 +23,72 @@ const tasksWrite = require('../lib/tasks-write');
 // immediately. `ids` (optional) is the list of task ids the caller just
 // wrote — when present, the frontend can upsert only those rows instead of
 // refetching the full task list.
-function enqueueScheduleRun(userId, source, ids) {
+function enqueueScheduleRun(userId, source, ids, options) {
+  options = options || {};
   var payload = { source: source, timestamp: Date.now() };
   if (Array.isArray(ids) && ids.length > 0) payload.ids = ids;
-  sseEmitter.emit(userId, 'tasks:changed', payload);
+  // When the caller queued writes to task_write_queue, the DB doesn't yet
+  // reflect this change — emitting now would race the queue flush and the
+  // frontend's re-fetch would return pre-write values (the "revert flash").
+  // Callers pass { skipEmit: true } in that case; task-write-queue._doFlush
+  // emits tasks:changed with the affected ids post-commit.
+  if (!options.skipEmit) {
+    sseEmitter.emit(userId, 'tasks:changed', payload);
+  }
+  // Non-scheduling-only edits (e.g. changing `notes` or `project`) don't
+  // affect placement — callers pass { skipScheduler: true } to avoid the
+  // wasted scheduler run. Other clients still learn of the change via the
+  // tasks:changed emit above.
+  if (options.skipScheduler) return;
   // Defer the scheduler enqueue (DB insert) off the save hot path. The
   // scheduler already debounces 2s after the last enqueue, so delaying this
   // by 2s just shifts the quiet-period start — it doesn't starve the user.
   // Keeps the save's pool connection uncontested by queue inserts.
   setTimeout(function() { _enqueueScheduleRun(userId, source); }, 2000);
+}
+
+// True iff `row` contains any scheduling-relevant DB fields (anything
+// outside NON_SCHEDULING_FIELDS).
+function hasSchedulingFields(row) {
+  if (!row) return false;
+  return Object.keys(splitFields(row).schedulingFields).length > 0;
+}
+
+/**
+ * Expand a list of task IDs to include every sibling instance of any
+ * recurring template or recurring instance among the inputs. Used after
+ * a write that touches template-level (universal) fields so the frontend
+ * can refresh every dependent instance — not just the one the user edited.
+ *
+ * Returns a deduped array (original order preserved for inputs that are
+ * not recurring templates / instances; siblings appended after).
+ */
+async function expandToAllInstanceIds(userId, ids) {
+  if (!Array.isArray(ids) || ids.length === 0) return ids || [];
+  var masterIds = new Set();
+  // Which input ids map to a master (either directly or via an instance's
+  // master_id)? Two short queries cover it.
+  var masters = await db('task_masters')
+    .where('user_id', userId)
+    .whereIn('id', ids)
+    .where('recurring', 1)
+    .select('id');
+  masters.forEach(function(r) { masterIds.add(r.id); });
+  var insts = await db('task_instances')
+    .where('user_id', userId)
+    .whereIn('id', ids)
+    .select('id', 'master_id');
+  insts.forEach(function(r) { if (r.master_id) masterIds.add(r.master_id); });
+  if (masterIds.size === 0) return ids;
+  var siblings = await db('task_instances')
+    .where('user_id', userId)
+    .whereIn('master_id', Array.from(masterIds))
+    .select('id');
+  var out = {};
+  ids.forEach(function(i) { out[i] = true; });
+  masterIds.forEach(function(m) { out[m] = true; });
+  siblings.forEach(function(r) { out[r.id] = true; });
+  return Object.keys(out);
 }
 
 /** Safely parse a JSON string, returning fallback on any error. */
@@ -90,7 +147,7 @@ var TEMPLATE_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', '
   'when', 'day_req', 'recurring', 'rigid', 'time_flex', 'split', 'split_min',
   'travel_before', 'travel_after', 'depends_on',
   'notes', 'marker', 'flex_when', 'recur', 'recur_start', 'recur_end',
-  'preferred_time_mins'];
+  'preferred_time', 'preferred_time_mins'];
 
 /**
  * Build a { sourceId: row } lookup from an array of task rows.
@@ -321,10 +378,13 @@ function rowToTask(row, timezone, sourceMap) {
     flexWhen: !!row.flex_when,
     travelBefore: row.travel_before != null ? row.travel_before : undefined,
     travelAfter: row.travel_after != null ? row.travel_after : undefined,
+    preferredTime: row.preferred_time != null ? !!row.preferred_time : null,
     preferredTimeMins: row.preferred_time_mins != null ? row.preferred_time_mins : null,
     desiredAt: row.desired_at ? new Date(row.desired_at).toISOString() : null,
     desiredDate: row.desired_date || null,
     unscheduled: !!row.unscheduled,
+    slackMins: row.slack_mins != null ? Number(row.slack_mins) : null,
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
     recurStart: row.recur_start || null,
     recurEnd: row.recur_end || null,
     disabledAt: row.disabled_at ? scheduledAtToISO(row.disabled_at) : null,
@@ -393,6 +453,9 @@ function taskToRow(task, userId, timezone) {
   if (task.tz !== undefined) row.tz = task.tz || null;
   if (task.recurStart !== undefined) row.recur_start = task.recurStart || null;
   if (task.recurEnd !== undefined) row.recur_end = task.recurEnd || null;
+  if (task.preferredTime !== undefined) {
+    row.preferred_time = task.preferredTime === null ? null : (task.preferredTime ? 1 : 0);
+  }
   if (task.preferredTimeMins !== undefined) row.preferred_time_mins = task.preferredTimeMins;
 
   // Direct desired_at / desired_date mapping (if caller provides them explicitly)
@@ -686,7 +749,7 @@ async function createTask(req, res) {
       row.user_id = req.user.id;
       await enqueueWrite(req.user.id, row.id, 'create', row, 'api:createTask');
       await cache.invalidateTasks(req.user.id);
-      enqueueScheduleRun(req.user.id, 'api:createTask', [row.id]);
+      enqueueScheduleRun(req.user.id, 'api:createTask', [row.id], { skipEmit: true });
       return res.status(201).json({ task: rowToTask(row, null), queued: true });
     }
 
@@ -795,9 +858,18 @@ async function updateTask(req, res) {
         await tasksWrite.updateTaskById(db, id, fastRow, req.user.id);
       }
 
-      // Fire-and-forget: cache invalidate + scheduler run.
+      // Fire-and-forget: cache invalidate + scheduler run (skipped when
+      // only non-scheduling fields changed).
       cache.invalidateTasks(req.user.id).catch(function(e) { console.error('[cache]', e.message); });
-      enqueueScheduleRun(req.user.id, 'api:updateTask', [id]);
+      // When the edit touched universal/template fields on a recurring
+      // task, broadcast a refresh to every sibling instance so their
+      // cached rows pick up the new values — even when the scheduler
+      // isn't rerun.
+      var fastBroadcastIds = [id];
+      if (fastExisting.recurring || fastExisting.task_type === 'recurring_template' || fastExisting.task_type === 'recurring_instance') {
+        try { fastBroadcastIds = await expandToAllInstanceIds(req.user.id, [id]); } catch (e) { /* fall back to just [id] */ }
+      }
+      enqueueScheduleRun(req.user.id, 'api:updateTask', fastBroadcastIds, { skipScheduler: !hasSchedulingFields(fastRow) });
 
       // Optimistic response: merge the submitted changes into the existing
       // row shape. Skips the slow response re-read entirely.
@@ -901,11 +973,24 @@ async function updateTask(req, res) {
         await tasksWrite.updateTaskById(db, id, nonSchedulingFields, req.user.id);
       }
       // Queue scheduling fields for flush
+      var queuedScheduling = false;
       if (Object.keys(schedulingFields).length > 0) {
         await enqueueWrite(req.user.id, id, 'update', schedulingFields, 'api:updateTask');
+        queuedScheduling = true;
       }
       await cache.invalidateTasks(req.user.id);
-      enqueueScheduleRun(req.user.id, 'api:updateTask', [id]);
+      // If scheduling fields are pending in the queue, defer the SSE emit —
+      // the queue flush will emit with post-commit values. If nothing
+      // scheduling-relevant was touched, skip the scheduler run entirely.
+      var lockedBroadcastIds = [id];
+      if ((existing.recurring || existing.task_type === 'recurring_template' || existing.task_type === 'recurring_instance') && !queuedScheduling) {
+        // Non-scheduling template change → frontend refresh siblings now.
+        try { lockedBroadcastIds = await expandToAllInstanceIds(req.user.id, [id]); } catch (e) { /* fall back */ }
+      }
+      enqueueScheduleRun(req.user.id, 'api:updateTask', lockedBroadcastIds, {
+        skipEmit: queuedScheduling,
+        skipScheduler: !queuedScheduling
+      });
       // Narrow re-read: updated row (cheap path that bypasses tasks_with_sync_v)
       // + just recurring templates for srcMap.
       var [currentRow, templateRows2] = await Promise.all([
@@ -1066,7 +1151,11 @@ async function updateTask(req, res) {
     ]);
     var srcMap = buildSourceMap(templateRows);
     await cache.invalidateTasks(req.user.id);
-    enqueueScheduleRun(req.user.id, 'api:updateTask', [id]);
+    var slowBroadcastIds = [id];
+    if (existing.recurring || existing.task_type === 'recurring_template' || existing.task_type === 'recurring_instance') {
+      try { slowBroadcastIds = await expandToAllInstanceIds(req.user.id, [id]); } catch (e) { /* fall back to just [id] */ }
+    }
+    enqueueScheduleRun(req.user.id, 'api:updateTask', slowBroadcastIds, { skipScheduler: !hasSchedulingFields(row) });
     res.json({ task: rowToTask(updatedRow, null, srcMap) });
   } catch (error) {
     console.error('Update task error:', error);
@@ -1468,7 +1557,7 @@ async function batchCreateTasks(req, res) {
         await enqueueWrite(req.user.id, rows[qi].id, 'create', rows[qi], 'api:batchCreateTasks');
       }
       await cache.invalidateTasks(req.user.id);
-      enqueueScheduleRun(req.user.id, 'api:batchCreateTasks', rows.map(function(r) { return r.id; }));
+      enqueueScheduleRun(req.user.id, 'api:batchCreateTasks', rows.map(function(r) { return r.id; }), { skipEmit: true });
       return res.status(201).json({ created: rows.length, queued: true });
     }
 
@@ -1555,13 +1644,21 @@ async function batchUpdateTasks(req, res) {
       }
 
       await cache.invalidateTasks(req.user.id);
-      enqueueScheduleRun(req.user.id, 'api:batchUpdateTasks', idsToCheck);
+      // If any scheduling-field updates were queued, defer the SSE emit —
+      // the queue flush will emit post-commit with correct values. If none
+      // were, only direct non-scheduling writes happened → skip scheduler.
+      enqueueScheduleRun(req.user.id, 'api:batchUpdateTasks', idsToCheck, {
+        skipEmit: queuedCount > 0,
+        skipScheduler: queuedCount === 0
+      });
       return res.json({ updated: updatedCount, queued: queuedCount });
     }
 
+    var anySchedulingInBatch = false;
     for (var attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         updatedCount = 0;
+        anySchedulingInBatch = false;
         await db.transaction(async function(trx) {
           // Pre-load task_type and source_id for all IDs being updated
           var idsToUpdate = updates.map(function(u) { return u.id; }).filter(Boolean);
@@ -1608,6 +1705,7 @@ async function batchUpdateTasks(req, res) {
             var row = taskToRow(fields, req.user.id, updateTz);
             delete row.user_id;
             delete row.created_at;
+            if (!anySchedulingInBatch && hasSchedulingFields(row)) anySchedulingInBatch = true;
 
             var existing = existingById[id];
 
@@ -1733,7 +1831,9 @@ async function batchUpdateTasks(req, res) {
     }
 
     await cache.invalidateTasks(req.user.id);
-    enqueueScheduleRun(req.user.id, 'api:batchUpdateTasks', updates.map(function(u) { return u.id; }).filter(Boolean));
+    enqueueScheduleRun(req.user.id, 'api:batchUpdateTasks', updates.map(function(u) { return u.id; }).filter(Boolean), {
+      skipScheduler: !anySchedulingInBatch
+    });
     res.json({ updated: updatedCount });
   } catch (error) {
     console.error('Batch update error:', error);
@@ -1926,5 +2026,6 @@ module.exports = {
   ensureProject,
   applySplitDefault,
   TEMPLATE_FIELDS,
-  validateTaskInput
+  validateTaskInput,
+  expandToAllInstanceIds
 };

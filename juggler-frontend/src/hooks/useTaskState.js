@@ -85,6 +85,37 @@ export default function useTaskState() {
   const flushPromiseRef = useRef(null);
   const lastVersionRef = useRef(null);
   const loadTasksRef = useRef(null);
+  // IDs of tasks this client just wrote. The server echoes our writes back
+  // over tasks:changed, and without filtering we'd re-fetch them — which
+  // races any still-queued writes and flashes the UI back to pre-write
+  // state. Each entry is an expiry timestamp (ms since epoch).
+  const selfWriteExpiryRef = useRef(new Map());
+  const SELF_WRITE_TTL_MS = 3000;
+
+  function markSelfWrite(ids) {
+    if (!ids) return;
+    var arr = Array.isArray(ids) ? ids : [ids];
+    var expiry = Date.now() + SELF_WRITE_TTL_MS;
+    arr.forEach(function(id) { if (id) selfWriteExpiryRef.current.set(id, expiry); });
+  }
+
+  function filterOutSelfWrites(ids) {
+    if (!ids || ids.length === 0) return ids;
+    var now = Date.now();
+    var map = selfWriteExpiryRef.current;
+    // Evict expired entries as we go.
+    var kept = [];
+    for (var i = 0; i < ids.length; i++) {
+      var id = ids[i];
+      var exp = map.get(id);
+      if (exp == null) { kept.push(id); continue; }
+      if (exp < now) { map.delete(id); kept.push(id); continue; }
+      // Self-written within TTL — skip and consume the token so a second
+      // echo (shouldn't happen, but safety) goes through.
+      map.delete(id);
+    }
+    return kept;
+  }
 
   // Load placements from backend scheduler
   const loadPlacements = useCallback(async () => {
@@ -137,6 +168,7 @@ export default function useTaskState() {
         }).filter(Boolean);
 
         if (updates.length > 0) {
+          markSelfWrite(updates.map(function(u) { return u.id; }));
           await apiClient.put('/tasks/batch', { updates });
         }
         // Only clear the specific fields we saved — preserve any dirtied during the await
@@ -220,6 +252,7 @@ export default function useTaskState() {
     // Save status immediately via dedicated endpoint
     var body = { status: val || '' };
     if (opts.completedAt) body.completedAt = opts.completedAt;
+    markSelfWrite(id);
     apiClient.put(`/tasks/${id}/status`, body).then((res) => {
       // Clear dirty flag once server confirms the save
       dispatch({ type: 'CLEAR_DIRTY_STATUS', id });
@@ -252,6 +285,7 @@ export default function useTaskState() {
       // Send the actual task ID — the backend routes template fields to the
       // source and instance fields to the instance for recurring_instance tasks.
       var partial = Object.assign({ id: id }, fields);
+      markSelfWrite(id);
       await apiClient.put('/tasks/batch', { updates: [partial] });
       dispatch({ type: 'CLEAR_DIRTY_TASKS', ids: [id], savedFields: { [id]: fields } });
       return true;
@@ -266,6 +300,7 @@ export default function useTaskState() {
   const addTasks = useCallback(async (tasks) => {
     dispatch({ type: 'ADD_TASKS', tasks });
     try {
+      markSelfWrite(tasks.map(function(t) { return t.id; }));
       await apiClient.post('/tasks/batch', { tasks });
       // Placements refresh via SSE schedule:changed
     } catch (error) {
@@ -314,6 +349,7 @@ export default function useTaskState() {
 
     try {
       var url = cascade ? `/tasks/${id}?cascade=${cascade}` : `/tasks/${id}`;
+      markSelfWrite(idsToRemove);
       await apiClient.delete(url);
       scheduleSave();
     } catch (error) {
@@ -324,6 +360,7 @@ export default function useTaskState() {
   const createTask = useCallback(async (task) => {
     dispatch({ type: 'ADD_TASKS', tasks: [task] });
     try {
+      markSelfWrite(task.id);
       await apiClient.post('/tasks', task);
       // Placements refresh via SSE schedule:changed
     } catch (error) {
@@ -382,6 +419,12 @@ export default function useTaskState() {
         var data = null;
         try { data = JSON.parse(e.data); } catch(err) {}
         var ids = data && Array.isArray(data.ids) ? data.ids : null;
+        var hadIds = !!(ids && ids.length > 0);
+        if (hadIds) ids = filterOutSelfWrites(ids);
+        if (hadIds && (!ids || ids.length === 0)) {
+          // Every id was our own just-acked write — nothing to fetch.
+          return;
+        }
         if (ids && ids.length > 0) {
           Promise.all(ids.map(function(id) {
             return apiClient.get('/tasks/' + id)

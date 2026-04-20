@@ -283,8 +283,17 @@ async function _doFlush(userId) {
     getCache().invalidateTasks(userId).catch(function(err) {
       console.error('[WRITE-QUEUE] cache invalidation error:', err.message);
     });
+    // If any flushed id belongs to a recurring template or one of its
+    // instances, broadcast a refresh for every sibling so the frontend
+    // doesn't keep stale rows cached. Lazy require to avoid a circular
+    // dependency with task.controller.
+    var broadcastIds = affectedIds;
+    try {
+      var expand = require('../controllers/task.controller').expandToAllInstanceIds;
+      if (typeof expand === 'function') broadcastIds = await expand(userId, affectedIds);
+    } catch (e) { /* fall back to affectedIds */ }
     var payload = { source: 'write-queue-flush', timestamp: Date.now() };
-    payload.ids = affectedIds;
+    payload.ids = broadcastIds;
     getSseEmitter().emit(userId, 'tasks:changed', payload);
     getEnqueueScheduleRun()(userId, 'write-queue-flush');
   }

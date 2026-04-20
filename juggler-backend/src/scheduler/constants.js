@@ -56,6 +56,13 @@ var DEFAULT_TIME_BLOCKS = {
 // Bump this when the placement algorithm changes to invalidate cached schedules.
 var SCHEDULER_VERSION = 2;
 
+// Forward expansion horizon for recurring templates. The scheduler only
+// generates/places recurring instances out to today + RECUR_EXPAND_DAYS.
+// Existing pending instances beyond this horizon are grandfathered (not
+// deleted by the reconciler) so users don't lose manually-adjusted
+// occurrences when the horizon shrinks.
+var RECUR_EXPAND_DAYS = 14;
+
 module.exports = {
   PRI_RANK,
   TASK_DEFAULTS,
@@ -68,5 +75,6 @@ module.exports = {
   DEFAULT_WEEKEND_BLOCKS,
   DEFAULT_TIME_BLOCKS,
   DEFAULT_TIMEZONE: 'America/New_York',
-  SCHEDULER_VERSION
+  SCHEDULER_VERSION,
+  RECUR_EXPAND_DAYS
 };

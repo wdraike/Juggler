@@ -9,6 +9,7 @@ var constants = require('./constants');
 var DEFAULT_TIME_BLOCKS = constants.DEFAULT_TIME_BLOCKS;
 var DEFAULT_TOOL_MATRIX = constants.DEFAULT_TOOL_MATRIX;
 var DAY_NAMES = constants.DAY_NAMES;
+var RECUR_EXPAND_DAYS = constants.RECUR_EXPAND_DAYS;
 var dateHelpers = require('./dateHelpers');
 var parseDate = dateHelpers.parseDate;
 var formatDateKey = dateHelpers.formatDateKey;
@@ -701,7 +702,7 @@ async function main() {
 
   // Expand recurring (matches runSchedule.js)
   var today = parseDate(timeInfo.todayKey) || new Date();
-  var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + 56);
+  var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + RECUR_EXPAND_DAYS);
   var expanded = expandRecurring(allTasks, today, expandEnd);
   if (expanded.length > 0) {
     allTasks = allTasks.concat(expanded);

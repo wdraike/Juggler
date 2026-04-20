@@ -48,6 +48,8 @@ import MsftCalSyncPanel from '../features/MsftCalSyncPanel';
 import CalSyncPanel from '../features/CalSyncPanel';
 import HelpModal from '../features/HelpModal';
 import DisabledItemsPanel from '../billing/DisabledItemsPanel';
+import ConfirmDialog from '../features/ConfirmDialog';
+import RecurringDeleteDialog from '../features/RecurringDeleteDialog';
 import AiCommandPanel from '../features/AiCommandPanel';
 import AppFooter from './AppFooter';
 import apiClient from '../../services/apiClient';
@@ -130,6 +132,7 @@ export default function AppLayout() {
   var [calSyncProgress, setCalSyncProgress] = useState(null); // { phase, detail, pct, provider, calendar }
   var editingRef = useRef(false);
   var [schedulerReady, setSchedulerReady] = useState(false);
+  var [deleteConfirmTask, setDeleteConfirmTask] = useState(null);
 
   var theme = getTheme(darkMode);
   var statuses = taskState.statuses;
@@ -640,6 +643,13 @@ export default function AppLayout() {
     showToast((labels[val] || val) + ': ' + (tasks.find(t => t.id === id)?.text || id).slice(0, 40), 'success');
   }, [pushUndo, setStatus, showToast]);
 
+  var requestDelete = useCallback(function(id) {
+    var tasks = allTasksRef.current;
+    var task = tasks.find(function(t) { return t.id === id; });
+    if (!task) return;
+    setDeleteConfirmTask(task);
+  }, []);
+
   var handleCompletionConfirm = useCallback(function(completedAt) {
     var task = completionPickerTask;
     if (!task) return;
@@ -1002,7 +1012,7 @@ export default function AppLayout() {
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
               placements={filteredDayPlacements[selectedDateKey] || []}
               statuses={statuses}
-              onStatusChange={handleStatusChange} onDelete={deleteTask} onExpand={handleExpand}
+              onStatusChange={handleStatusChange} onDelete={requestDelete} onExpand={handleExpand}
               onCreate={handleCreate} gridZoom={config.gridZoom}
               darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
               onGridDrop={handleGridDrop}
@@ -1023,7 +1033,7 @@ export default function AppLayout() {
             <ThreeDayView
               selectedDate={selectedDate} dayPlacements={filteredDayPlacements}
               statuses={statuses}
-              onStatusChange={handleStatusChange} onDelete={deleteTask} onExpand={handleExpand}
+              onStatusChange={handleStatusChange} onDelete={requestDelete} onExpand={handleExpand}
               gridZoom={config.gridZoom} darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins}
               onGridDrop={handleGridDrop} blockedTaskIds={blockedTaskIds}
               onZoomChange={handleZoomChange}
@@ -1035,7 +1045,7 @@ export default function AppLayout() {
             <WeekView
               selectedDate={selectedDate} dayPlacements={filteredDayPlacements}
               statuses={statuses}
-              onStatusChange={handleStatusChange} onDelete={deleteTask} onExpand={handleExpand}
+              onStatusChange={handleStatusChange} onDelete={requestDelete} onExpand={handleExpand}
               gridZoom={config.gridZoom} darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins}
               onGridDrop={handleGridDrop} blockedTaskIds={blockedTaskIds}
               onZoomChange={handleZoomChange}
@@ -1048,7 +1058,7 @@ export default function AppLayout() {
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
               placements={filteredDayPlacements[selectedDateKey] || []}
               statuses={statuses}
-              onStatusChange={handleStatusChange} onDelete={deleteTask} onExpand={handleExpand}
+              onStatusChange={handleStatusChange} onDelete={requestDelete} onExpand={handleExpand}
               onCreate={handleCreate} gridZoom={config.gridZoom}
               darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
               onGridDrop={handleGridDrop}
@@ -1067,7 +1077,7 @@ export default function AppLayout() {
               selectedDate={selectedDate} selectedDateKey={selectedDateKey}
               placements={filteredDayPlacements[selectedDateKey] || []}
               statuses={statuses}
-              onStatusChange={handleStatusChange} onDelete={deleteTask} onExpand={handleExpand}
+              onStatusChange={handleStatusChange} onDelete={requestDelete} onExpand={handleExpand}
               darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
               blockedTaskIds={blockedTaskIds}
               locSchedules={config.locSchedules}
@@ -1100,7 +1110,7 @@ export default function AppLayout() {
               pastDueIds={pastDueIds} fixedIds={fixedIds}
               isMobile={isMobile}
               onUpdate={handleUpdateTask}
-              onDelete={deleteTask}
+              onDelete={requestDelete}
               showToast={showToast}
               locations={config.locations}
               onHourLocationOverride={handleHourLocationOverride}
@@ -1114,7 +1124,7 @@ export default function AppLayout() {
             <ListView
               allTasks={visibleTasks} statuses={statuses}
               filter={filter} search={search} projectFilter={projectFilter}
-              onStatusChange={handleStatusChange} onExpand={handleExpand}
+              onStatusChange={handleStatusChange} onDelete={requestDelete} onExpand={handleExpand}
               onCreate={handleCreate} darkMode={darkMode} schedCfg={schedCfg}
               blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
               isMobile={isMobile} todayDate={today}
@@ -1124,7 +1134,7 @@ export default function AppLayout() {
             <PriorityView
               allTasks={visibleTasks} statuses={statuses}
               filter={filter} search={search} projectFilter={projectFilter}
-              onStatusChange={handleStatusChange} onExpand={handleExpand} darkMode={darkMode}
+              onStatusChange={handleStatusChange} onDelete={requestDelete} onExpand={handleExpand} darkMode={darkMode}
               onPriorityDrop={handlePriorityDrop}
               blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
               isMobile={isMobile} todayDate={today}
@@ -1145,7 +1155,7 @@ export default function AppLayout() {
               allTasks={visibleTasks} statuses={statuses}
               unplaced={unplaced} backlog={backlogTasks} schedulerWarnings={schedulerWarnings}
               onStatusChange={handleStatusChange} onExpand={handleExpand} onUpdateTask={handleUpdateTask}
-              onDelete={deleteTask}
+              onDelete={requestDelete}
               darkMode={darkMode} isMobile={isMobile} todayDate={today}
             />
           )}
@@ -1196,7 +1206,7 @@ export default function AppLayout() {
                     status={statuses[statusId] || ''}
                     onUpdate={handleUpdateTask}
                     onStatusChange={function(val) { handleStatusChange(statusId, val); }}
-                    onDelete={deleteTask}
+                    onDelete={requestDelete}
                     onClose={function() { setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== taskId; }); }); }}
                     onShowChain={function() { setViewMode('deps'); setProjectFilter(taskObj.project || ''); setExpandedTasks([]); }}
                     allProjectNames={allProjectNames}
@@ -1262,7 +1272,7 @@ export default function AppLayout() {
             status={statuses[statusId] || ''}
             onUpdate={handleUpdateTask}
             onStatusChange={function(val) { handleStatusChange(statusId, val); }}
-            onDelete={deleteTask}
+            onDelete={requestDelete}
             onClose={function() { setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== taskId; }); }); }}
             onShowChain={function() { setViewMode('deps'); setProjectFilter(taskObj.project || ''); setExpandedTasks([]); }}
             allProjectNames={allProjectNames}
@@ -1362,6 +1372,41 @@ export default function AppLayout() {
           darkMode={darkMode}
           isMobile={isMobile}
         />
+      )}
+
+      {/* Unified delete confirmation */}
+      {deleteConfirmTask && (
+        (deleteConfirmTask.recurring || deleteConfirmTask.taskType === 'recurring_instance' || deleteConfirmTask.taskType === 'recurring_template') ? (
+          <RecurringDeleteDialog
+            taskName={deleteConfirmTask.text || 'this task'}
+            onSkipInstance={function() {
+              handleStatusChange(deleteConfirmTask.id, 'skip');
+              setDeleteConfirmTask(null);
+            }}
+            onDeleteSeries={function() {
+              var id = deleteConfirmTask.id;
+              deleteTask(id, { cascade: 'recurring' });
+              setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== id; }); });
+              setDeleteConfirmTask(null);
+            }}
+            onCancel={function() { setDeleteConfirmTask(null); }}
+            darkMode={darkMode}
+            isMobile={isMobile}
+          />
+        ) : (
+          <ConfirmDialog
+            message={'Delete "' + (deleteConfirmTask.text || 'this task').slice(0, 60) + '"?'}
+            onConfirm={function() {
+              var id = deleteConfirmTask.id;
+              deleteTask(id);
+              setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== id; }); });
+              setDeleteConfirmTask(null);
+            }}
+            onCancel={function() { setDeleteConfirmTask(null); }}
+            darkMode={darkMode}
+            isMobile={isMobile}
+          />
+        )
       )}
 
       <AppFooter darkMode={darkMode} />

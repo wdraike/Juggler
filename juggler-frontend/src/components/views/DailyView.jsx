@@ -492,7 +492,14 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme,
         {status === 'done' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2713'}</span>}
         {status === 'skip' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u23ED'}</span>}
         {status === 'cancel' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2717'}</span>}
-        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.text}</span>
+        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {task.text}
+          {task._unplacedChunkCount > 1 && (
+            <span style={{ fontSize: 9, color: theme.textMuted, marginLeft: 6 }}>
+              ({task._unplacedChunkCount} chunks unplaced)
+            </span>
+          )}
+        </span>
         {task.dur > 0 && <span style={{ fontSize: 9, color: theme.textMuted, flexShrink: 0 }}>{durLabel(task.dur)}</span>}
         {task.pri && <span style={{ fontSize: 8, fontWeight: 700, color: priColor, flexShrink: 0 }}>{task.pri}</span>}
         {onStatusChange && (
@@ -682,19 +689,47 @@ export default function DailyView({
 
   var unscheduled = useMemo(function () {
     var scheduledIds = {};
-    (placements || []).forEach(function (p) { scheduledIds[p.task.id] = true; });
-    // Also mark source templates as "scheduled" if any of their instances are placed
+    // Track (sourceId, date) occurrences that already have at least one
+    // placement. If *any* row for that occurrence is scheduled, sibling
+    // rows (split chunks or duplicate task_instance rows for the same
+    // recurring occurrence) should not appear as "unscheduled" — the
+    // user sees them as already on the grid.
+    var scheduledByOccurrence = {};
     (placements || []).forEach(function (p) {
-      if (p.task && p.task.sourceId) scheduledIds[p.task.sourceId] = true;
+      if (!p.task) return;
+      scheduledIds[p.task.id] = true;
+      if (p.task.sourceId) {
+        scheduledIds[p.task.sourceId] = true;
+        var dk = p.task.date || selectedDateKey;
+        scheduledByOccurrence[p.task.sourceId + '|' + dk] = true;
+      }
     });
-    return (allTasks || []).filter(function (t) {
+    var raw = (allTasks || []).filter(function (t) {
       if (t.date !== selectedDateKey || scheduledIds[t.id]) return false;
-      // Hide recurring templates and generated instances — only the scheduler places these
+      // Recurring template (blueprint) doesn't belong here. `generated`
+      // in-memory chunks also don't — only real DB rows do.
       if (t.taskType === 'recurring_template' || t.generated) return false;
+      // If another row for this occurrence is already scheduled, hide
+      // this one — it's a duplicate view of the same occurrence (either
+      // a remaining split chunk or a stray task_instance row).
+      if (t.sourceId && scheduledByOccurrence[t.sourceId + '|' + (t.date || '')]) return false;
       // Only hide done/cancelled/skipped when filter is not 'all'
       var st = statuses[t.id] || '';
       if ((st === 'done' || st === 'cancel' || st === 'skip') && filter !== 'all' && filter !== 'done' && filter !== st) return false;
       return matchesFilter(t.id);
+    });
+    // Dedupe remaining rows by occurrence so N unplaced chunks of one
+    // recurring split task show as a single entry with a count.
+    var groups = {};
+    var order = [];
+    raw.forEach(function (t) {
+      var key = t.splitGroup || (t.sourceId ? t.sourceId + '|' + (t.date || '') : t.id);
+      if (!groups[key]) { groups[key] = { task: t, count: 0 }; order.push(key); }
+      groups[key].count += 1;
+    });
+    return order.map(function (k) {
+      var g = groups[k];
+      return g.count > 1 ? Object.assign({}, g.task, { _unplacedChunkCount: g.count }) : g.task;
     });
   }, [allTasks, selectedDateKey, placements, statuses, matchesFilter]);
 

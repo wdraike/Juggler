@@ -5,11 +5,13 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import apiClient from '../../services/apiClient';
+import ConfirmDialog from '../features/ConfirmDialog';
 
 export default function DisabledItemsPanel({ theme, onClose, onRefreshTasks }) {
   var [items, setItems] = useState([]);
   var [loading, setLoading] = useState(true);
   var [actionPending, setActionPending] = useState(null);
+  var [pendingDelete, setPendingDelete] = useState(null);
 
   var load = useCallback(function() {
     setLoading(true);
@@ -41,7 +43,15 @@ export default function DisabledItemsPanel({ theme, onClose, onRefreshTasks }) {
   }
 
   function handleDelete(id, isRecurring) {
-    if (!confirm('Permanently delete this ' + (isRecurring ? 'recurring task' : 'task') + '? This cannot be undone.')) return;
+    var item = items.find(function(t) { return t.id === id; });
+    setPendingDelete({ id: id, isRecurring: isRecurring, text: item && item.text ? item.text : '' });
+  }
+
+  function confirmDelete() {
+    if (!pendingDelete) return;
+    var id = pendingDelete.id;
+    var isRecurring = pendingDelete.isRecurring;
+    setPendingDelete(null);
     setActionPending(id);
     var url = '/tasks/' + id;
     if (isRecurring) url += '?cascade=recurring';
@@ -150,6 +160,19 @@ export default function DisabledItemsPanel({ theme, onClose, onRefreshTasks }) {
           </button>
         </div>
       </div>
+
+      {pendingDelete && (
+        <div onClick={function(e) { e.stopPropagation(); }}>
+          <ConfirmDialog
+            message={'Permanently delete ' + (pendingDelete.text ? '"' + pendingDelete.text.slice(0, 60) + '"' : ('this ' + (pendingDelete.isRecurring ? 'recurring task' : 'task'))) + '? This cannot be undone.'}
+            onConfirm={confirmDelete}
+            onCancel={function() { setPendingDelete(null); }}
+            darkMode={false}
+            isMobile={false}
+            zIndex={1100}
+          />
+        </div>
+      )}
     </div>
   );
 }

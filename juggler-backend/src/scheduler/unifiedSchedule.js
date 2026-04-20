@@ -57,6 +57,66 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   var PERF = Date.now();
   var debugMode = !!(cfg && cfg._debug);
 
+  // Step recorder: when cfg._stepRecorder is an array, each successful
+  // placement commit (via recordPlace or a direct placed.push for
+  // pinned/fixed/rigid tasks) appends a per-placement snapshot.
+  // Zero-cost when disabled; batch behavior is unchanged. See
+  // schedulerSession.js.
+  var stepRecorder = (cfg && Array.isArray(cfg._stepRecorder)) ? cfg._stepRecorder : null;
+  var currentPhaseName = null;
+  function emitStepRecord(t, start, dur, dateKey, locked, item) {
+    if (!stepRecorder) return;
+    var daySnap = {};
+    Object.keys(dayPlaced).forEach(function(ddk) {
+      daySnap[ddk] = (dayPlaced[ddk] || []).map(function(p) {
+        return {
+          taskId: p.task ? p.task.id : null,
+          taskText: p.task ? p.task.text : null,
+          start: p.start, dur: p.dur,
+          locked: !!p.locked, marker: !!(p.task && p.task.marker)
+        };
+      });
+    });
+    var slackVal = (item && item._slack != null) ? item._slack
+      : (item && item._recurSlack != null) ? item._recurSlack : null;
+    // Extra fields for the Stepper UI to explain WHY a placement landed
+    // where it did — surface flex-window, travel buffers, and the location
+    // active at the chosen minute so mismatches become obvious.
+    var locAtStart = null;
+    try { locAtStart = resolveLocationId(dateKey, start, cfg, dayBlocks[dateKey]); }
+    catch (e) { /* ignore */ }
+    var flexWinDbg = null;
+    try {
+      var fw = getFlexWindows(t, dayWindows[dateKey]);
+      if (fw && fw.length) flexWinDbg = { start: fw[0][0], end: fw[0][1] };
+    } catch (e) { /* ignore */ }
+    stepRecorder.push({
+      stepIndex: stepRecorder.length,
+      phase: currentPhaseName,
+      taskId: t.id,
+      taskText: t.text || '',
+      project: t.project || null,
+      pri: t.pri || null,
+      recurring: !!t.recurring,
+      when: t.when || null,
+      deadline: t.deadline || null,
+      preferredTimeMins: t.preferredTimeMins != null ? t.preferredTimeMins : null,
+      timeFlex: t.timeFlex != null ? t.timeFlex : null,
+      rigid: !!t.rigid,
+      travelBefore: t.travelBefore || 0,
+      travelAfter: t.travelAfter || 0,
+      locationRequirement: t.location || null,
+      toolRequirement: t.tools || null,
+      locationAtPlacement: locAtStart,
+      flexWindow: flexWinDbg,
+      placement: { dateKey: dateKey, start: start, dur: dur, locked: !!locked },
+      splitOrdinal: item ? item._parts.length : null,
+      totalChunksSoFar: item ? item._parts.length : null,
+      orderingSlack: (slackVal != null && isFinite(slackVal)) ? Math.round(slackVal) : null,
+      dayPlacementsSnapshot: daySnap
+    });
+  }
+
   var MIN_CHUNK = cfg.splitMinDefault || 15;
   var WALK_END = 23 * 60;
   var DAY_START = GRID_START * 60;
@@ -76,6 +136,15 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   }
 
   function captureSnapshot(phaseName) {
+    // Step recorder: retroactively label any not-yet-tagged step entries
+    // with the phase that just completed. Cheap and always-on when the
+    // recorder is active, regardless of debugMode.
+    if (stepRecorder) {
+      for (var si = stepRecorder.length - 1; si >= 0; si--) {
+        if (stepRecorder[si].phase != null) break;
+        stepRecorder[si].phase = phaseName;
+      }
+    }
     if (!debugMode) return;
     var snap = { phase: phaseName, timestamp: Date.now() - PERF, days: {} };
     // During the algorithm, placements accumulate in dayPlaced (not dayPlacements,
@@ -759,6 +828,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var dh = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
       taskUpdates[t.id] = { date: dateKey, time: dh + ":" + (mm < 10 ? "0" : "") + mm + " " + ampm, tz: placeTz };
     }
+    emitStepRecord(t, start, dur, dateKey, locked, item);
     return part;
   }
 
@@ -832,19 +902,32 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   function getFlexWindows(t, dateWindows) {
     if (t.rigid) return null;
 
+    // Authoritative mode signal: `preferred_time` boolean on the master.
+    // - true  → Time Window mode (preferredTimeMins ± timeFlex). Use flex.
+    // - false → Time Blocks mode (multi-tag `when`). Return null so
+    //           placement uses getWhenWindows with the tag union.
+    // - null  → legacy row, flag not yet set. Fall back to the multi-tag
+    //           heuristic: multiple non-special `when` tags => Time Blocks.
+    if (t.preferredTime === false) return null;
+    if (t.preferredTime !== true) {
+      var whenStr = t.when || '';
+      var _special = { anytime: 1, allday: 1, fixed: 1 };
+      var _whenParts = whenStr.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+      var _nonSpecial = _whenParts.filter(function(p) { return !_special[p]; });
+      if (_nonSpecial.length > 1) return null;
+    }
+
     // Use preferredTimeMins (authoritative) with fallback to parsed time string (legacy)
     var sm = t.preferredTimeMins != null ? t.preferredTimeMins : parseTimeToMinutes(t.time);
     if (sm === null) return null;
 
-    // Time Window mode is indicated by preferredTimeMins being set.
-    // Legacy fallback: check timeFlex or single when-tag.
-    var isTimeWindow = t.preferredTimeMins != null;
+    // Legacy: if preferredTime flag is null AND preferredTimeMins is null,
+    // only take the flex path when there's an explicit timeFlex or when
+    // is a single tag / fixed.
+    var isTimeWindow = t.preferredTime === true || t.preferredTimeMins != null;
     if (!isTimeWindow) {
       var hasExplicitFlex = t.timeFlex != null && t.timeFlex > 0;
-      var when = t.when || '';
-      if (when === '' && !hasExplicitFlex) return null;
-      var whenParts = when.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-      if (whenParts.length > 1 && !hasExplicitFlex) return null;
+      if ((t.when || '') === '' && !hasExplicitFlex) return null;
     }
 
     var flex = t.timeFlex != null ? t.timeFlex : DEFAULT_TIME_FLEX;
@@ -1089,6 +1172,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       var fixedTz = t.tz || cfg.timezone || null;
       placed.push({ task: t, start: sm, dur: dur, locked: true, _dateKey: d.key, travelBefore: tb, travelAfter: ta, tz: fixedTz });
       globalPlacedEnd[t.id] = { dateKey: d.key, endMin: sm + dur + ta, startMin: sm - tb };
+      emitStepRecord(t, sm, dur, d.key, true, null);
     });
   });
 
@@ -1105,6 +1189,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       placed.push({ task: t, start: sm, dur: dur, locked: true, marker: true, _dateKey: d.key, tz: t.tz || cfg.timezone || null });
       // Register in globalPlacedEnd so dependent tasks respect the marker's date
       globalPlacedEnd[t.id] = { dateKey: d.key, endMin: sm + dur, startMin: sm };
+      emitStepRecord(t, sm, dur, d.key, true, null);
     });
   });
 
@@ -1183,6 +1268,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       reserve(occ, placeSm, dur);
       placed.push({ task: t, start: placeSm, dur: dur, locked: true, _dateKey: d.key, tz: t.tz || cfg.timezone || null });
       globalPlacedEnd[t.id] = { dateKey: d.key, endMin: placeSm + dur, startMin: placeSm };
+      emitStepRecord(t, placeSm, dur, d.key, true, null);
       return;
     }
 
@@ -1192,6 +1278,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       reserve(occ, sm, dur);
       placed.push({ task: t, start: sm, dur: dur, locked: true, _dateKey: d.key, tz: t.tz || cfg.timezone || null });
       globalPlacedEnd[t.id] = { dateKey: d.key, endMin: sm + dur, startMin: sm };
+      emitStepRecord(t, sm, dur, d.key, true, null);
       return;
     }
 
@@ -1217,6 +1304,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
           reserve(occ, s, dur);
           placed.push({ task: t, start: s, dur: dur, locked: true, _dateKey: d.key, tz: t.tz || cfg.timezone || null });
           globalPlacedEnd[t.id] = { dateKey: d.key, endMin: s + dur, startMin: s };
+          emitStepRecord(t, s, dur, d.key, true, null);
           found = true; break;
         }
       }
@@ -1228,6 +1316,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
             reserve(occ, s2, dur);
             placed.push({ task: t, start: s2, dur: dur, locked: true, _dateKey: d.key, tz: t.tz || cfg.timezone || null });
             globalPlacedEnd[t.id] = { dateKey: d.key, endMin: s2 + dur, startMin: s2 };
+            emitStepRecord(t, s2, dur, d.key, true, null);
             found = true; break;
           }
         }
@@ -1253,6 +1342,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
             reserve(occ, s3, dur);
             placed.push({ task: t, start: s3, dur: dur, locked: true, _dateKey: d.key, tz: t.tz || cfg.timezone || null });
             globalPlacedEnd[t.id] = { dateKey: d.key, endMin: s3 + dur, startMin: s3 };
+            emitStepRecord(t, s3, dur, d.key, true, null);
             found = true; break;
           }
         }
@@ -1275,6 +1365,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         _conflict: true
       });
       globalPlacedEnd[t.id] = { dateKey: d.key, endMin: conflictSm + dur, startMin: conflictSm };
+      emitStepRecord(t, conflictSm, dur, d.key, true, null);
       schedulerWarnings.push({
         type: 'recurringConflict',
         taskId: t.id,
@@ -1307,19 +1398,23 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   // "morning" only) place before wide-window tasks (e.g. "anytime") —
   // the anytime task can find a slot later in the day, the morning task
   // can't. Priority is a tiebreaker, not the primary grouping.
+  //
+  // Slack is recomputed BEFORE EACH placement against live dayOcc. As
+  // earlier placements consume free minutes on a given day, later items
+  // whose windows overlap that day see their slack shrink and may jump
+  // ahead of others whose windows weren't impacted.
   var recurringItems = pool.filter(function(item) {
     return item.task && item.task.recurring && item.remaining > 0;
   });
-  // Compute recurring slack: available capacity from earliestDate to ceiling minus duration.
-  // Treat cycle end (ceiling) as the deadline for the recurring instance.
-  recurringItems.forEach(function(item) {
+
+  // Compute recurring slack for a single item using current dayOcc.
+  // Treats cycle end (ceiling) as the deadline; uses getFlexWindows for
+  // flex-time tasks so capacity reflects the actual placement window.
+  function computeRecurSlackFor(item) {
     var start = item.earliestDate || localToday;
     if (start < localToday) start = localToday;
     var end = item.ceiling;
-    if (!end) {
-      item._recurSlack = Infinity; // no cycle constraint — lowest urgency
-      return;
-    }
+    if (!end) return Infinity; // no cycle constraint — lowest urgency
     var cap = 0;
     var t = item.task;
     for (var di = 0; di < dates.length; di++) {
@@ -1327,7 +1422,8 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (d.date < start) continue;
       if (d.date > end) break;
       if (!canPlaceOnDate(t, d)) continue;
-      var wins = getWhenWindows(t.when, dayWindows[d.key]);
+      var flexWins = getFlexWindows(t, dayWindows[d.key]);
+      var wins = flexWins || getWhenWindows(t.when, dayWindows[d.key]);
       for (var wi = 0; wi < wins.length; wi++) {
         var occ = dayOcc[d.key];
         for (var m = wins[wi][0]; m < wins[wi][1]; m++) {
@@ -1335,9 +1431,10 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         }
       }
     }
-    item._recurSlack = Math.max(0, cap - item.totalDur);
-  });
-  recurringItems.sort(function(a, b) {
+    return Math.max(0, cap - item.totalDur);
+  }
+
+  function phase1Compare(a, b) {
     // 1. Slack ascending — most constrained first
     var aSlack = a._recurSlack != null ? a._recurSlack : Infinity;
     var bSlack = b._recurSlack != null ? b._recurSlack : Infinity;
@@ -1347,12 +1444,67 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     var bPri = PRI_RANK[b.task.pri || 'P3'] || 3;
     if (aPri !== bPri) return aPri - bPri;
     // 3. Narrower when-window first
-    return whenAvailableMinutes(a.task) - whenAvailableMinutes(b.task);
-  });
+    var aW = whenAvailableMinutes(a.task);
+    var bW = whenAvailableMinutes(b.task);
+    if (aW !== bW) return aW - bW;
+    // 4. Earliest instance date first
+    var aDate = a.earliestDate || (a.task && a.task.date ? parseDate(a.task.date) : null);
+    var bDate = b.earliestDate || (b.task && b.task.date ? parseDate(b.task.date) : null);
+    if (aDate && bDate) {
+      var dt = aDate.getTime() - bDate.getTime();
+      if (dt !== 0) return dt;
+    }
+    // 5. Deterministic id tie-break
+    return a.task.id < b.task.id ? -1 : (a.task.id > b.task.id ? 1 : 0);
+  }
+
   {
-    recurringItems.forEach(function(item) {
-      if (item.remaining <= 0) return;
+    // Dynamic sort with scoped recompute:
+    //   - Unconstrained items (no ceiling, slack = Infinity) never change
+    //     order, so compute once and never revisit.
+    //   - After each placement, only the items whose [earliestDate, ceiling]
+    //     window overlaps a "dirty" day (a day that just saw a placement)
+    //     need their slack recomputed. For rigid per-day recurrings —
+    //     where earliestDate == ceiling == the instance's own date — this
+    //     boils down to a single hash-set lookup.
+    var phase1Queue = recurringItems.slice();
+    // Initial pass: compute slack for everything.
+    phase1Queue.forEach(function(item) { item._recurSlack = computeRecurSlackFor(item); });
+
+    var dirtyDates = Object.create(null); // dateKey -> true
+    function windowTouchesDirty(item) {
+      if (item._recurSlack === Infinity) return false;
+      var start = item.earliestDate || localToday;
+      if (start < localToday) start = localToday;
+      var end = item.ceiling;
+      if (!end) return false;
+      for (var di = 0; di < dates.length; di++) {
+        var d = dates[di];
+        if (d.date < start) continue;
+        if (d.date > end) break;
+        if (dirtyDates[d.key]) return true;
+      }
+      return false;
+    }
+
+    var phase1Safety = phase1Queue.length * 2 + 16;
+    while (phase1Queue.length > 0 && phase1Safety-- > 0) {
+      // Recompute slack only for items impacted by recently-placed dates.
+      var dirtyKeys = Object.keys(dirtyDates);
+      if (dirtyKeys.length > 0) {
+        phase1Queue.forEach(function(item) {
+          if (windowTouchesDirty(item)) {
+            item._recurSlack = computeRecurSlackFor(item);
+          }
+        });
+        dirtyDates = Object.create(null);
+      }
+      phase1Queue.sort(phase1Compare);
+      var item = phase1Queue.shift();
+      if (!item || item.remaining <= 0) continue;
       var t = item.task;
+      var placedInThisItem = [];
+      var partsBefore = item._parts.length;
       for (var di = 0; di < dates.length; di++) {
         if (item.remaining <= 0) break;
         var d = dates[di];
@@ -1373,8 +1525,15 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         var wins = flexWins || getWhenWindows(t.when, dayWindows[d.key]);
         if (wins.length === 0) continue;
         placeEarly(item, d, 0, flexWins);
+        if (item._parts.length > partsBefore) {
+          placedInThisItem.push(d.key);
+          partsBefore = item._parts.length;
+        }
       }
-    });
+      for (var pi = 0; pi < placedInThisItem.length; pi++) {
+        dirtyDates[placedInThisItem[pi]] = true;
+      }
+    }
   }
 
   captureSnapshot('Phase 1: Recurring tasks');
@@ -1626,7 +1785,15 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     if (aPri !== bPri) return aPri - bPri;
     // 3. Duration descending (longer tasks harder to fit)
     if (b.totalDur !== a.totalDur) return b.totalDur - a.totalDur;
-    // 4. Deterministic id
+    // 4. Earliest earliestDate first — matches user intuition when
+    //    otherwise-identical constrained tasks share all prior keys.
+    var aDate = a.earliestDate || (a.task && a.task.date ? parseDate(a.task.date) : null);
+    var bDate = b.earliestDate || (b.task && b.task.date ? parseDate(b.task.date) : null);
+    if (aDate && bDate) {
+      var dt = aDate.getTime() - bDate.getTime();
+      if (dt !== 0) return dt;
+    }
+    // 5. Deterministic id
     return a.task.id < b.task.id ? -1 : (a.task.id > b.task.id ? 1 : 0);
   });
 
@@ -2536,7 +2703,86 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     });
   });
 
-  var result = { dayPlacements: dayPlacements, taskUpdates: taskUpdates, newStatuses: newSt, unplaced: unplaced, deadlineMisses: deadlineMisses, placedCount: placedCount, score: score, warnings: schedulerWarnings, timezone: cfg.timezone || null, spacingStats: spacingStats };
+  // Compute display slack per placement: how much later (in minutes) the
+  // task could have started on its placement date and still satisfy the
+  // tightest of its applicable ceilings — same-day hard deadline, same-day
+  // faux-deadline propagated backward from a dependent task (so chain
+  // predecessors correctly reflect downstream deadline pressure), and the
+  // latest end of its allowed when-windows.
+  //
+  // Example: "evening medication" allowed 4:30–5:30 PM placed at 4:30 →
+  // 60 min slack; placed at 5:30 → 0. A chain member whose consumer is
+  // due by 9:00 AM today will see its effective ceiling collapse to the
+  // consumer's start (via fauxDeadline), not the full window end.
+  //
+  // Tasks with no same-day ceiling (no deadline, no same-day faux-deadline,
+  // and a when-window as wide as the work day) surface as null → ∞ in UI.
+  var poolByTaskId = {};
+  pool.forEach(function(item) {
+    if (item.task && item.task.id != null) poolByTaskId[item.task.id] = item;
+  });
+
+  var slackByTaskId = {};
+  Object.keys(dayPlacements).forEach(function(dk) {
+    (dayPlacements[dk] || []).forEach(function(p) {
+      if (!p.task || !p.task.id || p.start == null) return;
+      var t = p.task;
+      var item = poolByTaskId[t.id];
+      var placementDay = parseDate(dk);
+
+      var effectiveCeiling = null; // minutes-of-day on the placement's date
+
+      // 1. Same-day window latest end. Prefer flex-window for tasks with
+      //    a preferred time + flex (e.g., "lunch at 11:30 ±30"), otherwise
+      //    fall back to the when-tag windows.
+      var flexWins = getFlexWindows(t, dayWindows[dk]);
+      var wins = flexWins || getWhenWindows(t.when, dayWindows[dk]);
+      for (var wi = 0; wi < wins.length; wi++) {
+        if (effectiveCeiling == null || wins[wi][1] > effectiveCeiling) effectiveCeiling = wins[wi][1];
+      }
+      // Tighten ceiling by any same-day deadline or faux-deadline.
+      function applyDateCeiling(d) {
+        if (!d) return;
+        var dk2 = formatDateKey(d);
+        if (dk2 === dk) {
+          var hh = d.getHours(), mm = d.getMinutes();
+          var mins = hh * 60 + mm;
+          // A date-only deadline lands at 23:59:59.999 via setHours above,
+          // i.e. hh=23/mm=59. Treat as end-of-window (don't over-tighten).
+          if (hh === 0 && mm === 0) mins = 24 * 60 - 1;
+          if (effectiveCeiling == null || mins < effectiveCeiling) effectiveCeiling = mins;
+        } else if (placementDay && d < placementDay) {
+          // Past-due on this placement — urgency is maximal.
+          effectiveCeiling = p.start;
+        }
+        // Future-date deadline: today's ceiling is the window end; slack
+        // for same-day placement is window-bounded. That's fine for v1.
+      }
+      if (item) {
+        applyDateCeiling(item.deadline);
+        applyDateCeiling(item.fauxDeadline);
+      }
+
+      // No same-day constraint → task is effectively unconstrained today.
+      if (effectiveCeiling == null) { p.slackMins = null; return; }
+
+      // Slack = "how much later could this have started and still fit".
+      // latest_start = effectiveCeiling − duration; slack = latest_start − actual_start.
+      // e.g., 11:00–12:00 window, 30-min task placed at 11:00 → latest start 11:30
+      // → slack = 30 min. Matches user's expected semantics.
+      var dur = p.dur != null ? p.dur : (t.dur || 0);
+      var latestStart = effectiveCeiling - dur;
+      var slack = Math.max(0, latestStart - p.start);
+      p.slackMins = slack;
+      // For split tasks (multiple placements sharing task.id), the earliest
+      // chunk's slack is what the user sees on the detail view.
+      if (!(t.id in slackByTaskId) || slack < slackByTaskId[t.id]) {
+        slackByTaskId[t.id] = slack;
+      }
+    });
+  });
+
+  var result = { dayPlacements: dayPlacements, taskUpdates: taskUpdates, newStatuses: newSt, unplaced: unplaced, deadlineMisses: deadlineMisses, placedCount: placedCount, score: score, warnings: schedulerWarnings, timezone: cfg.timezone || null, spacingStats: spacingStats, slackByTaskId: slackByTaskId };
   if (debugMode) result.phaseSnapshots = phaseSnapshots;
   return result;
 }

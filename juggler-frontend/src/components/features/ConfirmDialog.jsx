@@ -5,13 +5,13 @@
 import React from 'react';
 import { getTheme } from '../../theme/colors';
 
-export default function ConfirmDialog({ message, onConfirm, onCancel, darkMode, isMobile }) {
+export default function ConfirmDialog({ message, onConfirm, onCancel, darkMode, isMobile, zIndex }) {
   var theme = getTheme(darkMode);
 
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      background: 'rgba(0,0,0,0.5)', zIndex: 400, display: 'flex',
+      background: 'rgba(0,0,0,0.5)', zIndex: zIndex || 400, display: 'flex',
       alignItems: 'center', justifyContent: 'center'
     }} onClick={onCancel}>
       <div style={{

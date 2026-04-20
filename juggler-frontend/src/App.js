@@ -11,6 +11,7 @@ import AppLayout from './components/layout/AppLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import UpgradePrompt from './components/billing/UpgradePrompt';
 import SchedulerDebug from './components/admin/SchedulerDebug';
+import SchedulerStepper from './components/admin/SchedulerStepper';
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -18,6 +19,10 @@ function AppContent() {
   // Hidden admin route — scheduler debug visualization
   if (window.location.pathname === '/admin/scheduler-debug') {
     return user ? <SchedulerDebug /> : <LoginPage />;
+  }
+  // Hidden admin route — step-by-step scheduler stepper
+  if (window.location.pathname === '/admin/scheduler-stepper') {
+    return user ? <SchedulerStepper /> : <LoginPage />;
   }
 
   // Handle auth callback route
