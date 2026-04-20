@@ -23,8 +23,7 @@ var { APP_ID } = require('../service-identity');
 async function planCheck(authResult) {
   var plans = authResult.plans || {};
   if (plans[APP_ID]) return { hasActivePlan: true, planId: plans[APP_ID] };
-  // No plan claim — allow access (plan enforcement is optional during rollout)
-  return { hasActivePlan: true };
+  return { hasActivePlan: false };
 }
 
 /**

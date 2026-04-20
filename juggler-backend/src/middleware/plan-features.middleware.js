@@ -114,8 +114,9 @@ async function getUserPlanId(userId) {
     });
     if (!res.ok) throw new Error(`Payment service returned ${res.status}`);
     const data = await res.json();
-    const productId = await getProductId();
-    const planId = data.plans?.[productId] || null;
+    // active-plans returns a map keyed by products.productId (app slug),
+    // so look up by PRODUCT_LABEL — same key used in JWT `plans` claims.
+    const planId = data.plans?.[PRODUCT_LABEL] || null;
     // Only cache when user has an active plan — don't cache null so that
     // a user who just subscribed isn't blocked by stale cache
     if (planId) {

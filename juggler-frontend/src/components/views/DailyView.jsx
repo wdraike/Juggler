@@ -516,7 +516,7 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme,
 /* ── Main DailyView ── */
 export default function DailyView({
   selectedDate, selectedDateKey, placements, statuses, onStatusChange,
-  onExpand, darkMode, schedCfg, nowMins, isToday, allTasks,
+  onExpand, darkMode, schedCfg, nowMins, isToday, allTasks, unplaced,
   filter, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile,
   onUpdate, onDelete, showToast, locations, onHourLocationOverride,
   locSchedules, onUpdateLocScheduleOverrides, onUpdateLocScheduleDefaults, onBatchRecurringsDone
@@ -718,6 +718,29 @@ export default function DailyView({
       if ((st === 'done' || st === 'cancel' || st === 'skip') && filter !== 'all' && filter !== 'done' && filter !== st) return false;
       return matchesFilter(t.id);
     });
+    // Merge in scheduler-reported unplaced items for this date. Missed
+    // recurring instances (flex window passed, user hasn't marked done)
+    // live in `unplaced` without a matching DB row in `allTasks` — the
+    // deferred-insert pipeline only persists chunks that actually got
+    // placed. Without this merge they never surface in the Unscheduled
+    // list, and the user can't check them off from here.
+    var rawIds = {};
+    raw.forEach(function (t) { rawIds[t.id] = true; });
+    (unplaced || []).forEach(function (u) {
+      if (!u || !u.id || rawIds[u.id]) return;
+      if (scheduledIds[u.id]) return;
+      if (u.taskType === 'recurring_template') return;
+      // Only show unplaced items whose intended date is the day being viewed.
+      // expandRecurring's `date` field is the occurrence day in M/D.
+      var uDate = u.date || u._candidateDate;
+      if (uDate && uDate !== selectedDateKey) return;
+      if (u.sourceId && scheduledByOccurrence[u.sourceId + '|' + (uDate || '')]) return;
+      var st = statuses[u.id] || '';
+      if ((st === 'done' || st === 'cancel' || st === 'skip') && filter !== 'all' && filter !== 'done' && filter !== st) return;
+      if (!matchesFilter(u.id)) return;
+      raw.push(u);
+      rawIds[u.id] = true;
+    });
     // Dedupe remaining rows by occurrence so N unplaced chunks of one
     // recurring split task show as a single entry with a count.
     var groups = {};
@@ -731,7 +754,7 @@ export default function DailyView({
       var g = groups[k];
       return g.count > 1 ? Object.assign({}, g.task, { _unplacedChunkCount: g.count }) : g.task;
     });
-  }, [allTasks, selectedDateKey, placements, statuses, matchesFilter]);
+  }, [allTasks, unplaced, selectedDateKey, placements, statuses, matchesFilter, filter]);
 
   var nowY = isToday ? ((nowMins - GRID_START * 60) / 60) * hourHeight : null;
 
