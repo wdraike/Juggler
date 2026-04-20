@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { PRI_COLORS, STATUS_OPTIONS, applyDefaults } from '../../state/constants';
 import { toTime24, fromTime24, toDateISO, fromDateISO, formatDateKey, parseDate } from '../../scheduler/dateHelpers';
+import { isAnchorDependentRecur } from '../../scheduler/expandRecurring';
 import { getTheme } from '../../theme/colors';
 import { convertTimeForDisplay, getTimezoneAbbr, getUtcOffset } from '../../utils/timezone';
 import apiClient from '../../services/apiClient';
@@ -265,8 +266,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [flexWhen, setFlexWhen] = useState(isCreate ? false : !!task.flexWhen);
   var [datePinned, setDatePinned] = useState(isCreate ? false : !!task.datePinned);
   // For recurring instances: the template's anchor date (separate from this instance's date)
-  // anchorDate from API is YYYY-MM-DD (date-only)
-  var [anchorDate, setAnchorDate] = useState(isCreate ? '' : (task.anchorDate || ''));
   var [recurType, setRecurType] = useState(isCreate ? 'none' : (task.recur?.type || 'none'));
   var [recurDays, setRecurDays] = useState(isCreate ? 'MTWRF' : (function() {
     var raw = task.recur?.days;
@@ -281,6 +280,35 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [recurMonthDays, setRecurMonthDays] = useState(isCreate ? [1, 15] : (task.recur?.monthDays || [1, 15]));
   var [recurStart, setRecurringStart] = useState(isCreate ? '' : (task.recurStart || ''));
   var [recurEnd, setRecurringEnd] = useState(isCreate ? '' : (task.recurEnd || ''));
+
+  // Whether the current recur config requires a stored anchor (recur_start).
+  // Biweekly, interval, and timesPerCycle-filtered patterns can't run without
+  // one — the scheduler would otherwise fall back to "today" and drift.
+  var recurIsAnchorDependent = React.useMemo(function() {
+    if (!recurring || recurType === 'none') return false;
+    return isAnchorDependentRecur({
+      type: recurType,
+      days: recurDays,
+      timesPerCycle: recurTimesPerCycle,
+      every: recurEvery,
+      unit: recurUnit,
+      monthDays: recurMonthDays
+    });
+  }, [recurring, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays]);
+
+  // Auto-populate recurStart with today when the user picks an anchor-dependent
+  // config and hasn't already set one. Prevents the "Cut Grass scheduled for
+  // today when I did it Friday" class of confusion — user sees a value they
+  // can override, rather than a silent today-fallback in the scheduler.
+  React.useEffect(function() {
+    if (!recurIsAnchorDependent) return;
+    if (recurStart) return;
+    var now = new Date();
+    var y = now.getFullYear();
+    var m = String(now.getMonth() + 1).padStart(2, '0');
+    var d = String(now.getDate()).padStart(2, '0');
+    setRecurringStart(y + '-' + m + '-' + d);
+  }, [recurIsAnchorDependent, recurStart]);
 
   // --- Recurring preferred-time toggle ---
   // For recurringTasks: does the user want a specific preferred time (fixed ± window)
@@ -383,8 +411,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   // Deadline vs day requirement conflict (separate from config warnings so it always runs)
   var deadlineDayWarning = (function() {
     if (!deadline || !dayReq || dayReq === 'any') return null;
-    var deadlineDate = parseDate(deadline);
-    if (!deadlineDate) return null;
+    // `deadline` is stored as ISO (YYYY-MM-DD) in form state, but parseDate
+    // expects M/D. Convert first; parseDate on ISO returns an Invalid Date
+    // and NaN day-of-week, producing "(undefined)" in the warning string.
+    var deadlineDate = parseDate(fromDateISO(deadline));
+    if (!deadlineDate || isNaN(deadlineDate.getTime())) return null;
     var deadlineDayCode = ['Su','M','T','W','R','F','Sa'][deadlineDate.getDay()];
     var deadlineDayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][deadlineDate.getDay()];
     var allowed;
@@ -434,7 +465,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       marker: !!t.marker,
       flexWhen: !!t.flexWhen,
       datePinned: !!t.datePinned,
-      anchorDate: t.anchorDate || '',
       recurType: t.recur?.type || 'none', recurDays: t.recur?.days || 'MTWRF', recurTimesPerCycle: t.recur?.timesPerCycle || 0,
       recurEvery: t.recur?.every || 2, recurUnit: t.recur?.unit || 'days',
       recurMonthDays: t.recur?.monthDays || [1, 15],
@@ -485,7 +515,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setMarker(newSnap.marker);
     setFlexWhen(newSnap.flexWhen);
     setDatePinned(newSnap.datePinned);
-    setAnchorDate(newSnap.anchorDate);
     setRecurType(newSnap.recurType); setRecurDays(newSnap.recurDays); setRecurTimesPerCycle(newSnap.recurTimesPerCycle || 0);
     setRecurEvery(newSnap.recurEvery); setRecurUnit(newSnap.recurUnit);
     setRecurMonthDays(newSnap.recurMonthDays);
@@ -597,9 +626,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (recurType !== snap.recurType || JSON.stringify(recurDays) !== JSON.stringify(snap.recurDays) || recurTimesPerCycle !== snap.recurTimesPerCycle || String(recurEvery) !== String(snap.recurEvery) || recurUnit !== snap.recurUnit || JSON.stringify(recurMonthDays) !== JSON.stringify(snap.recurMonthDays)) {
       changed.recur = all.recur;
     }
-    // Anchor date (template's anchor, separate from instance date)
-    if (anchorDate !== (snap.anchorDate || '')) changed.anchorDate = fromDateISO(anchorDate);
-    // Recurring date range
+    // Recurring date range (recurStart is the sole anchor post-refactor)
     if (recurStart !== (snap.recurStart || '')) changed.recurStart = all.recurStart;
     if (recurEnd !== (snap.recurEnd || '')) changed.recurEnd = all.recurEnd;
     // Always include tz and _timezone when any field changed — the backend needs
@@ -609,7 +636,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       changed._timezone = all._timezone;
     }
     return Object.keys(changed).length > 0 ? changed : null;
-  }, [buildFields, text, project, pri, notes, when, dayReq, recurring, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime, anchorDate]);
+  }, [buildFields, text, project, pri, notes, when, dayReq, recurring, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime]);
 
   // Dirty detection — compare current fields to snapshot
   var [isDirty, setIsDirty] = useState(false);
@@ -620,7 +647,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     var changed = buildChangedFields();
     console.log('[DIRTY]', !!changed, changed ? Object.keys(changed) : 'null', 'when=' + when, 'snapWhen=' + (taskSnapshotRef.current ? taskSnapshotRef.current.when : '?'));
     setIsDirty(!!changed);
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, hasPreferredTime, anchorDate]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, hasPreferredTime]);
 
   // Manual save handler
   // Unpin: revert a drag-pinned task to scheduler control.
@@ -688,7 +715,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   function commitSave(changed) {
     console.log('[SAVE] commitSave for', task.id, 'changed keys:', Object.keys(changed), 'when:', changed.when);
     // Anchor date or recurrence changes regenerate instances (new IDs) — close form after save
-    var willRegenerateInstances = changed.anchorDate !== undefined || changed.recur !== undefined;
+    var willRegenerateInstances = changed.recur !== undefined;
     setSaveStatus('saving');
     var result = onUpdate(task.id, changed);
     // Wait for the API call to confirm before showing "Saved"
@@ -1490,41 +1517,19 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             )}
           </div>}
 
-          {/* Anchor date — for interval/weekly/biweekly recurrence, the date from which cycles are counted */}
-          {!marker && (recurType === 'interval' || ((recurType === 'weekly' || recurType === 'biweekly') && recurTimesPerCycle > 0 && recurTimesPerCycle < recurDays.length)) && (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 5 }}>
-              <label style={lStyle}>
-                <span title="The date from which the interval cycle counts. Change this to reset the cycle (e.g., after completing the task).">{'\u2693'} Anchor date</span>
-                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                  <input type="date" value={anchorDate || ''}
-                    onChange={e => { setAnchorDate(e.target.value || ''); }}
-                    style={iStyle} />
-                  <button onClick={function() {
-                    // Reset anchor to today
-                    var now = new Date();
-                    var y = now.getFullYear();
-                    var m = String(now.getMonth() + 1).padStart(2, '0');
-                    var d = String(now.getDate()).padStart(2, '0');
-                    setAnchorDate(y + '-' + m + '-' + d);
-                  }} title="Reset cycle to start from today"
-                    style={{ fontSize: 9, padding: '2px 8px', borderRadius: 3,
-                      background: TH.inputBg, border: '1px solid ' + TH.border, color: TH.text,
-                      cursor: 'pointer', fontWeight: 600, height: 26, boxSizing: 'border-box'
-                    }}>Today</button>
-                </div>
-              </label>
-              <span style={{ fontSize: 9, color: TH.muted2, paddingBottom: 4 }}>{recurType === 'interval' ? 'intervals count from this date' : 'cycle spacing starts from this date'}</span>
-            </div>
-          )}
-
           {/* Recurrence date range — when to start/stop generating instances */}
           {recurring && !marker && recurType !== 'none' && (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
               <label style={lStyle}>
-                <span title="Date to start generating instances for this recurring task">{'\u23EF\uFE0F'} Recurrence starts</span>
+                <span title={recurIsAnchorDependent
+                  ? 'Required for biweekly, interval, or times-per-cycle patterns — the scheduler measures cycles from this date.'
+                  : 'Date to start generating instances for this recurring task'}>
+                  {'\u23EF\uFE0F'} Recurrence starts
+                  {recurIsAnchorDependent && <span style={{ color: TH.redText, marginLeft: 2 }}>*</span>}
+                </span>
                 <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                  <input type="date" value={recurStart || ''} onChange={e => setRecurringStart(e.target.value || '')} style={iStyle} />
-                  {recurStart && (
+                  <input type="date" value={recurStart || ''} onChange={e => setRecurringStart(e.target.value || '')} style={iStyle} required={recurIsAnchorDependent} />
+                  {recurStart && !recurIsAnchorDependent && (
                     <button onClick={() => setRecurringStart('')} style={{
                       fontSize: 9, background: 'none', border: 'none', color: TH.redText,
                       cursor: 'pointer', padding: 0, fontWeight: 700

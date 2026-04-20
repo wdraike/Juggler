@@ -5,3 +5,4 @@
 const shared = require('juggler-shared/scheduler/expandRecurring');
 
 export const expandRecurring = shared.expandRecurring;
+export const isAnchorDependentRecur = shared.isAnchorDependentRecur;

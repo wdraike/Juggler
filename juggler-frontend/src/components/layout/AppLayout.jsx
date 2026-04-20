@@ -16,7 +16,7 @@ import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts';
 import useDragDrop from '../../hooks/useDragDrop';
 import useIsMobile from '../../hooks/useIsMobile';
 import { getTheme } from '../../theme/colors';
-import { formatDateKey, getWeekStart, parseDate } from '../../scheduler/dateHelpers';
+import { formatDateKey, getWeekStart, parseDate, parseTimeToMinutes } from '../../scheduler/dateHelpers';
 import { DAY_NAMES, applyDefaults } from '../../state/constants';
 import { useAuth } from '../auth/AuthProvider';
 import { useTimezone } from '../../hooks/useTimezone';
@@ -130,6 +130,7 @@ export default function AppLayout() {
   var [appleCalSyncing, setAppleCalSyncing] = useState(false);
   var [appleCalConnected, setAppleCalConnected] = useState(null);
   var [calSyncProgress, setCalSyncProgress] = useState(null); // { phase, detail, pct, provider, calendar }
+  var [schedulerRunning, setSchedulerRunning] = useState(false);
   var editingRef = useRef(false);
   var [schedulerReady, setSchedulerReady] = useState(false);
   var [deleteConfirmTask, setDeleteConfirmTask] = useState(null);
@@ -359,6 +360,37 @@ export default function AppLayout() {
     };
   }, []);
 
+  // Listen for schedule:running / schedule:changed SSE events so the toolbar
+  // can show a "Scheduling..." indicator during a run. schedule:running fires
+  // at the start of a queue-processed run; schedule:changed fires on
+  // completion (including lock-failure + error paths), clearing the flag.
+  useEffect(function() {
+    var attached = null;
+    function handleRunning() { setSchedulerRunning(true); }
+    function handleChanged() { setSchedulerRunning(false); }
+    function attach(es) {
+      es.addEventListener('schedule:running', handleRunning);
+      es.addEventListener('schedule:changed', handleChanged);
+    }
+    var poll = setInterval(function() {
+      var es = window.__jugglerEventSource;
+      if (es && !attached) {
+        attached = es;
+        attach(es);
+        clearInterval(poll);
+      }
+    }, 500);
+    var es = window.__jugglerEventSource;
+    if (es) { attached = es; attach(es); clearInterval(poll); }
+    return function() {
+      clearInterval(poll);
+      if (attached) {
+        attached.removeEventListener('schedule:running', handleRunning);
+        attached.removeEventListener('schedule:changed', handleChanged);
+      }
+    };
+  }, []);
+
   // Derived dates
   var today = useMemo(() => {
     return getNowInTimezone(userTimezone).todayDate;
@@ -480,42 +512,77 @@ export default function AppLayout() {
     return ids;
   }, [visibleTasks, statuses]);
 
-  // Past-due tasks: due date or scheduled date in the past, still open
-  // Split into overdue (has due date) vs stale (only scheduled date) to match
-  // ConflictsView categories — only overdue counts as Action Required
+  // Past-due tasks: due date or scheduled date in the past, still open.
+  // Recurring instances ARE eligible — an evening-medication task still
+  // pending at 8 PM is overdue even if its day-level deadline hasn't rolled
+  // to tomorrow. Four detection paths:
+  //   (a) day-level deadline before today
+  //   (b) scheduled date before today
+  //   (c) intraday: scheduled for today and scheduledAt + dur < now
+  //   (d) scheduler emitted _unplacedReason === 'missed' (lives on unplaced[])
   var pastDueIds = useMemo(() => {
     var ids = new Set();
-    var today = getNowInTimezone(userTimezone).todayDate;
+    var now = getNowInTimezone(userTimezone);
+    var today = now.todayDate;
+    var nowMins = now.nowMins;
+    var todayKey = now.todayKey;
+    // (d) ingest scheduler-reported misses from the unplaced list
+    (unplaced || []).forEach(u => {
+      if (u && u.id && u._unplacedReason === 'missed') ids.add(u.id);
+    });
     visibleTasks.forEach(t => {
       var st = statuses[t.id] || '';
       if (st === 'done' || st === 'cancel' || st === 'skip') return;
-      if (t.generated) return;
+      // (a) day-level deadline passed
       if (t.deadline) {
         var dd = parseDate(t.deadline);
         if (dd && dd < today) { ids.add(t.id); return; }
       }
+      // (b) scheduled date passed
       if (t.date && t.date !== 'TBD') {
         var td = parseDate(t.date);
-        if (td && td < today) ids.add(t.id);
+        if (td && td < today) { ids.add(t.id); return; }
+        // (c) intraday — only for tasks scheduled at a specific time today
+        if (t.date === todayKey && t.time) {
+          var startMins = parseTimeToMinutes(t.time);
+          if (startMins != null) {
+            var dur = Number(t.dur) || 0;
+            if (startMins + dur <= nowMins) ids.add(t.id);
+          }
+        }
       }
     });
     return ids;
-  }, [visibleTasks, statuses]);
+  }, [visibleTasks, statuses, userTimezone, unplaced]);
 
   var overdueIds = useMemo(() => {
     var ids = new Set();
-    var today = getNowInTimezone(userTimezone).todayDate;
+    var now = getNowInTimezone(userTimezone);
+    var today = now.todayDate;
+    var nowMins = now.nowMins;
+    var todayKey = now.todayKey;
+    (unplaced || []).forEach(u => {
+      if (u && u.id && u._unplacedReason === 'missed') ids.add(u.id);
+    });
     visibleTasks.forEach(t => {
       var st = statuses[t.id] || '';
       if (st === 'done' || st === 'cancel' || st === 'skip') return;
-      if (t.generated) return;
       if (t.deadline) {
         var dd = parseDate(t.deadline);
-        if (dd && dd < today) ids.add(t.id);
+        if (dd && dd < today) { ids.add(t.id); return; }
+      }
+      // Intraday overdue: scheduled for today and the task's window
+      // (start → start+dur) has fully elapsed. Requires a concrete time.
+      if (t.date === todayKey && t.time) {
+        var startMins = parseTimeToMinutes(t.time);
+        if (startMins != null) {
+          var dur = Number(t.dur) || 0;
+          if (startMins + dur <= nowMins) ids.add(t.id);
+        }
       }
     });
     return ids;
-  }, [visibleTasks, statuses]);
+  }, [visibleTasks, statuses, userTimezone, unplaced]);
 
   // Fixed tasks: when contains 'fixed'
   var fixedIds = useMemo(() => {
@@ -976,6 +1043,7 @@ export default function AppLayout() {
           msftCalSyncing={msftCalSyncing}
           calSyncing={gcalSyncing || msftCalSyncing || appleCalSyncing}
           calSyncProgress={calSyncProgress}
+          schedulerRunning={schedulerRunning}
           onShowCalSync={() => setShowCalSync(true)}
           onShowHelp={() => setShowHelp(true)}
           onAddTask={() => { setShowCreateForm(true); setExpandedTasks([]); }}

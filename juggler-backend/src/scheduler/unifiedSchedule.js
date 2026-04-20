@@ -373,9 +373,23 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       // or read-only schedule views), the full-duration row needs in-scheduler
       // splitting. The splitTotal check avoids re-splitting pre-chunked rows.
       var canSplit = !!(t.split && t.splitMin > 0 && (!t.splitTotal || t.splitTotal <= 1));
+      // Precompute earliest-date as a numeric ms timestamp. Sort comparators
+      // (allConstrained + phase1Queue) were calling parseDate(a.task.date) +
+      // parseDate(b.task.date) on every comparison; caching here skips
+      // hundreds of redundant parses per sort.
+      var earlyMs;
+      if (earliest) {
+        earlyMs = earliest.getTime();
+      } else if (t.date) {
+        var ed = parseDate(t.date);
+        earlyMs = ed ? ed.getTime() : Infinity;
+      } else {
+        earlyMs = Infinity;
+      }
       pool.push({
         task: t, remaining: effectiveDur, totalDur: effectiveDur,
         earliestDate: earliest, deadline: deadline, ceiling: ceiling,
+        earliestDateMs: earlyMs,
         splittable: canSplit,
         minChunk: canSplit ? t.splitMin : effectiveDur,
         _parts: [],
@@ -1447,13 +1461,10 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     var aW = whenAvailableMinutes(a.task);
     var bW = whenAvailableMinutes(b.task);
     if (aW !== bW) return aW - bW;
-    // 4. Earliest instance date first
-    var aDate = a.earliestDate || (a.task && a.task.date ? parseDate(a.task.date) : null);
-    var bDate = b.earliestDate || (b.task && b.task.date ? parseDate(b.task.date) : null);
-    if (aDate && bDate) {
-      var dt = aDate.getTime() - bDate.getTime();
-      if (dt !== 0) return dt;
-    }
+    // 4. Earliest instance date first (cached at pool construction)
+    var aMs = a.earliestDateMs != null ? a.earliestDateMs : Infinity;
+    var bMs = b.earliestDateMs != null ? b.earliestDateMs : Infinity;
+    if (aMs !== bMs && aMs !== Infinity && bMs !== Infinity) return aMs - bMs;
     // 5. Deterministic id tie-break
     return a.task.id < b.task.id ? -1 : (a.task.id > b.task.id ? 1 : 0);
   }
@@ -1787,12 +1798,10 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     if (b.totalDur !== a.totalDur) return b.totalDur - a.totalDur;
     // 4. Earliest earliestDate first — matches user intuition when
     //    otherwise-identical constrained tasks share all prior keys.
-    var aDate = a.earliestDate || (a.task && a.task.date ? parseDate(a.task.date) : null);
-    var bDate = b.earliestDate || (b.task && b.task.date ? parseDate(b.task.date) : null);
-    if (aDate && bDate) {
-      var dt = aDate.getTime() - bDate.getTime();
-      if (dt !== 0) return dt;
-    }
+    //    (cached at pool construction to skip parseDate per comparison)
+    var aMs = a.earliestDateMs != null ? a.earliestDateMs : Infinity;
+    var bMs = b.earliestDateMs != null ? b.earliestDateMs : Infinity;
+    if (aMs !== bMs && aMs !== Infinity && bMs !== Infinity) return aMs - bMs;
     // 5. Deterministic id
     return a.task.id < b.task.id ? -1 : (a.task.id > b.task.id ? 1 : 0);
   });

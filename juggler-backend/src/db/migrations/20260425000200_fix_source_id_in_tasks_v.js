@@ -1,14 +1,18 @@
 /**
- * Restore preferred_time (boolean) to tasks_v and tasks_with_sync_v.
+ * Rebuild tasks_v / tasks_with_sync_v with one fix:
  *
- * task_masters has a `preferred_time` column that tells the scheduler
- * which UI mode the user picked: 1 = Time Window (use preferred_time_mins
- * ± time_flex), 0/null = Time Blocks (use the `when` tag list). It is the
- * authoritative mode signal — the two modes are mutually exclusive.
+ *   source_id on the instance union branch now uses
+ *     CASE WHEN m.recurring = 1 THEN m.id ELSE NULL END
  *
- * Migration 20260425000000_add_slack_mins rebuilt the views without this
- * column. This migration puts it back. Idempotent on the column itself
- * (column already exists on task_masters).
+ * Prior migrations (20260425000000_add_slack_mins and a now-removed
+ * restore_preferred_time attempt) set `m.id AS source_id` unconditionally on
+ * that branch, which made one-off task rows carry a source_id pointing at
+ * their own master. buildSourceMap only keys recurring templates, so every
+ * one-off task read triggered a "[rowToTask] Orphaned instance …" warning.
+ * Worse, any downstream code treating `sourceId` as a truthy "this row is
+ * an instance of a template" flag would misclassify one-offs.
+ *
+ * This migration is view-definition-only; no table data changes.
  */
 exports.up = async function(knex) {
   await knex.raw('DROP VIEW IF EXISTS tasks_with_sync_v');
@@ -16,7 +20,6 @@ exports.up = async function(knex) {
 
   await knex.raw(`
     CREATE VIEW tasks_v AS
-    -- Template rows from recurring masters
     SELECT
       m.id                         AS id,
       m.user_id                    AS user_id,
@@ -41,7 +44,6 @@ exports.up = async function(knex) {
       m.recur_start                AS recur_start,
       m.recur_end                  AS recur_end,
       m.marker                     AS marker,
-      m.preferred_time             AS preferred_time,
       m.preferred_time_mins        AS preferred_time_mins,
       m.travel_before              AS travel_before,
       m.travel_after               AS travel_after,
@@ -81,7 +83,6 @@ exports.up = async function(knex) {
 
     UNION ALL
 
-    -- Instance rows (one-shots + recurring instances)
     SELECT
       i.id                         AS id,
       i.user_id                    AS user_id,
@@ -106,7 +107,6 @@ exports.up = async function(knex) {
       m.recur_start                AS recur_start,
       m.recur_end                  AS recur_end,
       m.marker                     AS marker,
-      m.preferred_time             AS preferred_time,
       m.preferred_time_mins        AS preferred_time_mins,
       m.travel_before              AS travel_before,
       m.travel_after               AS travel_after,
@@ -119,7 +119,7 @@ exports.up = async function(knex) {
       m.start_after_at             AS start_after_at,
       m.prev_when                  AS prev_when,
       m.tz                         AS tz,
-      m.id                         AS source_id,
+      CASE WHEN m.recurring = 1 THEN m.id ELSE NULL END AS source_id,
       i.scheduled_at               AS scheduled_at,
       i.date_pinned                AS date_pinned,
       i.\`date\`                   AS \`date\`,
@@ -151,8 +151,7 @@ exports.up = async function(knex) {
       v.id, v.user_id, v.task_type, v.text, v.dur, v.pri, v.project, v.section,
       v.notes, v.location, v.tools, v.\`when\`, v.day_req, v.recurring, v.rigid,
       v.time_flex, v.flex_when, v.split, v.split_min, v.recur, v.recur_start,
-      v.recur_end, v.marker, v.preferred_time, v.preferred_time_mins,
-      v.travel_before, v.travel_after,
+      v.recur_end, v.marker, v.preferred_time_mins, v.travel_before, v.travel_after,
       v.depends_on, v.desired_at, v.desired_date, v.disabled_at, v.disabled_reason,
       v.deadline, v.start_after_at, v.prev_when, v.tz, v.source_id, v.scheduled_at,
       v.date_pinned, v.\`date\`, v.\`day\`, v.\`time\`, v.\`status\`, v.time_remaining,
@@ -187,6 +186,5 @@ exports.up = async function(knex) {
 exports.down = async function(knex) {
   await knex.raw('DROP VIEW IF EXISTS tasks_with_sync_v');
   await knex.raw('DROP VIEW IF EXISTS tasks_v');
-  // Views omitted for brevity; rolling back would require recreating with
-  // the pre-migration definition. In practice, just re-run migrations.
+  // Previous state restored by rerunning 20260425000000.
 };

@@ -203,6 +203,63 @@ describe('expandRecurring', () => {
     });
   });
 
+  describe('recurStart is the anchor', () => {
+    test('biweekly parity follows recurStart, not src.date', () => {
+      // recurStart = 3/2 (week N). Biweekly-M should match 3/2, 3/16, 3/30 —
+      // NOT 3/9, 3/23 (odd weeks). src.date intentionally differs from
+      // recurStart to verify anchor swap is active.
+      const src = makeSource({
+        id: 'bw',
+        taskType: 'recurring_template',
+        date: '3/1',            // Sunday — legacy scheduled_at date
+        recurStart: '2026-03-02', // Monday — the true anchor
+        recur: { type: 'biweekly', days: 'M' }
+      });
+      const result = expandRecurring([src], new Date(2026, 2, 2), new Date(2026, 3, 6));
+      const dates = result.map(t => t.date);
+      expect(dates).toContain('3/2');
+      expect(dates).toContain('3/16');
+      expect(dates).toContain('3/30');
+      expect(dates).not.toContain('3/9');
+      expect(dates).not.toContain('3/23');
+    });
+
+    test('interval anchor itself is an instance (>= 0 semantics)', () => {
+      // recurStart = 3/1. every 3 days from that anchor: 3/1, 3/4, 3/7, ...
+      const src = makeSource({
+        id: 'iv',
+        taskType: 'recurring_template',
+        date: '3/1',
+        recurStart: '2026-03-01',
+        recur: { type: 'interval', every: 3, unit: 'days' }
+      });
+      const result = expandRecurring([src], new Date(2026, 2, 1), new Date(2026, 2, 10));
+      const dates = result.map(t => t.date);
+      expect(dates).toContain('3/1');
+      expect(dates).toContain('3/4');
+      expect(dates).toContain('3/7');
+      expect(dates).toContain('3/10');
+    });
+
+    test('recurStart null falls back to src.date', () => {
+      const src = makeSource({
+        id: 'fb',
+        taskType: 'recurring_template',
+        date: '3/2',
+        recur: { type: 'biweekly', days: 'M' }
+        // no recurStart
+      });
+      const result = expandRecurring([src], new Date(2026, 2, 2), new Date(2026, 3, 6));
+      const dates = result.map(t => t.date);
+      // Should behave identically to the existing biweekly test — src.date
+      // carries the anchor when recurStart is absent.
+      expect(dates).toContain('3/16');
+      expect(dates).toContain('3/30');
+      expect(dates).not.toContain('3/9');
+      expect(dates).not.toContain('3/23');
+    });
+  });
+
   describe('timesPerCycle with future-only existing instances', () => {
     // Repro: brand-new template, but prior scheduler runs persisted instances
     // only in cycles 2 and 3. Cycle 1 (today) has no existing instance. The

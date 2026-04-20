@@ -19,6 +19,7 @@ const { enqueueScheduleRun: _enqueueScheduleRun } = require('../scheduler/schedu
 const sseEmitter = require('../lib/sse-emitter');
 const { isLocked, enqueueWrite, splitFields, flushQueue } = require('../lib/task-write-queue');
 const tasksWrite = require('../lib/tasks-write');
+const { isAnchorDependentRecur } = require('../../../shared/scheduler/expandRecurring');
 // Wrap enqueueScheduleRun to also emit SSE event so frontends refresh
 // immediately. `ids` (optional) is the list of task ids the caller just
 // wrote — when present, the frontend can upsert only those rows instead of
@@ -243,9 +244,14 @@ function buildSourceMap(rows) {
  * If sourceMap is provided, recurring instances inherit template fields from their source.
  */
 function rowToTask(row, timezone, sourceMap) {
-  // Merge template fields from source for thin recurring instances
+  // Merge template fields from source for thin recurring instances.
+  // tasks_v currently (mis-)sets source_id = master_id for ALL instance rows
+  // including one-off tasks (task_type='task'). For one-offs that's harmless
+  // — we just don't merge anything — but we also don't want to spam warnings
+  // every read. Only warn for genuinely recurring instances whose template is
+  // absent.
   var src = sourceMap && row.source_id ? sourceMap[row.source_id] : null;
-  if (!src && row.source_id && sourceMap) {
+  if (!src && row.source_id && sourceMap && row.task_type === 'recurring_instance') {
     console.warn('[rowToTask] Orphaned instance: ' + row.id + ' references missing template ' + row.source_id);
   }
   // Disabled instances are frozen — do not inherit template fields so they stay locked in place
@@ -705,6 +711,26 @@ function validateTaskInput(body) {
     var validRecurTypes = ['daily', 'weekly', 'biweekly', 'monthly', 'interval', 'none'];
     var rType = (body.recur.type || '').toLowerCase();
     if (rType && validRecurTypes.indexOf(rType) === -1) errors.push('Invalid recurrence type: ' + rType);
+    // Anchor-dependent recur types (biweekly, interval, timesPerCycle filtering)
+    // need a stored recur_start. Without it, the scheduler falls back to
+    // "today" as the anchor, which causes cycle boundaries + parity to drift
+    // run-to-run. Two failure cases:
+    //   1. Create: caller sets _requireRecurStartIfAnchor (from createTask) —
+    //      recurStart missing entirely is rejected.
+    //   2. Update: caller explicitly clears recurStart (null / '') while the
+    //      recur type is still anchor-dependent — reject so the user can't
+    //      accidentally orphan the anchor. `undefined` means "not touched",
+    //      which is fine; the existing DB value remains.
+    if (isAnchorDependentRecur(body.recur)) {
+      var rs = body.recurStart;
+      if (body._requireRecurStartIfAnchor) {
+        if (rs === undefined || rs === null || String(rs).trim() === '') {
+          errors.push('Recurrence start date is required for biweekly, interval, or times-per-cycle patterns');
+        }
+      } else if (rs === null || (typeof rs === 'string' && rs.trim() === '')) {
+        errors.push('Recurrence start date cannot be cleared on biweekly, interval, or times-per-cycle patterns');
+      }
+    }
   }
   return errors;
 }
@@ -713,8 +739,10 @@ async function createTask(req, res) {
   try {
     // Validate input
     req.body._requireText = true;
+    req.body._requireRecurStartIfAnchor = true;
     var validationErrors = validateTaskInput(req.body);
     delete req.body._requireText;
+    delete req.body._requireRecurStartIfAnchor;
     if (validationErrors.length > 0) {
       return res.status(400).json({ error: validationErrors.join('; ') });
     }
@@ -1096,7 +1124,17 @@ async function updateTask(req, res) {
           } else {
             // Incremental cleanup: only delete instances that no longer match
             var _dateMatch = require('../../shared/scheduler/dateMatchesRecurrence');
-            var srcDateStr = updatedTmpl.scheduled_at ? utcToLocal(updatedTmpl.scheduled_at, tz).date : null;
+            // Prefer recur_start as the anchor (matches expandRecurring's new
+            // model). Fall back to scheduled_at for legacy templates without
+            // recur_start set.
+            var srcDateStr = updatedTmpl.recur_start
+              ? (updatedTmpl.recur_start instanceof Date
+                  ? _dateHelpers.formatDateKey(updatedTmpl.recur_start)
+                  : (function() {
+                      var iso = String(updatedTmpl.recur_start).match(/^(\d{4})-(\d{2})-(\d{2})/);
+                      return iso ? Number(iso[2]) + '/' + Number(iso[3]) : String(updatedTmpl.recur_start);
+                    })())
+              : (updatedTmpl.scheduled_at ? utcToLocal(updatedTmpl.scheduled_at, tz).date : null);
 
             var pendingInstances = await trx('tasks_v')
               .where({ source_id: id, user_id: req.user.id, task_type: 'recurring_instance' })

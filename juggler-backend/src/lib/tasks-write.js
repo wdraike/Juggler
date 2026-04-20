@@ -373,7 +373,15 @@ async function updateTasksWhere(dbOrTrx, userId, applyWhere, changes) {
   // error against task_instances.
   var instanceKeys = Object.keys(split.instance);
   var instanceHasRealChange = instanceKeys.some(function(k) { return k !== 'updated_at'; });
-  if (Object.keys(split.master).length > 0) {
+  // Same bail-out on the master side. The scheduler's persist path only
+  // mutates instance-side columns (scheduled_at / date / time / unscheduled /
+  // dur). Its batched UPDATE arrives here with master keys == only
+  // updated_at. Running the master UPDATE in that case is a pure round-trip
+  // cost — cache-staleness detection already picks up the instance-side
+  // updated_at bump via the tasks_v UNION.
+  var masterKeys = Object.keys(split.master);
+  var masterHasRealChange = masterKeys.some(function(k) { return k !== 'updated_at'; });
+  if (masterHasRealChange) {
     masterUpdated = await applyWhere(dbOrTrx('task_masters').where('user_id', userId)).update(split.master);
   }
   if (instanceHasRealChange) {

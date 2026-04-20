@@ -55,18 +55,18 @@ function dateMatchesRecurrence(dateStr, recur, srcDateStr, parseDate) {
     var unit = recur.unit || 'days';
     if (unit === 'days') {
       var between = Math.round((cursor.getTime() - srcDate.getTime()) / 86400000);
-      return between > 0 && between % every === 0;
+      return between >= 0 && between % every === 0;
     } else if (unit === 'weeks') {
       var betweenD = Math.round((cursor.getTime() - srcDate.getTime()) / 86400000);
-      return betweenD > 0 && betweenD % (every * 7) === 0;
+      return betweenD >= 0 && betweenD % (every * 7) === 0;
     } else if (unit === 'months') {
       if (cursor.getDate() !== srcDate.getDate()) return false;
       var monthDiff = (cursor.getFullYear() - srcDate.getFullYear()) * 12 + (cursor.getMonth() - srcDate.getMonth());
-      return monthDiff > 0 && monthDiff % every === 0;
+      return monthDiff >= 0 && monthDiff % every === 0;
     } else if (unit === 'years') {
       if (cursor.getMonth() !== srcDate.getMonth() || cursor.getDate() !== srcDate.getDate()) return false;
       var yearDiff = cursor.getFullYear() - srcDate.getFullYear();
-      return yearDiff > 0 && yearDiff % every === 0;
+      return yearDiff >= 0 && yearDiff % every === 0;
     }
   }
 

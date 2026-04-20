@@ -26,26 +26,32 @@ var MAX_LOCK_AGE = 5 * 60 * 1000;    // stop heartbeat after 5 min
 async function acquireLock(userId) {
   var token = crypto.randomUUID();
 
-  return db.transaction(async function(trx) {
-    // Clear expired lock using MySQL's own clock — no JS Date timezone issues
-    await trx.raw(
-      'DELETE FROM sync_locks WHERE user_id = ? AND expires_at <= NOW()',
-      [userId]
-    );
+  // Clear expired lock using MySQL's own clock — no JS Date timezone issues.
+  // Kept (not deferred to the background sweep) because the sweep interval
+  // (15s) plus the TTL window leaves up to ~45s where an expired-but-unswept
+  // lock would spuriously reject new acquirers.
+  //
+  // No transaction wrapper: the DELETE + INSERT don't need atomicity. If
+  // another process inserts between our DELETE and INSERT, our INSERT trips
+  // ER_DUP_ENTRY and we correctly return not-acquired. Dropping BEGIN/COMMIT
+  // saves two round-trips per lock acquisition.
+  await db.raw(
+    'DELETE FROM sync_locks WHERE user_id = ? AND expires_at <= NOW()',
+    [userId]
+  );
 
-    try {
-      await trx.raw(
-        'INSERT INTO sync_locks (user_id, lock_token, acquired_at, expires_at) VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? SECOND))',
-        [userId, token, LOCK_TTL_SECONDS]
-      );
-      return { acquired: true, token: token };
-    } catch (err) {
-      if (err.code === 'ER_DUP_ENTRY') {
-        return { acquired: false };
-      }
-      throw err;
+  try {
+    await db.raw(
+      'INSERT INTO sync_locks (user_id, lock_token, acquired_at, expires_at) VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL ? SECOND))',
+      [userId, token, LOCK_TTL_SECONDS]
+    );
+    return { acquired: true, token: token };
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      return { acquired: false };
     }
-  });
+    throw err;
+  }
 }
 
 async function releaseLock(userId, token) {

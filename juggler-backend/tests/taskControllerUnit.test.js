@@ -9,7 +9,7 @@ jest.mock('../src/db', () => {
   return mock;
 });
 
-const { rowToTask, taskToRow, buildSourceMap, TEMPLATE_FIELDS } = require('../src/controllers/task.controller');
+const { rowToTask, taskToRow, buildSourceMap, TEMPLATE_FIELDS, validateTaskInput } = require('../src/controllers/task.controller');
 const TZ = 'America/New_York';
 
 function makeRow(overrides) {
@@ -315,5 +315,88 @@ describe('buildSourceMap', () => {
     expect(map['t1'].text).toBe('Lunch');
     expect(map['t2'].text).toBe('Breakfast');
     expect(map['regular']).toBeUndefined();
+  });
+});
+
+describe('validateTaskInput — anchor-dependent recur requires recurStart', () => {
+  test('create rejects biweekly without recurStart', () => {
+    const errs = validateTaskInput({
+      _requireRecurStartIfAnchor: true,
+      recur: { type: 'biweekly', days: 'M' }
+    });
+    expect(errs.some(e => /Recurrence start date is required/i.test(e))).toBe(true);
+  });
+
+  test('create rejects interval without recurStart', () => {
+    const errs = validateTaskInput({
+      _requireRecurStartIfAnchor: true,
+      recur: { type: 'interval', every: 3, unit: 'days' }
+    });
+    expect(errs.some(e => /Recurrence start date is required/i.test(e))).toBe(true);
+  });
+
+  test('create rejects weekly+timesPerCycle without recurStart', () => {
+    const errs = validateTaskInput({
+      _requireRecurStartIfAnchor: true,
+      recur: { type: 'weekly', days: 'MTWRFUS', timesPerCycle: 1 }
+    });
+    expect(errs.some(e => /Recurrence start date is required/i.test(e))).toBe(true);
+  });
+
+  test('create allows biweekly WITH recurStart', () => {
+    const errs = validateTaskInput({
+      _requireRecurStartIfAnchor: true,
+      recur: { type: 'biweekly', days: 'M' },
+      recurStart: '2026-04-20'
+    });
+    expect(errs.some(e => /Recurrence start date/i.test(e))).toBe(false);
+  });
+
+  test('create allows daily without recurStart (not anchor-dependent)', () => {
+    const errs = validateTaskInput({
+      _requireRecurStartIfAnchor: true,
+      recur: { type: 'daily' }
+    });
+    expect(errs.some(e => /Recurrence start date/i.test(e))).toBe(false);
+  });
+
+  test('create allows weekly (no tpc) without recurStart', () => {
+    const errs = validateTaskInput({
+      _requireRecurStartIfAnchor: true,
+      recur: { type: 'weekly', days: 'MWF' }
+    });
+    expect(errs.some(e => /Recurrence start date/i.test(e))).toBe(false);
+  });
+
+  test('create allows monthly by monthDays without recurStart', () => {
+    const errs = validateTaskInput({
+      _requireRecurStartIfAnchor: true,
+      recur: { type: 'monthly', monthDays: [1, 15] }
+    });
+    expect(errs.some(e => /Recurrence start date/i.test(e))).toBe(false);
+  });
+
+  test('update without _requireRecurStartIfAnchor: recurStart undefined is OK', () => {
+    // Client only sending changed fields; existing DB recurStart remains.
+    const errs = validateTaskInput({
+      recur: { type: 'biweekly', days: 'M' }
+    });
+    expect(errs.some(e => /Recurrence start date/i.test(e))).toBe(false);
+  });
+
+  test('update rejects explicit clearing of recurStart while anchor-dependent', () => {
+    const errs = validateTaskInput({
+      recur: { type: 'biweekly', days: 'M' },
+      recurStart: ''
+    });
+    expect(errs.some(e => /cannot be cleared/i.test(e))).toBe(true);
+  });
+
+  test('update rejects null recurStart while anchor-dependent', () => {
+    const errs = validateTaskInput({
+      recur: { type: 'interval', every: 2, unit: 'weeks' },
+      recurStart: null
+    });
+    expect(errs.some(e => /cannot be cleared/i.test(e))).toBe(true);
   });
 });

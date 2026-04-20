@@ -10,6 +10,32 @@ var DAY_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
 var DOW_TO_CODE = ['U', 'M', 'T', 'W', 'R', 'F', 'S'];
 
+// Parse an anchor date from either a Date object, an ISO YYYY-MM-DD string,
+// or an M/D string. Returns a Date at local-midnight, or null.
+// parseDate (from dateHelpers) only understands M/D, so ISO recur_start values
+// silently became Invalid Date before this helper existed.
+function parseAnchor(val) {
+  if (!val) return null;
+  if (val instanceof Date) {
+    var d = new Date(val.getTime());
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+  var s = String(val);
+  var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  return parseDate(s);
+}
+
+// Resolve the recurrence anchor for a source. recurStart is the canonical
+// anchor; src.date (scheduled_at-derived) is a legacy fallback; startDate is
+// the final safety net so expansion still produces output for null anchors.
+function getAnchor(src, startDate) {
+  return parseAnchor(src.recurStart) || parseAnchor(src.date) || (function() {
+    var d = new Date(startDate); d.setHours(0, 0, 0, 0); return d;
+  })();
+}
+
 function doesDayMatch(dow, daysSpec, dayMap) {
   if (typeof daysSpec === 'object' && !Array.isArray(daysSpec)) {
     return daysSpec[DOW_TO_CODE[dow]] ? { match: true, state: daysSpec[DOW_TO_CODE[dow]] } : { match: false };
@@ -88,15 +114,14 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
     else if (r.type === 'monthly') cycleDays = 30;
     else cycleDays = 7; // daily and weekly
     var targetInterval = cycleDays / tpc;
-    var srcDate = parseDate(src.date);
-    if (!srcDate) srcDate = new Date(startDate);
+    var anchor = getAnchor(src, startDate);
 
     // 1. Collect all candidate dates in the expansion window
     var candidates = [];
     var c = new Date(startDate); c.setHours(0, 0, 0, 0);
     var e2 = new Date(endDate); e2.setHours(23, 59, 59, 999);
     while (c <= e2) {
-      if (c >= srcDate) {
+      if (c >= anchor) {
         var cStr = formatDateKey(c);
         {
           var cDow = c.getDay();
@@ -107,7 +132,7 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
             var days = r.days || 'MTWRF';
             if (doesDayMatch(cDow, days, dayMap).match) {
               if (r.type === 'biweekly') {
-                var dd = Math.round((c.getTime() - srcDate.getTime()) / 86400000);
+                var dd = Math.round((c.getTime() - anchor.getTime()) / 86400000);
                 isCandidate = Math.floor(dd / 7) % 2 === 0;
               } else {
                 isCandidate = true;
@@ -132,71 +157,64 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
       c.setDate(c.getDate() + 1);
     }
 
-    // 2. Find the last existing instance date BEFORE the expansion window as
-    // the starting reference. Existing placements INSIDE the window are
-    // already accounted for by the per-cycle existingBySourceDate filter and
-    // slotsNeeded math; using them here would warp cycle 1's idealDate (e.g.,
-    // a placement at week+2 would push cycle 1's ideal into the future and
-    // cause the closest-candidate pick to land at the end of cycle 1 instead
-    // of its natural anchor).
-    var windowStart = new Date(startDate); windowStart.setHours(0, 0, 0, 0);
-    var lastPlaced = null;
-    allTasks.forEach(function(t) {
-      if (t.sourceId !== src.id) return;
-      if (t.taskType !== 'recurring_instance' && !t.generated) return;
-      var d = parseDate(t.date);
-      if (!d) return;
-      if (d >= windowStart) return;
-      if (!lastPlaced || d > lastPlaced) lastPlaced = d;
-    });
-
-    // 3. Pick best tpc dates per cycle using target-interval steering
+    // 2. Pick best tpc dates per cycle using target-interval steering.
+    // Cycle boundaries are anchored to `anchor + k*cycleDays` so they are
+    // deterministic and independent of window position. lastPlaced evolves
+    // from picks within this call only — it is not pre-seeded from DB rows.
     var picked = {};
-    var ci = 0;
-    while (ci < candidates.length) {
-      // Determine cycle boundary: collect candidates within cycleDays of first
-      var cycleStart = candidates[ci].date;
-      var cycleEnd = new Date(cycleStart);
-      cycleEnd.setDate(cycleEnd.getDate() + cycleDays);
-      var cycleCandidates = [];
-      while (ci < candidates.length && candidates[ci].date < cycleEnd) {
-        cycleCandidates.push(candidates[ci]);
-        ci++;
-      }
+    var lastPlaced = null;
 
-      // Skip candidates that already exist in DB
-      var available = cycleCandidates.filter(function(cd) {
-        return !existingBySourceDate[src.id + '|' + cd.key];
-      });
-      // Count existing instances in this cycle
-      var existingInCycle = cycleCandidates.length - available.length;
-      var slotsNeeded = Math.max(0, tpc - existingInCycle);
-      if (slotsNeeded === 0 || available.length === 0) continue;
+    if (candidates.length > 0) {
+      var firstCandMs = candidates[0].date.getTime();
+      var anchorMs = anchor.getTime();
+      var daysFromAnchor = Math.floor((firstCandMs - anchorMs) / 86400000);
+      var kStart = Math.floor(daysFromAnchor / cycleDays);
+      var cycleStart = new Date(anchor);
+      cycleStart.setDate(cycleStart.getDate() + kStart * cycleDays);
 
-      // Greedy pick: choose the candidate closest to lastPlaced + targetInterval.
-      // For the very first pick (no lastPlaced), target the cycle start itself
-      // so the first instance lands on/near the anchor date, not a week later.
-      var ref = lastPlaced || null;
-      for (var pi = 0; pi < slotsNeeded && available.length > 0; pi++) {
-        var idealDate;
-        if (ref) {
-          idealDate = new Date(ref);
-          idealDate.setDate(idealDate.getDate() + Math.round(targetInterval));
-        } else {
-          idealDate = new Date(cycleStart);
+      var ci = 0;
+      while (ci < candidates.length) {
+        var cycleEnd = new Date(cycleStart);
+        cycleEnd.setDate(cycleEnd.getDate() + cycleDays);
+        var cycleCandidates = [];
+        while (ci < candidates.length && candidates[ci].date < cycleEnd) {
+          cycleCandidates.push(candidates[ci]);
+          ci++;
         }
 
-        // Find candidate closest to ideal date
-        var bestIdx = 0;
-        var bestDist = Infinity;
-        for (var ai = 0; ai < available.length; ai++) {
-          var dist = Math.abs(Math.round((available[ai].date.getTime() - idealDate.getTime()) / 86400000));
-          if (dist < bestDist) { bestDist = dist; bestIdx = ai; }
+        var available = cycleCandidates.filter(function(cd) {
+          return !existingBySourceDate[src.id + '|' + cd.key];
+        });
+        var existingInCycle = cycleCandidates.length - available.length;
+        var slotsNeeded = Math.max(0, tpc - existingInCycle);
+
+        if (slotsNeeded > 0 && available.length > 0) {
+          // Greedy pick: closest candidate to lastPlaced + targetInterval.
+          // First pick (no lastPlaced) targets the cycle start — which equals
+          // anchor in cycle 0 — so the first instance lands on/near the anchor.
+          var ref = lastPlaced || null;
+          for (var pi = 0; pi < slotsNeeded && available.length > 0; pi++) {
+            var idealDate;
+            if (ref) {
+              idealDate = new Date(ref);
+              idealDate.setDate(idealDate.getDate() + Math.round(targetInterval));
+            } else {
+              idealDate = new Date(cycleStart);
+            }
+            var bestIdx = 0;
+            var bestDist = Infinity;
+            for (var ai = 0; ai < available.length; ai++) {
+              var dist = Math.abs(Math.round((available[ai].date.getTime() - idealDate.getTime()) / 86400000));
+              if (dist < bestDist) { bestDist = dist; bestIdx = ai; }
+            }
+            picked[available[bestIdx].key] = true;
+            ref = available[bestIdx].date;
+            lastPlaced = ref;
+            available.splice(bestIdx, 1);
+          }
         }
-        picked[available[bestIdx].key] = true;
-        ref = available[bestIdx].date;
-        lastPlaced = ref;
-        available.splice(bestIdx, 1);
+
+        cycleStart = cycleEnd;
       }
     }
 
@@ -212,16 +230,10 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
 
     sources.forEach(function(src) {
       var r = src.recur;
-      var srcDate = parseDate(src.date);
-      if (!srcDate) srcDate = new Date(startDate);
-      if (cursor < srcDate) return;
-      // Respect recurring date range — don't generate outside start/end bounds
-      if (src.recurStart) {
-        var hs = parseDate(src.recurStart);
-        if (hs && cursor < hs) return;
-      }
+      var anchor = getAnchor(src, startDate);
+      if (cursor < anchor) return;
       if (src.recurEnd) {
-        var he = parseDate(src.recurEnd);
+        var he = parseAnchor(src.recurEnd);
         if (he && cursor > he) return;
       }
 
@@ -234,7 +246,7 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         if (!dayResult.match) return;
         var dayState = dayResult.state;
         if (r.type === 'biweekly') {
-          var daysDiff = Math.round((cursor.getTime() - srcDate.getTime()) / 86400000);
+          var daysDiff = Math.round((cursor.getTime() - anchor.getTime()) / 86400000);
           if (Math.floor(daysDiff / 7) % 2 !== 0) return;
         }
         match = true;
@@ -252,20 +264,20 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         var every = r.every || 2;
         var unit = r.unit || 'days';
         if (unit === 'days') {
-          var between = Math.round((cursor.getTime() - srcDate.getTime()) / 86400000);
-          if (between > 0 && between % every === 0) match = true;
+          var between = Math.round((cursor.getTime() - anchor.getTime()) / 86400000);
+          if (between >= 0 && between % every === 0) match = true;
         } else if (unit === 'weeks') {
-          var betweenD = Math.round((cursor.getTime() - srcDate.getTime()) / 86400000);
-          if (betweenD > 0 && betweenD % (every * 7) === 0) match = true;
+          var betweenD = Math.round((cursor.getTime() - anchor.getTime()) / 86400000);
+          if (betweenD >= 0 && betweenD % (every * 7) === 0) match = true;
         } else if (unit === 'months') {
-          if (cursor.getDate() === srcDate.getDate()) {
-            var monthDiff = (cursor.getFullYear() - srcDate.getFullYear()) * 12 + (cursor.getMonth() - srcDate.getMonth());
-            if (monthDiff > 0 && monthDiff % every === 0) match = true;
+          if (cursor.getDate() === anchor.getDate()) {
+            var monthDiff = (cursor.getFullYear() - anchor.getFullYear()) * 12 + (cursor.getMonth() - anchor.getMonth());
+            if (monthDiff >= 0 && monthDiff % every === 0) match = true;
           }
         } else if (unit === 'years') {
-          if (cursor.getMonth() === srcDate.getMonth() && cursor.getDate() === srcDate.getDate()) {
-            var yearDiff = cursor.getFullYear() - srcDate.getFullYear();
-            if (yearDiff > 0 && yearDiff % every === 0) match = true;
+          if (cursor.getMonth() === anchor.getMonth() && cursor.getDate() === anchor.getDate()) {
+            var yearDiff = cursor.getFullYear() - anchor.getFullYear();
+            if (yearDiff >= 0 && yearDiff % every === 0) match = true;
           }
         }
       }
@@ -344,4 +356,39 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
   return newTasks;
 }
 
-module.exports = { expandRecurring: expandRecurring };
+// Whether a recurrence config needs a stored anchor date (recur_start) to
+// produce stable output. Anchor-dependent types drift day-to-day when their
+// anchor falls back to "today" — biweekly parity flips, interval counting
+// slides, timesPerCycle cycle boundaries slide. Self-describing types
+// (daily, weekly by day-of-week, monthly by calendar days) do not need an
+// anchor because the pattern IS the spec.
+function isAnchorDependentRecur(recur) {
+  if (!recur || typeof recur !== 'object') return false;
+  if (recur.type === 'biweekly') return true;
+  if (recur.type === 'interval') return true;
+  // timesPerCycle < selected days ⇒ we pick N of M candidates per cycle,
+  // which requires stable cycle boundaries anchored from recur_start.
+  var tpc = Number(recur.timesPerCycle) || 0;
+  if (tpc > 0) {
+    var selected;
+    if (recur.type === 'weekly' || recur.type === 'biweekly') {
+      var days = recur.days || 'MTWRF';
+      selected = typeof days === 'object' && !Array.isArray(days)
+        ? Object.keys(days).length
+        : (typeof days === 'string' ? days.length : 0);
+    } else if (recur.type === 'daily') {
+      selected = 7;
+    } else if (recur.type === 'monthly') {
+      selected = (recur.monthDays || [1, 15]).length;
+    } else {
+      selected = 0;
+    }
+    if (tpc < selected) return true;
+  }
+  return false;
+}
+
+module.exports = {
+  expandRecurring: expandRecurring,
+  isAnchorDependentRecur: isAnchorDependentRecur
+};

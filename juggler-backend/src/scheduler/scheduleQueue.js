@@ -109,6 +109,12 @@ async function processUser(userId) {
     // Quiet period elapsed — sweep and run
     running[userId] = true;
 
+    // Signal start so the toolbar can show a "Scheduling…" indicator.
+    // `schedule:changed` (emitted on completion below) is the paired end
+    // signal; on lock-failure paths we also emit `schedule:changed` with a
+    // null changeset so the indicator always clears.
+    getSseEmitter().emit(userId, 'schedule:running', { timestamp: Date.now() });
+
     // Sweep: delete all queue entries for this user up to the snapshot time.
     // Entries that arrive after this point will be caught by the next cycle.
     var snapshotTime = new Date();
@@ -142,6 +148,12 @@ async function processUser(userId) {
 
     if (result === null) {
       console.warn('[SCHED-QUEUE] could not acquire lock for ' + userId + ' after ' + MAX_LOCK_RETRIES + ' attempts');
+      // Still emit schedule:changed so the "Scheduling..." indicator clears
+      // on the frontend even when we failed to run the scheduler.
+      getSseEmitter().emit(userId, 'schedule:changed', {
+        timestamp: Date.now(),
+        changeset: null
+      });
     } else {
       // Emit per-task update signal so the frontend can do surgical repaints
       getSseEmitter().emit(userId, 'schedule:changed', {
@@ -162,6 +174,10 @@ async function processUser(userId) {
 
   } catch (err) {
     console.error('[SCHED-QUEUE] error processing user ' + userId + ':', err);
+    // Make sure the "Scheduling..." indicator clears even on unexpected errors.
+    try {
+      getSseEmitter().emit(userId, 'schedule:changed', { timestamp: Date.now(), changeset: null });
+    } catch (_) { /* ignore */ }
   } finally {
     running[userId] = false;
   }

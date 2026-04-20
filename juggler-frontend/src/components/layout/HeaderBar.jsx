@@ -17,7 +17,7 @@ import FeedbackDialog from '../feedback/FeedbackDialog';
 import { services, homeUrl } from '../../proxy-config';
 var BILLING_URL = services.billing.frontend;
 
-export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, calSyncProgress, onShowCalSync, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today, activeTimezone, tzSource, onManageDisabled }) {
+export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, calSyncProgress, schedulerRunning, onShowCalSync, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today, activeTimezone, tzSource, onManageDisabled }) {
   var theme = getTheme(darkMode);
   var { user, logout } = useAuth();
   var [showOverflow, setShowOverflow] = useState(false);
@@ -62,7 +62,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
 
   return (
     <>
-    {gcalSyncing && <style>{`@keyframes gcal-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>}
+    {(gcalSyncing || schedulerRunning) && <style>{`@keyframes gcal-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } @keyframes sched-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.7); } }`}</style>}
     <div style={{
       display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: isMobile ? 6 : 12,
       padding: isMobile ? '6px 8px' : '8px 16px',
@@ -142,6 +142,16 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 'inherit', flexShrink: 0, ...(isMobile ? { marginLeft: 'auto' } : {}) }}>
         {saving && <span style={{ fontSize: 11, color: theme.textMuted }}>Saving...</span>}
+        {schedulerRunning && (
+          <span title="Scheduler is running" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: theme.textMuted }}>
+            <span style={{
+              display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+              background: theme.accent, animation: 'sched-pulse 1s ease-in-out infinite',
+              boxShadow: '0 0 6px ' + theme.accent
+            }} />
+            {!isMobile && <span>Scheduling...</span>}
+          </span>
+        )}
 
         {onAddTask && <button onClick={onAddTask} style={{ ...btnStyle(theme, isMobile), fontSize: 20, fontWeight: 700, color: '#2D6A4F' }} title="Add task">+</button>}
 

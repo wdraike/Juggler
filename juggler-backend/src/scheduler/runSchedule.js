@@ -29,6 +29,7 @@ var buildSourceMap = taskController.buildSourceMap;
 var taskToRow = taskController.taskToRow;
 var expandRecurringShared = require('../../../shared/scheduler/expandRecurring');
 var expandRecurring = expandRecurringShared.expandRecurring;
+var reconcile = require('./reconcileOccurrences');
 var cache = require('../lib/redis');
 var syncLock = require('../lib/sync-lock');
 
@@ -121,21 +122,33 @@ async function runScheduleAndPersist(userId, _retries, options) {
   try {
   return await db.transaction(async function(trx) {
 
-  // 1. Load schedulable tasks + templates (skip terminal-status rows at DB level).
-  //    This avoids loading the entire history (done/skip/cancel) into memory.
-  //    A separate lightweight query fetches just (source_id, date) for dedup.
-  var taskRows = await trx('tasks_v').where('user_id', userId)
+  // Per-phase timing. Each checkpoint captures cumulative elapsed ms from
+  // transaction start; the summary log at the end shows phase-by-phase
+  // deltas so we can find where time is going without a profiler.
+  var tPerfStart = Date.now();
+  var tPerf = { loadEnd: 0, expandEnd: 0, reconcileEnd: 0, scheduleEnd: 0, persistEnd: 0 };
+
+  // 1. Load schedulable tasks + templates + terminal-dedup + user config in
+  //    parallel. All three are read-only and independent; serial awaits were
+  //    adding the three queries' latencies on top of each other. Config uses
+  //    its own connection (db) while the task rows use the transaction (trx)
+  //    so the scheduler still sees a consistent snapshot.
+  var _loadStart = Date.now();
+  var _p_taskRows = trx('tasks_v').where('user_id', userId)
     .where(function() {
       this.where('status', '').orWhere('status', 'wip').orWhereNull('status')
         .orWhere('task_type', 'recurring_template');
     })
     .select();
-  // Dedup data for expandRecurring: which (source_id, date) combos already exist
-  // in terminal-status rows? Lightweight query — only two columns, no join needed.
-  var terminalDedupRows = await trx('task_instances').where('user_id', userId)
+  var _p_terminalDedupRows = trx('task_instances').where('user_id', userId)
     .whereNotNull('master_id')
     .whereIn('status', ['done', 'skip', 'cancel'])
     .select('master_id as source_id', 'date');
+  var _p_cfg = loadConfig(userId);
+  var _loaded = await Promise.all([_p_taskRows, _p_terminalDedupRows, _p_cfg]);
+  var taskRows = _loaded[0];
+  var terminalDedupRows = _loaded[1];
+  var _preloadedCfg = _loaded[2];
   var srcMap = buildSourceMap(taskRows);
   var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
   // Inject terminal dedup data as synthetic entries so expandRecurring skips those dates
@@ -208,9 +221,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // 4. Get current date/time in user's timezone
   var timeInfo = getNowInTimezone(TIMEZONE);
 
-  // 5. Load config
-  var cfg = await loadConfig(userId);
+  // 5. Config was loaded in parallel with tasks above.
+  var cfg = _preloadedCfg;
   cfg.timezone = TIMEZONE;
+
+  tPerf.loadEnd = Date.now() - tPerfStart;
 
   // 5b. Unified reconcile — recurring-instance expansion PLUS split chunks
   // in one pass. Each master with split=1 produces K chunks per occurrence
@@ -258,6 +273,54 @@ async function runScheduleAndPersist(userId, _retries, options) {
   if (desiredOccurrences.length > MAX_EXPANDED) {
     console.warn('[SCHED] expansion capped: ' + desiredOccurrences.length + ' → ' + MAX_EXPANDED);
     desiredOccurrences = desiredOccurrences.slice(0, MAX_EXPANDED);
+  }
+  tPerf.expandEnd = Date.now() - tPerfStart;
+
+  // ── Date-based reconciliation ──
+  // Match existing pending occurrences to target dates by exact-date first,
+  // then nearest-first. Preserves instance IDs + occurrence_ordinals across
+  // runs so completion state, cal links, and the UI don't churn. Cal-linked
+  // rows (gcal/msft) bypass this pool — they pass through the id-based diff
+  // unchanged so outbound sync stays correct.
+  var existingGroupsByMaster = reconcile.buildExistingGroups(taskRows, parseDate);
+  var reconResult = reconcile.matchOccurrences(desiredOccurrences, existingGroupsByMaster, parseDate);
+  var occIdOverrides = reconResult.occIdOverrides;
+  var occurrenceMoves = reconResult.occurrenceMoves;
+
+  // Rewrite matched desired.id to reuse the existing occurrence's primary id.
+  // Chunk fanout (below) sees existingById[primaryId] and keeps the original
+  // occurrence_ordinal; the existing DB row stays, avoiding ordinal churn.
+  desiredOccurrences.forEach(function(occ) {
+    var newId = occIdOverrides[occ.id];
+    if (newId && newId !== occ.id) occ.id = newId;
+  });
+
+  // Mutate matched allTasks entries so the scheduler sees the target date,
+  // not the stale existing date. Clearing scheduledAt forces re-placement.
+  // Stash `_preReconDate` / `_preReconTime` so the post-placement diff below
+  // still sees the pre-move date and emits a proper SSE patch + DB update.
+  // Without this, `taskById[id].date` would already be `newDate` at diff time,
+  // `dateChanged` would be false, and the frontend would never learn about
+  // the move.
+  if (occurrenceMoves.length > 0) {
+    var moveByChunkId = {};
+    occurrenceMoves.forEach(function(mv) {
+      mv.chunkIds.forEach(function(cid) { moveByChunkId[cid] = mv; });
+    });
+    allTasks.forEach(function(t) {
+      var mv = moveByChunkId[t.id];
+      if (!mv) return;
+      t._preReconDate = t.date;
+      t._preReconTime = t.time;
+      t.date = mv.newDate;
+      t._candidateDate = mv.newDate;
+      var d = parseDate(mv.newDate);
+      if (d) t.day = DAY_NAMES[d.getDay()];
+      t.startAfter = null;
+      t.deadline = null;
+      t.scheduledAt = null;
+    });
+    console.log('[SCHED] reconcile: matched ' + occurrenceMoves.length + ' existing occurrence(s) to new target date(s)');
   }
 
   // Fan out each occurrence into K chunks based on master.split / splitMin.
@@ -365,10 +428,26 @@ async function runScheduleAndPersist(userId, _retries, options) {
     reconcileChanged = true;
   }
   if (toUpdate.length > 0) {
-    for (var ui = 0; ui < toUpdate.length; ui++) {
-      await trx('task_instances')
-        .where('id', toUpdate[ui].id)
-        .update(Object.assign({}, toUpdate[ui].changes, { updated_at: db.fn.now() }));
+    // Batch drift-fix UPDATEs into CASE-WHEN expressions, chunked to 200 per
+    // statement to stay well below MySQL's max_allowed_packet. Each drift-fix
+    // touches up to three fields (split_ordinal, split_total, dur) — we only
+    // emit CASEs for fields that actually vary in the chunk, skipping no-op
+    // columns.
+    var DRIFT_CHUNK = 200;
+    for (var dci = 0; dci < toUpdate.length; dci += DRIFT_CHUNK) {
+      var driftChunk = toUpdate.slice(dci, dci + DRIFT_CHUNK);
+      var driftIds = driftChunk.map(function(u) { return u.id; });
+      var driftFields = { updated_at: db.fn.now() };
+      ['split_ordinal', 'split_total', 'dur'].forEach(function(col) {
+        var touched = driftChunk.filter(function(u) { return u.changes[col] != null; });
+        if (touched.length === 0) return;
+        var expr = 'CASE id';
+        var bindings = [];
+        touched.forEach(function(u) { expr += ' WHEN ? THEN ?'; bindings.push(u.id, u.changes[col]); });
+        expr += ' ELSE `' + col + '` END';
+        driftFields[col] = trx.raw(expr, bindings);
+      });
+      await trx('task_instances').whereIn('id', driftIds).update(driftFields);
     }
     var updateById = {};
     toUpdate.forEach(function(u) { updateById[u.id] = u.changes; });
@@ -505,8 +584,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (t.when == null || t.when === '') t.when = ALL_WINDOWS;
   });
 
+  tPerf.reconcileEnd = Date.now() - tPerfStart;
+
   // 6. Run scheduler
   var result = unifiedSchedule(allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg);
+  tPerf.scheduleEnd = Date.now() - tPerfStart;
 
   // 7. Persist schedule results from dayPlacements
   var updated = 0;
@@ -552,8 +634,15 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var newTime = formatMinutesToTime(placement.start);
     var newDate = placement.dateKey;
 
-    var dateChanged = newDate !== original.date;
-    var timeChanged = newTime !== original.time;
+    // For reconciled (moved) occurrences, `original.date` was overwritten
+    // in-place with the target date so the scheduler could place against it.
+    // The TRUE pre-run date lives on `_preReconDate`. Without this shim, the
+    // diff would see `newDate === original.date` and skip emitting the SSE
+    // patch / DB update even though the task just moved.
+    var priorDate = original._preReconDate != null ? original._preReconDate : original.date;
+    var priorTime = original._preReconTime != null ? original._preReconTime : original.time;
+    var dateChanged = newDate !== priorDate;
+    var timeChanged = newTime !== priorTime;
 
     // Never touch recurring templates — they're blueprints, not schedulable tasks.
     if (original.taskType === 'recurring_template') continue;
@@ -620,9 +709,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
       updatedTasks.push({
         id: taskId,
         text: original.text,
-        from: original.date,
+        from: priorDate,
         to: newDate,
-        fromTime: original.time,
+        fromTime: priorTime,
         toTime: newTime,
         // Minimal patch for SSE — only the fields the scheduler actually mutated.
         // Frontend merges this in without a re-fetch.
@@ -883,6 +972,16 @@ async function runScheduleAndPersist(userId, _retries, options) {
   }
 
   console.log('[SCHED] runScheduleAndPersist: updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
+  tPerf.persistEnd = Date.now() - tPerfStart;
+  console.log('[SCHED] perf user=' + userId
+    + ' load=' + tPerf.loadEnd
+    + 'ms expand=' + (tPerf.expandEnd - tPerf.loadEnd)
+    + 'ms reconcile=' + (tPerf.reconcileEnd - tPerf.expandEnd)
+    + 'ms schedule=' + (tPerf.scheduleEnd - tPerf.reconcileEnd)
+    + 'ms persist=' + (tPerf.persistEnd - tPerf.scheduleEnd)
+    + 'ms total=' + tPerf.persistEnd
+    + 'ms tasks=' + taskRows.length
+    + ' placed=' + updated);
 
   // 10. Cache the placement result so GET /placements doesn't re-run the scheduler
   var placementCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date().toISOString(), timezone: TIMEZONE, schedulerVersion: SCHEDULER_VERSION };
