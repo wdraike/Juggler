@@ -1532,6 +1532,35 @@ async function updateTaskStatus(req, res) {
       }
     }
 
+    // Outbound calendar sync on skip/cancel: the cal-sync processor already
+    // handles terminal-status tasks (cal-sync.controller.js:399-419 — it pulls
+    // active ledger rows whose task is done/cancel/skip/pause and pushes a
+    // DELETE to the provider). But cal-sync doesn't run automatically on
+    // every task mutation; it runs on a user-configured cadence or manual
+    // trigger. So skip/cancel alone leaves the remote event in place until
+    // the next sync cycle. Enqueue a cal-sync run to close the gap for
+    // calendar-linked instances.
+    //
+    // `done` intentionally NOT included — completed history on the user's
+    // calendar is usually valuable (e.g. "I exercised Mon"). Users who do
+    // want that can set calCompletedBehavior='delete' in config, which the
+    // processor already respects.
+    var hasCalLink = !!(existing.gcal_event_id || existing.msft_event_id || existing.apple_event_id);
+    if ((status === 'skip' || status === 'cancel') && hasCalLink) {
+      try {
+        var syncController = require('./cal-sync.controller');
+        if (syncController && typeof syncController.sync === 'function') {
+          // Fire-and-forget — don't block the status response on the sync.
+          // The processor pulls fresh task + ledger state, sees terminal
+          // status, deletes the event, and flips the ledger to deleted_local.
+          syncController.sync({ user: { id: req.user.id }, body: {} }, { json: function() {}, status: function() { return { json: function() {} }; } })
+            .catch(function(err) { console.error('[cal-sync] trigger failed:', err && err.message); });
+        }
+      } catch (err) {
+        console.error('[cal-sync] trigger import failed:', err && err.message);
+      }
+    }
+
     var updated = await fetchTaskWithEventIds(db, id, req.user.id);
     var srcMap = buildSourceMap(await db('tasks_v').where('user_id', req.user.id).where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); }).select());
     await cache.invalidateTasks(req.user.id);

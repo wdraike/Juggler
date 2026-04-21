@@ -595,7 +595,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       // guard allows it through.
       if (snap.datePinned && !all.datePinned) changed._allowUnfix = true;
     }
-    if (recurring && hasPreferredTime !== snap.preferredTime) changed.preferredTime = all.preferredTime;
+    // Normalize snapshot's preferredTime (can be null for legacy rows) to
+    // boolean before comparing against the form's boolean toggle. Without
+    // this, `false !== null` marked every recurring task as dirty on open.
+    var snapPref = !!snap.preferredTime;
+    if (recurring && hasPreferredTime !== snapPref) changed.preferredTime = all.preferredTime;
     if (dayReq !== snap.dayReq) changed.dayReq = all.dayReq;
     if (recurring !== snap.recurring) changed.recurring = all.recurring;
     if (rigid !== snap.rigid) changed.rigid = all.rigid;

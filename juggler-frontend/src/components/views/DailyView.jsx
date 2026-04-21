@@ -6,9 +6,9 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { getTheme } from '../../theme/colors';
-import { GRID_START, GRID_END, PRI_COLORS, STATUS_MAP, MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, locIcon, LOC_TINT, locBgTint, DEFAULT_LOCATIONS } from '../../state/constants';
+import { GRID_START, GRID_END, PRI_COLORS, STATUS_MAP, MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, locIcon, LOC_TINT, locBgTint, DEFAULT_LOCATIONS, WHEN_TAG_ICONS, DEFAULT_TOOLS } from '../../state/constants';
 import { formatHour, formatDateKey } from '../../scheduler/dateHelpers';
-import { getBlocksForDate } from '../../scheduler/timeBlockHelpers';
+import { getBlocksForDate, parseWhen } from '../../scheduler/timeBlockHelpers';
 import { resolveLocationId, getLocationForDatePure } from '../../scheduler/locationHelpers';
 import StatusToggle from '../schedule/StatusToggle';
 
@@ -121,11 +121,16 @@ function FixedPopup({ anchorRect, item, status, theme, darkMode }) {
           <span style={{ fontSize: 9, color: theme.textMuted }}>{durLabel(t.dur)}</span>
         )}
       </div>
-      {item.start != null && (
-        <div style={{ marginTop: 4, fontSize: 10, color: theme.textMuted }}>
-          {minsToTime(item.start)}{item.end != null ? ' \u2013 ' + minsToTime(item.end) : ''}
-        </div>
-      )}
+      {item.start != null && (function() {
+        var eEnd = (item.end != null)
+          ? item.end
+          : (item.dur != null ? item.start + item.dur : null);
+        return (
+          <div style={{ marginTop: 4, fontSize: 10, color: theme.textMuted }}>
+            {minsToTime(item.start)}{eEnd != null ? ' \u2013 ' + minsToTime(eEnd) : ''}
+          </div>
+        );
+      })()}
       {locIcons.length > 0 && (
         <div style={{ marginTop: 2, fontSize: 10 }}>
           {locIcons.join(' ')} <span style={{ color: theme.textMuted }}>{(t.location || []).join(', ')}</span>
@@ -248,6 +253,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
   var t = item.task || item;
   var priColor = PRI_COLORS[t.pri] || PRI_COLORS.P3;
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
+  var isOverdue = !!item._overdue && !isDone;
   var [show, setShow] = useState(false);
   var innerRef = useRef(null);
   var [anchorRect, setAnchorRect] = useState(null);
@@ -272,12 +278,52 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
   var isMarker = !!t.marker;
   var isWhenRelaxed = !!item._whenRelaxed;
 
-  // Reactive detail levels based on block pixel height
-  var showTime = height >= 28;
-  var showProjectDur = height >= 42;
-  var showStatus = height >= 58;
-  var showMeta = height >= 74;
-  var showNotes = height >= 96;
+  // Start–end time range anchored to the title row. Most-scanned field after
+  // the title itself, so it's always visible when the card renders at all.
+  // Fall back to start+dur when item.end isn't set — placements from the
+  // scheduler only carry { start, dur }, so the end must be derived.
+  var endMin = (item.end != null)
+    ? item.end
+    : (item.start != null && item.dur != null ? item.start + item.dur : null);
+  var timeRange = item.start != null
+    ? (minsToTime(item.start) + (endMin != null ? '\u2013' + minsToTime(endMin) : ''))
+    : null;
+
+  // Icon maps for the flow area.
+  var TOOL_ICON_MAP = React.useMemo(function() {
+    var m = {};
+    (DEFAULT_TOOLS || []).forEach(function(tool) { m[tool.id] = tool.icon; });
+    return m;
+  }, []);
+  var whenIcons = (function() {
+    if (!t.when || t.when === 'anytime' || isWhenRelaxed) return '';
+    var wp = parseWhen(t.when);
+    return wp.map(function(w) { return WHEN_TAG_ICONS[w] || ''; }).filter(Boolean).join('');
+  })();
+  var toolIcons = (t.tools || []).map(function(tid) { return TOOL_ICON_MAP[tid] || ''; }).filter(Boolean).join(' ');
+
+  // Preferred-time mismatch: recurring task scheduler-moved away from user's
+  // preferred time — tell the user so the displaced placement doesn't surprise.
+  var startLabel = item.start != null ? minsToTime(item.start) : null;
+  var preferredMismatch = (t.recurring && t.time && startLabel && t.time !== startLabel)
+    ? ('Preferred: ' + t.time)
+    : null;
+
+  // Build flow items in priority order. Each entry is { key, node }; nulls
+  // are filtered out, and separators are inserted between non-null entries
+  // during render so spacing stays consistent regardless of which items fire.
+  var typeBadgeText = (
+    (t.datePinned ? '\uD83D\uDCCD' : '') +
+    (isFixed && !isMarker ? '\uD83D\uDCCC' : '') +
+    (t.recurring ? '\uD83D\uDD01' : '') +
+    (item.splitTotal > 1 ? '\u2702\uFE0F' : '')
+  );
+  var depCount = (t.dependsOn && t.dependsOn.length) || 0;
+  var slackMins = (t.slackMins != null && t.slackMins < 1e9) ? t.slackMins : null;
+  var notesSnippet = t.notes ? (t.notes.length > 60 ? t.notes.slice(0, 60) + '\u2026' : t.notes) : null;
+  var placementReason = item._moveReason
+    ? ('\u2192 ' + item._moveReason)
+    : (item.placementReason || item._placementReason || null);
 
   return (
     <div
@@ -300,9 +346,13 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
         onKeyDown={function (e) { if (e.key === 'Enter') { e.stopPropagation(); onExpand(t.id); } }}
         style={{
           height: '100%', boxSizing: 'border-box',
+          position: 'relative',
           borderLeft: '3px solid ' + priColor,
-          border: '1px ' + (isMarker ? 'dotted' : (t.recurring ? 'dashed' : 'solid')) + ' ' + (isDone ? theme.border : (isMarker ? '#4338CA40' : priColor + '30')),
-          borderLeftWidth: 3, borderLeftColor: isWhenRelaxed ? '#C8942A' : (isMarker ? '#4338CA' : priColor),
+          border: isOverdue
+            ? ('2px solid ' + theme.error)
+            : ('1px ' + (isMarker ? 'dotted' : (t.recurring ? 'dashed' : 'solid')) + ' ' + (isDone ? theme.border : (isMarker ? '#4338CA40' : priColor + '30'))),
+          borderLeftWidth: 3,
+          borderLeftColor: isOverdue ? theme.error : (isWhenRelaxed ? '#C8942A' : (isMarker ? '#4338CA' : priColor)),
           borderRadius: 5,
           background: tileBg(t, darkMode, show, theme),
           padding: height >= 42 ? '3px 6px' : '2px 6px',
@@ -315,109 +365,159 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
           opacity: isDone ? 0.5 : (isMarker ? 0.65 : 1)
         }}
       >
-        {/* Row 1: Always show title */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 4,
-          fontSize: isMobile ? 10 : 11, fontWeight: 600,
-          color: isDone ? theme.textMuted : theme.text,
-          textDecoration: isDone ? 'line-through' : 'none',
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          lineHeight: 1.3
-        }}>
-          {isBlocked && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDEAB'}</span>}
-          {isMarker && <span style={{ fontSize: 9, flexShrink: 0, opacity: 0.7 }}>{'\u25C7'}</span>}
-          {isFixed && !isMarker && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDCCC'}</span>}
-          {status === 'done' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2713'}</span>}
-          {status === 'skip' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u23ED'}</span>}
-          {status === 'cancel' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2717'}</span>}
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.text}</span>
-        </div>
-
-        {/* Row 2: Time + project + duration (height >= 28) */}
-        {showTime && (
+        {isOverdue && (
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 4, marginTop: 1,
-            fontSize: 9, color: theme.textMuted, overflow: 'hidden'
+            position: 'absolute', top: -1, left: -1,
+            background: theme.error, color: '#FDFAF5',
+            fontSize: 8, fontWeight: 700, padding: '1px 4px',
+            borderRadius: '4px 0 4px 0', letterSpacing: 0.3,
+            zIndex: 2, pointerEvents: 'none'
+          }} title="This task's scheduled window has passed — mark done/skip or reschedule.">
+            {'\u26A0'} OVERDUE
+          </div>
+        )}
+        {/* Title row: prefix + title + time (flex-shrinking left group) |
+            inline flow of interactive items (flex-shrinking, overflow clipped) |
+            project + priority (right-anchored, never shrinks). */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          overflow: 'hidden', minWidth: 0
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'baseline', gap: 4,
+            flex: '1 1 auto', minWidth: 0, overflow: 'hidden',
+            fontSize: isMobile ? 10 : 11,
+            color: isDone ? theme.textMuted : theme.text,
+            lineHeight: 1.3
           }}>
-            {item.start != null && (
-              <span style={{ flexShrink: 0 }}>{minsToTime(item.start)}{item.end != null ? '\u2013' + minsToTime(item.end) : ''}</span>
-            )}
-            {showProjectDur && t.project && (
-              <span style={{
-                fontSize: 8, fontWeight: 600, flexShrink: 0,
-                background: theme.projectBadgeBg,
-                color: theme.projectBadgeText,
-                borderRadius: 3, padding: '0 4px'
-              }}>
-                {t.project}
-              </span>
-            )}
-            {showProjectDur && t.dur > 0 && (
-              <span style={{
-                fontSize: 8, flexShrink: 0, fontWeight: 600,
-                color: theme.badgeText,
-                background: theme.badgeBg,
-                borderRadius: 3, padding: '0 4px'
-              }}>
-                {durLabel(t.dur)}
-              </span>
-            )}
-            {showProjectDur && t.pri && (
-              <span style={{ fontSize: 8, fontWeight: 700, color: priColor, flexShrink: 0 }}>
-                {t.pri}
+            {isMarker && <span style={{ fontSize: 9, flexShrink: 0, opacity: 0.7 }}>{'\u25C7'}</span>}
+            {status === 'done' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2713'}</span>}
+            {status === 'skip' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u23ED'}</span>}
+            {status === 'cancel' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2717'}</span>}
+            <span style={{
+              fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap', textDecoration: isDone ? 'line-through' : 'none'
+            }}>
+              {t.text}
+            </span>
+            {timeRange && (
+              <span style={{ fontSize: 9, color: theme.textMuted, flexShrink: 0, fontWeight: 500 }}>
+                {timeRange}
               </span>
             )}
           </div>
-        )}
-
-        {/* Row 3: Status toggles + location + due (height >= 58) */}
-        {showStatus && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+          {/* Inline flow: interactive + compact items flow right after the
+              title when width allows. When the title is long enough to consume
+              the space, this group shrinks to zero and nothing shows — no
+              partial clipping. */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            flex: '0 1 auto', minWidth: 0, overflow: 'hidden',
+            fontSize: 9, color: theme.textMuted
+          }}>
             {onStatusChange && (
-              <span onClick={function (e) { e.stopPropagation(); }}>
+              <span onClick={function(e) { e.stopPropagation(); }} style={{ display: 'inline-flex', flexShrink: 0 }}>
                 <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete ? function() { onDelete(t.id); } : null} darkMode={darkMode} compact />
               </span>
             )}
-            <div style={{ flex: 1 }} />
-            {locIcons.length > 0 && <span style={{ fontSize: 9 }}>{locIcons.join(' ')}</span>}
-            {t.deadline && (
+            {t.dur > 0 && (
+              <span style={{
+                fontSize: 8, fontWeight: 600, flexShrink: 0, whiteSpace: 'nowrap',
+                color: theme.badgeText, background: theme.badgeBg,
+                borderRadius: 3, padding: '0 4px'
+              }}>{durLabel(t.dur)}</span>
+            )}
+            {isBlocked && <span title="Blocked" style={{ fontSize: 10, flexShrink: 0 }}>{'\uD83D\uDEAB'}</span>}
+            {typeBadgeText && <span style={{ fontSize: 10, flexShrink: 0, whiteSpace: 'nowrap' }}>{typeBadgeText}</span>}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+            {t.project && (
               <span style={{
                 fontSize: 8, fontWeight: 600,
-                color: theme.amberText,
-                background: theme.amberBg,
-                borderRadius: 3, padding: '0 4px'
-              }}>
-                Deadline {t.deadline}
-              </span>
+                background: theme.projectBadgeBg, color: theme.projectBadgeText,
+                borderRadius: 3, padding: '0 4px', whiteSpace: 'nowrap'
+              }}>{t.project}</span>
+            )}
+            {t.pri && (
+              <span title={'Priority ' + t.pri} style={{
+                fontSize: 8, fontWeight: 700, color: priColor,
+                background: priColor + '18', borderRadius: 3, padding: '0 3px'
+              }}>{t.pri}</span>
             )}
           </div>
-        )}
+        </div>
 
-        {/* Row 4: Extra meta — recurring, split, when (height >= 74) */}
-        {showMeta && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 1, fontSize: 8, color: theme.textMuted, overflow: 'hidden' }}>
-            {t.recurring && <span>{'\uD83D\uDD01'} recurring</span>}
-            {item.splitPart && <span>Part {item.splitPart}/{item.splitTotal}</span>}
-            {isWhenRelaxed && <span style={{ color: '#C8942A', fontWeight: 600 }}>{'~'} flexed</span>}
-            {t.when && t.when !== 'anytime' && !isWhenRelaxed && <span>{t.when}</span>}
-            {status === 'wip' && t.timeRemaining != null && (
-              <span style={{ fontWeight: 700, color: theme.amberText }}>
-                {t.timeRemaining}m left
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Row 5: Notes snippet (height >= 96) */}
-        {showNotes && t.notes && (
-          <div style={{
-            marginTop: 2, fontSize: 8, color: theme.textMuted,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            borderTop: '1px solid ' + theme.border + '60', paddingTop: 2
-          }}>
-            {t.notes.length > 60 ? t.notes.slice(0, 60) + '...' : t.notes}
-          </div>
-        )}
+        {/* Flow area: everything else in priority order. Only renders when
+            the card is tall enough for a FULL second line — below that
+            threshold, partial rendering shows as clipped content (bad UX),
+            so we hide it entirely and rely on the title row alone. */}
+        {height >= 36 && (function() {
+          // Interactive items (status toggle, dur, blocked, type badges)
+          // render inline on the title row above — don't duplicate here.
+          // This row holds the reference/meta items: deadline, location, when,
+          // tools, deps, time remaining, notes, scheduler reasons, etc.
+          var items = [];
+          if (t.deadline) items.push({ key: 'deadline', node: (
+            <span style={{
+              fontSize: 8, fontWeight: 600,
+              color: theme.amberText, background: theme.amberBg,
+              borderRadius: 3, padding: '0 4px', whiteSpace: 'nowrap'
+            }}>{'\uD83D\uDCC5'} {t.deadline}</span>
+          )});
+          if (locIcons.length > 0) items.push({ key: 'loc', node: (
+            <span style={{ fontSize: 10 }}>{locIcons.join(' ')}</span>
+          )});
+          if (whenIcons) items.push({ key: 'when', node: (
+            <span style={{ fontSize: 10 }}>{whenIcons}</span>
+          )});
+          if (toolIcons) items.push({ key: 'tools', node: (
+            <span style={{ fontSize: 10 }}>{toolIcons}</span>
+          )});
+          if (depCount > 0) items.push({ key: 'deps', node: (
+            <span>{'\u26D3'} {depCount}</span>
+          )});
+          if (status === 'wip' && t.timeRemaining != null) items.push({ key: 'remaining', node: (
+            <span style={{ fontWeight: 700, color: theme.amberText }}>{t.timeRemaining}m left</span>
+          )});
+          if (isWhenRelaxed) items.push({ key: 'relaxed', node: (
+            <span style={{ color: '#C8942A', fontWeight: 600 }}>~ flexed</span>
+          )});
+          if (notesSnippet) items.push({ key: 'notes', node: (
+            <span style={{ fontStyle: 'italic', opacity: 0.85 }}>{notesSnippet}</span>
+          )});
+          if (placementReason) items.push({ key: 'move', node: (
+            <span style={{ opacity: 0.8 }}>{placementReason}</span>
+          )});
+          if (preferredMismatch) items.push({ key: 'pref', node: (
+            <span style={{ opacity: 0.8 }}>{preferredMismatch}</span>
+          )});
+          if (slackMins != null) items.push({ key: 'slack', node: (
+            <span>slack {slackMins}m</span>
+          )});
+          if (item.travelBefore > 0) items.push({ key: 'tb', node: (
+            <span>+{item.travelBefore}m before</span>
+          )});
+          if (item.travelAfter > 0) items.push({ key: 'ta', node: (
+            <span>+{item.travelAfter}m after</span>
+          )});
+          if (items.length === 0) return null;
+          return (
+            <div style={{
+              display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center',
+              marginTop: 2, fontSize: 9, color: theme.textMuted,
+              overflow: 'hidden', lineHeight: 1.4
+            }}>
+              {items.map(function(it, i) {
+                return (
+                  <React.Fragment key={it.key}>
+                    {i > 0 && <span style={{ color: theme.border, userSelect: 'none' }}>{'\u00B7'}</span>}
+                    {it.node}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
       {show && <FixedPopup anchorRect={anchorRect} item={item} status={status} theme={theme} darkMode={darkMode} />}
       {/* Travel buffer zones — hatched strips above/below the task card */}

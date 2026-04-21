@@ -301,6 +301,60 @@ describe('expandRecurring', () => {
       expect(dates).not.toContain('4/24');
       expect(ours).toHaveLength(1);
     });
+
+    test('pendingBookedByDate counts pending as cycle occupants (no rebook after skip)', () => {
+      // Regression: user has tpc=4 weekly exercise. Originally picked 4/22,
+      // 4/24, 4/26, 4/28. Skipped 4/22 4/24 4/26 — all terminal. 4/28 now
+      // lives in the next cycle because of the 7-day anchor window.
+      // Within cycle 1 (4/21-4/27) we have 3 skipped + 0 pending = 3 booked.
+      // Caller ALSO passes pendingBookedByDate for 4/30, 5/2 etc. in cycle 2.
+      // Cycle 2 should treat those pending as booked → slotsNeeded drops.
+      const src = {
+        id: 'ex',
+        text: 'Exercise',
+        taskType: 'recurring_template',
+        date: '4/21',
+        dur: 30,
+        pri: 'P2',
+        recurring: true,
+        recur: { type: 'weekly', days: 'MTWRFSU', timesPerCycle: 4 },
+        recurStart: '2026-04-21',
+        dayReq: 'any'
+      };
+      // Seed three skipped instances in cycle 1 (they populate existingBySourceDate).
+      const skipped1 = { id: 'ex-1', sourceId: 'ex', taskType: 'recurring_instance', date: '4/22', text: 'Exercise', status: 'skip' };
+      const skipped2 = { id: 'ex-2', sourceId: 'ex', taskType: 'recurring_instance', date: '4/24', text: 'Exercise', status: 'skip' };
+      const skipped3 = { id: 'ex-3', sourceId: 'ex', taskType: 'recurring_instance', date: '4/26', text: 'Exercise', status: 'skip' };
+
+      // Without the pending-counting fix, the algorithm would see 3 booked
+      // (the skips) and pick a 4th date in cycle 1 (e.g., 4/21) every run.
+      // With pendingBookedByDate populated for cycle 2 dates, the algorithm
+      // also knows cycle 2 is already at its tpc budget (4 pending), so no
+      // new cycle-2 picks. Cycle 1 still picks 1 new date because user hasn't
+      // pending-booked it — expected, matches user's "3 skip = cycle 2/4"
+      // reading only if they've also filled pending; here they haven't.
+      //
+      // The specific assertion: cycle 2 (4/28-5/4) has 4 pending dates passed
+      // via opts.pendingBookedByDate → no new picks emitted for cycle 2.
+      const pendingBookedByDate = {
+        'ex|4/28': true,
+        'ex|4/30': true,
+        'ex|5/2': true,
+        'ex|5/4': true
+      };
+      const result = expandRecurring(
+        [src, skipped1, skipped2, skipped3],
+        new Date(2026, 3, 21), // 4/21
+        new Date(2026, 4, 4),  // 5/4
+        { pendingBookedByDate: pendingBookedByDate }
+      );
+      const ours = result.filter(r => r.sourceId === 'ex');
+      const dates = ours.map(r => r._candidateDate || r.date);
+      // No target for a cycle-2 date (all 4 pending).
+      ['4/28', '4/29', '4/30', '5/1', '5/2', '5/3', '5/4'].forEach(d => {
+        expect(dates).not.toContain(d);
+      });
+    });
   });
 
   describe('edge cases', () => {

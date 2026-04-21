@@ -28,18 +28,25 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
   var isDone = isTerminalStatus(status);
   var compact = layoutMode === 'compact';
   var showDetails = !compact && (cardHeight || 52) >= 60;
+  // Overdue: scheduler placed this at its original time because the user's
+  // window has passed (missed flex recurring, past-day recurring, or rigid
+  // recurring whose time already elapsed). Show a red border + OVERDUE badge
+  // so the user acknowledges it; suppress when the task is already terminal.
+  var isOverdue = !!item._overdue && !isDone;
   var containerStyle = React.useMemo(function() {
+    var baseBorder = '1px ' + (task.recurring ? 'dashed' : 'solid') + ' ' + (isDone ? theme.border : priColor + '40');
     return {
       width: '100%', height: '100%', borderRadius: 6, overflow: 'hidden',
       background: theme.bgCard,
-      border: '1px ' + (task.recurring ? 'dashed' : 'solid') + ' ' + (isDone ? theme.border : priColor + '40'),
-      borderLeft: '3px solid ' + priColor,
+      border: isOverdue ? ('2px solid ' + theme.error) : baseBorder,
+      borderLeft: isOverdue ? ('3px solid ' + theme.error) : ('3px solid ' + priColor),
       cursor: 'pointer', opacity: isDone ? 0.5 : 1,
       display: 'flex', flexDirection: 'column', justifyContent: 'center',
       padding: compact ? '3px 6px' : (isMobile ? '4px 6px' : '4px 8px'),
-      boxShadow: '0 1px 3px ' + theme.shadow, boxSizing: 'border-box'
+      boxShadow: '0 1px 3px ' + theme.shadow, boxSizing: 'border-box',
+      position: 'relative'
     };
-  }, [theme, task.recurring, isDone, priColor, compact, isMobile]);
+  }, [theme, task.recurring, isDone, priColor, compact, isMobile, isOverdue]);
   var durLabel = item.splitTotal > 1
     ? item.dur + ' of ' + task.dur + 'm'
     : (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm');
@@ -65,7 +72,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
       d.push('Preferred: ' + task.time);
     }
     if (showDetails) {
-      if (timeRange) d.push('\u23F0 ' + timeRange);
+      // timeRange is now shown inline in Row 2; no need to repeat in details.
       if (task.location && task.location.length > 0) {
         var li = task.location.map(function(lid) { return locIcon(lid); }).filter(Boolean);
         if (li.length > 0) d.push(li.join(' '));
@@ -94,6 +101,17 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
       onClick={onExpand}
       style={containerStyle}
     >
+      {isOverdue && (
+        <div style={{
+          position: 'absolute', top: -1, left: -1,
+          background: theme.error, color: '#FDFAF5',
+          fontSize: 9, fontWeight: 700, padding: '1px 5px',
+          borderRadius: '5px 0 5px 0', letterSpacing: 0.3,
+          zIndex: 2, pointerEvents: 'none'
+        }} title="This task's scheduled window has passed — mark done/skip or reschedule.">
+          {'\u26A0'} OVERDUE
+        </div>
+      )}
       {/* Row 1: title + duration + project */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 4,
@@ -136,13 +154,13 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
         {compact ? (
           <span style={{ fontSize: 10, color: theme.badgeText, fontWeight: 700, display: 'flex', gap: 3, alignItems: 'center' }}>
             {statusIcon && <span>{statusIcon}</span>}
-            {startLabel && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted }}>{startLabel}</span>}
+            {timeRange && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted }}>{timeRange}</span>}
             {isBlocked && <span style={{ color: theme.redText }} title="Blocked \u2014 waiting on incomplete dependencies">{'\uD83D\uDEAB'}</span>}
           </span>
         ) : (
           <>
             {onStatusChange && <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete} darkMode={darkMode} isMobile={isMobile} />}
-            {startLabel && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted }}>{startLabel}</span>}
+            {timeRange && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted }}>{timeRange}</span>}
             <div style={{ flex: 1 }} />
             {typeBadges.length > 0 && (
               <span style={{ fontSize: 9, display: 'flex', gap: 1, alignItems: 'center' }}>

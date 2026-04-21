@@ -227,12 +227,26 @@ describe('Tier 2: Recurrings with Preferred Time', () => {
     expect(p.start).toBeLessThanOrEqual(mins(8)); // before 8am
   });
 
-  test('S8: Breakfast at 7am ±60m, run at 9am → missed, not drifted', () => {
+  test('S8: Breakfast at 7am ±60m, run at 9am → missed + placed overdue at original time', () => {
     var r = schedule([
       task({ id: 'bf', text: 'Breakfast', recurring: true, when: 'morning', time: '7:00 AM', timeFlex: 60, dur: 30, generated: true }),
     ], 540); // 9am
-    expect(isPlaced(r, 'bf')).toBe(false);
+    // Still reported as missed (shows in ConflictsView / pastDue list)
     expect(isMissed(r, 'bf')).toBe(true);
+    // AND kept on the calendar at its original 7 AM slot with an overdue flag
+    // so the user can mark it done/skip without leaving the day view.
+    var p = placement(r, 'bf');
+    expect(p).not.toBeNull();
+    expect(p.start).toBe(mins(7));
+    // Locate the raw placement entry to verify the overdue flag
+    var entry = null;
+    for (var dk in r.dayPlacements) {
+      for (var pp of r.dayPlacements[dk]) {
+        if (pp.task && pp.task.id === 'bf') { entry = pp; break; }
+      }
+    }
+    expect(entry).not.toBeNull();
+    expect(entry._overdue).toBe(true);
   });
 
   test('S9: Recurring instance inherits template time via preferred_time_mins, not stale scheduler time', () => {
@@ -846,5 +860,67 @@ describe('Tier 11: Recurring + Split (day-boundary rule)', () => {
     var totalDur = chunks.reduce(function(s, p) { return s + p.dur; }, 0);
     expect(totalDur).toBe(90);
     // No assertion that chunks stay on one day — this is the point.
+  });
+});
+
+describe('Tier 10: Overdue placement flags', () => {
+  // Helper: return the raw placement entry (not the summary shape).
+  function entry(result, taskId) {
+    for (var dk in result.dayPlacements) {
+      for (var p of result.dayPlacements[dk]) {
+        if (p.task && p.task.id === taskId) return { dk: dk, p: p };
+      }
+    }
+    return null;
+  }
+
+  test('rigid recurring whose preferred window has passed today → _overdue on placement', () => {
+    var r = schedule([
+      task({ id: 'med', text: 'Morning meds', recurring: true, rigid: true, when: 'morning', time: '7:00 AM', dur: 15, generated: true }),
+    ], 540); // 9 AM — 7:00-7:15 AM window already past
+    var e = entry(r, 'med');
+    expect(e).not.toBeNull();
+    expect(e.dk).toBe(TODAY);
+    expect(e.p.task._overdue).toBe(true);
+  });
+
+  test('rigid recurring whose time is still future today → no overdue flag', () => {
+    var r = schedule([
+      task({ id: 'lunch', text: 'Lunch', recurring: true, rigid: true, when: 'lunch', time: '12:30 PM', dur: 30, generated: true }),
+    ], 540); // 9 AM — lunch still ahead
+    var e = entry(r, 'lunch');
+    expect(e).not.toBeNull();
+    expect(!!e.p.task._overdue).toBe(false);
+  });
+
+  test('non-rigid recurring from a prior day, outside flex window, still pending → overdue placement on its original day', () => {
+    var yesterday = dateKey(-1); // 4/6
+    var r = schedule([
+      task({
+        id: 'bf_yesterday', text: 'Breakfast (yesterday)',
+        recurring: true, rigid: false, when: 'morning',
+        time: '7:00 AM', dur: 30,
+        date: yesterday, timeFlex: 60, generated: true
+      }),
+    ], 540);
+    var e = entry(r, 'bf_yesterday');
+    expect(e).not.toBeNull();
+    expect(e.dk).toBe(yesterday);
+    expect(e.p._overdue).toBe(true);
+    expect(e.p.start).toBe(420); // 7:00 AM
+  });
+
+  test('non-rigid recurring from a prior day, outside flex window, status=done → NOT placed', () => {
+    var yesterday = dateKey(-1);
+    var r = schedule([
+      task({
+        id: 'bf_done', text: 'Breakfast (done)',
+        recurring: true, rigid: false, when: 'morning',
+        time: '7:00 AM', dur: 30,
+        date: yesterday, timeFlex: 60, generated: true,
+        status: 'done'
+      }),
+    ], 540);
+    expect(entry(r, 'bf_done')).toBeNull();
   });
 });

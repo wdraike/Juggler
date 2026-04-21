@@ -140,10 +140,15 @@ async function runScheduleAndPersist(userId, _retries, options) {
         .orWhere('task_type', 'recurring_template');
     })
     .select();
+  // Pull scheduled_at alongside date so we can fall back when date is NULL.
+  // Some legacy / partially-created rows end up with NULL date but a valid
+  // scheduled_at. Without the fallback, skip/cancel/done on those rows
+  // doesn't block expansion of the same occurrence — and a fresh pending
+  // instance reappears on the next scheduler run.
   var _p_terminalDedupRows = trx('task_instances').where('user_id', userId)
     .whereNotNull('master_id')
     .whereIn('status', ['done', 'skip', 'cancel'])
-    .select('master_id as source_id', 'date');
+    .select('master_id as source_id', 'date', 'scheduled_at');
   var _p_cfg = loadConfig(userId);
   var _loaded = await Promise.all([_p_taskRows, _p_terminalDedupRows, _p_cfg]);
   var taskRows = _loaded[0];
@@ -151,11 +156,19 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var _preloadedCfg = _loaded[2];
   var srcMap = buildSourceMap(taskRows);
   var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
-  // Inject terminal dedup data as synthetic entries so expandRecurring skips those dates
+  // Inject terminal dedup data as synthetic entries so expandRecurring skips
+  // those dates. Derive date from scheduled_at when the DB `date` column is
+  // NULL — common for legacy rows and for instances created through paths
+  // that set scheduled_at but didn't backfill the denormalized date column.
   terminalDedupRows.forEach(function(r) {
-    if (r.source_id && r.date) {
-      allTasks.push({ id: '_dedup_' + r.source_id + '_' + r.date, sourceId: r.source_id, date: r.date, taskType: 'recurring_instance', text: '', status: 'done' });
+    if (!r.source_id) return;
+    var dateKey = r.date;
+    if (!dateKey && r.scheduled_at) {
+      var local = utcToLocal(r.scheduled_at, TIMEZONE);
+      if (local && local.date) dateKey = local.date;
     }
+    if (!dateKey) return;
+    allTasks.push({ id: '_dedup_' + r.source_id + '_' + dateKey, sourceId: r.source_id, date: dateKey, taskType: 'recurring_instance', text: '', status: 'done' });
   });
 
   // 2a. Normalize empty `when` to all five standard day windows. Users treat
@@ -241,10 +254,17 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
   // Index existing recurring_instance rows. Track pending (placeable) and the
   // full set (any status) for ordinal preservation + existence lookup.
+  // `pendingBookedByDate` is additionally passed to expandRecurring so the
+  // timesPerCycle slot accounting can treat pending instances as already
+  // "filling" cycle slots. Without this, a user who skipped M+W+F of a
+  // tpc=4 weekly pattern saw the scheduler pick a fresh 4th date every run
+  // (skipped count = 3, slotsNeeded = 4-3 = 1, new instance created →
+  // user skips → repeat).
   var existingPendingIds = {};
   var existingById = {}; // id -> { occ, status, master_id }
   var rowsByIdForReconcile = {}; // id -> full raw row (for dur/merge-survivor checks)
   var maxOrdByMaster = {};
+  var pendingBookedByDate = {}; // `${masterId}|${date}` -> true (pending only)
   taskRows.forEach(function(r) {
     if (r.task_type !== 'recurring_instance') return;
     rowsByIdForReconcile[r.id] = r;
@@ -259,6 +279,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
       var o = Number(r.occurrence_ordinal) || 0;
       if (o > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = o;
     }
+    // Record pending dates so tpc slot accounting can count them as booked.
+    if (mid && (!r.status || r.status === '') && r.date) {
+      pendingBookedByDate[mid + '|' + r.date] = true;
+    }
   });
 
   // expandRecurring skips generating an instance whose (sourceId, date) already
@@ -268,7 +292,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (t.taskType !== 'recurring_instance') return true;
     return !existingPendingIds[t.id];
   });
-  var desiredOccurrences = expandRecurring(allTasksForExpand, today, expandEnd, { statuses: statuses, maxOrdBySource: maxOrdByMaster });
+  var desiredOccurrences = expandRecurring(allTasksForExpand, today, expandEnd, {
+    statuses: statuses,
+    maxOrdBySource: maxOrdByMaster,
+    pendingBookedByDate: pendingBookedByDate
+  });
   var MAX_EXPANDED = 500;
   if (desiredOccurrences.length > MAX_EXPANDED) {
     console.warn('[SCHED] expansion capped: ' + desiredOccurrences.length + ' → ' + MAX_EXPANDED);
@@ -332,12 +360,27 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
     // Determine chunk plan. occ inherits master.split / master.splitMin via
     // expandRecurring's newTasks copy.
+    //
+    // User-edited `time_remaining` on the existing primary chunk overrides
+    // the full master.dur for this occurrence. This lets the user say "I
+    // already did 75 of the planned 120 minutes of apply-for-jobs, only 45
+    // left to schedule today" and have the scheduler shrink the chunk plan
+    // accordingly. Only the PRIMARY chunk (split_ordinal=1) carries the
+    // override because that's what the edit form binds to for multi-chunk
+    // split tasks.
+    var effectiveDur = occ.dur;
+    var primaryRow = rowsByIdForReconcile[primaryId];
+    if (primaryRow && primaryRow.time_remaining != null) {
+      var remaining = Number(primaryRow.time_remaining);
+      if (!isNaN(remaining) && remaining >= 0) effectiveDur = remaining;
+    }
+
     var chunks;
-    if (occ.split && occ.dur) {
-      chunks = computeChunks(occ.dur, occ.splitMin);
-      if (chunks.length === 0) chunks = [{ splitOrdinal: 1, splitTotal: 1, dur: occ.dur || 30 }];
+    if (occ.split && effectiveDur > 0) {
+      chunks = computeChunks(effectiveDur, occ.splitMin);
+      if (chunks.length === 0) chunks = [{ splitOrdinal: 1, splitTotal: 1, dur: effectiveDur || 30 }];
     } else {
-      chunks = [{ splitOrdinal: 1, splitTotal: 1, dur: occ.dur || 30 }];
+      chunks = [{ splitOrdinal: 1, splitTotal: 1, dur: effectiveDur || 30 }];
     }
 
     // Always produce the correct chunk plan — even if a prior run merged
@@ -1001,6 +1044,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
       if (p._moveReason) entry.moveReason = p._moveReason;
       if (p._conflict) entry.conflict = true;
       if (p._placementReason) entry.placementReason = p._placementReason;
+      // Overdue flag: preserve through the cache round-trip so the frontend
+      // sees it in both the fresh schedule:changed payload and the hydrated
+      // read-from-cache path.
+      if (p._overdue || (p.task && p.task._overdue)) entry.overdue = true;
       return entry;
     });
   });
@@ -1192,6 +1239,7 @@ async function getSchedulePlacements(userId, options) {
         if (p.travelBefore) h.travelBefore = p.travelBefore;
         if (p.travelAfter) h.travelAfter = p.travelAfter;
         if (p.placementReason) h.placementReason = p.placementReason;
+        if (p.overdue) h._overdue = true;
         hydratedPlacements[dk].push(h);
       });
       if (hydratedPlacements[dk].length === 0) delete hydratedPlacements[dk];
@@ -1455,6 +1503,7 @@ async function getSchedulePlacements(userId, options) {
       if (p.splitPart) { entry.splitPart = p.splitPart; entry.splitTotal = p.splitTotal; }
       if (p.travelBefore) entry.travelBefore = p.travelBefore;
       if (p.travelAfter) entry.travelAfter = p.travelAfter;
+      if (p._overdue || (p.task && p.task._overdue)) entry.overdue = true;
       return entry;
     });
   });

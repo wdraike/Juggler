@@ -667,24 +667,32 @@ describe('Category E: Placement Reasons', () => {
     expect(result.phaseSnapshots).toBeUndefined();
   });
 
-  test('E8a: Flexible recurring with flex window entirely past → missed (not placed)', () => {
+  test('E8a: Flexible recurring with flex window entirely past → missed + placed overdue at preferred time', () => {
     // Preferred time 7:00am (420m), flex ±60m → window 360-480.
     // nowMins=480 (8am) → entire window is past.
     const tasks = [
       makeTask({ id: 'breakfast', text: 'Eat Breakfast', recurring: true, rigid: false, when: 'morning', dur: 30, date: TODAY, time: '7:00 AM', generated: true }),
     ];
-    // Run with nowMins=480 (8am) — flex window [360,480] is entirely past
     const statuses = {}; tasks.forEach(t => statuses[t.id] = '');
     const unifiedSchedule = require('../src/scheduler/unifiedSchedule');
     const result = unifiedSchedule(tasks, statuses, TODAY, 480, cfg);
 
-    // Should NOT be placed
-    expect(isPlaced(result, 'breakfast')).toBe(false);
-    // Should be in unplaced with reason 'missed'
+    // Still surfaces as missed in unplaced (ConflictsView / pastDue pick it up)
     const missed = result.unplaced.find(t => t.id === 'breakfast');
     expect(missed).toBeDefined();
     expect(missed._unplacedReason).toBe('missed');
     expect(missed._unplacedDetail).toContain('has passed');
+    // AND kept on today's grid at 7:00 AM with the overdue flag so the user
+    // can mark done/skip directly from the day view.
+    let placed = null;
+    for (const dk in result.dayPlacements) {
+      for (const p of result.dayPlacements[dk]) {
+        if (p.task && p.task.id === 'breakfast') { placed = p; break; }
+      }
+    }
+    expect(placed).not.toBeNull();
+    expect(placed.start).toBe(420);
+    expect(placed._overdue).toBe(true);
   });
 
   test('E8b: Flexible recurring with flex window partially remaining → placed normally', () => {

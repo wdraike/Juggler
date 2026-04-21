@@ -85,6 +85,15 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
   // Key: sourceId → { 'M/D': true }
   var tpcPickedDates = {};
 
+  // Caller (runSchedule) passes a map of pending recurring_instance dates so
+  // the tpc slot accounting can count them as booked. Without this, pending
+  // instances were filtered out of `allTasks` (so expandRecurring could emit
+  // fresh targets for them via reconciliation). That made tpc oblivious to
+  // them and it would pick fresh replacement dates when the user had skipped
+  // some of the cycle's picks — leading to the "skip → new pick today →
+  // skip → repeat" loop.
+  var pendingBookedByDate = (opts && opts.pendingBookedByDate) || {};
+
   // Helper: compute the number of candidate slots per cycle for a recurrence config
   function getSelectedDayCount(r) {
     if (r.type === 'weekly' || r.type === 'biweekly') {
@@ -182,11 +191,23 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
           ci++;
         }
 
-        var available = cycleCandidates.filter(function(cd) {
-          return !existingBySourceDate[src.id + '|' + cd.key];
+        // Cycle bookings: terminal-blocked (done/skip/cancel) + pending.
+        // Both count against the tpc budget. Dedup via a Set since a date
+        // could theoretically be in both maps.
+        var bookedKeys = {};
+        cycleCandidates.forEach(function(cd) {
+          var key = src.id + '|' + cd.key;
+          if (existingBySourceDate[key] || pendingBookedByDate[key]) bookedKeys[cd.key] = true;
         });
-        var existingInCycle = cycleCandidates.length - available.length;
+        var existingInCycle = Object.keys(bookedKeys).length;
         var slotsNeeded = Math.max(0, tpc - existingInCycle);
+
+        // Pick pool: candidates that are not already booked (neither
+        // terminal nor pending). No point picking a date that already has
+        // a pending instance — it'd just produce a no-op target.
+        var available = cycleCandidates.filter(function(cd) {
+          return !bookedKeys[cd.key];
+        });
 
         if (slotsNeeded > 0 && available.length > 0) {
           // Greedy pick: closest candidate to lastPlaced + targetInterval.

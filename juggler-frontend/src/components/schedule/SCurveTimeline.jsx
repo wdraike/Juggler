@@ -759,6 +759,7 @@ export default function SCurveTimeline(props) {
   var placements     = props.placements;
   var statuses       = props.statuses;
   var onStatusChange = props.onStatusChange;
+  var onDelete       = props.onDelete;
   var onExpand       = props.onExpand;
   var darkMode       = props.darkMode;
   var nowMins        = props.nowMins;

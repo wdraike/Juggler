@@ -5,13 +5,17 @@
 
 import React from 'react';
 
+// Labels are imperative verbs — they describe the ACTION clicking the button
+// performs, not the state the task ends up in. Keeps the UI consistent
+// ("Complete this task") instead of mixing past-participles ("Done", "Cancelled")
+// with imperatives ("Cancel", "Pause").
 var ALL_STATUSES = [
-  { value: '',       icon: '\u25CB', label: 'Open',   activeBg: '#F5F0E8', activeBgDark: '#2C2B28', color: '#5C5A55', colorDark: '#B0A898' },
-  { value: 'done',   icon: '\u2713', label: 'Done',   activeBg: '#D1FAE5', activeBgDark: '#0A3622', color: '#2D6A4F', colorDark: '#6EE7B7' },
-  { value: 'wip',    icon: '\u231B', label: 'WIP',    activeBg: '#FEF3C7', activeBgDark: '#3A2A08', color: '#9E6B3B', colorDark: '#E8C878' },
-  { value: 'cancel', icon: '\u2715', label: 'Cancel', activeBg: '#FEE2E2', activeBgDark: '#3A0A10', color: '#8B2635', colorDark: '#FCA5A5' },
-  { value: 'skip',   icon: '\u21ED', label: 'Skip',   activeBg: '#E8E0D0', activeBgDark: '#2C2B28', color: '#5C5A55', colorDark: '#B0A898' },
-  { value: 'pause',  icon: '\u23F8', label: 'Pause',  activeBg: '#E0E7FF', activeBgDark: '#1E1B4B', color: '#4338CA', colorDark: '#A5B4FC' },
+  { value: '',       icon: '\u25CB', label: 'Open',     activeBg: '#F5F0E8', activeBgDark: '#2C2B28', color: '#5C5A55', colorDark: '#B0A898' },
+  { value: 'done',   icon: '\u2713', label: 'Complete', activeBg: '#D1FAE5', activeBgDark: '#0A3622', color: '#2D6A4F', colorDark: '#6EE7B7' },
+  { value: 'wip',    icon: '\u231B', label: 'Start',    activeBg: '#FEF3C7', activeBgDark: '#3A2A08', color: '#9E6B3B', colorDark: '#E8C878' },
+  { value: 'cancel', icon: '\u2715', label: 'Cancel',   activeBg: '#FEE2E2', activeBgDark: '#3A0A10', color: '#8B2635', colorDark: '#FCA5A5' },
+  { value: 'skip',   icon: '\u21ED', label: 'Skip',     activeBg: '#E8E0D0', activeBgDark: '#2C2B28', color: '#5C5A55', colorDark: '#B0A898' },
+  { value: 'pause',  icon: '\u23F8', label: 'Pause',    activeBg: '#E0E7FF', activeBgDark: '#1E1B4B', color: '#4338CA', colorDark: '#A5B4FC' },
 ];
 
 function DeleteButton({ onDelete, size, fontSize, darkMode }) {

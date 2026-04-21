@@ -225,6 +225,14 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   var recurringByDate = {};
   var fixedByDate = {};
   var markersByDate = {};
+  // Overdue placements: entries kept on their original day/time (not pool-placed)
+  // so the frontend can render them with a red "OVERDUE" indicator. Merged into
+  // `dayPlacements` just before return. Covers:
+  //   - Missed flex recurring today (flex window passed, user didn't mark done)
+  //   - Past-day recurring beyond flex horizon (still pending from yesterday+)
+  // Rigid recurring past-time today carries the flag on the task object itself
+  // because it flows through placeRecurring() via recurringByDate.
+  var overdueByDate = {};
   var pool = [];
 
   allTasks.forEach(function(t) {
@@ -293,14 +301,35 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     // On past days, drop entirely.
     if (t.recurring && t.rigid) {
       var recurDropped = isPast && tdKey !== effectiveTodayKey;
-      if (!recurDropped) { if (!recurringByDate[tdKey]) recurringByDate[tdKey] = []; recurringByDate[tdKey].push(t); }
+      if (!recurDropped) {
+        // Tag overdue when the rigid task's scheduled window has already
+        // elapsed on today (start + dur <= now). placeRecurring preserves
+        // the task reference, so the flag flows through to the placement
+        // entry as `placement.task._overdue`.
+        if (tdKey === effectiveTodayKey && sm !== null && sm + effectiveDur <= nowMins) {
+          t._overdue = true;
+        }
+        if (!recurringByDate[tdKey]) recurringByDate[tdKey] = [];
+        recurringByDate[tdKey].push(t);
+      }
       return;
     }
     // Non-rigid recurringTasks on past days: drop unless still within placement window.
     if (t.recurring && isPast && tdKey !== effectiveTodayKey) {
       var flex = t.timeFlex != null ? t.timeFlex : RECUR_DEFAULT_FLEX;
       var daysPast = Math.round((localToday.getTime() - td.getTime()) / 86400000);
-      if (flex < daysPast * 1440) return; // outside placement window — skip
+      if (flex < daysPast * 1440) {
+        // Outside placement window — normally dropped. If the instance is
+        // still pending (status=''), surface it on its ORIGINAL day as an
+        // overdue marker so the user can mark it done/skipped from that
+        // day's grid instead of having it silently vanish.
+        if (st === '' && sm !== null) {
+          t._overdue = true;
+          if (!overdueByDate[tdKey]) overdueByDate[tdKey] = [];
+          overdueByDate[tdKey].push({ task: t, start: sm, dur: effectiveDur });
+        }
+        return;
+      }
       // Still within window — redirect to today so the scheduler can place it
       td = new Date(localToday);
       tdKey = effectiveTodayKey;
@@ -310,7 +339,9 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
     // Flexible recurring on today with preferred time: if the entire flex window
     // [time - flex, time + flex] has passed, the recurring task is MISSED — don't place
     // it at a wrong time (e.g., breakfast at 11:05am). Add to missedRecurrings
-    // so it appears in the unplaced list with a clear diagnostic.
+    // so it appears in the unplaced list with a clear diagnostic, AND keep it
+    // on today's grid at its preferred time with an overdue indicator so the
+    // user can mark it done/skip without hunting through ConflictsView.
     if (t.recurring && !t.rigid && tdKey === effectiveTodayKey && sm !== null) {
       var missedFlex = t.timeFlex != null ? t.timeFlex : RECUR_DEFAULT_FLEX;
       if (missedFlex > 0) {
@@ -320,7 +351,10 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
           t._unplacedReason = 'missed';
           t._unplacedDetail = 'Preferred window (' + fmtTime(flexStart) + ' \u2013 ' + fmtTime(flexEnd) + ') has passed';
           t._suggestions = [{ type: 'missed', text: 'Mark as done if completed, or skip for today' }];
+          t._overdue = true;
           missedRecurrings.push(t);
+          if (!overdueByDate[tdKey]) overdueByDate[tdKey] = [];
+          overdueByDate[tdKey].push({ task: t, start: sm, dur: effectiveDur });
           return; // don't add to pool
         }
       }
@@ -2788,6 +2822,26 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       if (!(t.id in slackByTaskId) || slack < slackByTaskId[t.id]) {
         slackByTaskId[t.id] = slack;
       }
+    });
+  });
+
+  // Merge overdue placements (missed flex today + past-day recurring beyond
+  // flex horizon). These live outside the main pool+placement loop because
+  // they don't consume capacity — the scheduler never places into past time
+  // slots. We append them to dayPlacements here so the frontend renders them
+  // at their original time with the OVERDUE marker.
+  Object.keys(overdueByDate).forEach(function(dk) {
+    if (!dayPlacements[dk]) dayPlacements[dk] = [];
+    overdueByDate[dk].forEach(function(entry) {
+      dayPlacements[dk].push({
+        task: entry.task,
+        start: entry.start,
+        dur: entry.dur,
+        locked: true,
+        _overdue: true,
+        _dateKey: dk,
+        tz: (entry.task && entry.task.tz) || cfg.timezone || null
+      });
     });
   });
 

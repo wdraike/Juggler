@@ -10,11 +10,11 @@ export const PRI_RANK = { P1: 100, P2: 80, P3: 50, P4: 20 };
 
 export const STATUS_OPTIONS = [
   { value: "", label: "\u2014", bg: "#F5F0E8", bgDark: "#1E2D4A", color: "#5C5A55", colorDark: "#B0A898", tip: "Open \u2014 not started" },
-  { value: "done", label: "\u2713", bg: "#D1FAE5", bgDark: "#0A3622", color: "#2D6A4F", colorDark: "#6EE7B7", tip: "Done \u2014 completed" },
-  { value: "wip", label: "\u231B", bg: "#FEF3C7", bgDark: "#3A2A08", color: "#9E6B3B", colorDark: "#E8C878", tip: "WIP \u2014 work in progress" },
-  { value: "cancel", label: "\u2715", bg: "#FEE2E2", bgDark: "#3A0A10", color: "#8B2635", colorDark: "#FCA5A5", tip: "Cancelled \u2014 won't do" },
-  { value: "skip", label: "\u23ED", bg: "#E8E0D0", bgDark: "#2C2B28", color: "#5C5A55", colorDark: "#B0A898", tip: "Skipped \u2014 not today" },
-  { value: "pause", label: "\u23F8", bg: "#E0E7FF", bgDark: "#1E1B4B", color: "#4338CA", colorDark: "#A5B4FC", tip: "Paused \u2014 temporarily inactive" },
+  { value: "done", label: "\u2713", bg: "#D1FAE5", bgDark: "#0A3622", color: "#2D6A4F", colorDark: "#6EE7B7", tip: "Complete \u2014 mark this task finished" },
+  { value: "wip", label: "\u231B", bg: "#FEF3C7", bgDark: "#3A2A08", color: "#9E6B3B", colorDark: "#E8C878", tip: "Start \u2014 mark as in progress" },
+  { value: "cancel", label: "\u2715", bg: "#FEE2E2", bgDark: "#3A0A10", color: "#8B2635", colorDark: "#FCA5A5", tip: "Cancel \u2014 won't do" },
+  { value: "skip", label: "\u23ED", bg: "#E8E0D0", bgDark: "#2C2B28", color: "#5C5A55", colorDark: "#B0A898", tip: "Skip \u2014 not today, keep the schedule" },
+  { value: "pause", label: "\u23F8", bg: "#E0E7FF", bgDark: "#1E1B4B", color: "#4338CA", colorDark: "#A5B4FC", tip: "Pause \u2014 temporarily inactive" },
 ];
 
 export const STATUS_MAP = Object.fromEntries(STATUS_OPTIONS.map(s => [s.value, s]));
