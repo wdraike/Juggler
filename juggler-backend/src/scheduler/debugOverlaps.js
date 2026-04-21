@@ -41,7 +41,9 @@ function getNowInTimezone(tz) {
   var vals = {};
   parts.forEach(function(p) { vals[p.type] = parseInt(p.value, 10); });
   var hour = vals.hour % 24;
-  return { todayKey: vals.month + '/' + vals.day, nowMins: hour * 60 + vals.minute };
+  var mo = vals.month, dy = vals.day;
+  var todayKey = vals.year + '-' + (mo < 10 ? '0' : '') + mo + '-' + (dy < 10 ? '0' : '') + dy;
+  return { todayKey: todayKey, nowMins: hour * 60 + vals.minute };
 }
 
 async function loadConfig(userId) {

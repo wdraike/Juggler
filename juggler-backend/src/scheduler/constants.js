@@ -54,7 +54,8 @@ var DEFAULT_TIME_BLOCKS = {
 };
 
 // Bump this when the placement algorithm changes to invalidate cached schedules.
-var SCHEDULER_VERSION = 2;
+// v3: date keys changed from M/D to ISO YYYY-MM-DD.
+var SCHEDULER_VERSION = 3;
 
 // Forward expansion horizon for recurring templates. The scheduler only
 // generates/places recurring instances out to today + RECUR_EXPAND_DAYS.

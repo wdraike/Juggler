@@ -2,6 +2,7 @@ const {
   inferYear,
   parseDate,
   formatDateKey,
+  isoToDateKey,
   toDateISO,
   fromDateISO,
   parseTimeToMinutes,
@@ -44,57 +45,78 @@ describe('dateHelpers', () => {
       expect(parseDate(undefined)).toBeNull();
     });
 
-    it('parses M/D format correctly', () => {
-      const d = parseDate('3/15');
+    it('parses ISO YYYY-MM-DD', () => {
+      const d = parseDate('2026-03-15');
       expect(d).toBeInstanceOf(Date);
-      expect(d.getMonth()).toBe(2); // March = 2
+      expect(d.getFullYear()).toBe(2026);
+      expect(d.getMonth()).toBe(2);
       expect(d.getDate()).toBe(15);
     });
 
-    it('uses dynamic year, not hardcoded 2026', () => {
+    it('parses ISO with time suffix', () => {
+      const d = parseDate('2026-03-15T12:00:00Z');
+      expect(d.getFullYear()).toBe(2026);
+      expect(d.getMonth()).toBe(2);
+      expect(d.getDate()).toBe(15);
+    });
+
+    it('parses legacy M/D format (back-compat, year inferred)', () => {
       const d = parseDate('3/15');
-      const expectedYear = inferYear(3);
-      expect(d.getFullYear()).toBe(expectedYear);
+      expect(d).toBeInstanceOf(Date);
+      expect(d.getMonth()).toBe(2);
+      expect(d.getDate()).toBe(15);
+      expect(d.getFullYear()).toBe(inferYear(3));
+    });
+
+    it('accepts Date objects (idempotent)', () => {
+      const in_ = new Date(2026, 2, 15);
+      const out = parseDate(in_);
+      expect(out.getFullYear()).toBe(2026);
+      expect(out.getMonth()).toBe(2);
+      expect(out.getDate()).toBe(15);
+    });
+
+    it('returns null for unparseable strings', () => {
+      expect(parseDate('garbage')).toBeNull();
     });
   });
 
   describe('formatDateKey', () => {
-    it('formats Date to M/D string', () => {
-      const d = new Date(2026, 2, 15); // March 15
-      expect(formatDateKey(d)).toBe('3/15');
+    it('formats Date to ISO YYYY-MM-DD', () => {
+      const d = new Date(2026, 2, 15);
+      expect(formatDateKey(d)).toBe('2026-03-15');
     });
 
-    it('does not zero-pad', () => {
-      const d = new Date(2026, 0, 5); // Jan 5
-      expect(formatDateKey(d)).toBe('1/5');
+    it('zero-pads month and day', () => {
+      const d = new Date(2026, 0, 5);
+      expect(formatDateKey(d)).toBe('2026-01-05');
+    });
+
+    it('round-trips through parseDate', () => {
+      const d = new Date(2026, 6, 4);
+      expect(formatDateKey(parseDate(formatDateKey(d)))).toBe('2026-07-04');
     });
   });
 
   describe('toDateISO', () => {
-    it('converts M/D to YYYY-MM-DD', () => {
+    it('normalizes legacy M/D to YYYY-MM-DD', () => {
       const iso = toDateISO('3/5');
       expect(iso).toMatch(/^\d{4}-03-05$/);
+    });
+
+    it('passes ISO through unchanged', () => {
+      expect(toDateISO('2026-03-05')).toBe('2026-03-05');
     });
 
     it('returns empty for falsy', () => {
       expect(toDateISO('')).toBe('');
       expect(toDateISO(null)).toBe('');
     });
-
-    it('uses dynamic year', () => {
-      const iso = toDateISO('3/15');
-      expect(iso).not.toContain('undefined');
-      expect(iso).toMatch(/^\d{4}-03-15$/);
-    });
   });
 
   describe('fromDateISO', () => {
-    it('converts YYYY-MM-DD to M/D', () => {
-      expect(fromDateISO('2026-03-15')).toBe('3/15');
-      expect(fromDateISO('2026-01-05')).toBe('1/5');
-    });
-
-    it('returns empty for falsy', () => {
+    it('is a pass-through (ISO is canonical)', () => {
+      expect(fromDateISO('2026-03-15')).toBe('2026-03-15');
       expect(fromDateISO('')).toBe('');
     });
   });
@@ -150,6 +172,35 @@ describe('dateHelpers', () => {
       expect(formatHour(6)).toBe('6 AM');
       expect(formatHour(12)).toBe('12 PM');
       expect(formatHour(18)).toBe('6 PM');
+    });
+  });
+
+  describe('isoToDateKey', () => {
+    it('passes ISO YYYY-MM-DD through', () => {
+      expect(isoToDateKey('2026-04-21')).toBe('2026-04-21');
+      expect(isoToDateKey('2026-12-01')).toBe('2026-12-01');
+    });
+
+    it('strips ISO time suffix', () => {
+      expect(isoToDateKey('2026-04-21T00:00:00.000Z')).toBe('2026-04-21');
+      expect(isoToDateKey('2026-04-21 12:30:00')).toBe('2026-04-21');
+    });
+
+    it('converts legacy M/D to ISO (year inferred)', () => {
+      const v = isoToDateKey('4/21');
+      expect(v).toMatch(/^\d{4}-04-21$/);
+    });
+
+    it('accepts Date objects', () => {
+      expect(isoToDateKey(new Date(2026, 3, 21))).toBe('2026-04-21');
+    });
+
+    it('returns null for null / empty / invalid', () => {
+      expect(isoToDateKey(null)).toBeNull();
+      expect(isoToDateKey(undefined)).toBeNull();
+      expect(isoToDateKey('')).toBeNull();
+      expect(isoToDateKey('garbage')).toBeNull();
+      expect(isoToDateKey(new Date('invalid'))).toBeNull();
     });
   });
 });

@@ -6,7 +6,7 @@
  * backing up into today, capacity overflow, and combined pressure.
  *
  * Date context:
- *   TODAY = '4/3' (Thursday) — weekday blocks
+ *   TODAY = '2026-04-03' (Thursday) — weekday blocks
  *   nowMins = 480 (8:00 AM)
  *   Usable today ≈ 780m (480-1260, 13 hours)
  */
@@ -14,7 +14,7 @@
 const unifiedSchedule = require('../src/scheduler/unifiedSchedule');
 const { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../src/scheduler/constants');
 
-const TODAY = '4/3';
+const TODAY = '2026-04-03';
 const NOW_MINS = 480; // 8 AM
 
 let _id = 0;

@@ -137,7 +137,7 @@ describe('taskToRow / rowToTask', () => {
 
   test('auto-pin on date set', () => {
     // This tests the REST controller behavior, not the MCP tool
-    var task = { text: 'Pinned', date: '4/20' };
+    var task = { text: 'Pinned', date: '2026-04-20' };
     var row = taskToRow(task, 'user1', 'America/New_York');
     // taskToRow itself doesn't auto-pin — that's done in the controller/MCP layer
     expect(row).toBeDefined();

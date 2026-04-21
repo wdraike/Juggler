@@ -195,12 +195,36 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         // Both count against the tpc budget. Dedup via a Set since a date
         // could theoretically be in both maps.
         var bookedKeys = {};
+        var pendingKeys = {};
         cycleCandidates.forEach(function(cd) {
           var key = src.id + '|' + cd.key;
-          if (existingBySourceDate[key] || pendingBookedByDate[key]) bookedKeys[cd.key] = true;
+          if (existingBySourceDate[key]) bookedKeys[cd.key] = true;
+          if (pendingBookedByDate[key]) { bookedKeys[cd.key] = true; pendingKeys[cd.key] = true; }
         });
         var existingInCycle = Object.keys(bookedKeys).length;
-        var slotsNeeded = Math.max(0, tpc - existingInCycle);
+
+        // Pre-fill `picked` with existing pending dates so they emit as desired
+        // occurrences. Without this the reconcile diff would treat them as
+        // "not desired" and DELETE them — even though the user still wants
+        // them. Pending are already tpc-budgeted, so they belong in picked
+        // regardless of slot math.
+        Object.keys(pendingKeys).forEach(function(k) { picked[k] = true; });
+
+        // Skip should not reshape future dates.
+        // Rule: once any instance (pending OR terminal) exists in the cycle,
+        // the user has already interacted with this cycle — do not refill
+        // vacated slots. Fresh cycles with zero existing instances get the
+        // full tpc budget.
+        //
+        // Without this: user with 1 pending instance skips it → cycle now
+        // has 1 terminal and 0 pending → tpc - 1 = 3 "needed" → scheduler
+        // creates 3 replacement dates → Exercise "keeps returning".
+        var slotsNeeded;
+        if (existingInCycle === 0) {
+          slotsNeeded = tpc;
+        } else {
+          slotsNeeded = 0;
+        }
 
         // Pick pool: candidates that are not already booked (neither
         // terminal nor pending). No point picking a date that already has

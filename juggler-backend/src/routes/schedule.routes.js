@@ -75,8 +75,9 @@ router.post('/debug', authenticateJWT, authenticateAdmin, debugLimiter, async fu
     }).formatToParts(now);
     var vals = {};
     parts.forEach(function(p) { vals[p.type] = parseInt(p.value, 10); });
+    var _m = vals.month, _d = vals.day;
     var dateCtx = {
-      todayKey: vals.month + '/' + vals.day,
+      todayKey: vals.year + '-' + (_m < 10 ? '0' : '') + _m + '-' + (_d < 10 ? '0' : '') + _d,
       nowMins: (vals.hour % 24) * 60 + vals.minute
     };
 

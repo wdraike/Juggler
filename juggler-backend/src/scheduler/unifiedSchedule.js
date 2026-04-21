@@ -322,11 +322,13 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
         // Outside placement window — normally dropped. If the instance is
         // still pending (status=''), surface it on its ORIGINAL day as an
         // overdue marker so the user can mark it done/skipped from that
-        // day's grid instead of having it silently vanish.
-        if (st === '' && sm !== null) {
+        // day's grid. Only surface when the user SET a preferred time —
+        // anchoring on a scheduler-assigned `t.time` would bolt the task
+        // to a time the user never chose.
+        if (st === '' && t.preferredTimeMins != null) {
           t._overdue = true;
           if (!overdueByDate[tdKey]) overdueByDate[tdKey] = [];
-          overdueByDate[tdKey].push({ task: t, start: sm, dur: effectiveDur });
+          overdueByDate[tdKey].push({ task: t, start: t.preferredTimeMins, dur: effectiveDur });
         }
         return;
       }
@@ -336,25 +338,29 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
       isPast = false;
     }
 
-    // Flexible recurring on today with preferred time: if the entire flex window
-    // [time - flex, time + flex] has passed, the recurring task is MISSED — don't place
-    // it at a wrong time (e.g., breakfast at 11:05am). Add to missedRecurrings
-    // so it appears in the unplaced list with a clear diagnostic, AND keep it
-    // on today's grid at its preferred time with an overdue indicator so the
-    // user can mark it done/skip without hunting through ConflictsView.
-    if (t.recurring && !t.rigid && tdKey === effectiveTodayKey && sm !== null) {
+    // Flexible recurring on today with a USER-SET preferred time: if the
+    // entire flex window [time - flex, time + flex] has passed, the task is
+    // MISSED — don't place at a wrong time (e.g. breakfast at 11:05am).
+    //
+    // Gate this ONLY on `preferredTimeMins` (the user explicitly said "I want
+    // this at X"), NOT on `t.time` (which may be a prior scheduler placement
+    // that anchored the task at a time the user never specified). Without
+    // this guard a generic flexible task placed at 9 AM would be flagged
+    // missed at 10:30 AM under the 60-min default flex — even though the
+    // user meant "do it anytime today".
+    if (t.recurring && !t.rigid && tdKey === effectiveTodayKey && t.preferredTimeMins != null) {
       var missedFlex = t.timeFlex != null ? t.timeFlex : RECUR_DEFAULT_FLEX;
       if (missedFlex > 0) {
-        var flexEnd = sm + missedFlex;
+        var flexEnd = t.preferredTimeMins + missedFlex;
         if (flexEnd <= nowMins) {
-          var flexStart = Math.max(0, sm - missedFlex);
+          var flexStart = Math.max(0, t.preferredTimeMins - missedFlex);
           t._unplacedReason = 'missed';
           t._unplacedDetail = 'Preferred window (' + fmtTime(flexStart) + ' \u2013 ' + fmtTime(flexEnd) + ') has passed';
           t._suggestions = [{ type: 'missed', text: 'Mark as done if completed, or skip for today' }];
           t._overdue = true;
           missedRecurrings.push(t);
           if (!overdueByDate[tdKey]) overdueByDate[tdKey] = [];
-          overdueByDate[tdKey].push({ task: t, start: sm, dur: effectiveDur });
+          overdueByDate[tdKey].push({ task: t, start: t.preferredTimeMins, dur: effectiveDur });
           return; // don't add to pool
         }
       }

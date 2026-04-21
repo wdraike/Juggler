@@ -300,7 +300,14 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   // config and hasn't already set one. Prevents the "Cut Grass scheduled for
   // today when I did it Friday" class of confusion — user sees a value they
   // can override, rather than a silent today-fallback in the scheduler.
+  //
+  // Skip the effect on the first render so opening a form for an
+  // already-anchor-dependent task with an empty recurStart doesn't mark it
+  // dirty immediately. Only fires after the user has changed state at least
+  // once (most commonly: flipping the recurrence type).
+  var autofillGuardRef = useRef(true);
   React.useEffect(function() {
+    if (autofillGuardRef.current) { autofillGuardRef.current = false; return; }
     if (!recurIsAnchorDependent) return;
     if (recurStart) return;
     var now = new Date();
@@ -526,8 +533,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     var d = fromDateISO(date);
     var dayName = '';
     if (d) {
-      var pd = new Date(2026, parseInt(d.split('/')[0]) - 1, parseInt(d.split('/')[1]));
-      dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][pd.getDay()];
+      var pd = parseDate(d);
+      if (pd) dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][pd.getDay()];
     }
     return {
       text, project, pri,

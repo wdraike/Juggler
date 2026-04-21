@@ -28,8 +28,8 @@ const unifiedSchedule = require('../src/scheduler/unifiedSchedule');
 const { rowToTask, buildSourceMap } = require('../src/controllers/task.controller');
 const { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../src/scheduler/constants');
 
-const TODAY = '4/7'; // Monday
-const TOMORROW = '4/8';
+const TODAY = '2026-04-07'; // Monday
+const TOMORROW = '2026-04-08';
 const TZ = 'America/New_York';
 const cfg = {
   timeBlocks: DEFAULT_TIME_BLOCKS, toolMatrix: DEFAULT_TOOL_MATRIX,
@@ -55,7 +55,8 @@ function task(overrides) {
 function dateKey(daysFromMonday) {
   var d = new Date(2026, 3, 7); // April 7 = Monday
   d.setDate(d.getDate() + daysFromMonday);
-  return (d.getMonth() + 1) + '/' + d.getDate();
+  var m = d.getMonth() + 1, day = d.getDate();
+  return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
 }
 
 function schedule(tasks, nowMins) {
@@ -228,8 +229,11 @@ describe('Tier 2: Recurrings with Preferred Time', () => {
   });
 
   test('S8: Breakfast at 7am ±60m, run at 9am → missed + placed overdue at original time', () => {
+    // preferredTimeMins is required for the missed-flex path: it represents
+    // "user explicitly set a preferred time". Without it, t.time is just a
+    // prior scheduler placement and shouldn't anchor a missed-flex window.
     var r = schedule([
-      task({ id: 'bf', text: 'Breakfast', recurring: true, when: 'morning', time: '7:00 AM', timeFlex: 60, dur: 30, generated: true }),
+      task({ id: 'bf', text: 'Breakfast', recurring: true, when: 'morning', time: '7:00 AM', preferredTimeMins: 420, timeFlex: 60, dur: 30, generated: true }),
     ], 540); // 9am
     // Still reported as missed (shows in ConflictsView / pastDue list)
     expect(isMissed(r, 'bf')).toBe(true);
@@ -700,7 +704,7 @@ describe('Tier 10: Eligible Days Recurrence', () => {
 
   test('S38: timesPerCycle=1, 2 days selected → one instance per week', () => {
     var tasks = [{
-      id: 'ht_clean', text: 'Clean Bathroom', date: '4/6', recurring: true,
+      id: 'ht_clean', text: 'Clean Bathroom', date: '2026-04-06', recurring: true,
       recur: { type: 'weekly', days: 'SU', timesPerCycle: 1 },
       when: 'morning', dur: 60, pri: 'P3', status: '', dayReq: 'any',
       generated: false, sourceId: null
@@ -711,7 +715,7 @@ describe('Tier 10: Eligible Days Recurrence', () => {
 
   test('S39: No timesPerCycle (default) → all selected days', () => {
     var tasks = [{
-      id: 'ht_gym', text: 'Gym', date: '4/6', recurring: true,
+      id: 'ht_gym', text: 'Gym', date: '2026-04-06', recurring: true,
       recur: { type: 'weekly', days: 'SU' },
       when: 'morning', dur: 60, pri: 'P3', status: '', dayReq: 'any',
       generated: false, sourceId: null
@@ -722,7 +726,7 @@ describe('Tier 10: Eligible Days Recurrence', () => {
 
   test('S40: timesPerCycle instance gets dayReq set to all selected days', () => {
     var tasks = [{
-      id: 'ht_any', text: 'Weekend Task', date: '4/6', recurring: true,
+      id: 'ht_any', text: 'Weekend Task', date: '2026-04-06', recurring: true,
       recur: { type: 'weekly', days: 'SU', timesPerCycle: 1 },
       when: 'morning', dur: 60, pri: 'P3', status: '', dayReq: 'any',
       generated: false, sourceId: null
@@ -735,7 +739,7 @@ describe('Tier 10: Eligible Days Recurrence', () => {
 
   test('S41: timesPerCycle=2, 5 days selected → two instances per week', () => {
     var tasks = [{
-      id: 'ht_flex', text: 'Flexible Workout', date: '4/6', recurring: true,
+      id: 'ht_flex', text: 'Flexible Workout', date: '2026-04-06', recurring: true,
       recur: { type: 'weekly', days: 'MTWRF', timesPerCycle: 2 },
       when: 'morning', dur: 60, pri: 'P3', status: '', dayReq: 'any',
       generated: false, sourceId: null
@@ -747,7 +751,7 @@ describe('Tier 10: Eligible Days Recurrence', () => {
 
   test('S42: Legacy string days, no timesPerCycle → all days (backward compat)', () => {
     var tasks = [{
-      id: 'ht_old', text: 'Old Recurring', date: '4/6', recurring: true,
+      id: 'ht_old', text: 'Old Recurring', date: '2026-04-06', recurring: true,
       recur: { type: 'weekly', days: 'MWF' },
       when: 'morning', dur: 30, pri: 'P3', status: '', dayReq: 'any',
       generated: false, sourceId: null
@@ -894,12 +898,15 @@ describe('Tier 10: Overdue placement flags', () => {
   });
 
   test('non-rigid recurring from a prior day, outside flex window, still pending → overdue placement on its original day', () => {
+    // preferredTimeMins required — matches the "user explicitly set a time"
+    // contract. Without it, a flexible task anchored on a stale scheduler
+    // placement would be wrongly flagged overdue.
     var yesterday = dateKey(-1); // 4/6
     var r = schedule([
       task({
         id: 'bf_yesterday', text: 'Breakfast (yesterday)',
         recurring: true, rigid: false, when: 'morning',
-        time: '7:00 AM', dur: 30,
+        time: '7:00 AM', preferredTimeMins: 420, dur: 30,
         date: yesterday, timeFlex: 60, generated: true
       }),
     ], 540);
@@ -922,5 +929,35 @@ describe('Tier 10: Overdue placement flags', () => {
       }),
     ], 540);
     expect(entry(r, 'bf_done')).toBeNull();
+  });
+
+  // Regression: flexible recurring task WITHOUT a user-set preferred time
+  // should NOT be marked overdue — even if a prior scheduler run placed it
+  // at a morning time. A previous bug fell back to `t.time` for the anchor,
+  // which anchored any task at its last placement + 60-min default flex
+  // window, forcing "afj"-style generic tasks overdue at 10:30 AM.
+  test('flexible recurring with no preferredTimeMins is NOT marked overdue mid-day', () => {
+    var today = dateKey(0);
+    var r = schedule([
+      task({
+        id: 'afj', text: 'Apply for jobs',
+        recurring: true, rigid: false,
+        when: 'morning,lunch,afternoon,evening,night',
+        time: '9:00 AM', // stale scheduler placement — NOT a preference
+        // preferredTimeMins: NOT SET
+        timeFlex: 60, dur: 30,
+        date: today, generated: true
+      }),
+    ], 660); // 11:00 AM — past 9 AM + 60-min flex
+    // Must not be flagged as missed — the task is genuinely flexible.
+    var unplaced = r.unplaced.find(function(t) { return t.id === 'afj'; });
+    expect(unplaced && unplaced._unplacedReason === 'missed').toBeFalsy();
+    // And should be placeable later today (enters the pool).
+    var p = placement(r, 'afj');
+    expect(p).not.toBeNull();
+    // Either placed somewhere today or unplaced for a non-missed reason;
+    // key invariant is NO overdue flag.
+    var e = entry(r, 'afj');
+    if (e) expect(!!e.p._overdue).toBe(false);
   });
 });

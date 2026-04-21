@@ -159,7 +159,7 @@ export function getNowInTimezone(timezone) {
   var minute = parts.minute;
 
   return {
-    todayKey: month + '/' + day,
+    todayKey: year + '-' + (month < 10 ? '0' : '') + month + '-' + (day < 10 ? '0' : '') + day,
     todayDate: new Date(year, month - 1, day),
     nowMins: hour * 60 + minute
   };

@@ -49,7 +49,7 @@ describe('task mapping', () => {
       const task = rowToTask(sampleRow, TZ);
       expect(task.id).toBe('t01');
       expect(task.text).toBe('Test task');
-      expect(task.date).toBe('3/15');
+      expect(task.date).toBe('2026-03-15');
       expect(task.time).toBe('9:00 AM');
       expect(task.timeRemaining).toBeNull();
       expect(task.location).toEqual(['home', 'work']);
@@ -62,7 +62,7 @@ describe('task mapping', () => {
       expect(task.datePinned).toBe(true);
       expect(task.gcalEventId).toBe('gcal_123');
       expect(task.deadline).toBe('2026-03-20');
-      expect(task.startAfter).toBe('3/10');
+      expect(task.startAfter).toBe('2026-03-10');
     });
 
     it('handles already-parsed JSON fields', () => {
@@ -78,7 +78,7 @@ describe('task mapping', () => {
   describe('taskToRow', () => {
     it('maps API task to DB row', () => {
       const task = {
-        id: 't01', text: 'Test', date: '3/15', location: ['home'],
+        id: 't01', text: 'Test', date: '2026-03-15', location: ['home'],
         tools: ['phone'], recurring: true, rigid: false, dependsOn: ['t00'],
         recur: { type: 'daily' }, split: true, datePinned: true
       };
@@ -106,7 +106,7 @@ describe('task mapping', () => {
   describe('round-trip', () => {
     it('taskToRow -> rowToTask preserves data', () => {
       const original = {
-        id: 't01', text: 'Round trip', date: '3/15', day: 'Sun',
+        id: 't01', text: 'Round trip', date: '2026-03-15', day: 'Sun',
         time: '9:00 AM', dur: 45, pri: 'P1', project: 'test',
         status: 'wip', location: ['home', 'work'], tools: ['phone'],
         when: 'morning', recurring: true, rigid: false, split: false,

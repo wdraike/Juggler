@@ -124,7 +124,7 @@ describe('rowToTask: UTC derivation', () => {
   test('derives date/time/day from scheduled_at with timezone', () => {
     var row = makeRow({ scheduled_at: new Date('2026-04-04T14:00:00Z') }); // 10:00 AM ET
     var task = rowToTask(row, TZ, {});
-    expect(task.date).toBe('4/4');
+    expect(task.date).toBe('2026-04-04');
     expect(task.time).toBe('10:00 AM');
     expect(task.day).toBe('Sat');
   });
@@ -155,7 +155,7 @@ describe('rowToTask: UTC derivation', () => {
   test('derives startAfter from start_after_at', () => {
     var row = makeRow({ start_after_at: '2026-04-06' });
     var task = rowToTask(row, TZ, {});
-    expect(task.startAfter).toBe('4/6');
+    expect(task.startAfter).toBe('2026-04-06');
   });
 
   test('handles null deadline and start_after_at', () => {
@@ -265,7 +265,7 @@ describe('rowToTask: template preferred time override via preferred_time_mins', 
     var task = rowToTask(instance, TZ, srcMap);
 
     expect(task.time).toBe('12:00 PM');  // from template preferred_time_mins
-    expect(task.date).toBe('4/4');       // date from instance (correct day)
+    expect(task.date).toBe('2026-04-04');       // date from instance (correct day)
   });
 
   test('instance at midnight stays midnight when template has preferred_time_mins=0', () => {
@@ -428,7 +428,7 @@ describe('Full pipeline: rowToTask → scheduler', () => {
     });
     var instance = makeInstanceRow('ht_lunch_pipe', {
       id: 'rc_lunch_pipe_44',
-      date: '4/4',
+      date: '2026-04-04',
       scheduled_at: new Date('2026-04-04T04:00:00Z'), // midnight ET
     });
 
@@ -443,7 +443,7 @@ describe('Full pipeline: rowToTask → scheduler', () => {
     // Run through scheduler
     var cfg = makeCfg();
     var statuses = {}; statuses[mapped.id] = '';
-    var result = unifiedSchedule([mapped], statuses, '4/4', 480, cfg); // 8am
+    var result = unifiedSchedule([mapped], statuses, '2026-04-04', 480, cfg); // 8am
 
     // Should be placed near noon (flex 660-780), NOT at midnight or 11am
     var placed = [];
@@ -469,7 +469,7 @@ describe('Full pipeline: rowToTask → scheduler', () => {
     });
     var instance = makeInstanceRow('ht_bf_pipe', {
       id: 'rc_bf_pipe_44',
-      date: '4/4',
+      date: '2026-04-04',
       scheduled_at: new Date('2026-04-04T04:00:00Z'), // midnight ET (cleared)
     });
 
@@ -482,7 +482,7 @@ describe('Full pipeline: rowToTask → scheduler', () => {
     // Run scheduler at 9am — flex window [360,480] is entirely past
     var cfg = makeCfg();
     var statuses = {}; statuses[mapped.id] = '';
-    var result = unifiedSchedule([mapped], statuses, '4/4', 540, cfg); // 9am
+    var result = unifiedSchedule([mapped], statuses, '2026-04-04', 540, cfg); // 9am
 
     // Should be missed (not placed)
     var placed = [];
@@ -507,12 +507,12 @@ describe('Full pipeline: rowToTask → scheduler', () => {
       pri: 'P2',
     });
     var task = rowToTask(row, TZ, {});
-    expect(task.date).toBe('4/4');
+    expect(task.date).toBe('2026-04-04');
     expect(task.time).toBe('2:00 PM');
 
     var cfg = makeCfg();
     var statuses = {}; statuses[task.id] = '';
-    var result = unifiedSchedule([task], statuses, '4/4', 480, cfg);
+    var result = unifiedSchedule([task], statuses, '2026-04-04', 480, cfg);
 
     var placed = [];
     Object.values(result.dayPlacements).forEach(function(day) {
@@ -559,7 +559,7 @@ describe('Full pipeline: rowToTask → scheduler', () => {
 
 describe('taskToRow: reverse mapping', () => {
   test('converts date + time to scheduled_at via timezone', () => {
-    var row = taskToRow({ date: '4/4', time: '2:00 PM' }, 'user1', TZ);
+    var row = taskToRow({ date: '2026-04-04', time: '2:00 PM' }, 'user1', TZ);
     expect(row.scheduled_at).toBeTruthy();
     // 2:00 PM ET = 6:00 PM UTC (EDT offset = -4)
     var sa = new Date(row.scheduled_at);
@@ -585,7 +585,7 @@ describe('taskToRow: reverse mapping', () => {
 
   test('scheduledAt ISO takes precedence over date+time', () => {
     var row = taskToRow({
-      date: '4/4', time: '2:00 PM',
+      date: '2026-04-04', time: '2:00 PM',
       scheduledAt: '2026-04-05T20:00:00Z'  // different day+time
     }, 'user1', TZ);
     var sa = new Date(row.scheduled_at);

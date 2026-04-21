@@ -60,7 +60,8 @@ async function startSession(userId, options) {
   }).formatToParts(nowDt);
   var vals = {};
   parts.forEach(function(p) { vals[p.type] = parseInt(p.value, 10); });
-  var todayKey = vals.month + '/' + vals.day;
+  var _m = vals.month, _d = vals.day;
+  var todayKey = vals.year + '-' + (_m < 10 ? '0' : '') + _m + '-' + (_d < 10 ? '0' : '') + _d;
   var nowMins = (vals.hour % 24) * 60 + vals.minute;
 
   // Match runSchedule.js's schedulable-row filter: open/wip instances,

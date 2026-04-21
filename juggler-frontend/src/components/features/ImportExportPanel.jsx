@@ -127,10 +127,12 @@ function buildICS(tasks, statuses) {
 
   tasks.forEach(function(t) {
     if (!t.date || t.date === 'TBD') return;
-    var parts = t.date.split('/');
-    if (parts.length !== 2) return;
-    var month = parseInt(parts[0]), day = parseInt(parts[1]);
-    var year = now.getFullYear();
+    var iso = String(t.date).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    var md = String(t.date).match(/^(\d{1,2})\/(\d{1,2})$/);
+    var year, month, day;
+    if (iso) { year = Number(iso[1]); month = Number(iso[2]); day = Number(iso[3]); }
+    else if (md) { year = now.getFullYear(); month = Number(md[1]); day = Number(md[2]); }
+    else return;
 
     var time = parseTime12(t.time);
     var startH = time ? time.h : 9, startM = time ? time.m : 0;
@@ -291,7 +293,7 @@ function icsEventsToTasks(events, existingIds) {
     }
     usedIds.add(id);
 
-    var dateStr = start.month + '/' + start.day;
+    var dateStr = start.year + '-' + (start.month < 10 ? '0' : '') + start.month + '-' + (start.day < 10 ? '0' : '') + start.day;
     var jsDate = new Date(start.year, start.month - 1, start.day);
 
     // Detect all-day events: DTSTART is date-only (no time component)

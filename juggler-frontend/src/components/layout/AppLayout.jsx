@@ -91,13 +91,27 @@ export default function AppLayout() {
     setProjectFilter('');
   }, []);
   var [dayOffset, setDayOffset] = useState(function () {
-    // Restore saved date as offset from today
+    // Restore saved date as offset from today. The saved format is the
+    // canonical date key (ISO "YYYY-MM-DD"). Legacy M/D values ("4/21")
+    // are tolerated — we normalize before parsing so stale localStorage
+    // doesn't produce Invalid Date (which cascades to "nothing scheduled").
     if (_savedUI.selectedDate) {
-      var saved = new Date(_savedUI.selectedDate + 'T12:00:00');
-      var today = new Date(); today.setHours(12, 0, 0, 0);
-      var diff = Math.round((saved - today) / 86400000);
-      // Only restore if within reasonable range (±90 days)
-      if (Math.abs(diff) <= 90) return diff;
+      var raw = String(_savedUI.selectedDate);
+      var iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      var md = raw.match(/^(\d{1,2})\/(\d{1,2})$/);
+      var saved = null;
+      if (iso) {
+        saved = new Date(raw + 'T12:00:00');
+      } else if (md) {
+        // Legacy M/D — infer current year, same as shared inferYear logic.
+        var now = new Date();
+        saved = new Date(now.getFullYear(), Number(md[1]) - 1, Number(md[2]), 12, 0, 0);
+      }
+      if (saved && !isNaN(saved.getTime())) {
+        var today = new Date(); today.setHours(12, 0, 0, 0);
+        var diff = Math.round((saved - today) / 86400000);
+        if (Math.abs(diff) <= 90) return diff;
+      }
     }
     return 0;
   });
@@ -437,8 +451,35 @@ export default function AppLayout() {
     scheduleTemplates: config.scheduleTemplates
   }), [config.timeBlocks, config.locSchedules, config.locScheduleDefaults, config.locScheduleOverrides, config.hourLocationOverrides, config.toolMatrix, config.splitDefault, config.splitMinDefault, config.schedFloor, config.schedCeiling, config.scheduleTemplates]);
 
-  // Placements come from the backend scheduler API
-  var dayPlacements = placements.dayPlacements;
+  // Placements come from the backend scheduler API. Re-key to canonical ISO
+  // "YYYY-MM-DD" in case a stale backend (pre-ISO-refactor) returns legacy
+  // "M/D" keys — protects against the "nothing scheduled" state you'd see
+  // during a partial deploy where frontend and backend are out of sync.
+  var dayPlacements = useMemo(function() {
+    var src = placements.dayPlacements || {};
+    var keys = Object.keys(src);
+    if (keys.length === 0) return src;
+    // Detect legacy M/D keys; if none, return the original map unchanged.
+    var hasLegacy = keys.some(function(k) { return /^\d{1,2}\/\d{1,2}$/.test(k); });
+    if (!hasLegacy) return src;
+    var out = {};
+    var now = new Date();
+    keys.forEach(function(k) {
+      var iso = k.match(/^(\d{4})-\d{2}-\d{2}$/);
+      var md = k.match(/^(\d{1,2})\/(\d{1,2})$/);
+      var normalized = k;
+      if (md) {
+        var mo = Number(md[1]), dy = Number(md[2]);
+        // Current year unless the month is more than 6 months behind — then next year.
+        // Mirrors shared/scheduler/dateHelpers.inferYear.
+        var currentMonth = now.getMonth() + 1;
+        var year = (mo < currentMonth - 6) ? now.getFullYear() + 1 : now.getFullYear();
+        normalized = year + '-' + (mo < 10 ? '0' : '') + mo + '-' + (dy < 10 ? '0' : '') + dy;
+      }
+      out[normalized] = (out[normalized] || []).concat(src[k] || []);
+    });
+    return out;
+  }, [placements.dayPlacements]);
   var unplaced = placements.unplaced;
   // Filter phantom unplaced entries — entries with no text or that can't be
   // matched to a loaded task are stale cache references. Also exclude recurring
@@ -515,11 +556,20 @@ export default function AppLayout() {
   // Past-due tasks: due date or scheduled date in the past, still open.
   // Recurring instances ARE eligible — an evening-medication task still
   // pending at 8 PM is overdue even if its day-level deadline hasn't rolled
-  // to tomorrow. Four detection paths:
+  // to tomorrow. Detection paths:
   //   (a) day-level deadline before today
   //   (b) scheduled date before today
-  //   (c) intraday: scheduled for today and scheduledAt + dur < now
+  //   (c) intraday, ONLY for tasks the scheduler can't re-place:
+  //       fixed-when tasks and rigid-recurring tasks. Flexible tasks
+  //       (the default) are auto-placed into later slots by the scheduler,
+  //       so an apparent-past `task.time` just means "last run's placement"
+  //       and should not be flagged.
   //   (d) scheduler emitted _unplacedReason === 'missed' (lives on unplaced[])
+  function isTimeLocked(t) {
+    if (t.rigid) return true;
+    if (t.when && typeof t.when === 'string' && t.when.indexOf('fixed') >= 0) return true;
+    return false;
+  }
   var pastDueIds = useMemo(() => {
     var ids = new Set();
     var now = getNowInTimezone(userTimezone);
@@ -542,8 +592,9 @@ export default function AppLayout() {
       if (t.date && t.date !== 'TBD') {
         var td = parseDate(t.date);
         if (td && td < today) { ids.add(t.id); return; }
-        // (c) intraday — only for tasks scheduled at a specific time today
-        if (t.date === todayKey && t.time) {
+        // (c) intraday — only for time-locked tasks (fixed/rigid). Flexible
+        // tasks will be re-placed at a later slot by the scheduler.
+        if (t.date === todayKey && t.time && isTimeLocked(t)) {
           var startMins = parseTimeToMinutes(t.time);
           if (startMins != null) {
             var dur = Number(t.dur) || 0;
@@ -571,9 +622,10 @@ export default function AppLayout() {
         var dd = parseDate(t.deadline);
         if (dd && dd < today) { ids.add(t.id); return; }
       }
-      // Intraday overdue: scheduled for today and the task's window
-      // (start → start+dur) has fully elapsed. Requires a concrete time.
-      if (t.date === todayKey && t.time) {
+      // Intraday overdue: only time-locked tasks (fixed/rigid) whose window
+      // has fully elapsed. Flexible tasks are re-placed; their apparent
+      // past-time placement is a stale-data artifact, not a missed slot.
+      if (t.date === todayKey && t.time && isTimeLocked(t)) {
         var startMins = parseTimeToMinutes(t.time);
         if (startMins != null) {
           var dur = Number(t.dur) || 0;

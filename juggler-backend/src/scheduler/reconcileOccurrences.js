@@ -21,9 +21,14 @@
  *
  * @param {Array} taskRows raw rows from task_instances
  * @param {Function} parseDate M/D → Date parser
+ * @param {Function} [normalizeDate] optional r.date normalizer. Callers whose
+ *        r.date is ISO (from knex with dateStrings:true) should pass
+ *        dateHelpers.isoToDateKey so g.date lands in M/D (parseDate-compatible
+ *        and comparable to expandRecurring's desired.date).
  * @returns {Object} masterId → { occOrdStr → group }
  */
-function buildExistingGroups(taskRows, parseDate) {
+function buildExistingGroups(taskRows, parseDate, normalizeDate) {
+  var norm = normalizeDate || function(v) { return v; };
   var byMaster = {};
   taskRows.forEach(function(r) {
     if (r.task_type !== 'recurring_instance') return;
@@ -41,8 +46,9 @@ function buildExistingGroups(taskRows, parseDate) {
     g.chunkIds.push(r.id);
     if (Number(r.split_ordinal || 1) === 1) {
       g.occId = r.id;
-      g.date = r.date;
-      g.dateObj = r.date ? parseDate(r.date) : null;
+      var normalizedDate = r.date ? norm(r.date) : null;
+      g.date = normalizedDate;
+      g.dateObj = normalizedDate ? parseDate(normalizedDate) : null;
       g.scheduledAt = r.scheduled_at;
     }
   });

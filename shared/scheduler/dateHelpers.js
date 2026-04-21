@@ -21,14 +21,56 @@ function inferYear(month, timezone) {
   return year;
 }
 
+// Parse a date string to a Date at local midnight.
+// Canonical format is ISO "YYYY-MM-DD". Legacy M/D accepted for backward
+// compatibility (year inferred from nearest-past context). Returns null for
+// null/TBD/unparseable.
 function parseDate(dateStr) {
   if (!dateStr || dateStr === "TBD") return null;
-  var parts = dateStr.split("/").map(Number);
-  return new Date(inferYear(parts[0]), parts[0] - 1, parts[1]);
+  if (dateStr instanceof Date) {
+    if (isNaN(dateStr.getTime())) return null;
+    return new Date(dateStr.getFullYear(), dateStr.getMonth(), dateStr.getDate());
+  }
+  var s = String(dateStr);
+  var iso = s.match(/^(\d{4})-0?(\d{1,2})-0?(\d{1,2})/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
+  var md = s.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (md) return new Date(inferYear(Number(md[1])), Number(md[1]) - 1, Number(md[2]));
+  return null;
 }
 
+// Canonical internal date key: ISO "YYYY-MM-DD".
+// Sorts lexicographically, unambiguous, matches what knex DB DATE columns
+// return. All scheduler-internal keyspaces (dayPlacements, existingBySourceDate,
+// pendingBookedByDate, etc.) use this format.
 function formatDateKey(d) {
-  return (d.getMonth() + 1) + "/" + d.getDate();
+  var y = d.getFullYear();
+  var m = d.getMonth() + 1;
+  var day = d.getDate();
+  return y + "-" + (m < 10 ? "0" : "") + m + "-" + (day < 10 ? "0" : "") + day;
+}
+
+// Normalize any date-like value (ISO, Date, or legacy M/D) to canonical ISO.
+// Kept for places that want an explicit normalization call — otherwise most
+// callers can just pass their value through parseDate+formatDateKey.
+function isoToDateKey(val) {
+  if (!val) return null;
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return null;
+    return formatDateKey(val);
+  }
+  var s = String(val);
+  var iso = s.match(/^(\d{4})-0?(\d{1,2})-0?(\d{1,2})/);
+  if (iso) {
+    var m = Number(iso[2]), d = Number(iso[3]);
+    return iso[1] + "-" + (m < 10 ? "0" : "") + m + "-" + (d < 10 ? "0" : "") + d;
+  }
+  var md = s.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (md) {
+    var mo = Number(md[1]), dy = Number(md[2]);
+    return inferYear(mo) + "-" + (mo < 10 ? "0" : "") + mo + "-" + (dy < 10 ? "0" : "") + dy;
+  }
+  return null;
 }
 
 function getWeekStart(d) {
@@ -82,19 +124,17 @@ function fromTime24(t24) {
   return h + ":" + min + " " + ap;
 }
 
-function toDateISO(md) {
-  if (!md) return "";
-  var parts = md.split("/");
-  if (parts.length < 2) return "";
-  var mon = parseInt(parts[0]), day = parseInt(parts[1]);
-  var year = inferYear(mon);
-  return year + "-" + (mon < 10 ? "0" : "") + mon + "-" + (day < 10 ? "0" : "") + day;
+// Accept any date-ish (ISO, legacy M/D, Date) and return canonical ISO
+// "YYYY-MM-DD". Empty string for null/invalid — historical contract.
+function toDateISO(val) {
+  return isoToDateKey(val) || "";
 }
 
+// Since ISO is now the canonical format, this is a pass-through. Kept for
+// call-site compatibility during the M/D → ISO migration; safe to remove
+// once no callers reference it.
 function fromDateISO(iso) {
-  if (!iso) return "";
-  var parts = iso.split("-");
-  return parseInt(parts[1]) + "/" + parseInt(parts[2]);
+  return iso || "";
 }
 
 function formatHour(h) {
@@ -191,8 +231,10 @@ function utcToLocal(utcDate, timezone) {
   var m = parseInt(parts.minute);
   var ampm = h >= 12 ? 'PM' : 'AM';
   var dh = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+  var mo = parseInt(parts.month);
+  var dy = parseInt(parts.day);
   return {
-    date: parseInt(parts.month) + '/' + parseInt(parts.day),
+    date: parts.year + '-' + (mo < 10 ? '0' : '') + mo + '-' + (dy < 10 ? '0' : '') + dy,
     time: dh + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm,
     day: parts.weekday
   };
@@ -224,6 +266,7 @@ module.exports = {
   inferYear,
   parseDate,
   formatDateKey,
+  isoToDateKey,
   getWeekStart,
   isSameDay,
   parseTimeToMinutes,

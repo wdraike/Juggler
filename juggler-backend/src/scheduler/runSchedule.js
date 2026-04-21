@@ -19,6 +19,7 @@ var RECUR_EXPAND_DAYS = constants.RECUR_EXPAND_DAYS;
 var dateHelpers = require('./dateHelpers');
 var parseDate = dateHelpers.parseDate;
 var formatDateKey = dateHelpers.formatDateKey;
+var isoToDateKey = dateHelpers.isoToDateKey;
 var parseTimeToMinutes = dateHelpers.parseTimeToMinutes;
 var formatMinutesToTime = dateHelpers.formatMinutesToTime;
 var localToUtc = dateHelpers.localToUtc;
@@ -55,8 +56,9 @@ function getNowInTimezone(timezone) {
   var hour = vals.hour % 24;
   var minute = vals.minute;
 
+  var todayKey = vals.year + '-' + (month < 10 ? '0' : '') + month + '-' + (day < 10 ? '0' : '') + day;
   return {
-    todayKey: month + '/' + day,
+    todayKey: todayKey,
     nowMins: hour * 60 + minute
   };
 }
@@ -162,7 +164,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // that set scheduled_at but didn't backfill the denormalized date column.
   terminalDedupRows.forEach(function(r) {
     if (!r.source_id) return;
-    var dateKey = r.date;
+    var dateKey = isoToDateKey(r.date);
     if (!dateKey && r.scheduled_at) {
       var local = utcToLocal(r.scheduled_at, TIMEZONE);
       if (local && local.date) dateKey = local.date;
@@ -280,8 +282,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
       if (o > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = o;
     }
     // Record pending dates so tpc slot accounting can count them as booked.
+    // knex returns MySQL DATE as ISO; expandRecurring keys are M/D — normalize.
     if (mid && (!r.status || r.status === '') && r.date) {
-      pendingBookedByDate[mid + '|' + r.date] = true;
+      var pdkey = isoToDateKey(r.date);
+      if (pdkey) pendingBookedByDate[mid + '|' + pdkey] = true;
     }
   });
 
@@ -310,7 +314,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // runs so completion state, cal links, and the UI don't churn. Cal-linked
   // rows (gcal/msft) bypass this pool — they pass through the id-based diff
   // unchanged so outbound sync stays correct.
-  var existingGroupsByMaster = reconcile.buildExistingGroups(taskRows, parseDate);
+  var existingGroupsByMaster = reconcile.buildExistingGroups(taskRows, parseDate, isoToDateKey);
   var reconResult = reconcile.matchOccurrences(desiredOccurrences, existingGroupsByMaster, parseDate);
   var occIdOverrides = reconResult.occIdOverrides;
   var occurrenceMoves = reconResult.occurrenceMoves;
@@ -1203,9 +1207,10 @@ async function getSchedulePlacements(userId, options) {
   if (cache && cache.generatedAt && cache.timezone === TIMEZONE && cache.schedulerVersion === SCHEDULER_VERSION) {
     var genTime = new Date(cache.generatedAt);
     var ageMs = Date.now() - genTime.getTime();
-    var genParts = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, month: 'numeric', day: 'numeric' }).formatToParts(genTime);
+    var genParts = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(genTime);
     var genVals = {}; genParts.forEach(function(p) { genVals[p.type] = p.value; });
-    var genDateKey = genVals.month + '/' + genVals.day;
+    var _gm = parseInt(genVals.month, 10), _gd = parseInt(genVals.day, 10);
+    var genDateKey = genVals.year + '-' + (_gm < 10 ? '0' : '') + _gm + '-' + (_gd < 10 ? '0' : '') + _gd;
     if (genDateKey === timeInfo.todayKey && ageMs <= 30 * 60 * 1000) {
       // Check if tasks were modified since cache
       var maxRow = await db('tasks_v').where('user_id', userId).max('updated_at as max_updated').first();
@@ -1263,13 +1268,31 @@ async function getSchedulePlacements(userId, options) {
   var terminalDedupRows2 = await db('task_instances').where('user_id', userId)
     .whereNotNull('master_id')
     .whereIn('status', ['done', 'skip', 'cancel'])
-    .select('master_id as source_id', 'date');
+    .select('master_id as source_id', 'date', 'scheduled_at');
   var srcMap = buildSourceMap(taskRows);
   var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
   terminalDedupRows2.forEach(function(r) {
-    if (r.source_id && r.date) {
-      allTasks.push({ id: '_dedup_' + r.source_id + '_' + r.date, sourceId: r.source_id, date: r.date, taskType: 'recurring_instance', text: '', status: 'done' });
+    if (!r.source_id) return;
+    var dkey = isoToDateKey(r.date);
+    if (!dkey && r.scheduled_at) {
+      var local = utcToLocal(r.scheduled_at, TIMEZONE);
+      if (local && local.date) dkey = local.date;
     }
+    if (!dkey) return;
+    allTasks.push({ id: '_dedup_' + r.source_id + '_' + dkey, sourceId: r.source_id, date: dkey, taskType: 'recurring_instance', text: '', status: 'done' });
+  });
+
+  // Mirror the runScheduleAndPersist path: pending recurring_instance rows
+  // must count against tpc cycle budgets so expandRecurring doesn't pick
+  // phantom targets on top of them when hydrating stale cache.
+  var pendingBookedByDate2 = {};
+  taskRows.forEach(function(r) {
+    if (r.task_type !== 'recurring_instance') return;
+    if (r.status && r.status !== '') return;
+    var mid = r.master_id || r.source_id;
+    if (!mid || !r.date) return;
+    var dk = isoToDateKey(r.date);
+    if (dk) pendingBookedByDate2[mid + '|' + dk] = true;
   });
 
   var statuses = {};
@@ -1278,7 +1301,7 @@ async function getSchedulePlacements(userId, options) {
   // Expand recurring so generated instances can be hydrated from cache
   var today = parseDate(timeInfo.todayKey) || new Date();
   var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + RECUR_EXPAND_DAYS);
-  var expanded = expandRecurring(allTasks, today, expandEnd, { statuses: statuses });
+  var expanded = expandRecurring(allTasks, today, expandEnd, { statuses: statuses, pendingBookedByDate: pendingBookedByDate2 });
   if (expanded.length > 0) {
     allTasks = allTasks.concat(expanded);
     expanded.forEach(function(t) { statuses[t.id] = ''; });
@@ -1310,9 +1333,10 @@ async function getSchedulePlacements(userId, options) {
     var genTime = new Date(cache.generatedAt);
     var ageMs = Date.now() - genTime.getTime();
     // Use Intl to get the generated date in the user's timezone (server may run in UTC)
-    var genParts = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, month: 'numeric', day: 'numeric' }).formatToParts(genTime);
+    var genParts = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(genTime);
     var genVals = {}; genParts.forEach(function(p) { genVals[p.type] = p.value; });
-    var genDateKey = genVals.month + '/' + genVals.day;
+    var _gm = parseInt(genVals.month, 10), _gd = parseInt(genVals.day, 10);
+    var genDateKey = genVals.year + '-' + (_gm < 10 ? '0' : '') + _gm + '-' + (_gd < 10 ? '0' : '') + _gd;
     if (genDateKey !== timeInfo.todayKey || ageMs > 30 * 60 * 1000) {
       cacheStale = true;
     }

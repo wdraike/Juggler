@@ -522,7 +522,7 @@ describe('expandRecurring with disabled status', () => {
 
   test('skips disabled templates', () => {
     const src = {
-      id: 'ht_1', text: 'Daily workout', date: '3/20', dur: 30, pri: 'P1',
+      id: 'ht_1', text: 'Daily workout', date: '2026-03-20', dur: 30, pri: 'P1',
       recurring: true, rigid: false, recur: { type: 'daily' }, dayReq: 'any',
       status: 'disabled'
     };
@@ -534,11 +534,11 @@ describe('expandRecurring with disabled status', () => {
 
   test('still expands active templates alongside disabled ones', () => {
     const active = {
-      id: 'ht_1', text: 'Active recurring', date: '3/20', dur: 30, pri: 'P1',
+      id: 'ht_1', text: 'Active recurring', date: '2026-03-20', dur: 30, pri: 'P1',
       recurring: true, rigid: false, recur: { type: 'daily' }, dayReq: 'any'
     };
     const disabled = {
-      id: 'ht_2', text: 'Disabled recurring', date: '3/20', dur: 30, pri: 'P1',
+      id: 'ht_2', text: 'Disabled recurring', date: '2026-03-20', dur: 30, pri: 'P1',
       recurring: true, rigid: false, recur: { type: 'daily' }, dayReq: 'any',
       status: 'disabled'
     };

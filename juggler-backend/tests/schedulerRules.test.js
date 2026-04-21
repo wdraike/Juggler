@@ -5,8 +5,8 @@
  * Organized by concept, serving as living documentation of scheduler behavior.
  *
  * Date context:
- *   TODAY = '3/22' (Sunday) — weekend blocks: morning 420-720, afternoon 720-1020, evening 1020-1260 (all home)
- *   Tomorrow = '3/23' (Monday) — weekday blocks: morning 360-480 (home), biz 480-720 (work), etc.
+ *   TODAY = '2026-03-22' (Sunday) — weekend blocks: morning 420-720, afternoon 720-1020, evening 1020-1260 (all home)
+ *   Tomorrow = '2026-03-23' (Monday) — weekday blocks: morning 360-480 (home), biz 480-720 (work), etc.
  *   nowMins = 480 (8:00 AM) — minutes 0-479 blocked on today
  *   Usable today capacity ≈ 780m (480-1260)
  */
@@ -14,8 +14,8 @@
 const unifiedSchedule = require('../src/scheduler/unifiedSchedule');
 const { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX, GRID_START, GRID_END } = require('../src/scheduler/constants');
 
-const TODAY = '3/22';
-const TOMORROW = '3/23';
+const TODAY = '2026-03-22';
+const TOMORROW = '2026-03-23';
 const NOW_MINS = 480;
 
 function makeTask(overrides) {
@@ -62,7 +62,8 @@ function makeCfg(overrides) {
 function dateKey(daysFromToday) {
   var d = new Date(2026, 2, 22); // March 22, 2026 (Sunday)
   d.setDate(d.getDate() + daysFromToday);
-  return (d.getMonth() + 1) + '/' + d.getDate();
+  var m = d.getMonth() + 1, day = d.getDate();
+  return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
 }
 
 const cfg = makeCfg();
@@ -108,6 +109,9 @@ function totalPlacedMinutes(result, taskId) {
 }
 
 function parseDateKey(dk) {
+  // ISO YYYY-MM-DD (canonical) or legacy M/D for back-compat.
+  var iso = dk.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return new Date(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
   var parts = dk.split('/');
   return new Date(2026, parseInt(parts[0]) - 1, parseInt(parts[1]));
 }
@@ -532,7 +536,7 @@ describe('Scheduler Rules', () => {
   describe('Group 18: Past tasks move to today', () => {
     test('non-recurring past tasks enter pool with today as floor', () => {
       var tasks = [
-        makeTask({ id: 'past_task', pri: 'P2', dur: 30, date: '3/21', text: 'Past task' }),
+        makeTask({ id: 'past_task', pri: 'P2', dur: 30, date: '2026-03-21', text: 'Past task' }),
         makeTask({ id: 'today_task', pri: 'P2', dur: 30, text: 'Today task' }),
       ];
       var result = run(tasks);
@@ -541,7 +545,7 @@ describe('Scheduler Rules', () => {
       expect(isPlaced(result, 'today_task')).toBe(true);
       // Past task NOT on yesterday
       var pastDay = placedDay(result, 'past_task');
-      expect(pastDay).not.toBe('3/21');
+      expect(pastDay).not.toBe('2026-03-21');
     });
   });
 
@@ -549,7 +553,7 @@ describe('Scheduler Rules', () => {
   describe('Group 19: Past recurringTasks are skipped', () => {
     test('recurringTasks on past dates are dropped', () => {
       var tasks = [
-        makeTask({ id: 'past_recurring', recurring: true, date: '3/21', dur: 30, text: 'Past recurring' }),
+        makeTask({ id: 'past_recurring', recurring: true, date: '2026-03-21', dur: 30, text: 'Past recurring' }),
         makeTask({ id: 'today_recurring', recurring: true, date: TODAY, dur: 30, text: 'Today recurring' }),
       ];
       var result = run(tasks);
@@ -701,14 +705,14 @@ describe('Scheduler Rules', () => {
       // startAfter respected
       var pickupDay = placedDay(result, 'pickup');
       if (pickupDay) {
-        var pickupDate = new Date(2026, 2, parseInt(pickupDay.split('/')[1]));
+        var pickupDate = parseDateKey(pickupDay);
         expect(pickupDate >= new Date(2026, 2, 24)).toBe(true); // today+2
       }
 
       // Tailor on a weekday (Mon-Fri = dow 1-5)
       var tailorDay = placedDay(result, 'tailor');
       if (tailorDay) {
-        var tailorDate = new Date(2026, 2, parseInt(tailorDay.split('/')[1]));
+        var tailorDate = parseDateKey(tailorDay);
         expect(tailorDate.getDay()).toBeGreaterThanOrEqual(1);
         expect(tailorDate.getDay()).toBeLessThanOrEqual(5);
       }
@@ -951,7 +955,7 @@ describe('Scheduler Rules', () => {
       expect(isPlaced(result, 'combo_task')).toBe(true);
       var parts = findPlacements(result, 'combo_task');
       // Must be on a weekday
-      var d = new Date(2026, 2, parseInt(parts[0].dateKey.split('/')[1]));
+      var d = parseDateKey(parts[0].dateKey);
       expect(d.getDay()).toBeGreaterThanOrEqual(1);
       expect(d.getDay()).toBeLessThanOrEqual(5);
       // Must be in biz window (480-720 or 780-1020 on weekday)
@@ -1001,11 +1005,11 @@ describe('Scheduler Rules', () => {
 
       expect(isPlaced(result, 'windowed')).toBe(true);
       var parts = findPlacements(result, 'windowed');
-      var placedDateNum = parseInt(parts[0].dateKey.split('/')[1]);
-      var startAfterNum = parseInt(dateKey(2).split('/')[1]);
-      var dueNum = parseInt(dateKey(5).split('/')[1]);
-      expect(placedDateNum).toBeGreaterThanOrEqual(startAfterNum);
-      expect(placedDateNum).toBeLessThanOrEqual(dueNum);
+      var placedDate = parseDateKey(parts[0].dateKey);
+      var startAfterDate = parseDateKey(dateKey(2));
+      var dueDate = parseDateKey(dateKey(5));
+      expect(placedDate.getTime()).toBeGreaterThanOrEqual(startAfterDate.getTime());
+      expect(placedDate.getTime()).toBeLessThanOrEqual(dueDate.getTime());
     });
   });
 
@@ -1088,9 +1092,9 @@ describe('Scheduler Rules', () => {
     test('tasks near month end schedule correctly', () => {
       // Use 3/30 and 3/31 → 4/1 boundary
       var tasks = [
-        makeTask({ id: 'march_task', pri: 'P2', dur: 60, date: '3/30', text: 'March task' }),
-        makeTask({ id: 'april_task', pri: 'P2', dur: 60, date: '4/1', text: 'April task' }),
-        makeTask({ id: 'chain_end', pri: 'P2', dur: 60, dependsOn: ['march_task'], deadline: '4/2', text: 'Chain across months' }),
+        makeTask({ id: 'march_task', pri: 'P2', dur: 60, date: '2026-03-30', text: 'March task' }),
+        makeTask({ id: 'april_task', pri: 'P2', dur: 60, date: '2026-04-01', text: 'April task' }),
+        makeTask({ id: 'chain_end', pri: 'P2', dur: 60, dependsOn: ['march_task'], deadline: '2026-04-02', text: 'Chain across months' }),
       ];
       var result = run(tasks);
 
@@ -1153,7 +1157,7 @@ describe('Scheduler Rules', () => {
     test('20 past tasks spread across days, not all on today', () => {
       var tasks = [];
       for (var i = 0; i < 20; i++) {
-        tasks.push(makeTask({ id: 'past_' + i, pri: 'P2', dur: 60, date: '3/15', text: 'Past task ' + i }));
+        tasks.push(makeTask({ id: 'past_' + i, pri: 'P2', dur: 60, date: '2026-03-15', text: 'Past task ' + i }));
       }
       var result = run(tasks);
 
@@ -1707,26 +1711,26 @@ describe('Timezone & DST', () => {
   // ─── GROUP 71: localToUtc / utcToLocal round-trip ───
   describe('Group 71: UTC conversion round-trip', () => {
     test('ET: 2pm on 3/15 round-trips correctly', () => {
-      var utc = localToUtc('3/15', '2:00 PM', 'America/New_York');
+      var utc = localToUtc('2026-03-15', '2:00 PM', 'America/New_York');
       expect(utc).not.toBeNull();
       var local = utcToLocal(utc, 'America/New_York');
-      expect(local.date).toBe('3/15');
+      expect(local.date).toBe('2026-03-15');
       expect(local.time).toBe('2:00 PM');
     });
 
     test('PT: 9am on 3/15 round-trips correctly', () => {
-      var utc = localToUtc('3/15', '9:00 AM', 'America/Los_Angeles');
+      var utc = localToUtc('2026-03-15', '9:00 AM', 'America/Los_Angeles');
       expect(utc).not.toBeNull();
       var local = utcToLocal(utc, 'America/Los_Angeles');
-      expect(local.date).toBe('3/15');
+      expect(local.date).toBe('2026-03-15');
       expect(local.time).toBe('9:00 AM');
     });
 
     test('CT: 6pm on 4/1 round-trips correctly', () => {
-      var utc = localToUtc('4/1', '6:00 PM', 'America/Chicago');
+      var utc = localToUtc('2026-04-01', '6:00 PM', 'America/Chicago');
       expect(utc).not.toBeNull();
       var local = utcToLocal(utc, 'America/Chicago');
-      expect(local.date).toBe('4/1');
+      expect(local.date).toBe('2026-04-01');
       expect(local.time).toBe('6:00 PM');
     });
   });
@@ -1734,7 +1738,7 @@ describe('Timezone & DST', () => {
   // ─── GROUP 72: Cross-timezone viewing ───
   describe('Group 72: Same UTC time viewed in different timezones', () => {
     test('2pm ET = 11am PT = 1pm CT', () => {
-      var utc = localToUtc('3/23', '2:00 PM', 'America/New_York');
+      var utc = localToUtc('2026-03-23', '2:00 PM', 'America/New_York');
       var inPT = utcToLocal(utc, 'America/Los_Angeles');
       var inCT = utcToLocal(utc, 'America/Chicago');
       var inET = utcToLocal(utc, 'America/New_York');
@@ -1743,18 +1747,18 @@ describe('Timezone & DST', () => {
       expect(inCT.time).toBe('1:00 PM');
       expect(inPT.time).toBe('11:00 AM');
       // All same date in March (no day boundary crossing)
-      expect(inET.date).toBe('3/23');
-      expect(inCT.date).toBe('3/23');
-      expect(inPT.date).toBe('3/23');
+      expect(inET.date).toBe('2026-03-23');
+      expect(inCT.date).toBe('2026-03-23');
+      expect(inPT.date).toBe('2026-03-23');
     });
 
     test('11pm ET crosses to next day in London', () => {
       // 11pm ET on 3/23 = 3am UTC on 3/24 = 3am London on 3/24
-      var utc = localToUtc('3/23', '11:00 PM', 'America/New_York');
+      var utc = localToUtc('2026-03-23', '11:00 PM', 'America/New_York');
       var inLondon = utcToLocal(utc, 'Europe/London');
       // In March, London is UTC+0 (GMT, before UK clocks change)
       // 11pm ET (UTC-4 in March/EDT) = 3am UTC = 3am GMT
-      expect(inLondon.date).toBe('3/24'); // next day!
+      expect(inLondon.date).toBe('2026-03-24'); // next day!
     });
   });
 
@@ -1763,28 +1767,28 @@ describe('Timezone & DST', () => {
     // In 2026, US spring forward is March 8
 
     test('1:30 AM ET on spring forward day converts correctly', () => {
-      var utc = localToUtc('3/8', '1:30 AM', 'America/New_York');
+      var utc = localToUtc('2026-03-08', '1:30 AM', 'America/New_York');
       expect(utc).not.toBeNull();
       var local = utcToLocal(utc, 'America/New_York');
-      expect(local.date).toBe('3/8');
+      expect(local.date).toBe('2026-03-08');
       expect(local.time).toBe('1:30 AM');
     });
 
     test('3:30 AM ET on spring forward day converts correctly', () => {
-      var utc = localToUtc('3/8', '3:30 AM', 'America/New_York');
+      var utc = localToUtc('2026-03-08', '3:30 AM', 'America/New_York');
       expect(utc).not.toBeNull();
       var local = utcToLocal(utc, 'America/New_York');
-      expect(local.date).toBe('3/8');
+      expect(local.date).toBe('2026-03-08');
       expect(local.time).toBe('3:30 AM');
     });
 
     test('2:30 AM ET on spring forward day (non-existent time) handles gracefully', () => {
       // 2:30 AM doesn't exist on spring forward day — clocks skip from 2AM to 3AM
-      var utc = localToUtc('3/8', '2:30 AM', 'America/New_York');
+      var utc = localToUtc('2026-03-08', '2:30 AM', 'America/New_York');
       // Should not crash; may round to 3:30 AM or 1:30 AM
       expect(utc).not.toBeNull();
       var local = utcToLocal(utc, 'America/New_York');
-      expect(local.date).toBe('3/8');
+      expect(local.date).toBe('2026-03-08');
       // Time should be reasonable (not wildly wrong)
       var mins = parseInt(local.time.split(':')[0]) * 60;
       expect(mins).toBeLessThan(600); // before 10 AM
@@ -1793,16 +1797,16 @@ describe('Timezone & DST', () => {
     test('tasks near DST boundary still schedule without overlaps', () => {
       // Schedule tasks on DST spring forward day (March 8 is a Sunday in 2026)
       var tasks = [
-        makeTask({ id: 'dst_a', pri: 'P1', dur: 60, date: '3/8', text: 'DST task A' }),
-        makeTask({ id: 'dst_b', pri: 'P2', dur: 60, date: '3/8', text: 'DST task B' }),
-        makeTask({ id: 'dst_c', pri: 'P3', dur: 60, date: '3/8', text: 'DST task C' }),
+        makeTask({ id: 'dst_a', pri: 'P1', dur: 60, date: '2026-03-08', text: 'DST task A' }),
+        makeTask({ id: 'dst_b', pri: 'P2', dur: 60, date: '2026-03-08', text: 'DST task B' }),
+        makeTask({ id: 'dst_c', pri: 'P3', dur: 60, date: '2026-03-08', text: 'DST task C' }),
       ];
       var statuses = {};
       tasks.forEach(function(t) { statuses[t.id] = ''; });
       // Run scheduler with 3/8 as today
-      var result = unifiedSchedule(tasks, statuses, '3/8', 480, cfg);
+      var result = unifiedSchedule(tasks, statuses, '2026-03-08', 480, cfg);
       expect(result).toBeDefined();
-      expect(hasOverlaps(result, '3/8')).toBe(false);
+      expect(hasOverlaps(result, '2026-03-08')).toBe(false);
       // All tasks should be placed
       expect(isPlaced(result, 'dst_a')).toBe(true);
       expect(isPlaced(result, 'dst_b')).toBe(true);
@@ -1820,7 +1824,7 @@ describe('Timezone & DST', () => {
       // = 8:30 AM UTC
       var utc = new Date('2026-11-01T08:30:00Z');
       var local = utcToLocal(utc, 'America/New_York');
-      expect(local.date).toBe('11/1');
+      expect(local.date).toBe('2026-11-01');
       expect(local.time).toBe('3:30 AM');
     });
 
@@ -1843,18 +1847,18 @@ describe('Timezone & DST', () => {
       // At 11:30 PM ET on 3/23, it's 8:30 PM PT on 3/23 — same date
       var etLocal = utcToLocal(new Date('2026-03-24T03:30:00Z'), 'America/New_York');
       var ptLocal = utcToLocal(new Date('2026-03-24T03:30:00Z'), 'America/Los_Angeles');
-      expect(etLocal.date).toBe('3/23');
-      expect(ptLocal.date).toBe('3/23');
+      expect(etLocal.date).toBe('2026-03-23');
+      expect(ptLocal.date).toBe('2026-03-23');
       expect(etLocal.time).toBe('11:30 PM');
       expect(ptLocal.time).toBe('8:30 PM');
     });
 
     test('late night ET crosses to next day in UTC but not in ET', () => {
       // 11pm ET on 3/23 = 3am UTC on 3/24
-      var utc = localToUtc('3/23', '11:00 PM', 'America/New_York');
+      var utc = localToUtc('2026-03-23', '11:00 PM', 'America/New_York');
       expect(utc.getUTCDate()).toBe(24); // UTC is next day
       var local = utcToLocal(utc, 'America/New_York');
-      expect(local.date).toBe('3/23'); // but ET is still 3/23
+      expect(local.date).toBe('2026-03-23'); // but ET is still 3/23
     });
   });
 
@@ -1862,18 +1866,18 @@ describe('Timezone & DST', () => {
   describe('Group 76: Fixed tasks maintain absolute time across timezone views', () => {
     test('fixed task created at 2PM ET shows as 1PM CT', () => {
       // Task created in ET: 2PM on 3/25
-      var utc = localToUtc('3/25', '2:00 PM', 'America/New_York');
+      var utc = localToUtc('2026-03-25', '2:00 PM', 'America/New_York');
       // View from CT
       var inCT = utcToLocal(utc, 'America/Chicago');
       expect(inCT.time).toBe('1:00 PM');
-      expect(inCT.date).toBe('3/25');
+      expect(inCT.date).toBe('2026-03-25');
     });
 
     test('fixed task at 11PM ET shows as next day in some timezones', () => {
-      var utc = localToUtc('3/25', '11:00 PM', 'America/New_York');
+      var utc = localToUtc('2026-03-25', '11:00 PM', 'America/New_York');
       // View from London (UTC+0 in March before UK clocks change)
       var inLondon = utcToLocal(utc, 'Europe/London');
-      expect(inLondon.date).toBe('3/26'); // crosses midnight
+      expect(inLondon.date).toBe('2026-03-26'); // crosses midnight
       expect(inLondon.time).toBe('3:00 AM');
     });
   });
@@ -1885,21 +1889,21 @@ describe('Timezone & DST', () => {
       // We simulate by running scheduler with CT-derived todayKey
       // (In real usage, getNowInTimezone would use CT)
       var tasks = [
-        makeTask({ id: 'travel_a', pri: 'P1', dur: 60, date: '3/25', text: 'Task while traveling' }),
-        makeTask({ id: 'travel_b', pri: 'P2', dur: 60, date: '3/25', text: 'Another travel task' }),
-        makeTask({ id: 'travel_fixed', when: 'fixed', time: '2:00 PM', dur: 120, date: '3/25', text: 'Wedding' }),
+        makeTask({ id: 'travel_a', pri: 'P1', dur: 60, date: '2026-03-25', text: 'Task while traveling' }),
+        makeTask({ id: 'travel_b', pri: 'P2', dur: 60, date: '2026-03-25', text: 'Another travel task' }),
+        makeTask({ id: 'travel_fixed', when: 'fixed', time: '2:00 PM', dur: 120, date: '2026-03-25', text: 'Wedding' }),
       ];
       var statuses = {};
       tasks.forEach(function(t) { statuses[t.id] = ''; });
 
       // Run as if in ET (todayKey = 3/25, nowMins = 480)
-      var resultET = unifiedSchedule(tasks, statuses, '3/25', 480, cfg);
+      var resultET = unifiedSchedule(tasks, statuses, '2026-03-25', 480, cfg);
       // Run as if in CT (todayKey = 3/25, nowMins = 420 — CT is 1hr behind ET)
-      var resultCT = unifiedSchedule(tasks, statuses, '3/25', 420, cfg);
+      var resultCT = unifiedSchedule(tasks, statuses, '2026-03-25', 420, cfg);
 
       // Both should produce valid schedules
-      expect(hasOverlaps(resultET, '3/25')).toBe(false);
-      expect(hasOverlaps(resultCT, '3/25')).toBe(false);
+      expect(hasOverlaps(resultET, '2026-03-25')).toBe(false);
+      expect(hasOverlaps(resultCT, '2026-03-25')).toBe(false);
 
       // Fixed task at same minute position in both (it's a local-time specification)
       var fixedET = findPlacements(resultET, 'travel_fixed');

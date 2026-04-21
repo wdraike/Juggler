@@ -20,10 +20,12 @@ router.get('/', async (req, res) => {
     var vals = {};
     parts.forEach(function(p) { vals[p.type] = parseInt(p.value, 10); });
     var hour = vals.hour % 24;
+    var _m = vals.month, _d = vals.day;
+    var todayKey = vals.year + '-' + (_m < 10 ? '0' : '') + _m + '-' + (_d < 10 ? '0' : '') + _d;
     res.json({
       status: 'ok', db: 'connected', service: 'juggler-backend',
       serverUtc: now.toISOString(),
-      schedulerTodayKey: vals.month + '/' + vals.day,
+      schedulerTodayKey: todayKey,
       schedulerNowMins: hour * 60 + vals.minute
     });
   } catch (error) {

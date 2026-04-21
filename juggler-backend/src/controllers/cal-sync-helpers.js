@@ -13,10 +13,17 @@ var DEFAULT_TIMEZONE = require('../scheduler/constants').DEFAULT_TIMEZONE;
  */
 function jugglerDateToISO(date, time, year) {
   if (!date) return null;
-  var parts = date.split('/');
-  var month = parseInt(parts[0], 10);
-  var day = parseInt(parts[1], 10);
-  var y = year || new Date().getFullYear();
+  var month, day, y;
+  var s = String(date);
+  var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    y = Number(iso[1]); month = Number(iso[2]); day = Number(iso[3]);
+  } else {
+    var parts = s.split('/');
+    month = parseInt(parts[0], 10);
+    day = parseInt(parts[1], 10);
+    y = year || new Date().getFullYear();
+  }
 
   var hours = 9, minutes = 0;
   if (time) {
@@ -72,37 +79,34 @@ function jugglerDateToISO(date, time, year) {
 }
 
 /**
- * Convert ISO datetime to { date: "M/D", time: "H:MM AM/PM" }
+ * Convert ISO datetime to { date: "YYYY-MM-DD", time: "H:MM AM/PM" }
  */
 function isoToJugglerDate(isoString, timezone) {
   if (!isoString) return { date: null, time: null };
   var tz = timezone || DEFAULT_TIMEZONE;
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(isoString)) {
-    var parts = isoString.split('-');
-    return {
-      date: parseInt(parts[1], 10) + '/' + parseInt(parts[2], 10),
-      time: null
-    };
+    return { date: isoString, time: null };
   }
 
   var d = new Date(isoString);
   try {
     var dateParts = new Intl.DateTimeFormat('en-US', {
-      timeZone: tz, month: 'numeric', day: 'numeric'
+      timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric'
     }).formatToParts(d);
     var timeParts = new Intl.DateTimeFormat('en-US', {
       timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true
     }).formatToParts(d);
 
-    var month = dateParts.find(function(p) { return p.type === 'month'; }).value;
-    var day = dateParts.find(function(p) { return p.type === 'day'; }).value;
+    var year = dateParts.find(function(p) { return p.type === 'year'; }).value;
+    var month = parseInt(dateParts.find(function(p) { return p.type === 'month'; }).value, 10);
+    var day = parseInt(dateParts.find(function(p) { return p.type === 'day'; }).value, 10);
     var hour = timeParts.find(function(p) { return p.type === 'hour'; }).value;
     var minute = timeParts.find(function(p) { return p.type === 'minute'; }).value;
     var dayPeriod = timeParts.find(function(p) { return p.type === 'dayPeriod'; }).value.toUpperCase();
 
     return {
-      date: month + '/' + day,
+      date: year + '-' + (month < 10 ? '0' : '') + month + '-' + (day < 10 ? '0' : '') + day,
       time: hour + ':' + minute + ' ' + dayPeriod
     };
   } catch (e) {
@@ -114,7 +118,7 @@ function isoToJugglerDate(isoString, timezone) {
     if (h > 12) h -= 12;
     if (h === 0) h = 12;
     return {
-      date: mo + '/' + da,
+      date: d.getFullYear() + '-' + (mo < 10 ? '0' : '') + mo + '-' + (da < 10 ? '0' : '') + da,
       time: h + ':' + String(mi).padStart(2, '0') + ' ' + ap
     };
   }

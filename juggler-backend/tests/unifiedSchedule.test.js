@@ -15,7 +15,7 @@ function makeTask(overrides) {
   return {
     id: 't_' + Math.random().toString(36).slice(2, 8),
     text: 'Test task',
-    date: '3/22',
+    date: '2026-03-22',
     dur: 30,
     pri: 'P3',
     when: '',
@@ -34,7 +34,7 @@ function makeCfg(overrides) {
   };
 }
 
-const TODAY = '3/22'; // Sunday
+const TODAY = '2026-03-22'; // Sunday
 const NOW_MINS = 480; // 8:00 AM
 const cfg = makeCfg();
 
@@ -61,9 +61,9 @@ function getAllPlacements(result) {
 describe('unifiedSchedule', () => {
   describe('basic placement', () => {
     test('places a single task on its date', () => {
-      const tasks = [makeTask({ id: 't1', date: '3/22' })];
+      const tasks = [makeTask({ id: 't1', date: '2026-03-22' })];
       const result = schedule(tasks);
-      const placed = getPlacementsForDay(result, '3/22');
+      const placed = getPlacementsForDay(result, '2026-03-22');
       expect(placed.length).toBeGreaterThanOrEqual(1);
       expect(placed[0].task.id).toBe('t1');
     });
@@ -78,12 +78,12 @@ describe('unifiedSchedule', () => {
 
     test('excludes done/cancel/skip tasks', () => {
       const tasks = [
-        makeTask({ id: 'done1', date: '3/22' }),
-        makeTask({ id: 'active1', date: '3/22' })
+        makeTask({ id: 'done1', date: '2026-03-22' }),
+        makeTask({ id: 'active1', date: '2026-03-22' })
       ];
       const statuses = { done1: 'done', active1: '' };
       const result = schedule(tasks, statuses);
-      const placed = getPlacementsForDay(result, '3/22');
+      const placed = getPlacementsForDay(result, '2026-03-22');
       const ids = placed.map(p => p.task.id);
       expect(ids).toContain('active1');
       expect(ids).not.toContain('done1');
@@ -98,19 +98,19 @@ describe('unifiedSchedule', () => {
     });
 
     test('allday events skip time grid', () => {
-      const tasks = [makeTask({ id: 't1', date: '3/22', when: 'allday' })];
+      const tasks = [makeTask({ id: 't1', date: '2026-03-22', when: 'allday' })];
       const result = schedule(tasks);
-      const placed = getPlacementsForDay(result, '3/22');
+      const placed = getPlacementsForDay(result, '2026-03-22');
       expect(placed).toHaveLength(0);
     });
 
     test('markers dont consume time slots', () => {
       const tasks = [
-        makeTask({ id: 'marker1', date: '3/22', marker: true }),
-        makeTask({ id: 'task1', date: '3/22', dur: 30 })
+        makeTask({ id: 'marker1', date: '2026-03-22', marker: true }),
+        makeTask({ id: 'task1', date: '2026-03-22', dur: 30 })
       ];
       const result = schedule(tasks);
-      const allPlacements = result.dayPlacements['3/22'] || [];
+      const allPlacements = result.dayPlacements['2026-03-22'] || [];
       const markerPlacement = allPlacements.find(p => p.marker);
       const taskPlacement = allPlacements.find(p => p.task?.id === 'task1');
       // Marker should not prevent task placement
@@ -121,11 +121,11 @@ describe('unifiedSchedule', () => {
   describe('priority ordering', () => {
     test('P1 placed before P3 on same day', () => {
       const tasks = [
-        makeTask({ id: 'p3', date: '3/23', pri: 'P3', dur: 30 }),
-        makeTask({ id: 'p1', date: '3/23', pri: 'P1', dur: 30 })
+        makeTask({ id: 'p3', date: '2026-03-23', pri: 'P3', dur: 30 }),
+        makeTask({ id: 'p1', date: '2026-03-23', pri: 'P1', dur: 30 })
       ];
-      const result = schedule(tasks, {}, '3/23');
-      const placed = getPlacementsForDay(result, '3/23');
+      const result = schedule(tasks, {}, '2026-03-23');
+      const placed = getPlacementsForDay(result, '2026-03-23');
       if (placed.length >= 2) {
         const p1 = placed.find(p => p.task.id === 'p1');
         const p3 = placed.find(p => p.task.id === 'p3');
@@ -137,22 +137,22 @@ describe('unifiedSchedule', () => {
 
     test('normalizePri handles various formats', () => {
       const tasks = [
-        makeTask({ id: 't1', date: '3/22', pri: '1' }),
-        makeTask({ id: 't2', date: '3/22', pri: 'p2' }),
-        makeTask({ id: 't3', date: '3/22', pri: 'P4' })
+        makeTask({ id: 't1', date: '2026-03-22', pri: '1' }),
+        makeTask({ id: 't2', date: '2026-03-22', pri: 'p2' }),
+        makeTask({ id: 't3', date: '2026-03-22', pri: 'P4' })
       ];
       const result = schedule(tasks);
       // All tasks should be placed (valid priorities)
-      const placed = getPlacementsForDay(result, '3/22');
+      const placed = getPlacementsForDay(result, '2026-03-22');
       expect(placed.length).toBeGreaterThanOrEqual(3);
     });
   });
 
   describe('fixed tasks', () => {
     test('fixed task anchored at specified time', () => {
-      const tasks = [makeTask({ id: 'fixed1', date: '3/22', when: 'fixed', time: '9:00 AM', dur: 60 })];
+      const tasks = [makeTask({ id: 'fixed1', date: '2026-03-22', when: 'fixed', time: '9:00 AM', dur: 60 })];
       const result = schedule(tasks);
-      const placed = getPlacementsForDay(result, '3/22');
+      const placed = getPlacementsForDay(result, '2026-03-22');
       const fixed = placed.find(p => p.task.id === 'fixed1');
       expect(fixed).toBeDefined();
       expect(fixed.start).toBe(540); // 9:00 AM = 540 minutes
@@ -160,13 +160,13 @@ describe('unifiedSchedule', () => {
 
     test('fixed task not displaced by flexible tasks', () => {
       const tasks = [
-        makeTask({ id: 'fixed1', date: '3/22', when: 'fixed', time: '9:00 AM', dur: 60 }),
-        makeTask({ id: 'flex1', date: '3/22', dur: 60 }),
-        makeTask({ id: 'flex2', date: '3/22', dur: 60 }),
-        makeTask({ id: 'flex3', date: '3/22', dur: 60 })
+        makeTask({ id: 'fixed1', date: '2026-03-22', when: 'fixed', time: '9:00 AM', dur: 60 }),
+        makeTask({ id: 'flex1', date: '2026-03-22', dur: 60 }),
+        makeTask({ id: 'flex2', date: '2026-03-22', dur: 60 }),
+        makeTask({ id: 'flex3', date: '2026-03-22', dur: 60 })
       ];
       const result = schedule(tasks);
-      const placed = getPlacementsForDay(result, '3/22');
+      const placed = getPlacementsForDay(result, '2026-03-22');
       const fixed = placed.find(p => p.task.id === 'fixed1');
       expect(fixed).toBeDefined();
       expect(fixed.start).toBe(540);
@@ -176,11 +176,11 @@ describe('unifiedSchedule', () => {
   describe('dependencies', () => {
     test('dependency placed before dependent on same day', () => {
       const tasks = [
-        makeTask({ id: 'A', date: '3/22', dur: 30, dependsOn: ['B'] }),
-        makeTask({ id: 'B', date: '3/22', dur: 30 })
+        makeTask({ id: 'A', date: '2026-03-22', dur: 30, dependsOn: ['B'] }),
+        makeTask({ id: 'B', date: '2026-03-22', dur: 30 })
       ];
       const result = schedule(tasks);
-      const placed = getPlacementsForDay(result, '3/22');
+      const placed = getPlacementsForDay(result, '2026-03-22');
       const a = placed.find(p => p.task.id === 'A');
       const b = placed.find(p => p.task.id === 'B');
       if (a && b) {
@@ -192,13 +192,13 @@ describe('unifiedSchedule', () => {
   describe('day requirements', () => {
     test('weekday-only task not placed on weekend', () => {
       // 3/22 is Sunday
-      const tasks = [makeTask({ id: 't1', date: '3/22', dayReq: 'weekday' })];
-      const result = schedule(tasks, {}, '3/22');
-      const sundayPlaced = getPlacementsForDay(result, '3/22');
+      const tasks = [makeTask({ id: 't1', date: '2026-03-22', dayReq: 'weekday' })];
+      const result = schedule(tasks, {}, '2026-03-22');
+      const sundayPlaced = getPlacementsForDay(result, '2026-03-22');
       const t1OnSunday = sundayPlaced.find(p => p.task.id === 't1');
       // Should be moved to Monday 3/23 or later
       expect(t1OnSunday).toBeUndefined();
-      const mondayPlaced = getPlacementsForDay(result, '3/23');
+      const mondayPlaced = getPlacementsForDay(result, '2026-03-23');
       const t1OnMonday = mondayPlaced.find(p => p.task.id === 't1');
       expect(t1OnMonday).toBeDefined();
     });
@@ -207,10 +207,10 @@ describe('unifiedSchedule', () => {
   describe('travel time', () => {
     test('travel buffers applied', () => {
       const tasks = [
-        makeTask({ id: 't1', date: '3/22', dur: 60, travelBefore: 15, travelAfter: 10 })
+        makeTask({ id: 't1', date: '2026-03-22', dur: 60, travelBefore: 15, travelAfter: 10 })
       ];
       const result = schedule(tasks);
-      const placed = getPlacementsForDay(result, '3/22');
+      const placed = getPlacementsForDay(result, '2026-03-22');
       const t = placed.find(p => p.task.id === 't1');
       expect(t).toBeDefined();
       // Travel time should be recorded in the placement
@@ -224,11 +224,11 @@ describe('unifiedSchedule', () => {
     test('more tasks than capacity produces some placed and handles overflow', () => {
       // Create many tasks — the scheduler handles overflow by spreading across days or unplacing
       const tasks = Array.from({ length: 50 }, (_, i) =>
-        makeTask({ id: `t${i}`, date: '3/22', dur: 120, datePinned: true })
+        makeTask({ id: `t${i}`, date: '2026-03-22', dur: 120, datePinned: true })
       );
       const result = schedule(tasks);
       // 50 x 2hr = 100 hours on a single day (17hr capacity). Must overflow.
-      const placedOn22 = getPlacementsForDay(result, '3/22');
+      const placedOn22 = getPlacementsForDay(result, '2026-03-22');
       // Can't fit all 50 on one day — some in unplaced or overflow to other days
       const totalPlacedAllDays = Object.values(result.dayPlacements)
         .reduce((sum, arr) => sum + arr.filter(p => !p.marker).length, 0);
@@ -240,7 +240,7 @@ describe('unifiedSchedule', () => {
 
   describe('score', () => {
     test('returns a score object', () => {
-      const tasks = [makeTask({ id: 't1', date: '3/22' })];
+      const tasks = [makeTask({ id: 't1', date: '2026-03-22' })];
       const result = schedule(tasks);
       expect(result.score).toBeDefined();
       expect(typeof result.score.total).toBe('number');
@@ -250,11 +250,11 @@ describe('unifiedSchedule', () => {
   describe('recurringTasks', () => {
     test('rigid recurring placed at preferred time', () => {
       const tasks = [makeTask({
-        id: 'h1', date: '3/22', recurring: true, rigid: true,
+        id: 'h1', date: '2026-03-22', recurring: true, rigid: true,
         time: '7:00 AM', dur: 30
       })];
       const result = schedule(tasks);
-      const placed = getPlacementsForDay(result, '3/22');
+      const placed = getPlacementsForDay(result, '2026-03-22');
       const h = placed.find(p => p.task.id === 'h1');
       expect(h).toBeDefined();
       // Rigid recurring should be at or near 7:00 AM (420 mins)
@@ -266,9 +266,9 @@ describe('unifiedSchedule', () => {
 
   describe('date pinning', () => {
     test('date-pinned task stays on its date', () => {
-      const tasks = [makeTask({ id: 't1', date: '3/22', datePinned: true, dur: 30 })];
+      const tasks = [makeTask({ id: 't1', date: '2026-03-22', datePinned: true, dur: 30 })];
       const result = schedule(tasks);
-      const placed = getPlacementsForDay(result, '3/22');
+      const placed = getPlacementsForDay(result, '2026-03-22');
       expect(placed.find(p => p.task.id === 't1')).toBeDefined();
     });
   });

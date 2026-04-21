@@ -8,13 +8,6 @@ import { getTheme } from '../../theme/colors';
 
 export default function CompletionTimePicker({ task, onConfirm, onCancel, darkMode, isMobile }) {
   var theme = getTheme(darkMode);
-  var [mode, setMode] = useState('now'); // 'scheduled', 'now', 'custom'
-  var [customValue, setCustomValue] = useState(function() {
-    // Default the custom picker to now in local time
-    var d = new Date();
-    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-    return d.toISOString().slice(0, 16);
-  });
 
   // Format the task's scheduled time for display
   var scheduledLabel = '';
@@ -22,6 +15,23 @@ export default function CompletionTimePicker({ task, onConfirm, onCancel, darkMo
     scheduledLabel = task.date;
     if (task.time) scheduledLabel += ' ' + task.time;
   }
+
+  // For tasks whose scheduled time is in the past, default to "Scheduled time":
+  // the user most likely did the task at (or near) its planned slot, and the
+  // calendar is already showing them that time. Skips the extra click for
+  // overdue recurring instances.
+  var scheduledInPast = false;
+  if (task && task.scheduledAt) {
+    scheduledInPast = new Date(task.scheduledAt) < new Date();
+  }
+  var defaultMode = (scheduledInPast && scheduledLabel) ? 'scheduled' : 'now';
+  var [mode, setMode] = useState(defaultMode);
+  var [customValue, setCustomValue] = useState(function() {
+    // Default the custom picker to now in local time
+    var d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 16);
+  });
 
   var iStyle = {
     width: '100%', padding: '10px 12px', borderRadius: 4,
