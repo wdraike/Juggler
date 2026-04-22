@@ -481,6 +481,45 @@ describe('expandRecurring', () => {
       expect(ours).toHaveLength(4);
     });
 
+    test('skipping a FUTURE instance in the cycle preserves the skip (no resurrect)', () => {
+      // Scenario: today is Monday 4/20. User has 4 pending Mon-Thu plus
+      // a skipped Friday 4/24 (future — user said "not this week's Fri").
+      // Scheduler must emit M/T/W/Th (preserving via ID-reuse), must NOT
+      // emit Friday (terminal-dedup blocks it), and must NOT create a
+      // replacement because the cycle is user-owned.
+      const src = {
+        id: 'ex', text: 'Exercise', taskType: 'recurring_template',
+        date: '2026-04-20', dur: 30, pri: 'P2', recurring: true,
+        recur: { type: 'weekly', days: 'MTWRF', timesPerCycle: 4 },
+        recurStart: '2026-04-20', dayReq: 'any'
+      };
+      const pendingBookedByDate = {
+        'ex|2026-04-20': true, // Mon
+        'ex|2026-04-21': true, // Tue
+        'ex|2026-04-22': true, // Wed
+        'ex|2026-04-23': true  // Thu
+      };
+      const skippedFriday = {
+        id: 'ex-5', sourceId: 'ex', taskType: 'recurring_instance',
+        date: '2026-04-24', text: 'Exercise', status: 'skip'
+      };
+      const result = expandRecurring(
+        [src, skippedFriday],
+        new Date(2026, 3, 20), // today = Mon
+        new Date(2026, 3, 26),
+        { pendingBookedByDate: pendingBookedByDate }
+      );
+      const ours = result.filter(r => r.sourceId === 'ex');
+      const dates = ours.map(r => r._candidateDate || r.date);
+      expect(dates).toContain('2026-04-20');
+      expect(dates).toContain('2026-04-21');
+      expect(dates).toContain('2026-04-22');
+      expect(dates).toContain('2026-04-23');
+      // Friday skip is NOT resurrected
+      expect(dates).not.toContain('2026-04-24');
+      expect(dates).toHaveLength(4);
+    });
+
     test('cycle with 2 pending + 1 skip emits the 2 pending and does NOT create a 4th', () => {
       // User had 3 instances, skipped one. Cycle budget consumed.
       // The 2 pending must still be emitted as desired so the reconcile
