@@ -138,6 +138,15 @@ function computeDurationMinutes(start, end) {
  * Hash the task fields we sync to calendars.
  */
 function taskHash(task) {
+  // Covers every task field that buildEventBody reads to construct the
+  // calendar event payload — if any of these change, the next sync must
+  // push the update, so they belong in the change-detection hash. Adding
+  // a field here: include it in the `str` array AND add a corresponding
+  // field to whichever adapter's buildEventBody uses it. Dropping a field:
+  // same, in reverse. The stored last_pushed_hash is opaque to the DB,
+  // so expansion doesn't need a migration — existing rows' hashes will
+  // simply all miss on the first sync after deploy, causing one extra
+  // push per ledger row (harmless catch-up).
   var str = [
     task.text || '',
     task.date || '',
@@ -146,7 +155,12 @@ function taskHash(task) {
     task.status || '',
     task.when || '',
     task.project || '',
-    task.marker ? 'marker' : ''
+    task.marker ? 'marker' : '',
+    task.notes || '',
+    task.url || '',
+    task.pri || '',
+    Array.isArray(task.location) ? task.location.slice().sort().join(',') : '',
+    Array.isArray(task.tools) ? task.tools.slice().sort().join(',') : ''
   ].join('|');
   return crypto.createHash('md5').update(str).digest('hex');
 }

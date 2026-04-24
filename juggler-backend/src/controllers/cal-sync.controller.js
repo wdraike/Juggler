@@ -57,7 +57,7 @@ async function sync(req, res) {
     var windowEnd = new Date(now);
     windowEnd.setDate(windowEnd.getDate() + 60);
 
-    var stats = { pushed: 0, pulled: 0, deleted_local: 0, deleted_remote: 0, errors: [], providers: {} };
+    var stats = { pushed: 0, pulled: 0, skipped: 0, deleted_local: 0, deleted_remote: 0, errors: [], providers: {} };
     var syncRunId = crypto.randomUUID();
 
     // === In-memory mutation buffers (written in one transaction at the end) ===
@@ -172,7 +172,7 @@ async function sync(req, res) {
         }
 
         providerData[adapter.providerId] = { token: token, events: events, eventsById: eventsById, adapter: adapter, partialFailure: !!events._hasPartialFailure };
-        stats.providers[adapter.providerId] = { pushed: 0, pulled: 0, deleted_local: 0, deleted_remote: 0, errors: [] };
+        stats.providers[adapter.providerId] = { pushed: 0, pulled: 0, skipped: 0, deleted_local: 0, deleted_remote: 0, errors: [] };
       } catch (err) {
         var errMsg = err.message || '';
         var isTokenExpired = errMsg.includes('invalid_grant') || errMsg.includes('Token has been expired or revoked');
@@ -377,8 +377,12 @@ async function sync(req, res) {
       processedTaskIdsByProvider[pid] = processedTaskIds;
       processedEventIdsByProvider[pid] = processedEventIds;
 
-      // Collect event updates for batch execution at end of ledger phase
-      var pendingEventUpdates = []; // { eventId, task }
+      // Collect event updates for batch execution at end of ledger phase.
+      // Each entry carries ledgerId + newHash so we can write the hash back
+      // only after the PATCH succeeds (a premature write would leave the
+      // ledger claiming the task was pushed when it wasn't, and the next
+      // sync would mistakenly skip the retry).
+      var pendingEventUpdates = []; // { eventId, task, ledgerId, newHash }
 
       for (var pli = 0; pli < pLedger.length; pli++) {
         var ledger = pLedger[pli];
@@ -488,10 +492,29 @@ async function sync(req, res) {
             // a provider (origin=pid) are read-only from Juggler's perspective —
             // we don't own them, can't PATCH them, and shouldn't try.
             if (ledger.origin === 'juggler' && !isIngestOnly(pid)) {
-              // Push task state to event. Every sync, every task. Deterministic.
-              pendingEventUpdates.push({ eventId: ledger.provider_event_id, task: task });
-              pStats.pushed++;
-              stats.pushed++;
+              // Hash-based skip: push only when the task's push-relevant fields
+              // actually differ from what the ledger says we last sent. With
+              // 200+ active tasks per user, the old "every sync, every task"
+              // PATCH loop burned through GCal's 600/min quota on every sync —
+              // and masked real errors behind rate-limit 403s. taskHash covers
+              // text/date/time/dur/status/when/project/marker (see
+              // cal-sync-helpers.js). On push success the new hash is written
+              // to last_pushed_hash (below); on failure we leave the old hash
+              // in place so the next sync retries.
+              var newHash = taskHash(task);
+              if (newHash !== ledger.last_pushed_hash) {
+                pendingEventUpdates.push({
+                  eventId: ledger.provider_event_id,
+                  task: task,
+                  ledgerId: ledger.id,
+                  newHash: newHash
+                });
+                pStats.pushed++;
+                stats.pushed++;
+              } else {
+                pStats.skipped = (pStats.skipped || 0) + 1;
+                stats.skipped = (stats.skipped || 0) + 1;
+              }
             } else if (isIngestOnly(pid)) {
               // Ingest-only: pull event changes into the task. Tasks created from
               // ingest-only events are when='fixed' by design (never scheduled by
@@ -606,7 +629,14 @@ async function sync(req, res) {
         }
       }
 
-      // Flush batched event updates for this provider
+      // Flush batched event updates for this provider. On each success the
+      // new last_pushed_hash gets queued so the next sync skips the PATCH if
+      // the task still matches.
+      function recordPushSuccess(upd) {
+        if (upd && upd.ledgerId && upd.newHash) {
+          ledgerUpdates.push({ id: upd.ledgerId, fields: { last_pushed_hash: upd.newHash } });
+        }
+      }
       if (pendingEventUpdates.length > 0) {
         if (pAdapter.batchUpdateEvents) {
           try {
@@ -615,6 +645,8 @@ async function sync(req, res) {
             for (var bui = 0; bui < batchUpdateResults.length; bui++) {
               if (batchUpdateResults[bui].error) {
                 failedUpdates.push(pendingEventUpdates[bui]);
+              } else {
+                recordPushSuccess(pendingEventUpdates[bui]);
               }
             }
             // Retry failed batch update items sequentially (single attempt)
@@ -623,6 +655,7 @@ async function sync(req, res) {
               for (var rui = 0; rui < failedUpdates.length; rui++) {
                 try {
                   await pAdapter.updateEvent(pToken, failedUpdates[rui].eventId, failedUpdates[rui].task, year, tz);
+                  recordPushSuccess(failedUpdates[rui]);
                   await throttle();
                 } catch (ruErr) {
                   pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: failedUpdates[rui].eventId, error: ruErr.message });
@@ -636,6 +669,7 @@ async function sync(req, res) {
             for (var fui = 0; fui < pendingEventUpdates.length; fui++) {
               try {
                 await pAdapter.updateEvent(pToken, pendingEventUpdates[fui].eventId, pendingEventUpdates[fui].task, year, tz);
+                recordPushSuccess(pendingEventUpdates[fui]);
                 await throttle();
               } catch (e5) {
                 pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[fui].eventId, error: e5.message });
@@ -648,6 +682,7 @@ async function sync(req, res) {
           for (var sui = 0; sui < pendingEventUpdates.length; sui++) {
             try {
               await pAdapter.updateEvent(pToken, pendingEventUpdates[sui].eventId, pendingEventUpdates[sui].task, year, tz);
+              recordPushSuccess(pendingEventUpdates[sui]);
               await throttle();
             } catch (e6) {
               pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[sui].eventId, error: e6.message });
