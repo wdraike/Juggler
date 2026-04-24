@@ -1521,13 +1521,13 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                     <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer', marginBottom: 2 }}>
                       <input type="radio" checked={recurFillPolicy !== 'backfill'} onChange={function() { setRecurFillPolicy('keep'); }} style={{ marginTop: 2 }} />
                       <span><strong>Keep the schedule</strong>
-                        <span style={{ color: TH.textMuted, fontSize: 10 }}> \u2014 skipped sessions stay skipped; the week's count may end below the target. Best for habits where spacing matters more than hitting the number.</span>
+                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'\u2014'} skipped sessions stay skipped; the week's count may end below the target. Best for habits where spacing matters more than hitting the number.</span>
                       </span>
                     </label>
                     <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer' }}>
                       <input type="radio" checked={recurFillPolicy === 'backfill'} onChange={function() { setRecurFillPolicy('backfill'); }} style={{ marginTop: 2 }} />
                       <span><strong>Backfill missed slots</strong>
-                        <span style={{ color: TH.textMuted, fontSize: 10 }}> \u2014 the scheduler picks a new date to replace each skipped session, aiming for the target count. Can feel pushy if you skip often.</span>
+                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'\u2014'} the scheduler picks a new date to replace each skipped session, aiming for the target count. Can feel pushy if you skip often.</span>
                       </span>
                     </label>
                   </div>
@@ -1577,13 +1577,13 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                     <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer', marginBottom: 2 }}>
                       <input type="radio" checked={recurFillPolicy !== 'backfill'} onChange={function() { setRecurFillPolicy('keep'); }} style={{ marginTop: 2 }} />
                       <span><strong>Keep the schedule</strong>
-                        <span style={{ color: TH.textMuted, fontSize: 10 }}> \u2014 skipped sessions stay skipped; the month's count may end below the target. Best when spacing matters more than hitting the number.</span>
+                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'\u2014'} skipped sessions stay skipped; the month's count may end below the target. Best when spacing matters more than hitting the number.</span>
                       </span>
                     </label>
                     <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer' }}>
                       <input type="radio" checked={recurFillPolicy === 'backfill'} onChange={function() { setRecurFillPolicy('backfill'); }} style={{ marginTop: 2 }} />
                       <span><strong>Backfill missed slots</strong>
-                        <span style={{ color: TH.textMuted, fontSize: 10 }}> \u2014 the scheduler picks a new date to replace each skipped session, aiming for the target count. Can feel pushy if you skip often.</span>
+                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'\u2014'} the scheduler picks a new date to replace each skipped session, aiming for the target count. Can feel pushy if you skip often.</span>
                       </span>
                     </label>
                   </div>

@@ -156,6 +156,50 @@ function extendDatesTo(targetIdx, dates, dayWindows, dayBlocks, dayOcc, dayPlace
   }
 }
 
+// Parse task.dayReq into a set of allowed day-of-week indices (Sun=0..Sat=6).
+// Returns null when all days are allowed (undefined/empty/'any'), so the caller
+// can treat a null result as "no dow filter" — cheaper than storing the full
+// 7-day set.
+var DOW_CODE_TO_IDX = { U: 0, Su: 0, M: 1, T: 2, W: 3, R: 4, F: 5, Sa: 6, S: 6 };
+function parseDayReq(dayReq) {
+  if (!dayReq || dayReq === 'any') return null;
+  if (dayReq === 'weekday') return { 1: true, 2: true, 3: true, 4: true, 5: true };
+  if (dayReq === 'weekend') return { 0: true, 6: true };
+  var parts = String(dayReq).split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+  if (parts.length === 0) return null;
+  var set = {};
+  var count = 0;
+  parts.forEach(function(p) {
+    if (DOW_CODE_TO_IDX[p] != null) { set[DOW_CODE_TO_IDX[p]] = true; count++; }
+  });
+  if (count === 0 || count >= 7) return null; // no parses recognized or all days → unconstrained
+  return set;
+}
+
+// Recurrence cycle length in days. Used to cap the placement-search window for
+// flexible recurring instances (tpc picks a specific date but the instance can
+// land on any of its allowed days within the cycle). Returns 0 when the
+// recurrence has no natural cycle (e.g. none) so the caller can skip the cap.
+function recurringCycleDays(recur) {
+  if (!recur) return 0;
+  var r = recur;
+  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e) { return 0; } }
+  var type = r && r.type;
+  if (type === 'weekly') return 7;
+  if (type === 'biweekly') return 14;
+  if (type === 'monthly') return 30;
+  if (type === 'daily') return 1;
+  if (type === 'interval') {
+    var every = Number(r.every) || 1;
+    var unit = r.unit || 'days';
+    if (unit === 'days') return every;
+    if (unit === 'weeks') return every * 7;
+    if (unit === 'months') return every * 30;
+    if (unit === 'years') return every * 365;
+  }
+  return 0;
+}
+
 // ── Placement item classification ──────────────────────────────
 // Normalizes each task into a compact item with the fields the
 // placement loop needs.
@@ -247,6 +291,51 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       }
     }
 
+    // Day-of-week eligibility. A tpc recurring instance (expandRecurring sets
+    // dayReq to the union of selected days when tpc < selectedDays) should be
+    // placeable on any of its allowed days — day-locking to the picked date
+    // defeats the whole point of the windowed pick. Parse dayReq into a set
+    // of allowed day-of-week indexes (Sun=0..Sat=6). Null => any day.
+    var allowedDows = parseDayReq(t.dayReq);
+
+    // Recurring cycle length (days) + roaming eligibility. A recurring
+    // instance may roam across its cycle (within dayReq) only when the
+    // recurrence uses timesPerCycle to PICK a subset of the selected days:
+    // in that mode the picked date is a hint, not a hard anchor, and the
+    // instance represents "one session in this cycle on any allowed day".
+    // Non-tpc recurring (each selected day has its own instance, e.g. M/W/F
+    // every week) must day-lock — otherwise the Mon instance could roam onto
+    // Wed and collide with the Wed instance.
+    var cycleDays = recurringCycleDays(t.recur);
+    var isFlexibleTpc = (function() {
+      if (!recurring) return false;
+      var r = t.recur;
+      if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e) { return false; } }
+      if (!r || !r.timesPerCycle || r.timesPerCycle <= 0) return false;
+      // Need to know how many days are selected in the cycle to decide if tpc
+      // is actually filtering. If tpc >= selectedDays, every selected day gets
+      // an instance and roaming doesn't apply.
+      var selectedDays;
+      if (r.type === 'daily') selectedDays = 7;
+      else if (r.type === 'weekly' || r.type === 'biweekly') {
+        var days = r.days || 'MTWRF';
+        selectedDays = typeof days === 'object' && !Array.isArray(days)
+          ? Object.keys(days).length
+          : (typeof days === 'string' ? days.length : 0);
+      } else if (r.type === 'monthly') {
+        selectedDays = (r.monthDays || [1, 15]).length;
+      } else {
+        selectedDays = 1;
+      }
+      return r.timesPerCycle < selectedDays;
+    })();
+    // Day-lock applies when:
+    //   - rigid recurring (user pinned the day + time)
+    //   - any split chunk (all chunks of the same occurrence must share the
+    //     anchor day; otherwise chunk 1 could roam while chunks 2+ stay put)
+    //   - non-tpc recurring (instance is day-specific, per above)
+    var isDayLocked = recurring && (rigid || splitTot > 1 || !isFlexibleTpc);
+
     items.push({
       task: t,
       id: t.id,
@@ -272,6 +361,11 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       windowHi: windowHi,
       travelBefore: travelBefore,
       travelAfter: travelAfter,
+      allowedDows: allowedDows,
+      cycleDays: cycleDays,
+      isDayLocked: isDayLocked,
+      splitOrdinal: splitOrd,
+      splitTotal: splitTot,
       slack: null // filled later
     });
   });
@@ -384,7 +478,8 @@ function tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements) {
   // user intent wins. Later-placed items must route around. Travel buffer
   // extends the footprint so adjacent tasks can't overlap commute time.
   reserveWithTravel(occ, start, item.dur, item.travelBefore, item.travelAfter);
-  var entry = { task: item.task, start: start, dur: item.dur, locked: true };
+  var entry = { task: item.task, start: start, dur: item.dur, locked: true,
+    travelBefore: item.travelBefore || 0, travelAfter: item.travelAfter || 0 };
   if (!dayPlaced[item.anchorDate]) dayPlaced[item.anchorDate] = [];
   dayPlaced[item.anchorDate].push(entry);
   if (!dayPlacements[item.anchorDate]) dayPlacements[item.anchorDate] = [];
@@ -445,19 +540,36 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
     var di = indexOfDate(dates, item.deadlineDate);
     if (di >= 0) latestIdx = di;
   }
-  // Recurring instances with an anchor date are LOCKED to that day.
-  // v1's "no roll forward" rule (SCHEDULER.md §8 Rule 2): a recurring
-  // instance must place on its assigned occurrence day or stay unplaced
-  // — including the overdue path. Without this clamp, v2 lets chunks of
-  // the same occurrence scatter across days because findEarliestSlot
-  // walks today→deadline-or-horizon and picks the first available slot.
+  // Recurring-instance placement windows. Three cases:
+  //   1. Strictly day-locked (rigid recurring, or split-chunk-2+ that must
+  //      join its already-placed chunk 1): clamp earliest=latest=anchor.
+  //   2. Flexible recurring (tpc windowed pick, non-rigid, non-split-chunk-2+):
+  //      search from anchor forward up to the cycle length so the instance
+  //      can land on any of its allowed days without overflowing into the
+  //      next cycle (which would double-book that cycle against its own pick).
+  //      dayReq filtering inside the loop limits to allowed day-of-week.
+  //   3. Every other recurring (anchor present but neither rigid nor tpc):
+  //      keep the v1 "no roll forward" semantics — day-locked to anchor.
+  //
   // Note: ignoreDeadline is intentionally ignored here for recurrings —
   // an overdue recurring goes to unplaced, never to a later day.
   if (item.isRecurring && item.anchorDate) {
     var ai = indexOfDate(dates, item.anchorDate);
     if (ai >= 0) {
       earliestIdx = ai;
-      latestIdx = ai;
+      if (item.isDayLocked) {
+        latestIdx = ai;
+      } else if (item.cycleDays > 0) {
+        // Cap the search at the end of the current cycle (inclusive), so a
+        // flexible recurring doesn't bleed into the next cycle and compete
+        // with that cycle's own pick.
+        var capIdx = ai + item.cycleDays - 1;
+        if (capIdx < latestIdx) latestIdx = capIdx;
+      } else {
+        // Unknown cycle (shouldn't happen for a recurring with anchorDate) —
+        // fall back to day-locked to preserve v1's no-roll-forward rule.
+        latestIdx = ai;
+      }
     }
   }
 
@@ -482,6 +594,7 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   var env = opts && opts.env;
   var canExtend = env && !item.isRecurring && !item.deadlineDate && !(opts && opts.ignoreDeadline);
 
+  var allowedDows = item.allowedDows;
   var i = earliestIdx;
   while (i <= latestIdx || canExtend) {
     if (i >= dates.length) {
@@ -492,6 +605,11 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
       latestIdx = dates.length - 1;
     }
     var d = dates[i];
+    // dayReq filter: skip days not in the task's allowed day-of-week set.
+    // null means unconstrained (any day). This applies to all tasks, not just
+    // recurring — a one-off task with dayReq=weekend should never land on
+    // weekdays either.
+    if (allowedDows && !allowedDows[d.isoDow]) { i++; continue; }
     var wins = eligibleWindows(item, d.key, dayWindows, dayBlocks, relaxWhen);
     if (wins.length) {
       var occ = dayOcc[d.key] || {};
@@ -732,7 +850,8 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     }
     var slot = placement.slot;
     reserveWithTravel(dayOcc[slot.dateKey], slot.start, item.dur, item.travelBefore, item.travelAfter);
-    var entry = { task: item.task, start: slot.start, dur: item.dur, locked: false };
+    var entry = { task: item.task, start: slot.start, dur: item.dur, locked: false,
+      travelBefore: item.travelBefore || 0, travelAfter: item.travelAfter || 0 };
     if (placement.overdue) entry._overdue = true;
     if (placement.relaxed) entry._flexWhenRelaxed = true;
     dayPlaced[slot.dateKey].push(entry);
@@ -777,7 +896,8 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     if (!placement.slot) { stillUnplaced.push(item); return; }
     var slot = placement.slot;
     reserveWithTravel(dayOcc[slot.dateKey], slot.start, item.dur, item.travelBefore, item.travelAfter);
-    var entry = { task: item.task, start: slot.start, dur: item.dur, locked: false };
+    var entry = { task: item.task, start: slot.start, dur: item.dur, locked: false,
+      travelBefore: item.travelBefore || 0, travelAfter: item.travelAfter || 0 };
     if (placement.overdue) entry._overdue = true;
     if (placement.relaxed) entry._flexWhenRelaxed = true;
     dayPlaced[slot.dateKey].push(entry);
