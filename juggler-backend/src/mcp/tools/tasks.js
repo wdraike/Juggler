@@ -67,17 +67,29 @@ function registerTaskTools(server, userId) {
   // ── list_tasks ──
   server.tool(
     'list_tasks',
-    'List tasks. Filter by status, project, date, or limit results. Returns both UTC (scheduledAt) and local (date/time/day) fields.',
+    'List tasks. Excludes completed ("done") tasks by default so the agent sees the active working set. Pass `status="done"` or `includeDone: true` to see completed history.',
     {
-      status: z.string().optional().describe('Filter by status (e.g. "", "done", "dropped")'),
+      status: z.string().optional().describe('Filter by exact status: "" (pending), "wip", "done", "skip", "cancel", "disabled", "pause". When provided, this overrides the default done-exclusion.'),
+      includeDone: z.boolean().optional().describe('Include tasks with status="done" in the default list. Default: false — done tasks are filtered out to keep the active working set focused.'),
       project: z.string().optional().describe('Filter by project name'),
       date: z.string().optional().describe('Filter by date (M/D format, e.g. "3/8") — matched against derived local date'),
       limit: z.number().optional().describe('Max number of tasks to return')
     },
-    async ({ status, project, date, limit }) => {
+    async ({ status, includeDone, project, date, limit }) => {
       var tz = await getUserTimezone();
       var query = db('tasks_v').where('user_id', userId);
-      if (status !== undefined) query = query.where('status', status);
+      if (status !== undefined) {
+        // Explicit status filter takes precedence over includeDone.
+        query = query.where('status', status);
+      } else if (!includeDone) {
+        // Default: hide completed tasks. Keep skip/cancel/disabled/pause/wip
+        // and active pending — those are all still informative to the agent.
+        // Use three-valued-logic aware predicate because MySQL `status != 'done'`
+        // is FALSE for NULL values.
+        query = query.where(function() {
+          this.whereNot('status', 'done').orWhereNull('status');
+        });
+      }
       if (project) query = query.where('project', project);
       query = query.orderBy('created_at', 'asc');
       if (limit && !date) query = query.limit(limit);
@@ -410,17 +422,24 @@ function registerTaskTools(server, userId) {
   // ── search_tasks ──
   server.tool(
     'search_tasks',
-    'Search tasks by text across task names and notes. Supports optional status and project filters.',
+    'Search tasks by text across task names and notes. Excludes "done" tasks by default — pass status="done" or includeDone=true to see completed history.',
     {
       query: z.string().describe('Search text (case-insensitive, matched against task text and notes)'),
-      status: z.string().optional().describe('Filter by status (e.g. "", "done", "dropped")'),
+      status: z.string().optional().describe('Filter by exact status: "" (pending), "wip", "done", "skip", "cancel", "disabled", "pause". Overrides the default done-exclusion.'),
+      includeDone: z.boolean().optional().describe('Include tasks with status="done" in the default results. Default: false.'),
       project: z.string().optional().describe('Filter by project name'),
       limit: z.number().optional().describe('Max results (default 20)')
     },
-    async ({ query, status, project, limit }) => {
+    async ({ query, status, includeDone, project, limit }) => {
       var tz = await getUserTimezone();
       var dbQuery = db('tasks_v').where('user_id', userId);
-      if (status !== undefined) dbQuery = dbQuery.where('status', status);
+      if (status !== undefined) {
+        dbQuery = dbQuery.where('status', status);
+      } else if (!includeDone) {
+        dbQuery = dbQuery.where(function() {
+          this.whereNot('status', 'done').orWhereNull('status');
+        });
+      }
       if (project) dbQuery = dbQuery.where('project', project);
       var escaped = query.replace(/%/g, '\\%').replace(/_/g, '\\_');
       dbQuery = dbQuery.where(function() {
