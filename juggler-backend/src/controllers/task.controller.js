@@ -147,7 +147,7 @@ function parseISOToDate(iso) {
 var TEMPLATE_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
   'when', 'day_req', 'recurring', 'rigid', 'time_flex', 'split', 'split_min',
   'travel_before', 'travel_after', 'depends_on',
-  'notes', 'marker', 'flex_when', 'recur', 'recur_start', 'recur_end',
+  'notes', 'url', 'marker', 'flex_when', 'recur', 'recur_start', 'recur_end',
   'preferred_time', 'preferred_time_mins'];
 
 /**
@@ -361,6 +361,7 @@ function rowToTask(row, timezone, sourceMap) {
     status: row.status || '',
     section: row.section,
     notes: row.notes,
+    url: row.url || null,
     startAfter: startAfter,
     location: safeParseJSON(row.location, []),
     tools: safeParseJSON(row.tools, []),
@@ -387,7 +388,6 @@ function rowToTask(row, timezone, sourceMap) {
     preferredTime: row.preferred_time != null ? !!row.preferred_time : null,
     preferredTimeMins: row.preferred_time_mins != null ? row.preferred_time_mins : null,
     desiredAt: row.desired_at ? new Date(row.desired_at).toISOString() : null,
-    desiredDate: row.desired_date || null,
     unscheduled: !!row.unscheduled,
     slackMins: row.slack_mins != null ? Number(row.slack_mins) : null,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
@@ -428,6 +428,7 @@ function taskToRow(task, userId, timezone) {
   if (task.status !== undefined) row.status = task.status;
   if (task.section !== undefined) row.section = task.section;
   if (task.notes !== undefined) row.notes = task.notes;
+  if (task.url !== undefined) row.url = task.url || null;
   if (task.deadline !== undefined) {
     row.deadline = task.deadline ? toDateISO(task.deadline) || task.deadline : null;
   }
@@ -464,12 +465,9 @@ function taskToRow(task, userId, timezone) {
   }
   if (task.preferredTimeMins !== undefined) row.preferred_time_mins = task.preferredTimeMins;
 
-  // Direct desired_at / desired_date mapping (if caller provides them explicitly)
+  // Direct desired_at mapping (if caller provides it explicitly)
   if (task.desiredAt !== undefined) {
     row.desired_at = task.desiredAt ? parseISOToDate(task.desiredAt) : null;
-  }
-  if (task.desiredDate !== undefined) {
-    row.desired_date = task.desiredDate || null;
   }
 
   // scheduledAt (UTC ISO) takes precedence over date+time (local strings)
@@ -484,19 +482,18 @@ function taskToRow(task, userId, timezone) {
     var timeVal = task.time !== undefined ? task.time : null;
     if (dateVal) {
       row.scheduled_at = localToUtc(dateVal, timeVal, timezone) || null;
-      // Also set desired_at to preserve user intent
+      // Also set desired_at to preserve user intent. For date-only (no time)
+      // intents we store local-noon of that day — avoids midnight timezone
+      // slip and reads naturally as "on this day."
       if (row.desired_at === undefined) {
-        row.desired_at = row.scheduled_at;
-      }
-      // Set desired_date for date-only tasks (no time specified)
-      if (!timeVal && row.desired_date === undefined) {
-        row.desired_date = toDateISO(dateVal) || null;
+        row.desired_at = timeVal
+          ? row.scheduled_at
+          : localToUtc(dateVal, '12:00 PM', timezone) || null;
       }
     } else if (task.date !== undefined && !dateVal) {
       // date was explicitly sent as null/empty → clear scheduled_at and desired_at
       row.scheduled_at = null;
       if (row.desired_at === undefined) row.desired_at = null;
-      if (row.desired_date === undefined) row.desired_date = null;
     }
     // If only time was sent (no date field), scheduled_at is handled in the
     // caller which can read the existing row's date and combine with the new time.

@@ -85,7 +85,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
   var actionSections = [
     {
       key: 'overdue', title: 'Overdue', tasks: issues.overdue, color: theme.redText,
-      tip: 'Tasks past their due date that haven\'t been completed',
+      tip: 'Tasks past their due date that aren\'t done',
       help: 'These tasks are past their due date and still open. Mark them done, reschedule to a new date, or cancel them.'
     },
     {
@@ -103,8 +103,8 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
     },
     {
       key: 'blocked', title: 'Blocked by Dependencies', tasks: issues.blocked, color: theme.purpleText,
-      tip: 'Tasks waiting on other tasks to be completed first',
-      help: 'These tasks depend on other tasks that aren\'t done yet. They\'ll become schedulable once their prerequisites are completed.'
+      tip: 'Tasks waiting on other tasks to be done first',
+      help: 'These tasks depend on other tasks that aren\'t done yet. They\'ll become schedulable once their prerequisites are done.'
     },
     {
       key: 'unscheduled', title: 'Backlog (no date)', tasks: backlog || [], color: theme.muted2,

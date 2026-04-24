@@ -356,7 +356,7 @@ function unifiedSchedule(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
           var flexStart = Math.max(0, t.preferredTimeMins - missedFlex);
           t._unplacedReason = 'missed';
           t._unplacedDetail = 'Preferred window (' + fmtTime(flexStart) + ' \u2013 ' + fmtTime(flexEnd) + ') has passed';
-          t._suggestions = [{ type: 'missed', text: 'Mark as done if completed, or skip for today' }];
+          t._suggestions = [{ type: 'missed', text: 'Mark as done if you finished it, or skip for today' }];
           t._overdue = true;
           missedRecurrings.push(t);
           if (!overdueByDate[tdKey]) overdueByDate[tdKey] = [];

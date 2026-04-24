@@ -176,14 +176,39 @@ function DetailPanel({ step, summary }) {
         {task.when != null && <><span style={{ color: '#8899aa' }}>When</span><span>{task.when}</span></>}
         {task.deadline != null && <><span style={{ color: '#8899aa' }}>Deadline</span><span>{task.deadline}</span></>}
         {task.startAfter != null && <><span style={{ color: '#8899aa' }}>Start after</span><span>{task.startAfter}</span></>}
-        {step.orderingSlack != null && <>
-          <span style={{ color: '#8899aa' }}>Ordering slack</span>
-          <span>{slackLabel(step.orderingSlack)}</span>
-        </>}
-        {task.slackMins !== undefined && <>
-          <span style={{ color: '#8899aa' }}>Display slack</span>
-          <span>{slackLabel(task.slackMins)}</span>
-        </>}
+        {(function() {
+          // Two slack numbers come out of the scheduler:
+          //   orderingSlack = slack at sort time (set in Phases 1/2)
+          //   slackMins     = slack of the final placement (computed post-hoc)
+          // Null means "no same-day ceiling" (unconstrained) and is not worth
+          // showing — we'd render "∞" for every unconstrained task, which
+          // drowned out the cases that have real slack. Also collapse to one
+          // row when both values agree.
+          var ord = step.orderingSlack;
+          var disp = task.slackMins;
+          var showOrd = ord != null;
+          var showDisp = disp != null;
+          if (showOrd && showDisp && ord === disp) {
+            return (
+              <>
+                <span style={{ color: '#8899aa' }}>Slack</span>
+                <span>{slackLabel(ord)}</span>
+              </>
+            );
+          }
+          return (
+            <>
+              {showOrd && <>
+                <span style={{ color: '#8899aa' }}>Ordering slack</span>
+                <span>{slackLabel(ord)}</span>
+              </>}
+              {showDisp && <>
+                <span style={{ color: '#8899aa' }}>Placement slack</span>
+                <span>{slackLabel(disp)}</span>
+              </>}
+            </>
+          );
+        })()}
         {step.splitOrdinal != null && task.split && <>
           <span style={{ color: '#8899aa' }}>Split chunk</span>
           <span>#{step.splitOrdinal}</span>
@@ -405,6 +430,47 @@ export default function SchedulerStepper() {
     window.addEventListener('keydown', onKey);
     return function() { window.removeEventListener('keydown', onKey); };
   }, [session]);
+
+  // Restart the stepper session whenever real scheduling state changes.
+  // Without this, edits made while the stepper is open show stale snapshots.
+  // Debounced so a burst of changes coalesces into one restart.
+  useEffect(function() {
+    var attached = null;
+    var debounceTimer = null;
+    function handleChanged() {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(function() {
+        // Stop the prior session first so the backend can free its snapshot memory.
+        if (sessionRef.current) {
+          apiClient.post('/schedule/step/' + sessionRef.current + '/stop').catch(function() {});
+          sessionRef.current = null;
+        }
+        start();
+      }, 500);
+    }
+    function attach(es) {
+      es.addEventListener('schedule:changed', handleChanged);
+      es.addEventListener('tasks:changed', handleChanged);
+    }
+    var poll = setInterval(function() {
+      var es = window.__jugglerEventSource;
+      if (es && !attached) {
+        attached = es;
+        attach(es);
+        clearInterval(poll);
+      }
+    }, 500);
+    var es = window.__jugglerEventSource;
+    if (es) { attached = es; attach(es); clearInterval(poll); }
+    return function() {
+      clearInterval(poll);
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (attached) {
+        attached.removeEventListener('schedule:changed', handleChanged);
+        attached.removeEventListener('tasks:changed', handleChanged);
+      }
+    };
+  }, [start]);
 
   if (loading) {
     return <div style={{ padding: 40, color: '#aab', background: '#0d1b2a', height: '100vh' }}>Starting stepper session…</div>;

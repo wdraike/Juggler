@@ -75,7 +75,7 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
           <P><B>Constraint matching:</B> The scheduler respects each task&apos;s <em>when</em> windows (morning, lunch, afternoon, evening), <em>location</em> requirements (only scheduled when you&apos;re at a matching location), and <em>tools</em> requirements (only scheduled where those tools are available).</P>
           <P><B>Rigid/fixed tasks</B> are never moved by the scheduler — they stay pinned to their set time.</P>
           <P><B>Date-pinned tasks</B> remain on their assigned date but can be moved within that day.</P>
-          <P><B>Dependencies:</B> A task with dependencies won&apos;t be scheduled until all its dependencies are complete or scheduled earlier.</P>
+          <P><B>Dependencies:</B> A task with dependencies won&apos;t be scheduled until all its dependencies are done or scheduled earlier.</P>
           <P><B>Splitting:</B> Tasks with split enabled can be broken into multiple chunks across different time blocks or even days, with each chunk at least <em>splitMin</em> minutes long.</P>
           <P>Tasks that can&apos;t fit anywhere are marked <B>unplaced</B>. Check the Issues view for details on why.</P>
         </Section>
@@ -97,7 +97,7 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
           <P><B>Date pinned:</B> Keeps the task on its assigned date, but the scheduler can still adjust the time within that day.</P>
           <P><B>Recurring:</B> Tasks with a recurrence pattern (daily, weekly, etc.) auto-generate instances. Batch-mark done with the &#x2713; button.</P>
           <P><B>Split:</B> Allows the scheduler to break this task into multiple smaller chunks. Set the minimum chunk size with <em>splitMin</em>.</P>
-          <P><B>Depends on:</B> Other tasks that must complete before this one can start. Open the dependency chain editor to visualize and manage links.</P>
+          <P><B>Depends on:</B> Other tasks that must be done before this one can start. Open the dependency chain editor to visualize and manage links.</P>
           <P><B>Day requirement (dayReq):</B> Restrict to weekdays, weekends, or a specific day of the week.</P>
           <P><B>Project:</B> Group tasks by project for filtering and organization.</P>
           <P><B>Notes:</B> Free-text notes shown on the card and in the editor.</P>
@@ -131,7 +131,7 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
           <P><B>Open:</B> Tasks that are not done, cancelled, or skipped. This is the default view.</P>
           <P><B>Action:</B> Open tasks plus tasks currently in progress (WIP). Focused on what needs attention right now.</P>
           <P><B>All:</B> Every task regardless of status.</P>
-          <P><B>Done:</B> Only completed tasks.</P>
+          <P><B>Done:</B> Only tasks that are done.</P>
           <P><B>WIP:</B> Only tasks currently in progress.</P>
           <P><B>Blocked:</B> Tasks waiting on incomplete dependencies. The red badge shows how many. These can&apos;t proceed until their dependencies are done.</P>
           <P><B>Unplaced:</B> Tasks the scheduler couldn&apos;t place into any time slot. The red badge shows how many. Check the Issues view for details.</P>

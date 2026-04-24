@@ -24,7 +24,7 @@ const FILTERS = [
   { id: 'open', label: 'Open', tip: 'Tasks not done, cancelled, or skipped' },
   { id: 'action', label: 'Action', tip: 'Open + in-progress tasks needing attention' },
   { id: 'all', label: 'All', tip: 'All tasks regardless of status' },
-  { id: 'done', label: 'Done', tip: 'Completed tasks only' },
+  { id: 'done', label: 'Done', tip: 'Done tasks only' },
   { id: 'wip', label: 'WIP', tip: 'Tasks currently in progress' },
   { id: 'pastdue', label: 'Overdue', tip: 'Tasks past their deadline or scheduled date' },
   { id: 'fixed', label: 'Fixed', tip: 'Tasks pinned to a specific date/time (not moved by scheduler)' },

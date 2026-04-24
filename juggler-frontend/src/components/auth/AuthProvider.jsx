@@ -179,9 +179,18 @@ export default function AuthProvider({ children }) {
         });
 
         if (res.status === 401) {
-          // Session ended from another app — clear local state and redirect through auth-service
-          window.dispatchEvent(new Event('auth:logout'));
-          window.location.href = `${AUTH_SERVICE_URL}/api/auth/logout-redirect?redirect=${encodeURIComponent(APP_URL)}`;
+          // 401 has two causes: SESSION_ENDED (signed off elsewhere — force
+          // logout) vs TOKEN_EXPIRED (access token aged out — next apiClient
+          // request will auto-refresh via the interceptor, so skip this tick).
+          // Without the distinction, every token expiry looked like a session
+          // kill and users were bounced back to login on the 60s heartbeat.
+          let code = null;
+          try { code = (await res.json()).code; } catch { /* no body */ }
+          if (code === 'SESSION_ENDED') {
+            window.dispatchEvent(new Event('auth:logout'));
+            window.location.href = `${AUTH_SERVICE_URL}/api/auth/logout-redirect?redirect=${encodeURIComponent(APP_URL)}`;
+          }
+          // TOKEN_EXPIRED / unspecified: do nothing — refresh path handles it.
         }
       } catch {
         // Network error — skip this check, try again next interval

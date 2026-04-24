@@ -52,12 +52,18 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
   allTasks.forEach(function(t) { existingIds[t.id] = true; });
   var existingByDateText = {};
   var existingBySourceDate = {};
+  // Status per (sourceId, date) — lets the 'backfill' fill policy distinguish
+  // skipped instances (replaceable) from done/cancel/pending (fulfilled).
+  var instanceStatusBySourceDate = {};
   allTasks.forEach(function(t) {
     // Skip recurring templates — they're sources, not placed tasks.
     // Their date is the anchor, not an instance that should block generation.
     if (t.taskType === 'recurring_template') return;
     if (t.date && t.text) existingByDateText[t.date + '|' + t.text] = true;
-    if (t.sourceId && t.date) existingBySourceDate[t.sourceId + '|' + t.date] = true;
+    if (t.sourceId && t.date) {
+      existingBySourceDate[t.sourceId + '|' + t.date] = true;
+      instanceStatusBySourceDate[t.sourceId + '|' + t.date] = t.status || '';
+    }
   });
 
   // Ordinal counter per source — IDs are date-agnostic: <sourceId>-<ordinal>
@@ -210,20 +216,30 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         // regardless of slot math.
         Object.keys(pendingKeys).forEach(function(k) { picked[k] = true; });
 
-        // Skip should not reshape future dates.
-        // Rule: once any instance (pending OR terminal) exists in the cycle,
-        // the user has already interacted with this cycle — do not refill
-        // vacated slots. Fresh cycles with zero existing instances get the
-        // full tpc budget.
-        //
-        // Without this: user with 1 pending instance skips it → cycle now
-        // has 1 terminal and 0 pending → tpc - 1 = 3 "needed" → scheduler
-        // creates 3 replacement dates → Exercise "keeps returning".
+        // Fill policy (#26). Per-task setting on the recurrence:
+        //   'keep'     (default) — once any instance exists in the cycle,
+        //               skipped slots are NOT refilled. The cycle is a
+        //               pattern the user already touched; respect it.
+        //               Prevents the "skip → new pick → skip → loop" that
+        //               makes a habit feel pushy.
+        //   'backfill' — aim to hit the tpc target. Count fulfilled
+        //               instances (done/cancel/pending/wip) toward the
+        //               budget; skip is treated as replaceable.
+        //               needed = tpc − fulfilled.
+        var fillPolicy = (r && r.fillPolicy === 'backfill') ? 'backfill' : 'keep';
         var slotsNeeded;
-        if (existingInCycle === 0) {
-          slotsNeeded = tpc;
+        if (fillPolicy === 'backfill') {
+          var fulfilledInCycle = 0;
+          cycleCandidates.forEach(function(cd) {
+            if (!bookedKeys[cd.key]) return;
+            var status = instanceStatusBySourceDate[src.id + '|' + cd.key] || '';
+            // Anything other than 'skip' counts toward the target: done/cancel
+            // are settled and pending/wip are already scheduled.
+            if (status !== 'skip') fulfilledInCycle++;
+          });
+          slotsNeeded = Math.max(0, tpc - fulfilledInCycle);
         } else {
-          slotsNeeded = 0;
+          slotsNeeded = existingInCycle === 0 ? tpc : 0;
         }
 
         // Pick pool: candidates that are not already booked (neither

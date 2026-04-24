@@ -17,7 +17,13 @@ import FeedbackDialog from '../feedback/FeedbackDialog';
 import { services, homeUrl } from '../../proxy-config';
 var BILLING_URL = services.billing.frontend;
 
-export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, calSyncProgress, schedulerRunning, onShowCalSync, onShowHelp, onAddTask, isMobile, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today, activeTimezone, tzSource, onManageDisabled }) {
+export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, calSyncProgress, schedulerRunning, onShowCalSync, onShowHelp, onAddTask, isMobile, isCompact, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today, activeTimezone, tzSource, onManageDisabled }) {
+  // `isCompact` collapses the right-button bank into an overflow menu and
+  // hides the inline week strip — same pattern as mobile, triggered earlier
+  // so tablet/narrow-laptop widths don't cram every header element onto
+  // one unreadable row. Pure mobile styling (fonts, paddings, small logo)
+  // stays tied to `isMobile`.
+  var useOverflow = isMobile || isCompact;
   var theme = getTheme(darkMode);
   var { user, logout } = useAuth();
   var [showOverflow, setShowOverflow] = useState(false);
@@ -47,9 +53,9 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
     return function() { document.removeEventListener('mousedown', handleClick); };
   }, [showOverflow]);
 
-  // Overflow menu items for mobile
+  // Overflow menu items — shown at mobile AND tablet-ish widths
   var overflowItems = [];
-  if (isMobile) {
+  if (useOverflow) {
     overflowItems.push({ label: 'Settings', icon: '\u2699\uFE0F', onClick: onShowSettings });
     overflowItems.push({ label: 'Import/Export', icon: '\uD83D\uDCE6', onClick: onShowExport });
     if (onShowCalSync || onShowGCalSync || onShowMsftCalSync) overflowItems.push({ label: 'Calendar Sync', icon: '\uD83D\uDCC5', onClick: onShowCalSync || onShowGCalSync || onShowMsftCalSync });
@@ -84,7 +90,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
       {aiPanel}
 
       {/* Inline week strip — fills the gap between AI input and action buttons */}
-      {!isMobile && weekStripDates && (function() {
+      {!useOverflow && weekStripDates && (function() {
         var todayKey = formatDateKey(today);
         var SHORT_DAY = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
         var dateInputValue = selectedDate.getFullYear() + '-' +
@@ -140,7 +146,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
         );
       })()}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'inherit', flexShrink: 0, ...(isMobile ? { marginLeft: 'auto' } : {}) }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'inherit', flexShrink: 0, ...(useOverflow ? { marginLeft: 'auto' } : {}) }}>
         {saving && <span style={{ fontSize: 11, color: theme.textMuted }}>Saving...</span>}
         {schedulerRunning && (
           <span title="Scheduler is running" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: theme.textMuted }}>
@@ -156,7 +162,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
         {onAddTask && <button onClick={onAddTask} style={{ ...btnStyle(theme, isMobile), fontSize: 20, fontWeight: 700, color: '#2D6A4F' }} title="Add task">+</button>}
 
         {/* Desktop: show all buttons inline */}
-        {!isMobile && (
+        {!useOverflow && (
           <>
             <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings \u2014 locations, tools, templates, and preferences">&#x2699;&#xFE0F;</button>
             <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export \u2014 save or load tasks as JSON">&#x1F4E6;</button>
@@ -242,8 +248,8 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
           </>
         )}
 
-        {/* Mobile: overflow menu button */}
-        {isMobile && (
+        {/* Compact (mobile + tablet-narrow): overflow menu button */}
+        {useOverflow && (
           <div ref={overflowRef} style={{ position: 'relative' }}>
             <button onClick={function() { setShowOverflow(function(v) { return !v; }); }} style={{ ...btnStyle(theme, isMobile), fontSize: 18, fontWeight: 700 }} title="More options">
               &#x22EF;

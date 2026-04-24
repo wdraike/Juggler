@@ -685,7 +685,7 @@ function PreferencesTab({ config, theme }) {
         </label>
 
         <div style={{ fontSize: 12, color: theme.text }}>
-          <span style={{ fontWeight: 500 }}>Completed tasks on calendar:</span>
+          <span style={{ fontWeight: 500 }}>Done tasks on calendar:</span>
           <select
             value={config.calCompletedBehavior || 'update'}
             onChange={function(e) { var v = e.target.value; config.setCalCompletedBehavior(v); savePrefs({ calCompletedBehavior: v }); }}

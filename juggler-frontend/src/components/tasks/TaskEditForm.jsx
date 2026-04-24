@@ -220,6 +220,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [deadline, setDeadline] = useState(isCreate ? '' : toDateISO(task.deadline));
   var [startAfter, setStartAfter] = useState(isCreate ? '' : toDateISO(task.startAfter));
   var [notes, setNotes] = useState(isCreate ? '' : (task.notes || ''));
+  var [url, setUrl] = useState(isCreate ? '' : (task.url || ''));
   var [when, setWhen] = useState(function() {
     if (isCreate) return 'morning,lunch,afternoon,evening,night';
     var raw = task.when || '';
@@ -275,6 +276,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     return String(raw);
   })());
   var [recurTimesPerCycle, setRecurTimesPerCycle] = useState(isCreate ? 0 : (task.recur?.timesPerCycle || 0)); // 0 = all selected days
+  var [recurFillPolicy, setRecurFillPolicy] = useState(isCreate ? 'keep' : (task.recur?.fillPolicy || 'keep'));
   var [recurEvery, setRecurEvery] = useState(isCreate ? 2 : (task.recur?.every || 2));
   var [recurUnit, setRecurUnit] = useState(isCreate ? 'days' : (task.recur?.unit || 'days'));
   var [recurMonthDays, setRecurMonthDays] = useState(isCreate ? [1, 15] : (task.recur?.monthDays || [1, 15]));
@@ -463,7 +465,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       date: toDateISO(t.date) || '', time: toTime24(t.time) || '',
       dur: t.dur || 30, timeRemaining: t.timeRemaining != null ? t.timeRemaining : '',
       deadline: toDateISO(t.deadline) || '', startAfter: toDateISO(t.startAfter) || '',
-      notes: t.notes || '', when: t.when || '', dayReq: t.dayReq || 'any',
+      notes: t.notes || '', url: t.url || '', when: t.when || '', dayReq: t.dayReq || 'any',
       recurring: !!t.recurring, rigid: !!t.rigid,
       timeFlex: t.timeFlex != null ? t.timeFlex : null,
       split: t.split !== undefined ? !!t.split : false, splitMin: t.splitMin || 15,
@@ -473,6 +475,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       flexWhen: !!t.flexWhen,
       datePinned: !!t.datePinned,
       recurType: t.recur?.type || 'none', recurDays: t.recur?.days || 'MTWRF', recurTimesPerCycle: t.recur?.timesPerCycle || 0,
+      recurFillPolicy: t.recur?.fillPolicy || 'keep',
       recurEvery: t.recur?.every || 2, recurUnit: t.recur?.unit || 'days',
       recurMonthDays: t.recur?.monthDays || [1, 15],
       tz: t.tz || activeTimezone || 'America/New_York',
@@ -511,6 +514,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setEndTimeError(null);
     setTimeRemaining(newSnap.timeRemaining); setDeadline(newSnap.deadline);
     setStartAfter(newSnap.startAfter); setNotes(newSnap.notes);
+    setUrl(newSnap.url || '');
     setWhen(newSnap.when); setDayReq(newSnap.dayReq);
     // Re-derive scheduling mode from synced value
     var syncTags = (newSnap.when || '').split(',').filter(Boolean);
@@ -523,6 +527,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setFlexWhen(newSnap.flexWhen);
     setDatePinned(newSnap.datePinned);
     setRecurType(newSnap.recurType); setRecurDays(newSnap.recurDays); setRecurTimesPerCycle(newSnap.recurTimesPerCycle || 0);
+    setRecurFillPolicy(newSnap.recurFillPolicy || 'keep');
     setRecurEvery(newSnap.recurEvery); setRecurUnit(newSnap.recurUnit);
     setRecurMonthDays(newSnap.recurMonthDays);
     setRecurringStart(newSnap.recurStart); setRecurringEnd(newSnap.recurEnd);
@@ -546,6 +551,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       deadline: fromDateISO(deadline),
       startAfter: fromDateISO(startAfter),
       notes,
+      url: (url && url.trim()) ? url.trim() : null,
       // Recurring tasks: auto-derive when/dayReq/rigid from mode
       when: when,  // preserved as-is: single tag = time-window mode, multi = time-blocks mode
       dayReq: recurring ? 'any' : dayReq,  // recurringTasks derive days from recurrence, not dayReq
@@ -567,6 +573,9 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         type: recurType,
         days: recurType === 'weekly' || recurType === 'biweekly' ? recurDays : undefined,
         timesPerCycle: recurTimesPerCycle > 0 ? recurTimesPerCycle : undefined,
+        // Only persist fillPolicy when tpc filtering is actually active — the
+        // field is meaningless without a target count.
+        fillPolicy: recurTimesPerCycle > 0 && recurFillPolicy === 'backfill' ? 'backfill' : undefined,
         every: recurType === 'interval' ? parseInt(recurEvery) || 2 : undefined,
         unit: recurType === 'interval' ? recurUnit : undefined,
         monthDays: recurType === 'monthly' ? recurMonthDays : undefined
@@ -582,7 +591,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || '0', 10);
       })() : undefined
     };
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, hasPreferredTime]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, hasPreferredTime]);
 
   // Build only the fields that changed from the initial snapshot (prevents marking unchanged fields dirty)
   var buildChangedFields = useCallback(function() {
@@ -595,6 +604,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (project !== snap.project) changed.project = all.project;
     if (pri !== snap.pri) changed.pri = all.pri;
     if (notes !== snap.notes) changed.notes = all.notes;
+    if ((url || '') !== (snap.url || '')) changed.url = all.url;
     if (when !== snap.when) {
       changed.when = all.when;
       // If the user is removing the 'fixed' tag, mark this edit as an explicit
@@ -634,7 +644,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (JSON.stringify(taskLoc) !== JSON.stringify(snap.location)) changed.location = all.location;
     if (JSON.stringify(taskTools) !== JSON.stringify(snap.tools)) changed.tools = all.tools;
     // Recurrence
-    if (recurType !== snap.recurType || JSON.stringify(recurDays) !== JSON.stringify(snap.recurDays) || recurTimesPerCycle !== snap.recurTimesPerCycle || String(recurEvery) !== String(snap.recurEvery) || recurUnit !== snap.recurUnit || JSON.stringify(recurMonthDays) !== JSON.stringify(snap.recurMonthDays)) {
+    if (recurType !== snap.recurType || JSON.stringify(recurDays) !== JSON.stringify(snap.recurDays) || recurTimesPerCycle !== snap.recurTimesPerCycle || recurFillPolicy !== (snap.recurFillPolicy || 'keep') || String(recurEvery) !== String(snap.recurEvery) || recurUnit !== snap.recurUnit || JSON.stringify(recurMonthDays) !== JSON.stringify(snap.recurMonthDays)) {
       changed.recur = all.recur;
     }
     // Recurring date range (recurStart is the sole anchor post-refactor)
@@ -647,7 +657,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       changed._timezone = all._timezone;
     }
     return Object.keys(changed).length > 0 ? changed : null;
-  }, [buildFields, text, project, pri, notes, when, dayReq, recurring, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime]);
+  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime]);
 
   // Dirty detection — compare current fields to snapshot
   var [isDirty, setIsDirty] = useState(false);
@@ -658,7 +668,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     var changed = buildChangedFields();
     console.log('[DIRTY]', !!changed, changed ? Object.keys(changed) : 'null', 'when=' + when, 'snapWhen=' + (taskSnapshotRef.current ? taskSnapshotRef.current.when : '?'));
     setIsDirty(!!changed);
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, hasPreferredTime]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, hasPreferredTime]);
 
   // Manual save handler
   // Unpin: revert a drag-pinned task to scheduler control.
@@ -941,6 +951,41 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             <span title="Free-text notes for your reference. Not used by the scheduler.">Notes</span>
             <textarea value={notes} onChange={e => setNotes(e.target.value)}
               style={{ ...iStyle, minHeight: 40, resize: 'vertical', width: '100%' }} />
+          </label>
+          <label style={lStyle}>
+            <span title="Optional link to an external resource (email thread, doc, issue, etc.) — shown as a clickable icon on the task card.">Link</span>
+            {(function() {
+              var isValid = url && /^https?:\/\//i.test(url.trim());
+              return (
+                <div style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
+                  <input type="url" value={url} onChange={e => setUrl(e.target.value)}
+                    placeholder="https://…"
+                    style={{ ...iStyle, flex: 1, minWidth: 0 }} />
+                  <button type="button"
+                    disabled={!isValid}
+                    onClick={function(e) {
+                      e.stopPropagation();
+                      if (!isValid) return;
+                      window.open(url.trim(), '_blank', 'noopener,noreferrer');
+                    }}
+                    title={isValid ? 'Open link in new tab' : 'Enter a valid http(s) URL to enable'}
+                    style={{
+                      height: BTN_H, padding: '0 10px', borderRadius: 4,
+                      border: '1px solid ' + TH.inputBorder,
+                      background: isValid ? TH.inputBg : 'transparent',
+                      color: isValid ? TH.accent : TH.textMuted,
+                      cursor: isValid ? 'pointer' : 'not-allowed',
+                      fontSize: 11, fontFamily: 'inherit', fontWeight: 600,
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      flexShrink: 0, boxSizing: 'border-box',
+                      opacity: isValid ? 1 : 0.5
+                    }}>
+                    <span>{'🔗'}</span>
+                    <span>Open</span>
+                  </button>
+                </div>
+              );
+            })()}
           </label>
         </div>
 
@@ -1307,13 +1352,13 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               return (
                 <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center', marginTop: 4 }}>
                   <button title={'No time restriction — the scheduler can place this in any available slot' + calWarn}
-                    onClick={function() { setWhen(''); }}
+                    onClick={function() { setDatePinned(false); setWhen(''); }}
                     style={togStyle(isAnytime, '#2D6A4F')}>{'\uD83D\uDD04'} Anytime</button>
                   <button title={'Spans the entire day' + calWarn}
-                    onClick={function() { setWhen('allday'); setSplit(false); setTravelBefore(0); setTravelAfter(0); }}
+                    onClick={function() { setDatePinned(false); setWhen('allday'); setSplit(false); setTravelBefore(0); setTravelAfter(0); }}
                     style={togStyle(isAllDay, '#C8942A')}>{'\u2600\uFE0F'} All Day</button>
                   <button title={'Locked to the exact Date/Time. The scheduler will never move it' + calWarn}
-                    onClick={function() { setWhen('fixed'); setSplit(false); }}
+                    onClick={function() { setDatePinned(true); setWhen('fixed'); setSplit(false); }}
                     style={togStyle(isFixed, '#8B2635')}>{'\uD83D\uDCCC'} Fixed</button>
                   <span style={{ width: 1, height: 18, background: TH.border, margin: '0 2px' }} />
                   {(uniqueTags || []).map(function(tb) {
@@ -1325,6 +1370,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                           : tb.name + ' time window — selecting any window disables Anytime'}
                         onClick={function() {
                           if (isAllDay || isFixed) {
+                            setDatePinned(false);
                             setWhen(tb.tag);
                           } else {
                             var cur = tagParts.slice();
@@ -1469,6 +1515,23 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                     )}
                   </div>
                 )}
+                {(recurTimesPerCycle > 0 && recurTimesPerCycle < selectedCount) && (
+                  <div style={{ marginTop: 6, paddingLeft: 6, borderLeft: '2px solid ' + TH.border, fontSize: 11 }}>
+                    <div style={{ fontSize: 10, color: TH.textMuted, marginBottom: 3 }}>When you skip or miss a session:</div>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer', marginBottom: 2 }}>
+                      <input type="radio" checked={recurFillPolicy !== 'backfill'} onChange={function() { setRecurFillPolicy('keep'); }} style={{ marginTop: 2 }} />
+                      <span><strong>Keep the schedule</strong>
+                        <span style={{ color: TH.textMuted, fontSize: 10 }}> \u2014 skipped sessions stay skipped; the week's count may end below the target. Best for habits where spacing matters more than hitting the number.</span>
+                      </span>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer' }}>
+                      <input type="radio" checked={recurFillPolicy === 'backfill'} onChange={function() { setRecurFillPolicy('backfill'); }} style={{ marginTop: 2 }} />
+                      <span><strong>Backfill missed slots</strong>
+                        <span style={{ color: TH.textMuted, fontSize: 10 }}> \u2014 the scheduler picks a new date to replace each skipped session, aiming for the target count. Can feel pushy if you skip often.</span>
+                      </span>
+                    </label>
+                  </div>
+                )}
               </label>;
             })()}
             {recurType === 'monthly' && (function() {
@@ -1506,6 +1569,23 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                     {(recurTimesPerCycle > 0 && recurTimesPerCycle < mdCount) && (
                       <span style={{ fontSize: 9, color: '#C8942A' }}>{'\u2248'}every {Math.round((recurType === 'biweekly' ? 14 : 7) / recurTimesPerCycle * 10) / 10} days</span>
                     )}
+                  </div>
+                )}
+                {(recurTimesPerCycle > 0 && recurTimesPerCycle < mdCount) && (
+                  <div style={{ marginTop: 6, paddingLeft: 6, borderLeft: '2px solid ' + TH.border, fontSize: 11 }}>
+                    <div style={{ fontSize: 10, color: TH.textMuted, marginBottom: 3 }}>When you skip or miss a session:</div>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer', marginBottom: 2 }}>
+                      <input type="radio" checked={recurFillPolicy !== 'backfill'} onChange={function() { setRecurFillPolicy('keep'); }} style={{ marginTop: 2 }} />
+                      <span><strong>Keep the schedule</strong>
+                        <span style={{ color: TH.textMuted, fontSize: 10 }}> \u2014 skipped sessions stay skipped; the month's count may end below the target. Best when spacing matters more than hitting the number.</span>
+                      </span>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer' }}>
+                      <input type="radio" checked={recurFillPolicy === 'backfill'} onChange={function() { setRecurFillPolicy('backfill'); }} style={{ marginTop: 2 }} />
+                      <span><strong>Backfill missed slots</strong>
+                        <span style={{ color: TH.textMuted, fontSize: 10 }}> \u2014 the scheduler picks a new date to replace each skipped session, aiming for the target count. Can feel pushy if you skip often.</span>
+                      </span>
+                    </label>
                   </div>
                 )}
               </label>;

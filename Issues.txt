@@ -1,0 +1,39 @@
+- what is the use of 'calender_id' in 'cal_sync_ledger'?
+- why are 'tas_id' null in 'cal_sync_ledger'?
+- how is the table 'feature_events' used?
+- add a URL field to the task and task detail UI
+- i want on table for all 3rd party syncs.  we will add additional ones and i don't want separate tables, like 'gcal_sync_ledger', and 'msft_cal_sync_ledger' for each one
+- should we implement sort order for projects?
+- how is 'schedule_queue' used?
+- need an explanation of each sync-related table and what role they play... 'sync_history', etc.
+- need proper audit columns on all tables
+- how is 'section' used in 'task_master'?
+-  why do we use 'desired_at' and 'desired_date' as separate fields?  why not a single date/time field?
+- for some reason, i cannot mark a task as 'fixed'. why?
+- can we consolidate the date in the 'task_masker' to be simpler, using settings that refer to one mutually exclusive setting for things like 'marker', 'rigid', 'time blocks', and the like?
+how is 'preferred_time_mins" used?
+- can we make sure MCP takes 'done' status into account?
+- i see very large 'occurrence_ordinal' values in the db. why?
+- why are there text 'dates' in the db?
+- why are there text 'day' in the db?
+- why is there text 'time' in the db?
+- what is 'generated' used for?
+- how is 'task_write_queue' used?
+- how is 'user_calendars' used?
+- we need to review how the scheduler managed overdue tasks and deciphers between the range of options for each
+- need a consistent us eof 'complete' vs 'done' in the app
+- since UUIDv7 is sortable by creation time, can we use these for ordinals?
+- for recurring tasks, want to investigate how we assess the placement.  1) should establish the recurrence window (daily, weekly, monthly, etc) 2) should assess the required frequency (should be in master already) 3) should assess how many instance exist in that window in status that imply the task was done or yet to be done 4) should count number done in the past inside the window and assess number remaining to be slotted. also access needed placement frequency for remaining to achieve the desired frequency 5) should place as many as possible 6) un-slotted are flagged as unscheduled.  need to co-design this with claude.
+- need to re-review task details to avoid user confusion for all configuration use cases
+- need to fix the reactive task tiles in clock view (text overlapping)
+- header is still not properly resizing
+- stepper is not showing the details for the slack correctly
+- need to make scheduler smarter and faster. 
+- should allow ui to show past accomplishments
+- need to test each 3rd party sync carefully
+- why is strivers logging out quickly?
+- should we add a health check to the ui (like climbrs)
+- use arrow up/down on stepper queue to progress.
+- the stepper isn't refreshing based on latest data
+- rather than multiple phases of scheduling, i'd like the scheduler to be purely constraints focused. this means we calculate the sum of the slack windows from its earliest placement option to its latest placement option.  Late placement should be determined by an internally (and possibly externally) established deadline date/time.  the internal deadline is determined for recurring tasks based on the recurring frequency and corresponding placement window(s).  for task with dependencies, the internal deadline is calculated back from the dependency chain should any of the dependent tasks have a firm deadline.  the items with the least slack (include <=0) get placed first. if more than one have the same level of constraint, we choose highest priority first.  if two have the same prioirty, place the one requiring the most time first.  as before, we must place items that are pinned/fixed exactly at the time they want, regardless if there are more than one item at that time slot.  if there are more than one with the same priority, choose at random.  after each placement, we access the other tasks affect by the placement, and if it is in the same potential time windows, subtract that slack from those impacted. this repeats until only items with no constraint remain. if an item with a constraint cannot be placed with >0 slack, if will be placed using the same rules (i.e. least slack and will show, and be flagged, as overdue).  the non-constrained tasks will be placed by priority order, followed by largest duration, and then random selection prioritization.  For all tasks, it may be wise for each task to carry a list of the time windows or time blocks used in calculating its slack and reduce the time blocks or remove them from the list when other tasks are slotted into them. this may help in calculating the slack and identifying the next available slot option.
+- we should optimize the be to fe communication to only provide updates for items that have changed or truly need to be communicated.  if a task hasn't moved, as a result of the scheduler running, we don't need to tell the front-end.

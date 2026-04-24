@@ -51,6 +51,14 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
           {status === 'cancel' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u2717'}</span>}
           {task.text}
         </span>
+        {task.url && /^https?:\/\//i.test(task.url) && (
+          <a href={task.url} target="_blank" rel="noopener noreferrer"
+            onClick={function(e) { e.stopPropagation(); }}
+            title={'Open link: ' + task.url}
+            style={{ fontSize: 11, textDecoration: 'none', color: theme.accent, flexShrink: 0 }}>
+            {'🔗'}
+          </a>
+        )}
         {task.project && (
           <span style={{
             fontSize: 9, flexShrink: 0, fontWeight: 600,

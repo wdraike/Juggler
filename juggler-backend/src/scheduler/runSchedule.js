@@ -10,7 +10,54 @@ var db = require('../db');
 var tasksWrite = require('../lib/tasks-write');
 var { computeChunks } = require('../lib/reconcile-splits');
 var unifiedSchedule = require('./unifiedSchedule');
+var unifiedScheduleV2 = require('./unifiedScheduleV2');
+var scheduleDiff = require('./scheduleDiff');
 var constants = require('./constants');
+
+// Scheduler version selection.
+//   SCHEDULER_V2=true        → v2 drives the DB + SSE (primary).
+//                              v1 runs as shadow when SCHEDULER_V2_SHADOW=true.
+//   default                  → v1 primary (legacy behavior).
+//                              v2 runs as shadow when SCHEDULER_V2_SHADOW=true.
+// Shadow exceptions are swallowed so they can never break the primary path.
+function runSchedulerWithShadow(allTasks, statuses, todayKey, nowMins, cfg, userId, context) {
+  var v2Primary = process.env.SCHEDULER_V2 === 'true';
+  var runShadow = process.env.SCHEDULER_V2_SHADOW === 'true';
+
+  if (v2Primary) {
+    var result = unifiedScheduleV2(allTasks, statuses, todayKey, nowMins, cfg);
+    if (runShadow) {
+      var shadowStart = Date.now();
+      var v1Result = null, v1Error = null;
+      try { v1Result = unifiedSchedule(allTasks, statuses, todayKey, nowMins, cfg); }
+      catch (e) { v1Error = e && e.message || String(e); }
+      // diffSchedules always takes (v1, v2). Label primary in meta.
+      var diff = scheduleDiff.diffSchedules(v1Result, result, {
+        userId: userId, primary: 'v2', context: context,
+        v1Ms: Date.now() - shadowStart, error: v1Error
+      });
+      scheduleDiff.logDiff(diff);
+    }
+    return result;
+  }
+
+  // v1 primary (default).
+  var result = unifiedSchedule(allTasks, statuses, todayKey, nowMins, cfg);
+  if (runShadow) {
+    var shadowStart2 = Date.now();
+    var v2Result = null, v2Error = null;
+    try { v2Result = unifiedScheduleV2(allTasks, statuses, todayKey, nowMins, cfg); }
+    catch (e) { v2Error = e && e.message || String(e); }
+    var diff2 = scheduleDiff.diffSchedules(result, v2Result, {
+      userId: userId, primary: 'v1', context: context,
+      v2Ms: Date.now() - shadowStart2,
+      v2Stub: v2Result && v2Result._v2Stub,
+      error: v2Error
+    });
+    scheduleDiff.logDiff(diff2);
+  }
+  return result;
+}
 var DEFAULT_TIME_BLOCKS = constants.DEFAULT_TIME_BLOCKS;
 var DEFAULT_TOOL_MATRIX = constants.DEFAULT_TOOL_MATRIX;
 var DAY_NAMES = constants.DAY_NAMES;
@@ -348,6 +395,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       t._candidateDate = mv.newDate;
       var d = parseDate(mv.newDate);
       if (d) t.day = DAY_NAMES[d.getDay()];
+      t.time = null;
       t.startAfter = null;
       t.deadline = null;
       t.scheduledAt = null;
@@ -517,6 +565,31 @@ async function runScheduleAndPersist(userId, _retries, options) {
     allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
     statuses = {};
     allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
+    // Re-apply reconcile move mutations — the reload above rebuilt allTasks
+    // from the original taskRows, so the date retargeting from the occurrence
+    // reconcile (e.g. user changed recur_start) just got wiped. Without this,
+    // the scheduler sees the stale original date and re-places at the old
+    // anchor (or leaves it unplaced if the old date is past).
+    if (typeof occurrenceMoves !== 'undefined' && occurrenceMoves.length > 0) {
+      var moveByChunkIdReapply = {};
+      occurrenceMoves.forEach(function(mv) {
+        mv.chunkIds.forEach(function(cid) { moveByChunkIdReapply[cid] = mv; });
+      });
+      allTasks.forEach(function(t) {
+        var mv = moveByChunkIdReapply[t.id];
+        if (!mv) return;
+        t._preReconDate = t.date;
+        t._preReconTime = t.time;
+        t.date = mv.newDate;
+        t._candidateDate = mv.newDate;
+        var d2 = parseDate(mv.newDate);
+        if (d2) t.day = DAY_NAMES[d2.getDay()];
+        t.time = null;
+        t.startAfter = null;
+        t.deadline = null;
+        t.scheduledAt = null;
+      });
+    }
   }
 
   // ── In-memory chunk expansion ──
@@ -633,8 +706,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
   tPerf.reconcileEnd = Date.now() - tPerfStart;
 
-  // 6. Run scheduler
-  var result = unifiedSchedule(allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg);
+  // 6. Run scheduler (primary chosen by SCHEDULER_V2 env var; shadow runs
+  //    in parallel when SCHEDULER_V2_SHADOW=true).
+  var result = runSchedulerWithShadow(
+    allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg, userId, 'main'
+  );
   tPerf.scheduleEnd = Date.now() - tPerfStart;
 
   // 7. Persist schedule results from dayPlacements
@@ -673,6 +749,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // Collect all updates, then batch them to minimize lock contention
   var pendingUpdates = []; // { id, dbUpdate }
 
+
   for (var taskId in placementByTaskId) {
     var placement = placementByTaskId[taskId];
     var original = taskById[taskId];
@@ -703,8 +780,12 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // Markers are non-blocking — never move them.
     if (original.marker) continue;
     // Recurrings should never have their date moved — they're day-specific.
-    // Exception: past recurringTasks within their placement window can be moved to today.
-    if (original.recurring && dateChanged) {
+    // Exceptions:
+    //   - Reconcile-initiated moves (e.g. user changed recur_start): reconcile
+    //     explicitly retargeted this chunk, so the move is authoritative. The
+    //     `_preReconDate` marker signals this case.
+    //   - Past recurringTasks within their placement window can be moved to today.
+    if (original.recurring && dateChanged && original._preReconDate == null) {
       var origTd = parseDate(original.date);
       var isBehind = origTd && origTd < today;
       var recurFlex = original.timeFlex != null ? original.timeFlex : 60;
@@ -753,6 +834,25 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // without a lookup. parseDate handles both M/D and MM/DD.
       var parsedForDay = parseDate(newDate);
       var dayLabel = parsedForDay ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][parsedForDay.getDay()] : null;
+
+      // Build a minimal patch — only fields that actually changed. Prior
+      // versions included dur/slackMins/unscheduled unconditionally, which
+      // meant every move triggered no-op merges (and frontend re-renders)
+      // for tasks whose duration and slack were stable across runs (#39).
+      var newDur = (placementCountByTaskId[taskId] === 1 ? placement.dur : null) || original.dur || null;
+      var newSlackMins = result.slackByTaskId && taskId in result.slackByTaskId ? result.slackByTaskId[taskId] : null;
+      var patch = {
+        date: newDate || null,
+        time: newTime || null,
+        day: dayLabel,
+        scheduledAt: newScheduledAt instanceof Date ? newScheduledAt.toISOString() : newScheduledAt
+      };
+      if (newDur !== original.dur) patch.dur = newDur;
+      // Normalize original.slackMins (number|null) so we don't emit on null→null.
+      var priorSlackMins = original.slackMins != null ? original.slackMins : null;
+      if (newSlackMins !== priorSlackMins) patch.slackMins = newSlackMins;
+      if (original.unscheduled) patch.unscheduled = false; // only send on transition
+
       updatedTasks.push({
         id: taskId,
         text: original.text,
@@ -760,18 +860,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
         to: newDate,
         fromTime: priorTime,
         toTime: newTime,
-        // Minimal patch for SSE — only the fields the scheduler actually mutated.
-        // Frontend merges this in without a re-fetch.
-        // For split masters, use the original dur (placement.dur is a chunk size).
-        patch: {
-          date: newDate || null,
-          time: newTime || null,
-          day: dayLabel,
-          scheduledAt: newScheduledAt instanceof Date ? newScheduledAt.toISOString() : newScheduledAt,
-          dur: (placementCountByTaskId[taskId] === 1 ? placement.dur : null) || original.dur || null,
-          slackMins: result.slackByTaskId && taskId in result.slackByTaskId ? result.slackByTaskId[taskId] : undefined,
-          unscheduled: false
-        }
+        patch: patch
       });
       updated++;
     }
@@ -779,6 +868,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
   // 8. Mark unplaced tasks — set unscheduled flag instead of overwriting scheduled_at
   //    Skip future recurring instances — they'll be placed when their day arrives.
+  //    Skip today/past recurring instances that already have a scheduled_at —
+  //    they remain on the calendar at their last proposed time (per user request:
+  //    "kept in the active part of the calendar at the time they were last
+  //    proposed"). Frontend renders them with overdue/missed styling rather
+  //    than removing them to an unscheduled lane.
   var cleared = 0;
   result.unplaced.forEach(function(t) {
     if (!t || !t.id) return;
@@ -788,13 +882,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (original.datePinned) return;
     if (original.datePinned) return;
     if (original.marker) return;
-    // Future recurring instances: skip — they'll be placed when their day arrives.
-    // Past/today recurring instances that couldn't place: fall through to unscheduled
-    // marking so they show up in the issues tab instead of silently vanishing.
-    if (original.taskType === 'recurring_instance') {
-      var instDate = parseDate(original.date);
-      if (instDate && instDate > today) return;
-    }
+    // Recurring instances: keep on the calendar at their existing scheduled_at.
+    // Future ones haven't been considered yet; today/past ones are missed but
+    // should stay visible at their last-proposed time. The frontend uses the
+    // (date < today AND status='') signal to flag them as overdue.
+    if (original.taskType === 'recurring_instance') return;
     // Mark as unscheduled but PRESERVE scheduled_at — it stays as the
     // last-proposed time so the frontend can render the chunk in the
     // unscheduled lane with a sensible "was supposed to be at" timestamp,
@@ -826,6 +918,19 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // Build unplaced lookup so Phase 9 doesn't overwrite Phase 8's null scheduled_at
   var unplacedIds = {};
   result.unplaced.forEach(function(t) { if (t && t.id) unplacedIds[t.id] = true; });
+
+  // 8.5. Clear stale `unscheduled` flag on recurring instances that have a
+  // scheduled_at. They stay visible on the calendar at their last proposed
+  // time even when they didn't fit a fresh placement (per user request).
+  // Without this, a flag set by a prior run persists indefinitely and the
+  // task shows in the unscheduled lane instead of the calendar.
+  allTasks.forEach(function(t) {
+    if (t.taskType !== 'recurring_instance') return;
+    var raw = rawRowById[t.id];
+    if (!raw || !raw.unscheduled) return; // already clear
+    if (!raw.scheduled_at) return; // truly nothing to show on calendar
+    pendingUpdates.push({ id: t.id, dbUpdate: { unscheduled: null, updated_at: db.fn.now() } });
+  });
 
   // 9. Move remaining past-dated tasks to today
   //    Past recurringTasks missed their day — mark as 'skip'.
@@ -1507,7 +1612,9 @@ async function getSchedulePlacements(userId, options) {
   console.log('[SCHED] no placement cache, running scheduler for first load');
   var cfg = await loadConfig(userId);
   cfg.timezone = TIMEZONE;
-  var result = unifiedSchedule(allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg);
+  var result = runSchedulerWithShadow(
+    allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg, userId, 'cache-hydrate'
+  );
 
   // Save cache
   var newCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date().toISOString(), timezone: TIMEZONE, schedulerVersion: SCHEDULER_VERSION };

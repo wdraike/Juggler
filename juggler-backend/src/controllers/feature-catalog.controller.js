@@ -110,7 +110,7 @@ const CATALOG = {
           key: 'scheduling.dependencies',
           type: 'boolean',
           display_name: 'Task Dependencies',
-          description: 'Chain tasks so one must complete before another starts',
+          description: 'Chain tasks so one must be done before another starts',
           value_order: 75,
           default_unrestricted_value: true
         },

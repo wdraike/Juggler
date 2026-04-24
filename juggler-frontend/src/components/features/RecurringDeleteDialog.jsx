@@ -45,7 +45,7 @@ export default function RecurringDeleteDialog({ taskName, onSkipInstance, onDele
           }}>
             <span style={{ fontWeight: 600 }}>{'\uD83D\uDDD1'} Delete entire series</span>
             <br />
-            <span style={{ fontSize: 11, opacity: 0.8 }}>Remove the recurring task and all future instances. Completed history is kept.</span>
+            <span style={{ fontSize: 11, opacity: 0.8 }}>Remove the recurring task and all future instances. Past instances are kept.</span>
           </button>
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>

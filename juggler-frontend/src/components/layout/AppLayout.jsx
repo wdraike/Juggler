@@ -15,6 +15,7 @@ import useUndo from '../../hooks/useUndo';
 import useKeyboardShortcuts from '../../hooks/useKeyboardShortcuts';
 import useDragDrop from '../../hooks/useDragDrop';
 import useIsMobile from '../../hooks/useIsMobile';
+import useIsCompact from '../../hooks/useIsCompact';
 import { getTheme } from '../../theme/colors';
 import { formatDateKey, getWeekStart, parseDate, parseTimeToMinutes } from '../../scheduler/dateHelpers';
 import { DAY_NAMES, applyDefaults } from '../../state/constants';
@@ -64,6 +65,7 @@ export default function AppLayout() {
   // State
   var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements, flushNow } = useTaskState();
   var isMobile = useIsMobile();
+  var isCompact = useIsCompact();
   var { toast, toastHistory, showToast } = useToast();
   var { pushUndo, popUndo } = useUndo(taskStateRef, dispatch, dispatchPersist);
 
@@ -1100,12 +1102,13 @@ export default function AppLayout() {
           onShowHelp={() => setShowHelp(true)}
           onAddTask={() => { setShowCreateForm(true); setExpandedTasks([]); }}
           isMobile={isMobile}
+          isCompact={isCompact}
           aiPanel={<AiCommandPanel darkMode={darkMode} isMobile={isMobile} allTasks={allTasks} statuses={statuses} config={config} onApplyOps={handleAiOps} showToast={showToast} />}
           weekStripDates={weekStripDates} selectedDate={selectedDate}
           dayOffset={dayOffset} setDayOffset={setDayOffset} today={today}
           onManageDisabled={function() { setShowDisabledItems(true); }}
         />
-        {isMobile && <WeekStrip
+        {(isMobile || isCompact) && <WeekStrip
           weekStripDates={weekStripDates} selectedDate={selectedDate}
           dayOffset={dayOffset} setDayOffset={setDayOffset} today={today}
           darkMode={darkMode} statuses={statuses} tasksByDate={tasksByDate}

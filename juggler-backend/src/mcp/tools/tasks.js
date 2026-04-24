@@ -35,6 +35,7 @@ var taskInputFields = {
   location: z.array(z.string()).optional().describe('Location IDs'),
   tools: z.array(z.string()).optional().describe('Tool IDs'),
   notes: z.string().optional().describe('Additional notes'),
+  url: z.string().optional().describe('External link (email thread, doc, issue, etc.) — surfaced on the task card as a clickable link.'),
   recurring: z.boolean().optional().describe('Whether this is a recurring recurring'),
   rigid: z.boolean().optional().describe('Whether time is fixed/rigid'),
   split: z.boolean().optional().describe('Whether task can be split across time blocks'),
@@ -42,15 +43,16 @@ var taskInputFields = {
   recur: z.object({
     type: z.string(),
     days: z.string().optional(),
-    every: z.number().optional()
+    every: z.number().optional(),
+    timesPerCycle: z.number().optional().describe('Target count per cycle (e.g. 3 for "3x per week"). Only used when fewer than all selected days are required.'),
+    fillPolicy: z.enum(['keep', 'backfill']).optional().describe('When a session in a times-per-cycle recurrence is skipped: "keep" (default) leaves it skipped; "backfill" tells the scheduler to pick a new date to hit the target count.')
   }).optional().describe('Recurrence pattern'),
   datePinned: z.boolean().optional().describe('Whether date is pinned (won\'t be moved by scheduler)'),
   marker: z.boolean().optional().describe('Non-blocking reminder event — shows on calendar at its time but does not prevent tasks from being scheduled in the same slot. Use for events you want to see but not block time for (e.g. TV game windows, reminders). Can have status and dependencies like regular tasks.'),
   flexWhen: z.boolean().optional().describe('Allow the scheduler to relax this task\'s "when" time-of-day preference if it can\'t be placed within those windows. When false (default), the task stays unplaced if its when windows are full.'),
   travelBefore: z.number().optional().describe('Travel buffer before task in minutes — scheduler reserves this time and prevents overlapping placements'),
   travelAfter: z.number().optional().describe('Travel buffer after task in minutes — scheduler reserves this time and prevents overlapping placements'),
-  desiredAt: z.string().optional().describe('User intended date/time as UTC ISO. Usually set automatically from date+time — only provide if you need to set desired_at differently from scheduled_at.'),
-  desiredDate: z.string().optional().describe('User intended date only (YYYY-MM-DD). For tasks with a date preference but no specific time.'),
+  desiredAt: z.string().optional().describe('User intended date/time as UTC ISO. Usually set automatically from date+time — only provide if you need to set desired_at differently from scheduled_at. For date-only intents (no specific time), send local-noon.'),
   preferredTimeMins: z.number().optional().describe('Preferred time as minutes from midnight in user local timezone (e.g. 720 = 12:00 PM, 420 = 7:00 AM). For recurring tasks in Time Window mode.')
 };
 

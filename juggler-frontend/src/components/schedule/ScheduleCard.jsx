@@ -118,7 +118,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
         fontSize: compact ? 10 : (isMobile ? 11 : 12), lineHeight: 1.2
       }}>
         <span style={{
-          flex: 1, fontWeight: 600, color: theme.text,
+          flex: 1, minWidth: 0, fontWeight: 600, color: theme.text,
           overflow: 'hidden', textDecoration: isDone ? 'line-through' : 'none',
           ...(isMobile && !compact ? {
             display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
@@ -166,6 +166,14 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
               <span style={{ fontSize: 9, display: 'flex', gap: 1, alignItems: 'center' }}>
                 {typeBadges.map(function(b, i) { return <span key={i} title={b.title}>{b.icon}</span>; })}
               </span>
+            )}
+            {task.url && /^https?:\/\//i.test(task.url) && (
+              <a href={task.url} target="_blank" rel="noopener noreferrer"
+                onClick={function(e) { e.stopPropagation(); }}
+                title={'Open link: ' + task.url}
+                style={{ fontSize: 10, textDecoration: 'none', color: theme.accent, cursor: 'pointer' }}>
+                {'🔗'}
+              </a>
             )}
             {task.location && task.location.length > 0 && (function() {
               var icons = task.location.map(function(lid) { return locIcon(lid); }).filter(Boolean);
