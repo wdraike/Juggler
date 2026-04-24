@@ -53,9 +53,41 @@ var DEFAULT_TIME_BLOCKS = {
   Sat: DEFAULT_WEEKEND_BLOCKS, Sun: DEFAULT_WEEKEND_BLOCKS,
 };
 
-// Bump this when the placement algorithm changes to invalidate cached schedules.
-// v3: date keys changed from M/D to ISO YYYY-MM-DD.
-var SCHEDULER_VERSION = 3;
+// Auto-invalidate cached schedules whenever the scheduler source changes.
+// Composite version = manual prefix + content hash of the core scheduler
+// files. Any edit to unifiedScheduleV2.js / runSchedule.js / reconcile /
+// the shared expandRecurring changes the hash, so `cache.schedulerVersion
+// === SCHEDULER_VERSION` flips on the next read and stale placements get
+// rebuilt instead of served.
+//
+// Keep MANUAL_SCHEDULER_VERSION as an explicit escape hatch for cases
+// where semantics change WITHOUT a code edit — e.g. a cfg format change,
+// a default-blocks bump, or an emergency "burn the cache" across a fleet.
+// Bump it and every cache becomes stale, regardless of hash.
+var MANUAL_SCHEDULER_VERSION = 3;
+
+function computeSchedulerHash() {
+  var fs = require('fs');
+  var crypto = require('crypto');
+  var path = require('path');
+  // Order matters for hash stability, not correctness: same files every time.
+  // Hash all logic that, if edited, should invalidate the cache. Keep this
+  // list tight — including every helper bloats noise when iterating.
+  var files = [
+    path.join(__dirname, 'unifiedScheduleV2.js'),
+    path.join(__dirname, 'runSchedule.js'),
+    path.join(__dirname, 'reconcileOccurrences.js'),
+    path.join(__dirname, '..', '..', '..', 'shared', 'scheduler', 'expandRecurring.js')
+  ];
+  var h = crypto.createHash('sha1');
+  files.forEach(function(f) {
+    try { h.update(fs.readFileSync(f)); }
+    catch (e) { /* missing file — skip rather than fail startup */ }
+  });
+  return h.digest('hex').slice(0, 10);
+}
+
+var SCHEDULER_VERSION = MANUAL_SCHEDULER_VERSION + '-' + computeSchedulerHash();
 
 // Forward expansion horizon for recurring templates. The scheduler only
 // generates/places recurring instances out to today + RECUR_EXPAND_DAYS.
