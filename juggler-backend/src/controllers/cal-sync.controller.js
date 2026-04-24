@@ -244,6 +244,87 @@ async function sync(req, res) {
       tasksById[allTasks[ti].id] = allTasks[ti];
     }
 
+    // Contiguous-split merge (#33 finding #7). Each split chunk of an
+    // occurrence lives as its own task_instances row — so a 3-hour task
+    // cut into 6×30-min contiguous blocks persists as 6 separate tasks
+    // and, without this pass, syncs as 6 separate GCal events. Users
+    // see a stack of "Task (chunk-like titles)" instead of one span.
+    //
+    // Group sibling chunks by (master_id, occurrence_ordinal), sort by
+    // split_ordinal, find contiguous runs (where chunk N's end equals
+    // chunk N+1's start). For each run longer than 1:
+    //   - LEADER = first chunk. Mutate its in-memory dur to the run's
+    //     total, append "(parts X-Y/N)" to the title when the run doesn't
+    //     cover all of the original chunks, and let it push as normal.
+    //   - FOLLOWERS = chunks 2..N in the run. Marked in `mergedFollowers`
+    //     to suppress from the push loop below, and any existing ledger
+    //     row for them gets queued for delete (their old one-per-chunk
+    //     GCal event disappears and the leader's single merged event
+    //     takes over).
+    // The hash-skip in the ledger loop handles steady-state updates —
+    // hash now sees merged dur + new title, so the first post-deploy
+    // sync will re-push each merged leader with the new shape; after
+    // that hash matches and the sync is a no-op for that task.
+    var mergedFollowers = {}; // taskId -> leaderId (suppress in push loop)
+    var mergedLeaderInfo = {}; // leaderId -> { leaderDur, titleSuffix }
+    (function mergeContiguousSplitChunks() {
+      var byOccurrence = {};
+      allTaskRows.forEach(function(r) {
+        var tot = Number(r.split_total) || 1;
+        if (tot <= 1) return;
+        if (!r.master_id || r.occurrence_ordinal == null) return;
+        var key = r.master_id + '|' + r.occurrence_ordinal;
+        if (!byOccurrence[key]) byOccurrence[key] = [];
+        byOccurrence[key].push(r);
+      });
+      Object.keys(byOccurrence).forEach(function(k) {
+        var chunks = byOccurrence[k].slice().sort(function(a, b) {
+          return (Number(a.split_ordinal) || 1) - (Number(b.split_ordinal) || 1);
+        });
+        // Build contiguous runs. "Contiguous" = chunk N's end (UTC ms) equals
+        // chunk N+1's start (UTC ms) within a 30-second tolerance (scheduler
+        // rounds to 15-minute slots so drift is never real).
+        var runs = [];
+        var current = null;
+        chunks.forEach(function(c) {
+          if (!c.scheduled_at) return;
+          var startMs = new Date(String(c.scheduled_at).replace(' ', 'T') + 'Z').getTime();
+          var endMs = startMs + ((Number(c.dur) || 30) * 60000);
+          if (current && Math.abs(current.endMs - startMs) < 30000) {
+            current.chunks.push(c);
+            current.endMs = endMs;
+          } else {
+            current = { chunks: [c], startMs: startMs, endMs: endMs };
+            runs.push(current);
+          }
+        });
+        runs.forEach(function(run) {
+          if (run.chunks.length < 2) return; // Singleton run: no merge
+          var leader = run.chunks[0];
+          var total = chunks.length;
+          var coversAll = run.chunks.length === total;
+          var firstPart = Number(leader.split_ordinal) || 1;
+          var lastPart = Number(run.chunks[run.chunks.length - 1].split_ordinal) || run.chunks.length;
+          mergedLeaderInfo[leader.id] = {
+            leaderDur: Math.round((run.endMs - run.startMs) / 60000),
+            titleSuffix: coversAll ? '' : ' (parts ' + firstPart + '-' + lastPart + '/' + total + ')'
+          };
+          for (var ci = 1; ci < run.chunks.length; ci++) {
+            mergedFollowers[run.chunks[ci].id] = leader.id;
+          }
+        });
+      });
+      // Apply mutations to the in-memory task objects. Leaders get merged
+      // dur + optional title suffix; followers are left untouched here
+      // and filtered later in the push loop + ledger-follower deletes.
+      for (var mi = 0; mi < allTasks.length; mi++) {
+        var info = mergedLeaderInfo[allTasks[mi].id];
+        if (!info) continue;
+        allTasks[mi].dur = info.leaderDur;
+        if (info.titleSuffix) allTasks[mi].text = (allTasks[mi].text || '') + info.titleSuffix;
+      }
+    })();
+
     // Secondary index: (masterId|date) → instance task. Used to self-heal
     // ledger rows whose `task_id` points to an occurrence_ordinal that the
     // scheduler's reconcile has since renumbered. Without this, every renamed
@@ -492,28 +573,37 @@ async function sync(req, res) {
             // a provider (origin=pid) are read-only from Juggler's perspective —
             // we don't own them, can't PATCH them, and shouldn't try.
             if (ledger.origin === 'juggler' && !isIngestOnly(pid)) {
-              // Hash-based skip: push only when the task's push-relevant fields
-              // actually differ from what the ledger says we last sent. With
-              // 200+ active tasks per user, the old "every sync, every task"
-              // PATCH loop burned through GCal's 600/min quota on every sync —
-              // and masked real errors behind rate-limit 403s. taskHash covers
-              // text/date/time/dur/status/when/project/marker (see
-              // cal-sync-helpers.js). On push success the new hash is written
-              // to last_pushed_hash (below); on failure we leave the old hash
-              // in place so the next sync retries.
-              var newHash = taskHash(task);
-              if (newHash !== ledger.last_pushed_hash) {
-                pendingEventUpdates.push({
-                  eventId: ledger.provider_event_id,
-                  task: task,
-                  ledgerId: ledger.id,
-                  newHash: newHash
-                });
-                pStats.pushed++;
-                stats.pushed++;
-              } else {
+              // Followers in a merged-chunks run: skip the PATCH — their
+              // event is queued for delete in Phase 3's splitDeleteQueue,
+              // so patching it first wastes an API call. We also clear
+              // last_pushed_hash later via the deleted_local transition.
+              if (mergedFollowers[task.id]) {
                 pStats.skipped = (pStats.skipped || 0) + 1;
                 stats.skipped = (stats.skipped || 0) + 1;
+              } else {
+                // Hash-based skip: push only when the task's push-relevant fields
+                // actually differ from what the ledger says we last sent. With
+                // 200+ active tasks per user, the old "every sync, every task"
+                // PATCH loop burned through GCal's 600/min quota on every sync —
+                // and masked real errors behind rate-limit 403s. taskHash covers
+                // text/date/time/dur/status/when/project/marker (see
+                // cal-sync-helpers.js). On push success the new hash is written
+                // to last_pushed_hash (below); on failure we leave the old hash
+                // in place so the next sync retries.
+                var newHash = taskHash(task);
+                if (newHash !== ledger.last_pushed_hash) {
+                  pendingEventUpdates.push({
+                    eventId: ledger.provider_event_id,
+                    task: task,
+                    ledgerId: ledger.id,
+                    newHash: newHash
+                  });
+                  pStats.pushed++;
+                  stats.pushed++;
+                } else {
+                  pStats.skipped = (pStats.skipped || 0) + 1;
+                  stats.skipped = (stats.skipped || 0) + 1;
+                }
               }
             } else if (isIngestOnly(pid)) {
               // Ingest-only: pull event changes into the task. Tasks created from
@@ -742,6 +832,23 @@ async function sync(req, res) {
       // Must clear: ledger, task event_id (DB + in-memory), processedTaskIds.
       var splitDeleteQueue = [];
       var splitReplacedIds = new Set();
+
+      // Merged-follower cleanup. Each chunk that got absorbed into a
+      // contiguous run (by the mergeContiguousSplitChunks pass above)
+      // should have its own GCal event removed and its ledger row marked
+      // deleted_local — the leader's expanded event now covers its time
+      // slot. If the follower had no active ledger yet (new merge before
+      // that chunk ever synced on its own), there's nothing to delete.
+      Object.keys(mergedFollowers).forEach(function(followerId) {
+        var row = (ledgerByProvider[pid2] || []).find(function(l) {
+          return l.task_id === followerId && l.status === 'active';
+        });
+        if (!row) return;
+        if (row.provider_event_id) splitDeleteQueue.push(row.provider_event_id);
+        ledgerUpdates.push({ id: row.id, fields: { status: 'deleted_local' } });
+        ledgeredTaskIds2.delete(followerId);
+      });
+
       for (var si = 0; si < allTasks.length; si++) {
         var sTask = allTasks[si];
         var sSplits = splitPlacements[sTask.id];
@@ -779,6 +886,9 @@ async function sync(req, res) {
         var newTask = allTasks[ti2];
         if (processedTaskIds2.has(newTask.id)) continue;
         if (ledgeredTaskIds2.has(newTask.id)) continue;
+        // Followers in a merged-chunks run: their time slot is covered
+        // by the leader's expanded event; don't push a separate event.
+        if (mergedFollowers[newTask.id]) continue;
 
         var taskStatus = newTask.status || '';
         if (taskStatus === 'done' || taskStatus === 'cancel' || taskStatus === 'skip' || taskStatus === 'pause' || taskStatus === 'disabled') continue;
