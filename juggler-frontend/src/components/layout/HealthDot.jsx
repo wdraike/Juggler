@@ -21,9 +21,11 @@ var NETWORK_TIMEOUT_MS = 5000;
 export default function HealthDot({ darkMode, theme }) {
   var [state, setState] = useState({ status: 'checking', data: null, error: null, lastChecked: null });
   var [expanded, setExpanded] = useState(false);
+  var [anchorRect, setAnchorRect] = useState(null);
   var [isChecking, setIsChecking] = useState(false);
   var inflightRef = useRef(false);
   var popoverRef = useRef(null);
+  var buttonRef = useRef(null);
 
   var check = useCallback(async function() {
     if (inflightRef.current) return;
@@ -54,14 +56,24 @@ export default function HealthDot({ darkMode, theme }) {
     return function() { clearInterval(timer); };
   }, [check]);
 
-  // Close popover on outside click.
+  // Close popover on outside click, window scroll, or resize.
+  // Scroll/resize close because the popover is position:fixed — keeping
+  // it pinned to a moving anchor would require live coordinate updates
+  // and would make the header feel glitchy.
   useEffect(function() {
     if (!expanded) return undefined;
     function onDocClick(e) {
       if (popoverRef.current && !popoverRef.current.contains(e.target)) setExpanded(false);
     }
+    function onLayoutChange() { setExpanded(false); }
     document.addEventListener('mousedown', onDocClick);
-    return function() { document.removeEventListener('mousedown', onDocClick); };
+    window.addEventListener('scroll', onLayoutChange, true);
+    window.addEventListener('resize', onLayoutChange);
+    return function() {
+      document.removeEventListener('mousedown', onDocClick);
+      window.removeEventListener('scroll', onLayoutChange, true);
+      window.removeEventListener('resize', onLayoutChange);
+    };
   }, [expanded]);
 
   var color = (function() {
@@ -108,7 +120,17 @@ export default function HealthDot({ darkMode, theme }) {
     <div ref={popoverRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
       <button
         type="button"
-        onClick={function() { setExpanded(function(v) { return !v; }); check(); }}
+        ref={buttonRef}
+        onClick={function(e) {
+          // Capture the button's screen rect so the popover can be
+          // position:fixed — HeaderBar's overflowX:auto forces overflowY
+          // into a non-visible compositing mode that clipped the old
+          // position:absolute popover.
+          var rect = e.currentTarget.getBoundingClientRect();
+          setAnchorRect({ top: rect.bottom, right: window.innerWidth - rect.right });
+          setExpanded(function(v) { return !v; });
+          check();
+        }}
         title={tooltip}
         aria-label="Backend health status"
         style={{
@@ -126,10 +148,14 @@ export default function HealthDot({ darkMode, theme }) {
       </button>
       <style>{'@keyframes health-dot-pulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(1.15); } }'}</style>
 
-      {expanded && (
+      {expanded && anchorRect && (
         <div style={{
-          position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 1000,
-          minWidth: 240, background: theme ? theme.bgCard : '#fff',
+          position: 'fixed',
+          top: anchorRect.top + 6,
+          right: anchorRect.right,
+          zIndex: 10000,
+          minWidth: 280, maxWidth: 360,
+          background: theme ? theme.bgCard : '#fff',
           color: theme ? theme.text : '#222',
           border: '1px solid ' + (theme ? theme.border : '#ddd'),
           borderRadius: 6, padding: 10,
