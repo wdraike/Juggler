@@ -160,11 +160,33 @@ async function runScheduleAndPersist(userId, _retries, options) {
     .whereNotNull('master_id')
     .whereIn('status', ['done', 'skip', 'cancel'])
     .select('master_id as source_id', 'date', 'scheduled_at');
+  // Cross-cycle spacing history: latest `done` placement date per recurring
+  // master. Only `done` counts — `skip` / `cancel` mean the user opted out
+  // of that slot and shouldn't be treated as the real cadence (else a user
+  // who skips a week would be blocked from re-scheduling earlier than
+  // minGap days later). Pending instances are excluded because they include
+  // the rows we are about to place; within-run placements contribute via
+  // noteMasterPlacement in v2. See docs/RECURRING-SPACING-DESIGN.md.
+  var _p_recurHistory = trx('task_instances').where('user_id', userId)
+    .whereNotNull('master_id')
+    .whereNotNull('date')
+    .where('status', 'done')
+    .select('master_id')
+    .max('date as latest_date')
+    .groupBy('master_id');
   var _p_cfg = loadConfig(userId);
-  var _loaded = await Promise.all([_p_taskRows, _p_terminalDedupRows, _p_cfg]);
+  var _loaded = await Promise.all([_p_taskRows, _p_terminalDedupRows, _p_recurHistory, _p_cfg]);
   var taskRows = _loaded[0];
   var terminalDedupRows = _loaded[1];
-  var _preloadedCfg = _loaded[2];
+  var recurHistoryRows = _loaded[2];
+  var _preloadedCfg = _loaded[3];
+  var recurringHistoryByMaster = {};
+  recurHistoryRows.forEach(function(r) {
+    if (!r.master_id || !r.latest_date) return;
+    var dk = isoToDateKey(r.latest_date);
+    if (dk) recurringHistoryByMaster[r.master_id] = dk;
+  });
+  _preloadedCfg.recurringHistoryByMaster = recurringHistoryByMaster;
   var srcMap = buildSourceMap(taskRows);
   var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
   // Inject terminal dedup data as synthetic entries so expandRecurring skips

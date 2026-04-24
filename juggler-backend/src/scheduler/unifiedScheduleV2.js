@@ -365,6 +365,8 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       allowedDows: allowedDows,
       cycleDays: cycleDays,
       isDayLocked: isDayLocked,
+      isFlexibleTpc: isFlexibleTpc,
+      masterId: t.sourceId || t.master_id || null,
       splitOrdinal: splitOrd,
       splitTotal: splitTot,
       slack: null // filled later
@@ -531,7 +533,7 @@ function emitStepRecord(cfg, phase, item, start, dur, dateKey, locked, dayPlaced
 }
 
 // ── Placement loop ────────────────────────────────────────────
-function tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements, cfg) {
+function tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements, cfg, env) {
   if (!item.anchorDate || item.anchorMin == null) return false;
   var occ = dayOcc[item.anchorDate];
   if (!occ) return false;
@@ -546,8 +548,19 @@ function tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements, cfg) {
   dayPlaced[item.anchorDate].push(entry);
   if (!dayPlacements[item.anchorDate]) dayPlacements[item.anchorDate] = [];
   dayPlacements[item.anchorDate].push(entry);
+  noteMasterPlacement(env, item, item.anchorDate);
   emitStepRecord(cfg, 'V2: Immovable', item, start, item.dur, item.anchorDate, true, dayPlaced, null);
   return true;
+}
+
+// Track the latest placement date per recurring master so the next cycle's
+// flexible tpc instance can enforce minimum spacing. Cross-run seed comes
+// from cfg.recurringHistoryByMaster (via env.lastByMaster); within-run
+// updates happen here on every placement commit.
+function noteMasterPlacement(env, item, dateKey) {
+  if (!env || !env.lastByMaster || !item.isRecurring || !item.masterId) return;
+  var prev = env.lastByMaster[item.masterId];
+  if (!prev || dateKey > prev) env.lastByMaster[item.masterId] = dateKey;
 }
 
 // Absolute "minutes from horizon start" for a placement. Lets us compare
@@ -658,6 +671,26 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   var canExtend = env && !item.isRecurring && !item.deadlineDate && !(opts && opts.ignoreDeadline);
 
   var allowedDows = item.allowedDows;
+  // Cross-cycle spacing guard for flexible tpc recurring. Skip any candidate
+  // day whose date is within `minGap` days of this master's most recent
+  // placement (from DB history seeded at entry, updated as this run commits).
+  // Prevents the "placed Sat 4/25, next week places Fri 5/1 → 6-day gap"
+  // drift, and the worst-case "Thu 4/30, Fri 5/1 → 1-day gap" cluster.
+  // See docs/RECURRING-SPACING-DESIGN.md.
+  var spacingMinKey = null;
+  if (item.isFlexibleTpc && item.masterId && env && env.lastByMaster) {
+    var lastKey = env.lastByMaster[item.masterId];
+    if (lastKey && item.cycleDays > 1) {
+      var minGap = Math.max(1, Math.floor(item.cycleDays * 0.5));
+      var lastDate = parseDate(lastKey);
+      if (lastDate) {
+        var minAllowed = new Date(lastDate);
+        minAllowed.setDate(minAllowed.getDate() + minGap);
+        spacingMinKey = formatDateKey(minAllowed);
+      }
+    }
+  }
+
   var i = earliestIdx;
   while (i <= latestIdx || canExtend) {
     if (i >= dates.length) {
@@ -673,6 +706,8 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
     // recurring — a one-off task with dayReq=weekend should never land on
     // weekdays either.
     if (allowedDows && !allowedDows[d.isoDow]) { i++; continue; }
+    // Cross-cycle spacing filter: reject days before minAllowed.
+    if (spacingMinKey && d.key < spacingMinKey) { i++; continue; }
     var wins = eligibleWindows(item, d.key, dayWindows, dayBlocks, relaxWhen);
     if (wins.length) {
       var occ = dayOcc[d.key] || {};
@@ -786,12 +821,20 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     }
   });
 
+  // Cross-cycle spacing guard for flexible tpc recurring tasks. Seed with
+  // DB history (latest placement date per master across all statuses from
+  // cfg.recurringHistoryByMaster — see docs/RECURRING-SPACING-DESIGN.md)
+  // and update on every recurring placement below so successive cycles in
+  // this run see their predecessor's actual placement.
+  var lastByMaster = Object.assign({}, cfg.recurringHistoryByMaster || {});
+
   // env carries everything findEarliestSlot needs to extend the dates list
   // on the fly for infinite-slack tasks. Declared once so we can thread the
   // same object through tryPlaceQueued in both the main loop and retry pass.
   var env = {
     dayPlaced: dayPlaced,
     dayPlacements: dayPlacements,
+    lastByMaster: lastByMaster,
     timeBlocks: timeBlocks
   };
 
@@ -837,7 +880,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       item.isPinned ||
       (item.isFixedWhen && item.anchorMin != null) ||
       (item.isRecurring && item.isRigid && item.anchorMin != null);
-    if (isImmovable && tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements, cfg)) {
+    if (isImmovable && tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements, cfg, env)) {
       return;
     }
     queue.push(item);
@@ -920,6 +963,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     dayPlaced[slot.dateKey].push(entry);
     dayPlacements[slot.dateKey].push(entry);
     placedById[item.id] = { dateKey: slot.dateKey, start: slot.start, dur: item.dur };
+    noteMasterPlacement(env, item, slot.dateKey);
     emitStepRecord(cfg,
       (item.slack != null && isFinite(item.slack)) ? 'V2: Constrained' : 'V2: Unconstrained',
       item, slot.start, item.dur, slot.dateKey, false, dayPlaced,
@@ -970,6 +1014,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     dayPlaced[slot.dateKey].push(entry);
     dayPlacements[slot.dateKey].push(entry);
     placedById[item.id] = { dateKey: slot.dateKey, start: slot.start, dur: item.dur };
+    noteMasterPlacement(env, item, slot.dateKey);
     emitStepRecord(cfg, 'V2: Retry', item, slot.start, item.dur, slot.dateKey, false, dayPlaced,
       { overdue: placement.overdue, relaxed: placement.relaxed });
   });
