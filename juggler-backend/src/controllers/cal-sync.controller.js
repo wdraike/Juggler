@@ -14,7 +14,7 @@ var tasksWrite = require('../lib/tasks-write');
 var { getConnectedAdapters } = require('../lib/cal-adapters');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 var { rowToTask } = require('./task.controller');
-var { localToUtc } = require('../scheduler/dateHelpers');
+var { localToUtc, utcToLocal } = require('../scheduler/dateHelpers');
 var { taskHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE } = require('./cal-sync-helpers');
 var sseEmitter = require('../lib/sse-emitter');
 var { acquireLock, releaseLock, refreshLock } = require('../lib/sync-lock');
@@ -219,6 +219,23 @@ async function sync(req, res) {
       t._marker = r.marker;
       t.marker = !!r.marker;
       t.user_id = r.user_id; // needed by Apple adapter's createEvent
+      // rowToTask only derives local date/time for user-anchored tasks
+      // (date_pinned / recurring / generated / marker / when contains 'fixed')
+      // so the scheduler doesn't re-bias off stale auto-placements. Sync is
+      // a different consumer: it needs the local date/time for buildEventBody
+      // and for the push-filter (!time && when !== 'allday' → skip). Without
+      // this, flexible tasks (e.g. one-off with when='morning,afternoon,…')
+      // get skipped from every sync and never land on the calendar. Localize
+      // from scheduled_at here for display purposes only — this does not
+      // write back to the DB and does not affect the next scheduler run.
+      if (r.scheduled_at && (!t.date || !t.time)) {
+        var local = utcToLocal(r.scheduled_at, tz);
+        if (local) {
+          if (!t.date) t.date = local.date;
+          if (!t.time) t.time = local.time;
+          if (!t.day) t.day = local.day;
+        }
+      }
       return t;
     });
 
