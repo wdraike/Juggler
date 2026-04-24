@@ -556,7 +556,15 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       when: when,  // preserved as-is: single tag = time-window mode, multi = time-blocks mode
       dayReq: recurring ? 'any' : dayReq,  // recurringTasks derive days from recurrence, not dayReq
       recurring, rigid: recurring && hasPreferredTime && time ? false : rigid,
-      timeFlex: recurring && hasPreferredTime && time ? (timeFlex || 60) : (recurring && !rigid ? timeFlex : undefined),
+      // timeFlex / preferredTimeMins: when a recurring task is in Time Blocks
+      // mode (hasPreferredTime=false), send `null` — not undefined — so the
+      // backend clears the column. `undefined` gets JSON-stripped from the
+      // PUT body; the controller's `!== undefined` check then treats it as
+      // "no change" and the row retains its stale Time Window values. Same
+      // failure mode as the `split || undefined` bug flagged above.
+      timeFlex: recurring && hasPreferredTime && time
+        ? (timeFlex || 60)
+        : (recurring ? null : undefined),
       // Always send as an explicit boolean. The previous `split || undefined`
       // collapsed `false` to `undefined`, which JSON-strips the key, which
       // the backend reads as "no change" — so turning split OFF never stuck.
@@ -585,11 +593,16 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       recurStart: recurring ? (recurStart || null) : null,
       recurEnd: recurring ? (recurEnd || null) : null,
       preferredTime: recurring ? hasPreferredTime : undefined,
-      // preferredTimeMins: minutes since midnight from 24h time input (no tz conversion)
-      preferredTimeMins: recurring && hasPreferredTime && time ? (function() {
-        var parts = time.split(':');
-        return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || '0', 10);
-      })() : undefined
+      // preferredTimeMins: minutes since midnight from 24h time input (no tz
+      // conversion). `null` — not undefined — when switching a recurring task
+      // out of Time Window mode so the backend clears preferred_time_mins.
+      // See the timeFlex comment above for the reasoning.
+      preferredTimeMins: recurring && hasPreferredTime && time
+        ? (function() {
+          var parts = time.split(':');
+          return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || '0', 10);
+        })()
+        : (recurring ? null : undefined)
     };
   }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, hasPreferredTime]);
 
@@ -621,7 +634,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (recurring !== snap.recurring) changed.recurring = all.recurring;
     if (rigid !== snap.rigid) changed.rigid = all.rigid;
     if (parseInt(dur) !== snap.dur) changed.dur = all.dur;
-    if (timeFlex !== snap.timeFlex) changed.timeFlex = all.timeFlex;
+    // Compare the derived `all.timeFlex` (not the raw state) so that switching
+    // into Time Blocks mode — which should blank timeFlex — is detected even
+    // if the user didn't touch the flex input directly.
+    if (all.timeFlex !== snap.timeFlex) changed.timeFlex = all.timeFlex;
     if (all.preferredTimeMins !== snap.preferredTimeMins) changed.preferredTimeMins = all.preferredTimeMins;
     if (!!split !== snap.split) changed.split = all.split;
     if (parseInt(splitMin) !== snap.splitMin) changed.splitMin = all.splitMin;
