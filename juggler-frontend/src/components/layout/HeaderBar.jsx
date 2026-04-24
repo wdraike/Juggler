@@ -13,6 +13,7 @@ import { getTimezoneAbbr } from '../../utils/timezone';
 import PlanUsagePanel from '../billing/PlanUsagePanel';
 import FeedbackButton from '../feedback/FeedbackButton';
 import FeedbackDialog from '../feedback/FeedbackDialog';
+import HealthDot from './HealthDot';
 
 import { services, homeUrl } from '../../proxy-config';
 var BILLING_URL = services.billing.frontend;
@@ -147,6 +148,9 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
       })()}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 'inherit', flexShrink: 0, ...(useOverflow ? { marginLeft: 'auto' } : {}) }}>
+        {/* Backend health dot (#35). Polls /api/health/detailed every 60s
+            and shows a colored indicator + popover with per-service status. */}
+        <HealthDot darkMode={darkMode} theme={theme} />
         {saving && <span style={{ fontSize: 11, color: theme.textMuted }}>Saving...</span>}
         {schedulerRunning && (
           <span title="Scheduler is running" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: theme.textMuted }}>

@@ -142,7 +142,12 @@ app.get('/api/events', (req, res, next) => {
 });
 
 // Routes
+// /health stays un-prefixed for load-balancer / infra probes.
+// /api/health is the same router re-mounted so the authenticated frontend
+// apiClient (baseURL=/api) can reach /api/health/detailed without bypassing
+// its bearer-token interceptor.
 app.use('/health', healthRoutes);
+app.use('/api/health', healthRoutes);
 app.use('/api/ai', aiLimiter, aiRoutes);
 app.use('/api/data/import', bodyParser.json({ limit: '2mb' }));
 app.use('/api', apiLimiter);
