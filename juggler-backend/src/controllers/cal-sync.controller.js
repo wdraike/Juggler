@@ -227,6 +227,17 @@ async function sync(req, res) {
       tasksById[allTasks[ti].id] = allTasks[ti];
     }
 
+    // Secondary index: (masterId|date) → instance task. Used to self-heal
+    // ledger rows whose `task_id` points to an occurrence_ordinal that the
+    // scheduler's reconcile has since renumbered. Without this, every renamed
+    // instance triggers a delete-and-recreate cycle on GCal (see issue #33 —
+    // Apr 24 reconnect surfaced 222 orphan events from exactly this drift).
+    var tasksByMasterDate = {};
+    for (var tj = 0; tj < allTasks.length; tj++) {
+      var t2 = allTasks[tj];
+      if (t2.sourceId && t2.date) tasksByMasterDate[t2.sourceId + '|' + t2.date] = t2;
+    }
+
     // Resolve text for recurring/generated instances that inherit from templates.
     // Instances often have empty text — the frontend resolves it at render time
     // from the source template, but sync needs it for the calendar event title.
@@ -355,6 +366,36 @@ async function sync(req, res) {
       for (var pli = 0; pli < pLedger.length; pli++) {
         var ledger = pLedger[pli];
         var task = ledger.task_id ? tasksById[ledger.task_id] : null;
+
+        // Self-heal stale recurring-instance IDs. Reconcile re-numbers
+        // occurrence_ordinal over time; ledger task_ids end up pointing to
+        // instances that were replaced by new rows for the same date. Before
+        // taking the `!task && event` branch below (which deletes the GCal
+        // event + marks the ledger deleted_local, followed by a fresh push
+        // that creates a duplicate event), rewrite the ledger to the current
+        // live instance when we can find one by (master, date).
+        //
+        // Scope: recurring instance task_ids of the form `<masterId>-<ordinal>`.
+        // The trailing `-\d+` captures numeric ordinals for both UUID masters
+        // (dash-separated v7 UUIDs) and legacy short-id masters like
+        // `t1775853066082nuxt-1157`. Split chunks use `_part<N>` (underscore)
+        // so they're not matched by this regex — they fall through to the
+        // original branch. event_start is an ISO datetime from the provider;
+        // the leading YYYY-MM-DD is compared against the instance's `date`.
+        if (!task && ledger.task_id && ledger.event_start) {
+          var masterMatch = ledger.task_id.match(/^(.+)-\d+$/);
+          var dateMatch = ledger.event_start.match(/^(\d{4}-\d{2}-\d{2})/);
+          if (masterMatch && dateMatch) {
+            var healKey = masterMatch[1] + '|' + dateMatch[1];
+            var healed = tasksByMasterDate[healKey];
+            if (healed) {
+              ledgerUpdates.push({ id: ledger.id, fields: { task_id: healed.id } });
+              ledger.task_id = healed.id; // keep in-memory consistent for the rest of this iteration
+              task = healed;
+            }
+          }
+        }
+
         var event = ledger.provider_event_id ? pEventsById[ledger.provider_event_id] : null;
 
         if (ledger.task_id) processedTaskIds.add(ledger.task_id);

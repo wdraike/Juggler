@@ -206,10 +206,23 @@ function buildEventBody(task, year, tz, opts) {
   var summaryText = isDone ? '✓ ' + task.text : task.text;
 
   if (isAllDay) {
-    var dateParts = (task.date || '').split('/');
-    var month = parseInt(dateParts[0], 10);
-    var day = parseInt(dateParts[1], 10);
-    var y = year || new Date().getFullYear();
+    // task.date is now ISO YYYY-MM-DD post-migration; legacy rows may still be
+    // M/D. Handle both — the old split('/') parse silently produced
+    // "2026-2026-NaN" for ISO strings and GCal returned 400 Bad Request.
+    var isoMatch = (task.date || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    var mdMatch = !isoMatch && (task.date || '').match(/^(\d{1,2})\/(\d{1,2})$/);
+    var y, month, day;
+    if (isoMatch) {
+      y = parseInt(isoMatch[1], 10);
+      month = parseInt(isoMatch[2], 10);
+      day = parseInt(isoMatch[3], 10);
+    } else if (mdMatch) {
+      month = parseInt(mdMatch[1], 10);
+      day = parseInt(mdMatch[2], 10);
+      y = year || new Date().getFullYear();
+    } else {
+      throw new Error('buildEventBody: unparseable task.date "' + task.date + '" for allday event');
+    }
     var startDate = y + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
     var endObj = new Date(y, month - 1, day + 1);
     var endDate = endObj.getFullYear() + '-' + String(endObj.getMonth() + 1).padStart(2, '0') + '-' + String(endObj.getDate()).padStart(2, '0');
