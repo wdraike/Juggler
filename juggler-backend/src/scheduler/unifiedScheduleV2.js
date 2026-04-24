@@ -46,6 +46,7 @@ var expandRecurring = expandRecurringMod.expandRecurring;
 
 var locationHelpers = require('./locationHelpers');
 var canTaskRunAtMin = locationHelpers.canTaskRunAtMin;
+var resolveLocationId = locationHelpers.resolveLocationId;
 
 var DAY_START = GRID_START * 60;
 var DAY_END = GRID_END * 60 + 59;
@@ -468,8 +469,69 @@ function overlapWithEligibleWindows(item, slotDateKey, slotStart, slotDur, dayWi
   return total;
 }
 
+// ── Stepper recorder ──────────────────────────────────────────
+// When cfg._stepRecorder is an Array, each successful placement appends a
+// per-placement snapshot mirroring v1's emitStepRecord shape. Consumed by
+// the admin Stepper UI (schedulerSession.js). Zero-cost when disabled.
+// Phase strings use the v2 vocabulary:
+//   'V2: Immovable'    — pinned/fixed/marker/rigid-recurring (tryPlaceAtTime)
+//   'V2: Constrained'  — slack-sorted main loop, item has finite slack
+//   'V2: Unconstrained'— slack-sorted main loop, item has Infinity slack
+//   'V2: Retry'        — dep-deferred items placed in the retry pass
+// Placement flags set on the returned entry (overdue/relaxed) are copied
+// onto the step so the UI can annotate "overdue" or "flex-relaxed" pills.
+function emitStepRecord(cfg, phase, item, start, dur, dateKey, locked, dayPlaced, extras) {
+  var rec = cfg && cfg._stepRecorder;
+  if (!Array.isArray(rec)) return;
+  var t = item.task;
+  // Snapshot cumulative placements across all days so the UI can paint the
+  // calendar state "at this step".
+  var daySnap = {};
+  Object.keys(dayPlaced).forEach(function(ddk) {
+    daySnap[ddk] = (dayPlaced[ddk] || []).map(function(p) {
+      return {
+        taskId: p.task ? p.task.id : null,
+        taskText: p.task ? p.task.text : null,
+        start: p.start, dur: p.dur,
+        locked: !!p.locked, marker: !!(p.task && p.task.marker)
+      };
+    });
+  });
+  var locAtStart = null;
+  try { locAtStart = resolveLocationId(dateKey, start, cfg, null); } catch (e) { /* ignore */ }
+  var slackVal = (item.slack != null && isFinite(item.slack)) ? Math.round(item.slack) : null;
+  rec.push({
+    stepIndex: rec.length,
+    phase: phase,
+    taskId: t.id,
+    taskText: t.text || '',
+    project: t.project || null,
+    pri: t.pri || null,
+    recurring: !!t.recurring,
+    when: t.when || null,
+    deadline: t.deadline || null,
+    preferredTimeMins: t.preferredTimeMins != null ? t.preferredTimeMins : null,
+    timeFlex: t.timeFlex != null ? t.timeFlex : null,
+    rigid: !!t.rigid,
+    travelBefore: item.travelBefore || 0,
+    travelAfter: item.travelAfter || 0,
+    locationRequirement: t.location || null,
+    toolRequirement: t.tools || null,
+    locationAtPlacement: locAtStart,
+    flexWindow: (item.isWindowMode && item.windowLo != null)
+      ? { start: item.windowLo, end: item.windowHi } : null,
+    placement: { dateKey: dateKey, start: start, dur: dur, locked: !!locked },
+    splitOrdinal: item.splitOrdinal != null ? item.splitOrdinal : null,
+    splitTotal: item.splitTotal != null ? item.splitTotal : null,
+    orderingSlack: slackVal,
+    overdue: !!(extras && extras.overdue),
+    whenRelaxed: !!(extras && extras.relaxed),
+    dayPlacementsSnapshot: daySnap
+  });
+}
+
 // ── Placement loop ────────────────────────────────────────────
-function tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements) {
+function tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements, cfg) {
   if (!item.anchorDate || item.anchorMin == null) return false;
   var occ = dayOcc[item.anchorDate];
   if (!occ) return false;
@@ -484,6 +546,7 @@ function tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements) {
   dayPlaced[item.anchorDate].push(entry);
   if (!dayPlacements[item.anchorDate]) dayPlacements[item.anchorDate] = [];
   dayPlacements[item.anchorDate].push(entry);
+  emitStepRecord(cfg, 'V2: Immovable', item, start, item.dur, item.anchorDate, true, dayPlaced, null);
   return true;
 }
 
@@ -774,7 +837,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       item.isPinned ||
       (item.isFixedWhen && item.anchorMin != null) ||
       (item.isRecurring && item.isRigid && item.anchorMin != null);
-    if (isImmovable && tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements)) {
+    if (isImmovable && tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements, cfg)) {
       return;
     }
     queue.push(item);
@@ -857,6 +920,10 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     dayPlaced[slot.dateKey].push(entry);
     dayPlacements[slot.dateKey].push(entry);
     placedById[item.id] = { dateKey: slot.dateKey, start: slot.start, dur: item.dur };
+    emitStepRecord(cfg,
+      (item.slack != null && isFinite(item.slack)) ? 'V2: Constrained' : 'V2: Unconstrained',
+      item, slot.start, item.dur, slot.dateKey, false, dayPlaced,
+      { overdue: placement.overdue, relaxed: placement.relaxed });
 
     // Recompute slack for affected remaining items. An item is affected
     // only if the committed slot's date falls within its eligible range
@@ -903,6 +970,8 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     dayPlaced[slot.dateKey].push(entry);
     dayPlacements[slot.dateKey].push(entry);
     placedById[item.id] = { dateKey: slot.dateKey, start: slot.start, dur: item.dur };
+    emitStepRecord(cfg, 'V2: Retry', item, slot.start, item.dur, slot.dateKey, false, dayPlaced,
+      { overdue: placement.overdue, relaxed: placement.relaxed });
   });
 
   // Convert deferred items back to task-object shape for the output contract.

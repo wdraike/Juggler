@@ -18,22 +18,18 @@ var PX_PER_MIN = 1.5;
 var COL_WIDTH = 110;
 
 var PHASE_LABELS = {
-  'Phase 0: Fixed items': 'Phase 0 — Fixed',
-  'Phase 0: + Rigid recurringTasks': 'Phase 0 — Rigid recurring',
-  'Phase 1: Recurring tasks': 'Phase 1 — Recurring',
-  'Phase 2: Slack-based forward placement': 'Phase 2 — Constrained',
-  'Phase 3: Unconstrained fill': 'Phase 3 — Backlog',
-  'Phase 4: Recurring rescue': 'Phase 4 — Rescue',
+  'V2: Immovable': 'Immovable',
+  'V2: Constrained': 'Constrained',
+  'V2: Unconstrained': 'Backlog',
+  'V2: Retry': 'Retry',
   'Final': 'Final'
 };
 
 var PHASE_COLORS = {
-  'Phase 0: Fixed items': '#E53935',
-  'Phase 0: + Rigid recurringTasks': '#EF6C00',
-  'Phase 1: Recurring tasks': '#F9A825',
-  'Phase 2: Slack-based forward placement': '#1E88E5',
-  'Phase 3: Unconstrained fill': '#43A047',
-  'Phase 4: Recurring rescue': '#8E24AA',
+  'V2: Immovable': '#E53935',
+  'V2: Constrained': '#1E88E5',
+  'V2: Unconstrained': '#43A047',
+  'V2: Retry': '#8E24AA',
   'Final': '#78909C'
 };
 
@@ -341,22 +337,20 @@ function QueuePanel({ queue, stepIndex, onJump }) {
 
 function phaseRationale(phase, step, task) {
   var bits = [];
-  if (phase === 'Phase 0: Fixed items') {
-    bits.push('Fixed/pinned task — placed at its locked time before any other scheduling.');
-  } else if (phase === 'Phase 0: + Rigid recurringTasks') {
-    bits.push('Rigid recurring task — anchored at its preferred time; ignores flexibility.');
-  } else if (phase === 'Phase 1: Recurring tasks') {
-    bits.push('Non-rigid recurring instance — slack-sorted within its cycle window.');
-  } else if (phase === 'Phase 2: Slack-based forward placement') {
+  if (phase === 'V2: Immovable') {
+    bits.push('Immovable task — pinned / fixed-when / marker / rigid recurring. Placed at its anchor time before any slack-sorted work.');
+  } else if (phase === 'V2: Constrained') {
     bits.push('Constrained task (deadline or chain). Sort order: slack asc, priority asc, duration desc.');
     if (step.orderingSlack != null) bits.push('Slack at sort time: ' + slackLabel(step.orderingSlack) + '.');
-  } else if (phase === 'Phase 3: Unconstrained fill') {
-    bits.push('Backlog task — no deadline. Filled into the earliest free slot that matches when/where.');
-  } else if (phase === 'Phase 4: Recurring rescue') {
-    bits.push('Recurring rescue pass — bumping lower-priority non-recurring tasks to make same-day room.');
+  } else if (phase === 'V2: Unconstrained') {
+    bits.push('Unconstrained backlog task — no deadline. Placed into the earliest free slot that matches when/where.');
+  } else if (phase === 'V2: Retry') {
+    bits.push('Retry pass — this task was deferred in the first pass because a dependency had not yet been placed; now those deps are settled so it can commit.');
   } else {
     bits.push('Placement recorded.');
   }
+  if (step.overdue) bits.push('Placed as overdue (deadline missed — slack < 0).');
+  if (step.whenRelaxed) bits.push('Placed with when-window relaxed (flex_when fallback).');
   if (task.when) bits.push('When window: ' + task.when + '.');
   if (task.split) bits.push('Task is split into ' + task.splitMin + '-min chunks.');
   return bits.join(' ');

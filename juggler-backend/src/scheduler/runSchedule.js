@@ -9,54 +9,16 @@
 var db = require('../db');
 var tasksWrite = require('../lib/tasks-write');
 var { computeChunks } = require('../lib/reconcile-splits');
-var unifiedSchedule = require('./unifiedSchedule');
 var unifiedScheduleV2 = require('./unifiedScheduleV2');
-var scheduleDiff = require('./scheduleDiff');
 var constants = require('./constants');
 
-// Scheduler version selection.
-//   SCHEDULER_V2=true        → v2 drives the DB + SSE (primary).
-//                              v1 runs as shadow when SCHEDULER_V2_SHADOW=true.
-//   default                  → v1 primary (legacy behavior).
-//                              v2 runs as shadow when SCHEDULER_V2_SHADOW=true.
-// Shadow exceptions are swallowed so they can never break the primary path.
-function runSchedulerWithShadow(allTasks, statuses, todayKey, nowMins, cfg, userId, context) {
-  var v2Primary = process.env.SCHEDULER_V2 === 'true';
-  var runShadow = process.env.SCHEDULER_V2_SHADOW === 'true';
-
-  if (v2Primary) {
-    var result = unifiedScheduleV2(allTasks, statuses, todayKey, nowMins, cfg);
-    if (runShadow) {
-      var shadowStart = Date.now();
-      var v1Result = null, v1Error = null;
-      try { v1Result = unifiedSchedule(allTasks, statuses, todayKey, nowMins, cfg); }
-      catch (e) { v1Error = e && e.message || String(e); }
-      // diffSchedules always takes (v1, v2). Label primary in meta.
-      var diff = scheduleDiff.diffSchedules(v1Result, result, {
-        userId: userId, primary: 'v2', context: context,
-        v1Ms: Date.now() - shadowStart, error: v1Error
-      });
-      scheduleDiff.logDiff(diff);
-    }
-    return result;
-  }
-
-  // v1 primary (default).
-  var result = unifiedSchedule(allTasks, statuses, todayKey, nowMins, cfg);
-  if (runShadow) {
-    var shadowStart2 = Date.now();
-    var v2Result = null, v2Error = null;
-    try { v2Result = unifiedScheduleV2(allTasks, statuses, todayKey, nowMins, cfg); }
-    catch (e) { v2Error = e && e.message || String(e); }
-    var diff2 = scheduleDiff.diffSchedules(result, v2Result, {
-      userId: userId, primary: 'v1', context: context,
-      v2Ms: Date.now() - shadowStart2,
-      v2Stub: v2Result && v2Result._v2Stub,
-      error: v2Error
-    });
-    scheduleDiff.logDiff(diff2);
-  }
-  return result;
+// v2 is the only scheduler. Kept as a thin wrapper so call sites don't have
+// to care about whether a shadow / diff layer exists (makes re-adding one
+// later for another migration trivial). The `userId` / `context` args are
+// accepted for signature compatibility with the historical shadow wrapper;
+// they're unused here.
+function runSchedulerWithShadow(allTasks, statuses, todayKey, nowMins, cfg /*, userId, context */) {
+  return unifiedScheduleV2(allTasks, statuses, todayKey, nowMins, cfg);
 }
 var DEFAULT_TIME_BLOCKS = constants.DEFAULT_TIME_BLOCKS;
 var DEFAULT_TOOL_MATRIX = constants.DEFAULT_TOOL_MATRIX;

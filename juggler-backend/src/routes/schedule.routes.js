@@ -62,7 +62,7 @@ router.get('/placements', authenticateJWT, async function(req, res) {
  */
 router.post('/debug', authenticateJWT, authenticateAdmin, debugLimiter, async function(req, res) {
   try {
-    var unifiedSchedule = require('../scheduler/unifiedSchedule');
+    var unifiedSchedule = require('../scheduler/unifiedScheduleV2');
     var db = require('../db');
     var TIMEZONE = req.headers['x-timezone'] || 'America/New_York';
     var userId = req.user.id;

@@ -1,10 +1,13 @@
 /**
  * schedulerSession — in-memory session store for the admin Stepper UI.
  *
- * A session pre-runs unifiedSchedule() once with cfg._stepRecorder enabled,
- * producing a full snapshots[] array (one entry per recordPlace call). The
+ * A session pre-runs unifiedScheduleV2() once with cfg._stepRecorder enabled,
+ * producing a full snapshots[] array (one entry per placement commit). The
  * admin UI then walks forward/backward through snapshots indexically; the
- * server doesn't re-run the scheduler per step.
+ * server doesn't re-run the scheduler per step. V2 emits steps tagged with
+ * phases 'V2: Immovable' / 'V2: Constrained' / 'V2: Unconstrained' /
+ * 'V2: Retry' — corresponding to the immovable pass, the slack-sorted main
+ * loop (finite vs Infinity slack), and the dep-deferred retry pass.
  *
  * Dry-run only: sessions never call runScheduleAndPersist or any
  * tasksWrite.*Task function. The scheduler output is never persisted from
@@ -48,7 +51,7 @@ if (sweepTimer.unref) sweepTimer.unref();
 async function startSession(userId, options) {
   var opts = options || {};
   var db = require('../db');
-  var unifiedSchedule = require('./unifiedSchedule');
+  var unifiedSchedule = require('./unifiedScheduleV2');
   var constants = require('./constants');
   var rowToTask = require('../controllers/task.controller').rowToTask;
 
