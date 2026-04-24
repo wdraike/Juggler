@@ -416,10 +416,23 @@ export default function SchedulerStepper() {
   useEffect(function() {
     function onKey(e) {
       if (!session) return;
-      if (e.key === 'ArrowRight') setStepIndex(function(i) { return Math.min(i + 1, session.totalSteps - 1); });
-      else if (e.key === 'ArrowLeft') setStepIndex(function(i) { return Math.max(i - 1, 0); });
-      else if (e.key === 'End') setStepIndex(session.totalSteps - 1);
-      else if (e.key === 'Home') setStepIndex(0);
+      // Ignore when typing in an input / textarea / contenteditable so
+      // arrow keys in text fields don't jump the stepper.
+      var t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      // Up/Down mirror Left/Right so the queue sidebar reads naturally:
+      // "next step down the list" = ArrowDown = advance.
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        setStepIndex(function(i) { return Math.min(i + 1, session.totalSteps - 1); });
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        setStepIndex(function(i) { return Math.max(i - 1, 0); });
+      } else if (e.key === 'End') {
+        setStepIndex(session.totalSteps - 1);
+      } else if (e.key === 'Home') {
+        setStepIndex(0);
+      }
     }
     window.addEventListener('keydown', onKey);
     return function() { window.removeEventListener('keydown', onKey); };
@@ -496,13 +509,13 @@ export default function SchedulerStepper() {
         <a href="/" style={{ color: '#667', fontSize: 12, textDecoration: 'none' }}>&larr; Back</a>
         <span style={{ fontSize: 14, fontWeight: 600 }}>Scheduler Stepper</span>
         <div style={{ flex: 1 }} />
-        <button onClick={function() { setStepIndex(0); }} disabled={!canBack} style={btnStyle(canBack)}>⟲ First</button>
-        <button onClick={function() { setStepIndex(Math.max(0, stepIndex - 1)); }} disabled={!canBack} style={btnStyle(canBack)}>◀ Prev</button>
+        <button onClick={function() { setStepIndex(0); }} disabled={!canBack} style={btnStyle(canBack)} title="Home">⟲ First</button>
+        <button onClick={function() { setStepIndex(Math.max(0, stepIndex - 1)); }} disabled={!canBack} style={btnStyle(canBack)} title="← or ↑">◀ Prev</button>
         <span style={{ fontSize: 12, color: '#aab', minWidth: 90, textAlign: 'center' }}>
           Step {stepIndex + 1} / {total}
         </span>
-        <button onClick={function() { setStepIndex(Math.min(total - 1, stepIndex + 1)); }} disabled={!canFwd} style={btnStyle(canFwd)}>Next ▶</button>
-        <button onClick={function() { setStepIndex(total - 1); }} disabled={!canFwd} style={btnStyle(canFwd)}>⏭ End</button>
+        <button onClick={function() { setStepIndex(Math.min(total - 1, stepIndex + 1)); }} disabled={!canFwd} style={btnStyle(canFwd)} title="→ or ↓">Next ▶</button>
+        <button onClick={function() { setStepIndex(total - 1); }} disabled={!canFwd} style={btnStyle(canFwd)} title="End">⏭ End</button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <input
             type="number"

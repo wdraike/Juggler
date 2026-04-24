@@ -292,7 +292,7 @@ function MatrixTab({ config, theme }) {
   );
 }
 
-function ProjectRow({ p, config, theme, onRename, taskCount }) {
+function ProjectRow({ p, config, theme, onRename, taskCount, canReorder, isFirst, isLast, onMoveUp, onMoveDown }) {
   var [editing, setEditing] = useState(false);
   var [editName, setEditName] = useState(p.name);
   var [editColor, setEditColor] = useState(p.color || '#2E4A7A');
@@ -327,8 +327,21 @@ function ProjectRow({ p, config, theme, onRename, taskCount }) {
     );
   }
 
+  var arrowBtn = {
+    border: 'none', background: 'transparent', cursor: 'pointer',
+    fontSize: 11, lineHeight: 1, padding: '2px 4px',
+    color: theme.textMuted
+  };
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13 }}>
+      {canReorder && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0, marginRight: -4 }}>
+          <button onClick={onMoveUp} disabled={isFirst} title="Move up"
+            style={Object.assign({}, arrowBtn, { opacity: isFirst ? 0.25 : 1, cursor: isFirst ? 'default' : 'pointer' })}>{'▲'}</button>
+          <button onClick={onMoveDown} disabled={isLast} title="Move down"
+            style={Object.assign({}, arrowBtn, { opacity: isLast ? 0.25 : 1, cursor: isLast ? 'default' : 'pointer' })}>{'▼'}</button>
+        </div>
+      )}
       {p.color && <div style={{ width: 12, height: 12, borderRadius: 3, background: p.color }} />}
       <span style={{ color: theme.text, flex: 1 }}>{p.name}</span>
       <span style={{ fontSize: 11, color: theme.textMuted, minWidth: 28, textAlign: 'right' }}>{taskCount}</span>
@@ -349,7 +362,10 @@ function ProjectRow({ p, config, theme, onRename, taskCount }) {
 function ProjectsTab({ config, theme, allProjectNames, allTasks, onRenameProject }) {
   var [newName, setNewName] = useState('');
   var [newColor, setNewColor] = useState('#2E4A7A');
-  var [sortBy, setSortBy] = useState('name'); // name, tasks, color
+  // 'custom' respects the user-chosen sort_order persisted on the server and
+  // is the default — matches #6's "implement sort order for projects" ask.
+  // Switching to name/tasks/color is still handy for browsing large lists.
+  var [sortBy, setSortBy] = useState('custom');
   var [sortDir, setSortDir] = useState('asc');
   var [filter, setFilter] = useState('');
 
@@ -375,8 +391,15 @@ function ProjectsTab({ config, theme, allProjectNames, allTasks, onRenameProject
     return !filter || n.toLowerCase().includes(filterLower);
   });
 
-  // Sort managed projects
+  // Sort managed projects. 'custom' preserves the server's sort_order
+  // (DB already returned projects in sort_order) and ignores sortDir.
   var sortedProjects = filteredProjects.slice().sort(function(a, b) {
+    if (sortBy === 'custom') {
+      var sa = a.sortOrder != null ? a.sortOrder : 0;
+      var sb = b.sortOrder != null ? b.sortOrder : 0;
+      if (sa !== sb) return sa - sb;
+      return a.name.localeCompare(b.name); // stable tie-break
+    }
     var dir = sortDir === 'asc' ? 1 : -1;
     if (sortBy === 'tasks') {
       return ((taskCounts[a.name] || 0) - (taskCounts[b.name] || 0)) * dir;
@@ -386,6 +409,37 @@ function ProjectsTab({ config, theme, allProjectNames, allTasks, onRenameProject
     }
     return a.name.localeCompare(b.name) * dir;
   });
+
+  // Move a project up or down in custom-sort mode. Persists to the server
+  // via a single reorder call and optimistically updates local state.
+  async function moveProject(projectId, delta) {
+    if (!filter && sortBy === 'custom') {
+      var full = config.projects.slice().sort(function(a, b) {
+        var sa = a.sortOrder != null ? a.sortOrder : 0;
+        var sb = b.sortOrder != null ? b.sortOrder : 0;
+        if (sa !== sb) return sa - sb;
+        return a.name.localeCompare(b.name);
+      });
+      var idx = full.findIndex(function(p) { return p.id === projectId; });
+      if (idx < 0) return;
+      var newIdx = idx + delta;
+      if (newIdx < 0 || newIdx >= full.length) return;
+      var reordered = full.slice();
+      var moved = reordered.splice(idx, 1)[0];
+      reordered.splice(newIdx, 0, moved);
+      // Re-index sort_order locally so the list redraws immediately.
+      var withOrder = reordered.map(function(p, i) { return Object.assign({}, p, { sortOrder: i }); });
+      config.setProjects(withOrder);
+      try {
+        var { default: apiClient } = await import('../../services/apiClient');
+        await apiClient.put('/projects/reorder', { ids: withOrder.map(function(p) { return p.id; }) });
+      } catch (e) {
+        console.error('reorder failed:', e);
+        // Revert on failure by re-sorting to the server's view (which we just
+        // invalidated locally, so the next config refresh will correct this).
+      }
+    }
+  }
 
   // Sort task-only names
   var sortedTaskOnly = filteredTaskOnly.slice().sort(function(a, b) {
@@ -431,13 +485,24 @@ function ProjectsTab({ config, theme, allProjectNames, allTasks, onRenameProject
           style={{ flex: 1, padding: '4px 6px', border: '1px solid ' + theme.inputBorder, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
         {filter && <button onClick={function() { setFilter(''); }} style={{ border: 'none', background: 'transparent', color: theme.textMuted, cursor: 'pointer', fontSize: 14 }}>&times;</button>}
         <span style={{ fontSize: 11, color: theme.textMuted }}>Sort:</span>
+        <button onClick={function() { setSortBy('custom'); }} style={btnStyle(sortBy === 'custom')} title="Use the order you've arranged with the up/down arrows">Custom</button>
         <button onClick={function() { toggleSort('name'); }} style={btnStyle(sortBy === 'name')}>Name{sortBy === 'name' ? sortArrow : ''}</button>
         <button onClick={function() { toggleSort('tasks'); }} style={btnStyle(sortBy === 'tasks')}>Tasks{sortBy === 'tasks' ? sortArrow : ''}</button>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
-        {sortedProjects.map(function(p) {
-          return <ProjectRow key={p.id || p.name} p={p} config={config} theme={theme} onRename={onRenameProject} taskCount={taskCounts[p.name] || 0} />;
+        {sortedProjects.map(function(p, i) {
+          // Show reorder arrows only when the user is viewing the custom order
+          // (otherwise moving by arrows wouldn't visibly track) and not
+          // filtering (a filtered view hides some rows — moving within it
+          // would be confusing).
+          var canReorder = sortBy === 'custom' && !filter;
+          return <ProjectRow key={p.id || p.name} p={p} config={config} theme={theme} onRename={onRenameProject} taskCount={taskCounts[p.name] || 0}
+            canReorder={canReorder}
+            isFirst={i === 0}
+            isLast={i === sortedProjects.length - 1}
+            onMoveUp={function() { moveProject(p.id, -1); }}
+            onMoveDown={function() { moveProject(p.id, 1); }} />;
         })}
         {sortedTaskOnly.map(function(name) {
           return (

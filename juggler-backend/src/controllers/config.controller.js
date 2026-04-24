@@ -33,7 +33,7 @@ async function getAllConfig(req, res) {
     const result = {
       locations: locations.map(l => ({ id: l.location_id, name: l.name, icon: l.icon })),
       tools: tools.map(t => ({ id: t.tool_id, name: t.name, icon: t.icon })),
-      projects: projects.map(p => ({ id: p.id, name: p.name, color: p.color, icon: p.icon })),
+      projects: projects.map(p => ({ id: p.id, name: p.name, color: p.color, icon: p.icon, sortOrder: p.sort_order })),
       toolMatrix: config.tool_matrix || null,
       timeBlocks: config.time_blocks || null,
       locSchedules: config.loc_schedules || null,
@@ -158,10 +158,45 @@ async function updateConfig(req, res) {
 async function getProjects(req, res) {
   try {
     const rows = await db('projects').where('user_id', req.user.id).orderBy('sort_order');
-    res.json({ projects: rows.map(p => ({ id: p.id, name: p.name, color: p.color, icon: p.icon })) });
+    res.json({ projects: rows.map(p => ({ id: p.id, name: p.name, color: p.color, icon: p.icon, sortOrder: p.sort_order })) });
   } catch (error) {
     console.error('Get projects error:', error);
     res.status(500).json({ error: 'Failed to fetch projects' });
+  }
+}
+
+/**
+ * PUT /api/projects/reorder — persist user-chosen project order.
+ * Body: { ids: [1, 3, 2, ...] } where the array order defines the new sort_order
+ * (index 0 = first = sort_order 0). Rows not listed are left alone so the UI
+ * can reorder a subset if needed; fresh creates slot in via max(sort_order)+1.
+ */
+async function reorderProjects(req, res) {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids)) return res.status(400).json({ error: 'ids array required' });
+    if (ids.length > 500) return res.status(400).json({ error: 'Too many ids (max 500)' });
+
+    await db.transaction(async (trx) => {
+      // Use a single CASE expression rather than N UPDATEs. Avoids N round-trips
+      // and keeps the reorder atomic under the transaction.
+      const escaped = ids.map((id) => Number(id)).filter((n) => Number.isFinite(n));
+      if (escaped.length === 0) return;
+      let caseExpr = 'CASE id';
+      const bindings = [];
+      escaped.forEach((id, idx) => { caseExpr += ' WHEN ? THEN ?'; bindings.push(id, idx); });
+      caseExpr += ' ELSE sort_order END';
+      await trx('projects')
+        .where('user_id', req.user.id)
+        .whereIn('id', escaped)
+        .update({ sort_order: trx.raw(caseExpr, bindings), updated_at: db.fn.now() });
+    });
+
+    await cache.invalidateConfig(req.user.id);
+    res.json({ reordered: ids.length });
+  } catch (error) {
+    console.error('Reorder projects error:', error);
+    res.status(500).json({ error: 'Failed to reorder projects' });
   }
 }
 
@@ -308,6 +343,7 @@ module.exports = {
   createProject,
   updateProject,
   deleteProject,
+  reorderProjects,
   getLocations,
   replaceLocations,
   getTools,
