@@ -78,6 +78,20 @@ export default function HealthDot({ darkMode, theme }) {
     var svc = state.data.services || {};
     var lines = ['Status: ' + state.status];
     Object.keys(svc).forEach(function(k) { lines.push(k + ': ' + svc[k]); });
+    // Surface pending sync retries in the tooltip (first amber-triggering
+    // condition the user actually encounters). Saves a click to see why
+    // the dot went amber.
+    if (state.data.sync) {
+      Object.keys(state.data.sync).forEach(function(p) {
+        var s = state.data.sync[p];
+        if (s && s.connected && s.pendingRetry > 0) {
+          lines.push(p + ': ' + s.pendingRetry + ' task(s) retrying (provider throttling)');
+        }
+        if (s && s.connected && s.permanentError > 0) {
+          lines.push(p + ': ' + s.permanentError + ' task(s) failed');
+        }
+      });
+    }
     if (state.lastChecked) lines.push('Checked: ' + state.lastChecked.toLocaleTimeString());
     return lines.join('\n');
   })();
@@ -144,6 +158,7 @@ export default function HealthDot({ darkMode, theme }) {
                   var detail = state.data.detail && state.data.detail[name];
                   var cellColor = status === 'operational' ? '#43A047'
                     : status === 'error' ? '#E53935'
+                    : status === 'degraded' ? '#F9A825'
                     : theme ? theme.textMuted : '#888';
                   return (
                     <tr key={name}>
@@ -156,6 +171,11 @@ export default function HealthDot({ darkMode, theme }) {
               </tbody>
             </table>
           )}
+
+          {state.data && state.data.sync && (
+            <SyncTable sync={state.data.sync} theme={theme} />
+          )}
+
           {state.data && (
             <div style={{ marginTop: 8, fontSize: 11, color: theme ? theme.textMuted : '#666' }}>
               Uptime: {fmtUptime(state.data.uptime)}
@@ -164,6 +184,67 @@ export default function HealthDot({ darkMode, theme }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Per-provider sync state table in the Health popover. One row per
+// connected provider; disconnected providers are listed dimmed at the
+// bottom so the user knows they can still hook them up. Pending-retry
+// counts appear in amber; permanent errors in red.
+function SyncTable({ sync, theme }) {
+  var providerLabels = { gcal: 'Google', msft: 'Microsoft', apple: 'Apple' };
+  // Sort: connected first (alphabetical by label), then disconnected.
+  var order = Object.keys(sync).slice().sort(function(a, b) {
+    var ac = sync[a] && sync[a].connected ? 0 : 1;
+    var bc = sync[b] && sync[b].connected ? 0 : 1;
+    if (ac !== bc) return ac - bc;
+    return (providerLabels[a] || a).localeCompare(providerLabels[b] || b);
+  });
+  function fmtAgo(iso) {
+    if (!iso) return '—';
+    var diff = Date.now() - new Date(iso.replace(' ', 'T') + (iso.endsWith('Z') ? '' : 'Z')).getTime();
+    if (isNaN(diff)) return '—';
+    var m = Math.floor(diff / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return m + 'm ago';
+    var h = Math.floor(m / 60);
+    if (h < 24) return h + 'h ago';
+    return Math.floor(h / 24) + 'd ago';
+  }
+  return (
+    <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px dashed ' + (theme ? theme.border : '#ddd') }}>
+      <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 11 }}>Calendar sync</div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+        <thead>
+          <tr style={{ color: theme ? theme.textMuted : '#888', textAlign: 'left' }}>
+            <th style={{ fontWeight: 500, padding: '2px 4px' }}>Provider</th>
+            <th style={{ fontWeight: 500, padding: '2px 4px', textAlign: 'right' }}>Active</th>
+            <th style={{ fontWeight: 500, padding: '2px 4px', textAlign: 'right' }}>Retry</th>
+            <th style={{ fontWeight: 500, padding: '2px 4px', textAlign: 'right' }}>Err</th>
+            <th style={{ fontWeight: 500, padding: '2px 4px' }}>Last</th>
+          </tr>
+        </thead>
+        <tbody>
+          {order.map(function(p) {
+            var s = sync[p] || {};
+            var dim = !s.connected;
+            var retryColor = s.pendingRetry > 0 ? '#F9A825' : (theme ? theme.textMuted : '#888');
+            var errColor = s.permanentError > 0 ? '#E53935' : (theme ? theme.textMuted : '#888');
+            return (
+              <tr key={p} style={{ opacity: dim ? 0.5 : 1 }}>
+                <td style={{ padding: '2px 4px' }}>
+                  {providerLabels[p] || p}{dim && <span style={{ fontSize: 9, marginLeft: 4, color: theme ? theme.textMuted : '#888' }}>(off)</span>}
+                </td>
+                <td style={{ padding: '2px 4px', textAlign: 'right' }}>{s.active || 0}</td>
+                <td style={{ padding: '2px 4px', textAlign: 'right', color: retryColor, fontWeight: s.pendingRetry > 0 ? 600 : 400 }}>{s.pendingRetry || 0}</td>
+                <td style={{ padding: '2px 4px', textAlign: 'right', color: errColor, fontWeight: s.permanentError > 0 ? 600 : 400 }}>{s.permanentError || 0}</td>
+                <td style={{ padding: '2px 4px', color: theme ? theme.textMuted : '#888' }}>{s.lastSync ? fmtAgo(s.lastSync) : '—'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

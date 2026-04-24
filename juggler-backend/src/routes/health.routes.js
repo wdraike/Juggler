@@ -126,10 +126,70 @@ router.get('/detailed', authenticateJWT, async (req, res) => {
     healthStatus.services.sse = 'unknown';
   }
 
+  // Sync: per-provider view of this user's cal sync state. Surfaces what
+  // lives in cal_sync_ledger today (invisible without raw DB access),
+  // plus connection status from the users row. Transient vs permanent
+  // errors are split by regex on error_detail — rate-limit / 5xx / 429
+  // errors are expected to clear on the next sync cycle and are reported
+  // as "pendingRetry" rather than "error", so a momentarily-throttled
+  // provider goes to DEGRADED instead of ERROR.
+  if (healthStatus.services.database === 'operational') {
+    try {
+      const userId = req.user.id;
+      const userRow = await db('users').where('id', userId).first();
+      const rows = await db('cal_sync_ledger')
+        .where('user_id', userId)
+        .select('provider', 'status', 'error_detail', 'synced_at');
+      const providers = {};
+      const ensure = (p) => providers[p] || (providers[p] = {
+        connected: false, active: 0, pendingRetry: 0, permanentError: 0, lastSync: null
+      });
+      const transientRe = /HTTP 403|HTTP 429|HTTP 5\d\d|rateLimitExceeded|quota.*exceeded/i;
+      for (const r of rows) {
+        const p = ensure(r.provider);
+        if (r.status === 'active') p.active++;
+        else if (r.status === 'error') {
+          if (r.error_detail && transientRe.test(r.error_detail)) p.pendingRetry++;
+          else p.permanentError++;
+        }
+        // Track latest synced_at (across any status)
+        if (r.synced_at && (!p.lastSync || r.synced_at > p.lastSync)) {
+          p.lastSync = r.synced_at;
+        }
+      }
+      // Connection status from the user row
+      ['gcal', 'msft', 'apple'].forEach(p => {
+        const slot = ensure(p);
+        if (p === 'gcal') slot.connected = !!(userRow && userRow.gcal_refresh_token);
+        else if (p === 'msft') slot.connected = !!(userRow && userRow.msft_cal_refresh_token);
+        else if (p === 'apple') slot.connected = !!(userRow && userRow.apple_cal_password);
+      });
+      healthStatus.sync = providers;
+
+      // Promote the overall status if any connected provider has pending
+      // retries (DEGRADED) or permanent errors (ERROR). An error dominates
+      // pending. Disconnected providers never affect the rollup — the user
+      // may simply not have connected them.
+      for (const p of Object.values(providers)) {
+        if (!p.connected) continue;
+        if (p.permanentError > 0) healthStatus.services.sync = 'error';
+        else if (p.pendingRetry > 0 && healthStatus.services.sync !== 'error') {
+          healthStatus.services.sync = 'degraded';
+        }
+      }
+      if (!healthStatus.services.sync) healthStatus.services.sync = 'operational';
+    } catch (error) {
+      healthStatus.services.sync = 'unknown';
+      healthStatus.detail.sync = error.message;
+    }
+  } else {
+    healthStatus.services.sync = 'unknown';
+  }
+
   // Rollup: 'error' dominates; 'operational' only wins when every service
-  // reports it. 'idle' / 'not configured' / 'unknown' collapse to DEGRADED
-  // rather than ERROR so the dot doesn't scream at users when e.g. no one
-  // has scheduled anything in the last ten minutes.
+  // reports it. 'idle' / 'not configured' / 'unknown' / 'degraded' collapse
+  // to DEGRADED rather than ERROR so the dot doesn't scream at users when
+  // e.g. no one has scheduled anything in the last ten minutes.
   const statuses = Object.values(healthStatus.services);
   if (statuses.some(s => s === 'error')) {
     healthStatus.status = 'ERROR';
