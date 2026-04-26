@@ -2,7 +2,7 @@ process.env.NODE_ENV = 'test';
 
 module.exports = {
   testEnvironment: 'node',
-  testMatch: ['**/tests/**/*.test.js'],
+  testMatch: ['**/tests/**/*.test.js', '**/src/__tests__/**/*.test.js'],
   collectCoverageFrom: ['src/**/*.js', '!src/server.js'],
   moduleNameMapper: {
     '^uuid$': '<rootDir>/tests/helpers/uuid-mock.js'
