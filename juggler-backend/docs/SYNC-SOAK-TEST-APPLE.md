@@ -252,6 +252,58 @@ wait window. **A-section soak complete.**
 | C4 | (pending) | |
 | D | ✅ PASS | 30-min ambient soak stable. active: 134 → 136 → 142 → 149 (linear growth = new recurring instances being scheduled, expected). `deleted_local` stable at 1866. No runaway churn. `deleted_remote` stays at 2. `replaced=9` at end (legitimate C2-fix re-creates). |
 
+---
+
+**B–D Run 2 (v3 script) — 2026-04-26 afternoon**
+
+**Root cause of failures:** v3 pre-run cleanup marked 3 SOAK task rows + 182 orphan rows as `replaced`, which freed ~185 tasks for Phase 3 re-push in recovery sync (sync 0b). Sync 0b pushed 217 tasks to Apple, exhausting the rate limit before the 16 new test tasks could obtain Apple ledger rows. Native B1 event UID storage (see Bug #8) also blocked B5.
+
+**Sync stats:**
+- Sync 0: pushed=14, pulled=69, errors=7 (14/16 new tasks initially pushed)
+- Sync 0b (recovery): pushed=217, errors=26 — ← rate limit exhausted here
+- Sync 1–6: pushed decreasing (retries), del\_remote=0 throughout, errors persisting
+
+| # | Result | Notes |
+|---|---|---|
+| B1 | ✅ PASS | Pulled as task `apple_92457c7f41896ad3`, `origin='apple'`, `when='fixed'` |
+| B2 | ❌ FAIL | No active Apple ledger row after recovery sync — rate limit blocked push |
+| B3 | ❌ FAIL | No active Apple ledger row — rate limit |
+| B4 | ❌ FAIL | No active Apple ledger row — rate limit |
+| B5 | ❌ FAIL | `provider_event_id` = UID `soak-b1-1777222729201` (not full URL) — CalDAV DELETE failed with "Failed to parse URL from soak-b1-…". See Bug #8. |
+| C1 | ❌ FAIL | No active Apple ledger row — rate limit |
+| C2 | ❌ FAIL | No active Apple ledger row — rate limit |
+| C3 | ⚠️ PARTIAL | 0/10 synced — all blocked by rate limit |
+| C4 | ❌ FAIL | No active Apple ledger row after sync 1 — rate limit |
+| D | ✅ PASS | active=123 perfectly stable across all snapshots (+0/+10/+20/+30 min). `deleted_local` 2467→2468. Zero oscillation. |
+
+D snapshots: `+0min: active=123 dl=2467` / `+10min: active=123 dl=2467` / `+20min: active=123 dl=2467` / `+30min: active=123 dl=2468`
+
+**v4 improvements applied:**
+- Orphan-only cleanup — never mark existing SOAK task rows as `replaced`
+- Pre-creation flush sync to push all unledgered tasks before new test tasks are created
+- B5 URL reconstruction: `rawId.startsWith('http') ? rawId : CALENDAR_URL + rawId + '.ics'`
+- `scheduledAt` camelCase fix (same as MSFT v2)
+- B5 assertion fix: `!b5Task` primary PASS condition
+- B2/B3 soak assertion fix: `replace(' ', 'T') + 'Z'` for MySQL timestamp UTC parsing
+- B3/B5 multi-provider isolation guards for null `provider_event_id` rows
+
+**B–D Run 3 (v4 script) — 2026-04-26 evening**
+
+In progress (started 19:10 UTC). Flush-1: pushed=15. Sync-0: pushed=52 pulled=126 errors=4 (16 new test tasks + 36 pre-existing hash updates, no rate limit).
+
+| # | Result | Notes |
+|---|---|---|
+| B1 | pending | |
+| B2 | pending | |
+| B3 | pending | |
+| B4 | pending | |
+| B5 | pending | |
+| C1 | pending | |
+| C2 | pending | |
+| C3 | pending | |
+| C4 | pending | |
+| D | pending | |
+
 ### Bugs found
 
 **Bug #1 — "Failed to parse URL from UUID" on Apple reconnect (234 errors) — FIXED 2026-04-26**
@@ -278,3 +330,24 @@ wait window. **A-section soak complete.**
 - **Symptom:** Background scheduler-triggered sync + manual API sync overlap → Phase 3 (push) runs twice for the same new tasks → 2 active ledger rows per task (same CalDAV URL, same hash). Seen: 18 rows for 6 tasks in C3 rapid-fire test.
 - **Root cause:** Same race as GCal Bug #6 (fixed 2026-04-25 for that sync's dedup logic). The dedup in the write phase prevents duplicates within a single run but not across concurrent runs.
 - **Fix applied 2026-04-28:** Added a virtual generated column `active_task_key = IF(status='active' AND task_id IS NOT NULL, CONCAT(user_id|provider|task_id), NULL)` and a unique index on it (migration `20260428000100`). MySQL ignores NULLs in unique indexes, so tombstone rows (deleted_local/deleted_remote) are unaffected. Changed `cal-sync.controller.js` ledger bulk insert to `INSERT IGNORE` so concurrent-write collisions are silently dropped rather than causing a 500 error.
+
+**Bug #7 — Soak pre-run cleanup causes Apple rate-limit exhaustion — FIXED in v4 soak script**
+- **Symptom (v3 run):** All B2–C4 tests failed because no active Apple ledger row was available after sync 0b. Sync 0b pushed 217 tasks, errors=26.
+- **Root cause:** v3 cleanup marked SOAK task ledger rows as `replaced`. This freed their tasks for Phase 3 re-push. With 48+ accumulated SOAK tasks from prior runs, Phase 3 generated 200+ Apple push attempts in sync 0b, exhausting the rate limit before the 16 new test tasks could push.
+- **Fix in v4 soak script:** Orphan-only cleanup — only retire rows where `task_instances.id IS NULL` (true orphans, not just old SOAK tasks). Combined with a flush sync before creating test tasks: existing SOAK tasks retain their active Apple ledger rows, so Phase 3 pushes 0 extra tasks in the flush sync. New test tasks (16) become the only Phase 3 work in sync 0.
+
+**Bug #9 — Soak task creation used snake_case `scheduled_at` instead of camelCase `scheduledAt` — FIXED in v4 soak script**
+- **Symptom (v3 run and MSFT v1 run):** All new B–D test tasks (B2, B3, B4, C1, C2, C4, C3×10) had `scheduled_at=null` in the DB and never pushed to any calendar. Root cause of ALL B2–C4 failures across both providers.
+- **Root cause:** `task.controller.js:476` maps `task.scheduledAt` (camelCase) → `row.scheduled_at`. The soak scripts sent `{ scheduled_at: '...' }` (snake_case) which the API ignores. This was masked in prior runs because the v1/v2 soak script originally used a different field name, and the regression was introduced during the rewrite.
+- **Fix in v4 soak scripts (both Apple and MSFT):** Changed `scheduled_at` → `scheduledAt` in `taskBase` and all task creation calls.
+
+**Bug #10 — B2 soak assertion: MySQL timestamp parsed as local time — FIXED in v4 soak script**
+- **Symptom:** `B2: ❌ FAIL — task UTC hour changed to N (was 14)` logged even when backend correctly preserved juggler's time.
+- **Root cause:** `new Date('2026-04-27 14:00:00').getUTCHours()` — without 'T'/'Z', JS parses MySQL DATETIME format as LOCAL time. On an EDT (UTC−4) system, 14:00 local → 18:00 UTC, so `h === 18 !== 14` → false negative FAIL.
+- **Fix in v4 soak scripts:** Changed to `new Date(String(task.scheduled_at).replace(' ', 'T') + 'Z').getUTCHours()`. Same bug found and fixed in `soak-msft-bcd.js` (documented as Bug #5 in `SYNC-SOAK-TEST-MSFT.md`).
+
+**Bug #8 — Native Apple events store UID as `provider_event_id`; soak B5 DELETE needs URL reconstruction — FIXED in v4 soak script**
+- **Symptom (v3 run):** `B5: DELETE → HTTP 0` / `CalDAV lib DELETE also failed: Failed to parse URL from soak-b1-1777222729201`
+- **Root cause:** `apple-cal-api.js` `normalizeEvent()` returns `id: event.id || event._url` where `event.id = uid` (VEVENT UID string). For native Apple events, `provider_event_id` stores the UID (e.g. `soak-b1-1777222729201`), not the CalDAV URL. The soak script's `deleteEventByUrl` tried to HTTP DELETE this UID directly, which is not a valid URL.
+- **Production impact:** None. For MISS_THRESHOLD on native Apple events (`origin='apple'`), the sync doesn't need to DELETE the CalDAV event — it already disappeared from the calendar. Juggler just removes the task from its DB.
+- **Fix in v4 soak script:** URL reconstruction: `rawId.startsWith('http') ? rawId : CALENDAR_URL + rawId + '.ics'`

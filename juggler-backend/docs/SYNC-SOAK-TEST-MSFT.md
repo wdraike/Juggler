@@ -161,18 +161,39 @@ Failures get a bug entry in the results section below.
 
 ### B–D sections
 
-| # | Result |
-|---|---|
-| B1 | (pending) |
-| B2 | (pending) |
-| B3 | (pending) |
-| B4 | (pending) |
-| B5 | (pending) |
-| C1 | (pending) |
-| C2 | (pending) |
-| C3 | (pending) |
-| C4 | (pending) |
-| D | (pending) |
+**B–D Run 1 (v1) — 2026-04-26 afternoon**
+
+**Root cause of failures:** v1 soak script used `scheduled_at` (snake_case) instead of `scheduledAt` (camelCase) in task creation. The juggler task API silently ignores unknown snake_case fields → all 16 new test tasks created with `scheduled_at=null` → sync skipped them (no date = no calendar event). Also, 15 SOAK rows were marked `replaced` in cleanup, causing unnecessary Phase 3 re-pushes.
+
+| # | Result | Notes |
+|---|---|---|
+| B1 | ✅ PASS | Native Outlook event pulled as `origin='msft'`, task `msft_2876f77fb77ff176` |
+| B2 | ❌ FAIL | Task created with `scheduled_at=null` (snake_case bug) — never pushed |
+| B3 | ❌ FAIL | Same snake_case bug — no MSFT ledger row; MISS_THRESHOLD test not runnable |
+| B4 | ❌ FAIL | Same snake_case bug |
+| B5 | ✅ PASS* | B1 native Outlook event deleted via Graph DELETE. `del_remote=1` in sync 6 confirms MISS_THRESHOLD fired and task deleted. *Soak script assertion logged FAIL due to Bug #4 (task_id NULLed in ledger). |
+| C1 | ❌ FAIL | Snake_case bug |
+| C2 | ❌ FAIL | Snake_case bug |
+| C3 | ⚠️ PARTIAL | 0/10 synced — snake_case bug |
+| C4 | ❌ FAIL | Snake_case bug |
+| D | (in progress) | active=125 at t+0; +10/+20/+30 snapshots pending |
+
+**B–D Run 2 (v2) — 2026-04-26 evening**
+
+All v2 fixes applied: `scheduledAt` camelCase, orphan-only cleanup, flush sync, B5 assertion fix, B3 isolation guard.
+
+| # | Result | Notes |
+|---|---|---|
+| B1 | ✅ PASS | Native Outlook event created (`AQMkADAwATI…`) pulled as task `msft_427cd58d539cce62`, `origin='msft'` |
+| B2 | ✅ PASS* | `conflict_juggler` fired in sync 1 — juggler pushed its version back over the Outlook PATCH. *Soak initially logged ❌ FAIL due to Bug #5 (MySQL timestamp parsed as local time → false h=18). See Bug #5 |
+| B3 | ❌ FAIL | After 3 syncs: `status=active miss_count=0` — MISS_THRESHOLD not reached. See Bug #6 |
+| B4 | ✅ PASS | Outlook title rename NOT pulled; juggler text unchanged (juggler wins for title) |
+| B5 | ✅ PASS | B1 native task deleted after MISS_THRESHOLD: `del_remote=1` in sync 6, task gone from `task_instances` |
+| C1 | ✅ PASS | Juggler title overwrote Outlook title edit (juggler wins) |
+| C2 | ✅ PASS | Event re-created after Outlook DELETE + juggler edit; new active ledger row |
+| C3 | ✅ PASS | All 10/10 tasks synced to Outlook |
+| C4 | ✅ PASS | Final edit "Edit 3 FINAL" appeared in Outlook event after 3 rapid edits |
+| D | ✅ PASS | 30-min stable. Snapshots: `+0min active=138 dl=2343 dr=1834 repl=721` / `+10min active=138` / `+20min active=138` / `+30min active=138`. Zero oscillation throughout. |
 
 ### Bugs found
 
@@ -184,3 +205,26 @@ Failures get a bug entry in the results section below.
 - **Symptom:** Task `t1777162110303wj1v` (and others from prior Apple connection) entered an infinite repush loop after reconnecting Apple. `sync_history` shows repeated `repush` actions with detail "GCal event gone but juggler task was modified — will re-create" (wrong provider name in message template)
 - **Root cause:** Old ledger rows stored bare UUIDs as `provider_event_id` instead of full CalDAV URLs. The C2-fix's tasksNeedingReCreate logic triggers on these invalid rows
 - **Impact:** Affects reconnected Apple accounts with old ledger data; new tasks sync cleanly (A8 instances all worked)
+
+**Bug #3 — Soak task creation used snake_case `scheduled_at` instead of camelCase `scheduledAt` — FIXED in v2 soak script**
+- **Symptom (MSFT v1 run):** All new B–D test tasks (B2–B4, C1–C4, C3×10) had `scheduled_at=null` in the DB and never pushed to any calendar. Root cause of all B2–C4 failures.
+- **Root cause:** `task.controller.js:476` maps `task.scheduledAt` (camelCase) → `row.scheduled_at`. The soak script sent `{ scheduled_at: '...' }` (snake_case), which the API silently ignores. Tasks were created successfully (got IDs) but with null `scheduled_at`.
+- **Fix in v2 soak script:** Changed `scheduled_at` → `scheduledAt` in `taskBase` and all task creation calls. Also applied to Apple soak script.
+
+**Bug #4 — B5 soak assertion: `task_id` NULLed after MISS_THRESHOLD deletion — FIXED in v2 soak script**
+- **Symptom (MSFT v1 run):** B5 logged `❌ FAIL — status=undefined miss_count=undefined, task deleted`. Task WAS deleted (MISS_THRESHOLD correctly fired, `del_remote=1` in sync 6), but `getLedgerRow(B5_TASK_ID)` returned no row.
+- **Root cause:** After MISS_THRESHOLD deletes the task from `task_instances`, the ledger row's `task_id` is set to NULL. The query `WHERE task_id = B5_TASK_ID` then returns no rows. B5 was a true ✅ PASS.
+- **Fix in v2 soak script:** Changed assertion to use `!b5Task` (task gone from task_instances) as primary PASS condition, eliminating the ledger row query for the PASS case. Also applied to Apple soak script.
+
+**Bug #5 — B2 soak assertion: MySQL timestamp parsed as local time — FIXED in v3 soak script**
+- **Symptom (MSFT v2 run):** Soak logged `❌ FAIL — task UTC hour changed to 18 (was 14)`. Backend was actually correct: `sync_history` shows `conflict_juggler` in sync 1 (juggler pushed its version back over the Outlook PATCH, "juggler wins" policy working). B2 is a true ✅ PASS.
+- **Root cause:** `new Date('2026-04-27 14:00:00').getUTCHours()` — without a 'T'/'Z' marker, JavaScript parses the MySQL format as LOCAL time (EDT = UTC−4). 14:00 local EDT → 18:00 UTC, making `h === 18` when the actual value is 14 UTC.
+- **Fix in soak scripts:** Changed to `new Date(String(task.scheduled_at).replace(' ', 'T') + 'Z').getUTCHours()` — matches the pattern used elsewhere in the codebase. Applied to both `soak-msft-bcd.js` and `soak-apple-bcd.js`.
+- **Side-finding (phantom pull cycle):** After the sync 1 conflict_juggler push, `last_modified_at` in the ledger is NOT updated (only `last_pushed_hash` and `last_pushed_at` are). On syncs 2+, MSFT's event lastModified (updated by our PATCH) exceeds `ledger.last_modified_at` → `eventModifiedExternally=true` → phantom pull fires, writing back the same `scheduled_at` value (different format only). Harmless for data integrity but causes unnecessary DB writes + `updated_at` bumps. Root cause: `pendingEventUpdates` batch handler (line 892) should also update `last_modified_at` after a successful push.
+
+**Bug #6 — B3: MISS_THRESHOLD bypassed when task hash changes during miss accumulation**
+- **Symptom (MSFT v2 run):** After Outlook DELETE of B3's event: sync 1 → `miss_count=1`, sync 2 → `status=undefined` (ledger row task_id NULLed → query returned no rows), sync 3 → `status=active miss_count=0` (new ledger row from re-push). MISS_THRESHOLD (3) never fired.
+- **Root cause:** `cal-sync.controller.js:791-797` — when `miss_count >= 1` AND `taskHash(task) !== last_pushed_hash` AND `event` is missing, the `tasksNeedingReCreate` path fires: marks ledger row `replaced/task_id=null`, removes task from `processedTaskIds`, then Phase 3 re-pushes to Outlook, creating a new ledger row with `miss_count=0`. The hash change was likely caused by the scheduler updating the task's derived fields (date/time recalculation) between sync 0 and sync 2 — not a user edit.
+- **Consequence:** A juggler task deleted from Outlook cannot reach MISS_THRESHOLD if the scheduler touches it between syncs; the event is endlessly re-created instead of being deleted from juggler.
+- **Fix needed (not yet applied):** Track that a task is in "miss accumulation" state (e.g., a `miss_start` timestamp or a flag) and suppress the `tasksNeedingReCreate` path until MISS_THRESHOLD is reached.
+- **Affects:** All three providers — shared code in `cal-sync.controller.js`.

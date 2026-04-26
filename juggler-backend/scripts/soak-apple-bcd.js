@@ -1,8 +1,14 @@
 /**
- * Apple CalDAV B–D soak test driver
+ * Apple CalDAV B–D soak test driver (v3)
  *
- * Drives B1–B5, C2, C3 by interacting with CalDAV directly, then triggering
- * juggler syncs and asserting ledger / task state.
+ * v3 improvements:
+ * - Pre-run cleanup: marks stale SOAK Apple ledger rows 'replaced' before creating
+ *   test tasks, preventing prior-run debris from consuming rate limit in sync 0
+ * - Orphan cleanup: also marks active rows whose task no longer exists as 'replaced'
+ * - Resilient URL lookup: after sync 0 + CDN wait, if URL still missing, runs a
+ *   second cleanup sync then waits again before giving up
+ * - B5 CalDAV delete: uses client.deleteCalendarObject instead of raw HTTP DELETE
+ *   (HTTP 0 = connection error in prior run)
  */
 
 'use strict';
@@ -12,65 +18,112 @@ require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 const db = require('../src/db');
 const appleCalApi = require('../src/lib/apple-cal-api');
 
-const USERNAME = 'wdraike@icloud.com';
-const PASSWORD = 'zyty-rkxh-vtxt-zdie';
+const USER_ID      = '019d29f9-9ef9-74eb-af2d-0418237d0bd9';
+const USERNAME     = 'wdraike@icloud.com';
+const PASSWORD     = 'zyty-rkxh-vtxt-zdie';
 const CALENDAR_URL = 'https://caldav.icloud.com/294728805/calendars/77E214B1-5D29-4D10-9AB3-447CBA9C3F66/';
-const SERVER_URL = 'https://caldav.icloud.com';
-const USER_ID = '019d29f9-9ef9-74eb-af2d-0418237d0bd9';
-const JWT = 'eyJhbGciOiJSUzI1NiIsImtpZCI6ImY1ZGM0M2JlZWJiODU2NjIifQ.eyJzdWIiOiIwMTlkMjlmOS05ZWY5LTc0ZWItYWYyZC0wNDE4MjM3ZDBiZDkiLCJlbWFpbCI6IndkcmFpa2VAZ21haWwuY29tIiwiYXBwcyI6WyJqdWdnbGVyIl0sInBsYW5zIjp7Imp1Z2dsZXIiOiJwcm8ifSwiaXNzIjoicmFpa2UtYXV0aCIsImlhdCI6MTc3NzE2ODE5MCwiZXhwIjoxNzc3MTk2OTkwfQ.mhwTQLV-feBhKBoY49hdnqTRS7e105qh3YC03pcOGM-6b12tSlekT2GgJPkR3MswZNLAYNJVdwCjbCpKKErIg2UZZaPe1ABjJfkSy86D1ZmhSRkuDPd0OeesTiWprWXCwP-uchrnVV-0-LRIq3IsqYxqQ_PV6zrOKZGF2_JsPSDttzVb5vvSHSSlz2FeXbFjzxSLTEAiJ3rd0tErp1TUibof_lmAs7IQdlqVpDqoXyTeyiBFU0BUYqz89grHr9B-hwGRy3Ww3zjqNJkiWrJ_KH5BpN041SQVKPvqLazkkvZXzRmZtCiigrNX-Q50w7TsIJ38VWiZc9IqRQke_SgY9g';
+const SERVER_URL   = 'https://caldav.icloud.com';
+const BASE         = 'http://localhost:5002/api';
+const RUN_TS       = Date.now();
 
-const B2_ID = '019dc77a-d37c-7443-ac30-b4b5825929ba';
-const B3_ID = '019dc77a-d4ab-757a-9cc2-ac777571eedf';
-const B4_ID = '019dc77a-d5db-752e-af74-465567bda3a7';
+// Dynamic JWT — reads auth-service private key so the token is always fresh
+const JWT = process.env.SOAK_JWT || (() => {
+  const jwt = require('jsonwebtoken');
+  const fs  = require('fs');
+  const keyPaths = [
+    require('path').join(__dirname, '../../../auth-service/auth-backend/src/keys/private.pem'),
+    require('path').join(__dirname, '../src/keys/service-private.pem'),
+  ];
+  let key = null;
+  for (const p of keyPaths) { try { key = fs.readFileSync(p); break; } catch (_) {} }
+  if (!key) throw new Error('No JWT private key found');
+  return jwt.sign(
+    { sub: USER_ID, email: 'wdraike@gmail.com', apps: ['juggler'], plans: { juggler: 'pro' }, iss: 'raike-auth' },
+    key,
+    { algorithm: 'RS256', expiresIn: '8h', keyid: 'f5dc43beebb85662' }
+  );
+})();
 
-const PASS = '✅ PASS';
-const FAIL = '❌ FAIL';
-const NOTE = '⚠️ NOTE';
+// Dates computed dynamically so the script doesn't need updating each day
+const _tomorrow = new Date();
+_tomorrow.setUTCDate(_tomorrow.getUTCDate() + 1);
+const TOMORROW_ISO      = _tomorrow.toISOString().slice(0, 10);  // '2026-04-27'
+const TOMORROW_YYYYMMDD = TOMORROW_ISO.replace(/-/g, '');        // '20260427'
+const TOMORROW_10AM_UTC = TOMORROW_ISO + 'T14:00:00Z';           // 10am EDT = UTC-4
+
+// Apple CalDAV CDN caches new/deleted events for 60–120s.
+// 120s is used here so event fetches by URL reliably succeed after push.
+const CDN_WAIT_MS = 120000;
+
+const PASS    = '✅ PASS';
+const FAIL    = '❌ FAIL';
+const PARTIAL = '⚠️ PARTIAL';
+const NOTE    = '📝 NOTE';
 
 function log(label, msg) {
   console.log(`[${new Date().toISOString().slice(11, 19)}] ${label}: ${msg}`);
 }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ── Juggler REST helpers ──────────────────────────────────────────────────────
+async function apiFetch(method, path, body) {
+  const opts = {
+    method,
+    headers: { Authorization: 'Bearer ' + JWT, 'Content-Type': 'application/json' }
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await fetch(BASE + path, opts);
+  const text = await r.text();
+  try { return { status: r.status, body: JSON.parse(text) }; }
+  catch (_) { return { status: r.status, body: text }; }
+}
+const apiPost   = (path, body) => apiFetch('POST',   path, body);
+const apiPut    = (path, body) => apiFetch('PUT',    path, body);
 
 async function triggerSync() {
-  const res = await fetch('http://localhost:5002/api/cal/sync', {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + JWT, 'Content-Type': 'application/json' },
-    body: '{}'
-  });
-  return res.json();
+  const r = await apiPost('/cal/sync', {});
+  return {
+    pushed:         r.body.pushed         || 0,
+    pulled:         r.body.pulled         || 0,
+    deleted_local:  r.body.deleted_local  || 0,
+    deleted_remote: r.body.deleted_remote || 0,
+    errors:         r.body.errors?.length || 0
+  };
 }
 
-async function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
+// ── CalDAV HTTP helpers (direct — bypasses CDN-lag listEvents) ───────────────
+const CALDAV_AUTH = 'Basic ' + Buffer.from(USERNAME + ':' + PASSWORD).toString('base64');
+
+async function fetchEventByUrl(url) {
+  try {
+    const resp = await fetch(url, { headers: { Authorization: CALDAV_AUTH, Accept: 'text/calendar' } });
+    if (!resp.ok) return null;
+    return { raw: await resp.text(), etag: resp.headers.get('etag') || '' };
+  } catch (_) { return null; }
 }
 
+async function putEventByUrl(url, icsBody, etag) {
+  const headers = { Authorization: CALDAV_AUTH, 'Content-Type': 'text/calendar; charset=utf-8' };
+  if (etag) headers['If-Match'] = etag;
+  try {
+    const resp = await fetch(url, { method: 'PUT', headers, body: icsBody });
+    return resp.status;
+  } catch (_) { return 0; }
+}
+
+async function deleteEventByUrl(url) {
+  try {
+    const resp = await fetch(url, { method: 'DELETE', headers: { Authorization: CALDAV_AUTH } });
+    return resp.status;
+  } catch (_) { return 0; }
+}
+
+// ── DB helpers ────────────────────────────────────────────────────────────────
 async function getLedgerRow(taskId) {
   return db('cal_sync_ledger')
     .where({ task_id: taskId, provider: 'apple' })
     .orderBy('id', 'desc')
     .first();
-}
-
-async function getLedgerByEventId(eventId) {
-  return db('cal_sync_ledger')
-    .where({ provider_event_id: eventId, provider: 'apple' })
-    .first();
-}
-
-async function getTaskById(taskId) {
-  return db('task_instances').where({ id: taskId }).first();
-}
-
-async function getTaskMasterById(masterId) {
-  return db('task_masters').where({ id: masterId }).first();
-}
-
-async function countAppleActiveLedger() {
-  const r = await db('cal_sync_ledger')
-    .where({ user_id: USER_ID, provider: 'apple', status: 'active' })
-    .count('id as n')
-    .first();
-  return r.n;
 }
 
 async function getAppleEventUrl(taskId) {
@@ -81,410 +134,551 @@ async function getAppleEventUrl(taskId) {
   return row ? row.provider_event_id : null;
 }
 
-// ── Build a native VEVENT ICS (not juggler-origin) ──────────────────────────
-function buildNativeICS(uid, title, dateStr, startHour, durationMins) {
-  // dateStr: 'YYYYMMDD', startHour: e.g. 9 → 09:00
+// ── ICS builder for native (non-juggler-origin) CalDAV events ─────────────────
+function buildNativeICS(uid, title, yyyymmdd, startHour, durationMins) {
   const pad = n => String(n).padStart(2, '0');
-  const endMins = (startHour * 60 + durationMins) % (24 * 60);
-  const endHour = Math.floor(endMins / 60);
-  const endMin = endMins % 60;
-  const dtstart = `${dateStr}T${pad(startHour)}0000`;
-  const dtend = `${dateStr}T${pad(endHour)}${pad(endMin)}00`;
-  const now = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  const endTotalMins = startHour * 60 + durationMins;
+  const endHour = Math.floor(endTotalMins / 60) % 24;
+  const endMin  = endTotalMins % 60;
+  const dtstamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15) + 'Z';
   return [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//Soak Test//EN',
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Soak Test//EN',
     'BEGIN:VEVENT',
-    `UID:${uid}`,
-    `SUMMARY:${title}`,
-    `DTSTART;TZID=America/New_York:${dtstart}`,
-    `DTEND;TZID=America/New_York:${dtend}`,
-    `DTSTAMP:${now}`,
-    'END:VEVENT',
-    'END:VCALENDAR'
+    'UID:' + uid,
+    'SUMMARY:' + title,
+    'DTSTART;TZID=America/New_York:' + yyyymmdd + 'T' + pad(startHour) + '0000',
+    'DTEND;TZID=America/New_York:'   + yyyymmdd + 'T' + pad(endHour)   + pad(endMin) + '00',
+    'DTSTAMP:' + dtstamp,
+    'END:VEVENT', 'END:VCALENDAR'
   ].join('\r\n');
 }
 
+// ── Pre-run cleanup ───────────────────────────────────────────────────────────
+// Only mark ORPHAN rows (no task in DB) as 'replaced' — these are from tasks deleted
+// by prior MISS_THRESHOLD runs. Marking SOAK rows for still-existing tasks would cause
+// Phase 3 to re-push all 40+ SOAK tasks, exhausting Apple's rate limit before new tasks.
+async function cleanupSoakDebris() {
+  const orphanClean = await db.raw(`
+    UPDATE cal_sync_ledger l
+    LEFT JOIN task_instances ti ON ti.id = l.task_id
+    SET l.status = 'replaced'
+    WHERE l.provider = 'apple'
+    AND l.user_id = ?
+    AND l.status = 'active'
+    AND ti.id IS NULL
+  `, [USER_ID]);
+
+  log('CLEANUP', 'Marked ' + orphanClean[0].affectedRows + ' orphan rows as replaced');
+}
+
+// ── Flush sync ────────────────────────────────────────────────────────────────
+// Run one or two syncs before creating test tasks so that regular user tasks are
+// already up-to-date on Apple. Sync 0 then only needs to push the ~16 new test tasks.
+async function flushSync() {
+  log('FLUSH', 'Pre-flush sync (stabilizing Apple before test task creation)...');
+  const f1 = await triggerSync();
+  log('FLUSH-1', 'pushed=' + f1.pushed + ' errors=' + f1.errors);
+  if (f1.pushed > 30 || f1.errors > 10) {
+    log('FLUSH', 'High push count — waiting 60s then second flush...');
+    await sleep(60000);
+    const f2 = await triggerSync();
+    log('FLUSH-2', 'pushed=' + f2.pushed + ' errors=' + f2.errors);
+  }
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
+  log('SETUP', `RUN_TS=${RUN_TS}  TOMORROW=${TOMORROW_ISO}`);
+
   const client = await appleCalApi.createClient(SERVER_URL, USERNAME, PASSWORD);
-  log('SETUP', 'CalDAV client connected');
+  log('SETUP', 'CalDAV client connected. Calendar: ' + CALENDAR_URL);
+
+  // Cleanup orphan ledger rows then stabilize Apple before creating test tasks
+  await cleanupSoakDebris();
+  await flushSync();
 
   const results = {};
 
-  // ── B1: Create native Apple event → juggler should pull it ───────────────
-  log('B1', 'Creating native Apple event via CalDAV PUT...');
-  const b1Uid = 'soak-b1-native-' + Date.now();
-  const b1Filename = b1Uid + '.ics';
-  const b1ICS = buildNativeICS(b1Uid, 'SOAK-B1: Native Apple event', '20260427', 9, 30);
-  let b1EventUrl;
+  // ── Phase 1: Create test artifacts ─────────────────────────────────────────
+  log('SETUP', 'Creating test tasks and native B1 event...');
+
+  // B1: native Apple event (no juggler origin) — juggler pulls it as origin='apple'
+  const b1Uid      = 'soak-b1-' + RUN_TS;
+  const b1EventUrl = CALENDAR_URL + b1Uid + '.ics';
   try {
-    const r = await client.createCalendarObject({
+    await client.createCalendarObject({
       calendar: { url: CALENDAR_URL },
-      filename: b1Filename,
-      iCalString: b1ICS
+      filename: b1Uid + '.ics',
+      iCalString: buildNativeICS(b1Uid, 'SOAK-B1-' + RUN_TS + ': Native Apple event', TOMORROW_YYYYMMDD, 9, 30)
     });
-    b1EventUrl = r.url || (CALENDAR_URL + b1Filename);
-    log('B1', `Created at ${b1EventUrl}`);
+    log('B1', 'Native event created at ' + b1EventUrl);
   } catch (e) {
-    log('B1', `CREATE FAILED: ${e.message}`);
-    results.B1 = FAIL + ' — create failed: ' + e.message;
+    log('B1', 'CREATE FAILED: ' + e.message);
+    results.B1 = FAIL + ' — native CalDAV create failed: ' + e.message;
   }
 
-  // ── B2: Move juggler-created event (update time via PUT) ─────────────────
-  log('B2', 'Fetching current B2 event to modify time...');
-  const b2EventUrl = await getAppleEventUrl(B2_ID);
-  if (b2EventUrl) {
-    try {
-      // Fetch existing event
-      const events = await appleCalApi.listEvents(client, CALENDAR_URL,
-        new Date('2026-04-27T00:00:00Z').toISOString(),
-        new Date('2026-04-28T00:00:00Z').toISOString());
-      const b2Event = events.find(e => e._url === b2EventUrl);
-      if (b2Event) {
-        // Modify start to 3:00 PM (19:00 UTC for New York)
-        const modICS = (b2Event._raw || '').replace(
-          /DTSTART[^:]*:[^\r\n]*/,
-          'DTSTART;TZID=America/New_York:20260427T150000'
-        ).replace(
-          /DTEND[^:]*:[^\r\n]*/,
-          'DTEND;TZID=America/New_York:20260427T154500'
-        );
-        if (modICS !== b2Event._raw) {
-          await client.updateCalendarObject({
-            calendarObject: { url: b2EventUrl, data: modICS, etag: b2Event._etag }
-          });
-          log('B2', 'Updated time to 3:00 PM in CalDAV');
-        } else {
-          log('B2', `${NOTE} raw ICS replace did not match — skipping time update`);
-          results.B2 = NOTE + ' — ICS regex did not match; manual test needed';
-        }
-      } else {
-        log('B2', `${NOTE} event not yet visible in listEvents (CDN cache) — will check after sync`);
-      }
-    } catch (e) {
-      log('B2', `UPDATE FAILED: ${e.message}`);
-      results.B2 = FAIL + ' — update failed: ' + e.message;
-    }
-  } else {
-    results.B2 = FAIL + ' — no active Apple ledger row for B2 task';
+  async function createTask(label, body) {
+    const r = await apiPost('/tasks', body);
+    const id = r.body?.task?.id;
+    if (!id) log(label, 'CREATE FAILED (' + r.status + '): ' + JSON.stringify(r.body).slice(0, 120));
+    else log(label, 'Task created: ' + id);
+    return id || null;
   }
 
-  // ── B3: Delete juggler-created event from CalDAV ─────────────────────────
-  log('B3', 'Deleting B3 event from CalDAV...');
-  const b3EventUrl = await getAppleEventUrl(B3_ID);
-  if (b3EventUrl) {
-    try {
-      await client.deleteCalendarObject({ calendarObject: { url: b3EventUrl } });
-      log('B3', 'Deleted from CalDAV — waiting for 3 sync cycles (MISS_THRESHOLD)...');
-    } catch (e) {
-      log('B3', `DELETE FAILED: ${e.message}`);
-      results.B3 = FAIL + ' — delete failed: ' + e.message;
-    }
-  } else {
-    results.B3 = FAIL + ' — no active Apple ledger row for B3 task';
+  const taskBase = { when: 'fixed', scheduledAt: TOMORROW_10AM_UTC, dur: 45 };
+
+  const B2_ID = await createTask('B2', { ...taskBase, text: 'SOAK-B2-' + RUN_TS + ': Apple tries to move this' });
+  const B3_ID = await createTask('B3', { ...taskBase, text: 'SOAK-B3-' + RUN_TS + ': Apple deletes — MISS_THRESHOLD test' });
+  const B4_ID = await createTask('B4', { ...taskBase, text: 'SOAK-B4-' + RUN_TS + ': Apple renames this' });
+  const C1_ID = await createTask('C1', { ...taskBase, dur: 30, text: 'SOAK-C1-' + RUN_TS + ': Concurrent edit test' });
+  const C2_ID = await createTask('C2', { ...taskBase, dur: 30, text: 'SOAK-C2-' + RUN_TS + ': Delete+edit re-create test' });
+  const C4_ID = await createTask('C4', { ...taskBase, dur: 30, text: 'SOAK-C4-' + RUN_TS + ': Accumulated edits test' });
+
+  // C3: 10 rapid-fire tasks
+  const c3Ids = [];
+  for (let i = 1; i <= 10; i++) {
+    const r = await apiPost('/tasks', {
+      text: 'SOAK-C3-' + String(i).padStart(2, '0') + '-' + RUN_TS + ': Rapid fire',
+      when: 'fixed', scheduledAt: TOMORROW_10AM_UTC, dur: 30
+    });
+    const id = r.body?.task?.id;
+    if (id) c3Ids.push(id);
+  }
+  log('C3', 'Created ' + c3Ids.length + '/10 tasks');
+
+  // ── Phase 2: Initial sync + CDN wait ──────────────────────────────────────
+  log('SYNC', 'Triggering sync 0 (initial push)...');
+  const s0 = await triggerSync();
+  log('SYNC-0', 'pushed=' + s0.pushed + ' pulled=' + s0.pulled + ' errors=' + s0.errors);
+
+  log('SYNC', 'Waiting ' + (CDN_WAIT_MS / 1000) + 's for CDN propagation...');
+  await sleep(CDN_WAIT_MS);
+
+  // Resolve Apple event URLs from ledger (written by sync 0)
+  let b2Url = B2_ID ? await getAppleEventUrl(B2_ID) : null;
+  let b3Url = B3_ID ? await getAppleEventUrl(B3_ID) : null;
+  let b4Url = B4_ID ? await getAppleEventUrl(B4_ID) : null;
+  let c1Url = C1_ID ? await getAppleEventUrl(C1_ID) : null;
+  let c2Url = C2_ID ? await getAppleEventUrl(C2_ID) : null;
+
+  const missingAfterSync0 = [
+    !b2Url && 'B2', !b3Url && 'B3', !b4Url && 'B4', !c1Url && 'C1', !c2Url && 'C2'
+  ].filter(Boolean);
+
+  if (missingAfterSync0.length > 0) {
+    // Tasks weren't pushed in sync 0 (rate limit). Run a recovery sync + CDN wait.
+    log('SETUP', 'URLs missing for: ' + missingAfterSync0.join(', ') + ' — running recovery sync 0b...');
+    const s0b = await triggerSync();
+    log('SYNC-0b', 'pushed=' + s0b.pushed + ' errors=' + s0b.errors);
+    log('SYNC', 'Waiting ' + (CDN_WAIT_MS / 1000) + 's for CDN propagation...');
+    await sleep(CDN_WAIT_MS);
+
+    if (!b2Url) b2Url = B2_ID ? await getAppleEventUrl(B2_ID) : null;
+    if (!b3Url) b3Url = B3_ID ? await getAppleEventUrl(B3_ID) : null;
+    if (!b4Url) b4Url = B4_ID ? await getAppleEventUrl(B4_ID) : null;
+    if (!c1Url) c1Url = C1_ID ? await getAppleEventUrl(C1_ID) : null;
+    if (!c2Url) c2Url = C2_ID ? await getAppleEventUrl(C2_ID) : null;
   }
 
-  // ── B4: Rename juggler-created event in CalDAV ───────────────────────────
-  log('B4', 'Fetching B4 event to rename...');
-  const b4EventUrl = await getAppleEventUrl(B4_ID);
-  if (b4EventUrl) {
-    try {
-      const events = await appleCalApi.listEvents(client, CALENDAR_URL,
-        new Date('2026-04-27T00:00:00Z').toISOString(),
-        new Date('2026-04-28T00:00:00Z').toISOString());
-      const b4Event = events.find(e => e._url === b4EventUrl);
-      if (b4Event) {
-        const renamedICS = (b4Event._raw || '').replace(
-          /SUMMARY:[^\r\n]*/,
-          'SUMMARY:SOAK-B4: RENAMED BY APPLE'
-        );
-        await client.updateCalendarObject({
-          calendarObject: { url: b4EventUrl, data: renamedICS, etag: b4Event._etag }
-        });
-        log('B4', 'Renamed to "SOAK-B4: RENAMED BY APPLE" in CalDAV');
-      } else {
-        log('B4', `${NOTE} event not yet visible in listEvents (CDN cache)`);
-        results.B4 = NOTE + ' — event not in listEvents; CDN lag';
-      }
-    } catch (e) {
-      log('B4', `RENAME FAILED: ${e.message}`);
-      results.B4 = FAIL + ' — rename failed: ' + e.message;
-    }
-  } else {
-    results.B4 = FAIL + ' — no active Apple ledger row for B4 task';
-  }
+  log('SETUP', 'Event URLs — B2:' + (b2Url ? 'ok' : 'MISSING') +
+    ' B3:' + (b3Url ? 'ok' : 'MISSING') + ' B4:' + (b4Url ? 'ok' : 'MISSING') +
+    ' C1:' + (c1Url ? 'ok' : 'MISSING') + ' C2:' + (c2Url ? 'ok' : 'MISSING'));
 
-  // ── Wait for CDN propagation + trigger sync 1 ────────────────────────────
-  log('SYNC', 'Waiting 35s for CDN propagation...');
-  await sleep(35000);
-  log('SYNC', 'Triggering sync 1...');
-  const s1 = await triggerSync();
-  log('SYNC-1', `pushed=${s1.pushed} pulled=${s1.pulled} del_local=${s1.deleted_local} del_remote=${s1.deleted_remote} errors=${s1.errors?.length || 0}`);
-
-  // ── Check B1 result ───────────────────────────────────────────────────────
+  // ── B1: Check if native event was pulled ───────────────────────────────────
   if (!results.B1) {
-    // Look for a task with origin='apple' and text matching B1
-    const b1Pulled = await db('cal_sync_ledger as l')
-      .join('task_instances as ti', 'ti.id', 'l.task_id')
-      .join('task_masters as m', 'm.id', 'ti.master_id')
-      .where('l.provider', 'apple')
-      .where('l.provider_event_id', b1EventUrl || '')
-      .first();
-    if (b1Pulled) {
-      const master = await getTaskMasterById(b1Pulled.master_id);
-      const when = b1Pulled.when || (master && master.when);
-      results.B1 = (b1Pulled.origin === 'apple')
-        ? `${PASS} — imported as task ${b1Pulled.task_id}, origin='apple', when='${b1Pulled.when || 'check task'}'`
-        : `${FAIL} — pulled but origin='${b1Pulled.origin}' (expected 'apple')`;
-    } else {
-      // Maybe it's in the tasks_v via origin field
-      const b1Task = await db.raw(`
-        SELECT l.task_id, l.origin, m.text, ti.scheduled_at
-        FROM cal_sync_ledger l
-        JOIN task_instances ti ON ti.id = l.task_id
-        JOIN task_masters m ON m.id = ti.master_id
-        WHERE l.provider='apple' AND l.status='active'
-          AND m.text LIKE '%SOAK-B1%'
-        LIMIT 1
-      `);
-      const row = b1Task[0]?.[0];
-      results.B1 = row
-        ? `${PASS} — pulled as task ${row.task_id}, origin='${row.origin}', text='${row.text}'`
-        : `${NOTE} — not yet visible after sync 1; may need another cycle`;
-    }
+    const rows = await db.raw(
+      `SELECT l.task_id, l.origin, m.text
+       FROM cal_sync_ledger l
+       JOIN task_instances ti ON ti.id = l.task_id
+       JOIN task_masters m ON m.id = ti.master_id
+       WHERE l.provider='apple' AND l.status='active' AND m.text LIKE ?
+       LIMIT 1`,
+      ['%SOAK-B1-' + RUN_TS + '%']
+    );
+    const row = rows[0]?.[0];
+    results.B1 = row
+      ? PASS + ' — pulled as task ' + row.task_id + ", origin='" + row.origin + "'"
+      : NOTE + ' — not yet visible after sync 0 + CDN wait; will appear on next sync';
   }
   log('B1', results.B1);
 
-  // ── Check B2 result (juggler should NOT have updated the task time) ────────
-  if (!results.B2) {
-    const b2Row = await getLedgerRow(B2_ID);
-    const b2Task = await getTaskById(B2_ID);
-    if (b2Row && b2Task) {
-      // Juggler should keep its version; scheduled_at should still be 14:00 UTC (10am ET)
-      const scheduledHour = new Date(b2Task.scheduled_at).getUTCHours();
-      results.B2 = (scheduledHour === 14)
-        ? `${PASS} — juggler task time unchanged (still 10am ET = 14:00 UTC); juggler wins`
-        : `${FAIL} — task time changed to ${b2Task.scheduled_at} — juggler was overwritten by Apple move`;
+  // ── Phase 3: CalDAV modifications (before Sync 1) ─────────────────────────
+
+  // B2: Move event time to 3pm — juggler should ignore on next sync
+  if (b2Url) {
+    const b2ICS = await fetchEventByUrl(b2Url);
+    if (b2ICS) {
+      const modICS = b2ICS.raw
+        .replace(/DTSTART[^\r\n]*/g, 'DTSTART;TZID=America/New_York:' + TOMORROW_YYYYMMDD + 'T150000')
+        .replace(/DTEND[^\r\n]*/g,   'DTEND;TZID=America/New_York:'   + TOMORROW_YYYYMMDD + 'T154500');
+      const st = await putEventByUrl(b2Url, modICS, b2ICS.etag);
+      log('B2', 'PUT modified time → HTTP ' + st);
     } else {
-      results.B2 = `${NOTE} — could not find ledger/task row`;
+      log('B2', 'Event ICS not yet fetchable by URL (CDN); skipping time modification');
+      results.B2 = NOTE + ' — event ICS not fetchable by URL after ' + (CDN_WAIT_MS / 1000) + 's';
+    }
+  } else {
+    results.B2 = FAIL + ' — no active Apple ledger row for B2 after recovery sync';
+  }
+
+  // B3: Delete event — juggler should hit MISS_THRESHOLD after 3 syncs
+  if (b3Url && B3_ID) {
+    // Guard: if any GCal/MSFT row has null provider_event_id (push failure under load),
+    // mark those rows 'replaced' so they don't reach MISS_THRESHOLD before Apple does.
+    const nullRows = await db('cal_sync_ledger')
+      .where({ task_id: B3_ID, status: 'active' })
+      .whereIn('provider', ['gcal', 'msft'])
+      .whereNull('provider_event_id')
+      .count('id as n').first();
+    if (parseInt(nullRows.n) > 0) {
+      log('B3', 'WARNING: ' + nullRows.n + ' GCal/MSFT row(s) have null provider_event_id — marking replaced for isolation');
+      await db('cal_sync_ledger')
+        .where({ task_id: B3_ID, status: 'active' })
+        .whereIn('provider', ['gcal', 'msft'])
+        .whereNull('provider_event_id')
+        .update({ status: 'replaced' });
+    }
+    const st = await deleteEventByUrl(b3Url);
+    log('B3', 'CalDAV DELETE → HTTP ' + st);
+    if (st === 0) {
+      // HTTP 0 = connection error; try with the CalDAV library
+      try {
+        await appleCalApi.deleteEvent(client, b3Url, null);
+        log('B3', 'CalDAV lib DELETE succeeded');
+      } catch (e) {
+        log('B3', 'CalDAV lib DELETE also failed: ' + e.message);
+      }
+    }
+  } else {
+    results.B3 = FAIL + ' — no active Apple ledger row for B3 after recovery sync';
+    log('B3', results.B3);
+  }
+
+  // B4: Rename event in CalDAV — juggler should keep its text (no pull for juggler-origin)
+  if (b4Url) {
+    const b4ICS = await fetchEventByUrl(b4Url);
+    if (b4ICS) {
+      const renamedICS = b4ICS.raw.replace(/SUMMARY:[^\r\n]*/, 'SUMMARY:SOAK-B4: RENAMED BY APPLE');
+      const st = await putEventByUrl(b4Url, renamedICS, b4ICS.etag);
+      log('B4', 'PUT renamed summary → HTTP ' + st);
+    } else {
+      log('B4', 'Event ICS not fetchable; skipping rename');
+      results.B4 = NOTE + ' — event ICS not fetchable';
+    }
+  } else {
+    results.B4 = FAIL + ' — no active Apple ledger row for B4 after recovery sync';
+  }
+
+  // C1: Edit juggler task (changes hash) + edit Apple event (different title)
+  //     On next sync: juggler detects hash diff → pushes its title → Apple edit overwritten
+  if (c1Url && C1_ID) {
+    const jugglerTitle = 'SOAK-C1-' + RUN_TS + ': JUGGLER TITLE (should win)';
+    const c1Edit = await apiPut('/tasks/' + C1_ID, { text: jugglerTitle });
+    log('C1', 'Juggler edit: ' + (c1Edit.body?.task?.text || 'FAILED'));
+
+    const c1ICS = await fetchEventByUrl(c1Url);
+    if (c1ICS) {
+      const appleICS = c1ICS.raw.replace(/SUMMARY:[^\r\n]*/, 'SUMMARY:SOAK-C1: APPLE TITLE (should lose)');
+      const st = await putEventByUrl(c1Url, appleICS, c1ICS.etag);
+      log('C1', 'Apple event edit → HTTP ' + st);
+    } else {
+      log('C1', 'Apple event ICS not fetchable — testing juggler-only hash-change path');
+    }
+  } else {
+    results.C1 = FAIL + ' — no active Apple ledger row for C1 after recovery sync';
+  }
+
+  // C2: Delete Apple event + immediately edit juggler task
+  //     Sync 1: CDN grace expired, hash changed → deferred to next miss
+  //     Sync 2: miss_count>=1 + hash changed → re-create fires
+  if (c2Url && C2_ID) {
+    const st = await deleteEventByUrl(c2Url);
+    log('C2', 'CalDAV DELETE → HTTP ' + st);
+    const c2Edit = await apiPut('/tasks/' + C2_ID, { text: 'SOAK-C2-' + RUN_TS + ': MODIFIED AFTER APPLE DELETE' });
+    log('C2', 'Juggler edit: ' + (c2Edit.body?.task?.text || 'FAILED'));
+  } else {
+    results.C2 = FAIL + ' — no active Apple ledger row for C2 after recovery sync';
+  }
+
+  // C4: Three juggler edits with no intermediate sync → verify final state pushed
+  if (C4_ID) {
+    await apiPut('/tasks/' + C4_ID, { text: 'SOAK-C4-' + RUN_TS + ': Edit 1' });
+    await apiPut('/tasks/' + C4_ID, { text: 'SOAK-C4-' + RUN_TS + ': Edit 2' });
+    const c4Final = await apiPut('/tasks/' + C4_ID, { text: 'SOAK-C4-' + RUN_TS + ': Edit 3 FINAL' });
+    log('C4', '3 edits done. Final title: ' + (c4Final.body?.task?.text || 'unknown'));
+  }
+
+  // ── Sync 1 ─────────────────────────────────────────────────────────────────
+  log('SYNC', 'Triggering sync 1...');
+  const s1 = await triggerSync();
+  log('SYNC-1', 'pushed=' + s1.pushed + ' pulled=' + s1.pulled + ' del_local=' + s1.deleted_local + ' del_remote=' + s1.deleted_remote + ' errors=' + s1.errors);
+
+  // B1: check again if not already found
+  if (results.B1?.startsWith(NOTE)) {
+    const rows = await db.raw(
+      `SELECT l.task_id, l.origin FROM cal_sync_ledger l
+       JOIN task_instances ti ON ti.id = l.task_id
+       JOIN task_masters m ON m.id = ti.master_id
+       WHERE l.provider='apple' AND l.status='active' AND m.text LIKE ? LIMIT 1`,
+      ['%SOAK-B1-' + RUN_TS + '%']
+    );
+    const row = rows[0]?.[0];
+    if (row) results.B1 = PASS + ' — pulled on sync 1: task ' + row.task_id + ", origin='" + row.origin + "'";
+  }
+  log('B1', results.B1);
+
+  // B2: verify juggler task time unchanged
+  if (!results.B2 && B2_ID) {
+    const task = await db('task_instances').where({ id: B2_ID }).first();
+    if (task) {
+      const h = task.scheduled_at ? new Date(String(task.scheduled_at).replace(' ', 'T') + 'Z').getUTCHours() : null;
+      results.B2 = h === 14
+        ? PASS + ' — juggler task time unchanged (10am EDT = 14:00 UTC); juggler wins'
+        : FAIL + ' — task UTC hour changed to ' + h + ' (was 14) — Apple edit was pulled';
+    } else {
+      results.B2 = NOTE + ' — task instance not found (may have been deleted)';
     }
   }
   log('B2', results.B2);
 
-  // ── Check B4 result (juggler should push its title back) ─────────────────
-  if (!results.B4) {
-    const b4Row = await getLedgerRow(B4_ID);
-    const b4Task = await getTaskById(B4_ID);
-    const b4Master = b4Task ? await getTaskMasterById(b4Task.master_id) : null;
-    if (b4Master) {
-      results.B4 = b4Master.text === 'SOAK-B4: Rename me in Apple Cal'
-        ? `${PASS} — juggler text unchanged ('${b4Master.text}'); juggler wins on pull`
-        : `${FAIL} — task text changed to '${b4Master.text}'`;
+  // B3: check miss count after sync 1
+  if (!results.B3 && B3_ID) {
+    const r = await getLedgerRow(B3_ID);
+    log('B3', 'After sync 1: status=' + r?.status + ' miss_count=' + r?.miss_count);
+  }
+
+  // B4: verify juggler task text unchanged (the Apple rename should NOT be pulled)
+  if (!results.B4 && B4_ID) {
+    const master = await db('task_masters as m')
+      .join('task_instances as ti', 'ti.master_id', 'm.id')
+      .where('ti.id', B4_ID)
+      .select('m.text').first();
+    const jugglerText = 'SOAK-B4-' + RUN_TS + ': Apple renames this';
+    if (master) {
+      results.B4 = master.text === jugglerText
+        ? PASS + " — juggler text unchanged; Apple rename was not pulled (juggler wins on pull)"
+        : FAIL + " — juggler text changed to '" + master.text + "' — Apple rename was pulled";
     } else {
-      results.B4 = `${NOTE} — task master not found`;
+      results.B4 = NOTE + ' — task master not found';
     }
   }
   log('B4', results.B4);
 
-  // B3 needs 3 sync cycles to confirm deletion
-  log('B3', 'Sync 1 done. B3 needs 2 more syncs (MISS_THRESHOLD=3)...');
-
-  // ── C2: Delete Apple event + edit juggler task before next sync ──────────
-  log('C2', 'Setup: deleting B2 event from CalDAV + editing B2 task title...');
-  const c2EventUrl = await getAppleEventUrl(B2_ID);
-  if (c2EventUrl) {
-    // Step 1: delete from Apple
-    try {
-      await client.deleteCalendarObject({ calendarObject: { url: c2EventUrl } });
-      log('C2', 'Deleted B2 event from CalDAV');
-    } catch (e) {
-      log('C2', `Delete failed: ${e.message}`);
-    }
-    // Step 2: immediately edit B2 task in juggler (within seconds)
-    const editRes = await fetch(`http://localhost:5002/api/tasks/${B2_ID}`, {
-      method: 'PUT',
-      headers: { 'Authorization': 'Bearer ' + JWT, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: 'SOAK-C2: Modified after Apple delete' })
-    });
-    const editData = await editRes.json();
-    log('C2', editData.task ? `Juggler task edited: ${editData.task.text}` : `Edit failed: ${JSON.stringify(editData)}`);
+  // C3: check how many tasks made it to Apple ledger
+  if (c3Ids.length > 0) {
+    const r = await db('cal_sync_ledger').where({ provider: 'apple', status: 'active' })
+      .whereIn('task_id', c3Ids).count('id as n').first();
+    const n = parseInt(r.n);
+    results.C3 = n === c3Ids.length
+      ? PASS + ' — all ' + n + '/' + c3Ids.length + ' C3 tasks synced to Apple'
+      : PARTIAL + ' — ' + n + '/' + c3Ids.length + ' synced; ' + (c3Ids.length - n) + ' missing (rate limit?)';
   } else {
-    log('C2', 'No B2 event URL available for C2 test');
-    results.C2 = NOTE + ' — B2 event URL not available';
+    results.C3 = FAIL + ' — no C3 tasks created';
   }
+  log('C3', results.C3);
 
-  // ── C3: Rapid-fire 10 tasks ───────────────────────────────────────────────
-  log('C3', 'Creating 10 tasks in rapid succession...');
-  const c3Ids = [];
-  for (let i = 1; i <= 10; i++) {
-    const r = await fetch('http://localhost:5002/api/tasks', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + JWT, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: `SOAK-C3-${String(i).padStart(2,'0')}: Rapid fire`,
-        when: 'fixed',
-        date: '4/28',
-        time: `${9 + i}:00 AM`,
-        dur: 30
-      })
-    });
-    const d = await r.json();
-    if (d.task?.id) c3Ids.push(d.task.id);
+  // C4: verify final edit reflected in Apple CalDAV event
+  if (C4_ID) {
+    const row = await getLedgerRow(C4_ID);
+    if (row?.status === 'active') {
+      const c4Url = row.provider_event_id;
+      const ics = c4Url ? await fetchEventByUrl(c4Url) : null;
+      if (ics && ics.raw.includes('Edit 3 FINAL')) {
+        results.C4 = PASS + ' — CalDAV event SUMMARY contains final edit text';
+      } else if (ics) {
+        results.C4 = NOTE + ' — event fetched but Edit 3 FINAL not in SUMMARY (CDN lag or push not yet reflected)';
+      } else {
+        results.C4 = NOTE + ' — active row; event URL=' + (c4Url ? 'ok' : 'null') + ' (CDN lag)';
+      }
+    } else {
+      results.C4 = FAIL + ' — no active Apple ledger row for C4 after sync 1';
+    }
   }
-  log('C3', `Created ${c3Ids.length} tasks`);
+  log('C4', results.C4);
 
-  // ── Sync 2 ────────────────────────────────────────────────────────────────
-  log('SYNC', 'Waiting 35s, then sync 2 (B3 needs 2 more misses)...');
+  // ── Sync 2 (35s wait) — B3 miss+2, C2 re-create fires ────────────────────
+  log('SYNC', 'Waiting 35s, then sync 2...');
   await sleep(35000);
   log('SYNC', 'Triggering sync 2...');
   const s2 = await triggerSync();
-  log('SYNC-2', `pushed=${s2.pushed} pulled=${s2.pulled} del_local=${s2.deleted_local} del_remote=${s2.deleted_remote} errors=${s2.errors?.length || 0}`);
+  log('SYNC-2', 'pushed=' + s2.pushed + ' del_remote=' + s2.deleted_remote + ' errors=' + s2.errors);
 
-  // Check B3 miss count after sync 2
-  const b3Row2 = await getLedgerRow(B3_ID);
-  log('B3', `After sync 2: status=${b3Row2?.status} miss_count=${b3Row2?.miss_count}`);
+  if (!results.B3 && B3_ID) {
+    const r = await getLedgerRow(B3_ID);
+    log('B3', 'After sync 2: status=' + r?.status + ' miss_count=' + r?.miss_count);
+  }
+  if (!results.C2 && C2_ID) {
+    const rows = await db('cal_sync_ledger').where({ task_id: C2_ID, provider: 'apple' }).orderBy('id', 'desc').limit(3);
+    log('C2', 'After sync 2: statuses=[' + rows.map(r => r.status).join(',') + ']');
+  }
 
-  // Check C2 after sync 2 — B2 was deleted+modified, should have been re-created
-  const c2LedgerRows = await db('cal_sync_ledger')
-    .where({ task_id: B2_ID, provider: 'apple' })
-    .orderBy('id', 'desc')
-    .limit(3);
-  const c2Active = c2LedgerRows.find(r => r.status === 'active');
-  log('C2', `After sync 2: active rows=${c2LedgerRows.filter(r=>r.status==='active').length}, statuses=[${c2LedgerRows.map(r=>r.status).join(',')}]`);
-
-  // ── Sync 3 ────────────────────────────────────────────────────────────────
-  log('SYNC', 'Waiting 35s, then sync 3 (should trigger B3 deletion)...');
+  // ── Sync 3 (35s wait) — B3 miss+3 = MISS_THRESHOLD ──────────────────────
+  log('SYNC', 'Waiting 35s, then sync 3...');
   await sleep(35000);
   log('SYNC', 'Triggering sync 3...');
   const s3 = await triggerSync();
-  log('SYNC-3', `pushed=${s3.pushed} pulled=${s3.pulled} del_local=${s3.deleted_local} del_remote=${s3.deleted_remote} errors=${s3.errors?.length || 0}`);
+  log('SYNC-3', 'pushed=' + s3.pushed + ' del_remote=' + s3.deleted_remote + ' errors=' + s3.errors);
 
-  // ── Check B3 final ────────────────────────────────────────────────────────
-  if (!results.B3) {
-    const b3RowFinal = await getLedgerRow(B3_ID);
-    const b3TaskFinal = await getTaskById(B3_ID);
-    if (b3RowFinal?.status === 'deleted_remote' && !b3TaskFinal) {
-      results.B3 = `${PASS} — task deleted after MISS_THRESHOLD, ledger → deleted_remote`;
-    } else if (b3RowFinal?.status === 'deleted_remote') {
-      results.B3 = `${PASS} (partial) — ledger → deleted_remote but task instance still exists`;
+  // B3 final
+  if (!results.B3 && B3_ID) {
+    const row = await getLedgerRow(B3_ID);
+    const task = await db('task_instances').where({ id: B3_ID }).first();
+    if (row?.status === 'deleted_remote' && !task) {
+      results.B3 = PASS + ' — task deleted after MISS_THRESHOLD; ledger → deleted_remote';
+    } else if (row?.status === 'deleted_remote') {
+      results.B3 = PARTIAL + ' — ledger → deleted_remote but task instance still in DB';
     } else {
-      results.B3 = `${FAIL} — after 3 syncs: ledger status=${b3RowFinal?.status} miss_count=${b3RowFinal?.miss_count}, task ${b3TaskFinal ? 'still exists' : 'deleted'}`;
+      results.B3 = FAIL + ' — after 3 syncs: status=' + row?.status + ' miss_count=' + row?.miss_count + ', task ' + (task ? 'still exists' : 'deleted');
     }
   }
   log('B3', results.B3);
 
-  // ── Check B5: delete the B1 native event (origin='apple') ────────────────
-  // First find the juggler task that was created for B1
-  const b1TaskRows = await db.raw(`
-    SELECT l.task_id, l.provider_event_id, l.status, l.miss_count, m.text
-    FROM cal_sync_ledger l
-    JOIN task_instances ti ON ti.id = l.task_id
-    JOIN task_masters m ON m.id = ti.master_id
-    WHERE l.provider='apple' AND m.text LIKE '%SOAK-B1%'
-    LIMIT 1
-  `);
-  const b1Task = b1TaskRows[0]?.[0];
-  if (b1Task && b1EventUrl) {
-    log('B5', `Found B1 task: ${b1Task.task_id}, deleting its Apple event...`);
-    try {
-      await client.deleteCalendarObject({ calendarObject: { url: b1EventUrl } });
-      log('B5', 'Deleted B1 native event from CalDAV — watching for MISS_THRESHOLD deletion...');
-    } catch (e) {
-      log('B5', `Delete failed: ${e.message}`);
-      results.B5 = FAIL + ' — delete failed: ' + e.message;
-    }
-  } else {
-    log('B5', `${NOTE} B1 task not found yet (B1 may have failed) — skipping B5`);
-    results.B5 = NOTE + ' — B1 task not found, B5 skipped';
-  }
-
-  // ── Check C2 final ────────────────────────────────────────────────────────
-  if (!results.C2) {
-    const c2FinalRows = await db('cal_sync_ledger')
-      .where({ task_id: B2_ID, provider: 'apple' })
-      .orderBy('id', 'desc');
-    const c2Active2 = c2FinalRows.find(r => r.status === 'active');
-    if (c2Active2) {
-      results.C2 = `${PASS} — event re-created after Apple delete + juggler edit; new URL: ${c2Active2.provider_event_id?.slice(-40)}`;
+  // C1 final — fetch CalDAV event to verify juggler's title won
+  if (!results.C1 && C1_ID) {
+    const c1ActiveUrl = await getAppleEventUrl(C1_ID);
+    if (c1ActiveUrl) {
+      const ics = await fetchEventByUrl(c1ActiveUrl);
+      if (ics) {
+        const hasJugglerTitle = ics.raw.includes('JUGGLER TITLE');
+        const hasAppleTitle   = ics.raw.includes('APPLE TITLE');
+        results.C1 = hasJugglerTitle
+          ? PASS + ' — CalDAV event has juggler title; Apple edit overwritten'
+          : hasAppleTitle
+            ? FAIL + " — Apple title persists in CalDAV; juggler didn't re-push"
+            : NOTE + ' — event fetched but title unclear in ICS';
+      } else {
+        results.C1 = NOTE + ' — event not fetchable by URL (CDN lag)';
+      }
     } else {
-      // The miss_count guard means it needs at least miss_count>=1 before re-creating
-      // After sync 3, the re-create should have happened
-      results.C2 = `${NOTE} — no active row after sync 3; statuses=[${c2FinalRows.map(r=>r.status).join(',')}]`;
+      results.C1 = NOTE + ' — no active Apple ledger row for C1 after 3 syncs';
     }
+  }
+  log('C1', results.C1);
+
+  // C2 final — should have new active row after re-create
+  if (!results.C2 && C2_ID) {
+    const rows = await db('cal_sync_ledger').where({ task_id: C2_ID, provider: 'apple' }).orderBy('id', 'desc');
+    const active = rows.find(r => r.status === 'active');
+    results.C2 = active
+      ? PASS + ' — event re-created; new active row: ' + active.provider_event_id?.slice(-40)
+      : NOTE + ' — no active row after sync 3; statuses=[' + rows.map(r => r.status).join(',') + ']';
   }
   log('C2', results.C2);
 
-  // ── Check C3: all 10 pushed to Apple? ────────────────────────────────────
-  if (!results.C3) {
-    const c3Pushed = await db('cal_sync_ledger')
-      .where({ provider: 'apple', status: 'active' })
-      .whereIn('task_id', c3Ids)
-      .count('id as n')
-      .first();
-    const n = parseInt(c3Pushed.n);
-    results.C3 = n === 10
-      ? `${PASS} — all 10 tasks synced to Apple (${n}/10)`
-      : `${NOTE} — ${n}/10 tasks synced; may need another sync cycle`;
+  // ── B5: Delete B1 native event → MISS_THRESHOLD for origin='apple' task ────
+  let B5_TASK_ID = null;
+  let B5_EVENT_URL = null;
+  const b1TaskRows = await db.raw(
+    `SELECT l.task_id, l.provider_event_id FROM cal_sync_ledger l
+     JOIN task_instances ti ON ti.id = l.task_id
+     JOIN task_masters m ON m.id = ti.master_id
+     WHERE l.provider='apple' AND l.status='active' AND m.text LIKE ? LIMIT 1`,
+    ['%SOAK-B1-' + RUN_TS + '%']
+  );
+  const b1Row = b1TaskRows[0]?.[0];
+  if (b1Row) {
+    B5_TASK_ID   = b1Row.task_id;
+    // Guard: GCal/MSFT rows with null provider_event_id could hit MISS_THRESHOLD first
+    const b5NullRows = await db('cal_sync_ledger')
+      .where({ task_id: B5_TASK_ID, status: 'active' })
+      .whereIn('provider', ['gcal', 'msft'])
+      .whereNull('provider_event_id')
+      .count('id as n').first();
+    if (parseInt(b5NullRows.n) > 0) {
+      log('B5', 'WARNING: ' + b5NullRows.n + ' GCal/MSFT row(s) with null provider_event_id — marking replaced for isolation');
+      await db('cal_sync_ledger')
+        .where({ task_id: B5_TASK_ID, status: 'active' })
+        .whereIn('provider', ['gcal', 'msft'])
+        .whereNull('provider_event_id')
+        .update({ status: 'replaced' });
+    }
+    // Native pulled events store UID (not full URL) in provider_event_id.
+    // Reconstruct CalDAV URL if needed.
+    const rawId = b1Row.provider_event_id;
+    B5_EVENT_URL = rawId && rawId.startsWith('http')
+      ? rawId
+      : CALENDAR_URL + (rawId || b1Uid) + '.ics';
+    log('B5', 'Found B1 task ' + B5_TASK_ID + '; deleting its Apple event...');
+    let st = await deleteEventByUrl(B5_EVENT_URL);
+    log('B5', 'DELETE → HTTP ' + st);
+    if (st === 0 || (st >= 500 && st < 600)) {
+      try {
+        await appleCalApi.deleteEvent(client, B5_EVENT_URL, null);
+        log('B5', 'CalDAV lib DELETE succeeded');
+        st = 204;
+      } catch (e) {
+        log('B5', 'CalDAV lib DELETE also failed: ' + e.message);
+      }
+    }
+  } else {
+    log('B5', 'B1 task not found in ledger — B5 not testable');
+    results.B5 = NOTE + ' — B1 task not pulled yet; B5 requires B1 to pass first';
   }
-  log('C3', results.C3);
 
-  // ── D: Stability baseline (count active/deleted) ─────────────────────────
-  const activeCount = await countAppleActiveLedger();
-  log('D', `Baseline after B/C tests: ${activeCount} active Apple ledger rows`);
-
-  // ── B5 needs 3 more syncs ─────────────────────────────────────────────────
-  if (!results.B5 && b1Task) {
-    log('B5', 'Running 3 more syncs for B5 MISS_THRESHOLD...');
+  // B5 needs 3 sync cycles for MISS_THRESHOLD
+  if (B5_TASK_ID) {
+    for (let i = 4; i <= 6; i++) {
+      log('SYNC', 'Waiting 35s, then sync ' + i + '...');
+      await sleep(35000);
+      const si = await triggerSync();
+      log('SYNC-' + i, 'pushed=' + si.pushed + ' del_remote=' + si.deleted_remote + ' errors=' + si.errors);
+    }
+    const b5Task = await db('task_instances').where({ id: B5_TASK_ID }).first();
+    // task_id is NULLed on the ledger row after MISS_THRESHOLD deletion — query by task gone, not ledger status
+    if (!b5Task) {
+      results.B5 = PASS + ' — native Apple task deleted after MISS_THRESHOLD';
+    } else {
+      const b5Row = await db('cal_sync_ledger').where({ task_id: B5_TASK_ID, provider: 'apple' }).orderBy('id', 'desc').first();
+      results.B5 = FAIL + ' — status=' + b5Row?.status + ' miss_count=' + b5Row?.miss_count + ', task still exists';
+    }
+  } else {
     for (let i = 4; i <= 6; i++) {
       await sleep(35000);
       const si = await triggerSync();
-      log(`SYNC-${i}`, `pushed=${si.pushed} pulled=${si.pulled} del_remote=${si.deleted_remote}`);
+      log('SYNC-' + i, 'pushed=' + si.pushed + ' del_remote=' + si.deleted_remote);
     }
-    const b5RowFinal = await db('cal_sync_ledger')
-      .where({ task_id: b1Task.task_id, provider: 'apple' })
-      .orderBy('id', 'desc').first();
-    const b5TaskFinal = await getTaskById(b1Task.task_id);
-    if (b5RowFinal?.status === 'deleted_remote' && !b5TaskFinal) {
-      results.B5 = `${PASS} — native Apple task deleted after MISS_THRESHOLD`;
-    } else {
-      results.B5 = `${FAIL} — ledger status=${b5RowFinal?.status} miss_count=${b5RowFinal?.miss_count}, task ${b5TaskFinal ? 'still exists' : 'deleted'}`;
-    }
-    log('B5', results.B5);
   }
+  log('B5', results.B5);
 
-  // ── D soak: 30 minutes ambient, snapshot every 10 min ────────────────────
+  // ── D: 30-min ambient stability soak ─────────────────────────────────────
   log('D', 'Starting 30-min ambient soak...');
   const snapshots = [];
   for (let t = 0; t <= 30; t += 10) {
     if (t > 0) {
-      log('D', `Waiting 10 min (${t}/30)...`);
+      log('D', 'Waiting 10 min (t+' + t + ')...');
       await sleep(600000);
+      await triggerSync();
     }
-    await triggerSync();
     const snap = await db('cal_sync_ledger')
       .where({ user_id: USER_ID, provider: 'apple' })
       .groupBy('status')
       .select('status', db.raw('COUNT(*) as n'));
-    const snapStr = snap.map(r => `${r.status}=${r.n}`).join(' ');
-    snapshots.push(`+${t}min: ${snapStr}`);
+    const snapStr = snap.map(r => r.status + '=' + r.n).join(' ');
+    snapshots.push('+' + t + 'min: ' + snapStr);
     log('D', snapshots[snapshots.length - 1]);
   }
 
-  // ── Final summary ────────────────────────────────────────────────────────
-  console.log('\n═══════════════ APPLE B–D SOAK RESULTS ═══════════════');
-  const order = ['B1','B2','B3','B4','B5','C2','C3'];
-  for (const k of order) {
-    console.log(`  ${k}: ${results[k] || '(no result recorded)'}`);
+  const actives = snapshots.map(s => parseInt(s.match(/active=(\d+)/)?.[1] || 0));
+  const maxOscillation = Math.max(...actives) - Math.min(...actives);
+  results.D = maxOscillation <= 5
+    ? PASS + ' — 30min stable; active oscillation ≤5 (max=' + Math.max(...actives) + ' min=' + Math.min(...actives) + ')'
+    : NOTE + ' — active oscillation=' + maxOscillation + '; check snapshots';
+
+  // ── Final summary ──────────────────────────────────────────────────────────
+  console.log('\n══════════════════ APPLE B–D SOAK RESULTS ══════════════════');
+  for (const k of ['B1', 'B2', 'B3', 'B4', 'B5', 'C1', 'C2', 'C3', 'C4']) {
+    console.log('  ' + k + ': ' + (results[k] || '(no result recorded)'));
   }
   console.log('\n  D — Stability snapshots:');
-  for (const s of snapshots) console.log(`    ${s}`);
-  console.log('═══════════════════════════════════════════════════════\n');
+  for (const s of snapshots) console.log('    ' + s);
+  console.log('  D: ' + (results.D || ''));
+  console.log('═════════════════════════════════════════════════════════════\n');
 
   await db.destroy();
 }
 
 main().catch(e => {
-  console.error('FATAL:', e.message, e.stack);
+  console.error('FATAL:', e.message);
+  console.error(e.stack);
   process.exit(1);
 });
