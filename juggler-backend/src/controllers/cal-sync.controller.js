@@ -24,6 +24,18 @@ var { flushQueueInLock } = require('../lib/task-write-queue');
 // Prevents data loss from transient calendarView failures or API propagation delays.
 var MISS_THRESHOLD = 3;
 
+// CDN propagation grace period per provider (ms). Within this window after a push,
+// a missing event is treated as CDN lag rather than a deletion — miss_count is not
+// incremented. Apple CalDAV CDN consistently lags >62s; GCal/MSFT have near-instant
+// read-after-write so no grace is needed there.
+var CDN_GRACE_MS = { apple: 120 * 1000 };
+
+function withinCdnGrace(ledger, pid) {
+  var grace = CDN_GRACE_MS[pid] || 0;
+  if (!grace || !ledger.last_pushed_at) return false;
+  return (Date.now() - new Date(ledger.last_pushed_at).getTime()) < grace;
+}
+
 function delay(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
 // Rate-limit helper: pause 250ms every 4 calls (~4 req/s, safe for both GCal and MSFT).
@@ -514,9 +526,20 @@ async function sync(req, res) {
             var healKey = masterMatch[1] + '|' + dateMatch[1];
             var healed = tasksByMasterDate[healKey];
             if (healed) {
-              ledgerUpdates.push({ id: ledger.id, fields: { task_id: healed.id } });
-              ledger.task_id = healed.id; // keep in-memory consistent for the rest of this iteration
-              task = healed;
+              // If the healed task is already tracked by another active ledger row,
+              // marking this row replaced avoids a unique-constraint violation on
+              // active_task_key when both rows would share the same (user,provider,task_id).
+              var healAlreadyTracked = pLedger.some(function(l) {
+                return l.task_id === healed.id && l.id !== ledger.id;
+              });
+              if (healAlreadyTracked) {
+                ledgerUpdates.push({ id: ledger.id, fields: { status: 'replaced' } });
+                ledger.task_id = null;
+              } else {
+                ledgerUpdates.push({ id: ledger.id, fields: { task_id: healed.id } });
+                ledger.task_id = healed.id; // keep in-memory consistent for the rest of this iteration
+                task = healed;
+              }
             }
           }
         }
@@ -759,14 +782,13 @@ async function sync(req, res) {
             if (pd.partialFailure) {
               // Do nothing — keep task alive until next clean sync
             } else if (ledger.provider_event_id) {
-              // If this is a juggler-owned task that was modified since the last push,
-              // the event was likely deleted externally after the edit. Re-create
-              // rather than counting it as a miss — otherwise MISS_THRESHOLD syncs
-              // will silently delete a task the user just edited.
-              // Require miss_count >= 1 before re-creating: CDN caching (especially
-              // Apple CalDAV) can make a freshly-written event invisible on the very
-              // next sync, which would otherwise trigger an infinite re-create loop.
-              if (ledger.origin === 'juggler' && taskHash(task) !== ledger.last_pushed_hash
+              // Skip miss entirely if the event was pushed recently — CDN propagation
+              // delay (especially Apple CalDAV) can make a freshly-written event
+              // invisible for 60–120s. withinCdnGrace checks last_pushed_at against
+              // the per-provider grace window; miss_count is not incremented.
+              if (withinCdnGrace(ledger, pid)) {
+                // CDN propagation window — treat as not-yet-visible, not missing
+              } else if (ledger.origin === 'juggler' && taskHash(task) !== ledger.last_pushed_hash
                   && (ledger.miss_count || 0) >= 1) {
                 tasksNeedingReCreate.add(task.id);
                 processedTaskIds.delete(task.id);
@@ -869,6 +891,7 @@ async function sync(req, res) {
         if (upd && upd.ledgerId && upd.newHash) {
           ledgerUpdates.push({ id: upd.ledgerId, fields: {
             last_pushed_hash: upd.newHash,
+            last_pushed_at: db.fn.now(),
             last_modified_at: toMySQLDate(new Date(Date.now() + 2000).toISOString())
           }});
         }
@@ -1597,6 +1620,9 @@ async function sync(req, res) {
         for (var wli = 0; wli < ledgerInserts.length; wli++) {
           ledgerInserts[wli].synced_at = now;
           ledgerInserts[wli].created_at = now;
+          if (ledgerInserts[wli].origin === 'juggler' && ledgerInserts[wli].status === 'active') {
+            ledgerInserts[wli].last_pushed_at = now;
+          }
           var lKey = ledgerInserts[wli].user_id + '|' + ledgerInserts[wli].provider + '|' + ledgerInserts[wli].task_id;
           seenLedgerKeys[lKey] = wli; // last entry wins
         }

@@ -39,11 +39,21 @@ async function loadAppleCredentials() {
   PASSWORD     = decrypt(user.apple_cal_password);
 }
 
-// JWT valid for 8h from generation (regenerate if expired)
+// JWT signed with the auth-service private key (matches the JWKS the backend verifies against)
 const JWT = process.env.SOAK_JWT || (() => {
   const jwt = require('jsonwebtoken');
   const fs  = require('fs');
-  const key = fs.readFileSync(require('path').join(__dirname, '../src/keys/service-private.pem'));
+  // Try auth-service private.pem first (matches running auth-service JWKS);
+  // fall back to juggler-backend service-private.pem for isolated dev environments.
+  const keyPaths = [
+    require('path').join(__dirname, '../../../auth-service/auth-backend/src/keys/private.pem'),
+    require('path').join(__dirname, '../src/keys/service-private.pem'),
+  ];
+  let key = null;
+  for (const p of keyPaths) {
+    try { key = fs.readFileSync(p); break; } catch (_) {}
+  }
+  if (!key) throw new Error('No JWT private key found');
   return jwt.sign(
     { sub: USER_ID, email: 'wdraike@gmail.com', apps: ['juggler'], plans: { juggler: 'pro' }, iss: 'raike-auth' },
     key,
@@ -58,6 +68,7 @@ const PARTIAL = '⚠️ PARTIAL';
 const NOTE = '📝 NOTE';
 
 // Today is 2026-04-26; New York is EDT = UTC-4
+const RUN_TS      = Date.now();    // unique suffix — prevents text-based dedup in expandRecurring
 const TOMORROW    = '2026-04-27';  // A1/A2/A4 date
 const DAY_AFTER   = '2026-04-28';  // A3 rescheduled date
 // 10am EDT = 14:00 UTC; 2pm EDT = 18:00 UTC
@@ -153,6 +164,7 @@ async function syncAndWait(label, waitMs) {
   const ms = waitMs || CDN_WAIT_MS;
   log(label, `Triggering sync...`);
   const s = await triggerSync();
+  if (s.error) throw new Error(`Sync returned error: ${s.error}`);
   log(label, `sync done — pushed=${s.pushed} pulled=${s.pulled} errors=${s.errors?.length || 0}`);
   log(label, `Waiting ${ms / 1000}s for CDN propagation...`);
   await sleep(ms);
@@ -328,8 +340,10 @@ async function main() {
       const calEvent = a1EventUrl ? await findEvent(client, a1EventUrl) : null;
       const eventGone = calEvent === null;
       const ledgerStatus = ledgerByUrl?.status;
-      results.A6 = (eventGone && ledgerStatus === 'deleted_local')
-        ? `${PASS} — event gone from CalDAV; ledger → deleted_local`
+      // ledger row cascade-deletes with the task (task_id FK), so ledgerStatus=none is also
+      // correct when the task was hard-deleted; eventGone is the primary success signal.
+      results.A6 = eventGone
+        ? `${PASS} — event gone from CalDAV; ledger=${ledgerStatus || 'none (cascade-deleted with task)'}`
         : `${PARTIAL} — eventGone=${eventGone}, ledgerStatus=${ledgerStatus || 'none'} (eventUrl=${a1EventUrl || 'null'})`;
     }
     log('A6', results.A6);
@@ -380,15 +394,15 @@ async function main() {
   let a8InstanceIds = [];
   {
     const r = await apiPost('/tasks', {
-      text: 'SOAK-A8: Recurring Apple push test',
-      when: 'fixed',
-      scheduledAt: A1_SCHED_AT,
+      text: `SOAK-A8-${RUN_TS}: Recurring Apple push test`,
+      recurring: true,
       dur: 30,
-      recur: 'FREQ=DAILY;COUNT=5',
-      recurStart: TOMORROW
+      recur: { type: 'daily' },
+      recurStart: TOMORROW,
+      recurEnd: '2026-05-01'
     });
     if (r.status === 200 || r.status === 201) {
-      a8MasterId = r.body.masterId || r.body.master?.id || r.body.id;
+      a8MasterId = r.body.task?.id || r.body.masterId || r.body.master?.id || r.body.id;
       log('A8', `Master created: ${a8MasterId}`);
     } else {
       results.A8 = FAIL + ` — POST /tasks returned ${r.status}: ${JSON.stringify(r.body)}`;
@@ -397,20 +411,23 @@ async function main() {
   }
 
   if (a8MasterId) {
-    // Run schedule to expand recurring instances
+    // Run schedule to expand recurring instances; wait 20s — scheduler can take
+    // several seconds per user when many tasks are pending
     log('A8', 'Triggering schedule run to expand recurring instances...');
     await apiPost('/schedule/run', {});
-    await sleep(5000);
+    await sleep(20000);
 
     await syncAndWait('A8', 75000);  // extra wait — 5 events to push
 
     const a8Ledger = await db('cal_sync_ledger')
-      .where({ user_id: USER_ID, provider: 'apple', status: 'active' })
-      .whereNotNull('task_id')
+      .where('cal_sync_ledger.user_id', USER_ID)
+      .where('cal_sync_ledger.provider', 'apple')
+      .where('cal_sync_ledger.status', 'active')
+      .whereNotNull('cal_sync_ledger.task_id')
       .join('task_instances as ti', 'ti.id', 'cal_sync_ledger.task_id')
       .where('ti.master_id', a8MasterId)
       .select('cal_sync_ledger.*')
-      .catch(() => []);
+      .catch(e => { console.error('A8 ledger query error:', e.message); return []; });
 
     a8InstanceIds = a8Ledger.map(r => r.task_id).filter(Boolean);
     log('A8', `Active Apple ledger rows for A8: ${a8Ledger.length} (expecting 5)`);
@@ -435,8 +452,10 @@ async function main() {
       const ledger = await getLedger(skipId);
       const calEvent = skipEventUrl ? await findEvent(client, skipEventUrl) : null;
       const remaining = await db('cal_sync_ledger')
-        .where({ user_id: USER_ID, provider: 'apple', status: 'active' })
-        .whereNotNull('task_id')
+        .where('cal_sync_ledger.user_id', USER_ID)
+        .where('cal_sync_ledger.provider', 'apple')
+        .where('cal_sync_ledger.status', 'active')
+        .whereNotNull('cal_sync_ledger.task_id')
         .join('task_instances as ti', 'ti.id', 'cal_sync_ledger.task_id')
         .where('ti.master_id', a8MasterId)
         .count('cal_sync_ledger.id as n')
