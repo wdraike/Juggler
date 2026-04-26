@@ -24,6 +24,7 @@ const calSyncRoutes = require('./routes/cal-sync.routes');
 const scheduleRoutes = require('./routes/schedule.routes');
 const healthRoutes = require('./routes/health.routes');
 const aiRoutes = require('./routes/ai.routes');
+const impersonationRoutes = require('./routes/impersonation.routes');
 
 // MCP + OAuth (shared module — auth-service handles OAuth, we proxy)
 const { createOAuthProxyRoutes } = require('auth-client/mcp-auth');
@@ -166,6 +167,7 @@ app.use('/api/feature-catalog', require('./routes/feature-catalog.routes'));
 app.use('/api/feature-events', require('./routes/feature-events.routes'));
 app.use('/api/my-plan', require('./routes/my-plan.routes'));
 app.use('/api/billing-webhooks', require('./routes/billing-webhooks.routes'));
+app.use('/api/impersonation', impersonationRoutes);
 
 // 404 handler
 app.use((req, res) => {
