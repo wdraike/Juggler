@@ -12,6 +12,7 @@ import ErrorBoundary from './components/ErrorBoundary';
 import UpgradePrompt from './components/billing/UpgradePrompt';
 import SchedulerDebug from './components/admin/SchedulerDebug';
 import SchedulerStepper from './components/admin/SchedulerStepper';
+import ImpersonationPage from './components/admin/ImpersonationPage';
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -23,6 +24,10 @@ function AppContent() {
   // Hidden admin route — step-by-step scheduler stepper
   if (window.location.pathname === '/admin/scheduler-stepper') {
     return user ? <SchedulerStepper /> : <LoginPage />;
+  }
+  // Hidden admin route — user impersonation
+  if (window.location.pathname === '/admin/impersonation') {
+    return user ? <ImpersonationPage darkMode={true} /> : <LoginPage />;
   }
 
   // Handle auth callback route
