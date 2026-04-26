@@ -1,4 +1,4 @@
-import { startImpersonation, stopImpersonation, getStoredImpersonation, isImpersonating } from '../impersonationService';
+import { startImpersonation, stopImpersonation, getStoredImpersonation, isImpersonating, getImpersonationTargets, getImpersonationLog } from '../impersonationService';
 
 const ACCESS_TOKEN_KEY = 'juggler-access-token';
 const REFRESH_TOKEN_KEY = 'juggler-refresh-token';
@@ -111,5 +111,54 @@ describe('isImpersonating', () => {
   it('returns true when impersonation data is stored', () => {
     localStorage.setItem(IMPERSONATION_KEY, JSON.stringify({ adminAccessToken: 'tok' }));
     expect(isImpersonating()).toBe(true);
+  });
+});
+
+describe('getImpersonationTargets', () => {
+  it('fetches targets with Bearer token', async () => {
+    localStorage.setItem('juggler-access-token', 'admin-tok');
+    const mockData = { users: [{ id: 'u1', email: 'a@test.com' }], pagination: { total: 1, limit: 50, offset: 0, hasMore: false } };
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockData
+    });
+
+    const result = await getImpersonationTargets('a@test.com', 10, 0);
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/impersonation/targets'),
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'Authorization': 'Bearer admin-tok' })
+      })
+    );
+    expect(result.users).toHaveLength(1);
+  });
+
+  it('throws when response is not ok', async () => {
+    localStorage.setItem('juggler-access-token', 'admin-tok');
+    global.fetch.mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({ error: 'Forbidden' })
+    });
+    await expect(getImpersonationTargets()).rejects.toThrow('Forbidden');
+  });
+});
+
+describe('getImpersonationLog', () => {
+  it('fetches log entries with filters', async () => {
+    localStorage.setItem('juggler-access-token', 'admin-tok');
+    const mockData = { logs: [{ id: 1, action: 'start_impersonation' }], pagination: { total: 1, limit: 50, offset: 0, hasMore: false } };
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockData
+    });
+
+    const result = await getImpersonationLog({ adminUserId: 'u1', limit: 20, offset: 0 });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('adminUserId=u1'),
+      expect.anything()
+    );
+    expect(result.logs).toHaveLength(1);
   });
 });
