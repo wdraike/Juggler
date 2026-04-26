@@ -78,8 +78,11 @@ const startImpersonation = async (req, res) => {
 
 const stopImpersonation = async (req, res) => {
   try {
-    const admin = req.user;
-    await insertAuditRow(admin.id, null, 'stop_impersonation', req);
+    // With an impersonation token: sub=target, acting_as_admin=admin ID.
+    const actingAsAdmin = req.auth?.actingAsAdmin;
+    const adminUserId = actingAsAdmin || req.user.id;
+    const targetUserId = actingAsAdmin ? req.user.id : null;
+    await insertAuditRow(adminUserId, targetUserId, 'stop_impersonation', req);
     return res.json({ message: 'Impersonation stopped. Discard the impersonation token client-side.' });
   } catch (err) {
     console.error('[juggler/impersonation] stop error:', err);
