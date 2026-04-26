@@ -146,7 +146,13 @@ function splitUpdateFields(changes) {
  */
 async function insertTask(dbOrTrx, row) {
   if (isTemplate(row)) {
-    await dbOrTrx('task_masters').insert(pickMaster(row, row.id));
+    var masterRow = pickMaster(row, row.id);
+    // Guarantee recurring=1 — templates must be visible in tasks_v WHERE recurring=1.
+    // A task classified as template via task_type='recurring_template' alone (without
+    // recurring:true in the body) would get recurring=0 from pickMaster and disappear
+    // from the view, causing fetchTaskWithEventIds to return null.
+    masterRow.recurring = 1;
+    await dbOrTrx('task_masters').insert(masterRow);
     return;
   }
   if (isInstance(row)) {

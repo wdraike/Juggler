@@ -51,12 +51,7 @@ afterAll(async () => {
   await db.destroy();
 });
 
-// SKIPPED: cal-sync integration tests need re-validation against the new
-// two-table schema. Several tests inserted gcal_event_id directly on the task
-// row (no longer a column post-refactor); that pattern needs migration to
-// cal_sync_ledger inserts. Adapter unit tests (01/02/03) and the push test (10)
-// continue to cover the underlying logic. TODO: re-enable per file.
-describe.skip('Sync Lock / Concurrency', () => {
+describe('Sync Lock / Concurrency', () => {
   var shouldSkip = () => !user || !token;
 
   test('write phase acquires and releases lock', async () => {
@@ -124,7 +119,7 @@ describe.skip('Sync Lock / Concurrency', () => {
     await sync(req2, res2);
 
     // Verify the edited text is preserved (not reverted to provider's version)
-    var taskAfterSync = await db('tasks_with_sync_v').where('id', task.id).first();
+    var taskAfterSync = await db('tasks_v').where('id', task.id).first();
     expect(taskAfterSync).toBeTruthy();
     expect(taskAfterSync.text).toBe('Test Task Watermark Edited');
 

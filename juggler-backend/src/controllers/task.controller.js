@@ -456,7 +456,9 @@ function taskToRow(task, userId, timezone) {
   if (task.marker !== undefined) row.marker = task.marker ? 1 : 0;
   if (task.flexWhen !== undefined) row.flex_when = task.flexWhen ? 1 : 0;
   if (task.travelBefore !== undefined) row.travel_before = task.travelBefore || null;
+  else if (task.travel_before !== undefined) row.travel_before = task.travel_before || null;
   if (task.travelAfter !== undefined) row.travel_after = task.travelAfter || null;
+  else if (task.travel_after !== undefined) row.travel_after = task.travel_after || null;
   if (task.tz !== undefined) row.tz = task.tz || null;
   if (task.recurStart !== undefined) row.recur_start = task.recurStart || null;
   if (task.recurEnd !== undefined) row.recur_end = task.recurEnd || null;
@@ -780,6 +782,10 @@ async function createTask(req, res) {
 
     await tasksWrite.insertTask(db, row);
     var created = await fetchTaskWithEventIds(db, row.id, req.user.id);
+    if (!created) {
+      console.error('Create task: fetchTaskWithEventIds returned null for id=' + row.id + ' type=' + row.task_type);
+      return res.status(500).json({ error: 'Task created but could not be read back' });
+    }
     await cache.invalidateTasks(req.user.id);
     enqueueScheduleRun(req.user.id, 'api:createTask', [row.id]);
     res.status(201).json({ task: rowToTask(created, null) });
@@ -1488,19 +1494,17 @@ async function updateTaskStatus(req, res) {
     var update = { status: status || '', updated_at: db.fn.now() };
     var isFutureScheduled = existing.scheduled_at && new Date(existing.scheduled_at) > new Date();
 
-    // When marking done, stamp scheduled_at to the chosen completion time
+    // When marking done, only update scheduled_at if the user provided an explicit
+    // custom completion time. Never overwrite it with "now" — that's the done-time
+    // shift bug that moves GCal events to the completion timestamp.
     if (status === 'done') {
       var completedAt = req.body.completedAt;
-      if (completedAt === 'scheduled' && !isFutureScheduled) {
-        // Keep existing scheduled_at — no change (only if not in the future)
-      } else if (completedAt && completedAt !== 'now' && completedAt !== 'scheduled') {
+      if (completedAt && completedAt !== 'now' && completedAt !== 'scheduled') {
         // Custom datetime string from the user — clamp to now if in the future
         var customDate = new Date(completedAt);
         update.scheduled_at = customDate > new Date() ? db.fn.now() : customDate;
-      } else {
-        // Default: current time
-        update.scheduled_at = db.fn.now();
       }
+      // Otherwise leave scheduled_at unchanged (covers 'now', 'scheduled', and undefined)
     }
 
     // For cancel/skip with a future scheduled_at, snap to now

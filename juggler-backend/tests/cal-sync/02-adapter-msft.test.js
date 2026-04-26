@@ -228,7 +228,7 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
       isTransparent: false,
       description: ''
     };
-    var currentTask = { when: 'morning', time: '9:00 AM', date: '4/15' };
+    var currentTask = { when: 'morning', time: '9:00 AM', date: '2026-04-15' };
     var fields = msftAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
     expect(fields.when).toBe('fixed');
@@ -248,7 +248,7 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
       isTransparent: false,
       description: ''
     };
-    var currentTask = { when: 'morning', time: '9:00 AM', date: '4/15' };
+    var currentTask = { when: 'morning', time: '9:00 AM', date: '2026-04-15' };
     var fields = msftAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
     expect(fields.when).toBe('fixed');
@@ -268,7 +268,7 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
       isTransparent: false,
       description: ''
     };
-    var currentTask = { when: 'allday', date: '4/15' };
+    var currentTask = { when: 'allday', date: '2026-04-15' };
     var fields = msftAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
     expect(fields.when).toBe('fixed');
@@ -288,7 +288,7 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
       isTransparent: false,
       description: ''
     };
-    var currentTask = { when: 'fixed', marker: true, date: '4/15', time: '10:00 AM' };
+    var currentTask = { when: 'fixed', marker: true, date: '2026-04-15', time: '10:00 AM' };
     var fields = msftAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
     expect(fields.marker).toBe(false);

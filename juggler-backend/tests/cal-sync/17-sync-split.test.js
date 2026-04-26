@@ -1,8 +1,13 @@
 /**
- * 17-sync-split.test.js — Split Task Expansion
+ * 17-sync-split.test.js — Split Task Calendar Sync
  *
- * Tests that the scheduler's split placements (stored in schedule_cache)
- * produce one calendar event per split part, with correct titles and times.
+ * Path A (real chunk rows): scheduler writes task_instances rows with
+ * split_ordinal/split_total > 1. Sync groups them by occurrence, merges
+ * contiguous runs into one event, and pushes non-contiguous chunks as
+ * separate events with "(X/N)" title suffixes.
+ *
+ * Path B (legacy cache-based): backward-compat path for old-style splits
+ * where only schedule_cache has the split placement info.
  */
 
 jest.setTimeout(60000);
@@ -14,12 +19,12 @@ jest.mock('../../src/lib/sse-emitter', () => ({
   emit: jest.fn()
 }));
 
+var crypto = require('crypto');
 var {
   db, TEST_USER_ID, isDbAvailable, hasGCalCredentials,
   seedTestUser, cleanupTestData, destroyTestUser,
-  getGCalToken, mockReq, mockRes, gcalApi
+  getGCalToken, mockReq, mockRes
 } = require('./helpers/test-setup');
-var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, deleteAllGCalTestEvents } = require('./helpers/test-fixtures');
 var { getGCalEvent, listGCalEvents, waitForPropagation } = require('./helpers/api-helpers');
 var { sync } = require('../../src/controllers/cal-sync.controller');
@@ -38,7 +43,6 @@ afterEach(async () => {
   if (!user || !token) return;
   await cleanupTestData();
   await deleteAllGCalTestEvents(token);
-  // Re-seed user since cleanupTestData deletes user_config
   user = await seedTestUser(GCAL_ONLY);
 });
 
@@ -48,6 +52,216 @@ afterAll(async () => {
   await destroyTestUser();
   await db.destroy();
 });
+
+// ─── Path A helpers ────────────────────────────────────────────────────────
+
+function makeChunkGroupId() {
+  return 'split-' + crypto.randomBytes(6).toString('hex');
+}
+
+// Returns a Date for tomorrow at the given UTC hour (midnight-anchored).
+function tomorrowUTC(utcHour) {
+  var d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setUTCHours(utcHour, 0, 0, 0);
+  return d;
+}
+
+/**
+ * Insert a split task into the DB as real chunk rows (Path A).
+ * Creates one task_masters row + one task_instances row per chunk.
+ * Secondary chunks (ordinal > 1) share the primary's master_id.
+ *
+ * @param {object} opts
+ *   text     - task title
+ *   chunks   - array of { scheduledAt: Date, dur: number }
+ */
+async function makeSplitTask(opts) {
+  var primaryId = opts.id || makeChunkGroupId();
+  var chunks = opts.chunks;
+  var total = chunks.length;
+  var text = opts.text || ('Test Split Task ' + primaryId.slice(-4));
+  var totalDur = chunks.reduce(function(s, c) { return s + (c.dur || 60); }, 0);
+
+  await db('task_masters').insert({
+    id: primaryId,
+    user_id: TEST_USER_ID,
+    text: text,
+    dur: totalDur,
+    pri: 'P3',
+    rigid: 0,
+    recurring: 0,
+    marker: 0,
+    flex_when: 0,
+    status: '',
+    when: 'fixed',
+    split: 1,
+    split_min: chunks[0].dur || 60,
+    created_at: db.fn.now(),
+    updated_at: db.fn.now()
+  });
+
+  var chunkIds = [];
+  for (var i = 0; i < total; i++) {
+    var chunk = chunks[i];
+    var chunkId = i === 0 ? primaryId : primaryId + '-' + (i + 1);
+    chunkIds.push(chunkId);
+    await db('task_instances').insert({
+      id: chunkId,
+      master_id: primaryId,
+      user_id: TEST_USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: i + 1,
+      split_total: total,
+      split_group: primaryId,
+      dur: chunk.dur || 60,
+      scheduled_at: chunk.scheduledAt,
+      date_pinned: 1,
+      status: '',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now()
+    });
+  }
+
+  return { id: primaryId, chunkIds: chunkIds, text: text };
+}
+
+async function runSync() {
+  var req = mockReq(user);
+  var res = mockRes();
+  await sync(req, res);
+  return res;
+}
+
+// ─── Path A: Real Chunk Rows ────────────────────────────────────────────────
+
+describe('Split: Real Chunk Rows (Path A)', () => {
+  var shouldSkip = () => !user || !token;
+
+  test('contiguous chunks merge into single GCal event with total duration', async () => {
+    if (shouldSkip()) return;
+
+    // chunk1: 9–10 AM EDT (UTC 13–14), chunk2: 10–11 AM EDT (UTC 14–15)
+    var task = await makeSplitTask({
+      text: 'Test Split Task Contiguous',
+      chunks: [
+        { scheduledAt: tomorrowUTC(13), dur: 60 },
+        { scheduledAt: tomorrowUTC(14), dur: 60 }
+      ]
+    });
+
+    var res = await runSync();
+    expect(res.statusCode).toBe(200);
+    expect(res._json.pushed).toBeGreaterThanOrEqual(1);
+
+    await waitForPropagation(1000);
+
+    // Exactly one active ledger entry for the primary chunk id
+    var ledgerRows = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, status: 'active' })
+      .whereIn('task_id', task.chunkIds);
+    expect(ledgerRows.length).toBe(1);
+    expect(ledgerRows[0].task_id).toBe(task.id);
+
+    var event = await getGCalEvent(token, ledgerRows[0].provider_event_id);
+    expect(event).toBeTruthy();
+    expect(event.status).not.toBe('cancelled');
+
+    // Title has no "(X/N)" suffix — contiguous full-cover run
+    expect(event.summary).toBe(task.text);
+
+    // Duration = 120 min total
+    var durMs = new Date(event.end.dateTime).getTime() - new Date(event.start.dateTime).getTime();
+    expect(durMs / 60000).toBe(120);
+  });
+
+  test('non-contiguous chunks push as separate events with (X/N) suffix', async () => {
+    if (shouldSkip()) return;
+
+    // chunk1: 9–10 AM EDT (UTC 13), chunk2: 2–3 PM EDT (UTC 18)
+    var task = await makeSplitTask({
+      text: 'Test Split Task NonContig',
+      chunks: [
+        { scheduledAt: tomorrowUTC(13), dur: 60 },
+        { scheduledAt: tomorrowUTC(18), dur: 60 }
+      ]
+    });
+
+    var res = await runSync();
+    expect(res.statusCode).toBe(200);
+    expect(res._json.pushed).toBeGreaterThanOrEqual(2);
+
+    await waitForPropagation(1000);
+
+    // Two active ledger entries, one per chunk
+    var ledgerRows = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, status: 'active' })
+      .whereIn('task_id', task.chunkIds)
+      .orderBy('task_id');
+    expect(ledgerRows.length).toBe(2);
+
+    for (var li = 0; li < ledgerRows.length; li++) {
+      var event = await getGCalEvent(token, ledgerRows[li].provider_event_id);
+      expect(event).toBeTruthy();
+      expect(event.status).not.toBe('cancelled');
+
+      // Each chunk gets its own "(X/2)" suffix
+      var expectedSuffix = ledgerRows[li].task_id === task.id ? '(1/2)' : '(2/2)';
+      expect(event.summary).toContain(expectedSuffix);
+
+      // Each chunk duration = 60 min
+      var durMs = new Date(event.end.dateTime).getTime() - new Date(event.start.dateTime).getTime();
+      expect(durMs / 60000).toBe(60);
+    }
+  });
+
+  test('second sync is a no-op: hash match prevents re-push', async () => {
+    if (shouldSkip()) return;
+
+    var task = await makeSplitTask({
+      text: 'Test Split Task Stable',
+      chunks: [
+        { scheduledAt: tomorrowUTC(13), dur: 60 },
+        { scheduledAt: tomorrowUTC(18), dur: 60 }
+      ]
+    });
+
+    var res1 = await runSync();
+    expect(res1.statusCode).toBe(200);
+    var firstPushCount = res1._json.pushed;
+    expect(firstPushCount).toBeGreaterThanOrEqual(2);
+
+    await waitForPropagation(500);
+
+    user = await db('users').where('id', TEST_USER_ID).first();
+    var res2 = await runSync();
+    expect(res2.statusCode).toBe(200);
+    expect(res2._json.pushed).toBe(0);
+  });
+
+  test('contiguous chunk follower has no separate ledger entry', async () => {
+    if (shouldSkip()) return;
+
+    var task = await makeSplitTask({
+      text: 'Test Split Task Follower Clean',
+      chunks: [
+        { scheduledAt: tomorrowUTC(13), dur: 60 },
+        { scheduledAt: tomorrowUTC(14), dur: 60 }
+      ]
+    });
+
+    await runSync();
+    await waitForPropagation(500);
+
+    // Follower (chunk2) must have no ledger entry — it's covered by the merged leader event
+    var followerLedger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.chunkIds[1] })
+      .first();
+    expect(followerLedger).toBeUndefined();
+  });
+});
+
+// ─── Path B: Legacy Cache-Based Splits ─────────────────────────────────────
 
 function buildScheduleCache(taskId, dateKey, placements) {
   var dayPlacements = {};
@@ -73,12 +287,7 @@ async function seedScheduleCache(cacheValue) {
   });
 }
 
-// SKIPPED: cal-sync integration tests need re-validation against the new
-// two-table schema. Several tests inserted gcal_event_id directly on the task
-// row (no longer a column post-refactor); that pattern needs migration to
-// cal_sync_ledger inserts. Adapter unit tests (01/02/03) and the push test (10)
-// continue to cover the underlying logic. TODO: re-enable per file.
-describe.skip('Split Task Expansion', () => {
+describe('Split Task Expansion (legacy cache path)', () => {
   var shouldSkip = () => !user || !token;
 
   test('120min task with 4x30min placements creates 4 calendar events', async () => {
@@ -109,7 +318,6 @@ describe.skip('Split Task Expansion', () => {
 
     await waitForPropagation(3000);
 
-    // Verify 4 events on GCal
     var timeMin = new Date(tomorrow);
     timeMin.setHours(0, 0, 0, 0);
     var timeMax = new Date(tomorrow);
@@ -122,7 +330,6 @@ describe.skip('Split Task Expansion', () => {
 
     expect(splitEvents.length).toBe(4);
 
-    // Each should have "(part N/4)" suffix
     for (var i = 1; i <= 4; i++) {
       var found = splitEvents.find(function(e) {
         return (e.summary || '').indexOf('(part ' + i + '/4)') >= 0;
@@ -131,7 +338,7 @@ describe.skip('Split Task Expansion', () => {
     }
   });
 
-  test('each split part has correct time and duration', async () => {
+  test('each split part has correct duration', async () => {
     if (shouldSkip()) return;
 
     var tomorrow = new Date();
@@ -145,7 +352,6 @@ describe.skip('Split Task Expansion', () => {
     });
 
     var dateKey = (tomorrow.getMonth() + 1) + '/' + tomorrow.getDate();
-    // 540 = 9:00 AM, 600 = 10:00 AM, 660 = 11:00 AM, 720 = 12:00 PM
     var placements = [
       { start: 540, dur: 30 },
       { start: 600, dur: 30 },
@@ -180,11 +386,9 @@ describe.skip('Split Task Expansion', () => {
       });
       expect(evt).toBeTruthy();
 
-      // Verify duration: 30 minutes
       var evtStart = new Date(evt.start.dateTime);
       var evtEnd = new Date(evt.end.dateTime);
-      var durMins = (evtEnd - evtStart) / 60000;
-      expect(durMins).toBe(30);
+      expect((evtEnd - evtStart) / 60000).toBe(30);
     }
   });
 
@@ -201,14 +405,13 @@ describe.skip('Split Task Expansion', () => {
       scheduled_at: tomorrow
     });
 
-    // First sync: no split placements, pushes as single event
+    // First sync: no split placements → single event
     var req1 = mockReq(user);
     var res1 = mockRes();
     await sync(req1, res1);
 
     await waitForPropagation(3000);
 
-    // Verify single event exists
     var ledgerBefore = await db('cal_sync_ledger')
       .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
       .select();
@@ -216,7 +419,7 @@ describe.skip('Split Task Expansion', () => {
     var oldEventId = ledgerBefore[0].provider_event_id;
     expect(oldEventId).toBeTruthy();
 
-    // Now seed split placements
+    // Seed split placements
     var dateKey = (tomorrow.getMonth() + 1) + '/' + tomorrow.getDate();
     var cache = buildScheduleCache(task.id, dateKey, [
       { start: 540, dur: 30 },
@@ -226,25 +429,18 @@ describe.skip('Split Task Expansion', () => {
     ]);
     await seedScheduleCache(cache);
 
-    // Touch task's updated_at so sync detects the change
-    await tasksWrite.updateTaskById(db, task.id, { updated_at: db.fn.now() }, TEST_USER_ID);
-
-    // Re-read user (tokens may have been refreshed during first sync)
     user = await db('users').where('id', TEST_USER_ID).first();
 
-    // Second sync: should delete old event and create 4 new ones
     var req2 = mockReq(user);
     var res2 = mockRes();
     await sync(req2, res2);
 
     await waitForPropagation(3000);
 
-    // Verify old event is gone from GCal
     var oldEvent = await getGCalEvent(token, oldEventId);
     var isGone = !oldEvent || oldEvent.status === 'cancelled';
     expect(isGone).toBe(true);
 
-    // Verify 4 new events exist
     var timeMin = new Date(tomorrow);
     timeMin.setHours(0, 0, 0, 0);
     var timeMax = new Date(tomorrow);

@@ -81,12 +81,17 @@ async function setIngestOnly() {
   });
 }
 
-// SKIPPED: cal-sync integration tests need re-validation against the new
-// two-table schema. Several tests inserted gcal_event_id directly on the task
-// row (no longer a column post-refactor); that pattern needs migration to
-// cal_sync_ledger inserts. Adapter unit tests (01/02/03) and the push test (10)
-// continue to cover the underlying logic. TODO: re-enable per file.
-describe.skip('Sync Ingest-Only Mode', () => {
+// Helper: find the juggler task created for a given GCal event ID via ledger.
+async function pulledTaskForEvent(gcalEventId) {
+  var ledger = await db('cal_sync_ledger')
+    .where({ user_id: TEST_USER_ID, provider_event_id: gcalEventId, provider: 'gcal' })
+    .whereIn('status', ['active', 'deleted_local', 'deleted_remote'])
+    .first();
+  if (!ledger || !ledger.task_id) return null;
+  return db('tasks_v').where('id', ledger.task_id).first();
+}
+
+describe('Sync Ingest-Only Mode', () => {
 
   test('push phase skipped', skipIfNoDB(async () => {
     if (!hasGCalCredentials()) return;
@@ -107,9 +112,11 @@ describe.skip('Sync Ingest-Only Mode', () => {
 
     expect(res.statusCode).toBe(200);
 
-    // Task should NOT have a gcal_event_id
-    var updated = await db('tasks_with_sync_v').where('id', task.id).first();
-    expect(updated.gcal_event_id).toBeFalsy();
+    // Task should NOT have a ledger entry (was not pushed)
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledger).toBeFalsy();
 
     // No events pushed
     var providerStats = res._json.providers && res._json.providers.gcal;
@@ -139,11 +146,10 @@ describe.skip('Sync Ingest-Only Mode', () => {
 
     expect(res._json.pulled).toBeGreaterThanOrEqual(1);
 
-    // Task should exist in DB
-    var tasks = await db('tasks_with_sync_v')
-      .where({ user_id: TEST_USER_ID, gcal_event_id: event.id });
-    expect(tasks.length).toBe(1);
-    expect(tasks[0].text).toBe('Test Event Ingest Pull');
+    // Find task via ledger
+    var task = await pulledTaskForEvent(event.id);
+    expect(task).toBeTruthy();
+    expect(task.text).toBe('Test Event Ingest Pull');
   }));
 
   test('task edits NOT pushed back', skipIfNoDB(async () => {
@@ -165,9 +171,8 @@ describe.skip('Sync Ingest-Only Mode', () => {
     var res = mockRes();
     await sync(req, res);
 
-    // Edit task text in DB
-    var task = await db('tasks_with_sync_v')
-      .where({ user_id: TEST_USER_ID, gcal_event_id: event.id }).first();
+    // Find task via ledger
+    var task = await pulledTaskForEvent(event.id);
     expect(task).toBeTruthy();
 
     await tasksWrite.updateTaskById(db, task.id, {
@@ -207,8 +212,8 @@ describe.skip('Sync Ingest-Only Mode', () => {
     var res = mockRes();
     await sync(req, res);
 
-    var task = await db('tasks_with_sync_v')
-      .where({ user_id: TEST_USER_ID, gcal_event_id: event.id }).first();
+    // Find task via ledger
+    var task = await pulledTaskForEvent(event.id);
     expect(task).toBeTruthy();
 
     // Change both task and event
@@ -230,7 +235,7 @@ describe.skip('Sync Ingest-Only Mode', () => {
     await sync(req, res);
 
     // Provider should always win
-    var taskAfter = await db('tasks_with_sync_v').where('id', task.id).first();
+    var taskAfter = await db('tasks_v').where('id', task.id).first();
     expect(taskAfter.text).toBe('Calendar Conflict Winner');
   }));
 

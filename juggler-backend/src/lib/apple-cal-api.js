@@ -178,6 +178,7 @@ function buildVEvent(task, year, tz) {
   if (task.project) descParts.push('Project: ' + task.project);
   if (task.pri) descParts.push('Priority: ' + task.pri);
   if (task.notes) descParts.push('Notes: ' + task.notes);
+  if (task.url) descParts.push('Link: ' + task.url);
   descParts.push('', 'Synced from Raike & Sons');
   vevent.addPropertyWithValue('description', descParts.join('\n'));
 

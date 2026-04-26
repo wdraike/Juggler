@@ -19,7 +19,7 @@ jest.mock('../../src/lib/sse-emitter', () => ({
 var {
   db, TEST_USER_ID, isDbAvailable, hasGCalCredentials, hasMsftCredentials,
   seedTestUser, cleanupTestData, destroyTestUser,
-  getGCalToken, getMsftToken, mockReq, mockRes, gcalApi
+  getGCalToken, getMsftToken, mockReq, mockRes, gcalApi, msftCalApi
 } = require('./helpers/test-setup');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, deleteAllGCalTestEvents, deleteAllMSFTTestEvents } = require('./helpers/test-fixtures');
@@ -54,12 +54,7 @@ afterAll(async () => {
   await db.destroy();
 });
 
-// SKIPPED: cal-sync integration tests need re-validation against the new
-// two-table schema. Several tests inserted gcal_event_id directly on the task
-// row (no longer a column post-refactor); that pattern needs migration to
-// cal_sync_ledger inserts. Adapter unit tests (01/02/03) and the push test (10)
-// continue to cover the underlying logic. TODO: re-enable per file.
-describe.skip('Multi-Provider Sync', () => {
+describe('Multi-Provider Sync', () => {
   var shouldSkip = () => !user || !gcalToken || !msftToken;
 
   test('task pushed to both GCal and MSFT', async () => {
@@ -109,73 +104,66 @@ describe.skip('Multi-Provider Sync', () => {
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(10, 0, 0, 0);
+    var endTime = new Date(tomorrow.getTime() + 30 * 60000);
 
     var task = await makeTask({
-      text: 'Test Task Cross Update',
+      text: 'Test Task GCal Edit Propagate',
       dur: 30,
-      scheduled_at: tomorrow
+      scheduled_at: tomorrow,
+      when: 'morning'
     });
 
-    // Initial sync — push to both
-    var req1 = mockReq(user);
-    var res1 = mockRes();
-    await sync(req1, res1);
+    var req = mockReq(user);
+    var res = mockRes();
+    await sync(req, res);
 
     await waitForPropagation(3000);
 
-    // Move event on GCal to 2:00 PM
     var gcalLedger = await db('cal_sync_ledger')
       .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
       .first();
+    var msftLedger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'msft', status: 'active' })
+      .first();
     expect(gcalLedger).toBeTruthy();
+    expect(msftLedger).toBeTruthy();
 
+    // Move GCal event to 3 PM
     var newStart = new Date(tomorrow);
-    newStart.setHours(14, 0, 0, 0);
+    newStart.setHours(15, 0, 0, 0);
     var newEnd = new Date(newStart.getTime() + 30 * 60000);
 
     await gcalApi.patchEvent(gcalToken, gcalLedger.provider_event_id, {
       start: { dateTime: newStart.toISOString(), timeZone: 'America/New_York' },
       end: { dateTime: newEnd.toISOString(), timeZone: 'America/New_York' }
     });
-
-    await waitForPropagation(3000);
-
-    // Re-read user (tokens may have been refreshed during first sync)
-    user = await db('users').where('id', TEST_USER_ID).first();
-
-    // Second sync — pull change from GCal, update task
-    var req2 = mockReq(user);
-    var res2 = mockRes();
-    await sync(req2, res2);
-
     await waitForPropagation(2000);
 
-    // Verify task promoted to fixed
-    var updatedTask = await db('tasks_with_sync_v').where('id', task.id).first();
-    expect(updatedTask).toBeTruthy();
-    expect(updatedTask.when).toContain('fixed');
-
-    // Re-read user again
+    // Sync — GCal edit should propagate to task
     user = await db('users').where('id', TEST_USER_ID).first();
+    req = mockReq(user);
+    res = mockRes();
+    await sync(req, res);
 
-    // Third sync — push updated task to MSFT
-    var req3 = mockReq(user);
-    var res3 = mockRes();
-    await sync(req3, res3);
+    var updatedTask = await db('tasks_v').where('id', task.id).first();
+    expect(updatedTask.when).toBe('fixed');
+    var updatedSched = new Date(String(updatedTask.scheduled_at).replace(' ', 'T') + 'Z');
+    expect(Math.abs(updatedSched - newStart)).toBeLessThan(2 * 60 * 1000);
 
+    // Sync again — task update should push to MSFT
+    user = await db('users').where('id', TEST_USER_ID).first();
+    req = mockReq(user);
+    res = mockRes();
+    await sync(req, res);
     await waitForPropagation(3000);
-
-    // Verify MSFT event now has the new time
-    var msftLedger = await db('cal_sync_ledger')
-      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'msft', status: 'active' })
-      .first();
-    expect(msftLedger).toBeTruthy();
 
     var msftEvent = await getMSFTEvent(msftToken, msftLedger.provider_event_id);
     expect(msftEvent).toBeTruthy();
-    var msftStartTime = new Date(msftEvent.start.dateTime + 'Z');
-    // Allow some timezone flex — just verify it's in the afternoon
-    expect(msftStartTime.getUTCHours()).toBeGreaterThanOrEqual(14);
+    // MSFT returns naive UTC datetimes (no Z); append Z so Date() parses as UTC not local
+    var msftDtStr = msftEvent.start.dateTime;
+    if (msftEvent.start.timeZone === 'UTC' && msftDtStr && !msftDtStr.endsWith('Z')) msftDtStr += 'Z';
+    var msftStart = new Date(msftDtStr);
+    expect(Math.abs(msftStart - newStart)).toBeLessThan(5 * 60 * 1000);
   });
 
   test('event deleted on one provider -> task deleted -> other provider cleaned up', async () => {
@@ -219,7 +207,7 @@ describe.skip('Multi-Provider Sync', () => {
     await waitForPropagation(3000);
 
     // Verify task is deleted
-    var deletedTask = await db('tasks_with_sync_v').where('id', task.id).first();
+    var deletedTask = await db('tasks_v').where('id', task.id).first();
     expect(deletedTask).toBeFalsy();
 
     // One more sync to let MSFT provider discover the task is gone and clean up its ledger

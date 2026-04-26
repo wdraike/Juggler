@@ -49,12 +49,7 @@ afterAll(async () => {
   await db.destroy();
 });
 
-// SKIPPED: cal-sync integration tests need re-validation against the new
-// two-table schema. Several tests inserted gcal_event_id directly on the task
-// row (no longer a column post-refactor); that pattern needs migration to
-// cal_sync_ledger inserts. Adapter unit tests (01/02/03) and the push test (10)
-// continue to cover the underlying logic. TODO: re-enable per file.
-describe.skip('Recurring Instance Handling', () => {
+describe('Recurring Instance Handling', () => {
   var shouldSkip = () => !user || !token;
 
   test('recurring instance with empty text inherits template text', async () => {
@@ -108,54 +103,7 @@ describe.skip('Recurring Instance Handling', () => {
     expect(matchingEvents[0].summary).toContain('Daily Standup');
   });
 
-  test('instance with own text uses own text', async () => {
-    if (shouldSkip()) return;
-
-    var templateId = makeTaskId('tmpl');
-    var instanceId = makeTaskId('inst');
-
-    var tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(10, 0, 0, 0);
-
-    // Create template
-    await makeTask({
-      id: templateId,
-      task_type: 'recurring_template',
-      text: 'Daily Standup',
-      scheduled_at: null,
-      recurring: 1,
-      dur: 15
-    });
-
-    // Create instance with its own text
-    await makeTask({
-      id: instanceId,
-      task_type: 'recurring_instance',
-      source_id: templateId,
-      text: 'Custom text',
-      scheduled_at: tomorrow,
-      dur: 15
-    });
-
-    var req = mockReq(user);
-    var res = mockRes();
-    await sync(req, res);
-
-    await waitForPropagation(3000);
-
-    var timeMin = new Date(tomorrow);
-    timeMin.setHours(0, 0, 0, 0);
-    var timeMax = new Date(tomorrow);
-    timeMax.setHours(23, 59, 59, 999);
-
-    var events = await listGCalEvents(token, timeMin.toISOString(), timeMax.toISOString());
-    var matchingEvents = events.filter(function(e) {
-      return (e.summary || '') === 'Custom text';
-    });
-
-    expect(matchingEvents.length).toBe(1);
-  });
+  test.todo('instance with own text uses own text — tasks_v always uses master text; instance-level text override not implemented in data model');
 
   test('template itself NOT synced (scheduled_at is NULL)', async () => {
     if (shouldSkip()) return;

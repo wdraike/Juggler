@@ -63,12 +63,7 @@ afterAll(async () => {
   await db.destroy();
 });
 
-// SKIPPED: cal-sync integration tests need re-validation against the new
-// two-table schema. Several tests inserted gcal_event_id directly on the task
-// row (no longer a column post-refactor); that pattern needs migration to
-// cal_sync_ledger inserts. Adapter unit tests (01/02/03) and the push test (10)
-// continue to cover the underlying logic. TODO: re-enable per file.
-describe.skip('Full Lifecycle E2E', () => {
+describe('Full Lifecycle E2E', () => {
   var shouldSkip = () => !user || !token;
 
   test('1. create 5 tasks -> sync -> 5 events on GCal', async () => {
@@ -124,7 +119,7 @@ describe.skip('Full Lifecycle E2E', () => {
       .first();
     expect(ledger).toBeTruthy();
 
-    // Move the event to 3:00 PM tomorrow
+    // Move event to 3:00 PM
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     var newStart = new Date(tomorrow);
@@ -135,18 +130,18 @@ describe.skip('Full Lifecycle E2E', () => {
       start: { dateTime: newStart.toISOString(), timeZone: 'America/New_York' },
       end: { dateTime: newEnd.toISOString(), timeZone: 'America/New_York' }
     });
-
-    await waitForPropagation(3000);
+    await waitForPropagation(2000);
 
     user = await db('users').where('id', TEST_USER_ID).first();
     var req = mockReq(user);
     var res = mockRes();
     await sync(req, res);
 
-    // Verify task promoted to fixed
-    var updatedTask = await db('tasks_with_sync_v').where('id', movedTaskId).first();
-    expect(updatedTask).toBeTruthy();
-    expect(updatedTask.when).toContain('fixed');
+    var task = await db('tasks_v').where('id', movedTaskId).first();
+    expect(task).toBeTruthy();
+    expect(task.when).toMatch(/fixed/);
+    var taskSched = new Date(String(task.scheduled_at).replace(' ', 'T') + 'Z');
+    expect(Math.abs(taskSched - newStart)).toBeLessThan(2 * 60 * 1000);
   });
 
   test('3. delete 1 event on GCal -> sync 3x -> task deleted', async () => {
@@ -172,7 +167,7 @@ describe.skip('Full Lifecycle E2E', () => {
     }
 
     // Verify task row is gone
-    var task = await db('tasks_with_sync_v').where('id', deletedTaskId).first();
+    var task = await db('tasks_v').where('id', deletedTaskId).first();
     expect(task).toBeFalsy();
   });
 
@@ -260,7 +255,7 @@ describe.skip('Full Lifecycle E2E', () => {
     expect(ledger.task_id).toBeTruthy();
     expect(ledger.origin).toBe('gcal');
 
-    var newTask = await db('tasks_with_sync_v').where('id', ledger.task_id).first();
+    var newTask = await db('tasks_v').where('id', ledger.task_id).first();
     expect(newTask).toBeTruthy();
     expect(newTask.text).toBe('Test Event Ingested From GCal');
   });

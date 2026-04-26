@@ -79,12 +79,7 @@ function tomorrowDateStr() {
   return d.toISOString().split('T')[0];
 }
 
-// SKIPPED: cal-sync integration tests need re-validation against the new
-// two-table schema. Several tests inserted gcal_event_id directly on the task
-// row (no longer a column post-refactor); that pattern needs migration to
-// cal_sync_ledger inserts. Adapter unit tests (01/02/03) and the push test (10)
-// continue to cover the underlying logic. TODO: re-enable per file.
-describe.skip('Sync All-Day & Transparency', () => {
+describe('Sync All-Day & Transparency', () => {
 
   test('all-day event -> when=allday on push', skipIfNoDB(async () => {
     if (!hasGCalCredentials()) return;
@@ -102,13 +97,16 @@ describe.skip('Sync All-Day & Transparency', () => {
     var res = mockRes();
     await sync(req, res);
 
-    var updated = await db('tasks_with_sync_v').where('id', task.id).first();
-    expect(updated.gcal_event_id).toBeTruthy();
-    createdGCalEventIds.push(updated.gcal_event_id);
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledger).toBeTruthy();
+    expect(ledger.provider_event_id).toBeTruthy();
+    createdGCalEventIds.push(ledger.provider_event_id);
 
     // Verify it is all-day on GCal
     await waitForPropagation(1000);
-    var event = await getGCalEvent(gcalToken, updated.gcal_event_id);
+    var event = await getGCalEvent(gcalToken, ledger.provider_event_id);
     expect(event).toBeTruthy();
     expect(event.start.date).toBeTruthy();
     expect(event.start.dateTime).toBeFalsy();
@@ -119,7 +117,7 @@ describe.skip('Sync All-Day & Transparency', () => {
     user = await seedTestUser(GCAL_ONLY);
 
     var task = await makeTask({
-      text: 'Test Task Dur Change',
+      text: 'Test Task Duration Change',
       scheduled_at: tomorrow(10, 0),
       dur: 30,
       when: 'morning'
@@ -129,26 +127,27 @@ describe.skip('Sync All-Day & Transparency', () => {
     var res = mockRes();
     await sync(req, res);
 
-    var updated = await db('tasks_with_sync_v').where('id', task.id).first();
-    var eventId = updated.gcal_event_id;
-    expect(eventId).toBeTruthy();
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledger).toBeTruthy();
+    var eventId = ledger.provider_event_id;
     createdGCalEventIds.push(eventId);
 
-    // Change event duration on GCal (30min -> 60min)
+    await waitForPropagation(2500); // ensure patch timestamp > last_modified_at (event.lastModified + 2000ms)
+    // Extend event to 60 minutes
     await gcalApi.patchEvent(gcalToken, eventId, {
-      summary: 'Test Task Dur Change',
-      start: { dateTime: tomorrowISO(10, 0), timeZone: 'America/New_York' },
       end: { dateTime: tomorrowEndISO(10, 0, 60), timeZone: 'America/New_York' }
     });
-    await waitForPropagation(1000);
+    await waitForPropagation(2000);
 
     user = await db('users').where('id', TEST_USER_ID).first();
     req = mockReq(user);
     res = mockRes();
     await sync(req, res);
 
-    var taskAfter = await db('tasks_with_sync_v').where('id', task.id).first();
-    expect(taskAfter.dur).toBe(60);
+    var updatedTask = await db('tasks_v').where('id', task.id).first();
+    expect(updatedTask.dur).toBe(60);
   }));
 
   test('title change reflected', skipIfNoDB(async () => {
@@ -156,8 +155,8 @@ describe.skip('Sync All-Day & Transparency', () => {
     user = await seedTestUser(GCAL_ONLY);
 
     var task = await makeTask({
-      text: 'Test Task Title Change Original',
-      scheduled_at: tomorrow(11, 0),
+      text: 'Original Title',
+      scheduled_at: tomorrow(10, 0),
       dur: 30,
       when: 'morning'
     });
@@ -166,26 +165,27 @@ describe.skip('Sync All-Day & Transparency', () => {
     var res = mockRes();
     await sync(req, res);
 
-    var updated = await db('tasks_with_sync_v').where('id', task.id).first();
-    var eventId = updated.gcal_event_id;
-    expect(eventId).toBeTruthy();
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledger).toBeTruthy();
+    var eventId = ledger.provider_event_id;
     createdGCalEventIds.push(eventId);
 
-    // Change event title on GCal
+    await waitForPropagation(2500); // ensure patch timestamp > last_modified_at (event.lastModified + 2000ms)
+    // Change event title
     await gcalApi.patchEvent(gcalToken, eventId, {
-      summary: 'Test Task Title Changed on GCal',
-      start: { dateTime: tomorrowISO(11, 0), timeZone: 'America/New_York' },
-      end: { dateTime: tomorrowEndISO(11, 0, 30), timeZone: 'America/New_York' }
+      summary: 'Updated Title From Calendar'
     });
-    await waitForPropagation(1000);
+    await waitForPropagation(2000);
 
     user = await db('users').where('id', TEST_USER_ID).first();
     req = mockReq(user);
     res = mockRes();
     await sync(req, res);
 
-    var taskAfter = await db('tasks_with_sync_v').where('id', task.id).first();
-    expect(taskAfter.text).toBe('Test Task Title Changed on GCal');
+    var updatedTask = await db('tasks_v').where('id', task.id).first();
+    expect(updatedTask.text).toBe('Updated Title From Calendar');
   }));
 
   test('calCompletedBehavior=delete', skipIfNoDB(async () => {
@@ -193,6 +193,7 @@ describe.skip('Sync All-Day & Transparency', () => {
     user = await seedTestUser(GCAL_ONLY);
 
     // Set preference to delete
+    await db('user_config').where({ user_id: TEST_USER_ID, config_key: 'preferences' }).del();
     await db('user_config').insert({
       user_id: TEST_USER_ID,
       config_key: 'preferences',
@@ -211,8 +212,11 @@ describe.skip('Sync All-Day & Transparency', () => {
     var res = mockRes();
     await sync(req, res);
 
-    var updated = await db('tasks_with_sync_v').where('id', task.id).first();
-    var eventId = updated.gcal_event_id;
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledger).toBeTruthy();
+    var eventId = ledger.provider_event_id;
     expect(eventId).toBeTruthy();
 
     // Mark task as done
@@ -240,6 +244,7 @@ describe.skip('Sync All-Day & Transparency', () => {
     user = await seedTestUser(GCAL_ONLY);
 
     // Set preference to update (default, but be explicit)
+    await db('user_config').where({ user_id: TEST_USER_ID, config_key: 'preferences' }).del();
     await db('user_config').insert({
       user_id: TEST_USER_ID,
       config_key: 'preferences',
@@ -258,8 +263,11 @@ describe.skip('Sync All-Day & Transparency', () => {
     var res = mockRes();
     await sync(req, res);
 
-    var updated = await db('tasks_with_sync_v').where('id', task.id).first();
-    var eventId = updated.gcal_event_id;
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledger).toBeTruthy();
+    var eventId = ledger.provider_event_id;
     expect(eventId).toBeTruthy();
     createdGCalEventIds.push(eventId);
 
@@ -280,7 +288,7 @@ describe.skip('Sync All-Day & Transparency', () => {
     var event = await getGCalEvent(gcalToken, eventId);
     expect(event).toBeTruthy();
     // The event summary should have the done marker (checkmark prefix)
-    expect(event.summary.indexOf('\u2713') >= 0 || event.summary.indexOf('\u2714') >= 0 ||
+    expect(event.summary.indexOf('✓') >= 0 || event.summary.indexOf('✔') >= 0 ||
            event.summary.indexOf('done') >= 0 || event.status !== 'cancelled').toBeTruthy();
   }));
 

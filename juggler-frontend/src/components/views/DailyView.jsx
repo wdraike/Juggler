@@ -613,6 +613,43 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme,
   );
 }
 
+/* ── Ghost block — unscheduled task shown at its intended desiredAt time ── */
+function GhostBlock({ task, top, height, startMins, gutterW, onExpand, theme, isMobile }) {
+  var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: top,
+        height: Math.max(height, 18),
+        left: gutterW,
+        right: 0,
+        zIndex: 8,
+        pointerEvents: 'auto',
+        cursor: 'pointer',
+        opacity: 0.5,
+        borderLeft: '3px dashed ' + priColor,
+        border: '1px dashed ' + priColor + '70',
+        borderLeftWidth: 3,
+        borderLeftColor: priColor,
+        borderRadius: 4,
+        padding: '2px 6px',
+        background: 'repeating-linear-gradient(45deg,' + priColor + '0C,' + priColor + '0C 4px,transparent 4px,transparent 8px)',
+        display: 'flex', alignItems: 'flex-start', gap: 4, overflow: 'hidden',
+        boxSizing: 'border-box'
+      }}
+      onClick={function () { onExpand(task.id); }}
+      title={'Couldn\'t schedule — intended ' + minsToTime(startMins)}
+    >
+      <span style={{ fontSize: 9, flexShrink: 0, color: priColor }}>⚠</span>
+      <span style={{ fontSize: isMobile ? 9 : 10, color: theme.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+        {task.text}
+      </span>
+      {task.dur > 0 && <span style={{ fontSize: 8, color: theme.textMuted, flexShrink: 0 }}>{durLabel(task.dur)}</span>}
+    </div>
+  );
+}
+
 /* ── Main DailyView ── */
 export default function DailyView({
   selectedDate, selectedDateKey, placements, statuses, onStatusChange,
@@ -855,6 +892,19 @@ export default function DailyView({
       return g.count > 1 ? Object.assign({}, g.task, { _unplacedChunkCount: g.count }) : g.task;
     });
   }, [allTasks, unplaced, selectedDateKey, placements, statuses, matchesFilter, filter]);
+
+  // Ghost placements: unscheduled tasks that have a desiredAt, shown in the
+  // time grid at their intended position with a striped "couldn't schedule" style.
+  var ghostPlacements = useMemo(function () {
+    return unscheduled.filter(function (t) {
+      return !!t.desiredAt;
+    }).map(function (t) {
+      var d = new Date(t.desiredAt);
+      var localMins = d.getHours() * 60 + d.getMinutes();
+      if (localMins < GRID_START * 60 || localMins >= GRID_END * 60) return null;
+      return { task: t, start: localMins, dur: t.dur || 30 };
+    }).filter(Boolean);
+  }, [unscheduled]);
 
   var nowY = isToday ? ((nowMins - GRID_START * 60) / 60) * hourHeight : null;
 
@@ -1232,6 +1282,25 @@ export default function DailyView({
                 canDrag={canDrag}
                 gutterW={GUTTER_W}
                 hourHeight={hourHeight}
+              />
+            );
+          })}
+
+          {/* Ghost blocks — unscheduled tasks shown at their intended desiredAt time */}
+          {ghostPlacements.map(function (gp) {
+            var gTop = ((gp.start - GRID_START * 60) / 60) * hourHeight;
+            var gHeight = Math.max((gp.dur / 60) * hourHeight, MIN_BLOCK_H);
+            return (
+              <GhostBlock
+                key={'ghost-' + gp.task.id}
+                task={gp.task}
+                top={gTop}
+                height={gHeight}
+                startMins={gp.start}
+                gutterW={GUTTER_W}
+                onExpand={onExpand}
+                theme={theme}
+                isMobile={isMobile}
               />
             );
           })}

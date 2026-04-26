@@ -88,63 +88,14 @@ function dayAfterEndISO(hours, minutes, durMinutes) {
   return new Date(dayAfterTomorrow(hours, minutes).getTime() + (durMinutes || 30) * 60000).toISOString();
 }
 
-function tomorrowDateStr() {
-  var d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().split('T')[0];
-}
-
-// SKIPPED: cal-sync integration tests need re-validation against the new
-// two-table schema. Several tests inserted gcal_event_id directly on the task
-// row (no longer a column post-refactor); that pattern needs migration to
-// cal_sync_ledger inserts. Adapter unit tests (01/02/03) and the push test (10)
-// continue to cover the underlying logic. TODO: re-enable per file.
-describe.skip('Sync Promotion: Event Moves', () => {
+describe('Sync Promotion: Event Moves', () => {
 
   test('event moved same day -> when=fixed', skipIfNoDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
-    // Create a morning task (non-fixed) and push
     var task = await makeTask({
-      text: 'Test Task Same Day Move',
-      scheduled_at: tomorrow(9, 0),
-      dur: 30,
-      when: 'morning'
-    });
-
-    var req = mockReq(user);
-    var res = mockRes();
-    await sync(req, res);
-
-    var updated = await db('tasks_with_sync_v').where('id', task.id).first();
-    var eventId = updated.gcal_event_id;
-    expect(eventId).toBeTruthy();
-    createdGCalEventIds.push(eventId);
-
-    // Move event to different time, same day
-    await gcalApi.patchEvent(gcalToken, eventId, {
-      summary: 'Test Task Same Day Move',
-      start: { dateTime: tomorrowISO(14, 0), timeZone: 'America/New_York' },
-      end: { dateTime: tomorrowEndISO(14, 0, 30), timeZone: 'America/New_York' }
-    });
-    await waitForPropagation(1000);
-
-    user = await db('users').where('id', TEST_USER_ID).first();
-    req = mockReq(user);
-    res = mockRes();
-    await sync(req, res);
-
-    var taskAfter = await db('tasks_with_sync_v').where('id', task.id).first();
-    expect(taskAfter.when).toBe('fixed');
-  }));
-
-  test('event moved different day -> fixed + date_pinned=1', skipIfNoDB(async () => {
-    if (!hasGCalCredentials()) return;
-    user = await seedTestUser(GCAL_ONLY);
-
-    var task = await makeTask({
-      text: 'Test Task Diff Day Move',
+      text: 'Test Task Move Same Day',
       scheduled_at: tomorrow(10, 0),
       dur: 30,
       when: 'morning'
@@ -154,36 +105,84 @@ describe.skip('Sync Promotion: Event Moves', () => {
     var res = mockRes();
     await sync(req, res);
 
-    var updated = await db('tasks_with_sync_v').where('id', task.id).first();
-    var eventId = updated.gcal_event_id;
-    expect(eventId).toBeTruthy();
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledger).toBeTruthy();
+    var eventId = ledger.provider_event_id;
     createdGCalEventIds.push(eventId);
 
-    // Move event to day after tomorrow
+    await waitForPropagation(2500); // ensure patch timestamp > last_modified_at (event.lastModified + 2000ms)
+    // Move event to 3 PM same day
     await gcalApi.patchEvent(gcalToken, eventId, {
-      summary: 'Test Task Diff Day Move',
-      start: { dateTime: dayAfterISO(10, 0), timeZone: 'America/New_York' },
-      end: { dateTime: dayAfterEndISO(10, 0, 30), timeZone: 'America/New_York' }
+      start: { dateTime: tomorrowISO(15, 0), timeZone: 'America/New_York' },
+      end: { dateTime: tomorrowEndISO(15, 0, 30), timeZone: 'America/New_York' }
     });
-    await waitForPropagation(1000);
+    await waitForPropagation(2000);
 
     user = await db('users').where('id', TEST_USER_ID).first();
     req = mockReq(user);
     res = mockRes();
     await sync(req, res);
 
-    var taskAfter = await db('tasks_with_sync_v').where('id', task.id).first();
-    expect(taskAfter.when).toBe('fixed');
-    expect(taskAfter.date_pinned).toBe(1);
+    var updatedTask = await db('tasks_v').where('id', task.id).first();
+    expect(updatedTask.when).toBe('fixed');
+    // scheduled_at is stored as UTC in MySQL and returned as "YYYY-MM-DD HH:MM:SS"
+    var newSched = new Date(String(updatedTask.scheduled_at).replace(' ', 'T') + 'Z');
+    var expected = tomorrow(15, 0);
+    expect(Math.abs(newSched - expected)).toBeLessThan(2 * 60 * 1000);
+  }));
+
+  test('event moved different day -> fixed + date_pinned=1', skipIfNoDB(async () => {
+    if (!hasGCalCredentials()) return;
+    user = await seedTestUser(GCAL_ONLY);
+
+    var task = await makeTask({
+      text: 'Test Task Move Different Day',
+      scheduled_at: tomorrow(10, 0),
+      dur: 30,
+      when: 'morning'
+    });
+
+    var req = mockReq(user);
+    var res = mockRes();
+    await sync(req, res);
+
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledger).toBeTruthy();
+    var eventId = ledger.provider_event_id;
+    createdGCalEventIds.push(eventId);
+
+    await waitForPropagation(2500); // ensure patch timestamp > last_modified_at (event.lastModified + 2000ms)
+    // Move event to day-after-tomorrow
+    await gcalApi.patchEvent(gcalToken, eventId, {
+      start: { dateTime: dayAfterISO(10, 0), timeZone: 'America/New_York' },
+      end: { dateTime: dayAfterEndISO(10, 0, 30), timeZone: 'America/New_York' }
+    });
+    await waitForPropagation(2000);
+
+    user = await db('users').where('id', TEST_USER_ID).first();
+    req = mockReq(user);
+    res = mockRes();
+    await sync(req, res);
+
+    var updatedTask = await db('tasks_v').where('id', task.id).first();
+    expect(updatedTask.when).toBe('fixed');
+    expect(updatedTask.date_pinned).toBeTruthy();
+    var newSched = new Date(String(updatedTask.scheduled_at).replace(' ', 'T') + 'Z');
+    var expected = dayAfterTomorrow(10, 0);
+    expect(Math.abs(newSched - expected)).toBeLessThan(2 * 60 * 1000);
   }));
 
   test('all-day -> timed -> promoted', skipIfNoDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
-    // Create an allday task and push
+    // Create all-day task
     var task = await makeTask({
-      text: 'Test Task Allday to Timed',
+      text: 'Test Task Allday Timed Promote',
       scheduled_at: tomorrow(0, 0),
       dur: 0,
       when: 'allday'
@@ -193,96 +192,32 @@ describe.skip('Sync Promotion: Event Moves', () => {
     var res = mockRes();
     await sync(req, res);
 
-    var updated = await db('tasks_with_sync_v').where('id', task.id).first();
-    var eventId = updated.gcal_event_id;
-    expect(eventId).toBeTruthy();
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledger).toBeTruthy();
+    var eventId = ledger.provider_event_id;
     createdGCalEventIds.push(eventId);
 
-    // Change from all-day to timed on GCal (must use PUT, not PATCH,
-    // to switch from date to dateTime — GCal PATCH merges and rejects
-    // conflicting start.date + start.dateTime)
-    await fetch(
-      'https://www.googleapis.com/calendar/v3/calendars/primary/events/' + encodeURIComponent(eventId),
-      {
-        method: 'PUT',
-        headers: { 'Authorization': 'Bearer ' + gcalToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          summary: 'Test Task Allday to Timed',
-          start: { dateTime: tomorrowISO(15, 0), timeZone: 'America/New_York' },
-          end: { dateTime: tomorrowEndISO(15, 0, 60), timeZone: 'America/New_York' }
-        })
-      }
-    );
-    await waitForPropagation(1000);
+    await waitForPropagation(2500); // ensure patch timestamp > last_modified_at (event.lastModified + 2000ms)
+    // Convert all-day event to timed at 2 PM — must also clear the 'date' field
+    // GCal PATCH does a deep merge, so omitting 'date' leaves it set; null clears it
+    await gcalApi.patchEvent(gcalToken, eventId, {
+      start: { date: null, dateTime: tomorrowISO(14, 0), timeZone: 'America/New_York' },
+      end: { date: null, dateTime: tomorrowEndISO(14, 0, 30), timeZone: 'America/New_York' }
+    });
+    await waitForPropagation(2000);
 
     user = await db('users').where('id', TEST_USER_ID).first();
     req = mockReq(user);
     res = mockRes();
     await sync(req, res);
 
-    var taskAfter = await db('tasks_with_sync_v').where('id', task.id).first();
-    expect(taskAfter.when).toBe('fixed');
-  }));
-
-  test('backwardsDep warning', skipIfNoDB(async () => {
-    if (!hasGCalCredentials()) return;
-    user = await seedTestUser(GCAL_ONLY);
-
-    // Create taskA (scheduled at 10am tomorrow) that depends on taskB (scheduled at 11am)
-    var taskA = await makeTask({
-      id: makeTaskId('promA'),
-      text: 'Test Task PromA',
-      scheduled_at: tomorrow(10, 0),
-      dur: 30,
-      when: 'morning'
-    });
-
-    var taskB = await makeTask({
-      id: makeTaskId('promB'),
-      text: 'Test Task PromB',
-      scheduled_at: tomorrow(11, 0),
-      dur: 30,
-      when: 'morning',
-      depends_on: JSON.stringify([taskA.id])
-    });
-
-    // Push both
-    var req = mockReq(user);
-    var res = mockRes();
-    await sync(req, res);
-
-    var updatedB = await db('tasks_with_sync_v').where('id', taskB.id).first();
-    var eventIdB = updatedB.gcal_event_id;
-    expect(eventIdB).toBeTruthy();
-    createdGCalEventIds.push(eventIdB);
-
-    var updatedA = await db('tasks_with_sync_v').where('id', taskA.id).first();
-    if (updatedA.gcal_event_id) createdGCalEventIds.push(updatedA.gcal_event_id);
-
-    // Move taskB's event BEFORE taskA (to 8am)
-    await gcalApi.patchEvent(gcalToken, eventIdB, {
-      summary: 'Test Task PromB',
-      start: { dateTime: tomorrowISO(8, 0), timeZone: 'America/New_York' },
-      end: { dateTime: tomorrowEndISO(8, 0, 30), timeZone: 'America/New_York' }
-    });
-    await waitForPropagation(1000);
-
-    user = await db('users').where('id', TEST_USER_ID).first();
-    req = mockReq(user);
-    res = mockRes();
-    await sync(req, res);
-
-    // Check sync_history for "before dependency" warning
-    var history = await db('sync_history')
-      .where({ user_id: TEST_USER_ID })
-      .where('action', 'promoted')
-      .select();
-    var depWarning = history.find(function(h) {
-      return h.detail && h.detail.indexOf('before') >= 0;
-    });
-    // This warning depends on the dep direction — the test sets up taskB depends on taskA,
-    // so moving taskB before taskA should trigger it
-    expect(depWarning || history.length > 0).toBeTruthy();
+    var updatedTask = await db('tasks_v').where('id', task.id).first();
+    expect(updatedTask.when).toBe('fixed');
+    var newSched = new Date(String(updatedTask.scheduled_at).replace(' ', 'T') + 'Z');
+    var expected = tomorrow(14, 0);
+    expect(Math.abs(newSched - expected)).toBeLessThan(2 * 60 * 1000);
   }));
 
   test('prev_when preserved', skipIfNoDB(async () => {
@@ -291,36 +226,98 @@ describe.skip('Sync Promotion: Event Moves', () => {
 
     var task = await makeTask({
       text: 'Test Task Prev When',
-      scheduled_at: tomorrow(9, 0),
+      scheduled_at: tomorrow(10, 0),
       dur: 30,
-      when: 'afternoon'
+      when: 'morning'
     });
 
     var req = mockReq(user);
     var res = mockRes();
     await sync(req, res);
 
-    var updated = await db('tasks_with_sync_v').where('id', task.id).first();
-    var eventId = updated.gcal_event_id;
-    expect(eventId).toBeTruthy();
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledger).toBeTruthy();
+    var eventId = ledger.provider_event_id;
     createdGCalEventIds.push(eventId);
 
-    // Move event to different time to trigger promotion
+    await waitForPropagation(2500); // ensure patch timestamp > last_modified_at (event.lastModified + 2000ms)
+    // Move event to a different time
     await gcalApi.patchEvent(gcalToken, eventId, {
-      summary: 'Test Task Prev When',
-      start: { dateTime: tomorrowISO(16, 0), timeZone: 'America/New_York' },
-      end: { dateTime: tomorrowEndISO(16, 0, 30), timeZone: 'America/New_York' }
+      start: { dateTime: tomorrowISO(15, 0), timeZone: 'America/New_York' },
+      end: { dateTime: tomorrowEndISO(15, 0, 30), timeZone: 'America/New_York' }
     });
-    await waitForPropagation(1000);
+    await waitForPropagation(2000);
 
     user = await db('users').where('id', TEST_USER_ID).first();
     req = mockReq(user);
     res = mockRes();
     await sync(req, res);
 
-    var taskAfter = await db('tasks_with_sync_v').where('id', task.id).first();
-    expect(taskAfter.when).toBe('fixed');
-    expect(taskAfter.prev_when).toBe('afternoon');
+    var updatedTask = await db('tasks_v').where('id', task.id).first();
+    expect(updatedTask.when).toBe('fixed');
+    expect(updatedTask.prev_when).toBe('morning');
+  }));
+
+  test('backwardsDep warning', skipIfNoDB(async () => {
+    if (!hasGCalCredentials()) return;
+    user = await seedTestUser(GCAL_ONLY);
+
+    // taskA is at 10 AM; taskB depends on taskA and is at 11 AM
+    var taskA = await makeTask({
+      text: 'Test Task Backward Dep A',
+      scheduled_at: tomorrow(10, 0),
+      dur: 30,
+      when: 'morning'
+    });
+    var taskB = await makeTask({
+      text: 'Test Task Backward Dep B',
+      scheduled_at: tomorrow(11, 0),
+      dur: 30,
+      when: 'morning',
+      depends_on: JSON.stringify([taskA.id])
+    });
+
+    var req = mockReq(user);
+    var res = mockRes();
+    await sync(req, res);
+
+    var ledgerA = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: taskA.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledgerA).toBeTruthy();
+    createdGCalEventIds.push(ledgerA.provider_event_id);
+
+    var ledgerB = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: taskB.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledgerB).toBeTruthy();
+    createdGCalEventIds.push(ledgerB.provider_event_id);
+
+    await waitForPropagation(2500); // ensure patch timestamp > last_modified_at (event.lastModified + 2000ms)
+    // Move taskB's event to 9 AM — before taskA (its dependency at 10 AM)
+    await gcalApi.patchEvent(gcalToken, ledgerB.provider_event_id, {
+      start: { dateTime: tomorrowISO(9, 0), timeZone: 'America/New_York' },
+      end: { dateTime: tomorrowEndISO(9, 0, 30), timeZone: 'America/New_York' }
+    });
+    await waitForPropagation(2000);
+
+    user = await db('users').where('id', TEST_USER_ID).first();
+    req = mockReq(user);
+    res = mockRes();
+    await sync(req, res);
+
+    // taskB should be promoted to fixed
+    var updatedB = await db('tasks_v').where('id', taskB.id).first();
+    expect(updatedB.when).toBe('fixed');
+
+    // sync_history should have a 'promoted' row for taskB with backward dep warning
+    var historyRow = await db('sync_history')
+      .where({ user_id: TEST_USER_ID, action: 'promoted' })
+      .whereRaw('detail LIKE ?', ['%dependency%'])
+      .first();
+    expect(historyRow).toBeTruthy();
   }));
 
 });

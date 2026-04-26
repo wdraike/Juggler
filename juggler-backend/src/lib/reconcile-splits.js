@@ -138,6 +138,7 @@ async function reconcileOccurrence(trx, masterId, master, occOrd, existingRows) 
         occurrence_ordinal: occOrd,
         split_ordinal: d2.splitOrdinal,
         split_total: desired.length,
+        split_group: masterId,
         dur: d2.dur,
         // Placement left null — scheduler assigns on next run
         scheduled_at: null,
@@ -196,16 +197,23 @@ async function collapseChunks(trx, masterId, master, existing) {
 }
 
 /**
- * Per-user batched reconcile: load all split masters + all their instances
- * in two queries, then run the per-master reconcile in memory using the
- * already-loaded data. Replaces the per-master loop pattern that issued
- * 2 queries × N split masters per scheduler run.
+ * Per-user batched reconcile: load all NON-RECURRING split masters + their
+ * instances in two queries, then reconcile in memory.
  *
- * Aggregates totals across all masters and returns one summary.
+ * Restricted to non-recurring tasks (recurring: 0) because recurring split
+ * tasks are managed by the scheduler's own inMemoryChunks + inMemoryInserts
+ * path with deterministic IDs. Calling this on recurring masters would create
+ * UUID-based secondary chunks that conflict with the scheduler's
+ * <primaryId>-N naming scheme.
+ *
+ * Called at the start of each scheduler transaction (before the task load)
+ * so that newly created or config-changed non-recurring split tasks have
+ * their secondary chunk rows materialized before the scheduler tries to
+ * place them.
  */
 async function reconcileSplitsForUser(trx, userId) {
   var masters = await trx('task_masters')
-    .where({ user_id: userId, split: 1 })
+    .where({ user_id: userId, split: 1, recurring: 0 })
     .whereNull('disabled_at')
     .select();
   if (masters.length === 0) {

@@ -120,13 +120,21 @@ async function makeMSFTEvent(token, overrides) {
 // ─── Cleanup Helpers ───
 
 /**
- * Delete a GCal event, swallowing 404/410 errors.
+ * Delete a GCal event, swallowing 404/410 errors. Retries once on 429/403 rate limit.
  */
 async function deleteGCalEvent(token, eventId) {
-  try {
-    await gcalApi.deleteEvent(token, eventId);
-  } catch (e) {
-    if (!e.message.includes('404') && !e.message.includes('410')) throw e;
+  for (var attempt = 0; attempt < 3; attempt++) {
+    try {
+      await gcalApi.deleteEvent(token, eventId);
+      return;
+    } catch (e) {
+      if (e.message.includes('404') || e.message.includes('410')) return;
+      if ((e.message.includes('429') || e.message.includes('403')) && attempt < 2) {
+        await new Promise(function(r) { setTimeout(r, (attempt + 1) * 2000); });
+        continue;
+      }
+      throw e;
+    }
   }
 }
 
@@ -159,6 +167,9 @@ async function deleteAllGCalTestEvents(token) {
 
   for (var i = 0; i < testEvents.length; i++) {
     await deleteGCalEvent(token, testEvents[i].id);
+    if (i > 0 && i % 10 === 0) {
+      await new Promise(function(r) { setTimeout(r, 500); });
+    }
   }
   return testEvents.length;
 }

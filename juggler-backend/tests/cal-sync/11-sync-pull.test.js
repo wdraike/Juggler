@@ -16,12 +16,24 @@ jest.mock('../../src/lib/sse-emitter', () => ({
 
 var { sync } = require('../../src/controllers/cal-sync.controller');
 var {
-  db, TEST_USER_ID, isDbAvailable, hasGCalCredentials, hasMsftCredentials,
+  db, TEST_USER_ID, TEST_TIMEZONE, isDbAvailable, hasGCalCredentials, hasMsftCredentials,
   seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes, getGCalToken, getMsftToken
 } = require('./helpers/test-setup');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, makeGCalEvent, makeMSFTEvent, deleteGCalEvent, deleteMSFTEvent } = require('./helpers/test-fixtures');
-var { waitForPropagation } = require('./helpers/api-helpers');
+var { getGCalEvent, waitForPropagation } = require('./helpers/api-helpers');
+var { assertPulledTaskMatchesGCalEvent, scheduledAtToUTC } = require('./helpers/assertions');
+
+// Helper: find the juggler task created for a given GCal event ID by querying
+// cal_sync_ledger (the source of truth for the new two-table schema).
+async function pulledTaskForEvent(gcalEventId) {
+  var ledger = await db('cal_sync_ledger')
+    .where({ user_id: TEST_USER_ID, provider_event_id: gcalEventId, provider: 'gcal' })
+    .whereIn('status', ['active'])
+    .first();
+  if (!ledger || !ledger.task_id) return null;
+  return db('tasks_v').where('id', ledger.task_id).first();
+}
 
 var user;
 var gcalToken;
@@ -86,14 +98,9 @@ function tomorrowDateStr() {
   return d.toISOString().split('T')[0];
 }
 
-// SKIPPED: cal-sync integration tests need re-validation against the new
-// two-table schema. Several tests inserted gcal_event_id directly on the task
-// row (no longer a column post-refactor); that pattern needs migration to
-// cal_sync_ledger inserts. Adapter unit tests (01/02/03) and the push test (10)
-// continue to cover the underlying logic. TODO: re-enable per file.
-describe.skip('Sync Pull: Calendar -> Strive', () => {
+describe('Sync Pull: Calendar -> Strive', () => {
 
-  test('new GCal event -> task created', skipIfNoDB(async () => {
+  test('new GCal event -> task created with correct fields', skipIfNoDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
 
@@ -113,12 +120,9 @@ describe.skip('Sync Pull: Calendar -> Strive', () => {
     expect(res.statusCode).toBe(200);
     expect(res._json.pulled).toBeGreaterThanOrEqual(1);
 
-    // Find the created task
-    var tasks = await db('tasks_with_sync_v')
-      .where({ user_id: TEST_USER_ID, gcal_event_id: event.id });
-    expect(tasks.length).toBe(1);
-    expect(tasks[0].when).toBe('fixed');
-    expect(tasks[0].rigid).toBe(1);
+    var task = await pulledTaskForEvent(event.id);
+    assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
+    expect(task.when).toBe('fixed');
   }));
 
   test('new MSFT event -> task created', skipIfNoDB(async () => {
@@ -141,11 +145,14 @@ describe.skip('Sync Pull: Calendar -> Strive', () => {
     expect(res.statusCode).toBe(200);
     expect(res._json.pulled).toBeGreaterThanOrEqual(1);
 
-    var tasks = await db('tasks_with_sync_v')
-      .where({ user_id: TEST_USER_ID, msft_event_id: event.id });
-    expect(tasks.length).toBe(1);
-    expect(tasks[0].when).toBe('fixed');
-    expect(tasks[0].rigid).toBe(1);
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, provider_event_id: event.id, provider: 'msft' })
+      .first();
+    expect(ledger).toBeTruthy();
+    expect(ledger.task_id).toBeTruthy();
+    var task = await db('tasks_v').where('id', ledger.task_id).first();
+    expect(task).toBeTruthy();
+    expect(task.when).toBe('fixed');
   }));
 
   test('event title -> task.text', skipIfNoDB(async () => {
@@ -158,17 +165,61 @@ describe.skip('Sync Pull: Calendar -> Strive', () => {
       end: { dateTime: tomorrowEndISO(15, 0, 60), timeZone: 'America/New_York' }
     });
     createdGCalEventIds.push(event.id);
-
     await waitForPropagation(1000);
-
     var req = mockReq(user);
     var res = mockRes();
     await sync(req, res);
 
-    var task = await db('tasks_with_sync_v')
-      .where({ user_id: TEST_USER_ID, gcal_event_id: event.id }).first();
+    var task = await pulledTaskForEvent(event.id);
     expect(task).toBeTruthy();
     expect(task.text).toBe('Test Event Title Match 42');
+    assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
+  }));
+
+  test('event duration -> task.dur', skipIfNoDB(async () => {
+    if (!hasGCalCredentials()) return;
+    user = await seedTestUser();
+
+    var event = await makeGCalEvent(gcalToken, {
+      summary: 'Test Event Duration Match',
+      start: { dateTime: tomorrowISO(15, 30), timeZone: 'America/New_York' },
+      end: { dateTime: tomorrowEndISO(15, 30, 75), timeZone: 'America/New_York' }
+    });
+    createdGCalEventIds.push(event.id);
+    await waitForPropagation(1000);
+    var req = mockReq(user);
+    var res = mockRes();
+    await sync(req, res);
+
+    var task = await pulledTaskForEvent(event.id);
+    expect(task).toBeTruthy();
+    expect(task.dur).toBe(75);
+    assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
+  }));
+
+  test('event start time -> task.scheduled_at (UTC)', skipIfNoDB(async () => {
+    if (!hasGCalCredentials()) return;
+    user = await seedTestUser();
+
+    var event = await makeGCalEvent(gcalToken, {
+      summary: 'Test Event ScheduledAt Match',
+      start: { dateTime: tomorrowISO(11, 0), timeZone: 'America/New_York' },
+      end: { dateTime: tomorrowEndISO(11, 0, 30), timeZone: 'America/New_York' }
+    });
+    createdGCalEventIds.push(event.id);
+    await waitForPropagation(1000);
+    var req = mockReq(user);
+    var res = mockRes();
+    await sync(req, res);
+
+    var task = await pulledTaskForEvent(event.id);
+    expect(task).toBeTruthy();
+    // scheduled_at must represent the same UTC moment as event start.
+    // MySQL dateStrings:true returns "YYYY-MM-DD HH:MM:SS" (no tz); append Z.
+    var expectedUTC = new Date(event.start.dateTime).getTime();
+    var actualUTC = scheduledAtToUTC(task.scheduled_at);
+    expect(Math.abs(actualUTC - expectedUTC)).toBeLessThan(60000);
+    assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
   }));
 
   test('transparent event -> task.marker = true', skipIfNoDB(async () => {
@@ -182,17 +233,15 @@ describe.skip('Sync Pull: Calendar -> Strive', () => {
       transparency: 'transparent'
     });
     createdGCalEventIds.push(event.id);
-
     await waitForPropagation(1000);
-
     var req = mockReq(user);
     var res = mockRes();
     await sync(req, res);
 
-    var task = await db('tasks_with_sync_v')
-      .where({ user_id: TEST_USER_ID, gcal_event_id: event.id }).first();
+    var task = await pulledTaskForEvent(event.id);
     expect(task).toBeTruthy();
     expect(task.marker).toBeTruthy();
+    assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
   }));
 
   test('all-day event -> when=allday', skipIfNoDB(async () => {
@@ -205,17 +254,15 @@ describe.skip('Sync Pull: Calendar -> Strive', () => {
       end: { date: tomorrowDateStr() }
     });
     createdGCalEventIds.push(event.id);
-
     await waitForPropagation(1000);
-
     var req = mockReq(user);
     var res = mockRes();
     await sync(req, res);
 
-    var task = await db('tasks_with_sync_v')
-      .where({ user_id: TEST_USER_ID, gcal_event_id: event.id }).first();
+    var task = await pulledTaskForEvent(event.id);
     expect(task).toBeTruthy();
     expect(task.when).toBe('allday');
+    assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
   }));
 
   test('ledger entry created with origin=provider', skipIfNoDB(async () => {

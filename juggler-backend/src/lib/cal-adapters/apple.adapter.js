@@ -229,6 +229,20 @@ function applyEventToTaskFields(event, tz, currentTask) {
     fields.marker = true;
   }
 
+  if (!isAllDay) {
+    var dateChanged = jd.date && jd.date !== currentTask?.date;
+    var timeChanged = jd.time && jd.time !== currentTask?.time;
+    if (dateChanged || timeChanged) {
+      fields.when = 'fixed';
+      fields.prev_when = currentTask?.when;
+      if (dateChanged) fields.date_pinned = 1;
+    }
+  }
+
+  if (!event.isTransparent && currentTask?.marker) {
+    fields.marker = false;
+  }
+
   return fields;
 }
 

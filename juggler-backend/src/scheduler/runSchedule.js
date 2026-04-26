@@ -8,7 +8,7 @@
 
 var db = require('../db');
 var tasksWrite = require('../lib/tasks-write');
-var { computeChunks } = require('../lib/reconcile-splits');
+var { computeChunks, reconcileSplitsForUser } = require('../lib/reconcile-splits');
 var unifiedScheduleV2 = require('./unifiedScheduleV2');
 var constants = require('./constants');
 
@@ -139,6 +139,19 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var tPerfStart = Date.now();
   var tPerf = { loadEnd: 0, expandEnd: 0, reconcileEnd: 0, scheduleEnd: 0, persistEnd: 0 };
 
+  // 0. Materialize secondary chunk rows for non-recurring split tasks before
+  // the task load so the scheduler sees them and can place each chunk
+  // independently. Recurring split tasks are handled by the scheduler's own
+  // inMemoryChunks + inMemoryInserts path and are excluded here to avoid
+  // ID conflicts (scheduler uses <primaryId>-N; this pass uses uuidv7).
+  var _splitResult = await reconcileSplitsForUser(trx, userId);
+  if (_splitResult.mastersTouched > 0) {
+    console.log('[SCHED] split-reconcile: inserted=' + _splitResult.inserted +
+      ' updated=' + _splitResult.updated +
+      ' deleted=' + _splitResult.deleted +
+      ' masters=' + _splitResult.mastersTouched);
+  }
+
   // 1. Load schedulable tasks + templates + terminal-dedup + user config in
   //    parallel. All three are read-only and independent; serial awaits were
   //    adding the three queries' latencies on top of each other. Config uses
@@ -159,7 +172,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var _p_terminalDedupRows = trx('task_instances').where('user_id', userId)
     .whereNotNull('master_id')
     .whereIn('status', ['done', 'skip', 'cancel'])
-    .select('master_id as source_id', 'date', 'scheduled_at');
+    .select('master_id as source_id', 'date', 'scheduled_at', 'occurrence_ordinal');
   // Cross-cycle spacing history: latest `done` placement date per recurring
   // master. Only `done` counts — `skip` / `cancel` mean the user opted out
   // of that slot and shouldn't be treated as the real cadence (else a user
@@ -318,6 +331,17 @@ async function runScheduleAndPersist(userId, _retries, options) {
       var pdkey = isoToDateKey(r.date);
       if (pdkey) pendingBookedByDate[mid + '|' + pdkey] = true;
     }
+  });
+
+  // Include terminal (done/skip/cancel) rows in maxOrdByMaster so new ordinals
+  // never collide with completed occurrences. Pending rows are already handled
+  // above; terminal rows are excluded from taskRows but their ordinals are just
+  // as reserved.
+  terminalDedupRows.forEach(function(r) {
+    var mid = r.source_id;
+    if (!mid) return;
+    var o = Number(r.occurrence_ordinal) || 0;
+    if (o > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = o;
   });
 
   // expandRecurring skips generating an instance whose (sourceId, date) already
@@ -755,12 +779,19 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // Never touch recurring templates — they're blueprints, not schedulable tasks.
     if (original.taskType === 'recurring_template') continue;
     // Fixed tasks are user-anchored — never override their time/date.
-    if (original.datePinned) continue;
-    // Date-pinned tasks are user-set — never override their date/time.
-    // Exception: a datePinned flag without an actual date/scheduled_at is a
-    // stale artifact (user cleared the date but pin survived). Treat as
-    // unpinned — the scheduler is free to place.
-    if (original.datePinned && (original.date || original.time)) continue;
+    // Exception: still sync dur back to the DB when the scheduler's effective
+    // placed duration differs from the stored value. The user pinned the TIME,
+    // not the block size. Without this, the cal-sync uses the master's dur
+    // (e.g. 30 min) and pushes a 30-min GCal event even though Juggler shows
+    // a 3.5-hour block — the "inaccurate split task information" in GCal.
+    if (original.datePinned) {
+      var pinnedPlacedDur = placement.dur;
+      var pinnedStoredDur = Number(original.dur) || 0;
+      if (pinnedPlacedDur && pinnedPlacedDur !== pinnedStoredDur && placementCountByTaskId[taskId] === 1) {
+        pendingUpdates.push({ id: taskId, dbUpdate: { dur: pinnedPlacedDur, updated_at: db.fn.now() } });
+      }
+      continue;
+    }
     // Markers are non-blocking — never move them.
     if (original.marker) continue;
     // Recurrings should never have their date moved — they're day-specific.

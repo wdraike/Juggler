@@ -163,6 +163,20 @@ function applyEventToTaskFields(event, tz, currentTask) {
     fields.marker = true;
   }
 
+  if (!isAllDay) {
+    var dateChanged = jd.date && jd.date !== currentTask?.date;
+    var timeChanged = jd.time && jd.time !== currentTask?.time;
+    if (dateChanged || timeChanged) {
+      fields.when = 'fixed';
+      fields.prev_when = currentTask?.when;
+      if (dateChanged) fields.date_pinned = 1;
+    }
+  }
+
+  if (!event.isTransparent && currentTask?.marker) {
+    fields.marker = false;
+  }
+
   return fields;
 }
 
@@ -200,6 +214,7 @@ function buildEventBody(task, year, tz, opts) {
   if (task.project) descParts.push('Project: ' + task.project);
   if (task.pri) descParts.push('Priority: ' + task.pri);
   if (task.notes) descParts.push('Notes: ' + task.notes);
+  if (task.url) descParts.push('Link: ' + task.url);
   descParts.push('', 'Synced from Raike & Sons');
 
   var isDone = task.status === 'done';

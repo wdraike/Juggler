@@ -140,8 +140,13 @@ async function hasChanges(token, user) {
  * Normalize an MSFT Graph event to the unified NormalizedEvent shape.
  */
 function normalizeEvent(event) {
-  var startStr = event.start?.dateTime || '';
-  var endStr = event.end?.dateTime || '';
+  var rawStart = event.start?.dateTime || '';
+  var rawEnd = event.end?.dateTime || '';
+  // MSFT returns naive datetimes (no Z) with a separate timeZone field.
+  // Append Z when timeZone is UTC so downstream Date parsing treats it as UTC,
+  // not local machine time (which would introduce a timezone-offset error).
+  var startStr = (event.start?.timeZone === 'UTC' && rawStart && !rawStart.endsWith('Z')) ? rawStart + 'Z' : rawStart;
+  var endStr = (event.end?.timeZone === 'UTC' && rawEnd && !rawEnd.endsWith('Z')) ? rawEnd + 'Z' : rawEnd;
   var isAllDay = !!event.isAllDay;
   var dur = 30;
   if (!isAllDay && startStr && endStr) {
@@ -232,6 +237,20 @@ function applyEventToTaskFields(event, tz, currentTask) {
     fields.marker = true;
   }
 
+  if (!isAllDay) {
+    var dateChanged = jd.date && jd.date !== currentTask?.date;
+    var timeChanged = jd.time && jd.time !== currentTask?.time;
+    if (dateChanged || timeChanged) {
+      fields.when = 'fixed';
+      fields.prev_when = currentTask?.when;
+      if (dateChanged) fields.date_pinned = 1;
+    }
+  }
+
+  if (!event.isTransparent && currentTask?.marker) {
+    fields.marker = false;
+  }
+
   return fields;
 }
 
@@ -268,16 +287,24 @@ function buildMsftEventBody(task, year, tz, opts) {
   if (task.project) descParts.push('Project: ' + task.project);
   if (task.pri) descParts.push('Priority: ' + task.pri);
   if (task.notes) descParts.push('Notes: ' + task.notes);
+  if (task.url) descParts.push('Link: ' + task.url);
   descParts.push('', 'Synced from Raike & Sons');
 
   var isDone = task.status === 'done';
   var subjectText = isDone ? '✓ ' + task.text : task.text;
 
   if (isAllDay) {
-    var dateParts = (task.date || '').split('/');
-    var month = parseInt(dateParts[0], 10);
-    var day = parseInt(dateParts[1], 10);
-    var y = year || new Date().getFullYear();
+    // task.date may be ISO YYYY-MM-DD or legacy M/D — handle both to avoid "2026-2026-NaN"
+    var isoMatch = (task.date || '').match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    var mdMatch = !isoMatch && (task.date || '').match(/^(\d{1,2})\/(\d{1,2})$/);
+    var y, month, day;
+    if (isoMatch) {
+      y = parseInt(isoMatch[1], 10); month = parseInt(isoMatch[2], 10); day = parseInt(isoMatch[3], 10);
+    } else if (mdMatch) {
+      month = parseInt(mdMatch[1], 10); day = parseInt(mdMatch[2], 10); y = year || new Date().getFullYear();
+    } else {
+      y = year || new Date().getFullYear(); month = NaN; day = NaN;
+    }
     var startDate = y + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
     var endObj = new Date(y, month - 1, day + 1);
     var endDate = endObj.getFullYear() + '-' + String(endObj.getMonth() + 1).padStart(2, '0') + '-' + String(endObj.getDate()).padStart(2, '0');

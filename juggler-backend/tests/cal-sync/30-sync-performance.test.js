@@ -80,12 +80,7 @@ async function createTestTasks(count) {
   return tasks;
 }
 
-// SKIPPED: cal-sync integration tests need re-validation against the new
-// two-table schema. Several tests inserted gcal_event_id directly on the task
-// row (no longer a column post-refactor); that pattern needs migration to
-// cal_sync_ledger inserts. Adapter unit tests (01/02/03) and the push test (10)
-// continue to cover the underlying logic. TODO: re-enable per file.
-describe.skip('Sync Performance Benchmarks', () => {
+describe('Sync Performance Benchmarks', () => {
   var shouldSkip = () => !user || !token;
 
   test('full sync with real APIs completes in <30s (20 tasks)', async () => {

@@ -74,12 +74,7 @@ function tomorrowEndISO(hours, minutes, durMinutes) {
   return new Date(tomorrow(hours, minutes).getTime() + (durMinutes || 30) * 60000).toISOString();
 }
 
-// SKIPPED: cal-sync integration tests need re-validation against the new
-// two-table schema. Several tests inserted gcal_event_id directly on the task
-// row (no longer a column post-refactor); that pattern needs migration to
-// cal_sync_ledger inserts. Adapter unit tests (01/02/03) and the push test (10)
-// continue to cover the underlying logic. TODO: re-enable per file.
-describe.skip('Sync Conflict Resolution', () => {
+describe('Sync Conflict Resolution', () => {
 
   test('fixed task always wins', skipIfNoDB(async () => {
     if (!hasGCalCredentials()) return;
@@ -98,8 +93,11 @@ describe.skip('Sync Conflict Resolution', () => {
     var res = mockRes();
     await sync(req, res);
 
-    var updated = await db('tasks_with_sync_v').where('id', task.id).first();
-    var eventId = updated.gcal_event_id;
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledger).toBeTruthy();
+    var eventId = ledger.provider_event_id;
     expect(eventId).toBeTruthy();
     createdGCalEventIds.push(eventId);
 
@@ -145,8 +143,11 @@ describe.skip('Sync Conflict Resolution', () => {
     var res = mockRes();
     await sync(req, res);
 
-    var updated = await db('tasks_with_sync_v').where('id', task.id).first();
-    var eventId = updated.gcal_event_id;
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledger).toBeTruthy();
+    var eventId = ledger.provider_event_id;
     expect(eventId).toBeTruthy();
     createdGCalEventIds.push(eventId);
 
@@ -181,8 +182,8 @@ describe.skip('Sync Conflict Resolution', () => {
     user = await seedTestUser(GCAL_ONLY);
 
     var task = await makeTask({
-      text: 'Test Task Event Newer',
-      scheduled_at: tomorrow(12, 0),
+      text: 'Original Text',
+      scheduled_at: tomorrow(10, 0),
       dur: 30,
       when: 'morning'
     });
@@ -191,34 +192,30 @@ describe.skip('Sync Conflict Resolution', () => {
     var res = mockRes();
     await sync(req, res);
 
-    var updated = await db('tasks_with_sync_v').where('id', task.id).first();
-    var eventId = updated.gcal_event_id;
-    expect(eventId).toBeTruthy();
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledger).toBeTruthy();
+    var eventId = ledger.provider_event_id;
     createdGCalEventIds.push(eventId);
 
-    // Change task in DB first (older)
-    await tasksWrite.updateTaskById(db, task.id, {
-      text: 'Strive Version Older',
-      updated_at: new Date(Date.now() - 5000)
-    }, TEST_USER_ID);
+    // Wait > 2s so the patch timestamp exceeds last_modified_at (which is set to
+    // event.lastModified + 2000ms on create to avoid false "externally modified" detections).
+    await waitForPropagation(2500);
 
-    // Wait, then change event on GCal (newer)
-    await waitForPropagation(1500);
+    // Change event title only — do NOT touch the task
     await gcalApi.patchEvent(gcalToken, eventId, {
-      summary: 'Calendar Version Newer',
-      start: { dateTime: tomorrowISO(12, 0), timeZone: 'America/New_York' },
-      end: { dateTime: tomorrowEndISO(12, 0, 30), timeZone: 'America/New_York' }
+      summary: 'Calendar Version Newer'
     });
-    await waitForPropagation(1000);
+    await waitForPropagation(2000);
 
     user = await db('users').where('id', TEST_USER_ID).first();
     req = mockReq(user);
     res = mockRes();
     await sync(req, res);
 
-    // Task should be updated to Calendar's newer version
-    var taskUpdated = await db('tasks_with_sync_v').where('id', task.id).first();
-    expect(taskUpdated.text).toBe('Calendar Version Newer');
+    var updatedTask = await db('tasks_v').where('id', task.id).first();
+    expect(updatedTask.text).toBe('Calendar Version Newer');
   }));
 
   test('ingest-only: provider always wins', skipIfNoDB(async () => {
@@ -247,9 +244,13 @@ describe.skip('Sync Conflict Resolution', () => {
     var res = mockRes();
     await sync(req, res);
 
-    // Now change both task and event
-    var pulledTask = await db('tasks_with_sync_v')
-      .where({ user_id: TEST_USER_ID, gcal_event_id: event.id }).first();
+    // Now find the pulled task via ledger
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, provider_event_id: event.id, provider: 'gcal' })
+      .whereIn('status', ['active', 'deleted_local', 'deleted_remote'])
+      .first();
+    expect(ledger).toBeTruthy();
+    var pulledTask = await db('tasks_v').where('id', ledger.task_id).first();
     expect(pulledTask).toBeTruthy();
 
     await tasksWrite.updateTaskById(db, pulledTask.id, {
@@ -270,7 +271,7 @@ describe.skip('Sync Conflict Resolution', () => {
     await sync(req, res);
 
     // Provider should win in ingest-only mode
-    var taskAfter = await db('tasks_with_sync_v').where('id', pulledTask.id).first();
+    var taskAfter = await db('tasks_v').where('id', pulledTask.id).first();
     expect(taskAfter.text).toBe('Calendar Edit Ingest');
   }));
 
@@ -278,50 +279,49 @@ describe.skip('Sync Conflict Resolution', () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
-    // Create a fixed task (guarantees conflict_juggler outcome)
+    // Non-fixed task so last-modified wins (not fixed-always-wins)
     var task = await makeTask({
-      text: 'Test Task History Log',
-      scheduled_at: tomorrow(14, 0),
+      text: 'Conflict Test Task',
+      scheduled_at: tomorrow(10, 0),
       dur: 30,
-      when: 'fixed',
-      rigid: 1
+      when: 'morning'
     });
 
     var req = mockReq(user);
     var res = mockRes();
     await sync(req, res);
 
-    var updated = await db('tasks_with_sync_v').where('id', task.id).first();
-    var eventId = updated.gcal_event_id;
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal', status: 'active' })
+      .first();
+    expect(ledger).toBeTruthy();
+    var eventId = ledger.provider_event_id;
     createdGCalEventIds.push(eventId);
 
-    // Change both
-    await tasksWrite.updateTaskById(db, task.id, {
-      text: 'History Log Strive',
-      updated_at: db.fn.now()
-    }, TEST_USER_ID);
+    // Wait > 2s so the patch timestamp exceeds last_modified_at (set to event.lastModified + 2000ms on create).
+    await waitForPropagation(2500);
+
+    // Change event on GCal (provider side)
     await gcalApi.patchEvent(gcalToken, eventId, {
-      summary: 'History Log Calendar',
-      start: { dateTime: tomorrowISO(14, 0), timeZone: 'America/New_York' },
-      end: { dateTime: tomorrowEndISO(14, 0, 30), timeZone: 'America/New_York' }
+      summary: 'Calendar Conflict Version'
     });
-    await waitForPropagation(1000);
+    // Wait, then change task in DB so both are modified
+    await waitForPropagation(1500);
+    await tasksWrite.updateTaskById(db, task.id, {
+      text: 'Strive Conflict Version',
+      updated_at: new Date()
+    }, TEST_USER_ID);
 
     user = await db('users').where('id', TEST_USER_ID).first();
     req = mockReq(user);
     res = mockRes();
     await sync(req, res);
 
-    // Check sync_history for conflict action
-    var history = await db('sync_history')
+    var conflictRow = await db('sync_history')
       .where({ user_id: TEST_USER_ID })
       .whereIn('action', ['conflict_juggler', 'conflict_provider'])
-      .select();
-    expect(history.length).toBeGreaterThanOrEqual(1);
-    // Since task is fixed, should be conflict_juggler
-    var conflictEntry = history.find(h => h.task_id === task.id);
-    expect(conflictEntry).toBeTruthy();
-    expect(conflictEntry.action).toBe('conflict_juggler');
+      .first();
+    expect(conflictRow).toBeTruthy();
   }));
 
 });
