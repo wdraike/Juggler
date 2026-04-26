@@ -54,6 +54,7 @@ import RecurringDeleteDialog from '../features/RecurringDeleteDialog';
 import AiCommandPanel from '../features/AiCommandPanel';
 import AppFooter from './AppFooter';
 import apiClient from '../../services/apiClient';
+import ImpersonationBanner from '../admin/ImpersonationBanner';
 
 export default function AppLayout() {
   // Auth & timezone
@@ -1084,6 +1085,7 @@ export default function AppLayout() {
 
   return (
     <div style={{ height: '100vh', overflow: 'hidden', maxWidth: '100vw', background: theme.bg, fontFamily: "'Inter', system-ui, sans-serif" }}>
+      <ImpersonationBanner darkMode={darkMode} />
     <div style={{ width: isMobile ? '100%' : (10000 / config.fontSize) + '%', height: isMobile ? '100%' : (10000 / config.fontSize) + '%', transform: isMobile ? undefined : 'scale(' + (config.fontSize / 100) + ')', transformOrigin: '0 0', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ flexShrink: 0, zIndex: 100, background: theme.bg }}>
         <HeaderBar

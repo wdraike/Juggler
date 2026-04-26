@@ -5,18 +5,20 @@
   "dependencies": {
     "@react-oauth/google": "^0.12.1",
     "axios": "^1.6.7",
-    "html2canvas": "^1.4.1",
-    "konva": "^9.3.6",
-    "react-konva": "^18.2.10",
     "dagre": "^0.8.5",
     "elkjs": "^0.11.1",
+    "html2canvas": "^1.4.1",
     "juggler-shared": "file:../shared",
+    "konva": "^9.3.6",
     "mobile-drag-drop": "^3.0.0-rc.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-konva": "^18.2.10",
     "react-scripts": "5.0.1"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "http-proxy-middleware": "^2.0.6"
   },
   "scripts": {
