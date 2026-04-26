@@ -90,8 +90,9 @@ const stopImpersonation = async (req, res) => {
 const getImpersonationTargets = async (req, res) => {
   try {
     const { search, limit = 50, offset = 0 } = req.query;
-    const lim = Math.min(parseInt(limit) || 50, 100);
-    const off = parseInt(offset) || 0;
+    const parsedLimit = parseInt(limit);
+    const lim = Math.min(Math.max(1, Number.isNaN(parsedLimit) ? 50 : parsedLimit), 100);
+    const off = Math.max(0, parseInt(offset) || 0);
 
     let query = db('users').select('id', 'email', 'created_at');
     if (search) {
@@ -116,8 +117,9 @@ const getImpersonationTargets = async (req, res) => {
 const getImpersonationLog = async (req, res) => {
   try {
     const { limit = 50, offset = 0, adminUserId, targetUserId } = req.query;
-    const lim = Math.min(parseInt(limit) || 50, 100);
-    const off = parseInt(offset) || 0;
+    const parsedLimit = parseInt(limit);
+    const lim = Math.min(Math.max(1, Number.isNaN(parsedLimit) ? 50 : parsedLimit), 100);
+    const off = Math.max(0, parseInt(offset) || 0);
 
     let query = db('impersonation_log')
       .select(

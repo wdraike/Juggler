@@ -14,7 +14,7 @@ jest.mock('../proxy-config', () => ({
 
 global.fetch = jest.fn();
 
-const { startImpersonation, stopImpersonation, getImpersonationTargets } = require('../controllers/impersonation.controller');
+const { startImpersonation, stopImpersonation, getImpersonationTargets, getImpersonationLog } = require('../controllers/impersonation.controller');
 
 function makeApp(handler, user = { id: 'admin-1', email: 'admin@test.com' }) {
   const app = express();
@@ -100,5 +100,50 @@ describe('stopImpersonation', () => {
       admin_user_id: 'admin-1',
       action: 'stop_impersonation'
     }));
+  });
+});
+
+describe('getImpersonationTargets', () => {
+  function makeTargetsDb(users = [], count = 0) {
+    const db = require('../db');
+    // Build a clone object that handles clearSelect().count()
+    const makeClone = () => ({
+      clearSelect: jest.fn().mockReturnThis(),
+      count: jest.fn().mockResolvedValue([{ count }]),
+      where: jest.fn().mockReturnThis(),
+    });
+    const chain = {
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      offset: jest.fn().mockResolvedValue(users),
+      clone: jest.fn(makeClone),
+    };
+    db.mockReturnValueOnce(chain);
+    return chain;
+  }
+
+  it('returns paginated users', async () => {
+    makeTargetsDb([{ id: 'u1', email: 'a@test.com', created_at: '2026-01-01' }], 1);
+    const res = await request(makeApp(getImpersonationTargets)).get('/test');
+    expect(res.status).toBe(200);
+    expect(res.body.users).toHaveLength(1);
+    expect(res.body.pagination.total).toBe(1);
+    expect(res.body.pagination.hasMore).toBe(false);
+  });
+
+  it('clamps limit to 100', async () => {
+    makeTargetsDb([], 0);
+    const res = await request(makeApp(getImpersonationTargets)).get('/test?limit=500&offset=0');
+    expect(res.status).toBe(200);
+    expect(res.body.pagination.limit).toBe(100);
+  });
+
+  it('enforces minimum limit of 1 for limit=0', async () => {
+    makeTargetsDb([], 0);
+    const res = await request(makeApp(getImpersonationTargets)).get('/test?limit=0&offset=0');
+    expect(res.status).toBe(200);
+    expect(res.body.pagination.limit).toBe(1);
   });
 });
