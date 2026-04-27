@@ -15,7 +15,7 @@ const TZ = 'America/New_York';
 function makeRow(overrides) {
   return Object.assign({
     id: 'test-001', user_id: 'u1', task_type: 'task', text: 'Test',
-    scheduled_at: null, desired_at: null, desired_date: null, tz: null,
+    scheduled_at: null, desired_at: null, tz: null,
     dur: 30, time_remaining: null, pri: 'P3', project: null, status: '',
     section: null, notes: null, deadline: null, start_after_at: null,
     location: '[]', tools: '[]', when: null, day_req: null,
@@ -192,7 +192,6 @@ describe('rowToTask: return object', () => {
     expect(task).toHaveProperty('taskType');
     expect(task).toHaveProperty('scheduledAt');
     expect(task).toHaveProperty('desiredAt');
-    expect(task).toHaveProperty('desiredDate');
     expect(task).toHaveProperty('preferredTimeMins');
     expect(task).toHaveProperty('unscheduled');
     expect(task).toHaveProperty('datePinned');
@@ -213,10 +212,10 @@ describe('taskToRow: date/time conversion', () => {
     expect(row.scheduled_at).toEqual(row.desired_at);
   });
 
-  test('date only → scheduled_at at midnight, desired_date set', () => {
+  test('date only → scheduled_at at midnight, desired_at at noon', () => {
     var row = taskToRow({ date: '4/7' }, 'u1', TZ);
     expect(row.scheduled_at).toBeTruthy();
-    expect(row.desired_date).toBe('2026-04-07');
+    expect(row.desired_at).toBeTruthy();
   });
 
   test('time only → _pendingTimeOnly', () => {
@@ -238,7 +237,6 @@ describe('taskToRow: date/time conversion', () => {
     var row = taskToRow({ date: '' }, 'u1', TZ);
     expect(row.scheduled_at).toBeNull();
     expect(row.desired_at).toBeNull();
-    expect(row.desired_date).toBeNull();
   });
 });
 

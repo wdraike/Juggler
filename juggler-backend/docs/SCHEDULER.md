@@ -101,7 +101,11 @@ After Phase 4, look for recurring instances that didn't land in Phase 1. For eac
 
 ### 5. Overlap prevention
 
-The scheduler prevents overlaps during placement — the occupancy grid (`dayOcc`) blocks already-occupied minutes. There is no post-placement pile-up resolution. Each phase respects what previous phases placed:
+The scheduler prevents overlaps during placement — the occupancy grid (`dayOcc`) blocks already-occupied minutes. There is no post-placement pile-up resolution. Each phase respects what previous phases placed.
+
+**Design decision (2026-04-27, closes GP-3/CL-2):** The original spec described *eviction* — removing already-placed tasks when a higher-priority new task can't fit. The implementation instead uses *prevention* — the occupancy grid simply skips occupied slots and leaves lower-priority tasks where they are. Prevention is correct: eviction would silently unschedule tasks the user sees as confirmed, producing confusing churn every cycle. If a slot is taken, the new task moves to the next available window. Spec is updated here to reflect the implemented design.
+
+Each phase respects what previous phases placed:
 
 - Phase 0 locks pinned/marker slots
 - Phase 1 recurring fills around Phase 0

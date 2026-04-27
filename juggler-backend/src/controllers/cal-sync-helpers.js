@@ -135,6 +135,28 @@ function computeDurationMinutes(start, end) {
 }
 
 /**
+ * Hash of user-editable task fields only — excludes scheduler-controlled fields
+ * (date, time, dur, status). Used in the miss-count path to distinguish genuine
+ * user edits (task renamed, notes changed) from scheduler rescheduling. Stored
+ * as last_user_hash on cal_sync_ledger; NULL on legacy rows suppresses the
+ * tasksNeedingReCreate path until a fresh push populates it.
+ */
+function userHash(task) {
+  var str = [
+    task.text || '',
+    task.when || '',
+    task.project || '',
+    task.marker ? 'marker' : '',
+    task.notes || '',
+    task.url || '',
+    task.pri || '',
+    Array.isArray(task.location) ? task.location.slice().sort().join(',') : '',
+    Array.isArray(task.tools) ? task.tools.slice().sort().join(',') : ''
+  ].join('|');
+  return crypto.createHash('md5').update(str).digest('hex');
+}
+
+/**
  * Hash the task fields we sync to calendars.
  */
 function taskHash(task) {
@@ -181,6 +203,7 @@ module.exports = {
   jugglerDateToISO,
   isoToJugglerDate,
   computeDurationMinutes,
+  userHash,
   taskHash,
   toMySQLDate
 };

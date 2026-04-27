@@ -15,7 +15,7 @@ var { getConnectedAdapters } = require('../lib/cal-adapters');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 var { rowToTask } = require('./task.controller');
 var { localToUtc, utcToLocal } = require('../scheduler/dateHelpers');
-var { taskHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE } = require('./cal-sync-helpers');
+var { taskHash, userHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE } = require('./cal-sync-helpers');
 var sseEmitter = require('../lib/sse-emitter');
 var { acquireLock, releaseLock, refreshLock } = require('../lib/sync-lock');
 var { flushQueueInLock } = require('../lib/task-write-queue');
@@ -788,8 +788,14 @@ async function sync(req, res) {
               // the per-provider grace window; miss_count is not incremented.
               if (withinCdnGrace(ledger, pid)) {
                 // CDN propagation window — treat as not-yet-visible, not missing
-              } else if (ledger.origin === 'juggler' && taskHash(task) !== ledger.last_pushed_hash
+              } else if (ledger.origin === 'juggler'
+                  && ledger.last_user_hash !== null
+                  && userHash(task) !== ledger.last_user_hash
                   && (ledger.miss_count || 0) >= 1) {
+                // User-editable content changed AND event is gone after at least one miss —
+                // the event link is broken. Re-create.
+                // Guarded on last_user_hash !== null: legacy rows (no stored user hash) fall
+                // through to the normal deletion ladder rather than triggering a spurious repush.
                 tasksNeedingReCreate.add(task.id);
                 processedTaskIds.delete(task.id);
                 ledgerUpdates.push({ id: ledger.id, fields: {
@@ -797,12 +803,14 @@ async function sync(req, res) {
                 }});
                 logSyncAction(pid, 'repush', {
                   taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                  detail: pid + ' event gone but juggler task was modified — will re-create'
+                  detail: pid + ' event gone but juggler task content changed — will re-create'
                 });
-              } else if (ledger.origin === 'juggler' && taskHash(task) !== ledger.last_pushed_hash) {
-                // First miss for a modified task — may be CDN propagation delay.
-                // Increment miss_count and wait for the next sync to confirm.
-                ledgerUpdates.push({ id: ledger.id, fields: { miss_count: (ledger.miss_count || 0) + 1 } });
+              } else if (ledger.origin === 'juggler'
+                  && taskHash(task) !== ledger.last_pushed_hash
+                  && (ledger.miss_count || 0) === 0) {
+                // First miss only: task changed (possibly scheduler timing update) on the same
+                // sync the event went missing. Wait one more cycle before acting — could be CDN lag.
+                ledgerUpdates.push({ id: ledger.id, fields: { miss_count: 1 } });
               } else {
                 var cachedStart = ledger.event_start;
                 var eventInWindow = false;
@@ -891,8 +899,12 @@ async function sync(req, res) {
         if (upd && upd.ledgerId && upd.newHash) {
           ledgerUpdates.push({ id: upd.ledgerId, fields: {
             last_pushed_hash: upd.newHash,
+            last_user_hash: upd.task ? userHash(upd.task) : null,
             last_pushed_at: db.fn.now(),
-            last_modified_at: toMySQLDate(new Date(Date.now() + 2000).toISOString())
+            // +30s: provider server timestamps often lag our push by several seconds
+            // (Apple CalDAV is especially slow). Using +2s caused false
+            // eventModifiedExternally detections on the following sync.
+            last_modified_at: toMySQLDate(new Date(Date.now() + 30000).toISOString())
           }});
         }
       }
@@ -1140,6 +1152,7 @@ async function sync(req, res) {
               user_id: userId, provider: pid2, task_id: br.taskId,
               provider_event_id: br.providerEventId, origin: 'juggler',
               last_pushed_hash: taskHash(bTask),
+              last_user_hash: userHash(bTask),
               last_pulled_hash: createdNorm ? pAdapter2.eventHash(createdNorm) : null,
               event_summary: bTask.text,
               event_start: createdNorm ? createdNorm.startDateTime : null,
@@ -1176,6 +1189,7 @@ async function sync(req, res) {
                   user_id: userId, provider: pid2, task_id: rTask.id,
                   provider_event_id: rResult.providerEventId, origin: 'juggler',
                   last_pushed_hash: taskHash(rTask),
+                  last_user_hash: userHash(rTask),
                   last_pulled_hash: rNorm ? pAdapter2.eventHash(rNorm) : null,
                   event_summary: rTask.text,
                   event_start: rNorm ? rNorm.startDateTime : null,
@@ -1192,6 +1206,7 @@ async function sync(req, res) {
                   user_id: userId, provider: pid2, task_id: rTask.id,
                   provider_event_id: null, origin: 'juggler',
                   last_pushed_hash: taskHash(rTask),
+                  last_user_hash: userHash(rTask),
                   event_summary: rTask.text,
                   status: 'error',
                   error_detail: rErr.message.substring(0, 1000)
@@ -1218,6 +1233,7 @@ async function sync(req, res) {
                 user_id: userId, provider: pid2, task_id: fTask.id,
                 provider_event_id: result.providerEventId, origin: 'juggler',
                 last_pushed_hash: taskHash(fTask),
+                last_user_hash: userHash(fTask),
                 last_pulled_hash: fNorm ? pAdapter2.eventHash(fNorm) : null,
                 event_summary: fTask.text,
                 event_start: fNorm ? fNorm.startDateTime : null,
@@ -1280,6 +1296,7 @@ async function sync(req, res) {
             provider_event_id: evId,
             origin: origin,
             last_pushed_hash: taskHash(existingTask),
+            last_user_hash: userHash(existingTask),
             last_pulled_hash: pAdapter2.eventHash(newEvent),
             event_summary: newEvent.title || existingTask.text,
             event_start: newEvent.startDateTime || null,
@@ -1308,6 +1325,7 @@ async function sync(req, res) {
             provider_event_id: evId,
             origin: pid2,
             last_pushed_hash: null,
+            last_user_hash: null,
             last_pulled_hash: pAdapter2.eventHash(newEvent),
             event_summary: newEvent.title,
             event_start: newEvent.startDateTime || null,
@@ -1342,6 +1360,7 @@ async function sync(req, res) {
               provider_event_id: evId,
               origin: 'juggler',
               last_pushed_hash: taskHash(orphanMatch),
+              last_user_hash: userHash(orphanMatch),
               last_pulled_hash: pAdapter2.eventHash(newEvent),
               event_summary: newEvent.title,
               event_start: newEvent.startDateTime || null,
@@ -1395,6 +1414,7 @@ async function sync(req, res) {
               provider_event_id: newEvent.id,
               origin: pid2,
               last_pushed_hash: taskHash(dupTask),
+              last_user_hash: userHash(dupTask),
               last_pulled_hash: pAdapter2.eventHash(newEvent),
               event_summary: newEvent.title,
               event_start: newEvent.startDateTime || null,
@@ -1448,6 +1468,7 @@ async function sync(req, res) {
             provider_event_id: newEvent.id,
             origin: pid2,
             last_pushed_hash: taskHash(newTaskObj),
+            last_user_hash: userHash(newTaskObj),
             last_pulled_hash: pAdapter2.eventHash(newEvent),
             event_summary: newEvent.title,
             event_start: newEvent.startDateTime || null,

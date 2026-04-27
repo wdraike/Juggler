@@ -84,7 +84,7 @@ Scheduler does not read this field — it's purely for UI intent-display.
 
 Intended range: `1..N` where N is the count of placed occurrences for the master. The insert trigger in migration `20260415010400` assigns it as `MAX(occurrence_ordinal) + 1` for each new recurring instance under a given master. Because the trigger never recycles numbers and because expired/old instances aren't pruned, this value grows monotonically for long-lived recurring templates — so values in the thousands are expected for a daily habit that has been running for years.
 
-Whether that is a bug (it should be truncated to a meaningful window) or a feature (permanent immutable ordinal for audit) is a Bucket 2 decision, likely settled by #25 (UUIDv7 for ordinals).
+**Decision (2026-04-27, closes #16 and #25):** Monotonic growth is expected and correct. The ordinal encodes "Nth ever occurrence" — an immutable audit identity that recycling or capping would break. UUIDv7 was considered as a replacement (#25) but rejected: ordinals carry cardinality semantics that an opaque UUID cannot express, and migrating 97 call-sites carried high cascade risk. UUIDv7 is already used for `task_instances.id` (opaque PK) where it is appropriate. For ordinals, keep the current monotonic scheme.
 
 #### `generated` (#20)
 
@@ -287,5 +287,5 @@ These are not authoritative changes — they're observations to consider when tr
 1. **`cal_sync_ledger.calendar_id` is unused.** Either populate it everywhere or drop the column.
 2. **`user_calendars` is Apple-only.** Either generalize or rename to signal its scope.
 3. **`section` is a dead field in the edit UI.** Decide whether to expose it, remove it, or keep it for import-only use.
-4. **`occurrence_ordinal` is monotonic with no cap.** Expected behavior given current design, but confirm it's what we want (see #25, UUIDv7).
+4. **`occurrence_ordinal` is monotonic with no cap.** Confirmed expected behavior — closed 2026-04-27 (see #16/#25 note above).
 5. **Text-cached `date`/`day`/`time` on `task_instances`.** Derived — convert to computed columns or drop + compute in views.
