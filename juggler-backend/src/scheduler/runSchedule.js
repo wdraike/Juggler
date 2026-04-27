@@ -172,7 +172,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var _p_terminalDedupRows = trx('task_instances').where('user_id', userId)
     .whereNotNull('master_id')
     .whereIn('status', ['done', 'skip', 'cancel'])
-    .select('master_id as source_id', 'date', 'scheduled_at', 'occurrence_ordinal');
+    .select('master_id as source_id', 'date', 'scheduled_at', 'occurrence_ordinal', 'id');
   // Cross-cycle spacing history: latest `done` placement date per recurring
   // master. Only `done` counts — `skip` / `cancel` mean the user opted out
   // of that slot and shouldn't be treated as the real cadence (else a user
@@ -324,9 +324,20 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (mid) {
       var o = Number(r.occurrence_ordinal) || 0;
       if (o > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = o;
+      // Also track the numeric suffix of the instance ID. IDs from prior runs
+      // may have suffixes higher than occurrence_ordinal (they diverge when
+      // collision-dropped desired occurrences leave holes in the ordinal space
+      // while the actual inserted IDs advance further). If nextOrd starts below
+      // an existing ID suffix, the new desired occurrence gets an ID that
+      // matches an existing pending instance — existingPendingIds rejects it,
+      // silently dropping the new instance from the calendar.
+      var idSuffix = String(r.id).match(/-(\d+)(?:-\d+)?$/);
+      if (idSuffix) {
+        var idNum = Number(idSuffix[1]);
+        if (idNum > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = idNum;
+      }
     }
     // Record pending dates so tpc slot accounting can count them as booked.
-    // knex returns MySQL DATE as ISO; expandRecurring keys are M/D — normalize.
     if (mid && (!r.status || r.status === '') && r.date) {
       var pdkey = isoToDateKey(r.date);
       if (pdkey) pendingBookedByDate[mid + '|' + pdkey] = true;
@@ -342,6 +353,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (!mid) return;
     var o = Number(r.occurrence_ordinal) || 0;
     if (o > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = o;
+    var idSuffix = String(r.id).match(/-(\d+)(?:-\d+)?$/);
+    if (idSuffix) {
+      var idNum = Number(idSuffix[1]);
+      if (idNum > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = idNum;
+    }
   });
 
   // expandRecurring skips generating an instance whose (sourceId, date) already
