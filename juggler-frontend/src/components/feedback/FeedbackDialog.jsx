@@ -231,7 +231,7 @@ export default function FeedbackDialog({ open, onClose, darkMode, theme }) {
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '16px 20px', borderBottom: '1px solid ' + theme.border
           }}>
-            <span style={{ fontSize: 18, fontWeight: 700, color: theme.text, fontFamily: "'Inter', sans-serif" }}>
+            <span style={{ fontSize: 18, fontWeight: 700, color: theme.text, fontFamily: "'Playfair Display', serif" }}>
               Report an Issue
             </span>
             {!success && (
@@ -289,7 +289,7 @@ export default function FeedbackDialog({ open, onClose, darkMode, theme }) {
             {success && (
               <div style={{ textAlign: 'center', padding: '32px 0' }}>
                 <div style={{ fontSize: 48, marginBottom: 12 }}>{'\u2705'}</div>
-                <div style={{ fontSize: 18, fontWeight: 600, color: theme.text, marginBottom: 8, fontFamily: "'Inter', sans-serif" }}>
+                <div style={{ fontSize: 18, fontWeight: 600, color: theme.text, marginBottom: 8, fontFamily: "'Playfair Display', serif" }}>
                   Thank you for your feedback!
                 </div>
                 <div style={{ fontSize: 14, color: theme.textMuted, fontFamily: "'Inter', sans-serif" }}>
