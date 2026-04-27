@@ -1,8 +1,19 @@
 # Juggler — Open Plans
 
 Source of truth for in-progress and backlog work. See `Issues.txt` for the item-level list.
+Last updated: 2026-04-27
 
-> **Caveat:** Items below were planned Apr 13–16. Verify current code state before starting any item — check git log and grep for the relevant symbols first.
+> **Caveat:** Items below were planned Apr 13–16 unless noted. Verify current code state before starting any item — check git log and grep for the relevant symbols first.
+
+## Status summary
+
+| Plan | Status |
+|------|--------|
+| Scheduler redesign — recurring/split chunks as persistent rows (5 phases) | 🔴 Active plan, not yet started — `reconcile-splits.js` exists but not wired to production |
+| Calendar Sync Reliability (retry/backoff, lock timeout, frontend retry countdown) | ⬜ Not started |
+| CalSyncPanel — Connected Apple Calendars display + per-calendar controls | ⬜ Not started |
+| Scheduler docs update (`SCHEDULER-PRIORITY-REDESIGN.md` is stale) | ⬜ Not started |
+| GCal Anomaly Verifier Script | ⬜ Not started |
 
 ---
 
