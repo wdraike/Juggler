@@ -691,6 +691,17 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
     }
   }
 
+  // Safety valve: if the spacing guard would block the entire search window
+  // (prior occurrence displaced forward past this occurrence's anchor dates),
+  // ignore the guard. Prevents permanently unplaceable occurrences when
+  // out-of-order future placements corrupt lastByMaster.
+  if (spacingMinKey && latestIdx >= earliestIdx && latestIdx < dates.length) {
+    var lastSearchDay = dates[latestIdx];
+    if (lastSearchDay && lastSearchDay.key < spacingMinKey) {
+      spacingMinKey = null;
+    }
+  }
+
   var i = earliestIdx;
   while (i <= latestIdx || canExtend) {
     if (i >= dates.length) {

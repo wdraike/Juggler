@@ -501,6 +501,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // where master.dur or master.split_min changed, or where a prior bug wrote
   // the wrong chunk dur.
   var toUpdate = [];
+  // Declared in outer scope so the reconcileChanged rebuild can re-apply these
+  // corrections — without this, the rebuild wipes the allTasks patch and the
+  // scheduler then places at the old (wrong) dur, which the persist step writes
+  // back to the DB, undoing the drift-fix entirely.
+  var updateById = {};
   taskRows.forEach(function(r) {
     if (r.task_type !== 'recurring_instance') return;
     if (r.status && r.status !== '') return;
@@ -552,7 +557,6 @@ async function runScheduleAndPersist(userId, _retries, options) {
       });
       await trx('task_instances').whereIn('id', driftIds).update(driftFields);
     }
-    var updateById = {};
     toUpdate.forEach(function(u) { updateById[u.id] = u.changes; });
     allTasks.forEach(function(t) {
       var ch = updateById[t.id];
@@ -596,6 +600,19 @@ async function runScheduleAndPersist(userId, _retries, options) {
         t.startAfter = null;
         t.deadline = null;
         t.scheduledAt = null;
+      });
+    }
+    // Re-apply drift-fix chunk-plan corrections. The taskRows rebuild above
+    // loaded stale dur/split values from before the DB update — without this
+    // the scheduler places at the old dur and the persist step writes it back,
+    // permanently undoing the drift-fix.
+    if (Object.keys(updateById).length > 0) {
+      allTasks.forEach(function(t) {
+        var ch = updateById[t.id];
+        if (!ch) return;
+        if (ch.dur != null) t.dur = ch.dur;
+        if (ch.split_ordinal != null) t.splitOrdinal = ch.split_ordinal;
+        if (ch.split_total != null) t.splitTotal = ch.split_total;
       });
     }
   }
