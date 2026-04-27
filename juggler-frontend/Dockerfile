@@ -8,8 +8,10 @@ COPY shared/ /shared/
 
 # Copy package files and install (from juggler-frontend/ subdirectory in build context)
 COPY juggler-frontend/package.json juggler-frontend/package-lock.json* ./
-# Fix shared module path for Docker context, then install + stub bug-reporter-client
-RUN sed -i 's|"file:../shared"|"file:/shared"|g' package.json package-lock.json 2>/dev/null; \
+# Fix shared module path, strip file: deps that can't resolve in Docker context, then install
+RUN sed -i 's|"file:../shared"|"file:/shared"|g' package.json package-lock.json 2>/dev/null && \
+    sed -i '/"bug-reporter-client"/d' package.json && \
+    node -e "const f=require('fs');const p=JSON.parse(f.readFileSync('package-lock.json','utf8'));delete p.packages['node_modules/bug-reporter-client'];delete p.dependencies?.['bug-reporter-client'];Object.keys(p.packages).forEach(k=>{if(k.includes('bug-reporter'))delete p.packages[k]});f.writeFileSync('package-lock.json',JSON.stringify(p,null,2))" && \
     npm ci --legacy-peer-deps && \
     mkdir -p node_modules/bug-reporter-client && \
     echo "module.exports.createBugReporterClient=function(){return{submitReport:function(){return Promise.resolve()},init:function(){}}};" > node_modules/bug-reporter-client/index.js && \
