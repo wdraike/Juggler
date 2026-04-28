@@ -690,6 +690,14 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   // Unpin: revert a drag-pinned task to scheduler control.
   // For recurring instances: deletes the instance so the scheduler regenerates it.
   var isPinned = !isCreate && task && task.prevWhen != null;
+  function handleUnfix() {
+    if (!task) return;
+    setDatePinned(false);
+    if (onUpdate) onUpdate(task.id, { datePinned: false });
+    apiClient.patch('/tasks/' + task.id, { datePinned: false, _allowUnfix: true }).catch(function(err) {
+      console.error('Unfix failed:', err);
+    });
+  }
   function handleUnpin() {
     if (!task) return;
     var isRecurringInstance = task.taskType === 'recurring_instance' && task.sourceId;
@@ -1188,7 +1196,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                     style={{ ...iStyle, width: isMobile ? '100%' : undefined, minWidth: 0, ...(datePinned && date ? { borderColor: '#D97706' } : {}) }} />
                 )}
                 {!isCreate && !isCalLinkedFixed && !marker && datePinned && date && (
-                  <button onClick={() => { setDatePinned(false); setDate(''); setTime(''); setEndTime(''); setEndTimeError(null); }} title="Let scheduler choose the date"
+                  <button onClick={handleUnfix} title="Let scheduler choose the date"
                     style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
                       border: '1px solid ' + TH.btnBorder, background: TH.inputBg, color: TH.textMuted, fontWeight: 600,
                       height: BTN_H, boxSizing: 'border-box' }}>
