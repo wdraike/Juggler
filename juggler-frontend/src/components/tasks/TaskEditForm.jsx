@@ -1154,7 +1154,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             <label style={{ ...lStyle, maxWidth: '100%', minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <span title="Date/time for this task. For fixed tasks: the scheduler will not move it. For unfixed tasks: the scheduler may shift it to fit your schedule.">{'\uD83D\uDCC5'} Date / Time</span>
-                {!isCreate && !isFixed && !marker && date && (
+                {!isCreate && !marker && date && (
                   datePinned
                     ? <span style={{ fontSize: 7, color: '#D97706', fontWeight: 700 }}>{'\uD83D\uDCCC'} fixed</span>
                     : <span style={{ fontSize: 7, color: TH.muted2 }}>set by scheduler</span>
