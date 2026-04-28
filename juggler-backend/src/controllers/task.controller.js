@@ -865,6 +865,16 @@ async function updateTask(req, res) {
         delete fastRow.depends_on;
       }
 
+      // Normalize: if clearing date_pinned without explicitly changing when,
+      // strip the 'fixed' tag so the scheduler isn't left treating the task as
+      // immovable after the user has asked to unpin it.
+      if (fastRow.date_pinned === 0 && req.body.when === undefined) {
+        var _exWhen = fastExisting.when || '';
+        if (_exWhen.split(',').some(function(t) { return t.trim() === 'fixed'; })) {
+          fastRow.when = _exWhen.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t && t !== 'fixed'; }).join(',');
+        }
+      }
+
       // Direct write: master + instance fields routed by the helper.
       // For recurring_instance, route template fields to the source master.
       if (fastExisting.task_type === 'recurring_instance' && fastExisting.source_id) {
@@ -1586,12 +1596,13 @@ async function batchCreateTasks(req, res) {
       return res.status(400).json({ error: 'Batch limited to 500 items' });
     }
 
-    // Validate field lengths to prevent oversized data
+    // Validate each task
     for (var i = 0; i < tasks.length; i++) {
       var t = tasks[i];
-      if (t.title && t.title.length > 500) return res.status(400).json({ error: `Task ${i}: title too long (max 500 chars)` });
-      if (t.notes && t.notes.length > 5000) return res.status(400).json({ error: `Task ${i}: notes too long (max 5000 chars)` });
-      if (t.depends_on && Array.isArray(t.depends_on) && t.depends_on.length > 50) return res.status(400).json({ error: `Task ${i}: too many dependencies (max 50)` });
+      var batchCreateErrs = validateTaskInput(Object.assign({ _requireText: true }, t));
+      if (batchCreateErrs.length > 0) {
+        return res.status(400).json({ error: 'Task ' + i + ': ' + batchCreateErrs.join('; ') });
+      }
     }
 
     var tz = safeTimezone(req.headers['x-timezone']);
@@ -1658,6 +1669,18 @@ async function batchUpdateTasks(req, res) {
       return res.status(400).json({ error: 'Batch limited to 2000 items' });
     }
 
+    // Validate each update item up-front
+    for (var bvi = 0; bvi < updates.length; bvi++) {
+      var bvItem = updates[bvi];
+      if (!bvItem || !bvItem.id) continue;
+      var bvFields = {};
+      Object.keys(bvItem).forEach(function(k) { if (k !== 'id') bvFields[k] = bvItem[k]; });
+      var bvErrs = validateTaskInput(bvFields);
+      if (bvErrs.length > 0) {
+        return res.status(400).json({ error: 'Update item ' + bvi + ' (' + bvItem.id + '): ' + bvErrs.join('; ') });
+      }
+    }
+
     var tz = safeTimezone(req.headers['x-timezone']);
     var updatedCount = 0;
     var queuedCount = 0;
@@ -1694,6 +1717,14 @@ async function batchUpdateTasks(req, res) {
         delete qRow.user_id;
         delete qRow.created_at;
         delete qRow._pendingTimeOnly;
+
+        // Normalize: clearing date_pinned without changing when → strip 'fixed'
+        if (qRow.date_pinned === 0 && qFields.when === undefined && qExisting) {
+          var _qExWhen = qExisting.when || '';
+          if (_qExWhen.split(',').some(function(t) { return t.trim() === 'fixed'; })) {
+            qRow.when = _qExWhen.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t && t !== 'fixed'; }).join(',');
+          }
+        }
 
         var { schedulingFields, nonSchedulingFields } = splitFields(qRow);
 
@@ -1808,6 +1839,14 @@ async function batchUpdateTasks(req, res) {
             // Recurrings cannot have dependencies — strip if provided
             if (existing && (existing.task_type === 'recurring_template' || existing.task_type === 'recurring_instance')) {
               delete row.depends_on;
+            }
+
+            // Normalize: clearing date_pinned without changing when → strip 'fixed'
+            if (row.date_pinned === 0 && fields.when === undefined && existing) {
+              var _exWhen = existing.when || '';
+              if (_exWhen.split(',').some(function(t) { return t.trim() === 'fixed'; })) {
+                row.when = _exWhen.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t && t !== 'fixed'; }).join(',');
+              }
             }
 
             var taskType = existing ? (existing.task_type || 'task') : 'task';

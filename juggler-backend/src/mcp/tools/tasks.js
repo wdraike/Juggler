@@ -20,7 +20,13 @@ var taskInputFields = {
   project: z.string().optional().describe('Project name'),
   pri: z.string().optional().describe('Priority: "P1" (highest), "P2", "P3" (default), "P4" (lowest)'),
   dur: z.number().optional().describe('Duration in minutes'),
-  when: z.string().optional().describe('Time preference: "morning", "afternoon", "evening", or null'),
+  when: z.string().optional()
+    .refine(function(w) {
+      if (!w) return true;
+      var reserved = ['fixed', 'allday'];
+      return !w.split(',').some(function(t) { return reserved.indexOf(t.trim()) !== -1; });
+    }, { message: 'Do not use when="fixed" or "allday" — these are reserved for calendar-synced events. Use date+time fields to schedule a task at a specific time.' })
+    .describe('Time-of-day preference tags, comma-separated: "morning", "afternoon", "evening", "lunch", "biz", "night", or "" (none). Do NOT use "fixed" or "allday".'),
   dayReq: z.string().optional().describe('Day requirement: "any", "weekday", "weekend", a single day letter (M,T,W,R,F,Sa,Su), or comma-separated for multiple days (e.g. "M,W,F")'),
   dependsOn: z.array(z.string()).optional().describe('Array of task IDs this task depends on'),
   // Local string fields (PREFERRED — server converts using user's timezone automatically)
@@ -157,6 +163,12 @@ function registerTaskTools(server, userId) {
       )).describe('Array of task objects to create')
     },
     async ({ tasks }) => {
+      for (var vi = 0; vi < tasks.length; vi++) {
+        var vErrs = validateTaskInput(Object.assign({ _requireText: true }, tasks[vi]));
+        if (vErrs.length > 0) {
+          return { content: [{ type: 'text', text: 'Validation error on task ' + vi + ': ' + vErrs.join('; ') }], isError: true };
+        }
+      }
       var tz = await getUserTimezone();
       var uuidv7 = require('uuid').v7;
       var prefs = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
