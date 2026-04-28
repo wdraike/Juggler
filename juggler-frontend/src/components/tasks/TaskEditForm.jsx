@@ -694,9 +694,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (!task) return;
     setDatePinned(false);
     if (onUpdate) onUpdate(task.id, { datePinned: false });
-    apiClient.patch('/tasks/' + task.id, { datePinned: false, _allowUnfix: true }).catch(function(err) {
-      console.error('Unfix failed:', err);
-    });
   }
   function handleUnpin() {
     if (!task) return;
