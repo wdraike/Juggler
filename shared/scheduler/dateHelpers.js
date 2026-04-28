@@ -163,7 +163,7 @@ function localToUtc(dateStr, timeStr, timezone) {
   var hours = 0, mins = 0;
   if (timeStr) {
     var totalMins = parseTimeToMinutes(timeStr);
-    if (totalMins != null) {
+    if (totalMins != null && !isNaN(totalMins)) {
       hours = Math.floor(totalMins / 60);
       mins = totalMins % 60;
     }
@@ -196,6 +196,7 @@ function localToUtc(dateStr, timeStr, timezone) {
   }
   var utcMs = tempDate.getTime() - diffMins * 60000;
   var result = new Date(utcMs);
+  if (isNaN(result.getTime())) return null;
   // Verify and adjust if DST boundary caused off-by-one
   var verifyParts = {};
   formatter.formatToParts(result).forEach(function(p) { verifyParts[p.type] = parseInt(p.value, 10); });
