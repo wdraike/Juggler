@@ -50,7 +50,7 @@ export default function ListView({ allTasks, statuses, filter, search, projectFi
     cutoff.setDate(cutoff.getDate() - parseInt(doneRange) + 1);
     cutoff.setHours(0, 0, 0, 0);
     return formatDateKey(cutoff);
-  }, [filter, doneRange, todayDate]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filter, doneRange, todayDate]); // eslint-disable-line
 
   var grouped = useMemo(() => {
     var map = {};
