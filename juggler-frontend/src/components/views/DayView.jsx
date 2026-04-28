@@ -5,7 +5,7 @@
 import React, { useRef, useEffect, useMemo, useCallback } from 'react';
 import CalendarGrid from '../schedule/CalendarGrid';
 import { getTheme } from '../../theme/colors';
-import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES } from '../../state/constants';
+import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, GRID_START } from '../../state/constants';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
 export default function DayView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onDelete, onExpand, onCreate, gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locSchedules, onUpdateLocScheduleOverrides, onUpdateLocScheduleDefaults, allTasks, onBatchRecurringsDone, locations, onHourLocationOverride, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, filter, onZoomChange, isMobile, onMarkerDrag }) {
@@ -33,6 +33,15 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
     if (!filter || filter === 'all') return placements;
     return placements.filter(function (p) { return p.task && matchesFilter(p.task.id); });
   }, [placements, filter, matchesFilter]);
+
+  var earlyPlacements = useMemo(function () {
+    return filteredPlacements.filter(function (p) { return p.task && p.start < GRID_START * 60; });
+  }, [filteredPlacements]);
+
+  var gridPlacements = useMemo(function () {
+    if (earlyPlacements.length === 0) return filteredPlacements;
+    return filteredPlacements.filter(function (p) { return !(p.task && p.start < GRID_START * 60); });
+  }, [filteredPlacements, earlyPlacements]);
 
   // Template override state
   var dayName = DAY_NAMES[selectedDate.getDay()];
@@ -167,12 +176,43 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
           </div>
         );
       })()}
+      {/* Early-hours banner — tasks scheduled before GRID_START (6 AM) */}
+      {earlyPlacements.length > 0 && (
+        <div style={{ padding: '4px 12px', borderBottom: `1px solid ${theme.border}`, flexShrink: 0 }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: theme.textMuted, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 }}>Before 6 AM</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {earlyPlacements.map(function(p) {
+              var t = p.task;
+              var st = statuses[t.id] || '';
+              var isDone = st === 'done' || st === 'cancel' || st === 'skip';
+              return (
+                <div key={t.id} onClick={function() { onExpand(t.id); }}
+                  style={{
+                    padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 12,
+                    background: isDone ? theme.badgeBg : theme.bgCard,
+                    color: isDone ? theme.textMuted : theme.text,
+                    border: '1px solid ' + theme.border,
+                    opacity: isDone ? 0.5 : 1,
+                    textDecoration: isDone ? 'line-through' : 'none',
+                    display: 'flex', alignItems: 'center', gap: 4
+                  }}>
+                  {t.time && <span style={{ fontSize: 10, color: theme.textMuted }}>{t.time}</span>}
+                  {st === 'done' && <span style={{ fontSize: 9 }}>{'✓'}</span>}
+                  {st === 'skip' && <span style={{ fontSize: 9 }}>{'⏭'}</span>}
+                  {st === 'cancel' && <span style={{ fontSize: 9 }}>{'✗'}</span>}
+                  <span>{t.text}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {/* Scrollable grid area */}
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0, maxWidth: '100%', width: '100%' }} ref={scrollRef}>
         <div style={{ padding: isMobile ? '0 2px' : '0 12px', maxWidth: '100%', boxSizing: 'border-box' }}>
           <CalendarGrid
             dateKey={selectedDateKey}
-            placements={filteredPlacements}
+            placements={gridPlacements}
             statuses={statuses}
 
             onStatusChange={onStatusChange} onDelete={onDelete}
