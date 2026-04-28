@@ -1465,6 +1465,7 @@ async function sync(req, res) {
             rigid: 1,
             status: '',
             when: newEvent.isAllDay ? 'allday' : 'fixed',
+            date_pinned: newEvent.isAllDay ? 0 : 1,
             [eventIdCol]: newEvent.id
           };
           if (newEvent.description) {
