@@ -1187,7 +1187,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                     }}
                     style={{ ...iStyle, width: isMobile ? '100%' : undefined, minWidth: 0, ...(datePinned && date ? { borderColor: '#D97706' } : {}) }} />
                 )}
-                {!isCreate && !isFixed && !marker && datePinned && date && (
+                {!isCreate && !isCalLinkedFixed && !marker && datePinned && date && (
                   <button onClick={() => { setDatePinned(false); setDate(''); setTime(''); setEndTime(''); setEndTimeError(null); }} title="Let scheduler choose the date"
                     style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
                       border: '1px solid ' + TH.btnBorder, background: TH.inputBg, color: TH.textMuted, fontWeight: 600,
