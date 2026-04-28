@@ -289,20 +289,26 @@ D snapshots: `+0min: active=123 dl=2467` / `+10min: active=123 dl=2467` / `+20mi
 
 **B–D Run 3 (v4 script) — 2026-04-26 evening**
 
-In progress (started 19:10 UTC). Flush-1: pushed=15. Sync-0: pushed=52 pulled=126 errors=4 (16 new test tasks + 36 pre-existing hash updates, no rate limit).
+In progress at session end — results never recorded. See Run 4 below.
+
+---
+
+**B–D Run 4 (v4 script) — 2026-04-28**
+
+Flush-1: pushed=10 errors=2 (clean, no rate-limit surge). Sync-0: pushed=52 pulled=120 errors=3. All 16 test tasks created, all 5 event URLs resolved after 120s CDN wait. First run with clean B2/B4/B5 passes and unambiguous B3/C1 failures.
 
 | # | Result | Notes |
 |---|---|---|
-| B1 | pending | |
-| B2 | pending | |
-| B3 | pending | |
-| B4 | pending | |
-| B5 | pending | |
-| C1 | pending | |
-| C2 | pending | |
-| C3 | pending | |
-| C4 | pending | |
-| D | pending | |
+| B1 | ✅ PASS | Pulled as task `apple_52c346fd2436c49f`, `origin='apple'` |
+| B2 | ✅ PASS | Juggler task time unchanged (10am EDT = 14:00 UTC); Apple time-edit was ignored |
+| B3 | ❌ FAIL | `miss_count=0` after all 3 syncs; see Bug #11 |
+| B4 | ✅ PASS | Juggler text unchanged; Apple rename was not pulled |
+| B5 | ✅ PASS | Native Apple task deleted after MISS_THRESHOLD (sync 4–6, `del_remote=1` on sync 6) |
+| C1 | ❌ FAIL | Apple title persisted in CalDAV after sync 3; juggler didn't win; see Bug #12 |
+| C2 | ✅ PASS | Event re-created; new active row confirmed after sync 2–3 |
+| C3 | ✅ PASS | All 10/10 rapid-fire tasks synced to Apple (no duplicate rows this run) |
+| C4 | 📝 NOTE | CDN lag — Edit 3 FINAL confirmed as final edit (active row present); not visible via direct URL fetch within ~26s of push. Not a bug. |
+| D | ✅ PASS | `active` grew 175→181→187→194 (monotonic +6–7/10min = new recurring instances scheduled, expected). `deleted_local` stable at 2590, `replaced` stable at 475, `deleted_remote` stable at 3 throughout. No churn. Script flags oscillation=19 but that metric is wrong for monotonic growth. |
 
 ### Bugs found
 
@@ -345,6 +351,18 @@ In progress (started 19:10 UTC). Flush-1: pushed=15. Sync-0: pushed=52 pulled=12
 - **Symptom:** `B2: ❌ FAIL — task UTC hour changed to N (was 14)` logged even when backend correctly preserved juggler's time.
 - **Root cause:** `new Date('2026-04-27 14:00:00').getUTCHours()` — without 'T'/'Z', JS parses MySQL DATETIME format as LOCAL time. On an EDT (UTC−4) system, 14:00 local → 18:00 UTC, so `h === 18 !== 14` → false negative FAIL.
 - **Fix in v4 soak scripts:** Changed to `new Date(String(task.scheduled_at).replace(' ', 'T') + 'Z').getUTCHours()`. Same bug found and fixed in `soak-msft-bcd.js` (documented as Bug #5 in `SYNC-SOAK-TEST-MSFT.md`).
+
+**Bug #11 — Apple pull phase doesn't detect misses for juggler-origin events (B3)**
+- **Symptom (Run 4):** After deleting a juggler-created Apple event via CalDAV DELETE, `miss_count` stays 0 across all 3 sync cycles. B3 task never deleted. B5 (native `origin='apple'` event) correctly reached MISS_THRESHOLD.
+- **Root cause (hypothesis):** The pull phase tracks misses for `origin='apple'` rows (events juggler didn't create). For `origin='juggler'` rows, miss detection relies on the push phase detecting a 404/gone event during a PUT attempt. If the juggler task is never edited, no push is attempted and the gone event is never detected.
+- **Impact:** If a user deletes a juggler-created event from Apple Calendar directly, the juggler task is never removed unless the task is subsequently edited.
+- **Fix needed:** In the Apple pull phase, after reconciling pulled events, walk all active `origin='juggler'` ledger rows and check if their `provider_event_id` URL appears in the current event set. If missing, increment `miss_count`. Same pattern as the existing miss detection for native events.
+
+**Bug #12 — Juggler doesn't re-push after Apple-side concurrent edit (C1)**
+- **Symptom (Run 4):** Juggler task text edited + Apple event title edited within 2s of each other. After 3 syncs, Apple still shows Apple's title. Juggler didn't win the conflict.
+- **Root cause (hypothesis):** Sync 1 ran 2s after the Apple event edit. Juggler tried to PUT its version of the event, but Apple had just changed the etag. The PUT likely returned 412 Precondition Failed (stale If-Match). Juggler may have recorded this as a push error without clearing the `last_pushed_hash`, so subsequent syncs see no hash change and don't retry.
+- **Impact:** In concurrent-edit scenarios (e.g., user edits juggler task while also editing the Apple event from Calendar.app), Apple's version wins rather than juggler's.
+- **Fix needed:** On 412 response from Apple CalDAV PUT: re-fetch the current event etag and retry the PUT once with the fresh etag. If the retry also fails, record as an error and let the next full sync handle it.
 
 **Bug #8 — Native Apple events store UID as `provider_event_id`; soak B5 DELETE needs URL reconstruction — FIXED in v4 soak script**
 - **Symptom (v3 run):** `B5: DELETE → HTTP 0` / `CalDAV lib DELETE also failed: Failed to parse URL from soak-b1-1777222729201`
