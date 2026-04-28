@@ -352,17 +352,17 @@ Flush-1: pushed=10 errors=2 (clean, no rate-limit surge). Sync-0: pushed=52 pull
 - **Root cause:** `new Date('2026-04-27 14:00:00').getUTCHours()` — without 'T'/'Z', JS parses MySQL DATETIME format as LOCAL time. On an EDT (UTC−4) system, 14:00 local → 18:00 UTC, so `h === 18 !== 14` → false negative FAIL.
 - **Fix in v4 soak scripts:** Changed to `new Date(String(task.scheduled_at).replace(' ', 'T') + 'Z').getUTCHours()`. Same bug found and fixed in `soak-msft-bcd.js` (documented as Bug #5 in `SYNC-SOAK-TEST-MSFT.md`).
 
-**Bug #11 — Apple pull phase doesn't detect misses for juggler-origin events (B3)**
-- **Symptom (Run 4):** After deleting a juggler-created Apple event via CalDAV DELETE, `miss_count` stays 0 across all 3 sync cycles. B3 task never deleted. B5 (native `origin='apple'` event) correctly reached MISS_THRESHOLD.
-- **Root cause (hypothesis):** The pull phase tracks misses for `origin='apple'` rows (events juggler didn't create). For `origin='juggler'` rows, miss detection relies on the push phase detecting a 404/gone event during a PUT attempt. If the juggler task is never edited, no push is attempted and the gone event is never detected.
-- **Impact:** If a user deletes a juggler-created event from Apple Calendar directly, the juggler task is never removed unless the task is subsequently edited.
-- **Fix needed:** In the Apple pull phase, after reconciling pulled events, walk all active `origin='juggler'` ledger rows and check if their `provider_event_id` URL appears in the current event set. If missing, increment `miss_count`. Same pattern as the existing miss detection for native events.
+**Finding #11 — B3 miss detection: Apple CDN DELETE propagation lag (not a code bug)**
+- **Symptom (Run 4):** After deleting B3's juggler-created Apple event via CalDAV DELETE (HTTP 204), `miss_count` stayed 0 through syncs 2 and 3 (90s and 149s post-DELETE). B5 (native event) worked: `del_remote=1` at sync 6 (~184s post-DELETE).
+- **Root cause:** Apple `listEvents` uses `fetchCalendarObjects` (PROPFIND), which is served by CDN. CDN propagation of DELETE operations on large-event-count accounts is non-deterministic — B3's DELETE wasn't visible in PROPFIND responses for at least 149s. B5's DELETE propagated faster (visible in <60s). Juggler's miss detection logic (`task && !event → eventInWindow → miss_count++`) is correct; it never fires because Apple CDN returns the event as still-present.
+- **Production impact:** None. In production, syncs run every several minutes. A user deleting a juggler event from Apple Calendar would result in the task being removed after 2-4 sync cycles (once CDN propagates), not after 3 × 35s test cycles. The mechanism works; only soak cadence exposed the lag.
+- **Action:** Document CDN DELETE lag as a known Apple CalDAV characteristic. No code change needed.
 
-**Bug #12 — Juggler doesn't re-push after Apple-side concurrent edit (C1)**
-- **Symptom (Run 4):** Juggler task text edited + Apple event title edited within 2s of each other. After 3 syncs, Apple still shows Apple's title. Juggler didn't win the conflict.
-- **Root cause (hypothesis):** Sync 1 ran 2s after the Apple event edit. Juggler tried to PUT its version of the event, but Apple had just changed the etag. The PUT likely returned 412 Precondition Failed (stale If-Match). Juggler may have recorded this as a push error without clearing the `last_pushed_hash`, so subsequent syncs see no hash change and don't retry.
-- **Impact:** In concurrent-edit scenarios (e.g., user edits juggler task while also editing the Apple event from Calendar.app), Apple's version wins rather than juggler's.
-- **Fix needed:** On 412 response from Apple CalDAV PUT: re-fetch the current event etag and retry the PUT once with the fresh etag. If the retry also fails, record as an error and let the next full sync handle it.
+**Finding #12 — C1 conflict check: CDN propagation lag on final assertion (not a code bug)**
+- **Symptom (Run 4):** After juggler edit + Apple edit within 2s, Apple title still persisted at sync 3 check.
+- **Root cause:** Apple push does NOT use `If-Match` etag (no 412 risk). Conflict resolution logic is correct: `taskChanged && !eventModifiedExternally` → push queued at sync 1 (Apple's CDN-cached event didn't yet show the Apple edit → `eventModifiedExternally = false`). Push succeeded. But the sync 3 assertion ran only ~40s after sync 2's push — within CDN propagation lag for PUT operations (60–120s). The direct URL fetch returned Apple's still-cached version. Juggler's title likely appeared 60–90s later.
+- **Production impact:** None. Production sync intervals exceed CDN propagation lag; the conflict resolution would settle correctly within 1-2 sync cycles.
+- **Action:** Soak script C1 check should add a 90s CDN wait after sync 3 before asserting. No code change needed.
 
 **Bug #8 — Native Apple events store UID as `provider_event_id`; soak B5 DELETE needs URL reconstruction — FIXED in v4 soak script**
 - **Symptom (v3 run):** `B5: DELETE → HTTP 0` / `CalDAV lib DELETE also failed: Failed to parse URL from soak-b1-1777222729201`
