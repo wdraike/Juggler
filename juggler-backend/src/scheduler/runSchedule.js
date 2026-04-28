@@ -640,7 +640,6 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // rows even though taskRows was loaded before the INSERT.
   var phase1InsertedById = {};
   if (toInsert.length > 0) {
-    var chunkInsertNow = new Date().toISOString();
     var chunkInsertRows = toInsert.map(function(row) {
       var occDate = row._candidateDate || row.date || null;
       var occDay = null;
@@ -665,8 +664,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
         time: null,
         unscheduled: null,
         status: '',
-        created_at: chunkInsertNow,
-        updated_at: chunkInsertNow
+        created_at: trx.fn.now(),
+        updated_at: trx.fn.now()
       };
     });
     // Defensive dedup: detect any IDs already in DB before inserting.
@@ -687,7 +686,12 @@ async function runScheduleAndPersist(userId, _retries, options) {
     }
     // Populate for changeset projection — taskRows was loaded before this INSERT
     // so rowsById won't have these rows; phase1InsertedById fills the gap.
-    chunkInsertRows.forEach(function(r) { phase1InsertedById[r.id] = r; });
+    // Use an ISO string for created_at/updated_at: the DB rows use trx.fn.now()
+    // (a Knex raw expression) which is valid SQL but breaks new Date() in rowToTask.
+    var nowISO = new Date().toISOString();
+    chunkInsertRows.forEach(function(r) {
+      phase1InsertedById[r.id] = Object.assign({}, r, { created_at: nowISO, updated_at: nowISO });
+    });
   }
 
   // ── In-memory chunk expansion ──
