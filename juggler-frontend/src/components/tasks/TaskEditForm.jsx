@@ -693,7 +693,9 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   function handleUnfix() {
     if (!task) return;
     setDatePinned(false);
-    if (onUpdate) onUpdate(task.id, { datePinned: false });
+    var newWhen = (task.when || '').split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t && t !== 'fixed'; }).join(',');
+    setWhen(newWhen);
+    if (onUpdate) onUpdate(task.id, { datePinned: false, when: newWhen });
   }
   function handleUnpin() {
     if (!task) return;
