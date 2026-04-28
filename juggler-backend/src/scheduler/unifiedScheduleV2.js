@@ -16,7 +16,7 @@
  *   - No chain deadline backprop; user deadline only (4.4).
  *   - No location/tool constraint enforcement (4.4).
  *   - No dependency-met check (4.4).
- *   - No split-chunk handling (4.4).
+ *   - Split chunks are pre-inserted as distinct DB rows (Phase 1); scheduler treats each as a regular task.
  *   - No timesPerCycle / recurring_rigid nuances (4.4).
  *   - Markers are skipped (4.4).
  *
@@ -287,6 +287,10 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       if (flex > 0 && flex <= 480) {
         windowLo = Math.max(DAY_START, t.preferredTimeMins - flex);
         windowHi = Math.min(DAY_END, t.preferredTimeMins + flex);
+        // Preferred time is entirely outside the schedulable day (before DAY_START
+        // or after DAY_END) — the clamped window is inverted (Lo > Hi).
+        // Fall back to when-tag placement so the task isn't silently unplaced.
+        if (windowHi <= windowLo) isWindowMode = false;
       } else {
         isWindowMode = false; // degenerate flex — fall back to when tags
       }

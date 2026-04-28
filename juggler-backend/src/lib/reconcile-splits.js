@@ -18,7 +18,7 @@
  * delete extras. Survivors keep their ids (so cal_sync_ledger bindings
  * persist across re-chunking).
  *
- * Not called from production code yet. Wire-up is the next session's task.
+ * Called at the start of each scheduler transaction for non-recurring splits.
  */
 
 var MIN_CHUNK_DEFAULT = 15;
@@ -58,10 +58,8 @@ function computeChunks(totalDur, splitMin) {
  *   - If master.split is true: for each distinct occurrence_ordinal the master
  *     already has an instance for, materialize N chunk rows with split_ordinal 1..N.
  *
- * Uses uuidv7 for new chunk ids.
+ * Uses deterministic ids for new chunk rows: `masterId-<splitOrdinal>`.
  */
-var { v7: uuidv7 } = require('uuid');
-
 async function reconcileSplitsForMaster(trx, masterId) {
   var master = await trx('task_masters').where('id', masterId).first();
   if (!master) return { inserted: 0, deleted: 0, updated: 0, skipped: 'master_not_found' };
@@ -132,7 +130,7 @@ async function reconcileOccurrence(trx, masterId, master, occOrd, existingRows) 
     for (var j = existingRows.length; j < desired.length; j++) {
       var d2 = desired[j];
       await trx('task_instances').insert({
-        id: uuidv7(),
+        id: masterId + '-' + d2.splitOrdinal,
         master_id: masterId,
         user_id: master.user_id,
         occurrence_ordinal: occOrd,
@@ -201,10 +199,9 @@ async function collapseChunks(trx, masterId, master, existing) {
  * instances in two queries, then reconcile in memory.
  *
  * Restricted to non-recurring tasks (recurring: 0) because recurring split
- * tasks are managed by the scheduler's own inMemoryChunks + inMemoryInserts
- * path with deterministic IDs. Calling this on recurring masters would create
- * UUID-based secondary chunks that conflict with the scheduler's
- * <primaryId>-N naming scheme.
+ * tasks are managed by the Phase 1 upfront INSERT path in runSchedule.js
+ * (step 5b). Calling this on recurring masters would create secondary chunks
+ * that conflict with the scheduler's <primaryId>-<ordinal>-N naming scheme.
  *
  * Called at the start of each scheduler transaction (before the task load)
  * so that newly created or config-changed non-recurring split tasks have

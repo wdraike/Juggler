@@ -141,9 +141,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
   // 0. Materialize secondary chunk rows for non-recurring split tasks before
   // the task load so the scheduler sees them and can place each chunk
-  // independently. Recurring split tasks are handled by the scheduler's own
-  // inMemoryChunks + inMemoryInserts path and are excluded here to avoid
-  // ID conflicts (scheduler uses <primaryId>-N; this pass uses uuidv7).
+  // independently. Recurring split tasks are handled by the Phase 1 upfront
+  // INSERT path (step 5b) and are excluded here to avoid ID conflicts.
   var _splitResult = await reconcileSplitsForUser(trx, userId);
   if (_splitResult.mastersTouched > 0) {
     console.log('[SCHED] split-reconcile: inserted=' + _splitResult.inserted +
@@ -633,6 +632,63 @@ async function runScheduleAndPersist(userId, _retries, options) {
     }
   }
 
+  // ── Phase 1: Pre-insert all new chunk rows before scheduling ──
+  // Ensures every planned chunk has a DB row immediately (for cal sync,
+  // per-chunk status, and idempotent next-run loading). scheduled_at starts
+  // null; the persist step UPDATEs it for placed chunks.
+  // Hoisted so the changeset builder can project full task objects for these
+  // rows even though taskRows was loaded before the INSERT.
+  var phase1InsertedById = {};
+  if (toInsert.length > 0) {
+    var chunkInsertRows = toInsert.map(function(row) {
+      var occDate = row._candidateDate || row.date || null;
+      var occDay = null;
+      if (occDate) {
+        var occDateObj = parseDate(occDate);
+        if (occDateObj) occDay = DAY_NAMES[occDateObj.getDay()];
+      }
+      return {
+        id: row.id,
+        user_id: userId,
+        task_type: 'recurring_instance',
+        source_id: row.sourceId,
+        occurrence_ordinal: row.occurrence_ordinal,
+        split_ordinal: row.split_ordinal,
+        split_total: row.split_total,
+        split_group: row.split_group || null,
+        dur: row.dur,
+        generated: 0,
+        scheduled_at: null,
+        date: occDate,
+        day: occDay,
+        time: null,
+        unscheduled: null,
+        status: '',
+        created_at: trx.fn.now(),
+        updated_at: trx.fn.now()
+      };
+    });
+    // Defensive dedup: detect any IDs already in DB before inserting.
+    // Structurally impossible given the existingPendingIds filter above,
+    // but guards against future code changes breaking that invariant.
+    var existingChunkCheck = await trx('task_instances')
+      .whereIn('id', chunkInsertRows.map(function(r) { return r.id; }))
+      .select('id');
+    if (existingChunkCheck.length > 0) {
+      var existingChunkSet = {};
+      existingChunkCheck.forEach(function(r) { existingChunkSet[r.id] = true; });
+      console.error('[SCHED] phase1: collision — ' + existingChunkCheck.length + ' chunk IDs already in DB, skipping:', existingChunkCheck.map(function(r) { return r.id; }));
+      chunkInsertRows = chunkInsertRows.filter(function(r) { return !existingChunkSet[r.id]; });
+    }
+    if (chunkInsertRows.length > 0) {
+      await tasksWrite.insertTasksBatch(trx, chunkInsertRows);
+      console.log('[SCHED] phase1: pre-inserted ' + chunkInsertRows.length + ' chunk rows');
+    }
+    // Populate for changeset projection — taskRows was loaded before this INSERT
+    // so rowsById won't have these rows; phase1InsertedById fills the gap.
+    chunkInsertRows.forEach(function(r) { phase1InsertedById[r.id] = r; });
+  }
+
   // ── In-memory chunk expansion ──
   // Build task objects for new/missing chunks directly from master fields.
   // No DB insert — the scheduler works on these in memory. Persist step
@@ -765,22 +821,17 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var rawRowById = {};
   taskRows.forEach(function(r) { rawRowById[r.id] = r; });
 
-  // Extract the first placement per task from dayPlacements. Also count
-  // placements per task so we can detect split masters: a non-recurring
-  // task split in-scheduler produces N placements that share task.id,
-  // each with p.dur = chunkSize (not the master total). Writing
-  // placement.dur back to the master row would shrink a 3:30 task to
-  // one chunk's 30 min. Below we use this count to skip the dur
-  // overwrite for split masters.
+  // Extract the first placement per task from dayPlacements. Phase 1 ensures
+  // every split chunk has its own unique row ID, so each task.id maps to
+  // exactly one placement. No multi-placement-per-task-id split-master
+  // handling needed (that was v1-only behavior).
   var placementByTaskId = {};
-  var placementCountByTaskId = {};
   var dayPlacements = result.dayPlacements;
   Object.keys(dayPlacements).forEach(function(dateKey) {
     var placements = dayPlacements[dateKey];
     if (!placements) return;
     placements.forEach(function(p) {
       if (!p.task || !p.task.id) return;
-      placementCountByTaskId[p.task.id] = (placementCountByTaskId[p.task.id] || 0) + 1;
       if (!placementByTaskId[p.task.id]) {
         placementByTaskId[p.task.id] = { dateKey: dateKey, start: p.start, dur: p.dur };
       }
@@ -820,7 +871,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (original.datePinned) {
       var pinnedPlacedDur = placement.dur;
       var pinnedStoredDur = Number(original.dur) || 0;
-      if (pinnedPlacedDur && pinnedPlacedDur !== pinnedStoredDur && placementCountByTaskId[taskId] === 1) {
+      if (pinnedPlacedDur && pinnedPlacedDur !== pinnedStoredDur) {
         pendingUpdates.push({ id: taskId, dbUpdate: { dur: pinnedPlacedDur, updated_at: db.fn.now() } });
       }
       continue;
@@ -863,9 +914,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       date_pinned: 0,
       updated_at: db.fn.now()
     };
-    // Skip dur overwrite for split masters (multiple placements for same
-    // task.id): each p.dur is a chunk size, not the master total.
-    if (placement.dur && placementCountByTaskId[taskId] === 1) {
+    if (placement.dur) {
       dbUpdate.dur = placement.dur;
     }
     if (result.slackByTaskId && taskId in result.slackByTaskId) {
@@ -887,7 +936,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // versions included dur/slackMins/unscheduled unconditionally, which
       // meant every move triggered no-op merges (and frontend re-renders)
       // for tasks whose duration and slack were stable across runs (#39).
-      var newDur = (placementCountByTaskId[taskId] === 1 ? placement.dur : null) || original.dur || null;
+      var newDur = placement.dur || original.dur || null;
       var newSlackMins = result.slackByTaskId && taskId in result.slackByTaskId ? result.slackByTaskId[taskId] : null;
       var patch = {
         date: newDate || null,
@@ -930,11 +979,24 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (original.datePinned) return;
     if (original.datePinned) return;
     if (original.marker) return;
-    // Recurring instances: keep on the calendar at their existing scheduled_at.
-    // Future ones haven't been considered yet; today/past ones are missed but
-    // should stay visible at their last-proposed time. The frontend uses the
-    // (date < today AND status='') signal to flag them as overdue.
-    if (original.taskType === 'recurring_instance') return;
+    // Recurring instances: two cases based on whether they've ever been placed.
+    //   - scheduled_at set: keep last-proposed position on calendar; frontend
+    //     shows them as overdue/missed using (date < today AND status='').
+    //   - scheduled_at null: Phase 1 pre-inserted chunk that couldn't be placed
+    //     this run. Mark unscheduled=1 so the frontend shows it in the
+    //     unscheduled lane. No SSE emitted here — Phase 5 handles new-chunk events.
+    if (original.taskType === 'recurring_instance') {
+      var rawRec = rawRowById[t.id];
+      var hasScheduledAt = rawRec ? !!rawRec.scheduled_at : !!original.scheduledAt;
+      if (hasScheduledAt) return;
+      var unplacedChunkUpdate = { unscheduled: 1, updated_at: db.fn.now() };
+      if (result.slackByTaskId && t.id in result.slackByTaskId) {
+        unplacedChunkUpdate.slack_mins = result.slackByTaskId[t.id];
+      }
+      pendingUpdates.push({ id: t.id, dbUpdate: unplacedChunkUpdate });
+      cleared++;
+      return;
+    }
     // Mark as unscheduled but PRESERVE scheduled_at — it stays as the
     // last-proposed time so the frontend can render the chunk in the
     // unscheduled lane with a sensible "was supposed to be at" timestamp,
@@ -1042,54 +1104,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // was counterproductive: it folded 8x30m chunks into one 240m block,
   // defeating the purpose of splitting for flexible intra-day placement.
 
-  // INSERT in-memory chunks that got placed (they don't exist in the DB yet).
-  // Separate them from pendingUpdates since they need INSERT, not UPDATE.
-  var inMemoryInserts = [];
-  var inMemoryIds = {};
-  inMemoryChunks.forEach(function(t) { inMemoryIds[t.id] = t; });
-  pendingUpdates = pendingUpdates.filter(function(pu) {
-    var chunk = inMemoryIds[pu.id];
-    if (!chunk) return true; // not an in-memory chunk — keep in pendingUpdates
-    // This is an in-memory chunk that got placed — collect for INSERT.
-    // Derive local date from scheduled_at so the dedup query can match it.
-    var chunkLocal = pu.dbUpdate.scheduled_at ? utcToLocal(
-      pu.dbUpdate.scheduled_at instanceof Date ? pu.dbUpdate.scheduled_at : new Date(pu.dbUpdate.scheduled_at),
-      TIMEZONE
-    ) : null;
-    inMemoryInserts.push({
-      id: pu.id,
-      user_id: userId,
-      task_type: 'recurring_instance',
-      source_id: chunk.sourceId,
-      occurrence_ordinal: chunk.occurrenceOrdinal || 1,
-      split_ordinal: chunk.splitOrdinal || 1,
-      split_total: chunk.splitTotal || 1,
-      split_group: chunk.splitGroup || null,
-      dur: pu.dbUpdate.dur || chunk.dur,
-      generated: 0,
-      recurring: 1,
-      scheduled_at: pu.dbUpdate.scheduled_at || null,
-      date: chunkLocal ? chunkLocal.date : (chunk._candidateDate || chunk.date || null),
-      day: chunkLocal ? chunkLocal.day : null,
-      time: chunkLocal ? chunkLocal.time : null,
-      unscheduled: pu.dbUpdate.unscheduled || null,
-      status: '',
-      created_at: db.fn.now(),
-      updated_at: db.fn.now()
-    });
-    return false; // remove from pendingUpdates
-  });
-  if (inMemoryInserts.length > 0) {
-    var nullDateCount = inMemoryInserts.filter(function(r) { return !r.date; }).length;
-    if (nullDateCount > 0) console.log('[SCHED] WARNING: ' + nullDateCount + ' of ' + inMemoryInserts.length + ' in-memory inserts have null date');
-    if (inMemoryInserts.length > 0 && inMemoryInserts[0]) {
-      console.log('[SCHED] sample insert: id=' + inMemoryInserts[0].id + ' sa=' + inMemoryInserts[0].scheduled_at + ' date=' + inMemoryInserts[0].date);
-    }
-    await tasksWrite.insertTasksBatch(trx, inMemoryInserts);
-    console.log('[SCHED] persist: inserted ' + inMemoryInserts.length + ' newly-placed chunk rows');
-  } else {
-    console.log('[SCHED] persist: 0 in-memory inserts (chunks matched ' + Object.keys(inMemoryIds).length + ' inMemoryIds, pendingUpdates had ' + pendingUpdates.length + ' entries)');
-  }
+  // Phase 1: in-memory chunk rows were pre-inserted before scheduling (see
+  // "Phase 1: Pre-insert" block above). Placed chunks now have DB rows and
+  // flow through pendingUpdates as UPDATEs like any other recurring instance.
+  console.log('[SCHED] persist: ' + inMemoryChunks.length + ' pre-inserted chunks updating via pendingUpdates');
 
   // Execute updates in batches to avoid long-running single-row UPDATEs.
   // Group by identical dbUpdate shape, then batch with CASE expressions.
@@ -1288,7 +1306,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var rowsById = {};
   taskRows.forEach(function(r) { rowsById[r.id] = r; });
   var added = Object.keys(addedIdSet).map(function(id) {
-    var r = rowsById[id];
+    // rowsById was populated from taskRows (pre-Phase-1 snapshot). Phase 1
+    // pre-inserted chunk rows (split_ordinal >= 2) aren't there — fall back
+    // to phase1InsertedById so we still ship a full object instead of id-only.
+    var r = rowsById[id] || phase1InsertedById[id];
     if (!r) return { id: id }; // fallback: id-only (frontend will fetch as before)
     // Project a full task shape via rowToTask so the frontend gets exactly the
     // same fields it would have received from GET /api/tasks/:id.
