@@ -51,8 +51,9 @@ export default function CalSyncPanel({
   var [history, setHistory] = useState(null);
   var [loadingHistory, setLoadingHistory] = useState(false);
   var [syncProgress, setSyncProgress] = useState(null); // { phase, detail, pct }
+  var [lockConflictCountdown, setLockConflictCountdown] = useState(null); // seconds remaining, or null
 
-  // Listen for sync:progress and sync:error SSE events
+  // Listen for sync SSE events
   useEffect(() => {
     function handleSseProgress(e) {
       try {
@@ -74,16 +75,33 @@ export default function CalSyncPanel({
         setSyncProgress(null);
       }
     }
+    function handleSseLockConflict(e) {
+      try {
+        var data = JSON.parse(e.data);
+        setLockConflictCountdown(data.retryAfter || 30);
+      } catch (err) { /* ignore */ }
+    }
     var eventSources = window.__jugglerEventSource;
     if (eventSources) {
       eventSources.addEventListener('sync:progress', handleSseProgress);
       eventSources.addEventListener('sync:error', handleSseError);
+      eventSources.addEventListener('sync:lock_conflict', handleSseLockConflict);
       return function() {
         eventSources.removeEventListener('sync:progress', handleSseProgress);
         eventSources.removeEventListener('sync:error', handleSseError);
+        eventSources.removeEventListener('sync:lock_conflict', handleSseLockConflict);
       };
     }
   }, []); // eslint-disable-line
+
+  // Tick down lock conflict countdown
+  useEffect(() => {
+    if (lockConflictCountdown === null || lockConflictCountdown <= 0) return;
+    var timer = setTimeout(function() {
+      setLockConflictCountdown(function(prev) { return prev <= 1 ? null : prev - 1; });
+    }, 1000);
+    return function() { clearTimeout(timer); };
+  }, [lockConflictCountdown]);
 
   // Safety timeout: if syncing stays true for 120s with no SSE events, auto-reset
   useEffect(() => {
@@ -392,6 +410,7 @@ export default function CalSyncPanel({
     try {
       syncRetryAttempted.current = false;
       setSyncing(true);
+      setLockConflictCountdown(null);
       setResults(null);
       if (onSyncStart) onSyncStart();
       var { data } = await apiClient.post('/cal/sync');
@@ -452,6 +471,7 @@ export default function CalSyncPanel({
       }
     } finally {
       setSyncing(false);
+      if (!syncRetryAttempted.current) setLockConflictCountdown(null);
     }
   }
 
@@ -659,11 +679,11 @@ export default function CalSyncPanel({
                 <button onClick={handleAppleRefreshCalendars} style={{
                   border: 'none', background: 'transparent', color: theme.accent,
                   fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline'
-                }}>Refresh calendars</button>
+                }}>Manage calendars</button>
                 <button onClick={handleAppleDisconnect} style={{
                   border: 'none', background: 'transparent', color: theme.textMuted,
                   fontSize: 10, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline'
-                }}>Disconnect</button>
+                }}>Disconnect all</button>
               </div>
             </div>
           ) : appleCalendars ? (
@@ -817,6 +837,11 @@ export default function CalSyncPanel({
             }}>
             {syncing ? (syncProgress ? syncProgress.detail : 'Syncing...') : 'Sync Now'}
           </button>
+          {lockConflictCountdown !== null && (
+            <div style={{ marginTop: 6, fontSize: 11, color: theme.textSecondary, textAlign: 'center' }}>
+              Scheduler busy — retrying in {lockConflictCountdown}s…
+            </div>
+          )}
         </div>
 
         {/* Results — readable activity log */}

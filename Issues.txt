@@ -1,9 +1,9 @@
 Legend: ✅ done · 🟡 partially done · ⬜ not done · ⏸ deferred
-Last updated: 2026-04-27
+Last updated: 2026-04-28
 
 ---
 
-## ✅ Done (34 items)
+## ✅ Done (36 items)
 
 1.   what is the use of 'calender_id' in 'cal_sync_ledger'?
 2.   why are 'tas_id' null in 'cal_sync_ledger'?
@@ -37,32 +37,25 @@ Last updated: 2026-04-27
 37.  the stepper isn't refreshing based on latest data
 38.  rather than multiple phases of scheduling, i'd like the scheduler to be purely constraints focused [v2 constraint-based single-pass with incremental slack subtraction; v1 decommissioned]
 39.  we should optimize the be to fe communication to only provide updates for items that have changed or truly need to be communicated [SSE emit gated on dateChanged || timeChanged; dur/slackMins/unscheduled only in patch when actually changed; SCHEDULER_VERSION auto-bumps on source hash so placement cache invalidates on any scheduler edit]
+16.  i see very large 'occurrence_ordinal' values in the db. why? [CLOSED 2026-04-27 — expected behavior from UUIDv7-based monotonic scheme; documented in SCHEMA.md]
+25.  since UUIDv7 is sortable by creation time, can we use these for ordinals? [CLOSED 2026-04-27 — keep current monotonic scheme; documented in SCHEMA.md]
+33.  need to test each 3rd party sync carefully [ALL COMPLETE 2026-04-28]
+     GCal  ✅ complete (soak 2026-04-25)
+     MSFT  ✅ A-section all pass. B–D run 2 (v2 script, 2026-04-26): B1/B2/B4/B5/C1/C2/C3/C4/D all pass.
+     Apple ✅ A-section complete (CDN-lag PARTIALs are Apple infrastructure). B–D Run 4 (v4 script, 2026-04-28): B1/B2/B4/B5/C2/C3/D all pass; B3/C1 are CDN timing artifacts (DELETE/PUT propagation 2–4 min; soak runs syncs 35s apart) — not code bugs. See docs/SYNC-SOAK-TEST-APPLE.md Findings #11/#12.
+     Bug #6 (MISS_THRESHOLD bypass via tasksNeedingReCreate) ✅ FIXED 2026-04-27 — userHash + last_user_hash column + miss_count >= 1 guard.
+     Side bug (last_modified_at not updated after conflict_juggler push) ✅ CLOSED 2026-04-27 — covered by +30s recordPushSuccess buffer.
+27.  need to re-review task details to avoid user confusion for all configuration use cases [DONE 2026-04-28 — fixed "fixed" vs "pinned" terminology (consistent "fixed"/"unfix"), default new-task placement to Anytime (was all-blocks-selected), renamed "Time window" → "Placement" for non-recurring, "Not before" → "Start after", added tooltips to Remaining + Slack fields]
+32.  should allow ui to show past accomplishments [DONE 2026-04-28 — date range selector (7d / 30d / 90d / All, default 30d) in ListView done filter; stats bar third column updates to match selected range; empty-state message reflects range]
 
 ---
 
 ## 🟡 In Progress / Partial
 
-31.  need to make scheduler smarter and faster [v2 constraint-based single-pass: schedule-phase wall time 600ms → 180ms for 305 tasks; spacing guard safety valve deployed 2026-04-27 resolves permanently-blocked flexible-TPC occurrences caused by chronologically inverted prior placements; further perf work on capacityInRange still possible]
-
-33.  need to test each 3rd party sync carefully
-     GCal  ✅ complete (soak 2026-04-25)
-     MSFT  ✅ A-section all pass. B–D run 2 (v2 script, 2026-04-26): B1/B2/B4/B5/C1/C2/C3/C4/D all pass.
-           Open bug: Bug #6 — MISS_THRESHOLD is bypassed when the scheduler updates a task's hash between miss cycles. The tasksNeedingReCreate path (cal-sync.controller.js ~line 791) resets miss_count to 0 and re-pushes, so a calendar-deleted task loops as re-created instead of being deleted from juggler. Affects all three providers. Fix: add a "miss accumulation" flag or timestamp to suppress tasksNeedingReCreate until MISS_THRESHOLD is reached. Not yet applied.
-           Side finding: after a conflict_juggler push, last_modified_at is not updated in the ledger, causing phantom pull cycles on subsequent syncs (cosmetic — no data corruption).
-     Apple ✅ A-section complete (CDN-lag PARTIALs are Apple infrastructure, not bugs).
-           B–D Run 3 (v4 script) was in progress at session end 2026-04-26 — results not recorded. Needs re-run or result capture before this item can close.
-
----
-
-## ⏸ Deferred
-
-16.  i see very large 'occurrence_ordinal' values in the db. why? [deferred pending UUIDv7 ordinal redesign decision]
-25.  since UUIDv7 is sortable by creation time, can we use these for ordinals? [deferred — "leave it for now"]
+31.  need to make scheduler smarter and faster [v2 constraint-based single-pass: schedule-phase wall time 600ms → 180ms for 305 tasks; spacing guard safety valve deployed 2026-04-27; 5-phase redesign committed 2026-04-28 (upfront chunk INSERT, deterministic split IDs, dead v1 code removed, pre-inserted chunks marked unscheduled=1, full task objects in changeset.added); further perf work on capacityInRange still possible]
 
 ---
 
 ## ⬜ Not Started
 
 19.  why is there text 'time' in the db? [values are "5:00 PM" human-readable strings; MySQL TIME conversion requires formatMinutesToTime + reader rewrites + 200+ row back-fill — scope not yet approved]
-27.  need to re-review task details to avoid user confusion for all configuration use cases
-32.  should allow ui to show past accomplishments

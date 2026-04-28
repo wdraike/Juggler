@@ -15,7 +15,7 @@ var { getConnectedAdapters } = require('../lib/cal-adapters');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 var { rowToTask } = require('./task.controller');
 var { localToUtc, utcToLocal } = require('../scheduler/dateHelpers');
-var { taskHash, userHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE } = require('./cal-sync-helpers');
+var { taskHash, userHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE, withGCalRateLimit, callWithRateLimit } = require('./cal-sync-helpers');
 var sseEmitter = require('../lib/sse-emitter');
 var { acquireLock, releaseLock, refreshLock } = require('../lib/sync-lock');
 var { flushQueueInLock } = require('../lib/task-write-queue');
@@ -79,6 +79,7 @@ async function sync(req, res) {
 
     var stats = { pushed: 0, pulled: 0, skipped: 0, deleted_local: 0, deleted_remote: 0, errors: [], providers: {} };
     var syncRunId = crypto.randomUUID();
+    var syncStart = Date.now();
 
     // === In-memory mutation buffers (written in one transaction at the end) ===
     var taskUpdates = [];      // { id, fields: { ... } }
@@ -194,6 +195,7 @@ async function sync(req, res) {
         providerData[adapter.providerId] = { token: token, events: events, eventsById: eventsById, adapter: adapter, partialFailure: !!events._hasPartialFailure };
         stats.providers[adapter.providerId] = { pushed: 0, pulled: 0, skipped: 0, deleted_local: 0, deleted_remote: 0, errors: [] };
       } catch (err) {
+        console.error('[CAL-SYNC] Event fetch failed for ' + adapter.providerId + ':', err);
         var errMsg = err.message || '';
         var isTokenExpired = errMsg.includes('invalid_grant') || errMsg.includes('Token has been expired or revoked');
 
@@ -461,6 +463,19 @@ async function sync(req, res) {
       }
     });
 
+    // Load Apple write-calendar display name for progress reporting (best-effort)
+    var appleCalendarLabel = null;
+    if (providerData.apple) {
+      try {
+        var appleWriteCal = await db('user_calendars')
+          .where({ user_id: userId, provider: 'apple', enabled: true })
+          .orderByRaw("CASE WHEN sync_direction = 'full' THEN 0 ELSE 1 END")
+          .first();
+        appleCalendarLabel = appleWriteCal ? (appleWriteCal.display_name || null) : null;
+      } catch (e) { /* ignore — label is display-only */ }
+    }
+    var calendarLabels = { apple: appleCalendarLabel };
+
     // === Phase 2: Process existing ledger records per provider ===
     // Group ledger by provider
     var ledgerByProvider = {};
@@ -480,7 +495,7 @@ async function sync(req, res) {
     var providerIds = Object.keys(providerData);
     for (var pi = 0; pi < providerIds.length; pi++) {
       var pid = providerIds[pi];
-      emitProgress('ledger', 'Checking for changes...', 20 + (pi * 5), { provider: pid });
+      emitProgress('ledger', 'Checking for changes...', 20 + (pi * 5), { provider: pid, calendar: calendarLabels[pid] || null });
       var pd = providerData[pid];
       var pAdapter = pd.adapter;
       var pToken = pd.token;
@@ -877,6 +892,7 @@ async function sync(req, res) {
           }
 
         } catch (e) {
+          console.error('[CAL-SYNC] Ledger sync error for ' + pid + ':', e);
           var errObj = {
             phase: 'ledger', provider: pid,
             ledgerId: ledger.id, taskId: ledger.task_id,
@@ -925,7 +941,7 @@ async function sync(req, res) {
               console.log('[CAL-SYNC] Retrying ' + failedUpdates.length + ' failed batch updates sequentially for ' + pid);
               for (var rui = 0; rui < failedUpdates.length; rui++) {
                 try {
-                  await pAdapter.updateEvent(pToken, failedUpdates[rui].eventId, failedUpdates[rui].task, year, tz);
+                  await callWithRateLimit(pid, function() { return pAdapter.updateEvent(pToken, failedUpdates[rui].eventId, failedUpdates[rui].task, year, tz); });
                   recordPushSuccess(failedUpdates[rui]);
                   await throttle();
                 } catch (ruErr) {
@@ -939,7 +955,7 @@ async function sync(req, res) {
             console.error('[CAL-SYNC] Batch update failed for ' + pid + ', falling back to sequential:', batchUpdateErr.message);
             for (var fui = 0; fui < pendingEventUpdates.length; fui++) {
               try {
-                await pAdapter.updateEvent(pToken, pendingEventUpdates[fui].eventId, pendingEventUpdates[fui].task, year, tz);
+                await callWithRateLimit(pid, function() { return pAdapter.updateEvent(pToken, pendingEventUpdates[fui].eventId, pendingEventUpdates[fui].task, year, tz); });
                 recordPushSuccess(pendingEventUpdates[fui]);
                 await throttle();
               } catch (e5) {
@@ -981,7 +997,7 @@ async function sync(req, res) {
 
     for (var pi2 = 0; pi2 < providerIds.length; pi2++) {
       var pid2 = providerIds[pi2];
-      emitProgress('push', 'Syncing tasks...', 50 + (pi2 * 5), { provider: pid2 });
+      emitProgress('push', 'Syncing tasks...', 50 + (pi2 * 5), { provider: pid2, calendar: calendarLabels[pid2] || null });
       var pd2 = providerData[pid2];
       var pAdapter2 = pd2.adapter;
       var pToken2 = pd2.token;
@@ -1060,7 +1076,7 @@ async function sync(req, res) {
         await pAdapter2.batchDeleteEvents(pToken2, splitDeleteQueue);
       } else {
         for (var sdi = 0; sdi < splitDeleteQueue.length; sdi++) {
-          try { await pAdapter2.deleteEvent(pToken2, splitDeleteQueue[sdi]); } catch (e3) { /* ignore */ }
+          try { await pAdapter2.deleteEvent(pToken2, splitDeleteQueue[sdi]); } catch (e3) { console.warn('[CAL-SYNC] splitDelete failed (ignored):', e3.message); }
         }
       }
 
@@ -1124,7 +1140,7 @@ async function sync(req, res) {
       // Batch create if adapter supports it, otherwise fall back to sequential
       if (pushQueue.length > 0 && pAdapter2.batchCreateEvents) {
         var provLabel = PROVIDER_LABELS[pid2] || pid2;
-        emitProgress('push', 'Pushing ' + pushQueue.length + ' tasks...', 50 + (pi2 * 20), { provider: pid2 });
+        emitProgress('push', 'Pushing ' + pushQueue.length + ' tasks...', 50 + (pi2 * 20), { provider: pid2, calendar: calendarLabels[pid2] || null });
         try {
           var batchResults = await pAdapter2.batchCreateEvents(pToken2, pushQueue, year, tz);
           // Collect successful results into mutation buffers
@@ -1173,7 +1189,7 @@ async function sync(req, res) {
             for (var ri = 0; ri < failedItems.length; ri++) {
               var rTask = failedItems[ri].task;
               try {
-                var rResult = await pAdapter2.createEvent(pToken2, rTask, year, tz);
+                var rResult = await callWithRateLimit(pid2, function() { return pAdapter2.createEvent(pToken2, rTask, year, tz); });
                 await throttle();
                 var rNorm = pAdapter2.normalizeEvent ? pAdapter2.normalizeEvent(rResult.raw) : null;
                 processedEventIds2.add(rResult.providerEventId);
@@ -1225,7 +1241,7 @@ async function sync(req, res) {
           for (var fi = 0; fi < pushQueue.length; fi++) {
             var fTask = pushQueue[fi].task;
             try {
-              var result = await pAdapter2.createEvent(pToken2, fTask, year, tz);
+              var result = await callWithRateLimit(pid2, function() { return pAdapter2.createEvent(pToken2, fTask, year, tz); });
               await throttle();
               var fNorm = pAdapter2.normalizeEvent ? pAdapter2.normalizeEvent(result.raw) : null;
               taskUpdates.push({ id: fTask.id, fields: { [eventIdCol]: result.providerEventId } });
@@ -1499,6 +1515,12 @@ async function sync(req, res) {
     // === Write Phase: Acquire lock, flush pending writes, then apply ===
     emitProgress('finalize', 'Saving changes...', 85);
 
+    if (Date.now() - syncStart > 300000) {
+      console.warn('[CAL-SYNC] Sync exceeded 5-minute timeout — aborting before write phase');
+      emitProgress('done', 'Sync timed out — please try again', 100);
+      return res.status(200).json(Object.assign({}, stats, { error: 'sync_timeout' }));
+    }
+
     // Acquire per-user lock for the write phase only. During the API fetch
     // phase above, user/MCP edits flowed normally. Now we lock so the
     // scheduler doesn't start while we write.
@@ -1513,7 +1535,8 @@ async function sync(req, res) {
     }
     if (!lockResult || !lockResult.acquired) {
       console.error('[CAL-SYNC] could not acquire lock for write phase after ' + MAX_LOCK_ATTEMPTS + ' attempts');
-      return res.status(409).json({ error: 'Scheduler is busy. Try again in a few seconds.', retryAfter: 10 });
+      sseEmitter.emit(userId, 'sync:lock_conflict', { error: 'Scheduler is busy', retryAfter: 30 });
+      return res.status(409).json({ error: 'Scheduler is busy. Try again in a few seconds.', retryAfter: 30 });
     }
     var lockToken = lockResult.token;
     var lockStart = Date.now();

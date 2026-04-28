@@ -198,6 +198,32 @@ function toMySQLDate(isoString) {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// Retries fn() up to 3 times (1s, 2s, 4s backoff) on GCal rate-limit (429) errors.
+async function withGCalRateLimit(fn) {
+  var delays = [1000, 2000, 4000];
+  var attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (err) {
+      var msg = err.message || '';
+      var isRateLimit = msg.includes('429') || msg.toLowerCase().includes('ratelimitexceeded');
+      if (isRateLimit && attempt < delays.length) {
+        console.warn('[CAL-SYNC] GCal rate limit hit, retry ' + (attempt + 1) + '/' + delays.length + ' in ' + delays[attempt] + 'ms');
+        await new Promise(function(r) { setTimeout(r, delays[attempt]); });
+        attempt++;
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
+// Calls fn(), wrapping in withGCalRateLimit only for gcal.
+function callWithRateLimit(pid, fn) {
+  return pid === 'gcal' ? withGCalRateLimit(fn) : fn();
+}
+
 module.exports = {
   DEFAULT_TIMEZONE,
   jugglerDateToISO,
@@ -205,5 +231,7 @@ module.exports = {
   computeDurationMinutes,
   userHash,
   taskHash,
-  toMySQLDate
+  toMySQLDate,
+  withGCalRateLimit,
+  callWithRateLimit
 };

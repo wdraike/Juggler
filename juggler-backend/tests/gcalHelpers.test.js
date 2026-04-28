@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 
-const { jugglerDateToISO, isoToJugglerDate, taskHash } = require('../src/controllers/cal-sync-helpers');
+const { jugglerDateToISO, isoToJugglerDate, taskHash, withGCalRateLimit, callWithRateLimit } = require('../src/controllers/cal-sync-helpers');
 
 // GCal event hash (from gcal.adapter.js) — inline for testing
 function eventHash(event) {
@@ -74,6 +74,85 @@ describe('cal-sync helpers', () => {
       const e1 = { summary: 'A', start: {}, end: {} };
       const e2 = { summary: 'B', start: {}, end: {} };
       expect(eventHash(e1)).not.toBe(eventHash(e2));
+    });
+  });
+
+  describe('rate limit helpers', () => {
+    beforeEach(() => {
+      jest.spyOn(global, 'setTimeout').mockImplementation((fn) => { fn(); return 0; });
+    });
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    describe('withGCalRateLimit', () => {
+      it('returns the result of fn on success', async () => {
+        const result = await withGCalRateLimit(() => Promise.resolve(42));
+        expect(result).toBe(42);
+      });
+
+      it('retries once on a 429 error and returns the result', async () => {
+        let calls = 0;
+        const fn = jest.fn(() => {
+          calls++;
+          if (calls === 1) throw new Error('Request failed with status 429');
+          return Promise.resolve('ok');
+        });
+        const result = await withGCalRateLimit(fn);
+        expect(result).toBe('ok');
+        expect(fn).toHaveBeenCalledTimes(2);
+      });
+
+      it('retries on "ratelimitexceeded" message', async () => {
+        let calls = 0;
+        const fn = jest.fn(() => {
+          calls++;
+          if (calls === 1) throw new Error('RateLimitExceeded quota');
+          return Promise.resolve('ok');
+        });
+        const result = await withGCalRateLimit(fn);
+        expect(result).toBe('ok');
+        expect(fn).toHaveBeenCalledTimes(2);
+      });
+
+      it('throws immediately on a non-rate-limit error', async () => {
+        const fn = jest.fn(() => { throw new Error('Not found'); });
+        await expect(withGCalRateLimit(fn)).rejects.toThrow('Not found');
+        expect(fn).toHaveBeenCalledTimes(1);
+      });
+
+      it('throws after exhausting 3 retries', async () => {
+        const fn = jest.fn(() => { throw new Error('429 Too Many Requests'); });
+        await expect(withGCalRateLimit(fn)).rejects.toThrow('429 Too Many Requests');
+        expect(fn).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
+      });
+    });
+
+    describe('callWithRateLimit', () => {
+      it('retries on 429 when pid is gcal', async () => {
+      let calls = 0;
+      const fn = jest.fn(() => {
+        calls++;
+        if (calls === 1) throw new Error('429');
+        return Promise.resolve('gcal-result');
+      });
+      const result = await callWithRateLimit('gcal', fn);
+      expect(result).toBe('gcal-result');
+      expect(fn).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not retry on 429 when pid is not gcal', async () => {
+      const fn = jest.fn(() => Promise.reject(new Error('429')));
+      await expect(callWithRateLimit('apple', fn)).rejects.toThrow('429');
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    it('calls fn directly and returns result for non-gcal provider', async () => {
+      const fn = jest.fn(() => Promise.resolve('msft-result'));
+      const result = await callWithRateLimit('msft', fn);
+      expect(result).toBe('msft-result');
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
     });
   });
 });

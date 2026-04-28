@@ -222,7 +222,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [notes, setNotes] = useState(isCreate ? '' : (task.notes || ''));
   var [url, setUrl] = useState(isCreate ? '' : (task.url || ''));
   var [when, setWhen] = useState(function() {
-    if (isCreate) return 'morning,lunch,afternoon,evening,night';
+    if (isCreate) return '';
     var raw = task.when || '';
     // Strip stale tags not in uniqueTags (e.g. "biz" when no biz button exists)
     var special = ['anytime', 'allday', 'fixed'];
@@ -1113,7 +1113,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               })()}</span>
               {isPinned ? (
                 <span style={{ marginLeft: 6 }}>
-                  <span style={{ fontSize: 9, color: '#D97706' }}>{'\uD83D\uDCCC'} pinned</span>
+                  <span style={{ fontSize: 9, color: '#D97706' }}>{'\uD83D\uDCCC'} fixed</span>
                   <button onClick={handleUnpin} style={{
                     fontSize: 9, marginLeft: 6, padding: '1px 6px', borderRadius: 3,
                     background: TH.inputBg, border: '1px solid ' + TH.border, color: TH.redText,
@@ -1137,15 +1137,15 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             </div>;
           })()}
 
-          {/* Non-recurring pinned task: show unpin option */}
+          {/* Non-recurring fixed task: show unfix option */}
           {!recurring && !isCreate && isPinned && (
             <div style={{ fontSize: 11, color: '#D97706', marginBottom: 5, padding: '4px 8px', background: TH.inputBg, borderRadius: 4, border: '1px solid #D97706', display: 'flex', alignItems: 'center', gap: 6 }}>
-              {'\uD83D\uDCCC'} Pinned by drag
+              {'\uD83D\uDCCC'} Fixed by drag
               <button onClick={handleUnpin} style={{
                 fontSize: 9, padding: '1px 8px', borderRadius: 3,
                 background: TH.inputBg, border: '1px solid ' + TH.border, color: TH.text,
                 cursor: 'pointer', fontWeight: 600
-              }}>Unpin — let scheduler control</button>
+              }}>Unfix — let scheduler choose</button>
             </div>
           )}
 
@@ -1153,10 +1153,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           {!recurring && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, maxWidth: '100%' }}>
             <label style={{ ...lStyle, maxWidth: '100%', minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span title="The date/time for this task. For fixed tasks: anchored exactly here. For pinned tasks: the scheduler keeps this date. For unpinned tasks: the scheduler may move it.">{'\uD83D\uDCC5'} Date / Time</span>
+                <span title="Date/time for this task. For fixed tasks: the scheduler will not move it. For unfixed tasks: the scheduler may shift it to fit your schedule.">{'\uD83D\uDCC5'} Date / Time</span>
                 {!isCreate && !isFixed && !marker && date && (
                   datePinned
-                    ? <span style={{ fontSize: 7, color: '#D97706', fontWeight: 700 }}>{'\uD83D\uDCCC'} pinned</span>
+                    ? <span style={{ fontSize: 7, color: '#D97706', fontWeight: 700 }}>{'\uD83D\uDCCC'} fixed</span>
                     : <span style={{ fontSize: 7, color: TH.muted2 }}>set by scheduler</span>
                 )}
               </div>
@@ -1188,11 +1188,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                     style={{ ...iStyle, width: isMobile ? '100%' : undefined, minWidth: 0, ...(datePinned && date ? { borderColor: '#D97706' } : {}) }} />
                 )}
                 {!isCreate && !isFixed && !marker && datePinned && date && (
-                  <button onClick={() => { setDatePinned(false); setDate(''); setTime(''); setEndTime(''); setEndTimeError(null); }} title="Let scheduler control date"
+                  <button onClick={() => { setDatePinned(false); setDate(''); setTime(''); setEndTime(''); setEndTimeError(null); }} title="Let scheduler choose the date"
                     style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
                       border: '1px solid ' + TH.btnBorder, background: TH.inputBg, color: TH.textMuted, fontWeight: 600,
                       height: BTN_H, boxSizing: 'border-box' }}>
-                    Unpin
+                    Unfix
                   </button>
                 )}
               </div>
@@ -1234,7 +1234,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               </select>
             </label>}
             {!isCreate && !marker && !isAllDay && <label style={lStyle}>
-              <span>{'\uD83D\uDCCA'} Remaining</span>
+              <span title="How much time is left to complete this task — can be less than Duration if you've already made progress on it.">{'\uD83D\uDCCA'} Remaining</span>
               <select value={remVal} onChange={e => setTimeRemaining(parseInt(e.target.value))}
                 style={{ ...iStyle, background: remVal < parseInt(dur) ? TH.purpleBg : TH.inputBg }}>
                 {remOptions.map(v => (
@@ -1298,7 +1298,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               </select>
             </label>
             {!isCreate && <label style={lStyle}>
-              <span>{'\uD83D\uDCCA'} Remaining</span>
+              <span title="How much time is left to complete this task — can be less than Duration if you've already made progress on it.">{'\uD83D\uDCCA'} Remaining</span>
               <select value={remVal} onChange={e => setTimeRemaining(parseInt(e.target.value))}
                 style={{ ...iStyle, background: remVal < parseInt(dur) ? TH.purpleBg : TH.inputBg }}>
                 {remOptions.map(v => (
@@ -1356,7 +1356,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               selector instead; showing both produces two redundant controls
               that write to the same `when` field (confusing). */}
           {!marker && !recurring && <label style={{ ...lStyle, marginBottom: 5 }}>
-            <span title="Controls which time windows the scheduler can place this task in.">{'\uD83D\uDCC6'} Time window</span>
+            <span title="When during the day the scheduler can place this task, and whether it is flexible or fixed.">{'\uD83D\uDCC6'} Placement</span>
             {(function() {
               // Window tags are everything that isn't a mode keyword
               var tagParts = whenParts.filter(function(p) { return p !== 'anytime' && p !== 'allday' && p !== 'fixed'; });
@@ -1459,7 +1459,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               </div>
             </label>
             <label style={lStyle}>
-              <span title="Task will not be scheduled before this date.">{'\u23F3'} Not before</span>
+              <span title="Task will not be scheduled before this date.">{'\u23F3'} Start after</span>
               <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
                 <input type="date" value={startAfter || ''}
                   onChange={e => setStartAfter(e.target.value || '')}
@@ -1864,7 +1864,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                 <span style={labelStyle}>Scheduled</span>
                 <span>{startStr ? (endStr ? startStr + ' \u2192 ' + endStr : startStr) : '\u2014'}</span>
               </div>
-              <div style={rowStyle}><span style={labelStyle}>Slack</span><span>{slackStr}</span></div>
+              <div style={rowStyle}><span style={labelStyle} title="How much time the scheduler can shift this task before it misses its deadline. ∞ means no deadline constraint.">Slack</span><span>{slackStr}</span></div>
             </div>
           );
         })()}
