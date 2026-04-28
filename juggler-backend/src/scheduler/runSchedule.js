@@ -640,6 +640,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // rows even though taskRows was loaded before the INSERT.
   var phase1InsertedById = {};
   if (toInsert.length > 0) {
+    var chunkInsertNow = new Date().toISOString();
     var chunkInsertRows = toInsert.map(function(row) {
       var occDate = row._candidateDate || row.date || null;
       var occDay = null;
@@ -664,8 +665,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
         time: null,
         unscheduled: null,
         status: '',
-        created_at: trx.fn.now(),
-        updated_at: trx.fn.now()
+        created_at: chunkInsertNow,
+        updated_at: chunkInsertNow
       };
     });
     // Defensive dedup: detect any IDs already in DB before inserting.
