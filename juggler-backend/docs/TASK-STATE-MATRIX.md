@@ -217,6 +217,16 @@ The `habit` flag gates scheduler behaviors (flex windows, missed detection, temp
         instance preserved in DB (not regenerated)
 ```
 
+**Completion date rules for recurring instances:**
+
+| Instance date | User action | Allowed? |
+|---------------|-------------|----------|
+| Today (any time) | Mark done | ✅ Yes — completing early on the same calendar day is normal |
+| Future day | Mark done | ❌ No — UI blocks with warning; use skip or cancel instead |
+| Past day | Mark done | ✅ Yes — overdue instance, CompletionTimePicker offered |
+
+The guard in the frontend (`AppLayout.jsx`) enforces this using ISO date key comparison (`taskDateKey > nowDayKey`), where today's key is never greater than itself.
+
 ### Habit Template
 ```
 [blueprint — not visible on calendar]

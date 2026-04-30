@@ -1,5 +1,5 @@
 Legend: ✅ done · 🟡 partially done · ⬜ not done · ⏸ deferred
-Last updated: 2026-04-28
+Last updated: 2026-04-29
 
 ---
 
@@ -59,3 +59,4 @@ Last updated: 2026-04-28
 ## ⬜ Not Started
 
 19.  why is there text 'time' in the db? [values are "5:00 PM" human-readable strings; MySQL TIME conversion requires formatMinutesToTime + reader rewrites + 200+ row back-fill — scope not yet approved]
+40.  header dropdowns (AI and others) render behind page content — need z-index high enough to appear on top of all other elements

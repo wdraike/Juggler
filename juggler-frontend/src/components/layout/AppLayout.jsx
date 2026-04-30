@@ -745,11 +745,13 @@ export default function AppLayout() {
     var tasks = allTasksRef.current;
     if (val === 'done') {
       var task = tasks.find(function(t) { return t.id === id; });
-      // Block marking future recurring instances as done
+      // Block marking future recurring instances as done.
+      // Today is always allowed — it's normal to complete a recurring task
+      // a bit early on the same calendar day.
       if (task && task.recurring && task.taskType === 'recurring_instance') {
-        var taskDate = parseDate(task.date);
-        var nowDay = todayRef.current;
-        if (taskDate && nowDay && taskDate > nowDay) {
+        var taskDateKey = task.date ? formatDateKey(parseDate(task.date)) : null;
+        var nowDayKey = formatDateKey(todayRef.current);
+        if (taskDateKey && taskDateKey > nowDayKey) {
           showToast('Can\'t mark a future recurring task as done — skip or cancel it instead', 'warning');
           return;
         }
