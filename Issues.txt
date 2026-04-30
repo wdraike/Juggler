@@ -38,7 +38,7 @@ Last updated: 2026-04-30
 38.  rather than multiple phases of scheduling, i'd like the scheduler to be purely constraints focused [v2 constraint-based single-pass with incremental slack subtraction; v1 decommissioned]
 39.  we should optimize the be to fe communication to only provide updates for items that have changed or truly need to be communicated [SSE emit gated on dateChanged || timeChanged; dur/slackMins/unscheduled only in patch when actually changed; SCHEDULER_VERSION auto-bumps on source hash so placement cache invalidates on any scheduler edit]
 19.  why is there text 'time' in the db? [DONE 2026-04-30 — task_instances.time varchar(20) → MySQL TIME; backfilled "H:MM AM/PM" rows via STR_TO_DATE; formatMinutesToTimeDb added to dateHelpers; runSchedule.js writes HH:MM:SS; views rebuilt with CAST(NULL AS TIME)]
-40.  header dropdowns (AI and others) render behind page content — need z-index high enough to appear on top of all other elements [DONE 2026-04-30 — HeaderBar zIndex raised from 100 → 300; DependencyView nodes were at z-index 150 inside position:relative content, painting above the sticky header at 100]
+40.  header dropdowns (AI and others) render behind page content — need z-index high enough to appear on top of all other elements [PARTIAL 2026-04-30 — HeaderBar zIndex raised 100→300 fixed general dropdowns, but AI dropdown specifically still renders behind page content; AI dropdown component needs separate investigation]
 16.  i see very large 'occurrence_ordinal' values in the db. why? [CLOSED 2026-04-27 — expected behavior from UUIDv7-based monotonic scheme; documented in SCHEMA.md]
 25.  since UUIDv7 is sortable by creation time, can we use these for ordinals? [CLOSED 2026-04-27 — keep current monotonic scheme; documented in SCHEMA.md]
 33.  need to test each 3rd party sync carefully [ALL COMPLETE 2026-04-28]
@@ -61,3 +61,4 @@ Last updated: 2026-04-30
 ## ⬜ Not Started
 
 41.  🔴 CRITICAL — list view shows tasks that are absent from day view (e.g. "cut grass" at 3:00 PM visible in list but not on day view). Suspected cause: stale split-chunk or recurring-instance rows surviving in the DB after reschedule, visible to list query but not rendered in day view. Also corrupts 3rd-party sync — calendar providers receive push events for these ghost instances. Root-cause investigation required: compare the DB query / filtering used by list view vs. day view; trace how split recurring chunks are cleaned up on reschedule.
+40.  AI dropdown still renders behind page content — HeaderBar zIndex 100→300 fixed other dropdowns but not the AI dropdown specifically; AI dropdown component needs separate z-index or portal investigation.

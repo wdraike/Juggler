@@ -229,7 +229,8 @@ async function sync(req, res) {
 
     var { fetchTasksWithEventIds } = require('./task.controller');
     var allTaskRows = await fetchTasksWithEventIds(db, userId, function(q) {
-      q.whereNotNull('scheduled_at');
+      q.whereNotNull('scheduled_at')
+        .where(function() { this.whereNull('unscheduled').orWhere('unscheduled', 0); });
     });
 
     var allTasks = allTaskRows.map(function(r) {
@@ -1904,6 +1905,7 @@ async function audit(req, res) {
         .whereNot('status', 'done').whereNot('status', 'cancel').whereNot('status', 'skip')
         .whereNot('status', 'pause').whereNot('status', 'disabled')
         .whereNot('task_type', 'recurring_template')
+        .where(function() { this.whereNull('unscheduled').orWhere('unscheduled', 0); })
         .orderBy('scheduled_at');
     });
 
