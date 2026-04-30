@@ -9,7 +9,8 @@ const {
   toTime24,
   fromTime24,
   formatHour,
-  getDayName
+  getDayName,
+  formatMinutesToTimeDb
 } = require('../src/scheduler/dateHelpers');
 
 describe('dateHelpers', () => {
@@ -201,6 +202,21 @@ describe('dateHelpers', () => {
       expect(isoToDateKey('')).toBeNull();
       expect(isoToDateKey('garbage')).toBeNull();
       expect(isoToDateKey(new Date('invalid'))).toBeNull();
+    });
+  });
+
+  describe('formatMinutesToTimeDb', () => {
+    it('converts midnight (0) to 00:00:00', () => {
+      expect(formatMinutesToTimeDb(0)).toBe('00:00:00');
+    });
+    it('converts 5:00 PM (1020) to 17:00:00', () => {
+      expect(formatMinutesToTimeDb(1020)).toBe('17:00:00');
+    });
+    it('converts 11:30 AM (690) to 11:30:00', () => {
+      expect(formatMinutesToTimeDb(690)).toBe('11:30:00');
+    });
+    it('converts noon (720) to 12:00:00', () => {
+      expect(formatMinutesToTimeDb(720)).toBe('12:00:00');
     });
   });
 });

@@ -263,6 +263,12 @@ function formatMinutesToTime(startMin) {
   return dh + ':' + (mm < 10 ? '0' : '') + mm + ' ' + ampm;
 }
 
+function formatMinutesToTimeDb(startMin) {
+  var hh = Math.floor(startMin / 60);
+  var mm = startMin % 60;
+  return (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm + ':00';
+}
+
 module.exports = {
   inferYear,
   parseDate,
@@ -281,5 +287,6 @@ module.exports = {
   utcToLocal,
   isValidTimezone,
   safeTimezone,
-  formatMinutesToTime
+  formatMinutesToTime,
+  formatMinutesToTimeDb
 };
