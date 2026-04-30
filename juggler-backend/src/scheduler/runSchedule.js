@@ -31,6 +31,7 @@ var formatDateKey = dateHelpers.formatDateKey;
 var isoToDateKey = dateHelpers.isoToDateKey;
 var parseTimeToMinutes = dateHelpers.parseTimeToMinutes;
 var formatMinutesToTime = dateHelpers.formatMinutesToTime;
+var formatMinutesToTimeDb = dateHelpers.formatMinutesToTimeDb;
 var localToUtc = dateHelpers.localToUtc;
 var utcToLocal = dateHelpers.utcToLocal;
 var taskController = require('../controllers/task.controller');
@@ -852,7 +853,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var original = taskById[taskId];
     if (!original) continue;
 
-    var newTime = formatMinutesToTime(placement.start);
+    var newTime = formatMinutesToTimeDb(placement.start);
+    var newTimeDisplay = formatMinutesToTime(placement.start);
     var newDate = placement.dateKey;
 
     // For reconciled (moved) occurrences, `original.date` was overwritten
@@ -863,7 +865,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var priorDate = original._preReconDate != null ? original._preReconDate : original.date;
     var priorTime = original._preReconTime != null ? original._preReconTime : original.time;
     var dateChanged = newDate !== priorDate;
-    var timeChanged = newTime !== priorTime;
+    var timeChanged = newTimeDisplay !== priorTime;
 
     // Never touch recurring templates — they're blueprints, not schedulable tasks.
     if (original.taskType === 'recurring_template') continue;
@@ -904,7 +906,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // This guarantees the DB matches what the scheduler decided. No minimal-diff
     // optimization — the batch CASE update handles 200 rows per query, so cost is
     // negligible, and it eliminates stale-DB states the sync used to compensate for.
-    var newScheduledAt = localToUtc(newDate, newTime, TIMEZONE);
+    var newScheduledAt = localToUtc(newDate, newTimeDisplay, TIMEZONE);
     if (!newScheduledAt) continue;
 
     // Derive day-of-week for the DB write
@@ -945,7 +947,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       var newSlackMins = result.slackByTaskId && taskId in result.slackByTaskId ? result.slackByTaskId[taskId] : null;
       var patch = {
         date: newDate || null,
-        time: newTime || null,
+        time: newTimeDisplay || null,
         day: dayLabel,
         scheduledAt: newScheduledAt instanceof Date ? newScheduledAt.toISOString() : newScheduledAt
       };
@@ -961,7 +963,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
         from: priorDate,
         to: newDate,
         fromTime: priorTime,
-        toTime: newTime,
+        toTime: newTimeDisplay,
         patch: patch
       });
       updated++;
