@@ -547,6 +547,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // Only delete stale rows and fix drifted rows in the DB.
   var reconcileChanged = false;
   if (toDeleteIds.length > 0) {
+    // Use db (not trx) so this persists even if the deletion transaction rolls
+    // back on lock timeout — the safety-net flag must survive a rollback.
+    await db('task_instances').whereIn('id', toDeleteIds).update({ unscheduled: 1, updated_at: db.fn.now() });
     await tasksWrite.deleteTasksWhere(trx, userId, function(q) { return q.whereIn('id', toDeleteIds); });
     console.log('[SCHED] reconcile: deleted ' + toDeleteIds.length + ' stale recurring instances');
     reconcileChanged = true;

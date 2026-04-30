@@ -1280,7 +1280,7 @@ async function deleteTask(req, res) {
             .where('user_id', req.user.id)
             .whereIn('task_id', pendingIds)
             .where('status', 'active')
-            .update({ status: 'deleted_local', task_id: null, provider_event_id: null, synced_at: db.fn.now() })
+            .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
             .catch(function(err) { console.error("[silent-catch]", err.message); });
 
           await tasksWrite.deleteTasksWhere(trx, req.user.id, function(q) {
@@ -1315,7 +1315,7 @@ async function deleteTask(req, res) {
             await trx('cal_sync_ledger')
               .where({ user_id: req.user.id, task_id: templateId })
               .where('status', 'active')
-              .update({ status: 'deleted_local', task_id: null, provider_event_id: null, synced_at: db.fn.now() })
+              .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
               .catch(function(err) { console.error("[silent-catch]", err.message); });
           }
           await tasksWrite.deleteTaskById(trx, templateId, req.user.id);
@@ -1381,7 +1381,7 @@ async function deleteTask(req, res) {
         await trx('cal_sync_ledger')
           .where({ user_id: req.user.id, task_id: id })
           .where('status', 'active')
-          .update({ status: 'deleted_local', task_id: null, provider_event_id: null, synced_at: db.fn.now() })
+          .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
           .catch(function(err) { console.error("[silent-catch]", err.message); });
       }
 
@@ -1484,7 +1484,7 @@ async function updateTaskStatus(req, res) {
             .where('user_id', req.user.id)
             .whereIn('task_id', instanceIds)
             .where('status', 'active')
-            .update({ status: 'deleted_local', task_id: null, provider_event_id: null, synced_at: db.fn.now() })
+            .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
             .catch(function(err) { console.error("[silent-catch]", err.message); });
 
           await tasksWrite.deleteTasksWhere(db, req.user.id, function(q) {

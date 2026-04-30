@@ -222,9 +222,18 @@ async function sync(req, res) {
     }));
 
     // Load unified ledger and all tasks once
+    // Load active rows AND deleted_local rows that still hold a provider_event_id.
+    // The deleted_local+provider_event_id case arises when deleteTask marks the ledger
+    // before the next sync runs — the provider event is still live. Phase 2's
+    // !task && event branch handles the actual provider DELETE and clears provider_event_id.
     var ledgerRecords = await db('cal_sync_ledger')
       .where('user_id', userId)
-      .where('status', 'active')
+      .where(function() {
+        this.where('status', 'active')
+          .orWhere(function() {
+            this.where('status', 'deleted_local').whereNotNull('provider_event_id');
+          });
+      })
       .select();
 
     var { fetchTasksWithEventIds } = require('./task.controller');
@@ -889,7 +898,7 @@ async function sync(req, res) {
 
           } else {
             // Both gone
-            ledgerUpdates.push({ id: ledger.id, fields: { status: 'deleted_local' } });
+            ledgerUpdates.push({ id: ledger.id, fields: { status: 'deleted_local', provider_event_id: null } });
           }
 
         } catch (e) {
@@ -1018,7 +1027,7 @@ async function sync(req, res) {
       var ledgeredTaskIds2 = new Set();
       var pLedger2 = ledgerByProvider[pid2] || [];
       for (var li2 = 0; li2 < pLedger2.length; li2++) {
-        if (pLedger2[li2].task_id && !tasksNeedingReCreate.has(pLedger2[li2].task_id)) {
+        if (pLedger2[li2].status === 'active' && pLedger2[li2].task_id && !tasksNeedingReCreate.has(pLedger2[li2].task_id)) {
           ledgeredTaskIds2.add(pLedger2[li2].task_id);
         }
       }
