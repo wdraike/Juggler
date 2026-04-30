@@ -3,6 +3,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { getTheme } from '../../theme/colors';
 import apiClient from '../../services/apiClient';
 
@@ -15,6 +16,7 @@ export default function AiCommandPanel({
   var [aiCmd, setAiCmd] = useState('');
   var [aiLog, setAiLog] = useState([]);
   var [aiLoading, setAiLoading] = useState(false);
+  var [dropdownPos, setDropdownPos] = useState(null);
   var autoHideRef = useRef(null);
   var logRef = useRef(null);
   var panelRef = useRef(null);
@@ -23,11 +25,27 @@ export default function AiCommandPanel({
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [aiLog]);
 
-  // Close dropdown on outside click
+  // Track panel position for portal dropdown; recalculate on resize
+  useEffect(function() {
+    if (!showLog) { setDropdownPos(null); return; }
+    function updatePos() {
+      if (panelRef.current) {
+        var rect = panelRef.current.getBoundingClientRect();
+        setDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.right - rect.left });
+      }
+    }
+    updatePos();
+    window.addEventListener('resize', updatePos);
+    return function() { window.removeEventListener('resize', updatePos); };
+  }, [showLog]);
+
+  // Close dropdown on outside click — check both the input panel and the portal dropdown
   useEffect(function() {
     if (!showLog) return;
     function handleClick(e) {
-      if (panelRef.current && !panelRef.current.contains(e.target)) setShowLog(false);
+      var inPanel = panelRef.current && panelRef.current.contains(e.target);
+      var inPortal = logRef.current && logRef.current.contains(e.target);
+      if (!inPanel && !inPortal) setShowLog(false);
     }
     document.addEventListener('mousedown', handleClick);
     return function() { document.removeEventListener('mousedown', handleClick); };
@@ -131,7 +149,7 @@ export default function AiCommandPanel({
         onFocus={function(e) { e.stopPropagation(); if (autoHideRef.current) clearTimeout(autoHideRef.current); }}
         onKeyDown={function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
         placeholder={aiLoading ? 'Thinking...' : 'Ask AI: "reschedule my day", "wfh"...'}
-        title='AI commands \u2014 type "wfh", "office", or natural language like "move groceries to Friday"'
+        title='AI commands — type "wfh", "office", or natural language like "move groceries to Friday"'
         autoComplete="off" autoCorrect="off" spellCheck="false"
         style={{
           flex: 1, background: theme.input,
@@ -163,7 +181,7 @@ export default function AiCommandPanel({
               borderRadius: 6, padding: isMobile ? '8px 12px' : '4px 10px', fontSize: 12, fontWeight: 600,
               cursor: aiLoading ? 'wait' : 'pointer', flexShrink: 0, minHeight: isMobile ? 36 : 28
             }}
-          >{aiLoading ? '...' : '\u23CE'}</button>
+          >{aiLoading ? '...' : '⏎'}</button>
         </>
       )}
       {!aiCmd.trim() && aiLog.length > 0 && (
@@ -175,14 +193,14 @@ export default function AiCommandPanel({
             border: 'none', borderRadius: 6, padding: '4px 6px', fontSize: 12,
             cursor: 'pointer', flexShrink: 0
           }}
-        >{'\uD83D\uDCAC'}</button>
+        >{'💬'}</button>
       )}
 
-      {/* Dropdown chat log */}
-      {showLog && (
+      {/* Dropdown chat log — portal to document.body escapes header overflow/stacking-context clipping */}
+      {showLog && dropdownPos && createPortal(
         <div ref={logRef} style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
-          maxHeight: '50vh', overflowY: 'auto', zIndex: 200,
+          position: 'fixed', top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width,
+          maxHeight: '50vh', overflowY: 'auto', zIndex: 9000,
           background: theme.bgSecondary,
           border: '1px solid ' + theme.border,
           borderRadius: 8, boxShadow: '0 8px 24px ' + theme.shadow,
@@ -218,7 +236,8 @@ export default function AiCommandPanel({
               Thinking...
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
