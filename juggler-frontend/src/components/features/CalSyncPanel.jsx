@@ -958,16 +958,52 @@ export default function CalSyncPanel({
                           {run.items.map(function(h, i) {
                             var icon = icons[actionToIcon[h.action]] || icons.info;
                             var isError = h.action === 'error';
+                            // Parse error_detail — may already be an object (server parsed it) or a string (old rows)
+                            var ed = null;
+                            if (isError && h.error_detail) {
+                              if (typeof h.error_detail === 'object') {
+                                ed = h.error_detail;
+                              } else {
+                                try { ed = JSON.parse(h.error_detail); } catch (_) { /* fall back to raw */ }
+                              }
+                            }
                             return (
                               <div key={i} style={{
-                                display: 'flex', gap: 6, alignItems: 'flex-start', padding: '2px 0',
+                                display: 'flex', gap: 6, alignItems: 'flex-start', padding: '3px 0',
                                 fontSize: 10, color: isError ? '#DC2626' : theme.text
                               }}>
                                 <span style={{ flexShrink: 0 }}>{icon}</span>
-                                <div>
-                                  {h.task_text && <strong>{h.task_text}</strong>}
-                                  {h.task_text && ' — '}
-                                  <span style={{ color: isError ? '#DC2626' : theme.textSecondary }}>{h.detail || h.action}</span>
+                                <div style={{ minWidth: 0 }}>
+                                  {ed ? (
+                                    <>
+                                      <div style={{ color: '#DC2626', fontWeight: 500 }}>{ed.summary}</div>
+                                      {ed.affectedTasks && ed.affectedTasks.length > 0 && (
+                                        <div style={{ color: theme.textSecondary, marginTop: 1 }}>
+                                          {ed.affectedTasks.map(function(t) { return t.title; }).join(', ')}
+                                        </div>
+                                      )}
+                                      {!ed.retryable && ed.userAction && (
+                                        <div style={{
+                                          marginTop: 3, padding: '3px 6px', borderRadius: 2,
+                                          background: darkMode ? 'rgba(220,38,38,0.12)' : '#FEE2E2',
+                                          color: '#B91C1C', fontWeight: 600
+                                        }}>
+                                          {ed.userAction}
+                                        </div>
+                                      )}
+                                      {ed.retryable && !ed.userAction && (
+                                        <div style={{ color: theme.textMuted, fontStyle: 'italic', marginTop: 1 }}>
+                                          Will retry automatically
+                                        </div>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      {h.task_text && <strong>{h.task_text}</strong>}
+                                      {h.task_text && ' — '}
+                                      <span style={{ color: isError ? '#DC2626' : theme.textSecondary }}>{h.detail || h.action}</span>
+                                    </>
+                                  )}
                                 </div>
                               </div>
                             );

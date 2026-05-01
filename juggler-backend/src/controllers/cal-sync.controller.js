@@ -36,6 +36,69 @@ function withinCdnGrace(ledger, pid) {
   return (Date.now() - new Date(ledger.last_pushed_at).getTime()) < grace;
 }
 
+var PROVIDER_NAMES = { gcal: 'Google Calendar', msft: 'Microsoft Calendar', apple: 'Apple Calendar' };
+
+/**
+ * Build a structured error detail object for sync_history rows.
+ * Translates HTTP status codes and common error messages into plain-language
+ * summaries, retryable flags, and user action guidance.
+ *
+ * @param {Error|string} err  - The caught error (or message string)
+ * @param {object} opts
+ * @param {string}  opts.provider       - 'gcal' | 'msft' | 'apple'
+ * @param {string}  [opts.calendar]     - Calendar display name
+ * @param {string}  [opts.operation]    - Human-readable operation label
+ * @param {Array}   [opts.affectedTasks] - [{ id, title }]
+ * @returns {object} Structured error detail
+ */
+function buildErrorDetail(err, opts) {
+  var msg = (err && (err.message || String(err))) || 'Unknown error';
+  var provider = opts.provider || 'unknown';
+  var providerName = PROVIDER_NAMES[provider] || provider;
+  var calendar = opts.calendar || null;
+  var affectedTasks = opts.affectedTasks || [];
+
+  // Extract HTTP status if present
+  var status = (err && err.status) || (err && err.response && err.response.status) || null;
+  if (!status) {
+    var m = msg.match(/\b(4\d\d|5\d\d)\b/);
+    if (m) status = parseInt(m[1], 10);
+  }
+
+  var summary, retryable, userAction;
+
+  if (status === 401 || status === 403 || /invalid_grant|unauthorized|forbidden|authorization|access.?denied|token.*expired|expired.*token/i.test(msg)) {
+    summary = 'Could not ' + (opts.operation || 'sync') + ' — ' + providerName + ' authorization expired or access denied';
+    retryable = false;
+    userAction = 'Reconnect your ' + providerName + ' in Settings → Calendars';
+  } else if (status === 404 || /not found|404/i.test(msg)) {
+    summary = 'Event no longer exists on ' + providerName;
+    retryable = false;
+    userAction = null;
+  } else if (status === 429 || /rate.?limit|too many requests|quota/i.test(msg)) {
+    summary = providerName + ' rate limit hit — sync will retry automatically';
+    retryable = true;
+    userAction = null;
+  } else if (status >= 500 || /server error|service unavailable|bad gateway|timeout/i.test(msg)) {
+    summary = providerName + ' is temporarily unavailable — sync will retry automatically';
+    retryable = true;
+    userAction = null;
+  } else {
+    summary = 'Could not ' + (opts.operation || 'sync') + ' — ' + msg;
+    retryable = true;
+    userAction = null;
+  }
+
+  return {
+    summary: summary,
+    affectedTasks: affectedTasks,
+    provider: provider,
+    calendar: calendar,
+    retryable: retryable,
+    userAction: userAction || undefined
+  };
+}
+
 function delay(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 
 // Rate-limit helper: pause 250ms every 4 calls (~4 req/s, safe for both GCal and MSFT).
@@ -97,7 +160,8 @@ async function sync(req, res) {
         event_id: opts.eventId || null,
         old_values: opts.oldValues ? JSON.stringify(opts.oldValues) : null,
         new_values: opts.newValues ? JSON.stringify(opts.newValues) : null,
-        detail: opts.detail || null
+        detail: opts.detail || null,
+        error_detail: opts.errorDetail ? JSON.stringify(opts.errorDetail) : null
       });
     }
 
@@ -917,10 +981,17 @@ async function sync(req, res) {
           };
           pStats.errors.push(errObj);
           stats.errors.push(errObj);
+          var taskTitle = task ? task.text : ledger.event_summary;
           logSyncAction(pid, 'error', {
-            taskId: ledger.task_id, taskText: task ? task.text : ledger.event_summary,
+            taskId: ledger.task_id, taskText: taskTitle,
             eventId: ledger.provider_event_id,
-            detail: 'Error in ledger sync: ' + e.message
+            detail: 'Error in ledger sync: ' + e.message,
+            errorDetail: buildErrorDetail(e, {
+              provider: pid,
+              calendar: calendarLabels[pid] || null,
+              operation: 'update event',
+              affectedTasks: taskTitle ? [{ id: ledger.task_id, title: taskTitle }] : []
+            })
           });
         }
       }
@@ -1235,6 +1306,12 @@ async function sync(req, res) {
               } catch (rErr) {
                 // Persistent failure — insert error ledger record so task is skipped next sync
                 console.warn('[CAL-SYNC] Retry failed for task ' + rTask.id + ' on ' + pid2 + ': ' + rErr.message);
+                var rErrDetail = buildErrorDetail(rErr, {
+                  provider: pid2,
+                  calendar: calendarLabels[pid2] || null,
+                  operation: 'push task to calendar',
+                  affectedTasks: [{ id: rTask.id, title: rTask.text }]
+                });
                 ledgerInserts.push({
                   user_id: userId, provider: pid2, task_id: rTask.id,
                   provider_event_id: null, origin: 'juggler',
@@ -1243,6 +1320,11 @@ async function sync(req, res) {
                   event_summary: rTask.text,
                   status: 'error',
                   error_detail: rErr.message.substring(0, 1000)
+                });
+                logSyncAction(pid2, 'error', {
+                  taskId: rTask.id, taskText: rTask.text,
+                  detail: 'Push failed: ' + rErr.message,
+                  errorDetail: rErrDetail
                 });
               }
             }
@@ -1283,6 +1365,16 @@ async function sync(req, res) {
             } catch (e) {
               pStats2.errors.push({ phase: 'push_new', provider: pid2, taskId: fTask.id, error: e.message });
               stats.errors.push({ phase: 'push_new', provider: pid2, taskId: fTask.id, error: e.message });
+              logSyncAction(pid2, 'error', {
+                taskId: fTask.id, taskText: fTask.text,
+                detail: 'Push failed: ' + e.message,
+                errorDetail: buildErrorDetail(e, {
+                  provider: pid2,
+                  calendar: calendarLabels[pid2] || null,
+                  operation: 'push task to calendar',
+                  affectedTasks: [{ id: fTask.id, title: fTask.text }]
+                })
+              });
             }
           }
         }
@@ -1524,7 +1616,13 @@ async function sync(req, res) {
           stats.errors.push(errObj3);
           logSyncAction(pid2, 'error', {
             eventId: evId,
-            detail: 'Failed to pull event: ' + e.message
+            detail: 'Failed to pull event: ' + e.message,
+            errorDetail: buildErrorDetail(e, {
+              provider: pid2,
+              calendar: calendarLabels[pid2] || null,
+              operation: 'pull event',
+              affectedTasks: []
+            })
           });
         }
       }
@@ -1884,6 +1982,9 @@ async function getSyncHistory(req, res) {
       }
       if (r.new_values && typeof r.new_values === 'string') {
         try { r.new_values = JSON.parse(r.new_values); } catch (e) { /* keep as string */ }
+      }
+      if (r.error_detail && typeof r.error_detail === 'string') {
+        try { r.error_detail = JSON.parse(r.error_detail); } catch (e) { /* keep as string */ }
       }
     });
     res.json({ items: rows, limit: limit, offset: offset });
