@@ -7,9 +7,22 @@ import React, { useState, useEffect, useRef } from 'react';
 import apiClient from '../../services/apiClient';
 import { getTheme } from '../../theme/colors';
 
+// knex dateStrings:true returns MySQL format "2026-05-01 19:44:00" (UTC, no Z).
+// Normalize to a proper UTC ISO string so browsers parse it correctly.
+function parseDbDate(str) {
+  if (!str) return null;
+  var s = String(str);
+  if (!s.includes('Z') && !s.includes('+') && s.includes(' ') && !s.includes('T')) {
+    s = s.replace(' ', 'T') + 'Z';
+  }
+  return new Date(s);
+}
+
 function formatRelativeTime(isoString) {
   if (!isoString) return 'Never';
-  var diff = Date.now() - new Date(isoString).getTime();
+  var d = parseDbDate(isoString);
+  if (!d || isNaN(d.getTime())) return 'Never';
+  var diff = Date.now() - d.getTime();
   var mins = Math.floor(diff / 60000);
   if (mins < 1) return 'Just now';
   if (mins < 60) return mins + 'm ago';
@@ -927,7 +940,8 @@ export default function CalSyncPanel({
 
           function formatAbsTime(isoString) {
             if (!isoString) return '';
-            var d = new Date(isoString);
+            var d = parseDbDate(isoString);
+            if (!d || isNaN(d.getTime())) return '';
             return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
               + ' at ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
           }
@@ -1036,7 +1050,29 @@ export default function CalSyncPanel({
                     var triggerLabel = run.trigger_type === 'auto' ? 'Auto' : 'Manual';
                     var hasErrors = (run.counts && run.counts.error) > 0;
                     var summary = summarizeRun(run.counts || {});
-                    var totalItems = run.items ? run.items.length : 0;
+                    var errorItems = (run.items || []).filter(function(h) { return h.action === 'error'; });
+                    var cleanedItems = (run.items || []).filter(function(h) { return h.action === 'deleted_local'; });
+                    var meaningfulItems = (run.items || []).filter(function(h) { return h.action !== 'error' && h.action !== 'deleted_local'; });
+
+                    // Deduplicate errors by summary message
+                    var errorGroups = {};
+                    errorItems.forEach(function(h) {
+                      var ed = h.error_detail || {};
+                      var key = ed.summary || 'Sync error';
+                      if (!errorGroups[key]) {
+                        errorGroups[key] = { summary: key, count: 0, userAction: ed.userAction || null, retryable: !!ed.retryable, tasks: [] };
+                      }
+                      errorGroups[key].count++;
+                      if (ed.affectedTasks) {
+                        ed.affectedTasks.forEach(function(t) {
+                          if (errorGroups[key].tasks.length < 3 && errorGroups[key].tasks.indexOf(t.title) < 0) {
+                            errorGroups[key].tasks.push(t.title);
+                          }
+                        });
+                      }
+                    });
+                    var errorGroupList = Object.values(errorGroups);
+
                     return (
                       <details key={run.sync_run_id} style={{ marginBottom: 6, borderBottom: '1px solid ' + theme.border, paddingBottom: 4 }}>
                         <summary style={{ cursor: 'pointer', padding: '4px 0', listStyle: 'none', userSelect: 'none' }}>
@@ -1059,11 +1095,47 @@ export default function CalSyncPanel({
                             <span style={{ color: hasErrors ? '#DC2626' : theme.textSecondary }}>{summary}</span>
                           </div>
                         </summary>
-                        {totalItems > 0 && (
-                          <div style={{ paddingLeft: 8, paddingTop: 4 }}>
-                            {run.items.map(renderItem)}
-                          </div>
-                        )}
+                        <div style={{ paddingLeft: 8, paddingTop: 4 }}>
+                          {errorGroupList.map(function(group, gi) {
+                            return (
+                              <div key={gi} style={{
+                                display: 'flex', gap: 6, alignItems: 'flex-start',
+                                padding: '4px 0',
+                                borderTop: gi > 0 ? '1px solid ' + (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)') : 'none',
+                                fontSize: 10
+                              }}>
+                                <span style={{ flexShrink: 0, marginTop: 1 }}>⚠</span>
+                                <div>
+                                  <div>
+                                    <span style={{ color: '#DC2626', fontWeight: 500 }}>{group.summary}</span>
+                                    {group.count > 1 && <span style={{ color: '#DC2626' }}> ×{group.count}</span>}
+                                  </div>
+                                  {group.tasks.length > 0 && (
+                                    <div style={{ color: theme.textMuted, marginTop: 1 }}>
+                                      {group.tasks.join(', ')}{group.count > group.tasks.length ? '…' : ''}
+                                    </div>
+                                  )}
+                                  {group.userAction && !group.retryable && (
+                                    <div style={{
+                                      marginTop: 2, padding: '2px 5px', borderRadius: 2,
+                                      background: darkMode ? 'rgba(220,38,38,0.12)' : '#FEE2E2',
+                                      color: '#B91C1C', fontWeight: 600
+                                    }}>{group.userAction}</div>
+                                  )}
+                                  {group.retryable && (
+                                    <div style={{ color: theme.textMuted, fontStyle: 'italic', marginTop: 1 }}>Will retry automatically</div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {cleanedItems.length > 0 && (
+                            <div style={{ fontSize: 10, color: theme.textMuted, padding: '3px 0', borderTop: (errorGroupList.length > 0 || meaningfulItems.length > 0) ? '1px solid ' + (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)') : 'none' }}>
+                              + {cleanedItems.length} orphan event{cleanedItems.length > 1 ? 's' : ''} cleaned up
+                            </div>
+                          )}
+                          {meaningfulItems.map(renderItem)}
+                        </div>
                       </details>
                     );
                   })}
