@@ -1035,6 +1035,18 @@ async function sync(req, res) {
                 } catch (ruErr) {
                   pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: failedUpdates[rui].eventId, error: ruErr.message });
                   stats.errors.push({ phase: 'ledger_update', provider: pid, eventId: failedUpdates[rui].eventId, error: ruErr.message });
+                  logSyncAction(pid, 'error', {
+                    taskId: failedUpdates[rui].task && failedUpdates[rui].task.id || null,
+                    taskText: failedUpdates[rui].task && failedUpdates[rui].task.text || null,
+                    eventId: failedUpdates[rui].eventId,
+                    detail: 'Retry failed: ' + ruErr.message,
+                    errorDetail: buildErrorDetail(ruErr, {
+                      provider: pid,
+                      calendar: calendarLabels[pid] || null,
+                      operation: 'update event',
+                      affectedTasks: failedUpdates[rui].task ? [{ id: failedUpdates[rui].task.id, title: failedUpdates[rui].task.text }] : []
+                    })
+                  });
                 }
               }
             }
@@ -1049,6 +1061,18 @@ async function sync(req, res) {
               } catch (e5) {
                 pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[fui].eventId, error: e5.message });
                 stats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[fui].eventId, error: e5.message });
+                logSyncAction(pid, 'error', {
+                  taskId: pendingEventUpdates[fui].task && pendingEventUpdates[fui].task.id || null,
+                  taskText: pendingEventUpdates[fui].task && pendingEventUpdates[fui].task.text || null,
+                  eventId: pendingEventUpdates[fui].eventId,
+                  detail: 'Fallback sequential update failed: ' + e5.message,
+                  errorDetail: buildErrorDetail(e5, {
+                    provider: pid,
+                    calendar: calendarLabels[pid] || null,
+                    operation: 'update event',
+                    affectedTasks: pendingEventUpdates[fui].task ? [{ id: pendingEventUpdates[fui].task.id, title: pendingEventUpdates[fui].task.text }] : []
+                  })
+                });
               }
             }
           }
@@ -1062,6 +1086,18 @@ async function sync(req, res) {
             } catch (e6) {
               pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[sui].eventId, error: e6.message });
               stats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[sui].eventId, error: e6.message });
+              logSyncAction(pid, 'error', {
+                taskId: pendingEventUpdates[sui].task && pendingEventUpdates[sui].task.id || null,
+                taskText: pendingEventUpdates[sui].task && pendingEventUpdates[sui].task.text || null,
+                eventId: pendingEventUpdates[sui].eventId,
+                detail: 'Sequential update failed: ' + e6.message,
+                errorDetail: buildErrorDetail(e6, {
+                  provider: pid,
+                  calendar: calendarLabels[pid] || null,
+                  operation: 'update event',
+                  affectedTasks: pendingEventUpdates[sui].task ? [{ id: pendingEventUpdates[sui].task.id, title: pendingEventUpdates[sui].task.text }] : []
+                })
+              });
             }
           }
         }
@@ -1239,6 +1275,17 @@ async function sync(req, res) {
             if (br.error) {
               pStats2.errors.push({ phase: 'push_new', provider: pid2, taskId: bTask.id, error: br.error });
               stats.errors.push({ phase: 'push_new', provider: pid2, taskId: bTask.id, error: br.error });
+              logSyncAction(pid2, 'error', {
+                taskId: bTask.id,
+                taskText: bTask.text || null,
+                detail: 'Push new event failed: ' + br.error,
+                errorDetail: buildErrorDetail(br.error, {
+                  provider: pid2,
+                  calendar: calendarLabels[pid2] || null,
+                  operation: 'push new event',
+                  affectedTasks: [{ id: bTask.id, title: bTask.text }]
+                })
+              });
               continue;
             }
             var createdNorm = pAdapter2.normalizeEvent ? pAdapter2.normalizeEvent(br.raw) : null;
