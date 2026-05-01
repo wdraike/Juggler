@@ -461,7 +461,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
     // Always produce the correct chunk plan — even if a prior run merged
     // chunks into one row. The scheduler places each chunk independently;
-    // the post-placement merge step (Phase 5a) recombines contiguous chunks.
+    // the post-placement merge step recombines contiguous chunks.
     // If the primary row carries the full master dur from a prior merge,
     // the drift-fix below will correct it back to chunk 1's dur.
 
@@ -836,6 +836,89 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // handling needed (that was v1-only behavior).
   var placementByTaskId = {};
   var dayPlacements = result.dayPlacements;
+
+  // ── #42: Merge adjacent split-task chunks ──────────────────────────────────
+  // After all placements are determined, collapse back-to-back chunks of the
+  // same split occurrence into a single extended placement entry. "Back-to-back"
+  // means zero gap: chunk N's start + dur === chunk N+1's start on the same day.
+  //
+  // Result: one DB row (the primary/first chunk) carries the combined dur.
+  // The secondary rows that were merged in are deleted from the DB — they were
+  // pre-inserted in Phase 1 but are no longer needed as distinct entries.
+  //
+  // Rationale: the day view and calendar sync should show one continuous block,
+  // not N short tiles/events. If the scheduler placed chunks with gaps between
+  // them the chunks remain separate (gap > 0 means the user could fill the gap
+  // with something else and the visual split is meaningful).
+  var mergedOutIds = []; // secondary chunk IDs whose DB rows should be deleted
+  Object.keys(dayPlacements).forEach(function(dateKey) {
+    var placements = dayPlacements[dateKey];
+    if (!placements || placements.length < 2) return;
+
+    // Track per-day merged IDs to filter only the current day's merged chunks
+    var dayMergedIds = [];
+
+    // Collect split-chunk placements grouped by splitGroup.
+    // Non-split placements (splitGroup null/undefined) are left untouched.
+    var byGroup = {}; // splitGroup → [placementEntry, ...]
+    placements.forEach(function(p) {
+      if (!p.task) return;
+      var sg = p.task.splitGroup;
+      if (!sg) return; // not a split chunk
+      if (!byGroup[sg]) byGroup[sg] = [];
+      byGroup[sg].push(p);
+    });
+
+    Object.keys(byGroup).forEach(function(sg) {
+      var group = byGroup[sg];
+      if (group.length < 2) return; // nothing to merge
+
+      // Sort by start time ascending so we can scan for adjacent pairs.
+      group.sort(function(a, b) { return a.start - b.start; });
+
+      // Linear scan: merge consecutive zero-gap pairs.
+      // Walk forward; whenever two entries are back-to-back, fold the second
+      // into the first (accumulate dur) and mark the second for deletion.
+      var i = 0;
+      while (i < group.length - 1) {
+        var curr = group[i];
+        var next = group[i + 1];
+        if (curr.start + curr.dur === next.start) {
+          // Zero gap — merge next into curr.
+          curr.dur += next.dur;
+          // Record next's task ID for DB row deletion.
+          if (next.task && next.task.id) {
+            dayMergedIds.push(next.task.id);
+            mergedOutIds.push(next.task.id);
+          }
+          // Remove next from the group so the scan can continue (handles 3+ chunks).
+          group.splice(i + 1, 1);
+          // Do NOT advance i: re-check curr against the new group[i+1].
+        } else {
+          i++;
+        }
+      }
+      // Note: `group` entries are the same object references as in `placements`,
+      // so mutating curr.dur already updated the placement list in-place.
+      // Entries removed from `group` via splice are still in `placements` — we
+      // filter those out below.
+    });
+
+    // Remove merged-out entries from the day's placement list so they don't
+    // receive a scheduled_at update and don't appear in the outgoing cache/SSE.
+    if (dayMergedIds.length > 0) {
+      var mergedOutSet = {};
+      dayMergedIds.forEach(function(id) { mergedOutSet[id] = true; });
+      dayPlacements[dateKey] = placements.filter(function(p) {
+        return !(p.task && p.task.id && mergedOutSet[p.task.id]);
+      });
+    }
+  });
+
+  if (mergedOutIds.length > 0) {
+    console.log('[SCHED] split-chunk merge: collapsed ' + mergedOutIds.length + ' adjacent chunk(s) into primary rows');
+  }
+
   Object.keys(dayPlacements).forEach(function(dateKey) {
     var placements = dayPlacements[dateKey];
     if (!placements) return;
@@ -921,6 +1004,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       day: newDay,
       time: newTime || null,
       unscheduled: null,
+      overdue: 0,
       date_pinned: 0,
       updated_at: db.fn.now()
     };
@@ -959,6 +1043,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       var priorSlackMins = original.slackMins != null ? original.slackMins : null;
       if (newSlackMins !== priorSlackMins) patch.slackMins = newSlackMins;
       if (original.unscheduled) patch.unscheduled = false; // only send on transition
+      if (original.overdue) patch.overdue = false; // only send on transition
 
       updatedTasks.push({
         id: taskId,
@@ -973,13 +1058,21 @@ async function runScheduleAndPersist(userId, _retries, options) {
     }
   }
 
-  // 8. Mark unplaced tasks — set unscheduled flag instead of overwriting scheduled_at
-  //    Skip future recurring instances — they'll be placed when their day arrives.
-  //    Skip today/past recurring instances that already have a scheduled_at —
-  //    they remain on the calendar at their last proposed time (per user request:
-  //    "kept in the active part of the calendar at the time they were last
-  //    proposed"). Frontend renders them with overdue/missed styling rather
-  //    than removing them to an unscheduled lane.
+  // 8. Mark unplaced tasks.
+  //    There are three cases:
+  //
+  //    A) Recurring instance with a scheduled_at: leave in place on the calendar.
+  //       These are already handled above (the recurring-instance preserve path).
+  //
+  //    B) Non-recurring task (or recurring instance without scheduled_at) that
+  //       has a scheduled_at / date set: it was previously placed but couldn't
+  //       be re-placed this run. Set overdue=1, keep unscheduled=0, and
+  //       PRESERVE scheduled_at/date/time so the task stays at its last proposed
+  //       position with an overdue indicator. Do NOT move it to the unscheduled
+  //       lane.
+  //
+  //    C) Brand-new task (no scheduled_at yet) that couldn't be placed: set
+  //       unscheduled=1 so the frontend shows it in the unscheduled lane.
   var cleared = 0;
   result.unplaced.forEach(function(t) {
     if (!t || !t.id) return;
@@ -987,11 +1080,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (!original) return;
     if (original.taskType === 'recurring_template') return;
     if (original.datePinned) return;
-    if (original.datePinned) return;
     if (original.marker) return;
     // Recurring instances: two cases based on whether they've ever been placed.
-    //   - scheduled_at set: keep last-proposed position on calendar; frontend
-    //     shows them as overdue/missed using (date < today AND status='').
+    //   - scheduled_at set: keep last-proposed position on calendar; the overdue
+    //     indicator is inferred on the frontend from (date < today AND status='').
+    //     No DB write needed here — the task is already in place.
     //   - scheduled_at null: Phase 1 pre-inserted chunk that couldn't be placed
     //     this run. Mark unscheduled=1 so the frontend shows it in the
     //     unscheduled lane. No SSE emitted here — Phase 5 handles new-chunk events.
@@ -1007,30 +1100,63 @@ async function runScheduleAndPersist(userId, _retries, options) {
       cleared++;
       return;
     }
-    // Mark as unscheduled but PRESERVE scheduled_at — it stays as the
-    // last-proposed time so the frontend can render the chunk in the
-    // unscheduled lane with a sensible "was supposed to be at" timestamp,
-    // and a future "mark done" click can infer a plausible done_at.
-    // The unscheduled=1 boolean is the sole signal that it's not on the calendar.
-    var unplacedDbUpdate = { unscheduled: 1, updated_at: db.fn.now() };
-    if (result.slackByTaskId && t.id in result.slackByTaskId) {
-      unplacedDbUpdate.slack_mins = result.slackByTaskId[t.id];
-    }
-    pendingUpdates.push({ id: t.id, dbUpdate: unplacedDbUpdate });
-    // Emit SSE change only on the transition from placed → unscheduled.
+    // One-off / chain-member task. Two sub-cases:
     var rawRow = rawRowById[t.id];
-    var wasPlaced = !!(original.date || original.time || (rawRow && rawRow.scheduled_at));
-    var wasAlreadyUnscheduled = !!(rawRow && rawRow.unscheduled);
-    if (wasPlaced && !wasAlreadyUnscheduled) {
-      updatedTasks.push({
-        id: t.id,
-        text: original.text,
-        from: original.date,
-        to: original.date, // proposed date stays
-        fromTime: original.time,
-        toTime: original.time,
-        patch: { unscheduled: true } // scheduled_at/date/time/day unchanged
-      });
+    var hasScheduledAt = rawRow ? !!rawRow.scheduled_at : !!(original.date || original.scheduledAt);
+    if (hasScheduledAt) {
+      // Case B: was previously placed — pin in place with overdue=1.
+      // Keep unscheduled=0 so the task renders at its scheduled position.
+      var wasAlreadyOverdue = !!(rawRow && rawRow.overdue);
+
+      // Only write if there's a state change:
+      // 1. If already overdue + unscheduled already 0 → only write if slack_mins changed
+      // 2. If newly overdue → write the full transition
+      // 3. If already overdue but unscheduled was 1 → fix that
+      var needsUpdate = false;
+      var overdueDbUpdate = {};
+
+      if (wasAlreadyOverdue && rawRow && rawRow.unscheduled === 0) {
+        // Already in final state (overdue=1, unscheduled=0).
+        // Only update if slack_mins changed.
+        if (result.slackByTaskId && t.id in result.slackByTaskId &&
+            result.slackByTaskId[t.id] !== (rawRow.slack_mins || 0)) {
+          overdueDbUpdate.slack_mins = result.slackByTaskId[t.id];
+          needsUpdate = true;
+        }
+      } else {
+        // Newly overdue OR unscheduled flag needs fixing.
+        overdueDbUpdate.unscheduled = 0;
+        overdueDbUpdate.overdue = 1;
+        overdueDbUpdate.updated_at = db.fn.now();
+        if (result.slackByTaskId && t.id in result.slackByTaskId) {
+          overdueDbUpdate.slack_mins = result.slackByTaskId[t.id];
+        }
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+        pendingUpdates.push({ id: t.id, dbUpdate: overdueDbUpdate });
+      }
+
+      // Emit SSE transition only when crossing placed → overdue (not already overdue).
+      if (!wasAlreadyOverdue) {
+        updatedTasks.push({
+          id: t.id,
+          text: original.text,
+          from: original.date,
+          to: original.date, // date stays unchanged
+          fromTime: original.time,
+          toTime: original.time,
+          patch: { overdue: true } // scheduled_at/date/time/day unchanged
+        });
+      }
+    } else {
+      // Case C: never placed — move to unscheduled lane.
+      var unplacedDbUpdate = { unscheduled: 1, updated_at: db.fn.now() };
+      if (result.slackByTaskId && t.id in result.slackByTaskId) {
+        unplacedDbUpdate.slack_mins = result.slackByTaskId[t.id];
+      }
+      pendingUpdates.push({ id: t.id, dbUpdate: unplacedDbUpdate });
     }
     cleared++;
   });
@@ -1109,10 +1235,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (movedPast > 0) console.log('[SCHED] moved/skipped ' + movedPast + ' past-dated tasks');
   }
 
-  // Merge-back removed — adjacent split chunks stay as separate DB rows.
-  // Visual collapsing is handled in the frontend (DailyView). Backend merge
-  // was counterproductive: it folded 8x30m chunks into one 240m block,
-  // defeating the purpose of splitting for flexible intra-day placement.
+  // Adjacent split chunks that landed back-to-back (zero gap) on the same day
+  // were merged into a single extended DB row earlier in the write path (#42).
+  // See the "Merge adjacent split-task chunks" block above. Chunks with gaps
+  // between them remain as separate rows — gap > 0 means capacity lives between
+  // them and the split is still meaningful for scheduling purposes.
 
   // Phase 1: in-memory chunk rows were pre-inserted before scheduling (see
   // "Phase 1: Pre-insert" block above). Placed chunks now have DB rows and
@@ -1199,6 +1326,15 @@ async function runScheduleAndPersist(userId, _retries, options) {
     await tasksWrite.updateTaskById(trx, otherUpdates[pi].id, otherUpdates[pi].dbUpdate, userId);
   }
 
+  // Delete merged-out secondary chunk rows. Pre-inserted in Phase 1 but their
+  // placement was folded into the primary chunk above.
+  if (mergedOutIds.length > 0) {
+    await tasksWrite.deleteTasksWhere(trx, userId, function(q) {
+      return q.whereIn('id', mergedOutIds);
+    });
+    console.log('[SCHED] split-chunk merge: deleted ' + mergedOutIds.length + ' secondary chunk row(s) from DB');
+  }
+
   console.log('[SCHED] runScheduleAndPersist: updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
   tPerf.persistEnd = Date.now() - tPerfStart;
   console.log('[SCHED] perf user=' + userId
@@ -1278,6 +1414,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
   // Synthesize placements for finished tasks so they appear on the calendar
   // when the "all" filter is active (scheduler only places active tasks).
+  // Also synthesize placements for overdue tasks — they have a scheduled_at
+  // but weren't re-placed this run. They stay visible in the grid at their
+  // last scheduled position with an overdue indicator (overdue=1).
   var placedIds = {};
   Object.keys(outPlacements).forEach(function(dk) {
     outPlacements[dk].forEach(function(p) {
@@ -1288,7 +1427,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (placedIds[t.id]) return;
     if (t.generated || t.taskType === 'recurring_template') return;
     var st = statuses[t.id] || '';
-    if (st !== 'done' && st !== 'cancel' && st !== 'skip') return;
+    var isFinished = st === 'done' || st === 'cancel' || st === 'skip';
+    var isOverdueTask = !!t.overdue;
+    if (!isFinished && !isOverdueTask) return;
     if (!t.date || t.date === 'TBD') return;
     var startMin = t.time ? parseTimeToMinutes(t.time) : null;
     if (startMin == null) return;
@@ -1296,6 +1437,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var entry = { task: t, start: startMin, dur: dur };
     var utcDate = localToUtc(t.date, t.time, TIMEZONE);
     if (utcDate) entry.scheduledAtUtc = utcDate.toISOString();
+    if (isOverdueTask) entry._overdue = true;
     if (!outPlacements[t.date]) outPlacements[t.date] = [];
     outPlacements[t.date].push(entry);
   });
@@ -1617,14 +1759,17 @@ async function getSchedulePlacements(userId, options) {
       if (dayPlacements[dk].length === 0) delete dayPlacements[dk];
     });
 
-    // Synthesize placements for finished tasks (done/cancel/skip) using their
-    // scheduled_at-derived date/time. The scheduler never places these, so without
-    // this they'd appear unscheduled when the "all" filter is active.
+    // Synthesize placements for finished tasks (done/cancel/skip) and overdue
+    // tasks using their scheduled_at-derived date/time. The scheduler never
+    // places these, so without this they'd appear unscheduled when the "all"
+    // filter is active. Overdue tasks render in-place with an overdue indicator.
     allTasks.forEach(function(t) {
       if (cachedIds[t.id]) return;
       if (t.generated || t.taskType === 'recurring_template') return;
       var st = statuses[t.id] || '';
-      if (st !== 'done' && st !== 'cancel' && st !== 'skip') return;
+      var isFinished = st === 'done' || st === 'cancel' || st === 'skip';
+      var isOverdueTask = !!t.overdue;
+      if (!isFinished && !isOverdueTask) return;
       if (!t.date || t.date === 'TBD') return;
       var startMin = t.time ? parseTimeToMinutes(t.time) : null;
       if (startMin == null) return;
@@ -1633,6 +1778,7 @@ async function getSchedulePlacements(userId, options) {
       // Add scheduledAtUtc for timezone-safe frontend hydration
       var utcDate = localToUtc(t.date, t.time, TIMEZONE);
       if (utcDate) entry.scheduledAtUtc = utcDate.toISOString();
+      if (isOverdueTask) entry._overdue = true;
       if (!dayPlacements[t.date]) dayPlacements[t.date] = [];
       dayPlacements[t.date].push(entry);
       cachedIds[t.id] = true;

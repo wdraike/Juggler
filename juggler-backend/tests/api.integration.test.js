@@ -11,7 +11,7 @@ let resolveQueue = [];
 
 function createChainMock() {
   const chain = jest.fn(() => chain);
-  ['where', 'whereRaw', 'whereNotNull', 'whereNull', 'whereNot', 'whereNotIn', 'whereIn', 'orWhere', 'orWhereNot', 'orderBy', 'limit', 'offset', 'join', 'leftJoin', 'count', 'max', 'clearSelect', 'clearOrder', 'clone', 'groupBy', 'having'].forEach(m => {
+  ['where', 'whereRaw', 'whereNotNull', 'whereNull', 'whereNot', 'whereNotIn', 'whereIn', 'orWhere', 'orWhereNot', 'orderBy', 'orderByRaw', 'limit', 'offset', 'join', 'leftJoin', 'count', 'max', 'clearSelect', 'clearOrder', 'clone', 'groupBy', 'having'].forEach(m => {
     chain[m] = jest.fn(() => chain);
   });
 

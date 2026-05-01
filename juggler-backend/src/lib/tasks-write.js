@@ -42,7 +42,7 @@ var INSTANCE_FIELDS = [
   'occurrence_ordinal', 'split_ordinal', 'split_total',
   'scheduled_at', 'dur',
   'date_pinned',
-  'status', 'time_remaining', 'unscheduled', 'generated',
+  'status', 'time_remaining', 'unscheduled', 'overdue', 'generated',
   'created_at', 'updated_at'
 ];
 
@@ -64,7 +64,7 @@ var MASTER_UPDATE_FIELDS = [
 var INSTANCE_UPDATE_FIELDS = [
   'scheduled_at', 'dur', 'date_pinned',
   'date', 'day', 'time',
-  'status', 'time_remaining', 'unscheduled', 'generated',
+  'status', 'time_remaining', 'unscheduled', 'overdue', 'generated',
   'split_group'
 ];
 
@@ -110,6 +110,7 @@ function pickInstance(row, id, masterId, occOrdinal) {
     status: row.status != null ? row.status : '',
     time_remaining: row.time_remaining != null ? row.time_remaining : null,
     unscheduled: row.unscheduled != null ? row.unscheduled : null,
+    overdue: row.overdue != null ? row.overdue : 0,
     generated: row.generated ? 1 : 0
   };
   // Derived local-tz caches — written by the scheduler when placing chunks

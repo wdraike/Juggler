@@ -389,6 +389,7 @@ function rowToTask(row, timezone, sourceMap) {
     preferredTimeMins: row.preferred_time_mins != null ? row.preferred_time_mins : null,
     desiredAt: row.desired_at ? new Date(row.desired_at).toISOString() : null,
     unscheduled: !!row.unscheduled,
+    overdue: !!row.overdue,
     slackMins: row.slack_mins != null ? Number(row.slack_mins) : null,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
     recurStart: row.recur_start || null,
@@ -558,7 +559,8 @@ async function getAllTasks(req, res) {
     var cached = await cache.get(cacheKey);
     if (cached) return res.json(cached);
 
-    var query = db('tasks_v').where('user_id', req.user.id).orderBy('created_at', 'asc');
+    var query = db('tasks_v').where('user_id', req.user.id)
+      .orderByRaw('(scheduled_at IS NULL) ASC, scheduled_at ASC');
     if (req.query.limit) query = query.limit(parseInt(req.query.limit) || 1000);
     if (req.query.offset) query = query.offset(parseInt(req.query.offset) || 0);
     var rows = await query;
@@ -2134,5 +2136,6 @@ module.exports = {
   applySplitDefault,
   TEMPLATE_FIELDS,
   validateTaskInput,
-  expandToAllInstanceIds
+  expandToAllInstanceIds,
+  safeParseJSON
 };

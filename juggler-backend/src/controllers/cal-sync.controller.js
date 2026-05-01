@@ -13,7 +13,7 @@ var db = require('../db');
 var tasksWrite = require('../lib/tasks-write');
 var { getConnectedAdapters } = require('../lib/cal-adapters');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
-var { rowToTask } = require('./task.controller');
+var { rowToTask, safeParseJSON } = require('./task.controller');
 var { localToUtc, utcToLocal } = require('../scheduler/dateHelpers');
 var { taskHash, userHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE, withGCalRateLimit, callWithRateLimit } = require('./cal-sync-helpers');
 var sseEmitter = require('../lib/sse-emitter');
@@ -34,6 +34,61 @@ function withinCdnGrace(ledger, pid) {
   var grace = CDN_GRACE_MS[pid] || 0;
   if (!grace || !ledger.last_pushed_at) return false;
   return (Date.now() - new Date(ledger.last_pushed_at).getTime()) < grace;
+}
+
+var PROVIDER_NAMES = { gcal: 'Google Calendar', msft: 'Microsoft Calendar', apple: 'Apple Calendar' };
+
+var RE_AUTH_ERR   = /invalid_grant|unauthorized|forbidden|authorization|access.?denied|token.*expired|expired.*token/i;
+var RE_404_ERR    = /not found|404/i;
+var RE_RATE_ERR   = /rate.?limit|too many requests|quota/i;
+var RE_SERVER_ERR = /server error|service unavailable|bad gateway|timeout/i;
+
+function buildErrorDetail(err, opts) {
+  var msg = (err && (err.message || String(err))) || 'Unknown error';
+  var provider = opts.provider || 'unknown';
+  var providerName = PROVIDER_NAMES[provider] || provider;
+  var calendar = opts.calendar || null;
+  var affectedTasks = opts.affectedTasks || [];
+
+  var status = (err && err.status != null ? err.status : null) ||
+               (err && err.response && err.response.status != null ? err.response.status : null);
+  if (status == null) {
+    var m = msg.match(/\b(4\d\d|5\d\d)\b/);
+    if (m) status = parseInt(m[1], 10);
+  }
+
+  var summary, retryable, userAction;
+
+  if (status === 401 || status === 403 || RE_AUTH_ERR.test(msg)) {
+    summary = 'Could not ' + (opts.operation || 'sync') + ' — ' + providerName + ' authorization expired or access denied';
+    retryable = false;
+    userAction = 'Reconnect your ' + providerName + ' in Settings → Calendars';
+  } else if (status === 404 || RE_404_ERR.test(msg)) {
+    summary = 'Event no longer exists on ' + providerName;
+    retryable = false;
+    userAction = null;
+  } else if (status === 429 || RE_RATE_ERR.test(msg)) {
+    summary = providerName + ' rate limit hit — sync will retry automatically';
+    retryable = true;
+    userAction = null;
+  } else if (status >= 500 || RE_SERVER_ERR.test(msg)) {
+    summary = providerName + ' is temporarily unavailable — sync will retry automatically';
+    retryable = true;
+    userAction = null;
+  } else {
+    summary = 'Could not ' + (opts.operation || 'sync') + ' — ' + msg;
+    retryable = true;
+    userAction = null;
+  }
+
+  return {
+    summary: summary,
+    affectedTasks: affectedTasks,
+    provider: provider,
+    calendar: calendar,
+    retryable: retryable,
+    userAction: userAction || undefined
+  };
 }
 
 function delay(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
@@ -97,7 +152,8 @@ async function sync(req, res) {
         event_id: opts.eventId || null,
         old_values: opts.oldValues ? JSON.stringify(opts.oldValues) : null,
         new_values: opts.newValues ? JSON.stringify(opts.newValues) : null,
-        detail: opts.detail || null
+        detail: opts.detail || null,
+        error_detail: opts.errorDetail ? JSON.stringify(opts.errorDetail) : null
       });
     }
 
@@ -115,7 +171,6 @@ async function sync(req, res) {
     }
 
     // Progress helper — emits SSE events so frontend can show a progress bar
-    var PROVIDER_LABELS = { gcal: 'Google Calendar', msft: 'Microsoft Calendar', apple: 'Apple Calendar' };
     function emitProgress(phase, detail, pct, extra) {
       sseEmitter.emit(userId, 'sync:progress', {
         phase: phase, detail: detail, pct: pct || 0,
@@ -151,7 +206,7 @@ async function sync(req, res) {
         validAdapters.push(va);
       } catch (err) {
         var vaErrMsg = err.message || '';
-        var vaIsTokenExpired = vaErrMsg.includes('invalid_grant') || vaErrMsg.includes('Token has been expired or revoked');
+        var vaIsTokenExpired = RE_AUTH_ERR.test(vaErrMsg);
         if (vaIsTokenExpired) {
           var vaEventIdCol = va.getEventIdColumn();
           var vaTokenCols = vaEventIdCol === 'gcal_event_id'
@@ -197,7 +252,7 @@ async function sync(req, res) {
       } catch (err) {
         console.error('[CAL-SYNC] Event fetch failed for ' + adapter.providerId + ':', err);
         var errMsg = err.message || '';
-        var isTokenExpired = errMsg.includes('invalid_grant') || errMsg.includes('Token has been expired or revoked');
+        var isTokenExpired = RE_AUTH_ERR.test(errMsg);
 
         if (isTokenExpired) {
           var eventIdCol = adapter.getEventIdColumn();
@@ -444,9 +499,16 @@ async function sync(req, res) {
     // SPECIFIC placement, not the sum. The scheduler may place a 180-min task
     // as two 90-min blocks; each block should become its own calendar event
     // with the block's duration, not the total.
+    //
+    // Skip merged leaders (#46): mergeContiguousSplitChunks() already set the
+    // correct merged dur from the DB rows. The cache may still hold the old
+    // per-chunk dur for the leader's taskId (e.g. the schedule_cache was written
+    // before the #42 DB merge ran, or has a stale entry without a splitPart key).
+    // Overwriting here would replace the merged total with the short chunk dur,
+    // producing a calendar event that ends before the next block starts.
     allTasks.forEach(function(t) {
       var placements = placementsByTaskId[t.id];
-      if (!placements || placements.length === 0 || splitPlacements[t.id]) return;
+      if (!placements || placements.length === 0 || splitPlacements[t.id] || mergedLeaderInfo[t.id]) return;
 
       if (placements.length === 1) {
         // Single placement — use its duration directly
@@ -910,10 +972,17 @@ async function sync(req, res) {
           };
           pStats.errors.push(errObj);
           stats.errors.push(errObj);
+          var taskTitle = task ? task.text : ledger.event_summary;
           logSyncAction(pid, 'error', {
-            taskId: ledger.task_id, taskText: task ? task.text : ledger.event_summary,
+            taskId: ledger.task_id, taskText: taskTitle,
             eventId: ledger.provider_event_id,
-            detail: 'Error in ledger sync: ' + e.message
+            detail: 'Error in ledger sync: ' + e.message,
+            errorDetail: buildErrorDetail(e, {
+              provider: pid,
+              calendar: calendarLabels[pid] || null,
+              operation: 'update event',
+              affectedTasks: taskTitle ? [{ id: ledger.task_id, title: taskTitle }] : []
+            })
           });
         }
       }
@@ -957,6 +1026,18 @@ async function sync(req, res) {
                 } catch (ruErr) {
                   pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: failedUpdates[rui].eventId, error: ruErr.message });
                   stats.errors.push({ phase: 'ledger_update', provider: pid, eventId: failedUpdates[rui].eventId, error: ruErr.message });
+                  logSyncAction(pid, 'error', {
+                    taskId: failedUpdates[rui].task && failedUpdates[rui].task.id || null,
+                    taskText: failedUpdates[rui].task && failedUpdates[rui].task.text || null,
+                    eventId: failedUpdates[rui].eventId,
+                    detail: 'Retry failed: ' + ruErr.message,
+                    errorDetail: buildErrorDetail(ruErr, {
+                      provider: pid,
+                      calendar: calendarLabels[pid] || null,
+                      operation: 'update event',
+                      affectedTasks: failedUpdates[rui].task ? [{ id: failedUpdates[rui].task.id, title: failedUpdates[rui].task.text }] : []
+                    })
+                  });
                 }
               }
             }
@@ -971,6 +1052,18 @@ async function sync(req, res) {
               } catch (e5) {
                 pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[fui].eventId, error: e5.message });
                 stats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[fui].eventId, error: e5.message });
+                logSyncAction(pid, 'error', {
+                  taskId: pendingEventUpdates[fui].task && pendingEventUpdates[fui].task.id || null,
+                  taskText: pendingEventUpdates[fui].task && pendingEventUpdates[fui].task.text || null,
+                  eventId: pendingEventUpdates[fui].eventId,
+                  detail: 'Fallback sequential update failed: ' + e5.message,
+                  errorDetail: buildErrorDetail(e5, {
+                    provider: pid,
+                    calendar: calendarLabels[pid] || null,
+                    operation: 'update event',
+                    affectedTasks: pendingEventUpdates[fui].task ? [{ id: pendingEventUpdates[fui].task.id, title: pendingEventUpdates[fui].task.text }] : []
+                  })
+                });
               }
             }
           }
@@ -984,6 +1077,18 @@ async function sync(req, res) {
             } catch (e6) {
               pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[sui].eventId, error: e6.message });
               stats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[sui].eventId, error: e6.message });
+              logSyncAction(pid, 'error', {
+                taskId: pendingEventUpdates[sui].task && pendingEventUpdates[sui].task.id || null,
+                taskText: pendingEventUpdates[sui].task && pendingEventUpdates[sui].task.text || null,
+                eventId: pendingEventUpdates[sui].eventId,
+                detail: 'Sequential update failed: ' + e6.message,
+                errorDetail: buildErrorDetail(e6, {
+                  provider: pid,
+                  calendar: calendarLabels[pid] || null,
+                  operation: 'update event',
+                  affectedTasks: pendingEventUpdates[sui].task ? [{ id: pendingEventUpdates[sui].task.id, title: pendingEventUpdates[sui].task.text }] : []
+                })
+              });
             }
           }
         }
@@ -1149,7 +1254,7 @@ async function sync(req, res) {
 
       // Batch create if adapter supports it, otherwise fall back to sequential
       if (pushQueue.length > 0 && pAdapter2.batchCreateEvents) {
-        var provLabel = PROVIDER_LABELS[pid2] || pid2;
+        var provLabel = PROVIDER_NAMES[pid2] || pid2;
         emitProgress('push', 'Pushing ' + pushQueue.length + ' tasks...', 50 + (pi2 * 20), { provider: pid2, calendar: calendarLabels[pid2] || null });
         try {
           var batchResults = await pAdapter2.batchCreateEvents(pToken2, pushQueue, year, tz);
@@ -1161,6 +1266,17 @@ async function sync(req, res) {
             if (br.error) {
               pStats2.errors.push({ phase: 'push_new', provider: pid2, taskId: bTask.id, error: br.error });
               stats.errors.push({ phase: 'push_new', provider: pid2, taskId: bTask.id, error: br.error });
+              logSyncAction(pid2, 'error', {
+                taskId: bTask.id,
+                taskText: bTask.text || null,
+                detail: 'Push new event failed: ' + br.error,
+                errorDetail: buildErrorDetail(br.error, {
+                  provider: pid2,
+                  calendar: calendarLabels[pid2] || null,
+                  operation: 'push new event',
+                  affectedTasks: [{ id: bTask.id, title: bTask.text }]
+                })
+              });
               continue;
             }
             var createdNorm = pAdapter2.normalizeEvent ? pAdapter2.normalizeEvent(br.raw) : null;
@@ -1228,6 +1344,12 @@ async function sync(req, res) {
               } catch (rErr) {
                 // Persistent failure — insert error ledger record so task is skipped next sync
                 console.warn('[CAL-SYNC] Retry failed for task ' + rTask.id + ' on ' + pid2 + ': ' + rErr.message);
+                var rErrDetail = buildErrorDetail(rErr, {
+                  provider: pid2,
+                  calendar: calendarLabels[pid2] || null,
+                  operation: 'push task to calendar',
+                  affectedTasks: [{ id: rTask.id, title: rTask.text }]
+                });
                 ledgerInserts.push({
                   user_id: userId, provider: pid2, task_id: rTask.id,
                   provider_event_id: null, origin: 'juggler',
@@ -1236,6 +1358,11 @@ async function sync(req, res) {
                   event_summary: rTask.text,
                   status: 'error',
                   error_detail: rErr.message.substring(0, 1000)
+                });
+                logSyncAction(pid2, 'error', {
+                  taskId: rTask.id, taskText: rTask.text,
+                  detail: 'Push failed: ' + rErr.message,
+                  errorDetail: rErrDetail
                 });
               }
             }
@@ -1276,6 +1403,16 @@ async function sync(req, res) {
             } catch (e) {
               pStats2.errors.push({ phase: 'push_new', provider: pid2, taskId: fTask.id, error: e.message });
               stats.errors.push({ phase: 'push_new', provider: pid2, taskId: fTask.id, error: e.message });
+              logSyncAction(pid2, 'error', {
+                taskId: fTask.id, taskText: fTask.text,
+                detail: 'Push failed: ' + e.message,
+                errorDetail: buildErrorDetail(e, {
+                  provider: pid2,
+                  calendar: calendarLabels[pid2] || null,
+                  operation: 'push task to calendar',
+                  affectedTasks: [{ id: fTask.id, title: fTask.text }]
+                })
+              });
             }
           }
         }
@@ -1517,7 +1654,13 @@ async function sync(req, res) {
           stats.errors.push(errObj3);
           logSyncAction(pid2, 'error', {
             eventId: evId,
-            detail: 'Failed to pull event: ' + e.message
+            detail: 'Failed to pull event: ' + e.message,
+            errorDetail: buildErrorDetail(e, {
+              provider: pid2,
+              calendar: calendarLabels[pid2] || null,
+              operation: 'pull event',
+              affectedTasks: []
+            })
           });
         }
       }
@@ -1745,7 +1888,7 @@ async function sync(req, res) {
     var doneSummaryParts = [];
     Object.keys(stats.providers).forEach(function(pid) {
       var ps = stats.providers[pid];
-      var label = PROVIDER_LABELS[pid] || pid;
+      var label = PROVIDER_NAMES[pid] || pid;
       var parts = [];
       if (ps.pulled > 0) parts.push(ps.pulled + ' pulled');
       if (ps.pushed > 0) parts.push(ps.pushed + ' pushed');
@@ -1818,7 +1961,7 @@ async function hasChanges(req, res) {
         if (check.hasChanges) result.hasChanges = true;
       } catch (err) {
         var msg = err.message || '';
-        if (msg.includes('invalid_grant') || msg.includes('Token has been expired or revoked')) {
+        if (RE_AUTH_ERR.test(msg)) {
           result.providers[adapter.providerId] = { hasChanges: false, tokenExpired: true };
         } else {
           result.providers[adapter.providerId] = { hasChanges: true, error: msg };
@@ -1872,12 +2015,9 @@ async function getSyncHistory(req, res) {
 
     var rows = await query.select();
     rows.forEach(function(r) {
-      if (r.old_values && typeof r.old_values === 'string') {
-        try { r.old_values = JSON.parse(r.old_values); } catch (e) { /* keep as string */ }
-      }
-      if (r.new_values && typeof r.new_values === 'string') {
-        try { r.new_values = JSON.parse(r.new_values); } catch (e) { /* keep as string */ }
-      }
+      r.old_values   = safeParseJSON(r.old_values,   r.old_values);
+      r.new_values   = safeParseJSON(r.new_values,   r.new_values);
+      r.error_detail = safeParseJSON(r.error_detail, r.error_detail);
     });
     res.json({ items: rows, limit: limit, offset: offset });
   } catch (error) {
