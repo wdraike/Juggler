@@ -444,9 +444,16 @@ async function sync(req, res) {
     // SPECIFIC placement, not the sum. The scheduler may place a 180-min task
     // as two 90-min blocks; each block should become its own calendar event
     // with the block's duration, not the total.
+    //
+    // Skip merged leaders (#46): mergeContiguousSplitChunks() already set the
+    // correct merged dur from the DB rows. The cache may still hold the old
+    // per-chunk dur for the leader's taskId (e.g. the schedule_cache was written
+    // before the #42 DB merge ran, or has a stale entry without a splitPart key).
+    // Overwriting here would replace the merged total with the short chunk dur,
+    // producing a calendar event that ends before the next block starts.
     allTasks.forEach(function(t) {
       var placements = placementsByTaskId[t.id];
-      if (!placements || placements.length === 0 || splitPlacements[t.id]) return;
+      if (!placements || placements.length === 0 || splitPlacements[t.id] || mergedLeaderInfo[t.id]) return;
 
       if (placements.length === 1) {
         // Single placement — use its duration directly
