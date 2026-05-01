@@ -267,7 +267,7 @@ export default function AppLayout() {
     function runFullSync() {
       setGcalSyncing(true);
       setMsftCalSyncing(true);
-      apiClient.post('/cal/sync').then(function(r) {
+      apiClient.post('/cal/sync?trigger=auto').then(function(r) {
         var errors = r.data.errors || [];
         var hasTokenExpiry = errors.some(function(e) { return e.tokenExpired; });
         var nonTokenErrors = errors.filter(function(e) { return !e.tokenExpired; });

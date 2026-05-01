@@ -136,6 +136,7 @@ async function sync(req, res) {
     var stats = { pushed: 0, pulled: 0, skipped: 0, deleted_local: 0, deleted_remote: 0, errors: [], providers: {} };
     var syncRunId = crypto.randomUUID();
     var syncStart = Date.now();
+    var triggerType = req.query.trigger === 'auto' ? 'auto' : 'manual';
 
     // === In-memory mutation buffers (written in one transaction at the end) ===
     var taskUpdates = [];      // { id, fields: { ... } }
@@ -154,7 +155,9 @@ async function sync(req, res) {
         old_values: opts.oldValues ? JSON.stringify(opts.oldValues) : null,
         new_values: opts.newValues ? JSON.stringify(opts.newValues) : null,
         detail: opts.detail || null,
-        error_detail: opts.errorDetail ? JSON.stringify(opts.errorDetail) : null
+        error_detail: opts.errorDetail ? JSON.stringify(opts.errorDetail) : null,
+        calendar_name: opts.calendarName || null,
+        trigger_type: triggerType
       });
     }
 
@@ -766,7 +769,8 @@ async function sync(req, res) {
                     stats.pushed++;
                     logSyncAction(pid, 'conflict_juggler', {
                       taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                      detail: 'Conflict: fixed task pushed over calendar edit'
+                      detail: 'Conflict: fixed task pushed over calendar edit',
+                      calendarName: calendarLabels[pid] || null
                     });
                   } else {
                     // Last-modified wins
@@ -782,7 +786,8 @@ async function sync(req, res) {
                         taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
                         oldValues: { text: task.text, when: task.when, dur: task.dur },
                         newValues: { text: event.title, when: conflictPullFields.when || task.when, dur: event.durationMinutes },
-                        detail: 'Conflict: calendar edit accepted (newer than task)'
+                        detail: 'Conflict: calendar edit accepted (newer than task)',
+                        calendarName: calendarLabels[pid] || null
                       });
                     } else {
                       // Task newer → push
@@ -796,7 +801,8 @@ async function sync(req, res) {
                       stats.pushed++;
                       logSyncAction(pid, 'conflict_juggler', {
                         taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                        detail: 'Conflict: task pushed over calendar edit (task is newer)'
+                        detail: 'Conflict: task pushed over calendar edit (task is newer)',
+                        calendarName: calendarLabels[pid] || null
                       });
                     }
                   }
@@ -827,7 +833,8 @@ async function sync(req, res) {
                     taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
                     oldValues: { when: task.when, scheduled_at: task._scheduled_at, dur: task.dur },
                     newValues: { when: pullFields.when || task.when, scheduled_at: pullFields.scheduled_at, dur: pullFields.dur },
-                    detail: (isPromotion ? 'Event moved on calendar — task promoted to fixed' : 'Event edited on calendar — task updated') + (backwardDepWarning ? '. WARNING: ' + backwardDepWarning : '')
+                    detail: (isPromotion ? 'Event moved on calendar — task promoted to fixed' : 'Event edited on calendar — task updated') + (backwardDepWarning ? '. WARNING: ' + backwardDepWarning : ''),
+                    calendarName: calendarLabels[pid] || null
                   });
                 } else {
                   // Neither changed → skip (existing behaviour)
@@ -891,7 +898,8 @@ async function sync(req, res) {
                 }});
                 logSyncAction(pid, 'repush', {
                   taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                  detail: pid + ' event gone but juggler task content changed — will re-create'
+                  detail: pid + ' event gone but juggler task content changed — will re-create',
+                  calendarName: calendarLabels[pid] || null
                 });
               } else if (ledger.origin === 'juggler'
                   && taskHash(task) !== ledger.last_pushed_hash
@@ -931,7 +939,8 @@ async function sync(req, res) {
                     stats.deleted_remote++;
                     logSyncAction(pid, 'deleted_remote', {
                       taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                      detail: 'Event deleted in ' + pid + ' — task removed after ' + MISS_THRESHOLD + ' consecutive syncs'
+                      detail: 'Event deleted in ' + pid + ' — task removed after ' + MISS_THRESHOLD + ' consecutive syncs',
+                      calendarName: calendarLabels[pid] || null
                     });
                   } else {
                     // Not yet confirmed — increment miss counter, keep task alive
@@ -955,7 +964,8 @@ async function sync(req, res) {
               stats.deleted_local++;
               logSyncAction(pid, 'deleted_local', {
                 taskId: ledger.task_id, taskText: ledger.event_summary, eventId: ledger.provider_event_id,
-                detail: 'Task deleted in Juggler — event removed from ' + pid
+                detail: 'Task deleted in Juggler — event removed from ' + pid,
+                calendarName: calendarLabels[pid] || null
               });
             }
 
@@ -978,6 +988,7 @@ async function sync(req, res) {
             taskId: ledger.task_id, taskText: taskTitle,
             eventId: ledger.provider_event_id,
             detail: 'Error in ledger sync: ' + e.message,
+            calendarName: calendarLabels[pid] || null,
             errorDetail: buildErrorDetail(e, {
               provider: pid,
               calendar: calendarLabels[pid] || null,
@@ -1032,6 +1043,7 @@ async function sync(req, res) {
                     taskText: failedUpdates[rui].task && failedUpdates[rui].task.text || null,
                     eventId: failedUpdates[rui].eventId,
                     detail: 'Retry failed: ' + ruErr.message,
+                    calendarName: calendarLabels[pid] || null,
                     errorDetail: buildErrorDetail(ruErr, {
                       provider: pid,
                       calendar: calendarLabels[pid] || null,
@@ -1058,6 +1070,7 @@ async function sync(req, res) {
                   taskText: pendingEventUpdates[fui].task && pendingEventUpdates[fui].task.text || null,
                   eventId: pendingEventUpdates[fui].eventId,
                   detail: 'Fallback sequential update failed: ' + e5.message,
+                  calendarName: calendarLabels[pid] || null,
                   errorDetail: buildErrorDetail(e5, {
                     provider: pid,
                     calendar: calendarLabels[pid] || null,
@@ -1083,6 +1096,7 @@ async function sync(req, res) {
                 taskText: pendingEventUpdates[sui].task && pendingEventUpdates[sui].task.text || null,
                 eventId: pendingEventUpdates[sui].eventId,
                 detail: 'Sequential update failed: ' + e6.message,
+                calendarName: calendarLabels[pid] || null,
                 errorDetail: buildErrorDetail(e6, {
                   provider: pid,
                   calendar: calendarLabels[pid] || null,
@@ -1271,6 +1285,7 @@ async function sync(req, res) {
                 taskId: bTask.id,
                 taskText: bTask.text || null,
                 detail: 'Push new event failed: ' + br.error,
+                calendarName: calendarLabels[pid2] || null,
                 errorDetail: buildErrorDetail(br.error, {
                   provider: pid2,
                   calendar: calendarLabels[pid2] || null,
@@ -1363,6 +1378,7 @@ async function sync(req, res) {
                 logSyncAction(pid2, 'error', {
                   taskId: rTask.id, taskText: rTask.text,
                   detail: 'Push failed: ' + rErr.message,
+                  calendarName: calendarLabels[pid2] || null,
                   errorDetail: rErrDetail
                 });
               }
@@ -1370,7 +1386,8 @@ async function sync(req, res) {
           }
           if (batchPushCount > 0) {
             logSyncAction(pid2, 'pushed', {
-              detail: 'Batch pushed ' + batchPushCount + ' tasks to ' + pid2
+              detail: 'Batch pushed ' + batchPushCount + ' tasks to ' + pid2,
+              calendarName: calendarLabels[pid2] || null
             });
           }
         } catch (batchErr) {
@@ -1407,6 +1424,7 @@ async function sync(req, res) {
               logSyncAction(pid2, 'error', {
                 taskId: fTask.id, taskText: fTask.text,
                 detail: 'Push failed: ' + e.message,
+                calendarName: calendarLabels[pid2] || null,
                 errorDetail: buildErrorDetail(e, {
                   provider: pid2,
                   calendar: calendarLabels[pid2] || null,
@@ -1556,7 +1574,9 @@ async function sync(req, res) {
           stats.deleted_local++;
           logSyncAction(pid2, 'deleted_local', {
             eventId: evId, taskText: newEvent.title,
-            detail: 'Stale Juggler event deleted (no matching task)'
+            oldValues: { startDateTime: newEvent.startDateTime },
+            detail: 'Stale orphan event removed — task was rescheduled or deleted',
+            calendarName: calendarLabels[pid2] || null
           });
           continue;
         }
@@ -1644,7 +1664,8 @@ async function sync(req, res) {
           stats.pulled++;
           logSyncAction(pid2, 'created', {
             taskId: newTaskId, taskText: newEvent.title, eventId: newEvent.id,
-            detail: 'New task from ' + pid2
+            detail: 'New task from ' + pid2,
+            calendarName: calendarLabels[pid2] || null
           });
         } catch (e) {
           var errObj3 = { phase: 'pull_new', provider: pid2, eventId: evId, error: e.message };
@@ -1653,6 +1674,7 @@ async function sync(req, res) {
           logSyncAction(pid2, 'error', {
             eventId: evId,
             detail: 'Failed to pull event: ' + e.message,
+            calendarName: calendarLabels[pid2] || null,
             errorDetail: buildErrorDetail(e, {
               provider: pid2,
               calendar: calendarLabels[pid2] || null,
@@ -1998,26 +2020,69 @@ async function hasChanges(req, res) {
 async function getSyncHistory(req, res) {
   try {
     var userId = req.user.id;
-    var limit = Math.min(parseInt(req.query.limit) || 50, 200);
-    var offset = parseInt(req.query.offset) || 0;
+    var runLimit = Math.min(parseInt(req.query.runs) || 20, 50);
 
-    var query = db('sync_history')
+    // Get the most recent distinct sync run IDs with their timestamps
+    var recentRuns = await db('sync_history')
       .where('user_id', userId)
-      .orderBy('created_at', 'desc')
-      .limit(limit)
-      .offset(offset);
+      .select('sync_run_id')
+      .max('created_at as run_time')
+      .groupBy('sync_run_id')
+      .orderBy('run_time', 'desc')
+      .limit(runLimit);
 
-    if (req.query.syncRunId) {
-      query = query.where('sync_run_id', req.query.syncRunId);
+    if (recentRuns.length === 0) {
+      return res.json({ runs: [] });
     }
 
-    var rows = await query.select();
+    var runIds = recentRuns.map(function(r) { return r.sync_run_id; });
+
+    var rows = await db('sync_history')
+      .where('user_id', userId)
+      .whereIn('sync_run_id', runIds)
+      .orderBy('id', 'asc')
+      .select();
+
     rows.forEach(function(r) {
       r.old_values   = safeParseJSON(r.old_values,   r.old_values);
       r.new_values   = safeParseJSON(r.new_values,   r.new_values);
       r.error_detail = safeParseJSON(r.error_detail, r.error_detail);
     });
-    res.json({ items: rows, limit: limit, offset: offset });
+
+    // Group rows by sync_run_id, preserving run order from recentRuns
+    var runMap = {};
+    rows.forEach(function(r) {
+      if (!runMap[r.sync_run_id]) {
+        runMap[r.sync_run_id] = {
+          sync_run_id: r.sync_run_id,
+          created_at: r.created_at,
+          trigger_type: r.trigger_type || 'manual',
+          providers: [],
+          calendar_names: [],
+          counts: {},
+          items: []
+        };
+      }
+      var run = runMap[r.sync_run_id];
+      if (r.provider && run.providers.indexOf(r.provider) < 0) run.providers.push(r.provider);
+      if (r.calendar_name && run.calendar_names.indexOf(r.calendar_name) < 0) run.calendar_names.push(r.calendar_name);
+      run.counts[r.action] = (run.counts[r.action] || 0) + 1;
+      run.items.push(r);
+    });
+
+    var runs = recentRuns.map(function(r) {
+      return runMap[r.sync_run_id] || {
+        sync_run_id: r.sync_run_id,
+        created_at: r.run_time,
+        trigger_type: 'manual',
+        providers: [],
+        calendar_names: [],
+        counts: {},
+        items: []
+      };
+    });
+
+    res.json({ runs: runs });
   } catch (error) {
     console.error('Sync history error:', error);
     res.status(500).json({ error: 'Failed to retrieve sync history' });

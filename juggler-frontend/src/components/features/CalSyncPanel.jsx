@@ -116,8 +116,8 @@ export default function CalSyncPanel({
 
   function loadHistory() {
     setLoadingHistory(true);
-    apiClient.get('/cal/sync-history?limit=100').then(function(r) {
-      setHistory(r.data.items || []);
+    apiClient.get('/cal/sync-history?runs=20').then(function(r) {
+      setHistory(r.data.runs || []);
       setShowHistory(true);
     }).catch(function() {
       setHistory([]);
@@ -910,18 +910,108 @@ export default function CalSyncPanel({
 
         {/* History view */}
         {showHistory && (function() {
-          var icons = { pin: '\uD83D\uDCCC', pull: '\u2B07', push: '\u2B06', create: '\u2795', delete: '\uD83D\uDDD1', error: '\u26A0', info: '\u2139\uFE0F' };
-          var actionToIcon = { promoted: 'pin', pulled: 'pull', pushed: 'push', created: 'create', deleted_remote: 'delete', deleted_local: 'delete', conflict_juggler: 'push', conflict_provider: 'pull', error: 'error' };
-          // Group by sync_run_id
-          var runs = [];
-          var runMap = {};
-          (history || []).forEach(function(h) {
-            if (!runMap[h.sync_run_id]) {
-              runMap[h.sync_run_id] = { id: h.sync_run_id, time: h.created_at, items: [] };
-              runs.push(runMap[h.sync_run_id]);
-            }
-            runMap[h.sync_run_id].items.push(h);
-          });
+          var PROVIDER_LABELS = { gcal: 'Google', msft: 'Microsoft', apple: 'Apple' };
+          var ACTION_LABELS = {
+            pushed: 'Pushed to calendar', pulled: 'Updated from calendar',
+            promoted: 'Pinned to calendar time', created: 'Task created from event',
+            deleted_local: 'Removed from calendar', deleted_remote: 'Task deleted (event gone)',
+            conflict_juggler: 'Conflict: Juggler wins', conflict_provider: 'Conflict: calendar wins',
+            repush: 'Re-created event', error: 'Error'
+          };
+          var ACTION_ICONS = {
+            pushed: '⬆', pulled: '⬇', promoted: '📌',
+            created: '➕', deleted_local: '🗑', deleted_remote: '🗑',
+            conflict_juggler: '⬆', conflict_provider: '⬇',
+            repush: '♻', error: '⚠'
+          };
+
+          function formatAbsTime(isoString) {
+            if (!isoString) return '';
+            var d = new Date(isoString);
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+              + ' at ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+          }
+
+          function formatEventTime(isoString) {
+            if (!isoString) return null;
+            var d = new Date(isoString);
+            if (isNaN(d.getTime())) return null;
+            return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+              + ', ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          }
+
+          function summarizeRun(counts) {
+            var parts = [];
+            var pushCount = (counts.pushed || 0) + (counts.conflict_juggler || 0) + (counts.repush || 0);
+            var pullCount = (counts.pulled || 0) + (counts.promoted || 0) + (counts.created || 0) + (counts.conflict_provider || 0);
+            var orphanCount = counts.deleted_local || 0;
+            var deleteCount = counts.deleted_remote || 0;
+            var errorCount = counts.error || 0;
+            if (pushCount) parts.push(pushCount + ' pushed');
+            if (pullCount) parts.push(pullCount + ' pulled');
+            if (orphanCount) parts.push(orphanCount + ' cleaned up');
+            if (deleteCount) parts.push(deleteCount + ' deleted');
+            if (errorCount) parts.push(errorCount + ' error' + (errorCount > 1 ? 's' : ''));
+            return parts.length ? parts.join(' · ') : 'No changes';
+          }
+
+          function renderItem(h, i) {
+            var isError = h.action === 'error';
+            var icon = ACTION_ICONS[h.action] || 'ℹ️';
+            var label = ACTION_LABELS[h.action] || h.action;
+            var ed = isError ? h.error_detail : null;
+            var oldTime = h.old_values ? formatEventTime(h.old_values.scheduled_at || h.old_values.startDateTime) : null;
+            var newTime = h.new_values ? formatEventTime(h.new_values.scheduled_at) : null;
+
+            return (
+              <div key={i} style={{
+                display: 'flex', gap: 6, alignItems: 'flex-start',
+                padding: '4px 0',
+                borderTop: i > 0 ? '1px solid ' + (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)') : 'none',
+                fontSize: 10, color: isError ? '#DC2626' : theme.text
+              }}>
+                <span style={{ flexShrink: 0, fontSize: 10, marginTop: 1 }}>{icon}</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  {ed ? (
+                    <>
+                      <div style={{ color: '#DC2626', fontWeight: 500 }}>{ed.summary || label}</div>
+                      {ed.affectedTasks && ed.affectedTasks.length > 0 && (
+                        <div style={{ color: theme.textSecondary, marginTop: 1 }}>
+                          {ed.affectedTasks.map(function(t) { return t.title; }).join(', ')}
+                        </div>
+                      )}
+                      {!ed.retryable && ed.userAction && (
+                        <div style={{
+                          marginTop: 2, padding: '2px 5px', borderRadius: 2,
+                          background: darkMode ? 'rgba(220,38,38,0.12)' : '#FEE2E2',
+                          color: '#B91C1C', fontWeight: 600
+                        }}>{ed.userAction}</div>
+                      )}
+                      {ed.retryable && (
+                        <div style={{ color: theme.textMuted, fontStyle: 'italic', marginTop: 1 }}>Will retry automatically</div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        {h.task_text && <span style={{ fontWeight: 600 }}>{h.task_text}</span>}
+                        {h.task_text && <span style={{ color: theme.textMuted }}> — </span>}
+                        <span style={{ color: theme.textSecondary }}>{label}</span>
+                        {h.calendar_name && <span style={{ color: theme.textMuted }}> ({h.calendar_name})</span>}
+                      </div>
+                      {(oldTime || newTime) && (
+                        <div style={{ color: theme.textMuted, marginTop: 1 }}>
+                          {oldTime && newTime ? oldTime + ' → ' + newTime : oldTime ? 'was ' + oldTime : 'now ' + newTime}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          }
+
+          var runs = history || [];
 
           return (
             <div style={{
@@ -939,76 +1029,41 @@ export default function CalSyncPanel({
               {runs.length === 0 ? (
                 <div style={{ fontSize: 11, color: theme.textSecondary, textAlign: 'center', padding: 8 }}>No sync history yet</div>
               ) : (
-                <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                <div style={{ maxHeight: 380, overflowY: 'auto' }}>
                   {runs.map(function(run) {
-                    var errorCount = run.items.filter(function(h) { return h.action === 'error'; }).length;
-                    var pushCount = run.items.filter(function(h) { return h.action === 'pushed'; }).length;
-                    var pullCount = run.items.filter(function(h) { return h.action === 'pulled' || h.action === 'created'; }).length;
-                    var parts = [];
-                    if (pushCount) parts.push(pushCount + ' pushed');
-                    if (pullCount) parts.push(pullCount + ' pulled');
-                    if (errorCount) parts.push(errorCount + ' error' + (errorCount > 1 ? 's' : ''));
+                    var providerLabel = (run.providers || []).map(function(p) { return PROVIDER_LABELS[p] || p; }).join(' + ');
+                    var calLabel = (run.calendar_names || []).length ? ' (' + run.calendar_names.join(', ') + ')' : '';
+                    var triggerLabel = run.trigger_type === 'auto' ? 'Auto' : 'Manual';
+                    var hasErrors = (run.counts && run.counts.error) > 0;
+                    var summary = summarizeRun(run.counts || {});
+                    var totalItems = run.items ? run.items.length : 0;
                     return (
-                      <details key={run.id} style={{ marginBottom: 4 }}>
-                        <summary style={{ cursor: 'pointer', fontSize: 11, padding: '4px 0', color: theme.text }}>
-                          <span style={{ fontWeight: 600 }}>{formatRelativeTime(run.time)}</span>
-                          <span style={{ color: theme.textMuted }}> — {parts.join(', ') || run.items.length + ' actions'}</span>
+                      <details key={run.sync_run_id} style={{ marginBottom: 6, borderBottom: '1px solid ' + theme.border, paddingBottom: 4 }}>
+                        <summary style={{ cursor: 'pointer', padding: '4px 0', listStyle: 'none', userSelect: 'none' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                            <span style={{
+                              fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em',
+                              color: run.trigger_type === 'auto' ? theme.textMuted : theme.accent,
+                              border: '1px solid ' + (run.trigger_type === 'auto' ? theme.border : theme.accent),
+                              borderRadius: 2, padding: '1px 4px', flexShrink: 0
+                            }}>{triggerLabel}</span>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: theme.text }}>
+                              {formatAbsTime(run.created_at)}
+                            </span>
+                            <span style={{ fontSize: 10, color: theme.textMuted }}>
+                              ({formatRelativeTime(run.created_at)})
+                            </span>
+                          </div>
+                          <div style={{ fontSize: 10, paddingLeft: 2 }}>
+                            {providerLabel && <span style={{ color: theme.textMuted }}>{providerLabel}{calLabel} — </span>}
+                            <span style={{ color: hasErrors ? '#DC2626' : theme.textSecondary }}>{summary}</span>
+                          </div>
                         </summary>
-                        <div style={{ paddingLeft: 12, paddingBottom: 6 }}>
-                          {run.items.map(function(h, i) {
-                            var icon = icons[actionToIcon[h.action]] || icons.info;
-                            var isError = h.action === 'error';
-                            // Parse error_detail — may already be an object (server parsed it) or a string (old rows)
-                            var ed = null;
-                            if (isError && h.error_detail) {
-                              if (typeof h.error_detail === 'object') {
-                                ed = h.error_detail;
-                              } else {
-                                try { ed = JSON.parse(h.error_detail); } catch (_) { /* fall back to raw */ }
-                              }
-                            }
-                            return (
-                              <div key={i} style={{
-                                display: 'flex', gap: 6, alignItems: 'flex-start', padding: '3px 0',
-                                fontSize: 10, color: isError ? '#DC2626' : theme.text
-                              }}>
-                                <span style={{ flexShrink: 0 }}>{icon}</span>
-                                <div style={{ minWidth: 0 }}>
-                                  {ed ? (
-                                    <>
-                                      <div style={{ color: '#DC2626', fontWeight: 500 }}>{ed.summary}</div>
-                                      {ed.affectedTasks && ed.affectedTasks.length > 0 && (
-                                        <div style={{ color: theme.textSecondary, marginTop: 1 }}>
-                                          {ed.affectedTasks.map(function(t) { return t.title; }).join(', ')}
-                                        </div>
-                                      )}
-                                      {!ed.retryable && ed.userAction && (
-                                        <div style={{
-                                          marginTop: 3, padding: '3px 6px', borderRadius: 2,
-                                          background: darkMode ? 'rgba(220,38,38,0.12)' : '#FEE2E2',
-                                          color: '#B91C1C', fontWeight: 600
-                                        }}>
-                                          {ed.userAction}
-                                        </div>
-                                      )}
-                                      {ed.retryable && !ed.userAction && (
-                                        <div style={{ color: theme.textMuted, fontStyle: 'italic', marginTop: 1 }}>
-                                          Will retry automatically
-                                        </div>
-                                      )}
-                                    </>
-                                  ) : (
-                                    <>
-                                      {h.task_text && <strong>{h.task_text}</strong>}
-                                      {h.task_text && ' — '}
-                                      <span style={{ color: isError ? '#DC2626' : theme.textSecondary }}>{h.detail || h.action}</span>
-                                    </>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                        {totalItems > 0 && (
+                          <div style={{ paddingLeft: 8, paddingTop: 4 }}>
+                            {run.items.map(renderItem)}
+                          </div>
+                        )}
                       </details>
                     );
                   })}
