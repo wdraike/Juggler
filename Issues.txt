@@ -1,9 +1,8 @@
 Legend: ✅ done · 🟡 partially done · ⬜ not done · ⏸ deferred
-Last updated: 2026-04-30
-
+Last updated: 2026-05-01
 ---
 
-## ✅ Done (38 items)
+## ✅ Done (46 items)
 
 1.   what is the use of 'calender_id' in 'cal_sync_ledger'?
 2.   why are 'tas_id' null in 'cal_sync_ledger'?
@@ -17,7 +16,7 @@ Last updated: 2026-04-30
 10.  how is 'section' used in 'task_master'?
 11.  why do we use 'desired_at' and 'desired_date' as separate fields? why not a single date/time field?
 12.  for some reason, i cannot mark a task as 'fixed'. why?
-13.  can we consolidate the date in the 'task_master' to be simpler, using settings that refer to one mutually exclusive setting for things like 'marker', 'rigid', 'time blocks', and the like?
+13.  can we consolidate the date in the 'task_master' to be simpler, using settings that refer to one mutually exclusive setting for things like 'marker', 'rigid', 'time blocks', and the like? [DONE 2026-05-01 — placement_mode ENUM stored column; scheduler reads it directly; marker+rigid dropped; views expose computed booleans]
 14.  how is 'preferred_time_mins' used?
 15.  can we make sure MCP takes 'done' status into account? [list_tasks + search_tasks exclude status='done' by default; includeDone=true or status='done' to opt in]
 17.  why are there text 'dates' in the db? [task_instances.date varchar(10) → DATE; drop-in safe because knex dateStrings:true keeps the string shape]
@@ -38,7 +37,7 @@ Last updated: 2026-04-30
 38.  rather than multiple phases of scheduling, i'd like the scheduler to be purely constraints focused [v2 constraint-based single-pass with incremental slack subtraction; v1 decommissioned]
 39.  we should optimize the be to fe communication to only provide updates for items that have changed or truly need to be communicated [SSE emit gated on dateChanged || timeChanged; dur/slackMins/unscheduled only in patch when actually changed; SCHEDULER_VERSION auto-bumps on source hash so placement cache invalidates on any scheduler edit]
 19.  why is there text 'time' in the db? [DONE 2026-04-30 — task_instances.time varchar(20) → MySQL TIME; backfilled "H:MM AM/PM" rows via STR_TO_DATE; formatMinutesToTimeDb added to dateHelpers; runSchedule.js writes HH:MM:SS; views rebuilt with CAST(NULL AS TIME)]
-40.  header dropdowns (AI and others) render behind page content — need z-index high enough to appear on top of all other elements [PARTIAL 2026-04-30 — HeaderBar zIndex raised 100→300 fixed general dropdowns, but AI dropdown specifically still renders behind page content; AI dropdown component needs separate investigation]
+40.  header dropdowns (AI and others) render behind page content [DONE 2026-04-30 — AiCommandPanel now renders via createPortal into document.body with position:fixed + zIndex:9000; position tracked with getBoundingClientRect on resize]
 16.  i see very large 'occurrence_ordinal' values in the db. why? [CLOSED 2026-04-27 — expected behavior from UUIDv7-based monotonic scheme; documented in SCHEMA.md]
 25.  since UUIDv7 is sortable by creation time, can we use these for ordinals? [CLOSED 2026-04-27 — keep current monotonic scheme; documented in SCHEMA.md]
 33.  need to test each 3rd party sync carefully [ALL COMPLETE 2026-04-28]
@@ -49,16 +48,17 @@ Last updated: 2026-04-30
      Side bug (last_modified_at not updated after conflict_juggler push) ✅ CLOSED 2026-04-27 — covered by +30s recordPushSuccess buffer.
 27.  need to re-review task details to avoid user confusion for all configuration use cases [DONE 2026-04-28 — fixed "fixed" vs "pinned" terminology (consistent "fixed"/"unfix"), default new-task placement to Anytime (was all-blocks-selected), renamed "Time window" → "Placement" for non-recurring, "Not before" → "Start after", added tooltips to Remaining + Slack fields]
 32.  should allow ui to show past accomplishments [DONE 2026-04-28 — date range selector (7d / 30d / 90d / All, default 30d) in ListView done filter; stats bar third column updates to match selected range; empty-state message reflects range]
+41.  🔴 CRITICAL — ghost tasks in list view / day view mismatch + orphan provider events [DONE 2026-04-30 — four-part fix: (1) unscheduled tasks excluded from cal-sync fetch; (2) deleteTask no longer nulls provider_event_id before sync — ledger load now includes deleted_local rows for DELETE dispatch; (3) scheduler sets unscheduled=1 on stale recurring instances before deletion; (4) 980 existing orphan events purged across all 3 providers (GCal 227, MSFT 152, Apple 601)]
+42.  adjacent split-task chunks should be merged into a single extended event [DONE 2026-05-01 — after all placements, merge step groups chunks by splitGroup, collapses zero-gap adjacent pairs with summed dur; per-day dayMergedIds prevents cross-day contamination; merged secondary rows deleted from DB in transaction]
+43.  list view: sort tasks in chronological order and show start/finish times on each card [DONE 2026-05-01 — ORDER BY (scheduled_at IS NULL) ASC, scheduled_at ASC in getAllTasks; TaskCard.jsx shows "9:00 AM – 10:30 AM" derived from scheduledAt + dur; suppressed when task.time already populated]
+44.  overdue tasks pin to last scheduled time; visible indicator [DONE 2026-05-01 — overdue TINYINT NOT NULL DEFAULT 0 added to task_instances; Phase 8 forks: previously-placed tasks get overdue=1 unscheduled=0 (preserving scheduled_at); never-placed still get unscheduled=1; TaskCard list view gains red border + ⚠ Overdue badge]
+45.  calendar sync history: human-readable error detail [DONE 2026-05-01 — error_detail TEXT NULL added to sync_history; buildErrorDetail() maps HTTP status codes to structured {summary, affectedTasks, provider, calendar, retryable, userAction}; CalSyncPanel.jsx shows plain-language summary + userAction + retry indicator]
+46.  reconstituted split tasks sync with wrong duration [DONE 2026-05-01 — cal-sync.controller.js "apply placed duration" pass skipped for merged split leaders via || mergedLeaderInfo[t.id] guard; preserves correctly merged dur from mergeContiguousSplitChunks()]
 
----
-
-## 🟡 In Progress / Partial
-
-31.  need to make scheduler smarter and faster [v2 constraint-based single-pass: schedule-phase wall time 600ms → 180ms for 305 tasks; spacing guard safety valve deployed 2026-04-27; 5-phase redesign committed 2026-04-28 (upfront chunk INSERT, deterministic split IDs, dead v1 code removed, pre-inserted chunks marked unscheduled=1, full task objects in changeset.added); further perf work on capacityInRange still possible]
+31.  need to make scheduler smarter and faster [DONE 2026-05-01 — v2 constraint-based single-pass (600ms → 180ms for 305 tasks); 5-phase redesign committed 2026-04-28; capacityInRange minute-loop replaced with O(1) prefix-sum (Int32Array) in 9e58417]
 
 ---
 
 ## ⬜ Not Started
 
-41.  🔴 CRITICAL — list view shows tasks that are absent from day view (e.g. "cut grass" at 3:00 PM visible in list but not on day view). Suspected cause: stale split-chunk or recurring-instance rows surviving in the DB after reschedule, visible to list query but not rendered in day view. Also corrupts 3rd-party sync — calendar providers receive push events for these ghost instances. Root-cause investigation required: compare the DB query / filtering used by list view vs. day view; trace how split recurring chunks are cleaned up on reschedule.
-40.  AI dropdown still renders behind page content — HeaderBar zIndex 100→300 fixed other dropdowns but not the AI dropdown specifically; AI dropdown component needs separate z-index or portal investigation.
+(none — all active issues resolved)
