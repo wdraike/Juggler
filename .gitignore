@@ -15,3 +15,5 @@ playwright-report/
 scripts/db-backup/
 .playwright-mcp/
 auth-client/
+.worktrees/
+juggler-backend/purge-orphan-events-*.csv
