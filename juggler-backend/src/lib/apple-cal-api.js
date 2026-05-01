@@ -252,6 +252,12 @@ async function createEvent(client, calendarUrl, task, year, tz) {
     iCalString: icsData
   });
 
+  if (result && result.status >= 300) {
+    var err = new Error('CalDAV PUT failed: HTTP ' + result.status);
+    err.statusCode = result.status;
+    throw err;
+  }
+
   // The result URL is the event's CalDAV URL (used as the event ID)
   var eventUrl = result.url || (calendarUrl + filename);
   return {
@@ -267,17 +273,19 @@ async function createEvent(client, calendarUrl, task, year, tz) {
 async function updateEvent(client, eventUrl, task, year, tz, etag) {
   var icsData = buildVEvent(task, year, tz);
 
-  var headers = {};
-  if (etag) headers['If-Match'] = etag;
-
-  await client.updateCalendarObject({
+  var response = await client.updateCalendarObject({
     calendarObject: {
       url: eventUrl,
       data: icsData,
       etag: etag || undefined
-    },
-    headers: headers
+    }
   });
+
+  if (response && response.status >= 300 && response.status !== 404 && response.status !== 410) {
+    var err = new Error('CalDAV PUT failed: HTTP ' + response.status);
+    err.statusCode = response.status;
+    throw err;
+  }
 }
 
 /**
@@ -285,12 +293,8 @@ async function updateEvent(client, eventUrl, task, year, tz, etag) {
  * tsdav returns the HTTP Response without throwing on non-2xx — check it.
  */
 async function deleteEvent(client, eventUrl, etag) {
-  var headers = {};
-  if (etag) headers['If-Match'] = etag;
-
   var response = await client.deleteCalendarObject({
-    calendarObject: { url: eventUrl, etag: etag || undefined },
-    headers: headers
+    calendarObject: { url: eventUrl, etag: etag || undefined }
   });
 
   if (response && response.status >= 300 && response.status !== 404 && response.status !== 410) {

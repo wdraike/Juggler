@@ -995,7 +995,7 @@ async function sync(req, res) {
             errorDetail: buildErrorDetail(e, {
               provider: pid,
               calendar: calendarLabels[pid] || null,
-              operation: 'update event',
+              operation: 'sync event',
               affectedTasks: taskTitle ? [{ id: ledger.task_id, title: taskTitle }] : []
             })
           });
