@@ -855,6 +855,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var placements = dayPlacements[dateKey];
     if (!placements || placements.length < 2) return;
 
+    // Track per-day merged IDs to filter only the current day's merged chunks
+    var dayMergedIds = [];
+
     // Collect split-chunk placements grouped by splitGroup.
     // Non-split placements (splitGroup null/undefined) are left untouched.
     var byGroup = {}; // splitGroup → [placementEntry, ...]
@@ -885,6 +888,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
           curr.dur += next.dur;
           // Record next's task ID for DB row deletion.
           if (next.task && next.task.id) {
+            dayMergedIds.push(next.task.id);
             mergedOutIds.push(next.task.id);
           }
           // Remove next from the group so the scan can continue (handles 3+ chunks).
@@ -902,9 +906,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
     // Remove merged-out entries from the day's placement list so they don't
     // receive a scheduled_at update and don't appear in the outgoing cache/SSE.
-    if (mergedOutIds.length > 0) {
+    if (dayMergedIds.length > 0) {
       var mergedOutSet = {};
-      mergedOutIds.forEach(function(id) { mergedOutSet[id] = true; });
+      dayMergedIds.forEach(function(id) { mergedOutSet[id] = true; });
       dayPlacements[dateKey] = placements.filter(function(p) {
         return !(p.task && p.task.id && mergedOutSet[p.task.id]);
       });
