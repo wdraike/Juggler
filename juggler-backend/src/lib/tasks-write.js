@@ -21,7 +21,7 @@ var MASTER_FIELDS = [
   'id', 'user_id', 'text', 'project', 'section', 'notes', 'url',
   'dur', 'pri',
   'desired_at', 'deadline', 'start_after_at',
-  'when', 'day_req', 'time_flex', 'flex_when', 'rigid', 'marker',
+  'when', 'day_req', 'time_flex', 'flex_when', 'placement_mode',
   'preferred_time_mins', 'tz', 'prev_when',
   'recurring', 'recur', 'recur_start', 'recur_end',
   'split', 'split_min',
@@ -50,7 +50,7 @@ var INSTANCE_FIELDS = [
 var MASTER_UPDATE_FIELDS = [
   'text', 'project', 'section', 'notes', 'url', 'dur', 'pri',
   'desired_at', 'deadline', 'start_after_at',
-  'when', 'day_req', 'time_flex', 'flex_when', 'rigid', 'marker',
+  'when', 'day_req', 'time_flex', 'flex_when', 'placement_mode',
   'preferred_time_mins', 'tz', 'prev_when',
   'recurring', 'recur', 'recur_start', 'recur_end',
   'split', 'split_min',
@@ -90,8 +90,6 @@ function pickMaster(row, id) {
   if (!out.pri) out.pri = 'P3';
   if (out.status == null) out.status = '';
   out.flex_when = out.flex_when ? 1 : 0;
-  out.rigid = out.rigid ? 1 : 0;
-  out.marker = out.marker ? 1 : 0;
   out.recurring = out.recurring ? 1 : 0;
   return out;
 }
@@ -316,7 +314,7 @@ async function getOrCreateArchivedMasterId(dbOrTrx, userId) {
     text: ARCHIVED_TEXT,
     pri: 'P4',
     recurring: 0,
-    flex_when: 0, rigid: 0, marker: 0,
+    flex_when: 0, placement_mode: 'flexible',
     dur: 30,
     created_at: dbOrTrx.fn.now(),
     updated_at: dbOrTrx.fn.now()

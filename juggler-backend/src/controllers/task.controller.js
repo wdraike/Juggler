@@ -92,6 +92,17 @@ async function expandToAllInstanceIds(userId, ids) {
   return Object.keys(out);
 }
 
+function derivePlacementMode(marker, rigid, when, recurring, preferredTimeMins) {
+  if (marker) return 'marker';
+  var whenStr = when || '';
+  if (whenStr.includes('fixed')) return 'fixed';
+  if (rigid && !recurring) return 'fixed';
+  if (recurring && rigid && preferredTimeMins != null) return 'recurring_rigid';
+  if (recurring && preferredTimeMins != null) return 'recurring_window';
+  if (recurring) return 'recurring_flexible';
+  return 'flexible';
+}
+
 /** Safely parse a JSON string, returning fallback on any error. */
 function safeParseJSON(val, fallback) {
   if (val === null || val === undefined) return fallback;
@@ -145,10 +156,10 @@ function parseISOToDate(iso) {
 // NOTE: scheduled_at and desired_at are NOT template fields — they belong on instances.
 // The template's preferred time is stored in preferred_time_mins (minutes since midnight).
 var TEMPLATE_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
-  'when', 'day_req', 'recurring', 'rigid', 'time_flex', 'split', 'split_min',
+  'when', 'day_req', 'recurring', 'time_flex', 'split', 'split_min',
   'travel_before', 'travel_after', 'depends_on',
-  'notes', 'url', 'marker', 'flex_when', 'recur', 'recur_start', 'recur_end',
-  'preferred_time', 'preferred_time_mins'];
+  'notes', 'url', 'flex_when', 'recur', 'recur_start', 'recur_end',
+  'preferred_time', 'preferred_time_mins', 'placement_mode'];
 
 /**
  * Build a { sourceId: row } lookup from an array of task rows.
@@ -299,7 +310,8 @@ function rowToTask(row, timezone, sourceMap) {
   var whenStr = typeof row.when === 'string' ? row.when : '';
   var whenParts = whenStr ? whenStr.split(',').map(function(s) { return s.trim(); }) : [];
   var isUserAnchored = boolish(row.date_pinned) || boolish(row.generated) ||
-    boolish(row.recurring) || whenParts.indexOf('fixed') !== -1 || boolish(row.marker);
+    boolish(row.recurring) || whenParts.indexOf('fixed') !== -1 || boolish(row.marker) ||
+    row.placement_mode === 'fixed' || row.placement_mode === 'marker';
   var displayTz = timezone || null;
   if (displayTz && row.scheduled_at && isUserAnchored) {
     var local = utcToLocal(row.scheduled_at, displayTz);
@@ -382,6 +394,7 @@ function rowToTask(row, timezone, sourceMap) {
     datePinned: !!row.date_pinned,
     prevWhen: row.prev_when || null,
     marker: !!row.marker,
+    placementMode: row.placement_mode || 'flexible',
     flexWhen: !!row.flex_when,
     travelBefore: row.travel_before != null ? row.travel_before : undefined,
     travelAfter: row.travel_after != null ? row.travel_after : undefined,
@@ -417,7 +430,7 @@ function rowToTask(row, timezone, sourceMap) {
  * Map API task to DB row.
  * Converts date+time → scheduled_at (UTC) and deadline/startAfter → deadline/start_after_at.
  */
-function taskToRow(task, userId, timezone) {
+function taskToRow(task, userId, timezone, currentTask) {
   var row = { user_id: userId };
   if (task.id !== undefined) row.id = task.id;
   if (task.taskType !== undefined) row.task_type = task.taskType;
@@ -443,7 +456,6 @@ function taskToRow(task, userId, timezone) {
   if (task.when !== undefined) row.when = task.when;
   if (task.dayReq !== undefined) row.day_req = task.dayReq;
   if (task.recurring !== undefined) row.recurring = task.recurring ? 1 : 0;
-  if (task.rigid !== undefined) row.rigid = task.rigid ? 1 : 0;
   if (task.timeFlex !== undefined) row.time_flex = task.timeFlex;
   if (task.split !== undefined) row.split = task.split === null ? null : (task.split ? 1 : 0);
   if (task.splitMin !== undefined) row.split_min = task.splitMin;
@@ -454,7 +466,6 @@ function taskToRow(task, userId, timezone) {
   if (task.msftEventId !== undefined) row.msft_event_id = task.msftEventId;
   if (task.dependsOn !== undefined) row.depends_on = JSON.stringify(task.dependsOn || []);
   if (task.datePinned !== undefined) row.date_pinned = task.datePinned ? 1 : 0;
-  if (task.marker !== undefined) row.marker = task.marker ? 1 : 0;
   if (task.flexWhen !== undefined) row.flex_when = task.flexWhen ? 1 : 0;
   if (task.travelBefore !== undefined) row.travel_before = task.travelBefore || null;
   else if (task.travel_before !== undefined) row.travel_before = task.travel_before || null;
@@ -505,6 +516,23 @@ function taskToRow(task, userId, timezone) {
     }
   }
 
+
+  var placementFields = ['marker', 'rigid', 'when', 'recurring', 'preferredTimeMins', 'placementMode'];
+  var touchesPlacement = placementFields.some(function(f) { return task[f] !== undefined; });
+  if (touchesPlacement) {
+    if (task.placementMode !== undefined) {
+      row.placement_mode = task.placementMode;
+    } else {
+      var cur = currentTask || {};
+      row.placement_mode = derivePlacementMode(
+        task.marker     !== undefined ? !!task.marker     : !!(cur.marker),
+        task.rigid      !== undefined ? !!task.rigid      : !!(cur.rigid),
+        task.when       !== undefined ? task.when         : (cur.when || ''),
+        task.recurring  !== undefined ? !!task.recurring  : !!(cur.recurring),
+        task.preferredTimeMins !== undefined ? task.preferredTimeMins : cur.preferredTimeMins
+      );
+    }
+  }
 
   row.updated_at = db.fn.now();
   return row;
@@ -833,7 +861,15 @@ async function updateTask(req, res) {
       var fastTz = safeTimezone(req.headers['x-timezone']);
       var fastBody = Object.assign({}, req.body);
       delete fastBody.anchorDate;
-      var fastRow = taskToRow(fastBody, req.user.id, fastTz);
+
+      // Fetch existing in parallel with project-ensure (if needed)
+      var fastExistingPromise = fetchTaskWithEventIds(db, id, req.user.id);
+      var fastEnsureProject = req.body.project
+        ? ensureProject(req.user.id, req.body.project)
+        : Promise.resolve();
+      var [fastExisting] = await Promise.all([fastExistingPromise, fastEnsureProject]);
+
+      var fastRow = taskToRow(fastBody, req.user.id, fastTz, fastExisting);
       delete fastRow.id;
       delete fastRow.user_id;
       delete fastRow.created_at;
@@ -843,13 +879,6 @@ async function updateTask(req, res) {
         fastRow.date_pinned = 1;
       }
       fastRow.updated_at = db.fn.now();
-
-      // Fetch existing in parallel with project-ensure (if needed)
-      var fastExistingPromise = fetchTaskWithEventIds(db, id, req.user.id);
-      var fastEnsureProject = req.body.project
-        ? ensureProject(req.user.id, req.body.project)
-        : Promise.resolve();
-      var [fastExisting] = await Promise.all([fastExistingPromise, fastEnsureProject]);
 
       if (!fastExisting) {
         return res.status(404).json({ error: 'Task not found' });
@@ -955,7 +984,7 @@ async function updateTask(req, res) {
     var anchorDateVal = req.body.anchorDate;
     var bodyWithoutAnchor = Object.assign({}, req.body);
     delete bodyWithoutAnchor.anchorDate;
-    var row = taskToRow(bodyWithoutAnchor, req.user.id, tz);
+    var row = taskToRow(bodyWithoutAnchor, req.user.id, tz, existing);
     delete row.id;
     delete row.user_id;
     delete row.created_at;
@@ -1715,7 +1744,7 @@ async function batchUpdateTasks(req, res) {
         var qTz = qFields._timezone || tz;
         delete qFields._timezone;
         delete qFields.anchorDate;
-        var qRow = taskToRow(qFields, req.user.id, qTz);
+        var qRow = taskToRow(qFields, req.user.id, qTz, qExisting);
         delete qRow.user_id;
         delete qRow.created_at;
         delete qRow._pendingTimeOnly;
@@ -1803,12 +1832,11 @@ async function batchUpdateTasks(req, res) {
             // Extract anchorDate before taskToRow — it routes directly to the template's scheduled_at
             var anchorDateVal = fields.anchorDate;
             delete fields.anchorDate;
-            var row = taskToRow(fields, req.user.id, updateTz);
+            var existing = existingById[id];
+            var row = taskToRow(fields, req.user.id, updateTz, existing);
             delete row.user_id;
             delete row.created_at;
             if (!anySchedulingInBatch && hasSchedulingFields(row)) anySchedulingInBatch = true;
-
-            var existing = existingById[id];
 
             // Skip disabled items — they cannot be modified
             if (existing && existing.status === 'disabled') continue;

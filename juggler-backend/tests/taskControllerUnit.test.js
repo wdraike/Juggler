@@ -64,11 +64,16 @@ describe('TEMPLATE_FIELDS export', () => {
 
   test('includes all expected template fields', () => {
     var expected = ['text', 'dur', 'pri', 'project', 'when', 'day_req',
-      'recurring', 'rigid', 'time_flex', 'split', 'split_min',
-      'notes', 'marker', 'flex_when', 'preferred_time_mins'];
+      'recurring', 'placement_mode', 'time_flex', 'split', 'split_min',
+      'notes', 'flex_when', 'preferred_time_mins'];
     expected.forEach(function(f) {
       expect(TEMPLATE_FIELDS).toContain(f);
     });
+  });
+
+  test('does NOT include rigid or marker (dropped in Phase 4)', () => {
+    expect(TEMPLATE_FIELDS).not.toContain('rigid');
+    expect(TEMPLATE_FIELDS).not.toContain('marker');
   });
 });
 

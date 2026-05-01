@@ -88,7 +88,8 @@ describe('task mapping', () => {
       expect(row.location).toBe('["home"]');
       expect(row.tools).toBe('["phone"]');
       expect(row.recurring).toBe(1);
-      expect(row.rigid).toBe(0);
+      expect(row.placement_mode).toBe('recurring_flexible');
+      expect(row.rigid).toBeUndefined();
       expect(row.depends_on).toBe('["t00"]');
       expect(row.recur).toBe('{"type":"daily"}');
       expect(row.split).toBe(1);
