@@ -25,7 +25,8 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = isTerminalStatus(status);
   var isMarker = !!task.marker;
-  var borderColor = isMarker ? '#4338CA' : priColor;
+  var isOverdue = !isDone && (task.overdue === true || task.overdue === 1);
+  var borderColor = isMarker ? '#4338CA' : (isOverdue ? theme.error : priColor);
   var durLabel = task.dur ? (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm') : '';
   var isPastDue = !isDone && task.deadline && (function() { var d = parseDate(task.deadline); var t = todayDate || new Date(); if (!todayDate) t.setHours(0,0,0,0); return d && d < t; })();
   var timeRange = (function() {
@@ -47,7 +48,7 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
       style={{
         borderRadius: 6, cursor: 'pointer', overflow: 'hidden',
         background: theme.bgCard,
-        border: '1px ' + (isMarker ? 'dotted' : (task.recurring ? 'dashed' : 'solid')) + ' ' + (isDone ? theme.border : borderColor + '40'),
+        border: '1px ' + (isMarker ? 'dotted' : (task.recurring ? 'dashed' : 'solid')) + ' ' + (isDone ? theme.border : (isOverdue ? theme.error + '60' : borderColor + '40')),
         borderLeft: '3px solid ' + borderColor,
         opacity: isDone ? 0.5 : (isMarker ? 0.7 : 1),
         padding: isMobile ? '8px 10px' : '6px 10px',
@@ -108,6 +109,15 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
           </span>
         )}
         <div style={{ flex: 1 }} />
+        {isOverdue && (
+          <span style={{
+            fontSize: 9, fontWeight: 700, flexShrink: 0,
+            background: theme.error, color: '#FDFAF5',
+            borderRadius: 3, padding: '1px 5px', letterSpacing: 0.2
+          }}>
+            {'⚠'} Overdue
+          </span>
+        )}
         {timeRange && (
           <span style={{ fontSize: 9, color: theme.textMuted, fontWeight: 500, flexShrink: 0 }}>
             {timeRange}

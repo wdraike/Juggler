@@ -389,6 +389,7 @@ function rowToTask(row, timezone, sourceMap) {
     preferredTimeMins: row.preferred_time_mins != null ? row.preferred_time_mins : null,
     desiredAt: row.desired_at ? new Date(row.desired_at).toISOString() : null,
     unscheduled: !!row.unscheduled,
+    overdue: !!row.overdue,
     slackMins: row.slack_mins != null ? Number(row.slack_mins) : null,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
     recurStart: row.recur_start || null,
