@@ -1609,17 +1609,14 @@ async function sync(req, res) {
             scheduled_at: newScheduledAt,
             dur: evDur,
             pri: 'P3',
-            rigid: 1,
             status: '',
             when: newEvent.isAllDay ? 'allday' : 'fixed',
             date_pinned: newEvent.isAllDay ? 0 : 1,
+            placement_mode: newEvent.isTransparent ? 'marker' : (newEvent.isAllDay ? 'flexible' : 'fixed'),
             [eventIdCol]: newEvent.id
           };
           if (newEvent.description) {
             taskRow.notes = newEvent.description;
-          }
-          if (newEvent.isTransparent) {
-            taskRow.marker = true;
           }
 
           var newTaskObj = rowToTask(taskRow, tz);
