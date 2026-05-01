@@ -206,7 +206,7 @@ async function sync(req, res) {
         validAdapters.push(va);
       } catch (err) {
         var vaErrMsg = err.message || '';
-        var vaIsTokenExpired = vaErrMsg.includes('invalid_grant') || vaErrMsg.includes('Token has been expired or revoked');
+        var vaIsTokenExpired = RE_AUTH_ERR.test(vaErrMsg);
         if (vaIsTokenExpired) {
           var vaEventIdCol = va.getEventIdColumn();
           var vaTokenCols = vaEventIdCol === 'gcal_event_id'
@@ -252,7 +252,7 @@ async function sync(req, res) {
       } catch (err) {
         console.error('[CAL-SYNC] Event fetch failed for ' + adapter.providerId + ':', err);
         var errMsg = err.message || '';
-        var isTokenExpired = errMsg.includes('invalid_grant') || errMsg.includes('Token has been expired or revoked');
+        var isTokenExpired = RE_AUTH_ERR.test(errMsg);
 
         if (isTokenExpired) {
           var eventIdCol = adapter.getEventIdColumn();
@@ -1961,7 +1961,7 @@ async function hasChanges(req, res) {
         if (check.hasChanges) result.hasChanges = true;
       } catch (err) {
         var msg = err.message || '';
-        if (msg.includes('invalid_grant') || msg.includes('Token has been expired or revoked')) {
+        if (RE_AUTH_ERR.test(msg)) {
           result.providers[adapter.providerId] = { hasChanges: false, tokenExpired: true };
         } else {
           result.providers[adapter.providerId] = { hasChanges: true, error: msg };
