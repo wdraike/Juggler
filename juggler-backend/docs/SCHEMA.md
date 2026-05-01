@@ -41,28 +41,17 @@ Read by `src/scheduler/unifiedSchedule.js` and `hillClimb.js`. Drives **Time Win
 
 Non-tz-dependent by design — no conversion needed at read time.
 
-#### `placement_mode` (#13, added 2026-04-26)
+#### `placement_mode` (#13, completed 2026-05-01)
 
-Virtual `ENUM` generated column (not stored — derived on-read). Values: `marker`, `fixed`, `pinned_date`, `recurring_rigid`, `recurring_window`, `recurring_flexible`, `flexible`.
+`ENUM` — stored column (not virtual). Scheduler reads it directly. `marker` and `rigid` columns are dropped from `task_masters`; views expose computed boolean equivalents for backward compatibility.
 
-Derivation (migration `20260426000300_add_placement_mode`):
+Values: `marker`, `fixed`, `pinned_date`, `recurring_rigid`, `recurring_window`, `recurring_flexible`, `flexible`.
 
-```
-CASE
-  WHEN marker = 1                                              THEN 'marker'
-  WHEN `when` LIKE '%fixed%'                                   THEN 'fixed'
-  WHEN rigid = 1 AND recurring = 0                             THEN 'fixed'
-  WHEN recurring = 1 AND rigid = 1
-       AND preferred_time_mins IS NOT NULL                     THEN 'recurring_rigid'
-  WHEN recurring = 1 AND preferred_time_mins IS NOT NULL       THEN 'recurring_window'
-  WHEN recurring = 1                                           THEN 'recurring_flexible'
-  ELSE                                                              'flexible'
-END
-```
+The column was originally added as a VIRTUAL GENERATED column in migration `20260426000300_add_placement_mode` (derived on-read from `marker`, `rigid`, and `when`). Migration `20260501000000` (Phase 4) converted it to a STORED column and dropped `marker` and `rigid` from `task_masters`. The write-path now derives `placement_mode` via `derivePlacementMode()` and writes it directly. Views (`tasks_v` etc.) reconstruct computed `marker` and `rigid` boolean columns via CASE expressions for any code that hasn't migrated to reading `placement_mode` directly.
 
-Scheduler v1 ignores this column; v2 branches on it (per `docs/SCHEDULER-V2-SPEC.md`). `pinned_date` is reserved for a future mode (date-locked, time-flexible) not surfaced in the UI yet.
+`pinned_date` is reserved for a future mode (date-locked, time-flexible) not surfaced in the UI yet.
 
-Instance-level `date_pinned` overrides the master's mode at read time — an instance with `date_pinned = 1` is placed like `fixed` regardless of its master's mode.
+Instance-level `date_pinned` overrides the master's mode at placement time — an instance with `date_pinned = 1` is placed like `fixed` regardless of its master's mode.
 
 #### `desired_at` (#11, consolidated 2026-04-26)
 

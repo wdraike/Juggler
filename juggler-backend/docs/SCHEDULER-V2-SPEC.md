@@ -192,11 +192,12 @@ Notes:
 - `recurring` / `deadline` / `chain_member` are **properties** (from recurrence + depends_on + deadline columns), not modes. A `flexible` task can have a deadline. A `recurring_flexible` task cannot have a user-set deadline — its deadline is the cycle window end.
 - `date_pinned` on `task_instances` is preserved for drag-pin (user drags an instance to a new slot). It sets the instance's mode to effectively `fixed` for that one occurrence without changing the master's mode.
 
-### 5.1 Migration path (staged)
-1. Add `placement_mode` ENUM column, backfill from existing flags.
-2. Scheduler v2 reads `placement_mode` directly.
-3. Write-path translator keeps old flags in sync during cutover.
-4. After v2 ships, drop legacy flags in a cleanup migration.
+### 5.1 Migration path (staged) — COMPLETE as of 2026-05-01
+
+1. ~~Add `placement_mode` ENUM column, backfill from existing flags.~~ ✅ (`20260426000300_add_placement_mode`)
+2. ~~Scheduler v2 reads `placement_mode` directly.~~ ✅ (Phase 2, commit `a57c469` — `buildItems()` branches on `t.placementMode`)
+3. ~~Write-path translator keeps old flags in sync during cutover.~~ ✅ (write-path now calls `derivePlacementMode()` and stores directly)
+4. ~~After v2 ships, drop legacy flags in a cleanup migration.~~ ✅ (Phase 4, commit `d532577` — `marker` and `rigid` dropped from `task_masters`; views expose computed boolean equivalents)
 
 ---
 
