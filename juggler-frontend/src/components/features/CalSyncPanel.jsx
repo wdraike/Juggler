@@ -587,7 +587,7 @@ export default function CalSyncPanel({
     }} onClick={onClose}>
       <div style={{
         background: theme.bgSecondary, borderRadius: isMobile ? 0 : 2,
-        width: isMobile ? '100%' : 420, maxWidth: isMobile ? '100%' : '95vw',
+        width: isMobile ? '100%' : 560, maxWidth: isMobile ? '100%' : '95vw',
         height: isMobile ? '100%' : undefined, maxHeight: isMobile ? '100%' : '80vh',
         overflow: 'auto', padding: 20,
         boxShadow: isMobile ? 'none' : '0 2px 8px ' + theme.shadow
