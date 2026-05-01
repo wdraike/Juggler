@@ -230,18 +230,18 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     var st = statuses[t.id] || t.status || '';
     if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'pause' || st === 'disabled') return;
 
-    var isMarker = !!t.marker;
+    var pm = t.placementMode || 'flexible';
+    var isMarker = pm === 'marker';
     // Markers are calendar indicators — they coexist with other placements at
     // the same minute, so dur=0 means they never consume occupancy.
     var dur = isMarker ? 0 : effectiveDuration(t);
     var pri = normalizePri(t.pri);
     var priRank = PRI_RANK[pri] || 50;
     var when = t.when || '';
-    var fixed = hasWhen(when, 'fixed');
+    var fixed = pm === 'fixed';
     var allday = hasWhen(when, 'allday');
     var pinned = !!t.datePinned;
-    var rigid = !!t.rigid;
-    var recurring = !!t.recurring;
+    var recurring = pm === 'recurring_rigid' || pm === 'recurring_window' || pm === 'recurring_flexible';
     var flexWhen = !!t.flexWhen;
 
     // Derive earliest placement minute-of-day and date.
@@ -250,7 +250,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     // canonical ISO so downstream lookups against dates[].key always match.
     var anchorDate = toKey(t.date);
     var anchorMin = t.time ? parseTimeToMinutes(t.time) : null;
-    if (recurring && t.preferredTimeMins != null && anchorMin == null) {
+    if ((pm === 'recurring_rigid' || pm === 'recurring_window') && t.preferredTimeMins != null && anchorMin == null) {
       anchorMin = t.preferredTimeMins;
     }
 
@@ -280,14 +280,10 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     var travelBefore = (splitOrd === 1) ? rawTb : 0;
     var travelAfter = (splitOrd === splitTot) ? rawTa : 0;
 
-    // Time-window mode (preferred time ± flex) vs time-block mode (when tags).
-    // Authoritative signal: preferred_time_mins is set AND not rigid. V1's
-    // legacy `preferred_time` boolean is not in the DB — placement_mode's
-    // `recurring_window` value is equivalent to these two conditions. In
-    // window mode the `when` tags are ignored in favor of a narrow window
-    // around preferredTimeMins; otherwise the when tags drive placement.
+    // Time-window mode: placement_mode 'recurring_window' means preferred_time_mins
+    // ± timeFlex. In window mode the `when` tags are ignored.
     var DEFAULT_TIME_FLEX = 60;
-    var isWindowMode = !rigid && t.preferredTimeMins != null;
+    var isWindowMode = pm === 'recurring_window';
     var windowLo = null, windowHi = null;
     if (isWindowMode) {
       var flex = t.timeFlex != null ? t.timeFlex : DEFAULT_TIME_FLEX;
@@ -346,7 +342,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     //   - any split chunk (all chunks of the same occurrence must share the
     //     anchor day; otherwise chunk 1 could roam while chunks 2+ stay put)
     //   - non-tpc recurring (instance is day-specific, per above)
-    var isDayLocked = recurring && (rigid || splitTot > 1 || !isFlexibleTpc);
+    var isDayLocked = recurring && (pm === 'recurring_rigid' || splitTot > 1 || !isFlexibleTpc);
 
     items.push({
       task: t,
@@ -359,7 +355,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       isFixedWhen: fixed,
       isAllDay: allday,
       isPinned: pinned,
-      isRigid: rigid,
+      isRigid: pm === 'recurring_rigid',
       isRecurring: recurring,
       isMarker: isMarker,
       flexWhen: flexWhen,
@@ -512,7 +508,7 @@ function emitStepRecord(cfg, phase, item, start, dur, dateKey, locked, dayPlaced
         taskId: p.task ? p.task.id : null,
         taskText: p.task ? p.task.text : null,
         start: p.start, dur: p.dur,
-        locked: !!p.locked, marker: !!(p.task && p.task.marker)
+        locked: !!p.locked, marker: !!(p.task && p.task.placementMode === 'marker')
       };
     });
   });
@@ -531,7 +527,7 @@ function emitStepRecord(cfg, phase, item, start, dur, dateKey, locked, dayPlaced
     deadline: t.deadline || null,
     preferredTimeMins: t.preferredTimeMins != null ? t.preferredTimeMins : null,
     timeFlex: t.timeFlex != null ? t.timeFlex : null,
-    rigid: !!t.rigid,
+    rigid: !!(t.placementMode === 'recurring_rigid'),
     travelBefore: item.travelBefore || 0,
     travelAfter: item.travelAfter || 0,
     locationRequirement: t.location || null,

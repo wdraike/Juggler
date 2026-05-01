@@ -8,7 +8,7 @@
  * Returns: { dayPlacements, taskUpdates, newStatuses, unplaced, score, warnings }
  */
 
-const unifiedSchedule = require('../src/scheduler/unifiedSchedule');
+const unifiedSchedule = require('../src/scheduler/unifiedScheduleV2');
 const { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../src/scheduler/constants');
 
 function makeTask(overrides) {
@@ -106,7 +106,7 @@ describe('unifiedSchedule', () => {
 
     test('markers dont consume time slots', () => {
       const tasks = [
-        makeTask({ id: 'marker1', date: '2026-03-22', marker: true }),
+        makeTask({ id: 'marker1', date: '2026-03-22', placementMode: 'marker' }),
         makeTask({ id: 'task1', date: '2026-03-22', dur: 30 })
       ];
       const result = schedule(tasks);
@@ -150,7 +150,7 @@ describe('unifiedSchedule', () => {
 
   describe('fixed tasks', () => {
     test('fixed task anchored at specified time', () => {
-      const tasks = [makeTask({ id: 'fixed1', date: '2026-03-22', when: 'fixed', time: '9:00 AM', dur: 60 })];
+      const tasks = [makeTask({ id: 'fixed1', date: '2026-03-22', placementMode: 'fixed', time: '9:00 AM', dur: 60 })];
       const result = schedule(tasks);
       const placed = getPlacementsForDay(result, '2026-03-22');
       const fixed = placed.find(p => p.task.id === 'fixed1');
@@ -160,7 +160,7 @@ describe('unifiedSchedule', () => {
 
     test('fixed task not displaced by flexible tasks', () => {
       const tasks = [
-        makeTask({ id: 'fixed1', date: '2026-03-22', when: 'fixed', time: '9:00 AM', dur: 60 }),
+        makeTask({ id: 'fixed1', date: '2026-03-22', placementMode: 'fixed', time: '9:00 AM', dur: 60 }),
         makeTask({ id: 'flex1', date: '2026-03-22', dur: 60 }),
         makeTask({ id: 'flex2', date: '2026-03-22', dur: 60 }),
         makeTask({ id: 'flex3', date: '2026-03-22', dur: 60 })
@@ -250,7 +250,7 @@ describe('unifiedSchedule', () => {
   describe('recurringTasks', () => {
     test('rigid recurring placed at preferred time', () => {
       const tasks = [makeTask({
-        id: 'h1', date: '2026-03-22', recurring: true, rigid: true,
+        id: 'h1', date: '2026-03-22', recurring: true, placementMode: 'recurring_rigid',
         time: '7:00 AM', dur: 30
       })];
       const result = schedule(tasks);
@@ -281,7 +281,7 @@ describe('unifiedSchedule', () => {
     test('recurring task with preferredTimeMins is placed within flex window', () => {
       var tasks = [
         makeTask({ id: 'lunch', text: 'Lunch', recurring: true, generated: true,
-          preferredTimeMins: 720, timeFlex: 60, dur: 30, date: TODAY, time: '12:00 PM' })
+          placementMode: 'recurring_window', preferredTimeMins: 720, timeFlex: 60, dur: 30, date: TODAY, time: '12:00 PM' })
       ];
       var result = schedule(tasks, 480); // 8am
       var placed = getAllPlacements(result).filter(p => p.task.id === 'lunch');
@@ -293,7 +293,7 @@ describe('unifiedSchedule', () => {
     test('recurring task with preferredTimeMins=420 (7am) placed in morning', () => {
       var tasks = [
         makeTask({ id: 'bf', text: 'Breakfast', recurring: true, generated: true,
-          preferredTimeMins: 420, timeFlex: 60, dur: 20, date: TODAY, time: '7:00 AM' })
+          placementMode: 'recurring_window', preferredTimeMins: 420, timeFlex: 60, dur: 20, date: TODAY, time: '7:00 AM' })
       ];
       var result = schedule(tasks, 360); // 6am
       var placed = getAllPlacements(result).filter(p => p.task.id === 'bf');
@@ -306,7 +306,7 @@ describe('unifiedSchedule', () => {
       // time says 9am but preferredTimeMins says noon — noon should win
       var tasks = [
         makeTask({ id: 'conflict', recurring: true, generated: true,
-          preferredTimeMins: 720, time: '9:00 AM', timeFlex: 30, dur: 30, date: TODAY })
+          placementMode: 'recurring_window', preferredTimeMins: 720, time: '9:00 AM', timeFlex: 30, dur: 30, date: TODAY })
       ];
       var result = schedule(tasks, 480);
       var placed = getAllPlacements(result).filter(p => p.task.id === 'conflict');
@@ -318,7 +318,7 @@ describe('unifiedSchedule', () => {
     test('missed recurring: preferredTimeMins window entirely past → unplaced', () => {
       var tasks = [
         makeTask({ id: 'missed', text: 'Morning task', recurring: true, generated: true,
-          preferredTimeMins: 420, timeFlex: 60, dur: 20, date: TODAY, time: '7:00 AM' })
+          placementMode: 'recurring_window', preferredTimeMins: 420, timeFlex: 60, dur: 20, date: TODAY, time: '7:00 AM' })
       ];
       var result = schedule(tasks, 540); // 9am — window [360,480] is past
       var placed = getAllPlacements(result).filter(p => p.task.id === 'missed');

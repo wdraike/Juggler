@@ -119,7 +119,7 @@ function makeTask(props) {
     when: props.when != null ? props.when : '',
     dayReq: props.dayReq || 'any',
     recurring: props.recurring || false,
-    rigid: props.rigid || false,
+    placementMode: props.placementMode || undefined,
     timeFlex: props.timeFlex != null ? props.timeFlex : undefined,
     split: props.split || false,
     splitMin: props.splitMin || null,
@@ -130,7 +130,6 @@ function makeTask(props) {
     msftEventId: props.msftEventId || null,
     dependsOn: props.dependsOn || [],
     datePinned: props.datePinned || false,
-    marker: props.marker || false,
     flexWhen: props.flexWhen || false,
     travelBefore: props.travelBefore || undefined,
     travelAfter: props.travelAfter || undefined,
@@ -146,7 +145,7 @@ function makeTask(props) {
 function makeRigidRecurring(props) {
   return makeTask(Object.assign({
     recurring: true,
-    rigid: true,
+    placementMode: 'recurring_rigid',
     taskType: 'recurring_instance',
     generated: true
   }, props));
@@ -156,7 +155,7 @@ function makeRigidRecurring(props) {
 function makeFlexRecurring(props) {
   return makeTask(Object.assign({
     recurring: true,
-    rigid: false,
+    placementMode: props && props.preferredTimeMins != null ? 'recurring_window' : 'recurring_flexible',
     taskType: 'recurring_instance',
     generated: true,
     flexWhen: true

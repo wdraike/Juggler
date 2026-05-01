@@ -11,7 +11,7 @@
  *   Usable today ≈ 780m (480-1260, 13 hours)
  */
 
-const unifiedSchedule = require('../src/scheduler/unifiedSchedule');
+const unifiedSchedule = require('../src/scheduler/unifiedScheduleV2');
 const { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../src/scheduler/constants');
 
 const TODAY = '2026-04-03';
@@ -23,7 +23,7 @@ function makeTask(overrides) {
   return {
     id: 'sd_' + _id, text: 'Task ' + _id, date: TODAY, dur: 30, pri: 'P3',
     when: '', dayReq: 'any', status: '', dependsOn: [], location: [], tools: [],
-    recurring: false, rigid: false, marker: false, split: false, datePinned: false,
+    recurring: false, split: false, datePinned: false,
     generated: false, section: '', flexWhen: false, ...overrides,
     ...(overrides && overrides.when && String(overrides.when).indexOf('fixed') >= 0 && !overrides.datePinned ? { datePinned: true } : {})
   };
@@ -132,7 +132,7 @@ describe('Category A: Capacity Crunch', () => {
   test('A3: When-window exhausted — lunch-only task displaced when today lunch full', () => {
     const tasks = [
       // Block today's lunch with a fixed event
-      makeTask({ id: 'lunch_block', when: 'fixed', date: TODAY, time: '12:00 PM', dur: 60, datePinned: true }),
+      makeTask({ id: 'lunch_block', placementMode: 'fixed', date: TODAY, time: '12:00 PM', dur: 60, datePinned: true }),
       // Task pinned to today that can ONLY go in lunch window
       makeTask({ id: 'lunch_only', when: 'lunch', dur: 30, date: TODAY, datePinned: true }),
     ];
@@ -157,9 +157,9 @@ describe('Category A: Capacity Crunch', () => {
     // Task pinned to today with only biz-time left should go to home blocks
     const tasks = [
       // Block morning (home block 360-480) with fixed event
-      makeTask({ id: 'block_morn', when: 'fixed', date: TODAY, time: '6:00 AM', dur: 120, datePinned: true }),
+      makeTask({ id: 'block_morn', placementMode: 'fixed', date: TODAY, time: '6:00 AM', dur: 120, datePinned: true }),
       // Block evening (home block 1020-1260) with fixed event
-      makeTask({ id: 'block_eve', when: 'fixed', date: TODAY, time: '5:00 PM', dur: 240, datePinned: true }),
+      makeTask({ id: 'block_eve', placementMode: 'fixed', date: TODAY, time: '5:00 PM', dur: 240, datePinned: true }),
       // Task needing personal_pc — only night block (1260-1380) at home remains
       makeTask({ id: 'needs_pc', tools: ['personal_pc'], dur: 60, date: TODAY }),
     ];
@@ -183,8 +183,8 @@ describe('Category B: Overlapping Fixed & Rigid Items', () => {
 
   test('B1: Two fixed calendar events overlapping — both placed, warning issued', () => {
     const tasks = [
-      makeTask({ id: 'mtg1', when: 'fixed', date: TODAY, time: '10:00 AM', dur: 60, datePinned: true }),
-      makeTask({ id: 'mtg2', when: 'fixed', date: TODAY, time: '10:30 AM', dur: 60, datePinned: true }),
+      makeTask({ id: 'mtg1', placementMode: 'fixed', date: TODAY, time: '10:00 AM', dur: 60, datePinned: true }),
+      makeTask({ id: 'mtg2', placementMode: 'fixed', date: TODAY, time: '10:30 AM', dur: 60, datePinned: true }),
     ];
 
     const result = run(tasks);
@@ -202,9 +202,9 @@ describe('Category B: Overlapping Fixed & Rigid Items', () => {
     // All three rigid recurringTasks want lunch block (720-780, 60m window)
     // Each is 30m, but the block only fits 2 at most
     const tasks = [
-      makeTask({ id: 'recur1', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
-      makeTask({ id: 'recur2', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
-      makeTask({ id: 'recur3', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'recur1', recurring: true, placementMode: 'recurring_rigid', when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'recur2', recurring: true, placementMode: 'recurring_rigid', when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'recur3', recurring: true, placementMode: 'recurring_rigid', when: 'lunch', dur: 30, date: TODAY, generated: true }),
     ];
 
     const result = run(tasks);
@@ -228,9 +228,9 @@ describe('Category B: Overlapping Fixed & Rigid Items', () => {
   test('B3: Fixed event + rigid recurring competing for same hour', () => {
     const tasks = [
       // 1-hour meeting at noon blocks the entire lunch window
-      makeTask({ id: 'meeting', when: 'fixed', date: TODAY, time: '12:00 PM', dur: 60, datePinned: true }),
+      makeTask({ id: 'meeting', placementMode: 'fixed', date: TODAY, time: '12:00 PM', dur: 60, datePinned: true }),
       // Rigid lunch recurring wants lunch block
-      makeTask({ id: 'lunch', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'lunch', recurring: true, placementMode: 'recurring_rigid', when: 'lunch', dur: 30, date: TODAY, generated: true }),
     ];
 
     const result = run(tasks);
@@ -252,9 +252,9 @@ describe('Category B: Overlapping Fixed & Rigid Items', () => {
   test('B4: All-day event blocks entire day — rigid recurringTasks force-place, flex tasks overflow', () => {
     const tasks = [
       // All-day calendar event
-      makeTask({ id: 'allday', when: 'fixed', date: TODAY, time: '8:00 AM', dur: 780, datePinned: true }),
+      makeTask({ id: 'allday', placementMode: 'fixed', date: TODAY, time: '8:00 AM', dur: 780, datePinned: true }),
       // Rigid recurring must still appear
-      makeTask({ id: 'meds', recurring: true, rigid: true, when: 'morning', dur: 20, date: TODAY, generated: true }),
+      makeTask({ id: 'meds', recurring: true, placementMode: 'recurring_rigid', when: 'morning', dur: 20, date: TODAY, generated: true }),
       // Flexible task should overflow
       makeTask({ id: 'flex', pri: 'P3', dur: 60, date: TODAY }),
     ];
@@ -284,7 +284,7 @@ describe('Category C: Dependency Chain Under Pressure', () => {
     // But if we also have recurringTasks etc, may not all fit.
     // Make today tight: only 360m available (6h) by blocking morning
     const tasks = [
-      makeTask({ id: 'block', when: 'fixed', date: TODAY, time: '8:00 AM', dur: 420, datePinned: true }),
+      makeTask({ id: 'block', placementMode: 'fixed', date: TODAY, time: '8:00 AM', dur: 420, datePinned: true }),
       makeTask({ id: 'chainA', pri: 'P1', dur: 180, date: TODAY, dependsOn: [] }),
       makeTask({ id: 'chainB', pri: 'P1', dur: 180, date: TODAY, dependsOn: ['chainA'] }),
       makeTask({ id: 'chainC', pri: 'P1', dur: 180, date: TODAY, deadline: TODAY, dependsOn: ['chainB'] }),
@@ -395,11 +395,11 @@ describe('Category D: Combined Pressure', () => {
   test('D1: Dependency chain + rigid recurringTasks + fixed events all on same day', () => {
     const tasks = [
       // Fixed events eating 4 hours
-      makeTask({ id: 'mtg_am', when: 'fixed', date: TODAY, time: '9:00 AM', dur: 120, datePinned: true }),
-      makeTask({ id: 'mtg_pm', when: 'fixed', date: TODAY, time: '2:00 PM', dur: 120, datePinned: true }),
+      makeTask({ id: 'mtg_am', placementMode: 'fixed', date: TODAY, time: '9:00 AM', dur: 120, datePinned: true }),
+      makeTask({ id: 'mtg_pm', placementMode: 'fixed', date: TODAY, time: '2:00 PM', dur: 120, datePinned: true }),
       // Rigid recurringTasks
-      makeTask({ id: 'lunch_h', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
-      makeTask({ id: 'meds_h', recurring: true, rigid: true, when: 'morning', dur: 20, date: TODAY, generated: true }),
+      makeTask({ id: 'lunch_h', recurring: true, placementMode: 'recurring_rigid', when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'meds_h', recurring: true, placementMode: 'recurring_rigid', when: 'morning', dur: 20, date: TODAY, generated: true }),
       // Dependency chain P1
       makeTask({ id: 'step1', pri: 'P1', dur: 90, date: TODAY }),
       makeTask({ id: 'step2', pri: 'P1', dur: 90, date: TODAY, deadline: dateKey(1), dependsOn: ['step1'] }),
@@ -427,11 +427,11 @@ describe('Category D: Combined Pressure', () => {
   test('D2: Non-splittable task in fragmented day — pushed to day with larger gaps', () => {
     // Fragment the biz2 block (780-1020, work) with 45m meetings leaving only 30m gaps
     const tasks = [
-      makeTask({ id: 'mtg1', when: 'fixed', date: TODAY, time: '1:00 PM', dur: 45, datePinned: true }),
-      makeTask({ id: 'mtg2', when: 'fixed', date: TODAY, time: '2:15 PM', dur: 45, datePinned: true }),
-      makeTask({ id: 'mtg3', when: 'fixed', date: TODAY, time: '3:30 PM', dur: 45, datePinned: true }),
+      makeTask({ id: 'mtg1', placementMode: 'fixed', date: TODAY, time: '1:00 PM', dur: 45, datePinned: true }),
+      makeTask({ id: 'mtg2', placementMode: 'fixed', date: TODAY, time: '2:15 PM', dur: 45, datePinned: true }),
+      makeTask({ id: 'mtg3', placementMode: 'fixed', date: TODAY, time: '3:30 PM', dur: 45, datePinned: true }),
       // Also fill morning biz block
-      makeTask({ id: 'mtg4', when: 'fixed', date: TODAY, time: '8:00 AM', dur: 210, datePinned: true }),
+      makeTask({ id: 'mtg4', placementMode: 'fixed', date: TODAY, time: '8:00 AM', dur: 210, datePinned: true }),
       // Non-splittable 90m task — gaps on today are only 30m each
       makeTask({ id: 'big_task', dur: 90, split: false, date: TODAY }),
     ];
@@ -450,9 +450,9 @@ describe('Category D: Combined Pressure', () => {
   test('D3: Split task that can fit when split — placed across multiple chunks', () => {
     // Same fragmented day, but task allows splitting
     const tasks = [
-      makeTask({ id: 'block1', when: 'fixed', date: TODAY, time: '8:00 AM', dur: 150, datePinned: true }),
-      makeTask({ id: 'block2', when: 'fixed', date: TODAY, time: '11:30 AM', dur: 150, datePinned: true }),
-      makeTask({ id: 'block3', when: 'fixed', date: TODAY, time: '3:00 PM', dur: 150, datePinned: true }),
+      makeTask({ id: 'block1', placementMode: 'fixed', date: TODAY, time: '8:00 AM', dur: 150, datePinned: true }),
+      makeTask({ id: 'block2', placementMode: 'fixed', date: TODAY, time: '11:30 AM', dur: 150, datePinned: true }),
+      makeTask({ id: 'block3', placementMode: 'fixed', date: TODAY, time: '3:00 PM', dur: 150, datePinned: true }),
       // Splittable 120m task — should fit in gaps
       makeTask({ id: 'split_task', dur: 120, split: true, splitMin: 30, date: TODAY, pri: 'P1' }),
     ];
@@ -470,9 +470,9 @@ describe('Category D: Combined Pressure', () => {
     const tomorrow = dateKey(1);
     const tasks = [];
     // Fill today completely (780m)
-    tasks.push(makeTask({ id: 'fill_today', when: 'fixed', date: TODAY, time: '8:00 AM', dur: 780, datePinned: true }));
+    tasks.push(makeTask({ id: 'fill_today', placementMode: 'fixed', date: TODAY, time: '8:00 AM', dur: 780, datePinned: true }));
     // Fill tomorrow completely
-    tasks.push(makeTask({ id: 'fill_tmrw', when: 'fixed', date: tomorrow, time: '6:00 AM', dur: 960, datePinned: true }));
+    tasks.push(makeTask({ id: 'fill_tmrw', placementMode: 'fixed', date: tomorrow, time: '6:00 AM', dur: 960, datePinned: true }));
     // Date-pinned task that can't move
     tasks.push(makeTask({ id: 'stuck', dur: 60, date: TODAY, datePinned: true }));
 
@@ -507,10 +507,10 @@ describe('Category D: Combined Pressure', () => {
   test('D6: Recurring-heavy day with deadline crunch — recurringTasks always appear', () => {
     const tasks = [
       // 4 rigid recurringTasks (total 90m) spread across blocks
-      makeTask({ id: 'h1', recurring: true, rigid: true, when: 'morning', dur: 20, date: TODAY, generated: true }),
-      makeTask({ id: 'h2', recurring: true, rigid: true, when: 'morning', dur: 30, date: TODAY, generated: true }),
-      makeTask({ id: 'h3', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
-      makeTask({ id: 'h4', recurring: true, rigid: true, when: 'evening', dur: 10, date: TODAY, generated: true }),
+      makeTask({ id: 'h1', recurring: true, placementMode: 'recurring_rigid', when: 'morning', dur: 20, date: TODAY, generated: true }),
+      makeTask({ id: 'h2', recurring: true, placementMode: 'recurring_rigid', when: 'morning', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'h3', recurring: true, placementMode: 'recurring_rigid', when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'h4', recurring: true, placementMode: 'recurring_rigid', when: 'evening', dur: 10, date: TODAY, generated: true }),
       // P1 deadline tasks filling the biz blocks
       makeTask({ id: 'crunch1', pri: 'P1', dur: 120, deadline: TODAY, date: TODAY }),
       makeTask({ id: 'crunch2', pri: 'P1', dur: 120, deadline: TODAY, date: TODAY }),
@@ -540,7 +540,7 @@ describe('Category E: Placement Reasons', () => {
 
   test('E1: Fixed event gets "Fixed calendar event" reason', () => {
     const tasks = [
-      makeTask({ id: 'mtg', when: 'fixed', date: TODAY, time: '10:00 AM', dur: 60, datePinned: true }),
+      makeTask({ id: 'mtg', placementMode: 'fixed', date: TODAY, time: '10:00 AM', dur: 60, datePinned: true }),
     ];
     const result = run(tasks);
     const p = findPlacements(result, 'mtg')[0];
@@ -550,7 +550,7 @@ describe('Category E: Placement Reasons', () => {
 
   test('E2: Rigid recurring gets reason with block name', () => {
     const tasks = [
-      makeTask({ id: 'lunch_h', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'lunch_h', recurring: true, placementMode: 'recurring_rigid', when: 'lunch', dur: 30, date: TODAY, generated: true }),
     ];
     const result = run(tasks);
     const p = findPlacements(result, 'lunch_h')[0];
@@ -598,8 +598,8 @@ describe('Category E: Placement Reasons', () => {
 
   test('E6: Every placed task has a _placementReason', () => {
     const tasks = [
-      makeTask({ id: 'fixed', when: 'fixed', date: TODAY, time: '9:00 AM', dur: 60, datePinned: true }),
-      makeTask({ id: 'recurring', recurring: true, rigid: true, when: 'morning', dur: 20, date: TODAY, generated: true }),
+      makeTask({ id: 'fixed', placementMode: 'fixed', date: TODAY, time: '9:00 AM', dur: 60, datePinned: true }),
+      makeTask({ id: 'recurring', recurring: true, placementMode: 'recurring_rigid', when: 'morning', dur: 20, date: TODAY, generated: true }),
       makeTask({ id: 'dl', pri: 'P1', dur: 60, date: TODAY, deadline: dateKey(2) }),
       makeTask({ id: 'flex', pri: 'P3', dur: 30, date: TODAY }),
     ];
@@ -618,10 +618,10 @@ describe('Category E: Placement Reasons', () => {
   test('E7: Conflict recurring reason mentions overlap', () => {
     const tasks = [
       // Block lunch with fixed event, force rigid recurring into conflict
-      makeTask({ id: 'mtg', when: 'fixed', date: TODAY, time: '12:00 PM', dur: 60, datePinned: true }),
-      makeTask({ id: 'block_morn', when: 'fixed', date: TODAY, time: '6:00 AM', dur: 360, datePinned: true }),
-      makeTask({ id: 'block_aft', when: 'fixed', date: TODAY, time: '1:00 PM', dur: 480, datePinned: true }),
-      makeTask({ id: 'lunch_h', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'mtg', placementMode: 'fixed', date: TODAY, time: '12:00 PM', dur: 60, datePinned: true }),
+      makeTask({ id: 'block_morn', placementMode: 'fixed', date: TODAY, time: '6:00 AM', dur: 360, datePinned: true }),
+      makeTask({ id: 'block_aft', placementMode: 'fixed', date: TODAY, time: '1:00 PM', dur: 480, datePinned: true }),
+      makeTask({ id: 'lunch_h', recurring: true, placementMode: 'recurring_rigid', when: 'lunch', dur: 30, date: TODAY, generated: true }),
     ];
     const result = run(tasks);
     const p = findPlacements(result, 'lunch_h')[0];
@@ -634,8 +634,8 @@ describe('Category E: Placement Reasons', () => {
   test('E8: Debug mode produces phase snapshots', () => {
     const debugCfg = { ...cfg, _debug: true };
     const tasks = [
-      makeTask({ id: 'fixed1', when: 'fixed', date: TODAY, time: '9:00 AM', dur: 60, datePinned: true }),
-      makeTask({ id: 'recur1', recurring: true, rigid: true, when: 'lunch', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'fixed1', placementMode: 'fixed', date: TODAY, time: '9:00 AM', dur: 60, datePinned: true }),
+      makeTask({ id: 'recur1', recurring: true, placementMode: 'recurring_rigid', when: 'lunch', dur: 30, date: TODAY, generated: true }),
       makeTask({ id: 'dl1', pri: 'P1', dur: 60, date: TODAY, deadline: dateKey(2) }),
       makeTask({ id: 'flex1', pri: 'P3', dur: 30, date: TODAY }),
     ];
@@ -671,10 +671,10 @@ describe('Category E: Placement Reasons', () => {
     // Preferred time 7:00am (420m), flex ±60m → window 360-480.
     // nowMins=480 (8am) → entire window is past.
     const tasks = [
-      makeTask({ id: 'breakfast', text: 'Eat Breakfast', recurring: true, rigid: false, when: 'morning', dur: 30, date: TODAY, time: '7:00 AM', generated: true }),
+      makeTask({ id: 'breakfast', text: 'Eat Breakfast', recurring: true, placementMode: 'recurring_window', when: 'morning', dur: 30, date: TODAY, time: '7:00 AM', preferredTimeMins: 420, generated: true }),
     ];
     const statuses = {}; tasks.forEach(t => statuses[t.id] = '');
-    const unifiedSchedule = require('../src/scheduler/unifiedSchedule');
+    const unifiedSchedule = require('../src/scheduler/unifiedScheduleV2');
     const result = unifiedSchedule(tasks, statuses, TODAY, 480, cfg);
 
     // Still surfaces as missed in unplaced (ConflictsView / pastDue pick it up)
@@ -699,10 +699,10 @@ describe('Category E: Placement Reasons', () => {
     // Preferred 7:00am, flex ±60m → window 360-480.
     // nowMins=420 (7am) → half the window remains (420-480).
     const tasks = [
-      makeTask({ id: 'breakfast', text: 'Eat Breakfast', recurring: true, rigid: false, when: 'morning', dur: 30, date: TODAY, time: '7:00 AM', generated: true }),
+      makeTask({ id: 'breakfast', text: 'Eat Breakfast', recurring: true, placementMode: 'recurring_window', when: 'morning', dur: 30, date: TODAY, time: '7:00 AM', preferredTimeMins: 420, generated: true }),
     ];
     const statuses = {}; tasks.forEach(t => statuses[t.id] = '');
-    const unifiedSchedule = require('../src/scheduler/unifiedSchedule');
+    const unifiedSchedule = require('../src/scheduler/unifiedScheduleV2');
     const result = unifiedSchedule(tasks, statuses, TODAY, 420, cfg);
 
     // Should be placed (window still partially open)
@@ -713,8 +713,8 @@ describe('Category E: Placement Reasons', () => {
     // Breakfast preferred 7:00am, flex ±60m → window 360-480.
     // Fill the entire flex window with a fixed meeting.
     const tasks = [
-      makeTask({ id: 'meeting', when: 'fixed', date: TODAY, time: '6:00 AM', dur: 120, datePinned: true }), // fills 360-480
-      makeTask({ id: 'breakfast', text: 'Eat Breakfast', recurring: true, rigid: false, when: 'morning', dur: 30, date: TODAY, time: '7:00 AM', generated: true }),
+      makeTask({ id: 'meeting', placementMode: 'fixed', date: TODAY, time: '6:00 AM', dur: 120, datePinned: true }), // fills 360-480
+      makeTask({ id: 'breakfast', text: 'Eat Breakfast', recurring: true, placementMode: 'recurring_window', when: 'morning', dur: 30, date: TODAY, time: '7:00 AM', preferredTimeMins: 420, generated: true }),
     ];
     const result = run(tasks); // nowMins=480
 
@@ -729,7 +729,7 @@ describe('Category E: Placement Reasons', () => {
   test('E8d: Recurring without preferred time → placed normally regardless of time', () => {
     // No time set, so no flex window constraint — anytime is fine
     const tasks = [
-      makeTask({ id: 'exercise', text: 'Exercise', recurring: true, rigid: false, when: 'morning,afternoon,evening', dur: 30, date: TODAY, generated: true }),
+      makeTask({ id: 'exercise', text: 'Exercise', recurring: true, placementMode: 'recurring_flexible', when: 'morning,afternoon,evening', dur: 30, date: TODAY, generated: true }),
     ];
     const result = run(tasks);
     expect(isPlaced(result, 'exercise')).toBe(true);
@@ -772,7 +772,7 @@ describe('Category F: Slack-Based Ordering', () => {
     // Two tasks with same deadline, different priorities
     // Fill most of today so only one fits
     const tasks = [
-      makeTask({ id: 'block', when: 'fixed', date: TODAY, time: '8:00 AM', dur: 660, datePinned: true }),
+      makeTask({ id: 'block', placementMode: 'fixed', date: TODAY, time: '8:00 AM', dur: 660, datePinned: true }),
       makeTask({ id: 'hi_pri', pri: 'P1', dur: 60, date: TODAY, deadline: TODAY }),
       makeTask({ id: 'lo_pri', pri: 'P3', dur: 60, date: TODAY, deadline: TODAY }),
     ];

@@ -738,6 +738,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       travelAfter: master.travelAfter,
       dependsOn: master.dependsOn || [],
       marker: master.marker,
+      placementMode: master.placementMode,
       flexWhen: master.flexWhen,
       recur: master.recur,
       recurStart: master.recurStart,

@@ -24,7 +24,7 @@ jest.mock('../src/db', () => {
   return mock;
 });
 
-const unifiedSchedule = require('../src/scheduler/unifiedSchedule');
+const unifiedSchedule = require('../src/scheduler/unifiedScheduleV2');
 const { rowToTask, buildSourceMap } = require('../src/controllers/task.controller');
 const { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../src/scheduler/constants');
 
@@ -46,8 +46,8 @@ function task(overrides) {
   return {
     id: overrides.id || 's_' + _n, text: overrides.text || 'Task ' + _n,
     date: TODAY, dur: 30, pri: 'P3', when: '', dayReq: 'any', status: '',
-    dependsOn: [], location: [], tools: [], recurring: false, rigid: false,
-    marker: false, split: false, datePinned: false, generated: false,
+    dependsOn: [], location: [], tools: [], recurring: false,
+    split: false, datePinned: false, generated: false,
     section: '', flexWhen: false, timeFlex: undefined, ...overrides
   };
 }
@@ -233,7 +233,7 @@ describe('Tier 2: Recurrings with Preferred Time', () => {
     // "user explicitly set a preferred time". Without it, t.time is just a
     // prior scheduler placement and shouldn't anchor a missed-flex window.
     var r = schedule([
-      task({ id: 'bf', text: 'Breakfast', recurring: true, when: 'morning', time: '7:00 AM', preferredTimeMins: 420, timeFlex: 60, dur: 30, generated: true }),
+      task({ id: 'bf', text: 'Breakfast', recurring: true, placementMode: 'recurring_window', when: 'morning', time: '7:00 AM', preferredTimeMins: 420, timeFlex: 60, dur: 30, generated: true }),
     ], 540); // 9am
     // Still reported as missed (shows in ConflictsView / pastDue list)
     expect(isMissed(r, 'bf')).toBe(true);
@@ -329,9 +329,9 @@ describe('Tier 3: Flexible Recurrings', () => {
   test('S13: Flexible recurring with flexWhen — placed via relaxation when blocks full', () => {
     // Fill morning + evening with fixed events
     var r = schedule([
-      task({ id: 'mtg1', when: 'fixed', time: '8:00 AM', dur: 240, datePinned: true }),
-      task({ id: 'mtg2', when: 'fixed', time: '1:00 PM', dur: 240, datePinned: true }),
-      task({ id: 'mtg3', when: 'fixed', time: '5:00 PM', dur: 240, datePinned: true }),
+      task({ id: 'mtg1', placementMode: 'fixed', time: '8:00 AM', dur: 240, datePinned: true }),
+      task({ id: 'mtg2', placementMode: 'fixed', time: '1:00 PM', dur: 240, datePinned: true }),
+      task({ id: 'mtg3', placementMode: 'fixed', time: '5:00 PM', dur: 240, datePinned: true }),
       task({ id: 'ex', text: 'Exercise', recurring: true, when: 'morning,afternoon', dur: 30, generated: true, flexWhen: true }),
     ]);
     // Should be placed somewhere (relaxation allows anytime)
@@ -340,9 +340,9 @@ describe('Tier 3: Flexible Recurrings', () => {
 
   test('S14: Strict flexible recurring with blocks full → unplaced', () => {
     var r = schedule([
-      task({ id: 'mtg1', when: 'fixed', time: '8:00 AM', dur: 240, datePinned: true }),
-      task({ id: 'mtg2', when: 'fixed', time: '1:00 PM', dur: 240, datePinned: true }),
-      task({ id: 'mtg3', when: 'fixed', time: '5:00 PM', dur: 240, datePinned: true }),
+      task({ id: 'mtg1', placementMode: 'fixed', time: '8:00 AM', dur: 240, datePinned: true }),
+      task({ id: 'mtg2', placementMode: 'fixed', time: '1:00 PM', dur: 240, datePinned: true }),
+      task({ id: 'mtg3', placementMode: 'fixed', time: '5:00 PM', dur: 240, datePinned: true }),
       task({ id: 'ex', text: 'Exercise', recurring: true, when: 'morning,afternoon', dur: 30, generated: true, flexWhen: false }),
     ]);
     // Strict + blocks full = should be unplaced
@@ -351,7 +351,7 @@ describe('Tier 3: Flexible Recurrings', () => {
 
   test('S15: P1 deadline + P3 exercise, limited capacity → deadline wins', () => {
     var r = schedule([
-      task({ id: 'mtg', when: 'fixed', time: '8:00 AM', dur: 480, datePinned: true }), // blocks 8am-4pm
+      task({ id: 'mtg', placementMode: 'fixed', time: '8:00 AM', dur: 480, datePinned: true }), // blocks 8am-4pm
       task({ id: 'dl', pri: 'P1', dur: 120, deadline: TODAY }),
       task({ id: 'ex', text: 'Exercise', pri: 'P3', recurring: true, when: 'evening', dur: 60, generated: true }),
     ]);
@@ -368,7 +368,7 @@ describe('Tier 4: Fixed Events & Conflicts', () => {
 
   test('S16: Fixed meeting blocks time, tasks work around it', () => {
     var r = schedule([
-      task({ id: 'mtg', when: 'fixed', time: '10:00 AM', dur: 60, datePinned: true }),
+      task({ id: 'mtg', placementMode: 'fixed', time: '10:00 AM', dur: 60, datePinned: true }),
       task({ id: 't1', dur: 30 }),
       task({ id: 't2', dur: 30 }),
       task({ id: 't3', dur: 30 }),
@@ -385,8 +385,8 @@ describe('Tier 4: Fixed Events & Conflicts', () => {
 
   test('S17: Two overlapping fixed events — both placed, warning issued', () => {
     var r = schedule([
-      task({ id: 'ma', when: 'fixed', time: '10:00 AM', dur: 60, datePinned: true }),
-      task({ id: 'mb', when: 'fixed', time: '10:30 AM', dur: 60, datePinned: true }),
+      task({ id: 'ma', placementMode: 'fixed', time: '10:00 AM', dur: 60, datePinned: true }),
+      task({ id: 'mb', placementMode: 'fixed', time: '10:30 AM', dur: 60, datePinned: true }),
     ]);
     expect(isPlaced(r, 'ma')).toBe(true);
     expect(isPlaced(r, 'mb')).toBe(true);
@@ -395,16 +395,16 @@ describe('Tier 4: Fixed Events & Conflicts', () => {
 
   test('S18: Rigid recurring blocked by fixed event → displaced or conflict', () => {
     var r = schedule([
-      task({ id: 'mtg', when: 'fixed', time: '12:00 PM', dur: 60, datePinned: true }),
-      task({ id: 'lunch', recurring: true, rigid: true, when: 'lunch', dur: 30, generated: true }),
+      task({ id: 'mtg', placementMode: 'fixed', time: '12:00 PM', dur: 60, datePinned: true }),
+      task({ id: 'lunch', recurring: true, placementMode: 'recurring_rigid', when: 'lunch', dur: 30, generated: true }),
     ]);
     expect(isPlaced(r, 'lunch')).toBe(true); // rigid recurringTasks NEVER vanish
   });
 
   test('S19: All-day event — rigid recurringTasks force-placed, flex overflow', () => {
     var r = schedule([
-      task({ id: 'conf', when: 'fixed', time: '8:00 AM', dur: 600, datePinned: true }),
-      task({ id: 'meds', recurring: true, rigid: true, when: 'morning', dur: 20, generated: true }),
+      task({ id: 'conf', placementMode: 'fixed', time: '8:00 AM', dur: 600, datePinned: true }),
+      task({ id: 'meds', recurring: true, placementMode: 'recurring_rigid', when: 'morning', dur: 20, generated: true }),
       task({ id: 'flex1', dur: 60 }),
       task({ id: 'flex2', dur: 60 }),
     ]);
@@ -451,8 +451,8 @@ describe('Tier 5: Capacity Crunch', () => {
   test('S22: Today fully consumed → tasks overflow to another day', () => {
     // Fill the entire schedulable day (6am-11pm = 1020 minutes)
     var r = schedule([
-      task({ id: 'fill1', when: 'fixed', time: '6:00 AM', dur: 510, datePinned: true }), // 6am-2:30pm
-      task({ id: 'fill2', when: 'fixed', time: '2:30 PM', dur: 510, datePinned: true }), // 2:30pm-11pm
+      task({ id: 'fill1', placementMode: 'fixed', time: '6:00 AM', dur: 510, datePinned: true }), // 6am-2:30pm
+      task({ id: 'fill2', placementMode: 'fixed', time: '2:30 PM', dur: 510, datePinned: true }), // 2:30pm-11pm
       task({ id: 'overflow', dur: 60 }),
     ]);
     var p = placement(r, 'overflow');
@@ -465,9 +465,9 @@ describe('Tier 5: Capacity Crunch', () => {
 
   test('S23: Fragmented day — split task fits, non-split does not', () => {
     var r = schedule([
-      task({ id: 'b1', when: 'fixed', time: '1:00 PM', dur: 60, datePinned: true }),
-      task({ id: 'b2', when: 'fixed', time: '2:30 PM', dur: 60, datePinned: true }),
-      task({ id: 'b3', when: 'fixed', time: '4:00 PM', dur: 60, datePinned: true }),
+      task({ id: 'b1', placementMode: 'fixed', time: '1:00 PM', dur: 60, datePinned: true }),
+      task({ id: 'b2', placementMode: 'fixed', time: '2:30 PM', dur: 60, datePinned: true }),
+      task({ id: 'b3', placementMode: 'fixed', time: '4:00 PM', dur: 60, datePinned: true }),
       task({ id: 'splittable', dur: 90, split: true, splitMin: 30 }),
       task({ id: 'nosplit', dur: 90, split: false, datePinned: true }),
     ]);
@@ -624,7 +624,7 @@ describe('Tier 8: Drag-Pin & Undo', () => {
 
   test('S31: Drag-pinned task treated as fixed by scheduler', () => {
     var r = schedule([
-      task({ id: 'pinned', when: 'fixed', time: '2:00 PM', dur: 30, datePinned: true, prevWhen: 'morning' }),
+      task({ id: 'pinned', placementMode: 'fixed', time: '2:00 PM', dur: 30, datePinned: true, prevWhen: 'morning' }),
       task({ id: 'other', dur: 30 }),
     ]);
     var p = placement(r, 'pinned');
@@ -643,7 +643,7 @@ describe('Tier 8: Drag-Pin & Undo', () => {
   });
 
   test('S33: Pinned recurring instance has prevWhen field', () => {
-    var t = task({ id: 'recur_pin', recurring: true, when: 'fixed', time: '2:00 PM',
+    var t = task({ id: 'recur_pin', recurring: true, placementMode: 'fixed', time: '2:00 PM',
       dur: 30, generated: true, datePinned: true, prevWhen: 'lunch' });
     expect(t.prevWhen).toBe('lunch');
     // Scheduler treats it as fixed
@@ -803,7 +803,7 @@ describe('Tier 11: Recurring + Split (day-boundary rule)', () => {
     // min as partial_split unplaced. Critically: NO chunks should appear
     // on any day other than TODAY.
     var r = schedule([
-      task({ id: 'block_am', when: 'fixed', time: '6:00 AM', dur: 90, datePinned: true }),
+      task({ id: 'block_am', placementMode: 'fixed', time: '6:00 AM', dur: 90, datePinned: true }),
       task({
         id: 'rec_stretch', text: 'Stretching',
         recurring: true, generated: true, date: TODAY,
@@ -827,7 +827,7 @@ describe('Tier 11: Recurring + Split (day-boundary rule)', () => {
     // its ceiling pins it to that day, so the entire task should land in
     // unplaced with zero chunks scheduled anywhere.
     var r = schedule([
-      task({ id: 'block_am_full', when: 'fixed', time: '6:00 AM', dur: 120, datePinned: true }),
+      task({ id: 'block_am_full', placementMode: 'fixed', time: '6:00 AM', dur: 120, datePinned: true }),
       task({
         id: 'rec_stretch', text: 'Stretching',
         recurring: true, generated: true, date: TODAY,
@@ -853,7 +853,7 @@ describe('Tier 11: Recurring + Split (day-boundary rule)', () => {
     // behavior allows chunks to span days — this test locks in that
     // behavior so the day-boundary rule stays scoped to recurring.
     var r = schedule([
-      task({ id: 'block_am', when: 'fixed', time: '6:00 AM', dur: 90, datePinned: true }),
+      task({ id: 'block_am', placementMode: 'fixed', time: '6:00 AM', dur: 90, datePinned: true }),
       task({
         id: 'effort', text: '90-min effort',
         dur: 90, split: true, splitMin: 30, pri: 'P3'
@@ -880,7 +880,7 @@ describe('Tier 10: Overdue placement flags', () => {
 
   test('rigid recurring whose preferred window has passed today → _overdue on placement', () => {
     var r = schedule([
-      task({ id: 'med', text: 'Morning meds', recurring: true, rigid: true, when: 'morning', time: '7:00 AM', dur: 15, generated: true }),
+      task({ id: 'med', text: 'Morning meds', recurring: true, placementMode: 'recurring_rigid', when: 'morning', time: '7:00 AM', dur: 15, generated: true }),
     ], 540); // 9 AM — 7:00-7:15 AM window already past
     var e = entry(r, 'med');
     expect(e).not.toBeNull();
@@ -890,7 +890,7 @@ describe('Tier 10: Overdue placement flags', () => {
 
   test('rigid recurring whose time is still future today → no overdue flag', () => {
     var r = schedule([
-      task({ id: 'lunch', text: 'Lunch', recurring: true, rigid: true, when: 'lunch', time: '12:30 PM', dur: 30, generated: true }),
+      task({ id: 'lunch', text: 'Lunch', recurring: true, placementMode: 'recurring_rigid', when: 'lunch', time: '12:30 PM', dur: 30, generated: true }),
     ], 540); // 9 AM — lunch still ahead
     var e = entry(r, 'lunch');
     expect(e).not.toBeNull();
@@ -905,7 +905,7 @@ describe('Tier 10: Overdue placement flags', () => {
     var r = schedule([
       task({
         id: 'bf_yesterday', text: 'Breakfast (yesterday)',
-        recurring: true, rigid: false, when: 'morning',
+        recurring: true, placementMode: 'recurring_window', when: 'morning',
         time: '7:00 AM', preferredTimeMins: 420, dur: 30,
         date: yesterday, timeFlex: 60, generated: true
       }),
@@ -922,8 +922,8 @@ describe('Tier 10: Overdue placement flags', () => {
     var r = schedule([
       task({
         id: 'bf_done', text: 'Breakfast (done)',
-        recurring: true, rigid: false, when: 'morning',
-        time: '7:00 AM', dur: 30,
+        recurring: true, placementMode: 'recurring_window', when: 'morning',
+        time: '7:00 AM', preferredTimeMins: 420, dur: 30,
         date: yesterday, timeFlex: 60, generated: true,
         status: 'done'
       }),
@@ -941,7 +941,7 @@ describe('Tier 10: Overdue placement flags', () => {
     var r = schedule([
       task({
         id: 'afj', text: 'Apply for jobs',
-        recurring: true, rigid: false,
+        recurring: true, placementMode: 'recurring_flexible',
         when: 'morning,lunch,afternoon,evening,night',
         time: '9:00 AM', // stale scheduler placement — NOT a preference
         // preferredTimeMins: NOT SET

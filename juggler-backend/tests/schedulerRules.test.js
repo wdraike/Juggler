@@ -11,7 +11,7 @@
  *   Usable today capacity ≈ 780m (480-1260)
  */
 
-const unifiedSchedule = require('../src/scheduler/unifiedSchedule');
+const unifiedSchedule = require('../src/scheduler/unifiedScheduleV2');
 const { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX, GRID_START, GRID_END } = require('../src/scheduler/constants');
 
 const TODAY = '2026-03-22';
@@ -32,8 +32,6 @@ function makeTask(overrides) {
     location: [],
     tools: [],
     recurring: false,
-    rigid: false,
-    marker: false,
     split: false,
     datePinned: false,
     generated: false,
@@ -300,7 +298,7 @@ describe('Scheduler Rules', () => {
   describe('Group 8: Fixed tasks are immovable', () => {
     test('fixed task anchors at declared time and blocks the slot', () => {
       var tasks = [
-        makeTask({ id: 'fixed_9am', when: 'fixed', time: '9:00 AM', dur: 60, text: 'Fixed 9AM' }),
+        makeTask({ id: 'fixed_9am', placementMode: 'fixed', time: '9:00 AM', dur: 60, text: 'Fixed 9AM' }),
         makeTask({ id: 'flex_task', pri: 'P1', dur: 60, text: 'Flex task' }),
       ];
       var result = run(tasks);
@@ -323,9 +321,9 @@ describe('Scheduler Rules', () => {
   describe('Group 9: Rigid vs flexible recurringTasks', () => {
     test('rigid recurring at exact time; flexible recurring drifts within timeFlex', () => {
       var tasks = [
-        makeTask({ id: 'rigid_7am', recurring: true, rigid: true, time: '7:00 AM', dur: 30, text: 'Rigid 7AM', pri: 'P1' }),
-        makeTask({ id: 'blocker', when: 'fixed', time: '8:00 AM', dur: 30, text: 'Blocker' }),
-        makeTask({ id: 'flex_8am', recurring: true, rigid: false, time: '8:00 AM', dur: 30, timeFlex: 60, text: 'Flex 8AM', pri: 'P1' }),
+        makeTask({ id: 'rigid_7am', recurring: true, placementMode: 'recurring_rigid', time: '7:00 AM', dur: 30, text: 'Rigid 7AM', pri: 'P1' }),
+        makeTask({ id: 'blocker', placementMode: 'fixed', time: '8:00 AM', dur: 30, text: 'Blocker' }),
+        makeTask({ id: 'flex_8am', recurring: true, placementMode: 'recurring_window', time: '8:00 AM', preferredTimeMins: 480, dur: 30, timeFlex: 60, text: 'Flex 8AM', pri: 'P1' }),
       ];
       var result = run(tasks);
 
@@ -401,7 +399,7 @@ describe('Scheduler Rules', () => {
       var tasks = [];
       // Fill today with fixed tasks (600m of the ~780m usable)
       for (var i = 0; i < 10; i++) {
-        tasks.push(makeTask({ id: 'fixed_' + i, when: 'fixed', time: (8 + i) + ':00 AM', dur: 60, text: 'Fixed ' + i }));
+        tasks.push(makeTask({ id: 'fixed_' + i, placementMode: 'fixed', time: (8 + i) + ':00 AM', dur: 60, text: 'Fixed ' + i }));
       }
       tasks.push(makeTask({ id: 'big_split', pri: 'P2', dur: 600, split: true, splitMin: 30, text: 'Big split task' }));
       var result = run(tasks);
@@ -567,7 +565,7 @@ describe('Scheduler Rules', () => {
   describe('Group 20: Markers are non-blocking', () => {
     test('markers show on calendar but do not consume time slots', () => {
       var tasks = [
-        makeTask({ id: 'marker_10am', marker: true, time: '10:00 AM', dur: 120, text: 'Marker' }),
+        makeTask({ id: 'marker_10am', placementMode: 'marker', time: '10:00 AM', dur: 120, text: 'Marker' }),
         makeTask({ id: 'task_10am', pri: 'P2', dur: 60, text: 'Task at 10' }),
       ];
       var result = run(tasks);
@@ -664,13 +662,13 @@ describe('Scheduler Rules', () => {
         var m = i % 60;
         var ampm = h >= 12 ? 'PM' : 'AM';
         var dh = h > 12 ? h - 12 : (h === 0 ? 12 : h);
-        tasks.push(makeTask({ id: 'eve_f_' + i, when: 'fixed', time: dh + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm, dur: 10, date: TOMORROW }));
+        tasks.push(makeTask({ id: 'eve_f_' + i, placementMode: 'fixed', time: dh + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm, dur: 10, date: TOMORROW }));
       }
       // Also fill night block
       for (var n = 1260; n < 1380; n += 10) {
         var nh = Math.floor(n / 60);
         var nm = n % 60;
-        tasks.push(makeTask({ id: 'night_f_' + n, when: 'fixed', time: (nh > 12 ? nh - 12 : nh) + ':' + (nm < 10 ? '0' : '') + nm + ' PM', dur: 10, date: TOMORROW }));
+        tasks.push(makeTask({ id: 'night_f_' + n, placementMode: 'fixed', time: (nh > 12 ? nh - 12 : nh) + ':' + (nm < 10 ? '0' : '') + nm + ' PM', dur: 10, date: TOMORROW }));
       }
       tasks.push(makeTask({ id: 'flex_eve', when: 'evening', dur: 60, date: TOMORROW, flexWhen: true, text: 'Flex evening', datePinned: true }));
       var result = run(tasks);
@@ -693,7 +691,7 @@ describe('Scheduler Rules', () => {
         makeTask({ id: 'wrap_gift', pri: 'P3', dur: 30, dependsOn: ['buy_gift'], text: 'Wrap gift' }),
         makeTask({ id: 'get_card', pri: 'P2', dur: 20, text: 'Get wedding card' }),
         makeTask({ id: 'pack', pri: 'P2', dur: 45, deadline: dayBefore, text: 'Pack' }),
-        makeTask({ id: 'wedding', when: 'fixed', time: '2:00 PM', dur: 240, date: weddingDay, deadline: weddingDay, text: 'Wedding' }),
+        makeTask({ id: 'wedding', placementMode: 'fixed', time: '2:00 PM', dur: 240, date: weddingDay, deadline: weddingDay, text: 'Wedding' }),
       ];
       var result = run(tasks);
 
@@ -758,7 +756,7 @@ describe('Scheduler Rules', () => {
       }
       // 10x fixed events
       for (var f = 0; f < 10; f++) {
-        tasks.push(makeTask({ id: 'event_' + f, when: 'fixed', time: (9 + f) + ':00 AM', dur: 30, date: dateKey(f % 4), text: 'Event ' + f }));
+        tasks.push(makeTask({ id: 'event_' + f, placementMode: 'fixed', time: (9 + f) + ':00 AM', dur: 30, date: dateKey(f % 4), text: 'Event ' + f }));
       }
       // 5x split tasks
       for (var sp = 0; sp < 5; sp++) {
@@ -910,9 +908,9 @@ describe('Scheduler Rules', () => {
   describe('Group 33: Multiple recurringTasks competing for same time slot', () => {
     test('recurringTasks displace each other within timeFlex range', () => {
       var tasks = [
-        makeTask({ id: 'recur_a', recurring: true, rigid: true, time: '8:00 AM', dur: 30, pri: 'P1', text: 'Recurring A 8AM' }),
-        makeTask({ id: 'recur_b', recurring: true, rigid: true, time: '8:00 AM', dur: 30, pri: 'P1', text: 'Recurring B 8AM' }),
-        makeTask({ id: 'recur_c', recurring: true, rigid: true, time: '8:00 AM', dur: 30, pri: 'P1', text: 'Recurring C 8AM' }),
+        makeTask({ id: 'recur_a', recurring: true, placementMode: 'recurring_rigid', time: '8:00 AM', dur: 30, pri: 'P1', text: 'Recurring A 8AM' }),
+        makeTask({ id: 'recur_b', recurring: true, placementMode: 'recurring_rigid', time: '8:00 AM', dur: 30, pri: 'P1', text: 'Recurring B 8AM' }),
+        makeTask({ id: 'recur_c', recurring: true, placementMode: 'recurring_rigid', time: '8:00 AM', dur: 30, pri: 'P1', text: 'Recurring C 8AM' }),
       ];
       var result = run(tasks);
       // All should be placed (scheduler must handle collision)
@@ -1031,8 +1029,8 @@ describe('Scheduler Rules', () => {
     test('mixed workload never produces overlaps', () => {
       var tasks = [];
       // Mix of everything
-      tasks.push(makeTask({ id: 'fix1', when: 'fixed', time: '9:00 AM', dur: 60 }));
-      tasks.push(makeTask({ id: 'fix2', when: 'fixed', time: '2:00 PM', dur: 60 }));
+      tasks.push(makeTask({ id: 'fix1', placementMode: 'fixed', time: '9:00 AM', dur: 60 }));
+      tasks.push(makeTask({ id: 'fix2', placementMode: 'fixed', time: '2:00 PM', dur: 60 }));
       for (var i = 0; i < 8; i++) {
         tasks.push(makeTask({ id: 'flex_' + i, pri: ['P1', 'P2', 'P3', 'P4'][i % 4], dur: 30 + (i * 10) }));
       }
@@ -1193,7 +1191,7 @@ describe('Scheduler Rules', () => {
       var tasks = [];
       for (var i = 480; i < 1020; i += 60) {
         var h = Math.floor(i / 60);
-        tasks.push(makeTask({ id: 'event_' + i, when: 'fixed', time: h + ':00 ' + (h >= 12 ? 'PM' : 'AM'), dur: 45 }));
+        tasks.push(makeTask({ id: 'event_' + i, placementMode: 'fixed', time: h + ':00 ' + (h >= 12 ? 'PM' : 'AM'), dur: 45 }));
       }
       tasks.push(makeTask({ id: 'big_split', pri: 'P2', dur: 60, split: true, splitMin: 15, datePinned: true, text: 'Big split' }));
       var result = run(tasks);
@@ -1532,7 +1530,7 @@ describe('Scheduler Rules', () => {
       var tasks = [];
       // Block most of today to force splitting into tight gaps
       for (var i = 480; i < 1200; i += 60) {
-        tasks.push(makeTask({ id: 'block_' + i, when: 'fixed', time: Math.floor(i / 60) + ':00 ' + (i >= 720 ? 'PM' : 'AM'), dur: 45 }));
+        tasks.push(makeTask({ id: 'block_' + i, placementMode: 'fixed', time: Math.floor(i / 60) + ':00 ' + (i >= 720 ? 'PM' : 'AM'), dur: 45 }));
       }
       tasks.push(makeTask({ id: 'split_strict', pri: 'P2', dur: 120, split: true, splitMin: 15, text: 'Split strict' }));
       var result = run(tasks);
@@ -1891,7 +1889,7 @@ describe('Timezone & DST', () => {
       var tasks = [
         makeTask({ id: 'travel_a', pri: 'P1', dur: 60, date: '2026-03-25', text: 'Task while traveling' }),
         makeTask({ id: 'travel_b', pri: 'P2', dur: 60, date: '2026-03-25', text: 'Another travel task' }),
-        makeTask({ id: 'travel_fixed', when: 'fixed', time: '2:00 PM', dur: 120, date: '2026-03-25', text: 'Wedding' }),
+        makeTask({ id: 'travel_fixed', placementMode: 'fixed', time: '2:00 PM', dur: 120, date: '2026-03-25', text: 'Wedding' }),
       ];
       var statuses = {};
       tasks.forEach(function(t) { statuses[t.id] = ''; });
@@ -1921,7 +1919,7 @@ describe('Timezone & DST', () => {
   describe('Group 78: Tasks near midnight across timezones', () => {
     test('task at 11:30 PM in one timezone does not bleed into next day', () => {
       var tasks = [
-        makeTask({ id: 'late_night', when: 'fixed', time: '11:00 PM', dur: 30, text: 'Late night task' }),
+        makeTask({ id: 'late_night', placementMode: 'fixed', time: '11:00 PM', dur: 30, text: 'Late night task' }),
       ];
       var statuses = {};
       tasks.forEach(function(t) { statuses[t.id] = ''; });
@@ -1963,7 +1961,7 @@ describe('Timezone & DST', () => {
     test('fixed task with own tz keeps it in placement', () => {
       var tzCfg = makeCfg({ timezone: 'America/Chicago' });
       var tasks = [
-        makeTask({ id: 'fixed_et', when: 'fixed', time: '2:00 PM', dur: 60, tz: 'America/New_York', text: 'ET flight' }),
+        makeTask({ id: 'fixed_et', placementMode: 'fixed', time: '2:00 PM', dur: 60, tz: 'America/New_York', text: 'ET flight' }),
       ];
       var statuses = { fixed_et: '' };
       var result = unifiedSchedule(tasks, statuses, TODAY, NOW_MINS, tzCfg);

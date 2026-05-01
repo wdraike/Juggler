@@ -9,7 +9,7 @@
  * configuration-specific issues.
  */
 
-var unifiedSchedule = require('../src/scheduler/unifiedSchedule');
+var unifiedSchedule = require('../src/scheduler/unifiedScheduleV2');
 var { timeControl } = require('./helpers/time-control');
 var {
   makeRealConfig, makeTask, makeRigidRecurring, makeFlexRecurring,
@@ -445,7 +445,7 @@ describe('UC-9: Fixed Events & Markers', function() {
     var tc = timeControl('4/3/2026');
     tc.setTime('8:00 AM');
     var tasks = [
-      makeTask({ id: 'marker1', text: 'TV Show', dur: 60, date: tc.todayKey, time: '10:00 AM', marker: true, when: 'fixed' }),
+      makeTask({ id: 'marker1', text: 'TV Show', dur: 60, date: tc.todayKey, time: '10:00 AM', placementMode: 'marker' }),
       makeTask({ id: 'work', text: 'Work Task', dur: 60, date: tc.todayKey, when: 'morning' })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
