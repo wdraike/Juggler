@@ -282,15 +282,22 @@ async function updateEvent(client, eventUrl, task, year, tz, etag) {
 
 /**
  * Delete a calendar event.
+ * tsdav returns the HTTP Response without throwing on non-2xx — check it.
  */
 async function deleteEvent(client, eventUrl, etag) {
   var headers = {};
   if (etag) headers['If-Match'] = etag;
 
-  await client.deleteCalendarObject({
+  var response = await client.deleteCalendarObject({
     calendarObject: { url: eventUrl, etag: etag || undefined },
     headers: headers
   });
+
+  if (response && response.status >= 300 && response.status !== 404 && response.status !== 410) {
+    var err = new Error('CalDAV DELETE failed: HTTP ' + response.status);
+    err.statusCode = response.status;
+    throw err;
+  }
 }
 
 /**

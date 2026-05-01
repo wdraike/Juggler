@@ -249,6 +249,9 @@ async function sync(req, res) {
         var eventsById = {};
         for (var ei = 0; ei < events.length; ei++) {
           eventsById[events[ei].id] = events[ei];
+          // Apple events: provider_event_id stores the CalDAV URL, not the UID —
+          // index by _url too so ledger lookups work regardless of which key was stored.
+          if (events[ei]._url) eventsById[events[ei]._url] = events[ei];
         }
 
         providerData[adapter.providerId] = { token: token, events: events, eventsById: eventsById, adapter: adapter, partialFailure: !!events._hasPartialFailure };
@@ -663,7 +666,7 @@ async function sync(req, res) {
             var taskNotDone = task.status !== 'done' && task.status !== 'skip';
             if (taskIsPast && taskNotDone) {
               try {
-                await pAdapter.deleteEvent(pToken, ledger.provider_event_id);
+                await pAdapter.deleteEvent(pToken, event._url || ledger.provider_event_id);
                 await throttle();
               } catch (e3) {
                 if (!e3.message.includes('404') && !e3.message.includes('410')) throw e3;
@@ -683,7 +686,7 @@ async function sync(req, res) {
               var shouldDelete = calCompletedBehavior === 'delete' || task.status !== 'done';
               if (shouldDelete) {
                 try {
-                  await pAdapter.deleteEvent(pToken, ledger.provider_event_id);
+                  await pAdapter.deleteEvent(pToken, event._url || ledger.provider_event_id);
                   await throttle();
                 } catch (e4) {
                   if (!e4.message.includes('404') && !e4.message.includes('410')) throw e4;
@@ -954,7 +957,7 @@ async function sync(req, res) {
             // Task deleted from Juggler — delete from provider (skip in ingest-only)
             if (!isIngestOnly(pid)) {
               try {
-                await pAdapter.deleteEvent(pToken, ledger.provider_event_id);
+                await pAdapter.deleteEvent(pToken, event._url || ledger.provider_event_id);
                 await throttle();
               } catch (e) {
                 if (!e.message.includes('404') && !e.message.includes('410')) throw e;
@@ -1562,7 +1565,9 @@ async function sync(req, res) {
           // recurring instance that was regenerated with a new ID). Delete it
           // from the provider to prevent duplicates accumulating.
           try {
-            await pAdapter2.deleteEvent(pToken2, evId);
+            // For Apple, evId is the VEVENT UID but deleteEvent needs the CalDAV URL.
+            // Use _url when available; fall back to evId for GCal/MSFT.
+            await pAdapter2.deleteEvent(pToken2, newEvent._url || evId);
             await throttle();
           } catch (e7) {
             if (!e7.message.includes('404') && !e7.message.includes('410')) {
@@ -2148,7 +2153,10 @@ async function audit(req, res) {
         var events = await adapter.listEvents(token, now.toISOString(), end.toISOString(), userId);
 
         var eventsById = {};
-        events.forEach(function(e) { eventsById[e.id] = e; });
+        events.forEach(function(e) {
+          eventsById[e.id] = e;
+          if (e._url) eventsById[e._url] = e;
+        });
         provReport.calendarEvents = events.length;
 
         taskRows.forEach(function(r) {
