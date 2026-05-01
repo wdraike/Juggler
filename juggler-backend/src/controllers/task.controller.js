@@ -558,7 +558,8 @@ async function getAllTasks(req, res) {
     var cached = await cache.get(cacheKey);
     if (cached) return res.json(cached);
 
-    var query = db('tasks_v').where('user_id', req.user.id).orderBy('created_at', 'asc');
+    var query = db('tasks_v').where('user_id', req.user.id)
+      .orderByRaw('(scheduled_at IS NULL) ASC, scheduled_at ASC');
     if (req.query.limit) query = query.limit(parseInt(req.query.limit) || 1000);
     if (req.query.offset) query = query.offset(parseInt(req.query.offset) || 0);
     var rows = await query;
