@@ -20,6 +20,12 @@ const sseEmitter = require('../lib/sse-emitter');
 const { isLocked, enqueueWrite, splitFields, flushQueue } = require('../lib/task-write-queue');
 const tasksWrite = require('../lib/tasks-write');
 const { isAnchorDependentRecur } = require('../../../shared/scheduler/expandRecurring');
+var { PLACEMENT_MODES } = require('../lib/placementModes');
+
+// Fields that, when present on an incoming task patch, require us to
+// (re)derive placement_mode. Module-level so it's allocated once instead
+// of on every taskToRow() call.
+var PLACEMENT_TRIGGER_FIELDS = ['marker', 'rigid', 'when', 'recurring', 'preferredTimeMins', 'placementMode'];
 // Wrap enqueueScheduleRun to also emit SSE event so frontends refresh
 // immediately. `ids` (optional) is the list of task ids the caller just
 // wrote — when present, the frontend can upsert only those rows instead of
@@ -92,15 +98,15 @@ async function expandToAllInstanceIds(userId, ids) {
   return Object.keys(out);
 }
 
-function derivePlacementMode(marker, rigid, when, recurring, preferredTimeMins) {
-  if (marker) return 'marker';
+function derivePlacementMode(isMarker, isRigid, when, recurring, preferredTimeMins) {
+  if (isMarker) return PLACEMENT_MODES.MARKER;
   var whenStr = when || '';
-  if (whenStr.includes('fixed')) return 'fixed';
-  if (rigid && !recurring) return 'fixed';
-  if (recurring && rigid && preferredTimeMins != null) return 'recurring_rigid';
-  if (recurring && preferredTimeMins != null) return 'recurring_window';
-  if (recurring) return 'recurring_flexible';
-  return 'flexible';
+  if (whenStr.includes('fixed')) return PLACEMENT_MODES.FIXED;
+  if (isRigid && !recurring) return PLACEMENT_MODES.FIXED;
+  if (recurring && isRigid && preferredTimeMins != null) return PLACEMENT_MODES.RECURRING_RIGID;
+  if (recurring && preferredTimeMins != null) return PLACEMENT_MODES.RECURRING_WINDOW;
+  if (recurring) return PLACEMENT_MODES.RECURRING_FLEXIBLE;
+  return PLACEMENT_MODES.FLEXIBLE;
 }
 
 /** Safely parse a JSON string, returning fallback on any error. */
@@ -311,7 +317,7 @@ function rowToTask(row, timezone, sourceMap) {
   var whenParts = whenStr ? whenStr.split(',').map(function(s) { return s.trim(); }) : [];
   var isUserAnchored = boolish(row.date_pinned) || boolish(row.generated) ||
     boolish(row.recurring) || whenParts.indexOf('fixed') !== -1 || boolish(row.marker) ||
-    row.placement_mode === 'fixed' || row.placement_mode === 'marker';
+    row.placement_mode === PLACEMENT_MODES.FIXED || row.placement_mode === PLACEMENT_MODES.MARKER;
   var displayTz = timezone || null;
   if (displayTz && row.scheduled_at && isUserAnchored) {
     var local = utcToLocal(row.scheduled_at, displayTz);
@@ -394,7 +400,7 @@ function rowToTask(row, timezone, sourceMap) {
     datePinned: !!row.date_pinned,
     prevWhen: row.prev_when || null,
     marker: !!row.marker,
-    placementMode: row.placement_mode || 'flexible',
+    placementMode: row.placement_mode || PLACEMENT_MODES.FLEXIBLE,
     flexWhen: !!row.flex_when,
     travelBefore: row.travel_before != null ? row.travel_before : undefined,
     travelAfter: row.travel_after != null ? row.travel_after : undefined,
@@ -517,8 +523,7 @@ function taskToRow(task, userId, timezone, currentTask) {
   }
 
 
-  var placementFields = ['marker', 'rigid', 'when', 'recurring', 'preferredTimeMins', 'placementMode'];
-  var touchesPlacement = placementFields.some(function(f) { return task[f] !== undefined; });
+  var touchesPlacement = PLACEMENT_TRIGGER_FIELDS.some(function(f) { return task[f] !== undefined; });
   if (touchesPlacement) {
     if (task.placementMode !== undefined) {
       row.placement_mode = task.placementMode;

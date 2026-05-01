@@ -19,6 +19,7 @@ var { taskHash, userHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE, withG
 var sseEmitter = require('../lib/sse-emitter');
 var { acquireLock, releaseLock, refreshLock } = require('../lib/sync-lock');
 var { flushQueueInLock } = require('../lib/task-write-queue');
+var { PLACEMENT_MODES } = require('../lib/placementModes');
 
 // Number of consecutive syncs an event must be missing before we delete the task.
 // Prevents data loss from transient calendarView failures or API propagation delays.
@@ -1612,7 +1613,7 @@ async function sync(req, res) {
             status: '',
             when: newEvent.isAllDay ? 'allday' : 'fixed',
             date_pinned: newEvent.isAllDay ? 0 : 1,
-            placement_mode: newEvent.isTransparent ? 'marker' : (newEvent.isAllDay ? 'flexible' : 'fixed'),
+            placement_mode: newEvent.isTransparent ? PLACEMENT_MODES.MARKER : (newEvent.isAllDay ? PLACEMENT_MODES.FLEXIBLE : PLACEMENT_MODES.FIXED),
             [eventIdCol]: newEvent.id
           };
           if (newEvent.description) {

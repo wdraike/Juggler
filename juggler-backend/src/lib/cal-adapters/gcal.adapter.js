@@ -8,6 +8,7 @@ var db = require('../../db');
 var gcalApi = require('../gcal-api');
 var { jugglerDateToISO, isoToJugglerDate, computeDurationMinutes } = require('../../controllers/cal-sync-helpers');
 var { localToUtc } = require('../../scheduler/dateHelpers');
+var { PLACEMENT_MODES } = require('../placementModes');
 
 var providerId = 'gcal';
 
@@ -160,7 +161,7 @@ function applyEventToTaskFields(event, tz, currentTask) {
   }
 
   if (event.isTransparent) {
-    fields.placementMode = 'marker';
+    fields.placementMode = PLACEMENT_MODES.MARKER;
   }
 
   if (!isAllDay) {
@@ -173,8 +174,8 @@ function applyEventToTaskFields(event, tz, currentTask) {
     }
   }
 
-  if (!event.isTransparent && currentTask?.placement_mode === 'marker') {
-    fields.placementMode = 'flexible';
+  if (!event.isTransparent && currentTask?.placement_mode === PLACEMENT_MODES.MARKER) {
+    fields.placementMode = PLACEMENT_MODES.FLEXIBLE;
   }
 
   return fields;

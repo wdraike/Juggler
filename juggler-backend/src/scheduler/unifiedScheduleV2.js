@@ -48,6 +48,8 @@ var locationHelpers = require('./locationHelpers');
 var canTaskRunAtMin = locationHelpers.canTaskRunAtMin;
 var resolveLocationId = locationHelpers.resolveLocationId;
 
+var { PLACEMENT_MODES } = require('../lib/placementModes');
+
 var DAY_START = GRID_START * 60;
 var DAY_END = GRID_END * 60 + 59;
 
@@ -230,18 +232,18 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     var st = statuses[t.id] || t.status || '';
     if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'pause' || st === 'disabled') return;
 
-    var pm = t.placementMode || 'flexible';
-    var isMarker = pm === 'marker';
+    var pm = t.placementMode || PLACEMENT_MODES.FLEXIBLE;
+    var isMarker = pm === PLACEMENT_MODES.MARKER;
     // Markers are calendar indicators — they coexist with other placements at
     // the same minute, so dur=0 means they never consume occupancy.
     var dur = isMarker ? 0 : effectiveDuration(t);
     var pri = normalizePri(t.pri);
     var priRank = PRI_RANK[pri] || 50;
     var when = t.when || '';
-    var fixed = pm === 'fixed';
+    var fixed = pm === PLACEMENT_MODES.FIXED;
     var allday = hasWhen(when, 'allday');
     var pinned = !!t.datePinned;
-    var recurring = pm === 'recurring_rigid' || pm === 'recurring_window' || pm === 'recurring_flexible';
+    var recurring = pm === PLACEMENT_MODES.RECURRING_RIGID || pm === PLACEMENT_MODES.RECURRING_WINDOW || pm === PLACEMENT_MODES.RECURRING_FLEXIBLE;
     var flexWhen = !!t.flexWhen;
 
     // Derive earliest placement minute-of-day and date.
@@ -250,7 +252,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     // canonical ISO so downstream lookups against dates[].key always match.
     var anchorDate = toKey(t.date);
     var anchorMin = t.time ? parseTimeToMinutes(t.time) : null;
-    if ((pm === 'recurring_rigid' || pm === 'recurring_window') && t.preferredTimeMins != null && anchorMin == null) {
+    if ((pm === PLACEMENT_MODES.RECURRING_RIGID || pm === PLACEMENT_MODES.RECURRING_WINDOW) && t.preferredTimeMins != null && anchorMin == null) {
       anchorMin = t.preferredTimeMins;
     }
 
@@ -283,7 +285,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     // Time-window mode: placement_mode 'recurring_window' means preferred_time_mins
     // ± timeFlex. In window mode the `when` tags are ignored.
     var DEFAULT_TIME_FLEX = 60;
-    var isWindowMode = pm === 'recurring_window';
+    var isWindowMode = pm === PLACEMENT_MODES.RECURRING_WINDOW;
     var windowLo = null, windowHi = null;
     if (isWindowMode) {
       var flex = t.timeFlex != null ? t.timeFlex : DEFAULT_TIME_FLEX;
@@ -342,7 +344,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     //   - any split chunk (all chunks of the same occurrence must share the
     //     anchor day; otherwise chunk 1 could roam while chunks 2+ stay put)
     //   - non-tpc recurring (instance is day-specific, per above)
-    var isDayLocked = recurring && (pm === 'recurring_rigid' || splitTot > 1 || !isFlexibleTpc);
+    var isDayLocked = recurring && (pm === PLACEMENT_MODES.RECURRING_RIGID || splitTot > 1 || !isFlexibleTpc);
 
     items.push({
       task: t,
@@ -355,7 +357,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       isFixedWhen: fixed,
       isAllDay: allday,
       isPinned: pinned,
-      isRigid: pm === 'recurring_rigid',
+      isRigid: pm === PLACEMENT_MODES.RECURRING_RIGID,
       isRecurring: recurring,
       isMarker: isMarker,
       flexWhen: flexWhen,
@@ -508,7 +510,7 @@ function emitStepRecord(cfg, phase, item, start, dur, dateKey, locked, dayPlaced
         taskId: p.task ? p.task.id : null,
         taskText: p.task ? p.task.text : null,
         start: p.start, dur: p.dur,
-        locked: !!p.locked, marker: !!(p.task && p.task.placementMode === 'marker')
+        locked: !!p.locked, marker: !!(p.task && p.task.placementMode === PLACEMENT_MODES.MARKER)
       };
     });
   });
@@ -527,7 +529,7 @@ function emitStepRecord(cfg, phase, item, start, dur, dateKey, locked, dayPlaced
     deadline: t.deadline || null,
     preferredTimeMins: t.preferredTimeMins != null ? t.preferredTimeMins : null,
     timeFlex: t.timeFlex != null ? t.timeFlex : null,
-    rigid: !!(t.placementMode === 'recurring_rigid'),
+    rigid: t.placementMode === PLACEMENT_MODES.RECURRING_RIGID,
     travelBefore: item.travelBefore || 0,
     travelAfter: item.travelAfter || 0,
     locationRequirement: t.location || null,

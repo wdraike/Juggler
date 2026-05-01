@@ -509,7 +509,7 @@ function registerTaskTools(server, userId) {
           if (!qId || !existById[qId]) continue;
           var qFields = {};
           Object.keys(qUpdate).forEach(function(k) { if (k !== 'id') qFields[k] = qUpdate[k]; });
-          var qRow = taskToRow(qFields, userId, tz);
+          var qRow = taskToRow(qFields, userId, tz, existById[qId]);
           delete qRow.user_id;
           delete qRow.created_at;
           delete qRow._pendingTimeOnly;

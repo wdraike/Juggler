@@ -10,12 +10,10 @@
  *   5. Rebuild views — expose computed marker/rigid for backward-compat readers.
  */
 exports.up = async function(knex) {
-  // 1. Drop VIRTUAL column
   await knex.schema.table('task_masters', function(t) {
     t.dropColumn('placement_mode');
   });
 
-  // 2. Add as regular stored column
   await knex.schema.table('task_masters', function(t) {
     t.enu('placement_mode', [
       'marker', 'fixed', 'pinned_date', 'recurring_rigid',
@@ -23,7 +21,6 @@ exports.up = async function(knex) {
     ]).notNullable().defaultTo('flexible').after('marker');
   });
 
-  // 3. Backfill from existing flags (same CASE as the old VIRTUAL expression)
   await knex.raw(`
     UPDATE task_masters SET placement_mode = CASE
       WHEN marker = 1 THEN 'marker'
@@ -37,13 +34,11 @@ exports.up = async function(knex) {
     END
   `);
 
-  // 4. Drop legacy flag columns
   await knex.schema.table('task_masters', function(t) {
     t.dropColumn('marker');
     t.dropColumn('rigid');
   });
 
-  // 5. Rebuild views — drop in reverse dependency order, recreate forward
   await knex.raw('DROP VIEW IF EXISTS tasks_with_sync_v');
   await knex.raw('DROP VIEW IF EXISTS tasks_v');
 

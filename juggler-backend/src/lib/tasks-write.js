@@ -17,6 +17,8 @@
  *       -> master + instance (both share row.id). ordinal (1, 1, 1).
  */
 
+var { PLACEMENT_MODES } = require('./placementModes');
+
 var MASTER_FIELDS = [
   'id', 'user_id', 'text', 'project', 'section', 'notes', 'url',
   'dur', 'pri',
@@ -314,7 +316,7 @@ async function getOrCreateArchivedMasterId(dbOrTrx, userId) {
     text: ARCHIVED_TEXT,
     pri: 'P4',
     recurring: 0,
-    flex_when: 0, placement_mode: 'flexible',
+    flex_when: 0, placement_mode: PLACEMENT_MODES.FLEXIBLE,
     dur: 30,
     created_at: dbOrTrx.fn.now(),
     updated_at: dbOrTrx.fn.now()
