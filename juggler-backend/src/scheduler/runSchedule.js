@@ -1107,13 +1107,39 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (hasScheduledAt) {
       // Case B: was previously placed — pin in place with overdue=1.
       // Keep unscheduled=0 so the task renders at its scheduled position.
-      var overdueDbUpdate = { unscheduled: 0, overdue: 1, updated_at: db.fn.now() };
-      if (result.slackByTaskId && t.id in result.slackByTaskId) {
-        overdueDbUpdate.slack_mins = result.slackByTaskId[t.id];
-      }
-      pendingUpdates.push({ id: t.id, dbUpdate: overdueDbUpdate });
-      // Emit SSE transition only when crossing placed → overdue (not already overdue).
       var wasAlreadyOverdue = !!(rawRow && rawRow.overdue);
+
+      // Only write if there's a state change:
+      // 1. If already overdue + unscheduled already 0 → only write if slack_mins changed
+      // 2. If newly overdue → write the full transition
+      // 3. If already overdue but unscheduled was 1 → fix that
+      var needsUpdate = false;
+      var overdueDbUpdate = {};
+
+      if (wasAlreadyOverdue && rawRow && rawRow.unscheduled === 0) {
+        // Already in final state (overdue=1, unscheduled=0).
+        // Only update if slack_mins changed.
+        if (result.slackByTaskId && t.id in result.slackByTaskId &&
+            result.slackByTaskId[t.id] !== (rawRow.slack_mins || 0)) {
+          overdueDbUpdate.slack_mins = result.slackByTaskId[t.id];
+          needsUpdate = true;
+        }
+      } else {
+        // Newly overdue OR unscheduled flag needs fixing.
+        overdueDbUpdate.unscheduled = 0;
+        overdueDbUpdate.overdue = 1;
+        overdueDbUpdate.updated_at = db.fn.now();
+        if (result.slackByTaskId && t.id in result.slackByTaskId) {
+          overdueDbUpdate.slack_mins = result.slackByTaskId[t.id];
+        }
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+        pendingUpdates.push({ id: t.id, dbUpdate: overdueDbUpdate });
+      }
+
+      // Emit SSE transition only when crossing placed → overdue (not already overdue).
       if (!wasAlreadyOverdue) {
         updatedTasks.push({
           id: t.id,
