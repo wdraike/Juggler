@@ -13,7 +13,7 @@ var db = require('../db');
 var tasksWrite = require('../lib/tasks-write');
 var { getConnectedAdapters } = require('../lib/cal-adapters');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
-var { rowToTask } = require('./task.controller');
+var { rowToTask, safeParseJSON } = require('./task.controller');
 var { localToUtc, utcToLocal } = require('../scheduler/dateHelpers');
 var { taskHash, userHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE, withGCalRateLimit, callWithRateLimit } = require('./cal-sync-helpers');
 var sseEmitter = require('../lib/sse-emitter');
@@ -38,19 +38,11 @@ function withinCdnGrace(ledger, pid) {
 
 var PROVIDER_NAMES = { gcal: 'Google Calendar', msft: 'Microsoft Calendar', apple: 'Apple Calendar' };
 
-/**
- * Build a structured error detail object for sync_history rows.
- * Translates HTTP status codes and common error messages into plain-language
- * summaries, retryable flags, and user action guidance.
- *
- * @param {Error|string} err  - The caught error (or message string)
- * @param {object} opts
- * @param {string}  opts.provider       - 'gcal' | 'msft' | 'apple'
- * @param {string}  [opts.calendar]     - Calendar display name
- * @param {string}  [opts.operation]    - Human-readable operation label
- * @param {Array}   [opts.affectedTasks] - [{ id, title }]
- * @returns {object} Structured error detail
- */
+var RE_AUTH_ERR   = /invalid_grant|unauthorized|forbidden|authorization|access.?denied|token.*expired|expired.*token/i;
+var RE_404_ERR    = /not found|404/i;
+var RE_RATE_ERR   = /rate.?limit|too many requests|quota/i;
+var RE_SERVER_ERR = /server error|service unavailable|bad gateway|timeout/i;
+
 function buildErrorDetail(err, opts) {
   var msg = (err && (err.message || String(err))) || 'Unknown error';
   var provider = opts.provider || 'unknown';
@@ -58,28 +50,28 @@ function buildErrorDetail(err, opts) {
   var calendar = opts.calendar || null;
   var affectedTasks = opts.affectedTasks || [];
 
-  // Extract HTTP status if present
-  var status = (err && err.status) || (err && err.response && err.response.status) || null;
-  if (!status) {
+  var status = (err && err.status != null ? err.status : null) ||
+               (err && err.response && err.response.status != null ? err.response.status : null);
+  if (status == null) {
     var m = msg.match(/\b(4\d\d|5\d\d)\b/);
     if (m) status = parseInt(m[1], 10);
   }
 
   var summary, retryable, userAction;
 
-  if (status === 401 || status === 403 || /invalid_grant|unauthorized|forbidden|authorization|access.?denied|token.*expired|expired.*token/i.test(msg)) {
+  if (status === 401 || status === 403 || RE_AUTH_ERR.test(msg)) {
     summary = 'Could not ' + (opts.operation || 'sync') + ' — ' + providerName + ' authorization expired or access denied';
     retryable = false;
     userAction = 'Reconnect your ' + providerName + ' in Settings → Calendars';
-  } else if (status === 404 || /not found|404/i.test(msg)) {
+  } else if (status === 404 || RE_404_ERR.test(msg)) {
     summary = 'Event no longer exists on ' + providerName;
     retryable = false;
     userAction = null;
-  } else if (status === 429 || /rate.?limit|too many requests|quota/i.test(msg)) {
+  } else if (status === 429 || RE_RATE_ERR.test(msg)) {
     summary = providerName + ' rate limit hit — sync will retry automatically';
     retryable = true;
     userAction = null;
-  } else if (status >= 500 || /server error|service unavailable|bad gateway|timeout/i.test(msg)) {
+  } else if (status >= 500 || RE_SERVER_ERR.test(msg)) {
     summary = providerName + ' is temporarily unavailable — sync will retry automatically';
     retryable = true;
     userAction = null;
@@ -179,7 +171,6 @@ async function sync(req, res) {
     }
 
     // Progress helper — emits SSE events so frontend can show a progress bar
-    var PROVIDER_LABELS = { gcal: 'Google Calendar', msft: 'Microsoft Calendar', apple: 'Apple Calendar' };
     function emitProgress(phase, detail, pct, extra) {
       sseEmitter.emit(userId, 'sync:progress', {
         phase: phase, detail: detail, pct: pct || 0,
@@ -1263,7 +1254,7 @@ async function sync(req, res) {
 
       // Batch create if adapter supports it, otherwise fall back to sequential
       if (pushQueue.length > 0 && pAdapter2.batchCreateEvents) {
-        var provLabel = PROVIDER_LABELS[pid2] || pid2;
+        var provLabel = PROVIDER_NAMES[pid2] || pid2;
         emitProgress('push', 'Pushing ' + pushQueue.length + ' tasks...', 50 + (pi2 * 20), { provider: pid2, calendar: calendarLabels[pid2] || null });
         try {
           var batchResults = await pAdapter2.batchCreateEvents(pToken2, pushQueue, year, tz);
@@ -1897,7 +1888,7 @@ async function sync(req, res) {
     var doneSummaryParts = [];
     Object.keys(stats.providers).forEach(function(pid) {
       var ps = stats.providers[pid];
-      var label = PROVIDER_LABELS[pid] || pid;
+      var label = PROVIDER_NAMES[pid] || pid;
       var parts = [];
       if (ps.pulled > 0) parts.push(ps.pulled + ' pulled');
       if (ps.pushed > 0) parts.push(ps.pushed + ' pushed');
@@ -2024,15 +2015,9 @@ async function getSyncHistory(req, res) {
 
     var rows = await query.select();
     rows.forEach(function(r) {
-      if (r.old_values && typeof r.old_values === 'string') {
-        try { r.old_values = JSON.parse(r.old_values); } catch (e) { /* keep as string */ }
-      }
-      if (r.new_values && typeof r.new_values === 'string') {
-        try { r.new_values = JSON.parse(r.new_values); } catch (e) { /* keep as string */ }
-      }
-      if (r.error_detail && typeof r.error_detail === 'string') {
-        try { r.error_detail = JSON.parse(r.error_detail); } catch (e) { /* keep as string */ }
-      }
+      r.old_values   = safeParseJSON(r.old_values,   r.old_values);
+      r.new_values   = safeParseJSON(r.new_values,   r.new_values);
+      r.error_detail = safeParseJSON(r.error_detail, r.error_detail);
     });
     res.json({ items: rows, limit: limit, offset: offset });
   } catch (error) {

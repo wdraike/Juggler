@@ -25,7 +25,7 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = isTerminalStatus(status);
   var isMarker = !!task.marker;
-  var isOverdue = !isDone && (task.overdue === true || task.overdue === 1);
+  var isOverdue = !isDone && !!task.overdue;
   var borderColor = isMarker ? '#4338CA' : (isOverdue ? theme.error : priColor);
   var durLabel = task.dur ? (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm') : '';
   var isPastDue = !isDone && task.deadline && (function() { var d = parseDate(task.deadline); var t = todayDate || new Date(); if (!todayDate) t.setHours(0,0,0,0); return d && d < t; })();
@@ -48,7 +48,7 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
       style={{
         borderRadius: 6, cursor: 'pointer', overflow: 'hidden',
         background: theme.bgCard,
-        border: '1px ' + (isMarker ? 'dotted' : (task.recurring ? 'dashed' : 'solid')) + ' ' + (isDone ? theme.border : (isOverdue ? theme.error + '60' : borderColor + '40')),
+        border: '1px ' + (isMarker ? 'dotted' : (task.recurring ? 'dashed' : 'solid')) + ' ' + (isDone ? theme.border : borderColor + (isOverdue ? '60' : '40')),
         borderLeft: '3px solid ' + borderColor,
         opacity: isDone ? 0.5 : (isMarker ? 0.7 : 1),
         padding: isMobile ? '8px 10px' : '6px 10px',

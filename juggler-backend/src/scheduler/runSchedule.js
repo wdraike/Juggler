@@ -461,7 +461,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
     // Always produce the correct chunk plan — even if a prior run merged
     // chunks into one row. The scheduler places each chunk independently;
-    // the post-placement merge step (#42) recombines contiguous chunks.
+    // the post-placement merge step recombines contiguous chunks.
     // If the primary row carries the full master dur from a prior merge,
     // the drift-fix below will correct it back to chunk 1's dur.
 
@@ -916,9 +916,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
   });
 
   if (mergedOutIds.length > 0) {
-    console.log('[SCHED] #42 merge: collapsed ' + mergedOutIds.length + ' adjacent split chunk(s) into primary rows');
+    console.log('[SCHED] split-chunk merge: collapsed ' + mergedOutIds.length + ' adjacent chunk(s) into primary rows');
   }
-  // ── end #42 merge ───────────────────────────────────────────────────────────
 
   Object.keys(dayPlacements).forEach(function(dateKey) {
     var placements = dayPlacements[dateKey];
@@ -1327,14 +1326,13 @@ async function runScheduleAndPersist(userId, _retries, options) {
     await tasksWrite.updateTaskById(trx, otherUpdates[pi].id, otherUpdates[pi].dbUpdate, userId);
   }
 
-  // #42: Delete merged-out secondary chunk rows. These were pre-inserted in
-  // Phase 1 but their placement was folded into the primary chunk above.
-  // They must be removed so the DB doesn't carry dangling unscheduled rows.
+  // Delete merged-out secondary chunk rows. Pre-inserted in Phase 1 but their
+  // placement was folded into the primary chunk above.
   if (mergedOutIds.length > 0) {
     await tasksWrite.deleteTasksWhere(trx, userId, function(q) {
       return q.whereIn('id', mergedOutIds);
     });
-    console.log('[SCHED] #42 merge: deleted ' + mergedOutIds.length + ' secondary chunk row(s) from DB');
+    console.log('[SCHED] split-chunk merge: deleted ' + mergedOutIds.length + ' secondary chunk row(s) from DB');
   }
 
   console.log('[SCHED] runScheduleAndPersist: updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);

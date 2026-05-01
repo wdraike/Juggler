@@ -2136,5 +2136,6 @@ module.exports = {
   applySplitDefault,
   TEMPLATE_FIELDS,
   validateTaskInput,
-  expandToAllInstanceIds
+  expandToAllInstanceIds,
+  safeParseJSON
 };
