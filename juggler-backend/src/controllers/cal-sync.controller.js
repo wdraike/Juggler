@@ -750,7 +750,7 @@ async function sync(req, res) {
                 if (taskChanged && !eventModifiedExternally) {
                   // Task changed, event stable → push (existing behaviour)
                   pendingEventUpdates.push({
-                    eventId: ledger.provider_event_id,
+                    eventId: event._url || ledger.provider_event_id,
                     task: task,
                     ledgerId: ledger.id,
                     newHash: newHash
@@ -763,7 +763,7 @@ async function sync(req, res) {
                   if (isFixed) {
                     // Fixed tasks always win → push, log conflict
                     pendingEventUpdates.push({
-                      eventId: ledger.provider_event_id,
+                      eventId: event._url || ledger.provider_event_id,
                       task: task,
                       ledgerId: ledger.id,
                       newHash: newHash
@@ -795,7 +795,7 @@ async function sync(req, res) {
                     } else {
                       // Task newer → push
                       pendingEventUpdates.push({
-                        eventId: ledger.provider_event_id,
+                        eventId: event._url || ledger.provider_event_id,
                         task: task,
                         ledgerId: ledger.id,
                         newHash: newHash

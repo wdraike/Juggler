@@ -946,9 +946,9 @@ export default function CalSyncPanel({
               + ' at ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
           }
 
-          function formatEventTime(isoString) {
-            if (!isoString) return null;
-            var d = new Date(isoString);
+          function formatEventTime(input) {
+            if (!input) return null;
+            var d = input instanceof Date ? input : new Date(input);
             if (isNaN(d.getTime())) return null;
             return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
               + ', ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -974,8 +974,16 @@ export default function CalSyncPanel({
             var icon = ACTION_ICONS[h.action] || 'ℹ️';
             var label = ACTION_LABELS[h.action] || h.action;
             var ed = isError ? h.error_detail : null;
-            var oldTime = h.old_values ? formatEventTime(h.old_values.scheduled_at || h.old_values.startDateTime) : null;
-            var newTime = h.new_values ? formatEventTime(h.new_values.scheduled_at) : null;
+            // scheduled_at is a MySQL UTC string — must use parseDbDate to avoid local-time misparse.
+            // startDateTime is a provider-native string already in local tz — use new Date() directly.
+            var oldTime = h.old_values
+              ? formatEventTime(h.old_values.scheduled_at ? parseDbDate(h.old_values.scheduled_at) : h.old_values.startDateTime)
+              : null;
+            var newTime = h.new_values && h.new_values.scheduled_at
+              ? formatEventTime(parseDbDate(h.new_values.scheduled_at))
+              : null;
+            // Suppress the arrow when both sides show the same time (format-only difference in DB).
+            if (oldTime && newTime && oldTime === newTime) { oldTime = null; newTime = null; }
 
             return (
               <div key={i} style={{
