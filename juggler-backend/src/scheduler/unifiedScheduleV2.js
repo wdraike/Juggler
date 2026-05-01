@@ -78,6 +78,12 @@ function reserveWithTravel(occ, start, dur, tb, ta) {
   var e = Math.min(start + dur + (ta || 0), 1440);
   for (var i = s; i < e; i++) occ[i] = true;
 }
+function rebuildPrefix(occ, psum) {
+  psum[0] = 0;
+  for (var i = 0; i < 1440; i++) {
+    psum[i + 1] = psum[i] + (occ[i] ? 1 : 0);
+  }
+}
 function isFree(occ, start, dur) {
   var end = Math.min(start + dur, 1440);
   for (var i = start; i < end; i++) if (occ[i]) return false;
@@ -135,7 +141,7 @@ function buildDates(todayKey, cfg, allTasks) {
 // Extend `dates` incrementally when an infinite-slack task's search walks
 // past the current horizon. Only called on-demand so the common fast path
 // doesn't pay for 365 days of window computation upfront.
-function extendDatesTo(targetIdx, dates, dayWindows, dayBlocks, dayOcc, dayPlaced, dayPlacements, timeBlocks, cfg) {
+function extendDatesTo(targetIdx, dates, dayWindows, dayBlocks, dayOcc, dayOccPrefix, dayPlaced, dayPlacements, timeBlocks, cfg) {
   if (dates.length === 0) return;
   var last = dates[dates.length - 1].date;
   while (dates.length <= targetIdx && dates.length < MAX_SEARCH_DAYS) {
@@ -149,6 +155,7 @@ function extendDatesTo(targetIdx, dates, dayWindows, dayBlocks, dayOcc, dayPlace
       isToday: false
     });
     dayOcc[key] = {};
+    dayOccPrefix[key] = new Int32Array(1441);
     dayPlaced[key] = [];
     dayPlacements[key] = [];
     dayBlocks[key] = getBlocksForDate(key, timeBlocks, cfg);
@@ -408,19 +415,25 @@ function eligibleWindows(item, dateKey, dayWindows, dayBlocks, relaxWhen) {
 
 // Sum free minutes across eligible windows in a date range, clamped by
 // occupancy. Used for slack = capacity − duration.
-function capacityInRange(item, dates, startIdx, endIdx, dayWindows, dayBlocks, dayOcc) {
+function capacityInRange(item, dates, startIdx, endIdx, dayWindows, dayBlocks, dayOcc, dayOccPrefix) {
   if (startIdx > endIdx) return 0;
   var total = 0;
   for (var i = startIdx; i <= endIdx && i < dates.length; i++) {
     var d = dates[i];
     var wins = eligibleWindows(item, d.key, dayWindows, dayBlocks);
-    var occ = dayOcc[d.key] || {};
-    wins.forEach(function(w) {
-      var s = w[0], e = w[1];
-      var freeMins = 0;
-      for (var m = s; m < e; m++) if (!occ[m]) freeMins++;
-      total += freeMins;
-    });
+    var psum = dayOccPrefix[d.key];
+    if (psum) {
+      wins.forEach(function(w) {
+        var s = w[0], e = w[1];
+        total += (e - s) - (psum[e] - psum[s]);
+      });
+    } else {
+      var occ = dayOcc[d.key] || {};
+      wins.forEach(function(w) {
+        var s = w[0], e = w[1];
+        for (var m = s; m < e; m++) if (!occ[m]) total++;
+      });
+    }
   }
   return total;
 }
@@ -440,7 +453,7 @@ function indexOfDate(dates, dateLike) {
   return -1;
 }
 
-function computeSlack(item, dates, dayWindows, dayBlocks, dayOcc) {
+function computeSlack(item, dates, dayWindows, dayBlocks, dayOcc, dayOccPrefix) {
   // No deadline → unconstrained. Free tasks sort to the end of the queue.
   if (!item.deadlineDate) return Infinity;
 
@@ -452,7 +465,7 @@ function computeSlack(item, dates, dayWindows, dayBlocks, dayOcc) {
   var deadlineIdx = indexOfDate(dates, item.deadlineDate);
   if (deadlineIdx < 0) deadlineIdx = dates.length - 1;
 
-  var cap = capacityInRange(item, dates, earliestIdx, deadlineIdx, dayWindows, dayBlocks, dayOcc);
+  var cap = capacityInRange(item, dates, earliestIdx, deadlineIdx, dayWindows, dayBlocks, dayOcc, dayOccPrefix);
   return cap - item.dur;
 }
 
@@ -710,7 +723,7 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   while (i <= latestIdx || canExtend) {
     if (i >= dates.length) {
       if (!canExtend) break;
-      extendDatesTo(i, dates, dayWindows, dayBlocks, dayOcc,
+      extendDatesTo(i, dates, dayWindows, dayBlocks, dayOcc, env.dayOccPrefix,
         env.dayPlaced, env.dayPlacements, env.timeBlocks, cfg);
       if (i >= dates.length) break; // MAX_SEARCH_DAYS reached
       latestIdx = dates.length - 1;
@@ -820,12 +833,14 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   var timeBlocks = cfg.timeBlocks || constants.DEFAULT_TIME_BLOCKS;
 
   var dayOcc = {};
+  var dayOccPrefix = {};
   var dayWindows = {};
   var dayBlocks = {};
   var dayPlaced = {};
   var dayPlacements = {};
   dates.forEach(function(d) {
     dayOcc[d.key] = {};
+    dayOccPrefix[d.key] = new Int32Array(1441);
     dayPlaced[d.key] = [];
     dayPlacements[d.key] = [];
     dayBlocks[d.key] = getBlocksForDate(d.key, timeBlocks, cfg);
@@ -849,6 +864,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   var env = {
     dayPlaced: dayPlaced,
     dayPlacements: dayPlacements,
+    dayOccPrefix: dayOccPrefix,
     lastByMaster: lastByMaster,
     timeBlocks: timeBlocks
   };
@@ -901,13 +917,17 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     queue.push(item);
   });
 
+  // Rebuild all prefix sums once after immovables are placed so the slack
+  // computation below sees correct occupancy for every day.
+  dates.forEach(function(d) { rebuildPrefix(dayOcc[d.key], dayOccPrefix[d.key]); });
+
   // Compute initial slack AND cache capacity for each queued item.
   // Capacity is the total free minutes in the item's eligible windows
   // across its earliest..deadline range (just slack + duration). After
   // each placement we subtract the consumed overlap from capacity and
   // re-derive slack — avoids the O(days × windows × minutes) recompute.
   queue.forEach(function(item) {
-    item.slack = computeSlack(item, dates, dayWindows, dayBlocks, dayOcc);
+    item.slack = computeSlack(item, dates, dayWindows, dayBlocks, dayOcc, dayOccPrefix);
     // Capacity only meaningful for finite-slack items — free tasks
     // (slack=Infinity) never need re-sort.
     if (item.slack != null && isFinite(item.slack)) {
