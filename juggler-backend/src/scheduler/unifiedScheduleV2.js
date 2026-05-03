@@ -378,7 +378,17 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       masterId: t.sourceId || t.master_id || null,
       splitOrdinal: splitOrd,
       splitTotal: splitTot,
-      slack: null // filled later
+      slack: null, // filled later
+      // RECURRING_FLEXIBLE tasks whose scheduled time has already passed today
+      // get pushed to the latest available slot so they stay visible on the
+      // day grid and the user can still mark them done before end of day.
+      // RECURRING_WINDOW tasks are intentionally excluded — when their preferred
+      // time window is past they should go to unplaced with reason 'missed'.
+      preferLatestSlot: (
+        pm === PLACEMENT_MODES.RECURRING_FLEXIBLE &&
+        anchorDate === todayKey &&
+        anchorMin != null && nowMins != null && anchorMin < nowMins
+      )
     });
   });
 
@@ -754,6 +764,65 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   return null;
 }
 
+// Mirror of findEarliestSlot that searches from the end of the day backwards,
+// returning the latest free slot. Used for scheduler-managed recurring tasks
+// whose original time has passed — keeps them visible at end-of-day so the
+// user can still mark them done.
+function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
+  var earliestIdx = 0;
+  var latestIdx = dates.length - 1;
+  if (item.deadlineDate && !(opts && opts.ignoreDeadline)) {
+    var di = indexOfDate(dates, item.deadlineDate);
+    if (di >= 0) latestIdx = di;
+  }
+  if (item.isRecurring && item.anchorDate) {
+    var ai = indexOfDate(dates, item.anchorDate);
+    if (ai >= 0) {
+      earliestIdx = ai;
+      if (item.isDayLocked) {
+        latestIdx = ai;
+      } else if (item.cycleDays > 0) {
+        var capIdx = ai + item.cycleDays - 1;
+        if (capIdx < latestIdx) latestIdx = capIdx;
+      } else {
+        latestIdx = ai;
+      }
+    }
+  }
+
+  var placedById = opts && opts.placedById;
+  var statuses = (opts && opts.statuses) || {};
+  var checkDeps = placedById && item.dependsOn && item.dependsOn.length > 0;
+  var relaxWhen = !!(opts && opts.relaxWhen);
+  var cfg = (opts && opts.cfg) || null;
+  var toolMatrix = cfg && cfg.toolMatrix;
+  var checkLoc = cfg && item.task && (
+    (Array.isArray(item.task.location) && item.task.location.length > 0) ||
+    (Array.isArray(item.task.tools) && item.task.tools.length > 0)
+  );
+
+  for (var i = latestIdx; i >= earliestIdx; i--) {
+    var d = dates[i];
+    if (item.allowedDows && !item.allowedDows[d.isoDow]) continue;
+    var wins = eligibleWindows(item, d.key, dayWindows, dayBlocks, relaxWhen);
+    if (!wins.length) continue;
+    var occ = dayOcc[d.key] || {};
+    var blocks = dayBlocks[d.key];
+    for (var w = wins.length - 1; w >= 0; w--) {
+      var winStart = wins[w][0];
+      var winEnd = wins[w][1];
+      var startMax = Math.floor((winEnd - item.dur) / 15) * 15;
+      for (var s = startMax; s >= winStart; s -= 15) {
+        if (!isFreeWithTravel(occ, s, item.dur, item.travelBefore, item.travelAfter)) continue;
+        if (checkDeps && !depsSatisfied(item, i, s, placedById, statuses, dates)) continue;
+        if (checkLoc && !canTaskRunAtMin(item.task, d.key, s, cfg, toolMatrix, blocks)) continue;
+        return { dateKey: d.key, start: s };
+      }
+    }
+  }
+  return null;
+}
+
 // Central placement attempt with fallback ladder. Returns:
 //   { slot, overdue, relaxed } on success (any field may be unset/false)
 //   { slot: null } on failure
@@ -766,26 +835,36 @@ function tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, 
   var base = { placedById: placedById, statuses: statuses, cfg: cfg, env: env };
   var overdueApplicable = item.slack != null && isFinite(item.slack) && item.slack < 0;
   var flexApplicable = !!item.flexWhen;
+  var findSlot = item.preferLatestSlot ? findLatestSlot : findEarliestSlot;
 
-  var slot = findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, base);
+  var slot = findSlot(item, dates, dayWindows, dayBlocks, dayOcc, base);
   if (slot) return { slot: slot };
 
   if (overdueApplicable) {
-    slot = findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc,
+    slot = findSlot(item, dates, dayWindows, dayBlocks, dayOcc,
       Object.assign({}, base, { ignoreDeadline: true }));
     if (slot) return { slot: slot, overdue: true };
   }
 
   if (flexApplicable) {
-    slot = findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc,
+    slot = findSlot(item, dates, dayWindows, dayBlocks, dayOcc,
       Object.assign({}, base, { relaxWhen: true }));
     if (slot) return { slot: slot, relaxed: true };
   }
 
   if (overdueApplicable && flexApplicable) {
-    slot = findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc,
+    slot = findSlot(item, dates, dayWindows, dayBlocks, dayOcc,
       Object.assign({}, base, { ignoreDeadline: true, relaxWhen: true }));
     if (slot) return { slot: slot, overdue: true, relaxed: true };
+  }
+
+  // Today's overdue recurring flexible tasks: if the designated when-window has
+  // passed and the normal retries all failed, force a latest-slot relaxed-when
+  // placement so the task stays visible and the user can still complete it.
+  if (item.preferLatestSlot) {
+    slot = findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc,
+      Object.assign({}, base, { relaxWhen: true }));
+    if (slot) return { slot: slot, relaxed: true };
   }
 
   return { slot: null };

@@ -7,7 +7,7 @@ import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import ReactDOM from 'react-dom';
 import { getTheme } from '../../theme/colors';
 import { GRID_START, GRID_END, PRI_COLORS, STATUS_MAP, MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, locIcon, LOC_TINT, locBgTint, DEFAULT_LOCATIONS, WHEN_TAG_ICONS, DEFAULT_TOOLS } from '../../state/constants';
-import { formatHour, formatDateKey } from '../../scheduler/dateHelpers';
+import { formatHour, formatDateKey, parseDate } from '../../scheduler/dateHelpers';
 import { getBlocksForDate, parseWhen } from '../../scheduler/timeBlockHelpers';
 import { resolveLocationId, getLocationForDatePure } from '../../scheduler/locationHelpers';
 import StatusToggle from '../schedule/StatusToggle';
@@ -868,9 +868,12 @@ export default function DailyView({
       if (scheduledIds[u.id]) return;
       if (u.taskType === 'recurring_template') return;
       // Only show unplaced items whose intended date is the day being viewed.
-      // expandRecurring's `date` field is the occurrence day in M/D.
+      // u.date may be M/D (from rowToTask) or ISO — normalize before comparing.
       var uDate = u.date || u._candidateDate;
-      if (uDate && uDate !== selectedDateKey) return;
+      if (uDate && uDate !== selectedDateKey) {
+        var parsed = parseDate(uDate);
+        if (!parsed || formatDateKey(parsed) !== selectedDateKey) return;
+      }
       if (u.sourceId && scheduledByOccurrence[u.sourceId + '|' + (uDate || '')]) return;
       var st = statuses[u.id] || '';
       if ((st === 'done' || st === 'cancel' || st === 'skip') && filter !== 'all' && filter !== 'done' && filter !== st) return;

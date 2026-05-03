@@ -961,3 +961,58 @@ describe('Tier 10: Overdue placement flags', () => {
     if (e) expect(!!e.p._overdue).toBe(false);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// TIER 11: recurring_flexible preferLatestSlot
+// ═══════════════════════════════════════════════════════════════════
+
+describe('Tier 11: recurring_flexible past-anchor placement', () => {
+
+  test('S51: recurring_flexible past anchor time → placed at latest available slot, not unplaced', () => {
+    // Mirrors "Submit Weekly UI Claim" at 12:30 PM when it's now 1:20 PM.
+    // preferLatestSlot fires → findLatestSlot finds the latest free afternoon slot.
+    var r = schedule([
+      task({
+        id: 'weekly_claim',
+        text: 'Submit Weekly Claim',
+        recurring: true,
+        placementMode: 'recurring_flexible',
+        when: 'afternoon',
+        time: '12:30 PM', // anchor time — now past
+        dur: 30,
+        date: TODAY,
+        generated: true,
+      }),
+    ], 800); // 1:20 PM — past anchor
+    var p = placement(r, 'weekly_claim');
+    expect(p).not.toBeNull();
+    expect(p.day).toBe(TODAY);
+    // Placed at the LATEST free afternoon slot (4:30 PM = 990 min), not at anchor
+    expect(p.start).toBe(990);
+    expect(isUnplaced(r, 'weekly_claim')).toBe(false);
+  });
+
+  test('S52: recurring_flexible before anchor time → placed via normal earliest-slot logic', () => {
+    // At 11:00 AM (660 min), the 12:30 PM anchor has NOT passed → preferLatestSlot=false.
+    // Normal findEarliestSlot fires and places at the earliest available afternoon slot.
+    var r = schedule([
+      task({
+        id: 'weekly_claim_early',
+        text: 'Submit Weekly Claim (future)',
+        recurring: true,
+        placementMode: 'recurring_flexible',
+        when: 'afternoon',
+        time: '12:30 PM',
+        dur: 30,
+        date: TODAY,
+        generated: true,
+      }),
+    ], 660); // 11:00 AM — anchor still ahead
+    var p = placement(r, 'weekly_claim_early');
+    expect(p).not.toBeNull();
+    expect(p.day).toBe(TODAY);
+    // Placed at the EARLIEST free afternoon slot (12:00 PM = 780 min), not at the latest
+    expect(p.start).toBe(780);
+    expect(isUnplaced(r, 'weekly_claim_early')).toBe(false);
+  });
+});

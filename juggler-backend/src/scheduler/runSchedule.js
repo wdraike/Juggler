@@ -951,7 +951,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // patch / DB update even though the task just moved.
     var priorDate = original._preReconDate != null ? original._preReconDate : original.date;
     var priorTime = original._preReconTime != null ? original._preReconTime : original.time;
-    var dateChanged = newDate !== priorDate;
+    // Normalize to ISO so M/D format from rowToTask never produces a false dateChanged.
+    var priorDateIso = priorDate ? (formatDateKey(parseDate(priorDate)) || priorDate) : priorDate;
+    var dateChanged = newDate !== priorDateIso;
     var timeChanged = newTimeDisplay !== priorTime;
 
     // Never touch recurring templates — they're blueprints, not schedulable tasks.
@@ -1576,9 +1578,12 @@ async function getSchedulePlacements(userId, options) {
       });
       if (hydratedPlacements[dk].length === 0) delete hydratedPlacements[dk];
     });
+    var unplacedTasks = (cache.unplaced || []).map(function(id) {
+      return fastTaskById[id] || null;
+    }).filter(Boolean);
     return {
       dayPlacements: hydratedPlacements,
-      unplaced: cache.unplaced || [],
+      unplaced: unplacedTasks,
       score: cache.score || {},
       warnings: cache.warnings || [],
       hasPastTasks: false
