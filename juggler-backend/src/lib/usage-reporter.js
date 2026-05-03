@@ -63,7 +63,7 @@ async function flush() {
           'X-Internal-Key': INTERNAL_KEY
         },
         body: JSON.stringify({ productId: await getProductId() || PRODUCT_LABEL, events }),
-        signal: AbortSignal.timeout(5000)
+        signal: AbortSignal.timeout(30000)
       });
     }
   } catch (err) {

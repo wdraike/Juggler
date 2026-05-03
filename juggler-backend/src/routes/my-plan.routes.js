@@ -16,7 +16,7 @@ async function getPlanName(planId) {
     const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
     const productId = await getProductId() || PRODUCT_LABEL;
     const res = await fetch(`${paymentUrl}/api/plans?product=${productId}&include_all=true`, {
-      signal: AbortSignal.timeout(3000)
+      signal: AbortSignal.timeout(30000)
     });
     if (res.ok) {
       const data = await res.json();
@@ -123,7 +123,7 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
       const productId = await getProductId() || PRODUCT_LABEL;
       const subRes = await fetch(`${paymentUrl}/internal/users/${userId}/subscriptions?product=${productId}`, {
         headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(3000)
+        signal: AbortSignal.timeout(30000)
       });
       if (subRes.ok) {
         const subData = await subRes.json();

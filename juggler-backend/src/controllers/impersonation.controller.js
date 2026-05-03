@@ -10,7 +10,7 @@ async function callAuthServiceImpersonate(adminUserId, targetUserId, reason) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Internal-Key': key },
     body: JSON.stringify({ admin_user_id: adminUserId, target_user_id: targetUserId, reason: reason || null }),
-    signal: AbortSignal.timeout(5000),
+    signal: AbortSignal.timeout(30000),
   });
   const text = await response.text();
   const payload = text ? JSON.parse(text) : {};

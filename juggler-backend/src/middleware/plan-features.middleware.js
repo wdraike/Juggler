@@ -30,7 +30,7 @@ async function getProductId() {
     try {
       const res = await fetch(`${paymentUrl}/internal/products/${PRODUCT_LABEL}`, {
         headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(5000)
+        signal: AbortSignal.timeout(30000)
       });
       if (!res.ok) throw new Error(`Product discovery failed (${res.status})`);
       const data = await res.json();
@@ -58,7 +58,7 @@ async function fetchPlanFeatures() {
   const filter = productId ? `?product=${productId}` : `?product=${PRODUCT_LABEL}`;
   const response = await fetch(`${paymentUrl}/api/plans${filter}&include_all=true`, {
     headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(5000)
+    signal: AbortSignal.timeout(30000)
   });
 
   if (!response.ok) throw new Error(`Payment service returned ${response.status}`);
@@ -110,7 +110,7 @@ async function getUserPlanId(userId) {
     const internalKey = process.env.INTERNAL_SERVICE_KEY || '';
     const res = await fetch(`${paymentUrl}/internal/users/${userId}/active-plans`, {
       headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(3000)
+      signal: AbortSignal.timeout(30000)
     });
     if (!res.ok) throw new Error(`Payment service returned ${res.status}`);
     const data = await res.json();
