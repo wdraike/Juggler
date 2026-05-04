@@ -8,12 +8,11 @@ import { useAuth } from '../auth/AuthProvider';
 import { getTheme, BRAND } from '../../theme/colors';
 import { DAY_NAMES } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
-import usePlanInfo from '../../hooks/usePlanInfo';
 import { getTimezoneAbbr } from '../../utils/timezone';
-import PlanUsagePanel from '../billing/PlanUsagePanel';
-import FeedbackButton from '../feedback/FeedbackButton';
 import FeedbackDialog from '../feedback/FeedbackDialog';
 import HealthDot from './HealthDot';
+import FontSizeControl from './FontSizeControl';
+import UserDropdown from './UserDropdown';
 
 import { services, homeUrl } from '../../proxy-config';
 var BILLING_URL = services.billing.frontend;
@@ -28,21 +27,8 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
   var theme = getTheme(darkMode);
   var { user, logout } = useAuth();
   var [showOverflow, setShowOverflow] = useState(false);
-  var [showPlanPanel, setShowPlanPanel] = useState(false);
   var [showFeedback, setShowFeedback] = useState(false);
-  var planPanelRef = useRef(null);
   var overflowRef = useRef(null);
-  var { planName, usageSummary, trialInfo, loading: planLoading, hasSubscription, disabledItems } = usePlanInfo();
-
-  // Close plan panel on outside click
-  useEffect(function() {
-    if (!showPlanPanel) return;
-    function handleClick(e) {
-      if (planPanelRef.current && !planPanelRef.current.contains(e.target)) setShowPlanPanel(false);
-    }
-    document.addEventListener('mousedown', handleClick);
-    return function() { document.removeEventListener('mousedown', handleClick); };
-  }, [showPlanPanel]);
 
   // Close overflow on outside click
   useEffect(function() {
@@ -57,14 +43,14 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
   // Overflow menu items — shown at mobile AND tablet-ish widths
   var overflowItems = [];
   if (useOverflow) {
-    overflowItems.push({ label: 'Settings', icon: '\u2699\uFE0F', onClick: onShowSettings });
-    overflowItems.push({ label: 'Import/Export', icon: '\uD83D\uDCE6', onClick: onShowExport });
-    if (onShowCalSync || onShowGCalSync || onShowMsftCalSync) overflowItems.push({ label: 'Calendar Sync', icon: '\uD83D\uDCC5', onClick: onShowCalSync || onShowGCalSync || onShowMsftCalSync });
-    if (onShowHelp) overflowItems.push({ label: 'Help', icon: '\u2753', onClick: onShowHelp });
-    overflowItems.push({ label: 'Report Issue', icon: '\uD83D\uDC1B', onClick: function() { setShowFeedback(true); } });
-    overflowItems.push({ label: (planName || 'Free') + ' Plan', icon: '\uD83D\uDCB3', onClick: function() { setShowPlanPanel(function(v) { return !v; }); } });
-    overflowItems.push({ label: darkMode ? 'Light Mode' : 'Dark Mode', icon: darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19', onClick: function() { setDarkMode(function(d) { return !d; }); } });
-    if (user) overflowItems.push({ label: 'Sign Out', icon: '\uD83D\uDEAA', onClick: logout });
+    overflowItems.push({ label: 'Settings', icon: '⚙️', onClick: onShowSettings });
+    overflowItems.push({ label: 'Import/Export', icon: '📦', onClick: onShowExport });
+    if (onShowCalSync || onShowGCalSync || onShowMsftCalSync) overflowItems.push({ label: 'Calendar Sync', icon: '📅', onClick: onShowCalSync || onShowGCalSync || onShowMsftCalSync });
+    if (onShowHelp) overflowItems.push({ label: 'Help', icon: '❓', onClick: onShowHelp });
+    overflowItems.push({ label: 'Report Issue', icon: '🐛', onClick: function() { setShowFeedback(true); } });
+    overflowItems.push({ label: 'Billing', icon: '💳', onClick: function() { window.open(BILLING_URL + '/plans', '_blank'); } });
+    overflowItems.push({ label: darkMode ? 'Light Mode' : 'Dark Mode', icon: darkMode ? '☀️' : '🌙', onClick: function() { setDarkMode(function(d) { return !d; }); } });
+    if (user) overflowItems.push({ label: 'Sign Out', icon: '🚪', onClick: logout });
   }
 
   return (
@@ -176,8 +162,8 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
                   var syncProvider = calSyncing && calSyncProgress && calSyncProgress.provider;
                   var syncIcon = syncProvider === 'gcal' ? 'G'
                     : syncProvider === 'msft' ? 'M'
-                    : syncProvider === 'apple' ? '\uD83C\uDF4E'
-                    : '\uD83D\uDCC5';
+                    : syncProvider === 'apple' ? '🍎'
+                    : '📅';
                   var iconColor = syncProvider === 'gcal' ? '#4285F4'
                     : syncProvider === 'msft' ? '#00A4EF'
                     : syncProvider === 'apple' ? '#A3AAAE'
@@ -204,18 +190,6 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
               </div>
             )}
             {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help guide — how the scheduler works, task properties, keyboard shortcuts">&#x2753;</button>}
-            <FeedbackButton darkMode={darkMode} theme={theme} isMobile={isMobile} />
-            {hasSubscription && (
-            <div ref={planPanelRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-              <button onClick={function() { setShowPlanPanel(function(v) { return !v; }); }} style={{ ...btnStyle(theme, isMobile), position: 'relative' }} title={'Plan: ' + (planName || 'Free')}>
-                &#x1F4B3;
-                {usageSummary.some(function(u) { return u.nearLimit || u.atLimit; }) && (
-                  <span style={{ position: 'absolute', top: -1, right: -1, width: 7, height: 7, borderRadius: '50%', background: usageSummary.some(function(u) { return u.atLimit; }) ? '#C62828' : '#E65100' }} />
-                )}
-              </button>
-              {showPlanPanel && <PlanUsagePanel planName={planName} usageSummary={usageSummary} trialInfo={trialInfo} loading={planLoading} theme={theme} onClose={function() { setShowPlanPanel(false); }} disabledItems={disabledItems} onManageDisabled={onManageDisabled} />}
-            </div>
-            )}
             {activeTimezone && (
               <span title={activeTimezone + ' (' + (tzSource || 'auto') + ')'}
                 style={{
@@ -227,28 +201,11 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
                 {getTimezoneAbbr(activeTimezone)}
               </span>
             )}
+            <FontSizeControl theme={theme} isMobile={isMobile} />
             <button onClick={() => setDarkMode(d => !d)} style={btnStyle(theme, isMobile)} title="Toggle dark mode">
-              {darkMode ? '\u2600\uFE0F' : '\uD83C\uDF19'}
+              {darkMode ? '☀️' : '🌙'}
             </button>
-            {user && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {user.picture && (
-                  <img src={user.picture} alt="" style={{ width: 24, height: 24, borderRadius: 12 }} />
-                )}
-                <button onClick={logout} title="Sign out of your account" style={{
-                  ...btnStyle(theme, isMobile), fontSize: 11, display: 'flex', alignItems: 'center', gap: 4,
-                  transition: 'color 0.2s'
-                }}
-                onMouseEnter={e => e.currentTarget.style.color = '#8B2635'}
-                onMouseLeave={e => e.currentTarget.style.color = theme.headerTextMuted}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.59L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
-                  </svg>
-                  Sign Out
-                </button>
-              </div>
-            )}
+            <UserDropdown user={user} theme={theme} isMobile={isMobile} onShowSettings={onShowSettings} logout={logout} onReportIssue={function() { setShowFeedback(true); }} />
           </>
         )}
 
