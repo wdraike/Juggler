@@ -168,8 +168,8 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
         {/* Desktop: show all buttons inline */}
         {!useOverflow && (
           <>
-            <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings \u2014 locations, tools, templates, and preferences">&#x2699;&#xFE0F;</button>
-            <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export \u2014 save or load tasks as JSON">&#x1F4E6;</button>
+            <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings — locations, tools, templates, and preferences">&#x2699;&#xFE0F;</button>
+            <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export — save or load tasks as JSON">&#x1F4E6;</button>
             {(onShowGCalSync || onShowMsftCalSync) && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 {(function() {
@@ -203,7 +203,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
                 )}
               </div>
             )}
-            {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help guide \u2014 how the scheduler works, task properties, keyboard shortcuts">&#x2753;</button>}
+            {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help guide — how the scheduler works, task properties, keyboard shortcuts">&#x2753;</button>}
             <FeedbackButton darkMode={darkMode} theme={theme} isMobile={isMobile} />
             {hasSubscription && (
             <div ref={planPanelRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>

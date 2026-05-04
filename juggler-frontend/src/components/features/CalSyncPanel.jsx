@@ -430,24 +430,32 @@ export default function CalSyncPanel({
       setResults(data);
       // Build smart toast from summary
       var summary = data.summary || [];
-      var hasIssue = summary.some(function(s) { return s.hasIssue; });
-      var pins = summary.filter(function(s) { return s.type === 'pin'; });
+      var errors = summary.filter(function(s) { return s.type === 'error'; });
+      var nonErrors = summary.filter(function(s) { return s.type !== 'error'; });
+      var pins = nonErrors.filter(function(s) { return s.type === 'pin'; });
+      var hasDepIssue = nonErrors.some(function(s) { return s.hasIssue; });
       var toastMsg;
-      if (summary.length === 0) {
+      if (nonErrors.length === 0 && errors.length > 0) {
+        var firstEd = errors[0].errorDetail;
+        var errSummary = firstEd ? firstEd.summary : errors[0].message;
+        toastMsg = errors.length === 1 ? errSummary : errors.length + ' sync errors — see details below';
+      } else if (summary.length === 0) {
         toastMsg = 'Already in sync';
-      } else if (summary.length <= 2) {
-        toastMsg = 'Synced: ' + summary.map(function(s) { return s.text ? "'" + s.text + "' " + s.message.toLowerCase() : s.message; }).join('. ');
+      } else if (nonErrors.length <= 2) {
+        toastMsg = 'Synced: ' + nonErrors.map(function(s) { return s.text ? "'" + s.text + "' " + s.message.toLowerCase() : s.message; }).join('. ');
+        if (errors.length > 0) toastMsg += ' · ' + errors.length + ' error' + (errors.length > 1 ? 's' : '');
       } else {
         var counts = [];
-        var pullCount = summary.filter(function(s) { return s.type === 'pull' || s.type === 'create'; }).length;
-        var pushCount = summary.filter(function(s) { return s.type === 'push'; }).length;
+        var pullCount = nonErrors.filter(function(s) { return s.type === 'pull' || s.type === 'create'; }).length;
+        var pushCount = nonErrors.filter(function(s) { return s.type === 'push'; }).length;
         if (pullCount) counts.push(pullCount + ' updated');
         if (pushCount) counts.push(pushCount + ' pushed');
         if (pins.length) counts.push(pins.length + ' pinned');
         toastMsg = 'Synced: ' + counts.join(', ');
+        if (errors.length > 0) toastMsg += ' · ' + errors.length + ' error' + (errors.length > 1 ? 's' : '');
       }
-      if (hasIssue) toastMsg += '. Check Conflicts for dependency issues.';
-      showToast(toastMsg, hasIssue ? 'warning' : 'success');
+      if (hasDepIssue) toastMsg += '. Check Conflicts for dependency issues.';
+      showToast(toastMsg, errors.length > 0 ? 'error' : hasDepIssue ? 'warning' : 'success');
       if (onSyncComplete) onSyncComplete();
     } catch (e) {
       if (e.response?.status === 409) {
@@ -870,16 +878,39 @@ export default function CalSyncPanel({
           function renderEntry(s, i) {
             var isError = s.type === 'error';
             var isIssue = s.hasIssue;
+            var ed = isError ? (s.errorDetail || null) : null;
             return (
               <div key={i} style={{
                 display: 'flex', gap: 6, alignItems: 'flex-start', padding: '4px 0',
                 fontSize: 11, color: isError ? '#DC2626' : isIssue ? '#92400E' : theme.text
               }}>
                 <span style={{ flexShrink: 0, fontSize: 10 }}>{icons[s.type] || icons.info}</span>
-                <div>
-                  {s.text && <strong>{s.text}</strong>}
-                  {s.text && ' — '}
-                  <span style={{ color: isError ? '#DC2626' : isIssue ? '#B45309' : theme.textSecondary }}>{s.message}</span>
+                <div style={{ minWidth: 0 }}>
+                  {ed ? (
+                    <>
+                      {ed.affectedTasks && ed.affectedTasks.length > 0 && (
+                        <strong>{ed.affectedTasks.map(function(t) { return t.title; }).join(', ')}</strong>
+                      )}
+                      {ed.affectedTasks && ed.affectedTasks.length > 0 && ' — '}
+                      <span style={{ color: '#DC2626' }}>{ed.summary}</span>
+                      {!ed.retryable && ed.userAction && (
+                        <div style={{
+                          marginTop: 2, padding: '2px 5px', borderRadius: 2,
+                          background: darkMode ? 'rgba(220,38,38,0.12)' : '#FEE2E2',
+                          color: '#B91C1C', fontWeight: 600
+                        }}>{ed.userAction}</div>
+                      )}
+                      {ed.retryable && (
+                        <div style={{ color: theme.textMuted, fontStyle: 'italic', marginTop: 1 }}>Will retry automatically</div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {s.text && <strong>{s.text}</strong>}
+                      {s.text && ' — '}
+                      <span style={{ color: isError ? '#DC2626' : isIssue ? '#B45309' : theme.textSecondary }}>{s.message}</span>
+                    </>
+                  )}
                 </div>
               </div>
             );

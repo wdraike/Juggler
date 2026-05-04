@@ -432,7 +432,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     else if (dayReq === 'weekend') allowed = ['Su','Sa'];
     else allowed = dayReq.split(',');
     if (allowed.indexOf(deadlineDayCode) === -1) {
-      return 'Deadline (' + deadlineDayName + ') conflicts with day requirement \u2014 task may not be schedulable before the deadline.';
+      return 'Deadline (' + deadlineDayName + ') conflicts with day requirement — task may not be schedulable before the deadline.';
     }
     return null;
   })();
@@ -911,7 +911,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                   fontSize: 10, fontWeight: isActive ? 700 : 500, fontFamily: 'inherit',
                   height: BTN_H, boxSizing: 'border-box'
                 }}>
-                  {s.label} {s.tip.split(' \u2014 ')[0]}
+                  {s.label} {s.tip.split(' — ')[0]}
                 </button>
               );
             })}
@@ -1544,13 +1544,13 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                     <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer', marginBottom: 2 }}>
                       <input type="radio" checked={recurFillPolicy !== 'backfill'} onChange={function() { setRecurFillPolicy('keep'); }} style={{ marginTop: 2 }} />
                       <span><strong>Keep the schedule</strong>
-                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'\u2014'} skipped sessions stay skipped; the week's count may end below the target. Best for habits where spacing matters more than hitting the number.</span>
+                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'—'} skipped sessions stay skipped; the week's count may end below the target. Best for habits where spacing matters more than hitting the number.</span>
                       </span>
                     </label>
                     <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer' }}>
                       <input type="radio" checked={recurFillPolicy === 'backfill'} onChange={function() { setRecurFillPolicy('backfill'); }} style={{ marginTop: 2 }} />
                       <span><strong>Backfill missed slots</strong>
-                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'\u2014'} the scheduler picks a new date to replace each skipped session, aiming for the target count. Can feel pushy if you skip often.</span>
+                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'—'} the scheduler picks a new date to replace each skipped session, aiming for the target count. Can feel pushy if you skip often.</span>
                       </span>
                     </label>
                   </div>
@@ -1600,13 +1600,13 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                     <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer', marginBottom: 2 }}>
                       <input type="radio" checked={recurFillPolicy !== 'backfill'} onChange={function() { setRecurFillPolicy('keep'); }} style={{ marginTop: 2 }} />
                       <span><strong>Keep the schedule</strong>
-                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'\u2014'} skipped sessions stay skipped; the month's count may end below the target. Best when spacing matters more than hitting the number.</span>
+                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'—'} skipped sessions stay skipped; the month's count may end below the target. Best when spacing matters more than hitting the number.</span>
                       </span>
                     </label>
                     <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer' }}>
                       <input type="radio" checked={recurFillPolicy === 'backfill'} onChange={function() { setRecurFillPolicy('backfill'); }} style={{ marginTop: 2 }} />
                       <span><strong>Backfill missed slots</strong>
-                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'\u2014'} the scheduler picks a new date to replace each skipped session, aiming for the target count. Can feel pushy if you skip often.</span>
+                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'—'} the scheduler picks a new date to replace each skipped session, aiming for the target count. Can feel pushy if you skip often.</span>
                       </span>
                     </label>
                   </div>
@@ -1825,7 +1825,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           var created = task.createdAt ? new Date(task.createdAt) : null;
           var createdStr = created
             ? mN[created.getMonth()] + ' ' + created.getDate() + ', ' + created.getFullYear()
-            : '\u2014';
+            : '—';
 
           // Parse task.time ("2:00 PM") + task.dur (minutes) → "2:00 PM \u2192 3:30 PM"
           var startStr = null, endStr = null;
@@ -1869,7 +1869,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               <div style={rowStyle}><span style={labelStyle}>Created</span><span>{createdStr}</span></div>
               <div style={rowStyle}>
                 <span style={labelStyle}>Scheduled</span>
-                <span>{startStr ? (endStr ? startStr + ' \u2192 ' + endStr : startStr) : '\u2014'}</span>
+                <span>{startStr ? (endStr ? startStr + ' \u2192 ' + endStr : startStr) : '—'}</span>
               </div>
               <div style={rowStyle}><span style={labelStyle} title="How much time the scheduler can shift this task before it misses its deadline. ∞ means no deadline constraint.">Slack</span><span>{slackStr}</span></div>
             </div>

@@ -23,12 +23,12 @@ var PRESET_BLOCKS = (function() {
 })();
 
 var TABS = [
-  { id: 'locations', label: 'Locations', tip: 'Locations \u2014 define places you work (home, office, gym, etc.)' },
-  { id: 'tools', label: 'Tools', tip: 'Tools \u2014 define tools you use (laptop, phone, etc.)' },
-  { id: 'matrix', label: 'Tool Matrix', tip: 'Tool Matrix \u2014 which tools are available at each location' },
-  { id: 'templates', label: 'Templates', tip: 'Templates \u2014 define daily time blocks, locations, and schedule structure' },
-  { id: 'projects', label: 'Projects', tip: 'Projects \u2014 manage project names and colors' },
-  { id: 'preferences', label: 'Preferences', tip: 'Preferences \u2014 font size, grid zoom, task defaults' },
+  { id: 'locations', label: 'Locations', tip: 'Locations — define places you work (home, office, gym, etc.)' },
+  { id: 'tools', label: 'Tools', tip: 'Tools — define tools you use (laptop, phone, etc.)' },
+  { id: 'matrix', label: 'Tool Matrix', tip: 'Tool Matrix — which tools are available at each location' },
+  { id: 'templates', label: 'Templates', tip: 'Templates — define daily time blocks, locations, and schedule structure' },
+  { id: 'projects', label: 'Projects', tip: 'Projects — manage project names and colors' },
+  { id: 'preferences', label: 'Preferences', tip: 'Preferences — font size, grid zoom, task defaults' },
 ];
 
 export default function SettingsPanel({ onClose, darkMode, config, allProjectNames, allTasks, isMobile, onRenameProject, showToast }) {
@@ -1157,7 +1157,7 @@ function ScheduleTemplateBar({ hours, locations, theme, onCommit, blocks, onBloc
           var tint = LOC_TINT[loc.id] || '#9E6B3B';
           var isActive = activeLoc === loc.id;
           return (
-            <button key={loc.id} onClick={function() { setActiveLoc(loc.id); }} title={'Paint with ' + loc.name + ' \u2014 click/drag on timeline to set location'} style={{
+            <button key={loc.id} onClick={function() { setActiveLoc(loc.id); }} title={'Paint with ' + loc.name + ' — click/drag on timeline to set location'} style={{
               border: isActive ? '2px solid ' + tint : '1px solid ' + theme.border,
               borderRadius: 12, padding: '2px 10px', fontSize: 11,
               background: isActive ? tint + '25' : 'transparent',
@@ -1576,7 +1576,7 @@ function UnifiedTemplateTab({ config, theme, showToast, allTasks }) {
             onBlocksChange={function(newBlocks) { saveTemplate(selectedTemplate, { blocks: newBlocks }); }}
           />
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
-            <button onClick={function() { setShowExpanded(true); }} title="Expand \u2014 open detailed slot-by-slot location editor" style={{
+            <button onClick={function() { setShowExpanded(true); }} title="Expand — open detailed slot-by-slot location editor" style={{
               border: '1px solid ' + theme.border, borderRadius: 4, padding: '2px 8px',
               background: 'transparent', color: theme.textSecondary, fontSize: 10,
               cursor: 'pointer', fontFamily: 'inherit'

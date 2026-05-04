@@ -97,8 +97,8 @@ function DetailPanel({ item, onClose }) {
       {(item._conflict || item._whenRelaxed || item._moveReason) && (
         <div style={{ marginTop: 16 }}>
           <div style={{ fontSize: 10, color: '#8899aa', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>Flags</div>
-          {item._conflict && <Flag text="Conflict \u2014 overlaps with another task" color="#ff0" />}
-          {item._whenRelaxed && <Flag text="When-window relaxed \u2014 preferred blocks were full" color="#AB47BC" />}
+          {item._conflict && <Flag text="Conflict — overlaps with another task" color="#ff0" />}
+          {item._whenRelaxed && <Flag text="When-window relaxed — preferred blocks were full" color="#AB47BC" />}
           {item._moveReason && <Flag text={'\u2192 ' + item._moveReason} color="#C8942A" />}
         </div>
       )}

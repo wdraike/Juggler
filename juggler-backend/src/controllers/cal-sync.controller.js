@@ -68,6 +68,10 @@ function buildErrorDetail(err, opts) {
     summary = 'Event no longer exists on ' + providerName;
     retryable = false;
     userAction = null;
+  } else if (status === 412) {
+    summary = 'Could not ' + (opts.operation || 'sync') + ' — ' + providerName + ' conflict (event was modified externally). Will retry next sync.';
+    retryable = true;
+    userAction = null;
   } else if (status === 429 || RE_RATE_ERR.test(msg)) {
     summary = providerName + ' rate limit hit — sync will retry automatically';
     retryable = true;
@@ -724,6 +728,22 @@ async function sync(req, res) {
               continue;
             }
 
+            // If the task is unscheduled (scheduler couldn't place it), delete its calendar
+            // event — unscheduled tasks should never occupy a slot on external calendars.
+            if (task.unscheduled && ledger.origin === 'juggler' && !isIngestOnly(pid)) {
+              try {
+                await pAdapter.deleteEvent(pToken, event._url || ledger.provider_event_id);
+                await throttle();
+              } catch (eDel) {
+                if (!eDel.message.includes('404') && !eDel.message.includes('410')) throw eDel;
+              }
+              taskUpdates.push({ id: task.id, fields: { [pAdapter.getEventIdColumn()]: null } });
+              ledgerUpdates.push({ id: ledger.id, fields: { status: 'deleted_local', provider_event_id: null } });
+              pStats.deleted_local++;
+              stats.deleted_local++;
+              continue;
+            }
+
             // Only push to events WE created (origin=juggler). Events pulled from
             // a provider (origin=pid) are read-only from Juggler's perspective —
             // we don't own them, can't PATCH them, and shouldn't try.
@@ -1241,6 +1261,7 @@ async function sync(req, res) {
         if (taskStatus === 'done' || taskStatus === 'cancel' || taskStatus === 'skip' || taskStatus === 'pause' || taskStatus === 'disabled') continue;
 
         if (newTask.taskType === 'recurring_template') continue;
+        if (newTask.unscheduled) continue;
         if (!newTask.date) continue;
         if (!newTask.time && newTask.when !== 'allday') continue;
 
@@ -1938,7 +1959,7 @@ async function sync(req, res) {
     emitProgress('done', doneSummaryParts.length > 0 ? doneSummaryParts.join(' | ') : 'Sync complete — no changes', 100);
     stats.syncRunId = syncRunId;
     stats.summary = historyInserts.map(function(h) {
-      var provLabel = h.provider === 'gcal' ? 'Google Calendar' : 'Microsoft Calendar';
+      var provLabel = PROVIDER_NAMES[h.provider] || h.provider || 'Calendar';
       switch (h.action) {
         case 'promoted':
           return { type: 'pin', text: h.task_text, message: 'Pinned to new time (moved in ' + provLabel + ')', hasIssue: (h.detail || '').indexOf('before dependency') >= 0 || (h.detail || '').indexOf('now before this task') >= 0 };
@@ -1956,8 +1977,11 @@ async function sync(req, res) {
           return { type: 'push', text: h.task_text, message: 'Conflict resolved — kept Juggler version' };
         case 'conflict_provider':
           return { type: 'pull', text: h.task_text, message: 'Conflict resolved — accepted ' + provLabel + ' version' };
-        case 'error':
-          return { type: 'error', text: h.task_text, message: h.detail || 'Sync error', hasIssue: true };
+        case 'error': {
+          var errDetail = null;
+          try { if (h.error_detail) errDetail = JSON.parse(h.error_detail); } catch (pe) {}
+          return { type: 'error', text: h.task_text, message: errDetail ? errDetail.summary : (h.detail || 'Sync error'), errorDetail: errDetail || undefined, hasIssue: true };
+        }
         default:
           return { type: 'info', text: h.task_text, message: h.detail || h.action };
       }

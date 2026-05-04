@@ -178,7 +178,7 @@ export default function GCalSyncPanel({ onClose, darkMode, showToast, autoSync, 
                   Sync every 5 minutes while app is open
                 </div>
               </div>
-              <label title={autoSync ? 'Disable auto-sync' : 'Enable auto-sync \u2014 syncs every 5 minutes'} style={{ position: 'relative', display: 'inline-block', width: 40, height: 22, cursor: 'pointer' }}>
+              <label title={autoSync ? 'Disable auto-sync' : 'Enable auto-sync — syncs every 5 minutes'} style={{ position: 'relative', display: 'inline-block', width: 40, height: 22, cursor: 'pointer' }}>
                 <input type="checkbox" checked={!!autoSync} onChange={handleToggleAutoSync} style={{ opacity: 0, width: 0, height: 0 }} />
                 <span style={{
                   position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,

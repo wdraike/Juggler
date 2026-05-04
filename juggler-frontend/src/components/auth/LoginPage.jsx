@@ -6,7 +6,7 @@ import React from 'react';
 import { useAuth } from './AuthProvider';
 
 var FEATURES = [
-  { icon: '\uD83C\uDFAF', title: 'Auto-Scheduling', desc: 'Drop in your tasks. We find the slots. Priorities, deadlines, locations \u2014 handled.' },
+  { icon: '\uD83C\uDFAF', title: 'Auto-Scheduling', desc: 'Drop in your tasks. We find the slots. Priorities, deadlines, locations — handled.' },
   { icon: '\uD83C\uDFE0', title: 'Location-Aware', desc: 'Home, office, gym. We know where your tools are and schedule accordingly.' },
   { icon: '\u2702\uFE0F', title: 'Smart Splitting', desc: 'Big task? We slice it into chunks across your free time. No more staring at a 4-hour block.' },
   { icon: '\uD83D\uDD17', title: 'Dependencies', desc: 'Task B waits for Task A. Link them. We respect the chain.' },

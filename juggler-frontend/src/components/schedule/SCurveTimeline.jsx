@@ -801,7 +801,7 @@ export default function SCurveTimeline(props) {
   var MAX_R  = 250;
   var MIN_CW = 110;
   var MAX_CW = 280;
-  var MIN_CH = 29;
+  var MIN_CH = 40;
   var HALF_FIXED = PADDING + CARD_GAP + 2 * CLOCK_BUFFER + BAND_W;
 
   // Minimum content dimensions for a comfortable layout.

@@ -7,17 +7,17 @@ import React, { useState, useRef, useEffect } from 'react';
 import { getTheme, BRAND } from '../../theme/colors';
 
 const VIEW_MODES = [
-  { id: 'daily', label: 'Day', icon: '\uD83D\uDCC4', tip: 'Day view \u2014 plain hour grid with hover details' },
-  { id: 'day', label: 'Flex', icon: '\u2194', tip: 'Flex view \u2014 single-day timeline with bezier connectors' },
-  { id: '3day', label: '3-Day', icon: '3', tip: '3-Day view \u2014 three-day side-by-side timeline' },
-  { id: 'week', label: 'Week', icon: '7', tip: 'Week view \u2014 seven-day timeline overview' },
-  { id: 'month', label: 'Month', icon: 'M', tip: 'Month view \u2014 calendar with hover details' },
-  { id: 'timeline', label: 'Timeline', icon: '\u2194', tip: 'Timeline view \u2014 horizontal left-to-right timeline with cards above and below' },
-  { id: 'list', label: 'List', icon: '\u2261', tip: 'List view \u2014 all tasks grouped by date' },
-  { id: 'priority', label: 'Priority', icon: 'P', tip: 'Priority view \u2014 P1-P4 kanban columns' },
-  { id: 'scurve', label: 'Clock', icon: '\u25D1', tip: 'Clock view \u2014 dual-circle timeline with morning and afternoon clocks' },
-  { id: 'deps', label: 'Deps', icon: '\u2192', tip: 'Dependencies view \u2014 DAG graph of task dependencies, filter by project' },
-  { id: 'conflicts', label: 'Issues', icon: '!', tip: 'Issues view \u2014 unplaced tasks, conflicts, and deadline misses' },
+  { id: 'daily', label: 'Day', icon: '\uD83D\uDCC4', tip: 'Day view — plain hour grid with hover details' },
+  { id: 'day', label: 'Flex', icon: '\u2194', tip: 'Flex view — single-day timeline with bezier connectors' },
+  { id: '3day', label: '3-Day', icon: '3', tip: '3-Day view — three-day side-by-side timeline' },
+  { id: 'week', label: 'Week', icon: '7', tip: 'Week view — seven-day timeline overview' },
+  { id: 'month', label: 'Month', icon: 'M', tip: 'Month view — calendar with hover details' },
+  { id: 'timeline', label: 'Timeline', icon: '\u2194', tip: 'Timeline view — horizontal left-to-right timeline with cards above and below' },
+  { id: 'list', label: 'List', icon: '\u2261', tip: 'List view — all tasks grouped by date' },
+  { id: 'priority', label: 'Priority', icon: 'P', tip: 'Priority view — P1-P4 kanban columns' },
+  { id: 'scurve', label: 'Clock', icon: '\u25D1', tip: 'Clock view — dual-circle timeline with morning and afternoon clocks' },
+  { id: 'deps', label: 'Deps', icon: '\u2192', tip: 'Dependencies view — DAG graph of task dependencies, filter by project' },
+  { id: 'conflicts', label: 'Issues', icon: '!', tip: 'Issues view — unplaced tasks, conflicts, and deadline misses' },
 ];
 
 const FILTERS = [

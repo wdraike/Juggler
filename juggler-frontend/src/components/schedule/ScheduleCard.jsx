@@ -26,7 +26,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
   var task = item.task;
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = isTerminalStatus(status);
-  var compact = layoutMode === 'compact';
+  var compact = layoutMode === 'compact' || (cardHeight != null && cardHeight < 48);
   var showDetails = !compact && (cardHeight || 52) >= 60;
   // Overdue: scheduler placed this at its original time because the user's
   // window has passed (missed flex recurring, past-day recurring, or rigid
@@ -53,10 +53,10 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
   var statusIcon = status === 'done' ? '\u2713' : status === 'wip' ? '\u231B' : status === 'cancel' ? '\u2715' : status === 'skip' ? '\u21ED' : status === 'pause' ? '\u23F8' : null;
   var startLabel = item.start != null ? formatStartTime(item.start) : null;
   var typeBadges = [];
-  if (task.datePinned) typeBadges.push({ icon: '\uD83D\uDCCD', title: 'Date pinned \u2014 stays on this date, scheduler adjusts time only' });
-  if (task.recurring) typeBadges.push({ icon: '\uD83D\uDD01', title: 'Recurring \u2014 recurring daily task' });
-  if (task.rigid || task.fixed) typeBadges.push({ icon: '\uD83D\uDCCC', title: 'Rigid \u2014 locked to set date and time, scheduler won\u2019t move it' });
-  if (item.splitTotal > 1) typeBadges.push({ icon: '\u2702\uFE0F', title: 'Split \u2014 broken into ' + item.splitTotal + ' chunks' });
+  if (task.datePinned) typeBadges.push({ icon: '\uD83D\uDCCD', title: 'Date pinned — stays on this date, scheduler adjusts time only' });
+  if (task.recurring) typeBadges.push({ icon: '\uD83D\uDD01', title: 'Recurring — recurring daily task' });
+  if (task.rigid || task.fixed) typeBadges.push({ icon: '\uD83D\uDCCC', title: 'Rigid — locked to set date and time, scheduler won\u2019t move it' });
+  if (item.splitTotal > 1) typeBadges.push({ icon: '\u2702\uFE0F', title: 'Split — broken into ' + item.splitTotal + ' chunks' });
 
   // Build end time label
   var endLabel = item.start != null ? formatStartTime(item.start + item.dur) : null;
@@ -155,7 +155,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
           <span style={{ fontSize: 10, color: theme.badgeText, fontWeight: 700, display: 'flex', gap: 3, alignItems: 'center' }}>
             {statusIcon && <span>{statusIcon}</span>}
             {timeRange && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted }}>{timeRange}</span>}
-            {isBlocked && <span style={{ color: theme.redText }} title="Blocked \u2014 waiting on incomplete dependencies">{'\uD83D\uDEAB'}</span>}
+            {isBlocked && <span style={{ color: theme.redText }} title="Blocked — waiting on incomplete dependencies">{'\uD83D\uDEAB'}</span>}
           </span>
         ) : (
           <>
@@ -179,7 +179,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
               var icons = task.location.map(function(lid) { return locIcon(lid); }).filter(Boolean);
               return icons.length > 0 ? <span style={{ fontSize: 10 }}>{icons.join(' ')}</span> : null;
             })()}
-            {isBlocked && <span style={{ color: theme.redText, fontSize: 11 }} title="Blocked \u2014 waiting on incomplete dependencies">{'\uD83D\uDEAB'}</span>}
+            {isBlocked && <span style={{ color: theme.redText, fontSize: 11 }} title="Blocked — waiting on incomplete dependencies">{'\uD83D\uDEAB'}</span>}
             {task.pri && (
               <span title={'Priority ' + task.pri} style={{
                 fontSize: 9, fontWeight: 700,

@@ -108,7 +108,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
     },
     {
       key: 'unscheduled', title: 'Backlog (no date)', tasks: backlog || [], color: theme.muted2,
-      tip: 'Tasks with no date assigned \u2014 not on the schedule yet',
+      tip: 'Tasks with no date assigned — not on the schedule yet',
       help: 'These tasks have no date set, so they don\'t appear on the schedule. This is normal for backlog items. Assign a date when you\'re ready to work on them.'
     },
   ];
@@ -371,7 +371,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
       <div style={{ marginBottom: 8 }}>
         <button
           onClick={function() { toggle('infoGroup'); }}
-          title="Context and status information \u2014 no immediate action needed"
+          title="Context and status information — no immediate action needed"
           style={{
             display: 'flex', alignItems: 'center', gap: 8, width: '100%',
             padding: '7px 4px', border: 'none', background: 'transparent',

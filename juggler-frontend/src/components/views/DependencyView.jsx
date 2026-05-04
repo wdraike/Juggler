@@ -658,7 +658,7 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
         <div style={{ fontSize: 11, color: theme.textMuted }}>
           {treeIds.length} tasks{projectFilter ? ' in ' + projectFilter : ' with dependencies'}
           {search ? ' matching "' + search + '"' : ''}
-          {' \u2014 drag the handle below a card to draw an arrow'}
+          {' — drag the handle below a card to draw an arrow'}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <button onClick={function() { setZoom(function(z) { return Math.max(MIN_ZOOM, Math.round((z - ZOOM_STEP) * 100) / 100); }); }}

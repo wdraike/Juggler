@@ -388,7 +388,7 @@ function TreeColumn({ bodyRef, chainOrder, chainDeps, chainData, chainAddDepFor,
             <div
               key={ct.id}
               data-chain-id={ct.id}
-              title={ct.text + (dateLabel ? ' (' + dateLabel + ')' : '') + ' \u2014 drag onto another task to add dependency'}
+              title={ct.text + (dateLabel ? ' (' + dateLabel + ')' : '') + ' — drag onto another task to add dependency'}
               draggable
               onDragStart={function(e) {
                 dragModeRef.current = 'link';

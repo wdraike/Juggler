@@ -1117,7 +1117,7 @@ export default function DailyView({
                     transform: 'translateY(-3px)',
                     opacity: 0.85
                   }}
-                  title={locId ? locId + ' \u2014 click to change' : 'Set location'}
+                  title={locId ? locId + ' — click to change' : 'Set location'}
                   onClick={onHourLocationOverride && locations ? function (e) {
                     e.stopPropagation();
                     setLocMenuHour(locMenuHour === hour ? null : hour);
