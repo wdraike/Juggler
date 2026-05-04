@@ -245,6 +245,8 @@ function buildVEvent(task, year, tz) {
 async function createEvent(client, calendarUrl, task, year, tz) {
   var icsData = buildVEvent(task, year, tz);
   var filename = 'juggler-' + task.id + '.ics';
+  var baseUrl = calendarUrl.endsWith('/') ? calendarUrl : calendarUrl + '/';
+  var expectedUrl = baseUrl + filename;
 
   var result = await client.createCalendarObject({
     calendar: { url: calendarUrl },
@@ -252,14 +254,38 @@ async function createEvent(client, calendarUrl, task, year, tz) {
     iCalString: icsData
   });
 
+  if (result && result.status === 412) {
+    // Event already exists at this URL (stale ledger) — fetch current ETag and overwrite
+    var currentEtag = null;
+    try {
+      var existing = await client.fetchCalendarObjects({
+        calendar: { url: calendarUrl },
+        objectUrls: [expectedUrl]
+      });
+      if (existing && existing[0] && existing[0].etag) {
+        currentEtag = existing[0].etag;
+      }
+    } catch (fetchErr) {
+      // proceed without ETag — server may accept unconditional overwrite
+    }
+    var updateResponse = await client.updateCalendarObject({
+      calendarObject: { url: expectedUrl, data: icsData, etag: currentEtag || undefined }
+    });
+    if (updateResponse && updateResponse.status >= 300) {
+      var upErr = new Error('CalDAV PUT failed: HTTP ' + updateResponse.status);
+      upErr.statusCode = updateResponse.status;
+      throw upErr;
+    }
+    return { providerEventId: expectedUrl, etag: currentEtag, url: expectedUrl };
+  }
+
   if (result && result.status >= 300) {
     var err = new Error('CalDAV PUT failed: HTTP ' + result.status);
     err.statusCode = result.status;
     throw err;
   }
 
-  // The result URL is the event's CalDAV URL (used as the event ID)
-  var eventUrl = result.url || (calendarUrl + filename);
+  var eventUrl = result.url || expectedUrl;
   return {
     providerEventId: eventUrl,
     etag: result.etag || null,
@@ -280,6 +306,32 @@ async function updateEvent(client, eventUrl, task, year, tz, etag) {
       etag: etag || undefined
     }
   });
+
+  if (response && response.status === 412) {
+    // Stale ETag — fetch current ETag from server and retry once
+    var calUrl = eventUrl.substring(0, eventUrl.lastIndexOf('/') + 1);
+    var freshEtag = null;
+    try {
+      var existing = await client.fetchCalendarObjects({
+        calendar: { url: calUrl },
+        objectUrls: [eventUrl]
+      });
+      if (existing && existing[0] && existing[0].etag) {
+        freshEtag = existing[0].etag;
+      }
+    } catch (fetchErr) {
+      // proceed without ETag
+    }
+    var retryResponse = await client.updateCalendarObject({
+      calendarObject: { url: eventUrl, data: icsData, etag: freshEtag || undefined }
+    });
+    if (retryResponse && retryResponse.status >= 300 && retryResponse.status !== 404 && retryResponse.status !== 410) {
+      var retryErr = new Error('CalDAV PUT failed: HTTP ' + retryResponse.status);
+      retryErr.statusCode = retryResponse.status;
+      throw retryErr;
+    }
+    return;
+  }
 
   if (response && response.status >= 300 && response.status !== 404 && response.status !== 410) {
     var err = new Error('CalDAV PUT failed: HTTP ' + response.status);
