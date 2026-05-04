@@ -244,7 +244,7 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
                       }}
                       title={'Mark "' + dep.text + '" as done'}
                     >
-                      Done
+                      Complete
                     </button>
                   )}
                 </span>

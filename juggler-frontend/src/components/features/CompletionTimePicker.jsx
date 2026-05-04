@@ -72,7 +72,7 @@ export default function CompletionTimePicker({ task, onConfirm, onCancel, darkMo
       }} onClick={function(e) { e.stopPropagation(); }}>
 
         <div style={{ fontSize: 15, fontWeight: 600, color: theme.text, marginBottom: 4 }}>
-          Mark as Done
+          Mark as Complete
         </div>
         <div style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 16 }}>
           When was this completed?
@@ -112,7 +112,7 @@ export default function CompletionTimePicker({ task, onConfirm, onCancel, darkMo
             border: 'none', borderRadius: 8, padding: '8px 20px',
             background: theme.accent, color: '#FDFAF5', fontWeight: 600, fontSize: 13,
             cursor: 'pointer', fontFamily: 'inherit'
-          }}>Done</button>
+          }}>Mark Complete</button>
         </div>
       </div>
     </div>
