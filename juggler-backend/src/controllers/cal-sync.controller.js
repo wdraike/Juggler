@@ -190,7 +190,22 @@ async function sync(req, res) {
       ? (typeof calSyncSettingsRow.config_value === 'string'
           ? JSON.parse(calSyncSettingsRow.config_value) : calSyncSettingsRow.config_value)
       : {};
+
+    // Apple uses per-calendar sync_direction (multi-calendar model). The
+    // provider-level cal_sync_settings.apple.mode is redundant and isn't
+    // exposed in the UI — derive Apple's effective mode from user_calendars
+    // instead. Apple is treated as ingest-only ONLY when no enabled Apple
+    // calendar has sync_direction='full'.
+    var appleFullSyncRow = await db('user_calendars')
+      .where({ user_id: userId, provider: 'apple', enabled: true, sync_direction: 'full' })
+      .first();
+    var appleHasFullSync = !!appleFullSyncRow;
+
     function isIngestOnly(providerId) {
+      if (providerId === 'apple') {
+        // Apple: per-calendar settings are authoritative. Provider-level mode ignored.
+        return !appleHasFullSync;
+      }
       return calSyncSettings[providerId] && calSyncSettings[providerId].mode === 'ingest';
     }
 
