@@ -1,5 +1,5 @@
 /**
- * schedulerSession — in-memory session store for the admin Stepper UI.
+ * schedulerSession — DB-backed session store for the admin Stepper UI.
  *
  * A session pre-runs unifiedScheduleV2() once with cfg._stepRecorder enabled,
  * producing a full snapshots[] array (one entry per placement commit). The
@@ -14,32 +14,29 @@
  * this path.
  *
  * Sessions are keyed by a random id, scoped to the admin who started them,
- * and swept after 1h idle to bound memory.
+ * and expire after 1h. The DB sweep deletes expired rows every 5 minutes.
  */
 
 var crypto = require('crypto');
+var db = require('../db');
 
 var SESSION_TTL_MS = 60 * 60 * 1000; // 1h
 var SWEEP_INTERVAL_MS = 5 * 60 * 1000; // 5m
-
-var sessions = new Map(); // sessionId -> session
 
 function newSessionId() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-function now() { return Date.now(); }
-
-function sweep() {
-  var cutoff = now() - SESSION_TTL_MS;
-  for (var entry of sessions.entries()) {
-    var sid = entry[0], s = entry[1];
-    if (s.lastAccess < cutoff) sessions.delete(sid);
+async function sweep() {
+  try {
+    await db('scheduler_sessions').where('expires_at', '<', new Date()).delete();
+  } catch (e) {
+    console.warn('[schedulerSession] sweep error:', e.message);
   }
 }
 
 // Start a background sweeper. Unref so it doesn't block process shutdown.
-var sweepTimer = setInterval(sweep, SWEEP_INTERVAL_MS);
+var sweepTimer = setInterval(function() { sweep(); }, SWEEP_INTERVAL_MS);
 if (sweepTimer.unref) sweepTimer.unref();
 
 /**
@@ -50,7 +47,6 @@ if (sweepTimer.unref) sweepTimer.unref();
  */
 async function startSession(userId, options) {
   var opts = options || {};
-  var db = require('../db');
   var unifiedSchedule = require('./unifiedScheduleV2');
   var constants = require('./constants');
   var rowToTask = require('../controllers/task.controller').rowToTask;
@@ -118,27 +114,28 @@ async function startSession(userId, options) {
   mapped.forEach(function(t) { tasksById[t.id] = t; });
 
   var sessionId = newSessionId();
-  var session = {
-    sessionId: sessionId,
-    userId: userId,
-    createdAt: now(),
-    lastAccess: now(),
-    todayKey: todayKey,
-    nowMins: nowMins,
+  var unplacedSummary = (result.unplaced || []).map(function(t) {
+    return {
+      id: t.id, text: t.text, project: t.project, pri: t.pri,
+      reason: t._unplacedReason || null, detail: t._unplacedDetail || null
+    };
+  });
+
+  await db('scheduler_sessions').insert({
+    session_id: sessionId,
+    user_id: userId,
+    today_key: todayKey,
+    now_mins: nowMins,
     timezone: TIMEZONE,
-    tasksById: tasksById,
-    snapshots: stepRecorder,
-    unplaced: (result.unplaced || []).map(function(t) {
-      return {
-        id: t.id, text: t.text, project: t.project, pri: t.pri,
-        reason: t._unplacedReason || null, detail: t._unplacedDetail || null
-      };
-    }),
-    score: result.score || {},
-    warnings: result.warnings || [],
-    slackByTaskId: result.slackByTaskId || {}
-  };
-  sessions.set(sessionId, session);
+    snapshots: JSON.stringify(stepRecorder),
+    tasks_by_id: JSON.stringify(tasksById),
+    unplaced: JSON.stringify(unplacedSummary),
+    score: JSON.stringify(result.score || {}),
+    warnings: JSON.stringify(result.warnings || []),
+    slack_by_task_id: JSON.stringify(result.slackByTaskId || {}),
+    created_at: new Date(),
+    expires_at: new Date(Date.now() + SESSION_TTL_MS)
+  });
 
   return {
     sessionId: sessionId,
@@ -155,20 +152,42 @@ async function startSession(userId, options) {
   };
 }
 
-function touch(session) { session.lastAccess = now(); }
+/**
+ * Load a session from the DB. Returns a session object (camelCase fields)
+ * or null if not found / expired. Also touches expires_at to extend TTL.
+ */
+async function getSession(sessionId) {
+  var row = await db('scheduler_sessions')
+    .where('session_id', sessionId)
+    .where('expires_at', '>', new Date())
+    .first();
+  if (!row) return null;
 
-function getSession(sessionId) {
-  var s = sessions.get(sessionId);
-  if (!s) return null;
-  touch(s);
-  return s;
+  // Extend TTL on access.
+  await db('scheduler_sessions')
+    .where('session_id', sessionId)
+    .update({ expires_at: new Date(Date.now() + SESSION_TTL_MS) });
+
+  return {
+    sessionId: row.session_id,
+    userId: row.user_id,
+    todayKey: row.today_key,
+    nowMins: row.now_mins,
+    timezone: row.timezone,
+    snapshots: typeof row.snapshots === 'string' ? JSON.parse(row.snapshots) : row.snapshots,
+    tasksById: typeof row.tasks_by_id === 'string' ? JSON.parse(row.tasks_by_id) : row.tasks_by_id,
+    unplaced: typeof row.unplaced === 'string' ? JSON.parse(row.unplaced) : row.unplaced,
+    score: typeof row.score === 'string' ? JSON.parse(row.score) : row.score,
+    warnings: typeof row.warnings === 'string' ? JSON.parse(row.warnings) : row.warnings,
+    slackByTaskId: typeof row.slack_by_task_id === 'string' ? JSON.parse(row.slack_by_task_id) : row.slack_by_task_id
+  };
 }
 
 /**
  * Return a single step enriched with task detail for the UI.
  */
-function getStep(sessionId, stepIndex) {
-  var s = getSession(sessionId);
+async function getStep(sessionId, stepIndex) {
+  var s = await getSession(sessionId);
   if (!s) return null;
   if (stepIndex < 0 || stepIndex >= s.snapshots.length) return null;
   var raw = s.snapshots[stepIndex];
@@ -196,8 +215,8 @@ function getStep(sessionId, stepIndex) {
   });
 }
 
-function getSummary(sessionId) {
-  var s = getSession(sessionId);
+async function getSummary(sessionId) {
+  var s = await getSession(sessionId);
   if (!s) return null;
   // Lightweight queue: one entry per step so the UI can render a scrollable
   // sidebar. Strips the heavy per-step dayPlacementsSnapshot; just the
@@ -231,8 +250,8 @@ function getSummary(sessionId) {
   };
 }
 
-function stopSession(sessionId) {
-  sessions.delete(sessionId);
+async function stopSession(sessionId) {
+  await db('scheduler_sessions').where('session_id', sessionId).delete();
 }
 
 module.exports = {
@@ -241,5 +260,5 @@ module.exports = {
   getStep: getStep,
   getSummary: getSummary,
   stopSession: stopSession,
-  _sessions: sessions // for tests / debugging only
+  _sessions: null // formerly the in-memory Map; retained for interface compatibility
 };

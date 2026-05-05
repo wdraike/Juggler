@@ -169,30 +169,45 @@ router.post('/step/start', authenticateJWT, authenticateAdmin, stepperLimiter, a
 // NB: declare /summary before the /:stepIndex pattern so the literal route
 // wins. Express matches in declaration order; a numeric-looking stepIndex
 // route would otherwise capture "summary".
-router.get('/step/:sessionId/summary', authenticateJWT, authenticateAdmin, function(req, res) {
-  var sessionId = req.params.sessionId;
-  var s = schedulerSession.getSession(sessionId);
-  if (!s || s.userId !== req.user.id) return res.status(404).json({ error: 'Session not found' });
-  res.json(schedulerSession.getSummary(sessionId));
+router.get('/step/:sessionId/summary', authenticateJWT, authenticateAdmin, async function(req, res) {
+  try {
+    var sessionId = req.params.sessionId;
+    var s = await schedulerSession.getSession(sessionId);
+    if (!s || s.userId !== req.user.id) return res.status(404).json({ error: 'Session not found' });
+    res.json(await schedulerSession.getSummary(sessionId));
+  } catch (err) {
+    console.error('stepper summary error:', err);
+    res.status(500).json({ error: 'Failed to load session summary' });
+  }
 });
 
-router.get('/step/:sessionId/:stepIndex', authenticateJWT, authenticateAdmin, function(req, res) {
-  var sessionId = req.params.sessionId;
-  var idx = parseInt(req.params.stepIndex, 10);
-  if (Number.isNaN(idx)) return res.status(400).json({ error: 'stepIndex must be an integer' });
-  var s = schedulerSession.getSession(sessionId);
-  if (!s || s.userId !== req.user.id) return res.status(404).json({ error: 'Session not found' });
-  var step = schedulerSession.getStep(sessionId, idx);
-  if (!step) return res.status(404).json({ error: 'Step out of range' });
-  res.json(step);
+router.get('/step/:sessionId/:stepIndex', authenticateJWT, authenticateAdmin, async function(req, res) {
+  try {
+    var sessionId = req.params.sessionId;
+    var idx = parseInt(req.params.stepIndex, 10);
+    if (Number.isNaN(idx)) return res.status(400).json({ error: 'stepIndex must be an integer' });
+    var s = await schedulerSession.getSession(sessionId);
+    if (!s || s.userId !== req.user.id) return res.status(404).json({ error: 'Session not found' });
+    var step = await schedulerSession.getStep(sessionId, idx);
+    if (!step) return res.status(404).json({ error: 'Step out of range' });
+    res.json(step);
+  } catch (err) {
+    console.error('stepper step error:', err);
+    res.status(500).json({ error: 'Failed to load step' });
+  }
 });
 
-router.post('/step/:sessionId/stop', authenticateJWT, authenticateAdmin, function(req, res) {
-  var sessionId = req.params.sessionId;
-  var s = schedulerSession.getSession(sessionId);
-  if (s && s.userId !== req.user.id) return res.status(403).json({ error: 'Not your session' });
-  schedulerSession.stopSession(sessionId);
-  res.json({ ok: true });
+router.post('/step/:sessionId/stop', authenticateJWT, authenticateAdmin, async function(req, res) {
+  try {
+    var sessionId = req.params.sessionId;
+    var s = await schedulerSession.getSession(sessionId);
+    if (s && s.userId !== req.user.id) return res.status(403).json({ error: 'Not your session' });
+    await schedulerSession.stopSession(sessionId);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('stepper stop error:', err);
+    res.status(500).json({ error: 'Failed to stop session' });
+  }
 });
 
 module.exports = router;
