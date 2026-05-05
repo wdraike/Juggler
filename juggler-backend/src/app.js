@@ -69,9 +69,14 @@ app.use(cookieParser());
 
 // Raw body capture for billing webhook HMAC — must be before bodyParser.json
 app.use('/api/billing-webhooks', express.raw({ type: 'application/json' }), function(req, res, next) {
-  if (Buffer.isBuffer(req.body)) {
-    req.rawBody = req.body;
-    try { req.body = JSON.parse(req.body.toString('utf8')); } catch (e) { req.body = {}; }
+  if (!Buffer.isBuffer(req.body)) {
+    return res.status(415).json({ error: 'Content-Type must be application/json' });
+  }
+  req.rawBody = req.body;
+  try {
+    req.body = JSON.parse(req.body.toString('utf8'));
+  } catch (e) {
+    return res.status(400).json({ error: 'Invalid JSON body' });
   }
   next();
 });

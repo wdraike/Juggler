@@ -4,9 +4,9 @@ const router = express.Router();
 const { handleWebhook } = require('../controllers/billing-webhooks.controller');
 
 // Verify HMAC-SHA256 signature from payment service + reject stale replays.
-// Signs req.rawBody (the original wire bytes captured by express.raw() in app.js),
-// falling back to re-serialized JSON only if rawBody is unavailable. This matches
-// what payment-service signs on the sending side.
+// Signs req.rawBody (the original wire bytes captured by express.raw() in app.js).
+// If rawBody is absent, the middleware in app.js failed — reject immediately.
+// This matches what payment-service signs on the sending side.
 const FRESHNESS_WINDOW_MS = 5 * 60 * 1000;
 function verifySignature(req, res, next) {
   var sig = req.headers['x-billing-signature'];
@@ -22,7 +22,10 @@ function verifySignature(req, res, next) {
     return res.status(401).json({ error: 'Missing X-Billing-Signature header' });
   }
 
-  var rawBody = req.rawBody || Buffer.from(JSON.stringify(req.body));
+  var rawBody = req.rawBody;
+  if (!rawBody) {
+    return res.status(500).json({ error: 'Internal: rawBody unavailable' });
+  }
   var expectedSig = 'sha256=' + crypto
     .createHmac('sha256', secret)
     .update(rawBody)

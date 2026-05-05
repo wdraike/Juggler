@@ -23,7 +23,17 @@ describe('Billing webhook signature', () => {
       .set('Content-Type', 'application/json')
       .set('X-Billing-Signature', signBuffer(buf))
       .send(body);
+    // Not 401 (auth) and not 5xx (server error)
+    expect(res.status).toBeLessThan(500);
     expect(res.status).not.toBe(401);
+  });
+
+  it('rejects non-JSON content-type with 415', async () => {
+    const res = await request(app)
+      .post('/api/billing-webhooks')
+      .set('Content-Type', 'text/plain')
+      .send('hello');
+    expect(res.status).toBe(415);
   });
 
   it('rejects a stale timestamp', async () => {
