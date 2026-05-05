@@ -2,6 +2,8 @@
 
 exports.up = async function(knex) {
   await knex.schema.createTable('scheduler_sessions', function(t) {
+    t.charset('utf8mb4');
+    t.collate('utf8mb4_unicode_ci');
     t.string('session_id', 36).primary();
     t.string('user_id', 36).notNullable().index();
     t.string('today_key', 10).notNullable();

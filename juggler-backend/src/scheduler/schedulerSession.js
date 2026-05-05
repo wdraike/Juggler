@@ -184,11 +184,9 @@ async function getSession(sessionId) {
 }
 
 /**
- * Return a single step enriched with task detail for the UI.
+ * Sync helper: compute a single step from an already-fetched session object.
  */
-async function getStep(sessionId, stepIndex) {
-  var s = await getSession(sessionId);
-  if (!s) return null;
+function _computeStep(s, stepIndex) {
   if (stepIndex < 0 || stepIndex >= s.snapshots.length) return null;
   var raw = s.snapshots[stepIndex];
   var task = s.tasksById[raw.taskId] || null;
@@ -215,9 +213,10 @@ async function getStep(sessionId, stepIndex) {
   });
 }
 
-async function getSummary(sessionId) {
-  var s = await getSession(sessionId);
-  if (!s) return null;
+/**
+ * Sync helper: compute the summary from an already-fetched session object.
+ */
+function _computeSummary(s) {
   // Lightweight queue: one entry per step so the UI can render a scrollable
   // sidebar. Strips the heavy per-step dayPlacementsSnapshot; just the
   // labels needed for an "up next" list.
@@ -238,7 +237,7 @@ async function getSummary(sessionId) {
     };
   });
   return {
-    sessionId: sessionId,
+    sessionId: s.sessionId,
     totalSteps: s.snapshots.length,
     todayKey: s.todayKey,
     nowMins: s.nowMins,
@@ -248,6 +247,21 @@ async function getSummary(sessionId) {
     warnings: s.warnings,
     queue: queue
   };
+}
+
+/**
+ * Return a single step enriched with task detail for the UI.
+ */
+async function getStep(sessionId, stepIndex) {
+  var s = await getSession(sessionId);
+  if (!s) return null;
+  return _computeStep(s, stepIndex);
+}
+
+async function getSummary(sessionId) {
+  var s = await getSession(sessionId);
+  if (!s) return null;
+  return _computeSummary(s);
 }
 
 async function stopSession(sessionId) {
@@ -260,5 +274,7 @@ module.exports = {
   getStep: getStep,
   getSummary: getSummary,
   stopSession: stopSession,
+  _computeStep: _computeStep,
+  _computeSummary: _computeSummary,
   _sessions: null // formerly the in-memory Map; retained for interface compatibility
 };

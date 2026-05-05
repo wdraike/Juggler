@@ -174,10 +174,10 @@ router.get('/step/:sessionId/summary', authenticateJWT, authenticateAdmin, async
     var sessionId = req.params.sessionId;
     var s = await schedulerSession.getSession(sessionId);
     if (!s || s.userId !== req.user.id) return res.status(404).json({ error: 'Session not found' });
-    res.json(await schedulerSession.getSummary(sessionId));
+    res.json(schedulerSession._computeSummary(s));
   } catch (err) {
     console.error('stepper summary error:', err);
-    res.status(500).json({ error: 'Failed to load session summary' });
+    res.status(500).json({ error: 'Failed to fetch session summary' });
   }
 });
 
@@ -188,12 +188,12 @@ router.get('/step/:sessionId/:stepIndex', authenticateJWT, authenticateAdmin, as
     if (Number.isNaN(idx)) return res.status(400).json({ error: 'stepIndex must be an integer' });
     var s = await schedulerSession.getSession(sessionId);
     if (!s || s.userId !== req.user.id) return res.status(404).json({ error: 'Session not found' });
-    var step = await schedulerSession.getStep(sessionId, idx);
+    var step = schedulerSession._computeStep(s, idx);
     if (!step) return res.status(404).json({ error: 'Step out of range' });
     res.json(step);
   } catch (err) {
     console.error('stepper step error:', err);
-    res.status(500).json({ error: 'Failed to load step' });
+    res.status(500).json({ error: 'Failed to fetch step' });
   }
 });
 
@@ -201,7 +201,14 @@ router.post('/step/:sessionId/stop', authenticateJWT, authenticateAdmin, async f
   try {
     var sessionId = req.params.sessionId;
     var s = await schedulerSession.getSession(sessionId);
-    if (s && s.userId !== req.user.id) return res.status(403).json({ error: 'Not your session' });
+    if (!s) {
+      // Session expired or already gone — check raw DB for ownership
+      var db = require('../db');
+      var row = await db('scheduler_sessions').where('session_id', sessionId).first();
+      if (row && row.user_id !== req.user.id) return res.status(403).json({ error: 'Not your session' });
+      return res.json({ ok: true }); // already gone — idempotent
+    }
+    if (s.userId !== req.user.id) return res.status(403).json({ error: 'Not your session' });
     await schedulerSession.stopSession(sessionId);
     res.json({ ok: true });
   } catch (err) {
