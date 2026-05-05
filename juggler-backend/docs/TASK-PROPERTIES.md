@@ -108,13 +108,29 @@ A task's mode is determined by its properties. The scheduler processes them in t
 |----------|-----|-----|------|--------|-----------------|
 | Priority | `pri` | `pri` | string | User | `P1` (highest) through `P4` (lowest). Default `P3`. Tiebreaker in all phases — never the primary sort. Past-due tasks get boosted to P1. |
 
+### Weather Conditions (hard constraints — see WEATHER-INTEGRATION.md)
+
+Weather conditions are optional. All default to `any`/null, meaning no constraint. A task with any non-`any` condition will only be placed in a time slot whose hourly forecast satisfies all conditions. If no qualifying slot exists → task goes unscheduled with `reason: 'weather'`.
+
+| Property | DB | JS | Type | Default | Scheduler Effect |
+|----------|-----|-----|------|---------|-----------------|
+| Precip Tolerance | `weather_precip` | `weatherPrecip` | enum | `any` | `dry_only` (≤20%), `light_ok` (≤50%), `wet_ok` (any), `any` (skip check). Checked against hourly `precipitation_probability`. |
+| Sky Cover | `weather_cloud` | `weatherCloud` | enum | `any` | `clear` (≤25%), `partly_ok` (≤60%), `overcast_ok` (any), `any` (skip check). Checked against hourly `cloudcover`. |
+| Temp Min | `weather_temp_min` | `weatherTempMin` | int or null | null | Slot temperature must be ≥ this value. Null = no lower bound. |
+| Temp Max | `weather_temp_max` | `weatherTempMax` | int or null | null | Slot temperature must be ≤ this value. Null = no upper bound. |
+| Temp Unit | `weather_temp_unit` | `weatherTempUnit` | `'C'` / `'F'` / null | null | Unit for temp_min/max. Null = inherit from user setting at display time. |
+
+**Fail-open rule:** If the scheduler has no weather data for a candidate slot (location has no coordinates, or cache miss), the weather constraint is skipped and placement proceeds normally. Weather never blocks a task when data is unavailable.
+
+**Template inheritance:** Weather conditions live on `task_masters`. Recurring instances inherit them via the standard template-merge in `rowToTask`. Individual instances cannot override.
+
 ### Scheduler-Set Flags (transient, per-run)
 
 | Property | Type | When Set |
 |----------|------|----------|
 | `_pastDue` | bool | Task whose deadline has passed |
 | `_originalDue` | string | Original deadline date before past-due remap |
-| `_unplacedReason` | string | Why task couldn't be placed: `missed`, `capacity_conflict`, `past_due_no_capacity`, `impossible_window`, `partial_split`, `spacing` |
+| `_unplacedReason` | string | Why task couldn't be placed: `missed`, `capacity_conflict`, `past_due_no_capacity`, `impossible_window`, `partial_split`, `spacing`, `weather` |
 | `_unplacedDetail` | string | Human-readable explanation |
 | `_suggestions` | array | Suggested fixes for the user |
 | `_conflict` | bool | Rigid recurring force-placed over another task |

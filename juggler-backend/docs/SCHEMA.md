@@ -16,6 +16,8 @@ Schema is Knex migrations in `src/db/migrations/`. The current task model is the
 - [schedule_queue](#schedule_queue) — debounce trigger for scheduler runs
 - [task_write_queue](#task_write_queue) — durable buffer for writes arriving under lock
 - [feature_events](#feature_events) — feature-gate analytics log
+- [weather_cache](#weather_cache) — hourly forecast cache keyed by rounded coordinates
+- [ai_command_log](#ai_command_log) — per-user daily AI command quota tracking
 
 ---
 
@@ -266,6 +268,111 @@ Key invariants:
 - `user_calendars` is read during Phase 1 by Apple only today; GCal/MSFT would read it if/when multi-cal lands.
 - `task_write_queue` is the pressure-relief valve that makes lock-holding safe — mutations arriving mid-sync don't block or drop, they queue.
 - `schedule_queue` is the **trigger** for scheduler runs but carries no semantics — it's a debounce buffer.
+
+---
+
+## `weather_cache`
+
+**Purpose.** Backend-side cache for Open-Meteo hourly forecasts. The scheduler reads from this table to evaluate weather constraints on candidate time slots — it can't make live HTTP calls mid-placement, so forecasts must be pre-loaded. Frontend calls `/api/weather`, which checks this cache before going upstream.
+
+Created by migration `20260505002000_create_weather_cache`.
+
+```sql
+CREATE TABLE weather_cache (
+  id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  lat_grid     DECIMAL(5,2) NOT NULL,
+  lon_grid     DECIMAL(5,2) NOT NULL,
+  fetched_at   DATETIME NOT NULL,
+  expires_at   DATETIME NOT NULL,
+  forecast_json MEDIUMTEXT NOT NULL,
+  INDEX idx_weather_cache_coords_exp (lat_grid, lon_grid, expires_at)
+) COLLATE utf8mb4_unicode_ci;
+```
+
+### Cache key
+
+Coordinates are rounded to 1 decimal place (`ROUND(lat, 1)`, `ROUND(lon, 1)`) before lookup — approximately a 10 km grid. This prevents near-identical coordinates from generating redundant rows (e.g., 40.712 and 40.714 both round to 40.7).
+
+### TTL
+
+1 hour. On cache hit (any row with `expires_at > NOW()` for the same grid cell), the cached JSON is returned without an upstream fetch. On miss, Open-Meteo is queried for 14 days of hourly data, stored, and `expires_at = NOW() + 1 HOUR`.
+
+### `forecast_json` structure
+
+Raw Open-Meteo hourly response. Backend parses it into `weatherByDateHour[dateKey][hourOfDay]` before passing to the scheduler:
+```json
+{
+  "hourly": {
+    "time":                     ["2026-05-05T00:00", ...],
+    "temperature_2m":           [18.4, ...],
+    "precipitation_probability": [5, ...],
+    "precipitation":            [0.0, ...],
+    "cloudcover":               [12, ...],
+    "weathercode":              [1, ...]
+  }
+}
+```
+
+### Location source
+
+The active location for a scheduling day is resolved via `getLocationForDate(dateKey, schedCfg)`. That location's `lat`/`lon` fields (stored in `user_config.locations[]`) are the cache lookup key. If a location has no coordinates, the weather constraint is skipped for that slot (fail-open).
+
+---
+
+## `ai_command_log`
+
+**Purpose.** Per-user daily AI command quota tracking. Each row records one AI command attempt. The controller counts rows in the last 24 hours per user before allowing a Gemini call.
+
+Created by migration `20260505001000_create_ai_command_log`.
+
+```sql
+CREATE TABLE ai_command_log (
+  id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id    INT UNSIGNED NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_ai_command_log_user_time (user_id, created_at)
+);
+```
+
+### Quota enforcement
+
+`checkAndLogDailyQuota(userId)` in `ai.controller.js`:
+1. Counts rows where `created_at >= NOW() - INTERVAL 24 HOUR` for the user
+2. If `count >= 50` → return `{ allowed: false }` → 429
+3. Otherwise → insert a row (pessimistic, counts the attempt regardless of Gemini outcome) → return `{ allowed: true }`
+
+Route-level `express-rate-limit` enforces 2 requests/minute independently.
+
+---
+
+## `task_masters` — weather condition columns
+
+Added by migration `20260505002000_create_weather_cache` (Phase 1 of weather integration):
+
+```sql
+ALTER TABLE task_masters
+  ADD COLUMN weather_precip    ENUM('any','wet_ok','light_ok','dry_only') NOT NULL DEFAULT 'any',
+  ADD COLUMN weather_cloud     ENUM('any','overcast_ok','partly_ok','clear') NOT NULL DEFAULT 'any',
+  ADD COLUMN weather_temp_min  SMALLINT NULL,
+  ADD COLUMN weather_temp_max  SMALLINT NULL,
+  ADD COLUMN weather_temp_unit CHAR(1) NULL;
+```
+
+All default to `any`/null — existing tasks are completely unaffected. Weather conditions live on `task_masters` only. Recurring instances inherit them via the standard template-merge in `rowToTask`; individual instances cannot override.
+
+The `tasks_v` view must expose all five columns. See `WEATHER-INTEGRATION.md` for enum semantics, scheduler integration, and UI spec.
+
+### `user_config` additions (location lat/lon + temperature unit)
+
+The `user_config` JSON blob in the `users` table gains two additions for weather:
+
+**Location objects** — each entry in `user_config.locations[]` gains optional `lat`/`lon` fields:
+```json
+{ "id": "home", "name": "Home", "icon": "🏠", "lat": 40.71, "lon": -74.01 }
+```
+These are populated via the location editor's geocode lookup or "Locate me" button.
+
+**Temperature unit** — `user_config.temperature_unit: 'C' | 'F'` (default `'F'`). Controls display in calendar weather badges and is passed as a query param to Open-Meteo so `temperature_2m` arrives in the requested unit.
 
 ---
 

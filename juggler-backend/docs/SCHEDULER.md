@@ -149,8 +149,57 @@ Place as many chunks as capacity allows. Chunks that can't fit are added to the 
 - Day-of-week / day-of-month restriction doesn't match any candidate day → unscheduled
 - Dependencies not yet placed → task waits; next scheduler run retries
 - Required location/tools aren't available in a candidate slot → skip that slot
+- Weather conditions not met in any candidate slot → unscheduled with `reason: 'weather'` (see §Weather)
 - Even after past-due → today remap, if today is full → unscheduled (with past-due badge)
 - **Unscheduled-recurring midnight guard**: a recurring master with no specific `time`, `preferredTimeMins`, or `when='fixed'` does NOT get a stored `scheduled_at` at insert time. If we naively called `localToUtc(date, null, tz)`, the result would be midnight-local-as-UTC (e.g. 04:00 UTC in EDT), causing every unconstrained recurring task to pile up at wall-clock midnight and consume morning/lunch capacity the user isn't working. The fix: leave `scheduled_at` NULL on insert and let the placement phase choose a slot from the `when`-window / time-block configuration. See `src/scheduler/runSchedule.js:357-365`.
+
+---
+
+## Weather constraints
+
+Weather conditions are a **hard slot qualifier** — the same tier as `when` time-block tags and `location`/`tools`. A task that requires `dry_only` will never land in a slot where `precipitation_probability > 20%`. If no qualifying slot exists, the task goes unscheduled with `_unplacedReason: 'weather'`.
+
+### Load phase
+
+Before the placement loop, `runSchedule.js` checks whether any task in the run carries a non-default weather condition:
+
+```js
+if (hasWeatherConstrainedTasks(allTasks)) {
+  var locationCoords = resolveLocationCoords(schedCfg, userLocations);
+  weatherByDateHour = await loadWeatherForHorizon(dates, locationCoords, db);
+}
+```
+
+`loadWeatherForHorizon` queries `weather_cache` for all `(lat_grid, lon_grid)` entries covering the scheduling horizon. On a cache miss it fetches Open-Meteo inline (~200ms per location) and stores the result. The resulting lookup is:
+
+```
+weatherByDateHour[dateKey][hourOfDay] = { temp, precipProb, cloudcover }
+```
+
+### Slot qualification
+
+`weatherOk(item, dateKey, startMin)` is called inside `findEarliestSlot` for every candidate slot:
+
+1. If all weather fields on the task are `any`/null → return true immediately (no overhead for most tasks)
+2. Look up `weatherByDateHour[dateKey][Math.floor(startMin / 60)]`
+3. If no weather data for that slot (location has no coordinates, cache miss) → return true (**fail-open**)
+4. Check each condition:
+   - `precipProb ≤ threshold` for `dry_only` (20%) and `light_ok` (50%); `wet_ok` and `any` always pass
+   - `cloudcover ≤ threshold` for `clear` (25%) and `partly_ok` (60%); `overcast_ok` and `any` always pass
+   - `temp >= weatherTempMin` and `temp <= weatherTempMax` (null bounds = open-ended)
+5. Return false if any condition fails → slot is skipped
+
+### Fail-open rule
+
+If the scheduler has no weather data for a candidate slot — because the location has no lat/lon, or the cache missed and Open-Meteo was unreachable — the weather constraint is silently skipped and placement proceeds normally. **Weather never blocks a task when data is unavailable.**
+
+### Unscheduled reason
+
+Tasks that couldn't find a qualifying slot get `_unplacedReason: 'weather'` and `_unplacedDetail: 'No suitable weather window found in the next 14 days'`. The frontend unplaced panel surfaces this with a hint about relaxing weather conditions.
+
+### Cache refresh trigger
+
+When `/api/weather` returns `{ refreshed: true }` (cache was stale and just updated), the frontend enqueues a scheduler run via the existing `scheduleQueue` mechanism with `reason: 'weather_refresh'`. Tasks previously blocked by weather may now have qualifying slots; tasks placed in now-unsuitable slots get rescheduled. No new infrastructure — this piggybacks on the existing event queue.
 
 ### 9. Triggers — when the scheduler runs
 - User edits a task (UI or MCP)
