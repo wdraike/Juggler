@@ -160,6 +160,56 @@ function TimezoneSelector({ taskTz, onChangeTz, TH }) {
   );
 }
 
+var TEMP_RANGES = { F: { min: -20, max: 120 }, C: { min: -29, max: 49 } };
+
+function WeatherTempSlider({ tempMin, tempMax, unit, onChange, TH }) {
+  var range = TEMP_RANGES[unit] || TEMP_RANGES.F;
+  var totalSpan = range.max - range.min;
+  var lo = (tempMin !== '' && tempMin !== null && tempMin !== undefined) ? Number(tempMin) : range.min;
+  var hi = (tempMax !== '' && tempMax !== null && tempMax !== undefined) ? Number(tempMax) : range.max;
+  function pct(val) { return ((val - range.min) / totalSpan) * 100; }
+  var noMin = (lo <= range.min);
+  var noMax = (hi >= range.max);
+  var noRestriction = noMin && noMax;
+  function handleLoChange(e) {
+    var v = Number(e.target.value);
+    var newLo = Math.min(v, hi - 1);
+    onChange(newLo <= range.min ? null : newLo, noMax ? null : hi);
+  }
+  function handleHiChange(e) {
+    var v = Number(e.target.value);
+    var newHi = Math.max(v, lo + 1);
+    onChange(noMin ? null : lo, newHi >= range.max ? null : newHi);
+  }
+  return (
+    <div style={{ marginTop: 4 }}>
+      <div style={{ fontSize: 8, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>Temperature</div>
+      <div style={{ position: 'relative', height: 20, marginBottom: 6 }}>
+        <div style={{ position: 'absolute', top: 8, left: 0, right: 0, height: 4, background: TH.border, borderRadius: 2 }} />
+        {!noRestriction && (
+          <div style={{ position: 'absolute', top: 8, height: 4, background: TH.accent, borderRadius: 2,
+            left: pct(lo) + '%', right: (100 - pct(hi)) + '%' }} />
+        )}
+        <input type="range" min={range.min} max={range.max} value={lo} onChange={handleLoChange}
+          style={{ position: 'absolute', width: '100%', top: 0, margin: 0, opacity: 0, cursor: 'pointer', height: 20, zIndex: 2 }} />
+        <input type="range" min={range.min} max={range.max} value={hi} onChange={handleHiChange}
+          style={{ position: 'absolute', width: '100%', top: 0, margin: 0, opacity: 0, cursor: 'pointer', height: 20, zIndex: 3 }} />
+        <div style={{ position: 'absolute', top: 4, left: 'calc(' + pct(lo) + '% - 6px)', width: 12, height: 12,
+          background: TH.accent, borderRadius: '50%', border: '2px solid ' + TH.bgCard,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.4)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', top: 4, left: 'calc(' + pct(hi) + '% - 6px)', width: 12, height: 12,
+          background: TH.accent, borderRadius: '50%', border: '2px solid ' + TH.bgCard,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.4)', pointerEvents: 'none' }} />
+      </div>
+      <div style={{ fontSize: 9, color: TH.text, fontWeight: 600, display: 'flex', justifyContent: 'space-between' }}>
+        <span>{noMin ? 'No min' : lo + '°' + unit}</span>
+        {noRestriction && <span style={{ color: TH.textMuted, fontWeight: 400 }}>No temperature restriction</span>}
+        <span>{noMax ? 'No max' : hi + '°' + unit}</span>
+      </div>
+    </div>
+  );
+}
+
 export default function TaskEditForm({ task, status, onUpdate, onStatusChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, scheduleTemplates, templateDefaults, calSyncSettings, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex, onRecurDayConflict, activeTimezone }) {
   var isCreate = mode === 'create';
   var TH = getTheme(darkMode);
@@ -1800,43 +1850,42 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           )}
         </div>
 
-        {/* ═══ SECTION: Where & Tools ═══ */}
+        {/* ═══ SECTION: Where ═══ */}
         {!marker &&
         <div style={secStyle}>
-          <div style={secHead}>Where & Tools</div>
-          <label style={{ ...lStyle, marginBottom: 5 }}>
-            <span title="Where this task can be done. The scheduler only places it where you're at a matching location.">{'\uD83D\uDCCD'} Location</span>
-            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 2 }}>
-              <button onClick={() => setTaskLoc([])} title="Task can be done at any location"
-                style={togStyle(taskLoc.length === 0, '#2D6A4F')}>{'\uD83C\uDF0D'} Anywhere</button>
-              {(locations || []).map(loc => {
-                var isOn = taskLoc.indexOf(loc.id) !== -1;
-                var anywhere = taskLoc.length === 0;
-                return (
-                  <button key={loc.id} title={'Restrict to ' + loc.name} onClick={() => {
-                    if (anywhere) { setTaskLoc([loc.id]); }
-                    else { setTaskLoc(isOn ? taskLoc.filter(x => x !== loc.id) : [...taskLoc, loc.id]); }
-                  }} style={{
-                    ...togStyle(isOn && !anywhere),
-                    opacity: anywhere ? 0.4 : 1,
-                  }}>{loc.icon} {loc.name}</button>
-                );
-              })}
-            </div>
-          </label>
-          <label style={lStyle}>
-            <span title="Equipment required. The scheduler checks which tools are at each location.">{'\uD83D\uDD27'} Tools needed</span>
-            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 2 }}>
-              {(tools || []).map(tool => {
-                var isOn = taskTools.indexOf(tool.id) !== -1;
-                return (
-                  <button key={tool.id} title={'Requires ' + tool.name} onClick={() => {
-                    setTaskTools(isOn ? taskTools.filter(x => x !== tool.id) : [...taskTools, tool.id]);
-                  }} style={togStyle(isOn)}>{tool.icon} {tool.name}</button>
-                );
-              })}
-            </div>
-          </label>
+          <div style={secHead}>{'\uD83D\uDCCD'} Where</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+            <button onClick={() => setTaskLoc([])} title="Task can be done at any location"
+              style={togStyle(taskLoc.length === 0, '#2D6A4F')}>{'\uD83C\uDF0D'} Anywhere</button>
+            {(locations || []).map(loc => {
+              var isOn = taskLoc.indexOf(loc.id) !== -1;
+              var anywhere = taskLoc.length === 0;
+              return (
+                <button key={loc.id} title={'Restrict to ' + loc.name} onClick={() => {
+                  if (anywhere) { setTaskLoc([loc.id]); }
+                  else { setTaskLoc(isOn ? taskLoc.filter(x => x !== loc.id) : [...taskLoc, loc.id]); }
+                }} style={{ ...togStyle(isOn && !anywhere), opacity: anywhere ? 0.4 : 1 }}>
+                  {loc.icon} {loc.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>}
+
+        {/* ═══ SECTION: Tools ═══ */}
+        {!marker && (tools || []).length > 0 &&
+        <div style={secStyle}>
+          <div style={secHead}>{'\uD83D\uDD27'} Tools</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+            {(tools || []).map(tool => {
+              var isOn = taskTools.indexOf(tool.id) !== -1;
+              return (
+                <button key={tool.id} title={'Requires ' + tool.name} onClick={() => {
+                  setTaskTools(isOn ? taskTools.filter(x => x !== tool.id) : [...taskTools, tool.id]);
+                }} style={togStyle(isOn)}>{tool.icon} {tool.name}</button>
+              );
+            })}
+          </div>
         </div>}
 
         {/* (Dependencies moved into Task section above) */}
@@ -1844,51 +1893,43 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           </>);
         })()}
 
-        {/* Weather Conditions */}
-        {!isCreate && !marker && (
-          <div style={{ padding: '8px 12px', borderTop: '1px solid ' + TH.border }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: TH.text, marginBottom: 8 }}>
-              🌤 Weather Conditions
-            </div>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 5 }}>
-              <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
-                <span title="Precipitation tolerance for this task">Precipitation</span>
-                <select value={weatherPrecip} onChange={e => setWeatherPrecip(e.target.value)} style={iStyle}>
-                  <option value="any">Any weather</option>
-                  <option value="wet_ok">Rain/snow OK</option>
-                  <option value="light_ok">Light rain OK</option>
-                  <option value="dry_only">Dry only</option>
-                </select>
-              </label>
-              <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
-                <span title="Sky cover requirement for this task">Sky cover</span>
-                <select value={weatherCloud} onChange={e => setWeatherCloud(e.target.value)} style={iStyle}>
-                  <option value="any">Any sky</option>
-                  <option value="overcast_ok">Overcast OK</option>
-                  <option value="partly_ok">Partly cloudy OK</option>
-                  <option value="clear">Clear sky only</option>
-                </select>
-              </label>
-            </div>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 2 }}>
-              <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
-                <span title="Minimum acceptable temperature">Temp min °F</span>
-                <input type="number" value={weatherTempMin}
-                  onChange={e => setWeatherTempMin(e.target.value)}
-                  placeholder="No min"
-                  style={{ ...iStyle, width: 'auto', minWidth: 70 }} />
-              </label>
-              <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
-                <span title="Maximum acceptable temperature">Temp max °F</span>
-                <input type="number" value={weatherTempMax}
-                  onChange={e => setWeatherTempMax(e.target.value)}
-                  placeholder="No max"
-                  style={{ ...iStyle, width: 'auto', minWidth: 70 }} />
-              </label>
-            </div>
-            <div style={{ fontSize: 10, color: TH.textMuted }}>Leave blank for no temperature restriction</div>
+        {/* ═══ SECTION: Weather ═══ */}
+        {!isCreate && !marker &&
+        <div style={secStyle}>
+          <div style={secHead}>{'\u26C5'} Weather</div>
+          <div style={{ fontSize: 8, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Precipitation</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 8 }}>
+            {[
+              { val: 'any',      label: '\uD83C\uDF26\uFE0F Any' },
+              { val: 'wet_ok',   label: '\uD83C\uDF27\uFE0F Rain OK' },
+              { val: 'light_ok', label: '\uD83C\uDF02 Light OK' },
+              { val: 'dry_only', label: '\u2600\uFE0F Dry only' },
+            ].map(function(o) {
+              return <button key={o.val} onClick={() => setWeatherPrecip(o.val)} style={togStyle(weatherPrecip === o.val)}>{o.label}</button>;
+            })}
           </div>
-        )}
+          <div style={{ fontSize: 8, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Sky cover</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 8 }}>
+            {[
+              { val: 'any',         label: '\u26C5 Any' },
+              { val: 'overcast_ok', label: '\u2601\uFE0F Overcast OK' },
+              { val: 'partly_ok',   label: '\uD83C\uDF24\uFE0F Partly OK' },
+              { val: 'clear',       label: '\u2600\uFE0F Clear' },
+            ].map(function(o) {
+              return <button key={o.val} onClick={() => setWeatherCloud(o.val)} style={togStyle(weatherCloud === o.val)}>{o.label}</button>;
+            })}
+          </div>
+          <WeatherTempSlider
+            tempMin={weatherTempMin}
+            tempMax={weatherTempMax}
+            unit={task.weatherTempUnit || 'F'}
+            onChange={function(min, max) {
+              setWeatherTempMin(min !== null ? String(min) : '');
+              setWeatherTempMax(max !== null ? String(max) : '');
+            }}
+            TH={TH}
+          />
+        </div>}
 
         {/* Metadata footer — created, scheduled window, slack */}
         {!isCreate && (function() {
