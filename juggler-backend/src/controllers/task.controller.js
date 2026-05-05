@@ -489,6 +489,11 @@ function taskToRow(task, userId, timezone, currentTask) {
     row.preferred_time = task.preferredTime === null ? null : (task.preferredTime ? 1 : 0);
   }
   if (task.preferredTimeMins !== undefined) row.preferred_time_mins = task.preferredTimeMins;
+  if (task.weatherPrecip   !== undefined) row.weather_precip    = task.weatherPrecip;
+  if (task.weatherCloud    !== undefined) row.weather_cloud     = task.weatherCloud;
+  if (task.weatherTempMin  !== undefined) row.weather_temp_min  = task.weatherTempMin;
+  if (task.weatherTempMax  !== undefined) row.weather_temp_max  = task.weatherTempMax;
+  if (task.weatherTempUnit !== undefined) row.weather_temp_unit = task.weatherTempUnit;
 
   // Direct desired_at mapping (if caller provides it explicitly)
   if (task.desiredAt !== undefined) {

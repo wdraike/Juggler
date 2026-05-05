@@ -266,6 +266,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [marker, setMarker] = useState(isCreate ? false : !!task.marker);
   var [flexWhen, setFlexWhen] = useState(isCreate ? false : !!task.flexWhen);
   var [datePinned, setDatePinned] = useState(isCreate ? false : !!task.datePinned);
+  var [weatherPrecip, setWeatherPrecip] = useState(isCreate ? 'any' : (task.weatherPrecip || 'any'));
+  var [weatherCloud, setWeatherCloud]   = useState(isCreate ? 'any' : (task.weatherCloud  || 'any'));
+  var [weatherTempMin, setWeatherTempMin] = useState(isCreate ? '' : (task.weatherTempMin != null ? String(task.weatherTempMin) : ''));
+  var [weatherTempMax, setWeatherTempMax] = useState(isCreate ? '' : (task.weatherTempMax != null ? String(task.weatherTempMax) : ''));
   // For recurring instances: the template's anchor date (separate from this instance's date)
   var [recurType, setRecurType] = useState(isCreate ? 'none' : (task.recur?.type || 'none'));
   var [recurDays, setRecurDays] = useState(isCreate ? 'MTWRF' : (function() {
@@ -481,7 +485,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       tz: t.tz || activeTimezone || 'America/New_York',
       recurStart: t.recurStart || '', recurEnd: t.recurEnd || '',
       preferredTime: t.preferredTime != null ? !!t.preferredTime : null,
-      preferredTimeMins: t.preferredTimeMins != null ? t.preferredTimeMins : null
+      preferredTimeMins: t.preferredTimeMins != null ? t.preferredTimeMins : null,
+      weatherPrecip: t.weatherPrecip || 'any',
+      weatherCloud:  t.weatherCloud  || 'any',
+      weatherTempMin: t.weatherTempMin != null ? t.weatherTempMin : null,
+      weatherTempMax: t.weatherTempMax != null ? t.weatherTempMax : null
     };
   }
   if (!taskSnapshotRef.current && !isCreate && task) {
@@ -531,6 +539,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setRecurEvery(newSnap.recurEvery); setRecurUnit(newSnap.recurUnit);
     setRecurMonthDays(newSnap.recurMonthDays);
     setRecurringStart(newSnap.recurStart); setRecurringEnd(newSnap.recurEnd);
+    setWeatherPrecip(newSnap.weatherPrecip || 'any');
+    setWeatherCloud(newSnap.weatherCloud   || 'any');
+    setWeatherTempMin(newSnap.weatherTempMin != null ? String(newSnap.weatherTempMin) : '');
+    setWeatherTempMax(newSnap.weatherTempMax != null ? String(newSnap.weatherTempMax) : '');
     firstRender.current = true; // prevent auto-save from firing for this sync
   }, [task, isCreate]);
 
@@ -602,9 +614,14 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           var parts = time.split(':');
           return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || '0', 10);
         })()
-        : (recurring ? null : undefined)
+        : (recurring ? null : undefined),
+      weatherPrecip,
+      weatherCloud,
+      weatherTempMin: weatherTempMin !== '' && weatherTempMin !== null ? parseInt(weatherTempMin) : null,
+      weatherTempMax: weatherTempMax !== '' && weatherTempMax !== null ? parseInt(weatherTempMax) : null,
+      weatherTempUnit: isCreate ? null : (task.weatherTempUnit || null)
     };
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, hasPreferredTime]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, hasPreferredTime, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax]);
 
   // Build only the fields that changed from the initial snapshot (prevents marking unchanged fields dirty)
   var buildChangedFields = useCallback(function() {
@@ -666,6 +683,14 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     // Recurring date range (recurStart is the sole anchor post-refactor)
     if (recurStart !== (snap.recurStart || '')) changed.recurStart = all.recurStart;
     if (recurEnd !== (snap.recurEnd || '')) changed.recurEnd = all.recurEnd;
+    if (weatherPrecip !== (snap.weatherPrecip || 'any')) changed.weatherPrecip = all.weatherPrecip;
+    if (weatherCloud  !== (snap.weatherCloud  || 'any')) changed.weatherCloud  = all.weatherCloud;
+    var snapTMin = snap.weatherTempMin != null ? snap.weatherTempMin : null;
+    var snapTMax = snap.weatherTempMax != null ? snap.weatherTempMax : null;
+    var curTMin  = weatherTempMin !== '' ? parseInt(weatherTempMin) : null;
+    var curTMax  = weatherTempMax !== '' ? parseInt(weatherTempMax) : null;
+    if (curTMin !== snapTMin) changed.weatherTempMin = all.weatherTempMin;
+    if (curTMax !== snapTMax) changed.weatherTempMax = all.weatherTempMax;
     // Always include tz and _timezone when any field changed — the backend needs
     // the timezone context for date/time → UTC conversion
     if (Object.keys(changed).length > 0) {
@@ -673,7 +698,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       changed._timezone = all._timezone;
     }
     return Object.keys(changed).length > 0 ? changed : null;
-  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime]);
+  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax]);
 
   // Dirty detection — compare current fields to snapshot
   var [isDirty, setIsDirty] = useState(false);
@@ -1818,6 +1843,52 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
 
           </>);
         })()}
+
+        {/* Weather Conditions */}
+        {!isCreate && !marker && (
+          <div style={{ padding: '8px 12px', borderTop: '1px solid ' + TH.border }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: TH.text, marginBottom: 8 }}>
+              🌤 Weather Conditions
+            </div>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 5 }}>
+              <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
+                <span title="Precipitation tolerance for this task">Precipitation</span>
+                <select value={weatherPrecip} onChange={e => setWeatherPrecip(e.target.value)} style={iStyle}>
+                  <option value="any">Any weather</option>
+                  <option value="wet_ok">Rain/snow OK</option>
+                  <option value="light_ok">Light rain OK</option>
+                  <option value="dry_only">Dry only</option>
+                </select>
+              </label>
+              <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
+                <span title="Sky cover requirement for this task">Sky cover</span>
+                <select value={weatherCloud} onChange={e => setWeatherCloud(e.target.value)} style={iStyle}>
+                  <option value="any">Any sky</option>
+                  <option value="overcast_ok">Overcast OK</option>
+                  <option value="partly_ok">Partly cloudy OK</option>
+                  <option value="clear">Clear sky only</option>
+                </select>
+              </label>
+            </div>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 2 }}>
+              <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
+                <span title="Minimum acceptable temperature">Temp min °F</span>
+                <input type="number" value={weatherTempMin}
+                  onChange={e => setWeatherTempMin(e.target.value)}
+                  placeholder="No min"
+                  style={{ ...iStyle, width: 'auto', minWidth: 70 }} />
+              </label>
+              <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
+                <span title="Maximum acceptable temperature">Temp max °F</span>
+                <input type="number" value={weatherTempMax}
+                  onChange={e => setWeatherTempMax(e.target.value)}
+                  placeholder="No max"
+                  style={{ ...iStyle, width: 'auto', minWidth: 70 }} />
+              </label>
+            </div>
+            <div style={{ fontSize: 10, color: TH.textMuted }}>Leave blank for no temperature restriction</div>
+          </div>
+        )}
 
         {/* Metadata footer — created, scheduled window, slack */}
         {!isCreate && (function() {
