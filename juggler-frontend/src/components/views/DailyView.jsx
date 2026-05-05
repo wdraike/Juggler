@@ -18,6 +18,18 @@ import { checkWeatherMatch, hasWeatherRestrictions } from '../../utils/weatherMa
 var MIN_PX_PER_HOUR = 30;
 var MAX_PX_PER_HOUR = 240;
 
+function weatherCodeIcon(code) {
+  if (code == null) return '';
+  if (code === 0) return '☀️';
+  if (code <= 3) return '⛅';
+  if (code <= 48) return '🌫️';
+  if (code <= 67) return '🌧️';
+  if (code <= 77) return '❄️';
+  if (code <= 82) return '🌦️';
+  if (code <= 86) return '🌨️';
+  return '⛈️';
+}
+
 function minsToTime(m) {
   var h = Math.floor(m / 60);
   var mm = m % 60;
@@ -804,6 +816,15 @@ export default function DailyView({
     return map;
   }, [selectedDateKey, schedCfg, blocks]);
 
+  // Pre-compute hourly weather map for today
+  var hourlyByHour = useMemo(function () {
+    var day = weatherByDate && weatherByDate[selectedDateKey];
+    if (!day || !day.hourly) return {};
+    var map = {};
+    day.hourly.forEach(function (e) { map[e.hour] = e; });
+    return map;
+  }, [weatherByDate, selectedDateKey]);
+
   // Status filter
   var matchesFilter = useCallback(function (taskId) {
     if (!filter || filter === 'all') return true;
@@ -1142,6 +1163,24 @@ export default function DailyView({
                 >
                   {locIconStr || '\u00B7'}
                 </div>
+                {/* Hourly weather indicator */}
+                {hourlyByHour[hour] && (function () {
+                  var hw = hourlyByHour[hour];
+                  var icon = weatherCodeIcon(hw.code);
+                  if (!icon) return null;
+                  var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
+                  return (
+                    <div style={{
+                      position: 'absolute', top: 12, left: 0, width: GUTTER_W,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1,
+                      fontSize: 8, color: theme.textMuted, opacity: 0.75,
+                      lineHeight: 1.1, userSelect: 'none', pointerEvents: 'none'
+                    }}>
+                      <span style={{ fontSize: 9 }}>{icon}</span>
+                      <span>{Math.round(hw.temp)}°{unit}</span>
+                    </div>
+                  );
+                })()}
                 {/* Location override menu — portal to body so it's above task tiles */}
                 {locMenuHour === hour && onHourLocationOverride && locations && (function () {
                   var gridEl = scrollRef.current && scrollRef.current.querySelector('[data-grid-area]');
