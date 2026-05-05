@@ -7,6 +7,7 @@
 import React from 'react';
 import { PRI_COLORS, locIcon, WHEN_TAG_ICONS, DEFAULT_TOOLS, isTerminalStatus } from '../../state/constants';
 import { getTheme } from '../../theme/colors';
+import { getTaskIcon } from '../../utils/taskIcon';
 import { parseWhen } from '../../scheduler/timeBlockHelpers';
 import StatusToggle from './StatusToggle';
 
@@ -127,7 +128,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
             whiteSpace: 'nowrap', textOverflow: 'ellipsis'
           })
         }}>
-          {task.text}
+          {(function(){ var ic = getTaskIcon(task.text); return ic ? <span style={{marginRight:2,flexShrink:0}}>{ic}</span> : null; })()}{task.text}
         </span>
         {task.project && (
           <span style={{
