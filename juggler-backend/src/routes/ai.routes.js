@@ -8,9 +8,9 @@ const { requireFeature, checkUsageLimit } = require('../middleware/feature-gate'
 
 var aiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 5,
+  max: 2,
   keyGenerator: function(req) { return req.user ? req.user.id : 'anon'; },
-  message: { error: 'Too many AI requests. Try again in a minute.' },
+  message: { error: 'Too many AI requests. Max 2 per minute — try again shortly.' },
   validate: false
 });
 

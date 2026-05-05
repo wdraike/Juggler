@@ -128,8 +128,8 @@ export default function AiCommandPanel({
         }
       }, { timeout: 55000 });
       var data = resp.data;
-      if (onApplyOps && data.ops && data.ops.length > 0) onApplyOps(data.ops, data.msg);
-      setAiLog(function(prev) { return prev.concat([{ role: 'ai', text: data.msg || 'Done.', ops: data.ops || [] }]); });
+      if (!data.unsupported && onApplyOps && data.ops && data.ops.length > 0) onApplyOps(data.ops, data.msg);
+      setAiLog(function(prev) { return prev.concat([{ role: 'ai', text: data.msg || 'Done.', ops: data.unsupported ? [] : (data.ops || []), unsupported: !!data.unsupported }]); });
       var hideDelay = (data.ops || []).some(function(o) { return o.op === 'add'; }) ? 30000 : 8000;
       autoHideRef.current = setTimeout(function() { setShowLog(false); }, hideDelay);
     } catch (err) {
@@ -212,18 +212,20 @@ export default function AiCommandPanel({
             </div>
           )}
           {aiLog.map(function(entry, i) {
+            var isUser = entry.role === 'user';
+            var isUnsupported = !isUser && entry.unsupported;
             return (
               <div key={i} style={{
                 marginBottom: 4, padding: '5px 8px', borderRadius: 6,
                 fontSize: 11, lineHeight: 1.4, maxWidth: '90%',
-                background: entry.role === 'user' ? theme.accent : theme.badgeBg,
-                color: entry.role === 'user' ? 'white' : theme.text,
-                border: entry.role === 'user' ? 'none' : '1px solid ' + theme.border,
-                marginLeft: entry.role === 'user' ? 'auto' : undefined,
-                textAlign: entry.role === 'user' ? 'right' : undefined
+                background: isUser ? theme.accent : (isUnsupported ? (darkMode ? '#3a2e1a' : '#fff8e6') : theme.badgeBg),
+                color: isUser ? 'white' : (isUnsupported ? (darkMode ? '#f0b429' : '#92600a') : theme.text),
+                border: isUser ? 'none' : ('1px solid ' + (isUnsupported ? (darkMode ? '#6b4a10' : '#f0c060') : theme.border)),
+                marginLeft: isUser ? 'auto' : undefined,
+                textAlign: isUser ? 'right' : undefined
               }}>
                 {entry.text}
-                {entry.ops && entry.ops.length > 0 && (
+                {!isUnsupported && entry.ops && entry.ops.length > 0 && (
                   <div style={{ fontSize: 9, color: theme.textMuted, marginTop: 2 }}>
                     {entry.ops.length} change{entry.ops.length !== 1 ? 's' : ''} applied
                   </div>
