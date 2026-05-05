@@ -67,6 +67,7 @@ export default function AppLayout() {
   var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements, flushNow } = useTaskState();
   var isMobile = useIsMobile();
   var isCompact = useIsCompact();
+  var [headerCompact, setHeaderCompact] = useState(isCompact);
   var { toast, toastHistory, showToast } = useToast();
   var { pushUndo, popUndo } = useUndo(taskStateRef, dispatch, dispatchPersist);
 
@@ -1107,12 +1108,13 @@ export default function AppLayout() {
           onAddTask={() => { setShowCreateForm(true); setExpandedTasks([]); }}
           isMobile={isMobile}
           isCompact={isCompact}
+          onCompactChange={setHeaderCompact}
           aiPanel={<AiCommandPanel darkMode={darkMode} isMobile={isMobile} allTasks={allTasks} statuses={statuses} config={config} onApplyOps={handleAiOps} showToast={showToast} />}
           weekStripDates={weekStripDates} selectedDate={selectedDate}
           dayOffset={dayOffset} setDayOffset={setDayOffset} today={today}
           onManageDisabled={function() { setShowDisabledItems(true); }}
         />
-        {(isMobile || isCompact) && <WeekStrip
+        {(isMobile || headerCompact) && <WeekStrip
           weekStripDates={weekStripDates} selectedDate={selectedDate}
           dayOffset={dayOffset} setDayOffset={setDayOffset} today={today}
           darkMode={darkMode} statuses={statuses} tasksByDate={tasksByDate}

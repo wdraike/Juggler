@@ -1352,8 +1352,8 @@ async function sync(req, res) {
               last_user_hash: userHash(bTask),
               last_pulled_hash: createdNorm ? pAdapter2.eventHash(createdNorm) : null,
               event_summary: bTask.text,
-              event_start: createdNorm ? createdNorm.startDateTime : null,
-              event_end: createdNorm ? createdNorm.endDateTime : null,
+              event_start: (createdNorm && createdNorm.startDateTime) || (bTask._scheduled_at ? String(bTask._scheduled_at).replace(' ', 'T') : null),
+              event_end: (createdNorm && createdNorm.endDateTime) || null,
               event_all_day: (bTask.when === 'allday') ? 1 : 0,
               task_updated_at: bTask._updated_at || null,
               last_modified_at: toMySQLDate(createdNorm && createdNorm.lastModified ? new Date(new Date(createdNorm.lastModified).getTime() + 2000).toISOString() : new Date().toISOString()),
@@ -1389,8 +1389,8 @@ async function sync(req, res) {
                   last_user_hash: userHash(rTask),
                   last_pulled_hash: rNorm ? pAdapter2.eventHash(rNorm) : null,
                   event_summary: rTask.text,
-                  event_start: rNorm ? rNorm.startDateTime : null,
-                  event_end: rNorm ? rNorm.endDateTime : null,
+                  event_start: (rNorm && rNorm.startDateTime) || (rTask._scheduled_at ? String(rTask._scheduled_at).replace(' ', 'T') : null),
+                  event_end: (rNorm && rNorm.endDateTime) || null,
                   event_all_day: (rTask.when === 'allday') ? 1 : 0,
                   task_updated_at: rTask._updated_at || null,
                   last_modified_at: toMySQLDate(rNorm && rNorm.lastModified ? new Date(new Date(rNorm.lastModified).getTime() + 2000).toISOString() : new Date().toISOString()),
@@ -1446,8 +1446,8 @@ async function sync(req, res) {
                 last_user_hash: userHash(fTask),
                 last_pulled_hash: fNorm ? pAdapter2.eventHash(fNorm) : null,
                 event_summary: fTask.text,
-                event_start: fNorm ? fNorm.startDateTime : null,
-                event_end: fNorm ? fNorm.endDateTime : null,
+                event_start: (fNorm && fNorm.startDateTime) || (fTask._scheduled_at ? String(fTask._scheduled_at).replace(' ', 'T') : null),
+                event_end: (fNorm && fNorm.endDateTime) || null,
                 event_all_day: (fTask.when === 'allday') ? 1 : 0,
                 task_updated_at: fTask._updated_at || null,
                 last_modified_at: toMySQLDate(fNorm && fNorm.lastModified ? new Date(new Date(fNorm.lastModified).getTime() + 2000).toISOString() : new Date().toISOString()),
@@ -1503,6 +1503,23 @@ async function sync(req, res) {
         if (existingLedgerEventIds.has(evId)) continue;
 
         var newEvent = pEventsById2[evId];
+
+        // Apple (CalDAV) indexes each event by BOTH its UID and its CalDAV URL, so the
+        // same event object appears under two keys in pEventsById2. Immediately mark the
+        // sibling key as processed so the second key is skipped — otherwise the loop
+        // creates duplicate tasks (pull) or triggers spurious orphan deletion (push).
+        if (newEvent._url && newEvent._url !== evId) {
+          if (processedEventIds2.has(newEvent._url) || existingLedgerEventIds.has(newEvent._url)) {
+            continue; // sibling (URL key) already handled — skip this UID entry
+          }
+          processedEventIds2.add(newEvent._url); // claim the URL key so it won't re-process
+        }
+        if (newEvent.id && newEvent.id !== evId) {
+          if (processedEventIds2.has(newEvent.id) || existingLedgerEventIds.has(newEvent.id)) {
+            continue; // sibling (UID key) already handled — skip this URL entry
+          }
+          processedEventIds2.add(newEvent.id); // claim the UID key so it won't re-process
+        }
 
         // Check if already linked to a task via the event ID column
         var existingTask = allTasks.find(function(t) {

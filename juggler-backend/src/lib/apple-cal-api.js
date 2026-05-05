@@ -158,6 +158,29 @@ function parseVEvents(icsData, url, etag) {
 }
 
 /**
+ * Build a UTC ICAL.Time from a JS Date or MySQL datetime string.
+ * MySQL datetime strings lack a timezone indicator — always interpret as UTC.
+ */
+function toUtcICALTime(input) {
+  var d;
+  if (input instanceof Date) {
+    d = input;
+  } else {
+    // MySQL "YYYY-MM-DD HH:MM:SS" — append Z so Date() parses as UTC
+    var s = String(input);
+    if (!s.includes('Z') && !s.includes('+') && s.includes(' ')) {
+      s = s.replace(' ', 'T') + 'Z';
+    }
+    d = new Date(s);
+  }
+  return new ICAL.Time({
+    year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate(),
+    hour: d.getUTCHours(), minute: d.getUTCMinutes(), second: d.getUTCSeconds(),
+    isDate: false
+  }, ICAL.Timezone.utcTimezone);
+}
+
+/**
  * Build an iCalendar (ICS) string from a task.
  */
 function buildVEvent(task, year, tz) {
@@ -170,7 +193,7 @@ function buildVEvent(task, year, tz) {
   vevent.addPropertyWithValue('uid', uid);
 
   var isDone = task.status === 'done';
-  var summaryText = isDone ? '\u2713 ' + task.text : task.text;
+  var summaryText = isDone ? '✓ ' + task.text : task.text;
   vevent.addPropertyWithValue('summary', summaryText);
 
   // Description with metadata
@@ -183,10 +206,21 @@ function buildVEvent(task, year, tz) {
   vevent.addPropertyWithValue('description', descParts.join('\n'));
 
   var isAllDay = task.when === 'allday';
-  var dateParts = (task.date || '').split('/');
-  var month = parseInt(dateParts[0], 10);
-  var day = parseInt(dateParts[1], 10);
-  var y = year || new Date().getFullYear();
+
+  // Parse date — handle both YYYY-MM-DD (from utcToLocal) and legacy M/D format
+  var dateStr = task.date || '';
+  var y, month, day;
+  var isoMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    y = parseInt(isoMatch[1], 10);
+    month = parseInt(isoMatch[2], 10);
+    day = parseInt(isoMatch[3], 10);
+  } else {
+    var dateParts = dateStr.split('/');
+    month = parseInt(dateParts[0], 10) || 1;
+    day = parseInt(dateParts[1], 10) || 1;
+    y = year || new Date().getFullYear();
+  }
 
   if (isAllDay) {
     var startDate = new ICAL.Time({ year: y, month: month, day: day, isDate: true });
@@ -195,31 +229,33 @@ function buildVEvent(task, year, tz) {
     vevent.addPropertyWithValue('dtstart', startDate);
     vevent.addPropertyWithValue('dtend', endDate);
   } else {
-    // Parse time (e.g. "2:30 PM")
-    var timeMatch = (task.time || '12:00 PM').match(/(\d+):(\d+)\s*(AM|PM)/i);
-    var hours = 12, mins = 0;
-    if (timeMatch) {
-      hours = parseInt(timeMatch[1], 10);
-      var ampm = timeMatch[3].toUpperCase();
-      if (ampm === 'PM' && hours !== 12) hours += 12;
-      if (ampm === 'AM' && hours === 12) hours = 0;
-      mins = parseInt(timeMatch[2], 10);
+    var startTime, endTime;
+
+    // Use _scheduled_at (UTC) when available — avoids floating-time issues from missing VTIMEZONE.
+    // Fall back to constructing from date+time fields, also emitted as UTC.
+    if (task._scheduled_at) {
+      // toUtcICALTime handles MySQL "YYYY-MM-DD HH:MM:SS" strings (no timezone indicator)
+      // by appending Z before parsing, ensuring getUTC* methods return the correct UTC values.
+      startTime = toUtcICALTime(task._scheduled_at);
+    } else {
+      var timeMatch = (task.time || '12:00 PM').match(/(\d+):(\d+)\s*(AM|PM)/i);
+      var hours = 12, mins = 0;
+      if (timeMatch) {
+        hours = parseInt(timeMatch[1], 10);
+        var ampm = timeMatch[3].toUpperCase();
+        if (ampm === 'PM' && hours !== 12) hours += 12;
+        if (ampm === 'AM' && hours === 12) hours = 0;
+        mins = parseInt(timeMatch[2], 10);
+      }
+      startTime = new ICAL.Time({
+        year: y, month: month, day: day,
+        hour: hours, minute: mins, second: 0,
+        isDate: false
+      }, ICAL.Timezone.utcTimezone);
     }
+
     var dur = task.dur || 30;
-
-    var startTime = new ICAL.Time({
-      year: y, month: month, day: day,
-      hour: hours, minute: mins, second: 0,
-      isDate: false
-    });
-    if (tz) {
-      try {
-        var zone = ICAL.TimezoneService.get(tz);
-        if (zone) startTime.zone = zone;
-      } catch (e) { /* use floating time */ }
-    }
-
-    var endTime = startTime.clone();
+    endTime = startTime.clone();
     endTime.addDuration(new ICAL.Duration({ minutes: dur }));
 
     vevent.addPropertyWithValue('dtstart', startTime);
@@ -231,8 +267,10 @@ function buildVEvent(task, year, tz) {
     vevent.addPropertyWithValue('transp', 'TRANSPARENT');
   }
 
-  // Timestamp
-  vevent.addPropertyWithValue('dtstamp', ICAL.Time.now());
+  // DTSTAMP — RFC 5545 requires UTC (Z suffix). ICAL.Time.now() returns floating
+  // local time which violates the spec and causes Apple Calendar to silently
+  // discard the event. Use toUtcICALTime(new Date()) for a proper UTC timestamp.
+  vevent.addPropertyWithValue('dtstamp', toUtcICALTime(new Date()));
 
   cal.addSubcomponent(vevent);
   return cal.toString();

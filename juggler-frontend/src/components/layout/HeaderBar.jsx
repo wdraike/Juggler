@@ -17,13 +17,36 @@ import UserDropdown from './UserDropdown';
 import { services, homeUrl } from '../../proxy-config';
 var BILLING_URL = services.billing.frontend;
 
-export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, calSyncProgress, schedulerRunning, onShowCalSync, onShowHelp, onAddTask, isMobile, isCompact, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today, activeTimezone, tzSource, onManageDisabled }) {
-  // `isCompact` collapses the right-button bank into an overflow menu and
-  // hides the inline week strip — same pattern as mobile, triggered earlier
-  // so tablet/narrow-laptop widths don't cram every header element onto
-  // one unreadable row. Pure mobile styling (fonts, paddings, small logo)
-  // stays tied to `isMobile`.
-  var useOverflow = isMobile || isCompact;
+export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, calSyncProgress, schedulerRunning, onShowCalSync, onShowHelp, onAddTask, isMobile, isCompact, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today, activeTimezone, tzSource, onManageDisabled, onCompactChange }) {
+  // Measure the actual header container width with ResizeObserver so the layout
+  // reacts correctly when sidebars/panels open and narrow the header — window.innerWidth
+  // based breakpoints miss that case entirely.
+  // Tiers (based on container px, not window px):
+  //   ≥ 920px → full: week strip inline + all buttons visible
+  //   < 920px → compact: week strip moves below header, buttons collapse to overflow menu
+  //   isMobile prop still controls touch-target sizing and font scale
+  var headerRef = useRef(null);
+  var [containerWidth, setContainerWidth] = useState(function() {
+    return typeof window !== 'undefined' ? window.innerWidth : 1200;
+  });
+  useEffect(function() {
+    if (!headerRef.current) return;
+    var ro = new ResizeObserver(function(entries) {
+      if (entries[0]) setContainerWidth(entries[0].contentRect.width);
+    });
+    ro.observe(headerRef.current);
+    return function() { ro.disconnect(); };
+  }, []);
+  var effectiveCompact = containerWidth < 920;
+  var useOverflow = isMobile || effectiveCompact;
+  // Notify parent when effective compact state changes (drives below-header WeekStrip)
+  var prevEffectiveCompact = useRef(effectiveCompact);
+  useEffect(function() {
+    if (onCompactChange && prevEffectiveCompact.current !== effectiveCompact) {
+      prevEffectiveCompact.current = effectiveCompact;
+      onCompactChange(effectiveCompact);
+    }
+  }, [effectiveCompact, onCompactChange]);
   var theme = getTheme(darkMode);
   var { user, logout } = useAuth();
   var [showOverflow, setShowOverflow] = useState(false);
@@ -56,11 +79,11 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
   return (
     <>
     {(gcalSyncing || schedulerRunning) && <style>{`@keyframes gcal-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } } @keyframes sched-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.7); } }`}</style>}
-    <div style={{
-      display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: isMobile ? 6 : 12,
+    <div ref={headerRef} style={{
+      display: 'flex', alignItems: 'center', gap: isMobile ? 6 : 12,
       padding: isMobile ? '6px 8px' : '8px 16px',
       background: theme.headerBg, borderBottom: '2px solid ' + theme.accent + '4D',
-      position: 'sticky', top: 0, zIndex: 300, overflowX: 'auto'
+      position: 'sticky', top: 0, zIndex: 300, overflow: 'hidden', minWidth: 0
     }}>
       <a href={homeUrl} style={{ textDecoration: 'none', display: 'inline-flex' }}>
       {!isMobile && <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, padding: '4px 10px', borderLeft: '2px solid ' + theme.accent }}>
