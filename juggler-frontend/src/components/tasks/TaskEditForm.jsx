@@ -200,7 +200,7 @@ function WeatherTempSlider({ tempMin, tempMax, unit, onChange, TH }) {
   }
   return (
     <div style={{ marginTop: 4 }}>
-      <div style={{ fontSize: 8, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>Temperature</div>
+      <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>Temperature</div>
       <div style={{ position: 'relative', height: 20, marginBottom: 6 }} onMouseMove={handleMouseMove}>
         <div style={{ position: 'absolute', top: 8, left: 0, right: 0, height: 4, background: TH.border, borderRadius: 2 }} />
         {!noRestriction && (
@@ -222,6 +222,65 @@ function WeatherTempSlider({ tempMin, tempMax, unit, onChange, TH }) {
         <span>{noMin ? 'No min' : lo + '°' + unit}</span>
         {noRestriction && <span style={{ color: TH.textMuted, fontWeight: 400 }}>No temperature restriction</span>}
         <span>{noMax ? 'No max' : hi + '°' + unit}</span>
+      </div>
+    </div>
+  );
+}
+
+function WeatherHumiditySlider({ humidityMin, humidityMax, onChange, TH }) {
+  var lo = (humidityMin !== '' && humidityMin !== null && humidityMin !== undefined) ? Number(humidityMin) : 0;
+  var hi = (humidityMax !== '' && humidityMax !== null && humidityMax !== undefined) ? Number(humidityMax) : 100;
+  function pct(val) { return val; } // 0-100 maps directly
+  var noMin = lo <= 0;
+  var noMax = hi >= 100;
+  var noRestriction = noMin && noMax;
+
+  var loRef = useRef(null);
+  var hiRef = useRef(null);
+
+  function handleMouseMove(e) {
+    if (!loRef.current || !hiRef.current) return;
+    var rect = e.currentTarget.getBoundingClientRect();
+    var x = (e.clientX - rect.left) / rect.width;
+    var preferLo = Math.abs(x - pct(lo) / 100) <= Math.abs(x - pct(hi) / 100);
+    loRef.current.style.zIndex = preferLo ? 4 : 2;
+    hiRef.current.style.zIndex = preferLo ? 2 : 3;
+  }
+
+  function handleLoChange(e) {
+    var v = Number(e.target.value);
+    var newLo = Math.min(v, hi - 1);
+    onChange(newLo <= 0 ? null : newLo, noMax ? null : hi);
+  }
+  function handleHiChange(e) {
+    var v = Number(e.target.value);
+    var newHi = Math.max(v, lo + 1);
+    onChange(noMin ? null : lo, newHi >= 100 ? null : newHi);
+  }
+  return (
+    <div style={{ marginTop: 4 }}>
+      <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>Humidity</div>
+      <div style={{ position: 'relative', height: 20, marginBottom: 6 }} onMouseMove={handleMouseMove}>
+        <div style={{ position: 'absolute', top: 8, left: 0, right: 0, height: 4, background: TH.border, borderRadius: 2 }} />
+        {!noRestriction && (
+          <div style={{ position: 'absolute', top: 8, height: 4, background: TH.accent, borderRadius: 2,
+            left: pct(lo) + '%', right: (100 - pct(hi)) + '%' }} />
+        )}
+        <input ref={loRef} type="range" min={0} max={100} value={lo} onChange={handleLoChange}
+          style={{ position: 'absolute', width: '100%', top: 0, margin: 0, opacity: 0, cursor: 'pointer', height: 20, zIndex: 2 }} />
+        <input ref={hiRef} type="range" min={0} max={100} value={hi} onChange={handleHiChange}
+          style={{ position: 'absolute', width: '100%', top: 0, margin: 0, opacity: 0, cursor: 'pointer', height: 20, zIndex: 3 }} />
+        <div style={{ position: 'absolute', top: 4, left: 'calc(' + pct(lo) + '% - 6px)', width: 12, height: 12,
+          background: TH.accent, borderRadius: '50%', border: '2px solid ' + TH.bgCard,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.4)', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', top: 4, left: 'calc(' + pct(hi) + '% - 6px)', width: 12, height: 12,
+          background: TH.accent, borderRadius: '50%', border: '2px solid ' + TH.bgCard,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.4)', pointerEvents: 'none' }} />
+      </div>
+      <div style={{ fontSize: 9, color: TH.text, fontWeight: 600, display: 'flex', justifyContent: 'space-between' }}>
+        <span>{noMin ? 'No min' : lo + '%'}</span>
+        {noRestriction && <span style={{ color: TH.textMuted, fontWeight: 400 }}>No humidity restriction</span>}
+        <span>{noMax ? 'No max' : hi + '%'}</span>
       </div>
     </div>
   );
@@ -337,6 +396,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [weatherCloud, setWeatherCloud]   = useState(isCreate ? 'any' : (task.weatherCloud  || 'any'));
   var [weatherTempMin, setWeatherTempMin] = useState(isCreate ? '' : (task.weatherTempMin != null ? String(task.weatherTempMin) : ''));
   var [weatherTempMax, setWeatherTempMax] = useState(isCreate ? '' : (task.weatherTempMax != null ? String(task.weatherTempMax) : ''));
+  var [weatherHumidityMin, setWeatherHumidityMin] = useState(isCreate ? '' : (task.weatherHumidityMin != null ? String(task.weatherHumidityMin) : ''));
+  var [weatherHumidityMax, setWeatherHumidityMax] = useState(isCreate ? '' : (task.weatherHumidityMax != null ? String(task.weatherHumidityMax) : ''));
   // For recurring instances: the template's anchor date (separate from this instance's date)
   var [recurType, setRecurType] = useState(isCreate ? 'none' : (task.recur?.type || 'none'));
   var [recurDays, setRecurDays] = useState(isCreate ? 'MTWRF' : (function() {
@@ -511,7 +572,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
 
   var BTN_H = isMobile ? 30 : 26;
   var iStyle = { fontSize: isMobile ? 13 : 11, padding: isMobile ? '6px 8px' : '3px 4px', border: '1px solid ' + TH.inputBorder, borderRadius: 4, background: TH.inputBg, color: TH.inputText, fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box', maxWidth: '100%' };
-  var lStyle = { fontSize: 8, color: TH.textMuted, display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 600 };
+  var lStyle = { fontSize: 9, color: TH.textMuted, display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 600 };
   function togStyle(on, color) {
     return {
       height: BTN_H, padding: '0 8px', borderRadius: 4, fontSize: 10, cursor: 'pointer',
@@ -556,7 +617,9 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       weatherPrecip: t.weatherPrecip || 'any',
       weatherCloud:  t.weatherCloud  || 'any',
       weatherTempMin: t.weatherTempMin != null ? t.weatherTempMin : null,
-      weatherTempMax: t.weatherTempMax != null ? t.weatherTempMax : null
+      weatherTempMax: t.weatherTempMax != null ? t.weatherTempMax : null,
+      weatherHumidityMin: t.weatherHumidityMin != null ? t.weatherHumidityMin : null,
+      weatherHumidityMax: t.weatherHumidityMax != null ? t.weatherHumidityMax : null
     };
   }
   if (!taskSnapshotRef.current && !isCreate && task) {
@@ -610,6 +673,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setWeatherCloud(newSnap.weatherCloud   || 'any');
     setWeatherTempMin(newSnap.weatherTempMin != null ? String(newSnap.weatherTempMin) : '');
     setWeatherTempMax(newSnap.weatherTempMax != null ? String(newSnap.weatherTempMax) : '');
+    setWeatherHumidityMin(newSnap.weatherHumidityMin != null ? String(newSnap.weatherHumidityMin) : '');
+    setWeatherHumidityMax(newSnap.weatherHumidityMax != null ? String(newSnap.weatherHumidityMax) : '');
     firstRender.current = true; // prevent auto-save from firing for this sync
   }, [task, isCreate]);
 
@@ -686,9 +751,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       weatherCloud,
       weatherTempMin: weatherTempMin !== '' && weatherTempMin !== null ? parseInt(weatherTempMin) : null,
       weatherTempMax: weatherTempMax !== '' && weatherTempMax !== null ? parseInt(weatherTempMax) : null,
-      weatherTempUnit: isCreate ? null : (task.weatherTempUnit || null)
+      weatherTempUnit: isCreate ? null : (task.weatherTempUnit || null),
+      weatherHumidityMin: weatherHumidityMin !== '' && weatherHumidityMin !== null ? parseInt(weatherHumidityMin) : null,
+      weatherHumidityMax: weatherHumidityMax !== '' && weatherHumidityMax !== null ? parseInt(weatherHumidityMax) : null
     };
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, hasPreferredTime, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, hasPreferredTime, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   // Build only the fields that changed from the initial snapshot (prevents marking unchanged fields dirty)
   var buildChangedFields = useCallback(function() {
@@ -758,6 +825,12 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     var curTMax  = weatherTempMax !== '' ? parseInt(weatherTempMax) : null;
     if (curTMin !== snapTMin) changed.weatherTempMin = all.weatherTempMin;
     if (curTMax !== snapTMax) changed.weatherTempMax = all.weatherTempMax;
+    var snapHMin = snap.weatherHumidityMin != null ? snap.weatherHumidityMin : null;
+    var snapHMax = snap.weatherHumidityMax != null ? snap.weatherHumidityMax : null;
+    var curHMin  = weatherHumidityMin !== '' ? parseInt(weatherHumidityMin) : null;
+    var curHMax  = weatherHumidityMax !== '' ? parseInt(weatherHumidityMax) : null;
+    if (curHMin !== snapHMin) changed.weatherHumidityMin = all.weatherHumidityMin;
+    if (curHMax !== snapHMax) changed.weatherHumidityMax = all.weatherHumidityMax;
     // Always include tz and _timezone when any field changed — the backend needs
     // the timezone context for date/time → UTC conversion
     if (Object.keys(changed).length > 0) {
@@ -765,7 +838,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       changed._timezone = all._timezone;
     }
     return Object.keys(changed).length > 0 ? changed : null;
-  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax]);
+  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, rigid, dur, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   // Dirty detection — compare current fields to snapshot
   var [isDirty, setIsDirty] = useState(false);
@@ -1017,7 +1090,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           return (<>
 
         <div style={secStyle}>
-          <div style={secHead}>Task</div>
+          <div style={secHead}>📋 Task</div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
             <label style={{ ...lStyle, flex: 1, minWidth: isMobile ? 0 : 200, width: isMobile ? '100%' : undefined }}>
               Name
@@ -1107,7 +1180,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         {/* ═══ SECTION: When (Scheduling) ═══ */}
         <div style={secStyle}>
           <div style={{ ...secHead, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-            <span>When</span>
+            <span>📅 When</span>
             <TimezoneSelector taskTz={taskTz} onChangeTz={changeTaskTimezone} TH={TH} />
           </div>
 
@@ -1893,18 +1966,18 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         {!isCreate && !marker &&
         <div style={secStyle}>
           <div style={secHead}>{'\u26C5'} Weather</div>
-          <div style={{ fontSize: 8, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Precipitation</div>
+          <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Precipitation</div>
           <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 8 }}>
             {[
               { val: 'any',      label: '\uD83C\uDF26\uFE0F Any' },
-              { val: 'wet_ok',   label: '\uD83C\uDF27\uFE0F Rain OK' },
+              { val: 'wet_ok',   label: '\uD83C\uDF27\uFE0F Precip OK' },
               { val: 'light_ok', label: '\uD83C\uDF02 Light OK' },
               { val: 'dry_only', label: '\u2600\uFE0F Dry only' },
             ].map(function(o) {
               return <button key={o.val} onClick={() => setWeatherPrecip(o.val)} style={togStyle(weatherPrecip === o.val)}>{o.label}</button>;
             })}
           </div>
-          <div style={{ fontSize: 8, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Sky cover</div>
+          <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Sky cover</div>
           <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 8 }}>
             {[
               { val: 'any',         label: '\u26C5 Any' },
@@ -1922,6 +1995,15 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             onChange={function(min, max) {
               setWeatherTempMin(min !== null ? String(min) : '');
               setWeatherTempMax(max !== null ? String(max) : '');
+            }}
+            TH={TH}
+          />
+          <WeatherHumiditySlider
+            humidityMin={weatherHumidityMin}
+            humidityMax={weatherHumidityMax}
+            onChange={function(min, max) {
+              setWeatherHumidityMin(min !== null ? String(min) : '');
+              setWeatherHumidityMax(max !== null ? String(max) : '');
             }}
             TH={TH}
           />

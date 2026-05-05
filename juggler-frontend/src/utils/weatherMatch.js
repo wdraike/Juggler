@@ -17,7 +17,9 @@ export function hasWeatherRestrictions(task) {
   return (task.weatherPrecip && task.weatherPrecip !== 'any')
     || (task.weatherCloud && task.weatherCloud !== 'any')
     || task.weatherTempMin != null
-    || task.weatherTempMax != null;
+    || task.weatherTempMax != null
+    || task.weatherHumidityMin != null
+    || task.weatherHumidityMax != null;
 }
 
 /**
@@ -46,8 +48,8 @@ export function checkWeatherMatch(task, weatherDay) {
     return { ok: null, reason: null };
   }
 
-  const { precipPct, high, low, hourly = [] } = weatherDay;
-  const { weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax } = task;
+  const { precipPct, high, low, hourly = [], humidityAvg } = weatherDay;
+  const { weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax } = task;
 
   // --- Precipitation checks ---
   if (weatherPrecip && weatherPrecip !== 'any') {
@@ -103,6 +105,22 @@ export function checkWeatherMatch(task, weatherDay) {
       ok: false,
       reason: `Temp above maximum (${weatherTempMax}° max, forecast high ${Math.round(high)}°)`,
     };
+  }
+
+  // --- Humidity checks ---
+  if (humidityAvg != null) {
+    if (weatherHumidityMin != null && humidityAvg < weatherHumidityMin) {
+      return {
+        ok: false,
+        reason: `Humidity below minimum (${weatherHumidityMin}% min, forecast avg ${Math.round(humidityAvg)}%)`,
+      };
+    }
+    if (weatherHumidityMax != null && humidityAvg > weatherHumidityMax) {
+      return {
+        ok: false,
+        reason: `Humidity above maximum (${weatherHumidityMax}% max, forecast avg ${Math.round(humidityAvg)}%)`,
+      };
+    }
   }
 
   return { ok: true, reason: null };

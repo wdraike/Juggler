@@ -9,8 +9,9 @@ import HorizontalTimeline from '../schedule/HorizontalTimeline';
 import { getTheme } from '../../theme/colors';
 import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES } from '../../state/constants';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
+import WeatherBadge from '../features/WeatherBadge';
 
-export default function TimelineView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onDelete, onExpand, onCreate, gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchRecurringsDone, locations, onHourLocationOverride, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag }) {
+export default function TimelineView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onDelete, onExpand, onCreate, gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchRecurringsDone, locations, onHourLocationOverride, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag, weatherByDate }) {
   var theme = getTheme(darkMode);
   var scrollRef = useRef(null);
   var loc = getLocationForDatePure(selectedDateKey, schedCfg);
@@ -52,6 +53,9 @@ export default function TimelineView({ selectedDate, selectedDateKey, placements
         <div style={{ fontSize: 12, color: theme.textMuted }}>
           {loc.icon} {loc.name}
         </div>
+        {weatherByDate && weatherByDate[selectedDateKey] && (
+          <WeatherBadge weatherDay={weatherByDate[selectedDateKey]} showLow darkMode={darkMode} />
+        )}
         {/* Progress bar */}
         {(function() {
           var dayTasks = placements.map(function(p) { return p.task; });

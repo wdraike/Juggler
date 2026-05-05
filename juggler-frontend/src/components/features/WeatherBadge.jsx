@@ -35,6 +35,7 @@ export default function WeatherBadge({ weatherDay, compact, showLow, darkMode, u
   var lowStr = fmt(weatherDay.low, unit);
   var precipPct = weatherDay.precipPct || 0;
   var showPrecip = precipPct >= 30;
+  var humidity = weatherDay.humidityAvg != null ? Math.round(weatherDay.humidityAvg) : null;
 
   var color = darkMode ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)';
 
@@ -54,6 +55,7 @@ export default function WeatherBadge({ weatherDay, compact, showLow, darkMode, u
       <span>{highStr}</span>
       {showLow && <span style={{ opacity: 0.8 }}>/ {lowStr}</span>}
       {showPrecip && <span style={{ opacity: 0.75 }}>· {precipPct}%</span>}
+      {humidity != null && <span style={{ opacity: 0.7 }}>· {humidity}% RH</span>}
     </span>
   );
 }

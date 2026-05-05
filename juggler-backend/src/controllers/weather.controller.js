@@ -32,7 +32,7 @@ async function fetchFromOpenMeteo(lat, lon, unit) {
   var url = OPEN_METEO_FORECAST_URL +
     '?latitude=' + lat +
     '&longitude=' + lon +
-    '&hourly=temperature_2m,precipitation_probability,precipitation,cloudcover,weathercode' +
+    '&hourly=temperature_2m,precipitation_probability,precipitation,cloudcover,weathercode,relativehumidity_2m' +
     '&forecast_days=14' +
     '&temperature_unit=' + tempUnit +
     '&timezone=auto';

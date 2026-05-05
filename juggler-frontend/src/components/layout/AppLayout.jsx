@@ -1211,6 +1211,7 @@ export default function AppLayout() {
               onZoomChange={handleZoomChange}
               isMobile={isMobile}
               onMarkerDrag={handleMarkerDrag}
+              weatherByDate={weatherByDate}
             />
           )}
           {viewMode === 'scurve' && (
@@ -1225,6 +1226,7 @@ export default function AppLayout() {
               onUpdateLocScheduleOverrides={config.updateTemplateOverrides}
               allTasks={allTasks} onBatchRecurringsDone={handleBatchRecurringDone}
               isMobile={isMobile}
+              weatherByDate={weatherByDate}
             />
           )}
           {viewMode === 'month' && (

@@ -8,8 +8,9 @@ import SCurveTimeline from '../schedule/SCurveTimeline';
 import { getTheme } from '../../theme/colors';
 import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES } from '../../state/constants';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
+import WeatherBadge from '../features/WeatherBadge';
 
-export default function SCurveView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onDelete, onExpand, darkMode, schedCfg, nowMins, isToday, blockedTaskIds, isMobile, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchRecurringsDone }) {
+export default function SCurveView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onDelete, onExpand, darkMode, schedCfg, nowMins, isToday, blockedTaskIds, isMobile, locSchedules, onUpdateLocScheduleOverrides, allTasks, onBatchRecurringsDone, weatherByDate }) {
   var theme = getTheme(darkMode);
   var loc = getLocationForDatePure(selectedDateKey, schedCfg);
   var wrapperRef = useRef(null);
@@ -73,6 +74,9 @@ export default function SCurveView({ selectedDate, selectedDateKey, placements, 
         <div style={{ fontSize: 12, color: theme.textMuted }}>
           {loc.icon} {loc.name}
         </div>
+        {weatherByDate && weatherByDate[selectedDateKey] && (
+          <WeatherBadge weatherDay={weatherByDate[selectedDateKey]} showLow darkMode={darkMode} />
+        )}
         {/* Progress bar */}
         {(function() {
           var dayTasks = placements.map(function(p) { return p.task; });

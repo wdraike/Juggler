@@ -406,9 +406,11 @@ function rowToTask(row, timezone, sourceMap) {
     travelAfter: row.travel_after != null ? row.travel_after : undefined,
     weatherPrecip:   row.weather_precip   || 'any',
     weatherCloud:    row.weather_cloud    || 'any',
-    weatherTempMin:  row.weather_temp_min  != null ? row.weather_temp_min  : null,
-    weatherTempMax:  row.weather_temp_max  != null ? row.weather_temp_max  : null,
-    weatherTempUnit: row.weather_temp_unit || null,
+    weatherTempMin:      row.weather_temp_min      != null ? row.weather_temp_min      : null,
+    weatherTempMax:      row.weather_temp_max      != null ? row.weather_temp_max      : null,
+    weatherTempUnit:     row.weather_temp_unit     || null,
+    weatherHumidityMin:  row.weather_humidity_min  != null ? row.weather_humidity_min  : null,
+    weatherHumidityMax:  row.weather_humidity_max  != null ? row.weather_humidity_max  : null,
     preferredTime: row.preferred_time != null ? !!row.preferred_time : null,
     preferredTimeMins: row.preferred_time_mins != null ? row.preferred_time_mins : null,
     desiredAt: row.desired_at ? new Date(row.desired_at).toISOString() : null,
@@ -491,9 +493,11 @@ function taskToRow(task, userId, timezone, currentTask) {
   if (task.preferredTimeMins !== undefined) row.preferred_time_mins = task.preferredTimeMins;
   if (task.weatherPrecip   !== undefined) row.weather_precip    = task.weatherPrecip;
   if (task.weatherCloud    !== undefined) row.weather_cloud     = task.weatherCloud;
-  if (task.weatherTempMin  !== undefined) row.weather_temp_min  = task.weatherTempMin;
-  if (task.weatherTempMax  !== undefined) row.weather_temp_max  = task.weatherTempMax;
-  if (task.weatherTempUnit !== undefined) row.weather_temp_unit = task.weatherTempUnit;
+  if (task.weatherTempMin      !== undefined) row.weather_temp_min      = task.weatherTempMin;
+  if (task.weatherTempMax      !== undefined) row.weather_temp_max      = task.weatherTempMax;
+  if (task.weatherTempUnit     !== undefined) row.weather_temp_unit     = task.weatherTempUnit;
+  if (task.weatherHumidityMin  !== undefined) row.weather_humidity_min  = task.weatherHumidityMin;
+  if (task.weatherHumidityMax  !== undefined) row.weather_humidity_max  = task.weatherHumidityMax;
 
   // Direct desired_at mapping (if caller provides it explicitly)
   if (task.desiredAt !== undefined) {
