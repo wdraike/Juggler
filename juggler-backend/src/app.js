@@ -103,6 +103,9 @@ if (process.env.NODE_ENV === 'production') {
 const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 1000, standardHeaders: true, legacyHeaders: false });
 const aiLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
 const mcpLimiter = rateLimit({ windowMs: 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
+const oauthCallbackLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests, please wait.' } });
+const billingWebhookLimiter = rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many webhook calls.' } });
+const healthLimiter = rateLimit({ windowMs: 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
 
 // OAuth proxy + discovery routes (auth-service handles Google SSO, etc.)
 createOAuthProxyRoutes(app, { mcpEndpoint: '/mcp' });
@@ -163,8 +166,8 @@ app.get('/api/events', (req, res, next) => {
 // /api/health is the same router re-mounted so the authenticated frontend
 // apiClient (baseURL=/api) can reach /api/health/detailed without bypassing
 // its bearer-token interceptor.
-app.use('/health', healthRoutes);
-app.use('/api/health', healthRoutes);
+app.use('/health', healthLimiter, healthRoutes);
+app.use('/api/health', healthLimiter, healthRoutes);
 app.use('/api/ai', aiLimiter, aiRoutes);
 app.use('/api/data/import', bodyParser.json({ limit: '2mb' }));
 app.use('/api', apiLimiter);
@@ -174,15 +177,18 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/locations', locationRoutes);
 app.use('/api/tools', toolRoutes);
 app.use('/api/data', dataRoutes);
+app.use('/api/gcal/callback', oauthCallbackLimiter);
 app.use('/api/gcal', gcalRoutes);
+app.use('/api/msft-cal/callback', oauthCallbackLimiter);
 app.use('/api/msft-cal', msftCalRoutes);
+app.use('/api/apple-cal/callback', oauthCallbackLimiter);
 app.use('/api/apple-cal', appleCalRoutes);
 app.use('/api/cal', calSyncRoutes);
 app.use('/api/schedule', scheduleRoutes);
 app.use('/api/feature-catalog', require('./routes/feature-catalog.routes'));
 app.use('/api/feature-events', require('./routes/feature-events.routes'));
 app.use('/api/my-plan', require('./routes/my-plan.routes'));
-app.use('/api/billing-webhooks', require('./routes/billing-webhooks.routes'));
+app.use('/api/billing-webhooks', billingWebhookLimiter, require('./routes/billing-webhooks.routes'));
 app.use('/api/weather', weatherRoutes);
 app.use('/api/impersonation', impersonationRoutes);
 
