@@ -211,6 +211,7 @@ async function selectCalendars(req, res) {
           display_name: cal.displayName || existing.display_name,
           enabled: cal.enabled !== undefined ? cal.enabled : existing.enabled,
           sync_direction: cal.syncDirection || existing.sync_direction,
+          ingest_mode: cal.ingestMode || existing.ingest_mode,
           updated_at: db.fn.now()
         });
       } else {
@@ -220,7 +221,8 @@ async function selectCalendars(req, res) {
           calendar_id: cal.url,
           display_name: cal.displayName || null,
           enabled: cal.enabled !== undefined ? cal.enabled : false,
-          sync_direction: cal.syncDirection || 'full'
+          sync_direction: cal.syncDirection || 'full',
+          ingest_mode: cal.ingestMode || 'task'
         });
       }
     }
@@ -278,6 +280,7 @@ async function updateCalendar(req, res) {
     var updates = { updated_at: db.fn.now() };
     if (req.body.enabled !== undefined) updates.enabled = req.body.enabled;
     if (req.body.syncDirection) updates.sync_direction = req.body.syncDirection;
+    if (req.body.ingestMode) updates.ingest_mode = req.body.ingestMode;
 
     await db('user_calendars').where('id', calendarId).update(updates);
 

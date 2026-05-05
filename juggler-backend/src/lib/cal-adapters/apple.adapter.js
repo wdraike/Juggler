@@ -53,7 +53,8 @@ async function getEnabledCalendars(userId) {
       id: null,
       calendar_id: user.apple_cal_calendar_url,
       display_name: null,
-      sync_direction: 'full'
+      sync_direction: 'full',
+      ingest_mode: 'task'
     }];
   }
 

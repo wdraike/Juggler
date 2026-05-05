@@ -333,7 +333,8 @@ export default function CalSyncPanel({
       cals.forEach(function(c) {
         selections[c.url] = {
           enabled: c.enabled || false,
-          syncDirection: c.syncDirection || 'full'
+          syncDirection: c.syncDirection || 'full',
+          ingestMode: c.ingestMode || 'task'
         };
       });
       setAppleCalendarSelections(selections);
@@ -369,7 +370,8 @@ export default function CalSyncPanel({
         url: cal.url,
         displayName: cal.displayName,
         enabled: !!sel.enabled,
-        syncDirection: sel.syncDirection || 'full'
+        syncDirection: sel.syncDirection || 'full',
+        ingestMode: sel.ingestMode || 'task'
       };
     });
 
@@ -658,13 +660,21 @@ export default function CalSyncPanel({
                       </span>
                     </label>
                     {isEnabled && (
-                      <div style={{ flexShrink: 0, marginLeft: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, marginLeft: 6 }}>
                         <select value={cal.sync_direction} onChange={function(e) {
                           handleAppleCalendarUpdate(cal.id, { syncDirection: e.target.value });
                         }} style={Object.assign({}, selectStyle, { fontSize: 10 })}>
                           <option value="full">Full</option>
                           <option value="ingest">Ingest</option>
                         </select>
+                        {cal.sync_direction === 'ingest' && (
+                          <select value={cal.ingest_mode || 'task'} onChange={function(e) {
+                            handleAppleCalendarUpdate(cal.id, { ingestMode: e.target.value });
+                          }} style={Object.assign({}, selectStyle, { fontSize: 10 })}>
+                            <option value="task">Block time</option>
+                            <option value="reminder">Reminder</option>
+                          </select>
+                        )}
                       </div>
                     )}
                   </div>
@@ -712,7 +722,7 @@ export default function CalSyncPanel({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={{ fontSize: 11, color: theme.text, fontWeight: 500 }}>Select calendars to sync:</span>
               {appleCalendars.map(function(cal) {
-                var sel = appleCalendarSelections[cal.url] || { enabled: false, syncDirection: 'full' };
+                var sel = appleCalendarSelections[cal.url] || { enabled: false, syncDirection: 'full', ingestMode: 'task' };
                 return (
                   <div key={cal.url} style={{
                     border: '1px solid ' + (sel.enabled ? theme.accent : theme.border),
@@ -730,7 +740,7 @@ export default function CalSyncPanel({
                       </label>
                     </div>
                     {sel.enabled && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, paddingLeft: 24 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, paddingLeft: 24, flexWrap: 'wrap' }}>
                         <span style={{ fontSize: 10, color: theme.textMuted }}>Sync</span>
                         <select value={sel.syncDirection}
                           onChange={function(e) { setAppleCalSyncDirection(cal.url, e.target.value); }}
@@ -738,6 +748,23 @@ export default function CalSyncPanel({
                           <option value="full">Full (read + write)</option>
                           <option value="ingest">Ingest only (read)</option>
                         </select>
+                        {sel.syncDirection === 'ingest' && (
+                          <>
+                            <span style={{ fontSize: 10, color: theme.textMuted }}>as</span>
+                            <select value={sel.ingestMode || 'task'}
+                              onChange={function(e) {
+                                setAppleCalendarSelections(function(prev) {
+                                  var next = Object.assign({}, prev);
+                                  next[cal.url] = Object.assign({}, next[cal.url], { ingestMode: e.target.value });
+                                  return next;
+                                });
+                              }}
+                              style={selectStyle}>
+                              <option value="task">Block time</option>
+                              <option value="reminder">Reminder</option>
+                            </select>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>

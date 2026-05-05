@@ -562,14 +562,20 @@ async function sync(req, res) {
     });
 
     // Load Apple write-calendar display name for progress reporting (best-effort)
+    // Also build calIngestModeMap: { calendarUrl: 'task'|'reminder' } for pull-new branching.
     var appleCalendarLabel = null;
+    var calIngestModeMap = {}; // calendarUrl → ingest_mode
     if (providerData.apple) {
       try {
-        var appleWriteCal = await db('user_calendars')
-          .where({ user_id: userId, provider: 'apple', enabled: true })
-          .orderByRaw("CASE WHEN sync_direction = 'full' THEN 0 ELSE 1 END")
-          .first();
+        var appleCals = await db('user_calendars')
+          .where({ user_id: userId, provider: 'apple', enabled: true });
+        var appleWriteCal = appleCals
+          .slice()
+          .sort(function(a, b) { return a.sync_direction === 'full' ? -1 : 1; })[0] || null;
         appleCalendarLabel = appleWriteCal ? (appleWriteCal.display_name || null) : null;
+        appleCals.forEach(function(c) {
+          calIngestModeMap[c.calendar_id] = c.ingest_mode || 'task';
+        });
       } catch (e) { /* ignore — label is display-only */ }
     }
     var calendarLabels = { apple: appleCalendarLabel };
@@ -1681,6 +1687,8 @@ async function sync(req, res) {
             }
           }
 
+          var calIngestMode = calIngestModeMap[newEvent._calendarId] || 'task';
+          var isReminder = !newEvent.isAllDay && calIngestMode === 'reminder';
           var taskRow = {
             id: newTaskId,
             user_id: userId,
@@ -1689,9 +1697,9 @@ async function sync(req, res) {
             dur: evDur,
             pri: 'P3',
             status: '',
-            when: newEvent.isAllDay ? 'allday' : 'fixed',
-            date_pinned: newEvent.isAllDay ? 0 : 1,
-            placement_mode: newEvent.isTransparent ? PLACEMENT_MODES.MARKER : (newEvent.isAllDay ? PLACEMENT_MODES.FLEXIBLE : PLACEMENT_MODES.FIXED),
+            when: newEvent.isAllDay ? 'allday' : (isReminder ? '' : 'fixed'),
+            date_pinned: (newEvent.isAllDay || isReminder) ? 0 : 1,
+            placement_mode: newEvent.isTransparent ? PLACEMENT_MODES.MARKER : (newEvent.isAllDay ? PLACEMENT_MODES.FLEXIBLE : (isReminder ? PLACEMENT_MODES.PINNED_DATE : PLACEMENT_MODES.FIXED)),
             [eventIdCol]: newEvent.id
           };
           if (newEvent.description) {
