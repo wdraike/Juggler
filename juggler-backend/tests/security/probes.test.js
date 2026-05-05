@@ -3,6 +3,8 @@
 const request = require('supertest');
 const app = require('../../src/app');
 
+const describeIfJwt = process.env.TEST_JWT ? describe : describe.skip;
+
 describe('Security probes', () => {
   afterAll(async () => {
     await new Promise(r => setTimeout(r, 100));
@@ -14,7 +16,7 @@ describe('Security probes', () => {
         .post('/mcp')
         .set('Content-Type', 'application/json')
         .send(JSON.stringify({ jsonrpc: '2.0', method: 'list_tasks', params: {}, id: 1 }));
-      expect([401, 403]).toContain(res.status);
+      expect(res.status).toBe(401);
     });
   });
 
@@ -43,10 +45,8 @@ describe('Security probes', () => {
     });
   });
 
-  describe('Input size limits', () => {
+  describeIfJwt('Input size limits', () => {
     it('rejects task text over 500 chars', async () => {
-      // Requires a valid token — skip if not in integration test environment
-      if (!process.env.TEST_JWT) return;
       const res = await request(app)
         .post('/api/tasks')
         .set('Authorization', 'Bearer ' + process.env.TEST_JWT)
