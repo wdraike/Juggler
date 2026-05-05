@@ -29,6 +29,8 @@ var MASTER_FIELDS = [
   'split', 'split_min',
   'depends_on', 'location', 'tools', 'travel_before', 'travel_after',
   'disabled_at', 'disabled_reason',
+  'weather_precip', 'weather_cloud', 'weather_temp_min', 'weather_temp_max',
+  'weather_temp_unit', 'weather_humidity_min', 'weather_humidity_max',
   // status lives on BOTH master and instance: master.status carries
   // template-level lifecycle ('pause'); instance.status carries per-occurrence
   // state (done/wip/skip/''). insertTask + updateTaskById write both so the
@@ -58,6 +60,8 @@ var MASTER_UPDATE_FIELDS = [
   'split', 'split_min',
   'depends_on', 'location', 'tools', 'travel_before', 'travel_after',
   'disabled_at', 'disabled_reason',
+  'weather_precip', 'weather_cloud', 'weather_temp_min', 'weather_temp_max',
+  'weather_temp_unit', 'weather_humidity_min', 'weather_humidity_max',
   // status: also a master-level field (template lifecycle); see MASTER_FIELDS comment
   'status'
 ];
