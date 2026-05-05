@@ -172,18 +172,11 @@ function LocationRow({ loc, index, config, theme }) {
   var [loading, setLoading] = useState(false);
   var [geoError, setGeoError] = useState('');
 
-  // Keep local state in sync if loc.displayName changes externally (e.g. after another row saves)
-  useEffect(function() {
-    setGeocodeInput(loc.displayName || '');
-    setDisplayName(loc.displayName || '');
-  }, [loc.id]);
-
   var hasCoords = loc.lat != null && loc.lon != null;
 
   function updateLocationCoords(lat, lon, dn) {
-    var updated = config.locations.map(function(l, idx) {
-      if (idx !== index) return l;
-      return Object.assign({}, l, { lat: lat, lon: lon, displayName: dn });
+    var updated = config.locations.map(function(l) {
+      return l.id === loc.id ? Object.assign({}, l, { lat: lat, lon: lon, displayName: dn }) : l;
     });
     config.updateLocations(updated);
     setDisplayName(dn);
@@ -191,13 +184,11 @@ function LocationRow({ loc, index, config, theme }) {
   }
 
   function clearCoords() {
-    var updated = config.locations.map(function(l, idx) {
-      if (idx !== index) return l;
-      var copy = Object.assign({}, l);
-      delete copy.lat;
-      delete copy.lon;
-      delete copy.displayName;
-      return copy;
+    var updated = config.locations.map(function(l) {
+      if (l.id !== loc.id) return l;
+      var c = Object.assign({}, l);
+      delete c.lat; delete c.lon; delete c.displayName;
+      return c;
     });
     config.updateLocations(updated);
     setGeocodeInput('');
@@ -207,7 +198,7 @@ function LocationRow({ loc, index, config, theme }) {
 
   async function handleGeocode() {
     var input = geocodeInput.trim();
-    if (!input) return;
+    if (!input || loading) return;
     setLoading(true);
     setGeoError('');
     try {
@@ -238,7 +229,8 @@ function LocationRow({ loc, index, config, theme }) {
       function() {
         setLoading(false);
         setGeoError("Location access denied");
-      }
+      },
+      { timeout: 10000 }
     );
   }
 
@@ -253,8 +245,7 @@ function LocationRow({ loc, index, config, theme }) {
         <span>{loc.icon}</span>
         <span style={{ color: theme.text, flex: 1 }}>{loc.name}</span>
         <button onClick={function() {
-          var updated = config.locations.filter(function(_, idx) { return idx !== index; });
-          config.updateLocations(updated);
+          config.updateLocations(config.locations.filter(function(l) { return l.id !== loc.id; }));
         }} title={'Delete location ' + loc.name} style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 14 }}>&times;</button>
       </div>
       {/* Geocode row */}
@@ -302,7 +293,7 @@ function LocationRow({ loc, index, config, theme }) {
             )}
           </div>
         )}
-        {geoError && <div style={{ fontSize: 11, color: theme.textMuted }}>{geoError}</div>}
+        {geoError && <div style={{ fontSize: 11, color: theme.redText }}>{geoError}</div>}
         {!geoError && displayName && hasCoords && (
           <div style={{ fontSize: 11, color: theme.textMuted }}>{displayName}</div>
         )}
