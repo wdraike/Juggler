@@ -164,6 +164,153 @@ var TOOL_FALLBACKS = ['\uD83D\uDD27', '\u2699\uFE0F', '\uD83D\uDEE0\uFE0F', '\uD
 
 // ─── Locations Tab ───────────────────────────────────────────────
 
+var hasGeolocation = typeof navigator !== 'undefined' && !!navigator.geolocation;
+
+function LocationRow({ loc, index, config, theme }) {
+  var [geocodeInput, setGeocodeInput] = useState(loc.displayName || '');
+  var [displayName, setDisplayName] = useState(loc.displayName || '');
+  var [loading, setLoading] = useState(false);
+  var [geoError, setGeoError] = useState('');
+
+  // Keep local state in sync if loc.displayName changes externally (e.g. after another row saves)
+  useEffect(function() {
+    setGeocodeInput(loc.displayName || '');
+    setDisplayName(loc.displayName || '');
+  }, [loc.id]);
+
+  var hasCoords = loc.lat != null && loc.lon != null;
+
+  function updateLocationCoords(lat, lon, dn) {
+    var updated = config.locations.map(function(l, idx) {
+      if (idx !== index) return l;
+      return Object.assign({}, l, { lat: lat, lon: lon, displayName: dn });
+    });
+    config.updateLocations(updated);
+    setDisplayName(dn);
+    setGeoError('');
+  }
+
+  function clearCoords() {
+    var updated = config.locations.map(function(l, idx) {
+      if (idx !== index) return l;
+      var copy = Object.assign({}, l);
+      delete copy.lat;
+      delete copy.lon;
+      delete copy.displayName;
+      return copy;
+    });
+    config.updateLocations(updated);
+    setGeocodeInput('');
+    setDisplayName('');
+    setGeoError('');
+  }
+
+  async function handleGeocode() {
+    var input = geocodeInput.trim();
+    if (!input) return;
+    setLoading(true);
+    setGeoError('');
+    try {
+      var { default: apiClient } = await import('../../services/apiClient');
+      var resp = await apiClient.get('/weather/geocode', { params: { q: input } });
+      var { lat, lon, displayName: dn } = resp.data;
+      updateLocationCoords(lat, lon, dn || input);
+      setGeocodeInput(dn || input);
+    } catch (e) {
+      setGeoError("Couldn't find that location");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleLocateMe() {
+    if (!hasGeolocation) return;
+    setLoading(true);
+    setGeoError('');
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        setLoading(false);
+        var lat = pos.coords.latitude;
+        var lon = pos.coords.longitude;
+        updateLocationCoords(lat, lon, '(device location)');
+        setGeocodeInput('(device location)');
+      },
+      function() {
+        setLoading(false);
+        setGeoError("Location access denied");
+      }
+    );
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter') { e.preventDefault(); handleGeocode(); }
+  }
+
+  return (
+    <div style={{ background: theme.bgTertiary, borderRadius: 6, padding: '6px 8px', fontSize: 13 }}>
+      {/* Top row: icon + name + delete */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span>{loc.icon}</span>
+        <span style={{ color: theme.text, flex: 1 }}>{loc.name}</span>
+        <button onClick={function() {
+          var updated = config.locations.filter(function(_, idx) { return idx !== index; });
+          config.updateLocations(updated);
+        }} title={'Delete location ' + loc.name} style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 14 }}>&times;</button>
+      </div>
+      {/* Geocode row */}
+      <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {hasCoords ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 11, color: theme.textMuted }}>
+              {'📍 ' + loc.lat.toFixed(4) + ', ' + loc.lon.toFixed(4)}
+            </span>
+            <button onClick={clearCoords} title="Clear coordinates" style={{
+              border: 'none', background: 'transparent', color: theme.textMuted,
+              cursor: 'pointer', fontSize: 11, textDecoration: 'underline', fontFamily: 'inherit', padding: 0
+            }}>Clear</button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 4 }}>
+            <input
+              value={geocodeInput}
+              onChange={function(e) { setGeocodeInput(e.target.value); setGeoError(''); }}
+              onBlur={handleGeocode}
+              onKeyDown={handleKeyDown}
+              placeholder="City, state — or ZIP code"
+              disabled={loading}
+              style={{
+                flex: 1, padding: '3px 6px', fontSize: 11,
+                border: '1px solid ' + (geoError ? theme.redText : theme.inputBorder),
+                borderRadius: 4, background: theme.input, color: theme.text,
+                opacity: loading ? 0.7 : 1
+              }}
+            />
+            {hasGeolocation && (
+              <button
+                onClick={handleLocateMe}
+                disabled={loading}
+                title="Use your current device location"
+                style={{
+                  border: 'none', borderRadius: 4, padding: '3px 8px',
+                  background: theme.accent, color: '#FDFAF5',
+                  fontSize: 11, cursor: loading ? 'default' : 'pointer',
+                  opacity: loading ? 0.7 : 1, whiteSpace: 'nowrap', fontFamily: 'inherit'
+                }}
+              >
+                {loading ? 'Locating…' : '📍 Locate me'}
+              </button>
+            )}
+          </div>
+        )}
+        {geoError && <div style={{ fontSize: 11, color: theme.textMuted }}>{geoError}</div>}
+        {!geoError && displayName && hasCoords && (
+          <div style={{ fontSize: 11, color: theme.textMuted }}>{displayName}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function LocationsTab({ config, theme }) {
   var [newName, setNewName] = useState('');
   var [error, setError] = useState('');
@@ -188,17 +335,10 @@ function LocationsTab({ config, theme }) {
   return (
     <div>
       <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>Locations</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
-        {config.locations.map((loc, i) => (
-          <div key={loc.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13 }}>
-            <span>{loc.icon}</span>
-            <span style={{ color: theme.text, flex: 1 }}>{loc.name}</span>
-            <button onClick={() => {
-              var updated = config.locations.filter((_, idx) => idx !== i);
-              config.updateLocations(updated);
-            }} title={'Delete location ' + loc.name} style={{ border: 'none', background: 'transparent', color: theme.redText, cursor: 'pointer', fontSize: 14 }}>&times;</button>
-          </div>
-        ))}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+        {config.locations.map(function(loc, i) {
+          return <LocationRow key={loc.id} loc={loc} index={i} config={config} theme={theme} />;
+        })}
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
         <input value={newName} onChange={e => { setNewName(e.target.value); setError(''); }} placeholder="Location name" onKeyDown={e => { if (e.key === 'Enter') handleAdd(); }}
