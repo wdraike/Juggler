@@ -253,7 +253,9 @@ function LocationRow({ loc, config, theme }) {
         {hasCoords ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: 11, color: theme.textMuted }}>
-              {'📍 ' + loc.lat.toFixed(4) + ', ' + loc.lon.toFixed(4)}
+              {'📍 '}
+              <span style={{ color: theme.text, fontWeight: 600 }}>{displayName || 'Current location'}</span>
+              {' (' + loc.lat.toFixed(4) + ', ' + loc.lon.toFixed(4) + ')'}
             </span>
             <button onClick={clearCoords} title="Clear coordinates" style={{
               border: 'none', background: 'transparent', color: theme.textMuted,
@@ -294,9 +296,6 @@ function LocationRow({ loc, config, theme }) {
           </div>
         )}
         {geoError && <div style={{ fontSize: 11, color: theme.redText }}>{geoError}</div>}
-        {!geoError && displayName && hasCoords && (
-          <div style={{ fontSize: 11, color: theme.textMuted }}>{displayName}</div>
-        )}
       </div>
     </div>
   );
