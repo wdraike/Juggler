@@ -1105,6 +1105,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       // Might be dep-blocked; retry pass below will give it another chance
       // once deps settle. Tag so the retry can identify what was deferred.
       item._deferred = true;
+      // Heuristic: attribute to weather if task has weather constraints; may be capacity failure
       if (hasWeatherConstraint(item.task)) item.task._unplacedReason = 'weather';
       unplaced.push(item);
       continue;
@@ -1160,6 +1161,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     delete item._deferred;
     var placement = tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, statuses, cfg, env);
     if (!placement.slot) {
+      // Heuristic: attribute to weather if task has weather constraints; may be capacity failure
       if (hasWeatherConstraint(item.task)) item.task._unplacedReason = 'weather';
       stillUnplaced.push(item);
       return;

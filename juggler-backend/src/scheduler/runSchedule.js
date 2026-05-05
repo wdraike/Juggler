@@ -862,7 +862,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
            t.weatherTempMin != null || t.weatherTempMax != null;
   });
   if (hasWeatherTasks && cfg.locations && cfg.locations.length > 0) {
-    cfg.weatherByDateHour = await loadWeatherForHorizon(cfg.locations, db);
+    try {
+      cfg.weatherByDateHour = await loadWeatherForHorizon(cfg.locations, db);
+    } catch (e) {
+      cfg.weatherByDateHour = {}; // fail-open: proceed without weather data
+    }
   }
 
   // 6. Run scheduler (primary chosen by SCHEDULER_V2 env var; shadow runs
@@ -1430,7 +1434,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // Store unplaced IDs + diagnostic info in cache
   var unplacedMeta = {};
   result.unplaced.forEach(function(t) {
-    if (t._unplacedDetail || t._suggestions) {
+    if (t._unplacedDetail || t._suggestions || t._unplacedReason) {
       var meta = {};
       if (t._unplacedDetail) meta.detail = t._unplacedDetail;
       if (t._unplacedReason) meta.reason = t._unplacedReason;
@@ -1924,7 +1928,7 @@ async function getSchedulePlacements(userId, options) {
   newCache.unplaced = result.unplaced.map(function(t) { return t.id; });
   var unplacedMeta2 = {};
   result.unplaced.forEach(function(t) {
-    if (t._unplacedDetail || t._suggestions) {
+    if (t._unplacedDetail || t._suggestions || t._unplacedReason) {
       var meta = {};
       if (t._unplacedDetail) meta.detail = t._unplacedDetail;
       if (t._unplacedReason) meta.reason = t._unplacedReason;
