@@ -106,6 +106,17 @@ const mcpLimiter = rateLimit({ windowMs: 60 * 1000, max: 300, standardHeaders: t
 const oauthCallbackLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests, please wait.' } });
 const billingWebhookLimiter = rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many webhook calls.' } });
 const healthLimiter = rateLimit({ windowMs: 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
+// Per-user write limiter — keys by user ID so shared NAT/proxies don't hit a common bucket.
+// skip() passes through safe read-only methods so GETs aren't throttled.
+const writeRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user && req.user.id) ? String(req.user.id) : req.ip,
+  message: { error: 'Too many write requests, please slow down.' },
+  skip: (req) => req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS',
+});
 
 // OAuth proxy + discovery routes (auth-service handles Google SSO, etc.)
 createOAuthProxyRoutes(app, { mcpEndpoint: '/mcp' });
@@ -171,11 +182,11 @@ app.use('/api/health', healthLimiter, healthRoutes);
 app.use('/api/ai', aiLimiter, aiRoutes);
 app.use('/api/data/import', bodyParser.json({ limit: '2mb' }));
 app.use('/api', apiLimiter);
-app.use('/api/tasks', taskRoutes);
-app.use('/api/config', configRoutes);
-app.use('/api/projects', projectRoutes);
-app.use('/api/locations', locationRoutes);
-app.use('/api/tools', toolRoutes);
+app.use('/api/tasks', authenticateJWT, writeRateLimiter, taskRoutes);
+app.use('/api/config', authenticateJWT, writeRateLimiter, configRoutes);
+app.use('/api/projects', authenticateJWT, writeRateLimiter, projectRoutes);
+app.use('/api/locations', authenticateJWT, writeRateLimiter, locationRoutes);
+app.use('/api/tools', authenticateJWT, writeRateLimiter, toolRoutes);
 app.use('/api/data', dataRoutes);
 app.use('/api/gcal/callback', oauthCallbackLimiter);
 app.use('/api/gcal', gcalRoutes);
