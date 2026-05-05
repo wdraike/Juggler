@@ -4,6 +4,8 @@ const configController = require('../controllers/config.controller');
 const { authenticateJWT } = require('../middleware/jwt-auth');
 const { resolvePlanFeatures } = require('../middleware/plan-features.middleware');
 const { checkScheduleTemplateLimit } = require('../middleware/entity-limits');
+const { validate } = require('../middleware/validate');
+const { preferencesSchema } = require('../schemas/config.schema');
 
 router.use(authenticateJWT, resolvePlanFeatures);
 
@@ -13,6 +15,11 @@ router.get('/', configController.getAllConfig);
 router.put('/:key', function(req, res, next) {
   if (req.params.key === 'time_blocks') {
     return checkScheduleTemplateLimit(req, res, next);
+  }
+  next();
+}, function(req, res, next) {
+  if (req.params.key === 'preferences') {
+    return validate(preferencesSchema)(req, res, next);
   }
   next();
 }, configController.updateConfig);

@@ -4,6 +4,8 @@ const taskController = require('../controllers/task.controller');
 const { authenticateJWT } = require('../middleware/jwt-auth');
 const { resolvePlanFeatures } = require('../middleware/plan-features.middleware');
 const { checkTaskOrRecurringLimit, checkBatchTaskLimits } = require('../middleware/entity-limits');
+const { validate } = require('../middleware/validate');
+const { taskCreateSchema, taskUpdateSchema } = require('../schemas/task.schema');
 
 router.use(authenticateJWT, resolvePlanFeatures);
 
@@ -69,13 +71,13 @@ router.get('/suggest-icon', async (req, res) => {
 });
 
 router.get('/:id', taskController.getTask);
-router.post('/', checkTaskOrRecurringLimit, taskController.createTask);
+router.post('/', checkTaskOrRecurringLimit, validate(taskCreateSchema), taskController.createTask);
 router.post('/batch', checkBatchTaskLimits, taskController.batchCreateTasks);
 router.put('/batch', taskController.batchUpdateTasks);
 router.put('/:id/status', taskController.updateTaskStatus);
 router.put('/:id/re-enable', taskController.reEnableTask);
 router.put('/:id/unpin', taskController.unpinTask);
-router.put('/:id', taskController.updateTask);
+router.put('/:id', validate(taskUpdateSchema), taskController.updateTask);
 router.delete('/:id', taskController.deleteTask);
 
 module.exports = router;
