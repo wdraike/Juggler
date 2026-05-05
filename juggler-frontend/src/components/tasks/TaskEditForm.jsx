@@ -191,7 +191,7 @@ function WeatherTempSlider({ tempMin, tempMax, unit, onChange, TH }) {
             left: pct(lo) + '%', right: (100 - pct(hi)) + '%' }} />
         )}
         <input type="range" min={range.min} max={range.max} value={lo} onChange={handleLoChange}
-          style={{ position: 'absolute', width: '100%', top: 0, margin: 0, opacity: 0, cursor: 'pointer', height: 20, zIndex: 2 }} />
+          style={{ position: 'absolute', width: '100%', top: 0, margin: 0, opacity: 0, cursor: 'pointer', height: 20, zIndex: lo >= hi - 1 ? 4 : 2 }} />
         <input type="range" min={range.min} max={range.max} value={hi} onChange={handleHiChange}
           style={{ position: 'absolute', width: '100%', top: 0, margin: 0, opacity: 0, cursor: 'pointer', height: 20, zIndex: 3 }} />
         <div style={{ position: 'absolute', top: 4, left: 'calc(' + pct(lo) + '% - 6px)', width: 12, height: 12,
@@ -1872,22 +1872,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           </div>
         </div>}
 
-        {/* ═══ SECTION: Tools ═══ */}
-        {!marker && (tools || []).length > 0 &&
-        <div style={secStyle}>
-          <div style={secHead}>{'\uD83D\uDD27'} Tools</div>
-          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-            {(tools || []).map(tool => {
-              var isOn = taskTools.indexOf(tool.id) !== -1;
-              return (
-                <button key={tool.id} title={'Requires ' + tool.name} onClick={() => {
-                  setTaskTools(isOn ? taskTools.filter(x => x !== tool.id) : [...taskTools, tool.id]);
-                }} style={togStyle(isOn)}>{tool.icon} {tool.name}</button>
-              );
-            })}
-          </div>
-        </div>}
-
         {/* ═══ SECTION: Weather ═══ */}
         {!isCreate && !marker &&
         <div style={secStyle}>
@@ -1924,6 +1908,22 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             }}
             TH={TH}
           />
+        </div>}
+
+        {/* ═══ SECTION: Tools ═══ */}
+        {!marker && (tools || []).length > 0 &&
+        <div style={secStyle}>
+          <div style={secHead}>{'\uD83D\uDD27'} Tools</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+            {(tools || []).map(tool => {
+              var isOn = taskTools.indexOf(tool.id) !== -1;
+              return (
+                <button key={tool.id} title={'Requires ' + tool.name} onClick={() => {
+                  setTaskTools(isOn ? taskTools.filter(x => x !== tool.id) : [...taskTools, tool.id]);
+                }} style={togStyle(isOn)}>{tool.icon} {tool.name}</button>
+              );
+            })}
+          </div>
         </div>}
 
         {/* (Dependencies moved into Task section above) */}
