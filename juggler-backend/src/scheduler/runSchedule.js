@@ -159,6 +159,7 @@ async function loadWeatherForHorizon(locations, db) {
       temp:       hourly.temperature_2m              ? hourly.temperature_2m[i]              : null,
       precipProb: hourly.precipitation_probability   ? hourly.precipitation_probability[i]   : 0,
       cloudcover: hourly.cloudcover                  ? hourly.cloudcover[i]                  : 0,
+      humidity:   hourly.relativehumidity_2m         ? hourly.relativehumidity_2m[i]         : null,
     };
   }
 

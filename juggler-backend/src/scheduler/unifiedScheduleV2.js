@@ -627,7 +627,8 @@ function hasWeatherConstraint(task) {
   if (!task) return false;
   return (task.weatherPrecip && task.weatherPrecip !== 'any') ||
          (task.weatherCloud  && task.weatherCloud  !== 'any') ||
-         task.weatherTempMin != null || task.weatherTempMax != null;
+         task.weatherTempMin != null || task.weatherTempMax != null ||
+         task.weatherHumidityMin != null || task.weatherHumidityMax != null;
 }
 
 function weatherOk(task, dateKey, startMin, weatherByDateHour) {
@@ -654,6 +655,13 @@ function weatherOk(task, dateKey, startMin, weatherByDateHour) {
   if (temp != null) {
     if (task.weatherTempMin != null && temp < task.weatherTempMin) return false;
     if (task.weatherTempMax != null && temp > task.weatherTempMax) return false;
+  }
+
+  // Humidity check
+  var humidity = w.humidity;
+  if (humidity != null) {
+    if (task.weatherHumidityMin != null && humidity < task.weatherHumidityMin) return false;
+    if (task.weatherHumidityMax != null && humidity > task.weatherHumidityMax) return false;
   }
 
   return true;

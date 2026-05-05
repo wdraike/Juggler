@@ -823,8 +823,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     var snapTMax = snap.weatherTempMax != null ? snap.weatherTempMax : null;
     var curTMin  = weatherTempMin !== '' ? parseInt(weatherTempMin) : null;
     var curTMax  = weatherTempMax !== '' ? parseInt(weatherTempMax) : null;
-    if (curTMin !== snapTMin) changed.weatherTempMin = all.weatherTempMin;
-    if (curTMax !== snapTMax) changed.weatherTempMax = all.weatherTempMax;
+    if (curTMin !== snapTMin) { changed.weatherTempMin = all.weatherTempMin; changed.weatherTempUnit = all.weatherTempUnit; }
+    if (curTMax !== snapTMax) { changed.weatherTempMax = all.weatherTempMax; changed.weatherTempUnit = all.weatherTempUnit; }
     var snapHMin = snap.weatherHumidityMin != null ? snap.weatherHumidityMin : null;
     var snapHMax = snap.weatherHumidityMax != null ? snap.weatherHumidityMax : null;
     var curHMin  = weatherHumidityMin !== '' ? parseInt(weatherHumidityMin) : null;
@@ -849,7 +849,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     var changed = buildChangedFields();
     console.log('[DIRTY]', !!changed, changed ? Object.keys(changed) : 'null', 'when=' + when, 'snapWhen=' + (taskSnapshotRef.current ? taskSnapshotRef.current.when : '?'));
     setIsDirty(!!changed);
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, hasPreferredTime]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, hasPreferredTime, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   // Manual save handler
   // Unpin: revert a drag-pinned task to scheduler control.
