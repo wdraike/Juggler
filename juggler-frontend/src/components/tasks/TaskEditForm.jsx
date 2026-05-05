@@ -171,6 +171,23 @@ function WeatherTempSlider({ tempMin, tempMax, unit, onChange, TH }) {
   var noMin = (lo <= range.min);
   var noMax = (hi >= range.max);
   var noRestriction = noMin && noMax;
+
+  var loRef = useRef(null);
+  var hiRef = useRef(null);
+
+  // Raise whichever thumb is closer to the cursor before the click lands,
+  // so the browser routes the drag to the correct input.
+  function handleMouseMove(e) {
+    if (!loRef.current || !hiRef.current) return;
+    var rect = e.currentTarget.getBoundingClientRect();
+    var x = (e.clientX - rect.left) / rect.width;
+    var loPct = pct(lo) / 100;
+    var hiPct = pct(hi) / 100;
+    var preferLo = Math.abs(x - loPct) <= Math.abs(x - hiPct);
+    loRef.current.style.zIndex = preferLo ? 4 : 2;
+    hiRef.current.style.zIndex = preferLo ? 2 : 3;
+  }
+
   function handleLoChange(e) {
     var v = Number(e.target.value);
     var newLo = Math.min(v, hi - 1);
@@ -184,15 +201,15 @@ function WeatherTempSlider({ tempMin, tempMax, unit, onChange, TH }) {
   return (
     <div style={{ marginTop: 4 }}>
       <div style={{ fontSize: 8, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>Temperature</div>
-      <div style={{ position: 'relative', height: 20, marginBottom: 6 }}>
+      <div style={{ position: 'relative', height: 20, marginBottom: 6 }} onMouseMove={handleMouseMove}>
         <div style={{ position: 'absolute', top: 8, left: 0, right: 0, height: 4, background: TH.border, borderRadius: 2 }} />
         {!noRestriction && (
           <div style={{ position: 'absolute', top: 8, height: 4, background: TH.accent, borderRadius: 2,
             left: pct(lo) + '%', right: (100 - pct(hi)) + '%' }} />
         )}
-        <input type="range" min={range.min} max={range.max} value={lo} onChange={handleLoChange}
-          style={{ position: 'absolute', width: '100%', top: 0, margin: 0, opacity: 0, cursor: 'pointer', height: 20, zIndex: lo >= hi - 1 ? 4 : 2 }} />
-        <input type="range" min={range.min} max={range.max} value={hi} onChange={handleHiChange}
+        <input ref={loRef} type="range" min={range.min} max={range.max} value={lo} onChange={handleLoChange}
+          style={{ position: 'absolute', width: '100%', top: 0, margin: 0, opacity: 0, cursor: 'pointer', height: 20, zIndex: 2 }} />
+        <input ref={hiRef} type="range" min={range.min} max={range.max} value={hi} onChange={handleHiChange}
           style={{ position: 'absolute', width: '100%', top: 0, margin: 0, opacity: 0, cursor: 'pointer', height: 20, zIndex: 3 }} />
         <div style={{ position: 'absolute', top: 4, left: 'calc(' + pct(lo) + '% - 6px)', width: 12, height: 12,
           background: TH.accent, borderRadius: '50%', border: '2px solid ' + TH.bgCard,
