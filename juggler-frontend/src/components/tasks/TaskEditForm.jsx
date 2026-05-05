@@ -1888,11 +1888,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           </div>
         </div>}
 
-        {/* (Dependencies moved into Task section above) */}
-
-          </>);
-        })()}
-
         {/* ═══ SECTION: Weather ═══ */}
         {!isCreate && !marker &&
         <div style={secStyle}>
@@ -1930,6 +1925,11 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             TH={TH}
           />
         </div>}
+
+        {/* (Dependencies moved into Task section above) */}
+
+          </>);
+        })()}
 
         {/* Metadata footer — created, scheduled window, slack */}
         {!isCreate && (function() {
