@@ -1162,7 +1162,10 @@ async function updateTask(req, res) {
         var needsCleanup = row.recur !== undefined || row.recur_start !== undefined || row.recur_end !== undefined;
         if (needsCleanup) {
           var _dateHelpers = require('../scheduler/dateHelpers');
-          var updatedTmpl = await trx('tasks_v').where({ id: id, user_id: req.user.id }).first();
+          // Build the post-update template state by merging the pre-fetch (existing) with
+          // the write payload (row) — both use tasks_v snake_case column names, so this is
+          // equivalent to re-fetching without the extra DB round-trip inside the transaction.
+          var updatedTmpl = Object.assign({}, existing, row);
           var newRecur = typeof updatedTmpl.recur === 'string' ? JSON.parse(updatedTmpl.recur || 'null') : updatedTmpl.recur;
           var oldRecur = typeof existing.recur === 'string' ? JSON.parse(existing.recur || 'null') : existing.recur;
 
