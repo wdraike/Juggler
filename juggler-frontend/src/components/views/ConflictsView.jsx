@@ -91,7 +91,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
     {
       key: 'unplaced', title: 'Unplaced', tasks: unplaced || [], color: theme.amberText,
       tip: 'Tasks the scheduler couldn\'t fit into any available time slot',
-      help: 'The scheduler tried to place these tasks but ran out of room. Common causes: the day is too full, time window constraints are too narrow, or a non-splittable task is too long for any available gap. Try shortening the task, enabling splitting, relaxing the time window, or moving other tasks to free up space.'
+      help: 'The scheduler tried to place these tasks but ran out of room. Common causes: the day is too full, time window constraints are too narrow, a non-splittable task is too long for any available gap, or no suitable weather window exists within the 14-day horizon. Try shortening the task, enabling splitting, relaxing the time window, adjusting weather conditions, or moving other tasks to free up space.'
     },
   ];
 
@@ -186,6 +186,11 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
                       allTasks={allTasks} statuses={statuses}
                       todayDate={todayDate}
                     />
+                    {t._unplacedReason === 'weather' && (
+                      <div style={{ fontSize: 10, color: theme.textMuted, marginLeft: 8, marginBottom: 4 }}>
+                        🌤 No suitable weather window in the next 14 days
+                      </div>
+                    )}
                     {t._unplacedDetail && (
                       <div style={{ fontSize: 10, color: theme.textMuted, padding: '2px 12px', marginTop: -2 }}>
                         <span>{t._unplacedDetail}</span>

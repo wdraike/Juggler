@@ -68,7 +68,14 @@ export default function AppLayout() {
   var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements, flushNow } = useTaskState();
   var isMobile = useIsMobile();
   var isCompact = useIsCompact();
-  var { weatherByDate } = useWeather(config.locations, config.temperatureUnit);
+  var { weatherByDate, refreshed: weatherRefreshed } = useWeather(config.locations, config.temperatureUnit);
+  var weatherRefreshedRef = useRef(false);
+  useEffect(function() {
+    if (!weatherRefreshed) return;
+    if (weatherRefreshedRef.current) return; // already triggered once this session
+    weatherRefreshedRef.current = true;
+    apiClient.post('/schedule/run').catch(function() { /* fail silently */ });
+  }, [weatherRefreshed]);
   var [headerCompact, setHeaderCompact] = useState(isCompact);
   var { toast, toastHistory, showToast } = useToast();
   var { pushUndo, popUndo } = useUndo(taskStateRef, dispatch, dispatchPersist);
