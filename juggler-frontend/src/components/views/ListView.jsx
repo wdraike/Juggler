@@ -17,7 +17,9 @@ var DONE_RANGES = [
   { value: 'all', label: 'All' },
 ];
 
-export default function ListView({ allTasks, statuses, filter, search, projectFilter, onStatusChange, onDelete, onExpand, onCreate, darkMode, schedCfg, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile, todayDate }) {
+import WeatherBadge from '../features/WeatherBadge';
+
+export default function ListView({ allTasks, statuses, filter, search, projectFilter, onStatusChange, onDelete, onExpand, onCreate, darkMode, schedCfg, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile, todayDate, weatherByDate }) {
   var theme = getTheme(darkMode);
   var todayKey = todayDate ? formatDateKey(todayDate) : formatDateKey(new Date());
   var [doneRange, setDoneRange] = useState('30');
@@ -130,6 +132,7 @@ export default function ListView({ allTasks, statuses, filter, search, projectFi
               {d ? `${DAY_NAMES[d.getDay()]} ${MONTH_NAMES[d.getMonth()]} ${d.getDate()}` : 'TBD'}
               {isToday && <span style={{ fontSize: 10, background: theme.accent, color: '#FDFAF5', borderRadius: 4, padding: '1px 6px' }}>Today</span>}
               {loc && <span style={{ fontSize: 10, color: theme.textMuted }}>{loc.icon}</span>}
+              {weatherByDate && weatherByDate[dateKey] && <WeatherBadge weatherDay={weatherByDate[dateKey]} showLow darkMode={darkMode} />}
               {filter === 'done' && <span style={{ fontSize: 10, color: theme.textMuted, fontWeight: 400, marginLeft: 'auto' }}>✓ {tasks.length}</span>}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>

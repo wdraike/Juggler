@@ -11,6 +11,7 @@ import { formatHour, formatDateKey, parseDate } from '../../scheduler/dateHelper
 import { getBlocksForDate, parseWhen } from '../../scheduler/timeBlockHelpers';
 import { resolveLocationId, getLocationForDatePure } from '../../scheduler/locationHelpers';
 import StatusToggle from '../schedule/StatusToggle';
+import WeatherBadge from '../features/WeatherBadge';
 
 var MIN_PX_PER_HOUR = 30;
 var MAX_PX_PER_HOUR = 240;
@@ -656,7 +657,8 @@ export default function DailyView({
   onExpand, darkMode, schedCfg, nowMins, isToday, allTasks, unplaced,
   filter, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile,
   onUpdate, onDelete, showToast, locations, onHourLocationOverride,
-  locSchedules, onUpdateLocScheduleOverrides, onUpdateLocScheduleDefaults, onBatchRecurringsDone
+  locSchedules, onUpdateLocScheduleOverrides, onUpdateLocScheduleDefaults, onBatchRecurringsDone,
+  weatherByDate
 }) {
   var theme = getTheme(darkMode);
   var scrollRef = useRef(null);
@@ -932,6 +934,9 @@ export default function DailyView({
         <div style={{ fontSize: 12, color: theme.textMuted }}>
           {loc.icon} {loc.name}
         </div>
+        {weatherByDate && weatherByDate[selectedDateKey] && (
+          <WeatherBadge weatherDay={weatherByDate[selectedDateKey]} showLow darkMode={darkMode} />
+        )}
         {/* Progress */}
         {(function () {
           var dayTasks = allScheduled.map(function (p) { return p.task; });

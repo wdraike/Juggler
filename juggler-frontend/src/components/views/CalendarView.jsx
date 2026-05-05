@@ -180,9 +180,11 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
 }
 
 /* ── Main CalendarView ── */
+import WeatherBadge from '../features/WeatherBadge';
+
 export default function CalendarView({
   selectedDate, dayPlacements, statuses, tasksByDate,
-  onExpand, setDayOffset, setViewMode, today, darkMode, onDateDrop, isMobile
+  onExpand, setDayOffset, setViewMode, today, darkMode, onDateDrop, isMobile, weatherByDate
 }) {
   var theme = getTheme(darkMode);
   var todayKey = formatDateKey(today);
@@ -319,9 +321,12 @@ export default function CalendarView({
                         }}>
                           {cell.day === 1 && !isToday ? MONTH_NAMES[cell.date.getMonth()] + ' ' + cell.day : cell.day}
                         </span>
-                        {items.length > 0 && (
-                          <span style={{ fontSize: 9, color: theme.textMuted, flexShrink: 0 }}>{doneCount}/{items.length}</span>
-                        )}
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                          {weatherByDate && weatherByDate[key] && cell.inMonth && <WeatherBadge weatherDay={weatherByDate[key]} compact darkMode={darkMode} />}
+                          {items.length > 0 && (
+                            <span style={{ fontSize: 9, color: theme.textMuted, flexShrink: 0 }}>{doneCount}/{items.length}</span>
+                          )}
+                        </span>
                       </div>
 
                       {/* Task entries — scrollable within the day cell */}

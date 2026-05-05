@@ -9,7 +9,9 @@ import { DAY_NAMES } from '../../state/constants';
 import { formatDateKey, getWeekStart } from '../../scheduler/dateHelpers';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
-export default function WeekView({ selectedDate, dayPlacements, statuses, onStatusChange, onDelete, onExpand, gridZoom, darkMode, schedCfg, nowMins, onGridDrop, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag }) {
+import WeatherBadge from '../features/WeatherBadge';
+
+export default function WeekView({ selectedDate, dayPlacements, statuses, onStatusChange, onDelete, onExpand, gridZoom, darkMode, schedCfg, nowMins, onGridDrop, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag, weatherByDate }) {
   var theme = getTheme(darkMode);
   var todayKey = formatDateKey(new Date());
   var weekStart = getWeekStart(selectedDate);
@@ -36,6 +38,7 @@ export default function WeekView({ selectedDate, dayPlacements, statuses, onStat
               background: d.isToday ? theme.accent + '15' : theme.bg
             }}>
               {DAY_NAMES[d.date.getDay()]} {d.date.getDate()} {loc.icon}
+              {weatherByDate && weatherByDate[d.key] && <div style={{ marginTop: 1 }}><WeatherBadge weatherDay={weatherByDate[d.key]} compact darkMode={darkMode} /></div>}
             </div>
           );
         })}

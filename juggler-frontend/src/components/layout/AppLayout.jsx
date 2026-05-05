@@ -55,6 +55,7 @@ import AiCommandPanel from '../features/AiCommandPanel';
 import AppFooter from './AppFooter';
 import apiClient from '../../services/apiClient';
 import ImpersonationBanner from '../admin/ImpersonationBanner';
+import useWeather from '../../hooks/useWeather';
 
 export default function AppLayout() {
   // Auth & timezone
@@ -67,6 +68,7 @@ export default function AppLayout() {
   var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements, flushNow } = useTaskState();
   var isMobile = useIsMobile();
   var isCompact = useIsCompact();
+  var { weatherByDate } = useWeather(config.locations, config.temperatureUnit);
   var [headerCompact, setHeaderCompact] = useState(isCompact);
   var { toast, toastHistory, showToast } = useToast();
   var { pushUndo, popUndo } = useUndo(taskStateRef, dispatch, dispatchPersist);
@@ -1156,6 +1158,7 @@ export default function AppLayout() {
               onZoomChange={handleZoomChange}
               isMobile={isMobile}
               onMarkerDrag={handleMarkerDrag}
+              weatherByDate={weatherByDate}
             />
           )}
           {viewMode === '3day' && (
@@ -1168,6 +1171,7 @@ export default function AppLayout() {
               onZoomChange={handleZoomChange}
               isMobile={isMobile}
               onMarkerDrag={handleMarkerDrag}
+              weatherByDate={weatherByDate}
             />
           )}
           {viewMode === 'week' && (
@@ -1180,6 +1184,7 @@ export default function AppLayout() {
               onZoomChange={handleZoomChange}
               isMobile={isMobile}
               onMarkerDrag={handleMarkerDrag}
+              weatherByDate={weatherByDate}
             />
           )}
           {viewMode === 'timeline' && (
@@ -1222,6 +1227,7 @@ export default function AppLayout() {
               onExpand={handleExpand} setDayOffset={setDayOffset} setViewMode={setViewMode} today={today} darkMode={darkMode}
               onDateDrop={handleDateDrop}
               isMobile={isMobile}
+              weatherByDate={weatherByDate}
             />
           )}
           {viewMode === 'daily' && (
@@ -1248,6 +1254,7 @@ export default function AppLayout() {
               onUpdateLocScheduleOverrides={config.updateTemplateOverrides}
               onUpdateLocScheduleDefaults={config.updateTemplateDefaults}
               onBatchRecurringsDone={handleBatchRecurringDone}
+              weatherByDate={weatherByDate}
             />
           )}
           {viewMode === 'list' && (
@@ -1258,6 +1265,7 @@ export default function AppLayout() {
               onCreate={handleCreate} darkMode={darkMode} schedCfg={schedCfg}
               blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
               isMobile={isMobile} todayDate={today}
+              weatherByDate={weatherByDate}
             />
           )}
           {viewMode === 'priority' && (

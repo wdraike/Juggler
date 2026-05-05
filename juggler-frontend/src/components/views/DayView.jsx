@@ -8,7 +8,9 @@ import { getTheme } from '../../theme/colors';
 import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, GRID_START } from '../../state/constants';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
-export default function DayView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onDelete, onExpand, onCreate, gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locSchedules, onUpdateLocScheduleOverrides, onUpdateLocScheduleDefaults, allTasks, onBatchRecurringsDone, locations, onHourLocationOverride, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, filter, onZoomChange, isMobile, onMarkerDrag }) {
+import WeatherBadge from '../features/WeatherBadge';
+
+export default function DayView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onDelete, onExpand, onCreate, gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locSchedules, onUpdateLocScheduleOverrides, onUpdateLocScheduleDefaults, allTasks, onBatchRecurringsDone, locations, onHourLocationOverride, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, filter, onZoomChange, isMobile, onMarkerDrag, weatherByDate }) {
   var theme = getTheme(darkMode);
   var scrollRef = useRef(null);
   var loc = getLocationForDatePure(selectedDateKey, schedCfg);
@@ -92,6 +94,9 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
         <div style={{ fontSize: 12, color: theme.textMuted }}>
           {loc.icon} {loc.name}
         </div>
+        {weatherByDate && weatherByDate[selectedDateKey] && (
+          <WeatherBadge weatherDay={weatherByDate[selectedDateKey]} showLow darkMode={darkMode} />
+        )}
         {/* Progress bar for the day */}
         {(() => {
           var dayTasks = placements.map(p => p.task);

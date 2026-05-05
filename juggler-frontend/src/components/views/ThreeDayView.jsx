@@ -9,7 +9,9 @@ import { DAY_NAMES, MONTH_NAMES } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
-export default function ThreeDayView({ selectedDate, dayPlacements, statuses, onStatusChange, onDelete, onExpand, gridZoom, darkMode, schedCfg, nowMins, onGridDrop, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag }) {
+import WeatherBadge from '../features/WeatherBadge';
+
+export default function ThreeDayView({ selectedDate, dayPlacements, statuses, onStatusChange, onDelete, onExpand, gridZoom, darkMode, schedCfg, nowMins, onGridDrop, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag, weatherByDate }) {
   var theme = getTheme(darkMode);
   var todayKey = formatDateKey(new Date());
 
@@ -34,6 +36,7 @@ export default function ThreeDayView({ selectedDate, dayPlacements, statuses, on
               background: d.isToday ? theme.accent + '15' : theme.bg
             }}>
               {DAY_NAMES[d.date.getDay()]} {d.date.getDate()} <span style={{ fontSize: 10, color: theme.textMuted }}>{loc.icon}</span>
+              {weatherByDate && weatherByDate[d.key] && <div style={{ marginTop: 2 }}><WeatherBadge weatherDay={weatherByDate[d.key]} darkMode={darkMode} /></div>}
             </div>
           );
         })}
