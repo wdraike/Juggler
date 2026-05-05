@@ -13,6 +13,7 @@ import { resolveLocationId, getLocationForDatePure } from '../../scheduler/locat
 import StatusToggle from '../schedule/StatusToggle';
 import WeatherBadge from '../features/WeatherBadge';
 import { getTaskIcon } from '../../utils/taskIcon';
+import { checkWeatherMatch, hasWeatherRestrictions } from '../../utils/weatherMatch';
 
 var MIN_PX_PER_HOUR = 30;
 var MAX_PX_PER_HOUR = 240;
@@ -92,7 +93,7 @@ function FixedPopup({ anchorRect, item, status, theme, darkMode }) {
         textDecoration: isDone ? 'line-through' : 'none',
         color: isDone ? theme.textMuted : theme.text
       }}>
-        {t.text}
+        {(function(){ var ic = getTaskIcon(t.text); return ic ? <span style={{marginRight:3,flexShrink:0}}>{ic}</span> : null; })()}{t.text}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
         {t.pri && (
@@ -251,10 +252,11 @@ function computeColumns(placements, hourHeight) {
 }
 
 /* ── Reactive task block — shows more info as height increases ── */
-function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStatusChange, onDelete, theme, darkMode, isMobile, isBlocked, canDrag, gutterW, hourHeight }) {
+function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStatusChange, onDelete, theme, darkMode, isMobile, isBlocked, canDrag, gutterW, hourHeight, weatherDay }) {
   var t = item.task || item;
   var priColor = PRI_COLORS[t.pri] || PRI_COLORS.P3;
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
+  var weatherResult = hasWeatherRestrictions(t) ? checkWeatherMatch(t, weatherDay) : null;
   var isOverdue = !!item._overdue && !isDone;
   var [show, setShow] = useState(false);
   var innerRef = useRef(null);
@@ -396,11 +398,20 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
             {status === 'done' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2713'}</span>}
             {status === 'skip' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u23ED'}</span>}
             {status === 'cancel' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2717'}</span>}
+            {weatherResult && (
+              <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 14, height: 14, flexShrink: 0 }}
+                title={weatherResult.ok === false ? weatherResult.reason : 'Forecast OK'}>
+                <span style={{ fontSize: 10, filter: weatherResult.ok ? 'drop-shadow(0 0 2px #2D9E6B88)' : 'none' }}>\u26c5</span>
+                {weatherResult.ok === false && (
+                  <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: '#e05252', textShadow: '0 0 3px #1a1a1a', lineHeight: 1, pointerEvents: 'none' }}>\u2298</span>
+                )}
+              </span>
+            )}
             <span style={{
               fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis',
               whiteSpace: 'nowrap', textDecoration: isDone ? 'line-through' : 'none'
             }}>
-              {t.text}
+              {(function(){ var ic = getTaskIcon(t.text); return ic ? <span style={{marginRight:2,flexShrink:0}}>{ic}</span> : null; })()}{t.text}
             </span>
             {timeRange && (
               <span style={{ fontSize: 9, color: theme.textMuted, flexShrink: 0, fontWeight: 500 }}>
@@ -1264,6 +1275,7 @@ export default function DailyView({
                 canDrag={canDrag}
                 gutterW={GUTTER_W}
                 hourHeight={hourHeight}
+                weatherDay={weatherByDate && weatherByDate[selectedDateKey]}
               />
             );
           })}
@@ -1291,6 +1303,7 @@ export default function DailyView({
                 canDrag={canDrag}
                 gutterW={GUTTER_W}
                 hourHeight={hourHeight}
+                weatherDay={weatherByDate && weatherByDate[selectedDateKey]}
               />
             );
           })}
