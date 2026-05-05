@@ -165,7 +165,9 @@ var TEMPLATE_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', '
   'when', 'day_req', 'recurring', 'time_flex', 'split', 'split_min',
   'travel_before', 'travel_after', 'depends_on',
   'notes', 'url', 'flex_when', 'recur', 'recur_start', 'recur_end',
-  'preferred_time', 'preferred_time_mins', 'placement_mode'];
+  'preferred_time', 'preferred_time_mins', 'placement_mode',
+  'weather_precip', 'weather_cloud', 'weather_temp_min', 'weather_temp_max',
+  'weather_temp_unit', 'weather_humidity_min', 'weather_humidity_max'];
 
 /**
  * Build a { sourceId: row } lookup from an array of task rows.

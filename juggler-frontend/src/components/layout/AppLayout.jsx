@@ -1285,6 +1285,7 @@ export default function AppLayout() {
               onPriorityDrop={handlePriorityDrop}
               blockedTaskIds={blockedTaskIds} unplacedIds={unplacedIds} pastDueIds={pastDueIds} fixedIds={fixedIds}
               isMobile={isMobile} todayDate={today}
+              weatherByDate={weatherByDate}
             />
           )}
           {viewMode === 'deps' && (
@@ -1304,6 +1305,7 @@ export default function AppLayout() {
               onStatusChange={handleStatusChange} onExpand={handleExpand} onUpdateTask={handleUpdateTask}
               onDelete={requestDelete}
               darkMode={darkMode} isMobile={isMobile} todayDate={today}
+              weatherByDate={weatherByDate}
             />
           )}
         </div>

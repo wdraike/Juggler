@@ -6,12 +6,15 @@ import React, { useMemo, useState } from 'react';
 import TaskCard from '../tasks/TaskCard';
 import { getTheme } from '../../theme/colors';
 import { PRI_COLORS } from '../../state/constants';
+import WeatherBadge from '../features/WeatherBadge';
+import { formatDateKey } from '../../scheduler/dateHelpers';
 
 var PRI_LEVELS = ['P1', 'P2', 'P3', 'P4'];
 
-export default function PriorityView({ allTasks, statuses, filter, search, projectFilter, onStatusChange, onDelete, onExpand, darkMode, onPriorityDrop, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile, todayDate }) {
+export default function PriorityView({ allTasks, statuses, filter, search, projectFilter, onStatusChange, onDelete, onExpand, darkMode, onPriorityDrop, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile, todayDate, weatherByDate }) {
   var theme = getTheme(darkMode);
   var [dragOver, setDragOver] = useState(null);
+  var todayKey = formatDateKey(todayDate || new Date());
 
   var filteredTasks = useMemo(() => {
     // Exclude recurring templates — only show instances.
@@ -57,7 +60,13 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
   }, [allTasks, statuses, filter, search, projectFilter, blockedTaskIds, unplacedIds, pastDueIds, fixedIds]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', flex: 1, overflow: 'auto', gap: 8, padding: isMobile ? 8 : 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+      {weatherByDate && weatherByDate[todayKey] && (
+        <div style={{ padding: '4px 12px', borderBottom: `1px solid ${theme.border}`, flexShrink: 0 }}>
+          <WeatherBadge weatherDay={weatherByDate[todayKey]} showLow darkMode={darkMode} />
+        </div>
+      )}
+      <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', flex: 1, overflow: 'auto', gap: 8, padding: isMobile ? 8 : 12 }}>
       {PRI_LEVELS.map(pri => {
         var tasks = filteredTasks.filter(t => (t.pri || 'P3') === pri);
         var isOver = dragOver === pri;
@@ -106,6 +115,7 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
           </div>
         );
       })}
+      </div>
     </div>
   );
 }

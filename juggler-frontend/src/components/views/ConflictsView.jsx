@@ -9,8 +9,9 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import TaskCard from '../tasks/TaskCard';
 import { getTheme } from '../../theme/colors';
 import { getTaskIcon } from '../../utils/taskIcon';
-import { parseDate } from '../../scheduler/dateHelpers';
+import { parseDate, formatDateKey } from '../../scheduler/dateHelpers';
 import { getDepsStatus } from '../../scheduler/dependencyHelpers';
+import WeatherBadge from '../features/WeatherBadge';
 
 var STORAGE_KEY = 'juggler-issues-collapsed';
 
@@ -24,9 +25,10 @@ function saveCollapsed(state) {
   catch (e) { /* quota exceeded */ }
 }
 
-export default function ConflictsView({ allTasks, statuses, unplaced, backlog, schedulerWarnings, onStatusChange, onExpand, onUpdateTask, onDelete, darkMode, isMobile, todayDate }) {
+export default function ConflictsView({ allTasks, statuses, unplaced, backlog, schedulerWarnings, onStatusChange, onExpand, onUpdateTask, onDelete, darkMode, isMobile, todayDate, weatherByDate }) {
   var theme = getTheme(darkMode);
   var today = todayDate || (function() { var d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
+  var todayKey = formatDateKey(today);
 
   var [collapsed, setCollapsed] = useState(function() {
     var saved = loadCollapsed();
@@ -331,6 +333,11 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
 
   return (
     <div style={{ flex: 1, overflow: 'auto', padding: isMobile ? 8 : 12 }}>
+      {weatherByDate && weatherByDate[todayKey] && (
+        <div style={{ padding: '0 4px 8px' }}>
+          <WeatherBadge weatherDay={weatherByDate[todayKey]} showLow darkMode={darkMode} />
+        </div>
+      )}
       {/* Page-level explanation */}
       <div style={{ fontSize: 11, color: theme.textMuted, padding: '0 4px 10px', lineHeight: 1.5 }}>
         Tasks that need attention are under Action Required. Informational sections show context that may be useful but doesn't need immediate action.
