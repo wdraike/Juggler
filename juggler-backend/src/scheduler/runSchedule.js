@@ -95,7 +95,8 @@ async function loadConfig(userId) {
     scheduleTemplates: config.schedule_templates || null,
     preferences: config.preferences || {},
     splitDefault: config.preferences ? config.preferences.splitDefault : undefined,
-    splitMinDefault: config.preferences ? config.preferences.splitMinDefault : undefined
+    splitMinDefault: config.preferences ? config.preferences.splitMinDefault : undefined,
+    locations: config.locations || []
   };
 }
 
@@ -122,6 +123,46 @@ async function acquireSchedulerLock(userId) {
 async function releaseSchedulerLock(userId) {
   var lockKey = 'sched_lock:' + userId;
   try { await cache.getClient().del(lockKey); } catch (e) { /* fail open */ }
+}
+
+async function loadWeatherForHorizon(locations, db) {
+  var weatherByDateHour = {};
+  var locWithCoords = (locations || []).find(function(l) {
+    return typeof l.lat === 'number' && typeof l.lon === 'number';
+  });
+  if (!locWithCoords) return weatherByDateHour;
+
+  var latGrid = Math.round(locWithCoords.lat * 10) / 10;
+  var lonGrid = Math.round(locWithCoords.lon * 10) / 10;
+
+  var row = await db('weather_cache')
+    .where('lat_grid', latGrid)
+    .where('lon_grid', lonGrid)
+    .where('expires_at', '>', db.fn.now())
+    .orderBy('fetched_at', 'desc')
+    .first();
+
+  if (!row) return weatherByDateHour; // fail-open: no cached data
+
+  var forecast;
+  try { forecast = JSON.parse(row.forecast_json); } catch (e) { return weatherByDateHour; }
+
+  var hourly = forecast.hourly;
+  if (!hourly || !hourly.time) return weatherByDateHour;
+
+  for (var i = 0; i < hourly.time.length; i++) {
+    var dt = hourly.time[i]; // "2026-05-05T14:00"
+    var dateKey = dt.slice(0, 10);
+    var hour = parseInt(dt.slice(11, 13), 10);
+    if (!weatherByDateHour[dateKey]) weatherByDateHour[dateKey] = {};
+    weatherByDateHour[dateKey][hour] = {
+      temp:       hourly.temperature_2m              ? hourly.temperature_2m[i]              : null,
+      precipProb: hourly.precipitation_probability   ? hourly.precipitation_probability[i]   : 0,
+      cloudcover: hourly.cloudcover                  ? hourly.cloudcover[i]                  : 0,
+    };
+  }
+
+  return weatherByDateHour;
 }
 
 async function runScheduleAndPersist(userId, _retries, options) {
@@ -812,6 +853,17 @@ async function runScheduleAndPersist(userId, _retries, options) {
   });
 
   tPerf.reconcileEnd = Date.now() - tPerfStart;
+
+  // Load weather data for weather-constrained tasks (fail-open if no coords/cache)
+  cfg.weatherByDateHour = {};
+  var hasWeatherTasks = allTasks.some(function(t) {
+    return (t.weatherPrecip && t.weatherPrecip !== 'any') ||
+           (t.weatherCloud  && t.weatherCloud  !== 'any') ||
+           t.weatherTempMin != null || t.weatherTempMax != null;
+  });
+  if (hasWeatherTasks && cfg.locations && cfg.locations.length > 0) {
+    cfg.weatherByDateHour = await loadWeatherForHorizon(cfg.locations, db);
+  }
 
   // 6. Run scheduler (primary chosen by SCHEDULER_V2 env var; shadow runs
   //    in parallel when SCHEDULER_V2_SHADOW=true).

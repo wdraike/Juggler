@@ -623,6 +623,42 @@ function depsSatisfied(item, candidateDateIdx, candidateStartMin, placedById, st
   return true;
 }
 
+function hasWeatherConstraint(task) {
+  if (!task) return false;
+  return (task.weatherPrecip && task.weatherPrecip !== 'any') ||
+         (task.weatherCloud  && task.weatherCloud  !== 'any') ||
+         task.weatherTempMin != null || task.weatherTempMax != null;
+}
+
+function weatherOk(task, dateKey, startMin, weatherByDateHour) {
+  if (!hasWeatherConstraint(task)) return true;
+  if (!weatherByDateHour || !weatherByDateHour[dateKey]) return true; // fail-open
+  var hour = Math.floor(startMin / 60);
+  var w = weatherByDateHour[dateKey][hour];
+  if (!w) return true; // fail-open: no data for this hour
+
+  // Precipitation check
+  var precip = task.weatherPrecip || 'any';
+  if (precip === 'dry_only'  && w.precipProb > 20) return false;
+  if (precip === 'light_ok'  && w.precipProb > 50) return false;
+  // 'wet_ok' and 'any' always pass
+
+  // Sky cover check
+  var cloud = task.weatherCloud || 'any';
+  if (cloud === 'clear'      && w.cloudcover > 25) return false;
+  if (cloud === 'partly_ok'  && w.cloudcover > 60) return false;
+  // 'overcast_ok' and 'any' always pass
+
+  // Temperature check
+  var temp = w.temp;
+  if (temp != null) {
+    if (task.weatherTempMin != null && temp < task.weatherTempMin) return false;
+    if (task.weatherTempMax != null && temp > task.weatherTempMax) return false;
+  }
+
+  return true;
+}
+
 // Walk eligible windows on each date from earliest..latest looking for
 // the first `dur`-minute free slot. Returns { dateKey, start } or null.
 // opts.ignoreDeadline=true extends the search through the full horizon —
@@ -687,6 +723,8 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
     (Array.isArray(item.task.location) && item.task.location.length > 0) ||
     (Array.isArray(item.task.tools) && item.task.tools.length > 0)
   );
+  var weatherByDateHour = cfg && cfg.weatherByDateHour;
+  var checkWeather = weatherByDateHour && item.task && hasWeatherConstraint(item.task);
 
   // Infinite-slack tasks (no deadline, no recurring anchor) are allowed to
   // extend the search past the initial date list — up to MAX_SEARCH_DAYS.
@@ -755,6 +793,7 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
           if (!isFreeWithTravel(occ, s, item.dur, item.travelBefore, item.travelAfter)) continue;
           if (checkDeps && !depsSatisfied(item, i, s, placedById, statuses, dates)) continue;
           if (checkLoc && !canTaskRunAtMin(item.task, d.key, s, cfg, toolMatrix, blocks)) continue;
+          if (checkWeather && !weatherOk(item.task, d.key, s, weatherByDateHour)) continue;
           return { dateKey: d.key, start: s };
         }
       }
@@ -800,6 +839,8 @@ function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
     (Array.isArray(item.task.location) && item.task.location.length > 0) ||
     (Array.isArray(item.task.tools) && item.task.tools.length > 0)
   );
+  var weatherByDateHour = cfg && cfg.weatherByDateHour;
+  var checkWeather = weatherByDateHour && item.task && hasWeatherConstraint(item.task);
 
   for (var i = latestIdx; i >= earliestIdx; i--) {
     var d = dates[i];
@@ -816,6 +857,7 @@ function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
         if (!isFreeWithTravel(occ, s, item.dur, item.travelBefore, item.travelAfter)) continue;
         if (checkDeps && !depsSatisfied(item, i, s, placedById, statuses, dates)) continue;
         if (checkLoc && !canTaskRunAtMin(item.task, d.key, s, cfg, toolMatrix, blocks)) continue;
+        if (checkWeather && !weatherOk(item.task, d.key, s, weatherByDateHour)) continue;
         return { dateKey: d.key, start: s };
       }
     }
@@ -1063,6 +1105,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       // Might be dep-blocked; retry pass below will give it another chance
       // once deps settle. Tag so the retry can identify what was deferred.
       item._deferred = true;
+      if (hasWeatherConstraint(item.task)) item.task._unplacedReason = 'weather';
       unplaced.push(item);
       continue;
     }
@@ -1116,7 +1159,11 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   retryQueue.forEach(function(item) {
     delete item._deferred;
     var placement = tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, statuses, cfg, env);
-    if (!placement.slot) { stillUnplaced.push(item); return; }
+    if (!placement.slot) {
+      if (hasWeatherConstraint(item.task)) item.task._unplacedReason = 'weather';
+      stillUnplaced.push(item);
+      return;
+    }
     var slot = placement.slot;
     reserveWithTravel(dayOcc[slot.dateKey], slot.start, item.dur, item.travelBefore, item.travelAfter);
     var entry = { task: item.task, start: slot.start, dur: item.dur, locked: false,
