@@ -166,7 +166,7 @@ var TOOL_FALLBACKS = ['\uD83D\uDD27', '\u2699\uFE0F', '\uD83D\uDEE0\uFE0F', '\uD
 
 var hasGeolocation = typeof navigator !== 'undefined' && !!navigator.geolocation;
 
-function LocationRow({ loc, index, config, theme }) {
+function LocationRow({ loc, config, theme }) {
   var [geocodeInput, setGeocodeInput] = useState(loc.displayName || '');
   var [displayName, setDisplayName] = useState(loc.displayName || '');
   var [loading, setLoading] = useState(false);
@@ -328,7 +328,7 @@ function LocationsTab({ config, theme }) {
       <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>Locations</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
         {config.locations.map(function(loc, i) {
-          return <LocationRow key={loc.id} loc={loc} index={i} config={config} theme={theme} />;
+          return <LocationRow key={loc.id} loc={loc} config={config} theme={theme} />;
         })}
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
