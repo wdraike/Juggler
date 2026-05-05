@@ -388,12 +388,15 @@ export default function CalendarGrid({
                 var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
                 return (
                   <div style={{
-                    fontSize: 8, color: theme.textMuted, lineHeight: 1.1,
+                    fontSize: 8, color: theme.textMuted, lineHeight: 1.2,
                     marginTop: 1, userSelect: 'none', opacity: 0.75,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0
                   }}>
-                    <span style={{ fontSize: 9 }}>{icon}</span>
-                    <span>{Math.round(hw.temp)}°{unit}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <span style={{ fontSize: 9 }}>{icon}</span>
+                      <span>{Math.round(hw.temp)}°{unit}</span>
+                    </div>
+                    {hw.humidity > 0 && <div style={{ fontSize: 7 }}>{hw.humidity}%↕</div>}
                   </div>
                 );
               })()}

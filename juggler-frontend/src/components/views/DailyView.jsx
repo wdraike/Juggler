@@ -1171,13 +1171,16 @@ export default function DailyView({
                   var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
                   return (
                     <div style={{
-                      position: 'absolute', top: 12, left: 0, width: GUTTER_W,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1,
+                      position: 'absolute', top: 10, left: 0, width: GUTTER_W,
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0,
                       fontSize: 8, color: theme.textMuted, opacity: 0.75,
-                      lineHeight: 1.1, userSelect: 'none', pointerEvents: 'none'
+                      lineHeight: 1.2, userSelect: 'none', pointerEvents: 'none'
                     }}>
-                      <span style={{ fontSize: 9 }}>{icon}</span>
-                      <span>{Math.round(hw.temp)}°{unit}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <span style={{ fontSize: 9 }}>{icon}</span>
+                        <span>{Math.round(hw.temp)}°{unit}</span>
+                      </div>
+                      {hw.humidity > 0 && <div style={{ fontSize: 7 }}>{hw.humidity}%↕</div>}
                     </div>
                   );
                 })()}
