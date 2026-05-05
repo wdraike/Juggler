@@ -223,8 +223,8 @@ function LocationRow({ loc, config, theme }) {
         setLoading(false);
         var lat = pos.coords.latitude;
         var lon = pos.coords.longitude;
-        updateLocationCoords(lat, lon, '(device location)');
-        setGeocodeInput('(device location)');
+        updateLocationCoords(lat, lon, '');
+        setGeocodeInput('');
       },
       function() {
         setLoading(false);

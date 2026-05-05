@@ -19,6 +19,18 @@ import { resolveLocationId } from '../../scheduler/locationHelpers';
 import { getBlocksForDate } from '../../scheduler/timeBlockHelpers';
 import ScheduleCard from './ScheduleCard';
 
+function weatherCodeIcon(code) {
+  if (code == null) return '';
+  if (code === 0) return '☀️';
+  if (code <= 3) return '⛅';
+  if (code <= 48) return '🌫️';
+  if (code <= 67) return '🌧️';
+  if (code <= 77) return '❄️';
+  if (code <= 82) return '🌦️';
+  if (code <= 86) return '🌨️';
+  return '⛈️';
+}
+
 // Dimensions
 var STRIP_W = 44;       // center strip holding hour labels
 var STRIP_W_M = 32;
@@ -319,6 +331,12 @@ export default function CalendarGrid({
     }
   });
 
+  // Map hour → hourly weather entry
+  var hourlyByHour = {};
+  if (weatherDay && weatherDay.hourly) {
+    weatherDay.hourly.forEach(function(entry) { hourlyByHour[entry.hour] = entry; });
+  }
+
   return (
     <div ref={elRef} style={{ position: 'relative', height: totalH, minHeight: totalH, touchAction: 'pan-y', overflow: 'hidden', userSelect: dragState ? 'none' : undefined, cursor: dragState ? 'grabbing' : undefined }}
       onClick={locMenuHour !== null ? function() { setLocMenuHour(null); } : undefined}
@@ -363,6 +381,22 @@ export default function CalendarGrid({
                   fontSize: isMobile ? 12 : 14, opacity: 0.9, margin: '1px auto 0'
                 }}>{locIcon(locId)}</div>
               )}
+              {mode === 'full' && hourlyByHour[hour] && (function() {
+                var hw = hourlyByHour[hour];
+                var icon = weatherCodeIcon(hw.code);
+                if (!icon) return null;
+                var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
+                return (
+                  <div style={{
+                    fontSize: 8, color: theme.textMuted, lineHeight: 1.1,
+                    marginTop: 1, userSelect: 'none', opacity: 0.75,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1
+                  }}>
+                    <span style={{ fontSize: 9 }}>{icon}</span>
+                    <span>{Math.round(hw.temp)}°{unit}</span>
+                  </div>
+                );
+              })()}
               {bs && mode === 'full' && <div style={{ fontSize: 7, color: bs.color || theme.textMuted, opacity: 0.6 }}>{bs.icon}</div>}
               {mode !== 'mini' && (function() {
                 var bl = blockByHour[hour];

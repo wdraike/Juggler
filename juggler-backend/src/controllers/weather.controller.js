@@ -10,12 +10,17 @@
  *   GET /api/weather/geocode?q=...
  *     Proxies Open-Meteo geocoding API. Returns { lat, lon, displayName }.
  *     No caching — only called during location setup.
+ *
+ *   GET /api/weather/reverse-geocode?lat=X&lon=Y
+ *     Proxies Nominatim reverse geocoding. Returns { displayName }.
+ *     No caching — only called when user clicks "Locate me".
  */
 
 const db = require('../db');
 
 const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 const OPEN_METEO_GEOCODE_URL  = 'https://geocoding-api.open-meteo.com/v1/search';
+const NOMINATIM_REVERSE_URL   = 'https://nominatim.openstreetmap.org/reverse';
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 function roundCoord(v) {
@@ -123,5 +128,35 @@ exports.geocode = async (req, res) => {
   } catch (err) {
     console.error('Geocode error:', err.message);
     res.status(500).json({ error: err.message || 'Geocode failed' });
+  }
+};
+
+async function reverseGeocodeDisplayName(lat, lon) {
+  var url = NOMINATIM_REVERSE_URL + '?lat=' + lat + '&lon=' + lon + '&format=json&zoom=10';
+  var resp = await fetch(url, {
+    headers: { 'User-Agent': 'Juggler/1.0 (task-scheduling-app)' }
+  });
+  if (!resp.ok) throw new Error('Nominatim returned ' + resp.status);
+  var data = await resp.json();
+  var addr = data.address || {};
+  var city = addr.city || addr.town || addr.village || addr.county || '';
+  var state = addr.state || addr.region || '';
+  return [city, state].filter(Boolean).join(', ') || data.display_name || '';
+}
+
+exports.reverseGeocodeDisplayName = reverseGeocodeDisplayName;
+
+exports.reverseGeocode = async (req, res) => {
+  try {
+    var lat = parseFloat(req.query.lat);
+    var lon = parseFloat(req.query.lon);
+    if (isNaN(lat) || isNaN(lon)) {
+      return res.status(400).json({ error: 'lat and lon are required' });
+    }
+    var displayName = await reverseGeocodeDisplayName(lat, lon);
+    res.json({ displayName });
+  } catch (err) {
+    console.error('Reverse geocode error:', err.message);
+    res.status(500).json({ error: err.message || 'Reverse geocode failed' });
   }
 };

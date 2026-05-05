@@ -6,6 +6,7 @@ const db = require('../db');
 const tasksWrite = require('../lib/tasks-write');
 const { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 const cache = require('../lib/redis');
+const { reverseGeocodeDisplayName } = require('./weather.controller');
 
 /**
  * GET /api/config — all config for user
@@ -31,7 +32,14 @@ async function getAllConfig(req, res) {
     });
 
     const result = {
-      locations: locations.map(l => ({ id: l.location_id, name: l.name, icon: l.icon })),
+      locations: locations.map(l => ({
+        id: l.location_id,
+        name: l.name,
+        icon: l.icon,
+        lat: l.lat != null ? parseFloat(l.lat) : undefined,
+        lon: l.lon != null ? parseFloat(l.lon) : undefined,
+        displayName: l.display_name || undefined
+      })),
       tools: tools.map(t => ({ id: t.tool_id, name: t.name, icon: t.icon })),
       projects: projects.map(p => ({ id: p.id, name: p.name, color: p.color, icon: p.icon, sortOrder: p.sort_order })),
       toolMatrix: config.tool_matrix || null,
@@ -265,7 +273,14 @@ async function deleteProject(req, res) {
 async function getLocations(req, res) {
   try {
     const rows = await db('locations').where('user_id', req.user.id).orderBy('sort_order');
-    res.json({ locations: rows.map(l => ({ id: l.location_id, name: l.name, icon: l.icon })) });
+    res.json({ locations: rows.map(l => ({
+      id: l.location_id,
+      name: l.name,
+      icon: l.icon,
+      lat: l.lat != null ? parseFloat(l.lat) : undefined,
+      lon: l.lon != null ? parseFloat(l.lon) : undefined,
+      displayName: l.display_name || undefined
+    })) });
   } catch (error) {
     console.error('Get locations error:', error);
     res.status(500).json({ error: 'Failed to fetch locations' });
@@ -277,21 +292,34 @@ async function replaceLocations(req, res) {
     const { locations } = req.body;
     if (!Array.isArray(locations)) return res.status(400).json({ error: 'Locations array required' });
 
+    // Fill in missing display names for locations that have coords but no name
+    const enriched = await Promise.all(locations.map(async (l) => {
+      if (l.lat != null && l.lon != null && !l.displayName) {
+        try {
+          l = { ...l, displayName: await reverseGeocodeDisplayName(l.lat, l.lon) };
+        } catch (_) { /* best-effort — save without display name if lookup fails */ }
+      }
+      return l;
+    }));
+
     await db.transaction(async (trx) => {
       await trx('locations').where('user_id', req.user.id).del();
-      if (locations.length > 0) {
-        await trx('locations').insert(locations.map((l, i) => ({
+      if (enriched.length > 0) {
+        await trx('locations').insert(enriched.map((l, i) => ({
           user_id: req.user.id,
           location_id: l.id,
           name: l.name,
           icon: l.icon || '',
-          sort_order: i
+          sort_order: i,
+          lat: l.lat != null ? l.lat : null,
+          lon: l.lon != null ? l.lon : null,
+          display_name: l.displayName || null
         })));
       }
     });
 
     await cache.invalidateConfig(req.user.id);
-    res.json({ locations });
+    res.json({ locations: enriched });
   } catch (error) {
     console.error('Replace locations error:', error);
     res.status(500).json({ error: 'Failed to update locations' });
