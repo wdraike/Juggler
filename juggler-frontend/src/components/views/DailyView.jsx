@@ -12,6 +12,7 @@ import { getBlocksForDate, parseWhen } from '../../scheduler/timeBlockHelpers';
 import { resolveLocationId, getLocationForDatePure } from '../../scheduler/locationHelpers';
 import StatusToggle from '../schedule/StatusToggle';
 import WeatherBadge from '../features/WeatherBadge';
+import { getTaskIcon } from '../../utils/taskIcon';
 
 var MIN_PX_PER_HOUR = 30;
 var MAX_PX_PER_HOUR = 240;
@@ -594,7 +595,7 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme,
         {status === 'skip' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u23ED'}</span>}
         {status === 'cancel' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2717'}</span>}
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {task.text}
+          {(function(){ var ic = getTaskIcon(task.text); return ic ? <span style={{marginRight:2,flexShrink:0}}>{ic}</span> : null; })()}{task.text}
           {task._unplacedChunkCount > 1 && (
             <span style={{ fontSize: 9, color: theme.textMuted, marginLeft: 6 }}>
               ({task._unplacedChunkCount} chunks unplaced)
@@ -644,7 +645,7 @@ function GhostBlock({ task, top, height, startMins, gutterW, onExpand, theme, is
     >
       <span style={{ fontSize: 9, flexShrink: 0, color: priColor }}>⚠</span>
       <span style={{ fontSize: isMobile ? 9 : 10, color: theme.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-        {task.text}
+        {(function(){ var ic = getTaskIcon(task.text); return ic ? <span style={{marginRight:2,flexShrink:0}}>{ic}</span> : null; })()}{task.text}
       </span>
       {task.dur > 0 && <span style={{ fontSize: 8, color: theme.textMuted, flexShrink: 0 }}>{durLabel(task.dur)}</span>}
     </div>

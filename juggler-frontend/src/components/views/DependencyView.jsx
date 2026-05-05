@@ -8,6 +8,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import ELK from 'elkjs/lib/elk.bundled.js';
 import { getTheme } from '../../theme/colors';
+import { getTaskIcon } from '../../utils/taskIcon';
 import { getTaskDeps, topoSortTasks } from '../../scheduler/dependencyHelpers';
 import { PRI_COLORS } from '../../state/constants';
 
@@ -123,7 +124,7 @@ function DepNode({ ct, pos, st, icon, isDone, isClosed, dateLabel, isExternal, i
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           lineHeight: NODE_H - 8 + 'px'
         }}>
-          {ct.text}
+          {(function(){ var ic = getTaskIcon(ct.text); return ic ? <span style={{marginRight:2,flexShrink:0}}>{ic}</span> : null; })()}{ct.text}
         </div>
       </div>
 
@@ -217,7 +218,7 @@ function DepNode({ ct, pos, st, icon, isDone, isClosed, dateLabel, isExternal, i
                       display: 'flex', gap: 4, alignItems: 'center', marginBottom: 1
                     }}>
                       <span style={{ fontSize: 8, opacity: 0.7 }}>{(statuses[ot.id] || '') === 'done' ? '\u2705' : '\u26AA'}</span>
-                      <span style={{ fontWeight: 500, color: theme.text, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ot.text}</span>
+                      <span style={{ fontWeight: 500, color: theme.text, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(function(){ var ic = getTaskIcon(ot.text); return ic ? <span style={{marginRight:2,flexShrink:0}}>{ic}</span> : null; })()}{ot.text}</span>
                     </div>
                   );
                 }) : (
