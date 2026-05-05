@@ -66,6 +66,16 @@ app.use(cors({
 }));
 
 app.use(cookieParser());
+
+// Raw body capture for billing webhook HMAC — must be before bodyParser.json
+app.use('/api/billing-webhooks', express.raw({ type: 'application/json' }), function(req, res, next) {
+  if (Buffer.isBuffer(req.body)) {
+    req.rawBody = req.body;
+    try { req.body = JSON.parse(req.body.toString('utf8')); } catch (e) { req.body = {}; }
+  }
+  next();
+});
+
 app.use(bodyParser.json({ limit: '1mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(morgan('dev'));
