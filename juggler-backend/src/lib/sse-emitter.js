@@ -41,6 +41,10 @@ function getSubscriber() {
   subscriber.on('error', function(err) {
     console.warn('[sse-emitter] Redis subscriber error (falling back to local-only):', err.message);
   });
+  subscriber.on('end', function() {
+    console.warn('[sse-emitter] Redis subscriber connection ended; will recreate on next use');
+    subscriber = null;
+  });
   return subscriber;
 }
 
@@ -59,6 +63,10 @@ function getPublisher() {
   publisher.on('error', function(err) {
     console.warn('[sse-emitter] Redis publisher error (falling back to local-only):', err.message);
   });
+  publisher.on('end', function() {
+    console.warn('[sse-emitter] Redis publisher connection ended; will recreate on next use');
+    publisher = null;
+  });
   return publisher;
 }
 
@@ -68,8 +76,14 @@ function addClient(userId, res) {
 
   // Subscribe to this user's channel if this is the first local client
   if (clients[userId].size === 1) {
-    try { getSubscriber().subscribe(CHANNEL_PREFIX + userId); }
-    catch (e) { /* Redis unavailable — local-only mode */ }
+    try {
+      var subP = getSubscriber().subscribe(CHANNEL_PREFIX + userId);
+      if (subP && typeof subP.catch === 'function') {
+        subP.catch(function(e) {
+          console.warn('[sse-emitter] subscribe failed for', userId + ':', e.message);
+        });
+      }
+    } catch (e) { /* Redis unavailable — local-only mode */ }
   }
 
   res.on('close', function() {
@@ -77,8 +91,14 @@ function addClient(userId, res) {
       clients[userId].delete(res);
       if (clients[userId].size === 0) {
         delete clients[userId];
-        try { getSubscriber().unsubscribe(CHANNEL_PREFIX + userId); }
-        catch (e) { /* ignore */ }
+        try {
+          var unsubP = getSubscriber().unsubscribe(CHANNEL_PREFIX + userId);
+          if (unsubP && typeof unsubP.catch === 'function') {
+            unsubP.catch(function(e) {
+              console.warn('[sse-emitter] unsubscribe failed:', e.message);
+            });
+          }
+        } catch (e) { /* ignore */ }
       }
     }
   });
