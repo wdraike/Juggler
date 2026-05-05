@@ -8,6 +8,7 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import TaskCard from '../tasks/TaskCard';
 import { getTheme } from '../../theme/colors';
+import { getTaskIcon } from '../../utils/taskIcon';
 import { parseDate } from '../../scheduler/dateHelpers';
 import { getDepsStatus } from '../../scheduler/dependencyHelpers';
 
@@ -203,7 +204,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
                           return (
                             <div key={si} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10 }}>
                               <span style={{ color: '#F59E0B', fontSize: 11 }}>{'\u2192'}</span>
-                              <span style={{ color: theme.textSecondary }}>{sug.text}</span>
+                              <span style={{ color: theme.textSecondary }}>{(function(){ var ic = getTaskIcon(sug.text); return ic ? <span style={{marginRight:2,flexShrink:0}}>{ic}</span> : null; })()}{sug.text}</span>
                               {hasAction && sug.action === 'flexWhen' && !t.flexWhen && (
                                 <button onClick={function(e) { e.stopPropagation(); onUpdateTask(t.id, { flexWhen: true }); }}
                                   style={sugBtnStyle}>Enable Flex</button>

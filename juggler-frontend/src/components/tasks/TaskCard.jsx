@@ -7,6 +7,7 @@
 
 import React from 'react';
 import { PRI_COLORS, locIcon, isTerminalStatus } from '../../state/constants';
+import { getTaskIcon } from '../../utils/taskIcon';
 import { getTheme } from '../../theme/colors';
 import StatusToggle from '../schedule/StatusToggle';
 import { parseDate } from '../../scheduler/dateHelpers';
@@ -69,7 +70,7 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
           {status === 'done' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u2713'}</span>}
           {status === 'skip' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u23ED'}</span>}
           {status === 'cancel' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u2717'}</span>}
-          {task.text}
+          {(function(){ var ic = getTaskIcon(task.text); return ic ? <span style={{marginRight:2,flexShrink:0}}>{ic}</span> : null; })()}{task.text}
         </span>
         {task.url && /^https?:\/\//i.test(task.url) && (
           <a href={task.url} target="_blank" rel="noopener noreferrer"

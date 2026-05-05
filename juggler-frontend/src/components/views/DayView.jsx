@@ -234,6 +234,7 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
             onZoomChange={onZoomChange}
             isMobile={isMobile}
             onMarkerDrag={onMarkerDrag}
+            weatherDay={weatherByDate && weatherByDate[selectedDateKey]}
           />
         </div>
       </div>

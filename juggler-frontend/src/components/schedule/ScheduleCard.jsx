@@ -7,6 +7,8 @@
 import React from 'react';
 import { PRI_COLORS, locIcon, WHEN_TAG_ICONS, DEFAULT_TOOLS, isTerminalStatus } from '../../state/constants';
 import { getTheme } from '../../theme/colors';
+import { getTaskIcon } from '../../utils/taskIcon';
+import { checkWeatherMatch, hasWeatherRestrictions } from '../../utils/weatherMatch';
 import { parseWhen } from '../../scheduler/timeBlockHelpers';
 import StatusToggle from './StatusToggle';
 
@@ -21,9 +23,10 @@ function formatStartTime(mins) {
   return h12 + (m > 0 ? ':' + (m < 10 ? '0' : '') + m : '') + ampm;
 }
 
-export default React.memo(function ScheduleCard({ item, status, onStatusChange, onDelete, onExpand, darkMode, isBlocked, isMobile, layoutMode, cardHeight }) {
+export default React.memo(function ScheduleCard({ item, status, onStatusChange, onDelete, onExpand, darkMode, isBlocked, isMobile, layoutMode, cardHeight, weatherDay }) {
   var theme = getTheme(darkMode);
   var task = item.task;
+  var weatherResult = hasWeatherRestrictions(task) ? checkWeatherMatch(task, weatherDay) : null;
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = isTerminalStatus(status);
   var compact = layoutMode === 'compact' || (cardHeight != null && cardHeight < 48);
@@ -127,7 +130,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
             whiteSpace: 'nowrap', textOverflow: 'ellipsis'
           })
         }}>
-          {task.text}
+          {(function(){ var ic = getTaskIcon(task.text); return ic ? <span style={{marginRight:2,flexShrink:0}}>{ic}</span> : null; })()}{task.text}
         </span>
         {task.project && (
           <span style={{
@@ -147,6 +150,15 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
         }}>
           {durLabel}
         </span>
+        {weatherResult && (
+          <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, flexShrink: 0 }}
+            title={weatherResult.ok === false ? weatherResult.reason : 'Forecast OK for this task'}>
+            <span style={{ fontSize: 11, filter: weatherResult.ok ? 'drop-shadow(0 0 2px #2D9E6B88)' : 'none' }}>⛅</span>
+            {weatherResult.ok === false && (
+              <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, color: '#e05252', textShadow: '0 0 3px #1a1a1a', lineHeight: 1, pointerEvents: 'none' }}>⊘</span>
+            )}
+          </span>
+        )}
       </div>
 
       {/* Row 2: status + start time + type badges + metadata */}
