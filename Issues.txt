@@ -61,4 +61,4 @@ Last updated: 2026-05-01
 
 ## ⬜ Not Started
 
-(none — all active issues resolved)
+- **Pollen count in weather integration** — Open-Meteo Air Quality API provides grass/tree/weed pollen indexes; add new DB columns, fetch alongside current forecast, and add a pollen condition filter on tasks (similar to precip/cloud/temp filters)
