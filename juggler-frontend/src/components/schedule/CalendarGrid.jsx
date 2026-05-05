@@ -127,7 +127,7 @@ function computeLayout(placements, hourHeight, cardH, gap, colsPerSide, rightOnl
 export default function CalendarGrid({
   dateKey, placements, statuses, onStatusChange, onDelete, onExpand,
   gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locations, onHourLocationOverride, blockedTaskIds,
-  onZoomChange, isMobile, layoutMode, onMarkerDrag
+  onZoomChange, isMobile, layoutMode, onMarkerDrag, weatherDay
 }) {
   var mode = layoutMode || 'full';
   var dm = getDims(mode, isMobile);
@@ -555,6 +555,7 @@ export default function CalendarGrid({
                     isMobile={isMobile}
                     layoutMode={mode}
                     cardHeight={dm.CARD_H}
+                    weatherDay={weatherDay}
                   />
                 </div>
               </React.Fragment>

@@ -63,6 +63,7 @@ export default function ThreeDayView({ selectedDate, dayPlacements, statuses, on
               isMobile={isMobile}
               layoutMode="compact"
               onMarkerDrag={onMarkerDrag}
+              weatherDay={weatherByDate && weatherByDate[d.key]}
             />
           </div>
         ))}

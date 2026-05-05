@@ -65,6 +65,7 @@ export default function WeekView({ selectedDate, dayPlacements, statuses, onStat
               isMobile={isMobile}
               layoutMode="mini"
               onMarkerDrag={onMarkerDrag}
+              weatherDay={weatherByDate && weatherByDate[d.key]}
             />
           </div>
         ))}
