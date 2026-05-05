@@ -1853,9 +1853,7 @@ async function sync(req, res) {
           taskInserts[wi].created_at = now;
           taskInserts[wi].updated_at = now;
         }
-        for (var wi2 = 0; wi2 < taskInserts.length; wi2++) {
-          await tasksWrite.insertTask(trx, taskInserts[wi2]);
-        }
+        await tasksWrite.insertTasksBatch(trx, taskInserts);
       }
 
       // 2. Task updates (event IDs, field changes from provider)
@@ -1887,11 +1885,25 @@ async function sync(req, res) {
         await tasksWrite.deleteTaskById(trx, del.id, userId);
       }
 
-      // 4. Ledger updates
+      // 4. Ledger updates — group rows with identical field sets so they execute as
+      // batched WHERE IN queries instead of one UPDATE per row.
+      var ledgerGroups = {}; // sig -> { fields, ids[] }
       for (var wl = 0; wl < ledgerUpdates.length; wl++) {
         var lu = ledgerUpdates[wl];
         lu.fields.synced_at = now;
-        await trx('cal_sync_ledger').where('id', lu.id).update(lu.fields);
+        // Stable sig: sort keys, represent Knex Raw objects (db.fn.now()) as sentinel
+        var sigParts = Object.keys(lu.fields).sort().map(function(k) {
+          var v = lu.fields[k];
+          return k + '=' + (v !== null && typeof v === 'object' ? '__raw__' : JSON.stringify(v));
+        });
+        var sig = sigParts.join('|');
+        if (!ledgerGroups[sig]) ledgerGroups[sig] = { fields: lu.fields, ids: [] };
+        ledgerGroups[sig].ids.push(lu.id);
+      }
+      var groupSigs = Object.keys(ledgerGroups);
+      for (var wg = 0; wg < groupSigs.length; wg++) {
+        var grp = ledgerGroups[groupSigs[wg]];
+        await trx('cal_sync_ledger').whereIn('id', grp.ids).update(grp.fields);
       }
 
       // 5. Ledger inserts — dedup by (user_id, provider, task_id) then bulk insert.
