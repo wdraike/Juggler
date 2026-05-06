@@ -46,6 +46,7 @@ exports.getForecast = async (req, res) => {
     var lat = parseFloat(req.query.lat);
     var lon = parseFloat(req.query.lon);
     var unit = (req.query.unit || 'C').toUpperCase();
+    var cacheOnly = req.query.cacheOnly === '1';
 
     if (isNaN(lat) || isNaN(lon)) {
       return res.status(400).json({ error: 'lat and lon are required' });
@@ -71,6 +72,10 @@ exports.getForecast = async (req, res) => {
         cachedAt: cached.fetched_at,
         expiresAt: cached.expires_at
       });
+    }
+
+    if (cacheOnly) {
+      return res.json({ miss: true });
     }
 
     // Cache miss — fetch from Open-Meteo
@@ -103,6 +108,78 @@ exports.getForecast = async (req, res) => {
   } catch (err) {
     console.error('Weather forecast error:', err.message);
     res.status(500).json({ error: err.message || 'Weather fetch failed' });
+  }
+};
+
+var INGEST_REQUIRED_ARRAYS = ['time', 'temperature_2m', 'precipitation_probability', 'cloudcover', 'weathercode'];
+var MAX_INGEST_HOURS = 336; // 14 days × 24h
+var TIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+
+function validateIngest(body) {
+  if (typeof body.lat !== 'number' || body.lat < -90 || body.lat > 90) return 'invalid lat';
+  if (typeof body.lon !== 'number' || body.lon < -180 || body.lon > 180) return 'invalid lon';
+  var h = body.hourly;
+  if (!h || typeof h !== 'object' || Array.isArray(h)) return 'missing hourly';
+
+  var len = null;
+  for (var key of INGEST_REQUIRED_ARRAYS) {
+    if (!Array.isArray(h[key])) return 'missing hourly.' + key;
+    if (len === null) len = h[key].length;
+    if (h[key].length !== len) return 'hourly arrays length mismatch';
+  }
+  if (len > MAX_INGEST_HOURS) return 'hourly array too long (max ' + MAX_INGEST_HOURS + ')';
+
+  for (var i = 0; i < len; i++) {
+    if (typeof h.time[i] !== 'string' || !TIME_RE.test(h.time[i])) return 'invalid time[' + i + ']';
+    if (typeof h.temperature_2m[i] !== 'number' || h.temperature_2m[i] < -200 || h.temperature_2m[i] > 200) return 'temperature_2m[' + i + '] out of range';
+    var pp = h.precipitation_probability[i];
+    if (pp != null && (typeof pp !== 'number' || pp < 0 || pp > 100)) return 'precipitation_probability[' + i + '] out of range';
+    var cc = h.cloudcover[i];
+    if (cc != null && (typeof cc !== 'number' || cc < 0 || cc > 100)) return 'cloudcover[' + i + '] out of range';
+    var wc = h.weathercode[i];
+    if (wc != null && (typeof wc !== 'number' || wc < 0 || wc > 99)) return 'weathercode[' + i + '] out of range';
+    if (h.relativehumidity_2m) {
+      var rh = h.relativehumidity_2m[i];
+      if (rh != null && (typeof rh !== 'number' || rh < 0 || rh > 100)) return 'relativehumidity_2m[' + i + '] out of range';
+    }
+    if (h.precipitation) {
+      var pr = h.precipitation[i];
+      if (pr != null && (typeof pr !== 'number' || pr < 0)) return 'precipitation[' + i + '] out of range';
+    }
+  }
+  return null;
+}
+
+exports.ingest = async (req, res) => {
+  try {
+    var err = validateIngest(req.body);
+    if (err) return res.status(400).json({ error: err });
+
+    var latGrid = roundCoord(req.body.lat);
+    var lonGrid = roundCoord(req.body.lon);
+    var fetchedAt = new Date();
+    var expiresAt = new Date(fetchedAt.getTime() + CACHE_TTL_MS);
+    var forecast = { hourly: req.body.hourly, hourly_units: req.body.hourly_units || {} };
+
+    await db('weather_cache').insert({
+      lat_grid: latGrid,
+      lon_grid: lonGrid,
+      fetched_at: fetchedAt,
+      expires_at: expiresAt,
+      forecast_json: JSON.stringify(forecast)
+    });
+
+    // Delete stale rows for this grid cell
+    await db('weather_cache')
+      .where('lat_grid', latGrid)
+      .where('lon_grid', lonGrid)
+      .where('expires_at', '<=', fetchedAt)
+      .delete();
+
+    res.json({ cachedAt: fetchedAt, expiresAt });
+  } catch (err) {
+    console.error('Weather ingest error:', err.message);
+    res.status(500).json({ error: err.message || 'Ingest failed' });
   }
 };
 

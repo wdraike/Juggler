@@ -12,6 +12,8 @@
 import { useState, useEffect, useRef } from 'react';
 import apiClient from '../services/apiClient';
 
+var OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
+
 function parseWeather(data, unit) {
   var { time, temperature_2m, precipitation_probability, cloudcover, weathercode, relativehumidity_2m } = data.hourly;
   var byDate = {};
@@ -65,10 +67,36 @@ export default function useWeather(locations, temperatureUnit) {
 
     async function fetchWeather(lat, lon) {
       try {
+        // 1. Check backend cache first (no external call)
+        var cacheResp = await apiClient.get('/weather', { params: { lat, lon, unit, cacheOnly: 1 } });
+        if (!cancelled && cacheResp.data && cacheResp.data.hourly) {
+          setWeatherByDate(parseWeather(cacheResp.data, unit));
+          return;
+        }
+
+        // 2. Cache miss — fetch Open-Meteo directly from browser (distributed IPs)
+        var tempUnit = unit === 'F' ? 'fahrenheit' : 'celsius';
+        var omUrl = OPEN_METEO_FORECAST_URL +
+          '?latitude=' + lat + '&longitude=' + lon +
+          '&hourly=temperature_2m,precipitation_probability,precipitation,cloudcover,weathercode,relativehumidity_2m' +
+          '&forecast_days=14&temperature_unit=' + tempUnit + '&timezone=auto';
+        var omResp = await fetch(omUrl);
+        if (omResp.ok) {
+          var forecast = await omResp.json();
+          if (cancelled) return;
+          apiClient.post('/weather/ingest', { lat, lon, hourly: forecast.hourly, hourly_units: forecast.hourly_units }).catch(function() {});
+          setWeatherByDate(parseWeather(forecast, unit));
+          return;
+        }
+      } catch (err) {
+        // fall through to backend fetch
+      }
+
+      // 3. Fallback — backend fetches Open-Meteo server-side
+      try {
         var resp = await apiClient.get('/weather', { params: { lat, lon, unit } });
         if (cancelled) return;
-        var parsed = parseWeather(resp.data, unit);
-        setWeatherByDate(parsed);
+        setWeatherByDate(parseWeather(resp.data, unit));
         if (resp.data.refreshed) setRefreshed(true);
       } catch (err) {
         // Fail silently — weather is non-critical

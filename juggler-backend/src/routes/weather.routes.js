@@ -8,5 +8,6 @@ router.use(authenticateJWT);
 router.get('/geocode', weatherController.geocode);
 router.get('/reverse-geocode', weatherController.reverseGeocode);
 router.get('/', weatherController.getForecast);
+router.post('/ingest', weatherController.ingest);
 
 module.exports = router;
