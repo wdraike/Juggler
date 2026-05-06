@@ -339,4 +339,13 @@ describe('unifiedSchedule', () => {
       expect(placed.length).toBe(1);
     });
   });
+
+  test('uses time_remaining (snake_case) when scheduling a wip task', function() {
+    // Task is 60 min planned but only 15 min remain — scheduler must use 15
+    var task = makeTask({ dur: 60, time_remaining: 15, date: TODAY, status: 'wip' });
+    var result = schedule([task], NOW_MINS);
+    var placements = getAllPlacements(result);
+    expect(placements.length).toBe(1);
+    expect(placements[0].dur).toBe(15);
+  });
 });

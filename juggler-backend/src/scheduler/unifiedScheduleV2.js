@@ -54,7 +54,9 @@ var DAY_START = GRID_START * 60;
 var DAY_END = GRID_END * 60 + 59;
 
 function effectiveDuration(t) {
-  var rd = t.timeRemaining != null ? t.timeRemaining : t.dur;
+  var rd = t.timeRemaining != null ? t.timeRemaining
+         : t.time_remaining != null ? t.time_remaining
+         : t.dur;
   return Math.min(rd > 0 ? rd : (rd === 0 ? 0 : 30), 720);
 }
 
