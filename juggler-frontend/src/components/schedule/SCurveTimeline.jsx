@@ -1262,7 +1262,8 @@ export default function SCurveTimeline(props) {
             width: 32, height: 20,
             cursor: 'default', zIndex: 5
           }}
-            onMouseEnter={function(e) { setHoveredHour(m.hour); var r = e.currentTarget.getBoundingClientRect(); setHoveredPos({ top: r.top, left: r.left, right: r.right }); }}
+            onMouseEnter={function(e) { setHoveredHour(m.hour); setHoveredPos({ x: e.clientX, y: e.clientY }); }}
+            onMouseMove={function(e) { setHoveredPos({ x: e.clientX, y: e.clientY }); }}
             onMouseLeave={function() { setHoveredHour(null); setHoveredPos(null); }}
           />
         );
@@ -1273,10 +1274,11 @@ export default function SCurveTimeline(props) {
         var hw = hourlyByHour[hoveredHour];
         var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
         var popW = 160;
-        var putRight = hoveredPos.right + 6 + popW < window.innerWidth;
-        var popLeft = putRight ? hoveredPos.right + 6 : hoveredPos.left - 6 - popW;
+        var putRight = hoveredPos.x + 14 + popW < window.innerWidth;
+        var popLeft = putRight ? hoveredPos.x + 14 : hoveredPos.x - 14 - popW;
+        var popTop = Math.min(hoveredPos.y - 10, window.innerHeight - 220);
         return (
-          <div style={{ position: 'fixed', top: hoveredPos.top - 4, left: popLeft, zIndex: 9999, background: theme.bgCard, border: '1px solid ' + theme.border, borderRadius: 6, padding: '8px 10px', width: popW, boxShadow: '0 4px 16px rgba(0,0,0,0.3)', pointerEvents: 'none', fontSize: 10, color: theme.text, lineHeight: 1.6 }}>
+          <div style={{ position: 'fixed', top: popTop, left: popLeft, zIndex: 9999, background: theme.bgCard, border: '1px solid ' + theme.border, borderRadius: 6, padding: '8px 10px', width: popW, boxShadow: '0 4px 16px rgba(0,0,0,0.3)', pointerEvents: 'none', fontSize: 10, color: theme.text, lineHeight: 1.6 }}>
             <div style={{ fontWeight: 700, color: theme.accent, fontSize: 11, marginBottom: 2 }}>{hoveredHour % 12 || 12}{hoveredHour < 12 ? ' AM' : ' PM'}</div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Condition</span><span>{weatherCodeIcon(hw.code)} {weatherCodeLabel(hw.code)}</span></div>
             {hw.temp != null && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Temp</span><span>{Math.round(hw.temp)}°{unit}</span></div>}

@@ -1131,7 +1131,8 @@ export default function DailyView({
               <div key={hour} style={{ position: 'absolute', top: y, left: 0, right: 0, pointerEvents: 'none', zIndex: 2 }}>
                 {/* Gutter-width hover target — keeps pointer events off the task strip so DayView's CalendarGrid can receive events */}
                 <div style={{ position: 'absolute', top: 0, left: 0, width: GUTTER_W, height: hourHeight, pointerEvents: dvHw ? 'auto' : 'none' }}
-                  onMouseEnter={dvHw ? function(e) { setDvHoveredHour(hour); var r = e.currentTarget.getBoundingClientRect(); setDvHoveredPos({ top: r.top, left: r.left, right: r.right }); } : undefined}
+                  onMouseEnter={dvHw ? function(e) { setDvHoveredHour(hour); setDvHoveredPos({ x: e.clientX, y: e.clientY }); } : undefined}
+                  onMouseMove={dvHw ? function(e) { setDvHoveredPos({ x: e.clientX, y: e.clientY }); } : undefined}
                   onMouseLeave={dvHw ? function() { setDvHoveredHour(null); setDvHoveredPos(null); } : undefined}
                 />
                 {/* Time label */}
@@ -1384,10 +1385,11 @@ export default function DailyView({
         var hw = hourlyByHour[dvHoveredHour];
         var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
         var popW = 150;
-        var putRight = dvHoveredPos.right + 6 + popW < window.innerWidth;
-        var popLeft = putRight ? dvHoveredPos.right + 6 : dvHoveredPos.left - 6 - popW;
+        var putRight = dvHoveredPos.x + 14 + popW < window.innerWidth;
+        var popLeft = putRight ? dvHoveredPos.x + 14 : dvHoveredPos.x - 14 - popW;
+        var popTop = Math.min(dvHoveredPos.y - 10, window.innerHeight - 220);
         return (
-          <div style={{ position: 'fixed', top: dvHoveredPos.top - 4, left: popLeft, zIndex: 9999, background: theme.bgCard, border: '1px solid ' + theme.border, borderRadius: 6, padding: '8px 10px', width: popW, textAlign: 'left', boxShadow: '0 4px 16px rgba(0,0,0,0.3)', pointerEvents: 'none', fontSize: 10, color: theme.text, lineHeight: 1.6 }}>
+          <div style={{ position: 'fixed', top: popTop, left: popLeft, zIndex: 9999, background: theme.bgCard, border: '1px solid ' + theme.border, borderRadius: 6, padding: '8px 10px', width: popW, textAlign: 'left', boxShadow: '0 4px 16px rgba(0,0,0,0.3)', pointerEvents: 'none', fontSize: 10, color: theme.text, lineHeight: 1.6 }}>
             <div style={{ fontWeight: 600, marginBottom: 2, fontSize: 11 }}>{weatherCodeLabel(hw.code)}</div>
             {hw.temp != null && <div>🌡 {Math.round(hw.temp)}°{unit}</div>}
             {hw.precipProb > 0 && <div>🌧 {hw.precipProb}% precip</div>}

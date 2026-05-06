@@ -394,7 +394,8 @@ export default function CalendarGrid({
                 e.stopPropagation();
                 setLocMenuHour(locMenuHour === hour ? null : hour);
               } : undefined}
-              onMouseEnter={hw ? function(e) { setHoveredHour(hour); var r = e.currentTarget.getBoundingClientRect(); setHoveredPos({ top: r.top, left: r.left, right: r.right }); } : undefined}
+              onMouseEnter={hw ? function(e) { setHoveredHour(hour); setHoveredPos({ x: e.clientX, y: e.clientY }); } : undefined}
+              onMouseMove={hw ? function(e) { setHoveredPos({ x: e.clientX, y: e.clientY }); } : undefined}
               onMouseLeave={hw ? function() { setHoveredHour(null); setHoveredPos(null); } : undefined}
               title={onHourLocationOverride ? 'Click to change location for ' + formatHour(hour) : undefined}
               style={{ position: 'absolute', top: i * hourHeight, left: 0, width: '100%', textAlign: 'center', pointerEvents: (onHourLocationOverride || hw) ? 'auto' : 'none', cursor: onHourLocationOverride ? 'pointer' : 'default', overflow: 'visible' }}
@@ -672,10 +673,11 @@ export default function CalendarGrid({
         var loc = (locations || []).find(function(l) { return l.id === locId; });
         var locLabel = loc ? (locIcon(locId) + ' ' + loc.name) : '';
         var popW = 160;
-        var putRight = hoveredPos.right + 6 + popW < window.innerWidth;
-        var popLeft = putRight ? hoveredPos.right + 6 : hoveredPos.left - 6 - popW;
+        var putRight = hoveredPos.x + 14 + popW < window.innerWidth;
+        var popLeft = putRight ? hoveredPos.x + 14 : hoveredPos.x - 14 - popW;
+        var popTop = Math.min(hoveredPos.y - 10, window.innerHeight - 220);
         return (
-          <div style={{ position: 'fixed', top: hoveredPos.top - 4, left: popLeft, zIndex: 9999, background: theme.bgCard, border: '1px solid ' + theme.border, borderRadius: 6, padding: '8px 10px', width: popW, textAlign: 'left', boxShadow: '0 4px 16px rgba(0,0,0,0.3)', pointerEvents: 'none', fontSize: 10, color: theme.text, lineHeight: 1.6 }}>
+          <div style={{ position: 'fixed', top: popTop, left: popLeft, zIndex: 9999, background: theme.bgCard, border: '1px solid ' + theme.border, borderRadius: 6, padding: '8px 10px', width: popW, textAlign: 'left', boxShadow: '0 4px 16px rgba(0,0,0,0.3)', pointerEvents: 'none', fontSize: 10, color: theme.text, lineHeight: 1.6 }}>
             <div style={{ fontWeight: 700, color: theme.accent, marginBottom: 4, borderBottom: '1px solid ' + theme.border, paddingBottom: 3 }}>{formatHour(hoveredHour)}</div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Condition</span><span>{weatherCodeIcon(hw.code)} {weatherCodeLabel(hw.code)}</span></div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Temp</span><span>{Math.round(hw.temp)}°{unit}</span></div>
