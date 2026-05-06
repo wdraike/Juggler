@@ -851,14 +851,6 @@ export default function DailyView({
     }).sort(function (a, b) { return a.start - b.start; });
   }, [placements, statuses, matchesFilter, filter]);
 
-  // Separate reminder events from regular tasks — reminders don't participate in column layout
-  var scheduled = useMemo(function () {
-    return allScheduled.filter(function (p) { return !p.task.marker; });
-  }, [allScheduled]);
-  var markers = useMemo(function () {
-    return allScheduled.filter(function (p) { return !!p.task.marker; });
-  }, [allScheduled]);
-
   var unscheduled = useMemo(function () {
     var scheduledIds = {};
     // Track (sourceId, date) occurrences that already have at least one
@@ -1296,7 +1288,7 @@ export default function DailyView({
           )}
 
           {/* Task blocks */}
-          {computeColumns(scheduled, hourHeight).map(function (layout) {
+          {computeColumns(allScheduled, hourHeight).map(function (layout) {
             var taskId = layout.p.task.id;
             return (
               <TaskBlock
@@ -1314,34 +1306,6 @@ export default function DailyView({
                 darkMode={darkMode}
                 isMobile={isMobile}
                 isBlocked={blockedTaskIds && blockedTaskIds.has(taskId)}
-                canDrag={canDrag}
-                gutterW={GUTTER_W}
-                hourHeight={hourHeight}
-                weatherDay={weatherByDate && weatherByDate[selectedDateKey]}
-              />
-            );
-          })}
-
-          {/* Reminder event overlays — rendered full-width, don't affect task column layout */}
-          {markers.map(function (p) {
-            var mTop = ((p.start - GRID_START * 60) / 60) * hourHeight;
-            var mDur = p.end ? p.end - p.start : (p.task.dur || 30);
-            var mHeight = Math.max((mDur / 60) * hourHeight, MIN_BLOCK_H);
-            return (
-              <TaskBlock
-                key={'m-' + p.task.id}
-                item={p}
-                status={statuses[p.task.id] || ''}
-                top={mTop}
-                height={mHeight}
-                col={0}
-                totalCols={1}
-                onExpand={onExpand}
-                onStatusChange={onStatusChange ? function (val) { onStatusChange(p.task.id, val); } : null}
-                theme={theme}
-                darkMode={darkMode}
-                isMobile={isMobile}
-                isBlocked={false}
                 canDrag={canDrag}
                 gutterW={GUTTER_W}
                 hourHeight={hourHeight}
