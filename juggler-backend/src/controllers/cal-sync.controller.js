@@ -687,7 +687,13 @@ async function sync(req, res) {
           // --- Past non-done juggler-origin cleanup ---
           if (task && event && ledger.origin === 'juggler' && task._scheduled_at && !isIngestOnly(pid)) {
             var taskScheduledAt = task._scheduled_at instanceof Date ? task._scheduled_at : new Date(String(task._scheduled_at).replace(' ', 'T') + 'Z');
-            var taskIsPast = taskScheduledAt < todayStart;
+            // For recurring instances: use `now` so today's past-time slots are cleaned
+            // up once their window has passed — keeps external calendar consistent with
+            // Juggler's UI (which hides past-time events from today's view).
+            // For one-off/chain tasks: use `todayStart` (previous-day boundary only) so
+            // a task still in-progress doesn't lose its calendar event mid-session.
+            var pastBoundary = task.taskType === 'recurring_instance' ? now : todayStart;
+            var taskIsPast = taskScheduledAt < pastBoundary;
             var taskNotDone = task.status !== 'done' && task.status !== 'skip';
             if (taskIsPast && taskNotDone) {
               try {
@@ -788,6 +794,8 @@ async function sync(req, res) {
                   }
                 }
 
+                var isTaskTerminal = task.status === 'done' || task.status === 'cancel' || task.status === 'skip' || task.status === 'pause';
+
                 if (taskChanged && !eventModifiedExternally) {
                   // Task changed, event stable → push (existing behaviour)
                   pendingEventUpdates.push({
@@ -800,9 +808,11 @@ async function sync(req, res) {
                   stats.pushed++;
                 } else if (taskChanged && eventModifiedExternally) {
                   // Both changed — conflict resolution
+                  // Terminal tasks (done/cancel/skip/pause) always win — never pull
+                  // a calendar edit into a completed task.
                   var isFixed = (task.when || '').indexOf('fixed') >= 0 || task.rigid;
-                  if (isFixed) {
-                    // Fixed tasks always win → push, log conflict
+                  if (isFixed || isTaskTerminal) {
+                    // Fixed or terminal tasks always win → push, log conflict
                     pendingEventUpdates.push({
                       eventId: event._url || ledger.provider_event_id,
                       task: task,
@@ -813,7 +823,7 @@ async function sync(req, res) {
                     stats.pushed++;
                     logSyncAction(pid, 'conflict_juggler', {
                       taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                      detail: 'Conflict: fixed task pushed over calendar edit',
+                      detail: isTaskTerminal ? 'Conflict: terminal task pushed over calendar edit (completed tasks are immutable)' : 'Conflict: fixed task pushed over calendar edit',
                       calendarName: calendarLabels[pid] || null
                     });
                   } else {
@@ -850,8 +860,8 @@ async function sync(req, res) {
                       });
                     }
                   }
-                } else if (!taskChanged && eventModifiedExternally) {
-                  // Event changed, task stable → pull from event to task
+                } else if (!taskChanged && eventModifiedExternally && !isTaskTerminal) {
+                  // Event changed, task stable, task not terminal → pull from event to task
                   var pullFields = _buildPullFields(event, task, tz, pAdapter);
                   // Backward dependency check: warn if task is moved to before a task it depends on
                   var backwardDepWarning = '';
@@ -880,6 +890,23 @@ async function sync(req, res) {
                     detail: (isPromotion ? 'Event moved on calendar — task promoted to fixed' : 'Event edited on calendar — task updated') + (backwardDepWarning ? '. WARNING: ' + backwardDepWarning : ''),
                     calendarName: calendarLabels[pid] || null
                   });
+                } else if (!taskChanged && eventModifiedExternally && isTaskTerminal) {
+                  // Calendar moved a completed task's event — push back to correct it.
+                  // Terminal tasks are immutable; the calendar edit is rejected and the
+                  // correct date/status is re-asserted so the calendar can't drift forward.
+                  pendingEventUpdates.push({
+                    eventId: event._url || ledger.provider_event_id,
+                    task: task,
+                    ledgerId: ledger.id,
+                    newHash: newHash
+                  });
+                  pStats.pushed++;
+                  stats.pushed++;
+                  logSyncAction(pid, 'conflict_juggler', {
+                    taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
+                    detail: 'Calendar moved completed task — pushed correct date back (terminal tasks are immutable)',
+                    calendarName: calendarLabels[pid] || null
+                  });
                 } else {
                   // Neither changed → skip (existing behaviour)
                   pStats.skipped = (pStats.skipped || 0) + 1;
@@ -890,11 +917,16 @@ async function sync(req, res) {
               // Ingest-only: pull event changes into the task. Tasks created from
               // ingest-only events are when='fixed' by design (never scheduled by
               // Juggler), so we overwrite task fields from the event every sync.
-              var updateFields = pAdapter.applyEventToTaskFields(event, tz, task);
-              updateFields.when = 'fixed';
-              taskUpdates.push({ id: task.id, fields: updateFields });
-              pStats.pulled++;
-              stats.pulled++;
+              // Exception: terminal tasks (done/cancel/skip/pause) are immutable —
+              // never pull calendar edits into a completed task.
+              var ingestTaskTerminal = task.status === 'done' || task.status === 'cancel' || task.status === 'skip' || task.status === 'pause';
+              if (!ingestTaskTerminal) {
+                var updateFields = pAdapter.applyEventToTaskFields(event, tz, task);
+                updateFields.when = 'fixed';
+                taskUpdates.push({ id: task.id, fields: updateFields });
+                pStats.pulled++;
+                stats.pulled++;
+              }
             }
             // else: origin=provider in full-sync mode — we don't push, we don't pull,
             // the ledger just exists to track that this task is linked to that event.
