@@ -5,10 +5,38 @@
  * Rectangular cards with colored accents matching time-block bands.
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import ReactDOM from 'react-dom';
 import { PRI_COLORS, locIcon, LOC_TINT, isTerminalStatus } from '../../state/constants';
 import { getTheme } from '../../theme/colors';
 import { getBlocksForDate } from '../../scheduler/timeBlockHelpers';
+
+function weatherCodeIcon(code) {
+  if (code == null) return '';
+  if (code === 0) return '☀️';
+  if (code <= 3) return '⛅';
+  if (code <= 48) return '🌫️';
+  if (code <= 67) return '🌧️';
+  if (code <= 77) return '❄️';
+  if (code <= 82) return '🌦️';
+  if (code <= 86) return '🌨️';
+  return '⛈️';
+}
+
+function weatherCodeLabel(code) {
+  if (code == null || code === 0) return 'Clear';
+  if (code <= 3) return 'Partly Cloudy';
+  if (code <= 48) return 'Foggy';
+  if (code === 51 || code === 53) return 'Light Drizzle';
+  if (code === 55) return 'Drizzle';
+  if (code === 61 || code === 63) return 'Light Rain';
+  if (code === 65) return 'Heavy Rain';
+  if (code === 66 || code === 67) return 'Freezing Rain';
+  if (code <= 77) return 'Snow';
+  if (code <= 82) return 'Rain Showers';
+  if (code <= 86) return 'Snow Showers';
+  return 'Thunderstorm';
+}
 
 import ScheduleCard from './ScheduleCard';
 
@@ -771,8 +799,20 @@ export default function SCurveTimeline(props) {
 
   var vpW            = props.viewportWidth  || 800;
   var vpH            = props.viewportHeight || 600;
+  var weatherDay     = props.weatherDay;
 
   var theme = getTheme(darkMode);
+
+  var hourlyByHour = useMemo(function() {
+    var map = {};
+    if (weatherDay && weatherDay.hourly) {
+      weatherDay.hourly.forEach(function(h) { map[h.hour] = h; });
+    }
+    return map;
+  }, [weatherDay]);
+
+  var [hoveredHour, setHoveredHour] = useState(null);
+  var [hoveredPos, setHoveredPos] = useState(null);
 
   /* ── Responsive card + circle sizing ──
    * 1. Split viewport into two equal halves.
@@ -1208,6 +1248,44 @@ export default function SCurveTimeline(props) {
           );
         })()}
       </svg>
+
+      {/* Weather hit targets — transparent divs over hour label positions */}
+      {hourMarkers.filter(function(m) { return m.showLabel && hourlyByHour[m.hour]; }).map(function(m) {
+        var dx = m.x - m.circleCX, dy = m.y - m.circleCY;
+        var d = Math.sqrt(dx * dx + dy * dy) || 1;
+        var outX = dx / d, outY = dy / d;
+        var lx = m.x + outX * (BAND_W / 2 + 16);
+        var ly = m.y + outY * (BAND_W / 2 + 16);
+        return (
+          <div key={'wh' + m.hour} style={{
+            position: 'absolute', left: lx - 16, top: ly - 10,
+            width: 32, height: 20,
+            cursor: 'default', zIndex: 5
+          }}
+            onMouseEnter={function(e) { setHoveredHour(m.hour); var r = e.currentTarget.getBoundingClientRect(); setHoveredPos({ top: r.top, left: r.left, right: r.right }); }}
+            onMouseLeave={function() { setHoveredHour(null); setHoveredPos(null); }}
+          />
+        );
+      })}
+
+      {/* Weather hover popup — portal to escape any overflow clipping */}
+      {hoveredHour !== null && hoveredPos && hourlyByHour[hoveredHour] && ReactDOM.createPortal((function() {
+        var hw = hourlyByHour[hoveredHour];
+        var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
+        var popW = 160;
+        var putRight = hoveredPos.right + 6 + popW < window.innerWidth;
+        var popLeft = putRight ? hoveredPos.right + 6 : hoveredPos.left - 6 - popW;
+        return (
+          <div style={{ position: 'fixed', top: hoveredPos.top - 4, left: popLeft, zIndex: 9999, background: theme.bgCard, border: '1px solid ' + theme.border, borderRadius: 6, padding: '8px 10px', width: popW, boxShadow: '0 4px 16px rgba(0,0,0,0.3)', pointerEvents: 'none', fontSize: 10, color: theme.text, lineHeight: 1.6 }}>
+            <div style={{ fontWeight: 700, color: theme.accent, fontSize: 11, marginBottom: 2 }}>{hoveredHour % 12 || 12}{hoveredHour < 12 ? ' AM' : ' PM'}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Condition</span><span>{weatherCodeIcon(hw.code)} {weatherCodeLabel(hw.code)}</span></div>
+            {hw.temp != null && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Temp</span><span>{Math.round(hw.temp)}°{unit}</span></div>}
+            {hw.precipProb > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Precip</span><span>{hw.precipProb}%</span></div>}
+            {hw.cloudcover > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Cloud</span><span>{hw.cloudcover}%</span></div>}
+            {hw.humidity > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Humidity</span><span>{hw.humidity}%</span></div>}
+          </div>
+        );
+      })(), document.body)}
 
       {/* Task cards — render lower cards first so upper cards sit on top and are clickable */}
       {cards.slice().sort(function (a, b) { return b.cardY - a.cardY; }).map(function (c) {

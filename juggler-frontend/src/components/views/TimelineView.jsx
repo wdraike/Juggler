@@ -119,6 +119,7 @@ export default function TimelineView({ selectedDate, selectedDateKey, placements
           onZoomChange={onZoomChange}
           isMobile={isMobile}
           onMarkerDrag={onMarkerDrag}
+          weatherDay={weatherByDate && weatherByDate[selectedDateKey]}
         />
       </div>
     </div>

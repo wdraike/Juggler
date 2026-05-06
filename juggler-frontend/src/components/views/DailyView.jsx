@@ -1128,10 +1128,12 @@ export default function DailyView({
             var dvHw = hourlyByHour[hour];
 
             var lines = [
-              <div key={hour} style={{ position: 'absolute', top: y, left: 0, right: 0, pointerEvents: dvHw ? 'auto' : 'none', zIndex: 2 }}
-                onMouseEnter={dvHw ? function(e) { setDvHoveredHour(hour); var r = e.currentTarget.getBoundingClientRect(); setDvHoveredPos({ top: r.top, left: r.left, right: r.right }); } : undefined}
-                onMouseLeave={dvHw ? function() { setDvHoveredHour(null); setDvHoveredPos(null); } : undefined}
-              >
+              <div key={hour} style={{ position: 'absolute', top: y, left: 0, right: 0, pointerEvents: 'none', zIndex: 2 }}>
+                {/* Gutter-width hover target — keeps pointer events off the task strip so DayView's CalendarGrid can receive events */}
+                <div style={{ position: 'absolute', top: 0, left: 0, width: GUTTER_W, height: hourHeight, pointerEvents: dvHw ? 'auto' : 'none' }}
+                  onMouseEnter={dvHw ? function(e) { setDvHoveredHour(hour); var r = e.currentTarget.getBoundingClientRect(); setDvHoveredPos({ top: r.top, left: r.left, right: r.right }); } : undefined}
+                  onMouseLeave={dvHw ? function() { setDvHoveredHour(null); setDvHoveredPos(null); } : undefined}
+                />
                 {/* Time label */}
                 <div style={{
                   position: 'absolute', top: 0, left: 0, width: GUTTER_W - 20,

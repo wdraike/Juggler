@@ -136,6 +136,7 @@ export default function SCurveView({ selectedDate, selectedDateKey, placements, 
           isMobile={isMobile}
           viewportWidth={viewportSize.width}
           viewportHeight={viewportSize.height}
+          weatherDay={weatherByDate && weatherByDate[selectedDateKey]}
         />}
       </div>
     </div>

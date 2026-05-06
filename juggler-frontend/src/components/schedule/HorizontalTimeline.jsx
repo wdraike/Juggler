@@ -6,12 +6,40 @@
  */
 
 import React, { useRef, useEffect, useMemo, useState, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import { GRID_START, GRID_END, GRID_HOURS_COUNT, PRI_COLORS, LOC_TINT, locBgTint, locIcon } from '../../state/constants';
 import { formatHour } from '../../scheduler/dateHelpers';
 import { getTheme } from '../../theme/colors';
 import { resolveLocationId } from '../../scheduler/locationHelpers';
 import { getBlocksForDate } from '../../scheduler/timeBlockHelpers';
 import ScheduleCard from './ScheduleCard';
+
+function weatherCodeIcon(code) {
+  if (code == null) return '';
+  if (code === 0) return '☀️';
+  if (code <= 3) return '⛅';
+  if (code <= 48) return '🌫️';
+  if (code <= 67) return '🌧️';
+  if (code <= 77) return '❄️';
+  if (code <= 82) return '🌦️';
+  if (code <= 86) return '🌨️';
+  return '⛈️';
+}
+
+function weatherCodeLabel(code) {
+  if (code == null || code === 0) return 'Clear';
+  if (code <= 3) return 'Partly Cloudy';
+  if (code <= 48) return 'Foggy';
+  if (code === 51 || code === 53) return 'Light Drizzle';
+  if (code === 55) return 'Drizzle';
+  if (code === 61 || code === 63) return 'Light Rain';
+  if (code === 65) return 'Heavy Rain';
+  if (code === 66 || code === 67) return 'Freezing Rain';
+  if (code <= 77) return 'Snow';
+  if (code <= 82) return 'Rain Showers';
+  if (code <= 86) return 'Snow Showers';
+  return 'Thunderstorm';
+}
 
 // Dimensions
 var STRIP_H = 32;         // horizontal strip height
@@ -85,7 +113,7 @@ function computeHLayout(placements, hourWidth, cardW, cardH, gap) {
 export default function HorizontalTimeline({
   dateKey, placements, statuses, onStatusChange, onDelete, onExpand,
   gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locations, onHourLocationOverride, blockedTaskIds,
-  onZoomChange, isMobile, onMarkerDrag
+  onZoomChange, isMobile, onMarkerDrag, weatherDay
 }) {
   var theme = getTheme(darkMode);
   var baseHourWidth = gridZoom || 60;
@@ -104,6 +132,18 @@ export default function HorizontalTimeline({
     if (elRef.current) ro.observe(elRef.current);
     return function() { ro.disconnect(); };
   }, []);
+
+  // Hourly weather map
+  var hourlyByHour = useMemo(function() {
+    var map = {};
+    if (weatherDay && weatherDay.hourly) {
+      weatherDay.hourly.forEach(function(h) { map[h.hour] = h; });
+    }
+    return map;
+  }, [weatherDay]);
+
+  var [hoveredHour, setHoveredHour] = useState(null);
+  var [hoveredPos, setHoveredPos] = useState(null);
 
   var blocks = getBlocksForDate(dateKey, schedCfg.timeBlocks, schedCfg);
 
@@ -242,16 +282,24 @@ export default function HorizontalTimeline({
         {Array.from({ length: GRID_HOURS_COUNT }, function(_, i) {
           var hour = GRID_START + i;
           var locId = resolveLocationId(dateKey, hour, schedCfg, blocks);
+          var hw = hourlyByHour[hour];
+          var icon = hw ? weatherCodeIcon(hw.code) : '';
+          var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
           return (
             <div key={i} style={{
               position: 'absolute', left: i * baseHourWidth, top: 0,
               width: baseHourWidth, height: STRIP_H,
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               fontSize: isMobile ? 9 : 10, color: theme.textMuted,
-              userSelect: 'none', borderRight: '1px solid ' + theme.border + '40'
-            }}>
+              userSelect: 'none', borderRight: '1px solid ' + theme.border + '40',
+              cursor: hw ? 'default' : undefined
+            }}
+              onMouseEnter={hw ? function(e) { setHoveredHour(hour); var r = e.currentTarget.getBoundingClientRect(); setHoveredPos({ top: r.top, left: r.left, right: r.right, bottom: r.bottom }); } : undefined}
+              onMouseLeave={hw ? function() { setHoveredHour(null); setHoveredPos(null); } : undefined}
+            >
               <span>{formatHour(hour)}</span>
               {locIcon(locId) && <span style={{ fontSize: isMobile ? 10 : 12, opacity: 0.7, lineHeight: 1 }}>{locIcon(locId)}</span>}
+              {icon && <span style={{ fontSize: 10, lineHeight: 1, opacity: 0.85 }}>{icon}{hw.temp != null ? ' ' + Math.round(hw.temp) + '°' + unit : ''}</span>}
             </div>
           );
         })}
@@ -289,6 +337,25 @@ export default function HorizontalTimeline({
             fill="none" stroke={pc} strokeWidth={1.5} opacity={0.4} />;
         })}
       </svg>
+
+      {/* Weather hover popup — portal to escape overflow:hidden */}
+      {hoveredHour !== null && hoveredPos && hourlyByHour[hoveredHour] && ReactDOM.createPortal((function() {
+        var hw = hourlyByHour[hoveredHour];
+        var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
+        var popW = 160;
+        var putRight = hoveredPos.right + 6 + popW < window.innerWidth;
+        var popLeft = putRight ? hoveredPos.right + 6 : hoveredPos.left - 6 - popW;
+        return (
+          <div style={{ position: 'fixed', top: hoveredPos.top - 4, left: popLeft, zIndex: 9999, background: theme.bgCard, border: '1px solid ' + theme.border, borderRadius: 6, padding: '8px 10px', width: popW, boxShadow: '0 4px 16px rgba(0,0,0,0.3)', pointerEvents: 'none', fontSize: 10, color: theme.text, lineHeight: 1.6 }}>
+            <div style={{ fontWeight: 700, color: theme.accent, fontSize: 11, marginBottom: 2 }}>{formatHour(hoveredHour)}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Condition</span><span>{weatherCodeIcon(hw.code)} {weatherCodeLabel(hw.code)}</span></div>
+            {hw.temp != null && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Temp</span><span>{Math.round(hw.temp)}°{unit}</span></div>}
+            {hw.precipProb > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Precip</span><span>{hw.precipProb}%</span></div>}
+            {hw.cloudcover > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Cloud</span><span>{hw.cloudcover}%</span></div>}
+            {hw.humidity > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Humidity</span><span>{hw.humidity}%</span></div>}
+          </div>
+        );
+      })(), document.body)}
 
       {/* Markers + Cards */}
       {layout.map(function(e) {
