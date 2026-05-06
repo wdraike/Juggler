@@ -31,10 +31,34 @@ function weatherCodeIcon(code) {
   return '⛈️';
 }
 
+function weatherCodeLabel(code) {
+  if (code == null || code === 0) return 'Clear';
+  if (code <= 3) return 'Partly Cloudy';
+  if (code <= 48) return 'Foggy';
+  if (code === 51 || code === 53) return 'Light Drizzle';
+  if (code === 55) return 'Drizzle';
+  if (code === 61 || code === 63) return 'Light Rain';
+  if (code === 65) return 'Heavy Rain';
+  if (code === 66 || code === 67) return 'Freezing Rain';
+  if (code === 71 || code === 73) return 'Light Snow';
+  if (code === 75) return 'Heavy Snow';
+  if (code === 77) return 'Snow Grains';
+  if (code === 80 || code === 81) return 'Rain Showers';
+  if (code === 82) return 'Heavy Showers';
+  if (code === 85 || code === 86) return 'Snow Showers';
+  return 'Stormy';
+}
+
+function precipColor(code) {
+  if (code >= 66 && code <= 67) return '#9b59b6'; // freezing — purple
+  if (code >= 71 && code <= 86) return '#c8d8f0'; // snow — light blue/grey
+  return '#1e90ff'; // rain/default — blue
+}
+
 // Dimensions
-var STRIP_W = 44;       // center strip holding hour labels
-var STRIP_W_M = 32;
-var STRIP_W_COMPACT = 32;
+var STRIP_W = 52;       // center strip holding hour labels
+var STRIP_W_M = 38;
+var STRIP_W_COMPACT = 38;
 var STRIP_W_MINI = 24;
 var MARKER_W = 10;
 var MARKER_W_M = 8;
@@ -223,6 +247,7 @@ export default function CalendarGrid({
 
   var [expandedMiniId, setExpandedMiniId] = useState(null);
   var [locMenuHour, setLocMenuHour] = useState(null);
+  var [hoveredHour, setHoveredHour] = useState(null);
 
   // total height
   var gridH = GRID_HOURS_COUNT * hourHeight;
@@ -355,21 +380,37 @@ export default function CalendarGrid({
       })}
 
       {/* Center strip */}
-      <div style={{ position: 'absolute', top: 0, bottom: 0, left: stripX, width: dm.STRIP_W, zIndex: locMenuHour !== null ? 30 : 10, pointerEvents: 'none' }}>
+      <div style={{ position: 'absolute', top: 0, bottom: 0, left: stripX, width: dm.STRIP_W, zIndex: locMenuHour !== null ? 30 : 10, pointerEvents: 'none', overflow: 'visible' }}>
         <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, marginLeft: -0.5, background: theme.border, opacity: 0.35 }} />
         {Array.from({ length: GRID_HOURS_COUNT }, function(_, i) {
           var hour = GRID_START + i;
           var locId = resolveLocationId(dateKey, hour, schedCfg, blocks);
           var bs = blockStartsByHour[hour];
+          var hw = hourlyByHour[hour];
           return (
             <div key={i}
               onClick={onHourLocationOverride && locations ? function(e) {
                 e.stopPropagation();
                 setLocMenuHour(locMenuHour === hour ? null : hour);
               } : undefined}
+              onMouseEnter={hw ? function() { setHoveredHour(hour); } : undefined}
+              onMouseLeave={hw ? function() { setHoveredHour(null); } : undefined}
               title={onHourLocationOverride ? 'Click to change location for ' + formatHour(hour) : undefined}
-              style={{ position: 'absolute', top: i * hourHeight, left: 0, width: '100%', textAlign: 'center', pointerEvents: onHourLocationOverride ? 'auto' : 'none', cursor: onHourLocationOverride ? 'pointer' : 'default' }}
+              style={{ position: 'absolute', top: i * hourHeight, left: 0, width: '100%', textAlign: 'center', pointerEvents: (onHourLocationOverride || hw) ? 'auto' : 'none', cursor: onHourLocationOverride ? 'pointer' : 'default', overflow: 'visible' }}
             >
+              {/* Precip bar segment on left edge */}
+              {hw && hw.precipProb >= 5 && (function() {
+                var col = precipColor(hw.code);
+                return (
+                  <div style={{
+                    position: 'absolute', left: 0, top: 0,
+                    width: 4, height: hourHeight,
+                    background: col,
+                    opacity: Math.min(1, (hw.precipProb || 0) / 100),
+                    pointerEvents: 'none'
+                  }} />
+                );
+              })()}
               <div style={{ fontSize: mode === 'mini' ? 7 : (mode === 'compact' ? 8 : (isMobile ? 9 : 11)), color: theme.textMuted, userSelect: 'none', lineHeight: 1.2, marginTop: 1 }}>
                 {formatHour(hour)}
               </div>
@@ -381,22 +422,80 @@ export default function CalendarGrid({
                   fontSize: isMobile ? 12 : 14, opacity: 0.9, margin: '1px auto 0'
                 }}>{locIcon(locId)}</div>
               )}
-              {mode === 'full' && hourlyByHour[hour] && (function() {
-                var hw = hourlyByHour[hour];
+              {mode !== 'mini' && hw && (function() {
                 var icon = weatherCodeIcon(hw.code);
                 if (!icon) return null;
                 var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
                 return (
                   <div style={{
                     fontSize: 8, color: theme.textMuted, lineHeight: 1.2,
-                    marginTop: 1, userSelect: 'none', opacity: 0.75,
+                    marginTop: 1, userSelect: 'none', opacity: 0.8,
                     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <span style={{ fontSize: 9 }}>{icon}</span>
                       <span>{Math.round(hw.temp)}°{unit}</span>
                     </div>
-                    {hw.humidity > 0 && <div style={{ fontSize: 7 }}>{hw.humidity}%↕</div>}
+                  </div>
+                );
+              })()}
+              {/* Hover popup */}
+              {hoveredHour === hour && hw && (function() {
+                var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
+                var loc = (locations || []).find(function(l) { return l.id === locId; });
+                var locLabel = loc ? (locIcon(locId) + ' ' + loc.name) : '';
+                var isRightHalf = stripX > (cw / 2);
+                return (
+                  <div style={{
+                    position: 'absolute',
+                    top: -4,
+                    ...(isRightHalf ? { right: dm.STRIP_W + 6 } : { left: dm.STRIP_W + 6 }),
+                    zIndex: 999,
+                    background: theme.bgCard,
+                    border: '1px solid ' + theme.border,
+                    borderRadius: 6,
+                    padding: '8px 10px',
+                    width: 160,
+                    textAlign: 'left',
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+                    pointerEvents: 'none',
+                    fontSize: 10,
+                    color: theme.text,
+                    lineHeight: 1.6
+                  }}>
+                    <div style={{ fontWeight: 700, color: theme.accent, marginBottom: 4, borderBottom: '1px solid ' + theme.border, paddingBottom: 3 }}>
+                      {formatHour(hour)}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: theme.textMuted }}>Condition</span>
+                      <span>{weatherCodeIcon(hw.code)} {weatherCodeLabel(hw.code)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: theme.textMuted }}>Temp</span>
+                      <span>{Math.round(hw.temp)}°{unit}</span>
+                    </div>
+                    {hw.precipProb > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: theme.textMuted }}>Precip</span>
+                        <span style={{ color: hw.precipProb >= 30 ? '#1e90ff' : theme.text, fontWeight: hw.precipProb >= 30 ? 700 : 400 }}>{hw.precipProb}%</span>
+                      </div>
+                    )}
+                    {hw.cloudcover > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: theme.textMuted }}>Cloud</span>
+                        <span>{hw.cloudcover}%</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: theme.textMuted }}>Humidity</span>
+                      <span>{hw.humidity}%</span>
+                    </div>
+                    {locLabel && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: theme.textMuted }}>Location</span>
+                        <span>{locLabel}</span>
+                      </div>
+                    )}
                   </div>
                 );
               })()}
