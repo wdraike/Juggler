@@ -30,6 +30,24 @@ function weatherCodeIcon(code) {
   return '⛈️';
 }
 
+function weatherCodeLabel(code) {
+  if (code == null || code === 0) return 'Clear';
+  if (code <= 3) return 'Partly Cloudy';
+  if (code <= 48) return 'Foggy';
+  if (code === 51 || code === 53) return 'Light Drizzle';
+  if (code === 55) return 'Drizzle';
+  if (code === 61 || code === 63) return 'Light Rain';
+  if (code === 65) return 'Heavy Rain';
+  if (code === 66 || code === 67) return 'Freezing Rain';
+  if (code === 71 || code === 73) return 'Light Snow';
+  if (code === 75) return 'Heavy Snow';
+  if (code === 77) return 'Snow Grains';
+  if (code === 80 || code === 81) return 'Rain Showers';
+  if (code === 82) return 'Heavy Showers';
+  if (code === 85 || code === 86) return 'Snow Showers';
+  return 'Stormy';
+}
+
 function minsToTime(m) {
   var h = Math.floor(m / 60);
   var mm = m % 60;
@@ -741,6 +759,7 @@ export default function DailyView({
 
   // Location menu state
   var [locMenuHour, setLocMenuHour] = useState(null);
+  var [dvHoveredHour, setDvHoveredHour] = useState(null);
 
   // Pinch zoom
   useEffect(function () {
@@ -1138,23 +1157,21 @@ export default function DailyView({
                   {locIconStr || '\u00B7'}
                 </div>
                 {/* Hourly weather indicator */}
-                {hourlyByHour[hour] && (function () {
-                  var hw = hourlyByHour[hour];
-                  var icon = weatherCodeIcon(hw.code);
+                {dvHw && (function () {
+                  var icon = weatherCodeIcon(dvHw.code);
                   if (!icon) return null;
                   var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
                   return (
                     <div style={{
                       position: 'absolute', top: 10, left: 0, width: GUTTER_W,
                       display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0,
-                      fontSize: 8, color: theme.textMuted, opacity: 0.75,
+                      fontSize: 8, color: theme.textMuted, opacity: 0.8,
                       lineHeight: 1.2, userSelect: 'none', pointerEvents: 'none'
                     }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <span style={{ fontSize: 9 }}>{icon}</span>
-                        <span>{Math.round(hw.temp)}°{unit}</span>
+                        <span>{Math.round(dvHw.temp)}°{unit}</span>
                       </div>
-                      {hw.humidity > 0 && <div style={{ fontSize: 7 }}>{hw.humidity}%↕</div>}
                     </div>
                   );
                 })()}
