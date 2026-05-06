@@ -1068,7 +1068,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
       date_pinned: 0,
       updated_at: db.fn.now()
     };
-    if (placement.dur) {
+    // Don't overwrite instance.dur when time_remaining drives the effective
+    // placement duration. The instance.dur represents the user-set total chunk
+    // size; time_remaining is a separate "how much is left" value. Writing
+    // dur = time_remaining would corrupt the Duration field in the task form.
+    if (placement.dur && original.timeRemaining == null) {
       dbUpdate.dur = placement.dur;
     }
     if (result.slackByTaskId && taskId in result.slackByTaskId) {
@@ -1090,7 +1094,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // versions included dur/slackMins/unscheduled unconditionally, which
       // meant every move triggered no-op merges (and frontend re-renders)
       // for tasks whose duration and slack were stable across runs (#39).
-      var newDur = placement.dur || original.dur || null;
+      // When time_remaining drives placement, keep the original instance.dur in
+      // the patch so the frontend doesn't replace the user's Duration value.
+      var newDur = (placement.dur && original.timeRemaining == null)
+        ? (placement.dur || original.dur || null)
+        : (original.dur || null);
       var newSlackMins = result.slackByTaskId && taskId in result.slackByTaskId ? result.slackByTaskId[taskId] : null;
       var patch = {
         date: newDate || null,
