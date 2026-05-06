@@ -1,0 +1,35 @@
+/* ScheduleCard — data-size tier font/layout rules */
+/* Default = lg (≥80px) */
+.sc-root { padding: 4px 8px; }
+.sc-row1 { font-size: 12px; }
+.sc-dur-badge { font-size: 10px; }
+.sc-row2 { margin-top: 3px; }
+.sc-details-row { display: block; }
+
+/* Mobile: lg tier only */
+.sc-root[data-mobile="1"] { padding: 4px 6px; }
+.sc-root[data-mobile="1"] .sc-row1 { font-size: 11px; }
+
+/* md: 48–80px */
+.sc-root[data-size="md"] { padding: 3px 6px; }
+.sc-root[data-size="md"] .sc-row1 { font-size: 11px; }
+.sc-root[data-size="md"] .sc-dur-badge { font-size: 8px; }
+.sc-root[data-size="md"] .sc-row2 { margin-top: 1px; }
+.sc-root[data-size="md"] .sc-details-row { display: none; }
+
+/* md mobile */
+.sc-root[data-size="md"][data-mobile="1"] .sc-row1 { font-size: 10px; }
+
+/* sm: 28–48px */
+.sc-root[data-size="sm"] { padding: 3px 6px; }
+.sc-root[data-size="sm"] .sc-row1 { font-size: 10px; }
+.sc-root[data-size="sm"] .sc-dur-badge { font-size: 8px; }
+.sc-root[data-size="sm"] .sc-row2 { margin-top: 1px; }
+.sc-root[data-size="sm"] .sc-details-row { display: none; }
+
+/* xs: <28px */
+.sc-root[data-size="xs"] { padding: 2px 5px; }
+.sc-root[data-size="xs"] .sc-row1 { font-size: 9px; }
+.sc-root[data-size="xs"] .sc-dur-badge { display: none; }
+.sc-root[data-size="xs"] .sc-row2 { display: none; }
+.sc-root[data-size="xs"] .sc-details-row { display: none; }

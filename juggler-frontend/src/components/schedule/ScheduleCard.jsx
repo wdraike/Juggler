@@ -5,6 +5,7 @@
  */
 
 import React from 'react';
+import './ScheduleCard.css';
 import { PRI_COLORS, locIcon, WHEN_TAG_ICONS, DEFAULT_TOOLS, isTerminalStatus } from '../../state/constants';
 import { getTheme } from '../../theme/colors';
 import { getTaskIcon } from '../../utils/taskIcon';
@@ -29,8 +30,13 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
   var weatherResult = hasWeatherRestrictions(task) ? checkWeatherMatch(task, weatherDay) : null;
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = isTerminalStatus(status);
-  var compact = layoutMode === 'compact' || (cardHeight != null && cardHeight < 48);
-  var showDetails = !compact && (cardHeight || 52) >= 60;
+  var h = cardHeight != null ? cardHeight : 52;
+  var size = layoutMode === 'compact' || h < 28 ? 'xs'
+           : h < 48 ? 'sm'
+           : h < 80 ? 'md'
+           : 'lg';
+  var compact = size === 'xs' || size === 'sm';
+  var showDetails = size === 'lg';
   // Overdue: scheduler placed this at its original time because the user's
   // window has passed (missed flex recurring, past-day recurring, or rigid
   // recurring whose time already elapsed). Show a red border + OVERDUE badge
@@ -45,11 +51,10 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
       borderLeft: isOverdue ? ('3px solid ' + theme.error) : ('3px solid ' + priColor),
       cursor: 'pointer', opacity: isDone ? 0.5 : 1,
       display: 'flex', flexDirection: 'column', justifyContent: 'center',
-      padding: compact ? '3px 6px' : (isMobile ? '4px 6px' : '4px 8px'),
       boxShadow: '0 1px 3px ' + theme.shadow, boxSizing: 'border-box',
       position: 'relative'
     };
-  }, [theme, task.recurring, isDone, priColor, compact, isMobile, isOverdue]);
+  }, [theme, task.recurring, isDone, priColor, isOverdue]);
   var durLabel = item.splitTotal > 1
     ? item.dur + ' of ' + task.dur + 'm'
     : (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm');
@@ -102,6 +107,9 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
       draggable
       onDragStart={function(e) { e.dataTransfer.setData('text/plain', task.id); e.dataTransfer.effectAllowed = 'move'; }}
       onClick={onExpand}
+      className="sc-root"
+      data-size={size}
+      data-mobile={isMobile ? '1' : undefined}
       style={containerStyle}
     >
       {isOverdue && (
@@ -116,9 +124,8 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
         </div>
       )}
       {/* Row 1: title + duration + project */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 4,
-        fontSize: compact ? 10 : (isMobile ? 11 : 12), lineHeight: 1.2
+      <div className="sc-row1" style={{
+        display: 'flex', alignItems: 'center', gap: 4, lineHeight: 1.2
       }}>
         <span style={{
           flex: 1, minWidth: 0, fontWeight: 600, color: theme.text,
@@ -142,8 +149,8 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
             {task.project}
           </span>
         )}
-        <span style={{
-          fontSize: compact ? 8 : 10, flexShrink: 0, fontWeight: 600,
+        <span className="sc-dur-badge" style={{
+          flexShrink: 0, fontWeight: 600,
           color: theme.badgeText,
           background: theme.badgeBg,
           borderRadius: 3, padding: '1px 4px'
@@ -162,7 +169,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
       </div>
 
       {/* Row 2: status + start time + type badges + metadata */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: compact ? 1 : 3 }}>
+      <div className="sc-row2" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         {compact ? (
           <span style={{ fontSize: 10, color: theme.badgeText, fontWeight: 700, display: 'flex', gap: 3, alignItems: 'center' }}>
             {statusIcon && <span>{statusIcon}</span>}
@@ -213,7 +220,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
 
       {/* Row 3: notes / due / details */}
       {details.length > 0 && (
-        <div style={{
+        <div className="sc-details-row" style={{
           fontSize: 9, color: theme.textMuted, marginTop: 1,
           overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
           lineHeight: 1.3, opacity: 0.75
