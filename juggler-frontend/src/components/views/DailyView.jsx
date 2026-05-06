@@ -962,24 +962,6 @@ export default function DailyView({
         {weatherByDate && weatherByDate[selectedDateKey] && (
           <WeatherBadge weatherDay={weatherByDate[selectedDateKey]} showLow darkMode={darkMode} />
         )}
-        {/* Progress */}
-        {(function () {
-          var dayTasks = allScheduled.map(function (p) { return p.task; });
-          var total = dayTasks.filter(function (t) { var s = statuses[t.id] || ''; return s !== 'cancel' && s !== 'skip'; }).length;
-          var done = dayTasks.filter(function (t) { return statuses[t.id] === 'done'; }).length;
-          var doneDur = dayTasks.filter(function (t) { return statuses[t.id] === 'done'; }).reduce(function (s, t) { return s + (t.dur || 0); }, 0);
-          var totalDur = dayTasks.reduce(function (s, t) { return s + (t.dur || 0); }, 0);
-          var pct = total > 0 ? Math.round(done / total * 100) : 0;
-          return (
-            <div title={done + ' of ' + total + ' tasks done (' + Math.round(doneDur / 60 * 10) / 10 + 'h / ' + Math.round(totalDur / 60 * 10) / 10 + 'h)'} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: theme.textMuted }}>
-              <div style={{ width: 60, height: 5, background: theme.bgTertiary, borderRadius: 3, overflow: 'hidden' }}>
-                <div style={{ width: pct + '%', height: '100%', background: pct >= 100 ? '#2D6A4F' : '#2E4A7A', borderRadius: 3 }} />
-              </div>
-              <span>{done}/{total}</span>
-              <span>({Math.round(doneDur / 60 * 10) / 10}h / {Math.round(totalDur / 60 * 10) / 10}h)</span>
-            </div>
-          );
-        })()}
         {/* Schedule template selector */}
         {templateEntries.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
