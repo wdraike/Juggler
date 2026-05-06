@@ -2103,12 +2103,52 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     );
   }
 
-  // Mobile: full-screen overlay
+  // Mobile: full-screen overlay with sticky mini-header
   return (
     <div style={{
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
       zIndex: 600, background: TH.bgCard, overflowY: 'auto'
     }}>
+      <div style={{
+        position: 'sticky', top: 0, zIndex: 10,
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '8px 12px',
+        background: TH.headerBg,
+        borderBottom: '2px solid ' + TH.accent,
+      }}>
+        <button onClick={onClose} style={{
+          border: 'none', background: 'transparent', color: TH.accent,
+          fontSize: 20, cursor: 'pointer', padding: '2px 4px', lineHeight: 1
+        }}>{'←'}</button>
+        <div style={{
+          fontFamily: "'Playfair Display', serif",
+          fontWeight: 700, fontSize: 16, color: TH.headerText, lineHeight: 1.1
+        }}>
+          Strive<span style={{ color: TH.accent }}>RS</span>
+          <span style={{
+            fontFamily: "'Inter', sans-serif", fontWeight: 400,
+            fontSize: 11, color: TH.textMuted, marginLeft: 6
+          }}>{'/ ' + (isCreate ? 'New Task' : 'Edit Task')}</span>
+        </div>
+        <div style={{ flex: 1 }} />
+        {isCreate ? (
+          <button onClick={handleCreate} style={{
+            fontSize: 11, fontWeight: 700, padding: '5px 14px',
+            border: 'none', borderRadius: 4,
+            background: '#2D6A4F', color: '#FDFAF5', cursor: 'pointer'
+          }}>{'+ Create'}</button>
+        ) : (
+          isDirty && <button onClick={handleSave} style={{
+            fontSize: 11, fontWeight: 700, padding: '5px 14px',
+            border: 'none', borderRadius: 4,
+            background: TH.accent, color: '#FDFAF5', cursor: 'pointer'
+          }}>{'✔ Save'}</button>
+        )}
+        <button onClick={onClose} style={{
+          border: 'none', background: 'transparent', color: TH.textMuted,
+          fontSize: 22, cursor: 'pointer', padding: '2px 4px', lineHeight: 1
+        }}>{'×'}</button>
+      </div>
       {dialogContent}
     </div>
   );
