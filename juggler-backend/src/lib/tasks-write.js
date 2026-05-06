@@ -373,7 +373,7 @@ function requireUserId(userId, fn) {
  * For updates whose filter references instance-only columns (e.g. `master_id`,
  * `status`), use `updateInstancesWhere` instead.
  */
-async function updateTasksWhere(dbOrTrx, userId, applyWhere, changes) {
+async function updateTasksWhere(dbOrTrx, userId, applyWhere, changes, opts) {
   requireUserId(userId, 'updateTasksWhere');
   var split = splitUpdateFields(changes);
   var masterUpdated = 0;
@@ -392,7 +392,10 @@ async function updateTasksWhere(dbOrTrx, userId, applyWhere, changes) {
   // updated_at bump via the tasks_v UNION.
   var masterKeys = Object.keys(split.master);
   var masterHasRealChange = masterKeys.some(function(k) { return k !== 'updated_at'; });
-  if (masterHasRealChange) {
+  // instanceOnly: skip master writes entirely (used by scheduler to prevent
+  // overwriting user-set master.dur with effectiveDuration / time_remaining).
+  var instanceOnly = opts && opts.instanceOnly;
+  if (masterHasRealChange && !instanceOnly) {
     masterUpdated = await applyWhere(dbOrTrx('task_masters').where('user_id', userId)).update(split.master);
   }
   if (instanceHasRealChange) {

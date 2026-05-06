@@ -1375,10 +1375,12 @@ async function runScheduleAndPersist(userId, _retries, options) {
       updateFields.time = trx.raw(timeCaseExpr, timeBindings);
     }
 
-    // Route `updateFields` across master/instance via helper.
+    // Route `updateFields` to instances only — the scheduler must not overwrite
+    // user-set master.dur with the effective placement duration (which may be
+    // driven by time_remaining and differ from the original task duration).
     await tasksWrite.updateTasksWhere(trx, userId, function(q) {
       return q.whereIn('id', ids);
-    }, updateFields);
+    }, updateFields, { instanceOnly: true });
   }
 
   // Run remaining updates individually (status changes, unscheduled flags, etc.)
