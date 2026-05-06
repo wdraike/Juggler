@@ -31,7 +31,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = isTerminalStatus(status);
   var h = cardHeight != null ? cardHeight : 52;
-  var size = layoutMode === 'compact' || h < 28 ? 'xs'
+  var size = h < 28 ? 'xs'
            : h < 48 ? 'sm'
            : h < 80 ? 'md'
            : 'lg';
