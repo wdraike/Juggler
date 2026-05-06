@@ -248,6 +248,7 @@ export default function CalendarGrid({
   var [expandedMiniId, setExpandedMiniId] = useState(null);
   var [locMenuHour, setLocMenuHour] = useState(null);
   var [hoveredHour, setHoveredHour] = useState(null);
+  var [hoveredPos, setHoveredPos] = useState(null);
 
   // total height
   var gridH = GRID_HOURS_COUNT * hourHeight;
@@ -393,8 +394,8 @@ export default function CalendarGrid({
                 e.stopPropagation();
                 setLocMenuHour(locMenuHour === hour ? null : hour);
               } : undefined}
-              onMouseEnter={hw ? function() { setHoveredHour(hour); } : undefined}
-              onMouseLeave={hw ? function() { setHoveredHour(null); } : undefined}
+              onMouseEnter={hw ? function(e) { setHoveredHour(hour); var r = e.currentTarget.getBoundingClientRect(); setHoveredPos({ top: r.top, left: r.left, right: r.right }); } : undefined}
+              onMouseLeave={hw ? function() { setHoveredHour(null); setHoveredPos(null); } : undefined}
               title={onHourLocationOverride ? 'Click to change location for ' + formatHour(hour) : undefined}
               style={{ position: 'absolute', top: i * hourHeight, left: 0, width: '100%', textAlign: 'center', pointerEvents: (onHourLocationOverride || hw) ? 'auto' : 'none', cursor: onHourLocationOverride ? 'pointer' : 'default', overflow: 'visible' }}
             >
@@ -436,66 +437,6 @@ export default function CalendarGrid({
                       <span style={{ fontSize: 9 }}>{icon}</span>
                       <span>{Math.round(hw.temp)}°{unit}</span>
                     </div>
-                  </div>
-                );
-              })()}
-              {/* Hover popup */}
-              {hoveredHour === hour && hw && (function() {
-                var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
-                var loc = (locations || []).find(function(l) { return l.id === locId; });
-                var locLabel = loc ? (locIcon(locId) + ' ' + loc.name) : '';
-                var isRightHalf = stripX > (cw / 2);
-                return (
-                  <div style={{
-                    position: 'absolute',
-                    top: -4,
-                    ...(isRightHalf ? { right: dm.STRIP_W + 6 } : { left: dm.STRIP_W + 6 }),
-                    zIndex: 999,
-                    background: theme.bgCard,
-                    border: '1px solid ' + theme.border,
-                    borderRadius: 6,
-                    padding: '8px 10px',
-                    width: 160,
-                    textAlign: 'left',
-                    boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
-                    pointerEvents: 'none',
-                    fontSize: 10,
-                    color: theme.text,
-                    lineHeight: 1.6
-                  }}>
-                    <div style={{ fontWeight: 700, color: theme.accent, marginBottom: 4, borderBottom: '1px solid ' + theme.border, paddingBottom: 3 }}>
-                      {formatHour(hour)}
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: theme.textMuted }}>Condition</span>
-                      <span>{weatherCodeIcon(hw.code)} {weatherCodeLabel(hw.code)}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: theme.textMuted }}>Temp</span>
-                      <span>{Math.round(hw.temp)}°{unit}</span>
-                    </div>
-                    {hw.precipProb > 0 && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: theme.textMuted }}>Precip</span>
-                        <span style={{ color: hw.precipProb >= 30 ? '#1e90ff' : theme.text, fontWeight: hw.precipProb >= 30 ? 700 : 400 }}>{hw.precipProb}%</span>
-                      </div>
-                    )}
-                    {hw.cloudcover > 0 && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: theme.textMuted }}>Cloud</span>
-                        <span>{hw.cloudcover}%</span>
-                      </div>
-                    )}
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: theme.textMuted }}>Humidity</span>
-                      <span>{hw.humidity}%</span>
-                    </div>
-                    {locLabel && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span style={{ color: theme.textMuted }}>Location</span>
-                        <span>{locLabel}</span>
-                      </div>
-                    )}
                   </div>
                 );
               })()}
@@ -723,6 +664,28 @@ export default function CalendarGrid({
           </React.Fragment>
         );
       })}
+      {/* Weather hover popup — portal so it's never clipped by overflow:hidden */}
+      {hoveredHour !== null && hoveredPos && hourlyByHour[hoveredHour] && ReactDOM.createPortal((function() {
+        var hw = hourlyByHour[hoveredHour];
+        var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
+        var locId = resolveLocationId(dateKey, hoveredHour, schedCfg, blocks);
+        var loc = (locations || []).find(function(l) { return l.id === locId; });
+        var locLabel = loc ? (locIcon(locId) + ' ' + loc.name) : '';
+        var popW = 160;
+        var putRight = hoveredPos.right + 6 + popW < window.innerWidth;
+        var popLeft = putRight ? hoveredPos.right + 6 : hoveredPos.left - 6 - popW;
+        return (
+          <div style={{ position: 'fixed', top: hoveredPos.top - 4, left: popLeft, zIndex: 9999, background: theme.bgCard, border: '1px solid ' + theme.border, borderRadius: 6, padding: '8px 10px', width: popW, textAlign: 'left', boxShadow: '0 4px 16px rgba(0,0,0,0.3)', pointerEvents: 'none', fontSize: 10, color: theme.text, lineHeight: 1.6 }}>
+            <div style={{ fontWeight: 700, color: theme.accent, marginBottom: 4, borderBottom: '1px solid ' + theme.border, paddingBottom: 3 }}>{formatHour(hoveredHour)}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Condition</span><span>{weatherCodeIcon(hw.code)} {weatherCodeLabel(hw.code)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Temp</span><span>{Math.round(hw.temp)}°{unit}</span></div>
+            {hw.precipProb > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Precip</span><span style={{ color: hw.precipProb >= 30 ? '#1e90ff' : theme.text, fontWeight: hw.precipProb >= 30 ? 700 : 400 }}>{hw.precipProb}%</span></div>}
+            {hw.cloudcover > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Cloud</span><span>{hw.cloudcover}%</span></div>}
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Humidity</span><span>{hw.humidity}%</span></div>
+            {locLabel && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Location</span><span>{locLabel}</span></div>}
+          </div>
+        );
+      })(), document.body)}
     </div>
   );
 }

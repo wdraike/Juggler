@@ -760,6 +760,7 @@ export default function DailyView({
   // Location menu state
   var [locMenuHour, setLocMenuHour] = useState(null);
   var [dvHoveredHour, setDvHoveredHour] = useState(null);
+  var [dvHoveredPos, setDvHoveredPos] = useState(null);
 
   // Pinch zoom
   useEffect(function () {
@@ -1128,8 +1129,8 @@ export default function DailyView({
 
             var lines = [
               <div key={hour} style={{ position: 'absolute', top: y, left: 0, right: 0, pointerEvents: dvHw ? 'auto' : 'none', zIndex: 2 }}
-                onMouseEnter={dvHw ? function() { setDvHoveredHour(hour); } : undefined}
-                onMouseLeave={dvHw ? function() { setDvHoveredHour(null); } : undefined}
+                onMouseEnter={dvHw ? function(e) { setDvHoveredHour(hour); var r = e.currentTarget.getBoundingClientRect(); setDvHoveredPos({ top: r.top, left: r.left, right: r.right }); } : undefined}
+                onMouseLeave={dvHw ? function() { setDvHoveredHour(null); setDvHoveredPos(null); } : undefined}
               >
                 {/* Time label */}
                 <div style={{
@@ -1189,25 +1190,6 @@ export default function DailyView({
                       height: hourHeight, opacity: dvHw.precipProb / 100,
                       background: color, pointerEvents: 'none', zIndex: 3
                     }} />
-                  );
-                })()}
-                {/* Hover popup */}
-                {dvHoveredHour === hour && dvHw && (function() {
-                  var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
-                  return (
-                    <div style={{
-                      position: 'absolute', top: -4, left: GUTTER_W + 8,
-                      zIndex: 999, background: theme.bgCard, border: '1px solid ' + theme.border,
-                      borderRadius: 6, padding: '8px 10px', width: 150, textAlign: 'left',
-                      boxShadow: '0 4px 16px rgba(0,0,0,0.3)', pointerEvents: 'none',
-                      fontSize: 10, color: theme.text, lineHeight: 1.6
-                    }}>
-                      <div style={{ fontWeight: 600, marginBottom: 2, fontSize: 11 }}>{weatherCodeLabel(dvHw.code)}</div>
-                      {dvHw.temp != null && <div>🌡 {Math.round(dvHw.temp)}°{unit}</div>}
-                      {dvHw.precipProb > 0 && <div>🌧 {dvHw.precipProb}% precip</div>}
-                      {dvHw.cloudcover != null && <div>☁ {dvHw.cloudcover}% cloud</div>}
-                      {dvHw.humidity > 0 && <div>💧 {dvHw.humidity}% RH</div>}
-                    </div>
                   );
                 })()}
                 {/* Location override menu — portal to body so it's above task tiles */}
@@ -1395,6 +1377,23 @@ export default function DailyView({
           </div>
         )}
       </div>
+      {/* Weather hover popup — portal so it's never clipped */}
+      {dvHoveredHour !== null && dvHoveredPos && hourlyByHour[dvHoveredHour] && ReactDOM.createPortal((function() {
+        var hw = hourlyByHour[dvHoveredHour];
+        var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
+        var popW = 150;
+        var putRight = dvHoveredPos.right + 6 + popW < window.innerWidth;
+        var popLeft = putRight ? dvHoveredPos.right + 6 : dvHoveredPos.left - 6 - popW;
+        return (
+          <div style={{ position: 'fixed', top: dvHoveredPos.top - 4, left: popLeft, zIndex: 9999, background: theme.bgCard, border: '1px solid ' + theme.border, borderRadius: 6, padding: '8px 10px', width: popW, textAlign: 'left', boxShadow: '0 4px 16px rgba(0,0,0,0.3)', pointerEvents: 'none', fontSize: 10, color: theme.text, lineHeight: 1.6 }}>
+            <div style={{ fontWeight: 600, marginBottom: 2, fontSize: 11 }}>{weatherCodeLabel(hw.code)}</div>
+            {hw.temp != null && <div>🌡 {Math.round(hw.temp)}°{unit}</div>}
+            {hw.precipProb > 0 && <div>🌧 {hw.precipProb}% precip</div>}
+            {hw.cloudcover != null && <div>☁ {hw.cloudcover}% cloud</div>}
+            {hw.humidity > 0 && <div>💧 {hw.humidity}% RH</div>}
+          </div>
+        );
+      })(), document.body)}
     </div>
   );
 }
