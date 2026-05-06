@@ -1124,9 +1124,13 @@ export default function DailyView({
             var locId = hourLocations[hour];
             var locColor = LOC_TINT[locId] || '#4338CA';
             var locIconStr = locIcon(locId);
+            var dvHw = hourlyByHour[hour];
 
             var lines = [
-              <div key={hour} style={{ position: 'absolute', top: y, left: 0, right: 0, pointerEvents: 'none', zIndex: 2 }}>
+              <div key={hour} style={{ position: 'absolute', top: y, left: 0, right: 0, pointerEvents: dvHw ? 'auto' : 'none', zIndex: 2 }}
+                onMouseEnter={dvHw ? function() { setDvHoveredHour(hour); } : undefined}
+                onMouseLeave={dvHw ? function() { setDvHoveredHour(null); } : undefined}
+              >
                 {/* Time label */}
                 <div style={{
                   position: 'absolute', top: 0, left: 0, width: GUTTER_W - 20,
@@ -1172,6 +1176,37 @@ export default function DailyView({
                         <span style={{ fontSize: 9 }}>{icon}</span>
                         <span>{Math.round(dvHw.temp)}°{unit}</span>
                       </div>
+                    </div>
+                  );
+                })()}
+                {/* Precip bar — thin strip at gutter right edge */}
+                {dvHw && dvHw.precipProb >= 5 && (function() {
+                  var code = dvHw.code || 0;
+                  var color = (code >= 66 && code <= 67) ? '#9b59b6' : (code >= 71 && code <= 86) ? '#c8d8f0' : '#1e90ff';
+                  return (
+                    <div style={{
+                      position: 'absolute', top: 0, left: GUTTER_W, width: 3,
+                      height: hourHeight, opacity: dvHw.precipProb / 100,
+                      background: color, pointerEvents: 'none', zIndex: 3
+                    }} />
+                  );
+                })()}
+                {/* Hover popup */}
+                {dvHoveredHour === hour && dvHw && (function() {
+                  var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
+                  return (
+                    <div style={{
+                      position: 'absolute', top: -4, left: GUTTER_W + 8,
+                      zIndex: 999, background: theme.bgCard, border: '1px solid ' + theme.border,
+                      borderRadius: 6, padding: '8px 10px', width: 150, textAlign: 'left',
+                      boxShadow: '0 4px 16px rgba(0,0,0,0.3)', pointerEvents: 'none',
+                      fontSize: 10, color: theme.text, lineHeight: 1.6
+                    }}>
+                      <div style={{ fontWeight: 600, marginBottom: 2, fontSize: 11 }}>{weatherCodeLabel(dvHw.code)}</div>
+                      {dvHw.temp != null && <div>🌡 {Math.round(dvHw.temp)}°{unit}</div>}
+                      {dvHw.precipProb > 0 && <div>🌧 {dvHw.precipProb}% precip</div>}
+                      {dvHw.cloudcover != null && <div>☁ {dvHw.cloudcover}% cloud</div>}
+                      {dvHw.humidity > 0 && <div>💧 {dvHw.humidity}% RH</div>}
                     </div>
                   );
                 })()}
