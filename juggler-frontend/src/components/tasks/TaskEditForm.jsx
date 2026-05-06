@@ -1963,7 +1963,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         </div>}
 
         {/* ═══ SECTION: Weather ═══ */}
-        {!isCreate && !marker &&
+        {!marker &&
         <div style={secStyle}>
           <div style={secHead}>{'\u26C5'} Weather</div>
           <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Precipitation</div>
@@ -1991,7 +1991,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           <WeatherTempSlider
             tempMin={weatherTempMin}
             tempMax={weatherTempMax}
-            unit={task.weatherTempUnit || 'F'}
+            unit={(task && task.weatherTempUnit) || 'F'}
             onChange={function(min, max) {
               setWeatherTempMin(min !== null ? String(min) : '');
               setWeatherTempMax(max !== null ? String(max) : '');
