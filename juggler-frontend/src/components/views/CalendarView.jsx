@@ -23,26 +23,21 @@ function durLabel(dur) {
 }
 
 /* ── Popup card rendered via portal directly below/above anchor ── */
-function FixedPopup({ anchorRect, item, status, theme, darkMode }) {
+function FixedPopup({ mousePos, item, status, theme, darkMode }) {
   var t = item.task;
   var priColor = PRI_COLORS[t.pri] || PRI_COLORS.P3;
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
   var statusObj = STATUS_MAP[status || ''];
   var locIcons = (t.location || []).map(function (l) { return locIcon(l); }).filter(Boolean);
 
-  if (!anchorRect) return null;
+  if (!mousePos) return null;
 
   var viewW = window.innerWidth;
   var viewH = window.innerHeight;
   var popW = 240;
-  var fitsBelow = anchorRect.bottom + 120 < viewH;
 
-  var left = Math.min(anchorRect.left, viewW - popW - 8);
-  left = Math.max(8, left);
-
-  var posStyle = fitsBelow
-    ? { top: anchorRect.bottom + 2 }
-    : { bottom: viewH - anchorRect.top + 2 };
+  var left = Math.max(8, Math.min(mousePos.x + 14, viewW - popW - 8));
+  var posStyle = { top: Math.min(mousePos.y - 10, viewH - 220) };
 
   var popup = (
     <div style={Object.assign({
@@ -133,11 +128,7 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
   var borderColor = isWhenRelaxed ? '#F59E0B' : (isMarker ? '#8B5CF6' : priColor);
   var [show, setShow] = useState(false);
   var entryRef = useRef(null);
-  var [anchorRect, setAnchorRect] = useState(null);
-
-  var updateRect = useCallback(function () {
-    if (entryRef.current) setAnchorRect(entryRef.current.getBoundingClientRect());
-  }, []);
+  var [mousePos, setMousePos] = useState(null);
 
   return (
     <div style={{ position: 'relative' }}>
@@ -148,10 +139,11 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
         draggable
         onDragStart={function (e) { e.stopPropagation(); onDragStart(e, t.id); }}
         onClick={function (e) { e.stopPropagation(); onExpand(t.id); }}
-        onMouseEnter={function () { setShow(true); updateRect(); }}
-        onMouseLeave={function () { setShow(false); }}
-        onFocus={function () { setShow(true); updateRect(); }}
-        onBlur={function () { setShow(false); }}
+        onMouseEnter={function(e) { setShow(true); setMousePos({ x: e.clientX, y: e.clientY }); }}
+        onMouseMove={function(e) { if (show) setMousePos({ x: e.clientX, y: e.clientY }); }}
+        onMouseLeave={function() { setShow(false); setMousePos(null); }}
+        onFocus={function() { setShow(true); if (entryRef.current) { var r = entryRef.current.getBoundingClientRect(); setMousePos({ x: r.left + r.width/2, y: r.top }); } }}
+        onBlur={function() { setShow(false); setMousePos(null); }}
         onKeyDown={function (e) { if (e.key === 'Enter') { e.stopPropagation(); onExpand(t.id); } }}
         style={{
           fontSize: isMobile ? 9 : 10,
@@ -174,7 +166,7 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
         {isWhenRelaxed && <span style={{ fontSize: 8, color: '#F59E0B', fontWeight: 700 }}>{'~'} </span>}
         {isMarker && !isWhenRelaxed && <span style={{ fontSize: 8, opacity: 0.7 }}>{'\u25C7'} </span>}{t.text}
       </div>
-      {show && <FixedPopup anchorRect={anchorRect} item={item} status={status} theme={theme} darkMode={darkMode} />}
+      {show && <FixedPopup mousePos={mousePos} item={item} status={status} theme={theme} darkMode={darkMode} />}
     </div>
   );
 }

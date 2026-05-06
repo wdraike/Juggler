@@ -83,26 +83,21 @@ function tileBg(task, darkMode, hover, theme) {
 }
 
 /* ── Popup card rendered via portal ── */
-function FixedPopup({ anchorRect, item, status, theme, darkMode }) {
+function FixedPopup({ mousePos, item, status, theme, darkMode }) {
   var t = item.task || item;
   var priColor = PRI_COLORS[t.pri] || PRI_COLORS.P3;
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
   var statusObj = STATUS_MAP[status || ''];
   var locIcons = (t.location || []).map(function (l) { return locIcon(l); }).filter(Boolean);
 
-  if (!anchorRect) return null;
+  if (!mousePos) return null;
 
   var viewW = window.innerWidth;
   var viewH = window.innerHeight;
   var popW = 240;
-  var fitsBelow = anchorRect.bottom + 120 < viewH;
 
-  var left = Math.min(anchorRect.left, viewW - popW - 8);
-  left = Math.max(8, left);
-
-  var posStyle = fitsBelow
-    ? { top: anchorRect.bottom + 2 }
-    : { bottom: viewH - anchorRect.top + 2 };
+  var left = Math.max(8, Math.min(mousePos.x + 14, viewW - popW - 8));
+  var posStyle = { top: Math.min(mousePos.y - 10, viewH - 220) };
 
   var popup = (
     <div style={Object.assign({
@@ -290,16 +285,13 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
   var isOverdue = !!item._overdue && !isDone;
   var [show, setShow] = useState(false);
   var innerRef = useRef(null);
-  var [anchorRect, setAnchorRect] = useState(null);
+  var [mousePos, setMousePos] = useState(null);
 
-  var updateRect = useCallback(function () {
-    if (innerRef.current) setAnchorRect(innerRef.current.getBoundingClientRect());
-  }, []);
-
-  function onEnter() { setShow(true); updateRect(); }
-  function onLeave() { setShow(false); }
-  function onFocusIn() { setShow(true); updateRect(); }
-  function onFocusOut() { setShow(false); }
+  function onEnter(e) { setShow(true); setMousePos({ x: e.clientX, y: e.clientY }); }
+  function onMove(e) { if (show) setMousePos({ x: e.clientX, y: e.clientY }); }
+  function onLeave() { setShow(false); setMousePos(null); }
+  function onFocusIn(e) { setShow(true); if (innerRef.current) { var r = innerRef.current.getBoundingClientRect(); setMousePos({ x: r.left + r.width / 2, y: r.top }); } }
+  function onFocusOut() { setShow(false); setMousePos(null); }
 
   var gutterRight = 8;
   var colWidth = totalCols > 1 ? 'calc((100% - ' + gutterW + 'px - ' + gutterRight + 'px) / ' + totalCols + ')' : undefined;
@@ -375,7 +367,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
         tabIndex={0}
         role="button"
         onClick={function (e) { e.stopPropagation(); onExpand(t.id); }}
-        onMouseEnter={onEnter} onMouseLeave={onLeave}
+        onMouseEnter={onEnter} onMouseMove={onMove} onMouseLeave={onLeave}
         onFocus={onFocusIn} onBlur={onFocusOut}
         onKeyDown={function (e) { if (e.key === 'Enter') { e.stopPropagation(); onExpand(t.id); } }}
         style={{
@@ -562,7 +554,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
           );
         })()}
       </div>
-      {show && <FixedPopup anchorRect={anchorRect} item={item} status={status} theme={theme} darkMode={darkMode} />}
+      {show && <FixedPopup mousePos={mousePos} item={item} status={status} theme={theme} darkMode={darkMode} />}
       {/* Travel buffer zones — hatched strips above/below the task card */}
       {item.travelBefore > 0 && hourHeight > 0 && (
         <div style={{
@@ -594,11 +586,7 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme,
   var isDone = status === 'done' || status === 'cancel' || status === 'skip';
   var [show, setShow] = useState(false);
   var ref = useRef(null);
-  var [anchorRect, setAnchorRect] = useState(null);
-
-  var updateRect = useCallback(function () {
-    if (ref.current) setAnchorRect(ref.current.getBoundingClientRect());
-  }, []);
+  var [mousePos, setMousePos] = useState(null);
 
   return (
     <div
@@ -609,10 +597,11 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme,
         ref={ref}
         tabIndex={0} role="button"
         onClick={function () { onExpand(task.id); }}
-        onMouseEnter={function () { setShow(true); updateRect(); }}
-        onMouseLeave={function () { setShow(false); }}
-        onFocus={function () { setShow(true); updateRect(); }}
-        onBlur={function () { setShow(false); }}
+        onMouseEnter={function(e) { setShow(true); setMousePos({ x: e.clientX, y: e.clientY }); }}
+        onMouseMove={function(e) { if (show) setMousePos({ x: e.clientX, y: e.clientY }); }}
+        onMouseLeave={function() { setShow(false); setMousePos(null); }}
+        onFocus={function() { setShow(true); if (ref.current) { var r = ref.current.getBoundingClientRect(); setMousePos({ x: r.left + r.width/2, y: r.top }); } }}
+        onBlur={function() { setShow(false); setMousePos(null); }}
         onKeyDown={function (e) { if (e.key === 'Enter') onExpand(task.id); }}
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
@@ -651,7 +640,7 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme,
           </span>
         )}
       </div>
-      {show && <FixedPopup anchorRect={anchorRect} item={{ task: task, start: null, end: null }} status={status} theme={theme} darkMode={darkMode} />}
+      {show && <FixedPopup mousePos={mousePos} item={{ task: task, start: null, end: null }} status={status} theme={theme} darkMode={darkMode} />}
     </div>
   );
 }
