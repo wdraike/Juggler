@@ -288,7 +288,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
   var [mousePos, setMousePos] = useState(null);
 
   function onEnter(e) { setShow(true); setMousePos({ x: e.clientX, y: e.clientY }); }
-  function onMove(e) { if (show) setMousePos({ x: e.clientX, y: e.clientY }); }
+  function onMove(e) { setMousePos({ x: e.clientX, y: e.clientY }); }
   function onLeave() { setShow(false); setMousePos(null); }
   function onFocusIn(e) { setShow(true); if (innerRef.current) { var r = innerRef.current.getBoundingClientRect(); setMousePos({ x: r.left + r.width / 2, y: r.top }); } }
   function onFocusOut() { setShow(false); setMousePos(null); }
@@ -598,7 +598,7 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme,
         tabIndex={0} role="button"
         onClick={function () { onExpand(task.id); }}
         onMouseEnter={function(e) { setShow(true); setMousePos({ x: e.clientX, y: e.clientY }); }}
-        onMouseMove={function(e) { if (show) setMousePos({ x: e.clientX, y: e.clientY }); }}
+        onMouseMove={function(e) { setMousePos({ x: e.clientX, y: e.clientY }); }}
         onMouseLeave={function() { setShow(false); setMousePos(null); }}
         onFocus={function() { setShow(true); if (ref.current) { var r = ref.current.getBoundingClientRect(); setMousePos({ x: r.left + r.width/2, y: r.top }); } }}
         onBlur={function() { setShow(false); setMousePos(null); }}
