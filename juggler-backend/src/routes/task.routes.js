@@ -6,6 +6,9 @@ const { resolvePlanFeatures } = require('../middleware/plan-features.middleware'
 const { checkTaskOrRecurringLimit, checkBatchTaskLimits } = require('../middleware/entity-limits');
 const { validate } = require('../middleware/validate');
 const { taskCreateSchema, taskUpdateSchema } = require('../schemas/task.schema');
+const { trackedGeminiCall } = require('../services/gemini-tracked-call');
+const AI_USE_CASES = require('../constants/ai-use-cases');
+const db = require('../db');
 
 router.use(authenticateJWT, resolvePlanFeatures);
 
@@ -45,11 +48,11 @@ router.get('/suggest-icon', async (req, res) => {
 
     const prompt = 'Reply with exactly one emoji that best represents this task. No text, punctuation, or explanation — just the emoji.\n\nTask: ' + text;
 
-    const result = await client.models.generateContent({
-      model: GEMINI_MODEL,
-      contents: prompt,
-      config: { temperature: 0.4, maxOutputTokens: 16 }
-    });
+    const result = await trackedGeminiCall(
+      db, client, GEMINI_MODEL, prompt,
+      { temperature: 0.4, maxOutputTokens: 16 },
+      { useCase: AI_USE_CASES.EMOJI_SUGGEST, userId: req.user?.id || null },
+    );
 
     let raw = '';
     if (result.text) {
