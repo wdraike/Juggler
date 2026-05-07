@@ -439,10 +439,52 @@ async function updateInstancesWhere(dbOrTrx, userId, applyWhere, changes) {
   return await applyWhere(dbOrTrx('task_instances').where('user_id', userId)).update(split.instance);
 }
 
+/**
+ * Delete all pending (status='') instances for a recurring template, cleaning
+ * the cal_sync_ledger first so the next sync doesn't re-ingest their events.
+ * Returns the number of instances deleted.
+ */
+async function resetRecurringInstances(dbOrTrx, userId, masterId, logTag) {
+  requireUserId(userId, 'resetRecurringInstances');
+  var pendingIds = await dbOrTrx('task_instances')
+    .where({ master_id: masterId, user_id: userId, status: '' })
+    .pluck('id');
+  if (pendingIds.length === 0) return 0;
+  await dbOrTrx('cal_sync_ledger')
+    .where('user_id', userId)
+    .whereIn('task_id', pendingIds)
+    .where('status', 'active')
+    .update({ status: 'deleted_local', task_id: null, synced_at: dbOrTrx.fn.now() })
+    .catch(function(err) { console.error('[silent-catch]', err.message); });
+  await deleteInstancesWhere(dbOrTrx, userId, function(q) {
+    return q.whereIn('id', pendingIds);
+  });
+  if (logTag) console.log(logTag + ': deleted ' + pendingIds.length + ' pending instances for ' + masterId);
+  return pendingIds.length;
+}
+
+/**
+ * Re-parent all completed (done/cancel/skip) instances for a recurring template
+ * to the archival master. Used when recurring is turned off so history doesn't
+ * display as orphaned task-type rows in the main list.
+ * Returns the number of instances re-parented.
+ */
+async function archiveCompletedInstances(dbOrTrx, userId, masterId) {
+  requireUserId(userId, 'archiveCompletedInstances');
+  var doneIds = await dbOrTrx('task_instances')
+    .where({ master_id: masterId, user_id: userId })
+    .whereIn('status', ['done', 'cancel', 'skip'])
+    .pluck('id');
+  if (doneIds.length === 0) return 0;
+  return await archiveInstances(dbOrTrx, userId, doneIds);
+}
+
 module.exports = {
   insertTask: insertTask,
   insertTasksBatch: insertTasksBatch,
   archiveInstances: archiveInstances,
+  archiveCompletedInstances: archiveCompletedInstances,
+  resetRecurringInstances: resetRecurringInstances,
   updateTaskById: updateTaskById,
   deleteTaskById: deleteTaskById,
   updateTasksWhere: updateTasksWhere,

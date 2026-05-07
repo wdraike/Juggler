@@ -875,6 +875,8 @@ async function updateTask(req, res) {
       || req.body._dragPin
       || req.body.anchorDate
       || req.body._allowUnfix
+      // recurring=false must clean up instances — fast path skips that entirely
+      || (req.body.recurring !== undefined && !req.body.recurring)
       // time without date requires existing.scheduled_at to combine
       || (req.body.time !== undefined && req.body.date === undefined && req.body.scheduledAt === undefined);
 
@@ -1136,11 +1138,9 @@ async function updateTask(req, res) {
         // If recurrence changed via instance edit, clean up pending instances on the template.
         // Always do a full reset since we can't reliably compare old vs new recur here.
         if (templateUpdate.recur !== undefined) {
-          var resetCount2 = await tasksWrite.deleteInstancesWhere(trx, req.user.id, function(q) {
-            return q.where({ master_id: existing.source_id, status: '' });
-          });
-          if (resetCount2 > 0) {
-            console.log('[RECUR] cycle reset via instance edit: deleted ' + resetCount2 + ' pending instances for template ' + existing.source_id);
+          await tasksWrite.resetRecurringInstances(trx, req.user.id, existing.source_id, '[RECUR] cycle reset via instance edit');
+          if (templateUpdate.recur === null) {
+            await tasksWrite.archiveCompletedInstances(trx, req.user.id, existing.source_id);
           }
         }
 
@@ -1182,12 +1182,9 @@ async function updateTask(req, res) {
           );
 
           if (recurChanged) {
-            // Full reset: delete all future active instances
-            var resetCount = await tasksWrite.deleteInstancesWhere(trx, req.user.id, function(q) {
-              return q.where({ master_id: id, status: '' });
-            });
-            if (resetCount > 0) {
-              console.log('[RECUR] cycle reset: deleted ' + resetCount + ' pending instances after recurrence change on ' + id);
+            await tasksWrite.resetRecurringInstances(trx, req.user.id, id, '[RECUR] cycle reset');
+            if (oldRecur && !newRecur) {
+              await tasksWrite.archiveCompletedInstances(trx, req.user.id, id);
             }
           } else {
             // Incremental cleanup: only delete instances that no longer match
@@ -1947,11 +1944,9 @@ async function batchUpdateTasks(req, res) {
               }
               // If recurrence changed, delete all pending instances so they regenerate
               if (templateUpdate.recur !== undefined) {
-                var resetCount = await tasksWrite.deleteInstancesWhere(trx, req.user.id, function(q) {
-                  return q.where({ master_id: existing.source_id, status: '' });
-                });
-                if (resetCount > 0) {
-                  console.log('[BATCH] cycle reset: deleted ' + resetCount + ' pending instances for template ' + existing.source_id);
+                await tasksWrite.resetRecurringInstances(trx, req.user.id, existing.source_id, '[BATCH] cycle reset');
+                if (templateUpdate.recur === null) {
+                  await tasksWrite.archiveCompletedInstances(trx, req.user.id, existing.source_id);
                 }
               }
               if (Object.keys(instanceUpdate).length > 0) {
@@ -1969,11 +1964,9 @@ async function batchUpdateTasks(req, res) {
               await tasksWrite.updateTaskById(trx, id, row, req.user.id);
               // If recurrence changed on a template, delete pending instances
               if (taskType === 'recurring_template' && row.recur !== undefined) {
-                var tplResetCount = await tasksWrite.deleteInstancesWhere(trx, req.user.id, function(q) {
-                  return q.where({ master_id: id, status: '' });
-                });
-                if (tplResetCount > 0) {
-                  console.log('[BATCH] cycle reset on template: deleted ' + tplResetCount + ' pending instances for ' + id);
+                await tasksWrite.resetRecurringInstances(trx, req.user.id, id, '[BATCH] cycle reset on template');
+                if (row.recur === null) {
+                  await tasksWrite.archiveCompletedInstances(trx, req.user.id, id);
                 }
               }
             }
