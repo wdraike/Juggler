@@ -71,6 +71,21 @@ async function start() {
   // Give in-flight requests time to finish on shutdown
   server.keepAliveTimeout = 65000;
   server.headersTimeout = 66000;
+
+  // Start AI usage flusher
+  try {
+    const { createFlusher } = require('./services/ai-usage-flusher.service');
+    const flusher = createFlusher({
+      db,
+      billingUrl: process.env.BILLING_SERVICE_URL || 'http://localhost:5020',
+      serviceKey: process.env.INTERNAL_SERVICE_KEY || '',
+      sourceApp:  process.env.AI_USAGE_SOURCE_APP  || 'juggler',
+    });
+    flusher.start();
+    console.log('✅ AI usage flusher started');
+  } catch (err) {
+    console.warn('[AiUsageFlusher] Failed to start:', err.message);
+  }
 }
 
 // ── Graceful shutdown ──
