@@ -11,6 +11,8 @@
  */
 
 const db = require('../db');
+const { trackedGeminiCall } = require('../services/gemini-tracked-call');
+const AI_USE_CASES = require('../constants/ai-use-cases');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -42,16 +44,18 @@ function getGenAIClient() {
 async function callGemini(prompt, systemPrompt) {
   const client = getGenAIClient();
 
-  const result = await client.models.generateContent({
-    model: GEMINI_MODEL,
-    contents: systemPrompt + '\n\n---\nUser request:\n' + prompt,
-    config: {
-      temperature: 0.2,
-      topP: 0.8,
-      topK: 40,
-      maxOutputTokens: 8192
+  const result = await trackedGeminiCall(
+    db,
+    client,
+    GEMINI_MODEL,
+    systemPrompt + '\n\n---\nUser request:\n' + prompt,
+    { temperature: 0.2, topP: 0.8, topK: 40, maxOutputTokens: 8192 },
+    {
+      useCase:       AI_USE_CASES.TASK_AI,
+      userId:        null,
+      correlationId: null,
     }
-  });
+  );
 
   if (result.text) {
     return result.text;
