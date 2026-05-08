@@ -270,6 +270,9 @@ function recurringCycleDays(recur) {
 // pending instances (they lack a date), so it regenerated them as fresh
 // items.
 function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
+  // Normalize todayKey to ISO form for consistent comparisons — it may arrive
+  // as legacy M/D format from test helpers (e.g. '4/3' instead of '2026-04-03').
+  var todayIsoKey = dates.length > 0 ? dates[0].key : toKey(todayKey);
   // Drop recurring templates (sources); their instances carry placement.
   var pool = allTasks.filter(function(t) { return t.taskType !== 'recurring_template'; });
 
@@ -285,11 +288,25 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     // Markers are calendar indicators — they coexist with other placements at
     // the same minute, so dur=0 means they never consume occupancy.
     var dur = isMarker ? 0 : effectiveDuration(t);
+    // Skip non-marker tasks with zero duration — they have nothing to schedule.
+    // Also skip tasks with date='TBD' (user explicitly deferred placement).
+    if (!isMarker && dur === 0) return;
+    if (t.date && String(t.date).toUpperCase() === 'TBD') return;
+    // All-day events have no time-grid presence — they appear in the calendar
+    // UI via a separate rendering path, not as time-grid placements.
+    var when = t.when || '';
+    var allday = hasWhen(when, 'allday');
+    if (allday) return;
+    // Past recurring instances (recurring=true, date in past, no explicit placement mode)
+    // are dropped — they already passed and should not be rescheduled to today.
+    // Generated instances with explicit placementMode (recurring_window / recurring_rigid)
+    // are NOT dropped here — they get force-placed with _overdue in a later pass.
+    var isExplicitRecurringMode = (pm === PLACEMENT_MODES.RECURRING_RIGID ||
+      pm === PLACEMENT_MODES.RECURRING_WINDOW || pm === PLACEMENT_MODES.RECURRING_FLEXIBLE);
+    if (t.recurring && !isExplicitRecurringMode && t.date && toKey(t.date) < todayIsoKey) return;
     var pri = normalizePri(t.pri);
     var priRank = PRI_RANK[pri] || 50;
-    var when = t.when || '';
     var fixed = pm === PLACEMENT_MODES.FIXED;
-    var allday = hasWhen(when, 'allday');
     var pinned = !!t.datePinned;
     var recurring = pm === PLACEMENT_MODES.RECURRING_RIGID || pm === PLACEMENT_MODES.RECURRING_WINDOW || pm === PLACEMENT_MODES.RECURRING_FLEXIBLE;
     var flexWhen = !!t.flexWhen;
@@ -299,7 +316,10 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     // datetime, captured in item.anchor. Normalize all date-ish fields to
     // canonical ISO so downstream lookups against dates[].key always match.
     var anchorDate = toKey(t.date);
-    var anchorMin = t.time ? parseTimeToMinutes(t.time) : null;
+    // For RECURRING_RIGID with a when-tag, the when-block is authoritative —
+    // do NOT use t.time (it may be a stale/feedback-loop value from a prior run).
+    // Only use t.time for immovable anchor if there is no when-tag (time-only rigid).
+    var anchorMin = (t.time && !(pm === PLACEMENT_MODES.RECURRING_RIGID && t.when)) ? parseTimeToMinutes(t.time) : null;
     if ((pm === PLACEMENT_MODES.RECURRING_RIGID || pm === PLACEMENT_MODES.RECURRING_WINDOW) && t.preferredTimeMins != null && anchorMin == null) {
       anchorMin = t.preferredTimeMins;
     }
@@ -351,7 +371,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
         // Fall back to when-tag placement so the task isn't silently unplaced.
         if (windowHi <= windowLo) isWindowMode = false;
         // Window entirely past on today → mark as missed; dual-placed in unplaced + grid.
-        else if (anchorDate === todayKey && nowMins != null && windowHi <= nowMins) {
+        else if (anchorDate === todayIsoKey && nowMins != null && windowHi <= nowMins) {
           isMissedWindow = true;
         }
       } else {
@@ -415,6 +435,9 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       isFixedWhen: fixed,
       isAllDay: allday,
       isPinned: pinned,
+      // Generated instances without an explicit anchorMin are day-locked via
+      // isGenerated — see findEarliestSlot for the clamping logic.
+      isGenerated: !!t.generated && !recurring,
       isRigid: pm === PLACEMENT_MODES.RECURRING_RIGID,
       isRecurring: recurring,
       isMarker: isMarker,
@@ -447,7 +470,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       // time window is past they should go to unplaced with reason 'missed'.
       preferLatestSlot: (
         pm === PLACEMENT_MODES.RECURRING_FLEXIBLE &&
-        anchorDate === todayKey &&
+        anchorDate === todayIsoKey &&
         anchorMin != null && nowMins != null && anchorMin < nowMins
       )
     });
@@ -667,7 +690,10 @@ function tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements, cfg, env)
   var entry = { task: item.task, start: start, dur: item.dur, locked: true,
     travelBefore: item.travelBefore || 0, travelAfter: item.travelAfter || 0,
     _placementReason: buildPlacementReason(item, isConflict, blockName) };
-  if (isConflict) entry._conflict = true;
+  if (isConflict) {
+    entry._conflict = true;
+    if (warnings) warnings.push({ type: 'recurringConflict', taskId: item.id });
+  }
   if (!dayPlaced[item.anchorDate]) dayPlaced[item.anchorDate] = [];
   dayPlaced[item.anchorDate].push(entry);
   if (!dayPlacements[item.anchorDate]) dayPlacements[item.anchorDate] = [];
@@ -783,6 +809,17 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   if (item.deadlineDate && !(opts && opts.ignoreDeadline)) {
     var di = indexOfDate(dates, item.deadlineDate);
     if (di >= 0) latestIdx = di;
+  }
+  // Date-pinned non-recurring tasks are locked to their anchorDate — they must
+  // not be pulled forward to today or pushed to another day.
+  // Also applies to generated instances (recurring instances without explicit
+  // placement modes) that have no anchorMin — they represent occurrences assigned
+  // to a specific day by expandRecurring.
+  if ((item.isPinned && !item.isRecurring) || (item.isGenerated && item.anchorMin == null)) {
+    if (item.anchorDate) {
+      var pi = indexOfDate(dates, item.anchorDate);
+      if (pi >= 0) { earliestIdx = pi; latestIdx = pi; }
+    }
   }
   // Recurring-instance placement windows. Three cases:
   //   1. Strictly day-locked (rigid recurring, or split-chunk-2+ that must
@@ -1152,13 +1189,44 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     }
   })();
 
+  // Backwards dependency detection: warn when a task is pinned/anchored to a date
+  // that is BEFORE its dependency's anchor date (A depends on B, but A is before B).
+  // These deps can never be satisfied — surface as warnings so the UI can flag them.
+  (function detectBackwardsDeps() {
+    var itemsById = {};
+    items.forEach(function(item) { itemsById[item.id] = item; });
+    items.forEach(function(item) {
+      if (!item.anchorDate || !item.dependsOn || item.dependsOn.length === 0) return;
+      item.dependsOn.forEach(function(depId) {
+        var dep = itemsById[depId];
+        if (!dep || !dep.anchorDate) return;
+        // Backwards: item must be after dep but item's date ≤ dep's date.
+        if (item.anchorDate < dep.anchorDate) {
+          warnings.push({ type: 'backwardsDep', taskId: item.id, depId: depId });
+        }
+      });
+    });
+  })();
+
+  // Pre-classify past-anchored recurring items (date before today) — these
+  // never enter the queue. They'll be force-placed by the past-anchored pass
+  // after the retry pass. Placing them through the queue would allow them to
+  // drift to a future day (wrong behavior — they should appear on their original date).
+  var pastAnchoredPreQueue = [];
+
   // Phase 0 analog: immovables (pinned, fixed-when, rigid-recurring with
   // preferred time, markers at their specified time). They claim their slots
   // before the slack-sorted queue is built, so other items' slack reflects
   // actual occupancy. Markers have dur=0 so `reserve` is a no-op for them —
   // they appear on the calendar without blocking time.
   var queue = [];
+  var todayIsoKey = dates.length > 0 ? dates[0].key : toKey(effectiveTodayKey);
   items.forEach(function(item) {
+    // Past-anchored recurring: skip the queue entirely — handled by a dedicated pass later.
+    if (item.isRecurring && item.anchorDate && item.anchorDate < todayIsoKey) {
+      pastAnchoredPreQueue.push(item);
+      return;
+    }
     var isImmovable =
       (item.isMarker && item.anchorDate && item.anchorMin != null) ||
       item.isPinned ||
@@ -1324,6 +1392,11 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   });
   captureSnapshot('retry_done');
 
+  // Merge pre-queue past-anchored recurring items into stillUnplaced so the
+  // past-anchored pass below can handle them. They were never put into the queue
+  // to prevent drifting to future dates.
+  pastAnchoredPreQueue.forEach(function(item) { stillUnplaced.push(item); });
+
   // Missed-window pass: RECURRING_WINDOW tasks whose flex window is entirely past.
   // They appear in unplaced (with 'missed' reason) AND on the day grid (with _overdue).
   var missedWindowItems = stillUnplaced.filter(function(u) {
@@ -1355,6 +1428,33 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   });
 
   captureSnapshot('missed_window_done');
+
+  // Past-anchored recurring pass: recurring items whose anchorDate is before today
+  // couldn't be found in the dates array by findEarliestSlot. Force-place them on
+  // their original anchor date so they appear for the user to mark done/skip.
+  var pastAnchoredRecurrings = stillUnplaced.filter(function(u) {
+    return u && u.isRecurring && u.anchorDate && u.anchorDate < todayIsoKey;
+  });
+  stillUnplaced = stillUnplaced.filter(function(u) {
+    return !(u && u.isRecurring && u.anchorDate && u.anchorDate < todayIsoKey);
+  });
+  pastAnchoredRecurrings.forEach(function(item) {
+    var pastTask = item.task;
+    var paDate = item.anchorDate;
+    var paStart = item.preferredTimeMins != null ? item.preferredTimeMins :
+                  (item.anchorMin != null ? item.anchorMin : 0);
+    if (!dayPlacements[paDate]) dayPlacements[paDate] = [];
+    dayPlacements[paDate].push({
+      task: pastTask,
+      start: paStart,
+      dur: item.dur,
+      locked: false,
+      _overdue: true,
+      travelBefore: 0,
+      travelAfter: 0,
+      _placementReason: 'Recurring window missed — placed for completion',
+    });
+  });
 
   // Force-placement pass: rigid recurrings must always appear even when their
   // when-block is full or in the past. Place at block start with _conflict=true.
@@ -1397,6 +1497,10 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       }
     }
 
+    // Mark task overdue if its forced time is in the past on today.
+    var forceIsOverdue = forceDate === todayIsoKey && nowMins != null && forceStart < nowMins;
+    if (forceIsOverdue) task._overdue = true;
+
     if (!dayPlacements[forceDate]) dayPlacements[forceDate] = [];
     var forceEntry = {
       task: task,
@@ -1408,7 +1512,10 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       travelAfter: 0,
       _placementReason: 'Rigid recurring: ' + (fBlockName || task.when || 'block') + ' (overlap)',
     };
+    if (forceIsOverdue) forceEntry._overdue = true;
     dayPlacements[forceDate].push(forceEntry);
+    // Emit a recurringConflict warning so callers can surface UI feedback.
+    warnings.push({ type: 'recurringConflict', taskId: task.id });
   });
   stillUnplaced = remainingUnplaced;
   captureSnapshot('rigid_forced');
@@ -1416,13 +1523,12 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   // Dep-relaxation pass: deadline tasks (deadline ≤ today) that are still unplaced
   // because their dep chain couldn't fully land. Place them ignoring dep constraints
   // as a last resort — something is better than missing a hard deadline entirely.
-  var todayKey = effectiveTodayKey;
   var deadlineRelaxed = stillUnplaced.filter(function(u) {
-    return u && u.task && u.deadlineDate && u.deadlineDate <= todayKey &&
+    return u && u.task && u.deadlineDate && u.deadlineDate <= todayIsoKey &&
            u.dependsOn && u.dependsOn.length > 0;
   });
   stillUnplaced = stillUnplaced.filter(function(u) {
-    return !(u && u.task && u.deadlineDate && u.deadlineDate <= todayKey &&
+    return !(u && u.task && u.deadlineDate && u.deadlineDate <= todayIsoKey &&
              u.dependsOn && u.dependsOn.length > 0);
   });
   deadlineRelaxed.forEach(function(item) {
