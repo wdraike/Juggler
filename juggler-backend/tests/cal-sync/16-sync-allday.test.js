@@ -20,7 +20,7 @@ var {
   seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes, getGCalToken, gcalApi
 } = require('./helpers/test-setup');
 var tasksWrite = require('../../src/lib/tasks-write');
-var { makeTask, makeGCalEvent, deleteGCalEvent } = require('./helpers/test-fixtures');
+var { makeTask, makeLedgerRow, makeGCalEvent, deleteGCalEvent } = require('./helpers/test-fixtures');
 var { getGCalEvent, waitForPropagation } = require('./helpers/api-helpers');
 
 var GCAL_ONLY = { msft_cal_refresh_token: null, apple_cal_username: null, apple_cal_password: null, apple_cal_server_url: null, apple_cal_calendar_url: null };
@@ -290,6 +290,170 @@ describe('Sync All-Day & Transparency', () => {
     // The event summary should have the done marker (checkmark prefix)
     expect(event.summary.indexOf('✓') >= 0 || event.summary.indexOf('✔') >= 0 ||
            event.summary.indexOf('done') >= 0 || event.status !== 'cancelled').toBeTruthy();
+  }));
+
+  test('done_frozen: done task with calCompletedBehavior=update is pushed once then frozen', skipIfNoDB(async () => {
+    if (!hasGCalCredentials()) return;
+    user = await seedTestUser(GCAL_ONLY);
+
+    // Seed calCompletedBehavior=update preference
+    await db('user_config').where({ user_id: TEST_USER_ID, config_key: 'preferences' }).del();
+    await db('user_config').insert({
+      user_id: TEST_USER_ID,
+      config_key: 'preferences',
+      config_value: JSON.stringify({ calCompletedBehavior: 'update' })
+    });
+
+    // Create a task, push it to calendar first so the ledger row exists
+    var task = await makeTask({
+      text: 'Done Frozen Test Task',
+      scheduled_at: tomorrow(14, 0),
+      dur: 30,
+      when: 'afternoon'
+    });
+
+    // First sync — push task (status='', not done yet)
+    var req = mockReq(user);
+    var res = mockRes();
+    await sync(req, res);
+
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal' })
+      .first();
+    expect(ledger).toBeTruthy();
+    createdGCalEventIds.push(ledger.provider_event_id);
+
+    // Mark task as done
+    await tasksWrite.updateTaskById(db, task.id, { status: 'done', updated_at: db.fn.now() }, TEST_USER_ID);
+
+    // Second sync — should do the done push and set done_frozen
+    user = await db('users').where('id', TEST_USER_ID).first();
+    req = mockReq(user);
+    res = mockRes();
+    await sync(req, res);
+
+    var frozenLedger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal' })
+      .first();
+    // After done push, ledger must be done_frozen
+    expect(frozenLedger.status).toBe('done_frozen');
+
+    // Third sync — done_frozen row must be skipped (no re-push)
+    var hashBefore = frozenLedger.last_pushed_hash;
+    var pushedAtBefore = frozenLedger.last_pushed_at;
+    user = await db('users').where('id', TEST_USER_ID).first();
+    req = mockReq(user);
+    res = mockRes();
+    await sync(req, res);
+
+    var afterThirdSync = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal' })
+      .first();
+    // Status must remain done_frozen
+    expect(afterThirdSync.status).toBe('done_frozen');
+    // last_pushed_hash must not change (no new push happened)
+    expect(afterThirdSync.last_pushed_hash).toBe(hashBefore);
+  }));
+
+  test('done_frozen: done task is skipped when ledger.status is already done_frozen', skipIfNoDB(async () => {
+    if (!hasGCalCredentials()) return;
+    user = await seedTestUser(GCAL_ONLY);
+
+    // Seed calCompletedBehavior=update preference
+    await db('user_config').where({ user_id: TEST_USER_ID, config_key: 'preferences' }).del();
+    await db('user_config').insert({
+      user_id: TEST_USER_ID,
+      config_key: 'preferences',
+      config_value: JSON.stringify({ calCompletedBehavior: 'update' })
+    });
+
+    // Create a done task
+    var task = await makeTask({
+      text: 'Already Frozen Test Task',
+      scheduled_at: tomorrow(15, 0),
+      dur: 30,
+      when: 'afternoon',
+      status: 'done'
+    });
+
+    // Push once to get a real event on GCal, then mark done_frozen manually
+    var req = mockReq(user);
+    var res = mockRes();
+    await sync(req, res);
+
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal' })
+      .first();
+    expect(ledger).toBeTruthy();
+    createdGCalEventIds.push(ledger.provider_event_id);
+
+    // Manually set done_frozen to simulate an already-frozen row
+    await db('cal_sync_ledger')
+      .where({ id: ledger.id })
+      .update({ status: 'done_frozen' });
+
+    var hashBefore = ledger.last_pushed_hash;
+
+    // Sync again — done_frozen guard must skip this row
+    user = await db('users').where('id', TEST_USER_ID).first();
+    req = mockReq(user);
+    res = mockRes();
+    await sync(req, res);
+
+    var afterSync = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal' })
+      .first();
+    // Status must remain done_frozen
+    expect(afterSync.status).toBe('done_frozen');
+    // last_pushed_hash must not change (skip means no push)
+    expect(afterSync.last_pushed_hash).toBe(hashBefore);
+  }));
+
+  test('done_frozen: calCompletedBehavior=keep tasks are NOT frozen (D-05)', skipIfNoDB(async () => {
+    if (!hasGCalCredentials()) return;
+    user = await seedTestUser(GCAL_ONLY);
+
+    // Seed calCompletedBehavior=keep preference
+    await db('user_config').where({ user_id: TEST_USER_ID, config_key: 'preferences' }).del();
+    await db('user_config').insert({
+      user_id: TEST_USER_ID,
+      config_key: 'preferences',
+      config_value: JSON.stringify({ calCompletedBehavior: 'keep' })
+    });
+
+    var task = await makeTask({
+      text: 'Keep Behavior Test Task',
+      scheduled_at: tomorrow(16, 0),
+      dur: 30,
+      when: 'afternoon'
+    });
+
+    // Push the task initially
+    var req = mockReq(user);
+    var res = mockRes();
+    await sync(req, res);
+
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal' })
+      .first();
+    expect(ledger).toBeTruthy();
+    createdGCalEventIds.push(ledger.provider_event_id);
+
+    // Mark task as done
+    await tasksWrite.updateTaskById(db, task.id, { status: 'done', updated_at: db.fn.now() }, TEST_USER_ID);
+
+    // Sync again — calCompletedBehavior=keep means no done processing at all
+    user = await db('users').where('id', TEST_USER_ID).first();
+    req = mockReq(user);
+    res = mockRes();
+    await sync(req, res);
+
+    var afterSync = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal' })
+      .first();
+    // With calCompletedBehavior=keep, ledger must NOT be done_frozen
+    expect(afterSync.status).not.toBe('done_frozen');
+    expect(afterSync.status).toBe('active');
   }));
 
 });
