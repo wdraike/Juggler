@@ -25,7 +25,13 @@ beforeAll(async function () {
     console.warn('Skipping GCal adapter tests — no credentials');
     return;
   }
-  token = await getGCalToken();
+  try {
+    token = await getGCalToken();
+  } catch (e) {
+    skip = true;
+    console.warn('Skipping GCal adapter tests — token refresh failed:', e.message);
+    return;
+  }
   if (!token) {
     skip = true;
     console.warn('Skipping GCal adapter tests — could not get access token');

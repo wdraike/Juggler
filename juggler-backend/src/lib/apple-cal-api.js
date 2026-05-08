@@ -193,7 +193,8 @@ function buildVEvent(task, year, tz) {
   vevent.addPropertyWithValue('uid', uid);
 
   var isDone = task.status === 'done';
-  var summaryText = isDone ? '✓ ' + task.text : task.text;
+  var cleanText = task.text.replace(/^(✓\s+)+/, '');
+  var summaryText = isDone ? '✓ ' + cleanText : task.text;
   vevent.addPropertyWithValue('summary', summaryText);
 
   // Description with metadata
@@ -206,6 +207,9 @@ function buildVEvent(task, year, tz) {
   vevent.addPropertyWithValue('description', descParts.join('\n'));
 
   var isAllDay = task.when === 'allday';
+  if (task.when === 'allday' && !isAllDay) {
+    console.warn('[cal-sync] buildVEvent: allday flag mismatch for task ' + task.id);
+  }
 
   // Parse date — handle both YYYY-MM-DD (from utcToLocal) and legacy M/D format
   var dateStr = task.date || '';

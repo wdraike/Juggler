@@ -210,6 +210,9 @@ function buildEventBody(task, year, tz, opts) {
   var startISO = jugglerDateToISO(task.date, task.time, year);
   var dur = task.dur || 30;
   var isAllDay = task.when === 'allday';
+  if (task.when === 'allday' && !isAllDay) {
+    console.warn('[cal-sync] buildEventBody: allday flag mismatch for task ' + task.id);
+  }
 
   var descParts = [];
   if (task.project) descParts.push('Project: ' + task.project);
@@ -219,7 +222,8 @@ function buildEventBody(task, year, tz, opts) {
   descParts.push('', 'Synced from Raike & Sons');
 
   var isDone = task.status === 'done';
-  var summaryText = isDone ? '✓ ' + task.text : task.text;
+  var cleanText = task.text.replace(/^(✓\s+)+/, '');
+  var summaryText = isDone ? '✓ ' + cleanText : task.text;
 
   if (isAllDay) {
     // task.date is now ISO YYYY-MM-DD post-migration; legacy rows may still be

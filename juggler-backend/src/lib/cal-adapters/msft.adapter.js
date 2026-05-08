@@ -283,6 +283,9 @@ function getLastSyncedColumn() {
 function buildMsftEventBody(task, year, tz, opts) {
   var dur = task.dur || 30;
   var isAllDay = task.when === 'allday';
+  if (task.when === 'allday' && !isAllDay) {
+    console.warn('[cal-sync] buildMsftEventBody: allday flag mismatch for task ' + task.id);
+  }
 
   var descParts = [];
   if (task.project) descParts.push('Project: ' + task.project);
@@ -292,7 +295,8 @@ function buildMsftEventBody(task, year, tz, opts) {
   descParts.push('', 'Synced from Raike & Sons');
 
   var isDone = task.status === 'done';
-  var subjectText = isDone ? '✓ ' + task.text : task.text;
+  var cleanText = task.text.replace(/^(✓\s+)+/, '');
+  var subjectText = isDone ? '✓ ' + cleanText : task.text;
 
   if (isAllDay) {
     // task.date may be ISO YYYY-MM-DD or legacy M/D — handle both to avoid "2026-2026-NaN"
