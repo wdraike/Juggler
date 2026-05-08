@@ -15,15 +15,26 @@ var PRI_RANK = constants.PRI_RANK;
 var UNPLACED_MULTIPLIER = 1;
 var DEADLINE_MISS_PENALTY = 500;
 var PRIORITY_DRIFT_BASE = 20;
+var CROSS_DAY_PRI_BASE = 20;
 var DATE_DRIFT_PENALTY = 10;
 var FRAGMENTATION_PENALTY = 15;
 
 /**
- * Parse a date string like '3/22' or '3/22/2026' into a comparable integer
- * (YYYYMMDD). If year is missing, uses current year.
+ * Parse a date string into a comparable integer (YYYYMMDD).
+ *
+ * Accepts:
+ *   - ISO format:    '2026-03-22'  → 20260322
+ *   - Legacy M/D:    '3/22'        → current-year * 10000 + 0322
+ *   - Legacy M/D/Y:  '3/22/2026'   → 20260322
  */
 function parseDateKey(str) {
   if (!str) return null;
+  // ISO: YYYY-MM-DD
+  var iso = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) {
+    return parseInt(iso[1], 10) * 10000 + parseInt(iso[2], 10) * 100 + parseInt(iso[3], 10);
+  }
+  // Legacy M/D or M/D/YYYY
   var parts = str.split('/');
   if (parts.length < 2) return null;
   var month = parseInt(parts[0], 10);
@@ -41,6 +52,7 @@ function scoreSchedule(dayPlacements, unplaced, allTasks) {
     unplaced:      0,
     deadlineMiss:  0,
     priorityDrift: 0,
+    crossDayPri:   0,
     dateDrift:     0,
     fragmentation: 0
   };
@@ -124,7 +136,42 @@ function scoreSchedule(dayPlacements, unplaced, allTasks) {
     });
   });
 
-  // ── 3. Total ────────────────────────────────────────────────────
+  // ── 3. Cross-day priority inversion ────────────────────────────
+  // For each pair of days, if a lower-priority task is on an earlier day
+  // than a higher-priority task, penalize.
+  var dateKeys = Object.keys(dayPlacements || {}).sort();
+  for (var di = 0; di < dateKeys.length - 1; di++) {
+    var earlyDayKey = dateKeys[di];
+    var earlyNum    = parseDateKey(earlyDayKey);
+    var earlySlots  = dayPlacements[earlyDayKey] || [];
+
+    for (var dj = di + 1; dj < dateKeys.length; dj++) {
+      var laterDayKey = dateKeys[dj];
+      var laterNum    = parseDateKey(laterDayKey);
+      var laterSlots  = dayPlacements[laterDayKey] || [];
+
+      if (earlyNum == null || laterNum == null || earlyNum >= laterNum) continue;
+
+      // Check all (earlier-day task, later-day task) pairs for priority inversions
+      earlySlots.forEach(function(es) {
+        if (!es.task) return;
+        var priEarly = priWeight(es.task.pri);
+        laterSlots.forEach(function(ls) {
+          if (!ls.task) return;
+          var priLater = priWeight(ls.task.pri);
+          // Lower-pri task on early day, higher-pri task on later day → inversion
+          if (priEarly < priLater) {
+            var gap     = priLater - priEarly;
+            var penalty = CROSS_DAY_PRI_BASE + gap;
+            breakdown.crossDayPri += penalty;
+            details.push({ taskId: es.task.id, type: 'crossDayPri', penalty: penalty });
+          }
+        });
+      });
+    }
+  }
+
+  // ── 4. Total ────────────────────────────────────────────────────
   var total = 0;
   Object.keys(breakdown).forEach(function(k) { total += breakdown[k]; });
 

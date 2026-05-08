@@ -35,6 +35,7 @@
  */
 
 var constants = require('./constants');
+var scoreSchedule = require('./scoreSchedule');
 var GRID_START = constants.GRID_START;
 var GRID_END = constants.GRID_END;
 var RECUR_EXPAND_DAYS = constants.RECUR_EXPAND_DAYS;
@@ -961,7 +962,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   if (dates.length === 0) {
     return {
       dayPlacements: {}, taskUpdates: {}, newStatuses: Object.assign({}, statuses),
-      unplaced: [], deadlineMisses: [], placedCount: 0, score: { score: 0 },
+      unplaced: [], deadlineMisses: [], placedCount: 0, score: scoreSchedule({}, [], allTasks),
       warnings: [{ type: 'v2_no_dates' }], timezone: cfg.timezone || null,
       spacingStats: {}, slackByTaskId: {}
     };
@@ -1216,7 +1217,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     unplaced: unplacedTasks,
     deadlineMisses: [],
     placedCount: placedCount,
-    score: { score: 0 },
+    score: scoreSchedule(dayPlacements, unplacedTasks, allTasks),
     warnings: [],
     timezone: cfg.timezone || null,
     spacingStats: {},
