@@ -1273,6 +1273,62 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       { overdue: placement.overdue, relaxed: placement.relaxed });
   });
 
+  // Force-placement pass: rigid recurrings must always appear even when their
+  // when-block is full or in the past. Place at block start with _conflict=true.
+  var rigidUnplaced = stillUnplaced.filter(function(u) {
+    var task = u && u.task ? u.task : u;
+    return task && (task.placementMode === 'recurring_rigid' || (u && u.isRigid));
+  });
+  var remainingUnplaced = stillUnplaced.filter(function(u) {
+    var task = u && u.task ? u.task : u;
+    return !(task && (task.placementMode === 'recurring_rigid' || (u && u.isRigid)));
+  });
+
+  rigidUnplaced.forEach(function(u) {
+    var item = u;
+    var task = item.task || item;
+
+    // Determine force-placement date and start minute.
+    var forceDate = (item.anchorDate) || (task.date ? toKey(task.date) : dates[0].key);
+    var forceStart = item.anchorMin || null;
+
+    if (forceStart == null && task.when) {
+      var fBlocks = dayBlocks[forceDate] || [];
+      var whenParts = task.when.split(',').map(function(w) { return w.trim().toLowerCase(); });
+      for (var bi = 0; bi < fBlocks.length; bi++) {
+        if (whenParts.indexOf(fBlocks[bi].tag) >= 0) {
+          forceStart = fBlocks[bi].start;
+          break;
+        }
+      }
+    }
+    if (forceStart == null) forceStart = nowMins || 0;
+
+    var forceDur = item.dur != null ? item.dur : (task.dur || 30);
+    var fBlockName = null;
+    if (task.when) {
+      var fBlocks2 = dayBlocks[forceDate] || [];
+      var wp2 = task.when.split(',').map(function(w) { return w.trim().toLowerCase(); });
+      for (var bi2 = 0; bi2 < fBlocks2.length; bi2++) {
+        if (wp2.indexOf(fBlocks2[bi2].tag) >= 0) { fBlockName = fBlocks2[bi2].name; break; }
+      }
+    }
+
+    if (!dayPlacements[forceDate]) dayPlacements[forceDate] = [];
+    var forceEntry = {
+      task: task,
+      start: forceStart,
+      dur: forceDur,
+      locked: true,
+      _conflict: true,
+      travelBefore: 0,
+      travelAfter: 0,
+      _placementReason: 'Rigid recurring: ' + (fBlockName || task.when || 'block') + ' (overlap)',
+    };
+    dayPlacements[forceDate].push(forceEntry);
+  });
+  stillUnplaced = remainingUnplaced;
+
   // Convert deferred items back to task-object shape for the output contract.
   var unplacedTasks = stillUnplaced.map(function(entry) {
     return entry && entry.task ? entry.task : entry;
