@@ -12,13 +12,24 @@
  *   - Places each at the earliest eligible slot in its when-windows.
  *
  * Known gaps vs v1 (surfaced as diffs in shadow mode; closed in 4.3/4.4):
- *   - No recompute of slack after each commit (4.3).
- *   - No chain deadline backprop; user deadline only (4.4).
- *   - No location/tool constraint enforcement (4.4).
- *   - No dependency-met check (4.4).
- *   - Split chunks are pre-inserted as distinct DB rows (Phase 1); scheduler treats each as a regular task.
- *   - No timesPerCycle / recurring_rigid nuances (4.4).
- *   - Markers are skipped (4.4).
+ *   - Slack recompute after commit (4.3): IMPLEMENTED — incremental capacity subtraction at
+ *     lines 1138–1159; queue re-sorted every iteration (queue.sort at line 1109).
+ *   - Chain deadline backprop: OPEN — user-provided deadline only; predecessor tasks in a dep
+ *     chain are not given an earlier deadline derived from their successor's deadline. The
+ *     comment at line 262 flags this for 4.4. See docs/SCHEDULER-V2-STATUS.md.
+ *   - Location/tool constraint enforcement: IMPLEMENTED — checkLoc initialized at line 732;
+ *     canTaskRunAtMin() called in findEarliestSlot (line 805) and findLatestSlot (line 869).
+ *   - Dependency-met check: IMPLEMENTED — checkDeps initialized at line 725; depsSatisfied()
+ *     called in findEarliestSlot (line 804) and findLatestSlot (line 868).
+ *   - Split chunks: pre-inserted as distinct DB rows (Phase 1); scheduler treats each as a
+ *     regular task (design intent, not a gap).
+ *   - timesPerCycle / recurring_rigid nuances: OPEN — held for UX review (see MASTER-PLAN).
+ *     No work-budget awareness; occurrence-count only.
+ *   - Marker handling: OPEN (partial) — markers WITH anchorDate + anchorMin are placed via
+ *     the immovable path (tryPlaceAtTime, line 1039). Markers WITHOUT anchorMin fall through
+ *     to the slack-sorted queue with dur=0; they land at the earliest eligible window slot
+ *     but there is no dedicated all-day marker rendering path for time-unset markers.
+ *     See docs/SCHEDULER-V2-STATUS.md for severity and recommended action.
  *
  * Imports shared helpers that v1 also uses — no v1 code touched.
  */
