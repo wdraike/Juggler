@@ -6,7 +6,7 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { getTheme } from '../../theme/colors';
-import { GRID_START, GRID_END, PRI_COLORS, STATUS_MAP, MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, locIcon, LOC_TINT, locBgTint, DEFAULT_LOCATIONS, WHEN_TAG_ICONS, DEFAULT_TOOLS } from '../../state/constants';
+import { GRID_START, GRID_END, PRI_COLORS, STATUS_MAP, MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, locIcon, LOC_TINT, locBgTint, DEFAULT_LOCATIONS, WHEN_TAG_ICONS, DEFAULT_TOOLS, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
 import { formatHour, formatDateKey, parseDate } from '../../scheduler/dateHelpers';
 import { getBlocksForDate, parseWhen } from '../../scheduler/timeBlockHelpers';
 import { resolveLocationId, getLocationForDatePure } from '../../scheduler/locationHelpers';
@@ -86,7 +86,7 @@ function tileBg(task, darkMode, hover, theme) {
 function FixedPopup({ mousePos, item, status, theme, darkMode }) {
   var t = item.task || item;
   var priColor = PRI_COLORS[t.pri] || PRI_COLORS.P3;
-  var isDone = status === 'done' || status === 'cancel' || status === 'skip';
+  var isDone = isTerminalStatus(status);
   var statusObj = STATUS_MAP[status || ''];
   var locIcons = (t.location || []).map(function (l) { return locIcon(l); }).filter(Boolean);
 
@@ -280,7 +280,10 @@ function computeColumns(placements, hourHeight) {
 function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStatusChange, onDelete, theme, darkMode, isMobile, isBlocked, canDrag, gutterW, hourHeight, weatherDay }) {
   var t = item.task || item;
   var priColor = PRI_COLORS[t.pri] || PRI_COLORS.P3;
-  var isDone = status === 'done' || status === 'cancel' || status === 'skip';
+  var isDone = isTerminalStatus(status);
+  // juggler-cal-history Plan E — past-fade (D-10).
+  var dvTodayKey = formatDateKey(new Date());
+  var isPast = !!t.scheduledAt && formatDateKey(new Date(t.scheduledAt)) < dvTodayKey;
   var weatherResult = hasWeatherRestrictions(t) ? checkWeatherMatch(t, weatherDay) : null;
   var isOverdue = !!item._overdue && !isDone;
   var [show, setShow] = useState(false);
@@ -388,7 +391,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
           outlineOffset: -1,
           boxShadow: '0 1px 3px ' + theme.shadow,
           transition: 'background 0.1s, box-shadow 0.1s',
-          opacity: isDone ? 0.5 : (isMarker ? 0.65 : 1)
+          opacity: (isDone && isPast) ? PAST_OPACITY : (isDone ? 0.5 : (isMarker ? 0.65 : 1))
         }}
       >
         {isOverdue && (
@@ -583,7 +586,10 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
 /* ── Unscheduled task entry ── */
 function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme, darkMode, isMobile, canDrag }) {
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
-  var isDone = status === 'done' || status === 'cancel' || status === 'skip';
+  var isDone = isTerminalStatus(status);
+  // juggler-cal-history Plan E — past-fade (D-10).
+  var ueTodayKey = formatDateKey(new Date());
+  var ueIsPast = !!task.scheduledAt && formatDateKey(new Date(task.scheduledAt)) < ueTodayKey;
   var [show, setShow] = useState(false);
   var ref = useRef(null);
   var [mousePos, setMousePos] = useState(null);
@@ -616,7 +622,7 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme,
           border: '1px ' + (task.recurring ? 'dashed' : 'solid') + ' ' + (isDone ? theme.border : priColor + '30'),
           borderLeftWidth: 3, borderLeftColor: priColor,
           boxShadow: '0 1px 2px ' + theme.shadow,
-          opacity: isDone ? 0.5 : 1
+          opacity: (isDone && ueIsPast) ? PAST_OPACITY : (isDone ? 0.5 : 1)
         }}
       >
         {(task.fixed || task.rigid) && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDCCC'}</span>}

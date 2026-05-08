@@ -12,7 +12,8 @@
 
 import React, { useRef, useEffect, useMemo, useState, useCallback } from 'react';
 import ReactDOM from 'react-dom';
-import { GRID_START, GRID_END, GRID_HOURS_COUNT, PRI_COLORS, LOC_TINT, locBgTint, locIcon } from '../../state/constants';
+import { GRID_START, GRID_END, GRID_HOURS_COUNT, PRI_COLORS, LOC_TINT, locBgTint, locIcon, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
+import { formatDateKey as cgFormatDateKey } from '../../scheduler/dateHelpers';
 import { formatHour } from '../../scheduler/dateHelpers';
 import { getTheme } from '../../theme/colors';
 import { resolveLocationId } from '../../scheduler/locationHelpers';
@@ -643,17 +644,21 @@ export default function CalendarGrid({
       )}
 
       {/* MINI: markers only */}
-      {mode === 'mini' && miniMarkers.map(function(item, idx) {
+      {mode === 'mini' && (function() {
+        // juggler-cal-history Plan E — past-fade for mini markers (D-10).
+        var cgTodayKey = cgFormatDateKey(new Date());
+        var cgIsPast = !!dateKey && dateKey < cgTodayKey;
+        return miniMarkers.map(function(item, idx) {
         var pc = PRI_COLORS[item.task.pri] || PRI_COLORS.P3;
         var my = ((item.start - GRID_START * 60) / 60) * hourHeight;
         var mh = Math.max(3, ((item.dur || 30) / 60) * hourHeight);
         var ml = (idx % 2 === 0) ? (stripX - dm.MARKER_W - 1) : (stripX + dm.STRIP_W + 1);
         var exp = expandedMiniId === item.task.id;
-        var done = (statuses[item.task.id] || '') === 'done' || (statuses[item.task.id] || '') === 'cancel' || (statuses[item.task.id] || '') === 'skip';
+        var done = isTerminalStatus(statuses[item.task.id] || '');
         return (
           <React.Fragment key={item.key || item.task.id}>
             <div onClick={function() { if (exp) { setExpandedMiniId(null); onExpand(item.task.id); } else setExpandedMiniId(item.task.id); }}
-              style={{ position: 'absolute', left: ml, top: my, width: dm.MARKER_W, height: mh, borderRadius: 2, background: pc, opacity: done ? 0.3 : 0.75, zIndex: 15, cursor: 'pointer' }}
+              style={{ position: 'absolute', left: ml, top: my, width: dm.MARKER_W, height: mh, borderRadius: 2, background: pc, opacity: (done && cgIsPast) ? PAST_OPACITY : (done ? 0.3 : 0.75), zIndex: 15, cursor: 'pointer' }}
               title={item.task.text + ' (' + item.dur + 'm)'} />
             {exp && (
               <div style={{ position: 'absolute', left: stripX + dm.STRIP_W + 4, top: my - 2, zIndex: 30, background: theme.bgCard, border: '1px solid ' + pc + '60', borderRadius: 6, padding: '4px 8px', fontSize: 10, color: theme.text, whiteSpace: 'nowrap', boxShadow: '0 2px 8px ' + theme.shadow, cursor: 'pointer', maxWidth: 'calc(100% - ' + (stripX + dm.STRIP_W + 12) + 'px)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -664,7 +669,8 @@ export default function CalendarGrid({
             )}
           </React.Fragment>
         );
-      })}
+      });
+      })()}
       {/* Weather hover popup — portal so it's never clipped by overflow:hidden */}
       {hoveredHour !== null && hoveredPos && hourlyByHour[hoveredHour] && ReactDOM.createPortal((function() {
         var hw = hourlyByHour[hoveredHour];

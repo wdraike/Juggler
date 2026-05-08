@@ -6,7 +6,7 @@
 import React, { useState, useMemo, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { getTheme } from '../../theme/colors';
-import { DAY_NAMES, MONTH_NAMES, PRI_COLORS, STATUS_MAP, locIcon } from '../../state/constants';
+import { DAY_NAMES, MONTH_NAMES, PRI_COLORS, STATUS_MAP, locIcon, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 
 function minsToTime(m) {
@@ -22,11 +22,43 @@ function durLabel(dur) {
   return dur >= 60 ? Math.round(dur / 60 * 10) / 10 + 'h' : dur + 'm';
 }
 
+// juggler-cal-history Plan E — past-fade + popup helpers (D-10/D-12).
+function isTaskPast(item, todayKey) {
+  var t = item && item.task;
+  if (!t || !t.scheduledAt) return false;
+  return formatDateKey(new Date(t.scheduledAt)) < todayKey;
+}
+
+function labelForStatus(s) {
+  if (s === 'done') return 'Done at';
+  if (s === 'skip') return 'Skipped at';
+  if (s === 'cancel') return 'Cancelled at';
+  if (s === 'missed') return 'Missed at';
+  if (s === 'pause') return 'Paused at';
+  return 'Resolved at';
+}
+
+function formatCompletedAt(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  var time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase().replace(/\s/g, '');
+  var day = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  return time + ' ' + day;
+}
+
+function statusReasonForMissed(t) {
+  if (!t || !t.scheduledAt) return null;
+  var flexMin = (t.timeFlex != null) ? t.timeFlex : 60;
+  var windowClose = new Date(new Date(t.scheduledAt).getTime() + flexMin * 60 * 1000);
+  return 'missed because no resolution by ' + formatCompletedAt(windowClose.toISOString());
+}
+
 /* ── Popup card rendered via portal directly below/above anchor ── */
-function FixedPopup({ mousePos, item, status, theme, darkMode }) {
+function FixedPopup({ mousePos, item, status, theme, darkMode, completedAt, statusReason }) {
   var t = item.task;
   var priColor = PRI_COLORS[t.pri] || PRI_COLORS.P3;
-  var isDone = status === 'done' || status === 'cancel' || status === 'skip';
+  var isDone = isTerminalStatus(status);
   var statusObj = STATUS_MAP[status || ''];
   var locIcons = (t.location || []).map(function (l) { return locIcon(l); }).filter(Boolean);
 
@@ -112,6 +144,16 @@ function FixedPopup({ mousePos, item, status, theme, darkMode }) {
           {t.notes.length > 120 ? t.notes.slice(0, 120) + '...' : t.notes}
         </div>
       )}
+      {completedAt && isDone && (
+        <div style={{ marginTop: 4, fontSize: 10, color: theme.textMuted, fontStyle: 'italic' }}>
+          {labelForStatus(status)} {formatCompletedAt(completedAt)}
+        </div>
+      )}
+      {statusReason && (
+        <div style={{ marginTop: 2, fontSize: 10, color: theme.textMuted }}>
+          {statusReason}
+        </div>
+      )}
     </div>
   );
 
@@ -119,16 +161,21 @@ function FixedPopup({ mousePos, item, status, theme, darkMode }) {
 }
 
 /* ── Single task entry in a day cell ── */
-function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMobile }) {
+function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMobile, todayKey }) {
   var t = item.task;
   var priColor = PRI_COLORS[t.pri] || PRI_COLORS.P3;
-  var isDone = status === 'done' || status === 'cancel' || status === 'skip';
+  var isDone = isTerminalStatus(status);
   var isMarker = !!t.marker;
   var isWhenRelaxed = !!item._whenRelaxed;
   var borderColor = isWhenRelaxed ? '#F59E0B' : (isMarker ? '#8B5CF6' : priColor);
   var [show, setShow] = useState(false);
   var entryRef = useRef(null);
   var [mousePos, setMousePos] = useState(null);
+
+  // juggler-cal-history Plan E — past-fade on past terminal entries (D-10).
+  var isPast = isTaskPast(item, todayKey);
+  var fadeOpacity = (isDone && isPast) ? PAST_OPACITY : null;
+  var statusReason = (status === 'missed') ? statusReasonForMissed(t) : null;
 
   return (
     <div style={{ position: 'relative' }}>
@@ -160,13 +207,13 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
           outline: show ? '2px solid ' + theme.accent : 'none',
           outlineOffset: -1,
           transition: 'background 0.1s',
-          opacity: isMarker ? 0.65 : 1
+          opacity: fadeOpacity != null ? fadeOpacity : (isMarker ? 0.65 : 1)
         }}
       >
         {isWhenRelaxed && <span style={{ fontSize: 8, color: '#F59E0B', fontWeight: 700 }}>{'~'} </span>}
         {isMarker && !isWhenRelaxed && <span style={{ fontSize: 8, opacity: 0.7 }}>{'\u25C7'} </span>}{t.text}
       </div>
-      {show && <FixedPopup mousePos={mousePos} item={item} status={status} theme={theme} darkMode={darkMode} />}
+      {show && <FixedPopup mousePos={mousePos} item={item} status={status} theme={theme} darkMode={darkMode} completedAt={t.completedAt} statusReason={statusReason} />}
     </div>
   );
 }
@@ -339,6 +386,7 @@ export default function CalendarView({
                               theme={theme}
                               darkMode={darkMode}
                               isMobile={isMobile}
+                              todayKey={todayKey}
                             />
                           );
                         })}

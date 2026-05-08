@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { getTheme } from '../../theme/colors';
-import { DAY_NAMES, PRI_COLORS, STATUS_MAP } from '../../state/constants';
+import { DAY_NAMES, PRI_COLORS, STATUS_MAP, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 
 export default function MonthView({ selectedDate, dayPlacements, statuses, tasksByDate, onExpand, setDayOffset, today, darkMode, onDateDrop, isMobile }) {
@@ -52,7 +52,10 @@ export default function MonthView({ selectedDate, dayPlacements, statuses, tasks
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 {tasks.slice(0, isMobile ? 2 : 4).map(t => {
                   var st = statuses[t.id] || '';
-                  var isDone = st === 'done' || st === 'cancel' || st === 'skip';
+                  var isDone = isTerminalStatus(st);
+                  // juggler-cal-history Plan E — past-fade on past terminal entries (D-10).
+                  var isPast = key < todayKey;
+                  var fadeOpacity = (isDone && isPast) ? PAST_OPACITY : 1;
                   return (
                     <div key={t.id} draggable
                       onDragStart={e => { e.stopPropagation(); e.dataTransfer.setData('text/plain', t.id); e.dataTransfer.effectAllowed = 'move'; }}
@@ -63,7 +66,8 @@ export default function MonthView({ selectedDate, dayPlacements, statuses, tasks
                         color: isDone ? theme.textMuted : theme.text,
                         textDecoration: isDone ? 'line-through' : 'none',
                         whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                        background: theme.bgTertiary
+                        background: theme.bgTertiary,
+                        opacity: fadeOpacity
                       }}>
                       {t.text}
                     </div>

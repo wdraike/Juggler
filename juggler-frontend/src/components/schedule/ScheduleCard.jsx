@@ -6,7 +6,8 @@
 
 import React from 'react';
 import './ScheduleCard.css';
-import { PRI_COLORS, locIcon, WHEN_TAG_ICONS, DEFAULT_TOOLS, isTerminalStatus } from '../../state/constants';
+import { PRI_COLORS, locIcon, WHEN_TAG_ICONS, DEFAULT_TOOLS, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
+import { formatDateKey } from '../../scheduler/dateHelpers';
 import { getTheme } from '../../theme/colors';
 import { getTaskIcon } from '../../utils/taskIcon';
 import { checkWeatherMatch, hasWeatherRestrictions } from '../../utils/weatherMatch';
@@ -30,6 +31,9 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
   var weatherResult = hasWeatherRestrictions(task) ? checkWeatherMatch(task, weatherDay) : null;
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = isTerminalStatus(status);
+  // juggler-cal-history Plan E — past-fade (D-10).
+  var scTodayKey = formatDateKey(new Date());
+  var scIsPast = !!task.scheduledAt && formatDateKey(new Date(task.scheduledAt)) < scTodayKey;
   var h = cardHeight != null ? cardHeight : 52;
   var size = h < 28 ? 'xs'
            : h < 48 ? 'sm'
@@ -49,12 +53,12 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
       background: theme.bgCard,
       border: isOverdue ? ('2px solid ' + theme.error) : baseBorder,
       borderLeft: isOverdue ? ('3px solid ' + theme.error) : ('3px solid ' + priColor),
-      cursor: 'pointer', opacity: isDone ? 0.5 : 1,
+      cursor: 'pointer', opacity: (isDone && scIsPast) ? PAST_OPACITY : (isDone ? 0.5 : 1),
       display: 'flex', flexDirection: 'column', justifyContent: 'center',
       boxShadow: '0 1px 3px ' + theme.shadow, boxSizing: 'border-box',
       position: 'relative'
     };
-  }, [theme, task.recurring, isDone, priColor, isOverdue]);
+  }, [theme, task.recurring, isDone, scIsPast, priColor, isOverdue]);
   var durLabel = item.splitTotal > 1
     ? item.dur + ' of ' + task.dur + 'm'
     : (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm');
@@ -178,7 +182,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
           </span>
         ) : (
           <>
-            {onStatusChange && <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete} darkMode={darkMode} isMobile={isMobile} />}
+            {onStatusChange && <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete} darkMode={darkMode} isMobile={isMobile} disableTerminal={!item.task.scheduledAt} />}
             {timeRange && <span style={{ fontSize: 9, fontWeight: 600, color: theme.textMuted }}>{timeRange}</span>}
             <div style={{ flex: 1 }} />
             {typeBadges.length > 0 && (

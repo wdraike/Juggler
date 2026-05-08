@@ -5,7 +5,6 @@
 
 import React from 'react';
 import { PRI_COLORS, isTerminalStatus } from '../../state/constants';
-import { isTerminalStatus } from '../../state/constants';
 import TaskStatusSelect from '../tasks/TaskStatusSelect';
 import { getTheme } from '../../theme/colors';
 
@@ -15,7 +14,7 @@ export default React.memo(function TimelineBubble({ item, status, side, topPx, o
   var theme = getTheme(darkMode);
   var task = item.task;
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
-  var isDone = status === 'done' || status === 'cancel' || status === 'skip';
+  var isDone = isTerminalStatus(status);
 
   var STEM_LEN = isMobile ? 12 : 24;
   var BUBBLE_W = isMobile ? 80 : 120;
@@ -87,7 +86,7 @@ export default React.memo(function TimelineBubble({ item, status, side, topPx, o
       >
         {onStatusChange && (
           <span onClick={e => e.stopPropagation()} style={{ flexShrink: 0, fontSize: 9 }}>
-            <TaskStatusSelect value={status} onChange={onStatusChange} darkMode={darkMode} />
+            <TaskStatusSelect value={status} onChange={onStatusChange} darkMode={darkMode} disableTerminal={!item.task.scheduledAt} />
           </span>
         )}
         <span style={{

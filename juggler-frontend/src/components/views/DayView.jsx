@@ -5,8 +5,9 @@
 import React, { useRef, useEffect, useMemo, useCallback } from 'react';
 import CalendarGrid from '../schedule/CalendarGrid';
 import { getTheme } from '../../theme/colors';
-import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, GRID_START } from '../../state/constants';
+import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, GRID_START, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
+import { formatDateKey } from '../../scheduler/dateHelpers';
 
 import WeatherBadge from '../features/WeatherBadge';
 
@@ -133,6 +134,9 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
       </div>
       {/* All-day events banner — also outside scroll */}
       {(() => {
+        // juggler-cal-history Plan E — past-day fade (D-10).
+        var dvTodayKey = formatDateKey(new Date());
+        var isPastDay = !!selectedDateKey && selectedDateKey < dvTodayKey;
         var allDayTasks = (allTasks || []).filter(t => t.date === selectedDateKey && (t.when === 'allday' || (!t.time && (t.dur === 0 || t.dur === null))));
         if (allDayTasks.length === 0) return null;
         return (
@@ -141,7 +145,7 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {allDayTasks.map(t => {
                 var st = statuses[t.id] || '';
-                var isDone = st === 'done' || st === 'cancel' || st === 'skip';
+                var isDone = isTerminalStatus(st);
                 return (
                   <div key={t.id} onClick={() => onExpand(t.id)}
                     style={{
@@ -149,7 +153,7 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
                       background: isDone ? theme.badgeBg : theme.projectBadgeBg,
                       color: isDone ? theme.textMuted : theme.projectBadgeText,
                       border: '1px solid ' + (isDone ? theme.border : theme.projectBadgeText + '40'),
-                      opacity: isDone ? 0.5 : 1,
+                      opacity: (isDone && isPastDay) ? PAST_OPACITY : (isDone ? 0.5 : 1),
                       textDecoration: isDone ? 'line-through' : 'none'
                     }}>
                     {st === 'done' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u2713'}</span>}
@@ -164,14 +168,14 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
         );
       })()}
       {/* Early-hours banner — tasks scheduled before GRID_START (6 AM) */}
-      {earlyPlacements.length > 0 && (
+      {earlyPlacements.length > 0 && (() => { var dvTodayKey2 = formatDateKey(new Date()); var isPastDay2 = !!selectedDateKey && selectedDateKey < dvTodayKey2; return (
         <div style={{ padding: '4px 12px', borderBottom: `1px solid ${theme.border}`, flexShrink: 0 }}>
           <div style={{ fontSize: 10, fontWeight: 600, color: theme.textMuted, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 }}>Before 6 AM</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {earlyPlacements.map(function(p) {
               var t = p.task;
               var st = statuses[t.id] || '';
-              var isDone = st === 'done' || st === 'cancel' || st === 'skip';
+              var isDone = isTerminalStatus(st);
               return (
                 <div key={t.id} onClick={function() { onExpand(t.id); }}
                   style={{
@@ -179,7 +183,7 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
                     background: isDone ? theme.badgeBg : theme.bgCard,
                     color: isDone ? theme.textMuted : theme.text,
                     border: '1px solid ' + theme.border,
-                    opacity: isDone ? 0.5 : 1,
+                    opacity: (isDone && isPastDay2) ? PAST_OPACITY : (isDone ? 0.5 : 1),
                     textDecoration: isDone ? 'line-through' : 'none',
                     display: 'flex', alignItems: 'center', gap: 4
                   }}>
@@ -193,7 +197,7 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
             })}
           </div>
         </div>
-      )}
+      ); })()}
       {/* Scrollable grid area */}
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0, maxWidth: '100%', width: '100%' }} ref={scrollRef}>
         <div style={{ padding: isMobile ? '0 2px' : '0 12px', maxWidth: '100%', boxSizing: 'border-box' }}>

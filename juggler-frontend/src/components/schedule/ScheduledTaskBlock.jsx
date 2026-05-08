@@ -12,7 +12,7 @@ export default function ScheduledTaskBlock({ item, status, gridZoom, gutter, has
   var theme = getTheme(darkMode);
   var task = item.task;
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
-  var isDone = status === 'done' || status === 'cancel' || status === 'skip';
+  var isDone = isTerminalStatus(status);
   var top = ((item.start - GRID_START * 60) / 60) * gridZoom;
   var height = Math.max((item.dur / 60) * gridZoom - 2, 18);
   var GUTTER = gutter || (isMobile ? 40 : 72);
@@ -57,7 +57,7 @@ export default function ScheduledTaskBlock({ item, status, gridZoom, gutter, has
       }}>
         {onStatusChange && (
           <span onClick={e => e.stopPropagation()} style={{ flexShrink: 0, fontSize: 10 }}>
-            <TaskStatusSelect value={status} onChange={onStatusChange} darkMode={darkMode} />
+            <TaskStatusSelect value={status} onChange={onStatusChange} darkMode={darkMode} disableTerminal={!item.task.scheduledAt} />
           </span>
         )}
         {task.location?.length > 0 && (function() { var ic = task.location.map(lid => locIcon(lid)).filter(Boolean); return ic.length > 0 ? <span style={{ fontSize: 9, marginRight: 2 }}>{ic.join('')}</span> : null; })()}
