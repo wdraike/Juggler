@@ -270,3 +270,98 @@ describe('getAllTasks', () => {
     expect(res._json.tasks.length).toBe(3); // returns all including disabled
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// Recurring toggle-off cleanup
+// ═══════════════════════════════════════════════════════════════
+
+describe('Recurring toggle-off cleanup', () => {
+  test('converts recurring to one-off: removes all pending instances', async () => {
+    if (!available) return;
+    // Insert recurring template + 2 pending instances
+    await tasksWrite.insertTask(db, {
+      id: 'tog-tmpl', user_id: USER_ID, task_type: 'recurring_template',
+      text: 'Toggle test recurring', recurring: 1,
+      recur: JSON.stringify({ type: 'weekly', days: ['mon'] }),
+      status: '', created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    await tasksWrite.insertTask(db, {
+      id: 'tog-inst-1', user_id: USER_ID, task_type: 'recurring_instance',
+      source_id: 'tog-tmpl', recurring: 1, status: '',
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    await tasksWrite.insertTask(db, {
+      id: 'tog-inst-2', user_id: USER_ID, task_type: 'recurring_instance',
+      source_id: 'tog-tmpl', recurring: 1, status: '',
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+
+    // Toggle recurring=false on the template
+    var req = mockReq({ params: { id: 'tog-tmpl' }, body: { recurring: false } });
+    var res = mockRes();
+    await controller.updateTask(req, res);
+    expect(res.statusCode).toBe(200);
+
+    // All pending instances must be deleted
+    var remaining = await db('task_instances')
+      .where({ master_id: 'tog-tmpl', user_id: USER_ID, status: '' });
+    expect(remaining).toHaveLength(0);
+  });
+
+  test('archives done/cancel instances instead of deleting them', async () => {
+    if (!available) return;
+    await tasksWrite.insertTask(db, {
+      id: 'tog-tmpl2', user_id: USER_ID, task_type: 'recurring_template',
+      text: 'Toggle test archive', recurring: 1,
+      recur: JSON.stringify({ type: 'daily' }),
+      status: '', created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    await tasksWrite.insertTask(db, {
+      id: 'tog-done-1', user_id: USER_ID, task_type: 'recurring_instance',
+      source_id: 'tog-tmpl2', recurring: 1, status: 'done',
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    await tasksWrite.insertTask(db, {
+      id: 'tog-pend-1', user_id: USER_ID, task_type: 'recurring_instance',
+      source_id: 'tog-tmpl2', recurring: 1, status: '',
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+
+    var req = mockReq({ params: { id: 'tog-tmpl2' }, body: { recurring: false } });
+    var res = mockRes();
+    await controller.updateTask(req, res);
+    expect(res.statusCode).toBe(200);
+
+    // Pending instance deleted
+    var pend = await db('task_instances').where({ id: 'tog-pend-1', user_id: USER_ID }).first();
+    expect(pend).toBeUndefined();
+
+    // Done instance re-parented to archive master (not deleted)
+    var done = await db('task_instances').where({ id: 'tog-done-1', user_id: USER_ID }).first();
+    expect(done).toBeDefined();
+    expect(done.master_id).not.toBe('tog-tmpl2'); // re-parented away from template
+  });
+
+  test('preserves the template task itself after toggle-off', async () => {
+    if (!available) return;
+    await tasksWrite.insertTask(db, {
+      id: 'tog-tmpl3', user_id: USER_ID, task_type: 'recurring_template',
+      text: 'Toggle preserve test', recurring: 1,
+      recur: JSON.stringify({ type: 'weekly', days: ['tue'] }),
+      status: '', created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+
+    var req = mockReq({ params: { id: 'tog-tmpl3' }, body: { recurring: false } });
+    var res = mockRes();
+    await controller.updateTask(req, res);
+    expect(res.statusCode).toBe(200);
+
+    // Template row still exists with recurring=0
+    var tmpl = await db('task_masters').where({ id: 'tog-tmpl3', user_id: USER_ID }).first();
+    expect(tmpl).toBeDefined();
+    expect(tmpl.recurring).toBe(0);
+    // Response task has recurring=false
+    expect(res._json.task.recurring).toBe(false);
+    expect(res._json.task.id).toBe('tog-tmpl3');
+  });
+});

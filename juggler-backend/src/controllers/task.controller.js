@@ -1160,8 +1160,16 @@ async function updateTask(req, res) {
 
         // If recurrence or recurring date range changed, clean up pending instances
         // that no longer match the new pattern.
-        var needsCleanup = row.recur !== undefined || row.recur_start !== undefined || row.recur_end !== undefined;
+        var needsCleanup = row.recur !== undefined || row.recur_start !== undefined || row.recur_end !== undefined
+          || row.recurring === 0;
         if (needsCleanup) {
+          // recurring=false on a template: convert to a one-off task.
+          // resetRecurringInstances handles ledger cleanup + pending instance deletion atomically.
+          // archiveCompletedInstances re-parents done/cancel/skip instances to the archive master.
+          if (row.recurring === 0) {
+            await tasksWrite.resetRecurringInstances(trx, req.user.id, id, '[RECUR] toggle-off: recurring=false');
+            await tasksWrite.archiveCompletedInstances(trx, req.user.id, id);
+          } else {
           var _dateHelpers = require('../scheduler/dateHelpers');
           // Build the post-update template state by merging the pre-fetch (existing) with
           // the write payload (row) — both use tasks_v snake_case column names, so this is
@@ -1237,6 +1245,7 @@ async function updateTask(req, res) {
               console.log('[RECUR] cleaned up ' + deleteIds.length + ' pending instances after date-range change on ' + id);
             }
           }
+          } // end else (recur/recur_start/recur_end change detection)
         }
       } else {
         // Normal (non-recurring) task — update directly
@@ -1956,7 +1965,6 @@ async function batchUpdateTasks(req, res) {
 
             if (taskType === 'recurring_instance' && existing && existing.source_id) {
               // Route template fields to source, instance fields to this row
-              console.log('[BATCH] routing instance ' + id + ' → template ' + existing.source_id + ', row keys:', Object.keys(row).join(','));
               var templateUpdate = {};
               var instanceUpdate = {};
               Object.keys(row).forEach(function(k) {
@@ -1974,14 +1982,13 @@ async function batchUpdateTasks(req, res) {
               }
 
               if (Object.keys(templateUpdate).length > 0) {
-                console.log('[BATCH] template update:', JSON.stringify(templateUpdate));
                 templateUpdate.updated_at = db.fn.now();
                 await tasksWrite.updateTaskById(trx, existing.source_id, templateUpdate, req.user.id);
               }
               // If recurrence changed, delete all pending instances so they regenerate
-              if (templateUpdate.recur !== undefined) {
+              if (templateUpdate.recur !== undefined || templateUpdate.recurring === 0) {
                 await tasksWrite.resetRecurringInstances(trx, req.user.id, existing.source_id, '[BATCH] cycle reset');
-                if (templateUpdate.recur === null) {
+                if (templateUpdate.recur === null || templateUpdate.recurring === 0) {
                   await tasksWrite.archiveCompletedInstances(trx, req.user.id, existing.source_id);
                 }
               }
@@ -1999,9 +2006,9 @@ async function batchUpdateTasks(req, res) {
               }
               await tasksWrite.updateTaskById(trx, id, row, req.user.id);
               // If recurrence changed on a template, delete pending instances
-              if (taskType === 'recurring_template' && row.recur !== undefined) {
+              if (taskType === 'recurring_template' && (row.recur !== undefined || row.recurring === 0)) {
                 await tasksWrite.resetRecurringInstances(trx, req.user.id, id, '[BATCH] cycle reset on template');
-                if (row.recur === null) {
+                if (row.recur === null || row.recurring === 0) {
                   await tasksWrite.archiveCompletedInstances(trx, req.user.id, id);
                 }
               }
@@ -2012,7 +2019,6 @@ async function batchUpdateTasks(req, res) {
         break;
       } catch (err) {
         if (err.code === 'ER_LOCK_DEADLOCK' && attempt < MAX_RETRIES) {
-          console.log('[BATCH] deadlock, retry ' + (attempt + 1) + '/' + MAX_RETRIES);
           await new Promise(function(r) { setTimeout(r, 200 * (attempt + 1)); });
           continue;
         }
