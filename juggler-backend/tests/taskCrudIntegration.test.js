@@ -138,6 +138,37 @@ describe('createTask', () => {
     await controller.createTask(req, res);
     expect(res._json.task.when).toBe('fixed');
   });
+
+  // D-14: all-day backstop via allDay flag
+  test('D-14: sets when=allday when allDay=true and no time or when field provided', async () => {
+    if (!available) return;
+    var req = mockReq({ body: { text: 'All Day Task', allDay: true } });
+    var res = mockRes();
+    await controller.createTask(req, res);
+    expect(res.statusCode).toBe(201);
+    expect(res._json.task.when).toBe('allday');
+  });
+
+  // D-14: explicit when=allday still works (existing path via taskToRow, backstop does not interfere)
+  test('D-14: explicit when=allday is preserved', async () => {
+    if (!available) return;
+    var req = mockReq({ body: { text: 'Explicit All Day Task', when: 'allday' } });
+    var res = mockRes();
+    await controller.createTask(req, res);
+    expect(res.statusCode).toBe(201);
+    expect(res._json.task.when).toBe('allday');
+  });
+
+  // D-14: allDay=true + time provided — time takes precedence, backstop does not fire
+  test('D-14: allDay=true with time present sets when=fixed (time wins)', async () => {
+    if (!available) return;
+    var req = mockReq({ body: { text: 'Ambiguous Task', allDay: true, time: '2:00 PM', date: '4/15' } });
+    var res = mockRes();
+    await controller.createTask(req, res);
+    expect(res.statusCode).toBe(201);
+    // time was set → timeWasSet=true → when='fixed', backstop should NOT override
+    expect(res._json.task.when).toBe('fixed');
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -221,6 +252,21 @@ describe('updateTask', () => {
     var tmpl = await db('tasks_v').where('id', 'tmpl-crud').first();
     expect(tmpl.text).toBe('New Name');
     expect(tmpl.dur).toBe(45);
+  });
+
+  // D-14: all-day backstop in updateTask
+  test('D-14: sets when=allday when allDay=true and no time or when field provided', async () => {
+    if (!available) return;
+    var req1 = mockReq({ body: { text: 'Update All Day Task' } });
+    var res1 = mockRes();
+    await controller.createTask(req1, res1);
+    var id = res1._json.task.id;
+
+    var req2 = mockReq({ params: { id: id }, body: { allDay: true } });
+    var res2 = mockRes();
+    await controller.updateTask(req2, res2);
+    expect(res2.statusCode).toBe(200);
+    expect(res2._json.task.when).toBe('allday');
   });
 
   test('preferred_time_mins routes to template', async () => {
