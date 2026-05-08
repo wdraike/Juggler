@@ -20,6 +20,7 @@ var sseEmitter = require('../lib/sse-emitter');
 var { acquireLock, releaseLock, refreshLock } = require('../lib/sync-lock');
 var { flushQueueInLock } = require('../lib/task-write-queue');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
+var { isTerminalStatus } = require('../lib/task-status');
 
 // Number of consecutive syncs an event must be missing before we delete the task.
 // Prevents data loss from transient calendarView failures or API propagation delays.
@@ -712,7 +713,7 @@ async function sync(req, res) {
 
           // --- Terminal status handling (done/cancel/skip/pause) ---
           if (task && event && ledger.origin === 'juggler' && calCompletedBehavior !== 'keep' && !isIngestOnly(pid)) {
-            var isTerminal = task.status === 'done' || task.status === 'cancel' || task.status === 'skip' || task.status === 'pause';
+            var isTerminal = isTerminalStatus(task.status);
             if (isTerminal) {
               var shouldDelete = calCompletedBehavior === 'delete' || task.status !== 'done';
               if (shouldDelete) {
@@ -819,7 +820,7 @@ async function sync(req, res) {
                   }
                 }
 
-                var isTaskTerminal = task.status === 'done' || task.status === 'cancel' || task.status === 'skip' || task.status === 'pause';
+                var isTaskTerminal = isTerminalStatus(task.status);
 
                 if (taskChanged && !eventModifiedExternally) {
                   // Task changed, event stable → push (existing behaviour)
@@ -951,7 +952,7 @@ async function sync(req, res) {
               // Juggler), so we overwrite task fields from the event every sync.
               // Exception: terminal tasks (done/cancel/skip/pause) are immutable —
               // never pull calendar edits into a completed task.
-              var ingestTaskTerminal = task.status === 'done' || task.status === 'cancel' || task.status === 'skip' || task.status === 'pause';
+              var ingestTaskTerminal = isTerminalStatus(task.status);
               if (!ingestTaskTerminal) {
                 var updateFields = pAdapter.applyEventToTaskFields(event, tz, task);
                 updateFields.when = 'fixed';

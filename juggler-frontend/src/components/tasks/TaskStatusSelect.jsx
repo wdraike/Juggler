@@ -5,7 +5,12 @@
 import React from 'react';
 import { STATUS_OPTIONS } from '../../state/constants';
 
-export default function TaskStatusSelect({ value, onChange, darkMode, isMobile }) {
+// juggler-cal-history Plan C — D-15: terminal transitions require scheduled_at.
+// Disable done/skip/cancel options when the task has no scheduled time. Backend 400 guard
+// is the source of truth; this is the UX nicety.
+var TERMINAL_REQUIRES_SCHEDULE = ['done', 'skip', 'cancel'];
+
+export default function TaskStatusSelect({ value, onChange, darkMode, isMobile, disableTerminal }) {
   var current = STATUS_OPTIONS.find(s => s.value === (value || '')) || STATUS_OPTIONS[0];
   var bg = darkMode ? current.bgDark : current.bg;
   var color = darkMode ? current.colorDark : current.color;
@@ -25,9 +30,16 @@ export default function TaskStatusSelect({ value, onChange, darkMode, isMobile }
           minWidth: isMobile ? 44 : 28
         }}
       >
-        {STATUS_OPTIONS.map(s => (
-          <option key={s.value} value={s.value}>{s.label} {s.tip}</option>
-        ))}
+        {STATUS_OPTIONS.map(s => {
+          var isGated = !!disableTerminal && TERMINAL_REQUIRES_SCHEDULE.indexOf(s.value) !== -1;
+          return (
+            <option
+              key={s.value}
+              value={s.value}
+              disabled={isGated}
+            >{s.label} {isGated ? s.tip + ' — schedule task first' : s.tip}</option>
+          );
+        })}
       </select>
     </div>
   );

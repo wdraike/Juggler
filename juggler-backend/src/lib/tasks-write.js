@@ -71,7 +71,9 @@ var INSTANCE_UPDATE_FIELDS = [
   'scheduled_at', 'dur', 'date_pinned',
   'date', 'day', 'time',
   'status', 'time_remaining', 'unscheduled', 'overdue', 'generated',
-  'split_group'
+  'split_group',
+  // juggler-cal-history Plan A/C: completed_at column on task_instances.
+  'completed_at'
 ];
 
 function isTemplate(row) {

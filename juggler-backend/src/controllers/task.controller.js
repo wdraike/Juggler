@@ -22,6 +22,7 @@ const { isLocked, enqueueWrite, splitFields, flushQueue } = require('../lib/task
 const tasksWrite = require('../lib/tasks-write');
 const { isAnchorDependentRecur } = require('../../../shared/scheduler/expandRecurring');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
+var { TERMINAL_STATUSES, isTerminalStatus } = require('../lib/task-status');
 
 // Fields that, when present on an incoming task patch, require us to
 // (re)derive placement_mode. Module-level so it's allocated once instead
@@ -292,7 +293,7 @@ function rowToTask(row, timezone, sourceMap) {
 
   // Terminal-status tasks must never appear in the future — clamp scheduled_at
   // to updated_at (completion time) or now, whichever is earlier.
-  if (row.scheduled_at && (row.status === 'done' || row.status === 'cancel' || row.status === 'skip')) {
+  if (row.scheduled_at && (row.status === 'done' || row.status === 'cancel' || row.status === 'skip' || row.status === 'missed')) {
     var sa = new Date(row.scheduled_at);
     var now = new Date();
     if (sa > now) {
@@ -368,6 +369,8 @@ function rowToTask(row, timezone, sourceMap) {
     text: row.text,
     // UTC source of truth
     scheduledAt: scheduledAtToISO(row.scheduled_at),
+    // juggler-cal-history Plan A/E — completion timestamp on terminal transition.
+    completedAt: row.completed_at ? scheduledAtToISO(row.completed_at) : null,
     tz: row.tz || null,
     deadline: deadlineISO,
     startAfterAt: startAfterAtISO,
@@ -1485,7 +1488,12 @@ async function deleteTask(req, res) {
 /**
  * PUT /api/tasks/:id/status — update status + direction
  */
-var VALID_STATUSES = ['', 'done', 'wip', 'cancel', 'skip', 'pause', 'disabled'];
+var VALID_STATUSES = ['', 'done', 'wip', 'cancel', 'skip', 'pause', 'disabled', 'missed'];
+
+// juggler-cal-history Plan C — terminal transitions that require non-null scheduled_at (D-15).
+// 'missed' excluded: cron-only writer + scheduler past-window (rows always have scheduled_at).
+// 'pause' excluded: template-level operation, scheduled_at semantically n/a.
+var TERMINAL_REQUIRES_SCHEDULE = ['done', 'skip', 'cancel'];
 
 const taskPatchSchema = z.object({
   id: z.string().optional(),
@@ -1508,7 +1516,7 @@ const batchUpdateSchema = z.object({
 });
 
 const statusUpdateSchema = z.object({
-  status: z.enum(['', 'done', 'wip', 'cancel', 'skip', 'pause', 'disabled']),
+  status: z.enum(['', 'done', 'wip', 'cancel', 'skip', 'pause', 'disabled', 'missed']),
   completedAt: z.string().optional(),
   direction: z.string().optional(),
 }).passthrough();
@@ -1524,6 +1532,15 @@ async function updateTaskStatus(req, res) {
     // Validate status value
     if (status !== undefined && VALID_STATUSES.indexOf(status) === -1) {
       return res.status(400).json({ error: 'Invalid status. Valid values: ' + VALID_STATUSES.join(', ') });
+    }
+
+    // juggler-cal-history Plan C: 'missed' is system-applied (cron writer + scheduler past-window).
+    // Reject user-supplied 'missed' to keep the semantic clean.
+    if (status === 'missed') {
+      return res.status(403).json({
+        error: "Status 'missed' is system-applied; cannot be set directly.",
+        code: 'STATUS_MISSED_SYSTEM_ONLY'
+      });
     }
 
     var existing = await fetchTaskWithEventIds(db, id, req.user.id);
@@ -1615,8 +1632,28 @@ async function updateTaskStatus(req, res) {
       return res.json({ task: rowToTask(updatedTemplate, null, srcMap), instancesRemoved: status === 'pause' ? (instanceIds || []).length : 0 });
     }
 
+    // juggler-cal-history Plan C — scheduled_at required for terminal transitions (D-15).
+    // Backend constraint: cannot mark a task done/skip/cancel without a scheduled time.
+    // Eliminates the unscheduled-history anchor ambiguity. Frontend mirrors with disabled buttons.
+    if (TERMINAL_REQUIRES_SCHEDULE.indexOf(status) !== -1
+        && !existing.scheduled_at
+        && !req.body.scheduledAt) {
+      return res.status(400).json({
+        error: 'Cannot mark task ' + status + ' without a scheduled time. Schedule it first.',
+        code: 'SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS'
+      });
+    }
+
     var update = { status: status || '', updated_at: db.fn.now() };
     var isFutureScheduled = existing.scheduled_at && new Date(existing.scheduled_at) > new Date();
+
+    // juggler-cal-history Plan C — write completed_at on terminal transition (D-12).
+    // Reverse: clearing terminal status (reopen) clears completed_at.
+    if (isTerminalStatus(status) && !isTerminalStatus(existing.status)) {
+      update.completed_at = db.fn.now();
+    } else if (status === '' && isTerminalStatus(existing.status)) {
+      update.completed_at = null;
+    }
 
     // When marking done, only update scheduled_at if the user provided an explicit
     // custom completion time. Never overwrite it with "now" — that's the done-time
@@ -1631,8 +1668,11 @@ async function updateTaskStatus(req, res) {
       // Otherwise leave scheduled_at unchanged (covers 'now', 'scheduled', and undefined)
     }
 
-    // [FIX D-04] Reactivating a done task — clear done_frozen so sync resumes
-    if (status && status !== 'done' && existing && existing.status === 'done') {
+    // [FIX D-04 + juggler-cal-history Plan C] Reactivating a terminal task — clear done_frozen
+    // so sync resumes. Originally fix-cal-sync handled `done → non-done` only; Plan C
+    // generalizes to all terminal statuses (done, cancel, skip, pause, missed) via shared
+    // isTerminalStatus. Fires on any terminal → non-terminal transition.
+    if (existing && isTerminalStatus(existing.status) && !isTerminalStatus(status)) {
       await db('cal_sync_ledger')
         .where({ user_id: req.user.id, task_id: id, status: 'done_frozen' })
         .update({ status: 'active', synced_at: db.fn.now() });

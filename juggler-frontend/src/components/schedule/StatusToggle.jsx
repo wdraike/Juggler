@@ -38,7 +38,12 @@ function DeleteButton({ onDelete, size, fontSize, darkMode }) {
   );
 }
 
-export default React.memo(function StatusToggle({ value, onChange, onDelete, darkMode, compact, isMobile, taskType }) {
+// juggler-cal-history Plan C — D-15: terminal transitions require scheduled_at.
+// Disable done/skip/cancel buttons when the task has no scheduled time. Backend 400 guard
+// is the source of truth; this is the UX nicety.
+var TERMINAL_REQUIRES_SCHEDULE = ['done', 'skip', 'cancel'];
+
+export default React.memo(function StatusToggle({ value, onChange, onDelete, darkMode, compact, isMobile, taskType, disableTerminal }) {
   var size = compact ? 16 : (isMobile ? 28 : 22);
   var fontSize = compact ? 8 : (isMobile ? 14 : 12);
 
@@ -56,24 +61,27 @@ export default React.memo(function StatusToggle({ value, onChange, onDelete, dar
     <div style={{ display: 'flex', gap: compact ? 1 : 3, alignItems: 'center' }}>
       {statuses.map(function(s) {
         var active = (value || '') === s.value;
+        var isDisabled = !!disableTerminal && TERMINAL_REQUIRES_SCHEDULE.indexOf(s.value) !== -1;
         return (
           <button
             key={s.value || 'open'}
-            onClick={function(e) { e.stopPropagation(); onChange(s.value); }}
-            title={s.label}
+            onClick={function(e) { e.stopPropagation(); if (!isDisabled) onChange(s.value); }}
+            disabled={isDisabled}
+            title={isDisabled ? 'Schedule task before resolving' : s.label}
             style={{
               width: size, height: size,
               borderRadius: 4,
               border: active
                 ? '1.5px solid ' + (darkMode ? s.colorDark : s.color)
                 : '1px solid ' + (darkMode ? '#475569' : '#94A3B8'),
-              cursor: 'pointer',
+              cursor: isDisabled ? 'not-allowed' : 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: fontSize,
               fontWeight: 700,
               padding: 0,
               background: active ? (darkMode ? s.activeBgDark : s.activeBg) : (darkMode ? '#1E293B' : '#F5F0E8'),
               color: active ? (darkMode ? s.colorDark : s.color) : (darkMode ? '#64748B' : '#6B7280'),
+              opacity: isDisabled ? 0.45 : 1,
               transition: 'background 0.1s, color 0.1s, border-color 0.1s',
               flexShrink: 0
             }}

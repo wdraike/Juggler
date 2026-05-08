@@ -47,6 +47,26 @@ var syncLock = require('../lib/sync-lock');
 var DEFAULT_TIMEZONE = constants.DEFAULT_TIMEZONE;
 
 /**
+ * juggler-cal-history Plan C — compute window-close UTC for a recurring instance.
+ * Returns Date when scheduled_at + timeFlex marks the moment the placement window closed.
+ * Used by the past-window auto-mark block (status: 'missed' write below) and exported for
+ * the cal-history cron's matching logic in `shared/scheduler/missedHelpers.js`.
+ *
+ * @param task — task object with `scheduledAt` (camelCase, rowToTask) or `scheduled_at` (snake_case, raw row)
+ * @param _today — current date (kept for parity with caller signatures; not used)
+ * @param _tz — timezone (kept for parity; window math is UTC-pure)
+ * @returns Date | null — null when scheduled_at is missing
+ */
+function computeWindowCloseUtc(task, _today, _tz) {
+  var sa = task && (task.scheduledAt || task.scheduled_at);
+  if (!sa) return null;
+  var saDate = new Date(sa);
+  if (isNaN(saDate.getTime())) return null;
+  var flexMin = (task.timeFlex != null) ? task.timeFlex : 60;
+  return new Date(saDate.getTime() + flexMin * 60 * 1000);
+}
+
+/**
  * Get current date/time in user's timezone
  */
 function getNowInTimezone(timezone) {
@@ -1247,7 +1267,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   });
 
   // 9. Move remaining past-dated tasks to today
-  //    Past recurringTasks missed their day — mark as 'skip'.
+  //    Past recurringTasks missed their day — mark as 'missed' (juggler-cal-history Plan C; was 'skip').
   //    Past non-recurringTasks that weren't placed — move date to today.
   var todayMidnight = localToUtc(timeInfo.todayKey, '12:00 AM', TIMEZONE);
   if (todayMidnight) {
@@ -1278,15 +1298,21 @@ async function runScheduleAndPersist(userId, _retries, options) {
       if (t.marker) return;
 
       if (t.recurring) {
-        // Past recurring — check placement window before auto-skipping.
+        // Past recurring — check placement window before auto-marking missed.
         // If still within timeFlex range, the scheduler can place it today.
         var flex = t.timeFlex != null ? t.timeFlex : 60;
         var daysPast = Math.round((today.getTime() - td.getTime()) / 86400000);
-        if (flex >= daysPast * 1440) return; // still within window, don't skip
-        // Outside placement window — day was missed, mark as skipped
+        if (flex >= daysPast * 1440) return; // still within window, don't mark
+        // Outside placement window — day was missed, mark as 'missed' (juggler-cal-history
+        // Plan C; was 'skip'). Distinguishes user-initiated skip from system-applied missed.
+        var windowClose = computeWindowCloseUtc(t, today, TIMEZONE);
         pendingUpdates.push({
           id: t.id,
-          dbUpdate: { status: 'skip', updated_at: db.fn.now() }
+          dbUpdate: {
+            status: 'missed',
+            completed_at: windowClose || db.fn.now(),
+            updated_at: db.fn.now()
+          }
         });
       } else {
         // Past non-recurring — move date forward to today
@@ -1984,4 +2010,4 @@ async function getSchedulePlacements(userId, options) {
   };
 }
 
-module.exports = { runScheduleAndPersist, getSchedulePlacements };
+module.exports = { runScheduleAndPersist, getSchedulePlacements, computeWindowCloseUtc };
