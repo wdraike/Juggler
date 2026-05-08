@@ -72,6 +72,28 @@ function effectiveDuration(t) {
   return Math.min(rd > 0 ? rd : (rd === 0 ? 0 : 30), 720);
 }
 
+// ── Placement reason ──────────────────────────────────────────
+// Builds a human-readable _placementReason string for each entry.
+// `item` is the scheduler item object (not the raw task).
+// `isConflict` = true when the placement overrides occupancy (rigid recurring overflow).
+// `blockName` = the display name of the when-block (e.g. "Lunch", "Morning").
+function buildPlacementReason(item, isConflict, blockName) {
+  if (isConflict) return 'Rigid recurring: ' + (blockName || item.when || 'block') + ' (overlap)';
+  if (item.isFixedWhen) return 'Fixed calendar event';
+  if (item.isRecurring && item.isRigid) return 'Rigid recurring: ' + (blockName || item.when || 'block');
+  if (item.deadlineDate) {
+    var dl = item.task && item.task.deadline ? item.task.deadline : item.deadlineDate;
+    return (item.pri || 'P3') + ' deadline due ' + dl;
+  }
+  if (item.dependsOn && item.dependsOn.length > 0) {
+    return 'After ' + (item.depNames && item.depNames[0] ? "'" + item.depNames[0] + "'" : 'dependency');
+  }
+  if (item.task && item.task.tools && item.task.tools.length > 0) {
+    return 'Requires ' + item.task.tools.join(', ');
+  }
+  return 'Scheduled by priority';
+}
+
 function normalizePri(p) {
   if (!p) return 'P3';
   var s = String(p).trim().toUpperCase();
@@ -285,6 +307,11 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     else if (t.dependsOn && typeof t.dependsOn === 'string') {
       try { depsOn = JSON.parse(t.dependsOn) || []; } catch (e) { depsOn = []; }
     }
+    // Dep names for placement reason annotations (E4).
+    var depNames = depsOn.map(function(depId) {
+      var depTask = pool.find(function(pt) { return pt.id === depId; });
+      return depTask ? (depTask.text || depId) : depId;
+    });
 
     // Travel buffers. For split chunks, only the first carries travelBefore
     // and only the last carries travelAfter — matches v1's recordPlace logic
@@ -392,6 +419,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       masterId: t.sourceId || t.master_id || null,
       splitOrdinal: splitOrd,
       splitTotal: splitTot,
+      depNames: depNames,
       slack: null, // filled later
       // RECURRING_FLEXIBLE tasks whose scheduled time has already passed today
       // get pushed to the latest available slot so they stay visible on the
@@ -577,12 +605,50 @@ function tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements, cfg, env)
   var occ = dayOcc[item.anchorDate];
   if (!occ) return false;
   var start = item.anchorMin;
+
+  // Fixed/pinned overlap warning: detect conflict with already-placed locked entries.
+  var warnings = env && env.warnings;
+  if ((item.isFixedWhen || item.isPinned) && warnings) {
+    var existingFixed = (dayPlaced[item.anchorDate] || []).filter(function(p) {
+      return p.locked && p.start < start + item.dur && p.start + p.dur > start;
+    });
+    if (existingFixed.length > 0) {
+      warnings.push({ type: 'fixedOverlap', taskIds: [item.id].concat(existingFixed.map(function(p) { return p.task && p.task.id; })) });
+    }
+  }
+
   // Fixed/pinned placements reserve their slot regardless of conflict —
   // user intent wins. Later-placed items must route around. Travel buffer
   // extends the footprint so adjacent tasks can't overlap commute time.
   reserveWithTravel(occ, start, item.dur, item.travelBefore, item.travelAfter);
+
+  // Look up block name for rigid recurring placement reason.
+  var blockName = null;
+  if (item.isRecurring && item.isRigid && item.when) {
+    var imBlocks = env && env.dayBlocks && env.dayBlocks[item.anchorDate];
+    if (imBlocks) {
+      var wp = item.when.split(',').map(function(w) { return w.trim().toLowerCase(); });
+      for (var bi = 0; bi < imBlocks.length; bi++) {
+        if (wp.indexOf(imBlocks[bi].tag) >= 0) {
+          blockName = imBlocks[bi].name; break;
+        }
+      }
+    }
+  }
+
+  // _conflict: rigid recurring overlapping an already-occupied slot.
+  var isConflict = false;
+  if (item.isRigid) {
+    var occupied = (dayPlaced[item.anchorDate] || []).some(function(p) {
+      return p.start < start + item.dur && p.start + p.dur > start;
+    });
+    if (occupied) isConflict = true;
+  }
+
   var entry = { task: item.task, start: start, dur: item.dur, locked: true,
-    travelBefore: item.travelBefore || 0, travelAfter: item.travelAfter || 0 };
+    travelBefore: item.travelBefore || 0, travelAfter: item.travelAfter || 0,
+    _placementReason: buildPlacementReason(item, isConflict, blockName) };
+  if (isConflict) entry._conflict = true;
   if (!dayPlaced[item.anchorDate]) dayPlaced[item.anchorDate] = [];
   dayPlaced[item.anchorDate].push(entry);
   if (!dayPlacements[item.anchorDate]) dayPlacements[item.anchorDate] = [];
@@ -1002,12 +1068,15 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   // env carries everything findEarliestSlot needs to extend the dates list
   // on the fly for infinite-slack tasks. Declared once so we can thread the
   // same object through tryPlaceQueued in both the main loop and retry pass.
+  var warnings = [];
   var env = {
     dayPlaced: dayPlaced,
     dayPlacements: dayPlacements,
     dayOccPrefix: dayOccPrefix,
     lastByMaster: lastByMaster,
-    timeBlocks: timeBlocks
+    timeBlocks: timeBlocks,
+    dayBlocks: dayBlocks,
+    warnings: warnings
   };
 
   var items = buildItems(allTasks, statuses, dates, effectiveTodayKey, nowMins, cfg);
@@ -1135,7 +1204,8 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     var slot = placement.slot;
     reserveWithTravel(dayOcc[slot.dateKey], slot.start, item.dur, item.travelBefore, item.travelAfter);
     var entry = { task: item.task, start: slot.start, dur: item.dur, locked: false,
-      travelBefore: item.travelBefore || 0, travelAfter: item.travelAfter || 0 };
+      travelBefore: item.travelBefore || 0, travelAfter: item.travelAfter || 0,
+      _placementReason: buildPlacementReason(item, false, null) };
     if (placement.overdue) entry._overdue = true;
     if (placement.relaxed) entry._flexWhenRelaxed = true;
     dayPlaced[slot.dateKey].push(entry);
@@ -1191,7 +1261,8 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     var slot = placement.slot;
     reserveWithTravel(dayOcc[slot.dateKey], slot.start, item.dur, item.travelBefore, item.travelAfter);
     var entry = { task: item.task, start: slot.start, dur: item.dur, locked: false,
-      travelBefore: item.travelBefore || 0, travelAfter: item.travelAfter || 0 };
+      travelBefore: item.travelBefore || 0, travelAfter: item.travelAfter || 0,
+      _placementReason: buildPlacementReason(item, false, null) };
     if (placement.overdue) entry._overdue = true;
     if (placement.relaxed) entry._flexWhenRelaxed = true;
     dayPlaced[slot.dateKey].push(entry);
@@ -1218,7 +1289,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     deadlineMisses: [],
     placedCount: placedCount,
     score: scoreSchedule(dayPlacements, unplacedTasks, allTasks),
-    warnings: [],
+    warnings: warnings,
     timezone: cfg.timezone || null,
     spacingStats: {},
     slackByTaskId: slackByTaskId
