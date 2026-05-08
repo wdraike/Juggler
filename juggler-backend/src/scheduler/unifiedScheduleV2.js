@@ -328,6 +328,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     var DEFAULT_TIME_FLEX = 60;
     var isWindowMode = pm === PLACEMENT_MODES.RECURRING_WINDOW;
     var windowLo = null, windowHi = null;
+    var isMissedWindow = false; // true when the flex window is entirely past
     if (isWindowMode) {
       var flex = t.timeFlex != null ? t.timeFlex : DEFAULT_TIME_FLEX;
       if (flex > 0 && flex <= 480) {
@@ -337,6 +338,10 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
         // or after DAY_END) — the clamped window is inverted (Lo > Hi).
         // Fall back to when-tag placement so the task isn't silently unplaced.
         if (windowHi <= windowLo) isWindowMode = false;
+        // Window entirely past on today → mark as missed; dual-placed in unplaced + grid.
+        else if (anchorDate === todayKey && nowMins != null && windowHi <= nowMins) {
+          isMissedWindow = true;
+        }
       } else {
         isWindowMode = false; // degenerate flex — fall back to when tags
       }
@@ -408,8 +413,10 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       startAfterDate: toKey(t.startAfter),
       dependsOn: depsOn,
       isWindowMode: isWindowMode,
+      isMissedWindow: isMissedWindow,
       windowLo: windowLo,
       windowHi: windowHi,
+      preferredTimeMins: t.preferredTimeMins != null ? t.preferredTimeMins : null,
       travelBefore: travelBefore,
       travelAfter: travelAfter,
       allowedDows: allowedDows,
@@ -1079,6 +1086,27 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     warnings: warnings
   };
 
+  // Phase snapshots (debug mode only). captureSnapshot records the current
+  // dayPlacements state at each named phase so the admin UI and tests can
+  // inspect scheduling progress step-by-step.
+  var phaseSnapshots = cfg._debug ? [] : null;
+  function captureSnapshot(phaseName) {
+    if (!phaseSnapshots) return;
+    var days = {};
+    Object.keys(dayPlacements).forEach(function(dk) {
+      days[dk] = (dayPlacements[dk] || []).map(function(p) {
+        return {
+          taskId: p.task && p.task.id,
+          text: p.task && p.task.text,
+          start: p.start,
+          dur: p.dur,
+          type: p.locked ? 'fixed' : (p._conflict ? 'conflict' : 'flexible'),
+        };
+      });
+    });
+    phaseSnapshots.push({ phase: phaseName, timestamp: Date.now(), days: days });
+  }
+
   var items = buildItems(allTasks, statuses, dates, effectiveTodayKey, nowMins, cfg);
 
   // Chain deadline backpropagation. Walk dependsOn edges backward from
@@ -1130,6 +1158,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   // Rebuild all prefix sums once after immovables are placed so the slack
   // computation below sees correct occupancy for every day.
   dates.forEach(function(d) { rebuildPrefix(dayOcc[d.key], dayOccPrefix[d.key]); });
+  captureSnapshot('immovables');
 
   // Compute initial slack AND cache capacity for each queued item.
   // Capacity is the total free minutes in the item's eligible windows
@@ -1144,6 +1173,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       item.capacity = item.slack + item.dur;
     }
   });
+  captureSnapshot('slack_computed');
 
   // Dynamic-slack placement loop (4.3).
   //
@@ -1159,6 +1189,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   // takes priority over micro-optimization at this stage.
   var unplaced = [];
   var slackByTaskId = {};
+  var queuePlacedCount = 0; // for periodic snapshots in debug mode
   // placedById tracks every placement — immovables from Phase 0 plus every
   // queue commit. findEarliestSlot consults it to gate candidate slots on
   // dependency completion. Immovables are seeded below; queue items are
@@ -1216,6 +1247,8 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       (item.slack != null && isFinite(item.slack)) ? 'V2: Constrained' : 'V2: Unconstrained',
       item, slot.start, item.dur, slot.dateKey, false, dayPlaced,
       { overdue: placement.overdue, relaxed: placement.relaxed });
+    queuePlacedCount++;
+    if (phaseSnapshots && queuePlacedCount % 5 === 0) captureSnapshot('queue_step_' + queuePlacedCount);
 
     // Recompute slack for affected remaining items. An item is affected
     // only if the committed slot's date falls within its eligible range
@@ -1240,6 +1273,8 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       });
     }
   }
+
+  captureSnapshot('queue_done');
 
   // Retry pass: items that deferred because of unmet deps may now be
   // placeable — their deps could have landed later in the main pass (e.g.
@@ -1272,6 +1307,39 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     emitStepRecord(cfg, 'V2: Retry', item, slot.start, item.dur, slot.dateKey, false, dayPlaced,
       { overdue: placement.overdue, relaxed: placement.relaxed });
   });
+  captureSnapshot('retry_done');
+
+  // Missed-window pass: RECURRING_WINDOW tasks whose flex window is entirely past.
+  // They appear in unplaced (with 'missed' reason) AND on the day grid (with _overdue).
+  var missedWindowItems = stillUnplaced.filter(function(u) {
+    return u && u.isMissedWindow;
+  });
+  stillUnplaced = stillUnplaced.filter(function(u) {
+    return !(u && u.isMissedWindow);
+  });
+  missedWindowItems.forEach(function(item) {
+    var task = item.task;
+    // Mark missed on the task object for unplaced output.
+    task._unplacedReason = 'missed';
+    task._unplacedDetail = 'Flex window has passed';
+    // Also push to unplaced list for ConflictsView / pastDue pickup.
+    stillUnplaced.push(item);
+    // Dual-place on the grid at preferredTimeMins with _overdue so user can mark done/skip.
+    var overdueDateKey = item.anchorDate || dates[0].key;
+    if (!dayPlacements[overdueDateKey]) dayPlacements[overdueDateKey] = [];
+    dayPlacements[overdueDateKey].push({
+      task: task,
+      start: item.preferredTimeMins != null ? item.preferredTimeMins : (item.anchorMin || 0),
+      dur: item.dur,
+      locked: false,
+      _overdue: true,
+      travelBefore: 0,
+      travelAfter: 0,
+      _placementReason: 'Recurring window missed — placed for completion',
+    });
+  });
+
+  captureSnapshot('missed_window_done');
 
   // Force-placement pass: rigid recurrings must always appear even when their
   // when-block is full or in the past. Place at block start with _conflict=true.
@@ -1328,6 +1396,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     dayPlacements[forceDate].push(forceEntry);
   });
   stillUnplaced = remainingUnplaced;
+  captureSnapshot('rigid_forced');
 
   // Convert deferred items back to task-object shape for the output contract.
   var unplacedTasks = stillUnplaced.map(function(entry) {
@@ -1337,7 +1406,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   var placedCount = 0;
   Object.keys(dayPlacements).forEach(function(k) { placedCount += dayPlacements[k].length; });
 
-  return {
+  return Object.assign({
     dayPlacements: dayPlacements,
     taskUpdates: {},
     newStatuses: Object.assign({}, statuses),
@@ -1349,7 +1418,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     timezone: cfg.timezone || null,
     spacingStats: {},
     slackByTaskId: slackByTaskId
-  };
+  }, phaseSnapshots ? { phaseSnapshots: phaseSnapshots } : {});
 }
 
 module.exports = unifiedScheduleV2;
