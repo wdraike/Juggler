@@ -409,6 +409,59 @@ describe('Sync All-Day & Transparency', () => {
     expect(afterSync.last_pushed_hash).toBe(hashBefore);
   }));
 
+  test("D-10: done_frozen skip is logged to sync_history as action='skipped'", skipIfNoDB(async () => {
+    if (!hasGCalCredentials()) return;
+    user = await seedTestUser(GCAL_ONLY);
+
+    // Seed calCompletedBehavior=update preference
+    await db('user_config').where({ user_id: TEST_USER_ID, config_key: 'preferences' }).del();
+    await db('user_config').insert({
+      user_id: TEST_USER_ID,
+      config_key: 'preferences',
+      config_value: JSON.stringify({ calCompletedBehavior: 'update' })
+    });
+
+    // Create a done task and push it once to seed a ledger row
+    var task = await makeTask({
+      text: 'D-10 Skipped Logging Test',
+      scheduled_at: tomorrow(17, 0),
+      dur: 30,
+      when: 'afternoon',
+      status: 'done'
+    });
+
+    var req = mockReq(user);
+    var res = mockRes();
+    await sync(req, res);
+
+    var ledger = await db('cal_sync_ledger')
+      .where({ user_id: TEST_USER_ID, task_id: task.id, provider: 'gcal' })
+      .first();
+    expect(ledger).toBeTruthy();
+    createdGCalEventIds.push(ledger.provider_event_id);
+
+    // Force done_frozen so the next sync hits the FIX D-03 guard
+    await db('cal_sync_ledger')
+      .where({ id: ledger.id })
+      .update({ status: 'done_frozen' });
+
+    // Clear sync_history so the assertion is unambiguous
+    await db('sync_history').where({ user_id: TEST_USER_ID }).del();
+
+    // Sync again — done_frozen guard skips this row and MUST log a 'skipped' action
+    user = await db('users').where('id', TEST_USER_ID).first();
+    req = mockReq(user);
+    res = mockRes();
+    await sync(req, res);
+
+    var skippedRow = await db('sync_history')
+      .where({ user_id: TEST_USER_ID, action: 'skipped', task_id: task.id })
+      .first();
+    expect(skippedRow).toBeTruthy();
+    expect(skippedRow.action).toBe('skipped');
+    expect(skippedRow.task_id).toBe(task.id);
+  }));
+
   test('done_frozen: calCompletedBehavior=keep tasks are NOT frozen (D-05)', skipIfNoDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
