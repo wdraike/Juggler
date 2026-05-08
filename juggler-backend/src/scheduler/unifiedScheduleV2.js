@@ -73,6 +73,18 @@ function effectiveDuration(t) {
 }
 
 // ── Placement reason ──────────────────────────────────────────
+// Look up the display name of the when-block matching this item on a given date.
+// Returns null when not found (caller falls back to item.when tag string).
+function getBlockNameForItem(item, dateKey, dayBlocks) {
+  if (!item.when || !dayBlocks || !dayBlocks[dateKey]) return null;
+  var blocks = dayBlocks[dateKey];
+  var whenParts = item.when.split(',').map(function(w) { return w.trim().toLowerCase(); });
+  for (var bi = 0; bi < blocks.length; bi++) {
+    if (whenParts.indexOf(blocks[bi].tag) >= 0) return blocks[bi].name;
+  }
+  return null;
+}
+
 // Builds a human-readable _placementReason string for each entry.
 // `item` is the scheduler item object (not the raw task).
 // `isConflict` = true when the placement overrides occupancy (rigid recurring overflow).
@@ -807,7 +819,8 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
 
   var placedById = opts && opts.placedById;
   var statuses = (opts && opts.statuses) || {};
-  var checkDeps = placedById && item.dependsOn && item.dependsOn.length > 0;
+  var relaxDeps = !!(opts && opts.relaxDeps);
+  var checkDeps = !relaxDeps && placedById && item.dependsOn && item.dependsOn.length > 0;
   var relaxWhen = !!(opts && opts.relaxWhen);
   var cfg = (opts && opts.cfg) || null;
   var toolMatrix = cfg && cfg.toolMatrix;
@@ -926,7 +939,8 @@ function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
 
   var placedById = opts && opts.placedById;
   var statuses = (opts && opts.statuses) || {};
-  var checkDeps = placedById && item.dependsOn && item.dependsOn.length > 0;
+  var relaxDepsL = !!(opts && opts.relaxDeps);
+  var checkDeps = !relaxDepsL && placedById && item.dependsOn && item.dependsOn.length > 0;
   var relaxWhen = !!(opts && opts.relaxWhen);
   var cfg = (opts && opts.cfg) || null;
   var toolMatrix = cfg && cfg.toolMatrix;
@@ -969,7 +983,8 @@ function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
 //   3. If flex_when: relax when to 'anytime'
 //   4. If both: drop deadline AND relax when (last resort)
 function tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, statuses, cfg, env) {
-  var base = { placedById: placedById, statuses: statuses, cfg: cfg, env: env };
+  var relaxDepsFlag = !!(env && env.relaxDeps);
+  var base = { placedById: placedById, statuses: statuses, cfg: cfg, env: env, relaxDeps: relaxDepsFlag };
   var overdueApplicable = item.slack != null && isFinite(item.slack) && item.slack < 0;
   var flexApplicable = !!item.flexWhen;
   var findSlot = item.preferLatestSlot ? findLatestSlot : findEarliestSlot;
@@ -1236,7 +1251,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     reserveWithTravel(dayOcc[slot.dateKey], slot.start, item.dur, item.travelBefore, item.travelAfter);
     var entry = { task: item.task, start: slot.start, dur: item.dur, locked: false,
       travelBefore: item.travelBefore || 0, travelAfter: item.travelAfter || 0,
-      _placementReason: buildPlacementReason(item, false, null) };
+      _placementReason: buildPlacementReason(item, false, getBlockNameForItem(item, slot.dateKey, dayBlocks)) };
     if (placement.overdue) entry._overdue = true;
     if (placement.relaxed) entry._flexWhenRelaxed = true;
     dayPlaced[slot.dateKey].push(entry);
@@ -1297,7 +1312,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     reserveWithTravel(dayOcc[slot.dateKey], slot.start, item.dur, item.travelBefore, item.travelAfter);
     var entry = { task: item.task, start: slot.start, dur: item.dur, locked: false,
       travelBefore: item.travelBefore || 0, travelAfter: item.travelAfter || 0,
-      _placementReason: buildPlacementReason(item, false, null) };
+      _placementReason: buildPlacementReason(item, false, getBlockNameForItem(item, slot.dateKey, dayBlocks)) };
     if (placement.overdue) entry._overdue = true;
     if (placement.relaxed) entry._flexWhenRelaxed = true;
     dayPlaced[slot.dateKey].push(entry);
@@ -1397,6 +1412,42 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   });
   stillUnplaced = remainingUnplaced;
   captureSnapshot('rigid_forced');
+
+  // Dep-relaxation pass: deadline tasks (deadline ≤ today) that are still unplaced
+  // because their dep chain couldn't fully land. Place them ignoring dep constraints
+  // as a last resort — something is better than missing a hard deadline entirely.
+  var todayKey = effectiveTodayKey;
+  var deadlineRelaxed = stillUnplaced.filter(function(u) {
+    return u && u.task && u.deadlineDate && u.deadlineDate <= todayKey &&
+           u.dependsOn && u.dependsOn.length > 0;
+  });
+  stillUnplaced = stillUnplaced.filter(function(u) {
+    return !(u && u.task && u.deadlineDate && u.deadlineDate <= todayKey &&
+             u.dependsOn && u.dependsOn.length > 0);
+  });
+  deadlineRelaxed.forEach(function(item) {
+    // Try with dep-relaxation first. If still can't place, also ignore deadline
+    // (last resort: place on any future day rather than miss the deadline entirely).
+    var relaxedEnv = Object.assign({}, env, { relaxDeps: true });
+    var slot = findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc,
+      { placedById: placedById, statuses: statuses, cfg: cfg, env: relaxedEnv,
+        relaxDeps: true, ignoreDeadline: true });
+    var placement = slot ? { slot: slot, overdue: true } : { slot: null };
+    if (!placement.slot) {
+      // Still can't place — return to unplaced
+      stillUnplaced.push(item);
+      return;
+    }
+    var slot = placement.slot;
+    reserveWithTravel(dayOcc[slot.dateKey], slot.start, item.dur, item.travelBefore, item.travelAfter);
+    var rEntry = { task: item.task, start: slot.start, dur: item.dur, locked: false,
+      travelBefore: item.travelBefore || 0, travelAfter: item.travelAfter || 0,
+      _placementReason: buildPlacementReason(item, false, null) };
+    if (placement.overdue) rEntry._overdue = true;
+    dayPlaced[slot.dateKey].push(rEntry);
+    dayPlacements[slot.dateKey].push(rEntry);
+    placedById[item.id] = { dateKey: slot.dateKey, start: slot.start, dur: item.dur };
+  });
 
   // Convert deferred items back to task-object shape for the output contract.
   var unplacedTasks = stillUnplaced.map(function(entry) {
