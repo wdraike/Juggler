@@ -86,6 +86,20 @@ async function start() {
   } catch (err) {
     console.warn('[AiUsageFlusher] Failed to start:', err.message);
   }
+
+  // juggler-cal-history Plan D — sharded cron for missed auto-mark + 12mo purge.
+  // Non-fatal: server continues if cron init fails.
+  try {
+    const calHistoryCron = require('./cron/cal-history-cron');
+    calHistoryCron.start({
+      db: db,
+      cache: require('./lib/redis'),
+      sseEmitter: require('./lib/sse-emitter')
+    });
+    console.log('✅ cal-history-cron started');
+  } catch (err) {
+    console.warn('[cal-history-cron] Failed to start:', err.message);
+  }
 }
 
 // ── Graceful shutdown ──
