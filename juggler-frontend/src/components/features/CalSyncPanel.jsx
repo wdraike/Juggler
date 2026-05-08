@@ -1018,11 +1018,13 @@ export default function CalSyncPanel({
             var pullCount = (counts.pulled || 0) + (counts.promoted || 0) + (counts.created || 0) + (counts.conflict_provider || 0);
             var orphanCount = counts.deleted_local || 0;
             var deleteCount = counts.deleted_remote || 0;
+            var skippedCount = counts.skipped || 0;
             var errorCount = counts.error || 0;
             if (pushCount) parts.push(pushCount + ' pushed');
             if (pullCount) parts.push(pullCount + ' pulled');
             if (orphanCount) parts.push(orphanCount + ' cleaned up');
             if (deleteCount) parts.push(deleteCount + ' deleted');
+            if (skippedCount) parts.push(skippedCount + ' skipped');
             if (errorCount) parts.push(errorCount + ' error' + (errorCount > 1 ? 's' : ''));
             return parts.length ? parts.join(' · ') : 'No changes';
           }

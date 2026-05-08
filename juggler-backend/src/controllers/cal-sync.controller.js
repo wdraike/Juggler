@@ -740,6 +740,13 @@ async function sync(req, res) {
               event_summary: event ? (event.title || task.text) : task.text,
               miss_count: 0
             }});
+            // [FIX D-10] Log skipped item to sync_history so UI can show skipped count
+            logSyncAction(pid, 'skipped', {
+              taskId: task ? task.id : null,
+              taskText: task ? task.text : null,
+              eventId: ledger.provider_event_id,
+              calendarName: calendarLabels[pid] || null
+            });
             continue;
           }
 
@@ -778,6 +785,13 @@ async function sync(req, res) {
               if (mergedFollowers[task.id]) {
                 pStats.skipped = (pStats.skipped || 0) + 1;
                 stats.skipped = (stats.skipped || 0) + 1;
+                // [FIX D-10] Log skipped item to sync_history so UI can show skipped count
+                logSyncAction(pid, 'skipped', {
+                  taskId: task ? task.id : null,
+                  taskText: task ? task.text : null,
+                  eventId: ledger ? ledger.provider_event_id : null,
+                  calendarName: calendarLabels[pid] || null
+                });
               } else {
                 // Hash-based skip: push only when the task's push-relevant fields
                 // actually differ from what the ledger says we last sent. With
@@ -922,6 +936,13 @@ async function sync(req, res) {
                   // Neither changed → skip (existing behaviour)
                   pStats.skipped = (pStats.skipped || 0) + 1;
                   stats.skipped = (stats.skipped || 0) + 1;
+                  // [FIX D-10] Log skipped item to sync_history so UI can show skipped count
+                  logSyncAction(pid, 'skipped', {
+                    taskId: task ? task.id : null,
+                    taskText: task ? task.text : null,
+                    eventId: ledger ? ledger.provider_event_id : null,
+                    calendarName: calendarLabels[pid] || null
+                  });
                 }
               }
             } else if (isIngestOnly(pid)) {
