@@ -3,10 +3,27 @@
  */
 
 const db = require('../db');
+const { z } = require('zod');
 const tasksWrite = require('../lib/tasks-write');
 const { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 const cache = require('../lib/redis');
 const { reverseGeocodeDisplayName } = require('./weather.controller');
+
+const locationItemSchema = z.object({
+  id: z.string().max(36).optional(),
+  name: z.string().min(1).max(200),
+  icon: z.string().max(100).optional(),
+  lat: z.number().optional(),
+  lng: z.number().optional(),
+}).passthrough();
+const locationsBodySchema = z.object({ locations: z.array(locationItemSchema).max(50) });
+
+const toolItemSchema = z.object({
+  id: z.string().min(1).max(36),
+  name: z.string().min(1).max(200),
+  icon: z.string().max(100).optional(),
+}).passthrough();
+const toolsBodySchema = z.object({ tools: z.array(toolItemSchema).max(50) });
 
 /**
  * GET /api/config — all config for user
@@ -289,8 +306,9 @@ async function getLocations(req, res) {
 
 async function replaceLocations(req, res) {
   try {
-    const { locations } = req.body;
-    if (!Array.isArray(locations)) return res.status(400).json({ error: 'Locations array required' });
+    const locParsed = locationsBodySchema.safeParse(req.body);
+    if (!locParsed.success) return res.status(400).json({ error: 'Invalid locations payload', details: locParsed.error.issues });
+    const { locations } = locParsed.data;
 
     // Fill in missing display names for locations that have coords but no name
     const enriched = await Promise.all(locations.map(async (l) => {
@@ -340,8 +358,9 @@ async function getTools(req, res) {
 
 async function replaceTools(req, res) {
   try {
-    const { tools } = req.body;
-    if (!Array.isArray(tools)) return res.status(400).json({ error: 'Tools array required' });
+    const toolParsed = toolsBodySchema.safeParse(req.body);
+    if (!toolParsed.success) return res.status(400).json({ error: 'Invalid tools payload', details: toolParsed.error.issues });
+    const { tools } = toolParsed.data;
 
     await db.transaction(async (trx) => {
       await trx('tools').where('user_id', req.user.id).del();

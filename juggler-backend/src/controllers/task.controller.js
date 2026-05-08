@@ -13,6 +13,7 @@
 
 const db = require('../db');
 const { v7: uuidv7 } = require('uuid');
+const { z } = require('zod');
 const { localToUtc, utcToLocal, toDateISO, fromDateISO, getDayName, safeTimezone } = require('../scheduler/dateHelpers');
 const cache = require('../lib/redis');
 const { enqueueScheduleRun: _enqueueScheduleRun } = require('../scheduler/scheduleQueue');
@@ -1454,7 +1455,36 @@ async function deleteTask(req, res) {
  */
 var VALID_STATUSES = ['', 'done', 'wip', 'cancel', 'skip', 'pause', 'disabled'];
 
+const taskPatchSchema = z.object({
+  id: z.string().optional(),
+  text: z.string().max(500).optional(),
+  dur: z.number().int().min(1).max(1440).optional(),
+  pri: z.enum(['P1', 'P2', 'P3', 'P4']).optional(),
+  status: z.string().optional(),
+  notes: z.string().max(10000).optional(),
+  project: z.string().max(100).optional(),
+  deadline: z.string().nullable().optional(),
+  recurring: z.boolean().optional(),
+}).passthrough();
+
+const batchCreateSchema = z.object({
+  tasks: z.array(taskPatchSchema).min(1).max(100),
+});
+
+const batchUpdateSchema = z.object({
+  updates: z.array(taskPatchSchema.extend({ id: z.string().min(1) })).min(1).max(2000),
+});
+
+const statusUpdateSchema = z.object({
+  status: z.enum(['', 'done', 'wip', 'cancel', 'skip', 'pause', 'disabled']),
+  completedAt: z.string().optional(),
+  direction: z.string().optional(),
+}).passthrough();
+
 async function updateTaskStatus(req, res) {
+  const statusParsed = statusUpdateSchema.safeParse(req.body);
+  if (!statusParsed.success) return res.status(400).json({ error: 'Invalid status', details: statusParsed.error.issues });
+
   try {
     var id = req.params.id;
     var status = req.body.status;
@@ -1639,6 +1669,9 @@ async function updateTaskStatus(req, res) {
  * POST /api/tasks/batch — batch create tasks
  */
 async function batchCreateTasks(req, res) {
+  const batchParsed = batchCreateSchema.safeParse(req.body);
+  if (!batchParsed.success) return res.status(400).json({ error: 'Invalid batch payload', details: batchParsed.error.issues });
+
   try {
     var tasks = req.body.tasks;
     if (!Array.isArray(tasks) || tasks.length === 0) {
@@ -1712,6 +1745,9 @@ async function batchCreateTasks(req, res) {
  * PUT /api/tasks/batch — batch update tasks
  */
 async function batchUpdateTasks(req, res) {
+  const batchUpdateParsed = batchUpdateSchema.safeParse(req.body);
+  if (!batchUpdateParsed.success) return res.status(400).json({ error: 'Invalid batch payload', details: batchUpdateParsed.error.issues });
+
   try {
     var updates = req.body.updates;
     if (!Array.isArray(updates) || updates.length === 0) {
