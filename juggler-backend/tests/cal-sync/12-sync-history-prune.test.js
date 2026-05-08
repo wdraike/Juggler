@@ -2,7 +2,7 @@
  * 12-sync-history-prune.test.js — Inline sync_history retention prune (D-11 + D-13)
  *
  * Verifies that at the end of each sync run:
- *   • sync_history rows older than 7 days are deleted (D-11)
+ *   • sync_history rows older than 3 days are deleted (D-11)
  *   • the delete is scoped to the syncing user only — other users' rows are preserved (D-13)
  *
  * Uses a stub gcal adapter (no network) so sync() reaches the write transaction
@@ -170,11 +170,11 @@ afterAll(async () => {
 
 describe('Inline sync_history prune at end of sync run (D-11)', () => {
 
-  test('rows older than 7 days are deleted for the syncing user after sync', skipIfNoDB(async () => {
+  test('rows older than 3 days are deleted for the syncing user after sync', skipIfNoDB(async () => {
     var user = await seedUser(USER_PRIMARY);
 
-    var oldId = await insertHistoryRow(USER_PRIMARY, 8);   // > 7d → must be pruned
-    var newId = await insertHistoryRow(USER_PRIMARY, 6);   // < 7d → must remain
+    var oldId = await insertHistoryRow(USER_PRIMARY, 4);   // > 3d → must be pruned
+    var newId = await insertHistoryRow(USER_PRIMARY, 2);   // < 3d → must remain
 
     var res = mockRes();
     await sync(mockReq(user), res);
@@ -186,14 +186,14 @@ describe('Inline sync_history prune at end of sync run (D-11)', () => {
     var oldRow = await db('sync_history').where('id', oldId).first();
     var newRow = await db('sync_history').where('id', newId).first();
 
-    expect(oldRow).toBeFalsy(); // 8-day-old row must be gone
-    expect(newRow).toBeTruthy(); // 6-day-old row must remain
+    expect(oldRow).toBeFalsy(); // 4-day-old row must be gone
+    expect(newRow).toBeTruthy(); // 2-day-old row must remain
   }));
 
-  test('boundary: rows just under 7 days survive; rows just over 7 days are pruned', skipIfNoDB(async () => {
+  test('boundary: rows just under 3 days survive; rows just over 3 days are pruned', skipIfNoDB(async () => {
     var user = await seedUser(USER_PRIMARY);
-    var insideId = await insertHistoryRow(USER_PRIMARY, 6.9);
-    var outsideId = await insertHistoryRow(USER_PRIMARY, 7.1);
+    var insideId = await insertHistoryRow(USER_PRIMARY, 2.9);
+    var outsideId = await insertHistoryRow(USER_PRIMARY, 3.1);
 
     var res = mockRes();
     await sync(mockReq(user), res);

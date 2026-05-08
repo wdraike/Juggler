@@ -2025,10 +2025,10 @@ async function sync(req, res) {
         .whereNull('task_id')
         .del();
 
-      // [FIX D-13] Prune sync_history rows older than 7 days
+      // [FIX D-13] Prune sync_history rows older than 3 days
       await trx('sync_history')
         .where('user_id', userId)
-        .where('created_at', '<', trx.raw('NOW() - INTERVAL 7 DAY'))
+        .where('created_at', '<', trx.raw('NOW() - INTERVAL 3 DAY'))
         .del();
 
       // 7. Update last-synced timestamps for all providers
