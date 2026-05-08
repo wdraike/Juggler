@@ -573,3 +573,32 @@ describe('MSFT adapter — hasChanges', function () {
     expect(result.hasChanges).toBe(true);
   });
 });
+
+// ─── 13. buildMsftEventBody — checkmark idempotency ───
+
+describe('buildMsftEventBody — checkmark idempotency', function () {
+  it('should produce single checkmark when task is done and text has no prefix', function () {
+    var task = { id: 'ck-m1', text: 'My Task', date: '4/15', time: '9:00 AM', dur: 30, status: 'done', when: 'morning' };
+    var body = msftAdapter.buildMsftEventBody(task, 2026, 'America/New_York');
+    expect(body.subject).toBe('✓ My Task');
+  });
+
+  it('should strip one leading checkmark when task is done and text already has prefix', function () {
+    var task = { id: 'ck-m2', text: '✓ My Task', date: '4/15', time: '9:00 AM', dur: 30, status: 'done', when: 'morning' };
+    var body = msftAdapter.buildMsftEventBody(task, 2026, 'America/New_York');
+    expect(body.subject).toBe('✓ My Task');
+    expect(body.subject).not.toBe('✓ ✓ My Task');
+  });
+
+  it('should strip multiple leading checkmarks when task is done', function () {
+    var task = { id: 'ck-m3', text: '✓ ✓ My Task', date: '4/15', time: '9:00 AM', dur: 30, status: 'done', when: 'morning' };
+    var body = msftAdapter.buildMsftEventBody(task, 2026, 'America/New_York');
+    expect(body.subject).toBe('✓ My Task');
+  });
+
+  it('should not add checkmark when task is active', function () {
+    var task = { id: 'ck-m4', text: 'My Task', date: '4/15', time: '9:00 AM', dur: 30, status: 'active', when: 'morning' };
+    var body = msftAdapter.buildMsftEventBody(task, 2026, 'America/New_York');
+    expect(body.subject).toBe('My Task');
+  });
+});

@@ -583,3 +583,32 @@ describe('GCal adapter — hasChanges', function () {
     await destroyTestUser();
   });
 });
+
+// ─── 13. buildEventBody — checkmark idempotency ───
+
+describe('buildEventBody — checkmark idempotency', function () {
+  it('should produce single checkmark when task is done and text has no prefix', function () {
+    var task = { id: 'ck-1', text: 'My Task', date: '4/15', time: '9:00 AM', dur: 30, status: 'done', when: 'morning' };
+    var body = gcalAdapter.buildEventBody(task, 2026, 'America/New_York');
+    expect(body.summary).toBe('✓ My Task');
+  });
+
+  it('should strip one leading checkmark when task is done and text already has prefix', function () {
+    var task = { id: 'ck-2', text: '✓ My Task', date: '4/15', time: '9:00 AM', dur: 30, status: 'done', when: 'morning' };
+    var body = gcalAdapter.buildEventBody(task, 2026, 'America/New_York');
+    expect(body.summary).toBe('✓ My Task');
+    expect(body.summary).not.toBe('✓ ✓ My Task');
+  });
+
+  it('should strip multiple leading checkmarks when task is done', function () {
+    var task = { id: 'ck-3', text: '✓ ✓ My Task', date: '4/15', time: '9:00 AM', dur: 30, status: 'done', when: 'morning' };
+    var body = gcalAdapter.buildEventBody(task, 2026, 'America/New_York');
+    expect(body.summary).toBe('✓ My Task');
+  });
+
+  it('should not add checkmark when task is active', function () {
+    var task = { id: 'ck-4', text: 'My Task', date: '4/15', time: '9:00 AM', dur: 30, status: 'active', when: 'morning' };
+    var body = gcalAdapter.buildEventBody(task, 2026, 'America/New_York');
+    expect(body.summary).toBe('My Task');
+  });
+});

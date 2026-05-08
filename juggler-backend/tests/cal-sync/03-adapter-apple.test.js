@@ -11,6 +11,7 @@ var {
 var { waitForPropagation } = require('./helpers/api-helpers');
 
 var appleAdapter = require('../../src/lib/cal-adapters/apple.adapter');
+var appleCalApi = require('../../src/lib/apple-cal-api');
 
 jest.setTimeout(30000);
 
@@ -535,5 +536,37 @@ describe('Apple adapter — hasChanges', function () {
     expect(changes.hasChanges).toBe(true);
 
     await destroyTestUser();
+  });
+});
+
+// ─── 11. buildVEvent — checkmark idempotency ───
+
+describe('buildVEvent — checkmark idempotency', function () {
+  it('should produce single checkmark in SUMMARY when task is done and text has no prefix', function () {
+    var task = { id: 'ck-a1', text: 'My Task', date: '4/15', time: '9:00 AM', dur: 30, status: 'done', when: 'morning' };
+    var ics = appleCalApi.buildVEvent(task, 2026, 'America/New_York');
+    expect(ics).toContain('SUMMARY:✓ My Task');
+    expect(ics).not.toContain('SUMMARY:✓ ✓ My Task');
+  });
+
+  it('should strip one leading checkmark when task is done and text already has prefix', function () {
+    var task = { id: 'ck-a2', text: '✓ My Task', date: '4/15', time: '9:00 AM', dur: 30, status: 'done', when: 'morning' };
+    var ics = appleCalApi.buildVEvent(task, 2026, 'America/New_York');
+    expect(ics).toContain('SUMMARY:✓ My Task');
+    expect(ics).not.toContain('SUMMARY:✓ ✓ My Task');
+  });
+
+  it('should strip multiple leading checkmarks when task is done', function () {
+    var task = { id: 'ck-a3', text: '✓ ✓ My Task', date: '4/15', time: '9:00 AM', dur: 30, status: 'done', when: 'morning' };
+    var ics = appleCalApi.buildVEvent(task, 2026, 'America/New_York');
+    expect(ics).toContain('SUMMARY:✓ My Task');
+    expect(ics).not.toContain('SUMMARY:✓ ✓ My Task');
+  });
+
+  it('should not add checkmark in SUMMARY when task is active', function () {
+    var task = { id: 'ck-a4', text: 'My Task', date: '4/15', time: '9:00 AM', dur: 30, status: 'active', when: 'morning' };
+    var ics = appleCalApi.buildVEvent(task, 2026, 'America/New_York');
+    expect(ics).toContain('SUMMARY:My Task');
+    expect(ics).not.toContain('SUMMARY:✓');
   });
 });
