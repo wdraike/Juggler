@@ -1302,6 +1302,24 @@ async function deleteTask(req, res) {
       }
     }
 
+    // [FIX D-08] Block deletion of provider-origin tasks — user must delete from the provider
+    var PROVIDER_NAMES_LOCAL = { gcal: 'Google Calendar', msft: 'Microsoft Calendar', apple: 'Apple Calendar' };
+    var isCascadeDelete = cascade === 'recurring';
+    if (!isCascadeDelete) {
+      var providerLedgerRow = await db('cal_sync_ledger')
+        .where({ user_id: req.user.id, task_id: id, status: 'active' })
+        .where('origin', '!=', 'juggler')
+        .first();
+      if (providerLedgerRow) {
+        var providerName = PROVIDER_NAMES_LOCAL[providerLedgerRow.provider] || providerLedgerRow.provider;
+        return res.status(403).json({
+          error: 'This task came from ' + providerName + '. To remove it, delete it from ' + providerName + ' directly.',
+          code: 'PROVIDER_ORIGIN_DELETE_BLOCKED',
+          provider: providerLedgerRow.provider
+        });
+      }
+    }
+
     // Cascade recurring delete: delete template + pending instances, keep completed
     if (cascade === 'recurring') {
       // Resolve the template ID — caller may pass a template or an instance
@@ -1603,6 +1621,13 @@ async function updateTaskStatus(req, res) {
         update.scheduled_at = customDate > new Date() ? db.fn.now() : customDate;
       }
       // Otherwise leave scheduled_at unchanged (covers 'now', 'scheduled', and undefined)
+    }
+
+    // [FIX D-04] Reactivating a done task — clear done_frozen so sync resumes
+    if (status && status !== 'done' && existing && existing.status === 'done') {
+      await db('cal_sync_ledger')
+        .where({ user_id: req.user.id, task_id: id, status: 'done_frozen' })
+        .update({ status: 'active', synced_at: db.fn.now() });
     }
 
     // For cancel/skip with a future scheduled_at, snap to now
