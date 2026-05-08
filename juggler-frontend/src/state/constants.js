@@ -14,8 +14,12 @@ export const STATUS_OPTIONS = [
   { value: "wip", label: "\u231B", bg: "#FEF3C7", bgDark: "#3A2A08", color: "#9E6B3B", colorDark: "#E8C878", tip: "Start — mark as in progress" },
   { value: "cancel", label: "\u2715", bg: "#FEE2E2", bgDark: "#3A0A10", color: "#8B2635", colorDark: "#FCA5A5", tip: "Cancel — won't do" },
   { value: "skip", label: "\u23ED", bg: "#E8E0D0", bgDark: "#2C2B28", color: "#5C5A55", colorDark: "#B0A898", tip: "Skip — not today, keep the schedule" },
+  { value: "missed", label: "\u26A0", bg: "#FEF3E0", bgDark: "#3A2818", color: "#A16207", colorDark: "#FCD34D", tip: "Missed — system flagged (no resolution before window closed)" },
   { value: "pause", label: "\u23F8", bg: "#E0E7FF", bgDark: "#1E1B4B", color: "#4338CA", colorDark: "#A5B4FC", tip: "Pause — temporarily inactive" },
 ];
+
+// juggler-cal-history Plan B: faded opacity for past terminal-state tasks (D-10).
+export const PAST_OPACITY = 0.60;
 
 export const STATUS_MAP = Object.fromEntries(STATUS_OPTIONS.map(s => [s.value, s]));
 
@@ -137,5 +141,5 @@ export function registerLocations(locations) {
 }
 
 export function isTerminalStatus(st) {
-  return st === "done" || st === "cancel" || st === "skip" || st === "pause";
+  return st === "done" || st === "cancel" || st === "skip" || st === "pause" || st === "missed";
 }
