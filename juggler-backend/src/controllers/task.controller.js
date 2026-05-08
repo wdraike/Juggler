@@ -579,7 +579,6 @@ function guardFixedCalendarWhen(row, guardTarget, opts) {
   if (!isCalLinked) return;
   // Prevent clearing date_pinned on calendar-linked tasks
   if (row.date_pinned === 0 || row.date_pinned === false) {
-    console.log('[TASK-GUARD] preserving date_pinned on calendar-linked task ' + guardTarget.id);
     delete row.date_pinned;
   }
 }
@@ -852,7 +851,6 @@ async function createTask(req, res) {
  */
 async function updateTask(req, res) {
   try {
-    console.log('[UPDATE] id=' + req.params.id + ' body=' + JSON.stringify(req.body));
     var validationErrors = validateTaskInput(req.body);
     if (validationErrors.length > 0) {
       return res.status(400).json({ error: validationErrors.join('; ') });
@@ -1242,7 +1240,6 @@ async function updateTask(req, res) {
               await tasksWrite.deleteTasksWhere(trx, req.user.id, function(q) {
                 return q.whereIn('id', deleteIds);
               });
-              console.log('[RECUR] cleaned up ' + deleteIds.length + ' pending instances after date-range change on ' + id);
             }
           }
           } // end else (recur/recur_start/recur_end change detection)

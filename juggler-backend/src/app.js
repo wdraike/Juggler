@@ -83,7 +83,14 @@ app.use('/api/billing-webhooks', express.raw({ type: 'application/json' }), func
 
 app.use(bodyParser.json({ limit: '1mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(morgan('dev'));
+// NOTE: GET /api/events accepts JWT via ?token= query param (EventSource limitation).
+// In dev, morgan logs the full URL including ?token=. This is acceptable in local dev
+// but ensure production log export destinations are secure.
+app.use(morgan('dev', {
+  skip: function(req) {
+    return req.path === '/api/events' && req.query.token;
+  }
+}));
 
 // Sanitize error responses in production
 if (process.env.NODE_ENV === 'production') {
@@ -192,7 +199,6 @@ app.use('/api/gcal/callback', oauthCallbackLimiter);
 app.use('/api/gcal', gcalRoutes);
 app.use('/api/msft-cal/callback', oauthCallbackLimiter);
 app.use('/api/msft-cal', msftCalRoutes);
-app.use('/api/apple-cal/callback', oauthCallbackLimiter);
 app.use('/api/apple-cal', appleCalRoutes);
 app.use('/api/cal', calSyncRoutes);
 app.use('/api/schedule', scheduleRoutes);

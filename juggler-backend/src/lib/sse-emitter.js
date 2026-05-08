@@ -134,4 +134,12 @@ function clientCount(userId) {
   return clients[userId] ? clients[userId].size : 0;
 }
 
-module.exports = { addClient, emit, clientCount };
+function getStats() {
+  var total = 0;
+  Object.keys(clients).forEach(function(userId) {
+    total += clients[userId].size;
+  });
+  return { activeConnections: total };
+}
+
+module.exports = { addClient, emit, clientCount, getStats };

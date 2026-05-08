@@ -60,11 +60,17 @@ describe('Rate limits — targeted attack surfaces', () => {
     expect(limit).toBe(20);
   });
 
-  it('/api/apple-cal/callback has tight OAuth limit (20/min)', async () => {
+  it('/api/apple-cal/callback has no OAuth rate limit (Apple uses app-specific passwords, not OAuth)', async () => {
+    // Apple CalDAV does not use OAuth callbacks — no /api/apple-cal/callback route exists.
+    // The oauthCallbackLimiter is NOT applied here; the path falls through to the 404 handler
+    // under the general apiLimiter (1000/min).
     const res = await request(app).get('/api/apple-cal/callback');
     const limit = getRateLimitMax(res.headers);
-    expect(limit).not.toBeNull();
-    expect(limit).toBe(20);
+    expect(res.status).toBe(404);
+    // If a rate-limit header is present at all (from apiLimiter), it must not be the tight OAuth limit
+    if (limit !== null) {
+      expect(limit).toBeGreaterThan(20);
+    }
   });
 
   it('non-callback gcal routes are NOT capped at 20 (covered by broader apiLimiter)', async () => {
