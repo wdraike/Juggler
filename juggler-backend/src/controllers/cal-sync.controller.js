@@ -732,6 +732,17 @@ async function sync(req, res) {
             }
           }
 
+          // [FIX D-03] done_frozen guard — skip push for already-frozen rows
+          if (ledger.status === 'done_frozen') {
+            pStats.skipped = (pStats.skipped || 0) + 1;
+            stats.skipped = (stats.skipped || 0) + 1;
+            ledgerUpdates.push({ id: ledger.id, fields: {
+              event_summary: event ? (event.title || task.text) : task.text,
+              miss_count: 0
+            }});
+            continue;
+          }
+
           // --- Both exist ---
           if (task && event) {
             var isRecurringTemplate = task.taskType === 'recurring_template';
@@ -1105,6 +1116,11 @@ async function sync(req, res) {
             // eventModifiedExternally detections on the following sync.
             last_modified_at: toMySQLDate(new Date(Date.now() + 30000).toISOString())
           }});
+        }
+        // [FIX D-02] Freeze done tasks after first successful push (done_frozen)
+        var pushedTask = upd && upd.task;
+        if (pushedTask && pushedTask.status === 'done' && calCompletedBehavior === 'update') {
+          ledgerUpdates.push({ id: upd.ledgerId, fields: { status: 'done_frozen' } });
         }
       }
       if (pendingEventUpdates.length > 0) {
