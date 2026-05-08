@@ -814,6 +814,10 @@ async function createTask(req, res) {
     if (timeWasSet && row.when === undefined) {
       row.when = 'fixed';
     }
+    // [FIX D-14] Server-side backstop: if client signals all-day but didn't set when, enforce it
+    if (!timeWasSet && req.body.allDay === true && row.when === undefined) {
+      row.when = 'allday';
+    }
     // Recurrings cannot have dependencies — clear if provided
     if (row.recurring || row.task_type === 'recurring_template' || row.task_type === 'recurring_instance') {
       delete row.depends_on;
@@ -1049,6 +1053,10 @@ async function updateTask(req, res) {
     var timeWasSet = req.body.time !== undefined || req.body.scheduledAt !== undefined;
     if (dateWasSet && row.date_pinned === undefined) {
       row.date_pinned = 1;
+    }
+    // [FIX D-14] Server-side backstop for all-day tasks in update path
+    if (!timeWasSet && req.body.allDay === true && row.when === undefined) {
+      row.when = 'allday';
     }
     // Drag-pin: user dragged this task to a new time on the calendar.
     // Pin it so the scheduler respects the user's placement. The when-tags
