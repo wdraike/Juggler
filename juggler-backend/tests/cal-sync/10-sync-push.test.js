@@ -20,7 +20,7 @@ var {
   seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes, getGCalToken, getMsftToken
 } = require('./helpers/test-setup');
 var tasksWrite = require('../../src/lib/tasks-write');
-var { makeTask, makeTaskId } = require('./helpers/test-fixtures');
+var { makeTask, makeTaskId, makeLedgerRow } = require('./helpers/test-fixtures');
 var { getGCalEvent, getMSFTEvent, waitForPropagation } = require('./helpers/api-helpers');
 var { deleteGCalEvent, deleteMSFTEvent, deleteAllGCalTestEvents, deleteAllMSFTTestEvents } = require('./helpers/test-fixtures');
 var { assertGCalEventMatchesTask } = require('./helpers/assertions');
@@ -520,6 +520,53 @@ describe('Sync Push: field-level assertions', () => {
 
     var taskRow = await db('tasks_v').where('id', task.id).first();
     assertGCalEventMatchesTask(event, taskRow, TEST_TIMEZONE);
+  }));
+
+});
+
+// ─── Ledger orphan prune (D-09) ────────────────────────────────────────────────
+//
+// Verifies that at the end of each sync run, fully-resolved orphan ledger rows
+// (status='deleted_local', provider_event_id IS NULL, task_id IS NULL) are pruned.
+// Rows that still have an active reference (e.g., provider_event_id is set) must
+// NOT be deleted — they represent pending remote deletions that haven't landed yet.
+
+describe('Ledger orphan prune (D-09)', () => {
+
+  beforeEach(async () => {
+    if (!await isDbAvailable()) return;
+    user = await seedTestUser();
+  });
+
+  test('orphan prune: deleted_local ledger rows with no task and no event are removed after sync', skipIfNoDB(async () => {
+    // Row A: true orphan — deleted_local with no task and no event → MUST be pruned
+    var rowA = await makeLedgerRow({
+      user_id: user.id,
+      status: 'deleted_local',
+      provider_event_id: null,
+      task_id: null
+    });
+
+    // Row B: pending deletion — deleted_local but still has a provider_event_id → must NOT be pruned
+    var rowB = await makeLedgerRow({
+      user_id: user.id,
+      status: 'deleted_local',
+      provider_event_id: 'evt_pending_123',
+      task_id: null
+    });
+
+    var req = mockReq(user);
+    var res = mockRes();
+    await sync(req, res);
+
+    // Row A must be gone
+    var foundA = await db('cal_sync_ledger').where('id', rowA.id).first();
+    expect(foundA).toBeFalsy();
+
+    // Row B must still be present (has provider_event_id — not yet fully resolved)
+    var foundB = await db('cal_sync_ledger').where('id', rowB.id).first();
+    expect(foundB).toBeTruthy();
+    expect(foundB.provider_event_id).toBe('evt_pending_123');
   }));
 
 });
