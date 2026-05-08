@@ -349,3 +349,88 @@ describe('Sync Deletion Scenarios', () => {
   }));
 
 });
+
+describe('Provider-origin delete protection (D-08)', () => {
+
+  test('deleteTask: rejects deletion of provider-origin task with 403 PROVIDER_ORIGIN_DELETE_BLOCKED', skipIfNoDB(async () => {
+    var task = await makeTask({
+      text: 'Test Task Provider Origin GCal',
+      scheduled_at: new Date(Date.now() + 86400000),
+      dur: 30,
+      when: 'morning',
+      status: ''
+    });
+    await makeLedgerRow({ task_id: task.id, origin: 'gcal', provider: 'gcal', status: 'active' });
+
+    var delReq = mockReq(user, { params: { id: task.id }, body: {} });
+    var delRes = mockRes();
+    await deleteTask(delReq, delRes);
+
+    expect(delRes.statusCode).toBe(403);
+    expect(delRes._json.code).toBe('PROVIDER_ORIGIN_DELETE_BLOCKED');
+    expect(delRes._json.error).toMatch(/Google Calendar/);
+  }));
+
+  test('deleteTask: allows deletion of juggler-origin task normally', skipIfNoDB(async () => {
+    var task = await makeTask({
+      text: 'Test Task Juggler Origin',
+      scheduled_at: new Date(Date.now() + 86400000),
+      dur: 30,
+      when: 'morning',
+      status: ''
+    });
+    await makeLedgerRow({ task_id: task.id, origin: 'juggler', provider: 'gcal', status: 'active' });
+
+    var delReq = mockReq(user, { params: { id: task.id }, body: {} });
+    var delRes = mockRes();
+    await deleteTask(delReq, delRes);
+
+    expect(delRes.statusCode).not.toBe(403);
+  }));
+
+  test('deleteTask: allows deletion when no ledger row exists', skipIfNoDB(async () => {
+    var task = await makeTask({
+      text: 'Test Task No Ledger',
+      scheduled_at: new Date(Date.now() + 86400000),
+      dur: 30,
+      when: 'morning',
+      status: ''
+    });
+    // No ledger row inserted
+
+    var delReq = mockReq(user, { params: { id: task.id }, body: {} });
+    var delRes = mockRes();
+    await deleteTask(delReq, delRes);
+
+    expect(delRes.statusCode).not.toBe(403);
+  }));
+
+});
+
+describe('Done-task reactivation — done_frozen reset (D-04)', () => {
+
+  test('updateTaskStatus: resets done_frozen ledger rows to active when task is reactivated', skipIfNoDB(async () => {
+    var { updateTaskStatus } = require('../../src/controllers/task.controller');
+
+    var task = await makeTask({
+      text: 'Test Task Done Frozen Reset',
+      scheduled_at: new Date(Date.now() + 86400000),
+      dur: 30,
+      when: 'morning',
+      status: 'done'
+    });
+    await makeLedgerRow({ task_id: task.id, origin: 'juggler', provider: 'gcal', status: 'done_frozen' });
+
+    var statusReq = mockReq(user, {
+      params: { id: task.id },
+      body: { status: 'wip' }
+    });
+    var statusRes = mockRes();
+    await updateTaskStatus(statusReq, statusRes);
+
+    var ledgerRow = await db('cal_sync_ledger').where({ task_id: task.id, user_id: TEST_USER_ID }).first();
+    expect(ledgerRow).toBeTruthy();
+    expect(ledgerRow.status).toBe('active');
+  }));
+
+});
