@@ -1997,6 +1997,19 @@ async function sync(req, res) {
         await trx('sync_history').insert(historyInserts);
       }
 
+      // [FIX D-09] Prune fully-resolved orphan ledger rows — no task, no event, no purpose
+      await trx('cal_sync_ledger')
+        .where({ user_id: userId, status: 'deleted_local' })
+        .whereNull('provider_event_id')
+        .whereNull('task_id')
+        .del();
+
+      // [FIX D-13] Prune sync_history rows older than 7 days
+      await trx('sync_history')
+        .where('user_id', userId)
+        .where('created_at', '<', trx.raw('NOW() - INTERVAL 7 DAY'))
+        .del();
+
       // 7. Update last-synced timestamps for all providers
       var userUpdate = { updated_at: now };
       for (var pi3 = 0; pi3 < providerIds.length; pi3++) {
