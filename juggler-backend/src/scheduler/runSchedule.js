@@ -46,6 +46,44 @@ var syncLock = require('../lib/sync-lock');
 
 var DEFAULT_TIMEZONE = constants.DEFAULT_TIMEZONE;
 
+async function injectTerminalPlacements(dayPlacements, userId, TIMEZONE) {
+  if (!dayPlacements) return;
+  var rows = await db('tasks_v')
+    .where('user_id', userId)
+    .whereIn('status', ['done', 'cancel', 'skip', 'missed'])
+    .whereNotNull('scheduled_at')
+    .select();
+  if (rows.length === 0) return;
+  var srcMap = buildSourceMap(rows);
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var task = rowToTask(r, TIMEZONE, srcMap);
+    if (!task.scheduledAt) continue;
+    var local = utcToLocal(r.scheduled_at, TIMEZONE);
+    if (!local || !local.date) continue;
+    var dk = local.date;
+    var startMin = 0;
+    if (local.time) {
+      var m = /^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i.exec(local.time);
+      if (m) {
+        var h = parseInt(m[1], 10);
+        var mm = parseInt(m[2], 10);
+        var ampm = (m[3] || '').toUpperCase();
+        if (ampm === 'PM' && h < 12) h += 12;
+        if (ampm === 'AM' && h === 12) h = 0;
+        startMin = h * 60 + mm;
+      }
+    }
+    if (!dayPlacements[dk]) dayPlacements[dk] = [];
+    var already = false;
+    for (var j = 0; j < dayPlacements[dk].length; j++) {
+      if (dayPlacements[dk][j].task && dayPlacements[dk][j].task.id === task.id) { already = true; break; }
+    }
+    if (already) continue;
+    dayPlacements[dk].push({ task: task, start: startMin, dur: task.dur || 30, locked: true });
+  }
+}
+
 /**
  * juggler-cal-history Plan C — compute window-close UTC for a recurring instance.
  * Returns Date when scheduled_at + timeFlex marks the moment the placement window closed.
@@ -1674,6 +1712,7 @@ async function getSchedulePlacements(userId, options) {
     var unplacedTasks = (cache.unplaced || []).map(function(id) {
       return fastTaskById[id] || null;
     }).filter(Boolean);
+    await injectTerminalPlacements(hydratedPlacements, userId, TIMEZONE);
     return {
       dayPlacements: hydratedPlacements,
       unplaced: unplacedTasks,
@@ -1811,6 +1850,7 @@ async function getSchedulePlacements(userId, options) {
       // Fall through to cached hydration
     }
     if (freshResult) {
+      await injectTerminalPlacements(freshResult.dayPlacements, userId, TIMEZONE);
       return {
         dayPlacements: freshResult.dayPlacements,
         unplaced: freshResult.unplaced,
@@ -1923,6 +1963,7 @@ async function getSchedulePlacements(userId, options) {
       unplaced.push(t);
     });
 
+    await injectTerminalPlacements(dayPlacements, userId, TIMEZONE);
     return {
       dayPlacements: dayPlacements,
       unplaced: unplaced,
@@ -1998,6 +2039,7 @@ async function getSchedulePlacements(userId, options) {
     });
   });
 
+  await injectTerminalPlacements(outPlacements2, userId, TIMEZONE);
   return {
     dayPlacements: outPlacements2,
     unplaced: result.unplaced.filter(function(t) {
