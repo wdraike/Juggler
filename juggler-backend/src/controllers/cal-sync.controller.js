@@ -953,11 +953,27 @@ async function sync(req, res) {
             if (pd.partialFailure) {
               // Do nothing — keep task alive until next clean sync
             } else if (ledger.provider_event_id) {
-              // Skip miss entirely if the event was pushed recently — CDN propagation
-              // delay (especially Apple CalDAV) can make a freshly-written event
-              // invisible for 60–120s. withinCdnGrace checks last_pushed_at against
-              // the per-provider grace window; miss_count is not incremented.
-              if (withinCdnGrace(ledger, pid)) {
+              // Past-time recurring instance guard: providers don't return past events in their
+              // calendar view, so a past recurring_instance will always appear as task&&!event
+              // after its scheduled time. Without this guard it would accumulate miss_count and
+              // be catastrophically deleted after MISS_THRESHOLD syncs.
+              // Fix: detect past-time recurring instances here and only clean up the ledger row —
+              // never delete the task itself.
+              var _taskScheduledAt = task._scheduled_at instanceof Date
+                ? task._scheduled_at
+                : new Date(String(task._scheduled_at).replace(' ', 'T') + 'Z');
+              if (task.taskType === 'recurring_instance' && !isNaN(_taskScheduledAt) && _taskScheduledAt < now) {
+                // Ledger-only cleanup: stop tracking this past instance in the ledger.
+                // The task row itself is preserved — it's historical data.
+                ledgerUpdates.push({ id: ledger.id, fields: {
+                  status: 'deleted_local', task_id: null, miss_count: 0
+                }});
+                logSyncAction(pid, 'past_recurring_cleanup', {
+                  taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
+                  detail: 'Past recurring instance — provider does not return past events; ledger cleaned only',
+                  calendarName: calendarLabels[pid] || null
+                });
+              } else if (withinCdnGrace(ledger, pid)) {
                 // CDN propagation window — treat as not-yet-visible, not missing
               } else if (ledger.origin === 'juggler'
                   && ledger.last_user_hash !== null
@@ -1105,7 +1121,6 @@ async function sync(req, res) {
             }
             // Retry failed batch update items sequentially (single attempt)
             if (failedUpdates.length > 0) {
-              console.log('[CAL-SYNC] Retrying ' + failedUpdates.length + ' failed batch updates sequentially for ' + pid);
               for (var rui = 0; rui < failedUpdates.length; rui++) {
                 try {
                   await callWithRateLimit(pid, function() { return pAdapter.updateEvent(pToken, failedUpdates[rui].eventId, failedUpdates[rui].task, year, tz); });
@@ -1198,7 +1213,6 @@ async function sync(req, res) {
     if (errorLedgerRows.length > 0) {
       var errorLedgerIds = errorLedgerRows.map(function(r) { return r.id; });
       await db('cal_sync_ledger').whereIn('id', errorLedgerIds).del();
-      console.log('[CAL-SYNC] Cleared ' + errorLedgerIds.length + ' error ledger records for retry');
     }
 
     for (var pi2 = 0; pi2 < providerIds.length; pi2++) {
@@ -1215,7 +1229,7 @@ async function sync(req, res) {
 
       // 3a: Push — skip entirely for ingest-only providers
       if (isIngestOnly(pid2)) {
-        console.log('[CAL-SYNC] skipping push phase for ' + pid2 + ' (ingest-only mode)');
+        // ingest-only: no push phase
       } else {
 
       // Build set of task IDs that already have active ledger records for this provider
@@ -1404,7 +1418,6 @@ async function sync(req, res) {
             if (batchResults[fbi].error) failedItems.push(pushQueue[fbi]);
           }
           if (failedItems.length > 0) {
-            console.log('[CAL-SYNC] Retrying ' + failedItems.length + ' failed batch items sequentially for ' + pid2);
             for (var ri = 0; ri < failedItems.length; ri++) {
               var rTask = failedItems[ri].task;
               try {
@@ -1802,7 +1815,6 @@ async function sync(req, res) {
       lockResult = await acquireLock(userId);
       if (lockResult.acquired) break;
       var backoffMs = Math.min(1000 * Math.pow(1.5, lockAttempt), 10000) + Math.floor(Math.random() * 500);
-      console.log('[CAL-SYNC] lock held, retry ' + (lockAttempt + 1) + '/' + MAX_LOCK_ATTEMPTS + ' in ' + backoffMs + 'ms');
       await new Promise(function(r) { setTimeout(r, backoffMs); });
     }
     if (!lockResult || !lockResult.acquired) {
