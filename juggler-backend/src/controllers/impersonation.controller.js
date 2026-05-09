@@ -99,7 +99,8 @@ const getImpersonationTargets = async (req, res) => {
 
     let query = db('users').select('id', 'email', 'created_at');
     if (search) {
-      query = query.where('email', 'like', `%${search}%`);
+      const escaped = String(search).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+      query = query.where('email', 'like', `%${escaped}%`);
     }
 
     const countQuery = query.clone().clearSelect().count('* as count');
