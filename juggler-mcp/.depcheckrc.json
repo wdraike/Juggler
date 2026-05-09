@@ -1,0 +1,6 @@
+{
+  "ignorePatterns": ["coverage", "node_modules"],
+  "ignoreMatches": ["@modelcontextprotocol/*"],
+  "skipMissing": false,
+  "specials": ["jest", "eslint"]
+}

@@ -1,0 +1,6 @@
+{
+  "ignorePatterns": ["build", "coverage", "playwright-report", "test-results", "node_modules", "auth-client.js"],
+  "ignoreMatches": ["react-scripts", "web-vitals", "@testing-library/*", "eslint-config-react-app", "@craco/*", "bug-reporter-client", "juggler-shared"],
+  "skipMissing": false,
+  "specials": ["jest", "eslint", "babel", "prettier"]
+}

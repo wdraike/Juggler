@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/index.js",
+    "src/setupTests.js!",
+    "src/serviceWorker.js!",
+    "src/setupProxy.js!",
+    "src/scheduler/**/*.js!",
+    "tests/**/*.test.{js,jsx}!",
+    "src/**/*.test.{js,jsx}!"
+  ],
+  "project": ["src/**/*.{js,jsx,ts,tsx}"],
+  "ignore": ["build/**", "coverage/**", "playwright-report/**", "test-results/**", "auth-client.js"],
+  "ignoreDependencies": []
+}

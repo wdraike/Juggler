@@ -3,8 +3,19 @@
   "version": "1.0.0",
   "description": "Juggler MCP server for Claude Code (stdio transport, HTTP backend calls)",
   "main": "index.js",
+  "scripts": {
+    "audit:knip": "knip --reporter json 2>/dev/null | sed -n '/^[\\[{]/,$p' > ../../.planning/phases/juggler-code-review/baseline/knip-mcp.json || true",
+    "audit:depcheck": "depcheck --json 2>/dev/null | sed -n '/^[\\[{]/,$p' > ../../.planning/phases/juggler-code-review/baseline/depcheck-mcp.json || true",
+    "audit:unused": "eslint 'index.js' 'src/**/*.js' --rule '{\"unused-imports/no-unused-imports\":\"error\",\"unused-imports/no-unused-vars\":\"error\"}' --format json --output-file ../../.planning/phases/juggler-code-review/baseline/eslint-unused-mcp.json || true"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
     "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "depcheck": "^1.4.7",
+    "eslint": "^9.39.4",
+    "eslint-plugin-unused-imports": "^4.4.1",
+    "knip": "^5.88.1"
   }
 }

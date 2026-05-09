@@ -20,11 +20,27 @@
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
-    "http-proxy-middleware": "^2.0.6"
+    "depcheck": "^1.4.7",
+    "eslint-plugin-unused-imports": "^3.2.0",
+    "http-proxy-middleware": "^2.0.6",
+    "knip": "^5.88.1",
+    "typescript": "^6.0.3"
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build"
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "audit:knip": "knip --reporter json 2>/dev/null | sed -n '/^[\\[{]/,$p' > ../../.planning/phases/juggler-code-review/baseline/knip-frontend.json || true",
+    "audit:depcheck": "depcheck --json 2>/dev/null | sed -n '/^[\\[{]/,$p' > ../../.planning/phases/juggler-code-review/baseline/depcheck-frontend.json || true",
+    "audit:unused": "eslint 'src/**/*.{js,jsx}' --rule '{\"unused-imports/no-unused-imports\":\"error\",\"unused-imports/no-unused-vars\":\"error\"}' --format json --output-file ../../.planning/phases/juggler-code-review/baseline/eslint-unused-frontend.json || true"
+  },
+  "eslintConfig": {
+    "extends": ["react-app", "react-app/jest"],
+    "plugins": ["unused-imports"],
+    "rules": {
+      "unused-imports/no-unused-imports": "error",
+      "unused-imports/no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
+    }
   },
   "browserslist": {
     "production": [
