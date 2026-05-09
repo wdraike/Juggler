@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { getTheme } from '../../theme/colors';
-import { DAY_NAMES, PRI_COLORS, STATUS_MAP, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
+import { DAY_NAMES, PRI_COLORS, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 
 export default function MonthView({ selectedDate, dayPlacements, statuses, tasksByDate, onExpand, setDayOffset, today, darkMode, onDateDrop, isMobile }) {

@@ -7,7 +7,7 @@
 
 import React, { useRef, useEffect, useMemo, useState, useCallback } from 'react';
 import ReactDOM from 'react-dom';
-import { GRID_START, GRID_END, GRID_HOURS_COUNT, PRI_COLORS, LOC_TINT, locBgTint, locIcon } from '../../state/constants';
+import { GRID_START, GRID_END, GRID_HOURS_COUNT, PRI_COLORS, locBgTint, locIcon } from '../../state/constants';
 import { formatHour } from '../../scheduler/dateHelpers';
 import { getTheme } from '../../theme/colors';
 import { resolveLocationId } from '../../scheduler/locationHelpers';

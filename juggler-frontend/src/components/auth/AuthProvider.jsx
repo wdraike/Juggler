@@ -8,9 +8,9 @@
 import React, { createContext, useState, useEffect, useCallback, useContext } from 'react';
 import apiClient, { setAccessToken, getAccessToken, clearAccessToken } from '../../services/apiClient';
 
-const AuthContext = createContext(null);
-
 import { authServiceUrl, authFrontendUrl, appId as APP_ID } from '../../proxy-config';
+
+const AuthContext = createContext(null);
 const AUTH_SERVICE_URL = authServiceUrl;
 const AUTH_FRONTEND_URL = authFrontendUrl;
 const APP_URL = window.location.origin;

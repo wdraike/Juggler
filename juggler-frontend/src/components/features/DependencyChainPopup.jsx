@@ -6,7 +6,6 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import dagre from 'dagre';
 import { getTheme } from '../../theme/colors';
 import { getTaskDeps, topoSortTasks } from '../../scheduler/dependencyHelpers';
-import { PRI_COLORS, STATUS_MAP } from '../../state/constants';
 
 var STATUS_ICONS = { done: '\u2705', wip: '\u{1F7E1}', cancel: '\u274C', skip: '\u23ED\uFE0F', other: '\u27A1\uFE0F', '': '\u26AA' };
 var ARROW_COLORS = ['#2E4A7A', '#4338CA', '#2D6A4F', '#8B2635', '#D97706', '#9E6B3B', '#0D9488'];

@@ -3,7 +3,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { PRI_COLORS, STATUS_OPTIONS, applyDefaults } from '../../state/constants';
+import { STATUS_OPTIONS, applyDefaults } from '../../state/constants';
 import { toTime24, fromTime24, toDateISO, fromDateISO, formatDateKey, parseDate } from '../../scheduler/dateHelpers';
 import { isAnchorDependentRecur } from '../../scheduler/expandRecurring';
 import { getTheme } from '../../theme/colors';

@@ -10,14 +10,14 @@ import { DAY_NAMES, MONTH_NAMES } from '../../state/constants';
 import { parseDate, formatDateKey } from '../../scheduler/dateHelpers';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
+import WeatherBadge from '../features/WeatherBadge';
+
 var DONE_RANGES = [
   { value: '7',   label: '7d' },
   { value: '30',  label: '30d' },
   { value: '90',  label: '90d' },
   { value: 'all', label: 'All' },
 ];
-
-import WeatherBadge from '../features/WeatherBadge';
 
 export default function ListView({ allTasks, statuses, filter, search, projectFilter, onStatusChange, onDelete, onExpand, onCreate, darkMode, schedCfg, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isMobile, todayDate, weatherByDate }) {
   var theme = getTheme(darkMode);

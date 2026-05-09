@@ -11,6 +11,8 @@ import { PRI_COLORS, locIcon, LOC_TINT, isTerminalStatus } from '../../state/con
 import { getTheme } from '../../theme/colors';
 import { getBlocksForDate } from '../../scheduler/timeBlockHelpers';
 
+import ScheduleCard from './ScheduleCard';
+
 function weatherCodeIcon(code) {
   if (code == null) return '';
   if (code === 0) return '☀️';
@@ -37,8 +39,6 @@ function weatherCodeLabel(code) {
   if (code <= 86) return 'Snow Showers';
   return 'Thunderstorm';
 }
-
-import ScheduleCard from './ScheduleCard';
 
 /* ── Dimensions ────────────────────────────────────────── */
 var BAND_W      = 28;     // thick coloured time-block band

@@ -2,7 +2,7 @@
  * SettingsPanel — tabbed container for locations, tools, matrix, time blocks, etc.
  */
 
-import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { getTheme } from '../../theme/colors';
 import { DEFAULT_WEEKDAY_BLOCKS, DEFAULT_WEEKEND_BLOCKS } from '../../state/constants';
 import { TZ_OVERRIDE_KEY } from '../../services/apiClient';

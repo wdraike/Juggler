@@ -9,6 +9,9 @@ import { getTheme } from '../../theme/colors';
 import { DAY_NAMES, MONTH_NAMES, PRI_COLORS, STATUS_MAP, locIcon, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 
+/* ── Main CalendarView ── */
+import WeatherBadge from '../features/WeatherBadge';
+
 function minsToTime(m) {
   var h = Math.floor(m / 60);
   var mm = m % 60;
@@ -217,9 +220,6 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
     </div>
   );
 }
-
-/* ── Main CalendarView ── */
-import WeatherBadge from '../features/WeatherBadge';
 
 export default function CalendarView({
   selectedDate, dayPlacements, statuses, tasksByDate,

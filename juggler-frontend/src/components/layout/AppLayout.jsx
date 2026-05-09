@@ -44,8 +44,6 @@ import SettingsPanel from '../settings/SettingsPanel';
 import ImportExportPanel from '../features/ImportExportPanel';
 import CompletionTimePicker from '../features/CompletionTimePicker';
 
-import GCalSyncPanel from '../features/GCalSyncPanel';
-import MsftCalSyncPanel from '../features/MsftCalSyncPanel';
 import CalSyncPanel from '../features/CalSyncPanel';
 import HelpModal from '../features/HelpModal';
 import DisabledItemsPanel from '../billing/DisabledItemsPanel';

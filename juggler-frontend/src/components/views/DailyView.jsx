@@ -6,7 +6,7 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { getTheme } from '../../theme/colors';
-import { GRID_START, GRID_END, PRI_COLORS, STATUS_MAP, MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, locIcon, LOC_TINT, locBgTint, DEFAULT_LOCATIONS, WHEN_TAG_ICONS, DEFAULT_TOOLS, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
+import { GRID_START, GRID_END, PRI_COLORS, STATUS_MAP, MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, locIcon, LOC_TINT, locBgTint, WHEN_TAG_ICONS, DEFAULT_TOOLS, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
 import { formatHour, formatDateKey, parseDate } from '../../scheduler/dateHelpers';
 import { getBlocksForDate, parseWhen } from '../../scheduler/timeBlockHelpers';
 import { resolveLocationId, getLocationForDatePure } from '../../scheduler/locationHelpers';

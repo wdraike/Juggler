@@ -6,7 +6,7 @@ import { useState, useCallback } from 'react';
 import apiClient, { TZ_OVERRIDE_KEY } from '../services/apiClient';
 import {
   DEFAULT_LOCATIONS, DEFAULT_TOOLS, DEFAULT_TOOL_MATRIX,
-  DEFAULT_TIME_BLOCKS, DEFAULT_WEEKDAY_BLOCKS, DEFAULT_WEEKEND_BLOCKS,
+  DEFAULT_TIME_BLOCKS, DEFAULT_WEEKDAY_BLOCKS,
   DEFAULT_SCHEDULE_TEMPLATES, DEFAULT_TEMPLATE_DEFAULTS,
   registerLocations
 } from '../state/constants';
