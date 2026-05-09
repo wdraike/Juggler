@@ -6,7 +6,7 @@
   "scripts": {
     "audit:knip": "knip --reporter json 2>/dev/null | sed -n '/^[\\[{]/,$p' > ../../.planning/phases/juggler-code-review/baseline/knip-mcp.json || true",
     "audit:depcheck": "depcheck --json 2>/dev/null | sed -n '/^[\\[{]/,$p' > ../../.planning/phases/juggler-code-review/baseline/depcheck-mcp.json || true",
-    "audit:unused": "eslint 'index.js' 'src/**/*.js' --rule '{\"unused-imports/no-unused-imports\":\"error\",\"unused-imports/no-unused-vars\":\"error\"}' --format json --output-file ../../.planning/phases/juggler-code-review/baseline/eslint-unused-mcp.json || true"
+    "audit:unused": "eslint 'index.js' --rule '{\"unused-imports/no-unused-imports\":\"error\",\"unused-imports/no-unused-vars\":\"error\"}' --format json --output-file ../../.planning/phases/juggler-code-review/baseline/eslint-unused-mcp.json || true"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
