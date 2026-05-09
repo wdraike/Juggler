@@ -6,7 +6,6 @@
     "@react-oauth/google": "^0.12.1",
     "axios": "^1.6.7",
     "bug-reporter-client": "file:../../bug-reporter-service/shared",
-    "dagre": "^0.8.5",
     "elkjs": "^0.11.1",
     "html2canvas": "^1.4.1",
     "juggler-shared": "file:../shared",
@@ -35,11 +34,22 @@
     "audit:unused": "eslint 'src/**/*.{js,jsx}' --rule '{\"unused-imports/no-unused-imports\":\"error\",\"unused-imports/no-unused-vars\":\"error\"}' --format json --output-file ../../.planning/phases/juggler-code-review/baseline/eslint-unused-frontend.json || true"
   },
   "eslintConfig": {
-    "extends": ["react-app", "react-app/jest"],
-    "plugins": ["unused-imports"],
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ],
+    "plugins": [
+      "unused-imports"
+    ],
     "rules": {
       "unused-imports/no-unused-imports": "error",
-      "unused-imports/no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
+      "unused-imports/no-unused-vars": [
+        "warn",
+        {
+          "argsIgnorePattern": "^_",
+          "varsIgnorePattern": "^_"
+        }
+      ]
     }
   },
   "browserslist": {
