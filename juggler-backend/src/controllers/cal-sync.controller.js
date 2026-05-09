@@ -129,12 +129,21 @@ async function sync(req, res) {
     var tz = (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
     var year = new Date().getFullYear();
     var now = new Date();
-    var todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     _throttleCount = 0; // reset per sync run
 
-    var windowStart = new Date(now);
-    windowStart.setDate(windowStart.getDate() - 14);
+    // Sync window starts at the user's local midnight today and runs 60
+    // days forward. The scheduler only ever places tasks from "now"
+    // forward, so anything before today is settled history that doesn't
+    // need re-fetching every sync. Starting at midnight (rather than
+    // "now") still captures rows the scheduler may have rewound to
+    // earlier today.
+    var todayKey = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(now);
+    var todayStart = localToUtc(todayKey, '12:00 AM', tz)
+      || new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var windowStart = todayStart;
     var windowEnd = new Date(now);
     windowEnd.setDate(windowEnd.getDate() + 60);
 
