@@ -1086,7 +1086,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   var dates = buildDates(effectiveTodayKey, cfg, allTasks);
   if (dates.length === 0) {
     return {
-      dayPlacements: {}, taskUpdates: {}, newStatuses: Object.assign({}, statuses),
+      dayPlacements: {}, newStatuses: Object.assign({}, statuses),
       unplaced: [], deadlineMisses: [], placedCount: 0, score: scoreSchedule({}, [], allTasks),
       warnings: [{ type: 'v2_no_dates' }], timezone: cfg.timezone || null,
       spacingStats: {}, slackByTaskId: {}
@@ -1565,7 +1565,6 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
 
   return Object.assign({
     dayPlacements: dayPlacements,
-    taskUpdates: {},
     newStatuses: Object.assign({}, statuses),
     unplaced: unplacedTasks,
     deadlineMisses: [],

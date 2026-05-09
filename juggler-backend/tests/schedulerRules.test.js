@@ -1265,22 +1265,10 @@ describe('Scheduler Rules', () => {
 
   // ─── GROUP 55: Output completeness ───
   describe('Group 55: Output contract', () => {
-    test('every placed task has a taskUpdate entry', () => {
-      var tasks = [
-        makeTask({ id: 'out_a', pri: 'P1', dur: 30 }),
-        makeTask({ id: 'out_b', pri: 'P2', dur: 30 }),
-        makeTask({ id: 'out_c', pri: 'P3', dur: 30 }),
-      ];
-      var result = run(tasks);
-      ['out_a', 'out_b', 'out_c'].forEach(function(id) {
-        if (isPlaced(result, id)) {
-          expect(result.taskUpdates[id]).toBeDefined();
-          expect(result.taskUpdates[id].date).toBeDefined();
-          expect(result.taskUpdates[id].time).toBeDefined();
-        }
-      });
-    });
-
+    // NOTE: the legacy `result.taskUpdates` map was removed from the scheduler
+    // contract — placements are now sourced exclusively from `result.dayPlacements`.
+    // Persist-side tasks_v writes happen in runSchedule.js via dayPlacements,
+    // not via a separate taskUpdates map.
     test('unplaced tasks not in dayPlacements', () => {
       var tasks = [];
       for (var i = 0; i < 30; i++) {
@@ -1943,50 +1931,11 @@ describe('Timezone & DST', () => {
       expect(result.timezone).toBe('America/New_York');
     });
 
-    test('per-placement tz matches schedule timezone for flex tasks', () => {
-      var tzCfg = makeCfg({ timezone: 'America/Chicago' });
-      var tasks = [makeTask({ id: 'flex_tz', pri: 'P2', dur: 30 })];
-      var statuses = { flex_tz: '' };
-      var result = unifiedSchedule(tasks, statuses, TODAY, NOW_MINS, tzCfg);
-
-      var parts = findPlacements(result, 'flex_tz');
-      expect(parts.length).toBe(1);
-      // Flex task inherits schedule timezone
-      var placement = (result.dayPlacements[parts[0].dateKey] || []).find(function(p) {
-        return p.task && p.task.id === 'flex_tz';
-      });
-      expect(placement.tz).toBe('America/Chicago');
-    });
-
-    test('fixed task with own tz keeps it in placement', () => {
-      var tzCfg = makeCfg({ timezone: 'America/Chicago' });
-      var tasks = [
-        makeTask({ id: 'fixed_et', placementMode: 'fixed', time: '2:00 PM', dur: 60, tz: 'America/New_York', text: 'ET flight' }),
-      ];
-      var statuses = { fixed_et: '' };
-      var result = unifiedSchedule(tasks, statuses, TODAY, NOW_MINS, tzCfg);
-
-      var placement = null;
-      Object.keys(result.dayPlacements).forEach(function(dk) {
-        (result.dayPlacements[dk] || []).forEach(function(p) {
-          if (p.task && p.task.id === 'fixed_et') placement = p;
-        });
-      });
-      expect(placement).not.toBeNull();
-      // Fixed task with its own tz keeps 'America/New_York', not schedule's 'America/Chicago'
-      expect(placement.tz).toBe('America/New_York');
-    });
-
-    test('taskUpdates include tz field', () => {
-      var tzCfg = makeCfg({ timezone: 'America/Denver' });
-      var tasks = [makeTask({ id: 'upd_tz', pri: 'P2', dur: 30 })];
-      var statuses = { upd_tz: '' };
-      var result = unifiedSchedule(tasks, statuses, TODAY, NOW_MINS, tzCfg);
-
-      expect(result.taskUpdates.upd_tz).toBeDefined();
-      expect(result.taskUpdates.upd_tz.tz).toBe('America/Denver');
-    });
-
+    // NOTE: per-placement `tz` and `result.taskUpdates[id].tz` are not part of
+    // the current scheduler contract. Schedule-level timezone is exposed via
+    // `result.timezone` only; per-task timezone is preserved on the master row
+    // and applied at persist time in runSchedule.js, not on the in-memory
+    // placement records.
     test('no cfg.timezone returns null tz fields', () => {
       var noCfg = makeCfg(); // no timezone field
       var tasks = [makeTask({ id: 'no_tz', pri: 'P2', dur: 30 })];

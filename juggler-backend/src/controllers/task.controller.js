@@ -330,11 +330,19 @@ function rowToTask(row, timezone, sourceMap) {
     if (local.day) day = local.day;
   }
 
-  // Recurring instances in Time Window mode: derive the preferred time from
-  // the template's preferred_time_mins (minutes since midnight, local tz).
-  // No timezone conversion needed — the value is already in local time.
-  // Exception: disabled instances are frozen.
-  if (src && src.preferred_time_mins != null && row.status !== 'disabled') {
+  // Recurring instances without a scheduler placement yet: derive a "where it
+  // will likely land" time from the template's preferred_time_mins so the UI
+  // has something to render before the scheduler runs. The value is in local
+  // minutes-since-midnight, so no timezone conversion is needed.
+  //
+  // Once scheduler has placed the instance (scheduled_at is set), trust that
+  // placement. Overriding scheduled_at-derived `time` with preferred_time_mins
+  // here used to cause cal-sync drift: GCal builds events from task.time
+  // (poisoned by the override), while MSFT/Apple build from scheduled_at —
+  // so providers diverged whenever scheduler placement ≠ preferred minute.
+  // Exception: disabled instances are frozen and never get the preferred-time
+  // hint regardless.
+  if (src && src.preferred_time_mins != null && row.status !== 'disabled' && !row.scheduled_at) {
     var ptH = Math.floor(src.preferred_time_mins / 60);
     var ptM = src.preferred_time_mins % 60;
     var ptAmpm = ptH >= 12 ? 'PM' : 'AM';

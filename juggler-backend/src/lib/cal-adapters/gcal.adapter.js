@@ -259,7 +259,29 @@ function buildEventBody(task, year, tz, opts) {
     return body;
   }
 
-  // Timed event — use Date math to handle events that span midnight
+  // Timed event — prefer the UTC scheduled_at as the single source of truth.
+  // MSFT and Apple builders both prefer scheduledAt first; aligning GCal here
+  // collapses the three-builder fallback chain into a single path so providers
+  // can never diverge on event start time. The local task.date+task.time path
+  // remains as a fallback for tasks the scheduler has not yet placed (e.g.
+  // pinned/fixed tasks pushed before a schedule run).
+  var scheduledAt = task.scheduledAt || task._scheduledAtISO;
+  if (scheduledAt) {
+    var startUtc = new Date(scheduledAt);
+    var endUtc = new Date(startUtc.getTime() + dur * 60000);
+    var body2 = {
+      summary: summaryText,
+      description: descParts.join('\n'),
+      start: { dateTime: startUtc.toISOString(), timeZone: 'UTC' },
+      end: { dateTime: endUtc.toISOString(), timeZone: 'UTC' }
+    };
+    if (task.marker || isDone) {
+      body2.transparency = 'transparent';
+    }
+    return body2;
+  }
+
+  // Fallback: build from local date+time when scheduled_at is missing.
   var startDate = new Date(startISO);
   var endDate = new Date(startDate.getTime() + dur * 60000);
   var endISO = endDate.getFullYear() + '-' +
@@ -268,16 +290,16 @@ function buildEventBody(task, year, tz, opts) {
     String(endDate.getHours()).padStart(2, '0') + ':' +
     String(endDate.getMinutes()).padStart(2, '0') + ':00';
 
-  var body2 = {
+  var body3 = {
     summary: summaryText,
     description: descParts.join('\n'),
     start: { dateTime: startISO, timeZone: tz },
     end: { dateTime: endISO, timeZone: tz }
   };
   if (task.marker || isDone) {
-    body2.transparency = 'transparent';
+    body3.transparency = 'transparent';
   }
-  return body2;
+  return body3;
 }
 
 /**
