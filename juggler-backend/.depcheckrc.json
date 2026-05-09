@@ -1,0 +1,6 @@
+{
+  "ignorePatterns": ["coverage", "logs", "uploads", "test-results", "vendor", "node_modules", "auth-client.js"],
+  "ignoreMatches": ["@google-cloud/*", "knex", "mysql2", "dotenv-cli", "ioredis"],
+  "skipMissing": false,
+  "specials": ["jest", "eslint", "prettier", "babel"]
+}

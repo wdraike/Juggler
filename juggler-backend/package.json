@@ -10,7 +10,10 @@
     "migrate:rollback": "npx knex migrate:rollback",
     "migrate:status": "npx knex migrate:status",
     "test": "jest --forceExit",
-    "verify-sync": "node ../shared/verify-sync.js"
+    "verify-sync": "node ../shared/verify-sync.js",
+    "audit:knip": "knip --reporter json 2>/dev/null | sed -n '/^[\\[{]/,$p' > ../../.planning/phases/juggler-code-review/baseline/knip-backend.json || true",
+    "audit:depcheck": "depcheck --json 2>/dev/null | sed -n '/^[\\[{]/,$p' > ../../.planning/phases/juggler-code-review/baseline/depcheck-backend.json || true",
+    "audit:unused": "eslint 'src/**/*.js' --rule '{\"unused-imports/no-unused-imports\":\"error\",\"unused-imports/no-unused-vars\":\"error\"}' --format json --output-file ../../.planning/phases/juggler-code-review/baseline/eslint-unused-backend.json || true"
   },
   "dependencies": {
     "@azure/msal-node": "^5.0.6",
@@ -37,7 +40,11 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "depcheck": "^1.4.7",
+    "eslint": "^9.39.4",
+    "eslint-plugin-unused-imports": "^4.4.1",
     "jest": "^30.2.0",
+    "knip": "^5.88.1",
     "nodemon": "^3.1.0",
     "supertest": "^7.2.2"
   }
