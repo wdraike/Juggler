@@ -27,14 +27,17 @@ function roundCoord(v) {
   return Math.round(parseFloat(v) * 10) / 10;
 }
 
-async function fetchFromOpenMeteo(lat, lon, unit) {
-  var tempUnit = (unit === 'F' || unit === 'fahrenheit') ? 'fahrenheit' : 'celsius';
+// All cached forecasts are stored in Fahrenheit. The scheduler and all
+// internal weather decisions assume F. Frontend converts F → C at the
+// display layer based on user's temp_unit_pref. See migration
+// 20260509000400_normalize_weather_temp_to_fahrenheit.js.
+async function fetchFromOpenMeteo(lat, lon) {
   var url = OPEN_METEO_FORECAST_URL +
     '?latitude=' + lat +
     '&longitude=' + lon +
     '&hourly=temperature_2m,precipitation_probability,precipitation,cloudcover,weathercode,relativehumidity_2m' +
     '&forecast_days=14' +
-    '&temperature_unit=' + tempUnit +
+    '&temperature_unit=fahrenheit' +
     '&timezone=auto';
   var resp = await fetch(url);
   if (!resp.ok) throw new Error('Open-Meteo returned ' + resp.status);
@@ -45,7 +48,6 @@ exports.getForecast = async (req, res) => {
   try {
     var lat = parseFloat(req.query.lat);
     var lon = parseFloat(req.query.lon);
-    var unit = (req.query.unit || 'C').toUpperCase();
     var cacheOnly = req.query.cacheOnly === '1';
 
     if (isNaN(lat) || isNaN(lon)) {
@@ -78,8 +80,8 @@ exports.getForecast = async (req, res) => {
       return res.json({ miss: true });
     }
 
-    // Cache miss — fetch from Open-Meteo
-    var forecast = await fetchFromOpenMeteo(latGrid, lonGrid, unit);
+    // Cache miss — fetch from Open-Meteo (always Fahrenheit)
+    var forecast = await fetchFromOpenMeteo(latGrid, lonGrid);
     var fetchedAt = new Date();
     var expiresAt = new Date(fetchedAt.getTime() + CACHE_TTL_MS);
 

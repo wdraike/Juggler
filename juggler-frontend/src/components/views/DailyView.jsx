@@ -426,9 +426,9 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
             {weatherResult && (
               <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 14, height: 14, flexShrink: 0 }}
                 title={weatherResult.ok === false ? weatherResult.reason : 'Forecast OK'}>
-                <span style={{ fontSize: 10, filter: weatherResult.ok ? 'drop-shadow(0 0 2px #2D9E6B88)' : 'none' }}>\u26c5</span>
+                <span style={{ fontSize: 10, filter: weatherResult.ok ? 'drop-shadow(0 0 2px #2D9E6B88)' : 'none' }}>{'\u26c5'}</span>
                 {weatherResult.ok === false && (
-                  <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: '#e05252', textShadow: '0 0 3px #1a1a1a', lineHeight: 1, pointerEvents: 'none' }}>\u2298</span>
+                  <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, color: '#e05252', textShadow: '0 0 3px #1a1a1a', lineHeight: 1, pointerEvents: 'none' }}>{'\u2298'}</span>
                 )}
               </span>
             )}

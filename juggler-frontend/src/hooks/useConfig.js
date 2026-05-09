@@ -124,6 +124,7 @@ export default function useConfig() {
   var [pullForwardDampening, setPullForwardDampening] = useState(false);
   var [timezoneOverride, setTimezoneOverride] = useState(null);
   var [calCompletedBehavior, setCalCompletedBehavior] = useState('update');
+  var [tempUnitPref, setTempUnitPref] = useState('F');
   var [calSyncSettings, setCalSyncSettings] = useState({
     gcal: { mode: 'full', frequency: 120 },
     msft: { mode: 'full', frequency: 120 },
@@ -164,6 +165,10 @@ export default function useConfig() {
           else localStorage.removeItem(TZ_OVERRIDE_KEY);
         } catch (e) { /* ignore */ }
       }
+    }
+
+    if (config.tempUnitPref === 'C' || config.tempUnitPref === 'F') {
+      setTempUnitPref(config.tempUnitPref);
     }
 
     if (config.cal_sync_settings || config.calSyncSettings) {
@@ -311,6 +316,12 @@ export default function useConfig() {
     saveConfig('cal_sync_settings', val);
   }, [saveConfig]);
 
+  var updateTempUnitPref = useCallback(function(val) {
+    var v = val === 'C' ? 'C' : 'F';
+    setTempUnitPref(v);
+    saveConfig('temp_unit_pref', v);
+  }, [saveConfig]);
+
   var updateLocations = useCallback(async function(locs) {
     registerLocations(locs);
     setLocations(locs);
@@ -335,11 +346,13 @@ export default function useConfig() {
     locSchedules, locScheduleDefaults, locScheduleOverrides,
     hourLocationOverrides, splitDefault, splitMinDefault,
     gridZoom, schedFloor, schedCeiling, fontSize, pullForwardDampening, timezoneOverride, calCompletedBehavior, calSyncSettings,
+    tempUnitPref,
     scheduleTemplates, templateDefaults, templateOverrides,
     setLocations, setTools, setToolMatrix, setTimeBlocks, setProjects,
     setLocSchedules, setLocScheduleDefaults, setLocScheduleOverrides,
     setHourLocationOverrides, setSplitDefault, setSplitMinDefault,
     setGridZoom, setSchedFloor, setSchedCeiling, setFontSize, setPullForwardDampening, setTimezoneOverride, setCalCompletedBehavior, setCalSyncSettings,
+    setTempUnitPref,
     setScheduleTemplates, setTemplateDefaults, setTemplateOverrides,
     initFromConfig,
     updateToolMatrix, updateTimeBlocks,
@@ -347,6 +360,6 @@ export default function useConfig() {
     updateLocScheduleOverrides, updateHourLocationOverrides,
     updatePreferences, updateLocations, updateTools,
     updateScheduleTemplates, updateTemplateDefaults, updateTemplateOverrides,
-    updateCalSyncSettings
+    updateCalSyncSettings, updateTempUnitPref
   };
 }

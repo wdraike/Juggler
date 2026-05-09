@@ -162,11 +162,32 @@ function TimezoneSelector({ taskTz, onChangeTz, TH }) {
 
 var TEMP_RANGES = { F: { min: -20, max: 120 }, C: { min: -29, max: 49 } };
 
+// All canonical temp values (props + onChange) are Fahrenheit. The `unit`
+// prop only drives display + slider track range. C↔F conversion happens
+// inside the slider so callers stay unit-agnostic.
+function fToUnit(f, unit) {
+  if (f == null) return f;
+  if (unit === 'C') return Math.round((f - 32) * 5 / 9);
+  return f;
+}
+function unitToF(v, unit) {
+  if (v == null) return v;
+  if (unit === 'C') return Math.round(v * 9 / 5 + 32);
+  return v;
+}
+
 function WeatherTempSlider({ tempMin, tempMax, unit, onChange, TH }) {
-  var range = TEMP_RANGES[unit] || TEMP_RANGES.F;
+  var displayUnit = unit === 'C' ? 'C' : 'F';
+  var range = TEMP_RANGES[displayUnit];
   var totalSpan = range.max - range.min;
-  var lo = (tempMin !== '' && tempMin !== null && tempMin !== undefined) ? Number(tempMin) : range.min;
-  var hi = (tempMax !== '' && tempMax !== null && tempMax !== undefined) ? Number(tempMax) : range.max;
+  // Inputs arrive in F; project onto the display range for the slider track.
+  var loF = (tempMin !== '' && tempMin !== null && tempMin !== undefined) ? Number(tempMin) : null;
+  var hiF = (tempMax !== '' && tempMax !== null && tempMax !== undefined) ? Number(tempMax) : null;
+  var lo = loF != null ? fToUnit(loF, displayUnit) : range.min;
+  var hi = hiF != null ? fToUnit(hiF, displayUnit) : range.max;
+  // Clamp into display range so a stale F value outside [-29C..49C] doesn't break the slider.
+  if (lo < range.min) lo = range.min;
+  if (hi > range.max) hi = range.max;
   function pct(val) { return ((val - range.min) / totalSpan) * 100; }
   var noMin = (lo <= range.min);
   var noMax = (hi >= range.max);
@@ -175,8 +196,6 @@ function WeatherTempSlider({ tempMin, tempMax, unit, onChange, TH }) {
   var loRef = useRef(null);
   var hiRef = useRef(null);
 
-  // Raise whichever thumb is closer to the cursor before the click lands,
-  // so the browser routes the drag to the correct input.
   function handleMouseMove(e) {
     if (!loRef.current || !hiRef.current) return;
     var rect = e.currentTarget.getBoundingClientRect();
@@ -191,12 +210,16 @@ function WeatherTempSlider({ tempMin, tempMax, unit, onChange, TH }) {
   function handleLoChange(e) {
     var v = Number(e.target.value);
     var newLo = Math.min(v, hi - 1);
-    onChange(newLo <= range.min ? null : newLo, noMax ? null : hi);
+    var loOut = newLo <= range.min ? null : unitToF(newLo, displayUnit);
+    var hiOut = noMax ? null : unitToF(hi, displayUnit);
+    onChange(loOut, hiOut);
   }
   function handleHiChange(e) {
     var v = Number(e.target.value);
     var newHi = Math.max(v, lo + 1);
-    onChange(noMin ? null : lo, newHi >= range.max ? null : newHi);
+    var loOut = noMin ? null : unitToF(lo, displayUnit);
+    var hiOut = newHi >= range.max ? null : unitToF(newHi, displayUnit);
+    onChange(loOut, hiOut);
   }
   return (
     <div style={{ marginTop: 4 }}>
@@ -219,9 +242,9 @@ function WeatherTempSlider({ tempMin, tempMax, unit, onChange, TH }) {
           boxShadow: '0 1px 3px rgba(0,0,0,0.4)', pointerEvents: 'none' }} />
       </div>
       <div style={{ fontSize: 9, color: TH.text, fontWeight: 600, display: 'flex', justifyContent: 'space-between' }}>
-        <span>{noMin ? 'No min' : lo + '°' + unit}</span>
+        <span>{noMin ? 'No min' : lo + '°' + displayUnit}</span>
         {noRestriction && <span style={{ color: TH.textMuted, fontWeight: 400 }}>No temperature restriction</span>}
-        <span>{noMax ? 'No max' : hi + '°' + unit}</span>
+        <span>{noMax ? 'No max' : hi + '°' + displayUnit}</span>
       </div>
     </div>
   );
@@ -286,7 +309,7 @@ function WeatherHumiditySlider({ humidityMin, humidityMax, onChange, TH }) {
   );
 }
 
-export default function TaskEditForm({ task, status, onUpdate, onStatusChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, scheduleTemplates, templateDefaults, calSyncSettings, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex, onRecurDayConflict, activeTimezone }) {
+export default function TaskEditForm({ task, status, onUpdate, onStatusChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, scheduleTemplates, templateDefaults, calSyncSettings, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex, onRecurDayConflict, activeTimezone, tempUnitPref }) {
   var isCreate = mode === 'create';
   var TH = getTheme(darkMode);
   var initDate = isCreate && initialDate ? toDateISO(formatDateKey(initialDate)) : '';
@@ -751,7 +774,9 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       weatherCloud,
       weatherTempMin: weatherTempMin !== '' && weatherTempMin !== null ? parseInt(weatherTempMin) : null,
       weatherTempMax: weatherTempMax !== '' && weatherTempMax !== null ? parseInt(weatherTempMax) : null,
-      weatherTempUnit: isCreate ? null : (task.weatherTempUnit || null),
+      // Internal storage is always Fahrenheit. Display unit (C/F) is a UI-only
+      // preference handled by WeatherTempSlider via fToUnit/unitToF.
+      weatherTempUnit: 'F',
       weatherHumidityMin: weatherHumidityMin !== '' && weatherHumidityMin !== null ? parseInt(weatherHumidityMin) : null,
       weatherHumidityMax: weatherHumidityMax !== '' && weatherHumidityMax !== null ? parseInt(weatherHumidityMax) : null
     };
@@ -1991,7 +2016,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           <WeatherTempSlider
             tempMin={weatherTempMin}
             tempMax={weatherTempMax}
-            unit={(task && task.weatherTempUnit) || 'F'}
+            unit={tempUnitPref || 'F'}
             onChange={function(min, max) {
               setWeatherTempMin(min !== null ? String(min) : '');
               setWeatherTempMax(max !== null ? String(max) : '');

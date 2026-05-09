@@ -66,6 +66,7 @@ async function getAllConfig(req, res) {
       locScheduleOverrides: config.loc_schedule_overrides || null,
       hourLocationOverrides: config.hour_location_overrides || null,
       preferences: config.preferences || null,
+      tempUnitPref: config.temp_unit_pref || 'F',
       scheduleTemplates: config.schedule_templates || null,
       templateDefaults: config.template_defaults || null,
       templateOverrides: config.template_overrides || null
@@ -92,8 +93,14 @@ async function updateConfig(req, res) {
       'loc_schedule_defaults', 'loc_schedule_overrides',
       'hour_location_overrides', 'preferences',
       'schedule_templates', 'template_defaults', 'template_overrides',
-      'cal_sync_settings'
+      'cal_sync_settings', 'temp_unit_pref'
     ];
+
+    // temp_unit_pref must be 'F' or 'C' — internal storage is always F,
+    // this only drives display conversion at the UI layer.
+    if (key === 'temp_unit_pref' && value !== 'F' && value !== 'C') {
+      return res.status(400).json({ error: "temp_unit_pref must be 'F' or 'C'" });
+    }
 
     if (!validKeys.includes(key)) {
       return res.status(400).json({ error: `Invalid config key: ${key}` });

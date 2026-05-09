@@ -879,6 +879,28 @@ function PreferencesTab({ config, theme }) {
           Dampen pull-forward (less aggressive when calendar is open)
         </label>
 
+        <div style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }} title="Display unit for weather temperatures. Internal storage and scheduling decisions are always Fahrenheit.">
+          <span style={{ fontWeight: 500 }}>Temperature unit:</span>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {['F', 'C'].map(function(u) {
+              var active = (config.tempUnitPref || 'F') === u;
+              return (
+                <button key={u}
+                  onClick={function() { config.updateTempUnitPref(u); }}
+                  style={{
+                    padding: '3px 10px', borderRadius: 4, fontSize: 11, cursor: 'pointer',
+                    border: '1px solid ' + (active ? theme.accent : theme.inputBorder),
+                    background: active ? theme.accent : theme.input,
+                    color: active ? '#FDFAF5' : theme.text,
+                    fontFamily: 'inherit', fontWeight: active ? 600 : 400
+                  }}>
+                  &deg;{u}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div style={{ fontSize: 12, color: theme.text }}>
           <span style={{ fontWeight: 500 }}>Done tasks on calendar:</span>
           <select

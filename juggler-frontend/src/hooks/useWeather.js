@@ -4,15 +4,27 @@
  * Picks the first location that has lat/lon, then falls back to browser
  * geolocation. If neither is available, weather is silently disabled.
  *
+ * Internal storage and the backend cache are ALWAYS in Fahrenheit. The
+ * `temperatureUnit` arg only controls display conversion at parse time —
+ * scheduler and stored task constraints live in F regardless of what the
+ * user sees on screen.
+ *
  * Returns:
  *   weatherByDate[dateKey] = { high, low, precipPct, code, humidityAvg, hourly[] }
  *   where hourly[i] = { hour, temp, precipProb, cloudcover, code, humidity }
+ *   (temps already converted to the user's display unit)
  */
 
 import { useState, useEffect, useRef } from 'react';
 import apiClient from '../services/apiClient';
 
 var OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
+
+function fToDisplay(f, unit) {
+  if (f == null) return f;
+  if (unit === 'C') return Math.round(((f - 32) * 5) / 9 * 10) / 10;
+  return f;
+}
 
 function parseWeather(data, unit) {
   var { time, temperature_2m, precipitation_probability, cloudcover, weathercode, relativehumidity_2m } = data.hourly;
@@ -28,7 +40,8 @@ function parseWeather(data, unit) {
     }
 
     var d = byDate[dateKey];
-    var temp = temperature_2m[i];
+    // Backend cache is always F; convert to display unit here.
+    var temp = fToDisplay(temperature_2m[i], unit);
     var precip = precipitation_probability[i] || 0;
     var code = weathercode[i] || 0;
     var humidity = relativehumidity_2m ? (relativehumidity_2m[i] || 0) : 0;
@@ -43,7 +56,6 @@ function parseWeather(data, unit) {
     d.hourly.push({ hour, temp, precipProb: precip, cloudcover: cloudcover[i] || 0, code, humidity });
   }
 
-  // Round temperatures to 1 decimal
   Object.keys(byDate).forEach(function(k) {
     var d = byDate[k];
     if (d.high === -Infinity) d.high = null;
@@ -63,40 +75,40 @@ export default function useWeather(locations, temperatureUnit) {
 
   useEffect(function() {
     var cancelled = false;
-    var unit = temperatureUnit || 'F';
+    var displayUnit = temperatureUnit === 'C' ? 'C' : 'F';
 
     async function fetchWeather(lat, lon) {
       try {
-        // 1. Check backend cache first (no external call)
-        var cacheResp = await apiClient.get('/weather', { params: { lat, lon, unit, cacheOnly: 1 } });
+        // 1. Check backend cache first (no external call). Backend always returns F.
+        var cacheResp = await apiClient.get('/weather', { params: { lat, lon, cacheOnly: 1 } });
         if (!cancelled && cacheResp.data && cacheResp.data.hourly) {
-          setWeatherByDate(parseWeather(cacheResp.data, unit));
+          setWeatherByDate(parseWeather(cacheResp.data, displayUnit));
           return;
         }
 
-        // 2. Cache miss — fetch Open-Meteo directly from browser (distributed IPs)
-        var tempUnit = unit === 'F' ? 'fahrenheit' : 'celsius';
+        // 2. Cache miss — fetch Open-Meteo directly from browser (distributed IPs).
+        // Always pull Fahrenheit so the ingest payload matches the canonical cache unit.
         var omUrl = OPEN_METEO_FORECAST_URL +
           '?latitude=' + lat + '&longitude=' + lon +
           '&hourly=temperature_2m,precipitation_probability,precipitation,cloudcover,weathercode,relativehumidity_2m' +
-          '&forecast_days=14&temperature_unit=' + tempUnit + '&timezone=auto';
+          '&forecast_days=14&temperature_unit=fahrenheit&timezone=auto';
         var omResp = await fetch(omUrl);
         if (omResp.ok) {
           var forecast = await omResp.json();
           if (cancelled) return;
           apiClient.post('/weather/ingest', { lat, lon, hourly: forecast.hourly, hourly_units: forecast.hourly_units }).catch(function() {});
-          setWeatherByDate(parseWeather(forecast, unit));
+          setWeatherByDate(parseWeather(forecast, displayUnit));
           return;
         }
       } catch (err) {
         // fall through to backend fetch
       }
 
-      // 3. Fallback — backend fetches Open-Meteo server-side
+      // 3. Fallback — backend fetches Open-Meteo server-side (always F).
       try {
-        var resp = await apiClient.get('/weather', { params: { lat, lon, unit } });
+        var resp = await apiClient.get('/weather', { params: { lat, lon } });
         if (cancelled) return;
-        setWeatherByDate(parseWeather(resp.data, unit));
+        setWeatherByDate(parseWeather(resp.data, displayUnit));
         if (resp.data.refreshed) setRefreshed(true);
       } catch (err) {
         // Fail silently — weather is non-critical

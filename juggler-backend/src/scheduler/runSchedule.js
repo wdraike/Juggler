@@ -135,12 +135,33 @@ function getNowInTimezone(timezone) {
  * Load user config values from DB and assemble into scheduler cfg object
  */
 async function loadConfig(userId) {
-  var rows = await db('user_config').where('user_id', userId).select();
+  // user_config holds JSON-blob settings (time_blocks, preferences, etc).
+  // The `locations` user setting lives in its own table (matching the
+  // shape exposed by getAllConfig in config.controller.js); the scheduler
+  // needs lat/lon from there to load weather forecasts for weather-constrained
+  // tasks. Reading `config.locations` from user_config silently produced an
+  // empty array, which made `loadWeatherForHorizon` skip and weatherOk
+  // fail-open for every weather-constrained task.
+  var [rows, locRows] = await Promise.all([
+    db('user_config').where('user_id', userId).select(),
+    db('locations').where('user_id', userId).orderBy('sort_order')
+  ]);
   var config = {};
   rows.forEach(function(row) {
     var val = typeof row.config_value === 'string'
       ? JSON.parse(row.config_value) : row.config_value;
     config[row.config_key] = val;
+  });
+
+  var locations = locRows.map(function(l) {
+    return {
+      id: l.location_id,
+      name: l.name,
+      icon: l.icon,
+      lat: l.lat != null ? parseFloat(l.lat) : undefined,
+      lon: l.lon != null ? parseFloat(l.lon) : undefined,
+      displayName: l.display_name || undefined
+    };
   });
 
   return {
@@ -154,7 +175,7 @@ async function loadConfig(userId) {
     preferences: config.preferences || {},
     splitDefault: config.preferences ? config.preferences.splitDefault : undefined,
     splitMinDefault: config.preferences ? config.preferences.splitMinDefault : undefined,
-    locations: config.locations || []
+    locations: locations
   };
 }
 
@@ -913,12 +934,15 @@ async function runScheduleAndPersist(userId, _retries, options) {
 
   tPerf.reconcileEnd = Date.now() - tPerfStart;
 
-  // Load weather data for weather-constrained tasks (fail-open if no coords/cache)
+  // Load weather data for weather-constrained tasks (fail-open if no coords/cache).
+  // Detection MUST mirror hasWeatherConstraint() in unifiedScheduleV2.js — otherwise
+  // a task whose only constraint is humidity skips the load and fails open silently.
   cfg.weatherByDateHour = {};
   var hasWeatherTasks = allTasks.some(function(t) {
     return (t.weatherPrecip && t.weatherPrecip !== 'any') ||
            (t.weatherCloud  && t.weatherCloud  !== 'any') ||
-           t.weatherTempMin != null || t.weatherTempMax != null;
+           t.weatherTempMin != null || t.weatherTempMax != null ||
+           t.weatherHumidityMin != null || t.weatherHumidityMax != null;
   });
   if (hasWeatherTasks && cfg.locations && cfg.locations.length > 0) {
     try {

@@ -66,7 +66,7 @@ export default function AppLayout() {
   var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements, flushNow } = useTaskState();
   var isMobile = useIsMobile();
   var isCompact = useIsCompact();
-  var { weatherByDate, refreshed: weatherRefreshed } = useWeather(config.locations, config.temperatureUnit);
+  var { weatherByDate, refreshed: weatherRefreshed } = useWeather(config.locations, config.tempUnitPref);
   var weatherRefreshedRef = useRef(false);
   useEffect(function() {
     if (!weatherRefreshed) return;
@@ -459,8 +459,9 @@ export default function AppLayout() {
     splitMinDefault: config.splitMinDefault,
     schedFloor: config.schedFloor,
     schedCeiling: config.schedCeiling,
-    scheduleTemplates: config.scheduleTemplates
-  }), [config.timeBlocks, config.locSchedules, config.locScheduleDefaults, config.locScheduleOverrides, config.hourLocationOverrides, config.toolMatrix, config.splitDefault, config.splitMinDefault, config.schedFloor, config.schedCeiling, config.scheduleTemplates]);
+    scheduleTemplates: config.scheduleTemplates,
+    temperatureUnit: config.tempUnitPref || 'F'
+  }), [config.timeBlocks, config.locSchedules, config.locScheduleDefaults, config.locScheduleOverrides, config.hourLocationOverrides, config.toolMatrix, config.splitDefault, config.splitMinDefault, config.schedFloor, config.schedCeiling, config.scheduleTemplates, config.tempUnitPref]);
 
   // Placements come from the backend scheduler API. Re-key to canonical ISO
   // "YYYY-MM-DD" in case a stale backend (pre-ISO-refactor) returns legacy
@@ -1324,6 +1325,7 @@ export default function AppLayout() {
                 uniqueTags={uniqueTags}
                 scheduleTemplates={config.scheduleTemplates}
                 templateDefaults={config.templateDefaults}
+                tempUnitPref={config.tempUnitPref || 'F'}
                 darkMode={darkMode}
                 isMobile={isMobile}
                 activeTimezone={userTimezone}
@@ -1362,6 +1364,7 @@ export default function AppLayout() {
                     uniqueTags={uniqueTags}
                     scheduleTemplates={config.scheduleTemplates}
                     templateDefaults={config.templateDefaults}
+                tempUnitPref={config.tempUnitPref || 'F'}
                     calSyncSettings={calSyncSettings}
                     darkMode={darkMode}
                     isMobile={isMobile}
