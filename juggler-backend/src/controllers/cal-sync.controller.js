@@ -825,7 +825,14 @@ async function sync(req, res) {
                   var evModMs = new Date(event.lastModified).getTime();
                   var recordedModMs = new Date(String(ledger.last_modified_at).replace(' ', 'T') + 'Z').getTime();
                   if (!isNaN(evModMs) && !isNaN(recordedModMs)) {
-                    eventModifiedExternally = evModMs > recordedModMs;
+                    // 1-second tolerance: provider servers (especially MSFT)
+                    // sometimes bump lastModified by tens of ms internally
+                    // even when no real edit occurred. Without a tolerance
+                    // window every push generates a phantom "externally
+                    // modified" detection on the next sync, triggering a
+                    // pull that re-applies the same scheduled_at and then
+                    // fires enqueueScheduleRun, which loops the system.
+                    eventModifiedExternally = (evModMs - recordedModMs) > 1000;
                   }
                 }
 
@@ -862,10 +869,10 @@ async function sync(req, res) {
                       calendarName: calendarLabels[pid] || null
                     });
                   } else {
-                    // Last-modified wins
+                    // Last-modified wins (with 1s tolerance — see eventModifiedExternally above)
                     var evModMsConflict = new Date(event.lastModified).getTime();
                     var taskModMsConflict = new Date(String(task._updated_at).replace(' ', 'T') + 'Z').getTime();
-                    if (!isNaN(evModMsConflict) && !isNaN(taskModMsConflict) && evModMsConflict > taskModMsConflict) {
+                    if (!isNaN(evModMsConflict) && !isNaN(taskModMsConflict) && (evModMsConflict - taskModMsConflict) > 1000) {
                       // Event newer → pull
                       var conflictPullFields = _buildPullFields(event, task, tz, pAdapter);
                       taskUpdates.push({ id: task.id, fields: conflictPullFields });
