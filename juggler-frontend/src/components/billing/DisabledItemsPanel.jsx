@@ -106,12 +106,12 @@ export default function DisabledItemsPanel({ theme, onClose, onRefreshTasks }) {
             <div style={{ textAlign: 'center', color: theme.textMuted, padding: 20, fontSize: 13 }}>No disabled items</div>
           ) : (
             <>
-              {recurrings.length > 0 && (
+              {recurringTasks.length > 0 && (
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: theme.textMuted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
-                    Recurrings ({recurrings.length})
+                    Recurrings ({recurringTasks.length})
                   </div>
-                  {recurrings.map(function(item) {
+                  {recurringTasks.map(function(item) {
                     var instCount = instanceCounts[item.id] || 0;
                     return (
                       <ItemRow
