@@ -567,7 +567,7 @@ function taskToRow(task, userId, timezone, currentTask) {
     }
   }
 
-  row.updated_at = db.fn.now();
+  row.updated_at = new Date();
   return row;
 }
 
@@ -812,7 +812,7 @@ async function createTask(req, res) {
     var row = taskToRow(req.body, req.user.id, tz);
     if (!row.id) row.id = uuidv7();
     if (!row.task_type) row.task_type = 'task';
-    row.created_at = db.fn.now();
+    row.created_at = new Date();
     // When a user explicitly provides a date/scheduledAt on creation, pin it
     // so the scheduler doesn't drift the task to a different day.
     var dateWasSet = req.body.date !== undefined || req.body.scheduledAt !== undefined;
@@ -1784,7 +1784,7 @@ async function batchCreateTasks(req, res) {
 
     var rows = tasks.map(function(t) {
       var row = taskToRow(t, req.user.id, tz);
-      row.created_at = db.fn.now();
+      row.created_at = new Date();
       if (row.split === undefined || row.split === null) {
         row.split = splitDefault ? 1 : 0;
       }

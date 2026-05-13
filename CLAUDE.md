@@ -69,3 +69,6 @@ AI enrichment (titles, descriptions, etc.) is **shared globally** — one enrich
 
 ## MCP Server
 `juggler-mcp/` exposes juggler tasks to external MCP clients (e.g. ClimbRS). Changes here affect the ClimbRS integration.
+
+## Open Work
+Canonical backlog: `BACKLOG.md` — check before starting any new work.
