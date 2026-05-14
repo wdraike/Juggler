@@ -17,6 +17,7 @@
     "react-scripts": "5.0.1"
   },
   "devDependencies": {
+    "@meteocons/svg-static": "^0.1.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "depcheck": "^1.4.7",

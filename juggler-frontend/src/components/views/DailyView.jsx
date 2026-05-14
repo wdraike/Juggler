@@ -14,21 +14,10 @@ import StatusToggle from '../schedule/StatusToggle';
 import WeatherBadge from '../features/WeatherBadge';
 import { getTaskIcon } from '../../utils/taskIcon';
 import { checkWeatherMatch, hasWeatherRestrictions } from '../../utils/weatherMatch';
+import { weatherIconUrl } from '../../utils/weatherIcons';
 
 var MIN_PX_PER_HOUR = 30;
 var MAX_PX_PER_HOUR = 240;
-
-function weatherCodeIcon(code) {
-  if (code == null) return '';
-  if (code === 0) return '☀️';
-  if (code <= 3) return '⛅';
-  if (code <= 48) return '🌫️';
-  if (code <= 67) return '🌧️';
-  if (code <= 77) return '❄️';
-  if (code <= 82) return '🌦️';
-  if (code <= 86) return '🌨️';
-  return '⛈️';
-}
 
 function weatherCodeLabel(code) {
   if (code == null || code === 0) return 'Clear';
@@ -1204,8 +1193,6 @@ export default function DailyView({
                 </div>
                 {/* Hourly weather indicator */}
                 {dvHw && (function () {
-                  var icon = weatherCodeIcon(dvHw.code);
-                  if (!icon) return null;
                   var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
                   return (
                     <div style={{
@@ -1215,7 +1202,7 @@ export default function DailyView({
                       lineHeight: 1.2, userSelect: 'none', pointerEvents: 'none'
                     }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <span style={{ fontSize: 9 }}>{icon}</span>
+                        <img src={weatherIconUrl(dvHw.code)} alt="" width={10} height={10} style={{ verticalAlign: 'middle', display: 'inline-block' }} />
                         <span>{Math.round(dvHw.temp)}°{unit}</span>
                       </div>
                     </div>
@@ -1428,7 +1415,7 @@ export default function DailyView({
         var popTop = Math.min(dvHoveredPos.y - 10, window.innerHeight - 220);
         return (
           <div style={{ position: 'fixed', top: popTop, left: popLeft, zIndex: 9999, background: theme.bgCard, border: '1px solid ' + theme.border, borderRadius: 6, padding: '8px 10px', width: popW, textAlign: 'left', boxShadow: '0 4px 16px rgba(0,0,0,0.3)', pointerEvents: 'none', fontSize: 10, color: theme.text, lineHeight: 1.6 }}>
-            <div style={{ fontWeight: 600, marginBottom: 2, fontSize: 11 }}>{weatherCodeLabel(hw.code)}</div>
+            <div style={{ fontWeight: 600, marginBottom: 2, fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}><img src={weatherIconUrl(hw.code)} alt="" width={14} height={14} style={{ verticalAlign: 'middle' }} />{weatherCodeLabel(hw.code)}</div>
             {hw.temp != null && <div>🌡 {Math.round(hw.temp)}°{unit}</div>}
             {hw.precipProb > 0 && <div>🌧 {hw.precipProb}% precip</div>}
             {hw.cloudcover != null && <div>☁ {hw.cloudcover}% cloud</div>}

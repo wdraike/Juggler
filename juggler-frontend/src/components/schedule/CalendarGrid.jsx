@@ -15,22 +15,11 @@ import ReactDOM from 'react-dom';
 import { GRID_START, GRID_END, GRID_HOURS_COUNT, PRI_COLORS, LOC_TINT, locBgTint, locIcon, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
 import { formatDateKey as cgFormatDateKey } from '../../scheduler/dateHelpers';
 import { formatHour } from '../../scheduler/dateHelpers';
+import { weatherIconUrl } from '../../utils/weatherIcons';
 import { getTheme } from '../../theme/colors';
 import { resolveLocationId } from '../../scheduler/locationHelpers';
 import { getBlocksForDate } from '../../scheduler/timeBlockHelpers';
 import ScheduleCard from './ScheduleCard';
-
-function weatherCodeIcon(code) {
-  if (code == null) return '';
-  if (code === 0) return '☀️';
-  if (code <= 3) return '⛅';
-  if (code <= 48) return '🌫️';
-  if (code <= 67) return '🌧️';
-  if (code <= 77) return '❄️';
-  if (code <= 82) return '🌦️';
-  if (code <= 86) return '🌨️';
-  return '⛈️';
-}
 
 function weatherCodeLabel(code) {
   if (code == null || code === 0) return 'Clear';
@@ -426,8 +415,6 @@ export default function CalendarGrid({
                 }}>{locIcon(locId)}</div>
               )}
               {mode !== 'mini' && hw && (function() {
-                var icon = weatherCodeIcon(hw.code);
-                if (!icon) return null;
                 var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
                 return (
                   <div style={{
@@ -436,7 +423,7 @@ export default function CalendarGrid({
                     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <span style={{ fontSize: 9 }}>{icon}</span>
+                      <img src={weatherIconUrl(hw.code)} alt="" width={10} height={10} style={{ verticalAlign: 'middle', display: 'inline-block' }} />
                       <span>{Math.round(hw.temp)}°{unit}</span>
                     </div>
                   </div>
@@ -685,7 +672,7 @@ export default function CalendarGrid({
         return (
           <div style={{ position: 'fixed', top: popTop, left: popLeft, zIndex: 9999, background: theme.bgCard, border: '1px solid ' + theme.border, borderRadius: 6, padding: '8px 10px', width: popW, textAlign: 'left', boxShadow: '0 4px 16px rgba(0,0,0,0.3)', pointerEvents: 'none', fontSize: 10, color: theme.text, lineHeight: 1.6 }}>
             <div style={{ fontWeight: 700, color: theme.accent, marginBottom: 4, borderBottom: '1px solid ' + theme.border, paddingBottom: 3 }}>{formatHour(hoveredHour)}</div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Condition</span><span>{weatherCodeIcon(hw.code)} {weatherCodeLabel(hw.code)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Condition</span><span><img src={weatherIconUrl(hw.code)} alt="" width={14} height={14} style={{ verticalAlign: 'middle', marginRight: 2 }} />{weatherCodeLabel(hw.code)}</span></div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Temp</span><span>{Math.round(hw.temp)}°{unit}</span></div>
             {hw.precipProb > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Precip</span><span style={{ color: hw.precipProb >= 30 ? '#1e90ff' : theme.text, fontWeight: hw.precipProb >= 30 ? 700 : 400 }}>{hw.precipProb}%</span></div>}
             {hw.cloudcover > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Cloud</span><span>{hw.cloudcover}%</span></div>}

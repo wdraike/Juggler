@@ -12,18 +12,7 @@ import { getTheme } from '../../theme/colors';
 import { getBlocksForDate } from '../../scheduler/timeBlockHelpers';
 
 import ScheduleCard from './ScheduleCard';
-
-function weatherCodeIcon(code) {
-  if (code == null) return '';
-  if (code === 0) return '☀️';
-  if (code <= 3) return '⛅';
-  if (code <= 48) return '🌫️';
-  if (code <= 67) return '🌧️';
-  if (code <= 77) return '❄️';
-  if (code <= 82) return '🌦️';
-  if (code <= 86) return '🌨️';
-  return '⛈️';
-}
+import { weatherIconUrl } from '../../utils/weatherIcons';
 
 function weatherCodeLabel(code) {
   if (code == null || code === 0) return 'Clear';
@@ -1280,7 +1269,7 @@ export default function SCurveTimeline(props) {
         return (
           <div style={{ position: 'fixed', top: popTop, left: popLeft, zIndex: 9999, background: theme.bgCard, border: '1px solid ' + theme.border, borderRadius: 6, padding: '8px 10px', width: popW, boxShadow: '0 4px 16px rgba(0,0,0,0.3)', pointerEvents: 'none', fontSize: 10, color: theme.text, lineHeight: 1.6 }}>
             <div style={{ fontWeight: 700, color: theme.accent, fontSize: 11, marginBottom: 2 }}>{hoveredHour % 12 || 12}{hoveredHour < 12 ? ' AM' : ' PM'}</div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Condition</span><span>{weatherCodeIcon(hw.code)} {weatherCodeLabel(hw.code)}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Condition</span><span><img src={weatherIconUrl(hw.code)} alt="" width={14} height={14} style={{ verticalAlign: 'middle', marginRight: 2 }} />{weatherCodeLabel(hw.code)}</span></div>
             {hw.temp != null && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Temp</span><span>{Math.round(hw.temp)}°{unit}</span></div>}
             {hw.precipProb > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Precip</span><span>{hw.precipProb}%</span></div>}
             {hw.cloudcover > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: theme.textMuted }}>Cloud</span><span>{hw.cloudcover}%</span></div>}
