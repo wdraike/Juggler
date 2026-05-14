@@ -38,10 +38,17 @@ async function start() {
   console.log(`  DB_NAME: ${process.env.DB_NAME}`);
   console.log(`  PORT: ${PORT}`);
 
-  // Clear stale sync locks before accepting requests
+  // Clear EXPIRED sync locks before accepting requests.
+  // Uses a TTL-bounded sweep (acquired_at older than 10 minutes) so a rolling
+  // deploy cannot steal active locks held by peer instances still serving traffic.
+  // Rationale: MAX_LOCK_AGE = 5 min in sync-lock.js; any lock older than 10 min
+  // is definitionally abandoned (heartbeat would have refreshed within 5 min if
+  // the owner were still alive). See Phase 07 FIX-01.
   try {
-    var cleared = await db('sync_locks').del();
-    if (cleared > 0) console.log('[startup] Cleared ' + cleared + ' stale sync lock(s)');
+    var cleared = await db('sync_locks')
+      .where('acquired_at', '<', db.raw('DATE_SUB(NOW(), INTERVAL 10 MINUTE)'))
+      .del();
+    if (cleared > 0) console.log('[startup] Cleared ' + cleared + ' expired sync lock(s) (acquired_at older than 10 min)');
   } catch (e) { /* table might not exist yet */ }
 
   // Load JWT secrets
