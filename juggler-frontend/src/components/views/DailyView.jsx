@@ -700,6 +700,7 @@ export default function DailyView({
   var theme = getTheme(darkMode);
   var scrollRef = useRef(null);
   var loc = getLocationForDatePure(selectedDateKey, schedCfg);
+  var isPast = selectedDate < new Date(new Date().setHours(0, 0, 0, 0));
 
   // Schedule template state
   var dayName = DAY_NAMES[selectedDate.getDay()];
@@ -841,10 +842,14 @@ export default function DailyView({
   }, [weatherByDate, selectedDateKey]);
 
   // Status filter
+  // Past days: done/skip/cancel are historical records and always visible under 'open'.
   var matchesFilter = useCallback(function (taskId) {
     if (!filter || filter === 'all') return true;
     var st = statuses[taskId] || '';
-    if (filter === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause';
+    if (filter === 'open') {
+      if (isPast && (st === 'done' || st === 'cancel' || st === 'skip')) return true;
+      return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause';
+    }
     if (filter === 'action') return st === '' || st === 'wip';
     if (filter === 'done') return st === 'done';
     if (filter === 'pause') return st === 'pause';
@@ -854,17 +859,18 @@ export default function DailyView({
     if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(taskId);
     if (filter === 'unplaced') return unplacedIds && unplacedIds.has(taskId);
     return true;
-  }, [filter, statuses, blockedTaskIds, unplacedIds, pastDueIds, fixedIds]);
+  }, [filter, statuses, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isPast]);
 
   var allScheduled = useMemo(function () {
     return (placements || []).filter(function (p) {
       if (p.start == null) return false;
       var st = statuses[p.task.id] || '';
-      // Only hide done/cancelled/skipped when filter is not 'all'
+      // Past days: always show done/cancel/skip (historical record)
+      if (isPast && (st === 'done' || st === 'cancel' || st === 'skip')) return true;
       if ((st === 'done' || st === 'cancel' || st === 'skip') && filter !== 'all' && filter !== 'done' && filter !== st) return false;
       return matchesFilter(p.task.id);
     }).sort(function (a, b) { return a.start - b.start; });
-  }, [placements, statuses, matchesFilter, filter]);
+  }, [placements, statuses, matchesFilter, filter, isPast]);
 
   var unscheduled = useMemo(function () {
     var scheduledIds = {};

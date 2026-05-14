@@ -15,12 +15,17 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
   var theme = getTheme(darkMode);
   var scrollRef = useRef(null);
   var loc = getLocationForDatePure(selectedDateKey, schedCfg);
+  var isPast = selectedDate < new Date(new Date().setHours(0, 0, 0, 0));
 
   // Status filter — matches DailyView logic
+  // Past days: done/skip/cancel are historical records and always visible under 'open'.
   var matchesFilter = useCallback(function (taskId) {
     if (!filter || filter === 'all') return true;
     var st = statuses[taskId] || '';
-    if (filter === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause';
+    if (filter === 'open') {
+      if (isPast && (st === 'done' || st === 'cancel' || st === 'skip')) return true;
+      return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause';
+    }
     if (filter === 'action') return st === '' || st === 'wip';
     if (filter === 'done') return st === 'done';
     if (filter === 'wip') return st === 'wip';
@@ -30,7 +35,7 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
     if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(taskId);
     if (filter === 'unplaced') return unplacedIds && unplacedIds.has(taskId);
     return true;
-  }, [filter, statuses, blockedTaskIds, unplacedIds, pastDueIds, fixedIds]);
+  }, [filter, statuses, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isPast]);
 
   var filteredPlacements = useMemo(function () {
     if (!filter || filter === 'all') return placements;
