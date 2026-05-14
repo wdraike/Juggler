@@ -261,20 +261,23 @@ export default function AppLayout() {
   }, []);
 
   // Combined calendar auto-sync: configurable frequency, full sync only when changes detected
-  // Waits for initial scheduler run to complete before starting any external syncs
-  var calSyncSettings = config.calSyncSettings || { gcal: { mode: 'full', frequency: 120 }, msft: { mode: 'full', frequency: 120 } };
+  // Waits for initial scheduler run to complete before starting any external syncs.
+  // Extract primitives here so useEffect deps are stable numbers, not an object reference
+  // (an inline object in the dep array causes the effect to restart every render).
+  var gcalFreq = ((config.calSyncSettings || {}).gcal || {}).frequency || 0;
+  var msftFreq = ((config.calSyncSettings || {}).msft || {}).frequency || 0;
+  var appleFreq = ((config.calSyncSettings || {}).apple || {}).frequency || 0;
   useEffect(() => {
-    // Derive auto-sync from frequency: frequency > 0 means auto-sync is on
-    var gcalFreq = (calSyncSettings.gcal || {}).frequency || 0;
-    var msftFreq = (calSyncSettings.msft || {}).frequency || 0;
     var gcalAuto = gcalAutoSync || gcalFreq > 0;
     var msftAuto = msftCalAutoSync || msftFreq > 0;
-    if (!gcalAuto && !msftAuto) return;
+    var appleAuto = appleCalAutoSync || appleFreq > 0;
+    if (!gcalAuto && !msftAuto && !appleAuto) return;
     if (!schedulerReady) return;
 
     function runFullSync() {
       setGcalSyncing(true);
       setMsftCalSyncing(true);
+      setAppleCalSyncing(true);
       apiClient.post('/cal/sync?trigger=auto').then(function(r) {
         var errors = r.data.errors || [];
         var hasTokenExpiry = errors.some(function(e) { return e.tokenExpired; });
@@ -291,6 +294,7 @@ export default function AppLayout() {
           var now = new Date().toISOString();
           if (gcalAutoSync) setGcalLastSyncedAt(now);
           if (msftCalAutoSync) setMsftCalLastSyncedAt(now);
+          if (appleCalAutoSync) setAppleCalLastSyncedAt(now);
         }
         // Intentionally no loadTasks() here: the backend emits
         // tasks:changed / schedule:changed over SSE when cal-sync touches
@@ -312,6 +316,7 @@ export default function AppLayout() {
       }).finally(function() {
         setGcalSyncing(false);
         setMsftCalSyncing(false);
+        setAppleCalSyncing(false);
       });
     }
 
@@ -335,6 +340,7 @@ export default function AppLayout() {
     var activeFreqs = [];
     if (gcalAuto && gcalFreq > 0) activeFreqs.push(gcalFreq);
     if (msftAuto && msftFreq > 0) activeFreqs.push(msftFreq);
+    if (appleAuto && appleFreq > 0) activeFreqs.push(appleFreq);
     var intervalMs = activeFreqs.length > 0 ? Math.min.apply(null, activeFreqs) * 1000 : 2 * 60 * 1000;
     var intervalId = setInterval(checkAndSync, intervalMs);
 
@@ -342,7 +348,7 @@ export default function AppLayout() {
       clearTimeout(initialTimer);
       clearInterval(intervalId);
     };
-  }, [gcalAutoSync, msftCalAutoSync, schedulerReady, loadTasks, loadPlacements, calSyncSettings]);
+  }, [gcalAutoSync, msftCalAutoSync, appleCalAutoSync, schedulerReady, gcalFreq, msftFreq, appleFreq]);
 
   // Listen for sync:progress SSE events (shared with CalSyncPanel + HeaderBar)
   useEffect(function() {
@@ -1365,7 +1371,7 @@ export default function AppLayout() {
                     scheduleTemplates={config.scheduleTemplates}
                     templateDefaults={config.templateDefaults}
                 tempUnitPref={config.tempUnitPref || 'F'}
-                    calSyncSettings={calSyncSettings}
+                    calSyncSettings={config.calSyncSettings}
                     darkMode={darkMode}
                     isMobile={isMobile}
                     activeTimezone={userTimezone}
@@ -1431,7 +1437,7 @@ export default function AppLayout() {
             uniqueTags={uniqueTags}
             scheduleTemplates={config.scheduleTemplates}
             templateDefaults={config.templateDefaults}
-            calSyncSettings={calSyncSettings}
+            calSyncSettings={config.calSyncSettings}
             darkMode={darkMode}
             isMobile={isMobile}
             onRecurDayConflict={function(data) {

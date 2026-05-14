@@ -2196,9 +2196,15 @@ async function hasChanges(req, res) {
       }
     }
 
-    // Also check if there are local task changes since last sync
+    // Also check if there are local task changes since last sync.
+    // Use the most recent sync across all providers — not just GCal — so
+    // MSFT-only and Apple-only users also get local-change detection.
     var userId = req.user.id;
-    var lastSynced = req.user.gcal_last_synced_at;
+    var lastSynced = [
+      req.user.gcal_last_synced_at,
+      req.user.msft_cal_last_synced_at,
+      req.user.apple_cal_last_synced_at,
+    ].filter(Boolean).sort().pop() || null;
     if (lastSynced) {
       var localChanges = await db('tasks_v')
         .where('user_id', userId)
