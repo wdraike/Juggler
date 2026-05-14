@@ -166,8 +166,7 @@ async function processUser(userId) {
     if (!newest) {
       // Queue is empty — clear dirty hint
       delete dirty[userId];
-      await releaseClaim(userId);
-      return;
+      return;  // finally will releaseClaim
     }
 
     // Check if quiet period has elapsed since the newest entry.
@@ -182,9 +181,8 @@ async function processUser(userId) {
     var newestTime = new Date(createdAt).getTime();
     var elapsed = Date.now() - newestTime;
     if (elapsed < DEBOUNCE_MS) {
-      // Still within quiet period — release claim and leave dirty hint
-      // so the next poll tick reclaims and re-checks.
-      await releaseClaim(userId);
+      // Still within quiet period — leave dirty hint so the next poll
+      // tick reclaims and re-checks. finally will releaseClaim.
       return;
     }
 
@@ -194,13 +192,15 @@ async function processUser(userId) {
     // Signal start so the toolbar can show a "Scheduling…" indicator.
     getSseEmitter().emit(userId, 'schedule:running', { timestamp: Date.now() });
 
-    // Sweep: delete all queue entries for this user up to the snapshot time.
+    // Sweep: delete all queue entries for this user up to the current DB time.
+    // Using NOW() avoids JS/TZ drift between the Node server and MySQL UTC storage.
     // Entries that arrive after this point will be caught by the next cycle.
-    var snapshotTime = new Date();
-    var swept = await db('schedule_queue')
-      .where('user_id', userId)
-      .where('created_at', '<=', snapshotTime)
-      .del();
+    var sweptResult = await db.raw(
+      'DELETE FROM schedule_queue WHERE user_id = ? AND created_at <= NOW()',
+      [userId]
+    );
+    var swept = sweptResult[0] && sweptResult[0].affectedRows !== undefined
+      ? sweptResult[0].affectedRows : 0;
     console.log('[SCHED-QUEUE] swept ' + swept + ' entry(ies) for ' + userId);
 
     // Resolve the user's timezone so the scheduler computes todayKey and
