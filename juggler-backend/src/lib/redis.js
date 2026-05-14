@@ -10,7 +10,6 @@
 
 const Redis = require('ioredis');
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 const KEY_PREFIX = 'strivers:';
 
 let client = null;
@@ -18,7 +17,8 @@ let connected = false;
 
 function ensureClient() {
   if (client) return client;
-  client = new Redis(REDIS_URL, {
+  if (!process.env.REDIS_URL) return null;  // no-op when Redis not configured
+  client = new Redis(process.env.REDIS_URL, {
     keyPrefix: KEY_PREFIX,
     maxRetriesPerRequest: 1,
     enableOfflineQueue: false,
@@ -30,7 +30,7 @@ function ensureClient() {
 
   client.on('connect', () => {
     connected = true;
-    console.log('[redis] Connected to', REDIS_URL);
+    console.log('[redis] Connected to', process.env.REDIS_URL);
   });
 
   client.on('error', (err) => {

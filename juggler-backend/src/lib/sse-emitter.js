@@ -10,7 +10,6 @@
 
 const Redis = require('ioredis');
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
 const CHANNEL_PREFIX = 'sse:';
 
 // Local SSE response objects — own-instance only
@@ -21,7 +20,8 @@ var subscriber = null;
 
 function getSubscriber() {
   if (subscriber) return subscriber;
-  subscriber = new Redis(REDIS_URL, {
+  if (!process.env.REDIS_URL) return null;  // no-op when Redis not configured
+  subscriber = new Redis(process.env.REDIS_URL, {
     maxRetriesPerRequest: 1,
     enableOfflineQueue: false,
     retryStrategy: function(times) {
@@ -52,7 +52,8 @@ function getSubscriber() {
 var publisher = null;
 function getPublisher() {
   if (publisher) return publisher;
-  publisher = new Redis(REDIS_URL, {
+  if (!process.env.REDIS_URL) return null;  // no-op when Redis not configured
+  publisher = new Redis(process.env.REDIS_URL, {
     maxRetriesPerRequest: 1,
     enableOfflineQueue: false,
     retryStrategy: function(times) {
