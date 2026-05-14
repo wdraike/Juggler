@@ -103,9 +103,6 @@ async function connect(req, res) {
 
 async function callback(req, res) {
   try {
-    console.log('MsftCal callback hit at', new Date().toISOString());
-    console.log('  code:', req.query.code ? 'present (len=' + req.query.code.length + ')' : 'NONE');
-    console.log('  state:', req.query.state ? 'present' : 'NONE');
     var code = req.query.code;
     var state = req.query.state;
 
