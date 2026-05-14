@@ -265,6 +265,10 @@ export default function CalendarView({
         if (pl && pl._whenRelaxed) item._whenRelaxed = true;
         return item;
       }).sort(function (a, b) {
+        var aAllDay = !!(a.task.isAllDay || a.task.when === 'allday');
+        var bAllDay = !!(b.task.isAllDay || b.task.when === 'allday');
+        if (aAllDay && !bAllDay) return -1;
+        if (!aAllDay && bAllDay) return 1;
         if (a.start != null && b.start != null) return a.start - b.start;
         if (a.start != null) return -1;
         if (b.start != null) return 1;
