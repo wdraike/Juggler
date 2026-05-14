@@ -825,6 +825,9 @@ async function createTask(req, res) {
     var timeWasSet = req.body.time !== undefined || req.body.scheduledAt !== undefined;
     if (timeWasSet && row.when === undefined) {
       row.when = 'fixed';
+      // Also align placement_mode — taskToRow derived it before this auto-set,
+      // so it may be FLEXIBLE. Fix the inconsistency here.
+      row.placement_mode = PLACEMENT_MODES.FIXED;
     }
     // [FIX D-14] Server-side backstop: if client signals all-day but didn't set when, enforce it
     if (!timeWasSet && req.body.allDay === true && row.when === undefined) {

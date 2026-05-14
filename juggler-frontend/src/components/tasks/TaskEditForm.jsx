@@ -491,7 +491,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   // --- Derived scheduling mode flags (used for field disable logic) ---
   var whenParts = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
   var isAllDay = whenParts.indexOf('allday') !== -1;
-  var isFixed = !!datePinned;
+  var isFixed = !!datePinned || whenParts.indexOf("fixed") !== -1;
   // Calendar-linked fixed tasks are pinned by the external calendar. Stripping
   // 'fixed' from them creates a contradiction the backend guard will reject,
   // so the When-mode selector locks those buttons out entirely.
