@@ -139,6 +139,15 @@ describe('createTask', () => {
     expect(res._json.task.when).toBe('fixed');
   });
 
+  test('sets placementMode=fixed when time is provided (no when in body)', async () => {
+    if (!available) return;
+    var req = mockReq({ body: { text: 'Fixed time no when', time: '3:00 PM', date: '4/15' } });
+    var res = mockRes();
+    await controller.createTask(req, res);
+    expect(res._json.task.when).toBe('fixed');
+    expect(res._json.task.placementMode).toBe('fixed');
+  });
+
   // D-14: all-day backstop via allDay flag
   test('D-14: sets when=allday when allDay=true and no time or when field provided', async () => {
     if (!available) return;

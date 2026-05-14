@@ -715,6 +715,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
     }
     srcMap = buildSourceMap(taskRows);
     allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
+    // Re-apply step 2a: the rebuild above wiped any when-normalization done
+    // before the reconcile. Tasks with when='' must still get ALL_WINDOWS so
+    // the scheduler has a non-empty window set to match against.
+    allTasks.forEach(function(t) { if (t.when == null || t.when === '') t.when = ALL_WINDOWS; });
     statuses = {};
     allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
     // Re-apply reconcile move mutations — the reload above rebuilt allTasks
