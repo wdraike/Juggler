@@ -12,14 +12,40 @@ var msftCalApi = require('../lib/msft-cal-api');
 var { getJwtSecret } = require('../lib/jwt-secret');
 var { getValidAccessToken } = require('../lib/cal-adapters/msft.adapter');
 
-// Guard against duplicate callback hits (browser retries)
-var usedCodes = new Set();
-function markCodeUsed(code) {
+// Guard against duplicate callback hits (browser retries).
+//
+// FIX-03 — Multi-instance safe OAuth code dedup.
+// Replaces the former per-instance in-memory `usedCodes` Set with a
+// DB-backed nonce table (oauth_code_nonces).
+//
+// RESEARCH.md Category 4g + Pitfall 5: if the browser retries the OAuth
+// redirect and Cloud Run routes the retry to a different instance, the
+// old in-memory Set would have missed the duplicate. The DB row is visible
+// to all instances, so INSERT IGNORE provides atomic cross-instance dedup.
+//
+// Security notes:
+//   - The raw OAuth code is never stored. We hash the first 40 chars
+//     (matching the original truncation) with SHA-256 before writing to DB.
+//   - INSERT IGNORE: succeeds (affectedRows=1) on first hit; silently
+//     no-ops (affectedRows=0) if the PK already exists — i.e. duplicate.
+//   - Best-effort sweep: DELETE WHERE expires_at < NOW() before each INSERT
+//     keeps the table bounded. Wrap in .catch() so a sweep failure never
+//     blocks the OAuth flow (table grows by at most one extra row).
+//   - 2-minute TTL matches the OAuth code lifetime + browser retry window.
+async function markCodeUsed(code) {
   var key = code.substring(0, 40);
-  if (usedCodes.has(key)) return false;
-  usedCodes.add(key);
-  setTimeout(function() { usedCodes.delete(key); }, 120000);
-  return true;
+  var hash = require('crypto').createHash('sha256').update(key).digest('hex');
+
+  // Best-effort sweep of expired rows (keeps table naturally bounded)
+  await db.raw('DELETE FROM oauth_code_nonces WHERE expires_at < NOW()').catch(function() {});
+
+  // INSERT IGNORE: atomic "claim this nonce or detect duplicate"
+  var result = await db.raw(
+    'INSERT IGNORE INTO oauth_code_nonces (code_hash, expires_at) ' +
+    'VALUES (?, DATE_ADD(NOW(), INTERVAL 2 MINUTE))',
+    [hash]
+  );
+  return result[0].affectedRows === 1;
 }
 
 // --- Endpoints ---
@@ -87,7 +113,7 @@ async function callback(req, res) {
       return res.status(400).send('Missing code or state parameter');
     }
 
-    if (!markCodeUsed(code)) {
+    if (!(await markCodeUsed(code))) {
       console.log('[MSFT CALLBACK] Duplicate code detected, redirecting without re-exchange');
       var frontUrl = require('../proxy-config').services.juggler.frontend;
       return res.redirect(frontUrl + '/?msftcal=connected');
@@ -181,5 +207,7 @@ module.exports = {
   connect,
   callback,
   disconnect,
-  setAutoSync
+  setAutoSync,
+  // Test-only: direct access to markCodeUsed for unit testing without HTTP stack
+  _internal: { markCodeUsed }
 };
