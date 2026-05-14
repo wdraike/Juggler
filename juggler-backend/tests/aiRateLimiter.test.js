@@ -80,10 +80,18 @@ describe('AI per-user rate limiter — FIX-05 source wiring', function() {
     aiRoutesSource = fs.readFileSync(aiRoutesPath, 'utf8');
   });
 
-  test('ai.routes.js imports rate-limit-redis (RedisStore wiring)', function() {
+  test('ai.routes.js imports the rate-limit-redis store helper (RedisStore wiring)', function() {
     // This test FAILS until FIX-05 is implemented.
-    // After fix: ai.routes.js requires rate-limit-redis and uses it conditionally.
-    expect(aiRoutesSource).toContain('rate-limit-redis');
+    // After fix: ai.routes.js requires rate-limit-store (which wraps rate-limit-redis)
+    // and passes it to the aiLimiter. Both the route and the helper are checked.
+    var hasDirectImport = aiRoutesSource.includes('rate-limit-redis');
+    var hasHelperImport = aiRoutesSource.includes('rate-limit-store');
+    expect(hasDirectImport || hasHelperImport).toBe(true);
+
+    // Also verify the rate-limit-store.js helper itself imports rate-limit-redis
+    var storePath = path.join(__dirname, '../src/lib/rate-limit-store.js');
+    var storeSource = fs.readFileSync(storePath, 'utf8');
+    expect(storeSource).toContain('rate-limit-redis');
   });
 
   test('ai.routes.js aiLimiter uses a conditional store (REDIS_URL check)', function() {
