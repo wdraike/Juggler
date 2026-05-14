@@ -1066,6 +1066,16 @@ async function updateTask(req, res) {
     if (dateWasSet && row.date_pinned === undefined) {
       row.date_pinned = 1;
     }
+    // If the user explicitly cleared the time field and didn't also set when, auto-strip
+    // 'fixed' from when. The create path auto-adds 'fixed' when a time is given; without
+    // this strip the task becomes permanently unschedulable (when='fixed', no date/time).
+    var timeWasCleared = req.body.time === null || req.body.time === '';
+    if (timeWasCleared && row.when === undefined) {
+      var _existingWhen = existing.when || '';
+      if (_existingWhen.split(',').some(function(t) { return t.trim() === 'fixed'; })) {
+        row.when = _existingWhen.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t && t !== 'fixed'; }).join(',');
+      }
+    }
     // [FIX D-14] Server-side backstop for all-day tasks in update path
     if (!timeWasSet && req.body.allDay === true && row.when === undefined) {
       row.when = 'allday';
