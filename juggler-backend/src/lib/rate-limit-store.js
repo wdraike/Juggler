@@ -5,12 +5,12 @@
  * Returns undefined otherwise, which causes express-rate-limit to use its
  * default in-memory MemoryStore (fail-open for local dev / single-instance).
  *
- * The RedisStore constructor does NOT require the ioredis client to be in
- * 'ready' state at construction time — it queues commands internally until
- * the connection is established. Checking client.status at module load would
- * always see 'connecting' (ioredis connects asynchronously) and would cause
- * the store to permanently fall back to MemoryStore even when Redis is
- * correctly provisioned. (Phase 07 WR-03 fix)
+ * RedisStore v4 runs SCRIPT LOAD at construction time. To avoid running that
+ * at module load (before ioredis has connected), we defer construction until
+ * the Redis client reaches 'ready' state, then swap the store in on first use.
+ * This fixes WR-03: the previous status check always saw 'connecting' at module
+ * load and permanently fell back to MemoryStore even when Redis was correctly
+ * provisioned. (Phase 07 WR-03 fix)
  *
  * Use this ONLY for rate limiters that need shared counters across Cloud Run
  * instances — currently only the strict per-user AI limiter (max=2/min).
@@ -33,13 +33,59 @@ function maybeRedisStore(prefix) {
   var client = redisLib.getClient();
   if (!client) return undefined;
 
-  return new RedisStore({
-    sendCommand: function(cmd) {
-      var args = Array.prototype.slice.call(arguments, 1);
-      return client.call.apply(client, [cmd].concat(args));
+  // Defer RedisStore construction until the ioredis client is ready.
+  // RedisStore v4 calls SCRIPT LOAD at construction — doing this at module
+  // load (when client.status is 'connecting') would race the TCP handshake
+  // and cause "unexpected reply" errors. Instead, return a lazy wrapper that
+  // builds the real store on first use after Redis is ready, then delegates
+  // all subsequent calls to the real store.
+  var realStore = null;
+
+  function buildRealStore() {
+    if (realStore) return realStore;
+    if (client.status !== 'ready') return null;
+    realStore = new RedisStore({
+      sendCommand: function(cmd) {
+        var args = Array.prototype.slice.call(arguments, 1);
+        return client.call.apply(client, [cmd].concat(args));
+      },
+      prefix: prefix || 'jugrl:'
+    });
+    return realStore;
+  }
+
+  // Return a store-shaped object that lazily delegates to the real RedisStore.
+  // express-rate-limit v6+ calls store.increment(key), store.decrement(key),
+  // store.resetKey(key), store.resetAll(), and store.init(options).
+  return {
+    init: function(options) {
+      // Called by express-rate-limit at setup. No-op here; real store inits
+      // itself when constructed on first use.
+      var s = buildRealStore();
+      if (s && s.init) s.init(options);
     },
-    prefix: prefix || 'jugrl:'
-  });
+    increment: async function(key) {
+      var s = buildRealStore();
+      if (!s) {
+        // Redis not ready yet — fall back to an ephemeral in-memory response
+        // so the limiter doesn't crash on the first few requests during startup.
+        return { totalHits: 1, resetTime: new Date(Date.now() + 60000) };
+      }
+      return s.increment(key);
+    },
+    decrement: async function(key) {
+      var s = buildRealStore();
+      if (s) return s.decrement(key);
+    },
+    resetKey: async function(key) {
+      var s = buildRealStore();
+      if (s) return s.resetKey(key);
+    },
+    resetAll: async function() {
+      var s = buildRealStore();
+      if (s) return s.resetAll();
+    }
+  };
 }
 
 module.exports = { maybeRedisStore };
