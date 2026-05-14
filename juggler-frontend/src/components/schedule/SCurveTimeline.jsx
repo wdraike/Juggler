@@ -1238,23 +1238,40 @@ export default function SCurveTimeline(props) {
         })()}
       </svg>
 
-      {/* Weather hit targets — transparent divs over hour label positions */}
+      {/* Weather display + hit targets at each 3-hour label */}
       {hourMarkers.filter(function(m) { return m.showLabel && hourlyByHour[m.hour]; }).map(function(m) {
+        var hw = hourlyByHour[m.hour];
         var dx = m.x - m.circleCX, dy = m.y - m.circleCY;
         var d = Math.sqrt(dx * dx + dy * dy) || 1;
         var outX = dx / d, outY = dy / d;
         var lx = m.x + outX * (BAND_W / 2 + 16);
         var ly = m.y + outY * (BAND_W / 2 + 16);
+        var wx = m.x + outX * (BAND_W / 2 + 32);
+        var wy = m.y + outY * (BAND_W / 2 + 32);
+        var unit = (schedCfg && schedCfg.temperatureUnit) || 'F';
         return (
-          <div key={'wh' + m.hour} style={{
-            position: 'absolute', left: lx - 16, top: ly - 10,
-            width: 32, height: 20,
-            cursor: 'default', zIndex: 5
-          }}
-            onMouseEnter={function(e) { setHoveredHour(m.hour); setHoveredPos({ x: e.clientX, y: e.clientY }); }}
-            onMouseMove={function(e) { setHoveredPos({ x: e.clientX, y: e.clientY }); }}
-            onMouseLeave={function() { setHoveredHour(null); setHoveredPos(null); }}
-          />
+          <React.Fragment key={'wh' + m.hour}>
+            {/* Visible weather: icon + temp */}
+            <div style={{
+              position: 'absolute', left: wx - 15, top: wy - 6,
+              display: 'flex', alignItems: 'center', gap: 1,
+              fontSize: 8, color: theme.textMuted, opacity: 0.8,
+              userSelect: 'none', pointerEvents: 'none', whiteSpace: 'nowrap'
+            }}>
+              <img src={weatherIconUrl(hw.code)} alt="" width={10} height={10} style={{ verticalAlign: 'middle', display: 'inline-block' }} />
+              <span>{Math.round(hw.temp)}°{unit}</span>
+            </div>
+            {/* Hit target for hover popup */}
+            <div style={{
+              position: 'absolute', left: lx - 16, top: ly - 10,
+              width: 32, height: 20,
+              cursor: 'default', zIndex: 5
+            }}
+              onMouseEnter={function(e) { setHoveredHour(m.hour); setHoveredPos({ x: e.clientX, y: e.clientY }); }}
+              onMouseMove={function(e) { setHoveredPos({ x: e.clientX, y: e.clientY }); }}
+              onMouseLeave={function() { setHoveredHour(null); setHoveredPos(null); }}
+            />
+          </React.Fragment>
         );
       })}
 
