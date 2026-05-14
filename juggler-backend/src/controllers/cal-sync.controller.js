@@ -834,6 +834,11 @@ async function sync(req, res) {
                     // fires enqueueScheduleRun, which loops the system.
                     eventModifiedExternally = (evModMs - recordedModMs) > 1000;
                   }
+                } else if (event._etag && ledger.provider_etag) {
+                  // ETag fallback for Apple CalDAV: LAST-MODIFIED is absent on iCloud
+                  // VEVENTs, so last_modified_at is always NULL for Apple rows. ETags
+                  // change on every server-side write and are exact — no tolerance needed.
+                  eventModifiedExternally = event._etag !== ledger.provider_etag;
                 }
 
                 var isTaskTerminal = isTerminalStatus(task.status);
@@ -987,6 +992,7 @@ async function sync(req, res) {
               event_end: event.endDateTime || null,
               event_all_day: event.isAllDay ? 1 : 0,
               last_modified_at: toMySQLDate(event.lastModified),
+              provider_etag: event._etag || null,
               task_updated_at: task._updated_at || null,
               miss_count: 0
             }});
@@ -1152,7 +1158,8 @@ async function sync(req, res) {
             // +30s: provider server timestamps often lag our push by several seconds
             // (Apple CalDAV is especially slow). Using +2s caused false
             // eventModifiedExternally detections on the following sync.
-            last_modified_at: toMySQLDate(new Date(Date.now() + 30000).toISOString())
+            last_modified_at: toMySQLDate(new Date(Date.now() + 30000).toISOString()),
+            provider_etag: null
           }});
         }
         // [FIX D-02] Freeze done tasks after first successful push (done_frozen)
@@ -1463,6 +1470,7 @@ async function sync(req, res) {
               event_all_day: (bTask.when === 'allday') ? 1 : 0,
               task_updated_at: bTask._updated_at || null,
               last_modified_at: toMySQLDate(createdNorm && createdNorm.lastModified ? new Date(new Date(createdNorm.lastModified).getTime() + 2000).toISOString() : new Date().toISOString()),
+              provider_etag: null,
               status: 'active'
             });
           }
@@ -1499,6 +1507,7 @@ async function sync(req, res) {
                   event_all_day: (rTask.when === 'allday') ? 1 : 0,
                   task_updated_at: rTask._updated_at || null,
                   last_modified_at: toMySQLDate(rNorm && rNorm.lastModified ? new Date(new Date(rNorm.lastModified).getTime() + 2000).toISOString() : new Date().toISOString()),
+                  provider_etag: null,
                   status: 'active'
                 });
               } catch (rErr) {
@@ -1556,6 +1565,7 @@ async function sync(req, res) {
                 event_all_day: (fTask.when === 'allday') ? 1 : 0,
                 task_updated_at: fTask._updated_at || null,
                 last_modified_at: toMySQLDate(fNorm && fNorm.lastModified ? new Date(new Date(fNorm.lastModified).getTime() + 2000).toISOString() : new Date().toISOString()),
+                provider_etag: null,
                 status: 'active'
               });
               processedEventIds2.add(result.providerEventId);
@@ -1646,6 +1656,7 @@ async function sync(req, res) {
             event_end: newEvent.endDateTime || null,
             event_all_day: newEvent.isAllDay ? 1 : 0,
             last_modified_at: toMySQLDate(newEvent.lastModified),
+            provider_etag: newEvent._etag || null,
             task_updated_at: existingTask._updated_at || null,
             status: 'active'
           });
@@ -1675,6 +1686,7 @@ async function sync(req, res) {
             event_end: newEvent.endDateTime || null,
             event_all_day: newEvent.isAllDay ? 1 : 0,
             last_modified_at: toMySQLDate(newEvent.lastModified),
+            provider_etag: newEvent._etag || null,
             status: 'active'
           });
           continue;
@@ -1768,6 +1780,7 @@ async function sync(req, res) {
               event_end: newEvent.endDateTime || null,
               event_all_day: newEvent.isAllDay ? 1 : 0,
               last_modified_at: toMySQLDate(newEvent.lastModified),
+              provider_etag: newEvent._etag || null,
               task_updated_at: dupTask._updated_at || null,
               status: 'active'
             });
@@ -1822,6 +1835,7 @@ async function sync(req, res) {
             event_end: newEvent.endDateTime || null,
             event_all_day: newEvent.isAllDay ? 1 : 0,
             last_modified_at: toMySQLDate(newEvent.lastModified),
+            provider_etag: newEvent._etag || null,
             status: 'active'
           });
 
