@@ -54,9 +54,9 @@ purged), the row is the canonical record itself; no source remains.
 | ~~JUG-MED-01~~ | ~~Show all-day events at top of calendar view~~ | — | — | 2026-05-14 | **FIXED** — CalendarView sort + DailyView all-day banner (commit 2f94a01). DayView already correct. |
 | JUG-MED-02 | Sort out icons for weather (currently confusing) | ~/Obsidian-Vault/wiki/design-docs/juggler/Juggler Backlog Thoughts.md (purged 2026-05-11) | Item 2 of 3 | 2026-05-11 | Weather icon-set ambiguity. Needs UX pass + map to canonical icon set. |
 | JUG-MED-03 | Fix sync frequency issues | ~/Obsidian-Vault/wiki/design-docs/juggler/Juggler Backlog Thoughts.md (purged 2026-05-11) | Item 3 of 3 | 2026-05-11 | Sync frequency is informally noted as inconsistent. Needs concrete repro + RC before a fix can be scoped. |
-| JUG-MED-04 | ClimbRS header consistency (Juggler ↔ ClimbRS auth artifacts) | .planning/todos/pending/2026-05-04-juggler-climbrs-header-consistency.md | (whole file) | 2026-05-04 | Hand-written 2026-05-04, pre-audit. Note: MASTER-PLAN.md shows "✅ ClimbRS header consistency — done in resume-optimizer/ClimbRS" in Closed list — verify status before working; may already be done. |
-| JUG-MED-05 | Header responsive layout — auto-scale, eliminate overlaps | .planning/todos/pending/2026-05-04-juggler-header-responsive-overlap.md | (whole file) | 2026-05-04 | Hand-written 2026-05-04. Note: MASTER-PLAN.md shows "✅ Header responsive overlap — commit `c2c284a`" in Closed list — verify whether this todo predates the fix or covers a residual issue. |
-| JUG-MED-06 | Sync ingest — treat event as reminder vs. time-consuming task | .planning/todos/pending/2026-05-04-juggler-sync-ingest-reminder-vs-task.md | (whole file) | 2026-05-04 | Hand-written 2026-05-04. Note: MASTER-PLAN.md shows "✅ Sync ingest reminder-vs-task — migration `20260505000100_add_ingest_mode_to_user_calendars`" in Closed list — verify whether this todo is the DB part only or also covers UI surfacing. |
+| ~~JUG-MED-04~~ | ~~ClimbRS header consistency~~ | — | — | 2026-05-14 | **ALREADY DONE** — MASTER-PLAN.md confirms ✅ done in resume-optimizer/ClimbRS. |
+| ~~JUG-MED-05~~ | ~~Header responsive layout — auto-scale, eliminate overlaps~~ | — | — | 2026-05-14 | **ALREADY DONE** — commit `c2c284a` (ResizeObserver collapse). Confirmed in git log. |
+| ~~JUG-MED-06~~ | ~~Sync ingest — treat event as reminder vs. time-consuming task~~ | — | — | 2026-05-14 | **ALREADY DONE** — migration `20260505000100_add_ingest_mode_to_user_calendars` confirmed in DB. |
 
 ---
 
