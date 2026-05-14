@@ -330,19 +330,20 @@ function rowToTask(row, timezone, sourceMap) {
     if (local.day) day = local.day;
   }
 
-  // Recurring instances without a scheduler placement yet: derive a "where it
-  // will likely land" time from the template's preferred_time_mins so the UI
-  // has something to render before the scheduler runs. The value is in local
-  // minutes-since-midnight, so no timezone conversion is needed.
+  // Recurring instances: derive time from template's preferred_time_mins so the UI
+  // shows where the scheduler will place it and the scheduler itself uses the
+  // correct preferred time. The value is in local minutes-since-midnight, no
+  // timezone conversion needed.
   //
-  // Once scheduler has placed the instance (scheduled_at is set), trust that
-  // placement. Overriding scheduled_at-derived `time` with preferred_time_mins
-  // here used to cause cal-sync drift: GCal builds events from task.time
-  // (poisoned by the override), while MSFT/Apple build from scheduled_at —
-  // so providers diverged whenever scheduler placement ≠ preferred minute.
-  // Exception: disabled instances are frozen and never get the preferred-time
-  // hint regardless.
-  if (src && src.preferred_time_mins != null && row.status !== 'disabled' && !row.scheduled_at) {
+  // Note: the `!row.scheduled_at` guard previously here (commit 9b8d4f7) has been
+  // removed. That guard was added to prevent cal-sync drift between GCal (which used
+  // task.time) and MSFT/Apple (which used scheduled_at). However, the GCal builder
+  // was simultaneously hardened to prefer task.scheduledAt over task.time — making
+  // the rowToTask guard redundant. With the guard in place, recurring instances with
+  // a stale prior-day scheduled_at kept stale time values, causing the scheduler to
+  // treat them as overdue or drop them silently.
+  // Exception: disabled instances are frozen and never get the preferred-time hint.
+  if (src && src.preferred_time_mins != null && row.status !== 'disabled') {
     var ptH = Math.floor(src.preferred_time_mins / 60);
     var ptM = src.preferred_time_mins % 60;
     var ptAmpm = ptH >= 12 ? 'PM' : 'AM';

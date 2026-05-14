@@ -343,7 +343,7 @@ describe('Tier 3: Flexible Recurrings', () => {
       task({ id: 'mtg1', placementMode: 'fixed', time: '8:00 AM', dur: 240, datePinned: true }),
       task({ id: 'mtg2', placementMode: 'fixed', time: '1:00 PM', dur: 240, datePinned: true }),
       task({ id: 'mtg3', placementMode: 'fixed', time: '5:00 PM', dur: 240, datePinned: true }),
-      task({ id: 'ex', text: 'Exercise', recurring: true, when: 'morning,afternoon', dur: 30, generated: true, flexWhen: false }),
+      task({ id: 'ex', text: 'Exercise', recurring: true, placementMode: 'recurring_flexible', when: 'morning,afternoon', dur: 30, generated: true, flexWhen: false }),
     ]);
     // Strict + blocks full = should be unplaced
     expect(isUnplaced(r, 'ex')).toBe(true);
@@ -781,7 +781,7 @@ describe('Tier 11: Recurring + Split (day-boundary rule)', () => {
     var r = schedule([
       task({
         id: 'rec_stretch', text: 'Stretching',
-        recurring: true, generated: true, date: TODAY,
+        recurring: true, placementMode: 'recurring_flexible', generated: true, date: TODAY,
         when: 'morning', dur: 60, split: true, splitMin: 15, pri: 'P3'
       }),
     ], 300);
@@ -806,7 +806,7 @@ describe('Tier 11: Recurring + Split (day-boundary rule)', () => {
       task({ id: 'block_am', placementMode: 'fixed', time: '6:00 AM', dur: 90, datePinned: true }),
       task({
         id: 'rec_stretch', text: 'Stretching',
-        recurring: true, generated: true, date: TODAY,
+        recurring: true, placementMode: 'recurring_flexible', generated: true, date: TODAY,
         when: 'morning', dur: 60, split: true, splitMin: 15, pri: 'P3'
       }),
     ], 300);
@@ -830,7 +830,7 @@ describe('Tier 11: Recurring + Split (day-boundary rule)', () => {
       task({ id: 'block_am_full', placementMode: 'fixed', time: '6:00 AM', dur: 120, datePinned: true }),
       task({
         id: 'rec_stretch', text: 'Stretching',
-        recurring: true, generated: true, date: TODAY,
+        recurring: true, placementMode: 'recurring_flexible', generated: true, date: TODAY,
         when: 'morning', dur: 60, split: true, splitMin: 15, pri: 'P3'
       }),
     ], 300);
