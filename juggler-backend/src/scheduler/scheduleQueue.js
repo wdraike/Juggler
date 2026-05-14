@@ -4,19 +4,31 @@
  * Mutation controllers call enqueueScheduleRun(userId) after their DB write.
  * This inserts a row into schedule_queue and marks the user dirty in memory.
  *
- * A poll loop checks the dirty set on a short interval. For each dirty user,
- * it reads the queue from DB: if the newest entry is older than DEBOUNCE_MS,
- * the user's writes have gone quiet — sweep (delete) all entries, run the
- * scheduler, and emit per-task SSE signals.
+ * A poll loop checks the DB for unclaimed rows on a short interval. For each
+ * unclaimed user, it atomically claims the row (claimed_by + claimed_at), then
+ * runs the scheduler if the quiet period has elapsed.
  *
- * The dirty set defaults to ALL on startup, so any queue entries that survived
- * a crash/restart are picked up without needing to scan the DB continuously.
+ * The dirty set is retained as a write-side advisory hint: enqueue() marks the
+ * user dirty so the poll loop checks immediately on this instance. It is NOT the
+ * authoritative gate for processing — the DB claim is. This prevents the
+ * multi-instance double-run described in RESEARCH.md Category 2 / Pitfall 3.
  *
- * Single-flight per user: only one scheduler run at a time. If the user is
- * still dirty after a run (new writes arrived), the next poll picks it up.
+ * Reference pattern: cal-history-cron.js uses the same DB-based claim approach
+ * (sync_locks shard leader election). The claiming here is lighter-weight —
+ * a direct UPDATE on the schedule_queue row instead of an INSERT-based mutex —
+ * because schedule_queue rows are per-user and naturally deduplicated.
+ *
+ * Single-flight per user within one instance: the `running` Map prevents one
+ * instance from racing itself if the poll interval fires faster than processUser
+ * completes. The DB claim prevents cross-instance races.
+ *
+ * Crash recovery: if an instance crashes mid-run, claimed_by stays set but
+ * claimed_at stops refreshing. After CLAIM_TTL_SECONDS, another instance
+ * reclaims the row and runs the scheduler. (T-07-07 mitigation)
  */
 
 var db = require('../db');
+var crypto = require('crypto');
 
 // Lazy requires to avoid circular dependency
 var _flushQueueInLock;
@@ -44,18 +56,80 @@ function getSseEmitter() {
 var DEBOUNCE_MS = 2000;   // quiet period before scheduler runs
 var POLL_MS     = 1000;   // how often the poll loop checks the dirty set
 
+// ── Multi-instance claiming constants (FIX-04) ──────────────────────────────
+//
+// INSTANCE_ID uniquely identifies this process across Cloud Run replicas.
+//   - Cloud Run sets K_REVISION (e.g. "juggler-backend-00042-abc") — preferred
+//     because it's stable for the lifetime of the process and human-readable.
+//   - HOSTNAME is the fallback for local dev / non-Cloud-Run environments.
+//   - Random hex is the final fallback when neither env var is set.
+//   (T-07-09: INSTANCE_ID is not a secret — it's operator-visible in DB only)
+//
+// CLAIM_TTL_SECONDS: how long a claim can sit without being released before
+// another instance considers it stale. 60s is long enough for a slow scheduler
+// run (which includes a Knex transaction + SSE emit) but short enough that a
+// crashed instance's claim is reclaimable promptly.
+// Matches the shape of MAX_LOCK_AGE in sync-lock.js (5 min) scaled to the
+// much shorter schedule_queue lifecycle. (T-07-07 mitigation)
+var INSTANCE_ID = process.env.K_REVISION || process.env.HOSTNAME || crypto.randomBytes(8).toString('hex');
+var CLAIM_TTL_SECONDS = 60;
+
 // ── In-memory state ──
-var dirty = {};            // { userId: true } — users with pending queue entries
-var running = {};          // { userId: true } — single-flight flag
+var dirty = {};            // { userId: true } — advisory hint: check this user on next poll
+var running = {};          // { userId: true } — within-instance single-flight guard
 var startupScanDone = false;
+
+// ── DB-based atomic claiming (FIX-04) ───────────────────────────────────────
+//
+// Reference: RESEARCH.md Category 2 / Pitfall 3; cal-history-cron.js tick()
+// is the canonical reference pattern for DB-based leader election in this
+// codebase (uses sync_locks shard keys; we adapt that pattern to per-user rows).
+//
+// tryClaim: atomically sets claimed_by + claimed_at on the user's schedule_queue
+// row. The WHERE guard ensures only an unclaimed row (or a stale-claimed row past
+// TTL) is updated. MySQL's UPDATE is atomic per row — no transaction needed.
+//
+// Returns { claimed: true } if this instance won the claim (affectedRows === 1).
+// Returns { claimed: false } if another instance already owns it (affectedRows === 0).
+// A false return is normal multi-instance behavior — log nothing (not an error).
+
+async function tryClaim(userId, instanceId) {
+  var id = instanceId !== undefined ? instanceId : INSTANCE_ID;
+  var result = await db.raw(
+    'UPDATE schedule_queue ' +
+    'SET claimed_by = ?, claimed_at = NOW() ' +
+    'WHERE user_id = ? ' +
+    'AND (claimed_by IS NULL OR claimed_at < DATE_SUB(NOW(), INTERVAL ? SECOND))',
+    [id, userId, CLAIM_TTL_SECONDS]
+  );
+  var affectedRows = (result[0] && result[0].affectedRows) || 0;
+  return { claimed: affectedRows >= 1 };
+}
+
+// releaseClaim: releases this instance's claim after processUser completes.
+// Only releases if claimed_by still matches this instance (guards against TTL
+// reclaim racing with a late release). Best-effort — transient DB errors are
+// swallowed because the CLAIM_TTL_SECONDS safety net handles the failure case
+// (T-07-08: accepted trade-off — 60s delay on next run is acceptable).
+
+async function releaseClaim(userId, instanceId) {
+  var id = instanceId !== undefined ? instanceId : INSTANCE_ID;
+  await db.raw(
+    'UPDATE schedule_queue SET claimed_by = NULL, claimed_at = NULL ' +
+    'WHERE user_id = ? AND claimed_by = ?',
+    [userId, id]
+  ).catch(function(err) {
+    console.warn('[SCHED-QUEUE] releaseClaim failed for ' + userId + ':', err.message);
+  });
+}
 
 /**
  * Enqueue a scheduler run for a user.
- * Inserts a queue row into the DB and marks the user dirty in memory.
+ * Inserts a queue row into the DB and marks the user dirty (advisory hint).
  * Fire-and-forget from the caller's perspective.
  */
 async function enqueueScheduleRun(userId, source) {
-  dirty[userId] = true;
+  dirty[userId] = true;  // advisory hint — triggers immediate poll on this instance
   try {
     await db('schedule_queue').insert({
       user_id: userId,
@@ -71,11 +145,16 @@ async function enqueueScheduleRun(userId, source) {
 }
 
 /**
- * Process a single dirty user: check if their queue has gone quiet,
+ * Process a single user: check if their queue has gone quiet,
  * sweep entries, run the scheduler, emit SSE.
+ *
+ * Precondition: caller (pollLoop) has already atomically claimed the DB row
+ * for this userId. The running{} Map provides a secondary within-instance
+ * single-flight guard in case the poll interval fires faster than processUser
+ * completes (which would only happen under extreme DB slowness).
  */
 async function processUser(userId) {
-  if (running[userId]) return; // already running — next poll picks it up
+  if (running[userId]) return; // within-instance single-flight guard
 
   try {
     // Read the newest queue entry for this user
@@ -85,8 +164,9 @@ async function processUser(userId) {
       .first();
 
     if (!newest) {
-      // Queue is empty — clear dirty flag
+      // Queue is empty — clear dirty hint
       delete dirty[userId];
+      await releaseClaim(userId);
       return;
     }
 
@@ -102,7 +182,9 @@ async function processUser(userId) {
     var newestTime = new Date(createdAt).getTime();
     var elapsed = Date.now() - newestTime;
     if (elapsed < DEBOUNCE_MS) {
-      // Still within quiet period — leave dirty, poll will re-check
+      // Still within quiet period — release claim and leave dirty hint
+      // so the next poll tick reclaims and re-checks.
+      await releaseClaim(userId);
       return;
     }
 
@@ -110,9 +192,6 @@ async function processUser(userId) {
     running[userId] = true;
 
     // Signal start so the toolbar can show a "Scheduling…" indicator.
-    // `schedule:changed` (emitted on completion below) is the paired end
-    // signal; on lock-failure paths we also emit `schedule:changed` with a
-    // null changeset so the indicator always clears.
     getSseEmitter().emit(userId, 'schedule:running', { timestamp: Date.now() });
 
     // Sweep: delete all queue entries for this user up to the snapshot time.
@@ -125,9 +204,7 @@ async function processUser(userId) {
     console.log('[SCHED-QUEUE] swept ' + swept + ' entry(ies) for ' + userId);
 
     // Resolve the user's timezone so the scheduler computes todayKey and
-    // caches placements under the correct timezone — without this, the
-    // default 'America/New_York' can mismatch the browser-initiated cache,
-    // causing placements to flicker/disappear on the frontend.
+    // caches placements under the correct timezone.
     var userRow = await db('users').where('id', userId).select('timezone').first();
     var tz = (userRow && userRow.timezone) || 'America/New_York';
 
@@ -136,8 +213,6 @@ async function processUser(userId) {
     var result = null;
     for (var attempt = 0; attempt < MAX_LOCK_RETRIES; attempt++) {
       result = await getWithLock()(userId, async function() {
-        // Flush any pending task writes before scheduling so the
-        // scheduler reads the latest user-intended state.
         await getFlushQueueInLock()(userId);
         return getRunScheduleAndPersist()(userId, undefined, { timezone: tz });
       }, { flushOnRelease: false });
@@ -148,14 +223,11 @@ async function processUser(userId) {
 
     if (result === null) {
       console.warn('[SCHED-QUEUE] could not acquire lock for ' + userId + ' after ' + MAX_LOCK_RETRIES + ' attempts');
-      // Still emit schedule:changed so the "Scheduling..." indicator clears
-      // on the frontend even when we failed to run the scheduler.
       getSseEmitter().emit(userId, 'schedule:changed', {
         timestamp: Date.now(),
         changeset: null
       });
     } else {
-      // Emit per-task update signal so the frontend can do surgical repaints
       getSseEmitter().emit(userId, 'schedule:changed', {
         timestamp: Date.now(),
         changeset: result.changeset || null
@@ -174,27 +246,35 @@ async function processUser(userId) {
 
   } catch (err) {
     console.error('[SCHED-QUEUE] error processing user ' + userId + ':', err);
-    // Make sure the "Scheduling..." indicator clears even on unexpected errors.
     try {
       getSseEmitter().emit(userId, 'schedule:changed', { timestamp: Date.now(), changeset: null });
     } catch (_) { /* ignore */ }
   } finally {
     running[userId] = false;
+    // Release the DB claim. This is in finally so it runs on both success and
+    // error paths. If releaseClaim itself throws, it swallows the error —
+    // the CLAIM_TTL_SECONDS=60 safety net handles the transient DB error case.
+    await releaseClaim(userId);
   }
 }
 
 /**
- * Poll loop — runs on a fixed interval. Checks each dirty user and
- * processes them if their quiet period has elapsed.
+ * Poll loop — runs on a fixed interval. Queries the DB for unclaimed
+ * schedule_queue rows and attempts to claim + process each one.
+ *
+ * The DB claim (tryClaim) is the cross-instance gate. The running{} Map is
+ * the within-instance single-flight guard. Both are needed:
+ *   - tryClaim prevents Instance A and Instance B from both running processUser
+ *   - running{} prevents one instance from running processUser twice if poll
+ *     fires while a previous run is still in progress
  */
 async function pollLoop() {
   // On first run, scan DB for any users with pending queue entries
-  // (covers crash recovery / restart)
+  // (covers crash recovery / restart). Each instance does this independently;
+  // the DB claim ensures only one processes each row.
   if (!startupScanDone) {
     startupScanDone = true;
     try {
-      // Check both queues: schedule_queue (pending scheduler runs) and
-      // task_write_queue (pending task writes that survived a crash)
       var [schedPending, writePending] = await Promise.all([
         db('schedule_queue').distinct('user_id'),
         db('task_write_queue').distinct('user_id')
@@ -211,12 +291,42 @@ async function pollLoop() {
     }
   }
 
-  var dirtyUsers = Object.keys(dirty);
-  if (dirtyUsers.length === 0) return;
+  // Query DB for users with unclaimed (or stale-claimed) queue rows.
+  // This is the authoritative work list — the dirty{} Map is advisory only
+  // and may have stale entries from the startup scan or from other instances.
+  var pendingRows;
+  try {
+    pendingRows = await db('schedule_queue')
+      .whereRaw('(claimed_by IS NULL OR claimed_at < DATE_SUB(NOW(), INTERVAL ? SECOND))', [CLAIM_TTL_SECONDS])
+      .distinct('user_id')
+      .pluck('user_id');
+  } catch (err) {
+    // DB unavailable — fall back to in-memory dirty set as advisory
+    console.error('[SCHED-QUEUE] poll DB query failed:', err.message);
+    pendingRows = Object.keys(dirty);
+  }
 
-  // Process all dirty users concurrently (single-flight per user is
-  // enforced inside processUser)
-  await Promise.all(dirtyUsers.map(processUser));
+  if (!pendingRows || pendingRows.length === 0) return;
+
+  // For each candidate user: atomically claim the row, then process if claimed.
+  // Process all candidates concurrently — single-flight per user is enforced
+  // by running{} within this instance and by the DB claim across instances.
+  await Promise.all(pendingRows.map(async function(userId) {
+    // Mark dirty (advisory hint for future polls on this instance)
+    dirty[userId] = true;
+
+    // Atomic cross-instance claim — if another instance won, skip silently.
+    var claim = await tryClaim(userId);
+    if (!claim.claimed) {
+      // Normal multi-instance behavior: another instance owns this row.
+      // Do NOT log — this is not an error, it's the happy path for N>1 instances.
+      return;
+    }
+
+    // This instance owns the claim — proceed to processUser.
+    // processUser's finally block calls releaseClaim().
+    await processUser(userId);
+  }));
 }
 
 // Start the poll loop
@@ -234,4 +344,14 @@ function stopPollLoop() {
   }
 }
 
-module.exports = { enqueueScheduleRun, stopPollLoop };
+module.exports = {
+  enqueueScheduleRun,
+  stopPollLoop,
+  // Internals exposed for test access — do not import in production code.
+  _internal: {
+    tryClaim: tryClaim,
+    releaseClaim: releaseClaim,
+    CLAIM_TTL_SECONDS: CLAIM_TTL_SECONDS,
+    INSTANCE_ID: INSTANCE_ID
+  }
+};
