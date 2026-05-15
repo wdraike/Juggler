@@ -26,13 +26,17 @@ const NOMINATIM_REVERSE_URL   = 'https://nominatim.openstreetmap.org/reverse';
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 // Reverse geocode cache: city/state labels change rarely; 24h TTL is safe.
-const REVERSE_GEOCODE_TTL_S  = 24 * 60 * 60;  // seconds (for Redis)
-const REVERSE_GEOCODE_TTL_MS = REVERSE_GEOCODE_TTL_S * 1000; // ms (for in-memory)
+const REVERSE_GEOCODE_TTL_S = 24 * 60 * 60;  // seconds (for Redis SET EX)
 
-// In-memory fallback for reverse geocode results when Redis is unavailable.
-// Simple map: { key → { value, expiresAt } }. Bounded by the number of unique
-// 0.1° grid cells ever queried (≈ practical ceiling of a few hundred per server).
+// In-memory fallback for when Redis is unavailable. Only written when redis.set
+// returns falsy. Pruned hourly so expired entries don't accumulate indefinitely.
 var _reverseGeocodeMemCache = {};
+setInterval(function() {
+  var now = Date.now();
+  Object.keys(_reverseGeocodeMemCache).forEach(function(k) {
+    if (_reverseGeocodeMemCache[k].expiresAt <= now) delete _reverseGeocodeMemCache[k];
+  });
+}, 60 * 60 * 1000).unref();
 
 function roundCoord(v) {
   return Math.round(parseFloat(v) * 10) / 10;
@@ -225,21 +229,16 @@ exports.geocode = async (req, res) => {
 };
 
 async function reverseGeocodeDisplayName(lat, lon) {
-  // Cache key: round to same 0.1° grid as the forecast cache so nearby
-  // "Locate me" requests collapse to the same entry.
-  var latGrid = roundCoord(lat);
-  var lonGrid = roundCoord(lon);
-  var cacheKey = 'rgeo:' + latGrid + ':' + lonGrid;
+  // 0.1° rounding collapses nearby requests to the same cache entry.
+  var cacheKey = 'rgeo:' + roundCoord(lat) + ':' + roundCoord(lon);
 
-  // 1. Try Redis (preferred — shared across instances)
   var cached = await redis.get(cacheKey);
+  // cached.displayName !== undefined guards against a corrupt/null-valued entry
   if (cached && cached.displayName !== undefined) return cached.displayName;
 
-  // 2. Try in-memory fallback (single-instance, survives Redis outage)
   var memEntry = _reverseGeocodeMemCache[cacheKey];
   if (memEntry && memEntry.expiresAt > Date.now()) return memEntry.value;
 
-  // 3. Cache miss — fetch from Nominatim
   var url = NOMINATIM_REVERSE_URL + '?lat=' + lat + '&lon=' + lon + '&format=json&zoom=10';
   var resp = await fetch(url, {
     headers: { 'User-Agent': 'Juggler/1.0 (task-scheduling-app)' }
@@ -251,11 +250,10 @@ async function reverseGeocodeDisplayName(lat, lon) {
   var state = addr.state || addr.region || '';
   var displayName = [city, state].filter(Boolean).join(', ') || data.display_name || '';
 
-  // Store in Redis (fire-and-forget; failure is non-fatal)
-  redis.set(cacheKey, { displayName }, REVERSE_GEOCODE_TTL_S).catch(function() {});
-
-  // Store in memory fallback
-  _reverseGeocodeMemCache[cacheKey] = { value: displayName, expiresAt: Date.now() + REVERSE_GEOCODE_TTL_MS };
+  var stored = await redis.set(cacheKey, { displayName }, REVERSE_GEOCODE_TTL_S).catch(function() { return null; });
+  if (!stored) {
+    _reverseGeocodeMemCache[cacheKey] = { value: displayName, expiresAt: Date.now() + REVERSE_GEOCODE_TTL_S * 1000 };
+  }
 
   return displayName;
 }

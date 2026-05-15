@@ -106,11 +106,9 @@ async function tryClaim(userId, instanceId) {
   return { claimed: affectedRows >= 1 };
 }
 
-// releaseClaim: releases this instance's claim after processUser completes.
 // Only releases if claimed_by still matches this instance (guards against TTL
-// reclaim racing with a late release). Best-effort — transient DB errors are
-// swallowed because the CLAIM_TTL_SECONDS safety net handles the failure case
-// (T-07-08: accepted trade-off — 60s delay on next run is acceptable).
+// reclaim racing with a late release). Transient DB errors are swallowed —
+// CLAIM_TTL_SECONDS safety net handles the failure case (T-07-08).
 
 async function releaseClaim(userId, instanceId) {
   var id = instanceId !== undefined ? instanceId : INSTANCE_ID;
@@ -251,9 +249,7 @@ async function processUser(userId) {
     } catch (_) { /* ignore */ }
   } finally {
     running[userId] = false;
-    // Release the DB claim. This is in finally so it runs on both success and
-    // error paths. If releaseClaim itself throws, it swallows the error —
-    // the CLAIM_TTL_SECONDS=60 safety net handles the transient DB error case.
+    // If releaseClaim throws, the CLAIM_TTL_SECONDS=60 safety net cleans up.
     await releaseClaim(userId);
   }
 }

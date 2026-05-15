@@ -95,9 +95,7 @@ async function processPurge(deps, shard, now) {
 }
 
 async function notifyUsers(deps, userIds) {
-  // Fan out cache invalidation + SSE concurrently across users.
-  // Sequential awaits added per-user latency proportional to userIds.length
-  // (each Redis invalidateTasks call is a network round-trip).
+  // Concurrent: serial awaits per user add per-user Redis round-trip latency.
   await Promise.all(userIds.map(async function(u) {
     if (deps.cache && deps.cache.invalidateTasks) {
       try { await deps.cache.invalidateTasks(u); } catch (e) { /* swallow */ }

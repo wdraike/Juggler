@@ -10,8 +10,7 @@ const cookieParser = require('cookie-parser');
 const bodyParser = require('body-parser');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
-const { RedisStore } = require('rate-limit-redis');
-const redisLib = require('./lib/redis');
+const { maybeRedisStore } = require('./lib/rate-limit-store');
 
 const taskRoutes = require('./routes/task.routes');
 const configRoutes = require('./routes/config.routes');
@@ -108,34 +107,27 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Rate limiting
-// When Redis is available, use a shared RedisStore so limits are enforced
-// consistently across all Cloud Run instances. Falls back to default in-memory
-// MemoryStore when Redis is not configured (single-instance or local dev).
-function makeRateLimiter(opts) {
-  const redisClient = redisLib.getClient();
-  if (redisClient) {
-    opts.store = new RedisStore({
-      sendCommand: (command, ...args) => redisClient.call(command, ...args),
-      prefix: 'rl:',
-    });
-  }
-  return rateLimit(opts);
+// Without Redis, SSE fan-out degrades to local-only and the AI rate limiter
+// falls back to per-instance counters.
+if (!process.env.REDIS_URL) {
+  console.warn('[startup] REDIS_URL not set — SSE fan-out and AI rate limiter will be local-only (single-instance safe, not multi-instance safe)');
 }
 
-const apiLimiter = makeRateLimiter({ windowMs: 60 * 1000, max: 1000, standardHeaders: true, legacyHeaders: false });
-const aiLimiter = makeRateLimiter({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
-const mcpLimiter = makeRateLimiter({ windowMs: 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
-const oauthCallbackLimiter = makeRateLimiter({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests, please wait.' } });
-const billingWebhookLimiter = makeRateLimiter({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many webhook calls.' } });
-const healthLimiter = makeRateLimiter({ windowMs: 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
+// Broad limiters stay per-instance by design (Category 4f — shared counters
+// across instances would synchronize on every request at 1000/min with no
+// meaningful protection gain). Only the strict AI limiter uses Redis.
+const LIMITER_DEFAULTS = { windowMs: 60 * 1000, standardHeaders: true, legacyHeaders: false };
+const apiLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 1000 });
+const aiLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 20, store: maybeRedisStore('jugrl-ai:') });
+const mcpLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 300 });
+const oauthCallbackLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 20, message: { error: 'Too many requests, please wait.' } });
+const billingWebhookLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 120, message: { error: 'Too many webhook calls.' } });
+const healthLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 300 });
 // Per-user write limiter — keys by user ID so shared NAT/proxies don't hit a common bucket.
 // skip() passes through safe read-only methods so GETs aren't throttled.
-const writeRateLimiter = makeRateLimiter({
-  windowMs: 60 * 1000,
+const writeRateLimiter = rateLimit({
+  ...LIMITER_DEFAULTS,
   max: 300,
-  standardHeaders: true,
-  legacyHeaders: false,
   keyGenerator: (req) => (req.user && req.user.id) ? String(req.user.id) : req.ip,
   message: { error: 'Too many write requests, please slow down.' },
   skip: (req) => req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS',
@@ -165,13 +157,6 @@ app.get('/api/auth/me', authenticateJWT, async (req, res) => {
     }
   });
 });
-
-// Startup check: warn if REDIS_URL is missing. Without Redis, SSE fan-out
-// degrades to local-only (events not delivered across instances) and rate
-// limiters fall back to per-instance in-memory counters.
-if (!process.env.REDIS_URL) {
-  console.warn('[startup] REDIS_URL not set — SSE fan-out and rate limiters will be local-only (single-instance safe, not multi-instance safe)');
-}
 
 // SSE endpoint — real-time event stream for connected frontends
 // EventSource doesn't support custom headers, so accept token as query param
