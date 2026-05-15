@@ -981,9 +981,36 @@ async function sync(req, res) {
                 pStats.pulled++;
                 stats.pulled++;
               }
+            } else if (ledger.origin === pid && !isTerminalStatus(task.status)) {
+              // Provider-origin task in full-sync mode: pull event changes when the
+              // event was modified since our last sync. We never push to these events
+              // (we don't own them), but we keep task fields (dur, text, time) current
+              // when the user edits them on the provider side.
+              var provEventModified = false;
+              if (event.lastModified && ledger.last_modified_at) {
+                var pvModMs = new Date(event.lastModified).getTime();
+                var pvRecMs = new Date(String(ledger.last_modified_at).replace(' ', 'T') + 'Z').getTime();
+                if (!isNaN(pvModMs) && !isNaN(pvRecMs)) {
+                  provEventModified = (pvModMs - pvRecMs) > 1000;
+                }
+              } else if (event._etag && ledger.provider_etag) {
+                provEventModified = event._etag !== ledger.provider_etag;
+              }
+              if (provEventModified) {
+                var provPullFields = pAdapter.applyEventToTaskFields(event, tz, task);
+                provPullFields.when = 'fixed';
+                taskUpdates.push({ id: task.id, fields: provPullFields });
+                pStats.pulled++;
+                stats.pulled++;
+                logSyncAction(pid, 'pulled', {
+                  taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
+                  oldValues: { dur: task.dur, text: task.text },
+                  newValues: { dur: event.durationMinutes, text: event.title },
+                  detail: 'Provider-origin event edited — task refreshed from ' + pid,
+                  calendarName: calendarLabels[pid] || null
+                });
+              }
             }
-            // else: origin=provider in full-sync mode — we don't push, we don't pull,
-            // the ledger just exists to track that this task is linked to that event.
 
             // Update ledger cached fields
             ledgerUpdates.push({ id: ledger.id, fields: {

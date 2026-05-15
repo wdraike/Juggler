@@ -292,7 +292,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // instance reappears on the next scheduler run.
   var _p_terminalDedupRows = trx('task_instances').where('user_id', userId)
     .whereNotNull('master_id')
-    .whereIn('status', ['done', 'skip', 'cancel'])
+    .whereIn('status', ['done', 'skip', 'cancel', 'missed'])
     .select('master_id as source_id', 'date', 'scheduled_at', 'occurrence_ordinal', 'id');
   // Cross-cycle spacing history: latest `done` placement date per recurring
   // master. Only `done` counts — `skip` / `cancel` mean the user opted out
@@ -1391,6 +1391,16 @@ async function runScheduleAndPersist(userId, _retries, options) {
     pendingUpdates.push({ id: t.id, dbUpdate: { unscheduled: null, updated_at: db.fn.now() } });
   });
 
+  // 8.6. Clear stale overdue flag on tasks that were overdue in the DB but are
+  // now placed. The unplaced loop (§8) writes overdue=1 for newly-unplaceable
+  // tasks; without this sweep those flags are never cleared when the
+  // constraint resolves (e.g. when-tag corrected, new capacity freed up).
+  taskRows.forEach(function(r) {
+    if (!r.overdue) return; // already clear in DB — nothing to do
+    if (unplacedIds[r.id]) return; // still unplaced — §8 handles this
+    pendingUpdates.push({ id: r.id, dbUpdate: { overdue: 0, updated_at: db.fn.now() } });
+  });
+
   // 9. Move remaining past-dated tasks to today
   //    Past recurringTasks missed their day — mark as 'missed' (juggler-cal-history Plan C; was 'skip').
   //    Past non-recurringTasks that weren't placed — move date to today.
@@ -1487,7 +1497,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var chunk = scheduledAtUpdates.slice(ci, ci + CHUNK);
     var ids = chunk.map(function(pu) { return pu.id; });
 
-    var updateFields = { unscheduled: null, date_pinned: 0, updated_at: db.fn.now() };
+    var updateFields = { unscheduled: null, date_pinned: 0, overdue: 0, updated_at: db.fn.now() };
 
     // Build CASE for scheduled_at (only include tasks that have a new scheduled_at)
     var saChunk = chunk.filter(function(pu) { return !!pu.dbUpdate.scheduled_at; });
@@ -1818,7 +1828,7 @@ async function getSchedulePlacements(userId, options) {
     .select();
   var terminalDedupRows2 = await db('task_instances').where('user_id', userId)
     .whereNotNull('master_id')
-    .whereIn('status', ['done', 'skip', 'cancel'])
+    .whereIn('status', ['done', 'skip', 'cancel', 'missed'])
     .select('master_id as source_id', 'date', 'scheduled_at');
   var srcMap = buildSourceMap(taskRows);
   var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
