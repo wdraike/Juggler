@@ -124,12 +124,6 @@ const checkTaskLimit = checkEntityLimit(
   countActiveTasks
 );
 
-const checkTaskBatchLimit = checkEntityLimit(
-  'limits.active_tasks',
-  countActiveTasks,
-  { batchCountFn: (req) => Array.isArray(req.body) ? req.body.length : (req.body?.tasks?.length || 1) }
-);
-
 const checkRecurringLimit = checkEntityLimit(
   'limits.recurring_templates',
   countRecurringTemplates
@@ -237,10 +231,6 @@ async function checkBatchTaskLimits(req, res, next) {
 }
 
 module.exports = {
-  checkEntityLimit,
-  checkTaskLimit,
-  checkTaskBatchLimit,
-  checkRecurringLimit,
   checkProjectLimit,
   checkLocationLimit,
   checkScheduleTemplateLimit,

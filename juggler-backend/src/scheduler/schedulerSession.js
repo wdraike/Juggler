@@ -276,5 +276,4 @@ module.exports = {
   stopSession: stopSession,
   _computeStep: _computeStep,
   _computeSummary: _computeSummary,
-  _sessions: null // formerly the in-memory Map; retained for interface compatibility
 };

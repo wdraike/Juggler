@@ -102,18 +102,6 @@ async function del(...keys) {
 }
 
 /**
- * Invalidate all caches for a user.
- */
-async function invalidateUser(userId) {
-  return del(
-    `user:${userId}:tasks`,
-    `user:${userId}:version`,
-    `user:${userId}:placements`,
-    `user:${userId}:config`
-  );
-}
-
-/**
  * Invalidate task-related caches (tasks + version + placements).
  */
 async function invalidateTasks(userId) {
@@ -144,11 +132,9 @@ async function quit() {
 
 module.exports = {
   getClient,
-  isConnected,
   get,
   set,
   del,
-  invalidateUser,
   invalidateTasks,
   invalidateConfig,
   quit

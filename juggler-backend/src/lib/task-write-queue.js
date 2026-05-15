@@ -105,9 +105,8 @@ async function enqueueWrite(userId, taskId, operation, fields, source) {
   console.log('[WRITE-QUEUE] enqueued ' + operation + ' for task ' + taskId + ' user ' + userId + ' source=' + (source || 'unknown'));
 }
 
-/**
- * Check if a user has pending writes in the queue.
- */
+// ── Coalescing ───────────────────────────────────────────────────────
+
 async function hasQueuedWrites(userId) {
   var result = await db('task_write_queue')
     .where('user_id', userId)
@@ -115,8 +114,6 @@ async function hasQueuedWrites(userId) {
     .first();
   return result && parseInt(result.cnt, 10) > 0;
 }
-
-// ── Coalescing ───────────────────────────────────────────────────────
 
 /**
  * Coalesce queue entries into a minimal set of DB operations.
@@ -299,37 +296,11 @@ async function _doFlush(userId) {
   }
 }
 
-// ── MCP read-after-write support ─────────────────────────────────────
-
-/**
- * Get pending field changes for a specific task (for read-after-write overlay).
- * Returns merged fields object, or null if no pending writes.
- */
-async function getPendingForTask(userId, taskId) {
-  var entries = await db('task_write_queue')
-    .where({ user_id: userId, task_id: taskId })
-    .orderBy('created_at', 'asc')
-    .select('operation', 'fields');
-
-  if (entries.length === 0) return null;
-
-  var coalesced = coalesceEntries(entries.map(function(e, i) {
-    return { id: i, task_id: taskId, operation: e.operation, fields: e.fields };
-  }));
-
-  if (coalesced.length === 0) return null;
-  var op = coalesced[0];
-  if (op.operation === 'delete') return { _deleted: true };
-  return op.fields;
-}
-
 module.exports = {
   isLocked: isLocked,
   enqueueWrite: enqueueWrite,
-  hasQueuedWrites: hasQueuedWrites,
   flushQueue: flushQueue,
   flushQueueInLock: flushQueueInLock,
   splitFields: splitFields,
-  getPendingForTask: getPendingForTask,
   NON_SCHEDULING_FIELDS: NON_SCHEDULING_FIELDS
 };
