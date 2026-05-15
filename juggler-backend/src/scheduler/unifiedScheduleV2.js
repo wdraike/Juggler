@@ -419,10 +419,15 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     })();
     // Day-lock applies when:
     //   - rigid recurring (user pinned the day + time)
-    //   - any split chunk (all chunks of the same occurrence must share the
-    //     anchor day; otherwise chunk 1 could roam while chunks 2+ stay put)
-    //   - non-tpc recurring (instance is day-specific, per above)
-    var isDayLocked = recurring && (pm === PLACEMENT_MODES.RECURRING_RIGID || splitTot > 1 || !isFlexibleTpc);
+    //   - non-tpc recurring (instance is day-specific — daily tasks lock to their
+    //     day, non-tpc weekly tasks must stay on their picked day to avoid colliding
+    //     with other occurrences)
+    // Split chunks of tpc recurring tasks are NOT day-locked. Their deadline is
+    // capped to the day before the next occurrence fires (set in runSchedule.js),
+    // so chunks spread across the interval window naturally without competing with
+    // the next occurrence. Daily tpc splits self-cap via cycleDays=1 in the
+    // placement window (ai + cycleDays - 1 = ai → same day regardless).
+    var isDayLocked = recurring && (pm === PLACEMENT_MODES.RECURRING_RIGID || !isFlexibleTpc);
 
     items.push({
       task: t,

@@ -500,6 +500,52 @@ async function runScheduleAndPersist(userId, _retries, options) {
   }
   tPerf.expandEnd = Date.now() - tPerfStart;
 
+  // Build next-tpc-occurrence map so split chunk deadlines can be capped to the
+  // interval boundary (day before next occurrence) instead of the full flex window.
+  // Without this, a Mon chunk of a Mon/Thu 2x-weekly task could roam all the way
+  // to Sunday and compete with Thursday's occurrence for slots.
+  var nextTpcOccDateByKey = {}; // key: masterId|occDateKey → next occDateKey (or null)
+  (function() {
+    var occsByMaster = {};
+    desiredOccurrences.forEach(function(occ) {
+      var mid = occ.sourceId;
+      if (!mid) return;
+      var master = srcMap[mid];
+      if (!master) return;
+      var recur = master.recur || {};
+      if (!recur.timesPerCycle || recur.timesPerCycle <= 0) return;
+      if (!occsByMaster[mid]) occsByMaster[mid] = [];
+      occsByMaster[mid].push(occ.date);
+    });
+    Object.keys(occsByMaster).forEach(function(mid) {
+      var sorted = occsByMaster[mid].slice().sort();
+      for (var i = 0; i < sorted.length; i++) {
+        nextTpcOccDateByKey[mid + '|' + sorted[i]] = sorted[i + 1] || null;
+      }
+    });
+  })();
+
+  // Fix split-chunk deadlines for tpc tasks. Step 2b used the coarse flex window
+  // (e.g. 6 days for weekly). Now that desiredOccurrences is available, cap each
+  // split primary chunk's deadline to the day before the next occurrence fires.
+  allTasks.forEach(function(t) {
+    if (t.taskType !== 'recurring_instance' || !t.sourceId) return;
+    if (!t.deadline || !t.splitTotal || t.splitTotal <= 1) return;
+    var master = srcMap[t.sourceId];
+    if (!master) return;
+    var recur = master.recur || {};
+    if (!recur.timesPerCycle || recur.timesPerCycle <= 0) return;
+    var occDate = t._candidateDate || t.date || t.startAfter;
+    if (!occDate) return;
+    var nextKey = nextTpcOccDateByKey[t.sourceId + '|' + occDate];
+    if (!nextKey) return;
+    var nextOcc = parseDate(nextKey);
+    if (!nextOcc) return;
+    var dayBefore = new Date(nextOcc);
+    dayBefore.setDate(dayBefore.getDate() - 1);
+    t.deadline = formatDateKey(dayBefore);
+  });
+
   // ── Date-based reconciliation ──
   // Match existing pending occurrences to target dates by exact-date first,
   // then nearest-first. Preserves instance IDs + occurrence_ordinals across
@@ -929,6 +975,19 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var dueDate = new Date(occ); dueDate.setDate(dueDate.getDate() + flex);
     t.startAfter = formatDateKey(occ);
     t.deadline = formatDateKey(dueDate);
+    // For in-memory split chunks (ordinal 2+) of tpc tasks, cap deadline to the
+    // day before the next occurrence so they don't compete with it for slots.
+    if (t.splitTotal > 1 && recur.timesPerCycle > 0) {
+      var nextKey = nextTpcOccDateByKey[t.sourceId + '|' + formatDateKey(occ)];
+      if (nextKey) {
+        var nextOcc2 = parseDate(nextKey);
+        if (nextOcc2) {
+          var dayBefore2 = new Date(nextOcc2);
+          dayBefore2.setDate(dayBefore2.getDate() - 1);
+          t.deadline = formatDateKey(dayBefore2);
+        }
+      }
+    }
     if (!t.date) {
       t.date = t.startAfter;
       t.day = DAY_NAMES[occ.getDay()];
