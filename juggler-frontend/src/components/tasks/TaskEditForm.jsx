@@ -881,11 +881,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   // For recurring instances: deletes the instance so the scheduler regenerates it.
   var isPinned = !isCreate && task && task.prevWhen != null;
   function handleUnfix() {
-    if (!task) return;
+    var newWhen = (when || '').split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t && t !== 'fixed'; }).join(',');
     setDatePinned(false);
-    var newWhen = (task.when || '').split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t && t !== 'fixed'; }).join(',');
     setWhen(newWhen);
-    if (onUpdate) onUpdate(task.id, { datePinned: false, when: newWhen });
+    if (task && onUpdate) onUpdate(task.id, { datePinned: false, when: newWhen });
   }
   function handleUnpin() {
     if (!task) return;
@@ -1334,29 +1333,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             </div>;
           })()}
 
-          {/* Non-recurring fixed task: show unfix option */}
-          {!recurring && !isCreate && isPinned && (
-            <div style={{ fontSize: 11, color: '#D97706', marginBottom: 5, padding: '4px 8px', background: TH.inputBg, borderRadius: 4, border: '1px solid #D97706', display: 'flex', alignItems: 'center', gap: 6 }}>
-              {'\uD83D\uDCCC'} Fixed by drag
-              <button onClick={handleUnpin} style={{
-                fontSize: 9, padding: '1px 8px', borderRadius: 3,
-                background: TH.inputBg, border: '1px solid ' + TH.border, color: TH.text,
-                cursor: 'pointer', fontWeight: 600
-              }}>Unfix — let scheduler choose</button>
-            </div>
-          )}
-
           {/* === NON-RECURRING: Original Date/Time field === */}
           {!recurring && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, maxWidth: '100%' }}>
             <label style={{ ...lStyle, maxWidth: '100%', minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span title="Date/time for this task. For fixed tasks: the scheduler will not move it. For unfixed tasks: the scheduler may shift it to fit your schedule.">{'\uD83D\uDCC5'} Date / Time</span>
-                {!isCreate && !marker && date && (
-                  datePinned
-                    ? <span style={{ fontSize: 7, color: '#D97706', fontWeight: 700 }}>{'\uD83D\uDCCC'} fixed</span>
-                    : <span style={{ fontSize: 7, color: TH.muted2 }}>set by scheduler</span>
-                )}
-              </div>
+              <span title="Date/time for this task. For fixed tasks: the scheduler will not move it. For unfixed tasks: the scheduler may shift it to fit your schedule.">{'\uD83D\uDCC5'} Date / Time</span>
               <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                 {isAllDay ? (
                   <input type="date" value={date || ''}
@@ -1383,14 +1363,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                       if (!isCreate && !isFixed) setDatePinned(!!v);
                     }}
                     style={{ ...iStyle, width: isMobile ? '100%' : undefined, minWidth: 0, ...(datePinned && date ? { borderColor: '#D97706' } : {}) }} />
-                )}
-                {!isCreate && !isCalLinkedFixed && !marker && datePinned && date && (
-                  <button onClick={handleUnfix} title="Let scheduler choose the date"
-                    style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, cursor: 'pointer',
-                      border: '1px solid ' + TH.btnBorder, background: TH.inputBg, color: TH.textMuted, fontWeight: 600,
-                      height: BTN_H, boxSizing: 'border-box' }}>
-                    Unfix
-                  </button>
                 )}
               </div>
             </label>
@@ -1457,6 +1429,37 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               </label>
             )}
           </div>}
+
+          {/* Float / Fixed badge */}
+          {!recurring && !marker && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              {isCalLinkedFixed ? (
+                <button disabled style={{
+                  padding: '2px 10px', borderRadius: 4, border: '1px solid ' + TH.amberBorder,
+                  background: TH.amberBg, color: TH.amberText, fontSize: 10, fontWeight: 700,
+                  cursor: 'not-allowed', fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box'
+                }}>Fixed</button>
+              ) : isFixed ? (
+                <button onClick={isPinned ? handleUnpin : handleUnfix} style={{
+                  padding: '2px 10px', borderRadius: 4, border: '1px solid ' + TH.amberBorder,
+                  background: TH.amberBg, color: TH.amberText, fontSize: 10, fontWeight: 700,
+                  cursor: 'pointer', fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box'
+                }}>Fixed</button>
+              ) : (
+                <button onClick={function() { setDatePinned(true); setWhen('fixed'); setSplit(false); }} style={{
+                  padding: '2px 10px', borderRadius: 4, border: '1px solid ' + TH.btnBorder,
+                  background: 'transparent', color: TH.textMuted, fontSize: 10, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box'
+                }}>Float</button>
+              )}
+              {isFixed
+                ? <span style={{ fontSize: 10, color: TH.amberText }}>Scheduler will not move this</span>
+                : (!isCreate && date
+                    ? <span style={{ fontSize: 10, color: TH.textMuted }}>set by scheduler</span>
+                    : null)
+              }
+            </div>
+          )}
 
           {/* Intended vs scheduled — only when scheduler moved the task */}
           {!isCreate && !recurring && task.desiredAt && task.scheduledAt && task.desiredAt !== task.scheduledAt && !task.unscheduled && (function() {
@@ -1548,41 +1551,32 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             </label>
           </div>}
 
-          {/* When mode selector — hidden for markers and recurring tasks.
-              Recurring tasks use the upper "Time window / Time blocks" mode
-              selector instead; showing both produces two redundant controls
-              that write to the same `when` field (confusing). */}
-          {!marker && !recurring && <label style={{ ...lStyle, marginBottom: 5 }}>
-            <span title="When during the day the scheduler can place this task, and whether it is flexible or fixed.">{'\uD83D\uDCC6'} Placement</span>
-            {(function() {
-              // Window tags are everything that isn't a mode keyword
-              var tagParts = whenParts.filter(function(p) { return p !== 'anytime' && p !== 'allday' && p !== 'fixed'; });
-              var isWindows = tagParts.length > 0;
-              var isAnytime = !isAllDay && !isFixed && !isWindows;
-              var calWarn = isCalLinkedFixed
-                ? ' — This event is synced to your external calendar; unpinning it may cause calendar/scheduler drift.'
-                : '';
-              return (
-                <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center', marginTop: 4 }}>
-                  <button title={'No time restriction — the scheduler can place this in any available slot' + calWarn}
+          {!marker && !recurring && (function() {
+            var tagParts = whenParts.filter(function(p) { return p !== 'anytime' && p !== 'allday' && p !== 'fixed'; });
+            var isWindows = tagParts.length > 0;
+            var isAnytime = !isAllDay && !isFixed && !isWindows;
+            return (
+                <div style={{ marginBottom: 5 }}>
+                  <div style={{ fontSize: 9, color: TH.muted2, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, opacity: isFixed ? 0.4 : 1 }}>Scheduling mode</div>
+                  <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 8, opacity: isFixed ? 0.35 : 1, pointerEvents: isFixed ? 'none' : undefined }}>
+                  <button title="No time restriction — the scheduler can place this in any available slot"
                     onClick={function() { setDatePinned(false); setWhen(''); }}
                     style={togStyle(isAnytime, '#2D6A4F')}>{'\uD83D\uDD04'} Anytime</button>
-                  <button title={'Spans the entire day' + calWarn}
+                  <button title="Spans the entire day"
                     onClick={function() { setDatePinned(false); setWhen('allday'); setSplit(false); setTravelBefore(0); setTravelAfter(0); }}
                     style={togStyle(isAllDay, '#C8942A')}>{'\u2600\uFE0F'} All Day</button>
-                  <button title={'Locked to the exact Date/Time. The scheduler will never move it' + calWarn}
-                    onClick={function() { setDatePinned(true); setWhen('fixed'); setSplit(false); }}
-                    style={togStyle(isFixed, '#8B2635')}>{'\uD83D\uDCCC'} Fixed</button>
-                  <span style={{ width: 1, height: 18, background: TH.border, margin: '0 2px' }} />
+                  </div>
+                  <div style={{ fontSize: 9, color: TH.muted2, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, opacity: isFixed ? 0.4 : 1 }}>Preferred time windows</div>
+                  <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 6, opacity: isFixed ? 0.35 : 1, pointerEvents: isFixed ? 'none' : undefined }}>
                   {(uniqueTags || []).map(function(tb) {
                     var isOn = tagParts.indexOf(tb.tag) !== -1;
                     return (
                       <button key={tb.tag}
-                        title={(isAllDay || isFixed)
-                          ? tb.name + ' time window — clicking will switch out of ' + (isFixed ? 'Fixed' : 'All Day') + ' mode'
+                        title={isAllDay
+                          ? tb.name + ' time window — clicking will switch out of All Day mode'
                           : tb.name + ' time window — selecting any window disables Anytime'}
                         onClick={function() {
-                          if (isAllDay || isFixed) {
+                          if (isAllDay) {
                             setDatePinned(false);
                             setWhen(tb.tag);
                           } else {
@@ -1592,8 +1586,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                             setWhen(cur.length === 0 ? '' : cur.join(','));
                           }
                         }} style={{
-                          ...togStyle(isOn && !isAllDay && !isFixed, tb.color),
-                          opacity: (isAllDay || isFixed) ? 0.55 : 1
+                          ...togStyle(isOn && !isAllDay, tb.color),
+                          opacity: isAllDay ? 0.55 : 1
                         }}>{tb.icon} {tb.name}</button>
                     );
                   })}
@@ -1605,10 +1599,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                       {flexWhen ? '~ Flex' : 'Strict'}
                     </button>
                   </>}
+                  </div>
                 </div>
               );
             })()}
-          </label>}
 
           {/* Day requirement — hidden for recurringTasks and fixed tasks */}
           {!marker && !recurring && !isFixed && (
