@@ -6,7 +6,7 @@ module.exports = defineConfig({
   timeout: 30000,
   retries: 0,
   use: {
-    baseURL: process.env.FRONTEND_URL || 'http://localhost:3001',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || process.env.FRONTEND_URL || 'http://localhost:3002',
     headless: true,
     viewport: { width: 1280, height: 800 },
     actionTimeout: 10000,
