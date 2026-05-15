@@ -360,7 +360,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     var DEFAULT_TIME_FLEX = 60;
     var isWindowMode = pm === PLACEMENT_MODES.RECURRING_WINDOW;
     var windowLo = null, windowHi = null;
-    var isMissedWindow = false; // true when the flex window is entirely past
+    var isMissedWindow = false; // true when the flex window is entirely past (RECURRING_WINDOW mode)
     if (isWindowMode) {
       var flex = t.timeFlex != null ? t.timeFlex : DEFAULT_TIME_FLEX;
       if (flex > 0 && flex <= 480) {
@@ -376,6 +376,21 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
         }
       } else {
         isWindowMode = false; // degenerate flex — fall back to when tags
+      }
+    }
+
+    // Missed preferred-time detection for non-window recurring tasks.
+    // A FLEXIBLE recurring (or any recurring without RECURRING_WINDOW mode) that
+    // has a preferredTimeMins set should be marked missed — not normally placed —
+    // when its preferred-time window [preferredTimeMins, preferredTimeMins+timeFlex]
+    // has entirely passed. This prevents stale instances from being placed far
+    // outside their intended time when the user has explicitly set a preferred time.
+    var isMissedPreferredTime = false;
+    if (t.recurring && !isWindowMode && !isMissedWindow &&
+        t.preferredTimeMins != null && anchorDate === todayIsoKey && nowMins != null) {
+      var flex2 = t.timeFlex != null ? t.timeFlex : DEFAULT_TIME_FLEX;
+      if (flex2 > 0 && nowMins >= t.preferredTimeMins + flex2) {
+        isMissedPreferredTime = true;
       }
     }
 
@@ -454,6 +469,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       dependsOn: depsOn,
       isWindowMode: isWindowMode,
       isMissedWindow: isMissedWindow,
+      isMissedPreferredTime: isMissedPreferredTime,
       windowLo: windowLo,
       windowHi: windowHi,
       preferredTimeMins: t.preferredTimeMins != null ? t.preferredTimeMins : null,
@@ -1085,9 +1101,108 @@ function compareItems(a, b) {
   return 0;
 }
 
+// ── Inline split placement ────────────────────────────────────
+// Greedy placement for tasks with t.split===true that don't have pre-split
+// ordinals. Places chunks of at least splitMin minutes in free slots, consuming
+// available capacity until the full duration is covered or no more slots exist.
+//
+// Returns: { placed: [{dateKey, start, dur}], remaining: number }
+//
+// For recurring split tasks: restricted to the anchorDate only (isDayLocked).
+// For non-recurring: searches across the eligible date range.
+function placeSplitInline(item, remaining, splitMin, dates, dayWindows, dayBlocks, dayOcc, cfg) {
+  var placed = [];
+  var STEP = 15; // placement granularity
+
+  // Build search index range.
+  var earliestIdx = 0;
+  var latestIdx = dates.length - 1;
+
+  if (item.startAfterDate) {
+    var sai = indexOfDate(dates, item.startAfterDate);
+    if (sai > 0) earliestIdx = sai;
+  }
+  if (item.deadlineDate) {
+    var di = indexOfDate(dates, item.deadlineDate);
+    if (di >= 0 && di < latestIdx) latestIdx = di;
+  }
+
+  // Recurring split: restrict to anchor day only (must not spill into the
+  // next occurrence's window).
+  if (item.isRecurring && item.anchorDate) {
+    var ai = indexOfDate(dates, item.anchorDate);
+    if (ai >= 0) {
+      earliestIdx = ai;
+      if (item.isDayLocked) {
+        latestIdx = ai;
+      } else if (item.cycleDays > 0) {
+        var capIdx = ai + item.cycleDays - 1;
+        if (capIdx < latestIdx) latestIdx = capIdx;
+      } else {
+        latestIdx = ai;
+      }
+    }
+  }
+
+  for (var i = earliestIdx; i <= latestIdx && remaining > 0; i++) {
+    if (i >= dates.length) break;
+    var d = dates[i];
+    // Day-of-week filter
+    if (item.allowedDows && !item.allowedDows[d.isoDow]) continue;
+    var wins = eligibleWindows(item, d.key, dayWindows, dayBlocks);
+    if (!wins.length) continue;
+    var occ = dayOcc[d.key];
+    if (!occ) continue;
+
+    for (var w = 0; w < wins.length && remaining > 0; w++) {
+      var winStart = wins[w][0];
+      var winEnd = wins[w][1];
+      // Walk the window looking for free runs of >= splitMin minutes.
+      var s = winStart;
+      while (s < winEnd && remaining > 0) {
+        if (occ[s]) { s++; continue; }
+        // Count the free run from s.
+        var freeEnd = s;
+        while (freeEnd < winEnd && !occ[freeEnd]) freeEnd++;
+        var freeLen = freeEnd - s;
+        if (freeLen < splitMin) { s = freeEnd + 1; continue; }
+        // Clamp chunk to remaining and floor to STEP granularity.
+        var chunk = Math.min(freeLen, remaining);
+        chunk = Math.floor(chunk / STEP) * STEP;
+        if (chunk < splitMin) {
+          // After flooring, chunk may be too small — try without flooring.
+          chunk = Math.min(freeLen, remaining);
+          if (chunk < splitMin) { s = freeEnd + 1; continue; }
+        }
+        // Place this chunk.
+        reserve(occ, s, chunk);
+        placed.push({ dateKey: d.key, start: s, dur: chunk });
+        remaining -= chunk;
+        s += chunk;
+      }
+    }
+  }
+
+  return { placed: placed, remaining: remaining };
+}
+
 // ── Main ──────────────────────────────────────────────────────
 function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) {
   cfg = cfg || {};
+
+  // Build effective statuses: tasks in allTasks that have no explicit status
+  // are live (pending). This ensures depsSatisfied correctly identifies
+  // in-pool deps as live even when callers pass a sparse statuses map.
+  // Without this, statuses[depId]===undefined is treated as "dep not in pool"
+  // (satisfied), causing the scheduler to place a dep-dependent task before
+  // its predecessor when the caller omits status entries.
+  var effectiveStatuses = Object.assign({}, statuses);
+  allTasks.forEach(function(t) {
+    if (t && t.id && effectiveStatuses[t.id] === undefined) {
+      effectiveStatuses[t.id] = t.status || '';
+    }
+  });
+
   var dates = buildDates(effectiveTodayKey, cfg, allTasks);
   if (dates.length === 0) {
     return {
@@ -1164,7 +1279,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     phaseSnapshots.push({ phase: phaseName, timestamp: Date.now(), days: days });
   }
 
-  var items = buildItems(allTasks, statuses, dates, effectiveTodayKey, nowMins, cfg);
+  var items = buildItems(allTasks, effectiveStatuses, dates, effectiveTodayKey, nowMins, cfg);
 
   // Chain deadline backpropagation. Walk dependsOn edges backward from
   // every tail (item with deadlineDate set from user input) and tighten
@@ -1226,19 +1341,53 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   // they appear on the calendar without blocking time.
   var queue = [];
   var todayIsoKey = dates.length > 0 ? dates[0].key : toKey(effectiveTodayKey);
+  // Items flagged isMissedPreferredTime are collected here; handled after the
+  // retry pass (below) without entering the placement queue or the dual-place path.
+  var missedPreferredTimeItems = [];
   items.forEach(function(item) {
     // Past-anchored recurring: skip the queue entirely — handled by a dedicated pass later.
     if (item.isRecurring && item.anchorDate && item.anchorDate < todayIsoKey) {
       pastAnchoredPreQueue.push(item);
       return;
     }
+    // Missed preferred-time: recurring task whose preferred-time window has
+    // entirely passed but is not in RECURRING_WINDOW mode (which has its own
+    // dual-place path). Skip the queue entirely — mark missed below.
+    if (item.isMissedPreferredTime) {
+      missedPreferredTimeItems.push(item);
+      return;
+    }
+    var isRigidWithAnchor = item.isRecurring && item.isRigid && item.anchorMin != null;
     var isImmovable =
       (item.isMarker && item.anchorDate && item.anchorMin != null) ||
       item.isPinned ||
       (item.isFixedWhen && item.anchorMin != null) ||
-      (item.isRecurring && item.isRigid && item.anchorMin != null);
-    if (isImmovable && tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements, cfg, env)) {
-      return;
+      isRigidWithAnchor;
+    if (isImmovable) {
+      // For rigid recurrings: check whether the anchor slot is already occupied
+      // by a previously placed task (not merely by the nowMins time-boundary).
+      // If occupied by a task, displace to the next available slot via the queue
+      // so that all rigid recurrings at the same anchor time don't overlap.
+      // If the slot is clear (or only blocked by nowMins), place immovably at
+      // the anchor time — rigid means "user pinned this time", and it must
+      // remain visible even if the time has already passed.
+      if (isRigidWithAnchor) {
+        var rigidAnchorDate = item.anchorDate;
+        var rigidAnchorMin = item.anchorMin;
+        var rigidDur = item.dur;
+        var hasTaskConflict = (dayPlaced[rigidAnchorDate] || []).some(function(p) {
+          return p.start < rigidAnchorMin + rigidDur && p.start + p.dur > rigidAnchorMin;
+        });
+        if (!hasTaskConflict && tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements, cfg, env)) {
+          return;
+        }
+        // Task conflict at anchor — queue for next available non-overlapping slot.
+        queue.push(item);
+        return;
+      }
+      if (tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements, cfg, env)) {
+        return;
+      }
     }
     queue.push(item);
   });
@@ -1310,8 +1459,54 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     var item = queue.shift();
     slackByTaskId[item.id] = item.slack == null || !isFinite(item.slack) ? null : Math.round(item.slack);
 
-    var placement = tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, statuses, cfg, env);
+    var placement = tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, effectiveStatuses, cfg, env);
     if (!placement.slot) {
+      // Inline split expansion: tasks with split===true that can't fit as a
+      // single contiguous block are placed greedily in chunks of >= splitMin.
+      // Each chunk is a separate placement entry sharing the same task object.
+      // Recurring split chunks stay day-locked (isDayLocked drives the search);
+      // non-recurring splits may span days up to the deadline.
+      if (item.task && item.task.split && item.splitOrdinal <= 1 && item.splitTotal <= 1) {
+        var splitMin = (item.task.splitMin != null ? item.task.splitMin : null) ||
+                       (cfg && cfg.splitMinDefault) || 15;
+        var splitResult = placeSplitInline(item, item.dur, splitMin, dates, dayWindows, dayBlocks, dayOcc, cfg);
+        if (splitResult.placed.length > 0) {
+          var splitPlacedFirst = splitResult.placed[0];
+          splitResult.placed.forEach(function(chunk) {
+            var chunkEntry = { task: item.task, start: chunk.start, dur: chunk.dur, locked: false,
+              travelBefore: 0, travelAfter: 0,
+              _placementReason: buildPlacementReason(item, false, getBlockNameForItem(item, chunk.dateKey, dayBlocks)) };
+            if (!dayPlaced[chunk.dateKey]) dayPlaced[chunk.dateKey] = [];
+            if (!dayPlacements[chunk.dateKey]) dayPlacements[chunk.dateKey] = [];
+            dayPlaced[chunk.dateKey].push(chunkEntry);
+            dayPlacements[chunk.dateKey].push(chunkEntry);
+          });
+          // Record placement as the first chunk's slot for dep-ordering.
+          placedById[item.id] = { dateKey: splitPlacedFirst.dateKey, start: splitPlacedFirst.start, dur: item.dur };
+          noteMasterPlacement(env, item, splitPlacedFirst.dateKey);
+          queuePlacedCount += splitResult.placed.length;
+          if (splitResult.remaining > 0) {
+            // Partial placement: mark as partial_split in unplaced.
+            item.task._unplacedReason = 'partial_split';
+            unplaced.push(item);
+          }
+          // Recompute slack for affected items (use first chunk's date).
+          var splitSlotIdx = indexOfDate(dates, splitPlacedFirst.dateKey);
+          if (splitSlotIdx >= 0) {
+            splitResult.placed.forEach(function(chunk) {
+              var chunkIdx = indexOfDate(dates, chunk.dateKey);
+              if (chunkIdx < 0) return;
+              queue.forEach(function(other) {
+                if (other.slack == null || !isFinite(other.slack)) return;
+                if (!rangeIncludesDate(other, chunkIdx)) return;
+                var ov = overlapWithEligibleWindows(other, chunk.dateKey, chunk.start, chunk.dur, dayWindows, dayBlocks);
+                if (ov > 0) { other.capacity -= ov; other.slack = other.capacity - other.dur; }
+              });
+            });
+          }
+          continue;
+        }
+      }
       // Might be dep-blocked; retry pass below will give it another chance
       // once deps settle. Tag so the retry can identify what was deferred.
       item._deferred = true;
@@ -1374,7 +1569,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   var stillUnplaced = unplaced.filter(function(u) { return !(u && u._deferred); });
   retryQueue.forEach(function(item) {
     delete item._deferred;
-    var placement = tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, statuses, cfg, env);
+    var placement = tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, effectiveStatuses, cfg, env);
     if (!placement.slot) {
       // Heuristic: attribute to weather if task has weather constraints; may be capacity failure
       if (hasWeatherConstraint(item.task)) item.task._unplacedReason = 'weather';
@@ -1402,8 +1597,21 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   // to prevent drifting to future dates.
   pastAnchoredPreQueue.forEach(function(item) { stillUnplaced.push(item); });
 
+  // Missed-preferred-time pass: recurring tasks (non-RECURRING_WINDOW) whose
+  // preferred-time window has entirely passed. They are marked missed and go
+  // to unplaced only — no dual grid placement (they don't have a time window
+  // to anchor a visible calendar slot).
+  missedPreferredTimeItems.forEach(function(item) {
+    item.task._unplacedReason = 'missed';
+    item.task._unplacedDetail = 'Preferred-time window has passed';
+    stillUnplaced.push(item);
+  });
+
   // Missed-window pass: RECURRING_WINDOW tasks whose flex window is entirely past.
-  // They appear in unplaced (with 'missed' reason) AND on the day grid (with _overdue).
+  // They appear in unplaced (with 'missed' reason). When the task has a `when`
+  // block (e.g. 'morning'), they are also dual-placed on the grid with _overdue
+  // so the user can mark them done without leaving the day view. Tasks with no
+  // `when` block have no obvious calendar anchor and are unplaced-only.
   var missedWindowItems = stillUnplaced.filter(function(u) {
     return u && u.isMissedWindow;
   });
@@ -1417,19 +1625,23 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     task._unplacedDetail = 'Flex window has passed';
     // Also push to unplaced list for ConflictsView / pastDue pickup.
     stillUnplaced.push(item);
-    // Dual-place on the grid at preferredTimeMins with _overdue so user can mark done/skip.
-    var overdueDateKey = item.anchorDate || dates[0].key;
-    if (!dayPlacements[overdueDateKey]) dayPlacements[overdueDateKey] = [];
-    dayPlacements[overdueDateKey].push({
-      task: task,
-      start: item.preferredTimeMins != null ? item.preferredTimeMins : (item.anchorMin || 0),
-      dur: item.dur,
-      locked: false,
-      _overdue: true,
-      travelBefore: 0,
-      travelAfter: 0,
-      _placementReason: 'Recurring window missed — placed for completion',
-    });
+    // Dual-place on the grid only when the task has a when-block anchor.
+    // Tasks with no when-tag have no obvious calendar slot to anchor the
+    // overdue entry, so they stay unplaced-only.
+    if (item.when && item.when.trim() !== '') {
+      var overdueDateKey = item.anchorDate || dates[0].key;
+      if (!dayPlacements[overdueDateKey]) dayPlacements[overdueDateKey] = [];
+      dayPlacements[overdueDateKey].push({
+        task: task,
+        start: item.preferredTimeMins != null ? item.preferredTimeMins : (item.anchorMin || 0),
+        dur: item.dur,
+        locked: false,
+        _overdue: true,
+        travelBefore: 0,
+        travelAfter: 0,
+        _placementReason: 'Recurring window missed — placed for completion',
+      });
+    }
   });
 
   captureSnapshot('missed_window_done');
@@ -1541,7 +1753,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     // (last resort: place on any future day rather than miss the deadline entirely).
     var relaxedEnv = Object.assign({}, env, { relaxDeps: true });
     var slot = findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc,
-      { placedById: placedById, statuses: statuses, cfg: cfg, env: relaxedEnv,
+      { placedById: placedById, statuses: effectiveStatuses, cfg: cfg, env: relaxedEnv,
         relaxDeps: true, ignoreDeadline: true });
     var placement = slot ? { slot: slot, overdue: true } : { slot: null };
     if (!placement.slot) {
