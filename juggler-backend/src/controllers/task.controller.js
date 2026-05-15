@@ -885,6 +885,8 @@ async function updateTask(req, res) {
       || req.body._dragPin
       || req.body.anchorDate
       || req.body._allowUnfix
+      // allDay affects `when` derivation — must hit the complex path for D-14 backstop
+      || req.body.allDay !== undefined
       // recurring=false must clean up instances — fast path skips that entirely
       || (req.body.recurring !== undefined && !req.body.recurring)
       // time without date requires existing.scheduled_at to combine
@@ -1192,6 +1194,27 @@ async function updateTask(req, res) {
           if (row.recurring === 0) {
             await tasksWrite.resetRecurringInstances(trx, req.user.id, id, '[RECUR] toggle-off: recurring=false');
             await tasksWrite.archiveCompletedInstances(trx, req.user.id, id);
+            // After toggle-off, the template is no longer visible in tasks_v
+            // (template branch requires recurring=1; instance branch requires an instance row).
+            // Create the self-linked instance so the task stays visible as a one-off.
+            await trx('task_instances')
+              .insert({
+                id: id,
+                master_id: id,
+                user_id: req.user.id,
+                occurrence_ordinal: 1,
+                split_ordinal: 1,
+                split_total: 1,
+                dur: existing.dur || 30,
+                status: existing.status || '',
+                scheduled_at: existing.scheduled_at || null,
+                date_pinned: 0,
+                overdue: 0,
+                generated: 0,
+                created_at: trx.fn.now(),
+                updated_at: trx.fn.now()
+              })
+              .onConflict('id').ignore();
           } else {
           var _dateHelpers = require('../scheduler/dateHelpers');
           // Build the post-update template state by merging the pre-fetch (existing) with

@@ -130,7 +130,7 @@ async function reconcileOccurrence(trx, masterId, master, occOrd, existingRows) 
     for (var j = existingRows.length; j < desired.length; j++) {
       var d2 = desired[j];
       await trx('task_instances').insert({
-        id: masterId + '-' + d2.splitOrdinal,
+        id: masterId + '-occ' + occOrd + '-' + d2.splitOrdinal,
         master_id: masterId,
         user_id: master.user_id,
         occurrence_ordinal: occOrd,

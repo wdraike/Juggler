@@ -87,7 +87,8 @@ describe('deleteTask: calendar-linked task cleanup', () => {
     expect(ledger).toBeTruthy();
     expect(ledger.status).toBe('deleted_local');
     expect(ledger.task_id).toBeNull();
-    expect(ledger.provider_event_id).toBeNull();
+    // provider_event_id is retained so the next cal-sync push can DELETE the calendar event.
+    expect(ledger.provider_event_id).toBe('gcal_evt_will_be_orphaned');
 
     // Crucially: NO orphan ledger row (task_id NULL + status active)
     var orphans = await db('cal_sync_ledger')

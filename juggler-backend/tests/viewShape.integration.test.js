@@ -115,7 +115,7 @@ describe('tasks_v shape — by row class', () => {
     expect(row.occurrence_ordinal).toBe(1);
   });
 
-  test('detached instance: master deleted, FK SET NULL leaves instance with master fields NULL', async () => {
+  test('detached instance: master deleted, instance becomes invisible in tasks_v (INNER JOIN)', async () => {
     if (!available) return;
     var tid = uuidv7();
     await insertTask(db, {
@@ -131,17 +131,21 @@ describe('tasks_v shape — by row class', () => {
       scheduled_at: new Date('2026-06-03T08:00:00Z'),
       created_at: db.fn.now(), updated_at: db.fn.now()
     });
-    // Delete the template — FK SET NULL detaches the done instance
+    // Delete the template — FK SET NULL detaches the done instance (master_id=NULL)
     await deleteTaskById(db, tid, USER_ID);
 
+    // tasks_v uses INNER JOIN (not LEFT JOIN as of migration 20260506000600).
+    // Detached instances (master_id=NULL) disappear from tasks_v because the
+    // JOIN ON m.id = i.master_id has no match when master_id is NULL.
+    // History rows go through archiveCompletedInstances instead.
     var row = await db('tasks_v').where('id', doneIid).first();
-    expect(row).toBeTruthy();                    // still in view via LEFT JOIN
-    expect(row.task_type).toBe('task');           // fallback when m.id IS NULL
-    expect(row.text).toBeNull();                  // master gone, can't inherit
-    expect(row.pri).toBeNull();
-    expect(row.recurring).toBeNull();
-    expect(row.scheduled_at).toBeTruthy();        // instance fields still populated
-    expect(row.status).toBe('done');
+    expect(row).toBeUndefined();
+
+    // The raw task_instances row still exists (just not visible through the view)
+    var rawRow = await db('task_instances').where('id', doneIid).first();
+    expect(rawRow).toBeDefined();
+    expect(rawRow.status).toBe('done');
+    expect(rawRow.master_id).toBeNull(); // FK SET NULL did its job
   });
 
   test('persistent split chunks: split_ordinal 1..N and split_total surface in view', async () => {

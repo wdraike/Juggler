@@ -106,11 +106,15 @@ describe('FK ON DELETE SET NULL on task_instances.master_id', () => {
     var inst = await db('task_instances').where('id', doneId).first();
     expect(inst.master_id).toBeNull();
 
+    // tasks_v uses INNER JOIN — detached instances (master_id=NULL) are NOT
+    // visible in the view. The raw task_instances row still exists.
     var view = await db('tasks_v').where('id', doneId).first();
-    expect(view).toBeTruthy();
-    expect(view.task_type).toBe('task');     // m.id IS NULL fallback
-    expect(view.text).toBeNull();             // master gone
-    expect(view.recurring).toBeNull();
+    expect(view).toBeUndefined();
+
+    var rawInst = await db('task_instances').where('id', doneId).first();
+    expect(rawInst).toBeDefined();
+    expect(rawInst.master_id).toBeNull(); // FK SET NULL confirmed
+    expect(rawInst.status).toBe('done');
   });
 
   test('archival master: completed instances re-parented to __archived__:<userId> with new ordinals', async () => {

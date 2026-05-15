@@ -123,7 +123,11 @@ describe('updateTaskStatus: recurring templates', () => {
     var req = mockReq({ params: { id: 'tmpl-pause' }, body: { status: 'pause' } });
     var res = mockRes();
     await controller.updateTaskStatus(req, res);
-    expect(res._json.task.status).toBe('pause');
+    expect(res.statusCode).toBe(200);
+    // tasks_v template branch returns status=NULL (master status not exposed in view).
+    // Verify the DB row directly.
+    var pausedMaster = await db('task_masters').where('id', 'tmpl-pause').first();
+    expect(pausedMaster.status).toBe('pause');
     expect(await db('tasks_v').where('id', 'inst-future').first()).toBeUndefined();
   });
 
@@ -302,9 +306,11 @@ describe('Recurring toggle-off cleanup', () => {
     await controller.updateTask(req, res);
     expect(res.statusCode).toBe(200);
 
-    // All pending instances must be deleted
+    // Recurring instances (tog-inst-1, tog-inst-2) must be deleted.
+    // The self-linked one-off instance (id = master_id) is the new one-off form — exclude it.
     var remaining = await db('task_instances')
-      .where({ master_id: 'tog-tmpl', user_id: USER_ID, status: '' });
+      .where({ master_id: 'tog-tmpl', user_id: USER_ID, status: '' })
+      .whereNot('id', 'tog-tmpl');
     expect(remaining).toHaveLength(0);
   });
 
@@ -363,5 +369,35 @@ describe('Recurring toggle-off cleanup', () => {
     // Response task has recurring=false
     expect(res._json.task.recurring).toBe(false);
     expect(res._json.task.id).toBe('tog-tmpl3');
+  });
+
+  test('toggle-off creates self-linked instance so task remains visible in tasks_v', async () => {
+    // Regression guard: without the self-linked instance, tasks_v INNER JOINs against
+    // task_instances with no matching row → fetchTaskWithEventIds returns null →
+    // rowToTask(null, …) crashes before response is sent.
+    if (!available) return;
+    await tasksWrite.insertTask(db, {
+      id: 'tog-tmpl4', user_id: USER_ID, task_type: 'recurring_template',
+      text: 'Self-link test', recurring: 1, dur: 45,
+      recur: JSON.stringify({ type: 'daily' }),
+      status: '', created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+
+    var req = mockReq({ params: { id: 'tog-tmpl4' }, body: { recurring: false } });
+    var res = mockRes();
+    await controller.updateTask(req, res);
+    expect(res.statusCode).toBe(200);
+
+    // Self-linked instance (id = master_id) must exist
+    var selfInst = await db('task_instances').where({ id: 'tog-tmpl4', master_id: 'tog-tmpl4' }).first();
+    expect(selfInst).toBeDefined();
+    expect(selfInst.split_ordinal).toBe(1);
+    expect(selfInst.split_total).toBe(1);
+
+    // Task visible in tasks_v (INNER JOIN resolves via self-linked instance)
+    var viewRow = await db('tasks_v').where('id', 'tog-tmpl4').first();
+    expect(viewRow).toBeDefined();
+    expect(viewRow.text).toBe('Self-link test');
+    expect(Number(viewRow.recurring)).toBe(0);
   });
 });

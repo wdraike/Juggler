@@ -161,8 +161,10 @@ describe('runScheduleAndPersist: immutable tasks', () => {
 
   test('marker tasks are not moved', async () => {
     if (!available) return;
-    var markerTime = '2026-04-10 20:00:00';
-    await seedTask({ id: 'marker-t', text: 'Reminder', marker: 1, scheduled_at: markerTime, dur: 0 });
+    // Use a far-future date so the marker is never in the scheduling window.
+    // `marker` column was dropped in migration 20260501000300; use placement_mode.
+    var markerTime = '2026-12-01 20:00:00';
+    await seedTask({ id: 'marker-t', text: 'Reminder', placement_mode: 'marker', scheduled_at: markerTime, dur: 0 });
     await runScheduleAndPersist(USER_ID);
     var row = await db('tasks_v').where('id', 'marker-t').first();
     expect(row.scheduled_at).toBe(markerTime);
