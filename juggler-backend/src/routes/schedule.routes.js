@@ -10,6 +10,7 @@ var authenticateAdmin = require('../middleware/authenticateAdmin');
 var { runScheduleAndPersist, getSchedulePlacements } = require('../scheduler/runSchedule');
 var { withSyncLock } = require('../lib/sync-lock');
 var schedulerSession = require('../scheduler/schedulerSession');
+var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 
 // Rate limit scheduler endpoints — expensive operations
 var schedulerLimiter = rateLimit({
@@ -53,6 +54,22 @@ router.get('/placements', authenticateJWT, async function(req, res) {
   } catch (error) {
     console.error('Schedule placements error:', error);
     res.status(500).json({ error: 'Failed to get placements' });
+  }
+});
+
+/**
+ * POST /api/schedule/nudge — frontend task-end nudge: enqueue a scheduler run
+ * Called by the frontend when an active task's end time passes (tab visible).
+ * Uses the same enqueueScheduleRun path as all other triggers (D-01).
+ * No request body needed — userId taken from JWT (D-02).
+ */
+router.post('/nudge', authenticateJWT, schedulerLimiter, async function(req, res) {
+  try {
+    await enqueueScheduleRun(req.user.id, 'frontend:task-end-nudge');
+    res.json({ queued: true });
+  } catch (err) {
+    console.error('[NUDGE] enqueue failed:', err.message);
+    res.status(500).json({ error: 'Failed to queue nudge' });
   }
 });
 

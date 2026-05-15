@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { authenticateJWT } = require('../middleware/jwt-auth');
+const { getLastError } = require('../scheduler/scheduleQueue');
 
 // Immediate health check (no DB). Suitable for load-balancer probes; no auth.
 router.get('/immediate', (req, res) => {
@@ -75,32 +76,38 @@ router.get('/detailed', authenticateJWT, async (req, res) => {
     healthStatus.detail.database = error.message;
   }
 
-  // Scheduler: look at the most recent per-user schedule_cache generatedAt.
-  // If nothing in the last 10 min, report 'idle' (informational) — the
-  // scheduler only runs on user mutation or startup, so extended idle is
-  // normal when no one's active. Only 'error' when the query itself fails.
+  // Scheduler: two true-failure signals replace the old "time since last run" check.
+  // The reactive system never self-triggers, so idle time is not a failure signal (D-06, D-07).
+  //
+  // Signal 1 — Stuck claim: rows claimed longer than CLAIM_TTL + 60s without release.
+  //   CLAIM_TTL_SECONDS = 60 (from scheduleQueue.js); 120s = TTL + 60s buffer avoids
+  //   false positives during a slow scheduler run. Hardcoded here to avoid circular imports.
+  //
+  // Signal 2 — Last error: module-level error recorded by processUser catch.
+  //   Only errors from the last 10 minutes are flagged (stale errors cleared implicitly).
   if (healthStatus.services.database === 'operational') {
     try {
-      const row = await db('user_config')
-        .where('config_key', 'schedule_cache')
-        .select('config_value')
-        .orderBy('updated_at', 'desc')
-        .limit(1)
-        .first();
-      if (!row) {
-        healthStatus.services.scheduler = 'idle';
-        healthStatus.detail.scheduler = 'no cache entries yet';
+      // Stuck-claim check: rows claimed longer than CLAIM_TTL + 60 seconds
+      // (CLAIM_TTL = 60s; the +60s buffer avoids false positives during a slow run)
+      const stuckRows = await db.raw(
+        'SELECT COUNT(*) AS cnt FROM schedule_queue' +
+        ' WHERE claimed_by IS NOT NULL AND claimed_at < DATE_SUB(NOW(), INTERVAL 120 SECOND)'
+      );
+      const stuckCount = (stuckRows[0] && stuckRows[0][0] && stuckRows[0][0].cnt) ? parseInt(stuckRows[0][0].cnt, 10) : 0;
+
+      // Last-error check: module-level error recorded by processUser catch
+      const lastErr = getLastError();
+      const TEN_MIN_MS = 10 * 60 * 1000;
+      const recentError = lastErr && (Date.now() - lastErr.timestamp) < TEN_MIN_MS;
+
+      if (stuckCount > 0) {
+        healthStatus.services.scheduler = 'error';
+        healthStatus.detail.scheduler = stuckCount + ' stuck claim(s) in schedule_queue';
+      } else if (recentError) {
+        healthStatus.services.scheduler = 'error';
+        healthStatus.detail.scheduler = 'recent scheduler error: ' + lastErr.message;
       } else {
-        let cache = row.config_value;
-        if (typeof cache === 'string') { try { cache = JSON.parse(cache); } catch (e) { cache = null; } }
-        if (cache && cache.generatedAt) {
-          const ageMs = Date.now() - new Date(cache.generatedAt).getTime();
-          const ageMin = Math.round(ageMs / 60000);
-          healthStatus.services.scheduler = ageMs < 10 * 60 * 1000 ? 'operational' : 'idle';
-          healthStatus.detail.scheduler = 'last run ' + ageMin + ' min ago';
-        } else {
-          healthStatus.services.scheduler = 'unknown';
-        }
+        healthStatus.services.scheduler = 'operational';
       }
     } catch (error) {
       healthStatus.services.scheduler = 'error';

@@ -81,6 +81,8 @@ export default function useTaskState() {
   taskStateRef.current = taskState;
   const saveTimerRef = useRef(null);
   const placementTimerRef = useRef(null);
+  const nudgeTimerRef = useRef(null);
+  const nudgePendingRef = useRef(null);  // { deadline: number } when tab-hidden timer fired
   const flushSaveRef = useRef(null);
   const flushPromiseRef = useRef(null);
   const lastVersionRef = useRef(null);
@@ -394,6 +396,58 @@ export default function useTaskState() {
       } catch (e) { /* silently ignore */ }
     }
 
+    // Compute the soonest end time across all active tasks with a future scheduledAt
+    function computeNextTaskEnd(tasks) {
+      // tasks: array or iterable from taskStateRef.current.tasks (Map values or array)
+      var now = Date.now();
+      var soonest = null;
+      var list = Array.isArray(tasks) ? tasks : (tasks instanceof Map ? Array.from(tasks.values()) : Object.values(tasks));
+      list.forEach(function(t) {
+        if (t.status !== 'active') return;
+        if (!t.scheduledAt || !t.dur) return;
+        var endMs = new Date(t.scheduledAt).getTime() + (t.dur * 60 * 1000);
+        if (endMs <= now) return;  // already past
+        if (soonest === null || endMs < soonest) soonest = endMs;
+      });
+      return soonest;  // ms since epoch, or null
+    }
+
+    // Arm (or rearm) the nudge timer for the next task end time
+    function armNudgeTimer(nextEndMs) {
+      if (nudgeTimerRef.current) { clearTimeout(nudgeTimerRef.current); nudgeTimerRef.current = null; }
+      nudgePendingRef.current = null;
+      if (!nextEndMs) return;
+      var delay = nextEndMs - Date.now();
+      if (delay <= 0) return;
+      nudgeTimerRef.current = setTimeout(function() {
+        nudgeTimerRef.current = null;
+        if (document.visibilityState === 'visible') {
+          // Tab visible — fire immediately
+          apiClient.post('/schedule/nudge').catch(function(e) {
+            console.warn('[nudge] POST failed:', e && e.message);
+          });
+        } else {
+          // Tab hidden — arm one-shot visibilitychange listener
+          nudgePendingRef.current = { deadline: nextEndMs };
+          var onVisible = function() {
+            document.removeEventListener('visibilitychange', onVisible);
+            var pending = nudgePendingRef.current;
+            nudgePendingRef.current = null;
+            if (!pending) return;
+            var ageMs = Date.now() - pending.deadline;
+            if (ageMs <= 15 * 60 * 1000) {
+              // Within 15-minute staleness window — fire
+              apiClient.post('/schedule/nudge').catch(function(e) {
+                console.warn('[nudge] POST failed (visibility):', e && e.message);
+              });
+            }
+            // else: stale — skip; next mutation will retrigger the scheduler
+          };
+          document.addEventListener('visibilitychange', onVisible, { once: true });
+        }
+      }, delay);
+    }
+
     // Start SSE connection
     function connectSSE() {
       var token = getAccessToken();
@@ -468,6 +522,7 @@ export default function useTaskState() {
           // reload placements. The schedule cache includes newly-created
           // tasks that the scheduler didn't move (already had scheduled_at).
           if (addedArr.length + changedArr.length + removedArr.length === 0) {
+            armNudgeTimer(computeNextTaskEnd(taskStateRef.current.tasks));
             loadPlacements();
             return;
           }
@@ -521,6 +576,8 @@ export default function useTaskState() {
         // Reload placements (time-slot positions) — only when something
         // actually moved on the schedule grid.
         loadPlacements();
+        // Recompute nudge timer on every schedule change (D-05)
+        armNudgeTimer(computeNextTaskEnd(taskStateRef.current.tasks));
       });
 
       eventSource.onerror = function() {
@@ -539,11 +596,15 @@ export default function useTaskState() {
     }
 
     connectSSE();
+    // Arm nudge timer for current task state on mount
+    armNudgeTimer(computeNextTaskEnd(taskStateRef.current.tasks));
 
     return function() {
       if (eventSource) eventSource.close();
       if (fallbackIntervalId) clearInterval(fallbackIntervalId);
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
+      nudgePendingRef.current = null;
     };
   }, [loadPlacements]);
 
@@ -552,6 +613,7 @@ export default function useTaskState() {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       if (placementTimerRef.current) clearTimeout(placementTimerRef.current);
+      if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
     };
   }, []);
 

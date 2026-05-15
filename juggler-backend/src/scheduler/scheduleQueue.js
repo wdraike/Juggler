@@ -78,6 +78,7 @@ var CLAIM_TTL_SECONDS = 60;
 var dirty = {};            // { userId: true } — advisory hint: check this user on next poll
 var running = {};          // { userId: true } — within-instance single-flight guard
 var startupScanDone = false;
+var _lastError = null;     // { message, timestamp } — set in processUser catch; read by health routes
 
 // ── DB-based atomic claiming (FIX-04) ───────────────────────────────────────
 //
@@ -243,6 +244,7 @@ async function processUser(userId) {
     // else: still dirty — next poll cycle will handle it
 
   } catch (err) {
+    _lastError = { message: err && err.message ? err.message : String(err), timestamp: Date.now() };
     console.error('[SCHED-QUEUE] error processing user ' + userId + ':', err);
     try {
       getSseEmitter().emit(userId, 'schedule:changed', { timestamp: Date.now(), changeset: null });
@@ -340,9 +342,19 @@ function stopPollLoop() {
   }
 }
 
+/**
+ * Returns the most recent unhandled processUser error, or null if no error
+ * has occurred. Pure read — does not clear _lastError.
+ * Shape: { message: string, timestamp: number } | null
+ */
+function getLastError() {
+  return _lastError;
+}
+
 module.exports = {
   enqueueScheduleRun,
   stopPollLoop,
+  getLastError,
   // Internals exposed for test access — do not import in production code.
   _internal: {
     tryClaim: tryClaim,
