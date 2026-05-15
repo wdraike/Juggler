@@ -61,7 +61,9 @@ jest.mock('../../src/middleware/plan-features.middleware', () => ({
 }));
 
 jest.mock('../../src/lib/redis', () => ({
+  getClient: jest.fn().mockReturnValue(null),
   invalidateTasks: jest.fn(() => Promise.resolve()),
+  invalidateConfig: jest.fn(() => Promise.resolve()),
   get: jest.fn(() => Promise.resolve(null)),
   set: jest.fn(() => Promise.resolve()),
   del: jest.fn(() => Promise.resolve())
