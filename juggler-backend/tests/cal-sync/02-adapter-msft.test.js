@@ -288,10 +288,10 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
       isTransparent: false,
       description: ''
     };
-    var currentTask = { when: 'fixed', marker: true, date: '2026-04-15', time: '10:00 AM' };
+    var currentTask = { when: 'fixed', placement_mode: 'marker', date: '2026-04-15', time: '10:00 AM' };
     var fields = msftAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
-    expect(fields.marker).toBe(false);
+    expect(fields.placementMode).toBe('flexible');
   });
 });
 

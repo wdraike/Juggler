@@ -77,6 +77,7 @@ jest.mock('../src/middleware/plan-features.middleware', () => ({
 
 // Mock redis cache
 jest.mock('../src/lib/redis', () => ({
+  getClient: jest.fn().mockReturnValue(null),
   invalidateTasks: jest.fn(() => Promise.resolve()),
   get: jest.fn(() => Promise.resolve(null)),
   set: jest.fn(() => Promise.resolve()),
@@ -162,14 +163,19 @@ describe('Mutation guards for disabled items', () => {
   });
 
   test('DELETE /api/tasks/:id?cascade=recurring works on disabled recurring', async () => {
-    // Task lookup
+    // fetchTaskWithEventIds: tasks_v.first() then ledger.select()
     resolveQueue.push({ id: 'ht01', user_id: 'user-123', status: 'disabled', task_type: 'recurring_template' });
-    // Instances query
+    resolveQueue.push([]); // ledger rows (none)
+    // Instances query (tasks_with_sync_v.select inside transaction)
     resolveQueue.push([
       { id: 'hi01', status: 'disabled', gcal_event_id: null, msft_event_id: null },
       { id: 'hi02', status: 'done', gcal_event_id: null, msft_event_id: null }
     ]);
-    // Template lookup for cal sync cleanup
+    // archiveInstances: getOrCreateArchivedMasterId — task_masters.first() → null (creates new)
+    resolveQueue.push(null);
+    // archiveInstances: task_instances.max().first() → null (no existing ordinals)
+    resolveQueue.push(null);
+    // Template lookup for cal sync cleanup (tasks_with_sync_v.first)
     resolveQueue.push({ id: 'ht01', gcal_event_id: null, msft_event_id: null });
 
     const res = await request(app)
@@ -202,11 +208,14 @@ describe('GET /api/tasks/disabled', () => {
   });
 
   test('returns disabled tasks and recurringTasks', async () => {
+    // fetchTasksWithEventIds: ledger.select() is evaluated first in Promise.all array
+    resolveQueue.push([]);
+    // fetchTasksWithEventIds: tasks_v (q.then) is evaluated second by Promise.all
     resolveQueue.push([
       { id: 'ht01', user_id: 'user-123', text: 'Morning run', status: 'disabled', task_type: 'recurring_template', disabled_at: '2026-04-01T12:00:00Z', disabled_reason: 'downgrade' },
       { id: 't05', user_id: 'user-123', text: 'Write report', status: 'disabled', task_type: 'task', disabled_at: '2026-04-01T12:00:00Z', disabled_reason: 'downgrade' }
     ]);
-    // srcMap query (templates for instance inheritance)
+    // buildSourceMap: srcMap query (templates for instance inheritance)
     resolveQueue.push([]);
 
     const res = await request(app)
@@ -239,12 +248,14 @@ describe('PUT /api/tasks/:id/re-enable', () => {
   });
 
   test('re-enables a disabled task when under limit (unlimited plan)', async () => {
-    // Task lookup
+    // fetchTaskWithEventIds: tasks_v.first() then ledger.select()
     resolveQueue.push({ id: 't05', user_id: 'user-123', status: 'disabled', task_type: 'task', disabled_at: '2026-04-01T12:00:00Z', disabled_reason: 'downgrade' });
-    // srcMap for response
+    resolveQueue.push([]); // ledger rows (none)
+    // buildSourceMap: tasks_v.select()
     resolveQueue.push([]);
-    // Updated row for response
+    // fetchTaskWithEventIds (updated row): tasks_v.first() then ledger.select()
     resolveQueue.push({ id: 't05', user_id: 'user-123', status: '', task_type: 'task', text: 'Write report', disabled_at: null, disabled_reason: null });
+    resolveQueue.push([]); // ledger rows (none)
 
     const res = await request(app)
       .put('/api/tasks/t05/re-enable')
@@ -263,8 +274,9 @@ describe('PUT /api/tasks/:id/re-enable', () => {
     };
     mockPlanId = 'free';
 
-    // Task lookup
+    // fetchTaskWithEventIds: tasks_v.first() then ledger.select()
     resolveQueue.push({ id: 't10', user_id: 'user-123', status: 'disabled', task_type: 'task', disabled_at: '2026-04-01T12:00:00Z' });
+    resolveQueue.push([]); // ledger rows (none)
     // countActiveTasks result (already at limit)
     resolveQueue.push({ count: 5 });
 
@@ -278,18 +290,20 @@ describe('PUT /api/tasks/:id/re-enable', () => {
   });
 
   test('re-enables a disabled recurring template and its instances', async () => {
-    // Task lookup — recurring template
+    // fetchTaskWithEventIds: tasks_v.first() then ledger.select()
     resolveQueue.push({ id: 'ht01', user_id: 'user-123', status: 'disabled', task_type: 'recurring_template', disabled_at: '2026-04-01T12:00:00Z' });
+    resolveQueue.push([]); // ledger rows (none)
     // countRecurringTemplates (under limit)
     resolveQueue.push({ count: 2 });
     // Count disabled instances for task limit check
     resolveQueue.push({ count: 3 });
     // countActiveTasks (under limit with room for 3 instances)
     resolveQueue.push({ count: 10 });
-    // srcMap for response
+    // buildSourceMap: tasks_v.select()
     resolveQueue.push([]);
-    // Updated row for response
+    // fetchTaskWithEventIds (updated row): tasks_v.first() then ledger.select()
     resolveQueue.push({ id: 'ht01', user_id: 'user-123', status: '', task_type: 'recurring_template', text: 'Morning run', disabled_at: null, disabled_reason: null });
+    resolveQueue.push([]); // ledger rows (none)
 
     mockPlanFeatures = {
       ...mockPlanFeatures,
@@ -312,8 +326,9 @@ describe('PUT /api/tasks/:id/re-enable', () => {
     };
     mockPlanId = 'pro';
 
-    // Task lookup — recurring template
+    // fetchTaskWithEventIds: tasks_v.first() then ledger.select()
     resolveQueue.push({ id: 'ht01', user_id: 'user-123', status: 'disabled', task_type: 'recurring_template', disabled_at: '2026-04-01T12:00:00Z' });
+    resolveQueue.push([]); // ledger rows (none)
     // countRecurringTemplates (under limit)
     resolveQueue.push({ count: 10 });
     // Count disabled instances — 15 instances

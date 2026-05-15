@@ -38,6 +38,7 @@ jest.mock('ical.js', function () {
     Component: MockComponent,
     Time: MockTime,
     Duration: MockDuration,
+    Timezone: { utcTimezone: null },
     TimezoneService: { get: jest.fn().mockReturnValue(null) },
     parse: jest.fn().mockReturnValue([]),
     Event: jest.fn().mockReturnValue({})
