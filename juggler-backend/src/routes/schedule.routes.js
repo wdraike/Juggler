@@ -57,12 +57,7 @@ router.get('/placements', authenticateJWT, async function(req, res) {
   }
 });
 
-/**
- * POST /api/schedule/nudge — frontend task-end nudge: enqueue a scheduler run
- * Called by the frontend when an active task's end time passes (tab visible).
- * Uses the same enqueueScheduleRun path as all other triggers (D-01).
- * No request body needed — userId taken from JWT (D-02).
- */
+// POST /api/schedule/nudge — enqueue a scheduler run when an active task's end time passes
 router.post('/nudge', authenticateJWT, schedulerLimiter, async function(req, res) {
   try {
     await enqueueScheduleRun(req.user.id, 'frontend:task-end-nudge');

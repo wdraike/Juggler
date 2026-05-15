@@ -398,11 +398,9 @@ export default function useTaskState() {
 
     // Compute the soonest end time across all active tasks with a future scheduledAt
     function computeNextTaskEnd(tasks) {
-      // tasks: array or iterable from taskStateRef.current.tasks (Map values or array)
       var now = Date.now();
       var soonest = null;
-      var list = Array.isArray(tasks) ? tasks : (tasks instanceof Map ? Array.from(tasks.values()) : Object.values(tasks));
-      list.forEach(function(t) {
+      tasks.forEach(function(t) {
         if (t.status !== 'active') return;
         if (!t.scheduledAt || !t.dur) return;
         var endMs = new Date(t.scheduledAt).getTime() + (t.dur * 60 * 1000);
@@ -522,8 +520,8 @@ export default function useTaskState() {
           // reload placements. The schedule cache includes newly-created
           // tasks that the scheduler didn't move (already had scheduled_at).
           if (addedArr.length + changedArr.length + removedArr.length === 0) {
-            armNudgeTimer(computeNextTaskEnd(taskStateRef.current.tasks));
             loadPlacements();
+            armNudgeTimer(computeNextTaskEnd(taskStateRef.current.tasks));
             return;
           }
           // Remove deleted tasks from state immediately
@@ -614,6 +612,7 @@ export default function useTaskState() {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       if (placementTimerRef.current) clearTimeout(placementTimerRef.current);
       if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
+      nudgePendingRef.current = null;
     };
   }, []);
 

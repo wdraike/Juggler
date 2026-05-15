@@ -87,15 +87,13 @@ router.get('/detailed', authenticateJWT, async (req, res) => {
   //   Only errors from the last 10 minutes are flagged (stale errors cleared implicitly).
   if (healthStatus.services.database === 'operational') {
     try {
-      // Stuck-claim check: rows claimed longer than CLAIM_TTL + 60 seconds
-      // (CLAIM_TTL = 60s; the +60s buffer avoids false positives during a slow run)
-      const stuckRows = await db.raw(
-        'SELECT COUNT(*) AS cnt FROM schedule_queue' +
-        ' WHERE claimed_by IS NOT NULL AND claimed_at < DATE_SUB(NOW(), INTERVAL 120 SECOND)'
-      );
-      const stuckCount = (stuckRows[0] && stuckRows[0][0] && stuckRows[0][0].cnt) ? parseInt(stuckRows[0][0].cnt, 10) : 0;
+      const stuckRow = await db('schedule_queue')
+        .whereNotNull('claimed_by')
+        .whereRaw('claimed_at < DATE_SUB(NOW(), INTERVAL 120 SECOND)')
+        .count('id as cnt')
+        .first();
+      const stuckCount = parseInt((stuckRow && stuckRow.cnt) || 0, 10);
 
-      // Last-error check: module-level error recorded by processUser catch
       const lastErr = getLastError();
       const TEN_MIN_MS = 10 * 60 * 1000;
       const recentError = lastErr && (Date.now() - lastErr.timestamp) < TEN_MIN_MS;
