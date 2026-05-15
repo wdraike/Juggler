@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Task Sidebar — Before / After</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0d1117;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 12px;
+    color: #e2e8f0;
+    display: flex;
+    gap: 0;
+    min-height: 100vh;
+  }
+
+  .label-col {
+    width: 80px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    background: #0d1117;
+    border-right: 1px solid #1e2a38;
+    flex-shrink: 0;
+  }
+  .label-col span {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    transform: rotate(180deg);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #64748b;
+  }
+
+  .panels {
+    display: flex;
+    gap: 0;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .panel {
+    width: 380px;
+    flex-shrink: 0;
+    height: 100vh;
+    overflow-y: auto;
+    border-right: 1px solid #1e2a38;
+    display: flex;
+    flex-direction: column;
+    background: #111827;
+    position: relative;
+  }
+
+  .panel-label {
+    background: #1e2a38;
+    color: #94a3b8;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 6px 12px;
+    text-align: center;
+    border-bottom: 1px solid #263545;
+    flex-shrink: 0;
+  }
+
+  /* ─── SHARED ATOMS ─── */
+  .sec {
+    border: 1px solid #1e2a38;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
+  }
+  .sec-head {
+    font-size: 9px;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+  .field-label {
+    font-size: 10px;
+    color: #94a3b8;
+    display: block;
+    margin-bottom: 3px;
+  }
+  input[type=text], input[type=date], select, textarea {
+    background: #1a2332;
+    border: 1px solid #263545;
+    border-radius: 4px;
+    color: #e2e8f0;
+    font-size: 12px;
+    padding: 4px 7px;
+    font-family: inherit;
+    width: 100%;
+  }
+  textarea { resize: vertical; min-height: 36px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 5px; align-items: flex-end; }
+  .tog {
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid #263545;
+    background: transparent;
+    color: #94a3b8;
+    font-size: 10px;
+    cursor: pointer;
+    font-family: inherit;
+    height: 22px;
+  }
+  .tog.active { background: rgba(212,175,55,0.15); color: #d4af37; border-color: #d4af37; font-weight: 700; }
+  .tog.green  { background: rgba(45,106,79,0.25); color: #4ade80; border-color: #2d6a4f; }
+  .tog.red    { background: rgba(139,38,53,0.2); color: #f87171; border-color: #8b2635; }
+  .tog.blue   { background: rgba(14,165,233,0.15); color: #38bdf8; border-color: #0ea5e9; }
+
+  /* ─── BEFORE PANEL specifics ─── */
+  .before-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-bottom: 1px solid #1e2a38;
+    background: #111827;
+    flex-shrink: 0;
+    gap: 6px;
+  }
+  .btn-save-top {
+    padding: 4px 12px; border-radius: 4px; border: none;
+    background: #1a6b3a; color: #4ade80; font-size: 11px; font-weight: 700;
+    cursor: pointer; font-family: inherit;
+  }
+  .btn-del-top {
+    padding: 4px 12px; border-radius: 4px; border: 1px solid #8b2635;
+    background: rgba(139,38,53,0.15); color: #f87171; font-size: 11px; font-weight: 700;
+    cursor: pointer; font-family: inherit;
+  }
+  .btn-close {
+    background: transparent; border: none; color: #64748b;
+    font-size: 18px; cursor: pointer; padding: 0 4px;
+  }
+  .before-status {
+    padding: 5px 10px 0;
+    margin-bottom: 0;
+  }
+  .before-status .sec-head { margin-bottom: 4px; }
+  .status-pills-before {
+    display: flex; gap: 3px; flex-wrap: wrap; margin-bottom: 8px;
+  }
+  .sp {
+    padding: 2px 8px; border-radius: 4px; border: 1px solid #263545;
+    background: transparent; color: #64748b;
+    font-size: 10px; font-weight: 500; cursor: pointer; height: 22px;
+    display: flex; align-items: center;
+  }
+  .sp.active-open { border-color: #0ea5e9; color: #38bdf8; background: rgba(14,165,233,0.12); font-weight: 700; }
+  .before-scroll { padding: 8px 10px; flex: 1; overflow-y: auto; }
+
+  /* ─── AFTER PANEL specifics ─── */
+  .after-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    border-bottom: 1px solid #1e2a38;
+    background: #111827;
+    flex-shrink: 0;
+  }
+  .after-topbar .task-name-display {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e2e8f0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 280px;
+  }
+  .after-scroll {
+    padding: 8px 10px;
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: 64px; /* room for sticky footer */
+  }
+
+  /* Status strip — AFTER */
+  .status-strip {
+    display: flex;
+    gap: 3px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .ss-btn {
+    padding: 0 10px;
+    border-radius: 4px;
+    border: 1px solid #263545;
+    background: transparent;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    height: 28px;
+    display: flex;
+    align-items: center;
+  }
+  .ss-btn.active-open {
+    border-color: #0ea5e9;
+    background: rgba(14,165,233,0.18);
+    color: #38bdf8;
+  }
+  .ss-btn.s-done { border-color: #2d6a4f; color: #4ade80; }
+  .ss-btn.s-done:hover { background: rgba(45,106,79,0.15); }
+  .ss-btn.s-wip  { border-color: #c8942a; color: #fbbf24; }
+  .ss-btn.s-cancel { border-color: #8b2635; color: #f87171; }
+  .ss-btn.s-skip { border-color: #475569; color: #94a3b8; }
+  .sub-status {
+    display: flex; gap: 4px; margin-bottom: 8px;
+  }
+  .sub-chip {
+    font-size: 9px; padding: 1px 6px; border-radius: 3px;
+    border: 1px solid #263545; color: #64748b;
+  }
+
+  /* Task name input — AFTER */
+  .name-input-after {
+    background: #1a2332;
+    border: 1px solid #263545;
+    border-radius: 4px;
+    color: #e2e8f0;
+    font-size: 15px;
+    font-weight: 500;
+    padding: 5px 8px;
+    font-family: inherit;
+    width: 100%;
+  }
+
+  /* Collapsed section row */
+  .sec-collapsed {
+    border: 1px solid #1e2a38;
+    border-radius: 6px;
+    padding: 7px 10px;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+    background: #0f1822;
+  }
+  .sec-collapsed:hover { border-color: #2d3f52; background: #131f2e; }
+  .sec-collapsed-left {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sec-collapsed-label {
+    font-size: 9px; font-weight: 700; color: #64748b;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .sec-collapsed-summary {
+    font-size: 10px; color: #94a3b8;
+  }
+  .chevron { font-size: 9px; color: #475569; }
+
+  /* Advanced accordion */
+  .adv-header {
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; padding: 5px 0; margin-bottom: 0; user-select: none;
+    border-top: 1px solid #1e2a38; margin-top: 8px; padding-top: 8px;
+  }
+  .adv-header-left { display: flex; align-items: center; gap: 6px; }
+  .adv-label { font-size: 9px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+
+  /* Sticky footer */
+  .sticky-footer {
+    position: sticky;
+    bottom: 0;
+    background: #111827;
+    border-top: 1px solid #1e2a38;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .btn-del-footer {
+    padding: 5px 14px; border-radius: 5px;
+    border: 1px solid #8b2635;
+    background: transparent; color: #f87171;
+    font-size: 11px; font-weight: 700; cursor: pointer; font-family: inherit;
+  }
+  .btn-save-footer {
+    padding: 5px 20px; border-radius: 5px;
+    border: none; background: #1a6b3a; color: #4ade80;
+    font-size: 11px; font-weight: 700; cursor: pointer; font-family: inherit;
+  }
+
+  /* placement buttons */
+  .placement-row { display: flex; gap: 3px; flex-wrap: wrap; margin-top: 4px; }
+  .pt { padding: 3px 8px; border-radius: 4px; border: 1px solid #263545; background: transparent; color: #94a3b8; font-size: 10px; cursor: pointer; height: 22px; }
+  .pt.active { background: rgba(212,175,55,0.18); color: #d4af37; border-color: #d4af37; font-weight: 700; }
+
+  /* small field label */
+  .fl { font-size: 9px; color: #64748b; margin-bottom: 3px; display: block; }
+
+  /* inline small input */
+  .si {
+    background: #1a2332; border: 1px solid #263545; border-radius: 4px;
+    color: #e2e8f0; font-size: 12px; padding: 3px 6px; font-family: inherit;
+  }
+</style>
+</head>
+<body>
+
+<!-- BEFORE -->
+<div class="panel" id="before">
+  <div class="panel-label">BEFORE</div>
+
+  <!-- top bar: Save + Delete + × -->
+  <div class="before-topbar">
+    <div style="display:flex;gap:6px;align-items:center">
+      <button class="btn-save-top">💾 Save</button>
+      <button class="btn-del-top">🗑 Delete</button>
+    </div>
+    <button class="btn-close">&times;</button>
+  </div>
+
+  <!-- status -->
+  <div class="before-status">
+    <div class="sec-head">Status</div>
+    <div class="status-pills-before">
+      <div class="sp active-open">Open</div>
+      <div class="sp">✓ Complete</div>
+      <div class="sp">⌛ WIP</div>
+      <div class="sp">✕ Cancel</div>
+      <div class="sp">Skip</div>
+      <div class="sp" style="font-size:9px;color:#475569">— Noticed</div>
+      <div class="sp" style="font-size:9px;color:#475569">▼ Placed</div>
+    </div>
+  </div>
+
+  <div class="before-scroll">
+
+    <!-- TASK section -->
+    <div class="sec">
+      <div class="sec-head">📋 Task</div>
+      <div class="row">
+        <div style="flex:1">
+          <label class="field-label">Name</label>
+          <input type="text" value="Pay Peter" />
+        </div>
+        <div>
+          <label class="field-label">Project</label>
+          <input type="text" style="width:110px" value="Finance" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label class="field-label">🔥 Priority</label>
+          <select style="width:110px"><option>🟠 P2 High</option></select>
+        </div>
+        <div>
+          <label class="field-label">◇ Reminder event</label>
+          <button class="tog" style="height:26px">No</button>
+        </div>
+      </div>
+      <button class="tog blue" style="width:100%;margin-bottom:5px;height:26px">🔗 Dependencies</button>
+      <div>
+        <label class="field-label">Notes</label>
+        <textarea style="height:36px"></textarea>
+      </div>
+      <div style="margin-top:4px">
+        <label class="field-label">Link</label>
+        <div style="display:flex;gap:4px">
+          <input type="text" placeholder="https://…" style="flex:1" />
+          <button class="tog" style="height:26px">🔗 Open</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- WHEN section -->
+    <div class="sec">
+      <div class="sec-head" style="display:flex;justify-content:space-between;align-items:center">
+        <span>📅 When</span>
+        <button class="tog" style="font-size:9px;height:20px;padding:0 6px">🌐 EDT UTC-4 ▾</button>
+      </div>
+      <div class="row">
+        <div style="flex:1">
+          <span class="fl">Date / Time</span>
+          <input type="text" value="05/14/2026, 10:30 PM" style="width:100%" />
+        </div>
+        <div>
+          <span class="fl">Finish</span>
+          <input type="text" value="11:00 PM" style="width:90px" />
+        </div>
+        <div>
+          <span class="fl">Duration</span>
+          <select style="width:80px"><option>30 min</option></select>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <span class="fl">Remaining</span>
+          <select style="width:80px"><option>30 min</option></select>
+        </div>
+        <div>
+          <span class="fl">Start</span>
+          <select style="width:80px"><option>0</option></select>
+        </div>
+      </div>
+      <div style="font-size:10px;color:#64748b;margin-bottom:6px;background:#0f1822;border-radius:4px;padding:4px 8px">
+        📌 5/14/2026 10:30 PM
+      </div>
+      <div class="row" style="margin-bottom:5px">
+        <div style="flex:1">
+          <span class="fl">Travel before</span>
+          <select><option>None</option></select>
+        </div>
+        <div style="flex:1">
+          <span class="fl">Travel after</span>
+          <select><option>None</option></select>
+        </div>
+      </div>
+      <div style="margin-bottom:5px">
+        <span class="fl">📅 Placement</span>
+        <div class="placement-row">
+          <button class="pt active">🔄 Anytime</button>
+          <button class="pt">☀️ All Day</button>
+          <button class="pt">📌 Fixed</button>
+          <button class="pt">🌤️ Morning</button>
+          <button class="pt">🍽️ Lunch</button>
+          <button class="pt">🌤️ Afternoon</button>
+          <button class="pt">🌙 Evening</button>
+          <button class="pt">🌑 Night</button>
+        </div>
+      </div>
+      <div style="margin-bottom:5px">
+        <span class="fl">Day requirement</span>
+        <div style="display:flex;gap:3px;flex-wrap:wrap">
+          <button class="pt active">Any</button>
+          <button class="pt">Wkday</button>
+          <button class="pt">Wkend</button>
+          <button class="pt">Su</button>
+          <button class="pt">Mo</button>
+          <button class="pt">Tu</button>
+          <button class="pt">We</button>
+          <button class="pt">Th</button>
+          <button class="pt">Fr</button>
+          <button class="pt">Sa</button>
+        </div>
+      </div>
+      <div class="row">
+        <div style="flex:1">
+          <span class="fl">📅 Deadline</span>
+          <input type="date" />
+        </div>
+        <div style="flex:1">
+          <span class="fl">Not before</span>
+          <input type="date" />
+        </div>
+      </div>
+      <div>
+        <span class="fl">Recurrence</span>
+        <select><option>None</option></select>
+      </div>
+    </div>
+
+    <!-- WHERE section -->
+    <div class="sec">
+      <div class="sec-head">📍 Where</div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap">
+        <button class="pt active">🌍 Anywhere</button>
+        <button class="pt">🏠 Home</button>
+        <button class="pt">🏢 Work</button>
+        <button class="pt">✈️ Travel</button>
+        <button class="pt">🏋 Billd</button>
+        <button class="pt">✈️ Airplane</button>
+      </div>
+    </div>
+
+    <!-- WEATHER section -->
+    <div class="sec">
+      <div class="sec-head">⛅ Weather</div>
+      <div class="sec-head" style="margin-bottom:4px">Precipitation</div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:8px">
+        <button class="pt active">🌦️ Any</button>
+        <button class="pt">🌧️ Precip OK</button>
+        <button class="pt">🌂 Light OK</button>
+        <button class="pt">☀️ Dry only</button>
+      </div>
+      <div class="sec-head" style="margin-bottom:4px">Sky cover</div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:8px">
+        <button class="pt active">⛅ Any</button>
+        <button class="pt">☁️ Overcast OK</button>
+        <button class="pt">🌤️ Partly OK</button>
+        <button class="pt">☀️ Clear</button>
+      </div>
+      <div class="sec-head" style="margin-bottom:4px">Temperature</div>
+      <div style="height:24px;background:#1a2332;border-radius:4px;border:1px solid #263545;margin-bottom:8px;display:flex;align-items:center;padding:0 8px">
+        <div style="flex:1;height:3px;background:#2d3f52;border-radius:2px;position:relative">
+          <div style="position:absolute;left:0;right:0;height:100%;background:#263545"></div>
+        </div>
+        <span style="font-size:9px;color:#475569;margin-left:8px">No range</span>
+      </div>
+      <div class="sec-head" style="margin-bottom:4px">Humidity</div>
+      <div style="height:24px;background:#1a2332;border-radius:4px;border:1px solid #263545;margin-bottom:0;display:flex;align-items:center;padding:0 8px">
+        <div style="flex:1;height:3px;background:#2d3f52;border-radius:2px"></div>
+        <span style="font-size:9px;color:#475569;margin-left:8px">No range</span>
+      </div>
+    </div>
+
+    <!-- TOOLS section -->
+    <div class="sec">
+      <div class="sec-head">🔧 Tools</div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap">
+        <button class="pt">📱 Phone</button>
+        <button class="pt active">🖥️ Personal PC</button>
+        <button class="pt">🚗 Car</button>
+      </div>
+    </div>
+
+    <!-- footer meta -->
+    <div style="padding:6px 0 16px;font-size:10px;color:#475569;display:flex;flex-direction:column;gap:3px">
+      <div>Created: May 12, 2026</div>
+      <div>Scheduled: May 14, 2026</div>
+      <div>Slack: ∞</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- AFTER -->
+<div class="panel" id="after">
+  <div class="panel-label">AFTER</div>
+
+  <!-- top bar: just title + close -->
+  <div class="after-topbar">
+    <span class="task-name-display">💰 Pay Peter</span>
+    <button class="btn-close">&times;</button>
+  </div>
+
+  <div class="after-scroll">
+
+    <!-- Status strip — prominent -->
+    <div class="status-strip">
+      <button class="ss-btn active-open">Open</button>
+      <button class="ss-btn s-done">✓ Complete</button>
+      <button class="ss-btn s-wip">⌛ WIP</button>
+      <button class="ss-btn s-cancel">✕ Cancel</button>
+      <button class="ss-btn s-skip">Skip</button>
+    </div>
+    <div class="sub-status">
+      <span class="sub-chip">— Noticed</span>
+      <span class="sub-chip">▼ Placed</span>
+    </div>
+
+    <!-- TASK section — name input larger -->
+    <div class="sec">
+      <div class="sec-head">📋 Task</div>
+      <div class="row" style="margin-bottom:6px">
+        <div style="flex:1">
+          <input class="name-input-after" type="text" value="Pay Peter" />
+        </div>
+        <div>
+          <label class="field-label">Project</label>
+          <input type="text" style="width:110px;font-size:12px" value="Finance" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label class="field-label">🔥 Priority</label>
+          <select style="width:110px"><option>🟠 P2 High</option></select>
+        </div>
+        <div>
+          <label class="field-label">◇ Reminder event</label>
+          <button class="tog" style="height:26px">No</button>
+        </div>
+      </div>
+      <button class="tog blue" style="width:100%;margin-bottom:5px;height:26px">🔗 Dependencies</button>
+      <div>
+        <label class="field-label">Notes</label>
+        <textarea style="height:36px"></textarea>
+      </div>
+      <div style="margin-top:4px">
+        <label class="field-label">Link</label>
+        <div style="display:flex;gap:4px">
+          <input type="text" placeholder="https://…" style="flex:1" />
+          <button class="tog" style="height:26px">🔗 Open</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- WHEN section — with Advanced accordion -->
+    <div class="sec">
+      <div class="sec-head" style="display:flex;justify-content:space-between;align-items:center">
+        <span>📅 When</span>
+        <button class="tog" style="font-size:9px;height:20px;padding:0 6px">🌐 EDT UTC-4 ▾</button>
+      </div>
+
+      <!-- primary: date/time + placement -->
+      <div class="row">
+        <div style="flex:1">
+          <span class="fl">Date / Time</span>
+          <input type="text" value="05/14/2026, 10:30 PM" style="width:100%" />
+        </div>
+        <div>
+          <span class="fl">Finish</span>
+          <input type="text" value="11:00 PM" style="width:90px" />
+        </div>
+        <div>
+          <span class="fl">Duration</span>
+          <select style="width:80px"><option>30 min</option></select>
+        </div>
+      </div>
+      <div style="font-size:10px;color:#64748b;margin-bottom:6px;background:#0f1822;border-radius:4px;padding:4px 8px">
+        📌 5/14/2026 10:30 PM
+      </div>
+
+      <div style="margin-bottom:5px">
+        <span class="fl">📅 Placement</span>
+        <div class="placement-row">
+          <button class="pt active">🔄 Anytime</button>
+          <button class="pt">☀️ All Day</button>
+          <button class="pt">📌 Fixed</button>
+          <button class="pt">🌤️ Morning</button>
+          <button class="pt">🍽️ Lunch</button>
+          <button class="pt">🌤️ Afternoon</button>
+          <button class="pt">🌙 Evening</button>
+          <button class="pt">🌑 Night</button>
+        </div>
+      </div>
+
+      <div>
+        <span class="fl">Recurrence</span>
+        <select><option>None</option></select>
+      </div>
+
+      <!-- Advanced accordion (collapsed) -->
+      <div class="adv-header" id="adv-toggle" onclick="toggleAdv()">
+        <div class="adv-header-left">
+          <span style="font-size:11px">⚙</span>
+          <span class="adv-label">Advanced</span>
+        </div>
+        <span class="chevron" id="adv-chevron">˅</span>
+      </div>
+
+      <div id="adv-body" style="display:none;margin-top:8px">
+        <div class="row" style="margin-bottom:5px">
+          <div style="flex:1">
+            <span class="fl">Travel before</span>
+            <select><option>None</option></select>
+          </div>
+          <div style="flex:1">
+            <span class="fl">Travel after</span>
+            <select><option>None</option></select>
+          </div>
+        </div>
+        <div style="margin-bottom:5px">
+          <span class="fl">Day requirement</span>
+          <div style="display:flex;gap:3px;flex-wrap:wrap">
+            <button class="pt active">Any</button>
+            <button class="pt">Wkday</button>
+            <button class="pt">Wkend</button>
+            <button class="pt">Su</button><button class="pt">Mo</button><button class="pt">Tu</button>
+            <button class="pt">We</button><button class="pt">Th</button><button class="pt">Fr</button>
+            <button class="pt">Sa</button>
+          </div>
+        </div>
+        <div class="row">
+          <div style="flex:1">
+            <span class="fl">📅 Deadline</span>
+            <input type="date" />
+          </div>
+          <div style="flex:1">
+            <span class="fl">Not before</span>
+            <input type="date" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:4px">
+          <div>
+            <span class="fl">Remaining</span>
+            <select class="si" style="width:80px"><option>30 min</option></select>
+          </div>
+          <div>
+            <span class="fl">Split</span>
+            <button class="tog" style="height:26px">No</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- WHERE — collapsed (default: Anywhere) -->
+    <div class="sec-collapsed" onclick="toggleSec('where-body', 'where-chev')">
+      <div class="sec-collapsed-left">
+        <span style="font-size:11px">📍</span>
+        <span class="sec-collapsed-label">Where</span>
+        <span class="sec-collapsed-summary">Anywhere</span>
+      </div>
+      <span class="chevron" id="where-chev">˅</span>
+    </div>
+    <div id="where-body" style="display:none;margin-top:-4px;margin-bottom:6px;border:1px solid #1e2a38;border-top:none;border-radius:0 0 6px 6px;padding:8px 10px">
+      <div style="display:flex;gap:3px;flex-wrap:wrap">
+        <button class="pt active">🌍 Anywhere</button>
+        <button class="pt">🏠 Home</button>
+        <button class="pt">🏢 Work</button>
+        <button class="pt">✈️ Travel</button>
+        <button class="pt">🏋 Billd</button>
+        <button class="pt">✈️ Airplane</button>
+      </div>
+    </div>
+
+    <!-- WEATHER — collapsed (default: no constraints) -->
+    <div class="sec-collapsed" onclick="toggleSec('weather-body', 'weather-chev')">
+      <div class="sec-collapsed-left">
+        <span style="font-size:11px">⛅</span>
+        <span class="sec-collapsed-label">Weather</span>
+        <span class="sec-collapsed-summary">No constraints</span>
+      </div>
+      <span class="chevron" id="weather-chev">˅</span>
+    </div>
+    <div id="weather-body" style="display:none;margin-top:-4px;margin-bottom:6px;border:1px solid #1e2a38;border-top:none;border-radius:0 0 6px 6px;padding:8px 10px">
+      <div class="sec-head" style="margin-bottom:4px">Precipitation</div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:8px">
+        <button class="pt active">🌦️ Any</button>
+        <button class="pt">🌧️ Precip OK</button>
+        <button class="pt">🌂 Light OK</button>
+        <button class="pt">☀️ Dry only</button>
+      </div>
+      <div class="sec-head" style="margin-bottom:4px">Sky cover</div>
+      <div style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:8px">
+        <button class="pt active">⛅ Any</button>
+        <button class="pt">☁️ Overcast OK</button>
+        <button class="pt">🌤️ Partly OK</button>
+        <button class="pt">☀️ Clear</button>
+      </div>
+      <div class="sec-head" style="margin-bottom:4px">Temperature / Humidity</div>
+      <div style="font-size:10px;color:#475569;padding:4px 0">No range set</div>
+    </div>
+
+    <!-- TOOLS — collapsed but with active tools shown -->
+    <div class="sec-collapsed" onclick="toggleSec('tools-body', 'tools-chev')">
+      <div class="sec-collapsed-left">
+        <span style="font-size:11px">🔧</span>
+        <span class="sec-collapsed-label">Tools</span>
+        <span class="sec-collapsed-summary" style="color:#d4af37">Personal PC</span>
+      </div>
+      <span class="chevron" id="tools-chev">˅</span>
+    </div>
+    <div id="tools-body" style="display:none;margin-top:-4px;margin-bottom:6px;border:1px solid #1e2a38;border-top:none;border-radius:0 0 6px 6px;padding:8px 10px">
+      <div style="display:flex;gap:3px;flex-wrap:wrap">
+        <button class="pt">📱 Phone</button>
+        <button class="pt active">🖥️ Personal PC</button>
+        <button class="pt">🚗 Car</button>
+      </div>
+    </div>
+
+    <!-- footer meta -->
+    <div style="padding:6px 0 8px;font-size:10px;color:#475569;display:flex;flex-direction:column;gap:3px">
+      <div>Created: May 12, 2026</div>
+      <div>Scheduled: May 14, 2026</div>
+      <div>Slack: ∞</div>
+    </div>
+
+  </div>
+
+  <!-- sticky footer -->
+  <div class="sticky-footer">
+    <button class="btn-del-footer">🗑 Delete</button>
+    <button class="btn-save-footer">💾 Save</button>
+  </div>
+</div>
+
+<script>
+function toggleAdv() {
+  var body = document.getElementById('adv-body');
+  var chev = document.getElementById('adv-chevron');
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  chev.textContent = open ? '˅' : '˄';
+}
+function toggleSec(bodyId, chevId) {
+  var body = document.getElementById(bodyId);
+  var chev = document.getElementById(chevId);
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  chev.textContent = open ? '˅' : '˄';
+}
+</script>
+</body>
+</html>

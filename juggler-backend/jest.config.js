@@ -7,6 +7,7 @@ module.exports = {
   moduleNameMapper: {
     '^uuid$': '<rootDir>/tests/helpers/uuid-mock.js'
   },
+  globalSetup: '<rootDir>/tests/helpers/jest.globalSetup.js',
   forceExit: true,
   // Run sequentially — integration tests share a DB connection that
   // conflicts with jest.mock('../src/db') in parallel workers.
