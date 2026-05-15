@@ -1892,11 +1892,3 @@ function UnifiedTemplateTab({ config, theme, showToast, allTasks }) {
     </div>
   );
 }
-
-function PlaceholderTab({ label, theme }) {
-  return (
-    <div style={{ textAlign: 'center', padding: 40, color: theme.textMuted, fontSize: 13 }}>
-      {label} editor — coming soon
-    </div>
-  );
-}
