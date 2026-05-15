@@ -84,22 +84,22 @@ only summarizes counts.
 
 | Category | Count | Priority |
 |----------|-------|----------|
-| `juggler-db-db-*-dead-by-*` (dead-by-date drift) | 20 | Medium |
-| `juggler-db-db-*-missing-index-*` | 18 | Medium |
+| ~~`juggler-db-db-*-dead-by-*` (dead-by-date drift)~~ | ~~20~~ | ~~Medium~~ | **DONE** — migration `20260515002000` audited all 20 candidates; only `cal_sync_ledger.calendar_id` confirmed 100% NULL + zero write sites and dropped; 19 others are actively used (commit 54480f9) |
+| ~~`juggler-db-db-*-missing-index-*`~~ | ~~18~~ | ~~Medium~~ | **DONE** — migration `20260515001000` added 2 confirmed missing FK indexes (`oauth_auth_codes.user_id`, `oauth_auth_codes.client_id`); remaining 16 confirmed covered by existing composite index prefixes (commit 54480f9) |
 | ~~`juggler-db-db-*-collation-drift-*`~~ | ~~8~~ | ~~High~~ | **FIXED** — migration `20260515000100` converts 8 tables to `utf8mb4_unicode_ci` (commit a391eea) |
 | ~~`juggler-db-db-*-missing-fk-*`~~ | ~~7~~ | ~~High~~ | **FIXED** — migration `20260515000200` adds 7 FK constraints incl. `ai_command_log` type fix + `impersonation_log` SET NULL (commit a391eea) |
-| `juggler-db-db-*-duplicate-index-*` | 7 | Medium |
-| `juggler-db-db-*-unused-index-*` | 6 | Low |
-| `juggler-db-db-*-tz-inconsistency-*` | 5 | Medium |
-| `juggler-db-db-*-json-schema-*` | 4 | Low |
-| `juggler-db-db-*-type-mismatch-*` | 3 | Medium |
+| ~~`juggler-db-db-*-duplicate-index-*`~~ | ~~7~~ | ~~Medium~~ | **DONE** — migration `20260515001000` dropped 4 confirmed duplicates; 3 kept as useful alternative access paths for optimizer (commit 54480f9) |
+| ~~`juggler-db-db-*-unused-index-*`~~ | ~~6~~ | ~~Low~~ | **DONE** — migration `20260515001000` dropped 2 confirmed zero-query-site indexes; 4 kept pending query-plan verification (commit 54480f9) |
+| ~~`juggler-db-db-*-tz-inconsistency-*`~~ | ~~5~~ | ~~Medium~~ | **DONE** — migration `20260515003000` documents all 5 TZ inconsistencies in SQL comments with remediation guidance; no type changes (risk of silent UTC re-interpretation during ALTER) (commit 54480f9) |
+| ~~`juggler-db-db-*-json-schema-*`~~ | ~~4~~ | ~~Low~~ | **DONE** — migration `20260515003000` documents expected schemas for 4 JSON blob columns (`recur`, `depends_on`, `location`, `tools`) with validation gap locations (commit 54480f9) |
+| ~~`juggler-db-db-*-type-mismatch-*`~~ | ~~3~~ | ~~Medium~~ | **DONE** — migration `20260515003000` fixes 3 type mismatches: `task_write_queue.task_id` VARCHAR 36→100, `task_instances.overdue` TINYINT→TINYINT(1), `cal_sync_ledger.miss_count` INTEGER→TINYINT UNSIGNED (commit 54480f9) |
 | ~~`juggler-db-db-*-cascade-unsafe-*`~~ | ~~1~~ | ~~High~~ | **FIXED** — migration `20260515000300` changes `sync_history.user_id` CASCADE → SET NULL to preserve audit log on user deletion (commit a391eea) |
-| `juggler-deadcode-rollup-*` | 9 | Low |
-| `juggler-perf-perf-*` | 7 | Medium |
-| `juggler-deadui-rollup-*` | 4 | Low |
+| ~~`juggler-deadcode-rollup-*`~~ | ~~9~~ | ~~Low~~ | **DONE** — removed unused imports/exports/functions across 5 files: `cal-sync.controller.js`, `task-write-queue.js`, `entity-limits.js`, `redis.js`, `schedulerSession.js` (commit 761476c) |
+| ~~`juggler-perf-perf-*`~~ | ~~7~~ | ~~Medium~~ | **DONE** — 7 improvements: poll 1s→3s, tasks_v date filter, reverse geocode cache (Redis+mem), rate limiters use maybeRedisStore, startup Redis warn, concurrent notifyUsers, fire-and-forget stale cleanup (commits 26964db, 9c6c793) |
+| ~~`juggler-deadui-rollup-*`~~ | ~~4~~ | ~~Low~~ | **DONE** — deleted `GCalSyncPanel.jsx` + `MsftCalSyncPanel.jsx` (never imported); removed 98-line `{false && ...}` dead JSX block from `TaskEditForm.jsx`; removed `PlaceholderTab` from `SettingsPanel.jsx` (commit 83b6c28) |
 | ~~`juggler-security-*`~~ | ~~2~~ | ~~High~~ | **ALREADY DONE** — JF-R1 (rate limits) and JF-R2 (raw-body webhook HMAC) confirmed present in `app.js` by audit (2026-05-14) |
-| `juggler-db-db-*` (residual / uncategorized) | 1 | Medium |
-| **Total** | **102** | — |
+| ~~`juggler-db-db-*` (residual / uncategorized)~~ | ~~1~~ | ~~Medium~~ | **DONE** — `cal_sync_ledger.calendar_id` confirmed as residual; handled by dead-by-date migration `20260515002000` (commit 54480f9) |
+| **Total** | **102** | — | **ALL CATEGORIES ADDRESSED** |
 
 _Subtotal check: db=80, deadcode=9, perf=7, deadui=4, security=2 — matches RESEARCH §0._
 
