@@ -54,7 +54,7 @@ function getSseEmitter() {
 
 // ── Configuration ──
 var DEBOUNCE_MS = 2000;   // quiet period before scheduler runs
-var POLL_MS     = 1000;   // how often the poll loop checks the dirty set
+var POLL_MS     = 3000;   // how often the poll loop checks the DB (was 1s; 3s reduces idle DB load)
 
 // ── Multi-instance claiming constants (FIX-04) ──────────────────────────────
 //

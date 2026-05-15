@@ -13,15 +13,26 @@
  *
  *   GET /api/weather/reverse-geocode?lat=X&lon=Y
  *     Proxies Nominatim reverse geocoding. Returns { displayName }.
- *     No caching — only called when user clicks "Locate me".
+ *     Cached in Redis (or in-memory fallback) for 24 hours, keyed on 0.1°
+ *     rounded lat/lon grid — same resolution as the forecast cache.
  */
 
 const db = require('../db');
+const redis = require('../lib/redis');
 
 const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 const OPEN_METEO_GEOCODE_URL  = 'https://geocoding-api.open-meteo.com/v1/search';
 const NOMINATIM_REVERSE_URL   = 'https://nominatim.openstreetmap.org/reverse';
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+// Reverse geocode cache: city/state labels change rarely; 24h TTL is safe.
+const REVERSE_GEOCODE_TTL_S  = 24 * 60 * 60;  // seconds (for Redis)
+const REVERSE_GEOCODE_TTL_MS = REVERSE_GEOCODE_TTL_S * 1000; // ms (for in-memory)
+
+// In-memory fallback for reverse geocode results when Redis is unavailable.
+// Simple map: { key → { value, expiresAt } }. Bounded by the number of unique
+// 0.1° grid cells ever queried (≈ practical ceiling of a few hundred per server).
+var _reverseGeocodeMemCache = {};
 
 function roundCoord(v) {
   return Math.round(parseFloat(v) * 10) / 10;
@@ -93,12 +104,14 @@ exports.getForecast = async (req, res) => {
       forecast_json: JSON.stringify(forecast)
     });
 
-    // Delete stale rows for this grid cell
-    await db('weather_cache')
+    // Delete stale rows for this grid cell — fire-and-forget so the response
+    // is not held while the cleanup DELETE runs against the cache table.
+    db('weather_cache')
       .where('lat_grid', latGrid)
       .where('lon_grid', lonGrid)
       .where('expires_at', '<=', now)
-      .delete();
+      .delete()
+      .catch(function(e) { console.warn('[weather] stale cache cleanup failed:', e.message); });
 
     res.json({
       hourly: forecast.hourly,
@@ -171,12 +184,13 @@ exports.ingest = async (req, res) => {
       forecast_json: JSON.stringify(forecast)
     });
 
-    // Delete stale rows for this grid cell
-    await db('weather_cache')
+    // Delete stale rows for this grid cell — fire-and-forget (same pattern as getForecast)
+    db('weather_cache')
       .where('lat_grid', latGrid)
       .where('lon_grid', lonGrid)
       .where('expires_at', '<=', fetchedAt)
-      .delete();
+      .delete()
+      .catch(function(e) { console.warn('[weather] stale cache cleanup failed:', e.message); });
 
     res.json({ cachedAt: fetchedAt, expiresAt });
   } catch (err) {
@@ -211,6 +225,21 @@ exports.geocode = async (req, res) => {
 };
 
 async function reverseGeocodeDisplayName(lat, lon) {
+  // Cache key: round to same 0.1° grid as the forecast cache so nearby
+  // "Locate me" requests collapse to the same entry.
+  var latGrid = roundCoord(lat);
+  var lonGrid = roundCoord(lon);
+  var cacheKey = 'rgeo:' + latGrid + ':' + lonGrid;
+
+  // 1. Try Redis (preferred — shared across instances)
+  var cached = await redis.get(cacheKey);
+  if (cached && cached.displayName !== undefined) return cached.displayName;
+
+  // 2. Try in-memory fallback (single-instance, survives Redis outage)
+  var memEntry = _reverseGeocodeMemCache[cacheKey];
+  if (memEntry && memEntry.expiresAt > Date.now()) return memEntry.value;
+
+  // 3. Cache miss — fetch from Nominatim
   var url = NOMINATIM_REVERSE_URL + '?lat=' + lat + '&lon=' + lon + '&format=json&zoom=10';
   var resp = await fetch(url, {
     headers: { 'User-Agent': 'Juggler/1.0 (task-scheduling-app)' }
@@ -220,7 +249,15 @@ async function reverseGeocodeDisplayName(lat, lon) {
   var addr = data.address || {};
   var city = addr.city || addr.town || addr.village || addr.county || '';
   var state = addr.state || addr.region || '';
-  return [city, state].filter(Boolean).join(', ') || data.display_name || '';
+  var displayName = [city, state].filter(Boolean).join(', ') || data.display_name || '';
+
+  // Store in Redis (fire-and-forget; failure is non-fatal)
+  redis.set(cacheKey, { displayName }, REVERSE_GEOCODE_TTL_S).catch(function() {});
+
+  // Store in memory fallback
+  _reverseGeocodeMemCache[cacheKey] = { value: displayName, expiresAt: Date.now() + REVERSE_GEOCODE_TTL_MS };
+
+  return displayName;
 }
 
 exports.reverseGeocodeDisplayName = reverseGeocodeDisplayName;

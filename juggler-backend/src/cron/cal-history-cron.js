@@ -40,6 +40,10 @@ async function processMissedMark(deps, shard, now) {
     .where('status', '')
     .whereRaw('user_id % ? = ?', [SHARD_COUNT, shard])
     .whereNotNull('scheduled_at')
+    // Perf: only scan instances whose window could plausibly have closed.
+    // Pending instances scheduled in the future cannot be missed yet; filtering
+    // them here dramatically shrinks the scan on the tasks_v view.
+    .whereRaw('scheduled_at < NOW() - INTERVAL 1 HOUR')
     .select('id', 'user_id', 'scheduled_at', 'time_flex');
 
   var toFlip = [];
@@ -91,15 +95,17 @@ async function processPurge(deps, shard, now) {
 }
 
 async function notifyUsers(deps, userIds) {
-  for (var i = 0; i < userIds.length; i++) {
-    var u = userIds[i];
+  // Fan out cache invalidation + SSE concurrently across users.
+  // Sequential awaits added per-user latency proportional to userIds.length
+  // (each Redis invalidateTasks call is a network round-trip).
+  await Promise.all(userIds.map(async function(u) {
     if (deps.cache && deps.cache.invalidateTasks) {
       try { await deps.cache.invalidateTasks(u); } catch (e) { /* swallow */ }
     }
     if (deps.sseEmitter && deps.sseEmitter.emit) {
       try { deps.sseEmitter.emit(u, 'schedule:changed', { timestamp: Date.now(), changeset: null }); } catch (e) { /* swallow */ }
     }
-  }
+  }));
 }
 
 async function tick() {

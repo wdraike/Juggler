@@ -10,6 +10,8 @@ const cookieParser = require('cookie-parser');
 const bodyParser = require('body-parser');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const { RedisStore } = require('rate-limit-redis');
+const redisLib = require('./lib/redis');
 
 const taskRoutes = require('./routes/task.routes');
 const configRoutes = require('./routes/config.routes');
@@ -107,15 +109,29 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Rate limiting
-const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 1000, standardHeaders: true, legacyHeaders: false });
-const aiLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
-const mcpLimiter = rateLimit({ windowMs: 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
-const oauthCallbackLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests, please wait.' } });
-const billingWebhookLimiter = rateLimit({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many webhook calls.' } });
-const healthLimiter = rateLimit({ windowMs: 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
+// When Redis is available, use a shared RedisStore so limits are enforced
+// consistently across all Cloud Run instances. Falls back to default in-memory
+// MemoryStore when Redis is not configured (single-instance or local dev).
+function makeRateLimiter(opts) {
+  const redisClient = redisLib.getClient();
+  if (redisClient) {
+    opts.store = new RedisStore({
+      sendCommand: (command, ...args) => redisClient.call(command, ...args),
+      prefix: 'rl:',
+    });
+  }
+  return rateLimit(opts);
+}
+
+const apiLimiter = makeRateLimiter({ windowMs: 60 * 1000, max: 1000, standardHeaders: true, legacyHeaders: false });
+const aiLimiter = makeRateLimiter({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
+const mcpLimiter = makeRateLimiter({ windowMs: 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
+const oauthCallbackLimiter = makeRateLimiter({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests, please wait.' } });
+const billingWebhookLimiter = makeRateLimiter({ windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many webhook calls.' } });
+const healthLimiter = makeRateLimiter({ windowMs: 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false });
 // Per-user write limiter — keys by user ID so shared NAT/proxies don't hit a common bucket.
 // skip() passes through safe read-only methods so GETs aren't throttled.
-const writeRateLimiter = rateLimit({
+const writeRateLimiter = makeRateLimiter({
   windowMs: 60 * 1000,
   max: 300,
   standardHeaders: true,
@@ -149,6 +165,13 @@ app.get('/api/auth/me', authenticateJWT, async (req, res) => {
     }
   });
 });
+
+// Startup check: warn if REDIS_URL is missing. Without Redis, SSE fan-out
+// degrades to local-only (events not delivered across instances) and rate
+// limiters fall back to per-instance in-memory counters.
+if (!process.env.REDIS_URL) {
+  console.warn('[startup] REDIS_URL not set — SSE fan-out and rate limiters will be local-only (single-instance safe, not multi-instance safe)');
+}
 
 // SSE endpoint — real-time event stream for connected frontends
 // EventSource doesn't support custom headers, so accept token as query param
