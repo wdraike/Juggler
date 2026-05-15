@@ -1,6 +1,6 @@
 # Juggler — Backlog
 
-_Last consolidated: 2026-05-11 (Phase `consolidate-handovers`)_
+_Last consolidated: 2026-05-14 (Phase 08 + cross-day split)_
 
 This is the canonical open-work index for `juggler/`.
 
@@ -50,7 +50,9 @@ purged), the row is the canonical record itself; no source remains.
 
 | ID | Title | Source File | Source Line | Last-Touched | Blocker |
 |----|-------|-------------|-------------|--------------|---------|
-| JUG-MED-07 <a id="scheduler-visual-docs"></a> | Scheduler — full visual documentation (Mermaid diagrams or equivalent) | (user-reported 2026-05-12) | — | 2026-05-12 | Document the scheduler end-to-end using visual tools (Mermaid, HTML flowcharts, or similar). Cover: trigger sources, scheduling algorithm flow, state transitions, split/chain/recurring paths, event queue integration. Goal: anyone can understand the scheduler from the diagrams alone. |
+| ~~JUG-MED-08~~ | ~~Scheduler nudge + health fix~~ | — | — | 2026-05-14 | **DONE** — Phase 08 shipped: `POST /api/schedule/nudge` (JWT, queued via `enqueueScheduleRun`); frontend `visibilityState`-aware timer resets on SSE; health check replaced with stuck-claim query + `getLastError()` 10-min window; `idle`/`stale` states removed (commits 7530e7e, 00393a0). |
+| ~~JUG-MED-09~~ | ~~Cross-day splits for tpc recurring tasks~~ | — | — | 2026-05-14 | **DONE** — Split chunks of timesPerCycle recurring tasks now spread across the interval window (day before next occurrence) instead of being locked to the anchor day. `nextTpcOccDateByKey` map in `runSchedule.js` caps deadline per chunk; `splitTot > 1` removed from `isDayLocked` in `unifiedScheduleV2.js`. Daily tpc self-limits via `cycleDays=1` (commit 3052ef6). |
+| JUG-MED-07 <a id="scheduler-visual-docs"></a> | Scheduler — full visual documentation (Mermaid diagrams or equivalent) | (user-reported 2026-05-12) | — | 2026-05-14 | Document the scheduler end-to-end using visual tools (Mermaid, HTML flowcharts, or similar). Cover: trigger sources, scheduling algorithm flow, state transitions, split/chain/recurring paths, event queue integration. Goal: anyone can understand the scheduler from the diagrams alone. |
 | ~~JUG-MED-01~~ | ~~Show all-day events at top of calendar view~~ | — | — | 2026-05-14 | **FIXED** — CalendarView sort + DailyView all-day banner (commit 2f94a01). DayView already correct. |
 | ~~JUG-MED-02~~ | ~~Sort out icons for weather (currently confusing)~~ | — | — | 2026-05-14 | **FIXED** — Meteocons SVG icons, per-code WMO mapping, Comp C badge layout (icon 20px + hi/lo + raindrop 14px + precip%). Shared util `weatherIcons.js`; 4 duplicate `weatherCodeIcon()` fns removed. Sketch 001 documents decisions. |
 | ~~JUG-MED-03~~ | ~~Fix sync frequency issues~~ | — | — | 2026-05-14 | **FIXED** — 3 RCs fixed: (1) Apple excluded from polling interval — added `appleFreq`/`appleAuto` to `AppLayout.jsx` loop and `activeFreqs` push; (2) `has-changes` local-change check used only `gcal_last_synced_at` — now uses max of all 3 provider timestamps so MSFT/Apple-only users get local-change detection (`cal-sync.controller.js`); (3) `calSyncSettings` object reference in `useEffect` dep array caused interval to restart every render — extracted primitive `gcalFreq`/`msftFreq`/`appleFreq` numbers before the effect, deps are now stable. |
@@ -64,7 +66,7 @@ purged), the row is the canonical record itself; no source remains.
 
 | ID | Title | Source File | Source Line | Last-Touched | Blocker |
 |----|-------|-------------|-------------|--------------|---------|
-| JUG-HOLD-01 | `timesPerCycle` work-budget-aware | MASTER-PLAN.md (JUGGLER → Hold) | "tpc currently occurrence-count-based, not work-budget-based" | 2026-05-08 | Design question: suppress slots when `sum(time_remaining) < session_dur`, or keep occurrence-count + manual tpc adjust? Files: `shared/scheduler/expandRecurring.js` (tpc slot accounting), `src/scheduler/runSchedule.js:489` (`time_remaining → effectiveDur`). Held for UX review. |
+| JUG-HOLD-01 | `timesPerCycle` work-budget-aware | MASTER-PLAN.md (JUGGLER → Hold) | "tpc currently occurrence-count-based, not work-budget-based" | 2026-05-14 | Design question: suppress slots when `sum(time_remaining) < session_dur`, or keep occurrence-count + manual tpc adjust? Files: `shared/scheduler/expandRecurring.js` (tpc slot accounting), `src/scheduler/runSchedule.js` (`time_remaining → effectiveDur`). Held for UX review. Note: cross-day tpc splits shipped (commit 3052ef6) — time_remaining remains per-instance; this item is about suppressing extra occurrences when overall work is nearly done. |
 
 ---
 
