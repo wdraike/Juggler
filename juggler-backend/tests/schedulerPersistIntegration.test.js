@@ -300,3 +300,83 @@ describe('TEMPLATE_FIELDS routing (real DB)', () => {
     expect(instanceFields.scheduled_at).toBe('2026-04-07 11:00:00');
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// SC-36: Dependency ordering persisted to DB
+// SC-37: Split chunk scheduling persisted to DB
+// ═══════════════════════════════════════════════════════════════
+
+describe('SC-36: Dependency ordering persisted to DB', () => {
+  test('depends_on JSON persists and is readable via tasks_v', async () => { if (!available) return;
+    var db = testDb.getDb();
+    await testDb.seedTask({ id: 'dep-a', text: 'Task A', depends_on: JSON.stringify([]) });
+    await testDb.seedTask({ id: 'dep-b', text: 'Task B', depends_on: JSON.stringify(['dep-a']) });
+
+    var rowA = await db('tasks_v').where('id', 'dep-a').first();
+    var rowB = await db('tasks_v').where('id', 'dep-b').first();
+    expect(rowA).toBeDefined();
+    expect(rowB).toBeDefined();
+
+    var depsB = typeof rowB.depends_on === 'string' ? JSON.parse(rowB.depends_on) : rowB.depends_on;
+    expect(Array.isArray(depsB)).toBe(true);
+    expect(depsB).toContain('dep-a');
+
+    var depsA = typeof rowA.depends_on === 'string' ? JSON.parse(rowA.depends_on) : rowA.depends_on;
+    expect(depsA).toEqual([]);
+  });
+
+  test('task with multiple dependencies persists all dep IDs', async () => { if (!available) return;
+    var db = testDb.getDb();
+    await testDb.seedTask({ id: 'dep-x', text: 'Task X' });
+    await testDb.seedTask({ id: 'dep-y', text: 'Task Y' });
+    await testDb.seedTask({ id: 'dep-z', text: 'Task Z', depends_on: JSON.stringify(['dep-x', 'dep-y']) });
+
+    var rowZ = await db('tasks_v').where('id', 'dep-z').first();
+    var depsZ = typeof rowZ.depends_on === 'string' ? JSON.parse(rowZ.depends_on) : rowZ.depends_on;
+    expect(depsZ.length).toBe(2);
+    expect(depsZ).toContain('dep-x');
+    expect(depsZ).toContain('dep-y');
+  });
+});
+
+describe('SC-37: Split chunk scheduling persisted to DB', () => {
+  test('split flag persists to task_masters and is visible via tasks_v', async () => { if (!available) return;
+    var db = testDb.getDb();
+    await testDb.seedTask({ id: 'split-a', text: 'Splittable Task', split: 1, split_min: 15, dur: 60 });
+
+    var master = await db('task_masters').where('id', 'split-a').first();
+    expect(master.split).toBeTruthy();
+    expect(master.split_min).toBe(15);
+
+    var row = await db('tasks_v').where('id', 'split-a').first();
+    expect(row.split).toBeTruthy();
+  });
+
+  test('task_instances supports split_ordinal and split_total for chunk tracking', async () => { if (!available) return;
+    var db = testDb.getDb();
+    // Seed master
+    await testDb.seedTask({ id: 'split-b', text: 'Long Task', split: 1, split_min: 20, dur: 90 });
+
+    // Simulate scheduler creating a second split chunk instance (split_ordinal=2)
+    var now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    await db('task_instances').insert({
+      id: 'split-b_i2',
+      master_id: 'split-b',
+      user_id: 'test-user-001',
+      occurrence_ordinal: 1,
+      split_ordinal: 2,
+      split_total: 3,
+      dur: 30,
+      status: '',
+      generated: 1,
+      created_at: now,
+      updated_at: now
+    });
+
+    var chunks = await db('task_instances').where('master_id', 'split-b').orderBy('split_ordinal');
+    expect(chunks.length).toBe(2);
+    expect(chunks[0].split_ordinal).toBe(1);
+    expect(chunks[1].split_ordinal).toBe(2);
+    expect(chunks[1].split_total).toBe(3);
+  });
+});
