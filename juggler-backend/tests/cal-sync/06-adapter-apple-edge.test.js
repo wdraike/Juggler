@@ -16,111 +16,44 @@ jest.mock('../../src/lib/sse-emitter', () => ({ emit: jest.fn() }));
 var appleCalApi = require('../../src/lib/apple-cal-api');
 var appleAdapter = require('../../src/lib/cal-adapters/apple.adapter');
 var { encrypt } = require('../../src/lib/credential-encrypt');
+var { sync } = require('../../src/controllers/cal-sync.controller');
 var {
-  db, TEST_USER_ID, isDbAvailable, seedTestUser, cleanupTestData, destroyTestUser
+  db, TEST_USER_ID, isDbAvailable, seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes
 } = require('./helpers/test-setup');
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-var APPLE_EDGE_USER_ID = 'apple-edge-test-001';
-
-async function seedAppleUser(overrides) {
-  await db('users').where('id', APPLE_EDGE_USER_ID).del();
-  var base = {
-    id: APPLE_EDGE_USER_ID,
-    email: 'apple-edge@test.com',
-    name: 'Apple Edge Test',
-    timezone: 'America/New_York',
-    apple_cal_username: 'test@icloud.com',
-    apple_cal_password: encrypt('test-app-specific-password'),
-    apple_cal_server_url: 'https://caldav.icloud.com',
-    apple_cal_calendar_url: 'https://p01-caldav.icloud.com/123456789/calendars/test-cal/',
-    apple_cal_sync_token: null,
-    apple_cal_last_synced_at: null,
-    created_at: new Date(),
-    updated_at: new Date()
-  };
-  await db('users').insert({ ...base, ...overrides });
-  return db('users').where('id', APPLE_EDGE_USER_ID).first();
-}
 
 afterEach(async () => {
   jest.restoreAllMocks();
-  await db('users').where('id', APPLE_EDGE_USER_ID).del();
+  await destroyTestUser();
 });
 
 afterAll(async () => {
-  await db('users').where('id', APPLE_EDGE_USER_ID).del();
+  await destroyTestUser();
   await db.destroy();
 });
 
-// ─── BF-1: Apple 401 clears apple_cal_password ───────────────────────────────
+// ─── BF-1: Apple 401 clears apple_cal_password via sync() ────────────────────
 
 describe('BF-1: Apple 401 clears apple_cal_password in DB', () => {
-  it('clears apple_cal_password when createClient throws 401-style error', async () => {
+  it('clears apple_cal_password when createClient throws Unauthorized', async () => {
     if (!await isDbAvailable()) return;
 
-    var user = await seedAppleUser({});
+    var user = await seedTestUser({
+      gcal_refresh_token: null,
+      msft_cal_refresh_token: null,
+      apple_cal_username: 'test@icloud.com',
+      apple_cal_password: encrypt('test-app-specific-password'),
+      apple_cal_server_url: 'https://caldav.icloud.com',
+      apple_cal_calendar_url: 'https://p01-caldav.icloud.com/123456789/calendars/test-cal/'
+    });
 
-    // Verify password was seeded
-    expect(user.apple_cal_password).toBeTruthy();
+    jest.spyOn(appleCalApi, 'createClient').mockRejectedValue(new Error('Unauthorized'));
 
-    // Mock createClient to throw an Unauthorized error
-    jest.spyOn(appleCalApi, 'createClient').mockRejectedValue(
-      Object.assign(new Error('Unauthorized: 401'), { statusCode: 401 })
-    );
+    var req = mockReq(user);
+    var res = mockRes();
+    await sync(req, res);
 
-    // getValidAccessToken calls createClient — wrap it to simulate the auth error path
-    // that the sync controller catches and clears credentials for
-    var err = null;
-    try {
-      await appleAdapter.getValidAccessToken(user);
-    } catch (e) {
-      err = e;
-    }
-
-    expect(err).toBeTruthy();
-
-    // Simulate what cal-sync.controller does on auth error: clear apple_cal_password
-    var RE_AUTH_ERR = /invalid_grant|unauthorized|forbidden|authorization|access.?denied|token.*expired|expired.*token/i;
-    if (RE_AUTH_ERR.test(err.message)) {
-      await db('users').where('id', APPLE_EDGE_USER_ID).update({
-        apple_cal_password: null,
-        updated_at: new Date()
-      });
-    }
-
-    var updated = await db('users').where('id', APPLE_EDGE_USER_ID).first();
+    var updated = await db('users').where('id', TEST_USER_ID).first();
     expect(updated.apple_cal_password).toBeNull();
-  });
-
-  it('apple_cal_password remains if createClient throws non-auth error (network)', async () => {
-    if (!await isDbAvailable()) return;
-
-    var user = await seedAppleUser({});
-
-    jest.spyOn(appleCalApi, 'createClient').mockRejectedValue(
-      Object.assign(new Error('ECONNREFUSED: connection refused'), { code: 'ECONNREFUSED' })
-    );
-
-    var err = null;
-    try {
-      await appleAdapter.getValidAccessToken(user);
-    } catch (e) {
-      err = e;
-    }
-
-    expect(err).toBeTruthy();
-
-    // Non-auth error: controller should NOT clear the password
-    var RE_AUTH_ERR = /invalid_grant|unauthorized|forbidden|authorization|access.?denied|token.*expired|expired.*token/i;
-    if (RE_AUTH_ERR.test(err.message)) {
-      await db('users').where('id', APPLE_EDGE_USER_ID).update({ apple_cal_password: null });
-    }
-
-    var updated = await db('users').where('id', APPLE_EDGE_USER_ID).first();
-    // Password should still be there since it wasn't an auth error
-    expect(updated.apple_cal_password).toBeTruthy();
   });
 });
 

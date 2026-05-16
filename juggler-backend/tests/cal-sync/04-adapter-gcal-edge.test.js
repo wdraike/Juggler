@@ -72,6 +72,7 @@ describe('hasChanges: 410 expired sync token', () => {
 
     var result = await gcalAdapter.hasChanges('access-token', user);
     expect(result.hasChanges).toBe(true);
+    expect(result.tokenInvalid).toBe(true);
   });
 });
 
