@@ -1981,11 +1981,17 @@ async function sync(req, res) {
       for (var ci = 0; ci < taskUpdates.length; ci++) {
         var tu = taskUpdates[ci];
         var origTask = tasksById[tu.id];
-        if (origTask && freshById[tu.id]) {
-          var origTime = new Date(String(origTask._updated_at).replace(' ', 'T') + 'Z').getTime();
-          var freshTime = new Date(String(freshById[tu.id]).replace(' ', 'T') + 'Z').getTime();
-          if (!isNaN(origTime) && !isNaN(freshTime) && freshTime > origTime) {
+        if (origTask) {
+          if (!freshById[tu.id]) {
+            // Task was deleted between the API-phase snapshot and the write phase —
+            // skip the DB write so we don't update a non-existent row.
             conflictSkipIds.add(tu.id);
+          } else {
+            var origTime = new Date(String(origTask._updated_at).replace(' ', 'T') + 'Z').getTime();
+            var freshTime = new Date(String(freshById[tu.id]).replace(' ', 'T') + 'Z').getTime();
+            if (!isNaN(origTime) && !isNaN(freshTime) && freshTime > origTime) {
+              conflictSkipIds.add(tu.id);
+            }
           }
         }
       }
