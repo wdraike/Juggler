@@ -58,7 +58,9 @@ async function listEvents(token, timeMin, timeMax, userId) {
     await db('users').where('id', userId).update({ gcal_sync_token: result.nextSyncToken });
   }
 
-  return events.map(normalizeEvent);
+  return events
+    .filter(function(e) { return e.status !== 'cancelled'; })
+    .map(normalizeEvent);
 }
 
 /**
