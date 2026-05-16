@@ -429,7 +429,8 @@ async function checkForChanges(client, calendarUrl, storedSyncToken) {
 
   try {
     var calendars = await client.fetchCalendars();
-    var cal = calendars.find(function(c) { return c.url === calendarUrl; });
+    var normalizeUrl = function(u) { return u ? u.replace(/\/$/, '') : u; };
+    var cal = calendars.find(function(c) { return normalizeUrl(c.url) === normalizeUrl(calendarUrl); });
     if (!cal) return { hasChanges: true };
 
     var currentToken = cal.syncToken || cal.ctag || '';
