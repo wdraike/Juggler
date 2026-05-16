@@ -282,7 +282,9 @@ async function sync(req, res) {
           eventsById[events[ei].id] = events[ei];
           // Apple events: provider_event_id stores the CalDAV URL, not the UID —
           // index by _url too so ledger lookups work regardless of which key was stored.
-          if (events[ei]._url) eventsById[events[ei]._url] = events[ei];
+          if (events[ei]._url && !eventsById[events[ei]._url]) {
+            eventsById[events[ei]._url] = events[ei];
+          }
         }
 
         providerData[adapter.providerId] = { token: token, events: events, eventsById: eventsById, adapter: adapter, partialFailure: !!events._hasPartialFailure };

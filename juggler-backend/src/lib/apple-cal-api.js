@@ -92,6 +92,8 @@ function parseVEvents(icsData, url, etag) {
     var event = new ICAL.Event(vevent);
 
     var uid = event.uid || '';
+    var recurrenceId = vevent.getFirstPropertyValue('recurrence-id');
+    var eventId = uid + (recurrenceId ? '_' + recurrenceId.toString() : '');
     var summary = event.summary || '(No title)';
     var description = event.description || '';
 
@@ -158,7 +160,7 @@ function parseVEvents(icsData, url, etag) {
     var lastModStr = lastModified ? formatICALDateTime(lastModified) : null;
 
     results.push({
-      id: uid,
+      id: eventId,
       title: summary,
       description: description,
       startDateTime: startStr,

@@ -104,3 +104,37 @@ describe('BF-5: floating-time DTSTART converted to UTC', () => {
     expect(events[0].startDateTime).not.toMatch(/Z$/);
   });
 });
+
+describe('BF-6: multi-VEVENT ICS — master not overwritten by override', () => {
+  it('returns both VEVENTs from a single ICS with different ids', () => {
+    var ics = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'BEGIN:VEVENT',
+      'UID:recurring-abc',
+      'SUMMARY:Weekly standup',
+      'DTSTART:20260515T130000Z',
+      'DTEND:20260515T133000Z',
+      'RRULE:FREQ=WEEKLY',
+      'END:VEVENT',
+      'BEGIN:VEVENT',
+      'UID:recurring-abc',
+      'SUMMARY:Weekly standup (moved)',
+      'DTSTART:20260515T180000Z',
+      'DTEND:20260515T183000Z',
+      'RECURRENCE-ID:20260515T130000Z',
+      'END:VEVENT',
+      'END:VCALENDAR'
+    ].join('\r\n');
+
+    var events = parseVEvents(ics, 'https://cal/recurring.ics', '"etag"');
+    expect(events).toHaveLength(2);
+    expect(events[0].title).toBe('Weekly standup');
+    expect(events[1].title).toBe('Weekly standup (moved)');
+    // master has plain uid
+    expect(events[0].id).toBe('recurring-abc');
+    // override has uid_recurrenceId
+    expect(events[1].id).toMatch(/^recurring-abc_/);
+    expect(events[0].id).not.toBe(events[1].id);
+  });
+});
