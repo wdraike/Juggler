@@ -70,6 +70,9 @@ describe('BF-3: 410 on PATCH transitions ledger to deleted_remote', () => {
     jest.spyOn(gcalAdapter, 'updateEvent').mockRejectedValue(
       new Error('Calendar API error 410: Resource has been deleted')
     );
+    jest.spyOn(gcalAdapter, 'batchUpdateEvents').mockRejectedValue(
+      new Error('Calendar API error 410: Resource has been deleted')
+    );
 
     var req = mockReq(user);
     var res = mockRes();
@@ -77,5 +80,6 @@ describe('BF-3: 410 on PATCH transitions ledger to deleted_remote', () => {
 
     var ledger = await db('cal_sync_ledger').where({ task_id: task.id, provider: 'gcal' }).first();
     expect(ledger.status).toBe('deleted_remote');
+    expect(ledger.provider_event_id).toBeNull();
   });
 });
