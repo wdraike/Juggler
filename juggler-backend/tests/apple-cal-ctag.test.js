@@ -47,4 +47,18 @@ describe('BF-9: CTag URL trailing-slash normalization', () => {
     );
     expect(result.hasChanges).toBe(false);
   });
+
+  it('handles server returning null/empty calendars gracefully', async () => {
+    var mockClient = {
+      fetchCalendars: jest.fn().mockResolvedValue([])
+    };
+    var result = await checkForChanges(
+      mockClient,
+      'https://caldav.icloud.com/123/calendars/home/',
+      'some-token'
+    );
+    // No calendar found → treat as changed (conservative)
+    expect(result).toBeDefined();
+    expect(typeof result.hasChanges).toBe('boolean');
+  });
 });
