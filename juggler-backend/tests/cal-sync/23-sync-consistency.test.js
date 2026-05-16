@@ -34,6 +34,7 @@ var gcalAdapter = require('../../src/lib/cal-adapters/gcal.adapter');
 var tasksWrite = require('../../src/lib/tasks-write');
 
 var GCAL_ONLY = {
+  gcal_refresh_token: 'mock-gcal-token',
   msft_cal_refresh_token: null, apple_cal_username: null,
   apple_cal_password: null, apple_cal_server_url: null, apple_cal_calendar_url: null
 };
@@ -119,6 +120,11 @@ describe('BF-7: task deleted during API phase is skipped in write phase', () => 
     var req = mockReq(user);
     var res = mockRes();
     await sync(req, res);
+
+    // Proof that the push phase actually executed: batchCreateEvents was called
+    // with our task, and sync() returned a response (not a no-op early exit).
+    expect(gcalAdapter.batchCreateEvents).toHaveBeenCalled();
+    expect(res._json).not.toBeNull();
 
     // Assert: updateTaskById was never called with the deleted task's ID.
     // Other tasks (e.g. dependency transfers) may be updated — only check this ID.
