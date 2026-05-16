@@ -19,7 +19,7 @@ beforeAll(async () => {
 });
 afterEach(async () => {
   jest.restoreAllMocks();
-  await cleanupTestData();
+  await destroyTestUser();
 });
 afterAll(async () => {
   await destroyTestUser();
@@ -31,7 +31,8 @@ describe('BF-1: Auth 401 clears correct provider credentials', () => {
     if (!await isDbAvailable()) return;
     var user = await seedTestUser({
       gcal_refresh_token: null,
-      msft_cal_refresh_token: null,
+      msft_cal_refresh_token: 'should-not-be-cleared',
+      msft_cal_access_token: 'should-not-be-cleared-either',
       apple_cal_username: 'test@icloud.com',
       apple_cal_password: encrypt('app-specific-pw'),
       apple_cal_server_url: 'https://caldav.icloud.com',
@@ -47,9 +48,9 @@ describe('BF-1: Auth 401 clears correct provider credentials', () => {
     var updated = await db('users').where('id', TEST_USER_ID).first();
     // Apple credential cleared
     expect(updated.apple_cal_password).toBeNull();
-    // MSFT columns untouched (were already null — just verify no corruption)
-    expect(updated.msft_cal_refresh_token).toBeNull();
-    expect(updated.msft_cal_access_token).toBeNull();
+    // MSFT columns untouched (verify they survive)
+    expect(updated.msft_cal_refresh_token).toBe('should-not-be-cleared');
+    expect(updated.msft_cal_access_token).toBe('should-not-be-cleared-either');
   });
 
   it('MSFT 401: clears msft_cal_ columns (not msft_ columns)', async () => {
