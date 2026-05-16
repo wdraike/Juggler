@@ -128,7 +128,17 @@ async function hasChanges(token, user) {
   var deltaLink = user.msft_cal_delta_link;
   if (!deltaLink) return { hasChanges: true }; // No delta link yet — need full sync
 
-  var result = await msftCalApi.checkForChanges(token, deltaLink);
+  var result;
+  try {
+    result = await msftCalApi.checkForChanges(token, deltaLink);
+  } catch (err) {
+    // 410 = delta token expired; clear it so next sync does full fetch
+    if (err.message && (err.message.includes('410') || err.message.includes('syncStateNotFound'))) {
+      await db('users').where('id', user.id).update({ msft_cal_delta_link: null });
+      return { hasChanges: true, tokenInvalid: true };
+    }
+    throw err;
+  }
 
   if (!result.hasChanges && result.deltaLink && result.deltaLink !== deltaLink) {
     await db('users').where('id', user.id).update({ msft_cal_delta_link: result.deltaLink });
