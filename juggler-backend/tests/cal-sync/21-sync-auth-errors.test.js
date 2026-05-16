@@ -58,6 +58,7 @@ describe('BF-1: Auth 401 clears correct provider credentials', () => {
       gcal_refresh_token: null,
       msft_cal_refresh_token: 'old-refresh',
       msft_cal_access_token: 'old-access',
+      msft_cal_token_expiry: new Date(Date.now() + 60000),
       apple_cal_username: null
     });
 
