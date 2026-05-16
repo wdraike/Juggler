@@ -2475,4 +2475,4 @@ async function audit(req, res) {
   }
 }
 
-module.exports = { sync, hasChanges, getSyncHistory, audit };
+module.exports = { sync, hasChanges, getSyncHistory, audit, withinCdnGrace };
