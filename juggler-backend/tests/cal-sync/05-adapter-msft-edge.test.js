@@ -59,3 +59,21 @@ describe('BF-2: delta link cleared on 410 (tokenInvalid)', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe('BF-8: $select includes critical fields', () => {
+  it('listEvents $select contains isCancelled, type, seriesMasterId, sensitivity, responseStatus', () => {
+    var fs = require('fs');
+    var path = require('path');
+    var src = fs.readFileSync(
+      path.join(__dirname, '../../src/lib/msft-cal-api.js'), 'utf8'
+    );
+    // Find the $select string in the source
+    var selectMatch = src.match(/'\$select'\s*:\s*'([^']+)'/);
+    var selectFields = selectMatch ? selectMatch[1] : '';
+    expect(selectFields).toContain('isCancelled');
+    expect(selectFields).toContain('type');
+    expect(selectFields).toContain('seriesMasterId');
+    expect(selectFields).toContain('sensitivity');
+    expect(selectFields).toContain('responseStatus');
+  });
+});

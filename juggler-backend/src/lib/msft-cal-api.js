@@ -144,7 +144,7 @@ async function listEvents(accessToken, startDateTime, endDateTime) {
     endDateTime: endDateTime,
     '$top': '1000',
     '$orderby': 'start/dateTime',
-    '$select': 'id,subject,start,end,isAllDay,showAs,lastModifiedDateTime,body'
+    '$select': 'id,subject,start,end,isAllDay,showAs,lastModifiedDateTime,body,type,seriesMasterId,isCancelled,sensitivity,responseStatus'
   });
 
   var path = '/me/calendarView?' + params.toString();
