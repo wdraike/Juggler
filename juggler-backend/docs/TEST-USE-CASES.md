@@ -198,11 +198,11 @@ Routes from `docs/SCHEMA.md` and `juggler-test-suite-RESEARCH.md §4`.
 
 | ID | Route | Test File | Plan | Status |
 |----|-------|-----------|------|--------|
-| AP-70 | `POST /api/data/import` | — | — | GAP |
-| AP-71 | `GET /api/data/export` | — | — | GAP |
+| AP-70 | `POST /api/data/import` | `tests/api/data-and-weather.test.js` | — | COVERED |
+| AP-71 | `GET /api/data/export` | `tests/api/data-and-weather.test.js` | — | COVERED |
 | AP-72 | `POST /api/ai/command` | — | — | GAP |
-| AP-73 | `GET /api/weather/geocode` | — | — | GAP |
-| AP-74 | `GET /api/weather/` (forecast) | — | — | GAP |
+| AP-73 | `GET /api/weather/geocode` | `tests/api/data-and-weather.test.js` | — | COVERED |
+| AP-74 | `GET /api/weather/` (forecast) | `tests/api/data-and-weather.test.js` | — | COVERED |
 | AP-75 | `GET /api/my-plan/` | — | — | GAP |
 | AP-76 | `POST /api/impersonation/start` (admin) | — | — | GAP |
 | AP-77 | `POST /api/impersonation/stop` | — | — | GAP |
@@ -233,6 +233,16 @@ Scenarios in `tests/helpers/seed/scenarios.js` seed the DB row; the actual sync 
 | CS-13 | Apple: miss_count guard (repush loop fix) | — | `apple-cal-soak` scripts | — | MANUAL |
 | CS-14 | Multi-provider: no MISS_THRESHOLD interference | — | — | — | GAP |
 | CS-15 | Concurrent sync: no duplicate active rows | — | — | — | GAP |
+
+### 4.4 Uncovered Cal-Sync Code Paths (identified 2026-05-16)
+
+| ID | Use Case | Test File | Plan | Status |
+|----|----------|-----------|------|--------|
+| CS-30 | ETag-based change detection fallback path in `cal-sync.controller.js` | — | — | GAP |
+| CS-31 | Provider-origin full-sync pull — new branch in sync controller | — | — | GAP |
+| CS-32 | Multi-provider `hasChangesLocal` fix — max of all 3 provider timestamps | — | — | GAP |
+| CS-33 | `apple.adapter.getEnabledCalendars` legacy fallback path | — | — | GAP |
+| CS-34 | Apple 412 retry paths — `createEvent` + `updateEvent` retry on 412 | — | — | GAP |
 
 ### 4.3 Credential Utilities
 
@@ -273,40 +283,40 @@ Port 3002 (from `juggler-frontend/.env`). Auth via route interception pattern.
 
 | ID | Use Case | Test File | Plan | Status |
 |----|----------|-----------|------|--------|
-| PW-01 | QuickAddTask inline form — fill + submit, task appears in day view | `tests/task-create.spec.js` | 08 | PLANNED |
-| PW-02 | TaskEditForm full creation: text, priority, duration, when-window, project | `tests/task-create.spec.js` | 08 | PLANNED |
-| PW-03 | Recurring task creation: toggle + daily/weekly, save | `tests/recurring.spec.js` | 08 | PLANNED |
-| PW-04 | Task with dependency: dep picker → dep badge visible | `tests/task-create.spec.js` | 08 | PLANNED |
+| PW-01 | QuickAddTask inline form — fill + submit, task appears in day view | `tests/task-create.spec.js` | 08 | COVERED |
+| PW-02 | TaskEditForm full creation: text, priority, duration, when-window, project | `tests/task-create.spec.js` | 08 | PARTIAL |
+| PW-03 | Recurring task creation: toggle + daily/weekly, save | `tests/recurring.spec.js` | 08 | COVERED |
+| PW-04 | Task with dependency: dep picker → dep badge visible | `tests/task-create.spec.js` | 08 | PARTIAL |
 
 ### 6.2 Task Edit / Sidebar (Flow 2)
 
 | ID | Use Case | Test File | Plan | Status |
 |----|----------|-----------|------|--------|
-| PW-10 | Click task card → sidebar/edit panel opens | `tests/task-edit.spec.js` | 08 | PLANNED |
-| PW-11 | Status cycle via StatusToggle: open → wip → done | `tests/task-edit.spec.js` | 08 | PLANNED |
-| PW-12 | Drag-pin task → 📌 badge appears, Unpin button visible | `tests/task-edit.spec.js` | 08 | PLANNED |
-| PW-13 | Unpin → badge gone | `tests/task-edit.spec.js` | 08 | PLANNED |
-| PW-14 | RecurringDeleteDialog: delete instance vs. template cascade | `tests/recurring.spec.js` | 08 | PLANNED |
+| PW-10 | Click task card → sidebar/edit panel opens | `tests/task-edit.spec.js` | 08 | COVERED |
+| PW-11 | Status cycle via StatusToggle: open → wip → done | `tests/task-edit.spec.js` | 08 | COVERED |
+| PW-12 | Drag-pin task → 📌 badge appears, Unpin button visible | `tests/task-edit.spec.js` | 08 | PARTIAL |
+| PW-13 | Unpin → badge gone | `tests/task-edit.spec.js` | 08 | PARTIAL |
+| PW-14 | RecurringDeleteDialog: delete instance vs. template cascade | `tests/recurring.spec.js` | 08 | COVERED |
 
 ### 6.3 Calendar Navigation (Flow 3)
 
 | ID | Use Case | Test File | Plan | Status |
 |----|----------|-----------|------|--------|
-| PW-20 | WeekStrip: click different days, view updates | `tests/calendar-navigation.spec.js` | 08 | PLANNED |
-| PW-21 | View switch: DayView → ThreeDayView → WeekView → CalendarView | `tests/calendar-navigation.spec.js` | 08 | PLANNED |
-| PW-22 | ListView: filter by priority | `tests/calendar-navigation.spec.js` | 08 | PLANNED |
-| PW-23 | PriorityView: tasks grouped by P1-P4 | `tests/calendar-navigation.spec.js` | 08 | PLANNED |
-| PW-24 | DependencyView: dependency graph renders | `tests/calendar-navigation.spec.js` | 08 | PLANNED |
+| PW-20 | WeekStrip: click different days, view updates | `tests/calendar-navigation.spec.js` | 08 | PARTIAL |
+| PW-21 | View switch: DayView → ThreeDayView → WeekView → CalendarView | `tests/calendar-navigation.spec.js` | 08 | PARTIAL |
+| PW-22 | ListView: filter by priority | `tests/calendar-navigation.spec.js` | 08 | PARTIAL |
+| PW-23 | PriorityView: tasks grouped by P1-P4 | `tests/calendar-navigation.spec.js` | 08 | GAP |
+| PW-24 | DependencyView: dependency graph renders | `tests/calendar-navigation.spec.js` | 08 | GAP |
 
 ### 6.4 Settings (Flow 4)
 
 | ID | Use Case | Test File | Plan | Status |
 |----|----------|-----------|------|--------|
-| PW-30 | SettingsPanel open via gear icon — each of 6 tabs accessible | `tests/settings.spec.js` | 08 | PLANNED |
-| PW-31 | Locations: add location, save, verify appears | `tests/settings.spec.js` | 08 | PLANNED |
-| PW-32 | Projects: add project, rename, delete | `tests/settings.spec.js` | 08 | PLANNED |
-| PW-33 | Templates (time blocks): add block, change color | `tests/settings.spec.js` | 08 | PLANNED |
-| PW-34 | CalSyncPanel: connect flow visible (mock API) | `tests/settings.spec.js` | 08 | PLANNED |
+| PW-30 | SettingsPanel open via gear icon — each of 6 tabs accessible | `tests/settings.spec.js` | 08 | COVERED |
+| PW-31 | Locations: add location, save, verify appears | `tests/settings.spec.js` | 08 | PARTIAL |
+| PW-32 | Projects: add project, rename, delete | `tests/settings.spec.js` | 08 | PARTIAL |
+| PW-33 | Templates (time blocks): add block, change color | `tests/settings.spec.js` | 08 | PARTIAL |
+| PW-34 | CalSyncPanel: connect flow visible (mock API) | `tests/settings.spec.js` | 08 | GAP |
 
 ---
 
@@ -334,21 +344,46 @@ Seed scenarios in `tests/helpers/seed/scenarios.js` prepare DB state for integra
 
 ## 8. Coverage Summary by Layer
 
-| Layer | Total | COVERED | FIX | PLANNED | GAP |
-|-------|-------|---------|-----|---------|-----|
-| Scheduler unit | 16 | 8 | 8 | 0 | 0 |
-| Scheduler scoring | 4 | 1 | 0 | 3 | 0 |
-| Scheduler integration | 11 | 9 | 0 | 2 | 0 |
-| Scheduler session | 5 | 0 | 0 | 5 | 0 |
-| Task state machine | 26 | 10 | 4 | 11 | 1 |
-| API routes | 58 | 44 | 0 | 6 | 8 |
-| Cal-sync adapters | 5 | 2 | 3 | 0 | 0 |
-| Cal-sync integration | 6 | 1 | 0 | 0 | 5 |
-| Cal-sync credentials | 4 | 0 | 0 | 4 | 0 |
-| E2E API | 11 | 8 | 0 | 0 | 3 |
-| Screen / Playwright | 19 | 0 | 0 | 19 | 0 |
-| **Total** | **165** | **83** | **15** | **50** | **17** |
+_Updated 2026-05-16 after research audit (R1–R4). Added PARTIAL column; added §4.4 cal-sync code paths._
 
-> After `juggler-test-suite` phase executes: **COVERED + FIX + PLANNED = 148 of 165 (90%)**. The 17 GAPs are lower-priority routes (import/export, weather, AI command, multi-provider cal-sync edge cases, impersonation controller, CORS) and may be addressed in future phases.
+| Layer | Total | COVERED | FIX | PLANNED | PARTIAL | GAP |
+|-------|-------|---------|-----|---------|---------|-----|
+| Scheduler unit | 16 | 8 | 8 | 0 | 0 | 0 |
+| Scheduler scoring | 4 | 1 | 0 | 3 | 0 | 0 |
+| Scheduler integration | 11 | 9 | 0 | 2 | 0 | 0 |
+| Scheduler session | 5 | 0 | 0 | 5 | 0 | 0 |
+| Task state machine | 26 | 10 | 4 | 11 | 0 | 1 |
+| API routes | 58 | 48 | 0 | 6 | 0 | 4 |
+| Cal-sync adapters | 5 | 2 | 3 | 0 | 0 | 0 |
+| Cal-sync integration | 6 | 1 | 0 | 0 | 0 | 5 |
+| Cal-sync code paths (§4.4) | 5 | 0 | 0 | 0 | 0 | 5 |
+| Cal-sync credentials | 4 | 0 | 0 | 4 | 0 | 0 |
+| E2E API | 11 | 8 | 0 | 0 | 0 | 3 |
+| Screen / Playwright | 19 | 6 | 0 | 0 | 10 | 3 |
+| **Total** | **170** | **93** | **15** | **31** | **10** | **21** |
+
+> After `juggler-test-suite` phase executes: **COVERED + FIX + PLANNED = 139 of 170 (82%)**. The 21 GAPs include 5 new cal-sync code paths (CS-30–34), 4 remaining uncovered API routes (AI command, my-plan, impersonation ×2), 3 Playwright views (PW-23/24/34), 5 cal-sync integration scenarios, and CORS + legacy items.
 >
-> **Note on E2 PARTIAL:** E2-10 (rate limiter) and E2-11 (billing webhook HMAC) have tests but cover only a subset of the full use case; counted in the GAP column above.
+> **Note on PARTIAL:** E2-10 (rate limiter) and E2-11 (billing webhook HMAC) have partial test coverage; counted in the GAP column above (E2E layer). Playwright PARTIALs (10 specs) have real tests with shallow assertions — counted in PARTIAL column.
+>
+> **Note on scheduleQueue:** `scheduleQueue.test.js` wraps all its tests in `describe.skip()` — the queue public API is effectively untested. This is tracked as a new task for Phase 3.
+
+---
+
+## 9. Research Audit Delta (2026-05-16)
+
+### Key findings
+- 4 routes (AP-70/71/73/74) already covered by `tests/api/data-and-weather.test.js` — doc was stale
+- All 6 Playwright spec files have real tests — §8 coverage summary was stale
+- `scheduleQueue.test.js`: all tests in `describe.skip()` — entire queue public API untested
+- 5 new cal-sync gaps found (CS-30 to CS-34): ETag path, provider-origin pull, multi-provider hasChangesLocal, apple adapter fallback, Apple 412 retry
+- 18 routes undocumented (tools, feature-catalog, billing-webhooks, oauth callbacks, health, weather/reverse-geocode, impersonation/targets, impersonation/log)
+- Zero data-testid attributes in frontend — Playwright relies on text/role selectors (fragile)
+
+### Action map
+| Finding | Phase |
+|---------|-------|
+| scheduleQueue describe.skip() | Phase 3 (new task) |
+| CS-30 to CS-34 cal-sync gaps | Phase 5 |
+| PW-23, PW-24, PW-34 still GAP | Phase 4 augment |
+| Undocumented routes | Out of scope for this initiative |
