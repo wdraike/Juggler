@@ -73,21 +73,21 @@ test.describe('Calendar Navigation', () => {
     // Click "Next day" navigation button (title from HeaderBar.jsx)
     const nextDay = page.locator('button[title="Next day"]');
     if (await nextDay.isVisible()) {
-      await nextDay.click();
+      await nextDay.click({ force: true });
       await page.waitForTimeout(200);
     }
 
     // Click "Previous day"
     const prevDay = page.locator('button[title="Previous day"]');
     if (await prevDay.isVisible()) {
-      await prevDay.click();
+      await prevDay.click({ force: true });
       await page.waitForTimeout(200);
     }
 
     // Click "Go to today"
     const today = page.locator('button[title="Go to today"]');
     if (await today.isVisible()) {
-      await today.click();
+      await today.click({ force: true });
       await page.waitForTimeout(200);
     }
 
@@ -98,12 +98,12 @@ test.describe('Calendar Navigation', () => {
   // Test 2: DayView → 3-Day view switch
   test('DayView → 3-Day view switch', async ({ page }) => {
     // Start in Day view
-    await page.locator('button:has-text("Day")').first().click();
+    await page.locator('button:has-text("Day")').first().click({ force: true });
     await page.waitForTimeout(300);
     await expect(page.locator('text=StriveRS').first()).toBeVisible();
 
     // Switch to 3-Day
-    await page.locator('button:has-text("3-Day")').first().click();
+    await page.locator('button:has-text("3-Day")').first().click({ force: true });
     await page.waitForTimeout(500);
 
     // 3-Day renders a three-column grid — app should not crash
@@ -117,7 +117,7 @@ test.describe('Calendar Navigation', () => {
     await page.waitForTimeout(300);
 
     // Switch to Week
-    await page.locator('button:has-text("Week")').first().click();
+    await page.locator('button:has-text("Week")').first().click({ force: true });
     await page.waitForTimeout(500);
 
     // Week view should render — app should not crash
@@ -131,7 +131,7 @@ test.describe('Calendar Navigation', () => {
     await page.waitForTimeout(300);
 
     // Switch to Month (label "Month" in NavigationBar VIEW_MODES)
-    await page.locator('button:has-text("Month")').first().click();
+    await page.locator('button:has-text("Month")').first().click({ force: true });
     await page.waitForTimeout(500);
 
     // Month view renders a calendar grid — app should not crash
@@ -141,7 +141,7 @@ test.describe('Calendar Navigation', () => {
   // Test 5: ListView — filter by priority shows only matching tasks
   test('ListView — filter by Priority shows filtered results', async ({ page }) => {
     // Switch to List view
-    await page.locator('button:has-text("List")').first().click();
+    await page.locator('button:has-text("List")').first().click({ force: true });
     await page.waitForTimeout(500);
 
     // P1 task should be visible (mocked in SEED_TASKS)

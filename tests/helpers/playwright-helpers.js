@@ -16,7 +16,7 @@
  *   - RecurringDeleteDialog: "Skip this instance" / "Delete entire series"
  */
 
-const TEST_TOKEN = process.env.TEST_TOKEN || '';
+const TEST_TOKEN = process.env.TEST_TOKEN || 'playwright-test-token';
 const TEST_USER = {
   id: 'test-user-00000000-0000-0000-0000',
   email: 'test@juggler.local',
@@ -73,12 +73,31 @@ const SELECTORS = {
  * @param {import('@playwright/test').Page} page
  */
 async function setupAuth(page) {
-  await page.route('**/api/auth/refresh', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ accessToken: TEST_TOKEN }),
-    })
+  // Seed localStorage so apiClient.js picks up the token at module init time.
+  // Without this, getAccessToken() returns null → auth falls through to
+  // refresh/SSO paths, neither of which work in a test environment.
+  await page.addInitScript((token) => {
+    localStorage.setItem('juggler-access-token', token);
+  }, TEST_TOKEN);
+
+  // Playwright uses LIFO route matching — last registered wins.
+  // Register catch-all FIRST so specific routes registered after it take priority.
+
+  // Catch-all: any /api/* call returns 200 to prevent 401s that would
+  // trigger the apiClient refresh-fail → clearAccessToken → auth:logout cycle.
+  await page.route('**/api/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) })
+  );
+
+  // Specific stubs (registered after catch-all so they win via LIFO priority)
+  await page.route('**/api/tasks**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ tasks: [] }) })
+  );
+  await page.route('**/api/user/config**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) })
+  );
+  await page.route('**/api/my-plan**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ plan_id: 'free', features: {}, usage: {} }) })
   );
   await page.route('**/api/auth/me', (route) =>
     route.fulfill({

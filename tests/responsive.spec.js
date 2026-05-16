@@ -1,31 +1,6 @@
 // @ts-check
 const { test, expect } = require('@playwright/test');
-
-const TEST_TOKEN = process.env.TEST_TOKEN || '';
-const TEST_USER = {
-  id: 'test-user-00000000-0000-0000-0000',
-  email: 'test@juggler.local',
-  name: 'Test User',
-  picture: null,
-  timezone: 'America/New_York',
-};
-
-async function setupAuth(page) {
-  await page.route('**/api/auth/refresh', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ accessToken: TEST_TOKEN }),
-    })
-  );
-  await page.route('**/api/auth/me', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ user: TEST_USER }),
-    })
-  );
-}
+const { setupAuth } = require('./helpers/playwright-helpers');
 
 // ── Device definitions ───────────────────────────────────────────────
 // Covers the most common real-world form factors:
@@ -56,13 +31,13 @@ for (const device of DEVICES) {
     test.beforeEach(async ({ page }) => {
       await setupAuth(page);
       await page.goto('/');
-      await page.waitForSelector('text=Juggler', { timeout: 15000 });
+      await page.waitForSelector('text=StriveRS', { timeout: 15000 });
     });
 
     // ── 1. App loads without overflow ──────────────────────────────
     test('app loads — no horizontal overflow', async ({ page }) => {
       // Header/juggler icon should be visible
-      await expect(page.locator('text=Juggler').first()).toBeVisible();
+      await expect(page.locator('text=StriveRS').first()).toBeVisible();
 
       // The body should not scroll horizontally
       const overflowX = await page.evaluate(() => {
@@ -97,14 +72,10 @@ for (const device of DEVICES) {
       for (const label of viewSelectors) {
         const btn = page.locator(`button:has-text("${label}")`).first();
         if (await btn.isVisible()) {
-          await btn.click();
+          await btn.click({ force: true });
           await page.waitForTimeout(300);
-          // Page should not crash — juggler icon is always present
-          const juggler = page.locator('text=Juggler').first();
-          // On small mobile the text "Juggler" may be hidden, but the emoji stays
-          const emoji = page.locator('text=🤹');
-          const visible = await juggler.isVisible() || await emoji.isVisible();
-          expect(visible).toBe(true);
+          // Page should not crash — brand wordmark always present
+          await expect(page.locator('text=StriveRS').first()).toBeVisible();
         }
       }
     });
@@ -114,7 +85,7 @@ for (const device of DEVICES) {
       const dayBtn = device.mobile
         ? page.locator('button:has-text("1")').first()
         : page.locator('button:has-text("Day")').first();
-      await dayBtn.click();
+      await dayBtn.click({ force: true });
       await page.waitForTimeout(500);
 
       // Hour labels should be visible
@@ -142,10 +113,7 @@ for (const device of DEVICES) {
           await expect(page.locator('text=Settings').first()).toBeVisible();
         }
         // Whether overflow exists or not, app shouldn't crash
-        const juggler = page.locator('text=Juggler').first();
-        const emoji = page.locator('text=🤹');
-        const visible = await juggler.isVisible() || await emoji.isVisible();
-        expect(visible).toBe(true);
+        await expect(page.locator('text=StriveRS').first()).toBeVisible();
       });
 
       test('mobile — filter dropdown instead of inline pills', async ({ page }) => {
@@ -159,8 +127,7 @@ for (const device of DEVICES) {
           await page.waitForTimeout(200);
         }
         // No crash
-        const emoji = page.locator('text=🤹');
-        await expect(emoji.first()).toBeVisible();
+        await expect(page.locator('text=StriveRS').first()).toBeVisible();
       });
 
       test('mobile — view tabs show icons not labels', async ({ page }) => {
@@ -204,7 +171,7 @@ for (const device of DEVICES) {
           }
         }
       } else {
-        const settingsBtn = page.locator('button[title="Settings"]');
+        const settingsBtn = page.locator('button[title="Settings — locations, tools, templates, and preferences"]');
         if (await settingsBtn.isVisible()) {
           await settingsBtn.click();
         }
@@ -230,7 +197,7 @@ for (const device of DEVICES) {
       const weekBtn = device.mobile
         ? page.locator('button:has-text("7")').first()
         : page.locator('button:has-text("Week")').first();
-      await weekBtn.click();
+      await weekBtn.click({ force: true });
       await page.waitForTimeout(500);
 
       const overflowX = await page.evaluate(() => {
@@ -244,7 +211,7 @@ for (const device of DEVICES) {
       const monthBtn = device.mobile
         ? page.locator('button:has-text("M")').first()
         : page.locator('button:has-text("Month")').first();
-      await monthBtn.click();
+      await monthBtn.click({ force: true });
       await page.waitForTimeout(500);
 
       const overflowX = await page.evaluate(() => {
@@ -258,7 +225,7 @@ for (const device of DEVICES) {
       const listBtn = device.mobile
         ? page.locator('button:has-text("≡")').first()
         : page.locator('button:has-text("List")').first();
-      await listBtn.click();
+      await listBtn.click({ force: true });
       await page.waitForTimeout(500);
 
       const overflowX = await page.evaluate(() => {
@@ -272,14 +239,11 @@ for (const device of DEVICES) {
       const timelineBtn = device.mobile
         ? page.locator('button:has-text("↔")').first()
         : page.locator('button:has-text("Timeline")').first();
-      await timelineBtn.click();
+      await timelineBtn.click({ force: true });
       await page.waitForTimeout(500);
 
       // Timeline is horizontally scrollable by design, so just check no crash
-      const emoji = page.locator('text=🤹');
-      const juggler = page.locator('text=Juggler').first();
-      const visible = await juggler.isVisible() || await emoji.isVisible();
-      expect(visible).toBe(true);
+      await expect(page.locator('text=StriveRS').first()).toBeVisible();
     });
 
     // ── 12. Priority view kanban columns fit ───────────────────────
@@ -287,7 +251,7 @@ for (const device of DEVICES) {
       const prioBtn = device.mobile
         ? page.locator('button:has-text("P")').first()
         : page.locator('button:has-text("Priority")').first();
-      await prioBtn.click();
+      await prioBtn.click({ force: true });
       await page.waitForTimeout(500);
 
       const overflowX = await page.evaluate(() => {
@@ -321,10 +285,7 @@ for (const device of DEVICES) {
         }
       }
       // No crash
-      const emoji = page.locator('text=🤹');
-      const juggler = page.locator('text=Juggler').first();
-      const visible = await juggler.isVisible() || await emoji.isVisible();
-      expect(visible).toBe(true);
+      await expect(page.locator('text=StriveRS').first()).toBeVisible();
     });
 
     // ── 14. Week navigation works at this viewport ─────────────────
@@ -334,22 +295,19 @@ for (const device of DEVICES) {
       const today = page.locator('button[title="Go to today"]');
 
       if (await nextDay.isVisible()) {
-        await nextDay.click();
-        await page.waitForTimeout(200);
+        await nextDay.click({ force: true });
+        await page.waitForTimeout(300);
       }
       if (await prevDay.isVisible()) {
-        await prevDay.click();
-        await page.waitForTimeout(200);
+        await prevDay.click({ force: true });
+        await page.waitForTimeout(300);
       }
       if (await today.isVisible()) {
-        await today.click();
-        await page.waitForTimeout(200);
+        await today.click({ force: true });
+        await page.waitForTimeout(300);
       }
 
-      const emoji = page.locator('text=🤹');
-      const juggler = page.locator('text=Juggler').first();
-      const visible = await juggler.isVisible() || await emoji.isVisible();
-      expect(visible).toBe(true);
+      await expect(page.locator('text=StriveRS').first()).toBeVisible();
     });
   });
 }

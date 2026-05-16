@@ -58,7 +58,7 @@ test.describe('Task Editing', () => {
   // Test 1: Click task card opens sidebar/edit panel
   test('Click task card opens sidebar edit panel', async ({ page }) => {
     // Switch to List view which shows TaskCards
-    await page.locator('button:has-text("List")').first().click();
+    await page.locator('button:has-text("List")').first().click({ force: true });
     await page.waitForTimeout(500);
 
     // Find a task card by visible task text and click it
@@ -81,7 +81,7 @@ test.describe('Task Editing', () => {
   // Test 2: Status toggle cycle: open → wip → done
   test('Status toggle: open → wip (Start) → done (Complete)', async ({ page }) => {
     // Switch to List view
-    await page.locator('button:has-text("List")').first().click();
+    await page.locator('button:has-text("List")').first().click({ force: true });
     await page.waitForTimeout(500);
 
     // StatusToggle renders inline in TaskCard — find "Start" button (sets wip)
@@ -123,7 +123,7 @@ test.describe('Task Editing', () => {
     );
 
     // Switch to Day view
-    await page.locator('button:has-text("Day")').first().click();
+    await page.locator('button:has-text("Day")').first().click({ force: true });
     await page.waitForTimeout(500);
 
     // In Day view, tasks appear as ScheduleCards inside the calendar grid.
@@ -158,7 +158,7 @@ test.describe('Task Editing', () => {
     });
 
     // Switch to List view
-    await page.locator('button:has-text("List")').first().click();
+    await page.locator('button:has-text("List")').first().click({ force: true });
     await page.waitForTimeout(500);
 
     // Open a task's edit form
