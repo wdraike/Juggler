@@ -77,3 +77,70 @@ describe('BF-8: $select includes critical fields', () => {
     expect(selectFields).toContain('responseStatus');
   });
 });
+
+describe('normalizeEvent: isCancelled field exposed', () => {
+  it('isCancelled:true event has isCancelled:true in normalized output', () => {
+    var event = {
+      id: 'cancelled-event-1',
+      subject: 'Cancelled meeting',
+      start: { dateTime: '2026-06-01T10:00:00.0000000', timeZone: 'UTC' },
+      end: { dateTime: '2026-06-01T11:00:00.0000000', timeZone: 'UTC' },
+      isAllDay: false, showAs: 'busy',
+      lastModifiedDateTime: '2026-05-15T10:00:00Z',
+      body: { content: 'Notes', contentType: 'text' },
+      isCancelled: true, type: 'singleInstance', seriesMasterId: null,
+      sensitivity: 'normal', responseStatus: { response: 'none' }
+    };
+    var norm = msftAdapter.normalizeEvent(event);
+    expect(norm.isCancelled).toBe(true);
+  });
+});
+
+describe('normalizeEvent: occurrence type and seriesMasterId', () => {
+  it('occurrence type and seriesMasterId exposed', () => {
+    var event = {
+      id: 'occ-1', subject: 'Weekly meeting',
+      start: { dateTime: '2026-06-01T10:00:00.0000000', timeZone: 'UTC' },
+      end: { dateTime: '2026-06-01T11:00:00.0000000', timeZone: 'UTC' },
+      isAllDay: false, showAs: 'busy',
+      lastModifiedDateTime: '2026-05-15T10:00:00Z',
+      body: { content: '', contentType: 'text' },
+      isCancelled: false, type: 'occurrence', seriesMasterId: 'master-event-id',
+      sensitivity: 'normal', responseStatus: { response: 'accepted' }
+    };
+    var norm = msftAdapter.normalizeEvent(event);
+    expect(norm.eventType).toBe('occurrence');
+    expect(norm.seriesMasterId).toBe('master-event-id');
+  });
+});
+
+describe('normalizeEvent: allday event', () => {
+  it('allday event has isAllDay:true and truncated startDateTime', () => {
+    var event = {
+      id: 'allday-1', subject: 'All day',
+      start: { dateTime: '2026-06-15T00:00:00.0000000', timeZone: 'UTC' },
+      end: { dateTime: '2026-06-16T00:00:00.0000000', timeZone: 'UTC' },
+      isAllDay: true, showAs: 'free',
+      lastModifiedDateTime: '2026-05-15T10:00:00Z',
+      body: { content: '', contentType: 'text' },
+      isCancelled: false, type: 'singleInstance', seriesMasterId: null,
+      sensitivity: 'normal', responseStatus: { response: 'none' }
+    };
+    var norm = msftAdapter.normalizeEvent(event);
+    expect(norm.isAllDay).toBe(true);
+    // normalizeEvent preserves the datetime string (truncated to 6 fractional digits)
+    // for allday events; date-only extraction is done by applyEventToTaskFields
+    expect(norm.startDateTime).toBe('2026-06-15T00:00:00.000000Z');
+  });
+});
+
+describe('buildMsftEventBody: absent fields (PATCH-safe)', () => {
+  it('categories absent from output', () => {
+    var task = {
+      id: 't1', text: 'Meeting', date: '2026-06-01', time: '10:00 AM',
+      dur: 30, when: 'morning', status: 'todo', url: null
+    };
+    var body = msftAdapter.buildMsftEventBody(task, 2026, 'America/New_York');
+    expect(body).not.toHaveProperty('categories');
+  });
+});

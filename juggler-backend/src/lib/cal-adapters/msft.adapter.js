@@ -175,6 +175,9 @@ function normalizeEvent(event) {
     durationMinutes: dur,
     lastModified: truncateDateTime(event.lastModifiedDateTime),
     isTransparent: event.showAs === 'free',
+    isCancelled: !!event.isCancelled,
+    eventType: event.type || null,
+    seriesMasterId: event.seriesMasterId || null,
     _raw: event
   };
 }
