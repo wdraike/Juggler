@@ -84,4 +84,23 @@ describe('BF-5: floating-time DTSTART converted to UTC', () => {
     expect(events[0].startDateTime).toBe('2026-05-15');
     expect(events[0].startDateTime).not.toMatch(/Z$/);
   });
+
+  it('DTSTART with no TZID and no Z (floating) is stored without Z suffix', () => {
+    var ics = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'BEGIN:VEVENT',
+      'UID:test-uid-float',
+      'SUMMARY:Floating Event',
+      'DTSTART:20260515T100000',
+      'DTEND:20260515T103000',
+      'END:VEVENT',
+      'END:VCALENDAR'
+    ].join('\r\n');
+    var events = parseVEvents(ics, 'https://cal/test.ics', '"etag-float"');
+    expect(events).toHaveLength(1);
+    // Floating times should not have a Z suffix (they have no timezone info)
+    expect(events[0].startDateTime).toBe('2026-05-15T10:00:00');
+    expect(events[0].startDateTime).not.toMatch(/Z$/);
+  });
 });

@@ -119,7 +119,7 @@ function parseVEvents(icsData, url, etag) {
       } else {
         // Convert TZID-annotated times to UTC to avoid server-timezone misinterpretation.
         // new Date('2026-05-15T10:00:00') on a UTC production server reads as UTC, not New York local.
-        if (dtstart.zone && dtstart.zone !== ICAL.Timezone.utcTimezone) {
+        if (dtstart.zone && dtstart.zone !== ICAL.Timezone.utcTimezone && dtstart.zone.tzid !== 'floating') {
           var utcStart = dtstart.convertToZone(ICAL.Timezone.utcTimezone);
           startStr = formatICALDateTime(utcStart) + 'Z';
         } else {
@@ -127,7 +127,7 @@ function parseVEvents(icsData, url, etag) {
           if (dtstart.zone === ICAL.Timezone.utcTimezone) startStr += 'Z';
         }
         if (dtend) {
-          if (dtend.zone && dtend.zone !== ICAL.Timezone.utcTimezone) {
+          if (dtend.zone && dtend.zone !== ICAL.Timezone.utcTimezone && dtend.zone.tzid !== 'floating') {
             var utcEnd = dtend.convertToZone(ICAL.Timezone.utcTimezone);
             endStr = formatICALDateTime(utcEnd) + 'Z';
           } else {
@@ -139,7 +139,7 @@ function parseVEvents(icsData, url, etag) {
           durationMinutes = Math.round(duration.toSeconds() / 60);
           var endTime = dtstart.clone();
           endTime.addDuration(duration);
-          if (endTime.zone && endTime.zone !== ICAL.Timezone.utcTimezone) {
+          if (endTime.zone && endTime.zone !== ICAL.Timezone.utcTimezone && endTime.zone.tzid !== 'floating') {
             var utcEndTime = endTime.convertToZone(ICAL.Timezone.utcTimezone);
             endStr = formatICALDateTime(utcEndTime) + 'Z';
           } else {
