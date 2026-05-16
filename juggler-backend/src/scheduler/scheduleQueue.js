@@ -53,8 +53,9 @@ function getSseEmitter() {
 }
 
 // ── Configuration ──
-var DEBOUNCE_MS = 2000;   // quiet period before scheduler runs
-var POLL_MS     = 3000;   // how often the poll loop checks the DB (was 1s; 3s reduces idle DB load)
+var DEBOUNCE_MS    = 2000;   // quiet period before scheduler runs
+var POLL_MS        = 3000;   // how often the poll loop checks the DB (was 1s; 3s reduces idle DB load)
+var LOCK_RETRY_MS  = 2000;   // wait between lock acquisition retries
 
 // ── Multi-instance claiming constants (FIX-04) ──────────────────────────────
 //
@@ -217,7 +218,7 @@ async function processUser(userId) {
       }, { flushOnRelease: false });
       if (result !== null) break;
       console.log('[SCHED-QUEUE] lock held for ' + userId + ', retry ' + (attempt + 1) + '/' + MAX_LOCK_RETRIES);
-      await new Promise(function(r) { setTimeout(r, 2000); });
+      await new Promise(function(r) { setTimeout(r, LOCK_RETRY_MS); });
     }
 
     if (result === null) {
@@ -359,7 +360,11 @@ module.exports = {
   _internal: {
     tryClaim: tryClaim,
     releaseClaim: releaseClaim,
+    processUser: processUser,
+    pollLoop: pollLoop,
     CLAIM_TTL_SECONDS: CLAIM_TTL_SECONDS,
-    INSTANCE_ID: INSTANCE_ID
+    INSTANCE_ID: INSTANCE_ID,
+    setDebounceMs: function(ms) { DEBOUNCE_MS = ms; },
+    setLockRetryMs: function(ms) { LOCK_RETRY_MS = ms; }
   }
 };
