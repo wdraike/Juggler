@@ -88,40 +88,52 @@ var TEST_USER = 'test-user-scheduler-integration';
 
 // Helper: insert a task and return it
 async function insertTask(taskData) {
-  var defaults = {
+  var masterId = taskData.id || ('test_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6));
+  var now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  var masterRow = {
+    id: masterId,
     user_id: TEST_USER,
-    task_type: taskData.taskType || 'task',
     text: taskData.text || 'Test Task',
     dur: taskData.dur || 30,
     pri: taskData.pri || 'P3',
-    status: taskData.status || '',
     when: taskData.when || '',
     day_req: taskData.dayReq || 'any',
     recurring: taskData.recurring ? 1 : 0,
-    rigid: taskData.rigid ? 1 : 0,
     split: taskData.split ? 1 : 0,
-    marker: taskData.marker ? 1 : 0,
-    date_pinned: taskData.datePinned ? 1 : 0,
     flex_when: taskData.flexWhen ? 1 : 0,
-    generated: taskData.generated ? 1 : 0,
+    placement_mode: taskData.placementMode || 'flexible',
     location: JSON.stringify(taskData.location || []),
     tools: JSON.stringify(taskData.tools || []),
-    depends_on: JSON.stringify(taskData.dependsOn || [])
+    depends_on: JSON.stringify(taskData.dependsOn || []),
+    created_at: now,
+    updated_at: now
   };
+  if (taskData.deadline) masterRow.deadline = taskData.deadline;
 
-  if (taskData.scheduledAt) defaults.scheduled_at = taskData.scheduledAt;
-  if (taskData.deadline) defaults.deadline = taskData.deadline;
-  if (taskData.sourceId) defaults.source_id = taskData.sourceId;
-  if (taskData.id) defaults.id = taskData.id;
-  else defaults.id = 'test_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  var instanceRow = {
+    id: masterId + '_i',
+    master_id: masterId,
+    user_id: TEST_USER,
+    occurrence_ordinal: 1,
+    split_ordinal: 1,
+    split_total: 1,
+    status: taskData.status || '',
+    date_pinned: taskData.datePinned ? 1 : 0,
+    generated: taskData.generated ? 1 : 0,
+    created_at: now,
+    updated_at: now
+  };
+  if (taskData.scheduledAt) instanceRow.scheduled_at = taskData.scheduledAt;
 
-  await knex('tasks').insert(defaults).onConflict('id').merge();
-  return defaults;
+  await knex('task_masters').insert(masterRow).onConflict('id').merge();
+  await knex('task_instances').insert(instanceRow).onConflict('id').merge();
+  return { master: masterRow, instance: instanceRow };
 }
 
 // Helper: clean test tasks
 async function cleanTasks() {
-  await knex('tasks').where('user_id', TEST_USER).del();
+  await knex('task_instances').where('user_id', TEST_USER).del();
+  await knex('task_masters').where('user_id', TEST_USER).del();
 }
 
 // ═════════════════════════════════════════════════════════════════════
@@ -149,7 +161,7 @@ describe('UC-15: DB Persistence', function() {
     });
 
     // Read back and verify it's there
-    var row = await knex('tasks').where('id', 'idem_t1').first();
+    var row = await knex('task_masters').where('id', 'idem_t1').first();
     expect(row).toBeDefined();
     expect(row.text).toBe('Idempotent Test');
   });
@@ -164,8 +176,8 @@ describe('UC-15: DB Persistence', function() {
       status: 'done'
     });
 
-    var row = await knex('tasks').where('id', 'done_task').first();
-    expect(row.status).toBe('done');
+    var inst = await knex('task_instances').where('master_id', 'done_task').first();
+    expect(inst.status).toBe('done');
   });
 });
 
@@ -193,9 +205,10 @@ describe('UC-18: Full DB Pipeline', function() {
       sourceId: 'ht_test'
     });
 
-    var row = await knex('tasks').where('id', 'recur_done').first();
-    expect(row.status).toBe('done');
-    expect(row.task_type).toBe('recurring_instance');
+    var master = await knex('task_masters').where('id', 'recur_done').first();
+    var inst = await knex('task_instances').where('master_id', 'recur_done').first();
+    expect(inst.status).toBe('done');
+    expect(master.recurring).toBe(1);
   });
 
   test('UC-18.7: Config loads from DB correctly', async function() {
@@ -205,7 +218,7 @@ describe('UC-18: Full DB Pipeline', function() {
       .where({ user_id: TEST_USER, config_key: 'time_blocks' })
       .first();
     expect(row).toBeDefined();
-    var blocks = JSON.parse(row.config_value);
+    var blocks = typeof row.config_value === 'string' ? JSON.parse(row.config_value) : row.config_value;
     expect(blocks.Fri).toBeDefined();
     expect(blocks.Fri.length).toBeGreaterThan(0);
     // Verify lunch block exists
