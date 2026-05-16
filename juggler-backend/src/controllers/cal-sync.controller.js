@@ -1219,6 +1219,9 @@ async function sync(req, res) {
                   recordPushSuccess(failedUpdates[rui]);
                   await throttle();
                 } catch (ruErr) {
+                  if (ruErr.message && ruErr.message.includes('410') && failedUpdates[rui] && failedUpdates[rui].ledgerId) {
+                    ledgerUpdates.push({ id: failedUpdates[rui].ledgerId, fields: { status: 'deleted_remote', provider_event_id: null } });
+                  }
                   pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: failedUpdates[rui].eventId, error: ruErr.message });
                   stats.errors.push({ phase: 'ledger_update', provider: pid, eventId: failedUpdates[rui].eventId, error: ruErr.message });
                   logSyncAction(pid, 'error', {
@@ -1246,6 +1249,9 @@ async function sync(req, res) {
                 recordPushSuccess(pendingEventUpdates[fui]);
                 await throttle();
               } catch (e5) {
+                if (e5.message && e5.message.includes('410') && pendingEventUpdates[fui] && pendingEventUpdates[fui].ledgerId) {
+                  ledgerUpdates.push({ id: pendingEventUpdates[fui].ledgerId, fields: { status: 'deleted_remote', provider_event_id: null } });
+                }
                 pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[fui].eventId, error: e5.message });
                 stats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[fui].eventId, error: e5.message });
                 logSyncAction(pid, 'error', {
@@ -1272,6 +1278,9 @@ async function sync(req, res) {
               recordPushSuccess(pendingEventUpdates[sui]);
               await throttle();
             } catch (e6) {
+              if (e6.message && e6.message.includes('410') && pendingEventUpdates[sui] && pendingEventUpdates[sui].ledgerId) {
+                ledgerUpdates.push({ id: pendingEventUpdates[sui].ledgerId, fields: { status: 'deleted_remote', provider_event_id: null } });
+              }
               pStats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[sui].eventId, error: e6.message });
               stats.errors.push({ phase: 'ledger_update', provider: pid, eventId: pendingEventUpdates[sui].eventId, error: e6.message });
               logSyncAction(pid, 'error', {
