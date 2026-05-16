@@ -25,6 +25,23 @@ jest.setTimeout(60000);
 jest.mock('../../src/scheduler/scheduleQueue', () => ({ enqueueScheduleRun: jest.fn() }));
 jest.mock('../../src/lib/sse-emitter', () => ({ emit: jest.fn() }));
 
+// Mock sync-lock so the controller's destructured acquireLock binding
+// is a jest.fn() we can override per-test with mockImplementation().
+jest.mock('../../src/lib/sync-lock', () => {
+  var actual = jest.requireActual('../../src/lib/sync-lock');
+  return Object.assign({}, actual, {
+    acquireLock: jest.fn(function(userId) {
+      return actual.acquireLock(userId);
+    }),
+    releaseLock: jest.fn(function(userId, token) {
+      return actual.releaseLock(userId, token);
+    }),
+    refreshLock: jest.fn(function(userId, token) {
+      return actual.refreshLock(userId, token);
+    })
+  });
+});
+
 var {
   db, TEST_USER_ID, isDbAvailable, seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes
 } = require('./helpers/test-setup');
@@ -32,6 +49,7 @@ var { makeTask } = require('./helpers/test-fixtures');
 var { sync } = require('../../src/controllers/cal-sync.controller');
 var gcalAdapter = require('../../src/lib/cal-adapters/gcal.adapter');
 var tasksWrite = require('../../src/lib/tasks-write');
+var syncLock = require('../../src/lib/sync-lock'); // mocked — used for mockImplementation per-test
 
 var GCAL_ONLY = {
   gcal_refresh_token: 'mock-gcal-token',
@@ -45,6 +63,11 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
+  // Reset acquireLock to the real implementation after each test
+  var actual = jest.requireActual('../../src/lib/sync-lock');
+  syncLock.acquireLock.mockImplementation(function(userId) {
+    return actual.acquireLock(userId);
+  });
   jest.restoreAllMocks();
   await cleanupTestData();
 });
@@ -133,5 +156,70 @@ describe('BF-7: task deleted during API phase is skipped in write phase', () => 
       return args[1] === task.id;
     });
     expect(calledForDeletedTask).toBe(false);
+  });
+});
+
+describe('Concurrent sync lock: second sync gets 409', () => {
+  it('second concurrent sync returns 409 when first holds lock', async () => {
+    if (!await isDbAvailable()) return;
+    var user = await seedTestUser(GCAL_ONLY);
+
+    // Stub GCal adapter so token validation succeeds and sync reaches the
+    // write-phase lock acquisition. Without these, getValidAccessToken throws
+    // on the mock token and sync returns 200 before ever trying to acquire a lock.
+    jest.spyOn(gcalAdapter, 'getValidAccessToken').mockResolvedValue('mock-token');
+    jest.spyOn(gcalAdapter, 'listEvents').mockResolvedValue([]);
+
+    // Override acquireLock to always return not-acquired — simulates a lock
+    // held by a concurrent sync. mockImplementation on the already-mocked
+    // jest.fn() in sync-lock intercepts the controller's destructured binding.
+    // Also shim global.setTimeout → 0ms so the 8-retry backoff (~40s real
+    // time) completes instantly; restore it immediately after sync() returns.
+    syncLock.acquireLock.mockImplementation(function() {
+      return Promise.resolve({ acquired: false });
+    });
+    var _realSetTimeout = global.setTimeout;
+    global.setTimeout = function(fn, _ms) { return _realSetTimeout(fn, 0); };
+
+    var req = mockReq(user);
+    var res = mockRes();
+    try {
+      await sync(req, res);
+    } finally {
+      global.setTimeout = _realSetTimeout;
+    }
+
+    // Controller returns 409 after MAX_LOCK_ATTEMPTS (8) failed acquires
+    expect(res.statusCode).toBe(409);
+  });
+});
+
+describe('Stale lock recovery: expired lock cleared on next sync', () => {
+  it('sync succeeds after expired lock is cleared', async () => {
+    if (!await isDbAvailable()) return;
+    var user = await seedTestUser(GCAL_ONLY);
+
+    // Insert an expired lock (both acquired_at and expires_at are in the past).
+    // acquireLock() runs: DELETE WHERE expires_at <= NOW() then INSERT — so the
+    // expired row is swept atomically before the new lock is inserted.
+    await db('sync_locks').insert({
+      user_id: user.id,
+      lock_token: 'expired-lock',
+      acquired_at: new Date(Date.now() - 60000),
+      expires_at: new Date(Date.now() - 30000)
+    });
+
+    jest.spyOn(gcalAdapter, 'getValidAccessToken').mockResolvedValue('mock-token');
+    jest.spyOn(gcalAdapter, 'listEvents').mockResolvedValue([]);
+    jest.spyOn(gcalAdapter, 'hasChanges').mockResolvedValue({ hasChanges: false });
+
+    var req = mockReq(user);
+    var res = mockRes();
+    await sync(req, res);
+
+    expect(res.statusCode).toBe(200);
+    // Expired lock row must have been cleared by acquireLock's DELETE sweep
+    var lock = await db('sync_locks').where({ user_id: user.id, lock_token: 'expired-lock' }).first();
+    expect(lock).toBeUndefined();
   });
 });
