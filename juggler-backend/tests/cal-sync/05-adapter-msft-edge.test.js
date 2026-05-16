@@ -52,7 +52,10 @@ describe('BF-2: delta link cleared on 410 (tokenInvalid)', () => {
   it('null delta link returns hasChanges:true immediately (full sync)', async () => {
     var user = await seedUser({ msft_cal_delta_link: null });
 
+    var spy = jest.spyOn(msftCalApi, 'checkForChanges');
     var result = await msftAdapter.hasChanges('any-token', user);
     expect(result.hasChanges).toBe(true);
+    expect(result.tokenInvalid).toBeUndefined();
+    expect(spy).not.toHaveBeenCalled();
   });
 });

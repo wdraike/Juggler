@@ -133,7 +133,7 @@ async function hasChanges(token, user) {
     result = await msftCalApi.checkForChanges(token, deltaLink);
   } catch (err) {
     // 410 = delta token expired; clear it so next sync does full fetch
-    if (err.message && (err.message.includes('410') || err.message.includes('syncStateNotFound'))) {
+    if (err.statusCode === 410 || err.status === 410 || (err.message && err.message.includes('syncStateNotFound'))) {
       await db('users').where('id', user.id).update({ msft_cal_delta_link: null });
       return { hasChanges: true, tokenInvalid: true };
     }
