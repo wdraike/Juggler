@@ -244,7 +244,9 @@ async function sync(req, res) {
           var vaEventIdCol = va.getEventIdColumn();
           var vaTokenCols = vaEventIdCol === 'gcal_event_id'
             ? { gcal_access_token: null, gcal_refresh_token: null, gcal_token_expiry: null }
-            : { msft_access_token: null, msft_refresh_token: null, msft_token_expiry: null };
+            : vaEventIdCol === 'apple_event_id'
+              ? { apple_cal_password: null }
+              : { msft_cal_access_token: null, msft_cal_refresh_token: null, msft_cal_token_expiry: null };
           await db('users').where('id', userId).update({ ...vaTokenCols, updated_at: db.fn.now() });
         }
         stats.errors.push({
@@ -294,7 +296,9 @@ async function sync(req, res) {
           var eventIdCol = adapter.getEventIdColumn();
           var tokenCols = eventIdCol === 'gcal_event_id'
             ? { gcal_access_token: null, gcal_refresh_token: null, gcal_token_expiry: null }
-            : { msft_access_token: null, msft_refresh_token: null, msft_token_expiry: null };
+            : eventIdCol === 'apple_event_id'
+              ? { apple_cal_password: null }
+              : { msft_cal_access_token: null, msft_cal_refresh_token: null, msft_cal_token_expiry: null };
           await db('users').where('id', userId).update({ ...tokenCols, updated_at: db.fn.now() });
         }
 
