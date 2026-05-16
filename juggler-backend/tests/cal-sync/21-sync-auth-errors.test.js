@@ -12,6 +12,7 @@ var { sync } = require('../../src/controllers/cal-sync.controller');
 
 var appleCalApi = require('../../src/lib/apple-cal-api');
 var { encrypt } = require('../../src/lib/credential-encrypt');
+var gcalApi = require('../../src/lib/gcal-api');
 
 beforeAll(async () => {
   if (!await isDbAvailable()) return;
@@ -74,5 +75,40 @@ describe('BF-1: Auth 401 clears correct provider credentials', () => {
     expect(updated.msft_cal_refresh_token).toBeNull();
     expect(updated.msft_cal_access_token).toBeNull();
     expect(updated.msft_cal_token_expiry).toBeNull();
+  });
+});
+
+describe('GCal invalid_grant: gcal tokens cleared', () => {
+  it('clears gcal_refresh_token and gcal_access_token on invalid_grant', async () => {
+    if (!await isDbAvailable()) return;
+    var user = await seedTestUser({
+      gcal_refresh_token: 'revoked-token',
+      msft_cal_refresh_token: null,
+      apple_cal_username: null
+    });
+    jest.spyOn(gcalApi, 'refreshAccessToken').mockRejectedValue(new Error('invalid_grant'));
+    var req = mockReq(user);
+    var res = mockRes();
+    await sync(req, res);
+    var updated = await db('users').where('id', TEST_USER_ID).first();
+    expect(updated.gcal_refresh_token).toBeNull();
+    expect(updated.gcal_access_token).toBeNull();
+  });
+});
+
+describe('GCal auth error: sync returns HTTP 200 (not 500)', () => {
+  it('auth failure yields 200 with error info in body, not 500', async () => {
+    if (!await isDbAvailable()) return;
+    var user = await seedTestUser({
+      gcal_refresh_token: 'revoked',
+      msft_cal_refresh_token: null,
+      apple_cal_username: null
+    });
+    jest.spyOn(gcalApi, 'refreshAccessToken').mockRejectedValue(new Error('invalid_grant'));
+    var req = mockReq(user);
+    var res = mockRes();
+    await sync(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res._json).toBeDefined();
   });
 });
