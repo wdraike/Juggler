@@ -117,15 +117,35 @@ function parseVEvents(icsData, url, etag) {
           endStr = formatICALDate(nextDay);
         }
       } else {
-        startStr = formatICALDateTime(dtstart);
+        // Convert TZID-annotated times to UTC to avoid server-timezone misinterpretation.
+        // new Date('2026-05-15T10:00:00') on a UTC production server reads as UTC, not New York local.
+        if (dtstart.zone && dtstart.zone !== ICAL.Timezone.utcTimezone) {
+          var utcStart = dtstart.convertToZone(ICAL.Timezone.utcTimezone);
+          startStr = formatICALDateTime(utcStart) + 'Z';
+        } else {
+          startStr = formatICALDateTime(dtstart);
+          if (dtstart.zone === ICAL.Timezone.utcTimezone) startStr += 'Z';
+        }
         if (dtend) {
-          endStr = formatICALDateTime(dtend);
+          if (dtend.zone && dtend.zone !== ICAL.Timezone.utcTimezone) {
+            var utcEnd = dtend.convertToZone(ICAL.Timezone.utcTimezone);
+            endStr = formatICALDateTime(utcEnd) + 'Z';
+          } else {
+            endStr = formatICALDateTime(dtend);
+            if (dtend.zone === ICAL.Timezone.utcTimezone) endStr += 'Z';
+          }
           durationMinutes = Math.round((dtend.toUnixTime() - dtstart.toUnixTime()) / 60);
         } else if (duration) {
           durationMinutes = Math.round(duration.toSeconds() / 60);
           var endTime = dtstart.clone();
           endTime.addDuration(duration);
-          endStr = formatICALDateTime(endTime);
+          if (endTime.zone && endTime.zone !== ICAL.Timezone.utcTimezone) {
+            var utcEndTime = endTime.convertToZone(ICAL.Timezone.utcTimezone);
+            endStr = formatICALDateTime(utcEndTime) + 'Z';
+          } else {
+            endStr = formatICALDateTime(endTime);
+            if (endTime.zone === ICAL.Timezone.utcTimezone) endStr += 'Z';
+          }
         }
       }
     }
