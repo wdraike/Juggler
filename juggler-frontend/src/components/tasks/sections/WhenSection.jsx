@@ -215,13 +215,13 @@ export default function WhenSection(props) {
             if (v && time) {
               var startMins = minutesFrom24h(time);
               var endMins = minutesFrom24h(v);
-              if (startMins !== null && endMins !== null && endMins <= startMins) {
+              if (startMins !== null && endMins !== null && endMins > startMins) {
+                if (onEndTimeErrorChange) onEndTimeErrorChange(null);
+                onDurChange(endMins - startMins);
+              } else if (startMins !== null && endMins !== null) {
                 if (onEndTimeErrorChange) onEndTimeErrorChange('Finish must be after start');
               } else {
                 if (onEndTimeErrorChange) onEndTimeErrorChange(null);
-                if (startMins !== null && endMins !== null && endMins > startMins) {
-                  onDurChange(endMins - startMins);
-                }
               }
             } else {
               if (onEndTimeErrorChange) onEndTimeErrorChange(null);
