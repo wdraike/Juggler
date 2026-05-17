@@ -2,6 +2,8 @@ import React from 'react';
 import { STATUS_OPTIONS } from '../../state/constants';
 import { BRAND } from '../../theme/colors';
 
+var URL_PATTERN = /^https?:\/\//i;
+
 export default function TaskDetailHeader({
   task, isCreate, isMobile,
   TH, darkMode,
@@ -18,6 +20,12 @@ export default function TaskDetailHeader({
   unplacedDetail, whenBlocked, onEnableFlex,
 }) {
   var BTN_H = isMobile ? 30 : 26;
+  var lStyle = { fontSize: 9, color: TH.textMuted, display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 600 };
+  var iStyle = {
+    fontSize: isMobile ? 13 : 11, padding: isMobile ? '6px 8px' : '3px 4px',
+    border: '1px solid ' + TH.inputBorder, borderRadius: 4,
+    background: TH.inputBg, color: TH.inputText, fontFamily: 'inherit', boxSizing: 'border-box',
+  };
 
   var deleteSlot = null;
   if (!isCreate && onDelete) {
@@ -170,32 +178,22 @@ export default function TaskDetailHeader({
           </button>
         </div>
 
-        <label style={{ fontSize: 9, color: TH.textMuted, display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 600, marginBottom: 6 }}>
+        <label style={{ ...lStyle, marginBottom: 6 }}>
           Notes
           <textarea value={notes || ''} onChange={e => onNotesChange && onNotesChange(e.target.value)}
-            style={{
-              fontSize: isMobile ? 13 : 11, padding: isMobile ? '6px 8px' : '3px 4px',
-              border: '1px solid ' + TH.inputBorder, borderRadius: 4,
-              background: TH.inputBg, color: TH.inputText, fontFamily: 'inherit',
-              minHeight: 40, resize: 'vertical', width: '100%', boxSizing: 'border-box'
-            }} />
+            style={{ ...iStyle, minHeight: 40, resize: 'vertical', width: '100%' }} />
         </label>
-        <label style={{ fontSize: 9, color: TH.textMuted, display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 600, marginBottom: 4 }}>
+        <label style={{ ...lStyle, marginBottom: 4 }}>
           Link
           <div style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
             <input type="url" value={url || ''} onChange={e => onUrlChange && onUrlChange(e.target.value)}
               placeholder="https://…"
-              style={{
-                fontSize: isMobile ? 13 : 11, padding: isMobile ? '6px 8px' : '3px 4px',
-                border: '1px solid ' + TH.inputBorder, borderRadius: 4,
-                background: TH.inputBg, color: TH.inputText, fontFamily: 'inherit',
-                flex: 1, minWidth: 0, height: isMobile ? 30 : 26, boxSizing: 'border-box'
-              }} />
-            {url && /^https?:\/\//i.test((url || '').trim()) && (
+              style={{ ...iStyle, flex: 1, minWidth: 0, height: BTN_H }} />
+            {url && URL_PATTERN.test(url.trim()) && (
               <button type="button"
                 onClick={function(e) { e.stopPropagation(); window.open(url.trim(), '_blank', 'noopener,noreferrer'); }}
                 style={{
-                  height: isMobile ? 30 : 26, padding: '0 10px', borderRadius: 4,
+                  height: BTN_H, padding: '0 10px', borderRadius: 4,
                   border: '1px solid ' + TH.inputBorder, background: TH.inputBg,
                   color: TH.accent, cursor: 'pointer', fontSize: 11,
                   fontFamily: 'inherit', fontWeight: 600, flexShrink: 0, boxSizing: 'border-box'
