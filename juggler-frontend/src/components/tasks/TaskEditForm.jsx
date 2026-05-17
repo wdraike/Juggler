@@ -3,13 +3,21 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { STATUS_OPTIONS, applyDefaults } from '../../state/constants';
+import { applyDefaults } from '../../state/constants';
 import { toTime24, fromTime24, toDateISO, fromDateISO, formatDateKey, parseDate } from '../../scheduler/dateHelpers';
 import { isAnchorDependentRecur } from '../../scheduler/expandRecurring';
 import { getTheme } from '../../theme/colors';
-import { convertTimeForDisplay, getTimezoneAbbr, getUtcOffset } from '../../utils/timezone';
+import { convertTimeForDisplay } from '../../utils/timezone';
 import apiClient from '../../services/apiClient';
 import { addMinutesTo24h, minutesFrom24h } from './sections/WhenSection';
+import CollapsibleSection from './CollapsibleSection';
+import TaskDetailHeader from './TaskDetailHeader';
+import MetaSection from './sections/MetaSection';
+import WhereSection from './sections/WhereSection';
+import WeatherSection from './sections/WeatherSection';
+import ToolsSection from './sections/ToolsSection';
+import DependsOnSection from './sections/DependsOnSection';
+import WhenSection from './sections/WhenSection';
 
 
 // ---------------------------------------------------------------------------
@@ -351,128 +359,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     return tags.length === 1;
   });
 
-  // --- Derived scheduling mode flags (used for field disable logic) ---
-  var whenParts = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
-  var isAllDay = whenParts.indexOf('allday') !== -1;
-  var isFixed = !!datePinned || whenParts.indexOf("fixed") !== -1;
-  // Calendar-linked fixed tasks are pinned by the external calendar. Stripping
-  // 'fixed' from them creates a contradiction the backend guard will reject,
-  // so the When-mode selector locks those buttons out entirely.
-  // Provider-origin tasks (calendar owns the schedule). Juggler-native tasks
-  // that were pushed to a calendar have origin='juggler' — they should behave
-  // like regular fixed tasks so the user can still click "Fixed ×" to unfix.
-  var isCalLinkedFixed = isFixed && !!(task && (task.gcalEventId || task.msftEventId || task.appleEventId)) && task.calSyncOrigin !== 'juggler';
-  var isRigid = recurring && rigid;
-  // Split is allowed for non-recurring tasks (except all-day / fixed) and for
-  // recurring tasks only in Time Blocks mode (not Time Window, not rigid).
-  // For recurring Time Blocks, the scheduler enforces that chunks stay on
-  // the instance's assigned day — chunks that don't fit are dropped, not
-  // rolled to the next day. See the hint below the split toggle.
-  var disSplit = isAllDay || isFixed || (recurring && (hasPreferredTime || rigid));
-
-  // --- Configuration feasibility warnings ---
-  var configWarnings = (function() {
-    if (marker) return [];
-    var warnings = [];
-    var isAnytime = whenParts.length === 0 || (whenParts.length === 1 && whenParts[0] === 'anytime');
-    if (isAnytime || isAllDay || isFixed) return [];
-    if (!scheduleTemplates || !templateDefaults) return [];
-
-    // Determine which day-names are eligible given dayReq
-    var dayCodeMap = { Su: 'Sun', M: 'Mon', T: 'Tue', W: 'Wed', R: 'Thu', F: 'Fri', Sa: 'Sat' };
-    var weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
-    var weekends = ['Sat', 'Sun'];
-    var allDays = weekdays.concat(weekends);
-    var eligibleDays;
-    if (!dayReq || dayReq === 'any') {
-      eligibleDays = allDays;
-    } else if (dayReq === 'weekday') {
-      eligibleDays = weekdays;
-    } else if (dayReq === 'weekend') {
-      eligibleDays = weekends;
-    } else {
-      var codes = dayReq.split(',');
-      eligibleDays = codes.map(function(c) { return dayCodeMap[c]; }).filter(Boolean);
-    }
-
-    // Collect which tags exist on eligible days (including aliases)
-    var tagsOnEligibleDays = {};
-    eligibleDays.forEach(function(dn) {
-      var tmplId = templateDefaults[dn];
-      var tmpl = tmplId && scheduleTemplates[tmplId];
-      if (!tmpl) return;
-      (tmpl.blocks || []).forEach(function(b) {
-        tagsOnEligibleDays[b.tag] = true;
-        // "biz" blocks after noon also match "afternoon"
-        if (b.tag === 'biz' && b.start >= 720) tagsOnEligibleDays['afternoon'] = true;
-      });
-    });
-
-    // Silently strip stale when-tags that don't exist in any template
-    // (scheduler handles missing tags gracefully — no warning needed)
-
-    // Check location feasibility: if task has location constraint, check if any eligible block has a matching location
-    if (taskLoc.length > 0 && whenParts.length > 0) {
-      var matchingBlocks = [];
-      eligibleDays.forEach(function(dn) {
-        var tmplId = templateDefaults[dn];
-        var tmpl = tmplId && scheduleTemplates[tmplId];
-        if (!tmpl) return;
-        (tmpl.blocks || []).forEach(function(b) {
-          if (whenParts.indexOf(b.tag) >= 0) matchingBlocks.push(b);
-        });
-      });
-      if (matchingBlocks.length > 0) {
-        var hasLocMatch = matchingBlocks.some(function(b) {
-          return taskLoc.some(function(loc) { return loc === b.loc; });
-        });
-        if (!hasLocMatch) {
-          var blockLocs = {};
-          matchingBlocks.forEach(function(b) { if (b.loc) blockLocs[b.loc] = true; });
-          warnings.push('Location mismatch: task needs "' + taskLoc.join('" or "') +
-            '" but matching time blocks use "' + Object.keys(blockLocs).join('", "') + '".');
-        }
-      }
-    }
-
-    return warnings;
-  })();
-
-  // Deadline vs day requirement conflict (separate from config warnings so it always runs)
-  var deadlineDayWarning = (function() {
-    if (!deadline || !dayReq || dayReq === 'any') return null;
-    // `deadline` is stored as ISO (YYYY-MM-DD) in form state, but parseDate
-    // expects M/D. Convert first; parseDate on ISO returns an Invalid Date
-    // and NaN day-of-week, producing "(undefined)" in the warning string.
-    var deadlineDate = parseDate(fromDateISO(deadline));
-    if (!deadlineDate || isNaN(deadlineDate.getTime())) return null;
-    var deadlineDayCode = ['Su','M','T','W','R','F','Sa'][deadlineDate.getDay()];
-    var deadlineDayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][deadlineDate.getDay()];
-    var allowed;
-    if (dayReq === 'weekday') allowed = ['M','T','W','R','F'];
-    else if (dayReq === 'weekend') allowed = ['Su','Sa'];
-    else allowed = dayReq.split(',');
-    if (allowed.indexOf(deadlineDayCode) === -1) {
-      return 'Deadline (' + deadlineDayName + ') conflicts with day requirement — task may not be schedulable before the deadline.';
-    }
-    return null;
-  })();
-  if (deadlineDayWarning) configWarnings.push(deadlineDayWarning);
-
-  var BTN_H = isMobile ? 30 : 26;
-  var iStyle = { fontSize: isMobile ? 13 : 11, padding: isMobile ? '6px 8px' : '3px 4px', border: '1px solid ' + TH.inputBorder, borderRadius: 4, background: TH.inputBg, color: TH.inputText, fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box', maxWidth: '100%' };
-  var lStyle = { fontSize: 9, color: TH.textMuted, display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 600 };
-  function togStyle(on, color) {
-    return {
-      height: BTN_H, padding: '0 8px', borderRadius: 4, fontSize: 10, cursor: 'pointer',
-      fontWeight: on ? 600 : 400, fontFamily: 'inherit', boxSizing: 'border-box',
-      border: on ? '2px solid ' + (color || TH.accent) : '1px solid ' + TH.btnBorder,
-      background: on ? (color || TH.accent) + '22' : TH.bgCard,
-      color: on ? (color || TH.accent) : TH.textMuted,
-    };
-  }
-  var [saveStatus, setSaveStatus] = useState(null); // null | 'saving' | 'saved'
-  var saveTimer = useRef(null);
+  var [saveStatus, setSaveStatus] = useState(null);
   var firstRender = useRef(true);
   // Track the task prop snapshot so we can detect external changes and diff for saves
   var taskSnapshotRef = useRef(null);
@@ -740,35 +627,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (firstRender.current) { firstRender.current = false; return; }
     userDirtyRef.current = true;
     var changed = buildChangedFields();
-    console.log('[DIRTY]', !!changed, changed ? Object.keys(changed) : 'null', 'when=' + when, 'snapWhen=' + (taskSnapshotRef.current ? taskSnapshotRef.current.when : '?'));
     setIsDirty(!!changed);
   }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, hasPreferredTime, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
-
-  // Manual save handler
-  // Unpin: revert a drag-pinned task to scheduler control.
-  // For recurring instances: deletes the instance so the scheduler regenerates it.
-  var isPinned = !isCreate && task && task.prevWhen != null;
-  function handleUnfix() {
-    var newWhen = (when || '').split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t && t !== 'fixed'; }).join(',');
-    setDatePinned(false);
-    setWhen(newWhen);
-    if (task && onUpdate) onUpdate(task.id, { datePinned: false, when: newWhen });
-  }
-  function handleUnpin() {
-    if (!task) return;
-    var isRecurringInstance = task.taskType === 'recurring_instance' && task.sourceId;
-    // Optimistic update: flip UI state immediately, let the scheduler's final
-    // placement arrive via SSE. For recurring instances, the row is deleted
-    // server-side, so close the form now.
-    if (isRecurringInstance) {
-      if (onClose) onClose();
-    } else if (onUpdate) {
-      onUpdate(task.id, { when: task.prevWhen || '', datePinned: false, prevWhen: null });
-    }
-    apiClient.put('/tasks/' + task.id + '/unpin').catch(function(err) {
-      console.error('Unpin failed:', err);
-    });
-  }
 
   function handleSave() {
     // Suppress save while the start/finish pair is invalid — keeps the user's
@@ -814,7 +674,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   }
 
   function commitSave(changed) {
-    console.log('[SAVE] commitSave for', task.id, 'changed keys:', Object.keys(changed), 'when:', changed.when);
     // Anchor date or recurrence changes regenerate instances (new IDs) — close form after save
     var willRegenerateInstances = changed.recur !== undefined;
     setSaveStatus('saving');
@@ -856,1027 +715,130 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     onClose();
   }
 
-  var durOptions = [5,10,15,20,30,45,60,90,120,180,240];
-  if (durOptions.indexOf(parseInt(dur)) === -1) durOptions = durOptions.concat([parseInt(dur)]);
-  durOptions.sort(function(a,b) { return a - b; });
-
-  var remOptions = [0,5,10,15,20,30,45,60,90,120,180,240];
-  var remVal = timeRemaining === '' ? dur : parseInt(timeRemaining);
-  if (remOptions.indexOf(remVal) === -1) remOptions = remOptions.concat([remVal]);
-  if (remOptions.indexOf(parseInt(dur)) === -1) remOptions = remOptions.concat([parseInt(dur)]);
-  remOptions = remOptions.filter(function(v, i, a) { return a.indexOf(v) === i; }).sort(function(a,b) { return a - b; });
-
-  function durLabel(v) {
-    if (v === 0) return 'Done (0)';
-    if (v < 60) return v + ' min';
-    if (v === 60) return '1 hour';
-    if (v === 90) return '1.5 hrs';
-    return (v/60) + ' hrs';
-  }
-
-  var hasStack = (stackIndex || 0) > 0;
-
   var dialogContent = (
     <>
-      {/* Top bar with Save / Delete / Close */}
-      <div style={{
-        display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap',
-        background: TH.badgeBg,
-        padding: '8px 12px', borderBottom: '1px solid ' + TH.border
-      }}>
-        {isCreate ? (
-          <button onClick={handleCreate} style={{
-            fontSize: 10, fontWeight: 700, padding: '4px 14px', border: 'none', borderRadius: 4,
-            background: '#2D6A4F', color: '#FDFAF5', cursor: 'pointer'
-          }}>{'\u2795 Create'}</button>
-        ) : (
-          <>
-            {isDirty && <button onClick={handleSave} style={{
-              fontSize: 10, fontWeight: 700, padding: '4px 14px', border: 'none', borderRadius: 4,
-              background: TH.accent, color: '#FDFAF5', cursor: 'pointer'
-            }}>{'\uD83D\uDCBE'} Save</button>}
-            {saveStatus && <span style={{
-              fontSize: 10, fontWeight: 600,
-              color: saveStatus === 'failed' ? '#8B2635' : saveStatus === 'saving' ? TH.textMuted : '#2D6A4F',
-              padding: '4px 8px'
-            }}>{saveStatus === 'saving' ? 'Saving\u2026' : saveStatus === 'failed' ? '\u2716 Save failed' : '\u2714 Saved'}</span>}
-          </>
-        )}
-        <div style={{ flex: 1 }} />
-        {!isCreate && onDelete && (() => {
-          // Hide delete for calendar-linked tasks when provider is in ingest-only mode
-          var css = calSyncSettings || {};
-          var isIngestBlocked = (task.gcalEventId && css.gcal && css.gcal.mode === 'ingest')
-                             || (task.msftEventId && css.msft && css.msft.mode === 'ingest');
-          if (isIngestBlocked) {
-            return <span style={{ fontSize: 10, color: TH.textMuted, fontStyle: 'italic' }} title="This event is managed by your calendar. Delete it there instead.">Calendar event</span>;
-          }
-          return (
-            <button onClick={() => { if (onDelete) onDelete(task.id); }} style={{
-              fontSize: 10, fontWeight: 600, padding: '4px 10px',
-              border: '1px solid #8B2635', borderRadius: 4,
-              background: TH.redBg, color: TH.redText, cursor: 'pointer'
-            }}>{'\uD83D\uDDD1'} Delete</button>
-          );
-        })()}
-        <button onClick={onClose} style={{
-          border: 'none', background: 'transparent', color: TH.textMuted,
-          fontSize: isMobile ? 24 : 16, cursor: 'pointer', padding: '2px 6px',
-          minWidth: isMobile ? 44 : undefined, minHeight: isMobile ? 44 : undefined
-        }}>&times;</button>
-      </div>
+      <TaskDetailHeader
+        task={task} isCreate={isCreate} isMobile={isMobile} TH={TH} darkMode={darkMode}
+        isDirty={isDirty} saveStatus={saveStatus} onSave={handleSave} onCreate={handleCreate}
+        onClose={onClose} onDelete={onDelete} calSyncSettings={calSyncSettings}
+        status={status} onStatusChange={onStatusChange}
+        text={text} onTextChange={setText}
+        project={project} onProjectChange={setProject} allProjectNames={allProjectNames}
+        pri={pri} onPriChange={setPri}
+        dur={dur}
+        notes={notes} onNotesChange={setNotes}
+        url={url} onUrlChange={setUrl}
+        scheduledBadge={date && time ? (date === formatDateKey(new Date()) ? 'Today' : date) + ' · ' + (fromTime24(time) || time) + (endTime ? '–' + (fromTime24(endTime) || endTime) : '') : null}
+        unplacedDetail={!isCreate && task && task._unplacedDetail ? task._unplacedDetail : null}
+        whenBlocked={!isCreate && task && task._whenBlocked && !flexWhen}
+        onEnableFlex={function() { setFlexWhen(true); }}
+      />
 
-      <div style={{ padding: '10px 12px', maxWidth: '100%', boxSizing: 'border-box', overflowX: 'hidden', overflowY: 'visible' }}>
-        {/* Unplaced reason banner */}
-        {!isCreate && task && task._unplacedDetail && (
-          <div style={{
-            fontSize: 10, padding: '6px 10px', marginBottom: 8, borderRadius: 4,
-            background: TH.amberBg,
-            color: TH.amberText,
-            border: '1px solid ' + TH.amberBorder,
-            display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap'
-          }}>
-            <span style={{ fontWeight: 600 }}>{'\u26A0'} Not placed:</span>
-            <span>{task._unplacedDetail}</span>
-            {task._whenBlocked && !flexWhen && (
-              <button onClick={function() { setFlexWhen(true); }}
-                style={{
-                  fontSize: 9, fontWeight: 600, padding: '1px 6px', borderRadius: 4,
-                  border: '1px solid #C8942A', background: '#C8942A18', color: '#C8942A',
-                  cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap'
-                }}>
-                Enable Flex
-              </button>
-            )}
-          </div>
-        )}
+      {!marker && (
+        <CollapsibleSection id="when" label="When" isOpen={!!collapse.when}
+          onToggle={toggleCollapse}
+          badge={collapse.when ? null : (date && time ? (date === new Date().toISOString().slice(0,10) ? 'Today' : date) + ' · ' + (fromTime24(time)||time) + (endTime ? '–'+(fromTime24(endTime)||endTime) : '') : 'No date')}
+          TH={TH}>
+          <WhenSection
+            date={date} onDateChange={setDate}
+            time={time} onTimeChange={setTime}
+            endTime={endTime} onEndTimeChange={setEndTime} endTimeError={endTimeError}
+            dur={dur} onDurChange={setDur}
+            recurring={recurring} rigid={rigid} onRigidChange={setRigid}
+            timeFlex={timeFlex} onTimeFlexChange={setTimeFlex}
+            recurType={recurType} onRecurTypeChange={setRecurType}
+            recurDays={recurDays} onRecurDaysChange={setRecurDays}
+            recurEvery={recurEvery} onRecurEveryChange={setRecurEvery}
+            recurTpc={recurTimesPerCycle} onRecurTpcChange={setRecurTimesPerCycle}
+            recurStart={recurStart} onRecurStartChange={setRecurringStart}
+            recurEnd={recurEnd} onRecurEndChange={setRecurringEnd}
+            deadline={deadline} onDeadlineChange={setDeadline}
+            startAfter={startAfter} onStartAfterChange={setStartAfter}
+            split={split} onSplitChange={setSplit}
+            splitMin={splitMin} onSplitMinChange={setSplitMin}
+            travelBefore={travelBefore} onTravelBeforeChange={setTravelBefore}
+            travelAfter={travelAfter} onTravelAfterChange={setTravelAfter}
+            marker={marker} onMarkerChange={setMarker}
+            flexWhen={flexWhen} onFlexWhenChange={setFlexWhen}
+            datePinned={datePinned} onDatePinnedChange={setDatePinned}
+            dayReq={dayReq} onDayReqChange={setDayReq}
+            when={when} onWhenChange={setWhen}
+            timeRemaining={timeRemaining} onTimeRemainingChange={setTimeRemaining}
+            taskTz={taskTz} onChangeTz={changeTaskTimezone}
+            task={task} isCreate={isCreate} isMobile={isMobile} TH={TH}
+            scheduleTemplates={scheduleTemplates} templateDefaults={templateDefaults}
+            uniqueTags={uniqueTags}
+            collapse={collapse} toggleCollapse={toggleCollapse}
+          />
+        </CollapsibleSection>
+      )}
 
-        {/* Status buttons — hidden in create mode */}
-        {!isCreate && <div style={{ marginBottom: 8 }}>
-          <div style={{ ...lStyle, marginBottom: 3 }}>Status</div>
-          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-            {STATUS_OPTIONS.map(s => {
-              var isActive = (status || '') === s.value;
-              var sBg = darkMode ? s.bgDark : s.bg;
-              var sColor = darkMode ? s.colorDark : s.color;
-              return (
-                <button key={s.value} onClick={() => { if (onStatusChange) onStatusChange(s.value); }} title={s.tip} style={{
-                  border: '1px solid ' + (isActive ? sColor : TH.btnBorder),
-                  borderRadius: 4, padding: '3px 8px', cursor: 'pointer',
-                  background: isActive ? sBg : 'transparent',
-                  color: isActive ? sColor : TH.textMuted,
-                  fontSize: 10, fontWeight: isActive ? 700 : 500, fontFamily: 'inherit',
-                  height: BTN_H, boxSizing: 'border-box'
-                }}>
-                  {s.label} {s.tip.split(' — ')[0]}
-                </button>
-              );
-            })}
-          </div>
-        </div>}
+      {!marker && (
+        <CollapsibleSection id="where" label="Where" isOpen={!!collapse.where}
+          onToggle={toggleCollapse}
+          badge={taskLoc.length > 0 ? taskLoc.length + ' location' + (taskLoc.length > 1 ? 's' : '') : null}
+          TH={TH}>
+          <WhereSection locations={locations} taskLoc={taskLoc} onChange={setTaskLoc} TH={TH} isMobile={isMobile} />
+        </CollapsibleSection>
+      )}
 
-        {/* ═══ SECTION: Task Description ═══ */}
-        {(function() {
-          var secStyle = { border: '1px solid ' + TH.border, borderRadius: 6, padding: '8px 10px', marginBottom: 8, maxWidth: '100%', boxSizing: 'border-box', overflow: 'hidden' };
-          var secHead = { fontSize: 9, fontWeight: 700, color: TH.textMuted, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 };
-          return (<>
+      {!marker && (
+        <CollapsibleSection id="weather" label="Weather" isOpen={!!collapse.weather}
+          onToggle={toggleCollapse}
+          badge={(weatherTempMin || weatherTempMax) ? (weatherTempMin || '?') + '–' + (weatherTempMax || '?') + '°' : null}
+          TH={TH}>
+          <WeatherSection
+            weatherPrecip={weatherPrecip} weatherCloud={weatherCloud}
+            weatherTempMin={weatherTempMin} weatherTempMax={weatherTempMax}
+            weatherHumidityMin={weatherHumidityMin} weatherHumidityMax={weatherHumidityMax}
+            onChange={function(patch) {
+              if (patch.weatherPrecip !== undefined) setWeatherPrecip(patch.weatherPrecip);
+              if (patch.weatherCloud !== undefined) setWeatherCloud(patch.weatherCloud);
+              if (patch.weatherTempMin !== undefined) setWeatherTempMin(patch.weatherTempMin);
+              if (patch.weatherTempMax !== undefined) setWeatherTempMax(patch.weatherTempMax);
+              if (patch.weatherHumidityMin !== undefined) setWeatherHumidityMin(patch.weatherHumidityMin);
+              if (patch.weatherHumidityMax !== undefined) setWeatherHumidityMax(patch.weatherHumidityMax);
+            }}
+            TH={TH} isMobile={isMobile} tempUnitPref={tempUnitPref}
+          />
+        </CollapsibleSection>
+      )}
 
-        <div style={secStyle}>
-          <div style={secHead}>📋 Task</div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
-            <label style={{ ...lStyle, flex: 1, minWidth: isMobile ? 0 : 200, width: isMobile ? '100%' : undefined }}>
-              Name
-              <input type="text" value={text} onChange={e => setText(e.target.value)}
-                style={{ ...iStyle, width: '100%' }} autoFocus />
-            </label>
-            <label style={{ ...lStyle, width: isMobile ? '100%' : undefined }}>
-              Project
-              <input type="text" list="project-options" value={project}
-                onChange={e => setProject(e.target.value)}
-                placeholder="— none —"
-                style={{ ...iStyle, width: isMobile ? '100%' : 120 }} />
-              <datalist id="project-options">
-                {(allProjectNames || []).map(name => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-            </label>
-          </div>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 5 }}>
-            <label style={lStyle}>
-              <span title="Controls scheduling order: P1 tasks are placed first and get the best time slots, then P2, P3, P4.">{'\uD83D\uDD25'} Priority</span>
-              <select value={pri} onChange={e => setPri(e.target.value)} style={{ ...iStyle, minWidth: 80 }}>
-                <option value="P1">{'\uD83D\uDD34'} P1 Critical</option>
-                <option value="P2">{'\uD83D\uDFE0'} P2 High</option>
-                <option value="P3">{'\uD83D\uDD35'} P3 Medium</option>
-                <option value="P4">{'\u26AA'} P4 Low</option>
-              </select>
-            </label>
-            <label style={lStyle}>
-              <span title="Non-blocking reminder event — shows on the calendar but doesn't block time. Other tasks can overlap it.">{'\u25C7'} Reminder event</span>
-              <button title={marker ? 'This is a non-blocking reminder event' : 'Make this a non-blocking reminder event'} onClick={() => setMarker(!marker)}
-                style={{ ...togStyle(marker, '#4338CA'), minWidth: 50 }}>{marker ? '\u25C7 Yes' : 'No'}</button>
-            </label>
-            {/* Recurring toggle removed — recurrence drives recurring status automatically */}
-          </div>
-          {!isCreate && onShowChain && !task.recurring && (
-            <button onClick={onShowChain} style={{
-              border: '1px solid #0EA5E9', borderRadius: 4, padding: '4px 10px',
-              background: 'transparent', color: '#0EA5E9', fontSize: 10, fontWeight: 600,
-              cursor: 'pointer', fontFamily: 'inherit', width: '100%', marginBottom: 5,
-              height: BTN_H, boxSizing: 'border-box'
-            }}>{'\uD83D\uDD17'} Dependencies{task.dependsOn && task.dependsOn.length > 0 ? ' (' + task.dependsOn.length + ')' : ''}</button>
-          )}
-          <label style={lStyle}>
-            <span title="Free-text notes for your reference. Not used by the scheduler.">Notes</span>
-            <textarea value={notes} onChange={e => setNotes(e.target.value)}
-              style={{ ...iStyle, minHeight: 40, resize: 'vertical', width: '100%' }} />
-          </label>
-          <label style={lStyle}>
-            <span title="Optional link to an external resource (email thread, doc, issue, etc.) — shown as a clickable icon on the task card.">Link</span>
-            {(function() {
-              var isValid = url && /^https?:\/\//i.test(url.trim());
-              return (
-                <div style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
-                  <input type="url" value={url} onChange={e => setUrl(e.target.value)}
-                    placeholder="https://…"
-                    style={{ ...iStyle, flex: 1, minWidth: 0 }} />
-                  <button type="button"
-                    disabled={!isValid}
-                    onClick={function(e) {
-                      e.stopPropagation();
-                      if (!isValid) return;
-                      window.open(url.trim(), '_blank', 'noopener,noreferrer');
-                    }}
-                    title={isValid ? 'Open link in new tab' : 'Enter a valid http(s) URL to enable'}
-                    style={{
-                      height: BTN_H, padding: '0 10px', borderRadius: 4,
-                      border: '1px solid ' + TH.inputBorder,
-                      background: isValid ? TH.inputBg : 'transparent',
-                      color: isValid ? TH.accent : TH.textMuted,
-                      cursor: isValid ? 'pointer' : 'not-allowed',
-                      fontSize: 11, fontFamily: 'inherit', fontWeight: 600,
-                      display: 'flex', alignItems: 'center', gap: 4,
-                      flexShrink: 0, boxSizing: 'border-box',
-                      opacity: isValid ? 1 : 0.5
-                    }}>
-                    <span>{'🔗'}</span>
-                    <span>Open</span>
-                  </button>
-                </div>
-              );
-            })()}
-          </label>
-        </div>
+      {!marker && (tools || []).length > 0 && (
+        <CollapsibleSection id="tools" label="Tools" isOpen={!!collapse.tools}
+          onToggle={toggleCollapse}
+          badge={taskTools.length > 0 ? taskTools.length + ' tool' + (taskTools.length > 1 ? 's' : '') : null}
+          TH={TH}>
+          <ToolsSection tools={tools} taskTools={taskTools} onChange={setTaskTools} TH={TH} isMobile={isMobile} />
+        </CollapsibleSection>
+      )}
 
-        {/* ═══ SECTION: When (Scheduling) ═══ */}
-        <div style={secStyle}>
-          <div style={{ ...secHead, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-            <span>📅 When</span>
-            <TimezoneSelector taskTz={taskTz} onChangeTz={changeTaskTimezone} TH={TH} />
-          </div>
+      {!isCreate && onShowChain && (
+        <CollapsibleSection id="deps" label="Depends On" isOpen={!!collapse.deps}
+          onToggle={toggleCollapse}
+          badge={task && task.dependsOn && task.dependsOn.length > 0 ? task.dependsOn.length + ' dep' + (task.dependsOn.length > 1 ? 's' : '') : null}
+          TH={TH}>
+          <DependsOnSection task={task} onShowChain={onShowChain} TH={TH} isMobile={isMobile} />
+        </CollapsibleSection>
+      )}
 
-          {/* === RECURRING MODE: Fixed time ±window  OR  Time blocks === */}
-          {recurring && !marker && (
-            <div style={{ marginBottom: 5 }}>
-              <div style={{ display: 'flex', gap: 3, marginBottom: 6 }}>
-                <button onClick={function() {
-                  setRecurringHasPreferredTime(true);
-                  // Derive single when-tag from time or default to 'morning'
-                  var tags = (when || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-                  if (tags.length !== 1) setWhen('morning');
-                }} style={togStyle(hasPreferredTime, '#C8942A')}>{'\u23F0'} Time window</button>
-                <button onClick={function() {
-                  setRecurringHasPreferredTime(false);
-                  setTime('');
-                  // Rigid is a Time Window concept (exact time, no \u00B1 flex).
-                  // Clear it when leaving that mode so the split toggle is
-                  // reachable and the meaning of "rigid" doesn't leak.
-                  setRigid(false);
-                  var tags = (when || '').split(',').filter(Boolean);
-                  if (tags.length <= 1) setWhen('morning,lunch,afternoon,evening,night');
-                }} style={togStyle(!hasPreferredTime, '#2D6A4F')}>{'\uD83D\uDCC6'} Time blocks</button>
-              </div>
-
-              {hasPreferredTime ? (
-                /* Fixed time mode: time + ± window on one row */
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                  <label style={lStyle}>
-                    <span>{'\u23F0'} Time</span>
-                    <input type="time" value={time || ''}
-                      onChange={e => setTime(e.target.value || '')}
-                      style={{ ...iStyle, minWidth: 90 }} />
-                  </label>
-                  <label style={lStyle}>
-                    <span>{'\u00B1'} Window</span>
-                    {(function() {
-                      var opts = [
-                        { value: 0, label: 'exact' },
-                        { value: 15, label: '\u00b115m' },
-                        { value: 30, label: '\u00b130m' },
-                        { value: 60, label: '\u00b11hr' },
-                        { value: 90, label: '\u00b11.5hr' },
-                        { value: 120, label: '\u00b12hr' },
-                      ];
-                      var val = rigid ? 0 : (timeFlex || 60);
-                      return (
-                        <select value={val} onChange={e => {
-                          var v = parseInt(e.target.value);
-                          if (v === 0) { setRigid(true); setTimeFlex(0); } else { setRigid(false); setTimeFlex(v); }
-                        }} style={{ ...iStyle, minWidth: 80 }}>
-                          {opts.map(function(o) { return <option key={o.value} value={o.value}>{o.label}</option>; })}
-                        </select>
-                      );
-                    })()}
-                  </label>
-                </div>
-              ) : (
-                /* Time blocks mode: block buttons + flex toggle */
-                <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
-                  {(uniqueTags || []).map(function(tb) {
-                    var tagParts2 = when ? when.split(',').map(function(s) { return s.trim(); }) : [];
-                    var isOn = tagParts2.indexOf(tb.tag) !== -1;
-                    return (
-                      <button key={tb.tag} title={tb.name + ' time window'} onClick={function() {
-                        var cur = when ? when.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s && s !== 'fixed' && s !== 'allday' && s !== 'anytime'; }) : [];
-                        if (isOn) { cur = cur.filter(function(v) { return v !== tb.tag; }); }
-                        else { cur.push(tb.tag); }
-                        setWhen(cur.length === 0 ? '' : cur.join(','));
-                      }} style={togStyle(isOn, tb.color)}>{tb.icon} {tb.name}</button>
-                    );
-                  })}
-                  {/* Flex toggle removed — if selected blocks are full, recurring goes unplaced
-                       with a clear diagnostic. User can add more blocks explicitly. */}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Recurring instance: show read-only scheduled date/time from the scheduler */}
-          {recurring && !isCreate && !marker && task.scheduledAt && (
-            <div style={{ fontSize: 11, color: TH.textMuted, marginBottom: 5, padding: '4px 8px', background: TH.inputBg, borderRadius: 4, border: '1px solid ' + TH.border }}>
-              {'\uD83D\uDCC5'} Scheduled: <span style={{ color: TH.text, fontWeight: 600 }}>{(function() {
-                // Format the instance's actual scheduled date/time (from scheduler, not desired)
-                var tz = task.tz || activeTimezone || 'America/New_York';
-                var conv = convertTimeForDisplay(task.scheduledAt, tz);
-                if (!conv || !conv.date) return 'Not scheduled';
-                var d = toDateISO(conv.date);
-                var t = toTime24(conv.time);
-                if (!d) return 'Not scheduled';
-                var dt = new Date(d + 'T' + (t || '00:00'));
-                var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                var monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                var dayName = dayNames[dt.getDay()];
-                var month = monthNames[dt.getMonth()];
-                var day = dt.getDate();
-                var h = dt.getHours(), m = dt.getMinutes();
-                var ampm = h >= 12 ? 'PM' : 'AM';
-                var h12 = h % 12 || 12;
-                var timeStr = t ? (h12 + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm) : '';
-                return dayName + ', ' + month + ' ' + day + (timeStr ? ' at ' + timeStr : '');
-              })()}</span>
-              {isPinned ? (
-                <span style={{ marginLeft: 6 }}>
-                  <span style={{ fontSize: 9, color: '#D97706' }}>{'\uD83D\uDCCC'} fixed</span>
-                  <button onClick={handleUnpin} style={{
-                    fontSize: 9, marginLeft: 6, padding: '1px 6px', borderRadius: 3,
-                    background: TH.inputBg, border: '1px solid ' + TH.border, color: TH.redText,
-                    cursor: 'pointer', fontWeight: 600
-                  }}>{task.taskType === 'recurring_instance' ? 'Reset to template' : 'Unpin'}</button>
-                </span>
-              ) : (
-                <span style={{ color: TH.muted2, marginLeft: 6, fontSize: 9 }}>set by scheduler</span>
-              )}
-            </div>
-          )}
-
-          {/* Recurring instance: note when scheduler moved it from intended time */}
-          {recurring && !isCreate && task.desiredAt && task.scheduledAt && task.desiredAt !== task.scheduledAt && (function() {
-            var tz = task.tz || activeTimezone || 'America/New_York';
-            var intended = convertTimeForDisplay(task.desiredAt, tz);
-            var scheduled = convertTimeForDisplay(task.scheduledAt, tz);
-            if (!intended || !intended.time || !scheduled || intended.time === scheduled.time) return null;
-            return <div style={{ fontSize: 10, color: TH.textMuted, marginBottom: 5 }}>
-              Moved: {intended.time} {'\u2192'} <span style={{ color: TH.text }}>{scheduled.time}</span>
-            </div>;
-          })()}
-
-          {/* === NON-RECURRING: Original Date/Time field === */}
-          {!recurring && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, maxWidth: '100%' }}>
-            <label style={{ ...lStyle, maxWidth: '100%', minWidth: 0 }}>
-              <span title="Date/time for this task. For fixed tasks: the scheduler will not move it. For unfixed tasks: the scheduler may shift it to fit your schedule.">{'\uD83D\uDCC5'} Date / Time</span>
-              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                {isAllDay ? (
-                  <input type="date" value={date || ''}
-                    onChange={e => {
-                      setDate(e.target.value || '');
-                      setTime('');
-                      if (!isCreate && !isFixed) setDatePinned(!!e.target.value);
-                    }}
-                    style={{ ...iStyle, width: isMobile ? '100%' : undefined, minWidth: 0, ...(datePinned && date ? { borderColor: '#D97706' } : {}) }} />
-                ) : (
-                  <input type="datetime-local" value={date && time ? date + 'T' + time : date ? date + 'T00:00' : ''}
-                    onChange={e => {
-                      var v = e.target.value;
-                      if (v) {
-                        var parts = v.split('T');
-                        setDate(parts[0]);
-                        var newStart = parts[1] || '';
-                        setTime(newStart);
-                        // Keep finish in sync: shift finish by the same delta as start,
-                        // preserving the current duration. Clears any stale validation error.
-                        if (newStart) setEndTime(addMinutesTo24h(newStart, dur));
-                        setEndTimeError(null);
-                      } else { setDate(''); setTime(''); setEndTime(''); setEndTimeError(null); }
-                      if (!isCreate && !isFixed) setDatePinned(!!v);
-                    }}
-                    style={{ ...iStyle, width: isMobile ? '100%' : undefined, minWidth: 0, ...(datePinned && date ? { borderColor: '#D97706' } : {}) }} />
-                )}
-              </div>
-            </label>
-            {!isAllDay && <label style={lStyle}>
-              <span>{'\uD83C\uDFC1'} Finish</span>
-              <input type="time" value={endTime || ''} step={60}
-                onChange={e => {
-                  var newEnd = e.target.value || '';
-                  setEndTime(newEnd);
-                  var startMin = minutesFrom24h(time);
-                  var endMin = minutesFrom24h(newEnd);
-                  if (startMin == null || endMin == null || endMin <= startMin) {
-                    setEndTimeError('Finish must be after start');
-                    return;
-                  }
-                  setEndTimeError(null);
-                  setDur(endMin - startMin);
-                  if (!isCreate && !isFixed) setDatePinned(true);
-                }}
-                style={{ ...iStyle, width: isMobile ? '100%' : undefined, minWidth: 0,
-                  ...(endTimeError ? { borderColor: '#DC2626' } : (datePinned && time ? { borderColor: '#D97706' } : {})) }} />
-              {endTimeError && (
-                <span style={{ fontSize: 10, color: '#DC2626', marginTop: 2 }}>{endTimeError}</span>
-              )}
-            </label>}
-            {!isAllDay && <label style={lStyle}>
-              <span>{'\u23F1'} Duration</span>
-              <select value={dur} onChange={e => {
-                var newDur = parseInt(e.target.value);
-                setDur(newDur);
-                // Keep finish in sync when user changes duration directly.
-                if (time) setEndTime(addMinutesTo24h(time, newDur));
-                setEndTimeError(null);
-              }} style={iStyle}>
-                {durOptions.map(v => (
-                  <option key={v} value={v}>{durLabel(v)}</option>
-                ))}
-              </select>
-            </label>}
-            {!isCreate && !marker && !isAllDay && <label style={lStyle}>
-              <span title="How much time is left to complete this task — can be less than Duration if you've already made progress on it.">{'\uD83D\uDCCA'} Remaining</span>
-              <select value={remVal} onChange={e => setTimeRemaining(parseInt(e.target.value))}
-                style={{ ...iStyle, background: remVal < parseInt(dur) ? TH.purpleBg : TH.inputBg }}>
-                {remOptions.map(v => (
-                  <option key={v} value={v}>{durLabel(v)}</option>
-                ))}
-              </select>
-            </label>}
-            {!marker && !disSplit && <label style={lStyle}>
-              <span>{'\u2702'} Split</span>
-              <button title={split ? 'Can be split into chunks' : 'Scheduled as one block'}
-                onClick={() => { var on = !split; setSplit(on); if (on) { setTravelBefore(0); setTravelAfter(0); } }}
-                style={togStyle(split, '#2D6A4F')}>{split ? '\u2702 Yes' : 'No'}</button>
-            </label>}
-            {split && !disSplit && !marker && (
-              <label style={lStyle}>
-                <span>Min</span>
-                <select value={splitMin} onChange={e => setSplitMin(parseInt(e.target.value))}
-                  style={{ ...iStyle, width: 'auto', minWidth: 55 }}>
-                  {[15,20,30,45,60].map(v => (
-                    <option key={v} value={v}>{v < 60 ? v + 'm' : '1h'}</option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </div>}
-
-          {/* Float / Fixed badge */}
-          {!recurring && !marker && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-              {isCalLinkedFixed ? (
-                <button onClick={function() { setManageCalDialog(true); }}
-                  title="Manage this task — edit in calendar or take ownership"
-                  style={{
-                  padding: '2px 10px', borderRadius: 4, border: '1px solid ' + TH.amberBorder,
-                  background: TH.amberBg, color: TH.amberText, fontSize: 10, fontWeight: 700,
-                  cursor: 'pointer', fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box'
-                }}>Fixed ↗</button>
-              ) : isFixed ? (
-                <button onClick={isPinned ? handleUnpin : handleUnfix}
-                  title={isPinned ? (task && task.taskType === 'recurring_instance' ? 'Reset to template — let scheduler regenerate' : 'Unpin — let scheduler choose time') : 'Click to float — let scheduler move this freely'}
-                  style={{
-                  padding: '2px 10px', borderRadius: 4, border: '1px solid ' + TH.amberBorder,
-                  background: TH.amberBg, color: TH.amberText, fontSize: 10, fontWeight: 700,
-                  cursor: 'pointer', fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box'
-                }}>Fixed ×</button>
-              ) : (
-                <button onClick={function() { setDatePinned(true); setWhen('fixed'); setSplit(false); }}
-                  title="Fix to this time — scheduler will not move it"
-                  style={{
-                  padding: '2px 10px', borderRadius: 4, border: '1px solid ' + TH.btnBorder,
-                  background: 'transparent', color: TH.textMuted, fontSize: 10, fontWeight: 600,
-                  cursor: 'pointer', fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box'
-                }}>Float</button>
-              )}
-              {isCalLinkedFixed
-                ? <span style={{ fontSize: 10, color: TH.amberText, cursor: 'pointer' }} onClick={function() { setManageCalDialog(true); }}>Set by calendar — click to manage</span>
-                : isFixed
-                  ? <span style={{ fontSize: 10, color: TH.amberText }}>Scheduler will not move this</span>
-                  : (!isCreate && date
-                      ? <span style={{ fontSize: 10, color: TH.textMuted }}>set by scheduler</span>
-                      : null)
-              }
-            </div>
-          )}
-
-          {/* Intended vs scheduled — only when scheduler moved the task */}
-          {!isCreate && !recurring && task.desiredAt && task.scheduledAt && task.desiredAt !== task.scheduledAt && !task.unscheduled && (function() {
-            var tz = task.tz || activeTimezone || 'America/New_York';
-            var intended = convertTimeForDisplay(task.desiredAt, tz);
-            var scheduled = convertTimeForDisplay(task.scheduledAt, tz);
-            if (!intended || !scheduled || (intended.date === scheduled.date && intended.time === scheduled.time)) return null;
-            var fmtTime = function(c) { return c && c.time ? c.time : ''; };
-            var sameDay = intended.date === scheduled.date;
-            return <div style={{ fontSize: 10, color: TH.textMuted, marginBottom: 5 }}>
-              {sameDay
-                ? <span>Moved: {fmtTime(intended)} {'\u2192'} <span style={{ color: TH.text }}>{fmtTime(scheduled)}</span></span>
-                : <span>Moved to <span style={{ color: TH.text }}>{scheduled.date}{fmtTime(scheduled) ? ' ' + fmtTime(scheduled) : ''}</span></span>}
-            </div>;
-          })()}
-
-          {/* Intended time for unscheduled tasks */}
-          {!isCreate && !recurring && task.desiredAt && task.unscheduled && (function() {
-            var tz = task.tz || activeTimezone || 'America/New_York';
-            var intended = convertTimeForDisplay(task.desiredAt, tz);
-            if (!intended) return null;
-            return <div style={{ fontSize: 10, marginBottom: 5 }}>
-              <span style={{ color: TH.redText }}>Unscheduled</span>
-              {intended.time ? <span style={{ color: TH.textMuted }}> — requested {intended.time}</span> : null}
-            </div>;
-          })()}
-
-          {/* Duration + Split for recurringTasks */}
-          {recurring && !marker && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, alignItems: 'flex-end' }}>
-            <label style={lStyle}>
-              <span>{'\u23F1'} Duration</span>
-              <select value={dur} onChange={e => setDur(parseInt(e.target.value))} style={iStyle}>
-                {durOptions.map(v => (
-                  <option key={v} value={v}>{durLabel(v)}</option>
-                ))}
-              </select>
-            </label>
-            {!isCreate && <label style={lStyle}>
-              <span title="How much time is left to complete this task — can be less than Duration if you've already made progress on it.">{'\uD83D\uDCCA'} Remaining</span>
-              <select value={remVal} onChange={e => setTimeRemaining(parseInt(e.target.value))}
-                style={{ ...iStyle, background: remVal < parseInt(dur) ? TH.purpleBg : TH.inputBg }}>
-                {remOptions.map(v => (
-                  <option key={v} value={v}>{durLabel(v)}</option>
-                ))}
-              </select>
-            </label>}
-            {!disSplit && <label style={lStyle}>
-              <span>{'\u2702'} Split</span>
-              <button title={split ? 'Can be split into chunks' : 'Scheduled as one block'}
-                onClick={() => { var on = !split; setSplit(on); if (on) { setTravelBefore(0); setTravelAfter(0); } }}
-                style={togStyle(split, '#2D6A4F')}>{split ? '\u2702 Yes' : 'No'}</button>
-            </label>}
-            {split && !disSplit && (
-              <label style={lStyle}>
-                <span>Min</span>
-                <select value={splitMin} onChange={e => setSplitMin(parseInt(e.target.value))}
-                  style={{ ...iStyle, width: 'auto', minWidth: 55 }}>
-                  {[15,20,30,45,60].map(v => (
-                    <option key={v} value={v}>{v < 60 ? v + 'm' : '1h'}</option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </div>}
-          {recurring && !marker && split && !disSplit && (
-            <div style={{ fontSize: 10, color: TH.textMuted, marginTop: -2, marginBottom: 5, lineHeight: 1.3 }}>
-              Chunks stay on the same day as the instance. If a chunk doesn't
-              fit, it's dropped rather than moved to a later day.
-            </div>
-          )}
-
-          {/* Travel time buffers — hidden for all-day, markers, and split tasks */}
-          {!marker && !isAllDay && !split && <div style={{ display: 'flex', gap: 6, marginBottom: 5 }}>
-            <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
-              <span title="Travel buffer before the task — scheduler prevents overlaps">{'\uD83D\uDE97'} Travel before</span>
-              <select value={travelBefore} onChange={e => setTravelBefore(parseInt(e.target.value))} style={iStyle}>
-                {[0, 5, 10, 15, 20, 30, 45, 60, 90].map(v => (
-                  <option key={v} value={v}>{v === 0 ? 'None' : v + ' min'}</option>
-                ))}
-              </select>
-            </label>
-            <label style={{ ...lStyle, flex: 1, marginBottom: 0 }}>
-              <span title="Travel buffer after the task — scheduler prevents overlaps">Travel after</span>
-              <select value={travelAfter} onChange={e => setTravelAfter(parseInt(e.target.value))} style={iStyle}>
-                {[0, 5, 10, 15, 20, 30, 45, 60, 90].map(v => (
-                  <option key={v} value={v}>{v === 0 ? 'None' : v + ' min'}</option>
-                ))}
-              </select>
-            </label>
-          </div>}
-
-          {!marker && !recurring && (function() {
-            var tagParts = whenParts.filter(function(p) { return p !== 'anytime' && p !== 'allday' && p !== 'fixed'; });
-            var isWindows = tagParts.length > 0;
-            var isAnytime = !isAllDay && !isFixed && !isWindows;
-            return (
-                <div style={{ marginBottom: 5 }}>
-                  <div style={{ fontSize: 9, color: TH.muted2, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, opacity: isFixed ? 0.4 : 1 }}>Scheduling mode</div>
-                  <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 8, opacity: isFixed ? 0.35 : 1, pointerEvents: isFixed ? 'none' : undefined }}>
-                  <button title="No time restriction — the scheduler can place this in any available slot"
-                    onClick={function() { setDatePinned(false); setWhen(''); }}
-                    style={togStyle(isAnytime, '#2D6A4F')}>{'\uD83D\uDD04'} Anytime</button>
-                  <button title="Spans the entire day"
-                    onClick={function() { setDatePinned(false); setWhen('allday'); setSplit(false); setTravelBefore(0); setTravelAfter(0); }}
-                    style={togStyle(isAllDay, '#C8942A')}>{'\u2600\uFE0F'} All Day</button>
-                  </div>
-                  <div style={{ fontSize: 9, color: TH.muted2, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, opacity: isFixed ? 0.4 : 1 }}>Preferred time windows</div>
-                  <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 6, opacity: isFixed ? 0.35 : 1, pointerEvents: isFixed ? 'none' : undefined }}>
-                  {(uniqueTags || []).map(function(tb) {
-                    var isOn = tagParts.indexOf(tb.tag) !== -1;
-                    return (
-                      <button key={tb.tag}
-                        title={isAllDay
-                          ? tb.name + ' time window — clicking will switch out of All Day mode'
-                          : tb.name + ' time window — selecting any window disables Anytime'}
-                        onClick={function() {
-                          if (isAllDay) {
-                            setDatePinned(false);
-                            setWhen(tb.tag);
-                          } else {
-                            var cur = tagParts.slice();
-                            if (isOn) { cur = cur.filter(function(v) { return v !== tb.tag; }); }
-                            else { cur.push(tb.tag); }
-                            setWhen(cur.length === 0 ? '' : cur.join(','));
-                          }
-                        }} style={{
-                          ...togStyle(isOn && !isAllDay, tb.color),
-                          opacity: isAllDay ? 0.55 : 1
-                        }}>{tb.icon} {tb.name}</button>
-                    );
-                  })}
-                  {isWindows && <>
-                    <span style={{ width: 1, height: 18, background: TH.border, margin: '0 2px' }} />
-                    <button title={flexWhen ? 'Flex: scheduler tries other slots if selected windows are full' : 'Strict: only placed in selected windows'}
-                      onClick={function() { setFlexWhen(!flexWhen); }}
-                      style={togStyle(flexWhen, '#C8942A')}>
-                      {flexWhen ? '~ Flex' : 'Strict'}
-                    </button>
-                  </>}
-                  </div>
-                </div>
-              );
-            })()}
-
-          {/* Day requirement — hidden for recurringTasks and fixed tasks */}
-          {!marker && !recurring && !isFixed && (
-          <label style={{ ...lStyle, marginBottom: 5 }}>
-            <span title="Restrict which days the scheduler can place this task.">Day requirement</span>
-            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-              <button title="No day restriction" onClick={function() { setDayReq('any'); }}
-                style={togStyle(dayReq === 'any', '#2D6A4F')}>Any</button>
-              <button title="Monday through Friday only" onClick={function() { setDayReq(dayReq === 'weekday' ? 'any' : 'weekday'); }}
-                style={togStyle(dayReq === 'weekday', '#4338CA')}>Wkday</button>
-              <button title="Saturday or Sunday only" onClick={function() { setDayReq(dayReq === 'weekend' ? 'any' : 'weekend'); }}
-                style={togStyle(dayReq === 'weekend', '#4338CA')}>Wkend</button>
-              {[['Su','Su'],['M','Mo'],['T','Tu'],['W','We'],['R','Th'],['F','Fr'],['Sa','Sa']].map(function(pair) {
-                var code = pair[0], label = pair[1];
-                var selected = dayReq ? dayReq.split(',') : [];
-                var isOn = selected.indexOf(code) >= 0;
-                return (
-                  <button key={code} title={({Su:'Sunday',M:'Monday',T:'Tuesday',W:'Wednesday',R:'Thursday',F:'Friday',Sa:'Saturday'})[code]}
-                    onClick={function() {
-                      var cur = dayReq && dayReq !== 'any' && dayReq !== 'weekday' && dayReq !== 'weekend' ? dayReq.split(',') : [];
-                      if (isOn) { cur = cur.filter(function(v) { return v !== code; }); }
-                      else { cur.push(code); }
-                      setDayReq(cur.length === 0 ? 'any' : cur.join(','));
-                    }}
-                    style={togStyle(isOn)}>{label}</button>
-                );
-              })}
-            </div>
-          </label>)}
-
-          {/* Deadline + Start after — hidden for markers, recurringTasks, and fixed tasks */}
-          {!marker && !recurring && !isFixed && <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5, alignItems: 'flex-end', maxWidth: '100%' }}>
-            <label style={lStyle}>
-              <span title="Hard deadline. The scheduler places this task on or before this date.">{'\uD83D\uDCC6'} Deadline</span>
-              <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                <input type="date" value={deadline || ''}
-                  onChange={e => setDeadline(e.target.value || '')}
-                  style={{ ...iStyle, minWidth: 0, flex: 1, ...(deadline ? { background: TH.amberBg } : {}) }} />
-                {deadline && (
-                  <button onClick={() => setDeadline('')} style={{
-                    fontSize: 9, background: 'none', border: 'none', color: TH.redText,
-                    cursor: 'pointer', padding: 0, fontWeight: 700
-                  }}>{'\u2715'}</button>
-                )}
-              </div>
-            </label>
-            <label style={lStyle}>
-              <span title="Task will not be scheduled before this date.">{'\u23F3'} Not before</span>
-              <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                <input type="date" value={startAfter || ''}
-                  onChange={e => setStartAfter(e.target.value || '')}
-                  style={{ ...iStyle, minWidth: 0, flex: 1, ...(startAfter ? { background: TH.blueBg } : {}) }} />
-                {startAfter && (
-                  <button onClick={() => setStartAfter('')} style={{
-                    fontSize: 9, background: 'none', border: 'none', color: TH.redText,
-                    cursor: 'pointer', padding: 0, fontWeight: 700
-                  }}>{'\u2715'}</button>
-                )}
-              </div>
-            </label>
-          </div>}
-
-          {/* Split moved to be next to Duration */}
-
-          {/* Recurrence */}
-          {!marker &&
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <label style={lStyle}>
-              <span title="Automatically generate copies of this task on a schedule.">{'\uD83D\uDD01'} Recurrence</span>
-              <select value={recurType} onChange={e => {
-                var val = e.target.value;
-                setRecurType(val);
-                if (val === 'weekly' || val === 'biweekly') setDayReq('any');
-                // Recurrence drives recurring status: recurring = recurring, none = regular task
-                if (val === 'none') { setRecurring(false); setRigid(false); }
-                else { setRecurring(true); setSplit(false); setDayReq('any'); }
-              }} style={iStyle}>
-                <option value="none">None</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="biweekly">Biweekly</option>
-                <option value="monthly">Monthly (pick days)</option>
-                <option value="interval">Every N (days/wks/mo/yr)</option>
-              </select>
-            </label>
-            {(recurType === 'weekly' || recurType === 'biweekly') && (function() {
-              var selectedCount = recurDays.length;
-              return <label style={lStyle}>
-                Days
-                <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <button onClick={function() { setRecurDays('MTWRF'); }}
-                    style={togStyle(recurDays === 'MTWRF', '#4338CA')}>Wkday</button>
-                  <button onClick={function() { setRecurDays('SU'); }}
-                    style={togStyle(recurDays === 'SU' || recurDays === 'US', '#4338CA')}>Wkend</button>
-                  <span style={{ width: 1, height: 18, background: TH.border, margin: '0 1px' }} />
-                  {[['U','Su'],['M','Mo'],['T','Tu'],['W','We'],['R','Th'],['F','Fr'],['S','Sa']].map(function(pair) {
-                    var code = pair[0], label = pair[1];
-                    var active = recurDays.includes(code);
-                    return (
-                      <button key={code} onClick={function() {
-                        setRecurDays(active ? recurDays.replace(code, '') : recurDays + code);
-                      }} style={togStyle(active)}>{label}</button>
-                    );
-                  })}
-                </div>
-                {selectedCount > 1 && (
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
-                    <span style={{ fontSize: 10, color: TH.textMuted }}>Times per {recurType === 'biweekly' ? '2 weeks' : 'week'}:</span>
-                    <select value={recurTimesPerCycle || selectedCount} onChange={function(e) { setRecurTimesPerCycle(parseInt(e.target.value)); }}
-                      style={{ ...iStyle, width: 'auto', minWidth: 50 }}>
-                      {Array.from({ length: selectedCount }, function(_, i) { return i + 1; }).map(function(n) {
-                        return <option key={n} value={n}>{n}{n === selectedCount ? ' (all)' : ''}</option>;
-                      })}
-                    </select>
-                    {(recurTimesPerCycle > 0 && recurTimesPerCycle < selectedCount) && (
-                      <span style={{ fontSize: 9, color: '#C8942A' }}>{'\u2248'}every {Math.round((recurType === 'biweekly' ? 14 : 7) / recurTimesPerCycle * 10) / 10} days</span>
-                    )}
-                  </div>
-                )}
-                {(recurTimesPerCycle > 0 && recurTimesPerCycle < selectedCount) && (
-                  <div style={{ marginTop: 6, paddingLeft: 6, borderLeft: '2px solid ' + TH.border, fontSize: 11 }}>
-                    <div style={{ fontSize: 10, color: TH.textMuted, marginBottom: 3 }}>When you skip or miss a session:</div>
-                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer', marginBottom: 2 }}>
-                      <input type="radio" checked={recurFillPolicy !== 'backfill'} onChange={function() { setRecurFillPolicy('keep'); }} style={{ marginTop: 2 }} />
-                      <span><strong>Keep the schedule</strong>
-                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'—'} skipped sessions stay skipped; the week's count may end below the target. Best for habits where spacing matters more than hitting the number.</span>
-                      </span>
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer' }}>
-                      <input type="radio" checked={recurFillPolicy === 'backfill'} onChange={function() { setRecurFillPolicy('backfill'); }} style={{ marginTop: 2 }} />
-                      <span><strong>Backfill missed slots</strong>
-                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'—'} the scheduler picks a new date to replace each skipped session, aiming for the target count. Can feel pushy if you skip often.</span>
-                      </span>
-                    </label>
-                  </div>
-                )}
-              </label>;
-            })()}
-            {recurType === 'monthly' && (function() {
-              var mdArr = Array.isArray(recurMonthDays) ? recurMonthDays : Object.keys(recurMonthDays || {});
-              var mdCount = mdArr.length;
-              return <label style={lStyle}>
-                Days of month
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, maxWidth: 260 }}>
-                  {[['first', '1st'], ['last', 'Last']].concat(
-                    Array.from({ length: 28 }, function(_, i) { return [String(i + 1), String(i + 1)]; })
-                  ).map(function(pair) {
-                    var val = pair[0], label = pair[1];
-                    var active = mdArr.indexOf(val) >= 0 || mdArr.indexOf(Number(val)) >= 0;
-                    return (
-                      <button key={val} onClick={function() {
-                        setRecurMonthDays(function(prev) {
-                          var arr = Array.isArray(prev) ? prev : Object.keys(prev || {});
-                          var norm = arr.map(String);
-                          var sv = String(val);
-                          return norm.indexOf(sv) >= 0 ? arr.filter(function(d) { return String(d) !== sv; }) : arr.concat([val]);
-                        });
-                      }} style={{ ...togStyle(active), minWidth: label.length > 2 ? 32 : 22, fontSize: 9 }}>{label}</button>
-                    );
-                  })}
-                </div>
-                {mdCount > 1 && (
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
-                    <span style={{ fontSize: 10, color: TH.textMuted }}>Times per month:</span>
-                    <select value={recurTimesPerCycle || mdCount} onChange={function(e) { setRecurTimesPerCycle(parseInt(e.target.value)); }}
-                      style={{ ...iStyle, width: 'auto', minWidth: 50 }}>
-                      {Array.from({ length: mdCount }, function(_, i) { return i + 1; }).map(function(n) {
-                        return <option key={n} value={n}>{n}{n === mdCount ? ' (all)' : ''}</option>;
-                      })}
-                    </select>
-                    {(recurTimesPerCycle > 0 && recurTimesPerCycle < mdCount) && (
-                      <span style={{ fontSize: 9, color: '#C8942A' }}>{'\u2248'}every {Math.round((recurType === 'biweekly' ? 14 : 7) / recurTimesPerCycle * 10) / 10} days</span>
-                    )}
-                  </div>
-                )}
-                {(recurTimesPerCycle > 0 && recurTimesPerCycle < mdCount) && (
-                  <div style={{ marginTop: 6, paddingLeft: 6, borderLeft: '2px solid ' + TH.border, fontSize: 11 }}>
-                    <div style={{ fontSize: 10, color: TH.textMuted, marginBottom: 3 }}>When you skip or miss a session:</div>
-                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer', marginBottom: 2 }}>
-                      <input type="radio" checked={recurFillPolicy !== 'backfill'} onChange={function() { setRecurFillPolicy('keep'); }} style={{ marginTop: 2 }} />
-                      <span><strong>Keep the schedule</strong>
-                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'—'} skipped sessions stay skipped; the month's count may end below the target. Best when spacing matters more than hitting the number.</span>
-                      </span>
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer' }}>
-                      <input type="radio" checked={recurFillPolicy === 'backfill'} onChange={function() { setRecurFillPolicy('backfill'); }} style={{ marginTop: 2 }} />
-                      <span><strong>Backfill missed slots</strong>
-                        <span style={{ color: TH.textMuted, fontSize: 10 }}> {'—'} the scheduler picks a new date to replace each skipped session, aiming for the target count. Can feel pushy if you skip often.</span>
-                      </span>
-                    </label>
-                  </div>
-                )}
-              </label>;
-            })()}
-            {recurType === 'interval' && (
-              <label style={lStyle}>
-                Interval
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{ fontSize: 10, color: TH.text }}>Every</span>
-                  <input type="number" value={recurEvery} onChange={e => setRecurEvery(e.target.value)} min={1}
-                    style={{ ...iStyle, width: 50 }} />
-                  <select value={recurUnit} onChange={e => setRecurUnit(e.target.value)} style={{ ...iStyle, width: 'auto' }}>
-                    <option value="days">day(s)</option>
-                    <option value="weeks">week(s)</option>
-                    <option value="months">month(s)</option>
-                    <option value="years">year(s)</option>
-                  </select>
-                </div>
-              </label>
-            )}
-          </div>}
-
-          {/* Recurrence date range — when to start/stop generating instances */}
-          {recurring && !marker && recurType !== 'none' && (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
-              <label style={lStyle}>
-                <span title={recurIsAnchorDependent
-                  ? 'Required for biweekly, interval, or times-per-cycle patterns — the scheduler measures cycles from this date.'
-                  : 'Date to start generating instances for this recurring task'}>
-                  {'\u23EF\uFE0F'} Recurrence starts
-                  {recurIsAnchorDependent && <span style={{ color: TH.redText, marginLeft: 2 }}>*</span>}
-                </span>
-                <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                  <input type="date" value={recurStart || ''} onChange={e => setRecurringStart(e.target.value || '')} style={iStyle} required={recurIsAnchorDependent} />
-                  {recurStart && !recurIsAnchorDependent && (
-                    <button onClick={() => setRecurringStart('')} style={{
-                      fontSize: 9, background: 'none', border: 'none', color: TH.redText,
-                      cursor: 'pointer', padding: 0, fontWeight: 700
-                    }}>{'\u2715'}</button>
-                  )}
-                </div>
-              </label>
-              <label style={lStyle}>
-                <span title="Date to stop generating new instances">{'\u23F9'} Recurrence ends</span>
-                <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                  <input type="date" value={recurEnd || ''} onChange={e => setRecurringEnd(e.target.value || '')} style={iStyle} />
-                  {recurEnd && (
-                    <button onClick={() => setRecurringEnd('')} style={{
-                      fontSize: 9, background: 'none', border: 'none', color: TH.redText,
-                      cursor: 'pointer', padding: 0, fontWeight: 700
-                    }}>{'\u2715'}</button>
-                  )}
-                </div>
-              </label>
-            </div>
-          )}
-
-          {/* Configuration warnings */}
-          {configWarnings.length > 0 && (
-            <div style={{ background: TH.amberBg, border: '1px solid ' + TH.amberBorder, borderRadius: 4, padding: '4px 8px', marginTop: 5, fontSize: 10, color: TH.amberText, lineHeight: 1.4 }}>
-              {configWarnings.map(function(w, i) {
-                return <div key={i}>{'\u26A0\uFE0F'} {w}</div>;
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* ═══ SECTION: Where ═══ */}
-        {!marker &&
-        <div style={secStyle}>
-          <div style={secHead}>{'\uD83D\uDCCD'} Where</div>
-          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-            <button onClick={() => setTaskLoc([])} title="Task can be done at any location"
-              style={togStyle(taskLoc.length === 0, '#2D6A4F')}>{'\uD83C\uDF0D'} Anywhere</button>
-            {(locations || []).map(loc => {
-              var isOn = taskLoc.indexOf(loc.id) !== -1;
-              var anywhere = taskLoc.length === 0;
-              return (
-                <button key={loc.id} title={'Restrict to ' + loc.name} onClick={() => {
-                  if (anywhere) { setTaskLoc([loc.id]); }
-                  else { setTaskLoc(isOn ? taskLoc.filter(x => x !== loc.id) : [...taskLoc, loc.id]); }
-                }} style={{ ...togStyle(isOn && !anywhere), opacity: anywhere ? 0.4 : 1 }}>
-                  {loc.icon} {loc.name}
-                </button>
-              );
-            })}
-          </div>
-        </div>}
-
-        {/* ═══ SECTION: Weather ═══ */}
-        {!marker &&
-        <div style={secStyle}>
-          <div style={secHead}>{'\u26C5'} Weather</div>
-          <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Precipitation</div>
-          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 8 }}>
-            {[
-              { val: 'any',      label: '\uD83C\uDF26\uFE0F Any' },
-              { val: 'wet_ok',   label: '\uD83C\uDF27\uFE0F Precip OK' },
-              { val: 'light_ok', label: '\uD83C\uDF02 Light OK' },
-              { val: 'dry_only', label: '\u2600\uFE0F Dry only' },
-            ].map(function(o) {
-              return <button key={o.val} onClick={() => setWeatherPrecip(o.val)} style={togStyle(weatherPrecip === o.val)}>{o.label}</button>;
-            })}
-          </div>
-          <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Sky cover</div>
-          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 8 }}>
-            {[
-              { val: 'any',         label: '\u26C5 Any' },
-              { val: 'overcast_ok', label: '\u2601\uFE0F Overcast OK' },
-              { val: 'partly_ok',   label: '\uD83C\uDF24\uFE0F Partly OK' },
-              { val: 'clear',       label: '\u2600\uFE0F Clear' },
-            ].map(function(o) {
-              return <button key={o.val} onClick={() => setWeatherCloud(o.val)} style={togStyle(weatherCloud === o.val)}>{o.label}</button>;
-            })}
-          </div>
-        </div>}
-
-        {/* ═══ SECTION: Tools ═══ */}
-        {!marker && (tools || []).length > 0 &&
-        <div style={secStyle}>
-          <div style={secHead}>{'\uD83D\uDD27'} Tools</div>
-          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-            {(tools || []).map(tool => {
-              var isOn = taskTools.indexOf(tool.id) !== -1;
-              return (
-                <button key={tool.id} title={'Requires ' + tool.name} onClick={() => {
-                  setTaskTools(isOn ? taskTools.filter(x => x !== tool.id) : [...taskTools, tool.id]);
-                }} style={togStyle(isOn)}>{tool.icon} {tool.name}</button>
-              );
-            })}
-          </div>
-        </div>}
-
-        {/* (Dependencies moved into Task section above) */}
-
-          </>);
-        })()}
-
-        {/* Metadata footer — created, scheduled window, slack */}
-        {!isCreate && (function() {
-          var mN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-          var created = task.createdAt ? new Date(task.createdAt) : null;
-          var createdStr = created
-            ? mN[created.getMonth()] + ' ' + created.getDate() + ', ' + created.getFullYear()
-            : '—';
-
-          // Parse task.time ("2:00 PM") + task.dur (minutes) → "2:00 PM \u2192 3:30 PM"
-          var startStr = null, endStr = null;
-          if (task.time) startStr = task.time;
-          if (task.time && task.dur) {
-            var m = task.time.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-            if (m) {
-              var hh = parseInt(m[1], 10), mm = parseInt(m[2], 10), ap = (m[3] || '').toUpperCase();
-              if (ap === 'PM' && hh < 12) hh += 12;
-              if (ap === 'AM' && hh === 12) hh = 0;
-              var total = hh * 60 + mm + task.dur;
-              if (total < 24 * 60) {
-                var eh = Math.floor(total / 60), em = total % 60;
-                var eap = eh >= 12 ? 'PM' : 'AM';
-                var eh12 = eh % 12 || 12;
-                endStr = eh12 + ':' + (em < 10 ? '0' : '') + em + ' ' + eap;
-              }
-            }
-          }
-
-          // Slack: null means Infinity (no deadline / no constraint).
-          var s = task.slackMins;
-          var slackStr;
-          if (s == null) {
-            slackStr = '\u221E'; // ∞
-          } else if (s <= 0) {
-            slackStr = '0m';
-          } else if (s < 60) {
-            slackStr = s + 'm';
-          } else {
-            slackStr = Math.floor(s / 60) + 'h ' + (s % 60) + 'm';
-          }
-
-          var rowStyle = { display: 'flex', gap: 6, fontSize: 10, color: TH.textMuted, lineHeight: 1.5 };
-          var labelStyle = { minWidth: 64, fontWeight: 600, color: TH.textMuted };
-          return (
-            <div style={{
-              marginTop: 12, padding: '8px 12px', borderTop: '1px solid ' + TH.border,
-              fontFamily: 'inherit'
-            }}>
-              <div style={rowStyle}><span style={labelStyle}>Created</span><span>{createdStr}</span></div>
-              <div style={rowStyle}>
-                <span style={labelStyle}>Scheduled</span>
-                <span>{startStr ? (endStr ? startStr + ' \u2192 ' + endStr : startStr) : '—'}</span>
-              </div>
-              <div style={rowStyle}><span style={labelStyle} title="How much time the scheduler can shift this task before it misses its deadline. ∞ means no deadline constraint.">Slack</span><span>{slackStr}</span></div>
-            </div>
-          );
-        })()}
-      </div>
+      {!isCreate && (
+        <CollapsibleSection id="meta" label="Metadata" isOpen={!!collapse.meta}
+          onToggle={toggleCollapse} TH={TH}>
+          <MetaSection task={task} TH={TH} />
+        </CollapsibleSection>
+      )}
 
       {manageCalDialog && !isCreate && task && (
         <ManageCalTaskDialog
-          task={task}
-          darkMode={darkMode}
+          task={task} darkMode={darkMode}
           onClose={function() { setManageCalDialog(false); }}
-          onOwnershipTaken={function(updatedTask) {
-            if (onUpdate && updatedTask) onUpdate(updatedTask);
-          }}
+          onOwnershipTaken={function(updatedTask) { if (onUpdate && updatedTask) onUpdate(updatedTask); }}
         />
       )}
     </>
   );
+
 
   // Sidebar mode (desktop): render inline, no overlay
   if (!isMobile) {
