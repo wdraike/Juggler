@@ -84,7 +84,7 @@ function TimezoneSelector({ taskTz, onChangeTz, TH }) {
       </button>
       {tzOpen && (
         <div style={{
-          position: 'absolute', top: '100%', right: 0, zIndex: 200, width: 280,
+          position: 'absolute', top: '100%', left: 0, zIndex: 200, width: 280,
           background: TH.bgCard, border: '1px solid ' + TH.inputBorder, borderRadius: 6,
           boxShadow: '0 4px 16px rgba(0,0,0,0.2)'
         }}>

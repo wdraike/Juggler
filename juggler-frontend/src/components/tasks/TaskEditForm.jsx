@@ -782,6 +782,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   if (weatherPrecip && weatherPrecip !== 'any') weatherBadgeParts.push(WEATHER_PRECIP_ICONS[weatherPrecip] || '');
   if (weatherCloud && weatherCloud !== 'any') weatherBadgeParts.push(WEATHER_CLOUD_ICONS[weatherCloud] || '');
   if (weatherTempMin || weatherTempMax) weatherBadgeParts.push((weatherTempMin || '?') + '–' + (weatherTempMax || '?') + '°');
+  if (weatherHumidityMin || weatherHumidityMax) weatherBadgeParts.push('💧' + (weatherHumidityMin || '?') + '–' + (weatherHumidityMax || '?') + '%');
   var weatherBadge = weatherBadgeParts.length > 0 ? weatherBadgeParts.join(' ') : null;
   var toolsBadge = taskTools.length > 0 ? iconBadge(taskTools, tools || []) : null;
 
