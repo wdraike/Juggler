@@ -20,6 +20,13 @@ import DependsOnSection from './sections/DependsOnSection';
 import WhenSection from './sections/WhenSection';
 
 
+var WEATHER_PRECIP_ICONS = { wet_ok: '🌧️', light_ok: '🌂', dry_only: '☀️' };
+var WEATHER_CLOUD_ICONS = { overcast_ok: '☁️', partly_ok: '🌤️', clear: '☀️' };
+
+function iconBadge(ids, catalog) {
+  return ids.map(function(id) { var item = catalog.find(function(x) { return x.id === id; }); return item ? item.icon : null; }).filter(Boolean).join(' ') || null;
+}
+
 // ---------------------------------------------------------------------------
 // ManageCalTaskDialog — shown when user clicks Fixed ↗ on a calendar-owned task
 // ---------------------------------------------------------------------------
@@ -715,6 +722,14 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     onClose();
   }
 
+  var whereBadge = taskLoc.length > 0 ? iconBadge(taskLoc, locations || []) : null;
+  var weatherBadgeParts = [];
+  if (weatherPrecip && weatherPrecip !== 'any') weatherBadgeParts.push(WEATHER_PRECIP_ICONS[weatherPrecip] || '');
+  if (weatherCloud && weatherCloud !== 'any') weatherBadgeParts.push(WEATHER_CLOUD_ICONS[weatherCloud] || '');
+  if (weatherTempMin || weatherTempMax) weatherBadgeParts.push((weatherTempMin || '?') + '–' + (weatherTempMax || '?') + '°');
+  var weatherBadge = weatherBadgeParts.length > 0 ? weatherBadgeParts.join(' ') : null;
+  var toolsBadge = taskTools.length > 0 ? iconBadge(taskTools, tools || []) : null;
+
   var dialogContent = (
     <>
       <TaskDetailHeader
@@ -777,7 +792,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       {!marker && (
         <CollapsibleSection id="where" label="Where" isOpen={!!collapse.where}
           onToggle={toggleCollapse}
-          badge={taskLoc.length > 0 ? taskLoc.length + ' location' + (taskLoc.length > 1 ? 's' : '') : null}
+          badge={whereBadge}
           TH={TH}>
           <WhereSection locations={locations} taskLoc={taskLoc} onChange={setTaskLoc} TH={TH} isMobile={isMobile} />
         </CollapsibleSection>
@@ -786,7 +801,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       {!marker && (
         <CollapsibleSection id="weather" label="Weather" isOpen={!!collapse.weather}
           onToggle={toggleCollapse}
-          badge={(weatherTempMin || weatherTempMax) ? (weatherTempMin || '?') + '–' + (weatherTempMax || '?') + '°' : null}
+          badge={weatherBadge}
           TH={TH}>
           <WeatherSection
             weatherPrecip={weatherPrecip} weatherCloud={weatherCloud}
@@ -808,7 +823,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       {!marker && (tools || []).length > 0 && (
         <CollapsibleSection id="tools" label="Tools" isOpen={!!collapse.tools}
           onToggle={toggleCollapse}
-          badge={taskTools.length > 0 ? taskTools.length + ' tool' + (taskTools.length > 1 ? 's' : '') : null}
+          badge={toolsBadge}
           TH={TH}>
           <ToolsSection tools={tools} taskTools={taskTools} onChange={setTaskTools} TH={TH} isMobile={isMobile} />
         </CollapsibleSection>
