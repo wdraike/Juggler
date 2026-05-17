@@ -14,6 +14,7 @@ import HealthDot from './HealthDot';
 import FontSizeControl from './FontSizeControl';
 import UserDropdown from './UserDropdown';
 
+import { Settings, CreditCard, Bug, LogOut } from 'lucide-react';
 import { services, homeUrl } from '../../proxy-config';
 var BILLING_URL = services.billing.frontend;
 
@@ -66,14 +67,14 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
   // Overflow menu items — shown at mobile AND tablet-ish widths
   var overflowItems = [];
   if (useOverflow) {
-    overflowItems.push({ label: 'Settings', icon: '⚙️', onClick: onShowSettings });
+    overflowItems.push({ label: 'Settings', icon: <Settings size={16} />, onClick: onShowSettings });
     overflowItems.push({ label: 'Import/Export', icon: '📦', onClick: onShowExport });
     if (onShowCalSync || onShowGCalSync || onShowMsftCalSync) overflowItems.push({ label: 'Calendar Sync', icon: '📅', onClick: onShowCalSync || onShowGCalSync || onShowMsftCalSync });
     if (onShowHelp) overflowItems.push({ label: 'Help', icon: '❓', onClick: onShowHelp });
-    overflowItems.push({ label: 'Report Issue', icon: '🐛', onClick: function() { setShowFeedback(true); } });
-    overflowItems.push({ label: 'Billing', icon: '💳', onClick: function() { window.open(BILLING_URL + '/plans', '_blank'); } });
+    overflowItems.push({ label: 'Report Issue', icon: <Bug size={16} />, onClick: function() { setShowFeedback(true); } });
+    overflowItems.push({ label: 'Billing', icon: <CreditCard size={16} />, onClick: function() { window.open(BILLING_URL + '/plans', '_blank'); } });
     overflowItems.push({ label: darkMode ? 'Light Mode' : 'Dark Mode', icon: darkMode ? '☀️' : '🌙', onClick: function() { setDarkMode(function(d) { return !d; }); } });
-    if (user) overflowItems.push({ label: 'Sign Out', icon: '🚪', onClick: logout });
+    if (user) overflowItems.push({ label: 'Sign Out', icon: <LogOut size={16} />, onClick: logout });
   }
 
   return (
@@ -177,7 +178,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
         {/* Desktop: show all buttons inline */}
         {!useOverflow && (
           <>
-            <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings — locations, tools, templates, and preferences">&#x2699;&#xFE0F;</button>
+            <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings — locations, tools, templates, and preferences"><Settings size={16} /></button>
             <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export — save or load tasks as JSON">&#x1F4E6;</button>
             {(onShowGCalSync || onShowMsftCalSync) && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
