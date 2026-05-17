@@ -150,8 +150,13 @@ export default function WhenSection(props) {
     recurDays, onRecurDaysChange,
     recurEvery, onRecurEveryChange,
     recurTpc, onRecurTpcChange,
+    recurFillPolicy, onRecurFillPolicyChange,
+    recurUnit, onRecurUnitChange,
+    recurMonthDays, onRecurMonthDaysChange,
     recurStart, onRecurStartChange,
     recurEnd, onRecurEndChange,
+    recurIsAnchorDependent,
+    configWarnings,
     deadline, onDeadlineChange,
     startAfter, onStartAfterChange,
     split, onSplitChange,
@@ -187,6 +192,22 @@ export default function WhenSection(props) {
       background: on ? (color || TH.accent) + '22' : TH.bgCard,
       color: on ? (color || TH.accent) : TH.textMuted,
     };
+  }
+
+  function FillPolicyBlock(cycleLabel) {
+    return (
+      <div style={{ marginTop: 6, paddingLeft: 6, borderLeft: '2px solid ' + TH.border, fontSize: 11 }}>
+        <div style={{ fontSize: 10, color: TH.textMuted, marginBottom: 3 }}>When you skip or miss a session:</div>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer', marginBottom: 2 }}>
+          <input type="radio" checked={recurFillPolicy !== 'backfill'} onChange={function() { onRecurFillPolicyChange('keep'); }} style={{ marginTop: 2 }} />
+          <span><strong>Keep the schedule</strong><span style={{ color: TH.textMuted, fontSize: 10 }}> — skipped sessions stay skipped; the {cycleLabel}'s count may end below the target.</span></span>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 4, cursor: 'pointer' }}>
+          <input type="radio" checked={recurFillPolicy === 'backfill'} onChange={function() { onRecurFillPolicyChange('backfill'); }} style={{ marginTop: 2 }} />
+          <span><strong>Backfill missed slots</strong><span style={{ color: TH.textMuted, fontSize: 10 }}> — the scheduler picks a new date to replace each skipped session.</span></span>
+        </label>
+      </div>
+    );
   }
 
   var isRecurring = !!recurring;
@@ -257,37 +278,146 @@ export default function WhenSection(props) {
       TH={TH}
     >
       <div>
-        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 6 }}>
-          {['none', 'daily', 'weekly', 'weekdays', 'custom'].map(function(rt) {
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+          <label style={lStyle}>
+            <span title="Automatically generate copies of this task on a schedule.">🔁 Recurrence</span>
+            <select value={recurType} onChange={function(e) { onRecurTypeChange(e.target.value); }} style={{ ...iStyle, width: 'auto' }}>
+              <option value="none">None</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="biweekly">Biweekly</option>
+              <option value="monthly">Monthly (pick days)</option>
+              <option value="interval">Every N (days/wks/mo/yr)</option>
+            </select>
+          </label>
+
+          {(recurType === 'weekly' || recurType === 'biweekly') && (function() {
+            var selectedCount = recurDays ? recurDays.length : 0;
             return (
-              <button key={rt} onClick={() => onRecurTypeChange(rt)} style={togStyle(recurType === rt)}>
-                {rt.charAt(0).toUpperCase() + rt.slice(1)}
-              </button>
+              <label style={lStyle}>
+                Days
+                <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <button onClick={function() { onRecurDaysChange('MTWRF'); }} style={togStyle(recurDays === 'MTWRF', '#4338CA')}>Wkday</button>
+                  <button onClick={function() { onRecurDaysChange('SU'); }} style={togStyle(recurDays === 'SU' || recurDays === 'US', '#4338CA')}>Wkend</button>
+                  <span style={{ width: 1, height: 18, background: TH.border, margin: '0 1px' }} />
+                  {[['U','Su'],['M','Mo'],['T','Tu'],['W','We'],['R','Th'],['F','Fr'],['S','Sa']].map(function(pair) {
+                    var code = pair[0], label = pair[1];
+                    var active = recurDays && recurDays.includes(code);
+                    return (
+                      <button key={code} onClick={function() {
+                        onRecurDaysChange(active ? (recurDays || '').replace(code, '') : (recurDays || '') + code);
+                      }} style={togStyle(active)}>{label}</button>
+                    );
+                  })}
+                </div>
+                {selectedCount > 1 && (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
+                    <span style={{ fontSize: 10, color: TH.textMuted }}>Times per {recurType === 'biweekly' ? '2 weeks' : 'week'}:</span>
+                    <select value={recurTpc || selectedCount} onChange={function(e) { onRecurTpcChange(parseInt(e.target.value)); }}
+                      style={{ ...iStyle, width: 'auto', minWidth: 50 }}>
+                      {Array.from({ length: selectedCount }, function(_, i) { return i + 1; }).map(function(n) {
+                        return <option key={n} value={n}>{n}{n === selectedCount ? ' (all)' : ''}</option>;
+                      })}
+                    </select>
+                    {(recurTpc > 0 && recurTpc < selectedCount) && (
+                      <span style={{ fontSize: 9, color: '#C8942A' }}>≈every {Math.round((recurType === 'biweekly' ? 14 : 7) / recurTpc * 10) / 10} days</span>
+                    )}
+                  </div>
+                )}
+                {(recurTpc > 0 && recurTpc < selectedCount) && FillPolicyBlock('week')}
+              </label>
             );
-          })}
+          })()}
+
+          {recurType === 'monthly' && (function() {
+            var mdArr = Array.isArray(recurMonthDays) ? recurMonthDays : Object.keys(recurMonthDays || {});
+            var mdCount = mdArr.length;
+            return (
+              <label style={lStyle}>
+                Days of month
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, maxWidth: 260 }}>
+                  {[['first', '1st'], ['last', 'Last']].concat(
+                    Array.from({ length: 28 }, function(_, i) { return [String(i + 1), String(i + 1)]; })
+                  ).map(function(pair) {
+                    var val = pair[0], lab = pair[1];
+                    var active = mdArr.indexOf(val) >= 0 || mdArr.indexOf(Number(val)) >= 0;
+                    return (
+                      <button key={val} onClick={function() {
+                        var arr = Array.isArray(recurMonthDays) ? recurMonthDays : Object.keys(recurMonthDays || {});
+                        var norm = arr.map(String);
+                        var sv = String(val);
+                        onRecurMonthDaysChange(norm.indexOf(sv) >= 0 ? arr.filter(function(d) { return String(d) !== sv; }) : arr.concat([val]));
+                      }} style={{ ...togStyle(active), minWidth: lab.length > 2 ? 32 : 22, fontSize: 9 }}>{lab}</button>
+                    );
+                  })}
+                </div>
+                {mdCount > 1 && (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
+                    <span style={{ fontSize: 10, color: TH.textMuted }}>Times per month:</span>
+                    <select value={recurTpc || mdCount} onChange={function(e) { onRecurTpcChange(parseInt(e.target.value)); }}
+                      style={{ ...iStyle, width: 'auto', minWidth: 50 }}>
+                      {Array.from({ length: mdCount }, function(_, i) { return i + 1; }).map(function(n) {
+                        return <option key={n} value={n}>{n}{n === mdCount ? ' (all)' : ''}</option>;
+                      })}
+                    </select>
+                    {(recurTpc > 0 && recurTpc < mdCount) && (
+                      <span style={{ fontSize: 9, color: '#C8942A' }}>≈every {Math.round(30 / recurTpc * 10) / 10} days</span>
+                    )}
+                  </div>
+                )}
+                {(recurTpc > 0 && recurTpc < mdCount) && FillPolicyBlock('month')}
+              </label>
+            );
+          })()}
+
+          {recurType === 'interval' && (
+            <label style={lStyle}>
+              Interval
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 10, color: TH.text }}>Every</span>
+                <input type="number" value={recurEvery} onChange={function(e) { onRecurEveryChange(e.target.value); }} min={1}
+                  style={{ ...iStyle, width: 50 }} />
+                <select value={recurUnit} onChange={function(e) { onRecurUnitChange(e.target.value); }} style={{ ...iStyle, width: 'auto' }}>
+                  <option value="days">day(s)</option>
+                  <option value="weeks">week(s)</option>
+                  <option value="months">month(s)</option>
+                  <option value="years">year(s)</option>
+                </select>
+              </div>
+            </label>
+          )}
         </div>
-        {recurType !== 'none' && (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+
+        {!!recurring && recurType !== 'none' && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
             <label style={lStyle}>
-              Every
-              <input type="number" min={1} value={recurEvery} onChange={e => onRecurEveryChange(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                style={{ ...iStyle, width: 55 }} />
+              <span title={recurIsAnchorDependent ? 'Required for biweekly, interval, or times-per-cycle patterns — the scheduler measures cycles from this date.' : 'Date to start generating instances for this recurring task'}>
+                ⏯ Recurrence starts{recurIsAnchorDependent && <span style={{ color: TH.redText, marginLeft: 2 }}>*</span>}
+              </span>
+              <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                <input type="date" value={recurStart || ''} onChange={function(e) { onRecurStartChange(e.target.value || ''); }}
+                  style={{ ...iStyle, width: 130 }} required={recurIsAnchorDependent} />
+                {recurStart && !recurIsAnchorDependent && (
+                  <button onClick={function() { onRecurStartChange(''); }} style={{ fontSize: 9, background: 'none', border: 'none', color: TH.redText, cursor: 'pointer', padding: 0, fontWeight: 700 }}>✕</button>
+                )}
+              </div>
             </label>
             <label style={lStyle}>
-              Times/cycle
-              <input type="number" min={1} value={recurTpc} onChange={e => onRecurTpcChange(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                style={{ ...iStyle, width: 55 }} />
+              <span title="Date to stop generating new instances">⏹ Recurrence ends</span>
+              <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                <input type="date" value={recurEnd || ''} onChange={function(e) { onRecurEndChange(e.target.value || ''); }}
+                  style={{ ...iStyle, width: 130 }} />
+                {recurEnd && (
+                  <button onClick={function() { onRecurEndChange(''); }} style={{ fontSize: 9, background: 'none', border: 'none', color: TH.redText, cursor: 'pointer', padding: 0, fontWeight: 700 }}>✕</button>
+                )}
+              </div>
             </label>
-            <label style={lStyle}>
-              Start
-              <input type="date" value={recurStart} onChange={e => onRecurStartChange(e.target.value)}
-                style={{ ...iStyle, width: 130 }} />
-            </label>
-            <label style={lStyle}>
-              End
-              <input type="date" value={recurEnd} onChange={e => onRecurEndChange(e.target.value)}
-                style={{ ...iStyle, width: 130 }} />
-            </label>
+          </div>
+        )}
+
+        {configWarnings && configWarnings.length > 0 && (
+          <div style={{ background: TH.amberBg, border: '1px solid ' + TH.amberBorder, borderRadius: 4, padding: '4px 8px', marginTop: 5, fontSize: 10, color: TH.amberText, lineHeight: 1.4 }}>
+            {configWarnings.map(function(w, i) { return <div key={i}>⚠️ {w}</div>; })}
           </div>
         )}
       </div>
