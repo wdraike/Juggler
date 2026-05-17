@@ -440,9 +440,38 @@ function ManageCalTaskDialog({ task, darkMode, onClose, onOwnershipTaken }) {
   );
 }
 
+var COLLAPSE_KEY = 'juggler_task_detail_collapse';
+var COLLAPSE_DEFAULTS = {
+  when: true, where: false, weather: false, tools: false, deps: false, meta: false,
+  when_recurrence: false, when_constraints: false
+};
+
+function readCollapseState() {
+  try {
+    var stored = JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '{}');
+    return Object.assign({}, COLLAPSE_DEFAULTS, stored);
+  } catch (e) {
+    return Object.assign({}, COLLAPSE_DEFAULTS);
+  }
+}
+
+function writeCollapseState(state) {
+  try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(state)); } catch (e) { /* quota */ }
+}
+
 export default function TaskEditForm({ task, status, onUpdate, onStatusChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, scheduleTemplates, templateDefaults, calSyncSettings, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex, onRecurDayConflict, activeTimezone, tempUnitPref }) {
   var isCreate = mode === 'create';
   var TH = getTheme(darkMode);
+  var [collapse, setCollapse] = useState(readCollapseState);
+
+  function toggleCollapse(id) {
+    setCollapse(function(prev) {
+      var next = Object.assign({}, prev, { [id]: !prev[id] });
+      writeCollapseState(next);
+      return next;
+    });
+  }
+
   var initDate = isCreate && initialDate ? toDateISO(formatDateKey(initialDate)) : '';
   var [text, setText] = useState(isCreate ? '' : (task.text || ''));
   var [project, setProject] = useState(isCreate ? (initialProject || '') : (task.project || ''));
