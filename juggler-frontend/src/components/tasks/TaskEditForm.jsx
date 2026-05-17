@@ -9,7 +9,6 @@ import { isAnchorDependentRecur } from '../../scheduler/expandRecurring';
 import { getTheme } from '../../theme/colors';
 import { convertTimeForDisplay, getTimezoneAbbr, getUtcOffset } from '../../utils/timezone';
 import apiClient from '../../services/apiClient';
-import { WeatherTempSlider, WeatherHumiditySlider } from './sections/WeatherSection';
 
 // "hh:mm" (24h) + delta minutes → "hh:mm" (24h). Clamps to the day [00:00, 23:59].
 // Used by the start/finish/duration three-way binding below.
@@ -1933,25 +1932,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
               return <button key={o.val} onClick={() => setWeatherCloud(o.val)} style={togStyle(weatherCloud === o.val)}>{o.label}</button>;
             })}
           </div>
-          <WeatherTempSlider
-            tempMin={weatherTempMin}
-            tempMax={weatherTempMax}
-            unit={tempUnitPref || 'F'}
-            onChange={function(min, max) {
-              setWeatherTempMin(min !== null ? String(min) : '');
-              setWeatherTempMax(max !== null ? String(max) : '');
-            }}
-            TH={TH}
-          />
-          <WeatherHumiditySlider
-            humidityMin={weatherHumidityMin}
-            humidityMax={weatherHumidityMax}
-            onChange={function(min, max) {
-              setWeatherHumidityMin(min !== null ? String(min) : '');
-              setWeatherHumidityMax(max !== null ? String(max) : '');
-            }}
-            TH={TH}
-          />
         </div>}
 
         {/* ═══ SECTION: Tools ═══ */}
