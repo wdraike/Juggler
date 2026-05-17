@@ -2338,21 +2338,24 @@ async function takeOwnership(req, res) {
     if (!task) return res.status(404).json({ error: 'Task not found' });
 
     await db.transaction(async function(trx) {
-      // Mark all active ledger rows for this task as deleted_local so sync
-      // stops tracking them. The calendar event remains in the provider.
+      // Mark all active ledger rows as deleted_local — sync stops, calendar
+      // event remains in the provider.
       await trx('cal_sync_ledger')
         .where({ task_id: id, user_id: req.user.id, status: 'active' })
         .update({ status: 'deleted_local', synced_at: trx.fn.now() });
 
-      // Clear event ID columns on the task row so isCalLinkedFixed becomes false
-      var clearFields = {};
+      // Clear event IDs and strip 'fixed' from when / clear date_pinned so the
+      // scheduler can place this task freely. Guard is bypassed here because we
+      // just removed the cal link in the same transaction.
+      var clearFields = { updated_at: trx.fn.now() };
       if (task.gcal_event_id) clearFields.gcal_event_id = null;
       if (task.msft_event_id) clearFields.msft_event_id = null;
       if (task.apple_event_id) clearFields.apple_event_id = null;
-      if (Object.keys(clearFields).length > 0) {
-        clearFields.updated_at = trx.fn.now();
-        await tasksWrite.updateTaskById(trx, id, clearFields, req.user.id);
-      }
+      var currentWhen = task.when || '';
+      var newWhen = currentWhen.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t && t !== 'fixed'; }).join(',');
+      clearFields.when = newWhen;
+      clearFields.date_pinned = 0;
+      await tasksWrite.updateTaskById(trx, id, clearFields, req.user.id);
     });
 
     await cache.invalidateTasks(req.user.id);
@@ -2362,6 +2365,7 @@ async function takeOwnership(req, res) {
         .select()
     );
     var updated = await fetchTaskWithEventIds(db, id, req.user.id);
+    enqueueScheduleRun(req.user.id, 'api:takeOwnership', [id]);
     res.json({ task: rowToTask(updated, null, srcMap) });
   } catch (error) {
     console.error('Take ownership error:', error);
