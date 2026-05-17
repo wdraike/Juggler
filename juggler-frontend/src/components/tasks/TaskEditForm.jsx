@@ -818,6 +818,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             dur={dur} onDurChange={setDur}
             recurring={recurring} rigid={rigid} onRigidChange={setRigid}
             timeFlex={timeFlex} onTimeFlexChange={setTimeFlex}
+            hasPreferredTime={hasPreferredTime} onHasPreferredTimeChange={setRecurringHasPreferredTime}
             recurType={recurType} onRecurTypeChange={handleRecurTypeChange}
             recurDays={recurDays} onRecurDaysChange={setRecurDays}
             recurEvery={recurEvery} onRecurEveryChange={setRecurEvery}

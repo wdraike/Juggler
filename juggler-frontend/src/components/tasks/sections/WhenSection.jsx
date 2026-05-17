@@ -146,6 +146,7 @@ export default function WhenSection(props) {
     dur, onDurChange,
     recurring, rigid, onRigidChange,
     timeFlex, onTimeFlexChange,
+    hasPreferredTime, onHasPreferredTimeChange,
     recurType, onRecurTypeChange,
     recurDays, onRecurDaysChange,
     recurEvery, onRecurEveryChange,
@@ -265,6 +266,63 @@ export default function WhenSection(props) {
           {rigid ? '📌 Fixed' : '🔀 Float'}
         </button>
       </div>
+
+      {recurring && !marker && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ display: 'flex', gap: 3, marginBottom: 6 }}>
+            <button onClick={function() {
+              onHasPreferredTimeChange(true);
+              var tags = (when || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+              if (tags.length !== 1) onWhenChange('morning');
+            }} style={togStyle(hasPreferredTime, '#C8942A')}>⏰ Time window</button>
+            <button onClick={function() {
+              onHasPreferredTimeChange(false);
+              onTimeChange('');
+              onRigidChange(false);
+              var tags = (when || '').split(',').filter(Boolean);
+              if (tags.length <= 1) onWhenChange('morning,lunch,afternoon,evening,night');
+            }} style={togStyle(!hasPreferredTime, '#2D6A4F')}>📅 Time blocks</button>
+          </div>
+
+          {hasPreferredTime ? (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <label style={lStyle}>
+                ⏰ Time
+                <input type="time" value={time || ''} onChange={function(e) { onTimeChange(e.target.value || ''); }}
+                  style={{ ...iStyle, minWidth: 90 }} />
+              </label>
+              <label style={lStyle}>
+                ± Window
+                <select value={rigid ? 0 : (timeFlex || 60)} onChange={function(e) {
+                  var v = parseInt(e.target.value);
+                  if (v === 0) { onRigidChange(true); onTimeFlexChange(0); } else { onRigidChange(false); onTimeFlexChange(v); }
+                }} style={{ ...iStyle, minWidth: 80 }}>
+                  <option value={0}>exact</option>
+                  <option value={15}>±15m</option>
+                  <option value={30}>±30m</option>
+                  <option value={60}>±1hr</option>
+                  <option value={90}>±1.5hr</option>
+                  <option value={120}>±2hr</option>
+                </select>
+              </label>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
+              {(uniqueTags || []).map(function(tb) {
+                var tagParts = when ? when.split(',').map(function(s) { return s.trim(); }) : [];
+                var isOn = tagParts.indexOf(tb.tag) !== -1;
+                return (
+                  <button key={tb.tag} title={tb.name + ' time window'} onClick={function() {
+                    var cur = when ? when.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s && s !== 'fixed' && s !== 'allday' && s !== 'anytime'; }) : [];
+                    if (isOn) { cur = cur.filter(function(v) { return v !== tb.tag; }); } else { cur.push(tb.tag); }
+                    onWhenChange(cur.length === 0 ? '' : cur.join(','));
+                  }} style={togStyle(isOn, tb.color)}>{tb.icon} {tb.name}</button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 
