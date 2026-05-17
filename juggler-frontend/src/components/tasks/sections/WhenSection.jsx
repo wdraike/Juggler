@@ -21,7 +21,7 @@ var ALL_TIMEZONES = (function() {
   ];
 })();
 
-function addMinutesTo24h(hhmm, mins) {
+export function addMinutesTo24h(hhmm, mins) {
   if (!hhmm) return '';
   var parts = String(hhmm).split(':');
   var h = parseInt(parts[0], 10); if (isNaN(h)) return '';
@@ -33,7 +33,7 @@ function addMinutesTo24h(hhmm, mins) {
   return (nh < 10 ? '0' : '') + nh + ':' + (nm < 10 ? '0' : '') + nm;
 }
 
-function minutesFrom24h(hhmm) {
+export function minutesFrom24h(hhmm) {
   if (!hhmm) return null;
   var parts = String(hhmm).split(':');
   var h = parseInt(parts[0], 10); if (isNaN(h)) return null;
