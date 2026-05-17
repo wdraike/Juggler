@@ -38,13 +38,13 @@ Run tests from `juggler-frontend/`: `npm test -- --watchAll=false`
 
 ---
 
-## Task 1: CollapsibleSection + collapse state
+## Task 1: CollapsibleSection + collapse state ✓ DONE
 
 **Files:**
 - Create: `src/components/tasks/CollapsibleSection.jsx`
 - Create: `src/components/tasks/__tests__/CollapsibleSection.test.jsx`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```jsx
 // src/components/tasks/__tests__/CollapsibleSection.test.jsx
@@ -93,7 +93,7 @@ it('calls onToggle with id when header is clicked', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to confirm it fails**
+- [x] **Step 2: Run test to confirm it fails**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=CollapsibleSection
@@ -101,7 +101,7 @@ npm test -- --watchAll=false --testPathPattern=CollapsibleSection
 
 Expected: FAIL — `CollapsibleSection` not found
 
-- [ ] **Step 3: Create CollapsibleSection.jsx**
+- [x] **Step 3: Create CollapsibleSection.jsx**
 
 ```jsx
 // src/components/tasks/CollapsibleSection.jsx
@@ -138,7 +138,7 @@ export default function CollapsibleSection({ id, label, isOpen, onToggle, badge,
 }
 ```
 
-- [ ] **Step 4: Run tests to confirm they pass**
+- [x] **Step 4: Run tests to confirm they pass**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=CollapsibleSection
@@ -146,53 +146,11 @@ npm test -- --watchAll=false --testPathPattern=CollapsibleSection
 
 Expected: 4 tests pass
 
-- [ ] **Step 5: Add collapse state utilities to TaskEditForm.jsx**
+- [x] **Step 5: Add collapse state utilities to TaskEditForm.jsx**
 
-Find the line in `TaskEditForm.jsx` where `var BTN_H` is defined (~line 730) and add the collapse state block immediately **before** the `TaskEditForm` function declaration (~line 443):
+> Note: `toggleCollapse` was upgraded to `useCallback` during the simplify pass to avoid unnecessary re-renders when passed as prop to child `CollapsibleSection` instances.
 
-```js
-// Collapse state persisted to localStorage. Keys: when, where, weather, tools, deps, meta,
-// when_recurrence, when_constraints.
-var COLLAPSE_KEY = 'juggler_task_detail_collapse';
-var COLLAPSE_DEFAULTS = {
-  when: true, where: false, weather: false, tools: false, deps: false, meta: false,
-  when_recurrence: false, when_constraints: false
-};
-
-function readCollapseState() {
-  try {
-    var stored = JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '{}');
-    return Object.assign({}, COLLAPSE_DEFAULTS, stored);
-  } catch (e) {
-    return Object.assign({}, COLLAPSE_DEFAULTS);
-  }
-}
-
-function writeCollapseState(state) {
-  try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(state)); } catch (e) { /* quota */ }
-}
-```
-
-Then inside the `TaskEditForm` function body (after the `var TH` line), add:
-
-```js
-var [collapse, setCollapse] = useState(readCollapseState);
-
-function toggleCollapse(id) {
-  setCollapse(function(prev) {
-    var next = Object.assign({}, prev, { [id]: !prev[id] });
-    writeCollapseState(next);
-    return next;
-  });
-}
-```
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/components/tasks/CollapsibleSection.jsx src/components/tasks/__tests__/CollapsibleSection.test.jsx src/components/tasks/TaskEditForm.jsx
-git commit -m "feat(task-detail): CollapsibleSection component + collapse state"
-```
+- [x] **Step 6: Commit**
 
 ---
 
