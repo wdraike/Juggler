@@ -1434,29 +1434,37 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           {!recurring && !marker && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
               {isCalLinkedFixed ? (
-                <button disabled style={{
+                <button disabled
+                  title="This event is synced from your external calendar — the time is controlled by the calendar. To move it, edit in your calendar app."
+                  style={{
                   padding: '2px 10px', borderRadius: 4, border: '1px solid ' + TH.amberBorder,
                   background: TH.amberBg, color: TH.amberText, fontSize: 10, fontWeight: 700,
                   cursor: 'not-allowed', fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box'
                 }}>Fixed</button>
               ) : isFixed ? (
-                <button onClick={isPinned ? handleUnpin : handleUnfix} style={{
+                <button onClick={isPinned ? handleUnpin : handleUnfix}
+                  title={isPinned ? (task && task.taskType === 'recurring_instance' ? 'Reset to template — let scheduler regenerate' : 'Unpin — let scheduler choose time') : 'Click to float — let scheduler move this freely'}
+                  style={{
                   padding: '2px 10px', borderRadius: 4, border: '1px solid ' + TH.amberBorder,
                   background: TH.amberBg, color: TH.amberText, fontSize: 10, fontWeight: 700,
                   cursor: 'pointer', fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box'
-                }}>Fixed</button>
+                }}>Fixed ×</button>
               ) : (
-                <button onClick={function() { setDatePinned(true); setWhen('fixed'); setSplit(false); }} style={{
+                <button onClick={function() { setDatePinned(true); setWhen('fixed'); setSplit(false); }}
+                  title="Fix to this time — scheduler will not move it"
+                  style={{
                   padding: '2px 10px', borderRadius: 4, border: '1px solid ' + TH.btnBorder,
                   background: 'transparent', color: TH.textMuted, fontSize: 10, fontWeight: 600,
                   cursor: 'pointer', fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box'
                 }}>Float</button>
               )}
-              {isFixed
-                ? <span style={{ fontSize: 10, color: TH.amberText }}>Scheduler will not move this</span>
-                : (!isCreate && date
-                    ? <span style={{ fontSize: 10, color: TH.textMuted }}>set by scheduler</span>
-                    : null)
+              {isCalLinkedFixed
+                ? <span style={{ fontSize: 10, color: TH.amberText }}>Synced from calendar — edit there to move</span>
+                : isFixed
+                  ? <span style={{ fontSize: 10, color: TH.amberText }}>Scheduler will not move this</span>
+                  : (!isCreate && date
+                      ? <span style={{ fontSize: 10, color: TH.textMuted }}>set by scheduler</span>
+                      : null)
               }
             </div>
           )}

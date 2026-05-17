@@ -130,8 +130,19 @@ export default function taskReducer(state, action) {
       // Does NOT mark tasks dirty — the backend already persisted these fields.
       var patchMap = {};
       action.patches.forEach(function(p) { if (p && p.id) patchMap[p.id] = p.patch || {}; });
+      // Sync statuses map when a patch carries a status field, but skip tasks
+      // whose status is currently dirty (local change not yet confirmed by server).
+      var dirtyStatuses = state._dirtyStatuses || {};
+      var newStatuses = state.statuses;
+      action.patches.forEach(function(p) {
+        if (!p || !p.id || !p.patch || !('status' in p.patch)) return;
+        if (dirtyStatuses[p.id] !== undefined) return;
+        if (newStatuses === state.statuses) newStatuses = Object.assign({}, state.statuses);
+        if (p.patch.status) newStatuses[p.id] = p.patch.status;
+        else delete newStatuses[p.id];
+      });
       return {
-        statuses: state.statuses,
+        statuses: newStatuses,
         tasks: state.tasks.map(function(t) {
           var p = patchMap[t.id];
           return p ? Object.assign({}, t, p) : t;

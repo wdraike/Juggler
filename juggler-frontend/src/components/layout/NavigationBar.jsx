@@ -21,7 +21,7 @@ const VIEW_MODES = [
 ];
 
 const FILTERS = [
-  { id: 'open', label: 'Open', tip: 'Tasks not done, cancelled, or skipped' },
+  { id: 'open', label: 'Open', tip: 'Tasks not done, cancelled, skipped, or missed' },
   { id: 'action', label: 'Action', tip: 'Open + in-progress tasks needing attention' },
   { id: 'all', label: 'All', tip: 'All tasks regardless of status' },
   { id: 'done', label: 'Done', tip: 'Done tasks only' },
@@ -31,6 +31,7 @@ const FILTERS = [
   { id: 'blocked', label: 'Blocked', tip: 'Tasks waiting on incomplete dependencies' },
   { id: 'unplaced', label: 'Unplaced', tip: 'Tasks the scheduler couldn\u2019t place into any time slot' },
   { id: 'pause', label: 'Paused', tip: 'Tasks temporarily paused' },
+  { id: 'missed', label: 'Missed', tip: 'Tasks automatically marked missed by the scheduler (past recurring tasks outside placement window)' },
 ];
 
 // Which filter controls are relevant per view

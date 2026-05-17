@@ -12,6 +12,14 @@ import { getTheme } from '../../theme/colors';
 import StatusToggle from '../schedule/StatusToggle';
 import { parseDate } from '../../scheduler/dateHelpers';
 
+var TERMINAL_BORDER_COLORS = {
+  done:   { light: '#2D6A4F', dark: '#6EE7B7' },
+  cancel: { light: '#8B2635', dark: '#FCA5A5' },
+  skip:   { light: '#475569', dark: '#94A3B8' },
+  missed: { light: '#B45309', dark: '#FCD34D' },
+  pause:  { light: '#4338CA', dark: '#A5B4FC' },
+};
+
 function formatTimeAmPm(date) {
   var h = date.getHours();
   var m = date.getMinutes();
@@ -50,7 +58,7 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
         borderRadius: 6, cursor: 'pointer', overflow: 'hidden',
         background: theme.bgCard,
         border: '1px ' + (isMarker ? 'dotted' : (task.recurring ? 'dashed' : 'solid')) + ' ' + (isDone ? theme.border : borderColor + (isOverdue ? '60' : '40')),
-        borderLeft: '3px solid ' + borderColor,
+        borderLeft: '3px solid ' + (isDone && TERMINAL_BORDER_COLORS[status] ? (darkMode ? TERMINAL_BORDER_COLORS[status].dark : TERMINAL_BORDER_COLORS[status].light) : borderColor),
         opacity: isDone ? 0.5 : (isMarker ? 0.7 : 1),
         padding: isMobile ? '8px 10px' : '6px 10px',
         boxShadow: '0 1px 3px ' + theme.shadow,
@@ -70,6 +78,7 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
           {status === 'done' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u2713'}</span>}
           {status === 'skip' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u23ED'}</span>}
           {status === 'cancel' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u2717'}</span>}
+          {status === 'missed' && <span style={{ fontSize: 9, marginRight: 2, color: '#B45309' }}>{'\u29bb'}</span>}
           {(function(){ var ic = getTaskIcon(task.text); return ic ? <span style={{marginRight:2,flexShrink:0}}>{ic}</span> : null; })()}{task.text}
         </span>
         {task.url && /^https?:\/\//i.test(task.url) && (

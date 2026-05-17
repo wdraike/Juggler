@@ -25,7 +25,7 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
       if (!t.recurring || t.taskType === 'recurring_template') return;
       var key = t.text || t.id;
       var st = statuses[t.id] || '';
-      var isOpen = st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause';
+      var isOpen = st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause' && st !== 'missed';
       var prev = recurringBest[key];
       if (!prev || (isOpen && !prev.isOpen)) {
         recurringBest[key] = { id: t.id, isOpen: isOpen };
@@ -41,11 +41,12 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
 
     return deduped.filter(t => {
       var st = statuses[t.id] || '';
-      if (filter === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause';
+      if (filter === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause' && st !== 'missed';
       if (filter === 'action') return st === '' || st === 'wip';
       if (filter === 'done') return st === 'done';
       if (filter === 'wip') return st === 'wip';
       if (filter === 'pause') return st === 'pause';
+      if (filter === 'missed') return st === 'missed';
       if (filter === 'pastdue') return pastDueIds && pastDueIds.has(t.id);
       if (filter === 'fixed') return fixedIds && fixedIds.has(t.id);
       if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(t.id);

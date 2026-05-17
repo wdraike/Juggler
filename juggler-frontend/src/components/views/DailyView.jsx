@@ -836,12 +836,13 @@ export default function DailyView({
     if (!filter || filter === 'all') return true;
     var st = statuses[taskId] || '';
     if (filter === 'open') {
-      if (isPast && (st === 'done' || st === 'cancel' || st === 'skip')) return true;
-      return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause';
+      if (isPast && (st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed')) return true;
+      return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause' && st !== 'missed';
     }
     if (filter === 'action') return st === '' || st === 'wip';
     if (filter === 'done') return st === 'done';
     if (filter === 'pause') return st === 'pause';
+    if (filter === 'missed') return st === 'missed';
     if (filter === 'wip') return st === 'wip';
     if (filter === 'pastdue') return pastDueIds && pastDueIds.has(taskId);
     if (filter === 'fixed') return fixedIds && fixedIds.has(taskId);
@@ -855,8 +856,8 @@ export default function DailyView({
       if (p.start == null) return false;
       var st = statuses[p.task.id] || '';
       // Past days: always show done/cancel/skip (historical record)
-      if (isPast && (st === 'done' || st === 'cancel' || st === 'skip')) return true;
-      if ((st === 'done' || st === 'cancel' || st === 'skip') && filter !== 'all' && filter !== 'done' && filter !== st) return false;
+      if (isPast && (st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed')) return true;
+      if ((st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed') && filter !== 'all' && filter !== 'done' && filter !== st) return false;
       return matchesFilter(p.task.id);
     }).sort(function (a, b) { return a.start - b.start; });
   }, [placements, statuses, matchesFilter, filter, isPast]);

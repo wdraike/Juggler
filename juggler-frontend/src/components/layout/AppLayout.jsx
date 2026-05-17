@@ -518,7 +518,7 @@ export default function AppLayout() {
     if (!t || !t.id || _unplacedIdSet[t.id]) return false;
     if (t.taskType === 'recurring_template') return false;
     var st = statuses[t.id] || '';
-    if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'disabled' || st === 'pause') return false;
+    if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'disabled' || st === 'pause' || st === 'missed') return false;
     return !t.scheduledAt && !t.date;
   });
   var schedulerWarnings = placements.warnings || [];
@@ -556,7 +556,7 @@ export default function AppLayout() {
     visibleTasks.forEach(t => {
       if (!t.dependsOn || t.dependsOn.length === 0) return;
       var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'skip') return;
+      if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed') return;
       var hasOverdueDep = t.dependsOn.some(function(depId) {
         if ((statuses[depId] || '') === 'done') return false;
         var dep = taskMap[depId];
@@ -600,7 +600,7 @@ export default function AppLayout() {
     });
     visibleTasks.forEach(t => {
       var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'skip') return;
+      if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed') return;
       // (a) day-level deadline passed
       if (t.deadline) {
         var dd = parseDate(t.deadline);
@@ -635,7 +635,7 @@ export default function AppLayout() {
     });
     visibleTasks.forEach(t => {
       var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'skip') return;
+      if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed') return;
       if (t.deadline) {
         var dd = parseDate(t.deadline);
         if (dd && dd < today) { ids.add(t.id); return; }
@@ -659,7 +659,7 @@ export default function AppLayout() {
     var ids = new Set();
     allTasks.forEach(t => {
       var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'skip') return;
+      if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed') return;
       if (t.when && t.when.indexOf('fixed') >= 0) ids.add(t.id);
     });
     return ids;

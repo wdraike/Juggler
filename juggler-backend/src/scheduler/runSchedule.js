@@ -1449,6 +1449,13 @@ async function runScheduleAndPersist(userId, _retries, options) {
             updated_at: db.fn.now()
           }
         });
+        updatedTasks.push({
+          id: t.id,
+          text: t.text,
+          from: t.date,
+          to: t.date,
+          patch: { status: 'missed' }
+        });
       } else {
         // Past non-recurring — move date forward to today
         pendingUpdates.push({

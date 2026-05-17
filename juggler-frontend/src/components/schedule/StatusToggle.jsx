@@ -14,8 +14,9 @@ var ALL_STATUSES = [
   { value: 'done',   icon: '\u2713', label: 'Complete', activeBg: '#D1FAE5', activeBgDark: '#0A3622', color: '#2D6A4F', colorDark: '#6EE7B7' },
   { value: 'wip',    icon: '\u231B', label: 'Start',    activeBg: '#FEF3C7', activeBgDark: '#3A2A08', color: '#9E6B3B', colorDark: '#E8C878' },
   { value: 'cancel', icon: '\u2715', label: 'Cancel',   activeBg: '#FEE2E2', activeBgDark: '#3A0A10', color: '#8B2635', colorDark: '#FCA5A5' },
-  { value: 'skip',   icon: '\u21ED', label: 'Skip',     activeBg: '#E8E0D0', activeBgDark: '#2C2B28', color: '#5C5A55', colorDark: '#B0A898' },
+  { value: 'skip',   icon: '\u21ED', label: 'Skip',     activeBg: '#F1F5F9', activeBgDark: '#1E293B', color: '#475569', colorDark: '#94A3B8' },
   { value: 'pause',  icon: '\u23F8', label: 'Pause',    activeBg: '#E0E7FF', activeBgDark: '#1E1B4B', color: '#4338CA', colorDark: '#A5B4FC' },
+  { value: 'missed', icon: '\u29BB', label: 'Missed',   activeBg: '#FEF3C7', activeBgDark: '#3A2A08', color: '#B45309', colorDark: '#FCD34D', systemOnly: true },
 ];
 
 function DeleteButton({ onDelete, size, fontSize, darkMode }) {
@@ -48,13 +49,13 @@ export default React.memo(function StatusToggle({ value, onChange, onDelete, dar
   var fontSize = compact ? 8 : (isMobile ? 14 : 12);
 
   // Filter statuses based on task type
-  var statuses = ALL_STATUSES;
+  var statuses = ALL_STATUSES.filter(function(s) { return !s.systemOnly || (value || '') === s.value; });
   if (taskType === 'recurring_template') {
     // Templates can only be paused or unpaused
-    statuses = ALL_STATUSES.filter(function(s) { return s.value === '' || s.value === 'pause'; });
+    statuses = statuses.filter(function(s) { return s.value === '' || s.value === 'pause'; });
   } else if (taskType === 'recurring_instance') {
     // Instances can't be paused — pause is template-level
-    statuses = ALL_STATUSES.filter(function(s) { return s.value !== 'pause'; });
+    statuses = statuses.filter(function(s) { return s.value !== 'pause'; });
   }
 
   return (
@@ -62,12 +63,13 @@ export default React.memo(function StatusToggle({ value, onChange, onDelete, dar
       {statuses.map(function(s) {
         var active = (value || '') === s.value;
         var isDisabled = !!disableTerminal && TERMINAL_REQUIRES_SCHEDULE.indexOf(s.value) !== -1;
+        var isSystem = !!s.systemOnly;
         return (
           <button
             key={s.value || 'open'}
-            onClick={function(e) { e.stopPropagation(); if (!isDisabled) onChange(s.value); }}
-            disabled={isDisabled}
-            title={isDisabled ? 'Schedule task before resolving' : s.label}
+            onClick={function(e) { e.stopPropagation(); if (!isDisabled && !isSystem) onChange(s.value); }}
+            disabled={isDisabled || isSystem}
+            title={isSystem ? 'Missed — auto-applied by scheduler' : (isDisabled ? 'Schedule task before resolving' : s.label)}
             style={{
               width: size, height: size,
               borderRadius: 4,

@@ -23,13 +23,14 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
     if (!filter || filter === 'all') return true;
     var st = statuses[taskId] || '';
     if (filter === 'open') {
-      if (isPast && (st === 'done' || st === 'cancel' || st === 'skip')) return true;
-      return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause';
+      if (isPast && (st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed')) return true;
+      return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause' && st !== 'missed';
     }
     if (filter === 'action') return st === '' || st === 'wip';
     if (filter === 'done') return st === 'done';
     if (filter === 'wip') return st === 'wip';
     if (filter === 'pause') return st === 'pause';
+    if (filter === 'missed') return st === 'missed';
     if (filter === 'pastdue') return pastDueIds && pastDueIds.has(taskId);
     if (filter === 'fixed') return fixedIds && fixedIds.has(taskId);
     if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(taskId);
