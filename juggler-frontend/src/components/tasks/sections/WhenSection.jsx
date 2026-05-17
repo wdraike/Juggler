@@ -142,7 +142,7 @@ export default function WhenSection(props) {
   var {
     date, onDateChange,
     time, onTimeChange,
-    endTime, onEndTimeChange, endTimeError,
+    endTime, onEndTimeChange, endTimeError, onEndTimeErrorChange,
     dur, onDurChange,
     recurring, rigid, onRigidChange,
     timeFlex, onTimeFlexChange,
@@ -203,19 +203,28 @@ export default function WhenSection(props) {
           Start
           <input type="time" value={time} onChange={e => {
             onTimeChange(e.target.value);
+            if (onEndTimeErrorChange) onEndTimeErrorChange(null);
             if (e.target.value && dur) onEndTimeChange(addMinutesTo24h(e.target.value, dur));
           }} style={{ ...iStyle, width: 90 }} />
         </label>
         <label style={lStyle}>
           End
           <input type="time" value={endTime} onChange={e => {
-            onEndTimeChange(e.target.value);
-            if (e.target.value && time) {
+            var v = e.target.value;
+            onEndTimeChange(v);
+            if (v && time) {
               var startMins = minutesFrom24h(time);
-              var endMins = minutesFrom24h(e.target.value);
-              if (startMins !== null && endMins !== null && endMins > startMins) {
-                onDurChange(endMins - startMins);
+              var endMins = minutesFrom24h(v);
+              if (startMins !== null && endMins !== null && endMins <= startMins) {
+                if (onEndTimeErrorChange) onEndTimeErrorChange('Finish must be after start');
+              } else {
+                if (onEndTimeErrorChange) onEndTimeErrorChange(null);
+                if (startMins !== null && endMins !== null && endMins > startMins) {
+                  onDurChange(endMins - startMins);
+                }
               }
+            } else {
+              if (onEndTimeErrorChange) onEndTimeErrorChange(null);
             }
           }} style={{ ...iStyle, width: 90 }} />
         </label>

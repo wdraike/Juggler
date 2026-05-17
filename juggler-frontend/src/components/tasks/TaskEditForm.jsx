@@ -728,6 +728,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         dur={dur}
         notes={notes} onNotesChange={setNotes}
         url={url} onUrlChange={setUrl}
+        marker={marker} onMarkerChange={setMarker}
         scheduledBadge={date && time ? (date === formatDateKey(new Date()) ? 'Today' : date) + ' · ' + (fromTime24(time) || time) + (endTime ? '–' + (fromTime24(endTime) || endTime) : '') : null}
         unplacedDetail={!isCreate && task && task._unplacedDetail ? task._unplacedDetail : null}
         whenBlocked={!isCreate && task && task._whenBlocked && !flexWhen}
@@ -742,7 +743,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           <WhenSection
             date={date} onDateChange={setDate}
             time={time} onTimeChange={setTime}
-            endTime={endTime} onEndTimeChange={setEndTime} endTimeError={endTimeError}
+            endTime={endTime} onEndTimeChange={setEndTime} endTimeError={endTimeError} onEndTimeErrorChange={setEndTimeError}
             dur={dur} onDurChange={setDur}
             recurring={recurring} rigid={rigid} onRigidChange={setRigid}
             timeFlex={timeFlex} onTimeFlexChange={setTimeFlex}

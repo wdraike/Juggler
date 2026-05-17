@@ -12,6 +12,7 @@ export default function TaskDetailHeader({
   dur,
   notes, onNotesChange,
   url, onUrlChange,
+  marker, onMarkerChange,
   scheduledBadge,
   unplacedDetail, whenBlocked, onEnableFlex,
 }) {
@@ -135,7 +136,17 @@ export default function TaskDetailHeader({
               borderRadius: 3, padding: '1px 6px', fontWeight: 600
             }}>{project}</span>
           )}
-          <span style={{ fontSize: 10, background: TH.badgeBg, color: TH.badgeText, borderRadius: 3, padding: '1px 6px' }}>{pri}</span>
+          <select value={pri} onChange={e => onPriChange && onPriChange(e.target.value)}
+            style={{
+              fontSize: 10, background: TH.badgeBg, color: TH.badgeText,
+              borderRadius: 3, padding: '1px 4px', border: '1px solid ' + TH.inputBorder,
+              fontFamily: 'inherit', cursor: 'pointer', height: 22
+            }}>
+            <option value="P1">🔴 P1</option>
+            <option value="P2">🟠 P2</option>
+            <option value="P3">🔵 P3</option>
+            <option value="P4">⚪ P4</option>
+          </select>
           {dur > 0 && (
             <span style={{ fontSize: 10, background: TH.badgeBg, color: TH.badgeText, borderRadius: 3, padding: '1px 6px' }}>
               {dur >= 60 ? (Math.round(dur / 60 * 10) / 10) + 'h' : dur + 'm'}
@@ -151,6 +162,17 @@ export default function TaskDetailHeader({
               onClick={e => e.stopPropagation()}
               style={{ fontSize: 10, color: TH.accent }}>🔗</a>
           )}
+          <button
+            title={marker ? 'Reminder event — does not block time' : 'Make this a non-blocking reminder event'}
+            onClick={() => onMarkerChange && onMarkerChange(!marker)}
+            style={{
+              fontSize: 10, background: marker ? '#4338CA22' : TH.badgeBg,
+              color: marker ? '#4338CA' : TH.textMuted,
+              border: '1px solid ' + (marker ? '#4338CA' : TH.inputBorder),
+              borderRadius: 3, padding: '1px 6px', cursor: 'pointer', fontFamily: 'inherit'
+            }}>
+            {marker ? '◇ Reminder' : '◇'}
+          </button>
         </div>
 
         {notesPreview && (
