@@ -464,13 +464,13 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var TH = getTheme(darkMode);
   var [collapse, setCollapse] = useState(readCollapseState);
 
-  function toggleCollapse(id) {
+  var toggleCollapse = useCallback(function(id) {
     setCollapse(function(prev) {
       var next = Object.assign({}, prev, { [id]: !prev[id] });
       writeCollapseState(next);
       return next;
     });
-  }
+  }, []);
 
   var initDate = isCreate && initialDate ? toDateISO(formatDateKey(initialDate)) : '';
   var [text, setText] = useState(isCreate ? '' : (task.text || ''));

@@ -1,4 +1,3 @@
-// src/components/tasks/CollapsibleSection.jsx
 import React from 'react';
 
 export default function CollapsibleSection({ id, label, isOpen, onToggle, badge, TH, children }) {
