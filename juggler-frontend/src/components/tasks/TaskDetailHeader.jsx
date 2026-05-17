@@ -18,7 +18,6 @@ export default function TaskDetailHeader({
   unplacedDetail, whenBlocked, onEnableFlex,
 }) {
   var BTN_H = isMobile ? 30 : 26;
-  var notesPreview = notes ? notes.split('\n')[0] : '';
 
   var deleteSlot = null;
   if (!isCreate && onDelete) {
@@ -158,11 +157,6 @@ export default function TaskDetailHeader({
               ⏰ {scheduledBadge}
             </span>
           )}
-          {url && /^https?:\/\//i.test(url) && (
-            <a href={url} target="_blank" rel="noopener noreferrer"
-              onClick={e => e.stopPropagation()}
-              style={{ fontSize: 10, color: TH.accent }}>🔗</a>
-          )}
           <button
             title={marker ? 'Reminder event — does not block time' : 'Make this a non-blocking reminder event'}
             onClick={() => onMarkerChange && onMarkerChange(!marker)}
@@ -176,15 +170,39 @@ export default function TaskDetailHeader({
           </button>
         </div>
 
-        {notesPreview && (
-          <div style={{
-            fontSize: 11, color: TH.textMuted, background: TH.badgeBg,
-            borderRadius: 4, padding: '5px 8px', marginBottom: 4,
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
-          }}>
-            {notesPreview}
+        <label style={{ fontSize: 9, color: TH.textMuted, display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 600, marginBottom: 6 }}>
+          Notes
+          <textarea value={notes || ''} onChange={e => onNotesChange && onNotesChange(e.target.value)}
+            style={{
+              fontSize: isMobile ? 13 : 11, padding: isMobile ? '6px 8px' : '3px 4px',
+              border: '1px solid ' + TH.inputBorder, borderRadius: 4,
+              background: TH.inputBg, color: TH.inputText, fontFamily: 'inherit',
+              minHeight: 40, resize: 'vertical', width: '100%', boxSizing: 'border-box'
+            }} />
+        </label>
+        <label style={{ fontSize: 9, color: TH.textMuted, display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 600, marginBottom: 4 }}>
+          Link
+          <div style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
+            <input type="url" value={url || ''} onChange={e => onUrlChange && onUrlChange(e.target.value)}
+              placeholder="https://…"
+              style={{
+                fontSize: isMobile ? 13 : 11, padding: isMobile ? '6px 8px' : '3px 4px',
+                border: '1px solid ' + TH.inputBorder, borderRadius: 4,
+                background: TH.inputBg, color: TH.inputText, fontFamily: 'inherit',
+                flex: 1, minWidth: 0, height: isMobile ? 30 : 26, boxSizing: 'border-box'
+              }} />
+            {url && /^https?:\/\//i.test((url || '').trim()) && (
+              <button type="button"
+                onClick={function(e) { e.stopPropagation(); window.open(url.trim(), '_blank', 'noopener,noreferrer'); }}
+                style={{
+                  height: isMobile ? 30 : 26, padding: '0 10px', borderRadius: 4,
+                  border: '1px solid ' + TH.inputBorder, background: TH.inputBg,
+                  color: TH.accent, cursor: 'pointer', fontSize: 11,
+                  fontFamily: 'inherit', fontWeight: 600, flexShrink: 0, boxSizing: 'border-box'
+                }}>🔗 Open</button>
+            )}
           </div>
-        )}
+        </label>
       </div>
     </>
   );
