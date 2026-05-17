@@ -104,6 +104,7 @@ function normalizeEvent(event) {
     durationMinutes: dur,
     lastModified: event.updated || null,
     isTransparent: event.transparency === 'transparent',
+    eventUrl: event.htmlLink || null,
     _raw: event
   };
 }

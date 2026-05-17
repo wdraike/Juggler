@@ -1700,6 +1700,7 @@ async function sync(req, res) {
             last_modified_at: toMySQLDate(newEvent.lastModified),
             provider_etag: newEvent._etag || null,
             task_updated_at: existingTask._updated_at || null,
+            event_url: newEvent.eventUrl || null,
             status: 'active'
           });
           continue;
@@ -1729,6 +1730,7 @@ async function sync(req, res) {
             event_all_day: newEvent.isAllDay ? 1 : 0,
             last_modified_at: toMySQLDate(newEvent.lastModified),
             provider_etag: newEvent._etag || null,
+            event_url: newEvent.eventUrl || null,
             status: 'active'
           });
           continue;
@@ -1824,6 +1826,7 @@ async function sync(req, res) {
               last_modified_at: toMySQLDate(newEvent.lastModified),
               provider_etag: newEvent._etag || null,
               task_updated_at: dupTask._updated_at || null,
+              event_url: newEvent.eventUrl || null,
               status: 'active'
             });
             continue;
@@ -1878,6 +1881,7 @@ async function sync(req, res) {
             event_all_day: newEvent.isAllDay ? 1 : 0,
             last_modified_at: toMySQLDate(newEvent.lastModified),
             provider_etag: newEvent._etag || null,
+            event_url: newEvent.eventUrl || null,
             status: 'active'
           });
 

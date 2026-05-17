@@ -195,18 +195,25 @@ async function fetchTaskWithEventIds(dbOrTrx, id, userId) {
     dbOrTrx('tasks_v').where({ id: id, user_id: userId }).first(),
     dbOrTrx('cal_sync_ledger')
       .where({ task_id: id, status: 'active' })
-      .select('provider', 'provider_event_id')
+      .select('provider', 'provider_event_id', 'origin', 'event_url')
   ]);
   if (!row) return null;
   // Attach event ids in the same shape tasks_with_sync_v exposes.
   row.gcal_event_id = null;
   row.msft_event_id = null;
   row.apple_event_id = null;
+  row.cal_sync_origin = null;
+  row.cal_event_url = null;
   for (var i = 0; i < ledgerRows.length; i++) {
     var p = ledgerRows[i].provider;
-    if (p === 'gcal') row.gcal_event_id = ledgerRows[i].provider_event_id;
-    else if (p === 'msft') row.msft_event_id = ledgerRows[i].provider_event_id;
-    else if (p === 'apple') row.apple_event_id = ledgerRows[i].provider_event_id;
+    if (p === 'gcal') { row.gcal_event_id = ledgerRows[i].provider_event_id; }
+    else if (p === 'msft') { row.msft_event_id = ledgerRows[i].provider_event_id; }
+    else if (p === 'apple') { row.apple_event_id = ledgerRows[i].provider_event_id; }
+    // Use the first active ledger row for origin/url (multi-provider: pick non-juggler origin if present)
+    if (!row.cal_sync_origin || row.cal_sync_origin === 'juggler') {
+      row.cal_sync_origin = ledgerRows[i].origin || null;
+      row.cal_event_url = ledgerRows[i].event_url || null;
+    }
   }
   return row;
 }
@@ -226,7 +233,7 @@ async function fetchTasksWithEventIds(dbOrTrx, userId, queryBuilder) {
     q,
     dbOrTrx('cal_sync_ledger')
       .where({ user_id: userId, status: 'active' })
-      .select('task_id', 'provider', 'provider_event_id')
+      .select('task_id', 'provider', 'provider_event_id', 'origin', 'event_url')
   ]);
   var byTask = {};
   for (var j = 0; j < ledgerRows.length; j++) {
@@ -236,6 +243,11 @@ async function fetchTasksWithEventIds(dbOrTrx, userId, queryBuilder) {
     if (lr.provider === 'gcal') slot.gcal_event_id = lr.provider_event_id;
     else if (lr.provider === 'msft') slot.msft_event_id = lr.provider_event_id;
     else if (lr.provider === 'apple') slot.apple_event_id = lr.provider_event_id;
+    // Use non-juggler origin if present (prefer provider-origin over juggler-origin)
+    if (!slot.cal_sync_origin || slot.cal_sync_origin === 'juggler') {
+      slot.cal_sync_origin = lr.origin || null;
+      slot.cal_event_url = lr.event_url || null;
+    }
   }
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
@@ -243,6 +255,8 @@ async function fetchTasksWithEventIds(dbOrTrx, userId, queryBuilder) {
     r.gcal_event_id = ev && ev.gcal_event_id || null;
     r.msft_event_id = ev && ev.msft_event_id || null;
     r.apple_event_id = ev && ev.apple_event_id || null;
+    r.cal_sync_origin = ev && ev.cal_sync_origin || null;
+    r.cal_event_url = ev && ev.cal_event_url || null;
   }
   return rows;
 }
@@ -403,6 +417,8 @@ function rowToTask(row, timezone, sourceMap) {
     gcalEventId: row.gcal_event_id,
     msftEventId: row.msft_event_id,
     appleEventId: row.apple_event_id,
+    calSyncOrigin: row.cal_sync_origin || null,
+    calEventUrl: row.cal_event_url || null,
     dependsOn: safeParseJSON(row.depends_on, []),
     datePinned: !!row.date_pinned,
     prevWhen: row.prev_when || null,
@@ -2308,6 +2324,51 @@ async function unpinTask(req, res) {
   }
 }
 
+/**
+ * POST /api/tasks/:id/take-ownership
+ *
+ * Detaches a provider-origin task from its calendar link so Juggler owns
+ * the schedule. Marks ledger rows as 'deleted_local' (sync stops without
+ * deleting the event from the provider) and returns the updated task.
+ */
+async function takeOwnership(req, res) {
+  try {
+    var id = req.params.id;
+    var task = await fetchTaskWithEventIds(db, id, req.user.id);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+
+    await db.transaction(async function(trx) {
+      // Mark all active ledger rows for this task as deleted_local so sync
+      // stops tracking them. The calendar event remains in the provider.
+      await trx('cal_sync_ledger')
+        .where({ task_id: id, user_id: req.user.id, status: 'active' })
+        .update({ status: 'deleted_local', synced_at: trx.fn.now() });
+
+      // Clear event ID columns on the task row so isCalLinkedFixed becomes false
+      var clearFields = {};
+      if (task.gcal_event_id) clearFields.gcal_event_id = null;
+      if (task.msft_event_id) clearFields.msft_event_id = null;
+      if (task.apple_event_id) clearFields.apple_event_id = null;
+      if (Object.keys(clearFields).length > 0) {
+        clearFields.updated_at = trx.fn.now();
+        await tasksWrite.updateTaskById(trx, id, clearFields, req.user.id);
+      }
+    });
+
+    await cache.invalidateTasks(req.user.id);
+    var srcMap = buildSourceMap(
+      await db('tasks_v').where('user_id', req.user.id)
+        .where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); })
+        .select()
+    );
+    var updated = await fetchTaskWithEventIds(db, id, req.user.id);
+    res.json({ task: rowToTask(updated, null, srcMap) });
+  } catch (error) {
+    console.error('Take ownership error:', error);
+    res.status(500).json({ error: 'Failed to take ownership' });
+  }
+}
+
 module.exports = {
   getAllTasks,
   getTask,
@@ -2321,6 +2382,7 @@ module.exports = {
   getDisabledTasks,
   reEnableTask,
   unpinTask,
+  takeOwnership,
   rowToTask,
   taskToRow,
   guardFixedCalendarWhen,

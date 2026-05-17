@@ -178,6 +178,7 @@ function normalizeEvent(event) {
     isCancelled: !!event.isCancelled,
     eventType: event.type || null,
     seriesMasterId: event.seriesMasterId || null,
+    eventUrl: event.webLink || null,
     _raw: event
   };
 }

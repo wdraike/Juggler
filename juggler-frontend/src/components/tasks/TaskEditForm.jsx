@@ -309,6 +309,137 @@ function WeatherHumiditySlider({ humidityMin, humidityMax, onChange, TH }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// ManageCalTaskDialog — shown when user clicks Fixed ↗ on a calendar-owned task
+// ---------------------------------------------------------------------------
+function ManageCalTaskDialog({ task, darkMode, onClose, onOwnershipTaken }) {
+  var TH = getTheme(darkMode);
+  var [busy, setBusy] = useState(false);
+  var [err, setErr] = useState(null);
+
+  var provider = task.gcalEventId ? 'gcal' : task.msftEventId ? 'msft' : 'apple';
+  var providerName = provider === 'gcal' ? 'Google Calendar' : provider === 'msft' ? 'Outlook Calendar' : 'Apple Calendar';
+  var providerDotColor = provider === 'gcal' ? '#4285F4' : provider === 'msft' ? '#00A4EF' : '#8B5CF6';
+
+  var eventUrl = task.calEventUrl || null;
+  var canDeepLink = !!(eventUrl) || provider !== 'apple';
+  var openLabel = provider === 'gcal' ? 'Open this task in Google Calendar'
+                : provider === 'msft' ? 'Open this task in Outlook'
+                : 'Open Apple Calendar';
+  var openDesc  = provider === 'apple'
+    ? 'Opens the Calendar app — find and edit the task there. Juggler syncs automatically.'
+    : 'Goes directly to the event. Edit or move it there — Juggler syncs automatically.';
+  var openHref  = eventUrl || (provider === 'msft' ? 'https://outlook.live.com/calendar/' : provider === 'gcal' ? 'https://calendar.google.com/' : null);
+
+  function handleTakeOwnership() {
+    setBusy(true);
+    setErr(null);
+    apiClient.post('/tasks/' + task.id + '/take-ownership')
+      .then(function(res) {
+        setBusy(false);
+        onOwnershipTaken && onOwnershipTaken(res.data && res.data.task);
+        onClose();
+      })
+      .catch(function(e) {
+        setBusy(false);
+        setErr((e.response && e.response.data && e.response.data.error) || 'Failed to take ownership');
+      });
+  }
+
+  var overlayStyle = {
+    position: 'absolute', inset: 0,
+    background: 'rgba(0,0,0,0.55)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 200, borderRadius: 8
+  };
+  var cardStyle = {
+    background: TH.bgCard,
+    border: '1px solid ' + TH.border,
+    borderRadius: 10,
+    overflow: 'hidden',
+    boxShadow: '0 8px 28px ' + TH.shadow,
+    width: 300,
+    fontFamily: 'inherit',
+    fontSize: 12
+  };
+  var headStyle = {
+    background: TH.headerBg,
+    borderBottom: '1px solid ' + TH.borderLight,
+    padding: '11px 15px',
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+  };
+  var chipStyle = {
+    display: 'flex', alignItems: 'center', gap: 8,
+    background: TH.bgTertiary, border: '1px solid ' + TH.border,
+    borderRadius: 6, padding: '7px 11px', marginBottom: 10,
+    fontSize: 11, color: TH.textSecondary
+  };
+  var rowBase = {
+    display: 'flex', alignItems: 'flex-start', gap: 10,
+    padding: '9px 11px', borderRadius: 6,
+    border: '1px solid ' + TH.border,
+    cursor: 'pointer', marginBottom: 6,
+    transition: 'background 0.1s'
+  };
+
+  return (
+    <div style={overlayStyle} onClick={onClose}>
+      <div style={cardStyle} onClick={function(e) { e.stopPropagation(); }}>
+        <div style={headStyle}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: TH.headerText }}>Manage this task</span>
+          <span style={{ color: 'rgba(255,255,255,0.45)', cursor: 'pointer', fontSize: 13 }} onClick={onClose}>✕</span>
+        </div>
+        <div style={{ padding: '12px 15px' }}>
+          <div style={chipStyle}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: providerDotColor, flexShrink: 0 }} />
+            <span>Set by <strong style={{ color: TH.text }}>{providerName}</strong></span>
+          </div>
+
+          {/* Open in calendar */}
+          {openHref ? (
+            <a href={openHref} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', display: 'block', marginBottom: 6 }}>
+              <div style={{ ...rowBase, borderColor: TH.blueBorder, background: TH.blueBg }}>
+                <span style={{ fontSize: 14, lineHeight: 1.3, flexShrink: 0 }}>↗</span>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: TH.blueText, marginBottom: 2 }}>{openLabel}</div>
+                  <div style={{ fontSize: 10, color: TH.textMuted, lineHeight: 1.5 }}>{openDesc}</div>
+                </div>
+              </div>
+            </a>
+          ) : (
+            <div style={{ ...rowBase, borderColor: TH.blueBorder, background: TH.blueBg, cursor: 'default', marginBottom: 6 }}>
+              <span style={{ fontSize: 14, lineHeight: 1.3, flexShrink: 0 }}>↗</span>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: TH.blueText, marginBottom: 2 }}>{openLabel}</div>
+                <div style={{ fontSize: 10, color: TH.textMuted, lineHeight: 1.5 }}>{openDesc}</div>
+              </div>
+            </div>
+          )}
+
+          {/* Take ownership */}
+          <div style={{ ...rowBase, borderColor: TH.amberBorder, marginBottom: 0 }}
+            onClick={busy ? null : handleTakeOwnership}
+            onMouseEnter={function(e) { e.currentTarget.style.background = TH.amberBg; }}
+            onMouseLeave={function(e) { e.currentTarget.style.background = ''; }}>
+            <span style={{ fontSize: 14, lineHeight: 1.3, flexShrink: 0 }}>⚡</span>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: TH.amberText, marginBottom: 2 }}>{busy ? 'Taking ownership…' : 'Take ownership'}</div>
+              <div style={{ fontSize: 10, color: TH.textMuted, lineHeight: 1.5 }}>Juggler owns the time. Calendar link removed. Float or reschedule freely.</div>
+            </div>
+          </div>
+          {err && <div style={{ fontSize: 10, color: TH.redText, marginTop: 6 }}>{err}</div>}
+        </div>
+        <div style={{ borderTop: '1px solid ' + TH.borderLight, padding: '9px 15px', textAlign: 'right' }}>
+          <button onClick={onClose} style={{
+            background: 'none', border: 'none', fontFamily: 'inherit',
+            fontSize: 11, color: TH.textMuted, cursor: 'pointer'
+          }}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function TaskEditForm({ task, status, onUpdate, onStatusChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, scheduleTemplates, templateDefaults, calSyncSettings, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex, onRecurDayConflict, activeTimezone, tempUnitPref }) {
   var isCreate = mode === 'create';
   var TH = getTheme(darkMode);
@@ -495,7 +626,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   // Calendar-linked fixed tasks are pinned by the external calendar. Stripping
   // 'fixed' from them creates a contradiction the backend guard will reject,
   // so the When-mode selector locks those buttons out entirely.
-  var isCalLinkedFixed = isFixed && !!(task && (task.gcalEventId || task.msftEventId || task.appleEventId));
+  // Provider-origin tasks (calendar owns the schedule). Juggler-native tasks
+  // that were pushed to a calendar have origin='juggler' — they should behave
+  // like regular fixed tasks so the user can still click "Fixed ×" to unfix.
+  var isCalLinkedFixed = isFixed && !!(task && (task.gcalEventId || task.msftEventId || task.appleEventId)) && task.calSyncOrigin !== 'juggler';
   var isRigid = recurring && rigid;
   // Split is allowed for non-recurring tasks (except all-day / fixed) and for
   // recurring tasks only in Time Blocks mode (not Time Window, not rigid).
@@ -864,6 +998,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     }
     return Object.keys(changed).length > 0 ? changed : null;
   }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, rigid, dur, timeRemaining, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+
+  var [manageCalDialog, setManageCalDialog] = useState(false);
 
   // Dirty detection — compare current fields to snapshot
   var [isDirty, setIsDirty] = useState(false);
@@ -1434,13 +1570,13 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           {!recurring && !marker && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
               {isCalLinkedFixed ? (
-                <button disabled
-                  title="This event is synced from your external calendar — the time is controlled by the calendar. To move it, edit in your calendar app."
+                <button onClick={function() { setManageCalDialog(true); }}
+                  title="Manage this task — edit in calendar or take ownership"
                   style={{
                   padding: '2px 10px', borderRadius: 4, border: '1px solid ' + TH.amberBorder,
                   background: TH.amberBg, color: TH.amberText, fontSize: 10, fontWeight: 700,
-                  cursor: 'not-allowed', fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box'
-                }}>Fixed</button>
+                  cursor: 'pointer', fontFamily: 'inherit', height: BTN_H, boxSizing: 'border-box'
+                }}>Fixed ↗</button>
               ) : isFixed ? (
                 <button onClick={isPinned ? handleUnpin : handleUnfix}
                   title={isPinned ? (task && task.taskType === 'recurring_instance' ? 'Reset to template — let scheduler regenerate' : 'Unpin — let scheduler choose time') : 'Click to float — let scheduler move this freely'}
@@ -1459,7 +1595,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
                 }}>Float</button>
               )}
               {isCalLinkedFixed
-                ? <span style={{ fontSize: 10, color: TH.amberText }}>Synced from calendar — edit there to move</span>
+                ? <span style={{ fontSize: 10, color: TH.amberText, cursor: 'pointer' }} onClick={function() { setManageCalDialog(true); }}>Set by calendar — click to manage</span>
                 : isFixed
                   ? <span style={{ fontSize: 10, color: TH.amberText }}>Scheduler will not move this</span>
                   : (!isCreate && date
@@ -2016,6 +2152,16 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         })()}
       </div>
 
+      {manageCalDialog && !isCreate && task && (
+        <ManageCalTaskDialog
+          task={task}
+          darkMode={darkMode}
+          onClose={function() { setManageCalDialog(false); }}
+          onOwnershipTaken={function(updatedTask) {
+            if (onUpdate && updatedTask) onUpdate(updatedTask);
+          }}
+        />
+      )}
     </>
   );
 
@@ -2024,7 +2170,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     return (
       <div style={{
         height: '100%', overflowX: 'hidden', overflowY: 'auto',
-        background: TH.bgCard, boxSizing: 'border-box'
+        background: TH.bgCard, boxSizing: 'border-box', position: 'relative'
       }}>
         {dialogContent}
       </div>
