@@ -88,7 +88,9 @@ describe('task mapping', () => {
       expect(row.location).toBe('["home"]');
       expect(row.tools).toBe('["phone"]');
       expect(row.recurring).toBe(1);
-      expect(row.placement_mode).toBe('recurring_flexible');
+      // placement_mode is only written when client explicitly supplies placementMode.
+      // No placementMode in the task above → undefined (no server-side derivation).
+      expect(row.placement_mode).toBeUndefined();
       expect(row.rigid).toBeUndefined();
       expect(row.depends_on).toBe('["t00"]');
       expect(row.recur).toBe('{"type":"daily"}');
@@ -103,30 +105,30 @@ describe('task mapping', () => {
       expect(row.location).toBeUndefined();
     });
 
-    it('derives recurring_window when currentTask has preferred_time_mins (snake_case) and only when changes', () => {
-      // Regression: DB rows use snake_case preferred_time_mins; taskToRow was reading
-      // camelCase cur.preferredTimeMins (undefined), causing RECURRING_FLEXIBLE instead of RECURRING_WINDOW.
+    it('does NOT derive placement_mode from currentTask fields — only explicit placementMode is written', () => {
+      // After 09-03: server never derives placement_mode from when/recurring/rigid/preferredTimeMins.
+      // An update that only touches `when` leaves placement_mode undefined in the row.
       const existing = {
         recurring: 1,
         preferred_time_mins: 1140,
         rigid: 0,
         marker: 0,
         when: 'morning',
-        placement_mode: 'recurring_window'
+        placement_mode: 'time_window'
       };
       const row = taskToRow({ when: 'evening' }, 'user1', null, existing);
-      expect(row.placement_mode).toBe('recurring_window');
+      expect(row.placement_mode).toBeUndefined();
+      expect(row.when).toBe('evening');
     });
 
-    it('does not clobber placement_mode when currentTask missing (create path)', () => {
-      // Recurring task with preferredTimeMins in the request body (create path — no currentTask)
+    it('does not set placement_mode when placementMode absent (create path, recurring with preferredTimeMins)', () => {
+      // After 09-03: no server-side derivation — client must supply placementMode explicitly.
       const row = taskToRow({ recurring: true, preferredTimeMins: 1140, when: 'evening' }, 'user1');
-      expect(row.placement_mode).toBe('recurring_window');
+      expect(row.placement_mode).toBeUndefined();
     });
 
-    it('preserves recurring_window when update provides only when and currentTask is DB row', () => {
-      // Regression: mcp/tools/tasks.js was calling taskToRow without currentTask,
-      // causing cur={}, cur.recurring=undefined, derivePlacementMode returning FLEXIBLE.
+    it('writes placement_mode when client explicitly supplies placementMode alongside when', () => {
+      // Correct post-09-03 pattern: UI sends placementMode in the patch.
       const dbRow = {
         task_type: 'recurring_template',
         recurring: 1,
@@ -134,10 +136,10 @@ describe('task mapping', () => {
         rigid: 0,
         marker: 0,
         when: 'morning',
-        placement_mode: 'recurring_window'
+        placement_mode: 'time_window'
       };
-      const row = taskToRow({ when: 'evening' }, 'user1', null, dbRow);
-      expect(row.placement_mode).toBe('recurring_window');
+      const row = taskToRow({ when: 'evening', placementMode: 'time_window' }, 'user1', null, dbRow);
+      expect(row.placement_mode).toBe('time_window');
       expect(row.when).toBe('evening');
     });
   });

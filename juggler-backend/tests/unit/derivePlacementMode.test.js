@@ -1,45 +1,29 @@
 /**
- * Unit tests for derivePlacementMode — the internal helper in task.controller.js.
+ * Unit tests for taskToRow placement_mode behaviour after the Phase 09 enum redesign.
  *
- * derivePlacementMode is NOT exported from task.controller; it is exercised via
- * taskToRow (which IS exported). We drive it by passing task fields that trigger
- * the placement-mode re-derivation path in taskToRow (any field in
- * PLACEMENT_TRIGGER_FIELDS: marker, rigid, when, recurring, preferredTimeMins,
- * placementMode).
+ * derivePlacementMode() was removed in plan 09-03. placement_mode is now written
+ * ONLY when the client explicitly supplies task.placementMode — the server never
+ * derives it from when-content or legacy flags (marker/rigid/recurring).
  *
- * Source: src/controllers/task.controller.js lines 103–112 (derivePlacementMode)
- * and lines 547–561 (taskToRow integration).
+ * Source: src/controllers/task.controller.js — taskToRow (placement block)
  *
- * ── Phase 09-02 note ──────────────────────────────────────────────────────────
- * placementModes.js was updated in plan 09-02 to remove the old 7-value set
- * (MARKER, FLEXIBLE, PINNED_DATE, RECURRING_RIGID, RECURRING_WINDOW,
- * RECURRING_FLEXIBLE) and replace it with the new 6-value set that matches the
- * DB ENUM. The controller's derivePlacementMode() still references the old keys
- * (PLACEMENT_MODES.MARKER, .RECURRING_RIGID, etc.) which now return undefined.
- *
- * Tests that assert old return values are SKIPPED here and are tracked for
- * deletion/replacement in plan 09-03, which removes derivePlacementMode()
- * entirely. Only the two FIXED paths (which use PLACEMENT_MODES.FIXED, a key
- * that survived the rename) are kept active.
+ * ── Phase 09-03 ──────────────────────────────────────────────────────────────
+ * This file replaces the old derivePlacementMode.test.js (skipped tests from
+ * 09-02). All tests now verify the direct-write path introduced in plan 09-03.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-// Mock db at require-time so that task.controller.js can be required in a
-// unit-test context without a real database connection.
+// Mock db at require-time so task.controller.js can load without a real DB.
 jest.mock('../../src/db', () => {
   const fn = { now: () => 'MOCK_NOW' };
   const mock = jest.fn(() => mock);
   mock.fn = fn;
-  // Provide enough of the chain interface that any incidental DB calls don't
-  // explode (they should not be reached for taskToRow, but safety-net here).
   mock.where = jest.fn(() => mock);
   mock.whereIn = jest.fn(() => mock);
   mock.select = jest.fn().mockResolvedValue([]);
   return mock;
 });
 
-// Also stub out side-effect modules that task.controller requires at the
-// module level so the require() doesn't crash.
 jest.mock('../../src/lib/redis', () => ({
   invalidateTasks: jest.fn().mockResolvedValue(undefined),
 }));
@@ -59,63 +43,94 @@ jest.mock('../../src/lib/tasks-write', () => ({
   updateTaskById: jest.fn().mockResolvedValue(undefined),
 }));
 
-const { taskToRow } = require('../../src/controllers/task.controller');
+const { taskToRow, rowToTask } = require('../../src/controllers/task.controller');
+const { PLACEMENT_MODES } = require('../../src/lib/placementModes');
 
-// Helper: call taskToRow with a minimal task that only contains the
-// placement-triggering fields of interest. The second argument (userId) is
-// required but its value doesn't affect placement_mode derivation.
-function placementFor(fields) {
-  const row = taskToRow(fields, 'u-test', null, null);
+// Helper: call taskToRow and return only placement_mode from the resulting row.
+function placementFor(fields, currentTask) {
+  const row = taskToRow(fields, 'u-test', null, currentTask || null);
   return row.placement_mode;
 }
 
-describe('derivePlacementMode (exercised via taskToRow)', () => {
-  // ── Mode: FIXED (via when string) ─────────────────────────────────────────
-  // PLACEMENT_MODES.FIXED === 'fixed' still holds after the 09-02 rename.
-  test('returns FIXED when when includes "fixed"', () => {
-    expect(placementFor({ when: 'fixed-08:00' })).toBe('fixed');
+describe('taskToRow — direct-write placement_mode (post-09-03)', () => {
+  // ── Direct write: client supplies placementMode ───────────────────────────
+
+  test('writes placement_mode when client supplies placementMode=fixed', () => {
+    expect(placementFor({ placementMode: 'fixed' })).toBe('fixed');
   });
 
-  // ── Mode: FIXED (via rigid + !recurring) ─────────────────────────────────
-  // The second code path: isRigid && !recurring → FIXED
-  test('returns FIXED when rigid=true and recurring=false', () => {
-    expect(placementFor({ rigid: true, recurring: false })).toBe('fixed');
+  test('writes placement_mode when client supplies placementMode=anytime', () => {
+    expect(placementFor({ placementMode: 'anytime' })).toBe('anytime');
   });
 
-  // ── Precedence: FIXED (when) beats RECURRING_RIGID ───────────────────────
-  // when string check comes before the recurring block.
-  test('FIXED (via when) takes precedence over recurring+rigid inputs', () => {
-    // recurring+rigid+ptm would normally yield RECURRING_RIGID but when wins.
-    expect(placementFor({ when: 'fixed-09:00', recurring: true, rigid: true, preferredTimeMins: 480 })).toBe('fixed');
+  test('writes placement_mode when client supplies placementMode=time_window', () => {
+    expect(placementFor({ placementMode: 'time_window' })).toBe('time_window');
   });
 
-  // ── Skipped: old enum values (plan 09-03 will remove derivePlacementMode) ──
-  // These tests relied on PLACEMENT_MODES.MARKER / .RECURRING_RIGID /
-  // .RECURRING_WINDOW / .RECURRING_FLEXIBLE / .FLEXIBLE which no longer exist.
-  // The controller will be updated in plan 09-03 to remove derivePlacementMode()
-  // entirely; at that point this entire test file will be replaced.
-
-  test.skip('returns MARKER when marker=true [removed in 09-03]', () => {
-    expect(placementFor({ marker: true })).toBe('marker');
+  test('writes placement_mode when client supplies placementMode=time_blocks', () => {
+    expect(placementFor({ placementMode: 'time_blocks' })).toBe('time_blocks');
   });
 
-  test.skip('returns RECURRING_RIGID when recurring+rigid+preferredTimeMins [removed in 09-03]', () => {
-    expect(placementFor({ recurring: true, rigid: true, preferredTimeMins: 480 })).toBe('recurring_rigid');
+  test('writes placement_mode when client supplies placementMode=reminder', () => {
+    expect(placementFor({ placementMode: 'reminder' })).toBe('reminder');
   });
 
-  test.skip('returns RECURRING_WINDOW when recurring+preferredTimeMins [removed in 09-03]', () => {
-    expect(placementFor({ recurring: true, preferredTimeMins: 600 })).toBe('recurring_window');
+  test('writes placement_mode when client supplies placementMode=all_day', () => {
+    expect(placementFor({ placementMode: 'all_day' })).toBe('all_day');
   });
 
-  test.skip('returns RECURRING_FLEXIBLE when recurring+no constraints [removed in 09-03]', () => {
-    expect(placementFor({ recurring: true, rigid: false, preferredTimeMins: null })).toBe('recurring_flexible');
+  // ── No derivation: without explicit placementMode, row has none ───────────
+
+  test('does NOT set placement_mode when placementMode is absent (no derivation)', () => {
+    expect(placementFor({ when: 'morning', recurring: true })).toBeUndefined();
   });
 
-  test.skip('returns FLEXIBLE as fallback [removed in 09-03]', () => {
-    expect(placementFor({ marker: false, when: '', recurring: false })).toBe('flexible');
+  test('does NOT derive from rigid flag — placementMode must be explicit', () => {
+    expect(placementFor({ rigid: true, recurring: false })).toBeUndefined();
   });
 
-  test.skip('MARKER takes precedence over FIXED [removed in 09-03]', () => {
-    expect(placementFor({ marker: true, when: 'fixed-08:00' })).toBe('marker');
+  test('does NOT derive from when containing old fixed-like strings', () => {
+    // After migration, 'fixed' never appears in `when`; and even if it did, the
+    // server no longer inspects when-content to derive placement_mode.
+    expect(placementFor({ when: 'fixed-08:00' })).toBeUndefined();
+  });
+
+  test('does NOT derive from marker flag', () => {
+    expect(placementFor({ marker: true })).toBeUndefined();
+  });
+
+  test('does NOT derive from recurring+preferredTimeMins without explicit placementMode', () => {
+    expect(placementFor({ recurring: true, preferredTimeMins: 480 })).toBeUndefined();
+  });
+
+  // ── placementMode takes priority over all other fields ────────────────────
+
+  test('explicit placementMode wins even when other legacy flags are present', () => {
+    // Passes both old-style flags and an explicit placementMode — only
+    // placementMode should land in the row.
+    expect(placementFor({
+      placementMode: 'time_window',
+      rigid: true,
+      recurring: true,
+      preferredTimeMins: 480,
+      when: 'morning'
+    })).toBe('time_window');
+  });
+});
+
+describe('rowToTask — ANYTIME fallback (post-09-03)', () => {
+  test('falls back to ANYTIME when placement_mode is missing from DB row', () => {
+    const task = rowToTask({ text: 'Test' }, null);
+    expect(task.placementMode).toBe(PLACEMENT_MODES.ANYTIME);
+  });
+
+  test('falls back to ANYTIME when placement_mode is empty string', () => {
+    const task = rowToTask({ placement_mode: '' }, null);
+    expect(task.placementMode).toBe(PLACEMENT_MODES.ANYTIME);
+  });
+
+  test('preserves explicit placement_mode from DB row', () => {
+    const task = rowToTask({ placement_mode: 'fixed' }, null);
+    expect(task.placementMode).toBe('fixed');
   });
 });

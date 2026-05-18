@@ -24,10 +24,10 @@ const { isAnchorDependentRecur } = require('../../../shared/scheduler/expandRecu
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { TERMINAL_STATUSES, isTerminalStatus } = require('../lib/task-status');
 
-// Fields that, when present on an incoming task patch, require us to
-// (re)derive placement_mode. Module-level so it's allocated once instead
-// of on every taskToRow() call.
-var PLACEMENT_TRIGGER_FIELDS = ['marker', 'rigid', 'when', 'recurring', 'preferredTimeMins', 'placementMode'];
+// Fields that, when explicitly supplied by the client, cause placement_mode
+// to be written. After the enum redesign, placement_mode is always written
+// directly — the server never derives it from when-content or legacy flags.
+var PLACEMENT_TRIGGER_FIELDS = ['when', 'placementMode'];
 // Wrap enqueueScheduleRun to also emit SSE event so frontends refresh
 // immediately. `ids` (optional) is the list of task ids the caller just
 // wrote — when present, the frontend can upsert only those rows instead of
@@ -98,17 +98,6 @@ async function expandToAllInstanceIds(userId, ids) {
   masterIds.forEach(function(m) { out[m] = true; });
   siblings.forEach(function(r) { out[r.id] = true; });
   return Object.keys(out);
-}
-
-function derivePlacementMode(isMarker, isRigid, when, recurring, preferredTimeMins) {
-  if (isMarker) return PLACEMENT_MODES.MARKER;
-  var whenStr = when || '';
-  if (whenStr.includes('fixed')) return PLACEMENT_MODES.FIXED;
-  if (isRigid && !recurring) return PLACEMENT_MODES.FIXED;
-  if (recurring && isRigid && preferredTimeMins != null) return PLACEMENT_MODES.RECURRING_RIGID;
-  if (recurring && preferredTimeMins != null) return PLACEMENT_MODES.RECURRING_WINDOW;
-  if (recurring) return PLACEMENT_MODES.RECURRING_FLEXIBLE;
-  return PLACEMENT_MODES.FLEXIBLE;
 }
 
 /** Safely parse a JSON string, returning fallback on any error. */
@@ -423,7 +412,7 @@ function rowToTask(row, timezone, sourceMap) {
     datePinned: !!row.date_pinned,
     prevWhen: row.prev_when || null,
     marker: !!row.marker,
-    placementMode: row.placement_mode || PLACEMENT_MODES.FLEXIBLE,
+    placementMode: row.placement_mode || PLACEMENT_MODES.ANYTIME,
     flexWhen: !!row.flex_when,
     travelBefore: row.travel_before != null ? row.travel_before : undefined,
     travelAfter: row.travel_after != null ? row.travel_after : undefined,
@@ -560,21 +549,8 @@ function taskToRow(task, userId, timezone, currentTask) {
   }
 
 
-  var touchesPlacement = PLACEMENT_TRIGGER_FIELDS.some(function(f) { return task[f] !== undefined; });
-  if (touchesPlacement) {
-    if (task.placementMode !== undefined) {
-      row.placement_mode = task.placementMode;
-    } else {
-      var cur = currentTask || {};
-      var curPrefTimeMins = cur.preferredTimeMins != null ? cur.preferredTimeMins : cur.preferred_time_mins;
-      row.placement_mode = derivePlacementMode(
-        task.marker     !== undefined ? !!task.marker     : !!(cur.marker),
-        task.rigid      !== undefined ? !!task.rigid      : !!(cur.rigid),
-        task.when       !== undefined ? task.when         : (cur.when || ''),
-        task.recurring  !== undefined ? !!task.recurring  : !!(cur.recurring),
-        task.preferredTimeMins !== undefined ? task.preferredTimeMins : curPrefTimeMins
-      );
-    }
+  if (task.placementMode !== undefined) {
+    row.placement_mode = task.placementMode;
   }
 
   row.updated_at = new Date();
@@ -829,18 +805,15 @@ async function createTask(req, res) {
     if (dateWasSet && row.date_pinned === undefined) {
       row.date_pinned = 1;
     }
-    // When a user creates a task with an explicit time, make it fixed so the
-    // scheduler anchors it at that time. User can remove the fixed setting later.
+    // When a user creates a task with an explicit time, fix its placement_mode
+    // so the scheduler anchors it at that time. User can change the mode later.
     var timeWasSet = req.body.time !== undefined || req.body.scheduledAt !== undefined;
-    if (timeWasSet && row.when === undefined) {
-      row.when = 'fixed';
-      // Also align placement_mode — taskToRow derived it before this auto-set,
-      // so it may be FLEXIBLE. Fix the inconsistency here.
+    if (timeWasSet && row.placement_mode === undefined) {
       row.placement_mode = PLACEMENT_MODES.FIXED;
     }
-    // [FIX D-14] Server-side backstop: if client signals all-day but didn't set when, enforce it
-    if (!timeWasSet && req.body.allDay === true && row.when === undefined) {
-      row.when = 'allday';
+    // [FIX D-14] Server-side backstop: if client signals all-day but didn't set placement_mode, enforce it
+    if (!timeWasSet && req.body.allDay === true && row.placement_mode === undefined) {
+      row.placement_mode = PLACEMENT_MODES.ALL_DAY;
     }
     // Recurrings cannot have dependencies — clear if provided
     if (row.recurring || row.task_type === 'recurring_template' || row.task_type === 'recurring_instance') {
@@ -949,13 +922,11 @@ async function updateTask(req, res) {
       }
 
       // Normalize: if clearing date_pinned without explicitly changing when,
-      // strip the 'fixed' tag so the scheduler isn't left treating the task as
-      // immovable after the user has asked to unpin it.
+      // compact and trim the when value so the scheduler sees a clean list.
+      // ('fixed' is no longer stored in `when` after the enum redesign.)
       if (fastRow.date_pinned === 0 && req.body.when === undefined) {
         var _exWhen = fastExisting.when || '';
-        if (_exWhen.split(',').some(function(t) { return t.trim() === 'fixed'; })) {
-          fastRow.when = _exWhen.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t && t !== 'fixed'; }).join(',');
-        }
+        fastRow.when = _exWhen.split(',').map(function(t) { return t.trim(); }).filter(Boolean).join(',');
       }
 
       // Direct write: master + instance fields routed by the helper.
@@ -1080,19 +1051,9 @@ async function updateTask(req, res) {
     if (dateWasSet && row.date_pinned === undefined) {
       row.date_pinned = 1;
     }
-    // If the user explicitly cleared the time field and didn't also set when, auto-strip
-    // 'fixed' from when. The create path auto-adds 'fixed' when a time is given; without
-    // this strip the task becomes permanently unschedulable (when='fixed', no date/time).
-    var timeWasCleared = req.body.time === null || req.body.time === '';
-    if (timeWasCleared && row.when === undefined) {
-      var _existingWhen = existing.when || '';
-      if (_existingWhen.split(',').some(function(t) { return t.trim() === 'fixed'; })) {
-        row.when = _existingWhen.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t && t !== 'fixed'; }).join(',');
-      }
-    }
     // [FIX D-14] Server-side backstop for all-day tasks in update path
-    if (!timeWasSet && req.body.allDay === true && row.when === undefined) {
-      row.when = 'allday';
+    if (!timeWasSet && req.body.allDay === true && row.placement_mode === undefined) {
+      row.placement_mode = PLACEMENT_MODES.ALL_DAY;
     }
     // Drag-pin: user dragged this task to a new time on the calendar.
     // Pin it so the scheduler respects the user's placement. The when-tags
@@ -1939,12 +1900,11 @@ async function batchUpdateTasks(req, res) {
         delete qRow.created_at;
         delete qRow._pendingTimeOnly;
 
-        // Normalize: clearing date_pinned without changing when → strip 'fixed'
+        // Normalize: clearing date_pinned without changing when → compact the when value.
+        // ('fixed' is no longer stored in `when` after the enum redesign.)
         if (qRow.date_pinned === 0 && qFields.when === undefined && qExisting) {
           var _qExWhen = qExisting.when || '';
-          if (_qExWhen.split(',').some(function(t) { return t.trim() === 'fixed'; })) {
-            qRow.when = _qExWhen.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t && t !== 'fixed'; }).join(',');
-          }
+          qRow.when = _qExWhen.split(',').map(function(t) { return t.trim(); }).filter(Boolean).join(',');
         }
 
         var { schedulingFields, nonSchedulingFields } = splitFields(qRow);
@@ -2061,12 +2021,11 @@ async function batchUpdateTasks(req, res) {
               delete row.depends_on;
             }
 
-            // Normalize: clearing date_pinned without changing when → strip 'fixed'
+            // Normalize: clearing date_pinned without changing when → compact the when value.
+            // ('fixed' is no longer stored in `when` after the enum redesign.)
             if (row.date_pinned === 0 && fields.when === undefined && existing) {
               var _exWhen = existing.when || '';
-              if (_exWhen.split(',').some(function(t) { return t.trim() === 'fixed'; })) {
-                row.when = _exWhen.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t && t !== 'fixed'; }).join(',');
-              }
+              row.when = _exWhen.split(',').map(function(t) { return t.trim(); }).filter(Boolean).join(',');
             }
 
             var taskType = existing ? (existing.task_type || 'task') : 'task';
@@ -2345,15 +2304,15 @@ async function takeOwnership(req, res) {
         .where({ task_id: id, user_id: req.user.id, status: 'active' })
         .update({ status: 'deleted_local', synced_at: trx.fn.now() });
 
-      // Clear event IDs and strip 'fixed' from when / clear date_pinned so the
-      // scheduler can place this task freely. Guard is bypassed here because we
-      // just removed the cal link in the same transaction.
+      // Clear event IDs and clear date_pinned so the scheduler can place this
+      // task freely. Guard is bypassed here because we just removed the cal
+      // link in the same transaction.
       var clearFields = { updated_at: trx.fn.now() };
       if (task.gcal_event_id) clearFields.gcal_event_id = null;
       if (task.msft_event_id) clearFields.msft_event_id = null;
       if (task.apple_event_id) clearFields.apple_event_id = null;
       var currentWhen = task.when || '';
-      var newWhen = currentWhen.split(',').map(function(t) { return t.trim(); }).filter(function(t) { return t && t !== 'fixed'; }).join(',');
+      var newWhen = currentWhen.split(',').map(function(t) { return t.trim(); }).filter(Boolean).join(',');
       clearFields.when = newWhen;
       clearFields.date_pinned = 0;
       await tasksWrite.updateTaskById(trx, id, clearFields, req.user.id);
