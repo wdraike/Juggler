@@ -233,7 +233,7 @@ describe('Tier 2: Recurrings with Preferred Time', () => {
     // "user explicitly set a preferred time". Without it, t.time is just a
     // prior scheduler placement and shouldn't anchor a missed-flex window.
     var r = schedule([
-      task({ id: 'bf', text: 'Breakfast', recurring: true, placementMode: 'recurring_window', when: 'morning', time: '7:00 AM', preferredTimeMins: 420, timeFlex: 60, dur: 30, generated: true }),
+      task({ id: 'bf', text: 'Breakfast', recurring: true, placementMode: 'time_window', when: 'morning', time: '7:00 AM', preferredTimeMins: 420, timeFlex: 60, dur: 30, generated: true }),
     ], 540); // 9am
     // Still reported as missed (shows in ConflictsView / pastDue list)
     expect(isMissed(r, 'bf')).toBe(true);
@@ -343,7 +343,7 @@ describe('Tier 3: Flexible Recurrings', () => {
       task({ id: 'mtg1', placementMode: 'fixed', time: '8:00 AM', dur: 240, datePinned: true }),
       task({ id: 'mtg2', placementMode: 'fixed', time: '1:00 PM', dur: 240, datePinned: true }),
       task({ id: 'mtg3', placementMode: 'fixed', time: '5:00 PM', dur: 240, datePinned: true }),
-      task({ id: 'ex', text: 'Exercise', recurring: true, placementMode: 'recurring_flexible', when: 'morning,afternoon', dur: 30, generated: true, flexWhen: false }),
+      task({ id: 'ex', text: 'Exercise', recurring: true, placementMode: 'anytime', when: 'morning,afternoon', dur: 30, generated: true, flexWhen: false }),
     ]);
     // Strict + blocks full = should be unplaced
     expect(isUnplaced(r, 'ex')).toBe(true);
@@ -396,7 +396,7 @@ describe('Tier 4: Fixed Events & Conflicts', () => {
   test('S18: Rigid recurring blocked by fixed event → displaced or conflict', () => {
     var r = schedule([
       task({ id: 'mtg', placementMode: 'fixed', time: '12:00 PM', dur: 60, datePinned: true }),
-      task({ id: 'lunch', recurring: true, placementMode: 'recurring_rigid', when: 'lunch', dur: 30, generated: true }),
+      task({ id: 'lunch', recurring: true, placementMode: 'fixed', when: 'lunch', dur: 30, generated: true }),
     ]);
     expect(isPlaced(r, 'lunch')).toBe(true); // rigid recurringTasks NEVER vanish
   });
@@ -404,7 +404,7 @@ describe('Tier 4: Fixed Events & Conflicts', () => {
   test('S19: All-day event — rigid recurringTasks force-placed, flex overflow', () => {
     var r = schedule([
       task({ id: 'conf', placementMode: 'fixed', time: '8:00 AM', dur: 600, datePinned: true }),
-      task({ id: 'meds', recurring: true, placementMode: 'recurring_rigid', when: 'morning', dur: 20, generated: true }),
+      task({ id: 'meds', recurring: true, placementMode: 'fixed', when: 'morning', dur: 20, generated: true }),
       task({ id: 'flex1', dur: 60 }),
       task({ id: 'flex2', dur: 60 }),
     ]);
@@ -563,11 +563,14 @@ describe('Tier 6: Full Pipeline (DB rows)', () => {
 describe('Tier 7: Multi-Day Patterns', () => {
 
   test('S28: Week of recurringTasks — same time (±flex) across all 7 days', () => {
+    // Use time_window mode with preferredTimeMins so placement is anchored near
+    // noon on every day (including weekends that lack a 'lunch' when-block).
     var tasks = [];
     for (var d = 0; d < 7; d++) {
       tasks.push(task({
-        id: 'lunch_d' + d, text: 'Lunch', recurring: true, when: 'lunch',
-        time: '12:00 PM', timeFlex: 60, dur: 30, date: dateKey(d), generated: true
+        id: 'lunch_d' + d, text: 'Lunch', recurring: true,
+        placementMode: 'time_window', preferredTimeMins: 720,
+        timeFlex: 60, dur: 30, date: dateKey(d), generated: true
       }));
     }
     var r = schedule(tasks, 360); // 6am
@@ -781,7 +784,7 @@ describe('Tier 11: Recurring + Split (day-boundary rule)', () => {
     var r = schedule([
       task({
         id: 'rec_stretch', text: 'Stretching',
-        recurring: true, placementMode: 'recurring_flexible', generated: true, date: TODAY,
+        recurring: true, placementMode: 'anytime', generated: true, date: TODAY,
         when: 'morning', dur: 60, split: true, splitMin: 15, pri: 'P3'
       }),
     ], 300);
@@ -806,7 +809,7 @@ describe('Tier 11: Recurring + Split (day-boundary rule)', () => {
       task({ id: 'block_am', placementMode: 'fixed', time: '6:00 AM', dur: 90, datePinned: true }),
       task({
         id: 'rec_stretch', text: 'Stretching',
-        recurring: true, placementMode: 'recurring_flexible', generated: true, date: TODAY,
+        recurring: true, placementMode: 'anytime', generated: true, date: TODAY,
         when: 'morning', dur: 60, split: true, splitMin: 15, pri: 'P3'
       }),
     ], 300);
@@ -830,7 +833,7 @@ describe('Tier 11: Recurring + Split (day-boundary rule)', () => {
       task({ id: 'block_am_full', placementMode: 'fixed', time: '6:00 AM', dur: 120, datePinned: true }),
       task({
         id: 'rec_stretch', text: 'Stretching',
-        recurring: true, placementMode: 'recurring_flexible', generated: true, date: TODAY,
+        recurring: true, placementMode: 'anytime', generated: true, date: TODAY,
         when: 'morning', dur: 60, split: true, splitMin: 15, pri: 'P3'
       }),
     ], 300);
@@ -880,7 +883,7 @@ describe('Tier 10: Overdue placement flags', () => {
 
   test('rigid recurring whose preferred window has passed today → _overdue on placement', () => {
     var r = schedule([
-      task({ id: 'med', text: 'Morning meds', recurring: true, placementMode: 'recurring_rigid', when: 'morning', time: '7:00 AM', dur: 15, generated: true }),
+      task({ id: 'med', text: 'Morning meds', recurring: true, placementMode: 'fixed', when: 'morning', time: '7:00 AM', dur: 15, generated: true }),
     ], 540); // 9 AM — 7:00-7:15 AM window already past
     var e = entry(r, 'med');
     expect(e).not.toBeNull();
@@ -890,7 +893,7 @@ describe('Tier 10: Overdue placement flags', () => {
 
   test('rigid recurring whose time is still future today → no overdue flag', () => {
     var r = schedule([
-      task({ id: 'lunch', text: 'Lunch', recurring: true, placementMode: 'recurring_rigid', when: 'lunch', time: '12:30 PM', dur: 30, generated: true }),
+      task({ id: 'lunch', text: 'Lunch', recurring: true, placementMode: 'fixed', when: 'lunch', time: '12:30 PM', dur: 30, generated: true }),
     ], 540); // 9 AM — lunch still ahead
     var e = entry(r, 'lunch');
     expect(e).not.toBeNull();
@@ -905,7 +908,7 @@ describe('Tier 10: Overdue placement flags', () => {
     var r = schedule([
       task({
         id: 'bf_yesterday', text: 'Breakfast (yesterday)',
-        recurring: true, placementMode: 'recurring_window', when: 'morning',
+        recurring: true, placementMode: 'time_window', when: 'morning',
         time: '7:00 AM', preferredTimeMins: 420, dur: 30,
         date: yesterday, timeFlex: 60, generated: true
       }),
@@ -922,7 +925,7 @@ describe('Tier 10: Overdue placement flags', () => {
     var r = schedule([
       task({
         id: 'bf_done', text: 'Breakfast (done)',
-        recurring: true, placementMode: 'recurring_window', when: 'morning',
+        recurring: true, placementMode: 'time_window', when: 'morning',
         time: '7:00 AM', preferredTimeMins: 420, dur: 30,
         date: yesterday, timeFlex: 60, generated: true,
         status: 'done'
@@ -941,7 +944,7 @@ describe('Tier 10: Overdue placement flags', () => {
     var r = schedule([
       task({
         id: 'afj', text: 'Apply for jobs',
-        recurring: true, placementMode: 'recurring_flexible',
+        recurring: true, placementMode: 'anytime',
         when: 'morning,lunch,afternoon,evening,night',
         time: '9:00 AM', // stale scheduler placement — NOT a preference
         // preferredTimeMins: NOT SET
@@ -976,7 +979,7 @@ describe('Tier 11: recurring_flexible past-anchor placement', () => {
         id: 'weekly_claim',
         text: 'Submit Weekly Claim',
         recurring: true,
-        placementMode: 'recurring_flexible',
+        placementMode: 'anytime',
         when: 'afternoon',
         time: '12:30 PM', // anchor time — now past
         dur: 30,
@@ -1000,7 +1003,7 @@ describe('Tier 11: recurring_flexible past-anchor placement', () => {
         id: 'weekly_claim_early',
         text: 'Submit Weekly Claim (future)',
         recurring: true,
-        placementMode: 'recurring_flexible',
+        placementMode: 'anytime',
         when: 'afternoon',
         time: '12:30 PM',
         dur: 30,

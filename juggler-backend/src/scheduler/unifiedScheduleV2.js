@@ -283,8 +283,8 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     var st = statuses[t.id] || t.status || '';
     if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'pause' || st === 'disabled') return;
 
-    var pm = t.placementMode || PLACEMENT_MODES.FLEXIBLE;
-    var isMarker = pm === PLACEMENT_MODES.MARKER;
+    var pm = t.placementMode || PLACEMENT_MODES.ANYTIME;
+    var isMarker = pm === PLACEMENT_MODES.REMINDER;
     // Markers are calendar indicators — they coexist with other placements at
     // the same minute, so dur=0 means they never consume occupancy.
     var dur = isMarker ? 0 : effectiveDuration(t);
@@ -294,24 +294,25 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     if (t.date && String(t.date).toUpperCase() === 'TBD') return;
     // All-day events have no time-grid presence — they appear in the calendar
     // UI via a separate rendering path, not as time-grid placements.
-    // 'fixed' belongs in placementMode, not when. If it leaks into the when
-    // field it has no matching time-block and the task becomes unplaceable.
-    // Strip it here so the task floats freely (anytime placement).
-    var when = (t.when === 'fixed' ? '' : (t.when || ''));
-    var allday = hasWhen(when, 'allday');
-    if (allday) return;
-    // Past recurring instances (recurring=true, date in past, no explicit placement mode)
+    // After the placement_mode enum redesign, all_day mode is carried in
+    // placement_mode directly — never in the when column.
+    if (pm === PLACEMENT_MODES.ALL_DAY) return;
+    var when = t.when || '';
+    // Past ANYTIME recurring instances (recurring=true, date in past, no time anchor)
     // are dropped — they already passed and should not be rescheduled to today.
-    // Generated instances with explicit placementMode (recurring_window / recurring_rigid)
-    // are NOT dropped here — they get force-placed with _overdue in a later pass.
-    var isExplicitRecurringMode = (pm === PLACEMENT_MODES.RECURRING_RIGID ||
-      pm === PLACEMENT_MODES.RECURRING_WINDOW || pm === PLACEMENT_MODES.RECURRING_FLEXIBLE);
-    if (t.recurring && !isExplicitRecurringMode && t.date && toKey(t.date) < todayIsoKey) return;
+    // TIME_WINDOW tasks from prior days still go through the missed-window path
+    // so they can be force-placed with _overdue on their original day.
+    // FIXED tasks from prior days still go through the force-placement pass.
+    if (t.recurring && pm === PLACEMENT_MODES.ANYTIME && t.date && toKey(t.date) < todayIsoKey) return;
     var pri = normalizePri(t.pri);
     var priRank = PRI_RANK[pri] || 50;
-    var fixed = pm === PLACEMENT_MODES.FIXED;
+    // fixed = true only for non-recurring calendar events in FIXED mode.
+    // Recurring FIXED tasks (rigid recurrings) use isRigid instead — they can
+    // be displaced from their anchor when the slot is occupied, whereas truly
+    // fixed calendar events cannot be moved.
+    var fixed = pm === PLACEMENT_MODES.FIXED && !t.recurring;
     var pinned = !!t.datePinned;
-    var recurring = pm === PLACEMENT_MODES.RECURRING_RIGID || pm === PLACEMENT_MODES.RECURRING_WINDOW || pm === PLACEMENT_MODES.RECURRING_FLEXIBLE;
+    var recurring = !!t.recurring;
     var flexWhen = !!t.flexWhen;
 
     // Derive earliest placement minute-of-day and date.
@@ -319,11 +320,11 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     // datetime, captured in item.anchor. Normalize all date-ish fields to
     // canonical ISO so downstream lookups against dates[].key always match.
     var anchorDate = toKey(t.date);
-    // For RECURRING_RIGID with a when-tag, the when-block is authoritative —
+    // For FIXED with a when-tag, the when-block is authoritative —
     // do NOT use t.time (it may be a stale/feedback-loop value from a prior run).
-    // Only use t.time for immovable anchor if there is no when-tag (time-only rigid).
-    var anchorMin = (t.time && !(pm === PLACEMENT_MODES.RECURRING_RIGID && t.when)) ? parseTimeToMinutes(t.time) : null;
-    if ((pm === PLACEMENT_MODES.RECURRING_RIGID || pm === PLACEMENT_MODES.RECURRING_WINDOW) && t.preferredTimeMins != null && anchorMin == null) {
+    // Only use t.time for immovable anchor if there is no when-tag (time-only fixed).
+    var anchorMin = (t.time && !(pm === PLACEMENT_MODES.FIXED && t.when)) ? parseTimeToMinutes(t.time) : null;
+    if ((pm === PLACEMENT_MODES.FIXED || pm === PLACEMENT_MODES.TIME_WINDOW) && t.preferredTimeMins != null && anchorMin == null) {
       anchorMin = t.preferredTimeMins;
     }
 
@@ -358,12 +359,12 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     var travelBefore = (splitOrd === 1) ? rawTb : 0;
     var travelAfter = (splitOrd === splitTot) ? rawTa : 0;
 
-    // Time-window mode: placement_mode 'recurring_window' means preferred_time_mins
+    // Time-window mode: placement_mode 'time_window' means preferred_time_mins
     // ± timeFlex. In window mode the `when` tags are ignored.
     var DEFAULT_TIME_FLEX = 60;
-    var isWindowMode = pm === PLACEMENT_MODES.RECURRING_WINDOW;
+    var isWindowMode = pm === PLACEMENT_MODES.TIME_WINDOW;
     var windowLo = null, windowHi = null;
-    var isMissedWindow = false; // true when the flex window is entirely past (RECURRING_WINDOW mode)
+    var isMissedWindow = false; // true when the flex window is entirely past (TIME_WINDOW mode)
     if (isWindowMode) {
       var flex = t.timeFlex != null ? t.timeFlex : DEFAULT_TIME_FLEX;
       if (flex > 0 && flex <= 480) {
@@ -383,7 +384,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     }
 
     // Missed preferred-time detection for non-window recurring tasks.
-    // A FLEXIBLE recurring (or any recurring without RECURRING_WINDOW mode) that
+    // An ANYTIME recurring (or any recurring without TIME_WINDOW mode) that
     // has a preferredTimeMins set should be marked missed — not normally placed —
     // when its preferred-time window [preferredTimeMins, preferredTimeMins+timeFlex]
     // has entirely passed. This prevents stale instances from being placed far
@@ -445,7 +446,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     // so chunks spread across the interval window naturally without competing with
     // the next occurrence. Daily tpc splits self-cap via cycleDays=1 in the
     // placement window (ai + cycleDays - 1 = ai → same day regardless).
-    var isDayLocked = recurring && (pm === PLACEMENT_MODES.RECURRING_RIGID || !isFlexibleTpc);
+    var isDayLocked = recurring && (pm === PLACEMENT_MODES.FIXED || !isFlexibleTpc);
 
     items.push({
       task: t,
@@ -456,12 +457,12 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       when: when,
       whenParts: parseWhen(when),
       isFixedWhen: fixed,
-      isAllDay: allday,
+      isAllDay: pm === PLACEMENT_MODES.ALL_DAY,
       isPinned: pinned,
       // Generated instances without an explicit anchorMin are day-locked via
       // isGenerated — see findEarliestSlot for the clamping logic.
       isGenerated: !!t.generated && !recurring,
-      isRigid: pm === PLACEMENT_MODES.RECURRING_RIGID,
+      isRigid: pm === PLACEMENT_MODES.FIXED,
       isRecurring: recurring,
       isMarker: isMarker,
       flexWhen: flexWhen,
@@ -487,13 +488,17 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       splitTotal: splitTot,
       depNames: depNames,
       slack: null, // filled later
-      // RECURRING_FLEXIBLE tasks whose scheduled time has already passed today
+      // ANYTIME recurring tasks whose scheduled time has already passed today
       // get pushed to the latest available slot so they stay visible on the
       // day grid and the user can still mark them done before end of day.
-      // RECURRING_WINDOW tasks are intentionally excluded — when their preferred
+      // TIME_WINDOW tasks are intentionally excluded — when their preferred
       // time window is past they should go to unplaced with reason 'missed'.
+      // The `recurring &&` guard is required: without it, any non-recurring
+      // ANYTIME task whose anchorMin < nowMins would incorrectly get
+      // preferLatestSlot = true.
       preferLatestSlot: (
-        pm === PLACEMENT_MODES.RECURRING_FLEXIBLE &&
+        pm === PLACEMENT_MODES.ANYTIME &&
+        recurring &&
         anchorDate === todayIsoKey &&
         anchorMin != null && nowMins != null && anchorMin < nowMins
       )
@@ -628,7 +633,7 @@ function emitStepRecord(cfg, phase, item, start, dur, dateKey, locked, dayPlaced
         taskId: p.task ? p.task.id : null,
         taskText: p.task ? p.task.text : null,
         start: p.start, dur: p.dur,
-        locked: !!p.locked, marker: !!(p.task && p.task.placementMode === PLACEMENT_MODES.MARKER)
+        locked: !!p.locked, marker: !!(p.task && p.task.placementMode === PLACEMENT_MODES.REMINDER)
       };
     });
   });
@@ -647,7 +652,7 @@ function emitStepRecord(cfg, phase, item, start, dur, dateKey, locked, dayPlaced
     deadline: t.deadline || null,
     preferredTimeMins: t.preferredTimeMins != null ? t.preferredTimeMins : null,
     timeFlex: t.timeFlex != null ? t.timeFlex : null,
-    rigid: t.placementMode === PLACEMENT_MODES.RECURRING_RIGID,
+    rigid: t.placementMode === PLACEMENT_MODES.FIXED,
     travelBefore: item.travelBefore || 0,
     travelAfter: item.travelAfter || 0,
     locationRequirement: t.location || null,
@@ -1354,7 +1359,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       return;
     }
     // Missed preferred-time: recurring task whose preferred-time window has
-    // entirely passed but is not in RECURRING_WINDOW mode (which has its own
+    // entirely passed but is not in TIME_WINDOW mode (which has its own
     // dual-place path). Skip the queue entirely — mark missed below.
     if (item.isMissedPreferredTime) {
       missedPreferredTimeItems.push(item);
@@ -1600,7 +1605,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   // to prevent drifting to future dates.
   pastAnchoredPreQueue.forEach(function(item) { stillUnplaced.push(item); });
 
-  // Missed-preferred-time pass: recurring tasks (non-RECURRING_WINDOW) whose
+  // Missed-preferred-time pass: recurring tasks (non-TIME_WINDOW) whose
   // preferred-time window has entirely passed. They are marked missed and go
   // to unplaced only — no dual grid placement (they don't have a time window
   // to anchor a visible calendar slot).
@@ -1610,7 +1615,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     stillUnplaced.push(item);
   });
 
-  // Missed-window pass: RECURRING_WINDOW tasks whose flex window is entirely past.
+  // Missed-window pass: TIME_WINDOW tasks whose flex window is entirely past.
   // They appear in unplaced (with 'missed' reason). When the task has a `when`
   // block (e.g. 'morning'), they are also dual-placed on the grid with _overdue
   // so the user can mark them done without leaving the day view. Tasks with no
@@ -1676,15 +1681,15 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     });
   });
 
-  // Force-placement pass: rigid recurrings must always appear even when their
+  // Force-placement pass: fixed tasks must always appear even when their
   // when-block is full or in the past. Place at block start with _conflict=true.
   var rigidUnplaced = stillUnplaced.filter(function(u) {
     var task = u && u.task ? u.task : u;
-    return task && (task.placementMode === 'recurring_rigid' || (u && u.isRigid));
+    return task && (task.placementMode === PLACEMENT_MODES.FIXED || (u && u.isRigid));
   });
   var remainingUnplaced = stillUnplaced.filter(function(u) {
     var task = u && u.task ? u.task : u;
-    return !(task && (task.placementMode === 'recurring_rigid' || (u && u.isRigid)));
+    return !(task && (task.placementMode === PLACEMENT_MODES.FIXED || (u && u.isRigid)));
   });
 
   rigidUnplaced.forEach(function(u) {

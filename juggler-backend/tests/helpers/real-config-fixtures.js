@@ -145,7 +145,7 @@ function makeTask(props) {
 function makeRigidRecurring(props) {
   return makeTask(Object.assign({
     recurring: true,
-    placementMode: 'recurring_rigid',
+    placementMode: 'fixed',
     taskType: 'recurring_instance',
     generated: true
   }, props));
@@ -155,7 +155,7 @@ function makeRigidRecurring(props) {
 function makeFlexRecurring(props) {
   return makeTask(Object.assign({
     recurring: true,
-    placementMode: props && props.preferredTimeMins != null ? 'recurring_window' : 'recurring_flexible',
+    placementMode: props && props.preferredTimeMins != null ? 'time_window' : 'anytime',
     taskType: 'recurring_instance',
     generated: true,
     flexWhen: true

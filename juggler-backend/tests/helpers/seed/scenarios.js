@@ -78,7 +78,7 @@ async function rigidDailyRecurring(db, userId) {
     pri: 'P3',
     when: 'morning',
     rigid: true,
-    placementMode: 'recurring_rigid',
+    placementMode: 'fixed',
     recur: { type: 'daily', days: [], every: 1 }
   });
   return result;

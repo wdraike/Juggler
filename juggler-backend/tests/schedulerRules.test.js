@@ -321,9 +321,9 @@ describe('Scheduler Rules', () => {
   describe('Group 9: Rigid vs flexible recurringTasks', () => {
     test('rigid recurring at exact time; flexible recurring drifts within timeFlex', () => {
       var tasks = [
-        makeTask({ id: 'rigid_7am', recurring: true, placementMode: 'recurring_rigid', time: '7:00 AM', dur: 30, text: 'Rigid 7AM', pri: 'P1' }),
+        makeTask({ id: 'rigid_7am', recurring: true, placementMode: 'fixed', time: '7:00 AM', dur: 30, text: 'Rigid 7AM', pri: 'P1' }),
         makeTask({ id: 'blocker', placementMode: 'fixed', time: '8:00 AM', dur: 30, text: 'Blocker' }),
-        makeTask({ id: 'flex_8am', recurring: true, placementMode: 'recurring_window', time: '8:00 AM', preferredTimeMins: 480, dur: 30, timeFlex: 60, text: 'Flex 8AM', pri: 'P1' }),
+        makeTask({ id: 'flex_8am', recurring: true, placementMode: 'time_window', time: '8:00 AM', preferredTimeMins: 480, dur: 30, timeFlex: 60, text: 'Flex 8AM', pri: 'P1' }),
       ];
       var result = run(tasks);
 
@@ -908,9 +908,9 @@ describe('Scheduler Rules', () => {
   describe('Group 33: Multiple recurringTasks competing for same time slot', () => {
     test('recurringTasks displace each other within timeFlex range', () => {
       var tasks = [
-        makeTask({ id: 'recur_a', recurring: true, placementMode: 'recurring_rigid', time: '8:00 AM', dur: 30, pri: 'P1', text: 'Recurring A 8AM' }),
-        makeTask({ id: 'recur_b', recurring: true, placementMode: 'recurring_rigid', time: '8:00 AM', dur: 30, pri: 'P1', text: 'Recurring B 8AM' }),
-        makeTask({ id: 'recur_c', recurring: true, placementMode: 'recurring_rigid', time: '8:00 AM', dur: 30, pri: 'P1', text: 'Recurring C 8AM' }),
+        makeTask({ id: 'recur_a', recurring: true, placementMode: 'fixed', time: '8:00 AM', dur: 30, pri: 'P1', text: 'Recurring A 8AM' }),
+        makeTask({ id: 'recur_b', recurring: true, placementMode: 'fixed', time: '8:00 AM', dur: 30, pri: 'P1', text: 'Recurring B 8AM' }),
+        makeTask({ id: 'recur_c', recurring: true, placementMode: 'fixed', time: '8:00 AM', dur: 30, pri: 'P1', text: 'Recurring C 8AM' }),
       ];
       var result = run(tasks);
       // All should be placed (scheduler must handle collision)
