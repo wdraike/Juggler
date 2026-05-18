@@ -24,7 +24,7 @@
 
 **Goal:** Remove the `preferred_time` boolean column from `task_masters` DB table and all code references. The column is now fully derivable from `placement_mode = 'time_window'`. Remove from migrations, views, `rowToTask`, `taskToRow`, MCP schema, and any frontend reads.
 
-**Status:** Pending
+**Status:** Complete
 
 **Depends on:** 09-placement-mode-enum-redesign
 
