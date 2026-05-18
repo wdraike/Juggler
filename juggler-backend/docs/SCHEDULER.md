@@ -63,8 +63,18 @@ These resolve remaining ambiguity when the severity hierarchy alone isn't decisi
 > 4e → Phase 5 (recurring rescue).
 
 #### 4a. Immovable first  *(Phase 0)*
-- Pinned tasks (`datePinned` + has time) at their locked times
-- Markers at their times (no occupancy)
+`buildItems` applies `placement_mode`-first branching before any phase runs:
+
+- `placement_mode = 'all_day'` → task is excluded from the time grid entirely (early return). Shown on calendar header row; does not consume minute-level capacity.
+- `placement_mode = 'reminder'` → placed at its exact time with no occupancy. Multiple reminders at the same minute do not conflict.
+- `placement_mode = 'fixed'` → anchored at the exact `time` value. `isRigid=true`. Blocks the slot. Also applies to tasks with `date_pinned=1`.
+- `placement_mode = 'time_window'` → placed within ±timeFlex minutes of `preferredTimeMins`. Falls back to when-tag windows if the window is degenerate.
+- `placement_mode = 'time_blocks'` → constrained to user-defined `when` tag windows (e.g. `morning`, `lunch`, `evening`). Uses `flexWhen` for retry when windows are full.
+- `placement_mode = 'anytime'` → no time constraint. Placed wherever fits by priority/slack order (recurring tasks with this mode can use `preferLatestSlot` when their anchor has already passed today).
+
+The `when` column contains only user-defined tag names after the Phase 9 migration. `'fixed'` and `'allday'` tokens are no longer stored in `when` — these are expressed as `placement_mode` values.
+
+Recurrence is orthogonal to `placement_mode`. Any mode can be recurring. The scheduler reads `t.recurring` (boolean flag) to determine recurrence — it does not infer recurrence from `placement_mode`.
 
 #### 4b. Recurring instances — constrained-first  *(Phase 1)*
 All recurring instances are sorted by **slack** (available capacity in cycle window minus duration) across ALL priority tiers, with priority as tiebreaker. This ensures narrow-window tasks (e.g., "morning" only) place before wide-window tasks (e.g., "anytime"), regardless of priority — the anytime task can go later in the day, the morning task can't.
