@@ -212,6 +212,14 @@ export default function WhenSection(props) {
   }
 
   var isRecurring = !!recurring;
+  var whenPartsLocal = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+  var isAllDay = whenPartsLocal.indexOf('allday') !== -1;
+  var isFixed = !!datePinned || whenPartsLocal.indexOf('fixed') !== -1;
+  var activeTags = whenPartsLocal.filter(function(p) { return p !== 'anytime' && p !== 'allday' && p !== 'fixed'; });
+  var isWindows = activeTags.length > 0;
+  var isAnytime = !isAllDay && !isFixed && !isWindows;
+  var isAnytimeMode = !hasPreferredTime && activeTags.length === 0;
+  var isBlocksMode = !hasPreferredTime && activeTags.length > 0;
 
   var tier1 = (
     <div>
@@ -267,21 +275,97 @@ export default function WhenSection(props) {
         </button>
       </div>
 
+      {!marker && !isRecurring && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, opacity: isFixed ? 0.4 : 1 }}>Scheduling mode</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 8, opacity: isFixed ? 0.35 : 1, pointerEvents: isFixed ? 'none' : undefined }}>
+            <button title="No time restriction — the scheduler can place this in any available slot"
+              onClick={function() { onDatePinnedChange(false); onWhenChange(''); }}
+              style={togStyle(isAnytime, '#2D6A4F')}>🔄 Anytime</button>
+            <button title="Spans the entire day"
+              onClick={function() { onDatePinnedChange(false); onWhenChange('allday'); onSplitChange(false); onTravelBeforeChange(0); onTravelAfterChange(0); }}
+              style={togStyle(isAllDay, '#C8942A')}>☀️ All Day</button>
+          </div>
+          <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, opacity: isFixed ? 0.4 : 1 }}>Preferred time windows</div>
+          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 6, opacity: isFixed ? 0.35 : 1, pointerEvents: isFixed ? 'none' : undefined }}>
+            {(uniqueTags || []).map(function(tb) {
+              var isOn = activeTags.indexOf(tb.tag) !== -1;
+              return (
+                <button key={tb.tag}
+                  title={isAllDay ? tb.name + ' time window — clicking will switch out of All Day mode' : tb.name + ' time window — selecting any window disables Anytime'}
+                  onClick={function() {
+                    if (isAllDay) {
+                      onDatePinnedChange(false);
+                      onWhenChange(tb.tag);
+                    } else {
+                      var cur = activeTags.slice();
+                      if (isOn) { cur = cur.filter(function(v) { return v !== tb.tag; }); }
+                      else { cur.push(tb.tag); }
+                      onWhenChange(cur.length === 0 ? '' : cur.join(','));
+                    }
+                  }} style={{ ...togStyle(isOn && !isAllDay, tb.color), opacity: isAllDay ? 0.55 : 1 }}>
+                  {tb.icon} {tb.name}
+                </button>
+              );
+            })}
+            {isWindows && (
+              <>
+                <span style={{ width: 1, height: 18, background: TH.border, margin: '0 2px' }} />
+                <button title={flexWhen ? 'Flex: scheduler tries other slots if selected windows are full' : 'Strict: only placed in selected windows'}
+                  onClick={function() { onFlexWhenChange(!flexWhen); }}
+                  style={togStyle(flexWhen, '#C8942A')}>
+                  {flexWhen ? '~ Flex' : 'Strict'}
+                </button>
+              </>
+            )}
+          </div>
+          {!isFixed && (
+            <label style={{ ...lStyle, marginBottom: 5 }}>
+              <span title="Restrict which days the scheduler can place this task.">Day requirement</span>
+              <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                <button title="No day restriction" onClick={function() { onDayReqChange('any'); }} style={togStyle(dayReq === 'any', '#2D6A4F')}>Any</button>
+                <button title="Monday through Friday only" onClick={function() { onDayReqChange(dayReq === 'weekday' ? 'any' : 'weekday'); }} style={togStyle(dayReq === 'weekday', '#4338CA')}>Wkday</button>
+                <button title="Saturday or Sunday only" onClick={function() { onDayReqChange(dayReq === 'weekend' ? 'any' : 'weekend'); }} style={togStyle(dayReq === 'weekend', '#4338CA')}>Wkend</button>
+                {[['Su','Su'],['M','Mo'],['T','Tu'],['W','We'],['R','Th'],['F','Fr'],['Sa','Sa']].map(function(pair) {
+                  var code = pair[0], label = pair[1];
+                  var selected = dayReq ? dayReq.split(',') : [];
+                  var isOn = selected.indexOf(code) >= 0;
+                  return (
+                    <button key={code} title={({Su:'Sunday',M:'Monday',T:'Tuesday',W:'Wednesday',R:'Thursday',F:'Friday',Sa:'Saturday'})[code]}
+                      onClick={function() {
+                        var cur = dayReq && dayReq !== 'any' && dayReq !== 'weekday' && dayReq !== 'weekend' ? dayReq.split(',') : [];
+                        if (isOn) { cur = cur.filter(function(v) { return v !== code; }); }
+                        else { cur.push(code); }
+                        onDayReqChange(cur.length === 0 ? 'any' : cur.join(','));
+                      }}
+                      style={togStyle(isOn)}>{label}</button>
+                  );
+                })}
+              </div>
+            </label>
+          )}
+        </div>
+      )}
+
       {recurring && !marker && (
         <div style={{ marginTop: 8 }}>
           <div style={{ display: 'flex', gap: 3, marginBottom: 6 }}>
             <button onClick={function() {
+              onHasPreferredTimeChange(false);
+              onTimeChange('');
+              onRigidChange(false);
+              onWhenChange('');
+            }} style={togStyle(isAnytimeMode, '#2D6A4F')}>🔄 Anytime</button>
+            <button onClick={function() {
               onHasPreferredTimeChange(true);
-              var tags = (when || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-              if (tags.length !== 1) onWhenChange('morning');
+              if (activeTags.length !== 1) onWhenChange('morning');
             }} style={togStyle(hasPreferredTime, '#C8942A')}>⏰ Time window</button>
             <button onClick={function() {
               onHasPreferredTimeChange(false);
               onTimeChange('');
               onRigidChange(false);
-              var tags = (when || '').split(',').filter(Boolean);
-              if (tags.length <= 1) onWhenChange('morning,lunch,afternoon,evening,night');
-            }} style={togStyle(!hasPreferredTime, '#2D6A4F')}>📅 Time blocks</button>
+              if (activeTags.length <= 1) onWhenChange('morning,lunch,afternoon,evening,night');
+            }} style={togStyle(isBlocksMode, '#4338CA')}>📅 Time blocks</button>
           </div>
 
           {hasPreferredTime ? (
@@ -309,11 +393,10 @@ export default function WhenSection(props) {
           ) : (
             <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
               {(uniqueTags || []).map(function(tb) {
-                var tagParts = when ? when.split(',').map(function(s) { return s.trim(); }) : [];
-                var isOn = tagParts.indexOf(tb.tag) !== -1;
+                var isOn = activeTags.indexOf(tb.tag) !== -1;
                 return (
                   <button key={tb.tag} title={tb.name + ' time window'} onClick={function() {
-                    var cur = when ? when.split(',').map(function(s) { return s.trim(); }).filter(function(s) { return s && s !== 'fixed' && s !== 'allday' && s !== 'anytime'; }) : [];
+                    var cur = activeTags.slice();
                     if (isOn) { cur = cur.filter(function(v) { return v !== tb.tag; }); } else { cur.push(tb.tag); }
                     onWhenChange(cur.length === 0 ? '' : cur.join(','));
                   }} style={togStyle(isOn, tb.color)}>{tb.icon} {tb.name}</button>

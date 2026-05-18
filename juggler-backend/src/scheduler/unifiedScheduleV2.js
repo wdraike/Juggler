@@ -294,7 +294,10 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     if (t.date && String(t.date).toUpperCase() === 'TBD') return;
     // All-day events have no time-grid presence — they appear in the calendar
     // UI via a separate rendering path, not as time-grid placements.
-    var when = t.when || '';
+    // 'fixed' belongs in placementMode, not when. If it leaks into the when
+    // field it has no matching time-block and the task becomes unplaceable.
+    // Strip it here so the task floats freely (anytime placement).
+    var when = (t.when === 'fixed' ? '' : (t.when || ''));
     var allday = hasWhen(when, 'allday');
     if (allday) return;
     // Past recurring instances (recurring=true, date in past, no explicit placement mode)

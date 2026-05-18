@@ -1,7 +1,7 @@
 # Task Detail Panel Redesign
 
 **Date:** 2026-05-17  
-**Status:** Spec — approved, pending implementation plan
+**Status:** Implemented (2026-05-17)
 
 ## Problem
 
@@ -33,7 +33,7 @@ juggler-frontend/src/components/tasks/
     MetaSection.jsx             ← created date, scheduled window, slack, IDs
 ```
 
-Helper functions (`addMinutesTo24h`, `minutesFrom24h`, `TimezoneSelector`, `WeatherTempSlider`, etc.) remain in `TaskEditForm.jsx` for now — extracting them is a follow-on, not part of this phase.
+Helper functions (`addMinutesTo24h`, `minutesFrom24h`) are exported from `WhenSection.jsx` and imported by `TaskEditForm.jsx`. `TimezoneSelector` lives in `WhenSection.jsx`; `WeatherTempSlider` / `WeatherHumiditySlider` live in `WeatherSection.jsx`.
 
 ### Form state ownership
 
@@ -103,21 +103,42 @@ Three tiers. Section starts **expanded by default**.
 
 ### Tier 1 — Date & Time (always visible inside When)
 
-Four fields on one row (wraps on narrow viewports):
+**Row 1 — Date/time fields** (wraps on narrow viewports):
 - **Date** — date picker input
-- **Start** — time input (24h internally, displayed as 12h AM/PM)
+- **Start** — time input (24h internally)
 - **End** — time input, three-way bound with Start + Duration
-- **Duration** — text input (`30m`, `1.5h`, etc.)
+- **Duration** — number input (minutes)
 
-Editing any one of Start/End/Duration recalculates the other two (existing `addMinutesTo24h` / `minutesFrom24h` logic unchanged).
+Editing any one of Start/End/Duration recalculates the other two (`addMinutesTo24h` / `minutesFrom24h` logic in `WhenSection.jsx`).
 
-Float/Fixed badge and timezone selector stay in this tier, below the four fields.
+**Row 2 — Timezone + Float/Fixed toggle** below the time fields.
+
+**Non-recurring tasks — scheduling mode block** (hidden for recurring and markers):
+
+- *Scheduling mode* row: **🔄 Anytime** | **☀️ All Day** — mutually exclusive; Anytime = empty `when`, All Day = `when='allday'`
+- *Preferred time windows* row: block-tag buttons (Morning / Lunch / Afternoon / etc.) sourced from `uniqueTags` prop; selecting any tag leaves Anytime mode. A **Strict / ~ Flex** toggle appears alongside when ≥1 tag is selected (`flexWhen` field).
+- *Day requirement* row (hidden when task is fixed/date-pinned): **Any** | **Wkday** | **Wkend** | individual day pickers (Su/Mo/Tu/We/Th/Fr/Sa) — stored in `dayReq` field.
+
+**Recurring tasks — time mode toggle** (hidden for non-recurring and markers):
+
+Three mutually exclusive modes:
+- **🔄 Anytime** — no time preference; `hasPreferredTime=false`, `when=''`
+- **⏰ Time window** — `hasPreferredTime=true`; shows Time input + ±Window select (exact / ±15m / ±30m / ±1hr / ±1.5hr / ±2hr); stored as `preferredTimeMins` + `timeFlex`
+- **📅 Time blocks** — `hasPreferredTime=false`, ≥1 `when` tag; shows block-tag buttons
 
 The collapsed When badge mirrors this: `"Today · {start}–{end}"`.
 
 ### Tier 2 — Recurrence (nested collapsible, collapsed by default)
 
-Contains: recurrence mode buttons (Daily / Weekly / Weekdays / Custom), times-per-cycle, date range. Collapsed badge shows mode if set (`"Daily"`), else `"none"`.
+Recurrence type select: **None / Daily / Weekly / Biweekly / Monthly (pick days) / Every N (interval)**.
+
+- **Weekly / Biweekly** — day-of-week toggles (Su/Mo/Tu/We/Th/Fr/Sa) + Wkday/Wkend presets; times-per-cycle select + fill policy (Keep schedule / Backfill missed slots) when tpc < selected day count.
+- **Monthly** — day-of-month picker (1–28 + First/Last); same tpc + fill policy controls.
+- **Interval** — Every N + unit select (day/week/month/year).
+
+All types: **Recurrence starts** date (required for biweekly/interval/tpc patterns — marked with `*`) + **Recurrence ends** date (optional, clearable). Config warnings (location mismatch, deadline/dayReq conflict) shown inline.
+
+Collapsed badge shows type if set (`"Weekly"`), else `"none"`.
 
 ### Tier 3 — Constraints (nested collapsible, collapsed by default)
 

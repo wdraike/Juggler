@@ -573,8 +573,9 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     // Compare the derived `all.timeFlex` (not the raw state) so that switching
     // into Time Blocks mode — which should blank timeFlex — is detected even
     // if the user didn't touch the flex input directly.
-    if (all.timeFlex !== snap.timeFlex) changed.timeFlex = all.timeFlex;
-    if (all.preferredTimeMins !== snap.preferredTimeMins) changed.preferredTimeMins = all.preferredTimeMins;
+    // undefined = "not applicable for this task type"; treat null and undefined as equivalent
+    if (all.timeFlex !== snap.timeFlex && !(all.timeFlex == null && snap.timeFlex == null)) changed.timeFlex = all.timeFlex;
+    if (all.preferredTimeMins !== snap.preferredTimeMins && !(all.preferredTimeMins == null && snap.preferredTimeMins == null)) changed.preferredTimeMins = all.preferredTimeMins;
     if (!!split !== snap.split) changed.split = all.split;
     if (parseInt(splitMin) !== snap.splitMin) changed.splitMin = all.splitMin;
     if (!!marker !== snap.marker) changed.marker = all.marker;

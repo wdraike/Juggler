@@ -160,7 +160,7 @@ Expected: 4 tests pass
 - Create: `src/components/tasks/TaskDetailHeader.jsx`
 - Create: `src/components/tasks/__tests__/TaskDetailHeader.test.jsx`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```jsx
 // src/components/tasks/__tests__/TaskDetailHeader.test.jsx
@@ -222,7 +222,7 @@ it('shows notes preview when notes is non-empty', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to confirm it fails**
+- [x] **Step 2: Run test to confirm it fails**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=TaskDetailHeader
@@ -230,7 +230,7 @@ npm test -- --watchAll=false --testPathPattern=TaskDetailHeader
 
 Expected: FAIL — `TaskDetailHeader` not found
 
-- [ ] **Step 3: Create TaskDetailHeader.jsx**
+- [x] **Step 3: Create TaskDetailHeader.jsx**
 
 Move the top-bar block, status buttons, title input, badge row, and notes preview out of `TaskEditForm.jsx` into this new file. The component receives controlled values (`text`, `project`, `pri`, `dur`, `notes`, `url`) as props plus their setters (`onTextChange`, `onProjectChange`, etc.) so the orchestrator keeps state ownership.
 
@@ -427,7 +427,7 @@ export default function TaskDetailHeader({
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=TaskDetailHeader
@@ -435,7 +435,7 @@ npm test -- --watchAll=false --testPathPattern=TaskDetailHeader
 
 Expected: 4 tests pass
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/components/tasks/TaskDetailHeader.jsx src/components/tasks/__tests__/TaskDetailHeader.test.jsx
@@ -450,7 +450,7 @@ git commit -m "feat(task-detail): TaskDetailHeader component"
 - Create: `src/components/tasks/sections/MetaSection.jsx`
 - Create: `src/components/tasks/sections/__tests__/MetaSection.test.jsx`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```jsx
 // src/components/tasks/sections/__tests__/MetaSection.test.jsx
@@ -481,7 +481,7 @@ it('renders slack in hours when 60+', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to confirm it fails**
+- [x] **Step 2: Run test to confirm it fails**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=MetaSection
@@ -489,7 +489,7 @@ npm test -- --watchAll=false --testPathPattern=MetaSection
 
 Expected: FAIL — `MetaSection` not found
 
-- [ ] **Step 3: Create MetaSection.jsx**
+- [x] **Step 3: Create MetaSection.jsx**
 
 Cut the "Metadata footer" block (~lines 2097–2152 of `TaskEditForm.jsx`) into this file:
 
@@ -545,7 +545,7 @@ export default function MetaSection({ task, TH }) {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=MetaSection
@@ -553,7 +553,7 @@ npm test -- --watchAll=false --testPathPattern=MetaSection
 
 Expected: 4 tests pass
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/components/tasks/sections/MetaSection.jsx src/components/tasks/sections/__tests__/MetaSection.test.jsx
@@ -568,7 +568,7 @@ git commit -m "feat(task-detail): extract MetaSection"
 - Create: `src/components/tasks/sections/WhereSection.jsx`
 - Create: `src/components/tasks/sections/__tests__/WhereSection.test.jsx`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```jsx
 // src/components/tasks/sections/__tests__/WhereSection.test.jsx
@@ -603,7 +603,7 @@ it('calls onChange with empty array when Anywhere clicked', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to confirm it fails**
+- [x] **Step 2: Run test to confirm it fails**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=WhereSection
@@ -611,7 +611,7 @@ npm test -- --watchAll=false --testPathPattern=WhereSection
 
 Expected: FAIL
 
-- [ ] **Step 3: Create WhereSection.jsx**
+- [x] **Step 3: Create WhereSection.jsx**
 
 Cut the "Where" block (~lines 2007–2027 of `TaskEditForm.jsx`) into this file:
 
@@ -654,7 +654,7 @@ export default function WhereSection({ locations, taskLoc, onChange, TH, isMobil
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=WhereSection
@@ -662,7 +662,7 @@ npm test -- --watchAll=false --testPathPattern=WhereSection
 
 Expected: 3 tests pass
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/components/tasks/sections/WhereSection.jsx src/components/tasks/sections/__tests__/WhereSection.test.jsx
@@ -679,7 +679,7 @@ Weather section has two helper components (`WeatherTempSlider`, `WeatherHumidity
 - Create: `src/components/tasks/sections/WeatherSection.jsx`
 - Create: `src/components/tasks/sections/__tests__/WeatherSection.test.jsx`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```jsx
 // src/components/tasks/sections/__tests__/WeatherSection.test.jsx
@@ -713,7 +713,7 @@ it('renders sky cover buttons', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to confirm it fails**
+- [x] **Step 2: Run test to confirm it fails**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=WeatherSection
@@ -721,7 +721,7 @@ npm test -- --watchAll=false --testPathPattern=WeatherSection
 
 Expected: FAIL
 
-- [ ] **Step 3: Create WeatherSection.jsx**
+- [x] **Step 3: Create WeatherSection.jsx**
 
 Cut `WeatherTempSlider`, `WeatherHumiditySlider`, and the "Weather" JSX block from `TaskEditForm.jsx` into this file. The `onChange` callback receives a partial update object `{ weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax }`.
 
@@ -898,7 +898,7 @@ export default function WeatherSection({
 
 After creating this file, **delete** `WeatherTempSlider` and `WeatherHumiditySlider` from `TaskEditForm.jsx` (they moved here).
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=WeatherSection
@@ -906,7 +906,7 @@ npm test -- --watchAll=false --testPathPattern=WeatherSection
 
 Expected: 3 tests pass
 
-- [ ] **Step 5: Run full test suite to confirm nothing broke**
+- [x] **Step 5: Run full test suite to confirm nothing broke**
 
 ```bash
 npm test -- --watchAll=false
@@ -914,7 +914,7 @@ npm test -- --watchAll=false
 
 Expected: all existing tests still pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/components/tasks/sections/WeatherSection.jsx src/components/tasks/sections/__tests__/WeatherSection.test.jsx src/components/tasks/TaskEditForm.jsx
@@ -929,7 +929,7 @@ git commit -m "feat(task-detail): extract WeatherSection (moves WeatherTempSlide
 - Create: `src/components/tasks/sections/ToolsSection.jsx`
 - Create: `src/components/tasks/sections/__tests__/ToolsSection.test.jsx`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```jsx
 // src/components/tasks/sections/__tests__/ToolsSection.test.jsx
@@ -964,13 +964,13 @@ it('calls onChange removing tool when clicked again', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to confirm it fails**
+- [x] **Step 2: Run test to confirm it fails**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=ToolsSection
 ```
 
-- [ ] **Step 3: Create ToolsSection.jsx**
+- [x] **Step 3: Create ToolsSection.jsx**
 
 ```jsx
 // src/components/tasks/sections/ToolsSection.jsx
@@ -1005,7 +1005,7 @@ export default function ToolsSection({ tools, taskTools, onChange, TH, isMobile 
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=ToolsSection
@@ -1013,7 +1013,7 @@ npm test -- --watchAll=false --testPathPattern=ToolsSection
 
 Expected: 3 tests pass
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/components/tasks/sections/ToolsSection.jsx src/components/tasks/sections/__tests__/ToolsSection.test.jsx
@@ -1030,7 +1030,7 @@ The current form has a "Dependencies" button that opens the dependency view chai
 - Create: `src/components/tasks/sections/DependsOnSection.jsx`
 - Create: `src/components/tasks/sections/__tests__/DependsOnSection.test.jsx`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```jsx
 // src/components/tasks/sections/__tests__/DependsOnSection.test.jsx
@@ -1062,13 +1062,13 @@ it('renders nothing for recurring tasks (no dep chain UI)', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to confirm it fails**
+- [x] **Step 2: Run test to confirm it fails**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=DependsOnSection
 ```
 
-- [ ] **Step 3: Create DependsOnSection.jsx**
+- [x] **Step 3: Create DependsOnSection.jsx**
 
 ```jsx
 // src/components/tasks/sections/DependsOnSection.jsx
@@ -1093,7 +1093,7 @@ export default function DependsOnSection({ task, onShowChain, TH, isMobile }) {
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=DependsOnSection
@@ -1101,7 +1101,7 @@ npm test -- --watchAll=false --testPathPattern=DependsOnSection
 
 Expected: 3 tests pass
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/components/tasks/sections/DependsOnSection.jsx src/components/tasks/sections/__tests__/DependsOnSection.test.jsx
@@ -1134,7 +1134,7 @@ The section exposes three nested collapsibles:
 - Create: `src/components/tasks/sections/WhenSection.jsx`
 - Create: `src/components/tasks/sections/__tests__/WhenSection.test.jsx`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```jsx
 // src/components/tasks/sections/__tests__/WhenSection.test.jsx
@@ -1214,13 +1214,13 @@ it('expands Recurrence sub-section when collapse.when_recurrence is true', () =>
 });
 ```
 
-- [ ] **Step 2: Run test to confirm it fails**
+- [x] **Step 2: Run test to confirm it fails**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=WhenSection
 ```
 
-- [ ] **Step 3: Create WhenSection.jsx**
+- [x] **Step 3: Create WhenSection.jsx**
 
 This is a large file. Move the following from `TaskEditForm.jsx` into `WhenSection.jsx`:
 1. `TimezoneSelector` function (~lines 66–161)
@@ -1584,7 +1584,7 @@ export default function WhenSection(props) {
 
 **Important:** After creating `WhenSection.jsx`, remove the `TimezoneSelector`, `addMinutesTo24h`, and `minutesFrom24h` definitions from `TaskEditForm.jsx` (they are now in `WhenSection.jsx`). Also remove the entire When JSX block from the `dialogContent` in `TaskEditForm.jsx`.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=WhenSection
@@ -1592,7 +1592,7 @@ npm test -- --watchAll=false --testPathPattern=WhenSection
 
 Expected: 3 tests pass
 
-- [ ] **Step 5: Run full test suite**
+- [x] **Step 5: Run full test suite**
 
 ```bash
 npm test -- --watchAll=false
@@ -1600,7 +1600,7 @@ npm test -- --watchAll=false
 
 Expected: all tests pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/components/tasks/sections/WhenSection.jsx src/components/tasks/sections/__tests__/WhenSection.test.jsx src/components/tasks/TaskEditForm.jsx
@@ -1616,7 +1616,7 @@ Replace the existing inline JSX blocks in `TaskEditForm.jsx` with imports of the
 **Files:**
 - Modify: `src/components/tasks/TaskEditForm.jsx`
 
-- [ ] **Step 1: Write the orchestrator integration test**
+- [x] **Step 1: Write the orchestrator integration test**
 
 ```jsx
 // src/components/tasks/__tests__/TaskEditForm.integration.test.jsx
@@ -1671,13 +1671,13 @@ it('clicking ▶ When collapses the section', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to confirm it fails** (imports will fail until orchestrator is wired)
+- [x] **Step 2: Run test to confirm it fails** (imports will fail until orchestrator is wired)
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=TaskEditForm.integration
 ```
 
-- [ ] **Step 3: Rewrite TaskEditForm.jsx as orchestrator**
+- [x] **Step 3: Rewrite TaskEditForm.jsx as orchestrator**
 
 Add imports at the top of `TaskEditForm.jsx`:
 
@@ -1820,7 +1820,7 @@ var dialogContent = (
 );
 ```
 
-- [ ] **Step 4: Run integration tests**
+- [x] **Step 4: Run integration tests**
 
 ```bash
 npm test -- --watchAll=false --testPathPattern=TaskEditForm.integration
@@ -1828,7 +1828,7 @@ npm test -- --watchAll=false --testPathPattern=TaskEditForm.integration
 
 Expected: 3 tests pass
 
-- [ ] **Step 5: Run full test suite**
+- [x] **Step 5: Run full test suite**
 
 ```bash
 npm test -- --watchAll=false
@@ -1836,7 +1836,7 @@ npm test -- --watchAll=false
 
 Expected: all tests pass
 
-- [ ] **Step 6: Verify in browser**
+- [x] **Step 6: Verify in browser**
 
 Start dev server:
 ```bash
@@ -1851,7 +1851,7 @@ Manual smoke checks:
 5. Edit any field → save → reopen → value persists
 6. Create mode → Create button visible, no status buttons, no Metadata/DependsOn sections
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/components/tasks/TaskEditForm.jsx src/components/tasks/__tests__/TaskEditForm.integration.test.jsx
