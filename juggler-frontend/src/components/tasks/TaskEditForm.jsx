@@ -453,7 +453,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setWhen(newSnap.when); setDayReq(newSnap.dayReq);
     // Re-derive scheduling mode from synced value
     var syncTags = (newSnap.when || '').split(',').filter(Boolean);
-    setRecurringHasPreferredTime(newSnap.preferredTime != null ? newSnap.preferredTime : (syncTags.length === 1 && newSnap.recurring));
+    setRecurringHasPreferredTime(syncTags.length === 1 && newSnap.recurring);
     setRecurring(newSnap.recurring); setRigid(newSnap.rigid); setTimeFlex(newSnap.timeFlex);
     setSplit(newSnap.split); setSplitMin(newSnap.splitMin);
     setTaskLoc(newSnap.location); setTaskTools(newSnap.tools);
@@ -548,7 +548,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       weatherHumidityMin: weatherHumidityMin !== '' && weatherHumidityMin !== null ? parseInt(weatherHumidityMin) : null,
       weatherHumidityMax: weatherHumidityMax !== '' && weatherHumidityMax !== null ? parseInt(weatherHumidityMax) : null
     };
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, hasPreferredTime, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   // Build only the fields that changed from the initial snapshot (prevents marking unchanged fields dirty)
   var buildChangedFields = useCallback(function() {
@@ -629,7 +629,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       changed._timezone = all._timezone;
     }
     return Object.keys(changed).length > 0 ? changed : null;
-  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, rigid, dur, timeRemaining, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, rigid, dur, timeRemaining, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   var [manageCalDialog, setManageCalDialog] = useState(false);
 
@@ -641,7 +641,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     userDirtyRef.current = true;
     var changed = buildChangedFields();
     setIsDirty(!!changed);
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, hasPreferredTime, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   function handleSave() {
     // Suppress save while the start/finish pair is invalid — keeps the user's
