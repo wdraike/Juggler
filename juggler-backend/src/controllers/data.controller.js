@@ -88,7 +88,7 @@ async function importData(req, res) {
 
           // Compute deadline and start_after_at
           var deadline = t.deadline ? toDateISO(t.deadline) || null : null;
-          var startAfterAt = (t.startAfter || t.start_after) ? toDateISO(t.startAfter || t.start_after) || null : null;
+          var startAfterDate = (t.startAfter || t.start_after) ? toDateISO(t.startAfter || t.start_after) || null : null;
 
           return {
             id: t.id,
@@ -103,7 +103,7 @@ async function importData(req, res) {
             section: t.section || null,
             notes: t.notes || null,
             deadline: deadline,
-            start_after_at: startAfterAt,
+            start_after_at: startAfterDate,
             location: JSON.stringify(locationArr),
             tools: JSON.stringify(t.tools || []),
             when: t.when || null,

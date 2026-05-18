@@ -4,7 +4,7 @@
  * The DB stores scheduled_at (DATETIME, UTC) as the single source of truth.
  *
  * API accepts BOTH formats:
- *   - UTC ISO: scheduledAt ("2026-03-08T22:45:00Z"), deadline (YYYY-MM-DD), startAfterAt
+ *   - UTC ISO: scheduledAt ("2026-03-08T22:45:00Z"), deadline (YYYY-MM-DD)
  *   - Local strings: date ("3/8") + time ("6:45 PM") — converted server-side
  *   UTC takes precedence if both are provided.
  *
@@ -359,14 +359,6 @@ function rowToTask(row, timezone, sourceMap) {
       ? row.start_after_at.toISOString().split('T')[0]
       : String(row.start_after_at).split('T')[0]);
   }
-  var startAfterAtISO = null;
-  if (row.start_after_at) {
-    var saStr = row.start_after_at instanceof Date
-      ? row.start_after_at.toISOString().split('T')[0]
-      : String(row.start_after_at).split('T')[0];
-    startAfterAtISO = saStr;
-  }
-
   return {
     id: row.id,
     taskType: row.task_type || 'task',
@@ -377,7 +369,6 @@ function rowToTask(row, timezone, sourceMap) {
     completedAt: row.completed_at ? scheduledAtToISO(row.completed_at) : null,
     tz: row.tz || null,
     deadline: deadlineISO,
-    startAfterAt: startAfterAtISO,
     // Derived local convenience fields
     date: date,
     day: day,
@@ -471,9 +462,7 @@ function taskToRow(task, userId, timezone, currentTask) {
   if (task.deadline !== undefined) {
     row.deadline = task.deadline ? toDateISO(task.deadline) || task.deadline : null;
   }
-  if (task.startAfterAt !== undefined) {
-    row.start_after_at = task.startAfterAt || null;
-  } else if (task.startAfter !== undefined) {
+  if (task.startAfter !== undefined) {
     row.start_after_at = task.startAfter ? toDateISO(task.startAfter) || null : null;
   }
   if (task.location !== undefined) row.location = JSON.stringify(task.location);

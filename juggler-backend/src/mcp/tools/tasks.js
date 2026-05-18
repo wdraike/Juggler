@@ -33,10 +33,9 @@ var taskInputFields = {
   date: z.string().optional().describe('Scheduled date in M/D format (e.g. "3/8"). PREFERRED over scheduledAt — server handles timezone conversion.'),
   time: z.string().optional().describe('Scheduled time in h:mm AM/PM format (e.g. "9:30 PM"). PREFERRED over scheduledAt — server handles timezone conversion.'),
   deadline: z.string().optional().describe('Deadline (hard, non-negotiable). YYYY-MM-DD or M/D format. The scheduler places this task on or before this date.'),
-  startAfter: z.string().optional().describe('Start-after date (YYYY-MM-DD or M/D). PREFERRED over startAfterAt.'),
+  startAfter: z.string().optional().describe('Start-after date (YYYY-MM-DD or M/D).'),
   // UTC ISO fields (use ONLY if you already have a correct UTC timestamp — avoid manual timezone math)
   scheduledAt: z.string().optional().describe('UTC ISO timestamp. AVOID — use date+time instead to prevent timezone errors. Only use if you already have a verified UTC value.'),
-  startAfterAt: z.string().optional().describe('Start-after as ISO string. AVOID — use startAfter instead.'),
   // Other fields
   location: z.array(z.string()).optional().describe('Location IDs'),
   tools: z.array(z.string()).optional().describe('Tool IDs'),

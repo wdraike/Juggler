@@ -113,7 +113,6 @@ function makeTask(props) {
     notes: props.notes || '',
     deadline: props.deadline || null,
     startAfter: props.startAfter || null,
-    startAfterAt: props.startAfterAt || null,
     location: props.location || [],
     tools: props.tools || [],
     when: props.when != null ? props.when : '',
