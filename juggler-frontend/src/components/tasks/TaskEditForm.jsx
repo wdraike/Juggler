@@ -358,8 +358,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [hasPreferredTime, setRecurringHasPreferredTime] = useState(function() {
     if (isCreate) return false;
     if (!recurring || !task) return false;
-    // Use explicit preferredTime flag if persisted; fall back to tag-count heuristic
-    if (task.preferredTime != null) return !!task.preferredTime;
+    // Use tag-count heuristic for preferred-time detection
     var w = task.when || '';
     if (!w || w === 'fixed' || w === 'allday' || w === 'anytime') return false;
     var tags = w.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
@@ -411,7 +410,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       recurMonthDays: t.recur?.monthDays || [1, 15],
       tz: t.tz || activeTimezone || 'America/New_York',
       recurStart: t.recurStart || '', recurEnd: t.recurEnd || '',
-      preferredTime: t.preferredTime != null ? !!t.preferredTime : null,
       preferredTimeMins: t.preferredTimeMins != null ? t.preferredTimeMins : null,
       weatherPrecip: t.weatherPrecip || 'any',
       weatherCloud:  t.weatherCloud  || 'any',
@@ -531,7 +529,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       _timezone: taskTz,  // tells backend which timezone to use for date/time → UTC conversion
       recurStart: recurring ? (recurStart || null) : null,
       recurEnd: recurring ? (recurEnd || null) : null,
-      preferredTime: placementMode === 'time_window' ? true : (placementMode === 'time_blocks' ? false : undefined),
       // preferredTimeMins: minutes since midnight from 24h time input (no tz conversion).
       // `null` — not undefined — when switching out of time_window mode so the backend clears preferred_time_mins.
       // The `recurring &&` gate is removed: any task (recurring or not) in time_window mode gets preferredTimeMins.
@@ -572,11 +569,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       // guard allows it through.
       if (snap.datePinned && !all.datePinned) changed._allowUnfix = true;
     }
-    // Normalize snapshot's preferredTime (can be null for legacy rows) to
-    // boolean before comparing against the form's boolean toggle. Without
-    // this, `false !== null` marked every recurring task as dirty on open.
-    var snapPref = !!snap.preferredTime;
-    if (recurring && hasPreferredTime !== snapPref) changed.preferredTime = all.preferredTime;
     var snapPlacementMode = task ? (task.placementMode || 'anytime') : 'anytime';
     if (placementMode !== snapPlacementMode) changed.placementMode = all.placementMode;
     if (dayReq !== snap.dayReq) changed.dayReq = all.dayReq;

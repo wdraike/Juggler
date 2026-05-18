@@ -156,7 +156,7 @@ var TEMPLATE_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', '
   'when', 'day_req', 'recurring', 'time_flex', 'split', 'split_min',
   'travel_before', 'travel_after', 'depends_on',
   'notes', 'url', 'flex_when', 'recur', 'recur_start', 'recur_end',
-  'preferred_time', 'preferred_time_mins', 'placement_mode',
+  'preferred_time_mins', 'placement_mode',
   'weather_precip', 'weather_cloud', 'weather_temp_min', 'weather_temp_max',
   'weather_temp_unit', 'weather_humidity_min', 'weather_humidity_max'];
 
@@ -413,7 +413,6 @@ function rowToTask(row, timezone, sourceMap) {
     weatherTempUnit:     row.weather_temp_unit     || null,
     weatherHumidityMin:  row.weather_humidity_min  != null ? row.weather_humidity_min  : null,
     weatherHumidityMax:  row.weather_humidity_max  != null ? row.weather_humidity_max  : null,
-    preferredTime: row.preferred_time != null ? !!row.preferred_time : null,
     preferredTimeMins: row.preferred_time_mins != null ? row.preferred_time_mins : null,
     desiredAt: row.desired_at ? new Date(row.desired_at).toISOString() : null,
     unscheduled: !!row.unscheduled,
@@ -487,9 +486,6 @@ function taskToRow(task, userId, timezone, currentTask) {
   if (task.tz !== undefined) row.tz = task.tz || null;
   if (task.recurStart !== undefined) row.recur_start = task.recurStart || null;
   if (task.recurEnd !== undefined) row.recur_end = task.recurEnd || null;
-  if (task.preferredTime !== undefined) {
-    row.preferred_time = task.preferredTime === null ? null : (task.preferredTime ? 1 : 0);
-  }
   if (task.preferredTimeMins !== undefined) row.preferred_time_mins = task.preferredTimeMins;
   if (task.weatherPrecip   !== undefined) row.weather_precip    = task.weatherPrecip;
   if (task.weatherCloud    !== undefined) row.weather_cloud     = task.weatherCloud;
