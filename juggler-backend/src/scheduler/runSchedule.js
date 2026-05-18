@@ -43,6 +43,7 @@ var expandRecurring = expandRecurringShared.expandRecurring;
 var reconcile = require('./reconcileOccurrences');
 var cache = require('../lib/redis');
 var syncLock = require('../lib/sync-lock');
+var { PLACEMENT_MODES } = require('../lib/placementModes');
 
 var DEFAULT_TIMEZONE = constants.DEFAULT_TIMEZONE;
 
@@ -1191,7 +1192,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // Within placement window — allow the date move to today
     }
     // Rigid recurringTasks keep their preferred time (unless redirected from past above).
-    if (original.recurring && original.placementMode === 'fixed' && !dateChanged) continue; // 'fixed' per placementModes.js PLACEMENT_MODES.FIXED
+    if (original.recurring && original.placementMode === PLACEMENT_MODES.FIXED && !dateChanged) continue;
 
     // NEW DESIGN: write scheduled_at and dur for EVERY placed task, every run.
     // This guarantees the DB matches what the scheduler decided. No minimal-diff
