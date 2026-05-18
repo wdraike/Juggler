@@ -14,7 +14,7 @@
 
 **Goal:** Replace all reads of `task.rigid` (the backward-compat virtual view column) with `task.placementMode === 'fixed'` checks. Remove `rigid` from `rowToTask` output. Replace `rigid: true` writes in `register-plans.js` with `placementMode: 'fixed'`. Fix `cal-sync.controller.js:866` stale `task.rigid || when.includes('fixed')` check. Drop `rigid` from data export. Drop the virtual `rigid` column from both views.
 
-**Status:** Pending
+**Status:** Complete
 
 **Depends on:** 09-placement-mode-enum-redesign
 
