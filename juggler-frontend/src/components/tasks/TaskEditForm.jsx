@@ -9,7 +9,7 @@ import { isAnchorDependentRecur } from '../../scheduler/expandRecurring';
 import { getTheme } from '../../theme/colors';
 import { convertTimeForDisplay } from '../../utils/timezone';
 import apiClient from '../../services/apiClient';
-import { addMinutesTo24h, minutesFrom24h } from './sections/WhenSection';
+import { addMinutesTo24h } from './sections/WhenSection';
 import CollapsibleSection from './CollapsibleSection';
 import TaskDetailHeader from './TaskDetailHeader';
 import MetaSection from './sections/MetaSection';
@@ -366,6 +366,22 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     return tags.length === 1;
   });
 
+  // --- placementMode state ---
+  // Canonical scheduling mode, initialized from task.placementMode.
+  // This is the single source of truth for which mode (anytime/time_window/time_blocks/all_day/fixed/reminder) is active.
+  var [placementMode, setPlacementMode] = useState(function() {
+    if (isCreate) return 'anytime';
+    if (!task) return 'anytime';
+    return task.placementMode || 'anytime';
+  });
+
+  // Handler passed to WhenSection — sets placementMode and syncs hasPreferredTime for time-input display.
+  function handleModeChange(mode) {
+    setPlacementMode(mode);
+    // Keep hasPreferredTime in sync: only true when in time_window mode (drives time-input visibility)
+    setRecurringHasPreferredTime(mode === 'time_window');
+  }
+
   var [saveStatus, setSaveStatus] = useState(null);
   var firstRender = useRef(true);
   // Track the task prop snapshot so we can detect external changes and diff for saves
@@ -479,19 +495,15 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       startAfter: fromDateISO(startAfter),
       notes,
       url: (url && url.trim()) ? url.trim() : null,
-      // Recurring tasks: auto-derive when/dayReq/rigid from mode
-      when: when,  // preserved as-is: single tag = time-window mode, multi = time-blocks mode
+      // Scheduling mode — sent explicitly to backend; backend writes directly to placement_mode ENUM column.
+      placementMode: placementMode,
+      when: when,  // preserved as-is: user-defined slot tag names only (no 'allday'/'fixed' system keywords after migration)
       dayReq: recurring ? 'any' : dayReq,  // recurringTasks derive days from recurrence, not dayReq
-      recurring, rigid: recurring && hasPreferredTime && time ? false : rigid,
-      // timeFlex / preferredTimeMins: when a recurring task is in Time Blocks
-      // mode (hasPreferredTime=false), send `null` — not undefined — so the
-      // backend clears the column. `undefined` gets JSON-stripped from the
-      // PUT body; the controller's `!== undefined` check then treats it as
-      // "no change" and the row retains its stale Time Window values. Same
-      // failure mode as the `split || undefined` bug flagged above.
-      timeFlex: recurring && hasPreferredTime && time
+      recurring, rigid: rigid,
+      // timeFlex: send when in time_window mode; null clears when switching away so backend doesn't retain stale values.
+      timeFlex: placementMode === 'time_window' && time
         ? (timeFlex || 60)
-        : (recurring ? null : undefined),
+        : (placementMode === 'time_window' ? null : undefined),
       // Always send as an explicit boolean. The previous `split || undefined`
       // collapsed `false` to `undefined`, which JSON-strips the key, which
       // the backend reads as "no change" — so turning split OFF never stuck.
@@ -519,17 +531,16 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       _timezone: taskTz,  // tells backend which timezone to use for date/time → UTC conversion
       recurStart: recurring ? (recurStart || null) : null,
       recurEnd: recurring ? (recurEnd || null) : null,
-      preferredTime: recurring ? hasPreferredTime : undefined,
-      // preferredTimeMins: minutes since midnight from 24h time input (no tz
-      // conversion). `null` — not undefined — when switching a recurring task
-      // out of Time Window mode so the backend clears preferred_time_mins.
-      // See the timeFlex comment above for the reasoning.
-      preferredTimeMins: recurring && hasPreferredTime && time
+      preferredTime: placementMode === 'time_window' ? true : (placementMode === 'time_blocks' ? false : undefined),
+      // preferredTimeMins: minutes since midnight from 24h time input (no tz conversion).
+      // `null` — not undefined — when switching out of time_window mode so the backend clears preferred_time_mins.
+      // The `recurring &&` gate is removed: any task (recurring or not) in time_window mode gets preferredTimeMins.
+      preferredTimeMins: placementMode === 'time_window' && time
         ? (function() {
           var parts = time.split(':');
           return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || '0', 10);
         })()
-        : (recurring ? null : undefined),
+        : (placementMode === 'time_window' ? null : undefined),
       weatherPrecip,
       weatherCloud,
       weatherTempMin: weatherTempMin !== '' && weatherTempMin !== null ? parseInt(weatherTempMin) : null,
@@ -540,7 +551,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       weatherHumidityMin: weatherHumidityMin !== '' && weatherHumidityMin !== null ? parseInt(weatherHumidityMin) : null,
       weatherHumidityMax: weatherHumidityMax !== '' && weatherHumidityMax !== null ? parseInt(weatherHumidityMax) : null
     };
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, hasPreferredTime, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, hasPreferredTime, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   // Build only the fields that changed from the initial snapshot (prevents marking unchanged fields dirty)
   var buildChangedFields = useCallback(function() {
@@ -566,6 +577,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     // this, `false !== null` marked every recurring task as dirty on open.
     var snapPref = !!snap.preferredTime;
     if (recurring && hasPreferredTime !== snapPref) changed.preferredTime = all.preferredTime;
+    var snapPlacementMode = task ? (task.placementMode || 'anytime') : 'anytime';
+    if (placementMode !== snapPlacementMode) changed.placementMode = all.placementMode;
     if (dayReq !== snap.dayReq) changed.dayReq = all.dayReq;
     if (recurring !== snap.recurring) changed.recurring = all.recurring;
     if (rigid !== snap.rigid) changed.rigid = all.rigid;
@@ -624,7 +637,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       changed._timezone = all._timezone;
     }
     return Object.keys(changed).length > 0 ? changed : null;
-  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, rigid, dur, timeRemaining, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, rigid, dur, timeRemaining, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, hasPreferredTime, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   var [manageCalDialog, setManageCalDialog] = useState(false);
 
@@ -636,7 +649,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     userDirtyRef.current = true;
     var changed = buildChangedFields();
     setIsDirty(!!changed);
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, hasPreferredTime, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, datePinned, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, hasPreferredTime, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   function handleSave() {
     // Suppress save while the start/finish pair is invalid — keeps the user's
@@ -844,6 +857,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             when={when} onWhenChange={setWhen}
             timeRemaining={timeRemaining} onTimeRemainingChange={setTimeRemaining}
             taskTz={taskTz} onChangeTz={changeTaskTimezone}
+            placementMode={placementMode} onModeChange={handleModeChange}
             task={task} isCreate={isCreate} isMobile={isMobile} TH={TH}
             scheduleTemplates={scheduleTemplates} templateDefaults={templateDefaults}
             uniqueTags={uniqueTags}
