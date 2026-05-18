@@ -147,6 +147,7 @@ export default function WhenSection(props) {
     recurring, rigid, onRigidChange,
     timeFlex, onTimeFlexChange,
     hasPreferredTime, onHasPreferredTimeChange,
+    placementMode, onModeChange,
     recurType, onRecurTypeChange,
     recurDays, onRecurDaysChange,
     recurEvery, onRecurEveryChange,
@@ -213,13 +214,12 @@ export default function WhenSection(props) {
 
   var isRecurring = !!recurring;
   var whenPartsLocal = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
-  var isAllDay = whenPartsLocal.indexOf('allday') !== -1;
   var isFixed = !!datePinned || whenPartsLocal.indexOf('fixed') !== -1;
   var activeTags = whenPartsLocal.filter(function(p) { return p !== 'anytime' && p !== 'allday' && p !== 'fixed'; });
   var isWindows = activeTags.length > 0;
-  var isAnytime = !isAllDay && !isFixed && !isWindows;
-  var isAnytimeMode = !hasPreferredTime && activeTags.length === 0;
-  var isBlocksMode = !hasPreferredTime && activeTags.length > 0;
+  // Use placementMode prop as the canonical source for mode display.
+  // Previously inferred from hasPreferredTime + activeTags.length — now flows down from TaskEditForm state.
+  var effectiveMode = placementMode || 'anytime';
 
   var tier1 = (
     <div>
@@ -278,47 +278,76 @@ export default function WhenSection(props) {
       {!marker && !isRecurring && (
         <div style={{ marginTop: 8 }}>
           <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, opacity: isFixed ? 0.4 : 1 }}>Scheduling mode</div>
-          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 8, opacity: isFixed ? 0.35 : 1, pointerEvents: isFixed ? 'none' : undefined }}>
-            <button title="No time restriction — the scheduler can place this in any available slot"
-              onClick={function() { onDatePinnedChange(false); onWhenChange(''); }}
-              style={togStyle(isAnytime, '#2D6A4F')}>🔄 Anytime</button>
-            <button title="Spans the entire day"
-              onClick={function() { onDatePinnedChange(false); onWhenChange('allday'); onSplitChange(false); onTravelBeforeChange(0); onTravelAfterChange(0); }}
-              style={togStyle(isAllDay, '#C8942A')}>☀️ All Day</button>
-          </div>
-          <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, opacity: isFixed ? 0.4 : 1 }}>Preferred time windows</div>
+          {/* Three-button mode selector — mirrors recurring section; all task types get the same three modes */}
           <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 6, opacity: isFixed ? 0.35 : 1, pointerEvents: isFixed ? 'none' : undefined }}>
-            {(uniqueTags || []).map(function(tb) {
-              var isOn = activeTags.indexOf(tb.tag) !== -1;
-              return (
-                <button key={tb.tag}
-                  title={isAllDay ? tb.name + ' time window — clicking will switch out of All Day mode' : tb.name + ' time window — selecting any window disables Anytime'}
-                  onClick={function() {
-                    if (isAllDay) {
-                      onDatePinnedChange(false);
-                      onWhenChange(tb.tag);
-                    } else {
-                      var cur = activeTags.slice();
-                      if (isOn) { cur = cur.filter(function(v) { return v !== tb.tag; }); }
-                      else { cur.push(tb.tag); }
-                      onWhenChange(cur.length === 0 ? '' : cur.join(','));
-                    }
-                  }} style={{ ...togStyle(isOn && !isAllDay, tb.color), opacity: isAllDay ? 0.55 : 1 }}>
-                  {tb.icon} {tb.name}
-                </button>
-              );
-            })}
-            {isWindows && (
-              <>
-                <span style={{ width: 1, height: 18, background: TH.border, margin: '0 2px' }} />
-                <button title={flexWhen ? 'Flex: scheduler tries other slots if selected windows are full' : 'Strict: only placed in selected windows'}
-                  onClick={function() { onFlexWhenChange(!flexWhen); }}
-                  style={togStyle(flexWhen, '#C8942A')}>
-                  {flexWhen ? '~ Flex' : 'Strict'}
-                </button>
-              </>
-            )}
+            <button title="No time restriction — the scheduler can place this in any available slot"
+              onClick={function() { onModeChange('anytime'); onWhenChange(''); }}
+              style={togStyle(effectiveMode === 'anytime', '#2D6A4F')}>🔄 Anytime</button>
+            <button title="Schedule near a preferred time ± a flex window"
+              onClick={function() { onModeChange('time_window'); }}
+              style={togStyle(effectiveMode === 'time_window', '#C8942A')}>⏰ Time window</button>
+            <button title="Restrict to named time block windows (morning, afternoon, etc.)"
+              onClick={function() {
+                onModeChange('time_blocks');
+                if (activeTags.length === 0) onWhenChange('morning,lunch,afternoon,evening,night');
+              }}
+              style={togStyle(effectiveMode === 'time_blocks', '#4338CA')}>📅 Time blocks</button>
+            <button title="Spans the entire day"
+              onClick={function() { onModeChange('all_day'); onDatePinnedChange(false); onWhenChange(''); onSplitChange(false); onTravelBeforeChange(0); onTravelAfterChange(0); }}
+              style={togStyle(effectiveMode === 'all_day', '#C8942A')}>☀️ All Day</button>
           </div>
+
+          {/* Time window: time input + ± window select (shown when placementMode === 'time_window') */}
+          {effectiveMode === 'time_window' && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 6 }}>
+              <label style={lStyle}>
+                ⏰ Time
+                <input type="time" value={time || ''} onChange={function(e) { onTimeChange(e.target.value || ''); }}
+                  style={{ ...iStyle, minWidth: 90 }} />
+              </label>
+              <label style={lStyle}>
+                ± Window
+                <select value={rigid ? 0 : (timeFlex || 60)} onChange={function(e) {
+                  var v = parseInt(e.target.value);
+                  if (v === 0) { onRigidChange(true); onTimeFlexChange(0); } else { onRigidChange(false); onTimeFlexChange(v); }
+                }} style={{ ...iStyle, minWidth: 80 }}>
+                  <option value={0}>exact</option>
+                  <option value={15}>±15m</option>
+                  <option value={30}>±30m</option>
+                  <option value={60}>±1hr</option>
+                  <option value={90}>±1.5hr</option>
+                  <option value={120}>±2hr</option>
+                </select>
+              </label>
+            </div>
+          )}
+
+          {/* Time blocks: tag window selector (shown when placementMode === 'time_blocks') */}
+          {effectiveMode === 'time_blocks' && (
+            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 6, opacity: isFixed ? 0.35 : 1, pointerEvents: isFixed ? 'none' : undefined }}>
+              {(uniqueTags || []).map(function(tb) {
+                var isOn = activeTags.indexOf(tb.tag) !== -1;
+                return (
+                  <button key={tb.tag} title={tb.name + ' time window'} onClick={function() {
+                    var cur = activeTags.slice();
+                    if (isOn) { cur = cur.filter(function(v) { return v !== tb.tag; }); } else { cur.push(tb.tag); }
+                    onWhenChange(cur.length === 0 ? '' : cur.join(','));
+                  }} style={togStyle(isOn, tb.color)}>{tb.icon} {tb.name}</button>
+                );
+              })}
+              {isWindows && (
+                <>
+                  <span style={{ width: 1, height: 18, background: TH.border, margin: '0 2px' }} />
+                  <button title={flexWhen ? 'Flex: scheduler tries other slots if selected windows are full' : 'Strict: only placed in selected windows'}
+                    onClick={function() { onFlexWhenChange(!flexWhen); }}
+                    style={togStyle(flexWhen, '#C8942A')}>
+                    {flexWhen ? '~ Flex' : 'Strict'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
           {!isFixed && (
             <label style={{ ...lStyle, marginBottom: 5 }}>
               <span title="Restrict which days the scheduler can place this task.">Day requirement</span>
@@ -351,21 +380,24 @@ export default function WhenSection(props) {
         <div style={{ marginTop: 8 }}>
           <div style={{ display: 'flex', gap: 3, marginBottom: 6 }}>
             <button onClick={function() {
+              onModeChange('anytime');
               onHasPreferredTimeChange(false);
               onTimeChange('');
               onRigidChange(false);
               onWhenChange('');
-            }} style={togStyle(isAnytimeMode, '#2D6A4F')}>🔄 Anytime</button>
+            }} style={togStyle(effectiveMode === 'anytime', '#2D6A4F')}>🔄 Anytime</button>
             <button onClick={function() {
+              onModeChange('time_window');
               onHasPreferredTimeChange(true);
               if (activeTags.length !== 1) onWhenChange('morning');
-            }} style={togStyle(hasPreferredTime, '#C8942A')}>⏰ Time window</button>
+            }} style={togStyle(effectiveMode === 'time_window', '#C8942A')}>⏰ Time window</button>
             <button onClick={function() {
+              onModeChange('time_blocks');
               onHasPreferredTimeChange(false);
               onTimeChange('');
               onRigidChange(false);
               if (activeTags.length <= 1) onWhenChange('morning,lunch,afternoon,evening,night');
-            }} style={togStyle(isBlocksMode, '#4338CA')}>📅 Time blocks</button>
+            }} style={togStyle(effectiveMode === 'time_blocks', '#4338CA')}>📅 Time blocks</button>
           </div>
 
           {hasPreferredTime ? (
