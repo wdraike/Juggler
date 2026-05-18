@@ -241,7 +241,7 @@ function registerTaskTools(server, userId) {
         }
       }
 
-      var row = taskToRow(fields, userId, tz);
+      var row = taskToRow(fields, userId, tz, existing);
       delete row.user_id;
       delete row.created_at;
 
@@ -545,12 +545,11 @@ function registerTaskTools(server, userId) {
 
           var fields = {};
           Object.keys(update).forEach(function(k) { if (k !== 'id') fields[k] = update[k]; });
-          var row = taskToRow(fields, userId, tz);
+          var existing = existingById[id];
+          var row = taskToRow(fields, userId, tz, existing);
           delete row.user_id;
           delete row.created_at;
           delete row._pendingTimeOnly;
-
-          var existing = existingById[id];
           var taskType = existing.task_type || 'task';
 
           if (taskType === 'recurring_instance' && existing.source_id) {

@@ -102,6 +102,44 @@ describe('task mapping', () => {
       expect(row.date).toBeUndefined();
       expect(row.location).toBeUndefined();
     });
+
+    it('derives recurring_window when currentTask has preferred_time_mins (snake_case) and only when changes', () => {
+      // Regression: DB rows use snake_case preferred_time_mins; taskToRow was reading
+      // camelCase cur.preferredTimeMins (undefined), causing RECURRING_FLEXIBLE instead of RECURRING_WINDOW.
+      const existing = {
+        recurring: 1,
+        preferred_time_mins: 1140,
+        rigid: 0,
+        marker: 0,
+        when: 'morning',
+        placement_mode: 'recurring_window'
+      };
+      const row = taskToRow({ when: 'evening' }, 'user1', null, existing);
+      expect(row.placement_mode).toBe('recurring_window');
+    });
+
+    it('does not clobber placement_mode when currentTask missing (create path)', () => {
+      // Recurring task with preferredTimeMins in the request body (create path — no currentTask)
+      const row = taskToRow({ recurring: true, preferredTimeMins: 1140, when: 'evening' }, 'user1');
+      expect(row.placement_mode).toBe('recurring_window');
+    });
+
+    it('preserves recurring_window when update provides only when and currentTask is DB row', () => {
+      // Regression: mcp/tools/tasks.js was calling taskToRow without currentTask,
+      // causing cur={}, cur.recurring=undefined, derivePlacementMode returning FLEXIBLE.
+      const dbRow = {
+        task_type: 'recurring_template',
+        recurring: 1,
+        preferred_time_mins: 1140,
+        rigid: 0,
+        marker: 0,
+        when: 'morning',
+        placement_mode: 'recurring_window'
+      };
+      const row = taskToRow({ when: 'evening' }, 'user1', null, dbRow);
+      expect(row.placement_mode).toBe('recurring_window');
+      expect(row.when).toBe('evening');
+    });
   });
 
   describe('round-trip', () => {

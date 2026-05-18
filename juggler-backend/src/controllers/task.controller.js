@@ -566,12 +566,13 @@ function taskToRow(task, userId, timezone, currentTask) {
       row.placement_mode = task.placementMode;
     } else {
       var cur = currentTask || {};
+      var curPrefTimeMins = cur.preferredTimeMins != null ? cur.preferredTimeMins : cur.preferred_time_mins;
       row.placement_mode = derivePlacementMode(
         task.marker     !== undefined ? !!task.marker     : !!(cur.marker),
         task.rigid      !== undefined ? !!task.rigid      : !!(cur.rigid),
         task.when       !== undefined ? task.when         : (cur.when || ''),
         task.recurring  !== undefined ? !!task.recurring  : !!(cur.recurring),
-        task.preferredTimeMins !== undefined ? task.preferredTimeMins : cur.preferredTimeMins
+        task.preferredTimeMins !== undefined ? task.preferredTimeMins : curPrefTimeMins
       );
     }
   }
