@@ -61,7 +61,7 @@ const PLAN_CATALOG = [
         mcp_access: false
       },
       tasks: {
-        rigid: true
+        placementMode: 'fixed'
       }
     },
     metadata: {
@@ -115,7 +115,7 @@ const PLAN_CATALOG = [
         mcp_access: true
       },
       tasks: {
-        rigid: true
+        placementMode: 'fixed'
       }
     },
     metadata: {
@@ -175,7 +175,7 @@ const PLAN_CATALOG = [
         mcp_access: true
       },
       tasks: {
-        rigid: true
+        placementMode: 'fixed'
       }
     },
     metadata: {
@@ -229,7 +229,7 @@ const PLAN_CATALOG = [
         mcp_access: true
       },
       tasks: {
-        rigid: true
+        placementMode: 'fixed'
       }
     },
     metadata: {
@@ -284,7 +284,7 @@ const PLAN_CATALOG = [
         mcp_access: true
       },
       tasks: {
-        rigid: true
+        placementMode: 'fixed'
       }
     },
     metadata: {

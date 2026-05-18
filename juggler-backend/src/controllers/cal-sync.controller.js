@@ -863,7 +863,7 @@ async function sync(req, res) {
                   // Both changed — conflict resolution
                   // Terminal tasks (done/cancel/skip/pause) always win — never pull
                   // a calendar edit into a completed task.
-                  var isFixed = (task.when || '').indexOf('fixed') >= 0 || task.rigid;
+                  const isFixed = task.placementMode === 'fixed';
                   if (isFixed || isTaskTerminal) {
                     // Fixed or terminal tasks always win → push, log conflict
                     pendingEventUpdates.push({

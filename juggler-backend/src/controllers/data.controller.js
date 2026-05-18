@@ -109,7 +109,7 @@ async function importData(req, res) {
             when: t.when || null,
             day_req: t.dayReq || 'any',
             recurring: t.recurring ? 1 : 0,
-            rigid: t.rigid ? 1 : 0,
+            placementMode: t.placementMode,
             split: t.split === undefined || t.split === null ? null : (t.split ? 1 : 0),
             split_min: t.splitMin || null,
             recur: t.recur ? JSON.stringify(t.recur) : null,

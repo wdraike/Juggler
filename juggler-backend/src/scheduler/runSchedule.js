@@ -901,7 +901,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       when: master.when || ALL_WINDOWS,
       dayReq: master.dayReq,
       recurring: true,
-      rigid: master.rigid,
+      placementMode: master.placementMode,
       timeFlex: master.timeFlex,
       split: master.split,
       splitMin: master.splitMin,
@@ -1191,7 +1191,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // Within placement window — allow the date move to today
     }
     // Rigid recurringTasks keep their preferred time (unless redirected from past above).
-    if (original.recurring && original.rigid && !dateChanged) continue;
+    if (original.recurring && original.placementMode === 'fixed' && !dateChanged) continue; // 'fixed' per placementModes.js PLACEMENT_MODES.FIXED
 
     // NEW DESIGN: write scheduled_at and dur for EVERY placed task, every run.
     // This guarantees the DB matches what the scheduler decided. No minimal-diff

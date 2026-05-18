@@ -184,12 +184,12 @@ const CATALOG = {
       sort_order: 5,
       features: [
         {
-          key: 'tasks.rigid',
-          type: 'boolean',
+          key: 'tasks.placementMode',
+          type: 'string',
           display_name: 'Pinned Tasks',
           description: 'Lock tasks to specific times on the calendar',
           value_order: 25,
-          default_unrestricted_value: true
+          default_unrestricted_value: 'fixed'
         }
       ]
     }

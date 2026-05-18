@@ -61,7 +61,7 @@ A task's scheduling constraint is set directly via the `placement_mode` column. 
 | Placement Mode | `placement_mode` | `placementMode` | enum (see Scheduling Modes table) | User/System | Primary scheduling constraint. Written by the UI directly. Never derived server-side. |
 | When | `when` | `when` | string | User | Comma-separated user-defined time block tags (e.g. `morning`, `lunch`, `evening`). Empty = all windows. Must NOT contain `'allday'` or `'fixed'` — these are now expressed via `placement_mode`. |
 | Day Req | `day_req` | `dayReq` | string | User | `any`, `weekday`, `weekend`, or comma-separated days (`M,W,F`). Checked via `canPlaceOnDate()`. |
-| Rigid | `rigid` | `rigid` | bool | User | Forces placement at exact `preferredTimeMins`. Phase 0 only. Note: `rigid` is now a UI-level toggle within the `time_window` mode. The scheduler reads `isRigid` from `placement_mode === 'fixed'` — do not use the `rigid` flag for scheduler branching. |
+| ~~Rigid~~ | ~~`rigid`~~ | ~~`rigid`~~ | ~~bool~~ | ~~removed~~ | Removed in phase 11. The scheduler reads fixed-placement intent from `placement_mode === 'fixed'` (`placementMode === 'fixed'` in JS). Do not use `rigid`. |
 | Flex When | `flex_when` | `flexWhen` | bool | User | If true and unplaced after Phase 3, retries with "anytime" windows. |
 | Time Flex | `time_flex` | `timeFlex` | int (minutes) | User | ± window around `preferredTimeMins` for recurring. Default 60m. Also controls past-recurring flex window for auto-skip. |
 | Preferred Time | `preferred_time_mins` | `preferredTimeMins` | int (mins from midnight) | User | Anchor time for rigid and time-window recurring. 420 = 7:00 AM. |

@@ -55,7 +55,7 @@ describe('task mapping', () => {
       expect(task.location).toEqual(['home', 'work']);
       expect(task.tools).toEqual(['phone']);
       expect(task.recurring).toBe(true);
-      expect(task.rigid).toBe(false);
+      expect(task.placementMode).toBe('anytime'); // rigid removed; placementMode is the authoritative field
       expect(task.split).toBe(true);
       expect(task.recur).toEqual({ type: 'daily' });
       expect(task.dependsOn).toEqual(['t00']);

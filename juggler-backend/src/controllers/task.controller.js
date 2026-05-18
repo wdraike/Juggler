@@ -387,7 +387,6 @@ function rowToTask(row, timezone, sourceMap) {
     when: row.when,
     dayReq: row.day_req,
     recurring: !!row.recurring,
-    rigid: !!row.rigid,
     timeFlex: row.time_flex != null ? row.time_flex : undefined,
     split: row.split === null ? undefined : !!row.split,
     splitMin: row.split_min,
