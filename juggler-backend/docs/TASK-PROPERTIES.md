@@ -4,19 +4,18 @@ How every property on a task object affects scheduling.
 
 ## Scheduling Modes
 
-A task's mode is determined by its properties. The scheduler processes them in this order:
+A task's scheduling constraint is set directly via the `placement_mode` column. The scheduler branches on this value first, before any phase-based placement logic.
 
-| Mode | Trigger | Phase | Behavior |
-|------|---------|-------|----------|
-| **Fixed** | `when` contains `'fixed'` | 0 | Anchored at exact time. Immovable. Blocks the slot. |
-| **Marker** | `marker = true` | 0 | Shown on calendar but **no time occupancy**. Never moved. |
-| **Pinned** | `datePinned = true` + has time | 0 | User-locked date+time. Treated as fixed. First evicted during pile-ups. |
-| **Rigid Recurring** | `recurring + rigid` | 0 | Force-placed at `preferredTimeMins` within `when`-window. |
-| **Non-Rigid Recurring** | `recurring + !rigid` | 1 | Placed by slack (constrained-first), within `when`-windows on occurrence day. |
-| **Deadline Constrained** | has `deadline` or chain member | 2 | Slack-sorted left-to-right. Chain rollback if capacity-constrained. |
-| **Unconstrained** | no deadline, not recurring | 3 | Priority-sorted forward fill. |
-| **FlexWhen Retry** | `flexWhen = true` + unplaced | 4 | Retry with "anytime" windows (all time blocks). |
-| **Recurring Rescue** | recurring + unplaced after Phase 4 | 5 | Bump lower-priority non-deadline tasks to make room. |
+| Mode | Value | Scheduler treatment |
+|------|-------|---------------------|
+| **Reminder** | `'reminder'` | Calendar marker. `dur=0`. Coexists with other tasks at same minute. No time-grid occupancy. |
+| **All Day** | `'all_day'` | Spans full day. Excluded from time-grid placement entirely (early return in buildItems). |
+| **Fixed** | `'fixed'` | Immovable at exact time (from `time` field). Blocks the slot. `date_pinned` tasks also treated as fixed-anchor. |
+| **Time Window** | `'time_window'` | Placed within ±timeFlex minutes of `preferredTimeMins`. Falls back to when-tags if window is degenerate. |
+| **Time Blocks** | `'time_blocks'` | Constrained to user-named `when` tag windows only (e.g. `morning`, `lunch`, `evening`). Uses `flexWhen` for retry. |
+| **Anytime** | `'anytime'` | No constraint. Placed wherever fits by priority/slack order. |
+
+> **Recurrence is orthogonal** — any mode can be recurring. Use the `recurring` flag to check if a task is recurring; do not infer recurrence from `placement_mode`.
 
 ## Status Effects
 
@@ -59,9 +58,10 @@ A task's mode is determined by its properties. The scheduler processes them in t
 
 | Property | DB | JS | Type | Set By | Scheduler Effect |
 |----------|-----|-----|------|--------|-----------------|
-| When | `when` | `when` | string | User | Comma-separated time block tags: `morning`, `lunch`, `afternoon`, `evening`, `night`, `fixed`, `allday`. Empty = all windows. `allday` = excluded from grid. |
+| Placement Mode | `placement_mode` | `placementMode` | enum (see Scheduling Modes table) | User/System | Primary scheduling constraint. Written by the UI directly. Never derived server-side. |
+| When | `when` | `when` | string | User | Comma-separated user-defined time block tags (e.g. `morning`, `lunch`, `evening`). Empty = all windows. Must NOT contain `'allday'` or `'fixed'` — these are now expressed via `placement_mode`. |
 | Day Req | `day_req` | `dayReq` | string | User | `any`, `weekday`, `weekend`, or comma-separated days (`M,W,F`). Checked via `canPlaceOnDate()`. |
-| Rigid | `rigid` | `rigid` | bool | User | Forces placement at exact `preferredTimeMins`. Phase 0 only. |
+| Rigid | `rigid` | `rigid` | bool | User | Forces placement at exact `preferredTimeMins`. Phase 0 only. Note: `rigid` is now a UI-level toggle within the `time_window` mode. The scheduler reads `isRigid` from `placement_mode === 'fixed'` — do not use the `rigid` flag for scheduler branching. |
 | Flex When | `flex_when` | `flexWhen` | bool | User | If true and unplaced after Phase 3, retries with "anytime" windows. |
 | Time Flex | `time_flex` | `timeFlex` | int (minutes) | User | ± window around `preferredTimeMins` for recurring. Default 60m. Also controls past-recurring flex window for auto-skip. |
 | Preferred Time | `preferred_time_mins` | `preferredTimeMins` | int (mins from midnight) | User | Anchor time for rigid and time-window recurring. 420 = 7:00 AM. |
@@ -100,7 +100,7 @@ A task's mode is determined by its properties. The scheduler processes them in t
 | Source ID | `source_id` | `sourceId` | string | System | For instances: points to master. Used for field inheritance and chunk grouping. |
 | Generated | `generated` | `generated` | bool | System | Instance was scheduler-generated. Treated as user-anchored (date preserved). |
 | Occurrence Ordinal | `occurrence_ordinal` | `occurrenceOrdinal` | int | System | Which occurrence of the recurring task (1..N). |
-| Marker | `marker` | `marker` | bool | User | Non-blocking reminder. Shown on calendar, doesn't consume time. |
+| Marker | `marker` | `marker` | bool | User | Non-blocking reminder. Shown on calendar, doesn't consume time. Expressed as `placement_mode = 'reminder'` in the DB. The `marker` computed column in `tasks_v` is `CASE WHEN placement_mode = 'reminder' THEN 1 ELSE 0 END`. |
 
 ### Priority
 
