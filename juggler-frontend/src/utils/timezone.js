@@ -40,8 +40,11 @@ export function convertTimeForDisplay(isoString, timezone) {
   var m = parseInt(parts.minute);
   var ampm = h >= 12 ? 'PM' : 'AM';
   var dh = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+  var yr = parseInt(parts.year);
+  var mo = parseInt(parts.month);
+  var dy = parseInt(parts.day);
   return {
-    date: parseInt(parts.month) + '/' + parseInt(parts.day),
+    date: yr + '-' + (mo < 10 ? '0' : '') + mo + '-' + (dy < 10 ? '0' : '') + dy,
     time: dh + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm,
     day: parts.weekday
   };

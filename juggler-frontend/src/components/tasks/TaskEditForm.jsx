@@ -376,6 +376,13 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
 
   // Handler passed to WhenSection — sets placementMode and syncs hasPreferredTime for time-input display.
   function handleModeChange(mode) {
+    var wasAllDay = placementMode === 'all_day';
+    var isAllDay = mode === 'all_day';
+    if (wasAllDay !== isAllDay) {
+      setTime('');
+      setEndTime('');
+      setDur('');
+    }
     setPlacementMode(mode);
     // Keep hasPreferredTime in sync: only true when in time_window mode (drives time-input visibility)
     setRecurringHasPreferredTime(mode === 'time_window');
@@ -792,6 +799,12 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var weatherBadge = weatherBadgeParts.length > 0 ? weatherBadgeParts.join(' ') : null;
   var toolsBadge = taskTools.length > 0 ? iconBadge(taskTools, tools || []) : null;
 
+  var whenBadge = placementMode === 'all_day' && date
+    ? date + ' · All Day'
+    : date && time
+      ? date + ' · ' + (fromTime24(time) || time) + (endTime ? '–' + (fromTime24(endTime) || endTime) : '')
+      : null;
+
   var dialogContent = (
     <>
       <TaskDetailHeader
@@ -806,7 +819,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         notes={notes} onNotesChange={setNotes}
         url={url} onUrlChange={setUrl}
         marker={marker} onMarkerChange={setMarker}
-        scheduledBadge={date && time ? (date === formatDateKey(new Date()) ? 'Today' : date) + ' · ' + (fromTime24(time) || time) + (endTime ? '–' + (fromTime24(endTime) || endTime) : '') : null}
+        scheduledBadge={whenBadge}
         unplacedDetail={!isCreate && task && task._unplacedDetail ? task._unplacedDetail : null}
         whenBlocked={!isCreate && task && task._whenBlocked && !flexWhen}
         onEnableFlex={function() { setFlexWhen(true); }}
@@ -815,7 +828,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       {!marker && (
         <CollapsibleSection id="when" label="When" isOpen={!!collapse.when}
           onToggle={toggleCollapse}
-          badge={collapse.when ? null : (date && time ? (date === new Date().toISOString().slice(0,10) ? 'Today' : date) + ' · ' + (fromTime24(time)||time) + (endTime ? '–'+(fromTime24(endTime)||endTime) : '') : 'No date')}
+          badge={collapse.when ? null : (whenBadge || 'No date')}
           TH={TH}>
           <WhenSection
             date={date} onDateChange={setDate}

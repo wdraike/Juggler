@@ -18,6 +18,7 @@ import { formatHour } from '../../scheduler/dateHelpers';
 import { weatherIconUrl } from '../../utils/weatherIcons';
 import { getTheme } from '../../theme/colors';
 import { resolveLocationId } from '../../scheduler/locationHelpers';
+import { isAllDayTask } from '../../utils/isAllDayTask';
 import { getBlocksForDate } from '../../scheduler/timeBlockHelpers';
 import ScheduleCard from './ScheduleCard';
 
@@ -159,6 +160,11 @@ export default function CalendarGrid({
   var dm = getDims(mode, isMobile);
   var theme = getTheme(darkMode);
   var baseHourHeight = gridZoom || 60;
+
+  // Defensive guard: filter out all-day placements before layout.
+  // Scheduler emits isAllDay placements with [DAY_START, DAY_END] windows
+  // which would otherwise render as full-grid blocks.
+  placements = (placements || []).filter(function(p) { return !p.isAllDay && !isAllDayTask(p.task); });
 
   // On mobile, enforce a minimum zoom so taller cards have room to spread
   if (isMobile && mode !== 'mini' && baseHourHeight < 80) baseHourHeight = 80;

@@ -10,8 +10,9 @@ import { formatDateKey } from '../../scheduler/dateHelpers';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
 import WeatherBadge from '../features/WeatherBadge';
+import AllDayBanner from './AllDayBanner';
 
-export default function ThreeDayView({ selectedDate, dayPlacements, statuses, onStatusChange, onDelete, onExpand, gridZoom, darkMode, schedCfg, nowMins, onGridDrop, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag, weatherByDate }) {
+export default function ThreeDayView({ selectedDate, dayPlacements, allTasks, statuses, onStatusChange, onDelete, onExpand, gridZoom, darkMode, schedCfg, nowMins, onGridDrop, blockedTaskIds, onZoomChange, isMobile, onMarkerDrag, weatherByDate }) {
   var theme = getTheme(darkMode);
   var todayKey = formatDateKey(new Date());
 
@@ -44,7 +45,15 @@ export default function ThreeDayView({ selectedDate, dayPlacements, statuses, on
       {/* Scrollable grid area */}
       <div style={{ display: 'flex', flex: 1, overflow: 'auto', minWidth: isMobile ? 600 : undefined, minHeight: 0 }}>
         {days.map((d, i) => (
-          <div key={d.key} style={{ flex: 1, borderRight: i < 2 ? `1px solid ${theme.border}` : 'none', minWidth: 0 }}>
+          <div key={d.key} style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: i < 2 ? `1px solid ${theme.border}` : 'none', minWidth: 0 }}>
+            <AllDayBanner
+              allTasks={allTasks}
+              dateKey={d.key}
+              statuses={statuses}
+              onExpand={onExpand}
+              darkMode={darkMode}
+              isPastDay={d.key < todayKey}
+            />
             <CalendarGrid
               dateKey={d.key}
               placements={dayPlacements[d.key] || []}

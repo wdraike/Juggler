@@ -1176,6 +1176,7 @@ export default function AppLayout() {
           {viewMode === '3day' && (
             <ThreeDayView
               selectedDate={selectedDate} dayPlacements={filteredDayPlacements}
+              allTasks={allTasks}
               statuses={statuses}
               onStatusChange={handleStatusChange} onDelete={requestDelete} onExpand={handleExpand}
               gridZoom={config.gridZoom} darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins}
@@ -1189,6 +1190,7 @@ export default function AppLayout() {
           {viewMode === 'week' && (
             <WeekView
               selectedDate={selectedDate} dayPlacements={filteredDayPlacements}
+              allTasks={allTasks}
               statuses={statuses}
               onStatusChange={handleStatusChange} onDelete={requestDelete} onExpand={handleExpand}
               gridZoom={config.gridZoom} darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins}

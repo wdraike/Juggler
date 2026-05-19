@@ -10,6 +10,7 @@ import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 
 import WeatherBadge from '../features/WeatherBadge';
+import AllDayBanner from './AllDayBanner';
 
 export default function DayView({ selectedDate, selectedDateKey, placements, statuses, onStatusChange, onDelete, onExpand, onCreate, gridZoom, darkMode, schedCfg, nowMins, isToday, onGridDrop, locSchedules, onUpdateLocScheduleOverrides, onUpdateLocScheduleDefaults, allTasks, onBatchRecurringsDone, locations, onHourLocationOverride, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, filter, onZoomChange, isMobile, onMarkerDrag, weatherByDate }) {
   var theme = getTheme(darkMode);
@@ -140,37 +141,17 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
       </div>
       {/* All-day events banner — also outside scroll */}
       {(() => {
-        // juggler-cal-history Plan E — past-day fade (D-10).
         var dvTodayKey = formatDateKey(new Date());
         var isPastDay = !!selectedDateKey && selectedDateKey < dvTodayKey;
-        var allDayTasks = (allTasks || []).filter(t => t.date === selectedDateKey && (t.when === 'allday' || (!t.time && (t.dur === 0 || t.dur === null))));
-        if (allDayTasks.length === 0) return null;
         return (
-          <div style={{ padding: '4px 12px', borderBottom: `1px solid ${theme.border}`, flexShrink: 0 }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: theme.textMuted, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 }}>All Day</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {allDayTasks.map(t => {
-                var st = statuses[t.id] || '';
-                var isDone = isTerminalStatus(st);
-                return (
-                  <div key={t.id} onClick={() => onExpand(t.id)}
-                    style={{
-                      padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 12,
-                      background: isDone ? theme.badgeBg : theme.projectBadgeBg,
-                      color: isDone ? theme.textMuted : theme.projectBadgeText,
-                      border: '1px solid ' + (isDone ? theme.border : theme.projectBadgeText + '40'),
-                      opacity: (isDone && isPastDay) ? PAST_OPACITY : (isDone ? 0.5 : 1),
-                      textDecoration: isDone ? 'line-through' : 'none'
-                    }}>
-                    {st === 'done' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u2713'}</span>}
-                    {st === 'skip' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u23ED'}</span>}
-                    {st === 'cancel' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u2717'}</span>}
-                    {t.text}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <AllDayBanner
+            allTasks={allTasks}
+            dateKey={selectedDateKey}
+            statuses={statuses}
+            onExpand={onExpand}
+            darkMode={darkMode}
+            isPastDay={isPastDay}
+          />
         );
       })()}
       {/* Early-hours banner — tasks scheduled before GRID_START (6 AM) */}

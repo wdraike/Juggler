@@ -229,51 +229,55 @@ export default function WhenSection(props) {
           <input type="date" value={date} onChange={e => onDateChange(e.target.value)}
             style={{ ...iStyle, width: 130 }} />
         </label>
-        <label style={lStyle}>
-          Start
-          <input type="time" value={time} onChange={e => {
-            onTimeChange(e.target.value);
-            if (onEndTimeErrorChange) onEndTimeErrorChange(null);
-            if (e.target.value && dur) onEndTimeChange(addMinutesTo24h(e.target.value, dur));
-          }} style={{ ...iStyle, width: 90 }} />
-        </label>
-        <label style={lStyle}>
-          End
-          <input type="time" value={endTime} onChange={e => {
-            var v = e.target.value;
-            onEndTimeChange(v);
-            if (v && time) {
-              var startMins = minutesFrom24h(time);
-              var endMins = minutesFrom24h(v);
-              if (startMins !== null && endMins !== null && endMins > startMins) {
-                if (onEndTimeErrorChange) onEndTimeErrorChange(null);
-                onDurChange(endMins - startMins);
-              } else if (startMins !== null && endMins !== null) {
-                if (onEndTimeErrorChange) onEndTimeErrorChange('Finish must be after start');
+        {effectiveMode !== 'all_day' && (<>
+          <label style={lStyle}>
+            Start
+            <input type="time" value={time} onChange={e => {
+              onTimeChange(e.target.value);
+              if (onEndTimeErrorChange) onEndTimeErrorChange(null);
+              if (e.target.value && dur) onEndTimeChange(addMinutesTo24h(e.target.value, dur));
+            }} style={{ ...iStyle, width: 90 }} />
+          </label>
+          <label style={lStyle}>
+            End
+            <input type="time" value={endTime} onChange={e => {
+              var v = e.target.value;
+              onEndTimeChange(v);
+              if (v && time) {
+                var startMins = minutesFrom24h(time);
+                var endMins = minutesFrom24h(v);
+                if (startMins !== null && endMins !== null && endMins > startMins) {
+                  if (onEndTimeErrorChange) onEndTimeErrorChange(null);
+                  onDurChange(endMins - startMins);
+                } else if (startMins !== null && endMins !== null) {
+                  if (onEndTimeErrorChange) onEndTimeErrorChange('Finish must be after start');
+                } else {
+                  if (onEndTimeErrorChange) onEndTimeErrorChange(null);
+                }
               } else {
                 if (onEndTimeErrorChange) onEndTimeErrorChange(null);
               }
-            } else {
-              if (onEndTimeErrorChange) onEndTimeErrorChange(null);
-            }
-          }} style={{ ...iStyle, width: 90 }} />
-        </label>
-        <label style={lStyle}>
-          Duration
-          <input type="number" min={1} value={dur} onChange={e => {
-            var v = Math.max(1, parseInt(e.target.value, 10) || 1);
-            onDurChange(v);
-            if (time) onEndTimeChange(addMinutesTo24h(time, v));
-          }} style={{ ...iStyle, width: 65 }} />
-        </label>
+            }} style={{ ...iStyle, width: 90 }} />
+          </label>
+          <label style={lStyle}>
+            Duration
+            <input type="number" min={1} value={dur} onChange={e => {
+              var v = Math.max(1, parseInt(e.target.value, 10) || 1);
+              onDurChange(v);
+              if (time) onEndTimeChange(addMinutesTo24h(time, v));
+            }} style={{ ...iStyle, width: 65 }} />
+          </label>
+        </>)}
       </div>
-      {endTimeError && <div style={{ fontSize: 9, color: TH.amberText, marginBottom: 4 }}>{endTimeError}</div>}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
-        <TimezoneSelector taskTz={taskTz} onChangeTz={onChangeTz} TH={TH} />
-        <button onClick={() => onRigidChange(!rigid)} style={{ ...togStyle(rigid, '#2D6A4F'), fontSize: 9 }}>
-          {rigid ? '📌 Fixed' : '🔀 Float'}
-        </button>
-      </div>
+      {effectiveMode !== 'all_day' && (<>
+        {endTimeError && <div style={{ fontSize: 9, color: TH.amberText, marginBottom: 4 }}>{endTimeError}</div>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+          <TimezoneSelector taskTz={taskTz} onChangeTz={onChangeTz} TH={TH} />
+          <button onClick={() => onRigidChange(!rigid)} style={{ ...togStyle(rigid, '#2D6A4F'), fontSize: 9 }}>
+            {rigid ? '📌 Fixed' : '🔀 Float'}
+          </button>
+        </div>
+      </>)}
 
       {!marker && !isRecurring && (
         <div style={{ marginTop: 8 }}>

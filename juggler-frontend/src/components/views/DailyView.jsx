@@ -15,6 +15,8 @@ import WeatherBadge from '../features/WeatherBadge';
 import { getTaskIcon } from '../../utils/taskIcon';
 import { checkWeatherMatch, hasWeatherRestrictions } from '../../utils/weatherMatch';
 import { weatherIconUrl } from '../../utils/weatherIcons';
+import AllDayBanner from './AllDayBanner';
+import { isAllDayTask } from '../../utils/isAllDayTask';
 
 var MIN_PX_PER_HOUR = 30;
 var MAX_PX_PER_HOUR = 240;
@@ -882,7 +884,7 @@ export default function DailyView({
     var raw = (allTasks || []).filter(function (t) {
       if (t.date !== selectedDateKey || scheduledIds[t.id]) return false;
       // All-day tasks rendered in the all-day banner above the grid.
-      if (t.when === 'allday' || t.isAllDay) return false;
+      if (isAllDayTask(t)) return false;
       // Recurring template (blueprint) doesn't belong here. `generated`
       // in-memory chunks also don't — only real DB rows do.
       if (t.taskType === 'recurring_template' || t.generated) return false;
@@ -935,12 +937,6 @@ export default function DailyView({
       return g.count > 1 ? Object.assign({}, g.task, { _unplacedChunkCount: g.count }) : g.task;
     });
   }, [allTasks, unplaced, selectedDateKey, placements, statuses, matchesFilter, filter]);
-
-  var allDayItems = useMemo(function () {
-    return (allTasks || []).filter(function (t) {
-      return t.date === selectedDateKey && (t.when === 'allday' || t.isAllDay);
-    });
-  }, [allTasks, selectedDateKey]);
 
   // Ghost placements: unscheduled tasks that have a desiredAt, shown in the
   // time grid at their intended position with a striped "couldn't schedule" style.
@@ -1047,35 +1043,16 @@ export default function DailyView({
       </div>
 
       {/* All-day events banner */}
-      {allDayItems.length > 0 && (
-        <div style={{ padding: '4px 12px', borderBottom: '1px solid ' + theme.border, flexShrink: 0 }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: theme.textMuted, marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 }}>All Day</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {allDayItems.map(function (t) {
-              var st = statuses[t.id] || '';
-              var isDone = isTerminalStatus(st);
-              return (
-                <div key={t.id} onClick={function () { if (onExpand) onExpand(t.id); }}
-                  style={{
-                    padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 12,
-                    background: isDone ? theme.badgeBg : theme.projectBadgeBg,
-                    color: isDone ? theme.textMuted : theme.projectBadgeText,
-                    border: '1px solid ' + (isDone ? theme.border : theme.projectBadgeText + '40'),
-                    opacity: (isDone && isPast) ? PAST_OPACITY : (isDone ? 0.5 : 1),
-                    textDecoration: isDone ? 'line-through' : 'none'
-                  }}>
-                  {st === 'done' && <span style={{ fontSize: 9, marginRight: 2 }}>{'✓'}</span>}
-                  {st === 'skip' && <span style={{ fontSize: 9, marginRight: 2 }}>{'⏭'}</span>}
-                  {st === 'cancel' && <span style={{ fontSize: 9, marginRight: 2 }}>{'✗'}</span>}
-                  {t.text}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      <AllDayBanner
+        allTasks={allTasks}
+        dateKey={selectedDateKey}
+        statuses={statuses}
+        onExpand={onExpand}
+        darkMode={darkMode}
+        isPastDay={isPast}
+      />
 
-      {/* Scrollable hour grid */}
+            {/* Scrollable hour grid */}
       <div
         ref={scrollRef}
         style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', minHeight: 0 }}
