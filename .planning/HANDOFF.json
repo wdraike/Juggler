@@ -1,32 +1,34 @@
 {
   "version": "1.0",
-  "timestamp": "2026-05-18T20:39:25Z",
+  "timestamp": "2026-05-19T00:00:00Z",
   "phase": null,
-  "phase_name": "JUG-MED-10 — all-day task display consistency (not yet a phase)",
+  "phase_name": null,
   "phase_dir": null,
   "plan": null,
   "task": null,
   "total_tasks": null,
-  "status": "paused — brainstorming started, context exhausted before design complete",
+  "status": "clean — JUG-MED-10 complete, no active phase",
   "completed_tasks": [
     {"id": "10-01", "name": "Remove startAfterAt from rowToTask and MCP schema", "status": "done", "commit": "763a979"},
     {"id": "11-01", "name": "Replace rigid with placementMode checks across all JS", "status": "done", "commit": "c4aa5e3"},
     {"id": "11-02", "name": "Drop rigid from tasks_v and tasks_with_sync_v views", "status": "done", "commit": "7228528"},
     {"id": "12-01", "name": "Remove preferred_time boolean from rowToTask, taskToRow, and form", "status": "done", "commit": "877d14a"},
     {"id": "12-02", "name": "Drop preferred_time column from task_masters and rebuild views", "status": "done", "commit": "30fb020"},
-    {"id": "12-simplify", "name": "Remove stale preferredTime refs from useEffect deps", "status": "done", "commit": "dbe42c7"}
+    {"id": "12-simplify", "name": "Remove stale preferredTime refs from useEffect deps", "status": "done", "commit": "dbe42c7"},
+    {"id": "JUG-MED-10-a", "name": "All-day banner: shared component + all views + timezone date fix", "status": "done", "commit": "de0322c"},
+    {"id": "JUG-MED-10-b", "name": "Hide Where/Weather/Tools for all-day tasks in TaskEditForm", "status": "done", "commit": "88fa4cb"}
   ],
   "remaining_tasks": [
-    {"id": "JUG-MED-10", "name": "All-day tasks: consistent full-day reminder display across all views", "status": "not_started — brainstorming interrupted"},
     {"id": "JUG-MED-07", "name": "Scheduler visual documentation (Mermaid diagrams)", "status": "not_started"}
   ],
   "blockers": [],
   "human_actions_pending": [],
   "decisions": [
-    {"decision": "Extracted shared AllDayBanner component approach preferred", "rationale": "DayView + DailyView both inline identical chip-row banners; WeekView/ThreeDayView/TimelineView/CalendarView missing allday handling entirely", "phase": "JUG-MED-10-brainstorm"},
-    {"decision": "Visual companion server started at port 49713 but not used — session ended", "rationale": "Context exhausted at 75%", "phase": "JUG-MED-10-brainstorm"}
+    {"decision": "convertTimeForDisplay returns ISO YYYY-MM-DD (not M/D)", "rationale": "All t.date === dateKey comparisons use ISO; M/D format caused banner filter to always be empty", "phase": "JUG-MED-10"},
+    {"decision": "Shared AllDayBanner component extracted", "rationale": "DayView + DailyView had duplicate inline logic; WeekView/ThreeDayView had none", "phase": "JUG-MED-10"},
+    {"decision": "Where/Weather/Tools sections hidden for all-day tasks", "rationale": "Location/weather/tools are irrelevant for untimed all-day tasks", "phase": "JUG-MED-10"}
   ],
   "uncommitted_files": ["BACKLOG.md", "juggler-backend/docs/SCHEDULER-UI-STATE-MAP.md"],
-  "next_action": "Resume brainstorming for JUG-MED-10: shared AllDayBanner component design + per-view integration. Start fresh visual companion session. Key finding: DayView + DailyView have banners, CalendarView sort-only, WeekView/ThreeDayView/TimelineView have nothing.",
-  "context_notes": "Phases 10, 11, 12 all shipped this session. All three were schema/code cleanup (drop legacy fields). JUG-MED-10 is next — UI consistency fix across 6 calendar views for all-day tasks."
+  "next_action": "Start JUG-MED-07 (scheduler Mermaid diagrams) or pick from BACKLOG.md",
+  "context_notes": "JUG-MED-10 shipped in prior session. Root cause was timezone.js returning M/D date format, breaking all banner date-key comparisons. Fixed + all 4 calendar views now have AllDayBanner."
 }
