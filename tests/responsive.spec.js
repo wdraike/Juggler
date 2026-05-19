@@ -288,9 +288,10 @@ for (const device of DEVICES) {
 
     // ── 14. Week navigation works at this viewport ─────────────────
     test('week navigation arrows work', async ({ page }) => {
-      const nextDay = page.locator('button[title="Next day"]');
-      const prevDay = page.locator('button[title="Previous day"]');
-      const today = page.locator('button[title="Go to today"]');
+      // Navigation buttons use « ‹ symbols (HeaderBar/WeekStrip)
+      const nextDay = page.locator('button:has-text("›")').or(page.locator('button:has-text("»")')).first();
+      const prevDay = page.locator('button:has-text("‹")').or(page.locator('button:has-text("«")')).first();
+      const today = page.locator('button:has-text("Today")').first();
 
       if (await nextDay.isVisible()) {
         await nextDay.click({ force: true });
