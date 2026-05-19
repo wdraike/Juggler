@@ -1,4 +1,19 @@
+---
+type: testing
+service: juggler
+status: active
+last_updated: 2026-05-19
+tags:
+  - type/testing
+  - service/juggler
+  - status/active
+  - calendar-sync
+  - cal-sync-google
+---
+
 # GCal sync soak test — #33
+
+**Last Updated:** 2026-05-19
 
 Structured bidirectional soak for juggler ↔ Google Calendar. User executes
 each step in the UI + on GCal; I monitor the backend log + diff the ledger

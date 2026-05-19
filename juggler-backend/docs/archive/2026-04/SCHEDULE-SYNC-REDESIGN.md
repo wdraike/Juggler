@@ -1,4 +1,21 @@
+---
+type: design
+service: juggler
+status: archived
+last_updated: 2026-05-19
+tags:
+  - type/design
+  - service/juggler
+  - status/archived
+  - scheduler
+  - calendar-sync
+---
+
 # Schedule/Sync Redesign
+
+**Last Updated:** 2026-05-19
+
+> **Status:** ARCHIVED — this document describes the root-cause analysis for a scheduler/sync drift problem from 2026-04-12. The redesign was implemented through the fix-cal-sync phase. See `CALENDAR-SYNC-REFACTOR.md` for current architecture.
 
 ## Problem
 

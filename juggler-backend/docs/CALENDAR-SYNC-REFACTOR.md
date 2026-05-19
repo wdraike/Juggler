@@ -1,4 +1,18 @@
+---
+type: design
+service: juggler
+status: active
+last_updated: 2026-05-19
+tags:
+  - type/design
+  - service/juggler
+  - status/active
+  - calendar-sync
+---
+
 # Calendar Sync Refactor — Continuation Brief
+
+**Last Updated:** 2026-05-19
 
 ## What This Is
 

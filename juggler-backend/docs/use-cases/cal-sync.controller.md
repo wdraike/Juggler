@@ -1,4 +1,18 @@
+---
+type: use-case
+service: juggler
+status: active
+last_updated: 2026-05-19
+tags:
+  - type/use-case
+  - service/juggler
+  - status/active
+  - calendar-sync
+---
+
 # Cal-Sync Controller — Use Cases
+
+**Last Updated:** 2026-05-19
 
 Source: `src/controllers/cal-sync.controller.js`
 See also: `docs/CALENDAR-SYNC-REFACTOR.md`, `docs/SYNC-EVENT-TO-TASK-HANDOFF.md`

@@ -1,4 +1,18 @@
+---
+type: security-audit
+service: juggler
+status: active
+last_updated: 2026-05-19
+tags:
+  - type/security-audit
+  - service/juggler
+  - status/active
+  - security
+---
+
 # Juggler / StriveRS — API Security Audit
+
+**Last Updated:** 2026-05-19
 
 **Audit completed:** 2026-04-18
 **Scope:** 57 REST endpoints (17 route files) + 21 embedded MCP tools + 20 standalone MCP tools + 5 middleware.
@@ -34,10 +48,10 @@ Juggler's structure mirrors ClimbRS — same `jwt-auth`/`resolvePlanFeatures` pi
 
 ## Remaining work
 
-- [ ] **JF-R1 — Public-endpoint rate limits.** Port `resume-optimizer-backend/src/middleware/public-rate-limits.js` to juggler. Apply to `/health`, `/api/gcal/callback`, `/api/msft-cal/callback`, `/api/billing-webhooks` (pre-signature), `/api/feature-catalog`, `/api/feature-events`. The existing `apiLimiter` in `app.js:78` is 1000/min global per IP — good floor but doesn't protect the specific brute-force surfaces.
-- [ ] **JF-R2 — Billing webhook raw-body signing.** Move to raw-body HMAC input (see JF-I1 above). Requires mounting the billing-webhooks route before `bodyParser.json` and capturing `req.rawBody`. Coordinate with payment-service to ensure both sides use the same bytes.
-- [ ] **JF-R3 — Zod schemas on REST write routes.** `zod` is already a dependency (v4.3.6) but only used in MCP tools. Add schema validation to the top-10 write endpoints (`POST /api/tasks`, batch CRUD, config updates, etc.). Manual validation in controllers works but is inconsistent.
-- [ ] **JF-R4 — Live probe suite.** Mirror `resume-optimizer/temp/security-probes/probe-rest.sh`. Add probes specific to juggler: OAuth callback with missing/mismatched `state` (expect 400), MCP tool call with spoofed `userId` in params (handler must ignore and use `extra.userId`), billing webhook with stale timestamp (expect 401 after JF8 fix).
+- [ ] **[OPEN] JF-R1 — Public-endpoint rate limits.** Port `resume-optimizer-backend/src/middleware/public-rate-limits.js` to juggler. Apply to `/health`, `/api/gcal/callback`, `/api/msft-cal/callback`, `/api/billing-webhooks` (pre-signature), `/api/feature-catalog`, `/api/feature-events`. The existing `apiLimiter` in `app.js:78` is 1000/min global per IP — good floor but doesn't protect the specific brute-force surfaces.
+- [ ] **[OPEN] JF-R2 — Billing webhook raw-body signing.** Move to raw-body HMAC input (see JF-I1 above). Requires mounting the billing-webhooks route before `bodyParser.json` and capturing `req.rawBody`. Coordinate with payment-service to ensure both sides use the same bytes.
+- [ ] **[OPEN] JF-R3 — Zod schemas on REST write routes.** `zod` is already a dependency (v4.3.6) but only used in MCP tools. Add schema validation to the top-10 write endpoints (`POST /api/tasks`, batch CRUD, config updates, etc.). Manual validation in controllers works but is inconsistent.
+- [ ] **[OPEN] JF-R4 — Live probe suite.** Mirror `resume-optimizer/temp/security-probes/probe-rest.sh`. Add probes specific to juggler: OAuth callback with missing/mismatched `state` (expect 400), MCP tool call with spoofed `userId` in params (handler must ignore and use `extra.userId`), billing webhook with stale timestamp (expect 401 after JF8 fix).
 
 ## Files modified this pass
 

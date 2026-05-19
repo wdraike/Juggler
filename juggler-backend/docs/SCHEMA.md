@@ -1,4 +1,19 @@
+---
+type: design
+service: juggler
+status: active
+last_updated: 2026-05-19
+tags:
+  - type/design
+  - service/juggler
+  - status/active
+  - database
+  - migrations
+---
+
 # Juggler Schema Reference
+
+**Last Updated:** 2026-05-19
 
 Purpose and lifecycle of the non-obvious tables in the Juggler DB. Covers the **Bucket 1** questions from `juggler/Issues.txt`.
 

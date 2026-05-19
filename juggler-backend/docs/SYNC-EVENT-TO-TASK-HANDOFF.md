@@ -1,4 +1,18 @@
+---
+type: design
+service: juggler
+status: draft
+last_updated: 2026-05-19
+tags:
+  - type/design
+  - service/juggler
+  - status/draft
+  - calendar-sync
+---
+
 # Calendar Sync: Event-to-Task Propagation — Implementation Handoff
+
+**Last Updated:** 2026-05-19
 
 **Status**: Design complete, implementation not started.
 

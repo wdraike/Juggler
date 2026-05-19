@@ -1,4 +1,19 @@
+---
+type: testing
+service: juggler
+status: active
+last_updated: 2026-05-19
+tags:
+  - type/testing
+  - service/juggler
+  - status/active
+  - task-management
+  - calendar-sync
+---
+
 # Juggler — Test Use Cases
+
+**Last Updated:** 2026-05-19
 
 Maps every system use case to its test case(s). Status column reflects current state after the `juggler-test-suite` phase completes.
 

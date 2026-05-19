@@ -1,4 +1,19 @@
+---
+type: design
+service: juggler
+status: active
+last_updated: 2026-05-19
+tags:
+  - type/design
+  - service/juggler
+  - status/active
+  - weather
+  - scheduler
+---
+
 # Weather Integration — Design Spec
+
+**Last Updated:** 2026-05-19
 
 Juggler surfaces weather context in all calendar views and optionally constrains task scheduling to user-defined weather conditions (temperature range, precipitation tolerance, sky cover).
 

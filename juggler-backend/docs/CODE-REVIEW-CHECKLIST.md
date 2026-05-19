@@ -1,4 +1,20 @@
+---
+type: refactor-plan
+service: juggler
+status: draft
+last_updated: 2026-05-19
+tags:
+  - type/refactor-plan
+  - service/juggler
+  - status/draft
+  - security
+---
+
 # Code Review Checklist — Juggler/StriveRS
+
+**Last Updated:** 2026-05-19
+
+> **Status:** DRAFT STUB - will be superseded by juggler-code-review phase audit deliverables when that phase runs. Do not delete prematurely.
 
 Generated: 2026-04-05
 

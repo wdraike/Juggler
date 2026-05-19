@@ -1,4 +1,19 @@
+---
+type: testing
+service: juggler
+status: active
+last_updated: 2026-05-19
+tags:
+  - type/testing
+  - service/juggler
+  - status/active
+  - calendar-sync
+  - cal-sync-msft
+---
+
 # MSFT Calendar sync soak test
+
+**Last Updated:** 2026-05-19
 
 Structured bidirectional soak for juggler ↔ Microsoft Calendar (Outlook/Teams).
 Mirrors the GCal soak structure — same test matrix, MSFT-specific details noted inline.
