@@ -871,7 +871,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         </CollapsibleSection>
       )}
 
-      {!marker && (
+      {!marker && placementMode !== 'all_day' && (
         <CollapsibleSection id="where" label="Where" isOpen={!!collapse.where}
           onToggle={toggleCollapse}
           badge={whereBadge}
@@ -880,7 +880,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         </CollapsibleSection>
       )}
 
-      {!marker && (
+      {!marker && placementMode !== 'all_day' && (
         <CollapsibleSection id="weather" label="Weather" isOpen={!!collapse.weather}
           onToggle={toggleCollapse}
           badge={weatherBadge}
@@ -902,7 +902,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         </CollapsibleSection>
       )}
 
-      {!marker && (tools || []).length > 0 && (
+      {!marker && placementMode !== 'all_day' && (tools || []).length > 0 && (
         <CollapsibleSection id="tools" label="Tools" isOpen={!!collapse.tools}
           onToggle={toggleCollapse}
           badge={toolsBadge}
