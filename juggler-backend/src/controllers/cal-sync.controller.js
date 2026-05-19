@@ -22,6 +22,9 @@ var { flushQueueInLock } = require('../lib/task-write-queue');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { isTerminalStatus } = require('../lib/task-status');
 
+// Ledger origin value for tasks created/managed by Juggler (vs. pulled from a provider).
+var JUGGLER_ORIGIN = 'juggler';
+
 // Number of consecutive syncs an event must be missing before we delete the task.
 // Prevents data loss from transient calendarView failures or API propagation delays.
 var MISS_THRESHOLD = 3;
@@ -701,7 +704,7 @@ async function sync(req, res) {
           // Exception: ingest-only providers pull event changes into the task. ===
 
           // --- Past non-done juggler-origin cleanup ---
-          if (task && event && ledger.origin === 'juggler' && task._scheduled_at && !isIngestOnly(pid)) {
+          if (task && event && ledger.origin === JUGGLER_ORIGIN && task._scheduled_at && !isIngestOnly(pid)) {
             var taskScheduledAt = task._scheduled_at instanceof Date ? task._scheduled_at : new Date(String(task._scheduled_at).replace(' ', 'T') + 'Z');
             // For recurring instances: use `now` so today's past-time slots are cleaned
             // up once their window has passed — keeps external calendar consistent with
@@ -727,7 +730,7 @@ async function sync(req, res) {
           }
 
           // --- Terminal status handling (done/cancel/skip/pause) ---
-          if (task && event && ledger.origin === 'juggler' && calCompletedBehavior !== 'keep' && !isIngestOnly(pid)) {
+          if (task && event && ledger.origin === JUGGLER_ORIGIN && calCompletedBehavior !== 'keep' && !isIngestOnly(pid)) {
             var isTerminal = isTerminalStatus(task.status);
             if (isTerminal) {
               var shouldDelete = calCompletedBehavior === 'delete' || task.status !== 'done';
@@ -776,7 +779,7 @@ async function sync(req, res) {
 
             // If the task is unscheduled (scheduler couldn't place it), delete its calendar
             // event — unscheduled tasks should never occupy a slot on external calendars.
-            if (task.unscheduled && ledger.origin === 'juggler' && !isIngestOnly(pid)) {
+            if (task.unscheduled && ledger.origin === JUGGLER_ORIGIN && !isIngestOnly(pid)) {
               try {
                 await pAdapter.deleteEvent(pToken, event._url || ledger.provider_event_id);
                 await throttle();
@@ -793,7 +796,7 @@ async function sync(req, res) {
             // Only push to events WE created (origin=juggler). Events pulled from
             // a provider (origin=pid) are read-only from Juggler's perspective —
             // we don't own them, can't PATCH them, and shouldn't try.
-            if (ledger.origin === 'juggler' && !isIngestOnly(pid)) {
+            if (ledger.origin === JUGGLER_ORIGIN && !isIngestOnly(pid)) {
               // Followers in a merged-chunks run: skip the PATCH — their
               // event is queued for delete in Phase 3's splitDeleteQueue,
               // so patching it first wastes an API call. We also clear
@@ -974,13 +977,11 @@ async function sync(req, res) {
                 }
               }
             } else if (isIngestOnly(pid)) {
-              // Ingest-only: pull event changes into the task. Tasks created from
-              // ingest-only events are when='fixed' by design (never scheduled by
-              // Juggler), so we overwrite task fields from the event every sync.
-              // Exception: terminal tasks (done/cancel/skip/pause) are immutable —
-              // never pull calendar edits into a completed task.
+              // Ingest-only: pull event changes into task. Skip terminal tasks and
+              // juggler-origin tasks (MCP-created) — Juggler owns their scheduling fields.
               var ingestTaskTerminal = isTerminalStatus(task.status);
-              if (!ingestTaskTerminal) {
+              var isJugglerOrigin = ledger.origin === JUGGLER_ORIGIN;
+              if (!isJugglerOrigin && !ingestTaskTerminal) {
                 var updateFields = pAdapter.applyEventToTaskFields(event, tz, task);
                 updateFields.when = 'fixed';
                 taskUpdates.push({ id: task.id, fields: updateFields });
@@ -1063,7 +1064,7 @@ async function sync(req, res) {
                 });
               } else if (withinCdnGrace(ledger, pid)) {
                 // CDN propagation window — treat as not-yet-visible, not missing
-              } else if (ledger.origin === 'juggler'
+              } else if (ledger.origin === JUGGLER_ORIGIN
                   && ledger.last_user_hash !== null
                   && userHash(task) !== ledger.last_user_hash
                   && (ledger.miss_count || 0) >= 1) {
@@ -1081,7 +1082,7 @@ async function sync(req, res) {
                   detail: pid + ' event gone but juggler task content changed — will re-create',
                   calendarName: calendarLabels[pid] || null
                 });
-              } else if (ledger.origin === 'juggler'
+              } else if (ledger.origin === JUGGLER_ORIGIN
                   && taskHash(task) !== ledger.last_pushed_hash
                   && (ledger.miss_count || 0) === 0) {
                 // First miss only: task changed (possibly scheduler timing update) on the same
@@ -1502,7 +1503,7 @@ async function sync(req, res) {
             }
             ledgerInserts.push({
               user_id: userId, provider: pid2, task_id: br.taskId,
-              provider_event_id: br.providerEventId, origin: 'juggler',
+              provider_event_id: br.providerEventId, origin: JUGGLER_ORIGIN,
               last_pushed_hash: taskHash(bTask),
               last_user_hash: userHash(bTask),
               last_pulled_hash: createdNorm ? pAdapter2.eventHash(createdNorm) : null,
@@ -1539,7 +1540,7 @@ async function sync(req, res) {
                 }
                 ledgerInserts.push({
                   user_id: userId, provider: pid2, task_id: rTask.id,
-                  provider_event_id: rResult.providerEventId, origin: 'juggler',
+                  provider_event_id: rResult.providerEventId, origin: JUGGLER_ORIGIN,
                   last_pushed_hash: taskHash(rTask),
                   last_user_hash: userHash(rTask),
                   last_pulled_hash: rNorm ? pAdapter2.eventHash(rNorm) : null,
@@ -1563,7 +1564,7 @@ async function sync(req, res) {
                 });
                 ledgerInserts.push({
                   user_id: userId, provider: pid2, task_id: rTask.id,
-                  provider_event_id: null, origin: 'juggler',
+                  provider_event_id: null, origin: JUGGLER_ORIGIN,
                   last_pushed_hash: taskHash(rTask),
                   last_user_hash: userHash(rTask),
                   event_summary: rTask.text,
@@ -1597,7 +1598,7 @@ async function sync(req, res) {
               taskUpdates.push({ id: fTask.id, fields: { [eventIdCol]: result.providerEventId } });
               ledgerInserts.push({
                 user_id: userId, provider: pid2, task_id: fTask.id,
-                provider_event_id: result.providerEventId, origin: 'juggler',
+                provider_event_id: result.providerEventId, origin: JUGGLER_ORIGIN,
                 last_pushed_hash: taskHash(fTask),
                 last_user_hash: userHash(fTask),
                 last_pulled_hash: fNorm ? pAdapter2.eventHash(fNorm) : null,
@@ -1757,7 +1758,7 @@ async function sync(req, res) {
               provider: pid2,
               task_id: orphanMatch.id,
               provider_event_id: evId,
-              origin: 'juggler',
+              origin: JUGGLER_ORIGIN,
               last_pushed_hash: taskHash(orphanMatch),
               last_user_hash: userHash(orphanMatch),
               last_pulled_hash: pAdapter2.eventHash(newEvent),

@@ -20,7 +20,7 @@ var {
   seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes, getGCalToken, gcalApi
 } = require('./helpers/test-setup');
 var tasksWrite = require('../../src/lib/tasks-write');
-var { makeTask, makeGCalEvent, deleteGCalEvent } = require('./helpers/test-fixtures');
+var { makeTask, makeGCalEvent, makeLedgerRow, deleteGCalEvent } = require('./helpers/test-fixtures');
 var { getGCalEvent, waitForPropagation } = require('./helpers/api-helpers');
 
 var GCAL_ONLY = { msft_cal_refresh_token: null, apple_cal_username: null, apple_cal_password: null, apple_cal_server_url: null, apple_cal_calendar_url: null };
@@ -191,6 +191,47 @@ describe('Sync Ingest-Only Mode', () => {
     var gcalEvent = await getGCalEvent(gcalToken, event.id);
     expect(gcalEvent).toBeTruthy();
     expect(gcalEvent.summary).toBe('Test Event Ingest No Pushback');
+  }));
+
+  test('juggler-origin task not clobbered in ingest-only', skipIfNoDB(async () => {
+    if (!hasGCalCredentials()) return;
+    user = await seedTestUser(GCAL_ONLY);
+    await setIngestOnly();
+
+    // Create a real GCal event to give the sync something to find.
+    var event = await makeGCalEvent(gcalToken, {
+      summary: 'MCP-created task mirror',
+      start: { dateTime: tomorrowISO(9, 0), timeZone: 'America/New_York' },
+      end: { dateTime: tomorrowEndISO(9, 0, 30), timeZone: 'America/New_York' }
+    });
+    createdGCalEventIds.push(event.id);
+    await waitForPropagation(1000);
+
+    // Create a juggler-origin task (simulating an MCP-created task that was pushed).
+    var task = await makeTask({
+      text: 'MCP-created task mirror',
+      when: 'morning',
+      placement_mode: 'anytime',
+      scheduled_at: tomorrow(9, 0),
+      dur: 30
+    });
+
+    // Ledger row: origin defaults to 'juggler' — ingest-only sync must not overwrite scheduling fields.
+    await makeLedgerRow({
+      task_id: task.id,
+      provider_event_id: event.id,
+      status: 'active',
+      event_summary: task.text
+    });
+
+    var req = mockReq(user);
+    var res = mockRes();
+    await sync(req, res);
+
+    var taskAfter = await db('tasks_v').where('id', task.id).first();
+    // when must remain 'morning' — ingest-only must not overwrite juggler-origin scheduling.
+    expect(taskAfter.when).toBe('morning');
+    expect(taskAfter.placement_mode).toBe('anytime');
   }));
 
   test('conflict: provider always wins', skipIfNoDB(async () => {

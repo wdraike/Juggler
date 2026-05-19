@@ -40,11 +40,24 @@ In both cases: push juggler state to provider, log `conflict_juggler`.
 
 ---
 
-## UC-3: Ingest-Only Provider Events → Tasks
+## UC-3: Ingest-Only Mode
 
-**Trigger:** Provider event arrives with no matching juggler task.
+### UC-3a: New ingest-only event → task creation
 
-**Flow:** Creates a new juggler task from the event. Sets `placement_mode` based on event type (all-day, reminder/transparent, or regular).
+**Trigger:** Provider event arrives on an ingest-only calendar with no matching juggler task.
+
+**Flow:** Creates a new juggler task from the event. Sets `placement_mode` based on event type (all-day, reminder/transparent, or regular). Ledger row written with `origin='juggler'`.
+
+### UC-3b: Existing task update from ingest-only event
+
+**Trigger:** Provider event matches an existing juggler task via the ledger.
+
+**Rules:**
+- If `task.status` is terminal (done/cancel/skip/pause) → skip, never overwrite completed tasks.
+- If `ledger.origin === 'juggler'` (task was created by Juggler/MCP and mirrored to the calendar) → skip, Juggler owns the scheduling fields. Overwriting with `when='fixed'` would corrupt the task's placement.
+- Otherwise → pull event fields into task, set `when='fixed'`, increment `pulled` counter.
+
+**Key invariant:** Juggler-origin tasks on ingest-only calendars are treated as Juggler-owned, not ingest-owned. The calendar reflection is informational; Juggler's scheduler controls when they run.
 
 ---
 

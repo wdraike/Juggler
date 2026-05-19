@@ -69,7 +69,7 @@ The calendar is a **reflection** of Strive's schedule, not an input to it. Event
 
 This is a deliberate trade-off. The current "bidirectional" behavior sounds nice but creates the feedback loop that causes drift. Users will experience one-way sync (Strive → calendar) and can always re-ingest events they add in the calendar.
 
-Exception: **Ingest-only mode** (per-calendar setting). Events from an ingest-only calendar always win and their tasks are always `when=fixed`. This is the existing semantics; it stays.
+Exception: **Ingest-only mode** (per-calendar setting). Events from an ingest-only calendar always win and their tasks are always `when=fixed`. This is the existing semantics; it stays. Sub-exception: tasks whose ledger `origin='juggler'` (created by Juggler/MCP and mirrored to the calendar) are **never** overwritten by the ingest-only pull — Juggler owns their scheduling fields.
 
 ### 3. Sync push is deterministic
 
@@ -101,7 +101,7 @@ Remove everything that mutates `tasks` except `gcal_event_id` / `msft_event_id` 
 - Delete the promotion-to-fixed logic entirely from all three adapters (`gcal.adapter.js` lines 164-194, `msft.adapter.js` lines 235-267, `apple.adapter.js` lines 227-252).
 - Remove `prev_when` writes.
 - In Phase 2, for existing linked tasks: always push task → event via batch update. No hash comparison, no conflict resolution.
-- Keep ingest-only mode exception: for ingest-only providers, always pull event → task (existing behavior).
+- Keep ingest-only mode exception: for ingest-only providers, always pull event → task (existing behavior). Preserve the juggler-origin sub-exception: skip tasks where `ledger.origin='juggler'` (Juggler owns their scheduling fields).
 
 **File: `runSchedule.js`**
 
