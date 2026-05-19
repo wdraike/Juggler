@@ -1111,7 +1111,7 @@ export default function DailyView({
             return (
               <div key={'bg-' + i} style={{
                 position: 'absolute', top: i * hourHeight, left: 0, right: 0,
-                height: hourHeight, borderBottom: '1px solid ' + theme.border,
+                height: hourHeight, borderBottom: '1px solid ' + theme.gridLine,
                 background: locBgTint(locId)
               }} />
             );
@@ -1275,7 +1275,7 @@ export default function DailyView({
                     )}
                     <div style={{
                       position: 'absolute', top: 0, left: GUTTER_W, right: 0,
-                      borderTop: '1px dashed ' + theme.border + '50', height: 0
+                      borderTop: '1px dashed ' + theme.gridLineSub, height: 0
                     }} />
                   </div>
                 );

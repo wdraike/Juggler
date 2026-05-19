@@ -1286,48 +1286,25 @@ export default function SCurveTimeline(props) {
 
       {/* Task cards — render lower cards first so upper cards sit on top and are clickable */}
       {cards.slice().sort(function (a, b) { return b.cardY - a.cardY; }).map(function (c) {
-        var bc = c.blockColor || theme.badgeText;
         return (
-          <div key={c.item.key || c.item.task.id} onClick={function () { onExpand(c.item.task.id); }} style={{
+          <div key={c.item.key || c.item.task.id} style={{
             position: 'absolute',
             left: c.cardX, top: c.cardY,
             width: cW, height: cH,
-            boxSizing: 'border-box',
-            zIndex: 20,
-            borderRadius: 6,
-            overflow: 'hidden',
-            cursor: 'pointer',
-            border: '1px solid ' + theme.border
+            zIndex: 20
           }}>
-            <div style={{
-              position: 'absolute', left: 0, top: 0, right: 0, bottom: 0,
-              background: theme.bgCard,
-              pointerEvents: 'none'
-            }} />
-            <div style={{
-              position: 'absolute', left: 0, top: 0, bottom: 0,
-              width: 4,
-              background: bc,
-              opacity: 0.75,
-              pointerEvents: 'none'
-            }} />
-            <div style={{
-              position: 'relative',
-              paddingLeft: 8, paddingRight: 6,
-              height: '100%'
-            }}>
-              <ScheduleCard
-                item={c.item}
-                status={statuses[c.item.task.id] || ''}
-                onStatusChange={function (val) { onStatusChange(c.item.task.id, val); }}
-                onDelete={onDelete ? function() { onDelete(c.item.task.id); } : null}
-                darkMode={darkMode}
-                isBlocked={blockedTaskIds && blockedTaskIds.has(c.item.task.id)}
-                isMobile={isMobile}
-                layoutMode={layoutMode}
-                cardHeight={cH}
-              />
-            </div>
+            <ScheduleCard
+              item={c.item}
+              status={statuses[c.item.task.id] || ''}
+              onStatusChange={function (val) { onStatusChange(c.item.task.id, val); }}
+              onDelete={onDelete ? function() { onDelete(c.item.task.id); } : null}
+              onExpand={function() { onExpand(c.item.task.id); }}
+              darkMode={darkMode}
+              isBlocked={blockedTaskIds && blockedTaskIds.has(c.item.task.id)}
+              isMobile={isMobile}
+              layoutMode={layoutMode}
+              cardHeight={cH}
+            />
           </div>
         );
       })}

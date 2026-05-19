@@ -60,7 +60,7 @@ app.use(cors({
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) !== -1) return callback(null, true);
     if (LOOPBACK_ORIGIN.test(origin) || origin.includes('localdev')) return callback(null, true);
-    if (process.env.CORS_ALLOW_ANY_ORIGIN === 'true') return callback(null, true);
+    if (process.env.CORS_ALLOW_ANY_ORIGIN === 'true' && process.env.NODE_ENV !== 'production') return callback(null, true);
     return callback(null, false);
   },
   credentials: true

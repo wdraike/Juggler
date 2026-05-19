@@ -79,7 +79,7 @@ function computeSchedulerHash() {
     path.join(__dirname, 'reconcileOccurrences.js'),
     path.join(__dirname, '..', '..', '..', 'shared', 'scheduler', 'expandRecurring.js')
   ];
-  var h = crypto.createHash('sha1');
+  var h = crypto.createHash('sha256');
   files.forEach(function(f) {
     try { h.update(fs.readFileSync(f)); }
     catch (e) { /* missing file — skip rather than fail startup */ }

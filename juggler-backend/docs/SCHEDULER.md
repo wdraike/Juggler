@@ -162,6 +162,8 @@ Three rules govern incomplete tasks whose scheduled time has passed:
 **Rule 1: One-off past-due tasks → P1 boost, reschedule within existing constraints, flag as past-due.**
 The task's priority is boosted to P1 and the scheduler tries to place it in its original `when` and `where` windows. If it can't fit, it goes to the issues log — the user decides whether to relax the constraints. The task is marked `_pastDue` for visual indication.
 
+Rule 1 is triggered by the **frontend nudge** (see §9 Triggers). The scheduler only sees past slots as occupied (`dayOcc` blocked up to `nowMins`) — once triggered it naturally places the task at the next free window after the current time.
+
 **Rule 2: Recurring past-due instances → unscheduled, no roll-forward.**
 A recurring instance that missed its assigned day is NOT rolled forward to a later day in the cycle window. It goes to the unscheduled/issues list with a `_pastDue` flag, and the user must mark it done or skipped to clear it. The next occurrence starts fresh on its own day. Rationale: rolling recurrings forward double-books the user and silently erodes habit cadence.
 
@@ -233,6 +235,20 @@ When `/api/weather` returns `{ refreshed: true }` (cache was stale and just upda
 - Manual "Run scheduler"
 - Task status flipped to done / skip / cancel
 - Queue poller runs every ~2 s; dirty users get processed
+- **Frontend nudge** — `POST /schedule/nudge` fired by the frontend when an incomplete task's scheduled end time passes (see below)
+
+#### Frontend nudge — time-based auto-reschedule
+
+The UI arms a timer (`armNudgeTimer` in `useTaskState.js`) whenever tasks load or the schedule changes. The timer fires shortly after the soonest incomplete task's end time (`scheduledAt + dur`) passes, triggering a scheduler re-run that moves the undone task to the next available slot.
+
+**Visibility gate:** If the tab is hidden when the timer fires, the nudge is held in `nudgePendingRef` and sent as soon as `visibilitychange` fires (tab comes back into focus). If the tab stays hidden for more than 15 minutes after the deadline, the nudge is dropped — the next mutation will retrigger the scheduler.
+
+**Why visibility-gated:** Prevents scheduler churn when the user is away from the app. No point rescheduling tasks no one is watching.
+
+**Implementation:**
+- `computeNextTaskEnd(tasks)` — finds soonest `scheduledAt + dur` across all incomplete (non-terminal) tasks with a future end time. Skips tasks with terminal status (`done`, `cancel`, `skip`, `pause`, `missed`) and tasks with no `scheduledAt` or `dur`.
+- `armNudgeTimer(nextEndMs)` — clears any existing timer, sets a new `setTimeout` for `nextEndMs`. Rearms on every `schedule:changed` SSE event and on mount.
+- `POST /schedule/nudge` — backend route that calls `enqueueScheduleRun(userId, 'frontend:task-end-nudge')`. Rate-limited by `schedulerLimiter`.
 
 ### 10. Safety — why repeated runs are cheap
 - Ordinal IDs (`masterId-N` for instances, `masterId-N-S` for split chunks) — date-agnostic, reusable across scheduler runs

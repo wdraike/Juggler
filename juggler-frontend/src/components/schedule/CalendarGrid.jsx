@@ -369,11 +369,23 @@ export default function CalendarGrid({
       {Array.from({ length: GRID_HOURS_COUNT }, function(_, i) {
         var hour = GRID_START + i;
         var locId = resolveLocationId(dateKey, hour, schedCfg, blocks);
-        return <div key={i} style={{
-          position: 'absolute', top: i * hourHeight, left: 0, right: 0,
-          height: hourHeight, borderBottom: '1px solid ' + theme.border,
-          background: locBgTint(locId)
-        }} />;
+        return (
+          <React.Fragment key={i}>
+            <div style={{
+              position: 'absolute', top: i * hourHeight, left: 0, right: 0,
+              height: hourHeight, borderBottom: '1px solid ' + theme.gridLine,
+              background: locBgTint(locId)
+            }} />
+            {hourHeight >= 30 && (
+              <div style={{
+                position: 'absolute', top: i * hourHeight + Math.floor(hourHeight / 2),
+                left: 0, right: 0, height: 0,
+                borderTop: '1px dashed ' + theme.gridLineSub,
+                pointerEvents: 'none'
+              }} />
+            )}
+          </React.Fragment>
+        );
       })}
 
       {/* Center strip */}

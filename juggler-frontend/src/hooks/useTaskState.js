@@ -14,6 +14,7 @@ import apiClient, { TZ_OVERRIDE_KEY, getAccessToken } from '../services/apiClien
 import { apiBase } from '../proxy-config';
 import { getBrowserTimezone, hydrateTaskTimezones, convertTimeForDisplay } from '../utils/timezone';
 import { parseTimeToMinutes } from '../scheduler/dateHelpers';
+import { isTerminalStatus } from '../state/constants';
 
 function getHydrationTimezone() {
   try {
@@ -396,15 +397,15 @@ export default function useTaskState() {
       } catch (e) { /* silently ignore */ }
     }
 
-    // Compute the soonest end time across all active tasks with a future scheduledAt
+    // Compute the soonest end time across all incomplete (non-terminal) tasks with a future scheduledAt
     function computeNextTaskEnd(tasks) {
       var now = Date.now();
       var soonest = null;
       tasks.forEach(function(t) {
-        if (t.status !== 'active') return;
+        if (isTerminalStatus(t.status)) return;
         if (!t.scheduledAt || !t.dur) return;
         var endMs = new Date(t.scheduledAt).getTime() + (t.dur * 60 * 1000);
-        if (endMs <= now) return;  // already past
+        if (endMs <= now) return;
         if (soonest === null || endMs < soonest) soonest = endMs;
       });
       return soonest;  // ms since epoch, or null

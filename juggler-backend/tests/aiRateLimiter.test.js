@@ -210,3 +210,170 @@ describe('AI rate limiter — shared RedisStore counts across instances', functi
     expect(hitCount).toBeGreaterThanOrEqual(2);
   });
 });
+
+// ── Test 4: keyGenerator uses req.user.id (source-level assertion) ──────────
+
+describe('AI rate limiter — keyGenerator uses req.user.id', function() {
+  test('ai.routes.js keyGenerator reads req.user.id (not req.ip)', function() {
+    var aiRoutesPath = path.join(__dirname, '../src/routes/ai.routes.js');
+    var src = fs.readFileSync(aiRoutesPath, 'utf8');
+
+    // Must reference req.user.id (or req.user?.id) as the key
+    expect(src).toMatch(/req\.user(\?\.|\.)id/);
+
+    // Must NOT use req.ip as the primary key — per-user isolation requires user id
+    // (anon fallback is acceptable but should never be the primary key expression)
+    var keyGenMatch = src.match(/keyGenerator\s*:\s*function[^}]+}/s) ||
+                      src.match(/keyGenerator\s*[:(][^}]+}/s);
+    if (keyGenMatch) {
+      // The key generator must reference user id before any ip fallback
+      var keyGenBody = keyGenMatch[0];
+      var userIdPos = keyGenBody.search(/req\.user(\?\.|\.)id/);
+      var ipPos = keyGenBody.indexOf('req.ip');
+      expect(userIdPos).toBeGreaterThanOrEqual(0);
+      // ip may appear as fallback but only after the user id check
+      if (ipPos >= 0) {
+        expect(userIdPos).toBeLessThan(ipPos);
+      }
+    }
+  });
+});
+
+// ── Test 5: 3rd request within window → 429 with exact error message ─────────
+
+describe('AI rate limiter — HTTP 429 on 3rd request in window', function() {
+  var _app;
+
+  beforeAll(function() {
+    jest.resetModules();
+
+    // Set up all required mocks before requiring the app
+    jest.doMock('ioredis', function() {
+      return function IORedisMock() {
+        return { status: 'connecting', call: jest.fn(), on: jest.fn(function() { return this; }) };
+      };
+    });
+
+    delete process.env.REDIS_URL;
+
+    // Mock db
+    var mockDb = (function() {
+      var chain = jest.fn(function() { return chain; });
+      ['where', 'whereRaw', 'whereNotNull', 'whereNull', 'whereNot', 'whereNotIn',
+       'whereIn', 'orWhere', 'orderBy', 'orderByRaw', 'limit', 'offset',
+       'join', 'leftJoin', 'count', 'max', 'clearSelect', 'clearOrder',
+       'groupBy', 'having'].forEach(function(m) { chain[m] = jest.fn(function() { return chain; }); });
+      chain.select = jest.fn(function() { return Promise.resolve([]); });
+      chain.first = jest.fn(function() { return Promise.resolve({ cnt: 0 }); });
+      chain.insert = jest.fn(function() { return Promise.resolve(); });
+      chain.update = jest.fn(function() { return Promise.resolve(1); });
+      chain.del = jest.fn(function() { return Promise.resolve(1); });
+      chain.then = jest.fn(function(resolve) { return Promise.resolve([]).then(resolve); });
+      chain.catch = jest.fn(function(fn) { return Promise.resolve([]).catch(fn); });
+      chain.raw = jest.fn(function(s) { return s; });
+      chain.transaction = jest.fn(function(cb) { return cb(chain); });
+      chain.fn = { now: function() { return 'NOW'; } };
+      return chain;
+    }());
+    jest.doMock('../src/db', function() { return mockDb; });
+
+    jest.doMock('../src/middleware/jwt-auth', function() { return {
+      loadJWTSecrets: jest.fn(),
+      authenticateJWT: function(req, res, next) {
+        var auth = req.headers.authorization;
+        if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Auth required' });
+        req.user = { id: req.headers['x-test-user-id'] || 'rl-user-1', email: 'test@test.com' };
+        req.auth = { plans: {} };
+        next();
+      },
+      verifyToken: jest.fn()
+    }; });
+
+    jest.doMock('../src/middleware/plan-features.middleware', function() { return {
+      resolvePlanFeatures: function(req, res, next) {
+        req.planId = 'enterprise';
+        req.planFeatures = { limits: { active_tasks: -1 }, calendar: { max_providers: -1 }, scheduling: {}, tasks: {}, ai: { natural_language_commands: true } };
+        next();
+      },
+      PRODUCT_ID: 'juggler', refreshPlanFeatures: jest.fn(), invalidateUserPlanCache: jest.fn(), getCachedPlanFeatures: jest.fn()
+    }; });
+
+    jest.doMock('../src/lib/redis', function() { return { getClient: jest.fn().mockReturnValue(null), invalidateTasks: jest.fn().mockResolvedValue(), invalidateConfig: jest.fn().mockResolvedValue(), get: jest.fn().mockResolvedValue(null), set: jest.fn().mockResolvedValue(), del: jest.fn().mockResolvedValue() }; });
+
+    jest.doMock('../src/scheduler/scheduleQueue', function() { return { enqueueScheduleRun: jest.fn(), stopPollLoop: jest.fn() }; });
+    jest.doMock('../src/lib/sse-emitter', function() { return { emit: jest.fn(), addClient: jest.fn() }; });
+    jest.doMock('../src/lib/tasks-write', function() { return { insertTask: jest.fn().mockResolvedValue(), insertTasksBatch: jest.fn().mockResolvedValue(), archiveInstances: jest.fn().mockResolvedValue(), archiveCompletedInstances: jest.fn().mockResolvedValue(), resetRecurringInstances: jest.fn().mockResolvedValue(), updateTaskById: jest.fn().mockResolvedValue(1), deleteTaskById: jest.fn().mockResolvedValue(1), updateTasksWhere: jest.fn().mockResolvedValue(), deleteTasksWhere: jest.fn().mockResolvedValue(), deleteInstancesWhere: jest.fn().mockResolvedValue(), updateInstancesWhere: jest.fn().mockResolvedValue(), splitUpdateFields: jest.fn(function(f) { return f; }), isTemplate: jest.fn().mockReturnValue(false) }; });
+    jest.doMock('../src/lib/task-write-queue', function() { return { isLocked: jest.fn().mockResolvedValue(false), enqueueWrite: jest.fn().mockResolvedValue(), flushQueue: jest.fn().mockResolvedValue(), flushQueueInLock: jest.fn().mockResolvedValue(), splitFields: jest.fn(function(f) { return { schedulingFields: {}, nonSchedulingFields: f }; }), NON_SCHEDULING_FIELDS: [] }; });
+    jest.doMock('../src/middleware/entity-limits', function() { return { checkProjectLimit: function(q,r,n){n();}, checkLocationLimit: function(q,r,n){n();}, checkScheduleTemplateLimit: function(q,r,n){n();}, checkTaskOrRecurringLimit: function(q,r,n){n();}, checkBatchTaskLimits: function(q,r,n){n();}, checkToolLimit: function(q,r,n){n();}, countActiveTasks: jest.fn().mockResolvedValue(0), countRecurringTemplates: jest.fn().mockResolvedValue(0), countProjects: jest.fn().mockResolvedValue(0), countLocations: jest.fn().mockResolvedValue(0), countScheduleTemplates: jest.fn().mockResolvedValue(0) }; });
+    jest.doMock('../src/middleware/validate', function() { return { validate: function() { return function(q,r,n){n();}; } }; });
+    jest.doMock('../src/services/gemini-tracked-call', function() { return { trackedGeminiCall: jest.fn().mockResolvedValue({ text: JSON.stringify({ ops: [], msg: 'Done.' }) }) }; });
+    jest.doMock('../src/services/ai-usage-queue.service', function() { return { enqueue: jest.fn() }; });
+
+    // Do NOT mock rate-limit-store here — let the real MemoryStore accumulate hits
+    // so we can verify the 429 fires on the 3rd request.
+
+    _app = require('../src/app');
+  });
+
+  afterAll(function() {
+    jest.resetModules();
+    jest.unmock('ioredis');
+  });
+
+  test('returns 429 with exact rate-limit error message on 3rd request within 60s', async function() {
+    var supertest = require('supertest');
+    var userId = 'rl-user-3rd-test-' + Date.now(); // unique user to avoid bleed from other tests
+
+    function fireRequest() {
+      return supertest(_app)
+        .post('/api/ai/command')
+        .set('Authorization', 'Bearer valid-test-token')
+        .set('x-test-user-id', userId)
+        .send({ command: 'add a task', tasks: [] });
+    }
+
+    var res1 = await fireRequest();
+    expect(res1.status).toBe(200);
+
+    var res2 = await fireRequest();
+    expect(res2.status).toBe(200);
+
+    var res3 = await fireRequest();
+    expect(res3.status).toBe(429);
+    expect(res3.body.error).toBe('Too many AI requests. Max 2 per minute — try again shortly.');
+  });
+
+  test('per-user isolation — user A hitting limit does not block user B', async function() {
+    var supertest = require('supertest');
+    var userA = 'rl-user-A-' + Date.now();
+    var userB = 'rl-user-B-' + Date.now();
+
+    function fireAs(uid) {
+      return supertest(_app)
+        .post('/api/ai/command')
+        .set('Authorization', 'Bearer valid-test-token')
+        .set('x-test-user-id', uid)
+        .send({ command: 'add a task', tasks: [] });
+    }
+
+    // Exhaust user A's limit
+    await fireAs(userA);
+    await fireAs(userA);
+    var resA3 = await fireAs(userA);
+    expect(resA3.status).toBe(429);
+
+    // User B should still succeed on first request
+    var resB1 = await fireAs(userB);
+    expect(resB1.status).toBe(200);
+  });
+
+  test('unauthenticated request is rejected by JWT middleware before reaching rate limiter', async function() {
+    var supertest = require('supertest');
+
+    var res = await supertest(_app)
+      .post('/api/ai/command')
+      .send({ command: 'add a task' });
+    // JWT middleware fires before the rate limiter — must be 401, not 429
+    expect(res.status).toBe(401);
+  });
+});

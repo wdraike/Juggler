@@ -281,7 +281,7 @@ function eventHash(event) {
     event.isTransparent ? 'transparent' : 'opaque',
     event.isAllDay ? 'allday' : 'timed'
   ].join('|');
-  return crypto.createHash('md5').update(str).digest('hex');
+  return crypto.createHash('sha256').update(str).digest('hex');
 }
 
 function getEventIdColumn() {

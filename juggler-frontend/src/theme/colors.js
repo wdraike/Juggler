@@ -39,6 +39,8 @@ export const THEME_DARK = {
   muted2: '#6B7280',
   border: '#2E4A7A',
   borderLight: '#1E2D4A',
+  gridLine: '#3E5C8A',      // calendar hour lines — 2.5:1 on #0F1520
+  gridLineSub: '#2A3D5A',   // calendar sub-hour dashed lines — 1.4:1 on #0F1520
   accent: '#C8942A',
   accentHover: '#E8C878',
   success: '#2D6A4F',
@@ -94,6 +96,8 @@ export const THEME_LIGHT = {
   muted2: '#6B7280',
   border: '#E8E0D0',
   borderLight: '#F5F0E8',
+  gridLine: '#C8B49A',      // calendar hour lines — 1.8:1 on #F5F0E8
+  gridLineSub: '#DDD0BE',   // calendar sub-hour dashed lines — 1.3:1 on #F5F0E8
   accent: '#C8942A',
   accentHover: '#9E6B3B',
   success: '#2D6A4F',
