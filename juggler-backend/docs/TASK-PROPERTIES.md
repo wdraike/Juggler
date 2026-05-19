@@ -1,4 +1,20 @@
+---
+type: design
+service: juggler
+status: active
+last_updated: 2026-05-19
+tags:
+  - type/design
+  - service/juggler
+  - status/active
+  - task-management
+  - scheduler
+  - recurrence
+---
+
 # Task Properties — Scheduler Reference
+
+**Last Updated:** 2026-05-19
 
 How every property on a task object affects scheduling.
 

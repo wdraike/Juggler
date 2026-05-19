@@ -1,4 +1,20 @@
+---
+type: design
+service: juggler
+status: active
+last_updated: 2026-05-19
+tags:
+  - type/design
+  - service/juggler
+  - status/active
+  - scheduler
+  - task-management
+  - recurrence
+---
+
 # Scheduler — Design & Test Cases
+
+**Last Updated:** 2026-05-19
 
 ## Status
 **Current design.** Single source of truth for the scheduler placement algorithm and its test coverage. Consolidates the earlier `SCHEDULER-PRIORITY-REDESIGN.md`, `SCHEDULER-DEPENDENCY-REDESIGN.md`, and `SCHEDULER-TEST-CASES.md` drafts.

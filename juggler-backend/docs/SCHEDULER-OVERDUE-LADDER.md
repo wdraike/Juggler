@@ -1,4 +1,19 @@
+---
+type: design
+service: juggler
+status: active
+last_updated: 2026-05-19
+tags:
+  - type/design
+  - service/juggler
+  - status/active
+  - scheduler
+  - task-management
+---
+
 # Scheduler overdue-placement ladder (#23 review)
+
+**Last Updated:** 2026-05-19
 
 ## Context
 

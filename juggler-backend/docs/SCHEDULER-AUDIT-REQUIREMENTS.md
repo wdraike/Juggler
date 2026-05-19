@@ -1,4 +1,19 @@
+---
+type: design
+service: juggler
+status: active
+last_updated: 2026-05-19
+tags:
+  - type/design
+  - service/juggler
+  - status/active
+  - scheduler
+  - task-management
+---
+
 # Scheduler Requirements Audit
+
+**Last Updated:** 2026-05-19
 
 Every requirement from SCHEDULER.md traced to implementation.
 - **PASS** = code implements the requirement correctly

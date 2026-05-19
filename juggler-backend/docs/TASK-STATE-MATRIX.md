@@ -1,4 +1,19 @@
+---
+type: design
+service: juggler
+status: active
+last_updated: 2026-05-19
+tags:
+  - type/design
+  - service/juggler
+  - status/active
+  - task-management
+  - scheduler
+---
+
 # Task & Habit State Matrix
+
+**Last Updated:** 2026-05-19
 
 > Complete reference for how every combination of task type, scheduling mode,
 > and user action maps to UI controls and scheduler behavior.

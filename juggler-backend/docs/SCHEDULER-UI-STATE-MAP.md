@@ -1,4 +1,20 @@
+---
+type: design
+service: juggler
+status: active
+last_updated: 2026-05-19
+tags:
+  - type/design
+  - service/juggler
+  - status/active
+  - scheduler
+  - task-management
+  - ui
+---
+
 # Scheduler UI → State Map
+
+**Last Updated:** 2026-05-19
 
 Maps every UI control in the task editor (WhenSection) to the fields written to the DB
 and the resulting scheduler behavior. Verified against `WhenSection.jsx`, `TaskEditForm.jsx`,

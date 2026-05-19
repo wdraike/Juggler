@@ -1,4 +1,20 @@
+---
+type: design
+service: juggler
+status: superseded
+last_updated: 2026-05-19
+tags:
+  - type/design
+  - service/juggler
+  - status/superseded
+  - scheduler
+---
+
 # Scheduler v2 — Unified Spec
+
+**Last Updated:** 2026-05-19
+
+> **Status:** SUPERSEDED — V2 design folded into [SCHEDULER.md](../SCHEDULER.md). Retained for historical context.
 
 **Status:** Draft for user review. Covers Bucket 4 issues #23, #26, #31, #38, #39, plus #13 bundled from Bucket 3.
 
