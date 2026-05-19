@@ -147,12 +147,10 @@ for (const device of DEVICES) {
     // ── 6. Tablet/Desktop: inline filter pills visible ─────────────
     if (!device.mobile && device.width >= 744) {
       test('tablet/desktop — inline filter pills visible', async ({ page }) => {
-        // On wider screens, filter pills should be inline
-        const openPill = page.locator('button:has-text("Open")');
-        const allPill = page.locator('button:has-text("All")');
-        const hasOpen = await openPill.first().isVisible().catch(() => false);
-        const hasAll = await allPill.first().isVisible().catch(() => false);
-        expect(hasOpen || hasAll).toBe(true);
+        // On wider screens, filter is a select dropdown (not buttons)
+        const filterSelect = page.locator('select').first();
+        const hasFilter = await filterSelect.first().isVisible().catch(() => false);
+        expect(hasFilter).toBe(true);
       });
     }
 
