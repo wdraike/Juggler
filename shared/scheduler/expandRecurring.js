@@ -217,15 +217,15 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         Object.keys(pendingKeys).forEach(function(k) { picked[k] = true; });
 
         // Fill policy (#26). Per-task setting on the recurrence:
-        //   'keep'     (default) — once any instance exists in the cycle,
-        //               skipped slots are NOT refilled. The cycle is a
-        //               pattern the user already touched; respect it.
-        //               Prevents the "skip → new pick → skip → loop" that
-        //               makes a habit feel pushy.
-        //   'backfill' — aim to hit the tpc target. Count fulfilled
-        //               instances (done/cancel/pending/wip) toward the
-        //               budget; skip is treated as replaceable.
-        //               needed = tpc − fulfilled.
+        //   'keep'     (default) — any skip in the cycle freezes new picks;
+        //               remaining budget slots are filled up to tpc when no
+        //               skip exists. Prevents "skip → refill → skip → loop"
+        //               while still scheduling the remaining target sessions.
+        //               needed = skip? 0 : max(0, tpc − all_booked)
+        //   'backfill' — aim to hit the tpc target. Count only fulfilled
+        //               instances (done/cancel/pending/wip) toward the budget;
+        //               skip is treated as replaceable.
+        //               needed = tpc − fulfilled (non-skip booked).
         var fillPolicy = (r && r.fillPolicy === 'backfill') ? 'backfill' : 'keep';
         var slotsNeeded;
         if (fillPolicy === 'backfill') {
@@ -239,7 +239,11 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
           });
           slotsNeeded = Math.max(0, tpc - fulfilledInCycle);
         } else {
-          slotsNeeded = existingInCycle === 0 ? tpc : 0;
+          var hasSkipInCycle = cycleCandidates.some(function(cd) {
+            return bookedKeys[cd.key] &&
+                   (instanceStatusBySourceDate[src.id + '|' + cd.key] || '') === 'skip';
+          });
+          slotsNeeded = hasSkipInCycle ? 0 : Math.max(0, tpc - existingInCycle);
         }
 
         // Pick pool: candidates that are not already booked (neither
