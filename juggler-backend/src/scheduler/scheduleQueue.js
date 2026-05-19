@@ -328,12 +328,15 @@ async function pollLoop() {
   }));
 }
 
-// Start the poll loop
-var pollInterval = setInterval(function() {
-  pollLoop().catch(function(err) {
-    console.error('[SCHED-QUEUE] poll loop error:', err);
-  });
-}, POLL_MS);
+// Start the poll loop — disabled in test environment
+var pollInterval;
+if (process.env.NODE_ENV !== 'test') {
+  pollInterval = setInterval(function() {
+    pollLoop().catch(function(err) {
+      console.error('[SCHED-QUEUE] poll loop error:', err);
+    });
+  }, POLL_MS);
+}
 
 // Allow graceful shutdown
 function stopPollLoop() {

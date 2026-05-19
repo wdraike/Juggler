@@ -172,17 +172,21 @@ async function withLock(userId, fn, opts) {
 }
 
 // ── background sweep using MySQL clock ─────────────────────────────
+// Disabled in test environment — integration tests manage their own DB state
 
-var sweepTimer = setInterval(function() {
-  db.raw('DELETE FROM sync_locks WHERE expires_at <= NOW()')
-    .then(function(result) {
-      var count = result[0].affectedRows || 0;
-      if (count > 0) console.warn('[sync-lock] Swept ' + count + ' expired lock(s)');
-    })
-    .catch(function(err) {
-      console.error('[sync-lock] Sweep error:', err.message);
-    });
-}, SWEEP_INTERVAL);
-sweepTimer.unref();
+var sweepTimer;
+if (process.env.NODE_ENV !== 'test') {
+  sweepTimer = setInterval(function() {
+    db.raw('DELETE FROM sync_locks WHERE expires_at <= NOW()')
+      .then(function(result) {
+        var count = result[0].affectedRows || 0;
+        if (count > 0) console.warn('[sync-lock] Swept ' + count + ' expired lock(s)');
+      })
+      .catch(function(err) {
+        console.error('[sync-lock] Sweep error:', err.message);
+      });
+  }, SWEEP_INTERVAL);
+  sweepTimer.unref();
+}
 
 module.exports = { withSyncLock, withLock, acquireLock, releaseLock, refreshLock, isLocked };
