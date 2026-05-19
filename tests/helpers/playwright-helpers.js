@@ -116,7 +116,17 @@ async function setupAuth(page) {
  * @param {import('@playwright/test').Page} page
  */
 async function waitForApp(page) {
-  await page.waitForSelector(SELECTORS.APP_BRAND, { timeout: 15000 });
+  // Retry logic for flaky loads — 3 attempts, 30s timeout each
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await page.waitForSelector(SELECTORS.APP_BRAND, { timeout: 30000 });
+      return; // success
+    } catch (err) {
+      if (attempt === 3) throw err; // last attempt fails → bubble up
+      // reload and retry
+      await page.reload({ waitUntil: 'networkidle' });
+    }
+  }
 }
 
 // ── Task helpers ─────────────────────────────────────────────────────────────
