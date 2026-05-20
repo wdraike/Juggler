@@ -421,6 +421,7 @@ function rowToTask(row, timezone, sourceMap) {
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
     recurStart: row.recur_start || null,
     recurEnd: row.recur_end || null,
+    rollingAnchor: row.rolling_anchor || null,
     disabledAt: row.disabled_at ? scheduledAtToISO(row.disabled_at) : null,
     disabledReason: row.disabled_reason || null,
     // Ordinals from task_instances. Undefined for template rows (which don't
