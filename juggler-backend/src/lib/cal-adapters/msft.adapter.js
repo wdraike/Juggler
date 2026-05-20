@@ -249,7 +249,7 @@ function applyEventToTaskFields(event, tz, currentTask) {
   }
 
   if (event.isTransparent) {
-    fields.placementMode = PLACEMENT_MODES.MARKER;
+    fields.placementMode = PLACEMENT_MODES.REMINDER;
   }
 
   if (!isAllDay) {
@@ -262,8 +262,8 @@ function applyEventToTaskFields(event, tz, currentTask) {
     }
   }
 
-  if (!event.isTransparent && currentTask?.placement_mode === PLACEMENT_MODES.MARKER) {
-    fields.placementMode = PLACEMENT_MODES.FLEXIBLE;
+  if (!event.isTransparent && currentTask?.placement_mode === PLACEMENT_MODES.REMINDER) {
+    fields.placementMode = PLACEMENT_MODES.ANYTIME;
   }
 
   return fields;

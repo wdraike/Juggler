@@ -1857,7 +1857,7 @@ async function sync(req, res) {
             status: '',
             when: newEvent.isAllDay ? 'allday' : (isReminder ? '' : 'fixed'),
             date_pinned: newEvent.isAllDay ? 0 : 1,
-            placement_mode: newEvent.isTransparent ? PLACEMENT_MODES.MARKER : (newEvent.isAllDay ? PLACEMENT_MODES.FLEXIBLE : (isReminder ? PLACEMENT_MODES.PINNED_DATE : PLACEMENT_MODES.FIXED)),
+            placement_mode: newEvent.isTransparent ? PLACEMENT_MODES.REMINDER : (newEvent.isAllDay ? PLACEMENT_MODES.ALL_DAY : (isReminder ? PLACEMENT_MODES.REMINDER : PLACEMENT_MODES.FIXED)),
             [eventIdCol]: newEvent.id
           };
           if (newEvent.description) {

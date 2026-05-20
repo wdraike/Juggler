@@ -101,7 +101,7 @@ async function insertTask(taskData) {
     recurring: taskData.recurring ? 1 : 0,
     split: taskData.split ? 1 : 0,
     flex_when: taskData.flexWhen ? 1 : 0,
-    placement_mode: taskData.placementMode || 'flexible',
+    placement_mode: taskData.placementMode || 'anytime',
     location: JSON.stringify(taskData.location || []),
     tools: JSON.stringify(taskData.tools || []),
     depends_on: JSON.stringify(taskData.dependsOn || []),

@@ -69,11 +69,11 @@ afterEach(async () => {
     return actual.acquireLock(userId);
   });
   jest.restoreAllMocks();
-  await cleanupTestData();
+  if (await isDbAvailable()) await cleanupTestData();
 });
 
 afterAll(async () => {
-  await destroyTestUser();
+  if (await isDbAvailable()) await destroyTestUser();
   await db.destroy();
 });
 

@@ -9,8 +9,8 @@ const { handleWebhook } = require('../controllers/billing-webhooks.controller');
 // This matches what payment-service signs on the sending side.
 const FRESHNESS_WINDOW_MS = 5 * 60 * 1000;
 function verifySignature(req, res, next) {
-  var sig = req.headers['x-billing-signature'];
-  var secret = process.env.BILLING_WEBHOOK_SECRET || process.env.INTERNAL_SERVICE_KEY;
+  const sig = req.headers['x-billing-signature'];
+  const secret = process.env.BILLING_WEBHOOK_SECRET || process.env.INTERNAL_SERVICE_KEY;
 
   if (!secret) {
     console.error('[billing-webhook] No BILLING_WEBHOOK_SECRET or INTERNAL_SERVICE_KEY configured — cannot verify webhooks');
@@ -21,20 +21,20 @@ function verifySignature(req, res, next) {
     return res.status(401).json({ error: 'Missing X-Billing-Signature header' });
   }
 
-  var rawBody = req.rawBody;
+  const rawBody = req.rawBody;
   if (!rawBody) {
     return res.status(500).json({ error: 'Internal: rawBody unavailable' });
   }
-  var expectedSig = 'sha256=' + crypto
+  const expectedSig = 'sha256=' + crypto
     .createHmac('sha256', secret)
     .update(rawBody)
     .digest('hex');
 
-  // Use timing-safe comparison to prevent timing attacks
+  // Hash both sides to equal length so timingSafeEqual gets no length side-channel.
   try {
-    var sigBuf = Buffer.from(sig);
-    var expectedBuf = Buffer.from(expectedSig);
-    if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
+    const sigHash = crypto.createHash('sha256').update(Buffer.from(sig)).digest();
+    const expectedHash = crypto.createHash('sha256').update(Buffer.from(expectedSig)).digest();
+    if (!crypto.timingSafeEqual(sigHash, expectedHash)) {
       return res.status(401).json({ error: 'Invalid signature' });
     }
   } catch {
@@ -44,7 +44,7 @@ function verifySignature(req, res, next) {
   // Replay protection: payment-service puts a `timestamp` in the signed body
   // (notification.service.js:59). Reject anything outside the freshness window.
   if (req.body && typeof req.body.timestamp === 'string') {
-    var ts = Date.parse(req.body.timestamp);
+    const ts = Date.parse(req.body.timestamp);
     if (!Number.isNaN(ts) && Math.abs(Date.now() - ts) > FRESHNESS_WINDOW_MS) {
       return res.status(401).json({ error: 'Webhook timestamp outside freshness window' });
     }

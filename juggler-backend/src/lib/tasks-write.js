@@ -322,7 +322,7 @@ async function getOrCreateArchivedMasterId(dbOrTrx, userId) {
     text: ARCHIVED_TEXT,
     pri: 'P4',
     recurring: 0,
-    flex_when: 0, placement_mode: PLACEMENT_MODES.FLEXIBLE,
+    flex_when: 0, placement_mode: PLACEMENT_MODES.ANYTIME,
     dur: 30,
     created_at: dbOrTrx.fn.now(),
     updated_at: dbOrTrx.fn.now()

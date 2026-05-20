@@ -425,11 +425,13 @@ describe('Full pipeline: rowToTask → scheduler', () => {
       time_flex: 60,
       dur: 30,
       preferred_time_mins: 720, // 12:00 PM
+      placement_mode: 'time_window', // required for preferred_time_mins scheduling path
     });
     var instance = makeInstanceRow('ht_lunch_pipe', {
       id: 'rc_lunch_pipe_44',
       date: '2026-04-04',
       scheduled_at: new Date('2026-04-04T04:00:00Z'), // midnight ET
+      placement_mode: 'time_window', // required for preferred_time_mins scheduling path
     });
 
     var srcMap = {}; srcMap['ht_lunch_pipe'] = template;

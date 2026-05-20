@@ -23,11 +23,15 @@ var {
 
 afterEach(async () => {
   jest.restoreAllMocks();
-  await destroyTestUser();
+  if (await isDbAvailable()) {
+    await destroyTestUser();
+  }
 });
 
 afterAll(async () => {
-  await destroyTestUser();
+  if (await isDbAvailable()) {
+    await destroyTestUser();
+  }
   await db.destroy();
 });
 

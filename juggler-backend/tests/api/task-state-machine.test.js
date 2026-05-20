@@ -549,7 +549,10 @@ describe('SM-24: allDay flag round-trip through task update', () => {
     expect(res.status).toBe(200);
   });
 
-  test('allDay=true results in when=allday being written', async () => {
+  test('allDay=true results in placement_mode=all_day being written', async () => {
+    // After the placement_mode enum redesign (migration 20260518000100),
+    // allDay:true writes placement_mode='all_day' rather than when='allday'.
+    // The when column is no longer the canonical all-day signal.
     const task = makeTask({ id: 'sm24-write', when: '', scheduled_at: '2026-05-15 00:00:00' });
     resolveQueue.push(task); // existing first()
     resolveQueue.push([]);   // existing ledger select()
@@ -561,8 +564,8 @@ describe('SM-24: allDay flag round-trip through task update', () => {
       .send({ text: 'SM24 allday test', allDay: true });
 
     const tasksWrite = require('../../src/lib/tasks-write');
-    // At least one updateTaskById call should contain when='allday'
-    const allDayCall = tasksWrite.updateTaskById.mock.calls.find(c => c[2] && c[2].when === 'allday');
+    // At least one updateTaskById call should contain placement_mode='all_day'
+    const allDayCall = tasksWrite.updateTaskById.mock.calls.find(c => c[2] && c[2].placement_mode === 'all_day');
     expect(allDayCall).toBeDefined();
   });
 });

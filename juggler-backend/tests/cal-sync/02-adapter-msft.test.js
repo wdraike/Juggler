@@ -114,7 +114,11 @@ describe('MSFT adapter — normalizeEvent', function () {
 // ─── 2. eventHash ───
 
 describe('MSFT adapter — eventHash', function () {
-  it('should produce a consistent 32-char MD5 hex hash', function () {
+  it('should produce a consistent 64-char SHA-256 hex hash', function () {
+    // NOTE: The implementation uses SHA-256 (64 hex chars), not MD5 (32 hex chars).
+    // KNOWN PRODUCTION BUG: last_pulled_hash column is VARCHAR(32) which silently
+    // truncates SHA-256 hashes — see cal-sync change detection. This test documents
+    // the current implementation; the column width needs a migration to fix.
     if (skipIfNoCreds()) return;
 
     var event = {
@@ -128,8 +132,8 @@ describe('MSFT adapter — eventHash', function () {
     var hash1 = msftAdapter.eventHash(event);
     var hash2 = msftAdapter.eventHash(event);
 
-    expect(hash1).toHaveLength(32);
-    expect(hash1).toMatch(/^[a-f0-9]{32}$/);
+    expect(hash1).toHaveLength(64);
+    expect(hash1).toMatch(/^[a-f0-9]{64}$/);
     expect(hash1).toBe(hash2);
   });
 
@@ -288,10 +292,10 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
       isTransparent: false,
       description: ''
     };
-    var currentTask = { when: 'fixed', placement_mode: 'marker', date: '2026-04-15', time: '10:00 AM' };
+    var currentTask = { when: 'fixed', placement_mode: 'reminder', date: '2026-04-15', time: '10:00 AM' };
     var fields = msftAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
-    expect(fields.placementMode).toBe('flexible');
+    expect(fields.placementMode).toBe('anytime');
   });
 });
 

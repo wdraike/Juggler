@@ -140,6 +140,11 @@ function computeDurationMinutes(start, end) {
  * user edits (task renamed, notes changed) from scheduler rescheduling. Stored
  * as last_user_hash on cal_sync_ledger; NULL on legacy rows suppresses the
  * tasksNeedingReCreate path until a fresh push populates it.
+ *
+ * MD5 is intentional here — this is a change-detection hash, not a security
+ * primitive. MD5 is ~2x faster than SHA-256 and the 32-char output fits the
+ * cal_sync_ledger VARCHAR column with room to spare. Collision resistance beyond
+ * 2^64 is irrelevant for calendar-diff purposes.
  */
 function userHash(task) {
   var str = [
