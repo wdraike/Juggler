@@ -14,6 +14,7 @@ const { PLACEMENT_MODES } = require('../../lib/placementModes');
 const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
 const { isLocked, enqueueWrite, splitFields } = require('../../lib/task-write-queue');
 const tasksWrite = require('../../lib/tasks-write');
+const { isRollingMaster, computeRollingAnchor } = require('../../lib/rolling-anchor');
 
 // Shared Zod fields for task input (used by create_task, create_tasks, update_task)
 var taskInputFields = {
@@ -368,6 +369,23 @@ function registerTaskTools(server, userId) {
       var update = { status: status || '', updated_at: db.fn.now() };
 
       await tasksWrite.updateTaskById(db, id, update, userId);
+
+      // Rolling anchor update
+      var _mcpMasterId = existing.master_id || existing.source_id;
+      if (_mcpMasterId && ['done', 'skip', 'missed'].includes(status)) {
+        var _mcpMaster = await db('task_masters').where({ id: _mcpMasterId, user_id: userId }).first();
+        if (_mcpMaster && isRollingMaster(_mcpMaster)) {
+          var _mcpDate = existing.date ? String(existing.date).slice(0, 10) : null;
+          var _mcpCurrentAnchor = _mcpMaster.rolling_anchor ? String(_mcpMaster.rolling_anchor).slice(0, 10) : null;
+          var _mcpNewAnchor = computeRollingAnchor(status, _mcpDate, _mcpCurrentAnchor);
+          if (_mcpNewAnchor) {
+            await db('task_masters')
+              .where({ id: _mcpMasterId, user_id: userId })
+              .update({ rolling_anchor: _mcpNewAnchor, updated_at: db.fn.now() });
+          }
+        }
+      }
+
       enqueueScheduleRun(userId, 'mcp:set_task_status', [id]);
       var updated = await db('tasks_with_sync_v').where('id', id).first();
       return { content: [{ type: 'text', text: safeStringify(rowToTask(updated, tz)) }] };
