@@ -16,6 +16,7 @@
 var helpers = require('../../../shared/scheduler/missedHelpers');
 var { TERMINAL_STATUSES } = require('../lib/task-status');
 var syncLock = require('../lib/sync-lock');
+var { isRollingMaster, computeRollingAnchor } = require('../lib/rolling-anchor');
 
 var SHARD_COUNT = 60;          // 1 shard/minute → full pass each hour
 var RETENTION_DAYS = 365;      // 12 months
@@ -44,7 +45,7 @@ async function processMissedMark(deps, shard, now) {
     // Pending instances scheduled in the future cannot be missed yet; filtering
     // them here dramatically shrinks the scan on the tasks_v view.
     .whereRaw('scheduled_at < NOW() - INTERVAL 1 HOUR')
-    .select('id', 'user_id', 'scheduled_at', 'time_flex');
+    .select('id', 'user_id', 'scheduled_at', 'time_flex', 'master_id', 'date');
 
   var toFlip = [];
   for (var i = 0; i < rows.length; i++) {
@@ -65,6 +66,21 @@ async function processMissedMark(deps, shard, now) {
       .where({ id: f.id, status: '' })
       .update({ status: 'missed', completed_at: wc, updated_at: deps.db.fn.now() });
     byUser[f.user_id] = true;
+
+    // Rolling anchor: nudge forward +1 day on auto-miss
+    if (f.master_id) {
+      var masterRow = await deps.db('task_masters').where({ id: f.master_id }).first();
+      if (masterRow && isRollingMaster(masterRow)) {
+        var instanceDate = f.date ? String(f.date).slice(0, 10) : null;
+        var currentAnchor = masterRow.rolling_anchor ? String(masterRow.rolling_anchor).slice(0, 10) : null;
+        var newAnchor = computeRollingAnchor('missed', instanceDate, currentAnchor);
+        if (newAnchor) {
+          await deps.db('task_masters')
+            .where({ id: f.master_id })
+            .update({ rolling_anchor: newAnchor, updated_at: deps.db.fn.now() });
+        }
+      }
+    }
   }
 
   var userIds = Object.keys(byUser);
