@@ -1318,6 +1318,24 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var rawRow = rawRowById[t.id];
     var hasScheduledAt = rawRow ? !!rawRow.scheduled_at : !!(original.date || original.scheduledAt);
     if (hasScheduledAt) {
+      // Guard: ANYTIME tasks without a passed deadline are not overdue when they
+      // can't fit in today's time grid — the calendar is simply full right now.
+      // Only mark overdue if (a) the task was placed on a prior day (rolled over
+      // without completion) OR (b) its deadline has already passed.
+      // This prevents a full calendar from permanently locking ANYTIME tasks in
+      // overdue=1 on every subsequent scheduler run.
+      if (original.placementMode === PLACEMENT_MODES.ANYTIME) {
+        var _aDeadlineKey = original.deadline ? isoToDateKey(original.deadline) : null;
+        var _aInPast = original.date && original.date < timeInfo.todayKey;
+        var _aDeadlinePassed = _aDeadlineKey && _aDeadlineKey < timeInfo.todayKey;
+        if (!_aInPast && !_aDeadlinePassed) {
+          if (rawRow && rawRow.overdue) {
+            pendingUpdates.push({ id: t.id, dbUpdate: { overdue: 0, updated_at: db.fn.now() } });
+          }
+          cleared++;
+          return;
+        }
+      }
       // Case B: was previously placed — pin in place with overdue=1.
       // Keep unscheduled=0 so the task renders at its scheduled position.
       var wasAlreadyOverdue = !!(rawRow && rawRow.overdue);
