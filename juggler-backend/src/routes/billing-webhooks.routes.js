@@ -12,10 +12,9 @@ function verifySignature(req, res, next) {
   var sig = req.headers['x-billing-signature'];
   var secret = process.env.BILLING_WEBHOOK_SECRET || process.env.INTERNAL_SERVICE_KEY;
 
-  // In development without a secret configured, allow unsigned webhooks
   if (!secret) {
-    console.warn('[billing-webhook] No BILLING_WEBHOOK_SECRET configured — skipping signature verification');
-    return next();
+    console.error('[billing-webhook] No BILLING_WEBHOOK_SECRET or INTERNAL_SERVICE_KEY configured — cannot verify webhooks');
+    return res.status(500).json({ error: 'Webhook signature verification not configured' });
   }
 
   if (!sig) {

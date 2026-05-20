@@ -128,7 +128,7 @@ export default function ListView({ allTasks, statuses, filter, search, projectFi
             <div style={{
               fontSize: 13, fontWeight: 600, color: isToday ? theme.accent : isPast ? theme.textMuted : theme.text,
               padding: '4px 0', borderBottom: `1px solid ${theme.border}`, marginBottom: 6,
-              display: 'flex', alignItems: 'center', gap: 6
+              display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0
             }}>
               {d ? `${DAY_NAMES[d.getDay()]} ${MONTH_NAMES[d.getMonth()]} ${d.getDate()}` : 'TBD'}
               {isToday && <span style={{ fontSize: 10, background: theme.accent, color: '#FDFAF5', borderRadius: 4, padding: '1px 6px' }}>Today</span>}

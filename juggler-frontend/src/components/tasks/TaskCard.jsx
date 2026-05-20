@@ -51,6 +51,7 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
 
   return (
     <div
+      data-testid="task-card-root"
       draggable={draggable || false}
       onDragStart={draggable ? function(e) { e.dataTransfer.setData('text/plain', task.id); e.dataTransfer.effectAllowed = 'move'; } : undefined}
       onClick={function() { if (onExpand) onExpand(task.id); }}
@@ -70,7 +71,7 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
         display: 'flex', alignItems: 'center', gap: 6,
         fontSize: isMobile ? 13 : 12, lineHeight: 1.3
       }}>
-        <span style={{
+        <span data-testid="task-card-title" style={{
           flex: 1, fontWeight: 600, color: theme.text,
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           textDecoration: isDone ? 'line-through' : 'none'
@@ -112,13 +113,13 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
       </div>
 
       {/* Row 2: status toggles + metadata */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+      <div data-testid="task-card-row2" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap', minWidth: 0 }}>
         {onStatusChange && (
           <span onClick={function(e) { e.stopPropagation(); }}>
             <StatusToggle value={status} onChange={function(val) { onStatusChange(task.id, val); }} onDelete={onDelete ? function() { onDelete(task.id); } : null} darkMode={darkMode} isMobile={isMobile} />
           </span>
         )}
-        <div style={{ flex: 1 }} />
+        <div style={{ flex: '1 1 0%', minWidth: 0 }} />
         {isOverdue && (
           <span style={{
             fontSize: 9, fontWeight: 700, flexShrink: 0,
