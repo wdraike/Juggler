@@ -587,6 +587,92 @@ describe('expandRecurring', () => {
     });
   });
 
+  describe('rolling recurrence', () => {
+    const anchor = '2026-05-18'; // Monday
+
+    function makeRolling(intervalDays, rollingAnchor) {
+      return {
+        id: 'r1',
+        text: 'Haircut',
+        taskType: 'recurring_template',
+        date: anchor,
+        dur: 30,
+        pri: 'P2',
+        recurring: true,
+        recur: { type: 'rolling', intervalDays, periodLabel: 'weekly', timesPerPeriod: 1 },
+        recurStart: anchor,
+        rollingAnchor: rollingAnchor || null,
+        dayReq: 'any'
+      };
+    }
+
+    test('7-day interval generates instances at anchor+7, +14, +21', () => {
+      const src = makeRolling(7, null); // falls back to recurStart
+      const result = expandRecurring(
+        [src],
+        new Date(2026, 4, 18), // 5/18
+        new Date(2026, 5, 1)   // 6/1
+      );
+      const dates = result.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
+      expect(dates).toContain('2026-05-25');
+      expect(dates).toContain('2026-06-01');
+      expect(dates).not.toContain('2026-05-18'); // anchor itself not emitted
+    });
+
+    test('3.5-day interval: rounds per-N correctly (4, 7, 11, 14)', () => {
+      const src = makeRolling(3.5, null);
+      const result = expandRecurring(
+        [src],
+        new Date(2026, 4, 18),
+        new Date(2026, 5, 1)
+      );
+      const dates = result.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
+      expect(dates).toContain('2026-05-22'); // +4
+      expect(dates).toContain('2026-05-25'); // +7
+      expect(dates).toContain('2026-05-29'); // +11
+      expect(dates).toContain('2026-06-01'); // +14
+    });
+
+    test('rollingAnchor overrides recurStart', () => {
+      const src = makeRolling(7, '2026-05-20'); // completed Wed, next due Wed+7
+      const result = expandRecurring(
+        [src],
+        new Date(2026, 4, 20),
+        new Date(2026, 5, 3)
+      );
+      const dates = result.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
+      expect(dates).toContain('2026-05-27'); // 5/20 + 7
+      expect(dates).not.toContain('2026-05-25'); // old recurStart-based date
+    });
+
+    test('existing terminal instance deduped', () => {
+      const src = makeRolling(7, null);
+      const existing = {
+        id: 'r1-1', sourceId: 'r1', taskType: 'recurring_instance',
+        date: '2026-05-25', status: 'done'
+      };
+      const result = expandRecurring(
+        [src, existing],
+        new Date(2026, 4, 18),
+        new Date(2026, 5, 1)
+      );
+      const dates = result.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
+      expect(dates).not.toContain('2026-05-25'); // already done — deduped
+      expect(dates).toContain('2026-06-01');     // next slot still generated
+    });
+
+    test('null rollingAnchor with null recurStart falls back to startDate', () => {
+      const src = { ...makeRolling(7, null), recurStart: null, date: null };
+      const result = expandRecurring(
+        [src],
+        new Date(2026, 4, 18),
+        new Date(2026, 4, 25)
+      );
+      const dates = result.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
+      expect(dates).toContain('2026-05-25'); // startDate + 7
+    });
+  });
+
   describe('edge cases', () => {
     test('tasks without recur return empty', () => {
       const tasks = [{ id: 't1', text: 'Normal task', date: '2026-03-20' }];
@@ -607,5 +693,12 @@ describe('expandRecurring', () => {
       const sourceIds = result.filter(t => t.sourceId === 'rc_1');
       expect(sourceIds).toHaveLength(0);
     });
+  });
+});
+
+describe('isAnchorDependentRecur — rolling', () => {
+  test('rolling type is anchor-dependent', () => {
+    const { isAnchorDependentRecur } = require('../../shared/scheduler/expandRecurring');
+    expect(isAnchorDependentRecur({ type: 'rolling', intervalDays: 7 })).toBe(true);
   });
 });

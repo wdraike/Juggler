@@ -31,6 +31,12 @@ function parseAnchor(val) {
 // anchor; src.date (scheduled_at-derived) is a legacy fallback; startDate is
 // the final safety net so expansion still produces output for null anchors.
 function getAnchor(src, startDate) {
+  // Rolling tasks use the mutable rolling_anchor (updated on each terminal event)
+  // before falling back to the static recur_start.
+  if (src.recur && src.recur.type === 'rolling' && src.rollingAnchor) {
+    var ra = parseAnchor(src.rollingAnchor);
+    if (ra) return ra;
+  }
   return parseAnchor(src.recurStart) || parseAnchor(src.date) || (function() {
     var d = new Date(startDate); d.setHours(0, 0, 0, 0); return d;
   })();
@@ -286,6 +292,46 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
     tpcPickedDates[src.id] = picked;
   });
 
+  // --- Rolling recurrence: arithmetic projection from anchor, no day iteration ---
+  sources.forEach(function(src) {
+    var r = src.recur;
+    if (!r || r.type !== 'rolling') return;
+    var rollingInterval = Math.max(1, Number(r.intervalDays) || 7);
+    var rollingAnchor = getAnchor(src, startDate);
+    for (var n = 1; n <= 1000; n++) {
+      var offsetDays = Math.round(n * rollingInterval);
+      var rollingDate = new Date(rollingAnchor.getTime());
+      rollingDate.setDate(rollingDate.getDate() + offsetDays);
+      rollingDate.setHours(0, 0, 0, 0);
+      if (rollingDate > end) break;
+      if (rollingDate < cursor) continue;
+      var rollingDateStr = formatDateKey(rollingDate);
+      var rollingKey = src.id + '|' + rollingDateStr;
+      if (existingBySourceDate[rollingKey]) continue;
+      if (existingByDateText[rollingDateStr + '|' + src.text]) continue;
+      nextOrdBySource[src.id] = (nextOrdBySource[src.id] || 0) + 1;
+      var rollingId = src.id + '-' + nextOrdBySource[src.id];
+      existingBySourceDate[rollingKey] = true;
+      existingByDateText[rollingDateStr + '|' + src.text] = true;
+      var rollingDow = rollingDate.getDay();
+      newTasks.push({
+        id: rollingId,
+        sourceId: src.id,
+        taskType: 'recurring_instance',
+        text: src.text,
+        date: rollingDateStr,
+        _candidateDate: rollingDateStr,
+        day: DAY_NAMES[rollingDow],
+        dur: src.dur,
+        pri: src.pri,
+        dayReq: 'any',
+        when: src.when,
+        placement_mode: src.placement_mode,
+        occurrence_ordinal: nextOrdBySource[src.id]
+      });
+    }
+  });
+
   var iter = 0;
   while (cursor <= end && (maxIter === 0 || iter < maxIter)) {
     iter++;
@@ -295,6 +341,7 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
 
     sources.forEach(function(src) {
       var r = src.recur;
+      if (r.type === 'rolling') return; // handled by rolling section above
       var anchor = getAnchor(src, startDate);
       if (cursor < anchor) return;
       if (src.recurEnd) {
@@ -429,6 +476,7 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
 // anchor because the pattern IS the spec.
 function isAnchorDependentRecur(recur) {
   if (!recur || typeof recur !== 'object') return false;
+  if (recur.type === 'rolling') return true;
   if (recur.type === 'biweekly') return true;
   if (recur.type === 'interval') return true;
   // timesPerCycle < selected days ⇒ we pick N of M candidates per cycle,
