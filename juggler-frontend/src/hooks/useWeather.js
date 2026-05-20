@@ -68,10 +68,40 @@ function parseWeather(data, unit) {
   return byDate;
 }
 
+var REFRESH_INTERVAL_MS = 55 * 60 * 1000; // 55 min — keeps backend cache (1h TTL) always fresh
+
 export default function useWeather(locations, temperatureUnit) {
   var [weatherByDate, setWeatherByDate] = useState({});
   var [refreshed, setRefreshed] = useState(false);
   var locationFetchedRef = useRef(null);
+  var lastFetchAtRef = useRef(0);
+  var browserCoordsRef = useRef(null);
+  var [refreshTick, setRefreshTick] = useState(0);
+
+  // Periodic refresh: bump refreshTick every 55 min while tab is visible.
+  // Also re-fetches on tab focus if last fetch is > 55 min old.
+  useEffect(function() {
+    var timer = setInterval(function() {
+      if (document.visibilityState === 'hidden') return;
+      locationFetchedRef.current = null;
+      setRefreshTick(function(t) { return t + 1; });
+    }, REFRESH_INTERVAL_MS);
+
+    function onVisibility() {
+      if (document.visibilityState === 'visible') {
+        if (Date.now() - lastFetchAtRef.current > REFRESH_INTERVAL_MS) {
+          locationFetchedRef.current = null;
+          setRefreshTick(function(t) { return t + 1; });
+        }
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return function() {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, []);
 
   useEffect(function() {
     var cancelled = false;
@@ -83,6 +113,7 @@ export default function useWeather(locations, temperatureUnit) {
         var cacheResp = await apiClient.get('/weather', { params: { lat, lon, cacheOnly: 1 } });
         if (!cancelled && cacheResp.data && cacheResp.data.hourly) {
           setWeatherByDate(parseWeather(cacheResp.data, displayUnit));
+          lastFetchAtRef.current = Date.now();
           return;
         }
 
@@ -98,6 +129,7 @@ export default function useWeather(locations, temperatureUnit) {
           if (cancelled) return;
           apiClient.post('/weather/ingest', { lat, lon, hourly: forecast.hourly, hourly_units: forecast.hourly_units }).catch(function() {});
           setWeatherByDate(parseWeather(forecast, displayUnit));
+          lastFetchAtRef.current = Date.now();
           return;
         }
       } catch (err) {
@@ -109,6 +141,7 @@ export default function useWeather(locations, temperatureUnit) {
         var resp = await apiClient.get('/weather', { params: { lat, lon } });
         if (cancelled) return;
         setWeatherByDate(parseWeather(resp.data, displayUnit));
+        lastFetchAtRef.current = Date.now();
         if (resp.data.refreshed) setRefreshed(true);
       } catch (err) {
         // Fail silently — weather is non-critical
@@ -131,19 +164,26 @@ export default function useWeather(locations, temperatureUnit) {
 
     // Fallback: browser geolocation
     if (!navigator.geolocation) return;
+    // Refresh path: re-fetch using cached coords without re-querying position
+    if (locationFetchedRef.current === null && browserCoordsRef.current) {
+      locationFetchedRef.current = 'browser';
+      fetchWeather(browserCoordsRef.current.lat, browserCoordsRef.current.lon);
+      return function() { cancelled = true; };
+    }
     if (locationFetchedRef.current === 'browser') return;
 
     navigator.geolocation.getCurrentPosition(
       function(pos) {
         if (cancelled) return;
         locationFetchedRef.current = 'browser';
+        browserCoordsRef.current = { lat: pos.coords.latitude, lon: pos.coords.longitude };
         fetchWeather(pos.coords.latitude, pos.coords.longitude);
       },
       function() { /* user denied — weather silently disabled */ }
     );
 
     return function() { cancelled = true; };
-  }, [locations, temperatureUnit]);
+  }, [locations, temperatureUnit, refreshTick]);
 
   return { weatherByDate, refreshed };
 }
