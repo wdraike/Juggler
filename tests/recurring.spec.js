@@ -231,4 +231,51 @@ test.describe('Recurring Tasks', () => {
     // App must not crash
     await expect(page.locator('text=StriveRS').first()).toBeVisible();
   });
+
+  test('rolling 1x/week: completing task generates next instance at +7 days', async ({ page }) => {
+    // This test hits the real API — requires servers to be running.
+    // Create rolling task via API
+    const today = new Date().toISOString().slice(0, 10);
+    const createRes = await page.request.post('/api/tasks', {
+      data: {
+        text: 'E2E Rolling Haircut',
+        dur: 30,
+        pri: 'P2',
+        recurring: true,
+        recur: { type: 'rolling', intervalDays: 7, periodLabel: 'weekly', timesPerPeriod: 1 },
+        recurStart: today,
+        placement_mode: 'flexible',
+        when: 'morning'
+      }
+    });
+    expect(createRes.ok()).toBeTruthy();
+    const { task: template } = await createRes.json();
+
+    // Wait for scheduler to generate the first instance
+    await page.waitForTimeout(1000);
+
+    // Fetch instances
+    const listRes = await page.request.get('/api/tasks?recurring_source=' + template.id);
+    const { tasks } = await listRes.json();
+    const instance = tasks.find(t => t.taskType === 'recurring_instance' && t.sourceId === template.id);
+    expect(instance).toBeTruthy();
+    expect(instance.date).toBe(
+      // anchor + 7 days
+      new Date(new Date(today + 'T00:00:00').getTime() + 7 * 86400000).toISOString().slice(0, 10)
+    );
+
+    // Mark instance done — should update rolling_anchor to instance.date
+    const doneRes = await page.request.put('/api/tasks/' + instance.id + '/status', {
+      data: { status: 'done', scheduledAt: instance.date + 'T12:00:00Z' }
+    });
+    expect(doneRes.ok()).toBeTruthy();
+
+    // Verify rolling_anchor updated on master
+    const masterRes = await page.request.get('/api/tasks/' + template.id);
+    const { task: updatedMaster } = await masterRes.json();
+    expect(updatedMaster.rollingAnchor).toBe(instance.date);
+
+    // Cleanup
+    await page.request.delete('/api/tasks/' + template.id);
+  });
 });
