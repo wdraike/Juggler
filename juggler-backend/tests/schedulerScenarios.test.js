@@ -1019,3 +1019,66 @@ describe('Tier 11: recurring_flexible past-anchor placement', () => {
     expect(isUnplaced(r, 'weekly_claim_early')).toBe(false);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// TIER 11: ROLLING RECURRENCE
+// ═══════════════════════════════════════════════════════════════════
+
+describe('rolling recurrence integration', () => {
+  var { expandRecurring } = require('../../shared/scheduler/expandRecurring');
+
+  function makeRollingTemplate(id, anchor, intervalDays) {
+    return {
+      id,
+      text: 'Weekly Haircut',
+      taskType: 'recurring_template',
+      recurring: true,
+      recur: { type: 'rolling', intervalDays: intervalDays || 7, periodLabel: 'weekly', timesPerPeriod: 1 },
+      recurStart: anchor,
+      rollingAnchor: anchor,
+      dur: 30,
+      pri: 'P2',
+      when: 'morning,lunch,afternoon,evening',
+      dayReq: 'any',
+      placement_mode: 'flexible'
+    };
+  }
+
+  test('7-day rolling: generates instance at anchor+7', () => {
+    const anchor = '2026-05-18';
+    const src = makeRollingTemplate('haircut', anchor, 7);
+    const result = expandRecurring(
+      [src],
+      new Date(2026, 4, 18),
+      new Date(2026, 5, 1)
+    );
+    const dates = result.filter(r => r.sourceId === 'haircut').map(r => r.date || r._candidateDate);
+    expect(dates).toContain('2026-05-25');
+  });
+
+  test('rolling: shifting rollingAnchor regenerates different dates', () => {
+    const src1 = makeRollingTemplate('haircut', '2026-05-18', 7);
+    const r1 = expandRecurring([src1], new Date(2026, 4, 18), new Date(2026, 5, 1));
+    const d1 = r1.filter(r => r.sourceId === 'haircut').map(r => r.date || r._candidateDate);
+    expect(d1).toContain('2026-05-25');
+
+    // Simulate completion on 5/20 (anchor shifts)
+    const src2 = { ...src1, rollingAnchor: '2026-05-20' };
+    const r2 = expandRecurring([src2], new Date(2026, 4, 20), new Date(2026, 5, 3));
+    const d2 = r2.filter(r => r.sourceId === 'haircut').map(r => r.date || r._candidateDate);
+    expect(d2).toContain('2026-05-27'); // 5/20 + 7
+    expect(d2).not.toContain('2026-05-25'); // old anchor-based date gone
+  });
+
+  test('rolling: missed instance nudges anchor +1 day', () => {
+    const { computeRollingAnchor } = require('../src/lib/rolling-anchor');
+    const result = computeRollingAnchor('missed', '2026-05-25', '2026-05-18');
+    expect(result).toBe('2026-05-26');
+  });
+
+  test('rolling: skip reanchors to skip date', () => {
+    const { computeRollingAnchor } = require('../src/lib/rolling-anchor');
+    const result = computeRollingAnchor('skip', '2026-05-25', '2026-05-18');
+    expect(result).toBe('2026-05-25');
+  });
+});
