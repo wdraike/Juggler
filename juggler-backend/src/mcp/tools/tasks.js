@@ -10,6 +10,7 @@ const { z } = require('zod');
 const safeStringify = require('../safeStringify');
 const db = require('../../db');
 const { rowToTask, taskToRow, guardFixedCalendarWhen, ensureProject, applySplitDefault, buildSourceMap, TEMPLATE_FIELDS, validateTaskInput } = require('../../controllers/task.controller');
+const { PLACEMENT_MODES } = require('../../lib/placementModes');
 const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
 const { isLocked, enqueueWrite, splitFields } = require('../../lib/task-write-queue');
 const tasksWrite = require('../../lib/tasks-write');
@@ -134,6 +135,14 @@ function registerTaskTools(server, userId) {
       if (task.date || task.time || task.scheduledAt) {
         row.date_pinned = 1;
       }
+      // PHASE 19 D-04: mirror task.controller.js:794-800 — MCP must apply placement_mode inference to avoid Case B overdue
+      var _timeWasSet = task.time !== undefined || task.scheduledAt !== undefined;
+      if (_timeWasSet && row.placement_mode === undefined) {
+        row.placement_mode = PLACEMENT_MODES.FIXED;
+      }
+      if (!_timeWasSet && task.date !== undefined && row.placement_mode === undefined) {
+        row.placement_mode = PLACEMENT_MODES.ALL_DAY;
+      }
       await applySplitDefault(row, userId);
       await ensureProject(userId, task.project);
 
@@ -181,6 +190,18 @@ function registerTaskTools(server, userId) {
         row.created_at = db.fn.now();
         if (row.split === undefined || row.split === null) {
           row.split = splitDefault ? 1 : 0;
+        }
+        // Auto-pin when batch item has an explicit date/time (mirrors create_task behavior above)
+        if (t.date || t.time || t.scheduledAt) {
+          row.date_pinned = 1;
+        }
+        // PHASE 19 D-04: same inference as create_task — applied per item in the batch
+        var _tTimeWasSet = t.time !== undefined || t.scheduledAt !== undefined;
+        if (_tTimeWasSet && row.placement_mode === undefined) {
+          row.placement_mode = PLACEMENT_MODES.FIXED;
+        }
+        if (!_tTimeWasSet && t.date !== undefined && row.placement_mode === undefined) {
+          row.placement_mode = PLACEMENT_MODES.ALL_DAY;
         }
         return row;
       });
@@ -250,6 +271,11 @@ function registerTaskTools(server, userId) {
       var dateOrTimeSet = fields.date !== undefined || fields.time !== undefined || fields.scheduledAt !== undefined;
       if (dateOrTimeSet && row.date_pinned === undefined) {
         row.date_pinned = 1;
+      }
+      // PHASE 19 D-04: update-path ALL_DAY backstop — mirror task.controller.js:1032-1040 (NOT the create path; no FIXED inference here)
+      var _updateTimeWasSet = fields.time !== undefined || fields.scheduledAt !== undefined;
+      if (!_updateTimeWasSet && fields.date !== undefined && row.placement_mode === undefined) {
+        row.placement_mode = PLACEMENT_MODES.ALL_DAY;
       }
 
       // Recurrings cannot have dependencies — strip if provided
@@ -512,6 +538,11 @@ function registerTaskTools(server, userId) {
           delete qRow.user_id;
           delete qRow.created_at;
           delete qRow._pendingTimeOnly;
+          // PHASE 19 D-04: batch_update_tasks locked path — same ALL_DAY backstop as update_task
+          var _qTimeWasSet = qFields.time !== undefined || qFields.scheduledAt !== undefined;
+          if (!_qTimeWasSet && qFields.date !== undefined && qRow.placement_mode === undefined) {
+            qRow.placement_mode = PLACEMENT_MODES.ALL_DAY;
+          }
           var split = splitFields(qRow);
           if (Object.keys(split.nonSchedulingFields).length > 0) {
             split.nonSchedulingFields.updated_at = db.fn.now();
@@ -549,6 +580,11 @@ function registerTaskTools(server, userId) {
           delete row.user_id;
           delete row.created_at;
           delete row._pendingTimeOnly;
+          // PHASE 19 D-04: batch_update_tasks transaction path — same ALL_DAY backstop as update_task
+          var _txTimeWasSet = fields.time !== undefined || fields.scheduledAt !== undefined;
+          if (!_txTimeWasSet && fields.date !== undefined && row.placement_mode === undefined) {
+            row.placement_mode = PLACEMENT_MODES.ALL_DAY;
+          }
           var taskType = existing.task_type || 'task';
 
           if (taskType === 'recurring_instance' && existing.source_id) {

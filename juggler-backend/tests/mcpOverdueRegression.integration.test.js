@@ -104,13 +104,10 @@ describe('MCP create_task: overdue regression (Phase 19)', () => {
 
   test('date-only task seeded as ANYTIME (pre-fix MCP behavior) IS marked overdue', async () => {
     if (!available) return;
-    // PHASE 19 — documents pre-fix bug behavior; Plan 02 makes Test A the authoritative
-    // post-fix assertion. This test is retained because the scheduler-level behavior for
-    // an ANYTIME task with a past scheduled_at has NOT changed — the fix is at the MCP
-    // boundary (tasks.js inference), not in the scheduler. Keeping this test confirms
-    // that the scheduler's Case B path for anytime tasks remains intentional and that
-    // the Plan 02 fix works by preventing the MCP layer from ever producing this shape
-    // for date-only intent inputs.
+    // PHASE 19 — documents the scheduler-side invariant: an ANYTIME task with past scheduled_at
+    // WILL be marked overdue by Case B. The MCP-layer fix in Plan 02 ensures MCP never produces
+    // ANYTIME for date-only intent — this test guards that the scheduler behavior itself remains
+    // intentional. Test A is the authoritative post-fix assertion for the MCP code path.
     var t = await seedTask({
       id: 'mcp-19-anytime-' + Math.random().toString(36).slice(2, 8),
       text: 'Phase 19 pre-fix anytime test task',
