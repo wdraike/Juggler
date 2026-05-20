@@ -259,6 +259,7 @@ async function reverseGeocodeDisplayName(lat, lon) {
 }
 
 exports.reverseGeocodeDisplayName = reverseGeocodeDisplayName;
+exports.roundCoord = roundCoord;
 
 exports.reverseGeocode = async (req, res) => {
   try {

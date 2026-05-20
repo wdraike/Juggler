@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db');
 const { authenticateJWT } = require('../middleware/jwt-auth');
 const { getLastError } = require('../scheduler/scheduleQueue');
+const { roundCoord } = require('../controllers/weather.controller');
 
 // Immediate health check (no DB). Suitable for load-balancer probes; no auth.
 router.get('/immediate', (req, res) => {
@@ -191,14 +192,64 @@ router.get('/detailed', authenticateJWT, async (req, res) => {
     healthStatus.services.sync = 'unknown';
   }
 
+  // Weather: flag if the forecast cache for the user's primary location is
+  // stale (> 2h). Stale weather means weather-constrained tasks may be
+  // scheduled incorrectly. Not an error — the app still works.
+  if (healthStatus.services.database === 'operational') {
+    try {
+      const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+      const userId = req.user.id;
+      const userLoc = await db('locations')
+        .where('user_id', userId)
+        .whereNotNull('lat')
+        .whereNotNull('lon')
+        .orderBy('sort_order')
+        .first();
+
+      if (!userLoc) {
+        healthStatus.services.weather = 'not_configured';
+      } else {
+        const latGrid = roundCoord(userLoc.lat);
+        const lonGrid = roundCoord(userLoc.lon);
+        const weatherRow = await db('weather_cache')
+          .where('lat_grid', latGrid)
+          .where('lon_grid', lonGrid)
+          .orderBy('fetched_at', 'desc')
+          .first();
+
+        if (!weatherRow) {
+          healthStatus.services.weather = 'degraded';
+          healthStatus.detail.weather = 'no forecast data — open the app to fetch';
+        } else {
+          const ageMs = Date.now() - new Date(weatherRow.fetched_at).getTime();
+          if (ageMs > TWO_HOURS_MS) {
+            healthStatus.services.weather = 'degraded';
+            healthStatus.detail.weather = 'forecast is ' + Math.round(ageMs / 60000) + ' min old — weather constraints may not be enforced';
+          } else {
+            healthStatus.services.weather = 'operational';
+            healthStatus.detail.weather = { fetchedAt: weatherRow.fetched_at };
+          }
+        }
+      }
+    } catch (error) {
+      healthStatus.services.weather = 'unknown';
+      healthStatus.detail.weather = error.message;
+    }
+  } else {
+    healthStatus.services.weather = 'unknown';
+  }
+
   // Rollup: 'error' dominates; 'operational' only wins when every service
-  // reports it. 'idle' / 'not configured' / 'unknown' / 'degraded' collapse
-  // to DEGRADED rather than ERROR so the dot doesn't scream at users when
-  // e.g. no one has scheduled anything in the last ten minutes.
+  // reports it. 'idle' / 'unknown' / 'degraded' collapse to DEGRADED rather
+  // than ERROR so the dot doesn't scream at users when e.g. no one has
+  // scheduled anything in the last ten minutes.
+  // 'not_configured' is treated the same as 'operational' for rollup purposes:
+  // a user who has never set a weather location is not in a degraded state.
   const statuses = Object.values(healthStatus.services);
-  if (statuses.some(s => s === 'error')) {
+  const configurableStatuses = statuses.map(s => s === 'not_configured' ? 'operational' : s);
+  if (configurableStatuses.some(s => s === 'error')) {
     healthStatus.status = 'ERROR';
-  } else if (statuses.every(s => s === 'operational')) {
+  } else if (configurableStatuses.every(s => s === 'operational')) {
     healthStatus.status = 'OK';
   } else {
     healthStatus.status = 'DEGRADED';

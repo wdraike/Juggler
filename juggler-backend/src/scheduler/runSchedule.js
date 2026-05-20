@@ -11,6 +11,7 @@ var tasksWrite = require('../lib/tasks-write');
 var { computeChunks, reconcileSplitsForUser } = require('../lib/reconcile-splits');
 var unifiedScheduleV2 = require('./unifiedScheduleV2');
 var constants = require('./constants');
+var { roundCoord } = require('../controllers/weather.controller');
 
 // v2 is the only scheduler. Kept as a thin wrapper so call sites don't have
 // to care about whether a shadow / diff layer exists (makes re-adding one
@@ -211,17 +212,16 @@ async function loadWeatherForHorizon(locations, db) {
   });
   if (!locWithCoords) return weatherByDateHour;
 
-  var latGrid = Math.round(locWithCoords.lat * 10) / 10;
-  var lonGrid = Math.round(locWithCoords.lon * 10) / 10;
+  var latGrid = roundCoord(locWithCoords.lat);
+  var lonGrid = roundCoord(locWithCoords.lon);
 
   var row = await db('weather_cache')
     .where('lat_grid', latGrid)
     .where('lon_grid', lonGrid)
-    .where('expires_at', '>', db.fn.now())
     .orderBy('fetched_at', 'desc')
     .first();
 
-  if (!row) return weatherByDateHour; // fail-open: no cached data
+  if (!row) return weatherByDateHour; // fail-open: no data ever fetched
 
   var forecast;
   try { forecast = JSON.parse(row.forecast_json); } catch (e) { return weatherByDateHour; }
