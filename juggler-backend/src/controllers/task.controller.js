@@ -23,6 +23,7 @@ const tasksWrite = require('../lib/tasks-write');
 const { isAnchorDependentRecur } = require('../../../shared/scheduler/expandRecurring');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { TERMINAL_STATUSES, isTerminalStatus } = require('../lib/task-status');
+const { isRollingMaster, computeRollingAnchor } = require('../lib/rolling-anchor');
 
 // Fields that, when explicitly supplied by the client, cause placement_mode
 // to be written. After the enum redesign, placement_mode is always written
@@ -1632,12 +1633,21 @@ async function updateTaskStatus(req, res) {
       return res.json({ task: rowToTask(updatedTemplate, null, srcMap), instancesRemoved: status === 'pause' ? (instanceIds || []).length : 0 });
     }
 
+    // Rolling instances may be unscheduled — exempt from schedule-required check.
+    var _rollingMasterRow = null;
+    var _instanceMasterId = existing.master_id || existing.source_id;
+    if (_instanceMasterId && TERMINAL_REQUIRES_SCHEDULE.indexOf(status) !== -1 && !existing.scheduled_at) {
+      _rollingMasterRow = await db('task_masters').where({ id: _instanceMasterId, user_id: req.user.id }).first();
+    }
+    var _isRollingInstance = _rollingMasterRow && isRollingMaster(_rollingMasterRow);
+
     // juggler-cal-history Plan C — scheduled_at required for terminal transitions (D-15).
     // Backend constraint: cannot mark a task done/skip/cancel without a scheduled time.
     // Eliminates the unscheduled-history anchor ambiguity. Frontend mirrors with disabled buttons.
     if (TERMINAL_REQUIRES_SCHEDULE.indexOf(status) !== -1
         && !existing.scheduled_at
-        && !req.body.scheduledAt) {
+        && !req.body.scheduledAt
+        && !_isRollingInstance) {
       return res.status(400).json({
         error: 'Cannot mark task ' + status + ' without a scheduled time. Schedule it first.',
         code: 'SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS'
@@ -1685,6 +1695,27 @@ async function updateTaskStatus(req, res) {
 
 
     await tasksWrite.updateTaskById(db, id, update, req.user.id);
+
+    // Rolling anchor update — project future instances from terminal event date.
+    var _anchorMasterId = existing.master_id || existing.source_id;
+    if (_anchorMasterId && ['done', 'skip', 'missed'].includes(status)) {
+      var _masterForAnchor = _rollingMasterRow
+        || await db('task_masters').where({ id: _anchorMasterId, user_id: req.user.id }).first();
+      if (_masterForAnchor && isRollingMaster(_masterForAnchor)) {
+        var _instanceDate = existing.date
+          ? String(existing.date).slice(0, 10)
+          : null;
+        var _currentAnchor = _masterForAnchor.rolling_anchor
+          ? String(_masterForAnchor.rolling_anchor).slice(0, 10)
+          : null;
+        var _newAnchor = computeRollingAnchor(status, _instanceDate, _currentAnchor);
+        if (_newAnchor) {
+          await db('task_masters')
+            .where({ id: _anchorMasterId, user_id: req.user.id })
+            .update({ rolling_anchor: _newAnchor, updated_at: db.fn.now() });
+        }
+      }
+    }
 
     // Split-chunk sibling propagation: a split-enabled recurring master produces
     // multiple virtual chunks per occurrence (same occurrence_ordinal, different
