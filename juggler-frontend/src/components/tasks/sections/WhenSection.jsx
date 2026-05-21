@@ -462,7 +462,7 @@ export default function WhenSection(props) {
               <option value="none">None</option>
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
-              <option value="biweekly">Biweekly</option>
+              <option value="biweekly">Every 2 weeks</option>
               <option value="monthly">Monthly (pick days)</option>
               <option value="interval">Every N (days/wks/mo/yr)</option>
             </select>
@@ -472,7 +472,7 @@ export default function WhenSection(props) {
             var selectedCount = recurDays ? recurDays.length : 0;
             return (
               <label style={lStyle}>
-                Days
+                Eligible days
                 <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
                   <button onClick={function() { onRecurDaysChange('MTWRF'); }} style={togStyle(recurDays === 'MTWRF', '#4338CA')}>Wkday</button>
                   <button onClick={function() { onRecurDaysChange('SU'); }} style={togStyle(recurDays === 'SU' || recurDays === 'US', '#4338CA')}>Wkend</button>

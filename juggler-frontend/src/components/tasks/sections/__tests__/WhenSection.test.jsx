@@ -148,3 +148,19 @@ it('All Day button calls onModeChange with all_day', () => {
   fireEvent.click(screen.getByTitle(/Spans the entire day/));
   expect(called).toBe('all_day');
 });
+
+it('day picker label says "Eligible days" for weekly recurrence', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MTWRF"
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByText('Eligible days')).toBeInTheDocument();
+});
+
+it('recurrence select has option "Every 2 weeks" not "Biweekly"', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.queryByRole('option', { name: 'Biweekly' })).not.toBeInTheDocument();
+  expect(screen.getByRole('option', { name: 'Every 2 weeks' })).toBeInTheDocument();
+});
