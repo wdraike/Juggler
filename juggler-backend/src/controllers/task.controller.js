@@ -741,7 +741,7 @@ function validateTaskInput(body) {
   }
   // recur config validation
   if (body.recur && typeof body.recur === 'object') {
-    var validRecurTypes = ['daily', 'weekly', 'biweekly', 'monthly', 'interval', 'none'];
+    var validRecurTypes = ['daily', 'weekly', 'biweekly', 'monthly', 'interval', 'none', 'rolling'];
     var rType = (body.recur.type || '').toLowerCase();
     if (rType && validRecurTypes.indexOf(rType) === -1) errors.push('Invalid recurrence type: ' + rType);
     // Anchor-dependent recur types (biweekly, interval, timesPerCycle filtering)

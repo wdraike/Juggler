@@ -403,3 +403,15 @@ describe('validateTaskInput — anchor-dependent recur requires recurStart', () 
     expect(errs.some(e => /cannot be cleared/i.test(e))).toBe(true);
   });
 });
+
+describe('validateTaskInput — rolling recurrence type', () => {
+  test('rolling is accepted as valid recur type', () => {
+    const errs = validateTaskInput({ recur: { type: 'rolling', every: 7, unit: 'days' } });
+    expect(errs.some(e => /invalid recurrence type/i.test(e))).toBe(false);
+  });
+
+  test('unknown recur type still rejected', () => {
+    const errs = validateTaskInput({ recur: { type: 'quarterly' } });
+    expect(errs.some(e => /invalid recurrence type/i.test(e))).toBe(true);
+  });
+});
