@@ -243,3 +243,72 @@ it('clicking "Flexible quota" when already in flex-mode does not change recurTpc
   fireEvent.click(screen.getByText('Flexible quota'));
   expect(called).toBe(false);
 });
+
+// --- Task 3: Rolling recurrence mode UI ---
+
+it('recurrence select has "Rolling (after completion)" option', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByRole('option', { name: 'Rolling (after completion)' })).toBeInTheDocument();
+});
+
+it('rolling mode shows interval input', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
+    task={{ rolling_anchor: null }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByText('Repeat every')).toBeInTheDocument();
+  expect(screen.getByDisplayValue('7')).toBeInTheDocument();
+});
+
+it('rolling mode shows unit select with days/weeks/months options', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
+    task={{ rolling_anchor: null }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByRole('option', { name: 'days' })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: 'weeks' })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: 'months' })).toBeInTheDocument();
+  expect(screen.queryByRole('option', { name: 'years' })).not.toBeInTheDocument();
+});
+
+it('rolling mode anchor card shows "not yet set" when rolling_anchor is null', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
+    task={{ rolling_anchor: null }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByText(/Anchor not yet set/)).toBeInTheDocument();
+});
+
+it('rolling mode anchor card shows last completed and next due when rolling_anchor set', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
+    task={{ rolling_anchor: '2026-05-19' }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByText('Last completed')).toBeInTheDocument();
+  expect(screen.getByText('Next due')).toBeInTheDocument();
+});
+
+it('rolling mode hides day picker', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
+    task={{ rolling_anchor: null }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.queryByText('Eligible days')).not.toBeInTheDocument();
+});
+
+it('rolling mode hides fill policy', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
+    task={{ rolling_anchor: null }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.queryByText(/Keep the schedule/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Backfill missed/)).not.toBeInTheDocument();
+});

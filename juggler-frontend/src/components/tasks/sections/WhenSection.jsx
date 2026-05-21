@@ -41,6 +41,20 @@ export function minutesFrom24h(hhmm) {
   return h * 60 + m;
 }
 
+function addIntervalToDate(dateStr, every, unit) {
+  var d = new Date(dateStr + 'T00:00:00');
+  var n = parseInt(every, 10) || 1;
+  if (unit === 'weeks') { d.setDate(d.getDate() + n * 7); }
+  else if (unit === 'months') { d.setMonth(d.getMonth() + n); }
+  else { d.setDate(d.getDate() + n); }
+  return d.toISOString().slice(0, 10);
+}
+
+function formatAnchorDate(dateStr) {
+  var d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 function TimezoneSelector({ taskTz, onChangeTz, TH }) {
   var [tzSearch, setTzSearch] = React.useState('');
   var [tzOpen, setTzOpen] = React.useState(false);
@@ -465,6 +479,7 @@ export default function WhenSection(props) {
               <option value="biweekly">Every 2 weeks</option>
               <option value="monthly">Monthly (pick days)</option>
               <option value="interval">Every N (days/wks/mo/yr)</option>
+              <option value="rolling">Rolling (after completion)</option>
             </select>
           </label>
 
@@ -585,6 +600,50 @@ export default function WhenSection(props) {
                 </select>
               </div>
             </label>
+          )}
+
+          {recurType === 'rolling' && (
+            <div style={{ marginTop: 4 }}>
+              <label style={lStyle}>
+                Repeat every
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <input
+                    type="number" min={1} value={recurEvery || 7}
+                    onChange={function(e) { onRecurEveryChange(e.target.value); }}
+                    style={{ ...iStyle, width: 50 }}
+                  />
+                  <select
+                    value={recurUnit || 'days'}
+                    onChange={function(e) { onRecurUnitChange(e.target.value); }}
+                    style={{ ...iStyle, width: 'auto' }}
+                  >
+                    <option value="days">days</option>
+                    <option value="weeks">weeks</option>
+                    <option value="months">months</option>
+                  </select>
+                  <span style={{ fontSize: 10, color: TH.textMuted }}>after completion</span>
+                </div>
+              </label>
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Rolling anchor</div>
+                {(task && task.rolling_anchor) ? (
+                  <div style={{ display: 'flex', gap: 16, background: TH.bgCard, border: '1px solid ' + TH.inputBorder, borderRadius: 4, padding: '6px 10px', fontSize: 11 }}>
+                    <div>
+                      <div style={{ fontSize: 9, color: TH.textMuted, marginBottom: 1 }}>Last completed</div>
+                      <div style={{ color: TH.text, fontWeight: 500 }}>{formatAnchorDate(task.rolling_anchor)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 9, color: TH.textMuted, marginBottom: 1 }}>Next due</div>
+                      <div style={{ color: TH.accent, fontWeight: 500 }}>{formatAnchorDate(addIntervalToDate(task.rolling_anchor, recurEvery || 7, recurUnit || 'days'))}</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 10, color: TH.textMuted, fontStyle: 'italic' }}>
+                    Anchor not yet set — computed from first completion
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
 
