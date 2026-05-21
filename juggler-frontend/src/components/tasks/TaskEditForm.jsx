@@ -528,8 +528,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         // Only persist fillPolicy when tpc filtering is actually active — the
         // field is meaningless without a target count.
         fillPolicy: recurTimesPerCycle > 0 && recurFillPolicy === 'backfill' ? 'backfill' : undefined,
-        every: recurType === 'interval' ? parseInt(recurEvery) || 2 : undefined,
-        unit: recurType === 'interval' ? recurUnit : undefined,
+        every: (recurType === 'interval' || recurType === 'rolling') ? parseInt(recurEvery) || (recurType === 'rolling' ? 7 : 2) : undefined,
+        unit: (recurType === 'interval' || recurType === 'rolling') ? (recurUnit || 'days') : undefined,
         monthDays: recurType === 'monthly' ? recurMonthDays : undefined
       },
       tz: taskTz,

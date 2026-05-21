@@ -296,7 +296,17 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
   sources.forEach(function(src) {
     var r = src.recur;
     if (!r || r.type !== 'rolling') return;
-    var rollingInterval = Math.max(1, Number(r.intervalDays) || 7);
+    var rollingInterval;
+    if (r.intervalDays != null && Number(r.intervalDays) >= 1) {
+      rollingInterval = Math.max(1, Number(r.intervalDays));
+    } else if (r.every != null && r.unit) {
+      var everyN = Math.max(1, parseInt(r.every) || 1);
+      if (r.unit === 'weeks') rollingInterval = everyN * 7;
+      else if (r.unit === 'months') rollingInterval = everyN * 30;
+      else rollingInterval = everyN; // 'days'
+    } else {
+      rollingInterval = 7;
+    }
     var rollingAnchor = getAnchor(src, startDate);
     for (var n = 1; n <= 1000; n++) {
       var offsetDays = Math.round(n * rollingInterval);

@@ -402,6 +402,31 @@ describe('validateTaskInput — anchor-dependent recur requires recurStart', () 
     });
     expect(errs.some(e => /cannot be cleared/i.test(e))).toBe(true);
   });
+
+  test('create rejects rolling without recurStart', () => {
+    const errs = validateTaskInput({
+      _requireRecurStartIfAnchor: true,
+      recur: { type: 'rolling', every: 7, unit: 'days' }
+    });
+    expect(errs.some(e => /Recurrence start date is required/i.test(e))).toBe(true);
+  });
+
+  test('create allows rolling WITH recurStart', () => {
+    const errs = validateTaskInput({
+      _requireRecurStartIfAnchor: true,
+      recur: { type: 'rolling', every: 7, unit: 'days' },
+      recurStart: '2026-05-21'
+    });
+    expect(errs.some(e => /Recurrence start date/i.test(e))).toBe(false);
+  });
+
+  test('update rejects explicit clearing of recurStart on rolling', () => {
+    const errs = validateTaskInput({
+      recur: { type: 'rolling', every: 7, unit: 'days' },
+      recurStart: null
+    });
+    expect(errs.some(e => /cannot be cleared/i.test(e))).toBe(true);
+  });
 });
 
 describe('validateTaskInput — rolling recurrence type', () => {
