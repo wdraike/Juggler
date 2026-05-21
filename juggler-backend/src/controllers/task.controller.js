@@ -743,7 +743,21 @@ function validateTaskInput(body) {
   if (body.recur && typeof body.recur === 'object') {
     var validRecurTypes = ['daily', 'weekly', 'biweekly', 'monthly', 'interval', 'none', 'rolling'];
     var rType = (body.recur.type || '').toLowerCase();
+    if (!rType) errors.push('Recurrence type is required when recur object is provided');
     if (rType && validRecurTypes.indexOf(rType) === -1) errors.push('Invalid recurrence type: ' + rType);
+    var r = body.recur;
+    if ((rType === 'rolling' || rType === 'interval') && r.every !== undefined) {
+      var everyVal = Number(r.every);
+      if (!Number.isFinite(everyVal) || everyVal < 1 || !Number.isInteger(everyVal)) {
+        errors.push('Recurrence interval (every) must be a positive integer');
+      }
+    }
+    var VALID_RECUR_UNITS = ['days', 'weeks', 'months'];
+    if ((rType === 'rolling' || rType === 'interval') && r.unit !== undefined) {
+      if (VALID_RECUR_UNITS.indexOf(String(r.unit)) === -1) {
+        errors.push('Recurrence unit must be days, weeks, or months');
+      }
+    }
     // Anchor-dependent recur types (biweekly, interval, timesPerCycle filtering)
     // need a stored recur_start. Without it, the scheduler falls back to
     // "today" as the anchor, which causes cycle boundaries + parity to drift

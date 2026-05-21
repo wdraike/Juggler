@@ -433,10 +433,58 @@ describe('validateTaskInput — rolling recurrence type', () => {
   test('rolling is accepted as valid recur type', () => {
     const errs = validateTaskInput({ recur: { type: 'rolling', every: 7, unit: 'days' } });
     expect(errs.some(e => /invalid recurrence type/i.test(e))).toBe(false);
+    expect(errs.length).toBe(0); // tightened: no errors at all
   });
 
-  test('unknown recur type still rejected', () => {
+  test('unknown recur type rejected', () => {
     const errs = validateTaskInput({ recur: { type: 'quarterly' } });
     expect(errs.some(e => /invalid recurrence type/i.test(e))).toBe(true);
+  });
+
+  test('empty recur type rejected', () => {
+    const errs = validateTaskInput({ recur: { type: '' } });
+    expect(errs.some(e => /type is required/i.test(e))).toBe(true);
+  });
+
+  test('null recur type rejected', () => {
+    const errs = validateTaskInput({ recur: { type: null } });
+    expect(errs.some(e => /type is required/i.test(e))).toBe(true);
+  });
+
+  test('rolling with every=0 rejected', () => {
+    const errs = validateTaskInput({ recur: { type: 'rolling', every: 0, unit: 'days' } });
+    expect(errs.some(e => /positive integer/i.test(e))).toBe(true);
+  });
+
+  test('rolling with every=-1 rejected', () => {
+    const errs = validateTaskInput({ recur: { type: 'rolling', every: -1, unit: 'days' } });
+    expect(errs.some(e => /positive integer/i.test(e))).toBe(true);
+  });
+
+  test('rolling with every=Infinity rejected', () => {
+    const errs = validateTaskInput({ recur: { type: 'rolling', every: Infinity, unit: 'days' } });
+    expect(errs.some(e => /positive integer/i.test(e))).toBe(true);
+  });
+
+  test('rolling with unit=years rejected', () => {
+    const errs = validateTaskInput({ recur: { type: 'rolling', every: 1, unit: 'years' } });
+    expect(errs.some(e => /unit must be/i.test(e))).toBe(true);
+  });
+
+  test('rolling with valid units accepted', () => {
+    ['days', 'weeks', 'months'].forEach(unit => {
+      const errs = validateTaskInput({ recur: { type: 'rolling', every: 3, unit } });
+      expect(errs.some(e => /unit must be/i.test(e))).toBe(false);
+    });
+  });
+
+  test('rolling with undefined every and unit accepted (scheduler has defaults)', () => {
+    const errs = validateTaskInput({ recur: { type: 'rolling' } });
+    expect(errs.length).toBe(0);
+  });
+
+  test('Rolling (mixed case) accepted via toLowerCase', () => {
+    const errs = validateTaskInput({ recur: { type: 'Rolling', every: 7, unit: 'days' } });
+    expect(errs.some(e => /invalid recurrence type/i.test(e))).toBe(false);
   });
 });
