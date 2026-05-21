@@ -232,3 +232,14 @@ it('tpc select IS shown when "Flexible quota" is active', () => {
   />);
   expect(screen.getByText('Complete per cycle')).toBeInTheDocument();
 });
+
+it('clicking "Flexible quota" when already in flex-mode does not change recurTpc', () => {
+  var called = false;
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={1}
+    onRecurTpcChange={function() { called = true; }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  fireEvent.click(screen.getByText('Flexible quota'));
+  expect(called).toBe(false);
+});

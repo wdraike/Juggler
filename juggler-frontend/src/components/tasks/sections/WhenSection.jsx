@@ -499,7 +499,7 @@ export default function WhenSection(props) {
                           style={togStyle(isAllMode, '#2D6A4F')}
                         >All {selectedCount} days</button>
                         <button
-                          onClick={function() { onRecurTpcChange(selectedCount - 1); }}
+                          onClick={function() { if (isAllMode) onRecurTpcChange(selectedCount - 1); }}
                           aria-pressed={!isAllMode}
                           style={togStyle(!isAllMode, '#C8942A')}
                         >Flexible quota</button>
