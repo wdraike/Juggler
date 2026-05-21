@@ -2,7 +2,7 @@
 type: design
 service: juggler
 status: active
-last_updated: 2026-05-19
+last_updated: 2026-05-21
 tags:
   - type/design
   - service/juggler
@@ -14,7 +14,7 @@ tags:
 
 # Task Properties — Scheduler Reference
 
-**Last Updated:** 2026-05-19
+**Last Updated:** 2026-05-21
 
 How every property on a task object affects scheduling.
 
@@ -110,13 +110,31 @@ A task's scheduling constraint is set directly via the `placement_mode` column. 
 | Property | DB | JS | Type | Set By | Scheduler Effect |
 |----------|-----|-----|------|--------|-----------------|
 | Recurring | `recurring` | `recurring` | bool | User | Routes to Phase 0/1 instead of Phase 2/3. Instances get floor+ceiling on occurrence day. |
-| Recur Config | `recur` | `recur` | JSON | User | `{type, days, every, timesPerCycle, monthDays}`. Drives `expandRecurring` instance generation and flex window computation. |
+| Recur Config | `recur` | `recur` | JSON | User | `{type, days, every, unit, timesPerCycle, monthDays, intervalDays}`. Drives `expandRecurring` instance generation and flex window computation. `type` is required when `recur` is present. For `rolling` and `interval` types, `every` (positive integer) and `unit` (`days`/`weeks`/`months`) control the repeat interval. `intervalDays` is a legacy alias for rolling tasks; `every`+`unit` is preferred. |
 | Recur Start | `recur_start` | `recurStart` | date | User | Earliest date for instance generation. |
 | Recur End | `recur_end` | `recurEnd` | date | User | Latest date for instance generation. |
 | Source ID | `source_id` | `sourceId` | string | System | For instances: points to master. Used for field inheritance and chunk grouping. |
 | Generated | `generated` | `generated` | bool | System | Instance was scheduler-generated. Treated as user-anchored (date preserved). |
 | Occurrence Ordinal | `occurrence_ordinal` | `occurrenceOrdinal` | int | System | Which occurrence of the recurring task (1..N). |
 | Marker | `marker` | `marker` | bool | User | Non-blocking reminder. Shown on calendar, doesn't consume time. Expressed as `placement_mode = 'reminder'` in the DB. The `marker` computed column in `tasks_v` is `CASE WHEN placement_mode = 'reminder' THEN 1 ELSE 0 END`. |
+
+#### Recurrence Types (`recur.type`)
+
+| Type | Description | Required `recur` fields |
+|------|-------------|-------------------------|
+| `daily` | One instance per day | — |
+| `weekly` | One or more specific days of the week | `days` (array of day names) |
+| `biweekly` | Every other week on specific days | `days`, `recurStart` |
+| `monthly` | Specific day(s) of the month | `monthDays` (array of ints) |
+| `interval` | Fixed cadence every N days/weeks/months from `recurStart` | `every` (positive int), `unit` (`days`/`weeks`/`months`), `recurStart` |
+| `rolling` | Re-anchors to last completion; next occurrence is N days/weeks/months after the task is marked done | `every` (positive int), `unit` (`days`/`weeks`/`months`). Legacy: `intervalDays` (int days) accepted as fallback when `every`/`unit` absent. |
+| `none` | Non-recurring placeholder (recur object present but inactive) | — |
+
+**Validation rules enforced by `validateTaskInput`:**
+- `recur.type` is required when a `recur` object is supplied; null or empty string is rejected with `'Recurrence type is required when recur object is provided'`.
+- For `rolling` and `interval`: if `every` is present it must be a positive integer; non-integer and values < 1 are rejected.
+- For `rolling` and `interval`: if `unit` is present it must be `'days'`, `'weeks'`, or `'months'`; any other value is rejected.
+- `intervalDays` on `rolling` tasks is still accepted by `expandRecurring` as a backward-compatible fallback when `every`/`unit` are absent, but new callers should use `every`+`unit`.
 
 ### Priority
 

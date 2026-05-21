@@ -2,7 +2,7 @@
 type: design
 service: juggler
 status: active
-last_updated: 2026-05-19
+last_updated: 2026-05-21
 tags:
   - type/design
   - service/juggler
@@ -14,7 +14,7 @@ tags:
 
 # Scheduler — Design & Test Cases
 
-**Last Updated:** 2026-05-19
+**Last Updated:** 2026-05-21
 
 ## Status
 **Current design.** Single source of truth for the scheduler placement algorithm and its test coverage. Consolidates the earlier `SCHEDULER-PRIORITY-REDESIGN.md`, `SCHEDULER-DEPENDENCY-REDESIGN.md`, and `SCHEDULER-TEST-CASES.md` drafts.
@@ -105,8 +105,11 @@ Each recurrence type has a different "valid days" rule. Within valid days, pick 
 | **Every-N-days** (e.g., every 3) | the computed date | flex within when-window |
 | **Times-per-cycle / weekly-count** (e.g., 3× per week) | any eligible day within the cycle window | flex on both day *and* time |
 | **Monthly-N-times** | any day within the month matching constraints | flex on day and time |
+| **Rolling** (`recur.type = 'rolling'`) | computed date = last completion + interval; re-anchors on each terminal event | flex within when-window on the computed date |
 
 If the occurrence day has already passed and the recurrence has no remaining flexibility, that occurrence is skipped.
+
+**`expandRecurring` interval resolution for rolling tasks:** The expander reads `r.intervalDays` first (legacy field). If absent or null, it falls back to `r.every` + `r.unit` (`days` → N days, `weeks` → N×7 days, `months` → N×30 days). If neither is set, the default interval is 7 days. New tasks should always supply `every` + `unit`; `intervalDays` is retained for backward compatibility only.
 
 #### 4c. Deadline work — slack-based left-to-right placement  *(Phase 2)*
 This is the heart of the scheduler. Fully completed before 4d, so free tasks fill around the committed chain layer.
