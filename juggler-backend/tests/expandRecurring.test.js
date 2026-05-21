@@ -671,6 +671,25 @@ describe('expandRecurring', () => {
       const dates = result.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
       expect(dates).toContain('2026-05-25'); // startDate + 7
     });
+
+    test('null rollingAnchor + old recurStart generates wrong date (demonstrates bug pre-backfill)', () => {
+      // 2026-01-01 + 20*7 = 2026-05-21. With no rollingAnchor the scheduler
+      // falls back to recurStart and emits 5/21, violating the 7-day gap from
+      // the 5/18 completion. runSchedule.js backfills rollingAnchor from
+      // recurringHistoryByMaster before calling expandRecurring to prevent this.
+      const bugSrc = { ...makeRolling(7, null), recurStart: '2026-01-01' };
+      const today = new Date(2026, 4, 21); // 5/21
+      const bugResult = expandRecurring([bugSrc], today, new Date(2026, 4, 28));
+      const bugDates = bugResult.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
+      expect(bugDates).toContain('2026-05-21'); // confirms the bug exists without backfill
+
+      // After backfill: rollingAnchor set to 5/18 (the actual last completion)
+      const fixedSrc = { ...makeRolling(7, '2026-05-18'), recurStart: '2026-01-01' };
+      const fixResult = expandRecurring([fixedSrc], today, new Date(2026, 4, 28));
+      const fixDates = fixResult.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
+      expect(fixDates).not.toContain('2026-05-21'); // spacing respected
+      expect(fixDates).toContain('2026-05-25');     // correct next date: 5/18 + 7
+    });
   });
 
   describe('edge cases', () => {
