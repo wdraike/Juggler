@@ -246,11 +246,11 @@ it('clicking "Flexible quota" when already in flex-mode does not change recurTpc
 
 // --- Task 3: Rolling recurrence mode UI ---
 
-it('recurrence select has "Rolling (after completion)" option', () => {
+it('recurrence select has "Rolling (repeats after completion)" option', () => {
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
     collapse={{ when_recurrence: true, when_constraints: false }}
   />);
-  expect(screen.getByRole('option', { name: 'Rolling (after completion)' })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: 'Rolling (repeats after completion)' })).toBeInTheDocument();
 });
 
 it('rolling mode shows interval input', () => {
@@ -281,7 +281,7 @@ it('rolling mode anchor card shows "not yet set" when rolling_anchor is null', (
     task={{ rolling_anchor: null }}
     collapse={{ when_recurrence: true, when_constraints: false }}
   />);
-  expect(screen.getByText(/Anchor not yet set/)).toBeInTheDocument();
+  expect(screen.getByText(/Not yet completed/)).toBeInTheDocument();
 });
 
 it('rolling mode anchor card shows last completed and next due when rolling_anchor set', () => {
@@ -290,7 +290,7 @@ it('rolling mode anchor card shows last completed and next due when rolling_anch
     task={{ rolling_anchor: '2026-05-19' }}
     collapse={{ when_recurrence: true, when_constraints: false }}
   />);
-  expect(screen.getByText('Last completed')).toBeInTheDocument();
+  expect(screen.getByText('Completed on')).toBeInTheDocument();
   expect(screen.getByText('Next due')).toBeInTheDocument();
 });
 

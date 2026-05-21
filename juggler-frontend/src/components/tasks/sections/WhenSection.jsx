@@ -479,7 +479,7 @@ export default function WhenSection(props) {
               <option value="biweekly">Every 2 weeks</option>
               <option value="monthly">Monthly (pick days)</option>
               <option value="interval">Every N (days/wks/mo/yr)</option>
-              <option value="rolling">Rolling (after completion)</option>
+              <option value="rolling">Rolling (repeats after completion)</option>
             </select>
           </label>
 
@@ -605,7 +605,7 @@ export default function WhenSection(props) {
           {recurType === 'rolling' && (
             <div style={{ marginTop: 4 }}>
               <label style={lStyle}>
-                Repeat every
+                <span title="The next due date counts forward from the day you mark this done, not from a fixed calendar.">Repeat every</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <input
                     type="number" min={1} value={recurEvery || 7}
@@ -613,6 +613,7 @@ export default function WhenSection(props) {
                     style={{ ...iStyle, width: 50 }}
                   />
                   <select
+                    aria-label="Interval unit"
                     value={recurUnit || 'days'}
                     onChange={function(e) { onRecurUnitChange(e.target.value); }}
                     style={{ ...iStyle, width: 'auto' }}
@@ -621,15 +622,18 @@ export default function WhenSection(props) {
                     <option value="weeks">weeks</option>
                     <option value="months">months</option>
                   </select>
-                  <span style={{ fontSize: 10, color: TH.textMuted }}>after completion</span>
+                  <span style={{ fontSize: 10, color: TH.textMuted }}>after you mark it done</span>
                 </div>
               </label>
+              <div style={{ fontSize: 11, color: TH.textMuted, marginTop: 2 }}>
+                Each time you complete this task, a new one is scheduled {recurEvery || 7} {recurUnit || 'days'} later.
+              </div>
               <div style={{ marginTop: 8 }}>
-                <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Rolling anchor</div>
+                <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Last completion</div>
                 {(task && task.rolling_anchor) ? (
                   <div style={{ display: 'flex', gap: 16, background: TH.bgCard, border: '1px solid ' + TH.inputBorder, borderRadius: 4, padding: '6px 10px', fontSize: 11 }}>
                     <div>
-                      <div style={{ fontSize: 9, color: TH.textMuted, marginBottom: 1 }}>Last completed</div>
+                      <div style={{ fontSize: 9, color: TH.textMuted, marginBottom: 1 }}>Completed on</div>
                       <div style={{ color: TH.text, fontWeight: 500 }}>{formatAnchorDate(task.rolling_anchor)}</div>
                     </div>
                     <div>
@@ -639,7 +643,7 @@ export default function WhenSection(props) {
                   </div>
                 ) : (
                   <div style={{ fontSize: 10, color: TH.textMuted, fontStyle: 'italic' }}>
-                    Anchor not yet set — computed from first completion
+                    Not yet completed — the due date will be set after the first time you mark this done
                   </div>
                 )}
               </div>
