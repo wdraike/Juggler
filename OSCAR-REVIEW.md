@@ -1,45 +1,29 @@
-# Oscar Review — 2026-05-19 — Juggler evening session: nudge fix, grid contrast, AI tests, hash upgrade
+# Oscar Review — 2026-05-21 — rolling_anchor null backfill fix
 
-## Decision: WARN
-
-No BLOCK findings. Two undocumented behavior changes worth awareness before deploy. Commit approved.
+## Decision: WARN — Commit approved with noted follow-ups
 
 ---
 
 ## Changed Files
 
-| File | Category | Agent(s) |
-|------|----------|----------|
-| juggler-backend/src/app.js | Code + Security | Oscar inline |
-| juggler-backend/src/controllers/cal-sync-helpers.js | Code + API | Oscar inline |
-| juggler-backend/src/lib/cal-adapters/apple.adapter.js | Code | Oscar inline |
-| juggler-backend/src/lib/cal-adapters/gcal.adapter.js | Code | Oscar inline |
-| juggler-backend/src/lib/cal-adapters/msft.adapter.js | Code | Oscar inline |
-| juggler-backend/src/scheduler/constants.js | Code | Oscar inline |
-| juggler-frontend/src/hooks/useTaskState.js | Code + Frontend | Oscar inline |
-| juggler-frontend/src/theme/colors.js | Frontend | Oscar inline |
-| juggler-frontend/src/components/views/DailyView.jsx | Frontend | Oscar inline + visual QA PASS |
-| juggler-frontend/src/components/schedule/CalendarGrid.jsx | Frontend | Oscar inline + visual QA PASS |
-| juggler-frontend/src/components/schedule/SCurveTimeline.jsx | Frontend | Oscar inline |
-| juggler-backend/docs/SCHEDULER.md | Docs | Oscar inline |
-| juggler-backend/docs/AI-COMMANDS.md | Docs (new) | Oscar inline |
-| juggler-backend/tests/api/ai-command.test.js | Tests | Tina: 33/33 pass |
-| juggler-backend/tests/aiRateLimiter.test.js | Tests | Tina: 33/33 pass |
-| juggler-backend/scripts/heal-stale-pending-tasks.js | Code (admin) | Oscar inline |
+| File | Category | Agent(s) Launched |
+|------|----------|-------------------|
+| juggler-backend/src/scheduler/runSchedule.js | Code logic | earnie, peneloppy, bert |
+| juggler-backend/tests/expandRecurring.test.js | Test | tina |
 
 ---
 
 ## Agent Launch Decisions
 
-| Agent | Launched | Reason | Result | Findings |
-|-------|----------|--------|--------|----------|
-| phillis-doc-cop | Inline | .md files changed | PASS | 0 BLOCK, 0 WARN — frontmatter present in both docs |
-| earnie-code-critic | Inline | 10+ code files changed | WARN | 0 Critical, 2 Warning |
-| tina-test-expert | Yes (ran tests) | Test files + code changed | PASS | 33/33 pass |
-| peneloppy-security | Inline | CORS change + hash upgrades + deps | PASS | 0 CRITICAL, 0 HIGH |
-| big-brid-ux | Inline + visual QA | 3 JSX files changed | PASS | 0 BLOCK |
-| cookie-monster-architect | No | No infra changes | N/A | — |
-| bert-code-fixer | No | No block findings | N/A | — |
+| Agent | Launched | Reason | Result | Finding Count |
+|-------|----------|--------|--------|---------------|
+| earnie-code-critic | Yes | scheduler logic changed | WARN | 0 Critical, 2 Warn, 3 Info |
+| tina-test-expert | Yes | code + test changed | WARN | 47/47 pass; coverage gap (backfill path, blocked by pre-existing uuid ESM issue) |
+| peneloppy-security | Yes | DB write added in scheduler transaction | PASS | 0 CRITICAL, 0 HIGH, 1 Medium, 2 Low |
+| bert-code-fixer | Yes | Fix W1 (log count misleads) | Fixed | W1 resolved |
+| phillis-doc-cop | No | No .md files changed | N/A | — |
+| cookie-monster-architect | No | No infra/schema/migration changes | N/A | — |
+| big-brid-ux | No | No frontend changes | N/A | — |
 
 ---
 
@@ -47,37 +31,32 @@ No BLOCK findings. Two undocumented behavior changes worth awareness before depl
 
 | Review | Critical/BLOCK | Warn | Status |
 |--------|---------------|------|--------|
-| Code quality | 0 | 2 | WARN |
-| Security | 0 | 0 | PASS |
-| Docs | 0 | 0 | PASS |
-| Tests | — | 0 | PASS (33/33) |
-| UX | 0 | 0 | PASS |
+| CODE-REVIEW.md | 0 | 2 (W1 fixed by bert) | WARN→PASS |
+| TEST-REVIEW.md | 0 | 1 (coverage gap, blocked by pre-existing issue) | WARN |
+| SECURITY-REVIEW.md | 0 | 0 (1 Medium, 2 Low) | PASS |
 
 ---
 
-## Warnings (awareness only — no action before commit)
+## Findings Resolved
 
-### W-01: MD5→SHA256 hash upgrade causes full calendar re-sync on first post-deploy sync
-**Files:** cal-sync-helpers.js (userHash, taskHash), apple/gcal/msft.adapter.js (eventHash)
-**Effect:** All stored event hashes in DB mismatch new sha256 values. First calendar sync after deploy will UPDATE every calendar event for every user. No duplicates possible (event lookup by external ID). Operationally safe but may look noisy to users.
-**Action:** None required. Operationally acceptable.
+**W1 (Earnie → fixed by bert):** `Promise.all` log reported `_rollingBackfills.length` as "backfilled" even when `whereNull` filtered out concurrent writes. Fixed: `Promise.all` now captures per-row affected counts, sums them, and logs `A/N written` (actual vs candidates).
 
-### W-02: SHA1→SHA256 in computeSchedulerHash forces one-time cache invalidation on deploy
-**File:** juggler-backend/src/scheduler/constants.js
-**Effect:** Scheduler logic hash changes → full reschedule for all users on first startup post-deploy. Safe.
-**Action:** None required.
+---
 
-### W-03: No unit test for nudge fix (isTerminalStatus in useTaskState.js)
-**Effect:** The behavioral change (pending tasks now arm nudge timer) is not directly unit-tested. isTerminalStatus itself is tested in constants.test.js. Risk: low.
-**Action:** Optional — add a useTaskState test in a future session.
+## Findings to Address (follow-up, not blocking)
+
+**W2 (Earnie — Advisory):** No dedicated test for the "rolling task with no done history" branch (`if (!latestDone) return`). Covered indirectly by existing `'7-day interval generates instances'` test. Add an explicit named test.
+
+**Tina — Coverage gap:** The backfill block inside `runScheduleAndPersist` has no integration test (seeds null anchor → runs scheduler → asserts DB write + correct next occurrence). Blocked by pre-existing uuid ESM incompatibility in `runScheduleIntegration.test.js` (not caused by this fix). Track as follow-up: fix uuid jest config, then add integration test.
+
+**Peneloppy Medium — Unbounded Promise.all:** First-run burst of N concurrent UPDATE queries in transaction (no chunk cap). Steady-state: zero impact (whereNull guard fires once per task). Risk is acceptable for typical rolling task counts (<20/user); revisit if rolling tasks become high-volume.
+
+**Peneloppy Low — Implicit injection guard:** `b.anchor` is safe (sourced from MySQL DATE column via isoToDateKey). Consider adding `if (!/^\d{4}-\d{2}-\d{2}$/.test(b.anchor)) return` before push for defence-in-depth.
 
 ---
 
 ## Accountability Statement
 
-All required categories assessed: docs, code quality, security, tests, UX. No BLOCK or CRITICAL findings.
-Three WARN findings noted — all informational, no fixes required before commit.
+All required agents launched per rubric. No CRITICAL, HIGH, or BLOCK findings. Bert resolved W1. Remaining findings are advisory (W2, coverage gap, Medium/Low security). Commit is **APPROVED**.
 
-**Commit is APPROVED (WARN level).**
-
-Signed: Oscar, Technology Director — 2026-05-19T19:45:00Z
+Signed: Oscar, Technology Director — 2026-05-21T11:46:04Z

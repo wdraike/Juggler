@@ -36,7 +36,7 @@ var COMMON_HANDLERS = {
   onMarkerChange: noop, onFlexWhenChange: noop, onDatePinnedChange: noop,
   onDayReqChange: noop, onWhenChange: noop, onTimeRemainingChange: noop,
   onChangeTz: noop, toggleCollapse: noop, onModeChange: noop,
-  onHasPreferredTimeChange: noop,
+  onHasPreferredTimeChange: noop, onRecurUnitChange: noop, onRecurFillPolicyChange: noop,
 };
 
 it('renders date field', () => {
@@ -147,4 +147,168 @@ it('All Day button calls onModeChange with all_day', () => {
   />);
   fireEvent.click(screen.getByTitle(/Spans the entire day/));
   expect(called).toBe('all_day');
+});
+
+it('day picker label says "Eligible days" for weekly recurrence', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MTWRF"
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByText('Eligible days')).toBeInTheDocument();
+});
+
+it('recurrence select has option "Every 2 weeks" not "Biweekly"', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.queryByRole('option', { name: 'Biweekly' })).not.toBeInTheDocument();
+  expect(screen.getByRole('option', { name: 'Every 2 weeks' })).toBeInTheDocument();
+});
+
+// --- Task 2: Sub-mode split toggle for weekly/biweekly flexible quota ---
+
+it('shows "All N days" / "Flexible quota" toggle when selectedCount > 1 for weekly', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={3}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByText('All 3 days')).toBeInTheDocument();
+  expect(screen.getByText('Flexible quota')).toBeInTheDocument();
+});
+
+it('"All N days" is active when recurTpc === selectedCount', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={3}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  var allBtn = screen.getByText('All 3 days');
+  expect(allBtn.style.fontWeight).toBe('600');
+});
+
+it('"Flexible quota" is active when recurTpc < selectedCount', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={2}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  var flexBtn = screen.getByText('Flexible quota');
+  expect(flexBtn.style.fontWeight).toBe('600');
+});
+
+it('clicking "All N days" calls onRecurTpcChange with selectedCount', () => {
+  var called = null;
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={2}
+    onRecurTpcChange={function(v) { called = v; }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  fireEvent.click(screen.getByText('All 3 days'));
+  expect(called).toBe(3);
+});
+
+it('clicking "Flexible quota" when tpc===selectedCount calls onRecurTpcChange with selectedCount-1', () => {
+  var called = null;
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={3}
+    onRecurTpcChange={function(v) { called = v; }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  fireEvent.click(screen.getByText('Flexible quota'));
+  expect(called).toBe(2);
+});
+
+it('tpc select not shown when "All N days" is active', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={3}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  // In All mode the select and its label are not rendered
+  expect(screen.queryByText('Complete per cycle')).not.toBeInTheDocument();
+});
+
+it('tpc select IS shown when "Flexible quota" is active', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={2}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByText('Complete per cycle')).toBeInTheDocument();
+});
+
+it('clicking "Flexible quota" when already in flex-mode does not change recurTpc', () => {
+  var called = false;
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={1}
+    onRecurTpcChange={function() { called = true; }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  fireEvent.click(screen.getByText('Flexible quota'));
+  expect(called).toBe(false);
+});
+
+// --- Task 3: Rolling recurrence mode UI ---
+
+it('recurrence select has "Rolling (after completion)" option', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByRole('option', { name: 'Rolling (after completion)' })).toBeInTheDocument();
+});
+
+it('rolling mode shows interval input', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
+    task={{ rolling_anchor: null }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByText('Repeat every')).toBeInTheDocument();
+  expect(screen.getByDisplayValue('7')).toBeInTheDocument();
+});
+
+it('rolling mode shows unit select with days/weeks/months options', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
+    task={{ rolling_anchor: null }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByRole('option', { name: 'days' })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: 'weeks' })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: 'months' })).toBeInTheDocument();
+  expect(screen.queryByRole('option', { name: 'years' })).not.toBeInTheDocument();
+});
+
+it('rolling mode anchor card shows "not yet set" when rolling_anchor is null', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
+    task={{ rolling_anchor: null }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByText(/Anchor not yet set/)).toBeInTheDocument();
+});
+
+it('rolling mode anchor card shows last completed and next due when rolling_anchor set', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
+    task={{ rolling_anchor: '2026-05-19' }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByText('Last completed')).toBeInTheDocument();
+  expect(screen.getByText('Next due')).toBeInTheDocument();
+});
+
+it('rolling mode hides day picker', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
+    task={{ rolling_anchor: null }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.queryByText('Eligible days')).not.toBeInTheDocument();
+});
+
+it('rolling mode hides fill policy', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="rolling" recurEvery={7} recurUnit="days"
+    task={{ rolling_anchor: null }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.queryByText(/Keep the schedule/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Backfill missed/)).not.toBeInTheDocument();
 });

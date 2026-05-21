@@ -339,6 +339,34 @@ async function runScheduleAndPersist(userId, _retries, options) {
     allTasks.push({ id: '_dedup_' + r.source_id + '_' + dateKey, sourceId: r.source_id, date: dateKey, taskType: 'recurring_instance', text: '', status: 'done' });
   });
 
+  // Backfill: rolling tasks whose rolling_anchor is null because the last
+  // completion happened before the rolling-anchor feature shipped (2026-05-20).
+  // Without an anchor, getAnchor() falls back to recurStart, and the arithmetic
+  // projection can land on a date that violates the spacing guarantee. Use the
+  // latest done date from recurringHistoryByMaster as the in-memory anchor, and
+  // persist it so subsequent runs don't repeat the work.
+  var _rollingBackfills = [];
+  allTasks.forEach(function(t) {
+    if (t.taskType !== 'recurring_template') return;
+    if (!t.recur || t.recur.type !== 'rolling') return;
+    if (t.rollingAnchor) return; // already set — normal path
+    var latestDone = recurringHistoryByMaster[t.id];
+    if (!latestDone) return;
+    t.rollingAnchor = latestDone; // fix in-memory for this run
+    _rollingBackfills.push({ id: t.id, anchor: latestDone });
+  });
+  if (_rollingBackfills.length > 0) {
+    var _backfillCounts = await Promise.all(_rollingBackfills.map(function(b) {
+      return trx('task_masters')
+        .where({ id: b.id, user_id: userId })
+        .whereNull('rolling_anchor')
+        .update({ rolling_anchor: b.anchor, updated_at: trx.fn.now() });
+    }));
+    var _backfillActual = _backfillCounts.reduce(function(s, n) { return s + (n || 0); }, 0);
+    console.log('[SCHED] rolling_anchor backfill: ' + _backfillActual + '/' + _rollingBackfills.length + ' written: ' +
+      _rollingBackfills.map(function(b) { return b.id + '→' + b.anchor; }).join(', '));
+  }
+
   // 2a. Normalize empty `when` to all five standard day windows. Users treat
   // no-when-set as "place whenever," not "skip scheduling" — the placement
   // phase requires a non-empty when-tag to match against day windows.

@@ -41,6 +41,20 @@ export function minutesFrom24h(hhmm) {
   return h * 60 + m;
 }
 
+function addIntervalToDate(dateStr, every, unit) {
+  var d = new Date(dateStr + 'T00:00:00');
+  var n = parseInt(every, 10) || 1;
+  if (unit === 'weeks') { d.setDate(d.getDate() + n * 7); }
+  else if (unit === 'months') { var day = d.getDate(); d.setDate(1); d.setMonth(d.getMonth() + n); var max = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); d.setDate(Math.min(day, max)); }
+  else { d.setDate(d.getDate() + n); }
+  return d.toISOString().slice(0, 10);
+}
+
+function formatAnchorDate(dateStr) {
+  var d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 function TimezoneSelector({ taskTz, onChangeTz, TH }) {
   var [tzSearch, setTzSearch] = React.useState('');
   var [tzOpen, setTzOpen] = React.useState(false);
@@ -462,9 +476,10 @@ export default function WhenSection(props) {
               <option value="none">None</option>
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
-              <option value="biweekly">Biweekly</option>
+              <option value="biweekly">Every 2 weeks</option>
               <option value="monthly">Monthly (pick days)</option>
               <option value="interval">Every N (days/wks/mo/yr)</option>
+              <option value="rolling">Rolling (after completion)</option>
             </select>
           </label>
 
@@ -472,7 +487,7 @@ export default function WhenSection(props) {
             var selectedCount = recurDays ? recurDays.length : 0;
             return (
               <label style={lStyle}>
-                Days
+                Eligible days
                 <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
                   <button onClick={function() { onRecurDaysChange('MTWRF'); }} style={togStyle(recurDays === 'MTWRF', '#4338CA')}>Wkday</button>
                   <button onClick={function() { onRecurDaysChange('SU'); }} style={togStyle(recurDays === 'SU' || recurDays === 'US', '#4338CA')}>Wkend</button>
@@ -487,21 +502,44 @@ export default function WhenSection(props) {
                     );
                   })}
                 </div>
-                {selectedCount > 1 && (
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
-                    <span style={{ fontSize: 10, color: TH.textMuted }}>Times per {recurType === 'biweekly' ? '2 weeks' : 'week'}:</span>
-                    <select value={recurTpc || selectedCount} onChange={function(e) { onRecurTpcChange(parseInt(e.target.value)); }}
-                      style={{ ...iStyle, width: 'auto', minWidth: 50 }}>
-                      {Array.from({ length: selectedCount }, function(_, i) { return i + 1; }).map(function(n) {
-                        return <option key={n} value={n}>{n}{n === selectedCount ? ' (all)' : ''}</option>;
-                      })}
-                    </select>
-                    {(recurTpc > 0 && recurTpc < selectedCount) && (
-                      <span style={{ fontSize: 9, color: '#C8942A' }}>≈every {Math.round((recurType === 'biweekly' ? 14 : 7) / recurTpc * 10) / 10} days</span>
-                    )}
-                  </div>
-                )}
-                {(recurTpc > 0 && recurTpc < selectedCount) && FillPolicyBlock('week')}
+                {selectedCount > 1 && (function() {
+                  var isAllMode = (recurTpc || selectedCount) === selectedCount;
+                  var cycleLabel = recurType === 'biweekly' ? '2 weeks' : 'week';
+                  return (
+                    <div style={{ marginTop: 4 }}>
+                      <div role="group" aria-label="Sessions per cycle" style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+                        <button
+                          onClick={function() { onRecurTpcChange(selectedCount); }}
+                          aria-pressed={isAllMode}
+                          style={togStyle(isAllMode, '#2D6A4F')}
+                        >All {selectedCount} days</button>
+                        <button
+                          onClick={function() { if (isAllMode) onRecurTpcChange(selectedCount - 1); }}
+                          aria-pressed={!isAllMode}
+                          style={togStyle(!isAllMode, '#C8942A')}
+                        >Flexible quota</button>
+                      </div>
+                      {!isAllMode && (
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
+                          <span style={{ fontSize: 10, color: TH.textMuted }}>Complete per cycle</span>
+                          <select
+                            value={recurTpc || (selectedCount - 1)}
+                            onChange={function(e) { onRecurTpcChange(parseInt(e.target.value)); }}
+                            style={{ ...iStyle, width: 'auto', minWidth: 50 }}
+                          >
+                            {Array.from({ length: selectedCount - 1 }, function(_, i) { return i + 1; }).map(function(n) {
+                              return <option key={n} value={n}>{n}</option>;
+                            })}
+                          </select>
+                          <span style={{ fontSize: 9, color: '#C8942A' }}>
+                            ≈every {Math.round(((recurType === 'biweekly' ? 14 : 7) / (recurTpc || (selectedCount - 1))) * 10) / 10} days
+                          </span>
+                        </div>
+                      )}
+                      {!isAllMode && FillPolicyBlock(cycleLabel)}
+                    </div>
+                  );
+                })()}
               </label>
             );
           })()}
@@ -562,6 +600,50 @@ export default function WhenSection(props) {
                 </select>
               </div>
             </label>
+          )}
+
+          {recurType === 'rolling' && (
+            <div style={{ marginTop: 4 }}>
+              <label style={lStyle}>
+                Repeat every
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <input
+                    type="number" min={1} value={recurEvery || 7}
+                    onChange={function(e) { onRecurEveryChange(e.target.value); }}
+                    style={{ ...iStyle, width: 50 }}
+                  />
+                  <select
+                    value={recurUnit || 'days'}
+                    onChange={function(e) { onRecurUnitChange(e.target.value); }}
+                    style={{ ...iStyle, width: 'auto' }}
+                  >
+                    <option value="days">days</option>
+                    <option value="weeks">weeks</option>
+                    <option value="months">months</option>
+                  </select>
+                  <span style={{ fontSize: 10, color: TH.textMuted }}>after completion</span>
+                </div>
+              </label>
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4 }}>Rolling anchor</div>
+                {(task && task.rolling_anchor) ? (
+                  <div style={{ display: 'flex', gap: 16, background: TH.bgCard, border: '1px solid ' + TH.inputBorder, borderRadius: 4, padding: '6px 10px', fontSize: 11 }}>
+                    <div>
+                      <div style={{ fontSize: 9, color: TH.textMuted, marginBottom: 1 }}>Last completed</div>
+                      <div style={{ color: TH.text, fontWeight: 500 }}>{formatAnchorDate(task.rolling_anchor)}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 9, color: TH.textMuted, marginBottom: 1 }}>Next due</div>
+                      <div style={{ color: TH.accent, fontWeight: 500 }}>{formatAnchorDate(addIntervalToDate(task.rolling_anchor, recurEvery || 7, recurUnit || 'days'))}</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 10, color: TH.textMuted, fontStyle: 'italic' }}>
+                    Anchor not yet set — computed from first completion
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
 
