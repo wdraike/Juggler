@@ -356,13 +356,14 @@ async function runScheduleAndPersist(userId, _retries, options) {
     _rollingBackfills.push({ id: t.id, anchor: latestDone });
   });
   if (_rollingBackfills.length > 0) {
-    await Promise.all(_rollingBackfills.map(function(b) {
+    var _backfillCounts = await Promise.all(_rollingBackfills.map(function(b) {
       return trx('task_masters')
         .where({ id: b.id, user_id: userId })
         .whereNull('rolling_anchor')
         .update({ rolling_anchor: b.anchor, updated_at: trx.fn.now() });
     }));
-    console.log('[SCHED] rolling_anchor backfilled for ' + _rollingBackfills.length + ' task(s): ' +
+    var _backfillActual = _backfillCounts.reduce(function(s, n) { return s + (n || 0); }, 0);
+    console.log('[SCHED] rolling_anchor backfill: ' + _backfillActual + '/' + _rollingBackfills.length + ' written: ' +
       _rollingBackfills.map(function(b) { return b.id + '→' + b.anchor; }).join(', '));
   }
 
