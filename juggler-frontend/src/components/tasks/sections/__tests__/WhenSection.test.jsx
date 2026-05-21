@@ -36,7 +36,7 @@ var COMMON_HANDLERS = {
   onMarkerChange: noop, onFlexWhenChange: noop, onDatePinnedChange: noop,
   onDayReqChange: noop, onWhenChange: noop, onTimeRemainingChange: noop,
   onChangeTz: noop, toggleCollapse: noop, onModeChange: noop,
-  onHasPreferredTimeChange: noop,
+  onHasPreferredTimeChange: noop, onRecurUnitChange: noop, onRecurFillPolicyChange: noop,
 };
 
 it('renders date field', () => {

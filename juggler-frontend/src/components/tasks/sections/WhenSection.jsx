@@ -45,7 +45,7 @@ function addIntervalToDate(dateStr, every, unit) {
   var d = new Date(dateStr + 'T00:00:00');
   var n = parseInt(every, 10) || 1;
   if (unit === 'weeks') { d.setDate(d.getDate() + n * 7); }
-  else if (unit === 'months') { d.setMonth(d.getMonth() + n); }
+  else if (unit === 'months') { var day = d.getDate(); d.setDate(1); d.setMonth(d.getMonth() + n); var max = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate(); d.setDate(Math.min(day, max)); }
   else { d.setDate(d.getDate() + n); }
   return d.toISOString().slice(0, 10);
 }
