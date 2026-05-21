@@ -164,3 +164,71 @@ it('recurrence select has option "Every 2 weeks" not "Biweekly"', () => {
   expect(screen.queryByRole('option', { name: 'Biweekly' })).not.toBeInTheDocument();
   expect(screen.getByRole('option', { name: 'Every 2 weeks' })).toBeInTheDocument();
 });
+
+// --- Task 2: Sub-mode split toggle for weekly/biweekly flexible quota ---
+
+it('shows "All N days" / "Flexible quota" toggle when selectedCount > 1 for weekly', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={3}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByText('All 3 days')).toBeInTheDocument();
+  expect(screen.getByText('Flexible quota')).toBeInTheDocument();
+});
+
+it('"All N days" is active when recurTpc === selectedCount', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={3}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  var allBtn = screen.getByText('All 3 days');
+  expect(allBtn.style.fontWeight).toBe('600');
+});
+
+it('"Flexible quota" is active when recurTpc < selectedCount', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={2}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  var flexBtn = screen.getByText('Flexible quota');
+  expect(flexBtn.style.fontWeight).toBe('600');
+});
+
+it('clicking "All N days" calls onRecurTpcChange with selectedCount', () => {
+  var called = null;
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={2}
+    onRecurTpcChange={function(v) { called = v; }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  fireEvent.click(screen.getByText('All 3 days'));
+  expect(called).toBe(3);
+});
+
+it('clicking "Flexible quota" when tpc===selectedCount calls onRecurTpcChange with selectedCount-1', () => {
+  var called = null;
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={3}
+    onRecurTpcChange={function(v) { called = v; }}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  fireEvent.click(screen.getByText('Flexible quota'));
+  expect(called).toBe(2);
+});
+
+it('tpc select not shown when "All N days" is active', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={3}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  // In All mode the select and its label are not rendered
+  expect(screen.queryByText('Complete per cycle')).not.toBeInTheDocument();
+});
+
+it('tpc select IS shown when "Flexible quota" is active', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    recurring={true} recurType="weekly" recurDays="MWF" recurTpc={2}
+    collapse={{ when_recurrence: true, when_constraints: false }}
+  />);
+  expect(screen.getByText('Complete per cycle')).toBeInTheDocument();
+});

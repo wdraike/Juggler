@@ -487,21 +487,44 @@ export default function WhenSection(props) {
                     );
                   })}
                 </div>
-                {selectedCount > 1 && (
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
-                    <span style={{ fontSize: 10, color: TH.textMuted }}>Times per {recurType === 'biweekly' ? '2 weeks' : 'week'}:</span>
-                    <select value={recurTpc || selectedCount} onChange={function(e) { onRecurTpcChange(parseInt(e.target.value)); }}
-                      style={{ ...iStyle, width: 'auto', minWidth: 50 }}>
-                      {Array.from({ length: selectedCount }, function(_, i) { return i + 1; }).map(function(n) {
-                        return <option key={n} value={n}>{n}{n === selectedCount ? ' (all)' : ''}</option>;
-                      })}
-                    </select>
-                    {(recurTpc > 0 && recurTpc < selectedCount) && (
-                      <span style={{ fontSize: 9, color: '#C8942A' }}>≈every {Math.round((recurType === 'biweekly' ? 14 : 7) / recurTpc * 10) / 10} days</span>
-                    )}
-                  </div>
-                )}
-                {(recurTpc > 0 && recurTpc < selectedCount) && FillPolicyBlock('week')}
+                {selectedCount > 1 && (function() {
+                  var isAllMode = (recurTpc || selectedCount) === selectedCount;
+                  var cycleLabel = recurType === 'biweekly' ? '2 weeks' : 'week';
+                  return (
+                    <div style={{ marginTop: 4 }}>
+                      <div role="group" aria-label="Sessions per cycle" style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+                        <button
+                          onClick={function() { onRecurTpcChange(selectedCount); }}
+                          aria-pressed={isAllMode}
+                          style={togStyle(isAllMode, '#2D6A4F')}
+                        >All {selectedCount} days</button>
+                        <button
+                          onClick={function() { onRecurTpcChange(selectedCount - 1); }}
+                          aria-pressed={!isAllMode}
+                          style={togStyle(!isAllMode, '#C8942A')}
+                        >Flexible quota</button>
+                      </div>
+                      {!isAllMode && (
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
+                          <span style={{ fontSize: 10, color: TH.textMuted }}>Complete per cycle</span>
+                          <select
+                            value={recurTpc || (selectedCount - 1)}
+                            onChange={function(e) { onRecurTpcChange(parseInt(e.target.value)); }}
+                            style={{ ...iStyle, width: 'auto', minWidth: 50 }}
+                          >
+                            {Array.from({ length: selectedCount - 1 }, function(_, i) { return i + 1; }).map(function(n) {
+                              return <option key={n} value={n}>{n}</option>;
+                            })}
+                          </select>
+                          <span style={{ fontSize: 9, color: '#C8942A' }}>
+                            ≈every {Math.round(((recurType === 'biweekly' ? 14 : 7) / (recurTpc || (selectedCount - 1))) * 10) / 10} days
+                          </span>
+                        </div>
+                      )}
+                      {!isAllMode && FillPolicyBlock(cycleLabel)}
+                    </div>
+                  );
+                })()}
               </label>
             );
           })()}
