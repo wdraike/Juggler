@@ -1,3 +1,16 @@
+---
+type: design
+service: juggler
+status: active
+last_updated: 2026-05-15
+tags:
+  - type/design
+  - service/juggler
+  - status/active
+  - cal-sync
+  - testing
+---
+
 # Cal-Sync Test Suite Expansion — Design Spec
 
 **Date:** 2026-05-15  

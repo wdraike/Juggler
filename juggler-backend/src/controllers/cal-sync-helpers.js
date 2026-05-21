@@ -158,7 +158,7 @@ function userHash(task) {
     Array.isArray(task.location) ? task.location.slice().sort().join(',') : '',
     Array.isArray(task.tools) ? task.tools.slice().sort().join(',') : ''
   ].join('|');
-  return crypto.createHash('sha256').update(str).digest('hex');
+  return crypto.createHash('md5').update(str).digest('hex');
 }
 
 /**
@@ -189,7 +189,7 @@ function taskHash(task) {
     Array.isArray(task.location) ? task.location.slice().sort().join(',') : '',
     Array.isArray(task.tools) ? task.tools.slice().sort().join(',') : ''
   ].join('|');
-  return crypto.createHash('sha256').update(str).digest('hex');
+  return crypto.createHash('md5').update(str).digest('hex');
 }
 
 /**

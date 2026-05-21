@@ -1,62 +1,59 @@
-# Oscar Review — 2026-05-21 — rolling_anchor null backfill fix
+# Oscar Review — 2026-05-20 — fix(260519-rqg-01): fix TaskCard Row 2 + ListView header overflow (JUG-MED-11)
 
-## Decision: WARN — Commit approved with noted follow-ups
+## Decision: PASS
 
----
+**Rationale:** Four files staged across frontend and backend. All categories reviewed per rubric. No BLOCK findings, no CRITICAL security findings, no test failures.
 
 ## Changed Files
-
 | File | Category | Agent(s) Launched |
 |------|----------|-------------------|
-| juggler-backend/src/scheduler/runSchedule.js | Code logic | earnie, peneloppy, bert |
-| juggler-backend/tests/expandRecurring.test.js | Test | tina |
-
----
+| juggler-backend/src/routes/billing-webhooks.routes.js | API + Security-sensitive (billing/webhook) | earnie-code-critic, peneloppy-security, tina-test-expert |
+| juggler-frontend/src/components/tasks/TaskCard.jsx | Frontend + Code logic | big-brid-ux, earnie-code-critic, tina-test-expert |
+| juggler-frontend/src/components/tasks/__tests__/TaskCard.overflow.test.jsx | Test files | tina-test-expert |
+| juggler-frontend/src/components/views/ListView.jsx | Frontend + Code logic | big-brid-ux, earnie-code-critic, tina-test-expert |
 
 ## Agent Launch Decisions
-
 | Agent | Launched | Reason | Result | Finding Count |
 |-------|----------|--------|--------|---------------|
-| earnie-code-critic | Yes | scheduler logic changed | WARN | 0 Critical, 2 Warn, 3 Info |
-| tina-test-expert | Yes | code + test changed | WARN | 47/47 pass; coverage gap (backfill path, blocked by pre-existing uuid ESM issue) |
-| peneloppy-security | Yes | DB write added in scheduler transaction | PASS | 0 CRITICAL, 0 HIGH, 1 Medium, 2 Low |
-| bert-code-fixer | Yes | Fix W1 (log count misleads) | Fixed | W1 resolved |
-| phillis-doc-cop | No | No .md files changed | N/A | — |
-| cookie-monster-architect | No | No infra/schema/migration changes | N/A | — |
-| big-brid-ux | No | No frontend changes | N/A | — |
-
----
+| earnie-code-critic | Yes (inline) | API + code logic + frontend changes | PASS | 0 Critical, 0 Warning |
+| peneloppy-security | Yes (inline) | billing-webhooks.routes.js: security-sensitive | PASS | 0 CRITICAL, 0 HIGH |
+| tina-test-expert | Yes (inline) | Code logic + test files + API | PASS | 99/99 tests pass |
+| big-brid-ux | Yes (inline) | Frontend .jsx changed | PASS | 0 BLOCK, 0 WARN |
+| phillis-doc-cop | No | No .md files staged (non-planning) | N/A | — |
+| cookie-monster-architect | No | No infra/terraform/deploy files staged | N/A | — |
+| jordan-doc-writer | No | No doc requirement triggered | N/A | — |
+| bert-code-fixer | No | No findings to fix | N/A | — |
 
 ## Review Summary
 
-| Review | Critical/BLOCK | Warn | Status |
+### earnie-code-critic — Code Quality
+- `billing-webhooks.routes.js`: Removes `if (!secret) { return next(); }` dev bypass. Replaces with `res.status(500)`. Minimal, correct, safe. **0 Critical, 0 Warning.**
+- `TaskCard.jsx`: Adds `flexWrap: 'wrap', minWidth: 0` to Row 2 div; `flex: '1 1 0%', minWidth: 0` to spacer; 3 data-testid attributes. Minimal CSS-only change. Memo comparator unaffected. **0 Critical, 0 Warning.**
+- `ListView.jsx`: Adds `flexWrap: 'wrap', minWidth: 0` to header div. One-line change. **0 Critical, 0 Warning.**
+
+### peneloppy-security — Security Audit
+- `billing-webhooks.routes.js`: Change **removes** a security vulnerability. The old code silently processed unsigned webhooks when no secret was configured (dangerous in misconfigured prod). The new code returns HTTP 500 instead — fail-closed behavior. This is a security improvement, not a risk. **0 CRITICAL, 0 HIGH.**
+
+### tina-test-expert — Test Coverage
+- New `TaskCard.overflow.test.jsx`: 3 tests, all pass. Cover Row 2 flexWrap/minWidth, card root overflow:hidden preservation, and Row 1 title ellipsis regression guard.
+- Full suite: 99/99 pass (no regressions introduced).
+- **Decision: PASS.**
+
+### big-brid-ux — UI/UX
+- `flexWrap: 'wrap'` on TaskCard Row 2: Correct fix — badges wrap to next line instead of being clipped by card root overflow:hidden. Consistent with plan spec.
+- `flexWrap: 'wrap'` on ListView date-group header: Correct fix — WeatherBadge + count badge wrap at narrow viewports.
+- No visual regressions expected. Card chrome (rounded corners, colored left-border bar) unaffected (overflow:hidden preserved on card root).
+- **Decision: PASS.**
+
+## Review Summary Table
+| Review | BLOCK/CRITICAL | WARN | Status |
 |--------|---------------|------|--------|
-| CODE-REVIEW.md | 0 | 2 (W1 fixed by bert) | WARN→PASS |
-| TEST-REVIEW.md | 0 | 1 (coverage gap, blocked by pre-existing issue) | WARN |
-| SECURITY-REVIEW.md | 0 | 0 (1 Medium, 2 Low) | PASS |
-
----
-
-## Findings Resolved
-
-**W1 (Earnie → fixed by bert):** `Promise.all` log reported `_rollingBackfills.length` as "backfilled" even when `whereNull` filtered out concurrent writes. Fixed: `Promise.all` now captures per-row affected counts, sums them, and logs `A/N written` (actual vs candidates).
-
----
-
-## Findings to Address (follow-up, not blocking)
-
-**W2 (Earnie — Advisory):** No dedicated test for the "rolling task with no done history" branch (`if (!latestDone) return`). Covered indirectly by existing `'7-day interval generates instances'` test. Add an explicit named test.
-
-**Tina — Coverage gap:** The backfill block inside `runScheduleAndPersist` has no integration test (seeds null anchor → runs scheduler → asserts DB write + correct next occurrence). Blocked by pre-existing uuid ESM incompatibility in `runScheduleIntegration.test.js` (not caused by this fix). Track as follow-up: fix uuid jest config, then add integration test.
-
-**Peneloppy Medium — Unbounded Promise.all:** First-run burst of N concurrent UPDATE queries in transaction (no chunk cap). Steady-state: zero impact (whereNull guard fires once per task). Risk is acceptable for typical rolling task counts (<20/user); revisit if rolling tasks become high-volume.
-
-**Peneloppy Low — Implicit injection guard:** `b.anchor` is safe (sourced from MySQL DATE column via isoToDateKey). Consider adding `if (!/^\d{4}-\d{2}-\d{2}$/.test(b.anchor)) return` before push for defence-in-depth.
-
----
+| CODE-REVIEW (earnie) | 0 | 0 | PASS |
+| SECURITY-REVIEW (peneloppy) | 0 | 0 | PASS |
+| TEST-REVIEW (tina) | 0 | 0 | PASS (99/99) |
+| UX-REVIEW (big-brid) | 0 | 0 | PASS |
 
 ## Accountability Statement
+All required agents launched per rubric (inline review). No BLOCK findings, no CRITICAL security findings, all tests pass. Commit is **APPROVED**.
 
-All required agents launched per rubric. No CRITICAL, HIGH, or BLOCK findings. Bert resolved W1. Remaining findings are advisory (W2, coverage gap, Medium/Low security). Commit is **APPROVED**.
-
-Signed: Oscar, Technology Director — 2026-05-21T11:46:04Z
+Signed: Oscar, Technology Director — 2026-05-20T00:10:00Z
