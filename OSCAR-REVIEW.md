@@ -1,3 +1,32 @@
+# Oscar Review — 2026-05-22 — juggler: archive planning + review artifacts, ignore .claude/
+
+## Decision: PASS
+
+## Changed Files
+| File | Category | Agent(s) Launched |
+|------|----------|-------------------|
+| .gitignore | Config (add `.claude/`) | None per rubric |
+| .planning/phases/{09,10,11,12}/*.md | Planning | None per rubric — `.planning/` excluded from DOCS |
+| ARCH-REVIEW.md, CODE-REVIEW.md, SECURITY-REVIEW.md, TRINA-REVIEW.md, TRINA-TEST-AUDIT.md | Audit snapshot artifacts | None — time-stamped reviewer output, not living docs |
+| docs/testing/results/2026-05-19-E2E-002.md | Test result snapshot | None — result artifact |
+
+## Agent Launch Decisions
+| Agent | Launched | Reason |
+|-------|----------|--------|
+| prairie | No | Untracked `.md` files are reviewer-generated audit snapshots and test result artifacts, not living documentation. Documentation-standard frontmatter does not apply. |
+| ernie/elmo/telly/zoe | No | No source code changed. |
+| cookie | No | No infra change. |
+| bird | No | No frontend change. |
+
+## Review Summary
+Bulk-commit of accumulated planning files (phases 09–12) and audit snapshot artifacts. `.claude/` (including `.claude/worktrees/` — local git worktrees) added to ignore to prevent accidental nested-repo commit.
+
+## Accountability Statement
+Zero code, schema, security, or living-docs surface touched. Audit artifacts archived for history. Commit is **APPROVED**.
+Signed: Oscar, Technology Director — 2026-05-22
+
+---
+
 # Oscar Review — 2026-05-21 — juggler test fixes + UX-REVIEW correction
 
 ## Decision: PASS
