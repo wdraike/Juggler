@@ -261,7 +261,7 @@ describe('SM-18: wip → reopen (status = empty string)', () => {
 
 describe('SM-19: wip → done (task must have scheduled_at)', () => {
   test('returns 200 when task has scheduled_at set', async () => {
-    const task = makeTask({ id: 'sm19-task', status: 'wip', scheduled_at: '2026-05-15 14:00:00' });
+    const task = makeTask({ id: 'sm19-task', status: 'wip', scheduled_at: '2026-05-15 14:00:00', master_id: null });
     seedExisting(task);
 
     const res = await request(app)
@@ -318,6 +318,10 @@ describe('SM-20: skip a recurring instance (skip one occurrence)', () => {
       source_id: 'sm20-template'
     });
     seedExisting(instance);
+    // skip triggers the rolling-anchor check: db('task_masters').first() consumes one
+    // queue slot before the post-update fetchTaskWithEventIds. Insert null at index 2
+    // (between initial-fetch and post-update-fetch slots) so post-update gets the task row.
+    resolveQueue.splice(2, 0, null);
 
     const res = await request(app)
       .put('/api/tasks/sm20-inst/status')
@@ -470,19 +474,25 @@ describe('SM-22: disabled status guard', () => {
   });
 
   test('re-enable endpoint accepts disabled task', async () => {
-    const task = makeTask({ id: 'sm22-reenable', status: 'disabled', task_type: 'task', recurring: 0 });
-    // re-enable path: fetchTaskWithEventIds() → first(), then post-update re-read → first()
-    resolveQueue.push(task);
-    resolveQueue.push(task);
+    const task = makeTask({ id: 'sm22-reenable', status: 'disabled', task_type: 'task', recurring: 0, master_id: null });
+    // re-enable call sequence:
+    //   [0] first()  → task (initial fetchTaskWithEventIds)
+    //   [1] select() → [] (initial ledger fetch — cal_sync_ledger)
+    //   [2] select() → [] (buildSourceMap: db('tasks_v').select())
+    //   [3] first()  → task (post-update fetchTaskWithEventIds)
+    //   [4] select() → [] (post-update ledger fetch — returns [] when queue empty, mock default)
+    resolveQueue.push(task); // [0]
+    resolveQueue.push([]);   // [1]
+    resolveQueue.push([]);   // [2] buildSourceMap tasks_v select
+    resolveQueue.push(task); // [3]
+    // [4] post-update ledger select() → empty queue default []
 
     const res = await request(app)
       .put('/api/tasks/sm22-reenable/re-enable')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({});
 
-    // Should not be 404 or 403
-    expect(res.status).not.toBe(404);
-    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(200);
   });
 });
 
@@ -576,7 +586,7 @@ describe('SM-24: allDay flag round-trip through task update', () => {
 
 describe('SM-25: Terminal-status idempotency (done → done = 200)', () => {
   test('done→done returns 200, not an error', async () => {
-    const task = makeTask({ id: 'sm25-done', status: 'done', scheduled_at: '2026-05-15 14:00:00', completed_at: '2026-05-15T14:00:00Z' });
+    const task = makeTask({ id: 'sm25-done', status: 'done', scheduled_at: '2026-05-15 14:00:00', completed_at: '2026-05-15T14:00:00Z', master_id: null });
     seedExisting(task);
 
     const res = await request(app)
@@ -588,7 +598,7 @@ describe('SM-25: Terminal-status idempotency (done → done = 200)', () => {
   });
 
   test('skip→skip returns 200', async () => {
-    const task = makeTask({ id: 'sm25-skip', status: 'skip', scheduled_at: '2026-05-15 14:00:00' });
+    const task = makeTask({ id: 'sm25-skip', status: 'skip', scheduled_at: '2026-05-15 14:00:00', master_id: null });
     seedExisting(task);
 
     const res = await request(app)
@@ -612,13 +622,15 @@ describe('SM-25: Terminal-status idempotency (done → done = 200)', () => {
   });
 
   test('idempotent done→done does not set completed_at again (already terminal)', async () => {
-    const task = makeTask({ id: 'sm25-idem', status: 'done', scheduled_at: '2026-05-15 14:00:00', completed_at: '2026-05-15T14:00:00Z' });
+    const task = makeTask({ id: 'sm25-idem', status: 'done', scheduled_at: '2026-05-15 14:00:00', completed_at: '2026-05-15T14:00:00Z', master_id: null });
     seedExisting(task);
 
-    await request(app)
+    const res = await request(app)
       .put('/api/tasks/sm25-idem/status')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ status: 'done' });
+
+    expect(res.status).toBe(200);
 
     const tasksWrite = require('../../src/lib/tasks-write');
     const updateCall = tasksWrite.updateTaskById.mock.calls[0];
