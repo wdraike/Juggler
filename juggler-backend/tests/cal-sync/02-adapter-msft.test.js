@@ -12,6 +12,7 @@ var { makeTask, makeMSFTEvent, deleteMSFTEvent, deleteAllMSFTTestEvents } = requ
 var { getMSFTEvent, listMSFTEvents, waitForPropagation } = require('./helpers/api-helpers');
 
 var msftAdapter = require('../../src/lib/cal-adapters/msft.adapter');
+var { PLACEMENT_MODES } = require('../../src/lib/placementModes');
 
 jest.setTimeout(30000);
 
@@ -235,8 +236,7 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
     var currentTask = { when: 'morning', time: '9:00 AM', date: '2026-04-15' };
     var fields = msftAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
-    expect(fields.when).toBe('fixed');
-    expect(fields.prev_when).toBe('morning');
+    expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
   });
 
   it('should set date_pinned when date changes', function () {
@@ -255,7 +255,7 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
     var currentTask = { when: 'morning', time: '9:00 AM', date: '2026-04-15' };
     var fields = msftAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
-    expect(fields.when).toBe('fixed');
+    expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
     expect(fields.date_pinned).toBe(1);
   });
 
@@ -275,8 +275,7 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
     var currentTask = { when: 'allday', date: '2026-04-15' };
     var fields = msftAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
-    expect(fields.when).toBe('fixed');
-    expect(fields.prev_when).toBe('allday');
+    expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
   });
 
   it('should clear marker when event is no longer transparent', function () {
@@ -295,7 +294,7 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
     var currentTask = { when: 'fixed', placement_mode: 'reminder', date: '2026-04-15', time: '10:00 AM' };
     var fields = msftAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
-    expect(fields.placementMode).toBe('anytime');
+    expect(fields.placement_mode).toBe('anytime');
   });
 });
 

@@ -139,7 +139,9 @@ async function deleteEvent(token, eventId) {
 /**
  * Compute DB update fields from a normalized event.
  * Used ONLY when creating NEW tasks from pulled events (new design: no bidirectional sync).
- * For new tasks from ingest-only calendars, tasks are created with when='fixed' by the sync controller.
+ * For new tasks from ingest-only calendars, tasks are created with placement_mode=FIXED
+ * by the sync controller. All-day events also carry legacy when='allday' for downstream
+ * consumers that haven't migrated to placement_mode yet.
  */
 function applyEventToTaskFields(event, tz, currentTask) {
   var isAllDay = event.isAllDay;
@@ -160,25 +162,29 @@ function applyEventToTaskFields(event, tz, currentTask) {
   }
 
   if (isAllDay) {
+    fields.placement_mode = PLACEMENT_MODES.ALL_DAY;
+    // Also write legacy when='allday' tag — multiple downstream sites (scheduler
+    // skip-gate, multi-provider outbound push, AllDayBanner, CalendarView sort)
+    // still read `task.when === 'allday'`. Migrating all 6 sites is its own
+    // phase; until then, keep both writes in sync to avoid breaking ingest.
     fields.when = 'allday';
   }
 
   if (event.isTransparent) {
-    fields.placementMode = PLACEMENT_MODES.REMINDER;
+    fields.placement_mode = PLACEMENT_MODES.REMINDER;
   }
 
   if (!isAllDay) {
     var dateChanged = jd.date && jd.date !== currentTask?.date;
     var timeChanged = jd.time && jd.time !== currentTask?.time;
     if (dateChanged || timeChanged) {
-      fields.when = 'fixed';
-      fields.prev_when = currentTask?.when;
+      fields.placement_mode = PLACEMENT_MODES.FIXED;
       if (dateChanged) fields.date_pinned = 1;
     }
   }
 
   if (!event.isTransparent && currentTask?.placement_mode === PLACEMENT_MODES.REMINDER) {
-    fields.placementMode = PLACEMENT_MODES.ANYTIME;
+    fields.placement_mode = PLACEMENT_MODES.ANYTIME;
   }
 
   return fields;

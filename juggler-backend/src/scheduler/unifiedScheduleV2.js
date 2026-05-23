@@ -323,7 +323,15 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     // For FIXED with a when-tag, the when-block is authoritative —
     // do NOT use t.time (it may be a stale/feedback-loop value from a prior run).
     // Only use t.time for immovable anchor if there is no when-tag (time-only fixed).
-    var anchorMin = (t.time && !(pm === PLACEMENT_MODES.FIXED && t.when)) ? parseTimeToMinutes(t.time) : null;
+    // ANYTIME tasks never anchor on bare t.time: t.time is a derived/cached value
+    // (sync drift, leftover placement) and must not lock an "anytime" task to a
+    // missed instant. ANYTIME tasks may still anchor on preferredTimeMins below —
+    // that's the explicit user-intent "around X o'clock, but flexible" signal.
+    var anchorMin = (t.time && pm !== PLACEMENT_MODES.ANYTIME && !(pm === PLACEMENT_MODES.FIXED && t.when))
+      ? parseTimeToMinutes(t.time) : null;
+    if (anchorMin == null && pm === PLACEMENT_MODES.ANYTIME && t.preferredTimeMins != null) {
+      anchorMin = t.preferredTimeMins;
+    }
     if ((pm === PLACEMENT_MODES.FIXED || pm === PLACEMENT_MODES.TIME_WINDOW) && t.preferredTimeMins != null && anchorMin == null) {
       anchorMin = t.preferredTimeMins;
     }

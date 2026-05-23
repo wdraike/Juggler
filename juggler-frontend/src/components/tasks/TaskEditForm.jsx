@@ -742,8 +742,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   }
 
   var whenParts = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
-  var isAllDay = whenParts.indexOf('allday') !== -1;
-  var isFixed = !!datePinned || whenParts.indexOf('fixed') !== -1;
+  var isAllDay = placementMode === 'all_day';
+  var isFixed = !!datePinned || placementMode === 'fixed';
 
   var configWarnings = (function() {
     if (marker) return [];

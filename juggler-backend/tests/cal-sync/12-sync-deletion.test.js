@@ -220,7 +220,7 @@ describe('Sync Deletion Scenarios', () => {
       text: 'Test Task Ingest Delete Block',
       scheduled_at: tomorrow(13, 0),
       dur: 30,
-      when: 'fixed'
+      placement_mode: 'fixed'
     });
     await db('cal_sync_ledger').insert({
       user_id: TEST_USER_ID, provider: 'gcal', task_id: task.id,

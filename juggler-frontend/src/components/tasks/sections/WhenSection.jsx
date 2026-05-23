@@ -228,7 +228,7 @@ export default function WhenSection(props) {
 
   var isRecurring = !!recurring;
   var whenPartsLocal = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
-  var isFixed = !!datePinned || whenPartsLocal.indexOf('fixed') !== -1;
+  var isFixed = !!datePinned || placementMode === 'fixed';
   var activeTags = whenPartsLocal.filter(function(p) { return p !== 'anytime' && p !== 'allday' && p !== 'fixed'; });
   var isWindows = activeTags.length > 0;
   // Use placementMode prop as the canonical source for mode display.

@@ -126,7 +126,7 @@ describe('Sync Promotion: Event Moves', () => {
     await sync(req, res);
 
     var updatedTask = await db('tasks_v').where('id', task.id).first();
-    expect(updatedTask.when).toBe('fixed');
+    expect(updatedTask.placement_mode).toBe('fixed');
     // scheduled_at is stored as UTC in MySQL and returned as "YYYY-MM-DD HH:MM:SS"
     var newSched = new Date(String(updatedTask.scheduled_at).replace(' ', 'T') + 'Z');
     var expected = tomorrow(15, 0);
@@ -169,7 +169,7 @@ describe('Sync Promotion: Event Moves', () => {
     await sync(req, res);
 
     var updatedTask = await db('tasks_v').where('id', task.id).first();
-    expect(updatedTask.when).toBe('fixed');
+    expect(updatedTask.placement_mode).toBe('fixed');
     expect(updatedTask.date_pinned).toBeTruthy();
     var newSched = new Date(String(updatedTask.scheduled_at).replace(' ', 'T') + 'Z');
     var expected = dayAfterTomorrow(10, 0);
@@ -214,18 +214,18 @@ describe('Sync Promotion: Event Moves', () => {
     await sync(req, res);
 
     var updatedTask = await db('tasks_v').where('id', task.id).first();
-    expect(updatedTask.when).toBe('fixed');
+    expect(updatedTask.placement_mode).toBe('fixed');
     var newSched = new Date(String(updatedTask.scheduled_at).replace(' ', 'T') + 'Z');
     var expected = tomorrow(14, 0);
     expect(Math.abs(newSched - expected)).toBeLessThan(2 * 60 * 1000);
   }));
 
-  test('prev_when preserved', skipIfNoDB(async () => {
+  test('promoted task preserves original when tag', skipIfNoDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
     var task = await makeTask({
-      text: 'Test Task Prev When',
+      text: 'Test Task Promoted When Preserved',
       scheduled_at: tomorrow(10, 0),
       dur: 30,
       when: 'morning'
@@ -256,8 +256,9 @@ describe('Sync Promotion: Event Moves', () => {
     await sync(req, res);
 
     var updatedTask = await db('tasks_v').where('id', task.id).first();
-    expect(updatedTask.when).toBe('fixed');
-    expect(updatedTask.prev_when).toBe('morning');
+    expect(updatedTask.placement_mode).toBe('fixed');
+    // when tag (slot label) is preserved; placement_mode carries the fixed semantic.
+    expect(updatedTask.when).toBe('morning');
   }));
 
   test('backwardsDep warning', skipIfNoDB(async () => {

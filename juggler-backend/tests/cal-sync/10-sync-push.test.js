@@ -322,7 +322,7 @@ describe('Sync Push: field-level assertions', () => {
       date: tomorrowDateStr(),
       time: '10:00 AM',
       dur: 45,
-      when: 'fixed',
+      placement_mode: 'fixed',
       date_pinned: 1
     });
     var { event, taskRow } = await pushAndFetchEvent(task);
@@ -337,7 +337,7 @@ describe('Sync Push: field-level assertions', () => {
       date: tomorrowDateStr(),
       time: '2:00 PM',
       dur: 90,
-      when: 'fixed',
+      placement_mode: 'fixed',
       date_pinned: 1
     });
     var { event, taskRow } = await pushAndFetchEvent(task);
@@ -353,7 +353,7 @@ describe('Sync Push: field-level assertions', () => {
       date: tomorrowDateStr(),
       time: '11:00 AM',
       dur: 30,
-      when: 'fixed',
+      placement_mode: 'fixed',
       date_pinned: 1,
       notes: 'These are the test notes',
       url: 'https://example.com/sync-test',
@@ -375,7 +375,7 @@ describe('Sync Push: field-level assertions', () => {
       date: tomorrowDateStr(),
       time: '9:00 AM',
       dur: 30,
-      when: 'fixed',
+      placement_mode: 'fixed',
       date_pinned: 1,
       notes: null,
       url: null,
@@ -399,7 +399,7 @@ describe('Sync Push: field-level assertions', () => {
       date: tomorrowDateStr(),
       time: '3:00 PM',
       dur: 60,
-      when: 'fixed',
+      placement_mode: 'fixed',
       date_pinned: 1,
       status: ''
     });
@@ -434,7 +434,7 @@ describe('Sync Push: field-level assertions', () => {
       date: tomorrowDateStr(),
       time: '4:00 PM',
       dur: 30,
-      when: 'fixed',
+      placement_mode: 'fixed',
       date_pinned: 1,
       marker: 1,
       status: ''
@@ -451,7 +451,7 @@ describe('Sync Push: field-level assertions', () => {
       date: tomorrowDateStr(),
       time: '10:30 AM',
       dur: 45,
-      when: 'fixed',
+      placement_mode: 'fixed',
       date_pinned: 1,
       marker: 0,
       status: ''
@@ -468,7 +468,7 @@ describe('Sync Push: field-level assertions', () => {
       date: tomorrowDateStr(),
       time: '8:00 AM',
       dur: 30,
-      when: 'fixed',
+      placement_mode: 'fixed',
       date_pinned: 1
     });
     var { event } = await pushAndFetchEvent(task);
@@ -483,7 +483,7 @@ describe('Sync Push: field-level assertions', () => {
       date: tomorrowDateStr(),
       time: '9:00 AM',
       dur: 30,
-      when: 'fixed',
+      placement_mode: 'fixed',
       date_pinned: 1
     });
 

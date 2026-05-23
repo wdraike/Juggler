@@ -60,7 +60,7 @@ function tileBg(task, darkMode, hover, theme) {
     return hover ? '#EEF2FF20' : '#EEF2FF12';
   }
   // Fixed/rigid tasks — subtle amber/orange
-  if (task.fixed || task.rigid || (task.when && task.when.indexOf('fixed') >= 0)) {
+  if (task.fixed || task.rigid || task.placementMode === 'fixed' || task.placement_mode === 'fixed') {
     if (darkMode) return hover ? '#9E6B3B30' : '#9E6B3B1C';
     return hover ? '#FEF3C720' : '#FEF3C712';
   }
@@ -302,7 +302,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
     : gutterW;
 
   var locIcons = (t.location || []).map(function (l) { return locIcon(l); }).filter(Boolean);
-  var isFixed = t.fixed || t.rigid || (t.when && t.when.indexOf('fixed') >= 0);
+  var isFixed = t.fixed || t.rigid || t.placementMode === 'fixed' || t.placement_mode === 'fixed';
   var isMarker = !!t.marker;
   var isWhenRelaxed = !!item._whenRelaxed;
 
@@ -625,7 +625,7 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme,
           opacity: (isDone && ueIsPast) ? PAST_OPACITY : (isDone ? 0.5 : 1)
         }}
       >
-        {(task.fixed || task.rigid) && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDCCC'}</span>}
+        {(task.fixed || task.rigid || task.placementMode === 'fixed' || task.placement_mode === 'fixed') && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDCCC'}</span>}
         {task.recurring && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\uD83D\uDD01'}</span>}
         {status === 'done' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2713'}</span>}
         {status === 'skip' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u23ED'}</span>}

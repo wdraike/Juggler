@@ -12,6 +12,7 @@ var { waitForPropagation } = require('./helpers/api-helpers');
 
 var appleAdapter = require('../../src/lib/cal-adapters/apple.adapter');
 var appleCalApi = require('../../src/lib/apple-cal-api');
+var { PLACEMENT_MODES } = require('../../src/lib/placementModes');
 
 jest.setTimeout(30000);
 
@@ -176,8 +177,7 @@ describe('Apple adapter — applyEventToTaskFields', function () {
     var currentTask = { when: 'morning', time: '9:00 AM', date: '2026-04-15' };
     var fields = appleAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
-    expect(fields.when).toBe('fixed');
-    expect(fields.prev_when).toBe('morning');
+    expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
   });
 
   it('should set date_pinned when date changes', function () {
@@ -195,7 +195,7 @@ describe('Apple adapter — applyEventToTaskFields', function () {
     var currentTask = { when: 'morning', time: '9:00 AM', date: '2026-04-15' };
     var fields = appleAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
-    expect(fields.when).toBe('fixed');
+    expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
     expect(fields.date_pinned).toBe(1);
   });
 
@@ -214,8 +214,7 @@ describe('Apple adapter — applyEventToTaskFields', function () {
     var currentTask = { when: 'allday', date: '2026-04-15' };
     var fields = appleAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
-    expect(fields.when).toBe('fixed');
-    expect(fields.prev_when).toBe('allday');
+    expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
   });
 
   it('should clear marker when event is no longer transparent', function () {

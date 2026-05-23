@@ -1968,4 +1968,37 @@ describe('Timezone & DST', () => {
     });
   });
 
+  // ─── GROUP 81: ANYTIME tasks must not anchor on stale t.time ───
+  // Regression for sync-promotion bug: tasks with placement_mode='anytime' but
+  // leftover t.time from a prior placement or stale sync state were being
+  // hard-anchored by the scheduler and going overdue when their stale time
+  // had already passed. ANYTIME means "any slot" — t.time must be ignored.
+  describe('Group 81: ANYTIME ignores stale t.time anchor', () => {
+    test('anytime task with t.time set does not anchor to that time', () => {
+      // t.time = 7:00 AM (before NOW_MINS=480/8:00 AM). If anytime anchored,
+      // the task would land in the past and be marked overdue/unplaced.
+      // Correct behavior: place in the first available open slot >= now.
+      var tasks = [
+        makeTask({ id: 'anytime_stale', placementMode: 'anytime', time: '7:00 AM', pri: 'P2', dur: 30 })
+      ];
+      var result = run(tasks);
+      var parts = findPlacements(result, 'anytime_stale');
+      expect(parts.length).toBeGreaterThanOrEqual(1);
+      parts.forEach(function(p) {
+        expect(p.start).toBeGreaterThanOrEqual(NOW_MINS);
+      });
+    });
+
+    test('fixed task with t.time still anchors at that time (regression guard)', () => {
+      var tasks = [
+        makeTask({ id: 'fixed_anchored', placementMode: 'fixed', time: '10:00 AM', dur: 30 })
+      ];
+      var result = run(tasks);
+      var parts = findPlacements(result, 'fixed_anchored');
+      expect(parts.length).toBe(1);
+      expect(parts[0].start).toBe(600);
+    });
+
+  });
+
 });

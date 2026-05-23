@@ -164,7 +164,7 @@ function makeFlexRecurring(props) {
 /** Fixed calendar event — immovable anchor */
 function makeFixedEvent(props) {
   return makeTask(Object.assign({
-    when: 'fixed',
+    placementMode: 'fixed',
     datePinned: true
   }, props));
 }

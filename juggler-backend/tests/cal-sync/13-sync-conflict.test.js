@@ -85,7 +85,7 @@ describe('Sync Conflict Resolution', () => {
       text: 'Test Task Fixed Wins',
       scheduled_at: tomorrow(10, 0),
       dur: 30,
-      when: 'fixed',
+      placement_mode: 'fixed',
       rigid: 1
     });
 

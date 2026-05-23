@@ -67,7 +67,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
   var typeBadges = [];
   if (task.datePinned) typeBadges.push({ icon: '\uD83D\uDCCD', title: 'Date pinned — stays on this date, scheduler adjusts time only' });
   if (task.recurring) typeBadges.push({ icon: '\uD83D\uDD01', title: 'Recurring — recurring daily task' });
-  if (task.rigid || task.fixed) typeBadges.push({ icon: '\uD83D\uDCCC', title: 'Rigid — locked to set date and time, scheduler won\u2019t move it' });
+  if (task.rigid || task.fixed || task.placementMode === 'fixed' || task.placement_mode === 'fixed') typeBadges.push({ icon: '\uD83D\uDCCC', title: 'Rigid — locked to set date and time, scheduler won\u2019t move it' });
   if (item.splitTotal > 1) typeBadges.push({ icon: '\u2702\uFE0F', title: 'Split — broken into ' + item.splitTotal + ' chunks' });
 
   // Build end time label

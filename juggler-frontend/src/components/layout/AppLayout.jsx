@@ -585,7 +585,7 @@ export default function AppLayout() {
   //   (d) scheduler emitted _unplacedReason === 'missed' (lives on unplaced[])
   function isTimeLocked(t) {
     if (t.rigid) return true;
-    if (t.when && typeof t.when === 'string' && t.when.indexOf('fixed') >= 0) return true;
+    if (t.placementMode === 'fixed' || t.placement_mode === 'fixed') return true;
     return false;
   }
   var pastDueIds = useMemo(() => {
@@ -654,13 +654,13 @@ export default function AppLayout() {
     return ids;
   }, [visibleTasks, statuses, userTimezone, unplaced]);
 
-  // Fixed tasks: when contains 'fixed'
+  // Fixed tasks: placement_mode='fixed' (post-Phase 9 enum redesign)
   var fixedIds = useMemo(() => {
     var ids = new Set();
     allTasks.forEach(t => {
       var st = statuses[t.id] || '';
       if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed') return;
-      if (t.when && t.when.indexOf('fixed') >= 0) ids.add(t.id);
+      if (t.placementMode === 'fixed' || t.placement_mode === 'fixed') ids.add(t.id);
     });
     return ids;
   }, [allTasks, statuses]);
@@ -1002,7 +1002,7 @@ export default function AppLayout() {
       } else if (op.op === 'edit') {
         var editFields = Object.assign({}, op.fields);
         var srcTask = allTasks.find(function(tt) { return tt.id === op.id; });
-        if (srcTask && srcTask.when && srcTask.when.indexOf('fixed') >= 0) {
+        if (srcTask && (srcTask.placementMode === 'fixed' || srcTask.placement_mode === 'fixed')) {
           delete editFields.date; delete editFields.day; delete editFields.time;
         }
         // Resolve any temp AI IDs in dependsOn

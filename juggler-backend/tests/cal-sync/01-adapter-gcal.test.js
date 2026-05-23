@@ -12,6 +12,7 @@ var { makeTask, makeGCalEvent, deleteGCalEvent, deleteAllGCalTestEvents } = requ
 var { getGCalEvent, listGCalEvents, waitForPropagation } = require('./helpers/api-helpers');
 
 var gcalAdapter = require('../../src/lib/cal-adapters/gcal.adapter');
+var { PLACEMENT_MODES } = require('../../src/lib/placementModes');
 
 jest.setTimeout(30000);
 
@@ -213,8 +214,7 @@ describe('GCal adapter — applyEventToTaskFields', function () {
     var currentTask = { when: 'morning', time: '9:00 AM', date: '2026-04-15' };
     var fields = gcalAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
-    expect(fields.when).toBe('fixed');
-    expect(fields.prev_when).toBe('morning');
+    expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
   });
 
   it('should set date_pinned when date changes', function () {
@@ -232,7 +232,7 @@ describe('GCal adapter — applyEventToTaskFields', function () {
     var currentTask = { when: 'morning', time: '9:00 AM', date: '2026-04-15' };
     var fields = gcalAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
-    expect(fields.when).toBe('fixed');
+    expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
     expect(fields.date_pinned).toBe(1);
   });
 
@@ -251,8 +251,7 @@ describe('GCal adapter — applyEventToTaskFields', function () {
     var currentTask = { when: 'allday', date: '2026-04-15' };
     var fields = gcalAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
-    expect(fields.when).toBe('fixed');
-    expect(fields.prev_when).toBe('allday');
+    expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
   });
 
   it('should clear marker when event is no longer transparent', function () {
@@ -271,6 +270,26 @@ describe('GCal adapter — applyEventToTaskFields', function () {
     var fields = gcalAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
     expect(fields.marker).toBe(false);
+  });
+
+  // Regression guard: adapter must write snake_case `placement_mode`, not
+  // camelCase `placementMode` — tasks-write.js splitUpdateFields routes only
+  // snake_case keys, so camelCase would be silently dropped before reaching
+  // the DB (no test-DB needed; pure shape assertion).
+  it('writes snake_case placement_mode, never camelCase placementMode', function () {
+    var event = {
+      title: 'Promote Snake-Case',
+      startDateTime: '2026-04-15T14:00:00',
+      endDateTime: '2026-04-15T14:30:00',
+      isAllDay: false,
+      durationMinutes: 30,
+      isTransparent: false,
+      description: ''
+    };
+    var currentTask = { when: 'morning', time: '9:00 AM', date: '2026-04-15' };
+    var fields = gcalAdapter.applyEventToTaskFields(event, 'America/New_York', currentTask);
+    expect(fields.placement_mode).toBeDefined();
+    expect(fields.placementMode).toBeUndefined();
   });
 });
 

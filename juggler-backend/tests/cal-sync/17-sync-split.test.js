@@ -94,7 +94,7 @@ async function makeSplitTask(opts) {
     marker: 0,
     flex_when: 0,
     status: '',
-    when: 'fixed',
+    placement_mode: 'fixed',
     split: 1,
     split_min: chunks[0].dur || 60,
     created_at: db.fn.now(),

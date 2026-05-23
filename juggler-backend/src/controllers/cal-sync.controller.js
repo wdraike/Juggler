@@ -113,7 +113,7 @@ function throttle() {
 
 /**
  * Build the fields to write to a task when pulling an event edit back from a provider.
- * Promotion logic (when=fixed, prev_when, date_pinned, marker clearing) lives in applyEventToTaskFields.
+ * Promotion logic (placement_mode=fixed, date_pinned, marker clearing) lives in applyEventToTaskFields.
  */
 function _buildPullFields(event, task, tz, adapter) {
   return adapter.applyEventToTaskFields(event, tz, task);
@@ -122,7 +122,7 @@ function _buildPullFields(event, task, tz, adapter) {
 /**
  * POST /api/cal/sync — one-way sync (Strive → calendars).
  * Tasks push to their calendar events every sync (deterministic).
- * Ingest-only providers pull events into tasks (as when='fixed').
+ * Ingest-only providers pull events into tasks (as placement_mode='fixed').
  * Sync window: 14 days back + 60 days forward.
  */
 async function sync(req, res) {
@@ -938,11 +938,11 @@ async function sync(req, res) {
                   taskUpdates.push({ id: task.id, fields: pullFields });
                   pStats.pulled++;
                   stats.pulled++;
-                  var isPromotion = pullFields.when === 'fixed';
+                  var isPromotion = pullFields.placement_mode === PLACEMENT_MODES.FIXED;
                   logSyncAction(pid, isPromotion ? 'promoted' : 'pulled', {
                     taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
-                    oldValues: { when: task.when, scheduled_at: task._scheduled_at, dur: task.dur },
-                    newValues: { when: pullFields.when || task.when, scheduled_at: pullFields.scheduled_at, dur: pullFields.dur },
+                    oldValues: { placement_mode: task.placement_mode, scheduled_at: task._scheduled_at, dur: task.dur },
+                    newValues: { placement_mode: pullFields.placement_mode || task.placement_mode, scheduled_at: pullFields.scheduled_at, dur: pullFields.dur },
                     detail: (isPromotion ? 'Event moved on calendar — task promoted to fixed' : 'Event edited on calendar — task updated') + (backwardDepWarning ? '. WARNING: ' + backwardDepWarning : ''),
                     calendarName: calendarLabels[pid] || null
                   });
@@ -983,7 +983,7 @@ async function sync(req, res) {
               var isJugglerOrigin = ledger.origin === JUGGLER_ORIGIN;
               if (!isJugglerOrigin && !ingestTaskTerminal) {
                 var updateFields = pAdapter.applyEventToTaskFields(event, tz, task);
-                updateFields.when = 'fixed';
+                updateFields.placement_mode = PLACEMENT_MODES.FIXED;
                 taskUpdates.push({ id: task.id, fields: updateFields });
                 pStats.pulled++;
                 stats.pulled++;
@@ -1005,7 +1005,7 @@ async function sync(req, res) {
               }
               if (provEventModified) {
                 var provPullFields = pAdapter.applyEventToTaskFields(event, tz, task);
-                provPullFields.when = 'fixed';
+                provPullFields.placement_mode = PLACEMENT_MODES.FIXED;
                 taskUpdates.push({ id: task.id, fields: provPullFields });
                 pStats.pulled++;
                 stats.pulled++;
@@ -1855,7 +1855,11 @@ async function sync(req, res) {
             dur: evDur,
             pri: 'P3',
             status: '',
-            when: newEvent.isAllDay ? 'allday' : (isReminder ? '' : 'fixed'),
+            // Legacy when='allday' kept for downstream sites that still read it
+            // (scheduler skip-gate, outbound push, AllDayBanner, CalendarView).
+            // For non-all-day events `when` stays empty — placement_mode='fixed'
+            // is now the canonical fixed signal.
+            when: newEvent.isAllDay ? 'allday' : '',
             date_pinned: newEvent.isAllDay ? 0 : 1,
             placement_mode: newEvent.isTransparent ? PLACEMENT_MODES.REMINDER : (newEvent.isAllDay ? PLACEMENT_MODES.ALL_DAY : (isReminder ? PLACEMENT_MODES.REMINDER : PLACEMENT_MODES.FIXED)),
             [eventIdCol]: newEvent.id

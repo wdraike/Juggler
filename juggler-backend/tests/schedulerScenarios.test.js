@@ -982,6 +982,7 @@ describe('Tier 11: recurring_flexible past-anchor placement', () => {
         placementMode: 'anytime',
         when: 'afternoon',
         time: '12:30 PM', // anchor time — now past
+        preferredTimeMins: 750, // anytime tasks anchor on preferredTimeMins, not bare t.time
         dur: 30,
         date: TODAY,
         generated: true,
