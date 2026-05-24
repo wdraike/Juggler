@@ -122,6 +122,13 @@ apiClient.interceptors.response.use(
       }));
     }
 
+    // Handle calendar-sync readonly errors — dispatch event so UI can explain why
+    if (error.response?.data?.code === 'CAL_SYNCED_READONLY') {
+      window.dispatchEvent(new CustomEvent('task:calendar-sync-readonly', {
+        detail: error.response.data
+      }));
+    }
+
     return Promise.reject(error);
   }
 );

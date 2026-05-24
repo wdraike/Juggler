@@ -1688,6 +1688,7 @@ async function updateTaskStatus(req, res) {
     }
 
     var update = { status: status || '', updated_at: db.fn.now() };
+    var isIngested = existing.cal_sync_origin && existing.cal_sync_origin !== 'juggler';
     var isFutureScheduled = existing.scheduled_at && new Date(existing.scheduled_at) > new Date();
 
     // juggler-cal-history Plan C — write completed_at on terminal transition (D-12).
@@ -1701,7 +1702,8 @@ async function updateTaskStatus(req, res) {
     // When marking done, only update scheduled_at if the user provided an explicit
     // custom completion time. Never overwrite it with "now" — that's the done-time
     // shift bug that moves GCal events to the completion timestamp.
-    if (status === 'done') {
+    // For externally-ingested tasks, suppress scheduled_at mutations entirely.
+    if (status === 'done' && !isIngested) {
       var completedAt = req.body.completedAt;
       if (completedAt && completedAt !== 'now' && completedAt !== 'scheduled') {
         // Custom datetime string from the user — clamp to now if in the future
@@ -1721,8 +1723,9 @@ async function updateTaskStatus(req, res) {
         .update({ status: 'active', synced_at: db.fn.now() });
     }
 
-    // For cancel/skip with a future scheduled_at, snap to now
-    if ((status === 'cancel' || status === 'skip') && isFutureScheduled) {
+    // For cancel/skip with a future scheduled_at, snap to now.
+    // Suppress for externally-ingested tasks to prevent calendar drift.
+    if ((status === 'cancel' || status === 'skip') && isFutureScheduled && !isIngested) {
       update.scheduled_at = db.fn.now();
     }
 
@@ -1932,6 +1935,19 @@ async function batchUpdateTasks(req, res) {
       var existById = {};
       existCheck.forEach(function(r) { existById[r.id] = r; });
 
+      // Bulk-fetch ledger origins so the cal-sync guard can evaluate each item
+      var _lockedLedger = await db('cal_sync_ledger')
+        .whereIn('task_id', idsToCheck)
+        .where('status', 'active')
+        .select('task_id', 'origin');
+      var _lockedOriginById = {};
+      _lockedLedger.forEach(function(r) {
+        if (!_lockedOriginById[r.task_id] || _lockedOriginById[r.task_id] === 'juggler') {
+          _lockedOriginById[r.task_id] = r.origin || null;
+        }
+      });
+      existCheck.forEach(function(r) { r.cal_sync_origin = _lockedOriginById[r.id] || null; });
+
       for (var qi = 0; qi < updates.length; qi++) {
         var qUpdate = updates[qi];
         var qId = qUpdate.id;
@@ -1941,6 +1957,9 @@ async function batchUpdateTasks(req, res) {
 
         var qFields = {};
         Object.keys(qUpdate).forEach(function(k) { if (k !== 'id') qFields[k] = qUpdate[k]; });
+        var qGuard = checkCalSyncEditGuard(qExisting, qFields);
+        if (qGuard) return res.status(403).json(qGuard);
+
         var qTz = qFields._timezone || tz;
         delete qFields._timezone;
         delete qFields.anchorDate;
@@ -1999,6 +2018,19 @@ async function batchUpdateTasks(req, res) {
           var existingById = {};
           existingRows.forEach(function(r) { existingById[r.id] = r; });
 
+          // Bulk-fetch ledger origins so the cal-sync guard can evaluate each item
+          var _batchLedger = await trx('cal_sync_ledger')
+            .whereIn('task_id', idsToUpdate)
+            .where('status', 'active')
+            .select('task_id', 'origin');
+          var _batchOriginById = {};
+          _batchLedger.forEach(function(r) {
+            if (!_batchOriginById[r.task_id] || _batchOriginById[r.task_id] === 'juggler') {
+              _batchOriginById[r.task_id] = r.origin || null;
+            }
+          });
+          existingRows.forEach(function(r) { r.cal_sync_origin = _batchOriginById[r.id] || null; });
+
           // Pre-load any source templates referenced by recurring instances in
           // this batch, so the fixed-calendar guard can inspect the template's
           // calendar linkage (that's where `when` edits on an instance route).
@@ -2032,6 +2064,13 @@ async function batchUpdateTasks(req, res) {
             var anchorDateVal = fields.anchorDate;
             delete fields.anchorDate;
             var existing = existingById[id];
+            var _batchGuard = checkCalSyncEditGuard(existing, fields);
+            if (_batchGuard) {
+              var _batchErr = new Error('CAL_SYNCED_READONLY');
+              _batchErr.calSyncGuard = _batchGuard;
+              throw _batchErr;
+            }
+
             var row = taskToRow(fields, req.user.id, updateTz, existing);
             delete row.user_id;
             delete row.created_at;
@@ -2150,6 +2189,9 @@ async function batchUpdateTasks(req, res) {
         });
         break;
       } catch (err) {
+        if (err.calSyncGuard) {
+          return res.status(403).json(err.calSyncGuard);
+        }
         if (err.code === 'ER_LOCK_DEADLOCK' && attempt < MAX_RETRIES) {
           await new Promise(function(r) { setTimeout(r, 200 * (attempt + 1)); });
           continue;
@@ -2299,11 +2341,17 @@ async function reEnableTask(req, res) {
  */
 async function unpinTask(req, res) {
   try {
-    var existing = await db('tasks_with_sync_v')
-      .where({ id: req.params.id, user_id: req.user.id })
-      .first();
+    var existing = await fetchTaskWithEventIds(db, req.params.id, req.user.id);
 
     if (!existing) return res.status(404).json({ error: 'Task not found' });
+
+    // Guard: externally-ingested tasks must not be unpinned — the source calendar owns placement.
+    if (existing.cal_sync_origin && existing.cal_sync_origin !== 'juggler') {
+      return res.status(403).json({
+        error: 'This task is synced from an external calendar. Unpinning is not allowed here.',
+        code: 'CAL_SYNCED_READONLY'
+      });
+    }
 
     var taskType = existing.task_type || 'task';
 

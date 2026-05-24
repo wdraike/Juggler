@@ -167,6 +167,38 @@ describe('updateTaskStatus: recurring templates', () => {
     await controller.updateTaskStatus(req, res);
     expect(res.statusCode).toBe(403);
   });
+
+  test('ingested task: cancel does not snap scheduled_at to now', async () => {
+    if (!available) return;
+    var nowMs = Date.now();
+    var futureTime = new Date(nowMs + 86400000);
+    await tasksWrite.insertTask(db, { id: 'ingest-cancel', user_id: USER_ID, task_type: 'task', text: 'Cancel me', status: '', scheduled_at: futureTime, created_at: db.fn.now(), updated_at: db.fn.now() });
+    await db('cal_sync_ledger').insert({ task_id: 'ingest-cancel', user_id: USER_ID, provider: 'gcal', provider_event_id: 'evt-cancel', origin: 'gcal', status: 'active', created_at: db.fn.now(), updated_at: db.fn.now() });
+    var req = mockReq({ params: { id: 'ingest-cancel' }, body: { status: 'cancel' } });
+    var res = mockRes();
+    await controller.updateTaskStatus(req, res);
+    expect(res.statusCode).toBe(200);
+    var row = await db('tasks_v').where('id', 'ingest-cancel').first();
+    // Must still be in the future (not snapped to now) and status changed
+    expect(new Date(row.scheduled_at).getTime()).toBeGreaterThan(nowMs + 36000000);
+    expect(row.status).toBe('cancel');
+  });
+
+  test('ingested task: done with custom completedAt does not mutate scheduled_at', async () => {
+    if (!available) return;
+    var scheduledTime = new Date(Date.now() - 3600000);
+    await tasksWrite.insertTask(db, { id: 'ingest-done', user_id: USER_ID, task_type: 'task', text: 'Done me', status: '', scheduled_at: scheduledTime, created_at: db.fn.now(), updated_at: db.fn.now() });
+    await db('cal_sync_ledger').insert({ task_id: 'ingest-done', user_id: USER_ID, provider: 'gcal', provider_event_id: 'evt-done', origin: 'gcal', status: 'active', created_at: db.fn.now(), updated_at: db.fn.now() });
+    var customCompleted = new Date(Date.now() - 1800000).toISOString();
+    var req = mockReq({ params: { id: 'ingest-done' }, body: { status: 'done', completedAt: customCompleted } });
+    var res = mockRes();
+    await controller.updateTaskStatus(req, res);
+    expect(res.statusCode).toBe(200);
+    var row = await db('tasks_v').where('id', 'ingest-done').first();
+    // scheduled_at should not equal the custom completed time
+    expect(new Date(row.scheduled_at).getTime()).not.toBe(new Date(customCompleted).getTime());
+    expect(row.status).toBe('done');
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -218,6 +250,84 @@ describe('batchUpdateTasks', () => {
     await controller.batchUpdateTasks(req, res);
     var row = await db('tasks_v').where('id', 'bu-dis').first();
     expect(row.text).toBe('Disabled'); // unchanged
+  });
+
+  test('batch blocks disallowed fields on ingested cal-synced tasks', async () => {
+    if (!available) return;
+    await tasksWrite.insertTask(db, { id: 'bu-gcal', user_id: USER_ID, task_type: 'task', text: 'Ingested batch', status: '', created_at: db.fn.now(), updated_at: db.fn.now() });
+    await db('cal_sync_ledger').insert({
+      task_id: 'bu-gcal',
+      user_id: USER_ID,
+      provider: 'gcal',
+      provider_event_id: 'evt-bu-gcal',
+      origin: 'gcal',
+      status: 'active',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now()
+    });
+
+    var req = mockReq({ body: { updates: [{ id: 'bu-gcal', text: 'Blocked' }] }});
+    var res = mockRes();
+    await controller.batchUpdateTasks(req, res);
+    expect(res.statusCode).toBe(403);
+    expect(res._json.code).toBe('CAL_SYNCED_READONLY');
+
+    var row = await db('tasks_v').where('id', 'bu-gcal').first();
+    expect(row.text).toBe('Ingested batch');
+  });
+
+  test('batch allows status on ingested cal-synced tasks', async () => {
+    if (!available) return;
+    await tasksWrite.insertTask(db, { id: 'bu-gcal-ok', user_id: USER_ID, task_type: 'task', text: 'Ingested batch ok', status: '', created_at: db.fn.now(), updated_at: db.fn.now() });
+    await db('cal_sync_ledger').insert({
+      task_id: 'bu-gcal-ok',
+      user_id: USER_ID,
+      provider: 'gcal',
+      provider_event_id: 'evt-bu-gcal-ok',
+      origin: 'gcal',
+      status: 'active',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now()
+    });
+
+    var req = mockReq({ body: { updates: [{ id: 'bu-gcal-ok', status: 'done' }] }});
+    var res = mockRes();
+    await controller.batchUpdateTasks(req, res);
+    expect(res.statusCode).toBe(200);
+
+    var row = await db('tasks_v').where('id', 'bu-gcal-ok').first();
+    expect(row.status).toBe('done');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// unpinTask
+// ═══════════════════════════════════════════════════════════════
+
+describe('unpinTask', () => {
+  test('unpins a regular task', async () => {
+    if (!available) return;
+    await tasksWrite.insertTask(db, { id: 'unpin-reg', user_id: USER_ID, task_type: 'task', text: 'Pinned', status: '', date_pinned: 1, when: 'fixed', prev_when: 'afternoon', created_at: db.fn.now(), updated_at: db.fn.now() });
+    var req = mockReq({ params: { id: 'unpin-reg' } });
+    var res = mockRes();
+    await controller.unpinTask(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res._json.action).toBe('unpinned');
+    var row = await db('tasks_v').where('id', 'unpin-reg').first();
+    expect(row.date_pinned).toBe(0);
+  });
+
+  test('rejects unpin on ingested cal-synced task', async () => {
+    if (!available) return;
+    await tasksWrite.insertTask(db, { id: 'unpin-gcal', user_id: USER_ID, task_type: 'task', text: 'Ingested pinned', status: '', date_pinned: 1, when: 'fixed', prev_when: 'afternoon', created_at: db.fn.now(), updated_at: db.fn.now() });
+    await db('cal_sync_ledger').insert({ task_id: 'unpin-gcal', user_id: USER_ID, provider: 'gcal', provider_event_id: 'evt-unpin', origin: 'gcal', status: 'active', created_at: db.fn.now(), updated_at: db.fn.now() });
+    var req = mockReq({ params: { id: 'unpin-gcal' } });
+    var res = mockRes();
+    await controller.unpinTask(req, res);
+    expect(res.statusCode).toBe(403);
+    expect(res._json.code).toBe('CAL_SYNCED_READONLY');
+    var row = await db('tasks_v').where('id', 'unpin-gcal').first();
+    expect(row.date_pinned).toBe(1);
   });
 });
 

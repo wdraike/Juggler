@@ -231,6 +231,17 @@ export default function AppLayout() {
     }
   }, []);
 
+  // Show contextual toast when a calendar-synced task rejects edits
+  useEffect(() => {
+    var handleReadonly = function(e) {
+      showToast(e.detail?.error || 'This task is controlled by the source calendar.', 'warning');
+    };
+    window.addEventListener('task:calendar-sync-readonly', handleReadonly);
+    return function() {
+      window.removeEventListener('task:calendar-sync-readonly', handleReadonly);
+    };
+  }, [showToast]);
+
   // Fetch GCal + MsftCal status on mount
   useEffect(() => {
     apiClient.get('/gcal/status')
