@@ -65,6 +65,27 @@ function hasSchedulingFields(row) {
 }
 
 /**
+ * Returns a 403-response payload if `existing` is an externally-ingested
+ * calendar-synced task and `body` contains disallowed fields.
+ * Returns `null` when editing is permitted (juggler-originated or no
+ * blocked fields present).
+ */
+function checkCalSyncEditGuard(existing, body) {
+  var origin = existing && existing.cal_sync_origin;
+  if (!origin || origin === 'juggler') return null;
+  var allowed = ['status', 'notes', 'datePinned', '_dragPin', '_allowUnfix'];
+  var blocked = Object.keys(body)
+    .filter(function(k) { return k !== 'id'; })
+    .filter(function(k) { return allowed.indexOf(k) === -1; });
+  if (blocked.length === 0) return null;
+  return {
+    error: 'This task is synced from an external calendar. Only status, notes, datePinned, _dragPin, and _allowUnfix can be changed here.',
+    code: 'CAL_SYNCED_READONLY',
+    blockedFields: blocked
+  };
+}
+
+/**
  * Expand a list of task IDs to include every sibling instance of any
  * recurring template or recurring instance among the inputs. Used after
  * a write that touches template-level (universal) fields so the frontend
@@ -915,6 +936,14 @@ async function updateTask(req, res) {
         });
       }
 
+      // Guard: calendar-ingested tasks — block field edits that would create drift
+      // with the external calendar. Allow status and notes only. Juggler-originated
+      // tasks (origin='juggler') remain editable even when synced outward.
+      var guard = checkCalSyncEditGuard(fastExisting, req.body);
+      if (guard) return res.status(403).json(guard);
+
+      guardFixedCalendarWhen(fastRow, fastExisting, { allowUnfix: !!req.body._allowUnfix });
+
       // Recurrings cannot have dependencies — strip if provided
       if (fastExisting.recurring || fastExisting.task_type === 'recurring_template'
           || fastExisting.task_type === 'recurring_instance') {
@@ -987,21 +1016,11 @@ async function updateTask(req, res) {
       });
     }
 
-    // Guard: calendar-synced tasks in ingest mode — block field edits that
-    // would create drift with the external calendar. Allow status and notes only.
-    var isCalSynced = !!(existing.gcal_event_id || existing.msft_event_id || existing.apple_event_id);
-    if (isCalSynced) {
-      var ALLOWED_SYNCED_FIELDS = ['status', 'notes', 'datePinned', '_dragPin', '_allowUnfix'];
-      var bodyKeys = Object.keys(req.body).filter(function(k) { return k !== 'id'; });
-      var blockedFields = bodyKeys.filter(function(k) { return ALLOWED_SYNCED_FIELDS.indexOf(k) === -1; });
-      if (blockedFields.length > 0) {
-        return res.status(403).json({
-          error: 'This task is synced from an external calendar. Only status and notes can be changed here.',
-          code: 'CAL_SYNCED_READONLY',
-          blockedFields: blockedFields
-        });
-      }
-    }
+    // Guard: calendar-ingested tasks — block field edits that would create drift
+    // with the external calendar. Allow status and notes only. Juggler-originated
+    // tasks (origin='juggler') remain editable even when synced outward.
+    var guard = checkCalSyncEditGuard(existing, req.body);
+    if (guard) return res.status(403).json(guard);
 
     var tz = safeTimezone(req.headers['x-timezone']);
     var anchorDateVal = req.body.anchorDate;

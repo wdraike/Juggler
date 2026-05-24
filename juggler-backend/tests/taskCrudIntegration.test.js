@@ -48,6 +48,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   if (!available) return;
+  await db('cal_sync_ledger').where('user_id', USER_ID).del();
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
   await db('projects').where('user_id', USER_ID).del();
@@ -75,6 +76,19 @@ function mockRes() {
     json: function(data) { res._json = data; return res; }
   };
   return res;
+}
+
+// Create a task and attach a cal_sync_ledger row. Returns the task id.
+async function seedCalSyncTask(taskBody, ledger) {
+  var req = mockReq({ body: taskBody });
+  var res = mockRes();
+  await controller.createTask(req, res);
+  var id = res._json.task.id;
+  await db('cal_sync_ledger').insert(Object.assign({
+    user_id: USER_ID, task_id: id,
+    created_at: db.fn.now(), updated_at: db.fn.now()
+  }, ledger));
+  return id;
 }
 
 // Import controller handlers
@@ -305,6 +319,74 @@ describe('updateTask', () => {
     // scheduled_at should NOT be on the template
     var inst = await db('tasks_v').where('id', 'inst-ptm-crud').first();
     expect(inst.scheduled_at).toBe('2026-04-10 11:00:00'); // unchanged
+  });
+
+  test('juggler-originated cal-synced task remains editable (fast path)', async () => {
+    if (!available) return;
+    var id = await seedCalSyncTask(
+      { text: 'Juggler origin', date: '4/10', time: '9:00 AM' },
+      { provider: 'gcal', provider_event_id: 'evt-123', origin: 'juggler', status: 'active' }
+    );
+    var req = mockReq({ params: { id: id }, body: { text: 'Updated' } });
+    var res = mockRes();
+    await controller.updateTask(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res._json.task.text).toBe('Updated');
+  });
+
+  test('ingested cal-synced task blocks edits (fast path)', async () => {
+    if (!available) return;
+    var id = await seedCalSyncTask(
+      { text: 'Ingested origin', date: '4/10', time: '9:00 AM' },
+      { provider: 'gcal', provider_event_id: 'evt-456', origin: 'gcal', status: 'active' }
+    );
+    var req = mockReq({ params: { id: id }, body: { text: 'Should fail' } });
+    var res = mockRes();
+    await controller.updateTask(req, res);
+    expect(res.statusCode).toBe(403);
+    expect(res._json.code).toBe('CAL_SYNCED_READONLY');
+  });
+
+  test('ingested cal-synced task silently keeps date_pinned on fast path (C-1)', async () => {
+    if (!available) return;
+    var id = await seedCalSyncTask(
+      { text: 'Ingested pinned', date: '4/10', time: '9:00 AM' },
+      { provider: 'gcal', provider_event_id: 'evt-pinned', origin: 'gcal', status: 'active' }
+    );
+    // Pre-condition: date_pinned is set by createTask because date+time were provided
+    var before = await db('tasks_v').where('id', id).first();
+    expect(before.date_pinned).toBe(1);
+
+    // Fast path: send datePinned: false — guard should silently strip it
+    var req = mockReq({ params: { id: id }, body: { datePinned: false } });
+    var res = mockRes();
+    await controller.updateTask(req, res);
+    expect(res.statusCode).toBe(200);
+
+    var after = await db('tasks_v').where('id', id).first();
+    expect(after.date_pinned).toBe(1);
+  });
+
+  test('ingested cal-synced task blocks when and allows notes', async () => {
+    if (!available) return;
+    var id = await seedCalSyncTask(
+      { text: 'Ingested complex', when: 'morning' },
+      { provider: 'msft', provider_event_id: 'evt-789', origin: 'msft', status: 'active' }
+    );
+
+    // Complex path: edit `when` → blocked
+    var req2 = mockReq({ params: { id: id }, body: { when: 'afternoon' } });
+    var res2 = mockRes();
+    await controller.updateTask(req2, res2);
+    expect(res2.statusCode).toBe(403);
+    expect(res2._json.code).toBe('CAL_SYNCED_READONLY');
+
+    // Allowed field: notes → succeeds
+    var req3 = mockReq({ params: { id: id }, body: { notes: 'Added note' } });
+    var res3 = mockRes();
+    await controller.updateTask(req3, res3);
+    expect(res3.statusCode).toBe(200);
+    expect(res3._json.task.notes).toBe('Added note');
   });
 });
 
