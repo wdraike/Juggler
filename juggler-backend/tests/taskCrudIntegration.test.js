@@ -388,6 +388,113 @@ describe('updateTask', () => {
     expect(res3.statusCode).toBe(200);
     expect(res3._json.task.notes).toBe('Added note');
   });
+
+  test('juggler-originated edit writes to DB, not just response', async () => {
+    if (!available) return;
+    var id = await seedCalSyncTask(
+      { text: 'DB verify', date: '4/10', time: '9:00 AM' },
+      { provider: 'gcal', provider_event_id: 'evt-db', origin: 'juggler', status: 'active' }
+    );
+    var req = mockReq({ params: { id: id }, body: { text: 'DB Updated' } });
+    var res = mockRes();
+    await controller.updateTask(req, res);
+    expect(res.statusCode).toBe(200);
+    var row = await db('tasks_v').where('id', id).first();
+    expect(row.text).toBe('DB Updated');
+  });
+
+  test('ingested blocked edit leaves DB untouched', async () => {
+    if (!available) return;
+    var id = await seedCalSyncTask(
+      { text: 'Untouched', date: '4/10', time: '9:00 AM' },
+      { provider: 'gcal', provider_event_id: 'evt-no-touch', origin: 'gcal', status: 'active' }
+    );
+    var req = mockReq({ params: { id: id }, body: { text: 'Nope' } });
+    var res = mockRes();
+    await controller.updateTask(req, res);
+    expect(res.statusCode).toBe(403);
+    expect(res._json.blockedFields).toContain('text');
+    var row = await db('tasks_v').where('id', id).first();
+    expect(row.text).toBe('Untouched');
+  });
+
+  test('mixed allowed + blocked fields rejected', async () => {
+    if (!available) return;
+    var id = await seedCalSyncTask(
+      { text: 'Mixed', date: '4/10', time: '9:00 AM' },
+      { provider: 'gcal', provider_event_id: 'evt-mix', origin: 'gcal', status: 'active' }
+    );
+    var req = mockReq({ params: { id: id }, body: { text: 'Blocked', notes: 'Allowed' } });
+    var res = mockRes();
+    await controller.updateTask(req, res);
+    expect(res.statusCode).toBe(403);
+    var row = await db('tasks_v').where('id', id).first();
+    expect(row.text).toBe('Mixed');
+  });
+
+  test('inactive ledger row makes task editable', async () => {
+    if (!available) return;
+    await tasksWrite.insertTask(db, { id: 'inact-led', user_id: USER_ID, task_type: 'task', text: 'Inactive ledger', status: '', created_at: db.fn.now(), updated_at: db.fn.now() });
+    await db('cal_sync_ledger').insert({
+      task_id: 'inact-led', user_id: USER_ID, provider: 'gcal',
+      provider_event_id: 'evt-inact', origin: 'gcal', status: 'deleted',
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    var req = mockReq({ params: { id: 'inact-led' }, body: { text: 'Edited' } });
+    var res = mockRes();
+    await controller.updateTask(req, res);
+    expect(res.statusCode).toBe(200);
+    var row = await db('tasks_v').where('id', 'inact-led').first();
+    expect(row.text).toBe('Edited');
+  });
+
+  test('multi-provider origin collision prefers non-juggler', async () => {
+    if (!available) return;
+    await tasksWrite.insertTask(db, { id: 'multi-prov', user_id: USER_ID, task_type: 'task', text: 'Multi', status: '', created_at: db.fn.now(), updated_at: db.fn.now() });
+    await db('cal_sync_ledger').insert({
+      task_id: 'multi-prov', user_id: USER_ID, provider: 'gcal',
+      provider_event_id: 'evt-g', origin: 'juggler', status: 'active',
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    await db('cal_sync_ledger').insert({
+      task_id: 'multi-prov', user_id: USER_ID, provider: 'msft',
+      provider_event_id: 'evt-m', origin: 'msft', status: 'active',
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    var req = mockReq({ params: { id: 'multi-prov' }, body: { text: 'Blocked' } });
+    var res = mockRes();
+    await controller.updateTask(req, res);
+    expect(res.statusCode).toBe(403);
+  });
+
+  test('ingested task with _allowUnfix can clear date_pinned', async () => {
+    if (!available) return;
+    var id = await seedCalSyncTask(
+      { text: 'AllowUnfix', date: '4/10', time: '9:00 AM' },
+      { provider: 'apple', provider_event_id: 'evt-unfix', origin: 'apple', status: 'active' }
+    );
+    var before = await db('tasks_v').where('id', id).first();
+    expect(before.date_pinned).toBe(1);
+
+    var req = mockReq({ params: { id: id }, body: { datePinned: false, _allowUnfix: true } });
+    var res = mockRes();
+    await controller.updateTask(req, res);
+    expect(res.statusCode).toBe(200);
+    var after = await db('tasks_v').where('id', id).first();
+    expect(after.date_pinned).toBe(0);
+  });
+
+  test('wrong-user cannot edit cal-synced task', async () => {
+    if (!available) return;
+    var id = await seedCalSyncTask(
+      { text: 'Wrong user', date: '4/10', time: '9:00 AM' },
+      { provider: 'gcal', provider_event_id: 'evt-wrong', origin: 'gcal', status: 'active' }
+    );
+    var req = mockReq({ user: { id: 'other-user' }, params: { id: id }, body: { text: 'Hacked' } });
+    var res = mockRes();
+    await controller.updateTask(req, res);
+    expect(res.statusCode).toBe(404);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════

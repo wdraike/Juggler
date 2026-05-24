@@ -1975,6 +1975,9 @@ async function batchUpdateTasks(req, res) {
           qRow.when = _qExWhen.split(',').map(function(t) { return t.trim(); }).filter(Boolean).join(',');
         }
 
+        // Guard: prevent unpinning calendar-linked tasks during scheduler lock
+        guardFixedCalendarWhen(qRow, qExisting, { allowUnfix: !!qFields._allowUnfix });
+
         var { schedulingFields, nonSchedulingFields } = splitFields(qRow);
 
         // Write non-scheduling fields directly

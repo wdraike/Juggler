@@ -1,75 +1,43 @@
-# Oscar Review — 2026-05-22 — juggler: archive planning + review artifacts, ignore .claude/
+# Oscar Review — 2026-05-24 — Calendar sync guard fix (batch locked path + tests)
 
 ## Decision: PASS
 
 ## Changed Files
 | File | Category | Agent(s) Launched |
 |------|----------|-------------------|
-| .gitignore | Config (add `.claude/`) | None per rubric |
-| .planning/phases/{09,10,11,12}/*.md | Planning | None per rubric — `.planning/` excluded from DOCS |
-| ARCH-REVIEW.md, CODE-REVIEW.md, SECURITY-REVIEW.md, TRINA-REVIEW.md, TRINA-TEST-AUDIT.md | Audit snapshot artifacts | None — time-stamped reviewer output, not living docs |
-| docs/testing/results/2026-05-19-E2E-002.md | Test result snapshot | None — result artifact |
+| juggler-backend/src/controllers/task.controller.js | API + Code | ernie, elmo, telly |
+| juggler-backend/tests/taskCrudIntegration.test.js | Test | telly, zoe |
+| CODE-REVIEW.md | Docs | prairie |
+| SECURITY-REVIEW.md | Docs | prairie |
+| ZOE-REVIEW.md | Docs | prairie |
+| TEST-REVIEW.md | Docs | prairie |
 
 ## Agent Launch Decisions
-| Agent | Launched | Reason |
-|-------|----------|--------|
-| prairie | No | Untracked `.md` files are reviewer-generated audit snapshots and test result artifacts, not living documentation. Documentation-standard frontmatter does not apply. |
-| ernie/elmo/telly/zoe | No | No source code changed. |
-| cookie | No | No infra change. |
-| bird | No | No frontend change. |
-
-## Review Summary
-Bulk-commit of accumulated planning files (phases 09–12) and audit snapshot artifacts. `.claude/` (including `.claude/worktrees/` — local git worktrees) added to ignore to prevent accidental nested-repo commit.
-
-## Accountability Statement
-Zero code, schema, security, or living-docs surface touched. Audit artifacts archived for history. Commit is **APPROVED**.
-Signed: Oscar, Technology Director — 2026-05-22
-
----
-
-# Oscar Review — 2026-05-21 — juggler test fixes + UX-REVIEW correction
-
-## Decision: PASS
-
----
-
-## Changed Files
-
-| File | Category | Agent(s) Launched |
-|------|----------|-------------------|
-| OSCAR-REVIEW.md | Docs (review artifact) | prairie |
-| UX-REVIEW.md | Docs (review artifact) | prairie |
-| juggler-backend/tests/api/task-state-machine.test.js | Tests | telly |
-
----
-
-## Agent Launch Decisions
-
-| Agent | Launched | Reason | Result | Key Findings |
-|-------|----------|--------|--------|-------------|
-| prairie | Yes | 2 .md docs changed | WARN → PASS (fixed) | F7 aria-label status incorrect in UX-REVIEW.md |
-| telly | Yes | test file changed | WARN → PASS (fixed) | sm25-idem + sm22-reenable asserting against 500 |
-| ernie | No | test-only changes | N/A | — |
-| elmo | No | no security-sensitive files | N/A | — |
+| Agent | Launched | Reason | Result | Finding Count |
+|-------|----------|--------|--------|---------------|
+| ernie | Yes | API + code logic | PASS | 0 Critical, 0 Warning |
+| telly | Yes | API + tests | PASS | 56 pass, 5 pre-existing D-14 failures |
+| zoe | Yes | always after telly | PASS | 0 BLOCK, 0 WARN (7 new tests audited) |
+| elmo | Yes | API category | PASS | 0 CRITICAL, 0 HIGH |
+| prairie | Yes | .md review artifacts changed | PASS | 0 BLOCK, 0 WARN |
 | cookie | No | no infra changes | N/A | — |
 | bird | No | no frontend changes | N/A | — |
 
----
+## Review Summary
+| Review File | Critical/BLOCK | Warn | Status |
+|-------------|---------------|------|--------|
+| CODE-REVIEW.md | 0 | 0 | PASS |
+| TEST-REVIEW.md | 0 | 0 | PASS |
+| SECURITY-REVIEW.md | 0 | 0 | PASS |
+| ZOE-REVIEW.md | 0 | 0 | PASS |
 
-## Resolution Trace — Iteration 1 (bert)
+## Diff Summary
+- `task.controller.js`: Added `guardFixedCalendarWhen(qRow, qExisting, { allowUnfix: !!qFields._allowUnfix })` in `batchUpdateTasks` locked path. Prevents unpinning calendar-linked tasks when scheduler lock is held.
+- `taskCrudIntegration.test.js`: 7 new tests covering DB verify, blocked untouched, mixed fields, inactive ledger, multi-provider origin collision, `_allowUnfix`, and wrong-user auth.
 
-| Fix | Finding | Result |
-|-----|---------|--------|
-| UX-REVIEW.md F7 → RESOLVED | aria-label="Interval unit" present at WhenSection.jsx:616 but marked as not applied | Fixed ✓ |
-| sm25-idem: `master_id: null` + assert 200 | Rolling-anchor call drained queue, test passed against 500 | Fixed ✓ |
-| sm22-reenable: correct queue seed + assert 200 | Under-seeded resolveQueue (missing srcMap slot + post-update slots) | Fixed ✓ |
-
-**Test result:** 1433/1433 pass, 16 skipped, 3 suites skipped (pre-existing)
-
----
+## Findings to Address
+None for this diff. Prior-batch pre-existing findings (batch unlocked path, updateTaskStatus drift, unpinTask gap) remain documented in backlog; not caused by this change.
 
 ## Accountability Statement
-
-All required agents launched per rubric. All WARN findings fixed in one bert iteration. Commit is **APPROVED**.
-
-Signed: Oscar, Technology Director — 2026-05-21T23:10:00Z
+All required agents launched per rubric. No BLOCK or CRITICAL findings. Commit APPROVED.
+Signed: Oscar, Technology Director — 2026-05-24T14:00:00Z

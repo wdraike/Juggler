@@ -1,89 +1,64 @@
-# Security Review — rolling recur type allowlist addition
+# Security Review — Juggler Calendar-Sync Edit Guard
 
-**Reviewer:** peneloppy
-**Date:** 2026-05-21
-**Scope:** `juggler-backend/src/controllers/task.controller.js` — `validateTaskInput` recurrence section (lines ~742-766) and downstream effects of adding `'rolling'` to `validRecurTypes`. Broadened review of the full recurrence validation block.
-**Files read:** task.controller.js, shared/scheduler/expandRecurring.js, juggler-backend/src/lib/rolling-anchor.js
+**Scope:** `juggler-backend/src/controllers/task.controller.js`, `juggler-backend/tests/taskCrudIntegration.test.js`  
+**Date:** 2026-05-24  
+**Branch:** main (juggler submodule)
 
 ---
 
-## Summary
+## Severity Summary
 
-CRITICAL: 0 | HIGH: 0 | MEDIUM: 1 | LOW: 2 | INFO: 1
-
-The one-line change is safe. Adding `'rolling'` to `validRecurTypes` does not bypass any existing guard, does not open an injection path, and does not enable prototype pollution. The anchor-guard block (`isAnchorDependentRecur`) already returns `true` for `rolling` (expandRecurring.js line 479), so rolling tasks are subject to the same `recurStart` enforcement as `biweekly` and `interval` — the allowlist addition is the correct complement to that existing guard.
-
-The findings below are all pre-existing in the recurrence validation section; none were introduced by this commit.
+| Severity | Count |
+|----------|-------|
+| CRITICAL | 0 |
+| HIGH     | 1 |
+| MEDIUM   | 2 |
+| LOW      | 0 |
 
 ---
 
 ## Findings
 
-### MEDIUM-1 — No validation of `recur.intervalDays` for rolling type
+### HIGH-1 — batchUpdateTasks bypasses calendar-sync edit guard
+**Location:** `task.controller.js` — `batchUpdateTasks` (lines 1890-2170)
 
-**File:** `juggler-backend/src/controllers/task.controller.js` line 742-766
-**Also:** `shared/scheduler/expandRecurring.js` line 299
+The new `checkCalSyncEditGuard` is applied to `updateTask` (fast and complex paths) but is **completely absent** from `batchUpdateTasks`. An authenticated user can batch-update an externally-ingested calendar task with disallowed fields (e.g. `text`, `dur`, `scheduledAt`, `when`) and the server will accept the write.
 
-`validateTaskInput` validates only `recur.type`. The `recur` object's sub-fields are accepted without constraints by `.passthrough()` in `taskPatchSchema` (line 1509) and are never checked in `validateTaskInput`. For rolling tasks, the scheduler reads `r.intervalDays` at line 299:
+Compounding factor: `batchUpdateTasks` pre-loads existing rows from `tasks_with_sync_v`, which **does not expose `cal_sync_origin`**. Even if the guard call were added, it would return `null` (permit edit) because `existing.cal_sync_origin` is undefined. The view must include the origin column, or the controller must fetch ledger data separately, before the guard can be enforced in the batch path.
 
-```js
-var rollingInterval = Math.max(1, Number(r.intervalDays) || 7);
-```
+**Impact:** Integrity bypass — externally-ingested tasks can be edited in ways that create drift with the provider calendar.
 
-An authenticated user can supply `intervalDays: "Infinity"` or `intervalDays: 1e308`. `Number('Infinity')` = `Infinity`; `Math.max(1, Infinity)` = `Infinity`; `Math.round(n * Infinity)` = `Infinity`; `setDate(date + Infinity)` produces an Invalid Date. The loop's exit condition `rollingDate > end` evaluates to `false` for NaN, so all 1000 iterations run, each pushing a task object with `date: 'NaN/NaN'` into the scheduler output. This corrupts that user's scheduled task list silently until they correct or delete the task.
-
-The 1000-iteration hard cap bounds CPU exposure to a constant; this is not a server-DoS vector. The effect is per-user data corruption, not cross-user. Severity is MEDIUM because an authenticated user can corrupt their own scheduler state in a way that is not immediately obvious and may persist.
-
-**Remediation:** Add a bounds check in `validateTaskInput` for rolling type:
-```js
-if (rType === 'rolling') {
-  var id = Number(body.recur.intervalDays);
-  if (body.recur.intervalDays !== undefined &&
-      (!Number.isFinite(id) || id < 1 || id > 365)) {
-    errors.push('Rolling interval must be between 1 and 365 days');
-  }
-}
-```
+**Remediation:**
+1. Add `cal_sync_origin` to `tasks_with_sync_v` (or have `batchUpdateTasks` bulk-fetch ledger rows, mirroring `fetchTasksWithEventIds`).
+2. Invoke `checkCalSyncEditGuard(existing, fields)` for every item in the batch, in both the locked and unlocked paths.
+3. Reject the entire batch if any item violates the guard, or filter out offending items and return partial-success metadata.
 
 ---
 
-### LOW-1 — User-supplied string reflected verbatim in validation error message
+### MEDIUM-1 — updateTaskStatus can mutate scheduled_at on externally-ingested tasks
+**Location:** `task.controller.js` — `updateTaskStatus` (lines 1558-1803)
 
-**File:** `juggler-backend/src/controllers/task.controller.js` line 746
+`updateTaskStatus` does not call `checkCalSyncEditGuard`. It is semantically a status-only endpoint, but it can side-effect `scheduled_at`:
+- `cancel` / `skip` with a future `scheduled_at` snaps it to `db.fn.now()` (line 1726).
+- `done` with a custom `completedAt` overwrites `scheduled_at` to that timestamp (lines 1705-1710).
 
-```js
-if (rType && validRecurTypes.indexOf(rType) === -1) errors.push('Invalid recurrence type: ' + rType);
-```
+For an externally-ingested task, the policy is "only status and notes can be changed here." Mutating `scheduled_at` violates that policy and causes calendar drift.
 
-`rType` is the caller-supplied `body.recur.type` lowercased. The lowercased string is reflected directly into the error response body. Because the response is `application/json` and not rendered as HTML, there is no XSS risk. However, it leaks the exact input back to the caller, which is unnecessary and slightly aids enumeration. A 30-char input would produce a 30-char payload in the error message with no truncation.
-
-**Remediation:** Either omit the value from the message or truncate it: `rType.slice(0, 20)`.
-
----
-
-### LOW-2 — `when` field accepts arbitrary strings below 30 chars (pre-existing)
-
-**File:** `juggler-backend/src/controllers/task.controller.js` lines 692-699
-
-The `when` validation rejects tags over 30 chars but does not restrict to the `VALID_WHEN_KEYWORDS` allowlist (`['', 'fixed', 'allday', 'anytime']` defined at line 673). Any comma-separated string with each part <= 30 chars is stored. This is unrelated to the `rolling` change. Not a direct injection risk given the field is stored as a plain string and rendered as text, but it means callers can store arbitrary short strings that the scheduler does not understand. Note the comment in the code acknowledges this for "custom time block tags", so this may be intentional.
-
-**Remediation:** If custom block tags are intentional, document the expected format. Otherwise, enforce the allowlist.
+**Remediation:** Apply `checkCalSyncEditGuard` in `updateTaskStatus` when the side-effect touches any field other than `status` (and `completed_at`, which is internal bookkeeping). Alternatively, suppress `scheduled_at` mutations when `existing.cal_sync_origin` is a provider origin.
 
 ---
 
-### INFO-1 — No prototype pollution risk in the `rolling` change
+### MEDIUM-2 — unpinTask clears date_pinned on externally-ingested tasks
+**Location:** `task.controller.js` — `unpinTask` (lines 2300-2334)
 
-`body.recur` is accessed only after a `typeof body.recur === 'object'` guard. Properties are read individually (`body.recur.type`). The object is serialized via `JSON.stringify(task.recur)` before DB write. `Object.keys` iteration over `body` at lines 1875 and 1992 does not iterate prototype keys (standard behavior). No `Object.assign(target, body.recur)` pattern is present. Prototype pollution is not a concern here.
+`unpinTask` reads from `tasks_with_sync_v` and unconditionally clears `date_pinned: 0` and rewrites `when`. It never calls `checkCalSyncEditGuard`. For an externally-ingested task, this strips the fixed-calendar pinning that keeps the scheduler from moving the event, directly contradicting the cal-sync guard intent.
+
+**Remediation:** Check `cal_sync_origin` (or use `checkCalSyncEditGuard`) before allowing `unpinTask` on provider-origin tasks. If the task is externally-ingested, return `403 CAL_SYNCED_READONLY`.
 
 ---
 
-## Change-specific verdict
+## Other Observations (No Severity)
 
-The `'rolling'` allowlist addition at line 744 is correct and introduces no new attack surface:
-
-- `rolling` is already classified as anchor-dependent in `isAnchorDependentRecur` — the anchor guard fires correctly.
-- The scheduler's rolling loop has a hard 1000-iteration cap and the `rollingDate > end` break, bounding any CPU exposure.
-- No validation logic that applies to other types is bypassed for `rolling`.
-- No injection or prototype pollution vector was identified.
-
-MEDIUM-1 (`intervalDays` bounds) is the only finding directly relevant to the new `rolling` type and should be addressed before this type is exposed in production UI.
+- **JWT / Auth bypass:** None identified. All task routes are wrapped by `authenticateJWT` and `resolvePlanFeatures`. `tasksWrite.updateTaskById` consistently filters by `user_id`.
+- **Injection risks:** None identified. `taskToRow` is a closed allow-list mapper; arbitrary keys in the request body are dropped before DB writes. Knex parameterizes all `whereIn` and `update` calls.
+- **Test gap:** The new integration tests cover `updateTask` fast and complex paths, but there are **zero tests** for `batchUpdateTasks` cal-sync guard behavior. A test that sends a blocked field via `PUT /api/tasks/batch` should fail until the bypass is fixed.
