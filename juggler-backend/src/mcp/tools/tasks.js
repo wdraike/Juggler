@@ -54,7 +54,8 @@ var taskInputFields = {
     timesPerCycle: z.number().optional().describe('Target count per cycle (e.g. 3 for "3x per week"). Only used when fewer than all selected days are required.'),
     fillPolicy: z.enum(['keep', 'backfill']).optional().describe('When a session in a times-per-cycle recurrence is skipped: "keep" (default) leaves it skipped; "backfill" tells the scheduler to pick a new date to hit the target count.')
   }).optional().describe('Recurrence pattern'),
-  datePinned: z.boolean().optional().describe('Whether date is pinned (won\'t be moved by scheduler)'),
+  datePinned: z.boolean().optional().describe('Whether date is pinned (won\'t be moved by scheduler). When omitted and date/time are provided, defaults to true.'),
+  placementMode: z.enum(['anytime', 'time_window', 'time_blocks', 'fixed', 'all_day', 'reminder']).optional().describe('Scheduling mode. Inferred from date/time presence when omitted: time set → fixed; date only → all_day; neither → anytime.'),
   marker: z.boolean().optional().describe('Non-blocking reminder event — shows on calendar at its time but does not prevent tasks from being scheduled in the same slot. Use for events you want to see but not block time for (e.g. TV game windows, reminders). Can have status and dependencies like regular tasks.'),
   flexWhen: z.boolean().optional().describe('Allow the scheduler to relax this task\'s "when" time-of-day preference if it can\'t be placed within those windows. When false (default), the task stays unplaced if its when windows are full.'),
   travelBefore: z.number().optional().describe('Travel buffer before task in minutes — scheduler reserves this time and prevents overlapping placements'),
@@ -132,11 +133,11 @@ function registerTaskTools(server, userId) {
       var row = taskToRow(task, userId, tz);
       if (!row.task_type) row.task_type = 'task';
       row.created_at = db.fn.now();
-      // Auto-pin when user explicitly provides date/time/scheduledAt
-      if (task.date || task.time || task.scheduledAt) {
+      // Auto-pin when user provides date/time/scheduledAt but did not explicitly set datePinned
+      if ((task.date || task.time || task.scheduledAt) && task.datePinned === undefined) {
         row.date_pinned = 1;
       }
-      // PHASE 19 D-04: mirror task.controller.js:794-800 — MCP must apply placement_mode inference to avoid Case B overdue
+      // PHASE 19 D-04: mirror task.controller.js:794-800 — MCP applies placement_mode inference only when caller omitted placementMode
       var _timeWasSet = task.time !== undefined || task.scheduledAt !== undefined;
       if (_timeWasSet && row.placement_mode === undefined) {
         row.placement_mode = PLACEMENT_MODES.FIXED;
@@ -192,11 +193,11 @@ function registerTaskTools(server, userId) {
         if (row.split === undefined || row.split === null) {
           row.split = splitDefault ? 1 : 0;
         }
-        // Auto-pin when batch item has an explicit date/time (mirrors create_task behavior above)
-        if (t.date || t.time || t.scheduledAt) {
+        // Auto-pin when batch item has an explicit date/time and caller omitted datePinned
+        if ((t.date || t.time || t.scheduledAt) && t.datePinned === undefined) {
           row.date_pinned = 1;
         }
-        // PHASE 19 D-04: same inference as create_task — applied per item in the batch
+        // PHASE 19 D-04: same inference as create_task — applied per item in the batch, only when caller omitted placementMode
         var _tTimeWasSet = t.time !== undefined || t.scheduledAt !== undefined;
         if (_tTimeWasSet && row.placement_mode === undefined) {
           row.placement_mode = PLACEMENT_MODES.FIXED;
@@ -262,15 +263,25 @@ function registerTaskTools(server, userId) {
         }
       }
 
+      // Cross-field: fixed placementMode requires scheduling info
+      if (fields.placementMode === 'fixed') {
+        var _hasDate = fields.date !== undefined && fields.date !== null && fields.date !== '';
+        var _hasTime = fields.time !== undefined && fields.time !== null && fields.time !== '';
+        var _hasScheduledAt = fields.scheduledAt !== undefined && fields.scheduledAt !== null && fields.scheduledAt !== '';
+        if (!_hasDate && !_hasTime && !_hasScheduledAt && !existing.scheduled_at) {
+          return { content: [{ type: 'text', text: 'Validation error: placementMode "fixed" requires a date, time, or scheduledAt' }], isError: true };
+        }
+      }
+
       var row = taskToRow(fields, userId, tz, existing);
       delete row.user_id;
       delete row.created_at;
 
       if (fields.project) await ensureProject(userId, fields.project);
 
-      // Auto-pin when user explicitly provides date/time/scheduledAt
+      // Auto-pin when user provides date/time/scheduledAt but did not explicitly set datePinned
       var dateOrTimeSet = fields.date !== undefined || fields.time !== undefined || fields.scheduledAt !== undefined;
-      if (dateOrTimeSet && row.date_pinned === undefined) {
+      if (dateOrTimeSet && fields.datePinned === undefined && row.date_pinned === undefined) {
         row.date_pinned = 1;
       }
       // PHASE 19 D-04: update-path ALL_DAY backstop — mirror task.controller.js:1032-1040 (NOT the create path; no FIXED inference here)
@@ -529,6 +540,31 @@ function registerTaskTools(server, userId) {
         return { content: [{ type: 'text', text: 'Error: Batch limited to 200 items' }], isError: true };
       }
 
+      // Guard: calendar-synced tasks — only status and notes are editable
+      var idsToCheck = updates.map(function(u) { return u.id; });
+      var syncCheck = await db('tasks_with_sync_v')
+        .where('user_id', userId)
+        .whereIn('id', idsToCheck)
+        .select('id', 'gcal_event_id', 'msft_event_id', 'apple_event_id');
+      var syncById = {};
+      syncCheck.forEach(function(r) { syncById[r.id] = r; });
+      for (var si = 0; si < updates.length; si++) {
+        var sUpdate = updates[si];
+        var sId = sUpdate.id;
+        var sExisting = syncById[sId];
+        if (!sExisting) continue;
+        var isCalSynced = !!(sExisting.gcal_event_id || sExisting.msft_event_id || sExisting.apple_event_id);
+        if (isCalSynced) {
+          var allowedKeys = ['status', 'notes'];
+          var sFields = {};
+          Object.keys(sUpdate).forEach(function(k) { if (k !== 'id') sFields[k] = sUpdate[k]; });
+          var blocked = Object.keys(sFields).filter(function(k) { return allowedKeys.indexOf(k) === -1; });
+          if (blocked.length > 0) {
+            return { content: [{ type: 'text', text: 'Error: This task is synced from an external calendar. Only status and notes can be changed. Blocked fields: ' + blocked.join(', ') }], isError: true };
+          }
+        }
+      }
+
       var tz = await getUserTimezone();
       var updatedCount = 0;
 
@@ -552,6 +588,14 @@ function registerTaskTools(server, userId) {
           if (!qId || !existById[qId]) continue;
           var qFields = {};
           Object.keys(qUpdate).forEach(function(k) { if (k !== 'id') qFields[k] = qUpdate[k]; });
+          if (qFields.placementMode === 'fixed') {
+            var _qHasDate = qFields.date !== undefined && qFields.date !== null && qFields.date !== '';
+            var _qHasTime = qFields.time !== undefined && qFields.time !== null && qFields.time !== '';
+            var _qHasScheduledAt = qFields.scheduledAt !== undefined && qFields.scheduledAt !== null && qFields.scheduledAt !== '';
+            if (!_qHasDate && !_qHasTime && !_qHasScheduledAt && !existById[qId].scheduled_at) {
+              return { content: [{ type: 'text', text: 'Validation error: placementMode "fixed" requires a date, time, or scheduledAt' }], isError: true };
+            }
+          }
           var qRow = taskToRow(qFields, userId, tz, existById[qId]);
           delete qRow.user_id;
           delete qRow.created_at;
@@ -577,61 +621,106 @@ function registerTaskTools(server, userId) {
         return { content: [{ type: 'text', text: safeStringify({ updated: updatedCount, queued: queuedCount }) }] };
       }
 
-      await db.transaction(async function(trx) {
-        var idsToUpdate = updates.map(function(u) { return u.id; });
-        var existingRows = await trx('tasks_v')
-          .where('user_id', userId)
-          .whereIn('id', idsToUpdate)
-          .select('id', 'task_type', 'source_id', 'scheduled_at');
-        var existingById = {};
-        existingRows.forEach(function(r) { existingById[r.id] = r; });
+      var txErrors = [];
+      try {
+        await db.transaction(async function(trx) {
+          var idsToUpdate = updates.map(function(u) { return u.id; });
+          var existingRows = await trx('tasks_with_sync_v')
+            .where('user_id', userId)
+            .whereIn('id', idsToUpdate)
+            .select('id', 'task_type', 'source_id', 'scheduled_at', 'gcal_event_id', 'msft_event_id', 'apple_event_id');
+          var existingById = {};
+          existingRows.forEach(function(r) { existingById[r.id] = r; });
 
-        for (var i = 0; i < updates.length; i++) {
-          var update = updates[i];
-          var id = update.id;
-          if (!id || !existingById[id]) continue;
-
-          var fields = {};
-          Object.keys(update).forEach(function(k) { if (k !== 'id') fields[k] = update[k]; });
-          var existing = existingById[id];
-          var row = taskToRow(fields, userId, tz, existing);
-          delete row.user_id;
-          delete row.created_at;
-          delete row._pendingTimeOnly;
-          // PHASE 19 D-04: batch_update_tasks transaction path — same ALL_DAY backstop as update_task
-          var _txTimeWasSet = fields.time !== undefined || fields.scheduledAt !== undefined;
-          if (!_txTimeWasSet && fields.date !== undefined && row.placement_mode === undefined) {
-            row.placement_mode = PLACEMENT_MODES.ALL_DAY;
+          // Pre-load source templates for recurring instances so the fixed-calendar
+          // guard can inspect the template's calendar linkage (same as API batch update).
+          var srcIds = [];
+          existingRows.forEach(function(r) {
+            if (r.task_type === 'recurring_instance' && r.source_id && srcIds.indexOf(r.source_id) < 0) {
+              srcIds.push(r.source_id);
+            }
+          });
+          var templateById = {};
+          if (srcIds.length > 0) {
+            var tmplRows = await trx('tasks_with_sync_v')
+              .where('user_id', userId)
+              .whereIn('id', srcIds)
+              .select('id', 'gcal_event_id', 'msft_event_id', 'apple_event_id');
+            tmplRows.forEach(function(r) { templateById[r.id] = r; });
           }
-          var taskType = existing.task_type || 'task';
 
-          if (taskType === 'recurring_instance' && existing.source_id) {
-            var templateUpdate = {};
-            var instanceUpdate = {};
-            Object.keys(row).forEach(function(k) {
-              if (k === 'updated_at') return;
-              if (TEMPLATE_FIELDS.indexOf(k) >= 0) {
-                templateUpdate[k] = row[k];
-              } else {
-                instanceUpdate[k] = row[k];
+          for (var i = 0; i < updates.length; i++) {
+            var update = updates[i];
+            var id = update.id;
+            if (!id || !existingById[id]) continue;
+
+            var fields = {};
+            Object.keys(update).forEach(function(k) { if (k !== 'id') fields[k] = update[k]; });
+            var existing = existingById[id];
+            if (fields.placementMode === 'fixed') {
+              var _txHasDate = fields.date !== undefined && fields.date !== null && fields.date !== '';
+              var _txHasTime = fields.time !== undefined && fields.time !== null && fields.time !== '';
+              var _txHasScheduledAt = fields.scheduledAt !== undefined && fields.scheduledAt !== null && fields.scheduledAt !== '';
+              if (!_txHasDate && !_txHasTime && !_txHasScheduledAt && !existing.scheduled_at) {
+                txErrors.push({ id: id, error: 'Validation error: placementMode "fixed" requires a date, time, or scheduledAt' });
+                continue;
               }
-            });
-            if (Object.keys(templateUpdate).length > 0) {
-              templateUpdate.updated_at = db.fn.now();
-              await tasksWrite.updateTaskById(trx, existing.source_id, templateUpdate, userId);
             }
-            if (Object.keys(instanceUpdate).length > 0) {
-              instanceUpdate.updated_at = db.fn.now();
-              await tasksWrite.updateTaskById(trx, id, instanceUpdate, userId);
+            var row = taskToRow(fields, userId, tz, existing);
+            delete row.user_id;
+            delete row.created_at;
+            delete row._pendingTimeOnly;
+            // PHASE 19 D-04: batch_update_tasks transaction path — same ALL_DAY backstop as update_task
+            var _txTimeWasSet = fields.time !== undefined || fields.scheduledAt !== undefined;
+            if (!_txTimeWasSet && fields.date !== undefined && row.placement_mode === undefined) {
+              row.placement_mode = PLACEMENT_MODES.ALL_DAY;
+            }
+
+            // Guard: don't let calendar-linked fixed tasks lose their 'fixed' tag.
+            var _guardOpts = { allowUnfix: !!fields._allowUnfix };
+            if (existing.task_type === 'recurring_instance' && existing.source_id && templateById[existing.source_id]) {
+              guardFixedCalendarWhen(row, templateById[existing.source_id], _guardOpts);
+            }
+            guardFixedCalendarWhen(row, existing, _guardOpts);
+
+            var taskType = existing.task_type || 'task';
+
+            if (taskType === 'recurring_instance' && existing.source_id) {
+              var templateUpdate = {};
+              var instanceUpdate = {};
+              Object.keys(row).forEach(function(k) {
+                if (k === 'updated_at') return;
+                if (TEMPLATE_FIELDS.indexOf(k) >= 0) {
+                  templateUpdate[k] = row[k];
+                } else {
+                  instanceUpdate[k] = row[k];
+                }
+              });
+              if (Object.keys(templateUpdate).length > 0) {
+                templateUpdate.updated_at = db.fn.now();
+                await tasksWrite.updateTaskById(trx, existing.source_id, templateUpdate, userId);
+              }
+              if (Object.keys(instanceUpdate).length > 0) {
+                instanceUpdate.updated_at = db.fn.now();
+                await tasksWrite.updateTaskById(trx, id, instanceUpdate, userId);
+              } else {
+                await tasksWrite.updateTaskById(trx, id, { updated_at: db.fn.now() }, userId);
+              }
             } else {
-              await tasksWrite.updateTaskById(trx, id, { updated_at: db.fn.now() }, userId);
+              await tasksWrite.updateTaskById(trx, id, row, userId);
             }
-          } else {
-            await tasksWrite.updateTaskById(trx, id, row, userId);
+            updatedCount++;
           }
-          updatedCount++;
+          if (txErrors.length > 0) {
+            throw new Error(txErrors.map(function(e) { return e.id + ': ' + e.error; }).join('; '));
+          }
+        });
+      } catch (err) {
+        if (txErrors.length > 0) {
+          return { content: [{ type: 'text', text: err.message }], isError: true };
         }
-      });
+        throw err;
+      }
 
       enqueueScheduleRun(userId, 'mcp:batch_update_tasks', updates.map(function(u) { return u.id; }).filter(Boolean));
       return { content: [{ type: 'text', text: safeStringify({ updated: updatedCount }) }] };

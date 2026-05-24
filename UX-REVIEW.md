@@ -211,3 +211,90 @@ File: `juggler-frontend/src/components/tasks/sections/WhenSection.jsx`
 | 642 | `Anchor not yet set — computed from first completion` | `Not yet completed — the due date will be set after the first time you mark this done` |
 
 TaskEditForm.jsx — no rolling-specific copy found; no changes needed.
+
+---
+
+# UX Sweep — TaskEditForm + WhenSection
+Date: 2026-05-24
+Scope: `juggler-frontend/src/components/tasks/TaskEditForm.jsx`, `juggler-frontend/src/components/tasks/sections/WhenSection.jsx`
+Method: Full Playwright UX sweep covering all interactive elements in every state.
+Test file: `tests/ux-sweep-taskedit-when.spec.js` (23 tests, all passing)
+
+---
+
+## BLOCK (1)
+
+### 1. Recurring day toggles — Sunday & Saturday have broken/missing title attributes
+**Location:** `WhenSection.jsx`, weekly/biweekly recurrence day toggles  
+**Evidence:** Playwright selector `button[title="Monday"]` found Monday, but equivalent selectors for Sunday (`button[title="Sunday"]`) and Saturday (`button[title="Saturday"]`) return `title="undefined"` because the title map keys don't match the day codes.
+
+Code:
+```jsx
+// Day codes in weekly/biweekly section:
+{[['U','Su'],['M','Mo'],...,['S','Sa']].map(function(pair) {
+  var code = pair[0], label = pair[1];
+  // title map uses keys Su, M, T, W, R, F, Sa
+  return (
+    <button ... title={({Su:'Sunday',M:'Monday',...,Sa:'Saturday'})[code]}>
+      {label}
+    </button>
+  );
+})}
+```
+
+`code` is `'U'` for Sunday and `'S'` for Saturday, but the map has keys `'Su'` and `'Sa'`.  
+**Impact:** Screen-reader users can't identify the Sunday/Saturday toggle buttons. Hover tooltips are broken. Playwright selectors relying on titles fail.  
+**Fix:** Change map keys to match the actual `code` values (`U` and `S`) or update the codes to `Su`/`Sa`.
+
+---
+
+## WARN (3)
+
+### W1. End-time validation lacks inline real-time feedback
+**Location:** `WhenSection.jsx` start/end time inputs  
+**Evidence:** The error message `Finish must be after start` only renders after the `onChange` event of the end-time input fires. If a user sets start=14:00, end=13:00, and immediately clicks Save without touching the end field again, the save is silently blocked (`if (endTimeError) return;` in `handleSave`) but the error message may not be visible if the user never blurred the end-time field.  
+**Impact:** Users may be confused why Save does nothing.  
+**Fix:** Validate on any start/end/dur change, not just end-time onChange.
+
+### W2. No `data-testid` on any interactive element in scope
+**Location:** Both files in scope  
+**Evidence:** Confirmed via grep: `juggler-frontend/src/` contains zero `data-testid` attributes. All Playwright selectors must use visible text, titles, or role anchors. This is fragile when copy changes or when responsive viewports swap text for icons (e.g., NavigationBar `List` becomes `≡` on mobile).  
+**Impact:** Test maintenance cost is high; any copy tweak or icon swap breaks selectors.  
+**Fix:** Add minimal `data-testid` attributes to the most critical interactive elements (mode buttons, save/create buttons, date/time inputs, recurrence type select).
+
+### W3. Playwright `filter({ hasNot: locator('[placeholder]') })` does not exclude elements that themselves have the attribute
+**Location:** Test helper code (not product code), but the pitfall is worth documenting  
+**Evidence:** `page.locator('input[type="text"]').filter({ hasNot: page.locator('[placeholder]') }).first()` matched the search input **with** placeholder `Search tasks...` because `hasNot` checks for *descendants* matching the locator, not whether the element itself carries the attribute. This caused the dirty-state test to fill the search box instead of the task name input, making dirty detection fail.  
+**Fix:** Use CSS pseudo-class instead: `page.locator('input[type="text"]:not([placeholder])')`.
+
+---
+
+## States Covered by Playwright Sweep
+
+| State | Tests | Result |
+|-------|-------|--------|
+| Create mode — anytime | 1 | Pass |
+| Create mode — all_day (hides time/dur) | 1 | Pass |
+| Create mode — time_window (shows time + flex select) | 1 | Pass |
+| Create mode — time_blocks | 1 | Pass |
+| Create mode — Day requirement toggles | 1 | Pass |
+| Create mode — Pin button toggle | 1 | Pass |
+| Create mode — Timezone selector open/close | 1 | Pass |
+| Create mode — Rigid/Float toggle | 1 | Pass |
+| Create mode — End-time validation error | 1 | Pass |
+| Create mode — Constraints section expand | 1 | Pass |
+| Edit mode — Dirty detection + Save affordance | 1 | Pass |
+| Edit mode — Fixed/pinned task (dimmed mode selector) | 1 | Pass |
+| Edit mode — Marker=true (suppresses When/Where/Weather/Tools) | 1 | Pass |
+| Recurring — weekly day toggles + TPC | 1 | Pass |
+| Recurring — weekly TPC flexible quota + fill policy | 1 | Pass |
+| Recurring — monthly day-of-month picker | 1 | Pass |
+| Recurring — interval every + unit inputs | 1 | Pass |
+| Recurring — rolling empty anchor state | 1 | Pass |
+| Recurring — rolling with anchor (completed/next due) | 1 | Pass |
+| Recurring — time_window preferred time input | 1 | Pass |
+| Recurring — anchor-dependent autofill recurStart | 1 | Pass |
+| Mobile — create form full-screen overlay | 1 | Pass |
+| Mobile — dirty save button appears | 1 | Pass |
+
+**Total: 23 tests, 23 passed, 0 skipped.**

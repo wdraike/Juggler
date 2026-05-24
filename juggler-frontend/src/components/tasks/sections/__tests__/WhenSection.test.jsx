@@ -312,3 +312,51 @@ it('rolling mode hides fill policy', () => {
   expect(screen.queryByText(/Keep the schedule/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Backfill missed/)).not.toBeInTheDocument();
 });
+
+// --- datePinned toggle ---
+
+it('shows Pin button when datePinned is false', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} />);
+  expect(screen.getByText('📌 Pin')).toBeInTheDocument();
+});
+
+it('shows Pinned button when datePinned is true', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={true} />);
+  expect(screen.getByText('📍 Pinned')).toBeInTheDocument();
+});
+
+it('clicking Pin button calls onDatePinnedChange with true', () => {
+  var called = null;
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false}
+    onDatePinnedChange={function(v) { called = v; }}
+  />);
+  fireEvent.click(screen.getByText('📌 Pin'));
+  expect(called).toBe(true);
+});
+
+it('clicking Pinned button calls onDatePinnedChange with false', () => {
+  var called = null;
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={true}
+    onDatePinnedChange={function(v) { called = v; }}
+  />);
+  fireEvent.click(screen.getByText('📍 Pinned'));
+  expect(called).toBe(false);
+});
+
+// --- lockout explanation banner ---
+
+it('shows pinned lockout banner when datePinned is true', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={true} placementMode="anytime" />);
+  expect(screen.getByText(/Date is pinned/)).toBeInTheDocument();
+});
+
+it('shows calendar-managed lockout banner when placementMode is fixed', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" />);
+  expect(screen.getByText(/Calendar-managed/)).toBeInTheDocument();
+});
+
+it('does not show lockout banner when isFixed is false', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="anytime" />);
+  expect(screen.queryByText(/Date is pinned/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Calendar-managed/)).not.toBeInTheDocument();
+});

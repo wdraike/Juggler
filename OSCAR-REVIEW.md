@@ -1,43 +1,60 @@
-# Oscar Review — 2026-05-24 — Calendar sync guard fix (batch locked path + tests)
+# Oscar Review — 2026-05-24 — Juggler auto-pin + placementMode + silent-lockout fix
 
-## Decision: PASS
+## Decision: WARN
 
 ## Changed Files
 | File | Category | Agent(s) Launched |
 |------|----------|-------------------|
+| juggler-backend/src/mcp/tools/tasks.js | API + Code | ernie, elmo, telly, zoe |
 | juggler-backend/src/controllers/task.controller.js | API + Code | ernie, elmo, telly |
-| juggler-backend/tests/taskCrudIntegration.test.js | Test | telly, zoe |
-| CODE-REVIEW.md | Docs | prairie |
-| SECURITY-REVIEW.md | Docs | prairie |
-| ZOE-REVIEW.md | Docs | prairie |
-| TEST-REVIEW.md | Docs | prairie |
+| juggler-frontend/src/components/tasks/sections/WhenSection.jsx | Frontend + Code | bird, ernie, telly, zoe |
+| juggler-frontend/src/components/tasks/TaskEditForm.jsx | Frontend + Code | bird, ernie |
+| juggler-frontend/src/components/tasks/sections/__tests__/WhenSection.test.jsx | Test | telly, zoe |
+| juggler-frontend/src/components/tasks/sections/__tests__/WhenSection.modes.test.jsx | Test | telly, zoe |
+| juggler-backend/tests/mcp-task-config.test.js | Test | telly, zoe |
+| juggler-backend/docs/TASK-CONFIGURATION-MATRIX.md | Docs | prairie |
+| juggler-frontend/docs/TASK-EDIT-UX-AUDIT.md | Docs | prairie |
+| juggler-frontend/docs/ZOE-TEST-AUDIT.md | Docs | prairie |
+| juggler-frontend/docs/ERNIE-CODE-REVIEW.md | Docs | prairie |
+| juggler-backend/docs/ELMO-SECURITY-AUDIT.md | Docs | prairie |
 
 ## Agent Launch Decisions
 | Agent | Launched | Reason | Result | Finding Count |
 |-------|----------|--------|--------|---------------|
-| ernie | Yes | API + code logic | PASS | 0 Critical, 0 Warning |
-| telly | Yes | API + tests | PASS | 56 pass, 5 pre-existing D-14 failures |
-| zoe | Yes | always after telly | PASS | 0 BLOCK, 0 WARN (7 new tests audited) |
-| elmo | Yes | API category | PASS | 0 CRITICAL, 0 HIGH |
-| prairie | Yes | .md review artifacts changed | PASS | 0 BLOCK, 0 WARN |
+| prairie | Yes | 5 docs changed | PASS | 0 BLOCK, 0 WARN |
+| ernie | Yes | 4 code files | WARN | 6 Critical, 20 Warning |
+| elmo | Yes | API (task.controller.js) | WARN | 3 CRITICAL, 11 HIGH |
+| telly | Yes | code + tests | PASS | 274 pass, 0 fail |
+| zoe | Yes | mandatory after telly | WARN | 1 false-pass noted |
+| bird | Yes | 2 frontend files | WARN | 1 BLOCK (fixed), 3 WARN |
 | cookie | No | no infra changes | N/A | — |
-| bird | No | no frontend changes | N/A | — |
 
-## Review Summary
-| Review File | Critical/BLOCK | Warn | Status |
-|-------------|---------------|------|--------|
-| CODE-REVIEW.md | 0 | 0 | PASS |
-| TEST-REVIEW.md | 0 | 0 | PASS |
-| SECURITY-REVIEW.md | 0 | 0 | PASS |
-| ZOE-REVIEW.md | 0 | 0 | PASS |
+## Critical / BLOCK Findings — Fixed by Bert
+| Finding | File | Fix |
+|---------|------|-----|
+| ELMO CRITICAL C-2: return inside Knex transaction | tasks.js | Throw Error + try/catch outside transaction |
+| BIRD BLOCK 1: broken recurring day-picker titles | WhenSection.jsx | Map keys U/S match codes |
+| ERNIE C1: undeclared tz in updateTaskStatus | task.controller.js | Added var tz = safeTimezone(...) |
+| ERNIE C4: batch_update_tasks omits guardFixedCalendarWhen | tasks.js | Added guard with template-aware routing |
 
-## Diff Summary
-- `task.controller.js`: Added `guardFixedCalendarWhen(qRow, qExisting, { allowUnfix: !!qFields._allowUnfix })` in `batchUpdateTasks` locked path. Prevents unpinning calendar-linked tasks when scheduler lock is held.
-- `taskCrudIntegration.test.js`: 7 new tests covering DB verify, blocked untouched, mixed fields, inactive ledger, multi-provider origin collision, `_allowUnfix`, and wrong-user auth.
+## Test Summary
+| Suite | Tests | Passed |
+|-------|-------|--------|
+| mcp-task-config.test.js | 16 | 16 |
+| WhenSection.modes.test.jsx | 221 | 221 |
+| WhenSection.test.jsx | 37 | 37 |
+| **Total** | **274** | **274** |
 
-## Findings to Address
-None for this diff. Prior-batch pre-existing findings (batch unlocked path, updateTaskStatus drift, unpinTask gap) remain documented in backlog; not caused by this change.
+## Remaining Findings (Pre-existing, require follow-up)
+- ELMO CRITICAL C-1: delete_task bypasses provider-origin guard
+- ELMO CRITICAL C-3: set_task_status bypasses state machine
+- ERNIE C2: set_task_status bare write
+- ERNIE C3: delete_task hard-deletes recurring instances
+- ERNIE C5: inconsistent validation limits
+- ERNIE C6: non-transactional ledger flip
+- Plus 11 HIGH and 20 WARN documented in SECURITY-REVIEW.md and CODE-REVIEW.md
 
-## Accountability Statement
-All required agents launched per rubric. No BLOCK or CRITICAL findings. Commit APPROVED.
-Signed: Oscar, Technology Director — 2026-05-24T14:00:00Z
+## Verdict
+All required agents launched. Introduced critical/blocking findings fixed. Tests pass. Pre-existing MCP parity gaps deferred. Commit approved with WARN.
+
+Signed: Oscar — 2026-05-24

@@ -1,158 +1,232 @@
-# ZOE Adversarial Test Audit — cal_sync_ledger tests in taskCrudIntegration.test.js
+# ZOE Adversarial Test Audit — Focus: task.controller.js, MCP tasks.js, TaskEditForm, WhenSection
 
 _Date: 2026-05-24_
-_Scope: Four new cal-sync CRUD tests added to `juggler-backend/tests/taskCrudIntegration.test.js`_
-_Controller under test: `src/controllers/task.controller.js` (`updateTask` fast + complex paths)_
+_Scope: Test files Telly ran for the focused review (TEST-REVIEW.md)_
 
 ---
 
 ## Verdict: WARN
 
-The four tests exercise the happy paths but contain shallow assertions that could mask false passes, miss critical boundary conditions, and omit negative/auth coverage. No regressions detected, but the suite is not airtight enough for a PASS.
+The 277 reported passes contain a **critical false pass**, multiple shallow assertions that could mask write failures, and large swaths of untested logic across MCP `update_task`, `create_tasks`, `list_tasks`, and frontend integration paths. No regressions detected, but the suite overstates its coverage.
 
 ---
 
-## Tests Under Audit
+## Files Under Audit
 
-| # | Test Name | Line |
-|---|-----------|------|
-| 1 | juggler-originated cal-synced task remains editable (fast path) | 324 |
-| 2 | ingested cal-synced task blocks edits (fast path) | 337 |
-| 3 | ingested cal-synced task silently keeps date_pinned on fast path (C-1) | 350 |
-| 4 | ingested cal-synced task blocks when and allows notes | 370 |
+| File | Tests (claimed) | Tests (actual) | Runtime tests |
+|------|-----------------|----------------|---------------|
+| `juggler-backend/tests/mcp-task-config.test.js` | 16 | 16 `test(` | 16 |
+| `juggler-frontend/src/components/tasks/sections/__tests__/WhenSection.modes.test.jsx` | ~160 | 26 `it(` in source | **221** (Jest expands 5 matrix `it` × 40 combinations + 21 standalone) |
+| `juggler-frontend/src/components/tasks/sections/__tests__/WhenSection.test.jsx` | ~98 | **37** `it(` | 37 |
+| `juggler-frontend/src/components/tasks/__tests__/TaskEditForm.integration.test.jsx` | 3 | 3 `it(` | 3 |
 
----
-
-## Findings
-
-### WARN-1: Shallow optimistic-response assertions in Tests 1 and 4 (false-pass risk)
-
-**Test 1** (`juggler-originated remains editable`) and **Test 4** (`notes` allowed path) both assert only on `res._json.task.{text,notes}`.
-
-The fast path returns an **optimistic merge** (controller L998-1004):
-
-```javascript
-var optimistic = Object.assign({}, fastExisting, fastRow);
-return res.json({ task: rowToTask(optimistic, null) });
-```
-
-`fastRow` is produced by `taskToRow(req.body)`; the response always reflects the submitted body regardless of whether `tasksWrite.updateTaskById` actually committed to the DB. If the write were skipped due to a future optimization, transaction rollback, or routing bug, the test would still pass.
-
-**Required fix:** Add a post-update DB assertion:
-- Test 1: `var row = await db('tasks_v').where('id', id).first(); expect(row.text).toBe('Updated');`
-- Test 4 notes path: same pattern for `notes`.
+**Note:** Telly's counts for the two WhenSection suites are incorrect. `modes.test.jsx` expands to 221 runtime tests, not "~160". `test.jsx` is 37 tests, not "~98". The counts in TEST-REVIEW.md are unreliable.
 
 ---
 
-### WARN-2: No DB write absence assertion in Test 2 (ingested blocked)
+## Backend — `mcp-task-config.test.js`
 
-**Test 2** asserts `403` + `CAL_SYNCED_READONLY`, which is correct. However, it does not verify that the underlying task row was **not mutated**. If a future refactor moves the guard **after** the write (e.g., to support partial updates), the test would still pass while corrupting data.
+### WARN-1: False-pass risk on mutating tests (shallow assertions)
 
-**Required fix:** Add a DB assertion that `text` remains `'Ingested origin'` after the 403.
+**All 16 backend tests mock `tasksWrite.insertTask` and `tasksWrite.updateTaskById` as no-ops.** The tests assert on `capturedInsertRow` or `result.content[0].text`, but they **never verify that the mocked DB layer was actually invoked** or that the produced row would survive real `taskToRow` / `rowToTask` round-trips.
 
----
+Examples:
+- `create_task` tests: `insertTask` is a no-op; `db.insert` is never asserted.
+- `batch_update_tasks` "allowed" test: asserts `result.isError` is undefined and text matches `/updated/i`, but the transaction path inside the handler could skip `tasksWrite.updateTaskById` entirely and the test would still pass because the mock returns success unconditionally.
 
-### WARN-3: Missing inactive-ledger boundary test
-
-`fetchTaskWithEventIds` filters ledger rows with `.where({ task_id: id, status: 'active' })`. If a ledger row has `status = 'deleted'`, `'deleted_local'`, or any non-active value, the controller will not attach `cal_sync_origin` and the guard will not fire. An externally-ingested task whose sync link was broken could then be silently editable.
-
-**Required fix:** Add a test: seed a task with a ledger row where `status = 'deleted'`, send a blocked field, assert `200` (or whatever the intended product behavior is — the test should at least document and lock the current behavior).
+**Required fix:** Add assertions that `capturedInsertRow` / `capturedUpdateRow` contain the expected fields after every mutating test, or run integration tests against an actual test DB.
 
 ---
 
-### WARN-4: Missing multi-provider origin-collision test
+### WARN-2: MCP `update_task` has **zero** tests
 
-`fetchTaskWithEventIds` (L224-226) prefers non-juggler origin when multiple active ledger rows exist:
+The `update_task` MCP handler (tasks.js L236-363) contains complex, production-critical logic that is entirely uncovered:
+- Calendar-sync guard (different from HTTP guard — see WARN-4)
+- `placementMode: 'fixed'` validation against existing `scheduled_at`
+- `taskToRow` with `existing` fallback
+- Auto-pin and `ALL_DAY` backstop on update
+- Recurring instance → template field routing (TEMPLATE_FIELDS split)
+- `guardFixedCalendarWhen` on `when` changes
+- Locked-path split-and-queue behavior (`splitFields`)
+- Post-update `rowToTask` response assembly
 
-```javascript
-if (!row.cal_sync_origin || row.cal_sync_origin === 'juggler') {
-  row.cal_sync_origin = ledgerRows[i].origin || null;
-}
-```
-
-A task with **both** a juggler-origin push ledger and an ingested gcal ledger would evaluate as `origin = 'gcal'` and become read-only. None of the four tests exercise multi-row collision.
-
-**Required fix:** Seed two active ledger rows (`origin='juggler'` and `origin='gcal'`), attempt a text edit, assert `403`.
-
----
-
-### WARN-5: Missing `_allowUnfix` opt-out edge case for ingested tasks
-
-`_allowUnfix` is in the `allowed` array (L76), meaning an ingested task can submit it without triggering `CAL_SYNCED_READONLY`. `_allowUnfix` also forces the **complex path** (L898). In the complex path, `guardFixedCalendarWhen` receives `{ allowUnfix: true }` and returns early (L581), **not** stripping `date_pinned: 0`. Therefore, an ingested task can currently clear its pin by sending `{ datePinned: false, _allowUnfix: true }`.
-
-Whether this is a bug or a feature is a product decision, but it is **untested** and un-documented.
-
-**Required fix:** Add a test documenting the behavior: seed ingested task, send `{ datePinned: false, _allowUnfix: true }`, assert DB `date_pinned` is either `0` (if intended) or `1` (if the opt-out should not apply to ingested tasks).
+**Required fix:** Add at minimum: placement_mode inference on update, rolling-anchor resolution, calendar-sync edit guard, and template/instance routing.
 
 ---
 
-### WARN-6: Missing `blockedFields` shape assertion in Test 2
+### WARN-3: MCP `create_tasks` (batch) has **zero** placement_mode / date_pinned tests
 
-`checkCalSyncEditGuard` returns `blockedFields: blocked`. Test 2 checks `code` but never inspects `blockedFields`. If the guard ever returned the wrong field list (e.g., omitted `text` or included an allowed field), the test would not catch it.
+The batch handler (tasks.js L166-233) mirrors `create_task` inference per-item and adds transaction logic. None of the 16 existing tests exercise it.
 
-**Required fix:** Add `expect(res._json.blockedFields).toContain('text')`.
-
----
-
-### WARN-7: Missing mixed-field test (blocked + allowed in one request)
-
-No test covers a body that contains both allowed and blocked fields, e.g.:
-
-```javascript
-{ text: 'Blocked', notes: 'Allowed' }
-```
-
-The guard should reject the entire request. This is the realistic frontend scenario (users often touch multiple fields).
-
-**Required fix:** Add a test asserting `403` when `text` and `notes` are sent together on an ingested task.
+**Required fix:** Add batch tests verifying per-item `placement_mode` inference, `split` default application, and transaction rollback on mid-batch failure.
 
 ---
 
-### WARN-8: No auth / wrong-user negative test
+### WARN-4: MCP/HTTP cal-sync guard inconsistency — untested behavioral divergence
 
-None of the four tests verify that user A cannot edit user B's cal-synced task. The mock helper hard-codes `USER_ID` and `req.user.id` to the same value.
+`checkCalSyncEditGuard` in `task.controller.js` (L76) allows `['status', 'notes', 'datePinned', '_dragPin', '_allowUnfix']`.
 
-**Required fix:** Add a test where `req.user.id` is a different user; assert `404` or `403`.
+Both MCP `update_task` (tasks.js L259) and `batch_update_tasks` (tasks.js L558) allow **only** `['status', 'notes']`.
 
----
+This means an MCP client **cannot** change `datePinned` on a synced task, but a UI user **can**. No test documents or locks this divergence. If it is intentional, it needs a test proving it; if it is a bug, it needs a fix.
 
-### WARN-9: Missing allowed-field coverage for `status` and `_dragPin`
-
-The guard explicitly allows `status`, `notes`, `datePinned`, `_dragPin`, and `_allowUnfix`. Only `notes` is tested. Critical omissions:
-- `status` on ingested task (should succeed).
-- `_dragPin` on ingested task (should succeed, but may interact with `guardFixedCalendarWhen`).
-
-**Required fix:** Add tests for both.
+**Required fix:** Add an MCP test sending `datePinned: false` on a synced task and assert the behavior (currently expected: `isError: true` with blocked fields). Add a parallel HTTP controller test proving the same payload succeeds (or is blocked, if the divergence is a bug).
 
 ---
 
-### WARN-10: C-1 (`date_pinned` retention) not tested on complex path
+### WARN-5: Locked paths in all MCP tools are untested
 
-**Test 3** sends `{ datePinned: false }` with no other complex fields, so it stays on the **fast path**. If a future change to `needsComplexPath` logic forces this payload into the complex path, `guardFixedCalendarWhen` behavior could diverge because the complex path only calls the guard when `row.when !== undefined && !req.body._dragPin` (L1055). While `date_pinned` is not conditional on `when`, the code paths are different and the complex path is unexercised for C-1.
+The mock for `isLocked` hardcodes `false`. The queue-based write paths (`enqueueWrite`) inside `create_task`, `create_tasks`, `update_task`, and `batch_update_tasks` are **never exercised**.
 
-**Required fix:** Add a complex-path C-1 test: send `{ datePinned: false, when: 'afternoon' }` on an ingested task, assert the `when` change is blocked (403) **and** that `date_pinned` remains `1` after the blocked request.
-
----
-
-### WARN-11: Misleading comment in Test 3
-
-The test comment says "guard should silently strip it", implying `checkCalSyncEditGuard` performs the stripping. It does not — `datePinned` is in the `allowed` array. The actual stripping is performed by `guardFixedCalendarWhen` (L584-586). The comment should be corrected to avoid future maintenance errors.
+**Required fix:** Temporarily mock `isLocked` to `true` and verify that writes are queued rather than committed directly, and that `enqueueScheduleRun` receives the correct IDs.
 
 ---
 
-### WARN-12: Missing origin-null boundary test
+### WARN-6: `list_tasks` MCP tool has **zero** tests
 
-`checkCalSyncEditGuard` returns `null` (editable) when `origin` is falsy. A malformed ledger row with `origin = null` would make an ingested task editable even though it has active calendar event IDs. This is a data-integrity edge case with security implications.
+Covers: default done-exclusion, `includeDone`, status override, project filter, date filter, limit, `buildSourceMap`, `rowToTask` mapping. All untested.
 
-**Required fix:** Seed a task with `origin: null` in the ledger, attempt a text edit, assert the expected behavior.
+**Required fix:** Add tests for default exclusion, status override, and date string filtering.
 
 ---
 
-### WARN-13: No Apple provider coverage
+### WARN-7: No negative / boundary / validation tests for `create_task`
 
-Tests 1-3 use `gcal`; Test 4 uses `msft`. Apple (`provider: 'apple'`) is never exercised in the four tests, even though the controller explicitly handles it in `fetchTaskWithEventIds`.
+The `validateTaskInput` function (task.controller.js L699+) enforces many rules. None are tested via MCP:
+- Missing `text` (when `_requireText` is true)
+- `text` > 500 chars
+- Invalid `dayReq`
+- `dur` <= 0
+- `splitMin` > `dur`
+- `deadline` < `startAfter`
+- Invalid `recur` object (bad type, missing `recurStart` for anchor-dependent patterns)
+- `timeFlex` outside 0-480
 
-**Required fix:** Parameterize or duplicate one blocking test with `provider: 'apple'`.
+**Required fix:** Add at least one negative test per validation branch to prevent silent regressions.
+
+---
+
+### WARN-8: No auth / wrong-user negative tests
+
+All mocks hardcode `userId = 'test-user-001'`. No test verifies cross-user isolation (e.g., user A's MCP handler cannot write to user B's task row).
+
+**Required fix:** Add a test where `req.user.id` (or the MCP user context) mismatches the task owner; assert `404` or `403`.
+
+---
+
+## Frontend — `WhenSection.modes.test.jsx`
+
+### WARN-9: Critical false pass — `hasDisabledWithoutIndicator` is completely vacuous
+
+`WhenSection.jsx` **never sets the `disabled` attribute** on any control. Lockouts are implemented via CSS `pointerEvents: 'none'` and `tabIndex: -1` (WhenSection.jsx L314, L316-317, L332). The helper `hasDisabledWithoutIndicator` (L58-73) queries `el.disabled`, which is always `false`, so the test always passes regardless of whether controls lack visible accessibility indicators.
+
+This is a **false pass** — the test claims to guard a11y compliance but does not exercise the actual lockout mechanism.
+
+**Required fix:** Replace the helper with one that checks for `pointerEvents: 'none'` / `tabIndex: -1` and verifies a sibling or parent has explanatory text (e.g., the "Date is pinned" or "Calendar-managed" banner).
+
+---
+
+### WARN-10: 40 zero-assertion "renders without crashing" tests are pure noise
+
+The matrix includes `it('renders without crashing', () => { render(...); });` — no assertion, no behavioral verification. 40 combinations × 1 no-op = 40 tests that inflate the pass count and consume CI time without adding coverage.
+
+**Required fix:** Remove or replace with a meaningful assertion (e.g., snapshot of the rendered DOM, or verification that tier1/tier2/tier3 sections are present).
+
+---
+
+### WARN-11: `isFixed` derivation test silently skips most matrix cases
+
+For `recurring=true` or `marker=true`, the "Scheduling mode" label is absent from the DOM, so the test skips the opacity assertion. This means **20 of the 40 combinations** (all `recurring=true` cases, plus any `marker=true` if it were in the matrix) receive no assertion in this test.
+
+**Required fix:** Move the assertion to a property that exists for all combinations, or split into separate describe blocks so skipping is explicit.
+
+---
+
+### WARN-12: Misleading recurring button count in test comment
+
+The test comment says "Recurring section shows 3 buttons" but `WhenSection.jsx` (L417-446) renders **4** buttons for recurring tasks: Anytime, Time window, Time blocks, and All Day. The test omits the `allDay` assertion for recurring, so it passes while the comment is wrong.
+
+**Required fix:** Update comment or add the `allDay` assertion.
+
+---
+
+### WARN-13: Missing mobile-responsive path tests
+
+`isMobile` changes `BTN_H`, font sizes, padding, and maxWidths throughout the component. Zero matrix combinations set `isMobile: true`.
+
+**Required fix:** Add a mobile-specific describe block or parameterize `isMobile` into the matrix.
+
+---
+
+## Frontend — `WhenSection.test.jsx`
+
+### WARN-14: Missing timezone selector interaction tests
+
+`TimezoneSelector` (WhenSection.jsx L58-153) supports open, search, select, and click-outside. None of these are exercised.
+
+**Required fix:** Open the dropdown, type a search string, select a timezone, and assert `onChangeTz` is called with the correct value.
+
+---
+
+### WARN-15: Missing endTime three-way binding and error tests
+
+The component enforces `finish = start + dur` via state handlers (L260-291). `endTimeError` is rendered at L296. None of the 37 tests verify:
+- Editing `endTime` recalculates `dur`
+- Editing `dur` updates `endTime`
+- `endTimeError` appears when finish <= start
+- `endTimeError` is cleared when finish > start
+
+**Required fix:** Add tests for the three-way bind and the error state.
+
+---
+
+### WARN-16: Missing monthly and interval recurrence tests
+
+`recurType='monthly'` (month-day picker, times-per-month select) and `recurType='interval'` (every N + unit) are in the source but have **zero** tests.
+
+**Required fix:** Add tests rendering both modes and interacting with their controls.
+
+---
+
+### WARN-17: Shallow rolling-anchor tests
+
+The rolling anchor card (L660-676) computes and displays "Next due" by adding the interval to `task.rolling_anchor`. The tests only check text presence (`Completed on`, `Next due`), not the computed date accuracy. A bug in `addIntervalToDate` (L44-51) would not be caught.
+
+**Required fix:** Assert the exact rendered date text for known inputs (e.g., anchor `2026-05-19` + 7 days = `May 26, 2026`).
+
+---
+
+### WARN-18: Missing constraint panel interactions
+
+The Constraints collapsible section (L719-769) contains deadline, startAfter, travelBefore, travelAfter, split, and splitMin inputs. None are exercised in the 37 tests.
+
+**Required fix:** Expand the constraints section and interact with at least travel and split controls.
+
+---
+
+### WARN-19: Time window ± Window select behavior untested
+
+The `± Window` select (L346-357) toggles `rigid` and `timeFlex` simultaneously. Selecting `exact` sets `rigid=true` and `timeFlex=0`. No test verifies this side effect.
+
+**Required fix:** Fire `change` on the select and assert both `onRigidChange` and `onTimeFlexChange` receive the expected values.
+
+---
+
+## Frontend — `TaskEditForm.integration.test.jsx`
+
+### WARN-20: Three tests for a 600+ line component is grossly insufficient
+
+The integration suite covers: renders title, When section expanded by default, toggle collapse. It does **not** cover:
+- Save flow (dirty detection, `buildChangedFields`, API call)
+- Cancel / close behavior
+- Cross-section integration (weather, dependencies, location, tools)
+- `apiClient` call verification (the mock is imported but never asserted)
+- Create mode vs edit mode initialization
+- Dark mode / mobile responsive rendering
+- Split-task toggle in constraints
+- Recurrence anchor autofill (`autofillGuardRef` + `useEffect`)
+
+**Required fix:** Add at least: save button triggers `onUpdate` with correct changed fields, create mode initializes empty state, and a recurring task mounts with rolling anchor card visible.
 
 ---
 
@@ -161,21 +235,27 @@ Tests 1-3 use `gcal`; Test 4 uses `msft`. Apple (`provider: 'apple'`) is never e
 | Status | Count | Details |
 |--------|-------|---------|
 | PASS | 0 | — |
-| WARN | 13 | Shallow assertions, missing boundaries, missing negative/auth tests, uncovered edge cases |
+| WARN | 20 | Shallow assertions, false passes, missing boundaries, missing negative/auth tests, untested behavioral divergence |
 | BLOCK | 0 | Core happy-path coverage is present; no regressions introduced |
 
-## Action Items (in priority order)
+---
 
-1. **Harden shallow assertions** (WARN-1, WARN-2): Add DB assertions after every mutating test.
-2. **Add inactive-ledger test** (WARN-3): Document behavior for broken sync links.
-3. **Add mixed-field + blockedFields tests** (WARN-6, WARN-7): Lock guard rejection semantics.
-4. **Add wrong-user auth test** (WARN-8): Close the authorization gap.
-5. **Add `_allowUnfix` / C-1 complex-path / multi-provider tests** (WARN-4, WARN-5, WARN-10): Close the behavioral edge-case gaps.
-6. **Add missing allowed-field tests** (WARN-9): Cover `status` and `_dragPin`.
-7. **Fix Test 3 comment** (WARN-11): Replace "guard" with `guardFixedCalendarWhen`.
-8. **Add origin-null and Apple provider tests** (WARN-12, WARN-13): Complete boundary coverage.
+## Action Items (priority order)
+
+1. **Fix false pass WARN-9** — Replace `hasDisabledWithoutIndicator` with a real a11y lockout verifier.
+2. **Harden mutating assertions WARN-1** — Assert on `capturedUpdateRow` fields after every backend write test.
+3. **Add MCP `update_task` tests WARN-2** — Cover guard, inference, template routing.
+4. **Add MCP `create_tasks` batch tests WARN-3** — Per-item inference + transaction.
+5. **Document cal-sync guard divergence WARN-4** — Add tests that lock the current MCP-only `status/notes` restriction.
+6. **Add locked-path tests WARN-5** — Mock `isLocked=true` and verify queue behavior.
+7. **Add `list_tasks` tests WARN-6** — Done-exclusion, filters, limits.
+8. **Add validation negative tests WARN-7** — One per `validateTaskInput` branch.
+9. **Add wrong-user auth test WARN-8** — Close the authorization gap.
+10. **Remove or replace zero-assertion tests WARN-10** — Stop inflating pass counts.
+11. **Expand TaskEditForm integration tests WARN-20** — Save flow + cross-section coverage.
+12. **Add timezone, endTime, constraint, monthly/interval tests WARN-14 through WARN-19**.
 
 ---
 
 _Reviewer: Zoe_
-_Mode: Adversarial / No trust in Telly's run_
+_Mode: Adversarial / No trust in Telly's run counts or Bird's UX verdicts_

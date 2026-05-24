@@ -1,7 +1,7 @@
-# Test Review — task-state-machine.test.js (SM-19, SM-20, SM-25 fixes)
+# Test Review — Focus: task.controller.js, MCP tasks.js, TaskEditForm, WhenSection
 
-_Date: 2026-05-21_
-_Mode: Focus — changed file: `juggler-backend/tests/api/task-state-machine.test.js`_
+_Date: 2026-05-24_
+_Mode: Focus — changed/related files listed in command line_
 
 ---
 
@@ -9,71 +9,120 @@ _Mode: Focus — changed file: `juggler-backend/tests/api/task-state-machine.tes
 
 | Suite | Tests | Passed | Failed | Skipped |
 |-------|-------|--------|--------|---------|
-| tests/api/task-state-machine.test.js | 23 | 23 | 0 | 0 |
-| Full suite (109 suites total) | 1450 | 1433 | 0 | 16 + 1 todo |
-| Suites skipped | 3 | — | — | DB-dependent (ECONNREFUSED :3308, pre-existing) |
+| `juggler-backend/tests/mcp-task-config.test.js` | 16 | 16 | 0 | 0 |
+| `juggler-frontend/src/components/tasks/sections/__tests__/WhenSection.modes.test.jsx` | ~160 | 160 | 0 | 0 |
+| `juggler-frontend/src/components/tasks/sections/__tests__/WhenSection.test.jsx` | ~98 | 98 | 0 | 0 |
+| `juggler-frontend/src/components/tasks/__tests__/TaskEditForm.integration.test.jsx` | 3 | 3 | 0 | 0 |
+| **Total** | **277** | **277** | **0** | **0** |
 
-All 23 SM-18 through SM-25 tests pass. No regressions in any other suite. The 3 skipped suites (MCP integration, MSFT BF-2, one other DB-dependent suite) were pre-existing skips due to no test MySQL available — unrelated to this change.
-
----
-
-## Fix Correctness Analysis
-
-### SM-19: `master_id: null` on plain task (wip → done, 200 path)
-
-Two code paths in `task.controller.js` conditionally call `db('task_masters').first()`:
-
-**Path 1 (line 1652-1655):** Rolling-exempt check — fires when `_instanceMasterId` is truthy, status is terminal, and `scheduled_at` is null.
-
-**Path 2 (line 1714-1717):** Rolling-anchor update — fires when `_anchorMasterId` is truthy and status is `done`, `skip`, or `missed`.
-
-The default `makeTask` helper sets `master_id: 'task-sm'` (a truthy string). For SM-19's 200 path, the task has `scheduled_at` set, so Path 1 does not fire. But Path 2 fires unconditionally because `_anchorMasterId = existing.master_id || existing.source_id` is truthy and status is `done`. This consumes a `resolveQueue` slot before the post-update `fetchTaskWithEventIds` call, breaking the expected queue shape and causing `fetchTaskWithEventIds` to return null, producing a 500.
-
-Setting `master_id: null` makes both `_instanceMasterId` and `_anchorMasterId` evaluate to null (since `source_id` is also null in the default shape), so neither DB call fires. Fix is correct.
+All focused tests pass. No failures, no skips.
 
 ---
 
-### SM-20: `resolveQueue.splice(2, 0, null)` on recurring instance (skip)
+## Coverage by Focus File
 
-`makeInstance` does not override `master_id`, so instances inherit `master_id: 'task-sm'` (truthy). For a skip on a scheduled instance:
-- Path 1: `scheduled_at` is non-null, so this check does NOT fire.
-- Path 2: `_anchorMasterId` is truthy and status is `skip` — fires, consuming one `first()` slot.
-
-`seedExisting` places the instance at queue index 0 (first()), ledger at 1 (select()), and post-update task at 2 (first()). The rolling-anchor `first()` fires between the write and the post-update fetch, stealing index 2 before `fetchTaskWithEventIds` can use it.
-
-`resolveQueue.splice(2, 0, null)` inserts `null` at index 2, pushing the post-update task to index 3. The rolling-anchor call at L1716-1718 receives `null`, the `_masterForAnchor && isRollingMaster(_masterForAnchor)` guard short-circuits cleanly (no anchor update fires), and the post-update fetch gets the task from index 3. Fix is correct.
-
----
-
-### SM-25: `master_id: null` on terminal tasks (done→done, skip→skip)
-
-Same mechanism as SM-19. `sm25-done` and `sm25-skip` both assert `res.status === 200`. With default `master_id: 'task-sm'`, the rolling-anchor `first()` at Path 2 fires for status `done` and `skip`, exhausts the queue, `fetchTaskWithEventIds` returns null, `rowToTask(null, …)` throws `TypeError: Cannot read properties of null (reading 'source_id')`, and the response becomes 500 — failing the `toBe(200)` assertion. Setting `master_id: null` prevents the extra `first()` call. Fix is correct.
+| File | Stmts % | Branch % | Funcs % | Lines % | Tested By |
+|------|---------|----------|---------|---------|-----------|
+| `juggler-backend/src/mcp/tools/tasks.js` | 22.94 | 11.53 | 23.40 | 23.07 | `mcp-task-config.test.js` |
+| `juggler-backend/src/controllers/task.controller.js` | 11.27 | 14.20 | 7.75 | 12.61 | `mcp-task-config.test.js` (indirect) |
+| `juggler-frontend/src/components/tasks/sections/WhenSection.jsx` | 34.38 | 44.18 | 28.88 | 37.89 | `WhenSection.*.test.jsx` |
+| `juggler-frontend/src/components/tasks/TaskEditForm.jsx` | 27.95 | 29.95 | 36.17 | 34.89 | `TaskEditForm.integration.test.jsx` |
 
 ---
 
-## Gaps and WARNs Found
+## Backend — `mcp-task-config.test.js` (16 tests)
 
-### WARN-1: `sm25-idem` (idempotent done→done) produces a hidden 500
+### What is covered
+- `create_task` placement_mode inference (6 paths):
+  - Explicit `time_window` + date + time → `time_window`, auto-pinned
+  - Explicit `datePinned:false` + date → `all_day`, unpinned
+  - Date only (no placementMode) → `all_day`, pinned
+  - Date + time (no placementMode) → `fixed`, pinned
+  - `anytime` + date → `anytime`, pinned
+  - `anytime` + date + `datePinned:false` → `anytime`, unpinned
+  - `scheduledAt` only → `fixed`, pinned
+  - No scheduling fields → `placement_mode` undefined, `date_pinned` undefined
+  - Explicit `fixed` / `all_day` / `time_blocks` + date → respective mode, pinned
+  - `datePinned:true` without date/time → pinned flows through
+  - `fixed` without date/time/scheduledAt → validation error
+  - Invalid placementMode → falls back to `anytime`
+- `batch_update_tasks` calendar-sync guard (2 tests):
+  - Synced task with blocked fields (`datePinned`) → error with `CAL_SYNCED_READONLY`
+  - Synced task with only `status` + `notes` → allowed
 
-**Test:** `idempotent done→done does not set completed_at again (already terminal)`
-
-This test uses default `makeTask` with no `master_id: null` override. The rolling-anchor Path 2 fires (status is `done`, `_anchorMasterId` is truthy), exhausts the queue, `fetchTaskWithEventIds` returns null, and the response is 500. The test only checks `tasksWrite.updateTaskById.mock.calls[0][2]` (the fields argument) — not the HTTP status. The assertion passes against a broken response.
-
-Evidence: `console.error('Update task status error:', TypeError: Cannot read properties of null (reading 'source_id'))` printed during the run, and `PUT /api/tasks/sm25-idem/status 500` logged.
-
-**Fix:** Add `master_id: null` to `makeTask` for `sm25-idem` (same as `sm25-done`), then add `expect(res.status).toBe(200)`.
+### Gaps
+- `update_task` MCP tool has **zero** tests.
+- `list_tasks` MCP tool has **zero** tests.
+- `create_tasks` (batch) has **zero** placement_mode / date_pinned tests.
+- Rolling-anchor logic in MCP `update_task` (L576-621 in `tasks.js`) is uncovered.
+- The controller coverage (11.27%) is driven solely by `taskToRow`, `rowToTask`, `validateTaskInput`, and `buildSourceMap` being pulled in as dependencies; the actual HTTP/controller paths in `task.controller.js` are not exercised by this suite.
 
 ---
 
-### WARN-2: `sm22-reenable` (re-enable endpoint) produces a hidden 500
+## Frontend — WhenSection (2 suites, 258 tests)
 
-**Test:** `re-enable endpoint accepts disabled task` — asserts `res.status !== 404` and `res.status !== 403` only.
+### `WhenSection.modes.test.jsx` — mode matrix
+- Exhaustive cartesian matrix over: `placementMode` (anytime, time_window, time_blocks, fixed, all_day) × `datePinned` (true/false) × `rigid` (true/false) × `recurring` (true/false)
+- 4 assertions per combination:
+  1. Renders without crashing
+  2. Mode selector button visibility correct (recurring shows 3 buttons; non-recurring shows 4)
+  3. `isFixed` derivation correct (opacity 0.4 when fixed/pinned)
+  4. No disabled control lacks a visible indicator (accessibility guard)
+  5. `all_day` hides time inputs
 
-The re-enable controller path at L2179 calls `fetchTaskWithEventIds` (consumes `first()` + implicit `select()`), then at L2262-2265 calls `buildSourceMap(db('tasks_v').select())` and a second `fetchTaskWithEventIds`. The queue only has two `push(task)` entries with no ledger or srcMap slots. The post-update `fetchTaskWithEventIds` returns null, `rowToTask(null)` throws, and the response is 500. The test passes because 500 satisfies `!== 404` and `!== 403`.
+### `WhenSection.test.jsx` — behavior tests
+- **Task 1 (placementMode prop tests, D-24 through D-26):**
+  - Three-button / four-button selectors render correctly
+  - Active button font-weight is `600`
+  - Clicking modes fires `onModeChange` with correct value
+  - `time_window` shows time input; `anytime` hides it
+  - Recurring mode buttons call `onModeChange`
+  - `all_day` button calls `onModeChange('all_day')`
+  - Day picker label says "Eligible days" for weekly
+  - Recurrence select wording ("Every 2 weeks", not "Biweekly")
+- **Task 2 (sub-mode split toggle):**
+  - "All N days" / "Flexible quota" toggle visible when `selectedCount > 1`
+  - Active state derived correctly from `recurTpc === selectedCount`
+  - Clicking toggles calls `onRecurTpcChange` with correct value
+  - `tpc` select shown/hidden based on flex-mode
+  - Clicking flex when already flex is no-op
+- **Task 3 (rolling recurrence mode UI):**
+  - "Rolling (repeats after completion)" option present
+  - Interval input visible in rolling mode
+  - Unit select has days/weeks/months, no years
+  - Anchor card shows "not yet set" when `rolling_anchor` is null
+  - Anchor card shows "Completed on" / "Next due" when anchor set
+  - Rolling mode hides day picker and fill policy
+- **Pin toggle:**
+  - Clicking Pin calls `onDatePinnedChange(true)`
+  - Clicking Pinned calls `onDatePinnedChange(false)`
+- **Fixed mode specifics:**
+  - Mode selector dimmed and `pointerEvents: none`
+  - Pin toggle still visible even when `datePinned` is false
+- **All day specifics:**
+  - Time input hidden even when `time` prop provided
+  - Date input still shown
+- **Deep interactions — no silent lockouts:**
+  - Clicking Anytime, Time window, Time blocks, All Day all fire correct `onModeChange`
+  - Clicking Time blocks prefills `when` with all block tags
+  - Clicking All Day clears constraints (pin=false, when='', split=false, travel=0)
+- **Accessibility / lockout banners:**
+  - `datePinned=true` shows "Date is pinned" banner
+  - `fixed` mode shows "Calendar-managed" banner
+  - No banner when `isFixed` is false
+  - Day requirement removed from DOM when `isFixed`
+  - `tabIndex` and `pointerEvents` correctly set on mode buttons
 
-Evidence: `console.error('Re-enable task error:', TypeError: Cannot read properties of null (reading 'source_id'))` printed during the run, and `PUT /api/tasks/sm22-reenable/re-enable 500` logged.
+---
 
-**Fix:** Properly seed the queue for the re-enable path: `[task, [], [], task, []]` (initial `fetchTaskWithEventIds` needs `first()+select()`, srcMap needs one `select()`, post-update `fetchTaskWithEventIds` needs `first()+select()`), then assert `res.status === 200`.
+## Frontend — TaskEditForm integration (1 suite, 3 tests)
+
+- **Coverage:** TaskEditForm.jsx at 27.95% statements, 29.95% branches.
+- The integration test exercises the full mount + user interaction path:
+  - Form renders with task data
+  - State changes propagate through sections
+  - Save/cancel flow interactions
+- Gaps: Weather section, dependency chain picker, location/tools pickers, recurrence anchor editing, split-task UI, and mobile-responsive paths are not exercised.
 
 ---
 
@@ -81,24 +130,27 @@ Evidence: `console.error('Re-enable task error:', TypeError: Cannot read propert
 
 | Status | Count | Details |
 |--------|-------|---------|
-| PASS | 23 | All SM-18 through SM-25 tests green |
+| PASS | 277 | All focused-suite tests green |
 | FAIL | 0 | — |
-| WARN | 2 | `sm25-idem` and `sm22-reenable` assert on non-HTTP layers; both produce 500 responses that pass due to absent or weak status assertions |
+| WARN | 2 | Low coverage on `task.controller.js` (11%) and `tasks.js` (23%); MCP `update_task`, `list_tasks`, `create_tasks` untested |
 | BLOCK | 0 | — |
-| Regressions | 0 | Full suite: 1433 passed, 0 new failures |
+| Regressions | 0 | No failures in any focused suite |
+
+### Coverage verdict
+- **WhenSection.jsx:** 34.38% statements — acceptable for a presentational component with heavy conditional UI branches, but the uncovered ~65% includes recurrence anchor editing, timezone selector dropdown interactions, constraint panels (travel, split), and mobile layout paths.
+- **TaskEditForm.jsx:** 27.95% statements — the integration test covers the happy-path mount and basic interaction, but most cross-section integration (weather, dependencies, split tasks) is untested.
+- **tasks.js (MCP):** 22.94% statements — only `create_task` inference and `batch_update_tasks` guard are tested. The `update_task`, `list_tasks`, `create_tasks` batch, and rolling-anchor paths are entirely uncovered.
+- **task.controller.js:** 11.27% statements — this file is 2400+ lines; the only coverage comes from utility functions (`taskToRow`, `rowToTask`) being imported by the MCP test. The actual controller HTTP paths (CRUD, state machine, re-enable, calendar-sync guards) are **not exercised at all** by the focused tests.
 
 ---
 
-## Fix Verdict
+## Recommendations
 
-The three stated fixes are mechanically correct:
-- `master_id: null` on SM-19 and SM-25 (`sm25-done`, `sm25-skip`) properly prevents rolling-anchor DB calls for plain tasks by making `_anchorMasterId` evaluate to falsy.
-- `resolveQueue.splice(2, 0, null)` on SM-20 correctly fills the slot consumed by the rolling-anchor check before the post-update fetch, and the null sentinel cleanly bypasses the `isRollingMaster` guard.
-
-No regressions introduced. The fixes do not break any other test in the suite.
-
-The two WARNs are pre-existing weaknesses exposed by the review — not introduced by these fixes. They should be addressed before or alongside the commit.
+1. **Add MCP `update_task` tests** — at minimum cover placement_mode inference on update, rolling-anchor resolution, and the calendar-sync edit guard.
+2. **Add MCP `create_tasks` (batch) tests** — verify per-item placement_mode inference and split-default application.
+3. **Add TaskEditForm unit tests** that mount with `recurring=true` + `recurType=rolling` and verify the anchor card renders correctly; test timezone change handler; test split-task toggle.
+4. **Expand WhenSection tests** to open the timezone selector dropdown and select a timezone, and to expand the constraints panel and interact with travel/split inputs.
 
 ---
 
-Overall: WARN
+Overall: PASS with WARN (tests green, coverage thin on controller and MCP tools)

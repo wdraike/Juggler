@@ -27,136 +27,6 @@ function iconBadge(ids, catalog) {
   return ids.map(function(id) { var item = catalog.find(function(x) { return x.id === id; }); return item ? item.icon : null; }).filter(Boolean).join(' ') || null;
 }
 
-// ---------------------------------------------------------------------------
-// ManageCalTaskDialog — shown when user clicks Fixed ↗ on a calendar-owned task
-// ---------------------------------------------------------------------------
-function ManageCalTaskDialog({ task, darkMode, onClose, onOwnershipTaken }) {
-  var TH = getTheme(darkMode);
-  var [busy, setBusy] = useState(false);
-  var [err, setErr] = useState(null);
-
-  var provider = task.gcalEventId ? 'gcal' : task.msftEventId ? 'msft' : 'apple';
-  var providerName = provider === 'gcal' ? 'Google Calendar' : provider === 'msft' ? 'Outlook Calendar' : 'Apple Calendar';
-  var providerDotColor = provider === 'gcal' ? '#4285F4' : provider === 'msft' ? '#00A4EF' : '#8B5CF6';
-
-  var eventUrl = task.calEventUrl || null;
-  var canDeepLink = !!(eventUrl) || provider !== 'apple';
-  var openLabel = provider === 'gcal' ? 'Open this task in Google Calendar'
-                : provider === 'msft' ? 'Open this task in Outlook'
-                : 'Open Apple Calendar';
-  var openDesc  = provider === 'apple'
-    ? 'Opens the Calendar app — find and edit the task there. Juggler syncs automatically.'
-    : 'Goes directly to the event. Edit or move it there — Juggler syncs automatically.';
-  var openHref  = eventUrl || (provider === 'msft' ? 'https://outlook.live.com/calendar/' : provider === 'gcal' ? 'https://calendar.google.com/' : null);
-
-  function handleTakeOwnership() {
-    setBusy(true);
-    setErr(null);
-    apiClient.post('/tasks/' + task.id + '/take-ownership')
-      .then(function(res) {
-        setBusy(false);
-        onOwnershipTaken && onOwnershipTaken(res.data && res.data.task);
-        onClose();
-      })
-      .catch(function(e) {
-        setBusy(false);
-        setErr((e.response && e.response.data && e.response.data.error) || 'Failed to take ownership');
-      });
-  }
-
-  var overlayStyle = {
-    position: 'absolute', inset: 0,
-    background: 'rgba(0,0,0,0.55)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    zIndex: 200, borderRadius: 8
-  };
-  var cardStyle = {
-    background: TH.bgCard,
-    border: '1px solid ' + TH.border,
-    borderRadius: 10,
-    overflow: 'hidden',
-    boxShadow: '0 8px 28px ' + TH.shadow,
-    width: 300,
-    fontFamily: 'inherit',
-    fontSize: 12
-  };
-  var headStyle = {
-    background: TH.headerBg,
-    borderBottom: '1px solid ' + TH.borderLight,
-    padding: '11px 15px',
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between'
-  };
-  var chipStyle = {
-    display: 'flex', alignItems: 'center', gap: 8,
-    background: TH.bgTertiary, border: '1px solid ' + TH.border,
-    borderRadius: 6, padding: '7px 11px', marginBottom: 10,
-    fontSize: 11, color: TH.textSecondary
-  };
-  var rowBase = {
-    display: 'flex', alignItems: 'flex-start', gap: 10,
-    padding: '9px 11px', borderRadius: 6,
-    border: '1px solid ' + TH.border,
-    cursor: 'pointer', marginBottom: 6,
-    transition: 'background 0.1s'
-  };
-
-  return (
-    <div style={overlayStyle} onClick={onClose}>
-      <div style={cardStyle} onClick={function(e) { e.stopPropagation(); }}>
-        <div style={headStyle}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: TH.headerText }}>Manage this task</span>
-          <span style={{ color: 'rgba(255,255,255,0.45)', cursor: 'pointer', fontSize: 13 }} onClick={onClose}>✕</span>
-        </div>
-        <div style={{ padding: '12px 15px' }}>
-          <div style={chipStyle}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: providerDotColor, flexShrink: 0 }} />
-            <span>Set by <strong style={{ color: TH.text }}>{providerName}</strong></span>
-          </div>
-
-          {/* Open in calendar */}
-          {openHref ? (
-            <a href={openHref} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', display: 'block', marginBottom: 6 }}>
-              <div style={{ ...rowBase, borderColor: TH.blueBorder, background: TH.blueBg }}>
-                <span style={{ fontSize: 14, lineHeight: 1.3, flexShrink: 0 }}>↗</span>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: TH.blueText, marginBottom: 2 }}>{openLabel}</div>
-                  <div style={{ fontSize: 10, color: TH.textMuted, lineHeight: 1.5 }}>{openDesc}</div>
-                </div>
-              </div>
-            </a>
-          ) : (
-            <div style={{ ...rowBase, borderColor: TH.blueBorder, background: TH.blueBg, cursor: 'default', marginBottom: 6 }}>
-              <span style={{ fontSize: 14, lineHeight: 1.3, flexShrink: 0 }}>↗</span>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: TH.blueText, marginBottom: 2 }}>{openLabel}</div>
-                <div style={{ fontSize: 10, color: TH.textMuted, lineHeight: 1.5 }}>{openDesc}</div>
-              </div>
-            </div>
-          )}
-
-          {/* Take ownership */}
-          <div style={{ ...rowBase, borderColor: TH.amberBorder, marginBottom: 0 }}
-            onClick={busy ? null : handleTakeOwnership}
-            onMouseEnter={function(e) { e.currentTarget.style.background = TH.amberBg; }}
-            onMouseLeave={function(e) { e.currentTarget.style.background = ''; }}>
-            <span style={{ fontSize: 14, lineHeight: 1.3, flexShrink: 0 }}>⚡</span>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, color: TH.amberText, marginBottom: 2 }}>{busy ? 'Taking ownership…' : 'Take ownership'}</div>
-              <div style={{ fontSize: 10, color: TH.textMuted, lineHeight: 1.5 }}>Juggler owns the time. Calendar link removed. Float or reschedule freely.</div>
-            </div>
-          </div>
-          {err && <div style={{ fontSize: 10, color: TH.redText, marginTop: 6 }}>{err}</div>}
-        </div>
-        <div style={{ borderTop: '1px solid ' + TH.borderLight, padding: '9px 15px', textAlign: 'right' }}>
-          <button onClick={onClose} style={{
-            background: 'none', border: 'none', fontFamily: 'inherit',
-            fontSize: 11, color: TH.textMuted, cursor: 'pointer'
-          }}>Cancel</button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 var COLLAPSE_KEY = 'juggler_task_detail_collapse';
 var COLLAPSE_DEFAULTS = {
@@ -638,8 +508,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     return Object.keys(changed).length > 0 ? changed : null;
   }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, rigid, dur, timeRemaining, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, datePinned, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
-  var [manageCalDialog, setManageCalDialog] = useState(false);
-
   // Dirty detection — compare current fields to snapshot
   var [isDirty, setIsDirty] = useState(false);
   useEffect(function() {
@@ -927,13 +795,6 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         </CollapsibleSection>
       )}
 
-      {manageCalDialog && !isCreate && task && (
-        <ManageCalTaskDialog
-          task={task} darkMode={darkMode}
-          onClose={function() { setManageCalDialog(false); }}
-          onOwnershipTaken={function(updatedTask) { if (onUpdate && updatedTask) onUpdate(updatedTask); }}
-        />
-      )}
     </>
   );
 

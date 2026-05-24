@@ -14,6 +14,14 @@ const path = require('path');
 
 const API_URL = process.env.JUGGLER_API_URL || 'http://localhost:5002';
 
+const AUTH_INSTRUCTIONS = `Juggler MCP not authenticated.
+
+To connect:
+1) Open http://localhost:3003 and log in
+2) Open DevTools → Application → Local Storage → copy 'token'
+3) Save: echo TOKEN > ~/.juggler-mcp-token
+4) Reconnect MCP: /mcp`;
+
 function getToken() {
   if (process.env.JUGGLER_TOKEN) return process.env.JUGGLER_TOKEN;
   const tokenPath = path.join(process.env.HOME || process.env.USERPROFILE || '', '.juggler-mcp-token');
@@ -24,9 +32,16 @@ function getToken() {
   }
 }
 
+const token = getToken();
+if (!token) {
+  console.error(AUTH_INSTRUCTIONS);
+}
+
 async function apiCall(method, endpoint, body) {
   const token = getToken();
-  if (!token) throw new Error('No JUGGLER_TOKEN set. Set env var or create ~/.juggler-mcp-token');
+  if (!token) {
+    throw new Error(AUTH_INSTRUCTIONS);
+  }
 
   const url = `${API_URL}${endpoint}`;
   const opts = {

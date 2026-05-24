@@ -557,7 +557,8 @@ function taskToRow(task, userId, timezone, currentTask) {
 
 
   if (task.placementMode !== undefined) {
-    row.placement_mode = task.placementMode;
+    var validModes = Object.values(PLACEMENT_MODES);
+    row.placement_mode = validModes.indexOf(task.placementMode) >= 0 ? task.placementMode : PLACEMENT_MODES.ANYTIME;
   }
 
   row.updated_at = new Date();
@@ -798,6 +799,15 @@ function validateTaskInput(body) {
       } else if (rs === null || (typeof rs === 'string' && rs.trim() === '')) {
         errors.push('Recurrence start date cannot be cleared on biweekly, interval, or times-per-cycle patterns');
       }
+    }
+  }
+  // cross-field: fixed placementMode requires scheduling info
+  if (body.placementMode === 'fixed') {
+    var hasDate = body.date !== undefined && body.date !== null && body.date !== '';
+    var hasTime = body.time !== undefined && body.time !== null && body.time !== '';
+    var hasScheduledAt = body.scheduledAt !== undefined && body.scheduledAt !== null && body.scheduledAt !== '';
+    if (!hasDate && !hasTime && !hasScheduledAt) {
+      errors.push('placementMode "fixed" requires a date, time, or scheduledAt');
     }
   }
   return errors;
@@ -1561,6 +1571,7 @@ async function updateTaskStatus(req, res) {
 
   try {
     var id = req.params.id;
+    var tz = safeTimezone(req.headers['x-timezone']);
     var status = req.body.status;
 
     // Validate status value

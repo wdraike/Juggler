@@ -240,8 +240,17 @@ export default function WhenSection(props) {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 6 }}>
         <label style={lStyle}>
           Date
-          <input type="date" value={date} onChange={e => onDateChange(e.target.value)}
-            style={{ ...iStyle, width: 130 }} />
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <input type="date" value={date} onChange={e => onDateChange(e.target.value)}
+              style={{ ...iStyle, width: 130 }} />
+            <button
+              title={datePinned ? 'Date is pinned — scheduler will not move this task' : 'Pin date — prevent scheduler from moving this task'}
+              onClick={function() { onDatePinnedChange(!datePinned); }}
+              style={{ ...togStyle(datePinned, '#C8942A'), fontSize: 9, height: BTN_H }}
+            >
+              {datePinned ? '📍 Pinned' : '📌 Pin'}
+            </button>
+          </div>
         </label>
         {effectiveMode !== 'all_day' && (<>
           <label style={lStyle}>
@@ -295,22 +304,31 @@ export default function WhenSection(props) {
 
       {!marker && !isRecurring && (
         <div style={{ marginTop: 8 }}>
+          {isFixed && (
+            <div style={{ fontSize: 10, color: TH.amberText, marginBottom: 4, fontWeight: 500 }}>
+              {datePinned ? '📍 Date is pinned — unpin to change scheduling mode.' : '📅 Calendar-managed — scheduling is set by the source calendar.'}
+            </div>
+          )}
           <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, opacity: isFixed ? 0.4 : 1 }}>Scheduling mode</div>
           {/* Three-button mode selector — mirrors recurring section; all task types get the same three modes */}
           <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 6, opacity: isFixed ? 0.35 : 1, pointerEvents: isFixed ? 'none' : undefined }}>
             <button title="No time restriction — the scheduler can place this in any available slot"
+              tabIndex={isFixed ? -1 : 0}
               onClick={function() { onModeChange('anytime'); onWhenChange(''); }}
               style={togStyle(effectiveMode === 'anytime', '#2D6A4F')}>🔄 Anytime</button>
             <button title="Schedule near a preferred time ± a flex window"
+              tabIndex={isFixed ? -1 : 0}
               onClick={function() { onModeChange('time_window'); }}
               style={togStyle(effectiveMode === 'time_window', '#C8942A')}>⏰ Time window</button>
             <button title="Restrict to named time block windows (morning, afternoon, etc.)"
+              tabIndex={isFixed ? -1 : 0}
               onClick={function() {
                 onModeChange('time_blocks');
                 if (activeTags.length === 0) onWhenChange('morning,lunch,afternoon,evening,night');
               }}
               style={togStyle(effectiveMode === 'time_blocks', '#4338CA')}>📅 Time blocks</button>
             <button title="Spans the entire day"
+              tabIndex={isFixed ? -1 : 0}
               onClick={function() { onModeChange('all_day'); onDatePinnedChange(false); onWhenChange(''); onSplitChange(false); onTravelBeforeChange(0); onTravelAfterChange(0); }}
               style={togStyle(effectiveMode === 'all_day', '#C8942A')}>☀️ All Day</button>
           </div>
@@ -416,6 +434,15 @@ export default function WhenSection(props) {
               onRigidChange(false);
               if (activeTags.length <= 1) onWhenChange('morning,lunch,afternoon,evening,night');
             }} style={togStyle(effectiveMode === 'time_blocks', '#4338CA')}>📅 Time blocks</button>
+            <button title="Spans the entire day"
+              onClick={function() {
+                onModeChange('all_day');
+                onHasPreferredTimeChange(false);
+                onTimeChange('');
+                onRigidChange(false);
+                onWhenChange('');
+              }}
+              style={togStyle(effectiveMode === 'all_day', '#C8942A')}>☀️ All Day</button>
           </div>
 
           {hasPreferredTime ? (
@@ -496,9 +523,10 @@ export default function WhenSection(props) {
                     var code = pair[0], label = pair[1];
                     var active = recurDays && recurDays.includes(code);
                     return (
-                      <button key={code} onClick={function() {
-                        onRecurDaysChange(active ? (recurDays || '').replace(code, '') : (recurDays || '') + code);
-                      }} style={togStyle(active)}>{label}</button>
+                      <button key={code} title={({U:'Sunday',M:'Monday',T:'Tuesday',W:'Wednesday',R:'Thursday',F:'Friday',S:'Saturday'})[code]}
+                        onClick={function() {
+                          onRecurDaysChange(active ? (recurDays || '').replace(code, '') : (recurDays || '') + code);
+                        }} style={togStyle(active)}>{label}</button>
                     );
                   })}
                 </div>
