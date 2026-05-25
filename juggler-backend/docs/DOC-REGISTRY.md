@@ -1,19 +1,25 @@
 # Doc Registry — juggler
-_Last updated: 2026-05-19 20:22_
+_Last updated: 2026-05-25 17:15_
 
 | File | Status | Issues | Last Reviewed | File mtime |
 |------|--------|--------|---------------|------------|
+| juggler/juggler-backend/docs/PROJECT-BRIEF.md | MISSING | Required core doc | — | — |
+| juggler/juggler-backend/docs/architecture/README.md | MISSING | Required core doc | — | — |
+| juggler/juggler-backend/docs/api/README.md | MISSING | Required core doc (API routes exist) | — | — |
+| juggler/juggler-backend/docs/mcp/<server>.md | MISSING | Required — src/mcp/server.js exists | — | — |
+| juggler/juggler-backend/docs/architecture/SCHEDULER-UI-STATE-MAP.md | PASS | — | 2026-05-25 17:15 | 2026-05-25 16:25 |
+| juggler/juggler-backend/docs/architecture/SCHEDULER.md | PASS | — | 2026-05-25 17:15 | 2026-05-25 16:28 |
+| juggler/juggler-backend/docs/architecture/WHEN-MODE-REDESIGN.md | PASS | — | 2026-05-25 17:15 | 2026-05-25 16:29 |
+| juggler/juggler-backend/docs/architecture/TASK-PROPERTIES.md | PASS | — | 2026-05-25 16:35 | 2026-05-25 16:21 |
+| juggler/juggler-backend/docs/use-cases/task.controller.md | PASS | — | 2026-05-25 16:35 | 2026-05-25 16:27 |
 | juggler/juggler-backend/docs/architecture/AI-COMMANDS.md | PASS | — | 2026-05-19 20:22 | 2026-05-19 14:45 |
 | juggler/juggler-backend/docs/architecture/CALENDAR-SYNC-REFACTOR.md | PASS | — | 2026-05-19 20:22 | 2026-05-19 12:35 |
 | juggler/juggler-backend/docs/architecture/CODE-REVIEW-CHECKLIST.md | PASS | — | 2026-05-19 20:22 | 2026-05-19 12:35 |
 | juggler/juggler-backend/docs/architecture/RECURRING-SPACING-DESIGN.md | PASS | — | 2026-05-19 20:22 | 2026-05-19 12:32 |
 | juggler/juggler-backend/docs/architecture/SCHEDULER-AUDIT-REQUIREMENTS.md | PASS | — | 2026-05-19 20:22 | 2026-05-19 12:31 |
 | juggler/juggler-backend/docs/architecture/SCHEDULER-OVERDUE-LADDER.md | PASS | — | 2026-05-19 20:22 | 2026-05-19 12:31 |
-| juggler/juggler-backend/docs/architecture/SCHEDULER-UI-STATE-MAP.md | PASS | — | 2026-05-19 20:22 | 2026-05-19 12:32 |
-| juggler/juggler-backend/docs/architecture/SCHEDULER.md | PASS | — | 2026-05-19 20:22 | 2026-05-19 14:18 |
 | juggler/juggler-backend/docs/architecture/SCHEMA.md | PASS | — | 2026-05-19 20:22 | 2026-05-19 12:35 |
 | juggler/juggler-backend/docs/architecture/SYNC-EVENT-TO-TASK-HANDOFF.md | PASS | — | 2026-05-19 20:22 | 2026-05-19 12:35 |
-| juggler/juggler-backend/docs/architecture/TASK-PROPERTIES.md | PASS | — | 2026-05-19 20:22 | 2026-05-19 12:32 |
 | juggler/juggler-backend/docs/architecture/TASK-STATE-MATRIX.md | PASS | — | 2026-05-19 20:22 | 2026-05-19 12:32 |
 | juggler/juggler-backend/docs/architecture/WEATHER-INTEGRATION.md | PASS | — | 2026-05-19 20:22 | 2026-05-19 12:35 |
 | juggler/juggler-backend/docs/testing/SYNC-SOAK-TEST-APPLE.md | PASS | — | 2026-05-19 20:22 | 2026-05-19 12:35 |

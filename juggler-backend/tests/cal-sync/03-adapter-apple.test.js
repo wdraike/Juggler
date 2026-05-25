@@ -236,6 +236,36 @@ describe('Apple adapter — applyEventToTaskFields', function () {
   });
 });
 
+// ─── 3b. applyEventToTaskFields — REMINDER→FIXED combined scenario ───
+//
+// Block 3 (Apple): event was a REMINDER (transparent), now loses transparency AND
+// date/time changes in the same sync. Must produce FIXED, not ANYTIME.
+
+describe('Apple adapter — applyEventToTaskFields REMINDER→FIXED ordering', function () {
+  it('formerly-reminder event with date/time change → placement_mode fixed (not anytime)', function () {
+    // currentTask was synced as a REMINDER (transparent, placement_mode=reminder)
+    var currentTask = { date: '2026-05-20', time: '9:00 AM', placement_mode: 'reminder' };
+
+    // Event: no longer transparent, date+time changed.
+    var event = {
+      title: 'Formerly Reminder Apple',
+      startDateTime: '2026-05-25T10:00:00',
+      endDateTime: '2026-05-25T11:00:00',
+      isAllDay: false,
+      durationMinutes: 60,
+      isTransparent: false,
+      description: ''
+    };
+
+    var fields = appleAdapter.applyEventToTaskFields(event, 'UTC', currentTask);
+
+    // FIXED must win over the ANYTIME reset that runs first in the function.
+    expect(fields.placement_mode).toBe('fixed');
+    // Must NOT be 'anytime' — that would indicate the ordering bug
+    expect(fields.placement_mode).not.toBe('anytime');
+  });
+});
+
 // ─── 4. createEvent (CalDAV) ───
 
 describe('Apple adapter — createEvent', function () {

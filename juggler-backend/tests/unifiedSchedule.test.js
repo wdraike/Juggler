@@ -98,7 +98,8 @@ describe('unifiedSchedule', () => {
     });
 
     test('allday events skip time grid', () => {
-      const tasks = [makeTask({ id: 't1', date: '2026-03-22', when: 'allday' })];
+      // All-day mode is carried in placement_mode, not when (when:'allday' is stripped as legacy).
+      const tasks = [makeTask({ id: 't1', date: '2026-03-22', placementMode: 'all_day' })];
       const result = schedule(tasks);
       const placed = getPlacementsForDay(result, '2026-03-22');
       expect(placed).toHaveLength(0);

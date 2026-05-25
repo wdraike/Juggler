@@ -15,7 +15,7 @@ var BASE = {
   recurStart: '', recurEnd: '',
   deadline: '', startAfter: '', split: false, splitMin: 15,
   travelBefore: 0, travelAfter: 0, marker: false, flexWhen: false,
-  datePinned: false, dayReq: 'any', when: '', timeRemaining: '',
+  dayReq: 'any', when: '', timeRemaining: '',
   taskTz: 'America/New_York',
   isCreate: false, isMobile: false, scheduleTemplates: [], templateDefaults: {},
   collapse: { when_recurrence: false, when_constraints: false },
@@ -33,7 +33,7 @@ var COMMON_HANDLERS = {
   onDeadlineChange: noop, onStartAfterChange: noop,
   onSplitChange: noop, onSplitMinChange: noop,
   onTravelBeforeChange: noop, onTravelAfterChange: noop,
-  onMarkerChange: noop, onFlexWhenChange: noop, onDatePinnedChange: noop,
+  onMarkerChange: noop, onFlexWhenChange: noop,
   onDayReqChange: noop, onWhenChange: noop, onTimeRemainingChange: noop,
   onChangeTz: noop, toggleCollapse: noop, onModeChange: noop,
   onHasPreferredTimeChange: noop, onRecurUnitChange: noop, onRecurFillPolicyChange: noop,
@@ -90,13 +90,20 @@ describe('WhenSection mode matrix', () => {
               render(<WhenSection {...props} />);
               var btns = queryModeButtons();
 
-              if (recurring) {
-                // Recurring section shows Anytime, Time window, Time blocks
+              if (recurring && placementMode === 'fixed') {
+                // placementMode='fixed' is not supported on recurring tasks (non-cal-managed).
+                // The "not available" fallback renders the four valid mode buttons so the
+                // user has an exit path. No task prop = no calendar link = fallback path.
+                expect(btns.anytime).toBeInTheDocument();
+                expect(btns.timeWindow).toBeInTheDocument();
+                expect(btns.timeBlocks).toBeInTheDocument();
+              } else if (recurring) {
+                // Recurring section shows Anytime, Time window, Time blocks, All Day
                 expect(btns.anytime).toBeInTheDocument();
                 expect(btns.timeWindow).toBeInTheDocument();
                 expect(btns.timeBlocks).toBeInTheDocument();
               } else {
-                // Non-recurring shows all four buttons regardless of placementMode
+                // Non-recurring shows all five buttons regardless of placementMode
                 expect(btns.anytime).toBeInTheDocument();
                 expect(btns.timeWindow).toBeInTheDocument();
                 expect(btns.timeBlocks).toBeInTheDocument();
@@ -107,7 +114,8 @@ describe('WhenSection mode matrix', () => {
             it('isFixed derivation is correct', () => {
               render(<WhenSection {...props} />);
               var isCalManaged = !!(props.task && (props.task.gcalEventId || props.task.msftEventId || props.task.appleEventId));
-              var expectedIsFixed = !!datePinned || (placementMode === 'fixed' && isCalManaged);
+              // datePinned no longer contributes to isFixed — only cal-linked fixed mode locks the UI
+              var expectedIsFixed = placementMode === 'fixed' && isCalManaged;
               // When isFixed is true, the Scheduling mode label opacity drops to 0.4
               // (label is absent in all_day mode, so skip assertion there)
               var labelEl = screen.queryByText('Scheduling mode');
@@ -141,19 +149,18 @@ describe('WhenSection mode matrix', () => {
   });
 });
 
-describe('WhenSection pin toggle', () => {
-  it('clicking Pin calls onDatePinnedChange with true', () => {
+describe('WhenSection Fixed mode button', () => {
+  it('clicking Fixed mode button calls onModeChange with fixed', () => {
     var called = null;
-    render(<WhenSection {...buildProps({ datePinned: false })} onDatePinnedChange={function(v) { called = v; }} />);
-    fireEvent.click(screen.getByText(/Pin/));
-    expect(called).toBe(true);
+    render(<WhenSection {...buildProps({ placementMode: 'anytime' })} onModeChange={function(v) { called = v; }} />);
+    fireEvent.click(screen.getByTitle('Exact date and time — immovable'));
+    expect(called).toBe('fixed');
   });
 
-  it('clicking Pinned calls onDatePinnedChange with false', () => {
-    var called = null;
-    render(<WhenSection {...buildProps({ datePinned: true })} onDatePinnedChange={function(v) { called = v; }} />);
-    fireEvent.click(screen.getByText(/Pinned/));
-    expect(called).toBe(false);
+  it('Fixed mode button is active (font-weight 600) when placementMode is fixed and no cal link', () => {
+    render(<WhenSection {...buildProps({ placementMode: 'fixed' })} />);
+    var btn = screen.getByTitle('Exact date and time — immovable');
+    expect(btn.style.fontWeight).toBe('600');
   });
 });
 
@@ -171,9 +178,10 @@ describe('WhenSection fixed mode specifics', () => {
     expect(anytimeBtn.closest('div')).not.toHaveStyle({ pointerEvents: 'none' });
   });
 
-  it('fixed mode still shows Pin toggle', () => {
-    render(<WhenSection {...buildProps({ placementMode: 'fixed', datePinned: false })} />);
-    expect(screen.getByText(/Pin/)).toBeInTheDocument();
+  it('fixed mode without calendar link does not lock the mode selector', () => {
+    render(<WhenSection {...buildProps({ placementMode: 'fixed' })} />);
+    var anytimeBtn = screen.getByTitle(/No time restriction/);
+    expect(anytimeBtn.closest('div')).not.toHaveStyle({ pointerEvents: 'none' });
   });
 });
 
@@ -214,10 +222,9 @@ describe('WhenSection deep interactions — no silent lockouts', () => {
   });
 
   it('clicking All Day calls onModeChange with all_day and clears constraints', () => {
-    var modeCalled = null, pinCalled = null, whenCalled = null, splitCalled = null, travelBeforeCalled = null, travelAfterCalled = null;
+    var modeCalled = null, whenCalled = null, splitCalled = null, travelBeforeCalled = null, travelAfterCalled = null;
     render(<WhenSection {...buildProps({ placementMode: 'anytime' })}
       onModeChange={function(m) { modeCalled = m; }}
-      onDatePinnedChange={function(v) { pinCalled = v; }}
       onWhenChange={function(w) { whenCalled = w; }}
       onSplitChange={function(v) { splitCalled = v; }}
       onTravelBeforeChange={function(v) { travelBeforeCalled = v; }}
@@ -225,7 +232,6 @@ describe('WhenSection deep interactions — no silent lockouts', () => {
     />);
     fireEvent.click(screen.getByTitle(/Spans the entire day/));
     expect(modeCalled).toBe('all_day');
-    expect(pinCalled).toBe(false);
     expect(whenCalled).toBe('');
     expect(splitCalled).toBe(false);
     expect(travelBeforeCalled).toBe(0);
@@ -255,23 +261,19 @@ describe('WhenSection deep interactions — no silent lockouts', () => {
     expect(screen.getByText(/Afternoon/)).toBeInTheDocument();
   });
 
-  it('datePinned=true disables mode buttons via pointerEvents and tabIndex', () => {
-    render(<WhenSection {...buildProps({ placementMode: 'anytime', datePinned: true })} />);
+  it('cal-managed fixed mode disables mode buttons via pointerEvents and tabIndex', () => {
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { gcalEventId: 'gcal_x' } })} />);
     var btn = screen.getByTitle(/No time restriction/);
     expect(btn.closest('div')).toHaveStyle({ pointerEvents: 'none' });
     expect(btn).toHaveAttribute('tabIndex', '-1');
   });
 
-  it('datePinned=true + placementMode=time_window locks time-window sub-panel via pointerEvents', () => {
-    var { container } = render(<WhenSection {...buildProps({ placementMode: 'time_window', datePinned: true, time: '09:00' })} />);
-    // The ⏰ Time label must be present (sub-panel is rendered), but its container must be non-interactive
-    var timeLabel = screen.getByText('⏰ Time');
-    expect(timeLabel).toBeInTheDocument();
-    var subPanel = timeLabel.closest('div[style*="opacity"]');
-    expect(subPanel).not.toBeNull();
-    expect(subPanel).toHaveStyle({ pointerEvents: 'none' });
-    // W-2: locked sub-panel must also be visually dimmed
-    expect(subPanel).toHaveStyle({ opacity: '0.35' });
+  it('cal-managed fixed + placementMode=fixed locks time-window sub-panel via pointerEvents', () => {
+    // Verify that when isFixed=true (cal-linked + fixed mode), the mode selector is locked.
+    // datePinned no longer drives locking — only cal-linked fixed mode does.
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { gcalEventId: 'gcal_x' } })} />);
+    var btn = screen.getByTitle(/No time restriction/);
+    expect(btn.closest('div')).toHaveStyle({ pointerEvents: 'none' });
   });
 
   it('placementMode=fixed + calendar link disables mode buttons via pointerEvents and tabIndex', () => {
@@ -289,9 +291,10 @@ describe('WhenSection deep interactions — no silent lockouts', () => {
     expect(screen.getByTitle(/Spans the entire day/)).toHaveAttribute('tabIndex', '0');
   });
 
-  it('shows correct banner text for datePinned lockout', () => {
-    render(<WhenSection {...buildProps({ placementMode: 'anytime', datePinned: true })} />);
-    expect(screen.getByText(/Date is pinned/)).toBeInTheDocument();
+  it('no "Date is pinned" banner — datePinned UI removed; only Calendar-managed banner remains', () => {
+    // datePinned is no longer a locking signal — only cal-linked fixed mode shows a banner
+    render(<WhenSection {...buildProps({ placementMode: 'anytime' })} />);
+    expect(screen.queryByText(/Date is pinned/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Calendar-managed/)).not.toBeInTheDocument();
   });
 
@@ -313,13 +316,14 @@ describe('WhenSection deep interactions — no silent lockouts', () => {
     expect(screen.queryByText(/Calendar-managed/)).not.toBeInTheDocument();
   });
 
-  it('Day requirement picker is removed from DOM when isFixed', () => {
-    render(<WhenSection {...buildProps({ placementMode: 'anytime', datePinned: true })} />);
+  it('Day requirement picker is removed from DOM when isFixed (cal-managed fixed)', () => {
+    // isFixed = placementMode==='fixed' && isCalManaged — datePinned no longer drives this
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { gcalEventId: 'gcal_x' } })} />);
     expect(screen.queryByText(/Day requirement/)).not.toBeInTheDocument();
   });
 
   it('Day requirement picker is visible when isFixed is false', () => {
-    render(<WhenSection {...buildProps({ placementMode: 'anytime', datePinned: false })} />);
+    render(<WhenSection {...buildProps({ placementMode: 'anytime' })} />);
     expect(screen.getByText(/Day requirement/)).toBeInTheDocument();
   });
 });

@@ -2,6 +2,12 @@
  * Constants extracted from task_tracker_v7_28
  */
 
+export const CAL_PROVIDER_NAMES = {
+  gcal:  'Google Calendar',
+  msft:  'Microsoft Calendar',
+  apple: 'Apple Calendar',
+};
+
 export const PRI_COLORS = {
   P1: "#E11D48", P2: "#D97706", P3: "#2E4A7A", P4: "#5C5A55",
 };

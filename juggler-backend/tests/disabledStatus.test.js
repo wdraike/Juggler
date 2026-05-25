@@ -208,9 +208,15 @@ describe('GET /api/tasks/disabled', () => {
   });
 
   test('returns disabled tasks and recurringTasks', async () => {
-    // fetchTasksWithEventIds: ledger.select() is evaluated first in Promise.all array
+    // fetchTasksWithEventIds: Promise.all([tasks_v, ledger.select(), user_calendars.select()])
+    // JS evaluates arguments left-to-right: select() calls fire before Promise.all sees q.
+    // Consumption order: ledger.select() → slot 1, user_calendars.select() → slot 2,
+    // q.then() → slot 3, buildSourceMap .select() → slot 4.
+    // ledger.select() — no sync entries
     resolveQueue.push([]);
-    // fetchTasksWithEventIds: tasks_v (q.then) is evaluated second by Promise.all
+    // user_calendars.select() — no apple calendars
+    resolveQueue.push([]);
+    // tasks_v (q.then) — the disabled rows
     resolveQueue.push([
       { id: 'ht01', user_id: 'user-123', text: 'Morning run', status: 'disabled', task_type: 'recurring_template', disabled_at: '2026-04-01T12:00:00Z', disabled_reason: 'downgrade' },
       { id: 't05', user_id: 'user-123', text: 'Write report', status: 'disabled', task_type: 'task', disabled_at: '2026-04-01T12:00:00Z', disabled_reason: 'downgrade' }

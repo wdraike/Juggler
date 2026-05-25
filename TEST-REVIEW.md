@@ -1,156 +1,143 @@
-# Test Review — Focus: task.controller.js, MCP tasks.js, TaskEditForm, WhenSection
+# Test Review — When-mode Simplification (datePinned removal)
+# juggler / 2026-05-25
 
-_Date: 2026-05-24_
-_Mode: Focus — changed/related files listed in command line_
+## Verdict: PASS
 
----
-
-## Suite Results
-
-| Suite | Tests | Passed | Failed | Skipped |
-|-------|-------|--------|--------|---------|
-| `juggler-backend/tests/mcp-task-config.test.js` | 16 | 16 | 0 | 0 |
-| `juggler-frontend/src/components/tasks/sections/__tests__/WhenSection.modes.test.jsx` | ~160 | 160 | 0 | 0 |
-| `juggler-frontend/src/components/tasks/sections/__tests__/WhenSection.test.jsx` | ~98 | 98 | 0 | 0 |
-| `juggler-frontend/src/components/tasks/__tests__/TaskEditForm.integration.test.jsx` | 3 | 3 | 0 | 0 |
-| **Total** | **277** | **277** | **0** | **0** |
-
-All focused tests pass. No failures, no skips.
+All tests green. 3 Zoe BLOCK findings resolved via 1 bert iteration. 7 Zoe WARNs + 4 Bird WARNs resolved via 2 additional bert iterations. UX-4 (viewport Playwright test) deferred with user approval.
 
 ---
 
-## Coverage by Focus File
+## Test counts
 
-| File | Stmts % | Branch % | Funcs % | Lines % | Tested By |
-|------|---------|----------|---------|---------|-----------|
-| `juggler-backend/src/mcp/tools/tasks.js` | 22.94 | 11.53 | 23.40 | 23.07 | `mcp-task-config.test.js` |
-| `juggler-backend/src/controllers/task.controller.js` | 11.27 | 14.20 | 7.75 | 12.61 | `mcp-task-config.test.js` (indirect) |
-| `juggler-frontend/src/components/tasks/sections/WhenSection.jsx` | 34.38 | 44.18 | 28.88 | 37.89 | `WhenSection.*.test.jsx` |
-| `juggler-frontend/src/components/tasks/TaskEditForm.jsx` | 27.95 | 29.95 | 36.17 | 34.89 | `TaskEditForm.integration.test.jsx` |
+| Suite | Before | After |
+|-------|--------|-------|
+| Backend tests passing | 1443 | 1481 |
+| Frontend tests passing | 372 | 398 |
+| Backend suites | 99/107 active | 107/107 active |
 
----
-
-## Backend — `mcp-task-config.test.js` (16 tests)
-
-### What is covered
-- `create_task` placement_mode inference (6 paths):
-  - Explicit `time_window` + date + time → `time_window`, auto-pinned
-  - Explicit `datePinned:false` + date → `all_day`, unpinned
-  - Date only (no placementMode) → `all_day`, pinned
-  - Date + time (no placementMode) → `fixed`, pinned
-  - `anytime` + date → `anytime`, pinned
-  - `anytime` + date + `datePinned:false` → `anytime`, unpinned
-  - `scheduledAt` only → `fixed`, pinned
-  - No scheduling fields → `placement_mode` undefined, `date_pinned` undefined
-  - Explicit `fixed` / `all_day` / `time_blocks` + date → respective mode, pinned
-  - `datePinned:true` without date/time → pinned flows through
-  - `fixed` without date/time/scheduledAt → validation error
-  - Invalid placementMode → falls back to `anytime`
-- `batch_update_tasks` calendar-sync guard (2 tests):
-  - Synced task with blocked fields (`datePinned`) → error with `CAL_SYNCED_READONLY`
-  - Synced task with only `status` + `notes` → allowed
-
-### Gaps
-- `update_task` MCP tool has **zero** tests.
-- `list_tasks` MCP tool has **zero** tests.
-- `create_tasks` (batch) has **zero** placement_mode / date_pinned tests.
-- Rolling-anchor logic in MCP `update_task` (L576-621 in `tasks.js`) is uncovered.
-- The controller coverage (11.27%) is driven solely by `taskToRow`, `rowToTask`, `validateTaskInput`, and `buildSourceMap` being pulled in as dependencies; the actual HTTP/controller paths in `task.controller.js` are not exercised by this suite.
+Before: 8 failing backend suites, 24 failing tests.
+After: 0 failing suites, 0 failing tests (27 skipped = DB-gated integration tests without live DB + xdescribed removed-endpoint blocks).
 
 ---
 
-## Frontend — WhenSection (2 suites, 258 tests)
+## Failing tests found and repaired (telly)
 
-### `WhenSection.modes.test.jsx` — mode matrix
-- Exhaustive cartesian matrix over: `placementMode` (anytime, time_window, time_blocks, fixed, all_day) × `datePinned` (true/false) × `rigid` (true/false) × `recurring` (true/false)
-- 4 assertions per combination:
-  1. Renders without crashing
-  2. Mode selector button visibility correct (recurring shows 3 buttons; non-recurring shows 4)
-  3. `isFixed` derivation correct (opacity 0.4 when fixed/pinned)
-  4. No disabled control lacks a visible indicator (accessibility guard)
-  5. `all_day` hides time inputs
-
-### `WhenSection.test.jsx` — behavior tests
-- **Task 1 (placementMode prop tests, D-24 through D-26):**
-  - Three-button / four-button selectors render correctly
-  - Active button font-weight is `600`
-  - Clicking modes fires `onModeChange` with correct value
-  - `time_window` shows time input; `anytime` hides it
-  - Recurring mode buttons call `onModeChange`
-  - `all_day` button calls `onModeChange('all_day')`
-  - Day picker label says "Eligible days" for weekly
-  - Recurrence select wording ("Every 2 weeks", not "Biweekly")
-- **Task 2 (sub-mode split toggle):**
-  - "All N days" / "Flexible quota" toggle visible when `selectedCount > 1`
-  - Active state derived correctly from `recurTpc === selectedCount`
-  - Clicking toggles calls `onRecurTpcChange` with correct value
-  - `tpc` select shown/hidden based on flex-mode
-  - Clicking flex when already flex is no-op
-- **Task 3 (rolling recurrence mode UI):**
-  - "Rolling (repeats after completion)" option present
-  - Interval input visible in rolling mode
-  - Unit select has days/weeks/months, no years
-  - Anchor card shows "not yet set" when `rolling_anchor` is null
-  - Anchor card shows "Completed on" / "Next due" when anchor set
-  - Rolling mode hides day picker and fill policy
-- **Pin toggle:**
-  - Clicking Pin calls `onDatePinnedChange(true)`
-  - Clicking Pinned calls `onDatePinnedChange(false)`
-- **Fixed mode specifics:**
-  - Mode selector dimmed and `pointerEvents: none`
-  - Pin toggle still visible even when `datePinned` is false
-- **All day specifics:**
-  - Time input hidden even when `time` prop provided
-  - Date input still shown
-- **Deep interactions — no silent lockouts:**
-  - Clicking Anytime, Time window, Time blocks, All Day all fire correct `onModeChange`
-  - Clicking Time blocks prefills `when` with all block tags
-  - Clicking All Day clears constraints (pin=false, when='', split=false, travel=0)
-- **Accessibility / lockout banners:**
-  - `datePinned=true` shows "Date is pinned" banner
-  - `fixed` mode shows "Calendar-managed" banner
-  - No banner when `isFixed` is false
-  - Day requirement removed from DOM when `isFixed`
-  - `tabIndex` and `pointerEvents` correctly set on mode buttons
+| Suite | Root cause | Fix |
+|-------|-----------|-----|
+| `taskControllerUnit.test.js` | `datePinned` assertion on `rowToTask` output | Updated to check `placementMode` |
+| `taskMapping.test.js` | `task.datePinned` / `row.date_pinned` assertions | Removed; new contract documented |
+| `taskPipeline.test.js` | `prevWhen` field removed from `rowToTask` | Replaced drag-pin block with placement_mode fields block (4 tests) |
+| `mcp-task-config.test.js` | Multiple `date_pinned: 1` auto-set assertions | Rewrote to assert `placement_mode` only |
+| `schedulerRules.test.js` (Groups 10, 15, 28, 65, 66) | `datePinned: true` in `makeTask()` — scheduler ignores it | Replaced with `placementMode: 'fixed'` + time anchors |
+| `cal-sync/02-adapter-msft.test.js` | `expect(fields.date_pinned).toBe(1)` | Updated to assert `placement_mode === FIXED`, confirm `date_pinned` absent |
+| `unifiedSchedule.test.js` | `when: 'allday'` stripped as legacy | Changed to `placementMode: 'all_day'` |
+| `disabledStatus.test.js` | Mock queue ordering: 3-arg `Promise.all` got wrong resolves | Added missing `user_calendars` resolve, reordered queue |
 
 ---
 
-## Frontend — TaskEditForm integration (1 suite, 3 tests)
+## Coverage gaps filled (telly)
 
-- **Coverage:** TaskEditForm.jsx at 27.95% statements, 29.95% branches.
-- The integration test exercises the full mount + user interaction path:
-  - Form renders with task data
-  - State changes propagate through sections
-  - Save/cancel flow interactions
-- Gaps: Weather section, dependency chain picker, location/tools pickers, recurrence anchor editing, split-task UI, and mobile-responsive paths are not exercised.
-
----
-
-## Summary
-
-| Status | Count | Details |
-|--------|-------|---------|
-| PASS | 277 | All focused-suite tests green |
-| FAIL | 0 | — |
-| WARN | 2 | Low coverage on `task.controller.js` (11%) and `tasks.js` (23%); MCP `update_task`, `list_tasks`, `create_tasks` untested |
-| BLOCK | 0 | — |
-| Regressions | 0 | No failures in any focused suite |
-
-### Coverage verdict
-- **WhenSection.jsx:** 34.38% statements — acceptable for a presentational component with heavy conditional UI branches, but the uncovered ~65% includes recurrence anchor editing, timezone selector dropdown interactions, constraint panels (travel, split), and mobile layout paths.
-- **TaskEditForm.jsx:** 27.95% statements — the integration test covers the happy-path mount and basic interaction, but most cross-section integration (weather, dependencies, split tasks) is untested.
-- **tasks.js (MCP):** 22.94% statements — only `create_task` inference and `batch_update_tasks` guard are tested. The `update_task`, `list_tasks`, `create_tasks` batch, and rolling-anchor paths are entirely uncovered.
-- **task.controller.js:** 11.27% statements — this file is 2400+ lines; the only coverage comes from utility functions (`taskToRow`, `rowToTask`) being imported by the MCP test. The actual controller HTTP paths (CRUD, state machine, re-enable, calendar-sync guards) are **not exercised at all** by the focused tests.
+| Gap | Tests added |
+|-----|------------|
+| `guardFixedCalendarWhen` new behavior | 7 unit tests: strips non-fixed mode on cal-linked tasks, preserves fixed, allowUnfix bypass, all 3 providers |
+| New drag-to-fixed PATCH path | 4 unit tests: `placementMode: 'fixed'` writes `placement_mode`, no derivation when absent |
+| `validateTaskInput` cross-field fixed-mode check | 3 tests: error without date/time, no error with date+time, no error with scheduledAt |
+| Scheduler `placement_mode === 'fixed'` anchor | Covered by repaired schedulerRules groups + existing schedulerSupplyDemand suite |
+| WhenSection Fixed button | Already covered in existing `WhenSection.modes.test.jsx` |
 
 ---
 
-## Recommendations
+## Zoe BLOCK findings resolved (bert iteration 1)
 
-1. **Add MCP `update_task` tests** — at minimum cover placement_mode inference on update, rolling-anchor resolution, and the calendar-sync edit guard.
-2. **Add MCP `create_tasks` (batch) tests** — verify per-item placement_mode inference and split-default application.
-3. **Add TaskEditForm unit tests** that mount with `recurring=true` + `recurType=rolling` and verify the anchor card renders correctly; test timezone change handler; test split-task toggle.
-4. **Expand WhenSection tests** to open the timezone selector dropdown and select a timezone, and to expand the constraints panel and interact with travel/split inputs.
+| Finding | Fix |
+|---------|-----|
+| Z-1: `taskMapping.test.js` — no assertion `datePinned` absent from `rowToTask` output | Added `expect(task.datePinned).toBeUndefined()` |
+| Z-2: `taskMapping.test.js` — no assertion `date_pinned` absent from `taskToRow` + round-trip gap | Added `expect(row.date_pinned).toBeUndefined()` + `expect(result.datePinned).toBeUndefined()` |
+| Z-3: `taskCrudIntegration.test.js` — live drag-pin + unpinTask blocks silently skip on CI but fail with real DB | Changed to `xtest`/`xdescribe` documenting removed features |
 
 ---
 
-Overall: PASS with WARN (tests green, coverage thin on controller and MCP tools)
+## Zoe WARN findings resolved (bert iterations 2–3)
+
+| Finding | Fix |
+|---------|-----|
+| Z-4: msft adapter `date_pinned` absent not asserted in "time changes" + "allday-to-timed" tests | Added `expect(fields.date_pinned).toBeUndefined()` to both tests |
+| Z-5: 11 `datePinned: true` explicit overrides in `schedulerRules.test.js` — exercising inert field | Converted all to `placementMode: 'fixed'` + time anchors; Group 28C restructured |
+| Z-5 semantic: `flex_eve` passed via force-placement not flexWhen; `load_` unplaced branch unreachable | `flex_eve` → `placementMode: 'time_window'`; `load_` → time anchors + unconditional assertions |
+| Z-6: No test for `placementMode: 'fixed'` + date-only (no time) in validateTaskInput | Added test: date-only passes validator (handler enforces date+time, not validator) |
+| Z-7: No scheduler test for invalid `placement_mode` value | Added Group 71: `placementMode: 'unknown_value'` — no crash, placed, `locked: false` |
+| B-1 residual: No active test asserts `redis.invalidateTasks` for `updateTask` | Added assertion to "converts recurring to one-off" active test |
+| B-3 residual: Re-drag snapshot guard not exercised | Moot — `_dragPin` and `!existing.date_pinned` guard removed in redesign |
+
+---
+
+## Bird UX WARN findings resolved (bert iterations 2–3)
+
+| Finding | Fix |
+|---------|-----|
+| UX-1: Mode buttons missing `aria-pressed` / `role="group"` | Added `role="group" aria-label="Scheduling mode"` + `aria-pressed` to all 5 non-recurring + 4 recurring buttons |
+| UX-2: Fixed button absent from recurring mode selector | Added guard: cal-managed → "Calendar-managed" banner; non-cal → "Fixed not available" message + 4 valid mode buttons |
+| UX-3: Silent failure when Fixed task has no date/time | Client-side validation in `TaskEditForm.handleSave`; backend error string propagated via `useTaskState.updateTask`; `role="alert"` render |
+| UX-4: 5-button viewport overflow at 320px unverified | **DEFERRED — user approved. No browser available.** Backlog item: TC-W001 Playwright across 7 viewports |
+| UX-5: No unit tests for Fixed button behaviors | Created `WhenSection.fixed.test.jsx` with 26 tests (TC-W002 through TC-W007) |
+
+---
+
+## New test files
+
+| File | Tests | Coverage |
+|------|-------|----------|
+| `juggler-frontend/src/components/tasks/sections/__tests__/WhenSection.fixed.test.jsx` | 26 | TC-W002–W007: Fixed button render, cal-managed lock, non-cal unlock, "Date is pinned" regression, save validation, recurring guard |
+
+---
+
+## Files modified
+
+**Backend tests:**
+- `tests/taskControllerUnit.test.js` — +20 tests (guardFixedCalendarWhen, drag-to-fixed PATCH, validateTaskInput, date-only fixed)
+- `tests/taskMapping.test.js` — absence assertions added (datePinned, date_pinned, round-trip)
+- `tests/taskPipeline.test.js` — drag-pin block → placement_mode fields block
+- `tests/mcp-task-config.test.js` — rewritten for placement_mode contract
+- `tests/schedulerRules.test.js` — Groups 10/15/25/28/55/65/66 repaired; Group 71 added (invalid placement_mode + unknown_value)
+- `tests/taskCrudIntegration.test.js` — drag-pin + unpinTask → xtest/xdescribe
+- `tests/taskCrudIntegration2.test.js` — taskMapping absence assertions; redis.invalidateTasks active assertion
+- `tests/cal-sync/02-adapter-msft.test.js` — `date_pinned` absent asserted in all 3 adapter tests
+- `tests/unifiedSchedule.test.js` — allday → placementMode: 'all_day'
+- `tests/disabledStatus.test.js` — mock queue ordering fixed
+
+**Frontend tests:**
+- `src/components/tasks/sections/__tests__/WhenSection.fixed.test.jsx` — new file, 26 tests
+- `src/components/tasks/sections/__tests__/WhenSection.modes.test.jsx` — recurring+fixed guard matrix updated
+
+**Source files (UX fixes):**
+- `src/components/tasks/sections/WhenSection.jsx` — aria-pressed, role="group", recurring Fixed guard
+- `src/components/tasks/TaskEditForm.jsx` — client-side Fixed validation, saveError render
+- `src/hooks/useTaskState.js` — backend error string propagation
+
+---
+
+## Agent Iterations
+
+| Iteration | Agent | Findings | Outcome |
+|-----------|-------|----------|---------|
+| 1 | telly | 8 broken suites repaired, 5 coverage gaps filled | 1481 BE / 372 FE |
+| 1 | bird | 5 UX WARNs | WARN |
+| 2 | zoe | 3 BLOCKs + 4 WARNs | BLOCK |
+| 2 | bert | Fixed Z-1, Z-2, Z-3 BLOCKs | All tests pass |
+| 3 | zoe (re-run) | BLOCKs resolved; Z-4/Z-5/Z-6/Z-7 WARNs remain | WARN |
+| 3 | bert | Fixed Z-4, Z-5, Z-6, Z-7, B-1 residual, UX-1, UX-2, UX-3, UX-5 | 1481 BE / 398 FE |
+| 4 | bert | Fixed Z-5 semantic (flex_eve, load_), B-1 residual (redis), UX-2 banner fork | 1481 BE / 398 FE |
+| 4 | zoe (re-verify) | All resolved PASS | PASS |
+| 4 | bird (re-verify) | All resolved PASS | PASS |
+
+---
+
+## Deferred Items
+
+| Item | Reason | Approval |
+|------|--------|----------|
+| UX-4: TC-W001 Playwright viewport test for 5-button mode selector at 320px | Requires running browser — not available | User approved 2026-05-25 |
+
+---
+
+Signed: Oscar Test Phase — 2026-05-25

@@ -107,3 +107,87 @@ describe('Express App', () => {
     });
   });
 });
+
+// ── BLOCK 2: OAuth /oauth/authorize redirect_uri allowlist ─────────────────
+//
+// The route is only registered when NODE_ENV === 'development'.
+// We isolate each group to control NODE_ENV without leaking state.
+
+describe('OAuth /oauth/authorize redirect_uri allowlist', () => {
+  var savedNodeEnv;
+
+  beforeAll(() => {
+    savedNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    // Re-require app after setting env so the route is registered.
+    // Jest module cache: app was already loaded above; because this describe runs
+    // after the outer describe, the same app instance is used — which was loaded
+    // at module evaluation time. NODE_ENV was 'test' then (not 'development'),
+    // so the route was NOT registered. We need a fresh require.
+    jest.resetModules();
+  });
+
+  afterAll(() => {
+    process.env.NODE_ENV = savedNodeEnv;
+    jest.resetModules();
+  });
+
+  function getDevApp() {
+    // Each call gets a freshly-required app with current NODE_ENV.
+    return require('../../src/app');
+  }
+
+  test('redirect_uri with evil.com → 400 invalid_request', async () => {
+    process.env.NODE_ENV = 'development';
+    jest.resetModules();
+    const devApp = getDevApp();
+    const res = await request(devApp)
+      .get('/oauth/authorize')
+      .query({ redirect_uri: 'https://evil.com/callback', state: 'xyz' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_request');
+  });
+
+  test('redirect_uri with localhost → 302 redirect containing code', async () => {
+    process.env.NODE_ENV = 'development';
+    jest.resetModules();
+    const devApp = getDevApp();
+    const res = await request(devApp)
+      .get('/oauth/authorize')
+      .query({ redirect_uri: 'http://localhost/callback' });
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('http://localhost/callback');
+    expect(res.headers.location).toContain('code=');
+  });
+
+  test('redirect_uri that is not a valid URL → 400 invalid_request', async () => {
+    process.env.NODE_ENV = 'development';
+    jest.resetModules();
+    const devApp = getDevApp();
+    const res = await request(devApp)
+      .get('/oauth/authorize')
+      .query({ redirect_uri: 'not-a-url' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_request');
+  });
+
+  test('OAuth /oauth/authorize allowlist check is inactive when NODE_ENV is not development', async () => {
+    // The dev allowlist route (with evil.com rejection) is only registered in development.
+    // Outside development, createOAuthProxyRoutes still registers a redirect proxy to
+    // auth-service for /oauth/authorize, so the route returns 302, not 404.
+    // This test confirms the ALLOWLIST guard (evil.com check) is NOT active in non-dev.
+    process.env.NODE_ENV = 'test';
+    jest.resetModules();
+    const testApp = getDevApp();
+    // In non-dev, /oauth/authorize is the proxy redirect (302), not the
+    // allowlist handler. A request with evil.com redirect_uri is NOT rejected here.
+    const res = await request(testApp)
+      .get('/oauth/authorize')
+      .query({ redirect_uri: 'https://evil.com/callback', state: 'xyz' });
+    // Must not be the 400 from the dev allowlist (which is not registered)
+    expect(res.status).not.toBe(400);
+    // The proxy redirects to auth-service
+    expect(res.status).toBe(302);
+    process.env.NODE_ENV = 'development'; // restore for remaining tests in this describe
+  });
+});

@@ -2,7 +2,7 @@
 type: design
 service: juggler
 status: active
-last_updated: 2026-05-21
+last_updated: 2026-05-25
 tags:
   - type/design
   - service/juggler
@@ -14,7 +14,7 @@ tags:
 
 # Task Properties — Scheduler Reference
 
-**Last Updated:** 2026-05-21
+**Last Updated:** 2026-05-25
 
 How every property on a task object affects scheduling.
 
@@ -26,7 +26,7 @@ A task's scheduling constraint is set directly via the `placement_mode` column. 
 |------|-------|---------------------|
 | **Reminder** | `'reminder'` | Calendar marker. `dur=0`. Coexists with other tasks at same minute. No time-grid occupancy. |
 | **All Day** | `'all_day'` | Spans full day. Excluded from time-grid placement entirely (early return in buildItems). |
-| **Fixed** | `'fixed'` | Immovable at exact time (from `time` field). Blocks the slot. `date_pinned` tasks also treated as fixed-anchor. |
+| **Fixed** | `'fixed'` | Immovable at exact time (from `time` field). Blocks the slot. Sole immovability signal — `date_pinned` and `rigid` columns have been removed. Requires both `date` and `time`; server returns 400 if either is absent. User-selectable from the mode picker (5th option alongside Anytime / Time Window / Time Blocks / All Day). |
 | **Time Window** | `'time_window'` | Placed within ±timeFlex minutes of `preferredTimeMins`. Falls back to when-tags if window is degenerate. |
 | **Time Blocks** | `'time_blocks'` | Constrained to user-named `when` tag windows only (e.g. `morning`, `lunch`, `evening`). Uses `flexWhen` for retry. |
 | **Anytime** | `'anytime'` | No constraint. Placed wherever fits by priority/slack order. |
@@ -74,13 +74,13 @@ A task's scheduling constraint is set directly via the `placement_mode` column. 
 
 | Property | DB | JS | Type | Set By | Scheduler Effect |
 |----------|-----|-----|------|--------|-----------------|
-| Placement Mode | `placement_mode` | `placementMode` | enum (see Scheduling Modes table) | User/System | Primary scheduling constraint. Written by the UI directly. Never derived server-side. |
+| Placement Mode | `placement_mode` | `placementMode` | enum (see Scheduling Modes table) | User/System | Primary scheduling constraint and sole immovability signal. Written by the UI directly. `fixed` is now user-selectable from the mode picker — not just calendar-sync assigned. Requires `date` + `time` when set to `fixed`; server returns 400 if either is absent. Never derived server-side outside of `derivePlacementMode`. |
 | When | `when` | `when` | string | User | Comma-separated user-defined time block tags (e.g. `morning`, `lunch`, `evening`). Empty = all windows. Must NOT contain `'allday'` or `'fixed'` — these are now expressed via `placement_mode`. |
 | Day Req | `day_req` | `dayReq` | string | User | `any`, `weekday`, `weekend`, or comma-separated days (`M,W,F`). Checked via `canPlaceOnDate()`. |
-| ~~Rigid~~ | ~~`rigid`~~ | ~~`rigid`~~ | ~~bool~~ | ~~removed~~ | Removed in phase 11. The scheduler reads fixed-placement intent from `placement_mode === 'fixed'` (`placementMode === 'fixed'` in JS). Do not use `rigid`. |
+| ~~Rigid~~ | ~~`rigid`~~ | ~~`rigid`~~ | ~~bool~~ | ~~removed~~ | Removed in When-mode simplification. The scheduler reads fixed-placement intent solely from `placement_mode === 'fixed'`. Migration file `20260526000000_drop_pinned_and_rigid_columns.js` drops this column (pending execution). Do not use `rigid`. |
 | Flex When | `flex_when` | `flexWhen` | bool | User | If true and unplaced after Phase 3, retries with "anytime" windows. |
 | Time Flex | `time_flex` | `timeFlex` | int (minutes) | User | ± window around `preferredTimeMins` for recurring. Default 60m. Also controls past-recurring flex window for auto-skip. |
-| Preferred Time | `preferred_time_mins` | `preferredTimeMins` | int (mins from midnight) | User | Anchor time for rigid and time-window recurring. 420 = 7:00 AM. |
+| Preferred Time | `preferred_time_mins` | `preferredTimeMins` | int (mins from midnight) | User | Anchor time for time-window and time-blocks recurring modes. 420 = 7:00 AM. |
 | Location | `location` | `location` | JSON array | User | Task can only place in slots where location supports its requirements. |
 | Tools | `tools` | `tools` | JSON array | User | Location must have all required tools available. |
 | Travel Before | `travel_before` | `travelBefore` | int (minutes) | User | Reserved buffer before task start. Only first chunk of a split. |
@@ -98,7 +98,7 @@ A task's scheduling constraint is set directly via the `placement_mode` column. 
 
 | Property | DB | JS | Type | Set By | Scheduler Effect |
 |----------|-----|-----|------|--------|-----------------|
-| Date Pinned | `date_pinned` | `datePinned` | bool | User | If true + has time → immovable (Phase 0). Cleared by scheduler when it places the task. First evicted during pile-ups. |
+| ~~Date Pinned~~ | ~~`date_pinned`~~ | ~~`datePinned`~~ | ~~bool~~ | ~~removed~~ | Removed in When-mode simplification. Immovability is now expressed exclusively via `placement_mode = 'fixed'`. Migration file `20260526000000_drop_pinned_and_rigid_columns.js` drops this column (pending execution). |
 | Date (cached) | `date` | `date` | string (M/D) | Scheduler | Derived from `scheduled_at`. Non-anchored tasks get date reset to today each run. |
 | Day (cached) | `day` | `day` | string | Scheduler | Derived from `scheduled_at`. |
 | Time (cached) | `time` | `time` | string (h:mm AM) | Scheduler | Derived from `scheduled_at`. |

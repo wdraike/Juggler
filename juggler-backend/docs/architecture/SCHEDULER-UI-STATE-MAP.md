@@ -2,7 +2,7 @@
 type: design
 service: juggler
 status: active
-last_updated: 2026-05-19
+last_updated: 2026-05-25
 tags:
   - type/design
   - service/juggler
@@ -14,7 +14,7 @@ tags:
 
 # Scheduler UI → State Map
 
-**Last Updated:** 2026-05-19
+**Last Updated:** 2026-05-25
 
 Maps every UI control in the task editor (WhenSection) to the fields written to the DB
 and the resulting scheduler behavior. Verified against `WhenSection.jsx`, `TaskEditForm.jsx`,
@@ -24,38 +24,22 @@ and the resulting scheduler behavior. Verified against `WhenSection.jsx`, `TaskE
 
 ## Full pipeline: UI → scheduler
 
-```
-WhenSection.jsx / TaskEditForm.jsx
-  │
-  │  camelCase API body
-  │  { when, preferredTimeMins, timeFlex, rigid, recurring, ... }
-  ▼
-task.controller.js  taskToRow(fields, userId, tz, existingDbRow)
-  │
-  │  • maps camelCase → snake_case DB columns
-  │  • calls derivePlacementMode() if any PLACEMENT_TRIGGER_FIELD present
-  │  • ⚠️  existingDbRow MUST be passed so recurring/preferredTimeMins
-  │         read from cur fall back to the correct snake_case columns
-  │         (cur.preferredTimeMins → cur.preferred_time_mins)
-  ▼
-task_masters  (DB table — template / one-off fields)
-  when, placement_mode, preferred_time_mins, time_flex, rigid*, recurring
-  * rigid is a derived view column; not stored — inferred from placement_mode
+```mermaid
+flowchart TD
+    UI["WhenSection.jsx / TaskEditForm.jsx\ncamelCase API body\n{ when, preferredTimeMins, timeFlex,\n  placementMode, recurring, … }"]
+    CTRL["task.controller.js — taskToRow(fields, userId, tz, existingDbRow)\n• maps camelCase → snake_case DB columns\n• calls derivePlacementMode() if any PLACEMENT_TRIGGER_FIELD present\n⚠️  existingDbRow MUST be passed so recurring/preferredTimeMins\n   read from cur fall back to the correct snake_case columns\n   (cur.preferredTimeMins → cur.preferred_time_mins)"]
+    TM["task_masters (DB table — template / one-off fields)\nwhen, placement_mode, preferred_time_mins, time_flex, recurring"]
+    TI["task_instances (DB table — per-occurrence fields)\nscheduled_at, dur, status"]
+    TV["tasks_v (DB view — merges master + instance)\nexposes all columns below to application code"]
+    BUILD["unifiedScheduleV2.js — buildItems()\nreads tasks_v per user, builds one item object per task"]
+    PLACE["runSchedule.js — placeTask(item, …)\nplaces item into the day grid using item fields"]
 
-task_instances  (DB table — per-occurrence fields)
-  scheduled_at, date_pinned, dur, status
-  │
-  ▼
-tasks_v  (DB view — merges master + instance)
-  exposes all columns below to application code
-  │
-  ▼
-unifiedScheduleV2.js  buildItems()
-  reads tasks_v per user, builds one item object per task (see below)
-  │
-  ▼
-runSchedule.js  placeTask(item, ...)
-  places item into the day grid using item fields
+    UI --> CTRL
+    CTRL --> TM
+    TM --> TI
+    TI --> TV
+    TV --> BUILD
+    BUILD --> PLACE
 ```
 
 **Internal MCP path** (`src/mcp/tools/tasks.js` `update_task`):
@@ -73,10 +57,9 @@ and produces one item object per task. This is the complete set of fields the sc
 
 | `tasks_v` column (snake_case) | camelCase in code | Used for |
 |-------------------------------|-------------------|----------|
-| `placement_mode` | `placementMode` | driving all scheduler logic |
+| `placement_mode` | `placementMode` | driving all scheduler logic; sole immovability signal |
 | `dur` | `dur` | slot duration; `effectiveDuration()` applies split/time-remaining |
 | `when` | `when` | block-tag windows (FLEXIBLE / RECURRING_FLEXIBLE) |
-| `date_pinned` | `datePinned` | `isPinned` — clamps earliestIdx=latestIdx to anchorDate |
 | `flex_when` | `flexWhen` | fallback to any slot when named blocks are full |
 | `scheduled_at` (→ `date`/`time`) | `date`, `time` | `anchorDate`, `anchorMin` |
 | `preferred_time_mins` | `preferredTimeMins` | `anchorMin`, `windowLo/Hi` (RECURRING_WINDOW/RIGID) |
@@ -113,9 +96,8 @@ Every schedulable task becomes one item object. Fields used downstream by `place
   whenParts,          // parseWhen(when) — array of block-tag strings
   flexWhen,           // true → retry with anytime if named blocks full
 
-  // Fixed/pinned
-  isFixedWhen,        // placement_mode === FIXED
-  isPinned,           // !!datePinned — clamps to anchorDate, floats within day
+  // Fixed
+  isFixedWhen,        // placement_mode === FIXED — sole immovability signal; anchors exact time
   isGenerated,        // !!generated && !recurring — day-locks non-recurring generated tasks
 
   // Recurring
@@ -173,18 +155,19 @@ Every schedulable task becomes one item object. Fields used downstream by `place
 ## `placement_mode` derivation
 
 `derivePlacementMode()` runs on every write that touches a placement-trigger field
-(`marker`, `rigid`, `when`, `recurring`, `preferredTimeMins`, `placementMode`).
+(`marker`, `when`, `recurring`, `preferredTimeMins`, `placementMode`).
 First match wins:
 
 ```
 marker = true                                     → MARKER
-when includes 'fixed'                             → FIXED
-rigid = true  AND  recurring = false              → FIXED
-recurring AND rigid AND preferredTimeMins != null → RECURRING_RIGID
+placementMode = 'fixed'                           → FIXED
 recurring AND preferredTimeMins != null           → RECURRING_WINDOW
 recurring                                         → RECURRING_FLEXIBLE
 (default)                                         → FLEXIBLE
 ```
+
+> `rigid` and `when includes 'fixed'` were removed in the When-mode simplification.
+> `fixed` is now set explicitly by the client via `placementMode: 'fixed'`.
 
 ⚠️ The derive only re-runs when a trigger field is **written in that save**. A task whose
 `preferred_time_mins` was set via a direct DB write (or an older API path) may retain a
@@ -193,17 +176,17 @@ placement_mode" section at the bottom.
 
 ---
 
-## Two orthogonal lock axes
+## Single immovability axis
 
-| Field | Column | What it locks | Who sets it |
-|-------|--------|--------------|-------------|
-| `rigid` | `rigid` | **Time** — task's minute is immovable | Float/Fixed toggle (UI); ± Window "exact" for recurring Time Window |
-| `datePinned` | `date_pinned` | **Date** — scheduler won't move the task to a different day | Backend: auto-set when any task is created with an explicit date; drag-pin; calendar sync |
+`placement_mode === 'fixed'` is the sole immovability signal. The previous dual-axis model (`rigid` + `date_pinned`) has been removed.
 
-`rigid=true` on a non-recurring task triggers `derivePlacementMode → FIXED`.
-`datePinned=true` maps to `item.isPinned` in the scheduler → clamps `earliestIdx=latestIdx=anchorDate` in `findEarliestSlot`, but the task still floats within that day's eligible slots (it is NOT FIXED mode on its own).
+| Signal | Column | What it means | Who sets it |
+|--------|--------|--------------|-------------|
+| `placement_mode = 'fixed'` | `placement_mode` | Task is anchored to its exact `date` + `time`. Scheduler will not move it. | User (mode picker) or calendar sync |
 
-Calendar-synced tasks get both `when='fixed'` AND `datePinned=true` — the `when='fixed'` tag is what triggers FIXED in `derivePlacementMode`; `datePinned` additionally grays out the scheduling-mode controls in the UI so the user knows the calendar owns the time.
+Calendar-synced tasks receive `placement_mode = 'fixed'` from the sync adapters. The `isFixed` derived value in the frontend (`placementMode === 'fixed' && isCalManaged`) grays out the scheduling-mode controls only for calendar-managed tasks — Juggler-native fixed tasks display normally.
+
+The removed columns (`date_pinned` on `task_instances`, `rigid` and `prev_when` on `task_masters`) are dropped by migration `20260526000000_drop_pinned_and_rigid_columns.js` (pending execution after audit SQL confirms zero mismatched rows).
 
 ---
 
@@ -211,8 +194,8 @@ Calendar-synced tasks get both `when='fixed'` AND `datePinned=true` — the `whe
 
 | placement_mode       | Slot driver                        | Day-locked | If window/time passed today |
 |----------------------|------------------------------------|------------|----------------------------|
-| `FLEXIBLE`           | `whenParts` block tags             | if `isPinned`, else floats | reschedule forward |
-| `FIXED`              | `anchorMin` (exact, immovable)     | yes        | stays pinned               |
+| `FLEXIBLE`           | `whenParts` block tags             | floats across horizon      | reschedule forward |
+| `FIXED`              | `anchorMin` (exact, immovable)     | yes        | stays at anchored time     |
 | `MARKER`             | none — display only, dur=0         | yes        | n/a                        |
 | `RECURRING_FLEXIBLE` | `whenParts` block tags             | yes        | placed at latest slot      |
 | `RECURRING_WINDOW`   | `windowLo`…`windowHi`             | yes        | unplaced (reason='missed') |
@@ -226,7 +209,7 @@ Calendar-synced tasks get both `when='fixed'` AND `datePinned=true` — the `whe
 | `RECURRING_FLEXIBLE` | **authoritative** — drives block-window list       |
 | `RECURRING_WINDOW`   | **vestigial** — written by UI, ignored by scheduler|
 | `RECURRING_RIGID`    | **vestigial** — written by UI, ignored by scheduler|
-| `FIXED`              | carries `'fixed'` tag — triggers FIXED in derive   |
+| `FIXED`              | **not used** — `placement_mode='fixed'` is set directly by the client; `when` is not read by the scheduler in this mode |
 | `MARKER`             | carries `'allday'` or similar; allday items are filtered before placement |
 
 ---
@@ -234,40 +217,37 @@ Calendar-synced tasks get both `when='fixed'` AND `datePinned=true` — the `whe
 ## Non-recurring task UI controls
 
 Rendered when `!isRecurring && !marker`. All controls grayed out when `isFixed`
-(`datePinned = true` OR `when` includes `'fixed'`).
+(`placementMode === 'fixed' && isCalManaged` — calendar-managed tasks only).
 
-```
-Non-recurring When section
-│
-├── 🔀 Float / 📌 Fixed  toggle  (always visible, outside isFixed gate)
-│     rigid=false → float (default)
-│     rigid=true  → FIXED placement mode (time immovable)
-│
-└── Scheduling mode  ← grayed out when isFixed
-    │
-    ├── 🔄 Anytime
-    │     Writes: when='', datePinned=false
-    │     → placementMode = FLEXIBLE
-    │     Scheduler: any free slot; floats across horizon if not date-pinned
-    │
-    ├── ☀️ All Day
-    │     Writes: when='allday', split=false, travel=0, datePinned=false
-    │     → placementMode = FLEXIBLE  (derive sees no special trigger)
-    │     Scheduler: item.isAllDay=true → filtered out before placement;
-    │       task appears as full-day banner in calendar UI only (JUG-MED-10)
-    │
-    └── Preferred time windows  (block-tag buttons)
-          Writes: when='morning' / 'morning,evening' / etc.
-          → placementMode = FLEXIBLE
-          Scheduler: slot must fall inside one of the selected named blocks
-          │
-          ├── Strict (flexWhen=false, default)
-          │     Hard constraint — only placed inside selected blocks;
-          │     goes to unplaced if all matching windows full
-          │
-          └── ~ Flex toggle ON (flexWhen=true)
-                Tries selected blocks first; falls back to any available slot
-```
+The old Float/Fixed toggle and Pin/Pinned toggle have been removed. `fixed` is now the
+fifth option in the scheduling mode picker, available to all tasks.
+
+**Non-recurring When section** — Scheduling mode picker (grayed out when `isFixed`, calendar-managed tasks only)
+
+- **Anytime**
+  - Writes: `placementMode='anytime'`, `when=''`
+  - Derives: `placementMode = FLEXIBLE`
+  - Scheduler: any free slot
+
+- **Time Window**
+  - Writes: `placementMode='time_window'`, `preferredTimeMins`, `timeFlex`
+  - Derives: `placementMode = RECURRING_WINDOW` (recurring) or `FLEXIBLE` (one-off)
+
+- **Time Blocks**
+  - Writes: `placementMode='time_blocks'`, `when=selected block tags`
+  - Derives: `placementMode = RECURRING_FLEXIBLE` (recurring) or `FLEXIBLE` (one-off)
+
+- **All Day**
+  - Writes: `placementMode='all_day'`, `split=false`, `travel=0`
+  - Derives: `placementMode = ALL_DAY`
+  - Scheduler: `item.isAllDay=true` — filtered out before placement; task appears as full-day banner in calendar UI only
+
+- **Fixed** (5th option)
+  - Writes: `placementMode='fixed'`, `date`, `time` (both required)
+  - Derives: `placementMode = FIXED`
+  - Scheduler: anchored at exact time; blocks the slot
+  - Client validation: `date` + `time` must be set before save (400 if absent)
+  - Recurring + Fixed: not supported — `WhenSection` shows "not available" message with the four valid mode buttons as the exit path
 
 **Day requirement** (non-recurring, only when `!isFixed`):
 
@@ -285,60 +265,44 @@ Non-recurring When section
 Rendered when `recurring && !marker`. Three-way mutually exclusive mode picker.
 Clicking any mode clears the other mode's fields via `buildFields`.
 
-```
-Recurring task scheduling modes
-│
-├── 🔄 Anytime
-│     Writes: preferredTimeMins=null, timeFlex=null, when='', rigid=false
-│     → placementMode = RECURRING_FLEXIBLE
-│     Scheduler item: isWindowMode=false, anchorMin=null, whenParts=[]
-│       • searches all time blocks on anchorDate
-│       • day-locked to anchorDate
-│       • if scheduled time already past today → placed at latest available slot
-│
-├── ⏰ Time Window
-│     User inputs: Time (HH:MM), ± Window select
-│     Writes: preferredTimeMins = HH*60+MM
-│             timeFlex = N  (from ± Window select)
-│             when = single_tag  (vestigial — ignored by scheduler in this mode)
-│
-│     ⚠️  `when` IS written but IS IGNORED by the scheduler in RECURRING_WINDOW
-│         and RECURRING_RIGID modes. Slot selection uses ONLY preferredTimeMins
-│         and timeFlex. The stored tag ('morning' by default) is vestigial.
-│
-│     ± Window select → controls rigid and therefore placementMode:
-│     │
-│     ├── exact  (sets rigid=true, timeFlex=0)
-│     │     → placementMode = RECURRING_RIGID
-│     │     Scheduler item: isRigid=true, anchorMin=preferredTimeMins, isWindowMode=false
-│     │       • placed at exact preferredTimeMins minute
-│     │       • day-locked to anchorDate
-│     │       • if preferredTimeMins already past today → unplaced (reason='missed')
-│     │
-│     └── ±15m / ±30m / ±1hr / ±1.5hr / ±2hr  (rigid=false, timeFlex=N)
-│           → placementMode = RECURRING_WINDOW
-│           Scheduler item: isWindowMode=true, windowLo/Hi set, anchorMin=preferredTimeMins
-│             windowLo = max(DAY_START, preferredTimeMins − timeFlex)
-│             windowHi = min(DAY_END,   preferredTimeMins + timeFlex)
-│             • earliest free slot in [windowLo, windowHi]
-│             • day-locked to anchorDate
-│             • if windowHi ≤ nowMins (today) → isMissedWindow=true → unplaced (reason='missed')
-│             • if window inverted (outside schedulable day) → isWindowMode falls back to when-tag
-│
-│     Note: buildFields forces rigid=false when in Time Window mode with a
-│     time set. The ± Window "exact" option is the correct way to make a
-│     recurring task rigid — not the Float/Fixed button.
-│
-└── 📅 Time Blocks
-      Writes: preferredTimeMins=null, timeFlex=null
-              when = selected block tags (e.g. 'morning,lunch,afternoon,evening,night')
-              rigid=false
-      → placementMode = RECURRING_FLEXIBLE
-      Scheduler item: isWindowMode=false, anchorMin=null, whenParts=[...tags]
-        • slot must fall within one of the selected named blocks
-        • day-locked to anchorDate
-        • if scheduled time already past today → placed at latest available slot
-```
+**Recurring task scheduling modes** — three-way mutually exclusive mode picker; clicking any mode clears the other mode's fields via `buildFields`
+
+- **Anytime**
+  - Writes: `preferredTimeMins=null`, `timeFlex=null`, `when=''`
+  - Derives: `placementMode = RECURRING_FLEXIBLE`
+  - Scheduler item: `isWindowMode=false`, `anchorMin=null`, `whenParts=[]`
+    - searches all time blocks on `anchorDate`
+    - day-locked to `anchorDate`
+    - if scheduled time already past today: placed at latest available slot
+
+- **Time Window**
+  - User inputs: Time (HH:MM), +/- Window select
+  - Writes: `preferredTimeMins = HH*60+MM`, `timeFlex = N` (from +/- Window select), `when = single_tag` (vestigial — ignored by scheduler in this mode)
+  - Note: `when` IS written but IS IGNORED by the scheduler in `RECURRING_WINDOW` and `RECURRING_RIGID` modes. Slot selection uses ONLY `preferredTimeMins` and `timeFlex`. The stored tag (`'morning'` by default) is vestigial.
+  - +/- Window select controls `placementMode`:
+    - **exact** (`timeFlex=0`)
+      - Derives: `placementMode = RECURRING_RIGID`
+      - Scheduler item: `isRigid=true`, `anchorMin=preferredTimeMins`, `isWindowMode=false`
+        - placed at exact `preferredTimeMins` minute
+        - day-locked to `anchorDate`
+        - if `preferredTimeMins` already past today: unplaced (`reason='missed'`)
+    - **+/-15m / +/-30m / +/-1hr / +/-1.5hr / +/-2hr** (`timeFlex=N`)
+      - Derives: `placementMode = RECURRING_WINDOW`
+      - Scheduler item: `isWindowMode=true`, `windowLo/Hi` set, `anchorMin=preferredTimeMins`
+        - `windowLo = max(DAY_START, preferredTimeMins - timeFlex)`
+        - `windowHi = min(DAY_END, preferredTimeMins + timeFlex)`
+        - earliest free slot in `[windowLo, windowHi]`
+        - day-locked to `anchorDate`
+        - if `windowHi <= nowMins` (today): `isMissedWindow=true`, unplaced (`reason='missed'`)
+        - if window inverted (outside schedulable day): `isWindowMode` falls back to when-tag
+
+- **Time Blocks**
+  - Writes: `preferredTimeMins=null`, `timeFlex=null`, `when = selected block tags` (e.g. `'morning,lunch,afternoon,evening,night'`)
+  - Derives: `placementMode = RECURRING_FLEXIBLE`
+  - Scheduler item: `isWindowMode=false`, `anchorMin=null`, `whenParts=[...tags]`
+    - slot must fall within one of the selected named blocks
+    - day-locked to `anchorDate`
+    - if scheduled time already past today: placed at latest available slot
 
 ---
 

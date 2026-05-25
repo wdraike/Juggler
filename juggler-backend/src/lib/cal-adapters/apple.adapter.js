@@ -241,7 +241,6 @@ function applyEventToTaskFields(event, tz, currentTask) {
     var timeChanged = jd.time && jd.time !== currentTask?.time;
     if (dateChanged || timeChanged) {
       fields.placement_mode = PLACEMENT_MODES.FIXED;
-      if (dateChanged) fields.date_pinned = 1;
     }
   }
 

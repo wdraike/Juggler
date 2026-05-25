@@ -9,7 +9,7 @@ jest.mock('../src/db', () => {
   return mock;
 });
 
-const { rowToTask, taskToRow, buildSourceMap, TEMPLATE_FIELDS, validateTaskInput } = require('../src/controllers/task.controller');
+const { rowToTask, taskToRow, buildSourceMap, TEMPLATE_FIELDS, validateTaskInput, guardFixedCalendarWhen, safeParseJSON, updateTask } = require('../src/controllers/task.controller');
 const TZ = 'America/New_York';
 
 function makeRow(overrides) {
@@ -199,7 +199,7 @@ describe('rowToTask: return object', () => {
     expect(task).toHaveProperty('desiredAt');
     expect(task).toHaveProperty('preferredTimeMins');
     expect(task).toHaveProperty('unscheduled');
-    expect(task).toHaveProperty('datePinned');
+    expect(task).toHaveProperty('placementMode');
     expect(task).toHaveProperty('marker');
     expect(task).toHaveProperty('flexWhen');
   });
@@ -426,6 +426,216 @@ describe('validateTaskInput — anchor-dependent recur requires recurStart', () 
       recurStart: null
     });
     expect(errs.some(e => /cannot be cleared/i.test(e))).toBe(true);
+  });
+
+  test('cross-field: placementMode fixed without scheduling info → error', () => {
+    var errs = validateTaskInput({ placementMode: 'fixed' });
+    expect(errs.some(function(e) { return /placementMode "fixed" requires a date/i.test(e); })).toBe(true);
+  });
+
+  test('cross-field: placementMode fixed with date+time → no error', () => {
+    var errs = validateTaskInput({ placementMode: 'fixed', date: '2026-05-20', time: '10:00 AM' });
+    expect(errs.some(function(e) { return /placementMode "fixed"/i.test(e); })).toBe(false);
+  });
+
+  test('cross-field: placementMode fixed with scheduledAt → no error', () => {
+    var errs = validateTaskInput({ placementMode: 'fixed', scheduledAt: '2026-05-20T14:00:00Z' });
+    expect(errs.some(function(e) { return /placementMode "fixed"/i.test(e); })).toBe(false);
+  });
+
+  test('cross-field: placementMode fixed with date only (no time) → no error', () => {
+    // validateTaskInput uses OR: date | time | scheduledAt is sufficient.
+    // The stricter date+time requirement lives in the createTask/updateTask handlers,
+    // not in the shared validator. Date-only must pass validateTaskInput.
+    var errs = validateTaskInput({ placementMode: 'fixed', date: '2026-05-20' });
+    expect(errs.some(function(e) { return /placementMode "fixed"/i.test(e); })).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// taskToRow: placementMode — drag-to-fixed PATCH path
+// ═══════════════════════════════════════════════════════════════
+
+describe('taskToRow: placementMode drag-to-fixed', () => {
+  test('PATCH with placementMode:fixed writes placement_mode=fixed', () => {
+    var row = taskToRow({ placementMode: 'fixed', date: '2026-05-20', time: '2:00 PM' }, 'u1', TZ);
+    expect(row.placement_mode).toBe('fixed');
+  });
+
+  test('PATCH with placementMode:anytime writes placement_mode=anytime', () => {
+    var row = taskToRow({ placementMode: 'anytime' }, 'u1', TZ);
+    expect(row.placement_mode).toBe('anytime');
+  });
+
+  test('PATCH without placementMode leaves placement_mode undefined (no server derivation)', () => {
+    var row = taskToRow({ date: '2026-05-20', time: '2:00 PM' }, 'u1', TZ);
+    expect(row.placement_mode).toBeUndefined();
+  });
+
+  test('invalid placementMode is passed through by taskToRow (validateTaskInput catches it before taskToRow is called)', () => {
+    // validateTaskInput rejects unknown placementMode values before taskToRow is reached.
+    // taskToRow itself no longer silently coerces to 'anytime' — it assigns directly.
+    var row = taskToRow({ placementMode: 'bogus_mode' }, 'u1', TZ);
+    expect(row.placement_mode).toBe('bogus_mode');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// guardFixedCalendarWhen — placement_mode guard for cal-linked tasks
+// ═══════════════════════════════════════════════════════════════
+
+describe('guardFixedCalendarWhen', () => {
+  test('strips non-fixed placement_mode when task is calendar-linked', () => {
+    var row = { placement_mode: 'anytime' };
+    var existing = { gcal_event_id: 'gcal_abc', msft_event_id: null, apple_event_id: null };
+    guardFixedCalendarWhen(row, existing, {});
+    expect(row.placement_mode).toBeUndefined();
+  });
+
+  test('preserves placement_mode:fixed on calendar-linked task', () => {
+    var row = { placement_mode: 'fixed' };
+    var existing = { gcal_event_id: 'gcal_abc', msft_event_id: null, apple_event_id: null };
+    guardFixedCalendarWhen(row, existing, {});
+    expect(row.placement_mode).toBe('fixed');
+  });
+
+  test('does NOT guard when task has no calendar link', () => {
+    var row = { placement_mode: 'anytime' };
+    var existing = { gcal_event_id: null, msft_event_id: null, apple_event_id: null };
+    guardFixedCalendarWhen(row, existing, {});
+    expect(row.placement_mode).toBe('anytime');
+  });
+
+  test('does NOT guard when allowUnfix is set', () => {
+    var row = { placement_mode: 'anytime' };
+    var existing = { gcal_event_id: 'gcal_abc', msft_event_id: null, apple_event_id: null };
+    guardFixedCalendarWhen(row, existing, { allowUnfix: true });
+    expect(row.placement_mode).toBe('anytime');
+  });
+
+  test('guards on msft_event_id', () => {
+    var row = { placement_mode: 'time_blocks' };
+    var existing = { gcal_event_id: null, msft_event_id: 'msft_xyz', apple_event_id: null };
+    guardFixedCalendarWhen(row, existing, {});
+    expect(row.placement_mode).toBeUndefined();
+  });
+
+  test('guards on apple_event_id', () => {
+    var row = { placement_mode: 'time_window' };
+    var existing = { gcal_event_id: null, msft_event_id: null, apple_event_id: 'apple_123' };
+    guardFixedCalendarWhen(row, existing, {});
+    expect(row.placement_mode).toBeUndefined();
+  });
+
+  test('no-ops when guardTarget is null', () => {
+    var row = { placement_mode: 'anytime' };
+    guardFixedCalendarWhen(row, null, {});
+    expect(row.placement_mode).toBe('anytime');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// W-C2 HTTP — PATCH /api/tasks/:id with invalid placementMode → 400
+// ═══════════════════════════════════════════════════════════════
+
+describe('updateTask HTTP: invalid placementMode → 400 (W-C2 HTTP)', () => {
+  function makeUpdateReq(bodyOverrides) {
+    return {
+      user: { id: 'u1' },
+      headers: { 'x-timezone': 'America/New_York' },
+      params: { id: 'task-xyz' },
+      query: {},
+      planFeatures: null,
+      planId: 'free',
+      body: Object.assign({}, bodyOverrides)
+    };
+  }
+
+  function makeUpdateRes() {
+    var res = {
+      statusCode: 200,
+      _json: null,
+      status: function(code) { res.statusCode = code; return res; },
+      json: function(data) { res._json = data; return res; }
+    };
+    return res;
+  }
+
+  test('PATCH with totally_bogus placementMode → 400 with validation message', async () => {
+    var req = makeUpdateReq({ placementMode: 'totally_bogus' });
+    var res = makeUpdateRes();
+    await updateTask(req, res);
+    expect(res.statusCode).toBe(400);
+    expect(res._json.error).toMatch(/placementMode/);
+    expect(res._json.error).toMatch(/totally_bogus/);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// W-C2 unit — validateTaskInput rejects unknown placementMode
+// ═══════════════════════════════════════════════════════════════
+
+describe('validateTaskInput: unknown placementMode → validation error (W-C2)', () => {
+  test('unknown placementMode value produces error containing mode name', () => {
+    var errors = validateTaskInput({ placementMode: 'not_a_mode' });
+    expect(errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('placementMode')
+    ]));
+    expect(errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('not_a_mode')
+    ]));
+  });
+
+  test('known placementMode anytime produces no error', () => {
+    var errors = validateTaskInput({ placementMode: 'anytime' });
+    expect(errors.some(function(e) { return /placementMode/i.test(e); })).toBe(false);
+  });
+
+  test('known placementMode fixed with date produces no placementMode error', () => {
+    var errors = validateTaskInput({ placementMode: 'fixed', date: '2026-05-20' });
+    expect(errors.some(function(e) { return /not valid/i.test(e); })).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// W-W5 — safeParseJSON falsy-but-valid non-string passthrough
+// ═══════════════════════════════════════════════════════════════
+
+describe('safeParseJSON falsy passthrough (W-W5)', () => {
+  test('non-string value 0 passes through (not substituted by fallback)', () => {
+    // safeParseJSON(val, fallback): when val is not a string, returns val directly.
+    // 0 is falsy — if the guard were `if (!val) return fallback` this would fail.
+    var result = safeParseJSON(0, 'FALLBACK');
+    expect(result).toBe(0);
+    expect(result).not.toBe('FALLBACK');
+  });
+
+  test('false passes through (not substituted by fallback)', () => {
+    var result = safeParseJSON(false, 'FALLBACK');
+    expect(result).toBe(false);
+    expect(result).not.toBe('FALLBACK');
+  });
+
+  test('empty array [] passes through as-is (truthy, non-string)', () => {
+    var arr = [];
+    var result = safeParseJSON(arr, 'FALLBACK');
+    expect(result).toBe(arr);
+    expect(result).not.toBe('FALLBACK');
+  });
+
+  test('null returns fallback', () => {
+    var result = safeParseJSON(null, 'FALLBACK');
+    expect(result).toBe('FALLBACK');
+  });
+
+  test('undefined returns fallback', () => {
+    var result = safeParseJSON(undefined, 'FALLBACK');
+    expect(result).toBe('FALLBACK');
+  });
+
+  test('valid JSON string is parsed', () => {
+    var result = safeParseJSON('{"a":1}', null);
+    expect(result).toEqual({ a: 1 });
   });
 });
 

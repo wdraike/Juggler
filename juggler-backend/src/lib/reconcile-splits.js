@@ -140,7 +140,6 @@ async function reconcileOccurrence(trx, masterId, master, occOrd, existingRows) 
         dur: d2.dur,
         // Placement left null — scheduler assigns on next run
         scheduled_at: null,
-        date_pinned: template ? template.date_pinned : 0,
         status: '',
         time_remaining: null,
         unscheduled: null,

@@ -73,13 +73,13 @@ function hasSchedulingFields(row) {
 function checkCalSyncEditGuard(existing, body) {
   var origin = existing && existing.cal_sync_origin;
   if (!origin || origin === 'juggler') return null;
-  var allowed = ['status', 'notes', 'datePinned', '_dragPin', '_allowUnfix'];
+  var allowed = ['status', 'notes', '_allowUnfix'];
   var blocked = Object.keys(body)
     .filter(function(k) { return k !== 'id'; })
     .filter(function(k) { return allowed.indexOf(k) === -1; });
   if (blocked.length === 0) return null;
   return {
-    error: 'This task is synced from an external calendar. Only status, notes, datePinned, _dragPin, and _allowUnfix can be changed here.',
+    error: 'This task is synced from an external calendar. Only status and notes can be changed here.',
     code: 'CAL_SYNCED_READONLY',
     blockedFields: blocked
   };
@@ -125,7 +125,7 @@ async function expandToAllInstanceIds(userId, ids) {
 /** Safely parse a JSON string, returning fallback on any error. */
 function safeParseJSON(val, fallback) {
   if (val === null || val === undefined) return fallback;
-  if (typeof val !== 'string') return val || fallback;
+  if (typeof val !== 'string') return val;
   if (val === '' || val === 'null') return fallback;
   try { return JSON.parse(val); } catch { return fallback; }
 }
@@ -448,10 +448,8 @@ function rowToTask(row, timezone, sourceMap) {
     calSyncOrigin: row.cal_sync_origin || null,
     calEventUrl: row.cal_event_url || null,
     dependsOn: safeParseJSON(row.depends_on, []),
-    datePinned: !!row.date_pinned,
-    prevWhen: row.prev_when || null,
     marker: !!row.marker,
-    placementMode: row.placement_mode || PLACEMENT_MODES.ANYTIME,
+    placementMode: row.placement_mode,
     flexWhen: !!row.flex_when,
     travelBefore: row.travel_before != null ? row.travel_before : undefined,
     travelAfter: row.travel_after != null ? row.travel_after : undefined,
@@ -527,7 +525,6 @@ function taskToRow(task, userId, timezone, currentTask) {
   if (task.gcalEventId !== undefined) row.gcal_event_id = task.gcalEventId;
   if (task.msftEventId !== undefined) row.msft_event_id = task.msftEventId;
   if (task.dependsOn !== undefined) row.depends_on = JSON.stringify(task.dependsOn || []);
-  if (task.datePinned !== undefined) row.date_pinned = task.datePinned ? 1 : 0;
   if (task.flexWhen !== undefined) row.flex_when = task.flexWhen ? 1 : 0;
   if (task.travelBefore !== undefined) row.travel_before = task.travelBefore || null;
   else if (task.travel_before !== undefined) row.travel_before = task.travel_before || null;
@@ -584,8 +581,7 @@ function taskToRow(task, userId, timezone, currentTask) {
 
 
   if (task.placementMode !== undefined) {
-    var validModes = Object.values(PLACEMENT_MODES);
-    row.placement_mode = validModes.indexOf(task.placementMode) >= 0 ? task.placementMode : PLACEMENT_MODES.ANYTIME;
+    row.placement_mode = task.placementMode;
   }
 
   row.updated_at = new Date();
@@ -600,18 +596,20 @@ function taskToRow(task, userId, timezone, currentTask) {
 // guardTarget arg is the row whose `when` column will actually be written
 // (the task itself for normal updates, the source template for recurring
 // instance edits since TEMPLATE_FIELDS routes `when` there).
-// Guard: prevent unpinning calendar-linked tasks. Pinning is the mechanism
-// that keeps synced events immovable — removing it would let the scheduler
-// move calendar events. The broader ingested-task guard (#8) blocks most
-// field changes; this catches the specific case of date_pinned being cleared.
+// Guard: prevent stripping placement_mode off calendar-linked tasks.
+// Calendar adapters set placement_mode='fixed' to keep synced events immovable.
+// The broader ingested-task guard (#8) blocks most field changes; this catches
+// the specific case of a PATCH attempting to change or remove placement_mode
+// on a task that is still linked to a gcal/msft/apple calendar event.
 function guardFixedCalendarWhen(row, guardTarget, opts) {
   if (!guardTarget) return;
   if (opts && opts.allowUnfix) return;
   var isCalLinked = !!(guardTarget.gcal_event_id || guardTarget.msft_event_id || guardTarget.apple_event_id);
   if (!isCalLinked) return;
-  // Prevent clearing date_pinned on calendar-linked tasks
-  if (row.date_pinned === 0 || row.date_pinned === false) {
-    delete row.date_pinned;
+  // Prevent clearing placement_mode off calendar-linked tasks.
+  // Calendar adapters set placement_mode='fixed'; a PATCH must not strip it.
+  if (row.placement_mode && row.placement_mode !== 'fixed') {
+    delete row.placement_mode;
   }
 }
 
@@ -828,6 +826,13 @@ function validateTaskInput(body) {
       }
     }
   }
+  // placementMode enum validation
+  if (body.placementMode !== undefined) {
+    var validModes = Object.values(PLACEMENT_MODES);
+    if (validModes.indexOf(body.placementMode) < 0) {
+      errors.push('placementMode "' + body.placementMode + '" is not valid');
+    }
+  }
   // cross-field: fixed placementMode requires scheduling info
   if (body.placementMode === 'fixed') {
     var hasDate = body.date !== undefined && body.date !== null && body.date !== '';
@@ -857,18 +862,15 @@ async function createTask(req, res) {
     if (!row.id) row.id = uuidv7();
     if (!row.task_type) row.task_type = 'task';
     row.created_at = new Date();
-    // When a user explicitly provides a date/scheduledAt on creation, pin it
-    // so the scheduler doesn't drift the task to a different day.
-    var dateWasSet = req.body.date !== undefined || req.body.scheduledAt !== undefined;
-    if (dateWasSet && row.date_pinned === undefined) {
-      row.date_pinned = 1;
+    // Validate: fixed mode requires a date and time.
+    if (row.placement_mode === PLACEMENT_MODES.FIXED) {
+      var _hasDate = req.body.date !== undefined || req.body.scheduledAt !== undefined;
+      var _hasTime = req.body.time !== undefined || req.body.scheduledAt !== undefined;
+      if (!_hasDate || !_hasTime) {
+        return res.status(400).json({ error: 'Fixed mode requires a date and time.' });
+      }
     }
-    // When a user creates a task with an explicit time, fix its placement_mode
-    // so the scheduler anchors it at that time. User can change the mode later.
     var timeWasSet = req.body.time !== undefined || req.body.scheduledAt !== undefined;
-    if (timeWasSet && row.placement_mode === undefined) {
-      row.placement_mode = PLACEMENT_MODES.FIXED;
-    }
     // [FIX D-14] Server-side backstop: if client signals all-day but didn't set placement_mode, enforce it
     if (!timeWasSet && req.body.allDay === true && row.placement_mode === undefined) {
       row.placement_mode = PLACEMENT_MODES.ALL_DAY;
@@ -930,7 +932,6 @@ async function updateTask(req, res) {
       || req.body.recurStart !== undefined
       || req.body.recurEnd !== undefined
       || req.body.when !== undefined
-      || req.body._dragPin
       || req.body.anchorDate
       || req.body._allowUnfix
       // allDay affects `when` derivation — must hit the complex path for D-14 backstop
@@ -957,10 +958,6 @@ async function updateTask(req, res) {
       delete fastRow.user_id;
       delete fastRow.created_at;
       delete fastRow._pendingTimeOnly;
-      if ((req.body.date !== undefined || req.body.scheduledAt !== undefined)
-          && fastRow.date_pinned === undefined) {
-        fastRow.date_pinned = 1;
-      }
       fastRow.updated_at = db.fn.now();
 
       if (!fastExisting) {
@@ -985,14 +982,6 @@ async function updateTask(req, res) {
       if (fastExisting.recurring || fastExisting.task_type === 'recurring_template'
           || fastExisting.task_type === 'recurring_instance') {
         delete fastRow.depends_on;
-      }
-
-      // Normalize: if clearing date_pinned without explicitly changing when,
-      // compact and trim the when value so the scheduler sees a clean list.
-      // ('fixed' is no longer stored in `when` after the enum redesign.)
-      if (fastRow.date_pinned === 0 && req.body.when === undefined) {
-        var _exWhen = fastExisting.when || '';
-        fastRow.when = _exWhen.split(',').map(function(t) { return t.trim(); }).filter(Boolean).join(',');
       }
 
       // Direct write: master + instance fields routed by the helper.
@@ -1089,7 +1078,7 @@ async function updateTask(req, res) {
     // Guard: don't let calendar-linked fixed tasks silently lose their 'fixed'
     // tag. For recurring instances, `when` is routed to the source template,
     // so check the template's calendar linkage.
-    if (row.when !== undefined && !req.body._dragPin) {
+    if (row.when !== undefined) {
       var _guardOpts = { allowUnfix: !!req.body._allowUnfix };
       if ((existing.task_type || 'task') === 'recurring_instance' && existing.source_id) {
         var _srcTmpl = await fetchTaskWithEventIds(db, existing.source_id, req.user.id);
@@ -1101,30 +1090,18 @@ async function updateTask(req, res) {
 
     if (req.body.project) await ensureProject(req.user.id, req.body.project);
 
-    // When the user explicitly sets a date/scheduledAt, pin it so the scheduler honors it.
-    var dateWasSet = req.body.date !== undefined || req.body.scheduledAt !== undefined;
-    var timeWasSet = req.body.time !== undefined || req.body.scheduledAt !== undefined;
-    if (dateWasSet && row.date_pinned === undefined) {
-      row.date_pinned = 1;
+    // Validate: fixed mode requires a date and time.
+    if (row.placement_mode === PLACEMENT_MODES.FIXED) {
+      var _hasDate = req.body.date !== undefined || req.body.scheduledAt !== undefined || !!(existing && (existing.date || existing.scheduled_at));
+      var _hasTime = req.body.time !== undefined || req.body.scheduledAt !== undefined || !!(existing && existing.time);
+      if (!_hasDate || !_hasTime) {
+        return res.status(400).json({ error: 'Fixed mode requires a date and time.' });
+      }
     }
+    var timeWasSet = req.body.time !== undefined || req.body.scheduledAt !== undefined;
     // [FIX D-14] Server-side backstop for all-day tasks in update path
     if (!timeWasSet && req.body.allDay === true && row.placement_mode === undefined) {
       row.placement_mode = PLACEMENT_MODES.ALL_DAY;
-    }
-    // Drag-pin: user dragged this task to a new time on the calendar.
-    // Pin it so the scheduler respects the user's placement. The when-tags
-    // stay unchanged — pinning is handled by datePinned, not when:'fixed'.
-    if (req.body._dragPin) {
-      row.date_pinned = 1;
-      // Encode current placement_mode + when into prev_when so unpinTask can
-      // restore the exact pre-drag state. Format: 'mode:<placement_mode>:<when>'
-      // Only write prev_when when the task isn't already drag-pinned (i.e., don't
-      // overwrite a previous snapshot with a re-drag's snapshot of the pinned state).
-      if (!existing.date_pinned) {
-        var preDragMode = existing.placement_mode || PLACEMENT_MODES.ANYTIME;
-        var preDragWhen = existing.when || '';
-        row.prev_when = JSON.stringify({ mode: preDragMode, when: preDragWhen });
-      }
     }
 
     // Lock check: if scheduling lock is held, split and queue scheduling fields
@@ -1174,18 +1151,12 @@ async function updateTask(req, res) {
     await db.transaction(async function(trx) {
       if (taskType === 'recurring_instance' && existing.source_id) {
         // Route template fields to the source, keep instance fields on this row.
-        // Exception: drag-pin sets when='fixed' on the INSTANCE (not the template)
-        // so this specific instance is pinned without affecting other instances.
-        var isDragPin = !!req.body._dragPin;
         var templateUpdate = {};
         var instanceUpdate = {};
 
         Object.keys(row).forEach(function(k) {
           if (k === 'updated_at') return; // added to both
-          // For drag-pin: when + prev_when stay on instance, not routed to template
-          if (isDragPin && (k === 'when' || k === 'prev_when')) {
-            instanceUpdate[k] = row[k];
-          } else if (TEMPLATE_FIELDS.indexOf(k) >= 0) {
+          if (TEMPLATE_FIELDS.indexOf(k) >= 0) {
             templateUpdate[k] = row[k];
           } else {
             instanceUpdate[k] = row[k];
@@ -1251,7 +1222,6 @@ async function updateTask(req, res) {
                 dur: existing.dur || 30,
                 status: existing.status || '',
                 scheduled_at: existing.scheduled_at || null,
-                date_pinned: 0,
                 overdue: 0,
                 generated: 0,
                 created_at: trx.fn.now(),
@@ -2015,13 +1985,6 @@ async function batchUpdateTasks(req, res) {
         delete qRow.created_at;
         delete qRow._pendingTimeOnly;
 
-        // Normalize: clearing date_pinned without changing when → compact the when value.
-        // ('fixed' is no longer stored in `when` after the enum redesign.)
-        if (qRow.date_pinned === 0 && qFields.when === undefined && qExisting) {
-          var _qExWhen = qExisting.when || '';
-          qRow.when = _qExWhen.split(',').map(function(t) { return t.trim(); }).filter(Boolean).join(',');
-        }
-
         // Guard: prevent unpinning calendar-linked tasks during scheduler lock
         guardFixedCalendarWhen(qRow, qExisting, { allowUnfix: !!qFields._allowUnfix });
 
@@ -2159,13 +2122,6 @@ async function batchUpdateTasks(req, res) {
               delete row.depends_on;
             }
 
-            // Normalize: clearing date_pinned without changing when → compact the when value.
-            // ('fixed' is no longer stored in `when` after the enum redesign.)
-            if (row.date_pinned === 0 && fields.when === undefined && existing) {
-              var _exWhen = existing.when || '';
-              row.when = _exWhen.split(',').map(function(t) { return t.trim(); }).filter(Boolean).join(',');
-            }
-
             var taskType = existing ? (existing.task_type || 'task') : 'task';
 
             // Never set status on a recurring task template — status belongs on instances only
@@ -2175,7 +2131,7 @@ async function batchUpdateTasks(req, res) {
 
             // Guard: don't let calendar-linked fixed tasks lose their 'fixed' tag.
             // Recurring instances route `when` to the source template, so check it.
-            if (row.when !== undefined && !update._dragPin && existing) {
+            if (row.when !== undefined && existing) {
               var _bGuardOpts = { allowUnfix: !!update._allowUnfix };
               if (taskType === 'recurring_instance' && existing.source_id) {
                 guardFixedCalendarWhen(row, templateById[existing.source_id], _bGuardOpts);
@@ -2384,92 +2340,6 @@ async function reEnableTask(req, res) {
 }
 
 /**
- * PUT /api/tasks/:id/unpin — Unpin a drag-pinned task
- *
- * For regular tasks: restores prev_when, clears date_pinned.
- * For recurring instances: deletes the instance so the scheduler regenerates it.
- */
-async function unpinTask(req, res) {
-  try {
-    var existing = await fetchTaskWithEventIds(db, req.params.id, req.user.id);
-
-    if (!existing) return res.status(404).json({ error: 'Task not found' });
-
-    // Guard: externally-ingested tasks must not be unpinned — the source calendar owns placement.
-    if (existing.cal_sync_origin && existing.cal_sync_origin !== 'juggler') {
-      return res.status(403).json({
-        error: 'This task is synced from an external calendar. Unpinning is not allowed here.',
-        code: 'CAL_SYNCED_READONLY'
-      });
-    }
-
-    var taskType = existing.task_type || 'task';
-
-    if (taskType === 'recurring_instance' && existing.source_id) {
-      // Recurring instance: delete it so the scheduler regenerates from template
-      await tasksWrite.deleteTaskById(db, req.params.id, req.user.id);
-
-      enqueueScheduleRun(req.user.id, 'api:unpinTask:delete', [req.params.id]);
-      return res.json({ success: true, action: 'deleted', message: 'Instance deleted — scheduler will regenerate from template' });
-    }
-
-    // Regular task: restore previous scheduling mode
-    var restoredMode = PLACEMENT_MODES.ANYTIME;
-    var restoredWhen = '';
-    if (existing.prev_when) {
-      if (existing.prev_when.startsWith('{')) {
-        // New JSON format written by drag-pin: { mode, when }
-        try {
-          var parsed = JSON.parse(existing.prev_when);
-          var candidateMode = parsed.mode;
-          var validModes = Object.values(PLACEMENT_MODES);
-          if (candidateMode && validModes.indexOf(candidateMode) >= 0) {
-            restoredMode = candidateMode;
-            restoredWhen = parsed.when || '';
-          }
-          // If mode key is absent or invalid, leave restoredMode=ANYTIME and
-          // restoredWhen='' — a non-empty when with anytime mode is inconsistent.
-        } catch (e) {
-          // malformed JSON — fall through with defaults (anytime, empty when)
-        }
-      } else if (existing.prev_when.startsWith('mode:')) {
-        // Old colon format (transitional — written before JSON migration; keep for safety)
-        var parts = existing.prev_when.split(':');
-        var candidateMode = parts[1] || '';
-        restoredWhen = parts.slice(2).join(':');
-        var validModes = Object.values(PLACEMENT_MODES);
-        if (candidateMode && validModes.indexOf(candidateMode) >= 0) {
-          restoredMode = candidateMode;
-        }
-      } else {
-        // Legacy bare string (block tags or empty) — written before mode-prefix format
-        restoredWhen = existing.prev_when;
-        var restoredTags = restoredWhen.split(',').map(function(t) { return t.trim(); }).filter(Boolean);
-        var blockTags = ['morning', 'lunch', 'afternoon', 'evening', 'night'];
-        var allBlock = restoredTags.length > 0 && restoredTags.every(function(t) { return blockTags.indexOf(t) >= 0; });
-        restoredMode = allBlock ? PLACEMENT_MODES.TIME_BLOCKS : PLACEMENT_MODES.ANYTIME;
-      }
-    }
-    var updates = {
-      when: restoredWhen,
-      prev_when: null,
-      date_pinned: 0,
-      placement_mode: restoredMode,
-      updated_at: db.fn.now()
-    };
-
-    await tasksWrite.updateTaskById(db, req.params.id, updates, req.user.id);
-
-    await cache.invalidateTasks(req.user.id);
-    enqueueScheduleRun(req.user.id, 'api:unpinTask', [req.params.id]);
-    res.json({ success: true, action: 'unpinned', when: updates.when });
-  } catch (error) {
-    console.error('Unpin error:', error);
-    res.status(500).json({ error: 'Failed to unpin task' });
-  }
-}
-
-/**
  * POST /api/tasks/:id/take-ownership
  *
  * Detaches a provider-origin task from its calendar link so Juggler owns
@@ -2489,9 +2359,9 @@ async function takeOwnership(req, res) {
         .where({ task_id: id, user_id: req.user.id, status: 'active' })
         .update({ status: 'deleted_local', synced_at: trx.fn.now() });
 
-      // Clear event IDs and clear date_pinned so the scheduler can place this
-      // task freely. Guard is bypassed here because we just removed the cal
-      // link in the same transaction.
+      // Clear event IDs. Guard is bypassed here because we just removed the
+      // cal link in the same transaction. Also set placement_mode to anytime
+      // so the scheduler can place this task freely now that the cal owns it no more.
       var clearFields = { updated_at: trx.fn.now() };
       if (task.gcal_event_id) clearFields.gcal_event_id = null;
       if (task.msft_event_id) clearFields.msft_event_id = null;
@@ -2499,7 +2369,7 @@ async function takeOwnership(req, res) {
       var currentWhen = task.when || '';
       var newWhen = currentWhen.split(',').map(function(t) { return t.trim(); }).filter(Boolean).join(',');
       clearFields.when = newWhen;
-      clearFields.date_pinned = 0;
+      clearFields.placement_mode = PLACEMENT_MODES.ANYTIME;
       await tasksWrite.updateTaskById(trx, id, clearFields, req.user.id);
     });
 
@@ -2530,7 +2400,6 @@ module.exports = {
   batchUpdateTasks,
   getDisabledTasks,
   reEnableTask,
-  unpinTask,
   takeOwnership,
   rowToTask,
   taskToRow,

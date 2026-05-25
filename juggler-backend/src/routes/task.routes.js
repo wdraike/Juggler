@@ -79,7 +79,6 @@ router.post('/batch', checkBatchTaskLimits, taskController.batchCreateTasks);
 router.put('/batch', taskController.batchUpdateTasks);
 router.put('/:id/status', taskController.updateTaskStatus);
 router.put('/:id/re-enable', taskController.reEnableTask);
-router.put('/:id/unpin', taskController.unpinTask);
 router.post('/:id/take-ownership', taskController.takeOwnership);
 router.put('/:id', validate(taskUpdateSchema), taskController.updateTask);
 router.delete('/:id', taskController.deleteTask);

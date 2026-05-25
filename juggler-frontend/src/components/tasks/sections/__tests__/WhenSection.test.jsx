@@ -15,7 +15,7 @@ var BASE = {
   recurStart: '', recurEnd: '',
   deadline: '', startAfter: '', split: false, splitMin: 15,
   travelBefore: 0, travelAfter: 0, marker: false, flexWhen: false,
-  datePinned: false, dayReq: 'any', when: '', timeRemaining: '',
+  dayReq: 'any', when: '', timeRemaining: '',
   taskTz: 'America/New_York',
   isCreate: false, isMobile: false, scheduleTemplates: [], templateDefaults: {},
   collapse: { when_recurrence: false, when_constraints: false },
@@ -33,7 +33,7 @@ var COMMON_HANDLERS = {
   onDeadlineChange: noop, onStartAfterChange: noop,
   onSplitChange: noop, onSplitMinChange: noop,
   onTravelBeforeChange: noop, onTravelAfterChange: noop,
-  onMarkerChange: noop, onFlexWhenChange: noop, onDatePinnedChange: noop,
+  onMarkerChange: noop, onFlexWhenChange: noop,
   onDayReqChange: noop, onWhenChange: noop, onTimeRemainingChange: noop,
   onChangeTz: noop, toggleCollapse: noop, onModeChange: noop,
   onHasPreferredTimeChange: noop, onRecurUnitChange: noop, onRecurFillPolicyChange: noop,
@@ -313,41 +313,52 @@ it('rolling mode hides fill policy', () => {
   expect(screen.queryByText(/Backfill missed/)).not.toBeInTheDocument();
 });
 
-// --- datePinned toggle ---
+// --- Fixed mode button ---
 
-it('shows Pin button when datePinned is false', () => {
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} />);
-  expect(screen.getByText('📌 Pin')).toBeInTheDocument();
+it('shows Fixed button in the mode selector', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} placementMode="anytime" />);
+  expect(screen.getByTitle('Exact date and time — immovable')).toBeInTheDocument();
 });
 
-it('shows Pinned button when datePinned is true', () => {
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={true} />);
-  expect(screen.getByText('📍 Pinned')).toBeInTheDocument();
+it('Fixed button appears active when placementMode is fixed (non-cal-linked)', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} placementMode="fixed" task={{}} />);
+  // The Fixed button should be rendered with active toggle style (font-weight 600)
+  var btn = screen.getByTitle('Exact date and time — immovable');
+  expect(btn).toBeInTheDocument();
+  expect(btn.style.fontWeight).toBe('600');
 });
 
-it('clicking Pin button calls onDatePinnedChange with true', () => {
+it('clicking Fixed button calls onModeChange with fixed', () => {
   var called = null;
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false}
-    onDatePinnedChange={function(v) { called = v; }}
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} placementMode="anytime"
+    onModeChange={function(v) { called = v; }}
   />);
-  fireEvent.click(screen.getByText('📌 Pin'));
-  expect(called).toBe(true);
+  fireEvent.click(screen.getByTitle('Exact date and time — immovable'));
+  expect(called).toBe('fixed');
 });
 
-it('clicking Pinned button calls onDatePinnedChange with false', () => {
-  var called = null;
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={true}
-    onDatePinnedChange={function(v) { called = v; }}
-  />);
-  fireEvent.click(screen.getByText('📍 Pinned'));
-  expect(called).toBe(false);
+it('Pin button no longer present in date row', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} placementMode="anytime" />);
+  expect(screen.queryByText('📌 Pin')).not.toBeInTheDocument();
+  expect(screen.queryByText('📍 Pinned')).not.toBeInTheDocument();
+});
+
+it('Fixed/Float rigid toggle no longer present in time row', () => {
+  // The old rigid toggle ('📌 Fixed' / '🔀 Float') next to the timezone selector is gone.
+  // '📌 Fixed' now refers only to the mode-selector button (title="Exact date and time — immovable").
+  // Verify '🔀 Float' (the rigid-toggle's float label) is absent.
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} placementMode="time_window" />);
+  expect(screen.queryByText('🔀 Float')).not.toBeInTheDocument();
+  // '📌 Fixed' IS present — it's the new mode-selector button, not the old rigid toggle.
+  expect(screen.getByTitle('Exact date and time — immovable')).toBeInTheDocument();
 });
 
 // --- lockout explanation banner ---
 
-it('shows pinned lockout banner when datePinned is true', () => {
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={true} placementMode="anytime" />);
-  expect(screen.getByText(/Date is pinned/)).toBeInTheDocument();
+it('no "Date is pinned" banner — datePinned UI has been removed', () => {
+  // datePinned is no longer a prop — the banner case for it is gone
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} placementMode="anytime" />);
+  expect(screen.queryByText(/Date is pinned/)).not.toBeInTheDocument();
 });
 
 it('shows calendar-managed lockout banner when placementMode is fixed and task is calendar-linked', () => {

@@ -294,7 +294,10 @@ export default function useTaskState() {
       return true;
     } catch (error) {
       console.error('Save failed:', error);
-      return false;
+      // Propagate the server's error message string if present so the caller
+      // can surface it in the UI. The backend returns { error: '...' } on 400.
+      var serverMsg = error && error.response && error.response.data && error.response.data.error;
+      return serverMsg || false;
     } finally {
       setSaving(false);
     }

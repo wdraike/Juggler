@@ -2,7 +2,7 @@
 type: design
 service: juggler
 status: active
-last_updated: 2026-05-21
+last_updated: 2026-05-25
 tags:
   - type/design
   - service/juggler
@@ -26,8 +26,8 @@ tags:
 This is the unifying rule. Everything else (phase order, comparators, past-due boosts, rollback) exists to serve it.
 
 ### Severity hierarchy (most → least constrained)
-1. **Pinned** — user locked to a specific date/time. Immovable.
-2. **Overdue** — past its deadline (or past its scheduled day for rigid recurrings). Must place ASAP; slack=0.
+1. **Fixed** (`placement_mode = 'fixed'`) — immovable; scheduler never moves these.
+2. **Overdue** — past its deadline (or past its scheduled day for fixed-time recurrings). Must place ASAP; slack=0.
 3. **Explicit or implied deadline** — one-offs with `deadline`, chain members with `fauxDeadline`, recurring instances (cycle window's end = implied deadline). Sorted by slack within this band.
 4. **Free / backlog** — no deadline, no deps. Fills what's left.
 
@@ -43,7 +43,7 @@ These resolve remaining ambiguity when the severity hierarchy alone isn't decisi
 
 1. **Deadlines drive the schedule; priority is a tie-breaker.** A P3 task due Thursday beats a P1 task with no deadline. Priority only decides the outcome when deadlines (or slack) are equivalent.
 2. **Past-due tasks are promoted to P1 and rescheduled aggressively.** One-off past-due tasks get P1 boost and place in any available window. **Recurring past-due instances do NOT roll forward to the next day** — if they can't fit their original day, they go to the unscheduled/issues list and the user must mark them done or skipped. Split tasks place what fits and log the rest. See §8 for full rules.
-3. **Overlaps are prevented, not resolved.** The occupancy grid blocks already-placed minutes. Each phase places around what previous phases committed. Pinned tasks are placed first (Phase 0) and all subsequent phases respect their slots.
+3. **Overlaps are prevented, not resolved.** The occupancy grid blocks already-placed minutes. Each phase places around what previous phases committed. Fixed tasks are placed first (Phase 0) and all subsequent phases respect their slots.
 
 ---
 
@@ -61,7 +61,7 @@ These resolve remaining ambiguity when the severity hierarchy alone isn't decisi
 - If a recurring task has split enabled (e.g., 60 min ÷ 30 min chunks = 2), materialize one row per chunk per occurrence (via `reconcile-splits.js`)
 
 ### 3. Classify each task by how it can move
-- **Pinned** — user set `date_pinned=1` with a specific time. Never moved by the scheduler. Calendar-synced tasks are also pinned.
+- **Fixed** — task has `placement_mode = 'fixed'` with a specific time. Never moved by the scheduler. Both user-set fixed tasks and calendar-synced tasks use this mode.
 - **Markers** — reminders at a time that don't occupy a slot. Never moved
 - **Recurring instances** — see 4b for per-frequency placement rules
 - **Deadline tasks** — anything with `due_at`. Past-due (due_at < today) is promoted here: `due_at` is remapped to today and priority is bumped to P1 for tie-breaking
@@ -73,7 +73,7 @@ These resolve remaining ambiguity when the severity hierarchy alone isn't decisi
 
 > **Implementation note:** in code (`src/scheduler/unifiedSchedule.js`), these
 > sub-phases are called Phase 0 / Phase 1 / Phase 2 / Phase 3+4 / Phase 5:
-> 4a → Phase 0 (pinned + markers), 4b → Phase 1 (recurring, slack-sorted),
+> 4a → Phase 0 (fixed + markers), 4b → Phase 1 (recurring, slack-sorted),
 > 4c → Phase 2 (deadline work — slack-based forward placement),
 > 4d → Phase 3 (priority fill) + Phase 4 (flexWhen relaxation),
 > 4e → Phase 5 (recurring rescue).
@@ -83,7 +83,7 @@ These resolve remaining ambiguity when the severity hierarchy alone isn't decisi
 
 - `placement_mode = 'all_day'` → task is excluded from the time grid entirely (early return). Shown on calendar header row; does not consume minute-level capacity.
 - `placement_mode = 'reminder'` → placed at its exact time with no occupancy. Multiple reminders at the same minute do not conflict.
-- `placement_mode = 'fixed'` → anchored at the exact `time` value. `isRigid=true`. Blocks the slot. Also applies to tasks with `date_pinned=1`.
+- `placement_mode = 'fixed'` → anchored at the exact `time` value. `isFixedWhen=true`. Blocks the slot. This is the sole immovability signal — `date_pinned` has been removed.
 - `placement_mode = 'time_window'` → placed within ±timeFlex minutes of `preferredTimeMins`. Falls back to when-tag windows if the window is degenerate.
 - `placement_mode = 'time_blocks'` → constrained to user-defined `when` tag windows (e.g. `morning`, `lunch`, `evening`). Uses `flexWhen` for retry when windows are full.
 - `placement_mode = 'anytime'` → no time constraint. Placed wherever fits by priority/slack order (recurring tasks with this mode can use `preferLatestSlot` when their anchor has already passed today).
@@ -136,7 +136,7 @@ The scheduler prevents overlaps during placement — the occupancy grid (`dayOcc
 
 Each phase respects what previous phases placed:
 
-- Phase 0 locks pinned/marker slots
+- Phase 0 locks fixed/marker slots
 - Phase 1 recurring fills around Phase 0
 - Phase 2 deadline tasks fill around Phase 0+1
 - Phase 3 free tasks fill remaining gaps
@@ -146,7 +146,7 @@ Split chunks stay as separate DB rows. Adjacent chunks of the same task are visu
 
 ### 6. Persist
 - Batch-update every placed task's `scheduled_at`, `date`, `day`, `time`, and `dur`
-- Clear `date_pinned` on any task the scheduler placed (the scheduler moved it, so the old pin is stale)
+- Fixed tasks (`placement_mode = 'fixed'`) are never moved by the scheduler; their `scheduled_at` is preserved as-is
 - Set `unscheduled=1` on unplaced tasks (preserves `scheduled_at` for "was supposed to be at…" display)
 - INSERT new in-memory chunks that were placed (with full date/day/time fields)
 - All inside a single transaction per user
@@ -388,7 +388,7 @@ Impossible constraint. Detected during window computation. Task flagged with `_u
 | Per-chain sequential processing ("Phase 2 pull-forward by priority tier") | **Global backward sweep across all chain members**, ordered by `target_finish`. |
 | Forward pull as a uniform chain shift | **Per-member reverse-topo pull**, so diamond-shaped DAG chains tighten internal gaps correctly. |
 | Past-due as a separate rescue phase | Folded into classification: past-due = due today + priority bumped to P1. |
-| Pinned tasks never evicted | Pinned tasks dropped **first** during pile-up resolution (5b). |
+| Fixed tasks never evicted | Fixed-mode tasks dropped **first** during pile-up resolution (5b). |
 | "If a prereq can't place, continue the chain" | **Roll back the consumer** (and its transitive ancestors) to unscheduled. Leaving a tail placed with its prereq unscheduled creates false confidence. |
 | Global backward sweep + forward pull (multi-pass convergence) | **Slack-based left-to-right placement.** Single forward pass sorted by constraint-aware slack. Chain rollback replaces backward sweep for capacity-constrained chains. |
 | Past-due reclassified to unconstrained pool | **Past-due stays in constrained pool** with slack=0, P1 boost. Overflow pass places ASAP with no deadline ceiling. |
@@ -408,8 +408,8 @@ Tests that prove each guiding principle is honored:
 ### Principle 2 — past-due = due today + P1
 - **Test:** Task due yesterday, own priority P3. Today has a slot contested with on-time P1 task also due today. Expected: both are effective-P1-due-today; longer-duration wins.
 
-### Principle 3 — pinned tasks dropped first
-- **Test:** Day over-committed with a pinned P2 and two on-time P1 chain members. Expected: pinned P2 evicted; both P1 chain members stay.
+### Principle 3 — fixed task eviction first
+- **Test:** Day over-committed with a fixed-mode P2 and two on-time P1 chain members. Expected: fixed-mode P2 evicted; both P1 chain members stay.
 
 ### Algorithmic invariants
 - **Slack ordering:** two chains, one due Friday, one due Thursday. Expected: Thursday chain has lower slack → placed first. Friday chain fills around Thursday's commitments.
@@ -432,7 +432,7 @@ Tests that prove each guiding principle is honored:
 | File | Change |
 |---|---|
 | `src/scheduler/unifiedSchedule.js` | Rewrite the constrained-placement section to implement slack-based left-to-right placement with chain rollback |
-| `src/scheduler/runSchedule.js` | No change — already clears `date_pinned` on placed tasks; already preserves `scheduled_at` on unscheduled items |
+| `src/scheduler/runSchedule.js` | Updated — all `t.datePinned` refs replaced with `t.placementMode === 'fixed'` as the immovability check; `date_pinned` clear-on-place logic removed |
 | `tests/schedulerScenarios.test.js`, `tests/schedulerDeepCoverage.test.js` | Add cases for each principle above; update any test that codified the old "priority is primary" behavior |
 
 ---
@@ -615,7 +615,7 @@ This section catalogs every use case the scheduler must handle correctly. Each c
 |----|------|----------|------|
 | UC-15.1 | Scheduler runs twice — results identical (idempotent) | Same placements both runs | [INT] |
 | UC-15.2 | `original_scheduled_at` reset before each run | Non-fixed tasks reset to original time | [INT] |
-| UC-15.3 | Fixed task NOT reset | `when:"fixed"` tasks keep their scheduled_at | [INT] |
+| UC-15.3 | Fixed task NOT reset | `placement_mode='fixed'` tasks keep their scheduled_at | [INT] |
 | UC-15.4 | Habit misplaced in run 1 — corrected in run 2 | `when`-window override fixes the placement | [INT] |
 | UC-15.5 | Task edited by user between runs — new time honored | User edit persists, scheduler respects it | [INT] |
 | UC-15.6 | Schedule cache invalidated on timezone change | Re-runs scheduler with new timezone | [INT] |
@@ -697,13 +697,13 @@ These encode the three guiding principles at the top of this doc (deadlines over
 | PDP-2 | Past-due P3 + on-time P1 both due today. One slot left. | Both have slack=0 + P1; longer-duration wins. Loser goes to overflow (placed ASAP with no ceiling) or unscheduled. |
 | PDP-3 | Past-due task that can't fit today either. | Overflow pass places ASAP on future day. If still can't fit: `unscheduled=1` with past-due badge. |
 
-### Principle 3 — pinned eviction first
+### Principle 3 — fixed task eviction first
 
 | UC | Scenario | Expected |
 |----|----------|----------|
-| PE-1 | Day over-committed with a pinned P2 and two on-time P1 chain members. | Pile-up cleanup evicts the pinned P2 first; both P1 chain members stay placed. |
-| PE-2 | Pinned P1 vs unpinned P4 chain member, same slot. | Pinned P1 still evicted first — pinning trumps priority in eviction order. |
-| PE-3 | Two pinned tasks in the same slot. | Lower-priority pinned evicted first; ties on priority → longer-duration first; final tie-break `id`. |
+| PE-1 | Day over-committed with a fixed-mode P2 and two on-time P1 chain members. | Pile-up cleanup evicts the fixed-mode P2 first; both P1 chain members stay placed. |
+| PE-2 | Fixed-mode P1 vs non-fixed P4 chain member, same slot. | Fixed-mode P1 still evicted first — fixed mode trumps priority in eviction order. |
+| PE-3 | Two fixed-mode tasks in the same slot. | Lower-priority fixed-mode task evicted first; ties on priority → longer-duration first; final tie-break `id`. |
 
 ### Slack-based placement ordering
 

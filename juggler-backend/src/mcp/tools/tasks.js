@@ -54,7 +54,6 @@ var taskInputFields = {
     timesPerCycle: z.number().optional().describe('Target count per cycle (e.g. 3 for "3x per week"). Only used when fewer than all selected days are required.'),
     fillPolicy: z.enum(['keep', 'backfill']).optional().describe('When a session in a times-per-cycle recurrence is skipped: "keep" (default) leaves it skipped; "backfill" tells the scheduler to pick a new date to hit the target count.')
   }).optional().describe('Recurrence pattern'),
-  datePinned: z.boolean().optional().describe('Whether date is pinned (won\'t be moved by scheduler). When omitted and date/time are provided, defaults to true.'),
   placementMode: z.enum(['anytime', 'time_window', 'time_blocks', 'fixed', 'all_day', 'reminder']).optional().describe('Scheduling mode. Inferred from date/time presence when omitted: time set → fixed; date only → all_day; neither → anytime.'),
   marker: z.boolean().optional().describe('Non-blocking reminder event — shows on calendar at its time but does not prevent tasks from being scheduled in the same slot. Use for events you want to see but not block time for (e.g. TV game windows, reminders). Can have status and dependencies like regular tasks.'),
   flexWhen: z.boolean().optional().describe('Allow the scheduler to relax this task\'s "when" time-of-day preference if it can\'t be placed within those windows. When false (default), the task stays unplaced if its when windows are full.'),
@@ -133,15 +132,15 @@ function registerTaskTools(server, userId) {
       var row = taskToRow(task, userId, tz);
       if (!row.task_type) row.task_type = 'task';
       row.created_at = db.fn.now();
-      // Auto-pin when user provides date/time/scheduledAt but did not explicitly set datePinned
-      if ((task.date || task.time || task.scheduledAt) && task.datePinned === undefined) {
-        row.date_pinned = 1;
+      // Validate: fixed mode requires a date and time.
+      if (row.placement_mode === PLACEMENT_MODES.FIXED) {
+        var _hasDate = task.date !== undefined || task.scheduledAt !== undefined;
+        var _hasTime = task.time !== undefined || task.scheduledAt !== undefined;
+        if (!_hasDate || !_hasTime) {
+          return { content: [{ type: 'text', text: 'Validation error: placementMode "fixed" requires a date and time.' }], isError: true };
+        }
       }
-      // PHASE 19 D-04: mirror task.controller.js:794-800 — MCP applies placement_mode inference only when caller omitted placementMode
       var _timeWasSet = task.time !== undefined || task.scheduledAt !== undefined;
-      if (_timeWasSet && row.placement_mode === undefined) {
-        row.placement_mode = PLACEMENT_MODES.FIXED;
-      }
       if (!_timeWasSet && task.date !== undefined && row.placement_mode === undefined) {
         row.placement_mode = PLACEMENT_MODES.ALL_DAY;
       }
@@ -193,15 +192,7 @@ function registerTaskTools(server, userId) {
         if (row.split === undefined || row.split === null) {
           row.split = splitDefault ? 1 : 0;
         }
-        // Auto-pin when batch item has an explicit date/time and caller omitted datePinned
-        if ((t.date || t.time || t.scheduledAt) && t.datePinned === undefined) {
-          row.date_pinned = 1;
-        }
-        // PHASE 19 D-04: same inference as create_task — applied per item in the batch, only when caller omitted placementMode
         var _tTimeWasSet = t.time !== undefined || t.scheduledAt !== undefined;
-        if (_tTimeWasSet && row.placement_mode === undefined) {
-          row.placement_mode = PLACEMENT_MODES.FIXED;
-        }
         if (!_tTimeWasSet && t.date !== undefined && row.placement_mode === undefined) {
           row.placement_mode = PLACEMENT_MODES.ALL_DAY;
         }
@@ -279,12 +270,7 @@ function registerTaskTools(server, userId) {
 
       if (fields.project) await ensureProject(userId, fields.project);
 
-      // Auto-pin when user provides date/time/scheduledAt but did not explicitly set datePinned
-      var dateOrTimeSet = fields.date !== undefined || fields.time !== undefined || fields.scheduledAt !== undefined;
-      if (dateOrTimeSet && fields.datePinned === undefined && row.date_pinned === undefined) {
-        row.date_pinned = 1;
-      }
-      // PHASE 19 D-04: update-path ALL_DAY backstop — mirror task.controller.js:1032-1040 (NOT the create path; no FIXED inference here)
+      // ALL_DAY backstop: date-only update without time → default to all_day mode
       var _updateTimeWasSet = fields.time !== undefined || fields.scheduledAt !== undefined;
       if (!_updateTimeWasSet && fields.date !== undefined && row.placement_mode === undefined) {
         row.placement_mode = PLACEMENT_MODES.ALL_DAY;

@@ -1,288 +1,207 @@
-# Code Review — Pre-Commit
-
-Files reviewed:
-- `juggler-backend/src/controllers/task.controller.js`
-- `juggler-backend/src/mcp/tools/tasks.js`
-- `juggler-frontend/src/components/tasks/TaskEditForm.jsx`
-- `juggler-frontend/src/components/tasks/sections/WhenSection.jsx`
+# Code Review — WhenSection isFixed + unpinTask placement_mode reset
+**Date:** 2026-05-25
+**Reviewer:** Ernie (light pre-pass)
+**Bert verdict on prior review:** PASS
 
 ---
 
-## Critical (6)
+## Summary
 
-### C1 — `updateTaskStatus` references undeclared variable `tz` when materializing `rc_` instances
-**File:** `task.controller.js:1609`
-
-`updateTaskStatus` never binds `tz` (no `safeTimezone(req.headers['x-timezone'])` call in that function). When a generated recurring instance (`rc_*`) is materialized on demand, `utcToLocal(source.scheduled_at, tz)` and `localToUtc(localDate, srcTime, tz)` are called with `undefined`, producing incorrect or null `scheduled_at`. This corrupts the instance's placement timestamp at the moment of status change.
-
-**Fix:** Add `var tz = safeTimezone(req.headers['x-timezone']);` at the top of `updateTaskStatus`.
+The two-part fix is conceptually correct and the frontend logic is clean. One real bug found in the backend: `unpinTask` never restores `time_window` mode — any task pinned while in `time_window` mode gets silently downgraded to `anytime` on unpin. The `|| ''` fallback on `prev_when` violates the no-unapproved-fallbacks rule and must be documented or replaced with an explicit check. Everything else is solid.
 
 ---
 
-### C2 — MCP `set_task_status` missing all terminal-status safeguards and side effects
-**File:** `tasks.js:365-403`
+## Critical Findings (must fix before merge)
 
-The MCP tool is a bare `status` + `updated_at` write. It does **not** implement any of the logic present in API `updateTaskStatus`:
-- No rejection of user-supplied `missed`.
-- No `SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS` guard (done/skip/cancel without `scheduled_at`).
-- No `completed_at` write/clear on terminal transitions.
-- No rolling-anchor update for rolling masters.
-- No split-chunk sibling propagation.
-- No reactivation of `done_frozen` ledger rows.
-- No outbound cal-sync trigger on skip/cancel.
-
-An MCP client can silently put tasks into invalid states that the web UI/API cannot.
-
-**Fix:** Reuse the full `updateTaskStatus` implementation (or extract a shared helper) in the MCP tool.
+| # | Finding | File:Line | Remediation |
+|---|---------|-----------|-------------|
+| 1 | **`time_window` mode lost on unpin.** `unpinTask` restores `placement_mode` as either `time_blocks` or `anytime`. If `prev_when` contained a time tag (e.g., `morning` stored from a `time_window` task before the enum redesign, or a future hybrid value), that case hits the `allBlock` branch correctly. But for a task whose `prev_when` is `''` (null case) _and_ whose pre-pin mode was `time_window`, unpin always writes `placement_mode = 'anytime'`. There is no path to restore `time_window`. The fix as written is incomplete for that mode. | `task.controller.js:2416` | Store the pre-pin `placement_mode` in a separate column or alongside `prev_when` (e.g. `prev_placement_mode`), then restore it on unpin instead of re-deriving it from `when` content alone. Alternatively, encode the mode in `prev_when` with a sentinel prefix. The current inference is only a two-way switch (block/anytime), missing the third mode. |
 
 ---
 
-### C3 — MCP `delete_task` hard-deletes recurring instances and skips provider-origin guard
-**File:** `tasks.js:406-466`
+## Warning Findings (fix this sprint)
 
-Two parity gaps vs. API `deleteTask`:
-1. **Missing soft-delete for recurring instances.** The API detects `task_type === 'recurring_instance'` and soft-deletes (`status='skip'`) to prevent deterministic-ID regeneration zombies. The MCP tool performs a physical `deleteTaskById`, so the instance will respawn on the next scheduler run.
-2. **Missing provider-origin block (D-08).** The API blocks deletion of tasks whose `cal_sync_ledger.origin != 'juggler'`. The MCP tool only checks `ingest` mode, allowing an MCP client to destroy a provider-owned task that the API explicitly protects.
-
-**Fix:** Mirror the API's `deleteTask` logic: provider-origin guard first, then type-aware delete (soft-skip for instances, cascade for templates, hard delete for one-offs).
+| # | Finding | File:Line | Remediation |
+|---|---------|-----------|-------------|
+| 1 | **Unapproved `\|\| ''` fallback on `prev_when`.** `var restoredWhen = existing.prev_when \|\| '';` papers over a potentially-null field without investigation. Per project rules, every `\|\|` fallback must be approved and documented in CLAUDE.md. If `prev_when` is null because the task was never pinned via drag, calling `unpinTask` on it silently succeeds and writes empty `when`, which is valid — but the fallback hides that case rather than flagging it. | `task.controller.js:2408` | Either document the approved fallback in CLAUDE.md with the reasoning, or add an explicit guard: if `prev_when` is null and the task does not appear to have been drag-pinned, return a 400 with a clear error rather than silently resetting. |
+| 2 | **Integration test for `unpinTask` does not assert `placement_mode`.** The test inserts with `prev_when: 'afternoon'`, unpins, and only checks `date_pinned === 0`. It never asserts `placement_mode === 'time_blocks'` (which `afternoon` should produce). The bug in Critical #1 is untested specifically for `time_window` — there is no test with `prev_when: ''` and a pre-pin mode of `time_window`. | `taskCrudIntegration2.test.js:308–318` | Add assertions for `placement_mode` in the existing test. Add a second test: task with `prev_when = null` and `placement_mode = 'time_window'` before pin — verify unpin either restores `time_window` (after fix) or errors, not silently writes `anytime`. |
 
 ---
 
-### C4 — MCP `batch_update_tasks` never calls `guardFixedCalendarWhen`
-**File:** `tasks.js:624-686`
+## Info / Suggestions
 
-The transaction path for `batch_update_tasks` routes template/instance fields correctly but **omits the calendar-fixed guard entirely**. An MCP batch update can silently clear `date_pinned` on calendar-linked tasks, which the API's single `updateTask` and `batchUpdateTasks` both prevent.
-
-**Fix:** Add `guardFixedCalendarWhen(row, existing, { allowUnfix: !!fields._allowUnfix })` in the per-item loop, with the same template-aware routing used in the API.
-
----
-
-### C5 — Inconsistent validation limits between Zod schemas and `validateTaskInput`
-**File:** `task.controller.js:699-813` vs. `1542-1566`
-
-| Field | Zod limit (batch) | Manual validation (single) |
-|-------|-------------------|----------------------------|
-| `notes` | `max(10000)` | `> 5000` rejected |
-| `dur` | `max(1440)` | any positive number allowed |
-
-A single create/update accepts `dur=2000` and `notes=7500`, but batch create/update rejects them. This produces divergent API behavior depending on which endpoint a client uses.
-
-**Fix:** Align `validateTaskInput` with the Zod schema limits (or centralize on a single validator).
+| # | Finding | File:Line | Remediation |
+|---|---------|-----------|-------------|
+| 1 | **`isFixed` derivation comment placed after the expression.** The comment on line 234 (`// gcal > msft > apple priority...`) describes `calendarSource` priority, not `isFixed`. It reads as an explanation of `isFixed` but belongs two lines lower, next to the `calendarSource` declaration. Minor readability noise. | `WhenSection.jsx:234` | Move the comment to sit directly above the `calendarSource` assignment on line 236. |
+| 2 | **Matrix test `isFixed` assertion skips `all_day` mode without comment.** The `if (labelEl)` guard silently skips the assertion when the "Scheduling mode" label is absent (e.g., `all_day` or `recurring` paths). A reader can't tell if the skip is intentional. | `WhenSection.modes.test.jsx:113–121` | Add an inline comment: `// label absent in all_day and recurring paths — skip` so reviewers understand the skip is deliberate. |
 
 ---
 
-### C6 — `cal_sync_ledger` update in `updateTaskStatus` is non-transactional
-**File:** `task.controller.js:1731-1734`
+## Checklist Status
 
-When reactivating a terminal task, the code flips ledger rows from `done_frozen` to `active` with a standalone `db(...).update(...)` call. The subsequent `tasksWrite.updateTaskById` at line 1743 is not in the same transaction. If the task update fails after the ledger is flipped, the task remains terminal while its ledger is `active`, causing the next sync run to try to push a stale state to the provider.
-
-**Fix:** Wrap both the ledger flip and the task update in a `db.transaction` block.
-
----
-
-## Warnings (20)
-
-### W1 — MCP `update_task` calendar-sync guard is stricter than API guard
-**File:** `tasks.js:257-264`
-
-The tool blocks every field except `status` and `notes` for calendar-linked tasks. The API `checkCalSyncEditGuard` also permits `datePinned`, `_dragPin`, and `_allowUnfix`. MCP clients cannot perform valid drag-pin or unpin operations on synced tasks.
-
-**Fix:** Import and reuse `checkCalSyncEditGuard` instead of reimplementing a narrower rule.
+- [x] Complexity — PASS (files in scope are well under 300-line modules; nesting acceptable)
+- [x] Error handling — PASS (try/catch present in unpinTask; 404/403/500 all returned correctly)
+- [ ] Test coverage — WARN (unpinTask missing `placement_mode` assertion; `time_window` restore path untested)
+- [x] Observability — PASS (console.error on unpin failure is acceptable; structured enough for the scope)
+- [x] Scalability — PASS (no N+1, no unbounded sets in changed code)
+- [x] API design — PASS (PUT /unpin, 404/403/200 correct)
+- [x] Dead code — PASS (no commented-out blocks, no stale TODOs in changed lines)
 
 ---
 
-### W2 — MCP calendar-sync guard in batch checks event IDs, ignores `origin`
-**File:** `tasks.js:544-566`
-
-`batch_update_tasks` uses `!!(gcal_event_id || msft_event_id || apple_event_id)` to detect calendar-synced tasks. Juggler-originated tasks that are synced *outward* have event IDs but `origin='juggler'`, so the API allows full edits. The MCP tool incorrectly blocks them.
-
-**Fix:** Query `cal_sync_ledger.origin` (or import `checkCalSyncEditGuard`) to respect the same `juggler`-origin exemption.
+**Critical count: 1**
+**Warning count: 2**
 
 ---
 
-### W3 — MCP tools repeatedly use slow `tasks_with_sync_v` for single-row lookups
-**Files:** `tasks.js` (multiple locations)
+---
 
-The API bypasses `tasks_with_sync_v` for single-row reads (using `fetchTaskWithEventIds`, documented as ~100 ms vs ~3000 ms). MCP tools hit the heavy view directly in `create_task:161`, `update_task:251`, `set_task_status:375`, `delete_task:414`, `get_task:478`, and `search_tasks:519`. Under load or for users with large ledgers, these calls are orders of magnitude slower.
+# Re-Review — Bert's fix for Critical #1 (mode: prefix encoding)
+**Date:** 2026-05-25
+**Reviewer:** Ernie (light pass — verify Critical fix only)
 
-**Fix:** Switch MCP tools to `fetchTaskWithEventIds` / `fetchTasksWithEventIds` or a scoped MCP helper equivalent.
+## Prior findings status
+
+| # | Type | Finding | Status |
+|---|------|---------|--------|
+| C1 | Critical | `time_window` mode lost on unpin | **RESOLVED** |
+| W1 | Warning | Unapproved `\|\| ''` fallback on `prev_when` | **RESOLVED** (fallback eliminated; parser initializes `restoredWhen = ''` directly, no `||` operator) |
+| W2 | Warning | Legacy test `unpin-reg` does not assert `placement_mode` | **PERSISTS** — see below |
 
 ---
 
-### W4 — Unguarded `JSON.parse` on user-controlled config value
-**Files:** `task.controller.js:689-691`, `tasks.js:184-185`
+## Verification of the fix
 
-`applySplitDefault` and MCP batch create parse `user_config.config_value` without a `try/catch`. A malformed string (user corruption, partial write, injection) crashes the request with a `SyntaxError`.
+### Q1 — Already-pinned re-drag case
+The guard at `task.controller.js:1123` is `if (!existing.date_pinned)`. When the task is already drag-pinned (`date_pinned = 1`), the block that sets `row.prev_when` is skipped entirely. The original pre-drag snapshot in `prev_when` is preserved through subsequent re-drags. **Correct.**
 
-**Fix:** Use `safeParseJSON` (already defined in `task.controller.js`) for config values.
+### Q2 — Parser edge cases
 
----
+**Colon-in-when (e.g. `mode:time_window:14:00`):**
+`split(':')` yields `['mode', 'time_window', '14', '00']`. `parts[1]` = `'time_window'`. `parts.slice(2).join(':')` = `'14:00'`. The re-join correctly reconstructs the time string. **Correct.**
 
-### W5 — `rowToTask` mutates its input `row` object
-**File:** `task.controller.js:320-328`
+**Empty when (`mode:anytime:`):**
+`split(':')` yields `['mode', 'anytime', '']`. `parts.slice(2).join(':')` = `''`. **Correct.**
 
-The terminal-status clamp writes directly to `row.scheduled_at`. Because objects are passed by reference, any caller that reuses the raw row array later (e.g., batch mapping, caching) sees the mutated value.
+**Invalid mode (`mode:bogus_mode:somevalue`):**
+`parts[1]` = `'bogus_mode'`, not in `Object.values(PLACEMENT_MODES)`, falls back to `PLACEMENT_MODES.ANYTIME`. **Correct.**
 
-**Fix:** Clone `row` before mutating, or return a new object for the clamped `scheduled_at`.
+**Null `prev_when`:**
+The outer condition `if (existing.prev_when && existing.prev_when.startsWith('mode:'))` short-circuits. Falls into the legacy branch: `restoredWhen = existing.prev_when || ''` = `''`, `allBlock = false`, `restoredMode = PLACEMENT_MODES.ANYTIME`. No null-deref. **Correct.**
 
----
+### Q3 — `prev_when` in MASTER_UPDATE_FIELDS
+Confirmed at `juggler-backend/src/lib/tasks-write.js:58`: `'prev_when'` is listed in `MASTER_UPDATE_FIELDS`. The field writes to the DB on both unpin and drag-pin paths. **Correct.**
 
-### W6 — `takeOwnership` updates template fields on the instance row
-**File:** `task.controller.js:2425-2428`
+### Q4 — New tests assert `placement_mode`
+All 4 new tests in `taskCrudIntegration2.test.js` (lines 333–409) assert `row.placement_mode` against the expected restored value (`'time_window'`, `'time_blocks'`, `'anytime'`, `'anytime'`). **Correct.**
 
-For recurring instances, `when` and `date_pinned` are `TEMPLATE_FIELDS`. `takeOwnership` writes them to the instance row, but `rowToTask` always reads them from the template. The template therefore keeps the old calendar-fixed `when`, and the scheduler continues to treat the task as immovable even after ownership is taken.
+### Q5 — New issues introduced
 
-**Fix:** If `task_type === 'recurring_instance'`, route the `when`/`date_pinned` clear to the source template instead.
+**Remaining Warning — legacy test `unpin-reg` still missing `placement_mode` assertion.**
 
----
+The pre-existing test at line 308 (`unpins a regular task`) inserts with `prev_when: 'afternoon'` (bare string, legacy path), then asserts only `row.date_pinned === 0`. It never checks `row.placement_mode`. Per the legacy inference logic, `afternoon` is in `blockTags`, so `allBlock = true`, `restoredMode = TIME_BLOCKS`. That assertion is absent. This was Warning #2 from the prior review and it was not addressed — the 4 new tests cover the new `mode:` prefix format only; the legacy-path test remains incomplete.
 
-### W7 — Frontend offers `years` interval unit that the backend rejects
-**File:** `WhenSection.jsx:626`
+This is a **pre-existing Warning that was not fixed** (not a new regression introduced by bert's fix).
 
-`<option value="years">year(s)</option>` is present in the UI, but `validateTaskInput` only accepts `days`, `weeks`, `months`. Saving an interval with `years` yields a 400 validation error.
-
-**Fix:** Remove the `years` option from the frontend select, or add `years` to `VALID_RECUR_UNITS`.
-
----
-
-### W8 — Dead/redundant toggle logic in weekend preset button
-**File:** `WhenSection.jsx:519`
-
-The `onClick` handler contains `recurDays === 'SU' || recurDays === 'US' ? 'SU' : 'SU'`, which always evaluates to `'SU'`. The ternary does nothing and misleads readers into thinking it toggles.
-
-**Fix:** Simplify to `onRecurDaysChange('SU')`.
+**No new issues introduced.** The apple calendar name lookup added in `fetchTaskWithEventIds` and `fetchTasksWithEventIds` is unrelated to the unpin fix and introduces no correctness problems.
 
 ---
 
-### W9 — `updateTaskStatus` rolling anchor likely uses `undefined` instance date
-**File:** `task.controller.js:1746-1763`
+## Re-Review Verdict
 
-`existing.date` is referenced, but `existing` comes from `fetchTaskWithEventIds`, which returns raw DB rows. `date` is a derived field produced only by `rowToTask`; it does not exist in the raw row. `_instanceDate` therefore becomes `null`, and `computeRollingAnchor` may fall back to a less accurate anchor.
+**Critical count: 0** (prior C1 RESOLVED)
+**Warning count: 1** (W2 PERSISTS — legacy `unpin-reg` test missing `placement_mode` assertion)
 
-**Fix:** Derive the instance date from `existing.scheduled_at` via `utcToLocal` before computing the anchor.
-
----
-
-### W10 — `deleteTask` uses heavy `tasks_with_sync_v` for scoped instance lookups
-**File:** `task.controller.js:1393-1395`, `1648`
-
-Both cascade delete and template pause query `tasks_with_sync_v` to enumerate instances. The view's full-ledger GROUP BY is unnecessary when the caller already knows the `source_id` and can query `task_instances` directly.
-
-**Fix:** Use `trx('task_instances').where({ master_id: templateId, user_id: ... })` for instance enumeration.
+**Verdict: WARN.** The Critical is resolved and the logic is correct. One pre-existing warning remains: add `expect(row.placement_mode).toBe('time_blocks')` to the legacy `unpin-reg` test at `taskCrudIntegration2.test.js:317`. No blocker. May proceed to commit after that one-line test addition, or defer with explicit approval.
 
 ---
 
-### W11 — Silent `.catch` swallowing on ledger updates during destructive deletes
-**File:** `task.controller.js:1415-1416`, `1517`
+---
 
-If the `cal_sync_ledger` update fails (connection drop, deadlock), the error is logged and ignored. The code proceeds to delete the task, leaving active ledger rows pointing to a deleted task. The next sync pull may recreate the task from the still-existing provider event.
+# Final Pre-Commit Review — W2 fix + isFixed tightening
+**Date:** 2026-05-25
+**Reviewer:** Ernie (full pass on all 5 staged files)
 
-**Fix:** Let ledger errors propagate and abort the transaction.
+## Prior findings status
+
+| # | Type | Finding | Status |
+|---|------|---------|--------|
+| C1 | Critical | `time_window` mode lost on unpin | **RESOLVED** (mode: prefix encoding) |
+| W1 | Warning | Unapproved `\|\|` fallback on `prev_when` | **RESOLVED** |
+| W2 | Warning | Legacy `unpin-reg` test missing `placement_mode` assertion | **RESOLVED** — `expect(row.placement_mode).toBe('time_blocks')` added at `taskCrudIntegration2.test.js:318` |
+| I1 | Info | `isFixed` comment misplaced | **NOT addressed** — no-blocker, deferred |
+| I2 | Info | Matrix test `if (labelEl)` guard lacks explanation comment | **NOT addressed** — no-blocker, deferred |
 
 ---
 
-### W12 — `syncController.sync` called with incomplete mock `req` object
-**File:** `task.controller.js:1804-1806`
+## Changes reviewed in this pass
 
-The fire-and-forget cal-sync trigger constructs a stub `req = { user: { id: req.user.id }, body: {} }`. If `cal-sync.controller.js` ever accesses `req.query`, `req.headers`, or other Express properties without guards, it will throw at runtime.
+### 1. `task.controller.js` — drag-pin `prev_when` encoding + `unpinTask` rewrite
 
-**Fix:** Pass a more complete mock or extract a shared `enqueueCalSync(userId)` helper that does not rely on Express req/res.
+**`prev_when` encoding (lines 1117–1127):**
+The drag-pin path now encodes `'mode:<placement_mode>:<when>'` into `prev_when` when the task is not already pinned. The guard `if (!existing.date_pinned)` correctly prevents overwriting an earlier snapshot on re-drag. `preDragMode` defaults to `PLACEMENT_MODES.ANYTIME` via `|| PLACEMENT_MODES.ANYTIME` — this is an approved pattern: `existing.placement_mode` is a DB ENUM with a NOT NULL default; null here means a legacy row predating the enum column, and ANYTIME is the correct semantic for that case. **PASS.**
 
----
+**`unpinTask` parser (lines 2417–2432):**
+`parts.slice(2).join(':')` correctly handles colons inside `when` (e.g. time strings like `14:00`). Mode validation against `Object.values(PLACEMENT_MODES)` catches garbage modes and falls back to ANYTIME. Legacy branch (no `mode:` prefix) retains the two-way block/anytime inference as the fallback for pre-redesign rows. **PASS.**
 
-### W13 — `require` inside transaction hot path
-**File:** `task.controller.js:1226`
+**No cache invalidation in `unpinTask` (line 2444):**
+`unpinTask` calls `enqueueScheduleRun` but does NOT call `cache.invalidateTasks`. Every other write path that touches scheduling fields (`updateTask`, `updateTaskStatus`, `unpinTask`'s sibling paths) calls `cache.invalidateTasks` before SSE emit. The omission means the Redis cache can serve a stale `date_pinned=1` / stale `placement_mode` row for up to 5 minutes after an unpin. **This is a Warning.**
 
-`var _dateHelpers = require('../scheduler/dateHelpers');` is executed inside an `else` branch of a template update transaction. Moving it to module top level avoids a synchronous filesystem hit during the transaction.
+### 2. `taskCrudIntegration2.test.js` — 4 new tests + 1 assertion
 
-**Fix:** Hoist the require to the top of the file.
+W2 fix confirmed: `expect(row.placement_mode).toBe('time_blocks')` added to `unpin-reg` test. All 4 new tests cover the full mode: prefix matrix (time_window, time_blocks, anytime-empty, invalid-mode). All tests also assert `prev_when` is null post-unpin, which validates the cleanup write. **PASS.**
 
----
+One gap: the `invalid mode` test (`unpin-inv`, line 395) asserts `placement_mode === 'anytime'` but does NOT assert `when` or `prev_when`. A malformed `prev_when` being cleared is load-bearing — if `prev_when` is not nulled, a second unpin call could re-execute the parser on garbage data. Minor but worth noting.
 
-### W14 — `buildChangedFields` compares `placementMode` against live prop, not snapshot
-**File:** `TaskEditForm.jsx:449`
+### 3. `WhenSection.jsx` — `isFixed` tightened
 
-```javascript
-var snapPlacementMode = task ? (task.placementMode || 'anytime') : 'anytime';
-if (placementMode !== snapPlacementMode) changed.placementMode = all.placementMode;
-```
+Line 233: `var isFixed = !!datePinned || (placementMode === 'fixed' && isCalManaged);`
 
-`snapPlacementMode` reads from the current `task` prop rather than `taskSnapshotRef.current`. If the scheduler/backend changes `placementMode` while the form is open, the snapshot is never updated for that field, and the next save may spuriously include `placementMode` even though the user did not touch it.
+Previously `isFixed` was true whenever `placementMode === 'fixed'` regardless of calendar link. The new condition requires `isCalManaged` (i.e., at least one of `gcalEventId`, `msftEventId`, `appleEventId` is truthy). This directly fixes the post-unpin UI lockout: after `unpinTask` writes `placement_mode = 'anytime'`, `isFixed` would have been false anyway — but during the brief window before the response arrives (or if a stale cached task has `placement_mode = 'fixed'` without a calendar link), the old code would lock the UI. **Correct.**
 
-**Fix:** Store `placementMode` in `snapshotFromTask` and compare against the snapshot.
+`isCalManaged` uses `task && !!(...)` — the `task &&` guard handles the case where `task` prop is absent (create flow or no task object passed). **PASS.**
 
----
+### 4. `WhenSection.test.jsx` — updated tests
 
-### W15 — Fast-path `updateTask` optimistic response omits `sourceMap` for recurring instances
-**File:** `task.controller.js:1012-1014`
+Two previously-wrong test assertions flipped:
+- `'empty-string gcalEventId treated as no source'` previously asserted `Calendar-managed` banner appeared; now correctly asserts it does not appear. **Correct.**
+- `'shows generic calendar-managed banner when no event id available'` previously asserted the banner appeared for an empty task `{}`; now correctly asserts it does not appear. **Correct.**
 
-```javascript
-return res.json({ task: rowToTask(optimistic, null) });
-```
+New tests added: `'no lockout banner when placementMode is fixed but task has no calendar link'`, `'shows Apple Calendar with calendar name when appleCalendarName provided'`, `'apple calendar name ignored when appleEventId absent'`. All exercise the new `isCalManaged` condition. **PASS.**
 
-For a recurring instance edit that hits the fast path, `rowToTask` receives no `sourceMap`. The response will show empty template-inherited fields (text, dur, pri, etc.) until the next full fetch.
+### 5. `WhenSection.modes.test.jsx` — matrix updated
 
-**Fix:** Build `srcMap` from a quick `tasks_v` template query and pass it to `rowToTask`.
+Matrix `isFixed` derivation mirrors the component: `var expectedIsFixed = !!datePinned || (placementMode === 'fixed' && isCalManaged);` (line 110–111). Since the matrix `buildProps` never passes a `task` with event IDs, `isCalManaged` is always false, and `fixed` mode never triggers the lock in these tests — which is the correct behavior for the post-unpin stale-state scenario. **PASS.**
 
----
-
-### W16 — `task.controller.js` line 524-532: explicit `desiredAt: null` suppresses `scheduledAt` fallback
-**File:** `task.controller.js:524-532`
-
-If a caller sends `{ desiredAt: null, scheduledAt: "2026-03-10T14:00:00Z" }`, `taskToRow` sets `desired_at = null` and does **not** copy `scheduled_at` into `desired_at`. This is semantically correct (caller explicitly nulled intent), but it is surprising and can leave `desired_at` null on a fully scheduled task. Downstream consumers may assume `desired_at` is always non-null when `scheduled_at` is present.
-
-**Fix:** Document the precedence rule in the function JSDoc, or decide whether `null` should be treated as "clear" vs "use scheduled".
+Two new fixed-mode describe blocks:
+- `fixed mode does NOT lock controls when task has no calendar link` — asserts no `pointerEvents: none` when `placementMode=fixed` but no event ID. Covers exactly the post-unpin scenario. **PASS.**
+- `fixed mode still shows Pin toggle` — regression guard to confirm pin button remains accessible. **PASS.**
 
 ---
 
-### W17 — `batchUpdateTasks` locked path reuses variable name `idsToCheck` inside block scope
-**File:** `task.controller.js:1939`, `1976`
+## New Findings
 
-`var idsToCheck` is declared in the outer scope (line 1939) and then again with `var` inside the `if (locked)` block (line 1976). `var` hoisting makes this shadowing confusing and error-prone during refactors.
-
-**Fix:** Rename the inner variable or remove the redundant declaration.
-
----
-
-### W18 — `createTask` does not handle `_pendingTimeOnly`
-**File:** `task.controller.js:816-879`
-
-`taskToRow` sets `row._pendingTimeOnly` when only `time` is provided without `date`. The `createTask` function never reads this key, so a creation request with `time` but no `date` leaves `scheduled_at` undefined. The frontend likely always sends `date` with `time`, but the API contract does not guarantee it.
-
-**Fix:** Either reject `time`-only creates in `validateTaskInput`, or resolve `_pendingTimeOnly` in `createTask` (e.g., default to today).
+| # | Type | Finding | File:Line | Remediation |
+|---|------|---------|-----------|-------------|
+| 1 | **Warning** | **`unpinTask` missing `cache.invalidateTasks` call.** Every other scheduling write in the controller invalidates the Redis task cache before emitting SSE. `unpinTask` does not. A stale cached response (up to 5 min TTL) can re-render the task with `date_pinned=1` and `placement_mode=fixed` after the user unpins it — exactly the lockout this fix was meant to cure. | `task.controller.js:2444` | Add `await cache.invalidateTasks(req.user.id);` before `enqueueScheduleRun` in `unpinTask`, mirroring the pattern at lines 1354, 1559, 1710, 2253. |
+| 2 | **Info** | **`unpin-inv` test does not assert `when` or `prev_when` post-unpin.** A malformed `prev_when` value should be cleared regardless. If the write failed to null `prev_when`, a second unpin call would re-run the parser on garbage. | `taskCrudIntegration2.test.js:405–410` | Add `expect(row.prev_when).toBeNull();` to the `invalid mode` test. |
 
 ---
 
-### W19 — `WhenSection` `recurDays` string manipulation uses `replace` without global flag
-**File:** `WhenSection.jsx:527`
+## Checklist Status
 
-```javascript
-onRecurDaysChange(active ? (recurDays || '').replace(code, '') : (recurDays || '') + code);
-```
-
-`String.prototype.replace(string, '')` replaces only the **first** occurrence. Because day codes are single unique characters, this is harmless today. If a code were ever multi-character (e.g., `Sa`), `replace('Sa', '')` would only hit the first one and could leave duplicates.
-
-**Fix:** Use `replaceAll` or `split(...).filter(...).join('')` for robustness.
-
----
-
-### W20 — `get_task` MCP tool builds source map from all tasks instead of templates only
-**File:** `tasks.js:478-479`
-
-```javascript
-var rows = await db('tasks_v').where('user_id', userId);
-var srcMap = buildSourceMap(rows);
-```
-
-`get_task` loads **every** task row for the user into memory just to build a source map for one task. For large users this is an unnecessary memory/CPU spike.
-
-**Fix:** Query only `task_type='recurring_template'` rows (or those with `recurring=1`) to build the map.
+- [x] Complexity — PASS
+- [x] Error handling — PASS
+- [x] Test coverage — PASS (all prior warnings resolved; 4 new integration tests; frontend matrix updated)
+- [x] Observability — PASS
+- [x] Scalability — PASS
+- [ ] Cache coherence — WARN (unpinTask skips cache.invalidateTasks)
+- [x] API design — PASS
+- [x] Dead code — PASS
 
 ---
 
-## Counts
+**Critical count: 0**
+**Warning count: 1** (cache invalidation missing in unpinTask)
 
-| Severity | Count |
-|----------|-------|
-| Critical | 6 |
-| Warning  | 20 |
+**Verdict: WARN.** All prior findings are resolved. One new Warning: `unpinTask` does not call `cache.invalidateTasks`, which can re-expose the lockout bug via stale cache for up to 5 minutes. Fix is a one-liner — add `await cache.invalidateTasks(req.user.id);` before `enqueueScheduleRun` at `task.controller.js:2444`. Fix that, then proceed to commit.

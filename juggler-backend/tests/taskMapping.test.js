@@ -41,8 +41,18 @@ describe('task mapping', () => {
     generated: 0,
     gcal_event_id: 'gcal_123',
     depends_on: '["t00"]',
-    date_pinned: 1
+    date_pinned: 1,
+    placement_mode: 'anytime'
   };
+
+  describe('rowToTask: null placement_mode passthrough (W-C1)', () => {
+    it('null placement_mode passes through as null — no ANYTIME fallback', () => {
+      var row = Object.assign({}, sampleRow, { placement_mode: null });
+      var task = rowToTask(row, TZ);
+      // Must be exactly null — if someone adds `|| 'anytime'` this fails.
+      expect(task.placementMode).toBeNull();
+    });
+  });
 
   describe('rowToTask', () => {
     it('maps DB row to API format', () => {
@@ -59,7 +69,8 @@ describe('task mapping', () => {
       expect(task.split).toBe(true);
       expect(task.recur).toEqual({ type: 'daily' });
       expect(task.dependsOn).toEqual(['t00']);
-      expect(task.datePinned).toBe(true);
+      // datePinned removed from rowToTask — placement_mode === 'fixed' is the sole immovability signal
+      expect(task.datePinned).toBeUndefined();
       expect(task.gcalEventId).toBe('gcal_123');
       expect(task.deadline).toBe('2026-03-20');
       expect(task.startAfter).toBe('2026-03-10');
@@ -80,7 +91,7 @@ describe('task mapping', () => {
       const task = {
         id: 't01', text: 'Test', date: '2026-03-15', location: ['home'],
         tools: ['phone'], recurring: true, rigid: false, dependsOn: ['t00'],
-        recur: { type: 'daily' }, split: true, datePinned: true
+        recur: { type: 'daily' }, split: true
       };
       const row = taskToRow(task, 'user1');
       expect(row.user_id).toBe('user1');
@@ -95,7 +106,8 @@ describe('task mapping', () => {
       expect(row.depends_on).toBe('["t00"]');
       expect(row.recur).toBe('{"type":"daily"}');
       expect(row.split).toBe(1);
-      expect(row.date_pinned).toBe(1);
+      // date_pinned no longer written by taskToRow — placement_mode is the sole immovability signal
+      expect(row.date_pinned).toBeUndefined();
     });
 
     it('only includes defined fields', () => {
@@ -161,6 +173,7 @@ describe('task mapping', () => {
       expect(result.tools).toEqual(original.tools);
       expect(result.recurring).toBe(original.recurring);
       expect(result.dependsOn).toEqual(original.dependsOn);
+      expect(result.datePinned).toBeUndefined();
     });
   });
 });

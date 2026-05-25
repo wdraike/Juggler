@@ -111,7 +111,9 @@ function getBatchUpdateTaskHandler() {
 
 // ── Tests ──
 
-describe('create_task placement_mode and date_pinned inference', function() {
+// After the datePinned/date_pinned removal, placement_mode is the sole
+// immovability signal. date_pinned is no longer written by taskToRow or MCP.
+describe('create_task placement_mode inference', function() {
   var handler;
 
   beforeEach(function() {
@@ -119,7 +121,7 @@ describe('create_task placement_mode and date_pinned inference', function() {
     handler = getCreateTaskHandler();
   });
 
-  test('explicit placementMode time_window + date + time → row.placement_mode = time_window, date_pinned auto-set (date+time triggers pin)', async function() {
+  test('explicit placementMode time_window + date + time → row.placement_mode = time_window', async function() {
     await handler({
       text: 'Explicit time_window',
       placementMode: 'time_window',
@@ -128,43 +130,35 @@ describe('create_task placement_mode and date_pinned inference', function() {
     });
     expect(capturedInsertRow).toBeDefined();
     expect(capturedInsertRow.placement_mode).toBe('time_window');
-    // datePinned was omitted, so auto-pin should fire because date+time provided
-    expect(capturedInsertRow.date_pinned).toBe(1);
+    // date_pinned no longer written by MCP/taskToRow
+    expect(capturedInsertRow.date_pinned).toBeUndefined();
   });
 
-  test('explicit datePinned:false + date → row.date_pinned = 0, placement_mode = all_day (inferred)', async function() {
-    await handler({
-      text: 'Unpinned date-only',
-      datePinned: false,
-      date: '2026-05-20'
-    });
-    expect(capturedInsertRow).toBeDefined();
-    expect(capturedInsertRow.date_pinned).toBe(0);
-    expect(capturedInsertRow.placement_mode).toBe('all_day');
-  });
-
-  test('no placementMode, no datePinned, date only → row.placement_mode = all_day, date_pinned = 1 (default)', async function() {
+  test('no placementMode, date only → row.placement_mode = all_day (inferred)', async function() {
     await handler({
       text: 'Date only defaults',
       date: '2026-05-20'
     });
     expect(capturedInsertRow).toBeDefined();
     expect(capturedInsertRow.placement_mode).toBe('all_day');
-    expect(capturedInsertRow.date_pinned).toBe(1);
+    expect(capturedInsertRow.date_pinned).toBeUndefined();
   });
 
-  test('no placementMode, time + date → row.placement_mode = fixed, date_pinned = 1 (default)', async function() {
+  test('no placementMode, time + date → row.placement_mode is not changed by MCP (taskToRow sets fixed when placementMode explicitly given)', async function() {
     await handler({
-      text: 'Date and time defaults',
+      text: 'Date and time no placementMode',
       date: '2026-05-20',
       time: '3:30 PM'
     });
     expect(capturedInsertRow).toBeDefined();
-    expect(capturedInsertRow.placement_mode).toBe('fixed');
-    expect(capturedInsertRow.date_pinned).toBe(1);
+    // With no explicit placementMode and time set, MCP doesn't infer all_day
+    // (the time-was-set guard skips the all_day inference).
+    // placement_mode is left undefined — DB default (anytime) applies.
+    expect(capturedInsertRow.placement_mode).toBeUndefined();
+    expect(capturedInsertRow.date_pinned).toBeUndefined();
   });
 
-  test('placementMode:anytime + date → row.placement_mode = anytime, date_pinned = 1 (date triggers pin unless caller set datePinned:false)', async function() {
+  test('placementMode:anytime + date → row.placement_mode = anytime', async function() {
     await handler({
       text: 'Anytime with date',
       placementMode: 'anytime',
@@ -172,32 +166,21 @@ describe('create_task placement_mode and date_pinned inference', function() {
     });
     expect(capturedInsertRow).toBeDefined();
     expect(capturedInsertRow.placement_mode).toBe('anytime');
-    expect(capturedInsertRow.date_pinned).toBe(1);
+    expect(capturedInsertRow.date_pinned).toBeUndefined();
   });
 
-  test('placementMode:anytime + date + explicit datePinned:false → row.placement_mode = anytime, date_pinned = 0', async function() {
-    await handler({
-      text: 'Anytime unpinned',
-      placementMode: 'anytime',
-      date: '2026-05-20',
-      datePinned: false
-    });
-    expect(capturedInsertRow).toBeDefined();
-    expect(capturedInsertRow.placement_mode).toBe('anytime');
-    expect(capturedInsertRow.date_pinned).toBe(0);
-  });
-
-  test('scheduledAt only (no date/time) → row.placement_mode = fixed, date_pinned = 1', async function() {
+  test('scheduledAt only → row.placement_mode = fixed', async function() {
     await handler({
       text: 'UTC scheduled',
-      scheduledAt: '2026-05-20T18:00:00Z'
+      scheduledAt: '2026-05-20T18:00:00Z',
+      placementMode: 'fixed'
     });
     expect(capturedInsertRow).toBeDefined();
     expect(capturedInsertRow.placement_mode).toBe('fixed');
-    expect(capturedInsertRow.date_pinned).toBe(1);
+    expect(capturedInsertRow.date_pinned).toBeUndefined();
   });
 
-  test('no date, no time, no scheduledAt → placement_mode not set (DB default anytime), date_pinned undefined', async function() {
+  test('no date, no time, no scheduledAt → placement_mode not set (DB default anytime)', async function() {
     await handler({
       text: 'No scheduling info'
     });
@@ -208,7 +191,7 @@ describe('create_task placement_mode and date_pinned inference', function() {
     expect(capturedInsertRow.date_pinned).toBeUndefined();
   });
 
-  test('explicit placementMode:fixed + date → row.placement_mode = fixed, date_pinned = 1 (auto-pin)', async function() {
+  test('explicit placementMode:fixed + date + time → row.placement_mode = fixed', async function() {
     await handler({
       text: 'Explicit fixed',
       placementMode: 'fixed',
@@ -217,10 +200,10 @@ describe('create_task placement_mode and date_pinned inference', function() {
     });
     expect(capturedInsertRow).toBeDefined();
     expect(capturedInsertRow.placement_mode).toBe('fixed');
-    expect(capturedInsertRow.date_pinned).toBe(1);
+    expect(capturedInsertRow.date_pinned).toBeUndefined();
   });
 
-  test('explicit placementMode:all_day + date → row.placement_mode = all_day, date_pinned = 1 (auto-pin)', async function() {
+  test('explicit placementMode:all_day + date → row.placement_mode = all_day', async function() {
     await handler({
       text: 'Explicit all_day',
       placementMode: 'all_day',
@@ -228,10 +211,10 @@ describe('create_task placement_mode and date_pinned inference', function() {
     });
     expect(capturedInsertRow).toBeDefined();
     expect(capturedInsertRow.placement_mode).toBe('all_day');
-    expect(capturedInsertRow.date_pinned).toBe(1);
+    expect(capturedInsertRow.date_pinned).toBeUndefined();
   });
 
-  test('explicit placementMode:time_blocks + date → row.placement_mode = time_blocks, date_pinned = 1 (auto-pin)', async function() {
+  test('explicit placementMode:time_blocks + date → row.placement_mode = time_blocks', async function() {
     await handler({
       text: 'Explicit time_blocks',
       placementMode: 'time_blocks',
@@ -239,36 +222,72 @@ describe('create_task placement_mode and date_pinned inference', function() {
     });
     expect(capturedInsertRow).toBeDefined();
     expect(capturedInsertRow.placement_mode).toBe('time_blocks');
-    expect(capturedInsertRow.date_pinned).toBe(1);
+    expect(capturedInsertRow.date_pinned).toBeUndefined();
   });
 
-  test('datePinned:true without date/time still sets date_pinned (caller intent flows through)', async function() {
+  test('datePinned input field is ignored — no date_pinned written to row', async function() {
+    // datePinned is no longer a recognized taskToRow field; it is silently dropped.
     await handler({
       text: 'Pinned but no date',
       datePinned: true
     });
     expect(capturedInsertRow).toBeDefined();
-    // auto-pin rule only fires when date || time || scheduledAt present AND datePinned === undefined
-    // taskToRow will set date_pinned because task.datePinned === true
-    expect(capturedInsertRow.date_pinned).toBe(1);
+    expect(capturedInsertRow.date_pinned).toBeUndefined();
   });
 
-  test('placementMode:fixed without date/time/scheduledAt → validation error', async function() {
+  test('placementMode:fixed without date/time → validation error', async function() {
     var result = await handler({
       text: 'Fixed no date',
       placementMode: 'fixed'
     });
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/placementMode "fixed" requires a date, time, or scheduledAt/i);
+    // validateTaskInput fires first with the cross-field check message
+    expect(result.content[0].text).toMatch(/placementMode "fixed" requires a date.*time/i);
   });
 
-  test('placementMode:invalid_value → falls back to anytime', async function() {
-    await handler({
+  test('placementMode:invalid_value → validation error (rejected before insert)', async function() {
+    var result = await handler({
       text: 'Invalid placement mode',
       placementMode: 'invalid_value'
     });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/placementMode.*is not valid/i);
+    expect(capturedInsertRow).toBeNull();
+  });
+});
+
+// ── W-W3: rigid field rejected/ignored by MCP ─────────────────────────────
+//
+// `rigid` is not declared in the MCP tool schema and was dropped in Phase 4.
+// Sending it in create_task must not write a `rigid` column to the DB row.
+
+describe('create_task rigid field (W-W3)', function() {
+  var handler;
+
+  beforeEach(function() {
+    capturedInsertRow = null;
+    handler = getCreateTaskHandler();
+  });
+
+  test('rigid:true in payload is silently ignored — not written to DB row', async function() {
+    await handler({
+      text: 'Task with rigid',
+      date: '2026-05-20',
+      rigid: true
+    });
     expect(capturedInsertRow).toBeDefined();
-    expect(capturedInsertRow.placement_mode).toBe('anytime');
+    // rigid must not appear on the row — it was removed and is not a valid column
+    expect(capturedInsertRow.rigid).toBeUndefined();
+  });
+
+  test('rigid:false in payload is silently ignored — not written to DB row', async function() {
+    await handler({
+      text: 'Task with rigid false',
+      date: '2026-05-20',
+      rigid: false
+    });
+    expect(capturedInsertRow).toBeDefined();
+    expect(capturedInsertRow.rigid).toBeUndefined();
   });
 });
 

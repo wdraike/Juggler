@@ -313,7 +313,6 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     // be displaced from their anchor when the slot is occupied, whereas truly
     // fixed calendar events cannot be moved.
     var fixed = pm === PLACEMENT_MODES.FIXED && !t.recurring;
-    var pinned = !!t.datePinned;
     var recurring = !!t.recurring;
     var flexWhen = !!t.flexWhen;
 
@@ -468,7 +467,6 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       whenParts: parseWhen(when),
       isFixedWhen: fixed,
       isAllDay: pm === PLACEMENT_MODES.ALL_DAY,
-      isPinned: pinned,
       // Generated instances without an explicit anchorMin are day-locked via
       // isGenerated — see findEarliestSlot for the clamping logic.
       isGenerated: !!t.generated && !recurring,
@@ -687,9 +685,9 @@ function tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements, cfg, env)
   if (!occ) return false;
   var start = item.anchorMin;
 
-  // Fixed/pinned overlap warning: detect conflict with already-placed locked entries.
+  // Fixed overlap warning: detect conflict with already-placed locked entries.
   var warnings = env && env.warnings;
-  if ((item.isFixedWhen || item.isPinned) && warnings) {
+  if (item.isRigid && warnings) {
     var existingFixed = (dayPlaced[item.anchorDate] || []).filter(function(p) {
       return p.locked && p.start < start + item.dur && p.start + p.dur > start;
     });
@@ -849,12 +847,12 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
     var di = indexOfDate(dates, item.deadlineDate);
     if (di >= 0) latestIdx = di;
   }
-  // Date-pinned non-recurring tasks are locked to their anchorDate — they must
+  // Fixed non-recurring tasks are locked to their anchorDate — they must
   // not be pulled forward to today or pushed to another day.
   // Also applies to generated instances (recurring instances without explicit
   // placement modes) that have no anchorMin — they represent occurrences assigned
   // to a specific day by expandRecurring.
-  if ((item.isPinned && !item.isRecurring) || (item.isGenerated && item.anchorMin == null)) {
+  if (item.isFixedWhen || (item.isGenerated && item.anchorMin == null)) {
     if (item.anchorDate) {
       var pi = indexOfDate(dates, item.anchorDate);
       if (pi >= 0) { earliestIdx = pi; latestIdx = pi; }
@@ -1378,8 +1376,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     var isRigidWithAnchor = item.isRecurring && item.isRigid && item.anchorMin != null;
     var isImmovable =
       (item.isMarker && item.anchorDate && item.anchorMin != null) ||
-      item.isPinned ||
-      (item.isFixedWhen && item.anchorMin != null) ||
+      item.isRigid ||
       isRigidWithAnchor;
     if (isImmovable) {
       // For rigid recurrings: check whether the anchor slot is already occupied

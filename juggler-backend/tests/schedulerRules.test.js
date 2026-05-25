@@ -33,12 +33,9 @@ function makeTask(overrides) {
     tools: [],
     recurring: false,
     split: false,
-    datePinned: false,
     generated: false,
     section: '',
-    ...overrides,
-    // Auto-pin when 'fixed' is in when (backward compat for tests)
-    ...(overrides && overrides.when && String(overrides.when).indexOf('fixed') >= 0 && !overrides.datePinned ? { datePinned: true } : {})
+    ...overrides
   };
 }
 
@@ -349,11 +346,11 @@ describe('Scheduler Rules', () => {
   // ─── GROUP 10: When-window constraints ───
   describe('Group 10: When-window constraints', () => {
     test('tasks placed within their declared time windows', () => {
-      // Use Monday (weekday) for clearer window boundaries. datePinned so they stay on TOMORROW.
+      // Use Monday (weekday) for clearer window boundaries. placementMode:'fixed' keeps them on TOMORROW.
       var tasks = [
-        makeTask({ id: 'morning_task', when: 'morning', dur: 30, date: TOMORROW, datePinned: true, text: 'Morning task' }),
-        makeTask({ id: 'evening_task', when: 'evening', dur: 30, date: TOMORROW, datePinned: true, text: 'Evening task' }),
-        makeTask({ id: 'anytime_task', when: '', dur: 30, date: TOMORROW, datePinned: true, text: 'Anytime task' }),
+        makeTask({ id: 'morning_task', when: 'morning', dur: 30, date: TOMORROW, placementMode: 'fixed', text: 'Morning task' }),
+        makeTask({ id: 'evening_task', when: 'evening', dur: 30, date: TOMORROW, placementMode: 'fixed', text: 'Evening task' }),
+        makeTask({ id: 'anytime_task', when: '', dur: 30, date: TOMORROW, placementMode: 'fixed', time: '10:00 AM', text: 'Anytime task' }),
       ];
       var result = run(tasks);
 
@@ -454,10 +451,10 @@ describe('Scheduler Rules', () => {
   // ─── GROUP 15: Location constraints ───
   describe('Group 15: Location constraints', () => {
     test('tasks only place during compatible location blocks', () => {
-      // Use Monday for work/home blocks. datePinned so they stay on TOMORROW.
+      // Use Monday for work/home blocks. placementMode:'fixed' keeps them on TOMORROW.
       var tasks = [
-        makeTask({ id: 'office_task', location: ['work'], dur: 60, date: TOMORROW, datePinned: true, text: 'Office task' }),
-        makeTask({ id: 'home_task', location: ['home'], dur: 60, date: TOMORROW, datePinned: true, text: 'Home task' }),
+        makeTask({ id: 'office_task', location: ['work'], dur: 60, date: TOMORROW, placementMode: 'fixed', when: 'biz', text: 'Office task' }),
+        makeTask({ id: 'home_task', location: ['home'], dur: 60, date: TOMORROW, placementMode: 'fixed', when: 'morning', text: 'Home task' }),
       ];
       var result = run(tasks);
 
@@ -581,8 +578,8 @@ describe('Scheduler Rules', () => {
   describe('Group 21: Backwards dependency detection', () => {
     test('backwards pinned deps are skipped, not fatal', () => {
       var tasks = [
-        makeTask({ id: 'early_pinned', pri: 'P2', dur: 30, date: TODAY, datePinned: true, dependsOn: ['late_pinned'], text: 'Early' }),
-        makeTask({ id: 'late_pinned', pri: 'P2', dur: 30, date: dateKey(5), datePinned: true, text: 'Late' }),
+        makeTask({ id: 'early_pinned', pri: 'P2', dur: 30, date: TODAY, placementMode: 'fixed', time: '10:00 AM', dependsOn: ['late_pinned'], text: 'Early' }),
+        makeTask({ id: 'late_pinned', pri: 'P2', dur: 30, date: dateKey(5), placementMode: 'fixed', time: '10:00 AM', text: 'Late' }),
       ];
       var result = run(tasks);
 
@@ -604,8 +601,8 @@ describe('Scheduler Rules', () => {
         tasks.push(makeTask({ id: 'p4_' + i, pri: 'P4', dur: 30, text: 'P4 filler ' + i }));
       }
       // P1 tasks dated tomorrow — compaction should pull these earlier
-      tasks.push(makeTask({ id: 'p1_late_a', pri: 'P1', dur: 30, date: TOMORROW, datePinned: true, text: 'P1 A' }));
-      tasks.push(makeTask({ id: 'p1_late_b', pri: 'P1', dur: 30, date: TOMORROW, datePinned: true, text: 'P1 B' }));
+      tasks.push(makeTask({ id: 'p1_late_a', pri: 'P1', dur: 30, date: TOMORROW, placementMode: 'fixed', time: '10:00 AM', text: 'P1 A' }));
+      tasks.push(makeTask({ id: 'p1_late_b', pri: 'P1', dur: 30, date: TOMORROW, placementMode: 'fixed', time: '11:00 AM', text: 'P1 B' }));
       var result = run(tasks);
 
       // Cross-day priority penalty should exist (P4 on earlier day, P1 on later)
@@ -670,10 +667,15 @@ describe('Scheduler Rules', () => {
         var nm = n % 60;
         tasks.push(makeTask({ id: 'night_f_' + n, placementMode: 'fixed', time: (nh > 12 ? nh - 12 : nh) + ':' + (nm < 10 ? '0' : '') + nm + ' PM', dur: 10, date: TOMORROW }));
       }
-      tasks.push(makeTask({ id: 'flex_eve', when: 'evening', dur: 60, date: TOMORROW, flexWhen: true, text: 'Flex evening', datePinned: true }));
+      // time_window + flexWhen=true is the correct combination to exercise flexWhen
+      // relaxation. placementMode='fixed' force-places tasks outside the queue entirely
+      // and never reaches the tryPlaceQueued relaxWhen path. Use time_window so the
+      // task enters the scheduler queue and the flexWhen=true relaxation fires when
+      // the evening window is full.
+      tasks.push(makeTask({ id: 'flex_eve', when: 'evening', dur: 60, date: TOMORROW, flexWhen: true, text: 'Flex evening', placementMode: 'time_window' }));
       var result = run(tasks);
 
-      // Flex evening should still be placed (relaxed outside evening window)
+      // Flex evening should still be placed (relaxed outside evening window via flexWhen)
       expect(isPlaced(result, 'flex_eve')).toBe(true);
     });
   });
@@ -802,27 +804,25 @@ describe('Scheduler Rules', () => {
     });
 
     test('B: cross-day priority inversion penalized', () => {
-      // Force P4 on today, P1 on tomorrow by making P4 a pinned recurring (always placed)
-      // and P1 dated tomorrow
+      // Force P4 on today, P1 on tomorrow using placementMode:'fixed' so they stay on their dates.
       var tasks = [
-        makeTask({ id: 'p4_today', pri: 'P4', dur: 30, datePinned: true, text: 'P4 pinned today' }),
-        makeTask({ id: 'p1_tomorrow', pri: 'P1', dur: 30, date: TOMORROW, datePinned: true, text: 'P1 pinned tomorrow' }),
+        makeTask({ id: 'p4_today', pri: 'P4', dur: 30, placementMode: 'fixed', time: '10:00 AM', text: 'P4 pinned today' }),
+        makeTask({ id: 'p1_tomorrow', pri: 'P1', dur: 30, date: TOMORROW, placementMode: 'fixed', time: '10:00 AM', text: 'P1 pinned tomorrow' }),
       ];
       var result = run(tasks);
       expect(result.score.breakdown.crossDayPri).toBeGreaterThan(0);
     });
 
     test('C: unplaced penalty exists when tasks cannot be placed', () => {
-      // Create tasks with impossible constraints: weekday-only on a Sunday with datePinned
-      // so they can't overflow to Monday
+      // TODAY is Sunday (2026-03-22). weekday-only tasks cannot be placed on Sunday
+      // and have a deadline of TODAY — they will miss their deadline and trigger
+      // the unplaced/deadline-miss penalty without using the fixed force-placement pass.
       var tasks = [
-        makeTask({ id: 'p1_impossible', pri: 'P1', dur: 780, date: TODAY, datePinned: true, text: 'P1 too big for today' }),
-        makeTask({ id: 'p1_also_big', pri: 'P1', dur: 780, date: TODAY, datePinned: true, text: 'P1 also too big' }),
+        makeTask({ id: 'p1_impossible', pri: 'P1', dur: 60, date: TODAY, dayReq: 'weekday', deadline: TODAY, text: 'P1 weekday-only on Sunday' }),
+        makeTask({ id: 'p1_also_big', pri: 'P1', dur: 60, date: TODAY, dayReq: 'weekday', deadline: TODAY, text: 'P1 also weekday-only on Sunday' }),
       ];
       var result = run(tasks);
-      // At least one should be unplaced (both need 780m but today only has ~780m)
-      var placed = [isPlaced(result, 'p1_impossible'), isPlaced(result, 'p1_also_big')].filter(Boolean).length;
-      expect(placed).toBeLessThanOrEqual(1);
+      // Weekday-only tasks on Sunday cannot be placed — unplaced score must be non-zero
       expect(result.score.breakdown.unplaced).toBeGreaterThan(0);
     });
   });
@@ -1193,7 +1193,7 @@ describe('Scheduler Rules', () => {
         var h = Math.floor(i / 60);
         tasks.push(makeTask({ id: 'event_' + i, placementMode: 'fixed', time: h + ':00 ' + (h >= 12 ? 'PM' : 'AM'), dur: 45 }));
       }
-      tasks.push(makeTask({ id: 'big_split', pri: 'P2', dur: 60, split: true, splitMin: 15, datePinned: true, text: 'Big split' }));
+      tasks.push(makeTask({ id: 'big_split', pri: 'P2', dur: 60, split: true, splitMin: 15, placementMode: 'fixed', text: 'Big split' }));
       var result = run(tasks);
       expect(isPlaced(result, 'big_split')).toBe(true);
     });
@@ -1269,17 +1269,26 @@ describe('Scheduler Rules', () => {
     // contract — placements are now sourced exclusively from `result.dayPlacements`.
     // Persist-side tasks_v writes happen in runSchedule.js via dayPlacements,
     // not via a separate taskUpdates map.
-    test('unplaced tasks not in dayPlacements', () => {
+    test('fixed tasks with explicit time anchors are all placed (force-placement guarantee)', () => {
+      // 30 fixed tasks with explicit time anchors spread every 30 minutes from 6 AM.
+      // They overlap heavily (30×60 min = 1800 min vs ~1020 min day capacity) but
+      // fixed tasks force-place regardless of conflict — so all 30 must appear in
+      // dayPlacements. This verifies the output-contract: fixed tasks are never left
+      // in unplaced when they have an explicit anchor.
       var tasks = [];
       for (var i = 0; i < 30; i++) {
-        tasks.push(makeTask({ id: 'load_' + i, pri: 'P2', dur: 60, datePinned: true }));
+        // Spread anchors every 30 minutes from 6:00 AM (360 min) to 8:30 PM (1230 min).
+        var totalMin = 360 + i * 30;
+        var h = Math.floor(totalMin / 60);
+        var m = totalMin % 60;
+        var ampm = h >= 12 ? 'PM' : 'AM';
+        var dh = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+        var timeStr = dh + ':' + (m < 10 ? '0' : '') + m + ' ' + ampm;
+        tasks.push(makeTask({ id: 'load_' + i, pri: 'P2', dur: 60, placementMode: 'fixed', time: timeStr, date: TODAY }));
       }
       var result = run(tasks);
-      if (result.unplaced && result.unplaced.length > 0) {
-        result.unplaced.forEach(function(u) {
-          expect(u.id).toBeDefined();
-          expect(isPlaced(result, u.id)).toBe(false);
-        });
+      for (var j = 0; j < 30; j++) {
+        expect(isPlaced(result, 'load_' + j)).toBe(true);
       }
     });
 
@@ -1486,7 +1495,7 @@ describe('Scheduler Rules', () => {
   describe('Group 65: Task with multiple when tags', () => {
     test('task with when=morning,evening can place in either window', () => {
       var tasks = [
-        makeTask({ id: 'multi_when', when: 'morning,evening', dur: 30, date: TOMORROW, datePinned: true, text: 'Morning or evening' }),
+        makeTask({ id: 'multi_when', when: 'morning,evening', dur: 30, date: TOMORROW, placementMode: 'fixed', text: 'Morning or evening' }),
       ];
       var result = run(tasks);
 
@@ -1499,11 +1508,11 @@ describe('Scheduler Rules', () => {
     });
   });
 
-  // ─── GROUP 66: datePinned prevents moving earlier ───
-  describe('Group 66: Date-pinned task stays on its date', () => {
-    test('pinned future task not pulled to today', () => {
+  // ─── GROUP 66: fixed placement_mode prevents moving to an earlier date ───
+  describe('Group 66: Fixed task stays on its assigned date', () => {
+    test('fixed future task not pulled to today', () => {
       var tasks = [
-        makeTask({ id: 'pinned_future', pri: 'P1', dur: 30, date: dateKey(3), datePinned: true, text: 'Pinned to day+3' }),
+        makeTask({ id: 'pinned_future', pri: 'P1', dur: 30, date: dateKey(3), placementMode: 'fixed', time: '10:00 AM', text: 'Fixed to day+3' }),
       ];
       var result = run(tasks);
 
@@ -1549,8 +1558,8 @@ describe('Scheduler Rules', () => {
   describe('Group 69: Scheduler warnings', () => {
     test('warnings array exists and contains backward dep warnings', () => {
       var tasks = [
-        makeTask({ id: 'warn_a', pri: 'P2', dur: 30, date: TODAY, datePinned: true, dependsOn: ['warn_b'] }),
-        makeTask({ id: 'warn_b', pri: 'P2', dur: 30, date: dateKey(5), datePinned: true }),
+        makeTask({ id: 'warn_a', pri: 'P2', dur: 30, date: TODAY, placementMode: 'fixed', time: '10:00 AM', dependsOn: ['warn_b'] }),
+        makeTask({ id: 'warn_b', pri: 'P2', dur: 30, date: dateKey(5), placementMode: 'fixed', time: '10:00 AM' }),
       ];
       var result = run(tasks);
       expect(result.warnings).toBeDefined();
@@ -1678,6 +1687,34 @@ describe('Scheduler Rules', () => {
           });
         });
       }
+    });
+  });
+
+  // ─── GROUP 71: Unknown placementMode ───
+  describe('Group 71: Unknown placementMode falls back to anytime behavior', () => {
+    test('task with unknown placementMode reaches scheduler, is placed, and is not anchored as fixed', () => {
+      // The scheduler reads: var pm = t.placementMode || PLACEMENT_MODES.ANYTIME
+      // An unrecognised value is neither FIXED, ALL_DAY, nor REMINDER — so it
+      // enters the greedy pool and is placed without crashing. It does NOT go
+      // through the force-placement (rigid) pass because only FIXED === rigid.
+      var tasks = [
+        makeTask({ id: 'unknown_pm', pri: 'P2', dur: 30, placementMode: 'unknown_value', text: 'Unknown mode task' }),
+      ];
+      var result = run(tasks);
+
+      // Must not crash
+      expect(result).toBeDefined();
+      expect(result.dayPlacements).toBeDefined();
+
+      // Must be placed (no special exclusion for unknown modes)
+      expect(isPlaced(result, 'unknown_pm')).toBe(true);
+
+      // Must NOT be locked/anchored at a fixed time (not treated as FIXED)
+      var parts = findPlacements(result, 'unknown_pm');
+      expect(parts.length).toBeGreaterThan(0);
+      parts.forEach(function(p) {
+        expect(p.locked).toBe(false);
+      });
     });
   });
 

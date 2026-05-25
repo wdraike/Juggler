@@ -113,7 +113,7 @@ function throttle() {
 
 /**
  * Build the fields to write to a task when pulling an event edit back from a provider.
- * Promotion logic (placement_mode=fixed, date_pinned, marker clearing) lives in applyEventToTaskFields.
+ * Promotion logic (placement_mode=fixed, marker clearing) lives in applyEventToTaskFields.
  */
 function _buildPullFields(event, task, tz, adapter) {
   return adapter.applyEventToTaskFields(event, tz, task);
@@ -352,7 +352,7 @@ async function sync(req, res) {
       t.marker = !!r.marker;
       t.user_id = r.user_id; // needed by Apple adapter's createEvent
       // rowToTask only derives local date/time for user-anchored tasks
-      // (date_pinned / recurring / generated / marker / when contains 'fixed')
+      // (recurring / generated / marker / placement_mode = 'fixed')
       // so the scheduler doesn't re-bias off stale auto-placements. Sync is
       // a different consumer: it needs the local date/time for buildEventBody
       // and for the push-filter (!time && when !== 'allday' → skip). Without
@@ -1691,6 +1691,7 @@ async function sync(req, res) {
             task_id: existingTask.id,
             provider_event_id: evId,
             origin: origin,
+            calendar_id: newEvent._calendarId || null,
             last_pushed_hash: taskHash(existingTask),
             last_user_hash: userHash(existingTask),
             last_pulled_hash: pAdapter2.eventHash(newEvent),
@@ -1722,6 +1723,7 @@ async function sync(req, res) {
             task_id: null,
             provider_event_id: evId,
             origin: pid2,
+            calendar_id: newEvent._calendarId || null,
             last_pushed_hash: null,
             last_user_hash: null,
             last_pulled_hash: pAdapter2.eventHash(newEvent),
@@ -1759,6 +1761,7 @@ async function sync(req, res) {
               task_id: orphanMatch.id,
               provider_event_id: evId,
               origin: JUGGLER_ORIGIN,
+              calendar_id: newEvent._calendarId || null,
               last_pushed_hash: taskHash(orphanMatch),
               last_user_hash: userHash(orphanMatch),
               last_pulled_hash: pAdapter2.eventHash(newEvent),
@@ -1817,6 +1820,7 @@ async function sync(req, res) {
               task_id: dupTask.id,
               provider_event_id: newEvent.id,
               origin: pid2,
+              calendar_id: newEvent._calendarId || null,
               last_pushed_hash: taskHash(dupTask),
               last_user_hash: userHash(dupTask),
               last_pulled_hash: pAdapter2.eventHash(newEvent),
@@ -1860,7 +1864,6 @@ async function sync(req, res) {
             // For non-all-day events `when` stays empty — placement_mode='fixed'
             // is now the canonical fixed signal.
             when: newEvent.isAllDay ? 'allday' : '',
-            date_pinned: newEvent.isAllDay ? 0 : 1,
             placement_mode: newEvent.isTransparent ? PLACEMENT_MODES.REMINDER : (newEvent.isAllDay ? PLACEMENT_MODES.ALL_DAY : (isReminder ? PLACEMENT_MODES.REMINDER : PLACEMENT_MODES.FIXED)),
             [eventIdCol]: newEvent.id
           };
@@ -1877,6 +1880,7 @@ async function sync(req, res) {
             task_id: newTaskId,
             provider_event_id: newEvent.id,
             origin: pid2,
+            calendar_id: newEvent._calendarId || null,
             last_pushed_hash: taskHash(newTaskObj),
             last_user_hash: userHash(newTaskObj),
             last_pulled_hash: pAdapter2.eventHash(newEvent),

@@ -134,6 +134,52 @@ const writeRateLimiter = rateLimit({
 });
 
 // OAuth proxy + discovery routes (auth-service handles Google SSO, etc.)
+// Dev mode: auto-approve OAuth for MCP client testing
+if (process.env.NODE_ENV === 'development') {
+  app.get('/oauth/authorize', (req, res) => {
+    const redirectUri = req.query.redirect_uri;
+    const state = req.query.state;
+    const code = 'dev-code-' + Date.now();
+    if (!redirectUri) {
+      return res.status(400).json({ error: 'invalid_request', error_description: 'redirect_uri required' });
+    }
+    var allowedHosts = ['localhost', '127.0.0.1'];
+    var parsedUri;
+    try { parsedUri = new URL(redirectUri); } catch (e) {
+      return res.status(400).json({ error: 'invalid_request', error_description: 'redirect_uri is not a valid URL' });
+    }
+    if (!allowedHosts.includes(parsedUri.hostname)) {
+      return res.status(400).json({ error: 'invalid_request', error_description: 'redirect_uri host not permitted' });
+    }
+    const sep = redirectUri.includes('?') ? '&' : '?';
+    res.redirect(`${redirectUri}${sep}code=${encodeURIComponent(code)}&state=${encodeURIComponent(state || '')}`);
+  });
+
+  app.post('/oauth/token', (req, res) => {
+    const code = req.body?.code || req.query?.code;
+    if (code && code.startsWith('dev-code-')) {
+      return res.json({
+        access_token: 'dev-token',
+        token_type: 'Bearer',
+        expires_in: 3600
+      });
+    }
+    return res.status(400).json({ error: 'invalid_grant', error_description: 'Invalid authorization code' });
+  });
+
+  // Dev: static client registration (bypass auth-service rate limits)
+  app.post('/oauth/register', (req, res) => {
+    res.json({
+      client_id: 'dev-client',
+      client_secret: 'dev-secret',
+      client_name: 'dev-client',
+      redirect_uris: req.body?.redirect_uris,
+      grant_types: ['authorization_code'],
+      response_types: ['code'],
+      token_endpoint_auth_method: 'client_secret_post'
+    });
+  });
+}
 createOAuthProxyRoutes(app, { mcpEndpoint: '/mcp' });
 
 // MCP Streamable HTTP (stateless, own rate limit)

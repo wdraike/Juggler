@@ -173,6 +173,7 @@ export default function WhenSection(props) {
     recurStart, onRecurStartChange,
     recurEnd, onRecurEndChange,
     recurIsAnchorDependent,
+    // datePinned and onDatePinnedChange are intentionally omitted — removed in When-mode redesign
     configWarnings,
     deadline, onDeadlineChange,
     startAfter, onStartAfterChange,
@@ -182,7 +183,6 @@ export default function WhenSection(props) {
     travelAfter, onTravelAfterChange,
     marker, onMarkerChange,
     flexWhen, onFlexWhenChange,
-    datePinned, onDatePinnedChange,
     dayReq, onDayReqChange,
     when, onWhenChange,
     timeRemaining, onTimeRemainingChange,
@@ -230,7 +230,7 @@ export default function WhenSection(props) {
   var isRecurring = !!recurring;
   var whenPartsLocal = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
   var isCalManaged = task && !!(task.gcalEventId || task.msftEventId || task.appleEventId);
-  var isFixed = !!datePinned || (placementMode === 'fixed' && isCalManaged);
+  var isFixed = placementMode === 'fixed' && isCalManaged;
   // gcal > msft > apple priority: first provider wins when multiple IDs present (e.g. during migration or dual-sync)
   var appleCalLabel = task && task.appleCalendarName ? (task.appleCalendarName.length > 30 ? task.appleCalendarName.slice(0, 28) + '…' : task.appleCalendarName) : null;
   var calendarSource = task && (task.gcalEventId ? CAL_PROVIDER_NAMES.gcal : task.msftEventId ? CAL_PROVIDER_NAMES.msft : task.appleEventId ? (appleCalLabel ? CAL_PROVIDER_NAMES.apple + ': ' + appleCalLabel : CAL_PROVIDER_NAMES.apple) : null);
@@ -248,13 +248,6 @@ export default function WhenSection(props) {
           <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
             <input type="date" value={date} onChange={e => onDateChange(e.target.value)}
               style={{ ...iStyle, width: 130 }} />
-            <button
-              title={datePinned ? 'Date is pinned — scheduler will not move this task' : 'Pin date — prevent scheduler from moving this task'}
-              onClick={function() { onDatePinnedChange(!datePinned); }}
-              style={{ ...togStyle(datePinned, '#C8942A'), fontSize: 9, height: BTN_H }}
-            >
-              {datePinned ? '📍 Pinned' : '📌 Pin'}
-            </button>
           </div>
         </label>
         {effectiveMode !== 'all_day' && (<>
@@ -301,9 +294,6 @@ export default function WhenSection(props) {
         {endTimeError && <div style={{ fontSize: 9, color: TH.amberText, marginBottom: 4 }}>{endTimeError}</div>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
           <TimezoneSelector taskTz={taskTz} onChangeTz={onChangeTz} TH={TH} />
-          <button onClick={() => onRigidChange(!rigid)} style={{ ...togStyle(rigid, '#2D6A4F'), fontSize: 9 }}>
-            {rigid ? '📌 Fixed' : '🔀 Float'}
-          </button>
         </div>
       </>)}
 
@@ -311,21 +301,24 @@ export default function WhenSection(props) {
         <div style={{ marginTop: 8 }}>
           {isFixed && (
             <div style={{ fontSize: 10, color: TH.amberText, marginBottom: 4, fontWeight: 500, background: TH.amberBg, border: '1px solid ' + TH.amberBorder, borderRadius: 4, padding: '4px 8px' }}>
-              {datePinned ? '📍 Date is pinned — unpin to change scheduling mode.' : ('📅 Calendar-managed' + (calendarSource ? ' by ' + calendarSource : '') + ' — scheduling is set by the source calendar.')}
+              {'📅 Calendar-managed' + (calendarSource ? ' by ' + calendarSource : '') + ' — scheduling is set by the source calendar.'}
             </div>
           )}
           <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, opacity: isFixed ? 0.4 : 1 }}>Scheduling mode</div>
-          {/* Three-button mode selector — mirrors recurring section; all task types get the same three modes */}
-          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 6, opacity: isFixed ? 0.35 : 1, pointerEvents: isFixed ? 'none' : undefined }}>
+          {/* Mode selector — Anytime / Time window / Time blocks / All Day / Fixed */}
+          <div role="group" aria-label="Scheduling mode" style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginBottom: 6, opacity: isFixed ? 0.35 : 1, pointerEvents: isFixed ? 'none' : undefined }}>
             <button title="No time restriction — the scheduler can place this in any available slot"
+              aria-pressed={effectiveMode === 'anytime'}
               tabIndex={isFixed ? -1 : 0}
               onClick={function() { onModeChange('anytime'); onWhenChange(''); }}
               style={togStyle(effectiveMode === 'anytime', '#2D6A4F')}>🔄 Anytime</button>
             <button title="Schedule near a preferred time ± a flex window"
+              aria-pressed={effectiveMode === 'time_window'}
               tabIndex={isFixed ? -1 : 0}
               onClick={function() { onModeChange('time_window'); }}
               style={togStyle(effectiveMode === 'time_window', '#C8942A')}>⏰ Time window</button>
             <button title="Restrict to named time block windows (morning, afternoon, etc.)"
+              aria-pressed={effectiveMode === 'time_blocks'}
               tabIndex={isFixed ? -1 : 0}
               onClick={function() {
                 onModeChange('time_blocks');
@@ -333,9 +326,15 @@ export default function WhenSection(props) {
               }}
               style={togStyle(effectiveMode === 'time_blocks', '#4338CA')}>📅 Time blocks</button>
             <button title="Spans the entire day"
+              aria-pressed={effectiveMode === 'all_day'}
               tabIndex={isFixed ? -1 : 0}
-              onClick={function() { onModeChange('all_day'); onDatePinnedChange(false); onWhenChange(''); onSplitChange(false); onTravelBeforeChange(0); onTravelAfterChange(0); }}
+              onClick={function() { onModeChange('all_day'); onWhenChange(''); onSplitChange(false); onTravelBeforeChange(0); onTravelAfterChange(0); }}
               style={togStyle(effectiveMode === 'all_day', '#C8942A')}>☀️ All Day</button>
+            <button title="Exact date and time — immovable"
+              aria-pressed={effectiveMode === 'fixed'}
+              tabIndex={isFixed ? -1 : 0}
+              onClick={function() { onModeChange('fixed'); onWhenChange(''); onSplitChange(false); onTravelBeforeChange(0); onTravelAfterChange(0); }}
+              style={togStyle(effectiveMode === 'fixed', '#7C3AED')}>📌 Fixed</button>
           </div>
 
           {/* Time window: time input + ± window select (shown when placementMode === 'time_window') */}
@@ -419,20 +418,69 @@ export default function WhenSection(props) {
 
       {recurring && !marker && (
         <div style={{ marginTop: 8 }}>
-          <div style={{ display: 'flex', gap: 3, marginBottom: 6 }}>
-            <button onClick={function() {
+          {effectiveMode === 'fixed' ? (
+            // placementMode='fixed' is not supported on recurring tasks — the scheduler
+            // treats recurring+fixed as anytime (line 315: fixed = pm===FIXED && !t.recurring).
+            // Two cases:
+            //   1. Calendar-managed (gcal/msft/apple link present): show the calendar banner
+            //      and suppress the mode selector — the source calendar controls scheduling.
+            //   2. Not calendar-managed: fixed is an invalid state for recurring tasks.
+            //      Show an explanation and render the four valid mode buttons so the user
+            //      has a clear exit path.
+            isCalManaged ? (
+            <div style={{ fontSize: 10, color: TH.amberText, marginBottom: 4, fontWeight: 500, background: TH.amberBg, border: '1px solid ' + TH.amberBorder, borderRadius: 4, padding: '4px 8px' }}>
+              {'📅 Calendar-managed — scheduling mode is controlled by the source calendar.'}
+            </div>
+            ) : (
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ fontSize: 10, color: TH.amberText, marginBottom: 4, fontWeight: 500, background: TH.amberBg, border: '1px solid ' + TH.amberBorder, borderRadius: 4, padding: '4px 8px' }}>
+                {'Fixed mode is not available for recurring tasks. Select a scheduling mode:'}
+              </div>
+              <div role="group" aria-label="Scheduling mode" style={{ display: 'flex', gap: 3, marginBottom: 6 }}>
+                <button aria-pressed={false} onClick={function() {
+                  onModeChange('anytime');
+                  onHasPreferredTimeChange(false);
+                  onTimeChange('');
+                  onRigidChange(false);
+                  onWhenChange('');
+                }} style={togStyle(false, '#2D6A4F')}>🔄 Anytime</button>
+                <button aria-pressed={false} onClick={function() {
+                  onModeChange('time_window');
+                  onHasPreferredTimeChange(true);
+                  if (activeTags.length !== 1) onWhenChange('morning');
+                }} style={togStyle(false, '#C8942A')}>⏰ Time window</button>
+                <button aria-pressed={false} onClick={function() {
+                  onModeChange('time_blocks');
+                  onHasPreferredTimeChange(false);
+                  onTimeChange('');
+                  onRigidChange(false);
+                  if (activeTags.length <= 1) onWhenChange('morning,lunch,afternoon,evening,night');
+                }} style={togStyle(false, '#4338CA')}>📅 Time blocks</button>
+                <button title="Spans the entire day" aria-pressed={false} onClick={function() {
+                  onModeChange('all_day');
+                  onHasPreferredTimeChange(false);
+                  onTimeChange('');
+                  onRigidChange(false);
+                  onWhenChange('');
+                }} style={togStyle(false, '#C8942A')}>☀️ All Day</button>
+              </div>
+            </div>
+            )
+          ) : (
+          <div role="group" aria-label="Scheduling mode" style={{ display: 'flex', gap: 3, marginBottom: 6 }}>
+            <button aria-pressed={effectiveMode === 'anytime'} onClick={function() {
               onModeChange('anytime');
               onHasPreferredTimeChange(false);
               onTimeChange('');
               onRigidChange(false);
               onWhenChange('');
             }} style={togStyle(effectiveMode === 'anytime', '#2D6A4F')}>🔄 Anytime</button>
-            <button onClick={function() {
+            <button aria-pressed={effectiveMode === 'time_window'} onClick={function() {
               onModeChange('time_window');
               onHasPreferredTimeChange(true);
               if (activeTags.length !== 1) onWhenChange('morning');
             }} style={togStyle(effectiveMode === 'time_window', '#C8942A')}>⏰ Time window</button>
-            <button onClick={function() {
+            <button aria-pressed={effectiveMode === 'time_blocks'} onClick={function() {
               onModeChange('time_blocks');
               onHasPreferredTimeChange(false);
               onTimeChange('');
@@ -440,6 +488,7 @@ export default function WhenSection(props) {
               if (activeTags.length <= 1) onWhenChange('morning,lunch,afternoon,evening,night');
             }} style={togStyle(effectiveMode === 'time_blocks', '#4338CA')}>📅 Time blocks</button>
             <button title="Spans the entire day"
+              aria-pressed={effectiveMode === 'all_day'}
               onClick={function() {
                 onModeChange('all_day');
                 onHasPreferredTimeChange(false);
@@ -449,6 +498,7 @@ export default function WhenSection(props) {
               }}
               style={togStyle(effectiveMode === 'all_day', '#C8942A')}>☀️ All Day</button>
           </div>
+          )}
 
           {hasPreferredTime ? (
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-end' }}>

@@ -938,7 +938,6 @@ async function runScheduleAndPersist(userId, _retries, options) {
       travelAfter: master.travelAfter,
       dependsOn: master.dependsOn || [],
       marker: master.marker,
-      placementMode: master.placementMode,
       flexWhen: master.flexWhen,
       recur: master.recur,
       recurStart: master.recurStart,
@@ -950,7 +949,6 @@ async function runScheduleAndPersist(userId, _retries, options) {
       day: row.date ? DAY_NAMES[parseDate(row.date).getDay()] : null,
       time: row.split_ordinal === 1 ? row.time : null,
       status: '',
-      datePinned: false,
       splitOrdinal: row.split_ordinal,
       splitTotal: row.split_total,
       splitGroup: row.split_group || null,
@@ -1195,7 +1193,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // not the block size. Without this, the cal-sync uses the master's dur
     // (e.g. 30 min) and pushes a 30-min GCal event even though Juggler shows
     // a 3.5-hour block — the "inaccurate split task information" in GCal.
-    if (original.datePinned) {
+    if (original.placementMode === PLACEMENT_MODES.FIXED) {
       var pinnedPlacedDur = placement.dur;
       var pinnedStoredDur = Number(original.dur) || 0;
       if (pinnedPlacedDur && pinnedPlacedDur !== pinnedStoredDur) {
@@ -1239,7 +1237,6 @@ async function runScheduleAndPersist(userId, _retries, options) {
       time: newTime || null,
       unscheduled: null,
       overdue: 0,
-      date_pinned: 0,
       updated_at: db.fn.now()
     };
     // Don't overwrite instance.dur when time_remaining drives the effective
@@ -1321,7 +1318,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var original = taskById[t.id];
     if (!original) return;
     if (original.taskType === 'recurring_template') return;
-    if (original.datePinned) return;
+    if (original.placementMode === PLACEMENT_MODES.FIXED) return;
     if (original.marker) return;
     // Recurring instances: two cases based on whether they've ever been placed.
     //   - scheduled_at set: keep last-proposed position on calendar; the overdue
@@ -1473,9 +1470,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       if (!rawRowPast) return;  // not a real DB task
 
       // Fixed tasks are user-anchored — never move them, even if past.
-      if (t.datePinned) return;
-      // Date-pinned tasks are user-set — never move them.
-      if (t.datePinned) return;
+      if (t.placementMode === PLACEMENT_MODES.FIXED) return;
       // Markers are non-blocking — never move them.
       if (t.marker) return;
 
@@ -1551,7 +1546,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var chunk = scheduledAtUpdates.slice(ci, ci + CHUNK);
     var ids = chunk.map(function(pu) { return pu.id; });
 
-    var updateFields = { unscheduled: null, date_pinned: 0, overdue: 0, updated_at: db.fn.now() };
+    var updateFields = { unscheduled: null, overdue: 0, updated_at: db.fn.now() };
 
     // Build CASE for scheduled_at (only include tasks that have a new scheduled_at)
     var saChunk = chunk.filter(function(pu) { return !!pu.dbUpdate.scheduled_at; });
@@ -2110,7 +2105,7 @@ async function getSchedulePlacements(userId, options) {
       // Past recurringTasks missed their day — not schedulable
       if (t.recurring && isPast) return;
       // Past fixed tasks — not schedulable
-      if (isPast && t.datePinned) return;
+      if (isPast && t.placementMode === PLACEMENT_MODES.FIXED) return;
       unplaced.push(t);
     });
 

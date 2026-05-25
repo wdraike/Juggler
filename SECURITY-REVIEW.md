@@ -11,7 +11,7 @@
 | Severity | Count |
 |----------|-------|
 | CRITICAL | 3 |
-| HIGH     | 11 |
+| HIGH     | 12 |
 
 ---
 
@@ -224,10 +224,96 @@ If `tasks_with_sync_v` ever returns `null` event IDs for an active ledger row (e
 
 ---
 
+### H-12 — `when` field accepts colons; `prev_when` split-on-colon parser then restores corrupted data
+
+**Location (write):** `task.controller.js` lines 1117–1127 (drag-pin encoder)
+**Location (parse):** `task.controller.js` lines 2419–2425 (unpin parser)
+**Location (schema):** `task.schema.js` lines 25, 37–41
+
+**Evidence:**
+
+`taskUpdateSchema` defines `when` as `z.string().max(200).optional()` — no character whitelist. Both schemas call `.passthrough()`. A user can PATCH their own task with:
+
+```
+PATCH /api/tasks/<own-task-id>
+{ "when": "mode:fixed:morning" }
+```
+
+This stores `when = "mode:fixed:morning"` in the DB (VARCHAR 255, no DB-level constraint on the character set). No validation rejects colons in the `when` field.
+
+Later, when a drag-pin fires on the same task (line 1126):
+
+```js
+var preDragWhen = existing.when || '';   // => "mode:fixed:morning"
+row.prev_when = 'mode:' + preDragMode + ':' + preDragWhen;
+// stored: "mode:anytime:mode:fixed:morning"
+```
+
+At unpin time (lines 2421–2425):
+
+```js
+var parts = existing.prev_when.split(':');
+// parts = ['mode', 'anytime', 'mode', 'fixed', 'morning']
+var candidateMode = parts[1];              // => 'anytime'  (correct by coincidence)
+restoredWhen = parts.slice(2).join(':');  // => 'mode:fixed:morning'  (mangled garbage)
+```
+
+`updates.when` is then written back as `"mode:fixed:morning"`, a value that does not match any valid scheduler time-block tag. The scheduler receives this on every subsequent schedule run and silently misplaces the task. The mangled value is also echoed in the HTTP response body (line 2445).
+
+The attack is fully self-contained within the attacker's own data boundary (no other user is affected), but it corrupts task scheduling state in a way the user cannot easily diagnose or recover from by normal UI means, since the UI only surfaces the drag-pin restore flow.
+
+**Fix:** Add a colon-rejection regex to both schemas:
+
+```js
+when: z.string().max(200).regex(/^[^:]*$/, 'when tags may not contain colons').optional()
+```
+
+Alternatively, encode `prev_when` with a delimiter that cannot appear in `when` (e.g., store as JSON object `{ mode, when }` rather than a colon-delimited string).
+
+---
+
+## MEDIUM Findings
+
+### M-1 — `cal_sync_ledger` query in `fetchTaskWithEventIds` lacks `user_id` filter
+
+**Location:** `task.controller.js` lines 207–209
+
+```js
+dbOrTrx('cal_sync_ledger')
+  .where({ task_id: id, status: 'active' })
+  .select('provider', 'provider_event_id', 'origin', 'event_url', 'calendar_id')
+```
+
+`user_id` is absent from the WHERE clause. The task-ownership check on `tasks_v` (line 206) prevents an attacker from reaching this code for a task they do not own — `fetchTaskWithEventIds` returns `null` if the task row does not match — so there is no direct exploit path today. However, this is a defence-in-depth gap: if task IDs are ever reused (soft-delete + re-insert patterns) or a future call path queries the ledger without the prior task ownership gate, ledger rows from a different user could be attached.
+
+**Fix:**
+
+```js
+dbOrTrx('cal_sync_ledger')
+  .where({ task_id: id, user_id: userId, status: 'active' })
+```
+
+---
+
+## LOW Findings
+
+### L-1 — Schema `.passthrough()` is a permanent schema drift risk
+
+**Location:** `task.schema.js` lines 35, 41
+
+Both schemas use `.passthrough()`, forwarding any unrecognised body field to the controller. `taskToRow` maps only known properties, so truly unknown fields do not reach the DB today. But every new property added to `taskToRow` without a schema counterpart inherits no input validation — a silent gap that grows over time.
+
+`prev_when` / `prevWhen` is not currently in `taskToRow` so cannot be written via this path today.
+
+**Fix:** Replace `.passthrough()` with `.strip()` (Zod default) once all legitimate client fields are enumerated. Document the transitional use of `.passthrough()` with a tracking ticket in the meantime.
+
+---
+
 ## Methodology
 
-1. Read both files in full (task.controller.js 2472 lines, tasks.js 694 lines).
+1. Read `task.controller.js` (2472 lines) and `tasks.js` (694 lines) in full, plus `tasks-write.js`, `task.schema.js`, `task.routes.js`, and `placementModes.js`.
 2. Cross-referenced every guard in REST against the MCP parallel path.
-3. Probed for: IDOR, SQL injection, mass assignment, state-machine bypasses, transaction atomicity, cal-sync guard bypasses, disabled-task bypasses, batch size limits, and unbounded queries.
-4. Verified that `user_id` is consistently bound in both REST (`req.user.id`) and MCP (`registerTaskTools` closure), so no horizontal privilege escalation was found.
+3. Probed for: IDOR, SQL injection, mass assignment, state-machine bypasses, transaction atomicity, cal-sync guard bypasses, disabled-task bypasses, batch size limits, unbounded queries, delimiter-injection in encoded fields.
+4. Verified `user_id` is consistently bound in both REST (`req.user.id`) and MCP (`registerTaskTools` closure) — no horizontal privilege escalation found.
 5. Confirmed `JSON_CONTAINS` and Knex parameterized queries are used correctly — no SQL injection vectors in scope.
+6. Confirmed `unpinTask` ownership is double-enforced: `fetchTaskWithEventIds` scopes by `user_id` at fetch; `tasksWrite.updateTaskById` scopes by `user_id` at write; route is covered by `authenticateJWT`.

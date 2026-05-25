@@ -313,11 +313,10 @@ describe('batchUpdateTasks', () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
-// unpinTask
-// ═══════════════════════════════════════════════════════════════
+// unpinTask endpoint removed — placement_mode now set via normal PATCH
+// _dragPin body flag removed — drag-drop sends placementMode:'fixed' via normal PATCH
 
-describe('unpinTask', () => {
+xdescribe('unpinTask — endpoint removed', () => {
   test('unpins a regular task', async () => {
     if (!available) return;
     await tasksWrite.insertTask(db, { id: 'unpin-reg', user_id: USER_ID, task_type: 'task', text: 'Pinned', status: '', date_pinned: 1, when: 'fixed', prev_when: 'afternoon', created_at: db.fn.now(), updated_at: db.fn.now() });
@@ -457,7 +456,7 @@ describe('unpinTask', () => {
 // updateTask: re-drag guard
 // ═══════════════════════════════════════════════════════════════
 
-describe('updateTask: drag-pin', () => {
+xdescribe('updateTask: drag-pin — _dragPin flag removed', () => {
   // B-3: second drag must not overwrite the original prev_when snapshot
   test('second drag does not overwrite original prev_when snapshot', async () => {
     if (!available) return;
@@ -636,6 +635,9 @@ describe('Recurring toggle-off cleanup', () => {
       .where({ master_id: 'tog-tmpl', user_id: USER_ID, status: '' })
       .whereNot('id', 'tog-tmpl');
     expect(remaining).toHaveLength(0);
+
+    // Cache must be invalidated after any updateTask mutation.
+    expect(redis.invalidateTasks).toHaveBeenCalled();
   });
 
   test('archives done/cancel instances instead of deleting them', async () => {

@@ -236,7 +236,7 @@ describe('updateTask', () => {
     expect(res2._json.task.desiredAt).toBeTruthy();
   });
 
-  test('drag-pin sets when=fixed and date_pinned', async () => {
+  xtest('updateTask: drag-pin — _dragPin flag removed', async () => {
     if (!available) return;
     var req1 = mockReq({ body: { text: 'Drag test', date: '4/10', when: 'morning' } });
     var res1 = mockRes();
@@ -654,7 +654,7 @@ describe('batchCreateTasks', () => {
 // unpinTask
 // ═══════════════════════════════════════════════════════════════
 
-describe('unpinTask', () => {
+xdescribe('unpinTask — endpoint removed', () => {
   test('restores prev_when and clears date_pinned', async () => {
     if (!available) return;
     await tasksWrite.insertTask(db, {

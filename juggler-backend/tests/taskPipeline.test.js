@@ -596,21 +596,34 @@ describe('taskToRow: reverse mapping', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// 8. Drag-Pin Fields
+// 8. Placement Mode Fields
 // ═══════════════════════════════════════════════════════════════════
+// prevWhen and datePinned removed from rowToTask — placement_mode === 'fixed'
+// is now the sole immovability signal. Tests verify the new contract.
 
-describe('rowToTask: drag-pin fields', () => {
-  test('prevWhen is exposed from prev_when column', () => {
-    var row = makeRow({ prev_when: 'morning', when: 'fixed' });
+describe('rowToTask: placement_mode fields', () => {
+  test('placementMode is exposed from placement_mode column', () => {
+    var row = makeRow({ placement_mode: 'fixed', when: '' });
     var task = rowToTask(row, TZ, {});
-    expect(task.prevWhen).toBe('morning');
-    expect(task.when).toBe('fixed');
+    expect(task.placementMode).toBe('fixed');
   });
 
-  test('prevWhen is null when not drag-pinned', () => {
-    var row = makeRow({ prev_when: null });
+  test('placementMode defaults to anytime when column is null', () => {
+    var row = makeRow({ placement_mode: null });
     var task = rowToTask(row, TZ, {});
-    expect(task.prevWhen).toBeNull();
+    expect(task.placementMode).toBe('anytime');
+  });
+
+  test('prevWhen is not present on rowToTask output (field removed)', () => {
+    var row = makeRow({ prev_when: 'morning', placement_mode: 'fixed' });
+    var task = rowToTask(row, TZ, {});
+    expect(task.prevWhen).toBeUndefined();
+  });
+
+  test('datePinned is not present on rowToTask output (field removed)', () => {
+    var row = makeRow({ date_pinned: 1, placement_mode: 'fixed' });
+    var task = rowToTask(row, TZ, {});
+    expect(task.datePinned).toBeUndefined();
   });
 });
 

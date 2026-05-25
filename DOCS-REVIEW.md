@@ -1,116 +1,232 @@
-# Documentation Review — Juggler Task Configuration Review Artifacts
+# Documentation Review — Juggler When-Mode Simplification
 
 **Reviewer:** Prairie Dawn
-**Date:** 2026-05-24
-**Scope:** 5 review/audit artifacts generated for juggler-backend and juggler-frontend
+**Date:** 2026-05-25
+**Standard:** DOCUMENTATION-STANDARD.md
+**Scope:** 5 docs created/updated by Abby for the When-mode simplification
+
+---
+
+## Summary
+
+| Status | Count |
+|--------|-------|
+| BLOCK  | 0     |
+| WARN   | 5     |
+| INFO   | 2     |
+
+**Overall verdict: WARN**
+
+No blocking violations. Five warnings require attention before the next review cycle.
 
 ---
 
 ## Files Reviewed
 
-| # | File | Type | Service | BLOCK | WARN |
-|---|------|------|---------|-------|------|
-| 1 | `juggler-backend/docs/ELMO-SECURITY-AUDIT.md` | Security audit | juggler-backend | 3 | 3 |
-| 2 | `juggler-frontend/docs/ERNIE-CODE-REVIEW.md` | Code review | juggler-frontend / juggler-backend | 2 | 6 |
-| 3 | `juggler-frontend/docs/TASK-EDIT-UX-AUDIT.md` | UX audit | juggler-frontend | 3 | 6 |
-| 4 | `juggler-frontend/docs/ZOE-TEST-AUDIT.md` | Test quality audit | juggler-frontend / juggler-backend | 7 | 11 |
-| 5 | `juggler-backend/docs/TASK-CONFIGURATION-MATRIX.md` | Design reference | juggler-backend | 0 | 0 |
-
-**Aggregate: 15 BLOCK, 26 WARN**
+| File | Registry Status | mtime | Review Status | Issues |
+|------|----------------|-------|--------------|--------|
+| `juggler-backend/docs/architecture/TASK-PROPERTIES.md` | DIRTY (was 2026-05-19) | 2026-05-25 16:21 | PASS | — |
+| `juggler-backend/docs/architecture/SCHEDULER-UI-STATE-MAP.md` | DIRTY (was 2026-05-19) | 2026-05-25 16:25 | WARN | ASCII tree diagrams; no Mermaid |
+| `juggler-backend/docs/use-cases/task.controller.md` | NEW (not in registry) | 2026-05-25 16:27 | PASS | — |
+| `juggler-backend/docs/architecture/SCHEDULER.md` | DIRTY (was 2026-05-19) | 2026-05-25 16:28 | WARN | Stale "Pinned" terminology; stale `when:"fixed"` test reference |
+| `juggler-backend/docs/architecture/WHEN-MODE-REDESIGN.md` | NEW (not in registry) | 2026-05-25 16:29 | WARN | ADR structure incomplete: missing explicit Status and Consequences sections |
 
 ---
 
-## Cross-Cutting Themes (De-duplicated)
+## BLOCK Findings (Must Fix)
 
-These are the distinct problem areas that surface in multiple audits from different angles.
-
-### Theme 1 — `batch_update_tasks` is under-guarded and under-tested
-- **Elmo CRITICAL-1 (BLOCK):** `batch_update_tasks` has zero calendar-sync guard; any field is writable on externally-synced tasks, including `date_pinned` and `placement_mode`.
-- **Ernie C1 (BLOCK):** `batch_update_tasks` (both locked and transaction paths) silently omits the auto-pin backstop present in single-task `create_task` and `update_task`.
-- **Elmo MEDIUM-1 (WARN):** Auto-pin / all-day inference in `batch_update_tasks` can silently mutate calendar-synced tasks when combined with the missing guard.
-
-### Theme 2 — Silent lockout scenarios are unhandled and untested
-- **UX Audit (BLOCK):** Scheduling mode buttons are disabled via CSS `pointerEvents: 'none'` with no visible explanation, banner, or tooltip.
-- **UX Audit (BLOCK):** `fixed` mode without `datePinned` creates a contradictory UI state: the Pin button reads "Pin" (unpinned) while the mode selector is disabled, with no explanation.
-- **Zoe F2 (BLOCK):** The `fixed` + `datePinned=false` silent lockout is not exercised in the 166-test mode matrix.
-- **Zoe F3 (BLOCK):** The missing visible explanation for disabled controls is not tested.
-- **Ernie W1 (WARN):** The frontend disabling-test checks the HTML `disabled` property, but the real mechanism is CSS `pointerEvents`, giving false confidence.
-- **Ernie W2 (WARN):** The `isFixed` test only asserts on label opacity, not on the interactive button container.
-- **Ernie W5 (WARN):** Keyboard users can still activate mode buttons when `isFixed` is true because there is no `disabled` attribute or keyboard intercept.
-
-### Theme 3 — Placement mode / `datePinned` validation is inconsistent across API, MCP, and UI
-- **Elmo HIGH-1 (BLOCK):** `placementMode: 'fixed'` is accepted without requiring `date`, `time`, or `scheduledAt`, creating contradictory scheduler input.
-- **Elmo HIGH-2 (BLOCK):** `taskToRow` passes `placement_mode` through unchecked; the MCP Zod enum is the sole gate, and the REST path has no enforcement.
-- **Elmo MEDIUM-2 (WARN):** API `checkCalSyncEditGuard` allows `datePinned` on calendar-synced tasks, but MCP `update_task` blocks it entirely. The immutability policy is not uniform across channels.
-- **Elmo LOW-1 (WARN):** Explicit `datePinned: false` + `date` creates an un-pinned dated task; scheduler and frontend must not assume `scheduled_at !== null` implies `date_pinned = 1`.
-- **Ernie W3 (WARN):** Auto-pin guard uses truthiness on create (`task.date || task.time`) but presence on update (`fields.date !== undefined`), so sending `date: ''` to unschedule a task accidentally pins it on update.
-- **Ernie W4 (WARN):** The "All Day" mode handler preserves stale `time`, `endTime`, and `dur` in parent state, allowing contradictory `placementMode: 'all_day'` + non-empty `time` to reach the backend.
-- **Zoe F12 (WARN):** Backend tests send no contradictory parameter combinations (e.g., `all_day` + `time`, `fixed` without date/time).
-
-### Theme 4 — Test quality is dangerously misleading
-- **Ernie C2 (BLOCK):** Three backend test names in `mcp-task-config.test.js` describe the exact opposite of what they assert. A future developer "fixing" the code to match the name would break the tests and the fix.
-- **Zoe F1 (BLOCK):** 160 of 166 parameterized tests in `WhenSection.modes.test.jsx` are shallow "renders without crashing" + DOM presence checks that do not exercise interactivity, lockout conditions, or invalid combinations.
-- **Zoe F15 (WARN):** A backend test name claims `datePinned:true without date/time does NOT set date_pinned`, but the assertion expects `date_pinned` to be `1`.
-- **Zoe F8 (WARN):** Baseline frontend tests assert `fontWeight === '600'` to prove a button is active, not actual click behavior.
-- **Zoe F9 (WARN):** No negative interaction tests exist that click a control that should be disabled and assert the handler is NOT called.
-- **Ernie W6 (WARN):** The `fixed mode` test uses `.closest('div')`, which is brittle to layout wrapper changes.
-
-### Theme 5 — Recurring, All Day, and `rigid` gaps
-- **UX Audit (WARN):** The recurring mode selector offers only 3 modes (Anytime, Time window, Time blocks); `All Day` is absent, so converting a one-off all-day task to recurring silently reverts the mode.
-- **Zoe F6 (BLOCK):** The recurring All Day gap is not tested.
-- **Zoe F7 (BLOCK):** `rigid` is included in the parameter matrix but never meaningfully asserted in any of the 160 parameterized tests.
-- **Zoe F14 (WARN):** Recurring task inference (`recurring=true` + `preferredTimeMins` + `timeFlex=0`) is completely absent from backend tests.
-- **Ernie I2 (Info):** `placementMode: 'reminder'` is a valid MCP enum value but absent from the frontend UI mode selector.
-
-### Theme 6 — Dead / unreachable code
-- **UX Audit (BLOCK):** `ManageCalTaskDialog` in `TaskEditForm.jsx` is declared and conditionally rendered, but `setManageCalDialog(true)` is never called anywhere in the file. Calendar-owned tasks have no UI path to "Take ownership" or "Open in calendar".
+None.
 
 ---
 
-## Per-File Detail
+## WARN Findings (Should Fix)
 
-### 1. ELMO-SECURITY-AUDIT.md
-Clean audit structure with reproduction steps, attack vectors, and impact statements. Severity mapping is consistent. All three audited files are explicitly named. Remediation instructions are specific and actionable. No doc-quality defects.
-
-- **BLOCK (3):** `batch_update_tasks` missing calendar-sync guard; `placementMode: 'fixed'` without date/time; unchecked `placement_mode` passthrough in `taskToRow`.
-- **WARN (3):** Auto-pin inference mutating calendar-synced tasks; API vs MCP `datePinned` divergence; `datePinned: false` + `date` edge case.
-
-### 2. ERNIE-CODE-REVIEW.md
-Accurate line references and code snippets. Clear distinction between Critical, Warning, and Info. C1 and C2 are both well-evidenced. W1-W6 each name a specific test or component weakness. I3 (cross-field Zod validation gaps) is correctly classified Info because it documents a permissive contract, not an active bug.
-
-- **BLOCK (2):** Missing auto-pin in `batch_update_tasks`; 3 backend test names that contradict assertions.
-- **WARN (6):** False-confidence disabling-test; `isFixed` opacity-only assertion; auto-pin truthiness/presence inconsistency; All Day stale state preservation; keyboard activation of disabled buttons; brittle `.closest('div')` selector.
-
-### 3. TASK-EDIT-UX-AUDIT.md
-Method states "static code audit (no dev server)" — appropriate disclaimer. The disabled-control inventory is a useful table. Silent lockout scenarios are clearly enumerated. The dead/broken flow finding is a genuine product defect, not a cosmetic issue.
-
-- **BLOCK (3):** Mode selector disabled with no visible explanation; `fixed` mode + `datePinned=false` silent lockout; `ManageCalTaskDialog` unreachable.
-- **WARN (6):** Scheduling label dimmed without explanation; time blocks tag selector disabled without explanation; day requirement picker removed from DOM; travel inputs hidden; split toggle hidden; recurring mode selector missing All Day.
-
-### 4. ZOE-TEST-AUDIT.md
-Explicit verdicts per file (BLOCK / WARN) make prioritization easy. F1-F7 are correctly grouped as blockers because the mode-matrix test file is the primary test artifact for this feature. F8-F11 and F12-F17 are flagged for the baseline and backend suites respectively. The "Specific Missing Tests to Add" section is a concrete checklist.
-
-- **BLOCK (7):** Parameterized fluff (160 shallow tests); silent lockout `fixed`+`datePinned=false` untested; missing visible explanation untested; invalid combinations never exercised; mode transition paths untested; recurring All Day gap untested; `rigid` in matrix but unasserted.
-- **WARN (11):** Shallow active-button assertions; no negative interaction tests; rolling recurrence edge cases missing; no timezone change coverage; no negative backend tests for contradictory params; `datePinned` override with time untested; recurring inference absent; misleading test name; `scheduledAt` edge cases untested; auto-pin override logic thinly exercised.
-
-### 5. TASK-CONFIGURATION-MATRIX.md
-Well-structured reference doc. Catalogs 30 valid combinations, 10 invalid/locked combinations, 5 silent lockout scenarios, and inference rules for MCP, backend create, backend update, and MCP update paths. Cross-references other architecture docs. No actionable defects in the document itself. Its primary role is to provide the ground truth that the other four audits prove is unenforced or untested.
-
-- **BLOCK (0), WARN (0).**
+### W-1: SCHEDULER-UI-STATE-MAP.md — ASCII tree diagrams, no Mermaid
+**File:** `juggler-backend/docs/architecture/SCHEDULER-UI-STATE-MAP.md`
+**Lines:** 27–56, 242–337
+**Issue:** Two substantial ASCII/box-drawing tree diagrams (the pipeline flow and the UI control trees) use `│` box-drawing characters. The standard requires Mermaid for diagram content when Mermaid can express it. A `flowchart TD` or `graph LR` can represent the pipeline; nested bullet trees can replace the UI control decision trees without box-drawing characters.
+**Fix:** Convert the pipeline diagram (lines 27–56) to a Mermaid `flowchart TD` block. Convert the UI control trees (lines 242–337) to annotated Mermaid `flowchart` or replace with clean nested lists (no `│` chars).
 
 ---
 
-## Action Priority
-
-1. **Fix `batch_update_tasks` (Theme 1)** — Add calendar-sync guard and auto-pin backstop. 2 BLOCK.
-2. **Add visible lockout banners and test them (Theme 2)** — Replace CSS-only disabling with explanatory UI and hardened tests. 3 BLOCK, 5 WARN.
-3. **Harden placement_mode validation and unify API/MCP guards (Theme 3)** — Cross-field rules in `validateTaskInput`, whitelist in `taskToRow`, and consistent `allowedKeys`. 2 BLOCK, 5 WARN.
-4. **Rewrite misleading tests and add negative interaction coverage (Theme 4)** — Fix test names, replace shallow presence checks, add click-guard tests. 2 BLOCK, 4 WARN.
-5. **Close recurring / All Day / `rigid` gaps (Theme 5)** — Add All Day to recurring UI or document exclusion; assert `rigid` in tests; add recurring inference tests. 2 BLOCK, 3 WARN.
-6. **Wire up or remove `ManageCalTaskDialog` (Theme 6)** — 1 BLOCK.
+### W-2: SCHEDULER.md — "Pinned" in severity hierarchy is stale post-redesign
+**File:** `juggler-backend/docs/architecture/SCHEDULER.md`
+**Lines:** 29, 46
+**Issue:** The severity hierarchy still reads "1. **Pinned** — user locked to a specific date/time. Immovable." The concept of "pinned" as a distinct named tier has been superseded by `placement_mode = 'fixed'`. Line 46 similarly says "Pinned tasks are placed first (Phase 0)." These are accurate as behavioral descriptions but use the old vocabulary. The WHEN-MODE-REDESIGN.md established that the correct term is "fixed" tasks. The document is internally inconsistent — line 86 already uses the correct terminology ("This is the sole immovability signal — `date_pinned` has been removed").
+**Fix:** Replace "Pinned" with "Fixed (`placement_mode = 'fixed'`)" in the severity hierarchy at line 29. Update line 46 to read "Fixed tasks are placed first (Phase 0)."
 
 ---
 
-Signed: Prairie Dawn — 2026-05-24
+### W-3: SCHEDULER.md — "Pinned eviction" test cases use removed concept
+**File:** `juggler-backend/docs/architecture/SCHEDULER.md`
+**Lines:** 700–706
+**Issue:** The "Principle 3 — pinned eviction first" section and test cases PE-1, PE-2, PE-3 describe scenarios with "pinned P2," "pinned P1," and "unpinned P4 chain member." The `date_pinned` column has been removed. These test cases still encode the old dual-axis model. The term "pinned" in these scenarios should be updated to "fixed (`placement_mode = 'fixed'`)" to match the current architecture.
+**Fix:** Rename the section to "Principle 3 — fixed task eviction first." Replace "pinned P2," "pinned P1," and "unpinned" with "fixed-mode" and "non-fixed" throughout the PE-1/PE-2/PE-3 rows.
 
-Overall: BLOCK
+---
+
+### W-4: SCHEDULER.md — UC-15.3 references removed `when:"fixed"` syntax
+**File:** `juggler-backend/docs/architecture/SCHEDULER.md`
+**Line:** 618
+**Issue:** UC-15.3 reads: `Fixed task NOT reset | when:"fixed" tasks keep their scheduled_at`. The `when:"fixed"` token has been removed — `fixed` is no longer stored in the `when` column. The correct signal is `placement_mode = 'fixed'`. This test case description is factually wrong post-redesign and will mislead anyone writing or debugging the corresponding test.
+**Fix:** Update UC-15.3 to: `Fixed task NOT reset | Tasks with placement_mode='fixed' keep their scheduled_at`.
+
+---
+
+### W-5: WHEN-MODE-REDESIGN.md — ADR structure incomplete
+**File:** `juggler-backend/docs/architecture/WHEN-MODE-REDESIGN.md`
+**Issue:** The document is titled as an Architecture Decision Record (ADR) but is missing two conventional ADR sections:
+1. **Status** — An ADR must declare its decision status (e.g., Accepted, Proposed, Superseded, Deprecated). The document has no such declaration. The reader cannot determine whether this decision is final, experimental, or rolled back without reading the full prose.
+2. **Consequences** — A standard ADR section enumerating the tradeoffs accepted by this decision (both positive and negative consequences). The document has a "Why" section explaining the motivation and a "What Changed" section describing the implementation, but no section named "Consequences" that captures the ongoing cost/benefit of the decision.
+**Fix:** Add a `## Status` section immediately after the Summary with value `Accepted` (or the correct status). Add a `## Consequences` section enumerating known tradeoffs (e.g., migration window, loss of `prev_when` undo history, new requirement that drag sends full `date`+`time`).
+
+---
+
+## Accuracy Findings
+
+Accuracy check performed by reading code and cross-referencing claims in the docs directly.
+
+### A-1: SCHEDULER.md — "Pinned" terminology in hierarchy (duplicate of W-2/W-3)
+Already captured above. No additional accuracy-only findings that are not covered by W-2/W-3/W-4.
+
+### A-2: SCHEDULER-UI-STATE-MAP.md — `when` stripped of 'fixed' in item object
+**File:** `juggler-backend/docs/architecture/SCHEDULER-UI-STATE-MAP.md`
+**Line:** 112
+**Claim:** `when, // stripped of 'fixed'; empty string = anytime`
+**Status:** PASS — This note is present and is consistent with the WHEN-MODE-REDESIGN.md statement that `'fixed'` is no longer stored in the `when` column. The comment is legacy-context accurate.
+
+---
+
+## Cross-Reference Check
+
+All cross-references verified to exist on disk:
+
+| Reference | Source doc | Exists? |
+|-----------|-----------|---------|
+| `docs/architecture/TASK-PROPERTIES.md` | WHEN-MODE-REDESIGN.md, task.controller.md | YES |
+| `docs/architecture/SCHEDULER-UI-STATE-MAP.md` | WHEN-MODE-REDESIGN.md | YES |
+| `docs/architecture/SCHEDULER.md` | WHEN-MODE-REDESIGN.md, task.controller.md | YES |
+| `docs/use-cases/task.controller.md` | WHEN-MODE-REDESIGN.md | YES |
+| `docs/architecture/WEATHER-INTEGRATION.md` | TASK-PROPERTIES.md | YES |
+| `src/lib/placementModes.js` | task.controller.md | YES |
+
+No broken cross-references.
+
+---
+
+## Frontmatter Check
+
+All 5 files have valid frontmatter with all required fields:
+
+| File | type | service | status | last_updated | tags |
+|------|------|---------|--------|-------------|------|
+| TASK-PROPERTIES.md | design | juggler | active | 2026-05-25 | type/design, service/juggler, status/active, topic tags |
+| SCHEDULER-UI-STATE-MAP.md | design | juggler | active | 2026-05-25 | type/design, service/juggler, status/active, topic tags |
+| task.controller.md | use-case | juggler | active | 2026-05-25 | type/use-case, service/juggler, status/active, topic tags |
+| SCHEDULER.md | design | juggler | active | 2026-05-25 | type/design, service/juggler, status/active, topic tags |
+| WHEN-MODE-REDESIGN.md | design | juggler | active | 2026-05-25 | type/design, service/juggler, status/active, architecture-decision, topic tags |
+
+No frontmatter violations.
+
+---
+
+## Required Core Docs (Project-Level)
+
+The following required baseline docs are absent from `juggler/juggler-backend/docs/`:
+
+| Document | Status | Notes |
+|----------|--------|-------|
+| `PROJECT-BRIEF.md` | MISSING | Required for all projects |
+| `architecture/README.md` | MISSING | Required for all projects |
+| `api/README.md` | MISSING | Juggler has API routes — required |
+| `mcp/<server>.md` | MISSING | `src/mcp/server.js` exists — MCP doc required |
+
+These were already missing before this review cycle and are not introduced by the When-mode simplification. They are tracked here for completeness. Abby should create them in the next documentation pass.
+
+---
+
+## Symlink Check
+
+The Obsidian vault backup at `/Users/david/Obsidian-Vault.bak-20260522-125146/` has a `juggler-docs` symlink pointing to `juggler/docs` (not `juggler/juggler-backend/docs`). The active vault path `/Users/david/Obsidian-Vault/` does not exist on disk. No symlink action taken — vault location must be resolved before symlink can be verified or created.
+
+---
+
+## INFO Findings (Nice to Have)
+
+### I-1: WHEN-MODE-REDESIGN.md — no link to migration audit SQL
+**Issue:** The doc references `AUDIT-date_pinned-mismatch.sql` as a file to run before the Knex migration. That file is not linked and its location is not stated. A future operator running the migration needs to find it.
+**Fix:** Add the path to the audit SQL file, e.g., `src/db/migrations/AUDIT-date_pinned-mismatch.sql` or wherever it lives.
+
+### I-2: SCHEDULER.md — "rigid" appears in test case names UC-1.9/UC-1.10/UC-8.6/UC-19.7
+**Issue:** Several test case descriptions use "rigid habit" informally (meaning "recurring with a strict time window"), not the removed `rigid` DB column. This is not factually wrong, but it may confuse readers who know `rigid` was removed. Consider renaming to "RECURRING_RIGID habit" or "time-window habit" in the test case table.
+**Fix:** Optional — rename "rigid habit" to "RECURRING_RIGID habit" in test case IDs where the distinction matters.
+
+---
+
+## Next Steps
+
+- [ ] W-1: Convert ASCII pipeline/UI-tree diagrams to Mermaid in SCHEDULER-UI-STATE-MAP.md
+- [ ] W-2: Update severity hierarchy line 29 in SCHEDULER.md: "Pinned" → "Fixed"
+- [ ] W-3: Rename "Principle 3 — pinned eviction" section and PE-1/PE-2/PE-3 test cases
+- [ ] W-4: Fix UC-15.3 description: `when:"fixed"` → `placement_mode='fixed'`
+- [ ] W-5: Add `## Status` and `## Consequences` sections to WHEN-MODE-REDESIGN.md
+- [ ] Track MISSING core docs (PROJECT-BRIEF.md, architecture/README.md, api/README.md, mcp doc) for next documentation sprint
+- [ ] Resolve active Obsidian vault location before next Prairie run
+
+---
+
+Signed: Prairie Dawn — 2026-05-25
+
+Overall: WARN
+
+---
+
+## Re-Verification — bert fixes — 2026-05-25
+
+**Reviewer:** Prairie Dawn
+**Files re-read:** SCHEDULER-UI-STATE-MAP.md, SCHEDULER.md, WHEN-MODE-REDESIGN.md
+
+| WARN | File | Status | Notes |
+|------|------|--------|-------|
+| W-1 | SCHEDULER-UI-STATE-MAP.md | RESOLVED | Single `flowchart TD` Mermaid block present (lines 27–43); no ASCII box-drawing characters found. |
+| W-2 | SCHEDULER.md | RESOLVED | Line 29: "Fixed (`placement_mode = 'fixed'`) — immovable" — correct terminology present. |
+| W-3 | SCHEDULER.md | RESOLVED | Section header: "Principle 3 — fixed task eviction first"; PE-1/PE-2/PE-3 use "fixed-mode" and "non-fixed" throughout. |
+| W-4 | SCHEDULER.md | RESOLVED | UC-15.3 (line 618): `` `placement_mode='fixed'` tasks keep their scheduled_at `` — correct. |
+| W-5 | WHEN-MODE-REDESIGN.md | RESOLVED | `## Status` (line 156) and `## Consequences` (line 162) both present and populated. |
+
+**Introduced issues:** None. Mermaid block is well-formed (single open/close pair). No broken cross-references. One minor residual: SCHEDULER.md line 424 uses "pinned" informally in a manual regression checklist item ("No pinned task blocks a P1 deadline task from placing"). This is prose context only, not a formal term definition — recorded as INFO, not a new WARN.
+
+**Overall verdict: PASS**
+
+All five WARN findings are resolved. No new BLOCK or WARN findings introduced by the fixes.
+
+Signed: Prairie Dawn — 2026-05-25
+
+---
+
+## Oscar Summary
+
+**Decision: PASS**
+**Mode: --document**
+**Date: 2026-05-25**
+
+| Agent | Launched | Reason | Result |
+|-------|----------|--------|--------|
+| abby | Yes | mandatory | 5 docs created/updated |
+| prairie | Yes | mandatory, sequential after abby | WARN (5 findings) |
+| bert | Yes | WARN findings — fix before precommit | All 5 resolved |
+| prairie (re-run) | Yes | verify bert fixes | PASS |
+
+## Docs Created/Updated
+
+| File | Action |
+|------|--------|
+| `juggler-backend/docs/architecture/TASK-PROPERTIES.md` | Updated — removed date_pinned/prev_when/rigid; fixed placement_mode |
+| `juggler-backend/docs/architecture/SCHEDULER-UI-STATE-MAP.md` | Updated — datePinned→fixed, ASCII→Mermaid |
+| `juggler-backend/docs/use-cases/task.controller.md` | Updated — UC-3 removed, UC-2 drag-pin path removed |
+| `juggler-backend/docs/architecture/SCHEDULER.md` | Updated — pinned→fixed terminology |
+| `juggler-backend/docs/architecture/WHEN-MODE-REDESIGN.md` | Created — ADR for the simplification |
+
+**Next: /oscar --precommit**
+
+Signed: Oscar, Technology Director — 2026-05-25

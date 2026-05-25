@@ -237,9 +237,11 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
     var fields = msftAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
     expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
+    // date_pinned column removed — placement_mode === 'fixed' is the sole immovability signal
+    expect(fields.date_pinned).toBeUndefined();
   });
 
-  it('should set date_pinned when date changes', function () {
+  it('should set placement_mode to fixed when date changes', function () {
     if (skipIfNoCreds()) return;
 
     var event = {
@@ -256,7 +258,8 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
     var fields = msftAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
     expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
-    expect(fields.date_pinned).toBe(1);
+    // date_pinned column removed — placement_mode === 'fixed' is the sole immovability signal
+    expect(fields.date_pinned).toBeUndefined();
   });
 
   it('should promote allday-to-timed to fixed', function () {
@@ -276,6 +279,8 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
     var fields = msftAdapter.applyEventToTaskFields(event, TEST_TIMEZONE, currentTask);
 
     expect(fields.placement_mode).toBe(PLACEMENT_MODES.FIXED);
+    // date_pinned column removed — placement_mode === 'fixed' is the sole immovability signal
+    expect(fields.date_pinned).toBeUndefined();
   });
 
   it('should clear marker when event is no longer transparent', function () {
@@ -574,6 +579,43 @@ describe('MSFT adapter — hasChanges', function () {
     var result = await msftAdapter.hasChanges(token, user);
 
     expect(result.hasChanges).toBe(true);
+  });
+});
+
+// ─── 14. applyEventToTaskFields — REMINDER→FIXED combined scenario ───
+//
+// Block 3: event was a REMINDER (transparent), now loses transparency AND
+// date/time changes in the same sync. Must produce FIXED, not ANYTIME.
+// Deleting either the ANYTIME reset or the FIXED promotion would leave the
+// other tests green; this combined test catches both halves.
+
+describe('MSFT adapter — applyEventToTaskFields REMINDER→FIXED ordering', function () {
+  it('formerly-reminder event with date/time change → placement_mode fixed (not anytime)', function () {
+    // currentTask was synced as a REMINDER (transparent, placement_mode=reminder)
+    var currentTask = { date: '2026-05-20', time: '9:00 AM', placement_mode: 'reminder' };
+
+    // Event: no longer transparent, and the date+time have both changed.
+    // The raw event uses dateTime in the MSFT Graph shape; applyEventToTaskFields
+    // receives a normalizedEvent (already parsed by normalizeEvent), so we pass
+    // the fields from normalizeEvent's output directly.
+    var event = {
+      title: 'Formerly Reminder',
+      // startDateTime is what applyEventToTaskFields reads after normalizeEvent
+      startDateTime: '2026-05-25T10:00:00',
+      endDateTime: '2026-05-25T11:00:00',
+      startTimezone: 'UTC',
+      isAllDay: false,
+      durationMinutes: 60,
+      isTransparent: false,
+      description: ''
+    };
+
+    var fields = msftAdapter.applyEventToTaskFields(event, 'UTC', currentTask);
+
+    // FIXED must win over the ANYTIME reset that runs first in the function.
+    expect(fields.placement_mode).toBe('fixed');
+    // Must NOT be 'anytime' — that would indicate the ordering bug
+    expect(fields.placement_mode).not.toBe('anytime');
   });
 });
 
