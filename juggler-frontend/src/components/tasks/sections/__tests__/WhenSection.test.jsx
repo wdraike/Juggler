@@ -355,6 +355,41 @@ it('shows calendar-managed lockout banner when placementMode is fixed', () => {
   expect(screen.getByText(/Calendar-managed/)).toBeInTheDocument();
 });
 
+it('shows Google Calendar source in calendar-managed banner', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ gcalEventId: 'gcal_123' }} />);
+  expect(screen.getByText(/by Google Calendar/)).toBeInTheDocument();
+});
+
+it('shows Microsoft Calendar source in calendar-managed banner', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ msftEventId: 'msft_456' }} />);
+  expect(screen.getByText(/by Microsoft Calendar/)).toBeInTheDocument();
+});
+
+it('shows Apple Calendar source in calendar-managed banner', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ appleEventId: 'apple_789' }} />);
+  expect(screen.getByText(/by Apple Calendar/)).toBeInTheDocument();
+});
+
+it('gcal wins over msft when both event ids present', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ gcalEventId: 'g1', msftEventId: 'm1' }} />);
+  expect(screen.getByText(/by Google Calendar/)).toBeInTheDocument();
+  expect(screen.queryByText(/by Microsoft/)).not.toBeInTheDocument();
+});
+
+it('empty-string gcalEventId treated as no source — falls back to generic banner', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ gcalEventId: '' }} />);
+  expect(screen.getByText(/Calendar-managed/)).toBeInTheDocument();
+  expect(screen.queryByText(/by Google/)).not.toBeInTheDocument();
+});
+
+it('shows generic calendar-managed banner when no event id available', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{}} />);
+  expect(screen.getByText(/Calendar-managed/)).toBeInTheDocument();
+  expect(screen.queryByText(/by Google/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/by Microsoft/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/by Apple/)).not.toBeInTheDocument();
+});
+
 it('does not show lockout banner when isFixed is false', () => {
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="anytime" />);
   expect(screen.queryByText(/Date is pinned/)).not.toBeInTheDocument();

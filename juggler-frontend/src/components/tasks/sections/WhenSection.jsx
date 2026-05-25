@@ -229,6 +229,8 @@ export default function WhenSection(props) {
   var isRecurring = !!recurring;
   var whenPartsLocal = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
   var isFixed = !!datePinned || placementMode === 'fixed';
+  // gcal > msft > apple priority: first provider wins when multiple IDs present (e.g. during migration or dual-sync)
+  var calendarSource = task && (task.gcalEventId ? 'Google Calendar' : task.msftEventId ? 'Microsoft Calendar' : task.appleEventId ? 'Apple Calendar' : null);
   var activeTags = whenPartsLocal.filter(function(p) { return p !== 'anytime' && p !== 'allday' && p !== 'fixed'; });
   var isWindows = activeTags.length > 0;
   // Use placementMode prop as the canonical source for mode display.
@@ -306,7 +308,7 @@ export default function WhenSection(props) {
         <div style={{ marginTop: 8 }}>
           {isFixed && (
             <div style={{ fontSize: 10, color: TH.amberText, marginBottom: 4, fontWeight: 500 }}>
-              {datePinned ? '📍 Date is pinned — unpin to change scheduling mode.' : '📅 Calendar-managed — scheduling is set by the source calendar.'}
+              {datePinned ? '📍 Date is pinned — unpin to change scheduling mode.' : ('📅 Calendar-managed' + (calendarSource ? ' by ' + calendarSource : '') + ' — scheduling is set by the source calendar.')}
             </div>
           )}
           <div style={{ fontSize: 9, color: TH.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 4, opacity: isFixed ? 0.4 : 1 }}>Scheduling mode</div>
