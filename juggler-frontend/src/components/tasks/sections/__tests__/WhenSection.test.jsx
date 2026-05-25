@@ -350,9 +350,15 @@ it('shows pinned lockout banner when datePinned is true', () => {
   expect(screen.getByText(/Date is pinned/)).toBeInTheDocument();
 });
 
-it('shows calendar-managed lockout banner when placementMode is fixed', () => {
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" />);
+it('shows calendar-managed lockout banner when placementMode is fixed and task is calendar-linked', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ gcalEventId: 'gcal_x' }} />);
   expect(screen.getByText(/Calendar-managed/)).toBeInTheDocument();
+});
+
+it('no lockout banner when placementMode is fixed but task has no calendar link', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" />);
+  expect(screen.queryByText(/Calendar-managed/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Date is pinned/)).not.toBeInTheDocument();
 });
 
 it('shows Google Calendar source in calendar-managed banner', () => {
@@ -365,9 +371,20 @@ it('shows Microsoft Calendar source in calendar-managed banner', () => {
   expect(screen.getByText(/by Microsoft Calendar/)).toBeInTheDocument();
 });
 
-it('shows Apple Calendar source in calendar-managed banner', () => {
+it('shows Apple Calendar source in calendar-managed banner when no calendar name', () => {
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ appleEventId: 'apple_789' }} />);
   expect(screen.getByText(/by Apple Calendar/)).toBeInTheDocument();
+});
+
+it('shows Apple Calendar with calendar name when appleCalendarName provided', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ appleEventId: 'apple_789', appleCalendarName: 'Home' }} />);
+  expect(screen.getByText(/by Apple Calendar: Home/)).toBeInTheDocument();
+});
+
+it('apple calendar name ignored when appleEventId absent — gcal provider wins instead', () => {
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ gcalEventId: 'g1', appleCalendarName: 'Home' }} />);
+  expect(screen.getByText(/by Google Calendar/)).toBeInTheDocument();
+  expect(screen.queryByText(/Apple Calendar/)).not.toBeInTheDocument();
 });
 
 it('gcal wins over msft when both event ids present', () => {
@@ -376,15 +393,15 @@ it('gcal wins over msft when both event ids present', () => {
   expect(screen.queryByText(/by Microsoft/)).not.toBeInTheDocument();
 });
 
-it('empty-string gcalEventId treated as no source — falls back to generic banner', () => {
+it('empty-string gcalEventId means task is not calendar-managed — no lock banner', () => {
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ gcalEventId: '' }} />);
-  expect(screen.getByText(/Calendar-managed/)).toBeInTheDocument();
+  expect(screen.queryByText(/Calendar-managed/)).not.toBeInTheDocument();
   expect(screen.queryByText(/by Google/)).not.toBeInTheDocument();
 });
 
-it('shows generic calendar-managed banner when no event id available', () => {
+it('no calendar-managed banner when placementMode=fixed but task has no event IDs', () => {
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{}} />);
-  expect(screen.getByText(/Calendar-managed/)).toBeInTheDocument();
+  expect(screen.queryByText(/Calendar-managed/)).not.toBeInTheDocument();
   expect(screen.queryByText(/by Google/)).not.toBeInTheDocument();
   expect(screen.queryByText(/by Microsoft/)).not.toBeInTheDocument();
   expect(screen.queryByText(/by Apple/)).not.toBeInTheDocument();

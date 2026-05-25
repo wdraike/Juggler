@@ -206,7 +206,7 @@ async function fetchTaskWithEventIds(dbOrTrx, id, userId) {
     dbOrTrx('tasks_v').where({ id: id, user_id: userId }).first(),
     dbOrTrx('cal_sync_ledger')
       .where({ task_id: id, status: 'active' })
-      .select('provider', 'provider_event_id', 'origin', 'event_url')
+      .select('provider', 'provider_event_id', 'origin', 'event_url', 'calendar_id')
   ]);
   if (!row) return null;
   // Attach event ids in the same shape tasks_with_sync_v exposes.
@@ -215,16 +215,27 @@ async function fetchTaskWithEventIds(dbOrTrx, id, userId) {
   row.apple_event_id = null;
   row.cal_sync_origin = null;
   row.cal_event_url = null;
+  row.apple_calendar_name = null;
+  var appleCalendarId = null;
   for (var i = 0; i < ledgerRows.length; i++) {
     var p = ledgerRows[i].provider;
     if (p === 'gcal') { row.gcal_event_id = ledgerRows[i].provider_event_id; }
     else if (p === 'msft') { row.msft_event_id = ledgerRows[i].provider_event_id; }
-    else if (p === 'apple') { row.apple_event_id = ledgerRows[i].provider_event_id; }
+    else if (p === 'apple') {
+      row.apple_event_id = ledgerRows[i].provider_event_id;
+      if (ledgerRows[i].calendar_id) appleCalendarId = ledgerRows[i].calendar_id;
+    }
     // Use the first active ledger row for origin/url (multi-provider: pick non-juggler origin if present)
     if (!row.cal_sync_origin || row.cal_sync_origin === 'juggler') {
       row.cal_sync_origin = ledgerRows[i].origin || null;
       row.cal_event_url = ledgerRows[i].event_url || null;
     }
+  }
+  if (appleCalendarId) {
+    var appleCalRow = await dbOrTrx('user_calendars')
+      .where({ user_id: userId, provider: 'apple', calendar_id: appleCalendarId })
+      .select('display_name').first();
+    if (appleCalRow && appleCalRow.display_name) row.apple_calendar_name = appleCalRow.display_name;
   }
   return row;
 }
@@ -240,12 +251,21 @@ async function fetchTaskWithEventIds(dbOrTrx, id, userId) {
 async function fetchTasksWithEventIds(dbOrTrx, userId, queryBuilder) {
   var q = dbOrTrx('tasks_v').where('user_id', userId);
   if (typeof queryBuilder === 'function') queryBuilder(q);
-  var [rows, ledgerRows] = await Promise.all([
+  var [rows, ledgerRows, appleCalRows] = await Promise.all([
     q,
     dbOrTrx('cal_sync_ledger')
       .where({ user_id: userId, status: 'active' })
-      .select('task_id', 'provider', 'provider_event_id', 'origin', 'event_url')
+      .select('task_id', 'provider', 'provider_event_id', 'origin', 'event_url', 'calendar_id'),
+    dbOrTrx('user_calendars')
+      .where({ user_id: userId, provider: 'apple', enabled: true })
+      .select('calendar_id', 'display_name')
   ]);
+  var appleCalMap = {};
+  for (var ac = 0; ac < appleCalRows.length; ac++) {
+    if (appleCalRows[ac].calendar_id && appleCalRows[ac].display_name) {
+      appleCalMap[appleCalRows[ac].calendar_id] = appleCalRows[ac].display_name;
+    }
+  }
   var byTask = {};
   for (var j = 0; j < ledgerRows.length; j++) {
     var lr = ledgerRows[j];
@@ -253,7 +273,12 @@ async function fetchTasksWithEventIds(dbOrTrx, userId, queryBuilder) {
     var slot = byTask[lr.task_id] || (byTask[lr.task_id] = {});
     if (lr.provider === 'gcal') slot.gcal_event_id = lr.provider_event_id;
     else if (lr.provider === 'msft') slot.msft_event_id = lr.provider_event_id;
-    else if (lr.provider === 'apple') slot.apple_event_id = lr.provider_event_id;
+    else if (lr.provider === 'apple') {
+      slot.apple_event_id = lr.provider_event_id;
+      if (lr.calendar_id) {
+        slot.apple_calendar_name = appleCalMap[lr.calendar_id] || slot.apple_calendar_name || null;
+      }
+    }
     // Use non-juggler origin if present (prefer provider-origin over juggler-origin)
     if (!slot.cal_sync_origin || slot.cal_sync_origin === 'juggler') {
       slot.cal_sync_origin = lr.origin || null;
@@ -268,6 +293,7 @@ async function fetchTasksWithEventIds(dbOrTrx, userId, queryBuilder) {
     r.apple_event_id = ev && ev.apple_event_id || null;
     r.cal_sync_origin = ev && ev.cal_sync_origin || null;
     r.cal_event_url = ev && ev.cal_event_url || null;
+    r.apple_calendar_name = ev && ev.apple_calendar_name || null;
   }
   return rows;
 }
@@ -418,6 +444,7 @@ function rowToTask(row, timezone, sourceMap) {
     gcalEventId: row.gcal_event_id,
     msftEventId: row.msft_event_id,
     appleEventId: row.apple_event_id,
+    appleCalendarName: row.apple_calendar_name || null,
     calSyncOrigin: row.cal_sync_origin || null,
     calEventUrl: row.cal_event_url || null,
     dependsOn: safeParseJSON(row.depends_on, []),
@@ -1089,6 +1116,15 @@ async function updateTask(req, res) {
     // stay unchanged — pinning is handled by datePinned, not when:'fixed'.
     if (req.body._dragPin) {
       row.date_pinned = 1;
+      // Encode current placement_mode + when into prev_when so unpinTask can
+      // restore the exact pre-drag state. Format: 'mode:<placement_mode>:<when>'
+      // Only write prev_when when the task isn't already drag-pinned (i.e., don't
+      // overwrite a previous snapshot with a re-drag's snapshot of the pinned state).
+      if (!existing.date_pinned) {
+        var preDragMode = existing.placement_mode || PLACEMENT_MODES.ANYTIME;
+        var preDragWhen = existing.when || '';
+        row.prev_when = JSON.stringify({ mode: preDragMode, when: preDragWhen });
+      }
     }
 
     // Lock check: if scheduling lock is held, split and queue scheduling fields
@@ -2378,15 +2414,53 @@ async function unpinTask(req, res) {
     }
 
     // Regular task: restore previous scheduling mode
+    var restoredMode = PLACEMENT_MODES.ANYTIME;
+    var restoredWhen = '';
+    if (existing.prev_when) {
+      if (existing.prev_when.startsWith('{')) {
+        // New JSON format written by drag-pin: { mode, when }
+        try {
+          var parsed = JSON.parse(existing.prev_when);
+          var candidateMode = parsed.mode;
+          var validModes = Object.values(PLACEMENT_MODES);
+          if (candidateMode && validModes.indexOf(candidateMode) >= 0) {
+            restoredMode = candidateMode;
+            restoredWhen = parsed.when || '';
+          }
+          // If mode key is absent or invalid, leave restoredMode=ANYTIME and
+          // restoredWhen='' — a non-empty when with anytime mode is inconsistent.
+        } catch (e) {
+          // malformed JSON — fall through with defaults (anytime, empty when)
+        }
+      } else if (existing.prev_when.startsWith('mode:')) {
+        // Old colon format (transitional — written before JSON migration; keep for safety)
+        var parts = existing.prev_when.split(':');
+        var candidateMode = parts[1] || '';
+        restoredWhen = parts.slice(2).join(':');
+        var validModes = Object.values(PLACEMENT_MODES);
+        if (candidateMode && validModes.indexOf(candidateMode) >= 0) {
+          restoredMode = candidateMode;
+        }
+      } else {
+        // Legacy bare string (block tags or empty) — written before mode-prefix format
+        restoredWhen = existing.prev_when;
+        var restoredTags = restoredWhen.split(',').map(function(t) { return t.trim(); }).filter(Boolean);
+        var blockTags = ['morning', 'lunch', 'afternoon', 'evening', 'night'];
+        var allBlock = restoredTags.length > 0 && restoredTags.every(function(t) { return blockTags.indexOf(t) >= 0; });
+        restoredMode = allBlock ? PLACEMENT_MODES.TIME_BLOCKS : PLACEMENT_MODES.ANYTIME;
+      }
+    }
     var updates = {
-      when: existing.prev_when || '',
+      when: restoredWhen,
       prev_when: null,
       date_pinned: 0,
+      placement_mode: restoredMode,
       updated_at: db.fn.now()
     };
 
     await tasksWrite.updateTaskById(db, req.params.id, updates, req.user.id);
 
+    await cache.invalidateTasks(req.user.id);
     enqueueScheduleRun(req.user.id, 'api:unpinTask', [req.params.id]);
     res.json({ success: true, action: 'unpinned', when: updates.when });
   } catch (error) {

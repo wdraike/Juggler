@@ -106,7 +106,8 @@ describe('WhenSection mode matrix', () => {
 
             it('isFixed derivation is correct', () => {
               render(<WhenSection {...props} />);
-              var expectedIsFixed = !!datePinned || placementMode === 'fixed';
+              var isCalManaged = !!(props.task && (props.task.gcalEventId || props.task.msftEventId || props.task.appleEventId));
+              var expectedIsFixed = !!datePinned || (placementMode === 'fixed' && isCalManaged);
               // When isFixed is true, the Scheduling mode label opacity drops to 0.4
               // (label is absent in all_day mode, so skip assertion there)
               var labelEl = screen.queryByText('Scheduling mode');
@@ -157,15 +158,20 @@ describe('WhenSection pin toggle', () => {
 });
 
 describe('WhenSection fixed mode specifics', () => {
-  it('fixed mode dims mode selector and disables pointer events', () => {
-    render(<WhenSection {...buildProps({ placementMode: 'fixed' })} />);
-    // Buttons are still in the DOM but visually dimmed and non-interactive
+  it('fixed mode dims mode selector and disables pointer events when calendar-managed', () => {
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { gcalEventId: 'gcal_x' } })} />);
     var anytimeBtn = screen.getByText(/Anytime/);
     expect(anytimeBtn).toBeInTheDocument();
     expect(anytimeBtn.closest('div')).toHaveStyle({ pointerEvents: 'none' });
   });
 
-  it('fixed mode still shows Pin toggle and isFixed is true even when datePinned is false', () => {
+  it('fixed mode does NOT lock controls when task has no calendar link', () => {
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', datePinned: false })} />);
+    var anytimeBtn = screen.getByTitle(/No time restriction/);
+    expect(anytimeBtn.closest('div')).not.toHaveStyle({ pointerEvents: 'none' });
+  });
+
+  it('fixed mode still shows Pin toggle', () => {
     render(<WhenSection {...buildProps({ placementMode: 'fixed', datePinned: false })} />);
     expect(screen.getByText(/Pin/)).toBeInTheDocument();
   });
@@ -256,8 +262,20 @@ describe('WhenSection deep interactions — no silent lockouts', () => {
     expect(btn).toHaveAttribute('tabIndex', '-1');
   });
 
-  it('placementMode=fixed disables mode buttons via pointerEvents and tabIndex', () => {
-    render(<WhenSection {...buildProps({ placementMode: 'fixed' })} />);
+  it('datePinned=true + placementMode=time_window locks time-window sub-panel via pointerEvents', () => {
+    var { container } = render(<WhenSection {...buildProps({ placementMode: 'time_window', datePinned: true, time: '09:00' })} />);
+    // The ⏰ Time label must be present (sub-panel is rendered), but its container must be non-interactive
+    var timeLabel = screen.getByText('⏰ Time');
+    expect(timeLabel).toBeInTheDocument();
+    var subPanel = timeLabel.closest('div[style*="opacity"]');
+    expect(subPanel).not.toBeNull();
+    expect(subPanel).toHaveStyle({ pointerEvents: 'none' });
+    // W-2: locked sub-panel must also be visually dimmed
+    expect(subPanel).toHaveStyle({ opacity: '0.35' });
+  });
+
+  it('placementMode=fixed + calendar link disables mode buttons via pointerEvents and tabIndex', () => {
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { gcalEventId: 'gcal_x' } })} />);
     var btn = screen.getByTitle(/No time restriction/);
     expect(btn.closest('div')).toHaveStyle({ pointerEvents: 'none' });
     expect(btn).toHaveAttribute('tabIndex', '-1');
@@ -277,9 +295,15 @@ describe('WhenSection deep interactions — no silent lockouts', () => {
     expect(screen.queryByText(/Calendar-managed/)).not.toBeInTheDocument();
   });
 
-  it('shows correct banner text for fixed-mode lockout', () => {
-    render(<WhenSection {...buildProps({ placementMode: 'fixed', datePinned: false })} />);
+  it('shows correct banner text for fixed-mode lockout when calendar-managed', () => {
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', datePinned: false, task: { gcalEventId: 'gcal_x' } })} />);
     expect(screen.getByText(/Calendar-managed/)).toBeInTheDocument();
+    expect(screen.queryByText(/Date is pinned/)).not.toBeInTheDocument();
+  });
+
+  it('no banner shown when placementMode=fixed but no calendar link (post-unpin stale state)', () => {
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', datePinned: false })} />);
+    expect(screen.queryByText(/Calendar-managed/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Date is pinned/)).not.toBeInTheDocument();
   });
 
@@ -297,5 +321,33 @@ describe('WhenSection deep interactions — no silent lockouts', () => {
   it('Day requirement picker is visible when isFixed is false', () => {
     render(<WhenSection {...buildProps({ placementMode: 'anytime', datePinned: false })} />);
     expect(screen.getByText(/Day requirement/)).toBeInTheDocument();
+  });
+});
+
+// W-3: mode matrix with a calendar-linked task — exercises isFixed=true from
+// placementMode='fixed' + isCalManaged=true, a path the main matrix never hits
+// because it always passes task=undefined (so isCalManaged=false).
+describe('WhenSection mode matrix — with calendar task', () => {
+  var CALENDAR_TASK = { gcalEventId: 'gcal_x' };
+
+  MODES.forEach(function(placementMode) {
+    it('renders without crashing for placementMode=' + placementMode + ' with calendar link', () => {
+      render(<WhenSection {...buildProps({ placementMode, task: CALENDAR_TASK })} />);
+    });
+
+    it('isFixed derivation is correct for placementMode=' + placementMode + ' + calendar link', () => {
+      render(<WhenSection {...buildProps({ placementMode, task: CALENDAR_TASK, datePinned: false })} />);
+      // isCalManaged=true because gcalEventId is set; isFixed = placementMode==='fixed' && isCalManaged
+      var expectedIsFixed = placementMode === 'fixed';
+      var labelEl = screen.queryByText('Scheduling mode');
+      if (labelEl) {
+        var opacity = labelEl.style.opacity;
+        if (expectedIsFixed) {
+          expect(opacity).toBe('0.4');
+        } else {
+          expect(opacity).toBe('1');
+        }
+      }
+    });
   });
 });

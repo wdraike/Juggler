@@ -1,6 +1,7 @@
 import React from 'react';
 import CollapsibleSection from '../CollapsibleSection';
 import { getTimezoneAbbr, getUtcOffset } from '../../../utils/timezone';
+import { CAL_PROVIDER_NAMES } from '../../../state/constants';
 
 var ALL_TIMEZONES = (function() {
   try {
@@ -228,9 +229,11 @@ export default function WhenSection(props) {
 
   var isRecurring = !!recurring;
   var whenPartsLocal = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
-  var isFixed = !!datePinned || placementMode === 'fixed';
+  var isCalManaged = task && !!(task.gcalEventId || task.msftEventId || task.appleEventId);
+  var isFixed = !!datePinned || (placementMode === 'fixed' && isCalManaged);
   // gcal > msft > apple priority: first provider wins when multiple IDs present (e.g. during migration or dual-sync)
-  var calendarSource = task && (task.gcalEventId ? 'Google Calendar' : task.msftEventId ? 'Microsoft Calendar' : task.appleEventId ? 'Apple Calendar' : null);
+  var appleCalLabel = task && task.appleCalendarName ? (task.appleCalendarName.length > 30 ? task.appleCalendarName.slice(0, 28) + '…' : task.appleCalendarName) : null;
+  var calendarSource = task && (task.gcalEventId ? CAL_PROVIDER_NAMES.gcal : task.msftEventId ? CAL_PROVIDER_NAMES.msft : task.appleEventId ? (appleCalLabel ? CAL_PROVIDER_NAMES.apple + ': ' + appleCalLabel : CAL_PROVIDER_NAMES.apple) : null);
   var activeTags = whenPartsLocal.filter(function(p) { return p !== 'anytime' && p !== 'allday' && p !== 'fixed'; });
   var isWindows = activeTags.length > 0;
   // Use placementMode prop as the canonical source for mode display.
@@ -307,7 +310,7 @@ export default function WhenSection(props) {
       {!marker && !isRecurring && (
         <div style={{ marginTop: 8 }}>
           {isFixed && (
-            <div style={{ fontSize: 10, color: TH.amberText, marginBottom: 4, fontWeight: 500 }}>
+            <div style={{ fontSize: 10, color: TH.amberText, marginBottom: 4, fontWeight: 500, background: TH.amberBg, border: '1px solid ' + TH.amberBorder, borderRadius: 4, padding: '4px 8px' }}>
               {datePinned ? '📍 Date is pinned — unpin to change scheduling mode.' : ('📅 Calendar-managed' + (calendarSource ? ' by ' + calendarSource : '') + ' — scheduling is set by the source calendar.')}
             </div>
           )}
@@ -337,7 +340,7 @@ export default function WhenSection(props) {
 
           {/* Time window: time input + ± window select (shown when placementMode === 'time_window') */}
           {effectiveMode === 'time_window' && (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 6 }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 6, opacity: isFixed ? 0.35 : 1, pointerEvents: isFixed ? 'none' : undefined }}>
               <label style={lStyle}>
                 ⏰ Time
                 <input type="time" value={time || ''} onChange={function(e) { onTimeChange(e.target.value || ''); }}

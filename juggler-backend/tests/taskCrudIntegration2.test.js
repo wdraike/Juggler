@@ -7,9 +7,21 @@
 var db = require('../src/db');
 var controller = require('../src/controllers/task.controller');
 var tasksWrite = require('../src/lib/tasks-write');
+var redis = require('../src/lib/redis');
 
 jest.mock('../src/scheduler/scheduleQueue', () => ({
   enqueueScheduleRun: jest.fn()
+}));
+
+jest.mock('../src/lib/redis', () => ({
+  invalidateTasks: jest.fn().mockResolvedValue(true),
+  getClient: jest.fn(),
+  isConnected: jest.fn().mockReturnValue(true),
+  get: jest.fn().mockResolvedValue(null),
+  set: jest.fn().mockResolvedValue(true),
+  del: jest.fn().mockResolvedValue(true),
+  invalidateConfig: jest.fn().mockResolvedValue(true),
+  quit: jest.fn().mockResolvedValue(undefined),
 }));
 
 var available = false;
@@ -53,6 +65,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  jest.clearAllMocks();
   if (!available) return;
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
@@ -315,6 +328,11 @@ describe('unpinTask', () => {
     expect(res._json.action).toBe('unpinned');
     var row = await db('tasks_v').where('id', 'unpin-reg').first();
     expect(row.date_pinned).toBe(0);
+    expect(row.placement_mode).toBe('time_blocks');
+    // W-1: legacy bare-string 'afternoon' is a block tag → restoredWhen='afternoon'
+    expect(row.when).toBe('afternoon');
+    // B-1: cache must be invalidated after unpin
+    expect(redis.invalidateTasks).toHaveBeenCalledWith(USER_ID);
   });
 
   test('rejects unpin on ingested cal-synced task', async () => {
@@ -328,6 +346,202 @@ describe('unpinTask', () => {
     expect(res._json.code).toBe('CAL_SYNCED_READONLY');
     var row = await db('tasks_v').where('id', 'unpin-gcal').first();
     expect(row.date_pinned).toBe(1);
+  });
+
+  test('restores time_window placement_mode from JSON prev_when', async () => {
+    if (!available) return;
+    // Simulates a task that was in time_window mode before being drag-pinned.
+    // The drag-pin path now writes prev_when as JSON: { mode, when }.
+    await tasksWrite.insertTask(db, {
+      id: 'unpin-tw', user_id: USER_ID, task_type: 'task', text: 'Time window task',
+      status: '', date_pinned: 1, placement_mode: 'fixed', when: '',
+      prev_when: JSON.stringify({ mode: 'time_window', when: '09:00' }),
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    var req = mockReq({ params: { id: 'unpin-tw' } });
+    var res = mockRes();
+    await controller.unpinTask(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res._json.action).toBe('unpinned');
+    var row = await db('tasks_v').where('id', 'unpin-tw').first();
+    expect(row.date_pinned).toBe(0);
+    expect(row.placement_mode).toBe('time_window');
+    expect(row.when).toBe('09:00');
+    expect(row.prev_when).toBeNull();
+    // B-1: cache must be invalidated after unpin
+    expect(redis.invalidateTasks).toHaveBeenCalledWith(USER_ID);
+  });
+
+  test('restores time_blocks placement_mode from JSON prev_when', async () => {
+    if (!available) return;
+    await tasksWrite.insertTask(db, {
+      id: 'unpin-tb', user_id: USER_ID, task_type: 'task', text: 'Time blocks task',
+      status: '', date_pinned: 1, placement_mode: 'fixed', when: '',
+      prev_when: JSON.stringify({ mode: 'time_blocks', when: 'morning,lunch' }),
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    var req = mockReq({ params: { id: 'unpin-tb' } });
+    var res = mockRes();
+    await controller.unpinTask(req, res);
+    expect(res.statusCode).toBe(200);
+    expect(res._json.action).toBe('unpinned');
+    var row = await db('tasks_v').where('id', 'unpin-tb').first();
+    expect(row.date_pinned).toBe(0);
+    expect(row.placement_mode).toBe('time_blocks');
+    expect(row.when).toBe('morning,lunch');
+    expect(row.prev_when).toBeNull();
+    // B-1: cache must be invalidated after unpin
+    expect(redis.invalidateTasks).toHaveBeenCalledWith(USER_ID);
+  });
+
+  test('restores anytime from JSON prev_when with empty when', async () => {
+    if (!available) return;
+    await tasksWrite.insertTask(db, {
+      id: 'unpin-at', user_id: USER_ID, task_type: 'task', text: 'Anytime task',
+      status: '', date_pinned: 1, placement_mode: 'fixed', when: '',
+      prev_when: JSON.stringify({ mode: 'anytime', when: '' }),
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    var req = mockReq({ params: { id: 'unpin-at' } });
+    var res = mockRes();
+    await controller.unpinTask(req, res);
+    expect(res.statusCode).toBe(200);
+    var row = await db('tasks_v').where('id', 'unpin-at').first();
+    expect(row.date_pinned).toBe(0);
+    expect(row.placement_mode).toBe('anytime');
+    expect(row.when).toBe('');
+    expect(row.prev_when).toBeNull();
+  });
+
+  test('invalid mode in JSON prev_when falls back to anytime', async () => {
+    if (!available) return;
+    await tasksWrite.insertTask(db, {
+      id: 'unpin-inv', user_id: USER_ID, task_type: 'task', text: 'Invalid mode task',
+      status: '', date_pinned: 1, placement_mode: 'fixed', when: '',
+      prev_when: JSON.stringify({ mode: 'bogus_mode', when: 'somevalue' }),
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    var req = mockReq({ params: { id: 'unpin-inv' } });
+    var res = mockRes();
+    await controller.unpinTask(req, res);
+    expect(res.statusCode).toBe(200);
+    var row = await db('tasks_v').where('id', 'unpin-inv').first();
+    expect(row.date_pinned).toBe(0);
+    expect(row.placement_mode).toBe('anytime');
+    // B-2: invalid mode → restoredWhen must also be cleared to '' (anytime+non-empty when is inconsistent)
+    expect(row.when).toBe('');
+  });
+
+  // B-2: missing mode key in JSON prev_when
+  test('JSON prev_when with missing mode key falls back to anytime with empty when', async () => {
+    if (!available) return;
+    await tasksWrite.insertTask(db, {
+      id: 'unpin-no-mode', user_id: USER_ID, task_type: 'task', text: 'No mode key',
+      status: '', date_pinned: 1, placement_mode: 'fixed', when: '',
+      prev_when: JSON.stringify({ when: 'somevalue' }), // mode key absent
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    var req = mockReq({ params: { id: 'unpin-no-mode' } });
+    var res = mockRes();
+    await controller.unpinTask(req, res);
+    expect(res.statusCode).toBe(200);
+    var row = await db('tasks_v').where('id', 'unpin-no-mode').first();
+    expect(row.date_pinned).toBe(0);
+    // No mode key → falls back to anytime; when must be '' not 'somevalue'
+    expect(row.placement_mode).toBe('anytime');
+    expect(row.when).toBe('');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// updateTask: re-drag guard
+// ═══════════════════════════════════════════════════════════════
+
+describe('updateTask: drag-pin', () => {
+  // B-3: second drag must not overwrite the original prev_when snapshot
+  test('second drag does not overwrite original prev_when snapshot', async () => {
+    if (!available) return;
+    await tasksWrite.insertTask(db, {
+      id: 'redrag-test', user_id: USER_ID, task_type: 'task', text: 'Re-drag',
+      status: '', date_pinned: 0, placement_mode: 'anytime', when: '',
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+
+    // First drag: anytime → pinned at 2026-05-26 14:00
+    var req1 = mockReq({
+      params: { id: 'redrag-test' },
+      body: { _dragPin: true, date: '2026-05-26', time: '14:00' }
+    });
+    var res1 = mockRes();
+    await controller.updateTask(req1, res1);
+    expect(res1.statusCode).toBe(200);
+
+    var afterFirstDrag = await db('task_masters').where('id', 'redrag-test').first();
+    expect(afterFirstDrag.date_pinned).toBe(1);
+    var firstPrevWhen = afterFirstDrag.prev_when;
+    expect(firstPrevWhen).toBeTruthy(); // snapshot was saved on first drag
+
+    // Second drag: pinned → drag again to a different time — must NOT overwrite prev_when
+    var req2 = mockReq({
+      params: { id: 'redrag-test' },
+      body: { _dragPin: true, date: '2026-05-26', time: '16:00' }
+    });
+    var res2 = mockRes();
+    await controller.updateTask(req2, res2);
+    expect(res2.statusCode).toBe(200);
+
+    var afterSecondDrag = await db('task_masters').where('id', 'redrag-test').first();
+    // prev_when unchanged — original pre-drag snapshot preserved
+    expect(afterSecondDrag.prev_when).toBe(firstPrevWhen);
+  });
+
+  // B-3: full round-trip — re-drag preserves original snapshot → unpin restores original mode
+  test('re-drag then unpin restores original time_window placement', async () => {
+    if (!available) return;
+    await tasksWrite.insertTask(db, {
+      id: 'roundtrip-tw', user_id: USER_ID, task_type: 'task', text: 'Round-trip TW',
+      status: '', date_pinned: 0, placement_mode: 'time_window', when: '09:00',
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+
+    // First drag: time_window 09:00 → pinned at 2026-05-26 14:00
+    var req1 = mockReq({
+      params: { id: 'roundtrip-tw' },
+      body: { _dragPin: true, date: '2026-05-26', time: '14:00' }
+    });
+    var res1 = mockRes();
+    await controller.updateTask(req1, res1);
+    expect(res1.statusCode).toBe(200);
+
+    var afterFirst = await db('task_masters').where('id', 'roundtrip-tw').first();
+    expect(afterFirst.date_pinned).toBe(1);
+    // Snapshot must capture original mode + when
+    var expectedSnapshot = JSON.stringify({ mode: 'time_window', when: '09:00' });
+    expect(afterFirst.prev_when).toBe(expectedSnapshot);
+
+    // Second drag: pinned → drag to 16:00 — prev_when must remain unchanged
+    var req2 = mockReq({
+      params: { id: 'roundtrip-tw' },
+      body: { _dragPin: true, date: '2026-05-26', time: '16:00' }
+    });
+    var res2 = mockRes();
+    await controller.updateTask(req2, res2);
+    expect(res2.statusCode).toBe(200);
+
+    var afterSecond = await db('task_masters').where('id', 'roundtrip-tw').first();
+    expect(afterSecond.prev_when).toBe(expectedSnapshot); // original snapshot intact
+
+    // Unpin — must restore time_window mode and original when
+    var reqU = mockReq({ params: { id: 'roundtrip-tw' } });
+    var resU = mockRes();
+    await controller.unpinTask(reqU, resU);
+    expect(resU.statusCode).toBe(200);
+    expect(resU._json.action).toBe('unpinned');
+
+    var row = await db('tasks_v').where('id', 'roundtrip-tw').first();
+    expect(row.placement_mode).toBe('time_window');
+    expect(row.when).toBe('09:00');
+    expect(row.date_pinned).toBe(0);
   });
 });
 
