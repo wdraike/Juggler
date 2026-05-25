@@ -693,6 +693,12 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         onEnableFlex={function() { setFlexWhen(true); }}
       />
 
+      {marker && !isCreate && task && (task.gcalEventId || task.msftEventId || task.appleEventId) && (
+        <div style={{ fontSize: 10, color: TH.amberText, margin: '8px 0 4px', fontWeight: 500 }}>
+          {'📅 Calendar reminder from ' + (task.gcalEventId ? 'Google Calendar' : task.msftEventId ? 'Microsoft Calendar' : 'Apple Calendar') + ' — managed externally.'}
+        </div>
+      )}
+
       {!marker && (
         <CollapsibleSection id="when" label="When" isOpen={!!collapse.when}
           onToggle={toggleCollapse}

@@ -343,23 +343,6 @@ it('clicking Pinned button calls onDatePinnedChange with false', () => {
   expect(called).toBe(false);
 });
 
-// --- marker calendar source banner ---
-
-it('shows calendar source for marker task with gcalEventId', () => {
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} marker={true} placementMode="reminder" task={{ gcalEventId: 'g1' }} />);
-  expect(screen.getByText(/Calendar reminder from Google Calendar/)).toBeInTheDocument();
-});
-
-it('shows calendar source for marker task with appleEventId', () => {
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} marker={true} placementMode="reminder" task={{ appleEventId: 'a1' }} />);
-  expect(screen.getByText(/Calendar reminder from Apple Calendar/)).toBeInTheDocument();
-});
-
-it('shows no marker banner when marker task has no event id', () => {
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} marker={true} placementMode="reminder" task={{}} />);
-  expect(screen.queryByText(/Calendar reminder/)).not.toBeInTheDocument();
-});
-
 // --- lockout explanation banner ---
 
 it('shows pinned lockout banner when datePinned is true', () => {
