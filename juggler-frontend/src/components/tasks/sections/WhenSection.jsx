@@ -304,6 +304,12 @@ export default function WhenSection(props) {
         </div>
       </>)}
 
+      {marker && calendarSource && (
+        <div style={{ fontSize: 10, color: TH.amberText, marginTop: 8, marginBottom: 4, fontWeight: 500 }}>
+          {'📅 Calendar reminder from ' + calendarSource + ' — managed externally.'}
+        </div>
+      )}
+
       {!marker && !isRecurring && (
         <div style={{ marginTop: 8 }}>
           {isFixed && (
