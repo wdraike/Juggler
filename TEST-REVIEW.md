@@ -1,143 +1,162 @@
-# Test Review — When-mode Simplification (datePinned removal)
-# juggler / 2026-05-25
+# Test Review — TaskDetailHeader Project Select Field
+# 2026-05-26 | Mode: --focus TaskDetailHeader
 
-## Verdict: PASS
+## Run Result
 
-All tests green. 3 Zoe BLOCK findings resolved via 1 bert iteration. 7 Zoe WARNs + 4 Bird WARNs resolved via 2 additional bert iterations. UX-4 (viewport Playwright test) deferred with user approval.
+| Status | Count |
+|--------|-------|
+| PASS   | 6     |
+| FAIL   | 0     |
+| BLOCK (missing test) | 0 |
+| STALE  | 0     |
 
----
-
-## Test counts
-
-| Suite | Before | After |
-|-------|--------|-------|
-| Backend tests passing | 1443 | 1481 |
-| Frontend tests passing | 372 | 398 |
-| Backend suites | 99/107 active | 107/107 active |
-
-Before: 8 failing backend suites, 24 failing tests.
-After: 0 failing suites, 0 failing tests (27 skipped = DB-gated integration tests without live DB + xdescribed removed-endpoint blocks).
+All 6 tests pass. Duration: ~2.9 s.
 
 ---
 
-## Failing tests found and repaired (telly)
+## Tests Run
 
-| Suite | Root cause | Fix |
-|-------|-----------|-----|
-| `taskControllerUnit.test.js` | `datePinned` assertion on `rowToTask` output | Updated to check `placementMode` |
-| `taskMapping.test.js` | `task.datePinned` / `row.date_pinned` assertions | Removed; new contract documented |
-| `taskPipeline.test.js` | `prevWhen` field removed from `rowToTask` | Replaced drag-pin block with placement_mode fields block (4 tests) |
-| `mcp-task-config.test.js` | Multiple `date_pinned: 1` auto-set assertions | Rewrote to assert `placement_mode` only |
-| `schedulerRules.test.js` (Groups 10, 15, 28, 65, 66) | `datePinned: true` in `makeTask()` — scheduler ignores it | Replaced with `placementMode: 'fixed'` + time anchors |
-| `cal-sync/02-adapter-msft.test.js` | `expect(fields.date_pinned).toBe(1)` | Updated to assert `placement_mode === FIXED`, confirm `date_pinned` absent |
-| `unifiedSchedule.test.js` | `when: 'allday'` stripped as legacy | Changed to `placementMode: 'all_day'` |
-| `disabledStatus.test.js` | Mock queue ordering: 3-arg `Promise.all` got wrong resolves | Added missing `user_calendars` resolve, reordered queue |
+| # | Test Name | Covers |
+|---|-----------|--------|
+| 1 | renders task title | Task text input renders with correct value |
+| 2 | shows Save button only when dirty | isDirty prop controls Save button visibility |
+| 3 | calls onClose when × clicked | Close button fires onClose |
+| 4 | shows notes preview when notes is non-empty | Notes textarea shows value |
+| 5 | renders project select with current value and all options | Select renders with correct value + all options including "No project" |
+| 6 | calls onProjectChange when project select changes | onChange fires onProjectChange with new value |
 
 ---
 
-## Coverage gaps filled (telly)
+## Coverage Assessment — Project Select Field
 
-| Gap | Tests added |
-|-----|------------|
-| `guardFixedCalendarWhen` new behavior | 7 unit tests: strips non-fixed mode on cal-linked tasks, preserves fixed, allowUnfix bypass, all 3 providers |
-| New drag-to-fixed PATCH path | 4 unit tests: `placementMode: 'fixed'` writes `placement_mode`, no derivation when absent |
-| `validateTaskInput` cross-field fixed-mode check | 3 tests: error without date/time, no error with date+time, no error with scheduledAt |
-| Scheduler `placement_mode === 'fixed'` anchor | Covered by repaired schedulerRules groups + existing schedulerSupplyDemand suite |
-| WhenSection Fixed button | Already covered in existing `WhenSection.modes.test.jsx` |
+Tests 5 and 6 are the two new tests under review. Both are correct and pass. They cover:
+- The select renders with `value="Work"` when `project="Work"` is passed
+- The "No project" option is present
+- Other named options are present
+- Firing `change` calls `onProjectChange` with the new value
 
----
-
-## Zoe BLOCK findings resolved (bert iteration 1)
-
-| Finding | Fix |
-|---------|-----|
-| Z-1: `taskMapping.test.js` — no assertion `datePinned` absent from `rowToTask` output | Added `expect(task.datePinned).toBeUndefined()` |
-| Z-2: `taskMapping.test.js` — no assertion `date_pinned` absent from `taskToRow` + round-trip gap | Added `expect(row.date_pinned).toBeUndefined()` + `expect(result.datePinned).toBeUndefined()` |
-| Z-3: `taskCrudIntegration.test.js` — live drag-pin + unpinTask blocks silently skip on CI but fail with real DB | Changed to `xtest`/`xdescribe` documenting removed features |
+The following edge cases in the source code are **not covered by any existing test**.
 
 ---
 
-## Zoe WARN findings resolved (bert iterations 2–3)
+## Uncovered Edge Cases
 
-| Finding | Fix |
-|---------|-----|
-| Z-4: msft adapter `date_pinned` absent not asserted in "time changes" + "allday-to-timed" tests | Added `expect(fields.date_pinned).toBeUndefined()` to both tests |
-| Z-5: 11 `datePinned: true` explicit overrides in `schedulerRules.test.js` — exercising inert field | Converted all to `placementMode: 'fixed'` + time anchors; Group 28C restructured |
-| Z-5 semantic: `flex_eve` passed via force-placement not flexWhen; `load_` unplaced branch unreachable | `flex_eve` → `placementMode: 'time_window'`; `load_` → time anchors + unconditional assertions |
-| Z-6: No test for `placementMode: 'fixed'` + date-only (no time) in validateTaskInput | Added test: date-only passes validator (handler enforces date+time, not validator) |
-| Z-7: No scheduler test for invalid `placement_mode` value | Added Group 71: `placementMode: 'unknown_value'` — no crash, placed, `locked: false` |
-| B-1 residual: No active test asserts `redis.invalidateTasks` for `updateTask` | Added assertion to "converts recurring to one-off" active test |
-| B-3 residual: Re-drag snapshot guard not exercised | Moot — `_dragPin` and `!existing.date_pinned` guard removed in redesign |
+### 1. `project` prop is `null` — select should fall back to "No project"
 
----
+Source (`TaskDetailHeader.jsx` line 142):
+```jsx
+<select value={project || ''} ...>
+```
+When `project` is `null` (which API responses commonly produce), the `||` guard coerces it to `''` so the "No project" option is selected. No test renders with `project={null}`.
 
-## Bird UX WARN findings resolved (bert iterations 2–3)
+**Risk:** If the guard were removed, `value={null}` would cause a React controlled-component warning and unpredictable display. The test would catch a regression.
 
-| Finding | Fix |
-|---------|-----|
-| UX-1: Mode buttons missing `aria-pressed` / `role="group"` | Added `role="group" aria-label="Scheduling mode"` + `aria-pressed` to all 5 non-recurring + 4 recurring buttons |
-| UX-2: Fixed button absent from recurring mode selector | Added guard: cal-managed → "Calendar-managed" banner; non-cal → "Fixed not available" message + 4 valid mode buttons |
-| UX-3: Silent failure when Fixed task has no date/time | Client-side validation in `TaskEditForm.handleSave`; backend error string propagated via `useTaskState.updateTask`; `role="alert"` render |
-| UX-4: 5-button viewport overflow at 320px unverified | **DEFERRED — user approved. No browser available.** Backlog item: TC-W001 Playwright across 7 viewports |
-| UX-5: No unit tests for Fixed button behaviors | Created `WhenSection.fixed.test.jsx` with 26 tests (TC-W002 through TC-W007) |
+### 2. `project` prop is `undefined` (prop omitted)
 
----
+Same guard path as null, but a distinct caller pattern — the component is used without passing `project` at all. Neither case is tested.
 
-## New test files
+### 3. `allProjectNames` omitted entirely
 
-| File | Tests | Coverage |
-|------|-------|----------|
-| `juggler-frontend/src/components/tasks/sections/__tests__/WhenSection.fixed.test.jsx` | 26 | TC-W002–W007: Fixed button render, cal-managed lock, non-cal unlock, "Date is pinned" regression, save validation, recurring guard |
+Source (line 145):
+```jsx
+{(allProjectNames || []).map(function(p) { return <option key={p} value={p}>{p}</option>; })}
+```
+When `allProjectNames` is not passed, the `|| []` guard prevents a crash. The select should render with only the static "No project" option. No test exercises this path.
 
----
+### 4. `allProjectNames` is an empty array `[]`
 
-## Files modified
+The guard passes through an empty array without using the fallback. The select should render with only "No project". Distinct from the omit-prop case and worth an explicit assertion.
 
-**Backend tests:**
-- `tests/taskControllerUnit.test.js` — +20 tests (guardFixedCalendarWhen, drag-to-fixed PATCH, validateTaskInput, date-only fixed)
-- `tests/taskMapping.test.js` — absence assertions added (datePinned, date_pinned, round-trip)
-- `tests/taskPipeline.test.js` — drag-pin block → placement_mode fields block
-- `tests/mcp-task-config.test.js` — rewritten for placement_mode contract
-- `tests/schedulerRules.test.js` — Groups 10/15/25/28/55/65/66 repaired; Group 71 added (invalid placement_mode + unknown_value)
-- `tests/taskCrudIntegration.test.js` — drag-pin + unpinTask → xtest/xdescribe
-- `tests/taskCrudIntegration2.test.js` — taskMapping absence assertions; redis.invalidateTasks active assertion
-- `tests/cal-sync/02-adapter-msft.test.js` — `date_pinned` absent asserted in all 3 adapter tests
-- `tests/unifiedSchedule.test.js` — allday → placementMode: 'all_day'
-- `tests/disabledStatus.test.js` — mock queue ordering fixed
+### 5. `onProjectChange` not provided — no crash when select changes
 
-**Frontend tests:**
-- `src/components/tasks/sections/__tests__/WhenSection.fixed.test.jsx` — new file, 26 tests
-- `src/components/tasks/sections/__tests__/WhenSection.modes.test.jsx` — recurring+fixed guard matrix updated
+Source (line 142):
+```jsx
+onChange={e => onProjectChange && onProjectChange(e.target.value)}
+```
+The short-circuit guard prevents a crash when `onProjectChange` is absent. No test fires `change` without the prop present to confirm the guard holds.
 
-**Source files (UX fixes):**
-- `src/components/tasks/sections/WhenSection.jsx` — aria-pressed, role="group", recurring Fixed guard
-- `src/components/tasks/TaskEditForm.jsx` — client-side Fixed validation, saveError render
-- `src/hooks/useTaskState.js` — backend error string propagation
+### 6. Project select renders in `isCreate={true}` mode
+
+The status button row is hidden behind `{!isCreate && ...}` (line 102), but the project select has no such guard — it renders in both create and edit modes. No test covers `isCreate={true}` with the project select.
+
+### 7. Project name with special characters
+
+If a project name contains `&`, `<`, `>`, or quotes, the option must render with the correct visible text. Not tested.
 
 ---
 
-## Agent Iterations
+## Priority
 
-| Iteration | Agent | Findings | Outcome |
-|-----------|-------|----------|---------|
-| 1 | telly | 8 broken suites repaired, 5 coverage gaps filled | 1481 BE / 372 FE |
-| 1 | bird | 5 UX WARNs | WARN |
-| 2 | zoe | 3 BLOCKs + 4 WARNs | BLOCK |
-| 2 | bert | Fixed Z-1, Z-2, Z-3 BLOCKs | All tests pass |
-| 3 | zoe (re-run) | BLOCKs resolved; Z-4/Z-5/Z-6/Z-7 WARNs remain | WARN |
-| 3 | bert | Fixed Z-4, Z-5, Z-6, Z-7, B-1 residual, UX-1, UX-2, UX-3, UX-5 | 1481 BE / 398 FE |
-| 4 | bert | Fixed Z-5 semantic (flex_eve, load_), B-1 residual (redis), UX-2 banner fork | 1481 BE / 398 FE |
-| 4 | zoe (re-verify) | All resolved PASS | PASS |
-| 4 | bird (re-verify) | All resolved PASS | PASS |
+| Gap | Severity | Reason |
+|-----|----------|--------|
+| `project={null}` | HIGH | API commonly returns null; the fallback guard is the only safety net |
+| `allProjectNames` omitted | HIGH | Prop is optional — omission is a valid caller pattern |
+| `onProjectChange` absent + change fired | MEDIUM | Guard path untested; crash risk if guard is later removed |
+| `allProjectNames={[]}` | MEDIUM | Distinct data state; common initial render condition |
+| `isCreate={true}` renders select | MEDIUM | Distinct render mode; select presence in create flow unverified |
+| Special characters in names | LOW | JSX escaping handles it automatically, but a regression check is cheap |
 
 ---
 
-## Deferred Items
+## Recommended Additional Tests
 
-| Item | Reason | Approval |
-|------|--------|----------|
-| UX-4: TC-W001 Playwright viewport test for 5-button mode selector at 320px | Requires running browser — not available | User approved 2026-05-25 |
+Three tests covering the HIGH and most important MEDIUM priorities:
+
+```javascript
+it('renders project select with "No project" selected when project is null', () => {
+  render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+    onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+    isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+    text="Buy groceries" project={null} pri="P3" dur={30} notes="" url=""
+    allProjectNames={['Work', 'Personal']}
+    onProjectChange={() => {}}
+  />);
+  expect(screen.getByDisplayValue('No project')).toBeInTheDocument();
+});
+
+it('renders only "No project" option when allProjectNames is omitted', () => {
+  render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+    onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+    isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+    text="Buy groceries" project="" pri="P3" dur={30} notes="" url=""
+    onProjectChange={() => {}}
+  />);
+  // Use label text to target the project select specifically (priority select also has options)
+  const projectSelect = screen.getByRole('combobox', { name: /Project/i });
+  const options = within(projectSelect).getAllByRole('option');
+  expect(options).toHaveLength(1);
+  expect(options[0]).toHaveTextContent('No project');
+});
+
+it('does not crash when onProjectChange is not provided and select changes', () => {
+  render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+    onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+    isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+    text="Buy groceries" project="Work" pri="P3" dur={30} notes="" url=""
+    allProjectNames={['Work', 'Personal']}
+  />);
+  expect(() => {
+    fireEvent.change(screen.getByDisplayValue('Work'), { target: { value: 'Personal' } });
+  }).not.toThrow();
+});
+```
+
+Note: the second test above requires adding `import { within } from '@testing-library/react'` to the existing import line.
 
 ---
 
-Signed: Oscar Test Phase — 2026-05-25
+## Files
+
+| File | Path |
+|------|------|
+| Source | `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx` |
+| Test file | `juggler-frontend/src/components/tasks/__tests__/TaskDetailHeader.test.jsx` |
+| Result | `.muppets/results/2026-05-26-JUG-UT-TaskDetailHeader.md` |
+
+---
+
+## Verdict: PASS with gaps
+
+The two new tests are correct and all 6 tests pass. The primary happy path and callback invocation are verified. Six edge cases are uncovered; two are HIGH priority and should be added before this component is considered fully covered at the unit tier.
+
+Signed: Telly — 2026-05-26

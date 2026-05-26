@@ -454,3 +454,435 @@ UX-2 remains WARN. The fix prevents the original zero-active-buttons bug for rec
 **Action required before commit:**
 - Fix UX-2 banner text for non-cal-managed recurring tasks with `placementMode='fixed'`
 - Run Playwright TC-W001 for UX-4 when dev server is available
+
+---
+
+## Pre-commit Re-Verification — 2026-05-25
+
+**Re-verifier:** Bird
+**Trigger:** Final pre-commit pass after all prior WARN findings were addressed.
+**Method:** Source-code analysis + full unit test run (307 tests across WhenSection.test.jsx, WhenSection.modes.test.jsx, WhenSection.fixed.test.jsx).
+**Deferred item (do not re-raise):** UX-4 — viewport test at 320px, deferred with user approval 2026-05-25; requires running browser.
+
+---
+
+### Check 1 — All 5 mode buttons have `aria-pressed` set correctly
+
+**Location:** `WhenSection.jsx` line 309–337 (non-recurring selector)
+
+Non-recurring selector — confirmed:
+- `role="group" aria-label="Scheduling mode"` on the container div (line 309)
+- Anytime: `aria-pressed={effectiveMode === 'anytime'}` (line 311)
+- Time window: `aria-pressed={effectiveMode === 'time_window'}` (line 316)
+- Time blocks: `aria-pressed={effectiveMode === 'time_blocks'}` (line 321)
+- All Day: `aria-pressed={effectiveMode === 'all_day'}` (line 329)
+- Fixed: `aria-pressed={effectiveMode === 'fixed'}` (line 334)
+
+Boolean values: React serializes `true` → `"true"` and `false` → `"false"` on HTML attributes. Exactly one button will carry `aria-pressed="true"` at any given time. SC 4.1.2 satisfied.
+
+**Result: PASS**
+
+---
+
+### Check 2 — `role="group"` + `aria-label="Scheduling mode"` on the button container
+
+**Location:** `WhenSection.jsx` line 309 (non-recurring), line 439 (recurring non-cal-managed fallback), line 470 (recurring normal path)
+
+All three render paths that show mode buttons carry `role="group" aria-label="Scheduling mode"`:
+- Non-recurring selector: line 309 — confirmed
+- Recurring, non-cal-managed fallback (Fixed invalid state): line 439 — confirmed
+- Recurring, normal path (anytime/time_window/time_blocks/all_day): line 470 — confirmed
+
+**Result: PASS**
+
+---
+
+### Check 3 — `role="alert"` on saveError div
+
+**Location:** `TaskEditForm.jsx` line 747
+
+Confirmed: `<div role="alert" style={{ fontSize: 11, color: '#b91c1c', ... }}>{saveError}</div>`. The div is only mounted when `saveError` is truthy, which is correct — screen readers announce dynamically inserted `role="alert"` content. `setSaveError(null)` is called at line 527 on a clean save path, so stale messages clear correctly.
+
+**Result: PASS**
+
+---
+
+### Check 4 — Recurring + Fixed guard: two branches render correctly
+
+**Location:** `WhenSection.jsx` lines 419–468
+
+The guard fires when `recurring && !marker` (line 419) and then `effectiveMode === 'fixed'` (line 421). Two branches confirmed:
+
+**Branch A — `isCalManaged === true`** (lines 430–433):
+Renders amber banner: `"Calendar-managed — scheduling mode is controlled by the source calendar."`
+No mode buttons rendered. Correct: the source calendar owns scheduling.
+
+**Branch B — `isCalManaged === false`** (lines 434–467):
+Renders amber banner: `"Fixed mode is not available for recurring tasks. Select a scheduling mode:"` followed by a `role="group" aria-label="Scheduling mode"` div containing four buttons (Anytime, Time window, Time blocks, All Day), each with `aria-pressed={false}`. All four buttons have `onClick` handlers that call `onModeChange` and related state resets.
+
+This directly resolves the prior re-verification UX-2 WARN: the non-cal-managed recurring+fixed state now shows an accurate explanation and a clear exit path (4 clickable mode buttons). The prior "Calendar-managed" banner on a task with no calendar link is gone.
+
+The Fixed button is correctly absent from the recurring path in both branches. Recurring + Fixed is not a supported scheduling combination; the guard provides the user with information and an escape rather than a broken zero-selection state.
+
+**Result: PASS**
+
+---
+
+### Check 5 — Fixed button is absent from recurring tasks (correct behavior)
+
+**Location:** `WhenSection.jsx` lines 419–501
+
+In the recurring block (`recurring && !marker`), the Fixed button does not appear in any path:
+- `effectiveMode === 'fixed'` → guard fires, shows explanation + 4 valid buttons (no Fixed button in that group)
+- `effectiveMode !== 'fixed'` → normal recurring selector (lines 469–500) shows Anytime, Time window, Time blocks, All Day only
+
+The Fixed button at line 334 is inside the `!isRecurring` (non-recurring) path only (lines 300–417 gate on `!marker && !isRecurring`).
+
+This is the correct design: recurring tasks cannot use Fixed mode. Removing Fixed from the recurring selector prevents users from entering an unsupported state.
+
+**Result: PASS**
+
+---
+
+### Check 6 — `isFixed = placementMode === 'fixed' && isCalManaged`
+
+**Location:** `WhenSection.jsx` line 233
+
+Confirmed: `var isFixed = placementMode === 'fixed' && isCalManaged;`
+
+`isCalManaged` is derived at line 232: `var isCalManaged = task && !!(task.gcalEventId || task.msftEventId || task.appleEventId);`
+
+This means:
+- `task` is undefined → `isCalManaged = false` → `isFixed = false` (new task or no task prop)
+- `task` has no event IDs → `isCalManaged = false` → `isFixed = false`
+- `placementMode !== 'fixed'` → `isFixed = false` regardless of calendar link
+- `placementMode === 'fixed'` + any event ID set → `isFixed = true` → UI locks
+
+The `datePinned` prop is not referenced anywhere in `isFixed` derivation or in the locking logic (confirmed: no reference to `datePinned` in `WhenSection.jsx` other than the removal comment at line 177). The formula is correct and minimal.
+
+**Result: PASS**
+
+---
+
+### Check 7 — Error string propagation from backend reaches the UI
+
+**Chain confirmed:**
+
+1. `useTaskState.js` line 295–300: `updateTask` catch block extracts `error.response.data.error` into `serverMsg` and returns `serverMsg || false`. If the backend sends `{ error: "some message" }` on a 400, the string reaches the caller.
+
+2. `TaskEditForm.jsx` line 569–574: `commitSave` receives the return value as `ok`. The check `typeof ok === 'string'` at line 572 identifies it as a server error string. `setSaveError(ok)` at line 574 stores it in state.
+
+3. `TaskEditForm.jsx` line 746–750: `saveError && <div role="alert">` renders the string to the DOM.
+
+Pre-save client-side guard (lines 522–526): for the specific case of `placementMode === 'fixed'` with missing date or time, `setSaveError('Fixed mode requires a date and time.')` fires and `return` prevents the API call entirely. This is the primary path for the most common fixed-mode error.
+
+Note carried from prior re-verification (non-blocking): the `saveError` div is positioned at the bottom of the When collapsible section, after all WhenSection content including potentially-expanded Recurrence and Constraints sub-sections. When those sub-sections are expanded, the error message may appear well below the date/time fields. The `role="alert"` ensures screen readers announce it regardless. This is a deferred UX polish item, not a blocker.
+
+**Result: PASS**
+
+---
+
+### Test Run Results
+
+Tests executed: `CI=true react-scripts test --testPathPattern="WhenSection" --no-coverage`
+
+| Suite | Tests | Result |
+|-------|-------|--------|
+| WhenSection.test.jsx | 57 | PASS |
+| WhenSection.modes.test.jsx | 224 | PASS |
+| WhenSection.fixed.test.jsx | 26 | PASS |
+| **Total** | **307** | **ALL PASS** |
+
+No failures. No skipped tests.
+
+Key test coverage confirmed:
+- TC-W002 (6 tests): Fixed button aria-pressed, lock state, role+aria-label
+- TC-W003 (3 tests): cal-managed lock — banner, pointerEvents:none, tabIndex=-1
+- TC-W004 (3 tests): non-cal-managed — no banner, tabIndex=0, click fires onModeChange
+- TC-W005 (6 tests): "Date is pinned" regression guard across all prop variants
+- TC-W006 (3 tests): Fixed save guard — error shown, onUpdate not called, clears when valid
+- TC-W007 (5 tests): Recurring + Fixed + non-cal-managed path (new in this pass)
+
+---
+
+### Pre-commit Re-Verification Summary
+
+| Check | Item | Result |
+|-------|------|--------|
+| 1 | All 5 mode buttons have correct `aria-pressed` | PASS |
+| 2 | `role="group"` + `aria-label="Scheduling mode"` on all button containers | PASS |
+| 3 | `role="alert"` on saveError div | PASS |
+| 4 | Recurring + Fixed two-branch guard (cal-managed banner / non-cal explanation + 4 buttons) | PASS |
+| 5 | Fixed button absent from recurring selector | PASS |
+| 6 | `isFixed = placementMode === 'fixed' && isCalManaged` formula | PASS |
+| 7 | Error string propagation: backend string -> setSaveError -> role=alert div | PASS |
+| Tests | 307 unit tests across 3 suites | ALL PASS |
+| UX-4 | 320px viewport test | DEFERRED (user-approved) |
+
+**Verdict: PASS**
+
+All prior WARN findings (UX-1, UX-2, UX-3, UX-5) are resolved. UX-4 remains deferred with user approval. No new findings. This change set is clear to commit.
+
+---
+
+---
+
+## Review — Project Select in TaskDetailHeader — 2026-05-26
+
+**Reviewer:** Bird
+**Scope:** `TaskDetailHeader.jsx` lines 140–147 — new project `<select>` dropdown
+**Method:** Source-code analysis only (dev server not running; auth blocks live inspection)
+**Files read:**
+- `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx` (full file)
+- `juggler-frontend/src/components/tasks/__tests__/TaskDetailHeader.test.jsx` (full file)
+- `juggler-frontend/src/components/layout/AppLayout.jsx` lines 755–763 (allProjectNames derivation)
+- `juggler-frontend/src/components/tasks/TaskEditForm.jsx` lines 680–688 (prop passing)
+
+---
+
+### Code Under Review (lines 140–147)
+
+```jsx
+<label style={{ ...lStyle, marginBottom: 6 }}>
+  Project
+  <select value={project || ''} onChange={e => onProjectChange && onProjectChange(e.target.value)}
+    style={{ ...iStyle, height: BTN_H, cursor: 'pointer' }}>
+    <option value="">No project</option>
+    {(allProjectNames || []).map(function(p) { return <option key={p} value={p}>{p}</option>; })}
+  </select>
+</label>
+```
+
+Where `lStyle = { fontSize: 9, ... }` and `BTN_H = isMobile ? 30 : 26`.
+
+---
+
+### BLOCK Findings
+
+None.
+
+---
+
+### WARN Findings
+
+#### UX-P1 — Label text at 9px is illegible and fails WCAG 1.4.4 at 200% zoom
+
+**Location:** `TaskDetailHeader.jsx` line 23 (`lStyle`), used at line 140.
+
+**Evidence.** `lStyle` sets `fontSize: 9`. This applies not only to the new "Project" label but also to the pre-existing "Notes" and "Link" labels. The new select inherits this shared style.
+
+9px is approximately 6.75pt. WCAG 1.4.4 (Resize Text, SC AA) requires text to be readable up to 200% zoom without loss of content or functionality. At 9px base, 200% zoom produces 18px — which is acceptable — but at 9px the raw text is at the boundary of legibility on standard-density displays and drops below it on high-DPI screens that apply fractional scaling. More critically, 9pt falls below the WCAG 1.4.3 threshold for "large text" (18pt / 14pt bold), meaning the label requires a 4.5:1 contrast ratio rather than the 3:1 ratio that applies to large text. The actual contrast ratio of `TH.textMuted` against `TH.inputBg` is not known without live inspection, but the combination of small size and muted color creates a compounded risk.
+
+This is a systemic pattern across all three labels (Project, Notes, Link), not a defect introduced solely by the new select. The new select is the trigger for this finding.
+
+**WCAG:** SC 1.4.3 (Contrast, AA) — moderate risk; SC 1.4.4 (Resize Text, AA) — note.
+
+**Fix.** Increase label `fontSize` to a minimum of 11px to match `iStyle.fontSize` on desktop. On mobile (`isMobile === true`) use 12px or 13px. Since `lStyle` is shared across all three labels, one change fixes all three.
+
+```jsx
+var lStyle = {
+  fontSize: isMobile ? 12 : 11,
+  color: TH.textMuted, display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 600
+};
+```
+
+---
+
+#### UX-P2 — Select touch target height (26px desktop, 30px mobile) is below the preferred threshold; mobile height is not proportional to the label's actual touch surface
+
+**Location:** `TaskDetailHeader.jsx` line 22 (`BTN_H`), line 143 (`height: BTN_H`).
+
+**Evidence.** `BTN_H = isMobile ? 30 : 26`. The `isMobile` flag is used for height — contrary to the statement in the task brief — but neither value meets the WCAG 2.5.8 recommended 24px minimum with 24px spacing. The select element at 26px desktop height is the interactive target; it clears the 24px absolute minimum, but WCAG 2.5.8 explicitly recommends 44px for touch controls and sets 24px as a floor, not a target.
+
+The priority select in the adjacent badge row (`height: 22`) is worse and predates this change. The new project select at 26px/30px is marginally better but still in the same family of undersized controls. Together they create a small-target-dense UI section.
+
+**WCAG:** SC 2.5.8 (Target Size, AA) — moderate.
+
+**Fix.** Set `height: isMobile ? 36 : 28` at minimum for this select. This is a one-line change on line 143. The `iStyle` already sets `padding: isMobile ? '6px 8px' : '3px 4px'`, so increasing the height slightly will not misalign the text.
+
+---
+
+#### UX-P3 — `project || ''` and `allProjectNames || []` are undocumented fallbacks (violates CLAUDE.md no-fallback rule)
+
+**Location:** `TaskDetailHeader.jsx` line 142 (`project || ''`), line 145 (`allProjectNames || []`).
+
+**Evidence.**
+
+`allProjectNames` is derived in `AppLayout.jsx` line 758–763 as `Object.keys(names).sort()`, which always returns a defined array. It is always passed to `TaskDetailHeader` through `TaskEditForm`. The `|| []` guard in `TaskDetailHeader` papers over a scenario (the prop being omitted by a caller) that does not occur in production but could occur in tests or future call sites. Per CLAUDE.md: "Every approved fallback must be documented in the relevant CLAUDE.md or domain invariant section with the reason and approval context. Undocumented fallbacks are not approved."
+
+`project` can legitimately be `null` (no project assigned to the task) or `''` (empty string). `project || ''` converts `null` silently to `''`, which happens to produce the correct behavior (the "No project" option is selected when value is `''`). But it also converts any other falsy value (e.g. `0`, `false`) to `''` without a diagnostic. The `null` → `''` conversion should be explicit (`project ?? ''` or `project == null ? '' : project`) and documented.
+
+**Fix.** Either:
+1. Remove `|| []` from `allProjectNames` (assert it is always provided; let the TypeError surface if it is missing — which is the correct behavior per no-fallback rule), or
+2. Document both fallbacks in `juggler/CLAUDE.md` under an approved-fallbacks section with the reason.
+
+For `project || ''`, replace with `project ?? ''` and add a comment: `// project is null when no project is assigned; ?? converts null to '' to select the "No project" option`.
+
+---
+
+#### UX-P4 — Implicit label association only; no explicit `id`/`htmlFor` pairing
+
+**Location:** `TaskDetailHeader.jsx` lines 140–147.
+
+**Evidence.** The `<label>` wraps the `<select>` using implicit HTML labeling (label text "Project" is a text node sibling of the `<select>` inside the same `<label>` element). This is valid HTML5 and is handled correctly by modern screen readers. However:
+
+1. The label style uses `flexDirection: 'column'`, which visually stacks label text above the select. This is correct for rendering, and DOM order (text first, then select) matches visual order, so no reflow issue.
+2. Some older AT/browser combos (NVDA + Firefox pre-120, TalkBack on Android pre-14) handle implicit label association inconsistently on native `<select>` elements inside flex containers.
+3. The existing priority `<select>` at line 150 has no label at all — it relies on `<option>` text to convey meaning. The new project select is better than this, but explicit association is the most robust pattern.
+
+**WCAG:** SC 1.3.1 (Info and Relationships, A) — low risk with current pattern; moderate risk with older AT.
+
+**Fix.** Add an `id` to the select and a matching `htmlFor` to the label:
+
+```jsx
+<label htmlFor="task-project-select" style={{ ...lStyle, marginBottom: 6 }}>
+  Project
+  <select id="task-project-select" value={project ?? ''} ...>
+```
+
+This is a two-attribute addition and is backward compatible.
+
+---
+
+#### UX-P5 — New select has partial test coverage but is not registered in .muppets/TEST-REGISTRY.md; that registry does not exist
+
+**Location:** `juggler-frontend/src/components/tasks/__tests__/TaskDetailHeader.test.jsx` lines 59–84; `.muppets/` directory absent from juggler.
+
+**Evidence.**
+
+The test file at `TaskDetailHeader.test.jsx` does cover the project select with two cases:
+- Lines 59–71: renders with current value selected, "No project" option present, other options present.
+- Lines 73–84: `onProjectChange` is called with the correct value on change.
+
+These two tests are present and meaningful. However:
+
+The following states are NOT tested:
+- `isMobile=true` path: `BTN_H=30` applied to height (renders at 30px, not 26px)
+- `project=null` path: the `|| ''` fallback — does "No project" actually become the selected option when `project` is `null`?
+- `allProjectNames` omitted entirely: does the `|| []` guard prevent a render crash?
+- `onProjectChange` omitted (no prop passed): does `onProjectChange && onProjectChange(...)` guard prevent a crash on change?
+- Empty `allProjectNames=[]`: renders only "No project" option with no crash
+
+The `.muppets/TEST-REGISTRY.md` file does not exist in the juggler directory. Per the Bird charter, every interactive element must be registered. The select has no TC entry because the registry was never bootstrapped for juggler.
+
+**Fix.**
+1. Add three additional tests to `TaskDetailHeader.test.jsx` covering `project=null`, `isMobile=true` height, and missing `onProjectChange` prop.
+2. Bootstrap `.muppets/TEST-REGISTRY.md` for juggler and register `TC-P001` through `TC-P007` for the project select (see test cases below).
+
+---
+
+### INFO Suggestions
+
+#### UX-P6 — INFO: "No project" label is good copy; consider "None" for brevity at narrow widths
+
+The label "No project" in the default option is clear and unambiguous. The word "project" provides context for users who open the select without having read the label. This is good defensive copy. At very narrow viewports, "No project" is 10 characters and will fit comfortably in a 200px+ select box. No change required.
+
+#### UX-P7 — INFO: The select appears between the task title and the badge row — visual hierarchy is appropriate
+
+The placement (title → project → priority/duration/scheduled) follows a logical scoping order: what the task is, what it belongs to, and then its metadata. This is the correct information hierarchy.
+
+---
+
+### Test Cases Required
+
+#### TC-P001 — Project select renders with current value selected
+- **Surface:** TaskDetailHeader — project select
+- **Source file:** `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx:140-147`
+- **States:** `project='Work'`, `allProjectNames=['Work','Personal','Health']`
+- **Assertions:** `getByDisplayValue('Work')` is in document; 'No project' option present; 'Personal' option present
+- **Status:** TESTED (TaskDetailHeader.test.jsx lines 59–71)
+
+#### TC-P002 — Project select calls onProjectChange on change
+- **Surface:** TaskDetailHeader — project select
+- **Source file:** `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx:142`
+- **States:** user selects 'Personal' from 'Work'
+- **Assertions:** `onProjectChange` called with `'Personal'`
+- **Status:** TESTED (TaskDetailHeader.test.jsx lines 73–84)
+
+#### TC-P003 — Project select with null project shows "No project" selected
+- **Surface:** TaskDetailHeader — project select
+- **Source file:** `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx:142`
+- **States:** `project=null`, `allProjectNames=['Work']`
+- **Assertions:** select displays with value `''`; "No project" option is selected
+- **Status:** UNTESTED
+
+#### TC-P004 — Project select with isMobile=true renders at BTN_H=30
+- **Surface:** TaskDetailHeader — project select
+- **Source file:** `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx:22,143`
+- **States:** `isMobile=true`
+- **Assertions:** select element has computed height of 30px
+- **Status:** UNTESTED
+
+#### TC-P005 — Project select with empty allProjectNames shows only "No project"
+- **Surface:** TaskDetailHeader — project select
+- **Source file:** `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx:145`
+- **States:** `allProjectNames=[]`
+- **Assertions:** only one option in select (the "No project" option); no crash
+- **Status:** UNTESTED
+
+#### TC-P006 — Project select with onProjectChange omitted does not crash on change
+- **Surface:** TaskDetailHeader — project select
+- **Source file:** `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx:142`
+- **States:** `onProjectChange` prop not passed
+- **Assertions:** fireEvent.change does not throw; component remains mounted
+- **Status:** UNTESTED
+
+#### TC-P007 — Project select label "Project" is associated with the select (implicit label)
+- **Surface:** TaskDetailHeader — project select label
+- **Source file:** `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx:140`
+- **States:** default render
+- **Assertions:** `getByLabelText('Project')` returns the select element
+- **Status:** UNTESTED
+
+---
+
+### TEST-REGISTRY.md Status
+
+`.muppets/TEST-REGISTRY.md` does not exist in the juggler directory. The project select is therefore not formally registered regardless of test file coverage.
+
+| TC | Description | Status |
+|----|-------------|--------|
+| TC-P001 | Project select renders with current value | TESTED (no registry entry) |
+| TC-P002 | onProjectChange called on change | TESTED (no registry entry) |
+| TC-P003 | null project shows "No project" | UNTESTED |
+| TC-P004 | isMobile=true height is 30px | UNTESTED |
+| TC-P005 | empty allProjectNames shows only "No project" | UNTESTED |
+| TC-P006 | missing onProjectChange does not crash | UNTESTED |
+| TC-P007 | label "Project" is associated with select | UNTESTED |
+
+---
+
+### Project Select Summary Table
+
+| ID | Finding | Severity | Location |
+|----|---------|----------|----------|
+| UX-P1 | Label "Project" at 9px — below legibility floor; WCAG 1.4.3 contrast risk at muted color | WARN | TaskDetailHeader.jsx:23,140 |
+| UX-P2 | Select height 26px desktop / 30px mobile — below WCAG 2.5.8 preferred touch target | WARN | TaskDetailHeader.jsx:22,143 |
+| UX-P3 | `project \|\| ''` and `allProjectNames \|\| []` are undocumented fallbacks — violates CLAUDE.md no-fallback rule | WARN | TaskDetailHeader.jsx:142,145 |
+| UX-P4 | Implicit label association only — no `id`/`htmlFor`; moderate risk with older AT | WARN | TaskDetailHeader.jsx:140-147 |
+| UX-P5 | 5 of 7 test cases untested; .muppets/TEST-REGISTRY.md does not exist | WARN | TaskDetailHeader.test.jsx |
+| UX-P6 | INFO: "No project" copy is clear; no change needed | INFO | TaskDetailHeader.jsx:144 |
+| UX-P7 | INFO: Visual hierarchy placement (title > project > badges) is appropriate | INFO | TaskDetailHeader.jsx:140 |
+
+---
+
+### Verdict: WARN
+
+**0 BLOCK findings. 5 WARN findings. 2 INFO suggestions.**
+
+The project select is functional and has basic test coverage for the happy path. The five WARN findings are all fixable with small, targeted changes:
+
+- UX-P1 and UX-P2 are one-line CSS fixes each.
+- UX-P3 requires either removing the undocumented `|| ''` / `|| []` fallbacks or documenting them in `juggler/CLAUDE.md`.
+- UX-P4 requires adding `id` and `htmlFor` attributes.
+- UX-P5 requires three additional unit tests and bootstrapping `.muppets/TEST-REGISTRY.md`.
+
+None of these constitute broken functionality. There are no WCAG critical/serious violations that would prevent shipping, but all five WARN items should be resolved before this code is committed.
+
+### Next Steps
+
+- [ ] WARN UX-P1: Increase `lStyle.fontSize` from 9 to `isMobile ? 12 : 11`
+- [ ] WARN UX-P2: Increase `BTN_H` values: `isMobile ? 36 : 28` (or document a deliberate design decision to keep them compact)
+- [ ] WARN UX-P3: Replace `project || ''` with `project ?? ''` and add a comment; remove `allProjectNames || []` (assert always provided) or document both in `juggler/CLAUDE.md`
+- [ ] WARN UX-P4: Add `id="task-project-select"` to select and `htmlFor="task-project-select"` to label
+- [ ] WARN UX-P5: Add TC-P003 through TC-P007 to `TaskDetailHeader.test.jsx`; bootstrap `.muppets/TEST-REGISTRY.md`

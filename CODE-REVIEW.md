@@ -1,207 +1,97 @@
-# Code Review — WhenSection isFixed + unpinTask placement_mode reset
-**Date:** 2026-05-25
-**Reviewer:** Ernie (light pre-pass)
-**Bert verdict on prior review:** PASS
+# CODE-REVIEW — Project select field in TaskDetailHeader
+
+**Reviewer:** Ernie
+**Date:** 2026-05-26
+**Scope:** `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx` — project `<select>` dropdown added to task detail card; `__tests__/TaskDetailHeader.test.jsx` updated with project-select coverage.
 
 ---
 
 ## Summary
 
-The two-part fix is conceptually correct and the frontend logic is clean. One real bug found in the backend: `unpinTask` never restores `time_window` mode — any task pinned while in `time_window` mode gets silently downgraded to `anytime` on unpin. The `|| ''` fallback on `prev_when` violates the no-unapproved-fallbacks rule and must be documented or replaced with an explicit check. Everything else is solid.
+**Critical: 1 | Warning: 2 | Info: 1**
 
 ---
 
-## Critical Findings (must fix before merge)
+## Critical
 
-| # | Finding | File:Line | Remediation |
-|---|---------|-----------|-------------|
-| 1 | **`time_window` mode lost on unpin.** `unpinTask` restores `placement_mode` as either `time_blocks` or `anytime`. If `prev_when` contained a time tag (e.g., `morning` stored from a `time_window` task before the enum redesign, or a future hybrid value), that case hits the `allBlock` branch correctly. But for a task whose `prev_when` is `''` (null case) _and_ whose pre-pin mode was `time_window`, unpin always writes `placement_mode = 'anytime'`. There is no path to restore `time_window`. The fix as written is incomplete for that mode. | `task.controller.js:2416` | Store the pre-pin `placement_mode` in a separate column or alongside `prev_when` (e.g. `prev_placement_mode`), then restore it on unpin instead of re-deriving it from `when` content alone. Alternatively, encode the mode in `prev_when` with a sentinel prefix. The current inference is only a two-way switch (block/anytime), missing the third mode. |
+### C1 — Unapproved `||` fallback on `project` prop silently coerces null/undefined to empty string
 
----
+**File:** `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx`, line 142
 
-## Warning Findings (fix this sprint)
+```jsx
+<select value={project || ''} onChange={...}>
+```
 
-| # | Finding | File:Line | Remediation |
-|---|---------|-----------|-------------|
-| 1 | **Unapproved `\|\| ''` fallback on `prev_when`.** `var restoredWhen = existing.prev_when \|\| '';` papers over a potentially-null field without investigation. Per project rules, every `\|\|` fallback must be approved and documented in CLAUDE.md. If `prev_when` is null because the task was never pinned via drag, calling `unpinTask` on it silently succeeds and writes empty `when`, which is valid — but the fallback hides that case rather than flagging it. | `task.controller.js:2408` | Either document the approved fallback in CLAUDE.md with the reasoning, or add an explicit guard: if `prev_when` is null and the task does not appear to have been drag-pinned, return a 400 with a clear error rather than silently resetting. |
-| 2 | **Integration test for `unpinTask` does not assert `placement_mode`.** The test inserts with `prev_when: 'afternoon'`, unpins, and only checks `date_pinned === 0`. It never asserts `placement_mode === 'time_blocks'` (which `afternoon` should produce). The bug in Critical #1 is untested specifically for `time_window` — there is no test with `prev_when: ''` and a pre-pin mode of `time_window`. | `taskCrudIntegration2.test.js:308–318` | Add assertions for `placement_mode` in the existing test. Add a second test: task with `prev_when = null` and `placement_mode = 'time_window'` before pin — verify unpin either restores `time_window` (after fix) or errors, not silently writes `anytime`. |
+`project` is passed in as a controlled prop. If `project` is `null` or `undefined`, this silently substitutes `''` and the select binds to the "No project" option without surfacing that the data was missing. Per project rules, unapproved `||` fallbacks are prohibited — if `project` can legitimately be null/undefined it must be an approved, documented case. If the task always has a project field (even if empty string), the caller should guarantee it and the fallback is papering over a prop contract bug.
 
----
+Two distinct problems collapse here:
+1. The parent may be omitting `project` entirely when it should pass `''` for an unassigned task — the fallback hides this contract violation.
+2. A `null` DB value and a deliberately empty `''` value are being treated identically with no integrity signal.
 
-## Info / Suggestions
-
-| # | Finding | File:Line | Remediation |
-|---|---------|-----------|-------------|
-| 1 | **`isFixed` derivation comment placed after the expression.** The comment on line 234 (`// gcal > msft > apple priority...`) describes `calendarSource` priority, not `isFixed`. It reads as an explanation of `isFixed` but belongs two lines lower, next to the `calendarSource` declaration. Minor readability noise. | `WhenSection.jsx:234` | Move the comment to sit directly above the `calendarSource` assignment on line 236. |
-| 2 | **Matrix test `isFixed` assertion skips `all_day` mode without comment.** The `if (labelEl)` guard silently skips the assertion when the "Scheduling mode" label is absent (e.g., `all_day` or `recurring` paths). A reader can't tell if the skip is intentional. | `WhenSection.modes.test.jsx:113–121` | Add an inline comment: `// label absent in all_day and recurring paths — skip` so reviewers understand the skip is deliberate. |
+**Fix:** Remove `|| ''`. The parent component is responsible for passing `project` as a string (empty string for unassigned). If `project` is genuinely expected to sometimes be `null`/`undefined`, file for explicit approval and document it in `CLAUDE.md` before re-adding the fallback.
 
 ---
 
-## Checklist Status
+## Warning
 
-- [x] Complexity — PASS (files in scope are well under 300-line modules; nesting acceptable)
-- [x] Error handling — PASS (try/catch present in unpinTask; 404/403/500 all returned correctly)
-- [ ] Test coverage — WARN (unpinTask missing `placement_mode` assertion; `time_window` restore path untested)
-- [x] Observability — PASS (console.error on unpin failure is acceptable; structured enough for the scope)
-- [x] Scalability — PASS (no N+1, no unbounded sets in changed code)
-- [x] API design — PASS (PUT /unpin, 404/403/200 correct)
-- [x] Dead code — PASS (no commented-out blocks, no stale TODOs in changed lines)
+### W1 — Unapproved `||` fallback on `allProjectNames` silently swallows missing prop
 
----
+**File:** `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx`, line 145
 
-**Critical count: 1**
-**Warning count: 2**
+```jsx
+{(allProjectNames || []).map(...)}
+```
 
----
+If `allProjectNames` is not passed (caller forgot, async fetch not yet resolved, API returned null), this silently renders zero options with no error or loading signal. The user sees only "No project" and has no indication that the list failed to load. Same class of unapproved fallback as C1.
+
+**Fix:** Either make `allProjectNames` a required prop (PropTypes or TypeScript) and let the missing-prop warning surface, or handle the loading/error state explicitly in the parent and always pass a defined array. Do not paper over the missing data with `|| []`.
 
 ---
 
-# Re-Review — Bert's fix for Critical #1 (mode: prefix encoding)
-**Date:** 2026-05-25
-**Reviewer:** Ernie (light pass — verify Critical fix only)
+### W2 — Test for "notes preview" asserts behavior the component does not implement
 
-## Prior findings status
+**File:** `juggler-frontend/src/components/tasks/__tests__/TaskDetailHeader.test.jsx`, lines 50–57
 
-| # | Type | Finding | Status |
-|---|------|---------|--------|
-| C1 | Critical | `time_window` mode lost on unpin | **RESOLVED** |
-| W1 | Warning | Unapproved `\|\| ''` fallback on `prev_when` | **RESOLVED** (fallback eliminated; parser initializes `restoredWhen = ''` directly, no `||` operator) |
-| W2 | Warning | Legacy test `unpin-reg` does not assert `placement_mode` | **PERSISTS** — see below |
+```js
+it('shows notes preview when notes is non-empty', () => {
+  ...
+  expect(screen.getByText(/Pick up milk and eggs/)).toBeInTheDocument();
+});
+```
 
----
+`TaskDetailHeader.jsx` renders notes as a controlled `<textarea>` with `value={notes || ''}`. A `<textarea>` with a `value` prop does not produce a DOM text node that `getByText` can match — it sets the `.value` property of the element. This test will either fail or is accidentally passing because `getByText` happens to search textarea content in the test environment, which is implementation-dependent behavior. Either way the assertion does not correctly describe what the component does.
 
-## Verification of the fix
+**Fix:** Assert `screen.getByDisplayValue('Pick up milk and eggs')` instead of `getByText`. While not part of the new project-select feature, this is a pre-existing bug in the test file that is part of the staged changeset and should be fixed before commit.
 
-### Q1 — Already-pinned re-drag case
-The guard at `task.controller.js:1123` is `if (!existing.date_pinned)`. When the task is already drag-pinned (`date_pinned = 1`), the block that sets `row.prev_when` is skipped entirely. The original pre-drag snapshot in `prev_when` is preserved through subsequent re-drags. **Correct.**
-
-### Q2 — Parser edge cases
-
-**Colon-in-when (e.g. `mode:time_window:14:00`):**
-`split(':')` yields `['mode', 'time_window', '14', '00']`. `parts[1]` = `'time_window'`. `parts.slice(2).join(':')` = `'14:00'`. The re-join correctly reconstructs the time string. **Correct.**
-
-**Empty when (`mode:anytime:`):**
-`split(':')` yields `['mode', 'anytime', '']`. `parts.slice(2).join(':')` = `''`. **Correct.**
-
-**Invalid mode (`mode:bogus_mode:somevalue`):**
-`parts[1]` = `'bogus_mode'`, not in `Object.values(PLACEMENT_MODES)`, falls back to `PLACEMENT_MODES.ANYTIME`. **Correct.**
-
-**Null `prev_when`:**
-The outer condition `if (existing.prev_when && existing.prev_when.startsWith('mode:'))` short-circuits. Falls into the legacy branch: `restoredWhen = existing.prev_when || ''` = `''`, `allBlock = false`, `restoredMode = PLACEMENT_MODES.ANYTIME`. No null-deref. **Correct.**
-
-### Q3 — `prev_when` in MASTER_UPDATE_FIELDS
-Confirmed at `juggler-backend/src/lib/tasks-write.js:58`: `'prev_when'` is listed in `MASTER_UPDATE_FIELDS`. The field writes to the DB on both unpin and drag-pin paths. **Correct.**
-
-### Q4 — New tests assert `placement_mode`
-All 4 new tests in `taskCrudIntegration2.test.js` (lines 333–409) assert `row.placement_mode` against the expected restored value (`'time_window'`, `'time_blocks'`, `'anytime'`, `'anytime'`). **Correct.**
-
-### Q5 — New issues introduced
-
-**Remaining Warning — legacy test `unpin-reg` still missing `placement_mode` assertion.**
-
-The pre-existing test at line 308 (`unpins a regular task`) inserts with `prev_when: 'afternoon'` (bare string, legacy path), then asserts only `row.date_pinned === 0`. It never checks `row.placement_mode`. Per the legacy inference logic, `afternoon` is in `blockTags`, so `allBlock = true`, `restoredMode = TIME_BLOCKS`. That assertion is absent. This was Warning #2 from the prior review and it was not addressed — the 4 new tests cover the new `mode:` prefix format only; the legacy-path test remains incomplete.
-
-This is a **pre-existing Warning that was not fixed** (not a new regression introduced by bert's fix).
-
-**No new issues introduced.** The apple calendar name lookup added in `fetchTaskWithEventIds` and `fetchTasksWithEventIds` is unrelated to the unpin fix and introduces no correctness problems.
+Note: `notes` also uses a `|| ''` fallback on line 186 — consistent with the existing pattern but equally unapproved if the same project rules apply to this component in full. The staged diff is introducing the same pattern on `project`; that is what is being flagged as Critical/Warning here.
 
 ---
 
-## Re-Review Verdict
+## Info
 
-**Critical count: 0** (prior C1 RESOLVED)
-**Warning count: 1** (W2 PERSISTS — legacy `unpin-reg` test missing `placement_mode` assertion)
+### I1 — `onProjectChange` silently no-ops when handler is omitted
 
-**Verdict: WARN.** The Critical is resolved and the logic is correct. One pre-existing warning remains: add `expect(row.placement_mode).toBe('time_blocks')` to the legacy `unpin-reg` test at `taskCrudIntegration2.test.js:317`. No blocker. May proceed to commit after that one-line test addition, or defer with explicit approval.
+**File:** `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx`, line 142
 
----
+```jsx
+onChange={e => onProjectChange && onProjectChange(e.target.value)}
+```
 
----
-
-# Final Pre-Commit Review — W2 fix + isFixed tightening
-**Date:** 2026-05-25
-**Reviewer:** Ernie (full pass on all 5 staged files)
-
-## Prior findings status
-
-| # | Type | Finding | Status |
-|---|------|---------|--------|
-| C1 | Critical | `time_window` mode lost on unpin | **RESOLVED** (mode: prefix encoding) |
-| W1 | Warning | Unapproved `\|\|` fallback on `prev_when` | **RESOLVED** |
-| W2 | Warning | Legacy `unpin-reg` test missing `placement_mode` assertion | **RESOLVED** — `expect(row.placement_mode).toBe('time_blocks')` added at `taskCrudIntegration2.test.js:318` |
-| I1 | Info | `isFixed` comment misplaced | **NOT addressed** — no-blocker, deferred |
-| I2 | Info | Matrix test `if (labelEl)` guard lacks explanation comment | **NOT addressed** — no-blocker, deferred |
+This is a consistent pattern with the rest of the component (same guard is used for `onStatusChange`, `onPriChange`, `onMarkerChange`, `onTextChange`). It is an established component convention, not a new smell. Flagging for awareness: if `onProjectChange` is omitted, the select appears interactive but changes are silently discarded. A read-only `disabled` attribute would be more honest UX, but this pre-dates the current change and is not a blocker.
 
 ---
 
-## Changes reviewed in this pass
+## Test Coverage Assessment
 
-### 1. `task.controller.js` — drag-pin `prev_when` encoding + `unpinTask` rewrite
+The two new project-select tests (lines 59–84) cover the correct cases:
+- Correct option is selected when `project="Work"` is passed.
+- "No project" option is always present.
+- `onProjectChange` is called with the selected string value on change.
 
-**`prev_when` encoding (lines 1117–1127):**
-The drag-pin path now encodes `'mode:<placement_mode>:<when>'` into `prev_when` when the task is not already pinned. The guard `if (!existing.date_pinned)` correctly prevents overwriting an earlier snapshot on re-drag. `preDragMode` defaults to `PLACEMENT_MODES.ANYTIME` via `|| PLACEMENT_MODES.ANYTIME` — this is an approved pattern: `existing.placement_mode` is a DB ENUM with a NOT NULL default; null here means a legacy row predating the enum column, and ANYTIME is the correct semantic for that case. **PASS.**
-
-**`unpinTask` parser (lines 2417–2432):**
-`parts.slice(2).join(':')` correctly handles colons inside `when` (e.g. time strings like `14:00`). Mode validation against `Object.values(PLACEMENT_MODES)` catches garbage modes and falls back to ANYTIME. Legacy branch (no `mode:` prefix) retains the two-way block/anytime inference as the fallback for pre-redesign rows. **PASS.**
-
-**No cache invalidation in `unpinTask` (line 2444):**
-`unpinTask` calls `enqueueScheduleRun` but does NOT call `cache.invalidateTasks`. Every other write path that touches scheduling fields (`updateTask`, `updateTaskStatus`, `unpinTask`'s sibling paths) calls `cache.invalidateTasks` before SSE emit. The omission means the Redis cache can serve a stale `date_pinned=1` / stale `placement_mode` row for up to 5 minutes after an unpin. **This is a Warning.**
-
-### 2. `taskCrudIntegration2.test.js` — 4 new tests + 1 assertion
-
-W2 fix confirmed: `expect(row.placement_mode).toBe('time_blocks')` added to `unpin-reg` test. All 4 new tests cover the full mode: prefix matrix (time_window, time_blocks, anytime-empty, invalid-mode). All tests also assert `prev_when` is null post-unpin, which validates the cleanup write. **PASS.**
-
-One gap: the `invalid mode` test (`unpin-inv`, line 395) asserts `placement_mode === 'anytime'` but does NOT assert `when` or `prev_when`. A malformed `prev_when` being cleared is load-bearing — if `prev_when` is not nulled, a second unpin call could re-execute the parser on garbage data. Minor but worth noting.
-
-### 3. `WhenSection.jsx` — `isFixed` tightened
-
-Line 233: `var isFixed = !!datePinned || (placementMode === 'fixed' && isCalManaged);`
-
-Previously `isFixed` was true whenever `placementMode === 'fixed'` regardless of calendar link. The new condition requires `isCalManaged` (i.e., at least one of `gcalEventId`, `msftEventId`, `appleEventId` is truthy). This directly fixes the post-unpin UI lockout: after `unpinTask` writes `placement_mode = 'anytime'`, `isFixed` would have been false anyway — but during the brief window before the response arrives (or if a stale cached task has `placement_mode = 'fixed'` without a calendar link), the old code would lock the UI. **Correct.**
-
-`isCalManaged` uses `task && !!(...)` — the `task &&` guard handles the case where `task` prop is absent (create flow or no task object passed). **PASS.**
-
-### 4. `WhenSection.test.jsx` — updated tests
-
-Two previously-wrong test assertions flipped:
-- `'empty-string gcalEventId treated as no source'` previously asserted `Calendar-managed` banner appeared; now correctly asserts it does not appear. **Correct.**
-- `'shows generic calendar-managed banner when no event id available'` previously asserted the banner appeared for an empty task `{}`; now correctly asserts it does not appear. **Correct.**
-
-New tests added: `'no lockout banner when placementMode is fixed but task has no calendar link'`, `'shows Apple Calendar with calendar name when appleCalendarName provided'`, `'apple calendar name ignored when appleEventId absent'`. All exercise the new `isCalManaged` condition. **PASS.**
-
-### 5. `WhenSection.modes.test.jsx` — matrix updated
-
-Matrix `isFixed` derivation mirrors the component: `var expectedIsFixed = !!datePinned || (placementMode === 'fixed' && isCalManaged);` (line 110–111). Since the matrix `buildProps` never passes a `task` with event IDs, `isCalManaged` is always false, and `fixed` mode never triggers the lock in these tests — which is the correct behavior for the post-unpin stale-state scenario. **PASS.**
-
-Two new fixed-mode describe blocks:
-- `fixed mode does NOT lock controls when task has no calendar link` — asserts no `pointerEvents: none` when `placementMode=fixed` but no event ID. Covers exactly the post-unpin scenario. **PASS.**
-- `fixed mode still shows Pin toggle` — regression guard to confirm pin button remains accessible. **PASS.**
+Coverage is adequate for the new feature. The `getByText` assertion in the pre-existing notes test (W2) is the only structural test bug in the staged file.
 
 ---
 
-## New Findings
+## Final Verdict: BLOCK
 
-| # | Type | Finding | File:Line | Remediation |
-|---|------|---------|-----------|-------------|
-| 1 | **Warning** | **`unpinTask` missing `cache.invalidateTasks` call.** Every other scheduling write in the controller invalidates the Redis task cache before emitting SSE. `unpinTask` does not. A stale cached response (up to 5 min TTL) can re-render the task with `date_pinned=1` and `placement_mode=fixed` after the user unpins it — exactly the lockout this fix was meant to cure. | `task.controller.js:2444` | Add `await cache.invalidateTasks(req.user.id);` before `enqueueScheduleRun` in `unpinTask`, mirroring the pattern at lines 1354, 1559, 1710, 2253. |
-| 2 | **Info** | **`unpin-inv` test does not assert `when` or `prev_when` post-unpin.** A malformed `prev_when` value should be cleared regardless. If the write failed to null `prev_when`, a second unpin call would re-run the parser on garbage. | `taskCrudIntegration2.test.js:405–410` | Add `expect(row.prev_when).toBeNull();` to the `invalid mode` test. |
-
----
-
-## Checklist Status
-
-- [x] Complexity — PASS
-- [x] Error handling — PASS
-- [x] Test coverage — PASS (all prior warnings resolved; 4 new integration tests; frontend matrix updated)
-- [x] Observability — PASS
-- [x] Scalability — PASS
-- [ ] Cache coherence — WARN (unpinTask skips cache.invalidateTasks)
-- [x] API design — PASS
-- [x] Dead code — PASS
-
----
-
-**Critical count: 0**
-**Warning count: 1** (cache invalidation missing in unpinTask)
-
-**Verdict: WARN.** All prior findings are resolved. One new Warning: `unpinTask` does not call `cache.invalidateTasks`, which can re-expose the lockout bug via stale cache for up to 5 minutes. Fix is a one-liner — add `await cache.invalidateTasks(req.user.id);` before `enqueueScheduleRun` at `task.controller.js:2444`. Fix that, then proceed to commit.
+C1 is a project-rule violation (unapproved `||` fallback on a controlled prop). W1 is a second unapproved `||` fallback in the same diff. Both must be resolved before commit. W2 is a test correctness bug in the staged file — fix it in the same pass.

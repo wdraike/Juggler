@@ -55,3 +55,30 @@ it('shows notes preview when notes is non-empty', () => {
   />);
   expect(screen.getByText(/Pick up milk and eggs/)).toBeInTheDocument();
 });
+
+it('renders project select with current value and all options', () => {
+  render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+    onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+    isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+    text="Buy groceries" project="Work" pri="P3" dur={30} notes="" url=""
+    allProjectNames={['Work', 'Personal', 'Health']}
+    onProjectChange={() => {}}
+  />);
+  const select = screen.getByDisplayValue('Work');
+  expect(select).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: 'No project' })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: 'Personal' })).toBeInTheDocument();
+});
+
+it('calls onProjectChange when project select changes', () => {
+  const onProjectChange = jest.fn();
+  render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+    onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+    isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+    text="Buy groceries" project="Work" pri="P3" dur={30} notes="" url=""
+    allProjectNames={['Work', 'Personal']}
+    onProjectChange={onProjectChange}
+  />);
+  fireEvent.change(screen.getByDisplayValue('Work'), { target: { value: 'Personal' } });
+  expect(onProjectChange).toHaveBeenCalledWith('Personal');
+});

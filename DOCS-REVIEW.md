@@ -230,3 +230,141 @@ Signed: Prairie Dawn — 2026-05-25
 **Next: /oscar --precommit**
 
 Signed: Oscar, Technology Director — 2026-05-25
+
+---
+
+## Pre-commit Re-Verification — 2026-05-25
+
+**Reviewer:** Prairie Dawn
+**Trigger:** Final pre-commit check before staging commit
+**Standard:** `/Users/david/Obsidian-Vault.bak-20260522-125146/docs/DOCUMENTATION-STANDARD.md`
+**Files read:** All 6 primary docs + 11 review artifacts (BUILD-REVIEW.md, CODE-REVIEW.md, DESIGN-REVIEW.md, DOCS-REVIEW.md, OSCAR-REVIEW.md, SECURITY-REVIEW.md, TEST-REVIEW.md, UX-REVIEW.md, ZOE-REVIEW.md, juggler-backend/ARCH-REVIEW.md, juggler-backend/CODE-REVIEW.md)
+
+---
+
+### Primary Docs — Re-Verification
+
+#### Frontmatter
+
+All five architecture/use-case docs retain valid frontmatter. Spot-checked against current file state:
+
+| File | type | service | status | last_updated | tags |
+|------|------|---------|--------|-------------|------|
+| TASK-PROPERTIES.md | design | juggler | active | 2026-05-25 | present and complete |
+| SCHEDULER-UI-STATE-MAP.md | design | juggler | active | 2026-05-25 | present and complete |
+| task.controller.md | use-case | juggler | active | 2026-05-25 | present and complete |
+| SCHEDULER.md | design | juggler | active | 2026-05-25 | present and complete |
+| WHEN-MODE-REDESIGN.md | design | juggler | active | 2026-05-25 | present and complete |
+
+No frontmatter violations introduced. PASS.
+
+#### Diagram format
+
+SCHEDULER-UI-STATE-MAP.md: Mermaid `flowchart TD` block confirmed at lines 27–43. No ASCII box-drawing characters found. PASS.
+
+All other primary docs contain no diagrams requiring Mermaid. PASS.
+
+#### Cross-references
+
+Re-checked all cross-references from prior cycle — all still resolve on disk. No new cross-references introduced since the last verification pass. PASS.
+
+#### Stale terminology — new findings in SCHEDULER.md
+
+This is the focus of the re-verification. The prior PASS verdict on terminology was based on W-2/W-3/W-4 being resolved. Re-reading SCHEDULER.md against the current file reveals that **three stale-terminology occurrences were not caught in the earlier bert fix pass**:
+
+**New finding RV-W-1 (WARN):**
+`juggler-backend/docs/architecture/SCHEDULER.md` line 46, Secondary principles section:
+
+> "Pinned tasks are placed first (Phase 0) and all subsequent phases respect their slots."
+
+The prior re-verify marked W-2 as RESOLVED based on line 29 being corrected. Line 46 is a separate sentence in the Secondary Principles section that still uses "Pinned tasks." This was the exact fix required in the original W-2 finding ("Update line 46 to read 'Fixed tasks are placed first (Phase 0)'") — and it was not applied. The file currently reads "Pinned tasks" at line 46. This is a WARN.
+
+**New finding RV-W-2 (WARN):**
+`juggler-backend/docs/architecture/SCHEDULER.md` line 76 (Implementation note):
+
+> "4a → Phase 0 (pinned + markers)"
+
+This inline phase-label comment still uses the old "pinned" label. It should read "fixed + markers" to match the current architecture. This was not identified in the original W-2 finding and was not caught in the bert fix pass.
+
+**New finding RV-I-1 (INFO):**
+`juggler-backend/docs/architecture/SCHEDULER.md` line 424 (Manual regression checklist):
+
+> "No pinned task blocks a P1 deadline task from placing"
+
+Noted in the prior re-verify as an INFO/prose context. Confirmed INFO only — informal usage in a checklist, not a formal term definition.
+
+**New finding RV-I-2 (INFO):**
+`juggler-backend/docs/architecture/SCHEDULER.md` line 723 (Diamond DAG table, DD-3):
+
+> "Chain where earliest slots are blocked by a pinned task."
+
+Informal "pinned" usage in a test-case scenario description. Not a formal definition. INFO only.
+
+#### DOC-REGISTRY.md — stale status entries (WARN)
+
+**New finding RV-W-3 (WARN):**
+`juggler-backend/docs/DOC-REGISTRY.md` was last updated at 2026-05-25 16:35 — before the bert fixes resolved W-1/W-2/W-3/W-4/W-5. The registry currently shows:
+
+| File | Status in Registry | Actual Current Status |
+|------|-------------------|-----------------------|
+| SCHEDULER-UI-STATE-MAP.md | WARN (ASCII diagrams) | PASS — Mermaid block present |
+| SCHEDULER.md | WARN (stale terminology) | PARTIALLY RESOLVED — W-2 line 29 and W-3 PE-1/PE-2/PE-3 fixed; W-4 UC-15.3 fixed; but line 46 and line 76 remain stale (RV-W-1/RV-W-2 above) |
+| WHEN-MODE-REDESIGN.md | WARN (ADR missing sections) | PASS — Status and Consequences sections present |
+
+The registry must be updated to reflect the current state. Leaving WARN status against a PASS file misleads the next reviewer. This is a WARN: the registry is a live tracking document and its accuracy is part of the documentation standard.
+
+---
+
+### Review Artifacts — Verification
+
+The review artifacts (BUILD-REVIEW.md, CODE-REVIEW.md, DESIGN-REVIEW.md, OSCAR-REVIEW.md, SECURITY-REVIEW.md, TEST-REVIEW.md, UX-REVIEW.md, ZOE-REVIEW.md, juggler-backend/ARCH-REVIEW.md, juggler-backend/CODE-REVIEW.md) are staged as `.md` files. Checked against the documentation standard:
+
+**Format compliance:**
+- All files are `.md` format. PASS.
+- No diagrams present in any artifact. No Mermaid requirement triggered.
+- No frontmatter required — review artifacts are operational records, not project documentation. The standard's frontmatter requirement applies to `docs/` content. PASS.
+
+**Stale terminology in review artifacts:**
+Review artifacts intentionally preserve the history of findings at the time they were written. CODE-REVIEW.md contains references to `datePinned`, `prev_when`, `_dragPin`, and the `unpinTask` endpoint throughout — these are historically accurate records of what existed at review time. They are not live documentation and are not subject to the stale-terminology rule. PASS.
+
+ARCH-REVIEW.md and juggler-backend/CODE-REVIEW.md similarly describe the pre-implementation state. Correct as historical records. PASS.
+
+**UX-REVIEW.md — open WARN:**
+UX-REVIEW.md ends with a re-verification verdict of WARN (UX-2 banner text for non-cal-managed recurring tasks with `placementMode='fixed'`). The review artifact accurately reflects that this finding is still open. This is a UX concern, not a documentation violation. The artifact is correct. PASS as a document.
+
+**OSCAR-REVIEW.md — currency:**
+The OSCAR-REVIEW.md currently on disk covers the earlier "isFixed bug fix + unpinTask placement_mode reset" review cycle, not the When-mode simplification. The DOCS-REVIEW.md Oscar Summary section (added above) covers the When-mode simplification doc review. No conflict. PASS.
+
+---
+
+### Summary of New Findings
+
+| ID | Severity | File | Finding |
+|----|----------|------|---------|
+| RV-W-1 | WARN | SCHEDULER.md line 46 | "Pinned tasks are placed first (Phase 0)" — "Pinned" not replaced with "Fixed" |
+| RV-W-2 | WARN | SCHEDULER.md line 76 | Phase 0 label still reads "(pinned + markers)" — should be "(fixed + markers)" |
+| RV-W-3 | WARN | DOC-REGISTRY.md | Registry status rows for SCHEDULER-UI-STATE-MAP.md and WHEN-MODE-REDESIGN.md still show WARN; should be updated to PASS |
+| RV-I-1 | INFO | SCHEDULER.md line 424 | "No pinned task" in manual regression checklist — informal usage, not a formal term |
+| RV-I-2 | INFO | SCHEDULER.md line 723 | "blocked by a pinned task" in DD-3 test scenario — informal usage |
+
+**BLOCK findings: 0**
+**WARN findings: 3 (RV-W-1, RV-W-2, RV-W-3)**
+**INFO findings: 2 (RV-I-1, RV-I-2)**
+
+---
+
+### Required Actions Before Commit
+
+- [ ] **RV-W-1:** `SCHEDULER.md` line 46 — replace "Pinned tasks are placed first (Phase 0)" with "Fixed tasks are placed first (Phase 0)"
+- [ ] **RV-W-2:** `SCHEDULER.md` line 76 — replace "Phase 0 (pinned + markers)" with "Phase 0 (fixed + markers)"
+- [ ] **RV-W-3:** `DOC-REGISTRY.md` — update status for `SCHEDULER-UI-STATE-MAP.md` to PASS (Mermaid resolved) and `WHEN-MODE-REDESIGN.md` to PASS (ADR sections added); update `SCHEDULER.md` issue column to reflect only the residual RV-W-1/RV-W-2 items; update `Last Reviewed` and `File mtime` columns for all three
+
+---
+
+### Overall Verdict: WARN
+
+Three WARN findings prevent a clean PASS. All three are in `SCHEDULER.md` and `DOC-REGISTRY.md`. Two are single-line terminology fixes (RV-W-1 and RV-W-2) missed in the bert pass. One is a registry housekeeping update (RV-W-3). No BLOCK findings. No broken cross-references. No frontmatter violations. No Mermaid violations. No stale terminology in TASK-PROPERTIES.md, SCHEDULER-UI-STATE-MAP.md, WHEN-MODE-REDESIGN.md, or task.controller.md.
+
+Fix RV-W-1, RV-W-2, and RV-W-3, then re-run this verification.
+
+Signed: Prairie Dawn — 2026-05-25

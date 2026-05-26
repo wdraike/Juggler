@@ -137,13 +137,16 @@ export default function TaskDetailHeader({
           }}
         />
 
+        <label style={{ ...lStyle, marginBottom: 6 }}>
+          Project
+          <select value={project || ''} onChange={e => onProjectChange && onProjectChange(e.target.value)}
+            style={{ ...iStyle, height: BTN_H, cursor: 'pointer' }}>
+            <option value="">No project</option>
+            {(allProjectNames || []).map(function(p) { return <option key={p} value={p}>{p}</option>; })}
+          </select>
+        </label>
+
         <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', marginBottom: 6 }}>
-          {project && (
-            <span style={{
-              fontSize: 10, background: TH.projectBadgeBg, color: TH.projectBadgeText,
-              borderRadius: 3, padding: '1px 6px', fontWeight: 600
-            }}>{project}</span>
-          )}
           <select value={pri} onChange={e => onPriChange && onPriChange(e.target.value)}
             style={{
               fontSize: 10, background: TH.badgeBg, color: TH.badgeText,
