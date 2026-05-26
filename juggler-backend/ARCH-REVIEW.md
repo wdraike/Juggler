@@ -247,3 +247,205 @@ The audit query (WARN-1 above) must be run. Based on the two recent stale-fixed 
 9. **Build the new 5-mode selector** in the UI.
 
 Steps 1–4 can be done before any UI work and are independently safe to ship.
+
+---
+
+---
+
+# Pre-Commit Review — When-mode Simplification: Migration + Architecture
+## Date: 2026-05-26 | Scope: `20260526000000_drop_pinned_and_rigid_columns.js`, `AUDIT-date_pinned-mismatch.sql`, scheduler/controller read+write paths
+
+---
+
+## Executive Summary
+
+The prior design-mode BLOCKs 1, 2, and 3 are all resolved in the current implementation. The scheduler now reads only `placement_mode`; the cal adapters no longer write `date_pinned`; `guardFixedCalendarWhen` now guards `placement_mode` rather than `date_pinned`. The schema migration's DDL is structurally correct — column targets are right, view rebuilds drop only the removed columns, UNION branch column counts are symmetric. However, the pre-migration audit SQL file contains a critical wrong-table bug that would silently return 0 even when mismatches exist, and five active application-layer `date_pinned` write-paths remain that will throw column-not-found errors the moment the migration runs. Three BLOCK-level issues must be fixed before this migration can be executed.
+
+---
+
+## Migration File: `20260526000000_drop_pinned_and_rigid_columns.js`
+
+### DDL Correctness
+
+**PASS** — Column targets are correct: `date_pinned` is dropped from `task_instances` (confirmed as the table where the column lives, per `20260415010000_create_task_masters_and_instances.js`); `prev_when` and `rigid` are dropped from `task_masters` (confirmed correct). The prior design-mode review noted that `rigid` had already been removed from the scheduler — this migration completes the cleanup.
+
+**PASS** — No index cleanup required: no index on `date_pinned` exists in any migration (the 20260307 composite-indexes migration only touches `tasks`, not `task_instances`). No index on `rigid` exists. MySQL 8 instant DDL applies, so the `DROP COLUMN` operations will not require a full table copy.
+
+**PASS** — View drop/recreate order: views are dropped before the table `ALTER` (Step 1 before Step 2), so MySQL will not reject the column drop due to dependent view references.
+
+**PASS** — View UNION column-count parity: both the template branch and the instance branch of the `tasks_v` UNION now contain the same number of columns, with neither `date_pinned` nor `prev_when`. Verified by comparing against the prior `20260519000100_restore_weather_columns_to_tasks_v.js` view.
+
+**PASS** — Collation: string literals and NULL casts in the new `tasks_v` definition use explicit `COLLATE utf8mb4_unicode_ci`, consistent with the project collation rule.
+
+**PASS** — Architectural single-signal: the new `tasks_v` exposes `placement_mode` and no longer exposes `date_pinned`. Consumers that previously read `t.datePinned` now uniformly read `t.placementMode === 'fixed'`. Verified in `runSchedule.js` (all five prior `datePinned` branches now use `PLACEMENT_MODES.FIXED`) and `unifiedScheduleV2.js` (no remaining `datePinned` reads; `rigid` item property is now derived as `t.placementMode === PLACEMENT_MODES.FIXED` at line 663).
+
+**PASS** — Rollback: `exports.down` throws intentionally. This is correct for a destructive column-drop migration where re-adding the column without its historical data would create a corrupt state. The error message is clear.
+
+**PASS** — `guardFixedCalendarWhen` (was BLOCK-3): the function now correctly guards `placement_mode` instead of `date_pinned`. Evidence: `task.controller.js` lines 605–615 — the guard deletes `row.placement_mode` when the update would change it away from `'fixed'` on a cal-linked task. The `date_pinned` field no longer appears anywhere in the guard body.
+
+**PASS** — Cal adapters (was BLOCK-2): all three adapters (`gcal.adapter.js`, `msft.adapter.js`, `apple.adapter.js`) no longer write `date_pinned`. The `applyEventToTaskFields` function in each sets only `placement_mode`. Verified by grep — zero `date_pinned` hits in any adapter file.
+
+**PASS** — `PUT /:id/unpin` route: the endpoint does not exist in `task.routes.js`. Mode change is exclusively via `PATCH /api/tasks/:id`. Confirmed.
+
+**PASS** — `timeWasSet → FIXED` implicit promotion (was WARN-3): removed from both `createTask` (line 867) and `updateTask` (line 1095) paths. The backstop now only fires for `allDay=true` → `ALL_DAY` mode, which is correct and intentional.
+
+---
+
+## BLOCK Findings
+
+### BLOCK-A: Audit SQL queries wrong table — `date_pinned` does not exist on `task_masters`
+
+**File:** `juggler-backend/src/db/migrations/AUDIT-date_pinned-mismatch.sql`
+
+**Evidence:**
+```sql
+-- Step 1
+SELECT COUNT(*) FROM task_masters
+WHERE date_pinned = 1 AND placement_mode NOT IN ('fixed', 'reminder');
+
+-- Step 2
+UPDATE task_masters
+SET placement_mode = 'fixed'
+WHERE date_pinned = 1
+  AND placement_mode NOT IN ('fixed', 'reminder')
+  AND (time IS NOT NULL OR scheduled_at IS NOT NULL);
+```
+
+`date_pinned` is a column on `task_instances`, not `task_masters`. `task_masters` has never had a `date_pinned` column (confirmed across all migrations from schema creation through present). Running Step 1 against production MySQL will throw `ERROR 1054 (42S22): Unknown column 'date_pinned' in 'where clause'` — or, if the database engine silently errors, it will return 0, giving a false all-clear. Either outcome is dangerous: the first aborts the audit before it runs; the second gives the operator false confidence that no mismatches exist, leading them to execute the column-drop against unaudited data.
+
+Additionally, Step 2's `time IS NOT NULL OR scheduled_at IS NOT NULL` references `time` and `scheduled_at` which also do not exist on `task_masters` — those are `task_instances` columns. The entire correction UPDATE would fail.
+
+The correct query targets `task_instances` with a join to `task_masters` for the `placement_mode` check:
+```sql
+-- Step 1: Correct audit
+SELECT COUNT(*) FROM task_instances i
+JOIN task_masters m ON m.id = i.master_id
+WHERE i.date_pinned = 1
+  AND m.placement_mode NOT IN ('fixed', 'reminder');
+
+-- Step 2: Correct remediation
+UPDATE task_masters m
+JOIN task_instances i ON i.master_id = m.id
+SET m.placement_mode = 'fixed'
+WHERE i.date_pinned = 1
+  AND m.placement_mode NOT IN ('fixed', 'reminder')
+  AND (i.time IS NOT NULL OR i.scheduled_at IS NOT NULL);
+```
+
+Note: the `UPDATE` sets `placement_mode` on `task_masters` (correct — that is where the column lives), but must JOIN from `task_instances` to find the `date_pinned=1` rows.
+
+**Required action:** Fix `AUDIT-date_pinned-mismatch.sql` to target `task_instances` for the audit SELECT and for the JOIN in the UPDATE. Do not run the migration until the fixed audit script returns 0 rows.
+
+---
+
+### BLOCK-B: Five active `date_pinned` write-paths remain in application code — column-drop will break them
+
+**Files and lines:**
+
+1. `juggler-backend/src/scheduler/runSchedule.js:1241` — writes `date_pinned: 0` in the per-task scheduled-placement DB update object.
+2. `juggler-backend/src/scheduler/runSchedule.js:1551` — writes `date_pinned: 0` in the batch-update `updateFields` object used for the CASE expression bulk write.
+3. `juggler-backend/src/lib/reconcile-splits.js:143` — writes `date_pinned: template ? template.date_pinned : 0` when inserting new split chunks.
+4. `juggler-backend/src/controllers/task.controller.js:1219` — writes `date_pinned: 0` when creating an initial instance row inside a recurring-template create transaction.
+5. `juggler-backend/src/lib/tasks-write.js:48,71,115` — `INSTANCE_FIELDS` includes `'date_pinned'`; `INSTANCE_UPDATE_FIELDS` includes `'date_pinned'`; `pickInstance()` constructs `date_pinned: row.date_pinned ? 1 : 0` on every instance insert.
+
+All five write paths will throw a MySQL `Unknown column 'date_pinned'` error the moment the migration runs. Items 1 and 2 are in the scheduler's hot path — every scheduling run for every user will fail. Item 3 breaks split-task generation. Items 4 and 5 break task creation.
+
+The cal adapters (BLOCK-2 from the design-mode review) are already clean — no `date_pinned` writes remain there. But these five application-layer paths were not cleaned up and will cause immediate production failures.
+
+**Required action:** Before executing the migration, remove `date_pinned` from all five write sites:
+- `runSchedule.js:1241` — remove `date_pinned: 0` from `dbUpdate` object.
+- `runSchedule.js:1551` — remove `date_pinned: 0` from `updateFields` object.
+- `reconcile-splits.js:143` — remove the `date_pinned` key from the insert object.
+- `task.controller.js:1219` — remove `date_pinned: 0` from the instance upsert object.
+- `tasks-write.js:48` — remove `'date_pinned'` from `INSTANCE_FIELDS`.
+- `tasks-write.js:71` — remove `'date_pinned'` from `INSTANCE_UPDATE_FIELDS`.
+- `tasks-write.js:115` — remove the `date_pinned: row.date_pinned ? 1 : 0` line from `pickInstance()`.
+
+---
+
+### BLOCK-C: `prev_when` in `MASTER_FIELDS` and `MASTER_UPDATE_FIELDS` will cause column-not-found on task creates/updates after the migration
+
+**File:** `juggler-backend/src/lib/tasks-write.js:27,58`
+
+```js
+var MASTER_FIELDS = [
+  ...
+  'preferred_time_mins', 'tz', 'prev_when',
+  ...
+];
+
+var MASTER_UPDATE_FIELDS = [
+  ...
+  'preferred_time_mins', 'tz', 'prev_when',
+  ...
+];
+```
+
+`prev_when` is in both field-routing arrays. When a task is created or updated and `prev_when` is present in the incoming `row` (or when `pickMaster` constructs the master insert object), it will be included in the SQL write to `task_masters`. After `prev_when` is dropped from `task_masters`, any write that includes this field will throw `Unknown column 'prev_when'`.
+
+The field is not sent by the API (no client sets `prevWhen` — confirmed by grep showing only stale field-list entries). But the routing arrays enumerate it, which means any object that passes through `tasks-write.js` will include it in the DB write if the caller ever sets it. The risk window is open the moment the column is dropped.
+
+**Required action:** Remove `'prev_when'` from both `MASTER_FIELDS` (line 27) and `MASTER_UPDATE_FIELDS` (line 58) in `tasks-write.js` before executing the migration.
+
+---
+
+## WARN Findings
+
+### WARN-A: Frontend `ScheduleCard.jsx` still reads `task.datePinned` for the pin badge
+
+**File:** `juggler-frontend/src/components/schedule/ScheduleCard.jsx:68`
+
+```js
+if (task.datePinned) typeBadges.push({ icon: '...', title: 'Date pinned — stays on this date...' });
+```
+
+`rowToTask` no longer emits `datePinned` (confirmed — the field is absent from the return object). This line will silently never fire after the migration. The badge is dead UI but causes no runtime error.
+
+The `rigid` read on line 70 (`task.rigid || task.fixed || task.placementMode === 'fixed'`) will also always return false for `task.rigid` since `rigid` is not in the API response — but `task.placementMode === 'fixed'` still works correctly.
+
+**Required action:** Remove the `task.datePinned` branch from `ScheduleCard.jsx:68`. Clean up the `task.rigid` sub-expression from line 70 (it is dead since `rowToTask` never emits `rigid`; the `task.placementMode === 'fixed'` check alone is sufficient).
+
+### WARN-B: `rigid` prop wired through `TaskEditForm.jsx` and `WhenSection.jsx` — dead code from column drop
+
+**Files:** `juggler-frontend/src/components/tasks/TaskEditForm.jsx:155,276,333,375,446`, `WhenSection.jsx:162,350,512`
+
+`rigid` state is initialized from `task.rigid` which the API no longer emits (always `undefined`). The prop is threaded through to `WhenSection` where it gates `timeFlex` select rendering. This is dead code — `rigid` is always `false`/`undefined` — but it adds noise and could confuse future readers.
+
+This was WARN-4 in the design-mode review. It still exists.
+
+**Required action:** Remove `rigid` state from `TaskEditForm.jsx` and the `onRigidChange` prop from `WhenSection.jsx`. The timeFlex selector should be driven by `placementMode` directly.
+
+### WARN-C: Stale comment in `cal-sync.controller.js:116`
+
+**File:** `juggler-backend/src/controllers/cal-sync.controller.js:116`
+
+The comment still reads: `"Promotion logic (placement_mode=fixed, date_pinned, marker clearing) lives in applyEventToTaskFields."` The `date_pinned` reference is stale — `applyEventToTaskFields` no longer touches `date_pinned`.
+
+**Required action:** Update the comment to remove the `date_pinned` reference.
+
+---
+
+## Prior Design-Mode BLOCKs — Status
+
+| Prior Finding | Status | Evidence |
+|---------------|--------|----------|
+| BLOCK-1: `runSchedule.js` datePinned branches | RESOLVED | All five prior `datePinned` read sites now use `PLACEMENT_MODES.FIXED`. New BLOCK-B covers residual write-path issue. |
+| BLOCK-2: Cal adapter `date_pinned=1` writes | RESOLVED | All three adapters' `applyEventToTaskFields` functions no longer write `date_pinned`. |
+| BLOCK-3: `guardFixedCalendarWhen` guards wrong field | RESOLVED | Guard now deletes `row.placement_mode` when task is cal-linked. |
+| WARN-1: Audit query correctness | SUPERSEDED by BLOCK-A | The audit SQL exists but targets the wrong table. |
+| WARN-2: `_dragPin` / `prev_when` / `unpinTask` | RESOLVED | No `_dragPin` code in controller, no `PUT /:id/unpin` route, `prev_when` only survives in field lists (see BLOCK-C). |
+| WARN-3: Implicit `timeWasSet → FIXED` promotion | RESOLVED | Removed from both create and update paths. |
+| WARN-4: `rigid` UI dead code | PERSISTS as WARN-B | `rigid` still wired in `TaskEditForm` and `WhenSection`. |
+
+---
+
+## Summary Counts
+
+| Severity | Count | Items |
+|----------|-------|-------|
+| BLOCK | 3 | BLOCK-A (audit SQL wrong table), BLOCK-B (5 active date_pinned writes), BLOCK-C (prev_when in MASTER_FIELDS/MASTER_UPDATE_FIELDS) |
+| WARN | 3 | WARN-A (ScheduleCard datePinned badge), WARN-B (rigid prop dead code), WARN-C (stale comment) |
+
+**Verdict: BLOCK**
+
+Do not execute the migration until BLOCK-A, BLOCK-B, and BLOCK-C are resolved. Execution with any of these three present will either corrupt the audit result (BLOCK-A) or cause immediate runtime failures across the scheduler, task creation, and split reconciliation (BLOCK-B and BLOCK-C).

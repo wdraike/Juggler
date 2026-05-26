@@ -1,3 +1,468 @@
+# Zoe's Adversarial Test Review — 2026-05-26 (placement_mode no-fallback assertions)
+
+_Scope: juggler-backend — taskPipeline.test.js (1 assertion updated) + derivePlacementMode.test.js (2 tests updated)_
+_Context: Tests updated from expecting ANYTIME fallback to expecting null/undefined/empty passthrough. placement_mode is NOT NULL in DB; null = data integrity problem._
+_Telly run: 1505/1533 pass, 27 skipped, 1 todo. Exit code 0._
+_No Bird output for this scope._
+
+## Overall Verdict: WARN
+
+Two WARN findings. No BLOCKs. The changed test assertions are correct and meaningful. One gap: the REMINDER-before-FIXED ordering regression tests cover GCal in `04-adapter-gcal-edge.test.js` and are present in `01-adapter-gcal.test.js` (confirmed), but `05-adapter-msft-edge.test.js` and `06-adapter-apple-edge.test.js` have no REMINDER→FIXED combined-scenario tests — that gap predates this change set and was carried as a BLOCK in a prior Zoe session (C3). Two new narrow gaps introduced by this change set are documented below as WARNs.
+
+---
+
+## Assertion Correctness Audit
+
+### Changed assertion 1 — taskPipeline.test.js line 611-614
+
+**Test:** "placementMode passes through null from DB row as-is (NOT NULL column; null = data integrity problem)"
+
+**Input:** `makeRow({ placement_mode: null })` — row object with `placement_mode` property set to `null`.
+
+**Assertion:** `expect(task.placementMode).toBeNull()`
+
+**Source path:** `rowToTask` at `task.controller.js` line 452: `placementMode: row.placement_mode` — direct assignment, no conditional. When `row.placement_mode` is `null`, `task.placementMode` is `null`.
+
+**Is the assertion correct?** Yes. `null` passes through as `null`. The assertion is true to the source.
+
+**Does it guard against regression?** Yes, for the specific regression targeted: re-introducing `|| 'anytime'` or `?? 'anytime'` fallback after `row.placement_mode`. If that fallback were added, `task.placementMode` would be `'anytime'` and `toBeNull()` would fail.
+
+**Does it guard against the inverse regression (fallback removed but null leaked upstream)?** No, and that is by design — the no-fallback contract means null propagation is the correct behavior; upstream must ensure placement_mode is never null in DB.
+
+**Verdict: PASS** — assertion is correct, meaningful, and would catch re-introduction of the ANYTIME fallback.
+
+---
+
+### Changed assertion 2 — derivePlacementMode.test.js lines 125-127
+
+**Test:** "passes through null placement_mode from DB row as-is"
+
+**Input:** `rowToTask({ text: 'Test' }, null)` — row object with NO `placement_mode` property (the key is absent entirely).
+
+**Assertion:** `expect(task.placementMode).toBeUndefined()`
+
+**Source path:** `rowToTask` at line 452: `placementMode: row.placement_mode`. When `row.placement_mode` is `undefined` (property absent), the spread result is `placementMode: undefined`. `toBeUndefined()` matches.
+
+**Is the assertion correct?** Yes for a row with no `placement_mode` key. However: the test is titled "passes through null placement_mode from DB row as-is" but the input does NOT have `placement_mode: null`. It has no key at all. The test name is misleading — a real DB row with `placement_mode: null` would produce `task.placementMode === null`, not `undefined`. The taskPipeline test at line 611 correctly covers the `null` case. This test is actually covering the absent-key case.
+
+**Does it guard against regression?** Yes, in a narrow way: if `rowToTask` were changed to supply a default `placementMode: 'anytime'` when the key is absent, `toBeUndefined()` would fail. So the regression guard is real.
+
+**Verdict: WARN-1** — the test is guarding a real path but its name ("null placement_mode") is incorrect; the input has no key rather than a null value. This could mislead future developers into thinking null is already covered here (it is, but in taskPipeline.test.js, not this file). The assertion itself is sound.
+
+---
+
+### Changed assertion 3 — derivePlacementMode.test.js lines 128-130
+
+**Test:** "passes through empty string placement_mode from DB row as-is"
+
+**Input:** `rowToTask({ placement_mode: '' }, null)`
+
+**Assertion:** `expect(task.placementMode).toBe('')`
+
+**Source path:** line 452 — `placementMode: row.placement_mode`. Empty string passes through as empty string. Correct.
+
+**Is the assertion correct?** Yes.
+
+**Does it guard against regression?** Yes — any falsy-coercion fallback (e.g., `row.placement_mode || 'anytime'`) would coerce `''` to `'anytime'` and fail this assertion. This is stronger than the null test because `||` does not coerce `null` to the right side (it does — `null || 'anytime'` = `'anytime'`), and it also coerces empty string. So this test covers the `||` operator case that `toBeNull()` in taskPipeline also covers, but from a different input angle. Both are legitimate regression guards.
+
+**Verdict: PASS** — correct and meaningful.
+
+---
+
+## Cal-Adapter Reordering Coverage Audit
+
+The brief asks: are there missing cases for the ANYTIME reset before FIXED promotion?
+
+**Prior C3 BLOCK status (from Zoe precommit session 2026-05-25):** BLOCK was raised because the REMINDER→FIXED combined scenario (formerly-transparent + date/time change in same sync → must produce FIXED not ANYTIME) had no test in any adapter. The BLOCK required tests in all three adapters.
+
+**Current state — verified by Zoe:**
+
+- `01-adapter-gcal.test.js` lines 301-322: describe block "GCal adapter — applyEventToTaskFields REMINDER→FIXED ordering" — test present, `currentTask.placement_mode = 'reminder'`, `isTransparent: false`, date/time changed, asserts `fields.placement_mode === 'fixed'` AND `!== 'anytime'`. **PASS**
+
+- `02-adapter-msft.test.js` lines 592-618: describe block "MSFT adapter — applyEventToTaskFields REMINDER→FIXED ordering" — test present, same pattern. **PASS**
+
+- `03-adapter-apple.test.js` lines 244-265: describe block "Apple adapter — applyEventToTaskFields REMINDER→FIXED ordering" — test present, same pattern. **PASS**
+
+- `05-adapter-msft-edge.test.js`: No REMINDER→FIXED test (only edge cases unrelated to ordering). This file does not cover the ordering scenario. However, `02-adapter-msft.test.js` already covers it — the edge file is supplementary. **Gap is moot for this scenario.**
+
+- `06-adapter-apple-edge.test.js`: Same — no ordering test, covered by `03-adapter-apple.test.js`.
+
+**C3 BLOCK is resolved.** All three adapters have the combined REMINDER→FIXED ordering test.
+
+---
+
+## WARN Findings
+
+### WARN-1: Test name mismatch in derivePlacementMode.test.js line 125
+
+**Finding:** The test at line 125 is titled "passes through null placement_mode from DB row as-is" but its input is `rowToTask({ text: 'Test' }, null)` — a row with no `placement_mode` key at all, not a row with `placement_mode: null`. The assertion `toBeUndefined()` is correct for an absent key but would not catch a fallback applied specifically when `placement_mode` is `null` (as distinct from absent). The actual null-value case is correctly handled in `taskPipeline.test.js` line 611-614 with `toBeNull()`.
+
+**Risk:** Low — no behavioral gap, but a developer reading the derivePlacementMode test might believe the null DB row case is tested here and not look for it in taskPipeline.test.js. If the derivePlacementMode test were the only test for this file, the null case would be uncovered.
+
+**Required fix:** Rename the test to "does not supply a default when placement_mode key is absent" or change the input to `rowToTask({ text: 'Test', placement_mode: null }, null)` and update the assertion to `toBeNull()` — which would make it equivalent to the taskPipeline test but scoped within this file's describe block.
+
+**Verdict: WARN**
+
+---
+
+### WARN-2: No test for placement_mode passthrough through the template-inheritance path
+
+**Finding:** The `rowToTask` template-inheritance path (Phase 09 TEMPLATE_FIELDS) reads fields from the source template row and applies them to the instance. `placement_mode` is in `TEMPLATE_FIELDS` (confirmed: line 181 of task.controller.js includes `'placement_mode'` in the TEMPLATE_FIELDS array).
+
+**Verified:**
+
+```
+grep -n "TEMPLATE_FIELDS\|'placement_mode'" task.controller.js | grep -E "^181:|TEMPLATE_FIELDS"
+181:  'preferred_time_mins', 'placement_mode',
+```
+
+This means when a recurring instance is processed by `rowToTask`, the `placement_mode` comes from the source template, not the instance row. None of the changed tests cover this path: a template with `placement_mode: 'time_window'` → instance inherits `placementMode: 'time_window'`. If the TEMPLATE_FIELDS inheritance were changed to exclude `placement_mode`, neither the changed tests nor the existing template-inheritance tests in taskPipeline.test.js (section 2, lines 173-246) would catch it — those tests do not assert `placementMode` on the resulting task.
+
+**Evidence:** Zoe grepped all assertions in section 2 of taskPipeline.test.js. None assert `task.placementMode`. The inheritance tests assert `text`, `dur`, `pri`, `project`, `when`, `dayReq`, `timeFlex`, `split`, `flexWhen` — but not `placementMode`.
+
+**Required fix:** Add one test to taskPipeline.test.js section 2: template with `placement_mode: 'time_window'` → `rowToTask(instance, TZ, srcMap)` → assert `task.placementMode === 'time_window'`. This locks the TEMPLATE_FIELDS inheritance for placement_mode specifically.
+
+**Verdict: WARN**
+
+---
+
+## What the Changed Tests Got Right
+
+| Item | Assessment |
+|------|-----------|
+| taskPipeline.test.js line 611: `placement_mode: null` → `toBeNull()` | Correct input, correct assertion, real regression guard against `|| 'anytime'` re-introduction |
+| derivePlacementMode.test.js lines 128-130: `placement_mode: ''` → `toBe('')` | Catches `||` operator coercion, stronger than null alone |
+| derivePlacementMode.test.js lines 135-137: `placement_mode: 'fixed'` → `toBe('fixed')` | Positive case confirming non-null values still pass through correctly |
+| Test descriptions clearly document the no-fallback contract in comments | Architectural intent is explicit in the test file header and individual test descriptions |
+| C3 BLOCK (REMINDER→FIXED ordering) is covered in all three adapter test files | Prior BLOCK is fully resolved |
+
+---
+
+## Required Actions
+
+- [ ] **WARN-1:** Rename derivePlacementMode.test.js line 125 test from "passes through null placement_mode from DB row as-is" to "does not supply a default when placement_mode key is absent from DB row" — the input has no `placement_mode` key, not a null value. Alternatively, change the input to `{ text: 'Test', placement_mode: null }` and the assertion to `toBeNull()` to actually test the null case within this file.
+- [ ] **WARN-2:** Add one test to taskPipeline.test.js section 2 (template field inheritance): template with `placement_mode: 'time_window'` → recurring instance → `rowToTask(instance, TZ, srcMap)` → assert `task.placementMode === 'time_window'`. This locks `placement_mode` in the TEMPLATE_FIELDS inheritance path.
+
+---
+
+_Reviewer: Zoe_
+_Mode: Focused adversarial audit — placement_mode no-fallback assertion correctness_
+_Date: 2026-05-26_
+
+---
+
+# Zoe's Adversarial Test Review — 2026-05-26 (TaskDetailHeader project select) [Iteration 2 — re-review]
+
+_Scope: BLOCK-2 resolution verification (project={null} fix + new null test)_
+_Prior verdict: BLOCK (iteration 1)_
+_Re-review date: 2026-05-26_
+
+## Overall Verdict: BLOCK
+
+### Summary of iteration 2 findings
+
+BLOCK-2 from iteration 1 was partially addressed: `project ?? ''` is now in the source and the `project={null}` test exists. However the new test is a false pass — it would not catch the regression if `?? ''` were removed. A genuine regression guard requires `jest.spyOn(console, 'error')` and asserting no null-value warning fires. Without that, the test provides no protection.
+
+The four WARNs from iteration 1 (WARN-1 through WARN-5) are unaddressed and remain open.
+
+---
+
+## Re-Verification: BLOCK-2 — `project ?? ''` fix and null test
+
+### Claim 1: `value={project ?? ''}` now used (null/undefined → '', empty string passes through)
+
+**Zoe verified:** Source at `/Users/david/Offline Coding/Raike & Sons /DEV/juggler/juggler-frontend/src/components/tasks/TaskDetailHeader.jsx` line 142:
+
+```jsx
+<select value={project ?? ''} onChange={e => onProjectChange && onProjectChange(e.target.value)}
+```
+
+Confirmed. `?? ''` is present. CLAUDE.md Approved Fallbacks table documents this as approved (Oscar review 2026-05-26).
+
+**Source fix: PASS**
+
+---
+
+### Claim 2: New test added — "renders project select with no-project selected when project is null"
+
+**Zoe verified:** Test exists at line 86-95 of `TaskDetailHeader.test.jsx`. Renders with `project={null}`, asserts `getByDisplayValue('No project')` is in document.
+
+**Test count: 7/7 confirmed.** Zoe ran the suite independently:
+
+```
+PASS src/components/tasks/__tests__/TaskDetailHeader.test.jsx
+  ✓ renders task title (77 ms)
+  ✓ shows Save button only when dirty (30 ms)
+  ✓ calls onClose when × clicked (26 ms)
+  ✓ shows notes preview when notes is non-empty (26 ms)
+  ✓ renders project select with current value and all options (99 ms)
+  ✓ calls onProjectChange when project select changes (14 ms)
+  ✓ renders project select with no-project selected when project is null (12 ms)
+
+Tests: 7 passed, 7 total
+```
+
+**Test passes: confirmed.**
+
+---
+
+### Claim 3: New null test "would catch a regression if `?? ''` were removed"
+
+**This is the adversarial question. Zoe probed it directly.**
+
+The assertion is `getByDisplayValue('No project')`. This query asks: "is there a form element whose current displayed value is 'No project'?"
+
+When `value={null}` is passed to a controlled `<select>`:
+- jsdom coerces `null` to the empty string at the DOM `.value` property level.
+- The `<option value="">No project</option>` has an empty string value.
+- The select's displayed value settles to "No project".
+- `getByDisplayValue('No project')` matches the select.
+- The test PASSES even when `value={null}` is used — i.e., even if `?? ''` is absent.
+
+**Zoe's probe** (temporary test, executed and deleted):
+
+```jsx
+// value={null} directly (simulating removal of ?? ''):
+render(<select value={null} onChange={() => {}}><option value="">No project</option></select>);
+expect(screen.getByDisplayValue('No project')).toBeInTheDocument(); // PASSES
+```
+
+Result: PASS. jsdom's coercion makes the DOM-level behavior identical whether the prop is `null` or `''`. The `getByDisplayValue` assertion cannot distinguish between them.
+
+**The test is a false pass for the regression it claims to guard.**
+
+The regression signal that `?? ''` is actually suppressing is the React console.error: `Warning: 'value' prop on 'select' should not be null`. Zoe verified this warning fires for `value={null}` and is suppressible by `?? ''`:
+
+```
+// Probe: jest.spyOn(console, 'error') with value={null} → warning fires
+// Probe: jest.spyOn(console, 'error') with value={null ?? ''} → no warning
+// Both probe tests PASSED (executed and deleted by Zoe)
+```
+
+A test that captures `console.error` and asserts zero null-value warnings IS a real regression guard. The current `getByDisplayValue` assertion is not.
+
+**Verdict: BLOCK-2 partially resolved — source fix is correct, null test is a false pass.**
+
+---
+
+## BLOCK Finding — Iteration 2
+
+### BLOCK-2 (re-opened): Null test does not protect the `?? ''` guard
+
+**Evidence:**
+- `getByDisplayValue('No project')` passes with both `value={null}` and `value=''` in jsdom
+- Removing `?? ''` from line 142 leaves all 7 tests green
+- The React console.error is the only observable difference between the two states, and it is not captured by any test assertion
+
+**Required fix:** Replace the existing null-test assertion or augment it:
+
+```jsx
+it('renders project select with no-project selected when project is null — no React warning', () => {
+  const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+  render(<TaskDetailHeader ... project={null} allProjectNames={['Work', 'Personal']} onProjectChange={() => {}} />);
+  const nullValueWarnings = errorSpy.mock.calls.filter(
+    call => call.some(arg => typeof arg === 'string' && /value.*prop.*null|null.*value.*prop/i.test(arg))
+  );
+  expect(screen.getByDisplayValue('No project')).toBeInTheDocument(); // still valid
+  expect(nullValueWarnings).toHaveLength(0); // this is the guard — fails if ?? '' removed
+  errorSpy.mockRestore();
+});
+```
+
+Without this, the `?? ''` guard can be removed and CI will not notice.
+
+---
+
+## Open WARNs from Iteration 1 (unchanged — not addressed)
+
+| Finding | Status |
+|---------|--------|
+| WARN-1: Test 5 asserts only 2 of 4 options — "all options" is a false claim | OPEN |
+| WARN-2: `allProjectNames` omitted — no test | OPEN |
+| WARN-3: `onProjectChange` absent — no test | OPEN |
+| WARN-4: `allProjectNames=[]` — no test | OPEN |
+| WARN-5: `isCreate={true}` with project select — no test | OPEN |
+
+These were carried from iteration 1 and were not touched in this fix round.
+
+---
+
+## Required Actions
+
+- [ ] **BLOCK (BLOCK-2):** Strengthen the null test to spy on `console.error` and assert zero null-value warnings. The current `getByDisplayValue` assertion alone is insufficient — it is satisfied by jsdom's null-to-empty-string coercion regardless of whether `?? ''` is present.
+- [ ] **WARN (WARN-1):** Add assertion for 'Health' option and assert option count = 4 in Test 5.
+- [ ] **WARN (WARN-2):** Add test: `allProjectNames` omitted → only "No project" option renders.
+- [ ] **WARN (WARN-3):** Add test: `onProjectChange` not provided → `fireEvent.change` does not throw.
+- [ ] **WARN (WARN-4):** Add test: `allProjectNames={[]}` → only "No project" option renders.
+- [ ] **WARN (WARN-5):** Add test: `isCreate={true}` → project select renders with correct initial value.
+
+---
+
+_Reviewer: Zoe_
+_Mode: --re-review (iteration 2 — BLOCK-2 null-test verification)_
+_Date: 2026-05-26_
+
+---
+
+# Zoe's Adversarial Test Review — 2026-05-26 (TaskDetailHeader project select) [Iteration 1]
+
+_Auditing Telly's work from: TEST-REVIEW.md dated 2026-05-26, mode --focus TaskDetailHeader_
+_No Bird output present for this scope._
+
+## Overall Verdict: BLOCK
+
+---
+
+## Telly's Claims vs Reality
+
+| Telly Said | Zoe Found | Verdict |
+|-----------|-------------|---------|
+| Line 142: `<select value={project \|\| ''} ...>` — null is coerced to '' by guard | Actual source at line 142: `value={project}` — no `\|\|` guard. `null` passes directly to the select value prop. | BLOCK |
+| "renders project select with current value and all options" is correct | Test passes but does NOT verify option count or that all three named options are present (only checks 2 of 3; 'Health' is never asserted) | WARN |
+| All 6 tests pass, no gaps | 6 tests confirmed passing by Zoe's re-run (3.05 s). Pass count is accurate. | PASS |
+| "notes preview" getByText risk flagged | Zoe probed: getByText DOES match controlled textarea content in this jsdom/CRA environment because React sets textContent. Empty value correctly fails. NOT a false pass. | PASS (Telly's flag was overcautious but the underlying test is sound) |
+| `project={null}` risk — "API commonly returns null; guard is the only safety net" | Guard does not exist in the real source. `project={null}` passes `null` directly to the select, triggering a React `value should not be null` console.error warning. | BLOCK |
+
+---
+
+## BLOCK Findings
+
+### BLOCK-1: Telly fabricated source code — the `|| ''` guard does not exist
+
+**Evidence.**
+
+Telly's TEST-REVIEW.md (line 47) quotes the source as:
+
+```jsx
+<select value={project || ''} ...>
+```
+
+The actual source at `/Users/david/Offline Coding/Raike & Sons /DEV/juggler/juggler-frontend/src/components/tasks/TaskDetailHeader.jsx` line 142 is:
+
+```jsx
+<select value={project} onChange={e => onProjectChange && onProjectChange(e.target.value)}
+```
+
+There is no `|| ''` coercion. Telly's entire analysis of the `project={null}` risk was constructed around a guard that was either fabricated or copied from a different version of the file. The real code passes `project` directly to the select's `value` prop.
+
+**Impact.** When `project` is `null` (a common API response value):
+
+1. React fires a `value should not be null` console.error warning — confirmed by Zoe's probe against the real component.
+2. jsdom coerces the DOM property silently, so the UI does not visibly break, but the React warning is a production-observable error.
+3. No existing test exercises this path, so this warning is invisible to CI.
+
+**Note on CLAUDE.md.** The `Approved Fallbacks` table in `CLAUDE.md` was updated (system notification indicates this during the session) to document the `allProjectNames || []` fallback as approved. The `project || ''` guard is NOT in that table — because it does not exist in the source. The two are separate: `allProjectNames` has an approved fallback; `project` does not, and the select currently receives a raw `null` when the prop is null.
+
+**Verdict: BLOCK** — Telly's source citation is wrong. The null-guard gap is real and untested.
+
+---
+
+### BLOCK-2: No test covers `project={null}` — the most common API value after null guard is absent
+
+**Evidence.** Zoe ran the component with `project={null}` against the real source. React fired `Warning: 'value' prop on 'select' should not be null.` — one warning, confirmed. The DOM select settled on `value=""` via jsdom coercion, which is why the component does not visually break. But no test catches the warning and no test asserts the "No project" option is selected.
+
+**Required test:**
+
+```jsx
+it('renders "No project" selected when project is null', () => {
+  render(<TaskDetailHeader ... project={null} allProjectNames={['Work']} onProjectChange={() => {}} />);
+  // This would currently also catch the React console.error if warnings are treated as errors
+  expect(screen.getByDisplayValue('No project')).toBeInTheDocument();
+});
+```
+
+**Verdict: BLOCK** — not a gap Telly acknowledged as worth adding (Telly called it HIGH priority in the uncovered-edge-cases section but declined to add the test and signed off with "PASS with gaps"). Given the source guard does not exist, this is not a gap in testing an existing guard — it is a gap that masks a real production warning.
+
+---
+
+## WARN Findings
+
+### WARN-1: Test 5 assertion depth — 2 of 3 options verified, no option count check
+
+**Evidence.** Test 5 ("renders project select with current value and all options") asserts `getByRole('option', { name: 'No project' })` and `getByRole('option', { name: 'Personal' })` but never checks 'Health' or the total option count. Zoe's probe confirmed 4 options render (No project, Work, Personal, Health). The test name claims "all options" but verifies only 2 of 4.
+
+A regression that dropped the last option from the rendered list would not be caught.
+
+**Required fix:** Either assert all named options or assert `select.options.length === 4` (allProjectNames.length + 1 for "No project").
+
+**Verdict: WARN**
+
+---
+
+### WARN-2: `allProjectNames` omitted — behavior confirmed safe but untested
+
+**Evidence.** Zoe probed: `allProjectNames` omitted → select renders with 1 option ("No project") and no crash. The `|| []` guard on line 145 is real and works correctly. This is documented as an approved fallback in `CLAUDE.md`.
+
+No test exercises this path. The guard could be removed and CI would not notice.
+
+**Verdict: WARN**
+
+---
+
+### WARN-3: `onProjectChange` absent — guard path confirmed safe but untested
+
+**Evidence.** Zoe probed: firing `change` on the project select without `onProjectChange` prop does not crash. The `&&` short-circuit on line 142 works. No test covers this path.
+
+**Verdict: WARN**
+
+---
+
+### WARN-4: `allProjectNames=[]` — behavior confirmed but untested
+
+**Evidence.** Zoe probed: empty array renders only "No project". Distinct caller pattern from omitted prop (the `|| []` does not fire; an empty array passes through). No test covers this.
+
+**Verdict: WARN**
+
+---
+
+### WARN-5: `isCreate={true}` with project select — renders but untested
+
+**Evidence.** Zoe probed: with `isCreate={true}`, the project select renders and holds its value correctly. No existing test verifies the select is present and functional in create mode.
+
+**Verdict: WARN**
+
+---
+
+## What Telly Got Right
+
+| Item | Assessment |
+|------|-----------|
+| Test 6 (onProjectChange callback) correctly asserts `toHaveBeenCalledWith('Personal')` — value string, not event | Solid assertion; verified by Zoe's probe that the callback receives a string |
+| Test 6 uses `getByDisplayValue('Work')` which unambiguously targets only the project select (Zoe confirmed 1 match) | Correct — no selector ambiguity |
+| Test 5 uses `getByDisplayValue('Work')` to establish context, then role-based option queries | Appropriate approach for option verification |
+| Test run count (6) and pass results are accurate | Confirmed by Zoe's independent re-run: 6 PASS, 3.05 s |
+| The notes-preview test is not a false pass — getByText works on textarea in this jsdom environment | Telly's flag was overcautious; Zoe's probe confirms the test is sound |
+| Edge-case identification (null project, omitted allProjectNames, etc.) is correct | Correctly identified; incorrectly attributed to a non-existent guard |
+
+---
+
+## Required Actions
+
+- [ ] **BLOCK (BLOCK-1/BLOCK-2):** Fix the source: add `|| ''` to line 142 of `TaskDetailHeader.jsx` so the select reads `value={project || ''}`, eliminating the `null` prop warning. Then add a test: `project={null}` renders with `getByDisplayValue('No project')` selected. (Alternatively: if `project` is intentionally nullable at the call site, add the fallback and test together; if `project` is guaranteed non-null by callers, add a PropTypes or runtime assertion instead.)
+- [ ] **WARN (WARN-1):** Strengthen Test 5 to assert all 3 named options from `allProjectNames` and assert option count = `allProjectNames.length + 1`.
+- [ ] **WARN (WARN-2):** Add test: `allProjectNames` omitted → only "No project" option renders.
+- [ ] **WARN (WARN-3):** Add test: `onProjectChange` not provided → `fireEvent.change` does not throw.
+- [ ] **WARN (WARN-4):** Add test: `allProjectNames={[]}` → only "No project" option renders.
+- [ ] **WARN (WARN-5):** Add test: `isCreate={true}` → project select renders with correct initial value.
+
+---
+
+## Files
+
+| File | Path |
+|------|------|
+| Source | `/Users/david/Offline Coding/Raike & Sons /DEV/juggler/juggler-frontend/src/components/tasks/TaskDetailHeader.jsx` |
+| Test file | `/Users/david/Offline Coding/Raike & Sons /DEV/juggler/juggler-frontend/src/components/tasks/__tests__/TaskDetailHeader.test.jsx` |
+| Telly's review | `/Users/david/Offline Coding/Raike & Sons /DEV/juggler/TEST-REVIEW.md` |
+
+---
+
+_Reviewer: Zoe_
+_Mode: Adversarial — TaskDetailHeader project select field_
+_Date: 2026-05-26_
+
+---
+
 # Zoe's Adversarial Test Review — 2026-05-25 (When-mode simplification)
 
 ---
@@ -110,6 +575,181 @@ Deleting `cache.invalidateTasks(req.user.id)` from the `updateTask` handler woul
 
 _Reviewer: Zoe_
 _Mode: --re-review (bert's Z-4/Z-5/Z-6/Z-7 + B-1/B-3 residual fixes)_
+_Date: 2026-05-25_
+
+---
+
+## Bert Fix Re-Verify — Precommit (2026-05-25)
+
+_Scope: RC-C1 (transport.js planCheck), RC-C2 (app.js OAuth redirect allowlist), C1 (rowToTask fallback removed), C2 (taskToRow invalid placementMode → 400), C3 (adapter REMINDER-before-FIXED ordering), W3 (rigid removed from MCP Zod schema), W5 (safeParseJSON fallback removed)_
+
+_Files read: juggler-backend/src/mcp/transport.js, juggler-backend/src/app.js (lines 135-183), juggler-backend/src/lib/cal-adapters/msft.adapter.js (lines 250-276), juggler-backend/src/lib/cal-adapters/gcal.adapter.js (grep), juggler-backend/src/lib/cal-adapters/apple.adapter.js (grep), juggler-backend/src/controllers/task.controller.js (lines 126-131, grep for validateTaskInput), juggler-backend/src/mcp/tools/tasks.js (Zod schema lines 21-60), juggler-backend/tests/mcp.test.js (full describe listing), juggler-backend/tests/taskControllerUnit.test.js (validateTaskInput tests, grep), juggler-backend/tests/mcp-task-config.test.js (lines 248-256), juggler-backend/tests/cal-sync/01-adapter-gcal.test.js (grep), juggler-backend/tests/cal-sync/02-adapter-msft.test.js (lines 286-303, grep), juggler-backend/tests/cal-sync/03-adapter-apple.test.js (grep), global grep for hasActivePlan/planCheck/redirect_uri allowlist/safeParseJSON/rigid across all tests/_
+
+### Overall Verdict: BLOCK
+
+Two BLOCKs found: RC-C1 and C3. Three PASSes: C1, W3, W5. One split verdict: C2.
+
+---
+
+### RC-C1 — planCheck restored in transport.js
+
+**Source verified:**
+- `planCheck` at transport.js line 23-27 reads `authResult.plans || {}`, then `plans[APP_ID]`. Returns `{ hasActivePlan: false }` when APP_ID is absent. Correct.
+- Production guard at lines 59 and 71: `process.env.NODE_ENV !== 'production'` present on both dev-token bypass branches. Correct.
+
+**Test coverage:** Global grep across all 100 test files for `hasActivePlan`, `plans[APP_ID]`, `planCheck`, `MCP_DEV_NO_AUTH`, `NODE_ENV.*production` returned zero hits in any test file. `mcp.test.js` contains 218 lines covering `validateTaskInput`, `taskToRow/rowToTask`, task CRUD, and calendar guards — no transport authentication tests whatsoever.
+
+There is no test that:
+- Calls the transport handler with a JWT whose `plans` claim lacks the APP_ID key and asserts `{ hasActivePlan: false }` is returned or that the MCP request is rejected/limited accordingly.
+- Sets `NODE_ENV=production` and `MCP_DEV_NO_AUTH=true` and verifies the dev bypass is blocked.
+- Sets `NODE_ENV=production` and sends `dev-token` and verifies 401.
+
+Deleting the `process.env.NODE_ENV !== 'production'` guard from either branch leaves all tests green. The production security gate is completely unprotected by tests.
+
+**Verdict: BLOCK**
+
+---
+
+### RC-C2 — OAuth redirect_uri allowlist
+
+**Source verified:**
+- `/oauth/authorize` at app.js line 138-156 is gated by `process.env.NODE_ENV === 'development'` (not `MCP_DEV_NO_AUTH`). Correct — the endpoint does not exist in production.
+- Allowlist check at line 146-152: parses URL, rejects if `parsedUri.hostname` is not in `['localhost', '127.0.0.1']`. Correct.
+- The `NODE_ENV === 'development'` guard (not `MCP_DEV_NO_AUTH`) is the mechanism — the endpoint is absent in production entirely.
+
+**Test coverage for allowlist rejection:** `tests/unit/app.test.js` has only two CORS-related assertions (origin header checks) and nothing touching `/oauth/authorize`. Global grep for `redirect_uri.*evil`, `not.*permitted`, `allowedHosts`, `oauth.*authorize` across all test files returned zero hits. There is no test that:
+- POSTs/GETs `/oauth/authorize` with a non-localhost `redirect_uri` (e.g., `https://evil.com/callback`) and asserts 400 with `redirect_uri host not permitted`.
+- Verifies the endpoint returns 404 when `NODE_ENV !== 'development'`.
+
+**Split verdict:**
+- The allowlist logic itself (no test covering rejection): **BLOCK**
+- The production-gate claim ("OAuth endpoints only active in development, not via MCP_DEV_NO_AUTH"): correct at the source level — the `NODE_ENV === 'development'` guard is distinct from `MCP_DEV_NO_AUTH`. The source is right. But there is no test verifying that `MCP_DEV_NO_AUTH=true` with `NODE_ENV=test` does NOT activate `/oauth/authorize`. **WARN**
+
+**Verdict: BLOCK** (allowlist rejection untested; test deletion would leave it silently broken)
+
+---
+
+### C1 — rowToTask fallback removed
+
+**Source verified:** `task.controller.js` line 452 (confirmed by grep): `placementMode: row.placement_mode` with no fallback. The `|| 'anytime'` fallback is absent.
+
+**Test coverage:** `taskControllerUnit.test.js` rowToTask describe blocks (lines 84-202) test preferred_time_mins inheritance, template field inheritance, terminal status clamping, and return object completeness. Line 202 asserts `expect(task).toHaveProperty('placementMode')`. `taskMapping.test.js` line 59 asserts `expect(task.placementMode).toBe('anytime')` on a row with `placement_mode: 'anytime'`.
+
+No test passes `placement_mode: null` to `rowToTask` and asserts the result — which would be the precise regression catch for a re-introduced fallback. However, the fix is the removal of the fallback, not the introduction of new behavior. Any test asserting a non-null `placementMode` value on a row that sets `placement_mode` to that value remains valid. No test is asserting the old fallback behavior (ANYTIME when null), which is correct — that behavior should not be tested because it should not exist.
+
+The gap: no test proves that `rowToTask({ placement_mode: null })` produces `task.placementMode === null` (rather than `'anytime'`). If the fallback is re-introduced, existing tests would not catch it because they always pass non-null `placement_mode` values in fixtures.
+
+This is a narrow gap — re-introducing the fallback would require actively editing the source, and the taskMapping test's `expect(task.placementMode).toBe('anytime')` on a row with `placement_mode: 'anytime'` does not distinguish fallback from direct passthrough. But the task description asks whether a test with `placement_mode: null` asserting behavior exists. It does not.
+
+**Verdict: WARN** — no test covers the null input path directly; re-introducing the fallback would not be caught by the current suite.
+
+---
+
+### C2 — taskToRow silent mapping fixed (unknown placementMode → validation error)
+
+**Source verified:** `task.controller.js` lines 829-835: `validateTaskInput` checks `Object.values(PLACEMENT_MODES).indexOf(body.placementMode) < 0` and pushes an error. `taskToRow` at line 478-479 (confirmed by test): assigns `row.placement_mode = body.placementMode` directly — no coercion to ANYTIME.
+
+**Test coverage:**
+
+Unit level (`validateTaskInput`): The test at `taskControllerUnit.test.js` line 475-480 is titled "invalid placementMode is passed through by taskToRow" and calls `taskToRow({ placementMode: 'bogus_mode' })` — it asserts `row.placement_mode === 'bogus_mode'`. This tests `taskToRow` directly, bypassing `validateTaskInput`. There is no unit test that calls `validateTaskInput({ placementMode: 'bogus_mode' })` and asserts the error array contains a validation error. The comment on line 476 says "validateTaskInput catches it before taskToRow is reached" — but no test actually invokes `validateTaskInput` with an unknown mode and asserts an error is returned.
+
+MCP level (`mcp-task-config.test.js`): The test at line 248-256 sends `{ text: 'Invalid placement mode', placementMode: 'invalid_value' }` through the MCP handler and asserts `result.isError === true` and the text matches `/placementMode.*is not valid/i`. This IS a real assertion proving the validation pipeline rejects unknown modes before insert (`capturedInsertRow` is also asserted null).
+
+HTTP endpoint level: Global grep across `tests/api/` for `placementMode.*invalid`, `invalid.*placementMode`, `400.*placement` returned zero hits. No test POSTs `{ placementMode: 'bogus_mode' }` to the HTTP task API (`POST /api/tasks` or `PATCH /api/tasks/:id`) and asserts a 400 response.
+
+**Verdict: WARN** — MCP path is covered by a real test (mcp-task-config.test.js line 248-256). HTTP path has no test. The `validateTaskInput` unit test calling the function directly with an invalid mode is absent (the existing test bypasses it). The MCP test is sufficient to detect a regression in the validation logic itself, so this is not a BLOCK, but the HTTP surface is uncovered.
+
+---
+
+### C3 — Adapter ordering fix (REMINDER reset before FIXED promotion)
+
+**Source verified:** All three adapters contain the correct ordering:
+- `msft.adapter.js` lines 262-272: REMINDER reset (`fields.placement_mode = ANYTIME`) runs at line 262-264; FIXED promotion runs at lines 267-272. Comment explicitly states "must run before FIXED promotion so a same-sync date/time change still wins."
+- `gcal.adapter.js` lines 177-179: same pattern confirmed.
+- `apple.adapter.js` lines 239-241: same pattern confirmed.
+
+The ordering is correct in source.
+
+**Test coverage for the combined scenario:** The specific scenario Bert's fix targets is: a task currently at `placement_mode: 'reminder'` (formerly transparent) where the same sync event is now non-transparent AND has date/time changes — should end up as FIXED, not ANYTIME.
+
+Examining all three adapters' test files:
+
+- `02-adapter-msft.test.js` line 286-303: Tests "should clear marker when event is no longer transparent" with `currentTask.placement_mode = 'reminder'`, `isTransparent: false`, but the event's `startDateTime` is `'2026-04-15T10:00:00'` and `currentTask.date = '2026-04-15'` and `currentTask.time = '10:00 AM'` — the date and time are UNCHANGED. This tests the REMINDER→ANYTIME path only. It does NOT test REMINDER→FIXED when date/time also change in the same sync.
+
+- `01-adapter-gcal.test.js`: Global grep for `placement_mode.*reminder` returned zero hits. No test involves a currentTask with `placement_mode: 'reminder'`.
+
+- `03-adapter-apple.test.js`: Same — global grep for `placement_mode.*reminder` returned zero hits.
+
+The combined scenario — formerly-transparent task + date/time change in same sync → must be FIXED not ANYTIME — is untested in all three adapters. If the ordering were swapped (FIXED promotion first, then REMINDER reset), the reset would overwrite the FIXED result to ANYTIME, producing a bug. The current source order is correct but no test would catch a reversal.
+
+**Verdict: BLOCK** — the ordering-sensitive behavior Bert's fix specifically addresses has no test coverage. A swap of the two `if` blocks in any adapter would not be caught.
+
+---
+
+### W3 — rigid removed from MCP Zod schema
+
+**Source verified:** `juggler-backend/src/mcp/tools/tasks.js` lines 21-60 (full Zod schema read). `rigid` does not appear anywhere in the schema. The field is absent. Confirmed.
+
+**Test coverage:** Global grep for `rigid.*true|rigid.*false` in `mcp-task-config.test.js` and `mcp.test.js` returned zero hits. There is no test that sends `rigid: true` to the MCP `create_task` or `update_task` handler and verifies it is either rejected (if Zod strips unknown keys) or ignored (passthrough to taskToRow which no longer maps it).
+
+The risk level is low — if `rigid` were accidentally re-added to the schema, no external behavior would break because the DB column still exists and `taskToRow` passes it through. The field removal is a simplification, not a security or correctness issue. A test would confirm the schema is clean, but the absence doesn't mask a production bug.
+
+**Verdict: WARN** — no test verifies `rigid: true` is silently ignored or rejected; low risk but the cleanup is unverified.
+
+---
+
+### W5 — safeParseJSON fallback removed
+
+**Source verified:** `task.controller.js` lines 126-131:
+```js
+function safeParseJSON(val, fallback) {
+  if (val === null || val === undefined) return fallback;
+  if (typeof val !== 'string') return val;
+  if (val === '' || val === 'null') return fallback;
+  try { return JSON.parse(val); } catch { return fallback; }
+}
+```
+Line 128: `if (typeof val !== 'string') return val` — the `|| fallback` that was there before is gone. A non-string value (e.g., `0`, `false`, `[]`) is returned as-is, not replaced by fallback.
+
+**Test coverage:** Global grep for `safeParseJSON` across all test files returned zero hits. The function is not tested directly in any unit test. The behavior change (non-string non-null values pass through instead of falling back) affects the `location`, `tools`, `recur`, and `dependsOn` fields in `rowToTask` — all of which call `safeParseJSON`. No test passes `location: 0`, `tools: false`, or `recur: []` as a DB row value and verifies the output.
+
+The risk: DB rows in MySQL will always have JSON columns as either a string or NULL — non-string, non-null values would only arise from a bug elsewhere. The gap is real but the trigger condition is unlikely from a well-formed DB. Still, the behavioral change is undocumented by any test.
+
+**Verdict: WARN** — `safeParseJSON` has no direct unit tests; the new `typeof val !== 'string'` passthrough behavior (replacing `|| fallback`) is unverified by any test case.
+
+---
+
+### Summary Table
+
+| Item | Source Correct | Test Gap | Verdict |
+|------|---------------|----------|---------|
+| RC-C1: planCheck reads `plans[APP_ID]`, returns `{ hasActivePlan: false }` if absent | Yes | No test for `hasActivePlan: false` path; no production guard test | BLOCK |
+| RC-C1: `MCP_DEV_NO_AUTH` bypass blocked in production | Yes | No test verifies production blocks the bypass | BLOCK (same finding) |
+| RC-C2: `/oauth/authorize` rejects non-localhost redirect_uri | Yes | No test for allowlist rejection | BLOCK |
+| RC-C2: OAuth endpoints inactive when only `MCP_DEV_NO_AUTH` set (not `NODE_ENV=development`) | Yes | No test confirms `MCP_DEV_NO_AUTH` alone doesn't activate OAuth endpoints | WARN |
+| C1: `rowToTask` returns `row.placement_mode` with no fallback | Yes | No test passes `placement_mode: null` to verify null passthrough | WARN |
+| C2: Unknown `placementMode` → validation error (MCP path) | Yes | MCP test at mcp-task-config.test.js:248 is real and passes | PASS (MCP path) |
+| C2: Unknown `placementMode` → 400 (HTTP path) | Yes | No HTTP endpoint test for invalid placementMode | WARN |
+| C2: `validateTaskInput` unit test for unknown mode | Yes (source) | No `validateTaskInput({ placementMode: 'bogus' })` unit test | WARN |
+| C3: REMINDER reset runs before FIXED promotion (all 3 adapters) | Yes | No test for combined formerly-transparent + date/time change → FIXED | BLOCK |
+| W3: `rigid` absent from MCP Zod schema | Yes | No test sends `rigid: true` to MCP to verify ignored/rejected | WARN |
+| W5: `safeParseJSON` `|| fallback` removed; non-string returns `val` | Yes | No unit test for `safeParseJSON` with falsy non-string inputs | WARN |
+
+### Required Actions
+
+- [ ] **BLOCK (RC-C1):** Add tests to `mcp.test.js` or a new `mcp-transport.test.js`: (a) JWT with no plan for APP_ID → `planCheck` returns `{ hasActivePlan: false }`; (b) `NODE_ENV=production` + `MCP_DEV_NO_AUTH=true` + `dev-token` → 401; (c) `NODE_ENV=production` + no token → 401 (not dev bypass).
+- [ ] **BLOCK (RC-C2 allowlist):** Add test in `tests/unit/app.test.js` or `tests/api/` that GETs `/oauth/authorize?redirect_uri=https://evil.com/callback` in `NODE_ENV=development` and asserts 400 with body `{ error_description: 'redirect_uri host not permitted' }`.
+- [ ] **BLOCK (C3):** Add a test in each adapter's test file (or at minimum msft, which has the existing "clear marker" test as a template) for the combined scenario: `currentTask = { placement_mode: 'reminder', date: '2026-04-15', time: '10:00 AM' }`, event `isTransparent: false` AND `startDateTime` changed to a different date or time — assert `fields.placement_mode === 'fixed'`. This directly validates the ordering Bert's fix establishes.
+- [ ] **WARN (C1):** Add `rowToTask({ ...sampleRow, placement_mode: null })` test asserting `task.placementMode === null` to lock out re-introduction of the ANYTIME fallback.
+- [ ] **WARN (C2 HTTP):** Add an HTTP-level test that POSTs `{ text: 'test', placementMode: 'bogus_mode' }` to `POST /api/tasks` and asserts 400.
+- [ ] **WARN (C2 unit):** Add `const errs = validateTaskInput({ placementMode: 'bogus_mode' }); expect(errs.some(e => /is not valid/i.test(e))).toBe(true)` to `taskControllerUnit.test.js` cross-field section.
+- [ ] **WARN (W3):** Add a test sending `{ text: 'test', rigid: true }` to MCP `create_task` and asserting no error and that the task row does not contain an unexpected `rigid` column value (or that it is silently ignored).
+- [ ] **WARN (W5):** Add unit tests for `safeParseJSON` exported or tested indirectly: `safeParseJSON(0, [])` → `0`; `safeParseJSON(false, null)` → `false`; `safeParseJSON([], null)` → `[]`.
+
+---
+
+_Reviewer: Zoe_
+_Mode: Bert Fix Re-Verify — precommit_
 _Date: 2026-05-25_
 
 ---
