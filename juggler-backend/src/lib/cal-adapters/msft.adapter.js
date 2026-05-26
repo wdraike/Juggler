@@ -257,16 +257,19 @@ function applyEventToTaskFields(event, tz, currentTask) {
     fields.placement_mode = PLACEMENT_MODES.REMINDER;
   }
 
+  // Reset to ANYTIME if no longer transparent (was REMINDER) — must run before
+  // FIXED promotion so a same-sync date/time change still wins.
+  if (!event.isTransparent && currentTask?.placement_mode === PLACEMENT_MODES.REMINDER) {
+    fields.placement_mode = PLACEMENT_MODES.ANYTIME;
+  }
+
+  // Set FIXED if date/time changed — wins over ANYTIME reset above.
   if (!isAllDay) {
     var dateChanged = jd.date && jd.date !== currentTask?.date;
     var timeChanged = jd.time && jd.time !== currentTask?.time;
     if (dateChanged || timeChanged) {
       fields.placement_mode = PLACEMENT_MODES.FIXED;
     }
-  }
-
-  if (!event.isTransparent && currentTask?.placement_mode === PLACEMENT_MODES.REMINDER) {
-    fields.placement_mode = PLACEMENT_MODES.ANYTIME;
   }
 
   return fields;

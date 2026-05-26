@@ -118,15 +118,18 @@ describe('taskToRow — direct-write placement_mode (post-09-03)', () => {
   });
 });
 
-describe('rowToTask — ANYTIME fallback (post-09-03)', () => {
-  test('falls back to ANYTIME when placement_mode is missing from DB row', () => {
+describe('rowToTask — placement_mode passthrough (post-C1-fix)', () => {
+  // placement_mode is NOT NULL in the DB; rowToTask passes it through as-is.
+  // A missing/null value indicates a data integrity problem — rowToTask does
+  // not paper over it with a fallback.
+  test('passes through null placement_mode from DB row as-is', () => {
     const task = rowToTask({ text: 'Test' }, null);
-    expect(task.placementMode).toBe(PLACEMENT_MODES.ANYTIME);
+    expect(task.placementMode).toBeUndefined();
   });
 
-  test('falls back to ANYTIME when placement_mode is empty string', () => {
+  test('passes through empty string placement_mode from DB row as-is', () => {
     const task = rowToTask({ placement_mode: '' }, null);
-    expect(task.placementMode).toBe(PLACEMENT_MODES.ANYTIME);
+    expect(task.placementMode).toBe('');
   });
 
   test('preserves explicit placement_mode from DB row', () => {

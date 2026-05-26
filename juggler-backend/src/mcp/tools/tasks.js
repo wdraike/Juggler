@@ -44,7 +44,6 @@ var taskInputFields = {
   notes: z.string().optional().describe('Additional notes'),
   url: z.string().optional().describe('External link (email thread, doc, issue, etc.) — surfaced on the task card as a clickable link.'),
   recurring: z.boolean().optional().describe('Whether this is a recurring recurring'),
-  rigid: z.boolean().optional().describe('Whether time is fixed/rigid'),
   split: z.boolean().optional().describe('Whether task can be split across time blocks'),
   splitMin: z.number().optional().describe('Minimum split chunk in minutes'),
   recur: z.object({

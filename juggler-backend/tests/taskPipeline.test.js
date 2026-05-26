@@ -608,10 +608,10 @@ describe('rowToTask: placement_mode fields', () => {
     expect(task.placementMode).toBe('fixed');
   });
 
-  test('placementMode defaults to anytime when column is null', () => {
+  test('placementMode passes through null from DB row as-is (NOT NULL column; null = data integrity problem)', () => {
     var row = makeRow({ placement_mode: null });
     var task = rowToTask(row, TZ, {});
-    expect(task.placementMode).toBe('anytime');
+    expect(task.placementMode).toBeNull();
   });
 
   test('prevWhen is not present on rowToTask output (field removed)', () => {
