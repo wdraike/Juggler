@@ -53,7 +53,7 @@ it('shows notes preview when notes is non-empty', () => {
     isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
     text="Buy groceries" project="" pri="P3" dur={30} notes="Pick up milk and eggs" url=""
   />);
-  expect(screen.getByText(/Pick up milk and eggs/)).toBeInTheDocument();
+  expect(screen.getByDisplayValue('Pick up milk and eggs')).toBeInTheDocument();
 });
 
 it('renders project select with current value and all options', () => {
@@ -81,4 +81,21 @@ it('calls onProjectChange when project select changes', () => {
   />);
   fireEvent.change(screen.getByDisplayValue('Work'), { target: { value: 'Personal' } });
   expect(onProjectChange).toHaveBeenCalledWith('Personal');
+});
+
+it('renders project select with no-project selected when project is null — no React warning', () => {
+  const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+  render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+    onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+    isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+    text="Buy groceries" project={null} pri="P3" dur={30} notes="" url=""
+    allProjectNames={['Work', 'Personal']}
+    onProjectChange={() => {}}
+  />);
+  const nullValueWarnings = errorSpy.mock.calls.filter(
+    call => call.some(arg => typeof arg === 'string' && /value.*prop.*null|null.*value.*prop/i.test(arg))
+  );
+  expect(screen.getByDisplayValue('No project')).toBeInTheDocument();
+  expect(nullValueWarnings).toHaveLength(0);
+  errorSpy.mockRestore();
 });

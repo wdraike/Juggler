@@ -139,7 +139,7 @@ export default function TaskDetailHeader({
 
         <label style={{ ...lStyle, marginBottom: 6 }}>
           Project
-          <select value={project || ''} onChange={e => onProjectChange && onProjectChange(e.target.value)}
+          <select value={project ?? ''} onChange={e => onProjectChange && onProjectChange(e.target.value)}
             style={{ ...iStyle, height: BTN_H, cursor: 'pointer' }}>
             <option value="">No project</option>
             {(allProjectNames || []).map(function(p) { return <option key={p} value={p}>{p}</option>; })}
