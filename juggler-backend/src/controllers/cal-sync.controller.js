@@ -1098,7 +1098,39 @@ async function sync(req, res) {
                 if (eventInWindow) {
                   var newMissCount = (ledger.miss_count || 0) + 1;
                   if (newMissCount >= MISS_THRESHOLD) {
-                    // Confirmed missing after multiple syncs — delete the task.
+                    // === Fix Bug #4: Check multi-provider before deleting task ===
+                    // If the task is still on OTHER providers, don't delete the task — just delete the ledger row.
+                    // Only delete the task when ALL providers have marked it missing.
+                    var otherProviders = providerIds.filter(function(op) {
+                      return op !== pid;
+                    });
+                    var hasOtherActive = false;
+                    for (var opi = 0; opi < otherProviders.length; opi++) {
+                      var otherLedger = (ledgerByProvider[otherProviders[opi]] || []).find(function(l) {
+                        return l.task_id === task.id && l.status === 'active';
+                      });
+                      if (otherLedger) {
+                        hasOtherActive = true;
+                        break;
+                      }
+                    }
+
+                    if (hasOtherActive) {
+                      // Task exists on another provider — delete this ledger row only
+                      ledgerUpdates.push({ id: ledger.id, fields: {
+                        status: 'deleted_remote', task_id: null, miss_count: newMissCount
+                      }});
+                      pStats.deleted_remote++;
+                      stats.deleted_remote++;
+                      logSyncAction(pid, 'deleted_remote_partial', {
+                        taskId: task.id, taskText: task.text, eventId: ledger.provider_event_id,
+                        detail: 'Event deleted in ' + pid + ' but still active on another provider — ledger removed, task kept',
+                        calendarName: calendarLabels[pid] || null
+                      });
+                      continue;
+                    }
+
+                    // Confirmed missing after multiple syncs AND no other provider has it — delete the task.
                     // Pre-compute dependency transfers from in-memory data so the
                     // write phase can apply them without querying.
                     var deletedDeps = Array.isArray(task.dependsOn) ? task.dependsOn : [];
@@ -1936,7 +1968,35 @@ async function sync(req, res) {
     var lockResult = null;
     for (var lockAttempt = 0; lockAttempt < MAX_LOCK_ATTEMPTS; lockAttempt++) {
       lockResult = await acquireLock(userId);
-      if (lockResult.acquired) break;
+      if (lockResult.acquired) {
+        // === Fix Bug #5: Re-read ledger after lock to detect concurrent sync changes ===
+        // Another sync may have inserted ledger rows between our Phase 1 read and lock.
+        var postLockLedger = await db('cal_sync_ledger')
+          .where('user_id', userId)
+          .where(function() {
+            this.where('status', 'active')
+              .orWhere(function() {
+                this.where('status', 'deleted_local').whereNotNull('provider_event_id');
+              });
+          })
+          .select();
+
+        // Dedupe: merge post-read rows, keeping newer (by updated_at or computed_at)
+        var seenById = {};
+        for (var pli = 0; pli < ledgerRecords.length; pli++) {
+          seenById[ledgerRecords[pli].id] = ledgerRecords[pli];
+        }
+        for (var pli2 = 0; pli2 < postLockLedger.length; pli2++) {
+          var newRow = postLockLedger[pli2];
+          var existing = seenById[newRow.id];
+          if (!existing) {
+            ledgerRecords.push(newRow);
+            seenById[newRow.id] = newRow;
+          }
+        }
+
+        break;
+      }
       var backoffMs = Math.min(1000 * Math.pow(1.5, lockAttempt), 10000) + Math.floor(Math.random() * 500);
       await new Promise(function(r) { setTimeout(r, backoffMs); });
     }
