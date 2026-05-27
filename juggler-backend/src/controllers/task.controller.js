@@ -206,7 +206,7 @@ async function fetchTaskWithEventIds(dbOrTrx, id, userId) {
     dbOrTrx('tasks_v').where({ id: id, user_id: userId }).first(),
     dbOrTrx('cal_sync_ledger')
       .where({ task_id: id, status: 'active' })
-      .select('provider', 'provider_event_id', 'origin', 'event_url', 'calendar_id')
+      .select('provider', 'provider_event_id', 'origin', 'event_url')
   ]);
   if (!row) return null;
   // Attach event ids in the same shape tasks_with_sync_v exposes.
@@ -255,7 +255,7 @@ async function fetchTasksWithEventIds(dbOrTrx, userId, queryBuilder) {
     q,
     dbOrTrx('cal_sync_ledger')
       .where({ user_id: userId, status: 'active' })
-      .select('task_id', 'provider', 'provider_event_id', 'origin', 'event_url', 'calendar_id'),
+      .select('task_id', 'provider', 'provider_event_id', 'origin', 'event_url'),
     dbOrTrx('user_calendars')
       .where({ user_id: userId, provider: 'apple', enabled: true })
       .select('calendar_id', 'display_name')
