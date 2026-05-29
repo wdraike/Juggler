@@ -9,6 +9,7 @@
  */
 
 const Redis = require('ioredis');
+const { libRedisLogger } = require('./logger');
 
 const KEY_PREFIX = 'strivers:';
 
@@ -30,11 +31,11 @@ function ensureClient() {
 
   client.on('connect', () => {
     connected = true;
-    console.log('[redis] Connected to', process.env.REDIS_URL);
+    libRedisLogger.info('Redis connected', { url: process.env.REDIS_URL });
   });
 
   client.on('error', (err) => {
-    if (connected) console.warn('[redis] Error:', err.message);
+    if (connected) libRedisLogger.warn('Redis error', { error: err });
     connected = false;
   });
 

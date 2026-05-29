@@ -4,6 +4,8 @@ const MAX_ATTEMPTS   = 10;
 const HEALTH_TIMEOUT = 5_000;
 const POST_TIMEOUT   = 30_000;
 
+const { aiUsageFlusherLogger } = require('../lib/logger');
+
 class AiUsageFlusher {
   constructor({ db, billingUrl, serviceKey, sourceApp }) {
     this._db         = db;
@@ -86,7 +88,7 @@ class AiUsageFlusher {
         await this._db('ai_usage_outbox').whereIn('id', ids).increment('flush_attempts', 1);
       }
     } catch (err) {
-      console.warn('[ai-usage-flusher] tick error:', err.message);
+      aiUsageFlusherLogger.warn('Tick error', { error: err });
     }
   }
 }

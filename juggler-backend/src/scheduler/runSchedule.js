@@ -8,7 +8,7 @@
 
 var db = require('../db');
 var tasksWrite = require('../lib/tasks-write');
-var { computeChunks, reconcileSplitsForUser } = require('../lib/reconcile-splits');
+var { computeChunks } = require('../lib/reconcile-splits');
 var unifiedScheduleV2 = require('./unifiedScheduleV2');
 var constants = require('./constants');
 var { roundCoord } = require('../controllers/weather.controller');
@@ -45,6 +45,7 @@ var reconcile = require('./reconcileOccurrences');
 var cache = require('../lib/redis');
 var syncLock = require('../lib/sync-lock');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
+var { isAllDayTaskBackend } = require('../lib/isAllDayTaskBackend');
 
 var DEFAULT_TIMEZONE = constants.DEFAULT_TIMEZONE;
 
@@ -262,17 +263,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var tPerfStart = Date.now();
   var tPerf = { loadEnd: 0, expandEnd: 0, reconcileEnd: 0, scheduleEnd: 0, persistEnd: 0 };
 
-  // 0. Materialize secondary chunk rows for non-recurring split tasks before
-  // the task load so the scheduler sees them and can place each chunk
-  // independently. Recurring split tasks are handled by the Phase 1 upfront
-  // INSERT path (step 5b) and are excluded here to avoid ID conflicts.
-  var _splitResult = await reconcileSplitsForUser(trx, userId);
-  if (_splitResult.mastersTouched > 0) {
-    console.log('[SCHED] split-reconcile: inserted=' + _splitResult.inserted +
-      ' updated=' + _splitResult.updated +
-      ' deleted=' + _splitResult.deleted +
-      ' masters=' + _splitResult.mastersTouched);
-  }
+  // Note: Non-recurring split tasks are now handled by inline expansion in
+  // unifiedScheduleV2 (placeSplitInline) — split on demand as needed. The
+  // reconcileSplitsForUser() call has been removed per ROADMAP 999.097.
+  // Recurring split tasks continue to be handled by the Phase 1 upfront
+  // INSERT path in step 5b below (pre-insert before scheduling).
 
   // 1. Load schedulable tasks + templates + terminal-dedup + user config in
   //    parallel. All three are read-only and independent; serial awaits were
@@ -2097,7 +2092,8 @@ async function getSchedulePlacements(userId, options) {
       }
       // New task not in cache at all — apply scheduler exclusion rules
       if (t.marker) return;
-      if (t.when && t.when.indexOf('allday') >= 0) return;
+      // All-day events are skipped — they have no time-grid presence.
+      if (isAllDayTaskBackend(t)) return;
       if (!t.date || t.date === 'TBD') return;
       var td = parseDate(t.date);
       if (!td) return;

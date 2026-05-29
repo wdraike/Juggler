@@ -4,6 +4,7 @@
  */
 
 var crypto = require('crypto');
+var { libMsftLogger } = require('./logger');
 
 var GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
 var TOKEN_URL = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
@@ -50,7 +51,7 @@ async function getTokensFromCode(code, codeVerifier) {
     code_verifier: codeVerifier
   });
 
-  console.log('[MSFT TOKEN] Exchanging code with PKCE, redirect_uri=' + getRedirectUri());
+  libMsftLogger.debug('MSFT token exchange', { redirectUri: getRedirectUri() });
 
   var res = await fetch(TOKEN_URL, {
     method: 'POST',
@@ -60,10 +61,10 @@ async function getTokensFromCode(code, codeVerifier) {
 
   var data = await res.json();
   if (!res.ok) {
-    console.log('[MSFT TOKEN] FAILED:', data.error, data.error_description);
+    libMsftLogger.error('MSFT token exchange failed', { error: data.error, errorDescription: data.error_description });
     throw new Error('Token exchange error: ' + (data.error_description || data.error || res.status));
   }
-  console.log('[MSFT TOKEN] SUCCESS, got access_token');
+  libMsftLogger.info('MSFT token exchange succeeded');
 
   return {
     accessToken: data.access_token,
@@ -124,7 +125,14 @@ async function graphFetch(accessToken, path, options) {
       }
       var retryAfter = parseInt(res.headers.get('Retry-After'), 10);
       var delayMs = Math.min((retryAfter && retryAfter > 0 ? retryAfter * 1000 : Math.pow(2, attempt) * 1000), 30000);
-      console.warn('[MSFT-API] ' + res.status + ' on ' + (options.method || 'GET') + ' ' + path + ', retry ' + (attempt + 1) + '/' + maxRetries + ' in ' + delayMs + 'ms');
+      libMsftLogger.warn('MSFT API rate limited, retrying', { 
+        status: res.status,
+        method: options.method || 'GET',
+        path,
+        attempt: attempt + 1,
+        maxRetries,
+        delayMs
+      });
       await new Promise(function(r) { setTimeout(r, delayMs); });
       continue;
     }

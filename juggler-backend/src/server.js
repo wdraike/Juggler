@@ -3,6 +3,7 @@
  */
 
 require('dotenv').config();
+const { serverLogger } = require('./lib/logger');
 
 // Kill any zombie server processes from previous nodemon restarts.
 // Nodemon's SIGKILL doesn't reliably kill all child processes.
@@ -17,7 +18,7 @@ if (process.env.NODE_ENV !== 'production') {
       .filter(function(p) { return p !== myPid && p > 0; });
     if (pids.length > 0) {
       pids.forEach(function(p) { try { process.kill(p, 'SIGKILL'); } catch (e) { /* already dead */ } });
-      console.log('[startup] Killed ' + pids.length + ' zombie process(es) on port ' + port + ': ' + pids.join(', '));
+      serverLogger.info('Killed zombie processes', { count: pids.length, port, pids: pids.join(', ') });
     }
   } catch (e) { /* lsof not available, skip */ }
 }
@@ -32,11 +33,12 @@ const PORT = process.env.PORT || 5002;
 var server;
 
 async function start() {
-  console.log('Starting Raike & Sons backend...');
-  console.log(`  NODE_ENV: ${process.env.NODE_ENV}`);
-  console.log(`  DB_HOST: ${process.env.DB_HOST}`);
-  console.log(`  DB_NAME: ${process.env.DB_NAME}`);
-  console.log(`  PORT: ${PORT}`);
+  serverLogger.info('Starting Raike & Sons backend', { 
+    nodeEnv: process.env.NODE_ENV,
+    dbHost: process.env.DB_HOST,
+    dbName: process.env.DB_NAME,
+    port: PORT
+  });
 
   // Clear EXPIRED sync locks before accepting requests.
   // Uses a TTL-bounded sweep (acquired_at older than 10 minutes) so a rolling
@@ -48,14 +50,14 @@ async function start() {
     var cleared = await db('sync_locks')
       .where('acquired_at', '<', db.raw('DATE_SUB(NOW(), INTERVAL 10 MINUTE)'))
       .del();
-    if (cleared > 0) console.log('[startup] Cleared ' + cleared + ' expired sync lock(s) (acquired_at older than 10 min)');
+    if (cleared > 0) serverLogger.info('Cleared expired sync locks', { count: cleared });
   } catch (e) { /* table might not exist yet */ }
 
   // Load JWT secrets
   await loadJWTSecrets();
 
   server = app.listen(PORT, () => {
-    console.log(`Raike & Sons backend running on port ${PORT}`);
+    serverLogger.info('Raike & Sons backend running', { port: PORT });
 
     // Startup scheduler refresh: only enqueue for users who don't already
     // have pending queue entries. The scheduleQueue's own startup scan
@@ -69,9 +71,9 @@ async function start() {
       results[1].forEach(function(r) { existing[r.user_id] = true; });
       var newUsers = results[0].filter(function(r) { return !existing[r.user_id]; });
       newUsers.forEach(function(r) { enqueueScheduleRun(r.user_id, 'startup'); });
-      if (newUsers.length > 0) console.log('[SCHED] enqueued startup runs for ' + newUsers.length + ' user(s)');
+      if (newUsers.length > 0) serverLogger.info('Enqueued startup runs', { userCount: newUsers.length });
     }).catch(function(err) {
-      console.error('[SCHED] startup enqueue failed:', err.message);
+      serverLogger.error('Startup enqueue failed', { error: err });
     });
   });
 
@@ -89,9 +91,9 @@ async function start() {
       sourceApp:  process.env.AI_USAGE_SOURCE_APP  || 'juggler',
     });
     flusher.start();
-    console.log('✅ AI usage flusher started');
+    serverLogger.info('AI usage flusher started');
   } catch (err) {
-    console.warn('[AiUsageFlusher] Failed to start:', err.message);
+    serverLogger.warn('AI usage flusher failed to start', { error: err });
   }
 
   // juggler-cal-history Plan D — sharded cron for missed auto-mark + 12mo purge.
@@ -103,9 +105,9 @@ async function start() {
       cache: require('./lib/redis'),
       sseEmitter: require('./lib/sse-emitter')
     });
-    console.log('✅ cal-history-cron started');
+    serverLogger.info('cal-history-cron started');
   } catch (err) {
-    console.warn('[cal-history-cron] Failed to start:', err.message);
+    serverLogger.warn('cal-history-cron failed to start', { error: err });
   }
 }
 

@@ -454,7 +454,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
           }}>
             {onStatusChange && (
               <span onClick={function(e) { e.stopPropagation(); }} style={{ display: 'inline-flex', flexShrink: 0 }}>
-                <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete ? function() { onDelete(t.id); } : null} darkMode={darkMode} compact />
+                <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete ? function() { onDelete(t.id); } : null} darkMode={darkMode} compact disableTerminal={!t.scheduledAt} />
               </span>
             )}
             {t.dur > 0 && (
@@ -642,7 +642,7 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme,
         {task.pri && <span style={{ fontSize: 8, fontWeight: 700, color: priColor, flexShrink: 0 }}>{task.pri}</span>}
         {onStatusChange && (
           <span onClick={function (e) { e.stopPropagation(); }}>
-            <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete ? function() { onDelete(task.id); } : null} darkMode={darkMode} compact />
+            <StatusToggle value={status} onChange={onStatusChange} onDelete={onDelete ? function() { onDelete(task.id); } : null} darkMode={darkMode} compact disableTerminal={!task.scheduledAt} />
           </span>
         )}
       </div>

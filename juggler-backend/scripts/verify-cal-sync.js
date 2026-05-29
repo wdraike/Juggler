@@ -13,6 +13,8 @@ var { rowToTask, buildSourceMap } = require('../src/controllers/task.controller'
 var gcal = require('../src/lib/cal-adapters/gcal.adapter');
 var msft = require('../src/lib/cal-adapters/msft.adapter');
 var { isoToJugglerDate, DEFAULT_TIMEZONE } = require('../src/controllers/cal-sync-helpers');
+var { PLACEMENT_MODES } = require('../src/lib/placementModes');
+var { isAllDayTaskBackend } = require('../src/lib/isAllDayTaskBackend');
 
 function compareTaskToEvent(task, event, tz) {
   var diffs = [];
@@ -25,7 +27,8 @@ function compareTaskToEvent(task, event, tz) {
   }
 
   // 2. All-day status
-  var taskIsAllDay = task.when === 'allday';
+  // Phase 15: Migrated to placement_mode='all_day' exclusively
+  var taskIsAllDay = isAllDayTaskBackend(task);
   if (event.isAllDay !== taskIsAllDay) {
     diffs.push({ field: 'isAllDay', task: taskIsAllDay, event: event.isAllDay });
   }

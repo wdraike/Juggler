@@ -21,6 +21,7 @@ var { acquireLock, releaseLock, refreshLock } = require('../lib/sync-lock');
 var { flushQueueInLock } = require('../lib/task-write-queue');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { isTerminalStatus } = require('../lib/task-status');
+var { isAllDayTaskBackend } = require('../lib/isAllDayTaskBackend');
 
 // Ledger origin value for tasks created/managed by Juggler (vs. pulled from a provider).
 var JUGGLER_ORIGIN = 'juggler';
@@ -1451,7 +1452,7 @@ async function sync(req, res) {
         if (newTask.taskType === 'recurring_template') continue;
         if (newTask.unscheduled) continue;
         if (!newTask.date) continue;
-        if (!newTask.time && newTask.when !== 'allday') continue;
+        if (!newTask.time && !isAllDayTaskBackend(newTask)) continue;
 
         // Skip tasks with existing event IDs — unless they were just cleared for split replacement
         var existingEvId = newTask[(eventIdCol === 'gcal_event_id' ? 'gcalEventId' : eventIdCol === 'msft_event_id' ? 'msftEventId' : 'appleEventId')];
@@ -1542,7 +1543,7 @@ async function sync(req, res) {
               event_summary: bTask.text,
               event_start: (createdNorm && createdNorm.startDateTime) || (bTask._scheduled_at ? String(bTask._scheduled_at).replace(' ', 'T') : null),
               event_end: (createdNorm && createdNorm.endDateTime) || null,
-              event_all_day: (bTask.when === 'allday') ? 1 : 0,
+              event_all_day: isAllDayTaskBackend(bTask) ? 1 : 0,
               task_updated_at: bTask._updated_at || null,
               last_modified_at: toMySQLDate(createdNorm && createdNorm.lastModified ? new Date(new Date(createdNorm.lastModified).getTime() + 2000).toISOString() : new Date().toISOString()),
               provider_etag: null,
@@ -1579,7 +1580,7 @@ async function sync(req, res) {
                   event_summary: rTask.text,
                   event_start: (rNorm && rNorm.startDateTime) || (rTask._scheduled_at ? String(rTask._scheduled_at).replace(' ', 'T') : null),
                   event_end: (rNorm && rNorm.endDateTime) || null,
-                  event_all_day: (rTask.when === 'allday') ? 1 : 0,
+                  event_all_day: isAllDayTaskBackend(rTask) ? 1 : 0,
                   task_updated_at: rTask._updated_at || null,
                   last_modified_at: toMySQLDate(rNorm && rNorm.lastModified ? new Date(new Date(rNorm.lastModified).getTime() + 2000).toISOString() : new Date().toISOString()),
                   provider_etag: null,
@@ -1637,7 +1638,7 @@ async function sync(req, res) {
                 event_summary: fTask.text,
                 event_start: (fNorm && fNorm.startDateTime) || (fTask._scheduled_at ? String(fTask._scheduled_at).replace(' ', 'T') : null),
                 event_end: (fNorm && fNorm.endDateTime) || null,
-                event_all_day: (fTask.when === 'allday') ? 1 : 0,
+                event_all_day: isAllDayTaskBackend(fTask) ? 1 : 0,
                 task_updated_at: fTask._updated_at || null,
                 last_modified_at: toMySQLDate(fNorm && fNorm.lastModified ? new Date(new Date(fNorm.lastModified).getTime() + 2000).toISOString() : new Date().toISOString()),
                 provider_etag: null,

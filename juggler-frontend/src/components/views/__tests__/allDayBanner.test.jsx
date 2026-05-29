@@ -98,3 +98,37 @@ test('banner container has data-testid=all-day-banner', () => {
   );
   expect(screen.getByTestId('all-day-banner')).toBeInTheDocument();
 });
+
+test('shows fixed pin indicator for placementMode=fixed all-day tasks', () => {
+  render(
+    <AllDayBanner
+      allTasks={[
+        { id: 't1', text: 'Fixed meeting', when: 'allday', date: '2026-05-18', placementMode: 'fixed' },
+        { id: 't2', text: 'Regular all-day', when: 'allday', date: '2026-05-18' }
+      ]}
+      dateKey="2026-05-18"
+      statuses={{}}
+      onExpand={() => {}}
+      darkMode={false}
+    />
+  );
+  var chips = screen.getAllByTestId('all-day-chip');
+  expect(chips[0].textContent).toContain('📌');
+  expect(chips[1].textContent).not.toContain('📌');
+});
+
+test('shows fixed pin indicator for placement_mode=fixed all-day tasks (snake_case)', () => {
+  render(
+    <AllDayBanner
+      allTasks={[
+        { id: 't1', text: 'Fixed via snake', when: 'allday', date: '2026-05-18', placement_mode: 'fixed' }
+      ]}
+      dateKey="2026-05-18"
+      statuses={{}}
+      onExpand={() => {}}
+      darkMode={false}
+    />
+  );
+  var chip = screen.getByText('Fixed via snake').closest('[data-testid="all-day-chip"]');
+  expect(chip.textContent).toContain('📌');
+});

@@ -6,6 +6,9 @@ const db = require('../db');
 const tasksWrite = require('../lib/tasks-write');
 const { rowToTask, taskToRow } = require('./task.controller');
 const { localToUtc, toDateISO } = require('../scheduler/dateHelpers');
+const { dataControllerLogger } = require('../lib/logger');
+
+const logger = dataControllerLogger;
 
 /**
  * POST /api/data/import
@@ -198,7 +201,7 @@ async function importData(req, res) {
       }
     });
   } catch (error) {
-    console.error('Import error:', error);
+    logger.error('Import error', { error });
     res.status(500).json({ error: 'Import failed' });
   }
 }
@@ -262,7 +265,7 @@ async function exportData(req, res) {
       updated: new Date().toISOString()
     });
   } catch (error) {
-    console.error('Export error:', error);
+    logger.error('Export error', { error });
     res.status(500).json({ error: 'Export failed' });
   }
 }

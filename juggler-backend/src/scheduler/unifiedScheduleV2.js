@@ -298,8 +298,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     // placement_mode directly — never in the when column.
     if (pm === PLACEMENT_MODES.ALL_DAY) return;
     var when = t.when || '';
-    // Strip legacy reserved values — 'fixed' and 'allday' belong in placement_mode, not when.
-    if (when === 'fixed' || when === 'allday') when = '';
+    // Phase 15: Removed legacy 'allday'/'fixed' strip logic — only placement_mode is used now.
     // Past ANYTIME recurring instances (recurring=true, date in past, no time anchor)
     // are dropped — they already passed and should not be rescheduled to today.
     // TIME_WINDOW tasks from prior days still go through the missed-window path

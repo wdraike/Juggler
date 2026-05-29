@@ -4,6 +4,9 @@
  */
 
 const { OAuth2Client } = require('google-auth-library');
+const { libGcalLogger } = require('./logger');
+
+const logger = libGcalLogger;
 
 const CALENDAR_BASE = 'https://www.googleapis.com/calendar/v3';
 
@@ -57,7 +60,14 @@ async function calendarFetch(accessToken, path, options = {}) {
       }
       var retryAfter = parseInt(res.headers.get('Retry-After'), 10);
       var delayMs = Math.min((retryAfter && retryAfter > 0 ? retryAfter * 1000 : Math.pow(2, attempt) * 1000), 30000);
-      console.warn('[GCAL-API] ' + res.status + ' on ' + (options.method || 'GET') + ' ' + path + ', retry ' + (attempt + 1) + '/' + maxRetries + ' in ' + delayMs + 'ms');
+      logger.warn('GCal API rate limited, retrying', { 
+        status: res.status, 
+        method: options.method || 'GET', 
+        path, 
+        attempt: attempt + 1, 
+        maxRetries,
+        delayMs 
+      });
       await new Promise(function(r) { setTimeout(r, delayMs); });
       continue;
     }

@@ -6,6 +6,7 @@
  */
 
 var { jugglerDateToISO, computeDurationMinutes } = require('../../../src/controllers/cal-sync-helpers');
+var { PLACEMENT_MODES } = require('../../../src/lib/placementModes');
 
 // Strip timezone offset so wall-clock times can be compared.
 // '2026-04-26T10:00:00-04:00' -> '2026-04-26T10:00:00'
@@ -61,7 +62,10 @@ function assertGCalEventMatchesTask(event, task, tz) {
   expect(event.summary).toBe(isDone ? '✓ ' + task.text : task.text);
 
   // ── Time ─────────────────────────────────────────────────────────────────
-  if (task.when === 'allday') {
+  // Phase 15: Migrated to placement_mode='all_day' exclusively
+  var isAllDay = task.placementMode === PLACEMENT_MODES.ALL_DAY ||
+                 task.placement_mode === PLACEMENT_MODES.ALL_DAY;
+  if (isAllDay) {
     expect(event.start.date).toBeTruthy();
     expect(event.start.dateTime).toBeUndefined();
     expect(event.end.date).toBeTruthy();

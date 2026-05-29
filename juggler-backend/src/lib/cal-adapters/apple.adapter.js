@@ -14,6 +14,7 @@ var { decrypt } = require('../credential-encrypt');
 var { jugglerDateToISO, isoToJugglerDate, computeDurationMinutes } = require('../../controllers/cal-sync-helpers');
 var { localToUtc } = require('../../scheduler/dateHelpers');
 var { PLACEMENT_MODES } = require('../placementModes');
+var { calAdapterAppleLogger } = require('../logger');
 
 var providerId = 'apple';
 
@@ -94,7 +95,10 @@ async function listEvents(client, timeMin, timeMax, userId) {
       allEvents = allEvents.concat(normalized);
     } catch (e) {
       hasPartialFailure = true;
-      console.error('[APPLE-ADAPTER] Error fetching calendar ' + (cal.display_name || cal.calendar_id) + ':', e.message);
+      calAdapterAppleLogger.error('Error fetching calendar', { 
+        calendarId: cal.display_name || cal.calendar_id, 
+        error: e 
+      });
     }
   }
 
@@ -114,7 +118,7 @@ async function listEvents(client, timeMin, timeMax, userId) {
       }
     }
   } catch (e) {
-    console.error('[APPLE-ADAPTER] sync token update failed:', e.message);
+    calAdapterAppleLogger.error('Sync token update failed', { error: e });
   }
 
   if (hasPartialFailure) {
@@ -225,11 +229,8 @@ function applyEventToTaskFields(event, tz, currentTask) {
 
   if (isAllDay) {
     fields.placement_mode = PLACEMENT_MODES.ALL_DAY;
-    // Also write legacy when='allday' tag — multiple downstream sites (scheduler
-    // skip-gate, multi-provider outbound push, AllDayBanner, CalendarView sort)
-    // still read `task.when === 'allday'`. Migrating all 6 sites is its own
-    // phase; until then, keep both writes in sync to avoid breaking ingest.
-    fields.when = 'allday';
+    // Phase 15: Removed legacy when='allday' tag — all downstream sites now
+    // use placement_mode='all_day' exclusively (see ROADMAP 999.011).
   }
 
   if (event.isTransparent) {

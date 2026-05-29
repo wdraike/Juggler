@@ -116,7 +116,7 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
       <div data-testid="task-card-row2" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap', minWidth: 0 }}>
         {onStatusChange && (
           <span onClick={function(e) { e.stopPropagation(); }}>
-            <StatusToggle value={status} onChange={function(val) { onStatusChange(task.id, val); }} onDelete={onDelete ? function() { onDelete(task.id); } : null} darkMode={darkMode} isMobile={isMobile} />
+            <StatusToggle value={status} onChange={function(val) { onStatusChange(task.id, val); }} onDelete={onDelete ? function() { onDelete(task.id); } : null} darkMode={darkMode} isMobile={isMobile} disableTerminal={!task.scheduledAt} />
           </span>
         )}
         <div style={{ flex: '1 1 0%', minWidth: 0 }} />
@@ -192,6 +192,14 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
             borderRadius: 3, padding: '0 4px'
           }}>
             {task.pri}
+          </span>
+        )}
+        {(task.placementMode === 'fixed' || task.placement_mode === 'fixed') && (
+          <span style={{
+            fontSize: 10, fontWeight: 600,
+            flexShrink: 0
+          }} title="Fixed — locked to set date and time, scheduler won’t move it">
+            {'📌'}
           </span>
         )}
         {status === 'wip' && task.timeRemaining != null && (

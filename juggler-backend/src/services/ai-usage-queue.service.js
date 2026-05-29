@@ -1,4 +1,9 @@
+/**
+ * AI Usage Queue Service — Batches AI usage events for payment service
+ */
+
 const { v7: uuidv7 } = require('uuid');
+const { aiUsageQueueLogger } = require('../lib/logger');
 
 async function enqueue(db, event) {
   try {
@@ -19,7 +24,7 @@ async function enqueue(db, event) {
       flush_attempts: 0,
     });
   } catch (err) {
-    console.warn('[ai-usage-queue] enqueue failed:', err.message);
+    aiUsageQueueLogger.warn('Enqueue failed', { error: err });
   }
 }
 

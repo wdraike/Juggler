@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Seed base test data into juggler_test (port 3308).
+ * Seed base test data into juggler_test (test-bed port 3407).
  * Called by setup-test-db.sh after migrations complete.
  * Safe to re-run — all inserts are upserts.
  *

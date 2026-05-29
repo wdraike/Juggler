@@ -238,8 +238,10 @@ app.get('/api/events', (req, res, next) => {
 // /api/health is the same router re-mounted so the authenticated frontend
 // apiClient (baseURL=/api) can reach /api/health/detailed without bypassing
 // its bearer-token interceptor.
+// Mount-level auth guard on /api/health ensures defense-in-depth;
+// individual routes that need user context still validate JWT per-route.
 app.use('/health', healthLimiter, healthRoutes);
-app.use('/api/health', healthLimiter, healthRoutes);
+app.use('/api/health', authenticateJWT, healthLimiter, healthRoutes);
 app.use('/api/ai', aiLimiter, aiRoutes);
 app.use('/api/data/import', bodyParser.json({ limit: '2mb' }));
 app.use('/api', apiLimiter);

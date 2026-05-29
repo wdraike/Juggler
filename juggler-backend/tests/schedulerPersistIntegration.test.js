@@ -1,6 +1,6 @@
 /**
  * Integration tests for runSchedule.js persist step and task CRUD.
- * Uses a real MySQL test database (Docker on port 3308).
+ * Uses a real MySQL test database (test-bed Docker MySQL on port 3407).
  *
  * Run: docker compose -f docker-compose.test.yml up -d
  */

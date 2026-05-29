@@ -6,6 +6,7 @@
  */
 
 const { getProductId, PRODUCT_LABEL } = require('../middleware/plan-features.middleware');
+const { libUsageReporterLogger } = require('./logger');
 const FLUSH_INTERVAL = 30000;
 const FLUSH_SIZE = 50;
 
@@ -14,12 +15,12 @@ let flushTimer = null;
 let _serviceAuthReady = false;
 
 try {
-  const { initServiceAuth } = require('../../vendor/service-auth');
-  initServiceAuth({ serviceName: PRODUCT_LABEL }).then(() => {
-    _serviceAuthReady = true;
-  }).catch(err => {
-    console.warn('[usage-reporter] Service auth init failed, using legacy key:', err.message);
-  });
+const { initServiceAuth } = require('../../vendor/service-auth');
+initServiceAuth({ serviceName: PRODUCT_LABEL }).then(() => {
+  _serviceAuthReady = true;
+}).catch(err => {
+  libUsageReporterLogger.warn('Service auth init failed, using legacy key', { error: err });
+});
 } catch { /* service-auth not available */ }
 
 function reportUsage({ userId, planId, featureKey, eventType, quantity, inputTokens, outputTokens, endpoint }) {
@@ -67,7 +68,7 @@ async function flush() {
       });
     }
   } catch (err) {
-    console.warn(`[usage-reporter] Failed to flush ${events.length} events: ${err.message}`);
+    libUsageReporterLogger.warn('Failed to flush events', { eventCount: events.length, error: err });
   }
 }
 

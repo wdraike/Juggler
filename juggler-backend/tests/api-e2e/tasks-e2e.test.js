@@ -2,7 +2,7 @@
  * E2E tests for /api/tasks — real HTTP via supertest, real Express app, real DB.
  *
  * Uses the server-setup harness which:
- *   - Boots the real Express app against juggler_test (port 3308)
+ *   - Boots the real Express app against juggler_test (test-bed port 3407)
  *   - Starts a local JWKS server so jwt-auth middleware verifies our RS256 tokens
  *   - Starts a local payment-service mock so resolvePlanFeatures resolves correctly
  *

@@ -8,6 +8,8 @@
 
 var { createDAVClient, DAVNamespace } = require('tsdav');
 var ICAL = require('ical.js');
+var { PLACEMENT_MODES } = require('./placementModes');
+var { libAppleLogger } = require('./logger');
 
 var DEFAULT_SERVER_URL = 'https://caldav.icloud.com';
 
@@ -71,7 +73,7 @@ async function listEvents(client, calendarUrl, timeMin, timeMax) {
       var parsed = parseVEvents(obj.data, obj.url, obj.etag);
       events = events.concat(parsed);
     } catch (e) {
-      console.error('[APPLE-CAL] Failed to parse VEVENT:', e.message);
+      libAppleLogger.error('Failed to parse VEVENT', { error: e });
     }
   }
   return events;
@@ -228,10 +230,9 @@ function buildVEvent(task, year, tz) {
   descParts.push('', 'Synced from Raike & Sons');
   vevent.addPropertyWithValue('description', descParts.join('\n'));
 
-  var isAllDay = task.when === 'allday';
-  if (task.when === 'allday' && !isAllDay) {
-    console.warn('[cal-sync] buildVEvent: allday flag mismatch for task ' + task.id);
-  }
+  // Phase 15: Migrated to placement_mode='all_day' exclusively
+  var isAllDay = task.placementMode === PLACEMENT_MODES.ALL_DAY ||
+                 task.placement_mode === PLACEMENT_MODES.ALL_DAY;
 
   // Parse date — handle both YYYY-MM-DD (from utcToLocal) and legacy M/D format
   var dateStr = task.date || '';

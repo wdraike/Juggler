@@ -8,7 +8,6 @@ import { toTime24, fromTime24, toDateISO, fromDateISO, formatDateKey, parseDate 
 import { isAnchorDependentRecur } from '../../scheduler/expandRecurring';
 import { getTheme } from '../../theme/colors';
 import { convertTimeForDisplay } from '../../utils/timezone';
-import apiClient from '../../services/apiClient';
 import { addMinutesTo24h } from './sections/WhenSection';
 import CollapsibleSection from './CollapsibleSection';
 import TaskDetailHeader from './TaskDetailHeader';

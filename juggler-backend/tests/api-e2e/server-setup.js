@@ -1,7 +1,7 @@
 /**
  * Real-server harness for E2E tests.
  *
- * Boots juggler-backend's src/app.js against the test DB (port 3308, juggler_test).
+ * Boots juggler-backend's src/app.js against the test DB (test-bed port 3407, juggler_test).
  * Mints RS256 JWTs verifiable by the real jwt-auth middleware via a local JWKS server.
  * Also starts a local payment-service mock so resolvePlanFeatures passes without a
  * live payment service.
@@ -63,9 +63,9 @@ let _appInstance = null;
 // These must be set here (at require time) so that module-level caches in
 // auth-client.js (_jwks) and plan-features.middleware.js pick them up correctly.
 // The actual values are filled in by _initKeysAndJwksServer / _initPaymentServer.
-process.env.NODE_ENV = 'test'; // picks up juggler_test DB at port 3308 via knexfile
+process.env.NODE_ENV = 'test'; // picks up juggler_test DB at port 3407 via knexfile
 process.env.DB_HOST = '127.0.0.1';
-process.env.DB_PORT = '3308';
+process.env.DB_PORT = '3407';
 process.env.DB_USER = 'root';
 process.env.DB_PASSWORD = '';
 process.env.DB_NAME = 'juggler_test';
@@ -163,7 +163,7 @@ async function _initPaymentServer() {
 // ── DB availability ───────────────────────────────────────────────────────────
 
 /**
- * Returns true if the test DB (port 3308, juggler_test) is reachable.
+ * Returns true if the test DB (test-bed port 3407, juggler_test) is reachable.
  * Caches the result after the first call.
  */
 async function isAvailable() {
@@ -173,7 +173,7 @@ async function isAvailable() {
     await db.raw('SELECT 1');
     _availableCached = true;
   } catch (e) {
-    console.warn('[e2e-harness] Test DB not available (port 3308):', e.message);
+    console.warn('[e2e-harness] Test DB not available (test-bed port 3407):', e.message);
     _availableCached = false;
   }
   return _availableCached;

@@ -5,6 +5,9 @@
  * Renders a muted full-width banner row above the timed CalendarGrid.
  * Returns null when there are no all-day items for the given dateKey.
  *
+ * Supports multiday all-day tasks: shows tasks where dateKey falls within
+ * the task's date range [date, endDate].
+ *
  * Props:
  *   allTasks   — full task list (filtered internally by dateKey + isAllDayTask)
  *   dateKey    — ISO date string (e.g. "2026-05-18")
@@ -19,14 +22,33 @@ import { getTheme } from '../../theme/colors';
 import { isTerminalStatus, PAST_OPACITY } from '../../state/constants';
 import { isAllDayTask } from '../../utils/isAllDayTask';
 
+/**
+ * Check if a dateKey falls within a task's date range.
+ * For single-day tasks: dateKey must equal task.date.
+ * For multiday tasks: dateKey must be within [task.date, task.endDate].
+ */
+function isInDateRange(task, dateKey) {
+  if (!task.date) return false;
+  // Multiday all-day task: check if dateKey is within the range
+  if (task.endDate) {
+    return dateKey >= task.date && dateKey <= task.endDate;
+  }
+  // Single-day task: exact match
+  return task.date === dateKey;
+}
+
 export default function AllDayBanner({ allTasks, dateKey, statuses, onExpand, darkMode, isPastDay }) {
   var theme = getTheme(darkMode);
 
   var items = (allTasks || []).filter(function (t) {
-    return t.date === dateKey && isAllDayTask(t);
+    return isAllDayTask(t) && isInDateRange(t, dateKey);
   });
 
   if (items.length === 0) return null;
+
+  function isFixed(t) {
+    return t.placementMode === 'fixed' || t.placement_mode === 'fixed';
+  }
 
   return (
     <div
@@ -40,6 +62,7 @@ export default function AllDayBanner({ allTasks, dateKey, statuses, onExpand, da
         {items.map(function (t) {
           var st = statuses[t.id] || '';
           var isDone = isTerminalStatus(st);
+          var fixed = isFixed(t);
           return (
             <div
               key={t.id}
@@ -57,6 +80,7 @@ export default function AllDayBanner({ allTasks, dateKey, statuses, onExpand, da
               {st === 'done' && <span style={{ fontSize: 9, marginRight: 2 }}>{'✓'}</span>}
               {st === 'skip' && <span style={{ fontSize: 9, marginRight: 2 }}>{'⏭'}</span>}
               {st === 'cancel' && <span style={{ fontSize: 9, marginRight: 2 }}>{'✗'}</span>}
+              {fixed && <span style={{ fontSize: 9, marginRight: 2 }}>{'📌'}</span>}
               {t.text}
             </div>
           );

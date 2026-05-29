@@ -1,7 +1,7 @@
 /**
  * Test DB connection + reset utilities.
  *
- * Uses the `test` knex environment (port 3308, juggler_test).
+ * Uses the `test` knex environment (test-bed Docker MySQL on port 3407, juggler_test).
  * All helpers are safe to call from beforeAll / afterAll hooks.
  *
  * Usage:

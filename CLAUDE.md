@@ -3,6 +3,11 @@
 ## Stack
 React (port 3003) | Node.js/Express (port 5002) | MySQL + Knex.js | MCP server (`juggler-mcp/`)
 
+## Port Configuration
+- **Local Dev:** `DB_PORT=3407` (Docker MySQL, see `dev-bed/`)
+- **Test:** `DB_PORT=3407` (Docker MySQL via `test-bed/`, tmpfs)
+- **Production:** `DB_PORT=3307` (via GCP Cloud SQL Proxy)
+
 ## Key Commands
 ```bash
 npm run lint && npm test              # Quality gate

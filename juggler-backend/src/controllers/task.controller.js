@@ -468,6 +468,8 @@ function rowToTask(row, timezone, sourceMap) {
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
     recurStart: row.recur_start || null,
     recurEnd: row.recur_end || null,
+    // Multiday all-day task support: endDate for tasks spanning multiple days
+    endDate: row.end_date ? toDateISO(row.end_date) : null,
     rollingAnchor: row.rolling_anchor || null,
     disabledAt: row.disabled_at ? scheduledAtToISO(row.disabled_at) : null,
     disabledReason: row.disabled_reason || null,
@@ -541,6 +543,11 @@ function taskToRow(task, userId, timezone, currentTask) {
   if (task.weatherTempUnit     !== undefined) row.weather_temp_unit     = task.weatherTempUnit;
   if (task.weatherHumidityMin  !== undefined) row.weather_humidity_min  = task.weatherHumidityMin;
   if (task.weatherHumidityMax  !== undefined) row.weather_humidity_max  = task.weatherHumidityMax;
+
+  // Multiday all-day task support: endDate maps to end_date column
+  if (task.endDate !== undefined) {
+    row.end_date = task.endDate ? toDateISO(task.endDate) || task.endDate : null;
+  }
 
   // Direct desired_at mapping (if caller provides it explicitly)
   if (task.desiredAt !== undefined) {

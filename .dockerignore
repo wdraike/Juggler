@@ -1,0 +1,27 @@
+# Environment files — use Docker Compose env vars instead
+.env
+**/.env
+.env.*
+**/.env.*
+!.env.example
+
+# Node modules - handled by npm install in Dockerfile
+node_modules/
+**/node_modules/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Test artifacts
+coverage/
+.nyc_output/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -9,6 +9,7 @@ var gcalApi = require('../gcal-api');
 var { jugglerDateToISO, isoToJugglerDate, computeDurationMinutes } = require('../../controllers/cal-sync-helpers');
 var { localToUtc } = require('../../scheduler/dateHelpers');
 var { PLACEMENT_MODES } = require('../placementModes');
+var { isAllDayTaskBackend } = require('../isAllDayTaskBackend');
 
 var providerId = 'gcal';
 
@@ -163,11 +164,8 @@ function applyEventToTaskFields(event, tz, currentTask) {
 
   if (isAllDay) {
     fields.placement_mode = PLACEMENT_MODES.ALL_DAY;
-    // Also write legacy when='allday' tag — multiple downstream sites (scheduler
-    // skip-gate, multi-provider outbound push, AllDayBanner, CalendarView sort)
-    // still read `task.when === 'allday'`. Migrating all 6 sites is its own
-    // phase; until then, keep both writes in sync to avoid breaking ingest.
-    fields.when = 'allday';
+    // Phase 15: Removed legacy when='allday' tag — all downstream sites now
+    // use placement_mode='all_day' exclusively (see ROADMAP 999.011).
   }
 
   if (event.isTransparent) {
@@ -220,10 +218,9 @@ function getLastSyncedColumn() {
 function buildEventBody(task, year, tz, opts) {
   var startISO = jugglerDateToISO(task.date, task.time, year);
   var dur = task.dur || 30;
-  var isAllDay = task.when === 'allday';
-  if (task.when === 'allday' && !isAllDay) {
-    console.warn('[cal-sync] buildEventBody: allday flag mismatch for task ' + task.id);
-  }
+  // Phase 15: Migrated to placement_mode='all_day' exclusively
+  var isAllDay = task.placementMode === PLACEMENT_MODES.ALL_DAY ||
+                 task.placement_mode === PLACEMENT_MODES.ALL_DAY;
 
   var descParts = [];
   if (task.project) descParts.push('Project: ' + task.project);

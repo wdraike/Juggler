@@ -17,6 +17,7 @@ var helpers = require('../../../shared/scheduler/missedHelpers');
 var { TERMINAL_STATUSES } = require('../lib/task-status');
 var syncLock = require('../lib/sync-lock');
 var { isRollingMaster, computeRollingAnchor } = require('../lib/rolling-anchor');
+var { cronCalHistoryLogger } = require('../lib/logger');
 
 var SHARD_COUNT = 60;          // 1 shard/minute → full pass each hour
 var RETENTION_DAYS = 365;      // 12 months
@@ -132,7 +133,7 @@ async function tick() {
   try {
     got = await syncLock.acquireLock(lockKey);
   } catch (err) {
-    console.error('[cal-history-cron] lock acquire failed shard=' + shard, err && err.message);
+    cronCalHistoryLogger.error('Lock acquire failed', { shard, error: err });
     return;
   }
   if (!got || !got.acquired) return; // another instance owns this shard tick

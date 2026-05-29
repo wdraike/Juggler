@@ -4,6 +4,7 @@
  */
 
 var crypto = require('crypto');
+var { libCalAdapterLogger } = require('../lib/logger');
 
 var DEFAULT_TIMEZONE = require('../scheduler/constants').DEFAULT_TIMEZONE;
 
@@ -214,7 +215,11 @@ async function withGCalRateLimit(fn) {
       var msg = err.message || '';
       var isRateLimit = msg.includes('429') || msg.toLowerCase().includes('ratelimitexceeded');
       if (isRateLimit && attempt < delays.length) {
-        console.warn('[CAL-SYNC] GCal rate limit hit, retry ' + (attempt + 1) + '/' + delays.length + ' in ' + delays[attempt] + 'ms');
+      libCalAdapterLogger.warn('GCal rate limit hit, retrying', { 
+        attempt: attempt + 1,
+        maxAttempts: delays.length,
+        delayMs: delays[attempt]
+      });
         await new Promise(function(r) { setTimeout(r, delays[attempt]); });
         attempt++;
       } else {
