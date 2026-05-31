@@ -532,6 +532,16 @@ describe('guardFixedCalendarWhen', () => {
     guardFixedCalendarWhen(row, null, {});
     expect(row.placement_mode).toBe('anytime');
   });
+
+  test('strips null placement_mode (null-clearing attempt) on calendar-linked task (RF2)', () => {
+    // PATCH sends { placementMode: null } → taskToRow sets row.placement_mode = null.
+    // Guard must catch this falsy case and strip the key so the DB write
+    // does not overwrite 'fixed' with NULL.
+    var row = { placement_mode: null };
+    var existing = { gcal_event_id: 'gcal_abc', msft_event_id: null, apple_event_id: null };
+    guardFixedCalendarWhen(row, existing, {});
+    expect(row.placement_mode).toBeUndefined();
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════

@@ -324,7 +324,7 @@ function rowToTask(row, timezone, sourceMap) {
   // absent.
   var src = sourceMap && row.source_id ? sourceMap[row.source_id] : null;
   if (!src && row.source_id && sourceMap && row.task_type === 'recurring_instance') {
-    console.warn('[rowToTask] Orphaned instance: ' + row.id + ' references missing template ' + row.source_id);
+    logger.warn('[rowToTask] Orphaned instance: ' + row.id + ' references missing template ' + row.source_id);
   }
   // Disabled instances are frozen — do not inherit template fields so they stay locked in place
   if (src && row.status !== 'disabled') {
@@ -613,9 +613,12 @@ function guardFixedCalendarWhen(row, guardTarget, opts) {
   if (opts && opts.allowUnfix) return;
   var isCalLinked = !!(guardTarget.gcal_event_id || guardTarget.msft_event_id || guardTarget.apple_event_id);
   if (!isCalLinked) return;
-  // Prevent clearing placement_mode off calendar-linked tasks.
-  // Calendar adapters set placement_mode='fixed'; a PATCH must not strip it.
-  if (row.placement_mode && row.placement_mode !== 'fixed') {
+  // Prevent clearing or changing placement_mode on calendar-linked tasks.
+  // Calendar adapters set placement_mode='fixed'; a PATCH must not strip or
+  // override it. Use 'in' check (not truthiness) so that null/undefined
+  // clearing attempts are also caught — `row.placement_mode = null` is falsy
+  // and would bypass a simple `if (row.placement_mode &&...)` guard.
+  if ('placement_mode' in row && row.placement_mode !== 'fixed') {
     delete row.placement_mode;
   }
 }
@@ -657,7 +660,7 @@ async function getAllTasks(req, res) {
     await cache.set(cacheKey, result, 300); // 5 min TTL
     res.json(result);
   } catch (error) {
-    console.error('Get tasks error:', error);
+    logger.error('Get tasks error:', error);
     res.status(500).json({ error: 'Failed to fetch tasks' });
   }
 }
@@ -681,7 +684,7 @@ async function getTask(req, res) {
     var srcMap = buildSourceMap(templateRows);
     res.json({ task: rowToTask(row, null, srcMap) });
   } catch (error) {
-    console.error('Get task error:', error);
+    logger.error('Get task error:', error);
     res.status(500).json({ error: 'Failed to fetch task' });
   }
 }
@@ -700,7 +703,7 @@ async function getVersion(req, res) {
     await cache.set(cacheKey, result, 30); // 30s TTL — polled every 5-10s
     res.json(result);
   } catch (error) {
-    console.error('Get version error:', error);
+    logger.error('Get version error:', error);
     res.status(500).json({ error: 'Failed to get version' });
   }
 }
@@ -902,14 +905,14 @@ async function createTask(req, res) {
     await tasksWrite.insertTask(db, row);
     var created = await fetchTaskWithEventIds(db, row.id, req.user.id);
     if (!created) {
-      console.error('Create task: fetchTaskWithEventIds returned null for id=' + row.id + ' type=' + row.task_type);
+      logger.error('Create task: fetchTaskWithEventIds returned null for id=' + row.id + ' type=' + row.task_type);
       return res.status(500).json({ error: 'Task created but could not be read back' });
     }
     await cache.invalidateTasks(req.user.id);
     enqueueScheduleRun(req.user.id, 'api:createTask', [row.id]);
     res.status(201).json({ task: rowToTask(created, null) });
   } catch (error) {
-    console.error('Create task error:', error);
+    logger.error('Create task error:', error);
     res.status(500).json({ error: 'Failed to create task' });
   }
 }
@@ -1017,7 +1020,7 @@ async function updateTask(req, res) {
 
       // Fire-and-forget: cache invalidate + scheduler run (skipped when
       // only non-scheduling fields changed).
-      cache.invalidateTasks(req.user.id).catch(function(e) { console.error('[cache]', e.message); });
+      cache.invalidateTasks(req.user.id).catch(function(e) { logger.error('[cache]', e.message); });
       // When the edit touched universal/template fields on a recurring
       // task, broadcast a refresh to every sibling instance so their
       // cached rows pick up the new values — even when the scheduler
@@ -1336,7 +1339,7 @@ async function updateTask(req, res) {
     enqueueScheduleRun(req.user.id, 'api:updateTask', slowBroadcastIds, { skipScheduler: !hasSchedulingFields(row) });
     res.json({ task: rowToTask(updatedRow, null, srcMap) });
   } catch (error) {
-    console.error('Update task error:', error);
+    logger.error('Update task error:', error);
     res.status(500).json({ error: 'Failed to update task' });
   }
 }
@@ -1426,7 +1429,7 @@ async function deleteTask(req, res) {
             .whereIn('task_id', pendingIds)
             .where('status', 'active')
             .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
-            .catch(function(err) { console.error("[silent-catch]", err.message); });
+            .catch(function(err) { logger.error("[silent-catch]", err.message); });
 
           await tasksWrite.deleteTasksWhere(trx, req.user.id, function(q) {
             return q.whereIn('id', pendingIds);
@@ -1461,7 +1464,7 @@ async function deleteTask(req, res) {
               .where({ user_id: req.user.id, task_id: templateId })
               .where('status', 'active')
               .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
-              .catch(function(err) { console.error("[silent-catch]", err.message); });
+              .catch(function(err) { logger.error("[silent-catch]", err.message); });
           }
           await tasksWrite.deleteTaskById(trx, templateId, req.user.id);
         }
@@ -1527,7 +1530,7 @@ async function deleteTask(req, res) {
           .where({ user_id: req.user.id, task_id: id })
           .where('status', 'active')
           .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
-          .catch(function(err) { console.error("[silent-catch]", err.message); });
+          .catch(function(err) { logger.error("[silent-catch]", err.message); });
       }
 
       await tasksWrite.deleteTaskById(trx, id, req.user.id);
@@ -1537,7 +1540,7 @@ async function deleteTask(req, res) {
     enqueueScheduleRun(req.user.id, 'api:deleteTask', [id]);
     res.json({ message: 'Task deleted', id: id });
   } catch (error) {
-    console.error('Delete task error:', error);
+    logger.error('Delete task error:', error);
     res.status(500).json({ error: 'Failed to delete task' });
   }
 }
@@ -1674,7 +1677,7 @@ async function updateTaskStatus(req, res) {
             .whereIn('task_id', instanceIds)
             .where('status', 'active')
             .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
-            .catch(function(err) { console.error("[silent-catch]", err.message); });
+            .catch(function(err) { logger.error("[silent-catch]", err.message); });
 
           await tasksWrite.deleteTasksWhere(db, req.user.id, function(q) {
             return q.whereIn('id', instanceIds);
@@ -1817,10 +1820,10 @@ async function updateTaskStatus(req, res) {
           // The processor pulls fresh task + ledger state, sees terminal
           // status, deletes the event, and flips the ledger to deleted_local.
           syncController.sync({ user: { id: req.user.id }, body: {} }, { json: function() {}, status: function() { return { json: function() {} }; } })
-            .catch(function(err) { console.error('[cal-sync] trigger failed:', err && err.message); });
+            .catch(function(err) { logger.error('[cal-sync] trigger failed:', err && err.message); });
         }
       } catch (err) {
-        console.error('[cal-sync] trigger import failed:', err && err.message);
+        logger.error('[cal-sync] trigger import failed:', err && err.message);
       }
     }
 
@@ -1830,7 +1833,7 @@ async function updateTaskStatus(req, res) {
     enqueueScheduleRun(req.user.id, 'api:updateTaskStatus', [id].concat(siblingIds));
     res.json({ task: rowToTask(updated, null, srcMap), siblingsUpdated: siblingIds.length });
   } catch (error) {
-    console.error('Update task status error:', error);
+    logger.error('Update task status error:', error);
     res.status(500).json({ error: 'Failed to update task status' });
   }
 }
@@ -1906,7 +1909,7 @@ async function batchCreateTasks(req, res) {
     enqueueScheduleRun(req.user.id, 'api:batchCreateTasks', rows.map(function(r) { return r.id; }));
     res.status(201).json({ created: rows.length });
   } catch (error) {
-    console.error('Batch create error:', error);
+    logger.error('Batch create error:', error);
     res.status(500).json({ error: 'Failed to batch create tasks' });
   }
 }
@@ -2219,7 +2222,7 @@ async function batchUpdateTasks(req, res) {
     });
     res.json({ updated: updatedCount });
   } catch (error) {
-    console.error('Batch update error:', error);
+    logger.error('Batch update error:', error);
     res.status(500).json({ error: 'Failed to batch update tasks' });
   }
 }
@@ -2238,7 +2241,7 @@ async function getDisabledTasks(req, res) {
     var tasks = rows.map(function(r) { return rowToTask(r, null, srcMap); });
     res.json({ tasks: tasks });
   } catch (error) {
-    console.error('Get disabled tasks error:', error);
+    logger.error('Get disabled tasks error:', error);
     res.status(500).json({ error: 'Failed to get disabled tasks' });
   }
 }
@@ -2341,7 +2344,7 @@ async function reEnableTask(req, res) {
     enqueueScheduleRun(req.user.id, 'api:reEnableTask', [id]);
     res.json({ task: rowToTask(updated, null, srcMap) });
   } catch (error) {
-    console.error('Re-enable task error:', error);
+    logger.error('Re-enable task error:', error);
     res.status(500).json({ error: 'Failed to re-enable task' });
   }
 }
@@ -2390,7 +2393,7 @@ async function takeOwnership(req, res) {
     enqueueScheduleRun(req.user.id, 'api:takeOwnership', [id]);
     res.json({ task: rowToTask(updated, null, srcMap) });
   } catch (error) {
-    console.error('Take ownership error:', error);
+    logger.error('Take ownership error:', error);
     res.status(500).json({ error: 'Failed to take ownership' });
   }
 }
