@@ -1,12 +1,12 @@
 # Doc Registry — juggler
-_Last updated: 2026-05-25 17:15_
+_Last updated: 2026-05-31 00:00_
 
 | File | Status | Issues | Last Reviewed | File mtime |
 |------|--------|--------|---------------|------------|
-| juggler/juggler-backend/docs/PROJECT-BRIEF.md | MISSING | Required core doc | — | — |
-| juggler/juggler-backend/docs/architecture/README.md | MISSING | Required core doc | — | — |
-| juggler/juggler-backend/docs/api/README.md | MISSING | Required core doc (API routes exist) | — | — |
-| juggler/juggler-backend/docs/mcp/<server>.md | MISSING | Required — src/mcp/server.js exists | — | — |
+| juggler/juggler-backend/docs/PROJECT-BRIEF.md | PASS | — | 2026-05-31 | 2026-05-31 |
+| juggler/juggler-backend/docs/architecture/README.md | PASS | — | 2026-05-31 | 2026-05-31 |
+| juggler/juggler-backend/docs/api/README.md | PASS | — | 2026-05-31 | 2026-05-31 |
+| juggler/juggler-backend/docs/mcp/juggler-mcp-server.md | PASS | — | 2026-05-31 | 2026-05-31 |
 | juggler/juggler-backend/docs/architecture/SCHEDULER-UI-STATE-MAP.md | PASS | — | 2026-05-25 17:15 | 2026-05-25 16:25 |
 | juggler/juggler-backend/docs/architecture/SCHEDULER.md | PASS | — | 2026-05-25 17:15 | 2026-05-25 16:28 |
 | juggler/juggler-backend/docs/architecture/WHEN-MODE-REDESIGN.md | PASS | — | 2026-05-25 17:15 | 2026-05-25 16:29 |
