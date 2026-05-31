@@ -19,8 +19,8 @@ export default function TaskDetailHeader({
   scheduledBadge,
   unplacedDetail, whenBlocked, onEnableFlex,
 }) {
-  var BTN_H = isMobile ? 30 : 26;
-  var lStyle = { fontSize: 9, color: TH.textMuted, display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 600 };
+  var BTN_H = isMobile ? 36 : 28;
+  var lStyle = { fontSize: isMobile ? 12 : 11, color: TH.textMuted, display: 'flex', flexDirection: 'column', gap: 2, fontWeight: 600 };
   var iStyle = {
     fontSize: isMobile ? 13 : 11, padding: isMobile ? '6px 8px' : '3px 4px',
     border: '1px solid ' + TH.inputBorder, borderRadius: 4,
@@ -137,9 +137,9 @@ export default function TaskDetailHeader({
           }}
         />
 
-        <label style={{ ...lStyle, marginBottom: 6 }}>
+        <label htmlFor='task-project-select' style={{ ...lStyle, marginBottom: 6 }}>
           Project
-          <select value={project ?? ''} onChange={e => onProjectChange && onProjectChange(e.target.value)}
+          <select id='task-project-select' value={project ?? ''} onChange={e => onProjectChange && onProjectChange(e.target.value)}
             style={{ ...iStyle, height: BTN_H, cursor: 'pointer' }}>
             <option value="">No project</option>
             {(allProjectNames || []).map(function(p) { return <option key={p} value={p}>{p}</option>; })}
