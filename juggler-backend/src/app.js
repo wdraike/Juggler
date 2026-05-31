@@ -12,6 +12,9 @@ const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const { maybeRedisStore } = require('./lib/rate-limit-store');
 
+const { createLogger } = require('@resume-optimizer/lib-logger');
+const logger = createLogger('app');
+
 const taskRoutes = require('./routes/task.routes');
 const configRoutes = require('./routes/config.routes');
 const projectRoutes = require('./routes/project.routes');
@@ -38,7 +41,25 @@ const app = express();
 app.set('trust proxy', 1);
 
 // Middleware
-app.use(helmet());
+// Juggler serves both API responses and SSE streams. It does not serve HTML
+// pages directly, but the frontend dev server proxies through it, so we use
+// a moderate CSP: self + inline styles (for SSE/EventStream clients) and
+// data: URIs for images. No unsafe-eval.
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:'],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'none'"],
+      frameSrc: ["'none'"],
+    },
+  },
+}));
 app.use(compression({
   filter: (req, res) => {
     if (res.getHeader('Content-Type') === 'text/event-stream') return false;
@@ -110,7 +131,7 @@ if (process.env.NODE_ENV === 'production') {
 // Without Redis, SSE fan-out degrades to local-only and the AI rate limiter
 // falls back to per-instance counters.
 if (!process.env.REDIS_URL) {
-  console.warn('[startup] REDIS_URL not set — SSE fan-out and AI rate limiter will be local-only (single-instance safe, not multi-instance safe)');
+  logger.warn('[startup] REDIS_URL not set - SSE fan-out and AI rate limiter will be local-only (single-instance safe, not multi-instance safe)');
 }
 
 // Broad limiters stay per-instance by design (Category 4f — shared counters
@@ -272,7 +293,7 @@ app.use((req, res) => {
 
 // Global error handler
 app.use((err, req, res, _next) => {
-  console.error('Unhandled error:', err);
+  logger.error('Unhandled error:', { error: err });
   res.status(500).json({
     error: 'Internal server error',
     message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
