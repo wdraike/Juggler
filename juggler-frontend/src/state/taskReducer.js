@@ -82,7 +82,7 @@ export default function taskReducer(state, action) {
       var sourceId = targetTask && targetTask.sourceId;
       // Template fields that propagate from source to all instances
       var TEMPLATE_PROPS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
-        'when', 'dayReq', 'recurring', 'rigid', 'timeFlex', 'split', 'splitMin',
+        'when', 'dayReq', 'recurring', 'timeFlex', 'split', 'splitMin',
         'travelBefore', 'travelAfter', 'dependsOn'];
       // Extract template-level changes from the update
       var templatePatch = null;
