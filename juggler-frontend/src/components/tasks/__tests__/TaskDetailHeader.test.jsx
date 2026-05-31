@@ -99,3 +99,99 @@ it('renders project select with no-project selected when project is null — no 
   expect(nullValueWarnings).toHaveLength(0);
   errorSpy.mockRestore();
 });
+
+// TC-P003: null/undefined project renders without crash
+it('TC-P003: renders without crash when project is null', () => {
+  expect(() => {
+    render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+      onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+      isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+      text="Buy groceries" project={null} pri="P3" dur={30} notes="" url=""
+      allProjectNames={['Work']}
+      onProjectChange={() => {}}
+    />);
+  }).not.toThrow();
+});
+
+it('TC-P003b: renders without crash when project is undefined', () => {
+  expect(() => {
+    render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+      onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+      isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+      text="Buy groceries" project={undefined} pri="P3" dur={30} notes="" url=""
+      allProjectNames={['Work']}
+      onProjectChange={() => {}}
+    />);
+  }).not.toThrow();
+});
+
+// TC-P004: isMobile=true applies BTN_H=36; isMobile=false applies BTN_H=28
+it('TC-P004: isMobile=true applies BTN_H=36 to project select height', () => {
+  render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+    onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+    isDirty={false} saveStatus={null} isCreate={false} isMobile={true}
+    text="Buy groceries" project="" pri="P3" dur={30} notes="" url=""
+    allProjectNames={[]}
+    onProjectChange={() => {}}
+  />);
+  const select = document.getElementById('task-project-select');
+  expect(select).not.toBeNull();
+  expect(select.style.height).toBe('36px');
+});
+
+it('TC-P004b: isMobile=false applies BTN_H=28 to project select height', () => {
+  render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+    onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+    isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+    text="Buy groceries" project="" pri="P3" dur={30} notes="" url=""
+    allProjectNames={[]}
+    onProjectChange={() => {}}
+  />);
+  const select = document.getElementById('task-project-select');
+  expect(select).not.toBeNull();
+  expect(select.style.height).toBe('28px');
+});
+
+// TC-P005: empty allProjectNames array renders without crash
+it('TC-P005: renders without crash when allProjectNames is empty array', () => {
+  expect(() => {
+    render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+      onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+      isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+      text="Buy groceries" project="" pri="P3" dur={30} notes="" url=""
+      allProjectNames={[]}
+      onProjectChange={() => {}}
+    />);
+  }).not.toThrow();
+  expect(screen.getByRole('option', { name: 'No project' })).toBeInTheDocument();
+});
+
+// TC-P006: missing/undefined onProjectChange doesn't crash on interaction
+it('TC-P006: select change does not crash when onProjectChange is undefined', () => {
+  render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+    onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+    isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+    text="Buy groceries" project="" pri="P3" dur={30} notes="" url=""
+    allProjectNames={['Work', 'Personal']}
+  />);
+  const select = document.getElementById('task-project-select');
+  expect(() => {
+    fireEvent.change(select, { target: { value: 'Work' } });
+  }).not.toThrow();
+});
+
+// TC-P007: label association — id='task-project-select' paired with htmlFor label
+it('TC-P007: project select has id=task-project-select paired with a htmlFor label', () => {
+  render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+    onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+    isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+    text="Buy groceries" project="" pri="P3" dur={30} notes="" url=""
+    allProjectNames={['Work']}
+    onProjectChange={() => {}}
+  />);
+  const select = document.getElementById('task-project-select');
+  expect(select).not.toBeNull();
+  const label = document.querySelector('label[for="task-project-select"]');
+  expect(label).not.toBeNull();
+  expect(label).toHaveTextContent('Project');
+});
