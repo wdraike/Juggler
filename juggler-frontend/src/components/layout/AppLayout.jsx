@@ -589,13 +589,12 @@ export default function AppLayout() {
   //   (a) day-level deadline before today
   //   (b) scheduled date before today
   //   (c) intraday, ONLY for tasks the scheduler can't re-place:
-  //       fixed-when tasks and rigid-recurring tasks. Flexible tasks
+  //       tasks with placementMode:'fixed'. Flexible tasks
   //       (the default) are auto-placed into later slots by the scheduler,
   //       so an apparent-past `task.time` just means "last run's placement"
   //       and should not be flagged.
   //   (d) scheduler emitted _unplacedReason === 'missed' (lives on unplaced[])
   function isTimeLocked(t) {
-    if (t.rigid) return true;
     if (t.placementMode === 'fixed' || t.placement_mode === 'fixed') return true;
     return false;
   }
@@ -651,7 +650,7 @@ export default function AppLayout() {
         var dd = parseDate(t.deadline);
         if (dd && dd < today) { ids.add(t.id); return; }
       }
-      // Intraday overdue: only time-locked tasks (fixed/rigid) whose window
+      // Intraday overdue: only time-locked tasks (placementMode:'fixed') whose window
       // has fully elapsed. Flexible tasks are re-placed; their apparent
       // past-time placement is a stale-data artifact, not a missed slot.
       if (t.date === todayKey && t.time && isTimeLocked(t)) {

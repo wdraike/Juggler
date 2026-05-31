@@ -185,7 +185,7 @@ function buildICS(tasks, statuses) {
     if (t.when) lines.push('X-JUGGLER-WHEN:' + t.when);
     if (t.dayReq) lines.push('X-JUGGLER-DAYREQ:' + t.dayReq);
     if (t.recurring) lines.push('X-JUGGLER-RECURRING:TRUE');
-    if (t.rigid) lines.push('X-JUGGLER-RIGID:TRUE');
+    // X-JUGGLER-RIGID removed: field migrated to placementMode:'fixed' (CR-JUG-W3)
     if (t.split) lines.push('X-JUGGLER-SPLIT:TRUE');
     if (t.splitMin) lines.push('X-JUGGLER-SPLITMIN:' + t.splitMin);
     if (t.deadline) lines.push('X-JUGGLER-DEADLINE:' + t.deadline);
@@ -322,7 +322,8 @@ function icsEventsToTasks(events, existingIds) {
     var when = ev['X-JUGGLER-WHEN'] || (isAllDay ? 'allday' : '');
     var dayReq = ev['X-JUGGLER-DAYREQ'] || '';
     var recurring = ev['X-JUGGLER-RECURRING'] === 'TRUE';
-    var rigid = ev['X-JUGGLER-RIGID'] === 'TRUE';
+    // CR-JUG-W3: migrate legacy X-JUGGLER-RIGID → placementMode:'fixed' for one cycle
+    var legacyRigid = ev['X-JUGGLER-RIGID'] === 'TRUE';
     var split = ev['X-JUGGLER-SPLIT'] === 'TRUE';
     var splitMin = ev['X-JUGGLER-SPLITMIN'] ? parseInt(ev['X-JUGGLER-SPLITMIN']) : undefined;
     var deadline = ev['X-JUGGLER-DEADLINE'] || ev['X-JUGGLER-DUE'] || '';
@@ -373,7 +374,6 @@ function icsEventsToTasks(events, existingIds) {
       when: when,
       dayReq: dayReq,
       recurring: recurring,
-      rigid: rigid,
       split: split,
       recur: recur || undefined,
       deadline: deadline || undefined,
@@ -382,6 +382,9 @@ function icsEventsToTasks(events, existingIds) {
     };
     if (splitMin) task.splitMin = splitMin;
     if (timeRemaining != null) task.timeRemaining = timeRemaining;
+    // CR-JUG-W3: one-cycle migration — old iCal files with X-JUGGLER-RIGID:TRUE
+    // map to placementMode:'fixed'. Drop rigid field entirely on re-export.
+    if (legacyRigid) task.placementMode = 'fixed';
 
     tasks.push(task);
   });
