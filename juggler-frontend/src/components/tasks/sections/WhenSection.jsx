@@ -230,6 +230,9 @@ export default function WhenSection(props) {
   var isRecurring = !!recurring;
   var whenPartsLocal = when ? when.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
   var isCalManaged = task && !!(task.gcalEventId || task.msftEventId || task.appleEventId);
+  // isCalManaged is included because calendar-managed tasks are treated as fixed —
+  // their schedule is externally controlled by GCal/MSFT/Apple, so the UI should
+  // render them as immovable even if placement_mode hasn't been explicitly set to 'fixed'.
   var isFixed = placementMode === 'fixed' && isCalManaged;
   // gcal > msft > apple priority: first provider wins when multiple IDs present (e.g. during migration or dual-sync)
   var appleCalLabel = task && task.appleCalendarName ? (task.appleCalendarName.length > 30 ? task.appleCalendarName.slice(0, 28) + '…' : task.appleCalendarName) : null;

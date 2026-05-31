@@ -151,7 +151,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   // Recurring is derived from recurrence — any recurring task is a recurring task.
   // Keep setRecurring for backward compat in buildFields, but the UI toggle is removed.
   var [recurring, setRecurring] = useState(isCreate ? false : !!task.recurring);
-  var [rigid, setRigid] = useState(isCreate ? false : !!task.rigid); // rigid kept for time_window ± exact selector in WhenSection
+  var [exactTime, setExactTime] = useState(isCreate ? false : !!task.rigid); // exactTime: true = ± 0 flex (exact time window); kept for time_window ± exact selector in WhenSection
   var [timeFlex, setTimeFlex] = useState(isCreate ? 60 : (task.timeFlex != null ? task.timeFlex : 60));
   var [split, setSplit] = useState(isCreate ? false : (task.split !== undefined ? task.split : false));
   var [splitMin, setSplitMin] = useState(isCreate ? 15 : (task.splitMin || 15));
@@ -329,7 +329,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     // Re-derive scheduling mode from synced value
     var syncTags = (newSnap.when || '').split(',').filter(Boolean);
     setRecurringHasPreferredTime(syncTags.length === 1 && newSnap.recurring);
-    setRecurring(newSnap.recurring); setRigid(newSnap.rigid); setTimeFlex(newSnap.timeFlex);
+    setRecurring(newSnap.recurring); setExactTime(newSnap.rigid); setTimeFlex(newSnap.timeFlex);
     setSplit(newSnap.split); setSplitMin(newSnap.splitMin);
     setTaskLoc(newSnap.location); setTaskTools(newSnap.tools);
     setTravelBefore(newSnap.travelBefore); setTravelAfter(newSnap.travelAfter);
@@ -371,7 +371,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       placementMode: placementMode,
       when: when,  // preserved as-is: user-defined slot tag names only (no 'allday'/'fixed' system keywords after migration)
       dayReq: recurring ? 'any' : dayReq,  // recurringTasks derive days from recurrence, not dayReq
-      recurring, rigid: rigid,
+      recurring, rigid: exactTime,
       // timeFlex: send when in time_window mode; null clears when switching away so backend doesn't retain stale values.
       timeFlex: placementMode === 'time_window' && time
         ? (timeFlex || 60)
@@ -421,7 +421,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       weatherHumidityMin: weatherHumidityMin !== '' && weatherHumidityMin !== null ? parseInt(weatherHumidityMin) : null,
       weatherHumidityMax: weatherHumidityMax !== '' && weatherHumidityMax !== null ? parseInt(weatherHumidityMax) : null
     };
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, exactTime, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   // Build only the fields that changed from the initial snapshot (prevents marking unchanged fields dirty)
   var buildChangedFields = useCallback(function() {
@@ -442,7 +442,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (placementMode !== snapPlacementMode) changed.placementMode = all.placementMode;
     if (dayReq !== snap.dayReq) changed.dayReq = all.dayReq;
     if (recurring !== snap.recurring) changed.recurring = all.recurring;
-    if (rigid !== snap.rigid) changed.rigid = all.rigid;
+    if (exactTime !== snap.rigid) changed.rigid = all.rigid;
     if (parseInt(dur) !== snap.dur) changed.dur = all.dur;
     // Compare the derived `all.timeFlex` (not the raw state) so that switching
     // into Time Blocks mode — which should blank timeFlex — is detected even
@@ -497,7 +497,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       changed._timezone = all._timezone;
     }
     return Object.keys(changed).length > 0 ? changed : null;
-  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, rigid, dur, timeRemaining, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, exactTime, dur, timeRemaining, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   // Dirty detection — compare current fields to snapshot
   var [isDirty, setIsDirty] = useState(false);
@@ -507,7 +507,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     userDirtyRef.current = true;
     var changed = buildChangedFields();
     setIsDirty(!!changed);
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, rigid, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, exactTime, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   function handleSave() {
     // Suppress save while the start/finish pair is invalid — keeps the user's
@@ -606,7 +606,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
 
   function handleRecurTypeChange(val) {
     setRecurType(val);
-    if (val === 'none') { setRecurring(false); setRigid(false); }
+    if (val === 'none') { setRecurring(false); setExactTime(false); }
     else { setRecurring(true); setSplit(false); setDayReq('any'); }
   }
 
@@ -710,7 +710,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             time={time} onTimeChange={setTime}
             endTime={endTime} onEndTimeChange={setEndTime} endTimeError={endTimeError} onEndTimeErrorChange={setEndTimeError}
             dur={dur} onDurChange={setDur}
-            recurring={recurring} rigid={rigid} onRigidChange={setRigid}
+            recurring={recurring} rigid={exactTime} onRigidChange={setExactTime}
             timeFlex={timeFlex} onTimeFlexChange={setTimeFlex}
             hasPreferredTime={hasPreferredTime} onHasPreferredTimeChange={setRecurringHasPreferredTime}
             recurType={recurType} onRecurTypeChange={handleRecurTypeChange}
