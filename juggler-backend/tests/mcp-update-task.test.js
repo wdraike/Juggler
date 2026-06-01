@@ -497,11 +497,10 @@ describe('update_task — TEMPLATE_FIELDS routing for recurring instances', func
   test('status update on recurring_instance → written to instance, not template', async function() {
     setupRecurringInstance();
     await captureHandlers()['update_task']({ id: 'task-001', status: 'done' });
-    // status not in TEMPLATE_FIELDS → must not appear in template write
+    // status is NOT in TEMPLATE_FIELDS — a status-only update must not write to the template at all
     var templateWrite = findWrite(SOURCE_ID);
-    if (templateWrite) {
-      expect(templateWrite.row.status).toBeUndefined();
-    }
+    expect(templateWrite).toBeUndefined();
+    // status must appear in the instance write
     var instanceWrite = findWrite('task-001');
     expect(instanceWrite).toBeDefined();
     expect(instanceWrite.row.status).toBe('done');
@@ -550,10 +549,12 @@ describe('update_task — guardFixedCalendarWhen', function() {
     expect(lastWrite('task-001').row.placement_mode).toBe('anytime');
   });
 
-  test('recurring instance with cal-linked source: guardFixedCalendarWhen prevents placement_mode change', async function() {
+  test('recurring instance with cal-linked source: guardFixedCalendarWhen strips placement_mode from template write', async function() {
     // Source template is gcal-linked with placement_mode=fixed.
-    // Instance edit routes placement_mode (TEMPLATE_FIELD) to source.
-    // guardFixedCalendarWhen sees source.gcal_event_id and neutralises the change.
+    // Instance edit routes `when` and `placement_mode` (both TEMPLATE_FIELDs) to source.
+    // guardFixedCalendarWhen sees source.gcal_event_id and deletes placement_mode from row,
+    // preventing a non-fixed value from being written to the cal-linked template.
+    // `when` still routes to template (guard only touches placement_mode, not when).
     var SOURCE_ID = 'source-fixed-001';
     taskStore[SOURCE_ID] = makeTask({
       id: SOURCE_ID, task_type: 'recurring_template',
@@ -564,11 +565,13 @@ describe('update_task — guardFixedCalendarWhen', function() {
     });
     var result = await captureHandlers()['update_task']({ id: 'task-001', placementMode: 'anytime', when: 'morning' });
     expect(result.isError).toBeFalsy();
-    // Guard neutralised the placement_mode change — if written to template it must remain 'fixed'
+    // Template write must have happened (when='morning' is a TEMPLATE_FIELD that passes through)
     var templateWrite = findWrite(SOURCE_ID);
-    if (templateWrite && 'placement_mode' in templateWrite.row) {
-      expect(templateWrite.row.placement_mode).toBe('fixed');
-    }
+    expect(templateWrite).toBeDefined();
+    // guardFixedCalendarWhen deleted placement_mode from the row — must NOT appear in template write
+    expect('placement_mode' in templateWrite.row).toBe(false);
+    // `when` was not stripped — it must still be in the template write
+    expect(templateWrite.row.when).toBe('morning');
   });
 });
 
@@ -604,7 +607,11 @@ describe('update_task — locked-path split', function() {
 
   test('locked: text (non-scheduling) → direct write; no text in enqueue fields', async function() {
     await captureHandlers()['update_task']({ id: 'task-001', text: 'Only text change' });
-    // text is non-scheduling → goes to direct updateTaskById, not enqueueWrite
+    // text is non-scheduling → must appear in a direct updateTaskById write
+    var w = lastWrite('task-001');
+    expect(w).not.toBeNull();
+    expect(w.row.text).toBe('Only text change');
+    // text must NOT appear in any enqueueWrite call (scheduling queue is not for non-scheduling fields)
     var eq = mockEnqueueCalls.find(function(e) { return e.taskId === 'task-001' && e.fields && 'text' in e.fields; });
     expect(eq).toBeUndefined();
   });

@@ -1,3 +1,57 @@
+# Oscar Review — 2026-05-31 — ZOE-JUG-021
+
+## Verdict: PASS
+
+## Summary
+ZOE-JUG-021: safeParseJSON non-string passthrough unit tests. 11 tests added (new standalone file + 2 additions to existing describe block). All 11 pass. No production code changed. Pre-existing createLogger mismatch in taskControllerUnit.test.js is out of scope.
+
+---
+
+## Summary (previous: ZOE-JUG-014)
+3 new unit tests added to `mcp-transport.test.js` covering all ZOE-JUG-014 required auth paths: (a) `planCheck` with no APP_ID plan → `hasActivePlan:false` (already existed, now reinforced), (b) `MCP_DEV_NO_AUTH=true` + `NODE_ENV=development` + dev-token → bypass accepted, (c) `MCP_DEV_NO_AUTH=true` + `NODE_ENV=production` + dev-token → 401. Pre-existing source bug fixed: `logger.warn` → `console.warn` in timeout handler (logger was never imported). 6/6 tests passing. Telly PASS, Ernie PASS (C1 fixed in same commit). Ready to commit.
+
+## Agent Findings
+
+### Telly — PASS
+- 6/6 tests pass
+- All three ZOE-JUG-014 required branches covered (plan check, dev bypass allowed, dev bypass blocked in prod)
+- No-token dev-bypass path and `handleMethodNotAllowed` noted as untested — acceptable scope exclusions (dev-only or trivial)
+
+### Ernie — PASS (C1 fixed)
+- **C1 (fixed)**: `logger.warn` at `transport.js:84` — `logger` not imported → `ReferenceError` on timeout. Fixed: reverted to `console.warn`. Pre-existing bug, not introduced by ZOE-JUG-014.
+- **W1 (deferred)**: Repeated `jest.mock` blocks across 3 tests — acceptable, deferred cleanup
+- **I1/I2 (deferred)**: No-token dev-bypass + `handleMethodNotAllowed` uncovered — low priority
+
+## Fix Loop
+1 fix applied (C1 — `logger` → `console.warn` in `transport.js:84`). Tests re-run after fix: 6/6 PASS.
+
+## Completeness
+| Check | Result |
+|-------|--------|
+| Tests exist for changed code | PASS — test file IS the primary deliverable |
+| Tests passing | PASS — 6/6 |
+| Source bug fixed (C1) | PASS — `transport.js:84` reverted to `console.warn` |
+| Docs updated (if API changed) | PASS — no API surface changed |
+| Security review run | PASS — not applicable (test-only change + trivial source revert) |
+
+## Backlog Items
+| Finding | File |
+|---------|------|
+| Refactor repeated jest.mock blocks into shared helper | tests/mcp-transport.test.js |
+| Add test: no-token + NODE_ENV=development → dev-user bypass | tests/mcp-transport.test.js |
+| Add test: GET /mcp → 405 | tests/mcp-transport.test.js |
+
+## Kermit Report
+Verdict: PASS
+Completeness gaps: none
+Backlog items: 3 (all deferred WARNs/Info — not blockers)
+Ready to commit: yes
+
+## Status: PASS
+_Signed: Oscar — 2026-05-31T00:00:00Z_
+
+---
+
 # Oscar Review — 2026-05-31 — ZOE-JUG-015
 
 ## Verdict: PASS

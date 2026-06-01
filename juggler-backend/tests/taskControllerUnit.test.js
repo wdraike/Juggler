@@ -647,6 +647,20 @@ describe('safeParseJSON falsy passthrough (W-W5)', () => {
     var result = safeParseJSON('{"a":1}', null);
     expect(result).toEqual({ a: 1 });
   });
+
+  test('already-parsed object {a:1} passes through unchanged (non-string passthrough)', () => {
+    // ZOE-JUG-021: non-string values are returned as-is, not re-parsed
+    var obj = { a: 1 };
+    var result = safeParseJSON(obj, null);
+    expect(result).toBe(obj);
+    expect(result).toEqual({ a: 1 });
+  });
+
+  test('invalid JSON string returns fallback []', () => {
+    // ZOE-JUG-021: parse errors return the fallback, not the raw string
+    var result = safeParseJSON('bad json', []);
+    expect(result).toEqual([]);
+  });
 });
 
 describe('validateTaskInput — rolling recurrence type', () => {
