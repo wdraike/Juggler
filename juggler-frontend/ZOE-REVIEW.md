@@ -1,9 +1,9 @@
 # Zoe Review — 2026-06-01
 
 ## Summary
-0 BLOCK findings. 1 WARN (soft `if (labelEl)` guard in calendar matrix could silently skip opacity assertion if component changes). 197/197 pass.
+0 BLOCK findings. 1 WARN (pre-existing: soft `if (labelEl)` guard in calendar matrix). ZOE-JUG-040: 4 new tests pass, both onChange branches covered. 1 WARN for recurring-path ± Window not covered (identical logic, different render branch).
 
-## Telly Audit
+## Telly Audit — ZOE-JUG-040 (WhenSection.test.jsx lines 431–475)
 
 ### BLOCK Findings
 _None._
@@ -11,19 +11,19 @@ _None._
 ### WARN Findings
 | # | Finding | Evidence | File | Remediation |
 |---|---------|----------|------|-------------|
-| 1 | Calendar matrix `isFixed derivation` uses `if (labelEl)` soft guard — for `placementMode=fixed+cal`, the label IS always rendered (non-recurring path, component line 303-310), so the guard never fires today, but if the component stopped rendering the label the opacity assertion would silently skip. The `tabIndex=-1` assertion below it provides a real backstop, making this WARN not BLOCK. | WhenSection.jsx:303-310 | WhenSection.modes.test.jsx:364-380 | Harden to `expect(labelEl).toBeInTheDocument()` before the opacity check for non-recurring modes |
+| 1 | Recurring `± Window` select (rendered when `hasPreferredTime=true`, WhenSection.jsx:515-525) shares identical onChange logic but is not covered by the new ZOE-JUG-040 tests. The non-recurring path is fully covered. Since the handler body is character-for-character identical (`if (v === 0) { onRigidChange(true); onTimeFlexChange(0); } else { onRigidChange(false); onTimeFlexChange(v); }`), this is a WARN not BLOCK. | WhenSection.jsx:515-517 | WhenSection.recurrence.test.jsx | Add parallel `± Window` atomicity test for recurring+hasPreferredTime path |
+| 2 | (Pre-existing) Calendar matrix `isFixed derivation` uses `if (labelEl)` soft guard that could silently skip opacity assertion if component changes. `tabIndex=-1` assertion provides backstop. | WhenSection.jsx:303-310 | WhenSection.modes.test.jsx:364-380 | Harden to `expect(labelEl).toBeInTheDocument()` before opacity check for non-recurring modes |
 
 ### PASS Verifications
 | # | Check | Status |
 |---|-------|--------|
-| 1 | 40 zero-assertion `renders without crashing` tests removed from main matrix — each combination now runs 4 real assertions (button visibility, isFixed derivation, keyboard lock, all_day hiding) | PASS |
-| 2 | 5 zero-assertion calendar matrix smoke tests replaced with `mode selector buttons are present` (4 assertions each) | PASS |
-| 3 | `isFixed derivation` assertion for `all_day + recurring=false` corrected — component shows "Scheduling mode" label for all non-recurring modes; prior assertion was wrong | PASS |
-| 4 | `hasButtonSilentlyKeyboardLocked` helper checks real DOM attribute (tabIndex="-1") against real component behavior (WhenSection.jsx:315/320/325/333/338) | PASS |
-| 5 | Calendar matrix `isFixed` path (fixed+gcalEventId): tabIndex=-1 assertion is unconditional and will catch regressions even if label guard fires | PASS |
-| 6 | Calendar matrix non-fixed path: pointerEvents assertion is unconditional | PASS |
-| 7 | 197 tests run, 197 pass, 0 fail, 0 skipped — verified by direct test run | PASS |
+| 1 | Both onChange branches covered: v===0 → rigid=true + timeFlex=0 (test 1); v!==0 → rigid=false + timeFlex=v (test 2) | PASS |
+| 2 | Both callbacks (`onRigidChange` AND `onTimeFlexChange`) asserted in every handler test — atomicity verified | PASS |
+| 3 | Controlled select value derivation (`rigid ? 0 : (timeFlex || 60)`) tested: rigid=true renders value=0/"exact" | PASS |
+| 4 | `getByDisplayValue(/exact|±/)` query in test 1 matches when rigid=false (select shows timeFlex=60 → "±1hr") | PASS |
+| 5 | `getByDisplayValue('exact')` query in tests 2–4 matches when rigid=true (select controlled to value 0) | PASS |
+| 6 | 66 tests run in WhenSection.test.jsx, 66 pass, 0 fail, 0 skipped — verified by direct test run | PASS |
 
 ## Status: PASS
 
-_Signed: Zoe — 2026-06-01T00:00:00Z_
+_Signed: Zoe — 2026-06-01T14:40:00Z_
