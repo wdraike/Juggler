@@ -180,6 +180,48 @@ it('TC-P006: select change does not crash when onProjectChange is undefined', ()
   }).not.toThrow();
 });
 
+// ZOE-JUG-004: allProjectNames=['Work','Personal','Health'] → options.length === allProjectNames.length + 1
+it('ZOE-JUG-004: project select has allProjectNames.length + 1 options (including No project)', () => {
+  const projectNames = ['Work', 'Personal', 'Health'];
+  render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+    onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+    isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+    text="Buy groceries" project="Work" pri="P3" dur={30} notes="" url=""
+    allProjectNames={projectNames}
+    onProjectChange={() => {}}
+  />);
+  const select = document.getElementById('task-project-select');
+  expect(select).not.toBeNull();
+  expect(select.options.length).toBe(projectNames.length + 1);
+});
+
+// ZOE-JUG-005: allProjectNames prop omitted entirely — only "No project" option renders
+it('ZOE-JUG-005: only No project option renders when allProjectNames is omitted', () => {
+  render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+    onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+    isDirty={false} saveStatus={null} isCreate={false} isMobile={false}
+    text="Buy groceries" project="" pri="P3" dur={30} notes="" url=""
+  />);
+  const select = document.getElementById('task-project-select');
+  expect(select).not.toBeNull();
+  expect(select.options.length).toBe(1);
+  expect(select.options[0].text).toBe('No project');
+});
+
+// ZOE-JUG-008: isCreate=true — project select renders with correct initial value
+it('ZOE-JUG-008: isCreate=true renders project select with correct initial value', () => {
+  render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
+    onSave={() => {}} onClose={() => {}} onDelete={() => {}} onStatusChange={() => {}}
+    isDirty={false} saveStatus={null} isCreate={true} isMobile={false}
+    text="Buy groceries" project="Work" pri="P3" dur={30} notes="" url=""
+    allProjectNames={['Work', 'Personal']}
+    onProjectChange={() => {}}
+  />);
+  const select = document.getElementById('task-project-select');
+  expect(select).not.toBeNull();
+  expect(select.value).toBe('Work');
+});
+
 // TC-P007: label association — id='task-project-select' paired with htmlFor label
 it('TC-P007: project select has id=task-project-select paired with a htmlFor label', () => {
   render(<TaskDetailHeader task={BASE_TASK} status="todo" TH={TH} darkMode={false}
