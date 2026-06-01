@@ -122,15 +122,18 @@ describe('WhenSection mode matrix', () => {
               var isCalManaged = !!(props.task && (props.task.gcalEventId || props.task.msftEventId || props.task.appleEventId));
               // datePinned no longer contributes to isFixed — only cal-linked fixed mode locks the UI
               var expectedIsFixed = placementMode === 'fixed' && isCalManaged;
-              // When isFixed is true, the Scheduling mode label opacity drops to 0.4
-              // (label is absent in all_day mode, so skip assertion there)
               var labelEl = screen.queryByText('Scheduling mode');
-              if (labelEl) {
-                var opacity = labelEl.style.opacity;
+              // ZOE-JUG-032: recurring=true and all_day mode omit the label — assert absence
+              // explicitly so these 20/40 combos don't silently skip without any assertion.
+              if (recurring || placementMode === 'all_day') {
+                expect(labelEl).not.toBeInTheDocument();
+              } else {
+                // Non-recurring, non-allday: label must be present; check opacity reflects isFixed
+                expect(labelEl).toBeInTheDocument();
                 if (expectedIsFixed) {
-                  expect(opacity).toBe('0.4');
+                  expect(labelEl.style.opacity).toBe('0.4');
                 } else {
-                  expect(opacity).toBe('1');
+                  expect(labelEl.style.opacity).toBe('1');
                 }
               }
             });
