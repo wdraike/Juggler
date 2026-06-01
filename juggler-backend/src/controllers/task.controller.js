@@ -2413,6 +2413,7 @@ module.exports = {
   takeOwnership,
   rowToTask,
   taskToRow,
+  checkCalSyncEditGuard,
   guardFixedCalendarWhen,
   buildSourceMap,
   fetchTasksWithEventIds,
