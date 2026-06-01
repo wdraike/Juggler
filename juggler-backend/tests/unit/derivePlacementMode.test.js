@@ -127,6 +127,11 @@ describe('rowToTask — placement_mode passthrough (post-C1-fix)', () => {
     expect(task.placementMode).toBeUndefined();
   });
 
+  test('passes through null placement_mode from DB row as-is (placementMode is null)', () => {
+    const task = rowToTask({ text: 'Test', placement_mode: null }, null);
+    expect(task.placementMode).toBeNull();
+  });
+
   test('passes through empty string placement_mode from DB row as-is', () => {
     const task = rowToTask({ placement_mode: '' }, null);
     expect(task.placementMode).toBe('');
