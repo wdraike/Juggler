@@ -55,18 +55,23 @@ function queryModeButtons() {
   };
 }
 
-function hasDisabledWithoutIndicator(container) {
-  var inputs = container.querySelectorAll('input, select, button');
-  for (var i = 0; i < inputs.length; i++) {
-    var el = inputs[i];
-    if (el.disabled) {
-      // Check for a nearby visible indicator (title, aria-label, or helper text)
-      var title = el.getAttribute('title');
-      var aria = el.getAttribute('aria-label');
-      var parent = el.closest('[title]');
-      var sibling = el.nextElementSibling;
-      var hasIndicator = !!(title || aria || parent || (sibling && sibling.textContent));
-      if (!hasIndicator) return true;
+// WhenSection never sets the HTML `disabled` attribute — MUI-style lock is expressed
+// via tabIndex=-1 + pointerEvents:none on the wrapper. This helper verifies that
+// in unlocked configurations no button is silently keyboard-unreachable (tabIndex=-1
+// without an accompanying aria-disabled or calendar-managed context that would justify it).
+function hasButtonSilentlyKeyboardLocked(container) {
+  var buttons = container.querySelectorAll('button');
+  for (var i = 0; i < buttons.length; i++) {
+    var el = buttons[i];
+    var ti = el.getAttribute('tabIndex') || el.getAttribute('tabindex');
+    if (ti === '-1') {
+      // A tabIndex=-1 is only legitimate when the element also signals its locked
+      // state to AT: aria-disabled="true", or the parent group has pointerEvents:none
+      // with an accompanying visible calendar-managed banner in the document.
+      var ariaDisabled = el.getAttribute('aria-disabled');
+      var parent = el.closest('[style]');
+      var parentLocked = parent && parent.style && parent.style.pointerEvents === 'none';
+      if (!ariaDisabled && !parentLocked) return true;
     }
   }
   return false;
@@ -129,9 +134,11 @@ describe('WhenSection mode matrix', () => {
               }
             });
 
-            it('no control is disabled without a visible indicator', () => {
+            it('no button is keyboard-locked (tabIndex=-1) without a legitimate a11y context', () => {
+              // In the mode matrix task=undefined → isCalManaged=false → isFixed=false.
+              // No button should carry tabIndex=-1 without aria-disabled or a pointerEvents:none parent.
               var { container } = render(<WhenSection {...props} />);
-              expect(hasDisabledWithoutIndicator(container)).toBe(false);
+              expect(hasButtonSilentlyKeyboardLocked(container)).toBe(false);
             });
 
             it('All Day mode hides time inputs', () => {
