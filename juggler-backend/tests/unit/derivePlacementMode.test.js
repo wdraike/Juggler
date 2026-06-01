@@ -141,4 +141,20 @@ describe('rowToTask — placement_mode passthrough (post-C1-fix)', () => {
     const task = rowToTask({ placement_mode: 'fixed' }, null);
     expect(task.placementMode).toBe('fixed');
   });
+
+  // ZOE-JUG-002 — template-inheritance contract:
+  // When a recurring template has placement_mode:'time_window', instances stored
+  // in the DB should carry the same placement_mode. rowToTask must preserve it
+  // so callers see task.placementMode==='time_window' on the instance.
+  test('(ZOE-JUG-002) recurring instance with placement_mode:time_window → task.placementMode===time_window', () => {
+    const instanceRow = {
+      id: 'instance-1',
+      text: 'Recurring task instance',
+      placement_mode: 'time_window',
+      recurring: true,
+      recurrence_master_id: 'template-abc',
+    };
+    const task = rowToTask(instanceRow, null);
+    expect(task.placementMode).toBe('time_window');
+  });
 });
