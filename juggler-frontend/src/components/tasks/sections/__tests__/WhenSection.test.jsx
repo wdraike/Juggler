@@ -292,6 +292,10 @@ it('rolling mode anchor card shows last completed and next due when rolling_anch
   />);
   expect(screen.getByText('Completed on')).toBeInTheDocument();
   expect(screen.getByText('Next due')).toBeInTheDocument();
+  // ZOE-JUG-038: assert exact computed dates (formatAnchorDate uses en-US short format)
+  // rolling_anchor 2026-05-19 → "May 19, 2026"; +7 days → "May 26, 2026"
+  expect(screen.getByText('May 19, 2026')).toBeInTheDocument();
+  expect(screen.getByText('May 26, 2026')).toBeInTheDocument();
 });
 
 it('rolling mode hides day picker', () => {
