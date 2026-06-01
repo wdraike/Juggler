@@ -464,15 +464,15 @@ describe('create_task boundary — recur type validation', function() {
     // validateTaskInput: var rType = (body.recur.type || '').toLowerCase();
     // So "WEEKLY".toLowerCase() === "weekly" which IS in the valid list.
     // This test documents that the handler is case-insensitive via toLowerCase().
-    // The error (if any) must NOT be "invalid recurrence type".
     mockCreatedRow = makeSuccessRow({ text: 'Task', recurring: 1 });
     var result = await captureHandlers()['create_task']({
       text: 'Task',
       recur: { type: 'WEEKLY' }
     });
-    if (result.isError) {
-      expect(errorText(result)).not.toMatch(/invalid recurrence type/i);
-    }
+    // ZOE-JUG-028-W1: positive assertions — must not be an error AND must have inserted a task
+    expect(result.isError).toBeFalsy();
+    expect(result).toBeDefined();
+    expect(mockInsertCalls.length).toBe(1);
   });
 
   test('recur.type="yearly" → isError=true (not a known type)', async function() {

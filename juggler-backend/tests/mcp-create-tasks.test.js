@@ -31,12 +31,14 @@ var mockInsertCalls = [];       // all insertTask calls: { row }
 var mockEnqueueCalls = [];      // all enqueueWrite calls: { userId, taskId, op, fields, src }
 var mockIsLockedValue = false;  // controls isLocked() return value
 var mockSplitDefault = false;   // controls user_config splitDefault value
+var mockConfigValueRaw = null;  // when non-null, user_config returns this as config_value (bypasses JSON.stringify)
 
 function resetCaptures() {
   mockInsertCalls = [];
   mockEnqueueCalls = [];
   mockIsLockedValue = false;
   mockSplitDefault = false;
+  mockConfigValueRaw = null;
 }
 
 // ── DB mock ───────────────────────────────────────────────────────────────────
@@ -86,7 +88,8 @@ var mockDb = (function() {
       return [{ id: w.id || 'user-001', timezone: 'America/New_York' }];
     }
     if (t === 'user_config') {
-      return [{ config_key: 'preferences', config_value: JSON.stringify({ splitDefault: mockSplitDefault }) }];
+      var cv = mockConfigValueRaw !== null ? mockConfigValueRaw : JSON.stringify({ splitDefault: mockSplitDefault });
+      return [{ config_key: 'preferences', config_value: cv }];
     }
     if (t === 'projects' || t === 'task_masters' || t === 'task_instances' || t === 'sync_locks') {
       return [];
@@ -435,6 +438,20 @@ describe('create_tasks — split default behavior', function() {
     });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/split minimum must be greater than 0/i);
+  });
+
+  test('config_value is an object (not a JSON string) → parsed directly, splitDefault applied (ZOE-JUG-024-W1)', async function() {
+    // tasks.js line 183: typeof prefs.config_value === 'string' ? JSON.parse(...) : prefs.config_value
+    // When MySQL returns a pre-parsed JSON column (object, not a string), the else
+    // branch is taken. mockConfigValueRaw causes the mock DB to return an object
+    // directly for the user_config row, exercising that branch.
+    mockConfigValueRaw = { splitDefault: true };
+    var result = await captureHandlers()['create_tasks']({
+      tasks: [{ text: 'Object config_value task' }]
+    });
+    expect(result.isError).toBeFalsy();
+    // splitDefault:true was read via the object branch → row.split=1
+    expect(insertedRow(0).split).toBe(1);
   });
 
   test('prefs row absent (user_config returns null) → splitDefault=false, row.split=0', async function() {
