@@ -107,6 +107,7 @@ describe('WhenSection mode matrix', () => {
                 expect(btns.anytime).toBeInTheDocument();
                 expect(btns.timeWindow).toBeInTheDocument();
                 expect(btns.timeBlocks).toBeInTheDocument();
+                expect(btns.allDay).toBeInTheDocument(); // ZOE-JUG-033: 4th button was missing
               } else {
                 // Non-recurring shows all five buttons regardless of placementMode
                 expect(btns.anytime).toBeInTheDocument();
