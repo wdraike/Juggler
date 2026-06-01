@@ -21,7 +21,7 @@
     "@azure/msal-node": "^5.0.6",
     "@google/genai": "^1.46.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
-    "@resume-optimizer/lib-logger": "file:../../resume-optimizer/packages/lib-logger",
+    "@raike/lib-logger": "file:../../packages/lib-logger",
     "auth-client": "file:../../auth-service/shared",
     "body-parser": "^1.20.2",
     "chai": "^6.2.2",
