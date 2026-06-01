@@ -352,22 +352,24 @@ describe('list_tasks MCP handler', function() {
 
   it('limits results with date filter applied post-fetch', async function() {
     // When date is provided, limit is applied AFTER date-filtering (slice)
-    // scheduled_at in UTC; timezone is America/New_York (UTC-4 in summer)
-    // 2026-06-15T16:00:00Z → 12:00 PM Eastern → date "6/15"
+    // scheduled_at uses MySQL format ("YYYY-MM-DD HH:MM:SS") so utcToLocal
+    // appends "Z" correctly without double-Z corruption.
+    // 2026-06-15 16:00:00 UTC = noon Eastern (UTC-4) → ISO date "2026-06-15"
     mockRows = [
-      makeRow({ id: 'june-1', text: 'June task 1', status: '', scheduled_at: '2026-06-15T16:00:00.000Z', placement_mode: 'all_day' }),
-      makeRow({ id: 'june-2', text: 'June task 2', status: '', scheduled_at: '2026-06-15T16:00:00.000Z', placement_mode: 'all_day' }),
-      makeRow({ id: 'june-3', text: 'June task 3', status: '', scheduled_at: '2026-06-15T16:00:00.000Z', placement_mode: 'all_day' }),
-      makeRow({ id: 'other',  text: 'Other task',  status: '', scheduled_at: '2026-07-01T16:00:00.000Z', placement_mode: 'all_day' })
+      makeRow({ id: 'june-1', text: 'June task 1', status: '', scheduled_at: '2026-06-15 16:00:00', placement_mode: 'all_day' }),
+      makeRow({ id: 'june-2', text: 'June task 2', status: '', scheduled_at: '2026-06-15 16:00:00', placement_mode: 'all_day' }),
+      makeRow({ id: 'june-3', text: 'June task 3', status: '', scheduled_at: '2026-06-15 16:00:00', placement_mode: 'all_day' }),
+      makeRow({ id: 'other',  text: 'Other task',  status: '', scheduled_at: '2026-07-01 16:00:00', placement_mode: 'all_day' })
     ];
 
-    var result = await handlers.list_tasks({ date: '6/15', limit: 2 });
+    var result = await handlers.list_tasks({ date: '2026-06-15', limit: 2 });
     var tasks = JSON.parse(result.content[0].text);
 
     // Should return at most 2 (slice applied after date filter)
     expect(tasks.length).toBeLessThanOrEqual(2);
+    expect(tasks.length).toBeGreaterThan(0);
     // All returned tasks should match the date
-    tasks.forEach(function(t) { expect(t.date).toBe('6/15'); });
+    tasks.forEach(function(t) { expect(t.date).toBe('2026-06-15'); });
   });
 
   // ── 7. rowToTask mapping — expected fields present ────────────────────────
@@ -519,17 +521,22 @@ describe('list_tasks MCP handler', function() {
   });
 
   // ── 12. ZOE-JUG-027-W1: date-only filter (no limit) ─────────────────────
+  //
+  // utcToLocal returns canonical ISO dates ("YYYY-MM-DD"). list_tasks matches
+  // t.date === date, so the date argument must be in the same canonical ISO
+  // format. This test uses "2026-06-15" (ISO) — which is what rowToTask
+  // emits for 2026-06-15T16:00:00Z in the America/New_York timezone.
 
   it('filters by date without limit returns all matching tasks', async function() {
-    // 2026-06-15T16:00:00Z = noon Eastern (UTC-4) → date "6/15"
-    // 2026-06-16T16:00:00Z = noon Eastern → date "6/16"
+    // 2026-06-15T16:00:00Z = noon Eastern (UTC-4) → rowToTask date "2026-06-15"
+    // 2026-06-16T16:00:00Z = noon Eastern         → rowToTask date "2026-06-16"
     mockRows = [
-      makeRow({ id: 'june15-1', text: 'June 15 task 1', status: '', scheduled_at: '2026-06-15T16:00:00.000Z', placement_mode: 'all_day' }),
-      makeRow({ id: 'june15-2', text: 'June 15 task 2', status: '', scheduled_at: '2026-06-15T16:00:00.000Z', placement_mode: 'all_day' }),
-      makeRow({ id: 'june16-1', text: 'June 16 task',   status: '', scheduled_at: '2026-06-16T16:00:00.000Z', placement_mode: 'all_day' })
+      makeRow({ id: 'june15-1', text: 'June 15 task 1', status: '', scheduled_at: '2026-06-15 16:00:00', placement_mode: 'all_day' }),
+      makeRow({ id: 'june15-2', text: 'June 15 task 2', status: '', scheduled_at: '2026-06-15 16:00:00', placement_mode: 'all_day' }),
+      makeRow({ id: 'june16-1', text: 'June 16 task',   status: '', scheduled_at: '2026-06-16 16:00:00', placement_mode: 'all_day' })
     ];
 
-    var result = await handlers.list_tasks({ date: '6/15' });
+    var result = await handlers.list_tasks({ date: '2026-06-15' });
     var tasks = JSON.parse(result.content[0].text);
     var ids = tasks.map(function(t) { return t.id; });
 
