@@ -383,7 +383,7 @@ function registerTaskTools(server, userId) {
       }
 
       enqueueScheduleRun(userId, 'mcp:set_task_status', [id]);
-      var updated = await db('tasks_with_sync_v').where('id', id).first();
+      var updated = await db('tasks_with_sync_v').where({ id: id, user_id: userId }).first();
       return { content: [{ type: 'text', text: safeStringify(rowToTask(updated, tz)) }] };
     }
   );
