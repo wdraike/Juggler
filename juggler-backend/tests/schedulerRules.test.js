@@ -1731,8 +1731,8 @@ const utcToLocal = dateHelpers.utcToLocal;
 
 describe('Timezone & DST', () => {
 
-  // ─── GROUP 71B: localToUtc / utcToLocal round-trip ───
-  describe('Group 71B: UTC conversion round-trip', () => {
+  // ─── UTC round-trip: localToUtc / utcToLocal ───
+  describe('UTC conversion round-trip', () => {
     test('ET: 2pm on 3/15 round-trips correctly', () => {
       var utc = localToUtc('2026-03-15', '2:00 PM', 'America/New_York');
       expect(utc).not.toBeNull();
