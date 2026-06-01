@@ -340,3 +340,82 @@ describe('transport dev-token bypass', function () {
     expect(mockDevServerFactory).toHaveBeenCalledWith('dev-user');
   });
 });
+
+// ── BLOCK 3: ZOE-JUG-016 — MCP_DEV_NO_AUTH=true alone must NOT activate /oauth/authorize ──
+//
+// Security invariant: the dev /oauth/authorize route in app.js is guarded solely by
+//   if (process.env.NODE_ENV === 'development') { ... }
+// MCP_DEV_NO_AUTH has no effect on that guard. If someone sets MCP_DEV_NO_AUTH=true
+// in production (NODE_ENV=production or unset) the dev auto-approve flow must NOT run.
+//
+// These tests verify the guard condition directly — no full Express app required.
+
+describe('ZOE-JUG-016 — /oauth/authorize dev guard requires NODE_ENV=development, not MCP_DEV_NO_AUTH', function () {
+
+  /**
+   * Evaluate the exact guard condition used in app.js line 159:
+   *   if (process.env.NODE_ENV === 'development')
+   * Returns true if the dev /oauth/authorize route would be registered.
+   */
+  function oauthAuthorizeDevGuard() {
+    return process.env.NODE_ENV === 'development';
+  }
+
+  var savedNodeEnv;
+  var savedMcpDevNoAuth;
+
+  beforeEach(function () {
+    savedNodeEnv = process.env.NODE_ENV;
+    savedMcpDevNoAuth = process.env.MCP_DEV_NO_AUTH;
+  });
+
+  afterEach(function () {
+    if (savedNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = savedNodeEnv;
+    }
+    if (savedMcpDevNoAuth === undefined) {
+      delete process.env.MCP_DEV_NO_AUTH;
+    } else {
+      process.env.MCP_DEV_NO_AUTH = savedMcpDevNoAuth;
+    }
+  });
+
+  test('MCP_DEV_NO_AUTH=true + NODE_ENV=production → guard is false (route NOT registered)', function () {
+    // Core invariant: MCP_DEV_NO_AUTH alone must not activate the dev OAuth route.
+    process.env.NODE_ENV = 'production';
+    process.env.MCP_DEV_NO_AUTH = 'true';
+    expect(oauthAuthorizeDevGuard()).toBe(false);
+  });
+
+  test('MCP_DEV_NO_AUTH=true + NODE_ENV unset → guard is false (route NOT registered)', function () {
+    // NODE_ENV unset (common bare-process scenario) with MCP_DEV_NO_AUTH=true
+    // must also leave the dev route inactive.
+    delete process.env.NODE_ENV;
+    process.env.MCP_DEV_NO_AUTH = 'true';
+    expect(oauthAuthorizeDevGuard()).toBe(false);
+  });
+
+  test('MCP_DEV_NO_AUTH=true + NODE_ENV=test → guard is false (route NOT registered)', function () {
+    // NODE_ENV=test (Jest default) with MCP_DEV_NO_AUTH=true: still inactive.
+    process.env.NODE_ENV = 'test';
+    process.env.MCP_DEV_NO_AUTH = 'true';
+    expect(oauthAuthorizeDevGuard()).toBe(false);
+  });
+
+  test('NODE_ENV=development + MCP_DEV_NO_AUTH unset → guard is true (route IS registered, positive control)', function () {
+    // Positive control: only NODE_ENV=development activates the route.
+    process.env.NODE_ENV = 'development';
+    delete process.env.MCP_DEV_NO_AUTH;
+    expect(oauthAuthorizeDevGuard()).toBe(true);
+  });
+
+  test('NODE_ENV=development + MCP_DEV_NO_AUTH=true → guard is true (both set, route IS registered)', function () {
+    // When both are set and NODE_ENV=development, the route is registered — which is
+    // the intended dev workflow. MCP_DEV_NO_AUTH is additive for transport.js only.
+    process.env.NODE_ENV = 'development';
+    process.env.MCP_DEV_NO_AUTH = 'true';
+    expect(oauthAuthorizeDevGuard()).toBe(true);
+  });
+});

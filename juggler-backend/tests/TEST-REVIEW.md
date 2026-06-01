@@ -1,7 +1,55 @@
 # Test Review — 2026-05-31
 
+## ZOE-JUG-016 — mcp-oauth-authorize-guard.test.js (2026-05-31)
+
+5 new tests in `tests/mcp-oauth-authorize-guard.test.js`. All 5 pass (verified with `--globalSetup=""`; no DB required).
+
+**New tests lock the invariant:** `MCP_DEV_NO_AUTH=true` alone (without `NODE_ENV=development`) must NOT activate the dev `/oauth/authorize` auto-approve route. Tests use supertest against a minimal Express app (`buildApp(env)`) that reproduces the exact conditional from `app.js:159`. Covers: baseline active route (development), three negative cases (production, test, omitted), and a no-redirect assertion confirming the 404 body. No production code changed — test only.
+
+**Structural note:** `buildApp(env)` accepts an explicit env object (not `process.env`) — avoids global mutation and cross-test pollution. The guard condition `if (env.NODE_ENV === 'development')` directly mirrors `if (process.env.NODE_ENV === 'development')` in `app.js`. The complementary live-route coverage lives in `tests/unit/app.test.js` Block 2 (supertest against full app, requires DB).
+
+**Pre-existing infra gap (not introduced here):** Full jest suite is blocked by broken migration `20260603000000_add_completed_at_to_tasks_v_view.js` (`tasks_v` view missing in local test DB). Unrelated to ZOE-JUG-016. New test file requires no DB and passes independently.
+
+---
+
+## ZOE-JUG-028 — mcp-create-task-boundary.test.js (2026-05-31)
+
+40 boundary tests covering all invalid-input rejection paths for the `create_task` (singular) MCP handler. All 40 pass. No production code changed — tests only. Fully in-memory mock DB — no Docker dependency.
+
+### Test Results
+
+| Suite | Tests | Passed | Failed | Skipped | Time |
+|-------|-------|--------|--------|---------|------|
+| mcp-create-task-boundary.test.js | 40 | 40 | 0 | 0 | ~1s |
+
+### Boundary Conditions Covered
+
+| Condition | Reject Tests | Accept (Boundary) | Side-Effect Suppressed |
+|-----------|-------------|-------------------|----------------------|
+| Missing text (no field, empty, whitespace) | ✓ 3 tests | N/A | ✓ insertTask not called |
+| text > 500 chars (501 → reject) | ✓ | ✓ 500 accepted | ✓ insertTask not called |
+| dur ≤ 0 (0, -1, -100) | ✓ 3 tests | ✓ dur=1 accepted | ✓ insertTask not called |
+| splitMin > dur (31>30 off-by-one, 60>30) | ✓ 2 tests | ✓ splitMin=dur=30 accepted | ✓ insertTask not called |
+| deadline < startAfter (far, 1-day) | ✓ 2 tests | ✓ same-day + after both accepted | ✓ insertTask not called |
+| invalid recur type (banana/yearly/fortnightly/quarterly/empty) | ✓ 5 tests | ✓ all 7 valid types pass type check | ✓ insertTask not called |
+| timeFlex outside 0–480 (-1, 481, 1000) | ✓ 3 tests | ✓ 0 and 480 both accepted | ✓ insertTask not called |
+| isError=true sweep (6 cases) | ✓ | — | — |
+| enqueueScheduleRun suppressed on failure | ✓ | — | — |
+| Multi-violation accumulation (dur=0 + timeFlex=999) | ✓ | — | — |
+
+### Minor Gap (INFO — not blocking)
+`splitMin ≤ 0` without a `dur` field is not tested here — covered in `mcp-create-tasks.test.js` (ZOE-JUG-024) which tests the same `validateTaskInput` function.
+
+### Status: PASS
+
+_Signed: Telly — 2026-05-31T12:00:00Z_
+
+---
+
 ## Summary (ZOE-JUG-022 + ZOE-JUG-023 + ZOE-JUG-024 + ZOE-JUG-011)
 27 tests passed in `mcp-task-config.test.js` (ZOE-JUG-022). 48 tests passed in `mcp-update-task.test.js` (ZOE-JUG-023). 38 tests passed in `mcp-create-tasks.test.js` (ZOE-JUG-024). All new assertions are exercised and green.
+
+ZOE-JUG-011: Added `redis.invalidateTasks` assertions to 6 tests in `taskCrudIntegration2.test.js`. 2 active toggle-off tests pass with new assertions. 14 pre-existing failures are unrelated (logger ReferenceError + DB constraint issues).
 
 ZOE-JUG-011: 6 `redis.invalidateTasks` assertions added to `taskCrudIntegration2.test.js`. Test-only change. GlobalSetup migration failure is pre-existing (production DB missing migrations 20260603–20260607); not caused by this change. Assertions verified correct against controller call sites.
 
