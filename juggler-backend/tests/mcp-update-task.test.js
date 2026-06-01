@@ -1,0 +1,690 @@
+/**
+ * ZOE-JUG-023 — MCP update_task Handler Unit Tests
+ *
+ * Covers all critical code paths in the update_task handler:
+ *   1. cal-sync guard   — synced tasks reject non-allowed fields
+ *   2. placementMode:fixed validation — rejected when no scheduling info
+ *   3. taskToRow mapping — fields correctly translated to DB row
+ *   4. ALL_DAY backstop  — date-only update infers all_day mode
+ *   5. TEMPLATE_FIELDS   — recurring-instance fields routed to source template
+ *   6. guardFixedCalendarWhen — calendar-linked tasks keep placement_mode:fixed
+ *   7. locked-path split — isLocked=true routes scheduling fields to enqueueWrite
+ *
+ * Uses a fully in-memory mock DB — no real DB connection required.
+ * Variable naming: variables accessed inside jest.mock() factories must start
+ * with "mock" (case insensitive) per Jest's module factory scoping rule.
+ */
+
+'use strict';
+
+// ── Captured call state ───────────────────────────────────────────────────────
+// Named with "mock" prefix so jest.mock() factories can reference them.
+
+var mockWriteCalls = [];        // all updateTaskById calls: { id, row }
+var mockEnqueueCalls = [];      // all enqueueWrite calls: { userId, taskId, op, fields, src }
+var mockIsLockedValue = false;  // controls isLocked() return value
+
+function resetCaptures() {
+  mockWriteCalls = [];
+  mockEnqueueCalls = [];
+  mockIsLockedValue = false;
+}
+
+// ── Task row factory ──────────────────────────────────────────────────────────
+
+function makeTask(overrides) {
+  return Object.assign({
+    id: 'task-001',
+    user_id: 'user-001',
+    task_type: 'task',
+    text: 'Test task',
+    dur: 30,
+    pri: 'P3',
+    status: '',
+    scheduled_at: null,
+    desired_at: null,
+    tz: null,
+    deadline: null,
+    start_after_at: null,
+    location: '[]',
+    tools: '[]',
+    when: null,
+    day_req: null,
+    recurring: 0,
+    recur: null,
+    source_id: null,
+    generated: 0,
+    gcal_event_id: null,
+    msft_event_id: null,
+    apple_event_id: null,
+    depends_on: '[]',
+    marker: 0,
+    placement_mode: null,
+    flex_when: 0,
+    travel_before: null,
+    travel_after: null,
+    notes: null,
+    url: null,
+    split: null,
+    split_min: null,
+    time_remaining: null,
+    time_flex: null,
+    master_id: null,
+    project: null,
+    section: null,
+    created_at: '2026-01-01 00:00:00',
+    updated_at: '2026-01-01 00:00:00'
+  }, overrides);
+}
+
+// ── In-memory task store ──────────────────────────────────────────────────────
+
+var taskStore = {};
+
+function resetStore(overrides) {
+  taskStore = {};
+  taskStore['task-001'] = makeTask(overrides);
+}
+
+// ── DB mock ───────────────────────────────────────────────────────────────────
+
+var mockDb = (function() {
+  var _table = null;
+  var _where = {};
+
+  function db(tableName) {
+    _table = tableName;
+    _where = {};
+    return db;
+  }
+
+  db.fn = { now: function() { return 'MOCK_NOW'; } };
+  db.raw = function() { return Promise.resolve([[], []]); };
+
+  db.where = function(condOrField, val) {
+    if (typeof condOrField === 'object' && condOrField !== null) {
+      Object.assign(_where, condOrField);
+    } else if (typeof condOrField === 'function') {
+      // complex builder — ignored
+    } else if (typeof condOrField === 'string' && val !== undefined) {
+      _where[condOrField] = val;
+    }
+    return db;
+  };
+  db.whereIn    = function() { return db; };
+  db.whereRaw   = function() { return db; };
+  db.whereNot   = function() { return db; };
+  db.whereNull  = function() { return db; };
+  db.orWhere    = function() { return db; };
+  db.orWhereNull = function() { return db; };
+  db.orderBy    = function() { return db; };
+  db.orderByRaw = function() { return db; };
+  db.limit      = function() { return db; };
+  db.insert     = function() { return Promise.resolve([1]); };
+  db.update     = function() { return Promise.resolve(1); };
+  db.del        = function() { return Promise.resolve(1); };
+  db.catch      = function(fn) { return Promise.resolve([]).catch(fn); };
+  db.transaction = function(cb) { return cb(db); };
+
+  function resolve() {
+    var t = _table;
+    var w = _where;
+    if (t === 'users') {
+      return [{ id: w.id || 'user-001', timezone: 'America/New_York' }];
+    }
+    if (t === 'user_config') {
+      return [{ config_key: 'preferences', config_value: JSON.stringify({ splitDefault: false }) }];
+    }
+    if (t === 'projects' || t === 'task_masters' || t === 'sync_locks') { return []; }
+    if (t === 'tasks_v' || t === 'tasks_with_sync_v') {
+      var id  = w.id;
+      var uid = w.user_id;
+      if (!id && uid) {
+        return Object.values(taskStore).filter(function(r) { return r.user_id === uid; });
+      }
+      var row = id ? taskStore[id] : null;
+      if (!row) return [];
+      if (uid !== undefined && row.user_id !== uid) return [];
+      return [row];
+    }
+    return [];
+  }
+
+  db.first = function() {
+    var rows = resolve();
+    return Promise.resolve(rows.length > 0 ? rows[0] : null);
+  };
+  db.select = function() {
+    var rows = resolve();
+    var p = Promise.resolve(rows);
+    p.first = function() { return Promise.resolve(rows.length > 0 ? rows[0] : null); };
+    return p;
+  };
+  db.then = function(res, rej) { return Promise.resolve(resolve()).then(res, rej); };
+
+  return db;
+})();
+
+// ── Jest mocks ────────────────────────────────────────────────────────────────
+
+jest.mock('../src/db', function() { return mockDb; });
+
+jest.mock('../src/lib/tasks-write', function() {
+  return {
+    insertTask:    function() { return Promise.resolve(); },
+    updateTaskById: function(_db, id, row) {
+      mockWriteCalls.push({ id: id, row: row });
+      return Promise.resolve();
+    },
+    deleteTaskById: function() { return Promise.resolve(); }
+  };
+});
+
+jest.mock('../src/scheduler/scheduleQueue', function() {
+  return { enqueueScheduleRun: jest.fn() };
+});
+
+jest.mock('../src/lib/task-write-queue', function() {
+  // Inline splitFields — mirrors the production NON_SCHEDULING_FIELDS set exactly.
+  // (Cannot use jest.requireActual here because task-write-queue requires @raike/lib-logger
+  // which is not available in the test environment without the full logger mock chain.)
+  var NON_SCHEDULING = new Set(['text', 'notes', 'project', 'section',
+    'gcal_event_id', 'msft_event_id', 'tz', 'updated_at']);
+  function splitFields(row) {
+    var scheduling = {};
+    var nonScheduling = {};
+    Object.keys(row).forEach(function(k) {
+      if (NON_SCHEDULING.has(k)) { nonScheduling[k] = row[k]; }
+      else { scheduling[k] = row[k]; }
+    });
+    return { schedulingFields: scheduling, nonSchedulingFields: nonScheduling };
+  }
+  return {
+    isLocked: function() { return Promise.resolve(mockIsLockedValue); },
+    enqueueWrite: function(userId, taskId, op, fields, src) {
+      mockEnqueueCalls.push({ userId: userId, taskId: taskId, op: op, fields: fields, src: src });
+      return Promise.resolve();
+    },
+    splitFields: splitFields
+  };
+});
+
+jest.mock('../src/lib/sse-emitter', function() {
+  return { emitTasksChanged: jest.fn() };
+});
+
+// ── Handler capture ───────────────────────────────────────────────────────────
+
+var { registerTaskTools } = require('../src/mcp/tools/tasks');
+
+function captureHandlers(userId) {
+  var handlers = {};
+  var fakeServer = { tool: function(name, _d, _s, h) { handlers[name] = h; } };
+  registerTaskTools(fakeServer, userId || 'user-001');
+  return handlers;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function parseResult(result) {
+  if (!result || !result.content || !result.content[0]) return null;
+  try { return JSON.parse(result.content[0].text); } catch (e) { return result.content[0].text; }
+}
+
+/** Last direct updateTaskById call for a given task id (or the last call overall). */
+function lastWrite(id) {
+  var calls = id ? mockWriteCalls.filter(function(c) { return c.id === id; }) : mockWriteCalls;
+  return calls.length ? calls[calls.length - 1] : null;
+}
+
+/** Find a write call by task id. */
+function findWrite(id) {
+  return mockWriteCalls.find(function(c) { return c.id === id; });
+}
+
+/** Find an enqueue call by taskId. */
+function findEnqueue(taskId) {
+  return mockEnqueueCalls.find(function(e) { return e.taskId === taskId; });
+}
+
+// ── Setup ─────────────────────────────────────────────────────────────────────
+
+beforeEach(function() {
+  resetStore();
+  resetCaptures();
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 1. Cal-sync guard
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('update_task — cal-sync guard', function() {
+
+  test('gcal-synced task with non-allowed field → isError with blocked field listed', async function() {
+    resetStore({ gcal_event_id: 'gcal-evt-abc' });
+    var result = await captureHandlers()['update_task']({ id: 'task-001', text: 'New title', dur: 60 });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/synced from an external calendar/i);
+    expect(result.content[0].text).toContain('text');
+  });
+
+  test('msft-synced task with blocked field → isError', async function() {
+    resetStore({ msft_event_id: 'msft-evt-xyz' });
+    var result = await captureHandlers()['update_task']({ id: 'task-001', pri: 'P1' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/synced from an external calendar/i);
+  });
+
+  test('apple-synced task with blocked field → isError', async function() {
+    resetStore({ apple_event_id: 'apple-evt-uvw' });
+    var result = await captureHandlers()['update_task']({ id: 'task-001', dur: 45 });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/synced from an external calendar/i);
+  });
+
+  test('gcal-synced task with only status → allowed', async function() {
+    resetStore({ gcal_event_id: 'gcal-evt-abc' });
+    var result = await captureHandlers()['update_task']({ id: 'task-001', status: 'done' });
+    expect(result.isError).toBeFalsy();
+  });
+
+  test('gcal-synced task with only notes → allowed', async function() {
+    resetStore({ gcal_event_id: 'gcal-evt-abc' });
+    var result = await captureHandlers()['update_task']({ id: 'task-001', notes: 'A note' });
+    expect(result.isError).toBeFalsy();
+  });
+
+  test('gcal-synced task with status + notes → allowed', async function() {
+    resetStore({ gcal_event_id: 'gcal-evt-abc' });
+    var result = await captureHandlers()['update_task']({ id: 'task-001', status: 'wip', notes: 'In flight' });
+    expect(result.isError).toBeFalsy();
+  });
+
+  test('non-synced task — no cal-sync error; update proceeds', async function() {
+    var result = await captureHandlers()['update_task']({ id: 'task-001', text: 'Updated text' });
+    expect(result.isError).toBeFalsy();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2. placementMode:'fixed' validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('update_task — placementMode:fixed validation', function() {
+
+  test('fixed mode with no date/time and no existing scheduled_at → validation error', async function() {
+    resetStore({ scheduled_at: null });
+    var result = await captureHandlers()['update_task']({ id: 'task-001', placementMode: 'fixed' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/placementMode "fixed" requires/i);
+  });
+
+  test('fixed mode with date + time → succeeds', async function() {
+    var result = await captureHandlers()['update_task']({
+      id: 'task-001', placementMode: 'fixed', date: '5/31', time: '2:00 PM'
+    });
+    expect(result.isError).toBeFalsy();
+  });
+
+  test('fixed mode with scheduledAt → succeeds', async function() {
+    var result = await captureHandlers()['update_task']({
+      id: 'task-001', placementMode: 'fixed', scheduledAt: '2026-05-31T18:00:00Z'
+    });
+    expect(result.isError).toBeFalsy();
+  });
+
+  test('fixed mode without date/time but existing scheduled_at present → still validation error', async function() {
+    // validateTaskInput fires before the handler reads `existing.scheduled_at`.
+    // It only inspects body fields (date/time/scheduledAt); the existing row's
+    // scheduled_at is NOT consulted at the validateTaskInput stage.
+    // The in-handler cross-field check (lines 257-264 of tasks.js) does inspect
+    // existing.scheduled_at, but only after validateTaskInput passes — and
+    // validateTaskInput already rejects {placementMode:'fixed'} with no body scheduling fields.
+    resetStore({ scheduled_at: '2026-05-31T18:00:00Z' });
+    var result = await captureHandlers()['update_task']({ id: 'task-001', placementMode: 'fixed' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/placementMode "fixed" requires/i);
+  });
+
+  test('fixed mode with empty-string date and empty-string time → validation error', async function() {
+    resetStore({ scheduled_at: null });
+    var result = await captureHandlers()['update_task']({
+      id: 'task-001', placementMode: 'fixed', date: '', time: ''
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/placementMode "fixed" requires/i);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. taskToRow field mapping
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('update_task — taskToRow field mapping', function() {
+
+  test('text maps to row.text', async function() {
+    await captureHandlers()['update_task']({ id: 'task-001', text: 'New task title' });
+    var w = lastWrite('task-001');
+    expect(w).not.toBeNull();
+    expect(w.row.text).toBe('New task title');
+  });
+
+  test('dur maps to row.dur', async function() {
+    await captureHandlers()['update_task']({ id: 'task-001', dur: 90 });
+    expect(lastWrite('task-001').row.dur).toBe(90);
+  });
+
+  test('pri maps to row.pri (normalized)', async function() {
+    await captureHandlers()['update_task']({ id: 'task-001', pri: 'P1' });
+    expect(lastWrite('task-001').row.pri).toBe('P1');
+  });
+
+  test('notes maps to row.notes', async function() {
+    await captureHandlers()['update_task']({ id: 'task-001', notes: 'A note here' });
+    expect(lastWrite('task-001').row.notes).toBe('A note here');
+  });
+
+  test('url maps to row.url', async function() {
+    await captureHandlers()['update_task']({ id: 'task-001', url: 'https://example.com' });
+    expect(lastWrite('task-001').row.url).toBe('https://example.com');
+  });
+
+  test('dependsOn array maps to row.depends_on JSON string', async function() {
+    await captureHandlers()['update_task']({ id: 'task-001', dependsOn: ['dep-001', 'dep-002'] });
+    expect(lastWrite('task-001').row.depends_on).toBe(JSON.stringify(['dep-001', 'dep-002']));
+  });
+
+  test('placementMode maps to row.placement_mode', async function() {
+    await captureHandlers()['update_task']({ id: 'task-001', placementMode: 'time_window' });
+    expect(lastWrite('task-001').row.placement_mode).toBe('time_window');
+  });
+
+  test('travelBefore maps to row.travel_before', async function() {
+    await captureHandlers()['update_task']({ id: 'task-001', travelBefore: 15 });
+    expect(lastWrite('task-001').row.travel_before).toBe(15);
+  });
+
+  test('travelAfter maps to row.travel_after', async function() {
+    await captureHandlers()['update_task']({ id: 'task-001', travelAfter: 10 });
+    expect(lastWrite('task-001').row.travel_after).toBe(10);
+  });
+
+  test('user_id and created_at are stripped from the update row', async function() {
+    await captureHandlers()['update_task']({ id: 'task-001', text: 'Check strip' });
+    var w = lastWrite('task-001');
+    expect(w.row.user_id).toBeUndefined();
+    expect(w.row.created_at).toBeUndefined();
+  });
+
+  test('task not found → isError: true', async function() {
+    var result = await captureHandlers()['update_task']({ id: 'ghost-task-999', text: 'Ghost' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/not found/i);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. ALL_DAY backstop
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('update_task — ALL_DAY backstop', function() {
+
+  test('date provided without time and no existing placementMode → row.placement_mode = all_day', async function() {
+    resetStore({ placement_mode: null });
+    await captureHandlers()['update_task']({ id: 'task-001', date: '5/31' });
+    expect(lastWrite('task-001').row.placement_mode).toBe('all_day');
+  });
+
+  test('date + time provided → backstop does NOT fire (time-was-set guard)', async function() {
+    resetStore({ placement_mode: null });
+    await captureHandlers()['update_task']({ id: 'task-001', date: '5/31', time: '10:00 AM' });
+    // placement_mode was not set by caller and backstop did not fire → undefined in row diff
+    expect(lastWrite('task-001').row.placement_mode).toBeUndefined();
+  });
+
+  test('scheduledAt provided → backstop does NOT fire', async function() {
+    resetStore({ placement_mode: null });
+    await captureHandlers()['update_task']({ id: 'task-001', date: '5/31', scheduledAt: '2026-05-31T18:00:00Z' });
+    expect(lastWrite('task-001').row.placement_mode).toBeUndefined();
+  });
+
+  test('explicit placementMode + date → explicit value wins, backstop skipped', async function() {
+    resetStore({ placement_mode: null });
+    await captureHandlers()['update_task']({ id: 'task-001', date: '5/31', placementMode: 'anytime' });
+    // taskToRow sets placement_mode; backstop condition (row.placement_mode === undefined) is false
+    expect(lastWrite('task-001').row.placement_mode).toBe('anytime');
+  });
+
+  test('no date field provided → backstop never triggers', async function() {
+    resetStore({ placement_mode: null });
+    await captureHandlers()['update_task']({ id: 'task-001', text: 'No date update' });
+    expect(lastWrite('task-001').row.placement_mode).toBeUndefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. TEMPLATE_FIELDS routing for recurring instances
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('update_task — TEMPLATE_FIELDS routing for recurring instances', function() {
+
+  var SOURCE_ID = 'source-template-001';
+
+  function setupRecurringInstance(templateOverrides) {
+    taskStore[SOURCE_ID] = makeTask(Object.assign({
+      id: SOURCE_ID,
+      task_type: 'recurring_template',
+      text: 'Template text',
+      gcal_event_id: null
+    }, templateOverrides || {}));
+    taskStore['task-001'] = makeTask({
+      id: 'task-001',
+      task_type: 'recurring_instance',
+      source_id: SOURCE_ID,
+      text: 'Instance text',
+      gcal_event_id: null
+    });
+  }
+
+  test('text update on recurring_instance → written to template (source), not instance', async function() {
+    setupRecurringInstance();
+    await captureHandlers()['update_task']({ id: 'task-001', text: 'New template text' });
+    var templateWrite = findWrite(SOURCE_ID);
+    expect(templateWrite).toBeDefined();
+    expect(templateWrite.row.text).toBe('New template text');
+  });
+
+  test('status update on recurring_instance → written to instance, not template', async function() {
+    setupRecurringInstance();
+    await captureHandlers()['update_task']({ id: 'task-001', status: 'done' });
+    // status not in TEMPLATE_FIELDS → must not appear in template write
+    var templateWrite = findWrite(SOURCE_ID);
+    if (templateWrite) {
+      expect(templateWrite.row.status).toBeUndefined();
+    }
+    var instanceWrite = findWrite('task-001');
+    expect(instanceWrite).toBeDefined();
+    expect(instanceWrite.row.status).toBe('done');
+  });
+
+  test('non-recurring task → single write to the task itself, no template write', async function() {
+    resetStore({ task_type: 'task', source_id: null });
+    await captureHandlers()['update_task']({ id: 'task-001', text: 'Direct update' });
+    expect(findWrite('task-001')).toBeDefined();
+    expect(findWrite(SOURCE_ID)).toBeUndefined();
+  });
+
+  test('recurring_instance without source_id → treated as regular task', async function() {
+    resetStore({ task_type: 'recurring_instance', source_id: null });
+    await captureHandlers()['update_task']({ id: 'task-001', text: 'Instance no source' });
+    expect(findWrite('task-001')).toBeDefined();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. guardFixedCalendarWhen
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('update_task — guardFixedCalendarWhen', function() {
+
+  test('gcal-linked task: cal-sync guard fires first (when=null blocked before guardFixed runs)', async function() {
+    // The cal-sync guard (check 1) fires before guardFixedCalendarWhen (check 6).
+    // A gcal-linked task with `when` in the payload hits the cal-sync guard first.
+    resetStore({ gcal_event_id: 'gcal-evt-001', placement_mode: 'fixed', when: 'fixed' });
+    var result = await captureHandlers()['update_task']({ id: 'task-001', when: null });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/synced from an external calendar/i);
+  });
+
+  test('non-cal-linked task with when update → no guardFixedCalendarWhen interference', async function() {
+    resetStore({ gcal_event_id: null, placement_mode: null, when: 'morning' });
+    var result = await captureHandlers()['update_task']({ id: 'task-001', when: '' });
+    expect(result.isError).toBeFalsy();
+  });
+
+  test('non-cal-linked task: placementMode can change freely (no guard)', async function() {
+    // Task has placement_mode=fixed but NO cal link → guard is a no-op → anytime is written
+    resetStore({ gcal_event_id: null, placement_mode: 'fixed' });
+    var result = await captureHandlers()['update_task']({ id: 'task-001', placementMode: 'anytime' });
+    expect(result.isError).toBeFalsy();
+    expect(lastWrite('task-001').row.placement_mode).toBe('anytime');
+  });
+
+  test('recurring instance with cal-linked source: guardFixedCalendarWhen prevents placement_mode change', async function() {
+    // Source template is gcal-linked with placement_mode=fixed.
+    // Instance edit routes placement_mode (TEMPLATE_FIELD) to source.
+    // guardFixedCalendarWhen sees source.gcal_event_id and neutralises the change.
+    var SOURCE_ID = 'source-fixed-001';
+    taskStore[SOURCE_ID] = makeTask({
+      id: SOURCE_ID, task_type: 'recurring_template',
+      gcal_event_id: 'gcal-src-001', placement_mode: 'fixed'
+    });
+    taskStore['task-001'] = makeTask({
+      id: 'task-001', task_type: 'recurring_instance', source_id: SOURCE_ID, gcal_event_id: null
+    });
+    var result = await captureHandlers()['update_task']({ id: 'task-001', placementMode: 'anytime', when: 'morning' });
+    expect(result.isError).toBeFalsy();
+    // Guard neutralised the placement_mode change — if written to template it must remain 'fixed'
+    var templateWrite = findWrite(SOURCE_ID);
+    if (templateWrite && 'placement_mode' in templateWrite.row) {
+      expect(templateWrite.row.placement_mode).toBe('fixed');
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 7. Locked-path split (isLocked = true)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('update_task — locked-path split', function() {
+
+  beforeEach(function() {
+    mockIsLockedValue = true;
+  });
+
+  afterEach(function() {
+    mockIsLockedValue = false;
+  });
+
+  test('locked: scheduling fields enqueued via enqueueWrite', async function() {
+    await captureHandlers()['update_task']({
+      id: 'task-001', date: '5/31', time: '10:00 AM', placementMode: 'fixed'
+    });
+    var eq = findEnqueue('task-001');
+    expect(eq).toBeDefined();
+    expect(eq.op).toBe('update');
+    expect(eq.src).toBe('mcp:update_task');
+  });
+
+  test('locked: response includes queued:true', async function() {
+    var result = await captureHandlers()['update_task']({ id: 'task-001', text: 'Lock test' });
+    expect(result.isError).toBeFalsy();
+    expect(parseResult(result).queued).toBe(true);
+  });
+
+  test('locked: text (non-scheduling) → direct write; no text in enqueue fields', async function() {
+    await captureHandlers()['update_task']({ id: 'task-001', text: 'Only text change' });
+    // text is non-scheduling → goes to direct updateTaskById, not enqueueWrite
+    var eq = mockEnqueueCalls.find(function(e) { return e.taskId === 'task-001' && e.fields && 'text' in e.fields; });
+    expect(eq).toBeUndefined();
+  });
+
+  test('locked: scheduling field (placement_mode) → enqueued with correct value', async function() {
+    await captureHandlers()['update_task']({ id: 'task-001', placementMode: 'all_day' });
+    var eq = findEnqueue('task-001');
+    expect(eq).toBeDefined();
+    expect(eq.fields.placement_mode).toBe('all_day');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8. Input validation
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Note on `when` reserved-value enforcement:
+// The Zod `.refine()` on taskInputFields.when (blocking "fixed"/"allday") only
+// runs when the MCP framework parses the input before invoking the handler.
+// In unit tests we call the handler function directly, bypassing that layer.
+// validateTaskInput() does not separately check for reserved when values.
+// The `when="fixed"` / `when="allday"` guard is therefore a Zod-layer concern,
+// not a handler-layer concern — and is not assertable in these unit tests.
+// We test what validateTaskInput() DOES enforce: lengths and known bad formats.
+
+describe('update_task — input validation (validateTaskInput layer)', function() {
+
+  test('valid when value "morning" → no error', async function() {
+    var result = await captureHandlers()['update_task']({ id: 'task-001', when: 'morning' });
+    expect(result.isError).toBeFalsy();
+  });
+
+  test('empty string when → no error', async function() {
+    var result = await captureHandlers()['update_task']({ id: 'task-001', when: '' });
+    expect(result.isError).toBeFalsy();
+  });
+
+  test('when tag exceeding 30 chars → validateTaskInput returns error', async function() {
+    var longTag = 'a'.repeat(31);
+    var result = await captureHandlers()['update_task']({ id: 'task-001', when: longTag });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/validation error/i);
+  });
+
+  test('invalid placementMode value → validateTaskInput error', async function() {
+    var result = await captureHandlers()['update_task']({ id: 'task-001', placementMode: 'bogus_mode' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/placementMode.*is not valid/i);
+  });
+
+  test('placementMode:fixed with no date/time → validateTaskInput cross-field error', async function() {
+    var result = await captureHandlers()['update_task']({ id: 'task-001', placementMode: 'fixed' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/placementMode "fixed" requires/i);
+  });
+
+  test('dur=0 → validateTaskInput rejects duration <= 0', async function() {
+    var result = await captureHandlers()['update_task']({ id: 'task-001', dur: 0 });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/duration must be greater than 0/i);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. enqueueScheduleRun called after update
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('update_task — enqueueScheduleRun', function() {
+
+  test('successful update → enqueueScheduleRun called with userId and taskId', async function() {
+    var { enqueueScheduleRun } = require('../src/scheduler/scheduleQueue');
+    enqueueScheduleRun.mockClear();
+    await captureHandlers()['update_task']({ id: 'task-001', text: 'Schedule run test' });
+    expect(enqueueScheduleRun).toHaveBeenCalledWith('user-001', 'mcp:update_task', ['task-001']);
+  });
+
+  test('task not found → enqueueScheduleRun NOT called', async function() {
+    var { enqueueScheduleRun } = require('../src/scheduler/scheduleQueue');
+    enqueueScheduleRun.mockClear();
+    await captureHandlers()['update_task']({ id: 'nonexistent', text: 'Ghost' });
+    expect(enqueueScheduleRun).not.toHaveBeenCalled();
+  });
+});

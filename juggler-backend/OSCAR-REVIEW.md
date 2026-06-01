@@ -1,3 +1,93 @@
+# Oscar Review — ZOE-JUG-023 — 2026-05-31
+
+## Verdict: WARN
+
+## Summary
+48/48 tests pass. Telly PASS. Zoe 0 BLOCK, 3 WARN (untested branches: recurring_template depends_on strip, locked-path negative assertion, _allowUnfix path). All WARNs are backlog-grade deferrals — no blocking issues. Ready to commit.
+
+## Agent Findings
+
+### Telly — PASS
+- 48 tests, 0 failures, pure in-memory mock suite
+- All 9 handler code sections covered
+- No missing test files
+
+### Zoe — WARN (3 items, all deferred)
+| # | Severity | Finding | Remediation |
+|---|----------|---------|-------------|
+| Z-W1 | WARN | `recurring_template` direct edit — `depends_on` strip not tested | Backlog |
+| Z-W2 | WARN | Locked path — `updateTaskById` not-called assertion missing for pure-scheduling update | Backlog |
+| Z-W3 | WARN | `_allowUnfix` opt-in path untested | Backlog |
+
+## Completeness
+| Check | Result |
+|-------|--------|
+| Tests exist for changed code | PASS — 48 new tests for update_task handler |
+| Tests passing | PASS — 48/48 |
+| Docs updated | PASS — TEST-REVIEW.md updated |
+| Security review needed | N/A — test file only, no auth/payment changes |
+
+## Backlog Items
+| Finding | File |
+|---------|------|
+| recurring_template depends_on strip not tested (Z-W1) | mcp-update-task.test.js |
+| locked-path pure-scheduling: updateTaskById not-called assertion (Z-W2) | mcp-update-task.test.js |
+| _allowUnfix path not tested (Z-W3) | mcp-update-task.test.js |
+
+## Kermit Report
+Verdict: WARN
+Completeness gaps: none
+Backlog items: 3 (all test coverage deferrals)
+Ready to commit: yes
+
+## Status: PASS
+_Signed: Oscar — 2026-05-31T00:00:00Z_
+
+---
+
+# Oscar Review — ZOE-JUG-029 — 2026-05-31
+
+## Verdict: PASS
+
+## Summary
+17/17 cross-user isolation tests pass. One source WARN (missing user_id in set_task_status readback) found and fixed. Pre-existing logger regression (unstaged, not in commit) noted and corrected.
+
+## Agent Findings
+
+### Telly — PASS
+17 tests, 17 passed. Full tool coverage for all ID-accepting handlers. No shallow assertions. Side-channel test included.
+
+### Zoe — WARN → PASS (fixed)
+W-1: `set_task_status` post-update readback used `where('id', id)` without `user_id` filter — defence-in-depth gap. Fixed: changed to `where({ id, user_id: userId })`. All 17 tests re-verified green after fix.
+
+## Fix Loop
+- Iteration 1: 1 issue fixed (W-1 source fix in tasks.js:386), 0 remain
+
+## Completeness
+| Check | Result |
+|-------|--------|
+| Tests exist for changed code | PASS |
+| Tests passing (17/17) | PASS |
+| Docs updated | PASS (TEST-REVIEW.md, ZOE-REVIEW.md) |
+| Security review run | PASS (Zoe audited isolation assertions) |
+| Pre-existing logger regression (unstaged) | NOTED — not in this commit, pre-dates ZOE-JUG-029 |
+
+## Backlog Items
+| Finding | File |
+|---------|------|
+| globalSetup throws on migration failure when test DB view doesn't exist — blocks `npm test` for all pure-mock tests | juggler-backend/tests/helpers/jest.globalSetup.js |
+
+## Kermit Report
+Verdict: PASS
+Completeness gaps: none
+Backlog items: 1 (globalSetup migration resilience)
+Ready to commit: yes (committed at 497a8cb)
+
+## Status: PASS
+_Signed: Oscar — 2026-05-31T00:00:00Z_
+
+---
+
 # Oscar Review — 2026-05-31
 
 ## Verdict: PASS

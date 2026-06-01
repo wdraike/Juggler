@@ -1,6 +1,39 @@
-# Zoe Review — 2026-05-31
+# Zoe Review — 2026-05-31 (ZOE-JUG-023 addendum)
+
+## Scope: mcp-update-task.test.js audit
 
 ## Summary
+0 BLOCK findings. 3 WARN findings (untested branches, not assertion-quality issues). 48/48 tests pass. Mock structure verified against source. Core happy paths, error paths, and guard paths are all adequately covered.
+
+## Telly Audit
+
+### BLOCK Findings
+None.
+
+### WARN Findings
+
+| # | Finding | Evidence | File | Remediation |
+|---|---------|----------|------|-------------|
+| W1 | `recurring_template` direct edit — `depends_on` strip not tested | Handler line 279: `if (existing.task_type === 'recurring_template') delete row.depends_on`. Tests in §5 only cover `recurring_instance`; no test sends `dependsOn` to a `recurring_template` task and asserts it is stripped. | tasks.js:279 / mcp-update-task.test.js §5 | Add test: set `task_type:'recurring_template'`, send `dependsOn:['x']`, assert `row.depends_on` absent |
+| W2 | Locked path — `updateTaskById` not-called assertion missing for pure-scheduling update | When `nonSchedulingFields` is empty (e.g. only `placement_mode` sent while locked), `updateTaskById` is skipped. Tests assert `enqueueWrite` is called but do not assert `updateTaskById` was NOT called. | tasks.js:303-308 / mcp-update-task.test.js §7 | Add `expect(mockWriteCalls.find(...)).toBeUndefined()` for pure-scheduling locked update |
+| W3 | `_allowUnfix` opt-in path untested | `fields._allowUnfix` (line 290) bypasses `guardFixedCalendarWhen`. No test exercises this code path. | tasks.js:290 | Add test: set `gcal_event_id`, send `when:'morning'` + `_allowUnfix:true`, assert update proceeds without guard stripping |
+
+### PASS Verifications
+
+| # | Check | Status |
+|---|-------|--------|
+| 1 | All 9 handler code sections have at least one test | PASS |
+| 2 | Error paths (isError:true) tested alongside success paths | PASS — 24 error/success assertions |
+| 3 | `toBeDefined()` assertions all followed by value assertions | PASS — e.g. line 493 followed by 494 checking `.row.text` |
+| 4 | Mock `splitFields` faithfully mirrors production `NON_SCHEDULING_FIELDS` set | PASS — inline copy matches production at task-write-queue.js:54-58 |
+| 5 | `mockIsLockedValue` isolation via `beforeEach`/`afterEach` in locked suite | PASS — prevents state leak between locked and unlocked tests |
+| 6 | `resetStore()` + `resetCaptures()` in global `beforeEach` prevents cross-test pollution | PASS |
+| 7 | Recurring instance template routing: text→template, status→instance | PASS — both branches explicitly asserted |
+| 8 | `enqueueScheduleRun` called/not-called assertions use `mockClear()` before each | PASS — correct isolation |
+| 9 | Zod validation layer gap documented in test file with explanation | PASS — section 8 comment is accurate and complete |
+
+## Prior ZOE-REVIEW.md entry (2026-05-31 earlier)
+
 1 WARN finding (source-level code hygiene in `set_task_status`, not a test gap). No BLOCK findings. Test assertions are strong and correctly model production isolation behavior. Mock fidelity verified against source.
 
 ## Telly Audit

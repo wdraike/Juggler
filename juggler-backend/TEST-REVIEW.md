@@ -1,5 +1,47 @@
 # TEST-REVIEW.md — juggler-backend
 
+**Review date:** 2026-05-31 (ZOE-JUG-023 update)
+**Scope:** mcp-update-task.test.js — new MCP update_task unit test suite
+
+## ZOE-JUG-023 Test Run — 2026-05-31
+
+### Summary
+48 tests passed, 0 failed, 0 skipped. All 9 code-path sections fully green. Pure in-memory mock suite — no DB dependency.
+
+### Test Results
+
+| Suite | Tests | Passed | Failed | Skipped | Time |
+|-------|-------|--------|--------|---------|------|
+| mcp-update-task.test.js | 48 | 48 | 0 | 0 | 0.82s |
+
+### Coverage Map (by section)
+
+| Section | Code Path Covered | Tests |
+|---------|-------------------|-------|
+| 1. Cal-sync guard | gcal/msft/apple blocked; status+notes allowed; non-synced passes | 7 |
+| 2. placementMode:fixed validation | no date/time→error; date+time/scheduledAt→pass; empty strings→error | 5 |
+| 3. taskToRow mapping | text/dur/pri/notes/url/dependsOn/placementMode/travelBefore/travelAfter; strip user_id/created_at; not-found | 11 |
+| 4. ALL_DAY backstop | date-only→all_day; date+time→no backstop; scheduledAt→no backstop; explicit mode wins; no date→no backstop | 5 |
+| 5. TEMPLATE_FIELDS routing | text→template; status→instance; non-recurring→direct; instance without source→regular | 4 |
+| 6. guardFixedCalendarWhen | cal-guard fires first; non-linked free; non-linked can change; recurring cal-linked source prevented | 4 |
+| 7. Locked-path split | scheduling→enqueue; queued:true returned; text→direct; placement_mode enqueued correctly | 4 |
+| 8. Input validation (validateTaskInput layer) | long when tag; bogus placementMode; fixed cross-field; dur=0; valid when values | 6 |
+| 9. enqueueScheduleRun | called on success; not called on not-found | 2 |
+
+### Coverage Gaps (WARN — not blocking)
+
+| Gap | Notes |
+|-----|-------|
+| Zod `when="fixed"/"allday"` rejection | MCP framework layer — not assertable via direct handler call. Documented in test file. |
+| `_allowUnfix` opt-in path | The `fields._allowUnfix` branch in guardFixedCalendarWhen not exercised |
+| `recur` / `dayReq` field mapping | Additional taskToRow fields; covered by existing taskMapping.test.js |
+
+### Status: PASS
+
+_Signed: Telly — 2026-05-31T00:00:00Z_
+
+---
+
 **Review date:** 2026-05-24  
 **Branch:** main (22 commits ahead of origin/main)  
 **Changed files:**
