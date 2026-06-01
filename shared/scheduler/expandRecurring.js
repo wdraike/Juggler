@@ -467,6 +467,7 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         timeFlex: src.timeFlex, preferredTimeMins: src.preferredTimeMins,
         marker: src.marker, flexWhen: src.flexWhen,
         dayReq: instanceDayReq, section: '', notes: src.notes || '',
+        placement_mode: src.placement_mode,
         taskType: 'generated', sourceId: src.id, generated: true,
         _candidateDate: dateStr,
         _occurrenceOrdinal: nextOrdBySource[src.id]

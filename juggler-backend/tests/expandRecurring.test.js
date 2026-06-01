@@ -201,6 +201,14 @@ describe('expandRecurring', () => {
         expect(result[1].id).toBe(sourceId + '-2');
       }
     });
+
+    // ZOE-JUG-002: placement_mode:'time_window' must be inherited by recurring instances
+    test('instances inherit placement_mode time_window from template', () => {
+      const src = makeSource({ placement_mode: 'time_window' });
+      const result = expandRecurring([src], new Date(2026, 2, 20), new Date(2026, 2, 21));
+      expect(result).toHaveLength(1);
+      expect(result[0].placement_mode).toBe('time_window');
+    });
   });
 
   describe('recurStart is the anchor', () => {
