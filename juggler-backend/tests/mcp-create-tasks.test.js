@@ -710,3 +710,32 @@ describe('create_tasks — response shape', function() {
     expect(mockInsertCalls.length).toBe(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ZOE-JUG-020 — rigid field silently ignored, no unexpected DB column
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('create_tasks — rigid field silently ignored (ZOE-JUG-020)', function() {
+
+  test('{text:"test",rigid:true} succeeds and inserts without rigid column', async function() {
+    var result = await captureHandlers()['create_tasks']({
+      tasks: [{ text: 'test', rigid: true }]
+    });
+    expect(result.isError).toBeFalsy();
+    expect(mockInsertCalls.length).toBe(1);
+    var row = insertedRow(0);
+    // rigid must NOT appear in the DB row — it is a legacy field not in the schema
+    expect(row).not.toHaveProperty('rigid');
+    // task was created successfully
+    expect(row.text).toBe('test');
+  });
+
+  test('{text:"test",rigid:false} also silently ignores rigid field', async function() {
+    var result = await captureHandlers()['create_tasks']({
+      tasks: [{ text: 'test', rigid: false }]
+    });
+    expect(result.isError).toBeFalsy();
+    var row = insertedRow(0);
+    expect(row).not.toHaveProperty('rigid');
+  });
+});
