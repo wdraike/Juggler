@@ -1,3 +1,46 @@
+# Oscar Review — ZOE-JUG-024 — 2026-05-31
+
+## Verdict: PASS
+
+## Summary
+38/38 tests pass. Telly: PASS (all handler branches covered). Zoe: 3 WARNs raised, all fixed before commit (shallow assertions strengthened to `toBeUndefined()`, describe-block renamed, prefs=null branch added). No BLOCK findings from any agent.
+
+## Agent Findings
+
+### Telly — PASS
+37 tests written, all passing. Full branch coverage of `create_tasks` handler: pre-flight validation loop, placement_mode inference (all-day backstop, fixed mode, explicit mode), split default from user prefs, explicit split override, splitMin validation, locked path (enqueueWrite), transaction path (insertTask), enqueueScheduleRun, response shape. One INFO gap: `ensureProject` not directly asserted (has own coverage in `taskCrudIntegration`).
+
+### Zoe — PASS (after fixes)
+3 WARNs raised and resolved before commit:
+- W1 FIXED: Three `not.toBe('all_day')` assertions strengthened to `toBeUndefined()` — exact expected value when backstop does not fire
+- W2 FIXED: Describe block renamed from "transaction rollback on partial failure" to "pre-flight validation prevents any writes on batch error" with explanatory comment
+- W3 FIXED: Added test for `prefs=null` branch (missing user_config row) — verifies `splitDefault=false` fallback produces `row.split=0`
+
+Final count: 38 tests, 38 passing.
+
+## Completeness
+
+| Check | Result |
+|-------|--------|
+| Tests exist for changed code | PASS — new test file covers `create_tasks` handler |
+| Tests passing | PASS — 38/38 |
+| Docs updated | PASS — TEST-REVIEW.md updated, ZOE-REVIEW.md updated |
+| Security review (no auth/payment files changed) | N/A |
+
+## Backlog Items
+None.
+
+## Kermit Report
+Verdict: PASS
+Completeness gaps: none
+Backlog items: 0
+Ready to commit: yes
+
+## Status: PASS
+_Signed: Oscar — 2026-05-31T00:00:00Z_
+
+---
+
 # Oscar Review — ZOE-JUG-023 — 2026-05-31
 
 ## Verdict: WARN

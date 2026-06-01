@@ -1,3 +1,49 @@
+# Zoe Review — 2026-05-31 (ZOE-JUG-024 addendum)
+
+## Scope: mcp-create-tasks.test.js audit
+
+## Summary
+0 BLOCK findings. 2 WARN findings (shallow negative assertions, describe-block naming inaccuracy). 37/37 tests pass. Mock structure verified against handler source. All pre-flight validation, split default, placement_mode inference, locked path, and response shape branches are adequately covered.
+
+## Telly Audit
+
+### BLOCK Findings
+None.
+
+### WARN Findings
+
+| # | Finding | Evidence | File | Remediation |
+|---|---------|----------|------|-------------|
+| W1 | Three `not.toBe('all_day')` assertions are weaker than necessary — they don't assert the exact expected value | Tests: "no date no time", "date AND time", "scheduledAt" — all assert `placement_mode` is not `all_day` but don't assert `toBeUndefined()`. A regression where `placement_mode` is wrongly set to `anytime` would pass these. | mcp-create-tasks.test.js:198,217,226 | Strengthen to `expect(row.placement_mode).toBeUndefined()` for the no-placementMode-provided cases |
+| W2 | Describe block "transaction rollback on partial failure" tests pre-flight validation, not mid-transaction rollback | The mock `db.transaction` always resolves without rollback. Tests correctly verify that validation rejects before writes — but the block title implies rollback testing, which is not what runs. If `insertTask` throws mid-batch, the mock won't roll back and these tests won't catch it. Integration test coverage of mid-transaction error is out of scope for unit tests but the naming is misleading. | mcp-create-tasks.test.js:444 | Rename describe block to "pre-flight validation prevents any writes on batch error" |
+| W3 | `prefs = null` branch (missing user_config row) untested | Line 183: `var splitDefault = prefs ? ... : false`. If `user_config` row is absent, `prefs` is `null` and `splitDefault` defaults to `false`. No test covers this. Behavioral gap is low-risk (same result as `mockSplitDefault=false`) but the null-guard branch is unexercised. | tasks.js:183 | Add test: configure mock to return `null` for user_config, verify `row.split=0` |
+
+### PASS Verifications
+
+| # | Check | Status |
+|---|-------|--------|
+| 1 | All handler branches (validation loop, row mapping, locked path, transaction path, response) have at least one test | PASS |
+| 2 | Error paths (isError:true) tested alongside success paths for every validation rule | PASS |
+| 3 | `mockInsertCalls.length === 0` assertion present on all validation-failure tests — confirms no writes before complete validation | PASS |
+| 4 | Split default tests assert exact values (1 or 0), not just truthiness | PASS |
+| 5 | `placement_mode === 'all_day'` positive assertion is exact, not just truthiness | PASS (test at line 207) |
+| 6 | Locked path asserts: queued=true in response, insertTask NOT called (length=0), enqueueWrite called N times, correct op+src | PASS — 4 separate assertions across 4 tests |
+| 7 | `resetCaptures()` in global `beforeEach` prevents cross-test state pollution | PASS |
+| 8 | `mockIsLockedValue` isolated via `beforeEach`/`afterEach` in locked describe block | PASS |
+| 9 | `enqueueScheduleRun` mock cleared with `mockClear()` before each call-count assertion | PASS |
+| 10 | Explicit ID preservation verified (item with pre-set id → that id in response ids) | PASS |
+| 11 | Empty array edge case covered — `created:0`, `length===0` for ids, no writes | PASS |
+| 12 | Mixed-mode batch asserts per-item placement_mode by index, not just the response count | PASS |
+
+## Bird Audit
+Not applicable — no frontend files changed.
+
+## Status: ISSUES
+
+_Signed: Zoe — 2026-05-31T00:00:00Z_
+
+---
+
 # Zoe Review — 2026-05-31 (ZOE-JUG-023 addendum)
 
 ## Scope: mcp-update-task.test.js audit
