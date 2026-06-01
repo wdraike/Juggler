@@ -356,6 +356,11 @@ describe('ZOE-JUG-016 — /oauth/authorize dev guard requires NODE_ENV=developme
    * Evaluate the exact guard condition used in app.js line 159:
    *   if (process.env.NODE_ENV === 'development')
    * Returns true if the dev /oauth/authorize route would be registered.
+   *
+   * Guard expression copied from app.js:guard — mitigated by supertest
+   * integration tests (mcp-transport.supertest.test.js); tighten if guard
+   * logic changes (e.g. if the condition in app.js ever becomes more complex
+   * than a single NODE_ENV string comparison).
    */
   function oauthAuthorizeDevGuard() {
     return process.env.NODE_ENV === 'development';
