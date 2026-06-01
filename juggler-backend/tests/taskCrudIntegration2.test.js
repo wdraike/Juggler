@@ -410,6 +410,7 @@ xdescribe('unpinTask — endpoint removed', () => {
     expect(row.placement_mode).toBe('anytime');
     expect(row.when).toBe('');
     expect(row.prev_when).toBeNull();
+    expect(redis.invalidateTasks).toHaveBeenCalledWith(USER_ID);
   });
 
   test('invalid mode in JSON prev_when falls back to anytime', async () => {
@@ -429,6 +430,7 @@ xdescribe('unpinTask — endpoint removed', () => {
     expect(row.placement_mode).toBe('anytime');
     // B-2: invalid mode → restoredWhen must also be cleared to '' (anytime+non-empty when is inconsistent)
     expect(row.when).toBe('');
+    expect(redis.invalidateTasks).toHaveBeenCalledWith(USER_ID);
   });
 
   // B-2: missing mode key in JSON prev_when
@@ -449,6 +451,8 @@ xdescribe('unpinTask — endpoint removed', () => {
     // No mode key → falls back to anytime; when must be '' not 'somevalue'
     expect(row.placement_mode).toBe('anytime');
     expect(row.when).toBe('');
+    // B-1: cache must be invalidated after unpin
+    expect(redis.invalidateTasks).toHaveBeenCalledWith(USER_ID);
   });
 });
 
@@ -672,6 +676,9 @@ describe('Recurring toggle-off cleanup', () => {
     var done = await db('task_instances').where({ id: 'tog-done-1', user_id: USER_ID }).first();
     expect(done).toBeDefined();
     expect(done.master_id).not.toBe('tog-tmpl2'); // re-parented away from template
+
+    // Cache must be invalidated after toggle-off mutation.
+    expect(redis.invalidateTasks).toHaveBeenCalledWith(USER_ID);
   });
 
   test('preserves the template task itself after toggle-off', async () => {
@@ -695,6 +702,9 @@ describe('Recurring toggle-off cleanup', () => {
     // Response task has recurring=false
     expect(res._json.task.recurring).toBe(false);
     expect(res._json.task.id).toBe('tog-tmpl3');
+
+    // Cache must be invalidated after toggle-off mutation.
+    expect(redis.invalidateTasks).toHaveBeenCalledWith(USER_ID);
   });
 
   test('toggle-off creates self-linked instance so task remains visible in tasks_v', async () => {
@@ -725,5 +735,8 @@ describe('Recurring toggle-off cleanup', () => {
     expect(viewRow).toBeDefined();
     expect(viewRow.text).toBe('Self-link test');
     expect(Number(viewRow.recurring)).toBe(0);
+
+    // Cache must be invalidated after toggle-off mutation.
+    expect(redis.invalidateTasks).toHaveBeenCalledWith(USER_ID);
   });
 });

@@ -1,7 +1,12 @@
 # Test Review — 2026-05-31
 
-## Summary (ZOE-JUG-022 + ZOE-JUG-023 + ZOE-JUG-024)
-27 tests passed in `mcp-task-config.test.js` (ZOE-JUG-022). 48 tests passed in `mcp-update-task.test.js` (ZOE-JUG-023). All new capturedInsertRow/capturedUpdateRow assertions are exercised and green.
+## Summary (ZOE-JUG-022 + ZOE-JUG-023 + ZOE-JUG-024 + ZOE-JUG-011)
+27 tests passed in `mcp-task-config.test.js` (ZOE-JUG-022). 48 tests passed in `mcp-update-task.test.js` (ZOE-JUG-023). 38 tests passed in `mcp-create-tasks.test.js` (ZOE-JUG-024). All new assertions are exercised and green.
+
+ZOE-JUG-011: 6 `redis.invalidateTasks` assertions added to `taskCrudIntegration2.test.js`. Test-only change. GlobalSetup migration failure is pre-existing (production DB missing migrations 20260603–20260607); not caused by this change. Assertions verified correct against controller call sites.
+
+## ZOE-JUG-024 — mcp-create-tasks.test.js (re-reviewed 2026-05-31)
+38 tests, 38 passed, 0 failed. Run confirmed with `--globalSetup=""` (pure unit, no DB required). Full unit coverage of create_tasks batch handler: placement_mode inference (no-date/no-time, date-only→all_day, date+time, scheduledAt, explicit-mode-wins, time_window), splitDefault behavior (true, false, explicit-override-true, explicit-override-false, prefs-row-absent), fixed-mode validation (bogus mode, fixed+no-date/time, fixed+empty-strings, error-index-prefix, fixed+date+time succeeds, fixed+scheduledAt succeeds), pre-flight write prevention (second-item-fails, first-item-fails, all-valid-inserts-all, text-required), locked/queued path (enqueueWrite called per item, insertTask not called, queued:true in response, user_id on row, ids in response, enqueueScheduleRun called), enqueueScheduleRun (success, validation-failure suppressed, queued-path), response shape (created+ids, explicit-id, empty-array). All handler branches covered. One INFO gap: ensureProject write path not directly asserted — covered by integration tests. No flakiness risks identified (mockDb.first monkey-patch restored in finally; mockIsLockedValue reset in afterEach; enqueueScheduleRun mockCleared before each assertion).
 
 ---
 

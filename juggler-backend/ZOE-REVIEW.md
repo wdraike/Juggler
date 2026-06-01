@@ -1,9 +1,10 @@
-# Zoe Review — 2026-05-31 (ZOE-JUG-024 addendum)
+# Zoe Review — 2026-05-31 (ZOE-JUG-011 + ZOE-JUG-024)
 
-## Scope: mcp-create-tasks.test.js audit
+## Scope: mcp-create-tasks.test.js — full adversarial re-audit
 
 ## Summary
-0 BLOCK findings. 2 WARN findings (shallow negative assertions, describe-block naming inaccuracy). 37/37 tests pass. Mock structure verified against handler source. All pre-flight validation, split default, placement_mode inference, locked path, and response shape branches are adequately covered.
+
+0 BLOCK findings. 1 WARN finding (`config_value` object-branch untested — low risk, confirmed same code pattern exists in prior test files with same gap). 38/38 tests pass. Handler source read line-by-line against every test. Mock chain traced through DB → controller → handler. No false passes, no shallow assertions on primary paths, no flakiness risks found. Telly's PASS verdict is upheld with one WARN backlog item.
 
 ## Telly Audit
 
@@ -14,33 +15,48 @@ None.
 
 | # | Finding | Evidence | File | Remediation |
 |---|---------|----------|------|-------------|
-| W1 | Three `not.toBe('all_day')` assertions are weaker than necessary — they don't assert the exact expected value | Tests: "no date no time", "date AND time", "scheduledAt" — all assert `placement_mode` is not `all_day` but don't assert `toBeUndefined()`. A regression where `placement_mode` is wrongly set to `anytime` would pass these. | mcp-create-tasks.test.js:198,217,226 | Strengthen to `expect(row.placement_mode).toBeUndefined()` for the no-placementMode-provided cases |
-| W2 | Describe block "transaction rollback on partial failure" tests pre-flight validation, not mid-transaction rollback | The mock `db.transaction` always resolves without rollback. Tests correctly verify that validation rejects before writes — but the block title implies rollback testing, which is not what runs. If `insertTask` throws mid-batch, the mock won't roll back and these tests won't catch it. Integration test coverage of mid-transaction error is out of scope for unit tests but the naming is misleading. | mcp-create-tasks.test.js:444 | Rename describe block to "pre-flight validation prevents any writes on batch error" |
-| W3 | `prefs = null` branch (missing user_config row) untested | Line 183: `var splitDefault = prefs ? ... : false`. If `user_config` row is absent, `prefs` is `null` and `splitDefault` defaults to `false`. No test covers this. Behavioral gap is low-risk (same result as `mockSplitDefault=false`) but the null-guard branch is unexercised. | tasks.js:183 | Add test: configure mock to return `null` for user_config, verify `row.split=0` |
+| W1 | `config_value` object (non-string) branch untested | `tasks.js:183`: `typeof prefs.config_value === 'string' ? JSON.parse(...) : prefs.config_value`. Mock always returns a JSON string; the object-already-deserialized branch is never exercised. Both branches produce the same `.splitDefault` access, so behavioral impact is nil in practice. | tasks.js:183 | Backlog: add one test with `config_value` as plain object `{splitDefault: true}` and assert `row.split=1`. |
+
+### Investigated-but-not-found Issues
+
+| # | Hypothesis | Verdict |
+|---|-----------|---------|
+| task_type missing in batch path vs create_task single | create_task explicitly sets `row.task_type = 'task'`; create_tasks does not. NOT a bug — `tasks` table has `DEFAULT 'task'` on the `task_type` column (migration 20260310000000). DB fills it. Test omission of task_type assertion is correct. | CLEAR |
+| user_id missing in non-locked rows | `taskToRow` always starts with `var row = { user_id: userId }` (controller:498). user_id is present in all rows without handler-level set. Non-locked path test doesn't assert it — not needed since taskToRow guarantees it. | CLEAR |
+| `prefs row absent` test call-counter fragility | Counter assumes call 1=users, call 2=user_config. Handler query order is deterministic (`getUserTimezone()` first, `user_config` second). If handler reorders, test silently passes wrong branch. This is a structural brittleness but not a current failure risk since the query order is stable. | WARN-adjacent, not blocking — documented. |
+| Zod schema bypassed by fakeServer | Confirmed: `fakeServer.tool(name, _d, _s, h)` discards schema (`_s`). Zod validation does not run in tests. Bogus-mode rejection works because `validateTaskInput` has its own enum check. This is correct architecture — Zod is integration-level; `validateTaskInput` is the unit-testable gate. | CLEAR |
+| Mock DB `_table`/`_where` shared IIFE state — concurrent test risk | `maxWorkers:1` in jest.config.js ensures sequential execution. No race condition possible. | CLEAR |
+| `scheduled_at` assertion shallow (`not.toBeNull`) | Weak-looking but correct: `localToUtc('6/15','2:00 PM','America/New_York')` returns a real Date object. The assertion confirms taskToRow's date+time → scheduled_at conversion ran without returning null. Exact value would require date arithmetic and adds no safety margin for a unit test. | CLEAR |
+| `ensureProject` write path never exercised | Confirmed: no test provides `project` field. `ensureProject` mock chain would work (projects table returns `[]` → first() is null → insert called). Not tested here — covered by integration tests. INFO only. | CLEAR |
+| `time_blocks` placement mode not tested for acceptance | Valid PLACEMENT_MODES value. Not tested as an acceptance case. It follows the same code path as `time_window` (no special handler logic). Low value to add. | INFO only |
 
 ### PASS Verifications
 
 | # | Check | Status |
 |---|-------|--------|
-| 1 | All handler branches (validation loop, row mapping, locked path, transaction path, response) have at least one test | PASS |
-| 2 | Error paths (isError:true) tested alongside success paths for every validation rule | PASS |
-| 3 | `mockInsertCalls.length === 0` assertion present on all validation-failure tests — confirms no writes before complete validation | PASS |
-| 4 | Split default tests assert exact values (1 or 0), not just truthiness | PASS |
-| 5 | `placement_mode === 'all_day'` positive assertion is exact, not just truthiness | PASS (test at line 207) |
-| 6 | Locked path asserts: queued=true in response, insertTask NOT called (length=0), enqueueWrite called N times, correct op+src | PASS — 4 separate assertions across 4 tests |
-| 7 | `resetCaptures()` in global `beforeEach` prevents cross-test state pollution | PASS |
-| 8 | `mockIsLockedValue` isolated via `beforeEach`/`afterEach` in locked describe block | PASS |
-| 9 | `enqueueScheduleRun` mock cleared with `mockClear()` before each call-count assertion | PASS |
-| 10 | Explicit ID preservation verified (item with pre-set id → that id in response ids) | PASS |
-| 11 | Empty array edge case covered — `created:0`, `length===0` for ids, no writes | PASS |
-| 12 | Mixed-mode batch asserts per-item placement_mode by index, not just the response count | PASS |
+| 1 | All handler branches (pre-flight loop, prefs/splitDefault, row mapping, locked path, transaction, response) have at least one test | PASS |
+| 2 | Every validation error type (isError:true) tested alongside success path | PASS |
+| 3 | `mockInsertCalls.length === 0` asserted on every validation-failure test — no writes before validation complete | PASS |
+| 4 | Split default assertions are exact integers (1 or 0), not truthy/falsy | PASS |
+| 5 | `placement_mode === 'all_day'` uses exact `.toBe('all_day')` — no vague "not undefined" | PASS (line 207) |
+| 6 | Backstop-suppression assertions use `toBeUndefined()` — stronger than `not.toBe('all_day')` | PASS — lines 198, 217, 227 |
+| 7 | Locked path: queued:true, insertTask NOT called (length=0), enqueueWrite N times, op+src exact | PASS |
+| 8 | `resetCaptures()` in global `beforeEach` clears all cross-test state | PASS |
+| 9 | `mockIsLockedValue` isolated via describe-level `beforeEach`/`afterEach` | PASS |
+| 10 | `enqueueScheduleRun` cleared with `mockClear()` before each call-count assertion | PASS |
+| 11 | Explicit ID round-trip verified | PASS |
+| 12 | Empty array edge case covered — no writes, created:0 | PASS |
+| 13 | Mixed-mode batch verifies per-item placement_mode by array index | PASS |
+| 14 | `prefs=null` path: `splitDefault=false → row.split=0` tested with monkey-patched `mockDb.first` and `finally` restore | PASS |
+| 15 | Describe block naming accurately reflects pre-flight validation semantics (not rollback) | PASS |
+| 16 | `tasks.js:183` config_value parse: string-branch always used (mock returns string) — split value extracted correctly | PASS (string branch only) |
 
 ## Bird Audit
 Not applicable — no frontend files changed.
 
 ## Status: ISSUES
 
-_Signed: Zoe — 2026-05-31T00:00:00Z_
+_Signed: Zoe — 2026-05-31T23:00:00Z_
 
 ---
 
@@ -130,3 +146,53 @@ Not applicable — no frontend files changed.
 ## Status: ISSUES
 
 _Signed: Zoe — 2026-05-31T00:00:00Z_
+
+---
+
+# Zoe Review — 2026-05-31 (ZOE-JUG-011)
+
+## Scope: taskCrudIntegration2.test.js — redis.invalidateTasks assertion audit
+
+## Summary
+
+0 BLOCK findings. 1 WARN finding (first toggle-off test inconsistency). 6 assertions added correctly. Mock wiring verified against controller import. No false passes, no shallow assertions. Telly's PASS verdict upheld.
+
+## Telly Audit
+
+### BLOCK Findings
+None.
+
+### WARN Findings
+
+| # | Finding | Evidence | File | Remediation |
+|---|---------|----------|------|-------------|
+| W1 | First toggle-off test (`converts recurring to one-off`) uses `.toHaveBeenCalled()` without USER_ID arg check, while all 3 newly added sibling tests use `.toHaveBeenCalledWith(USER_ID)`. Pre-existing inconsistency — not introduced by this diff. | `taskCrudIntegration2.test.js:644` | `taskCrudIntegration2.test.js` | Strengthen to `.toHaveBeenCalledWith(USER_ID)` for consistency with siblings (backlog) |
+
+### Adversarial Checks
+
+| # | Hypothesis | Verdict |
+|---|-----------|---------|
+| Mock wiring: `redis` mock at test file top matches controller import `require('../lib/redis')` | Controller: `const cache = require('../lib/redis')` (line 18). Test file mocks `'../src/lib/redis'`. Both resolve to same module path. Mock intercepts correctly. | CLEAR |
+| `jest.clearAllMocks()` in `beforeEach` resets `invalidateTasks` call count before each test | Confirmed line 68. No cross-test call count bleed. | CLEAR |
+| `cache.invalidateTasks` at controller line 1334 is unconditional after transaction succeeds | Code reads: transaction closes, then `await cache.invalidateTasks(req.user.id)` with no conditional guard. Called for every successful `recurring=false` update. | CLEAR |
+| Tests assert `statusCode 200` before asserting `invalidateTasks` — confirms error path not taken | `expect(res.statusCode).toBe(200)` fires before cache assertion. If controller threw and hit the catch block (line 1341), statusCode would be 500, and the test would fail there first. | CLEAR |
+| xdescribe assertions — could they mask a defect by never running? | Yes by definition. `xdescribe` skips all tests. These assertions add future-proofing only (parity with existing `unpin-reg`/`unpin-tw`/`unpin-tb` siblings). The item explicitly targets this gap. Not a defect. | ACCEPTED by design |
+| Pre-existing `row.prev_when` assertion in xdescribe — column dropped by migration 20260526 | `unpin-at` test at line 412: `expect(row.prev_when).toBeNull()`. If xdescribe were ever re-enabled, this would fail (column doesn't exist → `row.prev_when === undefined`). Pre-existing defect in the xdescribe block, not introduced by this diff. | INFO (pre-existing) |
+| False-positive risk: controller calls `invalidateTasks` defensively even on partial failure | Examined catch block (line 1341): throws result in `res.status(500).json(...)`. The cache call at line 1334 is POST-transaction. A throw before line 1334 results in 500 status. Tests assert 200, so cache call must have happened. No false-positive path. | CLEAR |
+
+### PASS Verifications
+
+| # | Check | Status |
+|---|-------|--------|
+| 1 | All 3 JSON-restore unpin tests (`unpin-at`, `unpin-inv`, `unpin-no-mode`) now have `redis.invalidateTasks` assertion matching the 3 existing siblings | PASS |
+| 2 | All 4 toggle-off cleanup tests now have cache invalidation assertions (3 use `.toHaveBeenCalledWith(USER_ID)`, 1 pre-existing uses `.toHaveBeenCalled()`) | PASS |
+| 3 | Assertion form `.toHaveBeenCalledWith(USER_ID)` is stronger than `.toHaveBeenCalled()` — catches wrong-user regression | PASS |
+| 4 | No production code modified | PASS |
+| 5 | No test structure changed — only assertions appended to existing tests | PASS |
+
+## Bird Audit
+Not applicable — no frontend files changed.
+
+## Status: ISSUES
+
+_Signed: Zoe — 2026-05-31T23:30:00Z_
