@@ -9,7 +9,8 @@
  */
 
 const Redis = require('ioredis');
-const { libRedisLogger } = require('./logger');
+const { loggers } = require('./logger');
+const libRedisLogger = loggers.libRedis;
 
 const KEY_PREFIX = 'strivers:';
 

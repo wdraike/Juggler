@@ -1,6 +1,49 @@
-# Security Review — task.controller.js + MCP tasks.js
+# Security Review — ZOE-JUG-015 OAuth redirect_uri allowlist — 2026-05-31
 
-**Scope:** `juggler-backend/src/controllers/task.controller.js`, `juggler-backend/src/mcp/tools/tasks.js`  
+**Scope:** `juggler-backend/tests/unit/app.test.js`, `juggler-backend/src/lib/redis.js`, OAuth `/oauth/authorize` route (`app.js:160-177`)
+
+## Executive Summary
+
+The OAuth `/oauth/authorize` allowlist route (dev-mode only) correctly rejects non-allowlisted `redirect_uri` hosts with 400. The allowlist logic is sound for a dev-only endpoint. The `redis.js` logger fix is safe and narrows the blast radius of an undefined-logger crash. No exploitable vulnerabilities in the changed code.
+
+One medium finding: the `/oauth/token` dev endpoint accepts any `dev-code-*` string without checking that the code was actually issued by the `/oauth/authorize` handler — a minor CSRF-style issue in dev mode. Not exploitable in production (endpoint only registered in `development`).
+
+---
+
+## Critical Findings (exploitable now)
+
+_None._
+
+---
+
+## High Findings (exploitable with effort)
+
+_None._
+
+---
+
+## Medium Findings (defense in depth)
+
+| # | OWASP | Finding | File:Line | Remediation |
+|---|-------|---------|-----------|-------------|
+| M1 | A07 | `/oauth/token` in dev mode accepts any code matching `dev-code-*` prefix — it does not verify the code was actually issued by the `/oauth/authorize` handler. An attacker with access to the dev server could craft `dev-code-<anything>` and redeem it for a `dev-token`. Scoped to `NODE_ENV=development` only; not a production risk. | `app.js:181-183` | Track issued codes in a short-lived in-memory Set; reject codes not in the set. Low urgency given dev-only scope. |
+
+---
+
+## Low Findings (hardening)
+
+| # | OWASP | Finding | File:Line | Remediation |
+|---|-------|---------|-----------|-------------|
+| L1 | A10 | `state` parameter is echoed back in the redirect without validation for length or character set. An overly large `state` value would bloat the redirect URL. Not exploitable as SSRF since the redirect host is allowlisted; cosmetic hardening only. | `app.js:176` | Validate `state` length (e.g. max 512 chars) before echoing. |
+| L2 | A05 | `KEY_PREFIX` is `'strivers:'` — this is a Redis namespace mismatch if the service is Juggler. Keys written under the wrong prefix survive service restarts and could cause cache collisions if a future "strivers" service shares the same Redis instance. | `redis.js:15` | Update `KEY_PREFIX` to `'juggler:'` to match the service. |
+
+---
+
+## Status: PASS
+
+_No CRITICAL or HIGH findings. M1 is dev-only and L1/L2 are hardening items._
+
+_Signed: Elmo — 2026-05-31T00:00:00Z_
 **Date:** 2026-05-24  
 **Reviewer:** Elmo
 

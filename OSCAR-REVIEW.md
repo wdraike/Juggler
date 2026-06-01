@@ -1,3 +1,145 @@
+# Oscar Review — 2026-05-31 — ZOE-JUG-015
+
+## Verdict: PASS
+
+## Summary
+OAuth `/oauth/authorize` redirect_uri allowlist tests confirmed green (4/4 new cases, 18/18 total in suite). Three migration idempotency bug fixes (invalid COLLATE-in-CHECK SQL syntax + incomplete error-message matching). One runtime bug fix (redis.js `libRedisLogger` undefined crash). Ernie PASS (2 WARNs, zero criticals). Elmo PASS (no CRITICAL/HIGH). All 18 tests passing.
+
+## Agent Findings
+
+### Ernie — PASS
+- **W1**: Migration 20260604 `down()` lacks duplicate-constraint guard — low impact (rollback path only)
+- **W2**: Migration 20260606 `down()` lacks duplicate-constraint guard — same
+- No critical findings
+
+### Elmo — PASS
+- **M1**: `/oauth/token` dev endpoint accepts any `dev-code-*` string without verifying it was issued — dev-only, not exploitable in production
+- **L1/L2**: state parameter length unchecked; Redis KEY_PREFIX says 'strivers:' not 'juggler:' — hardening only
+- No CRITICAL or HIGH findings
+
+## Fix Loop
+None required.
+
+## Completeness
+| Check | Result |
+|-------|--------|
+| Tests exist for changed code | PASS — 4 OAuth allowlist tests cover all required cases |
+| Tests passing | PASS — 18/18 |
+| Docs updated (if API changed) | PASS — no API surface changed |
+| Security review run (OAuth/auth) | PASS — elmo run, no CRITICAL/HIGH |
+
+## Backlog Items
+| Finding | File |
+|---------|------|
+| Migration 20260604/20260606 down() duplicate-constraint guard | migrations/20260604, 20260606 |
+| Redis KEY_PREFIX 'strivers:' → 'juggler:' | redis.js:15 |
+| /oauth/token dev code replay (M1) | app.js:181 |
+
+## Kermit Report
+Verdict: PASS
+Completeness gaps: none
+Backlog items: 3 (all deferred WARNs)
+Ready to commit: yes
+
+## Status: PASS
+_Signed: Oscar — 2026-05-31T00:00:00Z_
+
+---
+
+# Oscar Review — 2026-05-31 — UX-JUG-P5
+
+## Verdict: PASS
+
+## Summary
+7 new unit tests (TC-P003–TC-P007 plus b-variants) added to TaskDetailHeader.test.jsx. Pure test-only change — no component logic altered. Telly PASS (14/14 tests), Zoe PASS (no BLOCK findings). One deferred WARN (allProjectNames=undefined not independently tested) — covered by approved `|| []` fallback in CLAUDE.md.
+
+## Agent Findings
+
+### Telly — PASS
+- 14/14 tests pass, including all 7 new TC-P003–P007 tests
+- TC-P003: null and undefined project render without crash — PASS
+- TC-P004: isMobile=true → BTN_H=36, isMobile=false → BTN_H=28 — PASS
+- TC-P005: empty allProjectNames array renders without crash — PASS
+- TC-P006: undefined onProjectChange does not crash on fireEvent.change — PASS
+- TC-P007: label[for="task-project-select"] pairs with id='task-project-select', text="Project" — PASS
+
+### Zoe — PASS
+- No false passes detected
+- Assertion depth adequate for each case: TC-P003/b crash-guard, TC-P004/b concrete px values, TC-P005 dual assertion, TC-P006 real interaction, TC-P007 two DOM assertions
+- WARN (deferred): allProjectNames=undefined not independently tested as standalone case — covered by approved fallback
+
+## Fix Loop
+None required.
+
+## Completeness
+| Check | Result |
+|-------|--------|
+| Tests exist for changed code | PASS — changed file IS the test file |
+| Tests passing | PASS — 14/14 |
+| Docs updated (if API changed) | PASS — no API or component logic changed |
+| Security review run (if auth/payment) | PASS — not applicable |
+
+## Backlog Items
+| Finding | File |
+|---------|------|
+| allProjectNames=undefined not independently tested | TaskDetailHeader.test.jsx |
+
+## Kermit Report
+Verdict: PASS
+Completeness gaps: none
+Backlog items: 1 (deferred WARN)
+Ready to commit: yes
+
+## Status: PASS
+_Signed: Oscar — 2026-05-31T00:00:00Z_
+
+---
+
+# Oscar Review — 2026-05-31 — UX-JUG-P1+P2+P4
+
+## Verdict: PASS
+
+## Summary
+Three targeted WCAG accessibility fixes to TaskDetailHeader.jsx. Bird PASS, Ernie PASS. 428 tests green. No blocking findings. Ready to commit.
+
+## Agent Findings
+
+### Bird (UX/Accessibility) — PASS
+- UX-JUG-P1: `lStyle.fontSize` 9→`isMobile ? 12 : 11` — correct, meets WCAG 1.4.3 for bold label text
+- UX-JUG-P2: `BTN_H` 26/30→28/36 — correct, meets WCAG 2.5.8 AA (24px min) on desktop and exceeds on mobile
+- UX-JUG-P4: `htmlFor='task-project-select'` + `id='task-project-select'` — correct explicit label association per WCAG 1.3.1
+- 4 pre-existing Info items noted (priority select height, Enable Flex font, Status label font, close button aria-label) — not regressions, out of scope
+
+### Ernie (Code Quality) — PASS
+- Diff is 4 lines; no logic changed
+- Approved fallbacks on lines 142 and 145 preserved unchanged (documented in CLAUDE.md)
+- React patterns correct — `htmlFor`/`id` pairing valid
+
+## Fix Loop
+None required.
+
+## Completeness
+| Check | Result |
+|-------|--------|
+| Tests exist for changed code | PASS — 6 tests in TaskDetailHeader.test.jsx including project select coverage |
+| Tests passing | PASS — 428/428 |
+| Docs updated (if API changed) | PASS — presentational value changes only, no API surface |
+| Security review run (if auth/payment) | PASS — not applicable |
+
+## Backlog Items
+None.
+
+## Kermit Report
+Verdict: PASS
+Completeness gaps: none
+Backlog items: 0
+Ready to commit: yes
+
+## Status: PASS
+_Signed: Oscar — 2026-05-31T00:00:00Z_
+
+---
+
 # Oscar Review — 2026-05-31 — BUILD-JUG-01+02+03, PRAIRIE-JUG-001+002+003
 
 ## Verdict: PASS
