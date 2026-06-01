@@ -291,6 +291,75 @@ describe('create_task rigid field (W-W3)', function() {
   });
 });
 
+// ── create_task field mapping assertions ──────────────────────────────────────
+//
+// Verifies that taskToRow correctly maps MCP input fields to DB column names.
+// These complement the placement_mode tests above which already assert
+// capturedInsertRow — here we focus on the other core fields.
+
+describe('create_task field mapping', function() {
+  var handler;
+
+  beforeEach(function() {
+    capturedInsertRow = null;
+    handler = getCreateTaskHandler();
+  });
+
+  test('text maps to row.text', async function() {
+    await handler({ text: 'My new task' });
+    expect(capturedInsertRow).toBeDefined();
+    expect(capturedInsertRow.text).toBe('My new task');
+  });
+
+  test('task_type defaults to "task"', async function() {
+    await handler({ text: 'Task type check' });
+    expect(capturedInsertRow).toBeDefined();
+    expect(capturedInsertRow.task_type).toBe('task');
+  });
+
+  test('dur maps to row.dur', async function() {
+    await handler({ text: 'Duration task', dur: 45 });
+    expect(capturedInsertRow).toBeDefined();
+    expect(capturedInsertRow.dur).toBe(45);
+  });
+
+  test('pri maps to row.pri', async function() {
+    await handler({ text: 'Priority task', pri: 'P1' });
+    expect(capturedInsertRow).toBeDefined();
+    expect(capturedInsertRow.pri).toBe('P1');
+  });
+
+  test('notes maps to row.notes', async function() {
+    await handler({ text: 'Task with notes', notes: 'Some notes here' });
+    expect(capturedInsertRow).toBeDefined();
+    expect(capturedInsertRow.notes).toBe('Some notes here');
+  });
+
+  test('url maps to row.url', async function() {
+    await handler({ text: 'Task with url', url: 'https://example.com' });
+    expect(capturedInsertRow).toBeDefined();
+    expect(capturedInsertRow.url).toBe('https://example.com');
+  });
+
+  test('dependsOn array maps to row.depends_on as JSON string', async function() {
+    await handler({ text: 'Dependent task', dependsOn: ['dep-aaa', 'dep-bbb'] });
+    expect(capturedInsertRow).toBeDefined();
+    expect(capturedInsertRow.depends_on).toBe(JSON.stringify(['dep-aaa', 'dep-bbb']));
+  });
+
+  test('row.id is set (UUID generated)', async function() {
+    await handler({ text: 'ID check task' });
+    expect(capturedInsertRow).toBeDefined();
+    expect(capturedInsertRow.id).toBe('mock-uuid-007');
+  });
+
+  test('created_at is set on the row', async function() {
+    await handler({ text: 'Timestamp task' });
+    expect(capturedInsertRow).toBeDefined();
+    expect(capturedInsertRow.created_at).toBeDefined();
+  });
+});
+
 describe('batch_update_tasks calendar-sync guard', function() {
   var handler;
   var mockDb;
@@ -320,5 +389,37 @@ describe('batch_update_tasks calendar-sync guard', function() {
     });
     expect(result.isError).toBeUndefined();
     expect(result.content[0].text).toMatch(/updated/i);
+    // Verify capturedUpdateRow contains the mapped fields
+    expect(capturedUpdateRow).toBeDefined();
+    expect(capturedUpdateRow.status).toBe('done');
+    expect(capturedUpdateRow.notes).toBe('Updated note');
+    // Confirm no calendar-blocked fields leaked into the row
+    expect(capturedUpdateRow.date_pinned).toBeUndefined();
+  });
+
+  test('batch_update_tasks: notes-only update → capturedUpdateRow.notes is set', async function() {
+    mockDb._tasksWithSyncRows = [{ id: 'task-2', gcal_event_id: 'gcal-2' }];
+    mockDb._tasksWithSyncFirst = { id: 'task-2', text: 'Another synced', task_type: 'task', scheduled_at: null };
+    capturedUpdateRow = null;
+    var batchHandler = getBatchUpdateTaskHandler();
+    var result = await batchHandler({
+      updates: [{ id: 'task-2', notes: 'Just a note' }]
+    });
+    expect(result.isError).toBeUndefined();
+    expect(capturedUpdateRow).toBeDefined();
+    expect(capturedUpdateRow.notes).toBe('Just a note');
+  });
+
+  test('batch_update_tasks: status-only update → capturedUpdateRow.status is set', async function() {
+    mockDb._tasksWithSyncRows = [{ id: 'task-3', gcal_event_id: 'gcal-3' }];
+    mockDb._tasksWithSyncFirst = { id: 'task-3', text: 'Status only', task_type: 'task', scheduled_at: null };
+    capturedUpdateRow = null;
+    var batchHandler = getBatchUpdateTaskHandler();
+    var result = await batchHandler({
+      updates: [{ id: 'task-3', status: 'wip' }]
+    });
+    expect(result.isError).toBeUndefined();
+    expect(capturedUpdateRow).toBeDefined();
+    expect(capturedUpdateRow.status).toBe('wip');
   });
 });
