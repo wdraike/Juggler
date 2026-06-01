@@ -122,7 +122,7 @@ describe('rowToTask — placement_mode passthrough (post-C1-fix)', () => {
   // placement_mode is NOT NULL in the DB; rowToTask passes it through as-is.
   // A missing/null value indicates a data integrity problem — rowToTask does
   // not paper over it with a fallback.
-  test('passes through null placement_mode from DB row as-is', () => {
+  test('passes through absent placement_mode key from DB row as-is (placementMode is undefined)', () => {
     const task = rowToTask({ text: 'Test' }, null);
     expect(task.placementMode).toBeUndefined();
   });
