@@ -517,4 +517,46 @@ describe('list_tasks MCP handler', function() {
     expect(ids).toContain('disabled-1');
     expect(ids).not.toContain('done-1');
   });
+
+  // ── 12. ZOE-JUG-027-W1: date-only filter (no limit) ─────────────────────
+
+  it('filters by date without limit returns all matching tasks', async function() {
+    // 2026-06-15T16:00:00Z = noon Eastern (UTC-4) → date "6/15"
+    // 2026-06-16T16:00:00Z = noon Eastern → date "6/16"
+    mockRows = [
+      makeRow({ id: 'june15-1', text: 'June 15 task 1', status: '', scheduled_at: '2026-06-15T16:00:00.000Z', placement_mode: 'all_day' }),
+      makeRow({ id: 'june15-2', text: 'June 15 task 2', status: '', scheduled_at: '2026-06-15T16:00:00.000Z', placement_mode: 'all_day' }),
+      makeRow({ id: 'june16-1', text: 'June 16 task',   status: '', scheduled_at: '2026-06-16T16:00:00.000Z', placement_mode: 'all_day' })
+    ];
+
+    var result = await handlers.list_tasks({ date: '6/15' });
+    var tasks = JSON.parse(result.content[0].text);
+    var ids = tasks.map(function(t) { return t.id; });
+
+    expect(ids).toContain('june15-1');
+    expect(ids).toContain('june15-2');
+    expect(ids).not.toContain('june16-1');
+    // No limit applied — both June-15 tasks returned
+    expect(tasks.length).toBe(2);
+  });
+
+  // ── 13. ZOE-JUG-027-W2: combined status + project filter ─────────────────
+
+  it('filters by status and project simultaneously', async function() {
+    mockRows = [
+      makeRow({ id: 'wip-alpha',   text: 'WIP Alpha',   status: 'wip',  project: 'Alpha' }),
+      makeRow({ id: 'wip-beta',    text: 'WIP Beta',    status: 'wip',  project: 'Beta'  }),
+      makeRow({ id: 'done-alpha',  text: 'Done Alpha',  status: 'done', project: 'Alpha' }),
+      makeRow({ id: 'empty-alpha', text: 'Empty Alpha', status: '',     project: 'Alpha' })
+    ];
+
+    var result = await handlers.list_tasks({ status: 'wip', project: 'Alpha' });
+    var tasks = JSON.parse(result.content[0].text);
+    var ids = tasks.map(function(t) { return t.id; });
+
+    expect(ids).toEqual(['wip-alpha']);
+    expect(ids).not.toContain('wip-beta');
+    expect(ids).not.toContain('done-alpha');
+    expect(ids).not.toContain('empty-alpha');
+  });
 });
