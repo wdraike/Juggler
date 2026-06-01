@@ -87,10 +87,6 @@ describe('WhenSection mode matrix', () => {
           describe(label, () => {
             var props = buildProps({ placementMode, datePinned, rigid, recurring });
 
-            it('renders without crashing', () => {
-              render(<WhenSection {...props} />);
-            });
-
             it('mode selector buttons visibility is correct', () => {
               render(<WhenSection {...props} />);
               var btns = queryModeButtons();
@@ -123,12 +119,15 @@ describe('WhenSection mode matrix', () => {
               // datePinned no longer contributes to isFixed — only cal-linked fixed mode locks the UI
               var expectedIsFixed = placementMode === 'fixed' && isCalManaged;
               var labelEl = screen.queryByText('Scheduling mode');
-              // ZOE-JUG-032: recurring=true and all_day mode omit the label — assert absence
-              // explicitly so these 20/40 combos don't silently skip without any assertion.
-              if (recurring || placementMode === 'all_day') {
+              // ZOE-JUG-031: "Scheduling mode" label is omitted only when recurring=true (the
+              // recurring branch renders its own mode selector without this label). For
+              // non-recurring tasks — including all_day — the non-recurring path renders the
+              // label unconditionally (component line 303-310: !marker && !isRecurring guard,
+              // no all_day exclusion). Assert accordingly so all 40 combos have real assertions.
+              if (recurring) {
                 expect(labelEl).not.toBeInTheDocument();
               } else {
-                // Non-recurring, non-allday: label must be present; check opacity reflects isFixed
+                // Non-recurring (all modes, including all_day): label must be present
                 expect(labelEl).toBeInTheDocument();
                 if (expectedIsFixed) {
                   expect(labelEl.style.opacity).toBe('0.4');
@@ -346,8 +345,15 @@ describe('WhenSection mode matrix — with calendar task', () => {
   var CALENDAR_TASK = { gcalEventId: 'gcal_x' };
 
   MODES.forEach(function(placementMode) {
-    it('renders without crashing for placementMode=' + placementMode + ' with calendar link', () => {
+    it('mode selector buttons are present for placementMode=' + placementMode + ' with calendar link', () => {
       render(<WhenSection {...buildProps({ placementMode, task: CALENDAR_TASK })} />);
+      var btns = queryModeButtons();
+      // All modes with a calendar-linked task must still render the mode selector buttons
+      // (fixed mode locks them via pointerEvents, but they remain in the DOM)
+      expect(btns.anytime).toBeInTheDocument();
+      expect(btns.timeWindow).toBeInTheDocument();
+      expect(btns.timeBlocks).toBeInTheDocument();
+      expect(btns.allDay).toBeInTheDocument();
     });
 
     it('isFixed derivation is correct for placementMode=' + placementMode + ' + calendar link', () => {
@@ -355,13 +361,22 @@ describe('WhenSection mode matrix — with calendar task', () => {
       // isCalManaged=true because gcalEventId is set; isFixed = placementMode==='fixed' && isCalManaged
       var expectedIsFixed = placementMode === 'fixed';
       var labelEl = screen.queryByText('Scheduling mode');
-      if (labelEl) {
-        var opacity = labelEl.style.opacity;
-        if (expectedIsFixed) {
-          expect(opacity).toBe('0.4');
-        } else {
-          expect(opacity).toBe('1');
+      if (expectedIsFixed) {
+        // fixed + cal-managed: label absent (locked UI) or dimmed at opacity 0.4
+        if (labelEl) {
+          expect(labelEl.style.opacity).toBe('0.4');
         }
+        // mode selector buttons must be keyboard-locked (tabIndex=-1)
+        var anytimeBtn = screen.getByTitle(/No time restriction/);
+        expect(anytimeBtn).toHaveAttribute('tabIndex', '-1');
+      } else {
+        // non-fixed: label present and fully opaque
+        if (labelEl) {
+          expect(labelEl.style.opacity).toBe('1');
+        }
+        // mode selector wrapper must NOT lock pointer events
+        var anytimeBtn = screen.getByTitle(/No time restriction/);
+        expect(anytimeBtn.closest('div')).not.toHaveStyle({ pointerEvents: 'none' });
       }
     });
   });
