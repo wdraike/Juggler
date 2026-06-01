@@ -363,3 +363,35 @@ describe('WhenSection mode matrix — with calendar task', () => {
     });
   });
 });
+
+// ── ZOE-JUG-034: mobile-specific block ───────────────────────────────────────
+// The main matrix has zero isMobile:true combinations. isMobile only affects
+// button sizing (BTN_H/fontSize/padding), not which buttons appear. These tests
+// verify button presence is unchanged on mobile.
+describe('WhenSection mode matrix — isMobile=true', function() {
+  it('non-recurring: all four mode buttons present on mobile', function() {
+    render(<WhenSection {...buildProps({ placementMode: 'anytime', isMobile: true })} />);
+    var btns = queryModeButtons();
+    expect(btns.anytime).toBeInTheDocument();
+    expect(btns.timeWindow).toBeInTheDocument();
+    expect(btns.timeBlocks).toBeInTheDocument();
+    expect(btns.allDay).toBeInTheDocument();
+  });
+
+  it('recurring: four mode buttons present on mobile', function() {
+    render(<WhenSection {...buildProps({ placementMode: 'anytime', recurring: true, isMobile: true })} />);
+    var btns = queryModeButtons();
+    expect(btns.anytime).toBeInTheDocument();
+    expect(btns.timeWindow).toBeInTheDocument();
+    expect(btns.timeBlocks).toBeInTheDocument();
+    expect(btns.allDay).toBeInTheDocument();
+  });
+
+  it('cal-managed fixed mode locks buttons on mobile (tabIndex=-1)', function() {
+    render(<WhenSection
+      {...buildProps({ placementMode: 'fixed', datePinned: false, task: { gcalEventId: 'gcal_x' }, isMobile: true })}
+    />);
+    var btn = screen.getByTitle(/No time restriction/);
+    expect(btn).toHaveAttribute('tabIndex', '-1');
+  });
+});
