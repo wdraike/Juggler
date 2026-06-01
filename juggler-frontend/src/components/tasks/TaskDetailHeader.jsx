@@ -127,6 +127,7 @@ export default function TaskDetailHeader({
         )}
 
         <input
+          data-testid="task-title"
           type="text" value={text} onChange={e => onTextChange && onTextChange(e.target.value)}
           autoFocus={isCreate}
           style={{

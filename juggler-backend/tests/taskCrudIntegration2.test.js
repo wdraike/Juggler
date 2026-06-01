@@ -641,7 +641,7 @@ describe('Recurring toggle-off cleanup', () => {
     expect(remaining).toHaveLength(0);
 
     // Cache must be invalidated after any updateTask mutation.
-    expect(redis.invalidateTasks).toHaveBeenCalled();
+    expect(redis.invalidateTasks).toHaveBeenCalledWith(USER_ID);
   });
 
   test('archives done/cancel instances instead of deleting them', async () => {
