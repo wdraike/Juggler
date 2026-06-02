@@ -151,10 +151,10 @@ const writeRateLimiter = rateLimit({
   max: 300,
   keyGenerator: (req) => {
     if (req.user && req.user.id) return String(req.user.id);
-    // Fallback to IP with IPv6 normalization
-    const ip = req.ip || req.connection.remoteAddress;
-    return ip && ip.includes(':') ? ip.split(':').slice(0, 4).join(':') : ip || 'unknown';
+    // Fallback to IP (express-rate-limit handles IPv6 internally)
+    return req.ip || 'unknown';
   },
+  validate: { ipAddress: false }, // Disable IPv6 validation warning (we handle fallback)
   message: { error: 'Too many write requests, please slow down.' },
   skip: (req) => req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS',
 });
