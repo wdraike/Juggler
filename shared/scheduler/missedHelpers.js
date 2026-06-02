@@ -1,36 +1,37 @@
-/**
- * juggler-cal-history — shared helpers for "missed" status computation.
- *
- * A pending recurring instance becomes "missed" once its placement window has closed.
- * Window-close = scheduled_at + timeFlex minutes (default 60).
- *
- * Used by:
- *   - juggler-backend/src/scheduler/runSchedule.js (event-triggered auto-mark)
- *   - juggler-backend/src/cron/cal-history-cron.js (periodic auto-mark sweep)
- *
- * Pure functions, no DB access — safe to import in either backend or shared/.
- */
+// Shared helpers for computing missed status
 
-function getScheduledAt(task) {
-  return task && (task.scheduledAt || task.scheduled_at);
+function isTaskMissed(task, currentTime) {
+  if (!task.scheduled_at) return false;
+  if (task.status === 'done' || task.status === 'cancel' || task.status === 'skip') return false;
+  
+  // Task is considered missed if it's past the scheduled time and not completed
+  const scheduledTime = new Date(task.scheduled_at);
+  const missedThreshold = new Date(scheduledTime.getTime() + (2 * 60 * 60 * 1000)); // 2 hours after scheduled time
+  
+  return currentTime > missedThreshold;
 }
 
-function windowCloseUtc(task) {
-  var sa = getScheduledAt(task);
-  if (!sa) return null;
-  var saDate = new Date(sa);
-  if (isNaN(saDate.getTime())) return null;
-  var flexMin = (task.timeFlex != null) ? task.timeFlex : 60;
-  return new Date(saDate.getTime() + flexMin * 60 * 1000);
+function shouldAutoMarkMissed(task, currentTime) {
+  if (!task.scheduled_at) return false;
+  if (task.status === 'missed') return false; // Already marked
+  if (task.status === 'done' || task.status === 'cancel' || task.status === 'skip') return false;
+  
+  // Auto-mark as missed if past the resolution window
+  const scheduledTime = new Date(task.scheduled_at);
+  const resolutionWindow = new Date(scheduledTime.getTime() + (24 * 60 * 60 * 1000)); // 24 hours after scheduled time
+  
+  return currentTime > resolutionWindow;
 }
 
-function isPastWindow(task, now) {
-  var wc = windowCloseUtc(task);
-  if (!wc) return false;
-  return wc.getTime() < (now ? now.getTime() : Date.now());
+function getMissedResolutionWindow(task) {
+  if (!task.scheduled_at) return null;
+  
+  const scheduledTime = new Date(task.scheduled_at);
+  return new Date(scheduledTime.getTime() + (24 * 60 * 60 * 1000)); // 24 hours after scheduled time
 }
 
 module.exports = {
-  windowCloseUtc: windowCloseUtc,
-  isPastWindow: isPastWindow
+  isTaskMissed,
+  shouldAutoMarkMissed,
+  getMissedResolutionWindow
 };

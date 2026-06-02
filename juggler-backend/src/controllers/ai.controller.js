@@ -10,7 +10,7 @@
  *   - 50 requests/day  (enforced here via ai_command_log table)
  */
 
-const db = require('../db');
+const { getDb } = require('@raike/lib-db');
 const { trackedGeminiCall } = require('../services/gemini-tracked-call');
 const AI_USE_CASES = require('../constants/ai-use-cases');
 
@@ -75,7 +75,7 @@ async function callGemini(prompt, systemPrompt) {
  */
 async function checkAndLogDailyQuota(userId) {
   var windowStart = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  var row = await db('ai_command_log')
+  var row = await getDb()('ai_command_log')
     .where('user_id', userId)
     .where('created_at', '>=', windowStart)
     .count('id as cnt')
@@ -84,7 +84,7 @@ async function checkAndLogDailyQuota(userId) {
   if (count >= AI_DAILY_LIMIT) {
     return { allowed: false };
   }
-  await db('ai_command_log').insert({ user_id: userId });
+  await getDb()('ai_command_log').insert({ user_id: userId });
   return { allowed: true };
 }
 

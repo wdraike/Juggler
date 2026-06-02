@@ -6,7 +6,7 @@
  * flow is: enter credentials → discover calendars → toggle selection.
  */
 
-var db = require('../db');
+const { getDb } = require('@raike/lib-db');
 var appleCalApi = require('../lib/apple-cal-api');
 var { encrypt, decrypt } = require('../lib/credential-encrypt');
 
@@ -21,7 +21,7 @@ async function getStatus(req, res) {
     // Load all calendars (enabled + disabled) for the toggle UI
     var allCalendars = [];
     try {
-      allCalendars = await db('user_calendars')
+      allCalendars = await getDb()('user_calendars')
         .where({ user_id: req.user.id, provider: 'apple' });
     } catch (e) {
       // Table may not exist if migration hasn't run yet
@@ -31,7 +31,7 @@ async function getStatus(req, res) {
 
     var lastSyncedAt = req.user.apple_cal_last_synced_at || null;
 
-    var autoSyncRow = await db('user_config')
+    var autoSyncRow = await getDb()('user_config')
       .where({ user_id: req.user.id, config_key: 'apple_cal_auto_sync' })
       .first();
     var autoSync = false;
@@ -97,17 +97,17 @@ async function connect(req, res) {
     }
 
     // Store encrypted credentials (calendar selection done separately)
-    await db('users').where('id', req.user.id).update({
+    await getDb()('users').where('id', req.user.id).update({
       apple_cal_server_url: url,
       apple_cal_username: username,
       apple_cal_password: encrypt(password),
-      updated_at: db.fn.now()
+      updated_at: getDb().fn.now()
     });
 
     // Load existing selections so frontend can show current state
     var existingSelections = [];
     try {
-      existingSelections = await db('user_calendars')
+      existingSelections = await getDb()('user_calendars')
         .where({ user_id: req.user.id, provider: 'apple' });
     } catch (e) {
       // Table may not exist if migration hasn't run yet — graceful fallback
@@ -153,20 +153,20 @@ async function selectCalendar(req, res) {
       return res.status(400).json({ error: 'Not connected to Apple Calendar. Connect first.' });
     }
 
-    await db('users').where('id', req.user.id).update({
+    await getDb()('users').where('id', req.user.id).update({
       apple_cal_calendar_url: calendarUrl,
-      updated_at: db.fn.now()
+      updated_at: getDb().fn.now()
     });
 
     // Also upsert into user_calendars for forward compat
-    var existing = await db('user_calendars')
+    var existing = await getDb()('user_calendars')
       .where({ user_id: req.user.id, provider: 'apple', calendar_id: calendarUrl })
       .first();
 
     if (existing) {
-      await db('user_calendars').where('id', existing.id).update({ enabled: true, updated_at: db.fn.now() });
+      await getDb()('user_calendars').where('id', existing.id).update({ enabled: true, updated_at: getDb().fn.now() });
     } else {
-      await db('user_calendars').insert({
+      await getDb()('user_calendars').insert({
         user_id: req.user.id,
         provider: 'apple',
         calendar_id: calendarUrl,
@@ -202,20 +202,20 @@ async function selectCalendars(req, res) {
     // Upsert each calendar selection
     for (var i = 0; i < calendars.length; i++) {
       var cal = calendars[i];
-      var existing = await db('user_calendars')
+      var existing = await getDb()('user_calendars')
         .where({ user_id: userId, provider: 'apple', calendar_id: cal.url })
         .first();
 
       if (existing) {
-        await db('user_calendars').where('id', existing.id).update({
+        await getDb()('user_calendars').where('id', existing.id).update({
           display_name: cal.displayName || existing.display_name,
           enabled: cal.enabled !== undefined ? cal.enabled : existing.enabled,
           sync_direction: cal.syncDirection || existing.sync_direction,
           ingest_mode: cal.ingestMode || existing.ingest_mode,
-          updated_at: db.fn.now()
+          updated_at: getDb().fn.now()
         });
       } else {
-        await db('user_calendars').insert({
+        await getDb()('user_calendars').insert({
           user_id: userId,
           provider: 'apple',
           calendar_id: cal.url,
@@ -228,16 +228,16 @@ async function selectCalendars(req, res) {
     }
 
     // Update legacy single-calendar field to first enabled calendar (backward compat)
-    var firstEnabled = await db('user_calendars')
+    var firstEnabled = await getDb()('user_calendars')
       .where({ user_id: userId, provider: 'apple', enabled: true })
       .first();
 
-    await db('users').where('id', userId).update({
+    await getDb()('users').where('id', userId).update({
       apple_cal_calendar_url: firstEnabled ? firstEnabled.calendar_id : null,
-      updated_at: db.fn.now()
+      updated_at: getDb().fn.now()
     });
 
-    var savedCalendars = await db('user_calendars')
+    var savedCalendars = await getDb()('user_calendars')
       .where({ user_id: userId, provider: 'apple' });
 
     res.json({ calendars: savedCalendars });
@@ -252,7 +252,7 @@ async function selectCalendars(req, res) {
  */
 async function getCalendars(req, res) {
   try {
-    var calendars = await db('user_calendars')
+    var calendars = await getDb()('user_calendars')
       .where({ user_id: req.user.id, provider: 'apple' });
 
     res.json({ calendars: calendars });
@@ -269,7 +269,7 @@ async function getCalendars(req, res) {
 async function updateCalendar(req, res) {
   try {
     var calendarId = req.params.id;
-    var row = await db('user_calendars')
+    var row = await getDb()('user_calendars')
       .where({ id: calendarId, user_id: req.user.id })
       .first();
 
@@ -277,24 +277,24 @@ async function updateCalendar(req, res) {
       return res.status(404).json({ error: 'Calendar not found' });
     }
 
-    var updates = { updated_at: db.fn.now() };
+    var updates = { updated_at: getDb().fn.now() };
     if (req.body.enabled !== undefined) updates.enabled = req.body.enabled;
     if (req.body.syncDirection) updates.sync_direction = req.body.syncDirection;
     if (req.body.ingestMode) updates.ingest_mode = req.body.ingestMode;
 
-    await db('user_calendars').where('id', calendarId).update(updates);
+    await getDb()('user_calendars').where('id', calendarId).update(updates);
 
     // Update legacy field
-    var firstEnabled = await db('user_calendars')
+    var firstEnabled = await getDb()('user_calendars')
       .where({ user_id: req.user.id, provider: 'apple', enabled: true })
       .first();
 
-    await db('users').where('id', req.user.id).update({
+    await getDb()('users').where('id', req.user.id).update({
       apple_cal_calendar_url: firstEnabled ? firstEnabled.calendar_id : null,
-      updated_at: db.fn.now()
+      updated_at: getDb().fn.now()
     });
 
-    var updated = await db('user_calendars').where('id', calendarId).first();
+    var updated = await getDb()('user_calendars').where('id', calendarId).first();
     res.json({ calendar: updated });
   } catch (error) {
     logger.error('Apple Calendar update-calendar error:', error);
@@ -308,22 +308,22 @@ async function updateCalendar(req, res) {
 async function disconnect(req, res) {
   try {
     // Remove all calendar selections
-    await db('user_calendars')
+    await getDb()('user_calendars')
       .where({ user_id: req.user.id, provider: 'apple' })
       .del();
 
-    await db('users').where('id', req.user.id).update({
+    await getDb()('users').where('id', req.user.id).update({
       apple_cal_server_url: null,
       apple_cal_username: null,
       apple_cal_password: null,
       apple_cal_calendar_url: null,
       apple_cal_sync_token: null,
       apple_cal_last_synced_at: null,
-      updated_at: db.fn.now()
+      updated_at: getDb().fn.now()
     });
 
     // Clear auto-sync setting
-    await db('user_config')
+    await getDb()('user_config')
       .where({ user_id: req.user.id, config_key: 'apple_cal_auto_sync' })
       .del()
       .catch(function() {});
@@ -344,16 +344,16 @@ async function setAutoSync(req, res) {
     var userId = req.user.id;
     var value = !!req.body.enabled;
 
-    var existing = await db('user_config')
+    var existing = await getDb()('user_config')
       .where({ user_id: userId, config_key: 'apple_cal_auto_sync' })
       .first();
 
     if (existing) {
-      await db('user_config')
+      await getDb()('user_config')
         .where({ user_id: userId, config_key: 'apple_cal_auto_sync' })
         .update({ config_value: JSON.stringify(value) });
     } else {
-      await db('user_config').insert({
+      await getDb()('user_config').insert({
         user_id: userId,
         config_key: 'apple_cal_auto_sync',
         config_value: JSON.stringify(value)
@@ -401,7 +401,7 @@ async function refreshCalendars(req, res) {
     }
 
     // Load existing rows
-    var existingRows = await db('user_calendars')
+    var existingRows = await getDb()('user_calendars')
       .where({ user_id: userId, provider: 'apple' });
     var existingByUrl = {};
     existingRows.forEach(function(r) { existingByUrl[r.calendar_id] = r; });
@@ -415,26 +415,26 @@ async function refreshCalendars(req, res) {
       if (existingByUrl[rc.url]) {
         // Update display name if changed
         if (existingByUrl[rc.url].display_name !== rc.displayName) {
-          await db('user_calendars').where('id', existingByUrl[rc.url].id)
-            .update({ display_name: rc.displayName, updated_at: db.fn.now() });
+          await getDb()('user_calendars').where('id', existingByUrl[rc.url].id)
+            .update({ display_name: rc.displayName, updated_at: getDb().fn.now() });
         }
       } else {
         // New calendar — insert as disabled
-        await db('user_calendars').insert({
+        await getDb()('user_calendars').insert({
           user_id: userId,
           provider: 'apple',
           calendar_id: rc.url,
           display_name: rc.displayName,
           enabled: false,
           sync_direction: 'full',
-          created_at: db.fn.now(),
-          updated_at: db.fn.now()
+          created_at: getDb().fn.now(),
+          updated_at: getDb().fn.now()
         });
       }
     }
 
     // Return the full list with current state
-    var allCalendars = await db('user_calendars')
+    var allCalendars = await getDb()('user_calendars')
       .where({ user_id: userId, provider: 'apple' });
 
     res.json({

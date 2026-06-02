@@ -2,7 +2,7 @@
  * Config Controller — locations, tools, matrix, time blocks, schedules, preferences, projects
  */
 
-const db = require('../db');
+const { getDb } = require('@raike/lib-db');
 const { z } = require('zod');
 const tasksWrite = require('../lib/tasks-write');
 const { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
@@ -36,10 +36,10 @@ async function getAllConfig(req, res) {
     if (cached) return res.json(cached);
 
     const [locations, tools, projects, configRows] = await Promise.all([
-      db('locations').where('user_id', userId).orderBy('sort_order'),
-      db('tools').where('user_id', userId).orderBy('sort_order'),
-      db('projects').where('user_id', userId).orderBy('sort_order'),
-      db('user_config').where('user_id', userId)
+      getDb()('locations').where('user_id', userId).orderBy('sort_order'),
+      getDb()('tools').where('user_id', userId).orderBy('sort_order'),
+      getDb()('projects').where('user_id', userId).orderBy('sort_order'),
+      getDb()('user_config').where('user_id', userId)
     ]);
 
     const config = {};
@@ -112,15 +112,15 @@ async function updateConfig(req, res) {
       return res.status(400).json({ error: 'Config value too large (max 100KB)' });
     }
 
-    const existing = await db('user_config').where({ user_id: userId, config_key: key }).first();
+    const existing = await getDb()('user_config').where({ user_id: userId, config_key: key }).first();
 
     if (existing) {
-      await db('user_config').where({ user_id: userId, config_key: key }).update({
+      await getDb()('user_config').where({ user_id: userId, config_key: key }).update({
         config_value: JSON.stringify(value),
-        updated_at: db.fn.now()
+        updated_at: getDb().fn.now()
       });
     } else {
-      await db('user_config').insert({
+      await getDb()('user_config').insert({
         user_id: userId,
         config_key: key,
         config_value: JSON.stringify(value)
@@ -139,7 +139,7 @@ async function updateConfig(req, res) {
         });
       });
 
-      var activeTasks = await db('tasks_v')
+      var activeTasks = await getDb()('tasks_v')
         .where('user_id', userId)
         .whereNotIn('status', ['done', 'cancel', 'skip', 'pause'])
         .whereNotNull('when')
@@ -189,7 +189,7 @@ async function updateConfig(req, res) {
 
 async function getProjects(req, res) {
   try {
-    const rows = await db('projects').where('user_id', req.user.id).orderBy('sort_order');
+    const rows = await getDb()('projects').where('user_id', req.user.id).orderBy('sort_order');
     res.json({ projects: rows.map(p => ({ id: p.id, name: p.name, color: p.color, icon: p.icon, sortOrder: p.sort_order })) });
   } catch (error) {
     logger.error('Get projects error:', error);
@@ -209,7 +209,7 @@ async function reorderProjects(req, res) {
     if (!Array.isArray(ids)) return res.status(400).json({ error: 'ids array required' });
     if (ids.length > 500) return res.status(400).json({ error: 'Too many ids (max 500)' });
 
-    await db.transaction(async (trx) => {
+    await getDb().transaction(async (trx) => {
       // Use a single CASE expression rather than N UPDATEs. Avoids N round-trips
       // and keeps the reorder atomic under the transaction.
       const escaped = ids.map((id) => Number(id)).filter((n) => Number.isFinite(n));
@@ -221,7 +221,7 @@ async function reorderProjects(req, res) {
       await trx('projects')
         .where('user_id', req.user.id)
         .whereIn('id', escaped)
-        .update({ sort_order: trx.raw(caseExpr, bindings), updated_at: db.fn.now() });
+        .update({ sort_order: trx.raw(caseExpr, bindings), updated_at: getDb().fn.now() });
     });
 
     await cache.invalidateConfig(req.user.id);
@@ -237,8 +237,8 @@ async function createProject(req, res) {
     const { name, color, icon } = req.body;
     if (!name) return res.status(400).json({ error: 'Project name required' });
 
-    const maxOrder = await db('projects').where('user_id', req.user.id).max('sort_order as max').first();
-    const [id] = await db('projects').insert({
+    const maxOrder = await getDb()('projects').where('user_id', req.user.id).max('sort_order as max').first();
+    const [id] = await getDb()('projects').insert({
       user_id: req.user.id,
       name,
       color: color || null,
@@ -259,15 +259,15 @@ async function updateProject(req, res) {
     const { id } = req.params;
     const { name, color, icon, oldName } = req.body;
 
-    await db.transaction(async (trx) => {
+    await getDb().transaction(async (trx) => {
       await trx('projects').where({ id, user_id: req.user.id }).update({
-        name, color, icon, updated_at: db.fn.now()
+        name, color, icon, updated_at: getDb().fn.now()
       });
       // If the name changed, rename the project on all tasks that reference it
       if (oldName && name && oldName !== name) {
         await tasksWrite.updateTasksWhere(trx, req.user.id, function(q) {
           return q.where('project', oldName);
-        }, { project: name, updated_at: db.fn.now() });
+        }, { project: name, updated_at: getDb().fn.now() });
       }
     });
 
@@ -283,7 +283,7 @@ async function updateProject(req, res) {
 async function deleteProject(req, res) {
   try {
     const { id } = req.params;
-    await db('projects').where({ id, user_id: req.user.id }).del();
+    await getDb()('projects').where({ id, user_id: req.user.id }).del();
     await cache.invalidateConfig(req.user.id);
     res.json({ message: 'Project deleted', id });
   } catch (error) {
@@ -296,7 +296,7 @@ async function deleteProject(req, res) {
 
 async function getLocations(req, res) {
   try {
-    const rows = await db('locations').where('user_id', req.user.id).orderBy('sort_order');
+    const rows = await getDb()('locations').where('user_id', req.user.id).orderBy('sort_order');
     res.json({ locations: rows.map(l => ({
       id: l.location_id,
       name: l.name,
@@ -327,7 +327,7 @@ async function replaceLocations(req, res) {
       return l;
     }));
 
-    await db.transaction(async (trx) => {
+    await getDb().transaction(async (trx) => {
       await trx('locations').where('user_id', req.user.id).del();
       if (enriched.length > 0) {
         await trx('locations').insert(enriched.map((l, i) => ({
@@ -355,7 +355,7 @@ async function replaceLocations(req, res) {
 
 async function getTools(req, res) {
   try {
-    const rows = await db('tools').where('user_id', req.user.id).orderBy('sort_order');
+    const rows = await getDb()('tools').where('user_id', req.user.id).orderBy('sort_order');
     res.json({ tools: rows.map(t => ({ id: t.tool_id, name: t.name, icon: t.icon })) });
   } catch (error) {
     logger.error('Get tools error:', error);
@@ -369,7 +369,7 @@ async function replaceTools(req, res) {
     if (!toolParsed.success) return res.status(400).json({ error: 'Invalid tools payload', details: toolParsed.error.issues });
     const { tools } = toolParsed.data;
 
-    await db.transaction(async (trx) => {
+    await getDb().transaction(async (trx) => {
       await trx('tools').where('user_id', req.user.id).del();
       if (tools.length > 0) {
         await trx('tools').insert(tools.map((t, i) => ({

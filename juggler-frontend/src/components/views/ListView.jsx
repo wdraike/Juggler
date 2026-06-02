@@ -7,6 +7,7 @@ import TaskCard from '../tasks/TaskCard';
 import QuickAddTask from '../tasks/QuickAddTask';
 import { getTheme } from '../../theme/colors';
 import { DAY_NAMES, MONTH_NAMES } from '../../state/constants';
+import { isTerminalStatus } from '../../shared/task-status';
 import { parseDate, formatDateKey } from '../../scheduler/dateHelpers';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 
@@ -27,7 +28,7 @@ export default function ListView({ allTasks, statuses, filter, search, projectFi
   var filteredTasks = useMemo(() => {
     return allTasks.filter(t => {
       var st = statuses[t.id] || '';
-      if (filter === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause' && st !== 'missed';
+      if (filter === 'open') return !isTerminalStatus(st);
       if (filter === 'action') return st === '' || st === 'wip';
       if (filter === 'done') return st === 'done';
       if (filter === 'wip') return st === 'wip';

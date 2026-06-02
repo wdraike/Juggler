@@ -11,7 +11,7 @@
  * API always returns both: scheduledAt (UTC ISO) + date/time/day (local derived).
  */
 
-const db = require('../db');
+const { getDb } = require('@raike/lib-db');
 const { v7: uuidv7 } = require('uuid');
 const { z } = require('zod');
 const { localToUtc, utcToLocal, toDateISO, fromDateISO, getDayName, safeTimezone } = require('../scheduler/dateHelpers');
@@ -99,19 +99,19 @@ async function expandToAllInstanceIds(userId, ids) {
   var masterIds = new Set();
   // Which input ids map to a master (either directly or via an instance's
   // master_id)? Two short queries cover it.
-  var masters = await db('task_masters')
+  var masters = await getDb()('task_masters')
     .where('user_id', userId)
     .whereIn('id', ids)
     .where('recurring', 1)
     .select('id');
   masters.forEach(function(r) { masterIds.add(r.id); });
-  var insts = await db('task_instances')
+  var insts = await getDb()('task_instances')
     .where('user_id', userId)
     .whereIn('id', ids)
     .select('id', 'master_id');
   insts.forEach(function(r) { if (r.master_id) masterIds.add(r.master_id); });
   if (masterIds.size === 0) return ids;
-  var siblings = await db('task_instances')
+  var siblings = await getDb()('task_instances')
     .where('user_id', userId)
     .whereIn('master_id', Array.from(masterIds))
     .select('id');
@@ -628,7 +628,7 @@ function guardFixedCalendarWhen(row, guardTarget, opts) {
  * Used for change-detection polling so the frontend knows when to reload.
  */
 async function getTasksVersion(userId) {
-  var row = await db('tasks_v')
+  var row = await getDb()('tasks_v')
     .where('user_id', userId)
     .max('updated_at as max_updated')
     .count('* as cnt')
@@ -648,7 +648,7 @@ async function getAllTasks(req, res) {
     var cached = await cache.get(cacheKey);
     if (cached) return res.json(cached);
 
-    var query = db('tasks_v').where('user_id', req.user.id)
+    var query = getDb()('tasks_v').where('user_id', req.user.id)
       .orderByRaw('(scheduled_at IS NULL) ASC, scheduled_at ASC');
     if (req.query.limit) query = query.limit(parseInt(req.query.limit) || 1000);
     if (req.query.offset) query = query.offset(parseInt(req.query.offset) || 0);
@@ -676,7 +676,7 @@ async function getTask(req, res) {
     // tasks_with_sync_v view (GROUP BY scan over full ledger).
     var [row, templateRows] = await Promise.all([
       fetchTaskWithEventIds(db, id, req.user.id),
-      db('tasks_v').where('user_id', req.user.id)
+      getDb()('tasks_v').where('user_id', req.user.id)
         .where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); })
         .select()
     ]);
@@ -713,15 +713,15 @@ async function getVersion(req, res) {
  */
 async function ensureProject(userId, projectName) {
   if (!projectName) return;
-  var exists = await db('projects').where({ user_id: userId, name: projectName }).first();
+  var exists = await getDb()('projects').where({ user_id: userId, name: projectName }).first();
   if (!exists) {
-    await db('projects').insert({ user_id: userId, name: projectName });
+    await getDb()('projects').insert({ user_id: userId, name: projectName });
   }
 }
 
 async function applySplitDefault(row, userId) {
   if (row.split === undefined || row.split === null) {
-    var prefs = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
+    var prefs = await getDb()('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
     var splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
     row.split = splitDefault ? 1 : 0;
   }
@@ -968,7 +968,7 @@ async function updateTask(req, res) {
       delete fastRow.user_id;
       delete fastRow.created_at;
       delete fastRow._pendingTimeOnly;
-      fastRow.updated_at = db.fn.now();
+      fastRow.updated_at = getDb().fn.now();
 
       if (!fastExisting) {
         return res.status(404).json({ error: 'Task not found' });
@@ -1005,14 +1005,14 @@ async function updateTask(req, res) {
           else fastInstUpdate[k] = fastRow[k];
         });
         if (Object.keys(fastTplUpdate).length > 0) {
-          fastTplUpdate.updated_at = db.fn.now();
+          fastTplUpdate.updated_at = getDb().fn.now();
           await tasksWrite.updateTaskById(db, fastExisting.source_id, fastTplUpdate, req.user.id);
         }
         if (Object.keys(fastInstUpdate).length > 0) {
-          fastInstUpdate.updated_at = db.fn.now();
+          fastInstUpdate.updated_at = getDb().fn.now();
           await tasksWrite.updateTaskById(db, id, fastInstUpdate, req.user.id);
         } else {
-          await tasksWrite.updateTaskById(db, id, { updated_at: db.fn.now() }, req.user.id);
+          await tasksWrite.updateTaskById(db, id, { updated_at: getDb().fn.now() }, req.user.id);
         }
       } else {
         await tasksWrite.updateTaskById(db, id, fastRow, req.user.id);
@@ -1120,7 +1120,7 @@ async function updateTask(req, res) {
       var { schedulingFields, nonSchedulingFields } = splitFields(row);
       // Write non-scheduling fields directly (safe during scheduler/cal-sync)
       if (Object.keys(nonSchedulingFields).length > 0) {
-        nonSchedulingFields.updated_at = db.fn.now();
+        nonSchedulingFields.updated_at = getDb().fn.now();
         await tasksWrite.updateTaskById(db, id, nonSchedulingFields, req.user.id);
       }
       // Queue scheduling fields for flush
@@ -1146,7 +1146,7 @@ async function updateTask(req, res) {
       // + just recurring templates for srcMap.
       var [currentRow, templateRows2] = await Promise.all([
         fetchTaskWithEventIds(db, id, req.user.id),
-        db('tasks_v').where('user_id', req.user.id)
+        getDb()('tasks_v').where('user_id', req.user.id)
           .where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); })
           .select()
       ]);
@@ -1158,7 +1158,7 @@ async function updateTask(req, res) {
 
     var taskType = existing.task_type || 'task';
 
-    await db.transaction(async function(trx) {
+    await getDb().transaction(async function(trx) {
       if (taskType === 'recurring_instance' && existing.source_id) {
         // Route template fields to the source, keep instance fields on this row.
         var templateUpdate = {};
@@ -1181,7 +1181,7 @@ async function updateTask(req, res) {
 
         // Update the source template with template fields
         if (Object.keys(templateUpdate).length > 0) {
-          templateUpdate.updated_at = db.fn.now();
+          templateUpdate.updated_at = getDb().fn.now();
           await tasksWrite.updateTaskById(trx, existing.source_id, templateUpdate, req.user.id);
         }
 
@@ -1196,11 +1196,11 @@ async function updateTask(req, res) {
 
         // Update instance-specific fields on this row
         if (Object.keys(instanceUpdate).length > 0) {
-          instanceUpdate.updated_at = db.fn.now();
+          instanceUpdate.updated_at = getDb().fn.now();
           await tasksWrite.updateTaskById(trx, id, instanceUpdate, req.user.id);
         } else {
           // Still touch updated_at so version changes
-          await tasksWrite.updateTaskById(trx, id, { updated_at: db.fn.now() }, req.user.id);
+          await tasksWrite.updateTaskById(trx, id, { updated_at: getDb().fn.now() }, req.user.id);
         }
       } else if (taskType === 'recurring_template') {
         // Editing the template directly — just update the template row.
@@ -1326,7 +1326,7 @@ async function updateTask(req, res) {
     // templates for srcMap. Both run in parallel.
     var [updatedRow, templateRows] = await Promise.all([
       fetchTaskWithEventIds(db, id, req.user.id),
-      db('tasks_v').where('user_id', req.user.id)
+      getDb()('tasks_v').where('user_id', req.user.id)
         .where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); })
         .select()
     ]);
@@ -1358,7 +1358,7 @@ async function deleteTask(req, res) {
 
     // In ingest-only mode, prevent deletion of calendar-linked tasks
     if (task.gcal_event_id || task.msft_event_id) {
-      var _csRow = await db('user_config')
+      var _csRow = await getDb()('user_config')
         .where({ user_id: req.user.id, config_key: 'cal_sync_settings' }).first();
       var _csSettings = _csRow
         ? (typeof _csRow.config_value === 'string' ? JSON.parse(_csRow.config_value) : _csRow.config_value)
@@ -1377,7 +1377,7 @@ async function deleteTask(req, res) {
     var PROVIDER_NAMES_LOCAL = { gcal: 'Google Calendar', msft: 'Microsoft Calendar', apple: 'Apple Calendar' };
     var isCascadeDelete = cascade === 'recurring';
     if (!isCascadeDelete) {
-      var providerLedgerRow = await db('cal_sync_ledger')
+      var providerLedgerRow = await getDb()('cal_sync_ledger')
         .where({ user_id: req.user.id, task_id: id, status: 'active' })
         .where('origin', '!=', 'juggler')
         .first();
@@ -1404,7 +1404,7 @@ async function deleteTask(req, res) {
       var pendingIds = [];
       var keptIds = [];
 
-      await db.transaction(async function(trx) {
+      await getDb().transaction(async function(trx) {
         // Find all instances of this recurring task
         var instances = await trx('tasks_with_sync_v')
           .where({ user_id: req.user.id, source_id: templateId })
@@ -1428,7 +1428,7 @@ async function deleteTask(req, res) {
             .where('user_id', req.user.id)
             .whereIn('task_id', pendingIds)
             .where('status', 'active')
-            .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
+            .update({ status: 'deleted_local', task_id: null, synced_at: getDb().fn.now() })
             .catch(function(err) { logger.error("[silent-catch]", err.message); });
 
           await tasksWrite.deleteTasksWhere(trx, req.user.id, function(q) {
@@ -1463,7 +1463,7 @@ async function deleteTask(req, res) {
             await trx('cal_sync_ledger')
               .where({ user_id: req.user.id, task_id: templateId })
               .where('status', 'active')
-              .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
+              .update({ status: 'deleted_local', task_id: null, synced_at: getDb().fn.now() })
               .catch(function(err) { logger.error("[silent-catch]", err.message); });
           }
           await tasksWrite.deleteTaskById(trx, templateId, req.user.id);
@@ -1493,7 +1493,7 @@ async function deleteTask(req, res) {
     if (task.task_type === 'recurring_instance') {
       await tasksWrite.updateTaskById(db, id, {
         status: 'skip',
-        updated_at: db.fn.now()
+        updated_at: getDb().fn.now()
       }, req.user.id);
       await cache.invalidateTasks(req.user.id);
       enqueueScheduleRun(req.user.id, 'api:deleteTask:softSkip', [id]);
@@ -1501,7 +1501,7 @@ async function deleteTask(req, res) {
     }
 
     // Standard single-task delete (non-recurring)
-    await db.transaction(async function(trx) {
+    await getDb().transaction(async function(trx) {
       var deletedDeps = typeof task.depends_on === 'string'
         ? JSON.parse(task.depends_on || '[]') : (task.depends_on || []);
       var affected = await trx('tasks_v')
@@ -1518,7 +1518,7 @@ async function deleteTask(req, res) {
         });
         await Promise.all(depUpdates.map(function(u) {
           return tasksWrite.updateTaskById(trx, u.id, {
-            depends_on: u.depends_on, updated_at: db.fn.now()
+            depends_on: u.depends_on, updated_at: getDb().fn.now()
           }, req.user.id);
         }));
       }
@@ -1529,7 +1529,7 @@ async function deleteTask(req, res) {
         await trx('cal_sync_ledger')
           .where({ user_id: req.user.id, task_id: id })
           .where('status', 'active')
-          .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
+          .update({ status: 'deleted_local', task_id: null, synced_at: getDb().fn.now() })
           .catch(function(err) { logger.error("[silent-catch]", err.message); });
       }
 
@@ -1634,8 +1634,8 @@ async function updateTaskStatus(req, res) {
           recurring: 1,
           scheduled_at: scheduledAt || null,
           status: '',
-          created_at: db.fn.now(),
-          updated_at: db.fn.now()
+          created_at: getDb().fn.now(),
+          updated_at: getDb().fn.now()
         });
         existing = await fetchTaskWithEventIds(db, id, req.user.id);
       }
@@ -1658,11 +1658,11 @@ async function updateTaskStatus(req, res) {
         return res.status(400).json({ error: 'Recurring templates can only be paused or unpaused' });
       }
 
-      await tasksWrite.updateTaskById(db, id, { status: status || '', updated_at: db.fn.now() }, req.user.id);
+      await tasksWrite.updateTaskById(db, id, { status: status || '', updated_at: getDb().fn.now() }, req.user.id);
 
       // When pausing: delete future open instances and clean up their GCal events
       if (status === 'pause') {
-        var futureInstances = await db('tasks_with_sync_v')
+        var futureInstances = await getDb()('tasks_with_sync_v')
           .where({ source_id: id, user_id: req.user.id })
           .where('status', '')
           .where('scheduled_at', '>', new Date())
@@ -1672,11 +1672,11 @@ async function updateTaskStatus(req, res) {
 
         if (instanceIds.length > 0) {
           // Clean up calendar sync ledger entries for deleted instances
-          await db('cal_sync_ledger')
+          await getDb()('cal_sync_ledger')
             .where('user_id', req.user.id)
             .whereIn('task_id', instanceIds)
             .where('status', 'active')
-            .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
+            .update({ status: 'deleted_local', task_id: null, synced_at: getDb().fn.now() })
             .catch(function(err) { logger.error("[silent-catch]", err.message); });
 
           await tasksWrite.deleteTasksWhere(db, req.user.id, function(q) {
@@ -1686,7 +1686,7 @@ async function updateTaskStatus(req, res) {
       }
       // Unpausing: next scheduler run will regenerate instances via expandRecurring
 
-      var srcMap = buildSourceMap(await db('tasks_v').where('user_id', req.user.id).where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); }).select());
+      var srcMap = buildSourceMap(await getDb()('tasks_v').where('user_id', req.user.id).where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); }).select());
       await cache.invalidateTasks(req.user.id);
       enqueueScheduleRun(req.user.id, 'api:updateTaskStatus:template', [id].concat(instanceIds || []));
       var updatedTemplate = await fetchTaskWithEventIds(db, id, req.user.id);
@@ -1697,7 +1697,7 @@ async function updateTaskStatus(req, res) {
     var _rollingMasterRow = null;
     var _instanceMasterId = existing.master_id || existing.source_id;
     if (_instanceMasterId && TERMINAL_REQUIRES_SCHEDULE.indexOf(status) !== -1 && !existing.scheduled_at) {
-      _rollingMasterRow = await db('task_masters').where({ id: _instanceMasterId, user_id: req.user.id }).first();
+      _rollingMasterRow = await getDb()('task_masters').where({ id: _instanceMasterId, user_id: req.user.id }).first();
     }
     var _isRollingInstance = _rollingMasterRow && isRollingMaster(_rollingMasterRow);
 
@@ -1714,14 +1714,14 @@ async function updateTaskStatus(req, res) {
       });
     }
 
-    var update = { status: status || '', updated_at: db.fn.now() };
+    var update = { status: status || '', updated_at: getDb().fn.now() };
     var isIngested = existing.cal_sync_origin && existing.cal_sync_origin !== 'juggler';
     var isFutureScheduled = existing.scheduled_at && new Date(existing.scheduled_at) > new Date();
 
     // juggler-cal-history Plan C — write completed_at on terminal transition (D-12).
     // Reverse: clearing terminal status (reopen) clears completed_at.
     if (isTerminalStatus(status) && !isTerminalStatus(existing.status)) {
-      update.completed_at = db.fn.now();
+      update.completed_at = getDb().fn.now();
     } else if (status === '' && isTerminalStatus(existing.status)) {
       update.completed_at = null;
     }
@@ -1735,7 +1735,7 @@ async function updateTaskStatus(req, res) {
       if (completedAt && completedAt !== 'now' && completedAt !== 'scheduled') {
         // Custom datetime string from the user — clamp to now if in the future
         var customDate = new Date(completedAt);
-        update.scheduled_at = customDate > new Date() ? db.fn.now() : customDate;
+        update.scheduled_at = customDate > new Date() ? getDb().fn.now() : customDate;
       }
       // Otherwise leave scheduled_at unchanged (covers 'now', 'scheduled', and undefined)
     }
@@ -1745,15 +1745,15 @@ async function updateTaskStatus(req, res) {
     // generalizes to all terminal statuses (done, cancel, skip, pause, missed) via shared
     // isTerminalStatus. Fires on any terminal → non-terminal transition.
     if (existing && isTerminalStatus(existing.status) && !isTerminalStatus(status)) {
-      await db('cal_sync_ledger')
+      await getDb()('cal_sync_ledger')
         .where({ user_id: req.user.id, task_id: id, status: 'done_frozen' })
-        .update({ status: 'active', synced_at: db.fn.now() });
+        .update({ status: 'active', synced_at: getDb().fn.now() });
     }
 
     // For cancel/skip with a future scheduled_at, snap to now.
     // Suppress for externally-ingested tasks to prevent calendar drift.
     if ((status === 'cancel' || status === 'skip') && isFutureScheduled && !isIngested) {
-      update.scheduled_at = db.fn.now();
+      update.scheduled_at = getDb().fn.now();
     }
 
 
@@ -1763,7 +1763,7 @@ async function updateTaskStatus(req, res) {
     var _anchorMasterId = existing.master_id || existing.source_id;
     if (_anchorMasterId && ['done', 'skip', 'missed'].includes(status)) {
       var _masterForAnchor = _rollingMasterRow
-        || await db('task_masters').where({ id: _anchorMasterId, user_id: req.user.id }).first();
+        || await getDb()('task_masters').where({ id: _anchorMasterId, user_id: req.user.id }).first();
       if (_masterForAnchor && isRollingMaster(_masterForAnchor)) {
         var _instanceDate = existing.date
           ? String(existing.date).slice(0, 10)
@@ -1773,9 +1773,9 @@ async function updateTaskStatus(req, res) {
           : null;
         var _newAnchor = computeRollingAnchor(status, _instanceDate, _currentAnchor);
         if (_newAnchor) {
-          await db('task_masters')
+          await getDb()('task_masters')
             .where({ id: _anchorMasterId, user_id: req.user.id })
-            .update({ rolling_anchor: _newAnchor, updated_at: db.fn.now() });
+            .update({ rolling_anchor: _newAnchor, updated_at: getDb().fn.now() });
         }
       }
     }
@@ -1788,7 +1788,7 @@ async function updateTaskStatus(req, res) {
     // reappears later in the day.
     var siblingIds = [];
     if (Number(existing.split_total) > 1 && existing.source_id != null && existing.occurrence_ordinal != null) {
-      var siblings = await db('task_instances')
+      var siblings = await getDb()('task_instances')
         .where({ user_id: req.user.id, master_id: existing.source_id, occurrence_ordinal: existing.occurrence_ordinal })
         .whereNot('id', id)
         .select('id');
@@ -1828,7 +1828,7 @@ async function updateTaskStatus(req, res) {
     }
 
     var updated = await fetchTaskWithEventIds(db, id, req.user.id);
-    var srcMap = buildSourceMap(await db('tasks_v').where('user_id', req.user.id).where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); }).select());
+    var srcMap = buildSourceMap(await getDb()('tasks_v').where('user_id', req.user.id).where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); }).select());
     await cache.invalidateTasks(req.user.id);
     enqueueScheduleRun(req.user.id, 'api:updateTaskStatus', [id].concat(siblingIds));
     res.json({ task: rowToTask(updated, null, srcMap), siblingsUpdated: siblingIds.length });
@@ -1865,7 +1865,7 @@ async function batchCreateTasks(req, res) {
 
     var tz = safeTimezone(req.headers['x-timezone']);
 
-    var prefs = await db('user_config').where({ user_id: req.user.id, config_key: 'preferences' }).first();
+    var prefs = await getDb()('user_config').where({ user_id: req.user.id, config_key: 'preferences' }).first();
     var splitDefault = prefs ? (typeof prefs.config_value === 'string' ? JSON.parse(prefs.config_value) : prefs.config_value).splitDefault : false;
 
     var rows = tasks.map(function(t) {
@@ -1898,7 +1898,7 @@ async function batchCreateTasks(req, res) {
       return res.status(201).json({ created: rows.length, queued: true });
     }
 
-    await db.transaction(async function(trx) {
+    await getDb().transaction(async function(trx) {
       // Bulk insert through the helper (routes each row to master/instance + legacy tasks)
       for (var i = 0; i < rows.length; i++) {
         await tasksWrite.insertTask(trx, rows[i]);
@@ -1954,7 +1954,7 @@ async function batchUpdateTasks(req, res) {
     if (locked) {
       // Pre-load existing task info (same as the unlocked path below)
       var idsToCheck = updates.map(function(u) { return u.id; }).filter(Boolean);
-      var existCheck = await db('tasks_with_sync_v')
+      var existCheck = await getDb()('tasks_with_sync_v')
         .where('user_id', req.user.id)
         .whereIn('id', idsToCheck)
         .select('id', 'task_type', 'source_id', 'scheduled_at', 'status',
@@ -1963,7 +1963,7 @@ async function batchUpdateTasks(req, res) {
       existCheck.forEach(function(r) { existById[r.id] = r; });
 
       // Bulk-fetch ledger origins so the cal-sync guard can evaluate each item
-      var _lockedLedger = await db('cal_sync_ledger')
+      var _lockedLedger = await getDb()('cal_sync_ledger')
         .whereIn('task_id', idsToCheck)
         .where('status', 'active')
         .select('task_id', 'origin');
@@ -2002,7 +2002,7 @@ async function batchUpdateTasks(req, res) {
 
         // Write non-scheduling fields directly
         if (Object.keys(nonSchedulingFields).length > 0) {
-          nonSchedulingFields.updated_at = db.fn.now();
+          nonSchedulingFields.updated_at = getDb().fn.now();
           await tasksWrite.updateTaskById(db, qId, nonSchedulingFields, req.user.id);
           updatedCount++;
         }
@@ -2030,7 +2030,7 @@ async function batchUpdateTasks(req, res) {
       try {
         updatedCount = 0;
         anySchedulingInBatch = false;
-        await db.transaction(async function(trx) {
+        await getDb().transaction(async function(trx) {
           // Pre-load task_type and source_id for all IDs being updated
           var idsToUpdate = updates.map(function(u) { return u.id; }).filter(Boolean);
           var existingRows = await trx('tasks_with_sync_v')
@@ -2169,7 +2169,7 @@ async function batchUpdateTasks(req, res) {
               }
 
               if (Object.keys(templateUpdate).length > 0) {
-                templateUpdate.updated_at = db.fn.now();
+                templateUpdate.updated_at = getDb().fn.now();
                 await tasksWrite.updateTaskById(trx, existing.source_id, templateUpdate, req.user.id);
               }
               // If recurrence changed, delete all pending instances so they regenerate
@@ -2180,10 +2180,10 @@ async function batchUpdateTasks(req, res) {
                 }
               }
               if (Object.keys(instanceUpdate).length > 0) {
-                instanceUpdate.updated_at = db.fn.now();
+                instanceUpdate.updated_at = getDb().fn.now();
                 await tasksWrite.updateTaskById(trx, id, instanceUpdate, req.user.id);
               } else {
-                await tasksWrite.updateTaskById(trx, id, { updated_at: db.fn.now() }, req.user.id);
+                await tasksWrite.updateTaskById(trx, id, { updated_at: getDb().fn.now() }, req.user.id);
               }
             } else {
               // Route anchor date to scheduled_at for templates
@@ -2236,7 +2236,7 @@ async function getDisabledTasks(req, res) {
       q.where('status', 'disabled').orderBy('disabled_at', 'desc');
     });
     var srcMap = buildSourceMap(
-      await db('tasks_v').where('user_id', req.user.id).where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); }).select()
+      await getDb()('tasks_v').where('user_id', req.user.id).where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); }).select()
     );
     var tasks = rows.map(function(r) { return rowToTask(r, null, srcMap); });
     res.json({ tasks: tasks });
@@ -2276,7 +2276,7 @@ async function reEnableTask(req, res) {
         // For recurring templates, also count how many instances will be re-enabled
         var instanceCount = 0;
         if (isRecurringTemplate) {
-          var disabledInstances = await db('tasks_v')
+          var disabledInstances = await getDb()('tasks_v')
             .where({ source_id: id, user_id: req.user.id, status: 'disabled' })
             .count('* as count').first();
           instanceCount = parseInt(disabledInstances.count, 10);
@@ -2317,13 +2317,13 @@ async function reEnableTask(req, res) {
       }
     }
 
-    await db.transaction(async function(trx) {
+    await getDb().transaction(async function(trx) {
       // Re-enable the task/template itself
       await tasksWrite.updateTaskById(trx, id, {
         status: '',
         disabled_at: null,
         disabled_reason: null,
-        updated_at: db.fn.now()
+        updated_at: getDb().fn.now()
       }, req.user.id);
 
       // If re-enabling a recurring task template, also re-enable its disabled instances.
@@ -2332,12 +2332,12 @@ async function reEnableTask(req, res) {
       if (isRecurringTemplate) {
         await tasksWrite.updateInstancesWhere(trx, req.user.id, function(q) {
           return q.where({ master_id: id, status: 'disabled' });
-        }, { status: '', updated_at: db.fn.now() });
+        }, { status: '', updated_at: getDb().fn.now() });
       }
     });
 
     var srcMap = buildSourceMap(
-      await db('tasks_v').where('user_id', req.user.id).where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); }).select()
+      await getDb()('tasks_v').where('user_id', req.user.id).where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); }).select()
     );
     var updated = await fetchTaskWithEventIds(db, id, req.user.id);
     await cache.invalidateTasks(req.user.id);
@@ -2362,7 +2362,7 @@ async function takeOwnership(req, res) {
     var task = await fetchTaskWithEventIds(db, id, req.user.id);
     if (!task) return res.status(404).json({ error: 'Task not found' });
 
-    await db.transaction(async function(trx) {
+    await getDb().transaction(async function(trx) {
       // Mark all active ledger rows as deleted_local — sync stops, calendar
       // event remains in the provider.
       await trx('cal_sync_ledger')
@@ -2385,7 +2385,7 @@ async function takeOwnership(req, res) {
 
     await cache.invalidateTasks(req.user.id);
     var srcMap = buildSourceMap(
-      await db('tasks_v').where('user_id', req.user.id)
+      await getDb()('tasks_v').where('user_id', req.user.id)
         .where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); })
         .select()
     );

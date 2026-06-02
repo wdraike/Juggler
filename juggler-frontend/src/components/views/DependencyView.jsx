@@ -11,6 +11,7 @@ import { getTheme } from '../../theme/colors';
 import { getTaskIcon } from '../../utils/taskIcon';
 import { getTaskDeps, topoSortTasks } from '../../scheduler/dependencyHelpers';
 import { PRI_COLORS } from '../../state/constants';
+import { isTerminalStatus } from '../../shared/task-status';
 
 var STATUS_ICONS = { done: '\u2705', wip: '\u{1F7E1}', cancel: '\u274C', skip: '\u23ED\uFE0F', other: '\u27A1\uFE0F', '': '\u26AA' };
 var ARROW_COLORS = ['#2E4A7A', '#4338CA', '#2D6A4F', '#8B2635', '#D97706', '#9E6B3B', '#0D9488'];
@@ -290,7 +291,7 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
     function matchesStatus(t) {
       var s = statuses[t.id] || '';
       if (filter === 'all') return true;
-      if (filter === 'open') return s !== 'done' && s !== 'cancel' && s !== 'skip' && s !== 'pause' && s !== 'missed';
+      if (filter === 'open') return !isTerminalStatus(s);
       if (filter === 'done') return s === 'done';
       if (filter === 'wip') return s === 'wip';
       if (filter === 'pause') return s === 'pause';

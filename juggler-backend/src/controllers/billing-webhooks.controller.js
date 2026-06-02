@@ -6,7 +6,7 @@
  * Enforces entity limits on downgrade by disabling excess items.
  */
 
-const db = require('../db');
+const { getDb } = require('@raike/lib-db');
 const tasksWrite = require('../lib/tasks-write');
 const { invalidateUserPlanCache, getCachedPlanFeatures } = require('../middleware/plan-features.middleware');
 const { countActiveTasks, countRecurringTemplates } = require('../middleware/entity-limits');
@@ -28,7 +28,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
   var disabledTasks = 0;
   var now = new Date();
 
-  await db.transaction(async function(trx) {
+  await getDb().transaction(async function(trx) {
     // --- Phase 1: Disable excess recurring templates (newest first) ---
     if (recurringLimit !== -1 && recurringLimit !== undefined && recurringLimit !== null) {
       var currentRecurrings = await trx('tasks_v')
@@ -75,7 +75,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
               .where('user_id', userId)
               .whereIn('task_id', allDisabledIds)
               .where('status', 'active')
-              .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
+              .update({ status: 'deleted_local', task_id: null, synced_at: getDb().fn.now() })
               .catch(function(err) { logger.error("[silent-catch]", err.message); });
           }
 
@@ -125,7 +125,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
                 ? JSON.parse(other.depends_on || '[]') : (other.depends_on || []);
               var newDeps = deps.filter(function(d) { return d !== taskId; });
               await tasksWrite.updateTaskById(trx, other.id, {
-                depends_on: JSON.stringify(newDeps), updated_at: db.fn.now()
+                depends_on: JSON.stringify(newDeps), updated_at: getDb().fn.now()
               }, userId);
             }
           }
@@ -140,7 +140,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
             .where('user_id', userId)
             .whereIn('task_id', taskIds)
             .where('status', 'active')
-            .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
+            .update({ status: 'deleted_local', task_id: null, synced_at: getDb().fn.now() })
             .catch(function(err) { logger.error("[silent-catch]", err.message); });
 
           disabledTasks = taskIds.length;

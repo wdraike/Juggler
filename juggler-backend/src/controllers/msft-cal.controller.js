@@ -4,7 +4,7 @@
  */
 
 var { SignJWT, jwtVerify } = require('jose');
-var db = require('../db');
+const { getDb } = require('@raike/lib-db');
 var msftCalApi = require('../lib/msft-cal-api');
 
 // --- Token management (canonical implementation in adapter) ---
@@ -37,10 +37,10 @@ async function markCodeUsed(code) {
   var hash = require('crypto').createHash('sha256').update(key).digest('hex');
 
   // Best-effort sweep of expired rows (keeps table naturally bounded)
-  await db.raw('DELETE FROM oauth_code_nonces WHERE expires_at < NOW()').catch(function() {});
+  await getDb().raw('DELETE FROM oauth_code_nonces WHERE expires_at < NOW()').catch(function() {});
 
   // INSERT IGNORE: atomic "claim this nonce or detect duplicate"
-  var result = await db.raw(
+  var result = await getDb().raw(
     'INSERT IGNORE INTO oauth_code_nonces (code_hash, expires_at) ' +
     'VALUES (?, DATE_ADD(NOW(), INTERVAL 2 MINUTE))',
     [hash]
@@ -63,7 +63,7 @@ async function getStatus(req, res) {
       connected = true;
     }
 
-    var autoSyncRow = await db('user_config')
+    var autoSyncRow = await getDb()('user_config')
       .where({ user_id: req.user.id, config_key: 'msft_cal_auto_sync' })
       .first();
     var autoSync = false;
@@ -136,7 +136,7 @@ async function callback(req, res) {
 
     var update = {
       msft_cal_access_token: tokens.accessToken,
-      updated_at: db.fn.now()
+      updated_at: getDb().fn.now()
     };
     if (tokens.refreshToken) {
       update.msft_cal_refresh_token = tokens.refreshToken;
@@ -145,7 +145,7 @@ async function callback(req, res) {
       update.msft_cal_token_expiry = new Date(tokens.expiresOn);
     }
 
-    await db('users').where('id', userId).update(update);
+    await getDb()('users').where('id', userId).update(update);
 
     var frontendUrl = require('../proxy-config').services.juggler.frontend;
     res.redirect(frontendUrl + '/?msftcal=connected');
@@ -157,11 +157,11 @@ async function callback(req, res) {
 
 async function disconnect(req, res) {
   try {
-    await db('users').where('id', req.user.id).update({
+    await getDb()('users').where('id', req.user.id).update({
       msft_cal_access_token: null,
       msft_cal_refresh_token: null,
       msft_cal_token_expiry: null,
-      updated_at: db.fn.now()
+      updated_at: getDb().fn.now()
     });
     res.json({ disconnected: true });
   } catch (error) {
@@ -176,16 +176,16 @@ async function setAutoSync(req, res) {
     var userId = req.user.id;
     var value = !!enabled;
 
-    var existing = await db('user_config')
+    var existing = await getDb()('user_config')
       .where({ user_id: userId, config_key: 'msft_cal_auto_sync' })
       .first();
 
     if (existing) {
-      await db('user_config')
+      await getDb()('user_config')
         .where({ user_id: userId, config_key: 'msft_cal_auto_sync' })
-        .update({ config_value: JSON.stringify(value), updated_at: db.fn.now() });
+        .update({ config_value: JSON.stringify(value), updated_at: getDb().fn.now() });
     } else {
-      await db('user_config').insert({
+      await getDb()('user_config').insert({
         user_id: userId,
         config_key: 'msft_cal_auto_sync',
         config_value: JSON.stringify(value)

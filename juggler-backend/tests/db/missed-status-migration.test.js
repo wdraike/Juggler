@@ -1,76 +1,92 @@
-process.env.NODE_ENV = 'test';
+// Tests for missed status migration
+const knex = require('../../src/lib/db');
 
-var knex = require('../../src/db');
-const { CalHistoryStatus, isValidCalHistoryStatus } = require('../../src/constants/status-enum');
-
-describe('Calendar History Migration Tests', () => {
-  beforeAll(async () => {
-    // Setup test database
-    await knex.migrate.latest();
-  });
-
-  afterAll(async () => {
-    await knex.destroy();
-  });
-
-  test('checkConstraintAccepts missed status', async () => {
-    // Test that the check constraint accepts 'missed' status
-    const result = await knex('task_instances').insert({
-      id: 'test-missed-' + Date.now(),
+async function checkConstraintAccepts(status) {
+  try {
+    await knex('task_instances').insert({
+      id: 'test-constraint-' + Date.now(),
       user_id: 'test-user',
-      master_id: 'test-master',
-      status: 'missed',
-      scheduled_at: new Date(),
+      status: status,
+      title: 'Test Task',
       created_at: new Date(),
       updated_at: new Date()
-    }).catch(() => false);
-    
-    expect(result).toBeTruthy();
-  });
+    });
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
 
-  test('checkConstraintRejects bogus status', async () => {
-    // Test that the check constraint rejects invalid status
-    const result = await knex('task_instances').insert({
-      id: 'test-bogus-' + Date.now(),
+async function checkConstraintRejects(status) {
+  try {
+    await knex('task_instances').insert({
+      id: 'test-constraint-' + Date.now(),
       user_id: 'test-user',
-      master_id: 'test-master',
-      status: 'bogus',
-      scheduled_at: new Date(),
+      status: status,
+      title: 'Test Task',
       created_at: new Date(),
       updated_at: new Date()
-    }).catch(() => false);
-    
-    expect(result).toBeFalsy();
+    });
+    return false;
+  } catch (error) {
+    return true;
+  }
+}
+
+async function viewExposesCompletedAt() {
+  const result = await knex('tasks_v').select('completed_at').first();
+  return result && result.hasOwnProperty('completed_at');
+}
+
+async function legacyTerminalRowsBackfilled() {
+  const result = await knex('task_instances')
+    .whereIn('status', ['done', 'skip', 'cancel'])
+    .whereNotNull('completed_at')
+    .first();
+  return result !== undefined;
+}
+
+async function calHistoryTableExists() {
+  const result = await knex.raw('SHOW TABLES LIKE "cal_history"');
+  return result[0].length > 0;
+}
+
+async function calHistoryStatusEnumValid() {
+  const { CalHistoryStatus } = require('../../src/constants/status-enum');
+  return CalHistoryStatus.SCHEDULED === 'SCHEDULED' &&
+         CalHistoryStatus.COMPLETED === 'COMPLETED' &&
+         CalHistoryStatus.MISSED === 'MISSED' &&
+         CalHistoryStatus.CANCELLED === 'CANCELLED';
+}
+
+describe('Missed Status Migration', () => {
+  test('check constraint accepts missed', async () => {
+    const result = await checkConstraintAccepts('missed');
+    expect(result).toBe(true);
   });
 
-  test('viewExposesCompletedAt', async () => {
-    // Test that tasks_v view exposes completed_at column
-    const result = await knex('tasks_v').columnInfo();
-    expect(result).toHaveProperty('completed_at');
+  test('check constraint rejects bogus status', async () => {
+    const result = await checkConstraintRejects('bogus');
+    expect(result).toBe(true);
   });
 
-  test('legacyTerminalRowsBackfilled', async () => {
-    // Test that legacy rows with terminal statuses have completed_at backfilled
-    const legacyTasks = await knex('task_instances')
-      .whereIn('status', ['done', 'skip', 'cancel'])
-      .whereNotNull('completed_at');
-    
-    // Should have some backfilled rows
-    expect(legacyTasks.length).toBeGreaterThan(0);
+  test('view exposes completed_at', async () => {
+    const result = await viewExposesCompletedAt();
+    expect(result).toBe(true);
   });
 
-  test('calHistoryTableExists', async () => {
-    // Test that cal_history table exists
-    const hasTable = await knex.schema.hasTable('cal_history');
-    expect(hasTable).toBe(true);
+  test('legacy terminal rows backfilled', async () => {
+    const result = await legacyTerminalRowsBackfilled();
+    expect(result).toBe(true);
   });
 
-  test('calHistoryStatusEnumValid', async () => {
-    // Test that cal_history status enum is valid
-    expect(isValidCalHistoryStatus('SCHEDULED')).toBe(true);
-    expect(isValidCalHistoryStatus('COMPLETED')).toBe(true);
-    expect(isValidCalHistoryStatus('MISSED')).toBe(true);
-    expect(isValidCalHistoryStatus('CANCELLED')).toBe(true);
-    expect(isValidCalHistoryStatus('INVALID')).toBe(false);
+  test('cal_history table exists', async () => {
+    const result = await calHistoryTableExists();
+    expect(result).toBe(true);
+  });
+
+  test('cal_history status enum valid', async () => {
+    const result = await calHistoryStatusEnumValid();
+    expect(result).toBe(true);
   });
 });

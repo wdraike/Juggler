@@ -17,7 +17,7 @@
  *     rounded lat/lon grid — same resolution as the forecast cache.
  */
 
-const db = require('../db');
+const { getDb } = require('@raike/lib-db');
 const redis = require('../lib/redis');
 
 const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
@@ -74,7 +74,7 @@ exports.getForecast = async (req, res) => {
     var now = new Date();
 
     // Cache lookup
-    var cached = await db('weather_cache')
+    var cached = await getDb()('weather_cache')
       .where('lat_grid', latGrid)
       .where('lon_grid', lonGrid)
       .where('expires_at', '>', now)
@@ -100,7 +100,7 @@ exports.getForecast = async (req, res) => {
     var fetchedAt = new Date();
     var expiresAt = new Date(fetchedAt.getTime() + CACHE_TTL_MS);
 
-    await db('weather_cache').insert({
+    await getDb()('weather_cache').insert({
       lat_grid: latGrid,
       lon_grid: lonGrid,
       fetched_at: fetchedAt,
@@ -110,7 +110,7 @@ exports.getForecast = async (req, res) => {
 
     // Delete stale rows for this grid cell — fire-and-forget so the response
     // is not held while the cleanup DELETE runs against the cache table.
-    db('weather_cache')
+    getDb()('weather_cache')
       .where('lat_grid', latGrid)
       .where('lon_grid', lonGrid)
       .where('expires_at', '<=', now)
@@ -180,7 +180,7 @@ exports.ingest = async (req, res) => {
     var expiresAt = new Date(fetchedAt.getTime() + CACHE_TTL_MS);
     var forecast = { hourly: req.body.hourly, hourly_units: req.body.hourly_units || {} };
 
-    await db('weather_cache').insert({
+    await getDb()('weather_cache').insert({
       lat_grid: latGrid,
       lon_grid: lonGrid,
       fetched_at: fetchedAt,
@@ -189,7 +189,7 @@ exports.ingest = async (req, res) => {
     });
 
     // Delete stale rows for this grid cell — fire-and-forget (same pattern as getForecast)
-    db('weather_cache')
+    getDb()('weather_cache')
       .where('lat_grid', latGrid)
       .where('lon_grid', lonGrid)
       .where('expires_at', '<=', fetchedAt)

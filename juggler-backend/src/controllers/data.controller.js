@@ -2,7 +2,7 @@
  * Data Controller — Import/Export for migration from window.storage format
  */
 
-const db = require('../db');
+const { getDb } = require('@raike/lib-db');
 const tasksWrite = require('../lib/tasks-write');
 const { rowToTask, taskToRow } = require('./task.controller');
 const { localToUtc, toDateISO } = require('../scheduler/dateHelpers');
@@ -65,7 +65,7 @@ async function importData(req, res) {
     );
 
     // Use a transaction for atomicity
-    await db.transaction(async function(trx) {
+    await getDb().transaction(async function(trx) {
       // Clear existing data for user
       await trx('user_config').where('user_id', userId).del();
       await trx('tools').where('user_id', userId).del();
@@ -218,10 +218,10 @@ async function exportData(req, res) {
     var { fetchTasksWithEventIds } = require('./task.controller');
     var results = await Promise.all([
       fetchTasksWithEventIds(db, userId, function(q) { q.orderBy('created_at', 'asc'); }),
-      db('locations').where('user_id', userId).orderBy('sort_order'),
-      db('tools').where('user_id', userId).orderBy('sort_order'),
-      db('projects').where('user_id', userId).orderBy('sort_order'),
-      db('user_config').where('user_id', userId)
+      getDb()('locations').where('user_id', userId).orderBy('sort_order'),
+      getDb()('tools').where('user_id', userId).orderBy('sort_order'),
+      getDb()('projects').where('user_id', userId).orderBy('sort_order'),
+      getDb()('user_config').where('user_id', userId)
     ]);
 
     var taskRows = results[0];

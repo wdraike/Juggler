@@ -6,6 +6,7 @@ import React, { useMemo, useState } from 'react';
 import TaskCard from '../tasks/TaskCard';
 import { getTheme } from '../../theme/colors';
 import { PRI_COLORS } from '../../state/constants';
+import { isTerminalStatus } from '../../shared/task-status';
 import WeatherBadge from '../features/WeatherBadge';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 
@@ -25,7 +26,7 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
       if (!t.recurring || t.taskType === 'recurring_template') return;
       var key = t.text || t.id;
       var st = statuses[t.id] || '';
-      var isOpen = st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause' && st !== 'missed';
+      var isOpen = !isTerminalStatus(st);
       var prev = recurringBest[key];
       if (!prev || (isOpen && !prev.isOpen)) {
         recurringBest[key] = { id: t.id, isOpen: isOpen };
@@ -41,7 +42,7 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
 
     return deduped.filter(t => {
       var st = statuses[t.id] || '';
-      if (filter === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause' && st !== 'missed';
+      if (filter === 'open') return !isTerminalStatus(st);
       if (filter === 'action') return st === '' || st === 'wip';
       if (filter === 'done') return st === 'done';
       if (filter === 'wip') return st === 'wip';

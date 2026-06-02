@@ -25,6 +25,7 @@
     "@azure/msal-node": "^5.0.6",
     "@google/genai": "^1.46.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "@raike/lib-db": "file:../../packages/lib-db",
     "@raike/lib-logger": "file:../../packages/lib-logger",
     "auth-client": "file:../../auth-service/shared",
     "body-parser": "^1.20.2",

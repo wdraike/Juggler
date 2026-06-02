@@ -1,4 +1,4 @@
-const db = require('../db');
+const { getDb } = require('@raike/lib-db');
 const { authServiceUrl } = require('../proxy-config');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('impersonation');
@@ -27,7 +27,7 @@ async function callAuthServiceImpersonate(adminUserId, targetUserId, reason) {
 
 async function insertAuditRow(adminUserId, targetUserId, action, req) {
   try {
-    await db('impersonation_log').insert({
+    await getDb()('impersonation_log').insert({
       admin_user_id: adminUserId,
       target_user_id: targetUserId || null,
       action,
@@ -99,7 +99,7 @@ const getImpersonationTargets = async (req, res) => {
     const lim = Math.min(Math.max(1, Number.isNaN(parsedLimit) ? 50 : parsedLimit), 100);
     const off = Math.max(0, parseInt(offset) || 0);
 
-    let query = db('users').select('id', 'email', 'created_at');
+    let query = getDb()('users').select('id', 'email', 'created_at');
     if (search) {
       const escaped = String(search).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
       query = query.where('email', 'like', `%${escaped}%`);
@@ -127,7 +127,7 @@ const getImpersonationLog = async (req, res) => {
     const lim = Math.min(Math.max(1, Number.isNaN(parsedLimit) ? 50 : parsedLimit), 100);
     const off = Math.max(0, parseInt(offset) || 0);
 
-    let query = db('impersonation_log')
+    let query = getDb()('impersonation_log')
       .select(
         'impersonation_log.*',
         'admin_users.email as admin_email'

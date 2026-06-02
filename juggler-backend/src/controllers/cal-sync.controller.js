@@ -9,7 +9,7 @@
  */
 
 var crypto = require('crypto');
-var db = require('../db');
+const { getDb } = require('@raike/lib-db');
 var tasksWrite = require('../lib/tasks-write');
 var { getConnectedAdapters } = require('../lib/cal-adapters');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
@@ -130,7 +130,7 @@ function _buildPullFields(event, task, tz, adapter) {
 async function sync(req, res) {
   try {
     var userId = req.user.id;
-    var userRow = await db('users').where('id', userId).select('timezone').first();
+    var userRow = await getDb()('users').where('id', userId).select('timezone').first();
     var tz = (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
     var year = new Date().getFullYear();
     var now = new Date();
@@ -183,7 +183,7 @@ async function sync(req, res) {
     // deletedDuringSync is derived from taskDeletes[] after the write phase
 
     // Load user preferences for completed task behavior
-    var prefsRow = await db('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
+    var prefsRow = await getDb()('user_config').where({ user_id: userId, config_key: 'preferences' }).first();
     var calCompletedBehavior = 'update'; // default
     if (prefsRow) {
       try {
@@ -203,7 +203,7 @@ async function sync(req, res) {
     }
 
     // Load per-provider sync mode (full vs ingest-only)
-    var calSyncSettingsRow = await db('user_config')
+    var calSyncSettingsRow = await getDb()('user_config')
       .where({ user_id: userId, config_key: 'cal_sync_settings' }).first();
     var calSyncSettings = calSyncSettingsRow
       ? (typeof calSyncSettingsRow.config_value === 'string'
@@ -215,7 +215,7 @@ async function sync(req, res) {
     // exposed in the UI — derive Apple's effective mode from user_calendars
     // instead. Apple is treated as ingest-only ONLY when no enabled Apple
     // calendar has sync_direction='full'.
-    var appleFullSyncRow = await db('user_calendars')
+    var appleFullSyncRow = await getDb()('user_calendars')
       .where({ user_id: userId, provider: 'apple', enabled: true, sync_direction: 'full' })
       .first();
     var appleHasFullSync = !!appleFullSyncRow;
@@ -252,7 +252,7 @@ async function sync(req, res) {
             : vaEventIdCol === 'apple_event_id'
               ? { apple_cal_password: null }
               : { msft_cal_access_token: null, msft_cal_refresh_token: null, msft_cal_token_expiry: null };
-          await db('users').where('id', userId).update({ ...vaTokenCols, updated_at: db.fn.now() });
+          await getDb()('users').where('id', userId).update({ ...vaTokenCols, updated_at: getDb().fn.now() });
         }
         stats.errors.push({
           phase: 'token_validation',
@@ -306,7 +306,7 @@ async function sync(req, res) {
             : eventIdCol === 'apple_event_id'
               ? { apple_cal_password: null }
               : { msft_cal_access_token: null, msft_cal_refresh_token: null, msft_cal_token_expiry: null };
-          await db('users').where('id', userId).update({ ...tokenCols, updated_at: db.fn.now() });
+          await getDb()('users').where('id', userId).update({ ...tokenCols, updated_at: getDb().fn.now() });
         }
 
         stats.errors.push({
@@ -328,7 +328,7 @@ async function sync(req, res) {
     // The deleted_local+provider_event_id case arises when deleteTask marks the ledger
     // before the next sync runs — the provider event is still live. Phase 2's
     // !task && event branch handles the actual provider DELETE and clears provider_event_id.
-    var ledgerRecords = await db('cal_sync_ledger')
+    var ledgerRecords = await getDb()('cal_sync_ledger')
       .where('user_id', userId)
       .where(function() {
         this.where('status', 'active')
@@ -493,7 +493,7 @@ async function sync(req, res) {
     });
     var templateTextById = {};
     if (sourceIds.length > 0) {
-      var templateRows = await db('tasks_v').whereIn('id', sourceIds).select('id', 'text');
+      var templateRows = await getDb()('tasks_v').whereIn('id', sourceIds).select('id', 'text');
       templateRows.forEach(function(r) { templateTextById[r.id] = r.text; });
     }
     allTasks.forEach(function(t) {
@@ -515,7 +515,7 @@ async function sync(req, res) {
     // Index each individual placement by taskId+scheduledAtUtc so we can match
     // a task to its SPECIFIC placement (not the sum of all placements).
     var placementsByTaskId = {}; // { taskId: [{ start, dur, dateKey, scheduledAtUtc }] }
-    var cacheRow = await db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
+    var cacheRow = await getDb()('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
     if (cacheRow) {
       try {
         var cache = typeof cacheRow.config_value === 'string' ? JSON.parse(cacheRow.config_value) : cacheRow.config_value;
@@ -588,7 +588,7 @@ async function sync(req, res) {
     var calIngestModeMap = {}; // calendarUrl → ingest_mode
     if (providerData.apple) {
       try {
-        var appleCals = await db('user_calendars')
+        var appleCals = await getDb()('user_calendars')
           .where({ user_id: userId, provider: 'apple', enabled: true });
         var appleWriteCal = appleCals
           .slice()
@@ -1216,7 +1216,7 @@ async function sync(req, res) {
           ledgerUpdates.push({ id: upd.ledgerId, fields: {
             last_pushed_hash: upd.newHash,
             last_user_hash: upd.task ? userHash(upd.task) : null,
-            last_pushed_at: db.fn.now(),
+            last_pushed_at: getDb().fn.now(),
             // +30s: provider server timestamps often lag our push by several seconds
             // (Apple CalDAV is especially slow). Using +2s caused false
             // eventModifiedExternally detections on the following sync.
@@ -1337,14 +1337,14 @@ async function sync(req, res) {
     // Load task IDs with error ledger records so we skip them in push.
     // A manual sync clears error records to allow fresh retries.
     var errorLedgerTaskIds = new Set();
-    var errorLedgerRows = await db('cal_sync_ledger')
+    var errorLedgerRows = await getDb()('cal_sync_ledger')
       .where('user_id', userId)
       .where('status', 'error')
       .select('task_id', 'id');
     // Clear error records so this manual sync can retry them
     if (errorLedgerRows.length > 0) {
       var errorLedgerIds = errorLedgerRows.map(function(r) { return r.id; });
-      await db('cal_sync_ledger').whereIn('id', errorLedgerIds).del();
+      await getDb()('cal_sync_ledger').whereIn('id', errorLedgerIds).del();
     }
 
     for (var pi2 = 0; pi2 < providerIds.length; pi2++) {
@@ -1671,7 +1671,7 @@ async function sync(req, res) {
       // "unledgered", creating a new active entry, which the next sync would
       // try to delete again — ad infinitum.
       var existingLedgerEventIds = new Set();
-      var allLedgerForProvider = await db('cal_sync_ledger')
+      var allLedgerForProvider = await getDb()('cal_sync_ledger')
         .where('user_id', userId)
         .where('provider', pid2)
         .whereNotNull('provider_event_id')
@@ -1962,7 +1962,7 @@ async function sync(req, res) {
       if (lockResult.acquired) {
         // === Fix Bug #5: Re-read ledger after lock to detect concurrent sync changes ===
         // Another sync may have inserted ledger rows between our Phase 1 read and lock.
-        var postLockLedger = await db('cal_sync_ledger')
+        var postLockLedger = await getDb()('cal_sync_ledger')
           .where('user_id', userId)
           .where(function() {
             this.where('status', 'active')
@@ -2025,7 +2025,7 @@ async function sync(req, res) {
     await flushQueueInLock(userId);
 
     // Snapshot watermark BEFORE writing so we can detect what we touched
-    var syncStartWatermark = (await db('tasks_v')
+    var syncStartWatermark = (await getDb()('tasks_v')
       .where('user_id', userId)
       .max('updated_at as max_ts')
       .first()) || { max_ts: null };
@@ -2037,7 +2037,7 @@ async function sync(req, res) {
     var conflictSkipIds = new Set();
     var taskIdsToCheck = taskUpdates.map(function(u) { return u.id; });
     if (taskIdsToCheck.length > 0) {
-      var freshRows = await db('tasks_v')
+      var freshRows = await getDb()('tasks_v')
         .whereIn('id', taskIdsToCheck)
         .select('id', 'updated_at');
       var freshById = {};
@@ -2068,8 +2068,8 @@ async function sync(req, res) {
       return res.status(503).json({ error: 'Sync lock lost. Please retry.', retryAfter: 5 });
     }
 
-    await db.transaction(async function(trx) {
-      var now = db.fn.now();
+    await getDb().transaction(async function(trx) {
+      var now = getDb().fn.now();
 
       // 1. Task inserts (new tasks from provider events) — bulk insert
       if (taskInserts.length > 0) {
@@ -2115,7 +2115,7 @@ async function sync(req, res) {
       for (var wl = 0; wl < ledgerUpdates.length; wl++) {
         var lu = ledgerUpdates[wl];
         lu.fields.synced_at = now;
-        // Stable sig: sort keys, represent Knex Raw objects (db.fn.now()) as sentinel
+        // Stable sig: sort keys, represent Knex Raw objects (getDb().fn.now()) as sentinel
         var sigParts = Object.keys(lu.fields).sort().map(function(k) {
           var v = lu.fields[k];
           return k + '=' + (v !== null && typeof v === 'object' ? '__raw__' : JSON.stringify(v));
@@ -2196,12 +2196,12 @@ async function sync(req, res) {
     var deletedDuringSync = taskDeletes.map(function(d) { return d.id; });
     var touchedRows;
     if (preSyncMaxUpdatedAt) {
-      touchedRows = await db('tasks_v')
+      touchedRows = await getDb()('tasks_v')
         .where('user_id', userId)
         .where('updated_at', '>', preSyncMaxUpdatedAt)
         .pluck('id');
     } else {
-      touchedRows = await db('tasks_v').where('user_id', userId).pluck('id');
+      touchedRows = await getDb()('tasks_v').where('user_id', userId).pluck('id');
     }
     var affectedIds = touchedRows.concat(deletedDuringSync);
     var seenIds = {};
@@ -2318,7 +2318,7 @@ async function hasChanges(req, res) {
       req.user.apple_cal_last_synced_at,
     ].filter(Boolean).sort().pop() || null;
     if (lastSynced) {
-      var localChanges = await db('tasks_v')
+      var localChanges = await getDb()('tasks_v')
         .where('user_id', userId)
         .whereNotNull('scheduled_at')
         .where('updated_at', '>', lastSynced)
@@ -2347,7 +2347,7 @@ async function getSyncHistory(req, res) {
     var runLimit = Math.min(parseInt(req.query.runs) || 20, 50);
 
     // Get the most recent distinct sync run IDs with their timestamps
-    var recentRuns = await db('sync_history')
+    var recentRuns = await getDb()('sync_history')
       .where('user_id', userId)
       .select('sync_run_id')
       .max('created_at as run_time')
@@ -2361,7 +2361,7 @@ async function getSyncHistory(req, res) {
 
     var runIds = recentRuns.map(function(r) { return r.sync_run_id; });
 
-    var rows = await db('sync_history')
+    var rows = await getDb()('sync_history')
       .where('user_id', userId)
       .whereIn('sync_run_id', runIds)
       .orderBy('id', 'asc')
@@ -2420,7 +2420,7 @@ async function getSyncHistory(req, res) {
 async function audit(req, res) {
   try {
     var userId = req.user.id;
-    var userRow = await db('users').where('id', userId).first();
+    var userRow = await getDb()('users').where('id', userId).first();
     var tz = userRow.timezone || DEFAULT_TIMEZONE;
 
     var days = Math.min(parseInt(req.query.days, 10) || 7, 60);
@@ -2449,7 +2449,7 @@ async function audit(req, res) {
     var srcIds = taskRows.filter(function(r){ return !r.text && r.source_id; }).map(function(r){ return r.source_id; });
     var tpl = {};
     if (srcIds.length > 0) {
-      (await db('tasks_v').whereIn('id', srcIds).select('id', 'text'))
+      (await getDb()('tasks_v').whereIn('id', srcIds).select('id', 'text'))
         .forEach(function(r) { tpl[r.id] = r.text; });
     }
     taskRows.forEach(function(r) { if (!r.text && r.source_id) r.text = tpl[r.source_id] || ''; });

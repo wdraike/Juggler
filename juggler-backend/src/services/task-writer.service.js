@@ -8,12 +8,12 @@
  */
 
 const db = require('../db');
-const { isTerminalStatus } = require('../lib/task-status');
+const { isTerminalStatus, TERMINAL_STATUSES } = require('../lib/task-status');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('task-writer');
 
 // Terminal statuses that require scheduled_at (juggler-cal-history Plan C)
-const TERMINAL_REQUIRES_SCHEDULE = ['done', 'skip', 'cancel'];
+const TERMINAL_REQUIRES_SCHEDULE = TERMINAL_STATUSES.filter(status => status !== 'pause' && status !== 'missed');
 
 class TaskWriterService {
   /**

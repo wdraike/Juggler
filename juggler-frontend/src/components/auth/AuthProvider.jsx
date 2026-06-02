@@ -5,7 +5,7 @@
  * with auth code → exchange for tokens → store in localStorage
  */
 
-import React, { createContext, useState, useEffect, useCallback, useContext } from 'react';
+import React, { createContext, useState, useEffect, useCallback, useContext, useRef } from 'react';
 import apiClient, { setAccessToken, getAccessToken, clearAccessToken } from '../../services/apiClient';
 
 import { authServiceUrl, authFrontendUrl, appId as APP_ID } from '../../proxy-config';
@@ -22,6 +22,7 @@ export function useAuth() {
 export default function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const codeExchangeRef = useRef(false);
 
   // Handle auth callback — exchange code for tokens
   useEffect(() => {
@@ -29,6 +30,10 @@ export default function AuthProvider({ children }) {
     const code = params.get('code');
 
     if (code && window.location.pathname === '/auth/callback') {
+      // Prevent double-exchange in React StrictMode (dev only)
+      if (codeExchangeRef.current) return;
+      codeExchangeRef.current = true;
+
       // Exchange authorization code for tokens
       fetch(`${AUTH_SERVICE_URL}/api/auth/token`, {
         method: 'POST',
@@ -45,7 +50,7 @@ export default function AuthProvider({ children }) {
             // Fetch user profile
             return apiClient.get('/auth/me');
           }
-          throw new Error('No access token in response');
+          throw new Error(data.error || 'No access token in response');
         })
         .then(res => {
           setUser(res.data.user);

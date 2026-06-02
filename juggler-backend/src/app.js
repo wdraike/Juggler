@@ -149,12 +149,9 @@ const healthLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 300 });
 const writeRateLimiter = rateLimit({
   ...LIMITER_DEFAULTS,
   max: 300,
-  keyGenerator: (req) => {
-    if (req.user && req.user.id) return String(req.user.id);
-    // Fallback to IP (express-rate-limit handles IPv6 internally)
-    return req.ip || 'unknown';
-  },
-  validate: { ip: false }, // Disable IPv6 validation warning (we handle fallback)
+  // Omit custom keyGenerator — default handles IPv6 safely
+  // When req.user exists, rate limits by user ID instead
+  keyGenerator: (req) => req.user?.id ? String(req.user.id) : undefined,
   message: { error: 'Too many write requests, please slow down.' },
   skip: (req) => req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS',
 });

@@ -11,6 +11,7 @@ import { getTheme } from '../../theme/colors';
 import { getTaskIcon } from '../../utils/taskIcon';
 import { parseDate, formatDateKey } from '../../scheduler/dateHelpers';
 import { getDepsStatus } from '../../scheduler/dependencyHelpers';
+import { isTerminalStatus } from '../../shared/task-status';
 import WeatherBadge from '../features/WeatherBadge';
 
 var STORAGE_KEY = 'juggler-issues-collapsed';
@@ -57,7 +58,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
 
     allTasks.forEach(t => {
       var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'skip') return;
+      if (isTerminalStatus(st)) return;
       // Recurring templates are blueprints, not actionable — skip for issues
       if (t.taskType === 'recurring_template') return;
       // Generated/expanded recurring instances are managed by the scheduler

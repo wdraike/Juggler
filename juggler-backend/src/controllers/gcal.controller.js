@@ -4,7 +4,7 @@
  */
 
 var { SignJWT, jwtVerify } = require('jose');
-var db = require('../db');
+const { getDb } = require('@raike/lib-db');
 var gcalApi = require('../lib/gcal-api');
 
 // --- Token management (canonical implementation in adapter) ---
@@ -38,7 +38,7 @@ async function getStatus(req, res) {
       }
     }
 
-    var autoSyncRow = await db('user_config')
+    var autoSyncRow = await getDb()('user_config')
       .where({ user_id: req.user.id, config_key: 'gcal_auto_sync' })
       .first();
     var autoSync = false;
@@ -103,7 +103,7 @@ async function callback(req, res) {
 
     var update = {
       gcal_access_token: tokens.access_token,
-      updated_at: db.fn.now()
+      updated_at: getDb().fn.now()
     };
     if (tokens.refresh_token) {
       update.gcal_refresh_token = tokens.refresh_token;
@@ -112,7 +112,7 @@ async function callback(req, res) {
       update.gcal_token_expiry = new Date(tokens.expiry_date);
     }
 
-    await db('users').where('id', userId).update(update);
+    await getDb()('users').where('id', userId).update(update);
 
     var frontendUrl = require('../proxy-config').services.juggler.frontend;
     res.redirect(frontendUrl + '/?gcal=connected');
@@ -124,11 +124,11 @@ async function callback(req, res) {
 
 async function disconnect(req, res) {
   try {
-    await db('users').where('id', req.user.id).update({
+    await getDb()('users').where('id', req.user.id).update({
       gcal_access_token: null,
       gcal_refresh_token: null,
       gcal_token_expiry: null,
-      updated_at: db.fn.now()
+      updated_at: getDb().fn.now()
     });
     res.json({ disconnected: true });
   } catch (error) {
@@ -143,16 +143,16 @@ async function setAutoSync(req, res) {
     var userId = req.user.id;
     var value = !!enabled;
 
-    var existing = await db('user_config')
+    var existing = await getDb()('user_config')
       .where({ user_id: userId, config_key: 'gcal_auto_sync' })
       .first();
 
     if (existing) {
-      await db('user_config')
+      await getDb()('user_config')
         .where({ user_id: userId, config_key: 'gcal_auto_sync' })
-        .update({ config_value: JSON.stringify(value), updated_at: db.fn.now() });
+        .update({ config_value: JSON.stringify(value), updated_at: getDb().fn.now() });
     } else {
-      await db('user_config').insert({
+      await getDb()('user_config').insert({
         user_id: userId,
         config_key: 'gcal_auto_sync',
         config_value: JSON.stringify(value)
