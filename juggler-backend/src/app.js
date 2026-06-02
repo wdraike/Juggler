@@ -154,7 +154,7 @@ const writeRateLimiter = rateLimit({
     // Fallback to IP (express-rate-limit handles IPv6 internally)
     return req.ip || 'unknown';
   },
-  validate: { ipAddress: false }, // Disable IPv6 validation warning (we handle fallback)
+  validate: { ip: false }, // Disable IPv6 validation warning (we handle fallback)
   message: { error: 'Too many write requests, please slow down.' },
   skip: (req) => req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS',
 });
