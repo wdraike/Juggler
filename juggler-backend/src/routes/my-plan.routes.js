@@ -154,7 +154,7 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
       disabled_items: disabledCount,
     });
   } catch (error) {
-    console.error('[my-plan] Error:', error.message);
+    logger.error('[my-plan] Error:', error.message);
     res.status(500).json({ error: 'Failed to load plan info' });
   }
 });

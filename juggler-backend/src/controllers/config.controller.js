@@ -74,7 +74,7 @@ async function getAllConfig(req, res) {
     await cache.set(cacheKey, result, 3600); // 1 hour TTL
     res.json(result);
   } catch (error) {
-    console.error('Get config error:', error);
+    logger.error('Get config error:', error);
     res.status(500).json({ error: 'Failed to fetch config' });
   }
 }
@@ -180,7 +180,7 @@ async function updateConfig(req, res) {
       enqueueScheduleRun(userId, 'config:' + key);
     }
   } catch (error) {
-    console.error('Update config error:', error);
+    logger.error('Update config error:', error);
     res.status(500).json({ error: 'Failed to update config' });
   }
 }
@@ -192,7 +192,7 @@ async function getProjects(req, res) {
     const rows = await db('projects').where('user_id', req.user.id).orderBy('sort_order');
     res.json({ projects: rows.map(p => ({ id: p.id, name: p.name, color: p.color, icon: p.icon, sortOrder: p.sort_order })) });
   } catch (error) {
-    console.error('Get projects error:', error);
+    logger.error('Get projects error:', error);
     res.status(500).json({ error: 'Failed to fetch projects' });
   }
 }
@@ -227,7 +227,7 @@ async function reorderProjects(req, res) {
     await cache.invalidateConfig(req.user.id);
     res.json({ reordered: ids.length });
   } catch (error) {
-    console.error('Reorder projects error:', error);
+    logger.error('Reorder projects error:', error);
     res.status(500).json({ error: 'Failed to reorder projects' });
   }
 }
@@ -249,7 +249,7 @@ async function createProject(req, res) {
     await cache.invalidateConfig(req.user.id);
     res.status(201).json({ project: { id, name, color, icon } });
   } catch (error) {
-    console.error('Create project error:', error);
+    logger.error('Create project error:', error);
     res.status(500).json({ error: 'Failed to create project' });
   }
 }
@@ -275,7 +275,7 @@ async function updateProject(req, res) {
     if (oldName && name && oldName !== name) await cache.invalidateTasks(req.user.id); // project rename cascades to tasks
     res.json({ project: { id: parseInt(id), name, color, icon }, renamed: oldName && name && oldName !== name ? { from: oldName, to: name } : null });
   } catch (error) {
-    console.error('Update project error:', error);
+    logger.error('Update project error:', error);
     res.status(500).json({ error: 'Failed to update project' });
   }
 }
@@ -287,7 +287,7 @@ async function deleteProject(req, res) {
     await cache.invalidateConfig(req.user.id);
     res.json({ message: 'Project deleted', id });
   } catch (error) {
-    console.error('Delete project error:', error);
+    logger.error('Delete project error:', error);
     res.status(500).json({ error: 'Failed to delete project' });
   }
 }
@@ -306,7 +306,7 @@ async function getLocations(req, res) {
       displayName: l.display_name || undefined
     })) });
   } catch (error) {
-    console.error('Get locations error:', error);
+    logger.error('Get locations error:', error);
     res.status(500).json({ error: 'Failed to fetch locations' });
   }
 }
@@ -346,7 +346,7 @@ async function replaceLocations(req, res) {
     await cache.invalidateConfig(req.user.id);
     res.json({ locations: enriched });
   } catch (error) {
-    console.error('Replace locations error:', error);
+    logger.error('Replace locations error:', error);
     res.status(500).json({ error: 'Failed to update locations' });
   }
 }
@@ -358,7 +358,7 @@ async function getTools(req, res) {
     const rows = await db('tools').where('user_id', req.user.id).orderBy('sort_order');
     res.json({ tools: rows.map(t => ({ id: t.tool_id, name: t.name, icon: t.icon })) });
   } catch (error) {
-    console.error('Get tools error:', error);
+    logger.error('Get tools error:', error);
     res.status(500).json({ error: 'Failed to fetch tools' });
   }
 }
@@ -385,7 +385,7 @@ async function replaceTools(req, res) {
     await cache.invalidateConfig(req.user.id);
     res.json({ tools });
   } catch (error) {
-    console.error('Replace tools error:', error);
+    logger.error('Replace tools error:', error);
     res.status(500).json({ error: 'Failed to update tools' });
   }
 }

@@ -21,34 +21,32 @@ var TaskAdapter = {
   },
 
   createTask: function (props) {
-    var self = this;
-    var task = taskFactory.create(Object.assign({ userId: TEST_USER_ID }, props));
-    return self.repo.save(task);
+    var task = taskFactory.createTask(TEST_USER_ID, props);
+    return this.repo.create(task.master);
   },
 
   getTask: function (id) {
-    return this.repo.findById(id);
+    return this.repo.findById(id, TEST_USER_ID);
   },
 
   updateTask: function (id, updates) {
-    var self = this;
-    return self.repo.findById(id).then(function (task) {
-      if (!task) return null;
-      var updated = Object.assign({}, task, updates, {
-        updatedAt: new Date().toISOString()
-      });
-      return self.repo.save(updated);
+    var task = this.repo.findById(id, TEST_USER_ID);
+    if (!task) return null;
+    // Small delay to ensure timestamp difference
+    var now = new Date();
+    now.setMilliseconds(now.getMilliseconds() + 1);
+    var updated = Object.assign({}, task, updates, {
+      updated_at: now.toISOString()
     });
+    return this.repo.update(id, updated, TEST_USER_ID);
   },
 
   deleteTask: function (id) {
-    return this.repo.delete(id);
+    return this.repo.delete(id, TEST_USER_ID);
   },
 
   listTasks: function () {
-    return this.repo.findWhere(function (task) {
-      return task.userId === TEST_USER_ID;
-    });
+    return this.repo.findByUserId(TEST_USER_ID);
   }
 };
 
@@ -82,9 +80,9 @@ describe('TaskAdapter with InMemoryTaskRepository', function () {
       expect(created.text).toBe('Write adapter tests');
       expect(created.dur).toBe(45);
       expect(created.project).toBe('juggler');
-      expect(created.userId).toBe(TEST_USER_ID);
-      expect(created.createdAt).toBeDefined();
-      expect(created.updatedAt).toBeDefined();
+      expect(created.user_id).toBe(TEST_USER_ID);
+      expect(created.created_at).toBeDefined();
+      expect(created.updated_at).toBeDefined();
 
       var retrieved = await TaskAdapter.getTask(created.id);
 
@@ -131,7 +129,7 @@ describe('TaskAdapter with InMemoryTaskRepository', function () {
       expect(updated.text).toBe('Updated title');
       expect(updated.status).toBe('in-progress');
       expect(updated.dur).toBe(30);
-      expect(updated.updatedAt).not.toBe(created.updatedAt);
+      expect(updated.updated_at).not.toBe(created.updated_at);
 
       var retrieved = await TaskAdapter.getTask(created.id);
       expect(retrieved.text).toBe('Updated title');
@@ -152,7 +150,8 @@ describe('TaskAdapter with InMemoryTaskRepository', function () {
       expect(before).not.toBeNull();
 
       var deleted = await TaskAdapter.deleteTask(created.id);
-      expect(deleted).toBe(true);
+      expect(deleted).not.toBeNull();
+      expect(deleted.id).toBe(created.id);
 
       var after = await TaskAdapter.getTask(created.id);
       expect(after).toBeNull();
@@ -160,7 +159,7 @@ describe('TaskAdapter with InMemoryTaskRepository', function () {
 
     it('should return false when deleting non-existent task', async function () {
       var result = await TaskAdapter.deleteTask('non-existent-id');
-      expect(result).toBe(false);
+      expect(result).toBeNull();
     });
   });
 
@@ -169,11 +168,10 @@ describe('TaskAdapter with InMemoryTaskRepository', function () {
       await TaskAdapter.createTask({ text: 'User task 1' });
       await TaskAdapter.createTask({ text: 'User task 2' });
 
-      var otherUserTask = taskFactory.create({
-        text: 'Other user task',
-        userId: 'other-user'
+      var otherUserTask = taskFactory.createTask('other-user', {
+        text: 'Other user task'
       });
-      await repo.save(otherUserTask);
+      await repo.create(otherUserTask.master);
 
       var list = await TaskAdapter.listTasks();
       expect(list).toHaveLength(2);
@@ -185,12 +183,12 @@ describe('TaskAdapter with InMemoryTaskRepository', function () {
 
   describe('DI verification', function () {
     it('should use injected repository, not real DB', async function () {
-      var count = await repo.count();
+      var count = repo.size;
       expect(count).toBe(0);
 
       await TaskAdapter.createTask({ text: 'DI test' });
 
-      count = await repo.count();
+      count = repo.size;
       expect(count).toBe(1);
     });
   });

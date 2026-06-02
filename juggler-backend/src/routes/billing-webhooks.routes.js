@@ -13,7 +13,7 @@ function verifySignature(req, res, next) {
   const secret = process.env.BILLING_WEBHOOK_SECRET || process.env.INTERNAL_SERVICE_KEY;
 
   if (!secret) {
-    console.error('[billing-webhook] No BILLING_WEBHOOK_SECRET or INTERNAL_SERVICE_KEY configured — cannot verify webhooks');
+    logger.error('[billing-webhook] No BILLING_WEBHOOK_SECRET or INTERNAL_SERVICE_KEY configured — cannot verify webhooks');
     return res.status(500).json({ error: 'Webhook signature verification not configured' });
   }
 

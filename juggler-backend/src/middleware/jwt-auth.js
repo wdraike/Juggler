@@ -9,8 +9,11 @@
 
 const { authenticateJWT: createAuthMiddleware } = require('auth-client');
 const { createRemoteJWKSet, jwtVerify } = require('jose');
+const { createLogger } = require('@raike/lib-logger');
 const db = require('../db');
 const { APP_ID } = require('../service-identity');
+
+const logger = createLogger('jwt-auth');
 
 // Verify JWT via auth-client, then resolve local user by email
 // (auth-service user IDs may differ from local user IDs)
@@ -53,7 +56,7 @@ async function verifyToken(token) {
  * No-op — secrets loaded via JWKS from auth-service, not local
  */
 async function loadJWTSecrets() {
-  console.log('JWT verification via auth-service JWKS (no local secret needed)');
+  logger.info('JWT verification via auth-service JWKS (no local secret needed)');
 }
 
 /**

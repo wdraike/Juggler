@@ -53,7 +53,7 @@ function checkEntityLimit(limitKey, countFn, options = {}) {
 
       next();
     } catch (err) {
-      console.error('[entity-limits] Check failed:', err.message);
+      logger.error('[entity-limits] Check failed:', err.message);
       next(); // fail open
     }
   };
@@ -225,7 +225,7 @@ async function checkBatchTaskLimits(req, res, next) {
 
     next();
   } catch (err) {
-    console.error('[entity-limits] Batch check failed:', err.message);
+    logger.error('[entity-limits] Batch check failed:', err.message);
     next();
   }
 }

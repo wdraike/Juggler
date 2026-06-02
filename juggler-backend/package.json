@@ -15,7 +15,11 @@
     "audit:knip": "knip --reporter json 2>/dev/null | sed -n '/^[\\[{]/,$p' > ../../.planning/phases/juggler-code-review/baseline/knip-backend.json || true",
     "audit:depcheck": "depcheck --json 2>/dev/null | sed -n '/^[\\[{]/,$p' > ../../.planning/phases/juggler-code-review/baseline/depcheck-backend.json || true",
     "audit:unused": "eslint 'src/**/*.js' --rule '{\"unused-imports/no-unused-imports\":\"error\",\"unused-imports/no-unused-vars\":\"error\"}' --format json --output-file ../../.planning/phases/juggler-code-review/baseline/eslint-unused-backend.json || true",
-    "lint:boundaries": "eslint --no-inline-config --config eslint.boundaries.config.js 'src/**/*.js'"
+    "lint:boundaries": "eslint --no-inline-config --config eslint.boundaries.config.js 'src/**/*.js'",
+    "security:sql-scan": "node scripts/sql-injection-scanner.js",
+    "security:lint": "eslint 'src/**/*.js' 'tests/**/*.js' 'scripts/**/*.js' --rule '{\"sql-injection/no-unsafe-sql\":\"error\"}' --config eslint-sql-injection-rules.js",
+    "security:check": "npm run security:sql-scan && npm run security:lint",
+    "precommit": "npm run lint:boundaries && npm run security:check && npm test"
   },
   "dependencies": {
     "@azure/msal-node": "^5.0.6",

@@ -9,6 +9,7 @@ var msftCalApi = require('../msft-cal-api');
 var { jugglerDateToISO, isoToJugglerDate, computeDurationMinutes } = require('../../controllers/cal-sync-helpers');
 var { localToUtc } = require('../../scheduler/dateHelpers');
 var { PLACEMENT_MODES } = require('../placementModes');
+var { isTerminalStatus } = require('../task-status');
 
 var providerId = 'msft';
 
@@ -300,8 +301,10 @@ function getLastSyncedColumn() {
 function buildMsftEventBody(task, year, tz, opts) {
   var dur = task.dur || 30;
   // Phase 15: Migrated to placement_mode='all_day' exclusively
+  // Legacy when='allday' fallback re-enabled for backward compatibility
   var isAllDay = task.placementMode === PLACEMENT_MODES.ALL_DAY ||
-                 task.placement_mode === PLACEMENT_MODES.ALL_DAY;
+                 task.placement_mode === PLACEMENT_MODES.ALL_DAY ||
+                 task.when === 'allday';
 
   var descParts = [];
   if (task.project) descParts.push('Project: ' + task.project);
@@ -310,7 +313,7 @@ function buildMsftEventBody(task, year, tz, opts) {
   if (task.url) descParts.push('Link: ' + task.url);
   descParts.push('', 'Synced from Raike & Sons');
 
-  var isDone = task.status === 'done';
+  var isDone = isTerminalStatus(task.status);
   var cleanText = task.text.replace(/^(✓\s+)+/, '');
   var subjectText = isDone ? '✓ ' + cleanText : task.text;
 

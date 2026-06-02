@@ -8,6 +8,7 @@
 const { OAuth2Client } = require('google-auth-library');
 const crypto = require('crypto');
 const { computeEventHash } = require('../domain/entities/CalendarEvent');
+const { isTerminalStatus } = require('../../../lib/task-status');
 
 // These require statements will be resolved at runtime
 // They reference the existing lib modules
@@ -287,7 +288,7 @@ function buildEventBody(task, year, tz, opts) {
   if (task.url) descParts.push('Link: ' + task.url);
   descParts.push('', 'Synced from Raike & Sons');
 
-  const isDone = task.status === 'done';
+  const isDone = isTerminalStatus(task.status);
   const cleanText = task.text.replace(/^(✓\s+)+/, '');
   const summaryText = isDone ? '✓ ' + cleanText : task.text;
 

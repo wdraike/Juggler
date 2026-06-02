@@ -19,7 +19,8 @@
 
 import React from 'react';
 import { getTheme } from '../../theme/colors';
-import { isTerminalStatus, PAST_OPACITY } from '../../state/constants';
+import { PAST_OPACITY } from '../../state/constants';
+import { isTerminalStatus } from '../../shared/task-status';
 import { isAllDayTask } from '../../utils/isAllDayTask';
 
 /**
@@ -80,6 +81,7 @@ export default function AllDayBanner({ allTasks, dateKey, statuses, onExpand, da
               {st === 'done' && <span style={{ fontSize: 9, marginRight: 2 }}>{'✓'}</span>}
               {st === 'skip' && <span style={{ fontSize: 9, marginRight: 2 }}>{'⏭'}</span>}
               {st === 'cancel' && <span style={{ fontSize: 9, marginRight: 2 }}>{'✗'}</span>}
+              {st === 'missed' && <span style={{ fontSize: 9, marginRight: 2 }}>{'⚠'}</span>}
               {fixed && <span style={{ fontSize: 9, marginRight: 2 }}>{'📌'}</span>}
               {t.text}
             </div>

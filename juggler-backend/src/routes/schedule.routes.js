@@ -38,7 +38,7 @@ router.post('/run', authenticateJWT, schedulerLimiter, withSyncLock(async functi
     // result now includes dayPlacements and unplaced from the same run (cached)
     res.json(result);
   } catch (error) {
-    console.error('Schedule run error:', error);
+    logger.error('Schedule run error:', error);
     res.status(500).json({ error: 'Failed to run scheduler' });
   }
 }));
@@ -52,7 +52,7 @@ router.get('/placements', authenticateJWT, async function(req, res) {
     var placements = await getSchedulePlacements(req.user.id, opts);
     res.json(placements);
   } catch (error) {
-    console.error('Schedule placements error:', error);
+    logger.error('Schedule placements error:', error);
     res.status(500).json({ error: 'Failed to get placements' });
   }
 });
@@ -63,7 +63,7 @@ router.post('/nudge', authenticateJWT, schedulerLimiter, async function(req, res
     await enqueueScheduleRun(req.user.id, 'frontend:task-end-nudge');
     res.json({ queued: true });
   } catch (err) {
-    console.error('[NUDGE] enqueue failed:', err.message);
+    logger.error('[NUDGE] enqueue failed:', err.message);
     res.status(500).json({ error: 'Failed to queue nudge' });
   }
 });
@@ -149,7 +149,7 @@ router.post('/debug', authenticateJWT, authenticateAdmin, debugLimiter, async fu
       phaseSnapshots: result.phaseSnapshots || [],
     });
   } catch (error) {
-    console.error('Schedule debug error:', error);
+    logger.error('Schedule debug error:', error);
     res.status(500).json({ error: 'Failed to run debug scheduler' });
   }
 });
@@ -173,7 +173,7 @@ router.post('/step/start', authenticateJWT, authenticateAdmin, stepperLimiter, a
     var info = await schedulerSession.startSession(req.user.id, { timezone: tz });
     res.json(info);
   } catch (err) {
-    console.error('stepper start error:', err);
+    logger.error('stepper start error:', err);
     res.status(500).json({ error: 'Failed to start stepper session' });
   }
 });
@@ -188,7 +188,7 @@ router.get('/step/:sessionId/summary', authenticateJWT, authenticateAdmin, async
     if (!s || s.userId !== req.user.id) return res.status(404).json({ error: 'Session not found' });
     res.json(schedulerSession._computeSummary(s));
   } catch (err) {
-    console.error('stepper summary error:', err);
+    logger.error('stepper summary error:', err);
     res.status(500).json({ error: 'Failed to fetch session summary' });
   }
 });
@@ -204,7 +204,7 @@ router.get('/step/:sessionId/:stepIndex', authenticateJWT, authenticateAdmin, as
     if (!step) return res.status(404).json({ error: 'Step out of range' });
     res.json(step);
   } catch (err) {
-    console.error('stepper step error:', err);
+    logger.error('stepper step error:', err);
     res.status(500).json({ error: 'Failed to fetch step' });
   }
 });
@@ -224,7 +224,7 @@ router.post('/step/:sessionId/stop', authenticateJWT, authenticateAdmin, async f
     await schedulerSession.stopSession(sessionId);
     res.json({ ok: true });
   } catch (err) {
-    console.error('stepper stop error:', err);
+    logger.error('stepper stop error:', err);
     res.status(500).json({ error: 'Failed to stop session' });
   }
 });

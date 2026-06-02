@@ -333,6 +333,8 @@ describe('update_task — locked path, scheduling fields', function() {
     expect(eq.op).toBe('update');
     expect(eq.src).toBe('mcp:update_task');
     expect(eq.fields.dur).toBe(60);
+    // ZOE-JUG-023-W2: locked path assertion - updateTaskById should NOT be called for scheduling fields
+    expect(mockWriteCalls.length).toBe(0);
   });
 
   test('scheduling field update → response has queued:true', async function() {

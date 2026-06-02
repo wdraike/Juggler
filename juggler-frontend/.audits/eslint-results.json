@@ -1,0 +1,17 @@
+
+Oops! Something went wrong! :(
+
+ESLint: 10.4.0
+
+TypeError: Error while loading rule 'unused-imports/no-unused-imports': context.getFilename is not a function
+Occurred while linting /Users/david/Offline Coding/Raike & Sons /DEV/juggler/juggler-frontend/src/App.js
+    at Object.create (/Users/david/Offline Coding/Raike & Sons /DEV/juggler/juggler-frontend/node_modules/eslint-rule-composer/lib/rule-composer.js:131:34)
+    at createRuleListeners (/Users/david/Offline Coding/Raike & Sons /DEV/juggler/juggler-frontend/node_modules/eslint/lib/linter/linter.js:497:15)
+    at /Users/david/Offline Coding/Raike & Sons /DEV/juggler/juggler-frontend/node_modules/eslint/lib/linter/linter.js:623:7
+    at Array.forEach (<anonymous>)
+    at runRules (/Users/david/Offline Coding/Raike & Sons /DEV/juggler/juggler-frontend/node_modules/eslint/lib/linter/linter.js:557:31)
+    at #flatVerifyWithoutProcessors (/Users/david/Offline Coding/Raike & Sons /DEV/juggler/juggler-frontend/node_modules/eslint/lib/linter/linter.js:1264:4)
+    at Linter._verifyWithFlatConfigArrayAndWithoutProcessors (/Users/david/Offline Coding/Raike & Sons /DEV/juggler/juggler-frontend/node_modules/eslint/lib/linter/linter.js:1349:43)
+    at Linter._verifyWithFlatConfigArray (/Users/david/Offline Coding/Raike & Sons /DEV/juggler/juggler-frontend/node_modules/eslint/lib/linter/linter.js:1416:15)
+    at Linter.verify (/Users/david/Offline Coding/Raike & Sons /DEV/juggler/juggler-frontend/node_modules/eslint/lib/linter/linter.js:861:9)
+    at Linter.verifyAndFix (/Users/david/Offline Coding/Raike & Sons /DEV/juggler/juggler-frontend/node_modules/eslint/lib/linter/linter.js:1534:20)

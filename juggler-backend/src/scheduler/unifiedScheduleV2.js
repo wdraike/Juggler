@@ -1480,7 +1480,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       // Each chunk is a separate placement entry sharing the same task object.
       // Recurring split chunks stay day-locked (isDayLocked drives the search);
       // non-recurring splits may span days up to the deadline.
-      if (item.task && item.task.split && item.splitOrdinal <= 1 && item.splitTotal <= 1) {
+      if (item.task && item.task.split && !item.isRecurring && (item.splitOrdinal === 1 || item.splitOrdinal == null)) {
         var splitMin = (item.task.splitMin != null ? item.task.splitMin : null) ||
                        (cfg && cfg.splitMinDefault) || 15;
         var splitResult = placeSplitInline(item, item.dur, splitMin, dates, dayWindows, dayBlocks, dayOcc, cfg);

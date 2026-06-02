@@ -1,0 +1,48 @@
+name: SQL Injection Scan
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+  schedule:
+    - cron: '0 0 * * 0' # Weekly on Sunday
+
+jobs:
+  sql-injection-scan:
+    name: SQL Injection Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install dependencies
+      run: npm install
+
+    - name: Run SQL Injection Scanner
+      run: node scripts/sql-injection-scanner.js
+
+    - name: Run ESLint with SQL injection rules
+      run: |
+        npx eslint 'src/**/*.js' 'tests/**/*.js' 'scripts/**/*.js' \
+          --rule '{"sql-injection/no-unsafe-sql":"error"}' \
+          --config eslint-sql-injection-rules.js
+
+    - name: Upload scan results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: sql-injection-scan-results
+        path: sql-injection-report.json
+
+    - name: Fail on SQL injection vulnerabilities
+      if: failure()
+      run: |
+        echo "::error::SQL injection vulnerabilities detected!"
+        exit 1

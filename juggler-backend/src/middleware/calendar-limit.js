@@ -62,7 +62,7 @@ function checkCalendarLimit(provider) {
 
       next();
     } catch (err) {
-      console.error('[calendar-limit] Check failed:', err.message);
+      logger.error('[calendar-limit] Check failed:', err.message);
       next(); // Fail open
     }
   };

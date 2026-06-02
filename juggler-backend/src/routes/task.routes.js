@@ -68,7 +68,7 @@ router.get('/suggest-icon', async (req, res) => {
 
     return res.json({ icon: raw });
   } catch (err) {
-    console.error('suggest-icon error:', err.message || err);
+    logger.error('suggest-icon error:', err.message || err);
     return res.json({ icon: null });
   }
 });

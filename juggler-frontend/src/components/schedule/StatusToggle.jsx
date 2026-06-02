@@ -4,6 +4,7 @@
  */
 
 import React from 'react';
+import { TERMINAL_STATUSES } from '../../shared/task-status';
 
 // Labels are imperative verbs — they describe the ACTION clicking the button
 // performs, not the state the task ends up in. Keeps the UI consistent
@@ -17,6 +18,9 @@ var ALL_STATUSES = [
   { value: 'skip',   icon: '\u21ED', label: 'Skip',     activeBg: '#F1F5F9', activeBgDark: '#1E293B', color: '#475569', colorDark: '#94A3B8' },
   { value: 'pause',  icon: '\u23F8', label: 'Pause',    activeBg: '#E0E7FF', activeBgDark: '#1E1B4B', color: '#4338CA', colorDark: '#A5B4FC' },
   { value: 'missed', icon: '\u29BB', label: 'Missed',   activeBg: '#FEF3C7', activeBgDark: '#3A2A08', color: '#B45309', colorDark: '#FCD34D', systemOnly: true },
+  // juggler-cal-history Plan B: new history-related statuses
+  { value: 'archived', icon: '\uD83D\uDDC1', label: 'Archive', activeBg: '#E5E7EB', activeBgDark: '#374151', color: '#6B7280', colorDark: '#9CA3AF' },
+  { value: 'restored', icon: '\u267B', label: 'Restore', activeBg: '#DBEAFE', activeBgDark: '#1E3A8A', color: '#1E40AF', colorDark: '#93C5FD' },
 ];
 
 function DeleteButton({ onDelete, size, fontSize, darkMode }) {
@@ -42,7 +46,7 @@ function DeleteButton({ onDelete, size, fontSize, darkMode }) {
 // juggler-cal-history Plan C — D-15: terminal transitions require scheduled_at.
 // Disable done/skip/cancel buttons when the task has no scheduled time. Backend 400 guard
 // is the source of truth; this is the UX nicety.
-var TERMINAL_REQUIRES_SCHEDULE = ['done', 'skip', 'cancel'];
+var TERMINAL_REQUIRES_SCHEDULE = TERMINAL_STATUSES;
 
 export default React.memo(function StatusToggle({ value, onChange, onDelete, darkMode, compact, isMobile, taskType, disableTerminal }) {
   var size = compact ? 16 : (isMobile ? 28 : 22);

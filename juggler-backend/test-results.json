@@ -1,0 +1,24 @@
+
+> juggler-backend@1.0.0 test
+> jest --forceExit --json
+
+
+✓  juggler_test migrations up to date
+FAIL tests/cal-sync/02-adapter-msft.test.js (41.561 s)
+  ● MSFT adapter — buildMsftEventBody › should build an all-day event body
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: undefined
+
+      180 |     var body = msftAdapter.buildMsftEventBody(task, 2026, TEST_TIMEZONE);
+      181 |
+    > 182 |     expect(body.isAllDay).toBe(true);
+          |                           ^
+      183 |     expect(body.start.dateTime).toContain('2026-04-15');
+      184 |     expect(body.end.dateTime).toContain('2026-04-16');
+      185 |   });
+
+      at Object.toBe (tests/cal-sync/02-adapter-msft.test.js:182:27)
+

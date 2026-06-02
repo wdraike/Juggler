@@ -6,6 +6,7 @@ import React from 'react';
 import CalendarGrid from '../schedule/CalendarGrid';
 import { getTheme } from '../../theme/colors';
 import { DAY_NAMES } from '../../state/constants';
+import { isTerminalStatus } from '../../shared/task-status';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 

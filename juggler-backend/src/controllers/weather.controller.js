@@ -115,7 +115,7 @@ exports.getForecast = async (req, res) => {
       .where('lon_grid', lonGrid)
       .where('expires_at', '<=', now)
       .delete()
-      .catch(function(e) { console.warn('[weather] stale cache cleanup failed:', e.message); });
+      .catch(function(e) { logger.warn('[weather] stale cache cleanup failed:', e.message); });
 
     res.json({
       hourly: forecast.hourly,
@@ -125,7 +125,7 @@ exports.getForecast = async (req, res) => {
       refreshed: true
     });
   } catch (err) {
-    console.error('Weather forecast error:', err.message);
+    logger.error('Weather forecast error:', err.message);
     res.status(500).json({ error: err.message || 'Weather fetch failed' });
   }
 };
@@ -194,11 +194,11 @@ exports.ingest = async (req, res) => {
       .where('lon_grid', lonGrid)
       .where('expires_at', '<=', fetchedAt)
       .delete()
-      .catch(function(e) { console.warn('[weather] stale cache cleanup failed:', e.message); });
+      .catch(function(e) { logger.warn('[weather] stale cache cleanup failed:', e.message); });
 
     res.json({ cachedAt: fetchedAt, expiresAt });
   } catch (err) {
-    console.error('Weather ingest error:', err.message);
+    logger.error('Weather ingest error:', err.message);
     res.status(500).json({ error: err.message || 'Ingest failed' });
   }
 };
@@ -223,7 +223,7 @@ exports.geocode = async (req, res) => {
 
     res.json({ lat: r.latitude, lon: r.longitude, displayName });
   } catch (err) {
-    console.error('Geocode error:', err.message);
+    logger.error('Geocode error:', err.message);
     res.status(500).json({ error: err.message || 'Geocode failed' });
   }
 };
@@ -271,7 +271,7 @@ exports.reverseGeocode = async (req, res) => {
     var displayName = await reverseGeocodeDisplayName(lat, lon);
     res.json({ displayName });
   } catch (err) {
-    console.error('Reverse geocode error:', err.message);
+    logger.error('Reverse geocode error:', err.message);
     res.status(500).json({ error: err.message || 'Reverse geocode failed' });
   }
 };

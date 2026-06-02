@@ -10,6 +10,8 @@
  */
 
 const db = require('../db');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('feature-gate');
 const { reportUsage } = require('../lib/usage-reporter');
 
 function getNestedValue(obj, path) {
@@ -32,7 +34,7 @@ function logFeatureEvent(req, featureKey, eventType, value) {
     value: value ? JSON.stringify(value) : null,
     created_at: new Date()
   }).catch(err => {
-    console.error('[feature-gate] Failed to log event:', err.message);
+    logger.error('[feature-gate] Failed to log event:', { error: err });
   });
 }
 
@@ -201,7 +203,7 @@ function checkUsageLimit(limitKey, options = {}) {
 
       next();
     } catch (err) {
-      console.error('[feature-gate] Usage check failed:', err.message);
+      logger.error('[feature-gate] Usage check failed:', { error: err });
       next();
     }
   };
@@ -215,7 +217,7 @@ async function decrementUsage(userId, usageKey) {
       .where('count', '>', 0)
       .update({ count: db.raw('`count` - 1'), updated_at: new Date() });
   } catch (err) {
-    console.error('[feature-gate] Failed to decrement usage:', err.message);
+    logger.error('[feature-gate] Failed to decrement usage:', { error: err });
   }
 }
 
@@ -226,9 +228,9 @@ async function cleanupExpiredUsage() {
       .whereNotNull('period_end')
       .where('period_end', '<', cutoff)
       .del();
-    if (deleted > 0) console.log(`[plan-usage] Cleaned up ${deleted} expired rows`);
+    if (deleted > 0) logger.info(`[plan-usage] Cleaned up ${deleted} expired rows`);
   } catch (err) {
-    console.error('[plan-usage] Cleanup failed:', err.message);
+    logger.error('[plan-usage] Cleanup failed:', { error: err });
   }
 }
 

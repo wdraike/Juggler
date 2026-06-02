@@ -10,6 +10,7 @@ var { createDAVClient, DAVNamespace } = require('tsdav');
 var ICAL = require('ical.js');
 var { PLACEMENT_MODES } = require('./placementModes');
 var { libAppleLogger } = require('./logger');
+var { isTerminalStatus } = require('./task-status');
 
 var DEFAULT_SERVER_URL = 'https://caldav.icloud.com';
 
@@ -216,7 +217,7 @@ function buildVEvent(task, year, tz) {
   var uid = 'juggler-' + task.id + '@raikeandsons.com';
   vevent.addPropertyWithValue('uid', uid);
 
-  var isDone = task.status === 'done';
+  var isDone = isTerminalStatus(task.status);
   var cleanText = task.text.replace(/^(✓\s+)+/, '');
   var summaryText = isDone ? '✓ ' + cleanText : task.text;
   vevent.addPropertyWithValue('summary', summaryText);

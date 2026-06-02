@@ -1,0 +1,28 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/server.js",
+    "src/app.js!",
+    "src/cron/**/*.js!",
+    "src/scheduler/**/*.js!",
+    "src/mcp/**/*.js!",
+    "src/routes/**/*.js!",
+    "scripts/**/*.js!",
+    "knexfile.js!",
+    "jest.config.js!",
+    "src/__tests__/**/*.test.js!",
+    "tests/**/*.test.js!"
+  ],
+  "project": ["src/**/*.js", "scripts/**/*.js"],
+  "ignore": [
+    "src/db/migrations/**",
+    "src/db/seeds/**",
+    "auth-client.js",
+    "vendor/**",
+    "coverage/**",
+    "logs/**",
+    "uploads/**",
+    "test-results/**"
+  ],
+  "ignoreDependencies": []
+}

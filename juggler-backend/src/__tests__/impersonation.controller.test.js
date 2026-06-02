@@ -12,6 +12,16 @@ jest.mock('../proxy-config', () => ({
   authServiceUrl: 'http://auth-mock:5010'
 }));
 
+// Mock logger to prevent ReferenceError in tests
+jest.mock('@raike/lib-logger', () => ({
+  createLogger: jest.fn(() => ({
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn()
+  }))
+}));
+
 global.fetch = jest.fn();
 
 const { startImpersonation, stopImpersonation, getImpersonationTargets, getImpersonationLog } = require('../controllers/impersonation.controller');

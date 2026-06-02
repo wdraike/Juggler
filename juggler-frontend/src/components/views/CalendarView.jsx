@@ -6,7 +6,8 @@
 import React, { useState, useMemo, useRef, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { getTheme } from '../../theme/colors';
-import { DAY_NAMES, MONTH_NAMES, PRI_COLORS, STATUS_MAP, locIcon, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
+import { DAY_NAMES, MONTH_NAMES, PRI_COLORS, STATUS_MAP, locIcon, PAST_OPACITY } from '../../state/constants';
+import { isTerminalStatus } from '../../shared/task-status';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 
 /* ── Main CalendarView ── */
@@ -50,11 +51,28 @@ function formatCompletedAt(iso) {
   return time + ' ' + day;
 }
 
-function statusReasonForMissed(t) {
-  if (!t || !t.scheduledAt) return null;
-  var flexMin = (t.timeFlex != null) ? t.timeFlex : 60;
-  var windowClose = new Date(new Date(t.scheduledAt).getTime() + flexMin * 60 * 1000);
-  return 'missed because no resolution by ' + formatCompletedAt(windowClose.toISOString());
+function getStatusReason(t, status) {
+  if (!t || !status) return null;
+
+  switch (status) {
+    case 'missed':
+      if (!t.scheduledAt) return null;
+      var flexMin = (t.timeFlex != null) ? t.timeFlex : 60;
+      var windowClose = new Date(new Date(t.scheduledAt).getTime() + flexMin * 60 * 1000);
+      return 'missed because no resolution by ' + formatCompletedAt(windowClose.toISOString());
+    case 'cancel':
+      return t.cancelReason ? 'cancelled: ' + t.cancelReason : 'cancelled by user';
+    case 'skip':
+      return t.skipReason ? 'skipped: ' + t.skipReason : 'skipped for today';
+    case 'pause':
+      return t.pauseReason ? 'paused: ' + t.pauseReason : 'temporarily paused';
+    case 'archived':
+      return t.archiveReason ? 'archived: ' + t.archiveReason : 'moved to history';
+    case 'restored':
+      return t.restoreReason ? 'restored: ' + t.restoreReason : 'brought back from history';
+    default:
+      return null; // 'done' and 'wip' don't typically have automatic reasons
+  }
 }
 
 /* ── Popup card rendered via portal directly below/above anchor ── */
@@ -178,7 +196,7 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
   // juggler-cal-history Plan E — past-fade on past terminal entries (D-10).
   var isPast = isTaskPast(item, todayKey);
   var fadeOpacity = (isDone && isPast) ? PAST_OPACITY : null;
-  var statusReason = (status === 'missed') ? statusReasonForMissed(t) : null;
+  var statusReason = getStatusReason(t, status);
 
   return (
     <div style={{ position: 'relative' }}>

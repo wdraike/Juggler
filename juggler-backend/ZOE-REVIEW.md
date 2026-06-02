@@ -1,3 +1,128 @@
+# Zoe Review — 2026-06-01 (ZOE-JUG-002)
+
+## Scope: expandRecurring.test.js — placement_mode time_window inheritance
+
+### BLOCK Findings
+_None._
+
+### WARN Findings
+_None._
+
+### PASS Verifications
+| # | Check | Status |
+|---|-------|--------|
+| 1 | Test assertion is specific value check (`toBe('time_window')`), not shallow `toBeDefined()` | PASS |
+| 2 | Test length assertion `toHaveLength(1)` confirms exactly one instance generated (tight, not vacuous) | PASS |
+| 3 | RED confirmed before fix: `placement_mode` returned `undefined` — bug is real | PASS |
+| 4 | GREEN after fix: all 38 tests pass, no regressions | PASS |
+| 5 | `null` propagation verified: template with `placement_mode:null` → instance `null` (no spurious undefined→null coercion) | PASS |
+| 6 | Missing template field verified: template with no `placement_mode` → instance `undefined` (no phantom injection) | PASS |
+| 7 | Rolling branch already had `placement_mode` (line 339) — fix brings non-rolling into parity, not introducing inconsistency | PASS |
+
+## Status: PASS
+
+_Signed: Zoe — 2026-06-01T00:00:00Z_
+
+---
+
+# Zoe Review — 2026-06-01 (ZOE-JUG-026)
+
+## Scope: mcp-locked-path.test.js — adversarial audit of locked-path enqueueWrite tests
+
+## Summary
+25 tests, all substantive. No BLOCK findings. 2 WARN-level gaps (dead helper function, one assertion could be stronger). Core locked-path routing is correctly and thoroughly tested across all three handlers.
+
+## Telly Audit
+
+### BLOCK Findings
+_None._
+
+### WARN Findings
+
+| # | Finding | Evidence | File | Remediation |
+|---|---------|----------|------|-------------|
+| W1 | `addTask()` helper defined at line 94 but never called — dead code | `grep -n "addTask"` returns only the definition; no call site in the file | tests/mcp-locked-path.test.js:94 | Remove unused helper or use it in a test (batch tests use `taskStore[id] = makeTask(...)` directly) |
+| W2 | "text non-scheduling → not enqueued" assertion checks field-level (`'text' in e.fields`) but not zero-call-count | When `nonSchedulingFields` is empty and `schedulingFields` is also empty (text-only update), the whole `enqueueWrite` is skipped per source line 307. The test asserts `enqueuedText` is undefined but not that `mockEnqueueCalls.length === 0` — a scheduling field could have snuck in and the test would still pass | tests/mcp-locked-path.test.js:376 | Add `expect(mockEnqueueCalls.length).toBe(0)` to the text-only non-scheduling test |
+
+### Investigated-but-not-found Issues
+
+| # | Hypothesis | Verdict |
+|---|-----------|---------|
+| `splitFields` mock diverges from production | Mock uses inline `NON_SCHEDULING` set that is a verbatim copy of production `task-write-queue.js:54-58`. Sets are identical. No divergence. | CLEAR |
+| batch locked path: `updatedCount` reported as `parsed.updated` not tested | Handler returns `{ updated: updatedCount, queued: queuedCount }`. The test for non-scheduling fields asserts writes happened but not `parsed.updated` value. For pure non-scheduling update, `updatedCount` would be 2 (one per task). Not a correctness risk — the critical assertion (enqueueWrite not called) is present. Low value to add. | INFO only |
+| `update_task` locked path — `updateTaskById` NOT called assertion missing for pure-scheduling update | ZOE-JUG-023 WARN W2 noted this in the `mcp-update-task.test.js` context. This file partially addresses it for `notes`-only update (verifies `mockEnqueueCalls.length` via field search), but not for a `dur`-only pure-scheduling update (verifies `enqueueWrite` called but does not assert `updateTaskById` NOT called). Residual gap from ZOE-JUG-023 W2. | INFO — carry-forward from ZOE-JUG-023 W2; not introduced here |
+| `db.fn.now()` returns a `Date` object not a string — does this cause issues anywhere? | The locked path in `create_task` calls `rowToTask(row, tz)` where `row.created_at = db.fn.now()`. With `new Date(...)`, `rowToTask` calls `.toISOString()` correctly. The fix (changing from `'MOCK_NOW'` string to a real `Date`) is correct and was the source of the failing tests pre-fix. | CLEAR |
+| Mock isolation: `mockIsLockedValue` always `true` — could mask incorrect unlocked behavior | The file is intentionally scoped to locked-path tests only. Unlocked paths are covered by `mcp-create-task-boundary.test.js`, `mcp-update-task.test.js`, `mcp-create-tasks.test.js`. This file's locked-only scope is correct by design. | CLEAR |
+
+### PASS Verifications
+
+| # | Check | Status |
+|---|-------|--------|
+| 1 | `create_task` locked: `insertTask` NOT called asserted as `length === 0` (strong) | PASS |
+| 2 | `create_task` locked: `enqueueWrite` call verified for `op`, `src`, `userId`, `taskId` — all four required fields | PASS |
+| 3 | `create_task` locked: `queued:true` verified by parsing JSON, not just `toBeTruthy()` | PASS |
+| 4 | `batch_update_tasks` locked: `db.transaction` NOT called verified as `=== 0` exact count | PASS |
+| 5 | `batch_update_tasks` locked: all `enqueueWrite` calls verified for both `op` and `src` | PASS |
+| 6 | `batch_update_tasks` locked: unknown id guard verified — call list explicitly checked to not contain missing id | PASS |
+| 7 | `update_task` locked scheduling: `dur` value verified in enqueue `fields` (not just that enqueue happened) | PASS |
+| 8 | `update_task` locked scheduling: `placement_mode` field name transformation (`placementMode` → `placement_mode`) verified | PASS |
+| 9 | `enqueueScheduleRun` tested with `mockClear()` before each assertion to prevent count bleed | PASS |
+| 10 | `beforeEach` resets both `taskStore` and all capture arrays — no cross-test bleed | PASS |
+| 11 | Explicit ID round-trip: `explicit-id-001` verified in `call.taskId` | PASS |
+| 12 | Mock `splitFields` correctly classifies `dur` as scheduling and `text`/`notes` as non-scheduling | PASS — verified against production NON_SCHEDULING_FIELDS set |
+| 13 | `task not found → isError` tested while locked — confirms lock check does not bypass the existence guard | PASS |
+| 14 | Mixed batch test verifies both paths fire in same call (direct write + enqueue) | PASS |
+
+## Bird Audit
+Not applicable — no frontend files changed.
+
+## Status: PASS
+
+_Signed: Zoe — 2026-06-01T00:00:00Z_
+
+---
+
+# Zoe Review — 2026-06-01 (ZOE-JUG-027)
+
+## Scope: mcp-list-tasks.test.js — adversarial audit of list_tasks MCP handler tests
+
+## Summary
+13 tests, all substantive. No false passes, no shallow assertions, no missing core paths.
+Two WARN-level gaps noted (date-only no limit, combined filters), not blocking.
+
+## Telly Audit
+
+### BLOCK Findings
+_None._
+
+### WARN Findings
+
+| # | Finding | Evidence | File | Remediation |
+|---|---------|----------|------|-------------|
+| W1 | No test for `date` filter without `limit` — handler still runs date filter but `tasks.slice` branch is skipped; confirmed correct but untested as an independent path | Handler line 106–109: `if (date)` filter runs even without limit | tests/mcp-list-tasks.test.js | Add a test: `list_tasks({ date: '6/15' })` with no limit — confirm only matching tasks returned |
+| W2 | No test for `status + project` combined filter — both filters applied together could interact if mock query resets state between calls | Handler lines 87–99: both branches independent, but a combined test would pin this | tests/mcp-list-tasks.test.js | Add a test: `{ status: 'wip', project: 'Alpha' }` — confirm only wip+Alpha tasks returned |
+
+### PASS Verifications
+
+| # | Check | Verdict |
+|---|-------|---------|
+| 1 | Done-exclusion tests have meaningful assertions (not just toBeDefined) | PASS — uses `.toContain` / `.not.toContain` on IDs |
+| 2 | includeDone=true test verifies done task is actually present | PASS — explicitly checks done-1 in results |
+| 3 | Limit-without-date test confirms exact count (not ≤) | PASS — `toBe(2)` exact match |
+| 4 | Limit-with-date test correctly uses `toBeLessThanOrEqual(2)` and validates `t.date === '6/15'` | PASS — slice semantics correctly asserted |
+| 5 | rowToTask test checks 14 specific fields, not just presence | PASS — values asserted, not just `toHaveProperty` |
+| 6 | buildSourceMap test confirms instance inherits template `text` AND `project` | PASS — both field values asserted |
+| 7 | NULL-status test exercises MySQL three-value-logic path | PASS — covers the `orWhereNull` branch |
+| 8 | Mock `_limit` bug was caught and fixed (was reset before `resolve()` could read it) | PASS — fixed in test, test now correctly exercises the limit path |
+| 9 | No `expect.assertions()` used — async paths still verified via return value inspection | PASS — all tests `await` and parse the result |
+| 10 | No TODO comments or deferred assertions | PASS |
+
+## Status: PASS
+
+_Signed: Zoe — 2026-06-01T00:00:00Z_
+
+---
+
 # Zoe Review — 2026-05-31 (ZOE-JUG-011 + ZOE-JUG-024)
 
 ## Scope: mcp-create-tasks.test.js — full adversarial re-audit

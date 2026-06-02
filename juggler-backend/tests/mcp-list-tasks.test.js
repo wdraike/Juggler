@@ -566,4 +566,32 @@ describe('list_tasks MCP handler', function() {
     expect(ids).not.toContain('done-alpha');
     expect(ids).not.toContain('empty-alpha');
   });
+
+  // ── 14. ZOE-JUG-027-W3: date-only filter with M/D format ─────────────────
+  //
+  // The MCP tool accepts dates in M/D format (e.g., "6/15"), which should be
+  // converted to canonical ISO format internally and matched against t.date.
+  // This test verifies that the M/D format works correctly.
+
+  it('filters by date in M/D format (6/15)', async function() {
+    // 2026-06-15T16:00:00Z = noon Eastern (UTC-4) → rowToTask date "2026-06-15"
+    // When the user passes "6/15", the system should infer the year and convert
+    // it to the canonical "2026-06-15" format for matching.
+    mockRows = [
+      makeRow({ id: 'june15-1', text: 'June 15 task 1', status: '', scheduled_at: '2026-06-15 16:00:00', placement_mode: 'all_day' }),
+      makeRow({ id: 'june15-2', text: 'June 15 task 2', status: '', scheduled_at: '2026-06-15 16:00:00', placement_mode: 'all_day' }),
+      makeRow({ id: 'june16-1', text: 'June 16 task',   status: '', scheduled_at: '2026-06-16 16:00:00', placement_mode: 'all_day' })
+    ];
+
+    var result = await handlers.list_tasks({ date: '6/15' });
+    var tasks = JSON.parse(result.content[0].text);
+    var ids = tasks.map(function(t) { return t.id; });
+
+    expect(ids).toContain('june15-1');
+    expect(ids).toContain('june15-2');
+    expect(ids).not.toContain('june16-1');
+    // No limit applied — both June-15 tasks returned
+    expect(tasks.length).toBe(2);
+  });
+
 });

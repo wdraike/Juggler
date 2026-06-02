@@ -190,4 +190,32 @@ describe('OAuth /oauth/authorize redirect_uri allowlist', () => {
     expect(res.status).toBe(302);
     process.env.NODE_ENV = 'development'; // restore for remaining tests in this describe
   });
+
+  // ── ZOE-JUG-016: MCP_DEV_NO_AUTH=true alone must NOT activate the dev route ─
+  //
+  // Regression guard: if app.js:159 is ever changed to include MCP_DEV_NO_AUTH in the
+  // condition, the evil.com request would receive 400 (dev allowlist active) instead of
+  // 302 (proxy), and this test would FAIL — catching the regression.
+
+  test('ZOE-JUG-016: MCP_DEV_NO_AUTH=true without NODE_ENV=development — dev /oauth/authorize guard is NOT registered', async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.MCP_DEV_NO_AUTH = 'true';
+    jest.resetModules();
+    const testApp = getDevApp();
+    // evil.com is blocked with 400 by the dev allowlist handler when it IS registered.
+    // When the dev route is NOT registered (correct behavior), the proxy redirect handles
+    // /oauth/authorize and returns 302 regardless of redirect_uri.
+    const res = await request(testApp)
+      .get('/oauth/authorize')
+      .query({ redirect_uri: 'https://evil.com/callback', state: 'xyz' });
+    // Dev allowlist guard must NOT be active — evil.com must not get 400
+    expect(res.status).not.toBe(400);
+    // Proxy redirect is still in effect
+    expect(res.status).toBe(302);
+    // Restore
+    process.env.NODE_ENV = 'development';
+    delete process.env.MCP_DEV_NO_AUTH;
+    jest.resetModules();
+  });
 });
+

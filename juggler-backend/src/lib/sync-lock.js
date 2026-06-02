@@ -97,19 +97,19 @@ function withSyncLock(handler) {
       if (Date.now() - lockStart > MAX_LOCK_AGE) {
         clearInterval(heartbeat);
         lockLost = true;
-        console.warn('[sync-lock] Heartbeat stopped — lock held over ' + Math.round(MAX_LOCK_AGE / 1000) + 's, allowing expiry');
+        logger.warn('[sync-lock] Heartbeat stopped — lock held over ' + Math.round(MAX_LOCK_AGE / 1000) + 's, allowing expiry');
         return;
       }
       refreshLock(userId, token).then(function(ok) {
         if (!ok) {
           lockLost = true;
           clearInterval(heartbeat);
-          console.warn('[sync-lock] Lock lost — refresh returned 0 rows (expired or stolen)');
+          logger.warn('[sync-lock] Lock lost — refresh returned 0 rows (expired or stolen)');
         }
       }).catch(function(err) {
         lockLost = true;
         clearInterval(heartbeat);
-        console.error('[sync-lock] Lock refresh failed:', err.message);
+        logger.error('[sync-lock] Lock refresh failed:', err.message);
       });
     }, 10 * 1000);
     req.syncLock = {
@@ -142,12 +142,12 @@ async function withLock(userId, fn, opts) {
       if (!ok) {
         lockLost = true;
         clearInterval(heartbeat);
-        console.warn('[sync-lock] Lock lost in withLock — refresh returned 0 rows');
+        logger.warn('[sync-lock] Lock lost in withLock — refresh returned 0 rows');
       }
     }).catch(function(err) {
       lockLost = true;
       clearInterval(heartbeat);
-      console.error('[sync-lock] Lock refresh failed in withLock:', err.message);
+      logger.error('[sync-lock] Lock refresh failed in withLock:', err.message);
     });
   }, 10 * 1000);
   try {
@@ -164,7 +164,7 @@ async function withLock(userId, fn, opts) {
         var twq = require('./task-write-queue');
         await twq.flushQueueInLock(userId);
       } catch (err) {
-        console.error('[sync-lock] pre-release flush error:', err.message);
+        logger.error('[sync-lock] pre-release flush error:', err.message);
       }
     }
     await releaseLock(userId, token);
@@ -180,10 +180,10 @@ if (process.env.NODE_ENV !== 'test') {
     db.raw('DELETE FROM sync_locks WHERE expires_at <= NOW()')
       .then(function(result) {
         var count = result[0].affectedRows || 0;
-        if (count > 0) console.warn('[sync-lock] Swept ' + count + ' expired lock(s)');
+        if (count > 0) logger.warn('[sync-lock] Swept ' + count + ' expired lock(s)');
       })
       .catch(function(err) {
-        console.error('[sync-lock] Sweep error:', err.message);
+        logger.error('[sync-lock] Sweep error:', err.message);
       });
   }, SWEEP_INTERVAL);
   sweepTimer.unref();

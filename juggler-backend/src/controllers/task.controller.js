@@ -344,7 +344,7 @@ function rowToTask(row, timezone, sourceMap) {
 
   // Terminal-status tasks must never appear in the future — clamp scheduled_at
   // to updated_at (completion time) or now, whichever is earlier.
-  if (row.scheduled_at && (row.status === 'done' || row.status === 'cancel' || row.status === 'skip' || row.status === 'missed')) {
+  if (row.scheduled_at && isTerminalStatus(row.status)) {
     var sa = new Date(row.scheduled_at);
     var now = new Date();
     if (sa > now) {

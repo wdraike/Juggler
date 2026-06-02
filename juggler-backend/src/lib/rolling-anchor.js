@@ -3,6 +3,8 @@
  * Used by task.controller.js, cal-history-cron.js, and mcp/tools/tasks.js.
  */
 
+var { isTerminalStatus } = require('./task-status');
+
 /**
  * Returns true if the given task_masters row uses recur.type = 'rolling'.
  * @param {Object} masterRow - row from task_masters (recur is JSON string or object)
@@ -38,7 +40,7 @@ function isRollingMaster(masterRow) {
 function computeRollingAnchor(status, instanceDate, currentAnchor) {
   if (!instanceDate) return null;
   if (status === 'cancel') return null;
-  if (!['done', 'skip', 'missed'].includes(status)) return null;
+  if (!isTerminalStatus(status)) return null;
 
   // Guard: stale event
   if (currentAnchor && instanceDate < currentAnchor) return null;

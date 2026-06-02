@@ -1,0 +1,102 @@
+
+> juggler-backend@1.0.0 test
+> jest --forceExit --json --maxWorkers=1 --testTimeout=120000
+
+
+✓  juggler_test migrations up to date
+FAIL tests/cal-sync/02-adapter-msft.test.js (35.304 s)
+  ● MSFT adapter — buildMsftEventBody › should build an all-day event body
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: true
+    Received: undefined
+
+      180 |     var body = msftAdapter.buildMsftEventBody(task, 2026, TEST_TIMEZONE);
+      181 |
+    > 182 |     expect(body.isAllDay).toBe(true);
+          |                           ^
+      183 |     expect(body.start.dateTime).toContain('2026-04-15');
+      184 |     expect(body.end.dateTime).toContain('2026-04-16');
+      185 |   });
+
+      at Object.toBe (tests/cal-sync/02-adapter-msft.test.js:182:27)
+
+FAIL tests/schedulerPersistIntegration.test.js (8.418 s)
+  ● rowToTask with real DB rows › round-trip: seed → read → rowToTask produces valid task object
+
+    Cannot find module '@resume-optimizer/lib-logger' from 'src/scheduler/scheduleQueue.js'
+
+    Require stack:
+      src/scheduler/scheduleQueue.js
+      src/controllers/task.controller.js
+      tests/schedulerPersistIntegration.test.js
+
+      30 | var db = require('../db');
+      31 | var crypto = require('crypto');
+    > 32 | var { createLogger } = require('@resume-optimizer/lib-logger');
+         |                        ^
+      33 | var logger = createLogger('scheduleQueue');
+      34 |
+      35 | // Lazy requires to avoid circular dependency
+
+      at Resolver._throwModNotFoundError (node_modules/jest-resolve/build/index.js:863:11)
+      at Object.require (src/scheduler/scheduleQueue.js:32:24)
+      at Object.require (src/controllers/task.controller.js:19:53)
+      at Object.require (tests/schedulerPersistIntegration.test.js:102:41)
+
+  ● rowToTask with real DB rows › instance inherits preferred_time_mins from template in real DB
+
+    Cannot find module '@resume-optimizer/lib-logger' from 'src/scheduler/scheduleQueue.js'
+
+    Require stack:
+      src/scheduler/scheduleQueue.js
+      src/controllers/task.controller.js
+      tests/schedulerPersistIntegration.test.js
+
+      30 | var db = require('../db');
+      31 | var crypto = require('crypto');
+    > 32 | var { createLogger } = require('@resume-optimizer/lib-logger');
+         |                        ^
+      33 | var logger = createLogger('scheduleQueue');
+      34 |
+      35 | // Lazy requires to avoid circular dependency
+
+      at Resolver._throwModNotFoundError (node_modules/jest-resolve/build/index.js:863:11)
+      at Object.require (src/scheduler/scheduleQueue.js:32:24)
+      at Object.require (src/controllers/task.controller.js:19:53)
+      at Object.require (tests/schedulerPersistIntegration.test.js:117:41)
+
+  ● TEMPLATE_FIELDS routing (real DB) › updating instance routes template fields to source
+
+    Cannot find module '@resume-optimizer/lib-logger' from 'src/scheduler/scheduleQueue.js'
+
+    Require stack:
+      src/scheduler/scheduleQueue.js
+      src/controllers/task.controller.js
+      tests/schedulerPersistIntegration.test.js
+
+      30 | var db = require('../db');
+      31 | var crypto = require('crypto');
+    > 32 | var { createLogger } = require('@resume-optimizer/lib-logger');
+         |                        ^
+      33 | var logger = createLogger('scheduleQueue');
+      34 |
+      35 | // Lazy requires to avoid circular dependency
+
+      at Resolver._throwModNotFoundError (node_modules/jest-resolve/build/index.js:863:11)
+      at Object.require (src/scheduler/scheduleQueue.js:32:24)
+      at Object.require (src/controllers/task.controller.js:19:53)
+      at Object.require (tests/schedulerPersistIntegration.test.js:248:31)
+
+  ● TEMPLATE_FIELDS routing (real DB) › preferred_time_mins routes to template, not instance
+
+    Cannot find module '@resume-optimizer/lib-logger' from 'src/scheduler/scheduleQueue.js'
+
+    Require stack:
+      src/scheduler/scheduleQueue.js
+      src/controllers/task.controller.js
+      tests/schedulerPersistIntegration.test.js
+
+      30 | var db = require('../db');
+      31 | var cr

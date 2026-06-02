@@ -6,7 +6,8 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { getTheme } from '../../theme/colors';
-import { GRID_START, GRID_END, PRI_COLORS, STATUS_MAP, MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, locIcon, LOC_TINT, locBgTint, WHEN_TAG_ICONS, DEFAULT_TOOLS, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
+import { GRID_START, GRID_END, PRI_COLORS, STATUS_MAP, MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, locIcon, LOC_TINT, locBgTint, WHEN_TAG_ICONS, DEFAULT_TOOLS, PAST_OPACITY } from '../../state/constants';
+import { isTerminalStatus } from '../../shared/task-status';
 import { formatHour, formatDateKey, parseDate } from '../../scheduler/dateHelpers';
 import { getBlocksForDate, parseWhen } from '../../scheduler/timeBlockHelpers';
 import { resolveLocationId, getLocationForDatePure } from '../../scheduler/locationHelpers';
@@ -52,6 +53,55 @@ function durLabel(dur) {
   return dur >= 60 ? Math.round(dur / 60 * 10) / 10 + 'h' : dur + 'm';
 }
 
+// juggler-cal-history Plan E — past-fade + popup helpers (D-10/D-12).
+function isTaskPast(item, todayKey) {
+  var t = item && item.task;
+  if (!t || !t.scheduledAt) return false;
+  return formatDateKey(new Date(t.scheduledAt)) < todayKey;
+}
+
+function labelForStatus(s) {
+  if (s === 'done') return 'Done at';
+  if (s === 'skip') return 'Skipped at';
+  if (s === 'cancel') return 'Cancelled at';
+  if (s === 'missed') return 'Missed at';
+  if (s === 'pause') return 'Paused at';
+  return 'Resolved at';
+}
+
+function formatCompletedAt(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  var time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase().replace(/\s/g, '');
+  var day = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  return time + ' ' + day;
+}
+
+function getStatusReason(t, status) {
+  if (!t || !status) return null;
+
+  switch (status) {
+    case 'missed':
+      if (!t.scheduledAt) return null;
+      var flexMin = (t.timeFlex != null) ? t.timeFlex : 60;
+      var windowClose = new Date(new Date(t.scheduledAt).getTime() + flexMin * 60 * 1000);
+      return 'missed because no resolution by ' + formatCompletedAt(windowClose.toISOString());
+    case 'cancel':
+      return t.cancelReason ? 'cancelled: ' + t.cancelReason : 'cancelled by user';
+    case 'skip':
+      return t.skipReason ? 'skipped: ' + t.skipReason : 'skipped for today';
+    case 'pause':
+      return t.pauseReason ? 'paused: ' + t.pauseReason : 'temporarily paused';
+    case 'archived':
+      return t.archiveReason ? 'archived: ' + t.archiveReason : 'moved to history';
+    case 'restored':
+      return t.restoreReason ? 'restored: ' + t.restoreReason : 'brought back from history';
+    default:
+      return null; // 'done' and 'wip' don't typically have automatic reasons
+  }
+}
+
 /* ── Task nature → background tint ── */
 function tileBg(task, darkMode, hover, theme) {
   // Reminder events — subtle purple/violet
@@ -74,7 +124,7 @@ function tileBg(task, darkMode, hover, theme) {
 }
 
 /* ── Popup card rendered via portal ── */
-function FixedPopup({ mousePos, item, status, theme, darkMode, cardRect }) {
+function FixedPopup({ mousePos, item, status, theme, darkMode, cardRect, completedAt, statusReason }) {
   var t = item.task || item;
   var priColor = PRI_COLORS[t.pri] || PRI_COLORS.P3;
   var isDone = isTerminalStatus(status);
@@ -174,6 +224,16 @@ function FixedPopup({ mousePos, item, status, theme, darkMode, cardRect }) {
           borderTop: '1px solid ' + theme.border, paddingTop: 4
         }}>
           {t.notes.length > 120 ? t.notes.slice(0, 120) + '...' : t.notes}
+        </div>
+      )}
+      {completedAt && isDone && (
+        <div style={{ marginTop: 4, fontSize: 10, color: theme.textMuted, fontStyle: 'italic' }}>
+          {labelForStatus(status)} {formatCompletedAt(completedAt)}
+        </div>
+      )}
+      {statusReason && (
+        <div style={{ marginTop: 2, fontSize: 10, color: theme.textMuted }}>
+          {statusReason}
         </div>
       )}
     </div>
@@ -556,7 +616,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
           );
         })()}
       </div>
-      {show && <FixedPopup mousePos={mousePos} item={item} status={status} theme={theme} darkMode={darkMode} cardRect={cardRect} />}
+      {show && <FixedPopup mousePos={mousePos} item={item} status={status} theme={theme} darkMode={darkMode} cardRect={cardRect} completedAt={item.task?.completedAt} statusReason={getStatusReason(item.task, status)} />}
       {/* Travel buffer zones — hatched strips above/below the task card */}
       {item.travelBefore > 0 && hourHeight > 0 && (
         <div style={{
@@ -646,7 +706,7 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme,
           </span>
         )}
       </div>
-      {show && <FixedPopup mousePos={mousePos} item={{ task: task, start: null, end: null }} status={status} theme={theme} darkMode={darkMode} cardRect={cardRect} />}
+      {show && <FixedPopup mousePos={mousePos} item={{ task: task, start: null, end: null }} status={status} theme={theme} darkMode={darkMode} cardRect={cardRect} completedAt={task?.completedAt} statusReason={getStatusReason(task, status)} />}
     </div>
   );
 }
@@ -842,13 +902,13 @@ export default function DailyView({
   }, [weatherByDate, selectedDateKey]);
 
   // Status filter
-  // Past days: done/skip/cancel are historical records and always visible under 'open'.
+  // Past days: terminal statuses are historical records and always visible under 'open'.
   var matchesFilter = useCallback(function (taskId) {
     if (!filter || filter === 'all') return true;
     var st = statuses[taskId] || '';
     if (filter === 'open') {
-      if (isPast && (st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed')) return true;
-      return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause' && st !== 'missed';
+      if (isPast && isTerminalStatus(st)) return true;
+      return !isTerminalStatus(st);
     }
     if (filter === 'action') return st === '' || st === 'wip';
     if (filter === 'done') return st === 'done';
@@ -860,18 +920,18 @@ export default function DailyView({
     if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(taskId);
     if (filter === 'unplaced') return unplacedIds && unplacedIds.has(taskId);
     return true;
-  }, [filter, statuses, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isPast]);
+  }, [filter, statuses, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isPast, isTerminalStatus]);
 
   var allScheduled = useMemo(function () {
     return (placements || []).filter(function (p) {
       if (p.start == null) return false;
       var st = statuses[p.task.id] || '';
-      // Past days: always show done/cancel/skip (historical record)
-      if (isPast && (st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed')) return true;
-      if ((st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed') && filter !== 'all' && filter !== 'done' && filter !== st) return false;
+      // Past days: always show terminal statuses (historical record)
+      if (isPast && isTerminalStatus(st)) return true;
+      if (isTerminalStatus(st) && filter !== 'all' && filter !== 'done' && filter !== st) return false;
       return matchesFilter(p.task.id);
     }).sort(function (a, b) { return a.start - b.start; });
-  }, [placements, statuses, matchesFilter, filter, isPast]);
+  }, [placements, statuses, matchesFilter, filter, isPast, isTerminalStatus]);
 
   var unscheduled = useMemo(function () {
     var scheduledIds = {};
@@ -901,9 +961,9 @@ export default function DailyView({
       // this one — it's a duplicate view of the same occurrence (either
       // a remaining split chunk or a stray task_instance row).
       if (t.sourceId && scheduledByOccurrence[t.sourceId + '|' + (t.date || '')]) return false;
-      // Only hide done/cancelled/skipped when filter is not 'all'
+      // Only hide terminal statuses when filter is not 'all'
       var st = statuses[t.id] || '';
-      if ((st === 'done' || st === 'cancel' || st === 'skip') && filter !== 'all' && filter !== 'done' && filter !== st) return false;
+      if (isTerminalStatus(st) && filter !== 'all' && filter !== 'done' && filter !== st) return false;
       return matchesFilter(t.id);
     });
     // Merge in scheduler-reported unplaced items for this date. Missed
@@ -927,7 +987,7 @@ export default function DailyView({
       }
       if (u.sourceId && scheduledByOccurrence[u.sourceId + '|' + (uDate || '')]) return;
       var st = statuses[u.id] || '';
-      if ((st === 'done' || st === 'cancel' || st === 'skip') && filter !== 'all' && filter !== 'done' && filter !== st) return;
+      if (isTerminalStatus(st) && filter !== 'all' && filter !== 'done' && filter !== st) return;
       if (!matchesFilter(u.id)) return;
       raw.push(u);
       rawIds[u.id] = true;

@@ -6,19 +6,72 @@
  * properties, derived from scheduled_at via rowToTask().
  */
 
+var { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('runSchedule');
+
 var db = require('../db');
 var tasksWrite = require('../lib/tasks-write');
 var { computeChunks } = require('../lib/reconcile-splits');
 var unifiedScheduleV2 = require('./unifiedScheduleV2');
 var constants = require('./constants');
 var { roundCoord } = require('../controllers/weather.controller');
+var { TERMINAL_STATUSES } = require('../lib/task-status');
 
 // v2 is the only scheduler. Kept as a thin wrapper so call sites don't have
 // to care about whether a shadow / diff layer exists (makes re-adding one
 // later for another migration trivial). The `userId` / `context` args are
 // accepted for signature compatibility with the historical shadow wrapper;
 // they're unused here.
+/**
+ * Validate that all pending tasks have required scheduled_at values.
+ * This is the scheduled_at-required guard for juggler-cal-history Plan C.
+ *
+ * Rules:
+ * - Recurring templates (task_type='recurring_template') should NOT have scheduled_at
+ * - Recurring instances (task_type='recurring_instance') should have scheduled_at
+ * - Regular tasks with date/time constraints but no scheduled_at are NEW tasks - OK
+ * - Regular tasks that look like they've been scheduled before should have scheduled_at
+ * - Terminal statuses are allowed to lack scheduled_at (legacy support, though DB constraint prevents this)
+ *
+ * @param {Array} allTasks - Array of task objects
+ * @throws {Error} If any pending task is missing required scheduled_at
+ */
+function validateScheduledAt(allTasks) {
+  for (var i = 0; i < allTasks.length; i++) {
+    var task = allTasks[i];
+    
+    // Recurring templates should NOT have scheduled_at - that's correct
+    if (task.taskType === 'recurring_template') {
+      continue; // Skip validation for templates
+    }
+    
+    // Recurring instances SHOULD have scheduled_at
+    if (task.taskType === 'recurring_instance') {
+      if (!task.scheduledAt && !task.scheduled_at) {
+        throw new Error('Recurring instance ' + task.id + ' is missing required scheduled_at');
+      }
+      continue; // Validation passed for this instance
+    }
+    
+    // Only validate pending tasks (empty status)
+    // Terminal statuses are handled by DB constraint (Phase A)
+    if (!task.status || task.status === '') {
+      // Recurring instances are handled above, so this is a regular task
+      // Regular tasks without scheduled_at are NEW tasks - that's OK
+      // The scheduler will assign scheduled_at during placement
+      if (!task.scheduledAt && !task.scheduled_at) {
+        // This is a new task without scheduling - perfectly valid
+        // The scheduler will assign scheduled_at during placement
+        continue;
+      }
+      // If we get here, the task has scheduled_at - validation passes
+    }
+  }
+}
+
 function runSchedulerWithShadow(allTasks, statuses, todayKey, nowMins, cfg /*, userId, context */) {
+  // Wave C: scheduled_at-required guard
+  validateScheduledAt(allTasks);
   return unifiedScheduleV2(allTasks, statuses, todayKey, nowMins, cfg);
 }
 var DEFAULT_TIME_BLOCKS = constants.DEFAULT_TIME_BLOCKS;
@@ -288,7 +341,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // instance reappears on the next scheduler run.
   var _p_terminalDedupRows = trx('task_instances').where('user_id', userId)
     .whereNotNull('master_id')
-    .whereIn('status', ['done', 'skip', 'cancel', 'missed'])
+    .whereIn('status', TERMINAL_STATUSES)
     .select('master_id as source_id', 'date', 'scheduled_at', 'occurrence_ordinal', 'id');
   // Cross-cycle spacing history: latest `done` placement date per recurring
   // master. Only `done` counts — `skip` / `cancel` mean the user opted out
@@ -358,7 +411,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
         .update({ rolling_anchor: b.anchor, updated_at: trx.fn.now() });
     }));
     var _backfillActual = _backfillCounts.reduce(function(s, n) { return s + (n || 0); }, 0);
-    console.log('[SCHED] rolling_anchor backfill: ' + _backfillActual + '/' + _rollingBackfills.length + ' written: ' +
+    logger.info('[SCHED] rolling_anchor backfill: ' + _backfillActual + '/' + _rollingBackfills.length + ' written: ' +
       _rollingBackfills.map(function(b) { return b.id + '→' + b.anchor; }).join(', '));
   }
 
@@ -519,7 +572,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   });
   var MAX_EXPANDED = 500;
   if (desiredOccurrences.length > MAX_EXPANDED) {
-    console.warn('[SCHED] expansion capped: ' + desiredOccurrences.length + ' → ' + MAX_EXPANDED);
+    logger.warn('[SCHED] expansion capped: ' + desiredOccurrences.length + ' → ' + MAX_EXPANDED);
     desiredOccurrences = desiredOccurrences.slice(0, MAX_EXPANDED);
   }
   tPerf.expandEnd = Date.now() - tPerfStart;
@@ -615,7 +668,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       t.deadline = null;
       t.scheduledAt = null;
     });
-    console.log('[SCHED] reconcile: matched ' + occurrenceMoves.length + ' existing occurrence(s) to new target date(s)');
+    logger.info('[SCHED] reconcile: matched ' + occurrenceMoves.length + ' existing occurrence(s) to new target date(s)');
   }
 
   // Fan out each occurrence into K chunks based on master.split / splitMin.
@@ -742,7 +795,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // back on lock timeout — the safety-net flag must survive a rollback.
     await db('task_instances').whereIn('id', toDeleteIds).update({ unscheduled: 1, updated_at: db.fn.now() });
     await tasksWrite.deleteTasksWhere(trx, userId, function(q) { return q.whereIn('id', toDeleteIds); });
-    console.log('[SCHED] reconcile: deleted ' + toDeleteIds.length + ' stale recurring instances');
+    logger.info('[SCHED] reconcile: deleted ' + toDeleteIds.length + ' stale recurring instances');
     reconcileChanged = true;
   }
   if (toUpdate.length > 0) {
@@ -775,7 +828,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       if (ch.split_ordinal != null) t.splitOrdinal = ch.split_ordinal;
       if (ch.split_total != null) t.splitTotal = ch.split_total;
     });
-    console.log('[SCHED] reconcile: updated ' + toUpdate.length + ' instance rows to match chunk plan');
+    logger.info('[SCHED] reconcile: updated ' + toUpdate.length + ' instance rows to match chunk plan');
     reconcileChanged = true;
   }
   if (reconcileChanged) {
@@ -876,12 +929,12 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (existingChunkCheck.length > 0) {
       var existingChunkSet = {};
       existingChunkCheck.forEach(function(r) { existingChunkSet[r.id] = true; });
-      console.error('[SCHED] phase1: collision — ' + existingChunkCheck.length + ' chunk IDs already in DB, skipping:', existingChunkCheck.map(function(r) { return r.id; }));
+      logger.error('[SCHED] phase1: collision — ' + existingChunkCheck.length + ' chunk IDs already in DB, skipping:', existingChunkCheck.map(function(r) { return r.id; }));
       chunkInsertRows = chunkInsertRows.filter(function(r) { return !existingChunkSet[r.id]; });
     }
     if (chunkInsertRows.length > 0) {
       await tasksWrite.insertTasksBatch(trx, chunkInsertRows);
-      console.log('[SCHED] phase1: pre-inserted ' + chunkInsertRows.length + ' chunk rows');
+      logger.info('[SCHED] phase1: pre-inserted ' + chunkInsertRows.length + ' chunk rows');
     }
     // Populate for changeset projection — taskRows was loaded before this INSERT
     // so rowsById won't have these rows; phase1InsertedById fills the gap.
@@ -961,7 +1014,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   if (inMemoryChunks.length > 0) {
     allTasks = allTasks.concat(inMemoryChunks);
     inMemoryChunks.forEach(function(t) { statuses[t.id] = ''; });
-    console.log('[SCHED] in-memory: added ' + inMemoryChunks.length + ' chunk tasks for scheduling');
+    logger.info('[SCHED] in-memory: added ' + inMemoryChunks.length + ' chunk tasks for scheduling');
   }
 
   // Re-apply placement brackets (startAfter/deadline) for all recurring instances
@@ -1141,7 +1194,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   });
 
   if (mergedOutIds.length > 0) {
-    console.log('[SCHED] split-chunk merge: collapsed ' + mergedOutIds.length + ' adjacent chunk(s) into primary rows');
+    logger.info('[SCHED] split-chunk merge: collapsed ' + mergedOutIds.length + ' adjacent chunk(s) into primary rows');
   }
 
   Object.keys(dayPlacements).forEach(function(dateKey) {
@@ -1505,7 +1558,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       }
       movedPast++;
     });
-    if (movedPast > 0) console.log('[SCHED] moved/skipped ' + movedPast + ' past-dated tasks');
+    if (movedPast > 0) logger.info('[SCHED] moved/skipped ' + movedPast + ' past-dated tasks');
   }
 
   // Adjacent split chunks that landed back-to-back (zero gap) on the same day
@@ -1517,11 +1570,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // Phase 1: in-memory chunk rows were pre-inserted before scheduling (see
   // "Phase 1: Pre-insert" block above). Placed chunks now have DB rows and
   // flow through pendingUpdates as UPDATEs like any other recurring instance.
-  console.log('[SCHED] persist: ' + inMemoryChunks.length + ' pre-inserted chunks updating via pendingUpdates');
+  logger.info('[SCHED] persist: ' + inMemoryChunks.length + ' pre-inserted chunks updating via pendingUpdates');
 
   // Execute updates in batches to avoid long-running single-row UPDATEs.
   // Group by identical dbUpdate shape, then batch with CASE expressions.
-  console.log('[SCHED] executing ' + pendingUpdates.length + ' DB updates');
+  logger.info('[SCHED] executing ' + pendingUpdates.length + ' DB updates');
   pendingUpdates.sort(function(a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
 
   // Batch scheduled_at + dur updates (the most common case)
@@ -1607,12 +1660,12 @@ async function runScheduleAndPersist(userId, _retries, options) {
     await tasksWrite.deleteTasksWhere(trx, userId, function(q) {
       return q.whereIn('id', mergedOutIds);
     });
-    console.log('[SCHED] split-chunk merge: deleted ' + mergedOutIds.length + ' secondary chunk row(s) from DB');
+    logger.info('[SCHED] split-chunk merge: deleted ' + mergedOutIds.length + ' secondary chunk row(s) from DB');
   }
 
-  console.log('[SCHED] runScheduleAndPersist: updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
+  logger.info('[SCHED] runScheduleAndPersist: updated ' + updated + ', cleared ' + cleared + ' for user ' + userId);
   tPerf.persistEnd = Date.now() - tPerfStart;
-  console.log('[SCHED] perf user=' + userId
+  logger.info('[SCHED] perf user=' + userId
     + ' load=' + tPerf.loadEnd
     + 'ms expand=' + (tPerf.expandEnd - tPerf.loadEnd)
     + 'ms reconcile=' + (tPerf.reconcileEnd - tPerf.expandEnd)
@@ -1670,7 +1723,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   }
 
   // Invalidate Redis caches — scheduler modified tasks
-  cache.invalidateTasks(userId).catch(function(err) { console.error("[silent-catch]", err.message); });
+  cache.invalidateTasks(userId).catch(function(err) { logger.error("[silent-catch]", { error: err }); });
 
   // Add scheduledAtUtc to placements for timezone-independent frontend display
   var outPlacements = {};
@@ -1775,7 +1828,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   }); // end transaction
   } catch (err) {
     if ((err.code === 'ER_LOCK_DEADLOCK' || err.code === 'ER_LOCK_WAIT_TIMEOUT') && retries < MAX_RETRIES) {
-      console.log('[SCHED] ' + err.code + ' detected, retry ' + (retries + 1) + '/' + MAX_RETRIES);
+      logger.info('[SCHED] ' + err.code + ' detected, retry ' + (retries + 1) + '/' + MAX_RETRIES);
       await new Promise(function(r) { setTimeout(r, 500 * (retries + 1)); });
       return runScheduleAndPersist(userId, retries + 1, options);
     }
@@ -1823,7 +1876,7 @@ async function getSchedulePlacements(userId, options) {
 
   // Fast return: if cache is fresh, hydrate task objects and return
   if (cacheUsable && cache.dayPlacements) {
-    console.log('[SCHED] placements: returning fresh cache (age=' + Math.round((Date.now() - new Date(cache.generatedAt).getTime()) / 1000) + 's)');
+    logger.info('[SCHED] placements: returning fresh cache (age=' + Math.round((Date.now() - new Date(cache.generatedAt).getTime()) / 1000) + 's)');
     // Load tasks to hydrate placements — cache stores taskId only
     var fastRows = await db('tasks_v').where('user_id', userId).select();
     var fastSrcMap = buildSourceMap(fastRows);
@@ -1872,7 +1925,7 @@ async function getSchedulePlacements(userId, options) {
     .select();
   var terminalDedupRows2 = await db('task_instances').where('user_id', userId)
     .whereNotNull('master_id')
-    .whereIn('status', ['done', 'skip', 'cancel', 'missed'])
+    .whereIn('status', TERMINAL_STATUSES)
     .select('master_id as source_id', 'date', 'scheduled_at');
   var srcMap = buildSourceMap(taskRows);
   var allTasks = taskRows.map(function(r) { return rowToTask(r, TIMEZONE, srcMap); });
@@ -1952,7 +2005,7 @@ async function getSchedulePlacements(userId, options) {
       if (maxRow && maxRow.max_updated) {
         var lastModified = new Date(String(maxRow.max_updated).replace(' ', 'T') + 'Z');
         if (lastModified > genTime) {
-          console.log('[SCHED] cache stale: tasks modified since cache (' + Math.round((lastModified - genTime) / 1000) + 's newer)');
+          logger.info('[SCHED] cache stale: tasks modified since cache (' + Math.round((lastModified - genTime) / 1000) + 's newer)');
           cacheStale = true;
         }
       }
@@ -1965,7 +2018,7 @@ async function getSchedulePlacements(userId, options) {
         return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'disabled';
       });
       if (activeTodayTasks.length > 0) {
-        console.log('[SCHED] cache stale: no placements for today but ' + activeTodayTasks.length + ' active tasks exist');
+        logger.info('[SCHED] cache stale: no placements for today but ' + activeTodayTasks.length + ' active tasks exist');
         cacheStale = true;
       }
     }
@@ -1983,11 +2036,11 @@ async function getSchedulePlacements(userId, options) {
     var freshResult = null;
     try {
       freshResult = await syncLock.withLock(userId, function() {
-        console.log('[SCHED] cache stale (age=' + Math.round((Date.now() - new Date(cache.generatedAt).getTime()) / 60000) + 'm), re-running scheduler under sync lock');
+        logger.info('[SCHED] cache stale (age=' + Math.round((Date.now() - new Date(cache.generatedAt).getTime()) / 60000) + 'm), re-running scheduler under sync lock');
         return runScheduleAndPersist(userId, undefined, { timezone: TIMEZONE });
       });
     } catch (err) {
-      console.error('[SCHED] stale re-run failed, using cached:', err.message);
+      logger.error('[SCHED] stale re-run failed, using cached:', { error: err });
       // Fall through to cached hydration
     }
     if (freshResult) {
@@ -2004,7 +2057,7 @@ async function getSchedulePlacements(userId, options) {
     // and re-read the cache that run produced, then fall through to
     // cached hydration below.
     if (freshResult === null) {
-      console.log('[SCHED] cache stale but scheduler already running, waiting...');
+      logger.info('[SCHED] cache stale but scheduler already running, waiting...');
       await new Promise(function(r) { setTimeout(r, 2000); });
       var freshCacheRow = await db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
       if (freshCacheRow) {
@@ -2116,7 +2169,7 @@ async function getSchedulePlacements(userId, options) {
   }
 
   // No cache — first load, run scheduler and cache the result
-  console.log('[SCHED] no placement cache, running scheduler for first load');
+  logger.info('[SCHED] no placement cache, running scheduler for first load');
   var cfg = await loadConfig(userId);
   cfg.timezone = TIMEZONE;
   var result = runSchedulerWithShadow(

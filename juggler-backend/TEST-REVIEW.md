@@ -1,5 +1,99 @@
 # TEST-REVIEW.md — juggler-backend
 
+## ZOE-JUG-002 Test Run — 2026-06-01
+
+### expandRecurring placement_mode inheritance
+
+38 tests passed, 0 failed. New test `instances inherit placement_mode time_window from template` confirmed RED before fix and GREEN after. Fix directly exercises the non-rolling instance push path at line 470 of `expandRecurring.js`.
+
+| Suite | Tests | Passed | Failed | Status |
+|-------|-------|--------|--------|--------|
+| expandRecurring.test.js | 38 | 38 | 0 | PASS |
+
+**Status: PASS** — _Signed: Telly — 2026-06-01T00:00:00Z_
+
+---
+
+## ZOE-JUG-026 Test Run — 2026-06-01
+
+**Scope:** `tests/mcp-locked-path.test.js` — locked-path (isLocked=true) routing for MCP create/update/batch_update handlers
+
+### Summary
+
+25 tests passed, 0 failed, 0 skipped. All locked-path branches covered across three MCP handlers. Pure in-memory mock suite — no DB dependency required.
+
+### Test Results
+
+| Suite | Tests | Passed | Failed | Skipped | Time |
+|-------|-------|--------|--------|---------|------|
+| mcp-locked-path.test.js | 25 | 25 | 0 | 0 | 0.4s |
+
+### Coverage Map
+
+| Handler | Path Tested | Tests |
+|---------|-------------|-------|
+| `create_task` locked | enqueueWrite called; insertTask NOT called; queued:true; user_id in fields; explicit id threading; enqueueScheduleRun called; no transaction | 8 |
+| `update_task` locked (scheduling) | dur enqueued; placement_mode enqueued; queued:true; enqueueScheduleRun | 4 |
+| `update_task` locked (non-scheduling) | text → direct write; notes → direct write; task not found → isError | 3 |
+| `batch_update_tasks` locked | enqueueWrite per task; no db.transaction; op/src; queued count; non-scheduling direct; mixed batch; enqueueScheduleRun; unknown id skipped | 7 |
+| Mock isolation | beforeEach resets all captures; no bleed across tests | 3 |
+
+### Infrastructure Note
+
+`jest.globalSetup.js` fails when test DB is reachable but migration `20260603000000_add_completed_at_to_tasks_v_view.js` errors (tasks_v not present in juggler_test). Pre-existing issue blocking all juggler-backend unit tests via `npm test`. Tests run with `--globalSetup=""` — all tests here use a fully in-memory mock DB; no real DB connection required.
+
+### Status: PASS
+
+_Signed: Telly — 2026-06-01T00:00:00Z_
+
+---
+
+## ZOE-JUG-027 Test Run — 2026-06-01
+
+**Scope:** `tests/mcp-list-tasks.test.js` — MCP list_tasks handler unit tests
+
+### Summary
+13 tests passed, 0 failed, 0 skipped. All list_tasks handler code paths covered.
+Pure in-memory mock suite — no DB dependency required.
+
+### Test Results
+
+| Suite | Tests | Passed | Failed | Skipped | Time |
+|-------|-------|--------|--------|---------|------|
+| mcp-list-tasks.test.js | 13 | 13 | 0 | 0 | 0.35s |
+
+### Coverage Map
+
+| Code Path | Test | Status |
+|-----------|------|--------|
+| Default done-exclusion | "excludes done tasks by default" | PASS |
+| NULL-status three-valued-logic (MySQL) | "includes null-status tasks" | PASS |
+| includeDone=true | "returns done tasks when includeDone=true" | PASS |
+| Explicit status="done" filter overrides default | "filters to only done tasks when status=done" | PASS |
+| Explicit status="wip" filter | "filters to wip tasks when status=wip" | PASS |
+| Project name filter | "filters by project name" | PASS |
+| limit without date (DB-level LIMIT) | "limits results when limit is provided without date" | PASS |
+| limit with date (post-fetch slice) | "limits results with date filter applied post-fetch" | PASS |
+| rowToTask field mapping | "maps DB row to task object with expected fields" | PASS |
+| buildSourceMap recurring instance inheritance | "inherits template text in recurring instance" | PASS |
+| Empty result set | "returns empty array when no tasks match" | PASS |
+| MCP response shape (content array) | "returns content array with type=text" | PASS |
+| skip/cancel/pause/disabled included by default | "includes skip, cancel, pause, and disabled tasks" | PASS |
+
+### Mock Architecture
+- Knex-style chainable in-memory query builder; filter accumulation with sub-builder for complex `where(fn)` calls
+- `_limit` applied inside `resolve()` — bug found and fixed during authoring: `.then` was nulling `_limit` before `resolve()` could read it, causing limit test to fail
+- Tables mocked: `users` (returns timezone), `tasks_v` (filtered task list)
+
+### Coverage Gaps
+None for `list_tasks`. All branches in handler (lines 84–111 of `src/mcp/tools/tasks.js`) are exercised.
+
+### Status: PASS
+
+_Signed: Telly — 2026-06-01T00:00:00Z_
+
+---
+
 **Review date:** 2026-05-31 (ZOE-JUG-023 update)
 **Scope:** mcp-update-task.test.js — new MCP update_task unit test suite
 

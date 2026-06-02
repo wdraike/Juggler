@@ -104,7 +104,14 @@ function registerTaskTools(server, userId) {
       var srcMap = buildSourceMap(rows);
       var tasks = rows.map(function(r) { return rowToTask(r, tz, srcMap); });
       if (date) {
-        tasks = tasks.filter(function(t) { return t.date === date; });
+        // Normalize date to canonical ISO format (YYYY-MM-DD) to match t.date format
+        var dateHelpers = require('../../../shared/scheduler/dateHelpers');
+        var normalizedDate = dateHelpers.isoToDateKey(date);
+        if (normalizedDate) {
+          tasks = tasks.filter(function(t) { return t.date === normalizedDate; });
+        } else {
+          tasks = []; // Invalid date format
+        }
         if (limit) tasks = tasks.slice(0, limit);
       }
       return { content: [{ type: 'text', text: safeStringify(tasks) }] };

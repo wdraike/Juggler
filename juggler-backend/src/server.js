@@ -99,15 +99,23 @@ async function start() {
   // juggler-cal-history Plan D — sharded cron for missed auto-mark + 12mo purge.
   // Non-fatal: server continues if cron init fails.
   try {
-    const calHistoryCron = require('./cron/cal-history-cron');
-    calHistoryCron.start({
-      db: db,
-      cache: require('./lib/redis'),
-      sseEmitter: require('./lib/sse-emitter')
-    });
+    const CalHistoryCron = require('./jobs/cal-history-cron');
+    const calHistoryCron = new CalHistoryCron();
+    calHistoryCron.start();
     serverLogger.info('cal-history-cron started');
   } catch (err) {
     serverLogger.warn('cal-history-cron failed to start', { error: err });
+  }
+
+  // Missed Auto-Mark Cron - Phase D
+  // Sharded daily cron for missed auto-mark with leader election
+  try {
+    const MissedAutoMarkCron = require('./jobs/missed-auto-mark-cron');
+    const missedAutoMarkCron = new MissedAutoMarkCron();
+    missedAutoMarkCron.start();
+    serverLogger.info('missed-auto-mark-cron started');
+  } catch (err) {
+    serverLogger.warn('missed-auto-mark-cron failed to start', { error: err });
   }
 }
 
@@ -117,7 +125,7 @@ var shuttingDown = false;
 function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`${signal} received — shutting down`);
+  serverLogger.info(`${signal} received - shutting down`);
 
   stopPollLoop();
 
@@ -132,19 +140,19 @@ function shutdown(signal) {
   // Production: graceful shutdown
   if (server) {
     server.close(function() {
-      console.log('HTTP server closed');
+      serverLogger.info('HTTP server closed');
       db.destroy().then(function() {
-        console.log('Database pool destroyed');
+        serverLogger.info('Database pool destroyed');
         process.exit(0);
       }).catch(function(err) {
-        console.error('Error destroying DB pool:', err);
+        serverLogger.error('Error destroying DB pool:', { error: err });
         process.exit(1);
       });
     });
   }
 
   setTimeout(function() {
-    console.error('Graceful shutdown timed out — forcing exit');
+    serverLogger.error('Graceful shutdown timed out - forcing exit');
     process.exit(1);
   }, 5000);
 }
@@ -153,18 +161,18 @@ process.on('SIGTERM', function() { shutdown('SIGTERM'); });
 process.on('SIGINT', function() { shutdown('SIGINT'); });
 
 start().catch(err => {
-  console.error('Fatal startup error:', err);
+  serverLogger.error('Fatal startup error:', { error: err });
   process.exit(1);
 });
 
 // Handle unhandled rejections — log but don't crash
 process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled Rejection:', reason);
+  serverLogger.error('Unhandled Rejection:', { reason });
 });
 
 // Uncaught exceptions — in production, shut down gracefully; in dev, log and keep running
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
+  serverLogger.error('Uncaught Exception:', { error });
   if (process.env.NODE_ENV === 'production') {
     shutdown('uncaughtException');
   }

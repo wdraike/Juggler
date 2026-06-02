@@ -6,6 +6,7 @@
  */
 
 const crypto = require('crypto');
+const { isTerminalStatus } = require('../../../lib/task-status');
 
 // Dependencies (resolved at runtime)
 let msftCalApi, db, calSyncHelpers, localToUtc, PLACEMENT_MODES;
@@ -356,7 +357,7 @@ function buildMsftEventBody(task, year, tz, opts) {
   if (task.url) descParts.push('Link: ' + task.url);
   descParts.push('', 'Synced from Raike & Sons');
 
-  const isDone = task.status === 'done';
+  const isDone = isTerminalStatus(task.status);
   const cleanText = task.text.replace(/^(✓\s+)+/, '');
   const subjectText = isDone ? '✓ ' + cleanText : task.text;
 

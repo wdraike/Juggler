@@ -16,13 +16,19 @@ exports.up = async function(knex) {
     await trx.raw('DROP VIEW IF EXISTS tasks_with_sync_v');
     await trx.raw('DROP VIEW IF EXISTS tasks_v');
 
-    // STEP 2 — Drop columns.
-    await trx.schema.table('task_instances', function(t) {
-      t.dropColumn('date_pinned');
-    });
+    // STEP 2 — Drop columns (guarded - check if they exist first).
+    const hasDatePinned = await trx.schema.hasColumn('task_instances', 'date_pinned');
+    if (hasDatePinned) {
+      await trx.schema.table('task_instances', function(t) {
+        t.dropColumn('date_pinned');
+      });
+    }
+
+    const hasPrevWhen = await trx.schema.hasColumn('task_masters', 'prev_when');
+    const hasRigid = await trx.schema.hasColumn('task_masters', 'rigid');
     await trx.schema.table('task_masters', function(t) {
-      t.dropColumn('prev_when');
-      t.dropColumn('rigid');
+      if (hasPrevWhen) t.dropColumn('prev_when');
+      if (hasRigid) t.dropColumn('rigid');
     });
 
     // STEP 3 — Recreate tasks_v without date_pinned and prev_when.

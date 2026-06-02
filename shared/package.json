@@ -1,6 +1,24 @@
 {
   "name": "juggler-shared",
-  "version": "1.0.0",
-  "description": "Shared scheduler modules for Juggler frontend and backend",
-  "main": "scheduler/dateHelpers.js"
+  "version": "2.0.0",
+  "description": "Shared utilities and constants for Juggler frontend and backend",
+  "main": "task-status.js",
+  "types": "task-status.d.ts",
+  "exports": {
+    ".": "./task-status.js",
+    "./task-status": "./task-status.js",
+    "./scheduler/dateHelpers": "./scheduler/dateHelpers.js",
+    "./scheduler/dependencyHelpers": "./scheduler/dependencyHelpers.js",
+    "./scheduler/expandRecurring": "./scheduler/expandRecurring.js",
+    "./scheduler/locationHelpers": "./scheduler/locationHelpers.js",
+    "./scheduler/timeBlockHelpers": "./scheduler/timeBlockHelpers.js",
+    "./scheduler/dateMatchesRecurrence": "./scheduler/dateMatchesRecurrence.js",
+    "./scheduler/missedHelpers": "./scheduler/missedHelpers.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["juggler", "shared", "task", "status"],
+  "author": "",
+  "license": "ISC"
 }

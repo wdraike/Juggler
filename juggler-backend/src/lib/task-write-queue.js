@@ -11,6 +11,8 @@
  */
 
 var db = require('../db');
+var { createLogger } = require('@raike/lib-logger');
+var logger = createLogger('task-write-queue');
 var tasksWrite = require('./tasks-write');
 
 // Lazy require to avoid circular dependency
@@ -102,7 +104,7 @@ async function enqueueWrite(userId, taskId, operation, fields, source) {
     fields: JSON.stringify(fields),
     source: source || 'unknown'
   });
-  console.log('[WRITE-QUEUE] enqueued ' + operation + ' for task ' + taskId + ' user ' + userId + ' source=' + (source || 'unknown'));
+  logger.info('[WRITE-QUEUE] enqueued ' + operation + ' for task ' + taskId + ' user ' + userId + ' source=' + (source || 'unknown'));
 }
 
 // ── Coalescing ───────────────────────────────────────────────────────
@@ -222,7 +224,7 @@ async function _doFlush(userId) {
   var coalesced = coalesceEntries(entries);
   var affectedIds = [];
 
-  console.log('[WRITE-QUEUE] flushing ' + entries.length + ' entries → ' + coalesced.length + ' ops for user ' + userId);
+  logger.info('[WRITE-QUEUE] flushing ' + entries.length + ' entries → ' + coalesced.length + ' ops for user ' + userId);
 
   await db.transaction(async function(trx) {
     for (var i = 0; i < coalesced.length; i++) {
@@ -278,7 +280,7 @@ async function _doFlush(userId) {
   // Post-flush: invalidate cache, notify frontend, trigger schedule run
   if (affectedIds.length > 0) {
     getCache().invalidateTasks(userId).catch(function(err) {
-      console.error('[WRITE-QUEUE] cache invalidation error:', err.message);
+      logger.error('[WRITE-QUEUE] cache invalidation error:', err.message);
     });
     // If any flushed id belongs to a recurring template or one of its
     // instances, broadcast a refresh for every sibling so the frontend

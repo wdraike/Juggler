@@ -5,6 +5,17 @@ const { authenticateJWT } = require('../middleware/jwt-auth');
 const { getLastError } = require('../scheduler/scheduleQueue');
 const { roundCoord } = require('../controllers/weather.controller');
 
+// Mount-level auth guard: apply JWT auth to all routes except public endpoints
+router.use((req, res, next) => {
+  // Public routes that don't require authentication
+  const publicRoutes = ['/immediate', '/'];
+  if (publicRoutes.includes(req.path)) {
+    return next(); // Skip auth for public routes
+  }
+  // For all other routes, require authentication
+  return authenticateJWT(req, res, next);
+});
+
 // Immediate health check (no DB). Suitable for load-balancer probes; no auth.
 router.get('/immediate', (req, res) => {
   res.json({ status: 'ok', service: 'juggler-backend' });
@@ -47,7 +58,7 @@ router.get('/', async (req, res) => {
 //   all services 'operational'               → 'OK'
 //   any service 'error'                      → 'ERROR'
 //   otherwise (stale / degraded / unknown)   → 'DEGRADED'
-router.get('/detailed', authenticateJWT, async (req, res) => {
+router.get('/detailed', async (req, res) => {
   const healthStatus = {
     status: 'OK',
     timestamp: new Date().toISOString(),

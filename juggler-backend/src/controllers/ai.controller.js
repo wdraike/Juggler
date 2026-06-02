@@ -31,11 +31,11 @@ function getGenAIClient() {
     const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
     if (!project) throw new Error('GOOGLE_CLOUD_PROJECT required for Vertex AI');
     _genAIClient = new GoogleGenAI({ vertexai: true, project, location });
-    console.log('🤖 Juggler AI: Using Vertex AI (project:', project + ')');
+    logger.info('🤖 Juggler AI: Using Vertex AI (project:', project + ')');
   } else {
     if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY not configured');
     _genAIClient = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    console.log('🤖 Juggler AI: Using Gemini API with API key');
+    logger.info('🤖 Juggler AI: Using Gemini API with API key');
   }
 
   return _genAIClient;
@@ -162,7 +162,7 @@ exports.handleCommand = async (req, res) => {
 
     res.json({ ops: result.ops || [], msg: result.msg || 'Done.' });
   } catch (err) {
-    console.error('AI command error:', err);
+    logger.error('AI command error:', err);
     res.status(500).json({ error: err.message || 'AI command failed' });
   }
 };

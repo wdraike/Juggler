@@ -56,7 +56,7 @@ async function getStatus(req, res) {
       autoSync: autoSync
     });
   } catch (error) {
-    console.error('GCal status error:', error);
+    logger.error('GCal status error:', error);
     res.status(500).json({ error: 'Failed to check GCal status' });
   }
 }
@@ -71,7 +71,7 @@ async function connect(req, res) {
     var authUrl = gcalApi.getAuthUrl(oauth2Client, state);
     res.json({ authUrl: authUrl });
   } catch (error) {
-    console.error('GCal connect error:', error);
+    logger.error('GCal connect error:', error);
     res.status(500).json({ error: 'Failed to generate auth URL' });
   }
 }
@@ -117,7 +117,7 @@ async function callback(req, res) {
     var frontendUrl = require('../proxy-config').services.juggler.frontend;
     res.redirect(frontendUrl + '/?gcal=connected');
   } catch (error) {
-    console.error('GCal callback error:', error);
+    logger.error('GCal callback error:', error);
     res.status(500).send('Failed to complete Google Calendar authorization');
   }
 }
@@ -132,7 +132,7 @@ async function disconnect(req, res) {
     });
     res.json({ disconnected: true });
   } catch (error) {
-    console.error('GCal disconnect error:', error);
+    logger.error('GCal disconnect error:', error);
     res.status(500).json({ error: 'Failed to disconnect GCal' });
   }
 }
@@ -161,7 +161,7 @@ async function setAutoSync(req, res) {
 
     res.json({ autoSync: value });
   } catch (error) {
-    console.error('GCal auto-sync error:', error);
+    logger.error('GCal auto-sync error:', error);
     res.status(500).json({ error: 'Failed to update auto-sync setting' });
   }
 }

@@ -8,10 +8,9 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import AllDayBanner from '../AllDayBanner';
-import { vi } from 'vitest';
 
 // Mock theme/colors
-vi.mock('../../../theme/colors', () => ({
+jest.mock('../../../theme/colors', () => ({
   getTheme: () => ({
     bg: '#fff',
     bgCard: '#f5f5f5',
@@ -26,8 +25,8 @@ vi.mock('../../../theme/colors', () => ({
 }));
 
 // Mock constants
-vi.mock('../../../state/constants', () => ({
-  isTerminalStatus: vi.fn((status) => ['done', 'skip', 'cancel'].includes(status)),
+jest.mock('../../../state/constants', () => ({
+  isTerminalStatus: jest.fn((status) => ['done', 'skip', 'cancel', 'missed'].includes(status)),
   PAST_OPACITY: 0.7,
 }));
 

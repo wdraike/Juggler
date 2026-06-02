@@ -4,7 +4,7 @@
  * Used to encrypt app-specific passwords (e.g., Apple CalDAV) at rest.
  * Key is read from CREDENTIAL_ENCRYPTION_KEY env var (64-char hex = 32 bytes).
  *
- * Generate a key: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+ * Generate a key: node -e "logger.info(require('crypto').randomBytes(32).toString('hex'))"
  */
 
 var crypto = require('crypto');
@@ -16,7 +16,7 @@ var TAG_LENGTH = 16;
 function getKey() {
   var hex = process.env.CREDENTIAL_ENCRYPTION_KEY;
   if (!hex || hex.length !== 64) {
-    throw new Error('CREDENTIAL_ENCRYPTION_KEY must be a 64-char hex string (32 bytes). Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+    throw new Error('CREDENTIAL_ENCRYPTION_KEY must be a 64-char hex string (32 bytes). Generate with: node -e "logger.info(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
   }
   return Buffer.from(hex, 'hex');
 }

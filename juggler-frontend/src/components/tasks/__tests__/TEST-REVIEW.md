@@ -34,9 +34,15 @@
 - Create mode test uses DOM query for empty `input[type="text"]` since the title field has no placeholder attribute. Assertion is robust: verifies Create button shown, title blank, no existing task text.
 - Save flow asserts `onUpdate` called with `expect.objectContaining({ text: '...' })` — does not assert the full payload, which includes timezone context fields irrelevant to this assertion.
 
-## Coverage Gaps
+## Coverage Gaps (WARN — not blocking)
 
-None identified for the scope of ZOE-JUG-041. The three scenarios explicitly requested are covered.
+| Gap | Detail | Priority |
+|-----|--------|----------|
+| Failed-save path | `onUpdate` returning `false` / error string sets `saveStatus='failed'` and shows `saveError` alert — not tested. | MEDIUM |
+| No-op save | No test that `onUpdate` is NOT called when no fields have changed (the `buildChangedFields()` null path). | LOW |
+| Fixed mode guard | `handleSave` blocks with `'Fixed mode requires a date and time.'` — no test for this client-side guard. | LOW |
+| Create mode: `onCreate` payload | Test verifies Create button renders but does not click it and assert `onCreate` receives an `applyDefaults`-shaped task. | MEDIUM |
+| Rolling anchor: no-anchor branch | No test for `!task.rolling_anchor` path that renders the "Not yet completed…" italic fallback message. | LOW |
 
 ## Status: PASS
 

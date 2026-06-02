@@ -11,6 +11,9 @@
  * lifetime of the process.
  */
 
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('plan-features');
+
 const { PRODUCT_LABEL } = require('../service-identity');
 const _proxyConfig = require('../proxy-config');
 const CATALOG_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -35,11 +38,11 @@ async function getProductId() {
       if (!res.ok) throw new Error(`Product discovery failed (${res.status})`);
       const data = await res.json();
       _productId = data.product.id;
-      console.log(`[plan-features] Product "${PRODUCT_LABEL}" → ${_productId}`);
+      logger.info(`[plan-features] Product "${PRODUCT_LABEL}" -> ${_productId}`);
       return _productId;
     } catch (err) {
       _productDiscoveryPromise = null;
-      console.error(`[plan-features] Product discovery failed:`, err.message);
+      logger.error(`[plan-features] Product discovery failed:`, { error: err });
       return null;
     }
   })();
@@ -88,7 +91,7 @@ async function getCachedPlanFeatures() {
     return cache;
   }).catch(err => {
     _fetchPromise = null;
-    console.error('[plan-features] Failed to fetch from payment service:', err.message);
+    logger.error('[plan-features] Failed to fetch from payment service:', { error: err });
     if (_planFeaturesCache) return _planFeaturesCache;
     throw err;
   });
@@ -156,7 +159,7 @@ async function reconcileLimitsIfNeeded(userId, planFeatures) {
       const { enforceDowngradeLimits } = require('../controllers/billing-webhooks.controller');
       await enforceDowngradeLimits(userId, planFeatures);
     } catch (err) {
-      console.error('[plan-features] Reconciliation failed for user', userId, ':', err.message);
+      logger.error('[plan-features] Reconciliation failed for user', { userId, error: err });
     }
   });
 }
@@ -186,7 +189,7 @@ const resolvePlanFeatures = async (req, res, next) => {
     req.planFeatures = allFeatures[realPlanId];
 
     if (!req.planFeatures) {
-      console.warn(`[plan-features] No features found for plan "${realPlanId}", falling back to "free"`);
+      logger.warn(`[plan-features] No features found for plan "${realPlanId}", falling back to "free"`);
       req.planFeatures = allFeatures['free'];
       req.planId = 'free';
     }
@@ -200,7 +203,7 @@ const resolvePlanFeatures = async (req, res, next) => {
 
     next();
   } catch (err) {
-    console.error('[plan-features] Error:', err.message);
+    logger.error('[plan-features] Error:', { error: err });
     return res.status(503).json({ error: 'Payment service unavailable. Please try again.' });
   }
 };

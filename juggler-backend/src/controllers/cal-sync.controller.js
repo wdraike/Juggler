@@ -22,6 +22,7 @@ var { flushQueueInLock } = require('../lib/task-write-queue');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { isTerminalStatus } = require('../lib/task-status');
 var { isAllDayTaskBackend } = require('../lib/isAllDayTaskBackend');
+var { handleTerminalTaskSync } = require('../lib/cal-sync-helpers');
 
 // Ledger origin value for tasks created/managed by Juggler (vs. pulled from a provider).
 var JUGGLER_ORIGIN = 'juggler';
@@ -261,7 +262,7 @@ async function sync(req, res) {
           action: vaIsTokenExpired ? 'Please reconnect your calendar in Settings' : undefined
         });
         stats.providers[va.providerId] = { error: vaErrMsg, tokenExpired: vaIsTokenExpired };
-        console.warn('[CAL-SYNC] Token validation failed for ' + va.providerId + ': ' + vaErrMsg);
+        logger.warn('[CAL-SYNC] Token validation failed for ' + va.providerId + ': ' + vaErrMsg);
       }
     }
     if (validAdapters.length === 0) {
@@ -294,7 +295,7 @@ async function sync(req, res) {
         providerData[adapter.providerId] = { token: token, events: events, eventsById: eventsById, adapter: adapter, partialFailure: !!events._hasPartialFailure };
         stats.providers[adapter.providerId] = { pushed: 0, pulled: 0, skipped: 0, deleted_local: 0, deleted_remote: 0, errors: [] };
       } catch (err) {
-        console.error('[CAL-SYNC] Event fetch failed for ' + adapter.providerId + ':', err);
+        logger.error('[CAL-SYNC] Event fetch failed for ' + adapter.providerId + ':', err);
         var errMsg = err.message || '';
         var isTokenExpired = RE_AUTH_ERR.test(errMsg);
 
@@ -732,24 +733,18 @@ async function sync(req, res) {
 
           // --- Terminal status handling (done/cancel/skip/pause) ---
           if (task && event && ledger.origin === JUGGLER_ORIGIN && calCompletedBehavior !== 'keep' && !isIngestOnly(pid)) {
-            var isTerminal = isTerminalStatus(task.status);
-            if (isTerminal) {
-              var shouldDelete = calCompletedBehavior === 'delete' || task.status !== 'done';
-              if (shouldDelete) {
-                try {
-                  await pAdapter.deleteEvent(pToken, event._url || ledger.provider_event_id);
-                  await throttle();
-                } catch (e4) {
-                  if (!e4.message.includes('404') && !e4.message.includes('410')) throw e4;
-                }
-                taskUpdates.push({ id: task.id, fields: { [pAdapter.getEventIdColumn()]: null } });
-                ledgerUpdates.push({ id: ledger.id, fields: { status: 'deleted_local', provider_event_id: null } });
-                pStats.deleted_local++;
-                stats.deleted_local++;
-                continue;
-              }
-              // 'update' mode for done tasks: fall through to regular push so ✓ prefix + transparency propagate
+            var terminalResult = await handleTerminalTaskSync(
+              task, event, ledger, pAdapter, pToken, calCompletedBehavior, isIngestOnly, JUGGLER_ORIGIN, throttle
+            );
+            
+            if (terminalResult.taskUpdates.length > 0) {
+              taskUpdates = taskUpdates.concat(terminalResult.taskUpdates);
+              ledgerUpdates = ledgerUpdates.concat(terminalResult.ledgerUpdates);
+              pStats.deleted_local = (pStats.deleted_local || 0) + (terminalResult.stats.deleted_local || 0);
+              stats.deleted_local = (stats.deleted_local || 0) + (terminalResult.stats.deleted_local || 0);
+              continue; // Skip to next iteration if event was deleted
             }
+            // 'update' mode for done tasks: fall through to regular push so ✓ prefix + transparency propagate
           }
 
           // [FIX D-03] done_frozen guard — skip push for already-frozen rows
@@ -1189,7 +1184,7 @@ async function sync(req, res) {
           }
 
         } catch (e) {
-          console.error('[CAL-SYNC] Ledger sync error for ' + pid + ':', e);
+          logger.error('[CAL-SYNC] Ledger sync error for ' + pid + ':', e);
           var errObj = {
             phase: 'ledger', provider: pid,
             ledgerId: ledger.id, taskId: ledger.task_id,
@@ -1278,7 +1273,7 @@ async function sync(req, res) {
             }
           } catch (batchUpdateErr) {
             // Fallback to sequential updates
-            console.error('[CAL-SYNC] Batch update failed for ' + pid + ', falling back to sequential:', batchUpdateErr.message);
+            logger.error('[CAL-SYNC] Batch update failed for ' + pid + ', falling back to sequential:', batchUpdateErr.message);
             for (var fui = 0; fui < pendingEventUpdates.length; fui++) {
               try {
                 await callWithRateLimit(pid, function() { return pAdapter.updateEvent(pToken, pendingEventUpdates[fui].eventId, pendingEventUpdates[fui].task, year, tz); });
@@ -1433,7 +1428,7 @@ async function sync(req, res) {
         await pAdapter2.batchDeleteEvents(pToken2, splitDeleteQueue);
       } else {
         for (var sdi = 0; sdi < splitDeleteQueue.length; sdi++) {
-          try { await pAdapter2.deleteEvent(pToken2, splitDeleteQueue[sdi]); } catch (e3) { console.warn('[CAL-SYNC] splitDelete failed (ignored):', e3.message); }
+          try { await pAdapter2.deleteEvent(pToken2, splitDeleteQueue[sdi]); } catch (e3) { logger.warn('[CAL-SYNC] splitDelete failed (ignored):', e3.message); }
         }
       }
 
@@ -1588,7 +1583,7 @@ async function sync(req, res) {
                 });
               } catch (rErr) {
                 // Persistent failure — insert error ledger record so task is skipped next sync
-                console.warn('[CAL-SYNC] Retry failed for task ' + rTask.id + ' on ' + pid2 + ': ' + rErr.message);
+                logger.warn('[CAL-SYNC] Retry failed for task ' + rTask.id + ' on ' + pid2 + ': ' + rErr.message);
                 var rErrDetail = buildErrorDetail(rErr, {
                   provider: pid2,
                   calendar: calendarLabels[pid2] || null,
@@ -1621,7 +1616,7 @@ async function sync(req, res) {
           }
         } catch (batchErr) {
           // Batch endpoint failed entirely — fall back to sequential
-          console.error('[CAL-SYNC] Batch create failed for ' + pid2 + ', falling back to sequential:', batchErr.message);
+          logger.error('[CAL-SYNC] Batch create failed for ' + pid2 + ', falling back to sequential:', batchErr.message);
           for (var fi = 0; fi < pushQueue.length; fi++) {
             var fTask = pushQueue[fi].task;
             try {
@@ -1952,7 +1947,7 @@ async function sync(req, res) {
     emitProgress('finalize', 'Saving changes...', 85);
 
     if (Date.now() - syncStart > 300000) {
-      console.warn('[CAL-SYNC] Sync exceeded 5-minute timeout — aborting before write phase');
+      logger.warn('[CAL-SYNC] Sync exceeded 5-minute timeout — aborting before write phase');
       emitProgress('done', 'Sync timed out — please try again', 100);
       return res.status(200).json(Object.assign({}, stats, { error: 'sync_timeout' }));
     }
@@ -1997,7 +1992,7 @@ async function sync(req, res) {
       await new Promise(function(r) { setTimeout(r, backoffMs); });
     }
     if (!lockResult || !lockResult.acquired) {
-      console.error('[CAL-SYNC] could not acquire lock for write phase after ' + MAX_LOCK_ATTEMPTS + ' attempts');
+      logger.error('[CAL-SYNC] could not acquire lock for write phase after ' + MAX_LOCK_ATTEMPTS + ' attempts');
       sseEmitter.emit(userId, 'sync:lock_conflict', { error: 'Scheduler is busy', retryAfter: 30 });
       return res.status(409).json({ error: 'Scheduler is busy. Try again in a few seconds.', retryAfter: 30 });
     }
@@ -2008,19 +2003,19 @@ async function sync(req, res) {
       if (Date.now() - lockStart > 120000) {
         clearInterval(lockHeartbeat);
         writePhaseLockLost = true;
-        console.warn('[CAL-SYNC] Write-phase heartbeat stopped — held over 120s, allowing expiry');
+        logger.warn('[CAL-SYNC] Write-phase heartbeat stopped — held over 120s, allowing expiry');
         return;
       }
       refreshLock(userId, lockToken).then(function(ok) {
         if (!ok) {
           writePhaseLockLost = true;
           clearInterval(lockHeartbeat);
-          console.warn('[CAL-SYNC] Write-phase lock lost — refresh returned 0 rows');
+          logger.warn('[CAL-SYNC] Write-phase lock lost — refresh returned 0 rows');
         }
       }).catch(function(err) {
         writePhaseLockLost = true;
         clearInterval(lockHeartbeat);
-        console.error('[CAL-SYNC] Write-phase lock refresh failed:', err.message);
+        logger.error('[CAL-SYNC] Write-phase lock refresh failed:', err.message);
       });
     }, 10000);
 
@@ -2068,7 +2063,7 @@ async function sync(req, res) {
 
     // Abort if the lock was lost during conflict detection
     if (writePhaseLockLost) {
-      console.error('[CAL-SYNC] Aborting write phase — lock lost before transaction');
+      logger.error('[CAL-SYNC] Aborting write phase — lock lost before transaction');
       emitProgress('error', 'Sync aborted — lock lost', 0);
       return res.status(503).json({ error: 'Sync lock lost. Please retry.', retryAfter: 5 });
     }
@@ -2268,7 +2263,7 @@ async function sync(req, res) {
 
     res.json(stats);
   } catch (error) {
-    console.error('Cal sync error:', error);
+    logger.error('Cal sync error:', error);
     sseEmitter.emit(userId, 'sync:error', { error: error.message || 'Unknown sync error' });
     res.status(500).json({ error: 'Failed to sync calendars' });
   }
@@ -2337,7 +2332,7 @@ async function hasChanges(req, res) {
 
     res.json(result);
   } catch (error) {
-    console.error('Cal has-changes error:', error);
+    logger.error('Cal has-changes error:', error);
     res.status(500).json({ error: 'Failed to check for changes' });
   }
 }
@@ -2413,7 +2408,7 @@ async function getSyncHistory(req, res) {
 
     res.json({ runs: runs });
   } catch (error) {
-    console.error('Sync history error:', error);
+    logger.error('Sync history error:', error);
     res.status(500).json({ error: 'Failed to retrieve sync history' });
   }
 }
@@ -2539,7 +2534,7 @@ async function audit(req, res) {
 
     res.json(report);
   } catch (error) {
-    console.error('Cal audit error:', error);
+    logger.error('Cal audit error:', error);
     res.status(500).json({ error: 'Failed to audit calendar sync' });
   }
 }

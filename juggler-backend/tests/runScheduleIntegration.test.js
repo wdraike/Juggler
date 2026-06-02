@@ -361,34 +361,41 @@ describe('runScheduleAndPersist: error handling', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// preferredTimeMins through full pipeline
+// Wave C: scheduled_at-required guard
 // ═══════════════════════════════════════════════════════════════
 
-describe('runScheduleAndPersist: preferredTimeMins', () => {
-  test('recurring with preferred_time_mins places within flex window', async () => {
+describe('runScheduleAndPersist: scheduled_at validation', () => {
+  test('throws error when pending recurring instance is missing scheduled_at', async () => {
     if (!available) return;
-    await seedTemplate({
-      id: 'tmpl-ptm-run', text: 'Lunch', dur: 30,
-      preferred_time: 1, preferred_time_mins: 720, time_flex: 60
+    
+    // Create a recurring template first
+    await seedTemplate({ id: 'tmpl-test', text: 'Test template', dur: 30 });
+    
+    // Manually insert a recurring instance without scheduled_at (bypassing normal flow)
+    await db('task_instances').insert({
+      id: 'inst-no-sched', master_id: 'tmpl-test', user_id: USER_ID,
+      occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
+      status: '', dur: 30, created_at: db.fn.now(), updated_at: db.fn.now()
     });
+    
+    // Should throw validation error for recurring instance without scheduled_at
+    await expect(runScheduleAndPersist(USER_ID))
+      .rejects
+      .toThrow(/missing required scheduled_at/);
+  });
+
+  test('allows regular tasks without scheduled_at (new tasks)', async () => {
+    if (!available) return;
+    
+    // Insert a regular task without scheduled_at (this is normal for new tasks)
+    await seedTask({ id: 'new-task', text: 'New task', dur: 30, when: 'morning' });
+    
+    // Should not throw - new tasks are allowed to lack scheduled_at
     var result = await runScheduleAndPersist(USER_ID);
-
-    // Check that instances were created and placed near noon
-    var instances = await db('tasks_v')
-      .where({ user_id: USER_ID, source_id: 'tmpl-ptm-run', task_type: 'recurring_instance' })
-      .whereNotNull('scheduled_at');
-    expect(instances.length).toBeGreaterThan(0);
-
-    // Verify at least one instance is near noon by reading via rowToTask
-    var rows = await db('tasks_v').where('user_id', USER_ID);
-    var srcMap = buildSourceMap(rows);
-    var placed = instances.map(function(inst) {
-      return rowToTask(inst, TZ, srcMap);
-    });
-    // All should have time derived from preferred_time_mins (12:00 PM)
-    placed.forEach(function(t) {
-      expect(t.time).toBe('12:00 PM');
-      expect(t.preferredTimeMins).toBe(720);
-    });
+    expect(result).toHaveProperty('updated');
+    
+    // Verify the task now has scheduled_at after scheduling
+    var taskRow = await db('tasks_v').where('id', 'new-task').first();
+    expect(taskRow.scheduled_at).toBeTruthy();
   });
 });

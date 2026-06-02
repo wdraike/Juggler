@@ -4,9 +4,9 @@ import AllDayBanner from '../AllDayBanner';
 
 var TASKS = [
   { id: 't1', text: 'Morning run', when: 'morning', date: '2026-05-18' },
-  { id: 't2', text: 'All-day meditation', when: 'allday', date: '2026-05-18' },
+  { id: 't2', text: 'All-day meditation', placementMode: 'all_day', date: '2026-05-18' },
   { id: 't3', text: 'Hospital appt', isAllDay: true, date: '2026-05-18' },
-  { id: 't4', text: 'Other day task', when: 'allday', date: '2026-05-19' },
+  { id: 't4', text: 'Other day task', placementMode: 'all_day', date: '2026-05-19' },
 ];
 
 var STATUSES = {};
@@ -43,7 +43,7 @@ test('returns null when no all-day items for dateKey', () => {
 test('shows done glyph and line-through for done status', () => {
   render(
     <AllDayBanner
-      allTasks={[{ id: 't2', text: 'All-day meditation', when: 'allday', date: '2026-05-18' }]}
+      allTasks={[{ id: 't2', text: 'All-day meditation', placementMode: 'all_day', date: '2026-05-18' }]}
       dateKey="2026-05-18"
       statuses={{ t2: 'done' }}
       onExpand={() => {}}
@@ -58,7 +58,7 @@ test('shows done glyph and line-through for done status', () => {
 test('shows skip glyph for skip status', () => {
   render(
     <AllDayBanner
-      allTasks={[{ id: 't2', text: 'All-day meditation', when: 'allday', date: '2026-05-18' }]}
+      allTasks={[{ id: 't2', text: 'All-day meditation', placementMode: 'all_day', date: '2026-05-18' }]}
       dateKey="2026-05-18"
       statuses={{ t2: 'skip' }}
       onExpand={() => {}}
@@ -72,7 +72,7 @@ test('shows skip glyph for skip status', () => {
 test('applies reduced opacity on past day done items when isPastDay=true', () => {
   render(
     <AllDayBanner
-      allTasks={[{ id: 't2', text: 'All-day meditation', when: 'allday', date: '2026-05-18' }]}
+      allTasks={[{ id: 't2', text: 'All-day meditation', placementMode: 'all_day', date: '2026-05-18' }]}
       dateKey="2026-05-18"
       statuses={{ t2: 'done' }}
       onExpand={() => {}}

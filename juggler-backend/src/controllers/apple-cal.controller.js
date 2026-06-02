@@ -50,7 +50,7 @@ async function getStatus(req, res) {
       autoSync: autoSync
     });
   } catch (error) {
-    console.error('Apple Calendar status error:', error);
+    logger.error('Apple Calendar status error:', error);
     res.status(500).json({ error: 'Failed to get Apple Calendar status' });
   }
 }
@@ -74,7 +74,7 @@ async function connect(req, res) {
     try {
       client = await appleCalApi.createClient(url, username, password);
     } catch (e) {
-      console.error('Apple Calendar connect failed:', e.message);
+      logger.error('Apple Calendar connect failed:', e.message);
       return res.status(401).json({
         error: 'Failed to connect. Check your Apple ID and app-specific password.',
         detail: e.message
@@ -85,7 +85,7 @@ async function connect(req, res) {
     try {
       calendars = await appleCalApi.discoverCalendars(client);
     } catch (e) {
-      console.error('Apple Calendar discovery failed:', e.message);
+      logger.error('Apple Calendar discovery failed:', e.message);
       return res.status(401).json({
         error: 'Connected but failed to discover calendars. Check your credentials.',
         detail: e.message
@@ -111,7 +111,7 @@ async function connect(req, res) {
         .where({ user_id: req.user.id, provider: 'apple' });
     } catch (e) {
       // Table may not exist if migration hasn't run yet — graceful fallback
-      console.warn('user_calendars table not available:', e.message);
+      logger.warn('user_calendars table not available:', e.message);
     }
 
     var selectionMap = {};
@@ -132,7 +132,7 @@ async function connect(req, res) {
       })
     });
   } catch (error) {
-    console.error('Apple Calendar connect error:', error);
+    logger.error('Apple Calendar connect error:', error);
     res.status(500).json({ error: 'Failed to connect Apple Calendar' });
   }
 }
@@ -177,7 +177,7 @@ async function selectCalendar(req, res) {
 
     res.json({ calendarUrl: calendarUrl });
   } catch (error) {
-    console.error('Apple Calendar select error:', error);
+    logger.error('Apple Calendar select error:', error);
     res.status(500).json({ error: 'Failed to select calendar' });
   }
 }
@@ -242,7 +242,7 @@ async function selectCalendars(req, res) {
 
     res.json({ calendars: savedCalendars });
   } catch (error) {
-    console.error('Apple Calendar select-calendars error:', error);
+    logger.error('Apple Calendar select-calendars error:', error);
     res.status(500).json({ error: 'Failed to save calendar selections' });
   }
 }
@@ -257,7 +257,7 @@ async function getCalendars(req, res) {
 
     res.json({ calendars: calendars });
   } catch (error) {
-    console.error('Apple Calendar get-calendars error:', error);
+    logger.error('Apple Calendar get-calendars error:', error);
     res.status(500).json({ error: 'Failed to get calendars' });
   }
 }
@@ -297,7 +297,7 @@ async function updateCalendar(req, res) {
     var updated = await db('user_calendars').where('id', calendarId).first();
     res.json({ calendar: updated });
   } catch (error) {
-    console.error('Apple Calendar update-calendar error:', error);
+    logger.error('Apple Calendar update-calendar error:', error);
     res.status(500).json({ error: 'Failed to update calendar' });
   }
 }
@@ -330,7 +330,7 @@ async function disconnect(req, res) {
 
     res.json({ disconnected: true });
   } catch (error) {
-    console.error('Apple Calendar disconnect error:', error);
+    logger.error('Apple Calendar disconnect error:', error);
     res.status(500).json({ error: 'Failed to disconnect Apple Calendar' });
   }
 }
@@ -362,7 +362,7 @@ async function setAutoSync(req, res) {
 
     res.json({ autoSync: value });
   } catch (error) {
-    console.error('Apple Calendar auto-sync error:', error);
+    logger.error('Apple Calendar auto-sync error:', error);
     res.status(500).json({ error: 'Failed to update auto-sync setting' });
   }
 }
@@ -450,7 +450,7 @@ async function refreshCalendars(req, res) {
       })
     });
   } catch (error) {
-    console.error('Apple Calendar refresh error:', error);
+    logger.error('Apple Calendar refresh error:', error);
     res.status(500).json({ error: 'Failed to refresh calendars' });
   }
 }

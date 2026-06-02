@@ -194,7 +194,7 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
             {task.pri}
           </span>
         )}
-        {(task.placementMode === 'fixed' || task.placement_mode === 'fixed') && (
+        {(task.fixed || task.rigid || task.placementMode === 'fixed' || task.placement_mode === 'fixed') && (
           <span style={{
             fontSize: 10, fontWeight: 600,
             flexShrink: 0

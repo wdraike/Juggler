@@ -76,7 +76,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
               .whereIn('task_id', allDisabledIds)
               .where('status', 'active')
               .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
-              .catch(function(err) { console.error("[silent-catch]", err.message); });
+              .catch(function(err) { logger.error("[silent-catch]", err.message); });
           }
 
           disabledRecurrings = recurringIds.length;
@@ -141,7 +141,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
             .whereIn('task_id', taskIds)
             .where('status', 'active')
             .update({ status: 'deleted_local', task_id: null, synced_at: db.fn.now() })
-            .catch(function(err) { console.error("[silent-catch]", err.message); });
+            .catch(function(err) { logger.error("[silent-catch]", err.message); });
 
           disabledTasks = taskIds.length;
         }
@@ -151,7 +151,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
 
   if (disabledRecurrings > 0 || disabledTasks > 0) {
     await cache.invalidateTasks(userId);
-    console.log(`[billing-webhook] Disabled ${disabledRecurrings} recurringTasks, ${disabledTasks} tasks for user ${userId}`);
+    logger.info(`[billing-webhook] Disabled ${disabledRecurrings} recurringTasks, ${disabledTasks} tasks for user ${userId}`);
   }
 
   return { disabledRecurrings, disabledTasks };
@@ -165,17 +165,17 @@ async function handleWebhook(req, res) {
     switch (event) {
       case 'subscription.created':
       case 'subscription.activated':
-        console.log(`[billing-webhook] ${event} for user ${userId}`);
+        logger.info(`[billing-webhook] ${event} for user ${userId}`);
         if (userId) invalidateUserPlanCache(userId);
         break;
 
       case 'subscription.plan_changed':
-        console.log(`[billing-webhook] Plan changed for user ${userId}: ${data.from_planId} → ${data.to_planId}`);
+        logger.info(`[billing-webhook] Plan changed for user ${userId}: ${data.from_planId} → ${data.to_planId}`);
         if (userId) invalidateUserPlanCache(userId);
         break;
 
       case 'subscription.downgrade_applied':
-        console.log(`[billing-webhook] Downgrade applied for user ${userId}`);
+        logger.info(`[billing-webhook] Downgrade applied for user ${userId}`);
         if (userId) {
           invalidateUserPlanCache(userId);
           // Fetch the new plan's features and enforce limits
@@ -186,7 +186,7 @@ async function handleWebhook(req, res) {
               await enforceDowngradeLimits(userId, planFeatures);
             }
           } catch (err) {
-            console.error('[billing-webhook] Downgrade enforcement failed:', err.message);
+            logger.error('[billing-webhook] Downgrade enforcement failed:', err.message);
           }
         }
         break;
@@ -202,17 +202,17 @@ async function handleWebhook(req, res) {
       case 'subscription.discount_applied':
       case 'subscription.trial_extended':
       case 'subscription.downgrade_scheduled':
-        console.log(`[billing-webhook] ${event} for user ${userId}`);
+        logger.info(`[billing-webhook] ${event} for user ${userId}`);
         if (userId) invalidateUserPlanCache(userId);
         break;
 
       default:
-        console.log(`[billing-webhook] Unhandled event: ${event}`, data);
+        logger.info(`[billing-webhook] Unhandled event: ${event}`, data);
     }
 
     res.json({ success: true, event });
   } catch (error) {
-    console.error('[billing-webhook] Error:', error);
+    logger.error('[billing-webhook] Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 }

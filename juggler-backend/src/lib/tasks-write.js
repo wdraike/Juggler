@@ -455,11 +455,11 @@ async function resetRecurringInstances(dbOrTrx, userId, masterId, logTag) {
     .whereIn('task_id', pendingIds)
     .where('status', 'active')
     .update({ status: 'deleted_local', task_id: null, synced_at: dbOrTrx.fn.now() })
-    .catch(function(err) { console.error('[silent-catch]', err.message); });
+    .catch(function(err) { logger.error('[silent-catch]', err.message); });
   await deleteInstancesWhere(dbOrTrx, userId, function(q) {
     return q.whereIn('id', pendingIds);
   });
-  if (logTag) console.log(logTag + ': deleted ' + pendingIds.length + ' pending instances for ' + masterId);
+  if (logTag) logger.info(logTag + ': deleted ' + pendingIds.length + ' pending instances for ' + masterId);
   return pendingIds.length;
 }
 

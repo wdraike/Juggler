@@ -81,7 +81,7 @@ router.get('/', authenticateServiceKey, async (req, res) => {
       }))
     });
   } catch (error) {
-    console.error('[feature-events] query failed:', error);
+    logger.error('[feature-events] query failed:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

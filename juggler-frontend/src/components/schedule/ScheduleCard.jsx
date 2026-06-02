@@ -62,7 +62,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
   var durLabel = item.splitTotal > 1
     ? item.dur + ' of ' + task.dur + 'm'
     : (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm');
-  var statusIcon = status === 'done' ? '\u2713' : status === 'wip' ? '\u231B' : status === 'cancel' ? '\u2715' : status === 'skip' ? '\u21ED' : status === 'pause' ? '\u23F8' : null;
+  var statusIcon = status === 'done' ? '\u2713' : status === 'wip' ? '\u231B' : status === 'cancel' ? '\u2715' : status === 'skip' ? '\u21ED' : status === 'pause' ? '\u23F8' : status === 'missed' ? '\u26A0' : null;
   var startLabel = item.start != null ? formatStartTime(item.start) : null;
   var typeBadges = [];
   if (task.recurring) typeBadges.push({ icon: '\uD83D\uDD01', title: 'Recurring — recurring daily task' });

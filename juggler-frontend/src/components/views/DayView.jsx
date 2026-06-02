@@ -5,7 +5,8 @@
 import React, { useRef, useEffect, useMemo, useCallback } from 'react';
 import CalendarGrid from '../schedule/CalendarGrid';
 import { getTheme } from '../../theme/colors';
-import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, GRID_START, isTerminalStatus, PAST_OPACITY } from '../../state/constants';
+import { MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, GRID_START, PAST_OPACITY } from '../../state/constants';
+import { isTerminalStatus } from '../../shared/task-status';
 import { getLocationForDatePure } from '../../scheduler/locationHelpers';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 
@@ -19,13 +20,13 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
   var isPast = selectedDate < new Date(new Date().setHours(0, 0, 0, 0));
 
   // Status filter — matches DailyView logic
-  // Past days: done/skip/cancel are historical records and always visible under 'open'.
+  // Past days: terminal statuses are historical records and always visible under 'open'.
   var matchesFilter = useCallback(function (taskId) {
     if (!filter || filter === 'all') return true;
     var st = statuses[taskId] || '';
     if (filter === 'open') {
-      if (isPast && (st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed')) return true;
-      return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause' && st !== 'missed';
+      if (isPast && isTerminalStatus(st)) return true;
+      return !isTerminalStatus(st);
     }
     if (filter === 'action') return st === '' || st === 'wip';
     if (filter === 'done') return st === 'done';
@@ -37,7 +38,7 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
     if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(taskId);
     if (filter === 'unplaced') return unplacedIds && unplacedIds.has(taskId);
     return true;
-  }, [filter, statuses, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isPast]);
+  }, [filter, statuses, blockedTaskIds, unplacedIds, pastDueIds, fixedIds, isPast, isTerminalStatus]);
 
   var filteredPlacements = useMemo(function () {
     if (!filter || filter === 'all') return placements;

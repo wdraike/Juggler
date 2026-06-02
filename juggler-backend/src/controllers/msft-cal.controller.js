@@ -81,7 +81,7 @@ async function getStatus(req, res) {
       autoSync: autoSync
     });
   } catch (error) {
-    console.error('MsftCal status error:', error);
+    logger.error('MsftCal status error:', error);
     res.status(500).json({ error: 'Failed to check Microsoft Calendar status' });
   }
 }
@@ -96,7 +96,7 @@ async function connect(req, res) {
     var authUrl = msftCalApi.getAuthUrl(state, pkce.codeChallenge);
     res.json({ authUrl: authUrl });
   } catch (error) {
-    console.error('MsftCal connect error:', error);
+    logger.error('MsftCal connect error:', error);
     res.status(500).json({ error: 'Failed to generate auth URL' });
   }
 }
@@ -111,7 +111,7 @@ async function callback(req, res) {
     }
 
     if (!(await markCodeUsed(code))) {
-      console.log('[MSFT CALLBACK] Duplicate code detected, redirecting without re-exchange');
+      logger.info('[MSFT CALLBACK] Duplicate code detected, redirecting without re-exchange');
       var frontUrl = require('../proxy-config').services.juggler.frontend;
       return res.redirect(frontUrl + '/?msftcal=connected');
     }
@@ -150,7 +150,7 @@ async function callback(req, res) {
     var frontendUrl = require('../proxy-config').services.juggler.frontend;
     res.redirect(frontendUrl + '/?msftcal=connected');
   } catch (error) {
-    console.error('MsftCal callback error:', error);
+    logger.error('MsftCal callback error:', error);
     res.status(500).send('Failed to complete Microsoft Calendar authorization. Please try again.');
   }
 }
@@ -165,7 +165,7 @@ async function disconnect(req, res) {
     });
     res.json({ disconnected: true });
   } catch (error) {
-    console.error('MsftCal disconnect error:', error);
+    logger.error('MsftCal disconnect error:', error);
     res.status(500).json({ error: 'Failed to disconnect Microsoft Calendar' });
   }
 }
@@ -194,7 +194,7 @@ async function setAutoSync(req, res) {
 
     res.json({ autoSync: value });
   } catch (error) {
-    console.error('MsftCal auto-sync error:', error);
+    logger.error('MsftCal auto-sync error:', error);
     res.status(500).json({ error: 'Failed to update auto-sync setting' });
   }
 }

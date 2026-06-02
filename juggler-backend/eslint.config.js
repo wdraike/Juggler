@@ -1,9 +1,13 @@
 const eslint = require('@eslint/js');
+const unusedImports = require('eslint-plugin-unused-imports');
 
 module.exports = [
   eslint.configs.recommended,
   {
     files: ['src/**/*.js', 'src/**/*.ts'],
+    plugins: {
+      'unused-imports': unusedImports,
+    },
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'commonjs',
@@ -24,7 +28,9 @@ module.exports = [
       },
     },
     rules: {
-      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'no-unused-vars': 'off',
+      'unused-imports/no-unused-imports': 'error',
+      'unused-imports/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'no-unused-labels': 'warn',
       'no-empty': 'warn',
       'no-constant-condition': 'warn',

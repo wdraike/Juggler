@@ -1,5 +1,7 @@
 const db = require('../db');
 const { authServiceUrl } = require('../proxy-config');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('impersonation');
 
 async function callAuthServiceImpersonate(adminUserId, targetUserId, reason) {
   const key = process.env.INTERNAL_SERVICE_KEY;
@@ -35,7 +37,7 @@ async function insertAuditRow(adminUserId, targetUserId, action, req) {
       updated_at: new Date(),
     });
   } catch (auditErr) {
-    console.warn('[juggler/impersonation] audit insert failed:', auditErr.message);
+    logger.warn('[juggler/impersonation] audit insert failed:', auditErr.message);
   }
 }
 
@@ -58,7 +60,7 @@ const startImpersonation = async (req, res) => {
       if (err.status && err.status < 500) {
         return res.status(err.status).json(err.body || { error: err.message });
       }
-      console.error('[juggler/impersonation] auth-service call failed:', err);
+      logger.error('[juggler/impersonation] auth-service call failed:', err);
       return res.status(503).json({ error: 'Impersonation service unavailable' });
     }
 
@@ -71,7 +73,7 @@ const startImpersonation = async (req, res) => {
       impersonating: result.impersonating,
     });
   } catch (err) {
-    console.error('[juggler/impersonation] unexpected error:', err);
+    logger.error('[juggler/impersonation] unexpected error:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -85,7 +87,7 @@ const stopImpersonation = async (req, res) => {
     await insertAuditRow(adminUserId, targetUserId, 'stop_impersonation', req);
     return res.json({ message: 'Impersonation stopped. Discard the impersonation token client-side.' });
   } catch (err) {
-    console.error('[juggler/impersonation] stop error:', err);
+    logger.error('[juggler/impersonation] stop error:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -113,7 +115,7 @@ const getImpersonationTargets = async (req, res) => {
       pagination: { total: parseInt(count), limit: lim, offset: off, hasMore: off + lim < parseInt(count) }
     });
   } catch (err) {
-    console.error('[juggler/impersonation] targets error:', err);
+    logger.error('[juggler/impersonation] targets error:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -146,7 +148,7 @@ const getImpersonationLog = async (req, res) => {
       pagination: { total: parseInt(count), limit: lim, offset: off, hasMore: off + lim < parseInt(count) }
     });
   } catch (err) {
-    console.error('[juggler/impersonation] log error:', err);
+    logger.error('[juggler/impersonation] log error:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 };

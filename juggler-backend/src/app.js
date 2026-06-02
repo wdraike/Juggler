@@ -12,7 +12,7 @@ const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const { maybeRedisStore } = require('./lib/rate-limit-store');
 
-const { createLogger } = require('@resume-optimizer/lib-logger');
+const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('app');
 
 const taskRoutes = require('./routes/task.routes');
@@ -149,7 +149,12 @@ const healthLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 300 });
 const writeRateLimiter = rateLimit({
   ...LIMITER_DEFAULTS,
   max: 300,
-  keyGenerator: (req) => (req.user && req.user.id) ? String(req.user.id) : req.ip,
+  keyGenerator: (req) => {
+    if (req.user && req.user.id) return String(req.user.id);
+    // Fallback to IP with IPv6 normalization
+    const ip = req.ip || req.connection.remoteAddress;
+    return ip && ip.includes(':') ? ip.split(':').slice(0, 4).join(':') : ip || 'unknown';
+  },
   message: { error: 'Too many write requests, please slow down.' },
   skip: (req) => req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS',
 });

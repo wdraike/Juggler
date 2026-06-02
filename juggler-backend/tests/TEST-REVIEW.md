@@ -1,3 +1,23 @@
+# Test Review — 2026-06-01
+
+## ZOE-JUG-027-W1/W2 — mcp-list-tasks.test.js (2026-06-01)
+
+2 new tests added to `tests/mcp-list-tasks.test.js`. All 15 tests in the suite pass (run with `--no-globalSetup`; fully in-memory mock DB, no Docker required).
+
+**W1 — date-only filter as independent path:** `list_tasks({date:'2026-06-15'})` with no `limit` and no `status`/`project`. Asserts both matching rows are returned and the non-matching date row is excluded. Exercises the post-fetch JS date filter at line 107 of `tasks.js` on its own, without the limit-slice branch.
+
+**W2 — combined status+project filter:** `list_tasks({status:'wip', project:'Alpha'})`. Asserts only the task matching both filters appears; tasks matching only one filter (wip-beta, empty-alpha) and tasks excluded by status (done-alpha) are all absent. Exercises simultaneous `query.where('status', ...)` + `query.where('project', ...)` DB filter composition.
+
+**Key finding — `scheduled_at` format:** `utcToLocal()` in `shared/scheduler/dateHelpers.js` applies `.replace(' ', 'T') + 'Z'` to string timestamps. ISO strings already containing `Z` (e.g. `'2026-06-15T16:00:00.000Z'`) become `'...ZZ'` — `isNaN`, date null, filter never matches. Test fixtures must use MySQL format (`'YYYY-MM-DD HH:MM:SS'`). `utcToLocal` returns ISO date strings (`'YYYY-MM-DD'`), so the `date` argument to `list_tasks` must use that format too. The pre-existing limit+date test (6b) was vacuously passing (0 results satisfied `<= 2`) — corrected to also assert `> 0` results and use MySQL-format timestamps.
+
+| Suite | Tests | Passed | Failed | Skipped | Time |
+|-------|-------|--------|--------|---------|------|
+| mcp-list-tasks.test.js | 15 | 15 | 0 | 0 | 0.654s |
+
+**Status: PASS** — _Signed: Telly — 2026-06-01T00:00:00Z_
+
+---
+
 # Test Review — 2026-05-31
 
 ## ZOE-JUG-016 — mcp-oauth-authorize-guard.test.js (2026-05-31)

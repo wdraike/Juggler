@@ -39,10 +39,10 @@ function getSubscriber() {
     });
   });
   subscriber.on('error', function(err) {
-    console.warn('[sse-emitter] Redis subscriber error (falling back to local-only):', err.message);
+    logger.warn('[sse-emitter] Redis subscriber error (falling back to local-only):', err.message);
   });
   subscriber.on('end', function() {
-    console.warn('[sse-emitter] Redis subscriber connection ended; will recreate on next use');
+    logger.warn('[sse-emitter] Redis subscriber connection ended; will recreate on next use');
     subscriber = null;
   });
   return subscriber;
@@ -62,10 +62,10 @@ function getPublisher() {
     }
   });
   publisher.on('error', function(err) {
-    console.warn('[sse-emitter] Redis publisher error (falling back to local-only):', err.message);
+    logger.warn('[sse-emitter] Redis publisher error (falling back to local-only):', err.message);
   });
   publisher.on('end', function() {
-    console.warn('[sse-emitter] Redis publisher connection ended; will recreate on next use');
+    logger.warn('[sse-emitter] Redis publisher connection ended; will recreate on next use');
     publisher = null;
   });
   return publisher;
@@ -81,7 +81,7 @@ function addClient(userId, res) {
       var subP = getSubscriber().subscribe(CHANNEL_PREFIX + userId);
       if (subP && typeof subP.catch === 'function') {
         subP.catch(function(e) {
-          console.warn('[sse-emitter] subscribe failed for', userId + ':', e.message);
+          logger.warn('[sse-emitter] subscribe failed for', userId + ':', e.message);
         });
       }
     } catch (e) { /* Redis unavailable — local-only mode */ }
@@ -96,7 +96,7 @@ function addClient(userId, res) {
           var unsubP = getSubscriber().unsubscribe(CHANNEL_PREFIX + userId);
           if (unsubP && typeof unsubP.catch === 'function') {
             unsubP.catch(function(e) {
-              console.warn('[sse-emitter] unsubscribe failed:', e.message);
+              logger.warn('[sse-emitter] unsubscribe failed:', e.message);
             });
           }
         } catch (e) { /* ignore */ }
@@ -113,7 +113,7 @@ function emit(userId, event, data) {
   var pub = getPublisher();
   if (pub && pub.status === 'ready') {
     pub.publish(CHANNEL_PREFIX + userId, payload).catch(function(err) {
-      console.warn('[sse-emitter] publish failed, falling back to local:', err.message);
+      logger.warn('[sse-emitter] publish failed, falling back to local:', err.message);
       _emitLocal(userId, payload);
     });
   } else {

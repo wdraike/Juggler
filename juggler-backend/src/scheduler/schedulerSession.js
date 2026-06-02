@@ -19,6 +19,8 @@
 
 var crypto = require('crypto');
 var db = require('../db');
+var { createLogger } = require('@raike/lib-logger');
+var logger = createLogger('schedulerSession');
 
 var SESSION_TTL_MS = 60 * 60 * 1000; // 1h
 var SWEEP_INTERVAL_MS = 5 * 60 * 1000; // 5m
@@ -31,7 +33,7 @@ async function sweep() {
   try {
     await db('scheduler_sessions').where('expires_at', '<', new Date()).delete();
   } catch (e) {
-    console.warn('[schedulerSession] sweep error:', e.message);
+    logger.warn('[schedulerSession] sweep error:', { error: e });
   }
 }
 

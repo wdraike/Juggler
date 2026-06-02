@@ -1,12 +1,22 @@
-const eslint = require('@eslint/js');
+// ESLint configuration using plugin from package.json
+const js = require('@eslint/js');
+const unusedImports = require('eslint-plugin-unused-imports');
 
 module.exports = [
-  eslint.configs.recommended,
+  js.configs.recommended,
   {
-    files: ['src/**/*.{js,jsx,ts,tsx}'],
+    files: ['src/**/*.{js,jsx}'],
+    plugins: {
+      'unused-imports': unusedImports,
+    },
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
+      parserOptions: {
+        ecmaFeatures: {
+          jsx: true,
+        },
+      },
       globals: {
         window: 'readonly',
         document: 'readonly',
@@ -43,9 +53,25 @@ module.exports = [
       },
     },
     rules: {
-      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      'no-unused-vars': 'off',
+      'unused-imports/no-unused-imports': 'error',
+      'unused-imports/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'no-unused-labels': 'warn',
       'no-empty': 'warn',
     },
+    settings: {
+      react: {
+        version: 'detect',
+      },
+    },
+  },
+  {
+    ignores: [
+      'node_modules/**',
+      'build/**',
+      'dist/**',
+      'coverage/**',
+      'test-results/**',
+    ],
   },
 ];
