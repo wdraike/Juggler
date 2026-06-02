@@ -5,7 +5,8 @@ const { isTerminalStatus, TERMINAL_STATUSES } = require('../lib/task-status');
 const { CalHistoryStatus } = require('../constants/status-enum');
 const { shouldAutoMarkMissed } = require('../../../shared/scheduler/missedHelpers');
 const knex = require('../lib/db');
-const logger = require('../lib/logger');
+const { createLogger } = require('../lib/logger');
+const logger = createLogger('cron.cal-history');
 
 // Leader election using sync_locks pattern
 async function acquireLock(lockName, ttl = 3600) {
