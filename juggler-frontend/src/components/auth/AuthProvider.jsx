@@ -31,14 +31,22 @@ export default function AuthProvider({ children }) {
 
     if (code && window.location.pathname === '/auth/callback') {
       // Prevent double-exchange in React StrictMode (dev only)
-      if (codeExchangeRef.current) return;
+      // Also prevent duplicate exchanges if this effect runs multiple times
+      if (codeExchangeRef.current) {
+        console.warn('AuthProvider: preventing duplicate code exchange');
+        return;
+      }
       codeExchangeRef.current = true;
 
       // Exchange authorization code for tokens
-      fetch(`${AUTH_SERVICE_URL}/api/auth/token`, {
+      fetch(`${AUTH_SERVICE_URL}/oauth/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, app: APP_ID })
+        body: JSON.stringify({ 
+          grant_type: 'authorization_code', 
+          code: code,
+          client_id: 'auth-frontend'
+        })
       })
         .then(res => res.json())
         .then(data => {
