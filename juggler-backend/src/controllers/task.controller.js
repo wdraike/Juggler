@@ -14,7 +14,7 @@
 const { getDb } = require('@raike/lib-db');
 const { v7: uuidv7 } = require('uuid');
 const { z } = require('zod');
-const { localToUtc, utcToLocal, toDateISO, fromDateISO, getDayName, safeTimezone } = require('../scheduler/dateHelpers');
+const { localToUtc, utcToLocal, toDateISO, fromDateISO, safeTimezone } = require('../scheduler/dateHelpers');
 const cache = require('../lib/redis');
 const { enqueueScheduleRun: _enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 const sseEmitter = require('../lib/sse-emitter');

@@ -4,7 +4,7 @@
 
 const { getDb } = require('@raike/lib-db');
 const tasksWrite = require('../lib/tasks-write');
-const { rowToTask, taskToRow } = require('./task.controller');
+const { rowToTask } = require('./task.controller');
 const { localToUtc, toDateISO } = require('../scheduler/dateHelpers');
 const { dataControllerLogger } = require('../lib/logger');
 
