@@ -26,9 +26,28 @@ const authenticateJWT = async (req, res, next) => {
       const localUser = await db('users').where('email', req.user.email).first();
       if (localUser) {
         req.user = { ...localUser, authServiceId: req.user.id };
+      } else {
+        // First login — provision user in local DB using auth-service claims
+        const newId = req.user.id; // use auth-service ID as local ID
+        try {
+          await db('users').insert({
+            id: newId,
+            email: req.user.email,
+            name: req.user.name,
+            picture_url: req.user.picture || null,
+          });
+        } catch (insertErr) {
+          // Concurrent request raced us — duplicate email insert; ignore and fetch below
+          if (!insertErr.message?.includes('Duplicate')) throw insertErr;
+          logger.warn('jwt-auth: concurrent first-login insert race, fetching existing row', { email: req.user.email });
+        }
+        const provisioned = await db('users').where('id', newId).first();
+        if (!provisioned) return next(new Error('User provision failed'));
+        req.user = { ...provisioned, authServiceId: newId };
       }
     } catch (dbErr) {
-      // DB lookup failed — continue with JWT-only user data
+      logger.error('jwt-auth: DB error during user lookup/provision', { err: dbErr.message });
+      return next(dbErr);
     }
     next();
   });
