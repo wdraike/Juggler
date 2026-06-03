@@ -21,7 +21,7 @@ const path = require('path');
 const readline = require('readline');
 
 const TOKEN_PATH = path.join(process.env.HOME || process.env.USERPROFILE || '', '.juggler-mcp-token');
-const JUGGLER_URL = 'http://localhost:3003';
+const JUGGLER_URL = 'http://localhost:3002';
 
 async function grabToken() {
   console.log('Launching browser...');
