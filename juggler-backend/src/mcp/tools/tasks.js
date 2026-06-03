@@ -105,7 +105,7 @@ function registerTaskTools(server, userId) {
       var tasks = rows.map(function(r) { return rowToTask(r, tz, srcMap); });
       if (date) {
         // Normalize date to canonical ISO format (YYYY-MM-DD) to match t.date format
-        var dateHelpers = require('../../../shared/scheduler/dateHelpers');
+        var dateHelpers = require('../../../../shared/scheduler/dateHelpers');
         var normalizedDate = dateHelpers.isoToDateKey(date);
         if (normalizedDate) {
           tasks = tasks.filter(function(t) { return t.date === normalizedDate; });
