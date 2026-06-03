@@ -5,7 +5,7 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js",
+    "dev": "npx nodemon src/server.js",
     "migrate": "npx knex migrate:latest",
     "migrate:rollback": "npx knex migrate:rollback",
     "migrate:status": "npx knex migrate:status",
@@ -15,6 +15,7 @@
     "audit:knip": "knip --reporter json 2>/dev/null | sed -n '/^[\\[{]/,$p' > ../../.planning/phases/juggler-code-review/baseline/knip-backend.json || true",
     "audit:depcheck": "depcheck --json 2>/dev/null | sed -n '/^[\\[{]/,$p' > ../../.planning/phases/juggler-code-review/baseline/depcheck-backend.json || true",
     "audit:unused": "eslint 'src/**/*.js' --rule '{\"unused-imports/no-unused-imports\":\"error\",\"unused-imports/no-unused-vars\":\"error\"}' --format json --output-file ../../.planning/phases/juggler-code-review/baseline/eslint-unused-backend.json || true",
+    "lint": "eslint 'src/**/*.js'",
     "lint:boundaries": "eslint --no-inline-config --config eslint.boundaries.config.js 'src/**/*.js'",
     "security:sql-scan": "node scripts/sql-injection-scanner.js",
     "security:lint": "eslint 'src/**/*.js' 'tests/**/*.js' 'scripts/**/*.js' --rule '{\"sql-injection/no-unsafe-sql\":\"error\"}' --config eslint-sql-injection-rules.js",
@@ -22,14 +23,12 @@
     "precommit": "npm run lint:boundaries && npm run security:check && npm test"
   },
   "dependencies": {
-    "@azure/msal-node": "^5.0.6",
     "@google/genai": "^1.46.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@raike/lib-db": "file:../../packages/lib-db",
     "@raike/lib-logger": "file:../../packages/lib-logger",
     "auth-client": "file:../../auth-service/shared",
     "body-parser": "^1.20.2",
-    "chai": "^6.2.2",
     "compression": "^1.7.4",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
@@ -41,26 +40,26 @@
     "ical.js": "^2.2.1",
     "ioredis": "^5.10.1",
     "jose": "^5.2.0",
+    "jsonwebtoken": "^9.0.2",
     "knex": "^3.1.0",
     "morgan": "^1.10.0",
-    "mysql2": "^3.9.2",
-    "node-cron": "^4.2.1",
     "rate-limit-redis": "^4.3.1",
     "tsdav": "^2.1.8",
     "uuid": "^13.0.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@eslint/js": "^9.3.0",
     "@typescript-eslint/eslint-plugin": "^8.59.4",
-    "@typescript-eslint/parser": "^8.59.4",
-    "depcheck": "^1.4.7",
     "eslint": "^9.39.4",
     "eslint-plugin-unused-imports": "^4.4.1",
-    "jest": "^30.2.0",
-    "knip": "^5.88.1",
-    "nodemon": "^3.1.0",
-    "sqlite3": "^6.0.1",
     "supertest": "^7.2.2",
     "typescript": "^6.0.3"
+  },
+  "eslintConfig": {
+    "extends": [
+      "eslint:recommended",
+      "plugin:@typescript-eslint/recommended"
+    ]
   }
 }
