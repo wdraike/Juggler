@@ -1,3 +1,36 @@
+# Zoe Review — 2026-06-02 — cal-history-cron createLogger bugfix
+
+## Scope: juggler/juggler-backend/src/cron/cal-history-cron.js (import fix)
+
+### BLOCK Findings
+_None for this change._
+
+### WARN Findings
+
+| # | ID | Finding | Evidence | File | Remediation |
+|---|-----|---------|----------|------|-------------|
+| 1 | ZOE-CAL-001 | `cal-history-cron.test.js` contains only 3 `expect(true).toBe(true)` stubs. No real assertions exist for `markMissedTasks`, `purgeOldEntries`, `acquireLock`, or `runCalHistoryCron`. Pre-existing, not introduced by this fix. | tests/cron/cal-history-cron.test.js:7,12,17 | tests/cron/cal-history-cron.test.js | Replace stubs with mocked-knex unit tests covering: lock-held path, lock-expired takeover, missed task marking, purge cutoff date, error paths. |
+| 2 | ZOE-CAL-002 | `missed-auto-mark-cron.test.js` calls `cron.cronInterval`, `cron.acquireLock()`, `cron.releaseLock()`, `cron.getUserShard()`, `cron.shouldProcessUser()`, `cron.totalShards` — none of which exist on `MissedAutoMarkCron`. The class only exposes `start()`, `run()`, `schedule()`, `stop()`. These tests would crash with TypeError if run. Ghost tests: non-zero test count, zero real coverage. Pre-existing, not introduced by this fix. | tests/cron/missed-auto-mark-cron.test.js:41,47,51,58,66,73 | tests/cron/missed-auto-mark-cron.test.js | Rewrite against actual `MissedAutoMarkCron` API: mock `markMissedTasks`, assert `run()` calls it and handles errors, assert `stop()` prevents re-entry. |
+
+### PASS Verifications
+
+| # | Check | Status |
+|---|-------|--------|
+| 1 | The fix itself (createLogger import) is mechanically correct — `createLogger('cron.cal-history')` returns a Logger instance with `.error()`, `.info()`, etc. | PASS |
+| 2 | No new test gaps introduced by this change | PASS |
+| 3 | No false pass in Telly's report — Telly correctly identified placeholder stubs as WARN, not PASS | PASS |
+| 4 | Telly did not claim tests passed when they cannot run (DB not available) | PASS |
+
+### Verdict on this commit
+
+The two WARN findings (ZOE-CAL-001, ZOE-CAL-002) are **pre-existing** defects not introduced by this fix. The fix is a 2-line corrective import change. Blocking this commit on pre-existing test debt would be disproportionate. Recommend: commit the fix, track test rewrites as backlog items.
+
+## Status: WARN (pre-existing test debt only — fix itself is clean)
+
+_Signed: Zoe — 2026-06-02T00:00:00Z_
+
+---
+
 # Zoe Review — 2026-06-01 (ZOE-JUG-002)
 
 ## Scope: expandRecurring.test.js — placement_mode time_window inheritance
