@@ -51,10 +51,10 @@ var getBlocksForDate = timeBlockHelpers.getBlocksForDate;
 var buildWindowsFromBlocks = timeBlockHelpers.buildWindowsFromBlocks;
 var getWhenWindows = timeBlockHelpers.getWhenWindows;
 var parseWhen = timeBlockHelpers.parseWhen;
-var hasWhen = timeBlockHelpers.hasWhen;
+// var hasWhen = timeBlockHelpers.hasWhen; // unused
 
-var expandRecurringMod = require('../../../shared/scheduler/expandRecurring');
-var expandRecurring = expandRecurringMod.expandRecurring;
+// var expandRecurringMod = require('../../../shared/scheduler/expandRecurring');
+// var expandRecurring = expandRecurringMod.expandRecurring; // unused
 
 var locationHelpers = require('./locationHelpers');
 var canTaskRunAtMin = locationHelpers.canTaskRunAtMin;

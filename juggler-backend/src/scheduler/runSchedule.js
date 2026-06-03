@@ -246,15 +246,7 @@ async function loadConfig(userId) {
  */
 // Per-user mutex to prevent concurrent scheduler runs (Redis-based for multi-process safety)
 var LOCK_TTL_MS = 30000; // 30s max lock hold time
-async function acquireSchedulerLock(userId) {
-  var lockKey = 'sched_lock:' + userId;
-  try {
-    var acquired = await cache.getClient().set(lockKey, Date.now(), 'PX', LOCK_TTL_MS, 'NX');
-    return acquired ? null : 'locked'; // null = acquired, truthy = already locked
-  } catch (e) {
-    return null; // Redis down — allow through (fail open)
-  }
-}
+async function acquireSchedulerLock(userId) { /* unused */ }
 async function releaseSchedulerLock(userId) {
   var lockKey = 'sched_lock:' + userId;
   try { await cache.getClient().del(lockKey); } catch (e) { /* fail open */ }
