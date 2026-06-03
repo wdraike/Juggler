@@ -293,13 +293,13 @@ function buildEventBody(task, year, tz, opts) {
   }
 
   // Fallback: build from local date+time when scheduled_at is missing.
-  var startDate = new Date(startISO);
-  var endDate = new Date(startDate.getTime() + dur * 60000);
-  var endISO = endDate.getFullYear() + '-' +
-    String(endDate.getMonth() + 1).padStart(2, '0') + '-' +
-    String(endDate.getDate()).padStart(2, '0') + 'T' +
-    String(endDate.getHours()).padStart(2, '0') + ':' +
-    String(endDate.getMinutes()).padStart(2, '0') + ':00';
+  var startDate2 = new Date(startISO);
+  var endDate2 = new Date(startDate2.getTime() + dur * 60000);
+  var endISO = endDate2.getFullYear() + '-' +
+    String(endDate2.getMonth() + 1).padStart(2, '0') + '-' +
+    String(endDate2.getDate()).padStart(2, '0') + 'T' +
+    String(endDate2.getHours()).padStart(2, '0') + ':' +
+    String(endDate2.getMinutes()).padStart(2, '0') + ':00';
 
   var body3 = {
     summary: summaryText,

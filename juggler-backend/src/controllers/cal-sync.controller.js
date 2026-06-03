@@ -190,8 +190,7 @@ async function sync(req, res) {
         var prefs = typeof prefsRow.config_value === 'string'
           ? JSON.parse(prefsRow.config_value) : prefsRow.config_value;
         if (prefs && prefs.calCompletedBehavior) calCompletedBehavior = prefs.calCompletedBehavior;
-      } catch (e) { /* ignore parse errors */ }
-    }
+} catch { /* ignore parse errors */ }    }
 
     // Progress helper — emits SSE events so frontend can show a progress bar
     function emitProgress(phase, detail, pct, extra) {
@@ -2253,7 +2252,7 @@ async function sync(req, res) {
           return { type: 'pull', text: h.task_text, message: 'Conflict resolved — accepted ' + provLabel + ' version' };
         case 'error': {
           var errDetail = null;
-          try { if (h.error_detail) errDetail = JSON.parse(h.error_detail); } catch (pe) {}
+          try { if (h.error_detail) errDetail = JSON.parse(h.error_detail); } catch (pe) { /* Ignore JSON parse errors in error_detail */ }
           return { type: 'error', text: h.task_text, message: errDetail ? errDetail.summary : (h.detail || 'Sync error'), errorDetail: errDetail || undefined, hasIssue: true };
         }
         default:
