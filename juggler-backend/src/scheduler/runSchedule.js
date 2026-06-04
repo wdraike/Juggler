@@ -1524,11 +1524,18 @@ async function runScheduleAndPersist(userId, _retries, options) {
         // Outside placement window — day was missed, mark as 'missed' (juggler-cal-history
         // Plan C; was 'skip'). Distinguishes user-initiated skip from system-applied missed.
         var windowClose = computeWindowCloseUtc(t, today, TIMEZONE);
+        // scheduled_at must be non-null for terminal statuses (DB CHECK constraint).
+        // For instances that were never placed (no scheduledAt), fall back to midnight
+        // of the task's intended date — it's when the occurrence was supposed to happen.
+        var missedAt = windowClose
+          || localToUtc(t.date, '12:00 AM', TIMEZONE)
+          || db.fn.now();
         pendingUpdates.push({
           id: t.id,
           dbUpdate: {
             status: 'missed',
-            completed_at: windowClose || db.fn.now(),
+            scheduled_at: missedAt,
+            completed_at: missedAt,
             updated_at: db.fn.now()
           }
         });
