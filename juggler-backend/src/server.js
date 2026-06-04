@@ -26,7 +26,7 @@ if (process.env.NODE_ENV !== 'production') {
 const app = require('./app');
 const { loadJWTSecrets } = require('./middleware/jwt-auth');
 const db = require('./db');
-const { enqueueScheduleRun, stopPollLoop } = require('./scheduler/scheduleQueue');
+const { enqueueScheduleRun, startPollLoop, stopPollLoop } = require('./scheduler/scheduleQueue');
 
 const PORT = process.env.PORT || 5002;
 
@@ -117,6 +117,10 @@ async function start() {
   } catch (err) {
     serverLogger.warn('missed-auto-mark-cron failed to start', { error: err });
   }
+
+  // Start the schedule queue poll loop
+  startPollLoop();
+  serverLogger.info('Schedule queue poll loop started');
 }
 
 // ── Graceful shutdown ──

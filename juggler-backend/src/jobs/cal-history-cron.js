@@ -1,5 +1,5 @@
 // Cal History Cron Job - Class-based version for server integration
-const { markMissedTasks, purgeOldEntries, runCalHistoryCron } = require('../cron/cal-history-cron');
+const { purgeOldEntries, runCalHistoryCron } = require('../cron/cal-history-cron');
 
 class CalHistoryCron {
   constructor() {

@@ -9,7 +9,7 @@
  */
 
 var crypto = require('crypto');
-const { getDb } = require('@raike/lib-db');
+const getDb = () => require('../db');
 var tasksWrite = require('../lib/tasks-write');
 var { getConnectedAdapters } = require('../lib/cal-adapters');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');

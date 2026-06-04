@@ -24,7 +24,7 @@ jest.mock('@raike/lib-logger', () => ({
 
 global.fetch = jest.fn();
 
-const { startImpersonation, stopImpersonation, getImpersonationTargets, getImpersonationLog } = require('../controllers/impersonation.controller');
+const { startImpersonation, stopImpersonation, getImpersonationTargets } = require('../controllers/impersonation.controller');
 
 function makeApp(handler, user = { id: 'admin-1', email: 'admin@test.com' }) {
   const app = express();

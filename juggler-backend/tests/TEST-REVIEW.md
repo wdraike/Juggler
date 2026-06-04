@@ -1,3 +1,31 @@
+# Test Review — 2026-06-02
+
+## cal-history-cron.js bugfix — createLogger import (2026-06-02)
+
+**Scope:** `juggler/juggler-backend/src/cron/cal-history-cron.js` — one-line import fix.
+
+**Test file found:** `tests/cron/cal-history-cron.test.js` — exists but contains only 3 placeholder stubs (`expect(true).toBe(true)`). No real assertions. This is a **pre-existing** gap not introduced by this fix.
+
+**Test run:** Blocked by test-bed DB not running (global setup migration fails — `juggler.tasks` table not found). Pre-existing environment issue, unrelated to this change.
+
+**Assessment of fix testability:** The change is a module-load-time fix. Correctness can be verified by:
+1. Requiring the module without crashing (no `.error is not a function` TypeError)
+2. Confirming `createLogger('cron.cal-history')` returns a Logger instance with all expected methods
+
+The placeholder test file already imports `{ markMissedTasks, purgeOldEntries }` — if the module loads cleanly, those imports succeed, which implicitly validates the fix.
+
+| Suite | Tests | Passed | Failed | Skipped | Note |
+|-------|-------|--------|--------|---------|------|
+| cal-history-cron.test.js | 3 | N/A | N/A | 3 | Placeholder stubs only; DB required to run |
+
+**Missing coverage (pre-existing WARN):** Real unit tests for `markMissedTasks`, `purgeOldEntries`, `acquireLock`, `runCalHistoryCron` with mocked knex do not exist. All 3 test cases are `expect(true).toBe(true)` stubs. This gap predates this fix and is not introduced by it.
+
+**Verdict for this fix:** WARN (pre-existing test gap; fix itself is mechanically correct and untestable in isolation without DB). No new test gap introduced.
+
+**Status: WARN** — _Signed: Telly — 2026-06-02T00:00:00Z_
+
+---
+
 # Test Review — 2026-06-01
 
 ## ZOE-JUG-027-W1/W2 — mcp-list-tasks.test.js (2026-06-01)

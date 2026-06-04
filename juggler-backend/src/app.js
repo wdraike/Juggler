@@ -97,7 +97,7 @@ app.use('/api/billing-webhooks', express.raw({ type: 'application/json' }), func
   req.rawBody = req.body;
   try {
     req.body = JSON.parse(req.body.toString('utf8'));
-  } catch (e) {
+  } catch {
     return res.status(400).json({ error: 'Invalid JSON body' });
   }
   next();
@@ -168,7 +168,7 @@ if (process.env.NODE_ENV === 'development') {
     }
     var allowedHosts = ['localhost', '127.0.0.1'];
     var parsedUri;
-    try { parsedUri = new URL(redirectUri); } catch (e) {
+    try { parsedUri = new URL(redirectUri); } catch {
       return res.status(400).json({ error: 'invalid_request', error_description: 'redirect_uri is not a valid URL' });
     }
     if (!allowedHosts.includes(parsedUri.hostname)) {
@@ -250,7 +250,7 @@ app.get('/api/events', (req, res, next) => {
 
   // Heartbeat every 30s to keep connection alive through proxies
   const heartbeat = setInterval(() => {
-    try { res.write(':\n\n'); } catch (e) { clearInterval(heartbeat); }
+    try { res.write(':\n\n'); } catch { clearInterval(heartbeat); }
   }, 30000);
 
   req.on('close', () => clearInterval(heartbeat));

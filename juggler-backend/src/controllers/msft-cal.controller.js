@@ -4,7 +4,7 @@
  */
 
 var { SignJWT, jwtVerify } = require('jose');
-const { getDb } = require('@raike/lib-db');
+const getDb = () => require('../db');
 var msftCalApi = require('../lib/msft-cal-api');
 
 // --- Token management (canonical implementation in adapter) ---

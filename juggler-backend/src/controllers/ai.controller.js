@@ -10,9 +10,10 @@
  *   - 50 requests/day  (enforced here via ai_command_log table)
  */
 
-const { getDb } = require('@raike/lib-db');
+const getDb = () => require('../db');
 const { trackedGeminiCall } = require('../services/gemini-tracked-call');
 const AI_USE_CASES = require('../constants/ai-use-cases');
+const logger = require('../lib/logger');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -45,7 +46,7 @@ async function callGemini(prompt, systemPrompt) {
   const client = getGenAIClient();
 
   const result = await trackedGeminiCall(
-    db,
+    getDb(),
     client,
     GEMINI_MODEL,
     systemPrompt + '\n\n---\nUser request:\n' + prompt,
@@ -145,10 +146,10 @@ exports.handleCommand = async (req, res) => {
     var result;
     try {
       result = JSON.parse(cleaned);
-    } catch (pe) {
+    } catch {
       var jsonMatch = cleaned.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        try { result = JSON.parse(jsonMatch[0]); } catch (pe2) { /* fall through */ }
+        try { result = JSON.parse(jsonMatch[0]); } catch { /* fall through */ }
       }
       if (!result) {
         return res.status(422).json({ error: 'Bad JSON from AI', raw: cleaned.substring(0, 500).replace(/[<>&"']/g, '') });

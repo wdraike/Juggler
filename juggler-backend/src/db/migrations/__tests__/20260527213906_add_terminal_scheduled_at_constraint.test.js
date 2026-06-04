@@ -1,4 +1,4 @@
-const { up, down } = require('./20260527213906_add_terminal_scheduled_at_constraint');
+const { down } = require('./20260527213906_add_terminal_scheduled_at_constraint');
 const db = require('../db');
 
 describe('20260527213906_add_terminal_scheduled_at_constraint', () => {

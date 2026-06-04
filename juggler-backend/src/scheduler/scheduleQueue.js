@@ -70,6 +70,7 @@ var _dirty = new Set();               // users with pending changes (write-side 
 var _lastEnqueueTime = new Map();       // user_id → timestamp
 var _running = new Map();             // user_id → promise (single-flight within instance)
 var _lastPollTime = 0;
+var _lastError = null;                // { timestamp, message } — last scheduler error, for health checks
 
 // Poll loop tracking for health checks
 function getPollLoopState() {
@@ -186,18 +187,20 @@ async function claimAndRun(userId) {
     var runScheduleAndPersist = getRunScheduleAndPersist();
     var flushQueueInLock = getFlushQueueInLock();
 
-    await runWithLock(userId, SOURCE_APP, async function() {
+    await runWithLock(userId, async function() {
       // Flush any pending writes before scheduler reads task state
       await flushQueueInLock(userId);
       // Run the scheduler
       await runScheduleAndPersist(userId, row.source);
     });
 
-    // Success: sweep the queue
+    // Success: sweep the queue and notify frontend
     await dequeueScheduleRun(userId);
+    try { getSseEmitter().emit(userId, 'schedule:changed', {}); } catch (e) { /* non-fatal */ }
     return { claimed: true, success: true };
   } catch (err) {
     // On failure, release the claim so someone else can retry
+    _lastError = { timestamp: Date.now(), message: err.message };
     await releaseClaim(userId);
     return { claimed: true, success: false, error: err.message };
   } finally {
@@ -346,6 +349,10 @@ var SOURCE_APP = 'scheduleQueue';
 var MAX_DIRTY_USERS_PER_POLL = 50;
 var CLAIM_TTL_SECONDS = 60; // Reclaim after 60s of no heartbeat
 
+function getLastError() {
+  return _lastError;
+}
+
 module.exports = {
   enqueueScheduleRun,
   dequeueScheduleRun,
@@ -353,6 +360,7 @@ module.exports = {
   startPollLoop,
   stopPollLoop,
   getPollLoopState,
+  getLastError,
   // Internal exports for tests
   _dirty,
   _lastEnqueueTime,

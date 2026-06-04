@@ -17,7 +17,7 @@
  *     rounded lat/lon grid — same resolution as the forecast cache.
  */
 
-const { getDb } = require('@raike/lib-db');
+const getDb = () => require('../db');
 const redis = require('../lib/redis');
 
 const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';

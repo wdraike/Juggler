@@ -6,7 +6,7 @@
  * flow is: enter credentials → discover calendars → toggle selection.
  */
 
-const { getDb } = require('@raike/lib-db');
+const getDb = () => require('../db');
 var appleCalApi = require('../lib/apple-cal-api');
 var { encrypt, decrypt } = require('../lib/credential-encrypt');
 

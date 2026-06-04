@@ -45,12 +45,13 @@ function validateScheduledAt(allTasks) {
       continue; // Skip validation for templates
     }
     
-    // Recurring instances SHOULD have scheduled_at
+    // Recurring instances: skip scheduled_at validation entirely.
+    // The reconciler creates instances without scheduled_at; the scheduler
+    // assigns it on first placement. Throwing here blocks the scheduler from
+    // ever running on new instances (chicken-and-egg). Post-run validation
+    // is the right place to enforce scheduled_at on placed instances.
     if (task.taskType === 'recurring_instance') {
-      if (!task.scheduledAt && !task.scheduled_at) {
-        throw new Error('Recurring instance ' + task.id + ' is missing required scheduled_at');
-      }
-      continue; // Validation passed for this instance
+      continue;
     }
     
     // Only validate pending tasks (empty status)
@@ -1860,7 +1861,7 @@ async function getSchedulePlacements(userId, options) {
     if (genDateKey === timeInfo.todayKey && ageMs <= 30 * 60 * 1000) {
       // Check if tasks were modified since cache
       var maxRow = await db('tasks_v').where('user_id', userId).max('updated_at as max_updated').first();
-      if (!maxRow || !maxRow.max_updated || new Date(maxRow.max_updated) <= genTime) {
+      if (!maxRow || !maxRow.max_updated || new Date(String(maxRow.max_updated).replace(' ', 'T') + 'Z') <= genTime) {
         cacheUsable = true;
       }
     }

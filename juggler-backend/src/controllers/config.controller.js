@@ -2,7 +2,7 @@
  * Config Controller — locations, tools, matrix, time blocks, schedules, preferences, projects
  */
 
-const { getDb } = require('@raike/lib-db');
+const getDb = () => require('../db');
 const { z } = require('zod');
 const tasksWrite = require('../lib/tasks-write');
 const { enqueueScheduleRun } = require('../scheduler/scheduleQueue');

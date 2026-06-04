@@ -67,8 +67,7 @@ exports.up = async function(knex) {
             REPLACE(REPLACE(\`when\`, 'allday', ''), 'fixed', ''), ',+', ','))
           WHERE \`when\` LIKE '%allday%' OR \`when\` LIKE '%fixed%'
       `);
-    } catch (regexpErr) {
-      // Fallback for MySQL < 8.0.4: strip tokens in JS
+    } catch {      // Fallback for MySQL < 8.0.4: strip tokens in JS
       const rows = await trx('task_masters')
         .where(function() {
           this.where('when', 'like', '%allday%').orWhere('when', 'like', '%fixed%');

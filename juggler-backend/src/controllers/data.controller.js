@@ -2,7 +2,7 @@
  * Data Controller — Import/Export for migration from window.storage format
  */
 
-const { getDb } = require('@raike/lib-db');
+const getDb = () => require('../db');
 const tasksWrite = require('../lib/tasks-write');
 const { rowToTask } = require('./task.controller');
 const { localToUtc, toDateISO } = require('../scheduler/dateHelpers');

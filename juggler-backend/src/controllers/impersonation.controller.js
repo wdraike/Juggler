@@ -1,4 +1,4 @@
-const { getDb } = require('@raike/lib-db');
+const getDb = () => require('../db');
 const { authServiceUrl } = require('../proxy-config');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('impersonation');

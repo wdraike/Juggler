@@ -11,7 +11,7 @@
  * API always returns both: scheduledAt (UTC ISO) + date/time/day (local derived).
  */
 
-const { getDb } = require('@raike/lib-db');
+const getDb = () => require('../db');
 const { v7: uuidv7 } = require('uuid');
 const { z } = require('zod');
 const { localToUtc, utcToLocal, toDateISO, fromDateISO, safeTimezone } = require('../scheduler/dateHelpers');

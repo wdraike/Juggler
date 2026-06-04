@@ -1,7 +1,7 @@
 // Cal History Cron Job
 // Daily sharded cron for auto-marking missed tasks and purging old cal_history entries
 
-const { isTerminalStatus, TERMINAL_STATUSES } = require('../lib/task-status');
+const { TERMINAL_STATUSES } = require('../lib/task-status');
 const { CalHistoryStatus } = require('../constants/status-enum');
 const { shouldAutoMarkMissed } = require('../../../shared/scheduler/missedHelpers');
 const knex = require('../lib/db');

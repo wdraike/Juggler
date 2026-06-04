@@ -4,7 +4,7 @@
  */
 
 var { SignJWT, jwtVerify } = require('jose');
-const { getDb } = require('@raike/lib-db');
+const getDb = () => require('../db');
 var gcalApi = require('../lib/gcal-api');
 
 // --- Token management (canonical implementation in adapter) ---

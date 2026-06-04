@@ -6,10 +6,10 @@
  * Enforces entity limits on downgrade by disabling excess items.
  */
 
-const { getDb } = require('@raike/lib-db');
+const getDb = () => require('../db');
 const tasksWrite = require('../lib/tasks-write');
 const { invalidateUserPlanCache, getCachedPlanFeatures } = require('../middleware/plan-features.middleware');
-const { countActiveTasks, countRecurringTemplates } = require('../middleware/entity-limits');
+const { countRecurringTemplates } = require('../middleware/entity-limits');
 const cache = require('../lib/redis');
 
 /**
