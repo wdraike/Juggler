@@ -9,6 +9,8 @@ const { taskCreateSchema, taskUpdateSchema } = require('../schemas/task.schema')
 const { trackedGeminiCall } = require('../services/gemini-tracked-call');
 const AI_USE_CASES = require('../constants/ai-use-cases');
 const db = require('../db');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('task.routes');
 
 router.use(authenticateJWT, resolvePlanFeatures);
 

@@ -23,6 +23,8 @@ var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { isTerminalStatus } = require('../lib/task-status');
 var { isAllDayTaskBackend } = require('../lib/isAllDayTaskBackend');
 var { handleTerminalTaskSync } = require('../lib/cal-sync-helpers');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('cal-sync.controller');
 
 // Ledger origin value for tasks created/managed by Juggler (vs. pulled from a provider).
 var JUGGLER_ORIGIN = 'juggler';

@@ -11,6 +11,8 @@ const tasksWrite = require('../lib/tasks-write');
 const { invalidateUserPlanCache, getCachedPlanFeatures } = require('../middleware/plan-features.middleware');
 const { countRecurringTemplates } = require('../middleware/entity-limits');
 const cache = require('../lib/redis');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('billing-webhooks.controller');
 
 /**
  * Enforce plan limits by disabling excess recurringTasks and tasks.

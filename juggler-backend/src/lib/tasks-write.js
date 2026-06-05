@@ -18,6 +18,8 @@
  */
 
 var { PLACEMENT_MODES } = require('./placementModes');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('tasks-write');
 
 var MASTER_FIELDS = [
   'id', 'user_id', 'text', 'project', 'section', 'notes', 'url',

@@ -9,6 +9,8 @@ const { authenticateJWT } = require('../middleware/jwt-auth');
 const { resolvePlanFeatures, getProductId, PRODUCT_LABEL } = require('../middleware/plan-features.middleware');
 const db = require('../db');
 const { countActiveTasks, countRecurringTemplates, countProjects, countLocations, countScheduleTemplates } = require('../middleware/entity-limits');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('my-plan.routes');
 
 // Fetch plan name from payment service
 async function getPlanName(planId) {

@@ -6,6 +6,8 @@
  */
 
 const db = require('../db');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('entity-limits');
 
 function getNestedValue(obj, path) {
   return path.split('.').reduce((o, key) => o?.[key], obj);

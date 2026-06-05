@@ -15,6 +15,8 @@
 
 var crypto = require('crypto');
 var db = require('../db');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('sync-lock');
 
 var LOCK_TTL_SECONDS = 30;           // short TTL — heartbeat keeps it alive
 var REFRESH_TTL_SECONDS = 30;        // each heartbeat extends by 30s

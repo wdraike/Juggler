@@ -9,6 +9,8 @@
  */
 
 const Redis = require('ioredis');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('sse-emitter');
 
 const CHANNEL_PREFIX = 'sse:';
 

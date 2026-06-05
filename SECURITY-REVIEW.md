@@ -1,28 +1,27 @@
-# Security Review — juggler-backend/src/middleware/jwt-auth.js — 2026-06-02
+# Security Review — juggler-backend logger-import restore — 2026-06-05
 
 ## Executive Summary
+No security impact. The change adds two lines per file:
+`const { createLogger } = require('@raike/lib-logger');` and
+`const logger = createLogger('<static-label>');`. The label is a hardcoded module
+name — no user input, no secret material. No new log statements are introduced;
+the fix only restores the `logger` binding that previously-existing `logger.*`
+calls already referenced (they were throwing `ReferenceError` on error/catch paths
+before this fix). Files touched include security-sensitive surfaces
+(billing-webhooks controller/route with HMAC verification, feature-events route
+with service-key auth) but their auth/validation logic is unchanged.
 
-The jwt-auth middleware correctly delegates signature verification to `auth-client` (RS256 via JWKS), performs a Redis session-active check, and provisions local users on first login. No exploitable vulnerabilities found. Two low-severity hardening observations noted.
+## Findings
+| # | Severity | Finding | File:Line | Remediation |
+|---|----------|---------|-----------|-------------|
+| — | — | None | — | — |
 
-## Critical Findings (exploitable now)
-
-_None._
-
-## High Findings (exploitable with effort)
-
-_None._
-
-## Medium Findings (defense in depth)
-
-_None._
-
-## Low Findings (hardening)
-
-| # | OWASP | Finding | File:Line | Remediation |
-|---|-------|---------|-----------|-------------|
-| L1 | A05 | `req.user.picture` is never set by auth-client (`req.user = { id, email, name }`), so `picture_url` is always written as `null` on first-login provisioning. Not a security issue, but silent data loss if a `picture` claim is ever added to the JWT. | jwt-auth.js:37 | Source `picture` from `req.auth` payload fields if/when auth-service emits it, or remove the field from the insert until it is supported. |
-| L2 | A09 | The `User provision failed` error passed to `next()` (line 45) is a plain `new Error(...)` with no error code. If the Express error handler forwards it to the client it may leak internal state terminology. | jwt-auth.js:45 | Assign a stable error code (`err.code = 'USER_PROVISION_FAILED'; err.status = 500;`) so the global handler can sanitize response body. |
+## OWASP Top 10 Check
+- A01 Broken Access Control — N/A (no authz logic touched)
+- A02 Cryptographic Failures — N/A (no crypto touched)
+- A03 Injection — PASS (label is a static literal, not interpolated input)
+- A09 Logging Failures — IMPROVED (restores structured logging on error paths)
 
 ## Status: PASS
 
-_Signed: Elmo — 2026-06-02T00:00:00Z_
+_Signed: Elmo — 2026-06-05T00:00:00Z_

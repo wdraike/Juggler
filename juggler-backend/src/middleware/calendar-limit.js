@@ -7,6 +7,8 @@
  */
 
 const db = require('../db');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('calendar-limit');
 
 function getNestedValue(obj, path) {
   return path.split('.').reduce((o, key) => o?.[key], obj);

@@ -2,6 +2,8 @@ const express = require('express');
 const crypto = require('crypto');
 const router = express.Router();
 const { handleWebhook } = require('../controllers/billing-webhooks.controller');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('billing-webhooks.routes');
 
 // Verify HMAC-SHA256 signature from payment service + reject stale replays.
 // Signs req.rawBody (the original wire bytes captured by express.raw() in app.js).

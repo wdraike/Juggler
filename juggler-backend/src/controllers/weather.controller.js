@@ -19,6 +19,8 @@
 
 const getDb = () => require('../db');
 const redis = require('../lib/redis');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('weather.controller');
 
 const OPEN_METEO_FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 const OPEN_METEO_GEOCODE_URL  = 'https://geocoding-api.open-meteo.com/v1/search';

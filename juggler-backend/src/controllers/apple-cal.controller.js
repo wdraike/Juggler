@@ -9,6 +9,8 @@
 const getDb = () => require('../db');
 var appleCalApi = require('../lib/apple-cal-api');
 var { encrypt, decrypt } = require('../lib/credential-encrypt');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('apple-cal.controller');
 
 /**
  * GET /api/apple-cal/status — connection status

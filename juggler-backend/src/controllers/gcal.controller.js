@@ -11,6 +11,8 @@ var gcalApi = require('../lib/gcal-api');
 
 var { getJwtSecret } = require('../lib/jwt-secret');
 var { getValidAccessToken } = require('../lib/cal-adapters/gcal.adapter');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('gcal.controller');
 
 // --- Endpoints ---
 

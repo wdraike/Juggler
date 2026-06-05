@@ -8,6 +8,8 @@
 const crypto = require('crypto');
 const router = require('express').Router();
 const db = require('../db');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('feature-events.routes');
 
 const MAX_DAYS = 90;
 const MAX_LIMIT = 1000;

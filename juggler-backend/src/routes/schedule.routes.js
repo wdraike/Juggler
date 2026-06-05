@@ -11,6 +11,8 @@ var { runScheduleAndPersist, getSchedulePlacements } = require('../scheduler/run
 var { withSyncLock } = require('../lib/sync-lock');
 var schedulerSession = require('../scheduler/schedulerSession');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('schedule.routes');
 
 // Rate limit scheduler endpoints — expensive operations
 var schedulerLimiter = rateLimit({

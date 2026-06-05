@@ -8,6 +8,8 @@ const tasksWrite = require('../lib/tasks-write');
 const { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 const cache = require('../lib/redis');
 const { reverseGeocodeDisplayName } = require('./weather.controller');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('config.controller');
 
 const locationItemSchema = z.object({
   id: z.string().max(36).optional(),

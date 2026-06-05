@@ -11,6 +11,8 @@ var msftCalApi = require('../lib/msft-cal-api');
 
 var { getJwtSecret } = require('../lib/jwt-secret');
 var { getValidAccessToken } = require('../lib/cal-adapters/msft.adapter');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('msft-cal.controller');
 
 // Guard against duplicate callback hits (browser retries).
 //
