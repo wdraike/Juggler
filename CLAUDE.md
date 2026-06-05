@@ -1,7 +1,7 @@
 # Juggler — Claude Instructions
 
 ## Stack
-React (port 3003) | Node.js/Express (port 5002) | MySQL + Knex.js | MCP server (`juggler-mcp/`)
+React (port 3002) | Node.js/Express (port 5002) | MySQL + Knex.js | MCP server (`juggler-mcp/`)
 
 ## Port Configuration
 - **Local Dev:** `DB_PORT=3407` (Docker MySQL, see `dev-bed/`)

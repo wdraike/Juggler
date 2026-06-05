@@ -12,6 +12,10 @@
  */
 
 const getDb = () => require('../db');
+// Module-level db handle. require() is cached so this is the same instance getDb()
+// returns. Restored after commit 7d3d40b removed it but left 32 bare `db` references
+// (createTask/updateTask/batch paths) that throw "db is not defined" without it.
+const db = require('../db');
 const { v7: uuidv7 } = require('uuid');
 const { z } = require('zod');
 const { localToUtc, utcToLocal, toDateISO, fromDateISO, safeTimezone } = require('../scheduler/dateHelpers');
@@ -23,6 +27,8 @@ const tasksWrite = require('../lib/tasks-write');
 const { isAnchorDependentRecur } = require('../../../shared/scheduler/expandRecurring');
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 var { TERMINAL_STATUSES, isTerminalStatus } = require('../lib/task-status');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('task.controller');
 const { isRollingMaster, computeRollingAnchor } = require('../lib/rolling-anchor');
 
 // Fields that, when explicitly supplied by the client, cause placement_mode
