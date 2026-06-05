@@ -188,7 +188,8 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
   var isDone = isTerminalStatus(status);
   var isMarker = !!t.marker;
   var isWhenRelaxed = !!item._whenRelaxed;
-  var borderColor = isWhenRelaxed ? '#F59E0B' : (isMarker ? '#8B5CF6' : priColor);
+  var isOverdue = !!item._overdue && !isDone;
+  var borderColor = isOverdue ? theme.error : (isWhenRelaxed ? '#F59E0B' : (isMarker ? '#8B5CF6' : priColor));
   var [show, setShow] = useState(false);
   var entryRef = useRef(null);
   var [mousePos, setMousePos] = useState(null);
@@ -231,8 +232,9 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
           opacity: fadeOpacity != null ? fadeOpacity : (isMarker ? 0.65 : 1)
         }}
       >
-        {isWhenRelaxed && <span style={{ fontSize: 8, color: '#F59E0B', fontWeight: 700 }}>{'~'} </span>}
-        {isMarker && !isWhenRelaxed && <span style={{ fontSize: 8, opacity: 0.7 }}>{'\u25C7'} </span>}{t.text}
+        {isOverdue && <span style={{ fontSize: 8, color: theme.error, fontWeight: 700 }}>{'\u26A0'} </span>}
+        {isWhenRelaxed && !isOverdue && <span style={{ fontSize: 8, color: '#F59E0B', fontWeight: 700 }}>{'~'} </span>}
+        {isMarker && !isWhenRelaxed && !isOverdue && <span style={{ fontSize: 8, opacity: 0.7 }}>{'\u25C7'} </span>}{t.text}
       </div>
       {show && <FixedPopup mousePos={mousePos} item={item} status={status} theme={theme} darkMode={darkMode} completedAt={t.completedAt} statusReason={statusReason} />}
     </div>
@@ -281,6 +283,7 @@ export default function CalendarView({
         var pl = plMap[t.id];
         var item = { task: t, start: pl ? pl.start : null, end: pl ? pl.end : null };
         if (pl && pl._whenRelaxed) item._whenRelaxed = true;
+        if (pl && pl._overdue) item._overdue = true;
         return item;
       }).sort(function (a, b) {
         var aAllDay = !!(a.task.isAllDay || a.task.placementMode === 'all_day' || a.task.placement_mode === 'all_day');

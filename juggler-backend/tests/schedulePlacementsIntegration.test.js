@@ -95,4 +95,25 @@ describe('getSchedulePlacements', () => {
     expect(result.unplaced).toBeDefined();
     expect(Array.isArray(result.unplaced)).toBe(true);
   });
+
+  test('isPastDue: past task with overdue=0 appears in dayPlacements with _overdue=true', async () => {
+    // Regression guard for the isPastDue fix: the scheduler clears overdue=0 at
+    // the start of every run, so tasks whose scheduled_at is in the past but just
+    // got reset must still be synthesised as overdue placements — not fall into
+    // the unscheduled bucket.
+    if (!available) return;
+    // Use a date definitely in the past
+    var pastDate = '2025-01-15';
+    var pastTime = '09:00 AM';
+    await db('task_masters').insert({
+      id: 'gp-pastdue-001', user_id: USER_ID, task_type: 'task', text: 'Past due task',
+      dur: 30, status: 'active', date: pastDate, time: pastTime, overdue: 0,
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    var result = await getSchedulePlacements(USER_ID, { timezone: 'America/New_York' });
+    var placements = result.dayPlacements[pastDate] || [];
+    var placement = placements.find(function(p) { return p.task && p.task.id === 'gp-pastdue-001'; });
+    expect(placement).toBeDefined();
+    expect(placement._overdue).toBe(true);
+  });
 });

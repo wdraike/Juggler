@@ -1756,10 +1756,13 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (t.generated || t.taskType === 'recurring_template') return;
     var st = statuses[t.id] || '';
     var isFinished = st === 'done' || st === 'cancel' || st === 'skip';
-    var isOverdueTask = !!t.overdue;
+    var scheduledMins = t.time ? parseTimeToMinutes(t.time) : null;
+    var isPastDue = scheduledMins != null && t.date != null && t.date !== 'TBD' &&
+      (t.date < timeInfo.todayKey || (t.date === timeInfo.todayKey && scheduledMins < timeInfo.nowMins));
+    var isOverdueTask = !!t.overdue || isPastDue;
     if (!isFinished && !isOverdueTask) return;
     if (!t.date || t.date === 'TBD') return;
-    var startMin = t.time ? parseTimeToMinutes(t.time) : null;
+    var startMin = scheduledMins;
     if (startMin == null) return;
     var dur = t.dur || 30;
     var entry = { task: t, start: startMin, dur: dur };
@@ -2086,6 +2089,7 @@ async function getSchedulePlacements(userId, options) {
         if (p.splitPart) { hydrated.splitPart = p.splitPart; hydrated.splitTotal = p.splitTotal; }
         if (p.travelBefore) hydrated.travelBefore = p.travelBefore;
         if (p.travelAfter) hydrated.travelAfter = p.travelAfter;
+        if (p.overdue) hydrated._overdue = true;
         dayPlacements[dk].push(hydrated);
         cachedIds[p.taskId] = true;
       });
@@ -2101,10 +2105,13 @@ async function getSchedulePlacements(userId, options) {
       if (t.generated || t.taskType === 'recurring_template') return;
       var st = statuses[t.id] || '';
       var isFinished = st === 'done' || st === 'cancel' || st === 'skip';
-      var isOverdueTask = !!t.overdue;
+      var scheduledMins = t.time ? parseTimeToMinutes(t.time) : null;
+      var isPastDue = scheduledMins != null && t.date != null && t.date !== 'TBD' &&
+        (t.date < timeInfo.todayKey || (t.date === timeInfo.todayKey && scheduledMins < timeInfo.nowMins));
+      var isOverdueTask = !!t.overdue || isPastDue;
       if (!isFinished && !isOverdueTask) return;
       if (!t.date || t.date === 'TBD') return;
-      var startMin = t.time ? parseTimeToMinutes(t.time) : null;
+      var startMin = scheduledMins;
       if (startMin == null) return;
       var dur = t.dur || 30;
       var entry = { task: t, start: startMin, dur: dur };
