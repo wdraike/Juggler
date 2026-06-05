@@ -1,10 +1,28 @@
 # Test Review — 2026-06-05
 
-## scheduler cache-always-stale fix — 2026-06-05
+## scheduler grace/overdue/collision fixes — 2026-06-05
 
-**Scope:** `juggler-backend/src/scheduler/runSchedule.js` — MySQL NOW(3) for generatedAt, 10s grace periods; `juggler-frontend/src/hooks/useTaskState.js` — periodic nudge.
+**Scope:** `juggler-backend/src/scheduler/runSchedule.js` — 3 bug fixes: grace 10s→1s, overdue snap to last time-block, collision detection.
 
-### Existing coverage
+### Test Results
+
+| Suite | Tests | Passed | Failed | Time |
+|-------|-------|--------|--------|------|
+| schedulePlacementsIntegration | 9 | 9 | 0 | 2.1s |
+| schedulerRules | (included in 151 total) | — | — | — |
+| runScheduleIntegration | (skipped — DB access) | — | — | — |
+| unifiedSchedule | (included in 151 total) | — | — | — |
+| **Total** | **151** | **151** | **0** | **4.6s** |
+
+### New Tests Added
+
+| Test | File | Covers |
+|------|------|--------|
+| `cache still fresh when updated_at is within 1s grace of generatedAt (clock skew)` | `schedulePlacementsIntegration.test.js:99` | Bug 1 — updated from 5s/10s to 0.5s/1s |
+| `overdue today-task with past time snaps to last block boundary` | `schedulePlacementsIntegration.test.js:130` | Bug 2 — overdue snap |
+| `multiple overdue today-tasks at same past time get distinct start slots (collision avoidance)` | `schedulePlacementsIntegration.test.js:163` | Bug 3 — collision detection |
+
+### Existing Coverage
 
 | Test | File | Coverage |
 |------|------|----------|

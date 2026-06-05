@@ -1756,6 +1756,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
       if (p.task) placedIds[p.task.id] = true;
     });
   });
+  // Track occupied (date, startMin) slots so overdue tasks don't stack on each other
+  var overdueSlotsByDate = {};
   allTasks.forEach(function(t) {
     if (placedIds[t.id]) return;
     if (t.generated || t.taskType === 'recurring_template') return;
@@ -1770,6 +1772,27 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var startMin = scheduledMins;
     if (startMin == null) return;
     var dur = t.dur || 30;
+    // Bug 2 fix: for overdue today-tasks whose original time has passed, snap to last
+    // time-block boundary so they appear at the latest slot rather than buried in the past.
+    if (isOverdueTask && t.date === timeInfo.todayKey && startMin < timeInfo.nowMins) {
+      var dateObj = parseDate(t.date);
+      var dayName = dateObj ? DAY_NAMES[dateObj.getDay()] : null;
+      var blocks = (dayName && cfg.timeBlocks && cfg.timeBlocks[dayName]) ? cfg.timeBlocks[dayName] : null;
+      var lastBlockEnd = 1080; // default 6 PM if no blocks available
+      if (blocks && blocks.length > 0) {
+        lastBlockEnd = blocks[blocks.length - 1].end;
+      }
+      startMin = lastBlockEnd - dur;
+      if (startMin < 0) startMin = 0;
+    }
+    // Bug 3 fix: collision detection — offset until a free slot is found for this date
+    if (!overdueSlotsByDate[t.date]) overdueSlotsByDate[t.date] = {};
+    var slotMin = startMin;
+    while (overdueSlotsByDate[t.date][slotMin]) {
+      slotMin += Math.max(dur, 15);
+    }
+    overdueSlotsByDate[t.date][slotMin] = true;
+    startMin = slotMin;
     var entry = { task: t, start: startMin, dur: dur };
     var utcDate = localToUtc(t.date, t.time, TIMEZONE);
     if (utcDate) entry.scheduledAtUtc = utcDate.toISOString();
@@ -1876,7 +1899,7 @@ async function getSchedulePlacements(userId, options) {
     if (genDateKey === timeInfo.todayKey && ageMs <= 30 * 60 * 1000) {
       // Check if tasks were modified since cache
       var maxRow = await db('tasks_v').where('user_id', userId).max('updated_at as max_updated').first();
-      if (!maxRow || !maxRow.max_updated || new Date(String(maxRow.max_updated).replace(' ', 'T') + 'Z') <= new Date(genTime.getTime() + 10000)) {
+      if (!maxRow || !maxRow.max_updated || new Date(String(maxRow.max_updated).replace(' ', 'T') + 'Z') <= new Date(genTime.getTime() + 1000)) {
         cacheUsable = true;
       }
     }
@@ -2012,8 +2035,8 @@ async function getSchedulePlacements(userId, options) {
         .max('updated_at as max_updated').first();
       if (maxRow && maxRow.max_updated) {
         var lastModified = new Date(String(maxRow.max_updated).replace(' ', 'T') + 'Z');
-        // 10-second grace covers MySQL/Node.js clock skew on Cloud SQL
-        if (lastModified > new Date(genTime.getTime() + 10000)) {
+        // 1-second grace covers sub-second processing lag (generatedAt now uses MySQL clock)
+        if (lastModified > new Date(genTime.getTime() + 1000)) {
           logger.info('[SCHED] cache stale: tasks modified since cache (' + Math.round((lastModified - genTime) / 1000) + 's newer)');
           cacheStale = true;
         }
@@ -2106,6 +2129,8 @@ async function getSchedulePlacements(userId, options) {
     // tasks using their scheduled_at-derived date/time. The scheduler never
     // places these, so without this they'd appear unscheduled when the "all"
     // filter is active. Overdue tasks render in-place with an overdue indicator.
+    // Track occupied (date, startMin) slots so overdue tasks don't stack on each other
+    var overdueSlotsByDate2 = {};
     allTasks.forEach(function(t) {
       if (cachedIds[t.id]) return;
       if (t.generated || t.taskType === 'recurring_template') return;
@@ -2120,6 +2145,27 @@ async function getSchedulePlacements(userId, options) {
       var startMin = scheduledMins;
       if (startMin == null) return;
       var dur = t.dur || 30;
+      // Bug 2 fix: for overdue today-tasks whose original time has passed, snap to last
+      // time-block boundary so they appear at the latest slot rather than buried in the past.
+      if (isOverdueTask && t.date === timeInfo.todayKey && startMin < timeInfo.nowMins) {
+        var dateObj2 = parseDate(t.date);
+        var dayName2 = dateObj2 ? DAY_NAMES[dateObj2.getDay()] : null;
+        var blocks2 = (dayName2 && DEFAULT_TIME_BLOCKS[dayName2]) ? DEFAULT_TIME_BLOCKS[dayName2] : null;
+        var lastBlockEnd2 = 1080; // default 6 PM if no blocks available
+        if (blocks2 && blocks2.length > 0) {
+          lastBlockEnd2 = blocks2[blocks2.length - 1].end;
+        }
+        startMin = lastBlockEnd2 - dur;
+        if (startMin < 0) startMin = 0;
+      }
+      // Bug 3 fix: collision detection — offset until a free slot is found for this date
+      if (!overdueSlotsByDate2[t.date]) overdueSlotsByDate2[t.date] = {};
+      var slotMin2 = startMin;
+      while (overdueSlotsByDate2[t.date][slotMin2]) {
+        slotMin2 += Math.max(dur, 15);
+      }
+      overdueSlotsByDate2[t.date][slotMin2] = true;
+      startMin = slotMin2;
       var entry = { task: t, start: startMin, dur: dur };
       // Add scheduledAtUtc for timezone-safe frontend hydration
       var utcDate = localToUtc(t.date, t.time, TIMEZONE);
