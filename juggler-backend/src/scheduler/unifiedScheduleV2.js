@@ -970,12 +970,25 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
       for (var w = 0; w < wins.length; w++) {
         var winStart = wins[w][0];
         var winEnd = wins[w][1];
-        for (var s = winStart; s + item.dur <= winEnd; s += 15) {
+        // time_window tasks: prefer slots at/after preferredTimeMins, fall back to winStart.
+        // This prevents DAY_START clamping from pulling tasks earlier than their preferred time.
+        var prefStart = (item.isWindowMode && item.preferredTimeMins != null)
+          ? Math.max(winStart, item.preferredTimeMins)
+          : winStart;
+        for (var s = prefStart; s + item.dur <= winEnd; s += 15) {
           if (!isFreeWithTravel(occ, s, item.dur, item.travelBefore, item.travelAfter)) continue;
           if (checkDeps && !depsSatisfied(item, i, s, placedById, statuses, dates)) continue;
           if (checkLoc && !canTaskRunAtMin(item.task, d.key, s, cfg, toolMatrix, blocks)) continue;
           if (checkWeather && !weatherOk(item.task, d.key, s, weatherByDateHour)) continue;
           return { dateKey: d.key, start: s };
+        }
+        // Fallback: try earlier slots between winStart and prefStart (e.g. window fully booked after preferred).
+        for (var sf = winStart; sf < prefStart; sf += 15) {
+          if (!isFreeWithTravel(occ, sf, item.dur, item.travelBefore, item.travelAfter)) continue;
+          if (checkDeps && !depsSatisfied(item, i, sf, placedById, statuses, dates)) continue;
+          if (checkLoc && !canTaskRunAtMin(item.task, d.key, sf, cfg, toolMatrix, blocks)) continue;
+          if (checkWeather && !weatherOk(item.task, d.key, sf, weatherByDateHour)) continue;
+          return { dateKey: d.key, start: sf };
         }
       }
     }
@@ -988,6 +1001,9 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
 // returning the latest free slot. Used for scheduler-managed recurring tasks
 // whose original time has passed — keeps them visible at end-of-day so the
 // user can still mark them done.
+// TIME_WINDOW tasks never reach this path — preferLatestSlot is set only for ANYTIME
+// recurring tasks (see schedulingMode logic above). The prefStart logic therefore
+// lives only in findEarliestSlot; adding it here would be dead code today.
 function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   var earliestIdx = 0;
   var latestIdx = dates.length - 1;

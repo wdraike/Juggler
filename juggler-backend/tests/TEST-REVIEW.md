@@ -1,3 +1,27 @@
+# Test Review — 2026-06-05
+
+## scheduler — preferred-time placement fix (2026-06-05)
+
+**Scope:** `juggler-backend/src/scheduler/unifiedScheduleV2.js` — `findEarliestSlot` preferred-time search order fix.
+
+**Test file:** `tests/scheduler/preferred-time-placement.test.js` (new)
+
+**Test run:** 3/3 PASS (run without globalSetup; pure unit test, no DB required)
+
+| Scenario | Test | Result |
+|----------|------|--------|
+| All slots free → lands at preferredTimeMins (420), not winStart (360) | A | PASS |
+| Preferred+ range fully blocked → fallback to winStart (360) | B | PASS |
+| ANYTIME task (isWindowMode=false) → unaffected, still from winStart | C | PASS |
+
+**Coverage:** Three-way behavioral split — preferred honored, fallback fires, non-window unaffected.
+
+## Status: PASS
+
+_Signed: Telly — 2026-06-05_
+
+---
+
 # Test Review — 2026-06-02
 
 ## cal-history-cron.js bugfix — createLogger import (2026-06-02)

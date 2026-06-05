@@ -84,7 +84,7 @@ These resolve remaining ambiguity when the severity hierarchy alone isn't decisi
 - `placement_mode = 'all_day'` → task is excluded from the time grid entirely (early return). Shown on calendar header row; does not consume minute-level capacity.
 - `placement_mode = 'reminder'` → placed at its exact time with no occupancy. Multiple reminders at the same minute do not conflict.
 - `placement_mode = 'fixed'` → anchored at the exact `time` value. `isFixedWhen=true`. Blocks the slot. This is the sole immovability signal — `date_pinned` has been removed.
-- `placement_mode = 'time_window'` → placed within ±timeFlex minutes of `preferredTimeMins`. Falls back to when-tag windows if the window is degenerate.
+- `placement_mode = 'time_window'` → placed at or after `preferredTimeMins` (not the window start). `findEarliestSlot` searches `[max(winStart, preferredTimeMins), winEnd)` first; falls back to `[winStart, preferredTimeMins)` only when the preferred-and-later range is fully booked. Note: `windowLo = max(DAY_START, preferredTimeMins - timeFlex)` — DAY_START clamping can pull `winStart` to 6:00 AM even when `preferredTimeMins` is later, which is why the search must start from `preferredTimeMins`, not `winStart`.
 - `placement_mode = 'time_blocks'` → constrained to user-defined `when` tag windows (e.g. `morning`, `lunch`, `evening`). Uses `flexWhen` for retry when windows are full.
 - `placement_mode = 'anytime'` → no time constraint. Placed wherever fits by priority/slack order (recurring tasks with this mode can use `preferLatestSlot` when their anchor has already passed today).
 
