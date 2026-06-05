@@ -601,11 +601,21 @@ export default function useTaskState() {
     // Arm nudge timer for current task state on mount
     armNudgeTimer(computeNextTaskEnd(taskStateRef.current.tasks));
 
+    // Periodic scheduler run — fallback for overdue detection and stale-cache
+    // recovery when no task mutations have fired (e.g. after page load with no edits).
+    var periodicNudgeId = setInterval(function() {
+      if (document.visibilityState !== 'visible') return;
+      apiClient.post('/schedule/nudge').catch(function(e) {
+        console.warn('[periodic-nudge] POST failed:', e && e.message);
+      });
+    }, 5 * 60 * 1000); // every 5 minutes
+
     return function() {
       if (eventSource) eventSource.close();
       if (fallbackIntervalId) clearInterval(fallbackIntervalId);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
+      clearInterval(periodicNudgeId);
       nudgePendingRef.current = null;
     };
   }, [loadPlacements]);

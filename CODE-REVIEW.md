@@ -1,7 +1,32 @@
-# Code Review — juggler overdue synthesis fix — 2026-06-05
+# Code Review — juggler scheduler cache-always-stale fix — 2026-06-05
 
 ## Summary
-Two correctness bugs fixed correctly. Logic is sound. W1 (redundant parseTimeToMinutes call) was fixed by reusing `scheduledMins` as `startMin`. W2 (no test for isPastDue path) addressed with new integration test in `schedulePlacementsIntegration.test.js`. I1 (theme.error consistency) applied to CalendarView. No critical findings. Ship-ready.
+Fix is architecturally correct. Root cause (MySQL/Node.js clock skew → generatedAt always behind updated_at → fast path never fires) is properly addressed by sourcing generatedAt from MySQL's clock. Two warn items: a date-parsing fragility and missing targeted test for the grace period. No blocking issues.
+
+## Critical Findings (must fix before merge)
+None.
+
+## Warning Findings (fix this sprint)
+| # | Finding | File:Line | Remediation |
+|---|---------|-----------|-------------|
+| W1 | `new Date(_dbNow)` parses MySQL datetime string `"2026-06-05 12:34:56.123"` (space separator) as implementation-defined (local time in V8). Works on Cloud Run (UTC) but fragile. All other datetime strings in this file use `.replace(' ', 'T') + 'Z'` for explicit UTC parse. | runSchedule.js:1683 | `new Date(String(_dbNow).replace(' ', 'T') + 'Z').toISOString()` |
+| W2 | No targeted unit test for 10s grace period boundary. The fast-path integration test (`'fresh cache returns quickly without re-running'`) exercises the happy path but not the case where `updated_at` is within 10s of `generatedAt`. | schedulePlacementsIntegration.test.js | Add unit test: seed a task with `updated_at = generatedAt + 5s` and assert cache is still considered fresh. |
+
+## Info / Suggestions
+| # | Finding | File:Line | Suggestion |
+|---|---------|-----------|-------------|
+| I1 | `runSchedule.js` is 2263 lines — far exceeds the 300-line guideline. Pre-existing, not introduced by this change. | runSchedule.js | Decompose into sub-modules in a future refactor phase. |
+
+## Checklist Status
+- [x] Complexity — pre-existing oversize, change itself is small (12 lines)
+- [x] Error handling — periodic nudge catch is correct; raw SQL access pattern is correct
+- [x] Test coverage — existing integration test covers fast path; grace period boundary untested (W2)
+- [x] Observability — `console.warn` for periodic nudge matches existing pattern in file (line 429)
+- [x] Scalability — nudge endpoint has `schedulerLimiter`; visibility guard prevents background tab spam
+- [x] Logic correctness — Change 1 (MySQL NOW(3) for generatedAt) fixes root cause; Changes 2–3 add safety margin; Change 4 adds fallback nudge with correct cleanup
+
+## Status: ISSUES
+_Signed: Ernie — 2026-06-05T00:00:00Z_
 
 ## Critical Findings (must fix before merge)
 _None._

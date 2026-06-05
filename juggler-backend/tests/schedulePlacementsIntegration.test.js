@@ -96,6 +96,35 @@ describe('getSchedulePlacements', () => {
     expect(Array.isArray(result.unplaced)).toBe(true);
   });
 
+  test('cache still fresh when updated_at is within 10s grace of generatedAt (clock skew)', async () => {
+    // Regression guard for the MySQL/Node.js clock skew fix.
+    // Simulates: generatedAt written 5s BEFORE the task's updated_at (as MySQL would have done
+    // before the NOW(3) fix). With the 10s grace, the fast path should still fire.
+    if (!available) return;
+    await tasksWrite.insertTask(db, { id: 'gp-grace-001', user_id: USER_ID, task_type: 'task', text: 'Grace test', dur: 30, status: '', when: 'morning', created_at: db.fn.now(), updated_at: db.fn.now() });
+    await runScheduleAndPersist(USER_ID);
+
+    // Read task's updated_at from DB
+    var taskRow = await db('task_instances').where({ id: 'gp-grace-001' }).first()
+      || await db('task_masters').where({ id: 'gp-grace-001' }).first();
+    var taskUpdatedAt = new Date(String(taskRow.updated_at).replace(' ', 'T') + 'Z');
+
+    // Patch cache's generatedAt to be 5s BEFORE task's updated_at
+    // This simulates clock skew where generatedAt (Node.js clock) lagged MySQL by 5s
+    var cacheRow = await db('user_config').where({ user_id: USER_ID, config_key: 'schedule_cache' }).first();
+    var cache = typeof cacheRow.config_value === 'string' ? JSON.parse(cacheRow.config_value) : cacheRow.config_value;
+    cache.generatedAt = new Date(taskUpdatedAt.getTime() - 5000).toISOString();
+    await db('user_config').where({ user_id: USER_ID, config_key: 'schedule_cache' })
+      .update({ config_value: JSON.stringify(cache) });
+
+    // Should still hit fast path — 5s < 10s grace
+    var start = Date.now();
+    var result = await getSchedulePlacements(USER_ID, { timezone: 'America/New_York' });
+    var elapsed = Date.now() - start;
+    expect(result).toBeDefined();
+    expect(elapsed).toBeLessThan(2000);
+  });
+
   test('isPastDue: past task with overdue=0 appears in dayPlacements with _overdue=true', async () => {
     // Regression guard for the isPastDue fix: the scheduler clears overdue=0 at
     // the start of every run, so tasks whose scheduled_at is in the past but just

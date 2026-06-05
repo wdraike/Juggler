@@ -1676,7 +1676,12 @@ async function runScheduleAndPersist(userId, _retries, options) {
     + ' placed=' + updated);
 
   // 10. Cache the placement result so GET /placements doesn't re-run the scheduler
-  var placementCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date().toISOString(), timezone: TIMEZONE, schedulerVersion: SCHEDULER_VERSION };
+  // Use MySQL's clock for generatedAt so it's consistent with tasks.updated_at
+  // (which is also set by db.fn.now()). Node.js Date.now() can lag MySQL by
+  // several seconds on Cloud SQL, making the cache appear stale immediately.
+  var _nowRow = await trx.raw('SELECT NOW(3) as ts');
+  var _dbNow = _nowRow[0][0].ts;
+  var placementCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date(String(_dbNow).replace(' ', 'T') + 'Z').toISOString(), timezone: TIMEZONE, schedulerVersion: SCHEDULER_VERSION };
   Object.keys(result.dayPlacements).forEach(function(dk) {
     placementCache.dayPlacements[dk] = result.dayPlacements[dk].map(function(p) {
       var entry = { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };
@@ -1871,7 +1876,7 @@ async function getSchedulePlacements(userId, options) {
     if (genDateKey === timeInfo.todayKey && ageMs <= 30 * 60 * 1000) {
       // Check if tasks were modified since cache
       var maxRow = await db('tasks_v').where('user_id', userId).max('updated_at as max_updated').first();
-      if (!maxRow || !maxRow.max_updated || new Date(String(maxRow.max_updated).replace(' ', 'T') + 'Z') <= genTime) {
+      if (!maxRow || !maxRow.max_updated || new Date(String(maxRow.max_updated).replace(' ', 'T') + 'Z') <= new Date(genTime.getTime() + 10000)) {
         cacheUsable = true;
       }
     }
@@ -2007,7 +2012,8 @@ async function getSchedulePlacements(userId, options) {
         .max('updated_at as max_updated').first();
       if (maxRow && maxRow.max_updated) {
         var lastModified = new Date(String(maxRow.max_updated).replace(' ', 'T') + 'Z');
-        if (lastModified > genTime) {
+        // 10-second grace covers MySQL/Node.js clock skew on Cloud SQL
+        if (lastModified > new Date(genTime.getTime() + 10000)) {
           logger.info('[SCHED] cache stale: tasks modified since cache (' + Math.round((lastModified - genTime) / 1000) + 's newer)');
           cacheStale = true;
         }

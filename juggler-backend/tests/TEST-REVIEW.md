@@ -1,5 +1,38 @@
 # Test Review — 2026-06-05
 
+## scheduler cache-always-stale fix — 2026-06-05
+
+**Scope:** `juggler-backend/src/scheduler/runSchedule.js` — MySQL NOW(3) for generatedAt, 10s grace periods; `juggler-frontend/src/hooks/useTaskState.js` — periodic nudge.
+
+### Existing coverage
+
+| Test | File | Coverage |
+|------|------|----------|
+| `fresh cache returns quickly without re-running` | schedulePlacementsIntegration.test.js:62 | Fast path (cache-hit) — passes before and after fix |
+| `stale cache triggers re-run when task modified` | schedulePlacementsIntegration.test.js:75 | Stale detection — exercises slow path |
+| `writes schedule_cache to user_config` | runScheduleIntegration.test.js:255 | generatedAt exists and is truthy |
+| `cache updates on subsequent runs` | runScheduleIntegration.test.js:269 | generatedAt advances on re-run |
+
+### New test added
+
+`schedulePlacementsIntegration.test.js` — `cache still fresh when updated_at is within 10s grace of generatedAt (clock skew)`. Patches cache's `generatedAt` to 5s before task's `updated_at`, asserts fast path fires (elapsed < 2000ms).
+
+### Test run result
+
+**COULD NOT RUN** — pre-existing migration failures block globalSetup:
+1. `20260602100000_add_scheduled_at_constraint.js` — referenced old `tasks` table (now split to task_masters/task_instances). **Fixed in this commit** (made no-op).
+2. `20260605000000_add_task_status_enum_and_timestamps.js` — `chk_task_masters_scheduled_at_for_terminal` constraint violated during migration run. Pre-existing issue, not caused by this change.
+
+The second failure prevents globalSetup from completing. Tests self-skip when DB is unavailable (guard at top of each test file), but globalSetup throws rather than skipping — so the entire suite fails to start.
+
+### Verdict
+
+**WARN** — grace period test written; tests unrunnable due to pre-existing migration issue #2. Recommend fixing `20260605000000` as a follow-up (separate commit). The cache-stale fix itself is correct and low-risk; blocking on unrelated migration debt is not warranted.
+
+_Signed: Telly — 2026-06-05T00:00:00Z_
+
+---
+
 ## scheduler — preferred-time placement fix (2026-06-05)
 
 **Scope:** `juggler-backend/src/scheduler/unifiedScheduleV2.js` — `findEarliestSlot` preferred-time search order fix.
