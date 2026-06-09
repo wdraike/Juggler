@@ -1,3 +1,5 @@
+> ⛔ **SUPERSEDED (2026-06-09).** This Jan-2026 analysis is retained for history only. Current truth lives in **[JUGGLER-ARCH-REVIEW-2026-06.md](./JUGGLER-ARCH-REVIEW-2026-06.md)** (verified current state) and **[JUGGLER-HEX-DESIGN.md](./JUGGLER-HEX-DESIGN.md)** (target architecture). Several metrics below were proven wrong (e.g. app.js/server.js line counts). Do not plan from this doc.
+
 # Juggler Architecture Review — DDD & Hexagonal Migration Analysis
 
 **Date:** 2026-01-14

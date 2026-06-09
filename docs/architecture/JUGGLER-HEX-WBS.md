@@ -1,3 +1,5 @@
+> ⛔ **SUPERSEDED (2026-06-09).** This Jan-2026 WBS is retained for history only. Its checkboxes never tracked real progress. Current plan: **[JUGGLER-HEX-ROADMAP.md](./JUGGLER-HEX-ROADMAP.md)**. Do not execute from this doc.
+
 # Juggler Hexagonal Architecture Migration WBS
 
 **Created:** 2026-01-15
