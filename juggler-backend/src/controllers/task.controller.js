@@ -80,6 +80,10 @@ function checkCalSyncEditGuard(existing, body) {
   var origin = existing && existing.cal_sync_origin;
   if (!origin || origin === 'juggler') return null;
   var allowed = ['status', 'notes', '_allowUnfix'];
+  // _allowUnfix is an explicit user opt-in to un-fix a calendar-synced task — it
+  // must permit the placementMode change it exists to authorize (else the flag
+  // is inert and unfixing a cal-synced task always 403s).
+  if (body && body._allowUnfix) allowed.push('placementMode');
   var blocked = Object.keys(body)
     .filter(function(k) { return k !== 'id'; })
     .filter(function(k) { return allowed.indexOf(k) === -1; });
@@ -890,6 +894,9 @@ async function createTask(req, res) {
     // [FIX D-14] Server-side backstop: if client signals all-day but didn't set placement_mode, enforce it
     if (!timeWasSet && req.body.allDay === true && row.placement_mode === undefined) {
       row.placement_mode = PLACEMENT_MODES.ALL_DAY;
+      // Also set when='allday' — consumers (scheduler, frontend) read `when`; the
+      // refactor to placement_mode dropped this, leaving allday tasks with when=null.
+      if (row.when === undefined) row.when = 'allday';
     }
     // Recurrings cannot have dependencies — clear if provided
     if (row.recurring || row.task_type === 'recurring_template' || row.task_type === 'recurring_instance') {
@@ -1118,6 +1125,9 @@ async function updateTask(req, res) {
     // [FIX D-14] Server-side backstop for all-day tasks in update path
     if (!timeWasSet && req.body.allDay === true && row.placement_mode === undefined) {
       row.placement_mode = PLACEMENT_MODES.ALL_DAY;
+      // Also set when='allday' — consumers (scheduler, frontend) read `when`; the
+      // refactor to placement_mode dropped this, leaving allday tasks with when=null.
+      if (row.when === undefined) row.when = 'allday';
     }
 
     // Lock check: if scheduling lock is held, split and queue scheduling fields
