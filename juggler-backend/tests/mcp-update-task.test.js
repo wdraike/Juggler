@@ -821,55 +821,58 @@ describe('update_task — _allowUnfix MCP behaviour (ZOE-JUG-023-W3)', function(
 
 describe('update_task — recurring_template direct edit depends_on strip', function() {
   test('recurring_template direct edit with dependsOn → depends_on stripped from row', async function() {
-    // Setup: create a recurring_template task
-    resetStore({ task_type: 'recurring_template', id: 'template-001' });
-    
+    // Setup: create a recurring_template task.
+    // resetStore always stores the task under the key 'task-001' in taskStore;
+    // the id override only sets the task's own id field — the DB mock resolves
+    // by store key, so the update_task call must use id: 'task-001'.
+    resetStore({ task_type: 'recurring_template' });
+
     // Send update with dependsOn field
-    await captureHandlers()['update_task']({ 
-      id: 'template-001', 
+    await captureHandlers()['update_task']({
+      id: 'task-001',
       dependsOn: ['task-002', 'task-003']
     });
-    
+
     // Verify the write was captured
-    var templateWrite = findWrite('template-001');
+    var templateWrite = findWrite('task-001');
     expect(templateWrite).toBeDefined();
-    
+
     // Verify depends_on was stripped from the row
     expect(templateWrite.row.depends_on).toBeUndefined();
   });
 
   test('recurring_template direct edit without dependsOn → no depends_on field added', async function() {
     // Setup: create a recurring_template task
-    resetStore({ task_type: 'recurring_template', id: 'template-002' });
-    
+    resetStore({ task_type: 'recurring_template' });
+
     // Send update without dependsOn field
-    await captureHandlers()['update_task']({ 
-      id: 'template-002', 
+    await captureHandlers()['update_task']({
+      id: 'task-001',
       text: 'Updated template text'
     });
-    
+
     // Verify the write was captured
-    var templateWrite = findWrite('template-002');
+    var templateWrite = findWrite('task-001');
     expect(templateWrite).toBeDefined();
-    
+
     // Verify depends_on is not present in the row
     expect(templateWrite.row.depends_on).toBeUndefined();
   });
 
   test('non-recurring_template with dependsOn → depends_on preserved in row', async function() {
     // Setup: create a regular task
-    resetStore({ task_type: 'task', id: 'regular-001' });
-    
+    resetStore({ task_type: 'task' });
+
     // Send update with dependsOn field
-    await captureHandlers()['update_task']({ 
-      id: 'regular-001', 
+    await captureHandlers()['update_task']({
+      id: 'task-001',
       dependsOn: ['task-002']
     });
-    
+
     // Verify the write was captured
-    var taskWrite = findWrite('regular-001');
+    var taskWrite = findWrite('task-001');
     expect(taskWrite).toBeDefined();
-    
+
     // Verify depends_on was preserved in the row
     expect(taskWrite.row.depends_on).toBe('["task-002"]');
   });

@@ -124,15 +124,16 @@ describe('SQL Injection Scanner', () => {
     it('should scan a file and find unsafe patterns', () => {
       // Create a test file
       const testFile = path.join(__dirname, 'test-file-unsafe.js');
-      const testContent = `
-        const knex = require('knex');
-        
-        // Unsafe template string
-        knex.raw(\`SELECT * FROM users WHERE id = ${userId}\`);
-        
-        // Unsafe string concatenation
-        knex.raw('SELECT * FROM users WHERE id = ' + userId);
-      `;
+      // Use string concatenation (not a template literal) so that ${userId} is
+      // written literally into the test file rather than evaluated in this scope.
+      const testContent =
+        "const knex = require('knex');\n" +
+        "\n" +
+        "// Unsafe template string\n" +
+        "knex.raw(`SELECT * FROM users WHERE id = ${userId}`);\n" +
+        "\n" +
+        "// Unsafe string concatenation\n" +
+        "knex.raw('SELECT * FROM users WHERE id = ' + userId);\n";
 
       fs.writeFileSync(testFile, testContent);
 

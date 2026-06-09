@@ -13,7 +13,7 @@
 const getDb = () => require('../db');
 const { trackedGeminiCall } = require('../services/gemini-tracked-call');
 const AI_USE_CASES = require('../constants/ai-use-cases');
-const logger = require('../lib/logger');
+const { aiControllerLogger: logger } = require('../lib/logger');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';

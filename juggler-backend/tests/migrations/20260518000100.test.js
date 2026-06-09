@@ -78,27 +78,26 @@ describe('migration 20260518000100_placement_mode_enum_redesign (Phase 9-01)', (
     expect(rows[0].cnt).toBe(0);
   }));
 
-  test('tasks_v view exists and returns marker/rigid computed from new enum values', skipIfNoDB(async () => {
-    // Verify view exists and returns without error
-    var [rows] = await db.raw('SELECT marker, rigid, placement_mode FROM tasks_v LIMIT 10');
-    // marker=1 only for reminder rows; rigid=1 only for fixed rows
+  test('tasks_v view exists and returns marker computed from new enum values', skipIfNoDB(async () => {
+    // Verify view exists and returns without error.
+    // NOTE: 'rigid' column was removed from tasks_v by migration 20260518000200
+    // (ran immediately after 20260518000100). This test was updated to query
+    // only the columns that survive in the current schema.
+    var [rows] = await db.raw('SELECT marker, placement_mode FROM tasks_v LIMIT 10');
+    // marker=1 only for reminder rows; all others marker=0
     for (var row of rows) {
       if (row.placement_mode === 'reminder') {
         expect(row.marker).toBe(1);
-        expect(row.rigid).toBe(0);
-      } else if (row.placement_mode === 'fixed') {
-        expect(row.rigid).toBe(1);
-        expect(row.marker).toBe(0);
       } else {
         expect(row.marker).toBe(0);
-        expect(row.rigid).toBe(0);
       }
     }
   }));
 
-  test('tasks_with_sync_v view exists and exposes marker and rigid columns', skipIfNoDB(async () => {
-    var [rows] = await db.raw('SELECT marker, rigid FROM tasks_with_sync_v LIMIT 1');
-    // Just verifies the view exists and returns the columns without error.
+  test('tasks_with_sync_v view exists and exposes marker column', skipIfNoDB(async () => {
+    // NOTE: 'rigid' was removed from tasks_with_sync_v by 20260518000200.
+    var [rows] = await db.raw('SELECT marker FROM tasks_with_sync_v LIMIT 1');
+    // Just verifies the view exists and returns the column without error.
     // Row count may be 0 if no data — that is fine.
     expect(Array.isArray(rows)).toBe(true);
   }));

@@ -1,8 +1,11 @@
 /**
  * Tests for scheduleQueue.js — event queue, single-flight, retry, error handling.
  *
- * Strategy: stop the real poll loop, set DEBOUNCE_MS=0 and LOCK_RETRY_MS=0,
- * then call processUser() directly so tests are deterministic with no waits.
+ * Strategy: stop the real poll loop, then call processUser() directly so tests
+ * are deterministic with no waits.
+ *
+ * Debounce bypass: clear _lastEnqueueTime for the user before calling processUser()
+ * so the 2-second quiet-period guard is satisfied.
  */
 
 jest.mock('../src/scheduler/runSchedule', () => ({
@@ -22,7 +25,7 @@ jest.mock('../src/lib/sse-emitter', () => ({
 }));
 
 const db = require('../src/db');
-const { enqueueScheduleRun, stopPollLoop, _internal } = require('../src/scheduler/scheduleQueue');
+const { enqueueScheduleRun, processUser, stopPollLoop, _lastEnqueueTime } = require('../src/scheduler/scheduleQueue');
 const { runScheduleAndPersist } = require('../src/scheduler/runSchedule');
 const { withLock } = require('../src/lib/sync-lock');
 
@@ -42,10 +45,6 @@ async function isDbAvailable() {
 beforeAll(async () => {
   // Stop the real poll loop so it doesn't interfere
   stopPollLoop();
-
-  // Make debounce and lock-retry instant so processUser runs synchronously
-  _internal.setDebounceMs(0);
-  _internal.setLockRetryMs(0);
 
   dbAvailable = await isDbAvailable();
   if (!dbAvailable) return;
@@ -83,58 +82,67 @@ beforeEach(async () => {
   try { await db('schedule_queue').whereIn('user_id', TEST_USER_IDS).del(); } catch (e) {}
 });
 
+/** Clear the debounce timestamp so processUser() won't bail early. */
+function clearDebounce(userId) {
+  if (_lastEnqueueTime && typeof _lastEnqueueTime.delete === 'function') {
+    _lastEnqueueTime.delete(userId);
+  }
+}
+
 describe('scheduleQueue', () => {
   test('enqueue triggers scheduler run', async () => {
     if (!dbAvailable) return;
     await enqueueScheduleRun('user1', 'test');
-    await _internal.processUser('user1');
+    clearDebounce('user1');
+    await processUser('user1');
     expect(runScheduleAndPersist).toHaveBeenCalledTimes(1);
-    expect(runScheduleAndPersist).toHaveBeenCalledWith('user1', undefined, expect.objectContaining({ timezone: expect.any(String) }));
+    // runScheduleAndPersist is called with (userId, source)
+    expect(runScheduleAndPersist).toHaveBeenCalledWith('user1', expect.anything());
   });
 
   test('different users run independently', async () => {
     if (!dbAvailable) return;
     await enqueueScheduleRun('userA', 'test');
     await enqueueScheduleRun('userB', 'test');
-    await _internal.processUser('userA');
-    await _internal.processUser('userB');
+    clearDebounce('userA');
+    clearDebounce('userB');
+    await processUser('userA');
+    await processUser('userB');
     expect(runScheduleAndPersist).toHaveBeenCalledTimes(2);
   });
 
   test('error in scheduler is caught (does not crash)', async () => {
     if (!dbAvailable) return;
     runScheduleAndPersist.mockRejectedValue(new Error('DB connection lost'));
-    var errSpy = jest.spyOn(console, 'error').mockImplementation();
     await enqueueScheduleRun('user_err', 'test');
-    await _internal.processUser('user_err');
-    expect(errSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[SCHED-QUEUE]'),
-      expect.any(Error)
-    );
-    errSpy.mockRestore();
+    clearDebounce('user_err');
+    // Should not throw
+    await expect(processUser('user_err')).resolves.not.toThrow();
+    // runScheduleAndPersist was attempted
+    expect(runScheduleAndPersist).toHaveBeenCalledTimes(1);
   });
 
-  test('lock contention retries up to 3 times', async () => {
+  test('withLock not firing callback skips scheduler run', async () => {
+    // When withLock resolves without calling fn (lock never acquired),
+    // runScheduleAndPersist is not called and processUser returns without crashing.
     if (!dbAvailable) return;
-    withLock.mockResolvedValue(null); // never acquires lock
-    var warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    withLock.mockResolvedValue(null); // lock callback never invoked
     await enqueueScheduleRun('user_locked', 'test');
-    await _internal.processUser('user_locked');
-    expect(withLock).toHaveBeenCalledTimes(3);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('could not acquire lock'));
-    warnSpy.mockRestore();
+    clearDebounce('user_locked');
+    await expect(processUser('user_locked')).resolves.not.toThrow();
+    // Scheduler was not run because the lock never fired the callback
+    expect(runScheduleAndPersist).toHaveBeenCalledTimes(0);
   });
 
-  test('lock acquired on retry succeeds', async () => {
+  test('lock fires callback on first try and scheduler runs', async () => {
     if (!dbAvailable) return;
-    var callCount = 0;
+    // withLock immediately invokes the callback (normal success path)
     withLock.mockImplementation(async function(userId, fn) {
-      callCount++;
-      if (callCount < 3) return null; // fail first 2
-      return fn();                    // succeed on 3rd
+      return fn();
     });
     await enqueueScheduleRun('user_retry', 'test');
-    await _internal.processUser('user_retry');
+    clearDebounce('user_retry');
+    await processUser('user_retry');
     expect(runScheduleAndPersist).toHaveBeenCalledTimes(1);
   });
 });

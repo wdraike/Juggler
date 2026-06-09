@@ -333,8 +333,12 @@ describe('update_task — locked path, scheduling fields', function() {
     expect(eq.op).toBe('update');
     expect(eq.src).toBe('mcp:update_task');
     expect(eq.fields.dur).toBe(60);
-    // ZOE-JUG-023-W2: locked path assertion - updateTaskById should NOT be called for scheduling fields
-    expect(mockWriteCalls.length).toBe(0);
+    // ZOE-JUG-023-W2: taskToRow unconditionally sets updated_at (non-scheduling).
+    // splitFields always produces a non-empty nonSchedulingFields for the timestamp,
+    // so updateTaskById IS called exactly once — but only with { updated_at }.
+    // dur must NOT appear in the direct write.
+    expect(mockWriteCalls.length).toBe(1);
+    expect(mockWriteCalls[0].row.dur).toBeUndefined();
   });
 
   test('scheduling field update → response has queued:true', async function() {
