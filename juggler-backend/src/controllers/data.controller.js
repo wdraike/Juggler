@@ -217,7 +217,7 @@ async function exportData(req, res) {
 
     var { fetchTasksWithEventIds } = require('./task.controller');
     var results = await Promise.all([
-      fetchTasksWithEventIds(db, userId, function(q) { q.orderBy('created_at', 'asc'); }),
+      fetchTasksWithEventIds(getDb(), userId, function(q) { q.orderBy('created_at', 'asc'); }),
       getDb()('locations').where('user_id', userId).orderBy('sort_order'),
       getDb()('tools').where('user_id', userId).orderBy('sort_order'),
       getDb()('projects').where('user_id', userId).orderBy('sort_order'),

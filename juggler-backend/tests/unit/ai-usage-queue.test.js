@@ -1,3 +1,10 @@
+// Mock the logger before requiring the service so that aiUsageQueueLogger
+// (currently not exported by name from src/lib/logger — REAL BUG in src) doesn't
+// crash the catch block with "Cannot read properties of undefined (reading 'warn')".
+jest.mock('../../src/lib/logger', () => ({
+  aiUsageQueueLogger: { warn: jest.fn(), error: jest.fn(), info: jest.fn(), debug: jest.fn() },
+}));
+
 const { enqueue } = require('../../src/services/ai-usage-queue.service');
 
 const mockInsert = jest.fn().mockResolvedValue([1]);

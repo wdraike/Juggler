@@ -92,19 +92,21 @@ describe('_allowUnfix opt-in unit tests', function() {
     });
 
     test('blocks placement_mode change on Apple calendar-synced task without _allowUnfix', () => {
-      var row = { placement_mode: 'fixed' };
+      // Use a non-'fixed' value: the guard deletes any value that isn't 'fixed'
+      // (it protects 'fixed', and blocks everything else on a cal-linked task).
+      var row = { placement_mode: 'anytime' };
       var existing = { gcal_event_id: null, msft_event_id: null, apple_event_id: 'apple_123' };
-      
+
       guardFixedCalendarWhen(row, existing, {});
       expect(row.placement_mode).toBeUndefined();
     });
 
     test('allows placement_mode change on Apple calendar-synced task with _allowUnfix=true', () => {
-      var row = { placement_mode: 'fixed' };
+      var row = { placement_mode: 'anytime' };
       var existing = { gcal_event_id: null, msft_event_id: null, apple_event_id: 'apple_123' };
-      
+
       guardFixedCalendarWhen(row, existing, { allowUnfix: true });
-      expect(row.placement_mode).toBe('fixed');
+      expect(row.placement_mode).toBe('anytime');
     });
   });
 

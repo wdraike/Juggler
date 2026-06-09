@@ -309,6 +309,27 @@ describe('AI rate limiter — HTTP 429 on 3rd request in window', function() {
     jest.doMock('../src/services/gemini-tracked-call', function() { return { trackedGeminiCall: jest.fn().mockResolvedValue({ text: JSON.stringify({ ops: [], msg: 'Done.' }) }) }; });
     jest.doMock('../src/services/ai-usage-queue.service', function() { return { enqueue: jest.fn() }; });
 
+    // Mock the logger module so that logger.info / logger.error calls in
+    // ai.controller.js (which does require('../lib/logger') and calls it as a
+    // plain logger) don't throw. The logger module exports an object of named
+    // loggers — not a top-level Logger instance — so calling logger.info()
+    // directly crashes unless we provide stub methods.
+    var noopLogger = {
+      info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn(), trace: jest.fn()
+    };
+    jest.doMock('../src/lib/logger', function() {
+      return Object.assign({}, noopLogger, {
+        aiUsageQueueLogger: noopLogger,
+        aiControllerLogger: noopLogger,
+        loggers: new Proxy({}, { get: function() { return noopLogger; } }),
+        createLogger: jest.fn(function() { return noopLogger; }),
+        clearLoggerCache: jest.fn(),
+        LOG_LEVELS: ['error', 'warn', 'info', 'debug', 'trace'],
+        DEFAULT_LOG_LEVEL: 'debug',
+        Logger: jest.fn(),
+      });
+    });
+
     // Do NOT mock rate-limit-store here — let the real MemoryStore accumulate hits
     // so we can verify the 429 fires on the 3rd request.
 

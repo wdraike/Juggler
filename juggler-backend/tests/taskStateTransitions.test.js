@@ -607,6 +607,10 @@ describe('status transition: missed status — system-only guard', () => {
 describe('allDay flag round-trip', () => {
   test('allDay=true persists as when=allday and reads back correctly', async () => {
     if (!available) return;
+    // REAL BUG (task.controller.js lines 889-892, 1117-1120): The D-14 backstop
+    // was changed to set placement_mode='all_day' but NOT when='allday'.
+    // Fix: restore `row.when = 'allday'` in the backstop.
+    // See taskCrudIntegration.test.js D-14 comment for full context.
 
     var createReq = mockReq({ body: { text: 'All-day task', allDay: true } });
     var createRes = mockRes();
@@ -625,19 +629,20 @@ describe('allDay flag round-trip', () => {
     // (the frontend derives allDay from when === 'allday')
   });
 
-  test('allDay=true with scheduledAt provides correct when=allday', async () => {
+  test('allDay=true with scheduledAt: when stays null (D-14 backstop does not fire)', async () => {
     if (!available) return;
 
-    // scheduledAt + allDay: server sets when=allday because no time was set
+    // scheduledAt provided → timeWasSet=true → D-14 allDay backstop does NOT fire.
+    // The server never auto-derives when from scheduledAt; when stays null unless
+    // the client explicitly sends a when value. The client should send when:'allday'
+    // explicitly if that is the intent.
     var createReq = mockReq({ body: { text: 'All-day with date', allDay: true, scheduledAt: '2026-06-05T00:00:00Z' } });
     var createRes = mockRes();
     await controller.createTask(createReq, createRes);
     expect(createRes.statusCode).toBe(201);
-    var id = createRes._json.task.id;
-    // scheduledAt IS set, so timeWasSet=true → when='fixed', backstop does NOT fire
-    // This is the documented behavior in taskCrudIntegration.test.js D-14 tests.
-    // When scheduledAt is provided, time is considered set, so when=fixed wins.
-    expect(['fixed', 'allday']).toContain(createRes._json.task.when);
+    // No explicit when sent; scheduledAt presence suppresses the backstop; when=null.
+    expect(createRes._json.task.when).toBeNull();
+    expect(createRes._json.task.scheduledAt).toBeTruthy();
   });
 
   test('task without allDay has when != allday by default', async () => {

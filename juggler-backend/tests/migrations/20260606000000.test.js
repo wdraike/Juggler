@@ -33,9 +33,12 @@ function skipIfNoDB(fn) {
 }
 
 async function cleanup() {
-  // Clean up any test data
+  // Clean up any test data (order matters — FK: instances before masters before users)
   await db('task_instances').where('user_id', 'test-user-missed').del();
+  await db('task_masters').where('user_id', 'test-user-missed').del();
   await db('users').where('id', 'test-user-missed').del();
+  // Ensure the migration is left in its applied (up) state for subsequent suites.
+  await migration.up(db).catch(() => {});
 }
 
 beforeAll(async () => {
@@ -76,13 +79,14 @@ describe('migration 20260606000000_add_missed_status_to_task_instances', () => {
       updated_at: db.fn.now()
     });
 
-    // Insert a task_instance with 'missed' status - this should succeed
+    // Insert a task_instance with 'missed' status - this should succeed.
+    // date_pinned is a boolean flag (tinyint 1), NOT a date integer.
     await db('task_instances').insert({
       id: 'test-instance-missed',
       master_id: 'test-master-missed',
       user_id: 'test-user-missed',
       status: 'missed',
-      date_pinned: 20260606,
+      date_pinned: 1,
       scheduled_at: db.fn.now(),
       created_at: db.fn.now(),
       updated_at: db.fn.now()
@@ -95,6 +99,11 @@ describe('migration 20260606000000_add_missed_status_to_task_instances', () => {
   }));
 
   test('down() removes missed status from CHECK constraint', skipIfNoDB(async () => {
+    // MySQL enforces CHECK constraints against existing rows when the constraint is
+    // re-added. We must delete any 'missed' rows before calling down() so that the
+    // restored constraint (which excludes 'missed') can be applied cleanly.
+    await db('task_instances').where('user_id', 'test-user-missed').del();
+
     // Run the down migration
     await migration.down(db);
 
@@ -104,7 +113,7 @@ describe('migration 20260606000000_add_missed_status_to_task_instances', () => {
       master_id: 'test-master-missed',
       user_id: 'test-user-missed',
       status: 'missed',
-      date_pinned: 20260606,
+      date_pinned: 1,
       scheduled_at: db.fn.now(),
       created_at: db.fn.now(),
       updated_at: db.fn.now()

@@ -1,5 +1,35 @@
 const crypto = require('crypto');
 
+// cal-sync-helpers.js destructures libCalAdapterLogger from src/lib/logger.
+// That named export is missing from the logger module (REAL BUG — see src bug report).
+// Mock the logger here so the retry tests can exercise the rate-limit logic.
+jest.mock('../src/lib/logger', () => {
+  const mockLogger = {
+    info: jest.fn(),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn()
+  };
+  return {
+    createLogger: jest.fn(() => mockLogger),
+    libCalAdapterLogger: mockLogger,
+    // other named exports consumed transitively
+    schedulerLogger: mockLogger,
+    schedulerRunLogger: mockLogger,
+    schedulerUnifiedLogger: mockLogger,
+    taskControllerLogger: mockLogger,
+    calSyncControllerLogger: mockLogger,
+    aiControllerLogger: mockLogger,
+    weatherControllerLogger: mockLogger,
+    serverLogger: mockLogger,
+    libGcalLogger: mockLogger,
+    libMsftLogger: mockLogger,
+    libAppleLogger: mockLogger,
+    libDbLogger: mockLogger,
+    cronCalHistoryLogger: mockLogger
+  };
+});
+
 const { jugglerDateToISO, isoToJugglerDate, taskHash, withGCalRateLimit, callWithRateLimit } = require('../src/controllers/cal-sync-helpers');
 
 // GCal event hash (from gcal.adapter.js) — inline for testing

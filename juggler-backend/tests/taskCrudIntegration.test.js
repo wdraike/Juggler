@@ -106,7 +106,10 @@ describe('createTask', () => {
     await controller.createTask(req, res);
     expect(res.statusCode).toBe(201);
     expect(res._json.task.text).toBe('Buy milk');
-    expect(res._json.task.datePinned).toBe(true);
+    // datePinned was removed in feat(when-mode): placement_mode='fixed' is the sole
+    // immovability signal. Creating with date+time sets scheduledAt; pinning now
+    // requires the client to explicitly send placementMode:'fixed'.
+    expect(res._json.task.scheduledAt).toBeTruthy();
     // enqueueScheduleRun fires inside a 2-second setTimeout in the controller wrapper;
     // asserting it here would be a race. DB state is the reliable assertion.
   });
@@ -137,32 +140,51 @@ describe('createTask', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  test('auto-pins when date is provided', async () => {
+  test('auto-schedules when date is provided (datePinned removed)', async () => {
     if (!available) return;
+    // datePinned was removed; date+time sets scheduledAt; placement_mode='fixed'
+    // requires an explicit client signal.
     var req = mockReq({ body: { text: 'Pinned', date: '4/15' } });
     var res = mockRes();
     await controller.createTask(req, res);
-    expect(res._json.task.datePinned).toBe(true);
+    expect(res.statusCode).toBe(201);
+    expect(res._json.task.scheduledAt).toBeTruthy();
   });
 
-  test('sets when=fixed when time is provided', async () => {
+  test('sets scheduledAt when time is provided (server no longer auto-sets when=fixed)', async () => {
     if (!available) return;
+    // After feat(when-mode): server does NOT auto-derive when='fixed' from time.
+    // The client must explicitly send when:'fixed' or placementMode:'fixed'.
+    // Server just sets scheduledAt from date+time.
     var req = mockReq({ body: { text: 'Fixed time', time: '2:00 PM', date: '4/15' } });
     var res = mockRes();
     await controller.createTask(req, res);
-    expect(res._json.task.when).toBe('fixed');
+    expect(res.statusCode).toBe(201);
+    expect(res._json.task.scheduledAt).toBeTruthy();
+    // when is null because client did not send it; placementMode is the DB default (anytime)
+    expect(res._json.task.when).toBeNull();
   });
 
-  test('sets placementMode=fixed when time is provided (no when in body)', async () => {
+  test('sets placementMode=fixed when client sends placementMode:fixed with date+time', async () => {
     if (!available) return;
-    var req = mockReq({ body: { text: 'Fixed time no when', time: '3:00 PM', date: '4/15' } });
+    // After feat(when-mode): server does NOT auto-set placementMode='fixed' from time.
+    // The client must explicitly send placementMode:'fixed'.
+    var req = mockReq({ body: { text: 'Fixed time explicit', time: '3:00 PM', date: '4/15', placementMode: 'fixed' } });
     var res = mockRes();
     await controller.createTask(req, res);
-    expect(res._json.task.when).toBe('fixed');
+    expect(res.statusCode).toBe(201);
+    expect(res._json.task.scheduledAt).toBeTruthy();
     expect(res._json.task.placementMode).toBe('fixed');
   });
 
   // D-14: all-day backstop via allDay flag
+  // REAL BUG (task.controller.js line 891-892): The D-14 backstop was changed from
+  //   `if (!timeWasSet && allDay && row.when===undefined) row.when='allday'`
+  // to
+  //   `if (!timeWasSet && allDay && row.placement_mode===undefined) row.placement_mode='all_day'`
+  // This broke when='allday' — the backstop now sets placement_mode but NOT when.
+  // Fix required in src/controllers/task.controller.js lines 889-892 (createTask)
+  // and lines 1117-1120 (updateTask): restore `row.when = 'allday'` alongside placement_mode.
   test('D-14: sets when=allday when allDay=true and no time or when field provided', async () => {
     if (!available) return;
     var req = mockReq({ body: { text: 'All Day Task', allDay: true } });
@@ -182,15 +204,20 @@ describe('createTask', () => {
     expect(res._json.task.when).toBe('allday');
   });
 
-  // D-14: allDay=true + time provided — time takes precedence, backstop does not fire
-  test('D-14: allDay=true with time present sets when=fixed (time wins)', async () => {
+  // D-14: allDay=true + time provided — time takes precedence, backstop does not fire.
+  // After feat(when-mode), the server no longer auto-sets when='fixed' from time —
+  // the client must send it explicitly. This test reflects the correct current contract:
+  // when time wins over allDay, the result is when=null (client did not send when).
+  test('D-14: allDay=true with time present — time wins, when stays null (client must send when)', async () => {
     if (!available) return;
     var req = mockReq({ body: { text: 'Ambiguous Task', allDay: true, time: '2:00 PM', date: '4/15' } });
     var res = mockRes();
     await controller.createTask(req, res);
     expect(res.statusCode).toBe(201);
-    // time was set → timeWasSet=true → when='fixed', backstop should NOT override
-    expect(res._json.task.when).toBe('fixed');
+    // timeWasSet=true → D-14 backstop does NOT fire → when is whatever client sent (null)
+    // The old assertion `when='fixed'` was stale: server never auto-sets when from time.
+    expect(res._json.task.when).toBeNull();
+    expect(res._json.task.scheduledAt).toBeTruthy();
   });
 });
 
@@ -280,6 +307,8 @@ describe('updateTask', () => {
   });
 
   // D-14: all-day backstop in updateTask
+  // REAL BUG: Same backstop bug as createTask — updateTask sets placement_mode='all_day'
+  // but NOT when='allday'. See createTask D-14 comment for fix location.
   test('D-14: sets when=allday when allDay=true and no time or when field provided', async () => {
     if (!available) return;
     var req1 = mockReq({ body: { text: 'Update All Day Task' } });
@@ -347,24 +376,30 @@ describe('updateTask', () => {
     expect(res._json.code).toBe('CAL_SYNCED_READONLY');
   });
 
-  test('ingested cal-synced task silently keeps date_pinned on fast path (C-1)', async () => {
+  test('ingested cal-synced task blocks placementMode change (replaces stale date_pinned C-1)', async () => {
     if (!available) return;
+    // date_pinned was removed in feat(when-mode); placement_mode='fixed' is the
+    // sole immovability signal. Cal-ingested tasks have placement_mode set by the
+    // cal adapter. checkCalSyncEditGuard blocks all field changes except status/notes
+    // on origin!='juggler' tasks — including placementMode changes.
     var id = await seedCalSyncTask(
-      { text: 'Ingested pinned', date: '4/10', time: '9:00 AM' },
+      { text: 'Ingested pinned', date: '4/10', time: '9:00 AM', placementMode: 'fixed' },
       { provider: 'gcal', provider_event_id: 'evt-pinned', origin: 'gcal', status: 'active' }
     );
-    // Pre-condition: date_pinned is set by createTask because date+time were provided
-    var before = await db('tasks_v').where('id', id).first();
-    expect(before.date_pinned).toBe(1);
+    // Pre-condition: placement_mode='fixed' was set on create
+    var before = await db('task_masters').where('id', id).first();
+    expect(before.placement_mode).toBe('fixed');
 
-    // Fast path: send datePinned: false — guard should silently strip it
-    var req = mockReq({ params: { id: id }, body: { datePinned: false } });
+    // Attempt to change placementMode on an ingested task → blocked (403 CAL_SYNCED_READONLY)
+    var req = mockReq({ params: { id: id }, body: { placementMode: 'anytime' } });
     var res = mockRes();
     await controller.updateTask(req, res);
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(403);
+    expect(res._json.code).toBe('CAL_SYNCED_READONLY');
 
-    var after = await db('tasks_v').where('id', id).first();
-    expect(after.date_pinned).toBe(1);
+    // placement_mode must remain 'fixed'
+    var after = await db('task_masters').where('id', id).first();
+    expect(after.placement_mode).toBe('fixed');
   });
 
   test('ingested cal-synced task blocks when and allows notes', async () => {
@@ -467,21 +502,30 @@ describe('updateTask', () => {
     expect(res.statusCode).toBe(403);
   });
 
-  test('ingested task with _allowUnfix can clear date_pinned', async () => {
+  test('ingested task with _allowUnfix can clear placementMode=fixed (replaces stale date_pinned)', async () => {
     if (!available) return;
+    // REAL BUG (task.controller.js): After feat(when-mode) removed datePinned, the
+    // _allowUnfix bypass was NOT updated to allow placementMode changes through
+    // checkCalSyncEditGuard. The guard's allowed list is ['status','notes','_allowUnfix'];
+    // 'placementMode' is not in it. So { placementMode:'anytime', _allowUnfix:true }
+    // is still blocked with 403 CAL_SYNCED_READONLY.
+    // Fix required: add 'placementMode' to the allowed list in checkCalSyncEditGuard
+    // when _allowUnfix is present, OR check _allowUnfix before the guard fires.
     var id = await seedCalSyncTask(
-      { text: 'AllowUnfix', date: '4/10', time: '9:00 AM' },
+      { text: 'AllowUnfix', date: '4/10', time: '9:00 AM', placementMode: 'fixed' },
       { provider: 'apple', provider_event_id: 'evt-unfix', origin: 'apple', status: 'active' }
     );
-    var before = await db('tasks_v').where('id', id).first();
-    expect(before.date_pinned).toBe(1);
+    // Pre-condition: task has placement_mode='fixed'
+    var before = await db('task_masters').where('id', id).first();
+    expect(before.placement_mode).toBe('fixed');
 
-    var req = mockReq({ params: { id: id }, body: { datePinned: false, _allowUnfix: true } });
+    // _allowUnfix=true should permit clearing placement_mode on a cal-linked task
+    var req = mockReq({ params: { id: id }, body: { placementMode: 'anytime', _allowUnfix: true } });
     var res = mockRes();
     await controller.updateTask(req, res);
     expect(res.statusCode).toBe(200);
-    var after = await db('tasks_v').where('id', id).first();
-    expect(after.date_pinned).toBe(0);
+    var after = await db('task_masters').where('id', id).first();
+    expect(after.placement_mode).toBe('anytime');
   });
 
   test('wrong-user cannot edit cal-synced task', async () => {
