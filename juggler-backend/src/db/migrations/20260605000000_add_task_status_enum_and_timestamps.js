@@ -96,6 +96,32 @@ exports.up = async function(knex) {
       }
     }
     
+    // Step 5b: Backfill terminal-status rows that would violate the constraint.
+    // Mirrors 20260527213906 (task_instances): a terminal status with NULL
+    // scheduled_at is invalid data. Without this backfill the ADD CONSTRAINT below
+    // fails on any DB that already holds terminal task_masters rows (fresh test/CI
+    // DBs included), aborting the whole migrate:latest chain.
+    const tmFixed = await trx.raw(`
+      UPDATE task_masters
+      SET scheduled_at = completed_at
+      WHERE status IN ('done','skip','cancel','missed')
+        AND scheduled_at IS NULL
+        AND completed_at IS NOT NULL
+    `);
+    const tmFixedCount = tmFixed[0] ? (tmFixed[0].affectedRows || tmFixed[0].changedRows || 0) : 0;
+    // Last resort: any remaining terminal row with no completed_at to borrow — clear
+    // status to non-terminal (the scheduler will re-place if needed). Never fabricate
+    // a placement time.
+    const tmCleared = await trx.raw(`
+      UPDATE task_masters
+      SET status = ''
+      WHERE status IN ('done','skip','cancel','missed')
+        AND scheduled_at IS NULL
+    `);
+    const tmClearedCount = tmCleared[0] ? (tmCleared[0].affectedRows || tmCleared[0].changedRows || 0) : 0;
+    if (tmFixedCount > 0) console.log(`[MIGRATION] task_masters: backfilled scheduled_at from completed_at (${tmFixedCount} rows)`);
+    if (tmClearedCount > 0) console.log(`[MIGRATION] task_masters: cleared invalid terminal status (${tmClearedCount} rows)`);
+
     // Step 6: Add CHECK constraint for scheduled_at requirement on terminal statuses
     try {
       await trx.raw(`
