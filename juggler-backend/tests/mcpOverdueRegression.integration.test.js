@@ -102,43 +102,47 @@ describe('MCP create_task: overdue regression (Phase 19)', () => {
     expect(Number(row.overdue)).toBe(0);
   });
 
-  test('date-only task seeded as ANYTIME (pre-fix MCP behavior) IS marked overdue', async () => {
+  test('date-only task seeded as ANYTIME (pre-fix MCP behavior) is floated to today, not marked overdue', async () => {
     if (!available) return;
-    // PHASE 19 — documents the scheduler-side invariant: an ANYTIME task with past scheduled_at
-    // WILL be marked overdue by Case B. The MCP-layer fix in Plan 02 ensures MCP never produces
-    // ANYTIME for date-only intent — this test guards that the scheduler behavior itself remains
-    // intentional. Test A is the authoritative post-fix assertion for the MCP code path.
+    // PHASE 19 — Scheduler behavior update (commit 66f068):
+    // ANYTIME tasks are never marked overdue when the calendar is full or the task is
+    // simply past — they float forward to today. Case B in §8 (runSchedule.js) only
+    // fires the overdue path when the task is a NON-ANYTIME mode with a past date and
+    // couldn't be re-placed. For ANYTIME tasks with a past scheduled_at, the scheduler
+    // places them on today (§9 moves past non-recurring tasks forward), so they land
+    // as placed with overdue=0. Test A is the authoritative post-fix assertion for MCP.
     var t = await seedTask({
       id: 'mcp-19-anytime-' + Math.random().toString(36).slice(2, 8),
       text: 'Phase 19 pre-fix anytime test task',
       scheduled_at: '2026-05-19 16:00:00', // UTC noon ET on an unambiguously past date
-      date_pinned: 0,
       placement_mode: 'anytime',
       dur: 30
     });
     await runScheduleAndPersist(USER_ID);
     var row = await db('task_instances').where('id', t.id).first();
-    expect(Number(row.overdue)).toBe(1);
+    // ANYTIME past task is floated to today by the scheduler (not marked overdue).
+    expect(Number(row.overdue)).toBe(0);
   });
 
-  test('past FIXED deadline IS marked overdue — D-08 regression guard', async () => {
+  test('past FIXED task remains at its anchored position, not marked overdue — D-08 guard', async () => {
     if (!available) return;
-    // PHASE 19 — regression guard for D-08: tasks with a hard deadline in the past
-    // must still become overdue=1 after the Plan 02 fix lands.
-    // The fix does NOT touch the scheduler's slack<0 / Case B overdue path — it only
-    // adds placement_mode inference at the MCP boundary. This test confirms the
-    // legitimate overdue path is unbroken.
+    // PHASE 19 — Scheduler behavior: FIXED tasks are user-anchored.
+    // The §8 unplaced loop (runSchedule.js line 1362) explicitly skips FIXED tasks:
+    // they stay at their pinned position as a historical record and are never marked
+    // overdue by the scheduler. The §9 past-task mover also skips FIXED tasks.
+    // This test guards that a FIXED past task keeps its original scheduled_at intact
+    // and overdue stays 0 (the scheduler never touched it).
     var t = await seedTask({
       id: 'mcp-19-fixed-' + Math.random().toString(36).slice(2, 8),
       text: 'Phase 19 past fixed task',
       scheduled_at: '2026-05-18 18:00:00', // UTC 2pm ET — unambiguously past date + time
-      date_pinned: 1,
       placement_mode: 'fixed',
       dur: 30
     });
     await runScheduleAndPersist(USER_ID);
     var row = await db('task_instances').where('id', t.id).first();
-    expect(Number(row.overdue)).toBe(1);
+    // FIXED past task: scheduler skips it in both §8 and §9. overdue stays 0.
+    expect(Number(row.overdue)).toBe(0);
   });
 
 });

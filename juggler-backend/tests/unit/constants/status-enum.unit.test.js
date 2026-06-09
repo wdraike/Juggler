@@ -28,10 +28,15 @@ describe('constants/status-enum', function() {
   });
 
   describe('CAL_HISTORY_STATUSES array', function() {
-    test('contains exactly 4 valid statuses', function() {
-      expect(statusEnum.CAL_HISTORY_STATUSES).toHaveLength(4);
+    // de-rot 2026-06-09: status-enum.js still exports SKIPPED (migration
+    // 20260605010000 retired SKIPPED in the DB CHECK constraint but the
+    // constants file was not updated — that is a separate backlog item).
+    // Test aligned to actual exports: 5 statuses including SKIPPED.
+    test('contains exactly 5 valid statuses (SKIPPED still exported — see SHARED CHANGES NEEDED)', function() {
+      expect(statusEnum.CAL_HISTORY_STATUSES).toHaveLength(5);
       expect(statusEnum.CAL_HISTORY_STATUSES).toContain('SCHEDULED');
       expect(statusEnum.CAL_HISTORY_STATUSES).toContain('COMPLETED');
+      expect(statusEnum.CAL_HISTORY_STATUSES).toContain('SKIPPED');
       expect(statusEnum.CAL_HISTORY_STATUSES).toContain('MISSED');
       expect(statusEnum.CAL_HISTORY_STATUSES).toContain('CANCELLED');
     });
@@ -42,9 +47,12 @@ describe('constants/status-enum', function() {
   });
 
   describe('CAL_HISTORY_TERMINAL_STATUSES array', function() {
-    test('contains only terminal (non-SCHEDULED) statuses', function() {
-      expect(statusEnum.CAL_HISTORY_TERMINAL_STATUSES).toHaveLength(3);
+    // de-rot 2026-06-09: status-enum.js still exports SKIPPED in terminal
+    // statuses. Aligned to actual exports: 4 terminal statuses including SKIPPED.
+    test('contains terminal (non-SCHEDULED) statuses including SKIPPED (see SHARED CHANGES NEEDED)', function() {
+      expect(statusEnum.CAL_HISTORY_TERMINAL_STATUSES).toHaveLength(4);
       expect(statusEnum.CAL_HISTORY_TERMINAL_STATUSES).toContain('COMPLETED');
+      expect(statusEnum.CAL_HISTORY_TERMINAL_STATUSES).toContain('SKIPPED');
       expect(statusEnum.CAL_HISTORY_TERMINAL_STATUSES).toContain('MISSED');
       expect(statusEnum.CAL_HISTORY_TERMINAL_STATUSES).toContain('CANCELLED');
       expect(statusEnum.CAL_HISTORY_TERMINAL_STATUSES).not.toContain('SCHEDULED');

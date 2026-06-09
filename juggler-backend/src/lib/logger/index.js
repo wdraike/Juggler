@@ -421,4 +421,10 @@ module.exports = {
   libAppleLogger: loggers.libApple,
   libDbLogger: loggers.libDb,
   cronCalHistoryLogger: loggers.cronCalHistory,
+  // Previously missing top-level exports — consumers destructured these and got
+  // undefined → `X.warn/error is not a function` crashes (cal-sync retry path,
+  // data export, ai-usage-queue). Surfaced by the test de-rot (clusters W5/W7/W8).
+  libCalAdapterLogger: loggers.libCalAdapter,
+  dataControllerLogger: loggers.dataController,
+  aiUsageQueueLogger: loggers.aiUsageQueue,
 };

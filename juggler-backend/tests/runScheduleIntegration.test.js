@@ -162,9 +162,9 @@ describe('runScheduleAndPersist: immutable tasks', () => {
   test('marker tasks are not moved', async () => {
     if (!available) return;
     // Use a far-future date so the marker is never in the scheduling window.
-    // `marker` column was dropped in migration 20260501000300; use placement_mode.
+    // `marker` column was dropped; placement_mode='reminder' is the current equivalent.
     var markerTime = '2026-12-01 20:00:00';
-    await seedTask({ id: 'marker-t', text: 'Reminder', placement_mode: 'marker', scheduled_at: markerTime, dur: 0 });
+    await seedTask({ id: 'marker-t', text: 'Reminder', placement_mode: 'reminder', scheduled_at: markerTime, dur: 0 });
     await runScheduleAndPersist(USER_ID);
     var row = await db('tasks_v').where('id', 'marker-t').first();
     expect(row.scheduled_at).toBe(markerTime);
@@ -178,10 +178,13 @@ describe('runScheduleAndPersist: immutable tasks', () => {
     expect(row.scheduled_at).toBeNull(); // scheduler never sets this on templates
   });
 
-  test('date-pinned tasks keep their date', async () => {
+  test('fixed-mode tasks keep their scheduled_at', async () => {
+    // `date_pinned` column was dropped in migration 20260526000000.
+    // The current equivalent is placement_mode='fixed', which prevents the scheduler
+    // from overwriting scheduled_at.
     if (!available) return;
     var pinnedTime = '2026-04-15 14:00:00';
-    await seedTask({ id: 'pinned-t', text: 'Pinned', date_pinned: 1, scheduled_at: pinnedTime, dur: 30 });
+    await seedTask({ id: 'pinned-t', text: 'Pinned', placement_mode: 'fixed', scheduled_at: pinnedTime, dur: 30 });
     await runScheduleAndPersist(USER_ID);
     var row = await db('tasks_v').where('id', 'pinned-t').first();
     expect(row.scheduled_at).toBe(pinnedTime);
@@ -365,23 +368,26 @@ describe('runScheduleAndPersist: error handling', () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe('runScheduleAndPersist: scheduled_at validation', () => {
-  test('throws error when pending recurring instance is missing scheduled_at', async () => {
+  test('pending recurring instance without scheduled_at does not throw (scheduler assigns it)', async () => {
+    // validateScheduledAt() explicitly skips recurring_instance validation:
+    // "Throwing here blocks the scheduler from ever running on new instances
+    //  (chicken-and-egg). Post-run validation is the right place."
+    // Instances created without scheduled_at are assigned one on first placement.
     if (!available) return;
-    
+
     // Create a recurring template first
     await seedTemplate({ id: 'tmpl-test', text: 'Test template', dur: 30 });
-    
+
     // Manually insert a recurring instance without scheduled_at (bypassing normal flow)
     await db('task_instances').insert({
       id: 'inst-no-sched', master_id: 'tmpl-test', user_id: USER_ID,
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
       status: '', dur: 30, created_at: db.fn.now(), updated_at: db.fn.now()
     });
-    
-    // Should throw validation error for recurring instance without scheduled_at
-    await expect(runScheduleAndPersist(USER_ID))
-      .rejects
-      .toThrow(/missing required scheduled_at/);
+
+    // Should NOT throw — the scheduler assigns scheduled_at during placement
+    var result = await runScheduleAndPersist(USER_ID);
+    expect(result).toHaveProperty('updated');
   });
 
   test('allows regular tasks without scheduled_at (new tasks)', async () => {

@@ -175,7 +175,7 @@ async function sync(req, res) {
         event_id: opts.eventId || null,
         old_values: opts.oldValues ? JSON.stringify(opts.oldValues) : null,
         new_values: opts.newValues ? JSON.stringify(opts.newValues) : null,
-        detail: opts.detail || null,
+        detail: opts.detail ? String(opts.detail).substring(0, 500) : null,
         error_detail: opts.errorDetail ? JSON.stringify(opts.errorDetail) : null,
         calendar_name: opts.calendarName || null,
         trigger_type: triggerType
@@ -340,7 +340,7 @@ async function sync(req, res) {
       .select();
 
     var { fetchTasksWithEventIds } = require('./task.controller');
-    var allTaskRows = await fetchTasksWithEventIds(db, userId, function(q) {
+    var allTaskRows = await fetchTasksWithEventIds(getDb(), userId, function(q) {
       q.whereNotNull('scheduled_at')
         .where(function() { this.whereNull('unscheduled').orWhere('unscheduled', 0); });
     });
@@ -2436,7 +2436,7 @@ async function audit(req, res) {
 
     // Load Strive tasks in window
     var { fetchTasksWithEventIds } = require('./task.controller');
-    var taskRows = await fetchTasksWithEventIds(db, userId, function(q) {
+    var taskRows = await fetchTasksWithEventIds(getDb(), userId, function(q) {
       q.whereNotNull('scheduled_at')
         .where('scheduled_at', '>=', now).where('scheduled_at', '<=', end)
         .whereNot('status', 'done').whereNot('status', 'cancel').whereNot('status', 'skip')

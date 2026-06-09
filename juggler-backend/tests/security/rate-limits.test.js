@@ -24,11 +24,16 @@ describe('Rate limits — targeted attack surfaces', () => {
     expect(limit).toBe(300);
   });
 
-  it('/api/health has a rate limit applied (300/min)', async () => {
+  it('/api/health is auth-gated (unauthenticated requests get 401 before rate-limit runs)', async () => {
+    // app.js mounts authenticateJWT before healthLimiter on /api/health (defense-in-depth).
+    // Unauthenticated probes get a 401 without rate-limit headers — the limiter is only
+    // reached by authenticated callers. This is intentional: the limiter protects
+    // authenticated callers from hammering the detailed health endpoint.
     const res = await request(app).get('/api/health');
+    expect(res.status).toBe(401);
+    // No rate-limit headers on the rejected response (limiter not yet reached)
     const limit = getRateLimitMax(res.headers);
-    expect(limit).not.toBeNull();
-    expect(limit).toBe(300);
+    expect(limit).toBeNull();
   });
 
   it('/api/billing-webhooks has tighter limit than general /api (120 vs 1000)', async () => {

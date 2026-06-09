@@ -9,6 +9,20 @@ jest.mock('../src/db', () => {
   return mock;
 });
 
+// Mock @raike/lib-logger so we can intercept logger.warn() calls in unit tests.
+// The controller calls createLogger('task.controller') at module load; this factory
+// always returns the same shared mock object so we can spy on it per-test.
+jest.mock('@raike/lib-logger', () => {
+  var sharedMock = {
+    info: jest.fn(), warn: jest.fn(), error: jest.fn(),
+    debug: jest.fn(), trace: jest.fn()
+  };
+  return {
+    createLogger: function() { return sharedMock; },
+    _sharedMock: sharedMock
+  };
+});
+
 const { rowToTask, taskToRow, buildSourceMap, TEMPLATE_FIELDS, validateTaskInput, guardFixedCalendarWhen, safeParseJSON, updateTask } = require('../src/controllers/task.controller');
 const TZ = 'America/New_York';
 
@@ -158,10 +172,12 @@ describe('rowToTask: template field inheritance', () => {
 
   test('orphaned instance (missing source) warns but does not crash', () => {
     var inst = makeInstance('missing_tmpl', { id: 'i1' });
-    var warn = jest.spyOn(console, 'warn').mockImplementation();
+    // @raike/lib-logger is mocked (see top of file). All createLogger() calls return
+    // the same sharedMock. Clear it, call rowToTask, then assert warn was called.
+    var libLogger = require('@raike/lib-logger');
+    libLogger._sharedMock.warn.mockClear();
     var task = rowToTask(inst, TZ, {});
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Orphaned instance'));
-    warn.mockRestore();
+    expect(libLogger._sharedMock.warn).toHaveBeenCalledWith(expect.stringContaining('Orphaned instance'));
   });
 });
 

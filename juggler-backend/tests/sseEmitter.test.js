@@ -183,16 +183,34 @@ describe('sseEmitter.emit — local fallback path', function() {
       };
     });
 
+    // sse-emitter uses @raike/lib-logger (Winston). Winston routes warn-level output
+    // through console._stdout.write or _consoleLog depending on Jest TTY mode,
+    // making console-level spies unreliable across suite runs. Mock the logger
+    // module directly so we can inspect calls regardless of Winston internals.
+    var mockWarn = jest.fn();
+    jest.doMock('@raike/lib-logger', function() {
+      return {
+        createLogger: function() {
+          return { info: jest.fn(), warn: mockWarn, error: jest.fn(), debug: jest.fn() };
+        },
+        logger: { info: jest.fn(), warn: mockWarn, error: jest.fn(), debug: jest.fn() },
+        transports: {},
+        format: {}
+      };
+    });
+
     var sseEmitter2 = require('../src/lib/sse-emitter');
     var fakeRes2 = { write: jest.fn(), on: jest.fn() };
     sseEmitter2.addClient('user789', fakeRes2);
 
-    var warnCountBefore = warnSpy.mock.calls.length;
     sseEmitter2.emit('user789', 'tasks:changed', {});
 
     return new Promise(function(resolve) {
       setTimeout(function() {
-        expect(warnSpy.mock.calls.length).toBeGreaterThan(warnCountBefore);
+        // Verify that logger.warn was called with the publish-failure message
+        expect(mockWarn).toHaveBeenCalled();
+        var warnMessages = mockWarn.mock.calls.map(function(c) { return c[0]; }).join(' ');
+        expect(warnMessages).toContain('publish failed');
         resolve();
       }, 150);
     });

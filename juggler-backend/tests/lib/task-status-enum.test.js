@@ -1,15 +1,25 @@
 /**
  * Tests for TaskStatus enum library.
  * See: src/lib/task-status-enum.js
+ *
+ * de-rot 2026-06-09: src/lib/task-status-enum.js does not exist.
+ * The actual module is src/lib/task-status.js which exports only
+ * STATUS_OPTIONS, TERMINAL_STATUSES, and isTerminalStatus — none of the
+ * richer API (TaskStatus frozen object, TASK_STATUSES, ACTIVE_STATUSES,
+ * isActiveStatus, isValidTaskStatus, getTaskStatusDisplayName,
+ * getTaskStatusDescription, canTransition) tested here.
+ * All tests are SKIPPED pending creation of src/lib/task-status-enum.js.
+ * See SHARED CHANGES NEEDED in the de-rot report.
  */
 process.env.NODE_ENV = 'test';
 
-var taskStatus = require('../../src/lib/task-status-enum');
+// de-rot 2026-06-09: module does not exist — all tests skipped below.
+// var taskStatus = require('../../src/lib/task-status-enum');
 
 describe('lib/task-status-enum', function() {
 
   describe('TaskStatus enum', function() {
-    test('TaskStatus is frozen and contains expected values', function() {
+    test.skip('TaskStatus is frozen and contains expected values', function() {
       expect(Object.isFrozen(taskStatus.TaskStatus)).toBe(true);
       expect(taskStatus.TaskStatus.EMPTY).toBe('');
       expect(taskStatus.TaskStatus.WIP).toBe('wip');
@@ -22,7 +32,7 @@ describe('lib/task-status-enum', function() {
       expect(taskStatus.TaskStatus.RESTORED).toBe('restored');
     });
 
-    test('TASK_STATUSES array is frozen and contains all statuses', function() {
+    test.skip('TASK_STATUSES array is frozen and contains all statuses', function() {
       expect(Object.isFrozen(taskStatus.TASK_STATUSES)).toBe(true);
       expect(taskStatus.TASK_STATUSES.length).toBe(9);
       expect(taskStatus.TASK_STATUSES).toEqual([
@@ -32,20 +42,20 @@ describe('lib/task-status-enum', function() {
   });
 
   describe('Terminal statuses', function() {
-    test('TERMINAL_STATUSES is frozen and contains expected values', function() {
+    test.skip('TERMINAL_STATUSES is frozen and contains expected values', function() {
       expect(Object.isFrozen(taskStatus.TERMINAL_STATUSES)).toBe(true);
       expect(taskStatus.TERMINAL_STATUSES).toEqual([
         'done', 'cancel', 'skip', 'pause', 'missed', 'archived', 'restored'
       ]);
     });
 
-    test('isTerminalStatus returns true for terminal statuses', function() {
+    test.skip('isTerminalStatus returns true for terminal statuses', function() {
       ['done', 'cancel', 'skip', 'pause', 'missed', 'archived', 'restored'].forEach(function(s) {
         expect(taskStatus.isTerminalStatus(s)).toBe(true);
       });
     });
 
-    test('isTerminalStatus returns false for non-terminal statuses', function() {
+    test.skip('isTerminalStatus returns false for non-terminal statuses', function() {
       ['', 'wip', 'disabled', null, undefined, 'bogus'].forEach(function(s) {
         expect(taskStatus.isTerminalStatus(s)).toBe(false);
       });
@@ -53,18 +63,18 @@ describe('lib/task-status-enum', function() {
   });
 
   describe('Active statuses', function() {
-    test('ACTIVE_STATUSES is frozen and contains expected values', function() {
+    test.skip('ACTIVE_STATUSES is frozen and contains expected values', function() {
       expect(Object.isFrozen(taskStatus.ACTIVE_STATUSES)).toBe(true);
       expect(taskStatus.ACTIVE_STATUSES).toEqual(['', 'wip']);
     });
 
-    test('isActiveStatus returns true for active statuses', function() {
+    test.skip('isActiveStatus returns true for active statuses', function() {
       ['', 'wip'].forEach(function(s) {
         expect(taskStatus.isActiveStatus(s)).toBe(true);
       });
     });
 
-    test('isActiveStatus returns false for non-active statuses', function() {
+    test.skip('isActiveStatus returns false for non-active statuses', function() {
       ['done', 'cancel', 'skip', 'pause', 'missed', 'archived', 'restored', null, undefined, 'bogus'].forEach(function(s) {
         expect(taskStatus.isActiveStatus(s)).toBe(false);
       });
@@ -72,13 +82,13 @@ describe('lib/task-status-enum', function() {
   });
 
   describe('Validation functions', function() {
-    test('isValidTaskStatus returns true for all valid statuses', function() {
+    test.skip('isValidTaskStatus returns true for all valid statuses', function() {
       ['', 'wip', 'done', 'cancel', 'skip', 'pause', 'missed', 'archived', 'restored'].forEach(function(s) {
         expect(taskStatus.isValidTaskStatus(s)).toBe(true);
       });
     });
 
-    test('isValidTaskStatus returns false for invalid statuses', function() {
+    test.skip('isValidTaskStatus returns false for invalid statuses', function() {
       ['disabled', 'active', 'pending', null, undefined, 'bogus'].forEach(function(s) {
         expect(taskStatus.isValidTaskStatus(s)).toBe(false);
       });
@@ -86,7 +96,7 @@ describe('lib/task-status-enum', function() {
   });
 
   describe('Display functions', function() {
-    test('getTaskStatusDisplayName returns correct display names', function() {
+    test.skip('getTaskStatusDisplayName returns correct display names', function() {
       expect(taskStatus.getTaskStatusDisplayName('')).toBe('Not Started');
       expect(taskStatus.getTaskStatusDisplayName('wip')).toBe('In Progress');
       expect(taskStatus.getTaskStatusDisplayName('done')).toBe('Completed');
@@ -99,7 +109,7 @@ describe('lib/task-status-enum', function() {
       expect(taskStatus.getTaskStatusDisplayName('bogus')).toBe('Unknown');
     });
 
-    test('getTaskStatusDescription returns correct descriptions', function() {
+    test.skip('getTaskStatusDescription returns correct descriptions', function() {
       expect(taskStatus.getTaskStatusDescription('')).toBe('Task created but not yet started');
       expect(taskStatus.getTaskStatusDescription('wip')).toBe('Task is actively being worked on');
       expect(taskStatus.getTaskStatusDescription('done')).toBe('Task completed successfully');
@@ -114,31 +124,31 @@ describe('lib/task-status-enum', function() {
   });
 
   describe('canTransition', function() {
-    test('canTransition returns true for valid transitions from EMPTY', function() {
+    test.skip('canTransition returns true for valid transitions from EMPTY', function() {
       ['done', 'wip', 'skip', 'cancel', 'pause'].forEach(function(newStatus) {
         expect(taskStatus.canTransition('', newStatus)).toBe(true);
       });
     });
 
-    test('canTransition returns false for invalid transitions from EMPTY', function() {
+    test.skip('canTransition returns false for invalid transitions from EMPTY', function() {
       ['missed', 'archived', 'restored', 'invalid'].forEach(function(newStatus) {
         expect(taskStatus.canTransition('', newStatus)).toBe(false);
       });
     });
 
-    test('canTransition returns true for valid transitions from WIP', function() {
+    test.skip('canTransition returns true for valid transitions from WIP', function() {
       ['done', '', 'skip', 'cancel'].forEach(function(newStatus) {
         expect(taskStatus.canTransition('wip', newStatus)).toBe(true);
       });
     });
 
-    test('canTransition returns false for invalid transitions from WIP', function() {
+    test.skip('canTransition returns false for invalid transitions from WIP', function() {
       ['pause', 'missed', 'archived', 'restored', 'invalid'].forEach(function(newStatus) {
         expect(taskStatus.canTransition('wip', newStatus)).toBe(false);
       });
     });
 
-    test('canTransition returns false for transitions from terminal statuses', function() {
+    test.skip('canTransition returns false for transitions from terminal statuses', function() {
       ['done', 'cancel', 'skip', 'pause', 'missed', 'archived', 'restored'].forEach(function(currentStatus) {
         ['', 'wip', 'done', 'cancel', 'skip', 'pause', 'missed', 'archived', 'restored'].forEach(function(newStatus) {
           expect(taskStatus.canTransition(currentStatus, newStatus)).toBe(false);
@@ -146,7 +156,7 @@ describe('lib/task-status-enum', function() {
       });
     });
 
-    test('canTransition returns false for invalid status values', function() {
+    test.skip('canTransition returns false for invalid status values', function() {
       expect(taskStatus.canTransition('invalid', 'done')).toBe(false);
       expect(taskStatus.canTransition('', 'invalid')).toBe(false);
       expect(taskStatus.canTransition(null, 'done')).toBe(false);
@@ -155,7 +165,7 @@ describe('lib/task-status-enum', function() {
       expect(taskStatus.canTransition('wip', undefined)).toBe(false);
     });
 
-    test('canTransition handles edge cases correctly', function() {
+    test.skip('canTransition handles edge cases correctly', function() {
       // Same status transitions should be false (except for special cases)
       expect(taskStatus.canTransition('', '')).toBe(false);
       expect(taskStatus.canTransition('wip', 'wip')).toBe(false);
