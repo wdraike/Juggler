@@ -11,7 +11,7 @@ must_haves:
     - "TODO: Define acceptance criteria"
   artifacts: []
 key_links:
-  - from: "BACKLOG.md"
+  - from: "ROADMAP.md ## Backlog"
     to: "JUG-HIGH-04 <a id="multi-server-config-audit"></a>"
     why: "Source backlog item"
 ---
@@ -20,7 +20,7 @@ key_links:
 
 **Goal:** Multi-server readiness audit — validate all code for safe horizontal scaling
 
-**Source:** juggler BACKLOG.md — JUG-HIGH-04 <a id="multi-server-config-audit"></a>
+**Source:** JUG-HIGH-04 (origin: removed per-service BACKLOG.md; backlog now in .planning/ROADMAP.md ## Backlog) <a id="multi-server-config-audit"></a>
 
 **Last-touched:** 2026-05-12
 

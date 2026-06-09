@@ -11,7 +11,7 @@ must_haves:
     - "TODO: Define acceptance criteria"
   artifacts: []
 key_links:
-  - from: "BACKLOG.md"
+  - from: "ROADMAP.md ## Backlog"
     to: "JUG-MED-07 <a id="scheduler-visual-docs"></a>"
     why: "Source backlog item"
 ---
@@ -20,7 +20,7 @@ key_links:
 
 **Goal:** Scheduler — full visual documentation (Mermaid diagrams or equivalent)
 
-**Source:** juggler BACKLOG.md — JUG-MED-07 <a id="scheduler-visual-docs"></a>
+**Source:** JUG-MED-07 (origin: removed per-service BACKLOG.md; backlog now in .planning/ROADMAP.md ## Backlog) <a id="scheduler-visual-docs"></a>
 
 **Last-touched:** 2026-05-12
 

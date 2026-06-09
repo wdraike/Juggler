@@ -11,7 +11,7 @@ must_haves:
     - "TODO: Define acceptance criteria"
   artifacts: []
 key_links:
-  - from: "BACKLOG.md"
+  - from: "ROADMAP.md ## Backlog"
     to: "JUG-MED-06"
     why: "Source backlog item"
 ---
@@ -20,7 +20,7 @@ key_links:
 
 **Goal:** Sync ingest — treat event as reminder vs. time-consuming task
 
-**Source:** juggler BACKLOG.md — JUG-MED-06
+**Source:** JUG-MED-06 (origin: removed per-service BACKLOG.md; backlog now in .planning/ROADMAP.md ## Backlog)
 
 **Last-touched:** 2026-05-04
 

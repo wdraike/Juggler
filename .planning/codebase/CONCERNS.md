@@ -31,10 +31,10 @@
 - Fix approach: Swap to `rate-limit-redis` store backed by the existing Redis client (`juggler-backend/src/lib/redis.js`).
 
 **`timesPerCycle` work-budget awareness — held design:**
-- Issue: `timesPerCycle` is occurrence-count-based, not work-budget-based. No slot suppression when `sum(time_remaining) < session_dur`. Held for UX review (BACKLOG.md JUG-HOLD-01).
+- Issue: `timesPerCycle` is occurrence-count-based, not work-budget-based. No slot suppression when `sum(time_remaining) < session_dur`. Held for UX review (JUG-HOLD-01 — `.planning/ROADMAP.md` `## Backlog` 999.013).
 - Files: `juggler-backend/shared/scheduler/expandRecurring.js`, `juggler-backend/src/scheduler/runSchedule.js` (line 489)
 - Impact: Recurring tasks with very low `time_remaining` still consume schedule slots unnecessarily.
-- Fix approach: Design decision needed before implementation; see BACKLOG JUG-HOLD-01.
+- Fix approach: Design decision needed before implementation; see JUG-HOLD-01 (`.planning/ROADMAP.md` `## Backlog` 999.013).
 
 **Recurring toggle bug (root cause identified, not fixed):**
 - Issue: Three root causes remain unresolved for the recurring-toggle-off path: (1) ledger not cleaned when recurring=false is set, (2) done instances not archived before deletion, (3) fast-path skips cleanup entirely (`task.controller.js` line 892: "recurring=false must clean up instances — fast path skips that entirely"). Described in memory handoff `archive/handoffs/2026-05/handoff_recurring_toggle_fix.md`.
@@ -44,7 +44,7 @@
 
 **102 deferred code-review audit findings:**
 - Issue: A machine-generated code review produced 102 deferred findings. They are not yet individually addressed. Categories include 8 collation-drift tables (High), 7 missing FK constraints (High), 1 destructive cascade risk (High), 2 security findings (High), 18 missing indexes (Medium), 7 perf items (Medium), 9 dead-code rollups (Low), 4 dead-UI rollups (Low).
-- Files: Full list in `BACKLOG.md` deferred findings table; individual files in `.planning/todos/pending/juggler-db-*`, `juggler-deadcode-*`, `juggler-perf-*`, `juggler-deadui-*`, `juggler-security-*`.
+- Files: Captured as JUG-DBAUDIT-01 in `.planning/ROADMAP.md` `## Backlog` (999.293) — the surviving aggregate is the "Schema / DB Issues" § below. (The former `BACKLOG.md` deferred-findings table and the per-finding `.planning/todos/pending/juggler-{db,deadcode,perf,deadui,security}-*` files were removed when per-service BACKLOG.md was retired.)
 - Impact: DB integrity gaps, silent join failures, performance degradation at scale, maintenance burden.
 - Fix approach: Triage High items first (collation drift, missing FKs, cascade risk, security). Schedule medium/low in batches.
 
@@ -239,7 +239,7 @@
 
 ## Schema / DB Issues (Aggregate)
 
-The 102-item audit produced the following unresolved DB issues by category (canonical individual files are in `.planning/todos/pending/` per BACKLOG.md):
+The 102-item audit produced the following unresolved DB issues by category (canonical record is now JUG-DBAUDIT-01 in `.planning/ROADMAP.md` `## Backlog` 999.293; the per-finding `.planning/todos/pending/` files were removed with per-service BACKLOG.md):
 
 | Category | Count | Priority | Notes |
 |----------|-------|----------|-------|

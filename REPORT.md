@@ -178,7 +178,8 @@ No code bugs found during Phase 5 implementation.
 | `status-guard` | Passes in isolation; parallel-flaky (timing contention) |
 
 These exclusions existed before this initiative. Fixing them requires real
-infrastructure credentials and is tracked separately in `BACKLOG.md`.
+infrastructure credentials and is tracked separately in `.planning/ROADMAP.md` `## Backlog`
+(origin: removed per-service BACKLOG.md; backlog is now single-source in ROADMAP).
 
 ---
 

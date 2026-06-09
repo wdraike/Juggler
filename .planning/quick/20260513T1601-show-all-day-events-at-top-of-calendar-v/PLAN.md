@@ -11,7 +11,7 @@ must_haves:
     - "TODO: Define acceptance criteria"
   artifacts: []
 key_links:
-  - from: "BACKLOG.md"
+  - from: "ROADMAP.md ## Backlog"
     to: "JUG-MED-01"
     why: "Source backlog item"
 ---
@@ -20,7 +20,7 @@ key_links:
 
 **Goal:** Show all-day events at top of calendar view
 
-**Source:** juggler BACKLOG.md — JUG-MED-01
+**Source:** JUG-MED-01 (origin: removed per-service BACKLOG.md; backlog now in .planning/ROADMAP.md ## Backlog)
 
 **Last-touched:** 2026-05-11
 
