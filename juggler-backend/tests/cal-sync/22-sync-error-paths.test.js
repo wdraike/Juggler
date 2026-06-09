@@ -36,10 +36,12 @@ describe('BF-3: 410 on PATCH transitions ledger to deleted_remote', () => {
     if (!await isDbAvailable()) return;
     var user = await seedTestUser(GCAL_ONLY);
 
+    // Future date — past tasks are not pushed/updated, so a hardcoded past date
+    // meant updateEvent was never called and the 410 path never exercised.
     var task = await makeTask({
       user_id: user.id,
       text: 'Meeting',
-      scheduled_at: new Date('2026-06-01T14:00:00Z'),
+      scheduled_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
       dur: 30,
       when: 'morning'
     });

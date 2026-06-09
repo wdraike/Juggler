@@ -40,6 +40,20 @@ async function makeTask(overrides) {
     updated_at: db.fn.now()
   }, overrides);
 
+  // A recurring_instance needs a parent recurring_template (insertTask requires
+  // source_id / master_id). If a test creates an instance without one, auto-create
+  // a minimal template so the fixture yields valid, insertable data.
+  if (task.task_type === 'recurring_instance' && !task.source_id) {
+    var templateId = makeTaskId('tmpl');
+    await tasksWrite.insertTask(db, Object.assign({}, task, {
+      id: templateId,
+      task_type: 'recurring_template',
+      recurring: 1,
+      status: ''
+    }));
+    task.source_id = templateId;
+  }
+
   await tasksWrite.insertTask(db, task);
   return db('tasks_v').where('id', task.id).first();
 }
