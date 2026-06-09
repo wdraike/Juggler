@@ -18,7 +18,7 @@
  *   - juggler-backend/docs/TASK-STATE-MATRIX.md
  */
 
-const { TERMINAL_STATUSES } = require('../lib/task-status');
+const { TERMINAL_STATUSES } = require('../../lib/task-status');
 
 async function dropCheckIfExists(knex, table, name) {
   try {
