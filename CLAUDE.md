@@ -85,4 +85,4 @@ AI enrichment (titles, descriptions, etc.) is **shared globally** — one enrich
 | `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx` line 192 | `url \|\| ''` | Pre-existing guard. Same rationale as `notes \|\| ''` — `url` may be null in legacy DB rows; input `value` must be a string. | Oscar review 2026-05-26 (ernie W3 — pre-existing, approved) |
 
 ## Open Work
-Canonical backlog: `BACKLOG.md` — check before starting any new work.
+Canonical backlog: the monorepo `.planning/ROADMAP.md` `## Backlog` (per-service `BACKLOG.md` removed — backlog is single-source) — check before starting any new work.
