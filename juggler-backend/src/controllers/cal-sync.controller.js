@@ -175,7 +175,7 @@ async function sync(req, res) {
         event_id: opts.eventId || null,
         old_values: opts.oldValues ? JSON.stringify(opts.oldValues) : null,
         new_values: opts.newValues ? JSON.stringify(opts.newValues) : null,
-        detail: opts.detail || null,
+        detail: opts.detail ? String(opts.detail).substring(0, 500) : null,
         error_detail: opts.errorDetail ? JSON.stringify(opts.errorDetail) : null,
         calendar_name: opts.calendarName || null,
         trigger_type: triggerType
