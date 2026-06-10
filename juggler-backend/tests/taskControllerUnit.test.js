@@ -172,12 +172,17 @@ describe('rowToTask: template field inheritance', () => {
 
   test('orphaned instance (missing source) warns but does not crash', () => {
     var inst = makeInstance('missing_tmpl', { id: 'i1' });
-    // @raike/lib-logger is mocked (see top of file). All createLogger() calls return
-    // the same sharedMock. Clear it, call rowToTask, then assert warn was called.
-    var libLogger = require('@raike/lib-logger');
-    libLogger._sharedMock.warn.mockClear();
-    var task = rowToTask(inst, TZ, {});
-    expect(libLogger._sharedMock.warn).toHaveBeenCalledWith(expect.stringContaining('Orphaned instance'));
+    // H3-W2: rowToTask is the relocated PURE domain mapper. DESIGN §7 keeps the
+    // domain log-free, so the orphaned-instance warn is emitted through an OPTIONAL
+    // INJECTED logger (4th arg; default no-op) instead of a module-level logger.
+    // Pass an injected logger and assert it received the warn (behavior preserved:
+    // orphan → warn, no crash). With no logger it is a silent no-op (also no crash).
+    var injectedLogger = { warn: jest.fn() };
+    var task = rowToTask(inst, TZ, {}, injectedLogger);
+    expect(injectedLogger.warn).toHaveBeenCalledWith(expect.stringContaining('Orphaned instance'));
+    expect(task).toBeTruthy(); // does not crash
+    // No-logger path: still no crash.
+    expect(function () { rowToTask(inst, TZ, {}); }).not.toThrow();
   });
 });
 

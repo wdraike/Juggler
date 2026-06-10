@@ -42,6 +42,14 @@ function createChainMock() {
 const mockDb = createChainMock();
 jest.mock('../src/db', () => mockDb);
 
+// ADR-0002 / H3-W6: the task slice's KnexTaskRepository obtains knex via lib/db
+// (getDefaultDb()), NOT src/db.js. Point lib/db's default at the SAME mockDb so the
+// thin controller → facade → repo path resolves the same chain mock + resolveQueue.
+jest.mock('../src/lib/db', () => {
+  const actual = jest.requireActual('../src/lib/db');
+  return Object.assign({}, actual, { getDefaultDb: () => mockDb });
+});
+
 const TEST_USER = { id: 'user-123', email: 'test@test.com', name: 'Test', timezone: 'America/New_York' };
 jest.mock('../src/middleware/jwt-auth', () => ({
   loadJWTSecrets: jest.fn(),

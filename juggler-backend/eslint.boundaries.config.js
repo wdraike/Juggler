@@ -138,6 +138,49 @@ module.exports = [
           message:
             "Direct import of weather value-object is forbidden. " +
             "Use the facade: require('./slices/weather/facade') (it re-exports GeoPoint + roundCoord/gridValue). See JUG-HEX-H1 (W3)."
+        },
+
+        // --- TASK SLICE BOUNDARIES (JUG-HEX-H3 / W6) ---
+        //
+        // External code must access task functionality only via the facade
+        // (slices/task/facade.js) or its index re-export. Direct imports of
+        // slice-internal paths (adapters / domain ports / entities / value-objects /
+        // application use-cases) are forbidden — they go through the facade.
+        //
+        // Adapters are internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/task\\/adapters\\//]",
+          message:
+            "Direct import of task adapter is forbidden. " +
+            "Use the facade: require('./slices/task/facade'). See JUG-HEX-H3 (W6)."
+        },
+        // Domain ports are internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/task\\/domain\\/ports\\//]",
+          message:
+            "Direct import of task port is forbidden. " +
+            "Use the facade: require('./slices/task/facade'). Ports are consumed only by adapters and the facade. See JUG-HEX-H3 (W6)."
+        },
+        // Domain entities are internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/task\\/domain\\/entities\\//]",
+          message:
+            "Direct import of task entity is forbidden. " +
+            "Use the facade: require('./slices/task/facade'). See JUG-HEX-H3 (W6)."
+        },
+        // Domain value-objects (closed-enum VOs) are internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/task\\/domain\\/value-objects\\//]",
+          message:
+            "Direct import of task value-object is forbidden. " +
+            "Use the facade: require('./slices/task/facade'). See JUG-HEX-H3 (W6)."
+        },
+        // Application use-cases are internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/task\\/application\\//]",
+          message:
+            "Direct import of task application use-case is forbidden. " +
+            "Use the facade: require('./slices/task/facade'). See JUG-HEX-H3 (W6)."
         }
       ]
     }
@@ -184,6 +227,40 @@ module.exports = [
   {
     // Weather tests are exempt — they import internals to test them directly.
     files: ['**/slices/weather/**/*.test.js', '**/slices/weather/test-doubles/**/*.js'],
+    rules: {
+      'no-restricted-syntax': 'off'
+    }
+  },
+
+  // --- TASK SLICE per-slice exemptions (JUG-HEX-H3 / W6) ---
+  {
+    // The task facade + its index re-export may import their own slice internals
+    // (adapters / domain ports / entities / value-objects / application use-cases).
+    files: ['**/slices/task/facade.js', '**/slices/task/index.js'],
+    rules: {
+      'no-restricted-syntax': 'off'
+    }
+  },
+  {
+    // Task adapter files may import domain ports/entities/value-objects
+    // (they implement the port / map the entities).
+    files: ['**/slices/task/adapters/**/*.js'],
+    rules: {
+      'no-restricted-syntax': 'off'
+    }
+  },
+  {
+    // Task application use-cases consume the ports/domain through injection; the
+    // application barrel + use-case files reach into their own slice's application
+    // and domain (NOT external code) — exempt the slice's own internals.
+    files: ['**/slices/task/application/**/*.js', '**/slices/task/domain/**/*.js'],
+    rules: {
+      'no-restricted-syntax': 'off'
+    }
+  },
+  {
+    // Task tests are exempt — they import internals to test them directly.
+    files: ['**/slices/task/**/*.test.js', '**/slices/task/test-doubles/**/*.js'],
     rules: {
       'no-restricted-syntax': 'off'
     }

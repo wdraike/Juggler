@@ -1,0 +1,203 @@
+/**
+ * Task input validation + edit guards — PURE relocation of the legacy
+ * `task.controller.js` helpers (Phase H3 / W2).
+ *
+ * ── BEHAVIOR-IDENTICAL RELOCATION, NOT A REWRITE ──────────────────────────────
+ * VERBATIM logic from `src/controllers/task.controller.js`:
+ *     validateTaskInput      ←  ~line 749
+ *     checkCalSyncEditGuard   ←  ~line 84
+ *     guardFixedCalendarWhen  ←  ~line 626
+ *     VALID_WHEN_KEYWORDS / VALID_DAY_REQ / VALID_DAY_CODES ← ~line 745
+ *
+ * ── PURITY (W2 (c), DESIGN §7) ────────────────────────────────────────────────
+ * Zero infra requires. Only pure deps:
+ *   - ../../../../lib/placementModes      (PLACEMENT_MODES constants — pure)
+ *   - ../../../../../../shared/scheduler/expandRecurring  (isAnchorDependentRecur
+ *      — pure recur-shape predicate, no I/O)
+ * All data enters via arguments.
+ *
+ * ── NO NEW FALLBACKS ──────────────────────────────────────────────────────────
+ * Every `||` default below is preserved verbatim from the controller
+ * (e.g. `(body.recur.type || '')`, `existing && existing.cal_sync_origin`). No
+ * new fallback introduced.
+ */
+
+'use strict';
+
+var { PLACEMENT_MODES } = require('../../../../lib/placementModes');
+var { isAnchorDependentRecur } = require('../../../../../../shared/scheduler/expandRecurring');
+
+// Verbatim from task.controller.js ~745.
+var VALID_WHEN_KEYWORDS = ['', 'fixed', 'allday', 'anytime'];
+var VALID_DAY_REQ = ['any', 'weekday', 'weekend'];
+var VALID_DAY_CODES = ['M', 'T', 'W', 'R', 'F', 'Sa', 'Su', 'S', 'U'];
+
+/**
+ * Returns a 403-response payload if `existing` is an externally-ingested
+ * calendar-synced task and `body` contains disallowed fields. Returns `null`
+ * when editing is permitted. (controller ~84)
+ *
+ * @param {Object} existing
+ * @param {Object} body
+ * @returns {?{error: string, code: string, blockedFields: string[]}}
+ */
+function checkCalSyncEditGuard(existing, body) {
+  var origin = existing && existing.cal_sync_origin;
+  if (!origin || origin === 'juggler') return null;
+  var allowed = ['status', 'notes', '_allowUnfix'];
+  if (body && body._allowUnfix) allowed.push('placementMode');
+  var blocked = Object.keys(body)
+    .filter(function(k) { return k !== 'id'; })
+    .filter(function(k) { return allowed.indexOf(k) === -1; });
+  if (blocked.length === 0) return null;
+  return {
+    error: 'This task is synced from an external calendar. Only status and notes can be changed here.',
+    code: 'CAL_SYNCED_READONLY',
+    blockedFields: blocked
+  };
+}
+
+/**
+ * Prevent stripping/altering placement_mode off calendar-linked tasks.
+ * MUTATES `row` (deletes `row.placement_mode`) exactly as the controller does.
+ * (controller ~626)
+ *
+ * @param {Object} row The write row whose placement_mode may be deleted.
+ * @param {Object} guardTarget The row that owns the cal-link (gcal/msft/apple ids).
+ * @param {{allowUnfix?: boolean}} [opts]
+ */
+function guardFixedCalendarWhen(row, guardTarget, opts) {
+  if (!guardTarget) return;
+  if (opts && opts.allowUnfix) return;
+  var isCalLinked = !!(guardTarget.gcal_event_id || guardTarget.msft_event_id || guardTarget.apple_event_id);
+  if (!isCalLinked) return;
+  if ('placement_mode' in row && row.placement_mode !== 'fixed') {
+    delete row.placement_mode;
+  }
+}
+
+/**
+ * Validate a task input body, returning an array of error strings (empty = valid).
+ * VERBATIM from task.controller.js ~749. (controller ~749)
+ * @param {Object} body
+ * @returns {string[]}
+ */
+function validateTaskInput(body) {
+  var errors = [];
+  // text required for creation
+  if (body._requireText && (!body.text || !body.text.trim())) {
+    errors.push('Task name is required');
+  }
+  // text length limit
+  if (body.text && body.text.length > 500) {
+    errors.push('Task name must be 500 characters or less');
+  }
+  // notes length limit
+  if (body.notes && body.notes.length > 5000) {
+    errors.push('Notes must be 5000 characters or less');
+  }
+  // when validation
+  if (body.when !== undefined && body.when !== null) {
+    var whenParts = String(body.when).split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+    if (whenParts.some(function(p) { return p.length > 30; })) {
+      errors.push('Invalid when value: tag names must be 30 characters or less');
+    }
+  }
+  // dayReq validation
+  if (body.dayReq !== undefined && body.dayReq !== null) {
+    var dr = String(body.dayReq);
+    if (VALID_DAY_REQ.indexOf(dr) === -1) {
+      var dayParts = dr.split(',');
+      var allValid = dayParts.every(function(p) { return VALID_DAY_CODES.indexOf(p.trim()) !== -1; });
+      if (!allValid) errors.push('Invalid dayReq: must be any, weekday, weekend, or comma-separated day codes (M,T,W,R,F,Sa,Su)');
+    }
+  }
+  // dur validation
+  if (body.dur !== undefined && body.dur !== null) {
+    var durVal = Number(body.dur);
+    if (isNaN(durVal) || durVal <= 0) errors.push('Duration must be greater than 0');
+  }
+  // split validation
+  if (body.split && body.splitMin !== undefined) {
+    var smVal = Number(body.splitMin);
+    if (isNaN(smVal) || smVal <= 0) errors.push('Split minimum must be greater than 0');
+    if (body.dur && smVal > Number(body.dur)) errors.push('Split minimum must be less than or equal to duration');
+  }
+  // timeFlex validation
+  if (body.timeFlex !== undefined && body.timeFlex !== null) {
+    var tfVal = Number(body.timeFlex);
+    if (isNaN(tfVal) || tfVal < 0 || tfVal > 480) errors.push('Time flex must be between 0 and 480 minutes');
+  }
+  // deadline validation
+  if (body.deadline !== undefined && body.deadline !== null && body.deadline !== '') {
+    var dlDate = new Date(body.deadline);
+    if (isNaN(dlDate.getTime())) errors.push('Deadline must be a valid date');
+  }
+  // startAfter validation
+  if (body.startAfter !== undefined && body.startAfter !== null && body.startAfter !== '') {
+    var saDate = new Date(body.startAfter);
+    if (isNaN(saDate.getTime())) errors.push('Start-after must be a valid date');
+  }
+  // cross-field: deadline >= startAfter
+  if (body.deadline && body.startAfter) {
+    var dlD = new Date(body.deadline);
+    var saD = new Date(body.startAfter);
+    if (!isNaN(dlD.getTime()) && !isNaN(saD.getTime()) && dlD < saD) errors.push('Deadline must be on or after start-after date');
+  }
+  // recur config validation
+  if (body.recur && typeof body.recur === 'object') {
+    var validRecurTypes = ['daily', 'weekly', 'biweekly', 'monthly', 'interval', 'none', 'rolling'];
+    var rType = (body.recur.type || '').toLowerCase();
+    if (!rType) errors.push('Recurrence type is required when recur object is provided');
+    if (rType && validRecurTypes.indexOf(rType) === -1) errors.push('Invalid recurrence type: ' + rType);
+    var r = body.recur;
+    if ((rType === 'rolling' || rType === 'interval') && r.every !== undefined) {
+      var everyVal = Number(r.every);
+      if (!Number.isFinite(everyVal) || everyVal < 1 || !Number.isInteger(everyVal)) {
+        errors.push('Recurrence interval (every) must be a positive integer');
+      }
+    }
+    var VALID_RECUR_UNITS = ['days', 'weeks', 'months'];
+    if ((rType === 'rolling' || rType === 'interval') && r.unit !== undefined) {
+      if (VALID_RECUR_UNITS.indexOf(String(r.unit)) === -1) {
+        errors.push('Recurrence unit must be days, weeks, or months');
+      }
+    }
+    if (isAnchorDependentRecur(body.recur)) {
+      var rs = body.recurStart;
+      if (body._requireRecurStartIfAnchor) {
+        if (rs === undefined || rs === null || String(rs).trim() === '') {
+          errors.push('Recurrence start date is required for biweekly, interval, or times-per-cycle patterns');
+        }
+      } else if (rs === null || (typeof rs === 'string' && rs.trim() === '')) {
+        errors.push('Recurrence start date cannot be cleared on biweekly, interval, or times-per-cycle patterns');
+      }
+    }
+  }
+  // placementMode enum validation
+  if (body.placementMode !== undefined) {
+    var validModes = Object.values(PLACEMENT_MODES);
+    if (validModes.indexOf(body.placementMode) < 0) {
+      errors.push('placementMode "' + body.placementMode + '" is not valid');
+    }
+  }
+  // cross-field: fixed placementMode requires scheduling info
+  if (body.placementMode === 'fixed') {
+    var hasDate = body.date !== undefined && body.date !== null && body.date !== '';
+    var hasTime = body.time !== undefined && body.time !== null && body.time !== '';
+    var hasScheduledAt = body.scheduledAt !== undefined && body.scheduledAt !== null && body.scheduledAt !== '';
+    if (!hasDate && !hasTime && !hasScheduledAt) {
+      errors.push('placementMode "fixed" requires a date, time, or scheduledAt');
+    }
+  }
+  return errors;
+}
+
+module.exports = {
+  validateTaskInput,
+  checkCalSyncEditGuard,
+  guardFixedCalendarWhen,
+  VALID_WHEN_KEYWORDS,
+  VALID_DAY_REQ,
+  VALID_DAY_CODES
+};

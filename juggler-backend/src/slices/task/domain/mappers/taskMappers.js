@@ -1,0 +1,420 @@
+/**
+ * Task row ↔ entity/API mappers — PURE relocation of the legacy
+ * `task.controller.js` transform helpers (Phase H3 / W2).
+ *
+ * ── BEHAVIOR-IDENTICAL RELOCATION (B6), NOT A REWRITE ─────────────────────────
+ * Every function here is the VERBATIM logic of the corresponding helper in
+ * `src/controllers/task.controller.js` (as of the W1 golden-master snapshot):
+ *
+ *     this file            ←  task.controller.js
+ *     ─────────────────       ─────────────────────────────────
+ *     safeParseJSON        ←  ~line 141
+ *     normalizePri         ←  ~line 151
+ *     scheduledAtToISO     ←  ~line 162
+ *     parseISOToDate       ←  ~line 179
+ *     TEMPLATE_FIELDS      ←  ~line 192
+ *     buildSourceMap       ←  ~line 316
+ *     rowToTask            ←  ~line 333
+ *     taskToRow            ←  ~line 512
+ *
+ * The W2 mapper-characterization tests (tests/slices/task/domain/) feed identical
+ * inputs to BOTH the legacy controller export and these functions and deep-equal
+ * the output — the proof the relocation is byte-identical.
+ *
+ * ── PURITY (W2 (c), DESIGN §7) ────────────────────────────────────────────────
+ * This module has ZERO `require('knex')`, `require('../../db')`, `lib/db`,
+ * `express`, or any SDK. Its only requires are PURE transform helpers:
+ *   - ../../../../scheduler/dateHelpers  (re-exports shared/scheduler/dateHelpers
+ *      — localToUtc / utcToLocal / toDateISO / fromDateISO; pure date math, no I/O)
+ *   - ../../value-objects/TaskStatus     (closed-enum VO; folds in task-status'
+ *      isTerminalStatus for the rowToTask terminal-clamp — same predicate)
+ * Data enters via arguments only.
+ *
+ * ── LOGGER INJECTION (purity-preserving) ──────────────────────────────────────
+ * The legacy `rowToTask` calls `logger.warn(...)` for an orphaned recurring
+ * instance (template missing). DESIGN §7 says the domain stays log-free, so
+ * instead of `require`-ing a logger (an infra concern) the warn is emitted
+ * through an OPTIONAL injected logger (4th arg / default no-op). The W1
+ * golden-master never asserts the warn (verified — no `warn`/`logger` assertions
+ * in the suite), and the 3-arg call sites produce byte-identical task output, so
+ * the warn behavior is preserved without coupling the domain to a logger.
+ *
+ * ── NO NEW FALLBACKS ──────────────────────────────────────────────────────────
+ * Every `||` / `??` / default below is PRESERVED VERBATIM as characterized
+ * behavior (e.g. `row.task_type || 'task'`, `weatherPrecip || 'any'`,
+ * `safeParseJSON(..., [])`). No new fallback is introduced.
+ */
+
+'use strict';
+
+var dateHelpers = require('../../../../scheduler/dateHelpers');
+var TaskStatus = require('../value-objects/TaskStatus');
+
+var utcToLocal = dateHelpers.utcToLocal;
+var toDateISO = dateHelpers.toDateISO;
+var fromDateISO = dateHelpers.fromDateISO;
+var localToUtc = dateHelpers.localToUtc;
+
+// isTerminalStatus predicate — characterized identical to lib/task-status via the
+// TaskStatus VO's TERMINAL set (rowToTask uses it for the terminal-clamp below).
+function isTerminalStatus(s) {
+  return TaskStatus.TERMINAL.indexOf(s) !== -1;
+}
+
+// No-op logger default — keeps the domain log-free while preserving the legacy
+// warn call shape when a logger is injected.
+var NOOP_LOGGER = { warn: function () {} };
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Fields that live on the source template and are inherited by recurring
+ * instances. SINGLE source of truth — verbatim from task.controller.js ~line 192.
+ * ───────────────────────────────────────────────────────────────────────────── */
+var TEMPLATE_FIELDS = ['text', 'dur', 'pri', 'project', 'section', 'location', 'tools',
+  'when', 'day_req', 'recurring', 'time_flex', 'split', 'split_min',
+  'travel_before', 'travel_after', 'depends_on',
+  'notes', 'url', 'flex_when', 'recur', 'recur_start', 'recur_end',
+  'preferred_time_mins', 'placement_mode',
+  'weather_precip', 'weather_cloud', 'weather_temp_min', 'weather_temp_max',
+  'weather_temp_unit', 'weather_humidity_min', 'weather_humidity_max'];
+
+/** Safely parse a JSON string, returning fallback on any error. (controller ~141) */
+function safeParseJSON(val, fallback) {
+  if (val === null || val === undefined) return fallback;
+  if (typeof val !== 'string') return val;
+  if (val === '' || val === 'null') return fallback;
+  try { return JSON.parse(val); } catch { return fallback; }
+}
+
+/** Normalize priority to P1-P4 format. Accepts "P1", "1", "p2", etc. (controller ~151) */
+function normalizePri(pri) {
+  if (!pri) return 'P3';
+  var s = String(pri).trim();
+  if (/^P[1-4]$/i.test(s)) return s.toUpperCase();
+  if (/^[1-4]$/.test(s)) return 'P' + s;
+  return 'P3';
+}
+
+/** Convert a DB scheduled_at value to an ISO UTC string. (controller ~162) */
+function scheduledAtToISO(val) {
+  if (!val) return null;
+  if (val instanceof Date) return val.toISOString();
+  var s = String(val);
+  // MySQL dateStrings mode returns "YYYY-MM-DD HH:MM:SS"
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s)) {
+    return s.replace(' ', 'T') + 'Z';
+  }
+  // Already ISO
+  if (s.endsWith('Z') || s.includes('+')) return s;
+  return s + 'Z';
+}
+
+/**
+ * Parse an ISO timestamp string into a Date for DB storage. (controller ~179)
+ * Accepts UTC ("2026-03-10T14:30:00Z") or with offset ("2026-03-10T10:30:00-04:00").
+ */
+function parseISOToDate(iso) {
+  if (!iso) return null;
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return d;
+}
+
+/**
+ * Build a { sourceId: row } lookup from an array of task rows. (controller ~316)
+ * Includes both recurring_template rows AND legacy rows that act as recurring
+ * sources (task_type='task' with recurring=1).
+ */
+function buildSourceMap(rows) {
+  var map = {};
+  rows.forEach(function(r) {
+    if (r.task_type === 'recurring_template') {
+      map[r.id] = r;
+    } else if (r.recurring && r.task_type !== 'recurring_instance') {
+      map[r.id] = r;
+    }
+  });
+  return map;
+}
+
+/**
+ * Map task row from DB to API format. (controller ~333)
+ * Derives date/time/day from scheduled_at (UTC) using the user's timezone.
+ * If sourceMap is provided, recurring instances inherit template fields from their source.
+ *
+ * @param {Object} row
+ * @param {?string} timezone
+ * @param {?Object} sourceMap
+ * @param {{warn: Function}} [logger] OPTIONAL injected logger (default no-op) —
+ *   keeps the legacy orphaned-instance warn without coupling the domain to a
+ *   logger require. Output is byte-identical regardless of which logger is passed.
+ * @returns {Object} the API task object.
+ */
+function rowToTask(row, timezone, sourceMap, logger) {
+  var log = logger || NOOP_LOGGER;
+  // Merge template fields from source for thin recurring instances.
+  var src = sourceMap && row.source_id ? sourceMap[row.source_id] : null;
+  if (!src && row.source_id && sourceMap && row.task_type === 'recurring_instance') {
+    log.warn('[rowToTask] Orphaned instance: ' + row.id + ' references missing template ' + row.source_id);
+  }
+  // Disabled instances are frozen — do not inherit template fields so they stay locked in place
+  if (src && row.status !== 'disabled') {
+    var isSplitChunk = Number(row.split_total) > 1;
+    var merged = {};
+    Object.keys(row).forEach(function(k) { merged[k] = row[k]; });
+    TEMPLATE_FIELDS.forEach(function(f) {
+      if (f === 'dur' && isSplitChunk) return; // keep the chunk's own dur
+      merged[f] = src[f];
+    });
+    row = merged;
+  }
+
+  // Terminal-status tasks must never appear in the future — clamp scheduled_at
+  // to updated_at (completion time) or now, whichever is earlier.
+  if (row.scheduled_at && isTerminalStatus(row.status)) {
+    var sa = new Date(row.scheduled_at);
+    var now = new Date();
+    if (sa > now) {
+      var ua = row.updated_at ? new Date(row.updated_at) : now;
+      row.scheduled_at = ua <= now ? ua : now;
+    }
+  }
+
+  var date = null;
+  var time = null;
+  var day = null;
+  var startAfter = null;
+
+  var displayTz = timezone || null;
+  if (displayTz && row.scheduled_at) {
+    var local = utcToLocal(row.scheduled_at, displayTz);
+    if (local.date) date = local.date;
+    if (local.time) time = local.time;
+    if (local.day) day = local.day;
+  }
+
+  if (src && src.preferred_time_mins != null && row.status !== 'disabled') {
+    var ptH = Math.floor(src.preferred_time_mins / 60);
+    var ptM = src.preferred_time_mins % 60;
+    var ptAmpm = ptH >= 12 ? 'PM' : 'AM';
+    var ptH12 = ptH % 12 || 12;
+    time = ptH12 + ':' + (ptM < 10 ? '0' : '') + ptM + ' ' + ptAmpm;
+  }
+
+  // Derive deadline (ISO YYYY-MM-DD) from the DATE column.
+  var deadlineISO = null;
+  if (row.deadline) {
+    deadlineISO = row.deadline instanceof Date
+      ? row.deadline.toISOString().split('T')[0]
+      : String(row.deadline).split('T')[0];
+  }
+  // Derive startAfter from start_after_at DATE column
+  if (row.start_after_at) {
+    startAfter = fromDateISO(row.start_after_at instanceof Date
+      ? row.start_after_at.toISOString().split('T')[0]
+      : String(row.start_after_at).split('T')[0]);
+  }
+  return {
+    id: row.id,
+    taskType: row.task_type || 'task',
+    text: row.text,
+    // UTC source of truth
+    scheduledAt: scheduledAtToISO(row.scheduled_at),
+    // juggler-cal-history Plan A/E — completion timestamp on terminal transition.
+    completedAt: row.completed_at ? scheduledAtToISO(row.completed_at) : null,
+    tz: row.tz || null,
+    deadline: deadlineISO,
+    // Derived local convenience fields
+    date: date,
+    day: day,
+    time: time,
+    dur: row.dur,
+    timeRemaining: row.time_remaining,
+    pri: row.pri,
+    project: row.project,
+    status: row.status || '',
+    section: row.section,
+    notes: row.notes,
+    url: row.url || null,
+    startAfter: startAfter,
+    location: safeParseJSON(row.location, []),
+    tools: safeParseJSON(row.tools, []),
+    when: row.when,
+    dayReq: row.day_req,
+    recurring: !!row.recurring,
+    timeFlex: row.time_flex != null ? row.time_flex : undefined,
+    split: row.split === null ? undefined : !!row.split,
+    splitMin: row.split_min,
+    recur: safeParseJSON(row.recur, null),
+    sourceId: row.source_id,
+    generated: !!row.generated,
+    gcalEventId: row.gcal_event_id,
+    msftEventId: row.msft_event_id,
+    appleEventId: row.apple_event_id,
+    appleCalendarName: row.apple_calendar_name || null,
+    calSyncOrigin: row.cal_sync_origin || null,
+    calEventUrl: row.cal_event_url || null,
+    dependsOn: safeParseJSON(row.depends_on, []),
+    marker: !!row.marker,
+    placementMode: row.placement_mode,
+    flexWhen: !!row.flex_when,
+    travelBefore: row.travel_before != null ? row.travel_before : undefined,
+    travelAfter: row.travel_after != null ? row.travel_after : undefined,
+    weatherPrecip:   row.weather_precip   || 'any',
+    weatherCloud:    row.weather_cloud    || 'any',
+    weatherTempMin:      row.weather_temp_min      != null ? row.weather_temp_min      : null,
+    weatherTempMax:      row.weather_temp_max      != null ? row.weather_temp_max      : null,
+    weatherTempUnit:     row.weather_temp_unit     || null,
+    weatherHumidityMin:  row.weather_humidity_min  != null ? row.weather_humidity_min  : null,
+    weatherHumidityMax:  row.weather_humidity_max  != null ? row.weather_humidity_max  : null,
+    preferredTimeMins: row.preferred_time_mins != null ? row.preferred_time_mins : null,
+    desiredAt: row.desired_at ? new Date(row.desired_at).toISOString() : null,
+    unscheduled: !!row.unscheduled,
+    overdue: !!row.overdue,
+    slackMins: row.slack_mins != null ? Number(row.slack_mins) : null,
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    recurStart: row.recur_start || null,
+    recurEnd: row.recur_end || null,
+    // Multiday all-day task support: endDate for tasks spanning multiple days
+    endDate: row.end_date ? toDateISO(row.end_date) : null,
+    rollingAnchor: row.rolling_anchor || null,
+    disabledAt: row.disabled_at ? scheduledAtToISO(row.disabled_at) : null,
+    disabledReason: row.disabled_reason || null,
+    occurrenceOrdinal: row.occurrence_ordinal != null ? Number(row.occurrence_ordinal) : undefined,
+    splitOrdinal: row.split_ordinal != null ? Number(row.split_ordinal) : undefined,
+    splitTotal: row.split_total != null ? Number(row.split_total) : undefined,
+    splitGroup: row.split_group || null,
+    // Anchor date (date-only, YYYY-MM-DD): for instances, from the template; for templates, from self
+    anchorDate: (function() {
+      var sa = src ? src.scheduled_at : row.scheduled_at;
+      if (!sa) return null;
+      var iso = scheduledAtToISO(sa);
+      return iso ? iso.slice(0, 10) : null;
+    })()
+  };
+}
+
+/**
+ * Map API task to DB row. (controller ~512)
+ * Converts date+time → scheduled_at (UTC) and deadline/startAfter →
+ * deadline/start_after_at.
+ *
+ * P1 NOTE (flagged for W3): this mapper sets `row.updated_at = new Date()` (a JS
+ * Date — P1-COMPLIANT). It is the WRITE-row builder; the legacy controller's
+ * fast-path updateTask separately overwrites updated_at with `getDb().fn.now()`
+ * (controller ~992) — that fn.now() write is a REPOSITORY concern, lives OUTSIDE
+ * this pure mapper, and is the P1 correction W3 owns (WBS "In-scope decision —
+ * P1 correction"). taskToRow itself already emits `new Date()`.
+ *
+ * @param {Object} task
+ * @param {string} userId
+ * @param {?string} timezone
+ * @param {Object} [_currentTask] preserved arg (legacy signature parity; unused
+ *   here exactly as in the controller — underscore-prefixed for the no-unused-vars
+ *   allowed-args convention).
+ * @returns {Object} the DB write row.
+ */
+function taskToRow(task, userId, timezone, _currentTask) {
+  var row = { user_id: userId };
+  if (task.id !== undefined) row.id = task.id;
+  if (task.taskType !== undefined) row.task_type = task.taskType;
+  if (task.text !== undefined) row.text = task.text;
+  if (task.dur !== undefined) row.dur = task.dur || 30;
+  if (task.timeRemaining !== undefined) row.time_remaining = task.timeRemaining;
+  if (task.pri !== undefined) row.pri = normalizePri(task.pri);
+  if (task.project !== undefined) row.project = task.project;
+  if (task.status !== undefined) row.status = task.status;
+  if (task.section !== undefined) row.section = task.section;
+  if (task.notes !== undefined) row.notes = task.notes;
+  if (task.url !== undefined) row.url = task.url || null;
+  if (task.deadline !== undefined) {
+    row.deadline = task.deadline ? toDateISO(task.deadline) || task.deadline : null;
+  }
+  if (task.startAfter !== undefined) {
+    row.start_after_at = task.startAfter ? toDateISO(task.startAfter) || null : null;
+  }
+  if (task.location !== undefined) row.location = JSON.stringify(task.location);
+  if (task.tools !== undefined) row.tools = JSON.stringify(task.tools);
+  if (task.when !== undefined) row.when = task.when;
+  if (task.dayReq !== undefined) row.day_req = task.dayReq;
+  if (task.recurring !== undefined) row.recurring = task.recurring ? 1 : 0;
+  if (task.timeFlex !== undefined) row.time_flex = task.timeFlex;
+  if (task.split !== undefined) row.split = task.split === null ? null : (task.split ? 1 : 0);
+  if (task.splitMin !== undefined) row.split_min = task.splitMin;
+  if (task.recur !== undefined) row.recur = task.recur ? JSON.stringify(task.recur) : null;
+  if (task.sourceId !== undefined) row.source_id = task.sourceId;
+  if (task.generated !== undefined) row.generated = task.generated ? 1 : 0;
+  if (task.gcalEventId !== undefined) row.gcal_event_id = task.gcalEventId;
+  if (task.msftEventId !== undefined) row.msft_event_id = task.msftEventId;
+  if (task.dependsOn !== undefined) row.depends_on = JSON.stringify(task.dependsOn || []);
+  if (task.flexWhen !== undefined) row.flex_when = task.flexWhen ? 1 : 0;
+  if (task.travelBefore !== undefined) row.travel_before = task.travelBefore || null;
+  else if (task.travel_before !== undefined) row.travel_before = task.travel_before || null;
+  if (task.travelAfter !== undefined) row.travel_after = task.travelAfter || null;
+  else if (task.travel_after !== undefined) row.travel_after = task.travel_after || null;
+  if (task.tz !== undefined) row.tz = task.tz || null;
+  if (task.recurStart !== undefined) row.recur_start = task.recurStart || null;
+  if (task.recurEnd !== undefined) row.recur_end = task.recurEnd || null;
+  if (task.preferredTimeMins !== undefined) row.preferred_time_mins = task.preferredTimeMins;
+  if (task.weatherPrecip   !== undefined) row.weather_precip    = task.weatherPrecip;
+  if (task.weatherCloud    !== undefined) row.weather_cloud     = task.weatherCloud;
+  if (task.weatherTempMin      !== undefined) row.weather_temp_min      = task.weatherTempMin;
+  if (task.weatherTempMax      !== undefined) row.weather_temp_max      = task.weatherTempMax;
+  if (task.weatherTempUnit     !== undefined) row.weather_temp_unit     = task.weatherTempUnit;
+  if (task.weatherHumidityMin  !== undefined) row.weather_humidity_min  = task.weatherHumidityMin;
+  if (task.weatherHumidityMax  !== undefined) row.weather_humidity_max  = task.weatherHumidityMax;
+
+  // Multiday all-day task support: endDate maps to end_date column
+  if (task.endDate !== undefined) {
+    row.end_date = task.endDate ? toDateISO(task.endDate) || task.endDate : null;
+  }
+
+  // Direct desired_at mapping (if caller provides it explicitly)
+  if (task.desiredAt !== undefined) {
+    row.desired_at = task.desiredAt ? parseISOToDate(task.desiredAt) : null;
+  }
+
+  // scheduledAt (UTC ISO) takes precedence over date+time (local strings)
+  if (task.scheduledAt !== undefined) {
+    row.scheduled_at = task.scheduledAt ? parseISOToDate(task.scheduledAt) : null;
+    // Also set desired_at to preserve user intent (unless explicitly provided)
+    if (row.desired_at === undefined) {
+      row.desired_at = row.scheduled_at;
+    }
+  } else if (timezone && (task.date !== undefined || task.time !== undefined)) {
+    var dateVal = task.date !== undefined ? task.date : null;
+    var timeVal = task.time !== undefined ? task.time : null;
+    if (dateVal) {
+      row.scheduled_at = localToUtc(dateVal, timeVal, timezone) || null;
+      if (row.desired_at === undefined) {
+        row.desired_at = timeVal
+          ? row.scheduled_at
+          : localToUtc(dateVal, '12:00 PM', timezone) || null;
+      }
+    } else if (task.date !== undefined && !dateVal) {
+      row.scheduled_at = null;
+      if (row.desired_at === undefined) row.desired_at = null;
+    }
+    if (task.date === undefined && task.time !== undefined) {
+      row._pendingTimeOnly = timeVal;
+    }
+  }
+
+
+  if (task.placementMode !== undefined) {
+    row.placement_mode = task.placementMode;
+  }
+
+  row.updated_at = new Date();
+  return row;
+}
+
+module.exports = {
+  safeParseJSON,
+  normalizePri,
+  scheduledAtToISO,
+  parseISOToDate,
+  buildSourceMap,
+  rowToTask,
+  taskToRow,
+  TEMPLATE_FIELDS
+};

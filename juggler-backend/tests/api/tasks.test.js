@@ -33,6 +33,15 @@ function createChainMock() {
 const mockDb = createChainMock();
 jest.mock('../../src/db', () => mockDb);
 
+// ADR-0002 / H3-W6: the task slice's KnexTaskRepository obtains knex via lib/db
+// (getDefaultDb()), NOT src/db.js. Point lib/db's default at the SAME mockDb so the
+// thin controller → facade → repo path resolves the same chain mock + resolveQueue
+// the legacy controller's src/db usage did. (Mirrors the W1 golden-master scaffold.)
+jest.mock('../../src/lib/db', () => {
+  const actual = jest.requireActual('../../src/lib/db');
+  return Object.assign({}, actual, { getDefaultDb: () => mockDb });
+});
+
 const TEST_USER = { id: 'user-123', email: 'test@test.com', name: 'Test', timezone: 'America/New_York' };
 jest.mock('../../src/middleware/jwt-auth', () => ({
   loadJWTSecrets: jest.fn(),
@@ -156,13 +165,16 @@ describe('AP-07: GET /api/tasks', () => {
   });
 
   test('returns 200 with tasks array for authenticated user', async () => {
-    // getAllTasks calls:
-    //   1. cache.get → null (mocked)
-    //   2. db('tasks_v').where(...).orderByRaw(...) → select() → rows
-    //   3. getTasksVersion → db('tasks_v').where(...).max(...).count(...).first()
-    //   4. cache.set
-    resolveQueue.push([BASE_TASK_ROW]);          // select() → task list
-    resolveQueue.push({ max_updated: null, cnt: 1 }); // first() → version row
+    // getAllTasks now routes through the task slice (H3-W6): ListTasks use-case →
+    // KnexTaskRepository.fetchTasksWithEventIds, which runs THREE parallel queries
+    // (tasks_v list + cal_sync_ledger + user_calendars) then getTasksVersion. The
+    // mock resolves the parallel array left-to-right (the two .select() calls shift
+    // before the awaited list builder), so the queue order is: ledger, user_calendars,
+    // tasks_v list, version. (Same scaffold the W1 golden-master uses for getAllTasks.)
+    resolveQueue.push([]);                       // cal_sync_ledger select()
+    resolveQueue.push([]);                       // user_calendars (apple) select()
+    resolveQueue.push([BASE_TASK_ROW]);          // tasks_v list (awaited builder)
+    resolveQueue.push({ max_updated: null, cnt: 1 }); // getTasksVersion first()
 
     const res = await request(app)
       .get('/api/tasks')

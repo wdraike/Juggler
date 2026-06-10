@@ -1,0 +1,242 @@
+/**
+ * UpdateTaskStatus — application command use-case (Phase H3 / W5).
+ *
+ * Reproduces the legacy `updateTaskStatus` HTTP handler (task.controller.js ~1611)
+ * step-for-step — the FULL status-transition orchestration, including the
+ * done/complete path (the WBS `CompleteTask` command delegates here with
+ * status='done', exactly as the handler routes 'done' through the same body).
+ *
+ * Branches reproduced:
+ *   - zod statusUpdateSchema.safeParse (injected) → 400.
+ *   - VALID_STATUSES guard → 400; user-supplied 'missed' → 403.
+ *   - rc_<sourceId>_<digits> on-demand materialization (repo.insertTask of the
+ *     instance row) when the generated instance has no DB row yet.
+ *   - 404 / disabled-403.
+ *   - recurring_template: pause/unpause only (→ template-pause cleanup collaborator).
+ *   - terminal-requires-schedule guard (rolling-instance exemption via injected
+ *     `loadMaster`) → 400.
+ *   - status update build (completed_at, done scheduled_at preservation, terminal
+ *     reactivation done_frozen, cancel/skip future snap-to-now) — all timestamp
+ *     stamping is left to the repo (P1 new Date()).
+ *   - rolling-anchor projection (injected `applyRollingAnchor`).
+ *   - split-chunk sibling propagation (injected `loadSplitSiblings` + repo writes).
+ *   - skip/cancel outbound cal-sync trigger (injected `triggerCalSync`).
+ *   - re-read, srcMap, invalidate, enqueueScheduleRun (SOLE trigger, S4/S6),
+ *     publishTaskCompleted('done') / publishTaskUpdated (else).
+ *
+ * ── S4/S6 ── enqueueScheduleRun is the SOLE scheduler trigger — a direct call
+ * after the write; the event publish is decoupled (no self-trigger, no cascade).
+ * The cal-sync trigger is a SEPARATE subsystem (cal-sync.controller), not the
+ * scheduler — preserved verbatim and fire-and-forget.
+ *
+ * ── P1 ── the use-case never passes db.fn.now(); it builds `update` WITHOUT
+ * updated_at/completed_at-as-fn.now() and lets the repo stamp new Date(). Where
+ * the legacy set completed_at = fn.now() it now sets a JS Date (new Date());
+ * scheduled_at custom/snap values are JS Dates.
+ *
+ * The raw-table side effects the repo port does not model (task_masters
+ * rolling-anchor, cal_sync_ledger reactivation/cleanup, template-pause instance
+ * deletion, split-sibling lookup, cal-sync trigger) are INJECTED collaborators —
+ * the legacy blocks lifted verbatim, wired by W6.
+ *
+ * @typedef {Object} UpdateTaskStatusDeps  (see constructor required list)
+ */
+
+'use strict';
+
+var TERMINAL_REQUIRES_SCHEDULE = ['done', 'skip', 'cancel'];
+var VALID_STATUSES = ['', 'done', 'wip', 'cancel', 'skip', 'pause', 'disabled', 'missed'];
+
+/** @param {UpdateTaskStatusDeps} deps */
+function UpdateTaskStatus(deps) {
+  var required = ['repo', 'cache', 'events', 'enqueueScheduleRun', 'mappers',
+    'statusUpdateSchema', 'safeTimezone', 'dateHelpers', 'isTerminalStatus',
+    'materializeRcInstance', 'handleTemplatePause', 'loadMaster', 'isRollingMaster',
+    'applyRollingAnchor', 'loadSplitSiblings', 'triggerCalSync', 'reactivateDoneFrozen'];
+  for (var i = 0; i < required.length; i++) {
+    if (!deps || deps[required[i]] === undefined || deps[required[i]] === null) {
+      throw new Error('UpdateTaskStatus: missing dependency "' + required[i] + '"');
+    }
+  }
+  this.repo = deps.repo;
+  this.cache = deps.cache;
+  this.events = deps.events;
+  this.enqueueScheduleRun = deps.enqueueScheduleRun;
+  this.mappers = deps.mappers;
+  this.statusUpdateSchema = deps.statusUpdateSchema;
+  this.safeTimezone = deps.safeTimezone;
+  this.dateHelpers = deps.dateHelpers;
+  this.isTerminalStatus = deps.isTerminalStatus;
+  this.materializeRcInstance = deps.materializeRcInstance;
+  this.handleTemplatePause = deps.handleTemplatePause;
+  this.loadMaster = deps.loadMaster;
+  this.isRollingMaster = deps.isRollingMaster;
+  this.applyRollingAnchor = deps.applyRollingAnchor;
+  this.loadSplitSiblings = deps.loadSplitSiblings;
+  this.triggerCalSync = deps.triggerCalSync;
+  this.reactivateDoneFrozen = deps.reactivateDoneFrozen;
+  this.logger = deps.logger || { error: function () {} };
+}
+
+/**
+ * @param {Object} input
+ * @param {string} input.id
+ * @param {string} input.userId
+ * @param {Object} input.body  `{ status, completedAt?, direction? }`.
+ * @param {string} [input.timezoneHeader]
+ * @returns {Promise<{ status: number, body: Object }>}
+ */
+UpdateTaskStatus.prototype.execute = async function execute(input) {
+  var id = input.id;
+  var userId = input.userId;
+  var body = input.body;
+  var isTerminalStatus = this.isTerminalStatus;
+
+  // zod (handler L1612-1613)
+  var statusParsed = this.statusUpdateSchema.safeParse(body);
+  if (!statusParsed.success) {
+    return { status: 400, body: { error: 'Invalid status', details: statusParsed.error.issues } };
+  }
+
+  var tz = this.safeTimezone(input.timezoneHeader);
+  var status = body.status;
+
+  if (status !== undefined && VALID_STATUSES.indexOf(status) === -1) {
+    return { status: 400, body: { error: 'Invalid status. Valid values: ' + VALID_STATUSES.join(', ') } };
+  }
+  if (status === 'missed') {
+    return { status: 403, body: { error: "Status 'missed' is system-applied; cannot be set directly.", code: 'STATUS_MISSED_SYSTEM_ONLY' } };
+  }
+
+  var existing = await this.repo.fetchTaskWithEventIds(id, userId);
+
+  // rc_ on-demand materialization (handler L1639-1669) — delegated (raw insert
+  // through repo, but the date-parsing + source read is the legacy block).
+  if (!existing && id.startsWith('rc_')) {
+    existing = await this.materializeRcInstance({ id: id, userId: userId, tz: tz, repo: this.repo });
+  }
+
+  if (!existing) return { status: 404, body: { error: 'Task not found' } };
+  if (existing.status === 'disabled') {
+    return { status: 403, body: { error: 'This item is disabled. Use the re-enable endpoint to restore it.', code: 'TASK_DISABLED' } };
+  }
+
+  // recurring_template: pause/unpause only (handler L1683-1721)
+  if (existing.task_type === 'recurring_template') {
+    if (status !== 'pause' && status !== '') {
+      return { status: 400, body: { error: 'Recurring templates can only be paused or unpaused' } };
+    }
+    await this.repo.updateTaskById(id, { status: status || '' }, userId);
+    var instanceIds = await this.handleTemplatePause({ id: id, userId: userId, status: status, repo: this.repo });
+    var tmplRows = await this.repo.getRecurringTemplateRows(userId);
+    var srcMapT = this.mappers.buildSourceMap(tmplRows);
+    await this.cache.invalidateTasks(userId);
+    this.enqueueScheduleRun(userId, 'api:updateTaskStatus:template', [id].concat(instanceIds || []));
+    var updatedTemplate = await this.repo.fetchTaskWithEventIds(id, userId);
+    return {
+      status: 200,
+      body: {
+        task: this.mappers.rowToTask(updatedTemplate, null, srcMapT),
+        instancesRemoved: status === 'pause' ? (instanceIds || []).length : 0
+      }
+    };
+  }
+
+  // terminal-requires-schedule guard w/ rolling exemption (handler L1723-1742)
+  var _rollingMasterRow = null;
+  var _instanceMasterId = existing.master_id || existing.source_id;
+  if (_instanceMasterId && TERMINAL_REQUIRES_SCHEDULE.indexOf(status) !== -1 && !existing.scheduled_at) {
+    _rollingMasterRow = await this.loadMaster(_instanceMasterId, userId);
+  }
+  var _isRollingInstance = _rollingMasterRow && this.isRollingMaster(_rollingMasterRow);
+
+  if (TERMINAL_REQUIRES_SCHEDULE.indexOf(status) !== -1 && !existing.scheduled_at && !body.scheduledAt && !_isRollingInstance) {
+    return {
+      status: 400,
+      body: { error: 'Cannot mark task ' + status + ' without a scheduled time. Schedule it first.', code: 'SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS' }
+    };
+  }
+
+  // build update (handler L1744-1784) — P1: no fn.now(); repo stamps updated_at.
+  var update = { status: status || '' };
+  var isIngested = existing.cal_sync_origin && existing.cal_sync_origin !== 'juggler';
+  var isFutureScheduled = existing.scheduled_at && new Date(existing.scheduled_at) > new Date();
+
+  if (isTerminalStatus(status) && !isTerminalStatus(existing.status)) {
+    update.completed_at = new Date();
+  } else if (status === '' && isTerminalStatus(existing.status)) {
+    update.completed_at = null;
+  }
+
+  if (status === 'done' && !isIngested) {
+    var completedAt = body.completedAt;
+    if (completedAt && completedAt !== 'now' && completedAt !== 'scheduled') {
+      var customDate = new Date(completedAt);
+      update.scheduled_at = customDate > new Date() ? new Date() : customDate;
+    }
+  }
+
+  // terminal → non-terminal reactivation: done_frozen → active (handler L1774-1778)
+  if (existing && isTerminalStatus(existing.status) && !isTerminalStatus(status)) {
+    await this.reactivateDoneFrozen({ id: id, userId: userId });
+  }
+
+  if ((status === 'cancel' || status === 'skip') && isFutureScheduled && !isIngested) {
+    update.scheduled_at = new Date();
+  }
+
+  await this.repo.updateTaskById(id, update, userId);
+
+  // rolling-anchor projection (handler L1789-1808) — delegated.
+  var _anchorMasterId = existing.master_id || existing.source_id;
+  if (_anchorMasterId && ['done', 'skip', 'missed'].includes(status)) {
+    await this.applyRollingAnchor({
+      masterId: _anchorMasterId,
+      userId: userId,
+      status: status,
+      existing: existing,
+      preloadedMaster: _rollingMasterRow
+    });
+  }
+
+  // split-chunk sibling propagation (handler L1816-1826) — same `update` payload.
+  var siblingIds = [];
+  if (Number(existing.split_total) > 1 && existing.source_id != null && existing.occurrence_ordinal != null) {
+    var siblings = await this.loadSplitSiblings({
+      userId: userId,
+      masterId: existing.source_id,
+      occurrenceOrdinal: existing.occurrence_ordinal,
+      excludeId: id
+    });
+    for (var si = 0; si < siblings.length; si++) {
+      siblingIds.push(siblings[si].id);
+      await this.repo.updateTaskById(siblings[si].id, update, userId);
+    }
+  }
+
+  // skip/cancel outbound cal-sync trigger (handler L1841-1855) — fire-and-forget.
+  var hasCalLink = !!(existing.gcal_event_id || existing.msft_event_id || existing.apple_event_id);
+  if ((status === 'skip' || status === 'cancel') && hasCalLink) {
+    Promise.resolve(this.triggerCalSync.sync({ userId: userId }))
+      .catch(this.logger.error.bind(this.logger));
+  }
+
+  var updated = await this.repo.fetchTaskWithEventIds(id, userId);
+  var tmplRows2 = await this.repo.getRecurringTemplateRows(userId);
+  var srcMap = this.mappers.buildSourceMap(tmplRows2);
+  await this.cache.invalidateTasks(userId);
+  this.enqueueScheduleRun(userId, 'api:updateTaskStatus', [id].concat(siblingIds));
+  if (status === 'done') {
+    this.events.publishTaskCompleted({ id: id, userId: userId, status: updated && updated.status });
+  } else {
+    this.events.publishTaskUpdated({ id: id, userId: userId, status: updated && updated.status });
+  }
+  return {
+    status: 200,
+    body: { task: this.mappers.rowToTask(updated, null, srcMap), siblingsUpdated: siblingIds.length }
+  };
+};
+
+module.exports = UpdateTaskStatus;
+module.exports.TERMINAL_REQUIRES_SCHEDULE = TERMINAL_REQUIRES_SCHEDULE;
+module.exports.VALID_STATUSES = VALID_STATUSES;
