@@ -15,6 +15,9 @@ var db = require('../db');
 var MCP_TIMEOUT = 120000; // 2 minutes max per MCP request
 var PUBLIC_URL = process.env.PUBLIC_URL || process.env.MCP_ISSUER_URL || '';
 var { APP_ID } = require('../service-identity');
+var { createLogger } = require('../lib/logger');
+
+var logger = createLogger('mcp.transport');
 
 /**
  * Check if user has an active plan for this app.
@@ -81,7 +84,7 @@ async function handlePost(req, res) {
 
     // Timeout: kill the request if it takes too long
     timeout = setTimeout(function() {
-      console.warn('[mcp] Request timeout after ' + MCP_TIMEOUT + 'ms');
+      logger.warn('[mcp] Request timeout after ' + MCP_TIMEOUT + 'ms');
       cleanup();
       if (!res.headersSent) {
         res.status(504).json({

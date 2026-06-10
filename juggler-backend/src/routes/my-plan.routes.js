@@ -7,7 +7,8 @@
 const router = require('express').Router();
 const { authenticateJWT } = require('../middleware/jwt-auth');
 const { resolvePlanFeatures, getProductId, PRODUCT_LABEL } = require('../middleware/plan-features.middleware');
-const db = require('../db');
+// W5 (juggler-hex-h2): route through lib/db's shared singleton (single pool).
+const db = require('../lib/db').getDefaultDb();
 const { countActiveTasks, countRecurringTemplates, countProjects, countLocations, countScheduleTemplates } = require('../middleware/entity-limits');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('my-plan.routes');

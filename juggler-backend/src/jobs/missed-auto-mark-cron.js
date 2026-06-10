@@ -1,5 +1,8 @@
 // Missed Auto-Mark Cron Job - Class-based version for server integration
 const { markMissedTasks } = require('../cron/cal-history-cron');
+const { createLogger } = require('../lib/logger');
+
+const logger = createLogger('cron.missed-auto-mark');
 
 class MissedAutoMarkCron {
   constructor() {
@@ -19,7 +22,7 @@ class MissedAutoMarkCron {
     try {
       await markMissedTasks();
     } catch (error) {
-      console.error('MissedAutoMarkCron run error:', error);
+      logger.error('MissedAutoMarkCron run error', { error });
     }
   }
 

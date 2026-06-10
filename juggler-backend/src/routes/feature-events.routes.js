@@ -7,7 +7,8 @@
 
 const crypto = require('crypto');
 const router = require('express').Router();
-const db = require('../db');
+// W5 (juggler-hex-h2): route through lib/db's shared singleton (single pool).
+const db = require('../lib/db').getDefaultDb();
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('feature-events.routes');
 

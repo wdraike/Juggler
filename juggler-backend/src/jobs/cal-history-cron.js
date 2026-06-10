@@ -1,5 +1,8 @@
 // Cal History Cron Job - Class-based version for server integration
 const { purgeOldEntries, runCalHistoryCron } = require('../cron/cal-history-cron');
+const { createLogger } = require('../lib/logger');
+
+const logger = createLogger('cron.cal-history-job');
 
 class CalHistoryCron {
   constructor() {
@@ -19,7 +22,7 @@ class CalHistoryCron {
     try {
       await runCalHistoryCron();
     } catch (error) {
-      console.error('CalHistoryCron run error:', error);
+      logger.error('CalHistoryCron run error', { error });
     }
   }
 

@@ -15,6 +15,11 @@ const { maybeRedisStore } = require('./lib/rate-limit-store');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('app');
 
+// Adopt lib-events (ADR-0001): register the benign task-event logging
+// subscriber once at startup so the shared EventBus has a live importer.
+// This is logging-only — it does NOT trigger the scheduler (invariants S4/S6).
+require('./lib/events/taskEventLogger');
+
 const taskRoutes = require('./routes/task.routes');
 const configRoutes = require('./routes/config.routes');
 const projectRoutes = require('./routes/project.routes');

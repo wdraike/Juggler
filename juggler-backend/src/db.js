@@ -2,21 +2,17 @@
  * Database connection module
  * Returns a Knex instance configured for the current environment.
  *
- * NOTE: @raike/lib-db is not yet installed as a package in this service.
- * Until the hexagonal migration is complete (JUG-HEX-P0, WBS 1.2),
- * this module uses knexfile.js directly.
+ * W5 (juggler-hex-h2): collapsed to a SINGLE pool. This module no longer builds
+ * its own knex instance from knexfile.js; it re-exports lib/db's lazy-cached
+ * singleton (getDefaultDb()) so that src/db.js and lib/db.getDefaultDb() return
+ * the exact same knex instance — one connection pool to the DB, not two.
+ *
+ * getDefaultDb() preserves the prior throw behavior verbatim:
+ *   throw new Error(`No database configuration found for environment: ${env}`)
+ * built from knexfile.js + (process.env.NODE_ENV || 'development').
+ *
+ * db.js is intentionally NOT deleted (later phase). All existing importers keep
+ * working, now sharing lib/db's single instance.
  */
 
-const knex = require('knex');
-
-const environment = process.env.NODE_ENV || 'development';
-const knexfile = require('../knexfile.js');
-const config = knexfile[environment];
-
-if (!config) {
-  throw new Error(`No database configuration found for environment: ${environment}`);
-}
-
-const db = knex(config);
-
-module.exports = db;
+module.exports = require('./lib/db').getDefaultDb();

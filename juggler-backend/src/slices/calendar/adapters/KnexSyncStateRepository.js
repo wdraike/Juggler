@@ -15,8 +15,10 @@
  * (src/controllers/cal-sync.controller.js: `var now = new Date(); userUpdate[syncedCol] = now;`)
  * so the refactor preserves the exact write semantics.
  *
- * The Knex instance is injected (defaults to require('../../../db')) so the
- * unit test can pass a stub builder and avoid a live DB.
+ * The Knex instance is injected (defaults to lib/db's shared singleton via
+ * require('../../../lib/db').getDefaultDb()) so the unit test can pass a stub
+ * builder and avoid a live DB. W5 (juggler-hex-h2): default routes directly
+ * through lib-db (the single pool); src/db.js re-exports the same instance.
  */
 
 var SyncState = require('../domain/entities/SyncState');
@@ -53,11 +55,12 @@ function columnsFor(providerId) {
 
 /**
  * @param {Object} [deps]
- * @param {Function} [deps.db] Knex instance. Defaults to the shared src/db.js.
+ * @param {Function} [deps.db] Knex instance. Defaults to lib/db's shared
+ *   singleton (getDefaultDb) — the single pool src/db.js also re-exports.
  */
 function KnexSyncStateRepository(deps) {
   var d = deps || {};
-  this.db = d.db || require('../../../db');
+  this.db = d.db || require('../../../lib/db').getDefaultDb();
 }
 
 /**

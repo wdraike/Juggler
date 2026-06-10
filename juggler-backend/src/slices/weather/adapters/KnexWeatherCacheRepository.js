@@ -43,13 +43,14 @@ var WEATHER_CACHE_REPOSITORY_PORT_METHODS =
 
 /**
  * @param {Object} [deps]
- * @param {Function} [deps.db] Knex instance (default: shared src/db.js).
+ * @param {Function} [deps.db] Knex instance (default: lib/db's shared
+ *   singleton via getDefaultDb() — the single pool src/db.js also re-exports).
  * @param {Object} [deps.redis] redis lib (default: src/lib/redis).
  * @param {Object} [deps.memCache] in-memory fallback store (default: a fresh {}).
  */
 function KnexWeatherCacheRepository(deps) {
   var d = deps || {};
-  this.db = d.db || require('../../../db');
+  this.db = d.db || require('../../../lib/db').getDefaultDb();
   this.redis = d.redis || require('../../../lib/redis');
   // In-memory fallback for reverse-geocode when Redis is unavailable. Matches
   // the legacy controller's `_reverseGeocodeMemCache` object.

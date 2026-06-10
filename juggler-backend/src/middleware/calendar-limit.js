@@ -6,7 +6,8 @@
  * Free: 1 provider, Pro+: unlimited (-1).
  */
 
-const db = require('../db');
+// W5 (juggler-hex-h2): route through lib/db's shared singleton (single pool).
+const db = require('../lib/db').getDefaultDb();
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('calendar-limit');
 

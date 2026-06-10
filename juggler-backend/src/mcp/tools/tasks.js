@@ -15,6 +15,9 @@ const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
 const { isLocked, enqueueWrite, splitFields } = require('../../lib/task-write-queue');
 const tasksWrite = require('../../lib/tasks-write');
 const { isRollingMaster, computeRollingAnchor } = require('../../lib/rolling-anchor');
+const { createLogger } = require('../../lib/logger');
+
+const logger = createLogger('mcp.tools.tasks');
 
 // Shared Zod fields for task input (used by create_task, create_tasks, update_task)
 var taskInputFields = {
@@ -447,7 +450,7 @@ function registerTaskTools(server, userId) {
             .where({ user_id: userId, task_id: id })
             .where('status', 'active')
             .update({ status: 'deleted_local', task_id: null, provider_event_id: null, synced_at: db.fn.now() })
-            .catch(function(err) { console.error("[silent-catch]", err.message); });
+            .catch(function(err) { logger.error('[silent-catch]', { error: err }); });
         }
 
         await tasksWrite.deleteTaskById(trx, id, userId);

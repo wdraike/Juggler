@@ -6,7 +6,11 @@ const getDb = () => require('../db');
 const { z } = require('zod');
 const tasksWrite = require('../lib/tasks-write');
 const { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
-const cache = require('../lib/redis');
+// Routed through the lib-cache CachePort (H2 / W2) instead of lib/redis directly.
+// The `cache` singleton is a RedisCacheAdapter (when REDIS_URL is set) that
+// delegates verbatim to lib/redis, so get/set/ttl/invalidate behavior is
+// identical — pinned by tests/configController.cache.characterization.test.js.
+const { cache } = require('../lib/cache');
 const { reverseGeocodeDisplayName } = require('./weather.controller');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('config.controller');

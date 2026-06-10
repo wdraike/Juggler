@@ -22,6 +22,11 @@ const { localToUtc, utcToLocal, toDateISO, fromDateISO, safeTimezone } = require
 const cache = require('../lib/redis');
 const { enqueueScheduleRun: _enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 const sseEmitter = require('../lib/sse-emitter');
+// lib-events task publisher (ADR-0001). Fire-and-forget + error-isolated:
+// publishing NEVER triggers the scheduler and NEVER alters the write response
+// (invariants S4/S6). The existing enqueueScheduleRun below remains the sole
+// scheduler trigger.
+const taskEvents = require('../lib/events/taskEvents');
 const { isLocked, enqueueWrite, splitFields, flushQueue } = require('../lib/task-write-queue');
 const tasksWrite = require('../lib/tasks-write');
 const { isAnchorDependentRecur } = require('../../../shared/scheduler/expandRecurring');
@@ -923,6 +928,9 @@ async function createTask(req, res) {
     }
     await cache.invalidateTasks(req.user.id);
     enqueueScheduleRun(req.user.id, 'api:createTask', [row.id]);
+    // lib-events: announce the created task (benign, fire-and-forget). Does NOT
+    // trigger the scheduler — enqueueScheduleRun above is the sole trigger.
+    taskEvents.publishTaskCreated({ id: created.id, userId: req.user.id, status: created.status });
     res.status(201).json({ task: rowToTask(created, null) });
   } catch (error) {
     logger.error('Create task error:', error);
@@ -1353,6 +1361,9 @@ async function updateTask(req, res) {
       try { slowBroadcastIds = await expandToAllInstanceIds(req.user.id, [id]); } catch (e) { /* fall back to just [id] */ }
     }
     enqueueScheduleRun(req.user.id, 'api:updateTask', slowBroadcastIds, { skipScheduler: !hasSchedulingFields(row) });
+    // lib-events: announce the updated task (benign, fire-and-forget). Does NOT
+    // trigger the scheduler — enqueueScheduleRun above is the sole trigger.
+    taskEvents.publishTaskUpdated({ id: id, userId: req.user.id, status: updatedRow && updatedRow.status });
     res.json({ task: rowToTask(updatedRow, null, srcMap) });
   } catch (error) {
     logger.error('Update task error:', error);
@@ -1847,6 +1858,14 @@ async function updateTaskStatus(req, res) {
     var srcMap = buildSourceMap(await getDb()('tasks_v').where('user_id', req.user.id).where(function() { this.where('task_type', 'recurring_template').orWhere('recurring', 1); }).select());
     await cache.invalidateTasks(req.user.id);
     enqueueScheduleRun(req.user.id, 'api:updateTaskStatus', [id].concat(siblingIds));
+    // lib-events: announce the status change (benign, fire-and-forget). Does NOT
+    // trigger the scheduler — enqueueScheduleRun above is the sole trigger.
+    // 'done' → task.completed; any other status change → task.updated.
+    if (status === 'done') {
+      taskEvents.publishTaskCompleted({ id: id, userId: req.user.id, status: updated && updated.status });
+    } else {
+      taskEvents.publishTaskUpdated({ id: id, userId: req.user.id, status: updated && updated.status });
+    }
     res.json({ task: rowToTask(updated, null, srcMap), siblingsUpdated: siblingIds.length });
   } catch (error) {
     logger.error('Update task status error:', error);

@@ -7,6 +7,9 @@
 
 const { writeTaskStatus, writeTaskInstanceStatus } = require('../calendar/task-status-writer');
 const { writeCalendarEventStatus, writeCalendarEventInstanceStatus } = require('../calendar/instance-status-writer');
+const { createLogger } = require('../lib/logger');
+
+const logger = createLogger('scheduler.index');
 
 /**
  * Main scheduler function that runs the scheduling algorithm
@@ -41,7 +44,7 @@ async function runScheduler(options) {
       try {
         await writeTaskStatus(db, taskUpdate.taskId, taskUpdate.newStatus, taskUpdate.reason);
       } catch (error) {
-        console.error(`Failed to update task status for ${taskUpdate.taskId}: ${error.message}`);
+        logger.error(`Failed to update task status for ${taskUpdate.taskId}: ${error.message}`);
         // Continue with other updates even if one fails
       }
     }
@@ -52,7 +55,7 @@ async function runScheduler(options) {
       try {
         await writeTaskInstanceStatus(db, instanceUpdate.instanceId, instanceUpdate.newStatus, instanceUpdate.reason);
       } catch (error) {
-        console.error(`Failed to update task instance status for ${instanceUpdate.instanceId}: ${error.message}`);
+        logger.error(`Failed to update task instance status for ${instanceUpdate.instanceId}: ${error.message}`);
         // Continue with other updates even if one fails
       }
     }
@@ -63,7 +66,7 @@ async function runScheduler(options) {
       try {
         await writeCalendarEventStatus(db, eventUpdate.eventId, eventUpdate.newStatus, eventUpdate.reason);
       } catch (error) {
-        console.error(`Failed to update calendar event status for ${eventUpdate.eventId}: ${error.message}`);
+        logger.error(`Failed to update calendar event status for ${eventUpdate.eventId}: ${error.message}`);
         // Continue with other updates even if one fails
       }
     }
@@ -74,7 +77,7 @@ async function runScheduler(options) {
       try {
         await writeCalendarEventInstanceStatus(db, eventInstanceUpdate.instanceId, eventInstanceUpdate.newStatus, eventInstanceUpdate.reason);
       } catch (error) {
-        console.error(`Failed to update calendar event instance status for ${eventInstanceUpdate.instanceId}: ${error.message}`);
+        logger.error(`Failed to update calendar event instance status for ${eventInstanceUpdate.instanceId}: ${error.message}`);
         // Continue with other updates even if one fails
       }
     }

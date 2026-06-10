@@ -37,6 +37,13 @@ function createChainMock() {
 const mockDb = createChainMock();
 jest.mock('../../src/db', () => mockDb);
 
+// W5 (juggler-hex-h2): my-plan.routes now default-wires from lib/db.getDefaultDb()
+// (the single pool src/db re-exports), so feed the same mockDb through lib/db too.
+jest.mock('../../src/lib/db', () => {
+  const actual = jest.requireActual('../../src/lib/db');
+  return Object.assign({}, actual, { getDefaultDb: () => mockDb });
+});
+
 const TEST_USER = { id: 'user-123', email: 'test@test.com', name: 'Test', timezone: 'America/New_York' };
 jest.mock('../../src/middleware/jwt-auth', () => ({
   loadJWTSecrets: jest.fn(),

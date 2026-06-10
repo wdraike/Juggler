@@ -16,7 +16,8 @@
  */
 
 var crypto = require('crypto');
-var db = require('../../../db');
+// W5 (juggler-hex-h2): route through lib/db's shared singleton (single pool).
+var db = require('../../../lib/db').getDefaultDb();
 var appleCalApi = require('../../../lib/apple-cal-api');
 var { decrypt } = require('../../../lib/credential-encrypt');
 var { jugglerDateToISO, isoToJugglerDate, computeDurationMinutes } = require('../../../controllers/cal-sync-helpers');
