@@ -11,7 +11,7 @@
 var crypto = require('crypto');
 const getDb = () => require('../db');
 var tasksWrite = require('../lib/tasks-write');
-var { getConnectedAdapters } = require('../lib/cal-adapters');
+var { getConnectedAdapters } = require('../slices/calendar/facade');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 var { rowToTask, safeParseJSON } = require('./task.controller');
 var { localToUtc, utcToLocal } = require('../scheduler/dateHelpers');

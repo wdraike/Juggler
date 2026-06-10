@@ -6,14 +6,21 @@
  * IDENTICAL after. All tests are pure-unit (no DB, no network, no credentials).
  *
  * Behaviors pinned:
- *   C1  — Apple repush guard: miss_count >= 1 is required before re-create fires.
- *          A removed guard means repush triggers on miss_count === 0, which the
- *          test MUST detect.
+ *   C1  — Apple repush guard: the REAL source of cal-sync.controller.js must
+ *          contain `(ledger.miss_count || 0) >= 1`. Tests read the production
+ *          source at runtime so a mutation of the real file breaks the test.
+ *          Also pins the real userHash() function from cal-sync-helpers.
  *   C2a — buildMsftEventBody includes task.url as "Link: …" in body.content.
  *   C2b — buildVEvent (Apple) includes task.url as "Link: …" in DESCRIPTION.
- *   B4  — Sync window computation: [user-tz local midnight today, now + 60 days].
- *   B5  — sync-lock serialization: concurrent sync returns 409 (covered by 23-sync-consistency.test.js;
- *          this file adds a unit-level sync-lock primitive test).
+ *   B4  — Sync window computation: the REAL source must use `+ 60` for
+ *          windowEnd. The `localToUtc` start semantics are tested via the
+ *          real exported function from dateHelpers.
+ *   B5  — sync-lock EXPORT-SHAPE check only (see B5 block comment for scope).
+ *          Behavioral serialization is owned by 23-sync-consistency.test.js.
+ *
+ * C1 and B4 previously re-implemented the guard/arithmetic locally (making
+ * them immune to production mutations). They now read the real production
+ * source and assert the exact text — a source-inspection characterization pin.
  *
  * These tests do NOT require DB or external credentials.
  * Traceability: TRACEABILITY.md B1–B7 (W0 column).
@@ -122,129 +129,159 @@ describe('C2b: buildVEvent (Apple) — task.url included as "Link: …" in DESCR
 //   && userHash(task) !== ledger.last_user_hash    <- content changed
 //   && (ledger.miss_count || 0) >= 1               <- C1 guard
 //
-// Pinning via white-box test on the exported helpers or by behavior-testing
-// the controller sync function through a DB mock.
+// APPROACH: Source-inspection pin against the REAL production file.
 //
-// Because the guard is embedded in the controller's full sync() flow and
-// extracting it requires either running the full controller (needs DB) or
-// extracting the logic function, we pin it via an assertion on the source
-// predicate that would break if the guard is removed.
+// Because the guard is inline inside sync() (not a separately exported
+// function), the safest characterization pin that does NOT replicate
+// the logic locally is to read the production source at test-time and
+// assert the exact guard text. This guarantees that:
+//   - flipping `>= 1` to `>= 0` in the real file  → test FAILS
+//   - removing the clause entirely                 → test FAILS
+//   - the production source is unchanged           → test PASSES
 //
-// APPROACH: Test the exported userHash / taskHash utilities (if available)
-// and document the guard location. The behavioral test (C1-behavior) tests
-// a minimal mock of the decision logic matching the actual code.
+// In addition we assert the real exported userHash() from cal-sync-helpers
+// produces different hashes for different user-visible content (confirming
+// the hash function the guard relies on is wired correctly), and that the
+// guard constant JUGGLER_ORIGIN is 'juggler' in the real controller source.
+
+var fs = require('fs');
+var path = require('path');
+
+// Read the REAL production source once (synchronous, test-setup time).
+var CONTROLLER_PATH = path.resolve(
+  __dirname, '../../../src/controllers/cal-sync.controller.js'
+);
+var controllerSource = fs.readFileSync(CONTROLLER_PATH, 'utf8');
+var controllerLines = controllerSource.split('\n');
+
+// The real helpers — userHash is exported from cal-sync-helpers.
+var { userHash } = require('../../../src/controllers/cal-sync-helpers');
 
 describe('C1: Apple repush guard — miss_count >= 1 is required before re-create', function () {
-  // Replicate the precise guard condition from cal-sync.controller.js:1067
-  // so the test FAILS if the guard is removed (condition simplified to miss_count >= 0 etc.)
-  function shouldRepush(ledger, taskHashChanged) {
-    var JUGGLER_ORIGIN = 'juggler';
-    return (
-      ledger.origin === JUGGLER_ORIGIN &&
-      ledger.last_user_hash !== null &&
-      taskHashChanged === true &&
-      (ledger.miss_count || 0) >= 1   // <-- C1 guard: MUST be >= 1
-    );
-  }
+  // ── Source-text invariant: the guard clause must read >= 1 ──────────────
+  // These tests read cal-sync.controller.js directly. A mutation to the real
+  // file (>= 0, > 0, removing the clause) breaks these tests.
 
-  it('C1-1: repush fires when miss_count === 1 and content changed', function () {
-    var ledger = {
-      origin: 'juggler',
-      last_user_hash: 'abc123',
-      miss_count: 1
-    };
-    expect(shouldRepush(ledger, true)).toBe(true);
+  it('C1-1: real controller source contains the miss_count >= 1 guard clause', function () {
+    // The guard must appear verbatim: (ledger.miss_count || 0) >= 1
+    // Any relaxation to >= 0 or removal will fail this assertion.
+    var guardPresent = controllerSource.includes('(ledger.miss_count || 0) >= 1');
+    expect(guardPresent).toBe(true);
   });
 
-  it('C1-2: repush fires when miss_count === 3 and content changed', function () {
-    var ledger = {
-      origin: 'juggler',
-      last_user_hash: 'abc123',
-      miss_count: 3
-    };
-    expect(shouldRepush(ledger, true)).toBe(true);
+  it('C1-2: real controller does NOT have a >= 0 repush guard (would re-enable repush-loop bug)', function () {
+    // If the guard is relaxed to >= 0 the repush-loop bug (#2, Apple soak
+    // 2026-04-26) is re-enabled. Assert the loosened form is absent.
+    // We exclude the taskHash path at line ~1084 which legitimately uses === 0.
+    // Strategy: find the repush branch block and confirm no >= 0 appears there.
+    var repushBlockStart = controllerLines.findIndex(function(l) {
+      return l.includes('(ledger.miss_count || 0) >= 1');
+    });
+    // Guard line itself must exist (C1-1 already catches if absent).
+    // Now check that the guard line itself says '>= 1', not '>= 0'.
+    if (repushBlockStart >= 0) {
+      var guardLine = controllerLines[repushBlockStart];
+      expect(guardLine).toContain('>= 1');
+      expect(guardLine).not.toMatch(/>=\s*0/);
+    } else {
+      // If the guard line is not found, C1-1 already fails. Fail here too.
+      expect(repushBlockStart).toBeGreaterThanOrEqual(0);
+    }
   });
 
-  it('C1-3: repush does NOT fire when miss_count === 0 — guard prevents premature re-create', function () {
-    // This test FAILS if the guard is changed from >= 1 to >= 0 or removed.
-    var ledger = {
-      origin: 'juggler',
-      last_user_hash: 'abc123',
-      miss_count: 0
-    };
-    expect(shouldRepush(ledger, true)).toBe(false);
+  it('C1-3: JUGGLER_ORIGIN is "juggler" in the real controller', function () {
+    // Changing the origin constant would silently break all repush decisions.
+    expect(controllerSource).toContain("var JUGGLER_ORIGIN = 'juggler';");
   });
 
-  it('C1-4: repush does NOT fire when last_user_hash is null (legacy row)', function () {
-    var ledger = {
-      origin: 'juggler',
-      last_user_hash: null,
-      miss_count: 2
-    };
-    expect(shouldRepush(ledger, true)).toBe(false);
+  it('C1-4: real userHash produces different hashes when user-visible content changes', function () {
+    // Confirms userHash is not a constant — the inequality userHash(task) !==
+    // ledger.last_user_hash actually detects a content change.
+    var taskA = { text: 'Original title', when: 'morning', project: '', notes: '', url: '', pri: '' };
+    var taskB = { text: 'Renamed title',  when: 'morning', project: '', notes: '', url: '', pri: '' };
+    expect(userHash(taskA)).not.toBe(userHash(taskB));
   });
 
-  it('C1-5: repush does NOT fire when content has not changed', function () {
-    var ledger = {
-      origin: 'juggler',
-      last_user_hash: 'abc123',
-      miss_count: 2
-    };
-    expect(shouldRepush(ledger, false)).toBe(false);
+  it('C1-5: real userHash returns the SAME hash for identical task content (guard does not fire spuriously)', function () {
+    var task = { text: 'Same title', when: 'morning', project: '', notes: '', url: '', pri: '' };
+    expect(userHash(task)).toBe(userHash(task));
   });
 
-  it('C1-6: repush does NOT fire when origin is provider (not juggler)', function () {
-    var ledger = {
-      origin: 'apple',
-      last_user_hash: 'abc123',
-      miss_count: 2
-    };
-    expect(shouldRepush(ledger, true)).toBe(false);
+  it('C1-6: real userHash changes when url changes — confirming Link-field is guarded', function () {
+    // task.url is part of userHash (confirmed in cal-sync-helpers.js). A
+    // rename-plus-url change triggers the C1 path.
+    var taskNoUrl  = { text: 'T', when: 'morning', project: '', notes: '', url: '',                         pri: '' };
+    var taskWithUrl = { text: 'T', when: 'morning', project: '', notes: '', url: 'https://example.com/t', pri: '' };
+    expect(userHash(taskNoUrl)).not.toBe(userHash(taskWithUrl));
   });
 });
 
 // ─── B4: Sync window — [user-tz local midnight today, now + 60 days] ─────────
 //
-// The sync() function in cal-sync.controller.js builds the window as:
-//   windowStart = localToUtc(todayKey, '12:00 AM', tz)   <- local midnight
-//   windowEnd   = new Date(now) + 60 days
+// The sync() function in cal-sync.controller.js builds the window as (lines ~148-155):
+//   todayKey   = Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now)
+//   windowStart = localToUtc(todayKey, '12:00 AM', tz)
+//   windowEnd   = new Date(now); windowEnd.setDate(windowEnd.getDate() + 60)
 //
-// We test the window computation logic (extracted here as a pure function
-// matching the controller's actual arithmetic) so the test FAILS if the window
-// shrinks, shifts, or changes start-of-day semantics.
+// APPROACH: Source-inspection pin + real localToUtc call.
+//
+// B4-1 and B4-4 previously re-implemented the window arithmetic inline, making
+// them immune to a mutation of the real `+60` offset.
+//
+// Fix: assert against the REAL source text (the `+ 60` literal in the controller)
+// AND compute windowStart using the same real localToUtc the controller uses,
+// then assert the computed value has the same midnight-semantics the controller
+// documents.
 
 var { localToUtc } = require('../../../src/scheduler/dateHelpers');
 
+// Re-use the controller source already read above (C1 block).
+// (CONTROLLER_PATH and controllerSource are declared in the C1 section above.)
+
 describe('B4: Sync window — starts at local midnight today, ends now + 60 days', function () {
 
-  it('B4-1: windowEnd is approximately 60 days after now (within 1 minute tolerance)', function () {
-    var now = new Date();
-    var windowEnd = new Date(now);
-    windowEnd.setDate(windowEnd.getDate() + 60);
+  // ── Source-text invariant: the +60 offset must be in the real controller ──
 
-    var expectedMs = now.getTime() + 60 * 24 * 60 * 60 * 1000;
-    // Allow 1 minute of execution-time skew
-    expect(Math.abs(windowEnd.getTime() - expectedMs)).toBeLessThan(60 * 1000);
+  it('B4-1: real controller source uses setDate(getDate() + 60) for windowEnd', function () {
+    // If the real window is changed from +60 to +30 (or any other value) this
+    // assertion fails. The test does NOT recompute +60 itself — it reads the
+    // real source and asserts the literal is present.
+    var has60 = controllerSource.includes('windowEnd.setDate(windowEnd.getDate() + 60)');
+    expect(has60).toBe(true);
   });
+
+  it('B4-4: real controller source does NOT use a 30-day window (mutation guard)', function () {
+    // Zoe's proof: changing +60 to +30 left old B4-4 green. This assertion
+    // fails when the controller reads + 30 for windowEnd.
+    // We check the windowEnd setDate line specifically.
+    var windowEndLine = controllerLines.find(function(l) {
+      return l.includes('windowEnd.setDate(windowEnd.getDate()');
+    });
+    expect(windowEndLine).toBeDefined();
+    // Must say + 60, not + 30 or any other value.
+    expect(windowEndLine).toMatch(/\+\s*60/);
+    expect(windowEndLine).not.toMatch(/\+\s*30/);
+  });
+
+  // ── Real localToUtc: window start semantics (B4-2, B4-3 unchanged — genuine) ─
 
   it('B4-2: windowStart is at local midnight for America/New_York', function () {
     var tz = 'America/New_York';
     var now = new Date();
+    // Replicate the controller's exact todayKey computation (lines 148-150).
     var todayKey = new Intl.DateTimeFormat('en-CA', {
       timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit'
     }).format(now);
 
+    // Call the REAL localToUtc — the same function the controller calls.
     var windowStart = localToUtc(todayKey, '12:00 AM', tz);
 
-    // windowStart must be a valid Date
     expect(windowStart).not.toBeNull();
     expect(windowStart).toBeInstanceOf(Date);
     expect(isNaN(windowStart.getTime())).toBe(false);
-
-    // windowStart must be before or equal to now (midnight today <= now)
+    // midnight today <= now (can't be in the future)
     expect(windowStart.getTime()).toBeLessThanOrEqual(now.getTime());
-
-    // windowStart must be within the past 24 hours
+    // midnight today >= 24h ago
     var oneDayAgoMs = now.getTime() - 24 * 60 * 60 * 1000;
     expect(windowStart.getTime()).toBeGreaterThanOrEqual(oneDayAgoMs);
   });
@@ -262,24 +299,26 @@ describe('B4: Sync window — starts at local midnight today, ends now + 60 days
     expect(isNaN(windowStart.getTime())).toBe(false);
     expect(windowStart.getTime()).toBeLessThanOrEqual(now.getTime());
   });
-
-  it('B4-4: window span is exactly 60 days (no drift)', function () {
-    var now = new Date('2026-06-09T14:00:00Z'); // fixed reference for determinism
-    var windowEnd = new Date(now);
-    windowEnd.setDate(windowEnd.getDate() + 60);
-
-    var spanDays = (windowEnd.getTime() - now.getTime()) / (24 * 60 * 60 * 1000);
-    expect(spanDays).toBe(60);
-  });
 });
 
 // ─── B5 sync-lock: unit-level primitive test ──────────────────────────────────
 //
-// Full concurrent-sync 409 behavior is covered by 23-sync-consistency.test.js
-// (requires DB). This block tests the sync-lock module's acquireLock / releaseLock
-// EXPORTS exist and have the correct shape, so a rename would be caught.
+// SCOPE DECLARATION (honest): This block is an EXPORT-SHAPE check only.
+// It asserts that the four sync-lock functions are exported with the correct
+// names so a rename would be caught immediately. It does NOT assert serialization
+// behavior (acquire-then-reject semantics, 409 response, DB lock lifecycle).
+//
+// Serialization correctness — the behavior that matters — is owned by:
+//   tests/cal-sync/23-sync-consistency.test.js  (409 + real DB lock, requires test-bed)
+//   tests/cal-sync/20-sync-lock.test.js          (acquire/release lifecycle, requires test-bed)
+//
+// If those suites are skipped (DB unreachable / skipIfNoDB fires), the behavioral
+// guarantee is unconfirmed. Oscar: ensure 23-sync-consistency runs non-skipped in
+// the gate (see ZOE-REVIEW.md WARN #3 / telly re-review flag).
+//
+// This B5 block deliberately does NOT masquerade as a behavioral guard.
 
-describe('B5: sync-lock — acquireLock / releaseLock are exported', function () {
+describe('B5: sync-lock — acquireLock / releaseLock are exported (shape check only)', function () {
   var syncLock = require('../../../src/lib/sync-lock');
 
   it('B5-1: acquireLock is a function', function () {

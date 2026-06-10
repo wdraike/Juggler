@@ -1,49 +1,20 @@
 /**
- * Calendar adapter registry.
- * Each adapter implements the unified provider interface.
+ * Calendar adapter registry — BACK-COMPAT RE-EXPORT SHIM (Wave 5 / W5).
+ *
+ * The registry now lives in the calendar slice facade
+ * (src/slices/calendar/facade.js), which owns the {gcal, msft, apple} adapter
+ * map directly. This shim re-exports the SAME four registry functions FROM the
+ * facade (boundary-allowed — importing the facade, not slice internals), so the
+ * export surface is byte-identical for the frozen migration require graph.
+ *
+ * Do NOT add logic here — edit the facade registry instead.
  */
 
-var gcalAdapter = require('./gcal.adapter');
-var msftAdapter = require('./msft.adapter');
-var appleAdapter = require('./apple.adapter');
-
-var adapters = {
-  gcal: gcalAdapter,
-  msft: msftAdapter,
-  apple: appleAdapter
-};
-
-/**
- * Get all registered adapters as an array.
- */
-function getAllAdapters() {
-  return Object.values(adapters);
-}
-
-/**
- * Get adapters that are connected for a given user.
- */
-function getConnectedAdapters(user) {
-  return getAllAdapters().filter(function(a) { return a.isConnected(user); });
-}
-
-/**
- * Get a specific adapter by provider ID.
- */
-function getAdapter(providerId) {
-  return adapters[providerId] || null;
-}
-
-/**
- * Register a new adapter (for future providers like Apple, Yahoo).
- */
-function registerAdapter(adapter) {
-  adapters[adapter.providerId] = adapter;
-}
+var facade = require('../../slices/calendar/facade');
 
 module.exports = {
-  getAllAdapters,
-  getConnectedAdapters,
-  getAdapter,
-  registerAdapter
+  getAllAdapters: facade.getAllAdapters,
+  getConnectedAdapters: facade.getConnectedAdapters,
+  getAdapter: facade.getAdapter,
+  registerAdapter: facade.registerAdapter
 };

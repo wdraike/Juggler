@@ -2,7 +2,7 @@
 type: architecture
 service: juggler
 status: active
-version: leg/juggler-hex-redesign @ 2026-06-09 (grounded on JUGGLER-ARCH-REVIEW-2026-06.md W1 + JUGGLER-HEX-DESIGN.md W2)
+version: leg/juggler-hex-h0-calendar @ 2026-06-09 (H0 COMPLETE — slice built, controllers repointed, boundary active, 222-test suite green)
 last_updated: 2026-06-09
 tags:
   - type/architecture
@@ -133,7 +133,13 @@ Each phase lists goal · work items · entry gate · exit gate · risk. Port/ada
 
 ---
 
-### Phase H0 — Calendar Port (FIRST, lowest risk)
+### Phase H0 — Calendar Port — **COMPLETE** (2026-06-09)
+
+> **As-built:** Slice stood up with all ports, entities, VOs, and adapters.
+> All calendar consumers (`cal-sync.controller.js`, `apple-cal`, `msft-cal`,
+> `gcal` controllers) route through `slices/calendar/facade.js`. Boundary rule
+> now guards a non-empty slice. W0 before-and-after verification + 222-test
+> cal-sync suite green.
 
 - **Goal:** Stand up the first real vertical slice. Define `CalendarPort`, relocate the 3 real
   adapters under it, add `InMemoryCalendarAdapter`, expose `slices/calendar/facade.js`, and point

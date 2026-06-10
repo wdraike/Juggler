@@ -10,7 +10,7 @@ var msftCalApi = require('../lib/msft-cal-api');
 // --- Token management (canonical implementation in adapter) ---
 
 var { getJwtSecret } = require('../lib/jwt-secret');
-var { getValidAccessToken } = require('../lib/cal-adapters/msft.adapter');
+var { getValidAccessToken } = require('../slices/calendar/facade').getAdapter('msft');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('msft-cal.controller');
 
