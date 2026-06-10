@@ -101,6 +101,43 @@ module.exports = [
           message:
             "Direct import of calendar entity is forbidden. " +
             "Use the facade: require('./slices/calendar/facade'). See JUG-HEX-P7."
+        },
+
+        // --- WEATHER SLICE BOUNDARIES (JUG-HEX-H1 / W3) ---
+        //
+        // External code must access weather functionality only via the facade
+        // (slices/weather/facade.js) or its index re-export. Direct imports of
+        // slice-internal paths (adapters / domain ports / domain entities +
+        // value-objects) are forbidden.
+        //
+        // Adapters are internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/weather\\/adapters\\//]",
+          message:
+            "Direct import of weather adapter is forbidden. " +
+            "Use the facade: require('./slices/weather/facade'). See JUG-HEX-H1 (W3)."
+        },
+        // Domain ports are internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/weather\\/domain\\/ports\\//]",
+          message:
+            "Direct import of weather port is forbidden. " +
+            "Use the facade: require('./slices/weather/facade'). Ports are consumed only by adapters and the facade. See JUG-HEX-H1 (W3)."
+        },
+        // Domain entities are internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/weather\\/domain\\/entities\\//]",
+          message:
+            "Direct import of weather entity is forbidden. " +
+            "Use the facade: require('./slices/weather/facade'). See JUG-HEX-H1 (W3)."
+        },
+        // Domain value-objects (e.g. GeoPoint) are internal — go through facade.js
+        // (the facade re-exports GeoPoint + roundCoord/gridValue for consumers).
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/weather\\/domain\\/value-objects\\//]",
+          message:
+            "Direct import of weather value-object is forbidden. " +
+            "Use the facade: require('./slices/weather/facade') (it re-exports GeoPoint + roundCoord/gridValue). See JUG-HEX-H1 (W3)."
         }
       ]
     }
@@ -122,6 +159,31 @@ module.exports = [
   {
     // Tests are exempt — they import internals to test them directly.
     files: ['**/slices/calendar/**/*.test.js', '**/slices/calendar/test-doubles/**/*.js'],
+    rules: {
+      'no-restricted-syntax': 'off'
+    }
+  },
+
+  // --- WEATHER SLICE per-slice exemptions (JUG-HEX-H1 / W3) ---
+  {
+    // The weather facade + its index re-export may import their own slice
+    // internals (adapters / domain ports / entities / value-objects).
+    files: ['**/slices/weather/facade.js', '**/slices/weather/index.js'],
+    rules: {
+      'no-restricted-syntax': 'off'
+    }
+  },
+  {
+    // Weather adapter files may import domain ports/entities/value-objects
+    // (they implement the port / use the VO).
+    files: ['**/slices/weather/adapters/**/*.js'],
+    rules: {
+      'no-restricted-syntax': 'off'
+    }
+  },
+  {
+    // Weather tests are exempt — they import internals to test them directly.
+    files: ['**/slices/weather/**/*.test.js', '**/slices/weather/test-doubles/**/*.js'],
     rules: {
       'no-restricted-syntax': 'off'
     }

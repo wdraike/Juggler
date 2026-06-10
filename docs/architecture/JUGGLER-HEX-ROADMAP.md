@@ -2,7 +2,7 @@
 type: architecture
 service: juggler
 status: active
-version: leg/juggler-hex-h0-calendar @ 2026-06-09 (H0 COMPLETE — slice built, controllers repointed, boundary active, 222-test suite green)
+version: leg/juggler-hex-h1-weather @ 2026-06-09 (H1 COMPLETE — weather slice built, controller thin, boundary active, weather suite green)
 last_updated: 2026-06-09
 tags:
   - type/architecture
@@ -159,7 +159,19 @@ Each phase lists goal · work items · entry gate · exit gate · risk. Port/ada
 
 ---
 
-### Phase H1 — Weather slice (smallest self-contained slice)
+### Phase H1 — Weather slice — **COMPLETE** (2026-06-09)
+
+> **As-built:** Slice stood up at `slices/weather/` with entity `WeatherConstraint`,
+> VO `GeoPoint`, and 3 ports (`WeatherProviderPort`, `GeocodePort`,
+> `WeatherCacheRepositoryPort`). 4 adapters: `OpenMeteoWeatherAdapter`,
+> `NominatimGeocodeAdapter`, `MockWeatherProvider`, `KnexWeatherCacheRepository`.
+> Facade (`slices/weather/facade.js`) owns adapter wiring + orchestration.
+> `weather.controller.js` is thin: 0 DB-access call sites, 0 outbound-`fetch` call
+> sites (both moved into the slice adapters — pinned by H1 B7 AFTER assertions).
+> ESLint boundary rule active, covering adapters, ports, entities, AND
+> value-objects. `fetchWithTimeout` (AbortController, 8 s budget) used by both
+> `OpenMeteoWeatherAdapter` and `NominatimGeocodeAdapter` — closes the W1
+> resilience gap (`ARCH-REVIEW §6 #6`). Weather suite green.
 
 - **Goal:** Convert the smallest domain (279 ln, 5 DB calls) end-to-end as the cleanest slice
   template, and close the W1 resilience gap (no timeout on Open-Meteo/Nominatim).
@@ -300,8 +312,8 @@ and must still pass against the extracted slice.
 
 ```mermaid
 flowchart TD
-    H0["H0 Calendar Port<br/>🟢 LOW"]
-    H1["H1 Weather<br/>🟢 LOW"]
+    H0["H0 Calendar Port<br/>🟢 LOW ✅ COMPLETE"]
+    H1["H1 Weather<br/>🟢 LOW ✅ COMPLETE"]
     H2["H2 Infra-lib completion<br/>🟡 MED"]
     H3["H3 Task slice<br/>🟡 MED-HIGH · char-gated"]
     H4["H4 User/Config<br/>🟡 MED"]
@@ -327,7 +339,7 @@ flowchart TD
 
 | Wave | Phases | Theme | Gate to enter next wave |
 |------|--------|-------|-------------------------|
-| **Wave 1** | H0, H1 | Lowest-risk real slices (adapters pre-isolated; smallest domain) | Both facades merged; lib-db pattern proven on real slices |
+| **Wave 1** | H0 ✅, H1 ✅ | Lowest-risk real slices (adapters pre-isolated; smallest domain) | Both facades merged; lib-db pattern proven on real slices — **COMPLETE** |
 | **Wave 2** | H2 | Finish the infra layer the heavy slices depend on | lib-config + lib-cache exist; lib-events adopted; db.js importers < 35 |
 | **Wave 3** | H3 | Task slice (publishes events the scheduler needs) | Task characterization suite green before+after; task facade live |
 | **Wave 4** | H4, H5 | Remaining non-core slices (parallelizable — both depend on H2+H3, not each other) | Both facades merged; SDK-leak grep = 0 |
@@ -371,8 +383,8 @@ the verified surface *grew* since Jan (scheduler +273 ln, task controller +10 ln
 
 | Phase | Risk | Effort (1-dev days) |
 |-------|------|---------------------|
-| H0 Calendar Port | 🟢 LOW | 5–7 |
-| H1 Weather | 🟢 LOW | 3–4 |
+| H0 Calendar Port | 🟢 LOW | 5–7 — **COMPLETE** |
+| H1 Weather | 🟢 LOW | 3–4 — **COMPLETE** |
 | H2 Infra-lib completion | 🟡 MED | 6–8 |
 | H3 Task slice (char-gated) | 🟡 MED-HIGH | 7–9 |
 | H4 User/Config | 🟡 MED | 5–7 |
