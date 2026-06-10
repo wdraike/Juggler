@@ -8,6 +8,8 @@ var {
   hasGCalCredentials, getGCalToken, seedTestUser, cleanupTestData, destroyTestUser
 } = require('./helpers/test-setup');
 
+var { assertDbAvailable } = require('../helpers/requireDB');
+
 var { makeTask, makeGCalEvent, deleteGCalEvent, deleteAllGCalTestEvents } = require('./helpers/test-fixtures');
 var { getGCalEvent, listGCalEvents, waitForPropagation } = require('./helpers/api-helpers');
 
@@ -21,6 +23,7 @@ var createdEventIds = [];
 var skip = false;
 
 beforeAll(async function () {
+  await assertDbAvailable();
   if (!hasGCalCredentials()) {
     skip = true;
     console.warn('Skipping GCal adapter tests — no credentials');

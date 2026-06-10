@@ -1,25 +1,20 @@
 /**
  * 05-adapter-msft-edge.test.js — MSFT adapter edge cases
  *
- * DB-dependent tests (BF-2) require the test DB; they self-skip when unavailable.
- * Pure unit tests (BF-8, normalizeEvent, buildMsftEventBody) run without DB.
+ * DB-dependent tests (BF-2) require the test DB; the suite fails loud (TEST-FR-001) when unavailable.
+ * Pure unit tests (BF-8, normalizeEvent, buildMsftEventBody) also require the DB guard (beforeAll).
  */
 jest.setTimeout(30000);
 
 var db = require('../../src/db');
 var msftAdapter = require('../../src/lib/cal-adapters/msft.adapter');
 var msftCalApi = require('../../src/lib/msft-cal-api');
+var { assertDbAvailable } = require('../helpers/requireDB');
 
 var TEST_USER_ID = 'msft-edge-test-001';
-var dbAvailable = false;
 
 beforeAll(async () => {
-  try {
-    await db.raw('SELECT 1');
-    dbAvailable = true;
-  } catch (e) {
-    console.warn('[05-adapter-msft-edge] Test DB not available — BF-2 tests skipped:', e.message);
-  }
+  await assertDbAvailable();
 });
 
 async function seedUser(overrides) {
@@ -43,20 +38,15 @@ async function seedUser(overrides) {
 
 afterEach(async () => {
   jest.restoreAllMocks();
-  if (dbAvailable) {
-    await db('users').where('id', TEST_USER_ID).del();
-  }
+  await db('users').where('id', TEST_USER_ID).del();
 });
 afterAll(async () => {
-  if (dbAvailable) {
-    await db('users').where('id', TEST_USER_ID).del();
-  }
+  await db('users').where('id', TEST_USER_ID).del();
   await db.destroy();
 });
 
 describe('BF-2: delta link cleared on 410 (tokenInvalid)', () => {
   it('clears msft_cal_delta_link in DB when checkForChanges throws 410', async () => {
-    if (!dbAvailable) return;
     var user = await seedUser({ msft_cal_delta_link: 'stale-link-that-causes-410' });
 
     jest.spyOn(msftCalApi, 'checkForChanges').mockRejectedValue(
@@ -71,7 +61,6 @@ describe('BF-2: delta link cleared on 410 (tokenInvalid)', () => {
   });
 
   it('null delta link returns hasChanges:true immediately (full sync)', async () => {
-    if (!dbAvailable) return;
     var user = await seedUser({ msft_cal_delta_link: null });
 
     var spy = jest.spyOn(msftCalApi, 'checkForChanges');

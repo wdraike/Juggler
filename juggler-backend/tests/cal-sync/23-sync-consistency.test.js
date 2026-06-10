@@ -45,6 +45,7 @@ jest.mock('../../src/lib/sync-lock', () => {
 var {
   db, TEST_USER_ID, isDbAvailable, seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes
 } = require('./helpers/test-setup');
+var { assertDbAvailable } = require('../helpers/requireDB');
 var { makeTask } = require('./helpers/test-fixtures');
 var { sync } = require('../../src/controllers/cal-sync.controller');
 var gcalAdapter = require('../../src/lib/cal-adapters/gcal.adapter');
@@ -58,7 +59,7 @@ var GCAL_ONLY = {
 };
 
 beforeAll(async () => {
-  if (!await isDbAvailable()) return;
+  await assertDbAvailable();
   await destroyTestUser();
 });
 
@@ -79,7 +80,7 @@ afterAll(async () => {
 
 describe('BF-7: task deleted during API phase is skipped in write phase', () => {
   it('does not call updateTaskById for a task deleted mid-sync', async () => {
-    if (!await isDbAvailable()) return;
+    await assertDbAvailable();
 
     var user = await seedTestUser(GCAL_ONLY);
 
@@ -161,7 +162,7 @@ describe('BF-7: task deleted during API phase is skipped in write phase', () => 
 
 describe('Concurrent sync lock: second sync gets 409', () => {
   it('second concurrent sync returns 409 when first holds lock', async () => {
-    if (!await isDbAvailable()) return;
+    await assertDbAvailable();
     var user = await seedTestUser(GCAL_ONLY);
 
     // Stub GCal adapter so token validation succeeds and sync reaches the
@@ -196,7 +197,7 @@ describe('Concurrent sync lock: second sync gets 409', () => {
 
 describe('Stale lock recovery: expired lock cleared on next sync', () => {
   it('sync succeeds after expired lock is cleared', async () => {
-    if (!await isDbAvailable()) return;
+    await assertDbAvailable();
     var user = await seedTestUser(GCAL_ONLY);
 
     // Insert an expired lock (both acquired_at and expires_at are in the past).

@@ -13,7 +13,7 @@
  *   3. Release: after processUser completes, claimed_by/claimed_at are NULL,
  *      so a subsequent claim for the same user succeeds immediately.
  *
- * Uses the real MySQL test DB when available; skips automatically otherwise.
+ * Requires test-bed MySQL @3407 (TEST-FR-001: throws loud on no-DB).
  * DB ops use raw SQL to backdate timestamps — same pattern as syncLockStartup.test.js.
  *
  * RED phase: these tests FAIL until scheduleQueue.js implements tryClaim / releaseClaim.
@@ -21,6 +21,7 @@
 process.env.NODE_ENV = 'test';
 
 var testDb = require('./helpers/testDb');
+var { assertDbAvailable } = require('./helpers/requireDB');
 
 var hasDb = false;
 var db;
@@ -34,23 +35,22 @@ var releaseClaim;
 var CLAIM_TTL_SECONDS;
 
 beforeAll(async function() {
-  hasDb = await testDb.isAvailable();
-  if (hasDb) {
-    db = testDb.getDb();
+  await assertDbAvailable();
+  hasDb = true;
+  db = testDb.getDb();
 
-    // Seed a test user (schedule_queue has FK to users)
-    var userId = '__claim_test_user__';
-    await db.raw('DELETE FROM schedule_queue WHERE user_id = ?', [userId]);
-    await db('users').where('id', userId).del();
-    await db('users').insert({
-      id: userId,
-      email: 'claim-test@test.com',
-      name: 'Claim Test User',
-      timezone: 'America/New_York',
-      created_at: db.fn.now(),
-      updated_at: db.fn.now()
-    });
-  }
+  // Seed a test user (schedule_queue has FK to users)
+  var userId = '__claim_test_user__';
+  await db.raw('DELETE FROM schedule_queue WHERE user_id = ?', [userId]);
+  await db('users').where('id', userId).del();
+  await db('users').insert({
+    id: userId,
+    email: 'claim-test@test.com',
+    name: 'Claim Test User',
+    timezone: 'America/New_York',
+    created_at: db.fn.now(),
+    updated_at: db.fn.now()
+  });
 
   // Import scheduleQueue — if it exports _internal.tryClaim and
   // _internal.releaseClaim these tests will run; otherwise they'll
@@ -71,17 +71,13 @@ afterAll(async function() {
   }
 });
 
-function maybeTest(name, fn, timeout) {
-  return (hasDb ? test : test.skip)(name, fn, timeout || 10000);
-}
-
 // ── Test 1: Race prevention ───────────────────────────────────────────────
 //
 // Two "instances" call tryClaim for the same userId back-to-back.
 // Because the first claim atomically sets claimed_by, the second must lose.
 // This simulates the poll tick racing between two Cloud Run replicas.
 
-maybeTest('only one of two concurrent claim attempts wins', async function() {
+test('only one of two concurrent claim attempts wins', async function() {
   // Require the internal helpers — RED state: tryClaim is not yet defined.
   expect(typeof tryClaim).toBe('function');
   expect(typeof releaseClaim).toBe('function');
@@ -121,7 +117,7 @@ maybeTest('only one of two concurrent claim attempts wins', async function() {
 // A row with claimed_by='instance-old' and claimed_at 120s ago (past CLAIM_TTL_SECONDS=60)
 // must be reclaimable by 'instance-new'. This is the crashed-instance recovery path.
 
-maybeTest('fresh instance reclaims a stale claim past CLAIM_TTL_SECONDS', async function() {
+test('fresh instance reclaims a stale claim past CLAIM_TTL_SECONDS', async function() {
   expect(typeof tryClaim).toBe('function');
 
   var userId = '__claim_test_user__';
@@ -157,7 +153,7 @@ maybeTest('fresh instance reclaims a stale claim past CLAIM_TTL_SECONDS', async 
 // This verifies the normal happy-path: run completes → claim released → next
 // enqueue cycle picks up cleanly.
 
-maybeTest('released claim allows immediate re-claim (no TTL wait)', async function() {
+test('released claim allows immediate re-claim (no TTL wait)', async function() {
   expect(typeof tryClaim).toBe('function');
   expect(typeof releaseClaim).toBe('function');
 

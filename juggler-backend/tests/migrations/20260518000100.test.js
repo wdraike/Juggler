@@ -17,6 +17,7 @@ require('dotenv').config({ path: path.join(__dirname, '../.env.test') });
 
 var db = require('../../src/db');
 var migration = require('../../src/db/migrations/20260518000100_placement_mode_enum_redesign');
+var { requireDB } = require('../helpers/requireDB');
 
 var _dbAvailable = null;
 async function isDbAvailable() {
@@ -31,13 +32,6 @@ async function isDbAvailable() {
   return _dbAvailable;
 }
 
-function skipIfNoDB(fn) {
-  return async () => {
-    if (!await isDbAvailable()) return;
-    await fn();
-  };
-}
-
 afterAll(async () => {
   if (!await isDbAvailable()) return;
   await db.destroy();
@@ -45,7 +39,7 @@ afterAll(async () => {
 
 describe('migration 20260518000100_placement_mode_enum_redesign (Phase 9-01)', () => {
 
-  test('placement_mode column is the new 6-value ENUM with DEFAULT anytime', skipIfNoDB(async () => {
+  test('placement_mode column is the new 6-value ENUM with DEFAULT anytime', requireDB(async () => {
     var [rows] = await db.raw('SHOW COLUMNS FROM task_masters LIKE \'placement_mode\'');
     expect(rows).toHaveLength(1);
     var col = rows[0];
@@ -54,7 +48,7 @@ describe('migration 20260518000100_placement_mode_enum_redesign (Phase 9-01)', (
     expect(col.Default).toBe('anytime');
   }));
 
-  test('no rows carry any old 7-value enum values', skipIfNoDB(async () => {
+  test('no rows carry any old 7-value enum values', requireDB(async () => {
     var [rows] = await db.raw(`
       SELECT COUNT(*) as cnt FROM task_masters
       WHERE placement_mode IN ('marker','pinned_date','recurring_rigid','recurring_window','recurring_flexible','flexible')
@@ -62,7 +56,7 @@ describe('migration 20260518000100_placement_mode_enum_redesign (Phase 9-01)', (
     expect(rows[0].cnt).toBe(0);
   }));
 
-  test('all placement_mode values are from the new 6-value set', skipIfNoDB(async () => {
+  test('all placement_mode values are from the new 6-value set', requireDB(async () => {
     var [rows] = await db.raw('SELECT DISTINCT placement_mode FROM task_masters ORDER BY placement_mode');
     var validValues = new Set(['reminder', 'all_day', 'fixed', 'time_window', 'time_blocks', 'anytime']);
     for (var row of rows) {
@@ -70,7 +64,7 @@ describe('migration 20260518000100_placement_mode_enum_redesign (Phase 9-01)', (
     }
   }));
 
-  test('no allday or fixed tokens remain in the when column', skipIfNoDB(async () => {
+  test('no allday or fixed tokens remain in the when column', requireDB(async () => {
     var [rows] = await db.raw(`
       SELECT COUNT(*) as cnt FROM task_masters
       WHERE \`when\` LIKE '%allday%' OR \`when\` LIKE '%fixed%'
@@ -78,7 +72,7 @@ describe('migration 20260518000100_placement_mode_enum_redesign (Phase 9-01)', (
     expect(rows[0].cnt).toBe(0);
   }));
 
-  test('tasks_v view exists and returns marker computed from new enum values', skipIfNoDB(async () => {
+  test('tasks_v view exists and returns marker computed from new enum values', requireDB(async () => {
     // Verify view exists and returns without error.
     // NOTE: 'rigid' column was removed from tasks_v by migration 20260518000200
     // (ran immediately after 20260518000100). This test was updated to query
@@ -94,7 +88,7 @@ describe('migration 20260518000100_placement_mode_enum_redesign (Phase 9-01)', (
     }
   }));
 
-  test('tasks_with_sync_v view exists and exposes marker column', skipIfNoDB(async () => {
+  test('tasks_with_sync_v view exists and exposes marker column', requireDB(async () => {
     // NOTE: 'rigid' was removed from tasks_with_sync_v by 20260518000200.
     var [rows] = await db.raw('SELECT marker FROM tasks_with_sync_v LIMIT 1');
     // Just verifies the view exists and returns the column without error.

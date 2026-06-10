@@ -19,6 +19,7 @@ var {
   db, TEST_USER_ID, isDbAvailable, hasGCalCredentials,
   seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes, getGCalToken, gcalApi
 } = require('./helpers/test-setup');
+var { requireDB } = require('../helpers/requireDB');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, makeLedgerRow, makeGCalEvent, deleteGCalEvent } = require('./helpers/test-fixtures');
 var { getGCalEvent, waitForPropagation } = require('./helpers/api-helpers');
@@ -51,13 +52,6 @@ afterAll(async () => {
   await db.destroy();
 });
 
-function skipIfNoDB(fn) {
-  return async () => {
-    if (!await isDbAvailable()) return;
-    await fn();
-  };
-}
-
 function tomorrow(hours, minutes) {
   var d = new Date();
   d.setDate(d.getDate() + 1);
@@ -81,7 +75,7 @@ function tomorrowDateStr() {
 
 describe('Sync All-Day & Transparency', () => {
 
-  test('all-day event -> when=allday on push', skipIfNoDB(async () => {
+  test('all-day event -> when=allday on push', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
@@ -112,7 +106,7 @@ describe('Sync All-Day & Transparency', () => {
     expect(event.start.dateTime).toBeFalsy();
   }));
 
-  test('duration change reflected', skipIfNoDB(async () => {
+  test('duration change reflected', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
@@ -150,7 +144,7 @@ describe('Sync All-Day & Transparency', () => {
     expect(updatedTask.dur).toBe(60);
   }));
 
-  test('title change reflected', skipIfNoDB(async () => {
+  test('title change reflected', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
@@ -188,7 +182,7 @@ describe('Sync All-Day & Transparency', () => {
     expect(updatedTask.text).toBe('Updated Title From Calendar');
   }));
 
-  test('calCompletedBehavior=delete', skipIfNoDB(async () => {
+  test('calCompletedBehavior=delete', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
@@ -239,7 +233,7 @@ describe('Sync All-Day & Transparency', () => {
     expect(!event || event.status === 'cancelled').toBeTruthy();
   }));
 
-  test('calCompletedBehavior=update', skipIfNoDB(async () => {
+  test('calCompletedBehavior=update', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
@@ -292,7 +286,7 @@ describe('Sync All-Day & Transparency', () => {
            event.summary.indexOf('done') >= 0 || event.status !== 'cancelled').toBeTruthy();
   }));
 
-  test('done_frozen: done task with calCompletedBehavior=update is pushed once then frozen', skipIfNoDB(async () => {
+  test('done_frozen: done task with calCompletedBehavior=update is pushed once then frozen', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
@@ -355,7 +349,7 @@ describe('Sync All-Day & Transparency', () => {
     expect(afterThirdSync.last_pushed_hash).toBe(hashBefore);
   }));
 
-  test('done_frozen: done task is skipped when ledger.status is already done_frozen', skipIfNoDB(async () => {
+  test('done_frozen: done task is skipped when ledger.status is already done_frozen', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
@@ -409,7 +403,7 @@ describe('Sync All-Day & Transparency', () => {
     expect(afterSync.last_pushed_hash).toBe(hashBefore);
   }));
 
-  test("D-10: done_frozen skip is logged to sync_history as action='skipped'", skipIfNoDB(async () => {
+  test("D-10: done_frozen skip is logged to sync_history as action='skipped'", requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
@@ -462,7 +456,7 @@ describe('Sync All-Day & Transparency', () => {
     expect(skippedRow.task_id).toBe(task.id);
   }));
 
-  test('done_frozen: calCompletedBehavior=keep tasks are NOT frozen (D-05)', skipIfNoDB(async () => {
+  test('done_frozen: calCompletedBehavior=keep tasks are NOT frozen (D-05)', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 

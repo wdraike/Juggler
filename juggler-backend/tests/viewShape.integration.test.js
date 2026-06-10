@@ -12,11 +12,13 @@ var db = require('../src/db');
 var { v7: uuidv7 } = require('uuid');
 var { insertTask, deleteTaskById } = require('../src/lib/tasks-write');
 var { reconcileSplitsForMaster } = require('../src/lib/reconcile-splits');
+var { assertDbAvailable } = require('./helpers/requireDB');
 
 var available = false;
 var USER_ID = 'view-shape-test-user';
 
 beforeAll(async () => {
+  await assertDbAvailable();
   try { await db.raw('SELECT 1'); available = true; } catch (e) {
     console.warn('Test DB not available:', e.message); return;
   }

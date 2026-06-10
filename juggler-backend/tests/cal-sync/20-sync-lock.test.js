@@ -15,10 +15,11 @@ jest.mock('../../src/lib/sse-emitter', () => ({
 }));
 
 var {
-  db, TEST_USER_ID, isDbAvailable, hasGCalCredentials,
+  db, TEST_USER_ID, hasGCalCredentials,
   seedTestUser, cleanupTestData, destroyTestUser,
   getGCalToken, mockReq, mockRes
 } = require('./helpers/test-setup');
+var { assertDbAvailable } = require('../helpers/requireDB');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, deleteAllGCalTestEvents } = require('./helpers/test-fixtures');
 var { waitForPropagation } = require('./helpers/api-helpers');
@@ -29,7 +30,8 @@ var token = null;
 var user = null;
 
 beforeAll(async () => {
-  if (!await isDbAvailable() || !hasGCalCredentials()) return;
+  await assertDbAvailable();
+  if (!hasGCalCredentials()) return;
   user = await seedTestUser(GCAL_ONLY);
   token = await getGCalToken();
 });

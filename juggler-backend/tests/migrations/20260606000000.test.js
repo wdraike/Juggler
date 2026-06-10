@@ -11,6 +11,7 @@ require('dotenv').config({ path: path.join(__dirname, '../.env.test') });
 
 var db = require('../../src/db');
 var migration = require('../../src/db/migrations/20260606000000_add_missed_status_to_task_instances');
+var { requireDB } = require('../helpers/requireDB');
 
 var _dbAvailable = null;
 async function isDbAvailable() {
@@ -23,13 +24,6 @@ async function isDbAvailable() {
     _dbAvailable = false;
   }
   return _dbAvailable;
-}
-
-function skipIfNoDB(fn) {
-  return async () => {
-    if (!await isDbAvailable()) return;
-    await fn();
-  };
 }
 
 async function cleanup() {
@@ -54,7 +48,7 @@ afterAll(async () => {
 
 describe('migration 20260606000000_add_missed_status_to_task_instances', () => {
 
-  test('up() adds missed status to CHECK constraint', skipIfNoDB(async () => {
+  test('up() adds missed status to CHECK constraint', requireDB(async () => {
     // Run the migration
     await migration.up(db);
 
@@ -98,7 +92,7 @@ describe('migration 20260606000000_add_missed_status_to_task_instances', () => {
     expect(instance.status).toBe('missed');
   }));
 
-  test('down() removes missed status from CHECK constraint', skipIfNoDB(async () => {
+  test('down() removes missed status from CHECK constraint', requireDB(async () => {
     // MySQL enforces CHECK constraints against existing rows when the constraint is
     // re-added. We must delete any 'missed' rows before calling down() so that the
     // restored constraint (which excludes 'missed') can be applied cleanly.
@@ -120,7 +114,7 @@ describe('migration 20260606000000_add_missed_status_to_task_instances', () => {
     })).rejects.toThrow();
   }));
 
-  test('up() is idempotent', skipIfNoDB(async () => {
+  test('up() is idempotent', requireDB(async () => {
     // Run up again - should not fail
     await expect(migration.up(db)).resolves.not.toThrow();
   }));

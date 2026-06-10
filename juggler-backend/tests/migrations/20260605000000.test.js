@@ -16,6 +16,7 @@ require('dotenv').config({ path: path.join(__dirname, '../.env.test') });
 
 var db = require('../../src/db');
 var migration = require('../../src/db/migrations/20260605000000_add_task_status_enum_and_timestamps');
+var { requireDB } = require('../helpers/requireDB');
 
 var _dbAvailable = null;
 async function isDbAvailable() {
@@ -28,13 +29,6 @@ async function isDbAvailable() {
     _dbAvailable = false;
   }
   return _dbAvailable;
-}
-
-function skipIfNoDB(fn) {
-  return async () => {
-    if (!await isDbAvailable()) return;
-    await fn();
-  };
 }
 
 async function cleanup() {
@@ -56,7 +50,7 @@ afterAll(async () => {
 
 describe('migration 20260605000000_add_task_status_enum_and_timestamps', () => {
 
-  test('up() adds all required columns and constraints', skipIfNoDB(async () => {
+  test('up() adds all required columns and constraints', requireDB(async () => {
     // Run the migration
     await migration.up(db);
 
@@ -118,7 +112,7 @@ describe('migration 20260605000000_add_task_status_enum_and_timestamps', () => {
     expect(doneTask.scheduled_at).toBeTruthy();
   }));
 
-  test('status enum constraint prevents invalid status values', skipIfNoDB(async () => {
+  test('status enum constraint prevents invalid status values', requireDB(async () => {
     // Try to insert with invalid status - should fail
     await expect(db('task_masters').insert({
       id: 'test-master-invalid',
@@ -131,7 +125,7 @@ describe('migration 20260605000000_add_task_status_enum_and_timestamps', () => {
     })).rejects.toThrow();
   }));
 
-  test('scheduled_at constraint requires value for terminal statuses', skipIfNoDB(async () => {
+  test('scheduled_at constraint requires value for terminal statuses', requireDB(async () => {
     // Try to insert with terminal status but no scheduled_at - should fail
     await expect(db('task_masters').insert({
       id: 'test-master-missing-scheduled',
@@ -145,7 +139,7 @@ describe('migration 20260605000000_add_task_status_enum_and_timestamps', () => {
     })).rejects.toThrow();
   }));
 
-  test('completed_at column is available', skipIfNoDB(async () => {
+  test('completed_at column is available', requireDB(async () => {
     // Test that completed_at column exists and can be updated
     await db('task_masters').where('id', 'test-master-done').update({
       completed_at: db.fn.now()
@@ -155,19 +149,19 @@ describe('migration 20260605000000_add_task_status_enum_and_timestamps', () => {
     expect(updatedTask.completed_at).toBeTruthy();
   }));
 
-  test('status index exists for performance', skipIfNoDB(async () => {
+  test('status index exists for performance', requireDB(async () => {
     // Verify the index exists by checking query performance
     // This is a basic check - in a real scenario you'd query information_schema
     var tasks = await db('task_masters').where('user_id', 'test-user-status').where('status', 'done').select('id');
     expect(tasks.length).toBeGreaterThan(0);
   }));
 
-  test('up() is idempotent', skipIfNoDB(async () => {
+  test('up() is idempotent', requireDB(async () => {
     // Run up again - should not fail
     await expect(migration.up(db)).resolves.not.toThrow();
   }));
 
-  test('down() removes all added columns and constraints', skipIfNoDB(async () => {
+  test('down() removes all added columns and constraints', requireDB(async () => {
     // Run the down migration
     await migration.down(db);
 

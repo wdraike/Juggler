@@ -6,13 +6,12 @@
  *
  * Requires: docker compose -f docker-compose.test.yml up -d
  *
- * When the test DB is unavailable every test body returns early via
- * `if (!available) return;` — the suite exits 0 so CI doesn't fail.
+ * Requires test-bed MySQL @3407 (TEST-FR-001: throws loud on no-DB).
  */
 
 var db = require('../src/db');
 var tasksWrite = require('../src/lib/tasks-write');
-var available = false;
+var { assertDbAvailable } = require('./helpers/requireDB');
 var USER_ID = 'state-test-user-001';
 
 // Mock scheduleQueue to prevent actual scheduler runs
@@ -34,13 +33,7 @@ jest.mock('../src/lib/sse-emitter', () => ({
 }));
 
 beforeAll(async () => {
-  try {
-    await db.raw('SELECT 1');
-    available = true;
-  } catch (e) {
-    console.warn('Test DB not available:', e.message);
-    return;
-  }
+  await assertDbAvailable();
 
   // Cleanup any leftover state from prior runs
   await db('cal_sync_ledger').where('user_id', USER_ID).del();
@@ -65,23 +58,20 @@ beforeAll(async () => {
 }, 15000);
 
 afterAll(async () => {
-  if (available) {
-    await db('cal_sync_ledger').where('user_id', USER_ID).del();
-    await db('task_instances').where('user_id', USER_ID).del();
-    await db('task_masters').where('user_id', USER_ID).del();
-    await db('projects').where('user_id', USER_ID).del();
-    await db('locations').where('user_id', USER_ID).del();
-    await db('tools').where('user_id', USER_ID).del();
-    await db('user_config').where('user_id', USER_ID).del();
-    await db('sync_locks').where('user_id', USER_ID).del();
-    await db('users').where('id', USER_ID).del();
-  }
+  await db('cal_sync_ledger').where('user_id', USER_ID).del();
+  await db('task_instances').where('user_id', USER_ID).del();
+  await db('task_masters').where('user_id', USER_ID).del();
+  await db('projects').where('user_id', USER_ID).del();
+  await db('locations').where('user_id', USER_ID).del();
+  await db('tools').where('user_id', USER_ID).del();
+  await db('user_config').where('user_id', USER_ID).del();
+  await db('sync_locks').where('user_id', USER_ID).del();
+  await db('users').where('id', USER_ID).del();
   await db.destroy();
 });
 
 // Wipe task rows between tests to keep them isolated
 beforeEach(async () => {
-  if (!available) return;
   await db('cal_sync_ledger').where('user_id', USER_ID).del();
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
@@ -128,7 +118,6 @@ var controller = require('../src/controllers/task.controller');
 // ── Smoke test ───────────────────────────────────────────────────────────────
 
 test('smoke — controller is importable and DB is reachable', async () => {
-  if (!available) return;
   expect(typeof controller.createTask).toBe('function');
   expect(typeof controller.updateTaskStatus).toBe('function');
   expect(typeof controller.reEnableTask).toBe('function');
@@ -142,7 +131,7 @@ test('smoke — controller is importable and DB is reachable', async () => {
 
 describe('status transition: wip → open (reopen)', () => {
   test('valid: sets wip then clears status back to empty', async () => {
-    if (!available) return;
+
 
     // Create scheduled task
     var createReq = mockReq({ body: { text: 'wip-reopen', scheduledAt: '2026-06-01T14:00:00Z' } });
@@ -172,7 +161,7 @@ describe('status transition: wip → open (reopen)', () => {
   });
 
   test('valid: reopen clears completed_at', async () => {
-    if (!available) return;
+
 
     var createReq = mockReq({ body: { text: 'reopen-completed-at', scheduledAt: '2026-06-01T14:00:00Z' } });
     var createRes = mockRes();
@@ -201,7 +190,7 @@ describe('status transition: wip → open (reopen)', () => {
 
 describe('status transition: wip → done', () => {
   test('valid: done when scheduled_at is set', async () => {
-    if (!available) return;
+
 
     var createReq = mockReq({ body: { text: 'wip-to-done', scheduledAt: '2026-05-20T10:00:00Z' } });
     var createRes = mockRes();
@@ -229,7 +218,7 @@ describe('status transition: wip → done', () => {
   });
 
   test('rejected: done on unscheduled task → 400 SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS', async () => {
-    if (!available) return;
+
 
     // Create task WITHOUT scheduled_at
     var createReq = mockReq({ body: { text: 'unscheduled-done-attempt' } });
@@ -252,7 +241,7 @@ describe('status transition: wip → done', () => {
 
 describe('status transition: skip', () => {
   test('valid: skip on a one-off scheduled task succeeds', async () => {
-    if (!available) return;
+
 
     var createReq = mockReq({ body: { text: 'skip-one-off', scheduledAt: '2026-06-02T15:00:00Z' } });
     var createRes = mockRes();
@@ -270,7 +259,7 @@ describe('status transition: skip', () => {
   });
 
   test('rejected: skip on unscheduled task → 400 SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS', async () => {
-    if (!available) return;
+
 
     // Create task without scheduled_at
     var createReq = mockReq({ body: { text: 'skip-unscheduled' } });
@@ -286,7 +275,7 @@ describe('status transition: skip', () => {
   });
 
   test('skip prevents re-skip — idempotent (200 no-op or succeeds)', async () => {
-    if (!available) return;
+
 
     var createReq = mockReq({ body: { text: 'skip-idempotent', scheduledAt: '2026-06-03T09:00:00Z' } });
     var createRes = mockRes();
@@ -316,7 +305,7 @@ describe('status transition: skip', () => {
 
 describe('status transition: pause/unpause on recurring template', () => {
   test('pause on template deletes future open instances', async () => {
-    if (!available) return;
+
 
     var tmplId = 'tmpl-pause-test-' + Date.now();
     var now = new Date();
@@ -371,7 +360,7 @@ describe('status transition: pause/unpause on recurring template', () => {
   });
 
   test('unpause: setting status to empty triggers schedule regeneration', async () => {
-    if (!available) return;
+
 
     var tmplId = 'tmpl-unpause-test-' + Date.now();
     var now = new Date();
@@ -408,7 +397,7 @@ describe('status transition: pause/unpause on recurring template', () => {
   });
 
   test('recurring template rejects non-pause/unpause status changes', async () => {
-    if (!available) return;
+
 
     var tmplId = 'tmpl-bad-status-' + Date.now();
     var now = new Date();
@@ -439,7 +428,7 @@ describe('status transition: pause/unpause on recurring template', () => {
 
 describe('status transition: disabled → re-enable (real DB)', () => {
   test('re-enable: unlimited plan succeeds', async () => {
-    if (!available) return;
+
 
     var now = new Date();
     var taskId = 'disabled-reenable-' + Date.now();
@@ -498,7 +487,7 @@ describe('status transition: disabled → re-enable (real DB)', () => {
   });
 
   test('re-enable: at plan limit returns 403 ENTITY_LIMIT_REACHED', async () => {
-    if (!available) return;
+
 
     var now = new Date();
 
@@ -555,7 +544,7 @@ describe('status transition: disabled → re-enable (real DB)', () => {
 
 describe('status transition: missed status — system-only guard', () => {
   test('user-supplied status=missed → 403 STATUS_MISSED_SYSTEM_ONLY', async () => {
-    if (!available) return;
+
 
     var createReq = mockReq({ body: { text: 'user-missed-attempt', scheduledAt: '2026-05-01T08:00:00Z' } });
     var createRes = mockRes();
@@ -570,7 +559,7 @@ describe('status transition: missed status — system-only guard', () => {
   });
 
   test('a row with status=missed written by the DB is readable and renders correctly', async () => {
-    if (!available) return;
+
 
     // Simulate a system-applied missed status by writing directly to DB
     var now = new Date();
@@ -606,7 +595,7 @@ describe('status transition: missed status — system-only guard', () => {
 
 describe('allDay flag round-trip', () => {
   test('allDay=true persists as when=allday and reads back correctly', async () => {
-    if (!available) return;
+
     // REAL BUG (task.controller.js lines 889-892, 1117-1120): The D-14 backstop
     // was changed to set placement_mode='all_day' but NOT when='allday'.
     // Fix: restore `row.when = 'allday'` in the backstop.
@@ -630,7 +619,7 @@ describe('allDay flag round-trip', () => {
   });
 
   test('allDay=true with scheduledAt: when stays null (D-14 backstop does not fire)', async () => {
-    if (!available) return;
+
 
     // scheduledAt provided → timeWasSet=true → D-14 allDay backstop does NOT fire.
     // The server never auto-derives when from scheduledAt; when stays null unless
@@ -646,7 +635,7 @@ describe('allDay flag round-trip', () => {
   });
 
   test('task without allDay has when != allday by default', async () => {
-    if (!available) return;
+
 
     var createReq = mockReq({ body: { text: 'Regular task no allDay' } });
     var createRes = mockRes();
@@ -662,7 +651,7 @@ describe('allDay flag round-trip', () => {
 
 describe('terminal-status edge cases', () => {
   test('cancel on scheduled task succeeds', async () => {
-    if (!available) return;
+
 
     var createReq = mockReq({ body: { text: 'Cancel-me', scheduledAt: '2026-06-10T16:00:00Z' } });
     var createRes = mockRes();
@@ -680,7 +669,7 @@ describe('terminal-status edge cases', () => {
   });
 
   test('cancel on unscheduled task → 400 SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS', async () => {
-    if (!available) return;
+
 
     // 'cancel' is in TERMINAL_REQUIRES_SCHEDULE alongside 'done' and 'skip'
     var createReq = mockReq({ body: { text: 'Cancel unscheduled' } });
@@ -696,7 +685,7 @@ describe('terminal-status edge cases', () => {
   });
 
   test('done is idempotent — marking done twice does not error', async () => {
-    if (!available) return;
+
 
     var createReq = mockReq({ body: { text: 'Idempotent done', scheduledAt: '2026-06-11T09:00:00Z' } });
     var createRes = mockRes();
@@ -719,7 +708,7 @@ describe('terminal-status edge cases', () => {
   });
 
   test('disabled task cannot have status changed via updateTaskStatus', async () => {
-    if (!available) return;
+
 
     var now = new Date();
     var taskId = 'guard-disabled-' + Date.now();

@@ -28,6 +28,7 @@ const db = require('../src/db');
 const { enqueueScheduleRun, processUser, stopPollLoop, _lastEnqueueTime } = require('../src/scheduler/scheduleQueue');
 const { runScheduleAndPersist } = require('../src/scheduler/runSchedule');
 const { withLock } = require('../src/lib/sync-lock');
+const { assertDbAvailable } = require('./helpers/requireDB');
 
 const TEST_USER_IDS = ['user1', 'userA', 'userB', 'user_err', 'user_locked', 'user_retry'];
 
@@ -47,7 +48,7 @@ beforeAll(async () => {
   stopPollLoop();
 
   dbAvailable = await isDbAvailable();
-  if (!dbAvailable) return;
+  await assertDbAvailable(isDbAvailable);
 
   // Seed test users (schedule_queue has FK to users)
   try {
@@ -91,7 +92,7 @@ function clearDebounce(userId) {
 
 describe('scheduleQueue', () => {
   test('enqueue triggers scheduler run', async () => {
-    if (!dbAvailable) return;
+    await assertDbAvailable(isDbAvailable);
     await enqueueScheduleRun('user1', 'test');
     clearDebounce('user1');
     await processUser('user1');
@@ -101,7 +102,7 @@ describe('scheduleQueue', () => {
   });
 
   test('different users run independently', async () => {
-    if (!dbAvailable) return;
+    await assertDbAvailable(isDbAvailable);
     await enqueueScheduleRun('userA', 'test');
     await enqueueScheduleRun('userB', 'test');
     clearDebounce('userA');
@@ -112,7 +113,7 @@ describe('scheduleQueue', () => {
   });
 
   test('error in scheduler is caught (does not crash)', async () => {
-    if (!dbAvailable) return;
+    await assertDbAvailable(isDbAvailable);
     runScheduleAndPersist.mockRejectedValue(new Error('DB connection lost'));
     await enqueueScheduleRun('user_err', 'test');
     clearDebounce('user_err');
@@ -125,7 +126,7 @@ describe('scheduleQueue', () => {
   test('withLock not firing callback skips scheduler run', async () => {
     // When withLock resolves without calling fn (lock never acquired),
     // runScheduleAndPersist is not called and processUser returns without crashing.
-    if (!dbAvailable) return;
+    await assertDbAvailable(isDbAvailable);
     withLock.mockResolvedValue(null); // lock callback never invoked
     await enqueueScheduleRun('user_locked', 'test');
     clearDebounce('user_locked');
@@ -135,7 +136,7 @@ describe('scheduleQueue', () => {
   });
 
   test('lock fires callback on first try and scheduler runs', async () => {
-    if (!dbAvailable) return;
+    await assertDbAvailable(isDbAvailable);
     // withLock immediately invokes the callback (normal success path)
     withLock.mockImplementation(async function(userId, fn) {
       return fn();

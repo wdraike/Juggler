@@ -16,6 +16,7 @@ process.env.NODE_ENV = 'test';
 // de-rot 2026-06-09: '../src/db' path was wrong (tests/db/ → need ../../src/db)
 // and src/db.js exports a knex singleton, not a factory — removed the call.
 var knex = require('../../src/db');
+var { assertDbAvailable } = require('../helpers/requireDB');
 
 describe('cal_history table — schema validation', () => {
   let userId;
@@ -23,6 +24,7 @@ describe('cal_history table — schema validation', () => {
   let taskInstanceId;
 
   beforeAll(async () => {
+    await assertDbAvailable();
     // Create a test user
     // de-rot 2026-06-09: removed stale `sub` field (no such column in users table)
     userId = 'test-' + Date.now();

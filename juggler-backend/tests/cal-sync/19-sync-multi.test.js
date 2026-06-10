@@ -17,10 +17,11 @@ jest.mock('../../src/lib/sse-emitter', () => ({
 }));
 
 var {
-  db, TEST_USER_ID, isDbAvailable, hasGCalCredentials, hasMsftCredentials,
+  db, TEST_USER_ID, hasGCalCredentials, hasMsftCredentials,
   seedTestUser, cleanupTestData, destroyTestUser,
   getGCalToken, getMsftToken, mockReq, mockRes, gcalApi, msftCalApi
 } = require('./helpers/test-setup');
+var { assertDbAvailable } = require('../helpers/requireDB');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, deleteAllGCalTestEvents, deleteAllMSFTTestEvents } = require('./helpers/test-fixtures');
 var { getGCalEvent, getMSFTEvent, waitForPropagation } = require('./helpers/api-helpers');
@@ -32,7 +33,8 @@ var msftToken = null;
 var user = null;
 
 beforeAll(async () => {
-  if (!await isDbAvailable() || !hasGCalCredentials() || !hasMsftCredentials()) return;
+  await assertDbAvailable();
+  if (!hasGCalCredentials() || !hasMsftCredentials()) return;
   user = await seedTestUser(NO_APPLE);
   gcalToken = await getGCalToken();
   msftToken = await getMsftToken();

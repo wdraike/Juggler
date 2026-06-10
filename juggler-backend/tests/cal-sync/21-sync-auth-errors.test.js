@@ -8,6 +8,7 @@ jest.mock('../../src/lib/sse-emitter', () => ({ emit: jest.fn() }));
 var {
   db, TEST_USER_ID, isDbAvailable, seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes
 } = require('./helpers/test-setup');
+var { assertDbAvailable } = require('../helpers/requireDB');
 var { sync } = require('../../src/controllers/cal-sync.controller');
 
 var appleCalApi = require('../../src/lib/apple-cal-api');
@@ -15,7 +16,7 @@ var { encrypt } = require('../../src/lib/credential-encrypt');
 var gcalApi = require('../../src/lib/gcal-api');
 
 beforeAll(async () => {
-  if (!await isDbAvailable()) return;
+  await assertDbAvailable();
   await destroyTestUser();
 });
 afterEach(async () => {
@@ -29,7 +30,7 @@ afterAll(async () => {
 
 describe('BF-1: Auth 401 clears correct provider credentials', () => {
   it('Apple 401: clears apple_cal_password, not MSFT columns', async () => {
-    if (!await isDbAvailable()) return;
+    await assertDbAvailable();
     var user = await seedTestUser({
       gcal_refresh_token: null,
       msft_cal_refresh_token: 'should-not-be-cleared',
@@ -55,7 +56,7 @@ describe('BF-1: Auth 401 clears correct provider credentials', () => {
   });
 
   it('MSFT 401: clears msft_cal_ columns (not msft_ columns)', async () => {
-    if (!await isDbAvailable()) return;
+    await assertDbAvailable();
     var user = await seedTestUser({
       gcal_refresh_token: null,
       msft_cal_refresh_token: 'old-refresh',
@@ -80,7 +81,7 @@ describe('BF-1: Auth 401 clears correct provider credentials', () => {
 
 describe('GCal invalid_grant: gcal tokens cleared', () => {
   it('clears gcal_refresh_token and gcal_access_token on invalid_grant', async () => {
-    if (!await isDbAvailable()) return;
+    await assertDbAvailable();
     var user = await seedTestUser({
       gcal_refresh_token: 'revoked-token',
       msft_cal_refresh_token: null,
@@ -98,7 +99,7 @@ describe('GCal invalid_grant: gcal tokens cleared', () => {
 
 describe('GCal auth error: sync returns HTTP 200 (not 500)', () => {
   it('auth failure yields 200 with error info in body, not 500', async () => {
-    if (!await isDbAvailable()) return;
+    await assertDbAvailable();
     var user = await seedTestUser({
       gcal_refresh_token: 'revoked',
       msft_cal_refresh_token: null,

@@ -20,6 +20,7 @@ var {
   db, TEST_USER_ID, isDbAvailable, hasGCalCredentials,
   seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes, getGCalToken
 } = require('./helpers/test-setup');
+var { requireDB } = require('../helpers/requireDB');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, makeTaskId, makeLedgerRow, deleteGCalEvent } = require('./helpers/test-fixtures');
 var { getGCalEvent, waitForPropagation } = require('./helpers/api-helpers');
@@ -51,12 +52,7 @@ afterAll(async () => {
   await db.destroy();
 });
 
-function skipIfNoDB(fn) {
-  return async () => {
-    if (!await isDbAvailable()) return;
-    await fn();
-  };
-}
+
 
 function tomorrow(hours, minutes) {
   var d = new Date();
@@ -67,7 +63,7 @@ function tomorrow(hours, minutes) {
 
 describe('Sync Deletion Scenarios', () => {
 
-  test('event deleted from GCal: miss_count increments', skipIfNoDB(async () => {
+  test('event deleted from GCal: miss_count increments', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
 
@@ -112,7 +108,7 @@ describe('Sync Deletion Scenarios', () => {
     expect(taskStill).toBeTruthy();
   }));
 
-  test('after 3 syncs with event deleted: task deleted', skipIfNoDB(async () => {
+  test('after 3 syncs with event deleted: task deleted', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
 
@@ -160,7 +156,7 @@ describe('Sync Deletion Scenarios', () => {
     expect(ledgerAfter.status).toBe('deleted_remote');
   }));
 
-  test('task deleted from Strive: event deleted from GCal', skipIfNoDB(async () => {
+  test('task deleted from Strive: event deleted from GCal', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
 
@@ -203,7 +199,7 @@ describe('Sync Deletion Scenarios', () => {
     expect(!event || event.status === 'cancelled').toBeTruthy();
   }));
 
-  test('ingest-only: task deletion blocked', skipIfNoDB(async () => {
+  test('ingest-only: task deletion blocked', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
 
@@ -243,7 +239,7 @@ describe('Sync Deletion Scenarios', () => {
     expect(taskStill).toBeTruthy();
   }));
 
-  test('dependency transfer on deletion', skipIfNoDB(async () => {
+  test('dependency transfer on deletion', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
 
@@ -302,7 +298,7 @@ describe('Sync Deletion Scenarios', () => {
     expect(deps).not.toContain(taskB.id);
   }), 120000);
 
-  test('event outside sync window NOT counted as miss', skipIfNoDB(async () => {
+  test('event outside sync window NOT counted as miss', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
 
@@ -352,7 +348,7 @@ describe('Sync Deletion Scenarios', () => {
 
 describe('Provider-origin delete protection (D-08)', () => {
 
-  test('deleteTask: rejects deletion of provider-origin task with 403 PROVIDER_ORIGIN_DELETE_BLOCKED', skipIfNoDB(async () => {
+  test('deleteTask: rejects deletion of provider-origin task with 403 PROVIDER_ORIGIN_DELETE_BLOCKED', requireDB(async () => {
     var task = await makeTask({
       text: 'Test Task Provider Origin GCal',
       scheduled_at: new Date(Date.now() + 86400000),
@@ -371,7 +367,7 @@ describe('Provider-origin delete protection (D-08)', () => {
     expect(delRes._json.error).toMatch(/Google Calendar/);
   }));
 
-  test('deleteTask: allows deletion of juggler-origin task normally', skipIfNoDB(async () => {
+  test('deleteTask: allows deletion of juggler-origin task normally', requireDB(async () => {
     var task = await makeTask({
       text: 'Test Task Juggler Origin',
       scheduled_at: new Date(Date.now() + 86400000),
@@ -388,7 +384,7 @@ describe('Provider-origin delete protection (D-08)', () => {
     expect(delRes.statusCode).not.toBe(403);
   }));
 
-  test('deleteTask: allows deletion when no ledger row exists', skipIfNoDB(async () => {
+  test('deleteTask: allows deletion when no ledger row exists', requireDB(async () => {
     var task = await makeTask({
       text: 'Test Task No Ledger',
       scheduled_at: new Date(Date.now() + 86400000),
@@ -409,7 +405,7 @@ describe('Provider-origin delete protection (D-08)', () => {
 
 describe('Done-task reactivation — done_frozen reset (D-04)', () => {
 
-  test('updateTaskStatus: resets done_frozen ledger rows to active when task is reactivated', skipIfNoDB(async () => {
+  test('updateTaskStatus: resets done_frozen ledger rows to active when task is reactivated', requireDB(async () => {
     var { updateTaskStatus } = require('../../src/controllers/task.controller');
 
     var task = await makeTask({

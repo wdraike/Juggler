@@ -10,16 +10,16 @@
 var db = require('../src/db');
 var { v7: uuidv7 } = require('uuid');
 var taskController = require('../src/controllers/task.controller');
+var { assertDbAvailable } = require('./helpers/requireDB');
 
 jest.mock('../src/scheduler/scheduleQueue', () => ({
   enqueueScheduleRun: jest.fn()
 }));
 
-var available = false;
 var USER_ID = 'del-cal-link-test';
 
 beforeAll(async () => {
-  try { await db.raw('SELECT 1'); available = true; } catch (e) { return; }
+  await assertDbAvailable();
   await db('cal_sync_ledger').where('user_id', USER_ID).del();
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
@@ -31,17 +31,14 @@ beforeAll(async () => {
 }, 15000);
 
 afterAll(async () => {
-  if (available) {
-    await db('cal_sync_ledger').where('user_id', USER_ID).del();
-    await db('task_instances').where('user_id', USER_ID).del();
-    await db('task_masters').where('user_id', USER_ID).del();
-    await db('users').where('id', USER_ID).del();
-  }
+  await db('cal_sync_ledger').where('user_id', USER_ID).del();
+  await db('task_instances').where('user_id', USER_ID).del();
+  await db('task_masters').where('user_id', USER_ID).del();
+  await db('users').where('id', USER_ID).del();
   await db.destroy();
 });
 
 beforeEach(async () => {
-  if (!available) return;
   await db('cal_sync_ledger').where('user_id', USER_ID).del();
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
@@ -59,7 +56,6 @@ function mockRes() {
 
 describe('deleteTask: calendar-linked task cleanup', () => {
   test('retires ledger row to status=deleted_local instead of leaving it active', async () => {
-    if (!available) return;
     var taskWrite = require('../src/lib/tasks-write');
     var id = uuidv7();
     await taskWrite.insertTask(db, {
@@ -97,7 +93,6 @@ describe('deleteTask: calendar-linked task cleanup', () => {
   });
 
   test('non-cal-linked task delete: no ledger writes', async () => {
-    if (!available) return;
     var taskWrite = require('../src/lib/tasks-write');
     var id = uuidv7();
     await taskWrite.insertTask(db, {

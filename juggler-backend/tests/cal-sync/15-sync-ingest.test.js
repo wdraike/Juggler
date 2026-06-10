@@ -19,6 +19,7 @@ var {
   db, TEST_USER_ID, isDbAvailable, hasGCalCredentials,
   seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes, getGCalToken, gcalApi
 } = require('./helpers/test-setup');
+var { requireDB } = require('../helpers/requireDB');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, makeGCalEvent, makeLedgerRow, deleteGCalEvent } = require('./helpers/test-fixtures');
 var { getGCalEvent, waitForPropagation } = require('./helpers/api-helpers');
@@ -50,13 +51,6 @@ afterAll(async () => {
   await destroyTestUser();
   await db.destroy();
 });
-
-function skipIfNoDB(fn) {
-  return async () => {
-    if (!await isDbAvailable()) return;
-    await fn();
-  };
-}
 
 function tomorrow(hours, minutes) {
   var d = new Date();
@@ -93,7 +87,7 @@ async function pulledTaskForEvent(gcalEventId) {
 
 describe('Sync Ingest-Only Mode', () => {
 
-  test('push phase skipped', skipIfNoDB(async () => {
+  test('push phase skipped', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
     await setIngestOnly();
@@ -125,7 +119,7 @@ describe('Sync Ingest-Only Mode', () => {
     }
   }));
 
-  test('events pulled as tasks', skipIfNoDB(async () => {
+  test('events pulled as tasks', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
     await setIngestOnly();
@@ -152,7 +146,7 @@ describe('Sync Ingest-Only Mode', () => {
     expect(task.text).toBe('Test Event Ingest Pull');
   }));
 
-  test('task edits NOT pushed back', skipIfNoDB(async () => {
+  test('task edits NOT pushed back', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
     await setIngestOnly();
@@ -193,7 +187,7 @@ describe('Sync Ingest-Only Mode', () => {
     expect(gcalEvent.summary).toBe('Test Event Ingest No Pushback');
   }));
 
-  test('juggler-origin task not clobbered in ingest-only', skipIfNoDB(async () => {
+  test('juggler-origin task not clobbered in ingest-only', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
     await setIngestOnly();
@@ -234,7 +228,7 @@ describe('Sync Ingest-Only Mode', () => {
     expect(taskAfter.placement_mode).toBe('anytime');
   }));
 
-  test('conflict: provider always wins', skipIfNoDB(async () => {
+  test('conflict: provider always wins', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
     await setIngestOnly();

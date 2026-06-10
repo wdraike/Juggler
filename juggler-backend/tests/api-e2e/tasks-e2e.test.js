@@ -6,7 +6,7 @@
  *   - Starts a local JWKS server so jwt-auth middleware verifies our RS256 tokens
  *   - Starts a local payment-service mock so resolvePlanFeatures resolves correctly
  *
- * All tests skip gracefully when the test DB is unavailable.
+ * All tests FAIL LOUD when the test DB is unavailable (TEST-FR-001).
  *
  * Response shape notes (from actual task.controller.js):
  *   POST /api/tasks  → 201 { task: { id, text, ... } }
@@ -25,6 +25,7 @@
 
 const request = require('supertest');
 const harness = require('./server-setup');
+const { requireDB } = require('../helpers/requireDB');
 
 let app;
 let token;
@@ -39,10 +40,7 @@ afterAll(async () => {
   await harness.destroy();
 }, 15000);
 
-// Helper: skip the current test if the DB is unavailable
-async function skipIfNoDB() {
-  return !(await harness.isAvailable());
-}
+const harnessProbe = () => harness.isAvailable();
 
 // ── Full task lifecycle: CREATE → GET-LIST → GET-SINGLE → UPDATE → DELETE ────
 
@@ -52,9 +50,7 @@ describe('Tasks API — E2E (real Express + real DB)', () => {
 
   // ── POST /api/tasks — create ───────────────────────────────────────────────
 
-  test('POST /api/tasks creates a task and returns 201 with id', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('POST /api/tasks creates a task and returns 201 with id', requireDB(async () => {
     const res = await request(app)
       .post('/api/tasks')
       .set('Authorization', `Bearer ${token}`)
@@ -72,13 +68,11 @@ describe('Tasks API — E2E (real Express + real DB)', () => {
     expect(masterRow).toBeDefined();
     expect(masterRow.text).toBe('E2E lifecycle task');
     expect(masterRow.user_id).toBe(harness.TEST_USER_ID);
-  });
+  }, harnessProbe));
 
   // ── GET /api/tasks — list ──────────────────────────────────────────────────
 
-  test('GET /api/tasks returns array including the created task', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('GET /api/tasks returns array including the created task', requireDB(async () => {
     const res = await request(app)
       .get('/api/tasks')
       .set('Authorization', `Bearer ${token}`);
@@ -88,13 +82,11 @@ describe('Tasks API — E2E (real Express + real DB)', () => {
     expect(Array.isArray(res.body.tasks)).toBe(true);
     const taskIds = res.body.tasks.map(t => t.id);
     expect(taskIds).toContain(createdTaskId);
-  });
+  }, harnessProbe));
 
   // ── GET /api/tasks/:id — single fetch ─────────────────────────────────────
 
-  test('GET /api/tasks/:id returns the specific task', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('GET /api/tasks/:id returns the specific task', requireDB(async () => {
     const res = await request(app)
       .get(`/api/tasks/${createdTaskId}`)
       .set('Authorization', `Bearer ${token}`);
@@ -103,13 +95,11 @@ describe('Tasks API — E2E (real Express + real DB)', () => {
     expect(res.body).toHaveProperty('task');
     expect(res.body.task.id).toBe(createdTaskId);
     expect(res.body.task.text).toBe('E2E lifecycle task');
-  });
+  }, harnessProbe));
 
   // ── PUT /api/tasks/:id — update ────────────────────────────────────────────
 
-  test('PUT /api/tasks/:id updates the task text and reflects in DB', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('PUT /api/tasks/:id updates the task text and reflects in DB', requireDB(async () => {
     const res = await request(app)
       .put(`/api/tasks/${createdTaskId}`)
       .set('Authorization', `Bearer ${token}`)
@@ -123,13 +113,11 @@ describe('Tasks API — E2E (real Express + real DB)', () => {
     const masterRow = await db('task_masters').where('id', createdTaskId).first();
     expect(masterRow).toBeDefined();
     expect(masterRow.text).toBe('E2E lifecycle task (updated)');
-  });
+  }, harnessProbe));
 
   // ── DELETE /api/tasks/:id — delete ────────────────────────────────────────
 
-  test('DELETE /api/tasks/:id removes task from DB', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('DELETE /api/tasks/:id removes task from DB', requireDB(async () => {
     const res = await request(app)
       .delete(`/api/tasks/${createdTaskId}`)
       .set('Authorization', `Bearer ${token}`);
@@ -143,13 +131,11 @@ describe('Tasks API — E2E (real Express + real DB)', () => {
     const masterRow = await db('task_masters').where('id', createdTaskId).first();
     expect(instanceRow).toBeUndefined();
     expect(masterRow).toBeUndefined();
-  });
+  }, harnessProbe));
 
   // ── PUT /api/tasks/:id/unpin — unpin a pinned task ────────────────────────
 
-  test('PUT /api/tasks/:id/unpin works on a date-pinned task', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('PUT /api/tasks/:id/unpin works on a date-pinned task', requireDB(async () => {
     // Create a task with a pinned date
     const createRes = await request(app)
       .post('/api/tasks')
@@ -172,15 +158,13 @@ describe('Tasks API — E2E (real Express + real DB)', () => {
     const instanceRow = await db('task_instances').where('id', pinnedId).first();
     expect(instanceRow).toBeDefined();
     expect(!instanceRow.date_pinned).toBe(true); // falsy: 0 or null
-  });
+  }, harnessProbe));
 });
 
 // ── Cross-user isolation ───────────────────────────────────────────────────────
 
 describe('Tasks API — cross-user isolation', () => {
-  test('User A cannot access User B tasks (GET by id returns 404)', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('User A cannot access User B tasks (GET by id returns 404)', requireDB(async () => {
     // Create a task as the test user (User A)
     const createRes = await request(app)
       .post('/api/tasks')
@@ -203,11 +187,9 @@ describe('Tasks API — cross-user isolation', () => {
 
     // Should be 404: task not found for this user (controller filters by user_id)
     expect(res.status).toBe(404);
-  });
+  }, harnessProbe));
 
-  test('GET /api/tasks for User B returns empty list (no cross-user leak)', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('GET /api/tasks for User B returns empty list (no cross-user leak)', requireDB(async () => {
     const userBToken = await harness.makeJWT({
       sub: 'e2e-user-b-999',
       email: 'userb@e2e-juggler.local',
@@ -223,5 +205,5 @@ describe('Tasks API — cross-user isolation', () => {
     // None of these tasks should belong to User A
     const userATaskIds = tasks.filter(t => t.userId === harness.TEST_USER_ID || t.user_id === harness.TEST_USER_ID);
     expect(userATaskIds.length).toBe(0);
-  });
+  }, harnessProbe));
 });

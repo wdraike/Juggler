@@ -8,6 +8,7 @@ var db = require('../src/db');
 var { rowToTask, taskToRow, buildSourceMap, TEMPLATE_FIELDS } = require('../src/controllers/task.controller');
 var { enqueueScheduleRun } = require('../src/scheduler/scheduleQueue');
 var tasksWrite = require('../src/lib/tasks-write');
+var { assertDbAvailable } = require('./helpers/requireDB');
 
 var available = false;
 var USER_ID = 'crud-test-user-001';
@@ -18,13 +19,8 @@ jest.mock('../src/scheduler/scheduleQueue', () => ({
 }));
 
 beforeAll(async () => {
-  try {
-    await db.raw('SELECT 1');
-    available = true;
-  } catch (e) {
-    console.warn('Test DB not available:', e.message);
-    return;
-  }
+  await assertDbAvailable();
+  available = true;
   // Seed test user
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();

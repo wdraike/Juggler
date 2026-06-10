@@ -12,18 +12,14 @@ var {
   insertTask, updateTaskById, deleteTaskById,
   splitUpdateFields, isTemplate, isInstance
 } = require('../src/lib/tasks-write');
+var { assertDbAvailable } = require('./helpers/requireDB');
 
 var available = false;
 var USER_ID = 'write-helper-test-user';
 
 beforeAll(async () => {
-  try {
-    await db.raw('SELECT 1');
-    available = true;
-  } catch (e) {
-    console.warn('Test DB not available:', e.message);
-    return;
-  }
+  await assertDbAvailable();
+  available = true;
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
   await db('users').where('id', USER_ID).del();

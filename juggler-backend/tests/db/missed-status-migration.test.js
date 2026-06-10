@@ -6,6 +6,7 @@
 //   the singleton query object) → corrected to '../src/db' (the Knex singleton).
 
 const knex = require('../../src/db');
+var { assertDbAvailable } = require('../helpers/requireDB');
 
 async function checkConstraintAccepts(status) {
   // We can't easily insert without a real user/master FK chain, so we assert
@@ -72,6 +73,10 @@ async function calHistoryStatusEnumValid() {
          CalHistoryStatus.MISSED === 'MISSED' &&
          CalHistoryStatus.CANCELLED === 'CANCELLED';
 }
+
+beforeAll(async () => {
+  await assertDbAvailable();
+});
 
 afterAll(async () => {
   await knex.destroy();

@@ -19,6 +19,7 @@ var {
   db, TEST_USER_ID, TEST_TIMEZONE, isDbAvailable, hasGCalCredentials, hasMsftCredentials,
   seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes, getGCalToken, getMsftToken
 } = require('./helpers/test-setup');
+var { requireDB } = require('../helpers/requireDB');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, makeTaskId, makeLedgerRow } = require('./helpers/test-fixtures');
 var { getGCalEvent, getMSFTEvent, waitForPropagation } = require('./helpers/api-helpers');
@@ -62,13 +63,6 @@ afterAll(async () => {
   await db.destroy();
 });
 
-function skipIfNoDB(fn) {
-  return async () => {
-    if (!await isDbAvailable()) return;
-    await fn();
-  };
-}
-
 function tomorrow(hours, minutes) {
   var d = new Date();
   d.setDate(d.getDate() + 1);
@@ -78,7 +72,7 @@ function tomorrow(hours, minutes) {
 
 describe('Sync Push: Strive -> Calendar', () => {
 
-  test('new task with scheduled_at -> event created on GCal', skipIfNoDB(async () => {
+  test('new task with scheduled_at -> event created on GCal', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
     var task = await makeTask({
@@ -107,7 +101,7 @@ describe('Sync Push: Strive -> Calendar', () => {
     expect(event.summary).toBe('Test Task GCal Push');
   }));
 
-  test('new task -> event created on MSFT', skipIfNoDB(async () => {
+  test('new task -> event created on MSFT', requireDB(async () => {
     if (!hasMsftCredentials()) return;
     user = await seedTestUser({ gcal_refresh_token: null });
     var task = await makeTask({
@@ -134,7 +128,7 @@ describe('Sync Push: Strive -> Calendar', () => {
     expect(event.subject).toBe('Test Task MSFT Push');
   }));
 
-  test('done tasks NOT pushed', skipIfNoDB(async () => {
+  test('done tasks NOT pushed', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
     var task = await makeTask({
@@ -153,7 +147,7 @@ describe('Sync Push: Strive -> Calendar', () => {
     expect(updated.gcal_event_id).toBeFalsy();
   }));
 
-  test('recurring_template NOT pushed', skipIfNoDB(async () => {
+  test('recurring_template NOT pushed', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
     var task = await makeTask({
@@ -173,7 +167,7 @@ describe('Sync Push: Strive -> Calendar', () => {
     expect(updated.gcal_event_id).toBeFalsy();
   }));
 
-  test('task without scheduled_at NOT pushed', skipIfNoDB(async () => {
+  test('task without scheduled_at NOT pushed', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
     var task = await makeTask({
@@ -191,7 +185,7 @@ describe('Sync Push: Strive -> Calendar', () => {
     expect(updated.gcal_event_id).toBeFalsy();
   }));
 
-  test('past task NOT pushed', skipIfNoDB(async () => {
+  test('past task NOT pushed', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
     var pastDate = new Date();
@@ -213,7 +207,7 @@ describe('Sync Push: Strive -> Calendar', () => {
     expect(updated.gcal_event_id).toBeFalsy();
   }));
 
-  test('batch push of 5+ tasks', skipIfNoDB(async () => {
+  test('batch push of 5+ tasks', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
     var tasks = [];
@@ -241,7 +235,7 @@ describe('Sync Push: Strive -> Calendar', () => {
     }
   }));
 
-  test('ledger entry created after push', skipIfNoDB(async () => {
+  test('ledger entry created after push', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
     var task = await makeTask({
@@ -315,7 +309,7 @@ describe('Sync Push: field-level assertions', () => {
     user = await seedTestUser();
   });
 
-  test('title: event.summary matches task.text exactly', skipIfNoDB(async () => {
+  test('title: event.summary matches task.text exactly', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     var task = await makeTask({
       text: 'Field Assertion — Title Check',
@@ -330,7 +324,7 @@ describe('Sync Push: field-level assertions', () => {
     assertGCalEventMatchesTask(event, taskRow, TEST_TIMEZONE);
   }));
 
-  test('start + end + duration: event spans exactly task.dur minutes', skipIfNoDB(async () => {
+  test('start + end + duration: event spans exactly task.dur minutes', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     var task = await makeTask({
       text: 'Field Assertion — Duration Check',
@@ -346,7 +340,7 @@ describe('Sync Push: field-level assertions', () => {
     assertGCalEventMatchesTask(event, taskRow, TEST_TIMEZONE);
   }));
 
-  test('description: project + notes + url all present; footer always present', skipIfNoDB(async () => {
+  test('description: project + notes + url all present; footer always present', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     var task = await makeTask({
       text: 'Field Assertion — Description Check',
@@ -368,7 +362,7 @@ describe('Sync Push: field-level assertions', () => {
     assertGCalEventMatchesTask(event, taskRow, TEST_TIMEZONE);
   }));
 
-  test('description: no spurious fields when project/notes/url are absent', skipIfNoDB(async () => {
+  test('description: no spurious fields when project/notes/url are absent', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     var task = await makeTask({
       text: 'Field Assertion — Empty Description',
@@ -390,7 +384,7 @@ describe('Sync Push: field-level assertions', () => {
     assertGCalEventMatchesTask(event, taskRow, TEST_TIMEZONE);
   }));
 
-  test('done task: summary has ✓ prefix and transparency=transparent', skipIfNoDB(async () => {
+  test('done task: summary has ✓ prefix and transparency=transparent', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     // Phase 3 (new-task push) skips done tasks, so we must push it as pending
     // first, then mark done and re-sync so Phase 2 (update path) propagates.
@@ -427,7 +421,7 @@ describe('Sync Push: field-level assertions', () => {
     // future done tasks, so the event start intentionally differs from the DB value.
   }));
 
-  test('marker task: transparency=transparent', skipIfNoDB(async () => {
+  test('marker task: transparency=transparent', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     var task = await makeTask({
       text: 'Field Assertion — Marker Task',
@@ -444,7 +438,7 @@ describe('Sync Push: field-level assertions', () => {
     assertGCalEventMatchesTask(event, taskRow, TEST_TIMEZONE);
   }));
 
-  test('normal task: no transparency (opaque or absent)', skipIfNoDB(async () => {
+  test('normal task: no transparency (opaque or absent)', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     var task = await makeTask({
       text: 'Field Assertion — Normal Task',
@@ -461,7 +455,7 @@ describe('Sync Push: field-level assertions', () => {
     assertGCalEventMatchesTask(event, taskRow, TEST_TIMEZONE);
   }));
 
-  test('timezone: event start.timeZone matches user timezone', skipIfNoDB(async () => {
+  test('timezone: event start.timeZone matches user timezone', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     var task = await makeTask({
       text: 'Field Assertion — Timezone Check',
@@ -476,7 +470,7 @@ describe('Sync Push: field-level assertions', () => {
     expect(event.end.timeZone).toBe(TEST_TIMEZONE);
   }));
 
-  test('update: edit task -> all changed fields reflected on GCal', skipIfNoDB(async () => {
+  test('update: edit task -> all changed fields reflected on GCal', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     var task = await makeTask({
       text: 'Field Assertion — Pre-Edit',
@@ -538,7 +532,7 @@ describe('Ledger orphan prune (D-09)', () => {
     user = await seedTestUser();
   });
 
-  test('orphan prune: deleted_local ledger rows with no task and no event are removed after sync', skipIfNoDB(async () => {
+  test('orphan prune: deleted_local ledger rows with no task and no event are removed after sync', requireDB(async () => {
     // Row A: true orphan — deleted_local with no task and no event → MUST be pruned
     var rowA = await makeLedgerRow({
       user_id: user.id,

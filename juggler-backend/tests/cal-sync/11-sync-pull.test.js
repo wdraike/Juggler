@@ -19,6 +19,7 @@ var {
   db, TEST_USER_ID, TEST_TIMEZONE, isDbAvailable, hasGCalCredentials, hasMsftCredentials,
   seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes, getGCalToken, getMsftToken
 } = require('./helpers/test-setup');
+var { requireDB } = require('../helpers/requireDB');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, makeGCalEvent, makeMSFTEvent, deleteGCalEvent, deleteMSFTEvent } = require('./helpers/test-fixtures');
 var { getGCalEvent, waitForPropagation } = require('./helpers/api-helpers');
@@ -71,13 +72,6 @@ afterAll(async () => {
   await db.destroy();
 });
 
-function skipIfNoDB(fn) {
-  return async () => {
-    if (!await isDbAvailable()) return;
-    await fn();
-  };
-}
-
 function tomorrowISO(hours, minutes) {
   var d = new Date();
   d.setDate(d.getDate() + 1);
@@ -100,7 +94,7 @@ function tomorrowDateStr() {
 
 describe('Sync Pull: Calendar -> Strive', () => {
 
-  test('new GCal event -> task created with correct fields', skipIfNoDB(async () => {
+  test('new GCal event -> task created with correct fields', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
 
@@ -125,7 +119,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     expect(task.when).toBe('fixed');
   }));
 
-  test('new MSFT event -> task created', skipIfNoDB(async () => {
+  test('new MSFT event -> task created', requireDB(async () => {
     if (!hasMsftCredentials()) return;
     user = await seedTestUser({ gcal_refresh_token: null });
 
@@ -155,7 +149,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     expect(task.when).toBe('fixed');
   }));
 
-  test('event title -> task.text', skipIfNoDB(async () => {
+  test('event title -> task.text', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
 
@@ -176,7 +170,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
   }));
 
-  test('event duration -> task.dur', skipIfNoDB(async () => {
+  test('event duration -> task.dur', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
 
@@ -197,7 +191,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
   }));
 
-  test('event start time -> task.scheduled_at (UTC)', skipIfNoDB(async () => {
+  test('event start time -> task.scheduled_at (UTC)', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
 
@@ -222,7 +216,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
   }));
 
-  test('transparent event -> task.marker = true', skipIfNoDB(async () => {
+  test('transparent event -> task.marker = true', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
 
@@ -244,7 +238,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
   }));
 
-  test('all-day event -> when=allday', skipIfNoDB(async () => {
+  test('all-day event -> when=allday', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
 
@@ -265,7 +259,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
   }));
 
-  test('ledger entry created with origin=provider', skipIfNoDB(async () => {
+  test('ledger entry created with origin=provider', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
 
@@ -290,7 +284,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     expect(ledger.last_pulled_hash).toBeTruthy();
   }));
 
-  test('duplicate prevention: event with same text+date not imported twice', skipIfNoDB(async () => {
+  test('duplicate prevention: event with same text+date not imported twice', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser();
 

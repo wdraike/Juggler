@@ -13,6 +13,8 @@
  * Skip these tests if no MySQL is available (CI without Docker).
  */
 
+var { assertDbAvailable } = require('./helpers/requireDB');
+
 var knex;
 var runScheduleModule;
 
@@ -26,6 +28,7 @@ var DB_PASS = process.env.TEST_DB_PASSWORD || '';
 var dbAvailable = false;
 
 beforeAll(async function() {
+  await assertDbAvailable();
   try {
     knex = require('knex')({
       client: 'mysql2',

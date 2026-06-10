@@ -6,7 +6,7 @@
  *   GET  /api/schedule/placements → reads persisted placements
  *   POST /api/schedule/nudge → enqueues a scheduler run; returns { queued: true }
  *
- * All tests skip gracefully when the test DB is unavailable.
+ * All tests FAIL LOUD when the test DB is unavailable (TEST-FR-001).
  *
  * Note: /api/schedule/run is SYNCHRONOUS — it persists scheduled_at values and
  * returns immediately (no async queue draining needed). The sync_locks table
@@ -17,6 +17,7 @@
 
 const request = require('supertest');
 const harness = require('./server-setup');
+const { requireDB } = require('../helpers/requireDB');
 
 let app, token;
 
@@ -30,9 +31,7 @@ afterAll(async () => {
   await harness.destroy();
 }, 15000);
 
-async function skipIfNoDB() {
-  return !(await harness.isAvailable());
-}
+const harnessProbe = () => harness.isAvailable();
 
 // ── Shared task id — created in beforeEach so each schedule test is independent
 
@@ -40,7 +39,7 @@ describe('Schedule API — E2E', () => {
   let taskId;
 
   beforeEach(async () => {
-    if (await skipIfNoDB()) return;
+    if (!(await harness.isAvailable())) return;
 
     // Create a fresh schedulable task for each test
     const res = await request(app)
@@ -55,9 +54,7 @@ describe('Schedule API — E2E', () => {
 
   // ── POST /api/schedule/run ─────────────────────────────────────────────────
 
-  test('POST /api/schedule/run returns 200 with dayPlacements object', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('POST /api/schedule/run returns 200 with dayPlacements object', requireDB(async () => {
     const res = await request(app)
       .post('/api/schedule/run')
       .set('Authorization', `Bearer ${token}`)
@@ -68,10 +65,9 @@ describe('Schedule API — E2E', () => {
     expect(typeof res.body.dayPlacements).toBe('object');
     expect(res.body).toHaveProperty('unplaced');
     expect(Array.isArray(res.body.unplaced)).toBe(true);
-  }, 20000);
+  }, harnessProbe), 20000);
 
-  test('POST /api/schedule/run writes scheduled_at to task_instances for placed tasks', async () => {
-    if (await skipIfNoDB()) return;
+  test('POST /api/schedule/run writes scheduled_at to task_instances for placed tasks', requireDB(async () => {
     if (!taskId) return; // beforeEach task creation failed (DB issue)
 
     // Run the scheduler
@@ -91,13 +87,11 @@ describe('Schedule API — E2E', () => {
     // If task was placed, scheduled_at should be set; if unplaced, it may be null.
     // Verify the row exists and has the correct user_id.
     expect(instanceRow.user_id).toBe(harness.TEST_USER_ID);
-  }, 20000);
+  }, harnessProbe), 20000);
 
   // ── GET /api/schedule/placements ──────────────────────────────────────────
 
-  test('GET /api/schedule/placements returns 200 with placements structure', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('GET /api/schedule/placements returns 200 with placements structure', requireDB(async () => {
     // Run first so placements cache is populated
     await request(app)
       .post('/api/schedule/run')
@@ -113,18 +107,16 @@ describe('Schedule API — E2E', () => {
     // Response is the same shape as /run: { dayPlacements, unplaced, ... }
     expect(res.body).toHaveProperty('dayPlacements');
     expect(typeof res.body.dayPlacements).toBe('object');
-  }, 20000);
+  }, harnessProbe), 20000);
 
   // ── POST /api/schedule/nudge ───────────────────────────────────────────────
 
-  test('POST /api/schedule/nudge enqueues and returns 200 { queued: true }', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('POST /api/schedule/nudge enqueues and returns 200 { queued: true }', requireDB(async () => {
     const res = await request(app)
       .post('/api/schedule/nudge')
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
     expect(res.body.queued).toBe(true);
-  }, 10000);
+  }, harnessProbe), 10000);
 });

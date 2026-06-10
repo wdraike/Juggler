@@ -7,7 +7,7 @@
  *   3. TTL expiry — expired rows are swept before INSERT IGNORE; the code
  *      is reclaimable once the sweep removes the stale row.
  *
- * Uses the real MySQL test DB when available; skips automatically otherwise.
+ * Uses the real MySQL test DB (TEST-FR-001: fails loud when unavailable).
  * DB ops use raw SQL to backdate expires_at — same pattern as syncLockStartup.test.js.
  *
  * RED phase: these tests FAIL until msft-cal.controller.js replaces the
@@ -19,8 +19,8 @@ process.env.NODE_ENV = 'test';
 
 var testDb = require('./helpers/testDb');
 var crypto = require('crypto');
+var { assertDbAvailable } = require('./helpers/requireDB');
 
-var hasDb = false;
 var db;
 
 // ── Helper: compute the hash markCodeUsed() stores ───────────────────────
@@ -54,23 +54,14 @@ var controller;
 var markCodeUsed;
 
 beforeAll(async function() {
-  hasDb = await testDb.isAvailable();
-  if (hasDb) {
-    db = testDb.getDb();
+  await assertDbAvailable(testDb.isAvailable);
+  db = testDb.getDb();
 
-    // Ensure the oauth_code_nonces table exists (migration must have run)
-    try {
-      await db.raw('SELECT 1 FROM oauth_code_nonces LIMIT 1');
-    } catch (e) {
-      // Table doesn't exist — tests will fail with a meaningful error
-      console.warn('[msftCalDedup] oauth_code_nonces table missing — run migrations first');
-      hasDb = false;
-      return;
-    }
+  // Ensure the oauth_code_nonces table exists (migration must have run)
+  await db.raw('SELECT 1 FROM oauth_code_nonces LIMIT 1');
 
-    // Clean slate for our test codes
-    await db.raw("DELETE FROM oauth_code_nonces WHERE code_hash LIKE 'test-%'").catch(function() {});
-  }
+  // Clean slate for our test codes
+  await db.raw("DELETE FROM oauth_code_nonces WHERE code_hash LIKE 'test-%'").catch(function() {});
 
   // Import the controller.  In RED state the in-memory Set is still present;
   // the _internal export will not exist and markCodeUsed will be undefined.
@@ -79,14 +70,8 @@ beforeAll(async function() {
 });
 
 afterAll(async function() {
-  if (hasDb) {
-    await testDb.destroy();
-  }
+  await testDb.destroy();
 });
-
-function maybeTest(name, fn, timeout) {
-  return (hasDb ? test : test.skip)(name, fn, timeout || 10000);
-}
 
 // ── Test 1: First call wins; duplicate call on same instance returns false ──
 //
@@ -94,7 +79,7 @@ function maybeTest(name, fn, timeout) {
 // markCodeUsed returns true. If the browser sends it again (same instance),
 // markCodeUsed must return false (the DB row is already there).
 
-maybeTest('first markCodeUsed call returns true; duplicate on same instance returns false', async function() {
+test('first markCodeUsed call returns true; duplicate on same instance returns false', async function() {
   // RED check: markCodeUsed must be exported for direct testing
   expect(typeof markCodeUsed).toBe('function');
 
@@ -129,7 +114,7 @@ maybeTest('first markCodeUsed call returns true; duplicate on same instance retu
 // browser's retry to a different Cloud Run pod. The in-memory Set on the old
 // implementation would have MISSED this; the DB row does not.
 
-maybeTest('cross-instance dedup: Instance B returns false for a code already used by Instance A', async function() {
+test('cross-instance dedup: Instance B returns false for a code already used by Instance A', async function() {
   expect(typeof markCodeUsed).toBe('function');
 
   var code = 'test-code-cross-instance-' + Date.now();
@@ -177,7 +162,7 @@ maybeTest('cross-instance dedup: Instance B returns false for a code already use
 //
 // This verifies the sweep-before-insert pattern handles the TTL-expiry case.
 
-maybeTest('markCodeUsed sweeps expired rows and succeeds for the same code hash', async function() {
+test('markCodeUsed sweeps expired rows and succeeds for the same code hash', async function() {
   expect(typeof markCodeUsed).toBe('function');
 
   var code = 'test-code-ttl-expiry-' + Date.now();

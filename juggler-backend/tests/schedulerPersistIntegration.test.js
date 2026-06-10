@@ -7,9 +7,11 @@
 
 var testDb = require('./helpers/testDb');
 var tasksWrite = require('../src/lib/tasks-write');
+var { assertDbAvailable } = require('./helpers/requireDB');
 var available = false;
 
 beforeAll(async () => {
+  await assertDbAvailable();
   available = await testDb.isAvailable();
   if (!available) {
     console.warn('Test DB not available. Run: docker compose -f docker-compose.test.yml up -d');

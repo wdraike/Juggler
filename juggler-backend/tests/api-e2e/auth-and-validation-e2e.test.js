@@ -12,7 +12,7 @@
  *   - Cross-user isolation: User B cannot PUT/DELETE User A's task → 404
  *   - Rate limiter smoke test (documents actual behavior)
  *
- * All tests skip gracefully when the test DB is unavailable.
+ * All tests FAIL LOUD when the test DB is unavailable (TEST-FR-001).
  *
  * Auth middleware chain:
  *   1. auth-client.authenticateJWT('juggler'):
@@ -30,6 +30,7 @@
 
 const request = require('supertest');
 const harness = require('./server-setup');
+const { requireDB } = require('../helpers/requireDB');
 
 let app, token;
 
@@ -43,39 +44,31 @@ afterAll(async () => {
   await harness.destroy();
 }, 15000);
 
-async function skipIfNoDB() {
-  return !(await harness.isAvailable());
-}
+const harnessProbe = () => harness.isAvailable();
 
 describe('Auth + Validation — E2E', () => {
 
   // ── 401: Missing token ─────────────────────────────────────────────────────
 
-  test('missing Authorization header → 401', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('missing Authorization header → 401', requireDB(async () => {
     const res = await request(app).get('/api/tasks');
     expect(res.status).toBe(401);
     expect(res.body).toHaveProperty('error');
-  });
+  }, harnessProbe));
 
   // ── 401: Malformed token ───────────────────────────────────────────────────
 
-  test('malformed bearer token → 401', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('malformed bearer token → 401', requireDB(async () => {
     const res = await request(app)
       .get('/api/tasks')
       .set('Authorization', 'Bearer not.a.real.jwt');
     expect(res.status).toBe(401);
     expect(res.body).toHaveProperty('error');
-  });
+  }, harnessProbe));
 
   // ── 401: Expired token ─────────────────────────────────────────────────────
 
-  test('expired token → 401', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('expired token → 401', requireDB(async () => {
     const expiredToken = await harness.makeJWT({ expired: true });
     const res = await request(app)
       .get('/api/tasks')
@@ -83,13 +76,11 @@ describe('Auth + Validation — E2E', () => {
     // ERR_JWT_EXPIRED → 401 { error: 'Token expired', code: 'TOKEN_EXPIRED' }
     expect(res.status).toBe(401);
     expect(res.body).toHaveProperty('error');
-  });
+  }, harnessProbe));
 
   // ── 403: Missing app access ────────────────────────────────────────────────
 
-  test('valid token without juggler in apps claim → 403', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('valid token without juggler in apps claim → 403', requireDB(async () => {
     // apps: [] means no app access — auth-client returns 403
     const noAppsToken = await harness.makeJWT({ apps: [] });
     const res = await request(app)
@@ -97,26 +88,22 @@ describe('Auth + Validation — E2E', () => {
       .set('Authorization', `Bearer ${noAppsToken}`);
     expect(res.status).toBe(403);
     expect(res.body).toHaveProperty('error');
-  });
+  }, harnessProbe));
 
   // ── 200: Valid token ───────────────────────────────────────────────────────
 
-  test('valid RS256 token with correct claims → 200', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('valid RS256 token with correct claims → 200', requireDB(async () => {
     const res = await request(app)
       .get('/api/tasks')
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('tasks');
     expect(Array.isArray(res.body.tasks)).toBe(true);
-  });
+  }, harnessProbe));
 
   // ── 400: Zod schema validation — wrong types ───────────────────────────────
 
-  test('POST /api/tasks with text as number → 400 Zod rejection', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('POST /api/tasks with text as number → 400 Zod rejection', requireDB(async () => {
     const res = await request(app)
       .post('/api/tasks')
       .set('Authorization', `Bearer ${token}`)
@@ -125,13 +112,11 @@ describe('Auth + Validation — E2E', () => {
 
     expect(res.status).toBe(400);
     expect(res.body).toHaveProperty('error');
-  });
+  }, harnessProbe));
 
   // ── 400: Zod schema validation — text too short ────────────────────────────
 
-  test('POST /api/tasks with empty text string → 400 Zod rejection', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('POST /api/tasks with empty text string → 400 Zod rejection', requireDB(async () => {
     const res = await request(app)
       .post('/api/tasks')
       .set('Authorization', `Bearer ${token}`)
@@ -140,13 +125,11 @@ describe('Auth + Validation — E2E', () => {
 
     expect(res.status).toBe(400);
     expect(res.body).toHaveProperty('error');
-  });
+  }, harnessProbe));
 
   // ── 400: Zod schema validation — invalid status enum ──────────────────────
 
-  test('PUT /api/tasks/:id with invalid status enum → 400', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('PUT /api/tasks/:id with invalid status enum → 400', requireDB(async () => {
     // Create a task first
     const createRes = await request(app)
       .post('/api/tasks')
@@ -163,13 +146,11 @@ describe('Auth + Validation — E2E', () => {
 
     expect([400, 422]).toContain(res.status);
     expect(res.body).toHaveProperty('error');
-  });
+  }, harnessProbe));
 
   // ── Cross-user isolation: PUT/DELETE ──────────────────────────────────────
 
-  test('User B cannot PUT User A task (404 — controller filters by user_id)', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('User B cannot PUT User A task (404 — controller filters by user_id)', requireDB(async () => {
     // Create a task as User A (the test user)
     const createRes = await request(app)
       .post('/api/tasks')
@@ -192,11 +173,9 @@ describe('Auth + Validation — E2E', () => {
 
     // Task lookup filters by user_id — User B's task lookup returns null → 404
     expect(res.status).toBe(404);
-  });
+  }, harnessProbe));
 
-  test('User B cannot DELETE User A task (404)', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('User B cannot DELETE User A task (404)', requireDB(async () => {
     // Create as User A
     const createRes = await request(app)
       .post('/api/tasks')
@@ -218,13 +197,11 @@ describe('Auth + Validation — E2E', () => {
 
     // Controller checks ownership → 404 if not found for that user
     expect(res.status).toBe(404);
-  });
+  }, harnessProbe));
 
   // ── Rate limiter smoke test ────────────────────────────────────────────────
 
-  test('rate limiter smoke test — documents actual behavior (429 vs always-200)', async () => {
-    if (await skipIfNoDB()) return;
-
+  test('rate limiter smoke test — documents actual behavior (429 vs always-200)', requireDB(async () => {
     // The broad /api rate limiter allows 1000 requests/min (per-instance MemoryStore,
     // no Redis in test). Hitting it in a unit test is impractical, so we just verify
     // the GET /api/tasks path is responsive for 5 sequential requests.
@@ -242,5 +219,5 @@ describe('Auth + Validation — E2E', () => {
     }
     // Document which path was observed (both are valid in E2E)
     expect(typeof saw429).toBe('boolean');
-  });
+  }, harnessProbe));
 });

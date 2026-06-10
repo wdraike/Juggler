@@ -8,6 +8,7 @@ var db = require('../src/db');
 var controller = require('../src/controllers/task.controller');
 var tasksWrite = require('../src/lib/tasks-write');
 var redis = require('../src/lib/redis');
+var { assertDbAvailable } = require('./helpers/requireDB');
 
 jest.mock('../src/scheduler/scheduleQueue', () => ({
   enqueueScheduleRun: jest.fn()
@@ -46,7 +47,8 @@ function mockRes() {
 }
 
 beforeAll(async () => {
-  try { await db.raw('SELECT 1'); available = true; } catch (e) { return; }
+  await assertDbAvailable();
+  available = true;
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
   await db('projects').where('user_id', USER_ID).del();

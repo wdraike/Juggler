@@ -10,15 +10,15 @@
 var db = require('../src/db');
 var { v7: uuidv7 } = require('uuid');
 var tw = require('../src/lib/tasks-write');
+var { assertDbAvailable } = require('./helpers/requireDB');
 
 var available = false;
 var USER_A = 'bulk-test-user-A';
 var USER_B = 'bulk-test-user-B';
 
 beforeAll(async () => {
-  try { await db.raw('SELECT 1'); available = true; } catch (e) {
-    console.warn('Test DB not available:', e.message); return;
-  }
+  await assertDbAvailable();
+  available = true;
   for (var u of [USER_A, USER_B]) {
     await db('task_instances').where('user_id', u).del();
     await db('task_masters').where('user_id', u).del();

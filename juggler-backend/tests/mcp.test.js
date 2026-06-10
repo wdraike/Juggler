@@ -8,22 +8,19 @@
  *
  * For tools that need a real DB (create, update, delete), we use the
  * testDb helper (requires Docker: docker compose -f docker-compose.test.yml up -d).
- * Tests gracefully skip if the DB is unavailable.
+ * Requires test-bed MySQL @3407 for DB integration sections (TEST-FR-001: throws loud on no-DB).
  */
 
 var testDb;
 try { testDb = require('./helpers/testDb'); } catch(e) { testDb = null; }
 var { rowToTask, taskToRow, validateTaskInput, buildSourceMap } = require('../src/controllers/task.controller');
+var { assertDbAvailable } = require('./helpers/requireDB');
 
 var available = false;
 
 beforeAll(async () => {
-  if (!testDb) return;
-  available = await testDb.isAvailable();
-  if (!available) {
-    console.warn('Test DB not available — MCP integration tests skipped');
-    return;
-  }
+  await assertDbAvailable();
+  available = true;
   await testDb.cleanup();
   await testDb.seedUser();
 }, 15000);
@@ -34,7 +31,6 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  if (!available) return;
   var db = testDb.getDb();
   await db('task_instances').where('user_id', 'test-user-001').del();
   await db('task_masters').where('user_id', 'test-user-001').del();
@@ -150,7 +146,6 @@ describe('taskToRow / rowToTask', () => {
 
 describe('Task CRUD via MCP code paths', () => {
   test('create and retrieve task', async () => {
-    if (!available) return;
     var task = await testDb.seedTask({ text: 'MCP test task', pri: 'P1', dur: 45 });
     var db = testDb.getDb();
     var row = await db('tasks_v').where('id', task.id).first();
@@ -161,7 +156,6 @@ describe('Task CRUD via MCP code paths', () => {
   });
 
   test('update task fields', async () => {
-    if (!available) return;
     var task = await testDb.seedTask({ text: 'Original', pri: 'P3' });
     var db = testDb.getDb();
     var tasksWrite = require('../src/lib/tasks-write');
@@ -172,7 +166,6 @@ describe('Task CRUD via MCP code paths', () => {
   });
 
   test('delete task', async () => {
-    if (!available) return;
     var task = await testDb.seedTask({ text: 'Delete me' });
     var db = testDb.getDb();
     var tasksWrite = require('../src/lib/tasks-write');
@@ -182,7 +175,6 @@ describe('Task CRUD via MCP code paths', () => {
   });
 
   test('status change persists', async () => {
-    if (!available) return;
     var task = await testDb.seedTask({ text: 'Mark done' });
     var db = testDb.getDb();
     var tasksWrite = require('../src/lib/tasks-write');
@@ -192,7 +184,6 @@ describe('Task CRUD via MCP code paths', () => {
   });
 
   test('recurring template creates correctly', async () => {
-    if (!available) return;
     var tmpl = await testDb.seedTemplate({ text: 'Daily habit', recurring: 1, recur: JSON.stringify({ type: 'daily' }) });
     var db = testDb.getDb();
     var row = await db('tasks_v').where('id', tmpl.id).first();

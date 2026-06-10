@@ -15,7 +15,7 @@
  *   C — past FIXED deadline IS marked overdue (D-08 regression guard)
  *
  * Requires: juggler_test DB running (docker compose -f docker-compose.test.yml up -d)
- * Falls back cleanly via `if (!available) return;` when DB is not reachable.
+ * Requires test-bed MySQL @3407 (TEST-FR-001: throws loud on no-DB).
  */
 
 var db = require('../src/db');
@@ -23,16 +23,13 @@ var { runScheduleAndPersist } = require('../src/scheduler/runSchedule');
 var { rowToTask, buildSourceMap } = require('../src/controllers/task.controller');
 var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../src/scheduler/constants');
 var tasksWrite = require('../src/lib/tasks-write');
+var { assertDbAvailable } = require('./helpers/requireDB');
 
-var available = false;
 var USER_ID = 'run-sched-test-001';
 var TZ = 'America/New_York';
 
 beforeAll(async () => {
-  try { await db.raw('SELECT 1'); available = true; } catch (e) {
-    console.warn('Test DB not available:', e.message);
-    return;
-  }
+  await assertDbAvailable();
   await cleanup();
   await db('users').insert({
     id: USER_ID, email: 'runsched@test.com', timezone: TZ,
@@ -44,7 +41,7 @@ beforeAll(async () => {
 }, 15000);
 
 afterAll(async () => {
-  if (available) await cleanup();
+  await cleanup();
   await db.destroy();
 });
 
@@ -57,7 +54,6 @@ async function cleanup() {
 }
 
 beforeEach(async () => {
-  if (!available) return;
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
   // Keep user_config (time_blocks, tool_matrix) but clear schedule_cache
@@ -80,7 +76,7 @@ function seedTask(overrides) {
 describe('MCP create_task: overdue regression (Phase 19)', () => {
 
   test('date-only task with placement_mode=all_day is never marked overdue', async () => {
-    if (!available) return;
+
     // PHASE 19 — guards unifiedScheduleV2 ALL_DAY skip guard (unifiedScheduleV2.js:299)
     //
     // Seeds a task with the shape MCP create_task produces AFTER the Plan 02 fix:
@@ -103,7 +99,7 @@ describe('MCP create_task: overdue regression (Phase 19)', () => {
   });
 
   test('date-only task seeded as ANYTIME (pre-fix MCP behavior) is floated to today, not marked overdue', async () => {
-    if (!available) return;
+
     // PHASE 19 — Scheduler behavior update (commit 66f068):
     // ANYTIME tasks are never marked overdue when the calendar is full or the task is
     // simply past — they float forward to today. Case B in §8 (runSchedule.js) only
@@ -125,7 +121,7 @@ describe('MCP create_task: overdue regression (Phase 19)', () => {
   });
 
   test('past FIXED task remains at its anchored position, not marked overdue — D-08 guard', async () => {
-    if (!available) return;
+
     // PHASE 19 — Scheduler behavior: FIXED tasks are user-anchored.
     // The §8 unplaced loop (runSchedule.js line 1362) explicitly skips FIXED tasks:
     // they stay at their pinned position as a historical record and are never marked

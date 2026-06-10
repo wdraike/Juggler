@@ -7,11 +7,13 @@ var db = require('../src/db');
 var { runScheduleAndPersist, getSchedulePlacements } = require('../src/scheduler/runSchedule');
 var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../src/scheduler/constants');
 var tasksWrite = require('../src/lib/tasks-write');
+var { assertDbAvailable } = require('./helpers/requireDB');
 
 var available = false;
 var USER_ID = 'placements-test-001';
 
 beforeAll(async () => {
+  await assertDbAvailable();
   try { await db.raw('SELECT 1'); available = true; } catch (e) { return; }
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();

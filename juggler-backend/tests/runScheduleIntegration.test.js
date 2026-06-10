@@ -9,12 +9,14 @@ var { runScheduleAndPersist } = require('../src/scheduler/runSchedule');
 var { rowToTask, buildSourceMap } = require('../src/controllers/task.controller');
 var { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../src/scheduler/constants');
 var tasksWrite = require('../src/lib/tasks-write');
+var { assertDbAvailable } = require('./helpers/requireDB');
 
 var available = false;
 var USER_ID = 'run-sched-test-001';
 var TZ = 'America/New_York';
 
 beforeAll(async () => {
+  await assertDbAvailable();
   try { await db.raw('SELECT 1'); available = true; } catch (e) {
     console.warn('Test DB not available:', e.message);
     return;

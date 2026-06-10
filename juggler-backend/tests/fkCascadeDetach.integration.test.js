@@ -9,14 +9,12 @@
 var db = require('../src/db');
 var { v7: uuidv7 } = require('uuid');
 var { insertTask, deleteTaskById, deleteInstancesWhere } = require('../src/lib/tasks-write');
+var { assertDbAvailable } = require('./helpers/requireDB');
 
-var available = false;
 var USER_ID = 'fk-cascade-test-user';
 
 beforeAll(async () => {
-  try { await db.raw('SELECT 1'); available = true; } catch (e) {
-    console.warn('Test DB not available:', e.message); return;
-  }
+  await assertDbAvailable();
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
   await db('users').where('id', USER_ID).del();
@@ -27,23 +25,19 @@ beforeAll(async () => {
 }, 15000);
 
 afterAll(async () => {
-  if (available) {
-    await db('task_instances').where('user_id', USER_ID).del();
-    await db('task_masters').where('user_id', USER_ID).del();
-    await db('users').where('id', USER_ID).del();
-  }
+  await db('task_instances').where('user_id', USER_ID).del();
+  await db('task_masters').where('user_id', USER_ID).del();
+  await db('users').where('id', USER_ID).del();
   await db.destroy();
 });
 
 beforeEach(async () => {
-  if (!available) return;
   await db('task_instances').where('user_id', USER_ID).del();
   await db('task_masters').where('user_id', USER_ID).del();
 });
 
 describe('FK ON DELETE SET NULL on task_instances.master_id', () => {
   test('deleting master with mixed-status instances: pending must be explicitly deleted; completed survive detached', async () => {
-    if (!available) return;
     var tid = uuidv7();
     await insertTask(db, {
       id: tid, user_id: USER_ID, text: 'cascade-test',
@@ -86,7 +80,6 @@ describe('FK ON DELETE SET NULL on task_instances.master_id', () => {
   });
 
   test('detached row appears in tasks_v with task_type=task and master fields NULL', async () => {
-    if (!available) return;
     var tid = uuidv7();
     await insertTask(db, {
       id: tid, user_id: USER_ID, text: 'will-orphan',
@@ -118,7 +111,6 @@ describe('FK ON DELETE SET NULL on task_instances.master_id', () => {
   });
 
   test('archival master: completed instances re-parented to __archived__:<userId> with new ordinals', async () => {
-    if (!available) return;
     var tw = require('../src/lib/tasks-write');
     var tid = uuidv7();
     await insertTask(db, {
@@ -163,7 +155,6 @@ describe('FK ON DELETE SET NULL on task_instances.master_id', () => {
   });
 
   test('non-recurring task delete: removes both master and instance', async () => {
-    if (!available) return;
     var id = uuidv7();
     await insertTask(db, {
       id: id, user_id: USER_ID, text: 'one-shot', task_type: 'task',

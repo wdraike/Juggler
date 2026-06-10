@@ -8,6 +8,7 @@ jest.mock('../../src/lib/sse-emitter', () => ({ emit: jest.fn() }));
 var {
   db, TEST_USER_ID, isDbAvailable, seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes
 } = require('./helpers/test-setup');
+var { assertDbAvailable } = require('../helpers/requireDB');
 var { makeTask, makeLedgerRow } = require('./helpers/test-fixtures');
 var { sync } = require('../../src/controllers/cal-sync.controller');
 var gcalAdapter = require('../../src/lib/cal-adapters/gcal.adapter');
@@ -19,7 +20,7 @@ var GCAL_ONLY = {
 };
 
 beforeAll(async () => {
-  if (!await isDbAvailable()) return;
+  await assertDbAvailable();
   await destroyTestUser();
 });
 afterEach(async () => {
@@ -33,7 +34,7 @@ afterAll(async () => {
 
 describe('BF-3: 410 on PATCH transitions ledger to deleted_remote', () => {
   it('ledger row becomes deleted_remote when updateEvent returns 410', async () => {
-    if (!await isDbAvailable()) return;
+    await assertDbAvailable();
     var user = await seedTestUser(GCAL_ONLY);
 
     // Future date — past tasks are not pushed/updated, so a hardcoded past date
@@ -89,7 +90,7 @@ describe('BF-3: 410 on PATCH transitions ledger to deleted_remote', () => {
 
 describe('MSFT 503 on listEvents: existing ledger rows unchanged', () => {
   it('503 on listEvents does not corrupt existing active ledger rows', async () => {
-    if (!await isDbAvailable()) return;
+    await assertDbAvailable();
     var user = await seedTestUser({
       gcal_refresh_token: null,
       msft_cal_refresh_token: 'valid-refresh',
@@ -132,7 +133,7 @@ describe('MSFT 503 on listEvents: existing ledger rows unchanged', () => {
 
 describe('Sync response: HTTP 200 even on partial errors', () => {
   it('sync with a mock error still returns 200', async () => {
-    if (!await isDbAvailable()) return;
+    await assertDbAvailable();
     var user = await seedTestUser({
       gcal_refresh_token: 'mock-gcal-token',
       msft_cal_refresh_token: null,

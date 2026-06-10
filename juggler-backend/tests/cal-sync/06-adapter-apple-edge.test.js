@@ -20,6 +20,7 @@ var { sync } = require('../../src/controllers/cal-sync.controller');
 var {
   db, TEST_USER_ID, isDbAvailable, seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes
 } = require('./helpers/test-setup');
+var { assertDbAvailable } = require('../helpers/requireDB');
 
 afterEach(async () => {
   jest.restoreAllMocks();
@@ -39,7 +40,7 @@ afterAll(async () => {
 
 describe('BF-1: Apple 401 clears apple_cal_password in DB', () => {
   it('clears apple_cal_password when createClient throws Unauthorized', async () => {
-    if (!await isDbAvailable()) return;
+    await assertDbAvailable();
 
     var user = await seedTestUser({
       gcal_refresh_token: null,

@@ -5,6 +5,7 @@ var db = require('../src/db');
 var { v7: uuidv7 } = require('uuid');
 var { insertTask } = require('../src/lib/tasks-write');
 var { computeChunks, reconcileSplitsForMaster } = require('../src/lib/reconcile-splits');
+var { assertDbAvailable } = require('./helpers/requireDB');
 
 var available = false;
 var USER_ID = 'reconcile-splits-test-user';
@@ -79,6 +80,8 @@ describe('computeChunks', () => {
 });
 
 describe('reconcileSplitsForMaster — one-shot', () => {
+  beforeAll(async () => { await assertDbAvailable(); });
+
   test('expands 90/30 single instance into 3 chunks', async () => {
     if (!available) return;
     var id = uuidv7();
@@ -171,6 +174,8 @@ describe('reconcileSplitsForMaster — one-shot', () => {
 });
 
 describe('reconcileSplitsForMaster — recurring', () => {
+  beforeAll(async () => { await assertDbAvailable(); });
+
   test('reconciles chunks per occurrence independently', async () => {
     if (!available) return;
     var tid = uuidv7();

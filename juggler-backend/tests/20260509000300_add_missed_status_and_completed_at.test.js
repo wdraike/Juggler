@@ -16,11 +16,13 @@
  * completed_at column exists, and tasks_v exposes it.
  */
 const db = require('../src/db');
+const { assertDbAvailable } = require('./helpers/requireDB');
 
 // Insert a real user so the FK task_masters.user_id → users.id is satisfied.
 const TEST_USER_ID = 'test-user-20260509';
 
 beforeAll(async () => {
+  await assertDbAvailable();
   await db('task_instances').where('user_id', TEST_USER_ID).del();
   await db('task_masters').where('user_id', TEST_USER_ID).del();
   await db('users').where('id', TEST_USER_ID).del();

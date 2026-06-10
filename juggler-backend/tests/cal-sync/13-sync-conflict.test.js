@@ -20,6 +20,7 @@ var {
   db, TEST_USER_ID, isDbAvailable, hasGCalCredentials,
   seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes, getGCalToken, gcalApi
 } = require('./helpers/test-setup');
+var { requireDB } = require('../helpers/requireDB');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, makeGCalEvent, deleteGCalEvent } = require('./helpers/test-fixtures');
 var { getGCalEvent, waitForPropagation } = require('./helpers/api-helpers');
@@ -52,13 +53,6 @@ afterAll(async () => {
   await db.destroy();
 });
 
-function skipIfNoDB(fn) {
-  return async () => {
-    if (!await isDbAvailable()) return;
-    await fn();
-  };
-}
-
 function tomorrow(hours, minutes) {
   var d = new Date();
   d.setDate(d.getDate() + 1);
@@ -76,7 +70,7 @@ function tomorrowEndISO(hours, minutes, durMinutes) {
 
 describe('Sync Conflict Resolution', () => {
 
-  test('fixed task always wins', skipIfNoDB(async () => {
+  test('fixed task always wins', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
@@ -127,7 +121,7 @@ describe('Sync Conflict Resolution', () => {
     expect(event.summary).toBe('Fixed Task Updated In Strive');
   }));
 
-  test('last-modified: task newer -> event updated', skipIfNoDB(async () => {
+  test('last-modified: task newer -> event updated', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
@@ -177,7 +171,7 @@ describe('Sync Conflict Resolution', () => {
     expect(event.summary).toBe('Strive Version Newer');
   }));
 
-  test('last-modified: event newer -> task updated', skipIfNoDB(async () => {
+  test('last-modified: event newer -> task updated', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
@@ -218,7 +212,7 @@ describe('Sync Conflict Resolution', () => {
     expect(updatedTask.text).toBe('Calendar Version Newer');
   }));
 
-  test('ingest-only: provider always wins', skipIfNoDB(async () => {
+  test('ingest-only: provider always wins', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 
@@ -275,7 +269,7 @@ describe('Sync Conflict Resolution', () => {
     expect(taskAfter.text).toBe('Calendar Edit Ingest');
   }));
 
-  test('sync_history logs conflict_juggler or conflict_provider', skipIfNoDB(async () => {
+  test('sync_history logs conflict_juggler or conflict_provider', requireDB(async () => {
     if (!hasGCalCredentials()) return;
     user = await seedTestUser(GCAL_ONLY);
 

@@ -24,6 +24,7 @@ var {
   seedTestUser, cleanupTestData, destroyTestUser,
   getGCalToken, mockReq, mockRes
 } = require('./helpers/test-setup');
+var { assertDbAvailable } = require('../helpers/requireDB');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, makeTaskId, makeLedgerRow, deleteAllGCalTestEvents } = require('./helpers/test-fixtures');
 var { listGCalEvents, waitForPropagation } = require('./helpers/api-helpers');
@@ -35,7 +36,8 @@ var token = null;
 var user = null;
 
 beforeAll(async () => {
-  if (!await isDbAvailable() || !hasGCalCredentials()) return;
+  await assertDbAvailable();
+  if (!hasGCalCredentials()) return;
   user = await seedTestUser(GCAL_ONLY);
   token = await getGCalToken();
 });
@@ -168,7 +170,7 @@ describe('task&&!event — past recurring instance protection', () => {
   var listEventsSpy = null;
 
   beforeEach(async () => {
-    if (!await isDbAvailable()) return;
+    await assertDbAvailable();
     // Seed user with a fake gcal_refresh_token so gcal adapter is "connected",
     // but we mock the API calls so no real network request is made.
     mockUser = await seedTestUser({
@@ -198,7 +200,7 @@ describe('task&&!event — past recurring instance protection', () => {
   });
 
   it('does NOT delete a past recurring_instance when provider returns no event', async () => {
-    if (!await isDbAvailable()) return;
+    await assertDbAvailable();
 
     // Setup: past recurring_instance task (scheduled 2 hours ago)
     var pastTime = new Date(Date.now() - 2 * 60 * 60 * 1000);
@@ -243,7 +245,7 @@ describe('task&&!event — past recurring instance protection', () => {
   });
 
   it('DOES apply miss-count to a future recurring_instance when provider returns no event', async () => {
-    if (!await isDbAvailable()) return;
+    await assertDbAvailable();
 
     // Setup: future recurring_instance task (scheduled 1 hour from now)
     var futureTime = new Date(Date.now() + 1 * 60 * 60 * 1000);

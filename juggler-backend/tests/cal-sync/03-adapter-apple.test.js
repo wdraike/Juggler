@@ -8,6 +8,8 @@ var {
   hasAppleCredentials, getAppleClient, seedTestUser, cleanupTestData, destroyTestUser
 } = require('./helpers/test-setup');
 
+var { assertDbAvailable } = require('../helpers/requireDB');
+
 var { waitForPropagation } = require('./helpers/api-helpers');
 
 var appleAdapter = require('../../src/lib/cal-adapters/apple.adapter');
@@ -22,6 +24,7 @@ var skip = false;
 var calendarUrl = null;
 
 beforeAll(async function () {
+  await assertDbAvailable();
   if (!hasAppleCredentials()) {
     skip = true;
     console.warn('Skipping Apple adapter tests — no credentials');

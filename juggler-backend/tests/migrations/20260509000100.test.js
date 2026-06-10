@@ -13,6 +13,7 @@ require('dotenv').config({ path: path.join(__dirname, '../.env.test') });
 
 var db = require('../../src/db');
 var migration = require('../../src/db/migrations/20260509000100_purge_old_sync_history');
+var { requireDB } = require('../helpers/requireDB');
 
 var USER_A = 'd12-test-user-A';
 var USER_B = 'd12-test-user-B';
@@ -28,13 +29,6 @@ async function isDbAvailable() {
     _dbAvailable = false;
   }
   return _dbAvailable;
-}
-
-function skipIfNoDB(fn) {
-  return async () => {
-    if (!await isDbAvailable()) return;
-    await fn();
-  };
 }
 
 async function seedUser(id) {
@@ -92,7 +86,7 @@ afterAll(async () => {
 
 describe('migration 20260509000100_purge_old_sync_history (D-12)', () => {
 
-  test('up() deletes ALL sync_history rows older than 7 days globally (across users)', skipIfNoDB(async () => {
+  test('up() deletes ALL sync_history rows older than 7 days globally (across users)', requireDB(async () => {
     // Seed: each user gets one >7d row and one <7d row.
     var aOld = await insertHistoryRow(USER_A, 8);   // 8 days old — should be purged
     var aNew = await insertHistoryRow(USER_A, 6);   // 6 days old — should remain
@@ -121,7 +115,7 @@ describe('migration 20260509000100_purge_old_sync_history (D-12)', () => {
     expect(foundBNew).toBeTruthy();
   }));
 
-  test('up() is idempotent — running twice leaves recent rows intact', skipIfNoDB(async () => {
+  test('up() is idempotent — running twice leaves recent rows intact', requireDB(async () => {
     var newId = await insertHistoryRow(USER_A, 2);  // 2 days old — should always remain
     var oldId = await insertHistoryRow(USER_A, 10); // 10 days old — should be deleted on first run
 
@@ -134,14 +128,14 @@ describe('migration 20260509000100_purge_old_sync_history (D-12)', () => {
     expect(foundOld).toBeFalsy();
   }));
 
-  test('down() is a no-op (does not throw, does not modify recent rows)', skipIfNoDB(async () => {
+  test('down() is a no-op (does not throw, does not modify recent rows)', requireDB(async () => {
     var newId = await insertHistoryRow(USER_A, 3);
     await expect(migration.down(db)).resolves.not.toThrow();
     var found = await db('sync_history').where('id', newId).first();
     expect(found).toBeTruthy();
   }));
 
-  test('exactly-7-day-old rows are NOT deleted (boundary check)', skipIfNoDB(async () => {
+  test('exactly-7-day-old rows are NOT deleted (boundary check)', requireDB(async () => {
     // Insert a row dated just inside the 7-day window (6.9 days old).
     // The migration uses `created_at < NOW() - INTERVAL 7 DAY` (strict less-than),
     // so a row right at the boundary should survive.

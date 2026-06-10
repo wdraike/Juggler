@@ -24,10 +24,15 @@ jest.mock('../../src/lib/sse-emitter', () => ({
   emit: jest.fn()
 }));
 
-// Replace the cal-adapters registry with a stub gcal adapter so the controller
-// reaches the write transaction (and thus the D-09/D-13 prunes) without real
-// network traffic.
-jest.mock('../../src/lib/cal-adapters', () => {
+// Replace the calendar adapter registry with a stub gcal adapter so the
+// controller reaches the write transaction (and thus the D-09/D-13 prunes)
+// without real network traffic.
+//
+// W5: cal-sync.controller now reads getConnectedAdapters from the calendar
+// slice facade (no longer from lib/cal-adapters), so the mock must intercept
+// the facade. lib/cal-adapters is also mocked for any frozen-migration code
+// paths that still reach the legacy shim. Both return the SAME stub surface.
+var mockMakeStubRegistry = function () {
   var fakeGcal = {
     providerId: 'gcal',
     isConnected: function(user) { return !!user && !!user.gcal_refresh_token; },
@@ -56,10 +61,13 @@ jest.mock('../../src/lib/cal-adapters', () => {
     getAdapter: function(id) { return adapters[id] || null; },
     registerAdapter: function() {}
   };
-});
+};
+jest.mock('../../src/slices/calendar/facade', () => mockMakeStubRegistry());
+jest.mock('../../src/lib/cal-adapters', () => mockMakeStubRegistry());
 
 var db = require('../../src/db');
 var { sync } = require('../../src/controllers/cal-sync.controller');
+var { requireDB } = require('../helpers/requireDB');
 
 var TEST_TIMEZONE = 'America/New_York';
 var USER_PRIMARY = 'd13-prune-user-primary';
@@ -76,13 +84,6 @@ async function isDbAvailable() {
     _dbAvailable = false;
   }
   return _dbAvailable;
-}
-
-function skipIfNoDB(fn) {
-  return async () => {
-    if (!await isDbAvailable()) return;
-    await fn();
-  };
 }
 
 async function seedUser(id) {
@@ -170,7 +171,7 @@ afterAll(async () => {
 
 describe('Inline sync_history prune at end of sync run (D-11)', () => {
 
-  test('rows older than 3 days are deleted for the syncing user after sync', skipIfNoDB(async () => {
+  test('rows older than 3 days are deleted for the syncing user after sync', requireDB(async () => {
     var user = await seedUser(USER_PRIMARY);
 
     var oldId = await insertHistoryRow(USER_PRIMARY, 4);   // > 3d → must be pruned
@@ -190,7 +191,7 @@ describe('Inline sync_history prune at end of sync run (D-11)', () => {
     expect(newRow).toBeTruthy(); // 2-day-old row must remain
   }));
 
-  test('boundary: rows just under 3 days survive; rows just over 3 days are pruned', skipIfNoDB(async () => {
+  test('boundary: rows just under 3 days survive; rows just over 3 days are pruned', requireDB(async () => {
     var user = await seedUser(USER_PRIMARY);
     var insideId = await insertHistoryRow(USER_PRIMARY, 2.9);
     var outsideId = await insertHistoryRow(USER_PRIMARY, 3.1);
@@ -209,7 +210,7 @@ describe('Inline sync_history prune at end of sync run (D-11)', () => {
 
 describe('Inline sync_history prune is per-user scoped (D-13)', () => {
 
-  test('old rows for OTHER users are NOT touched when a different user syncs', skipIfNoDB(async () => {
+  test('old rows for OTHER users are NOT touched when a different user syncs', requireDB(async () => {
     var primary = await seedUser(USER_PRIMARY);
     await seedUser(USER_OTHER);
 

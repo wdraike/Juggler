@@ -11,11 +11,13 @@
 process.env.NODE_ENV = 'test';
 
 var testDb = require('./helpers/testDb');
+var { assertDbAvailable } = require('./helpers/requireDB');
 
 var hasDb = false;
 var db;
 
 beforeAll(async function() {
+  await assertDbAvailable();
   hasDb = await testDb.isAvailable();
   if (hasDb) db = testDb.getDb();
 });
