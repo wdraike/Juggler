@@ -121,7 +121,7 @@ function reverseGeocode(lat, lon) {
 function renameTasks(trxRepo, userId, oldName, name) {
   return tasksWrite.updateTasksWhere(trxRepo.db, userId, function (q) {
     return q.where('project', oldName);
-  }, { project: name, updated_at: new Date() });
+  }, { project: name, updated_at: trxRepo.db.fn.now() });
 }
 
 // ExportData task read (data.controller.js:218-220) — task slice's
@@ -338,15 +338,16 @@ var _stopImpersonation = new app.StopImpersonation({ repo: _repo, auditLogger: l
 // resolvePlanFeatures uses — which stays inline in plan-features.middleware.js,
 // pinned by the golden-master Surface-7). So the webhook's entitlement seam
 // delegates invalidateUserPlan → invalidateUserPlanCache and resolvePlanCatalog →
-// getCachedPlanFeatures (the live module fns), NOT the slice adapter's parallel
-// cache — preserving the legacy behavior verbatim (golden-master H3-6/H3-7).
+// _entitlement.resolvePlanCatalog() (the adapter-instance cache, which the live
+// gate warms via checkEntitlement) — sharing ONE catalog cache and eliminating
+// the split-brain / cold-legacy-catalog silent-downgrade-skip (B1 fix).
 var _billingEntitlement = {
   invalidateUserPlan: function (userId) {
     _entitlement.invalidateUserPlan(userId); // bust the adapter instance cache the LIVE gate reads (restores pre-rewire coherence)
     return require('../../middleware/plan-features.middleware').invalidateUserPlanCache(userId); // legacy module-level cache (other consumers)
   },
   resolvePlanCatalog: function () {
-    return require('../../middleware/plan-features.middleware').getCachedPlanFeatures();
+    return _entitlement.resolvePlanCatalog(); // adapter-instance cache (same as the live entitlement gate)
   }
 };
 var _handleBillingWebhook = new app.HandleBillingWebhook({
