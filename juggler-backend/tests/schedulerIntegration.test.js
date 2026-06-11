@@ -2,7 +2,7 @@
  * Scheduler Integration Tests
  *
  * Tests the full DB-to-scheduler-to-DB pipeline using a real MySQL database.
- * Requires Docker: docker compose -f docker-compose.test.yml up -d
+ * Requires Docker: cd test-bed && make up
  *
  * These tests verify:
  * - UC-15: Persistence & feedback loop prevention
@@ -18,12 +18,14 @@ var { assertDbAvailable } = require('./helpers/requireDB');
 var knex;
 var runScheduleModule;
 
-// Check if test DB is available before running
+// Check if test DB is available before running.
+// Defaults target test-bed (MySQL @3407, root/rootpass). NEVER default to 3307
+// (Cloud SQL Proxy = production) — an integration test must not touch prod.
 var DB_HOST = process.env.TEST_DB_HOST || '127.0.0.1';
-var DB_PORT = process.env.TEST_DB_PORT || 3307;
+var DB_PORT = process.env.TEST_DB_PORT || 3407;
 var DB_NAME = process.env.TEST_DB_NAME || 'juggler_test';
 var DB_USER = process.env.TEST_DB_USER || 'root';
-var DB_PASS = process.env.TEST_DB_PASSWORD || '';
+var DB_PASS = process.env.TEST_DB_PASSWORD || 'rootpass';
 
 var dbAvailable = false;
 
@@ -233,7 +235,7 @@ describe('UC-18: Full DB Pipeline', function() {
 // Skip message for when DB is not available
 test('Integration tests require Docker MySQL on port 3307', function() {
   if (!dbAvailable) {
-    console.warn('Skipped: run `docker compose -f docker-compose.test.yml up -d` first');
+    console.warn('Skipped: run `cd test-bed && make up` first');
   }
   expect(true).toBe(true);
 });

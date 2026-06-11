@@ -14,7 +14,7 @@
  *   B — date-only task seeded as ANYTIME (pre-fix shape) IS marked overdue (scheduler invariant)
  *   C — past FIXED deadline IS marked overdue (D-08 regression guard)
  *
- * Requires: juggler_test DB running (docker compose -f docker-compose.test.yml up -d)
+ * Requires: juggler_test DB running (cd test-bed && make up)
  * Requires test-bed MySQL @3407 (TEST-FR-001: throws loud on no-DB).
  */
 

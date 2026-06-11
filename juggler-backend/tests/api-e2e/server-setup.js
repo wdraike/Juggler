@@ -67,7 +67,10 @@ process.env.NODE_ENV = 'test'; // picks up juggler_test DB at port 3407 via knex
 process.env.DB_HOST = '127.0.0.1';
 process.env.DB_PORT = '3407';
 process.env.DB_USER = 'root';
-process.env.DB_PASSWORD = '';
+// test-bed MySQL root requires 'rootpass' (MYSQL_ROOT_PASSWORD). Respect an
+// explicit override (e.g. make test-juggler) but default to the test-bed value
+// — an empty password fails auth against test-bed and silently skips e2e.
+process.env.DB_PASSWORD = process.env.DB_PASSWORD || 'rootpass';
 process.env.DB_NAME = 'juggler_test';
 // Encryption key placeholder — required by some modules at load time
 process.env.CREDENTIAL_ENCRYPTION_KEY = process.env.CREDENTIAL_ENCRYPTION_KEY || '0'.repeat(64);

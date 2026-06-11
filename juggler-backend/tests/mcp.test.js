@@ -7,7 +7,7 @@
  * taskToRow, rowToTask, validateTaskInput, and direct DB operations.
  *
  * For tools that need a real DB (create, update, delete), we use the
- * testDb helper (requires Docker: docker compose -f docker-compose.test.yml up -d).
+ * testDb helper (requires Docker: cd test-bed && make up).
  * Requires test-bed MySQL @3407 for DB integration sections (TEST-FR-001: throws loud on no-DB).
  */
 

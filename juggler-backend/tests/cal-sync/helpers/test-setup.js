@@ -4,7 +4,7 @@
  * Loads test credentials from .env.test and sets up a test user
  * with real OAuth tokens for GCal, MSFT, and Apple Calendar.
  *
- * Requires: docker compose -f docker-compose.test.yml up -d
+ * Requires: cd test-bed && make up
  */
 
 var path = require('path');

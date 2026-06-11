@@ -1,7 +1,7 @@
 /**
  * Integration tests for runScheduleAndPersist — the full scheduler pipeline.
  * Uses real test DB via NODE_ENV=test.
- * Requires: docker compose -f docker-compose.test.yml up -d
+ * Requires: cd test-bed && make up
  */
 
 var db = require('../src/db');

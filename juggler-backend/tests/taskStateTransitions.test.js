@@ -4,7 +4,7 @@
  * Covers state transitions documented in docs/TASK-STATE-MATRIX.md that are
  * NOT already covered by taskCrudIntegration.test.js.
  *
- * Requires: docker compose -f docker-compose.test.yml up -d
+ * Requires: cd test-bed && make up
  *
  * Requires test-bed MySQL @3407 (TEST-FR-001: throws loud on no-DB).
  */

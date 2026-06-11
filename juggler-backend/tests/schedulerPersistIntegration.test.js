@@ -2,7 +2,7 @@
  * Integration tests for runSchedule.js persist step and task CRUD.
  * Uses a real MySQL test database (test-bed Docker MySQL on port 3407).
  *
- * Run: docker compose -f docker-compose.test.yml up -d
+ * Run: cd test-bed && make up
  */
 
 var testDb = require('./helpers/testDb');
@@ -14,7 +14,7 @@ beforeAll(async () => {
   await assertDbAvailable();
   available = await testDb.isAvailable();
   if (!available) {
-    console.warn('Test DB not available. Run: docker compose -f docker-compose.test.yml up -d');
+    console.warn('Test DB not available. Run: cd test-bed && make up');
     return;
   }
   await testDb.cleanup();
