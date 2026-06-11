@@ -8,6 +8,7 @@ build/
 .env.local
 .env.production
 .env.test
+.env.tmp
 coverage/
 .cache/
 test-results/
