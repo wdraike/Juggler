@@ -72,7 +72,10 @@ GetConfig.prototype.execute = async function execute(input) {
 
   var config = {};
   configRows.forEach(function (row) {
-    config[row.config_key] = UserConfig.fromRow(row).parsedValue();
+    // Legacy getAllConfig built the map purely from config_key/config_value and
+    // never validated user_id per row — use the pure parse (NOT fromRow, which
+    // enforces the userId invariant meant for write/identity paths).
+    config[row.config_key] = UserConfig.parseConfigValue(row.config_value);
   });
 
   var result = {

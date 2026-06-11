@@ -167,45 +167,18 @@ async function reconcileLimitsIfNeeded(userId, planFeatures) {
 // ─── Middleware ─────────────────────────────────────────────────────────
 const resolvePlanFeatures = async (req, res, next) => {
   try {
-    if (!req.user?.id) {
-      return res.status(401).json({ error: 'Authentication required' });
+    const { checkEntitlement } = require('../slices/user-config/facade');  // LAZY require inside the fn (avoids the facade→plan-features↔plan-features→facade module-load cycle)
+    const result = await checkEntitlement({ user: req.user });
+    if (result.status === 200) {
+      req.planId = result.entitlement.planId;
+      req.planFeatures = result.entitlement.planFeatures;
+      return next();
     }
-
-    const paymentUserId = req.user.authServiceId || req.user.id;
-    const realPlanId = await getUserPlanId(paymentUserId);
-
-    if (!realPlanId) {
-      return res.status(402).json({
-        error: 'Subscription required',
-        code: 'SUBSCRIPTION_REQUIRED',
-        message: 'You need an active subscription to use this app. Choose a plan to get started.',
-        plans_url: `${_proxyConfig.services.billing.frontend}/plans`,
-      });
-    }
-
-    req.planId = realPlanId;
-
-    const allFeatures = await getCachedPlanFeatures();
-    req.planFeatures = allFeatures[realPlanId];
-
-    if (!req.planFeatures) {
-      logger.warn(`[plan-features] No features found for plan "${realPlanId}", falling back to "free"`);
-      req.planFeatures = allFeatures['free'];
-      req.planId = 'free';
-    }
-
-    if (!req.planFeatures) {
-      return res.status(503).json({ error: 'Plan configuration unavailable. Please try again.' });
-    }
-
-    // Background reconciliation: verify user isn't over limits (catches missed webhooks)
-    reconcileLimitsIfNeeded(req.user.id, req.planFeatures);
-
-    next();
+    return res.status(result.status).json(result.body);
   } catch (err) {
     logger.error('[plan-features] Error:', { error: err });
     return res.status(503).json({ error: 'Payment service unavailable. Please try again.' });
   }
 };
 
-module.exports = { resolvePlanFeatures, PRODUCT_LABEL, getProductId, refreshPlanFeatures, invalidateUserPlanCache, getCachedPlanFeatures };
+module.exports = { resolvePlanFeatures, PRODUCT_LABEL, getProductId, refreshPlanFeatures, invalidateUserPlanCache, getCachedPlanFeatures, reconcileLimitsIfNeeded };

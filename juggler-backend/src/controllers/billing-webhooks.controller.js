@@ -159,60 +159,26 @@ async function enforceDowngradeLimits(userId, planFeatures) {
   return { disabledRecurrings, disabledTasks };
 }
 
+/**
+ * POST /api/billing-webhooks — THIN HTTP adapter (Phase H4 / W6).
+ *
+ * The per-event dispatch was extracted into the user-config slice
+ * (HandleBillingWebhook command). This handler maps `req.body` → use-case input,
+ * delegates to `slices/user-config/facade`, and maps the `{ status, body }`
+ * envelope onto express. The per-handler try/catch → 500 stays here (an express
+ * concern).
+ *
+ * ── SECURITY (elmo gate, FLAG-1) ──
+ * The HMAC-SHA256 signature verification lives in the ROUTE layer
+ * (billing-webhooks.routes.js verifySignature) and is NOT in this handler — it
+ * trusts the route guard exactly as the legacy did (golden-master H3-9). This
+ * handler contains no signature/crypto logic.
+ */
 async function handleWebhook(req, res) {
   try {
-    const { event, ...data } = req.body;
-    const userId = data.user_id;
-
-    switch (event) {
-      case 'subscription.created':
-      case 'subscription.activated':
-        logger.info(`[billing-webhook] ${event} for user ${userId}`);
-        if (userId) invalidateUserPlanCache(userId);
-        break;
-
-      case 'subscription.plan_changed':
-        logger.info(`[billing-webhook] Plan changed for user ${userId}: ${data.from_planId} → ${data.to_planId}`);
-        if (userId) invalidateUserPlanCache(userId);
-        break;
-
-      case 'subscription.downgrade_applied':
-        logger.info(`[billing-webhook] Downgrade applied for user ${userId}`);
-        if (userId) {
-          invalidateUserPlanCache(userId);
-          // Fetch the new plan's features and enforce limits
-          try {
-            var allFeatures = await getCachedPlanFeatures();
-            var planFeatures = data.to_planId ? allFeatures[data.to_planId] : null;
-            if (planFeatures) {
-              await enforceDowngradeLimits(userId, planFeatures);
-            }
-          } catch (err) {
-            logger.error('[billing-webhook] Downgrade enforcement failed:', err.message);
-          }
-        }
-        break;
-
-      case 'subscription.canceled':
-      case 'subscription.cancel_scheduled':
-      case 'subscription.expired':
-      case 'subscription.paused':
-      case 'subscription.resumed':
-      case 'subscription.reactivated':
-      case 'subscription.updated':
-      case 'subscription.rebundled':
-      case 'subscription.discount_applied':
-      case 'subscription.trial_extended':
-      case 'subscription.downgrade_scheduled':
-        logger.info(`[billing-webhook] ${event} for user ${userId}`);
-        if (userId) invalidateUserPlanCache(userId);
-        break;
-
-      default:
-        logger.info(`[billing-webhook] Unhandled event: ${event}`, data);
-    }
-
-    res.json({ success: true, event });
+    const facade = require('../slices/user-config/facade');
+    const result = await facade.handleBillingWebhook({ body: req.body });
+    res.status(result.status).json(result.body);
   } catch (error) {
     logger.error('[billing-webhook] Error:', error);
     res.status(500).json({ error: 'Internal server error' });

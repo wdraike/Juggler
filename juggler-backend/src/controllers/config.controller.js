@@ -1,84 +1,46 @@
 /**
- * Config Controller — locations, tools, matrix, time blocks, schedules, preferences, projects
+ * Config Controller — THIN HTTP adapter over the user-config slice facade
+ * (Phase H4 / W6).
+ *
+ * The locations/tools/projects/config CRUD (11 handlers) was extracted into the
+ * `slices/user-config` vertical slice (W2 domain → W3 KnexConfigRepository → W4
+ * entitlement adapter → W5 application). This controller is now THIN: each handler
+ * maps `req` → a plain use-case input, calls the single public entry
+ * (`slices/user-config/facade`), and maps the use-case's `{ status, body }`
+ * envelope back onto express. It performs ZERO direct DB access (no getDb / no trx
+ * call sites — W6 acceptance b) and no longer requires `src/db.js` (ADR-0002 delta).
+ *
+ * The per-handler try/catch → 500 wrapper is KEPT here (an express concern); the
+ * use-cases return their own status via the envelope. The UpdateConfig
+ * fire-after-response ordering (the background reschedule) is preserved at the
+ * controller edge via the `scheduleAfter` directive (enqueueScheduleRun fired AFTER
+ * res.json, exactly as the legacy handler ordered it).
+ *
+ * ── BEHAVIOR-IDENTICAL EXCEPT the human-approved P1 correction ────────────────
+ * Config writes now go through KnexConfigRepository which stamps `new Date()`
+ * (never `db.fn.now()`) — the P1/ADR-0003 timestamp-source correction taking live
+ * effect (Scooter INBOX process-decision 2026-06-10).
  */
 
-const getDb = () => require('../db');
-const { z } = require('zod');
-const tasksWrite = require('../lib/tasks-write');
+'use strict';
+
+const facade = require('../slices/user-config/facade');
 const { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
-// Routed through the lib-cache CachePort (H2 / W2) instead of lib/redis directly.
-// The `cache` singleton is a RedisCacheAdapter (when REDIS_URL is set) that
-// delegates verbatim to lib/redis, so get/set/ttl/invalidate behavior is
-// identical — pinned by tests/configController.cache.characterization.test.js.
-const { cache } = require('../lib/cache');
-const { reverseGeocodeDisplayName } = require('./weather.controller');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('config.controller');
 
-const locationItemSchema = z.object({
-  id: z.string().max(36).optional(),
-  name: z.string().min(1).max(200),
-  icon: z.string().max(100).optional(),
-  lat: z.number().optional(),
-  lng: z.number().optional(),
-}).passthrough();
-const locationsBodySchema = z.object({ locations: z.array(locationItemSchema).max(50) });
-
-const toolItemSchema = z.object({
-  id: z.string().min(1).max(36),
-  name: z.string().min(1).max(200),
-  icon: z.string().max(100).optional(),
-}).passthrough();
-const toolsBodySchema = z.object({ tools: z.array(toolItemSchema).max(50) });
+/** Map a use-case `{ status, body }` envelope onto the express response. */
+function sendEnvelope(res, result) {
+  return res.status(result.status).json(result.body);
+}
 
 /**
  * GET /api/config — all config for user
  */
 async function getAllConfig(req, res) {
   try {
-    const userId = req.user.id;
-    const cacheKey = `user:${userId}:config`;
-    const cached = await cache.get(cacheKey);
-    if (cached) return res.json(cached);
-
-    const [locations, tools, projects, configRows] = await Promise.all([
-      getDb()('locations').where('user_id', userId).orderBy('sort_order'),
-      getDb()('tools').where('user_id', userId).orderBy('sort_order'),
-      getDb()('projects').where('user_id', userId).orderBy('sort_order'),
-      getDb()('user_config').where('user_id', userId)
-    ]);
-
-    const config = {};
-    configRows.forEach(row => {
-      const val = typeof row.config_value === 'string' ? (function() { try { return JSON.parse(row.config_value); } catch(e) { return row.config_value; } })() : row.config_value;
-      config[row.config_key] = val;
-    });
-
-    const result = {
-      locations: locations.map(l => ({
-        id: l.location_id,
-        name: l.name,
-        icon: l.icon,
-        lat: l.lat != null ? parseFloat(l.lat) : undefined,
-        lon: l.lon != null ? parseFloat(l.lon) : undefined,
-        displayName: l.display_name || undefined
-      })),
-      tools: tools.map(t => ({ id: t.tool_id, name: t.name, icon: t.icon })),
-      projects: projects.map(p => ({ id: p.id, name: p.name, color: p.color, icon: p.icon, sortOrder: p.sort_order })),
-      toolMatrix: config.tool_matrix || null,
-      timeBlocks: config.time_blocks || null,
-      locSchedules: config.loc_schedules || null,
-      locScheduleDefaults: config.loc_schedule_defaults || null,
-      locScheduleOverrides: config.loc_schedule_overrides || null,
-      hourLocationOverrides: config.hour_location_overrides || null,
-      preferences: config.preferences || null,
-      tempUnitPref: config.temp_unit_pref || 'F',
-      scheduleTemplates: config.schedule_templates || null,
-      templateDefaults: config.template_defaults || null,
-      templateOverrides: config.template_overrides || null
-    };
-    await cache.set(cacheKey, result, 3600); // 1 hour TTL
-    res.json(result);
+    const result = await facade.getAllConfig({ userId: req.user.id });
+    return sendEnvelope(res, result);
   } catch (error) {
     logger.error('Get config error:', error);
     res.status(500).json({ error: 'Failed to fetch config' });
@@ -90,100 +52,17 @@ async function getAllConfig(req, res) {
  */
 async function updateConfig(req, res) {
   try {
-    const userId = req.user.id;
-    const { key } = req.params;
-    const { value } = req.body;
+    const result = await facade.updateConfig({
+      userId: req.user.id,
+      key: req.params.key,
+      value: req.body.value
+    });
+    sendEnvelope(res, result);
 
-    const validKeys = [
-      'tool_matrix', 'time_blocks', 'loc_schedules',
-      'loc_schedule_defaults', 'loc_schedule_overrides',
-      'hour_location_overrides', 'preferences',
-      'schedule_templates', 'template_defaults', 'template_overrides',
-      'cal_sync_settings', 'temp_unit_pref'
-    ];
-
-    // temp_unit_pref must be 'F' or 'C' — internal storage is always F,
-    // this only drives display conversion at the UI layer.
-    if (key === 'temp_unit_pref' && value !== 'F' && value !== 'C') {
-      return res.status(400).json({ error: "temp_unit_pref must be 'F' or 'C'" });
-    }
-
-    if (!validKeys.includes(key)) {
-      return res.status(400).json({ error: `Invalid config key: ${key}` });
-    }
-
-    // Prevent DoS via oversized config values
-    const serialized = JSON.stringify(value);
-    if (serialized.length > 102400) { // 100KB max
-      return res.status(400).json({ error: 'Config value too large (max 100KB)' });
-    }
-
-    const existing = await getDb()('user_config').where({ user_id: userId, config_key: key }).first();
-
-    if (existing) {
-      await getDb()('user_config').where({ user_id: userId, config_key: key }).update({
-        config_value: JSON.stringify(value),
-        updated_at: getDb().fn.now()
-      });
-    } else {
-      await getDb()('user_config').insert({
-        user_id: userId,
-        config_key: key,
-        config_value: JSON.stringify(value)
-      });
-    }
-
-    await cache.invalidateConfig(userId);
-
-    // Check for orphaned when-tags when templates are saved
-    var warnings = [];
-    if (key === 'schedule_templates' && value && typeof value === 'object') {
-      var newTags = {};
-      Object.values(value).forEach(function(tmpl) {
-        (tmpl.blocks || []).forEach(function(b) {
-          if (b.tag) newTags[b.tag] = true;
-        });
-      });
-
-      var activeTasks = await getDb()('tasks_v')
-        .where('user_id', userId)
-        .whereNotIn('status', ['done', 'cancel', 'skip', 'pause'])
-        .whereNotNull('when')
-        .where('when', '!=', '')
-        .where('when', '!=', 'anytime')
-        .select('id', 'text', 'when');
-
-      var orphanedTasks = [];
-      activeTasks.forEach(function(t) {
-        var parts = (t.when || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-        // Skip special values
-        var nonSpecial = parts.filter(function(p) { return p !== 'fixed' && p !== 'allday' && p !== 'anytime'; });
-        if (nonSpecial.length === 0) return;
-        var hasValid = nonSpecial.some(function(p) { return newTags[p]; });
-        if (!hasValid) {
-          orphanedTasks.push({ id: t.id, text: t.text, when: t.when });
-        }
-      });
-
-      if (orphanedTasks.length > 0) {
-        warnings.push({
-          type: 'orphanedWhenTags',
-          tasks: orphanedTasks,
-          message: orphanedTasks.length + ' task(s) use time block tags that no longer exist in any template'
-        });
-      }
-    }
-
-    res.json({ key, value, warnings: warnings });
-
-    // Schedule-affecting keys: reschedule in the background after responding
-    var schedKeys = [
-      'hour_location_overrides', 'time_blocks', 'loc_schedules',
-      'loc_schedule_defaults', 'loc_schedule_overrides', 'tool_matrix', 'preferences',
-      'schedule_templates'
-    ];
-    if (schedKeys.includes(key)) {
-      enqueueScheduleRun(userId, 'config:' + key);
+    // Schedule-affecting keys: reschedule in the background AFTER responding
+    // (preserves the legacy fire-after-res.json ordering — config.controller.js:179-187).
+    if (result.scheduleAfter) {
+      enqueueScheduleRun(result.scheduleAfter.userId, result.scheduleAfter.source);
     }
   } catch (error) {
     logger.error('Update config error:', error);
@@ -195,8 +74,8 @@ async function updateConfig(req, res) {
 
 async function getProjects(req, res) {
   try {
-    const rows = await getDb()('projects').where('user_id', req.user.id).orderBy('sort_order');
-    res.json({ projects: rows.map(p => ({ id: p.id, name: p.name, color: p.color, icon: p.icon, sortOrder: p.sort_order })) });
+    const result = await facade.getProjects({ userId: req.user.id });
+    return sendEnvelope(res, result);
   } catch (error) {
     logger.error('Get projects error:', error);
     res.status(500).json({ error: 'Failed to fetch projects' });
@@ -205,33 +84,11 @@ async function getProjects(req, res) {
 
 /**
  * PUT /api/projects/reorder — persist user-chosen project order.
- * Body: { ids: [1, 3, 2, ...] } where the array order defines the new sort_order
- * (index 0 = first = sort_order 0). Rows not listed are left alone so the UI
- * can reorder a subset if needed; fresh creates slot in via max(sort_order)+1.
  */
 async function reorderProjects(req, res) {
   try {
-    const { ids } = req.body;
-    if (!Array.isArray(ids)) return res.status(400).json({ error: 'ids array required' });
-    if (ids.length > 500) return res.status(400).json({ error: 'Too many ids (max 500)' });
-
-    await getDb().transaction(async (trx) => {
-      // Use a single CASE expression rather than N UPDATEs. Avoids N round-trips
-      // and keeps the reorder atomic under the transaction.
-      const escaped = ids.map((id) => Number(id)).filter((n) => Number.isFinite(n));
-      if (escaped.length === 0) return;
-      let caseExpr = 'CASE id';
-      const bindings = [];
-      escaped.forEach((id, idx) => { caseExpr += ' WHEN ? THEN ?'; bindings.push(id, idx); });
-      caseExpr += ' ELSE sort_order END';
-      await trx('projects')
-        .where('user_id', req.user.id)
-        .whereIn('id', escaped)
-        .update({ sort_order: trx.raw(caseExpr, bindings), updated_at: getDb().fn.now() });
-    });
-
-    await cache.invalidateConfig(req.user.id);
-    res.json({ reordered: ids.length });
+    const result = await facade.reorderProjects({ userId: req.user.id, ids: req.body.ids });
+    return sendEnvelope(res, result);
   } catch (error) {
     logger.error('Reorder projects error:', error);
     res.status(500).json({ error: 'Failed to reorder projects' });
@@ -240,20 +97,8 @@ async function reorderProjects(req, res) {
 
 async function createProject(req, res) {
   try {
-    const { name, color, icon } = req.body;
-    if (!name) return res.status(400).json({ error: 'Project name required' });
-
-    const maxOrder = await getDb()('projects').where('user_id', req.user.id).max('sort_order as max').first();
-    const [id] = await getDb()('projects').insert({
-      user_id: req.user.id,
-      name,
-      color: color || null,
-      icon: icon || null,
-      sort_order: (maxOrder?.max || 0) + 1
-    });
-
-    await cache.invalidateConfig(req.user.id);
-    res.status(201).json({ project: { id, name, color, icon } });
+    const result = await facade.createProject({ userId: req.user.id, body: req.body });
+    return sendEnvelope(res, result);
   } catch (error) {
     logger.error('Create project error:', error);
     res.status(500).json({ error: 'Failed to create project' });
@@ -262,24 +107,8 @@ async function createProject(req, res) {
 
 async function updateProject(req, res) {
   try {
-    const { id } = req.params;
-    const { name, color, icon, oldName } = req.body;
-
-    await getDb().transaction(async (trx) => {
-      await trx('projects').where({ id, user_id: req.user.id }).update({
-        name, color, icon, updated_at: getDb().fn.now()
-      });
-      // If the name changed, rename the project on all tasks that reference it
-      if (oldName && name && oldName !== name) {
-        await tasksWrite.updateTasksWhere(trx, req.user.id, function(q) {
-          return q.where('project', oldName);
-        }, { project: name, updated_at: getDb().fn.now() });
-      }
-    });
-
-    await cache.invalidateConfig(req.user.id);
-    if (oldName && name && oldName !== name) await cache.invalidateTasks(req.user.id); // project rename cascades to tasks
-    res.json({ project: { id: parseInt(id), name, color, icon }, renamed: oldName && name && oldName !== name ? { from: oldName, to: name } : null });
+    const result = await facade.updateProject({ userId: req.user.id, id: req.params.id, body: req.body });
+    return sendEnvelope(res, result);
   } catch (error) {
     logger.error('Update project error:', error);
     res.status(500).json({ error: 'Failed to update project' });
@@ -288,10 +117,8 @@ async function updateProject(req, res) {
 
 async function deleteProject(req, res) {
   try {
-    const { id } = req.params;
-    await getDb()('projects').where({ id, user_id: req.user.id }).del();
-    await cache.invalidateConfig(req.user.id);
-    res.json({ message: 'Project deleted', id });
+    const result = await facade.deleteProject({ userId: req.user.id, id: req.params.id });
+    return sendEnvelope(res, result);
   } catch (error) {
     logger.error('Delete project error:', error);
     res.status(500).json({ error: 'Failed to delete project' });
@@ -302,15 +129,8 @@ async function deleteProject(req, res) {
 
 async function getLocations(req, res) {
   try {
-    const rows = await getDb()('locations').where('user_id', req.user.id).orderBy('sort_order');
-    res.json({ locations: rows.map(l => ({
-      id: l.location_id,
-      name: l.name,
-      icon: l.icon,
-      lat: l.lat != null ? parseFloat(l.lat) : undefined,
-      lon: l.lon != null ? parseFloat(l.lon) : undefined,
-      displayName: l.display_name || undefined
-    })) });
+    const result = await facade.getLocations({ userId: req.user.id });
+    return sendEnvelope(res, result);
   } catch (error) {
     logger.error('Get locations error:', error);
     res.status(500).json({ error: 'Failed to fetch locations' });
@@ -319,38 +139,8 @@ async function getLocations(req, res) {
 
 async function replaceLocations(req, res) {
   try {
-    const locParsed = locationsBodySchema.safeParse(req.body);
-    if (!locParsed.success) return res.status(400).json({ error: 'Invalid locations payload', details: locParsed.error.issues });
-    const { locations } = locParsed.data;
-
-    // Fill in missing display names for locations that have coords but no name
-    const enriched = await Promise.all(locations.map(async (l) => {
-      if (l.lat != null && l.lon != null && !l.displayName) {
-        try {
-          l = { ...l, displayName: await reverseGeocodeDisplayName(l.lat, l.lon) };
-        } catch (_) { /* best-effort — save without display name if lookup fails */ }
-      }
-      return l;
-    }));
-
-    await getDb().transaction(async (trx) => {
-      await trx('locations').where('user_id', req.user.id).del();
-      if (enriched.length > 0) {
-        await trx('locations').insert(enriched.map((l, i) => ({
-          user_id: req.user.id,
-          location_id: l.id,
-          name: l.name,
-          icon: l.icon || '',
-          sort_order: i,
-          lat: l.lat != null ? l.lat : null,
-          lon: l.lon != null ? l.lon : null,
-          display_name: l.displayName || null
-        })));
-      }
-    });
-
-    await cache.invalidateConfig(req.user.id);
-    res.json({ locations: enriched });
+    const result = await facade.replaceLocations({ userId: req.user.id, body: req.body });
+    return sendEnvelope(res, result);
   } catch (error) {
     logger.error('Replace locations error:', error);
     res.status(500).json({ error: 'Failed to update locations' });
@@ -361,8 +151,8 @@ async function replaceLocations(req, res) {
 
 async function getTools(req, res) {
   try {
-    const rows = await getDb()('tools').where('user_id', req.user.id).orderBy('sort_order');
-    res.json({ tools: rows.map(t => ({ id: t.tool_id, name: t.name, icon: t.icon })) });
+    const result = await facade.getTools({ userId: req.user.id });
+    return sendEnvelope(res, result);
   } catch (error) {
     logger.error('Get tools error:', error);
     res.status(500).json({ error: 'Failed to fetch tools' });
@@ -371,25 +161,8 @@ async function getTools(req, res) {
 
 async function replaceTools(req, res) {
   try {
-    const toolParsed = toolsBodySchema.safeParse(req.body);
-    if (!toolParsed.success) return res.status(400).json({ error: 'Invalid tools payload', details: toolParsed.error.issues });
-    const { tools } = toolParsed.data;
-
-    await getDb().transaction(async (trx) => {
-      await trx('tools').where('user_id', req.user.id).del();
-      if (tools.length > 0) {
-        await trx('tools').insert(tools.map((t, i) => ({
-          user_id: req.user.id,
-          tool_id: t.id,
-          name: t.name,
-          icon: t.icon || '',
-          sort_order: i
-        })));
-      }
-    });
-
-    await cache.invalidateConfig(req.user.id);
-    res.json({ tools });
+    const result = await facade.replaceTools({ userId: req.user.id, body: req.body });
+    return sendEnvelope(res, result);
   } catch (error) {
     logger.error('Replace tools error:', error);
     res.status(500).json({ error: 'Failed to update tools' });

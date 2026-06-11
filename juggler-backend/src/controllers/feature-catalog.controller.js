@@ -9,7 +9,7 @@
  * value_order: higher = more prominent in plan cards (100+ headline, 50-99 important, 1-49 secondary)
  */
 
-const { getProductId, PRODUCT_LABEL } = require('../middleware/plan-features.middleware');
+const { PRODUCT_LABEL } = require('../middleware/plan-features.middleware');
 
 const CATALOG = {
   product_id: PRODUCT_LABEL, // Resolved to UUID at request time
@@ -196,7 +196,24 @@ const CATALOG = {
   ]
 };
 
+/**
+ * GET /api/feature-catalog — THIN HTTP adapter (Phase H4 / W6).
+ *
+ * The catalog read (product-id resolution via the entitlement adapter, then
+ * `{ ...CATALOG, product_id }`) was extracted into the user-config slice
+ * (GetFeatureCatalog query). This handler delegates to the facade and maps the
+ * `{ status, body }` envelope onto express. The static CATALOG (whose
+ * `product_id: PRODUCT_LABEL` slug-keys the product at module load) stays HERE and
+ * is consumed by the slice via the facade. No DB access (never had any).
+ *
+ * The service-key auth guard (feature-catalog.routes.js authenticateServiceKey)
+ * stays at the route edge — preserved.
+ */
 exports.getFeatureCatalog = async (req, res) => {
-  const productId = await getProductId();
-  res.json({ ...CATALOG, product_id: productId || CATALOG.product_id });
+  const facade = require('../slices/user-config/facade');
+  const result = await facade.getFeatureCatalog();
+  res.status(result.status).json(result.body);
 };
+
+// Exposed for the slice facade (GetFeatureCatalog injects this static catalog).
+exports.CATALOG = CATALOG;

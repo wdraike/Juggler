@@ -34,6 +34,14 @@ function createChainMock() {
 
 const mockDb = createChainMock();
 jest.mock('../../src/db', () => mockDb);
+// H4/W6: feature-gate's checkUsageLimit is now a THIN adapter over the user-config
+// slice facade, whose checkAndIncrement reaches the DB via lib/db.getDefaultDb()
+// (ADR-0002), NOT src/db.js. Point lib/db's default at the SAME mockDb so the
+// plan_usage upsert/read still resolves from resolveQueue (the H3 dual-mock lesson).
+jest.mock('../../src/lib/db', () => {
+  const actual = jest.requireActual('../../src/lib/db');
+  return Object.assign({}, actual, { getDefaultDb: () => mockDb });
+});
 
 const TEST_USER = { id: 'user-123', email: 'test@test.com', name: 'Test', timezone: 'America/New_York' };
 jest.mock('../../src/middleware/jwt-auth', () => ({

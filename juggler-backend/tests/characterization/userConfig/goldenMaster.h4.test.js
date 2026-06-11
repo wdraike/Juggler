@@ -1639,6 +1639,24 @@ describe('Surface 7 — plan-features: slug-keying (H7), fallback (H13), cache T
         createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() })
       }));
 
+      // H7-2 FLAKE FIX: resolvePlanFeatures now lazy-requires the facade inside its
+      // function body (to break the circular dep). That lazy require may escape the
+      // isolateModulesAsync isolated registry and pick up the outer worker's cached/
+      // mocked facade (non-deterministic). Pin the facade explicitly in the isolated
+      // registry with a minimal implementation that uses PaymentServiceEntitlementAdapter
+      // + CheckEntitlement backed by global.fetch — identical behavioral surface, no
+      // full-facade load-time side-effects (db/redis/cache connections).
+      jest.mock('../../../src/slices/user-config/facade', () => {
+        const path = require('path');
+        const SLICE = path.join(__dirname, '../../../src/slices/user-config');
+        const PaymentServiceEntitlementAdapter = require(path.join(SLICE, 'adapters', 'PaymentServiceEntitlementAdapter'));
+        const CheckEntitlement = require(path.join(SLICE, 'application', 'commands', 'CheckEntitlement'));
+        const SILENT = { info: () => {}, warn: () => {}, error: () => {} };
+        const adapter = new PaymentServiceEntitlementAdapter({ productSlug: 'juggler', logger: SILENT });
+        const checkUC = new CheckEntitlement({ entitlement: adapter, plansUrl: 'http://localhost:3003/plans' });
+        return { checkEntitlement: (input) => checkUC.execute(input) };
+      });
+
       // fetch call 1: getUserPlanId → active-plans → slug-keyed response
       // fetch call 2: getCachedPlanFeatures → plan catalog
       let callIdx = 0;
@@ -1884,6 +1902,22 @@ describe('Surface 7 — plan-features: slug-keying (H7), fallback (H13), cache T
         createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() })
       }));
 
+      // H7-5 FLAKE FIX: pin the facade in the isolated registry so the lazy
+      // require inside resolvePlanFeatures cannot escape to the outer worker cache.
+      // The minimal facade mock re-creates the checkEntitlement path via
+      // PaymentServiceEntitlementAdapter + CheckEntitlement backed by global.fetch —
+      // behavioral pins preserved; no full-facade load-time side-effects.
+      jest.mock('../../../src/slices/user-config/facade', () => {
+        const path = require('path');
+        const SLICE = path.join(__dirname, '../../../src/slices/user-config');
+        const PaymentServiceEntitlementAdapter = require(path.join(SLICE, 'adapters', 'PaymentServiceEntitlementAdapter'));
+        const CheckEntitlement = require(path.join(SLICE, 'application', 'commands', 'CheckEntitlement'));
+        const SILENT = { info: () => {}, warn: () => {}, error: () => {} };
+        const adapter = new PaymentServiceEntitlementAdapter({ productSlug: 'juggler', logger: SILENT });
+        const checkUC = new CheckEntitlement({ entitlement: adapter, plansUrl: 'http://localhost:3003/plans' });
+        return { checkEntitlement: (input) => checkUC.execute(input) };
+      });
+
       // Plans keyed by UUID, NOT by slug 'juggler' — lookup data.plans?.['juggler'] returns undefined
       global.fetch = jest.fn(() => Promise.resolve({
         ok: true,
@@ -1925,6 +1959,20 @@ describe('Surface 7 — plan-features: slug-keying (H7), fallback (H13), cache T
       jest.mock('@raike/lib-logger', () => ({
         createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() })
       }));
+
+      // H7-6 FLAKE FIX: pin the facade in the isolated registry so the lazy
+      // require inside resolvePlanFeatures cannot escape to the outer worker cache.
+      // Minimal facade mock: checkEntitlement via adapter + use-case backed by global.fetch.
+      jest.mock('../../../src/slices/user-config/facade', () => {
+        const path = require('path');
+        const SLICE = path.join(__dirname, '../../../src/slices/user-config');
+        const PaymentServiceEntitlementAdapter = require(path.join(SLICE, 'adapters', 'PaymentServiceEntitlementAdapter'));
+        const CheckEntitlement = require(path.join(SLICE, 'application', 'commands', 'CheckEntitlement'));
+        const SILENT = { info: () => {}, warn: () => {}, error: () => {} };
+        const adapter = new PaymentServiceEntitlementAdapter({ productSlug: 'juggler', logger: SILENT });
+        const checkUC = new CheckEntitlement({ entitlement: adapter, plansUrl: 'http://localhost:3003/plans' });
+        return { checkEntitlement: (input) => checkUC.execute(input) };
+      });
 
       // Empty plans → no juggler plan → null planId → 402
       global.fetch = jest.fn(() => Promise.resolve({

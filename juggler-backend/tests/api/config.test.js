@@ -11,6 +11,14 @@ process.env.NODE_ENV = 'test';
 const { createMockChainDb } = require('../helpers/mockChainDb');
 const { mockDb, resolveQueue } = createMockChainDb();
 jest.mock('../../src/db', () => mockDb);
+// H4/W6: config controller is now a THIN adapter over the user-config slice facade,
+// whose KnexConfigRepository reaches the DB via lib/db.getDefaultDb() (ADR-0002),
+// NOT src/db.js. Point lib/db's default at the SAME mockDb so the resolveQueue still
+// serves the slice's reads/writes (the H3 dual-mock lesson).
+jest.mock('../../src/lib/db', () => {
+  const actual = jest.requireActual('../../src/lib/db');
+  return Object.assign({}, actual, { getDefaultDb: () => mockDb });
+});
 
 // JWT mock — injects test user for Bearer tokens, 401 for missing/invalid
 const TEST_USER = { id: 'user-123', email: 'test@test.com', name: 'Test', timezone: 'America/New_York' };

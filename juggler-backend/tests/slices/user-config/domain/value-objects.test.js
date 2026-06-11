@@ -185,6 +185,23 @@ describe('UserConfig — config-record entity', () => {
     expect(Object.isFrozen(a)).toBe(true);
   });
 
+  // [WARN-1] UserConfig.parseConfigValue — static convenience parse (UserConfig.js:108-115).
+  // Three branches: non-string (line 109 return as-is), valid JSON (line 111 return parsed),
+  // parse failure (line 113 catch-passthrough return raw string).
+  test('[WARN-1] parseConfigValue returns raw string when JSON.parse fails (catch-passthrough)', () => {
+    expect(UserConfig.parseConfigValue('not{json}')).toBe('not{json}');
+  });
+
+  test('[WARN-1] parseConfigValue parses valid JSON string (happy-path branch)', () => {
+    expect(UserConfig.parseConfigValue('{"weekStartsOn":1}')).toEqual({ weekStartsOn: 1 });
+  });
+
+  test('[WARN-1] parseConfigValue returns non-string value as-is (non-string branch)', () => {
+    expect(UserConfig.parseConfigValue(42)).toBe(42);
+    expect(UserConfig.parseConfigValue(null)).toBeNull();
+    expect(UserConfig.parseConfigValue({ already: 'parsed' })).toEqual({ already: 'parsed' });
+  });
+
   // [WARN-2] PIN #3a: null-props guard branch in UserConfig constructor (lines 52-53).
   // `new UserConfig(null)` and `new UserConfig(undefined)` hit the
   // `!props || typeof props !== 'object'` guard — previously untested.

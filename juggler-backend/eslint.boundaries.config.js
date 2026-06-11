@@ -181,6 +181,58 @@ module.exports = [
           message:
             "Direct import of task application use-case is forbidden. " +
             "Use the facade: require('./slices/task/facade'). See JUG-HEX-H3 (W6)."
+        },
+
+        // --- USER-CONFIG SLICE BOUNDARIES (JUG-HEX-H4 / W6) ---
+        //
+        // External code must access user-config functionality only via the facade
+        // (slices/user-config/facade.js) or its index re-export. Direct imports of
+        // slice-internal paths (adapters / domain ports / entities / value-objects /
+        // domain logic / application use-cases) are forbidden — they go through the
+        // facade.
+        //
+        // Adapters are internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/user-config\\/adapters\\//]",
+          message:
+            "Direct import of user-config adapter is forbidden. " +
+            "Use the facade: require('./slices/user-config/facade'). See JUG-HEX-H4 (W6)."
+        },
+        // Domain ports are internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/user-config\\/domain\\/ports\\//]",
+          message:
+            "Direct import of user-config port is forbidden. " +
+            "Use the facade: require('./slices/user-config/facade'). Ports are consumed only by adapters and the facade. See JUG-HEX-H4 (W6)."
+        },
+        // Domain entities are internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/user-config\\/domain\\/entities\\//]",
+          message:
+            "Direct import of user-config entity is forbidden. " +
+            "Use the facade: require('./slices/user-config/facade'). See JUG-HEX-H4 (W6)."
+        },
+        // Domain value-objects (closed-enum VOs: PlanSlug/FeatureKey/EntityLimit) are
+        // internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/user-config\\/domain\\/value-objects\\//]",
+          message:
+            "Direct import of user-config value-object is forbidden. " +
+            "Use the facade: require('./slices/user-config/facade'). See JUG-HEX-H4 (W6)."
+        },
+        // Domain logic (pure decision functions) is internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/user-config\\/domain\\/logic\\//]",
+          message:
+            "Direct import of user-config domain logic is forbidden. " +
+            "Use the facade: require('./slices/user-config/facade'). See JUG-HEX-H4 (W6)."
+        },
+        // Application use-cases are internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/user-config\\/application\\//]",
+          message:
+            "Direct import of user-config application use-case is forbidden. " +
+            "Use the facade: require('./slices/user-config/facade'). See JUG-HEX-H4 (W6)."
         }
       ]
     }
@@ -261,6 +313,40 @@ module.exports = [
   {
     // Task tests are exempt — they import internals to test them directly.
     files: ['**/slices/task/**/*.test.js', '**/slices/task/test-doubles/**/*.js'],
+    rules: {
+      'no-restricted-syntax': 'off'
+    }
+  },
+
+  // --- USER-CONFIG SLICE per-slice exemptions (JUG-HEX-H4 / W6) ---
+  {
+    // The user-config facade + its index re-export may import their own slice
+    // internals (adapters / domain ports / entities / value-objects / logic /
+    // application use-cases).
+    files: ['**/slices/user-config/facade.js', '**/slices/user-config/index.js'],
+    rules: {
+      'no-restricted-syntax': 'off'
+    }
+  },
+  {
+    // User-config adapter files may import domain ports/entities/value-objects/logic
+    // (they implement the port / map the entities).
+    files: ['**/slices/user-config/adapters/**/*.js'],
+    rules: {
+      'no-restricted-syntax': 'off'
+    }
+  },
+  {
+    // User-config application use-cases + domain reach into their OWN slice's
+    // application/domain (NOT external code) — exempt the slice's own internals.
+    files: ['**/slices/user-config/application/**/*.js', '**/slices/user-config/domain/**/*.js'],
+    rules: {
+      'no-restricted-syntax': 'off'
+    }
+  },
+  {
+    // User-config tests are exempt — they import internals to test them directly.
+    files: ['**/slices/user-config/**/*.test.js', '**/slices/user-config/test-doubles/**/*.js'],
     rules: {
       'no-restricted-syntax': 'off'
     }

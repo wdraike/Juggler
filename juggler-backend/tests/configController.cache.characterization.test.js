@@ -118,6 +118,16 @@ jest.mock('../src/db', () => {
   return mock;
 });
 
+// H4/W6: config.controller is now a THIN adapter over the user-config slice facade,
+// whose KnexConfigRepository reaches the DB via lib/db.getDefaultDb() (ADR-0002),
+// NOT src/db.js. Point lib/db's default at the SAME mocked src/db chain so the
+// cache-invalidation characterization still drives the controller's writes
+// (the H3 dual-mock lesson). Lazy require avoids jest.mock hoisting issues.
+jest.mock('../src/lib/db', () => {
+  const actual = jest.requireActual('../src/lib/db');
+  return Object.assign({}, actual, { getDefaultDb: () => require('../src/db') });
+});
+
 // ── Mock tasks-write (used by updateProject for project renames) ──────────────
 jest.mock('../src/lib/tasks-write', () => ({
   updateTasksWhere: jest.fn(() => Promise.resolve()),

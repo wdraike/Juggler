@@ -94,6 +94,27 @@ UserConfig.prototype.parsedValue = function parsedValue() {
 };
 
 /**
+ * Pure value-parse, byte-identical to getAllConfig's per-row parse
+ * (config.controller.js:52-55) WITHOUT constructing a UserConfig — JSON.parse a
+ * string value, RETURN THE RAW STRING on parse failure, return non-strings as-is.
+ *
+ * Used by GetConfig over rows that may not carry user_id (the legacy read built
+ * the config map purely from config_key/config_value and never validated user_id
+ * per row — golden-master H1-1 feeds user_id-less rows). The full UserConfig
+ * entity (with its userId invariant) is for write/identity paths, not this map build.
+ * @param {*} value
+ * @returns {*}
+ */
+UserConfig.parseConfigValue = function parseConfigValue(value) {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value; // legacy passthrough on parse failure
+  }
+};
+
+/**
  * @param {*} other
  * @returns {boolean}
  */
