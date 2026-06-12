@@ -89,10 +89,17 @@ var formatMinutesToTime = dateHelpers.formatMinutesToTime;
 var formatMinutesToTimeDb = dateHelpers.formatMinutesToTimeDb;
 var localToUtc = dateHelpers.localToUtc;
 var utcToLocal = dateHelpers.utcToLocal;
-var taskController = require('../controllers/task.controller');
-var rowToTask = taskController.rowToTask;
-var buildSourceMap = taskController.buildSourceMap;
-var taskToRow = taskController.taskToRow;
+// Task row↔object mappers are routed through the scheduler slice's
+// SchedulerTaskProvider (H6 W2), which sources the byte-identical mappers from the
+// task slice facade — CUTTING the legacy direct dependency on the task-controller
+// module that this file held at lines 92-95 (rowToTask/buildSourceMap/taskToRow).
+// The mappers are the SAME function objects the task slice owns; the golden-master
+// proves placements stay bit-for-bit identical.
+var SchedulerTaskProvider = require('../slices/scheduler/adapters/SchedulerTaskProvider');
+var _taskProvider = new SchedulerTaskProvider();
+var rowToTask = _taskProvider.rowToTask;
+var buildSourceMap = _taskProvider.buildSourceMap;
+var taskToRow = _taskProvider.taskToRow;
 var expandRecurringShared = require('../../../shared/scheduler/expandRecurring');
 var expandRecurring = expandRecurringShared.expandRecurring;
 var reconcile = require('./reconcileOccurrences');
@@ -291,6 +298,90 @@ async function loadWeatherForHorizon(locations, db) {
   }
 
   return weatherByDateHour;
+}
+
+// ── DELTA-WRITE comparison (H6 W2) ───────────────────────────────────────────
+// Normalizers + the placement-vs-DB-row equality used by the delta-write skip.
+// The contract: return TRUE only when the DB row ALREADY EQUALS the computed
+// placement for EVERY field the dbUpdate would write (so writing is a no-op).
+// Return FALSE on any difference OR any field we cannot confidently compare —
+// false → a real write happens, which is always safe (it never skips a genuine
+// change; the worst case is a redundant write, matching legacy write-all).
+
+// scheduled_at: compare to ms precision. The computed value is a JS Date (UTC);
+// the DB DATETIME comes back as a Date (mysql2) or a "YYYY-MM-DD HH:MM:SS" string
+// (UTC, no zone). Normalize both to epoch-ms.
+function _schedAtMs(v) {
+  if (v == null) return null;
+  if (v instanceof Date) { var t = v.getTime(); return isNaN(t) ? NaN : t; }
+  var s = String(v);
+  // Bare "YYYY-MM-DD HH:MM:SS" → treat as UTC (the DB stores UTC).
+  var m = s.match(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}/);
+  var iso = m ? s.replace(' ', 'T').slice(0, 19) + 'Z' : s;
+  var t2 = new Date(iso).getTime();
+  return isNaN(t2) ? NaN : t2;
+}
+
+// date: DB DATE → "YYYY-MM-DD" (string) or Date. The computed value is an ISO
+// dateKey "YYYY-MM-DD". Normalize both to "YYYY-MM-DD".
+function _dateKeyOf(v) {
+  if (v == null) return null;
+  if (v instanceof Date) return formatDateKey(v);
+  var s = String(v);
+  var m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : s;
+}
+
+// time: DB TIME → "HH:MM:SS". The computed value is "HH:MM:00" (formatMinutesToTimeDb).
+function _timeOf(v) {
+  if (v == null) return null;
+  var s = String(v);
+  var m = s.match(/^(\d{2}:\d{2}:\d{2})/);
+  return m ? m[1] : s;
+}
+
+// tinyint flags: DB returns 0/1/null. Computed: null (unscheduled), 0 (overdue).
+// Treat null and 0 as the SAME "not set" state for unscheduled (the DB default
+// for a placed task is unscheduled=0 or null — both mean "on the calendar").
+function _flagOf(v) {
+  if (v == null) return 0;
+  return Number(v) ? 1 : 0;
+}
+
+function placementMatchesDbRow(dbUpdate, rawRow) {
+  if (!rawRow) return false; // no DB row to compare → must write
+
+  // scheduled_at (always present in a placement dbUpdate).
+  var a = _schedAtMs(dbUpdate.scheduled_at);
+  var b = _schedAtMs(rawRow.scheduled_at);
+  if (a == null || b == null || isNaN(a) || isNaN(b) || a !== b) return false;
+
+  // date.
+  if (_dateKeyOf(dbUpdate.date) !== _dateKeyOf(rawRow.date)) return false;
+
+  // day (varchar — direct compare, null-normalized).
+  if ((dbUpdate.day || null) !== (rawRow.day || null)) return false;
+
+  // time.
+  if (_timeOf(dbUpdate.time) !== _timeOf(rawRow.time)) return false;
+
+  // unscheduled / overdue flags (the dbUpdate sets unscheduled:null, overdue:0).
+  if (_flagOf(dbUpdate.unscheduled) !== _flagOf(rawRow.unscheduled)) return false;
+  if (_flagOf(dbUpdate.overdue) !== _flagOf(rawRow.overdue)) return false;
+
+  // dur (only when the dbUpdate writes it).
+  if (Object.prototype.hasOwnProperty.call(dbUpdate, 'dur')) {
+    if (Number(dbUpdate.dur) !== Number(rawRow.dur)) return false;
+  }
+
+  // NOTE: slack_mins is intentionally NOT compared here. The legacy batched
+  // persist (runSchedule.js:1714-1773) silently drops slack_mins from the CASE
+  // update even when dbUpdate carries it. Comparing slack_mins here would cause
+  // a perpetual mismatch on rows where slack changed — triggering redundant
+  // writes that still don't persist slack_mins (the batch drops it). The skip
+  // logic must only compare fields the live write path ACTUALLY persists.
+
+  return true; // every written field already matches → skip the write
 }
 
 async function runScheduleAndPersist(userId, _retries, options) {
@@ -1261,10 +1352,23 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // Rigid recurringTasks keep their preferred time (unless redirected from past above).
     if (original.recurring && original.placementMode === PLACEMENT_MODES.FIXED && !dateChanged) continue;
 
-    // NEW DESIGN: write scheduled_at and dur for EVERY placed task, every run.
-    // This guarantees the DB matches what the scheduler decided. No minimal-diff
-    // optimization — the batch CASE update handles 200 rows per query, so cost is
-    // negligible, and it eliminates stale-DB states the sync used to compensate for.
+    // DELTA-WRITE (H6 W2 — write-all → write-changed, user ruling 2026-06-12).
+    // Build the placement the scheduler decided, then write it ONLY when the
+    // DB row does NOT already equal it. The prior "NEW DESIGN" wrote scheduled_at/
+    // dur for EVERY placed task every run; that made every run non-idempotent at
+    // the DB level (S5/C-IDEM red) and bumped updated_at on unchanged tasks.
+    //
+    // SYNC-SAFETY (binding W2 constraint — verified): cal-sync change detection is
+    // CONTENT-HASH based (cal-sync.controller.js:821-822 `taskHash(task) !==
+    // ledger.last_pushed_hash`), NOT updated_at-freshness based. taskHash covers
+    // scheduled_at-derived fields (date/time/dur/...). When this delta skips a row
+    // it is because those content fields are UNCHANGED in the DB, so the hash is
+    // unchanged → the sync sees no change → no stale-DB state is reopened. The one
+    // updated_at consumer (cal-sync.controller.js:885 last-modified-wins tiebreaker)
+    // is reached only when the content hash ALSO changed (both-sides-changed
+    // conflict), which never happens for a skipped (content-identical) row.
+    // `task_updated_at` written to the ledger is audit-only (never read back for
+    // sync logic). Conclusion: NOT bumping updated_at on unchanged tasks is sync-safe.
     var newScheduledAt = localToUtc(newDate, newTimeDisplay, TIMEZONE);
     if (!newScheduledAt) continue;
 
@@ -1289,6 +1393,18 @@ async function runScheduleAndPersist(userId, _retries, options) {
     }
     if (result.slackByTaskId && taskId in result.slackByTaskId) {
       dbUpdate.slack_mins = result.slackByTaskId[taskId];
+    }
+
+    // DELTA-WRITE skip: the skip condition is "the DB row ALREADY EQUALS the
+    // computed placement" (NOT "the task didn't move since last run"). Compare
+    // every field this dbUpdate would write against the current DB row
+    // (rawRowById[taskId]). If all match, the write is a no-op → skip it. Any
+    // field that differs, or any field we can't confidently compare, falls
+    // through to a real write (conservative — never skips a genuine change).
+    if (placementMatchesDbRow(dbUpdate, rawRowById[taskId])) {
+      // No DB change needed. Still emit the SSE patch below on a date/time move
+      // is impossible here (a move would have differed), so nothing to push.
+      continue;
     }
 
     pendingUpdates.push({

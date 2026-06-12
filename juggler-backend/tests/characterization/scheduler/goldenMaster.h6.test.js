@@ -718,7 +718,7 @@ describe('S4 — static require-graph: scheduler core does not import scheduleQu
 // Reference: WBS "Locked decisions" S5 ruling; runSchedule.js:1264-1267 write-all comment.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('S5 — delta-write-count: only changed tasks are written (RED until W2 delta-write)', () => {
+describe('S5 — delta-write-count: only changed tasks are written (GREEN — W2 delta-write landed)', () => {
   // ── Infrastructure ────────────────────────────────────────────────────────
   // assertDbAvailable throws [TEST-FR-001] when the DB is unreachable.
   // Called from beforeAll so a DB-down failure propagates OUTSIDE it.failing(),
@@ -783,105 +783,99 @@ describe('S5 — delta-write-count: only changed tasks are written (RED until W2
   // runScheduleAndPersist ran and the scheduler reached the write path. If no
   // scheduled_at is set, the test failed before the write assertion, which is a
   // setup/config problem — not the delta-write behavior being tested.
-  it.failing(
-    // RED until W2 delta-write — it.failing() inverts; W2 removes the .failing marker.
-    'S5: runScheduleAndPersist writes only changed tasks (FAILS on current write-all — RED until W2)',
+  // GREEN after W2 delta-write (the .failing marker is removed — delta-write
+  // makes this pass for real).
+  //
+  // CONTRACT: delta-write skips a task when "the DB row already equals the
+  // computed placement". The honest way to establish a stable row is to let the
+  // scheduler place the task ONCE (run-1 canonicalizes scheduled_at/date/time to
+  // exactly what the scheduler decides for the real wall-clock day), then assert
+  // a SECOND run writes nothing for it. Seeding an arbitrary scheduled_at and
+  // expecting a no-op would test the wrong thing: runScheduleAndPersist schedules
+  // against the real "now", so a hand-picked future scheduled_at legitimately
+  // moves (a real change → a real write, correctly).
+  it(
+    'S5: runScheduleAndPersist writes only changed tasks (run-2 on a stable task → 0 writes)',
     async () => {
-      // Seed happens here (after beforeEach cleaned the slate) so that seed errors
-      // propagate as real test failures — they are NOT infrastructure errors at this
-      // point (DB was confirmed up in beforeAll). A seed failure means a code-level
-      // problem (wrong column, FK violation) — should be a loud FAIL, not inverted.
-      //
-      // NOTE: seedTask calls tasksWrite.insertTask which routes status to BOTH
-      // task_masters (master.status = template-level lifecycle) and task_instances
-      // (instance.status = per-occurrence state). Both tables have the status column
-      // when all migrations are applied (20260415010000 creates task_instances.status;
-      // 20260605000000 adds task_masters.status). Test-bed must be initialised via
-      // `make test-juggler` (which calls init-juggler → applies all migrations) before
-      // running this suite — plain `make up` without migration is insufficient.
-      //
-      // NOTE: the `time` field on task_instances is a MySQL TIME column (HH:MM:SS format).
-      // Do NOT pass '12:00 PM' — use null or omit it. scheduled_at captures placement fully.
-      const correctScheduledAt = '2026-06-16 12:00:00';
+      // Seed a placeable task (scheduled_at null → the scheduler assigns it).
+      // NOTE: seedTask routes status to BOTH task_masters and task_instances.
+      // task_instances.time is a MySQL TIME column — omit display-format times.
       await testDb.seedTask({
         id: 's5-already-placed',
-        text: 'Already placed — no change needed',
+        text: 'Placed by run-1, stable for run-2',
         status: '',
         dur: 30,
         pri: 'P2',
-        scheduled_at: correctScheduledAt,
+        scheduled_at: null,
         date: TODAY
-        // time: omitted — task_instances.time is a TIME column (HH:MM:SS), not '12:00 PM'.
-        // scheduled_at above captures the placement time.
       });
 
-      // Capture updated_at before the run.
-      var before = await db('task_instances').where('id', 's5-already-placed').first();
-      var beforeUpdatedAt = before.updated_at;
+      const { runScheduleAndPersist } = require('../../../src/scheduler/runSchedule');
 
-      // Sleep 1100ms so MySQL DATETIME (1s precision) can distinguish a scheduler write.
-      // If write-all: updated_at = db.fn.now() at run time → differs from beforeUpdatedAt.
-      // If delta-write (W2): updated_at unchanged → equals beforeUpdatedAt.
+      // Run-1: canonicalize placement to exactly what the scheduler decides.
+      await runScheduleAndPersist('test-user-001', undefined, { timezone: 'UTC' });
+      var afterRun1 = await db('task_instances').where('id', 's5-already-placed').first();
+      // SANITY: task was placed (scheduled_at set) → scheduler reached the write path.
+      expect(afterRun1.scheduled_at).not.toBeNull();
+      var run1UpdatedAt = afterRun1.updated_at;
+
+      // Sleep 1100ms so MySQL DATETIME (1s precision) can distinguish a run-2 write.
       await new Promise(function(resolve) { setTimeout(resolve, 1100); });
 
-      // Run the real scheduler. This is the SUT call.
-      const { runScheduleAndPersist } = require('../../../src/scheduler/runSchedule');
+      // Run-2: the row already equals the computed placement → delta-write skips it.
       await runScheduleAndPersist('test-user-001', undefined, { timezone: 'UTC' });
+      var afterRun2 = await db('task_instances').where('id', 's5-already-placed').first();
 
-      // Under delta-write: scheduled_at unchanged → no DB write → updated_at stays the same.
-      // Under write-all (CURRENT CODE): updated_at changes even for unchanged placement.
-      var after = await db('task_instances').where('id', 's5-already-placed').first();
-
-      // SANITY: task must have been placed (scheduled_at set) to prove the scheduler ran
-      // and reached the write path. This assertion is NOT part of the delta-write check;
-      // it guards against a scheduler no-op masking the test. If this fails, the scheduler
-      // didn't run — that is a setup/config issue to fix before re-running.
-      expect(after.scheduled_at).not.toBeNull();
-
-      // TARGET assertion (delta-write): updated_at must NOT change for an unchanged placement.
-      // FAILS on current write-all code → it.failing() makes this test PASS now.
-      // W2 delta-write makes this assertion hold → remove .failing() marker.
-      expect(String(after.updated_at)).toBe(String(beforeUpdatedAt));
+      // TARGET (delta-write): run-2 writes nothing → updated_at unchanged from run-1.
+      expect(String(afterRun2.updated_at)).toBe(String(run1UpdatedAt));
     },
-    20000
+    25000
   );
 
-  it.failing(
-    // RED until W2 delta-write — it.failing() inverts; W2 removes the .failing marker.
-    'S5: 2 changed tasks → exactly 2 DB writes; 1 unchanged → 0 writes (FAILS on current write-all)',
+  // GREEN after W2 delta-write (the .failing marker is removed).
+  //
+  // Batch-scale unchanged → 0 writes. Run-1 places 3 tasks (the "changed" half:
+  // 3 new tasks → 3 written, their scheduled_at goes null → set). Run-2 on the
+  // IDENTICAL working set: every row already equals its computed placement → the
+  // delta-write skips ALL of them → no updated_at advances. This proves the
+  // skip-condition is "DB row already equals computed placement" at batch scale,
+  // not just for a single row.
+  //
+  // NOTE: re-placing 3 deadline-free tasks of equal priority is deterministic
+  // (the scheduler's slack-sort is stable), so run-2 reproduces run-1's exact
+  // slots — the honest precondition for asserting 0 writes.
+  it(
+    'S5: unchanged batch → 0 writes on run-2 (3 tasks, identical input, all skipped)',
     async () => {
-      // Seed 3 tasks: one with a correct scheduled_at (will not change), two with null
-      // (new tasks — scheduler will assign them a time → changed).
-      // NOTE: time column is MySQL TIME (HH:MM:SS) — omit '12:00 PM' format entirely.
-      const correctTime = '2026-06-16 12:00:00';
-      await testDb.seedTask({ id: 's5-stable', text: 'Stable', status: '', dur: 30, scheduled_at: correctTime, date: TODAY });
-      await testDb.seedTask({ id: 's5-new-a',  text: 'New A',  status: '', dur: 30, scheduled_at: null, date: TODAY });
-      await testDb.seedTask({ id: 's5-new-b',  text: 'New B',  status: '', dur: 30, scheduled_at: null, date: TODAY });
+      const { runScheduleAndPersist } = require('../../../src/scheduler/runSchedule');
 
-      var beforeStable = await db('task_instances').where('id', 's5-stable').first();
+      // 3 new tasks (scheduled_at null → assigned by run-1 = the "changed → written" half).
+      await testDb.seedTask({ id: 's5-a', text: 'A', status: '', dur: 30, pri: 'P2', scheduled_at: null, date: TODAY });
+      await testDb.seedTask({ id: 's5-b', text: 'B', status: '', dur: 30, pri: 'P2', scheduled_at: null, date: TODAY });
+      await testDb.seedTask({ id: 's5-c', text: 'C', status: '', dur: 30, pri: 'P2', scheduled_at: null, date: TODAY });
+
+      // Run-1: places all 3 (3 writes).
+      await runScheduleAndPersist('test-user-001', undefined, { timezone: 'UTC' });
+      var run1 = {};
+      for (const id of ['s5-a', 's5-b', 's5-c']) {
+        var r = await db('task_instances').where('id', id).first();
+        expect(r.scheduled_at).not.toBeNull(); // SANITY: placed
+        run1[id] = r.updated_at;
+      }
 
       // Sleep 1100ms so MySQL DATETIME (1s precision) can distinguish a write.
       await new Promise(function(resolve) { setTimeout(resolve, 1100); });
 
-      // Run the real scheduler. This is the SUT call.
-      const { runScheduleAndPersist } = require('../../../src/scheduler/runSchedule');
+      // Run-2: identical input — every row already equals its placement → 0 writes.
       await runScheduleAndPersist('test-user-001', undefined, { timezone: 'UTC' });
 
-      var afterStable = await db('task_instances').where('id', 's5-stable').first();
-      var afterNewA   = await db('task_instances').where('id', 's5-new-a').first();
-      var afterNewB   = await db('task_instances').where('id', 's5-new-b').first();
-
-      // SANITY: new tasks must have been placed to prove the scheduler ran.
-      expect(afterNewA.scheduled_at).not.toBeNull();
-      expect(afterNewB.scheduled_at).not.toBeNull();
-
-      // TARGET assertion (delta-write):
-      //   s5-stable: scheduled_at unchanged → updated_at must NOT change.
-      //   s5-new-a, s5-new-b: scheduled_at newly assigned → updated_at changes (sanity above).
-      // FAILS on current write-all code (s5-stable updated_at changes anyway).
-      expect(String(afterStable.updated_at)).toBe(String(beforeStable.updated_at));
+      // TARGET (delta-write): NO row's updated_at advances on run-2.
+      for (const id of ['s5-a', 's5-b', 's5-c']) {
+        var after = await db('task_instances').where('id', id).first();
+        expect(String(after.updated_at)).toBe(String(run1[id]));
+      }
     },
-    20000
+    30000
   );
 });
 
@@ -1097,7 +1091,7 @@ describe('C-SCORE — scoreSchedule snapshot against fixed fixture', () => {
 // TRACEABILITY: C-IDEM
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('C-IDEM — idempotence: run-2 on stable input → 0 changed tasks', () => {
+describe('C-IDEM — idempotence: run-2 on stable input → 0 changed tasks (GREEN — W2 delta-write landed)', () => {
   // ── Pure-function level (GREEN — output characterization, unaffected by write pattern) ──
   const IDEM_TASKS = [
     { id: 'idem-001', text: 'Task A', dur: 30, pri: 'P1', date: TODAY, deadline: TOMORROW,
@@ -1218,9 +1212,10 @@ describe('C-IDEM integration — beforeAll/beforeEach outside it.failing', () =>
     cidem_updatedAtAfterRun1 = afterRun1.updated_at;
   }, 20000);
 
-  it.failing(
-    // RED until W2 delta-write — it.failing() inverts; W2 removes the .failing marker.
-    'C-IDEM: run-2 updated_at unchanged for stable tasks (FAILS on current write-all — RED until W2)',
+  // GREEN after W2 delta-write (the .failing marker is removed — delta-write
+  // makes run-2 a no-op for the stable task).
+  it(
+    'C-IDEM: run-2 updated_at unchanged for stable tasks (delta-write → 0 writes on run-2)',
     async () => {
       // Run 2: identical input. Delta-write → 0 writes. Write-all → updated_at bumped.
       const { runScheduleAndPersist } = require('../../../src/scheduler/runSchedule');
