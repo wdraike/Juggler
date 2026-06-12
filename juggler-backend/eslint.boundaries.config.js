@@ -183,6 +183,28 @@ module.exports = [
             "Use the facade: require('./slices/task/facade'). See JUG-HEX-H3 (W6)."
         },
 
+        // --- AI-ENRICHMENT SLICE BOUNDARIES (JUG-HEX-H5 / W4) ---
+        //
+        // External code must access AI functionality only via the facade
+        // (slices/ai-enrichment/facade.js). Direct imports of the slice-internal
+        // adapters (GeminiAIAdapter / KnexAIUsageRepository / MockAIAdapter) or
+        // domain ports are forbidden — they go through the facade.
+        //
+        // Adapters are internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/ai-enrichment\\/adapters\\//]",
+          message:
+            "Direct import of ai-enrichment adapter is forbidden. " +
+            "Use the facade: require('./slices/ai-enrichment/facade'). See JUG-HEX-H5 (W4)."
+        },
+        // Domain ports are internal — go through facade.js
+        {
+          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/ai-enrichment\\/domain\\/ports\\//]",
+          message:
+            "Direct import of ai-enrichment port is forbidden. " +
+            "Use the facade: require('./slices/ai-enrichment/facade'). Ports are consumed only by adapters and the facade. See JUG-HEX-H5 (W4)."
+        },
+
         // --- USER-CONFIG SLICE BOUNDARIES (JUG-HEX-H4 / W6) ---
         //
         // External code must access user-config functionality only via the facade
@@ -313,6 +335,39 @@ module.exports = [
   {
     // Task tests are exempt — they import internals to test them directly.
     files: ['**/slices/task/**/*.test.js', '**/slices/task/test-doubles/**/*.js'],
+    rules: {
+      'no-restricted-syntax': 'off'
+    }
+  },
+
+  // --- AI-ENRICHMENT SLICE per-slice exemptions (JUG-HEX-H5 / W4) ---
+  {
+    // The ai-enrichment facade may import its own slice internals
+    // (adapters / domain ports).
+    files: ['**/slices/ai-enrichment/facade.js'],
+    rules: {
+      'no-restricted-syntax': 'off'
+    }
+  },
+  {
+    // AI-enrichment adapter files may import domain ports
+    // (they implement the port).
+    files: ['**/slices/ai-enrichment/adapters/**/*.js'],
+    rules: {
+      'no-restricted-syntax': 'off'
+    }
+  },
+  {
+    // AI-enrichment domain ports reach into their OWN slice's domain
+    // (NOT external code) — exempt the slice's own internals.
+    files: ['**/slices/ai-enrichment/domain/**/*.js'],
+    rules: {
+      'no-restricted-syntax': 'off'
+    }
+  },
+  {
+    // AI-enrichment tests are exempt — they import internals to test them directly.
+    files: ['**/slices/ai-enrichment/**/*.test.js', '**/slices/ai-enrichment/test-doubles/**/*.js'],
     rules: {
       'no-restricted-syntax': 'off'
     }

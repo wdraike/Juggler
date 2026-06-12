@@ -10,45 +10,17 @@
  *   - 50 requests/day  (enforced here via ai_command_log table)
  */
 
-const getDb = () => require('../db');
-const { trackedGeminiCall } = require('../services/gemini-tracked-call');
+// AI provider + daily-quota now live behind the ai-enrichment slice (Phase H5).
+// The @google/genai SDK is no longer instantiated here — it is wrapped by the
+// slice's GeminiAIAdapter (AIPort); the quota is the slice's AIUsagePort.
+const aiEnrichment = require('../slices/ai-enrichment/facade');
 const AI_USE_CASES = require('../constants/ai-use-cases');
 const { aiControllerLogger: logger } = require('../lib/logger');
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-const USE_VERTEX_AI = process.env.USE_VERTEX_AI === 'true';
-const AI_DAILY_LIMIT = 50;
-
-let _genAIClient = null;
-
-function getGenAIClient() {
-  if (_genAIClient) return _genAIClient;
-
-  const { GoogleGenAI } = require('@google/genai');
-
-  if (USE_VERTEX_AI) {
-    const project = process.env.GOOGLE_CLOUD_PROJECT;
-    const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
-    if (!project) throw new Error('GOOGLE_CLOUD_PROJECT required for Vertex AI');
-    _genAIClient = new GoogleGenAI({ vertexai: true, project, location });
-    logger.info('🤖 Juggler AI: Using Vertex AI (project:', project + ')');
-  } else {
-    if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY not configured');
-    _genAIClient = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    logger.info('🤖 Juggler AI: Using Gemini API with API key');
-  }
-
-  return _genAIClient;
-}
+const AI_DAILY_LIMIT = aiEnrichment.AI_DAILY_LIMIT;
 
 async function callGemini(prompt, systemPrompt) {
-  const client = getGenAIClient();
-
-  const result = await trackedGeminiCall(
-    getDb(),
-    client,
-    GEMINI_MODEL,
+  const result = await aiEnrichment.generate(
     systemPrompt + '\n\n---\nUser request:\n' + prompt,
     { temperature: 0.2, topP: 0.8, topK: 40, maxOutputTokens: 8192 },
     {
@@ -69,26 +41,6 @@ async function callGemini(prompt, systemPrompt) {
   throw new Error('Unexpected Gemini response structure');
 }
 
-/**
- * Check and record the per-user daily AI command quota.
- * Returns { allowed: true } or { allowed: false, remaining: 0 }.
- * Inserts a log row when allowed — counts the attempt regardless of Gemini outcome.
- */
-async function checkAndLogDailyQuota(userId) {
-  var windowStart = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  var row = await getDb()('ai_command_log')
-    .where('user_id', userId)
-    .where('created_at', '>=', windowStart)
-    .count('id as cnt')
-    .first();
-  var count = Number(row && row.cnt) || 0;
-  if (count >= AI_DAILY_LIMIT) {
-    return { allowed: false };
-  }
-  await getDb()('ai_command_log').insert({ user_id: userId });
-  return { allowed: true };
-}
-
 exports.handleCommand = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -99,7 +51,7 @@ exports.handleCommand = async (req, res) => {
     }
 
     // Daily quota check (2/min handled by route-level rate limiter)
-    var quota = await checkAndLogDailyQuota(userId);
+    var quota = await aiEnrichment.checkAndLogDailyQuota(userId);
     if (!quota.allowed) {
       return res.status(429).json({ error: 'Daily AI limit reached (' + AI_DAILY_LIMIT + '/day). Try again tomorrow.' });
     }

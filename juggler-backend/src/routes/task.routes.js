@@ -6,9 +6,8 @@ const { resolvePlanFeatures } = require('../middleware/plan-features.middleware'
 const { checkTaskOrRecurringLimit, checkBatchTaskLimits } = require('../middleware/entity-limits');
 const { validate } = require('../middleware/validate');
 const { taskCreateSchema, taskUpdateSchema } = require('../schemas/task.schema');
-const { trackedGeminiCall } = require('../services/gemini-tracked-call');
+const aiEnrichment = require('../slices/ai-enrichment/facade');
 const AI_USE_CASES = require('../constants/ai-use-cases');
-const db = require('../db');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('task.routes');
 
@@ -32,26 +31,10 @@ router.get('/suggest-icon', async (req, res) => {
       return res.json({ icon: null });
     }
 
-    const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-    const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-    const USE_VERTEX_AI = process.env.USE_VERTEX_AI === 'true';
-
-    const { GoogleGenAI } = require('@google/genai');
-    let client;
-    if (USE_VERTEX_AI) {
-      const project = process.env.GOOGLE_CLOUD_PROJECT;
-      const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
-      if (!project) return res.json({ icon: null });
-      client = new GoogleGenAI({ vertexai: true, project, location });
-    } else {
-      if (!GEMINI_API_KEY) return res.json({ icon: null });
-      client = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    }
-
     const prompt = 'Reply with exactly one emoji that best represents this task. No text, punctuation, or explanation — just the emoji.\n\nTask: ' + text;
 
-    const result = await trackedGeminiCall(
-      db, client, GEMINI_MODEL, prompt,
+    const result = await aiEnrichment.generate(
+      prompt,
       { temperature: 0.4, maxOutputTokens: 16 },
       { useCase: AI_USE_CASES.EMOJI_SUGGEST, userId: req.user?.id || null },
     );

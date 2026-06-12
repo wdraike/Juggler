@@ -20,3 +20,7 @@ auth-client/
 .worktrees/
 .claude/
 juggler-backend/purge-orphan-events-*.csv
+
+# MemPalace per-project files (issue #185)
+mempalace.yaml
+entities.json
