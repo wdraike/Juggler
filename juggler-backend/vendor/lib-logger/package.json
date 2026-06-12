@@ -1,0 +1,21 @@
+{
+  "name": "@raike/lib-logger",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "exports": {
+    ".": {
+      "import": "./src/index.js",
+      "require": "./src/index.js"
+    }
+  },
+  "dependencies": {
+    "winston": "^3.13.0",
+    "pino": "^9.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  },
+  "scripts": {
+    "test": "jest"
+  }
+}

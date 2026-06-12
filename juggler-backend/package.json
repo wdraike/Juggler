@@ -25,8 +25,8 @@
   "dependencies": {
     "@google/genai": "^1.46.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
-    "@raike/lib-db": "file:../../packages/lib-db",
-    "@raike/lib-logger": "file:../../packages/lib-logger",
+    "@raike/lib-db": "file:./vendor/lib-db",
+    "@raike/lib-logger": "file:./vendor/lib-logger",
     "auth-client": "file:../../auth-service/shared",
     "body-parser": "^1.20.2",
     "compression": "^1.7.4",
@@ -43,6 +43,7 @@
     "jsonwebtoken": "^9.0.2",
     "knex": "^3.1.0",
     "morgan": "^1.10.0",
+    "mysql2": "^3.9.2",
     "rate-limit-redis": "^4.3.1",
     "tsdav": "^2.1.8",
     "uuid": "^13.0.0",
