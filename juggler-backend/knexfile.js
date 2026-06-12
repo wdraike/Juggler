@@ -58,10 +58,7 @@ module.exports = {
       database: process.env.DB_NAME,
       charset: 'utf8mb4',
       timezone: '+00:00',
-      dateStrings: true,
-      ssl: process.env.DB_SSL === 'true' ? {
-        rejectUnauthorized: false
-      } : undefined
+      dateStrings: true
     },
     pool: Object.assign({}, poolConfig, { max: 20 }),
     migrations: {
