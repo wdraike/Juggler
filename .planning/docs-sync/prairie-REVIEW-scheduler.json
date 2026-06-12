@@ -1,0 +1,90 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "prairie",
+  "leg_id": "scheduler-hex-refactor-docverify",
+  "mode": "chore",
+  "depth": "standard",
+  "status": "ISSUES",
+  "summary": "SCHEDULER.md contains 2 BLOCK defects: incorrect phase naming (Phase 0/1/2 vs V2: Immovable/Constrained) and wrong file path (unifiedSchedule.js vs unifiedScheduleV2.js). 2 WARN: stale frontmatter (18 days old) and missing hexagon-slice architectural context. Core algorithms verified accurate.",
+  "steps": {
+    "rubric_check": "done",
+    "accuracy_semantic_verify": "done",
+    "frontmatter_freshness": "done",
+    "link_resolution": "done",
+    "architecture_refactor_acknowledgment": "done"
+  },
+  "findings": [
+    {
+      "id": "f1-phase-naming",
+      "severity": "BLOCK",
+      "dimension": "accuracy",
+      "file": "juggler-backend/docs/architecture/SCHEDULER.md",
+      "line": 75,
+      "claim": "In code (src/scheduler/unifiedSchedule.js), these sub-phases are called Phase 0 / Phase 1 / Phase 2 / Phase 3+4 / Phase 5",
+      "evidence": "Actual code in unifiedScheduleV2.js (lines 580–590, emitStepRecord function) uses phase names 'V2: Immovable', 'V2: Constrained', 'V2: Unconstrained', 'V2: Retry'. Phase numbers (0/1/2/3/4/5) do not appear in the codebase. Documentation phase terminology contradicts implementation.",
+      "fix": "Correct phase names to match code: V2: Immovable (≈Phase 0), V2: Constrained (≈Phase 2/main), V2: Unconstrained (≈Phase 3), V2: Retry (≈Phase 4). Add a reference table mapping doc section 4a–4e to actual code phase strings.",
+      "confidence": "high"
+    },
+    {
+      "id": "f2-file-path",
+      "severity": "BLOCK",
+      "dimension": "accuracy",
+      "file": "juggler-backend/docs/architecture/SCHEDULER.md",
+      "line": 75,
+      "claim": "File is src/scheduler/unifiedSchedule.js",
+      "evidence": "Actual file is src/scheduler/unifiedScheduleV2.js (missing 'V2' suffix). Verified in facade.js, runSchedule.js, and codebase imports. unifiedSchedule.js does not exist.",
+      "fix": "Correct file path on line 75 from 'src/scheduler/unifiedSchedule.js' to 'src/scheduler/unifiedScheduleV2.js'.",
+      "confidence": "high"
+    },
+    {
+      "id": "f3-stale-frontmatter",
+      "severity": "WARN",
+      "dimension": "accuracy",
+      "file": "juggler-backend/docs/architecture/SCHEDULER.md",
+      "line": 5,
+      "claim": "last_updated: 2026-05-25",
+      "evidence": "Frontmatter shows last_updated=2026-05-25. Today is 2026-06-12 (18 days old). For an active document post-refactoring, this is stale. If the doc reflects current scheduler slice implementation, version should be refreshed.",
+      "fix": "Update last_updated to 2026-06-12 and refresh version field to latest juggler-backend commit SHA.",
+      "confidence": "high"
+    },
+    {
+      "id": "f4-missing-slice-context",
+      "severity": "WARN",
+      "dimension": "completeness",
+      "file": "juggler-backend/docs/architecture/SCHEDULER.md",
+      "line": null,
+      "claim": "Documentation adequately describes scheduler architecture",
+      "evidence": "Doc does not mention hexagon-slice refactoring (src/slices/scheduler/). No mention of facade.js as entry point, domain/adapters/application layers, or relationship between legacy src/scheduler/* and new slice structure. Doc treats scheduler as pre-refactor monolithic unit. Per BASE-ARCH-DOC-STANDARD §4 (Containers), refactored architecture doc should name the slice and explain layer structure.",
+      "fix": "Add new section (§1.1 'Architecture Refactoring' or subsection after line 20–21) explaining: (1) scheduler is a hexagon slice (src/slices/scheduler/); (2) slice exposes runScheduleAndPersist, getSchedulePlacements, unifiedScheduleV2 via facade.js; (3) domain core (ConstraintSolver, ConflictResolver, ScoreEngine) and adapters (TaskProvider, CalendarProvider, ScheduleRepository, MysqlClockAdapter, SchedulerWeatherProvider) live in the slice; (4) legacy src/scheduler/* files imported by facade (H7 work pending).",
+      "confidence": "high"
+    },
+    {
+      "id": "f5-missing-c4-diagram",
+      "severity": "INFO",
+      "dimension": "standards",
+      "file": "juggler-backend/docs/architecture/SCHEDULER.md",
+      "line": null,
+      "claim": "Architecture doc includes C4 L2 (Containers) diagram",
+      "evidence": "No explicit C4 diagram present. Doc describes phases and algorithms in prose + tables but does not visualize system context (which services call scheduler, where does it fit in broader architecture). Per BASE-ARCH-DOC-STANDARD §2, architecture docs should include C4 L2.",
+      "fix": "Add C4 L2 diagram (Mermaid or ASCII) showing: (1) HTTP routes + MCP tools → scheduler facade; (2) scheduler → task/calendar/weather repositories; (3) scheduler → database (persist via RunScheduleCommand); (4) external port dependencies.",
+      "confidence": "med"
+    },
+    {
+      "id": "f6-missing-api-reference",
+      "severity": "INFO",
+      "dimension": "code-documentation",
+      "file": "juggler-backend/docs/architecture/SCHEDULER.md",
+      "line": 75,
+      "claim": "Public entry points documented",
+      "evidence": "Three public operations (runScheduleAndPersist, getSchedulePlacements, unifiedScheduleV2) are referenced in passing on line 75 but not formally documented with signatures, parameter descriptions, or links to source JSDoc. Developers calling the scheduler from routes/MCP would need to cross-reference code.",
+      "fix": "Add 'Public API Reference' section listing the three operations with signatures, one-line description, and link to facade.js or source definition.",
+      "confidence": "med"
+    }
+  ],
+  "refers": [
+    {
+      "to": "abby",
+      "why": "Fix 2 BLOCK accuracy defects (phase naming, file path on line 75) and 2 WARN issues (stale frontmatter, missing slice context). Blocks publication."
+    }
+  ]
+}
