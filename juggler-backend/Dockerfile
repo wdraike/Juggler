@@ -8,6 +8,9 @@ COPY shared/ /shared/
 # Copy package.json only (no lock file — auth-client path gets rewritten)
 COPY juggler-backend/package.json ./
 
+# Copy vendored local packages so file:./vendor/* paths resolve during npm install
+COPY juggler-backend/vendor/ ./vendor/
+
 # Rewrite auth-client to point to a local copy, then install
 RUN sed -i '/"auth-client"/d' package.json && \
     npm install --omit=dev --ignore-scripts
