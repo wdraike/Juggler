@@ -15,6 +15,131 @@
 // Boundary rule: ALL code outside the calendar slice must access calendar functionality
 // only via the public facade (slices/calendar/facade.js). Direct imports of adapters,
 // ports, or domain entities from outside the slice are forbidden.
+
+// --- Per-slice boundary helpers (single-source the copy-paste blocks) ---
+//
+// Each slice declares: name, ref tag, the list of restricted internal subpaths
+// (each carrying its own message text), the facade files that may import internals,
+// the adapters exemption glob, and the optional domain/application exemption globs.
+// `restriction()` builds one no-restricted-syntax selector object; `sliceRules()`
+// maps a slice's restrictions to selector objects; `sliceExemptions()` builds the
+// per-slice "off" override blocks in the canonical order
+// (facade(+index), adapters, [domain/application], tests).
+
+// Build a single no-restricted-syntax selector object for a slice subpath.
+// `subpath` is a slash-separated path under slices/<name>/ (e.g. 'adapters',
+// 'domain/ports'). `label` is the human noun in the message (e.g. 'adapter').
+// `tail` is the exact text following "...require('./slices/<name>/facade')" —
+// normally "." (period only), but some slices append extra prose (e.g. weather
+// value-object: " (it re-exports GeoPoint + roundCoord/gridValue).") or a port
+// sentence. It always ends just before the " See <ref>." suffix.
+function restriction(name, subpath, label, ref, tail) {
+  const escaped = subpath.split('/').join('\\/');
+  return {
+    selector:
+      "CallExpression[callee.name='require'] > Literal[value=/slices\\/" +
+      name + '\\/' + escaped + "\\//]",
+    message:
+      'Direct import of ' + name + ' ' + label + ' is forbidden. ' +
+      "Use the facade: require('./slices/" + name + "/facade')" +
+      tail + ' See ' + ref + '.'
+  };
+}
+
+// Standard message tails.
+const TAIL_PLAIN = '.';
+const TAIL_PORT = '. Ports are consumed only by adapters and the facade.';
+
+// Map a slice descriptor to its array of selector objects.
+function sliceRules(slice) {
+  return slice.restrictions.map((r) =>
+    restriction(slice.name, r.subpath, r.label, slice.ref, r.tail || TAIL_PLAIN)
+  );
+}
+
+// Build the per-slice exemption override blocks. `facadeFiles` is the glob list
+// for the facade (+ index when re-exported). `extraExempt` is an optional glob
+// list for the domain/application self-import exemption (omitted when absent).
+function sliceExemptions(slice) {
+  const blocks = [
+    { files: slice.facadeFiles, rules: { 'no-restricted-syntax': 'off' } },
+    { files: ['**/slices/' + slice.name + '/adapters/**/*.js'], rules: { 'no-restricted-syntax': 'off' } }
+  ];
+  if (slice.extraExempt) {
+    blocks.push({ files: slice.extraExempt, rules: { 'no-restricted-syntax': 'off' } });
+  }
+  blocks.push({
+    files: [
+      '**/slices/' + slice.name + '/**/*.test.js',
+      '**/slices/' + slice.name + '/test-doubles/**/*.js'
+    ],
+    rules: { 'no-restricted-syntax': 'off' }
+  });
+  return blocks;
+}
+
+// Slice descriptors — single source of truth for rules AND exemptions.
+const SLICES = [
+  {
+    name: 'calendar',
+    ref: 'JUG-HEX-P7',
+    facadeFiles: ['**/slices/calendar/facade.js'],
+    restrictions: [
+      { subpath: 'adapters', label: 'adapter' },
+      { subpath: 'domain/ports', label: 'port', tail: TAIL_PORT },
+      { subpath: 'domain/entities', label: 'entity' }
+    ]
+  },
+  {
+    name: 'weather',
+    ref: 'JUG-HEX-H1 (W3)',
+    facadeFiles: ['**/slices/weather/facade.js', '**/slices/weather/index.js'],
+    restrictions: [
+      { subpath: 'adapters', label: 'adapter' },
+      { subpath: 'domain/ports', label: 'port', tail: TAIL_PORT },
+      { subpath: 'domain/entities', label: 'entity' },
+      { subpath: 'domain/value-objects', label: 'value-object', tail: ' (it re-exports GeoPoint + roundCoord/gridValue).' }
+    ]
+  },
+  {
+    name: 'task',
+    ref: 'JUG-HEX-H3 (W6)',
+    facadeFiles: ['**/slices/task/facade.js', '**/slices/task/index.js'],
+    extraExempt: ['**/slices/task/application/**/*.js', '**/slices/task/domain/**/*.js'],
+    restrictions: [
+      { subpath: 'adapters', label: 'adapter' },
+      { subpath: 'domain/ports', label: 'port', tail: TAIL_PORT },
+      { subpath: 'domain/entities', label: 'entity' },
+      { subpath: 'domain/value-objects', label: 'value-object' },
+      { subpath: 'application', label: 'application use-case' }
+    ]
+  },
+  {
+    name: 'ai-enrichment',
+    ref: 'JUG-HEX-H5 (W4)',
+    facadeFiles: ['**/slices/ai-enrichment/facade.js'],
+    extraExempt: ['**/slices/ai-enrichment/domain/**/*.js'],
+    restrictions: [
+      { subpath: 'adapters', label: 'adapter' },
+      { subpath: 'domain/ports', label: 'port', tail: TAIL_PORT }
+    ]
+  },
+  {
+    name: 'user-config',
+    ref: 'JUG-HEX-H4 (W6)',
+    facadeFiles: ['**/slices/user-config/facade.js', '**/slices/user-config/index.js'],
+    extraExempt: ['**/slices/user-config/application/**/*.js', '**/slices/user-config/domain/**/*.js'],
+    restrictions: [
+      { subpath: 'adapters', label: 'adapter' },
+      { subpath: 'domain/ports', label: 'port', tail: TAIL_PORT },
+      { subpath: 'domain/entities', label: 'entity' },
+      { subpath: 'domain/value-objects', label: 'value-object' },
+      { subpath: 'domain/logic', label: 'domain logic' },
+      { subpath: 'application', label: 'application use-case' }
+    ]
+  }
+];
+
 module.exports = [
   {
     // Scope: all .js files under the backend root.
@@ -75,335 +200,18 @@ module.exports = [
       }
     },
     rules: {
-      // --- CALENDAR SLICE BOUNDARIES (JUG-HEX-P7) ---
-      //
-      // External code must access calendar functionality only via the facade.
-      // Direct imports of slice-internal paths are forbidden.
+      // Per-slice boundary selectors — single-sourced from SLICES (see helpers
+      // above). Order is preserved: calendar, weather, task, ai-enrichment,
+      // user-config; within each slice the restrictions array order is kept.
       'no-restricted-syntax': [
         'error',
-        // Adapters are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/calendar\\/adapters\\//]",
-          message:
-            "Direct import of calendar adapter is forbidden. " +
-            "Use the facade: require('./slices/calendar/facade'). See JUG-HEX-P7."
-        },
-        // Domain ports are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/calendar\\/domain\\/ports\\//]",
-          message:
-            "Direct import of calendar port is forbidden. " +
-            "Use the facade: require('./slices/calendar/facade'). Ports are consumed only by adapters and the facade. See JUG-HEX-P7."
-        },
-        // Domain entities are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/calendar\\/domain\\/entities\\//]",
-          message:
-            "Direct import of calendar entity is forbidden. " +
-            "Use the facade: require('./slices/calendar/facade'). See JUG-HEX-P7."
-        },
-
-        // --- WEATHER SLICE BOUNDARIES (JUG-HEX-H1 / W3) ---
-        //
-        // External code must access weather functionality only via the facade
-        // (slices/weather/facade.js) or its index re-export. Direct imports of
-        // slice-internal paths (adapters / domain ports / domain entities +
-        // value-objects) are forbidden.
-        //
-        // Adapters are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/weather\\/adapters\\//]",
-          message:
-            "Direct import of weather adapter is forbidden. " +
-            "Use the facade: require('./slices/weather/facade'). See JUG-HEX-H1 (W3)."
-        },
-        // Domain ports are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/weather\\/domain\\/ports\\//]",
-          message:
-            "Direct import of weather port is forbidden. " +
-            "Use the facade: require('./slices/weather/facade'). Ports are consumed only by adapters and the facade. See JUG-HEX-H1 (W3)."
-        },
-        // Domain entities are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/weather\\/domain\\/entities\\//]",
-          message:
-            "Direct import of weather entity is forbidden. " +
-            "Use the facade: require('./slices/weather/facade'). See JUG-HEX-H1 (W3)."
-        },
-        // Domain value-objects (e.g. GeoPoint) are internal — go through facade.js
-        // (the facade re-exports GeoPoint + roundCoord/gridValue for consumers).
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/weather\\/domain\\/value-objects\\//]",
-          message:
-            "Direct import of weather value-object is forbidden. " +
-            "Use the facade: require('./slices/weather/facade') (it re-exports GeoPoint + roundCoord/gridValue). See JUG-HEX-H1 (W3)."
-        },
-
-        // --- TASK SLICE BOUNDARIES (JUG-HEX-H3 / W6) ---
-        //
-        // External code must access task functionality only via the facade
-        // (slices/task/facade.js) or its index re-export. Direct imports of
-        // slice-internal paths (adapters / domain ports / entities / value-objects /
-        // application use-cases) are forbidden — they go through the facade.
-        //
-        // Adapters are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/task\\/adapters\\//]",
-          message:
-            "Direct import of task adapter is forbidden. " +
-            "Use the facade: require('./slices/task/facade'). See JUG-HEX-H3 (W6)."
-        },
-        // Domain ports are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/task\\/domain\\/ports\\//]",
-          message:
-            "Direct import of task port is forbidden. " +
-            "Use the facade: require('./slices/task/facade'). Ports are consumed only by adapters and the facade. See JUG-HEX-H3 (W6)."
-        },
-        // Domain entities are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/task\\/domain\\/entities\\//]",
-          message:
-            "Direct import of task entity is forbidden. " +
-            "Use the facade: require('./slices/task/facade'). See JUG-HEX-H3 (W6)."
-        },
-        // Domain value-objects (closed-enum VOs) are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/task\\/domain\\/value-objects\\//]",
-          message:
-            "Direct import of task value-object is forbidden. " +
-            "Use the facade: require('./slices/task/facade'). See JUG-HEX-H3 (W6)."
-        },
-        // Application use-cases are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/task\\/application\\//]",
-          message:
-            "Direct import of task application use-case is forbidden. " +
-            "Use the facade: require('./slices/task/facade'). See JUG-HEX-H3 (W6)."
-        },
-
-        // --- AI-ENRICHMENT SLICE BOUNDARIES (JUG-HEX-H5 / W4) ---
-        //
-        // External code must access AI functionality only via the facade
-        // (slices/ai-enrichment/facade.js). Direct imports of the slice-internal
-        // adapters (GeminiAIAdapter / KnexAIUsageRepository / MockAIAdapter) or
-        // domain ports are forbidden — they go through the facade.
-        //
-        // Adapters are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/ai-enrichment\\/adapters\\//]",
-          message:
-            "Direct import of ai-enrichment adapter is forbidden. " +
-            "Use the facade: require('./slices/ai-enrichment/facade'). See JUG-HEX-H5 (W4)."
-        },
-        // Domain ports are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/ai-enrichment\\/domain\\/ports\\//]",
-          message:
-            "Direct import of ai-enrichment port is forbidden. " +
-            "Use the facade: require('./slices/ai-enrichment/facade'). Ports are consumed only by adapters and the facade. See JUG-HEX-H5 (W4)."
-        },
-
-        // --- USER-CONFIG SLICE BOUNDARIES (JUG-HEX-H4 / W6) ---
-        //
-        // External code must access user-config functionality only via the facade
-        // (slices/user-config/facade.js) or its index re-export. Direct imports of
-        // slice-internal paths (adapters / domain ports / entities / value-objects /
-        // domain logic / application use-cases) are forbidden — they go through the
-        // facade.
-        //
-        // Adapters are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/user-config\\/adapters\\//]",
-          message:
-            "Direct import of user-config adapter is forbidden. " +
-            "Use the facade: require('./slices/user-config/facade'). See JUG-HEX-H4 (W6)."
-        },
-        // Domain ports are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/user-config\\/domain\\/ports\\//]",
-          message:
-            "Direct import of user-config port is forbidden. " +
-            "Use the facade: require('./slices/user-config/facade'). Ports are consumed only by adapters and the facade. See JUG-HEX-H4 (W6)."
-        },
-        // Domain entities are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/user-config\\/domain\\/entities\\//]",
-          message:
-            "Direct import of user-config entity is forbidden. " +
-            "Use the facade: require('./slices/user-config/facade'). See JUG-HEX-H4 (W6)."
-        },
-        // Domain value-objects (closed-enum VOs: PlanSlug/FeatureKey/EntityLimit) are
-        // internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/user-config\\/domain\\/value-objects\\//]",
-          message:
-            "Direct import of user-config value-object is forbidden. " +
-            "Use the facade: require('./slices/user-config/facade'). See JUG-HEX-H4 (W6)."
-        },
-        // Domain logic (pure decision functions) is internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/user-config\\/domain\\/logic\\//]",
-          message:
-            "Direct import of user-config domain logic is forbidden. " +
-            "Use the facade: require('./slices/user-config/facade'). See JUG-HEX-H4 (W6)."
-        },
-        // Application use-cases are internal — go through facade.js
-        {
-          selector: "CallExpression[callee.name='require'] > Literal[value=/slices\\/user-config\\/application\\//]",
-          message:
-            "Direct import of user-config application use-case is forbidden. " +
-            "Use the facade: require('./slices/user-config/facade'). See JUG-HEX-H4 (W6)."
-        }
+        ...SLICES.flatMap(sliceRules)
       ]
     }
   },
-  {
-    // The facade itself may import its own slice internals.
-    files: ['**/slices/calendar/facade.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-  {
-    // Adapter files may import domain ports/entities (they implement the port).
-    files: ['**/slices/calendar/adapters/**/*.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-  {
-    // Tests are exempt — they import internals to test them directly.
-    files: ['**/slices/calendar/**/*.test.js', '**/slices/calendar/test-doubles/**/*.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-
-  // --- WEATHER SLICE per-slice exemptions (JUG-HEX-H1 / W3) ---
-  {
-    // The weather facade + its index re-export may import their own slice
-    // internals (adapters / domain ports / entities / value-objects).
-    files: ['**/slices/weather/facade.js', '**/slices/weather/index.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-  {
-    // Weather adapter files may import domain ports/entities/value-objects
-    // (they implement the port / use the VO).
-    files: ['**/slices/weather/adapters/**/*.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-  {
-    // Weather tests are exempt — they import internals to test them directly.
-    files: ['**/slices/weather/**/*.test.js', '**/slices/weather/test-doubles/**/*.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-
-  // --- TASK SLICE per-slice exemptions (JUG-HEX-H3 / W6) ---
-  {
-    // The task facade + its index re-export may import their own slice internals
-    // (adapters / domain ports / entities / value-objects / application use-cases).
-    files: ['**/slices/task/facade.js', '**/slices/task/index.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-  {
-    // Task adapter files may import domain ports/entities/value-objects
-    // (they implement the port / map the entities).
-    files: ['**/slices/task/adapters/**/*.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-  {
-    // Task application use-cases consume the ports/domain through injection; the
-    // application barrel + use-case files reach into their own slice's application
-    // and domain (NOT external code) — exempt the slice's own internals.
-    files: ['**/slices/task/application/**/*.js', '**/slices/task/domain/**/*.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-  {
-    // Task tests are exempt — they import internals to test them directly.
-    files: ['**/slices/task/**/*.test.js', '**/slices/task/test-doubles/**/*.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-
-  // --- AI-ENRICHMENT SLICE per-slice exemptions (JUG-HEX-H5 / W4) ---
-  {
-    // The ai-enrichment facade may import its own slice internals
-    // (adapters / domain ports).
-    files: ['**/slices/ai-enrichment/facade.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-  {
-    // AI-enrichment adapter files may import domain ports
-    // (they implement the port).
-    files: ['**/slices/ai-enrichment/adapters/**/*.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-  {
-    // AI-enrichment domain ports reach into their OWN slice's domain
-    // (NOT external code) — exempt the slice's own internals.
-    files: ['**/slices/ai-enrichment/domain/**/*.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-  {
-    // AI-enrichment tests are exempt — they import internals to test them directly.
-    files: ['**/slices/ai-enrichment/**/*.test.js', '**/slices/ai-enrichment/test-doubles/**/*.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-
-  // --- USER-CONFIG SLICE per-slice exemptions (JUG-HEX-H4 / W6) ---
-  {
-    // The user-config facade + its index re-export may import their own slice
-    // internals (adapters / domain ports / entities / value-objects / logic /
-    // application use-cases).
-    files: ['**/slices/user-config/facade.js', '**/slices/user-config/index.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-  {
-    // User-config adapter files may import domain ports/entities/value-objects/logic
-    // (they implement the port / map the entities).
-    files: ['**/slices/user-config/adapters/**/*.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-  {
-    // User-config application use-cases + domain reach into their OWN slice's
-    // application/domain (NOT external code) — exempt the slice's own internals.
-    files: ['**/slices/user-config/application/**/*.js', '**/slices/user-config/domain/**/*.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  },
-  {
-    // User-config tests are exempt — they import internals to test them directly.
-    files: ['**/slices/user-config/**/*.test.js', '**/slices/user-config/test-doubles/**/*.js'],
-    rules: {
-      'no-restricted-syntax': 'off'
-    }
-  }
+  // Per-slice exemption override blocks — single-sourced from SLICES (see
+  // sliceExemptions above). Order is preserved: for each slice, facade(+index),
+  // adapters, [domain/application self-imports], tests; slices in declaration
+  // order (calendar, weather, task, ai-enrichment, user-config).
+  ...SLICES.flatMap(sliceExemptions)
 ];
