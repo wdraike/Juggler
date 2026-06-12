@@ -174,6 +174,41 @@ describe('POST /api/schedule/run', () => {
     expect(res.body).toHaveProperty('dayPlacements');
   });
 
+  // Z1 FORWARDING CONTRACT — guards facade arg forwarding.
+  // The route calls: runScheduleAndPersist(req.user.id, undefined, { timezone })
+  // A facade that drops args, mutates them, or short-circuits never reaches this
+  // fn — so WITHOUT this assertion a broken facade stays green (zoe W4 Z1).
+  test('Z1: forwards correct args — userId, undefined ids, timezone opts — to runScheduleAndPersist', async () => {
+    const { runScheduleAndPersist: mockFn } = require('../../src/scheduler/runSchedule');
+
+    await request(app)
+      .post('/api/schedule/run')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`);
+
+    expect(mockFn).toHaveBeenCalledTimes(1);
+    expect(mockFn).toHaveBeenCalledWith(
+      'user-123',          // req.user.id (TEST_USER)
+      undefined,           // ids — route passes undefined
+      { timezone: 'America/New_York' } // opts — default when no x-timezone header
+    );
+  });
+
+  test('Z1: forwards custom x-timezone header correctly to runScheduleAndPersist', async () => {
+    const { runScheduleAndPersist: mockFn } = require('../../src/scheduler/runSchedule');
+
+    await request(app)
+      .post('/api/schedule/run')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .set('x-timezone', 'Europe/London');
+
+    expect(mockFn).toHaveBeenCalledTimes(1);
+    expect(mockFn).toHaveBeenCalledWith(
+      'user-123',
+      undefined,
+      { timezone: 'Europe/London' }
+    );
+  });
+
   test('returns 401 without auth', async () => {
     const res = await request(app).post('/api/schedule/run');
     expect(res.status).toBe(401);

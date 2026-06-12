@@ -7,7 +7,7 @@ var rateLimit = require('express-rate-limit');
 var router = express.Router();
 var { authenticateJWT } = require('../middleware/jwt-auth');
 var authenticateAdmin = require('../middleware/authenticateAdmin');
-var { runScheduleAndPersist, getSchedulePlacements } = require('../scheduler/runSchedule');
+var { runScheduleAndPersist, getSchedulePlacements } = require('../slices/scheduler/facade');
 var { withSyncLock } = require('../lib/sync-lock');
 var schedulerSession = require('../scheduler/schedulerSession');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
@@ -76,7 +76,7 @@ router.post('/nudge', authenticateJWT, schedulerLimiter, async function(req, res
  */
 router.post('/debug', authenticateJWT, authenticateAdmin, debugLimiter, async function(req, res) {
   try {
-    var unifiedSchedule = require('../scheduler/unifiedScheduleV2');
+    var unifiedSchedule = require('../slices/scheduler/facade').unifiedScheduleV2;
     var db = require('../db');
     var TIMEZONE = req.headers['x-timezone'] || 'America/New_York';
     var userId = req.user.id;

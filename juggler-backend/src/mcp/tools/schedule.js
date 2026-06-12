@@ -4,7 +4,7 @@
 
 const { z } = require('zod');
 const safeStringify = require('../safeStringify');
-const { runScheduleAndPersist, getSchedulePlacements } = require('../../scheduler/runSchedule');
+const { runScheduleAndPersist, getSchedulePlacements } = require('../../slices/scheduler/facade');
 const { withLock } = require('../../lib/sync-lock');
 const db = require('../../db');
 
