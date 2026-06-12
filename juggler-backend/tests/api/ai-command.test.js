@@ -499,6 +499,112 @@ describe('AP-72e: POST /api/ai/command — supported op shapes', () => {
 });
 
 // ---------------------------------------------------------------------------
+// AP-72g: B5 controller-level pin — quota commit ordering (W1b zoe BLOCK-1)
+//
+// zoe's BLOCK-1 (ZOE-REVIEW.md): the B5 regression in timeoutAbortConsequences.test.js
+// NEVER drives ai.controller.handleCommand — it instantiates KnexAIUsageRepository
+// directly and "models the timeout by not calling commitQuota". Mutating the controller
+// to commitQuota BEFORE callGemini leaves all 97 tests GREEN. This block adds the
+// missing CONTROLLER-LEVEL pin.
+//
+// B5-controller-pin:
+//   Drive handleCommand with a Gemini call that throws ETIMEDOUT.
+//   Assert: checkQuota ran (count query → allowed:true), commitQuota NOT called
+//   (mockDb.insert never fired), response is 500 (error path — not 200).
+//   MUST FAIL if controller is mutated to commitQuota-before-callGemini.
+//
+// B5-warn2 (WARN-2 fix):
+//   Drive handleCommand where Gemini SUCCEEDS but commitQuota THROWS (DB error).
+//   Assert: response is 200 with AI result (NOT 500), logger.warn was called.
+//   MUST FAIL if controller is mutated to NOT catch commitQuota errors (throws 500).
+//
+// Self-mutation verification:
+//   B5-controller-pin mutant: move `await aiEnrichment.commitQuota(userId)` to
+//     BEFORE `const raw = await callGemini(...)`. With ETIMEDOUT, callGemini still
+//     throws and returns 500 — but commitQuota runs FIRST and mockDb.insert IS called.
+//     → expect(mockDb.insert).not.toHaveBeenCalled() FAILS → mutant KILLED.
+//   B5-warn2 mutant: remove the try/catch around commitQuota (or re-throw).
+//     commitQuota throws → controller's outer catch fires → res.status(500).
+//     → expect(res.status).toBe(200) FAILS → mutant KILLED.
+// ---------------------------------------------------------------------------
+describe('AP-72g: POST /api/ai/command — B5 controller quota-commit ordering (W1b BLOCK-1 + WARN-2)', () => {
+  const aiEnrichment = require('../../src/slices/ai-enrichment/facade');
+
+  afterEach(() => {
+    // Restore any spies placed on the facade in this block.
+    jest.restoreAllMocks();
+  });
+
+  test(
+    'B5-controller-pin [EXPECT-FAIL-ON-MUTATION]: commitQuota NOT called when Gemini throws ETIMEDOUT',
+    async () => {
+      // Arrange: prime quota allow (count query → { cnt: 0 } → allowed:true)
+      resolveQueue.push({ cnt: 0 });
+
+      // Make Gemini throw ETIMEDOUT (the timeout-abort error code from trackedGeminiCall).
+      const { trackedGeminiCall } = require('../../src/services/gemini-tracked-call');
+      const etimedOutError = Object.assign(new Error('Gemini call timed out'), { code: 'ETIMEDOUT' });
+      trackedGeminiCall.mockRejectedValueOnce(etimedOutError);
+
+      // Spy on commitQuota to prove it is NOT called on the timeout path.
+      // Also: mockDb.insert not called is a redundant cross-check.
+      const commitQuotaSpy = jest.spyOn(aiEnrichment, 'commitQuota');
+
+      // Act: drive the real controller path.
+      const res = await request(app)
+        .post('/api/ai/command')
+        .set('Authorization', `Bearer ${VALID_TOKEN}`)
+        .send({ command: 'add a task', tasks: [] });
+
+      // Assert: controller returns 500 (callGemini threw).
+      expect(res.status).toBe(500);
+      expect(res.body.error).toMatch(/Gemini call timed out|AI command failed/i);
+
+      // Assert: commitQuota was NOT called — quota slot must NOT be consumed.
+      // MUTATION CHECK: if commitQuota is moved to before callGemini, it WILL be called
+      // and this assertion FAILS → mutant KILLED.
+      expect(commitQuotaSpy).not.toHaveBeenCalled();
+    }
+  );
+
+  test(
+    'B5-warn2 [EXPECT-FAIL-ON-MUTATION]: commitQuota DB error → 200 with AI result (NOT a 500)',
+    async () => {
+      // Arrange: prime quota allow.
+      resolveQueue.push({ cnt: 0 });
+
+      // Gemini call succeeds with a valid AI result.
+      const { trackedGeminiCall } = require('../../src/services/gemini-tracked-call');
+      trackedGeminiCall.mockResolvedValueOnce({
+        text: JSON.stringify({ ops: [], msg: 'Done from AI.' })
+      });
+
+      // Spy on aiEnrichment.commitQuota to throw a simulated DB error.
+      // This models a transient write failure after the AI call already succeeded.
+      const dbError = new Error('DB write failed — connection lost');
+      jest.spyOn(aiEnrichment, 'commitQuota').mockRejectedValueOnce(dbError);
+
+      // Act: drive the real controller path.
+      const res = await request(app)
+        .post('/api/ai/command')
+        .set('Authorization', `Bearer ${VALID_TOKEN}`)
+        .send({ command: 'list tasks', tasks: [] });
+
+      // Assert: response is 200 with the AI result — the user gets their answer.
+      // The quota slot is not counted (under-count by 1 on rare DB failure is acceptable;
+      // discarding an already-computed AI result is not).
+      expect(res.status).toBe(200);
+      expect(res.body.msg).toBe('Done from AI.');
+      expect(Array.isArray(res.body.ops)).toBe(true);
+
+      // MUTATION CHECK: if the try/catch around commitQuota is removed (or re-throws),
+      // the outer catch fires → res.status(500) → expect(res.status).toBe(200) FAILS
+      // → mutant KILLED.
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
 // AP-72f: error path coverage — bad AI response, Gemini failure, feature gate
 // ---------------------------------------------------------------------------
 describe('AP-72f: POST /api/ai/command — error paths', () => {

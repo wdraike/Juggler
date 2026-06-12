@@ -19,16 +19,26 @@ const { aiControllerLogger: logger } = require('../lib/logger');
 
 const AI_DAILY_LIMIT = aiEnrichment.AI_DAILY_LIMIT;
 
-async function callGemini(prompt, systemPrompt) {
+// W2 (SECURITY — A09 audit trail): callGemini accepts userId so the inference
+// telemetry row (ai_usage_outbox) is attributed to the authenticated principal
+// instead of null. Cost/abuse investigations can now tie an AI call to a user.
+async function callGemini(prompt, systemPrompt, userId) {
   const result = await aiEnrichment.generate(
     systemPrompt + '\n\n---\nUser request:\n' + prompt,
     { temperature: 0.2, topP: 0.8, topK: 40, maxOutputTokens: 8192 },
     {
       useCase:       AI_USE_CASES.TASK_AI,
-      userId:        null,
+      userId:        userId || null,
       correlationId: null,
     }
   );
+
+  // B7: null guard — a null/blocked result must yield the structured error, not a TypeError.
+  // Without this guard, result.text on a null result throws "Cannot read properties of null"
+  // which surfaces as a raw 500 bypassing the explicit structured-error branch below.
+  if (!result) {
+    throw new Error('Unexpected Gemini response structure');
+  }
 
   if (result.text) {
     return result.text;
@@ -50,8 +60,11 @@ exports.handleCommand = async (req, res) => {
       return res.status(400).json({ error: 'No command provided' });
     }
 
-    // Daily quota check (2/min handled by route-level rate limiter)
-    var quota = await aiEnrichment.checkAndLogDailyQuota(userId);
+    // Daily quota check — split check/commit (W1b B5 fix):
+    //   checkQuota: count-only, no insert. Safe to call before the Gemini call.
+    //   commitQuota: insert-only. Called ONLY after callGemini resolves successfully.
+    //   A timed-out or failed call never reaches commitQuota → slot not consumed.
+    var quota = await aiEnrichment.checkQuota(userId);
     if (!quota.allowed) {
       return res.status(429).json({ error: 'Daily AI limit reached (' + AI_DAILY_LIMIT + '/day). Try again tomorrow.' });
     }
@@ -91,7 +104,19 @@ exports.handleCommand = async (req, res) => {
     // Sanitize user input
     var safeCmd = command.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/—/g, '--').replace(/–/g, '-').replace(/…/g, '...');
 
-    const raw = await callGemini(safeCmd, sysPrompt);
+    const raw = await callGemini(safeCmd, sysPrompt, userId);
+
+    // Gemini call succeeded — consume one quota slot (W1b B5 fix: commit ONLY on success).
+    // If callGemini throws (ETIMEDOUT, network error, etc.) this line is never reached.
+    //
+    // commitQuota failure isolation (WARN-2 fix): a DB error writing the quota row
+    // must NOT discard the user's already-computed AI result. Under-counting by one
+    // slot on a rare write failure is acceptable; losing the result is not.
+    try {
+      await aiEnrichment.commitQuota(userId);
+    } catch (commitErr) {
+      logger.warn('commitQuota DB error (slot not counted, result still returned):', commitErr);
+    }
 
     // Parse JSON from response
     var cleaned = raw.replace(/```json|```/g, '').trim();
@@ -104,7 +129,14 @@ exports.handleCommand = async (req, res) => {
         try { result = JSON.parse(jsonMatch[0]); } catch { /* fall through */ }
       }
       if (!result) {
-        return res.status(422).json({ error: 'Bad JSON from AI', raw: cleaned.substring(0, 500).replace(/[<>&"']/g, '') });
+        // W1 (SECURITY — A03): encode HTML-special chars so the echoed model output
+        // is safe in any future HTML sink. Allowlist-encode: replace each HTML-special
+        // or control character with its decimal HTML entity, rather than denylist-strip
+        // (the prior /[<>&"']/ strip was incomplete — backtick, =, /, control chars passed).
+        var safeRaw = cleaned.substring(0, 500).replace(/[&<>"'`=\/\x00-\x1F\x7F]/g, function(ch) {
+          return '&#' + ch.charCodeAt(0) + ';';
+        });
+        return res.status(422).json({ error: 'Bad JSON from AI', raw: safeRaw });
       }
     }
 

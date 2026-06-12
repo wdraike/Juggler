@@ -26,14 +26,11 @@
 const { trackedGeminiCall } = require('../../../services/gemini-tracked-call');
 const { createLogger } = require('@raike/lib-logger');
 
-// W3 (isolated additive): the 8s call timeout. 8s is the juggler convention from
-// H1-weather (KG juggler_hex_slice_external_http_calls·must_use — AbortController).
-// The @google/genai SDK accepts `abortSignal` inside GenerateContentConfig
-// (genai.d.ts:4273), so a real AbortController is used: when the deadline fires,
-// the in-flight SDK call is cancelled. A belt-and-suspenders Promise.race is also
-// used (mirroring H1 fetchWithTimeout:57-62) so that a signal-ignoring SDK version
-// or test double still produces a deterministic rejection within the budget.
-const AI_CALL_TIMEOUT_MS = 8000;
+// Default AI call budget. Read process.env at construction time (not module load)
+// so tests that set process.env.AI_CALL_TIMEOUT_MS before instantiation via
+// jest.isolateModules() get the right budget without needing --resetModules.
+// trackedGeminiCall owns the AbortController + Promise.race timeout (W1a fix).
+const DEFAULT_AI_CALL_TIMEOUT_MS = 45000; // 45s; override via AI_CALL_TIMEOUT_MS env
 
 /**
  * @param {object} [deps]
@@ -47,11 +44,23 @@ function GeminiAIAdapter(deps) {
   const d = deps || {};
   const env = d.env || process.env;
   this._client = d.client || null; // lazily built if not injected
-  this._db = d.db || null;         // resolved lazily to avoid requiring lib/db at construct
+  this._cachedApiKey = null;       // B8: snapshot of the key used to build the current client
   this.model = d.model || env.GEMINI_MODEL || 'gemini-2.5-flash';
   this._env = env;
-  this.timeoutMs = typeof d.timeoutMs === 'number' ? d.timeoutMs : AI_CALL_TIMEOUT_MS;
+  // Read AI_CALL_TIMEOUT_MS from env at construction time so an injected env object
+  // (tests) or process.env override takes effect without reloading the module.
+  const envBudget = env.AI_CALL_TIMEOUT_MS ? parseInt(env.AI_CALL_TIMEOUT_MS, 10) : DEFAULT_AI_CALL_TIMEOUT_MS;
+  this.timeoutMs = typeof d.timeoutMs === 'number' ? d.timeoutMs : envBudget;
   this.logger = d.logger || createLogger('ai-enrichment');
+  // DB handle: injected (tests/DI) or eagerly resolved from lib/db.
+  // Real validation of DB config now lives in facade.init() (B9 boot hook) —
+  // the constructor no longer validates NODE_ENV via a string allowlist (that was
+  // the wrong check: it tested a string, not actual db-config resolution).
+  if (d.db) {
+    this._db = d.db;
+  } else {
+    this._db = require('../../../lib/db').getDefaultDb();
+  }
 }
 
 GeminiAIAdapter.prototype._getDb = function _getDb() {
@@ -61,22 +70,32 @@ GeminiAIAdapter.prototype._getDb = function _getDb() {
 
 // Consolidated from getGenAIClient (ai.controller) + the /suggest-icon route —
 // identical branch + identical thrown errors.
+//
+// B8 (live-invalidation): stores this._cachedApiKey at the time the client is built.
+// On each call, if GEMINI_API_KEY has changed since the last build, the cached client
+// is discarded and rebuilt with the new key. Vertex AI branch is key-less (project-keyed)
+// and does not apply the live-invalidation logic.
 GeminiAIAdapter.prototype._getClient = function _getClient() {
-  if (this._client) return this._client;
-
   const { GoogleGenAI } = require('@google/genai');
   const env = this._env;
 
   if (env.USE_VERTEX_AI === 'true') {
+    // Vertex AI path: keyed by project, not an API key. Cache for the lifetime
+    // of the adapter (project changes require a restart, same as the original code).
+    if (this._client) return this._client;
     const project = env.GOOGLE_CLOUD_PROJECT;
     const location = env.VERTEX_AI_LOCATION || 'us-central1';
     if (!project) throw new Error('GOOGLE_CLOUD_PROJECT required for Vertex AI');
     this._client = new GoogleGenAI({ vertexai: true, project, location });
     this.logger.info('🤖 Juggler AI: Using Vertex AI (project:', project + ')');
   } else {
-    const apiKey = env.GEMINI_API_KEY || '';
-    if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
-    this._client = new GoogleGenAI({ apiKey });
+    // API-key path: live-invalidation — if the key changed, discard the cached client.
+    const currentKey = env.GEMINI_API_KEY || '';
+    if (this._client && this._cachedApiKey === currentKey) return this._client;
+    if (!currentKey) throw new Error('GEMINI_API_KEY not configured');
+    this._client = null; // discard stale client before rebuild
+    this._client = new GoogleGenAI({ apiKey: currentKey });
+    this._cachedApiKey = currentKey;
     this.logger.info('🤖 Juggler AI: Using Gemini API with API key');
   }
 
@@ -84,66 +103,43 @@ GeminiAIAdapter.prototype._getClient = function _getClient() {
 };
 
 /**
+ * isConfigured() — returns true when the adapter has enough env config to make a call.
+ *
+ * B6 (not-configured no-log): callers that want a silent no-op on an AI-disabled deploy
+ * should check this before calling generate(). generate() itself also checks this and
+ * returns {} (no throw, no error log) when not configured.
+ */
+GeminiAIAdapter.prototype.isConfigured = function isConfigured() {
+  const env = this._env;
+  if (this._client) return true; // injected or already built
+  if (env.USE_VERTEX_AI === 'true') return !!(env.GOOGLE_CLOUD_PROJECT);
+  return !!(env.GEMINI_API_KEY);
+};
+
+/**
  * @implements AIPort.generate
  * Returns the raw provider result (`{text?, candidates?, usageMetadata?}`).
+ *
+ * B6 (not-configured no-log): when the adapter is not configured (no API key / no
+ * Vertex project), generate() returns {} instead of throwing. This allows callers like
+ * /suggest-icon to map the empty result to {icon:null} without logging an error — an
+ * AI-disabled deploy is a CLEAN, expected state, not an error condition.
+ *
+ * W1a: timeout + AbortController now live in trackedGeminiCall (not here).
+ * The adapter passes its timeoutMs via meta so tests injecting `timeoutMs: 40`
+ * still get the right deadline. trackedGeminiCall handles the AbortController,
+ * Promise.race, signal injection into the SDK call, and telemetry separation.
  */
 GeminiAIAdapter.prototype.generate = async function generate(contents, config, meta) {
-  // The 8s deadline uses BOTH an AbortController wired into the SDK config AND a
-  // belt-and-suspenders Promise.race (mirroring H1 fetchWithTimeout:57-62). The
-  // AbortController threads `abortSignal` into GenerateContentConfig so the SDK
-  // cancels the in-flight HTTP request when the deadline fires. The Promise.race
-  // ensures a deterministic rejection even if the SDK or a test double ignores the
-  // signal. The caller's existing error path then runs (suggest-icon → null;
-  // handleCommand → 500) instead of hanging.
-  //
-  // TELEMETRY ISOLATION (B5-new): `abortSignal` must NOT reach `trackedGeminiCall`'s
-  // persisted `modelParams` — serialising an AbortSignal produces `{}`, which would
-  // break the refactor's byte-identity invariant for `ai_usage_outbox.model_params`.
-  // Fix: pass the ORIGINAL `config` to `trackedGeminiCall` (for telemetry); inject
-  // `abortSignal` only at the SDK `generateContent` boundary by wrapping the client's
-  // `models.generateContent` to merge it in transparently.
-  const controller = new AbortController();
-
-  // Build a thin client wrapper that merges abortSignal into the generateContent
-  // call without touching the config arg that trackedGeminiCall persists as modelParams.
-  const rawClient = this._getClient();
-  const signalClient = {
-    models: {
-      generateContent: (params) =>
-        rawClient.models.generateContent(
-          Object.assign({}, params, { config: Object.assign({}, params.config, { abortSignal: controller.signal }) })
-        ),
-    },
-  };
-
-  let timer;
-  const timeoutPromise = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => {
-      controller.abort();
-      const err = new Error('Gemini call timed out after ' + this.timeoutMs + 'ms');
-      err.code = 'ETIMEDOUT';
-      reject(err);
-    }, this.timeoutMs);
-    if (timer.unref) timer.unref();
-  });
-  // BLOCK B fix (mirrors H1 fetchWithTimeout:82): swallow the timer-reject when it
-  // fires as the loser — i.e. when generate() is a floating promise that was never
-  // awaited and callPromise settled first. Without this, the 8s timer fires into an
-  // unhandled rejection and crashes the jest runner.
-  timeoutPromise.catch(() => {});
-
-  // Pass the ORIGINAL config so trackedGeminiCall persists byte-identical modelParams.
-  const callPromise = trackedGeminiCall(
-    this._getDb(), signalClient, this.model, contents, config, meta || {}
-  );
-  // Swallow the loser's late rejection (belt-and-suspenders, mirrors H1 pattern).
-  callPromise.catch(() => {});
-
-  try {
-    return await Promise.race([callPromise, timeoutPromise]);
-  } finally {
-    clearTimeout(timer);
+  // B6: not-configured is a clean expected state — return empty result, no throw.
+  // Only suppress the specific "not configured" signals; real errors propagate normally.
+  if (!this.isConfigured()) {
+    return {};
   }
+  const metaWithTimeout = Object.assign({}, meta || {}, { timeoutMs: this.timeoutMs });
+  return trackedGeminiCall(
+    this._getDb(), this._getClient(), this.model, contents, config, metaWithTimeout
+  );
 };
 
 module.exports = GeminiAIAdapter;

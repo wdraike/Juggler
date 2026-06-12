@@ -1008,32 +1008,40 @@ describe('B3 :db — ai_command_log + ai_usage_outbox integration (test-bed 3407
     expect(rows[0].id).toBeDefined();
   });
 
-  it('quota boundary: 50 rows → KnexAIUsageRepository.checkAndLogDailyQuota() returns allowed:false', async () => {
+  it('quota boundary: 50 rows → KnexAIUsageRepository.checkQuota() returns allowed:false (W1b split interface)', async () => {
     if (!await testDb.isAvailable()) return;
 
-    // zoe W3 fix: was a self-comparing tautology that re-implemented the repo query
-    // and never called the SUT. Now calls the real KnexAIUsageRepository so a
-    // regression in the `>= AI_DAILY_LIMIT` comparator would FAIL this test.
+    // W1b update: checkAndLogDailyQuota (single-step count+insert before call) was
+    // removed — it had zero production callers after the B5 check/commit split (bert
+    // WARN-1 dead-code removal). The split interface is:
+    //   checkQuota(userId)  → { allowed: bool } — count-only, NO insert
+    //   commitQuota(userId) → void              — insert-only, ONLY after success
+    //
+    // This test pins the DENY boundary behavior of checkQuota:
+    //   50 rows in ai_command_log → count=50 → count >= AI_DAILY_LIMIT(50) → allowed:false
+    //   checkQuota is count-only: no additional row is inserted on the deny path.
     //
     // Self-mutation note: if `>=` in KnexAIUsageRepository were changed to `>`,
     // this test would FAIL (50 rows → count=50 → `50 > 50` = false → allowed:true).
-    // The mock-path B1.9 test also catches that via MUTATION 5 (zoe confirmed).
+    // The mock-path B1.9 test (goldenMaster primeQuotaDeny / primeQuotaAllow) also
+    // catches that boundary via the resolveQueue.
 
     const { KnexAIUsageRepository } = require('../../../src/slices/ai-enrichment/facade');
 
-    // Insert exactly 50 rows for this user.
+    // Insert exactly 50 rows for this user (at the daily limit).
     for (let i = 0; i < 50; i++) {
       await testDb('ai_command_log').insert({ user_id: TEST_USER_ID });
     }
 
-    // Call the real SUT with the test-bed DB — must return { allowed: false }.
+    // Call the real SUT with the test-bed DB — checkQuota must return { allowed: false }.
     const repo = new KnexAIUsageRepository({ db: testDb });
-    const result = await repo.checkAndLogDailyQuota(TEST_USER_ID);
+    const result = await repo.checkQuota(TEST_USER_ID);
     expect(result.allowed).toBe(false); // 50 >= AI_DAILY_LIMIT(50) → deny
 
-    // No additional row should have been inserted (deny path skips the insert).
+    // checkQuota is count-only: deny path must NOT insert any row.
+    // (The old checkAndLogDailyQuota also did NOT insert on deny — behavior preserved.)
     const rowsAfter = await testDb('ai_command_log').where('user_id', TEST_USER_ID);
-    expect(rowsAfter).toHaveLength(50); // still exactly 50 — deny does NOT insert
+    expect(rowsAfter).toHaveLength(50); // still exactly 50 — checkQuota never inserts
   });
 
   it('ai_usage_outbox: enqueue inserts row with expected shape', async () => {

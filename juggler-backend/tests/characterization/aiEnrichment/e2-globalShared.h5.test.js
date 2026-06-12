@@ -262,16 +262,35 @@ describe('E2-A3 — no per-user enrichment store (H5 surface is stateless for ge
   });
 });
 
-// ── Boundary: checkAndLogDailyQuota IS per-user (intentionally, not a violation) ─
-describe('E2 boundary — checkAndLogDailyQuota is per-user (quota, not enrichment)', () => {
-  it('quota is user-scoped: user A at limit does not block user B (independent quota)', async () => {
-    // This test documents that the INTENTIONALLY per-user operation (quota) is
+// ── Boundary: quota IS per-user (intentionally, not a violation of global-shared) ──
+//
+// NOTE (B5 interface update — telly re-review W1b):
+//   The quota operations were split from a single checkAndLogDailyQuota (check+insert
+//   in one step) into two steps:
+//     checkQuota(userId)  → { allowed: bool }  — count-only, NO insert
+//     commitQuota(userId) → void               — insert, called ONLY after success
+//   This test is updated to model the split mechanics while PRESERVING the E2
+//   invariant: quota is per-user and independent (user A at limit does NOT block user B).
+//   The shared-global contract of generate() is completely unaffected by this change.
+describe('E2 boundary — quota is per-user (quota, not enrichment — independent of generate())', () => {
+  it('quota is user-scoped: user A at limit does not block user B (independent quota — split check/commit interface)', async () => {
+    // This test documents that the INTENTIONALLY per-user quota operation is
     // separate from the globally-shared generate() path. The two must not be confused.
     //
-    // Using KnexAIUsageRepository with an injected mockDb to avoid a real DB call.
+    // E2 CORE INVARIANT (unchanged): generate() is globally shared and stateless
+    // with respect to userId. The quota gate (checkQuota / commitQuota) is per-user
+    // and intentionally so — it counts per-user ai_command_log rows. This is correct
+    // behavior, not a violation of the global-shared enrichment principle.
+    //
+    // MECHANICS (updated to split interface):
+    //   checkQuota(userId) → count-only; returns { allowed: bool }; does NOT insert.
+    //   commitQuota(userId) → inserts a row; called ONLY after a successful Gemini call.
+    //
+    // Using KnexAIUsageRepository with injected mockDbs to avoid a real DB call.
     const { KnexAIUsageRepository } = facade;
 
-    // User A: at limit (count = 50).
+    // User A: at limit (count = 50). checkQuota returns { allowed: false }.
+    // No insert expected (over-limit path never reaches commitQuota).
     const userADb = function() {
       const chain = {
         where: function() { return chain; },
@@ -282,27 +301,65 @@ describe('E2 boundary — checkAndLogDailyQuota is per-user (quota, not enrichme
       return chain;
     };
     const repoA = new KnexAIUsageRepository({ db: userADb });
-    const quotaA = await repoA.checkAndLogDailyQuota('user-A');
-    expect(quotaA.allowed).toBe(false); // user A is at limit
+    const quotaA = await repoA.checkQuota('user-A');
+    expect(quotaA.allowed).toBe(false); // user A is at limit — check returns denied
 
     // User B: fresh (count = 0). SAME quota logic, but user B's count is independent.
-    let insertCalledByB = false;
-    const userBDb = function(table) {
+    // checkQuota returns { allowed: true }; commitQuota inserts the row.
+    //
+    // W3 MOCK UPDATE (B11 TOCTOU fix): commitQuota now wraps the count-check and INSERT
+    // in db.transaction(async (trx) => {...}) and uses trx.raw() for the SELECT FOR UPDATE.
+    // The mock must supply:
+    //   - userBDb.transaction(cb): calls cb with a trx object (models the InnoDB transaction)
+    //   - trx.raw(sql, params):    returns [[{cnt:'0'}]] (models SELECT COUNT FOR UPDATE)
+    //   - trx('ai_command_log'):   returns a builder with .insert() (models the INSERT path)
+    // The E2 invariant (user A at limit does NOT block user B) is unchanged — we only
+    // teach the mock about the transaction wrapper commitQuota now uses.
+    let commitCalledByB = false;
+    const userBDb = function() {
+      // Called as db('ai_command_log') by checkQuota (non-transactional count path).
       const chain = {
         where: function() { return chain; },
         count: function() { return chain; },
         first: function() { return Promise.resolve({ cnt: '0' }); },
-        insert: function() { insertCalledByB = true; return Promise.resolve(); },
+        insert: function() { commitCalledByB = true; return Promise.resolve(); },
       };
       return chain;
     };
+    // transaction(): called by commitQuota. The trx object models what InnoDB gives back:
+    //   trx.raw(sql, [userId, windowStart]) → [[{cnt:'0'}]]  (SELECT COUNT FOR UPDATE)
+    //   trx('ai_command_log').insert(row)                    (INSERT on success path)
+    userBDb.transaction = async function(cb) {
+      const trxInsertBuilder = {
+        insert: function() { commitCalledByB = true; return Promise.resolve(); },
+      };
+      const trx = function(/* tableName */) {
+        // trx is called as trx('ai_command_log') — returns the builder.
+        return trxInsertBuilder;
+      };
+      // trx.raw(sql, params): models SELECT COUNT(*) FOR UPDATE → [[{cnt:'0'}]]
+      trx.raw = async function() {
+        return [[{ cnt: '0' }]];
+      };
+      return cb(trx);
+    };
     const repoB = new KnexAIUsageRepository({ db: userBDb });
-    const quotaB = await repoB.checkAndLogDailyQuota('user-B');
+
+    // checkQuota: count-only, no insert.
+    const quotaB = await repoB.checkQuota('user-B');
     expect(quotaB.allowed).toBe(true); // user B is NOT blocked by user A's limit
 
-    // User A's quota state did not contaminate user B.
-    // Mutation note: if checkAndLogDailyQuota were global (not per-user),
-    // quotaB.allowed would be false. This assertion would FAIL.
-    expect(insertCalledByB).toBe(true); // user B's log row was written (independent)
+    // E2 INVARIANT: user A's quota state did NOT contaminate user B.
+    // Mutation note: if checkQuota were global (not per-user), quotaB.allowed
+    // would be false. This assertion would FAIL. (Core E2 per-user pin — unchanged.)
+
+    // Simulate successful Gemini call, then commitQuota.
+    // commitQuota inserts the row — this is the only step that writes to ai_command_log.
+    await repoB.commitQuota('user-B');
+
+    // commitCalledByB confirms user B's log row was written via the commit step
+    // (independent of user A). Mutation note: if commitQuota were a no-op, this
+    // flag would remain false → assertion FAILS → mutant KILLED.
+    expect(commitCalledByB).toBe(true); // user B's log row was written (independent quota)
   });
 });

@@ -8,8 +8,8 @@
  *   - `generate(contents, config, meta)` → AIPort: the raw provider result. Used by
  *     `ai.controller.handleCommand` (TASK_AI) and `task.routes /suggest-icon`
  *     (EMOJI_SUGGEST). The call-sites keep their own result extraction/validation.
- *   - `checkAndLogDailyQuota(userId)` → AIUsagePort: the 50/day quota gate, used by
- *     `handleCommand`.
+ *   - `checkQuota(userId)` / `commitQuota(userId)` → AIUsagePort: the 50/day quota
+ *     gate, used by `handleCommand` (split check/commit interface, W1b B5 fix).
  *
  * Mirrors the user-config / task slice facade wiring idiom (the per-slice facade).
  *
@@ -43,13 +43,34 @@ function usage() {
 }
 
 module.exports = {
+  /**
+   * init() — boot hook for server.js.
+   *
+   * Eagerly calls getDefaultDb() to validate the DB configuration at server boot.
+   * Throws (or rejects) if getDefaultDb() cannot configure a pool — surfacing DB
+   * misconfig at boot rather than on the first AI request.
+   *
+   * Does NOT build the ai()/usage() singletons — those remain lazy so non-AI deploys
+   * pay no cost. Only the db seam is validated here.
+   *
+   * B9 (999.421): boot-level fail-fast for AI slice DB dependency.
+   */
+  async init() {
+    const { getDefaultDb } = require('../../lib/db');
+    getDefaultDb(); // throws on bad config (e.g. missing NODE_ENV in knexfile)
+                    // propagates to the boot sequence → process exits on misconfig
+  },
   /** @see AIPort.generate */
   generate(contents, config, meta) {
     return ai().generate(contents, config, meta);
   },
-  /** @see AIUsagePort.checkAndLogDailyQuota */
-  checkAndLogDailyQuota(userId) {
-    return usage().checkAndLogDailyQuota(userId);
+  /** @see AIUsagePort.checkQuota — count-only, no insert. Call before the Gemini call. */
+  checkQuota(userId) {
+    return usage().checkQuota(userId);
+  },
+  /** @see AIUsagePort.commitQuota — insert-only. Call ONLY after a successful Gemini call. */
+  commitQuota(userId) {
+    return usage().commitQuota(userId);
   },
   AI_DAILY_LIMIT: KnexAIUsageRepository.AI_DAILY_LIMIT,
   // exposed for tests / explicit DI

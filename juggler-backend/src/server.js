@@ -56,6 +56,10 @@ async function start() {
   // Load JWT secrets
   await loadJWTSecrets();
 
+  // B9: validate AI slice DB config at boot — surfaces misconfig immediately
+  // rather than deferring to the first AI request.
+  await require('./slices/ai-enrichment/facade').init();
+
   server = app.listen(PORT, () => {
     serverLogger.info('Raike & Sons backend running', { port: PORT });
 

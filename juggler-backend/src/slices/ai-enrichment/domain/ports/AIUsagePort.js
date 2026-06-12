@@ -1,27 +1,32 @@
 /**
  * AIUsagePort — driven-port contract for the per-user daily AI-command quota
- * (Phase H5). Formalizes `ai.controller.checkAndLogDailyQuota` (the `ai_command_log`
- * 24h-window count + insert). Implemented by `KnexAIUsageRepository` (over lib/db,
- * ADR-0002); the usage-telemetry enqueue (ai_usage_outbox) is separate and stays
- * inside the provider call (AIPort/trackedGeminiCall).
+ * (Phase H5). Implemented by `KnexAIUsageRepository` (over lib/db, ADR-0002);
+ * the usage-telemetry enqueue (ai_usage_outbox) is separate and stays inside
+ * the provider call (AIPort/trackedGeminiCall).
  *
- * ── BEHAVIOR-IDENTICAL (H5 refactor contract) ────────────────────────────────
- * `checkAndLogDailyQuota(userId)` reproduces the legacy step-for-step: count
- * `ai_command_log` rows for the user with `created_at >= now-24h`; if `count >=
- * AI_DAILY_LIMIT` (50) → `{ allowed: false }` (no insert); else insert one row
- * (`{ user_id }`, created_at via the DB default — NOT changed) → `{ allowed: true }`.
+ * ── SPLIT CHECK/COMMIT INTERFACE (H5 W1b — B5 fix) ──────────────────────────
+ * checkQuota(userId)  — count-only (no insert). Returns { allowed: bool }.
+ *                       Safe to call before the provider call.
+ * commitQuota(userId) — insert-only. Called ONLY after a successful Gemini call.
+ *                       Never called on ETIMEDOUT or any failure path.
  *
  * @typedef {Object} AIUsagePort
- * @property {(userId: string) => Promise<{allowed: boolean}>} checkAndLogDailyQuota
+ * @property {(userId: string) => Promise<{allowed: boolean}>} checkQuota
+ * @property {(userId: string) => Promise<void>}              commitQuota
  */
 
 'use strict';
 
-const AI_USAGE_PORT_METHODS = ['checkAndLogDailyQuota'];
+const AI_USAGE_PORT_METHODS = ['checkQuota', 'commitQuota'];
 
 function AIUsagePort() {}
-AIUsagePort.prototype.checkAndLogDailyQuota = async function checkAndLogDailyQuota() {
-  throw new Error('AIUsagePort.checkAndLogDailyQuota not implemented');
+
+AIUsagePort.prototype.checkQuota = async function checkQuota() {
+  throw new Error('AIUsagePort.checkQuota not implemented');
+};
+
+AIUsagePort.prototype.commitQuota = async function commitQuota() {
+  throw new Error('AIUsagePort.commitQuota not implemented');
 };
 
 module.exports = { AIUsagePort, AI_USAGE_PORT_METHODS };
