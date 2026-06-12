@@ -1,0 +1,12 @@
+# Traceability — juggler-hex-h5-ai — refactor
+
+Refactor rows = behaviors preserved across the extraction (before-test → after-test → identical?).
+Code/Test/Status columns filled downstream by the work-agent / telly / Oscar.
+
+| ID | Description (behavior preserved / exit criterion) | Design element | Code (file:sym) | Test(s) | Status |
+|----|--------------------------------------------------|----------------|-----------------|---------|--------|
+| E1 | `@google/genai` SDK no longer instantiated in controllers/routes — provider behind AIPort | AIPort + GeminiAIAdapter; facade indirection | `slices/ai-enrichment/adapters/GeminiAIAdapter.js`; `controllers/ai.controller.js:callGemini`→facade; `routes/task.routes.js:suggest-icon`→facade | `grep GoogleGenAI src/controllers src/routes` → 0 ✅; `goldenMaster.h5.test.js` B4 (client branching) — PASS 53/53 | COVERED — PASS |
+| E2 | Enrichment stays **globally shared**; user overrides **per-user, never shared** | shared-global path preserved through facade; per-user override path untouched | `slices/ai-enrichment/facade.js`; `controllers/ai.controller.js` enrich path | `tests/characterization/aiEnrichment/e2-globalShared.h5.test.js` — 8 tests, PASS; covers A1–A5 (userId-agnostic generate, shared singleton, no per-user store) + quota boundary | COVERED — PASS (W2 gate item satisfied) |
+| E3 | AI provider call has an explicit timeout (AbortController, closes ARCH-REVIEW §6 #6) | GeminiAIAdapter timeout/AbortController | `slices/ai-enrichment/adapters/GeminiAIAdapter.js` (timeout) | `tests/unit/aiEnrichment/geminiAdapterTimeout.test.js` — 3 tests (hung call ETIMEDOUT; fast call unaffected; **abort-pin: signal.aborted===true after timeout [zoe WARN-2]**) — PASS | COVERED — PASS |
+| E4 | 50/day quota via `ai_command_log` unchanged (DB-backed `AIUsagePort`) | AIUsagePort + KnexAIUsageRepository | `slices/ai-enrichment/adapters/KnexAIUsageRepository.js`; `facade.checkAndLogDailyQuota`; `ai.controller.js` quota check | `goldenMaster.h5.test.js` B1.7–B1.13 (quota enforce), B3 :db (ai_command_log/ai_usage_outbox DB integration) — PASS 53/53 | COVERED — PASS |
+| B-bound | Per-slice eslint boundary: external code must not deep-import slice internals (adapters/ports) — only the facade | no-restricted-imports rule (JUG-HEX-H5/W4) | `eslint.boundaries.config.js` (+22 ln) | `npx eslint --config eslint.boundaries.config.js src/` → 0 violations ✅ | COVERED — PASS |

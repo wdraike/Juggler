@@ -1,0 +1,38 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "telly",
+  "leg_id": "juggler-h5-fixes-W3-re-review-B11-E2-mock",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "ISSUES",
+  "summary": "E2-boundary mock fixed (8/8 GREEN). B11-race STILL RED (finalCount=51): bert's SELECT COUNT FOR UPDATE inside db.transaction does not prevent phantom inserts in InnoDB. B4/B5/B5-controller-pin all GREEN.",
+  "steps": {
+    "failing_test_red": "done",
+    "coverage_reviewed": "done"
+  },
+  "findings": [
+    {
+      "id": "telly-w3-rr-f1",
+      "severity": "BLOCK",
+      "dimension": "missing-regression",
+      "file": "juggler-backend/src/slices/ai-enrichment/adapters/KnexAIUsageRepository.js",
+      "line": 104,
+      "claim": "commitQuota's db.transaction + SELECT COUNT(*) FOR UPDATE does not serialize concurrent inserts in MySQL InnoDB — finalCount=51 after two concurrent acquires at count=49",
+      "evidence": "B11-race: Promise.all of two concurrent checkQuota+commitQuota paths at count=49 against real MySQL 3407 → finalCount=51 (Expected <=50). SELECT COUNT(*) FOR UPDATE acquires row locks on existing rows but does not prevent concurrent inserts of new rows (no gap lock that blocks INSERT-intention locks). Both transactions see count=49 and both insert.",
+      "fix": "Replace SELECT FOR UPDATE with a mechanism that actually serializes inserts: (a) unique constraint on (user_id, window_slot) — DB-rejected 51st insert, (b) INSERT ... SELECT WHERE COUNT < limit as a single atomic statement, or (c) a dedicated lock-row anchor that gets FOR UPDATE to serialize the full check+insert decision.",
+      "confidence": "high"
+    },
+    {
+      "id": "telly-w3-rr-f2",
+      "severity": "INFO",
+      "dimension": "missing-edge-case",
+      "file": "juggler-backend/tests/characterization/aiEnrichment/e2-globalShared.h5.test.js",
+      "line": 332,
+      "claim": "E2-boundary mock userBDb lacked .transaction() method; commitQuota called db.transaction() → TypeError: db.transaction is not a function",
+      "evidence": "Added userBDb.transaction = async function(cb) with trx.raw() returning [[{cnt:'0'}]] and trx('ai_command_log').insert() setting commitCalledByB=true. 8/8 E2 tests now GREEN including boundary. E2 invariant fully preserved.",
+      "fix": "Done — mock updated in e2-globalShared.h5.test.js lines 329-345",
+      "confidence": "high"
+    }
+  ],
+  "refers": []
+}

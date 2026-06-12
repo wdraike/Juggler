@@ -1,0 +1,5 @@
+# Traceability — juggler-test-failloud-residual — bugfix
+| ID | Description | Design element | Code (file:sym) | Test(s) | Status |
+|----|-------------|----------------|-----------------|---------|--------|
+| BUG-1 | quotaTOCTOU B11-race + B11-guard silent skip-pass (vacuous green) on DB-down — violates TEST-FR-001 | assertDbAvailable() in-body hard-fail | tests/unit/aiEnrichment/quotaTOCTOU.test.js (line 79 import; line ~169 B11-race; line ~272 B11-guard) | tests/unit/aiEnrichment/quotaTOCTOU.test.js — B11-race FAIL [TEST-FR-001] DB-down / PASS DB-up; B11-guard FAIL [TEST-FR-001] DB-down / PASS DB-up | verified |
+| BUG-2 | timeoutAbortConsequences B5-red + B5-guard silent skip-pass on DB-down — violates TEST-FR-001; B4 pure-unit must stay DB-free | assertDbAvailable() in B5 describe only | tests/unit/aiEnrichment/timeoutAbortConsequences.test.js (line 73 import; line ~258 B5-red; line ~296 B5-guard; B4 unchanged) | tests/unit/aiEnrichment/timeoutAbortConsequences.test.js — B5-red FAIL [TEST-FR-001] DB-down / PASS DB-up; B5-guard FAIL [TEST-FR-001] DB-down / PASS DB-up; B4 PASS both directions | verified |

@@ -1,0 +1,4 @@
+{ "mode":"bugfix", "project_root":"bug-reporter-service/bug-reporter-backend", "base_ref":"main",
+  "files":["bug-reporter-service/bug-reporter-backend/package.json","bug-reporter-service/bug-reporter-backend/package-lock.json","bug-reporter-service/bug-reporter-backend/vendor/lib-db"],
+  "added_lines":null, "acceptance_criteria":6, "new_files":1,
+  "wbs_text":"Fix broken bug-reporter deploy image: committed src/db.js requires @raike/lib-db but manifest omits it / uncommitted add uses file:../../packages (outside Docker build context). Vendor lib-db into vendor/lib-db, repoint package.json file:./vendor/lib-db, ensure knex+mysql2 present, regen lockfile online, Docker build+boot verify, guard test. Mirrors 999.407. Deploy/build/Docker surface." }

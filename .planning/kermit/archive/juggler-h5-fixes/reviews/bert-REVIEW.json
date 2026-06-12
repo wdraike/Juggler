@@ -1,0 +1,43 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "bert",
+  "leg_id": "juggler-h5-fixes-W3-B11-quota-TOCTOU",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "B11 TOCTOU fixed: commitQuota now atomic via transaction+FOR UPDATE; B11-race GREEN (finalCount=50); W1b B5 preserved; 1 E2-boundary mock refer→telly.",
+  "steps": {
+    "applied_blocks": "n/a",
+    "applied_warns": "n/a"
+  },
+  "findings": [
+    {
+      "id": "b11-toctou-commitquota-non-atomic",
+      "severity": "INFO",
+      "dimension": "fix-applied",
+      "file": "juggler-backend/src/slices/ai-enrichment/adapters/KnexAIUsageRepository.js",
+      "line": 75,
+      "claim": "TEST-REVIEW.md W3 B11: checkQuota+commitQuota non-atomic — two concurrent callers both see count=49, both insert, finalCount=51 (TOCTOU)",
+      "evidence": "commitQuota() rewritten to open a Knex transaction and issue `SELECT COUNT(*) AS cnt FROM ai_command_log WHERE user_id = ? AND created_at >= ? FOR UPDATE` before the INSERT decision. The FOR UPDATE acquires an exclusive range lock on idx_ai_command_log_user_time, serializing concurrent callers. Concurrent caller B blocks at FOR UPDATE until A's transaction commits (count=50), then skips INSERT. DB_PORT=3407 jest quotaTOCTOU: B11-race PASS (finalCount=50, TELLY_VERBOSE=allowedA=true,allowedB=true,finalCount=50); B11-guard PASS. node --check: OK.",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "e2-boundary-mock-transaction-missing",
+      "severity": "INFO",
+      "dimension": "unfixable-referred",
+      "file": "juggler-backend/tests/characterization/aiEnrichment/e2-globalShared.h5.test.js",
+      "line": 310,
+      "claim": "Adjacent-regression: E2-boundary mock DB (plain function returning a chain) lacks transaction() — commitQuota now calls db.transaction() and the mock throws TypeError",
+      "evidence": "Full suite run: 111/112 pass. e2-globalShared.h5 E2-boundary test FAIL: TypeError: db.transaction is not a function at KnexAIUsageRepository.transaction line 104. 7 core A1-A5 e2 tests GREEN. Referred to telly to add transaction(callback) to the mock.",
+      "fix": "referred",
+      "confidence": "high"
+    }
+  ],
+  "refers": [
+    {
+      "to": "telly",
+      "why": "e2-globalShared.h5.test.js E2-boundary mock (userBDb function) needs a transaction(callback) method. Minimal: `transaction: async (cb) => cb({ raw: async () => [[{ cnt: 0 }]], insert: fn })`. The 7 core A1-A5 tests are unaffected. Only the E2-boundary quota mechanics test calls commitQuota against the mock DB."
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "cookie",
+  "leg_id": "juggler-h5-fixes-w2a-b9",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Hex boundary clean, boot fail-fast sound for not-yet-serving. WARN: init() db-validation is redundant (infra layer getDefaultDb already throws first) + one-off per-slice boot pattern (future-DRY).",
+  "steps": {
+    "boundary_check": "done",
+    "scooter_consult": "done"
+  },
+  "findings": [
+    {
+      "id": "cookie-b9-redundant-init",
+      "severity": "WARN",
+      "dimension": "boundary",
+      "file": "juggler-backend/src/slices/ai-enrichment/facade.js",
+      "line": 58,
+      "claim": "facade.init()'s stated fail-fast DB-config validation is redundant — already performed at the infra layer before init() runs.",
+      "evidence": "init() calls getDefaultDb() (line 60), but src/db.js:18 already invokes getDefaultDb() at module-load via server.js:28 require('./db') and app.js:220; server.js:50 (db('sync_locks')) queries the pool BEFORE line 61. getDefaultDb caches via defaultDbCached, so the line-60 call returns the cached instance and cannot throw — the misconfig throw fires ~30 lines earlier at top-level require('./db'). The hook is a no-op for its documented purpose.",
+      "fix": "Drop init() (infra layer fails fast already) OR make it do a slice-specific check the infra load does not (live SELECT 1 ping, or GEMINI_API_KEY presence).",
+      "confidence": "high"
+    },
+    {
+      "id": "cookie-b9-oneoff-boot-pattern",
+      "severity": "WARN",
+      "dimension": "data-flow",
+      "file": "juggler-backend/src/server.js",
+      "line": 61,
+      "claim": "Per-slice facade.init() boot hook is a one-off pattern with no precedent and a future-DRY risk if copied per slice.",
+      "evidence": "server.js:61 is the ONLY slice .init()/.initialize() call in boot. weather/task/user-config/calendar (H0-H4) facades have no server.js-invoked init — they integrate lazily via controllers (require('../slices/<x>/facade') at controller-load), Scooter-confirmed. Generic db-readiness belongs validated once at the infra layer (already is). If generalized, start() accretes one await per slice — same copy-paste-per-slice smell as eslint.boundaries.config.js (43 slices/ refs across hand-maintained per-slice blocks).",
+      "fix": "Do not generalize into a per-slice boot convention; if slices need boot readiness, use a single registry/iterator. Track as 999.x H7 DRY item if slice count grows.",
+      "confidence": "high"
+    },
+    {
+      "id": "cookie-b9-failfast-semantics",
+      "severity": "INFO",
+      "dimension": "boundary",
+      "file": "juggler-backend/src/server.js",
+      "line": 61,
+      "claim": "init() being the only un-try/catch'd boot step (aborts boot on throw) is the correct fail-fast choice for Cloud Run + not-yet-serving, and does not mask errors or break health probes.",
+      "evidence": "Throw propagates to start().catch -> serverLogger.error('Fatal startup error') -> process.exit(1), before app.listen(), so no readiness probe ever sees a half-up instance reporting healthy. Distinct from flusher/cron starters (lines 89-127) which try/catch + degrade. Sound. (Moot per finding #1 since infra-layer load already aborts upstream.)",
+      "fix": "No action — documented as sound.",
+      "confidence": "high"
+    }
+  ],
+  "refers": []
+}

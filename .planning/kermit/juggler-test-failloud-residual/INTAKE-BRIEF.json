@@ -1,0 +1,101 @@
+{
+  "$contract": "intake-brief/v1",
+  "leg_id": "juggler-test-failloud-residual",
+  "mode": "bugfix",
+  "skipped": false,
+  "summary": "Convert 2 residual DB-required test files (quotaTOCTOU, timeoutAbortConsequences) from silent skip-pass (if !dbAvailable return) to hard-fail pattern via assertDbAvailable(). Completes 58-file sweep; governance TEST-FR-001. No production code changes.",
+  "affected_files": [
+    "juggler-backend/tests/unit/aiEnrichment/quotaTOCTOU.test.js",
+    "juggler-backend/tests/unit/aiEnrichment/timeoutAbortConsequences.test.js",
+    "juggler-backend/tests/helpers/requireDB.js"
+  ],
+  "risk_flags": [],
+  "prior_decisions": [
+    {
+      "ref": "docs/testing/TEST-FR-001 (governing requirement)",
+      "summary": "DB-backed tests must throw loud on unavailable DB, never silently pass. TEST-FR-001 is the binding standard."
+    },
+    {
+      "ref": "juggler-test-nodb-failloud (prior sweep, 58 files converted)",
+      "summary": "Established pattern: 58 test files already converted to requireDB()/assertDbAvailable(). These 2 H5-era files were missed — consistent with backlog item 999.431(a)."
+    }
+  ],
+  "repro": {
+    "steps": [
+      "Run the two test files against a system WITHOUT test-bed MySQL 3407 running.",
+      "Current state: both suites emit console.warn + return silently → green pass with zero assertions.",
+      "Expected state (post-fix): both suites throw [TEST-FR-001] error immediately."
+    ],
+    "failing_test_cmd": "cd test-bed && docker-compose down && cd ../juggler-backend && npx jest --testPathPattern='(quotaTOCTOU|timeoutAbortConsequences)' --verbose",
+    "observed": "quotaTOCTOU.test.js B11-race (line 166) and B11-guard (line 275): if (!dbAvailable) { console.warn(...); return; } → vacuous pass with 0 assertions. Same pattern in timeoutAbortConsequences.test.js B5-red (line 255) and B5-guard (line 297).",
+    "expected": "Both test suites fail immediately with [TEST-FR-001] error message when DB unavailable, forcing test-bed startup before proceeding — no silent passes."
+  },
+  "root_cause": {
+    "region": "quotaTOCTOU.test.js:166, 275; timeoutAbortConsequences.test.js:255, 297",
+    "evidence": "Raw if (!dbAvailable) { console.warn(...); return; } guards permit test bodies to complete with zero assertions. Quoted pattern from quotaTOCTOU B11-race (line 166–172):\n  if (!dbAvailable) {\n    console.warn(\n      'B11-race: test-bed DB not available — skipping. Run: cd test-bed && make up'\n    );\n    return;  // ← vacuous pass: test function exits, 0 assertions executed\n  }\nIdentical pattern at line 275 (B11-guard), line 255 (B5-red), line 297 (B5-guard).",
+    "confidence": "high — read the code; the vacuous return sites are present and confirmed."
+  },
+  "acceptance_criteria": [
+    {
+      "id": "AC1",
+      "criterion": "quotaTOCTOU.test.js: import { assertDbAvailable } from test helpers; call await assertDbAvailable() in beforeAll before any DB setup",
+      "testable": true
+    },
+    {
+      "id": "AC2",
+      "criterion": "quotaTOCTOU.test.js: remove raw if (!dbAvailable) return guards from B11-race (line 166) and B11-guard (line 275) test bodies",
+      "testable": true
+    },
+    {
+      "id": "AC3",
+      "criterion": "quotaTOCTOU.test.js: remove redundant if (!dbAvailable) checks from beforeEach/afterAll lifecycle (lines 116, 130, 139) — hard-fail in beforeAll makes these unnecessary",
+      "testable": true
+    },
+    {
+      "id": "AC4",
+      "criterion": "timeoutAbortConsequences.test.js (B5 suite): import { assertDbAvailable } from test helpers; call await assertDbAvailable() in beforeAll",
+      "testable": true
+    },
+    {
+      "id": "AC5",
+      "criterion": "timeoutAbortConsequences.test.js: remove raw if (!dbAvailable) return guards from B5-red (line 255) and B5-guard (line 297) test bodies",
+      "testable": true
+    },
+    {
+      "id": "AC6",
+      "criterion": "timeoutAbortConsequences.test.js: remove redundant if (!dbAvailable) checks from beforeAll/afterAll lifecycle (lines 228, 238, 246) — hard-fail in beforeAll makes these unnecessary",
+      "testable": true
+    },
+    {
+      "id": "AC7",
+      "criterion": "Both files still import production code correctly (KnexAIUsageRepository, ai-usage-queue.service) — no production changes",
+      "testable": true
+    },
+    {
+      "id": "AC8",
+      "criterion": "Running both suites without test-bed raises [TEST-FR-001] error immediately; running with test-bed executes all tests normally",
+      "testable": true
+    }
+  ],
+  "ambiguities": [],
+  "edge_cases": [
+    "B4 (timeout-abort mock test in timeoutAbortConsequences.test.js) is pure-unit; does NOT require DB. It must remain unaffected by the beforeAll hard-fail in the B5 suite. Verify: B4 and B5 are in SEPARATE describe blocks — B5's beforeAll() hard-fail DOES NOT block B4.",
+    "quotaTOCTOU stores dbAvailable in a suite-level variable (line 112). Removing the variable and the guards simplifies; confirm the variable is only used for the 4 vacuous-return sites (lines 116, 130, 139, 166, 275)."
+  ],
+  "spec_draft": "## Lifecycle guard consolidation\n\nCurrent state: Both test files guard their entire lifecycle (beforeAll, beforeEach, afterAll, test bodies) with `if (!dbAvailable) return` checks — a pattern that silently passes when DB is unavailable.\n\nTarget state: Move the DB availability check to a single hard-fail gate in `beforeAll()` using `await assertDbAvailable()`. All subsequent hooks and test bodies execute only if DB is reachable. The hard-fail propagates; no silent skip-pass.\n\n### Per-file changes:\n\n**quotaTOCTOU.test.js:**\n- Remove `let dbAvailable = false` suite variable.\n- In `beforeAll`: replace `dbAvailable = await testDb.isAvailable(); if (!dbAvailable) return;` with `await assertDbAvailable();`.\n- In `beforeEach` and `afterAll`: remove the `if (!dbAvailable)` guards (they are now unreachable — DB is guaranteed available or beforeAll threw).\n- In test bodies (B11-race, B11-guard): remove the `if (!dbAvailable) { console.warn(...); return; }` guards and their comments.\n\n**timeoutAbortConsequences.test.js (B5 suite only):**\n- In B5's `beforeAll`: replace `dbAvailable = await testDb.isAvailable(); if (!dbAvailable) return;` with `await assertDbAvailable();`.\n- In B5's `beforeEach` and `afterAll`: remove the `if (!dbAvailable)` guards.\n- In test bodies (B5-red, B5-guard): remove the `if (!dbAvailable) { console.warn(...); return; }` guards.\n- Leave B4 (describe block for timeout-abort) unchanged — it is pure-unit and has no DB guards.\n\n### Governance:\n\nTest-FR-001 (the binding requirement): DB-backed tests must hard-fail when the database is unavailable, never silently pass. Using `assertDbAvailable()` from the existing `requireDB.js` helper (deployed in 58 prior test files) enforces this standard uniformly across the suite.",
+  "behavior_contract": [
+    "quotaTOCTOU.test.js must still initialize the test user in beforeAll before running any tests.",
+    "quotaTOCTOU.test.js must still clean up (delete rows) in beforeEach between tests and in afterAll after the suite.",
+    "quotaTOCTOU.test.js B11-race and B11-guard must execute their full assertion bodies (not return early) when DB is available.",
+    "timeoutAbortConsequences.test.js B4 (pure-unit, mocked enqueue) must execute independently; the hard-fail in B5's beforeAll does NOT affect B4.",
+    "timeoutAbortConsequences.test.js B5 must initialize the test user and clean up in beforeAll/afterAll only if the DB hard-fail passes.",
+    "When test-bed is down, running either suite fails immediately with [TEST-FR-001] message; telly sees the error and must start test-bed."
+  ],
+  "characterization_targets": [],
+  "recommended_routing": {
+    "lane": "trivial",
+    "depth": "quick",
+    "rationale": "Mechanical refactor: remove 4 vacuous-return sites + lifecycle guards, add 2 hard-fail calls to existing helper. No logic changes, no production code. 58 prior files provide the reference pattern. Confidence: high (code is read, pattern established)."
+  },
+  "ts": "2026-06-12T00:00:00Z"
+}

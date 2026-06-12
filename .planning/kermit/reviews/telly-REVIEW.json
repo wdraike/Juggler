@@ -1,0 +1,27 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "telly",
+  "leg_id": "bugreporter-libdb-vendor",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "ISSUES",
+  "summary": "STEP 0: RED regression guard authored (2/4 RED). @raike/lib-db resolves outside BACKEND_DIR; package.json pin wrong. mysql2+knex GREEN. Fix not applied.",
+  "steps": {
+    "failing_test_red": "done",
+    "coverage_reviewed": "done"
+  },
+  "findings": [
+    {
+      "id": "br-libdb-001",
+      "severity": "BLOCK",
+      "dimension": "missing-regression",
+      "file": "bug-reporter-service/bug-reporter-backend/package.json",
+      "line": 17,
+      "claim": "@raike/lib-db declared file:../../packages/lib-db — outside Docker COPY context; boot crashes Cannot find module",
+      "evidence": "require.resolve('@raike/lib-db', { paths: [BACKEND_DIR] }) returns DEV/packages/lib-db/src/index.js (outside BACKEND_DIR); tests/unit/vendor-deps.test.js:72 FAIL and :110 FAIL on current tree",
+      "fix": "Vendor lib-db into bug-reporter-backend/vendor/lib-db/; update package.json to file:./vendor/lib-db; regenerate package-lock; npm ci; regression tests must go 4/4 GREEN",
+      "confidence": "high"
+    }
+  ],
+  "refers": []
+}

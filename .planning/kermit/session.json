@@ -1,0 +1,10 @@
+{
+  "leg_id": "bugreporter-libdb-vendor",
+  "intent": "Fix broken bug-reporter deploy image: vendor @raike/lib-db (mirror 999.407), repoint package.json, ensure knex+mysql2, regen lock, Docker build+boot verify. Closes 999.441.",
+  "mode": "bugfix", "lanes": [], "depth": "standard", "scope": ["bug-reporter-service"],
+  "branch": "leg/bugreporter-libdb-vendor", "status": "in_progress",
+  "wbs": ".planning/kermit/WBS-bugreporter-libdb-vendor.md", "spec": "",
+  "traceability": ".planning/kermit/bugreporter-libdb-vendor/TRACEABILITY.md",
+  "verdict": null, "owner": { "sse_port": 47420, "host": "Williams-MacBook-Pro.local", "started": "2026-06-12T23:13:47Z" },
+  "opened": "2026-06-12T23:13:47Z", "last_update": "2026-06-12T23:13:47Z"
+}

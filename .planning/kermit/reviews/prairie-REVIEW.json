@@ -1,0 +1,115 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "prairie",
+  "leg_id": "juggler-docs-review-2026-06-12",
+  "mode": "chore",
+  "depth": "standard",
+  "status": "ISSUES",
+  "summary": "REQUIREMENTS.md passes rubric; arch review is STALE (dated 2026-06-09, pre-scheduler-landing 2026-06-12). Claims 0% hex scheduler + empty slices are factually wrong—scheduler slice now fully implemented (30 files, domain, ports, adapters). 3 BLOCK findings on arch review accuracy. Arch review must be updated/deprecated before commit.",
+  "steps": {
+    "rubric_check": "done",
+    "accuracy_semantic_verify": "done",
+    "code_examples_parse": "done",
+    "links_check": "done",
+    "frontmatter_freshness": "done",
+    "scheduler_slice_verification": "done",
+    "eslint_config_audit": "done"
+  },
+  "findings": [
+    {
+      "id": "arch-review-stale-timestamp-and-wrong-claims",
+      "severity": "BLOCK",
+      "dimension": "inaccurate",
+      "file": "docs/architecture/JUGGLER-ARCH-REVIEW-2026-06.md",
+      "line": 14,
+      "claim": "Review dated 2026-06-09 claims 'Hex execution is still ~5%' and scheduler is '0% hex' with 'README + empty dirs'",
+      "evidence": "Scheduler slice implemented and committed 2026-06-12 (commits 183d77c–b522d99). Actual state: 30 files including domain core (ConstraintSolver, ScoreEngine), 5 ports, 6 adapters, facade, application/RunScheduleCommand. Review's methodology (line 18) claims 'commands run against live code on branch leg/juggler-hex-redesign', but this was 3 days BEFORE scheduler landing. Snapshot is pre-dated.",
+      "fix": "Update timestamp to ≥2026-06-12. Re-run all quantitative commands against current main. Revise §4 (slices actual contents), §5 (deltas since Jan), §6 (ranked issues), §7 (hex-readiness scorecard) to reflect scheduler-slice landing and correct the 0% → ~70% verdict for scheduler domain.",
+      "confidence": "high"
+    },
+    {
+      "id": "arch-review-section-4-factually-wrong",
+      "severity": "BLOCK",
+      "dimension": "inaccurate",
+      "file": "docs/architecture/JUGGLER-ARCH-REVIEW-2026-06.md",
+      "line": 108,
+      "claim": "§4 'slices/ actual contents' states 'find juggler-backend/src/slices -type f → slices/calendar/README.md (ONE file)' with 'Matches the Jan-status baseline exactly — zero forward motion in the slice itself.'",
+      "evidence": "Current state (2026-06-12 verified): slices/scheduler/ has 30 files; slices/calendar/ has 2 files (README + test); slices/task/ has 14+ files; slices/weather/ has 8+ files; slices/ai-enrichment/ has 6+ files; slices/user-config/ has 10+ files. The claim 'only calendar has empty dirs' is WRONG. Every slice except calendar now has substantive domain/ports/adapters/facade content.",
+      "fix": "Re-execute 'find slices -type f' and 'find slices -type d' against current main. Update §4 table and prose to list actual file counts per slice. Reference commits 183d77c–b522d99 for scheduler landing timeline.",
+      "confidence": "high"
+    },
+    {
+      "id": "arch-review-methodology-violated",
+      "severity": "BLOCK",
+      "dimension": "inaccurate",
+      "file": "docs/architecture/JUGGLER-ARCH-REVIEW-2026-06.md",
+      "line": 18,
+      "claim": "Line 18: 'Every quantitative claim below was produced by a real command run against the live code on branch leg/juggler-hex-redesign and the command is cited inline.' Review dated 2026-06-09; scheduler slice landed 2026-06-12.",
+      "evidence": "The 'live code' reviewed on 2026-06-09 did not include the scheduler slice (committed 2026-06-12). Review's evidence set is stale by definition. Running commands against a branch snapshot 3 days before a major landing invalidates the temporal claim 'Every claim was produced against live code [meaning current main]'.",
+      "fix": "Clarify the review's scope: either (a) re-run all commands against main HEAD as-of 2026-06-12 and re-verify all claims, OR (b) publish this as 'JUGGLER-ARCH-REVIEW-2026-06-09' (dated snapshot) and authorize a new 'JUGGLER-ARCH-REVIEW-2026-06-12-POST-H6' (post-scheduler-landing). Do not ship both as 'current' with contradictory evidence.",
+      "confidence": "high"
+    },
+    {
+      "id": "eslint-boundaries-incomplete",
+      "severity": "WARN",
+      "dimension": "missing-section",
+      "file": "juggler-backend/eslint.boundaries.config.js",
+      "line": 82,
+      "claim": "SLICES array lists 5 slices (calendar, weather, task, ai-enrichment, user-config); scheduler slice is missing despite being fully implemented and wired into schedule.routes.js:10 and mcp/tools/schedule.js:7.",
+      "evidence": "Line 10 of schedule.routes.js: 'var { runScheduleAndPersist, getSchedulePlacements } = require('../slices/scheduler/facade');'. Scheduler slice facade is in use but not guarded by eslint boundary rules. Direct imports of slices/scheduler/adapters, slices/scheduler/domain/ports, etc. are not forbidden.",
+      "fix": "Add scheduler slice descriptor to SLICES array (lines 82–141). Follow pattern of task (lines 104–115) with: name='scheduler', ref='JUG-HEX-H6 (W1–W4)', restrictions=['adapters', 'domain/ports', 'domain/entities', 'domain/logic', 'application']. Reference: BASE-ARCH-DOC-STANDARD §5 & JUG-HEX-P7 pattern.",
+      "confidence": "high"
+    },
+    {
+      "id": "requirements-r9-test-gap",
+      "severity": "INFO",
+      "dimension": "inaccurate",
+      "file": "juggler/docs/REQUIREMENTS.md",
+      "line": 36,
+      "claim": "R9 status=implemented; note: 'No dedicated backend test; AppLayout integration test via manual/E2E. Flag: no unit test for handleGridDrop logic.'",
+      "evidence": "Accurate annotation by abby. handleGridDrop is implemented in CalendarGrid.jsx:366 / AppLayout.jsx but has no isolated unit test. This is not a doc defect—it is a correct (honest) gap flag. Noted for telly's test coverage work.",
+      "fix": "No doc fix needed. This is a pre-existing test coverage gap, correctly documented. REFER→telly for unit test coverage.",
+      "confidence": "high"
+    },
+    {
+      "id": "requirements-r17-mcp-test-gap",
+      "severity": "INFO",
+      "dimension": "inaccurate",
+      "file": "juggler/docs/REQUIREMENTS.md",
+      "line": 44,
+      "claim": "R17 status=partial; note: 'No dedicated MCP-layer authorization test.'",
+      "evidence": "Accurate. MCP tools (20 registered in juggler-mcp/index.js) delegate to backend API which enforces JWT auth. Per-client isolation is tested at backend level but not in a dedicated MCP-layer test. This is a true coverage gap, honestly flagged. Not a doc defect.",
+      "fix": "No doc fix needed. Correctly flagged. REFER→telly for MCP per-client auth isolation test.",
+      "confidence": "high"
+    },
+    {
+      "id": "requirements-r12-r14-planned",
+      "severity": "INFO",
+      "dimension": "missing-section",
+      "file": "juggler/docs/REQUIREMENTS.md",
+      "line": 39,
+      "claim": "R12 (time reports), R13 (burn-down), R14 (capacity planning) are marked planned with zero code and zero tests.",
+      "evidence": "Accurate. These are true WBS backlog items. No implementation defect. Doc is correct in marking them planned with zero evidence. Correctly tracked in Traceability summary (Table: planned count = 3).",
+      "fix": "No fix needed. This is accurate backlog status tracking.",
+      "confidence": "high"
+    }
+  ],
+  "refers": [
+    {
+      "to": "abby",
+      "why": "Update docs/architecture/JUGGLER-ARCH-REVIEW-2026-06.md — stale timestamp (2026-06-09, pre-scheduler-landing) + factually wrong claims about hex status and slice contents. Re-run verification commands, update all quantitative claims and verdicts for §4–7, or deprecate/supersede with dated successor."
+    },
+    {
+      "to": "abby",
+      "why": "Add scheduler slice to eslint.boundaries.config.js SLICES array (lines 82–141). Follow task/ai-enrichment pattern with restrictions on adapters/ports/entities/logic/application. Ref: JUG-HEX-H6."
+    },
+    {
+      "to": "telly",
+      "why": "Add unit test for CalendarGrid.jsx:366 handleGridDrop scheduling logic (R9 coverage gap, per REQUIREMENTS.md §R9)."
+    },
+    {
+      "to": "telly",
+      "why": "Add MCP per-client authorization isolation test (R17 coverage gap, per REQUIREMENTS.md §R17)."
+    }
+  ]
+}

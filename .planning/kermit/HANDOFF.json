@@ -1,0 +1,6 @@
+{
+  "last_leg": "sibling-knexfile-tls-deadbranch", "mode": "chore", "verdict": "PASS", "completed": "2026-06-12T23:03:12Z",
+  "commits": {"payment-service":"6f07f24","bug-reporter-service":"8b6e73e","superrepo":"c598a37"},
+  "summary": "Removed dead ssl:{rejectUnauthorized:false} TCP-fallback branch from payment + bug-reporter knexfiles (repeat of 999.436). Both dead-branch verified (socketPath, DB_SSL unset). elmo PASS 0BLOCK/0WARN/3INFO. Merged leg→main in both submodules, superrepo pointers bumped.",
+  "backlog_items": ["999.441 (stray uncommitted @raike/lib-db dep in bug-reporter package.json — confirm origin)"]
+}

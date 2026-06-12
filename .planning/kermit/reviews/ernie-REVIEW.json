@@ -1,0 +1,74 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "ernie",
+  "leg_id": "juggler-test-failloud-residual",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "4 silent skip-pass sites -> in-body await assertDbAvailable() (TEST-FR-001). Helper async+awaited; lifecycle dbAvailable guards intact; B4 pure-unit untouched; no dead code; no prod code. No BLOCK/WARN.",
+  "steps": {
+    "line_by_line": "done",
+    "scooter_consult": "n/a"
+  },
+  "findings": [
+    {
+      "id": "ernie-failloud-1",
+      "severity": "INFO",
+      "dimension": "error-handling",
+      "file": "juggler-backend/tests/unit/aiEnrichment/quotaTOCTOU.test.js",
+      "line": 169,
+      "claim": "Helper imported and used correctly; assertDbAvailable is async and awaited at all 4 sites",
+      "evidence": "requireDB.js:93 'async function assertDbAvailable'. Call sites quotaTOCTOU:169,268 and timeoutAbort:259,297 all use 'await assertDbAvailable()'. Throws [TEST-FR-001] on DB-down -> RED, not vacuous green.",
+      "fix": "none",
+      "confidence": "high"
+    },
+    {
+      "id": "ernie-failloud-2",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/tests/unit/aiEnrichment/quotaTOCTOU.test.js",
+      "line": 142,
+      "claim": "Lifecycle dbAvailable guards intact; no ReferenceError; correct ordering",
+      "evidence": "let dbAvailable declared (quotaTOCTOU:113, timeoutAbort:227), set in beforeAll, still referenced by afterAll (if dbAvailable) and beforeEach (if !dbAvailable return). Only in-body guards removed. On DB-down, beforeEach early-returns (no DB call) then body assertDbAvailable() throws RED.",
+      "fix": "none",
+      "confidence": "high"
+    },
+    {
+      "id": "ernie-failloud-3",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/tests/unit/aiEnrichment/timeoutAbortConsequences.test.js",
+      "line": 115,
+      "claim": "B4 pure-unit describe not touched / not made DB-dependent",
+      "evidence": "Lines 115-184 use mocked enqueue spy (mockEnqueueFn), no DB. File-level assertDbAvailable import (line 73) is unused by B4; adds no DB dependency. B4 stays Docker-free.",
+      "fix": "none",
+      "confidence": "high"
+    },
+    {
+      "id": "ernie-failloud-4",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/tests/unit/aiEnrichment/timeoutAbortConsequences.test.js",
+      "line": 251,
+      "claim": "No leftover dead variables or unreachable code from guard removal",
+      "evidence": "dbAvailable still consumed by 3 hooks per suite. Removed console.warn skip blocks left no orphan. beforeEach comment accurate: DB-down throws in-body before any DB call in the body.",
+      "fix": "none",
+      "confidence": "high"
+    },
+    {
+      "id": "ernie-failloud-5",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/tests/unit/aiEnrichment/quotaTOCTOU.test.js",
+      "line": null,
+      "claim": "No production code touched",
+      "evidence": "git diff --name-only returns exactly the 2 named test files; git diff --cached empty.",
+      "fix": "none",
+      "confidence": "high"
+    }
+  ],
+  "refers": [
+    { "to": "zoe", "why": "test-quality judgments (assertion strength, mutation-kill, CI-RED confirmation) are zoe's column, not ernie's" },
+    { "to": "elmo", "why": "security column owner; none triggered by this diff" }
+  ]
+}

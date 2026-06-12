@@ -1,0 +1,126 @@
+{
+  "$contract": "intake-brief/v1",
+  "leg_id": "juggler-hex-h6-scheduler",
+  "mode": "refactor",
+  "skipped": false,
+  "summary": "H6 is the riskiest leg — 5,356 ln across 13 files, 19 db.fn.now() violations in runSchedule.js (P1 gap), NO scheduler golden-master characterization suite yet (S8 BLOCKING gate). H2/H3/H4 are complete (entry-gate cleared). Entry blocker: write the golden-master BEFORE any extraction work begins.",
+  "affected_files": [
+    "juggler-backend/src/scheduler/runSchedule.js",
+    "juggler-backend/src/scheduler/unifiedScheduleV2.js",
+    "juggler-backend/src/scheduler/scoreSchedule.js",
+    "juggler-backend/src/scheduler/reconcileOccurrences.js",
+    "juggler-backend/src/scheduler/scheduleQueue.js",
+    "juggler-backend/src/scheduler/schedulerSession.js",
+    "juggler-backend/src/scheduler/constants.js",
+    "juggler-backend/src/scheduler/index.js",
+    "juggler-backend/src/scheduler/dateHelpers.js",
+    "juggler-backend/src/scheduler/dependencyHelpers.js",
+    "juggler-backend/src/scheduler/locationHelpers.js",
+    "juggler-backend/src/scheduler/timeBlockHelpers.js",
+    "juggler-backend/src/scheduler/unifiedSchedule.js",
+    "juggler-backend/tests/characterization/scheduler/",
+    "juggler-backend/src/slices/scheduler/"
+  ],
+  "risk_flags": [
+    "P1-VIOLATION: runSchedule.js uses db.fn.now() / trx.fn.now() for updated_at in 19 places (lines 404, 789, 804, 912-913, 1241, 1281, 1375, 1399, 1428, 1453, 1476, 1486, 1532, 1539). ADR-0003 requires new Date(). The classifier grep could not see this — it is inside the body of a 2,309-ln file. This must be fixed in the KnexScheduleRepository adapter, not carried forward.",
+    "S8-BLOCKING: No scheduler golden-master characterization suite exists in tests/characterization/. The DESIGN §3 extraction gate is an unconditional BLOCK: scheduler slice may not be merged without characterization tests green before AND after. This is the single most important pre-work item for the entire leg.",
+    "S4/S6-TRIGGER-SEAM: scheduleQueue.js (not the scheduler core) owns the mutation→schedule trigger. runSchedule.js itself does NOT call enqueueScheduleRun from within the scheduler body — S4/S6 are currently preserved. The extraction must maintain this: RunScheduleCommand must not re-import scheduleQueue. The facade.js wiring must preserve the trigger path through the existing task/facade.js enqueueScheduleRun wrapper.",
+    "DEEP-COUPLING-TASK-CONTROLLER: runSchedule.js requires('../controllers/task.controller') for rowToTask/buildSourceMap/taskToRow (line 92-95). This is a direct controller dependency that must be resolved via SchedulerTaskProvider adapter over the task facade — a non-trivial seam to cut.",
+    "DEAD-CODE-CONFIRMED: dateHelpers.js, dependencyHelpers.js, locationHelpers.js, timeBlockHelpers.js are all 4-line stubs (likely re-export shims). unifiedSchedule.js is 1 line. These are proxy shims for the real code inside unifiedScheduleV2.js — the actual helpers are inlined or imported elsewhere. Must be inventoried before the extraction.",
+    "ENTRY-GATE-GAP-IN-ROADMAP: JUGGLER-HEX-ROADMAP.md version header still says 'leg/juggler-hex-h1-weather @ 2026-06-09' and H2/H3/H4 lack COMPLETE blocks despite git log confirming all three merged (commits bc6e437, 1ac024f, ba8d6ca). The roadmap header/phase docs need updating as part of H6 leg setup.",
+    "42-DB-TOUCHPOINTS: The W1 baseline (ARCH-REVIEW) counted 42 DB touchpoints in the scheduler. The KnexScheduleRepository adapter must encapsulate all of them. The characterization suite must pin the current write pattern before the adapter is introduced."
+  ],
+  "prior_decisions": [
+    {
+      "ref": "JUGGLER-HEX-DESIGN.md §3 (extraction gate)",
+      "summary": "Scheduler slice may not merge without characterization tests (golden-master over real fixtures) proving pure core reproduces current behavior bit-for-bit before any refactor. This is S8. Non-negotiable — BLOCK."
+    },
+    {
+      "ref": "JUGGLER-HEX-DESIGN.md §9 (scheduler last)",
+      "summary": "Scheduler is migrated LAST. The Jan-2026 recommendation of 'scheduler first' is explicitly reversed. This is now H6, gated on H0-H5 all merged."
+    },
+    {
+      "ref": "ADR-0003 / scheduler-rules / DESIGN §4 (P1)",
+      "summary": "All Knex*Repository adapters write created_at/updated_at with new Date(), never db.fn.now(). Veto recorded 2026-05-12 — circular-JSON serialization failure. runSchedule.js currently has 19 fn.now() calls that must move into the KnexScheduleRepository and be corrected to new Date()."
+    },
+    {
+      "ref": "ADR-0001 / DESIGN §4 / ROADMAP §2",
+      "summary": "lib/events adopted as TaskEventPort bus (Task slice publishes mutation events; Scheduler slice subscribes). Direct facade trigger kept until scheduler slice lands. Do not delete lib/events."
+    },
+    {
+      "ref": "ADR-0002 / DESIGN §4 (P1)",
+      "summary": "lib-db is the route for all Knex*Repository adapters; src/db.js singleton migrated per-slice. KnexScheduleRepository must use lib-db, not src/db.js."
+    },
+    {
+      "ref": "JUGGLER-HEX-DESIGN.md §6 invariants S1-S8, P1",
+      "summary": "S1 most-constrained→least (ConstraintSolver ordering); S2 Deadlines>dependencies>preferences (severity comparator); S3 recurring instances scheduled same-day as recurrence fires; S4 scheduler triggered by user/MCP mutation only (never self-triggers); S5 delta-writes only (writeChanged — only changed tasks written); S6 no cascading scheduler calls; S7 exact task-type terms via closed-enum VOs; S8 characterization tests gate the merge; P1 new Date() not db.fn.now() on repos."
+    },
+    {
+      "ref": "DESIGN §5 / ROADMAP §5 (trigger seam)",
+      "summary": "MCP adapter and HTTP adapter enter via the same facade. Scheduler subscribes to Task mutation events (lib-events). The trigger path must be identical for both driving adapters and the scheduler must never self-trigger."
+    }
+  ],
+  "behavior_contract": [
+    "S1: ConstraintSolver.solve() orders tasks most-constrained → least-constrained. The slack sort (slack asc, pri asc, dur desc, id) in unifiedScheduleV2.js is the implementation. Characterization must snapshot this ordering for mixed-constraint fixtures.",
+    "S2: Severity hierarchy — fixed/immovable > overdue (slack=0, P1-boosted) > explicit/implied deadline (sorted by slack) > free/backlog (slack=Infinity). Deadlines always trump priority as the primary sort key.",
+    "S3: Recurring instances are placed ONLY on the same day as their recurrence rule fires. No roll-forward to adjacent days if the assigned day is full — instance goes to unscheduled/issues (SCHEDULER.md §8 Rule 2). Exception: timesPerCycle/flex-day templates may slide within the cycle window by design.",
+    "S4: Scheduler is triggered only via enqueueScheduleRun from mutation controllers (or MCP). runSchedule.js body does not call enqueueScheduleRun. scheduleQueue.js owns the trigger. The extracted RunScheduleCommand must not import scheduleQueue.",
+    "S5: Only tasks whose scheduled_at actually changed are written back (delta-write). Unchanged tasks receive no DB update. Characterization test must count DB writes = number of changed tasks only.",
+    "S6: No cascading scheduler calls from within the scheduler. RunScheduleCommand completes, emits SSE, and returns. No re-enqueue inside the scheduler body.",
+    "S7: Task-type terms are exact closed-enum strings: 'one-off', 'chain member', 'recurring instance', 'split chunk'. PlacementMode VO enforces these — no unknown strings.",
+    "P1: All Knex*Repository adapter writes use new Date() for created_at/updated_at, never db.fn.now() or trx.fn.now(). KnexScheduleRepository must fix the 19 current violations in runSchedule.js.",
+    "IDEMPOTENCE: Back-to-back scheduler runs on stable input produce zero DB changes (second run's pendingUpdates length = 0). Characterization must assert this.",
+    "DELTA-WRITE-COUNT: The number of DB updates per run must equal the number of tasks whose placement changed. The existing 'minimal-diff: skip write when scheduled_at unchanged' test in schedulerPersistIntegration.test.js is the seed; golden-master must pin this at the full-run level.",
+    "WEATHER-FAIL-OPEN: weatherOk() returns true when no weather data exists for a candidate slot — slot is never blocked by missing data. This fail-open rule must survive extraction.",
+    "PAST-DUE-NO-ROLLFORWARD: Non-recurring past-due tasks are P1-boosted and rescheduled within existing constraints. Recurring past-due instances are NOT rolled forward — they go to unscheduled/issues.",
+    "OCCUPANCY-GRID: dayOcc prevents overlaps during placement. No post-placement pile-up resolution. Each phase respects all prior phases' placements. Zero overlaps invariant (tested by Group 70 fuzz test in schedulerScenarios).",
+    "SYNC-LOCK: One scheduler run per user at a time via sync_locks. scheduleQueue.js owns the DB-claim mechanism. This must remain in the infrastructure adapter layer, not the pure core.",
+    "ROLLING-ANCHOR: rolling tasks use rolling_anchor for spacing; backfill path in runSchedule.js handles legacy rows with null rolling_anchor. Must be preserved in the adapter."
+  ],
+  "characterization_targets": [
+    "GOLDEN-MASTER-CORE [MISSING — BLOCKING]: tests/characterization/scheduler/goldenMaster.h6.test.js — Feed fixed task/calendar fixtures through the CURRENT unifiedScheduleV2 (pre-extraction), snapshot {dayPlacements, unplaced, score, slackByTaskId}. Then assert the extracted ConstraintSolver/ScoreEngine/ConflictResolver reproduce the same output bit-for-bit. Must be green BEFORE extraction begins.",
+    "S1-ORDERING [partial — schedulerRules Group 2, schedulerScenarios S3/S4]: schedulerRules Group 2 covers deadline-governs-priority. schedulerScenarios S3 (dep chain A→B→C ordering), S4b (same-day dep placement) are close but not an explicit most-constrained-to-least ordering snapshot. Golden-master must add a fixture with mixed-constraint tasks and pin the full sorted order.",
+    "S2-SEVERITY [partial — schedulerRules Group 2, schedulerScenarios PDS-1/PDS-2]: Deadline-vs-priority ordering tested. Need a fixture that pins the exact severity comparator result (fixed > overdue > deadline > free) as a golden-master snapshot, not just a placement assertion.",
+    "S3-SAME-DAY-RECURRENCE [gap]: No existing test explicitly asserts that a recurring instance is placed ONLY on its assigned day and never rolled to adjacent days. schedulerScenarios Group 19 has a test for past recurring tasks being skipped, but no golden-master for same-day placement of future recurrings. Must add.",
+    "S4-NO-SELF-TRIGGER [gap]: No existing test asserts that the scheduler core (unifiedScheduleV2) does not import or call scheduleQueue/enqueueScheduleRun. This is a structural assertion — a static require-graph check — that must be added to the golden-master harness. Verify: `require.resolve('./scheduleQueue')` is NOT in unifiedScheduleV2's closure.",
+    "S5-DELTA-WRITE-COUNT [partial — schedulerPersistIntegration 'minimal-diff' test line 203]: The 'skip write when scheduled_at unchanged' test covers the single-task case. Golden-master must assert write count = changed tasks at the full multi-task run level (integration test against test-bed 3407).",
+    "S6-NO-CASCADE [gap]: No test asserts zero re-entries into the scheduler during a run. Must add a test that confirms RunScheduleCommand does not call enqueueScheduleRun or runScheduleAndPersist recursively. A spy/mock on scheduleQueue.enqueueScheduleRun must remain uncalled across a full scheduler run.",
+    "P1-NEW-DATE [gap — ADR-0003]: No existing adapter unit test asserts JS Date (not Knex raw) is passed for updated_at writes. Must add to KnexScheduleRepository unit test. The 19 fn.now() violations in runSchedule.js are the items to fix in the adapter.",
+    "IDEMPOTENCE [partial — schedulerIntegration line 203 IDEM-1/IDEM-2 in SCHEDULER.md]: schedulerPersistIntegration has a single idempotence test. Golden-master must add a multi-task idempotence fixture that captures the exact updated count on run-2 = 0.",
+    "SCORE-ENGINE [gap]: scoreSchedule.js is 181 ln of pure functions. No characterization test snapshots score output against a fixed fixture. ScoreEngine extraction from unifiedScheduleV2 must be pinned by a fixture that captures {total, breakdown} before extraction and asserts identity after.",
+    "WEATHER-CONSTRAINT [partial — SCHEDULER.md §Weather, no test found]: The weatherOk fail-open rule must be asserted in the characterization suite with a fixture that has no weather data and verifies the task IS placed (not blocked)."
+  ],
+  "ambiguities": [
+    {
+      "question": "H2/H3/H4 completion status in JUGGLER-HEX-ROADMAP.md: The roadmap header still reads 'leg/juggler-hex-h1-weather @ 2026-06-09' and H2/H3/H4 phases lack COMPLETE blocks. Git log confirms all three merged (H2: bc6e437, H3: 1ac024f, H4: ba8d6ca). Should the roadmap doc be updated as H6 leg setup work (part of this leg's W0), or was it intentionally left for a separate chore?",
+      "why_blocking": "The H6 entry gate explicitly requires 'all prior phases merged'. If the roadmap is the authoritative state tracker, Kermit may reject the leg as not yet entry-gate-cleared until the doc is updated. Clarify before WBS finalization."
+    },
+    {
+      "question": "4-line stub files (dateHelpers.js, dependencyHelpers.js, locationHelpers.js, timeBlockHelpers.js) and the 1-line unifiedSchedule.js: are these re-export shims for backward compatibility with old import paths, or dead stubs to be deleted in H7?",
+      "why_blocking": "If they are backward-compat shims, the extraction must maintain them. If they are dead stubs, the golden-master must not import them. The extraction WBS must account for which callers (if any) still use these paths."
+    },
+    {
+      "question": "scheduleQueue.js entry gate for the trigger seam: The task facade (slices/task/facade.js) already has enqueueScheduleRun wired (line 84, 136-144). Does H6 adopt lib-events (the S4 seam) as the trigger, or does it keep the existing direct facade→scheduleQueue call? The DESIGN §5 says 'until the scheduler slice lands, keep the direct facade call' — but now the scheduler IS landing. Must lib-events be fully wired before H6 can merge?",
+      "why_blocking": "If lib-events must be the trigger for H6 exit, that is additional scope. If the direct facade call is acceptable for H6 with lib-events as a follow-on, the WBS is smaller. DESIGN §5 implies lib-events is the target but the 'until it lands' clause is ambiguous."
+    }
+  ],
+  "edge_cases": [
+    "19 fn.now() violations in runSchedule.js must all migrate to new Date() in KnexScheduleRepository — none can be left in the pure core or RunScheduleCommand.",
+    "runSchedule.js requires task.controller directly (rowToTask, buildSourceMap, taskToRow). This dependency must be cut via SchedulerTaskProvider adapter. The adapter must reproduce the exact rowToTask/taskToRow transformation so the golden-master passes post-extraction.",
+    "src/db.js singleton (line 12 of runSchedule.js, line 30 of scheduleQueue.js, line 21 of schedulerSession.js) must all migrate to lib-db in their respective adapters.",
+    "reconcileOccurrences.js (126 ln) and scheduleQueue.js (368 ln) contain I/O that must stay in the adapter/infrastructure layer — they cannot be part of the pure domain core.",
+    "The cache path in runSchedule.js (getSchedulePlacements) uses Redis and user_config cache rows — this is infrastructure that belongs in an adapter, not RunScheduleCommand.",
+    "schedulerSession.js (281 ln) manages session state in DB — this is pure infrastructure and must stay outside the domain core.",
+    "The in-memory chunk expansion path (desiredOccurrences, toInsertIds, toDeleteIds) in runSchedule.js is I/O — it must live in the adapter layer.",
+    "The deadlock-retry loop (runScheduleAndPersist retries up to MAX_RETRIES=3 on ER_LOCK_DEADLOCK) is infrastructure — must stay in RunScheduleCommand or KnexScheduleRepository, not the pure core.",
+    "The rolling-anchor backfill path (lines 389-403 of runSchedule.js, using trx.fn.now()) is a write path that must migrate to new Date() in the adapter.",
+    "The sync-lock (lib/sync-lock) claim is infra — must stay in the RunScheduleCommand orchestrator, not leak into the pure core."
+  ],
+  "spec_draft": null,
+  "recommended_routing": {
+    "lane": "full",
+    "depth": "deep",
+    "rationale": "Measured: 5,356 ln across 13 source files + 5,763 ln of existing tests. 19 ADR-0003 violations found by reading (not greppable). Zero scheduler golden-master characterization exists — S8 gate is a hard BLOCK. Three structural seams to cut (task.controller dependency, db.js singleton, fn.now() violations). HIGHEST-risk per DESIGN §6 and CLAUDE.md ('scheduler bugs cascade and corrupt all task data'). Full+deep is the only appropriate routing — no part of this refactor is trivial."
+  },
+  "ts": "2026-06-12T00:00:00.000Z"
+}

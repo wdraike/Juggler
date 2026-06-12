@@ -1,0 +1,69 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "ernie",
+  "leg_id": "juggler-h5-fixes-W3",
+  "mode": "bugfix",
+  "depth": "deep",
+  "status": "DONE",
+  "summary": "commitQuota atomic re-count under FOR UPDATE is correct (re-counts, skips INSERT on >=limit, trx commit/rollback both release - no leak). Deny-path fail-open consistent with WARN-2, not a bug. No BLOCK. One deny-path coverage gap referred to telly.",
+  "steps": {
+    "line_by_line": "done",
+    "scooter_consult": "done"
+  },
+  "findings": [
+    {
+      "id": "w3-1-commitquota-atomicity",
+      "severity": "INFO",
+      "dimension": "concurrency",
+      "file": "juggler-backend/src/slices/ai-enrichment/adapters/KnexAIUsageRepository.js",
+      "line": 101,
+      "claim": "commitQuota atomic acquire is correct: re-counts under SELECT COUNT(*) FOR UPDATE, distrusts checkQuota's stale count, skips INSERT when count>=limit; FOR UPDATE serializes concurrent committers so the loser re-evaluates at count=50 and skips.",
+      "evidence": "Lines 108-116: trx.raw('SELECT COUNT(*)... FOR UPDATE') then `if (count < limit) { trx('ai_command_log').insert(...) }`. db.transaction(cb) commits on resolve / rolls back on throw -> no leaked connection on deny (empty trx commits+releases) or error (rollback+releases). `const [lockRow]=trx.raw(...)` reads mysql2 [rows,fields] correctly (matches repo precedent task-write-queue.js:88 `row[0]` and migration `const [cols]=...raw(SHOW COLUMNS)`).",
+      "fix": "None - closure evidence for prior BLOCK B11.",
+      "confidence": "high"
+    },
+    {
+      "id": "w3-2-deny-path-fail-open",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/src/controllers/ai.controller.js",
+      "line": 115,
+      "claim": "Deny-path fail-open (race-loser gets AI result un-counted, commitQuota returns void with no 429) is consistent with the recorded WARN-2 decision, not a bug.",
+      "evidence": "commitQuota resolves void on the skip path (no throw, no allowed:false). Controller lines 115-119 await it in a try/catch that only logs commitErr; returns 200 regardless. TRACEABILITY B5/AP-72g B5-warn2 records under-count-by-one acceptable and losing-result not acceptable; WBS W3 acceptance (a) is the row-count invariant finalCount<=50, which holds. Signalling the loss would re-introduce the WARN-2 lost-result regression or need a 2nd round-trip.",
+      "fix": "None - design-correct; recorded as process-decision in Scooter INBOX so the next reader does not re-flag it.",
+      "confidence": "high"
+    },
+    {
+      "id": "w3-3-denypath-coverage-gap",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/tests/unit/aiEnrichment/quotaTOCTOU.test.js",
+      "line": 208,
+      "claim": "B11-race asserts only finalCount<=50; no positive assertion that the race-LOSER still returns 200 with its AI result and that commitQuota does not throw on the skip path.",
+      "evidence": "Test comment lines 254-257 explicitly declines to assert allowedA/allowedB ('the fix could surface the denial as a rejected promise... both are valid'). The chosen mechanism resolves void, so no test pins the loser's success path at the controller level (mirror of AP-72g B5-warn2 but for race-loss, not DB-error). Logic is correct; the gap is a missing positive assertion.",
+      "fix": "REFER->telly: assert the denied concurrent caller does not throw from commitQuota and that the controller returns 200 with its result.",
+      "confidence": "high"
+    },
+    {
+      "id": "w3-4-window-consistency",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/src/slices/ai-enrichment/adapters/KnexAIUsageRepository.js",
+      "line": 69,
+      "claim": "checkQuota and commitQuota use the identical 24h-window expression and same dailyLimit -> the limit is applied consistently, no double-count or window skew.",
+      "evidence": "Both line 69 and line 107 compute `new Date(Date.now() - 24*60*60*1000)`; both compare against this.dailyLimit. Window is a 24h rolling window (pre-existing semantics, unchanged by W3); the user message says 'tomorrow' (controller:69) - pre-existing wording, out of W3 scope.",
+      "fix": "None for W3.",
+      "confidence": "high"
+    }
+  ],
+  "refers": [
+    {
+      "to": "telly",
+      "why": "B11-race asserts only the row-count invariant; add a positive assertion that the atomic-race LOSER still returns 200 with its AI result and that commitQuota does not throw on the skip path."
+    },
+    {
+      "to": "cookie",
+      "why": "Infra-level locking depth (FOR UPDATE / InnoDB range-lock behavior, migration/index design) deferred to cookie per CONTEXT; ernie verified application-level correctness only."
+    }
+  ]
+}

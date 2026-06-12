@@ -1,0 +1,64 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "ernie",
+  "leg_id": "juggler-h6-w3-runschedulecommand",
+  "mode": "refactor",
+  "depth": "deep",
+  "status": "DONE",
+  "summary": "Persist-repoint EQUIVALENT: inline flush == writeChanged (partition/CASE/chunk/sort/otherUpdates identical, P1+S5 only deltas). trx-bound, retry-safe, no scheduleQueue, no side-effect loss. No BLOCK/WARN.",
+  "steps": {
+    "line_by_line": "done",
+    "scooter_consult": "n/a"
+  },
+  "findings": [
+    {
+      "id": "w3-slack-batched-drop",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/src/slices/scheduler/adapters/KnexScheduleRepository.js",
+      "line": 171,
+      "claim": "slack_mins not emitted as a CASE column in the batched path",
+      "evidence": "writeChanged batched updateFields has no slack_mins CASE; legacy inline flush (deleted runSchedule.js ~1714-1773) also omitted slack_mins from the batched updateFields — byte-faithful. A row with slack_mins+scheduled_at loses slack_mins in BOTH old and new code.",
+      "fix": "No change for W3 (equivalence preserved). If the legacy drop is itself a latent data bug, refer to elmo / backlog.",
+      "confidence": "high"
+    },
+    {
+      "id": "w3-reconcile-db-not-trx",
+      "severity": "INFO",
+      "dimension": "error-handling",
+      "file": "juggler-backend/src/scheduler/runSchedule.js",
+      "line": 886,
+      "claim": "reconcile safety-net write uses db (not trx) with clockNow() for updated_at",
+      "evidence": "Line 886 db('task_instances')...update({unscheduled:1, updated_at:_runScheduleCommand.clockNow()}) — deliberate survives-rollback path (comment 884-885); was db.fn.now(), now JS Date (P1-consistent). Not routed through the command. Rollback/data-integrity semantics of the dual-connection write are elmo's column.",
+      "fix": "REFER->elmo (P1/data-integrity/rollback co-lead).",
+      "confidence": "high"
+    },
+    {
+      "id": "w3-phase1-insert-clocknow",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/src/scheduler/runSchedule.js",
+      "line": 1006,
+      "claim": "phase-1 chunk INSERT stamps created_at/updated_at with clockNow() and projects ISO for rowToTask",
+      "evidence": "Lines 1006-1037: DB row gets JS Date (P1), phase1InsertedById projection uses new Date().toISOString() so rowToTask can parse. Equivalence reasoning sound; golden-master pins changeset output.",
+      "fix": "REFER->zoe to confirm golden-master covers phase-1 insert changeset projection.",
+      "confidence": "med"
+    },
+    {
+      "id": "w3-writeset-gate",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/tests/characterization/scheduler/goldenMaster.h6.test.js",
+      "line": null,
+      "claim": "write-set equivalence (S5) is what gates the leg; needs adversarial verification of write-set assertions",
+      "evidence": "Refactor gate (goldenMaster.h6 + scheduleAdapters.contract) present. Repoint equivalence depends on the WRITE set, not just golden output — test truthfulness of write-set assertions is zoe's column.",
+      "fix": "REFER->zoe (adversarial test-truthfulness of write-set/golden-master).",
+      "confidence": "med"
+    }
+  ],
+  "refers": [
+    { "to": "elmo", "why": "P1/data-integrity/sync co-lead: dual-connection safety-net write (runSchedule.js:886) + slack_mins batched-drop latent quirk" },
+    { "to": "zoe", "why": "test truthfulness of write-set/golden-master equivalence and phase-1 insert changeset projection coverage" },
+    { "to": "cookie", "why": "non-trivial refactor: design-time Scooter consult block + slice topology/boundary depth (ARCH-REVIEW.md)" }
+  ]
+}

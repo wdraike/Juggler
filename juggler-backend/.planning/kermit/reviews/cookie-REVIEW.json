@@ -1,0 +1,84 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "cookie",
+  "leg_id": "juggler-h6-w3-runschedulecommand",
+  "mode": "refactor",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "W3 application seam PASS: layering inward, no scheduleQueue, single delta-writer (inline flush gone). Smells for W4: partial seam (3 inline writes bypass command) + no facade/non-mirrored layout.",
+  "steps": {
+    "boundary_check": "done",
+    "scooter_consult": "done"
+  },
+  "findings": [
+    {
+      "id": "w3-partial-seam",
+      "severity": "WARN",
+      "dimension": "boundary",
+      "file": "src/scheduler/runSchedule.js",
+      "line": 886,
+      "claim": "Caller still owns direct DB writes outside the application command — partial-orchestration seam.",
+      "evidence": "runScheduleAndPersist delegates persistDelta/deleteTasksWhere/backfillRollingAnchor/dbNow/clockNow to the command but keeps three inline writes around it: db('task_instances').update({unscheduled:1}) at 886 (rollback-survival, on db not trx), trx('task_instances').update(driftFields) drift CASE-update at 911, and the user_config schedule_cache upsert at 1777-1782. The slice writes the DB both through and around the command, so the command's 'sole persist seam' docstring is aspirational not enforced.",
+      "fix": "W4/H7: lift remaining writes behind the command (persistCache/flagUnscheduled/persistDrift). Document the 886 db-not-trx rollback-survival semantic in the port contract before moving it; do not silently fold a non-trx write into a trx-scoped primitive.",
+      "confidence": "high"
+    },
+    {
+      "id": "w3-no-facade-mirror-divergence",
+      "severity": "WARN",
+      "dimension": "boundary",
+      "file": "src/slices/scheduler/application/RunScheduleCommand.js",
+      "line": null,
+      "claim": "Scheduler application layer diverges from sibling slice shape: no commands/ subdir, no facade.js.",
+      "evidence": "slices/task/application and slices/user-config/application use a commands/ (+queries/) subdir AND a facade.js guarded by eslint.boundaries.config.js rules. Scheduler puts RunScheduleCommand.js directly under application/ with no facade; runSchedule.js imports the command class directly via require('../slices/scheduler/application/RunScheduleCommand'). Nothing prevents a future caller reaching past the application layer into adapters.",
+      "fix": "W4: add slices/scheduler/facade.js as the single entry + move command under application/commands/ to mirror task/user-config, plus the per-slice boundary eslint rule. OR record an ADR for the intentional single-command/no-query divergence (refer authoring to abby).",
+      "confidence": "high"
+    },
+    {
+      "id": "w3-stateless-singleton",
+      "severity": "INFO",
+      "dimension": "infra",
+      "file": "src/slices/scheduler/application/RunScheduleCommand.js",
+      "line": 75,
+      "claim": "Module-level command singleton is stateless and Cloud-Run scale-out safe.",
+      "evidence": "_runScheduleCommand = new RunScheduleCommand() holds only an injected clock + repositoryFactory (pure factories, no per-request mutable state). No instance-local state crosses requests.",
+      "fix": "none",
+      "confidence": "high"
+    },
+    {
+      "id": "w3-schedulequeue-invariant-holds",
+      "severity": "INFO",
+      "dimension": "dependency-direction",
+      "file": "src/slices/scheduler/application/RunScheduleCommand.js",
+      "line": 35,
+      "claim": "S4/S6 scheduleQueue invariant holds — the command persists, it does not self-trigger.",
+      "evidence": "Zero live scheduleQueue/enqueueScheduleRun references in application/; the only 3 grep hits are the invariant's own doc comments. Guarded by the golden-master require-closure assert.",
+      "fix": "none",
+      "confidence": "high"
+    },
+    {
+      "id": "w3-eslint-rule-w4-expected",
+      "severity": "INFO",
+      "dimension": "boundary",
+      "file": "eslint.boundaries.config.js",
+      "line": null,
+      "claim": "Per-slice scheduler boundary eslint rule absent — confirmed expected for W4.",
+      "evidence": "eslint.boundaries.config.js has facade-boundary rules for calendar/weather/task/ai-enrichment/user-config but no scheduler entry. Matches the stated expectation that scheduler boundary enforcement lands in W4.",
+      "fix": "W4: add the scheduler facade-boundary rule once the facade exists.",
+      "confidence": "high"
+    },
+    {
+      "id": "w3-drift-case-update-correctness",
+      "severity": "INFO",
+      "dimension": "boundary",
+      "file": "src/scheduler/runSchedule.js",
+      "line": 902,
+      "claim": "Drift CASE-WHEN UPDATE + safety-net flag are correctness-sensitive; SQL binding/chunk correctness is out of cookie's column.",
+      "evidence": "The batched CASE-WHEN drift update (902-911) and the unscheduled safety-net flag are correctness-sensitive scheduler writes; architecture is sound but per-statement binding-count/chunk-vs-max_allowed_packet is a code-correctness concern.",
+      "fix": "REFER to ernie",
+      "confidence": "med"
+    }
+  ],
+  "refers": [
+    { "to": "ernie", "why": "verify drift CASE-update binding count + chunk-size vs max_allowed_packet correctness (runSchedule.js 902-911)" }
+  ]
+}

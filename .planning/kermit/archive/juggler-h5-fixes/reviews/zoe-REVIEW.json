@@ -1,0 +1,15 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "zoe",
+  "leg_id": "juggler-h5-fixes-W3",
+  "mode": "bugfix",
+  "depth": "deep",
+  "status": "DONE",
+  "summary": "B11-race genuinely pins bert's atomic commitQuota (db.transaction + SELECT COUNT FOR UPDATE) and is a REAL race, not a false-GREEN. M1 (revert to non-atomic count-then-insert) drives finalCount=51 RED, deterministic x3. The 51 (vs serialization's 50) proves two distinct pooled connections = real concurrency. N-way probe: 5 racers @49 -> exactly 50 (FOR UPDATE gate not 2-specific). Boundary @50->50, @48-2x->50. No quota-on-timeout reintroduced (B5-red GREEN). 58/58 GREEN; tree clean.",
+  "steps": { "adversarial_pass": "done", "mutations_run": "2", "nway_boundary_probe": "run-and-deleted", "tree_reverted": "clean" },
+  "findings": [],
+  "refers": [
+    { "to": "telly", "why": "B11-race only tests 2-way concurrency at count=49. zoe's throwaway N-way/boundary probe (5-way @49/@46, @50 single+2x, @48 2x) all PASS on the fix but is not retained. 2-way is sufficient to pin the binding boundary race; optional to fold an N-way variant into the suite for regression durability. Breadth, not correctness." },
+    { "to": "cookie", "why": "Atomic mechanism is SELECT COUNT(*) ... FOR UPDATE in a REPEATABLE-READ trx anchored on idx_ai_command_log_user_time (no new migration). InnoDB range/gap-lock correctness on the existing composite index is an arch concern; empirically the N-way probe shows correct serialization." }
+  ]
+}

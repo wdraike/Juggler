@@ -1,0 +1,33 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "zoe",
+  "leg_id": "juggler-test-failloud-residual",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "telly's TEST-FR-001 claims independently reproduced: 4 DB tests RED [TEST-FR-001] on DB-down, real-assertion GREEN on DB-up @3407; 3 source mutations killed all 4 (assertions execute, no short-circuit); B4 DB-free both ways; no missed vacuous site. 0 BLOCK, 0 WARN, 1 INFO.",
+  "steps": {
+    "adversarial_pass": "done",
+    "db_down_reproduced": "done",
+    "db_up_reproduced": "done",
+    "spot_mutation": "done",
+    "coverage_probe": "done",
+    "flake_rerun": "done"
+  },
+  "findings": [
+    {
+      "id": "zoe-failloud-doc1",
+      "severity": "INFO",
+      "dimension": "unchallenged-claim",
+      "file": "juggler-backend/tests/unit/aiEnrichment/quotaTOCTOU.test.js",
+      "line": 60,
+      "claim": "Header doc comment says 'Skipped automatically when test-bed is not up (isAvailable() guard)' — and the same in timeoutAbortConsequences.test.js:59-60",
+      "evidence": "Behavior was converted to hard-fail: DB_PORT=9999 run shows the 4 DB tests FAIL with [TEST-FR-001] (not skip). The doc comment now misdescribes behavior. Cosmetic doc drift only — not a false pass; the assertions are real (mutation-killed).",
+      "fix": "On a future touch, update the stale 'Skipped automatically' comments to 'Hard-fails [TEST-FR-001] when DB unavailable'.",
+      "confidence": "high"
+    }
+  ],
+  "refers": [
+    { "to": "telly", "why": "stale 'skipped' doc comments in the two test files now misdescribe the hard-fail behavior (INFO, cosmetic)" }
+  ]
+}

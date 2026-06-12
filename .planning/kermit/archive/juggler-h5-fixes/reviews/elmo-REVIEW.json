@@ -1,0 +1,45 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "elmo",
+  "leg_id": "juggler-h5-fixes-w2b-rereview",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Re-review: W1 (422 echo) RESOLVED via encode (HTML-sink + double-decode bypass closed, adversarially tested); W2 (telemetry userId) RESOLVED via authenticated req.user.id threaded to enqueue, no prompt/PII/key co-threaded. No new BLOCK/WARN.",
+  "steps": {
+    "owasp_sweep": "done",
+    "authz_check": "done",
+    "secret_scan": "done",
+    "rereview_w1": "resolved",
+    "rereview_w2": "resolved",
+    "new_issue_scan": "clean",
+    "scanner_prefilter": "gitleaks=absent,semgrep=absent(grep-only),eslint=ran(2 style errors -> ernie)"
+  },
+  "findings": [
+    {
+      "id": "elmo-w2b-1-resolved",
+      "severity": "INFO",
+      "dimension": "owasp-A03",
+      "file": "juggler-backend/src/controllers/ai.controller.js",
+      "line": 136,
+      "claim": "Prior WARN W1 (denylist-strip on 422 echo) is RESOLVED",
+      "evidence": "Line 136-138 now encodes /[&<>\"'`=/\\x00-\\x1F\\x7F]/g to decimal HTML entities. Adversarial spot-test of the exact regex: <script>, <img onerror>, </textarea><svg/onload>, backtick-attr-breakout all fully neutralized; & in the encode set closes the pre-encoded-entity double-decode bypass (&#60;script&#62; becomes &#38;#60;...). raw is application/json and never reaches a log sink.",
+      "fix": "Resolved — no action. Lint nits (no-control-regex/no-useless-escape) referred to ernie; not security.",
+      "confidence": "high"
+    },
+    {
+      "id": "elmo-w2b-2-resolved",
+      "severity": "INFO",
+      "dimension": "owasp-A09",
+      "file": "juggler-backend/src/controllers/ai.controller.js",
+      "line": 25,
+      "claim": "Prior WARN W2 (telemetry userId:null attribution gap) is RESOLVED",
+      "evidence": "req.user.id (authenticated, set by authenticateJWT — not client-supplied) threaded controller:56 -> callGemini:107 -> generate({userId}):25 -> trackedGeminiCall:9 -> enqueue -> ai_usage_outbox.user_id. Same id already trusted for quota. enqueue payload (ai-usage-queue.service.js:12) persists only user_id/use_case/model_name/model_params(config, NOT contents)/tokens/latency/error — no prompt text, PII, or API key co-threaded.",
+      "fix": "Resolved — no action.",
+      "confidence": "high"
+    }
+  ],
+  "refers": [
+    {"to": "ernie", "file": "juggler-backend/src/controllers/ai.controller.js", "line": 136, "note": "ESLint no-control-regex (\\x00,\\x1f) and no-useless-escape (\\/ in char class) on the W1 encoder regex. Control-char match is intentional/correct (it IS the security control); needs a lint-disable comment or drop the redundant \\/. Style/correctness, NOT security."}
+  ]
+}
