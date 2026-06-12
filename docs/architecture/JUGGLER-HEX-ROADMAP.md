@@ -2,8 +2,8 @@
 type: architecture
 service: juggler
 status: active
-version: leg/juggler-hex-h1-weather @ 2026-06-09 (H1 COMPLETE — weather slice built, controller thin, boundary active, weather suite green)
-last_updated: 2026-06-09
+version: leg/juggler-hex-h6-scheduler @ 2026-06-12 (H5 COMPLETE — H2/H3/H4/H5 all merged; H6 W0 golden-master in progress)
+last_updated: 2026-06-12
 tags:
   - type/architecture
   - service/juggler
@@ -15,7 +15,7 @@ tags:
 
 # Juggler Backend — Hexagonal Conversion ROADMAP
 
-**Status:** active · **Type:** architecture-overview (migration roadmap) · **Last updated:** 2026-06-09
+**Status:** active · **Type:** architecture-overview (migration roadmap) · **Last updated:** 2026-06-12
 
 > ## SUPERSEDES `JUGGLER-HEX-WBS.md` (2026-01-15)
 >
@@ -187,7 +187,12 @@ Each phase lists goal · work items · entry gate · exit gate · risk. Port/ada
 
 ---
 
-### Phase H2 — Infra-lib completion & adoption
+### Phase H2 — Infra-lib completion & adoption — **COMPLETE** (2026-06-10, commit bc6e437)
+
+> **As-built:** lib-config and lib-cache created; lib-events adopted (importer count > 0);
+> lib-logger adoption extended; src/db.js importer count reduced below 35 and trending toward 0.
+> Entry gate (H0+H1 merged) cleared. Exit gate: lib/config + lib/cache exist with tests;
+> lib/events no longer dead; src/db.js importers < 35.
 
 - **Goal:** Finish the half-built infra layer **before** the two big domains depend on it: create the
   two absent libs, adopt the dead one, and begin retiring the `db.js` singleton. (Per ADR-0002 the
@@ -206,7 +211,13 @@ Each phase lists goal · work items · entry gate · exit gate · risk. Port/ada
 
 ---
 
-### Phase H3 — Task slice  *(characterization-gated — see §4)*
+### Phase H3 — Task slice  *(characterization-gated — see §4)* — **COMPLETE** (2026-06-10, commit 1ac024f)
+
+> **As-built:** task.controller.js extracted into slices/task/ with entities, ports, adapters,
+> application commands, and facade.js. Characterization golden-master suite (65KB,
+> tests/characterization/task.goldenMaster.http.test.js) green before and after extraction.
+> S7 (closed-enum VOs for task-type terms) and P1 (new Date() in KnexTaskRepository) asserted.
+> task.controller.js is thin (0 direct DB call sites). Entry gate (H2 merged + char suite) cleared.
 
 - **Goal:** Extract the 2,432-ln task controller (66 `getDb(` + 12 `trx(`) into a `slices/task`
   vertical slice. This is the first **behavior-must-be-identical** extraction.
@@ -224,7 +235,13 @@ Each phase lists goal · work items · entry gate · exit gate · risk. Port/ada
 
 ---
 
-### Phase H4 — User/Config slice
+### Phase H4 — User/Config slice — **COMPLETE** (2026-06-11, commits ba8d6ca + d87d592)
+
+> **As-built:** user-config slice extracted with ConfigRepositoryPort, EntitlementPort, 22 use-cases,
+> KnexConfigRepository, and facade.js. 5 controllers (config, data, billing-webhooks, feature-catalog,
+> impersonation) + 3 middleware thinned to facade calls. Entitlement checks slug-keyed ('juggler').
+> Fix leg d87d592 applied: H4 catalog-cache split + renameTasks timestamp correctness.
+> Entry gate (H2+H3 merged) cleared.
 
 - **Goal:** Consolidate config/entitlement logic spread across 5 controllers + 3 middleware into a
   `slices/user-config` slice. Lower leverage than task; sequenced after it because it shares the
@@ -241,7 +258,14 @@ Each phase lists goal · work items · entry gate · exit gate · risk. Port/ada
 
 ---
 
-### Phase H5 — AI-enrichment slice (removes the SDK leak)
+### Phase H5 — AI-enrichment slice (removes the SDK leak) — ✅ COMPLETE (2026-06-12, leg juggler-hex-h5-ai, commit cc61029)
+
+> **Done:** SDK leak removed (`grep GoogleGenAI src/controllers src/routes` = 0); AIPort/AIUsagePort
+> behind `slices/ai-enrichment/facade.js`; GeminiAIAdapter has a real AbortController timeout (E3);
+> shared-global/per-user-override split preserved (E2, `e2-globalShared.h5.test.js`); usage-tracking
+> unchanged via DB-backed AIUsagePort (E4). H5 suite 64/64. EnrichmentRepositoryPort/RedisAIUsageQueue
+> **de-scoped** (no enrichment-persistence tables exist — recorded decision, not a gap). Deferred to
+> backlog: 999.415 (quota TOCTOU, pre-existing), 999.416 (abort-telemetry), 999.417 (prompt-injection elmo pass).
 
 - **Goal:** Close the W1 **negative** finding: `@google/genai` is `new`'d directly in
   `controllers/ai.controller.js:28` **and** `routes/task.routes.js:39`. Route both behind an `AIPort`.
@@ -340,9 +364,9 @@ flowchart TD
 | Wave | Phases | Theme | Gate to enter next wave |
 |------|--------|-------|-------------------------|
 | **Wave 1** | H0 ✅, H1 ✅ | Lowest-risk real slices (adapters pre-isolated; smallest domain) | Both facades merged; lib-db pattern proven on real slices — **COMPLETE** |
-| **Wave 2** | H2 | Finish the infra layer the heavy slices depend on | lib-config + lib-cache exist; lib-events adopted; db.js importers < 35 |
-| **Wave 3** | H3 | Task slice (publishes events the scheduler needs) | Task characterization suite green before+after; task facade live |
-| **Wave 4** | H4, H5 | Remaining non-core slices (parallelizable — both depend on H2+H3, not each other) | Both facades merged; SDK-leak grep = 0 |
+| **Wave 2** | H2 ✅ | Finish the infra layer the heavy slices depend on | lib-config + lib-cache exist; lib-events adopted; db.js importers < 35 — **COMPLETE** (bc6e437) |
+| **Wave 3** | H3 ✅ | Task slice (publishes events the scheduler needs) | Task characterization suite green before+after; task facade live — **COMPLETE** (1ac024f) |
+| **Wave 4** | H4 ✅, H5 ✅ | Remaining non-core slices (parallelizable — both depend on H2+H3, not each other) | Both facades merged; SDK-leak grep = 0 — **COMPLETE** (ba8d6ca + d87d592 + cc61029 + 29401dc) |
 | **Wave 5** | H6 | Scheduler core (LAST) | Golden-master green before+after; all S/P invariants pinned |
 | **Wave 6** | H7 | Cleanup; delete `src/db.js` | 0 `db.js` importers |
 
@@ -385,9 +409,9 @@ the verified surface *grew* since Jan (scheduler +273 ln, task controller +10 ln
 |-------|------|---------------------|
 | H0 Calendar Port | 🟢 LOW | 5–7 — **COMPLETE** |
 | H1 Weather | 🟢 LOW | 3–4 — **COMPLETE** |
-| H2 Infra-lib completion | 🟡 MED | 6–8 |
-| H3 Task slice (char-gated) | 🟡 MED-HIGH | 7–9 |
-| H4 User/Config | 🟡 MED | 5–7 |
+| H2 Infra-lib completion | 🟡 MED | 6–8 — **COMPLETE** (2026-06-10, bc6e437) |
+| H3 Task slice (char-gated) | 🟡 MED-HIGH | 7–9 — **COMPLETE** (2026-06-10, 1ac024f) |
+| H4 User/Config | 🟡 MED | 5–7 — **COMPLETE** (2026-06-11, ba8d6ca + d87d592) |
 | H5 AI-enrichment | 🟢 LOW-MED | 4–5 |
 | H6 Scheduler slice (char-gated, LAST) | 🟥 HIGHEST | 8–12 |
 | H7 Cleanup | 🟢 LOW | 2–3 |
