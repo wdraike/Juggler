@@ -2,7 +2,7 @@
 type: design
 service: juggler
 status: active
-last_updated: 2026-05-25
+last_updated: 2026-06-12
 tags:
   - type/design
   - service/juggler
@@ -14,10 +14,24 @@ tags:
 
 # Scheduler — Design & Test Cases
 
-**Last Updated:** 2026-05-21
+**Last Updated:** 2026-06-12
 
 ## Status
 **Current design.** Single source of truth for the scheduler placement algorithm and its test coverage. Consolidates the earlier `SCHEDULER-PRIORITY-REDESIGN.md`, `SCHEDULER-DEPENDENCY-REDESIGN.md`, and `SCHEDULER-TEST-CASES.md` drafts.
+
+## Code structure (hexagonal slice)
+
+As of the H6 hex migration (2026-06-12, commits `30e23e5`→`f670368`), the scheduler is organized as a hexagonal slice under `src/slices/scheduler/`. The placement *algorithm* described in this doc is unchanged (golden-master verified bit-for-bit before and after) — H6 was a behavior-identical refactor that relocated the pure logic into a testable domain core and routed all I/O through ports/adapters:
+
+| Layer | Location | Contents |
+|-------|----------|----------|
+| **Domain core** (pure, I/O-free) | `src/slices/scheduler/domain/` | `logic/ConstraintSolver`, `logic/ScoreEngine`, `logic/ConflictResolver`; entities (`Schedule`, `ScheduledTask`, `Constraint`, `ScoredSchedule`); value-objects (`Deadline`, `Priority`, `TimeWindow`) |
+| **Ports** | `src/slices/scheduler/domain/ports/` | `TaskProviderPort`, `CalendarProviderPort`, `WeatherProviderPort`, `ScheduleRepositoryPort`, `ClockPort` |
+| **Adapters** | `src/slices/scheduler/adapters/` | `SchedulerTaskProvider`, `SchedulerCalendarProvider`, `SchedulerWeatherProvider`, `KnexScheduleRepository` (delta-write `writeChanged`), `InMemoryScheduleRepository`, `MysqlClockAdapter` |
+| **Application** | `src/slices/scheduler/application/RunScheduleCommand.js` | Sole I/O orchestrator for the persist path (delta-write, invariant S5) |
+| **Facade (entry)** | `src/slices/scheduler/facade.js` | Public seam: `runScheduleAndPersist`, `getSchedulePlacements`, `unifiedScheduleV2`. Imported by `routes/schedule.routes.js` and `mcp/tools/schedule.js`. |
+
+The legacy entry orchestrators **remain** at `src/scheduler/{runSchedule,unifiedScheduleV2,scoreSchedule}.js` — `unifiedScheduleV2.js` now imports `ConstraintSolver`/`ConflictResolver` from the slice domain (single source of truth), and `runSchedule.js` routes persistence through `RunScheduleCommand`→`KnexScheduleRepository`. The `src/scheduler/*` filenames referenced throughout this doc are still valid entry points; the pure logic they describe now lives in the domain core above.
 
 ## Core principle
 
@@ -71,8 +85,11 @@ These resolve remaining ambiguity when the severity hierarchy alone isn't decisi
 
 ### 4. Placement phase — figure out when each task goes
 
-> **Implementation note:** in code (`src/scheduler/unifiedSchedule.js`), these
-> sub-phases are called Phase 0 / Phase 1 / Phase 2 / Phase 3+4 / Phase 5:
+> **Implementation note:** in code (`src/scheduler/unifiedScheduleV2.js` — the
+> live entry; `unifiedSchedule.js` is a one-line re-export shim), these
+> sub-phases are called Phase 0 / Phase 1 / Phase 2 / Phase 3+4 / Phase 5
+> (the per-step telemetry labels emitted by `emitStepRecord` are `V2: Immovable`
+> / `V2: Constrained` / `V2: Unconstrained`):
 > 4a → Phase 0 (fixed + markers), 4b → Phase 1 (recurring, slack-sorted),
 > 4c → Phase 2 (deadline work — slack-based forward placement),
 > 4d → Phase 3 (priority fill) + Phase 4 (flexWhen relaxation),

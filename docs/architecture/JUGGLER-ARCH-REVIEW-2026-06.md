@@ -2,7 +2,7 @@
 type: architecture
 service: juggler
 status: active
-last_updated: 2026-06-09
+last_updated: 2026-06-12
 tags:
   - type/architecture
   - service/juggler
@@ -18,6 +18,31 @@ tags:
 **Method:** Every quantitative claim below was produced by a real command run against the live code on branch `leg/juggler-hex-redesign` and the command is cited inline. The Jan-2026 `JUGGLER-HEX-REVIEW.md` (5 months stale) was **not** trusted for any number; several of its figures are confirmed wrong below (see §5).
 
 > **Headline:** Five months after the Jan-2026 plan, hexagonal execution is still ~5%. Infra-lib scaffolding (`lib/db`, `lib/events`, `lib/logger`) was created 2026-05-28 but is mostly unadopted; the calendar slice is still a README + four empty dirs; and an ESLint boundary config (2026-05-31) guards a slice that doesn't exist. Meanwhile the two largest controllers and the scheduler **grew** in absolute size. The scheduler remains the core, highest-risk domain.
+
+> ## ⚠️ Update 2026-06-12 — superseded by the H0–H6 migration
+>
+> This review is a **point-in-time snapshot dated 2026-06-09**; the numbers below were accurate
+> then and are retained as historical record. Between this review and 2026-06-12 the hexagonal
+> migration was executed phase-by-phase (tracked in [`JUGGLER-HEX-ROADMAP.md`](./JUGGLER-HEX-ROADMAP.md) §3).
+> The following §-claims are now **stale** — do not cite them as current state:
+>
+> - **§2/§4/§6 "scheduler 0% hex / no `ConstraintSolver`·`ScoreEngine` / no ports"** — superseded.
+>   H6 (commits `30e23e5`→`f670368`) extracted the scheduler into a full hexagonal slice at
+>   `src/slices/scheduler/`: pure domain core (`ConstraintSolver`, `ScoreEngine`, `ConflictResolver`
+>   + entities/value-objects), **5 ports** (`TaskProviderPort`, `CalendarProviderPort`,
+>   `WeatherProviderPort`, `ScheduleRepositoryPort`, `ClockPort`), **6 adapters** incl.
+>   `KnexScheduleRepository` (delta-write), `RunScheduleCommand` as sole I/O orchestrator, and
+>   `facade.js` (imported by `routes/schedule.routes.js` + `mcp/tools/schedule.js`). Golden-master
+>   characterization GREEN bit-for-bit before and after.
+> - **§2/§4 "calendar slice = README + empty dirs / other domains 0%"** — superseded. H0 (calendar),
+>   H1 (weather), H3 (task), H4 (user/config), H5 (ai-enrichment) all landed as facade-backed slices.
+> - **§3 infra-libs "mostly unadopted" / §5 "no domain slice implemented"** — superseded by H2
+>   (infra-lib adoption) and H3–H6.
+>
+> What is **still current** from this review: the methodology, the Jan-2026 figure corrections (§5),
+> and the risk ordering (scheduler last). For live migration state always defer to
+> `JUGGLER-HEX-ROADMAP.md` §3 (per-phase COMPLETE markers). Only **H7 cleanup** (delete `src/db.js`,
+> per-slice eslint rules, legacy-entry retirement) remains open.
 
 ---
 

@@ -2,7 +2,7 @@
 type: architecture
 service: juggler
 status: active
-version: leg/juggler-hex-h6-scheduler @ 2026-06-12 (H5 COMPLETE — H2/H3/H4/H5 all merged; H6 W0 golden-master in progress)
+version: leg/juggler-hex-h6-scheduler @ 2026-06-12 (H0–H6 all COMPLETE — scheduler slice merged W1–W4, commits 30e23e5→f670368; only H7 cleanup remains)
 last_updated: 2026-06-12
 tags:
   - type/architecture
@@ -383,7 +383,7 @@ flowchart TD
 | **Wave 2** | H2 ✅ | Finish the infra layer the heavy slices depend on | lib-config + lib-cache exist; lib-events adopted; db.js importers < 35 — **COMPLETE** (bc6e437) |
 | **Wave 3** | H3 ✅ | Task slice (publishes events the scheduler needs) | Task characterization suite green before+after; task facade live — **COMPLETE** (1ac024f) |
 | **Wave 4** | H4 ✅, H5 ✅ | Remaining non-core slices (parallelizable — both depend on H2+H3, not each other) | Both facades merged; SDK-leak grep = 0 — **COMPLETE** (ba8d6ca + d87d592 + cc61029 + 29401dc) |
-| **Wave 5** | H6 | Scheduler core (LAST) | Golden-master green before+after; all S/P invariants pinned |
+| **Wave 5** | H6 ✅ | Scheduler core (LAST) | Golden-master green before+after; all S/P invariants pinned — **COMPLETE** (30e23e5→f670368) |
 | **Wave 6** | H7 | Cleanup; delete `src/db.js` | 0 `db.js` importers |
 
 H4 and H5 are the only phases that may run in parallel (same upstreams, no edge between them).
