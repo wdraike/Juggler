@@ -56,8 +56,8 @@
  *
  * ── DB NOTES ──────────────────────────────────────────────────────────────────
  *   B4 is pure-unit (mocked enqueue spy — no Docker needed).
- *   B5 uses test-bed MySQL on 3407 (tmpfs, ephemeral). Skipped automatically
- *   when DB unavailable (isAvailable() guard in beforeAll).
+ *   B5 uses test-bed MySQL on 3407 (tmpfs, ephemeral). Hard-fails via
+ *   assertDbAvailable() [TEST-FR-001] when test-bed is unavailable — never silently skips.
  *
  * ── DETERMINISM ───────────────────────────────────────────────────────────────
  *   Timing-sensitive tests use a hanging client + AbortSignal-aware client so
@@ -69,6 +69,8 @@
 'use strict';
 
 process.env.NODE_ENV = 'test';
+
+const { assertDbAvailable } = require('../../helpers/requireDB');
 
 // ── Top-level mock: ai-usage-queue.service ────────────────────────────────────
 // Must be declared at module scope so Jest's babel hoisting can reference it
@@ -244,20 +246,17 @@ describe('B5 — timed-out call must NOT consume the user daily quota slot', () 
   });
 
   beforeEach(async () => {
-    if (!dbAvailable) return;
     // Clean slate before each test.
+    // (DB-down tests throw [TEST-FR-001] in-body before reaching any DB call here.)
+    if (!dbAvailable) return;
     await testDb('ai_command_log').where('user_id', TEST_USER_ID).del();
   });
 
   test(
     'B5-red [EXPECT-RED]: timed-out call — checkQuota (no insert) + no commitQuota → 0 rows in ai_command_log',
     async () => {
-      if (!dbAvailable) {
-        // Skip rather than fail when test-bed is not up.
-        // Run with: cd test-bed && make up && make test-juggler
-        console.warn('B5-red: test-bed DB not available — skipping (run cd test-bed && make up)');
-        return;
-      }
+      // TEST-FR-001: throw loud if the required DB is unreachable (never silent-skip).
+      await assertDbAvailable();
 
       // Step 1: Call checkQuota. On allow, it returns { allowed: true } WITHOUT inserting.
       // On current code (no split): repo.checkQuota is undefined → TypeError → FAILS RED.
@@ -294,10 +293,8 @@ describe('B5 — timed-out call must NOT consume the user daily quota slot', () 
   test(
     'B5-guard [GUARD-GREEN]: successful call — checkQuota (no insert) THEN commitQuota (insert) → exactly 1 row',
     async () => {
-      if (!dbAvailable) {
-        console.warn('B5-guard: test-bed DB not available — skipping');
-        return;
-      }
+      // TEST-FR-001: throw loud if the required DB is unreachable (never silent-skip).
+      await assertDbAvailable();
 
       // Non-regression guard: a successful call must consume exactly 1 quota slot.
       // This test is RED on current code (no commitQuota method) and GREEN post-fix.
