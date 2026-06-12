@@ -16,7 +16,7 @@
  *   S4  — scheduler core does not import scheduleQueue (static require-graph assertion)
  *   S5  — delta-write count == number of tasks whose placement actually changed (RED until W2)
  *   S6  — enqueueScheduleRun is NOT called during a full scheduler run
- *   P1  — updated_at in runSchedule.js writes use db.fn.now() (characterize current behavior)
+ *   P1  — runSchedule.js has ZERO inline fn.now(); writes use new Date() via the repository (W3 migration complete)
  *   C-IDEM — back-to-back runs on stable input → 0 DB changes (RED until W2 delta-write)
  *   C-SCORE — scoreSchedule {total, breakdown} snapshot against fixed fixture
  *   C-WX    — weatherOk fail-open: no weather data → task IS placed, not blocked
@@ -729,6 +729,13 @@ describe('S5 — delta-write-count: only changed tasks are written (GREEN — W2
   const testDb = require('../../helpers/testDb');
   let db;
 
+  // ── ISOLATION: unique user per describe (isolation fix — 2026-06-12) ────────
+  // Each DB-backed describe gets its own user_id so that beforeEach cleanup and
+  // seed operations are fully scoped and cannot interfere with sibling describes
+  // regardless of execution order or --runInBand. Never use 'test-user-001'
+  // across multiple DB-backed describes in the same file.
+  const S5_USER = 'test-user-s5';
+
   // ── Seed state — set in beforeEach, read in it.failing bodies ────────────
   // s5-test-1 seed state
   let s5t1_before = null;
@@ -744,19 +751,29 @@ describe('S5 — delta-write-count: only changed tasks are written (GREEN — W2
     // This throw propagates OUTSIDE any it.failing() wrapper.
     await assertDbAvailable();
     db = testDb.getDb();
-    await testDb.cleanup();
-    await testDb.seedUser();
+    // Scope cleanup + seedUser to S5_USER only — never call testDb.cleanup()
+    // (which wipes ALL users) to avoid cross-describe interference.
+    await db('task_instances').where('user_id', S5_USER).del();
+    await db('task_masters').where('user_id', S5_USER).del();
+    await db('users').where('id', S5_USER).del();
+    await testDb.seedUser({ id: S5_USER, email: 'test-s5@test.com', name: 'S5 User' });
   }, 15000);
 
   afterAll(async () => {
-    await testDb.cleanup();
-    await testDb.destroy();
+    // Cleanup this describe's rows only. Do NOT call testDb.destroy() here —
+    // the singleton connection is shared with C-IDEM integration and other describes
+    // in this file. Destroying it mid-suite closes the connection before sibling
+    // describes run, causing FK errors and undefined-connection failures.
+    // The connection is closed by Jest's forceExit or the global teardown.
+    await db('task_instances').where('user_id', S5_USER).del();
+    await db('task_masters').where('user_id', S5_USER).del();
+    await db('users').where('id', S5_USER).del();
   });
 
   beforeEach(async () => {
-    // Clean slate for each test.
-    await db('task_instances').where('user_id', 'test-user-001').del();
-    await db('task_masters').where('user_id', 'test-user-001').del();
+    // Clean slate for each test — scoped to S5_USER only.
+    await db('task_instances').where('user_id', S5_USER).del();
+    await db('task_masters').where('user_id', S5_USER).del();
     s5t1_before = null;
     s5t2_beforeStable = null;
   });
@@ -802,6 +819,7 @@ describe('S5 — delta-write-count: only changed tasks are written (GREEN — W2
       // task_instances.time is a MySQL TIME column — omit display-format times.
       await testDb.seedTask({
         id: 's5-already-placed',
+        user_id: S5_USER,
         text: 'Placed by run-1, stable for run-2',
         status: '',
         dur: 30,
@@ -813,7 +831,7 @@ describe('S5 — delta-write-count: only changed tasks are written (GREEN — W2
       const { runScheduleAndPersist } = require('../../../src/scheduler/runSchedule');
 
       // Run-1: canonicalize placement to exactly what the scheduler decides.
-      await runScheduleAndPersist('test-user-001', undefined, { timezone: 'UTC' });
+      await runScheduleAndPersist(S5_USER, undefined, { timezone: 'UTC' });
       var afterRun1 = await db('task_instances').where('id', 's5-already-placed').first();
       // SANITY: task was placed (scheduled_at set) → scheduler reached the write path.
       expect(afterRun1.scheduled_at).not.toBeNull();
@@ -823,7 +841,7 @@ describe('S5 — delta-write-count: only changed tasks are written (GREEN — W2
       await new Promise(function(resolve) { setTimeout(resolve, 1100); });
 
       // Run-2: the row already equals the computed placement → delta-write skips it.
-      await runScheduleAndPersist('test-user-001', undefined, { timezone: 'UTC' });
+      await runScheduleAndPersist(S5_USER, undefined, { timezone: 'UTC' });
       var afterRun2 = await db('task_instances').where('id', 's5-already-placed').first();
 
       // TARGET (delta-write): run-2 writes nothing → updated_at unchanged from run-1.
@@ -850,12 +868,12 @@ describe('S5 — delta-write-count: only changed tasks are written (GREEN — W2
       const { runScheduleAndPersist } = require('../../../src/scheduler/runSchedule');
 
       // 3 new tasks (scheduled_at null → assigned by run-1 = the "changed → written" half).
-      await testDb.seedTask({ id: 's5-a', text: 'A', status: '', dur: 30, pri: 'P2', scheduled_at: null, date: TODAY });
-      await testDb.seedTask({ id: 's5-b', text: 'B', status: '', dur: 30, pri: 'P2', scheduled_at: null, date: TODAY });
-      await testDb.seedTask({ id: 's5-c', text: 'C', status: '', dur: 30, pri: 'P2', scheduled_at: null, date: TODAY });
+      await testDb.seedTask({ id: 's5-a', user_id: S5_USER, text: 'A', status: '', dur: 30, pri: 'P2', scheduled_at: null, date: TODAY });
+      await testDb.seedTask({ id: 's5-b', user_id: S5_USER, text: 'B', status: '', dur: 30, pri: 'P2', scheduled_at: null, date: TODAY });
+      await testDb.seedTask({ id: 's5-c', user_id: S5_USER, text: 'C', status: '', dur: 30, pri: 'P2', scheduled_at: null, date: TODAY });
 
       // Run-1: places all 3 (3 writes).
-      await runScheduleAndPersist('test-user-001', undefined, { timezone: 'UTC' });
+      await runScheduleAndPersist(S5_USER, undefined, { timezone: 'UTC' });
       var run1 = {};
       for (const id of ['s5-a', 's5-b', 's5-c']) {
         var r = await db('task_instances').where('id', id).first();
@@ -867,7 +885,7 @@ describe('S5 — delta-write-count: only changed tasks are written (GREEN — W2
       await new Promise(function(resolve) { setTimeout(resolve, 1100); });
 
       // Run-2: identical input — every row already equals its placement → 0 writes.
-      await runScheduleAndPersist('test-user-001', undefined, { timezone: 'UTC' });
+      await runScheduleAndPersist(S5_USER, undefined, { timezone: 'UTC' });
 
       // TARGET (delta-write): NO row's updated_at advances on run-2.
       for (const id of ['s5-a', 's5-b', 's5-c']) {
@@ -941,33 +959,74 @@ describe('S6 — no-cascade: enqueueScheduleRun NOT called during scheduler run'
 // TRACEABILITY: P1
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('P1 — characterize current updated_at write behavior in runSchedule.js', () => {
-  test('runSchedule.js source contains db.fn.now() calls for updated_at (characterizes current behavior)', () => {
-    // This test pins the CURRENT behavior so W2 can be proven equivalent.
-    // When W2 KnexScheduleRepository switches to new Date(), this test should be
-    // UPDATED (not broken) — the point is to characterize where the violations are,
-    // not to assert the violation must remain.
+describe('P1 — migration complete: runSchedule.js has 0 inline fn.now(); writes use new Date() via the repository', () => {
+  // W3 UPDATE (was: pin the CURRENT ~19 db.fn.now() violations). The H6 W3
+  // persist-repoint moved every scheduler DB write into the W2
+  // KnexScheduleRepository (writeChanged / deleteTasksWhere /
+  // backfillRollingAnchorIfNull / now) and replaced every inline
+  // db.fn.now()/trx.fn.now() with a JS new Date() (via RunScheduleCommand.clockNow()
+  // → ClockPort). This test now asserts the MIGRATION IS DONE: ZERO inline fn.now()
+  // calls in runSchedule.js CODE, and the repository stamps timestamps with new Date().
+  // This stays a meaningful pin (P1 / ADR-0003): re-introducing an inline fn.now()
+  // in runSchedule.js, or removing the new Date() stamp from the repository, fails it.
+  test('runSchedule.js source contains ZERO inline fn.now() calls (P1 migration complete)', () => {
     var fs = require('fs');
     var path = require('path');
     var src = fs.readFileSync(
       path.resolve(__dirname, '../../../src/scheduler/runSchedule.js'),
       'utf8'
     );
-    // Count the occurrences of db.fn.now() and trx.fn.now() in the file.
-    var dbFnNow  = (src.match(/db\.fn\.now\(\)/g) || []).length;
-    var trxFnNow = (src.match(/trx\.fn\.now\(\)/g) || []).length;
+    // Strip line comments so the 4 surviving explanatory mentions of "db.fn.now()"
+    // in comments do not count — only EXECUTABLE fn.now() calls are a P1 violation.
+    var codeOnly = src
+      .split('\n')
+      .map(function(line) {
+        var idx = line.indexOf('//');
+        return idx >= 0 ? line.slice(0, idx) : line;
+      })
+      .join('\n');
+
+    var dbFnNow  = (codeOnly.match(/db\.fn\.now\(\)/g) || []).length;
+    var trxFnNow = (codeOnly.match(/trx\.fn\.now\(\)/g) || []).length;
     var total = dbFnNow + trxFnNow;
 
-    // INTAKE-BRIEF.json documents 19 violations. Pin the current count here.
-    // SELF-MUTATION: if a developer removes one fn.now() call without updating this test,
-    // the count drops and this assertion catches the change.
-    // W2 task: this count should reach 0 in KnexScheduleRepository.
-    expect(total).toBeGreaterThanOrEqual(15); // current: ~19 violations (may vary slightly)
-    expect(total).toBeLessThanOrEqual(25); // sanity cap
+    // SELF-MUTATION: adding ANY inline (db|trx).fn.now() to runSchedule.js code
+    // makes total > 0 and fails this assertion (the P1/ADR-0003 invariant).
+    expect(total).toBe(0);
+    // And no executable `updated_at: (db|trx).fn.now()` remains.
+    expect(codeOnly).not.toMatch(/updated_at:\s*(db|trx)\.fn\.now\(\)/);
+  });
 
-    // Specifically characterize: updated_at uses fn.now() not new Date().
-    // These are the exact lines the INTAKE-BRIEF identified.
-    expect(src).toMatch(/updated_at:\s*(db|trx)\.fn\.now\(\)/);
+  test('KnexScheduleRepository stamps timestamps with new Date() (via clock), never the Knex now-builder', () => {
+    var fs = require('fs');
+    var path = require('path');
+    var repoSrc = fs.readFileSync(
+      path.resolve(__dirname, '../../../src/slices/scheduler/adapters/KnexScheduleRepository.js'),
+      'utf8'
+    );
+    // The repository is the SOLE owner of scheduler timestamp writes (P1). It must
+    // NOT contain any (db|trx).fn.now() — and its default clock returns new Date().
+    var repoCodeOnly = repoSrc
+      .split('\n')
+      .map(function(line) { var i = line.indexOf('//'); return i >= 0 ? line.slice(0, i) : line; })
+      .join('\n');
+    expect(repoCodeOnly).not.toMatch(/\.fn\.now\(\)/);
+    // The default clock is a JS new Date() source (the P1 stamp).
+    expect(repoSrc).toMatch(/now:\s*function\s*\(\)\s*\{\s*return\s+new Date\(\)/);
+
+    // Behavioral proof: the default-constructed repository's clock returns a JS Date.
+    var KnexScheduleRepository = require('../../../src/slices/scheduler/adapters/KnexScheduleRepository');
+    var repo = new KnexScheduleRepository({ db: {}, tasksWrite: {} });
+    expect(repo.clock.now()).toBeInstanceOf(Date);
+  });
+
+  test('RunScheduleCommand.clockNow() returns a JS Date (the P1 stamp the persist path uses), never a Knex builder', () => {
+    var RunScheduleCommand = require('../../../src/slices/scheduler/application/RunScheduleCommand');
+    var cmd = new RunScheduleCommand();
+    var stamp = cmd.clockNow();
+    expect(stamp).toBeInstanceOf(Date);
+    // It is a real timestamp, not a Knex raw expression object.
+    expect(typeof stamp.toISOString).toBe('function');
   });
 
   test('P1 — unifiedScheduleV2.js does NOT write to DB at all (pure function, no DB I/O)', () => {
@@ -1161,6 +1220,13 @@ describe('C-IDEM integration — beforeAll/beforeEach outside it.failing', () =>
   const testDb2 = require('../../helpers/testDb');
   let db2;
 
+  // ── ISOLATION: unique user per describe (isolation fix — 2026-06-12) ────────
+  // Each DB-backed describe gets its own user_id so that beforeEach cleanup and
+  // seed operations are fully scoped and cannot interfere with sibling describes
+  // regardless of execution order or --runInBand. Never use 'test-user-001'
+  // across multiple DB-backed describes in the same file.
+  const CIDEM_USER = 'test-user-cidem';
+
   // Capture the state that needs to survive from beforeEach into the it.failing body.
   // Set in beforeEach (outside it.failing), read in it.failing (inside).
   let cidem_updatedAtAfterRun1 = null;
@@ -1170,19 +1236,29 @@ describe('C-IDEM integration — beforeAll/beforeEach outside it.failing', () =>
     // Propagates OUTSIDE it.failing — never silently inverted.
     await assertDbAvailable();
     db2 = testDb2.getDb();
-    await testDb2.cleanup();
-    await testDb2.seedUser();
+    // Scope cleanup + seedUser to CIDEM_USER only — never call testDb2.cleanup()
+    // (which wipes ALL users) to avoid cross-describe interference.
+    await db2('task_instances').where('user_id', CIDEM_USER).del();
+    await db2('task_masters').where('user_id', CIDEM_USER).del();
+    await db2('users').where('id', CIDEM_USER).del();
+    await testDb2.seedUser({ id: CIDEM_USER, email: 'test-cidem@test.com', name: 'CIDEM User' });
   }, 15000);
 
   afterAll(async () => {
-    await testDb2.cleanup();
-    await testDb2.destroy();
+    // Cleanup this describe's rows only. Do NOT call testDb2.destroy() here —
+    // the singleton connection is shared with S5 and other describes in this file.
+    // Destroying it mid-suite closes the connection before sibling describes can
+    // finish their cleanup, causing FK errors and undefined-connection failures.
+    // The connection is closed by Jest's forceExit or the global teardown.
+    await db2('task_instances').where('user_id', CIDEM_USER).del();
+    await db2('task_masters').where('user_id', CIDEM_USER).del();
+    await db2('users').where('id', CIDEM_USER).del();
   });
 
   beforeEach(async () => {
-    // Clean slate.
-    await db2('task_instances').where('user_id', 'test-user-001').del();
-    await db2('task_masters').where('user_id', 'test-user-001').del();
+    // Clean slate — scoped to CIDEM_USER only.
+    await db2('task_instances').where('user_id', CIDEM_USER).del();
+    await db2('task_masters').where('user_id', CIDEM_USER).del();
     cidem_updatedAtAfterRun1 = null;
 
     // Seed a task that is ALREADY at its correct scheduled_at.
@@ -1192,14 +1268,14 @@ describe('C-IDEM integration — beforeAll/beforeEach outside it.failing', () =>
     // the placement time fully.
     const correctTime = '2026-06-16 12:00:00';
     await testDb2.seedTask({
-      id: 'idem-db-001', text: 'Already placed stable task',
+      id: 'idem-db-001', user_id: CIDEM_USER, text: 'Already placed stable task',
       status: '', dur: 30, pri: 'P2',
       scheduled_at: correctTime, date: TODAY
     });
 
     // Run 1 here (outside it.failing) so a run-1 failure is a hard setup error.
     const { runScheduleAndPersist } = require('../../../src/scheduler/runSchedule');
-    await runScheduleAndPersist('test-user-001', undefined, { timezone: 'UTC' });
+    await runScheduleAndPersist(CIDEM_USER, undefined, { timezone: 'UTC' });
 
     // Capture updated_at after run-1 (outside it.failing — hard error if missing).
     var afterRun1 = await db2('task_instances').where('id', 'idem-db-001').first();
@@ -1219,7 +1295,7 @@ describe('C-IDEM integration — beforeAll/beforeEach outside it.failing', () =>
     async () => {
       // Run 2: identical input. Delta-write → 0 writes. Write-all → updated_at bumped.
       const { runScheduleAndPersist } = require('../../../src/scheduler/runSchedule');
-      await runScheduleAndPersist('test-user-001', undefined, { timezone: 'UTC' });
+      await runScheduleAndPersist(CIDEM_USER, undefined, { timezone: 'UTC' });
 
       var afterRun2 = await db2('task_instances').where('id', 'idem-db-001').first();
 

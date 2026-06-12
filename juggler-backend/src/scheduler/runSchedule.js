@@ -100,6 +100,13 @@ var _taskProvider = new SchedulerTaskProvider();
 var rowToTask = _taskProvider.rowToTask;
 var buildSourceMap = _taskProvider.buildSourceMap;
 var taskToRow = _taskProvider.taskToRow;
+// H6 / W3 — the sole persist I/O orchestrator. Every scheduler DB write below
+// routes through this command's W2 adapters (writeChanged / deleteTasksWhere /
+// backfillRollingAnchorIfNull / now); the inline knex flush + the 19 inline
+// db.fn.now() are gone (P1). The command NEVER imports scheduleQueue (S4/S6) —
+// deadlock-retry + sync-lock stay here in runScheduleAndPersist / its caller.
+var RunScheduleCommand = require('../slices/scheduler/application/RunScheduleCommand');
+var _runScheduleCommand = new RunScheduleCommand();
 var expandRecurringShared = require('../../../shared/scheduler/expandRecurring');
 var expandRecurring = expandRecurringShared.expandRecurring;
 var reconcile = require('./reconcileOccurrences');
@@ -489,10 +496,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
   });
   if (_rollingBackfills.length > 0) {
     var _backfillCounts = await Promise.all(_rollingBackfills.map(function(b) {
-      return trx('task_masters')
-        .where({ id: b.id, user_id: userId })
-        .whereNull('rolling_anchor')
-        .update({ rolling_anchor: b.anchor, updated_at: trx.fn.now() });
+      // H6 / W3: rolling-anchor backfill via the repository (updated_at = new
+      // Date(), P1 — the legacy trx.fn.now() corrected). T-TX: trx-bound.
+      return _runScheduleCommand.backfillRollingAnchor(trx, userId, b.id, b.anchor);
     }));
     var _backfillActual = _backfillCounts.reduce(function(s, n) { return s + (n || 0); }, 0);
     logger.info('[SCHED] rolling_anchor backfill: ' + _backfillActual + '/' + _rollingBackfills.length + ' written: ' +
@@ -877,8 +883,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
   if (toDeleteIds.length > 0) {
     // Use db (not trx) so this persists even if the deletion transaction rolls
     // back on lock timeout — the safety-net flag must survive a rollback.
-    await db('task_instances').whereIn('id', toDeleteIds).update({ unscheduled: 1, updated_at: db.fn.now() });
-    await tasksWrite.deleteTasksWhere(trx, userId, function(q) { return q.whereIn('id', toDeleteIds); });
+    await db('task_instances').whereIn('id', toDeleteIds).update({ unscheduled: 1, updated_at: _runScheduleCommand.clockNow() });
+    await _runScheduleCommand.deleteTasksWhere(trx, userId, function(q) { return q.whereIn('id', toDeleteIds); });
     logger.info('[SCHED] reconcile: deleted ' + toDeleteIds.length + ' stale recurring instances');
     reconcileChanged = true;
   }
@@ -892,7 +898,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     for (var dci = 0; dci < toUpdate.length; dci += DRIFT_CHUNK) {
       var driftChunk = toUpdate.slice(dci, dci + DRIFT_CHUNK);
       var driftIds = driftChunk.map(function(u) { return u.id; });
-      var driftFields = { updated_at: db.fn.now() };
+      var driftFields = { updated_at: _runScheduleCommand.clockNow() };
       ['split_ordinal', 'split_total', 'dur'].forEach(function(col) {
         var touched = driftChunk.filter(function(u) { return u.changes[col] != null; });
         if (touched.length === 0) return;
@@ -1000,8 +1006,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
         time: null,
         unscheduled: null,
         status: '',
-        created_at: trx.fn.now(),
-        updated_at: trx.fn.now()
+        created_at: _runScheduleCommand.clockNow(),
+        updated_at: _runScheduleCommand.clockNow()
       };
     });
     // Defensive dedup: detect any IDs already in DB before inserting.
@@ -1022,8 +1028,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
     }
     // Populate for changeset projection — taskRows was loaded before this INSERT
     // so rowsById won't have these rows; phase1InsertedById fills the gap.
-    // Use an ISO string for created_at/updated_at: the DB rows use trx.fn.now()
-    // (a Knex raw expression) which is valid SQL but breaks new Date() in rowToTask.
+    // Use an ISO string for created_at/updated_at here: the DB rows were stamped
+    // with a JS Date (H6/W3 P1: _runScheduleCommand.clockNow()); rowToTask wants a
+    // parseable string for the changeset projection, so normalize to ISO.
     var nowISO = new Date().toISOString();
     chunkInsertRows.forEach(function(r) {
       phase1InsertedById[r.id] = Object.assign({}, r, { created_at: nowISO, updated_at: nowISO });
@@ -1329,7 +1336,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       var pinnedPlacedDur = placement.dur;
       var pinnedStoredDur = Number(original.dur) || 0;
       if (pinnedPlacedDur && pinnedPlacedDur !== pinnedStoredDur) {
-        pendingUpdates.push({ id: taskId, dbUpdate: { dur: pinnedPlacedDur, updated_at: db.fn.now() } });
+        pendingUpdates.push({ id: taskId, dbUpdate: { dur: pinnedPlacedDur, updated_at: _runScheduleCommand.clockNow() } });
       }
       continue;
     }
@@ -1382,7 +1389,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       time: newTime || null,
       unscheduled: null,
       overdue: 0,
-      updated_at: db.fn.now()
+      updated_at: _runScheduleCommand.clockNow()
     };
     // Don't overwrite instance.dur when time_remaining drives the effective
     // placement duration. The instance.dur represents the user-set total chunk
@@ -1488,7 +1495,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       var rawRec = rawRowById[t.id];
       var hasScheduledAt = rawRec ? !!rawRec.scheduled_at : !!original.scheduledAt;
       if (hasScheduledAt) return;
-      var unplacedChunkUpdate = { unscheduled: 1, updated_at: db.fn.now() };
+      var unplacedChunkUpdate = { unscheduled: 1, updated_at: _runScheduleCommand.clockNow() };
       if (result.slackByTaskId && t.id in result.slackByTaskId) {
         unplacedChunkUpdate.slack_mins = result.slackByTaskId[t.id];
       }
@@ -1512,7 +1519,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
         var _aDeadlinePassed = _aDeadlineKey && _aDeadlineKey < timeInfo.todayKey;
         if (!_aInPast && !_aDeadlinePassed) {
           if (rawRow && rawRow.overdue) {
-            pendingUpdates.push({ id: t.id, dbUpdate: { overdue: 0, updated_at: db.fn.now() } });
+            pendingUpdates.push({ id: t.id, dbUpdate: { overdue: 0, updated_at: _runScheduleCommand.clockNow() } });
           }
           cleared++;
           return;
@@ -1541,7 +1548,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
         // Newly overdue OR unscheduled flag needs fixing.
         overdueDbUpdate.unscheduled = 0;
         overdueDbUpdate.overdue = 1;
-        overdueDbUpdate.updated_at = db.fn.now();
+        overdueDbUpdate.updated_at = _runScheduleCommand.clockNow();
         if (result.slackByTaskId && t.id in result.slackByTaskId) {
           overdueDbUpdate.slack_mins = result.slackByTaskId[t.id];
         }
@@ -1566,7 +1573,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       }
     } else {
       // Case C: never placed — move to unscheduled lane.
-      var unplacedDbUpdate = { unscheduled: 1, updated_at: db.fn.now() };
+      var unplacedDbUpdate = { unscheduled: 1, updated_at: _runScheduleCommand.clockNow() };
       if (result.slackByTaskId && t.id in result.slackByTaskId) {
         unplacedDbUpdate.slack_mins = result.slackByTaskId[t.id];
       }
@@ -1589,7 +1596,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var raw = rawRowById[t.id];
     if (!raw || !raw.unscheduled) return; // already clear
     if (!raw.scheduled_at) return; // truly nothing to show on calendar
-    pendingUpdates.push({ id: t.id, dbUpdate: { unscheduled: null, updated_at: db.fn.now() } });
+    pendingUpdates.push({ id: t.id, dbUpdate: { unscheduled: null, updated_at: _runScheduleCommand.clockNow() } });
   });
 
   // 8.6. Clear stale overdue flag on tasks that were overdue in the DB but are
@@ -1599,7 +1606,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   taskRows.forEach(function(r) {
     if (!r.overdue) return; // already clear in DB — nothing to do
     if (unplacedIds[r.id]) return; // still unplaced — §8 handles this
-    pendingUpdates.push({ id: r.id, dbUpdate: { overdue: 0, updated_at: db.fn.now() } });
+    pendingUpdates.push({ id: r.id, dbUpdate: { overdue: 0, updated_at: _runScheduleCommand.clockNow() } });
   });
 
   // 9. Move remaining past-dated tasks to today
@@ -1645,14 +1652,14 @@ async function runScheduleAndPersist(userId, _retries, options) {
         // of the task's intended date — it's when the occurrence was supposed to happen.
         var missedAt = windowClose
           || localToUtc(t.date, '12:00 AM', TIMEZONE)
-          || db.fn.now();
+          || _runScheduleCommand.clockNow();
         pendingUpdates.push({
           id: t.id,
           dbUpdate: {
             status: 'missed',
             scheduled_at: missedAt,
             completed_at: missedAt,
-            updated_at: db.fn.now()
+            updated_at: _runScheduleCommand.clockNow()
           }
         });
         updatedTasks.push({
@@ -1668,7 +1675,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
           id: t.id,
           dbUpdate: {
             scheduled_at: todayMidnight,
-            updated_at: db.fn.now()
+            updated_at: _runScheduleCommand.clockNow()
           }
         });
       }
@@ -1688,92 +1695,22 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // flow through pendingUpdates as UPDATEs like any other recurring instance.
   logger.info('[SCHED] persist: ' + inMemoryChunks.length + ' pre-inserted chunks updating via pendingUpdates');
 
-  // Execute updates in batches to avoid long-running single-row UPDATEs.
-  // Group by identical dbUpdate shape, then batch with CASE expressions.
+  // H6 / W3 — flush the changed-rows delta through the SOLE delta-write impl
+  // (RunScheduleCommand → KnexScheduleRepository.writeChanged). The inline knex
+  // flush (the batched scheduled_at/dur CASE update chunked at 200 + the per-row
+  // otherUpdates loop + the 200-chunk constant + the updated_at db.fn.now())
+  // moved INTO the repository verbatim — there is now ONE delta-write impl, not
+  // two. The S5 skip (placementMatchesDbRow above) already excluded unchanged
+  // rows from pendingUpdates, so this writes only what changed. T-TX: trx-bound,
+  // so it commits/rolls back with the caller's transaction. instanceOnly:true
+  // preserves the legacy "never overwrite user-set master.dur" routing.
   logger.info('[SCHED] executing ' + pendingUpdates.length + ' DB updates');
-  pendingUpdates.sort(function(a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0; });
-
-  // Batch scheduled_at + dur updates (the most common case)
-  var scheduledAtUpdates = [];
-  var otherUpdates = [];
-  pendingUpdates.forEach(function(pu) {
-    if ((pu.dbUpdate.scheduled_at || pu.dbUpdate.dur) && !pu.dbUpdate.status) {
-      scheduledAtUpdates.push(pu);
-    } else {
-      otherUpdates.push(pu);
-    }
-  });
-
-  // Batch scheduled_at + dur updates in chunks of 200 using CASE expressions
-  var CHUNK = 200;
-  for (var ci = 0; ci < scheduledAtUpdates.length; ci += CHUNK) {
-    var chunk = scheduledAtUpdates.slice(ci, ci + CHUNK);
-    var ids = chunk.map(function(pu) { return pu.id; });
-
-    var updateFields = { unscheduled: null, overdue: 0, updated_at: db.fn.now() };
-
-    // Build CASE for scheduled_at (only include tasks that have a new scheduled_at)
-    var saChunk = chunk.filter(function(pu) { return !!pu.dbUpdate.scheduled_at; });
-    if (saChunk.length > 0) {
-      var saCaseExpr = 'CASE id';
-      var saBindings = [];
-      saChunk.forEach(function(pu) {
-        saCaseExpr += ' WHEN ? THEN ?';
-        saBindings.push(pu.id, pu.dbUpdate.scheduled_at);
-      });
-      saCaseExpr += ' ELSE scheduled_at END';
-      updateFields.scheduled_at = trx.raw(saCaseExpr, saBindings);
-    }
-
-    // Build CASE for dur (only include tasks that have a new dur)
-    var durChunk = chunk.filter(function(pu) { return !!pu.dbUpdate.dur; });
-    if (durChunk.length > 0) {
-      var durCaseExpr = 'CASE id';
-      var durBindings = [];
-      durChunk.forEach(function(pu) {
-        durCaseExpr += ' WHEN ? THEN ?';
-        durBindings.push(pu.id, pu.dbUpdate.dur);
-      });
-      durCaseExpr += ' ELSE dur END';
-      updateFields.dur = trx.raw(durCaseExpr, durBindings);
-    }
-
-    // Build CASE for date/day/time (keep DB in sync with scheduled_at)
-    var dateChunk = chunk.filter(function(pu) { return pu.dbUpdate.date != null; });
-    if (dateChunk.length > 0) {
-      var dateCaseExpr = 'CASE id'; var dateBindings = [];
-      var dayCaseExpr = 'CASE id'; var dayBindings = [];
-      var timeCaseExpr = 'CASE id'; var timeBindings = [];
-      dateChunk.forEach(function(pu) {
-        dateCaseExpr += ' WHEN ? THEN ?'; dateBindings.push(pu.id, pu.dbUpdate.date);
-        dayCaseExpr += ' WHEN ? THEN ?'; dayBindings.push(pu.id, pu.dbUpdate.day || null);
-        timeCaseExpr += ' WHEN ? THEN ?'; timeBindings.push(pu.id, pu.dbUpdate.time || null);
-      });
-      dateCaseExpr += ' ELSE `date` END';
-      dayCaseExpr += ' ELSE `day` END';
-      timeCaseExpr += ' ELSE `time` END';
-      updateFields.date = trx.raw(dateCaseExpr, dateBindings);
-      updateFields.day = trx.raw(dayCaseExpr, dayBindings);
-      updateFields.time = trx.raw(timeCaseExpr, timeBindings);
-    }
-
-    // Route `updateFields` to instances only — the scheduler must not overwrite
-    // user-set master.dur with the effective placement duration (which may be
-    // driven by time_remaining and differ from the original task duration).
-    await tasksWrite.updateTasksWhere(trx, userId, function(q) {
-      return q.whereIn('id', ids);
-    }, updateFields, { instanceOnly: true });
-  }
-
-  // Run remaining updates individually (status changes, unscheduled flags, etc.)
-  for (var pi = 0; pi < otherUpdates.length; pi++) {
-    await tasksWrite.updateTaskById(trx, otherUpdates[pi].id, otherUpdates[pi].dbUpdate, userId);
-  }
+  await _runScheduleCommand.persistDelta(trx, userId, pendingUpdates, { instanceOnly: true });
 
   // Delete merged-out secondary chunk rows. Pre-inserted in Phase 1 but their
   // placement was folded into the primary chunk above.
   if (mergedOutIds.length > 0) {
-    await tasksWrite.deleteTasksWhere(trx, userId, function(q) {
+    await _runScheduleCommand.deleteTasksWhere(trx, userId, function(q) {
       return q.whereIn('id', mergedOutIds);
     });
     logger.info('[SCHED] split-chunk merge: deleted ' + mergedOutIds.length + ' secondary chunk row(s) from DB');
@@ -1792,12 +1729,13 @@ async function runScheduleAndPersist(userId, _retries, options) {
     + ' placed=' + updated);
 
   // 10. Cache the placement result so GET /placements doesn't re-run the scheduler
-  // Use MySQL's clock for generatedAt so it's consistent with tasks.updated_at
-  // (which is also set by db.fn.now()). Node.js Date.now() can lag MySQL by
-  // several seconds on Cloud SQL, making the cache appear stale immediately.
-  var _nowRow = await trx.raw('SELECT NOW(3) as ts');
-  var _dbNow = _nowRow[0][0].ts;
-  var placementCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date(String(_dbNow).replace(' ', 'T') + 'Z').toISOString(), timezone: TIMEZONE, schedulerVersion: SCHEDULER_VERSION };
+  // Use MySQL's clock for generatedAt so it's consistent with tasks.updated_at.
+  // Node.js Date.now() can lag MySQL by several seconds on Cloud SQL, making the
+  // cache appear stale immediately. H6 / W3: the `SELECT NOW(3)` read is surfaced
+  // through RunScheduleCommand.dbNow (→ repository.now) so this path stays free of
+  // raw knex. Returns a JS Date already parsed (the legacy ' '→'T' + 'Z' parse).
+  var _dbNowDate = await _runScheduleCommand.dbNow(trx);
+  var placementCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: _dbNowDate.toISOString(), timezone: TIMEZONE, schedulerVersion: SCHEDULER_VERSION };
   Object.keys(result.dayPlacements).forEach(function(dk) {
     placementCache.dayPlacements[dk] = result.dayPlacements[dk].map(function(p) {
       var entry = { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };
