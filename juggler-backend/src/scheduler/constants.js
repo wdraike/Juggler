@@ -2,7 +2,10 @@
  * Scheduler-relevant constants — CJS port of juggler-frontend/src/state/constants.js
  */
 
-var PRI_RANK = { P1: 100, P2: 80, P3: 50, P4: 20 };
+// PRI_RANK lives in the pure domain leaf so the domain core can require it without
+// triggering the fs.readFileSync side-effect from computeSchedulerHash below.
+// This module re-exports the same frozen object — single source of truth, no duplication.
+var PRI_RANK = require('../slices/scheduler/domain/constants').PRI_RANK;
 
 var TASK_DEFAULTS = {
   where: "anywhere", when: "morning,lunch,afternoon,evening,night",

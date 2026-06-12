@@ -62,15 +62,21 @@ var resolveLocationId = locationHelpers.resolveLocationId;
 
 var { PLACEMENT_MODES } = require('../lib/placementModes');
 
+// H6 W1: the pure ordering/occupancy primitives now live in the scheduler domain
+// core. unifiedScheduleV2 DELEGATES to them so the algorithm has a single source
+// of truth in src/slices/scheduler/domain/. These are byte-identical moves — the
+// golden-master (S1 ordering, occupancy-driven placements) runs through this entry
+// point and pins the behavior. ScoreEngine is reached via scoreSchedule.js (which
+// already delegates), so no second import is needed here.
+var ConstraintSolver = require('../slices/scheduler/domain/logic/ConstraintSolver');
+var ConflictResolver = require('../slices/scheduler/domain/logic/ConflictResolver');
+
 var DAY_START = GRID_START * 60;
 var DAY_END = GRID_END * 60 + 59;
 
-function effectiveDuration(t) {
-  var rd = t.timeRemaining != null ? t.timeRemaining
-         : t.time_remaining != null ? t.time_remaining
-         : t.dur;
-  return Math.min(rd > 0 ? rd : (rd === 0 ? 0 : 30), 720);
-}
+// effectiveDuration — MOVED to ConstraintSolver (H6 W1). Local binding preserves
+// every call site unchanged; behavior is byte-identical.
+var effectiveDuration = ConstraintSolver.effectiveDuration;
 
 // ── Placement reason ──────────────────────────────────────────
 // Look up the display name of the when-block matching this item on a given date.
@@ -106,45 +112,24 @@ function buildPlacementReason(item, isConflict, blockName) {
   return 'Scheduled by priority';
 }
 
-function normalizePri(p) {
-  if (!p) return 'P3';
-  var s = String(p).trim().toUpperCase();
-  if (/^P[1-4]$/.test(s)) return s;
-  if (/^[1-4]$/.test(s)) return 'P' + s;
-  return 'P3';
-}
+// normalizePri — MOVED to ConstraintSolver (→ Priority.normalize) in H6 W1.
+// Local binding preserves call sites; behavior is byte-identical.
+var normalizePri = ConstraintSolver.normalizePri;
 
 // ── Occupancy primitives ────────────────────────────────────────
 // Travel buffers (tb/ta) extend the footprint in both directions so adjacent
 // tasks can't crowd into commute time. isFreeWithTravel rejects the slot if
 // any minute in [start-tb, start+dur+ta) is busy; reserveWithTravel marks
 // that whole range occupied.
-function reserve(occ, start, dur) {
-  var end = Math.min(start + dur, 1440);
-  for (var i = Math.max(0, start); i < end; i++) occ[i] = true;
-}
-function reserveWithTravel(occ, start, dur, tb, ta) {
-  var s = Math.max(0, start - (tb || 0));
-  var e = Math.min(start + dur + (ta || 0), 1440);
-  for (var i = s; i < e; i++) occ[i] = true;
-}
-function rebuildPrefix(occ, psum) {
-  psum[0] = 0;
-  for (var i = 0; i < 1440; i++) {
-    psum[i + 1] = psum[i] + (occ[i] ? 1 : 0);
-  }
-}
-function isFree(occ, start, dur) {
-  var end = Math.min(start + dur, 1440);
-  for (var i = start; i < end; i++) if (occ[i]) return false;
-  return true;
-}
-function isFreeWithTravel(occ, start, dur, tb, ta) {
-  var s = Math.max(0, start - (tb || 0));
-  var e = Math.min(start + dur + (ta || 0), 1440);
-  for (var i = s; i < e; i++) if (occ[i]) return false;
-  return true;
-}
+// Occupancy primitives — MOVED to ConflictResolver (H6 W1). Local bindings keep
+// every call site unchanged; the minute-grid representation is identical, so
+// placements stay bit-for-bit. (`isFree` is currently unused but preserved as a
+// binding to keep the public surface of this module stable.)
+var reserve = ConflictResolver.reserve;
+var reserveWithTravel = ConflictResolver.reserveWithTravel;
+var rebuildPrefix = ConflictResolver.rebuildPrefix;
+var isFree = ConflictResolver.isFree;
+var isFreeWithTravel = ConflictResolver.isFreeWithTravel;
 
 // Hard safety cap. Any task that can't find a slot within a year is almost
 // certainly misconfigured; preventing infinite search here keeps v2 from
@@ -218,45 +203,17 @@ function extendDatesTo(targetIdx, dates, dayWindows, dayBlocks, dayOcc, dayOccPr
 // Returns null when all days are allowed (undefined/empty/'any'), so the caller
 // can treat a null result as "no dow filter" — cheaper than storing the full
 // 7-day set.
-var DOW_CODE_TO_IDX = { U: 0, Su: 0, M: 1, T: 2, W: 3, R: 4, F: 5, Sa: 6, S: 6 };
-function parseDayReq(dayReq) {
-  if (!dayReq || dayReq === 'any') return null;
-  if (dayReq === 'weekday') return { 1: true, 2: true, 3: true, 4: true, 5: true };
-  if (dayReq === 'weekend') return { 0: true, 6: true };
-  var parts = String(dayReq).split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-  if (parts.length === 0) return null;
-  var set = {};
-  var count = 0;
-  parts.forEach(function(p) {
-    if (DOW_CODE_TO_IDX[p] != null) { set[DOW_CODE_TO_IDX[p]] = true; count++; }
-  });
-  if (count === 0 || count >= 7) return null; // no parses recognized or all days → unconstrained
-  return set;
-}
+// parseDayReq (and its DOW_CODE_TO_IDX map) — MOVED to ConstraintSolver (H6 W1).
+// Local binding preserves call sites; behavior is byte-identical.
+var parseDayReq = ConstraintSolver.parseDayReq;
 
 // Recurrence cycle length in days. Used to cap the placement-search window for
 // flexible recurring instances (tpc picks a specific date but the instance can
 // land on any of its allowed days within the cycle). Returns 0 when the
 // recurrence has no natural cycle (e.g. none) so the caller can skip the cap.
-function recurringCycleDays(recur) {
-  if (!recur) return 0;
-  var r = recur;
-  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e) { return 0; } }
-  var type = r && r.type;
-  if (type === 'weekly') return 7;
-  if (type === 'biweekly') return 14;
-  if (type === 'monthly') return 30;
-  if (type === 'daily') return 1;
-  if (type === 'interval') {
-    var every = Number(r.every) || 1;
-    var unit = r.unit || 'days';
-    if (unit === 'days') return every;
-    if (unit === 'weeks') return every * 7;
-    if (unit === 'months') return every * 30;
-    if (unit === 'years') return every * 365;
-  }
-  return 0;
-}
+// recurringCycleDays — MOVED to ConstraintSolver (H6 W1). Local binding preserves
+// call sites; behavior is byte-identical.
+var recurringCycleDays = ConstraintSolver.recurringCycleDays;
 
 // ── Placement item classification ──────────────────────────────
 // Normalizes each task into a compact item with the fields the
@@ -1111,26 +1068,10 @@ function tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, 
   return { slot: null };
 }
 
-function compareItems(a, b) {
-  // Slack asc (Infinity to end).
-  var sa = a.slack == null ? 0 : a.slack;
-  var sb = b.slack == null ? 0 : b.slack;
-  if (sa !== sb) {
-    if (!isFinite(sa) && isFinite(sb)) return 1;
-    if (isFinite(sa) && !isFinite(sb)) return -1;
-    if (sa < sb) return -1;
-    if (sa > sb) return 1;
-  }
-  // Priority asc (P1 < P2 < P3 < P4).
-  if (a.pri < b.pri) return -1;
-  if (a.pri > b.pri) return 1;
-  // Duration desc (longer first).
-  if (a.dur !== b.dur) return b.dur - a.dur;
-  // Deterministic id tiebreak.
-  if (a.id < b.id) return -1;
-  if (a.id > b.id) return 1;
-  return 0;
-}
+// compareItems — the S1 most-constrained→least ordering — MOVED to
+// ConstraintSolver (H6 W1). Local binding preserves the `queue.sort(compareItems)`
+// call site; the comparator is byte-identical (slack asc, pri asc, dur desc, id).
+var compareItems = ConstraintSolver.compareItems;
 
 // ── Inline split placement ────────────────────────────────────
 // Greedy placement for tasks with t.split===true that don't have pre-split
