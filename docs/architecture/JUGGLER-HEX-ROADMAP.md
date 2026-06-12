@@ -281,7 +281,23 @@ Each phase lists goal · work items · entry gate · exit gate · risk. Port/ada
 
 ---
 
-### Phase H6 — Scheduler slice (LAST, highest risk)  *(characterization-gated — see §4)*
+### Phase H6 — Scheduler slice (LAST, highest risk)  *(characterization-gated — see §4)* — ✅ COMPLETE (2026-06-12, leg juggler-hex-h6-scheduler, commits 30e23e5→183d77c→4c6c9c5→36edf79→f670368)
+
+> **Done:** pure ConstraintSolver/ScoreEngine/ConflictResolver core + VOs in `slices/scheduler/domain/`
+> (W1); 5 ports + 6 adapters incl. KnexScheduleRepository (W2); RunScheduleCommand sole I/O orchestrator
+> (W3); `slices/scheduler/facade.js` + 3 callers migrated (W4). Golden-master characterization suite
+> (W0) GREEN bit-for-bit before AND after — 45/45, each invariant mutation-proven (zoe). **S5 delta-write**:
+> user ruled the live write-all ("NEW DESIGN" runSchedule.js:1264) was a deviation → corrected to
+> `writeChanged(delta)` (a deliberate behavioral change; OUTPUT stays bit-for-bit, write-PATTERN changed;
+> sync-safe — cal-sync keys off content-hash, not updated_at). **P1**: 19 inline `db.fn.now()` → `new Date()`
+> (0 live remaining). S1–S8 each pinned. **Scope note:** the lib-events trigger SUBSCRIPTION was NOT wired
+> (verify-wired-only — S4 proven via characterization, RunScheduleCommand stays out of scheduleQueue); the
+> existing enqueueScheduleRun trigger path is unchanged. So backlog 999.331 + 999.333 (lib-events publisher
+> gaps "close in H6 when scheduler subscribes") are NOT closed — deferred to a dedicated event-subscription
+> leg. **H7 carries:** per-slice eslint rule (all 6 slices); legacy `runSchedule.js`/`unifiedScheduleV2.js`
+> thinning; the 3 inline writes (line-886 db-not-trx rollback-survival semantic MUST go into the port
+> contract before moving); src/db.js deletion; move the schedule-routes test mock to the facade once
+> legacy is thinned.
 
 - **Goal:** Extract the **core domain** — 5,370 ln, 42 DB touchpoints — into a pure `ConstraintSolver`
   / `ScoreEngine` / `ConflictResolver` core behind ports, with `RunScheduleCommand` as the sole I/O
