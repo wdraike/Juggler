@@ -57,7 +57,7 @@
  *   DB_NAME=juggler_test NODE_ENV=test \
  *   npx jest --testPathPattern=quotaTOCTOU --verbose
  *
- * Skipped automatically when test-bed is not up (isAvailable() guard).
+ * Hard-fails via assertDbAvailable() [TEST-FR-001] when test-bed is unavailable — never silently skips.
  *
  * ── TRACEABILITY ──────────────────────────────────────────────────────────────
  *   .planning/kermit/juggler-h5-fixes/TRACEABILITY.md B11
@@ -76,6 +76,7 @@
 process.env.NODE_ENV = 'test';
 
 const testDb = require('../../helpers/test-db');
+const { assertDbAvailable } = require('../../helpers/requireDB');
 const KnexAIUsageRepository = require('../../../src/slices/ai-enrichment/adapters/KnexAIUsageRepository');
 
 // Unique user IDs for this suite — avoids collisions with other suites.
@@ -136,8 +137,9 @@ describe('B11 — quota TOCTOU: concurrent acquisitions must not overshoot the 5
   });
 
   beforeEach(async () => {
-    if (!dbAvailable) return;
     // Clean slate before each test — wipe all rows for this user.
+    // (DB-down tests throw [TEST-FR-001] in-body before reaching any DB call here.)
+    if (!dbAvailable) return;
     await testDb('ai_command_log').where('user_id', USER_B11).del();
   });
 
@@ -163,14 +165,8 @@ describe('B11 — quota TOCTOU: concurrent acquisitions must not overshoot the 5
   test(
     'B11-race [EXPECT-RED]: two concurrent acquires at count=49 → at most 50 rows total (currently 51 — TOCTOU)',
     async () => {
-      if (!dbAvailable) {
-        // Skip rather than fail when test-bed is not up.
-        // Run with: cd test-bed && make up && make test-juggler
-        console.warn(
-          'B11-race: test-bed DB not available — skipping. Run: cd test-bed && make up'
-        );
-        return;
-      }
+      // TEST-FR-001: throw loud if the required DB is unreachable (never silent-skip).
+      await assertDbAvailable();
 
       // ── Step 1: Seed 49 rows (one below the cap). ───────────────────────
       await seedRows(USER_B11, SEED_COUNT);
@@ -272,10 +268,8 @@ describe('B11 — quota TOCTOU: concurrent acquisitions must not overshoot the 5
   test(
     'B11-guard [GUARD-GREEN]: single acquire under the limit → exactly 1 row committed',
     async () => {
-      if (!dbAvailable) {
-        console.warn('B11-guard: test-bed DB not available — skipping');
-        return;
-      }
+      // TEST-FR-001: throw loud if the required DB is unreachable (never silent-skip).
+      await assertDbAvailable();
 
       // Start from a clean slate (beforeEach already cleared rows).
       // Seed 48 rows — well under the cap; no risk of denial.
