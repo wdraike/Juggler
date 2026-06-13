@@ -104,6 +104,16 @@ KnexAIUsageRepository.prototype.commitQuota = async function commitQuota(userId)
   await db.transaction(async (trx) => {
     // SELECT FOR UPDATE: acquires an exclusive range lock on this user's rows
     // in idx_ai_command_log_user_time, serializing concurrent commitQuota calls.
+    //
+    // Lock scope + gap-lock blast radius (999.429, cookie W3): InnoDB takes
+    // next-key (row + gap) locks over the scanned (user_id, created_at) range,
+    // so the lock also covers the gap up to the NEXT index entry — which may be
+    // the first row of a neighbouring user_id. A concurrent commitQuota for that
+    // adjacent user can therefore briefly block on this boundary gap. Bounded +
+    // acceptable: the lock is held only for the COUNT+INSERT and released on
+    // commit (sub-ms), and contention requires two users adjacent in the index
+    // committing simultaneously. A cleaner anchor (a dedicated per-user counter
+    // row → point lock, no gap reasoning) is tracked as 999.430.
     const windowStart = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const [lockRow] = await trx.raw(
       'SELECT COUNT(*) AS cnt FROM `ai_command_log`' +
