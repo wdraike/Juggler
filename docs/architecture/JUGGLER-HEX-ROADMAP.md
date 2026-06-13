@@ -2,8 +2,8 @@
 type: architecture
 service: juggler
 status: active
-version: leg/juggler-hex-h6-scheduler @ 2026-06-12 (H0–H6 all COMPLETE — scheduler slice merged W1–W4, commits 30e23e5→f670368; only H7 cleanup remains)
-last_updated: 2026-06-12
+version: leg/juggler-test-failloud-residual @ 2026-06-13 (H7 exit-gate corrected — db.js deletion descoped; boundary-rule+README gate only; 999.434 filed)
+last_updated: 2026-06-13
 tags:
   - type/architecture
   - service/juggler
@@ -15,7 +15,7 @@ tags:
 
 # Juggler Backend — Hexagonal Conversion ROADMAP
 
-**Status:** active · **Type:** architecture-overview (migration roadmap) · **Last updated:** 2026-06-12
+**Status:** active · **Type:** architecture-overview (migration roadmap) · **Last updated:** 2026-06-13
 
 > ## SUPERSEDES `JUGGLER-HEX-WBS.md` (2026-01-15)
 >
@@ -296,8 +296,8 @@ Each phase lists goal · work items · entry gate · exit gate · risk. Port/ada
 > gaps "close in H6 when scheduler subscribes") are NOT closed — deferred to a dedicated event-subscription
 > leg. **H7 carries:** per-slice eslint rule (all 6 slices); legacy `runSchedule.js`/`unifiedScheduleV2.js`
 > thinning; the 3 inline writes (line-886 db-not-trx rollback-survival semantic MUST go into the port
-> contract before moving); src/db.js deletion; move the schedule-routes test mock to the facade once
-> legacy is thinned.
+> contract before moving); move the schedule-routes test mock to the facade once legacy is thinned.
+> (`src/db.js` deletion is NOT an H7 carry — tracked separately as backlog 999.434 per ADR-0002; see H7 note below.)
 
 - **Goal:** Extract the **core domain** — 5,370 ln, 42 DB touchpoints — into a pure `ConstraintSolver`
   / `ScoreEngine` / `ConflictResolver` core behind ports, with `RunScheduleCommand` as the sole I/O
@@ -320,14 +320,26 @@ Each phase lists goal · work items · entry gate · exit gate · risk. Port/ada
 
 ### Phase H7 — Cleanup & boundary hardening
 
-- **Goal:** Retire the last of the legacy DB path and make the boundary guard total.
-- **Work items:** delete `src/db.js` once its importer count hits 0 (ADR-0002 completion); confirm
-  every slice has a per-slice eslint boundary rule + the `domain/`-imports-infra rule (`DESIGN §7`);
-  a `slices/*/README.md` per slice; ensure CI lint is green against real (non-empty) slices.
-- **Entry gate:** H6 merged (last `db.js` consumers — the scheduler — moved).
-- **Exit gate:** `grep -rEl "require\(['\"](\.\./)*db['\"]\)" src` → **0**; `src/db.js` deleted; boundary lint enforces all 6 slices.
-- **Risk:** 🟢 **LOW** — mechanical, post-extraction.
+- **Goal:** Harden per-slice ESLint boundary rules and author a `README.md` for every slice. `src/db.js` retirement is tracked **separately** per ADR-0002 (see note below).
+- **Work items:** confirm every slice has a per-slice eslint boundary rule + the `domain/`-imports-infra rule (`DESIGN §7`); author a `slices/*/README.md` per slice (6 slices: calendar, weather, task, user-config, ai-enrichment, scheduler); ensure CI lint is green against all 6 non-empty slices.
+- **Entry gate:** H6 merged (all 6 domain slices have facades; boundary rules exist for at least the slices completed through H6).
+- **Exit gate:** every slice has a per-slice ESLint boundary rule + a `slices/*/README.md`; `lint:boundaries` is green against all 6 non-empty slices.
+- **Risk:** 🟢 **LOW** — mechanical documentation and config work.
 - **Effort:** ~2–3 dev-days.
+
+> **`src/db.js` retirement — tracked separately (ADR-0002, backlog 999.434):**
+> ADR-0002 (§2 above) specifies delta migration: migrate consumers slice-by-slice as each slice lands;
+> delete `src/db.js` when the **last** consumer moves. H7's exit-gate does **not** include `src/db.js`
+> deletion. As of the H6 merge, `src/db.js` has **25 importers** — the majority are non-slice code
+> (middleware: `entity-limits`, `feature-gate`, `jwt-auth`; MCP tools: `config`, `data`, `schedule`,
+> `tasks`, `transport`; routes: `health`, `schedule`; lib: `sync-lock`, `task-write-queue`; scheduler:
+> `runSchedule`, `scheduleQueue`, `schedulerSession`; controllers: `apple-cal`, `billing-webhooks`,
+> `cal-sync`, `gcal`, `msft-cal`; slice adapters: `KnexTaskRepository`, `KnexConfigRepository`,
+> `task/domain/mappers/taskMappers`; tests: `impersonation.controller.test`,
+> `20260527213906_add_terminal_scheduled_at_constraint.test`). No planned H7 work item converts these
+> — they are out-of-scope non-slice code requiring a separate consolidation effort. `src/db.js`
+> deletion is filed as backlog **999.434** and will complete when the last consumer migrates — that is
+> NOT an H7 exit criterion.
 
 ---
 
@@ -384,7 +396,7 @@ flowchart TD
 | **Wave 3** | H3 ✅ | Task slice (publishes events the scheduler needs) | Task characterization suite green before+after; task facade live — **COMPLETE** (1ac024f) |
 | **Wave 4** | H4 ✅, H5 ✅ | Remaining non-core slices (parallelizable — both depend on H2+H3, not each other) | Both facades merged; SDK-leak grep = 0 — **COMPLETE** (ba8d6ca + d87d592 + cc61029 + 29401dc) |
 | **Wave 5** | H6 ✅ | Scheduler core (LAST) | Golden-master green before+after; all S/P invariants pinned — **COMPLETE** (30e23e5→f670368) |
-| **Wave 6** | H7 | Cleanup; delete `src/db.js` | 0 `db.js` importers |
+| **Wave 6** | H7 | Cleanup; per-slice boundary rules + slice READMEs | All 6 slices have ESLint boundary rule + `README.md`; lint:boundaries green (`src/db.js` retirement is separate — tracked backlog 999.434, per ADR-0002) |
 
 H4 and H5 are the only phases that may run in parallel (same upstreams, no edge between them).
 
@@ -460,7 +472,7 @@ their state and Oscar gates each leg. Suggested entries:
 | H4 | 999.303 JUG-HEX-05 | User/Config slice: consolidate 5 controllers + middleware behind facade | Medium |
 | H5 | 999.304 JUG-HEX-06 | AI-enrichment slice: `AIPort`/`GeminiAIAdapter` — remove `@google/genai` controller+route SDK leak | High |
 | H6 | 999.305 JUG-HEX-07 | Scheduler slice (characterization-gated, LAST): pure ConstraintSolver/ScoreEngine/ConflictResolver behind ports | High |
-| H7 | 999.306 JUG-HEX-08 | Cleanup: delete `src/db.js`, total per-slice boundary enforcement | Low |
+| H7 | 999.306 JUG-HEX-08 | Cleanup: per-slice ESLint boundary enforcement + slice READMEs (`src/db.js` delta-retirement tracked separately as 999.434, per ADR-0002) | Low |
 
 (IDs indicative — the backlog owner assigns the final 999.x numbers via `/gsd-review-backlog`. The point
 is that **they must exist**: until they do, this roadmap is untracked and will rot exactly as the Jan WBS did.)

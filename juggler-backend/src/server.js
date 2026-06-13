@@ -58,6 +58,13 @@ async function start() {
 
   // B9: validate AI slice DB config at boot — surfaces misconfig immediately
   // rather than deferring to the first AI request.
+  //
+  // 999.427: this is INTENTIONALLY redundant with `require('./db')` at the top of
+  // this file (line ~28), which already triggers getDefaultDb() and would abort
+  // boot on a bad DB config first. We keep facade.init() anyway as an EXPLICIT,
+  // testable assertion of the AI slice's own DB dependency — it pins the B9
+  // fail-fast contract and survives someone reordering or removing the top-level
+  // require. getDefaultDb() is idempotent (cached), so the second call is a no-op.
   await require('./slices/ai-enrichment/facade').init();
 
   server = app.listen(PORT, () => {
