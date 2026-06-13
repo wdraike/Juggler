@@ -266,6 +266,7 @@ Content-Type: application/json
 | `colno` | number | no | Column number in the source file. |
 | `stack` | string | no | Stack trace (truncated to 2000 chars by the frontend). |
 | `kind` | string | no | `"error"` (uncaught) or `"unhandledrejection"`. Defaults to `"error"` if omitted. |
+| `userAgent` | string | no | Client browser User-Agent string; appended to the log line as `ua=…` and capped at 160 chars. |
 | `url` | string | no | Page URL where the error occurred. |
 | `ts` | number/string | no | Client-side timestamp (informational; not used in log line). |
 
