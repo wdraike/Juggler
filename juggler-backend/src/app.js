@@ -108,6 +108,18 @@ app.use('/api/billing-webhooks', express.raw({ type: 'application/json' }), func
   next();
 });
 
+// Passive browser-error ingest (leg log-issue-triage-browsercapture). Mounted BEFORE the global
+// 1mb json parser so its tight 16kb cap wins; unauthenticated by design (errors occur on any
+// page / pre-auth) but rate-limited + size-capped + log-injection-sanitized in the route.
+const clientErrorLimiter = require('express-rate-limit')({
+  windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false,
+});
+const clientErrors = require('./routes/client-errors.routes');
+// bodyErrorGuard is the TRAILING (4-arg) error handler in this same mount chain so it catches
+// express.json's PayloadTooLarge(413)/malformed(400) — a router-internal guard would be skipped.
+app.use('/api/client-errors', clientErrorLimiter, express.json({ limit: '16kb' }),
+  clientErrors.router, clientErrors.bodyErrorGuard);
+
 app.use(bodyParser.json({ limit: '1mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 // NOTE: GET /api/events accepts JWT via ?token= query param (EventSource limitation).
