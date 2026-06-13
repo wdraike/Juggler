@@ -114,11 +114,17 @@ app.use('/api/billing-webhooks', express.raw({ type: 'application/json' }), func
 const clientErrorLimiter = require('express-rate-limit')({
   windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false,
 });
-const clientErrors = require('./routes/client-errors.routes');
+// Shared @raike/lib-error-ingest router (999.454) — single-source with the other services.
+// Log path preserved verbatim from the prior local route: env BROWSER_ERRORS_LOG override, else
+// juggler-backend/browser-errors.log (the file the log-triage skill mines).
+const clientErrors = require('@raike/lib-error-ingest');
+const clientErrorsLogPath = process.env.BROWSER_ERRORS_LOG ||
+  require('path').join(__dirname, '..', 'browser-errors.log');
 // bodyErrorGuard is the TRAILING (4-arg) error handler in this same mount chain so it catches
 // express.json's PayloadTooLarge(413)/malformed(400) — a router-internal guard would be skipped.
 app.use('/api/client-errors', clientErrorLimiter, express.json({ limit: '16kb' }),
-  clientErrors.router, clientErrors.bodyErrorGuard);
+  clientErrors.createClientErrorsRouter({ app: 'juggler', logPath: clientErrorsLogPath }),
+  clientErrors.bodyErrorGuard);
 
 app.use(bodyParser.json({ limit: '1mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));

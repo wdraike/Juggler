@@ -163,4 +163,35 @@ describe('BUG-407 regression guard - vendor dependency resolution', () => {
     var output = execFileSync('git', ['ls-files', 'vendor/lib-logger'], { cwd: BACKEND_DIR }).toString().trim();
     expect(output.length).toBeGreaterThan(0);
   });
+
+  /**
+   * Tests 9-11 (999.454): @raike/lib-error-ingest — same deploy-trap guard.
+   *
+   * juggler consumes the shared browser-error ingest router via file:./vendor/lib-error-ingest
+   * (app.js mounts createClientErrorsRouter). Identical 999.407/999.443 risk: a bare require
+   * resolves on the dev host even if the declaration re-points to packages/ or vendor/ is
+   * re-gitignored, while a clean CI checkout crashes "Cannot find module @raike/lib-error-ingest"
+   * at startup. Path-scoped resolution + package.json pin + git-tracking close all three holes.
+   */
+  it('resolves @raike/lib-error-ingest from within juggler-backend (not hoisted ancestor)', function () {
+    var resolved;
+    expect(function () {
+      resolved = require.resolve('@raike/lib-error-ingest', { paths: [BACKEND_DIR] });
+    }).not.toThrow();
+    // Pre-fix: would resolve to DEV/packages/lib-error-ingest - outside BACKEND_DIR -> FAIL.
+    expect(resolved.indexOf(BACKEND_DIR)).toBe(0);
+  });
+
+  it('package.json declares @raike/lib-error-ingest as file:./vendor/lib-error-ingest', function () {
+    // Pins the vendor path - catches re-pointing back to file:../../packages/lib-error-ingest.
+    var pkg = require('../../package.json');
+    expect(pkg.dependencies['@raike/lib-error-ingest']).toMatch(/^file:\.\/vendor\//);
+  });
+
+  // (gitAvailable ? it : it.skip): git present → runs assertion; git absent → visible SKIP (○), not a green pass.
+  (gitAvailable ? it : it.skip)('vendor/lib-error-ingest source is git-tracked (999.454: guard against re-gitignore of vendor/)', function () {
+    var output = execFileSync('git', ['ls-files', 'vendor/lib-error-ingest'], { cwd: BACKEND_DIR }).toString().trim();
+    // Non-empty output means vendor/lib-error-ingest files are committed to the index. Empty = RED.
+    expect(output.length).toBeGreaterThan(0);
+  });
 });
