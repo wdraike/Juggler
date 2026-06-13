@@ -1,6 +1,6 @@
 'use strict';
 /**
- * vendor-deps.test.js - regression guard for BUG-407
+ * vendor-deps.test.js - regression guard for BUG-407 + 999.443
  *
  * Asserts that @raike/lib-logger, @raike/lib-db, and mysql2 all resolve
  * within the juggler-backend module tree - specifically within juggler-backend/
@@ -48,13 +48,19 @@
  *   - package.json pins: all three match expected patterns -> PASS
  *
  * No DB, no Docker, no test-bed required.
- * Traceability: BUG-407 (juggler-deploy-libvendor leg)
+ * Traceability: BUG-407 (juggler-deploy-libvendor leg); 999.443 (vendor-guard-gittrack leg)
  */
 
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 // juggler-backend/ - the Docker COPY root. Resolution must land inside here.
 const BACKEND_DIR = path.resolve(__dirname, '../..');
+
+// Checked once at module load so the (gitAvailable ? it : it.skip) selector
+// below produces a visible Jest SKIP (○) rather than a vacuous green pass.
+var gitAvailable = true;
+try { execFileSync('git', ['--version'], { stdio: 'ignore' }); } catch (_) { gitAvailable = false; }
 
 describe('BUG-407 regression guard - vendor dependency resolution', () => {
   /**
@@ -120,5 +126,41 @@ describe('BUG-407 regression guard - vendor dependency resolution', () => {
     var pkg = require('../../package.json');
     expect(pkg.dependencies['mysql2']).toBeDefined();
     expect(pkg.dependencies['mysql2']).toMatch(/^\^3\./);
+  });
+
+  /**
+   * Tests 7-8 (999.443): git-tracking assertions.
+   *
+   * Path-scoped resolution (tests 1-2) confirms the files are PRESENT on disk and
+   * resolve within BACKEND_DIR, but does NOT catch a future accidental re-gitignore
+   * of vendor/. On the dev host the files remain on disk and tests 1-2 stay GREEN;
+   * a fresh CI checkout lacks them and the image crashes.
+   *
+   * `git ls-files vendor/<pkg>` lists only files that git KNOWS about (committed or
+   * staged). If vendor/<pkg>/ were gitignored or removed from the index the output is
+   * empty and the assertion fails — even if the files exist on disk.
+   *
+   * When git is not available (e.g. a stripped container CI image without a git
+   * binary) the test is registered as `it.skip` so Jest reports it as a visible
+   * SKIP (○) rather than a vacuous green pass. The `gitAvailable` flag is evaluated
+   * once at module load (see top of file) so the selector is resolved before any
+   * test runs — no runtime branch inside the test body.
+   *
+   * RED-meaningfulness: `git ls-files` reads the git index; it cannot return non-empty
+   * output for a path that is gitignored or untracked. An assertion on its stdout is
+   * NOT a constant — it changes when the index changes.
+   */
+  // (gitAvailable ? it : it.skip): git present → runs assertion; git absent → visible SKIP (○), not a green pass.
+  (gitAvailable ? it : it.skip)('vendor/lib-db source is git-tracked (999.443: guard against re-gitignore of vendor/)', function () {
+    var output = execFileSync('git', ['ls-files', 'vendor/lib-db'], { cwd: BACKEND_DIR }).toString().trim();
+    // Non-empty output means vendor/lib-db files are committed to the index.
+    // Empty output means gitignored or untracked — RED.
+    expect(output.length).toBeGreaterThan(0);
+  });
+
+  // (gitAvailable ? it : it.skip): git present → runs assertion; git absent → visible SKIP (○), not a green pass.
+  (gitAvailable ? it : it.skip)('vendor/lib-logger source is git-tracked (999.443: guard against re-gitignore of vendor/)', function () {
+    var output = execFileSync('git', ['ls-files', 'vendor/lib-logger'], { cwd: BACKEND_DIR }).toString().trim();
+    expect(output.length).toBeGreaterThan(0);
   });
 });
