@@ -3,10 +3,10 @@ import ReactDOM from 'react-dom/client';
 import { polyfill } from 'mobile-drag-drop';
 import { scrollBehaviourDragImageTranslateOverride } from 'mobile-drag-drop/scroll-behaviour';
 import App from './App';
-import { installErrorReporter } from './bugminerReporter';
+import { installErrorReporter } from './errorReporter';
 
 // Passive browser-error capture → POST /api/client-errors → log-triage backlog. Fail-silent.
-installErrorReporter({ app: 'juggler' });
+installErrorReporter();
 
 polyfill({
   dragImageTranslateOverride: scrollBehaviourDragImageTranslateOverride,
