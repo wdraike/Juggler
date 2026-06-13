@@ -44,6 +44,13 @@
  *                             1 row committed. Happy path must not be broken.
  *                             Currently PASSES (and must stay GREEN after fix).
  *
+ *   B11-deny  [DENY-GREEN]  — seed user at EXACTLY the daily limit; call
+ *                             commitQuota once; assert (a) resolves without
+ *                             throwing, (b) row count stays at limit (no insert).
+ *                             Positive assertion for the atomic-DENY branch
+ *                             (count >= limit → skip INSERT, commit cleanly).
+ *                             999.432.
+ *
  * ── WHY REAL DB (not a mock) ──────────────────────────────────────────────────
  * A mock cannot exhibit the TOCTOU race: the mock is synchronous and does not
  * serialize concurrent calls the way MySQL does (or doesn't). The race condition
@@ -61,6 +68,7 @@
  *
  * ── TRACEABILITY ──────────────────────────────────────────────────────────────
  *   .planning/kermit/juggler-h5-fixes/TRACEABILITY.md B11
+ *   .planning/kermit/quota-denypath-test/ (999.432 — B11-deny)
  *
  * ── MUTATION NOTE ─────────────────────────────────────────────────────────────
  *   B11-race oracle: `count <= 50` after two concurrent acquires.
@@ -69,6 +77,9 @@
  *             The post-fix atomic version returns count=50 → assertion passes.
  *   B11-guard oracle: exactly 1 row after a single successful acquire.
  *     Mutant: skip commitQuota (or atomic insert skipped) → 0 rows → `toBe(1)` fails.
+ *   B11-deny oracle: count stays === limit after commitQuota when at limit.
+ *     Mutant: remove `if (count < limit)` guard so INSERT always runs →
+ *             count becomes limit+1 → `toBe(limit)` fails → mutant KILLED.
  */
 
 'use strict';
@@ -80,11 +91,16 @@ const { assertDbAvailable } = require('../../helpers/requireDB');
 const KnexAIUsageRepository = require('../../../src/slices/ai-enrichment/adapters/KnexAIUsageRepository');
 
 // Unique user IDs for this suite — avoids collisions with other suites.
-const USER_B11 = 'telly-b11-toctou';       // B11-race and B11-guard share this user;
+const USER_B11 = 'telly-b11-toctou';       // B11-race, B11-guard, B11-deny share this user;
                                             // each test cleans up in beforeEach.
+const USER_DENY = 'telly-b11-deny';        // Dedicated user for the deny-branch test
+                                            // (isolated seed so beforeEach wipes only USER_B11).
+
+// Read the daily limit from the repository export — do NOT hardcode.
+// KnexAIUsageRepository.AI_DAILY_LIMIT is the single source of truth.
+const AI_DAILY_LIMIT = KnexAIUsageRepository.AI_DAILY_LIMIT;
 
 // How many rows to pre-seed (one below the limit — the boundary where TOCTOU fires).
-const AI_DAILY_LIMIT = 50;
 const SEED_COUNT = AI_DAILY_LIMIT - 1; // 49 rows → both concurrent callers see "under limit"
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -116,7 +132,7 @@ describe('B11 — quota TOCTOU: concurrent acquisitions must not overshoot the 5
     dbAvailable = await testDb.isAvailable();
     if (!dbAvailable) return;
 
-    // Ensure test user exists (ai_command_log.user_id FK → users.id).
+    // Ensure test users exist (ai_command_log.user_id FK → users.id).
     await testDb('users')
       .insert({
         id: USER_B11,
@@ -125,13 +141,24 @@ describe('B11 — quota TOCTOU: concurrent acquisitions must not overshoot the 5
       })
       .onConflict('id')
       .ignore();
+
+    await testDb('users')
+      .insert({
+        id: USER_DENY,
+        email: 'telly-b11-deny@example.com',
+        name: 'Telly B11 DENY Test',
+      })
+      .onConflict('id')
+      .ignore();
   });
 
   afterAll(async () => {
     if (dbAvailable) {
-      // FK-safe cleanup: child rows first, then user row.
+      // FK-safe cleanup: child rows first, then user rows.
       await testDb('ai_command_log').where('user_id', USER_B11).del().catch(() => {});
       await testDb('users').where('id', USER_B11).del().catch(() => {});
+      await testDb('ai_command_log').where('user_id', USER_DENY).del().catch(() => {});
+      await testDb('users').where('id', USER_DENY).del().catch(() => {});
       await testDb.destroy();
     }
   });
@@ -296,6 +323,75 @@ describe('B11 — quota TOCTOU: concurrent acquisitions must not overshoot the 5
       // Step 5: verify the committed row is within the 24h window (sanity).
       const lastRow = rowsAfterCommit[rowsAfterCommit.length - 1];
       expect(lastRow.user_id).toBe(USER_B11);
+    },
+    10000
+  );
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // B11-deny — atomic DENY branch positive assertion (DENY-GREEN, 999.432)
+  //
+  // When the 24h window is ALREADY at the daily limit, commitQuota must:
+  //   (a) resolve without throwing (fail-open: caller keeps its AI result).
+  //   (b) NOT insert a new row (count stays == limit, not limit+1).
+  //
+  // This is the race-loser path: a caller that passed the advisory checkQuota
+  // but, by the time the FOR UPDATE lock is acquired inside commitQuota, the
+  // limit is already filled. The transaction commits cleanly (no INSERT, no
+  // throw) — the slot is silently denied.
+  //
+  // The existing B11-race test only asserts finalCount <= 50. B11-deny
+  // positively asserts the deny path's idempotency: a fully-saturated user
+  // never overshoots.
+  //
+  // Mutation-meaningful: removing the `if (count < limit)` guard inside
+  // commitQuota (so it always inserts) makes this test RED — count becomes
+  // limit+1, breaking `toBe(limit)`. The guard is thus pinned to this
+  // assertion.
+  //
+  // Uses a dedicated USER_DENY (not USER_B11) so beforeEach's wipe of
+  // USER_B11 does not interfere, and afterAll cleans both.
+  // ───────────────────────────────────────────────────────────────────────────
+  test(
+    'B11-deny [DENY-GREEN]: commitQuota at exactly the daily limit → resolves, no new row inserted',
+    async () => {
+      // TEST-FR-001: hard-fail if test-bed is unavailable — never silent-skip.
+      await assertDbAvailable();
+
+      // ── Step 1: Clean slate for DENY user. ──────────────────────────────
+      await testDb('ai_command_log').where('user_id', USER_DENY).del();
+
+      // ── Step 2: Seed EXACTLY `limit` rows within the 24h window. ────────
+      // This puts the user at the cap before commitQuota is called.
+      // We seed directly (bypassing the repo) so the pre-condition is
+      // deterministic regardless of any repo logic.
+      await seedRows(USER_DENY, AI_DAILY_LIMIT);
+
+      // Verify pre-condition: exactly `limit` rows before the call.
+      const countBefore = await testDb('ai_command_log')
+        .where('user_id', USER_DENY)
+        .count('id as cnt')
+        .first();
+      expect(Number(countBefore.cnt)).toBe(AI_DAILY_LIMIT);
+
+      // ── Step 3: Call commitQuota — must resolve without throwing. ────────
+      // The FOR UPDATE re-count sees count == limit → skips INSERT.
+      // The transaction commits cleanly (fail-open: no throw).
+      const repo = new KnexAIUsageRepository({ db: testDb });
+      await expect(repo.commitQuota(USER_DENY)).resolves.toBeUndefined();
+      // ^^ Assertion (a): resolves without throwing.
+
+      // ── Step 4: Assert row count is STILL exactly `limit`. ──────────────
+      const countAfter = await testDb('ai_command_log')
+        .where('user_id', USER_DENY)
+        .count('id as cnt')
+        .first();
+      expect(Number(countAfter.cnt)).toBe(AI_DAILY_LIMIT);
+      // ^^ Assertion (b): no new row inserted — deny branch skipped INSERT.
+      //
+      // Mutation-meaningful: if the `if (count < limit)` guard is removed
+      // so commitQuota always inserts, this assertion fails:
+      //   countAfter.cnt = limit+1 (51) ≠ limit (50) → toBe(limit) RED.
+      // The guard is pinned by this assertion.
     },
     10000
   );
