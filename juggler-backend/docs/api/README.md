@@ -2,7 +2,7 @@
 type: api-reference
 service: juggler
 status: active
-last_updated: 2026-05-31
+last_updated: 2026-06-13
 tags:
   - type/api-reference
   - service/juggler
@@ -13,14 +13,14 @@ tags:
 
 # Juggler Backend — API Reference
 
-**Last Updated:** 2026-05-31
+**Last Updated:** 2026-06-13
 **Base URL:** `http://localhost:5002` (dev)
 
 ---
 
 ## Authentication
 
-All `/api/*` routes (except `/api/data/import` and `/health`) require a JWT issued by auth-service:
+All `/api/*` routes (except `/api/data/import`, `/health`, and `/api/client-errors`) require a JWT issued by auth-service:
 
 ```
 Authorization: Bearer <JWT_TOKEN>
@@ -245,6 +245,83 @@ Pushes `schedule:changed` events when the scheduler completes. Heartbeat every 3
 
 ---
 
+## Browser Error Capture
+
+```http
+POST /api/client-errors
+Content-Type: application/json
+```
+
+**Authentication:** None. The endpoint is unauthenticated by design — browser errors can occur before the user logs in or on any page where the token is not available. Abuse is bounded by a rate limiter and a body-size cap instead.
+
+**Purpose:** Passive ingest of uncaught browser errors and unhandled promise rejections from the juggler frontend. The frontend `errorReporter.js` module ships each event here; the backend appends one sanitized line to `browser-errors.log`, which the log-triage skill mines on its next run to file backlog items.
+
+### Request body
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `message` | string | **yes** | Error message text. Missing or blank → 400. |
+| `source` | string | no | Script URL where the error originated. |
+| `lineno` | number | no | Line number in the source file. |
+| `colno` | number | no | Column number in the source file. |
+| `stack` | string | no | Stack trace (truncated to 2000 chars by the frontend). |
+| `kind` | string | no | `"error"` (uncaught) or `"unhandledrejection"`. Defaults to `"error"` if omitted. |
+| `url` | string | no | Page URL where the error occurred. |
+| `ts` | number/string | no | Client-side timestamp (informational; not used in log line). |
+
+Fields are per-field capped at 2000 characters (40 chars for `kind`). All fields are control-character-stripped before writing: no newline in any field can forge an extra log line (log-injection defence).
+
+### Example request
+
+```json
+{
+  "message": "Cannot read properties of undefined (reading 'id')",
+  "source": "http://localhost:3002/static/js/main.chunk.js",
+  "lineno": 1,
+  "colno": 4821,
+  "stack": "TypeError: Cannot read properties of undefined\n    at TaskList ...",
+  "kind": "error",
+  "url": "http://localhost:3002/tasks"
+}
+```
+
+### Responses
+
+| Status | Condition | Body |
+|--------|-----------|------|
+| `204 No Content` | Log line written successfully. | *(empty)* |
+| `400 Bad Request` | Missing or blank `message`, or malformed JSON body. | `{ "error": "invalid payload: message required" }` or `{ "error": "malformed body" }` |
+| `413 Payload Too Large` | Body exceeds the 16 KB mount-level limit. | `{ "error": "payload too large" }` |
+| `429 Too Many Requests` | Per-IP rate limit exceeded (30 requests/60 s). | Standard `express-rate-limit` response. |
+| `500 Internal Server Error` | `fs.appendFile` failed (disk full, permission error). | `{ "error": "log write failed" }` |
+
+### Security posture
+
+- **Log-injection neutralized:** all C0/C1 control characters (CR, LF, TAB, NUL, DEL) plus Unicode line/paragraph separators (U+2028, U+2029) are stripped from every field before the log line is assembled. A crafted `message` containing newlines cannot forge additional log entries.
+- **Abuse bounded:** body size is capped at 16 KB at the `express.json` mount layer (not inside the handler, so oversized bodies are rejected before any parsing). Per-IP rate limit: 30 requests per 60-second window (`express-rate-limit`, per-instance).
+- **Log rotation:** the log file is rotated (renamed to `.1`) when it exceeds 5 MB; at most one backup is kept, bounding total disk use to approximately 10 MB.
+- **No secrets logged:** the handler does not read or log `Authorization` headers, cookies, or any request header. Per-field char caps limit the surface area for PII leakage from error text.
+
+### Log-triage pipeline integration
+
+The written line format is:
+
+```text
+ERROR [browser] <kind>: <message> at <source>:<lineno> ua=<userAgent>
+```
+
+The leading `ERROR [browser]` token matches the log-triage collector's error-level pattern. The `kind` and `source` fields give the fingerprinter a stable `error_type` + `source_location` so identical errors across sessions collapse to a single backlog item. The log file (`browser-errors.log`) lives under `juggler/juggler-backend/` and is covered by the existing `juggler/juggler-backend/*.log` glob in `.planning/log-monitor/config.json` — no config change required.
+
+See `~/.claude/skills/log-triage/SKILL.md` for how the triage pipeline ingests and deduplicates the log.
+
+### Environment variable
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `BROWSER_ERRORS_LOG` | `<juggler-backend-root>/browser-errors.log` | Absolute path to the browser-errors log file. Override in test environments to isolate output. |
+
+---
+
 ## Error Codes
 
 | Code | Meaning |
@@ -253,6 +330,7 @@ Pushes `schedule:changed` events when the scheduler completes. Heartbeat every 3
 | `401` | Missing or expired JWT |
 | `403` | Feature gated (plan limit reached) |
 | `404` | Resource not found |
+| `413` | Payload too large (body exceeds endpoint's size cap) |
 | `429` | Rate limit exceeded |
 | `500` | Internal server error |
 
