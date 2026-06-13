@@ -26,11 +26,11 @@ function _signature(p) {
 }
 
 function _page() {
-  try { return typeof location !== 'undefined' ? (location.pathname || location.href || '') : ''; }
+  try { return typeof window !== 'undefined' && window.location ? (window.location.pathname || window.location.href || '') : ''; }
   catch (e) { return ''; }
 }
 function _hereUrl() {
-  try { return typeof location !== 'undefined' ? location.href : ''; } catch (e) { return ''; }
+  try { return typeof window !== 'undefined' && window.location ? window.location.href : ''; } catch (e) { return ''; }
 }
 function _ua() {
   try { return typeof navigator !== 'undefined' ? navigator.userAgent : ''; } catch (e) { return ''; }
