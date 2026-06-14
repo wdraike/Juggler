@@ -6,8 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "npx nodemon src/server.js",
-    "migrate": "npx knex migrate:latest",
-    "migrate:rollback": "npx knex migrate:rollback",
+    "migrate": "node scripts/migrate-guard.js migrate:latest",
+    "migrate:rollback": "node scripts/migrate-guard.js migrate:rollback",
     "migrate:status": "npx knex migrate:status",
     "test": "jest --forceExit",
     "test:adapter": "node scripts/test-adapter.js",
