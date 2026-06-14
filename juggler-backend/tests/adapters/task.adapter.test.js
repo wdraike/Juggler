@@ -32,12 +32,7 @@ var TaskAdapter = {
   updateTask: function (id, updates) {
     var task = this.repo.findById(id, TEST_USER_ID);
     if (!task) return null;
-    // Small delay to ensure timestamp difference
-    var now = new Date();
-    now.setMilliseconds(now.getMilliseconds() + 1);
-    var updated = Object.assign({}, task, updates, {
-      updated_at: now.toISOString()
-    });
+    var updated = Object.assign({}, task, updates);
     return this.repo.update(id, updated, TEST_USER_ID);
   },
 

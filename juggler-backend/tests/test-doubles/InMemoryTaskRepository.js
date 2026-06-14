@@ -13,14 +13,44 @@
  *   - findAll(userId) → array of all tasks for user
  */
 
+/**
+ * Default monotonic clock: returns a strictly-increasing ISO-8601 timestamp on
+ * every call, even when wall-clock milliseconds have not advanced.  Tracks the
+ * last-issued ms; if Date.now() <= lastMs, it emits lastMs + 1.
+ *
+ * This prevents the sub-millisecond create→update collision that caused
+ * task.adapter.test.js:132 to flake ~80% of the time (999.312).
+ */
+function makeMonotonicClock() {
+  var lastMs = 0;
+  return function monotonicNow() {
+    var now = Date.now();
+    if (now <= lastMs) {
+      lastMs = lastMs + 1;
+    } else {
+      lastMs = now;
+    }
+    return new Date(lastMs).toISOString();
+  };
+}
+
 class InMemoryTaskRepository {
-  constructor() {
+  /**
+   * @param {object} [opts]
+   * @param {function} [opts.clock] - Zero-arg function returning an ISO-8601
+   *   timestamp string.  Defaults to a monotonic wall-clock wrapper that
+   *   guarantees strictly-increasing values even within the same millisecond.
+   *   Inject a controlled clock in tests that need deterministic timestamps.
+   */
+  constructor(opts) {
     // Primary storage: id → task
     this._store = new Map();
     // Secondary index: userId → Set of task ids
     this._byUser = new Map();
     // Auto-increment counter for ID generation
     this._idCounter = 0;
+    // Injected or default monotonic clock
+    this._clock = (opts && opts.clock) ? opts.clock : makeMonotonicClock();
   }
 
   /**
@@ -88,7 +118,7 @@ class InMemoryTaskRepository {
    */
   create(task) {
     const id = task.id || this._generateId();
-    const now = new Date().toISOString();
+    const now = this._clock();
     
     const newTask = {
       id,
@@ -187,7 +217,7 @@ class InMemoryTaskRepository {
       ...updates,
       id, // preserve original id
       user_id: existing.user_id, // preserve original user_id
-      updated_at: new Date().toISOString(),
+      updated_at: this._clock(),
     };
 
     // Handle user_id change (rare, but update secondary index)
