@@ -244,7 +244,6 @@ async function recurCleanup(ctx) {
           })
           .onConflict('id').ignore();
       } else {
-        var _dateHelpers = require('../../scheduler/dateHelpers');
         var updatedTmpl = Object.assign({}, existing, row);
         var newRecur = typeof updatedTmpl.recur === 'string' ? JSON.parse(updatedTmpl.recur || 'null') : updatedTmpl.recur;
         var oldRecur = typeof existing.recur === 'string' ? JSON.parse(existing.recur || 'null') : existing.recur;
@@ -268,7 +267,7 @@ async function recurCleanup(ctx) {
           var _dateMatch = require('../../../shared/scheduler/dateMatchesRecurrence');
           var srcDateStr = updatedTmpl.recur_start
             ? (updatedTmpl.recur_start instanceof Date
-                ? _dateHelpers.formatDateKey(updatedTmpl.recur_start)
+                ? dateHelpers.formatDateKey(updatedTmpl.recur_start)
                 : (function () {
                     var iso = String(updatedTmpl.recur_start).match(/^(\d{4})-(\d{2})-(\d{2})/);
                     return iso ? Number(iso[2]) + '/' + Number(iso[3]) : String(updatedTmpl.recur_start);
@@ -284,21 +283,21 @@ async function recurCleanup(ctx) {
             var instDate = inst.scheduled_at ? utcToLocal(inst.scheduled_at, tz).date : null;
             if (!instDate) { deleteIds.push(inst.id); return; }
             if (!newRecur || newRecur.type === 'none' ||
-                !_dateMatch.dateMatchesRecurrence(instDate, newRecur, srcDateStr, _dateHelpers.parseDate)) {
+                !_dateMatch.dateMatchesRecurrence(instDate, newRecur, srcDateStr, dateHelpers.parseDate)) {
               deleteIds.push(inst.id); return;
             }
             if (updatedTmpl.recur_start) {
-              var hs = _dateHelpers.parseDate(updatedTmpl.recur_start instanceof Date
-                ? _dateHelpers.formatDateKey(updatedTmpl.recur_start)
+              var hs = dateHelpers.parseDate(updatedTmpl.recur_start instanceof Date
+                ? dateHelpers.formatDateKey(updatedTmpl.recur_start)
                 : String(updatedTmpl.recur_start).replace(/-/g, '/').replace(/^0/, ''));
-              var instD = _dateHelpers.parseDate(instDate);
+              var instD = dateHelpers.parseDate(instDate);
               if (hs && instD && instD < hs) { deleteIds.push(inst.id); return; }
             }
             if (updatedTmpl.recur_end) {
-              var he = _dateHelpers.parseDate(updatedTmpl.recur_end instanceof Date
-                ? _dateHelpers.formatDateKey(updatedTmpl.recur_end)
+              var he = dateHelpers.parseDate(updatedTmpl.recur_end instanceof Date
+                ? dateHelpers.formatDateKey(updatedTmpl.recur_end)
                 : String(updatedTmpl.recur_end).replace(/-/g, '/').replace(/^0/, ''));
-              var instD2 = _dateHelpers.parseDate(instDate);
+              var instD2 = dateHelpers.parseDate(instDate);
               if (he && instD2 && instD2 > he) { deleteIds.push(inst.id); return; }
             }
           });
