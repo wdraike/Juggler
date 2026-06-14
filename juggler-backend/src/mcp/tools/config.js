@@ -6,14 +6,12 @@ const { z } = require('zod');
 const safeStringify = require('../safeStringify');
 const db = require('../../db');
 const tasksWrite = require('../../lib/tasks-write');
-// Single source of truth for schedule-affecting keys — imported from the
-// slice facade (the sanctioned public entry point, JUG-HEX-H4/W6) so the
-// MCP tool cannot drift from the REST path and respects hexagonal boundaries
-// (WARN-1 / 999.464 fix-loop).
-const { SCHED_KEYS: schedKeysFromFacade } = require('../../slices/user-config/facade');
-// Config cache — invalidated after MCP writes to match the REST UpdateConfig
-// path (WARN-2 / cookie finding: missing cache.invalidateConfig after write).
-const redisCache = require('../../lib/redis');
+// Single source of truth for schedule-affecting keys and the updateConfig facade
+// operation — imported from the slice facade (the sanctioned public entry point,
+// JUG-HEX-H4/W6) so the MCP tool routes through the same path as the REST
+// controller and respects hexagonal boundaries (WARN-1 / 999.464 fix-loop;
+// 999.501 facade-routing refactor).
+const { SCHED_KEYS: schedKeysFromFacade, updateConfig: facadeUpdateConfig } = require('../../slices/user-config/facade');
 
 function registerConfigTools(server, userId) {
 
@@ -179,32 +177,26 @@ function registerConfigTools(server, userId) {
       value: z.any().describe('New configuration value (object or array)')
     },
     async ({ key, value }) => {
-      const existing = await db('user_config').where({ user_id: userId, config_key: key }).first();
+      // Delegate to the user-config slice facade — the sanctioned cross-slice entry
+      // (JUG-HEX-H4/W6, 999.501). The facade's UpdateConfig use-case handles the
+      // upsert (via KnexConfigRepository) and cache.invalidateConfig internally
+      // (UpdateConfig.js:99). This mirrors config.controller.js:55-66.
+      const result = await facadeUpdateConfig({ userId, key, value });
 
-      if (existing) {
-        await db('user_config').where({ user_id: userId, config_key: key }).update({
-          config_value: JSON.stringify(value),
-          updated_at: db.fn.now()
-        });
-      } else {
-        await db('user_config').insert({
-          user_id: userId,
-          config_key: key,
-          config_value: JSON.stringify(value)
-        });
+      // If the facade signals a validation error (non-2xx), surface it as an MCP
+      // error. The z.enum gate above pre-validates the key, so this branch is
+      // defensive — do NOT mask with a fallback.
+      if (result.status && result.status >= 400) {
+        throw new Error(
+          (result.body && result.body.error) || ('update_config failed with status ' + result.status)
+        );
       }
 
-      // Invalidate config cache after write — matches the REST UpdateConfig path
-      // (UpdateConfig.js:99 cache.invalidateConfig). Omitting this left the read
-      // cache stale after an MCP write (WARN-2 fix).
-      await redisCache.invalidateConfig(userId);
-
-      // Trigger reschedule only for schedule-affecting keys — gated on SCHED_KEYS
-      // (the single source of truth) so adding a non-schedule key to this tool
-      // in future cannot silently trigger a needless full re-schedule (WARN-1 fix).
-      if (schedKeys.includes(key)) {
+      // Trigger reschedule only when the facade instructs it (scheduleAfter present)
+      // — mirrors config.controller.js:64-66.
+      if (result.scheduleAfter) {
         const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
-        enqueueScheduleRun(userId, 'mcp:config');
+        enqueueScheduleRun(result.scheduleAfter.userId, result.scheduleAfter.source);
       }
 
       return { content: [{ type: 'text', text: safeStringify({ key, value }) }] };
