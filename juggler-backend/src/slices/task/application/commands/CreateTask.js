@@ -60,16 +60,14 @@
 
 'use strict';
 
+var assertDeps = require('../_assertDeps');
+
 /** @param {CreateTaskDeps} deps */
 function CreateTask(deps) {
   var required = ['repo', 'cache', 'events', 'enqueueScheduleRun', 'mappers',
     'validation', 'ensureProject', 'isLocked', 'enqueueWrite', 'uuidv7',
     'safeTimezone', 'placementModes'];
-  for (var i = 0; i < required.length; i++) {
-    if (!deps || deps[required[i]] === undefined || deps[required[i]] === null) {
-      throw new Error('CreateTask: missing dependency "' + required[i] + '"');
-    }
-  }
+  assertDeps('CreateTask', deps, required);
   this.repo = deps.repo;
   this.cache = deps.cache;
   this.events = deps.events;

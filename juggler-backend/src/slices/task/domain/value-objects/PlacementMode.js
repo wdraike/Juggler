@@ -22,7 +22,7 @@
  *
  * S7 CONTRACT: PlacementMode is a closed enum that rejects unknown terms, exactly
  * as the S7 contract requires. Its canonical set is the placement-mode set
- * (characterized), distinct from the S7 task-type terms (see TaskTypeTerm.js).
+ * (characterized), distinct from the S7 task-type terms.
  */
 
 'use strict';

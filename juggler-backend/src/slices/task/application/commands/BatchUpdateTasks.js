@@ -34,6 +34,8 @@
 
 'use strict';
 
+var assertDeps = require('../_assertDeps');
+
 var MAX_RETRIES = 3;
 
 /** @param {BatchUpdateTasksDeps} deps */
@@ -41,11 +43,7 @@ function BatchUpdateTasks(deps) {
   var required = ['repo', 'cache', 'enqueueScheduleRun', 'validation',
     'batchUpdateSchema', 'safeTimezone', 'isLocked', 'lockedBatchUpdate',
     'batchUpdateTxn', 'sleep'];
-  for (var i = 0; i < required.length; i++) {
-    if (!deps || deps[required[i]] === undefined || deps[required[i]] === null) {
-      throw new Error('BatchUpdateTasks: missing dependency "' + required[i] + '"');
-    }
-  }
+  assertDeps('BatchUpdateTasks', deps, required);
   this.repo = deps.repo;
   this.cache = deps.cache;
   this.enqueueScheduleRun = deps.enqueueScheduleRun;

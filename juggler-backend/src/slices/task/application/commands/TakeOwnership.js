@@ -26,14 +26,12 @@
 
 'use strict';
 
+var assertDeps = require('../_assertDeps');
+
 /** @param {TakeOwnershipDeps} deps */
 function TakeOwnership(deps) {
   var required = ['repo', 'cache', 'enqueueScheduleRun', 'mappers', 'detachLedger', 'placementModes'];
-  for (var i = 0; i < required.length; i++) {
-    if (!deps || deps[required[i]] === undefined || deps[required[i]] === null) {
-      throw new Error('TakeOwnership: missing dependency "' + required[i] + '"');
-    }
-  }
+  assertDeps('TakeOwnership', deps, required);
   this.repo = deps.repo;
   this.cache = deps.cache;
   this.enqueueScheduleRun = deps.enqueueScheduleRun;

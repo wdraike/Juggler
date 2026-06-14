@@ -1,7 +1,7 @@
 /**
  * W2 unit tests — Task domain value objects (closed enums, S7 rejection paths).
  *
- * Covers WBS W2 acceptance (b) + (e): TaskStatus / PlacementMode / TaskTypeTerm
+ * Covers WBS W2 acceptance (b) + (e): TaskStatus / PlacementMode
  * are CLOSED enums that REJECT unknown terms and ACCEPT exactly the canonical set
  * (characterized — verified against the controller libs + the W1 golden-master,
  * not assumed). Plus TaskId identity invariant.
@@ -14,7 +14,6 @@
 const TaskId = require('../../../../src/slices/task/domain/value-objects/TaskId');
 const TaskStatus = require('../../../../src/slices/task/domain/value-objects/TaskStatus');
 const PlacementMode = require('../../../../src/slices/task/domain/value-objects/PlacementMode');
-const TaskTypeTerm = require('../../../../src/slices/task/domain/value-objects/TaskTypeTerm');
 
 // The source-of-truth libs the VOs characterize against — assert the VO set
 // equals the lib set (so the VO can never silently drift from the controller).
@@ -100,56 +99,5 @@ describe('PlacementMode — closed enum (characterized from PLACEMENT_MODES)', (
   test("matches validateTaskInput's golden-master rejection of 'NOT_VALID'", () => {
     // Golden-master "Surface 1: 400 on invalid placementMode" sends 'NOT_VALID'.
     expect(PlacementMode.isValid('NOT_VALID')).toBe(false);
-  });
-});
-
-describe('TaskTypeTerm — S7 closed enum (the 4 canonical terms)', () => {
-  const S7 = ['one-off', 'chain member', 'recurring instance', 'split chunk'];
-
-  test('TERMS are EXACTLY the 4 canonical S7 strings (CLAUDE.md §Scheduler)', () => {
-    expect(TaskTypeTerm.TERMS).toEqual(S7);
-  });
-
-  test.each(S7)('accepts canonical S7 term %j', (t) => {
-    expect(new TaskTypeTerm(t).toString()).toBe(t);
-    expect(TaskTypeTerm.isValid(t)).toBe(true);
-  });
-
-  test.each([
-    ['task'], ['recurring_instance'], ['recurring_template'], // the DB snake_case forms are NOT S7 terms
-    ['recurringInstance'], ['one off'], ['oneoff'], ['split-chunk'],
-    [''], [null], [undefined]
-  ])('REJECTS non-canonical term %j (throws — S7)', (bad) => {
-    expect(() => new TaskTypeTerm(bad)).toThrow(/TaskTypeTerm \(S7\) must be one of/);
-    expect(TaskTypeTerm.isValid(bad)).toBe(false);
-  });
-
-  describe('fromRow — characterized derivation (golden-master lines 1371-1374)', () => {
-    test("task_type='task', empty depends_on → 'one-off'", () => {
-      expect(TaskTypeTerm.fromRow({ task_type: 'task', depends_on: '[]' }).value).toBe('one-off');
-    });
-    test("null task_type defaults to 'task' → 'one-off'", () => {
-      expect(TaskTypeTerm.fromRow({ task_type: null }).value).toBe('one-off');
-    });
-    test("task_type='task', non-empty depends_on → 'chain member'", () => {
-      expect(TaskTypeTerm.fromRow({ task_type: 'task', depends_on: '["other-id"]' }).value).toBe('chain member');
-      // already-parsed array form
-      expect(TaskTypeTerm.fromRow({ task_type: 'task', depends_on: ['other-id'] }).value).toBe('chain member');
-    });
-    test("task_type='recurring_instance', split_total<=1 → 'recurring instance'", () => {
-      expect(TaskTypeTerm.fromRow({ task_type: 'recurring_instance', split_total: 1 }).value).toBe('recurring instance');
-      expect(TaskTypeTerm.fromRow({ task_type: 'recurring_instance', split_total: null }).value).toBe('recurring instance');
-    });
-    test("task_type='recurring_instance', split_total>1 → 'split chunk'", () => {
-      expect(TaskTypeTerm.fromRow({ task_type: 'recurring_instance', split_total: 2 }).value).toBe('split chunk');
-    });
-    test("task_type='recurring_template' → null (blueprint, no S7 term)", () => {
-      expect(TaskTypeTerm.fromRow({ task_type: 'recurring_template' })).toBeNull();
-    });
-    test("empty-string depends_on / 'null' / '[]' are all treated as no-deps", () => {
-      ['', 'null', '[]', null, undefined].forEach((d) => {
-        expect(TaskTypeTerm.fromRow({ task_type: 'task', depends_on: d }).value).toBe('one-off');
-      });
-    });
   });
 });

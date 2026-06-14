@@ -60,17 +60,15 @@
 
 'use strict';
 
+var assertDeps = require('../_assertDeps');
+
 /** @param {UpdateTaskDeps} deps */
 function UpdateTask(deps) {
   var required = ['repo', 'cache', 'events', 'enqueueScheduleRun', 'mappers',
     'validation', 'hasSchedulingFields', 'splitFieldsLib', 'ensureProject',
     'isLocked', 'enqueueWrite', 'safeTimezone', 'dateHelpers', 'placementModes',
     'recurCleanup'];
-  for (var i = 0; i < required.length; i++) {
-    if (!deps || deps[required[i]] === undefined || deps[required[i]] === null) {
-      throw new Error('UpdateTask: missing dependency "' + required[i] + '"');
-    }
-  }
+  assertDeps('UpdateTask', deps, required);
   this.repo = deps.repo;
   this.cache = deps.cache;
   this.events = deps.events;

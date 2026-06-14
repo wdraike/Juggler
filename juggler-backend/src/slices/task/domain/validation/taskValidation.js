@@ -11,7 +11,7 @@
  *
  * ── PURITY (W2 (c), DESIGN §7) ────────────────────────────────────────────────
  * Zero infra requires. Only pure deps:
- *   - ../../../../lib/placementModes      (PLACEMENT_MODES constants — pure)
+ *   - ../value-objects/PlacementMode      (closed-enum VO over placement_mode — pure)
  *   - ../../../../../../shared/scheduler/expandRecurring  (isAnchorDependentRecur
  *      — pure recur-shape predicate, no I/O)
  * All data enters via arguments.
@@ -24,7 +24,7 @@
 
 'use strict';
 
-var { PLACEMENT_MODES } = require('../../../../lib/placementModes');
+var PlacementMode = require('../value-objects/PlacementMode');
 var { isAnchorDependentRecur } = require('../../../../../../shared/scheduler/expandRecurring');
 
 // Verbatim from task.controller.js ~745.
@@ -176,8 +176,7 @@ function validateTaskInput(body) {
   }
   // placementMode enum validation
   if (body.placementMode !== undefined) {
-    var validModes = Object.values(PLACEMENT_MODES);
-    if (validModes.indexOf(body.placementMode) < 0) {
+    if (!PlacementMode.isValid(body.placementMode)) {
       errors.push('placementMode "' + body.placementMode + '" is not valid');
     }
   }
