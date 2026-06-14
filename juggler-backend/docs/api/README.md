@@ -3,7 +3,7 @@ type: api-reference
 service: juggler
 status: active
 last_updated: 2026-06-14
-version: leg/jug-csv-export @ 2026-06-14
+version: leg/jug-csv-import @ 2026-06-14
 tags:
   - type/api-reference
   - service/juggler
@@ -221,7 +221,7 @@ Pushes `schedule:changed` events when the scheduler completes. Heartbeat every 3
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/data/import` | Import task data (2MB JSON limit) |
+| `POST` | `/api/data/import` | Import task data — JSON or CSV (`Content-Type: text/csv` or `?format=csv`); 2 MB body cap |
 | `GET` | `/api/data/export` | Export user data — JSON (default) or CSV (`?format=csv`) |
 
 ### GET /api/data/export
@@ -321,6 +321,103 @@ id,text,taskType,status,pri,project,dur,scheduledAt,date,time,deadline,startAfte
 | `401` | Missing or expired JWT |
 | `403` | `data.export` feature not enabled on the user's plan |
 | `500` | Internal server error |
+
+---
+
+### POST /api/data/import — CSV path
+
+**Auth:** `authenticateJWT` (all tiers — no `requireFeature` gate). Import is available on every plan.
+
+**Body size cap:** 2 MB (enforced by the `express.text` / `bodyParser.json` mounts in `app.js` before the route handler; oversized bodies are rejected with `413` before any parsing).
+
+#### Triggering the CSV path
+
+The CSV path is selected when **either** of the following conditions is true:
+
+- The `Content-Type` request header is `text/csv` (preferred — lets the body parser populate `req.body` as the raw CSV string).
+- The query parameter `?format=csv` is present (regardless of `Content-Type`).
+
+When neither condition is met the request is handled as JSON (the pre-existing path, unchanged).
+
+#### Request
+
+```http
+POST /api/data/import
+Authorization: Bearer <JWT>
+Content-Type: text/csv
+
+id,text,taskType,status,pri,project,dur,scheduledAt,date,time,deadline,startAfter,recurring,location,tools,notes,url,completedAt
+,Buy groceries,one-off,pending,P2,Personal,30,,6/15,10:00 AM,,,,Home,,Need oat milk,,
+```
+
+- The body must be valid RFC-4180 CSV.
+- The header row must contain a `text` column (the only required column). All other columns from the 18-column export schema are optional — unrecognised columns are rejected.
+- Rows where the `text` cell is empty are silently skipped.
+- The `id` column may be omitted or left blank; the server assigns a synthetic id per row and then fabricates a final unique DB id at insert time (no collision with existing tasks).
+
+#### Merge semantics
+
+CSV import is **always additive (merge mode)**. The mode is hard-forced to `merge` in the controller regardless of any `?mode=` query parameter — a task-only CSV cannot carry the config, projects, and locations needed to drive a safe destructive replace. Concretely:
+
+- Existing tasks and configuration are **never wiped**.
+- Each CSV row is inserted as a **new** task with a freshly fabricated id.
+- Imported tasks are appended to — not merged into — the existing task set.
+- The `?confirm=delete_all` parameter has no effect on CSV imports.
+
+#### Round-trip with CSV export
+
+The CSV format produced by `GET /api/data/export?format=csv` is the canonical input format for this endpoint. The 18 columns are identical, encoding rules are exact inverses:
+
+| Export rule | Import inverse |
+|-------------|---------------|
+| `null`/`undefined` → empty cell | Empty cell → field omitted from task object |
+| Array fields joined with `;` | `;`-delimited string split back to array |
+| Formula-injection guard: leading `'` prepended when first non-whitespace char is `=`, `+`, `-`, `@`, `\t`, or `\r` | Leading `'` stripped **only** when `str[1]` is one of those trigger chars — genuine apostrophe-led values (`'tis`, `'90s`) are preserved |
+| `recurring`: `true` or `false` | `'true'` → `true`; anything else → `false` |
+
+**Known limitation — semicolons in names.** The `location` and `tools` arrays are joined and split on `;`. A location or tools name that itself contains a `;` character will be mis-split on import, producing extra spurious array elements. This is an inherent ambiguity of the `;` separator convention; such names are **not round-trip-safe**. Workaround: avoid `;` in location and tools names.
+
+#### Response
+
+On success the response mirrors the JSON import envelope:
+
+```
+HTTP/1.1 200 OK
+Content-Type: application/json
+```
+
+```json
+{ "ok": true }
+```
+
+(The exact body shape is owned by `facade.importData`; the HTTP status is always `200` on a clean merge.)
+
+#### Error responses
+
+| Status | Condition | Body |
+|--------|-----------|------|
+| `400 Bad Request` | Malformed CSV: unbalanced quotes, ragged row (cell count differs from header count), missing `text` header column, or body is not a string. Zero DB writes on any parse error. | `{ "error": "Invalid CSV: <descriptive message>" }` |
+| `401 Unauthorized` | Missing or expired JWT | Standard auth error |
+| `413 Payload Too Large` | Body exceeds the 2 MB cap | Standard Express body-parser error |
+| `500 Internal Server Error` | Unexpected server error after a successful parse | `{ "error": "Import failed" }` |
+
+#### Example — import a single task via curl
+
+```bash
+curl -s -X POST http://localhost:5002/api/data/import \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: text/csv" \
+  --data-binary $'id,text,taskType,status,pri,project,dur,scheduledAt,date,time,deadline,startAfter,recurring,location,tools,notes,url,completedAt\r\n,Buy groceries,one-off,pending,P2,Personal,30,,6/15,10:00 AM,,,,,,,https://example.com,\r\n'
+```
+
+Or equivalently, sending an exported CSV file back:
+
+```bash
+curl -s -X POST "http://localhost:5002/api/data/import?format=csv" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: text/csv" \
+  --data-binary @juggler-tasks.csv
+```
 
 ---
 

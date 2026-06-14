@@ -21,6 +21,7 @@ const facade = require('../slices/user-config/facade');
 const { dataControllerLogger } = require('../lib/logger');
 const { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 const { tasksToCsv } = require('../lib/tasks-csv');
+const { csvToTasks } = require('../lib/csv-to-tasks');
 
 const logger = dataControllerLogger;
 
@@ -31,14 +32,41 @@ function sendEnvelope(res, result) {
 
 /**
  * POST /api/data/import
- * Import from window.storage JSON format (v7 persistAll shape)
+ * Import from window.storage JSON format (v7 persistAll shape), OR
+ * from a text/csv body (Content-Type: text/csv or ?format=csv).
+ *
+ * CSV path: parses the raw CSV string via csvToTasks, builds
+ * { extraTasks, v7: true }, and FORCES mode='merge' (a task-only CSV
+ * must never drive a destructive replace — it carries no config/projects
+ * to restore). A parse error returns 400 with ZERO DB writes.
+ *
+ * JSON path: unchanged — data: req.body, mode: req.query.mode.
  */
 async function importData(req, res) {
   try {
+    let data;
+    let mode;
+
+    if (req.is('text/csv') || req.query.format === 'csv') {
+      // CSV path — req.body is the raw CSV string (express.text parser upstream)
+      let tasks;
+      try {
+        tasks = csvToTasks(req.body);
+      } catch (parseErr) {
+        return res.status(400).json({ error: 'Invalid CSV: ' + parseErr.message });
+      }
+      data = { extraTasks: tasks, v7: true };
+      mode = 'merge'; // CSV is always additive — never destructive replace
+    } else {
+      // JSON path — unchanged
+      data = req.body;
+      mode = req.query.mode;
+    }
+
     const result = await facade.importData({
       userId: req.user.id,
-      data: req.body,
-      mode: req.query.mode,
+      data,
+      mode,
       confirm: req.query.confirm,
       timezoneHeader: req.headers['x-timezone']
     });

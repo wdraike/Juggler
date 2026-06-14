@@ -289,7 +289,7 @@ app.get('/api/events', (req, res, next) => {
 app.use('/health', healthLimiter, healthRoutes);
 app.use('/api/health', authenticateJWT, healthLimiter, healthRoutes);
 app.use('/api/ai', aiLimiter, aiRoutes);
-app.use('/api/data/import', bodyParser.json({ limit: '2mb' }));
+app.use('/api/data/import', express.text({ type: 'text/csv', limit: '2mb' }), bodyParser.json({ limit: '2mb' }));
 app.use('/api', apiLimiter);
 app.use('/api/tasks', authenticateJWT, writeRateLimiter, taskRoutes);
 app.use('/api/config', authenticateJWT, writeRateLimiter, configRoutes);
