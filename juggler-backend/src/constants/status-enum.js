@@ -1,7 +1,6 @@
 var CalHistoryStatus = Object.freeze({
   SCHEDULED: 'SCHEDULED',
   COMPLETED: 'COMPLETED',
-  SKIPPED: 'SKIPPED',
   MISSED: 'MISSED',
   CANCELLED: 'CANCELLED'
 });
@@ -9,14 +8,12 @@ var CalHistoryStatus = Object.freeze({
 var CAL_HISTORY_STATUSES = Object.freeze([
   CalHistoryStatus.SCHEDULED,
   CalHistoryStatus.COMPLETED,
-  CalHistoryStatus.SKIPPED,
   CalHistoryStatus.MISSED,
   CalHistoryStatus.CANCELLED
 ]);
 
 var CAL_HISTORY_TERMINAL_STATUSES = Object.freeze([
   CalHistoryStatus.COMPLETED,
-  CalHistoryStatus.SKIPPED,
   CalHistoryStatus.MISSED,
   CalHistoryStatus.CANCELLED
 ]);
@@ -37,8 +34,6 @@ function getCalHistoryStatusDisplayName(status) {
       return 'Scheduled';
     case CalHistoryStatus.COMPLETED:
       return 'Completed';
-    case CalHistoryStatus.SKIPPED:
-      return 'Skipped';
     case CalHistoryStatus.MISSED:
       return 'Missed';
     case CalHistoryStatus.CANCELLED:

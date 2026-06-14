@@ -1,13 +1,9 @@
 // Tests for status enum constants
 //
-// De-rot 2026-06-09: The original test expected CAL_HISTORY_STATUSES to contain
-// only 4 values [SCHEDULED, COMPLETED, MISSED, CANCELLED] — without SKIPPED.
-// Migration 20260605010000_fix_cal_history_status_enum intended to remove
-// SKIPPED from the DB enum, but src/constants/status-enum.js was never updated
-// to match: it still exports SKIPPED as a valid value.
-// The tests now reflect the actual exported constants (5 values including SKIPPED).
-// REAL BUG reported: constants/status-enum.js has stale SKIPPED value — see
-// SHARED CHANGES NEEDED in de-rot report.
+// Updated 2026-06-14 (leg jug-calhistory-skipped-enum, 999.308b): SKIPPED was
+// removed from src/constants/status-enum.js to match the DB CHECK constraint
+// (migration 20260605010000 dropped SKIPPED→CANCELLED). Assertions now reflect
+// the correct 4-value DB-aligned state.
 
 const { CalHistoryStatus, CAL_HISTORY_STATUSES, CAL_HISTORY_TERMINAL_STATUSES,
         isValidCalHistoryStatus, isTerminalCalHistoryStatus, getCalHistoryStatusDisplayName } = require('../../src/constants/status-enum');
@@ -59,14 +55,10 @@ describe('Status Enum Constants', () => {
     expect(getCalHistoryStatusDisplayName('INVALID')).toBe('Unknown');
   });
 
-  // NOTE: The source includes SKIPPED (5 values) even though migration
-  // 20260605010000 intended to remove it from the DB enum.  The constants file
-  // was never updated — see REAL BUG in de-rot report.
   test('CAL_HISTORY_STATUSES contains all statuses exported by the module', () => {
     expect(CAL_HISTORY_STATUSES).toEqual([
       CalHistoryStatus.SCHEDULED,
       CalHistoryStatus.COMPLETED,
-      CalHistoryStatus.SKIPPED,
       CalHistoryStatus.MISSED,
       CalHistoryStatus.CANCELLED
     ]);
@@ -75,7 +67,6 @@ describe('Status Enum Constants', () => {
   test('CAL_HISTORY_TERMINAL_STATUSES contains terminal statuses exported by the module', () => {
     expect(CAL_HISTORY_TERMINAL_STATUSES).toEqual([
       CalHistoryStatus.COMPLETED,
-      CalHistoryStatus.SKIPPED,
       CalHistoryStatus.MISSED,
       CalHistoryStatus.CANCELLED
     ]);
