@@ -73,6 +73,7 @@ var dateHelpers = require('../../scheduler/dateHelpers');
 var localToUtc = dateHelpers.localToUtc;
 var toDateISO = dateHelpers.toDateISO;
 var { z } = require('zod');
+var { validateImportBody } = require('../../schemas/data-import.schema');
 var proxyConfig = require('../../proxy-config');
 var { createLogger } = require('@raike/lib-logger');
 var logger = createLogger('user-config.facade');
@@ -140,6 +141,15 @@ function importWipeTasks(trxRepo, userId) {
 }
 function importInsertTask(trxRepo, row) {
   return tasksWrite.insertTask(trxRepo.db, row);
+}
+// MergeImportData task-id read (two-mode import / W2) — the EXISTING task ids for
+// the user, read within the merge transaction. task_masters.id is the canonical id
+// space (every task has a master; non-recurring master + instance share the id), so
+// a merge collision check against task_masters.id covers all task kinds. Reads via
+// trxRepo.db (the same knex trx handle the config repo carries), mirroring how
+// importWipeTasks/importInsertTask reach the task tables outside the config port.
+function mergeListTaskIds(trxRepo, userId) {
+  return trxRepo.db('task_masters').where('user_id', userId).pluck('id');
 }
 // v7-task → DB-row mapper (data.controller.js:79-125) — verbatim, incl. trx.fn.now()
 // for created_at/updated_at on the IMPORT path. The import insert is a task-table
@@ -318,6 +328,13 @@ var _exportData = new app.ExportData({ repo: _repo, fetchTasks: exportFetchTasks
 var _importData = new app.ImportData({
   repo: _repo, wipeTasks: importWipeTasks, insertTask: importInsertTask, buildTaskRow: importBuildTaskRow
 });
+// MergeImportData (two-mode import / W2) — additive, non-destructive. Shares the
+// SAME repo + task insert/row-map collaborators as ImportData; adds the
+// existing-task-id read it needs to re-key colliding ids. Does NOT touch
+// importData()'s behavior (mode routing is a later wave).
+var _mergeImportData = new app.MergeImportData({
+  repo: _repo, listTaskIds: mergeListTaskIds, insertTask: importInsertTask, buildTaskRow: importBuildTaskRow
+});
 
 // feature-catalog.controller handler
 var _getFeatureCatalog = new app.GetFeatureCatalog({
@@ -393,7 +410,100 @@ function replaceTools(input) { return _replaceTools.execute(input); }
 
 // ── data.controller ──
 function exportData(input) { return _exportData.execute(input); }
-function importData(input) { return _importData.execute(input); }
+
+/**
+ * dispatchImport — two-mode import dispatcher (W3).
+ *
+ * The SINGLE entry point the `importData` facade op delegates to. It owns mode
+ * routing + fail-safe resolution + schema validation, then dispatches to the
+ * EXISTING replace (`_importData`) or merge (`_mergeImportData`) use-cases — whose
+ * internal logic is unchanged. Returns the same `{ status, body }` envelope.
+ *
+ * ── ORDERING (EXACT — preserves the golden-master error messages) ─────────────
+ *   1. LEGACY SHAPE GUARD FIRST: `!data || !data.extraTasks` → 400 'Invalid import
+ *      data …' (H2-6 message; must run before mode + schema).
+ *   2. RESOLVE MODE from input.mode (?mode) + input.confirm (?confirm):
+ *        - absent/'' → LEGACY: confirm !== 'delete_all' → 400 'Import will DELETE
+ *          all existing …' (H2-5/elmoB2a/b); else REPLACE.
+ *        - 'merge'   → MERGE (no confirm required).
+ *        - 'replace' → confirm !== 'delete_all' → SAME 400 'Import will DELETE …';
+ *          else REPLACE.
+ *        - anything else → 400 "Invalid import mode '<value>' …" with ZERO DB writes.
+ *      An unknown mode NEVER falls through; an absent mode NEVER silently merges/wipes.
+ *   3. SCHEMA VALIDATION (W1 validateImportBody) — AFTER the shape+mode guards,
+ *      BEFORE any DB work, for the proceeding (merge/replace) paths. !ok → 400
+ *      { error: 'Validation failed', details } with ZERO DB writes.
+ *   4. DISPATCH: REPLACE → _importData (unchanged); MERGE → _mergeImportData.
+ *      Replace success body is augmented with `mode: 'replace'`; merge already
+ *      carries `mode: 'merge'` + `tasksRekeyed`.
+ *
+ * @param {Object} input
+ * @param {string} input.userId
+ * @param {*} input.data       the request body (v7 import shape).
+ * @param {string} [input.mode]     the ?mode query value.
+ * @param {string} [input.confirm]  the ?confirm query value.
+ * @param {string} [input.timezoneHeader]  raw x-timezone header.
+ * @returns {Promise<{ status: number, body: Object }>}
+ */
+async function dispatchImport(input) {
+  var data = input.data;
+
+  // 1. LEGACY SHAPE GUARD FIRST — owns H2-6's "Invalid import data" message.
+  if (!data || !data.extraTasks) {
+    return { status: 400, body: { error: 'Invalid import data — expected v7 format with extraTasks' } };
+  }
+
+  // 2. RESOLVE MODE (fail-safe — unknown never falls through; absent never wipes/merges silently).
+  var mode = input.mode;
+  var resolved;
+  if (mode === undefined || mode === null || mode === '') {
+    // LEGACY: absent mode → REPLACE, but only with the destructive confirm.
+    if (input.confirm !== 'delete_all') {
+      return { status: 400, body: { error: 'Import will DELETE all existing tasks, config, and projects. Pass ?confirm=delete_all to proceed.' } };
+    }
+    resolved = 'replace';
+  } else if (mode === 'merge') {
+    resolved = 'merge';
+  } else if (mode === 'replace') {
+    if (input.confirm !== 'delete_all') {
+      return { status: 400, body: { error: 'Import will DELETE all existing tasks, config, and projects. Pass ?confirm=delete_all to proceed.' } };
+    }
+    resolved = 'replace';
+  } else {
+    // Unknown mode — reject with ZERO DB writes; NEVER fall through to replace/merge.
+    return { status: 400, body: { error: "Invalid import mode '" + mode + "' — expected 'merge' or 'replace'." } };
+  }
+
+  // 3. SCHEMA VALIDATION (W1) — after shape+mode guards, before any DB work, for the
+  //    proceeding paths. ZERO DB writes on failure.
+  var validation = validateImportBody(data);
+  if (!validation.ok) {
+    return { status: 400, body: { error: 'Validation failed', details: validation.errors } };
+  }
+
+  // 4. DISPATCH — reuse the EXISTING use-cases unchanged.
+  if (resolved === 'merge') {
+    return _mergeImportData.execute({
+      userId: input.userId,
+      data: data,
+      timezoneHeader: input.timezoneHeader
+    });
+  }
+  // REPLACE — legacy ImportData; augment its success body with mode:'replace'.
+  var result = await _importData.execute({
+    userId: input.userId,
+    data: data,
+    confirm: input.confirm,
+    timezoneHeader: input.timezoneHeader
+  });
+  if (result.status === 200) {
+    result.body.mode = 'replace';
+  }
+  return result;
+}
+
+function importData(input) { return dispatchImport(input); }
+function mergeImportData(input) { return _mergeImportData.execute(input); }
 
 // ── feature-catalog.controller ──
 function getFeatureCatalog() { return _getFeatureCatalog.execute(); }
@@ -440,6 +550,7 @@ module.exports = {
   replaceTools: replaceTools,
   exportData: exportData,
   importData: importData,
+  mergeImportData: mergeImportData,
   getFeatureCatalog: getFeatureCatalog,
   getImpersonationTargets: getImpersonationTargets,
   getImpersonationLog: getImpersonationLog,

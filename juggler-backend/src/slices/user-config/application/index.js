@@ -57,6 +57,7 @@ module.exports = {
   ReplaceLocations: require('./commands/ReplaceLocations'),
   ReplaceTools: require('./commands/ReplaceTools'),
   ImportData: require('./commands/ImportData'),
+  MergeImportData: require('./commands/MergeImportData'),
   CheckEntitlement: require('./commands/CheckEntitlement'),
   GateFeature: require('./commands/GateFeature'),
   EnforceEntityLimit: require('./commands/EnforceEntityLimit'),

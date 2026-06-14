@@ -36,6 +36,7 @@ async function importData(req, res) {
     const result = await facade.importData({
       userId: req.user.id,
       data: req.body,
+      mode: req.query.mode,
       confirm: req.query.confirm,
       timezoneHeader: req.headers['x-timezone']
     });

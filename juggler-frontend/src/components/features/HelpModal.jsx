@@ -216,6 +216,19 @@ export default function HelpModal({ onClose, darkMode, isMobile }) {
           <P>&bull; Hover over any button or badge for a tooltip explaining what it does.</P>
         </Section>
 
+        {/* 12. Import / Export */}
+        <Section title="12. Import / Export" theme={theme}>
+          <P>Open Import / Export from the header menu. Export downloads a JSON snapshot of all your tasks, projects, locations, tools, and settings. You can also export or import .ics files for calendar apps.</P>
+          <P><B>Importing JSON</B> — paste the JSON into the text area and click <B>Import Data</B>. A dialog appears asking how to apply the file:</P>
+          <P style={{ paddingLeft: 12 }}>
+            <B>Merge — keep my data, add new:</B> adds the items from the file to what you already have. Nothing you own is deleted or overwritten. If the file contains a task, project, location, or tool whose name or ID already exists, the incoming item is brought in with a unique suffix (e.g. &ldquo;Errands (2)&rdquo;) so your data stays intact. Your settings (grid zoom, schedule floor/ceiling, tool matrix, time blocks, location schedules) are always kept as-is in merge mode — the file&rsquo;s settings are ignored.
+          </P>
+          <P style={{ paddingLeft: 12 }}>
+            <B>Replace all — delete everything first:</B> permanently wipes every existing task, project, location, tool, and setting, then loads the file from scratch. This cannot be undone. A separate confirmation is required before anything is deleted.
+          </P>
+          <P>Import is available to all users — no paid plan required.</P>
+        </Section>
+
       </div>
     </div>
   );

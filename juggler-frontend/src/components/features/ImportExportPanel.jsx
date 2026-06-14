@@ -2,7 +2,7 @@
  * ImportExportPanel — JSON import/export, ICS import/export
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import apiClient from '../../services/apiClient';
 import { getTheme } from '../../theme/colors';
 
@@ -401,15 +401,50 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
   var [exporting, setExporting] = useState(false);
   var [icsImporting, setIcsImporting] = useState(false);
   var [icsPreview, setIcsPreview] = useState(null); // { tasks, fileName }
+  var [importMode, setImportMode] = useState(null); // { data } while the mode-picker dialog is open
   var fileInputRef = useRef(null);
+  var cancelImportBtnRef = useRef(null);
+  var importTriggerRef = useRef(null);
 
-  async function handleImport() {
+  // Step 1: validate + parse JSON, then open the mode-picker dialog (posts nothing yet).
+  function handleImport() {
     if (!importText.trim()) return;
+    var data;
+    try {
+      data = JSON.parse(importText);
+    } catch (e) {
+      showToast('Import failed: invalid JSON — ' + e.message, 'error');
+      return;
+    }
+    setImportMode({ data: data });
+  }
+
+  // Step 2: user picked a mode — POST with the matching query params.
+  async function doImport(mode) {
+    if (!importMode) return;
+    var data = importMode.data;
+    var url = mode === 'replace'
+      ? '/data/import?mode=replace&confirm=delete_all'
+      : '/data/import?mode=merge';
     try {
       setImporting(true);
-      var data = JSON.parse(importText);
-      await apiClient.post('/data/import', data);
-      showToast('Import successful! Reload to see changes.', 'success');
+      var res = await apiClient.post(url, data);
+      var body = (res && res.data) || {};
+      if (mode === 'merge') {
+        var c = body.counts || {};
+        var parts = [];
+        parts.push((c.tasks != null ? c.tasks : 0) + ' tasks added');
+        if (c.tasksRekeyed) parts.push('(' + c.tasksRekeyed + ' re-keyed to avoid clashes)');
+        var collections = [];
+        if (c.projects) collections.push(c.projects + ' projects');
+        if (c.locations) collections.push(c.locations + ' locations');
+        if (c.tools) collections.push(c.tools + ' tools');
+        if (collections.length > 0) parts.push('+ ' + collections.join(', '));
+        showToast('Merged: ' + parts.join(' ') + '. Reload to see changes.', 'success');
+      } else {
+        showToast('Import successful! Reload to see changes.', 'success');
+      }
+      setImportMode(null);
       setTimeout(() => window.location.reload(), 1500);
     } catch (e) {
       showToast('Import failed: ' + e.message, 'error');
@@ -417,6 +452,27 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
       setImporting(false);
     }
   }
+
+  function cancelImportMode() {
+    if (importing) return;
+    setImportMode(null);
+    if (importTriggerRef.current) importTriggerRef.current.focus();
+  }
+
+  // Esc closes the mode-picker dialog (= Cancel); focus the safe (Cancel) button on open.
+  useEffect(function() {
+    if (!importMode) return;
+    function onKey(ev) {
+      if (ev.key === 'Escape') {
+        ev.stopPropagation();
+        cancelImportMode();
+      }
+    }
+    window.addEventListener('keydown', onKey, true);
+    if (cancelImportBtnRef.current) cancelImportBtnRef.current.focus();
+    return function() { window.removeEventListener('keydown', onKey, true); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [importMode, importing]);
 
   function handleCopySchedule() {
     try {
@@ -564,7 +620,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button onClick={handleExport} disabled={exporting} style={{
               border: 'none', borderRadius: 2, padding: '10px 20px',
-              background: theme.accent, color: '#FDFAF5', fontWeight: 600, fontSize: 13,
+              background: theme.accent, color: darkMode ? '#1A2B4A' : theme.text, fontWeight: 600, fontSize: 13,
               cursor: 'pointer', fontFamily: 'inherit', opacity: exporting ? 0.5 : 1
             }}>
               {exporting ? 'Exporting...' : 'Download JSON'}
@@ -639,7 +695,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
           <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 4 }}>Import JSON</div>
           <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 8 }}>
             Paste the JSON from your old task tracker (window.storage format) to import all tasks, settings, and config.
-            This will replace all existing data.
+            You&rsquo;ll choose to merge (add new, keep your data) or replace everything before anything is imported.
           </div>
           <textarea
             value={importText}
@@ -654,7 +710,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
             }}
           />
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-            <button onClick={handleImport} disabled={importing || !importText.trim()} style={{
+            <button ref={importTriggerRef} onClick={handleImport} disabled={importing || !importText.trim()} style={{
               border: 'none', borderRadius: 2, padding: '10px 20px',
               background: theme.success, color: '#FDFAF5', fontWeight: 600, fontSize: 13,
               cursor: 'pointer', fontFamily: 'inherit',
@@ -664,6 +720,109 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
             </button>
           </div>
         </div>
+
+        {/* Import mode picker — Merge / Replace all / Cancel */}
+        {importMode && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="import-mode-title"
+            style={{
+              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+              background: 'rgba(0,0,0,0.25)', zIndex: 320, display: 'flex',
+              alignItems: 'center', justifyContent: 'center'
+            }}
+            onClick={cancelImportMode}
+          >
+            <div
+              style={{
+                background: theme.bgSecondary, borderRadius: isMobile ? 0 : 2,
+                width: isMobile ? '100%' : 460, maxWidth: isMobile ? '100%' : '95vw',
+                height: isMobile ? '100%' : undefined,
+                overflow: 'auto', padding: 20,
+                boxShadow: isMobile ? 'none' : '0 2px 8px ' + theme.shadow,
+                display: 'flex', flexDirection: 'column'
+              }}
+              onClick={function(e) { e.stopPropagation(); }}
+            >
+              <div id="import-mode-title" style={{
+                fontFamily: "'Playfair Display', serif", fontSize: 18, fontWeight: 700,
+                color: theme.text, marginBottom: 6
+              }}>
+                How should we import?
+              </div>
+              <div style={{ fontSize: 12, color: theme.textMuted, marginBottom: 16 }}>
+                Choose how this file is applied to your existing data.
+              </div>
+
+              {/* Merge */}
+              <button
+                onClick={function() { doImport('merge'); }}
+                disabled={importing}
+                style={{
+                  textAlign: 'left', border: '1px solid ' + theme.border, borderRadius: 2,
+                  padding: '12px 14px', marginBottom: 10,
+                  background: theme.card, color: theme.text, cursor: 'pointer',
+                  fontFamily: 'inherit', opacity: importing ? 0.5 : 1,
+                  outline: 'none'
+                }}
+                onFocus={function(e) { e.currentTarget.style.boxShadow = '0 0 0 2px #FDFAF5, 0 0 0 4px #1A2B4A'; }}
+                onBlur={function(e) { e.currentTarget.style.boxShadow = 'none'; }}
+              >
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 3 }}>
+                  Merge — keep my data, add new
+                </div>
+                <div style={{ fontSize: 11, color: theme.textMuted }}>
+                  Adds new items and never deletes or overwrites your existing tasks, projects,
+                  locations, tools or settings (colliding items arrive with a unique suffix).
+                </div>
+              </button>
+
+              {/* Replace all — destructive */}
+              <button
+                onClick={function() { doImport('replace'); }}
+                disabled={importing}
+                aria-label="Replace all — delete everything first. This cannot be undone."
+                style={{
+                  textAlign: 'left', border: '1px solid ' + (darkMode ? theme.redText : theme.error), borderRadius: 2,
+                  padding: '12px 14px', marginBottom: 16,
+                  background: theme.redBg, color: theme.redText, cursor: 'pointer',
+                  fontFamily: 'inherit', opacity: importing ? 0.5 : 1,
+                  outline: 'none'
+                }}
+                onFocus={function(e) { e.currentTarget.style.boxShadow = '0 0 0 2px #FDFAF5, 0 0 0 4px #1A2B4A'; }}
+                onBlur={function(e) { e.currentTarget.style.boxShadow = 'none'; }}
+              >
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 3, color: theme.redText }}>
+                  <span aria-hidden="true">&#x26A0;</span>{' '}Replace all — delete everything first
+                </div>
+                <div style={{ fontSize: 11, color: theme.redText, opacity: 0.85 }}>
+                  Permanently wipes every existing task, project, location, tool and setting,
+                  then loads the file. This cannot be undone.
+                </div>
+              </button>
+
+              {/* Cancel — safe default focus */}
+              <button
+                ref={cancelImportBtnRef}
+                onClick={cancelImportMode}
+                disabled={importing}
+                style={{
+                  alignSelf: 'flex-end',
+                  border: '1px solid ' + theme.border, borderRadius: 2, padding: '10px 20px',
+                  background: 'transparent', color: theme.textMuted, fontWeight: 600, fontSize: 13,
+                  cursor: importing ? 'default' : 'pointer', fontFamily: 'inherit',
+                  opacity: importing ? 0.5 : 1,
+                  outline: 'none'
+                }}
+                onFocus={function(e) { e.currentTarget.style.boxShadow = '0 0 0 2px #FDFAF5, 0 0 0 4px #1A2B4A'; }}
+                onBlur={function(e) { e.currentTarget.style.boxShadow = 'none'; }}
+              >
+                {importing ? 'Importing...' : 'Cancel'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
