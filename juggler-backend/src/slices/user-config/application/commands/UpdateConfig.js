@@ -43,11 +43,13 @@
 
 var UserConfig = require('../../domain/entities/UserConfig');
 
-// Schedule-affecting keys — verbatim from config.controller.js:180-184.
+// Schedule-affecting keys — verbatim from config.controller.js:180-184,
+// extended to include template_defaults and template_overrides (GAP-1 / 999.464):
+// these are valid writable keys (UserConfig.VALID_KEYS) that drive scheduling.
 var SCHED_KEYS = [
   'hour_location_overrides', 'time_blocks', 'loc_schedules',
   'loc_schedule_defaults', 'loc_schedule_overrides', 'tool_matrix', 'preferences',
-  'schedule_templates'
+  'schedule_templates', 'template_defaults', 'template_overrides'
 ];
 
 /** @param {UpdateConfigDeps} deps */

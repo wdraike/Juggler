@@ -181,6 +181,47 @@ describe('UpdateConfig (== updateConfig, H1-5..H1-10)', () => {
       .execute({ userId: USER, key: 'schedule_templates', value: value });
     expect(res.body.warnings).toHaveLength(0);
   });
+
+  // ── BUG-1 RED tests (jug-sched-template-keys-reschedule / 999.464) ─────────
+  // template_defaults and template_overrides are VALID_KEYS that drive scheduling
+  // but are OMITTED from SCHED_KEYS — so editing them does NOT return a
+  // scheduleAfter directive. These two tests FAIL on pre-fix code (RED).
+
+  test('BUG-1 RED: template_defaults write returns a scheduleAfter directive', async () => {
+    // This FAILS on current code because 'template_defaults' is absent from SCHED_KEYS.
+    var value = { monday: 'work', friday: 'light' };
+    var res = await new App.UpdateConfig({ repo: new InMemoryConfigRepository(), cache: fakeCache(), enqueueScheduleRun: function () {} })
+      .execute({ userId: USER, key: 'template_defaults', value: value });
+    expect(res.status).toBe(200);
+    expect(res.scheduleAfter).toEqual({ userId: USER, source: 'config:template_defaults' });
+  });
+
+  test('BUG-1 RED: template_overrides write returns a scheduleAfter directive', async () => {
+    // This FAILS on current code because 'template_overrides' is absent from SCHED_KEYS.
+    var value = { '2026-06-14': 'light' };
+    var res = await new App.UpdateConfig({ repo: new InMemoryConfigRepository(), cache: fakeCache(), enqueueScheduleRun: function () {} })
+      .execute({ userId: USER, key: 'template_overrides', value: value });
+    expect(res.status).toBe(200);
+    expect(res.scheduleAfter).toEqual({ userId: USER, source: 'config:template_overrides' });
+  });
+
+  // ── GUARD / no-regression (must already be GREEN; must stay GREEN after fix) ─
+  // Pins: (a) an existing SCHED_KEYS member still triggers scheduleAfter,
+  //        (b) a non-sched valid key does NOT trigger scheduleAfter.
+
+  test('GUARD: schedule_templates (existing SCHED_KEY) still returns scheduleAfter', async () => {
+    var value = { weekday: { blocks: [] } };
+    var res = await new App.UpdateConfig({ repo: new InMemoryConfigRepository(), cache: fakeCache(), enqueueScheduleRun: function () {} })
+      .execute({ userId: USER, key: 'schedule_templates', value: value });
+    expect(res.scheduleAfter).toEqual({ userId: USER, source: 'config:schedule_templates' });
+  });
+
+  test('GUARD: temp_unit_pref (non-sched key, value "F") has NO scheduleAfter', async () => {
+    var res = await new App.UpdateConfig({ repo: new InMemoryConfigRepository(), cache: fakeCache(), enqueueScheduleRun: function () {} })
+      .execute({ userId: USER, key: 'temp_unit_pref', value: 'F' });
+    expect(res.status).toBe(200);
+    expect(res.scheduleAfter).toBeUndefined();
+  });
 });
 
 // ── CreateProject / DeleteProject / ReorderProjects ──────────────────────────
