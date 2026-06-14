@@ -58,6 +58,7 @@ var parseWhen = timeBlockHelpers.parseWhen;
 
 var locationHelpers = require('./locationHelpers');
 var canTaskRunAtMin = locationHelpers.canTaskRunAtMin;
+var canTaskRunAtMinCached = locationHelpers.canTaskRunAtMinCached;
 var resolveLocationId = locationHelpers.resolveLocationId;
 
 var { PLACEMENT_MODES } = require('../lib/placementModes');
@@ -869,6 +870,11 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   // `env` carries the maps extendDatesTo needs to build new day entries
   // lazily rather than pre-computing 365 days of windows on every run.
   var env = opts && opts.env;
+  // A-002: per-run location-availability cache. resolveLocationId at a given (dateKey,
+  // minute) is task-independent and pure within a run, so memoizing it on env (one object
+  // per run, line ~1223) collapses the per-task recompute to one compute per day-slot.
+  // env-absent paths pass null → canTaskRunAtMinCached falls back to the uncached call.
+  var locCache = env ? (env._locCache || (env._locCache = Object.create(null))) : null;
   var canExtend = env && !item.isRecurring && !item.deadlineDate && !(opts && opts.ignoreDeadline);
 
   var allowedDows = item.allowedDows;
@@ -935,7 +941,7 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
         for (var s = prefStart; s + item.dur <= winEnd; s += 15) {
           if (!isFreeWithTravel(occ, s, item.dur, item.travelBefore, item.travelAfter)) continue;
           if (checkDeps && !depsSatisfied(item, i, s, placedById, statuses, dates)) continue;
-          if (checkLoc && !canTaskRunAtMin(item.task, d.key, s, cfg, toolMatrix, blocks)) continue;
+          if (checkLoc && !canTaskRunAtMinCached(item.task, d.key, s, cfg, toolMatrix, blocks, locCache)) continue;
           if (checkWeather && !weatherOk(item.task, d.key, s, weatherByDateHour)) continue;
           return { dateKey: d.key, start: s };
         }
@@ -943,7 +949,7 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
         for (var sf = winStart; sf < prefStart; sf += 15) {
           if (!isFreeWithTravel(occ, sf, item.dur, item.travelBefore, item.travelAfter)) continue;
           if (checkDeps && !depsSatisfied(item, i, sf, placedById, statuses, dates)) continue;
-          if (checkLoc && !canTaskRunAtMin(item.task, d.key, sf, cfg, toolMatrix, blocks)) continue;
+          if (checkLoc && !canTaskRunAtMinCached(item.task, d.key, sf, cfg, toolMatrix, blocks, locCache)) continue;
           if (checkWeather && !weatherOk(item.task, d.key, sf, weatherByDateHour)) continue;
           return { dateKey: d.key, start: sf };
         }
@@ -997,6 +1003,10 @@ function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   var weatherByDateHour = cfg && cfg.weatherByDateHour;
   var checkWeather = weatherByDateHour && item.task && hasWeatherConstraint(item.task);
 
+  // A-002: same per-run location cache as findEarliestSlot (env reused across the run).
+  var env = opts && opts.env;
+  var locCache = env ? (env._locCache || (env._locCache = Object.create(null))) : null;
+
   for (var i = latestIdx; i >= earliestIdx; i--) {
     var d = dates[i];
     if (item.allowedDows && !item.allowedDows[d.isoDow]) continue;
@@ -1011,7 +1021,7 @@ function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
       for (var s = startMax; s >= winStart; s -= 15) {
         if (!isFreeWithTravel(occ, s, item.dur, item.travelBefore, item.travelAfter)) continue;
         if (checkDeps && !depsSatisfied(item, i, s, placedById, statuses, dates)) continue;
-        if (checkLoc && !canTaskRunAtMin(item.task, d.key, s, cfg, toolMatrix, blocks)) continue;
+        if (checkLoc && !canTaskRunAtMinCached(item.task, d.key, s, cfg, toolMatrix, blocks, locCache)) continue;
         if (checkWeather && !weatherOk(item.task, d.key, s, weatherByDateHour)) continue;
         return { dateKey: d.key, start: s };
       }
