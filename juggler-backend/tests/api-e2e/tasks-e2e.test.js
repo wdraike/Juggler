@@ -14,11 +14,12 @@
  *   GET  /api/tasks/:id → 200 { task: {...} }
  *   PUT  /api/tasks/:id → 200 { task: {...} } (or { task: {...}, queued: true })
  *   DELETE /api/tasks/:id → 200 { message: 'Task deleted', id }
- *   PUT  /api/tasks/:id/unpin → 200 { success: true, action: 'unpinned', ... }
+ *   (PUT /api/tasks/:id/unpin — REMOVED in commit 58d9a12 2026-05-25; see test below)
  *
  * DB field notes (two-table model: task_masters + task_instances):
- *   text, pri, dur → task_masters
- *   date_pinned, scheduled_at → task_instances
+ *   text, pri, dur, placement_mode → task_masters
+ *   scheduled_at → task_instances
+ *   (date_pinned was removed in commit 58d9a12 2026-05-25)
  */
 
 'use strict';
@@ -133,31 +134,56 @@ describe('Tasks API — E2E (real Express + real DB)', () => {
     expect(masterRow).toBeUndefined();
   }, harnessProbe));
 
-  // ── PUT /api/tasks/:id/unpin — unpin a pinned task ────────────────────────
+  // ── "Make movable" — clear placement_mode='fixed' via PUT /api/tasks/:id ────
+  //
+  // REWRITTEN in 999.309 W2 (BUG-3 / ernie triage):
+  //   PUT /api/tasks/:id/unpin and date_pinned/datePinned were REMOVED in commit
+  //   58d9a12 (2026-05-25).  placement_mode='fixed' is now the SOLE immovability
+  //   signal (migration 20260518000100 placement_mode_enum_redesign).
+  //   The live "make movable" operation is a normal PUT /api/tasks/:id that sets
+  //   placementMode to a non-fixed value (e.g. 'anytime').
+  //   We do NOT reintroduce /unpin or date_pinned (Scooter VETO, binding).
 
-  test('PUT /api/tasks/:id/unpin works on a date-pinned task', requireDB(async () => {
-    // Create a task with a pinned date
+  test('clearing placement_mode via PUT makes a fixed task movable', requireDB(async () => {
+    // Create a task with placement_mode='fixed' — requires date + time
     const createRes = await request(app)
       .post('/api/tasks')
       .set('Authorization', `Bearer ${token}`)
-      .send({ text: 'pin-test task', dur: 30, date: '2026-06-01', datePinned: true });
+      .send({
+        text: 'fixed-placement test task',
+        dur: 30,
+        date: '2026-06-20',
+        time: '09:00',
+        placementMode: 'fixed',
+      });
 
     expect(createRes.status).toBe(201);
-    const pinnedId = createRes.body.task.id;
+    expect(createRes.body).toHaveProperty('task');
+    const fixedId = createRes.body.task.id;
+    expect(typeof fixedId).toBe('string');
 
-    // Unpin it
-    const unpinRes = await request(app)
-      .put(`/api/tasks/${pinnedId}/unpin`)
-      .set('Authorization', `Bearer ${token}`);
-
-    expect(unpinRes.status).toBe(200);
-    expect(unpinRes.body.success).toBe(true);
-
-    // Verify date_pinned was cleared in task_instances
+    // Verify the task_masters row was written with placement_mode='fixed'
     const db = harness.getDb();
-    const instanceRow = await db('task_instances').where('id', pinnedId).first();
-    expect(instanceRow).toBeDefined();
-    expect(!instanceRow.date_pinned).toBe(true); // falsy: 0 or null
+    const beforeRow = await db('task_masters').where('id', fixedId).first();
+    expect(beforeRow).toBeDefined();
+    expect(beforeRow.placement_mode).toBe('fixed');
+
+    // Clear fixed placement by updating placementMode to 'anytime' (the live
+    // "make movable" operation — normal PUT, no /unpin route)
+    const clearRes = await request(app)
+      .put(`/api/tasks/${fixedId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ placementMode: 'anytime' });
+
+    expect(clearRes.status).toBe(200);
+    expect(clearRes.body).toHaveProperty('task');
+    // The response task must reflect the new placement mode
+    expect(clearRes.body.task.placementMode).toBe('anytime');
+
+    // Verify placement_mode was cleared in task_masters (placement_mode is a TEMPLATE_FIELD)
+    const afterRow = await db('task_masters').where('id', fixedId).first();
+    expect(afterRow).toBeDefined();
+    expect(afterRow.placement_mode).toBe('anytime');
   }, harnessProbe));
 });
 

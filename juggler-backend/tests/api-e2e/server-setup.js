@@ -59,6 +59,60 @@ let _paymentPort = null;
 let _db = null;            // knex connection for DB assertions
 let _appInstance = null;
 
+// Redis client for seeding auth:active:<sub> session keys.
+// Kept separate from the app's auth-client Redis so teardown can DEL
+// only the keys the harness minted without disturbing production sessions.
+let _redis = null;
+// Track every sub that has been seeded so destroy() can DEL them all.
+const _seededSubs = new Set();
+
+// ── Redis session seeding ─────────────────────────────────────────────────────
+
+/**
+ * Lazily open a harness-owned Redis client pointing at the same instance the
+ * app's auth-client uses.  Defaults to test-bed Redis (6479); respects an
+ * explicit REDIS_URL override exactly as server-setup.js:73 does for DB_PASSWORD.
+ */
+function _getHarnessRedis() {
+  if (_redis) return _redis;
+  const Redis = require('ioredis');
+  // Test-bed Redis is on 6479 (dev-bed is 6379 — do NOT default to dev port).
+  // Respect an explicit REDIS_URL override (e.g. CI sets it via test-bed env).
+  const url = process.env.REDIS_URL || 'redis://127.0.0.1:6479';
+  // lazyConnect: false  → connects immediately on construction (no manual .connect() needed)
+  // enableOfflineQueue  → default true: commands queue until 'ready', so setex() issued
+  //                       before the 'connect' event still reaches Redis.
+  // maxRetriesPerRequest: 1 → fail fast if Redis is actually absent.
+  _redis = new Redis(url, {
+    maxRetriesPerRequest: 1,
+    lazyConnect: false,
+    retryStrategy(times) { return times > 2 ? null : Math.min(times * 200, 1000); },
+  });
+  // Suppress unhandled-error crashes if Redis is unavailable; _seedSessionKey
+  // catches the resulting rejections and logs a non-fatal warning.
+  _redis.on('error', () => {});
+  return _redis;
+}
+
+/**
+ * Seed `auth:active:<sub>` in Redis so isSessionActive() returns true for the
+ * given sub.  Mirrors the production pattern in auth-service jwt-auth.js:208:
+ *   redis.setex(`auth:active:${userId}`, 3700, '1')
+ * TTL 3700 s (~1 h + buffer) matches SESSION_TTL in auth-service.
+ * No-ops gracefully if Redis is unavailable (the app will fail-open anyway).
+ */
+async function _seedSessionKey(sub) {
+  if (!sub || _seededSubs.has(sub)) return;
+  try {
+    const redis = _getHarnessRedis();
+    await redis.setex(`auth:active:${sub}`, 3700, '1');
+    _seededSubs.add(sub);
+  } catch (err) {
+    // Non-fatal: if Redis is down the app fail-opens; log so failures are diagnosable.
+    console.warn('[e2e-harness] Could not seed auth:active key for sub', sub, '—', err.message);
+  }
+}
+
 // ── Boot env vars BEFORE any app module is loaded ────────────────────────────
 // These must be set here (at require time) so that module-level caches in
 // auth-client.js (_jwks) and plan-features.middleware.js pick them up correctly.
@@ -76,6 +130,12 @@ process.env.DB_NAME = 'juggler_test';
 process.env.CREDENTIAL_ENCRYPTION_KEY = process.env.CREDENTIAL_ENCRYPTION_KEY || '0'.repeat(64);
 // Suppress scheduler warnings in test output
 process.env.DISABLE_REDIS_RECONNECT = 'true';
+// Point auth-client's Redis session check (and the app's own Redis clients) at
+// test-bed Redis (6479).  auth-client.js defaults to 127.0.0.1:6379 (dev-bed)
+// which is wrong in test — without this the harness seeds 6479 but isSessionActive()
+// checks 6379, always finding no key and returning SESSION_ENDED 401.
+// Respect an explicit override so CI can supply its own REDIS_URL.
+process.env.REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6479';
 
 // ── JWKS server ───────────────────────────────────────────────────────────────
 
@@ -238,6 +298,11 @@ async function setup() {
   await _teardownTestUser(db).catch(() => {}); // ignore errors if user doesn't exist
   await _seedTestUser(db);
 
+  // Seed the default test user's session key so auth-client isSessionActive() returns
+  // true.  Any JWT minted with a different sub (User B, etc.) is seeded on demand
+  // inside makeJWT() below.
+  await _seedSessionKey(TEST_USER_ID);
+
   // Clear module caches so auth-client + jwt-auth load fresh with our env vars.
   // This is essential: auth-client.js caches _jwks at the module level; if the
   // module was already loaded (e.g. by a previous test in the same jest worker),
@@ -279,6 +344,22 @@ async function destroy() {
   if (_paymentServer) {
     await new Promise((resolve) => _paymentServer.close(resolve));
     _paymentServer = null;
+  }
+  // DEL every auth:active key the harness seeded, then quit the client so Jest
+  // exits cleanly (no open handle).  Failures are swallowed — the test-bed Redis
+  // is ephemeral (tmpfs) and keys expire anyway after SESSION_TTL.
+  if (_redis) {
+    try {
+      if (_seededSubs.size > 0) {
+        const keys = [..._seededSubs].map((sub) => `auth:active:${sub}`);
+        await _redis.del(...keys);
+        _seededSubs.clear();
+      }
+    } catch {
+      // Ignore — Redis may already be gone if test-bed was torn down
+    }
+    await _redis.quit().catch(() => {});
+    _redis = null;
   }
 }
 
@@ -337,7 +418,14 @@ async function makeJWT(opts = {}) {
     builder = builder.setExpirationTime(opts.exp || '15m');
   }
 
-  return builder.sign(_keyPair.privateKey);
+  const token = await builder.sign(_keyPair.privateKey);
+
+  // Seed auth:active:<sub> for every minted token so isSessionActive() returns true.
+  // This covers the default user AND any dynamically-minted User B variants (different
+  // sub values used in cross-user isolation tests).  _seedSessionKey is idempotent.
+  await _seedSessionKey(payload.sub);
+
+  return token;
 }
 
 // ── Exports ───────────────────────────────────────────────────────────────────

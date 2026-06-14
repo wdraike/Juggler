@@ -47,9 +47,11 @@ describe('Schedule API — E2E', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ text: 'E2E sched-test task', dur: 60, pri: 'P1' });
 
-    if (res.status === 201 && res.body.task) {
-      taskId = res.body.task.id;
-    }
+    // Fail loud if task creation fails — a silent 500 would leave taskId stale
+    // from a prior test and allow false passes (zoe flag-and-refer :42)
+    expect(res.status).toBe(201);
+    expect(res.body.task).toBeDefined();
+    taskId = res.body.task.id;
   });
 
   // ── POST /api/schedule/run ─────────────────────────────────────────────────
@@ -68,9 +70,48 @@ describe('Schedule API — E2E', () => {
   }, harnessProbe), 20000);
 
   test('POST /api/schedule/run writes scheduled_at to task_instances for placed tasks', requireDB(async () => {
-    if (!taskId) return; // beforeEach task creation failed (DB issue)
+    // BUG-2 fix: DETERMINISTIC placement scenario.
+    //
+    // Key invariant (from runSchedule.js:1335): FIXED-mode tasks are user-anchored —
+    // the scheduler places them in dayPlacements but intentionally does NOT rewrite
+    // scheduled_at (that field is owned by taskMappers.taskToRow at insert time).
+    // So we must use an ANYTIME task (no date / no time at creation) which starts
+    // with scheduled_at = null in the DB (taskMappers leaves it null when no date is
+    // provided), and which the scheduler MUST write scheduled_at for when it places it.
+    //
+    // Determinism guarantee: a fresh ANYTIME task in an otherwise empty calendar
+    // (harness teardown + fresh seed per suite) has guaranteed capacity across all
+    // default time blocks.  The scheduler WILL place it and WILL write scheduled_at.
+    //
+    // FAIL CONDITION: if the scheduler's write is broken (e.g. runSchedule.js:1386
+    // scheduled_at→null), scheduled_at stays null and the terminal
+    // expect(instanceRow.scheduled_at).not.toBeNull() goes RED.  No if-gate survives.
 
-    // Run the scheduler
+    // Create an ANYTIME task — no date, no time → taskMappers writes scheduled_at = null.
+    const createRes = await request(app)
+      .post('/api/tasks')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        text: 'BUG-2 deterministic anytime-placement task',
+        dur: 30,
+        pri: 'P1',
+        // Deliberately omit date / time / placementMode so taskMappers.taskToRow
+        // leaves scheduled_at = null at creation.
+      });
+
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.task).toBeDefined();
+    const anytimeId = createRes.body.task.id;
+    expect(typeof anytimeId).toBe('string');
+
+    // Confirm the DB row starts null — if this fails the strategy premise is wrong.
+    const db = harness.getDb();
+    const beforeRow = await db('task_instances').where('id', anytimeId).first();
+    expect(beforeRow).toBeDefined();
+    expect(beforeRow.scheduled_at).toBeNull(); // null at creation: taskMappers owes no date
+
+    // Run the scheduler — with a fresh single-user calendar and a short-dur P1 task
+    // there is always capacity.  The scheduler MUST place this task today.
     const res = await request(app)
       .post('/api/schedule/run')
       .set('Authorization', `Bearer ${token}`)
@@ -78,15 +119,35 @@ describe('Schedule API — E2E', () => {
 
     expect(res.status).toBe(200);
 
-    // The scheduler either places our task (scheduled_at written) or puts it in unplaced.
-    // Either outcome is valid — we verify DB consistency.
-    const db = harness.getDb();
-    const instanceRow = await db('task_instances').where('id', taskId).first();
-    expect(instanceRow).toBeDefined();
+    // Assert the anytime task appears in dayPlacements UNCONDITIONALLY.
+    // No if-gate — absence means the scheduler failed to find any slot in an
+    // empty calendar, which is a scheduler bug, not a valid "unplaced" outcome.
+    const allPlacedIds = Object.values(res.body.dayPlacements || {})
+      .flat()
+      .map(p => (p && (p.id || (p.task && p.task.id))) || null)
+      .filter(Boolean);
+    expect(allPlacedIds).toContain(anytimeId);
 
-    // If task was placed, scheduled_at should be set; if unplaced, it may be null.
-    // Verify the row exists and has the correct user_id.
+    // THE CORE ASSERTION — unconditional, no if(isPlaced) gate.
+    // This is the line BUG-2 existed to protect.  If the scheduler's write path is
+    // broken, scheduled_at remains null and this assertion FAILS.
+    const instanceRow = await db('task_instances').where('id', anytimeId).first();
+    expect(instanceRow).toBeDefined();
     expect(instanceRow.user_id).toBe(harness.TEST_USER_ID);
+    expect(instanceRow.scheduled_at).not.toBeNull();
+
+    // WARN-1 fix: tie the dayPlacements entry to this specific task id.
+    // Find which date key this task was placed on and assert the DB row's stored
+    // date matches — confirming we observe the placement for THIS task, not a
+    // coincidental id collision.
+    const placementDayKey = Object.keys(res.body.dayPlacements || {}).find(dk =>
+      (res.body.dayPlacements[dk] || []).some(p =>
+        (p.id || (p.task && p.task.id)) === anytimeId
+      )
+    );
+    expect(placementDayKey).toBeDefined();
+    // The DB row's stored date must match what the scheduler reported in dayPlacements.
+    expect(instanceRow.date).toBe(placementDayKey);
   }, harnessProbe), 20000);
 
   // ── GET /api/schedule/placements ──────────────────────────────────────────

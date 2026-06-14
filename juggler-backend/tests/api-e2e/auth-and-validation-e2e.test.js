@@ -199,25 +199,69 @@ describe('Auth + Validation — E2E', () => {
     expect(res.status).toBe(404);
   }, harnessProbe));
 
-  // ── Rate limiter smoke test ────────────────────────────────────────────────
+  // ── 401 SESSION_ENDED: valid token, no Redis session key ──────────────────
+  //
+  // BUG-1 regression (elmo REFER→telly / 999.309 W2 AC-3):
+  //   W1 fixed the harness to seed auth:active:<sub> in Redis.  This test proves
+  //   that seed is LOAD-BEARING — a valid RS256 JWT whose session key has been
+  //   DEL'd from Redis is rejected with 401 { code: 'SESSION_ENDED' }.
+  //
+  // Strategy: makeJWT() auto-seeds auth:active:<sub>.  We explicitly DEL that key
+  // via a direct ioredis client BEFORE making the request, exercising the real
+  // unseeded path.  A harness bug that seeds unconditionally on every request
+  // would cause this test to get 200 instead of 401, catching the regression.
 
-  test('rate limiter smoke test — documents actual behavior (429 vs always-200)', requireDB(async () => {
-    // The broad /api rate limiter allows 1000 requests/min (per-instance MemoryStore,
-    // no Redis in test). Hitting it in a unit test is impractical, so we just verify
-    // the GET /api/tasks path is responsive for 5 sequential requests.
-    // If a 429 appears, we record it; both outcomes (saw429 = true/false) are valid.
-    let saw429 = false;
+  test('valid token with DEL-d Redis session key → 401 SESSION_ENDED', requireDB(async () => {
+    // Use a unique sub so DEL-ing the key cannot affect the shared test user
+    const noSessionSub = 'e2e-no-session-sub-001';
+    const noSessionEmail = 'no-session@e2e-juggler.local';
+
+    // makeJWT seeds auth:active:<sub> as a side-effect
+    const noSessionToken = await harness.makeJWT({
+      sub: noSessionSub,
+      email: noSessionEmail,
+      apps: ['juggler'],
+    });
+
+    // Explicitly DEL the session key — the token is now orphaned in Redis
+    // (auth-client.js:92 isSessionActive → EXISTS → 0 → SESSION_ENDED 401)
+    const Redis = require('ioredis');
+    const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6479';
+    const testRedis = new Redis(redisUrl, { maxRetriesPerRequest: 1, lazyConnect: false });
+    try {
+      await testRedis.del(`auth:active:${noSessionSub}`);
+    } finally {
+      await testRedis.quit().catch(() => {});
+    }
+
+    // Request with a cryptographically valid token but no active session — must 401
+    const res = await request(app)
+      .get('/api/tasks')
+      .set('Authorization', `Bearer ${noSessionToken}`);
+
+    expect(res.status).toBe(401);
+    expect(res.body).toHaveProperty('code', 'SESSION_ENDED');
+  }, harnessProbe));
+
+  // ── Rate limiter: authenticated route stays 200 under normal load ─────────
+  //
+  // The broad /api rate limiter allows 1000 req/min (per-instance MemoryStore,
+  // no Redis in test).  Triggering a real 429 in E2E is impractical without
+  // 1000 requests — attempting it would make the suite prohibitively slow and
+  // would interfere with other tests sharing the same app instance.
+  //
+  // What this test DOES assert: 5 sequential authenticated requests each return
+  // 200, confirming the rate-limiter does NOT misfire and block valid traffic
+  // under normal load.  That is the observable, meaningful behavior we can pin
+  // without saturating the limiter.
+
+  test('rate limiter: 5 sequential authenticated requests all return 200 (limiter does not misfire)', requireDB(async () => {
     for (let i = 0; i < 5; i++) {
       const r = await request(app)
         .get('/api/tasks')
         .set('Authorization', `Bearer ${token}`);
-      if (r.status === 429) {
-        saw429 = true;
-        break;
-      }
+      // Each must be 200 — if the limiter fires prematurely (misconfig) this goes red.
       expect(r.status).toBe(200);
     }
-    // Document which path was observed (both are valid in E2E)
-    expect(typeof saw429).toBe('boolean');
   }, harnessProbe));
 });
