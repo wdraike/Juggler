@@ -20,6 +20,7 @@
 const facade = require('../slices/user-config/facade');
 const { dataControllerLogger } = require('../lib/logger');
 const { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
+const { tasksToCsv } = require('../lib/tasks-csv');
 
 const logger = dataControllerLogger;
 
@@ -64,6 +65,13 @@ async function exportData(req, res) {
       userId: req.user.id,
       timezoneHeader: req.headers['x-timezone']
     });
+    if (req.query.format === 'csv') {
+      const csvString = tasksToCsv(result.body.extraTasks);
+      res.status(200);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="juggler-tasks.csv"');
+      return res.send(csvString);
+    }
     return sendEnvelope(res, result);
   } catch (error) {
     logger.error('Export error', { error });

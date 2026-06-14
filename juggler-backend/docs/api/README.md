@@ -2,7 +2,8 @@
 type: api-reference
 service: juggler
 status: active
-last_updated: 2026-06-13
+last_updated: 2026-06-14
+version: leg/jug-csv-export @ 2026-06-14
 tags:
   - type/api-reference
   - service/juggler
@@ -13,7 +14,7 @@ tags:
 
 # Juggler Backend — API Reference
 
-**Last Updated:** 2026-06-13
+**Last Updated:** 2026-06-14
 **Base URL:** `http://localhost:5002` (dev)
 
 ---
@@ -221,7 +222,105 @@ Pushes `schedule:changed` events when the scheduler completes. Heartbeat every 3
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/data/import` | Import task data (2MB JSON limit) |
-| `GET` | `/api/data/export` | Export all user data as JSON |
+| `GET` | `/api/data/export` | Export user data — JSON (default) or CSV (`?format=csv`) |
+
+### GET /api/data/export
+
+**Auth:** `authenticateJWT` + `requireFeature('data.export')`. Both formats share the same gate — the CSV path adds no new route, no new query, and no new data source.
+
+**Query parameters**
+
+| Parameter | Type | Required | Values | Default | Description |
+|-----------|------|----------|--------|---------|-------------|
+| `format` | string | no | `json`, `csv` | `json` | Response format. Any value other than `csv` produces the JSON envelope. |
+
+---
+
+#### format=json (default)
+
+Returns the v7 JSON backup envelope — tasks, config, locations, tools, and projects — suitable for round-trip import via `POST /api/data/import`.
+
+**Response**
+
+```
+HTTP/1.1 200 OK
+Content-Type: application/json
+```
+
+```json
+{
+  "version": 7,
+  "extraTasks": [ ... ],
+  "config": { ... },
+  "locations": [ ... ],
+  "tools": [ ... ],
+  "projects": [ ... ]
+}
+```
+
+#### format=csv
+
+Returns the authenticated user's **tasks only** as RFC-4180 CSV. Config, locations, tools, and projects are not included (use `format=json` for a full backup).
+
+**Response**
+
+```
+HTTP/1.1 200 OK
+Content-Type: text/csv; charset=utf-8
+Content-Disposition: attachment; filename="juggler-tasks.csv"
+```
+
+**Columns (fixed order)**
+
+| # | Column | Source field | Notes |
+|---|--------|-------------|-------|
+| 1 | `id` | `task.id` | |
+| 2 | `text` | `task.text` | |
+| 3 | `taskType` | `task.taskType` | |
+| 4 | `status` | `task.status` | |
+| 5 | `pri` | `task.pri` | |
+| 6 | `project` | `task.project` | |
+| 7 | `dur` | `task.dur` | Duration in minutes |
+| 8 | `scheduledAt` | `task.scheduledAt` | UTC ISO timestamp |
+| 9 | `date` | `task.date` | |
+| 10 | `time` | `task.time` | |
+| 11 | `deadline` | `task.deadline` | |
+| 12 | `startAfter` | `task.startAfter` | |
+| 13 | `recurring` | `task.recurring` | |
+| 14 | `location` | `task.location` | Array joined with `;` |
+| 15 | `tools` | `task.tools` | Array joined with `;` |
+| 16 | `notes` | `task.notes` | |
+| 17 | `url` | `task.url` | |
+| 18 | `completedAt` | `task.completedAt` | UTC ISO timestamp |
+
+**Encoding rules (applied in order)**
+
+1. `null` / `undefined` → empty cell (no quotes, no content).
+2. Boolean → `true` or `false`.
+3. Number → decimal string (`String(n)`).
+4. Array fields (`location`, `tools`) → elements joined with `;`, then the joined string is processed through the steps below.
+5. CSV formula-injection guard (OWASP): if a cell's first **non-whitespace** character is a spreadsheet formula trigger (`=`, `+`, `-`, `@`) — or its first character is a leading `\t`/`\r` — the cell is prefixed with a single quote (`'`) so spreadsheet clients (Excel, LibreOffice, Google Sheets) treat it as text and never execute it. The first-non-whitespace check defeats the leading-whitespace bypass (e.g. `" =HYPERLINK(...)"`), since spreadsheets strip leading whitespace before formula evaluation.
+6. RFC-4180 escaping: a cell value is wrapped in double-quotes if it contains `,`, `"`, `\n`, or `\r`; any `"` inside a quoted field is doubled to `""`. Lines are terminated with `\r\n` (RFC-4180 §2). (Applied after the injection guard, so a neutralized cell that also contains a comma is still quoted correctly.)
+
+**Empty export**
+
+If the user has no tasks, the response is a header-only CSV (one line, `\r\n` terminated).
+
+**Example (two tasks)**
+
+```csv
+id,text,taskType,status,pri,project,dur,scheduledAt,date,time,deadline,startAfter,recurring,location,tools,notes,url,completedAt
+42,Buy groceries,one-off,pending,P2,Personal,30,,6/15,10:00 AM,,,,,,,https://example.com,
+99,"Plan Q3, review",one-off,done,P1,Work,60,2026-06-14T14:00:00Z,,,,,,,,,2026-06-14T15:00:00Z
+```
+
+**Error responses**
+
+| Status | Condition |
+|--------|-----------|
+| `401` | Missing or expired JWT |
+| `403` | `data.export` feature not enabled on the user's plan |
+| `500` | Internal server error |
 
 ---
 
