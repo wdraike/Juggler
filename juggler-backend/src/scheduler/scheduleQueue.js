@@ -147,9 +147,18 @@ async function dequeueScheduleRun(userId) {
 
 // ── DB Claiming (FIX-04) ────────────────────────────────────────────────────
 
-// Claim a work item with multi-instance safety.
-// Returns { claimed: true, row } or { claimed: false, reason }.
-async function claimAndRun(userId) {
+/**
+ * Attempt to atomically claim the schedule_queue row for userId.
+ * instanceId is passed explicitly so this function is testable in isolation
+ * (tests pass synthetic instance identifiers without touching INSTANCE_ID).
+ *
+ * Returns:
+ *   { claimed: true, row }                                    — won the claim
+ *   { claimed: false, reason: 'already_claimed', by, since }  — lost to another instance
+ *   { claimed: false, reason: 'no_row' }                      — row doesn't exist
+ *   { claimed: false, reason: 'row_missing_after_claim' }     — race: row disappeared after update
+ */
+async function tryClaim(userId, instanceId) {
   var claimedAt = new Date();
   var ttlExpiry = new Date(Date.now() - (CLAIM_TTL_SECONDS * 1000));
 
@@ -162,23 +171,37 @@ async function claimAndRun(userId) {
           .orWhere('claimed_at', '<', ttlExpiry);
     })
     .update({
-      claimed_by: INSTANCE_ID,
+      claimed_by: instanceId,
       claimed_at: claimedAt
     });
 
   if (updated === 0) {
     var existing = await db('schedule_queue').where('user_id', userId).first();
-    if (existing && existing.claimed_by && existing.claimed_by !== INSTANCE_ID) {
+    if (existing && existing.claimed_by && existing.claimed_by !== instanceId) {
       return { claimed: false, reason: 'already_claimed', by: existing.claimed_by, since: existing.claimed_at };
     }
     return { claimed: false, reason: 'no_row' };
   }
 
-  // We claimed it. Now run the scheduler within the sync lock.
+  // We claimed it — read the row back for callers that need it.
   var row = await db('schedule_queue').where('user_id', userId).first();
   if (!row) {
     return { claimed: false, reason: 'row_missing_after_claim' };
   }
+
+  return { claimed: true, row: row };
+}
+
+// Claim a work item with multi-instance safety, then run the scheduler.
+// Returns { claimed: true, success: true } on full success,
+//         { claimed: true, success: false, error } on run failure,
+//         { claimed: false, reason } if the claim was lost.
+async function claimAndRun(userId) {
+  var c = await tryClaim(userId, INSTANCE_ID);
+  if (!c.claimed) {
+    return c;
+  }
+  var row = c.row;
 
   // Start heartbeat for long-running scheduler jobs
   var heartbeat = startClaimHeartbeat(userId);
@@ -201,7 +224,7 @@ async function claimAndRun(userId) {
   } catch (err) {
     // On failure, release the claim so someone else can retry
     _lastError = { timestamp: Date.now(), message: err.message };
-    await releaseClaim(userId);
+    await releaseClaim(userId, INSTANCE_ID);
     return { claimed: true, success: false, error: err.message };
   } finally {
     clearInterval(heartbeat);
@@ -276,11 +299,11 @@ function startClaimHeartbeat(userId) {
   }, 30000); // every 30s
 }
 
-async function releaseClaim(userId) {
+async function releaseClaim(userId, instanceId) {
   try {
     await db('schedule_queue')
       .where('user_id', userId)
-      .where('claimed_by', INSTANCE_ID)
+      .where('claimed_by', instanceId)
       .update({ claimed_by: null, claimed_at: null });
   } catch (e) {
     logger.error('[SCHED-QUEUE] Failed to release claim for user ' + userId, { error: e });
@@ -364,5 +387,11 @@ module.exports = {
   // Internal exports for tests
   _dirty,
   _lastEnqueueTime,
-  _running
+  _running,
+  // Test seam: atomic-claim helpers (extracted for scheduleQueueClaiming.test.js)
+  _internal: {
+    tryClaim,
+    releaseClaim,
+    CLAIM_TTL_SECONDS
+  }
 };

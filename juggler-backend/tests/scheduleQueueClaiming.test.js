@@ -108,6 +108,12 @@ test('only one of two concurrent claim attempts wins', async function() {
   expect(wins).toBe(1);
   expect(losses).toBe(1);
 
+  // The loser must report reason='already_claimed' (not 'no_row' or any other reason).
+  // This catches a regression where the loser returns claimed:false for the wrong reason.
+  var loser = result1.claimed ? result2 : result1;
+  expect(loser.claimed).toBe(false);
+  expect(loser.reason).toBe('already_claimed');
+
   // Cleanup
   await db.raw('DELETE FROM schedule_queue WHERE user_id = ?', [userId]);
 });
@@ -185,4 +191,30 @@ test('released claim allows immediate re-claim (no TTL wait)', async function() 
 
   // Cleanup
   await db.raw('DELETE FROM schedule_queue WHERE user_id = ?', [userId]);
+});
+
+// ── Test 4: no_row branch ──────────────────────────────────────────────────
+//
+// tryClaim for a userId that has no schedule_queue row (but the user exists in users)
+// must return { claimed: false, reason: 'no_row' }.
+// This covers the branch at scheduleQueue.js:183 — missed by Tests 1–3 which always
+// seed a row before calling tryClaim.
+
+test('tryClaim returns claimed:false reason:no_row when no schedule_queue row exists', async function() {
+  expect(typeof tryClaim).toBe('function');
+
+  var userId = '__claim_test_user__';
+
+  // Ensure no schedule_queue row exists for this user
+  await db.raw('DELETE FROM schedule_queue WHERE user_id = ?', [userId]);
+
+  // Verify the row is truly absent (sanity check)
+  var absent = await db('schedule_queue').where('user_id', userId).first();
+  expect(absent).toBeUndefined();
+
+  var result = await tryClaim(userId, 'instance-E');
+  expect(result.claimed).toBe(false);
+  expect(result.reason).toBe('no_row');
+
+  // No cleanup needed — no row was inserted
 });
