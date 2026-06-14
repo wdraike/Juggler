@@ -26,6 +26,7 @@
     "@google/genai": "^1.46.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@raike/lib-db": "file:./vendor/lib-db",
+    "@raike/lib-error-ingest": "file:./vendor/lib-error-ingest",
     "@raike/lib-logger": "file:./vendor/lib-logger",
     "auth-client": "file:../../auth-service/shared",
     "body-parser": "^1.20.2",

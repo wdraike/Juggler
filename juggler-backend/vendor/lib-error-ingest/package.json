@@ -1,0 +1,20 @@
+{
+  "name": "@raike/lib-error-ingest",
+  "version": "1.0.0",
+  "description": "Shared browser-error ingest router (BugMiner) — validate + sanitize + rate-limit-friendly + append to a mined log",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "exports": {
+    ".": "./src/index.js",
+    "./*": "./src/*"
+  },
+  "scripts": {
+    "test": "node test/router.test.js"
+  },
+  "peerDependencies": {
+    "express": "^4.0.0"
+  },
+  "keywords": ["bugminer", "error-capture", "raike", "express", "log"],
+  "author": "Raike & Sons",
+  "license": "MIT"
+}

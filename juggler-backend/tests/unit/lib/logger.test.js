@@ -297,5 +297,15 @@ describe('lib/logger', () => {
       expect(taskControllerLogger.name).toBe('task.controller');
       expect(serverLogger.name).toBe('server');
     });
+
+    test('exports libUsageReporterLogger as a top-level named export (regression: BUG-1)', () => {
+      // BUG-1: usage-reporter.js:9 destructures { libUsageReporterLogger } from './logger'.
+      // If the export is missing the binding is undefined and .warn()/.error() at lines 22
+      // and 71 throw "Cannot read properties of undefined (reading 'warn')".
+      const { libUsageReporterLogger } = require('../../../src/lib/logger');
+      expect(libUsageReporterLogger).toBeDefined();
+      expect(libUsageReporterLogger).toBeInstanceOf(Logger);
+      expect(libUsageReporterLogger.name).toBe('lib.usage-reporter');
+    });
   });
 });

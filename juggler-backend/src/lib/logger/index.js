@@ -427,4 +427,5 @@ module.exports = {
   libCalAdapterLogger: loggers.libCalAdapter,
   dataControllerLogger: loggers.dataController,
   aiUsageQueueLogger: loggers.aiUsageQueue,
+  libUsageReporterLogger: loggers.libUsageReporter,
 };
