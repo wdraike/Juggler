@@ -1,10 +1,10 @@
 ---
-type: design
+type: reference
 service: juggler
 status: active
-last_updated: 2026-05-19
+last_updated: 2026-06-14
 tags:
-  - type/design
+  - type/reference
   - service/juggler
   - status/active
   - database
@@ -13,11 +13,21 @@ tags:
 
 # Juggler Schema Reference
 
-**Last Updated:** 2026-05-19
+**Last Updated:** 2026-06-14
 
 Purpose and lifecycle of the non-obvious tables in the Juggler DB. Covers the **Bucket 1** questions from `juggler/Issues.txt`.
 
 Schema is Knex migrations in `src/db/migrations/`. The current task model is the two-table split (`task_masters` + `task_instances`) introduced in `20260415010000` — the legacy `tasks` table has been dropped (`20260415010900`). Code reads through the `tasks_v` view for backward compatibility.
+
+---
+
+## Collation Convention
+
+All Juggler DB tables — both application tables and knex's internal bookkeeping tables (`knex_migrations`, `knex_migrations_lock`) — use **`utf8mb4_unicode_ci`**.
+
+MySQL 8 creates tables with `utf8mb4_0900_ai_ci` by default. That collation is not directly comparable with `utf8mb4_unicode_ci`, so any JOIN across tables with different collations produces an `Illegal mix of collations` error or silently coerces data. Every migration must therefore set `COLLATE utf8mb4_unicode_ci` explicitly on every new table and column.
+
+`knex_migrations` and `knex_migrations_lock` were originally created by knex at first migrate run without an explicit charset/collate, leaving them at the MySQL 8 default. Migration `20260614000000_fix_knex_migrations_collation` corrected this by converting both tables with `ALTER TABLE … CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`.
 
 ---
 
