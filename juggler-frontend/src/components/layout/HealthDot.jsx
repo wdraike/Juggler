@@ -190,7 +190,7 @@ export default function HealthDot({ darkMode, theme }) {
                     <tr key={name}>
                       <td style={{ padding: '2px 4px', textTransform: 'capitalize' }}>{name}</td>
                       <td style={{ padding: '2px 4px', color: cellColor, fontWeight: 500 }}>{status}</td>
-                      <td style={{ padding: '2px 4px', color: theme ? theme.textMuted : '#888', fontStyle: 'italic' }}>{detail || ''}</td>
+                      <td style={{ padding: '2px 4px', color: theme ? theme.textMuted : '#888', fontStyle: 'italic' }}>{typeof detail === 'string' ? detail : ''}</td>
                     </tr>
                   );
                 })}

@@ -210,7 +210,8 @@ describe('/health/detailed weather service', () => {
     const res = await request(app).get('/api/health/detailed').set('Authorization', VALID_TOKEN);
     expect(res.status).toBe(200);
     expect(res.body.services.weather).toBe('operational');
-    expect(res.body.detail.weather).toHaveProperty('fetchedAt');
+    expect(typeof res.body.detail.weather).toBe('string');
+    expect(res.body.detail.weather).toMatch(/forecast fetched \d+ min ago/);
   });
 
   test('degraded when cache is stale (> 2h old)', async () => {
@@ -248,6 +249,8 @@ describe('/health/detailed weather service', () => {
     const res = await request(app).get('/api/health/detailed').set('Authorization', VALID_TOKEN);
     expect(res.status).toBe(200);
     expect(res.body.services.weather).toBe('operational');
+    expect(typeof res.body.detail.weather).toBe('string');
+    expect(res.body.detail.weather).toMatch(/forecast fetched \d+ min ago/);
   });
 
   test('degraded at 121 min (just over 2h boundary)', async () => {

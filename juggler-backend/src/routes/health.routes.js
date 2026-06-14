@@ -238,7 +238,7 @@ router.get('/detailed', async (req, res) => {
             healthStatus.detail.weather = 'forecast is ' + Math.round(ageMs / 60000) + ' min old — weather constraints may not be enforced';
           } else {
             healthStatus.services.weather = 'operational';
-            healthStatus.detail.weather = { fetchedAt: weatherRow.fetched_at };
+            healthStatus.detail.weather = 'forecast fetched ' + Math.round(ageMs / 60000) + ' min ago';
           }
         }
       }
