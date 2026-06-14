@@ -19,8 +19,8 @@
  *     comment at line 262 flags this for 4.4. See docs/SCHEDULER-V2-STATUS.md.
  *   - Location/tool constraint enforcement: IMPLEMENTED — checkLoc initialized at line 732;
  *     canTaskRunAtMin() called in findEarliestSlot (line 805) and findLatestSlot (line 869).
- *   - Dependency-met check: IMPLEMENTED — checkDeps initialized at line 725; depsSatisfied()
- *     called in findEarliestSlot (line 804) and findLatestSlot (line 868).
+ *   - Dependency-met check: IMPLEMENTED — checkDeps gate + computeDepReadyAbs() hoisted
+ *     once per scan (A-001); depReadyAbs compared per slot in findEarliestSlot / findLatestSlot.
  *   - Split chunks: pre-inserted as distinct DB rows (Phase 1); scheduler treats each as a
  *     regular task (design intent, not a gap).
  *   - timesPerCycle / recurring_rigid nuances: OPEN — held for UX review (see MASTER-PLAN).
@@ -714,32 +714,32 @@ function absoluteMin(dateIdx, startMin) {
   return dateIdx * 1440 + startMin;
 }
 
-// Are all `item.dependsOn` entries satisfied at the given (dateIdx, startMin)?
-// A dep is satisfied when:
-//   - its status is a terminal non-placement (done/cancel/skip/disabled/pause), or
-//   - it was placed and its end time ≤ candidate start time.
-// Unknown-status deps (referenced ID not in the task list) are treated as
-// satisfied — same as v1's behavior, avoids deadlocking on stale refs.
-function depsSatisfied(item, candidateDateIdx, candidateStartMin, placedById, statuses, dates) {
-  if (!item.dependsOn || item.dependsOn.length === 0) return true;
-  var candidateAbs = absoluteMin(candidateDateIdx, candidateStartMin);
-  for (var i = 0; i < item.dependsOn.length; i++) {
-    var depId = item.dependsOn[i];
+// A-001: Compute the earliest absolute minute at which all live deps are
+// satisfied, for the *current snapshot* of placedById/statuses/dates.
+// Called once per findEarliestSlot / findLatestSlot scan (not per slot).
+//
+// Return semantics:
+//   Infinity  → at least one live dep is unplaced; item can never be placed
+//               this scan (finite candidateAbs is never >= Infinity).
+//   -Infinity → no dep constrains timing (all are terminal/unknown/off-horizon);
+//               every candidate passes unconditionally.
+//   N (>=0)   → item may be placed at any candidateAbs >= N.
+function computeDepReadyAbs(item, placedById, statuses, dates) {
+  if (!item.dependsOn || item.dependsOn.length === 0) return -Infinity;
+  var depReadyAbs = -Infinity;
+  for (var j = 0; j < item.dependsOn.length; j++) {
+    var depId = item.dependsOn[j];
     var st = statuses[depId];
-    // Deps not loaded into the scheduling pool (terminal statuses like done/
-    // skip/cancel, or deleted) return `undefined` here — treat as satisfied.
-    // runSchedule.js filters them out of tasks_v at the SQL layer, matching
-    // v1's poolIds-based "is this dep active?" check.
     if (st === undefined) continue;
     if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'disabled' || st === 'pause') continue;
     var placed = placedById[depId];
-    if (!placed) return false; // unplaced live dep — not yet satisfied
+    if (!placed) return Infinity; // unplaced live dep — item is blocked this scan
     var depDateIdx = indexOfDate(dates, placed.dateKey);
-    if (depDateIdx < 0) continue; // placed off-horizon — treat as satisfied
+    if (depDateIdx < 0) continue; // off-horizon — non-constraining
     var depAbsEnd = absoluteMin(depDateIdx, placed.start + placed.dur);
-    if (depAbsEnd > candidateAbs) return false;
+    if (depAbsEnd > depReadyAbs) depReadyAbs = depAbsEnd;
   }
-  return true;
+  return depReadyAbs;
 }
 
 function hasWeatherConstraint(task) {
@@ -852,6 +852,11 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   var statuses = (opts && opts.statuses) || {};
   var relaxDeps = !!(opts && opts.relaxDeps);
   var checkDeps = !relaxDeps && placedById && item.dependsOn && item.dependsOn.length > 0;
+  // A-001: compute dep-readiness once per scan (constant within a findEarliestSlot call —
+  // placedById and statuses are captured above and only read in the candidate loop; all
+  // writes happen in the caller after findEarliestSlot returns). computeDepReadyAbs()
+  // returns a depReadyAbs floor; each slot-scan site does an O(1) comparison against it.
+  var depReadyAbs = checkDeps ? computeDepReadyAbs(item, placedById, statuses, dates) : -Infinity;
   var relaxWhen = !!(opts && opts.relaxWhen);
   var cfg = (opts && opts.cfg) || null;
   var toolMatrix = cfg && cfg.toolMatrix;
@@ -940,7 +945,7 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
           : winStart;
         for (var s = prefStart; s + item.dur <= winEnd; s += 15) {
           if (!isFreeWithTravel(occ, s, item.dur, item.travelBefore, item.travelAfter)) continue;
-          if (checkDeps && !depsSatisfied(item, i, s, placedById, statuses, dates)) continue;
+          if (checkDeps && absoluteMin(i, s) < depReadyAbs) continue;
           if (checkLoc && !canTaskRunAtMinCached(item.task, d.key, s, cfg, toolMatrix, blocks, locCache)) continue;
           if (checkWeather && !weatherOk(item.task, d.key, s, weatherByDateHour)) continue;
           return { dateKey: d.key, start: s };
@@ -948,7 +953,7 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
         // Fallback: try earlier slots between winStart and prefStart (e.g. window fully booked after preferred).
         for (var sf = winStart; sf < prefStart; sf += 15) {
           if (!isFreeWithTravel(occ, sf, item.dur, item.travelBefore, item.travelAfter)) continue;
-          if (checkDeps && !depsSatisfied(item, i, sf, placedById, statuses, dates)) continue;
+          if (checkDeps && absoluteMin(i, sf) < depReadyAbs) continue;
           if (checkLoc && !canTaskRunAtMinCached(item.task, d.key, sf, cfg, toolMatrix, blocks, locCache)) continue;
           if (checkWeather && !weatherOk(item.task, d.key, sf, weatherByDateHour)) continue;
           return { dateKey: d.key, start: sf };
@@ -993,6 +998,8 @@ function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   var statuses = (opts && opts.statuses) || {};
   var relaxDepsL = !!(opts && opts.relaxDeps);
   var checkDeps = !relaxDepsL && placedById && item.dependsOn && item.dependsOn.length > 0;
+  // A-001: same per-scan dep-readiness cache as findEarliestSlot (see comment there).
+  var depReadyAbs = checkDeps ? computeDepReadyAbs(item, placedById, statuses, dates) : -Infinity;
   var relaxWhen = !!(opts && opts.relaxWhen);
   var cfg = (opts && opts.cfg) || null;
   var toolMatrix = cfg && cfg.toolMatrix;
@@ -1020,7 +1027,7 @@ function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
       var startMax = Math.floor((winEnd - item.dur) / 15) * 15;
       for (var s = startMax; s >= winStart; s -= 15) {
         if (!isFreeWithTravel(occ, s, item.dur, item.travelBefore, item.travelAfter)) continue;
-        if (checkDeps && !depsSatisfied(item, i, s, placedById, statuses, dates)) continue;
+        if (checkDeps && absoluteMin(i, s) < depReadyAbs) continue;
         if (checkLoc && !canTaskRunAtMinCached(item.task, d.key, s, cfg, toolMatrix, blocks, locCache)) continue;
         if (checkWeather && !weatherOk(item.task, d.key, s, weatherByDateHour)) continue;
         return { dateKey: d.key, start: s };
@@ -1173,7 +1180,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   cfg = cfg || {};
 
   // Build effective statuses: tasks in allTasks that have no explicit status
-  // are live (pending). This ensures depsSatisfied correctly identifies
+  // are live (pending). This ensures computeDepReadyAbs correctly identifies
   // in-pool deps as live even when callers pass a sparse statuses map.
   // Without this, statuses[depId]===undefined is treated as "dep not in pool"
   // (satisfied), causing the scheduler to place a dep-dependent task before
@@ -1776,3 +1783,15 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
 }
 
 module.exports = unifiedScheduleV2;
+
+// Test-only exports — allow direct unit testing of dep-gating helpers.
+// These are pure functions with no side effects; exposing them here lets
+// depsGatingCharacterization.test.js verify the off-horizon guard (B6)
+// through computeDepReadyAbs directly, which is the ONLY reachable path
+// for depDateIdx<0 (past-dateKey deps never appear in placedById via the
+// full scheduler because dayPlacements is only built for dates[] = today+).
+module.exports._testOnly = {
+  computeDepReadyAbs: computeDepReadyAbs,
+  indexOfDate: indexOfDate,
+  absoluteMin: absoluteMin,
+};
