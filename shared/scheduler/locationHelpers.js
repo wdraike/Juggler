@@ -109,6 +109,28 @@ function canTaskRunAtMin(task, dateStr, minute, cfg, toolMatrix, blocks) {
   return canTaskRun(task, locId, toolMatrix);
 }
 
+// A-002 perf: cached variant of canTaskRunAtMin (jcr-h-performance hotspot — location
+// checking was ~12.4% of scheduling). The location resolved at a given (dateStr, minute)
+// is task-INDEPENDENT and, within a single schedule run, a pure function of (dateStr,
+// minute): cfg is fixed and `blocks` is dayBlocks[dateStr] (stable per date). Memoizing
+// locId by "dateStr|minute" therefore returns the IDENTICAL value resolveLocationId would
+// compute, while collapsing the per-candidate-slot recompute from O(tasks×slots) to
+// O(distinct day-slots) per run. `cache` is a per-run plain map; when absent, this falls
+// back to the uncached path (byte-identical). The task-specific canTaskRun stays per-call
+// (it depends on the task's location/tools, which the cache never folds in).
+function canTaskRunAtMinCached(task, dateStr, minute, cfg, toolMatrix, blocks, cache) {
+  if (!cache) return canTaskRunAtMin(task, dateStr, minute, cfg, toolMatrix, blocks);
+  var key = dateStr + "|" + minute;
+  var locId;
+  if (key in cache) {
+    locId = cache[key];
+  } else {
+    locId = resolveLocationId(dateStr, minute, cfg, blocks);
+    cache[key] = locId;
+  }
+  return canTaskRun(task, locId, toolMatrix);
+}
+
 function getLocationForDatePure(dateStr, cfg) {
   var blocks = getBlocksForDate(dateStr, cfg.timeBlocks, cfg);
   return resolveDayLocation(dateStr, cfg, blocks);
@@ -142,6 +164,7 @@ module.exports = {
   resolveDayLocation,
   canTaskRun,
   canTaskRunAtMin,
+  canTaskRunAtMinCached,
   getLocationForDatePure,
   getLocationForHourPure,
   isTaskBlockedPure
