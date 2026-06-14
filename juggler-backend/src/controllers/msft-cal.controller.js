@@ -3,13 +3,13 @@
  * Sync is handled by the unified cal-sync.controller.js.
  */
 
-var { SignJWT, jwtVerify } = require('jose');
+var { SignJWT } = require('jose');
 const getDb = () => require('../db');
 var msftCalApi = require('../lib/msft-cal-api');
 
 // --- Token management (canonical implementation in adapter) ---
 
-var { getJwtSecret } = require('../lib/jwt-secret');
+var { getJwtSecret, verifyStateToken } = require('../lib/jwt-secret');
 var { getValidAccessToken } = require('../slices/calendar/facade').getAdapter('msft');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('msft-cal.controller');
@@ -120,7 +120,7 @@ async function callback(req, res) {
 
     var decoded;
     try {
-      var result = await jwtVerify(state, getJwtSecret());
+      var result = await verifyStateToken(state);
       decoded = result.payload;
     } catch (e) {
       return res.status(400).send('Invalid or expired state parameter');

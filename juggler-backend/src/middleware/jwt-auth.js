@@ -67,7 +67,7 @@ function getJWKS() {
  * Verify a token using auth-service JWKS (used by MCP transport)
  */
 async function verifyToken(token) {
-  const { payload } = await jwtVerify(token, getJWKS(), { issuer: 'raike-auth' });
+  const { payload } = await jwtVerify(token, getJWKS(), { issuer: 'raike-auth', algorithms: ['RS256'] });
   return payload;
 }
 
