@@ -6,6 +6,14 @@ const { z } = require('zod');
 const safeStringify = require('../safeStringify');
 const db = require('../../db');
 const tasksWrite = require('../../lib/tasks-write');
+// Single source of truth for schedule-affecting keys — imported from the
+// slice facade (the sanctioned public entry point, JUG-HEX-H4/W6) so the
+// MCP tool cannot drift from the REST path and respects hexagonal boundaries
+// (WARN-1 / 999.464 fix-loop).
+const { SCHED_KEYS: schedKeysFromFacade } = require('../../slices/user-config/facade');
+// Config cache — invalidated after MCP writes to match the REST UpdateConfig
+// path (WARN-2 / cookie finding: missing cache.invalidateConfig after write).
+const redisCache = require('../../lib/redis');
 
 function registerConfigTools(server, userId) {
 
@@ -159,11 +167,15 @@ function registerConfigTools(server, userId) {
   );
 
   // ── update_config ──
+  // SCHED_KEYS is the single source of truth for which keys are schedule-affecting
+  // (re-exported from the slice facade — WARN-1 fix + boundary fix). The MCP-writable
+  // key enum is derived from it so the two lists cannot drift again.
+  const schedKeys = schedKeysFromFacade;
   server.tool(
     'update_config',
-    'Update a user configuration value. Valid keys: time_blocks, preferences, loc_schedules, loc_schedule_defaults, loc_schedule_overrides, hour_location_overrides, tool_matrix.',
+    'Update a user configuration value. Valid keys: ' + schedKeys.join(', ') + '.',
     {
-      key: z.enum(['time_blocks', 'preferences', 'loc_schedules', 'loc_schedule_defaults', 'loc_schedule_overrides', 'hour_location_overrides', 'tool_matrix']).describe('Configuration key to update'),
+      key: z.enum(/** @type {[string, ...string[]]} */ (schedKeys.slice())).describe('Configuration key to update'),
       value: z.any().describe('New configuration value (object or array)')
     },
     async ({ key, value }) => {
@@ -182,9 +194,18 @@ function registerConfigTools(server, userId) {
         });
       }
 
-      // Trigger reschedule for schedule-affecting keys
-      const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
-      enqueueScheduleRun(userId, 'mcp:config');
+      // Invalidate config cache after write — matches the REST UpdateConfig path
+      // (UpdateConfig.js:99 cache.invalidateConfig). Omitting this left the read
+      // cache stale after an MCP write (WARN-2 fix).
+      await redisCache.invalidateConfig(userId);
+
+      // Trigger reschedule only for schedule-affecting keys — gated on SCHED_KEYS
+      // (the single source of truth) so adding a non-schedule key to this tool
+      // in future cannot silently trigger a needless full re-schedule (WARN-1 fix).
+      if (schedKeys.includes(key)) {
+        const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
+        enqueueScheduleRun(userId, 'mcp:config');
+      }
 
       return { content: [{ type: 'text', text: safeStringify({ key, value }) }] };
     }

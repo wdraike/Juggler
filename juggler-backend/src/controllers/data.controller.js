@@ -19,6 +19,7 @@
 
 const facade = require('../slices/user-config/facade');
 const { dataControllerLogger } = require('../lib/logger');
+const { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 
 const logger = dataControllerLogger;
 
@@ -40,7 +41,13 @@ async function importData(req, res) {
       confirm: req.query.confirm,
       timezoneHeader: req.headers['x-timezone']
     });
-    return sendEnvelope(res, result);
+    sendEnvelope(res, result);
+
+    // Import rewrites all schedule-affecting config — fire one re-run AFTER responding,
+    // mirroring updateConfig's scheduleAfter pattern (BUG-3 / 999.464).
+    if (result.scheduleAfter) {
+      enqueueScheduleRun(result.scheduleAfter.userId, result.scheduleAfter.source);
+    }
   } catch (error) {
     logger.error('Import error', { error });
     res.status(500).json({ error: 'Import failed' });

@@ -40,6 +40,12 @@ function ReplaceTools(deps) {
  * @param {*} input.body  the raw request body ({ tools: [...] }).
  * @returns {Promise<{ status: number, body: Object }>}
  */
+// DELIBERATE NO-OP for scheduler triggering: ReplaceTools writes only the `tools`
+// table (tool names/icons/ids — display data). The schedule-relevant constraint
+// matrix is `tool_matrix` (a `user_config` row already in UpdateConfig.SCHED_KEYS),
+// updated separately via UpdateConfig(key='tool_matrix'). Tool ids are stable
+// identifiers; renaming a tool does not change which tool_id appears in tool_matrix,
+// so no re-schedule is needed here. (Confirmed: AC5 / 999.464 investigation.)
 ReplaceTools.prototype.execute = async function execute(input) {
   var userId = input.userId;
 

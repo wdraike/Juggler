@@ -140,7 +140,13 @@ async function getLocations(req, res) {
 async function replaceLocations(req, res) {
   try {
     const result = await facade.replaceLocations({ userId: req.user.id, body: req.body });
-    return sendEnvelope(res, result);
+    sendEnvelope(res, result);
+
+    // Replacing locations changes scheduling inputs — reschedule in background AFTER
+    // responding, mirroring updateConfig's scheduleAfter pattern (BUG-2 / 999.464).
+    if (result.scheduleAfter) {
+      enqueueScheduleRun(result.scheduleAfter.userId, result.scheduleAfter.source);
+    }
   } catch (error) {
     logger.error('Replace locations error:', error);
     res.status(500).json({ error: 'Failed to update locations' });

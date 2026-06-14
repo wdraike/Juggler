@@ -158,6 +158,9 @@ ImportData.prototype.execute = async function execute(input) {
   });
 
   // 6. response (handler L193-202)
+  // One scheduleAfter directive for the whole import — all schedule-affecting keys
+  // (tool_matrix, time_blocks, loc_schedules, locations, etc.) were written atomically
+  // in the transaction above. Exactly one trigger, never one per config key (BUG-3 / 999.464).
   return {
     status: 200,
     body: {
@@ -169,7 +172,8 @@ ImportData.prototype.execute = async function execute(input) {
         tools: tools.length,
         projects: mergedProjects.length
       }
-    }
+    },
+    scheduleAfter: { userId: userId, source: 'import' }
   };
 };
 

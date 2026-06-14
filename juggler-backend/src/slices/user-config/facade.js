@@ -65,6 +65,11 @@ var EntitlementPort = require('./domain/ports/EntitlementPort');
 // ── application use-cases (W5) ───────────────────────────────────────────────
 var app = require('./application');
 
+// Re-export SCHED_KEYS so external adapters (e.g., MCP tools) can obtain the
+// single-source policy without importing the application layer directly
+// (JUG-HEX-H4/W6 boundary — facade is the sole public entry point).
+var SCHED_KEYS = require('./application/commands/UpdateConfig').SCHED_KEYS;
+
 // ── infra seams the use-cases inject (the SAME modules the legacy files used) ──
 var libDb = require('../../lib/db');
 var { cache } = require('../../lib/cache');
@@ -576,6 +581,11 @@ module.exports = {
 
   // pure domain re-exports (mirror task facade — consumers go through the facade)
   domain: domain,
+
+  // schedule-key policy re-export — single source of truth (JUG-HEX-H4/W6)
+  // External adapters (e.g., mcp/tools/config.js) import this instead of
+  // reaching into the application layer directly.
+  SCHED_KEYS: SCHED_KEYS,
 
   // the singleton adapter instances (so the thin middleware/controllers share state)
   _repo: _repo,

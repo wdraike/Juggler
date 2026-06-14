@@ -87,7 +87,9 @@ ReplaceLocations.prototype.execute = async function execute(input) {
   });
 
   await this.cache.invalidateConfig(userId);
-  return { status: 200, body: { locations: enriched } };
+  // Replacing locations changes weather/location scheduling inputs — trigger re-run
+  // via the same scheduleAfter directive pattern used by UpdateConfig (BUG-2 / 999.464).
+  return { status: 200, body: { locations: enriched }, scheduleAfter: { userId: userId, source: 'locations:replaced' } };
 };
 
 module.exports = ReplaceLocations;
