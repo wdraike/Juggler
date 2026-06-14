@@ -47,7 +47,7 @@ exports.getForecast = async (req, res) => {
     res.json(result);
   } catch (err) {
     logger.error('Weather forecast error:', err.message);
-    res.status(500).json({ error: err.message || 'Weather fetch failed' });
+    res.status(500).json({ error: 'Weather fetch failed' });
   }
 };
 
@@ -99,7 +99,7 @@ exports.ingest = async (req, res) => {
     res.json(result);
   } catch (err) {
     logger.error('Weather ingest error:', err.message);
-    res.status(500).json({ error: err.message || 'Ingest failed' });
+    res.status(500).json({ error: 'Ingest failed' });
   }
 };
 
@@ -117,7 +117,7 @@ exports.geocode = async (req, res) => {
       return res.status(404).json({ error: 'Location not found' });
     }
     logger.error('Geocode error:', err.message);
-    res.status(500).json({ error: err.message || 'Geocode failed' });
+    res.status(500).json({ error: 'Geocode failed' });
   }
 };
 
@@ -132,7 +132,7 @@ exports.reverseGeocode = async (req, res) => {
     res.json(result);
   } catch (err) {
     logger.error('Reverse geocode error:', err.message);
-    res.status(500).json({ error: err.message || 'Reverse geocode failed' });
+    res.status(500).json({ error: 'Reverse geocode failed' });
   }
 };
 

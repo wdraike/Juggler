@@ -308,7 +308,7 @@ app.use('/api/feature-catalog', require('./routes/feature-catalog.routes'));
 app.use('/api/feature-events', require('./routes/feature-events.routes'));
 app.use('/api/my-plan', require('./routes/my-plan.routes'));
 app.use('/api/billing-webhooks', billingWebhookLimiter, require('./routes/billing-webhooks.routes'));
-app.use('/api/weather', weatherRoutes);
+app.use('/api/weather', authenticateJWT, writeRateLimiter, weatherRoutes);
 app.use('/api/impersonation', impersonationRoutes);
 
 // 404 handler
