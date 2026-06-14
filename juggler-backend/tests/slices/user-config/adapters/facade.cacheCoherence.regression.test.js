@@ -9,11 +9,16 @@
  * `facade.checkEntitlement` call returned the stale plan without re-fetching —
  * a downgraded user appeared to still have paid features.
  *
- * FIX (bert, facade.js:344-347): `_billingEntitlement.invalidateUserPlan` now
- * calls BOTH:
- *   1. `_entitlement.invalidateUserPlan(userId)` — drops the adapter Map entry.
- *   2. `invalidateUserPlanCache(userId)` on the legacy plan-features module — drops
- *      the module-level Map entry consumed by the non-facade resolvePlanFeatures path.
+ * FIX (bert, facade.js): `_billingEntitlement.invalidateUserPlan` calls
+ *   `_entitlement.invalidateUserPlan(userId)` — drops the adapter Map entry (the
+ *   single user-plan cache the live entitlement gate reads via checkEntitlement).
+ *
+ * NOTE (leg jug-h4-vestigial-plancache, 999.410): the pre-fix bug also referenced a
+ *   SECOND, module-level `_userPlanCache` in plan-features.middleware.js busted by
+ *   `invalidateUserPlanCache`. That module-level cache + its only writer
+ *   (getUserPlanId) were vestigial dead code (never populated, zero production
+ *   callers) and have since been REMOVED — so the shim now busts ONLY the adapter
+ *   cache. The coherence guarantee is unchanged: one cache, busted on every webhook.
  *
  * WHAT THIS SUITE PROVES
  * ----------------------
@@ -21,14 +26,14 @@
  *   A billing webhook fires (subscription.canceled / downgrade).
  *   The facade dispatches _billingEntitlement.invalidateUserPlan(userId).
  *   The NEXT facade.checkEntitlement({user: U}) MUST re-fetch (adapter cache gone).
- *   If only the module-level cache is busted (pre-fix behavior), the adapter
- *   STILL serves the cached paid plan — the gate would pass without re-fetching.
+ *   If the adapter cache is NOT busted, it STILL serves the cached paid plan —
+ *   the gate would pass without re-fetching (the stale-entitlement bug).
  *
  * This suite proves:
  *   A) With bert's fix in place, invalidation drops the adapter cache → re-fetch
  *      happens → the fetch counter increments (gate post-webhook !== stale).
- *   B) PROOF OF FAILURE (pre-fix path): when only the module-level invalidation
- *      fires (adapter.invalidateUserPlan NOT called), the adapter cache is NOT
+ *   B) PROOF OF FAILURE: when adapter.invalidateUserPlan is NOT called, the
+ *      adapter cache is NOT
  *      dropped → zero additional fetches → stale plan served. This test is the
  *      mutation gate — it FAILS if adapter-instance invalidation is removed.
  *
@@ -218,10 +223,9 @@ describe('facade cache-coherence regression — elmo W1 fix (bert facade.js:344-
 
   // ── billing webhook dispatch path (HandleBillingWebhook → _billingEntitlement) ─
   test('A4: HandleBillingWebhook.invalidateUserPlan calls the adapter invalidation (facade coherence path)', async function () {
-    // This test exercises the _billingEntitlement shim in facade.js:343-351
-    // by using the SAME two-call pattern: adapter.invalidateUserPlan is the
-    // method that the shim MUST call. We verify it is called by checking the
-    // adapter's _userPlanCache Map directly.
+    // This test exercises the _billingEntitlement shim in facade.js: the shim
+    // MUST call adapter.invalidateUserPlan (the single live cache bust). We verify
+    // it is called by checking the adapter's _userPlanCache Map directly.
     var counters = { userPlanFetches: 0 };
     var adapter = new PaymentServiceEntitlementAdapter({
       productSlug: 'juggler',
@@ -236,10 +240,9 @@ describe('facade cache-coherence regression — elmo W1 fix (bert facade.js:344-
     // Cache is warm.
     expect(adapter._userPlanCache.has(userId)).toBe(true);
 
-    // Simulate _billingEntitlement.invalidateUserPlan from facade.js:344-347.
-    // The shim calls BOTH: adapter.invalidateUserPlan(userId) [bert's fix]
-    // AND the module-level invalidateUserPlanCache(userId) [legacy path].
-    // We test the adapter half:
+    // Simulate _billingEntitlement.invalidateUserPlan from facade.js: it calls
+    // adapter.invalidateUserPlan(userId) — the single live cache bust (the legacy
+    // module-level invalidateUserPlanCache was removed as vestigial dead code).
     adapter.invalidateUserPlan(userId);
     expect(adapter._userPlanCache.has(userId)).toBe(false); // DROPPED
 
@@ -260,15 +263,13 @@ describe('facade cache-coherence regression — elmo W1 fix (bert facade.js:344-
     var userId = 'user-cancel-webhook';
     var HandleBillingWebhook = require(path.join(SLICE, 'application', 'commands', 'HandleBillingWebhook'));
 
-    // Construct the same _billingEntitlement shim as facade.js:343-351.
-    // In the real facade, this shim calls BOTH adapter.invalidateUserPlan AND
-    // the module-level invalidateUserPlanCache. We reproduce the shim here to
-    // test the coherence end-to-end through the use-case dispatch.
-    var moduleInvalidateCalls = [];
+    // Construct the same _billingEntitlement shim as the real facade: it busts
+    // ONLY the adapter-instance cache via adapter.invalidateUserPlan (the legacy
+    // module-level invalidateUserPlanCache was removed as vestigial dead code).
+    // We reproduce the shim here to test coherence end-to-end through the use-case.
     var billingEntitlement = {
       invalidateUserPlan: function (uid) {
-        adapter.invalidateUserPlan(uid); // bert's fix: adapter-instance invalidation
-        moduleInvalidateCalls.push(uid); // represents the module-level bust
+        adapter.invalidateUserPlan(uid); // the single live cache bust
       },
       resolvePlanCatalog: function () {
         return adapter.resolvePlanCatalog();
@@ -294,8 +295,7 @@ describe('facade cache-coherence regression — elmo W1 fix (bert facade.js:344-
     expect(webhookResult.status).toBe(200);
     expect(webhookResult.body.success).toBe(true);
 
-    // Step 3: Both shim halves must have fired.
-    expect(moduleInvalidateCalls).toContain(userId); // legacy module-level bust
+    // Step 3: the webhook dispatch busted the adapter cache (the live cache).
     expect(adapter._userPlanCache.has(userId)).toBe(false); // adapter cache DROPPED
 
     // Step 4: Next checkEntitlement re-fetches (adapter cache gone).

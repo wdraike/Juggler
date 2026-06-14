@@ -99,48 +99,10 @@ async function getCachedPlanFeatures() {
   return _fetchPromise;
 }
 
-// ─── User plan cache (real-time from payment service) ──────────────────
-const _userPlanCache = new Map();
-
-async function getUserPlanId(userId) {
-  const cached = _userPlanCache.get(userId);
-  if (cached && (Date.now() - cached.timestamp) < USER_PLAN_CACHE_TTL_MS) {
-    return cached.planId;
-  }
-
-  try {
-    const paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
-    const internalKey = process.env.INTERNAL_SERVICE_KEY || '';
-    const res = await fetch(`${paymentUrl}/internal/users/${userId}/active-plans`, {
-      headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(30000)
-    });
-    if (!res.ok) throw new Error(`Payment service returned ${res.status}`);
-    const data = await res.json();
-    // active-plans returns a map keyed by products.productId (app slug),
-    // so look up by PRODUCT_LABEL — same key used in JWT `plans` claims.
-    const planId = data.plans?.[PRODUCT_LABEL] || null;
-    // Only cache when user has an active plan — don't cache null so that
-    // a user who just subscribed isn't blocked by stale cache
-    if (planId) {
-      _userPlanCache.set(userId, { planId, timestamp: Date.now() });
-    } else {
-      _userPlanCache.delete(userId);
-    }
-    return planId;
-  } catch {
-    return null;
-  }
-}
-
 // Force refresh — called externally when plan changes
 async function refreshPlanFeatures() {
   _cacheTimestamp = 0;
   return getCachedPlanFeatures();
-}
-
-function invalidateUserPlanCache(userId) {
-  _userPlanCache.delete(userId);
 }
 
 // ─── Login reconciliation: enforce limits on stale plan changes ───────
@@ -181,4 +143,4 @@ const resolvePlanFeatures = async (req, res, next) => {
   }
 };
 
-module.exports = { resolvePlanFeatures, PRODUCT_LABEL, getProductId, refreshPlanFeatures, invalidateUserPlanCache, getCachedPlanFeatures, reconcileLimitsIfNeeded };
+module.exports = { resolvePlanFeatures, PRODUCT_LABEL, getProductId, refreshPlanFeatures, getCachedPlanFeatures, reconcileLimitsIfNeeded };

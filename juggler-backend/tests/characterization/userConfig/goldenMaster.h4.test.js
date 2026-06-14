@@ -142,7 +142,6 @@ jest.mock('../../../src/middleware/plan-features.middleware', () => ({
   // getProductId: used by feature-catalog.controller — returns null in test (payment-service unavailable)
   getProductId: jest.fn(() => Promise.resolve(null)),
   refreshPlanFeatures: jest.fn(),
-  invalidateUserPlanCache: jest.fn(),
   getCachedPlanFeatures: jest.fn(() => Promise.resolve({ 'plan-starter': mockPlanFeatures }))
 }));
 
@@ -934,15 +933,26 @@ describe('Surface 3 — billing-webhooks: signature guard + event handling (H3)'
     expect(res.status).toBe(200);
   });
 
+  // H3-6/H3-7: the webhook busts the user-plan cache via the REAL entitlement seam.
+  // Pre-leg-jug-h4-vestigial-plancache these asserted the legacy module-level
+  // invalidateUserPlanCache (a no-op that was removed); the live invalidation is
+  // _entitlement.invalidateUserPlan on the single PaymentServiceEntitlementAdapter
+  // instance (facade.js:106) the live entitlement gate reads. Spy the adapter
+  // prototype to prove the webhook reaches the real cache bust (non-tautological).
   test('H3-6: subscription.plan_changed invalidates user plan cache', async () => {
     const bodyObj = { event: 'subscription.plan_changed', user_id: 'u1', from_planId: 'plan-free', to_planId: 'plan-pro' };
     const raw = JSON.stringify(bodyObj);
     const sig = makeSignature(raw, process.env.BILLING_WEBHOOK_SECRET);
 
-    const planFeaturesMiddleware = require('../../../src/middleware/plan-features.middleware');
-    const res = await webhookRequest(bodyObj).set('X-Billing-Signature', sig);
-    expect(res.status).toBe(200);
-    expect(planFeaturesMiddleware.invalidateUserPlanCache).toHaveBeenCalledWith('u1');
+    const facade = require('../../../src/slices/user-config/facade');
+    const invSpy = jest.spyOn(facade.PaymentServiceEntitlementAdapter.prototype, 'invalidateUserPlan');
+    try {
+      const res = await webhookRequest(bodyObj).set('X-Billing-Signature', sig);
+      expect(res.status).toBe(200);
+      expect(invSpy).toHaveBeenCalledWith('u1');
+    } finally {
+      invSpy.mockRestore();
+    }
   });
 
   test('H3-7: subscription.canceled invalidates user plan cache', async () => {
@@ -950,10 +960,15 @@ describe('Surface 3 — billing-webhooks: signature guard + event handling (H3)'
     const raw = JSON.stringify(bodyObj);
     const sig = makeSignature(raw, process.env.BILLING_WEBHOOK_SECRET);
 
-    const planFeaturesMiddleware = require('../../../src/middleware/plan-features.middleware');
-    const res = await webhookRequest(bodyObj).set('X-Billing-Signature', sig);
-    expect(res.status).toBe(200);
-    expect(planFeaturesMiddleware.invalidateUserPlanCache).toHaveBeenCalledWith('u2');
+    const facade = require('../../../src/slices/user-config/facade');
+    const invSpy = jest.spyOn(facade.PaymentServiceEntitlementAdapter.prototype, 'invalidateUserPlan');
+    try {
+      const res = await webhookRequest(bodyObj).set('X-Billing-Signature', sig);
+      expect(res.status).toBe(200);
+      expect(invSpy).toHaveBeenCalledWith('u2');
+    } finally {
+      invSpy.mockRestore();
+    }
   });
 
   test('H3-8: unknown event returns 200 (handled gracefully)', async () => {
@@ -1830,9 +1845,10 @@ describe('Surface 7 — plan-features: slug-keying (H7), fallback (H13), cache T
       require('path').join(__dirname, '../../../src/middleware/plan-features.middleware.js'),
       'utf8'
     );
-    // Multiple occurrences expected (getProductId, fetchPlanFeatures, getUserPlanId)
+    // Occurrences expected (getProductId, fetchPlanFeatures). The 3rd (getUserPlanId)
+    // was removed with the vestigial dead user-plan cache chain (leg jug-h4-vestigial-plancache).
     const count = (src.match(/process\.env\.PAYMENT_SERVICE_URL \|\| 'http:\/\/localhost:5020'/g) || []).length;
-    expect(count).toBeGreaterThanOrEqual(3);
+    expect(count).toBeGreaterThanOrEqual(2);
   });
 
   // H7: product discovery URL shape — /internal/products/${PRODUCT_LABEL} (slug)
@@ -2395,13 +2411,16 @@ describe('Cross-cutting invariants (H11, H13)', () => {
     }
   });
 
-  test('H13-verified: PAYMENT_SERVICE_URL fallback appears 3 times (no removal)', () => {
+  test('H13-verified: PAYMENT_SERVICE_URL fallback appears 2 times (live: getProductId + fetchPlanFeatures)', () => {
+    // Was 3 before leg jug-h4-vestigial-plancache; the 3rd occurrence lived in the
+    // now-removed dead getUserPlanId. The 2 live fallbacks (getProductId, fetchPlanFeatures)
+    // must be preserved verbatim.
     const src = require('fs').readFileSync(
       require('path').join(__dirname, '../../../src/middleware/plan-features.middleware.js'),
       'utf8'
     );
     const matches = src.match(/process\.env\.PAYMENT_SERVICE_URL \|\| 'http:\/\/localhost:5020'/g) || [];
-    expect(matches.length).toBeGreaterThanOrEqual(3);
+    expect(matches.length).toBeGreaterThanOrEqual(2);
   });
 
   test('H7-final: feature-catalog PRODUCT_ID field uses PRODUCT_LABEL (slug "juggler")', async () => {

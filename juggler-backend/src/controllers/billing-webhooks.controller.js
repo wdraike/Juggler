@@ -8,7 +8,6 @@
 
 const getDb = () => require('../db');
 const tasksWrite = require('../lib/tasks-write');
-const { invalidateUserPlanCache, getCachedPlanFeatures } = require('../middleware/plan-features.middleware');
 const { countRecurringTemplates } = require('../middleware/entity-limits');
 const cache = require('../lib/redis');
 const { createLogger } = require('@raike/lib-logger');

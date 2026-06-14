@@ -334,17 +334,14 @@ var _impersonate = new app.Impersonate({
 var _stopImpersonation = new app.StopImpersonation({ repo: _repo, auditLogger: logger });
 
 // billing-webhooks.controller handler.
-// The webhook invalidates / reads the LIVE plan-features cache (the same cache
-// resolvePlanFeatures uses — which stays inline in plan-features.middleware.js,
-// pinned by the golden-master Surface-7). So the webhook's entitlement seam
-// delegates invalidateUserPlan → invalidateUserPlanCache and resolvePlanCatalog →
-// _entitlement.resolvePlanCatalog() (the adapter-instance cache, which the live
-// gate warms via checkEntitlement) — sharing ONE catalog cache and eliminating
-// the split-brain / cold-legacy-catalog silent-downgrade-skip (B1 fix).
+// The webhook's entitlement seam shares ONE cache with the LIVE entitlement gate
+// via the single _entitlement adapter instance: invalidateUserPlan busts the
+// adapter-instance user-plan cache and resolvePlanCatalog reads the
+// adapter-instance catalog cache (which the live gate warms via checkEntitlement)
+// — eliminating the split-brain / cold-legacy-catalog silent-downgrade-skip (B1 fix).
 var _billingEntitlement = {
   invalidateUserPlan: function (userId) {
     _entitlement.invalidateUserPlan(userId); // bust the adapter instance cache the LIVE gate reads (restores pre-rewire coherence)
-    return require('../../middleware/plan-features.middleware').invalidateUserPlanCache(userId); // legacy module-level cache (other consumers)
   },
   resolvePlanCatalog: function () {
     return _entitlement.resolvePlanCatalog(); // adapter-instance cache (same as the live entitlement gate)
