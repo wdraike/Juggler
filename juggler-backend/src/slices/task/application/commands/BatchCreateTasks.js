@@ -43,15 +43,13 @@
 
 'use strict';
 
+var assertDeps = require('../_assertDeps');
+
 /** @param {BatchCreateTasksDeps} deps */
 function BatchCreateTasks(deps) {
   var required = ['repo', 'cache', 'enqueueScheduleRun', 'mappers', 'validation',
     'batchCreateSchema', 'ensureProject', 'isLocked', 'enqueueWrite', 'safeTimezone'];
-  for (var i = 0; i < required.length; i++) {
-    if (!deps || deps[required[i]] === undefined || deps[required[i]] === null) {
-      throw new Error('BatchCreateTasks: missing dependency "' + required[i] + '"');
-    }
-  }
+  assertDeps('BatchCreateTasks', deps, required);
   this.repo = deps.repo;
   this.cache = deps.cache;
   this.enqueueScheduleRun = deps.enqueueScheduleRun;

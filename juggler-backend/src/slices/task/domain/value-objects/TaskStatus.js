@@ -11,7 +11,7 @@
  *     updateTaskStatus('done') / terminal-status paths.
  *
  * This VO does NOT introduce the S7 "task-type" terms — those are a SEPARATE
- * classification (see TaskTypeTerm.js). `status` is the lifecycle column; it is a
+ * classification. `status` is the lifecycle column; it is a
  * distinct closed enum and is modelled here so the application layer can reject
  * an unknown status before it reaches the DB (the legacy controller relied on the
  * frozen STATUS_OPTIONS list + the DB ENUM for this).

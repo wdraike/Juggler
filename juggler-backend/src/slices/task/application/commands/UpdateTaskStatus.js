@@ -44,6 +44,8 @@
 
 'use strict';
 
+var assertDeps = require('../_assertDeps');
+
 var TERMINAL_REQUIRES_SCHEDULE = ['done', 'skip', 'cancel'];
 var VALID_STATUSES = ['', 'done', 'wip', 'cancel', 'skip', 'pause', 'disabled', 'missed'];
 
@@ -53,11 +55,7 @@ function UpdateTaskStatus(deps) {
     'statusUpdateSchema', 'safeTimezone', 'dateHelpers', 'isTerminalStatus',
     'materializeRcInstance', 'handleTemplatePause', 'loadMaster', 'isRollingMaster',
     'applyRollingAnchor', 'loadSplitSiblings', 'triggerCalSync', 'reactivateDoneFrozen'];
-  for (var i = 0; i < required.length; i++) {
-    if (!deps || deps[required[i]] === undefined || deps[required[i]] === null) {
-      throw new Error('UpdateTaskStatus: missing dependency "' + required[i] + '"');
-    }
-  }
+  assertDeps('UpdateTaskStatus', deps, required);
   this.repo = deps.repo;
   this.cache = deps.cache;
   this.events = deps.events;

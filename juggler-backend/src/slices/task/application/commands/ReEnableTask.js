@@ -25,15 +25,13 @@
 
 'use strict';
 
+var assertDeps = require('../_assertDeps');
+
 /** @param {ReEnableTaskDeps} deps */
 function ReEnableTask(deps) {
   var required = ['repo', 'cache', 'enqueueScheduleRun', 'mappers',
     'countActiveTasks', 'countRecurringTemplates', 'countDisabledInstances'];
-  for (var i = 0; i < required.length; i++) {
-    if (!deps || deps[required[i]] === undefined || deps[required[i]] === null) {
-      throw new Error('ReEnableTask: missing dependency "' + required[i] + '"');
-    }
-  }
+  assertDeps('ReEnableTask', deps, required);
   this.repo = deps.repo;
   this.cache = deps.cache;
   this.enqueueScheduleRun = deps.enqueueScheduleRun;

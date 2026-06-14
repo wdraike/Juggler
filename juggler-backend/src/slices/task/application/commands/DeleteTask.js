@@ -31,15 +31,13 @@
 
 'use strict';
 
+var assertDeps = require('../_assertDeps');
+
 /** @param {DeleteTaskDeps} deps */
 function DeleteTask(deps) {
   var required = ['repo', 'cache', 'enqueueScheduleRun', 'loadCalSyncSettings',
     'findProviderLedgerRow', 'cascadeRecurringDelete', 'standardDelete'];
-  for (var i = 0; i < required.length; i++) {
-    if (!deps || deps[required[i]] === undefined || deps[required[i]] === null) {
-      throw new Error('DeleteTask: missing dependency "' + required[i] + '"');
-    }
-  }
+  assertDeps('DeleteTask', deps, required);
   this.repo = deps.repo;
   this.cache = deps.cache;
   this.enqueueScheduleRun = deps.enqueueScheduleRun;
