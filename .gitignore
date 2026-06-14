@@ -24,3 +24,6 @@ juggler-backend/purge-orphan-events-*.csv
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
+
+# --- transient muppet/kermit per-leg state + tooling junk (cross-session churn guard) ---
+.planning/kermit/
