@@ -137,6 +137,20 @@ const SLICES = [
       { subpath: 'domain/logic', label: 'domain logic' },
       { subpath: 'application', label: 'application use-case' }
     ]
+  },
+  {
+    name: 'scheduler',
+    ref: 'JUG-HEX-H6 / 999.435',
+    facadeFiles: ['**/slices/scheduler/facade.js', '**/slices/scheduler/index.js'],
+    extraExempt: ['**/slices/scheduler/application/**/*.js', '**/slices/scheduler/domain/**/*.js'],
+    restrictions: [
+      { subpath: 'adapters', label: 'adapter' },
+      { subpath: 'domain/ports', label: 'port', tail: TAIL_PORT },
+      { subpath: 'domain/entities', label: 'entity' },
+      { subpath: 'domain/value-objects', label: 'value-object' },
+      { subpath: 'domain/logic', label: 'domain logic' },
+      { subpath: 'application', label: 'application use-case' }
+    ]
   }
 ];
 
@@ -212,6 +226,19 @@ module.exports = [
   // Per-slice exemption override blocks — single-sourced from SLICES (see
   // sliceExemptions above). Order is preserved: for each slice, facade(+index),
   // adapters, [domain/application self-imports], tests; slices in declaration
-  // order (calendar, weather, task, ai-enrichment, user-config).
-  ...SLICES.flatMap(sliceExemptions)
+  // order (calendar, weather, task, ai-enrichment, user-config, scheduler).
+  ...SLICES.flatMap(sliceExemptions),
+  // Grandfather exemption (999.435): the legacy scheduler ENTRY files directly
+  // under src/scheduler/ predate the H6 slice extraction and still import scheduler
+  // slice internals directly (ScoreEngine/ConstraintSolver/ConflictResolver from
+  // domain/logic, SchedulerTaskProvider from adapters, RunScheduleCommand from
+  // application, PRI_RANK from domain/constants). Routing them through the facade is
+  // a separate scheduler-hot-path refactor (risky — "scheduler bugs cascade", see
+  // juggler CLAUDE.md), tracked as the H7B follow-up. They are exempted here so the
+  // scheduler boundary rule still enforces the facade for ALL OTHER (new/external)
+  // code today. The glob matches only the top-level legacy entry files
+  // (src/scheduler/*.js), NOT slices/scheduler/{adapters,domain,application}/** —
+  // those keep their inward slice enforcement. Remove this block when the H7B
+  // refactor lands and `npm run lint:boundaries` is clean without it.
+  { files: ['**/scheduler/*.js'], rules: { 'no-restricted-syntax': 'off' } }
 ];
