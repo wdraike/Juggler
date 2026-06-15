@@ -37,6 +37,20 @@
  * (the slug) is read via lib-config (through service-identity, H2). No NEW `||`/`??`
  * fallback is introduced.
  *
+ * ── CIRCUIT BREAKER (999.374, instance-scoped, SHARED across the 3 calls) ─────
+ * Each cross-service call (resolveProductId, _fetchPlanCatalog, resolveUserPlanId)
+ * uses AbortSignal.timeout(30000) and fail-softs on error. Without a breaker a
+ * payment-service outage makes EVERY request hang for the full 30s. A simple
+ * in-adapter breaker tracks CONSECUTIVE failures across all 3 calls; after a
+ * threshold (default 5) it OPENs and fast-fails (returns the SAME fail-soft result
+ * — null, or a throw for the catalog — WITHOUT the HTTP call) for a cooldown
+ * (default 30s); after cooldown EXACTLY ONE half-open trial (admitted atomically —
+ * a concurrent same-tick call is fast-failed) closes the breaker on success or
+ * re-opens it on failure. Each LOGICAL cross-service fetch records AT MOST one
+ * outcome (the catalog fetch's product-discovery sub-step does NOT double-count).
+ * The fail-soft return contract is UNCHANGED — only the 30s hang is avoided.
+ * Threshold / cooldown / clock are deps-injectable for tests.
+ *
  * ── CACHE STATE (instance-scoped) ────────────────────────────────────────────
  * The legacy module-global caches become per-instance fields. One adapter instance
  * == one process's cache — behavior-identical to the legacy singleton, and
@@ -107,6 +121,26 @@ function PaymentServiceEntitlementAdapter(deps) {
 
   // ── User plan cache state ──
   this._userPlanCache = new Map();
+
+  // ── Circuit breaker state (999.374) — SHARED across all 3 cross-service calls ──
+  // A payment-service outage otherwise makes EVERY request hang for the full 30s
+  // per-call AbortSignal.timeout before fail-softing. The breaker tracks consecutive
+  // failures; after _breakerThreshold it OPENs and fast-fails (returns the SAME
+  // fail-soft result WITHOUT making the HTTP call) for _breakerCooldownMs; after the
+  // cooldown EXACTLY ONE half-open trial is admitted (the state flips ATOMICALLY to
+  // 'half-open-pending' on admission, so a concurrent same-tick call is fast-failed,
+  // not admitted as a second trial) — a success CLOSEs the breaker, a failure re-OPENs
+  // it. Each LOGICAL cross-service fetch records AT MOST ONE outcome (via _withBreaker;
+  // the catalog fetch no longer double-counts product discovery + the catalog HTTP).
+  // The fail-soft return contract is UNCHANGED (callers still get null / the same
+  // throw); the breaker only avoids the 30s hang. Configurable via deps for tests.
+  this._breakerThreshold = d.breakerThreshold === undefined ? 5 : d.breakerThreshold;
+  this._breakerCooldownMs = d.breakerCooldownMs === undefined ? 30000 : d.breakerCooldownMs;
+  this._breakerState = 'closed';   // 'closed' | 'open' | 'half-open-pending'
+  this._breakerFailures = 0;       // consecutive failures
+  this._breakerOpenedAt = 0;       // Date.now() when the breaker last OPENed
+  // Injectable clock (defaults to Date.now) so tests can advance time deterministically.
+  this._now = typeof d.now === 'function' ? d.now : Date.now;
 }
 
 PaymentServiceEntitlementAdapter.prototype = Object.create(EntitlementPort.prototype);
@@ -131,6 +165,89 @@ PaymentServiceEntitlementAdapter.prototype._fetch = function _fetch() {
 };
 
 /**
+ * Circuit-breaker gate (999.374). Decide whether a cross-service HTTP call may
+ * proceed. Returns true when the breaker is CLOSED, or when it is OPEN but the
+ * cooldown has elapsed (transitions to HALF-OPEN, allowing ONE trial). Returns
+ * false while OPEN and still within the cooldown window (caller must fast-fail).
+ * @returns {boolean}
+ */
+PaymentServiceEntitlementAdapter.prototype._breakerAllowsCall = function _breakerAllowsCall() {
+  if (this._breakerState === 'open') {
+    if ((this._now() - this._breakerOpenedAt) >= this._breakerCooldownMs) {
+      // Cooldown elapsed → admit exactly ONE half-open trial. Flip to a
+      // half-open-IN-FLIGHT marker ('half-open-pending') ATOMICALLY (single-tick,
+      // no await between the check and the set) so a concurrent call landing in the
+      // same tick sees the pending marker and is fast-failed below — NOT admitted as
+      // a second trial. The trial resolves the marker via _breakerRecordSuccess
+      // (→ 'closed') or _breakerRecordFailure (→ 'open'). (999.374, half-open
+      // atomicity.)
+      this._breakerState = 'half-open-pending';
+      return true;
+    }
+    return false; // still OPEN within cooldown → fast-fail
+  }
+  if (this._breakerState === 'half-open-pending') {
+    // A half-open trial is already in flight (admitted earlier this cooldown). Only
+    // ONE trial is allowed → fast-fail this concurrent call.
+    return false;
+  }
+  // 'closed' → allow.
+  return true;
+};
+
+/**
+ * Wrap ONE logical cross-service fetch in the breaker so it records AT MOST one
+ * success/failure (999.374 — prevents the catalog double-count where product
+ * discovery + the catalog HTTP each recorded separately, halving the effective
+ * threshold). Gates the call; on fast-fail invokes onFastFail (caller decides the
+ * fail-soft shape — null vs throw); otherwise runs fn and records exactly one
+ * outcome. fn MUST NOT itself touch the breaker (call the raw `_*Raw` helpers).
+ * @template T
+ * @param {() => Promise<T>} fn  the raw I/O (no breaker accounting)
+ * @param {() => T} onFastFail  produce the fast-fail result when the breaker is open
+ * @returns {Promise<T>}
+ */
+PaymentServiceEntitlementAdapter.prototype._withBreaker = function _withBreaker(fn, onFastFail) {
+  if (!this._breakerAllowsCall()) {
+    return Promise.resolve().then(onFastFail);
+  }
+  var self = this;
+  return fn().then(function (value) {
+    self._breakerRecordSuccess();
+    return value;
+  }, function (err) {
+    self._breakerRecordFailure();
+    throw err;
+  });
+};
+
+/** Record a successful cross-service call — resets failures, CLOSEs the breaker. */
+PaymentServiceEntitlementAdapter.prototype._breakerRecordSuccess = function _breakerRecordSuccess() {
+  this._breakerFailures = 0;
+  this._breakerState = 'closed';
+};
+
+/**
+ * Record a failed cross-service call. Increments the consecutive-failure count and
+ * OPENs the breaker once the threshold is reached (or immediately re-OPENs if the
+ * failure happened during a HALF-OPEN trial).
+ */
+PaymentServiceEntitlementAdapter.prototype._breakerRecordFailure = function _breakerRecordFailure() {
+  if (this._breakerState === 'half-open-pending') {
+    // The single in-flight half-open trial failed → re-OPEN immediately, restart
+    // the cooldown (the pending marker is resolved).
+    this._breakerState = 'open';
+    this._breakerOpenedAt = this._now();
+    return;
+  }
+  this._breakerFailures += 1;
+  if (this._breakerFailures >= this._breakerThreshold) {
+    this._breakerState = 'open';
+    this._breakerOpenedAt = this._now();
+  }
+};
+
+/**
  * Slug→UUID product discovery — verbatim from getProductId
  * (plan-features.middleware.js:26-51). Cached for the process (instance) lifetime;
  * in-flight dedup; null on failure; discovery-promise reset so a later call retries.
@@ -142,29 +259,45 @@ PaymentServiceEntitlementAdapter.prototype.resolveProductId = function resolvePr
   if (self._productId) return Promise.resolve(self._productId);
   if (self._productDiscoveryPromise) return self._productDiscoveryPromise;
 
-  var PRODUCT_LABEL = self._slug();
-
-  self._productDiscoveryPromise = (async function () {
-    var paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
-    var internalKey = process.env.INTERNAL_SERVICE_KEY || '';
-    try {
-      var res = await self._fetch()(paymentUrl + '/internal/products/' + PRODUCT_LABEL, {
-        headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(30000)
-      });
-      if (!res.ok) throw new Error('Product discovery failed (' + res.status + ')');
-      var data = await res.json();
-      self._productId = data.product.id;
-      self._logger.info('[plan-features] Product "' + PRODUCT_LABEL + '" -> ' + self._productId);
-      return self._productId;
-    } catch (err) {
-      self._productDiscoveryPromise = null;
-      self._logger.error('[plan-features] Product discovery failed:', { error: err });
-      return null;
-    }
-  })();
+  // Top-level logical fetch → ONE breaker outcome via _withBreaker. The raw HTTP
+  // lives in _discoverProductIdRaw (no breaker accounting) so that when the catalog
+  // fetch reuses discovery it does NOT double-count (999.374). On fast-fail (breaker
+  // open) return the SAME fail-soft null WITHOUT the HTTP call, and reset the in-flight
+  // discovery promise so a later (post-cooldown) call retries.
+  self._productDiscoveryPromise = self._withBreaker(
+    function () { return self._discoverProductIdRaw(); },
+    function () { self._productDiscoveryPromise = null; return null; }
+  ).catch(function (err) {
+    // Raw discovery error → fail-soft null (legacy contract), reset for retry.
+    self._productDiscoveryPromise = null;
+    self._logger.error('[plan-features] Product discovery failed:', { error: err });
+    return null;
+  });
 
   return self._productDiscoveryPromise;
+};
+
+/**
+ * Raw product discovery HTTP — NO breaker accounting (the caller's _withBreaker owns
+ * the single success/failure record). Verbatim from getProductId
+ * (plan-features.middleware.js:26-51) minus the breaker. Throws on a non-OK/failed
+ * fetch (the breaker wrapper records the failure; resolveProductId maps it to the
+ * fail-soft null). Sets _productId on success.
+ * @returns {Promise<?string>}
+ */
+PaymentServiceEntitlementAdapter.prototype._discoverProductIdRaw = async function _discoverProductIdRaw() {
+  var PRODUCT_LABEL = this._slug();
+  var paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
+  var internalKey = process.env.INTERNAL_SERVICE_KEY || '';
+  var res = await this._fetch()(paymentUrl + '/internal/products/' + PRODUCT_LABEL, {
+    headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(30000)
+  });
+  if (!res.ok) throw new Error('Product discovery failed (' + res.status + ')');
+  var data = await res.json();
+  this._productId = data.product.id;
+  this._logger.info('[plan-features] Product "' + PRODUCT_LABEL + '" -> ' + this._productId);
+  return this._productId;
 };
 
 /**
@@ -174,18 +307,55 @@ PaymentServiceEntitlementAdapter.prototype.resolveProductId = function resolvePr
  * { planId → features } map is built by the W2 pure extractCatalogFeatures.
  * @returns {Promise<Object<string, Object>>}
  */
-PaymentServiceEntitlementAdapter.prototype._fetchPlanCatalog = async function _fetchPlanCatalog() {
+PaymentServiceEntitlementAdapter.prototype._fetchPlanCatalog = function _fetchPlanCatalog() {
+  var self = this;
+  // ONE logical cross-service fetch = (product discovery, if needed) + the /api/plans
+  // HTTP. Wrap the WHOLE thing in a single _withBreaker so it records AT MOST one
+  // success/failure (999.374). Previously discovery (via resolveProductId) recorded
+  // its own outcome AND the catalog recorded another — two records per logical fetch,
+  // halving the effective threshold. The inner step uses the RAW discovery helper (no
+  // breaker), never resolveProductId, so there is no nested breaker accounting.
+  // On fast-fail (breaker open within cooldown) THROW the same error shape a real
+  // failure produces (no HTTP) — resolvePlanCatalog().catch then returns the last
+  // cache or re-throws, identical to a real outage. Fail-soft contract unchanged.
+  return this._withBreaker(
+    function () { return self._fetchPlanCatalogRaw(); },
+    function () { throw new Error('Payment service circuit breaker open'); }
+  );
+};
+
+/**
+ * Raw catalog fetch — NO breaker accounting (the _withBreaker wrapper owns the single
+ * outcome). Resolves the product UUID for the `?product=` filter via the raw discovery
+ * helper (cached UUID reused; no nested breaker), then fetches /api/plans. Verbatim
+ * from fetchPlanFeatures (plan-features.middleware.js:58-77) minus the breaker.
+ * @returns {Promise<Object<string, Object>>}
+ */
+PaymentServiceEntitlementAdapter.prototype._fetchPlanCatalogRaw = async function _fetchPlanCatalogRaw() {
   var paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
-  var productId = await this.resolveProductId();
   var PRODUCT_LABEL = this._slug();
+
+  // Resolve the UUID for the catalog filter WITHOUT a nested breaker record: reuse the
+  // cached _productId, else do the raw discovery. A discovery failure here is fail-soft
+  // to null (the slug filter is used) — it must NOT abort the catalog fetch, matching
+  // resolveProductId's null-on-failure contract. The single breaker outcome for this
+  // logical fetch is decided by the /api/plans call below.
+  var productId = this._productId;
+  if (!productId) {
+    try {
+      productId = await this._discoverProductIdRaw();
+    } catch (err) {
+      this._logger.error('[plan-features] Product discovery failed:', { error: err });
+      productId = null;
+    }
+  }
   var filter = productId ? '?product=' + productId : '?product=' + PRODUCT_LABEL;
+
   var response = await this._fetch()(paymentUrl + '/api/plans' + filter + '&include_all=true', {
     headers: { 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(30000)
   });
-
   if (!response.ok) throw new Error('Payment service returned ' + response.status);
-
   var data = await response.json();
   // Pure map build (W2) — byte-identical to the legacy inline loop.
   return entitlementLogic.extractCatalogFeatures(data.plans || []);
@@ -230,37 +400,54 @@ PaymentServiceEntitlementAdapter.prototype.resolvePlanCatalog = function resolve
  * @param {string} userId
  * @returns {Promise<?string>}
  */
-PaymentServiceEntitlementAdapter.prototype.resolveUserPlanId = async function resolveUserPlanId(userId) {
+PaymentServiceEntitlementAdapter.prototype.resolveUserPlanId = function resolveUserPlanId(userId) {
+  var self = this;
   var cached = this._userPlanCache.get(userId);
   if (cached && (Date.now() - cached.timestamp) < USER_PLAN_CACHE_TTL_MS) {
-    return cached.planId;
+    return Promise.resolve(cached.planId);
   }
 
-  try {
-    var paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
-    var internalKey = process.env.INTERNAL_SERVICE_KEY || '';
-    var res = await this._fetch()(paymentUrl + '/internal/users/' + userId + '/active-plans', {
-      headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(30000)
-    });
-    if (!res.ok) throw new Error('Payment service returned ' + res.status);
-    var data = await res.json();
-    // active-plans returns a map keyed by products.productId (app SLUG) — look up
-    // by the slug 'juggler', same key as the JWT `plans` claims. The pure
-    // resolvePlanIdBySlug coerces the key through PlanSlug (rejects UUID).
-    var planId = entitlementLogic.resolvePlanIdBySlug(data.plans, this._productSlug);
-    // Only cache a TRUTHY planId — don't cache null so a just-subscribed user
-    // isn't blocked by a stale null (the W2 pure shouldCacheUserPlan predicate).
-    if (entitlementLogic.shouldCacheUserPlan(planId)) {
-      this._userPlanCache.set(userId, { planId: planId, timestamp: Date.now() });
-    } else {
-      this._userPlanCache.delete(userId);
-    }
-    return planId;
-  } catch {
-    // Legacy fail-soft (plan-features.middleware.js:131) — bare catch, null on error.
+  // ONE logical cross-service fetch → ONE breaker outcome via _withBreaker (raw HTTP
+  // in _fetchUserPlanIdRaw, no breaker accounting). On fast-fail (breaker open within
+  // cooldown) return the SAME fail-soft null WITHOUT the HTTP call. A raw error is also
+  // mapped to the legacy fail-soft null (plan-features.middleware.js:131). (999.374.)
+  return this._withBreaker(
+    function () { return self._fetchUserPlanIdRaw(userId); },
+    function () { return null; }
+  ).catch(function () {
     return null;
+  });
+};
+
+/**
+ * Raw user-plan HTTP — NO breaker accounting (the _withBreaker wrapper owns the single
+ * outcome). Verbatim from getUserPlanId (plan-features.middleware.js:105-134) minus the
+ * breaker. Throws on a non-OK/failed fetch (the wrapper records the failure;
+ * resolveUserPlanId maps it to the fail-soft null). Caches only a TRUTHY planId.
+ * @param {string} userId
+ * @returns {Promise<?string>}
+ */
+PaymentServiceEntitlementAdapter.prototype._fetchUserPlanIdRaw = async function _fetchUserPlanIdRaw(userId) {
+  var paymentUrl = process.env.PAYMENT_SERVICE_URL || 'http://localhost:5020';
+  var internalKey = process.env.INTERNAL_SERVICE_KEY || '';
+  var res = await this._fetch()(paymentUrl + '/internal/users/' + userId + '/active-plans', {
+    headers: { 'X-Internal-Key': internalKey, 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(30000)
+  });
+  if (!res.ok) throw new Error('Payment service returned ' + res.status);
+  var data = await res.json();
+  // active-plans returns a map keyed by products.productId (app SLUG) — look up
+  // by the slug 'juggler', same key as the JWT `plans` claims. The pure
+  // resolvePlanIdBySlug coerces the key through PlanSlug (rejects UUID).
+  var planId = entitlementLogic.resolvePlanIdBySlug(data.plans, this._productSlug);
+  // Only cache a TRUTHY planId — don't cache null so a just-subscribed user
+  // isn't blocked by a stale null (the W2 pure shouldCacheUserPlan predicate).
+  if (entitlementLogic.shouldCacheUserPlan(planId)) {
+    this._userPlanCache.set(userId, { planId: planId, timestamp: Date.now() });
+  } else {
+    this._userPlanCache.delete(userId);
   }
+  return planId;
 };
 
 /**

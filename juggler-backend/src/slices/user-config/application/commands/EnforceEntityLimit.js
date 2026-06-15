@@ -19,9 +19,13 @@
  * ── PRESERVED LEGACY BEHAVIOR ────────────────────────────────────────────────
  *   - planFeatures-missing → 500; no-userId → 401 (the guards that fire BEFORE the
  *     count; not modeled in W2 which only decides post-count).
- *   - DB-error fail-open: the legacy try/catch around the count → next() on error
- *     (entity-limits.js:57-60, golden-master H9-4). Reproduced: a thrown count →
- *     log + return allow ({ status: null }).
+ *   - DB-error handling: the `check` factory's count error is now FAIL-CLOSED
+ *     (999.370, user-approved) — a thrown count → log + return 503
+ *     ('Entitlement check temporarily unavailable') so creation is BLOCKED during a
+ *     DB outage, NOT silently allowed. (The legacy entity-limits.js:57-60 fail-open
+ *     next() is intentionally overridden here. checkBatch ALSO fail-closes — see its
+ *     catch — for symmetry, so the batch endpoint can't be used to bypass the limit
+ *     during a DB outage; 999.370.)
  *   - countScheduleTemplates: read the time_blocks config row, parse, count unique
  *     day keys with blocks (W2 countScheduleTemplatesFromBlocks); a parse failure →
  *     0 (the legacy inner try/catch, entity-limits.js:117-119).
@@ -107,9 +111,12 @@ EnforceEntityLimit.prototype.check = async function check(ctx, limitKey, countKi
     }
     return { status: null };
   } catch (err) {
-    // fail-open (entity-limits.js:57-60)
+    // fail-CLOSED (999.370, user-approved): a DB/count error during an entitlement
+    // check must BLOCK entity creation (503), not silently allow it. The legacy
+    // fail-open (entity-limits.js:57-60 → next()) let users exceed plan limits
+    // during a DB outage — corrected here to return 503 so the request is denied.
     this.logger.error('[entity-limits] Check failed:', err.message);
-    return { status: null };
+    return { status: 503, body: { error: 'Entitlement check temporarily unavailable' } };
   }
 };
 
@@ -150,7 +157,8 @@ EnforceEntityLimit.prototype.checkTaskOrRecurring = function checkTaskOrRecurrin
 /**
  * checkBatchTaskLimits (entity-limits.js:179-233): split items into recurringTasks
  * vs tasks, check BOTH limits. Reproduces the exact two-check sequence + the
- * distinct error messages + the fail-open.
+ * distinct error messages. The DB-error catch fails CLOSED (503), symmetric with
+ * check() (999.370) — see the catch.
  *
  * @param {Object} ctx  { planFeatures, planId, userId }
  * @param {Object[]} items  the batch items (each with task_type|taskType).
@@ -213,9 +221,16 @@ EnforceEntityLimit.prototype.checkBatch = async function checkBatch(ctx, items) 
 
     return { status: null };
   } catch (err) {
-    // fail-open (entity-limits.js:229-232)
+    // fail-CLOSED (999.370, user-approved): symmetric with check()'s catch. A
+    // DB/count error during the batch entitlement check must BLOCK creation (503),
+    // not silently allow it. Were this still fail-open (legacy entity-limits.js:229-232
+    // → next()), a user could bypass the per-entity limit during a DB outage by
+    // routing creation through the batch endpoint (POST /tasks/batch) while the
+    // single-create path (check()) correctly blocked — the asymmetry elmo flagged.
+    // applyGate maps this { status: 503, body } to res.status(503).json(body),
+    // identical to check()'s 503.
     this.logger.error('[entity-limits] Batch check failed:', err.message);
-    return { status: null };
+    return { status: 503, body: { error: 'Entitlement check temporarily unavailable' } };
   }
 };
 

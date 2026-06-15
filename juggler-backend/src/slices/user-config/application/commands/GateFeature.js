@@ -13,15 +13,16 @@
  * map — byte-identical to the legacy res.status(...).json(...) (golden-master
  * Surface 6 / H6).
  *
- * ── PRESERVED LEGACY BUGS (FLAG-2, pinned NOT fixed) ─────────────────────────
- *   requireFeatureIncludes' SUCCESS path (membership allow, not 'all') calls
- *   logFeatureEvent with the BUGGY 5-positional-arg shape
+ * ── FLAG-2 (999.371, FIXED) ──────────────────────────────────────────────────
+ *   requireFeatureIncludes' SUCCESS path (membership allow, not 'all') previously
+ *   called logFeatureEvent with the BUGGY 5-positional-arg shape
  *   `logFeatureEvent(userId, featurePath, 'used', planId, { selected })`
- *   (feature-gate.js:127) — the first arg is req.user?.id (a STRING, not a req),
- *   so planId/endpoint are dropped from the log row. Reproduced VERBATIM here via
- *   the injected logFeatureEvent (the bug lives in the I/O call, not the decision).
- *   (golden-master H6-FLAG2.) The 'all'-branch + the deny-branch use the correct
- *   `logFeatureEvent(req, …)` shape — also preserved.
+ *   (feature-gate.js:127) — the first arg was req.user?.id (a STRING, not a req),
+ *   so logFeatureEvent's object-typeof checks fell to the string branch and plan_id /
+ *   endpoint / ip_address / request_id were DROPPED from the persisted feature_events
+ *   row (the trailing 5th arg was ignored — logFeatureEvent is a 4-arg function).
+ *   NOW corrected to the canonical `logFeatureEvent(req, …)` shape (identical to the
+ *   'all'-branch + deny-branch) so plan_id and endpoint are actually written.
  *
  * ── FAIL-OPEN (checkUsageLimit, preserved) ───────────────────────────────────
  *   The legacy checkUsageLimit wraps the count I/O in try/catch and `next()`s on
@@ -150,9 +151,14 @@ GateFeature.prototype.requireFeatureIncludes = function requireFeatureIncludes(c
     };
   }
 
-  // allow (membership) — FLAG-2 (pinned, NOT fixed): the legacy success path passes
-  // userId as the FIRST positional arg (feature-gate.js:127), dropping req context.
-  this.logFeatureEvent(ctx.userId, featurePath, 'used', ctx.planId, { selected: requestedValue });
+  // allow (membership) — FLAG-2 (999.371, FIXED): the legacy success path passed
+  // userId as the FIRST positional arg (feature-gate.js:127), which made
+  // logFeatureEvent's `typeof reqOrUserId === 'object'` checks fall to the string
+  // branch — dropping plan_id, endpoint, ip_address, request_id from the persisted
+  // feature_events row (and ignoring the trailing 5th arg, since logFeatureEvent has
+  // a 4-arg signature). Corrected to the canonical `logFeatureEvent(req, …)` shape
+  // (identical to the 'all' branch above) so plan_id + endpoint are actually written.
+  this.logFeatureEvent(ctx.req, featurePath, 'used', { selected: requestedValue });
   return { status: null };
 };
 
