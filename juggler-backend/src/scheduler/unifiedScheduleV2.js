@@ -752,10 +752,13 @@ function hasWeatherConstraint(task) {
 
 function weatherOk(task, dateKey, startMin, weatherByDateHour) {
   if (!hasWeatherConstraint(task)) return true;
-  if (!weatherByDateHour || !weatherByDateHour[dateKey]) return true; // fail-open
+  // FAIL-CLOSED (999.546 / R38 CC6): a weather-constrained task must NOT be
+  // placed when the weather data needed to satisfy its constraint is absent.
+  // Previously this returned true (fail-open) — see goldenMaster.h6 C-WX delta.
+  if (!weatherByDateHour || !weatherByDateHour[dateKey]) return false; // fail-closed: no data for this date
   var hour = Math.floor(startMin / 60);
   var w = weatherByDateHour[dateKey][hour];
-  if (!w) return true; // fail-open: no data for this hour
+  if (!w) return false; // fail-closed: no data for this hour
 
   // Precipitation check
   var precip = task.weatherPrecip || 'any';
@@ -1794,4 +1797,6 @@ module.exports._testOnly = {
   computeDepReadyAbs: computeDepReadyAbs,
   indexOfDate: indexOfDate,
   absoluteMin: absoluteMin,
+  weatherOk: weatherOk,
+  hasWeatherConstraint: hasWeatherConstraint,
 };

@@ -59,6 +59,17 @@ var DEBOUNCE_MS    = 2000;   // quiet period before scheduler runs
 var POLL_MS        = 3000;   // how often the poll loop checks the DB (was 1s; 3s reduces idle DB load)
 var LOCK_RETRY_MS  = 2000;   // wait between lock acquisition retries
 
+// ── Per-user rate limit (999.591) ───────────────────────────────────────────
+// The 2000ms debounce (processUser) coalesces bursts but does NOT bound how many
+// scheduler RUNS a single user can trigger over time — a user mutating tasks
+// every few seconds could drive unbounded runs. This is a per-user sliding
+// window: at most RATE_LIMIT_MAX enqueues per RATE_LIMIT_WINDOW_MS. In-memory
+// (matching the existing in-process _dirty / _lastEnqueueTime state); a clean
+// fit because the DB row is per-user-deduplicated and the real cost being
+// bounded here is the local enqueue → poll → run cascade on THIS instance.
+var RATE_LIMIT_MAX        = 10;     // max enqueues per window per user
+var RATE_LIMIT_WINDOW_MS  = 60000;  // 60s window
+
 // ── Multi-instance claiming constants (FIX-04) ──────────────────────────────
 
 var POLL_LOOP_INSTANCE;
@@ -71,6 +82,31 @@ var _lastEnqueueTime = new Map();       // user_id → timestamp
 var _running = new Map();             // user_id → promise (single-flight within instance)
 var _lastPollTime = 0;
 var _lastError = null;                // { timestamp, message } — last scheduler error, for health checks
+var _rateWindows = new Map();         // user_id → array of enqueue timestamps (within the rate-limit window) (999.591)
+
+// Injectable clock — tests pass a synthetic now() so they never sleep; production
+// uses Date.now. Kept module-private; set via _internal.setClock for tests.
+var _now = function () { return Date.now(); };
+
+/**
+ * Per-user sliding-window rate-limit check (999.591). Records this enqueue and
+ * returns true if it is WITHIN the allowance, false if the user has exceeded
+ * RATE_LIMIT_MAX enqueues in the last RATE_LIMIT_WINDOW_MS. Pure in-memory; the
+ * window array is pruned of expired timestamps on each call.
+ */
+function checkRateLimit(userId) {
+  var now = _now();
+  var windowStart = now - RATE_LIMIT_WINDOW_MS;
+  var hits = _rateWindows.get(userId);
+  if (!hits) { hits = []; _rateWindows.set(userId, hits); }
+  // Drop timestamps older than the window.
+  while (hits.length > 0 && hits[0] <= windowStart) hits.shift();
+  if (hits.length >= RATE_LIMIT_MAX) {
+    return false; // limit exceeded — do NOT record this attempt
+  }
+  hits.push(now);
+  return true;
+}
 
 // Poll loop tracking for health checks
 function getPollLoopState() {
@@ -92,12 +128,28 @@ function getPollLoopState() {
  * so we don't have to poll the DB for every local mutation.
  */
 async function enqueueScheduleRun(userId, source, options) {
-  var now = Date.now();
+  // ── Per-user rate limit (999.591) ──
+  // The limit caps EXPENSIVE out-of-band runs (the `immediate` trigger), NOT the
+  // recording of pending work. When the user exceeds the window we still mark the
+  // user dirty and upsert the per-user queue row (coalesced via onConflict) so the
+  // poll loop picks up the pending recompute on its next cycle — a mutation's
+  // recompute is never silently dropped (elmo WARN-3). What we suppress is the
+  // immediate `processUser` trigger, so a hot-looping client cannot drive unbounded
+  // immediate runs. Callers fire-and-forget; the indicator is for surfacing/tests.
+  var rateLimited = !checkRateLimit(userId);
+  if (rateLimited) {
+    logger.warn('[SCHED-QUEUE] rate-limited (immediate suppressed) for ' + userId
+      + ' source=' + (source || 'unknown')
+      + ' (>' + RATE_LIMIT_MAX + '/' + (RATE_LIMIT_WINDOW_MS / 1000) + 's)');
+  }
+
+  var now = _now();
   _dirty.add(userId);
   _lastEnqueueTime.set(userId, now);
 
-  // Insert or update queue row (the actual work queue)
-  var shouldRun = options && options.immediate;
+  // Insert or update queue row (the actual work queue). An immediate run is
+  // suppressed when rate-limited (the queued recompute still happens via poll).
+  var shouldRun = options && options.immediate && !rateLimited;
   var row = {
     user_id: userId,
     source: source || 'unknown',
@@ -123,6 +175,7 @@ async function enqueueScheduleRun(userId, source, options) {
   }
 
   logger.info('[SCHED-QUEUE] enqueued for ' + userId + ' source=' + (source || 'unknown'));
+  return { enqueued: true, rateLimited: rateLimited };
 }
 
 /**
@@ -392,6 +445,12 @@ module.exports = {
   _internal: {
     tryClaim,
     releaseClaim,
-    CLAIM_TTL_SECONDS
+    CLAIM_TTL_SECONDS,
+    // Rate-limit test seam (999.591): injectable clock + reset + direct check.
+    checkRateLimit,
+    setClock: function (fn) { _now = fn || function () { return Date.now(); }; },
+    resetRateLimit: function () { _rateWindows.clear(); },
+    RATE_LIMIT_MAX,
+    RATE_LIMIT_WINDOW_MS
   }
 };

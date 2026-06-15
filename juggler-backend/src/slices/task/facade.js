@@ -885,7 +885,7 @@ var _batchCreateTasks = new app.BatchCreateTasks({
   repo: _repo, cache: _cache, enqueueScheduleRun: enqueueScheduleRun,
   mappers: mappers, validation: validation, batchCreateSchema: batchCreateSchema,
   ensureProject: ensureProject, isLocked: isLocked, enqueueWrite: enqueueWrite,
-  safeTimezone: safeTimezone
+  safeTimezone: safeTimezone, sleep: sleep
 });
 
 var _batchUpdateTasks = new app.BatchUpdateTasks({

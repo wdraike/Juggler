@@ -20,6 +20,15 @@
  * `getDb().transaction(async trx => …)` boundary the handler had (commit on
  * resolve, rollback on reject), with each insert going through the trx-bound repo.
  *
+ * ── DEADLOCK RETRY (999.589) ──────────────────────────────────────────────────
+ * The transaction is wrapped in a MAX_RETRIES deadlock-retry loop, mirroring
+ * BatchUpdateTasks: an InnoDB ER_LOCK_DEADLOCK (which MySQL resolves by rolling
+ * back one of the contending transactions) is retried up to MAX_RETRIES times
+ * with linear backoff; any non-deadlock error is re-thrown immediately, and a
+ * deadlock that survives all retries is re-thrown after the loop. The happy
+ * path is unchanged: a transaction that succeeds on the first attempt commits
+ * once and the loop exits.
+ *
  * ── S4/S6 ────────────────────────────────────────────────────────────────────
  * enqueueScheduleRun is the SOLE scheduler trigger; there is NO event publish in
  * this handler (the legacy batchCreate does not publish), so nothing to decouple —
@@ -39,16 +48,20 @@
  * @property {Function} isLocked
  * @property {Function} enqueueWrite
  * @property {Function} safeTimezone
+ * @property {Function} sleep  async backoff for the deadlock-retry loop (999.589).
  */
 
 'use strict';
 
 var assertDeps = require('../_assertDeps');
 
+var MAX_RETRIES = 3;
+
 /** @param {BatchCreateTasksDeps} deps */
 function BatchCreateTasks(deps) {
   var required = ['repo', 'cache', 'enqueueScheduleRun', 'mappers', 'validation',
-    'batchCreateSchema', 'ensureProject', 'isLocked', 'enqueueWrite', 'safeTimezone'];
+    'batchCreateSchema', 'ensureProject', 'isLocked', 'enqueueWrite', 'safeTimezone',
+    'sleep'];
   assertDeps('BatchCreateTasks', deps, required);
   this.repo = deps.repo;
   this.cache = deps.cache;
@@ -60,6 +73,7 @@ function BatchCreateTasks(deps) {
   this.isLocked = deps.isLocked;
   this.enqueueWrite = deps.enqueueWrite;
   this.safeTimezone = deps.safeTimezone;
+  this.sleep = deps.sleep;
 }
 
 /**
@@ -138,12 +152,23 @@ BatchCreateTasks.prototype.execute = async function execute(input) {
     return { status: 201, body: { created: rows.length, queued: true } };
   }
 
-  // 8. unlocked: transactional bulk insert (handler L1936-1945)
-  await this.repo.runInTransaction(async function (trxRepo) {
-    for (var ti = 0; ti < rows.length; ti++) {
-      await trxRepo.insertTask(rows[ti]);
+  // 8. unlocked: transactional bulk insert with deadlock-retry (handler L1936-1945; 999.589)
+  for (var attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      await this.repo.runInTransaction(async function (trxRepo) {
+        for (var ti = 0; ti < rows.length; ti++) {
+          await trxRepo.insertTask(rows[ti]);
+        }
+      });
+      break;
+    } catch (err) {
+      if (err && err.code === 'ER_LOCK_DEADLOCK' && attempt < MAX_RETRIES) {
+        await this.sleep(200 * (attempt + 1));
+        continue;
+      }
+      throw err;
     }
-  });
+  }
 
   await this.cache.invalidateTasks(userId);
   this.enqueueScheduleRun(userId, 'api:batchCreateTasks', rows.map(function (r) { return r.id; }));
@@ -151,3 +176,4 @@ BatchCreateTasks.prototype.execute = async function execute(input) {
 };
 
 module.exports = BatchCreateTasks;
+module.exports.MAX_RETRIES = MAX_RETRIES;
