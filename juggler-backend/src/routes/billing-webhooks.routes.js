@@ -12,6 +12,9 @@ const logger = createLogger('billing-webhooks.routes');
 const FRESHNESS_WINDOW_MS = 5 * 60 * 1000;
 function verifySignature(req, res, next) {
   const sig = req.headers['x-billing-signature'];
+  // Approved fallback (juggler/CLAUDE.md §Approved Fallbacks, 999.368): juggler and
+  // payment-service share one internal HMAC secret where a dedicated BILLING_WEBHOOK_SECRET
+  // isn't separately provisioned. If neither is set the request hard-fails below (500).
   const secret = process.env.BILLING_WEBHOOK_SECRET || process.env.INTERNAL_SERVICE_KEY;
 
   if (!secret) {
