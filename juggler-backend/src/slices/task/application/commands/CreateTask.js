@@ -65,7 +65,7 @@ var assertDeps = require('../_assertDeps');
 /** @param {CreateTaskDeps} deps */
 function CreateTask(deps) {
   var required = ['repo', 'cache', 'events', 'enqueueScheduleRun', 'mappers',
-    'validation', 'ensureProject', 'isLocked', 'enqueueWrite', 'uuidv7',
+    'validation', 'validateReferences', 'ensureProject', 'isLocked', 'enqueueWrite', 'uuidv7',
     'safeTimezone', 'placementModes'];
   assertDeps('CreateTask', deps, required);
   this.repo = deps.repo;
@@ -74,6 +74,7 @@ function CreateTask(deps) {
   this.enqueueScheduleRun = deps.enqueueScheduleRun;
   this.mappers = deps.mappers;
   this.validation = deps.validation;
+  this.validateReferences = deps.validateReferences;
   this.ensureProject = deps.ensureProject;
   this.isLocked = deps.isLocked;
   this.enqueueWrite = deps.enqueueWrite;
@@ -104,6 +105,20 @@ CreateTask.prototype.execute = async function execute(input) {
   delete body._requireRecurStartIfAnchor;
   if (validationErrors.length > 0) {
     return { status: 400, body: { error: validationErrors.join('; ') } };
+  }
+
+  // 1b. DB-backed reference existence validation (999.586): depends_on / location
+  // / tools must reference IDs the user actually owns. Recurring tasks strip
+  // depends_on below (step 3), so skip the dep existence check for them to avoid
+  // rejecting deps that will be discarded anyway. The shape was already validated.
+  var refBody = body;
+  if (body.recurring) {
+    refBody = Object.assign({}, body);
+    delete refBody.dependsOn;
+  }
+  var referenceErrors = await this.validateReferences(userId, refBody);
+  if (referenceErrors.length > 0) {
+    return { status: 400, body: { error: referenceErrors.join('; ') } };
   }
 
   // 2. shape row (handler L885-889)

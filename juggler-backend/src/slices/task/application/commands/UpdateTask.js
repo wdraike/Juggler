@@ -65,7 +65,7 @@ var assertDeps = require('../_assertDeps');
 /** @param {UpdateTaskDeps} deps */
 function UpdateTask(deps) {
   var required = ['repo', 'cache', 'events', 'enqueueScheduleRun', 'mappers',
-    'validation', 'hasSchedulingFields', 'splitFieldsLib', 'ensureProject',
+    'validation', 'validateReferences', 'hasSchedulingFields', 'splitFieldsLib', 'ensureProject',
     'isLocked', 'enqueueWrite', 'safeTimezone', 'dateHelpers', 'placementModes',
     'recurCleanup'];
   assertDeps('UpdateTask', deps, required);
@@ -75,6 +75,7 @@ function UpdateTask(deps) {
   this.enqueueScheduleRun = deps.enqueueScheduleRun;
   this.mappers = deps.mappers;
   this.validation = deps.validation;
+  this.validateReferences = deps.validateReferences;
   this.hasSchedulingFields = deps.hasSchedulingFields;
   this.splitFields = deps.splitFieldsLib.splitFields;
   this.ensureProject = deps.ensureProject;
@@ -109,6 +110,36 @@ UpdateTask.prototype.execute = async function execute(input) {
   var validationErrors = this.validation.validateTaskInput(body);
   if (validationErrors.length > 0) {
     return { status: 400, body: { error: validationErrors.join('; ') } };
+  }
+
+  // DB-backed reference existence validation (999.586) — runs for BOTH the fast
+  // and complex paths, before branch selection. depends_on / location / tools
+  // must reference IDs the user owns (shape already validated above). dependsOn
+  // is skipped for recurring tasks (their deps are stripped downstream). The
+  // recurring state is `body.recurring` when the update sets it, else the task's
+  // EXISTING state — a partial PATCH that omits `recurring` on an already-recurring
+  // task must not false-reject a stale dependsOn that will be stripped (ernie WARN-2).
+  var refBody = body;
+  if (Array.isArray(body.dependsOn) && body.dependsOn.length > 0) {
+    var willBeRecurring = body.recurring === true;
+    if (!willBeRecurring && body.recurring === undefined) {
+      // unchanged recurring state — consult the existing row (cheap, deps-only path)
+      var cur = await this.repo.fetchTaskRecurring(id, userId);
+      willBeRecurring = !!(cur && (cur.recurring
+        || cur.task_type === 'recurring_template'
+        || cur.task_type === 'recurring_instance'));
+    }
+    if (willBeRecurring) {
+      refBody = Object.assign({}, body);
+      delete refBody.dependsOn;
+    }
+  } else if (body.recurring) {
+    refBody = Object.assign({}, body);
+    delete refBody.dependsOn;
+  }
+  var referenceErrors = await this.validateReferences(userId, refBody);
+  if (referenceErrors.length > 0) {
+    return { status: 400, body: { error: referenceErrors.join('; ') } };
   }
 
   // needsComplexPath (handler L962-973)

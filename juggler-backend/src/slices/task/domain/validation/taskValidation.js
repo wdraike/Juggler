@@ -32,6 +32,14 @@ var VALID_WHEN_KEYWORDS = ['', 'fixed', 'allday', 'anytime'];
 var VALID_DAY_REQ = ['any', 'weekday', 'weekend'];
 var VALID_DAY_CODES = ['M', 'T', 'W', 'R', 'F', 'Sa', 'Su', 'S', 'U'];
 
+// Valid single-character day codes for `recur.days` (DISTINCT from VALID_DAY_CODES,
+// which is the comma-separated `dayReq` vocabulary). These are the exact codes the
+// scheduler's expandRecurring consumes: `dayMap = { U:0, M:1, T:2, W:3, R:4, F:5,
+// S:6 }` (shared/scheduler/expandRecurring.js). `recur.days` is a STRING of these
+// chars (e.g. 'MTWRF', 'MTWRFSU') OR an OBJECT keyed by them (e.g. { M:'required' }).
+// 999.586 (JSON schema gap) — application-level validation of recur.days.
+var VALID_RECUR_DAY_CODES = ['U', 'M', 'T', 'W', 'R', 'F', 'S'];
+
 /**
  * Returns a 403-response payload if `existing` is an externally-ingested
  * calendar-synced task and `body` contains disallowed fields. Returns `null`
@@ -163,6 +171,52 @@ function validateTaskInput(body) {
         errors.push('Recurrence unit must be days, weeks, or months');
       }
     }
+    // recur.days validation (999.586) — weekly/biweekly carry a day spec the
+    // scheduler reads via doesDayMatch(). It accepts EITHER a string of day codes
+    // ('MTWRF') OR an object keyed by day codes ({ M:'required' }). Reject any
+    // other type and any code outside VALID_RECUR_DAY_CODES. Only validated when
+    // `days` is present (it is optional; expandRecurring defaults to 'MTWRF').
+    if (r.days !== undefined && r.days !== null) {
+      if (typeof r.days === 'string') {
+        var badChars = r.days.split('').filter(function (c) {
+          return VALID_RECUR_DAY_CODES.indexOf(c) === -1;
+        });
+        if (r.days.length === 0 || badChars.length > 0) {
+          errors.push('Recurrence days must be a string of day codes (U,M,T,W,R,F,S)');
+        }
+      } else if (typeof r.days === 'object' && !Array.isArray(r.days)) {
+        var badKeys = Object.keys(r.days).filter(function (k) {
+          return VALID_RECUR_DAY_CODES.indexOf(k) === -1;
+        });
+        if (badKeys.length > 0) {
+          errors.push('Recurrence days object keys must be day codes (U,M,T,W,R,F,S)');
+        }
+      } else {
+        errors.push('Recurrence days must be a string of day codes or an object keyed by day codes');
+      }
+    }
+    // recur.monthDays validation (999.586) — monthly carries an array of
+    // day-of-month entries: integers 1..31, OR the literals 'first'/'last'
+    // (the scheduler consumes both — expandRecurring.js / dateMatchesRecurrence.js).
+    if (r.monthDays !== undefined && r.monthDays !== null) {
+      if (!Array.isArray(r.monthDays)) {
+        errors.push("Recurrence monthDays must be an array of day-of-month integers (1-31) or 'first'/'last'");
+      } else {
+        var badMonthDay = r.monthDays.some(function (d) {
+          if (d === 'first' || d === 'last') return false;
+          var n = Number(d);
+          return !Number.isInteger(n) || n < 1 || n > 31;
+        });
+        if (badMonthDay) errors.push("Recurrence monthDays must be integers 1-31 or 'first'/'last'");
+      }
+    }
+    // recur.timesPerCycle validation (999.586) — positive integer when present.
+    if (r.timesPerCycle !== undefined && r.timesPerCycle !== null) {
+      var tpcVal = Number(r.timesPerCycle);
+      if (!Number.isInteger(tpcVal) || tpcVal < 1) {
+        errors.push('Recurrence timesPerCycle must be a positive integer');
+      }
+    }
     if (isAnchorDependentRecur(body.recur)) {
       var rs = body.recurStart;
       if (body._requireRecurStartIfAnchor) {
@@ -178,6 +232,27 @@ function validateTaskInput(body) {
   if (body.placementMode !== undefined) {
     if (!PlacementMode.isValid(body.placementMode)) {
       errors.push('placementMode "' + body.placementMode + '" is not valid');
+    }
+  }
+  // depends_on / location / tools SHAPE validation (999.586). These are JSON
+  // arrays of string IDs. The EXISTENCE of the referenced IDs (the dep task must
+  // be the user's, the location/tool must be configured) is checked separately
+  // in the DB-backed validateTaskReferences() because it requires user-scoped
+  // queries — here we only reject a malformed shape (non-array, non-string
+  // elements). Empty array is valid (clears the field).
+  if (body.dependsOn !== undefined && body.dependsOn !== null) {
+    if (!Array.isArray(body.dependsOn) || body.dependsOn.some(function (x) { return typeof x !== 'string' || x.trim() === ''; })) {
+      errors.push('dependsOn must be an array of task IDs');
+    }
+  }
+  if (body.location !== undefined && body.location !== null) {
+    if (!Array.isArray(body.location) || body.location.some(function (x) { return typeof x !== 'string' || x.trim() === ''; })) {
+      errors.push('location must be an array of location IDs');
+    }
+  }
+  if (body.tools !== undefined && body.tools !== null) {
+    if (!Array.isArray(body.tools) || body.tools.some(function (x) { return typeof x !== 'string' || x.trim() === ''; })) {
+      errors.push('tools must be an array of tool IDs');
     }
   }
   // cross-field: fixed placementMode requires scheduling info
@@ -198,5 +273,6 @@ module.exports = {
   guardFixedCalendarWhen,
   VALID_WHEN_KEYWORDS,
   VALID_DAY_REQ,
-  VALID_DAY_CODES
+  VALID_DAY_CODES,
+  VALID_RECUR_DAY_CODES
 };

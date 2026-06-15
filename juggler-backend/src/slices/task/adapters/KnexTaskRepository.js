@@ -284,6 +284,21 @@ KnexTaskRepository.prototype.getTasksVersion = function getTasksVersion(userId) 
 };
 
 /**
+ * Cheap recurring-state lookup for one task (999.586 / ernie WARN-2): used by
+ * UpdateTask to decide whether to skip depends_on existence validation, since a
+ * recurring task's deps are stripped downstream. Only `recurring` + `task_type`
+ * are read; user-scoped. Returns null if the task is not the user's.
+ * @param {string} id
+ * @param {string} userId
+ * @returns {Promise<{recurring:number, task_type:string}|null>}
+ */
+KnexTaskRepository.prototype.fetchTaskRecurring = function fetchTaskRecurring(id, userId) {
+  return this.db('tasks_v')
+    .where({ id: id, user_id: userId })
+    .first('recurring', 'task_type');
+};
+
+/**
  * The user's recurring-template / recurring source rows (input to buildSourceMap).
  * Verbatim relocation of the getTask templateRows read (controller ~694).
  * @param {string} userId
