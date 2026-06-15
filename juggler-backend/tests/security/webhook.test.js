@@ -56,4 +56,31 @@ describe('Billing webhook signature', () => {
       .send(body);
     expect(res.status).toBe(401);
   });
+
+  // jug-webhook-replay-window-hardfail (999.552): a validly-signed body with NO timestamp
+  // previously bypassed replay protection and was accepted. The freshness window is now
+  // mandatory — a missing or unparseable timestamp hard-fails.
+  it('rejects a validly-signed webhook with a MISSING timestamp', async () => {
+    const body = JSON.stringify({ event: 'subscription.created', user_id: 'u1' });
+    const buf = Buffer.from(body);
+    const res = await request(app)
+      .post('/api/billing-webhooks')
+      .set('Content-Type', 'application/json')
+      .set('X-Billing-Signature', signBuffer(buf))
+      .send(body);
+    expect(res.status).toBe(401);
+    expect(res.body.error).toMatch(/timestamp missing or invalid/);
+  });
+
+  it('rejects a validly-signed webhook with a non-string / unparseable timestamp', async () => {
+    const body = JSON.stringify({ event: 'subscription.created', user_id: 'u1', timestamp: 1234567890 });
+    const buf = Buffer.from(body);
+    const res = await request(app)
+      .post('/api/billing-webhooks')
+      .set('Content-Type', 'application/json')
+      .set('X-Billing-Signature', signBuffer(buf))
+      .send(body);
+    expect(res.status).toBe(401);
+    expect(res.body.error).toMatch(/timestamp missing or invalid/);
+  });
 });

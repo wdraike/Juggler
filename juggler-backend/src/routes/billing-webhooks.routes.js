@@ -43,13 +43,20 @@ function verifySignature(req, res, next) {
     return res.status(401).json({ error: 'Invalid signature format' });
   }
 
-  // Replay protection: payment-service puts a `timestamp` in the signed body
-  // (notification.service.js:59). Reject anything outside the freshness window.
-  if (req.body && typeof req.body.timestamp === 'string') {
-    const ts = Date.parse(req.body.timestamp);
-    if (!Number.isNaN(ts) && Math.abs(Date.now() - ts) > FRESHNESS_WINDOW_MS) {
-      return res.status(401).json({ error: 'Webhook timestamp outside freshness window' });
-    }
+  // Replay protection (jug-webhook-replay-window-hardfail / 999.552):
+  // payment-service ALWAYS signs a `timestamp` into the body (notification.service.js:59),
+  // so a missing/unparseable timestamp on a validly-signed body means either a replay of a
+  // pre-timestamp message or a tampered payload — there is no legitimate timestamp-less
+  // webhook. The window check is therefore MANDATORY and hard-fails: previously a webhook
+  // with no (or a non-string/unparseable) timestamp silently bypassed replay protection and
+  // was accepted.
+  const tsRaw = req.body && req.body.timestamp;
+  const ts = typeof tsRaw === 'string' ? Date.parse(tsRaw) : NaN;
+  if (Number.isNaN(ts)) {
+    return res.status(401).json({ error: 'Webhook timestamp missing or invalid' });
+  }
+  if (Math.abs(Date.now() - ts) > FRESHNESS_WINDOW_MS) {
+    return res.status(401).json({ error: 'Webhook timestamp outside freshness window' });
   }
 
   next();
