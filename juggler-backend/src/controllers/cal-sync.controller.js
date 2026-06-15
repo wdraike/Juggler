@@ -1002,7 +1002,10 @@ async function sync(req, res) {
               }
               if (provEventModified) {
                 var provPullFields = pAdapter.applyEventToTaskFields(event, tz, task);
-                provPullFields.placement_mode = PLACEMENT_MODES.FIXED;
+                // Do NOT unconditionally override placement_mode here — the adapter's
+                // change-detection already sets FIXED when date/time genuinely changed.
+                // Forcing FIXED for title/duration-only changes would spuriously promote
+                // flexible tasks (ROADMAP 999.012 BUG-2 fix).
                 taskUpdates.push({ id: task.id, fields: provPullFields });
                 pStats.pulled++;
                 stats.pulled++;

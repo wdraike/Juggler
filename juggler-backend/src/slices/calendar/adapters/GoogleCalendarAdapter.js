@@ -188,10 +188,12 @@ function applyEventToTaskFields(event, tz, currentTask) {
     fields.placement_mode = PLACEMENT_MODES.ANYTIME;
   }
 
-  // Set FIXED if date/time changed — wins over ANYTIME reset above.
+  // Set FIXED only when an already-anchored task's date or time actually changed.
+  // A null→value transition (flexible task gaining its first computed anchor) is
+  // NOT a promotion trigger — require a prior non-null anchor before comparing.
   if (!isAllDay) {
-    var dateChanged = jd.date && jd.date !== currentTask?.date;
-    var timeChanged = jd.time && jd.time !== currentTask?.time;
+    var dateChanged = jd.date && currentTask?.date && jd.date !== currentTask.date;
+    var timeChanged = jd.time && currentTask?.time && jd.time !== currentTask.time;
     if (dateChanged || timeChanged) {
       fields.placement_mode = PLACEMENT_MODES.FIXED;
     }
