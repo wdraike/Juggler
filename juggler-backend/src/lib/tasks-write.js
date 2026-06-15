@@ -152,6 +152,12 @@ function splitUpdateFields(changes) {
  *   - everything else -> master + instance (both share row.id)
  */
 async function insertTask(dbOrTrx, row) {
+  // jug-task-write-mandatory-userid (999.550): every task row is owner-scoped — user_id is
+  // NOT NULL + FK to users on both task_masters and task_instances. Enforce the tenancy
+  // invariant at the write boundary (the bulk *Where helpers already call requireUserId;
+  // insertTask/insertTasksBatch did not) so an owner-less row fails loudly here instead of as
+  // a cryptic DB constraint error — and no future caller can silently insert an unowned task.
+  requireUserId(row && row.user_id, 'insertTask');
   if (isTemplate(row)) {
     var masterRow = pickMaster(row, row.id);
     // Guarantee recurring=1 — templates must be visible in tasks_v WHERE recurring=1.
@@ -237,6 +243,11 @@ async function deleteTaskById(dbOrTrx, id, userId) {
  */
 async function insertTasksBatch(dbOrTrx, rows) {
   if (!rows || rows.length === 0) return;
+
+  // Tenancy invariant (999.550): every row must be owner-scoped before the bulk insert.
+  for (var ri = 0; ri < rows.length; ri++) {
+    requireUserId(rows[ri] && rows[ri].user_id, 'insertTasksBatch (row ' + ri + ')');
+  }
 
   var masterRows = [];
   var instanceRowsNonRecurring = [];
