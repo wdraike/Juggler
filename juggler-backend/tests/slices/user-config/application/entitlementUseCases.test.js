@@ -172,13 +172,15 @@ describe('GateFeature (== feature-gate requireFeature/Includes/checkUsageLimit)'
     expect(r.body.error).toMatch(/not resolved/);
   });
 
-  test('requireFeatureIncludes value-in-list → allow; FLAG-2: logs with userId as FIRST arg', () => {
+  test('requireFeatureIncludes value-in-list → allow; FLAG-2 (999.371 FIXED): logs with the CORRECT req-first shape', () => {
     var s = spies();
     var r = new App.GateFeature(s).requireFeatureIncludes(ctx({ tasks: { placementMode: ['fixed', 'float'] } }), 'tasks.placementMode', 'fixed');
     expect(r.status).toBeNull();
-    // FLAG-2 (pinned, NOT fixed): success path passes userId ('u1') as the first
-    // positional arg, then planId ('plan-x') as the 4th — the legacy buggy shape.
-    expect(s.logFeatureEvent).toHaveBeenCalledWith('u1', 'tasks.placementMode', 'used', 'plan-x', { selected: 'fixed' });
+    // FLAG-2 (999.371): the success/membership path now passes the real req object as
+    // the FIRST positional arg (identical to the 'all' branch), so logFeatureEvent's
+    // object-typeof branch is taken and plan_id + endpoint are persisted. The buggy
+    // 5-positional shape (userId, …, planId, {selected}) is gone.
+    expect(s.logFeatureEvent).toHaveBeenCalledWith({ id: 'req' }, 'tasks.placementMode', 'used', { selected: 'fixed' });
   });
 
   test('requireFeatureIncludes "all" → allow; logs with the CORRECT req-first shape', () => {
@@ -273,11 +275,17 @@ describe('EnforceEntityLimit (== entity-limits check* middleware)', () => {
     expect((await uc.check(ctx({ limits: { projects: 3 } }, { userId: null }), 'limits.projects', 'projects')).status).toBe(401);
   });
 
-  test('check fail-open: a thrown count → allow (next)', async () => {
+  test('check fail-CLOSED (999.370): a thrown count → 503 (creation BLOCKED, not allowed)', async () => {
     var repo = new InMemoryConfigRepository();
     repo.countProjects = function () { return Promise.reject(new Error('count boom')); };
-    var r = await new App.EnforceEntityLimit({ repo: repo }).check(ctx({ limits: { projects: 1 } }), 'limits.projects', 'projects');
-    expect(r.status).toBeNull();
+    var logged = [];
+    var uc = new App.EnforceEntityLimit({ repo: repo, logger: { error: function () { logged.push(Array.prototype.slice.call(arguments)); } } });
+    var r = await uc.check(ctx({ limits: { projects: 1 } }), 'limits.projects', 'projects');
+    // 999.370 (user-approved): a DB/count error fails CLOSED → 503, NOT { status: null }.
+    expect(r.status).toBe(503);
+    expect(r.body.error).toMatch(/temporarily unavailable/i);
+    // The existing logger.error is preserved.
+    expect(logged.length).toBeGreaterThan(0);
   });
 
   test('checkLocation uses the INCOMING count, blocks when incoming > limit (strict)', async () => {
@@ -317,6 +325,24 @@ describe('EnforceEntityLimit (== entity-limits check* middleware)', () => {
     expect(deny.status).toBe(403);
     expect(deny.body.limit_key).toBe('limits.active_tasks');
     expect(deny.body.error).toMatch(/task limit/);
+  });
+
+  test('checkBatch fail-CLOSED (999.370): a thrown count → 503 (creation BLOCKED, not allowed)', async () => {
+    // Symmetric with check()'s fail-closed: a DB outage on the batch path must BLOCK,
+    // not allow — otherwise POST /tasks/batch bypasses the limit while single-create
+    // (check()) correctly 503s (the elmo asymmetry). applyGate maps this { status: 503 }
+    // to res.status(503).json(body), identical to check()'s 503.
+    var repo = new InMemoryConfigRepository();
+    repo.countActiveTasks = function () { return Promise.reject(new Error('count boom')); };
+    var logged = [];
+    var uc = new App.EnforceEntityLimit({ repo: repo, logger: { error: function () { logged.push(Array.prototype.slice.call(arguments)); } } });
+    // A finite active_tasks limit + tasks present → the count is attempted → throws.
+    var r = await uc.checkBatch(ctx({ limits: { active_tasks: 1, recurring_templates: -1 } }), [
+      { task_type: 'task' }, { task_type: 'task' }
+    ]);
+    expect(r.status).toBe(503);             // BLOCKS, not { status: null }
+    expect(r.body.error).toMatch(/temporarily unavailable/i);
+    expect(logged.length).toBeGreaterThan(0); // the existing logger.error is preserved
   });
 
   test('checkBatch all within limits → allow', async () => {

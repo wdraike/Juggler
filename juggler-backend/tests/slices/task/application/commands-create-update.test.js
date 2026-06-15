@@ -137,7 +137,7 @@ describe('UpdateTask (updateTask)', function () {
     }, extra || {}));
   }
 
-  test('FAST PATH: simple field edit → routed write, optimistic 200, trigger ONCE, publishes updated', function () {
+  test('FAST PATH: simple field edit → routed write, optimistic 200, trigger ONCE, publishes updated (999.331)', function () {
     var repo = seedOneOff();
     var trigger = H.makeTriggerSpy();
     var events = H.makeEventsSpy();
@@ -153,10 +153,28 @@ describe('UpdateTask (updateTask)', function () {
         expect(r.updated_at instanceof Date).toBe(true); // P1 repo-stamped
         expect(trigger.calls.length).toBe(1);
         expect(trigger.calls[0].source).toBe('api:updateTask');
-        // FAST PATH does NOT publish — the legacy controller only publishes on the
-        // slow/complex path (L1366). Behavior-identical: no event here.
-        expect(events.published.length).toBe(0);
+        // 999.331: the FAST PATH now publishes TASK_UPDATED exactly once after the
+        // successful write, so an H6 scheduler subscriber sees fast-path edits.
+        // Reconciled FLAT shape (ADR-0001 E-3): { id, userId, status }.
+        expect(events.published.length).toBe(1);
+        expect(events.published[0].type).toBe('updated');
+        expect(events.published[0].task).toEqual({ id: 'u1', userId: USER, status: r.status });
+        // S4/S6: the publish did NOT add a second scheduler trigger (no cascade).
+        expect(trigger.calls.length).toBe(1);
       });
+    });
+  });
+
+  test('FAST PATH: 404 (missing task) does NOT publish TASK_UPDATED (999.331 — publish only on success)', function () {
+    var repo = seedOneOff();
+    var trigger = H.makeTriggerSpy();
+    var events = H.makeEventsSpy();
+    var uc = new UpdateTask(updateDeps(repo, trigger, events));
+    return uc.execute({ id: 'nope', userId: USER, body: { text: 'x' } }).then(function (out) {
+      expect(out.status).toBe(404);
+      // No write happened → no publish, no trigger.
+      expect(events.published.length).toBe(0);
+      expect(trigger.calls.length).toBe(0);
     });
   });
 
@@ -269,6 +287,75 @@ describe('BatchCreateTasks (batchCreateTasks)', function () {
       expect(out.status).toBe(400);
       expect(out.body.error).toMatch(/^Task 1: /);
     });
+  });
+
+  // ── 999.589: deadlock-retry mirrors BatchUpdateTasks ────────────────────────
+  // A repo fake whose runInTransaction throws ER_LOCK_DEADLOCK on the first N
+  // calls then succeeds. We assert: (a) one deadlock then success → retried and
+  // 201; (b) a non-deadlock error is NOT retried; (c) exhausting retries rethrows.
+  function deadlockRepo(failTimes, errCode) {
+    var calls = 0;
+    return {
+      calls: function () { return calls; },
+      getUserSplitPreference: function () { return Promise.resolve(null); },
+      runInTransaction: function () {
+        calls++;
+        if (calls <= failTimes) {
+          var e = new Error(errCode === 'ER_LOCK_DEADLOCK' ? 'Deadlock found' : 'boom');
+          e.code = errCode;
+          return Promise.reject(e);
+        }
+        return Promise.resolve();
+      }
+    };
+  }
+
+  function retryDeps(repo, sleepSpy) {
+    return batchDeps(repo, H.makeTriggerSpy(), {
+      isLocked: function () { return Promise.resolve(false); },
+      sleep: sleepSpy
+    });
+  }
+
+  test('999.589: transaction throwing ER_LOCK_DEADLOCK once then succeeding is retried → 201', function () {
+    var repo = deadlockRepo(1, 'ER_LOCK_DEADLOCK');
+    var sleepCalls = [];
+    var uc = new BatchCreateTasks(retryDeps(repo, function (ms) { sleepCalls.push(ms); return Promise.resolve(); }));
+    return uc.execute({ userId: USER, body: { tasks: [{ id: 'd1', text: 'a' }] } }).then(function (out) {
+      expect(out.status).toBe(201);
+      expect(out.body.created).toBe(1);
+      expect(repo.calls()).toBe(2);          // first (deadlock) + retry (success)
+      expect(sleepCalls).toEqual([200]);     // one backoff, linear 200*(0+1)
+    });
+  });
+
+  test('999.589: a NON-deadlock error is NOT retried (rethrown immediately)', function () {
+    var repo = deadlockRepo(1, 'ER_SOME_OTHER');
+    var sleepCalls = [];
+    var uc = new BatchCreateTasks(retryDeps(repo, function (ms) { sleepCalls.push(ms); return Promise.resolve(); }));
+    return uc.execute({ userId: USER, body: { tasks: [{ id: 'd2', text: 'a' }] } }).then(
+      function () { throw new Error('expected throw'); },
+      function (err) {
+        expect(err.code).toBe('ER_SOME_OTHER');
+        expect(repo.calls()).toBe(1);        // no retry
+        expect(sleepCalls).toEqual([]);      // no backoff
+      }
+    );
+  });
+
+  test('999.589: exhausting MAX_RETRIES on persistent deadlock rethrows', function () {
+    // Always deadlocks → 1 initial + MAX_RETRIES attempts, then rethrow.
+    var repo = deadlockRepo(Infinity, 'ER_LOCK_DEADLOCK');
+    var sleepCalls = [];
+    var uc = new BatchCreateTasks(retryDeps(repo, function (ms) { sleepCalls.push(ms); return Promise.resolve(); }));
+    return uc.execute({ userId: USER, body: { tasks: [{ id: 'd3', text: 'a' }] } }).then(
+      function () { throw new Error('expected throw'); },
+      function (err) {
+        expect(err.code).toBe('ER_LOCK_DEADLOCK');
+        expect(repo.calls()).toBe(BatchCreateTasks.MAX_RETRIES + 1); // initial + retries
+        expect(sleepCalls).toEqual([200, 400, 600]);                 // linear backoff per attempt
+      }
+    );
   });
 });
 

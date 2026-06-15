@@ -50,24 +50,36 @@ const EventTypes = {
  * Event payload structures for documentation purposes.
  * Actual payloads should match these shapes.
  *
+ * RECONCILIATION (999.333): the task-lifecycle typedefs below document the
+ * FLAT/MINIMAL shape that `taskEvents.js` actually emits and that subscribers
+ * actually read. This matches ADR-0001 invariant E-3 ("minimal payload:
+ * { taskId, userId, status, timestamp }"). The earlier typedef documented a
+ * richer `{ task, changes }` shape that NO publisher emitted and NO consumer
+ * read — the sole subscriber (taskEventLogger.js) reads only taskId/userId/
+ * status, and the H6 scheduler subscriber keys off task identity (taskId/
+ * userId) to enqueue a schedule run, not the full task object. The typedef was
+ * corrected to the flat reality rather than enriching the publisher, because
+ * no consumer needs the richer fields and E-3 binds the contract to minimal.
+ * `status` is a serializable string scalar (never a knex/Date handle), and
+ * `timestamp` is `Date.now()` (a number), matching the publisher.
+ *
  * @typedef {Object} TaskCreatedPayload
  * @property {string} taskId - The task identifier
  * @property {string} userId - The user who owns the task
- * @property {Object} task - The task data
- * @property {Date} timestamp - When the event occurred
+ * @property {string} status - The task status at create time (serializable scalar)
+ * @property {number} timestamp - When the event occurred (Date.now() epoch ms)
  *
  * @typedef {Object} TaskUpdatedPayload
  * @property {string} taskId - The task identifier
  * @property {string} userId - The user who owns the task
- * @property {Object} changes - Fields that changed (old -> new)
- * @property {Object} task - The updated task data
- * @property {Date} timestamp - When the event occurred
+ * @property {string} status - The task status after the update (serializable scalar)
+ * @property {number} timestamp - When the event occurred (Date.now() epoch ms)
  *
  * @typedef {Object} TaskCompletedPayload
  * @property {string} taskId - The task identifier
  * @property {string} userId - The user who owns the task
- * @property {Date} completedAt - When the task was completed
- * @property {Date} timestamp - When the event occurred
+ * @property {string} status - The task status (typically 'done'; serializable scalar)
+ * @property {number} timestamp - When the event occurred (Date.now() epoch ms)
  *
  * @typedef {Object} TaskPlacedPayload
  * @property {string} taskId - The task identifier
@@ -213,11 +225,12 @@ class EventBus {
    * @returns {Object} Result with { delivered, failed } counts
    *
    * @example
+   * // Task-lifecycle payloads are flat + minimal (ADR-0001 E-3 / 999.333):
    * eventBus.publish(EventTypes.TASK_CREATED, {
    *   taskId: 'abc123',
    *   userId: 'user-456',
-   *   task: { title: 'My Task', ... },
-   *   timestamp: new Date()
+   *   status: '',
+   *   timestamp: Date.now()
    * });
    */
   publish(eventType, payload) {

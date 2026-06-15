@@ -1312,25 +1312,31 @@ describe('C-IDEM integration — beforeAll/beforeEach outside it.failing', () =>
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TEST 12: C-WX — WEATHER FAIL-OPEN
-// Purpose: fixture WITH weatherByDateHour populated for early hours but MISSING
-// for the candidate slot hour → weatherOk IS called (checkWeather=true) but hits
-// the per-hour fail-open guard → task is placed.
-// TRACEABILITY: C-WX
+// TEST 12: C-WX — WEATHER FAIL-CLOSED  (999.546 / R38 CC6)
+// Purpose: a weather-constrained task must NOT be placed in a slot whose weather
+// data is unavailable. Previously weatherOk() FAILED OPEN (returned true when the
+// date bucket or the hour entry was missing) and the task was placed regardless.
+// Per the user ruling (R38, CC6 audit) this is now FAIL-CLOSED: weatherOk()
+// returns false when weather data is missing, so the task is left unplaced.
+// TRACEABILITY: C-WX (999.546)
 //
-// BLOCK-4 FIX (zoe): Original fixture had CFG_NO_WEATHER with no weatherByDateHour
-// at all → checkWeather = false → weatherOk never called → mutation of weatherOk
-// return value had no effect. New CFG_ACTIVE_WEATHER provides weatherByDateHour[TODAY]
-// with bad weather for early hours but NO entry for hour 12 (720 min = task landing
-// slot). checkWeather = true → weatherOk IS called → hits `if (!w) return true`.
-// Under MUT-B (change `if (!w) return true` → `if (!w) return false`), the task
-// cannot find a weather-OK slot and goes to unplaced → TEST FAILS. ✓
+// GOLDEN-MASTER DELTA (deliberate, 999.546): this entire block formerly encoded
+// the OLD fail-open behavior:
+//   - "task placed when slot hour missing from weather data" → now goes UNPLACED.
+//   - the two source-string pins for `return true` → now pin `return false`.
+// Only the weather-missing-data expectations change; every non-weather case
+// elsewhere in this suite is untouched.
+//
+// NOTE: the genuinely-trivial case (NO weatherByDateHour field at all →
+// checkWeather=false → weatherOk never called) is unchanged: such a task is
+// still placed, because the scheduler skips the weather gate entirely when no
+// weather data was loaded for the horizon.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('C-WX — weatherOk fail-open: no weather data → task is placed, not blocked', () => {
+describe('C-WX — weatherOk fail-closed (999.546): missing weather data → task is NOT placed', () => {
   const weatherConstrainedTask = {
     id: 'wx-001', text: 'Outdoor task', dur: 30, pri: 'P2',
-    date: TODAY, status: '', when: 'morning,lunch,afternoon,evening,night',
+    date: TODAY, deadline: TODAY, status: '', when: 'morning,lunch,afternoon,evening,night',
     dayReq: 'any', dependsOn: [], location: [], tools: [],
     recurring: false, split: false, datePinned: false, generated: false, section: '', flexWhen: false,
     // Weather constraint: only schedule if dry and warm.
@@ -1339,14 +1345,13 @@ describe('C-WX — weatherOk fail-open: no weather data → task is placed, not 
     weatherTempMax: 90
   };
 
-  // CFG with weather data for TODAY covering early hours (8-11 AM) but NOT
-  // for the slot the task will land on (hour 12, 720 min = noon). This means:
-  //   - cfg.weatherByDateHour is truthy           → checkWeather = true in findEarliestSlot
-  //   - cfg.weatherByDateHour[TODAY] exists        → weatherOk proceeds past the null-check
-  //   - cfg.weatherByDateHour[TODAY][12] is absent → `if (!w) return true` fires (fail-open)
-  //
-  // The early-hour data has BAD weather (high precip + cold) so the scheduler
-  // skips those hours and tries noon where it finds no data → fail-open → placed. ✓
+  // CFG with weather data for TODAY covering early hours (8-11 AM) but NOT for
+  // the noon slot the task would otherwise land on. Under fail-CLOSED:
+  //   - cfg.weatherByDateHour is truthy            → checkWeather = true
+  //   - cfg.weatherByDateHour[TODAY] exists         → weatherOk proceeds
+  //   - early hours have BAD weather                → weatherOk false there
+  //   - cfg.weatherByDateHour[TODAY][12+] is absent → weatherOk false (fail-closed)
+  // → no slot on TODAY satisfies the constraint → task is unplaced.
   const CFG_ACTIVE_WEATHER = makeCfg({
     weatherByDateHour: {
       [TODAY]: {
@@ -1354,18 +1359,19 @@ describe('C-WX — weatherOk fail-open: no weather data → task is placed, not 
         9:  { precipProb: 80, cloudcover: 90, temp: 45, humidity: 80 }, // bad weather
         10: { precipProb: 80, cloudcover: 90, temp: 45, humidity: 80 }, // bad weather
         11: { precipProb: 80, cloudcover: 90, temp: 45, humidity: 80 }, // bad weather
-        // hour 12 (720 min) intentionally absent → fail-open fires for the candidate slot
+        // hours after 11 intentionally absent → fail-closed: no slot is weather-OK
       }
     }
   });
 
-  // The original CFG_NO_WEATHER test is kept as a basic sanity check (the most obvious
-  // fail-open case: no weather data at all → checkWeather=false → task placed trivially).
+  // The NO-weather-data-at-all case: checkWeather=false (the scheduler never
+  // calls weatherOk because no weather was loaded for the horizon). This is NOT
+  // a weather-missing-for-a-constrained-slot case — it is the scheduler running
+  // with the weather feature inert — so the task is still placed. Unchanged.
   const CFG_NO_WEATHER = makeCfg(); // no weatherByDateHour field
 
-  test('weather-constrained task is placed when NO weather data at all (fail-open, trivial path)', () => {
+  test('weather-constrained task is placed when NO weather data loaded at all (weather gate inert)', () => {
     // checkWeather = false when weatherByDateHour is absent → weatherOk never called.
-    // This is the simplest fail-open: no weather data → no constraint → placed.
     var statuses = { 'wx-001': '' };
     var result = unifiedSchedule([weatherConstrainedTask], statuses, TODAY, NOW_MINS, CFG_NO_WEATHER);
     var placed = findPlacements(result, 'wx-001');
@@ -1373,48 +1379,67 @@ describe('C-WX — weatherOk fail-open: no weather data → task is placed, not 
     expect(isUnplaced(result, 'wx-001')).toBe(false);
   });
 
-  // KEY BEHAVIORAL TEST (BLOCK-4 fix): weatherByDateHour IS populated but the
-  // specific slot hour is absent → weatherOk called → per-hour fail-open fires → placed.
-  // SELF-MUTATION (MUT-B): if `if (!w) return true` → `if (!w) return false`, the task
-  // cannot find a weather-OK slot (bad data for 8-11, no data for 12) → goes to unplaced
-  // → this assertion FAILS. ✓ Verified 2026-06-12.
-  test('C-WX active fixture: task placed when slot hour missing from weather data (FAILS under MUT-B)', () => {
+  // KEY BEHAVIORAL TEST (999.546): weatherByDateHour IS populated (so the weather
+  // gate is active) but no slot has data satisfying the constraint → fail-closed →
+  // task is UNPLACED. This is the deliberate flip from the old fail-open expectation.
+  test('C-WX active fixture: task NOT placed when no slot has satisfying weather data (fail-closed)', () => {
     var statuses = { 'wx-001': '' };
     var result = unifiedSchedule([weatherConstrainedTask], statuses, TODAY, NOW_MINS, CFG_ACTIVE_WEATHER);
 
-    // Task must be placed (fail-open at hour level: no data for the candidate slot).
+    // Task must NOT be placed — every candidate slot is either bad weather or has
+    // no weather data, and fail-closed rejects the missing-data slots.
     var placed = findPlacements(result, 'wx-001');
-    expect(placed.length).toBeGreaterThan(0);
-    expect(isUnplaced(result, 'wx-001')).toBe(false);
-
-    // Confirm placement is at hour 12 (720 min) — the first slot with no weather data.
-    expect(placed[0].start).toBe(720);
+    expect(placed.length).toBe(0);
+    expect(isUnplaced(result, 'wx-001')).toBe(true);
   });
 
-  test('weatherOk returns true when weatherByDateHour is null (direct function test)', () => {
-    // Additional structural check: the source must have the date-level fail-open guard.
+  test('weatherOk returns false when the date bucket is missing (fail-closed, direct function test)', () => {
+    var weatherOk = unifiedSchedule._testOnly.weatherOk;
+    var task = { weatherPrecip: 'dry_only', weatherTempMin: 60, weatherTempMax: 90 };
+    // No weatherByDateHour at all.
+    expect(weatherOk(task, TODAY, 720, null)).toBe(false);
+    // weatherByDateHour present but the date bucket is missing.
+    expect(weatherOk(task, TODAY, 720, { [TOMORROW]: { 12: { precipProb: 5, temp: 72 } } })).toBe(false);
+  });
+
+  test('weatherOk returns false when the hour entry is missing (fail-closed, direct function test)', () => {
+    var weatherOk = unifiedSchedule._testOnly.weatherOk;
+    var task = { weatherPrecip: 'dry_only', weatherTempMin: 60, weatherTempMax: 90 };
+    // Date bucket present, but the specific hour (12) is absent.
+    var byHour = { [TODAY]: { 8: { precipProb: 5, temp: 72 } } };
+    expect(weatherOk(task, TODAY, 720, byHour)).toBe(false);
+  });
+
+  test('weatherOk still returns the correct verdict when data IS present', () => {
+    var weatherOk = unifiedSchedule._testOnly.weatherOk;
+    var task = { weatherPrecip: 'dry_only', weatherTempMin: 60, weatherTempMax: 90 };
+    // Good weather present for hour 12 → true.
+    var good = { [TODAY]: { 12: { precipProb: 5, cloudcover: 10, temp: 72, humidity: 40 } } };
+    expect(weatherOk(task, TODAY, 720, good)).toBe(true);
+    // Bad weather (wet) present for hour 12 → false.
+    var bad = { [TODAY]: { 12: { precipProb: 95, cloudcover: 10, temp: 72, humidity: 40 } } };
+    expect(weatherOk(task, TODAY, 720, bad)).toBe(false);
+    // Unconstrained task is always OK even with no data.
+    expect(weatherOk({}, TODAY, 720, null)).toBe(true);
+  });
+
+  test('source has the fail-closed date-bucket guard (999.546)', () => {
     var fs = require('fs');
     var path = require('path');
     var src = fs.readFileSync(
       path.resolve(__dirname, '../../../src/scheduler/unifiedScheduleV2.js'),
       'utf8'
     );
-    // Pin the fail-open guard string — this is the actual behavioral mechanism.
-    // SELF-MUTATION: removing this guard would break the fail-open behavior.
-    expect(src).toMatch(/if\s*\(\s*!weatherByDateHour\s*\|\|\s*!weatherByDateHour\[dateKey\]\s*\)\s*return\s*true/);
+    expect(src).toMatch(/if\s*\(\s*!weatherByDateHour\s*\|\|\s*!weatherByDateHour\[dateKey\]\s*\)\s*return\s*false/);
   });
 
-  test('weatherOk returns true when specific hour data is missing (fail-open at hour level)', () => {
-    // The fail-open rule also applies at the per-hour level: if the date has weather data
-    // but not for this specific hour, the task is still placed.
-    // Verify via the source guard: `if (!w) return true`.
+  test('source has the fail-closed per-hour guard (999.546)', () => {
     var fs = require('fs');
     var path = require('path');
     var src = fs.readFileSync(
       path.resolve(__dirname, '../../../src/scheduler/unifiedScheduleV2.js'),
       'utf8'
     );
-    // Pin the per-hour fail-open guard.
-    expect(src).toMatch(/if\s*\(\s*!w\s*\)\s*return\s*true/);
+    expect(src).toMatch(/if\s*\(\s*!w\s*\)\s*return\s*false/);
   });
 });

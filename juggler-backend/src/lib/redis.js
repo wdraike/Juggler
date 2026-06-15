@@ -104,6 +104,30 @@ async function del(...keys) {
 }
 
 /**
+ * Acquire a short-lived dedupe lock (SET key value NX EX ttl). Returns true only
+ * if THIS caller set the key (i.e. no other instance currently holds it), false
+ * if the key already exists OR Redis is unavailable. Fail-soft: a false on a Redis
+ * outage lets the caller fall back to its local guard — it never throws.
+ *
+ * Used by the cross-instance reconciliation dedupe (999.385): only one Cloud Run
+ * instance should run enforceDowngradeLimits per debounce window.
+ *
+ * @param {string} key
+ * @param {number} ttlSeconds  lock lifetime (auto-expires; also acts as the debounce window)
+ * @returns {Promise<boolean>} true if the lock was acquired by this caller
+ */
+async function acquireLock(key, ttlSeconds) {
+  if (!isConnected()) return false;
+  try {
+    // ioredis: set(key, value, 'EX', ttl, 'NX') → 'OK' when set, null when key exists.
+    const res = await client.set(key, '1', 'EX', ttlSeconds, 'NX');
+    return res === 'OK';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Invalidate task-related caches (tasks + version + placements).
  */
 async function invalidateTasks(userId) {
@@ -134,9 +158,11 @@ async function quit() {
 
 module.exports = {
   getClient,
+  isConnected,
   get,
   set,
   del,
+  acquireLock,
   invalidateTasks,
   invalidateConfig,
   quit

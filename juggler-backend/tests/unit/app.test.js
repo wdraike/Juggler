@@ -108,6 +108,47 @@ describe('Express App', () => {
   });
 });
 
+// ── 999.372a: morgan logs must redact the ?token= query value ──────────────
+//
+// The morgan logger previously only SKIPPED logging for /api/events?token=, so any
+// other endpoint carrying a ?token= query string logged the full URL — leaking the
+// JWT into request logs. app.js now installs a `url-redacted` morgan token that
+// masks the token value for ALL paths (redact, don't drop). The masking function is
+// exported via app.set('redactTokenInUrl', ...) for unit testing.
+
+describe('morgan token redaction (999.372a)', () => {
+  const redact = app.get('redactTokenInUrl');
+
+  test('redactTokenInUrl is exported as a function', () => {
+    expect(typeof redact).toBe('function');
+  });
+
+  test('masks token on /api/events', () => {
+    expect(redact('/api/events?token=SECRET_JWT')).toBe('/api/events?token=[REDACTED]');
+  });
+
+  test('masks token on ANY other path (the leak this fixes)', () => {
+    expect(redact('/api/tasks?token=SECRET_JWT')).toBe('/api/tasks?token=[REDACTED]');
+  });
+
+  test('masks token when it is not the first query param, preserving other params', () => {
+    expect(redact('/api/x?foo=1&token=SECRET&bar=2'))
+      .toBe('/api/x?foo=1&token=[REDACTED]&bar=2');
+  });
+
+  test('stops masking at the next param boundary (& or #)', () => {
+    expect(redact('/p?token=abc#frag')).toBe('/p?token=[REDACTED]#frag');
+  });
+
+  test('leaves URLs without a token param unchanged', () => {
+    expect(redact('/api/tasks?foo=bar')).toBe('/api/tasks?foo=bar');
+  });
+
+  test('does not throw on non-string input', () => {
+    expect(redact(undefined)).toBeUndefined();
+  });
+});
+
 // ── BLOCK 2: OAuth /oauth/authorize redirect_uri allowlist ─────────────────
 //
 // The route is only registered when NODE_ENV === 'development'.

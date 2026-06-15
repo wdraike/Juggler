@@ -40,8 +40,7 @@ slices/task/
 │   ├── value-objects/
 │   │   ├── PlacementMode.js      # Closed-enum placement mode VO (reused by scheduler slice)
 │   │   ├── TaskId.js             # Immutable task ID wrapper
-│   │   ├── TaskStatus.js         # Closed-enum task status VO
-│   │   └── TaskTypeTerm.js       # Closed-enum S7 task type terms (one-off/chain member/recurring instance/split chunk)
+│   │   └── TaskStatus.js         # Closed-enum task status VO
 │   └── index.js                  # Domain barrel: mappers + validation + VOs
 ├── adapters/
 │   ├── EventBusTaskEvents.js     # TaskEventPort backed by lib/events (ADR-0001)
@@ -178,24 +177,13 @@ returns null on failure (E-2 isolation).
 
 ## Domain Value Objects
 
-### TaskTypeTerm (S7 closed-enum)
+### TaskId
 
-Enforces the four canonical scheduler task-type terms from `juggler/CLAUDE.md §Scheduler`:
+Immutable wrapper around a task ID.
 
-| S7 term | DB `task_type` + discriminator |
-|---------|--------------------------------|
-| `'one-off'` | `task_type='task'` with empty `depends_on` |
-| `'chain member'` | `task_type='task'` with non-empty `depends_on` |
-| `'recurring instance'` | `task_type='recurring_instance'` with `split_total <= 1` |
-| `'split chunk'` | `task_type='recurring_instance'` with `split_total > 1` |
+### TaskStatus
 
-`TaskTypeTerm.fromRow(row)` provides the derivation from DB discriminators to the S7
-term. `recurring_template` (the recurrence blueprint) is not one of the four scheduled
-S7 terms; `fromRow` returns `null` for a pure template row.
-
-The mappers continue to emit raw `task_type` (snake_case). `TaskTypeTerm.fromRow` is
-for application/scheduler layers that reason in S7 vocabulary — it does not change mapper
-output.
+Closed-enum task status VO. Rejects unknown status terms.
 
 ### PlacementMode
 
@@ -270,18 +258,6 @@ const updated = await task.updateTask({ userId, id, fields, timezone });
 // { status: 200, body: { task: { ... } } }
 ```
 
-### Using TaskTypeTerm in application code
-
-```javascript
-const taskFacade = require('./slices/task/facade');
-const { PlacementMode } = taskFacade;
-
-// Derive S7 term from a DB row
-const term = require('./slices/task/domain/value-objects/TaskTypeTerm').fromRow(row);
-// term.value === 'one-off' | 'chain member' | 'recurring instance' | 'split chunk'
-// (or null for recurring_template blueprints)
-```
-
 ---
 
 ## Architecture Boundary
@@ -311,7 +287,6 @@ The task suite covers:
 - `KnexTaskRepository` + `InMemoryTaskRepository` contract conformance (P1 + T-TX)
 - `RedisTaskCache` keying and TTL invariants
 - `EventBusTaskEvents` E-1/E-2/E-3 publishing invariants
-- `TaskTypeTerm` S7 closed-enum + `fromRow` discriminator derivation
 - All 14 application use-cases via facade delegation tests
 
 ---

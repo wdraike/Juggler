@@ -113,6 +113,11 @@ app.use('/api/billing-webhooks', express.raw({ type: 'application/json' }), func
 // page / pre-auth) but rate-limited + size-capped + log-injection-sanitized in the route.
 const clientErrorLimiter = require('express-rate-limit')({
   windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false,
+  // Shared counter across Cloud Run instances when Redis is configured (999.451) —
+  // mirrors aiLimiter's maybeRedisStore wiring so the 30/min cap is global, not
+  // per-instance. Falls back to express-rate-limit's in-memory MemoryStore
+  // (single-instance) when REDIS_URL is unset, exactly like aiLimiter.
+  store: maybeRedisStore('jugrl-cerr:'),
 });
 // Shared @raike/lib-error-ingest router (999.454) — single-source with the other services.
 // Log path preserved verbatim from the prior local route: env BROWSER_ERRORS_LOG override, else
@@ -129,13 +134,24 @@ app.use('/api/client-errors', clientErrorLimiter, express.json({ limit: '16kb' }
 app.use(bodyParser.json({ limit: '1mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 // NOTE: GET /api/events accepts JWT via ?token= query param (EventSource limitation).
-// In dev, morgan logs the full URL including ?token=. This is acceptable in local dev
-// but ensure production log export destinations are secure.
-app.use(morgan('dev', {
+// Other endpoints may also carry a ?token= query string; logging the raw URL would
+// leak the JWT into request logs. Redact the `token` query value for ALL paths while
+// keeping the log line (mask, don't drop). Exported for unit testing.
+function redactTokenInUrl(url) {
+  if (typeof url !== 'string') return url;
+  return url.replace(/([?&]token=)[^&#]*/gi, '$1[REDACTED]');
+}
+// Custom morgan token: same as :url but with the token query value masked.
+morgan.token('url-redacted', function(req) {
+  return redactTokenInUrl(req.originalUrl || req.url);
+});
+// Mirror morgan's 'dev' format, substituting the redacted URL for :url.
+app.use(morgan(':method :url-redacted :status :response-time ms - :res[content-length]', {
   skip: function(req) {
     return req.path === '/api/events' && req.query.token;
   }
 }));
+app.set('redactTokenInUrl', redactTokenInUrl);
 
 // Sanitize error responses in production
 if (process.env.NODE_ENV === 'production') {

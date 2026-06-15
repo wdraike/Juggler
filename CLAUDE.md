@@ -62,6 +62,12 @@ Soak test docs:
 Integration test credentials go in `juggler-backend/.env.test` (gitignored).
 See `juggler-backend/.env.test.example` for required vars.
 
+**Running tests directly (`DB_PORT=3407 jest`):** `.env.test` is per-dev and gitignored —
+copy `juggler-backend/.env.test.example` → `juggler-backend/.env.test` first. The test-bed
+MySQL root password is `rootpass` (already set in the example). Without a `.env.test` that
+reaches the DB, DB-backed suites fail the TEST-FR-001 reachability guard. (`make test-juggler`
+provisions this for you; the manual copy is only needed for direct `jest` runs.) (999.355)
+
 ## AI Enrichment
 See R15 for AI feature requirements (natural-language commands, emoji/icon suggestions, bulk project creation).
 
@@ -76,6 +82,7 @@ See R15 for AI feature requirements (natural-language commands, emoji/icon sugge
 | `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx` line 145 | `allProjectNames \|\| []` | `TaskDetailHeader` is a presentational component that can be rendered in test environments or outside `TaskEditForm` without the `allProjectNames` prop. The `|| []` prevents a `.map` crash in those contexts. The canonical usage path (via `TaskEditForm`) always supplies the prop. | Oscar review 2026-05-26 (ernie W1 WARN — approved, code unchanged) |
 | `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx` line 186 | `notes \|\| ''` | Pre-existing guard. `notes` field on legacy task rows may be null in the DB. Textarea `value` must be a string; null causes a React controlled-component warning. | Oscar review 2026-05-26 (ernie W3 — pre-existing, approved) |
 | `juggler-frontend/src/components/tasks/TaskDetailHeader.jsx` line 192 | `url \|\| ''` | Pre-existing guard. Same rationale as `notes \|\| ''` — `url` may be null in legacy DB rows; input `value` must be a string. | Oscar review 2026-05-26 (ernie W3 — pre-existing, approved) |
+| `juggler-backend/src/routes/billing-webhooks.routes.js` line ~15 | `BILLING_WEBHOOK_SECRET \|\| INTERNAL_SERVICE_KEY` | The webhook signature secret falls back to the shared internal service key. Juggler and payment-service share one internal HMAC secret in deployments where a dedicated `BILLING_WEBHOOK_SECRET` is not separately provisioned; the fallback lets signature verification work with either. If **neither** is set the middleware hard-fails the request (500) — no silent unverified path. | Documented here per 999.368 |
 
 ## Open Work
 Canonical backlog: the monorepo `.planning/ROADMAP.md` `## Backlog` (per-service `BACKLOG.md` removed — backlog is single-source) — check before starting any new work.

@@ -44,12 +44,12 @@
  *   with replay protection. This is a SECURITY SURFACE — captured and pinned here
  *   so W6 extraction cannot drop it. REFER→elmo for formal security assessment of
  *   the webhook surface.
- * FLAG-2 (requireFeatureIncludes bug): In feature-gate.js:127, logFeatureEvent is
- *   called with 4 positional args (req.user?.id, featurePath, 'used', req.planId)
- *   instead of the 4-arg signature (req, featurePath, eventType, value).
- *   The first arg is req.user?.id (a string, not a req object), so planId and
- *   endpoint are dropped from the log row. This is captured as-is; do not fix
- *   during characterization. REFER→ernie for correctness fix.
+ * FLAG-2 (requireFeatureIncludes bug — FIXED in 999.371): feature-gate.js:127 once
+ *   called logFeatureEvent with the wrong first arg (req.user?.id, a string, not the
+ *   req object), so plan_id and endpoint were dropped from the feature_events row.
+ *   999.371 corrected the call to `logFeatureEvent(req, featurePath, 'used',
+ *   { selected })`. The H6-FLAG2 test now asserts the CORRECTED row (plan_id +
+ *   endpoint populated).
  * FLAG-3 (H13 fallback): PAYMENT_SERVICE_URL uses `|| 'http://localhost:5020'` in
  *   plan-features.middleware.js lines 31, 59, 112. This is a pre-approved fallback
  *   per WBS H4 Scooter constraints — preserved verbatim. No new fallback added.
@@ -1497,15 +1497,15 @@ describe('Surface 6 — feature-gate: allow/deny decisions (H6)', () => {
     expect(next).toHaveBeenCalled();
   });
 
-  // ── FLAG-2 behavioral pin ─────────────────────────────────────────────────────
-  // feature-gate.js:127 has a bug: logFeatureEvent is called as
+  // ── FLAG-2 (999.371) — NOW FIXED ──────────────────────────────────────────────
+  // feature-gate.js:127 previously had a bug: logFeatureEvent was called as
   //   logFeatureEvent(req.user?.id, featurePath, 'used', req.planId, { selected: ... })
-  // i.e. the first arg is a STRING (req.user?.id), not the req object.
-  // logFeatureEvent(req, featureKey, eventType, value): when first arg is not an object,
-  //   userId = req (the string), planId = 'free' (not req.planId), endpoint = null.
-  // This test PINS the CURRENT BUGGY behavior so W6 cannot silently change it.
-  // Do NOT fix the bug here — refer to ernie. Capture as-is.
-  test('H6-FLAG2: requireFeatureIncludes success path inserts feature_event with BUGGY call shape (user_id = string id, plan_id = null)', async () => {
+  // i.e. the first arg was a STRING (req.user?.id), not the req object, so
+  // logFeatureEvent's `typeof reqOrUserId === 'object'` checks fell to the string
+  // branch and plan_id / endpoint / ip_address were DROPPED from the row.
+  // 999.371 corrected the call to the canonical `logFeatureEvent(req, …)` shape, so
+  // plan_id + endpoint are now persisted. This test asserts the CORRECTED behavior.
+  test('H6-FLAG2 (999.371 FIXED): requireFeatureIncludes success path inserts feature_event with plan_id + endpoint populated', async () => {
     const req = makeReq({ tasks: { placementMode: ['fixed', 'float'] } }, 'plan-test');
     const res = makeRes();
     const next = jest.fn();
@@ -1525,22 +1525,20 @@ describe('Surface 6 — feature-gate: allow/deny decisions (H6)', () => {
     // The first insert call should be the feature-event log.
     const insertArg = insertSpy.mock.calls[0][0];
 
-    // BUGGY SHAPE — pinned as-is:
-    // Because logFeatureEvent was called with req.user?.id (a string) as first arg,
-    // the function's typeof check sees a string, so:
-    //   userId = req.user?.id (the string 'gate-user-1') — CORRECT value but passed wrong
-    //   planId = 'free' — NOT req.planId ('plan-test'), because first arg is not an object
-    //   endpoint = null — NOT the real endpoint
-    //   ip_address = null
-    //   request_id = null
-    // If this bug is ever fixed (first arg becomes the real req object), plan_id will
-    // be populated ('plan-test') and endpoint will be non-null — that change would
-    // flip this test RED, which is the desired mutation-detection behavior.
+    // CORRECTED SHAPE (999.371): logFeatureEvent now receives the real req object,
+    // so the object-typeof branch is taken:
+    //   user_id    = req.user.id            → 'gate-user-1'
+    //   plan_id    = req.planId             → 'plan-test'  (was null)
+    //   endpoint   = req.method+' '+req.url → 'POST /api/tasks' (was null)
+    //   ip_address = req.ip                 → '127.0.0.1'  (was null)
+    //   value      = JSON.stringify({selected})
     expect(insertArg.user_id).toBe('gate-user-1');
-    // planId/plan_id populated from the string arg path → 'free' (not 'plan-test')
-    expect(insertArg.plan_id).toBeNull();
-    expect(insertArg.endpoint).toBeNull();
-    expect(insertArg.ip_address).toBeNull();
+    expect(insertArg.feature_key).toBe('tasks.placementMode');
+    expect(insertArg.event_type).toBe('used');
+    expect(insertArg.plan_id).toBe('plan-test');
+    expect(insertArg.endpoint).toBe('POST /api/tasks');
+    expect(insertArg.ip_address).toBe('127.0.0.1');
+    expect(insertArg.value).toBe(JSON.stringify({ selected: 'fixed' }));
   });
 
   test('H6-8: checkUsageLimit — limit=-1 (unlimited) → always calls next', async () => {
@@ -2219,25 +2217,19 @@ describe('Surface 8 — entity-limits: count/limit enforcement (H9)', () => {
     expect(res._body.upgrade_required).toBe(true);
   });
 
-  test('H9-4: checkProjectLimit — fail open on DB error (calls next)', async () => {
-    // DB throws → checkEntityLimit catches and calls next() (fail open)
-    // Mock chain: countProjects → db('projects').count().first() → reject
-    // We push a rejected promise simulation: push null and override chain to throw
-    // Simplest: just don't push anything — queue empty → resolveQueue returns null fallback
-    // Actually countProjects does db.first() → returns undefined → parseInt(undefined) = NaN
-    // Then currentCount + 1 > limit: NaN > 10 = false → next() is called (effectively fail open)
-    // But the catch block is what we want to test. Inject via resolveQueue trick:
-    // resolveQueue shift returns undefined when empty → first() resolves undefined
-    // parseInt(undefined.count) throws → catch → next()
-    // (leave queue empty to trigger this)
+  test('H9-4 (999.370 FAIL-CLOSED): checkProjectLimit — DB error → 503 (creation blocked)', async () => {
+    // Leave the resolveQueue empty → first() resolves undefined → result.count read
+    // throws a TypeError inside countProjects → check()'s catch fires. Under the
+    // 999.370 fail-CLOSED change this returns 503 (was fail-open next()+200).
 
     const req = makeReq({ limits: { projects: 5 } });
     const res = makeRes();
     const next = jest.fn();
 
     await checkProjectLimit(req, res, next);
-    expect(next).toHaveBeenCalled(); // fail open
-    expect(res._status).toBe(200);
+    expect(next).not.toHaveBeenCalled(); // fail-closed: blocked
+    expect(res._status).toBe(503);
+    expect(res._body.error).toMatch(/temporarily unavailable/);
   });
 
   test('H9-5: checkProjectLimit — planFeatures not resolved → 500', async () => {
@@ -2251,12 +2243,12 @@ describe('Surface 8 — entity-limits: count/limit enforcement (H9)', () => {
     expect(res._body.error).toMatch(/not resolved/);
   });
 
-  // ── elmo B1: entity-limits fail-OPEN on DB error ──────────────────────────────
-  // entity-limits.js:57-60 — catch { logger.error(...); next(); } (fail open).
-  // Deliberate availability-over-strictness: on a transient DB error, the user
-  // proceeds rather than being locked out. Pinned as-is so W6 extraction cannot
-  // accidentally flip this to fail-closed without turning this test RED.
-  test('H9-elmoB1: checkProjectLimit — count function DB throw → fail-open (next called, no error response)', async () => {
+  // ── 999.370: entity-limits fail-CLOSED on DB error (was fail-open) ─────────────
+  // 999.370 (user-approved) overrides the legacy entity-limits.js:57-60 fail-open
+  // catch { logger.error(...); next(); }. A DB/count error during an entitlement
+  // check now BLOCKS creation (503), rather than letting users exceed plan limits
+  // during a DB outage. This test asserts the corrected fail-CLOSED behavior.
+  test('H9-elmoB1 (999.370 FAIL-CLOSED): checkProjectLimit — count function DB throw → 503 (creation blocked)', async () => {
     // Force db('projects').count().first() to throw by making mockDb.first reject
     const origFirst = mockDb.first;
     mockDb.first = jest.fn(() => Promise.reject(new Error('Connection lost')));
@@ -2269,9 +2261,10 @@ describe('Surface 8 — entity-limits: count/limit enforcement (H9)', () => {
 
     mockDb.first = origFirst;
 
-    // Fail-open: next() must be called; no 4xx/5xx written
-    expect(next).toHaveBeenCalled();
-    expect(res._status).toBe(200); // no status override from error path
+    // Fail-CLOSED: next() must NOT be called; a 503 is written.
+    expect(next).not.toHaveBeenCalled();
+    expect(res._status).toBe(503);
+    expect(res._body.error).toMatch(/temporarily unavailable/);
   });
 
   test('H9-6: checkLocationLimit — incoming count > limit → 403', () => {

@@ -187,3 +187,193 @@ describe('PaymentServiceEntitlementAdapter — legacy I/O parity', function () {
     }).toThrow(/UUID|slug/i);
   });
 });
+
+// ── Circuit breaker (999.374) ─────────────────────────────────────────────────
+// A payment-service outage otherwise makes every cross-service call hang for the
+// full 30s AbortSignal.timeout. The breaker opens after N consecutive failures and
+// fast-fails (returns the SAME fail-soft result WITHOUT calling fetch); after a
+// cooldown one half-open trial closes it on success or re-opens it on failure. These
+// tests use a tiny threshold + injected clock for determinism. The fail-soft contract
+// (null on failure) is unchanged — the breaker only avoids the hang.
+describe('PaymentServiceEntitlementAdapter — circuit breaker (999.374)', function () {
+  function rejectingFetch() {
+    return jest.fn(function () { return Promise.reject(new Error('payment-service down')); });
+  }
+
+  test('(a) after N consecutive failures the breaker OPENs and the next call fast-fails WITHOUT calling fetch', async function () {
+    var fetchMock = rejectingFetch();
+    var clock = 1000;
+    var a = new PaymentServiceEntitlementAdapter({
+      productSlug: 'juggler',
+      logger: SILENT_LOGGER,
+      fetchImpl: fetchMock,
+      breakerThreshold: 3,
+      breakerCooldownMs: 30000,
+      now: function () { return clock; }
+    });
+
+    // 3 consecutive failures — each makes a (failing) fetch call; all fail-soft to null.
+    for (var i = 0; i < 3; i++) {
+      var r = await a.resolveUserPlanId('u' + i);
+      expect(r).toBeNull();
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3); // breaker still CLOSED for these 3
+    expect(a._breakerState).toBe('open');       // threshold reached → OPEN
+
+    // Next call within the cooldown window → fast-fail null WITHOUT a 4th fetch.
+    var fast = await a.resolveUserPlanId('u-after-open');
+    expect(fast).toBeNull();                    // same fail-soft contract
+    expect(fetchMock).toHaveBeenCalledTimes(3); // NO new fetch — the hang is avoided
+  });
+
+  test('(b) after the cooldown a successful HALF-OPEN trial CLOSEs the breaker', async function () {
+    var clock = 1000;
+    // Fail first to OPEN the breaker, then succeed on the half-open trial.
+    var callCount = 0;
+    var fetchMock = jest.fn(function () {
+      callCount++;
+      if (callCount <= 2) return Promise.reject(new Error('down'));
+      // half-open trial + subsequent calls succeed (active-plans map, slug-keyed)
+      return jsonRes({ plans: { juggler: 'plan-starter' } });
+    });
+    var a = new PaymentServiceEntitlementAdapter({
+      productSlug: 'juggler',
+      logger: SILENT_LOGGER,
+      fetchImpl: fetchMock,
+      breakerThreshold: 2,
+      breakerCooldownMs: 30000,
+      now: function () { return clock; }
+    });
+
+    // 2 failures → OPEN.
+    await a.resolveUserPlanId('u1');
+    await a.resolveUserPlanId('u2');
+    expect(a._breakerState).toBe('open');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // Still within cooldown → fast-fail, NO fetch.
+    expect(await a.resolveUserPlanId('u3')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // Advance past the cooldown → next call is a HALF-OPEN trial → fetch runs + succeeds.
+    clock += 30001;
+    var resolved = await a.resolveUserPlanId('u4');
+    expect(resolved).toBe('plan-starter');       // success
+    expect(fetchMock).toHaveBeenCalledTimes(3);   // the half-open trial fetched
+    expect(a._breakerState).toBe('closed');       // success CLOSEs the breaker
+    expect(a._breakerFailures).toBe(0);
+
+    // Breaker closed → subsequent calls flow normally (fetch again).
+    await a.resolveUserPlanId('u5');
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  test('(c) a catalog fetch counts as ONE breaker failure, not two (no product-discovery double-count)', async function () {
+    // Regression (999.374, elmo WARN-2a): _fetchPlanCatalog used to record a breaker
+    // outcome AND its nested resolveProductId recorded another — TWO records per
+    // logical catalog fetch, halving the effective threshold. With threshold 2, a
+    // SINGLE failing catalog fetch must NOT open the breaker (1 failure, not 2). A
+    // second failing catalog fetch then reaches the threshold and opens it.
+    var clock = 1000;
+    var fetchMock = jest.fn(function () { return Promise.reject(new Error('down')); });
+    var a = new PaymentServiceEntitlementAdapter({
+      productSlug: 'juggler',
+      logger: SILENT_LOGGER,
+      fetchImpl: fetchMock,
+      breakerThreshold: 2,
+      breakerCooldownMs: 30000,
+      now: function () { return clock; }
+    });
+
+    // ONE logical catalog fetch fails (discovery + /api/plans both error). It must
+    // record exactly ONE failure — below threshold 2 → breaker stays CLOSED.
+    await expect(a.resolvePlanCatalog()).rejects.toThrow();
+    expect(a._breakerState).toBe('closed');
+    expect(a._breakerFailures).toBe(1); // ONE failure, not two — the fix
+
+    // A second logical catalog fetch fails → now 2 failures → threshold reached → OPEN.
+    await expect(a.resolvePlanCatalog()).rejects.toThrow();
+    expect(a._breakerState).toBe('open');
+    expect(a._breakerFailures).toBe(2);
+
+    // While OPEN within cooldown, the next catalog fetch fast-fails WITHOUT new fetch.
+    var fetchesBefore = fetchMock.mock.calls.length;
+    await expect(a.resolvePlanCatalog()).rejects.toThrow(/circuit breaker open/);
+    expect(fetchMock).toHaveBeenCalledTimes(fetchesBefore); // no HTTP — the hang is avoided
+  });
+
+  test('(d) only ONE half-open trial is admitted — a concurrent same-tick call is fast-failed, not a 2nd trial', async function () {
+    // Regression (999.374, elmo WARN-2b): the half-open transition was a non-atomic
+    // check-then-set, so two concurrent post-cooldown calls could BOTH be admitted as
+    // trials. The admission now flips the state to 'half-open-pending' atomically, so a
+    // concurrent same-tick call sees the pending marker and is fast-failed. We model two
+    // concurrent calls by starting both BEFORE either's fetch resolves.
+    var clock = 1000;
+    var resolvers = [];
+    var fetchMock = jest.fn(function () {
+      // Each call returns a promise we resolve manually → both half-open candidates are
+      // in flight simultaneously (neither has recorded an outcome yet).
+      return new Promise(function (resolve) {
+        resolvers.push(function () { resolve({ ok: true, status: 200, json: function () { return Promise.resolve({ plans: { juggler: 'p1' } }); } }); });
+      });
+    });
+    var a = new PaymentServiceEntitlementAdapter({
+      productSlug: 'juggler',
+      logger: SILENT_LOGGER,
+      fetchImpl: fetchMock,
+      breakerThreshold: 1,
+      breakerCooldownMs: 30000,
+      now: function () { return clock; }
+    });
+
+    // 1 failure (threshold 1) → OPEN. Use a rejecting first call.
+    fetchMock.mockImplementationOnce(function () { return Promise.reject(new Error('down')); });
+    expect(await a.resolveUserPlanId('u1')).toBeNull();
+    expect(a._breakerState).toBe('open');
+
+    // Advance past cooldown → the breaker will admit ONE half-open trial.
+    clock += 30001;
+
+    // Two concurrent calls in the same tick (neither awaited yet → both pass through
+    // _breakerAllowsCall before any fetch settles).
+    var p1 = a.resolveUserPlanId('u-a');
+    var p2 = a.resolveUserPlanId('u-b');
+
+    // Only ONE was admitted as the trial (one fetch); the other was fast-failed (null,
+    // no fetch) by the 'half-open-pending' marker.
+    expect(a._breakerState).toBe('half-open-pending');
+    expect(fetchMock).toHaveBeenCalledTimes(2); // 1 initial failure + 1 trial fetch only
+
+    // Resolve the single in-flight trial → success CLOSEs the breaker.
+    resolvers[0]();
+    var r1 = await p1;
+    var r2 = await p2;
+    // One of the two is the admitted trial (resolves to 'p1'); the other was fast-failed (null).
+    var results = [r1, r2].sort();
+    expect(results).toEqual([null, 'p1']);
+    expect(a._breakerState).toBe('closed');
+  });
+
+  test('breaker is SHARED across the 3 calls — failures from resolveProductId count toward the open threshold', async function () {
+    var clock = 1000;
+    var fetchMock = jest.fn(function () { return Promise.reject(new Error('down')); });
+    var a = new PaymentServiceEntitlementAdapter({
+      productSlug: 'juggler',
+      logger: SILENT_LOGGER,
+      fetchImpl: fetchMock,
+      breakerThreshold: 2,
+      breakerCooldownMs: 30000,
+      now: function () { return clock; }
+    });
+
+    // Mix call types: 1 product-discovery failure + 1 user-plan failure → threshold 2.
+    expect(await a.resolveProductId()).toBeNull();
+    expect(await a.resolveUserPlanId('u1')).toBeNull();
+    expect(a._breakerState).toBe('open');
+    var callsBefore = fetchMock.mock.calls.length;
+
+    // Now a user-plan call fast-fails without fetch (breaker shared/open).
+    expect(await a.resolveUserPlanId('u2')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(callsBefore); // no new fetch
+  });
+});

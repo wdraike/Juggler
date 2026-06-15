@@ -244,6 +244,69 @@ describe('W3 publishing — task lifecycle events', () => {
 });
 
 // -------------------------------------------------------------------------
+// 1b. PAYLOAD↔TYPEDEF CONTRACT (999.333)
+//
+// The publisher (lib/events/taskEvents.js) must emit EXACTLY the flat/minimal
+// shape documented by the TaskCreated/Updated/CompletedPayload typedefs in
+// lib/events/index.js and bound by ADR-0001 E-3: { taskId, userId, status,
+// timestamp }. No `task` / `changes` fields (the stale typedef shape that no
+// publisher emitted and no consumer read). This is a fail-on-drift guard: if a
+// publisher starts emitting a richer/different shape without the typedef being
+// updated to match, this test goes RED.
+// -------------------------------------------------------------------------
+describe('999.333 payload↔typedef contract — publisher emits the flat E-3 shape', () => {
+  const taskEvents = require('../src/lib/events/taskEvents');
+
+  // The exact key set the typedefs document (sans the bus-attached _eventMeta).
+  const EXPECTED_KEYS = ['taskId', 'userId', 'status', 'timestamp'].sort();
+
+  function captureFor(eventType, publishFn) {
+    const spy = jest.fn();
+    const unsubscribe = getEventBus().subscribe(eventType, spy);
+    publishFn();
+    unsubscribe();
+    expect(spy).toHaveBeenCalledTimes(1);
+    const payload = spy.mock.calls[0][0];
+    const { _eventMeta, ...identity } = payload; // strip bus metadata
+    return identity;
+  }
+
+  function assertFlatShape(identity) {
+    expect(Object.keys(identity).sort()).toEqual(EXPECTED_KEYS);
+    expect(typeof identity.taskId).toBe('string');
+    expect(typeof identity.userId).toBe('string');
+    expect(typeof identity.status).toBe('string');
+    expect(typeof identity.timestamp).toBe('number'); // Date.now(), not a Date
+    // The stale richer shape must NOT leak through.
+    expect(identity).not.toHaveProperty('task');
+    expect(identity).not.toHaveProperty('changes');
+  }
+
+  test('publishTaskCreated payload matches the TaskCreatedPayload typedef (flat)', () => {
+    const identity = captureFor(EventTypes.TASK_CREATED, () =>
+      taskEvents.publishTaskCreated({ id: 'task-1', userId: 'user-1', status: '' }));
+    assertFlatShape(identity);
+    expect(identity.taskId).toBe('task-1');
+    expect(identity.userId).toBe('user-1');
+  });
+
+  test('publishTaskUpdated payload matches the TaskUpdatedPayload typedef (flat)', () => {
+    const identity = captureFor(EventTypes.TASK_UPDATED, () =>
+      taskEvents.publishTaskUpdated({ id: 'task-2', userId: 'user-2', status: 'active' }));
+    assertFlatShape(identity);
+    expect(identity.taskId).toBe('task-2');
+    expect(identity.status).toBe('active');
+  });
+
+  test('publishTaskCompleted payload matches the TaskCompletedPayload typedef (flat)', () => {
+    const identity = captureFor(EventTypes.TASK_COMPLETED, () =>
+      taskEvents.publishTaskCompleted({ id: 'task-3', userId: 'user-3', status: 'done' }));
+    assertFlatShape(identity);
+    expect(identity.status).toBe('done');
+  });
+});
+
+// -------------------------------------------------------------------------
 // 2. ERROR ISOLATION — a throwing subscriber must not break the write
 // -------------------------------------------------------------------------
 describe('W3 error isolation — throwing subscriber cannot break the write', () => {

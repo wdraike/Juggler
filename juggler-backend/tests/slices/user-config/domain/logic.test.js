@@ -113,6 +113,24 @@ describe('featureGate usage limit (== checkUsageLimit, H6-8/H6-9)', () => {
   test('resolveUsageLimit: limits.<key> missing falls through to bare key (?? semantics)', () => {
     expect(featureGate.resolveUsageLimit({ ai_commands_per_month: 5 }, 'ai_commands_per_month').limit).toBe(5);
   });
+
+  // 999.373 — guard the bare-key fallback after collapsing the redundant inner
+  // guard in resolveUsageLimit (the inner `if` was always-true dead code).
+  test('resolveUsageLimit: limits.<key> present takes precedence over bare key (no fallthrough)', () => {
+    const r = featureGate.resolveUsageLimit({ limits: { ai_commands_per_month: 7 }, ai_commands_per_month: 99 }, 'ai_commands_per_month');
+    expect(r.limit).toBe(7);
+  });
+
+  test('resolveUsageLimit: both limits.<key> and bare key missing → undefined → unlimited', () => {
+    const r = featureGate.resolveUsageLimit({}, 'ai_commands_per_month');
+    expect(r.limit).toBeUndefined();
+    expect(r.isUnlimited).toBe(true);
+  });
+
+  test('resolveUsageLimit: limits.<key> = 0 does NOT fall through to bare key (0 is a real limit)', () => {
+    const r = featureGate.resolveUsageLimit({ limits: { ai_commands_per_month: 0 }, ai_commands_per_month: 50 }, 'ai_commands_per_month');
+    expect(r.limit).toBe(0);
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

@@ -46,8 +46,9 @@
  * ── S4/S6 ── enqueueScheduleRun (the SSE-emit + deferred scheduler-enqueue wrapper)
  * is lifted verbatim and remains the SOLE scheduler trigger. The lib-events publish
  * happens at the use-case seam (EventBusTaskEvents), decoupled — no self-trigger,
- * no cascade. The fast-path-no-event nuance is preserved: only the COMPLEX update
- * path publishes TASK_UPDATED (the fast path never publishes).
+ * no cascade. As of 999.331 BOTH the fast path and the COMPLEX update path
+ * publish TASK_UPDATED after a successful write (the fast path previously did
+ * not, which made an H6 scheduler subscriber miss fast-path edits).
  */
 
 'use strict';
@@ -884,7 +885,7 @@ var _batchCreateTasks = new app.BatchCreateTasks({
   repo: _repo, cache: _cache, enqueueScheduleRun: enqueueScheduleRun,
   mappers: mappers, validation: validation, batchCreateSchema: batchCreateSchema,
   ensureProject: ensureProject, isLocked: isLocked, enqueueWrite: enqueueWrite,
-  safeTimezone: safeTimezone
+  safeTimezone: safeTimezone, sleep: sleep
 });
 
 var _batchUpdateTasks = new app.BatchUpdateTasks({

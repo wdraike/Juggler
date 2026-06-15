@@ -296,6 +296,19 @@ UpdateTask.prototype._fastPath = async function _fastPath(input) {
   optimistic.id = id;
   optimistic.user_id = userId;
   optimistic.updated_at = new Date();
+
+  // TASK_UPDATED publish on the fast path (999.331). The COMPLEX path publishes
+  // at L221; the fast path historically returned WITHOUT publishing, so a
+  // fast-path edit never emitted TASK_UPDATED and an H6 scheduler subscriber
+  // would miss it. We publish here AFTER the successful write above (the
+  // updateTaskById call(s) resolved — control only reaches this point on
+  // success; a thrown write rejects execute() before this line). Fire-and-
+  // forget + error-isolated like the slow path; uses the reconciled FLAT shape
+  // (ADR-0001 E-3): { id, userId, status }. The status mirrors what the slow
+  // path provides — the post-write status — sourced from the optimistic row
+  // (fastExisting merged with the applied fastRow) since the fast path does not
+  // re-read.
+  this.events.publishTaskUpdated({ id: id, userId: userId, status: optimistic.status });
   return { status: 200, body: { task: this.mappers.rowToTask(optimistic, null) } };
 };
 
