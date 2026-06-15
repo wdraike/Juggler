@@ -19,6 +19,7 @@ scripts/db-backup/
 auth-client/
 .worktrees/
 .claude/
+.muppets/
 juggler-backend/purge-orphan-events-*.csv
 
 # MemPalace per-project files (issue #185)
