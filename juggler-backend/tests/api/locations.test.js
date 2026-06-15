@@ -219,6 +219,59 @@ describe('PUT /api/locations', () => {
     expect(res.body.error).toMatch(/Invalid locations/);
   });
 
+  // jug-geopoint-coord-validation (999.557): coordinates must be range-validated.
+  // Real payloads use the `lat`/`lon` pair (DB columns, frontend `loc.lon`); the
+  // legacy schema validated a dead `lng` field while `lon` passed through unvalidated.
+  test('rejects latitude above +90', async () => {
+    const res = await request(app)
+      .put('/api/locations')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({ locations: [{ id: 'loc-a', name: 'Home', lat: 91, lon: 10 }] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid locations/);
+  });
+
+  test('rejects latitude below -90', async () => {
+    const res = await request(app)
+      .put('/api/locations')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({ locations: [{ id: 'loc-a', name: 'Home', lat: -90.5, lon: 10 }] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid locations/);
+  });
+
+  test('rejects longitude above +180', async () => {
+    const res = await request(app)
+      .put('/api/locations')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({ locations: [{ id: 'loc-a', name: 'Home', lat: 10, lon: 181 }] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid locations/);
+  });
+
+  test('rejects longitude below -180', async () => {
+    const res = await request(app)
+      .put('/api/locations')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({ locations: [{ id: 'loc-a', name: 'Home', lat: 10, lon: -181 }] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid locations/);
+  });
+
+  test('accepts valid in-range coordinates (displayName set → no geocode)', async () => {
+    const res = await request(app)
+      .put('/api/locations')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .send({ locations: [{ id: 'loc-a', name: 'Home', lat: 40.71, lon: -74.0, displayName: 'New York, NY' }] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.locations).toHaveLength(1);
+  });
+
   test('returns 401 without auth token', async () => {
     const res = await request(app)
       .put('/api/locations')

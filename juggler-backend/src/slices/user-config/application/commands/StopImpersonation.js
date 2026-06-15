@@ -11,14 +11,16 @@
  *
  * ── STEP-FOR-STEP (handler L82-88) ───────────────────────────────────────────
  *   1. actingAsAdmin = auth.actingAsAdmin (from the impersonation token: sub=target,
- *      acting_as_admin=admin id). adminUserId = actingAsAdmin || user.id;
- *      targetUserId = actingAsAdmin ? user.id : null. (Preserved verbatim.)
- *   2. insert the audit row ('stop_impersonation', P1 new Date(), best-effort).
+ *      acting_as_admin=admin id).
+ *   2. AUDIT ATTRIBUTION FIX (jug-impersonation-stop-audit-misattribution / 999.553):
+ *      only insert an audit row when actingAsAdmin is present — admin=actingAsAdmin,
+ *      target=user.id. A plain authenticated user (no impersonation token) has no active
+ *      impersonation, so no row is written. The legacy handler used
+ *      `adminUserId = actingAsAdmin || user.id; targetUserId = actingAsAdmin ? user.id : null`,
+ *      which falsely attributed a 'stop_impersonation' action to a non-admin (admin=self,
+ *      target=null) on every plain /stop. That misattribution is corrected here.
  *   3. respond 200 { message: 'Impersonation stopped. Discard the impersonation token
- *      client-side.' }.
- *
- * ── NO NEW FALLBACKS ── `actingAsAdmin || user.id` and the `actingAsAdmin ? … : null`
- * are preserved verbatim from the handler.
+ *      client-side.' } — unchanged in all cases.
  *
  * @typedef {Object} StopImpersonationDeps
  * @property {import('../../domain/ports/ConfigRepositoryPort')} repo
@@ -61,11 +63,17 @@ StopImpersonation.prototype.execute = async function execute(input) {
   var user = input.user;
   var actingAsAdmin = input.actingAsAdmin;
 
-  // sub=target, acting_as_admin=admin ID (handler L83-86).
-  var adminUserId = actingAsAdmin || user.id;
-  var targetUserId = actingAsAdmin ? user.id : null;
-
-  await this._insertAuditRow(adminUserId, targetUserId, 'stop_impersonation', input.audit || {});
+  // jug-impersonation-stop-audit-misattribution (999.553): only record an audit row for a
+  // REAL impersonation stop. The token of an active session carries acting_as_admin=<admin id>
+  // and sub=<impersonated target>, so actingAsAdmin = the admin and user.id = the target —
+  // correct attribution. A plain authenticated user (no impersonation token → no actingAsAdmin)
+  // hitting /stop has no active impersonation; the old `actingAsAdmin || user.id` /
+  // `actingAsAdmin ? user.id : null` recorded admin=self, target=null, falsely attributing a
+  // 'stop_impersonation' action to a non-admin. Skip the audit insert in that case. The response
+  // is unchanged (200) — any token is simply discarded client-side.
+  if (actingAsAdmin) {
+    await this._insertAuditRow(actingAsAdmin, user.id, 'stop_impersonation', input.audit || {});
+  }
 
   return {
     status: 200,

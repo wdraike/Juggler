@@ -901,8 +901,13 @@ describe('Surface 3 — billing-webhooks: signature guard + event handling (H3)'
     expect(res.body.error).toMatch(/Invalid signature/);
   });
 
+  // jug-webhook-replay-window-hardfail (999.552): the freshness window is now MANDATORY —
+  // a validly-signed body with no timestamp hard-fails (401). payment-service always signs a
+  // `timestamp` into the body (notification.service.js:59), so the 200-path fixtures below
+  // carry a fresh timestamp to match real payloads. This is an intentional security change to
+  // the characterized behavior, not an unintended regression.
   test('H3-3: correct HMAC signature with valid event returns 200', async () => {
-    const bodyObj = { event: 'subscription.created', user_id: 'u1' };
+    const bodyObj = { event: 'subscription.created', user_id: 'u1', timestamp: new Date().toISOString() };
     const raw = JSON.stringify(bodyObj);
     const sig = makeSignature(raw, process.env.BILLING_WEBHOOK_SECRET);
 
@@ -940,7 +945,7 @@ describe('Surface 3 — billing-webhooks: signature guard + event handling (H3)'
   // instance (facade.js:106) the live entitlement gate reads. Spy the adapter
   // prototype to prove the webhook reaches the real cache bust (non-tautological).
   test('H3-6: subscription.plan_changed invalidates user plan cache', async () => {
-    const bodyObj = { event: 'subscription.plan_changed', user_id: 'u1', from_planId: 'plan-free', to_planId: 'plan-pro' };
+    const bodyObj = { event: 'subscription.plan_changed', user_id: 'u1', from_planId: 'plan-free', to_planId: 'plan-pro', timestamp: new Date().toISOString() };
     const raw = JSON.stringify(bodyObj);
     const sig = makeSignature(raw, process.env.BILLING_WEBHOOK_SECRET);
 
@@ -956,7 +961,7 @@ describe('Surface 3 — billing-webhooks: signature guard + event handling (H3)'
   });
 
   test('H3-7: subscription.canceled invalidates user plan cache', async () => {
-    const bodyObj = { event: 'subscription.canceled', user_id: 'u2' };
+    const bodyObj = { event: 'subscription.canceled', user_id: 'u2', timestamp: new Date().toISOString() };
     const raw = JSON.stringify(bodyObj);
     const sig = makeSignature(raw, process.env.BILLING_WEBHOOK_SECRET);
 
@@ -972,7 +977,7 @@ describe('Surface 3 — billing-webhooks: signature guard + event handling (H3)'
   });
 
   test('H3-8: unknown event returns 200 (handled gracefully)', async () => {
-    const bodyObj = { event: 'subscription.unknown_future_event', user_id: 'u1' };
+    const bodyObj = { event: 'subscription.unknown_future_event', user_id: 'u1', timestamp: new Date().toISOString() };
     const raw = JSON.stringify(bodyObj);
     const sig = makeSignature(raw, process.env.BILLING_WEBHOOK_SECRET);
 
@@ -1008,7 +1013,7 @@ describe('Surface 3 — billing-webhooks: signature guard + event handling (H3)'
     delete process.env.BILLING_WEBHOOK_SECRET;
     // INTERNAL_SERVICE_KEY is already set to 'test-internal-key-abc123' at file top
 
-    const bodyObj = { event: 'subscription.created', user_id: 'u1' };
+    const bodyObj = { event: 'subscription.created', user_id: 'u1', timestamp: new Date().toISOString() };
     const raw = JSON.stringify(bodyObj);
     // Sign with INTERNAL_SERVICE_KEY (the fallback secret)
     const sig = makeSignature(raw, process.env.INTERNAL_SERVICE_KEY);

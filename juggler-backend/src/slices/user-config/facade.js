@@ -89,12 +89,17 @@ var logger = createLogger('user-config.facade');
 function getDb() { return libDb.getDefaultDb(); }
 
 // ── zod schemas (lifted verbatim — config.controller.js:18-32) ───────────────
+// jug-geopoint-coord-validation (999.557): coordinates are range-validated so out-of-range
+// values can't be persisted (and can't poison the weather lookup / reverse-geocode).
+// The canonical wire/DB pair is `lat`/`lon` (frontend `loc.lon`, DB column `lon DECIMAL(9,6)`);
+// the legacy schema validated a dead `lng` field while `lon` slipped through `.passthrough()`
+// entirely unchecked. Validate the real `lon` field; lat ∈ [-90, 90], lon ∈ [-180, 180].
 var locationItemSchema = z.object({
   id: z.string().max(36).optional(),
   name: z.string().min(1).max(200),
   icon: z.string().max(100).optional(),
-  lat: z.number().optional(),
-  lng: z.number().optional(),
+  lat: z.number().min(-90).max(90).optional(),
+  lon: z.number().min(-180).max(180).optional(),
 }).passthrough();
 var locationsBodySchema = z.object({ locations: z.array(locationItemSchema).max(50) });
 
