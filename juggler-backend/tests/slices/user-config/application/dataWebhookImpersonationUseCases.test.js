@@ -287,11 +287,18 @@ describe('StopImpersonation (== stopImpersonation)', () => {
     expect(log.logs[0]).toMatchObject({ admin_user_id: 'admin-9', target_user_id: 'target-1', action: 'stop_impersonation' });
   });
 
-  test('without acting context: admin=user.id, target=null', async () => {
+  // jug-impersonation-stop-audit-misattribution (999.553): a plain authenticated user
+  // (no impersonation token → no actingAsAdmin) hitting /stop has no active impersonation.
+  // The old code recorded admin=user.id, target=null, action=stop_impersonation — falsely
+  // attributing a 'stop_impersonation' action to a non-admin. The fix records NO audit row
+  // in that case; the response is still 200 (the client just discards any token).
+  test('without acting context: NO audit row recorded (no misattribution), still 200', async () => {
     var repo = new InMemoryConfigRepository();
-    await new App.StopImpersonation({ repo: repo }).execute({ user: { id: 'self-1' }, audit: {} });
+    var res = await new App.StopImpersonation({ repo: repo }).execute({ user: { id: 'self-1' }, audit: {} });
+    expect(res.status).toBe(200);
+    expect(res.body.message).toMatch(/stopped/i);
     var log = await repo.listImpersonationLog({ limit: 10, offset: 0 });
-    expect(log.logs[0]).toMatchObject({ admin_user_id: 'self-1', target_user_id: null });
+    expect(log.logs).toHaveLength(0);
   });
 });
 
