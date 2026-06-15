@@ -107,6 +107,10 @@ function baseDeps(extra) {
     },
     isTerminalStatus: isTerminalStatus,
     safeTimezone: safeTimezone,
+    // 999.586 default: DB-backed reference existence validator (no-op by default —
+    // returns no errors). Tests that exercise the reference check pass an `extra`
+    // override returning specific error strings.
+    validateReferences: function () { return Promise.resolve([]); },
     ensureProject: function () { return Promise.resolve(); },
     isLocked: function () { return Promise.resolve(false); },
     enqueueWrite: function () { return Promise.resolve(); },

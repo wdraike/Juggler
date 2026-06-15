@@ -459,3 +459,179 @@ describe('S4/S6 — publishing never cascades a second scheduler trigger', funct
     });
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 999.586 — DB-backed reference existence validation (depends_on / location /
+// tools). Exercised via the injected `validateReferences` collaborator: the
+// use-case must 400 (no write, no trigger) when it returns errors, and proceed
+// normally when it returns []. A real-DB integration of validateTaskReferences
+// itself lives in commands.db.test.js / the facade collaborators DB suite.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('CreateTask — reference existence validation (999.586)', function () {
+  // A fake validateReferences that rejects ids not in the configured allow-lists.
+  function makeRefValidator(known) {
+    var fn = function (userId, body) {
+      var errs = [];
+      (body.dependsOn || []).forEach(function (id) {
+        if (known.deps.indexOf(id) === -1) errs.push('dependsOn references unknown task ID(s): ' + id);
+      });
+      (body.location || []).forEach(function (id) {
+        if (known.locs.indexOf(id) === -1) errs.push('location references unknown location ID(s): ' + id);
+      });
+      (body.tools || []).forEach(function (id) {
+        if (known.tools.indexOf(id) === -1) errs.push('tools references unknown tool ID(s): ' + id);
+      });
+      return Promise.resolve(errs);
+    };
+    return fn;
+  }
+
+  var KNOWN = { deps: ['dep-ok'], locs: ['home'], tools: ['phone'] };
+
+  test('unknown depends_on ID → 400, no write, no trigger', function () {
+    var repo = new InMemoryTaskRepository();
+    var trigger = H.makeTriggerSpy();
+    var events = H.makeEventsSpy();
+    var insertSpy = jest.spyOn(repo, 'insertTask');
+    var deps = createDeps(repo, trigger, events, { validateReferences: makeRefValidator(KNOWN) });
+    var uc = new CreateTask(deps);
+    return uc.execute({ userId: USER, body: { text: 'x', dependsOn: ['ghost'] } }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/dependsOn references unknown/);
+      expect(insertSpy).not.toHaveBeenCalled();
+      expect(trigger.calls.length).toBe(0);
+      expect(events.published.length).toBe(0);
+    });
+  });
+
+  test('unknown location ID → 400', function () {
+    var repo = new InMemoryTaskRepository();
+    var deps = createDeps(repo, H.makeTriggerSpy(), H.makeEventsSpy(), { validateReferences: makeRefValidator(KNOWN) });
+    return new CreateTask(deps).execute({ userId: USER, body: { text: 'x', location: ['mars'] } }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/location references unknown/);
+    });
+  });
+
+  test('unknown tool ID → 400', function () {
+    var repo = new InMemoryTaskRepository();
+    var deps = createDeps(repo, H.makeTriggerSpy(), H.makeEventsSpy(), { validateReferences: makeRefValidator(KNOWN) });
+    return new CreateTask(deps).execute({ userId: USER, body: { text: 'x', tools: ['hammer'] } }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/tools references unknown/);
+    });
+  });
+
+  test('all references valid → 201 created', function () {
+    var repo = new InMemoryTaskRepository();
+    var trigger = H.makeTriggerSpy();
+    var deps = createDeps(repo, trigger, H.makeEventsSpy(), {
+      uuidv7: function () { return 'ref-ok-1'; },
+      validateReferences: makeRefValidator(KNOWN)
+    });
+    return new CreateTask(deps).execute({
+      userId: USER,
+      body: { text: 'valid refs', dependsOn: ['dep-ok'], location: ['home'], tools: ['phone'] }
+    }).then(function (out) {
+      expect(out.status).toBe(201);
+      expect(trigger.calls.length).toBe(1);
+    });
+  });
+
+  test('recurring task SKIPS dep existence check (deps stripped downstream)', function () {
+    var repo = new InMemoryTaskRepository();
+    var seen = [];
+    var refSpy = function (userId, body) { seen.push(body); return Promise.resolve([]); };
+    var deps = createDeps(repo, H.makeTriggerSpy(), H.makeEventsSpy(), {
+      uuidv7: function () { return 'rec-1'; },
+      validateReferences: refSpy
+    });
+    return new CreateTask(deps).execute({
+      userId: USER,
+      body: { text: 'recurring', recurring: true, dependsOn: ['ghost-but-stripped'] }
+    }).then(function (out) {
+      expect(out.status).toBe(201);
+      // the validator was called WITHOUT dependsOn (skipped for recurring).
+      expect(seen[0].dependsOn).toBeUndefined();
+    });
+  });
+});
+
+describe('UpdateTask — reference existence validation (999.586)', function () {
+  function seedOneOff() {
+    return new InMemoryTaskRepository({ rows: [
+      { id: 'r1', user_id: USER, task_type: 'task', text: 'orig', pri: 'P3', status: '', updated_at: new Date('2026-06-01T00:00:00Z') }
+    ] });
+  }
+  function updateDeps(repo, extra) {
+    return H.baseDeps(Object.assign({
+      repo: repo,
+      cache: H.makeCacheFake(),
+      events: H.makeEventsSpy(),
+      enqueueScheduleRun: H.makeTriggerSpy(),
+      recurCleanup: function () { return Promise.resolve(); }
+    }, extra || {}));
+  }
+
+  test('FAST PATH: unknown location ID → 400, no write, no trigger', function () {
+    var repo = seedOneOff();
+    var trigger = H.makeTriggerSpy();
+    var updateSpy = jest.spyOn(repo, 'updateTaskById');
+    var deps = updateDeps(repo, {
+      enqueueScheduleRun: trigger,
+      validateReferences: function () { return Promise.resolve(['location references unknown location ID(s): mars']); }
+    });
+    return new UpdateTask(deps).execute({ id: 'r1', userId: USER, body: { location: ['mars'] } }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/location references unknown/);
+      expect(updateSpy).not.toHaveBeenCalled();
+      expect(trigger.calls.length).toBe(0);
+    });
+  });
+
+  test('FAST PATH: valid reference → 200 updated', function () {
+    var repo = seedOneOff();
+    var deps = updateDeps(repo, {
+      validateReferences: function () { return Promise.resolve([]); }
+    });
+    return new UpdateTask(deps).execute({ id: 'r1', userId: USER, body: { location: ['home'], tools: ['phone'] } }).then(function (out) {
+      expect(out.status).toBe(200);
+    });
+  });
+
+  test('COMPLEX PATH (recur present): unknown dep on a non-recurring update → 400', function () {
+    var repo = seedOneOff();
+    var deps = updateDeps(repo, {
+      validateReferences: function (userId, body) {
+        // body still carries dependsOn here (task isn't flagged recurring in body)
+        return Promise.resolve(body.dependsOn ? ['dependsOn references unknown task ID(s): ghost'] : []);
+      }
+    });
+    // `when` forces the complex path; dependsOn triggers the rejection.
+    return new UpdateTask(deps).execute({ id: 'r1', userId: USER, body: { when: 'morning', dependsOn: ['ghost'] } }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/dependsOn references unknown/);
+    });
+  });
+
+  test('partial PATCH of an ALREADY-recurring task (body omits recurring) does NOT false-reject a stale dependsOn (ernie WARN-2)', function () {
+    // Existing task is recurring; the PATCH carries a stale dependsOn but no `recurring`.
+    // The gate must consult the existing recurring state (fetchTaskRecurring) and strip
+    // dependsOn (deps are discarded downstream), so validateReferences never sees it → no 400.
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'rec1', user_id: USER, task_type: 'recurring_template', recurring: 1, text: 'rt', pri: 'P3', status: '', updated_at: new Date('2026-06-01T00:00:00Z') }
+    ] });
+    var seen = [];
+    var deps = updateDeps(repo, {
+      validateReferences: function (userId, body) {
+        seen.push(body);
+        return Promise.resolve(body.dependsOn ? ['dependsOn references unknown task ID(s): ghost'] : []);
+      }
+    });
+    return new UpdateTask(deps).execute({ id: 'rec1', userId: USER, body: { dependsOn: ['ghost'] } }).then(function (out) {
+      expect(out.status).not.toBe(400);
+      expect(seen[0].dependsOn).toBeUndefined(); // stripped because the existing task is recurring
+    });
+  });
+});

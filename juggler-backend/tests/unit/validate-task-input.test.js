@@ -56,6 +56,9 @@ jest.mock('../../src/lib/placementModes', () => ({
 }));
 
 jest.mock('../../src/lib/task-status', () => ({
+  // STATUS_OPTIONS is required by the TaskStatus value-object the facade now
+  // loads through the domain index (slices/task/domain/value-objects/TaskStatus).
+  STATUS_OPTIONS: ['', 'done', 'cancelled', 'skip', 'pause', 'disabled'],
   TERMINAL_STATUSES: ['done', 'cancelled'],
   isTerminalStatus: jest.fn((s) => ['done', 'cancelled'].includes(s)),
 }));
@@ -95,6 +98,120 @@ describe('validateTaskInput — placementMode enum validation (ZOE-JUG-019)', ()
     const errors = validateTaskInput({ text: 'test' });
     const hasPlacementError = errors.some((e) => /placementMode/i.test(e));
     expect(hasPlacementError).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 999.586 — JSON-field shape validation (recur.days / monthDays / timesPerCycle,
+// and depends_on / location / tools array-of-string shape). EXISTENCE of
+// referenced IDs is DB-backed and tested separately (validateReferences).
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('validateTaskInput — recur.days shape (999.586)', () => {
+  test('valid day-code string "MTWRF" → no days error', () => {
+    const errors = validateTaskInput({ text: 't', recur: { type: 'weekly', days: 'MTWRF' } });
+    expect(errors.some((e) => /days/i.test(e))).toBe(false);
+  });
+
+  test('valid full-week string "MTWRFSU" → no days error', () => {
+    const errors = validateTaskInput({ text: 't', recur: { type: 'weekly', days: 'MTWRFSU' } });
+    expect(errors.some((e) => /days/i.test(e))).toBe(false);
+  });
+
+  test('valid days object { M:"required" } → no days error', () => {
+    const errors = validateTaskInput({ text: 't', recur: { type: 'weekly', days: { M: 'required', W: 'optional' } } });
+    expect(errors.some((e) => /days/i.test(e))).toBe(false);
+  });
+
+  test('invalid day code "XYZ" string → days error', () => {
+    const errors = validateTaskInput({ text: 't', recur: { type: 'weekly', days: 'XYZ' } });
+    expect(errors.some((e) => /days/i.test(e))).toBe(true);
+  });
+
+  test('days as an array (wrong type) → days error', () => {
+    const errors = validateTaskInput({ text: 't', recur: { type: 'weekly', days: ['M', 'W'] } });
+    expect(errors.some((e) => /days/i.test(e))).toBe(true);
+  });
+
+  test('days object with bad key { Q:"x" } → days error', () => {
+    const errors = validateTaskInput({ text: 't', recur: { type: 'weekly', days: { Q: 'x' } } });
+    expect(errors.some((e) => /days/i.test(e))).toBe(true);
+  });
+});
+
+describe('validateTaskInput — recur.monthDays shape (999.586)', () => {
+  test('valid [1, 15] → no monthDays error', () => {
+    const errors = validateTaskInput({ text: 't', recur: { type: 'monthly', monthDays: [1, 15] } });
+    expect(errors.some((e) => /monthDays/i.test(e))).toBe(false);
+  });
+
+  test('out-of-range [0, 32] → monthDays error', () => {
+    const errors = validateTaskInput({ text: 't', recur: { type: 'monthly', monthDays: [0, 32] } });
+    expect(errors.some((e) => /monthDays/i.test(e))).toBe(true);
+  });
+
+  test('non-array monthDays → monthDays error', () => {
+    const errors = validateTaskInput({ text: 't', recur: { type: 'monthly', monthDays: 15 } });
+    expect(errors.some((e) => /monthDays/i.test(e))).toBe(true);
+  });
+
+  test("'first'/'last' literals are valid (scheduler consumes them) — ernie WARN-1", () => {
+    const errors = validateTaskInput({ text: 't', recur: { type: 'monthly', monthDays: ['first', 'last'] } });
+    expect(errors.some((e) => /monthDays/i.test(e))).toBe(false);
+  });
+
+  test("mixed [1, 'last', 15] → no monthDays error", () => {
+    const errors = validateTaskInput({ text: 't', recur: { type: 'monthly', monthDays: [1, 'last', 15] } });
+    expect(errors.some((e) => /monthDays/i.test(e))).toBe(false);
+  });
+
+  test("bad literal ['middle'] → monthDays error", () => {
+    const errors = validateTaskInput({ text: 't', recur: { type: 'monthly', monthDays: ['middle'] } });
+    expect(errors.some((e) => /monthDays/i.test(e))).toBe(true);
+  });
+});
+
+describe('validateTaskInput — recur.timesPerCycle (999.586)', () => {
+  test('valid positive integer 3 → no error', () => {
+    const errors = validateTaskInput({ text: 't', recur: { type: 'weekly', timesPerCycle: 3 } });
+    expect(errors.some((e) => /timesPerCycle/i.test(e))).toBe(false);
+  });
+
+  test('zero → timesPerCycle error', () => {
+    const errors = validateTaskInput({ text: 't', recur: { type: 'weekly', timesPerCycle: 0 } });
+    expect(errors.some((e) => /timesPerCycle/i.test(e))).toBe(true);
+  });
+
+  test('non-integer 2.5 → timesPerCycle error', () => {
+    const errors = validateTaskInput({ text: 't', recur: { type: 'weekly', timesPerCycle: 2.5 } });
+    expect(errors.some((e) => /timesPerCycle/i.test(e))).toBe(true);
+  });
+});
+
+describe('validateTaskInput — dependsOn / location / tools array shape (999.586)', () => {
+  test('valid string arrays → no shape error', () => {
+    const errors = validateTaskInput({ text: 't', dependsOn: ['a', 'b'], location: ['home'], tools: ['phone'] });
+    expect(errors.some((e) => /dependsOn|location|tools/i.test(e))).toBe(false);
+  });
+
+  test('empty arrays are valid (clear the field)', () => {
+    const errors = validateTaskInput({ text: 't', dependsOn: [], location: [], tools: [] });
+    expect(errors.some((e) => /dependsOn|location|tools/i.test(e))).toBe(false);
+  });
+
+  test('dependsOn not an array → error', () => {
+    const errors = validateTaskInput({ text: 't', dependsOn: 'task-1' });
+    expect(errors.some((e) => /dependsOn/i.test(e))).toBe(true);
+  });
+
+  test('location with a non-string element → error', () => {
+    const errors = validateTaskInput({ text: 't', location: ['home', 42] });
+    expect(errors.some((e) => /location/i.test(e))).toBe(true);
+  });
+
+  test('tools with an empty-string element → error', () => {
+    const errors = validateTaskInput({ text: 't', tools: ['phone', '  '] });
+    expect(errors.some((e) => /tools/i.test(e))).toBe(true);
   });
 });
 

@@ -147,6 +147,13 @@ InMemoryTaskRepository.prototype.fetchTaskWithEventIds = function fetchTaskWithE
   return Promise.resolve(this._withEventIds(row));
 };
 
+/** Cheap recurring-state lookup for one task (mirrors KnexTaskRepository.fetchTaskRecurring). */
+InMemoryTaskRepository.prototype.fetchTaskRecurring = function fetchTaskRecurring(id, userId) {
+  var row = this._rows[id];
+  if (!row || row.user_id !== userId) return Promise.resolve(null);
+  return Promise.resolve({ recurring: row.recurring, task_type: row.task_type });
+};
+
 /**
  * Bulk read. `queryBuilder` is intentionally NOT applied to in-memory rows (the
  * double returns the user's full row set; callers that need filtering/ordering
