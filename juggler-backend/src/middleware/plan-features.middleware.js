@@ -107,13 +107,43 @@ async function refreshPlanFeatures() {
 
 // ─── Login reconciliation: enforce limits on stale plan changes ───────
 // Runs at most once per user plan cache refresh (2 min) to catch missed webhooks.
+//
+// _reconciliationPending is the SINGLE-INSTANCE dedupe guard (a per-user "last ran
+// at" map). Under Cloud Run scale-out (>1 instance) this map is per-instance, so two
+// instances could each run enforceDowngradeLimits for the same user in the same
+// window — wasteful and racy. When REDIS_URL is set we add a cross-instance SETNX
+// lock (acquireLock) so only ONE instance reconciles per debounce window; the local
+// map is still consulted first (fast path) and remains the sole guard when Redis is
+// absent or down (fail-soft — a Redis outage falls back to the local guard, never
+// crashes the request). (999.385)
 const _reconciliationPending = new Map();
+const _redis = require('../lib/redis');
+const RECONCILE_LOCK_TTL_SECONDS = Math.ceil(USER_PLAN_CACHE_TTL_MS / 1000); // matches the debounce window
 
 async function reconcileLimitsIfNeeded(userId, planFeatures) {
   const now = Date.now();
   const last = _reconciliationPending.get(userId);
-  if (last && (now - last) < USER_PLAN_CACHE_TTL_MS) return; // debounce
+  if (last && (now - last) < USER_PLAN_CACHE_TTL_MS) return; // local debounce
   _reconciliationPending.set(userId, now);
+
+  // Cross-instance dedupe: when Redis is connected, only the instance that wins the
+  // SETNX lock proceeds. acquireLock returns false (→ skip) if another instance holds
+  // it. When Redis is absent/down it ALSO returns false — so we must NOT treat false as
+  // "another instance won" unconditionally; instead, only gate on the lock when Redis is
+  // actually connected. If Redis is unavailable we rely solely on the local map above.
+  if (_redis.isConnected && _redis.isConnected()) {
+    let lockErrored = false;
+    let gotLock = false;
+    try {
+      gotLock = await _redis.acquireLock('entitlement:reconcile:' + userId, RECONCILE_LOCK_TTL_SECONDS);
+    } catch {
+      lockErrored = true; // fail-soft: a lock error degrades to local-only dedupe
+    }
+    // Redis was connected and the lock call succeeded but DIDN'T grant the lock →
+    // another instance is reconciling this user → skip. If the lock call errored we
+    // fall through and rely on the local map (this instance passed the local debounce).
+    if (!lockErrored && !gotLock) return;
+  }
 
   // Run async — don't block the request
   setImmediate(async () => {

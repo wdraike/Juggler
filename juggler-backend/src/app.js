@@ -113,6 +113,11 @@ app.use('/api/billing-webhooks', express.raw({ type: 'application/json' }), func
 // page / pre-auth) but rate-limited + size-capped + log-injection-sanitized in the route.
 const clientErrorLimiter = require('express-rate-limit')({
   windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false,
+  // Shared counter across Cloud Run instances when Redis is configured (999.451) —
+  // mirrors aiLimiter's maybeRedisStore wiring so the 30/min cap is global, not
+  // per-instance. Falls back to express-rate-limit's in-memory MemoryStore
+  // (single-instance) when REDIS_URL is unset, exactly like aiLimiter.
+  store: maybeRedisStore('jugrl-cerr:'),
 });
 // Shared @raike/lib-error-ingest router (999.454) — single-source with the other services.
 // Log path preserved verbatim from the prior local route: env BROWSER_ERRORS_LOG override, else

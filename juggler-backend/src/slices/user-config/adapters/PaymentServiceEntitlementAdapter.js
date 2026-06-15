@@ -120,7 +120,20 @@ function PaymentServiceEntitlementAdapter(deps) {
   this._fetchPromise = null;
 
   // ── User plan cache state ──
+  // Per-instance Map — preserved as the single-instance fallback AND a local
+  // mirror in front of the shared store. Reads hit it first (fast path, identical
+  // to legacy behavior); writes/invalidations go to both.
   this._userPlanCache = new Map();
+
+  // ── Shared (cross-instance) user-plan cache (999.385) ──────────────────────
+  // Under Cloud Run scale-out the per-instance Map split-brains: a plan cached or
+  // invalidated on instance A is stale on instance B. When REDIS_URL is set we
+  // mirror the user-plan cache into the shared lib/redis store (string key per
+  // userId, JSON {planId,timestamp}, TTL = USER_PLAN_CACHE_TTL_MS) so all
+  // instances see one cache. When Redis is absent/down this layer no-ops (get→null,
+  // set/del→false, all fail-soft) and only the in-memory Map is used — the exact
+  // legacy single-instance behavior. Injectable for tests (mock the redis client).
+  this._sharedCache = d.sharedCache === undefined ? require('../../../lib/redis') : d.sharedCache;
 
   // ── Circuit breaker state (999.374) — SHARED across all 3 cross-service calls ──
   // A payment-service outage otherwise makes EVERY request hang for the full 30s
@@ -149,6 +162,16 @@ PaymentServiceEntitlementAdapter.prototype.constructor = PaymentServiceEntitleme
 /** @returns {string} the slug string ('juggler'). */
 PaymentServiceEntitlementAdapter.prototype._slug = function _slug() {
   return this._productSlug.value;
+};
+
+/**
+ * Shared-cache key for a user's resolved plan (999.385). Slug-scoped so a future
+ * second product never collides. lib/redis prepends its own 'strivers:' keyPrefix.
+ * @param {string} userId
+ * @returns {string}
+ */
+PaymentServiceEntitlementAdapter.prototype._userPlanKey = function _userPlanKey(userId) {
+  return 'entitlement:' + this._slug() + ':userplan:' + userId;
 };
 
 /**
@@ -407,6 +430,70 @@ PaymentServiceEntitlementAdapter.prototype.resolveUserPlanId = function resolveU
     return Promise.resolve(cached.planId);
   }
 
+  // Local Map miss → consult the shared (cross-instance) cache before the HTTP call
+  // (999.385) — but ONLY when the shared store is actually connected. When Redis is
+  // absent/down we MUST fall straight through to the breaker SYNCHRONOUSLY (no extra
+  // microtask hop): the breaker's half-open atomicity depends on two same-tick callers
+  // both reaching _breakerAllowsCall before either awaits. Adding a Promise hop on the
+  // legacy/no-Redis path would break that (and is needless work). So: skip the shared
+  // read entirely unless the store reports connected.
+  if (!this._sharedCacheConnected()) {
+    return self._fetchUserPlanIdViaBreaker(userId);
+  }
+
+  // Shared store is live → consult it. On a shared hit we warm the local Map (so
+  // subsequent same-instance reads stay on the fast path) and return without an HTTP
+  // round-trip; on a miss/outage we fall through to the breaker fetch.
+  return self._readSharedUserPlan(userId).then(function (shared) {
+    if (shared && (Date.now() - shared.timestamp) < USER_PLAN_CACHE_TTL_MS) {
+      self._userPlanCache.set(userId, shared);
+      return shared.planId;
+    }
+    return self._fetchUserPlanIdViaBreaker(userId);
+  });
+};
+
+/**
+ * True when the shared cache is present AND reports a live connection. lib/redis
+ * exposes isConnected(); a sharedCache without that method (e.g. an always-on test
+ * double) is treated as connected so injected mocks still exercise the shared path.
+ * (999.385)
+ * @returns {boolean}
+ */
+PaymentServiceEntitlementAdapter.prototype._sharedCacheConnected = function _sharedCacheConnected() {
+  var sc = this._sharedCache;
+  if (!sc || typeof sc.get !== 'function') return false;
+  if (typeof sc.isConnected === 'function') return !!sc.isConnected();
+  return true; // injected double without isConnected() → assume usable
+};
+
+/**
+ * Read the shared (cross-instance) user-plan entry. Returns {planId,timestamp} or
+ * null. Fail-soft: any Redis miss/outage/parse issue → null (caller falls back to
+ * the HTTP fetch). lib/redis.get already JSON-parses and swallows errors. (999.385)
+ * @param {string} userId
+ * @returns {Promise<?{planId:string, timestamp:number}>}
+ */
+PaymentServiceEntitlementAdapter.prototype._readSharedUserPlan = function _readSharedUserPlan(userId) {
+  var self = this;
+  if (!this._sharedCache || typeof this._sharedCache.get !== 'function') return Promise.resolve(null);
+  return Promise.resolve()
+    .then(function () { return self._sharedCache.get(self._userPlanKey(userId)); })
+    .then(function (val) {
+      if (val && typeof val.planId !== 'undefined' && typeof val.timestamp === 'number') return val;
+      return null;
+    })
+    .catch(function () { return null; });
+};
+
+/**
+ * Run the breaker-wrapped user-plan fetch (extracted so resolveUserPlanId can defer
+ * to it after the shared-cache check). Preserves the legacy fail-soft null. (999.385)
+ * @param {string} userId
+ * @returns {Promise<?string>}
+ */
+PaymentServiceEntitlementAdapter.prototype._fetchUserPlanIdViaBreaker = function _fetchUserPlanIdViaBreaker(userId) {
+  var self = this;
   // ONE logical cross-service fetch → ONE breaker outcome via _withBreaker (raw HTTP
   // in _fetchUserPlanIdRaw, no breaker accounting). On fast-fail (breaker open within
   // cooldown) return the SAME fail-soft null WITHOUT the HTTP call. A raw error is also
@@ -443,11 +530,44 @@ PaymentServiceEntitlementAdapter.prototype._fetchUserPlanIdRaw = async function 
   // Only cache a TRUTHY planId — don't cache null so a just-subscribed user
   // isn't blocked by a stale null (the W2 pure shouldCacheUserPlan predicate).
   if (entitlementLogic.shouldCacheUserPlan(planId)) {
-    this._userPlanCache.set(userId, { planId: planId, timestamp: Date.now() });
+    var entry = { planId: planId, timestamp: Date.now() };
+    this._userPlanCache.set(userId, entry);
+    // Mirror to the shared cross-instance store (999.385) with the SAME 2-min TTL
+    // as the in-memory expiry. Fire-and-forget + fail-soft — a Redis outage must
+    // not fail the request; the local Map already holds the value.
+    this._writeSharedUserPlan(userId, entry);
   } else {
     this._userPlanCache.delete(userId);
+    this._deleteSharedUserPlan(userId);
   }
   return planId;
+};
+
+/**
+ * Mirror a user-plan entry into the shared store with the same TTL as the in-memory
+ * expiry (999.385). Fire-and-forget; fail-soft (lib/redis.set returns false on outage).
+ * @param {string} userId
+ * @param {{planId:string, timestamp:number}} entry
+ */
+PaymentServiceEntitlementAdapter.prototype._writeSharedUserPlan = function _writeSharedUserPlan(userId, entry) {
+  if (!this._sharedCacheConnected() || typeof this._sharedCache.set !== 'function') return;
+  var ttlSeconds = Math.ceil(USER_PLAN_CACHE_TTL_MS / 1000);
+  try {
+    var p = this._sharedCache.set(this._userPlanKey(userId), entry, ttlSeconds);
+    if (p && typeof p.catch === 'function') p.catch(function () {});
+  } catch { /* fail-soft: shared mirror is best-effort */ }
+};
+
+/**
+ * Delete the shared user-plan entry (999.385). Fire-and-forget; fail-soft.
+ * @param {string} userId
+ */
+PaymentServiceEntitlementAdapter.prototype._deleteSharedUserPlan = function _deleteSharedUserPlan(userId) {
+  if (!this._sharedCacheConnected() || typeof this._sharedCache.del !== 'function') return;
+  try {
+    var p = this._sharedCache.del(this._userPlanKey(userId));
+    if (p && typeof p.catch === 'function') p.catch(function () {});
+  } catch { /* fail-soft */ }
 };
 
 /**
@@ -480,6 +600,10 @@ PaymentServiceEntitlementAdapter.prototype.resolveEntitlement = async function r
  */
 PaymentServiceEntitlementAdapter.prototype.invalidateUserPlan = function invalidateUserPlan(userId) {
   this._userPlanCache.delete(userId);
+  // Webhook-driven invalidation must also drop the SHARED entry (999.385) so a plan
+  // change on one instance invalidates the cache for ALL instances — otherwise a
+  // stale plan survives on every other instance until its 2-min TTL lapses. Fail-soft.
+  this._deleteSharedUserPlan(userId);
 };
 
 module.exports = PaymentServiceEntitlementAdapter;
