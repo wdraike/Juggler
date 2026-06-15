@@ -89,8 +89,8 @@ The following combinations MUST be rejected or prevented:
 | `time_window` with `preferred_time_mins` outside `GRID_START`–`GRID_END` | **Silent fallback** to `when`-tag logic | Inverted window (`windowLo > windowHi`) produces no valid slots. Needs validation. |
 | `reminder` + any scheduling mode section | **UI hides** scheduling controls | Marker checkbox hides entire mode section. |
 | `split=true` + `marker=true` | **UI hides** split controls | Split and marker are mutually exclusive. |
-| `split=true` + `recurring=true` | **UI hides** split controls for recurring | Scheduler supports it (`placeSplitInline`), but UI does not expose it. API/MCP can set it. |
-| `recurring=true` + `dependsOn` | **Backend strips** dependencies at write time | Dependencies on recurring templates make no sense (instances span different days). |
+| `split=true` + `recurring=true` | **UI exposes** split controls for recurring | Scheduler supports it; UI toggle must be visible. Recurring splits are time-boxed (see §6). |
+| `recurring=true` + `dependsOn` | **Backend rejects with 400** on create/update | Dependencies on recurring templates are invalid (instances span different days). Enforced at API, MCP, and UI layers. |
 
 **Source:** `TASK-CONFIGURATION-MATRIX.md:93-106`, `WHEN-MODE-REDESIGN.md:119-122`
 
@@ -347,6 +347,25 @@ TPC is an **overlay** on daily/weekly/biweekly/monthly types. It is active when
 
 All split chunks sharing the same `occurrence_ordinal` get the same status update
 when one chunk is marked done/skip/cancel.
+
+### 6.5 Recurring Split Time-Boxing
+
+Recurring splits MUST complete all chunks before the next recurrence interval starts.
+The time-box boundary is the recurrence cycle:
+
+| Recurrence Type | Split Window | Boundary |
+|-----------------|-------------|----------|
+| `daily` | Occurrence date only | Same day |
+| `weekly` | 7-day window from occurrence date | Before next week's instance |
+| `biweekly` | 14-day window from occurrence date | Before next biweekly instance |
+| `monthly` | ~30-day window from occurrence date | Before next month's instance |
+| `interval` (every N days) | N-day window from occurrence date | Before next interval instance |
+| `rolling` | From `rollingAnchor` to `rollingAnchor + interval` | Before next rolling instance |
+
+If all chunks cannot fit within the time-box window, the task is flagged
+`_unplacedReason='recurring_split_overflow'` and placed on the unscheduled list.
+
+**Source:** `juggler/docs/REQUIREMENTS.md` R35 (2026-06-15 update)
 
 **Source:** `runSchedule.js:577-825`, `unifiedScheduleV2.js:1093-1169`, `reconcile-splits.js:32-50`, `UpdateTaskStatus.js:200-213`
 
@@ -654,30 +673,34 @@ All triggers go through `enqueueScheduleRun(userId, source)` from `scheduleQueue
 | C5 | **TASK-CONFIGURATION-MATRIX.md `rigid` column** shows `rigid=true` for `time_window + exact` recurring, but WHEN-MODE-REDESIGN says `rigid` is removed | TASK-CONFIGURATION-MATRIX vs WHEN-MODE-REDESIGN | `rigid` is derived in the scheduler from `timeFlex=0` but is no longer a stored DB column. The matrix should clarify this is a derived value, not a persisted field. |
 | C6 | **SCHEDULER.md says `date_pinned` sets `earliestIdx=latestIdx=anchorDate`**, but v2 uses `placement_mode='fixed'` for this | SCHEDULER.md (v1) vs v2 code | v2 code wins. `placement_mode='fixed'` is the sole signal. `date_pinned` is a UI concern only. |
 
-### 13.2 Missing Requirements (Not in REQUIREMENTS.md)
+### 13.2 Missing Requirements — RESOLVED (2026-06-15 audit)
 
-| # | Missing Requirement | Proposed ID | Priority |
-|---|--------------------|-------------|----------|
-| M1 | Recurring instance lifecycle rules (done/skip/cancel/missed/delete per recurrence type) | R32 | High |
-| M2 | Rolling re-anchoring rules (mutable anchor, backfill, stale guard) | R33 | High |
-| M3 | TimesPerCycle (TPC) rules (fill policies, spacing guard, flexible roaming) | R34 | High |
-| M4 | Split task containment rules (day boundaries, recurring vs non-recurring, partial splits) | R35 | High |
-| M5 | Deadline chain backpropagation and its limitations | R36 | Medium |
-| M6 | `earliest_start_at` (renamed from `start_after_at`) validation and impossible-window detection | R37 | Medium |
-| M7 | Weather fail-open behavior and detection parity requirement | R38 | Medium |
-| M8 | Time block → location → tool → weather resolution chain | R39 | Medium |
-| M9 | FlexWhen retry rules and `_whenRelaxed` flag semantics | R40 | Low |
-| M10 | Reschedule trigger inventory and debounce/rate-limit rules | R41 | Low |
+All 10 missing requirements (M1-M10) are now R32-R41 in `juggler/docs/REQUIREMENTS.md` and in the Scooter KG (brain facts 59669-59678). This section is retained for traceability only.
 
-### 13.3 Weak Requirements (Need Strengthening)
+|| # | Missing Requirement | Proposed ID | Priority | Status |
+||---|--------------------|-------------|----------|--------|
+|| M1 | Recurring instance lifecycle rules | R32 | High | ✅ Added |
+|| M2 | Rolling re-anchoring rules | R33 | High | ✅ Added |
+|| M3 | TimesPerCycle (TPC) rules | R34 | High | ✅ Added |
+|| M4 | Split task containment rules | R35 | High | ✅ Added |
+|| M5 | Deadline chain backpropagation | R36 | Medium | ✅ Added |
+|| M6 | `earliest_start_at` validation | R37 | Medium | ✅ Added |
+|| M7 | Weather fail-open behavior | R38 | Medium | ✅ Added (now fail-closed per 999.546) |
+|| M8 | Time block → location → tool → weather chain | R39 | Medium | ✅ Added |
+|| M9 | FlexWhen retry rules | R40 | Low | ✅ Added |
+|| M10 | Reschedule trigger inventory | R41 | Low | ✅ Added |
 
-| # | Requirement | Gap | Proposed Fix |
-|---|-------------|-----|-------------|
-| W1 | R11 (scheduler) | Does not mention placement modes, flexWhen, weather constraints, or the 4-level fallback ladder | Expand acceptance criteria |
-| W2 | R18 (recurring) | Does not mention rolling recurrence, TPC, fill policies, or spacing guard | Expand |
-| W3 | R19 (splits) | Does not mention day-containment rules, recurring vs non-recurring differences, or partial splits | Expand |
-| W4 | R25 (weather) | Does not mention fail-open behavior or the hard-constraint rule | Expand |
-| W5 | R26 (fixed/pinned) | Does not distinguish `isFixedWhen` (non-recurring, never displaced) from `isRigid` (recurring, can be force-placed) | Expand |
+### 13.3 Weak Requirements — RESOLVED (2026-06-15 audit)
+
+All 5 weak requirements (W1-W5) have been strengthened in `juggler/docs/REQUIREMENTS.md` and in the Scooter KG. This section is retained for traceability only.
+
+|| # | Requirement | Gap | Status |
+||---|-------------|-----|--------|
+|| W1 | R11 (scheduler) | Did not mention placement modes, flexWhen, weather, fallback ladder | ✅ Strengthened |
+|| W2 | R18 (recurring) | Did not mention rolling, TPC, fill policies, spacing guard | ✅ Strengthened |
+|| W3 | R19 (splits) | Did not mention day-containment, recurring vs non-recurring, partial splits | ✅ Strengthened |
+|| W4 | R25 (weather) | Did not mention fail-open behavior or hard-constraint rule | ✅ Strengthened |
+|| W5 | R26 (fixed/pinned) | Did not distinguish isFixedWhen from isRigid | ✅ Strengthened |
 
 ### 13.4 Open Issues (Need Decision)
 

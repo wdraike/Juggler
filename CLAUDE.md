@@ -16,7 +16,7 @@ npm run lint && npm test              # Quality gate
 
 ## Scheduler — Critical Architecture
 
-**Core principle:** Schedule tasks most-constrained → least-constrained. Never reverse this.
+**Core principle:** See R11 for the complete scheduling algorithm (slack-sorted single-pass with 6 placement modes, 7 phases, 4-level fallback ladder).
 
 **Task type terminology** (use these exact terms):
 | Term | Meaning |
@@ -26,14 +26,7 @@ npm run lint && npm test              # Quality gate
 | `recurring instance` | One occurrence of a repeating task |
 | `split chunk` | A piece of a task split across time blocks |
 
-**Severity hierarchy:** Deadlines > dependencies > preferences. A task with a hard deadline beats one with only a soft preference constraint.
-
-**Recurring tasks:** Instances must be scheduled on the **same day** as their recurrence rule fires. Never place a recurring instance on a different day.
-
-**Event queue pattern:**
-- Scheduler is triggered by user/MCP mutations only — never self-triggers
-- Only write tasks that actually changed (delta writes, not full rebuilds)
-- No cascading scheduler calls from within the scheduler
+**Recurring tasks:** See R32 (instance lifecycle) and R33 (rolling anchor) for complete behavior rules. Recurring instances are day-locked to their occurrence date when that date is today or future; past occurrences may be placed today at the latest available slot.
 
 **⚠️ Caution:** Scheduler bugs cascade and corrupt all task data. Test exhaustively before deploying any scheduler change. The `unifiedScheduleV2.js` is the main entry point.
 
@@ -70,7 +63,7 @@ Integration test credentials go in `juggler-backend/.env.test` (gitignored).
 See `juggler-backend/.env.test.example` for required vars.
 
 ## AI Enrichment
-AI enrichment (titles, descriptions, etc.) is **shared globally** — one enriched version for all users. User overrides stay per-user and are never shared.
+See R15 for AI feature requirements (natural-language commands, emoji/icon suggestions, bulk project creation).
 
 ## MCP Server
 `juggler-mcp/` exposes juggler tasks to external MCP clients (e.g. ClimbRS). Changes here affect the ClimbRS integration.

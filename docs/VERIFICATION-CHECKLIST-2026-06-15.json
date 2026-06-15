@@ -1,0 +1,62 @@
+{
+  "audit_date": "2026-06-15",
+  "service": "juggler",
+  "total_requirements": 38,
+  "verification_method": "3 parallel subagents reading referenced code files",
+  "results": [
+    {"id": "R1", "status": "verified", "domain": "Task Management", "detail": "POST /api/tasks with zod validation, facade wires CreateTask use-case"},
+    {"id": "R2", "status": "verified", "domain": "Task Management", "detail": "5 update pathways: PUT /:id, PUT /:id/status, PUT /:id/re-enable, POST /:id/take-ownership, PUT /batch"},
+    {"id": "R3", "status": "verified", "domain": "Task Management", "detail": "DELETE /:id with 4 branches: ingest-only block, provider-origin block, cascade recurring, soft-skip instance"},
+    {"id": "R4", "status": "verified", "domain": "Task Management", "detail": "Projects: GET/POST/PUT-reorder/PUT-rename/DELETE. ensureProject auto-creates on task create/update"},
+    {"id": "R5", "status": "verified", "domain": "Task Management", "detail": "color VARCHAR(50) in migration, KnexConfigRepository inserts color, route supports color updates"},
+    {"id": "R6", "status": "verified", "domain": "Task Management", "detail": "Full state machine: todo→wip→done/paused/cancelled/disabled. time_remaining column exists, used in scheduler"},
+    {"id": "R7", "status": "verified", "domain": "Calendar Sync", "detail": "3 providers: GCal (connect/callback/disconnect), MSFT (same), Apple (connect/select-calendar/calendars/refresh/disconnect)"},
+    {"id": "R8", "status": "verified", "domain": "Calendar Views", "detail": "8 views: DailyView, WeekView, ThreeDayView, TimelineView, ListView, SCurveView, PriorityView, DependencyView"},
+    {"id": "R9", "status": "verified", "domain": "Calendar Views", "detail": "Drag-and-drop in CalendarGrid, PriorityView, DependencyView. handleGridDrop via useDragDrop hook"},
+    {"id": "R10", "status": "verified", "domain": "Task Management", "detail": "dependsOn field, dependency gating in scheduler, chain deadline backprop, DependencyView graph. fauxDeadline→effective deadline (corrected)"},
+    {"id": "R11", "status": "verified", "domain": "Scheduler", "detail": "Slack-sorted single-pass, 6 placement modes, 7 phases, 4-level fallback ladder, delta writes in runSchedule.js"},
+    {"id": "R12", "status": "verified", "domain": "Reporting", "detail": "No implementation — correctly marked planned. completed_at + dur fields exist in schema"},
+    {"id": "R13", "status": "verified", "domain": "Reporting", "detail": "No implementation — correctly marked planned"},
+    {"id": "R14", "status": "verified", "domain": "Reporting", "detail": "No implementation — correctly marked planned. capacityInRange exists internally"},
+    {"id": "R15", "status": "verified", "domain": "AI", "detail": "NL commands + emoji/icon suggestions implemented. Bulk project creation flag exists but not implemented. Tests: ai-command.test.js + 5 aiEnrichment unit tests"},
+    {"id": "R16", "status": "verified", "domain": "Auth", "detail": "RS256 JWKS via jose library. 401 on invalid/missing, 403 on wrong app. authenticateJWT on all routes"},
+    {"id": "R17", "status": "verified", "domain": "MCP", "detail": "20 tools confirmed. No dedicated MCP-server unit tests"},
+    {"id": "R18", "status": "verified", "domain": "Scheduler", "detail": "6 recurrence types, RECUR_EXPAND_DAYS=14, rolling_anchor, TPC fillPolicy, entity limit checkTaskOrRecurringLimit"},
+    {"id": "R19", "status": "verified", "domain": "Scheduler", "detail": "Split chunks pre-inserted as DB rows, runt merge, day-lock for rigid, cross-day for non-recurring, travel buffers on first/last ordinal"},
+    {"id": "R20", "status": "verified", "domain": "Task Management", "detail": "GET/PUT /api/locations, travel buffers via locationHelpers, entity limit checkLocationLimit"},
+    {"id": "R21", "status": "verified", "domain": "Task Management", "detail": "PUT /api/config/:key for time_blocks, SettingsPanel UnifiedTemplateTab, checkScheduleTemplateLimit"},
+    {"id": "R22", "status": "verified", "domain": "Data", "detail": "Export: GET /api/data/export (feature-gated). Import: POST /api/data/import with merge/replace modes, Zod schema validation"},
+    {"id": "R23", "status": "verified", "domain": "Task Management", "detail": "Batch create ≤500, batch update ≤2000, deadlock retry with MAX_RETRIES=3, auto-project creation"},
+    {"id": "R24", "status": "verified", "domain": "Billing", "detail": "Feature gates, entity limits, plan resolution, downgrade enforcement, my-plan endpoint, billing webhooks with HMAC-SHA256"},
+    {"id": "R25", "status": "verified", "domain": "Weather", "detail": "Geocode, reverse-geocode, forecasts, ingest. WeatherBadge + WeatherSection frontend. 7 test files confirmed"},
+    {"id": "R26", "status": "verified", "domain": "Scheduler", "detail": "Fixed mode non-recurring only (pm===FIXED && !t.recurring). Calendar lock via WhenSection. takeOwnership route exists"},
+    {"id": "R27", "status": "verified", "domain": "Task Management", "detail": "Tools + toolMatrix via config routes. SettingsPanel ToolsTab + MatrixTab. canTaskRun in locationHelpers"},
+    {"id": "R28", "status": "verified", "domain": "Admin", "detail": "POST /start (admin-gated), GET /targets, GET /log, POST /stop. 5 authz guards. ImpersonationPage + Banner"},
+    {"id": "R29", "status": "verified", "domain": "Task Management", "detail": "GET /disabled, PUT /:id/re-enable with entity-limit checks. DisabledItemsPanel with re-enable/delete buttons"},
+    {"id": "R30", "status": "verified", "domain": "Calendar Sync", "detail": "POST /:id/take-ownership detaches ledger, clears event IDs, recomputes when, sets placement_mode=anytime"},
+    {"id": "R31", "status": "verified", "domain": "Task Management", "detail": "GET/PUT /api/config/:key. SettingsPanel PreferencesTab: timezone, font size, grid zoom, split defaults, schedFloor/Ceiling"},
+    {"id": "R32", "status": "verified", "domain": "Scheduler", "detail": "Full lifecycle: done/skip/cancel/missed/delete. Missed system-only (403 guard). Delete cascade. rolling-anchor updates"},
+    {"id": "R33", "status": "verified", "domain": "Scheduler", "detail": "computeRollingAnchor with stale guard. rc_ materialization. TERMINAL_REQUIRES_SCHEDULE exempt. Backfill from spacing history"},
+    {"id": "R34", "status": "verified", "domain": "Scheduler", "detail": "TPC expansion with target-interval steering. keep/backfill fill policies. Spacing guard minGap with safety valve"},
+    {"id": "R35", "status": "verified", "domain": "Scheduler", "detail": "Reconcile produces deterministic chunk IDs. placeSplitInline with day-lock/cycle-cap. Runt merge. partial_split flag"},
+    {"id": "R36", "status": "verified", "domain": "Scheduler", "detail": "Chain deadline backprop at line 1272-1292. deadlineMisses: [] dead code. No capacity-aware offset (documented limitation)"},
+    {"id": "R37", "status": "discrepancy", "domain": "Scheduler", "detail": "Field still named startAfter/start_after_at (rename not executed). No validation for startAfter > deadline (silently unplaced). Marked partial — accurate"},
+    {"id": "R38", "status": "discrepancy", "domain": "Weather", "detail": "Code is fail-open (weatherOk returns true when data missing). Requirement mandates fail-closed. hasWeatherConstraint duplicated. Unplaced reason is 'weather' not 'weather_unavailable'. Marked partial — accurate. Backlog 999.546"},
+    {"id": "R39", "status": "verified", "domain": "Scheduler", "detail": "5-layer AND constraint chain. 6-level location priority. biz→afternoon alias. preferred-time precedence over when tags"},
+    {"id": "R40", "status": "verified", "domain": "Scheduler", "detail": "flexWhen boolean flag. relaxWhen in eligibleWindows. 4-level ladder includes flexWhen retry. _flexWhenRelaxed flag"},
+    {"id": "R41", "status": "verified", "domain": "Scheduler", "detail": "enqueueScheduleRun with 2s debounce, 10/min/user rate limit. Full trigger inventory confirmed. No cascade. skipScheduler for non-scheduling fields"}
+  ],
+  "summary": {
+    "verified": 36,
+    "discrepancies": 2,
+    "discrepancy_details": [
+      "R37: start_after_at rename not executed; no startAfter>deadline validation (already marked partial)",
+      "R38: code is fail-open, requirement mandates fail-closed (already marked partial, backlog 999.546)"
+    ],
+    "corrections_applied": [
+      "R10: fauxDeadline → effective deadline (concept doesn't exist in code)",
+      "R15: Added note that AI system prompt supports task-level ops only; confirmed test paths exist",
+      "R25: Added missing test file references (data-and-weather.test.js, weather-security-regression.test.js)"
+    ]
+  }
+}

@@ -13,6 +13,7 @@
 - **Calendar sync:** < 30 s p95 per provider.
 - **MCP tool-call:** p95 < 500 ms.
 - **Frontend Core Web Vitals:** LCP < 2.5 s · INP < 200 ms · CLS < 0.1.
+- **API rate limit:** 1000 requests/minute per authenticated user; 100 requests/minute per IP unauthenticated. Headers: `X-RateLimit-Remaining`, `X-RateLimit-Reset`.
 - **Batch operations:** batch create (≤500 tasks) completes within 30 s p95; batch update (≤2000 tasks) completes within 60 s p95.
 - **Data import/replace:** < 60 s for 10k-task dataset; merge mode < 90 s for same.
 
@@ -26,6 +27,8 @@
 | Batch update | p95 < 60 s | ≤2000 tasks | batch endpoint timing | load test | reject oversized batch |
 | Data import (replace) | < 60 s | ≤10k tasks | import endpoint timing | load test | 408 on timeout; no partial write |
 | Data import (merge) | < 90 s | ≤10k tasks | import endpoint timing | load test | 408 on timeout; no partial write |
+| AI command rate limit | 2 req/min per user; 50/day quota | per user | rate-limit middleware | quota exhaustion test | 429 with human-readable error |
+| Scheduler run rate limit | 10/min per user | per user | scheduleQueue debounce | trigger-storm test | debounce to 1 run per 2s window |
 
 ---
 
@@ -71,7 +74,7 @@
 | Cloud SQL | down | 503; no schedule write; alert |
 | MCP client (ClimbRS) | n/a | MCP server degrades independently; task UI unaffected |
 | Payment service (entitlement checks) | unavailable | serve last-known plan features (cached); stale cache ≤5 min; fail-open (allow access) on cache miss to avoid locking users out |
-| Weather API | unavailable | serve stale cache; weather badges show "unavailable"; no impact on scheduling |
+| Weather API | unavailable | fail-closed: weather-constrained tasks not placed (flagged `_unplacedReason='weather_unavailable'`); weather badges show "unavailable"; non-weather-constrained tasks unaffected |
 
 ---
 
