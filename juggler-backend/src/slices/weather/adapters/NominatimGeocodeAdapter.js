@@ -94,8 +94,11 @@ NominatimGeocodeAdapter.prototype.reverseGeocode = async function reverseGeocode
   var p = GeoPoint.from(point);
   // The legacy upstream call uses the RAW lat/lon (not grid-rounded) in the URL;
   // only the cache KEY uses the grid. Preserve that: pass the raw coordinates.
+  // Defense-in-depth: encode the coordinate components the same way
+  // forwardGeocode encodes its query (encodeURIComponent) rather than raw concat.
   var url = constants.NOMINATIM_REVERSE_URL +
-    '?lat=' + p.lat + '&lon=' + p.lon + '&format=json&zoom=10';
+    '?lat=' + encodeURIComponent(p.lat) + '&lon=' + encodeURIComponent(p.lon) +
+    '&format=json&zoom=10';
 
   var resp = await this._fetch(url, {
     headers: { 'User-Agent': constants.NOMINATIM_USER_AGENT }

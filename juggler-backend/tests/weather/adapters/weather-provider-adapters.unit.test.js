@@ -267,6 +267,28 @@ describe('NominatimGeocodeAdapter — reverse geocode (B3)', function () {
     expect(name).toBe('Somewhere, Remote, Country');
   });
 
+  test('999.315: reverse-geocode URL encodes lat/lon params (defense-in-depth, parity with forwardGeocode)', async function () {
+    var calls = [];
+    var fetchImpl = function (url, opts) {
+      calls.push({ url: url, opts: opts });
+      return Promise.resolve(okResponse({ address: { city: 'X', state: 'Y' }, display_name: 'X, Y' }));
+    };
+    var adapter = new NominatimGeocodeAdapter({ fetchImpl: fetchImpl });
+    // GeoPoint stores lat/lon raw (numbers OR strings). A string carrying a
+    // character encodeURIComponent escapes proves the components are encoded
+    // (raw concat would inject it unescaped into the query string).
+    await adapter.reverseGeocode(new GeoPoint('1 & 2', '3 & 4'));
+
+    // Encoded forms present; raw (unescaped) special chars absent from the query.
+    expect(calls[0].url).toContain('lat=' + encodeURIComponent('1 & 2'));
+    expect(calls[0].url).toContain('lon=' + encodeURIComponent('3 & 4'));
+    expect(calls[0].url).not.toContain('lat=1 & 2');
+    expect(calls[0].url).not.toContain('lon=3 & 4');
+    // Other params still intact.
+    expect(calls[0].url).toContain('format=json');
+    expect(calls[0].url).toContain('zoom=10');
+  });
+
   test('B6: reverse geocode also aborts + rejects on a hanging upstream', async function () {
     var hanging = function () { return new Promise(function () {}); };
     var adapter = new NominatimGeocodeAdapter({ fetchImpl: hanging, timeoutMs: 50 });

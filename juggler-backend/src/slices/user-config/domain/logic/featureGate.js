@@ -125,7 +125,9 @@ function resolveUsageLimit(planFeatures, limitKey) {
     // ?? semantics: fall through to the bare key only when the `limits.<key>`
     // path is null/undefined (matches `?? getNestedValue(planFeatures, limitKey)`).
     var bare = FeatureKey.resolvePath(planFeatures, limitKey);
-    if (limit === undefined || limit === null) limit = bare;
+    // We are already inside the `limit === undefined || limit === null` guard and
+    // nothing mutates `limit` in between, so the bare key always applies here.
+    limit = bare;
   }
   return { limit: limit, isUnlimited: EntityLimit.isUsageUnlimited(limit) };
 }

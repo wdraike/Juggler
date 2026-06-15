@@ -129,13 +129,24 @@ app.use('/api/client-errors', clientErrorLimiter, express.json({ limit: '16kb' }
 app.use(bodyParser.json({ limit: '1mb' }));
 app.use(bodyParser.urlencoded({ extended: true }));
 // NOTE: GET /api/events accepts JWT via ?token= query param (EventSource limitation).
-// In dev, morgan logs the full URL including ?token=. This is acceptable in local dev
-// but ensure production log export destinations are secure.
-app.use(morgan('dev', {
+// Other endpoints may also carry a ?token= query string; logging the raw URL would
+// leak the JWT into request logs. Redact the `token` query value for ALL paths while
+// keeping the log line (mask, don't drop). Exported for unit testing.
+function redactTokenInUrl(url) {
+  if (typeof url !== 'string') return url;
+  return url.replace(/([?&]token=)[^&#]*/gi, '$1[REDACTED]');
+}
+// Custom morgan token: same as :url but with the token query value masked.
+morgan.token('url-redacted', function(req) {
+  return redactTokenInUrl(req.originalUrl || req.url);
+});
+// Mirror morgan's 'dev' format, substituting the redacted URL for :url.
+app.use(morgan(':method :url-redacted :status :response-time ms - :res[content-length]', {
   skip: function(req) {
     return req.path === '/api/events' && req.query.token;
   }
 }));
+app.set('redactTokenInUrl', redactTokenInUrl);
 
 // Sanitize error responses in production
 if (process.env.NODE_ENV === 'production') {

@@ -52,6 +52,14 @@ InMemoryCacheAdapter.prototype.get = function get(key) {
 
 /** @param {string} key @param {*} value @param {number} [ttlSeconds] @returns {Promise<boolean>} */
 InMemoryCacheAdapter.prototype.set = function set(key, value, ttlSeconds) {
+  // JSON.stringify(undefined) yields JS `undefined` (not a string); a later
+  // JSON.parse(undefined) throws SyntaxError. Treat an undefined value as a
+  // no-store (cache miss), so a subsequent get() returns null cleanly — the
+  // same way the adapter already represents a miss (entry absent -> null).
+  if (value === undefined) {
+    this._store.delete(key);
+    return Promise.resolve(true);
+  }
   var json = JSON.stringify(value);
   // ttlSeconds truthy => SETEX-equivalent; falsy/omitted => no expiry (C-2),
   // matching lib/redis's `if (ttlSeconds)` branch exactly.

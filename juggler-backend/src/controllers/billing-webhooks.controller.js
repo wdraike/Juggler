@@ -76,7 +76,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
               .where('user_id', userId)
               .whereIn('task_id', allDisabledIds)
               .where('status', 'active')
-              .update({ status: 'deleted_local', task_id: null, synced_at: getDb().fn.now() })
+              .update({ status: 'deleted_local', task_id: null, synced_at: now })
               .catch(function(err) { logger.error("[silent-catch]", err.message); });
           }
 
@@ -141,7 +141,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
             .where('user_id', userId)
             .whereIn('task_id', taskIds)
             .where('status', 'active')
-            .update({ status: 'deleted_local', task_id: null, synced_at: getDb().fn.now() })
+            .update({ status: 'deleted_local', task_id: null, synced_at: now })
             .catch(function(err) { logger.error("[silent-catch]", err.message); });
 
           disabledTasks = taskIds.length;
