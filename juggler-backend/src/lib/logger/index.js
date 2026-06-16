@@ -406,8 +406,31 @@ module.exports = {
   
   // Convenience exports - pre-configured loggers per slice
   loggers,
-  
-  // Individual loggers for direct destructuring
+
+  // ── Individual loggers for direct destructuring ──────────────────────────
+  //
+  // CONVENTION (two-place rule — READ BEFORE ADDING A LOGGER):
+  //   A logger is usable two ways, and the two are NOT linked automatically:
+  //     1. via the `loggers` map:           const { loggers } = require('...'); loggers.fooBar
+  //     2. via a top-level `*Logger` export: const { fooBarLogger } = require('...');
+  //   Adding an entry to the `loggers` object above does NOT create the
+  //   top-level `fooBarLogger` export. Each consumer-destructured `*Logger`
+  //   MUST have a matching `fooBarLogger: loggers.fooBar` line in THIS block.
+  //
+  // FAILURE MODE if you forget:
+  //   `const { fooBarLogger } = require('../lib/logger')` resolves to `undefined`,
+  //   so the first `fooBarLogger.warn(...)` / `.error(...)` throws
+  //   "Cannot read properties of undefined (reading 'warn')" — a runtime crash on
+  //   the logging line, often on an error/retry path that is rarely exercised.
+  //   This recurring crash class produced clusters W5/W7/W8 and 999.454
+  //   (POST /api/schedule/run crash via usage-reporter.js → libUsageReporterLogger).
+  //
+  // CHECKLIST when adding `loggers.fooBar`:
+  //   • if any module does `const { fooBarLogger } = require('.../logger')`,
+  //     add `fooBarLogger: loggers.fooBar` below;
+  //   • prefer the `loggers.fooBar` form in new code (no top-level export needed);
+  //   • `tests/unit/lib/logger.test.js` asserts these exports — keep it in sync.
+  // ─────────────────────────────────────────────────────────────────────────
   schedulerLogger: loggers.scheduler,
   schedulerRunLogger: loggers.schedulerRun,
   schedulerUnifiedLogger: loggers.schedulerUnified,
