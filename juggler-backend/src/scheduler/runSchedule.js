@@ -1639,16 +1639,44 @@ async function runScheduleAndPersist(userId, _retries, options) {
       if (t.taskType === 'recurring_template') return;
       var st = statuses[t.id] || '';
       if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'pause' || st === 'disabled') return;
-      if (!t.date || t.date === 'TBD') return;
-      var td = parseDate(t.date);
+
+      // PATH B fix (BUG-142): Hoist rawRowPast so we can use the DB `date` column
+      // as a fallback when t.date is null. rowToTask only sets t.date from
+      // utcToLocal(scheduled_at) — when scheduled_at=NULL (never placed), t.date
+      // is null even if the DB row's `date` column holds the intended calendar day.
+      var rawRowPast = rawRowById[t.id];
+      if (!rawRowPast) return;  // not a real DB task
+
+      // Use the raw DB row's `date` column as the authoritative calendar day for
+      // auto-miss decisions when the instance was never placed (scheduled_at=NULL).
+      // Two cases this corrects:
+      //   (1) t.date=null: rowToTask only derives date from utcToLocal(scheduled_at);
+      //       when scheduled_at=NULL, t.date is null even though rawRowPast.date is set.
+      //   (2) t.date=future: the reconciler's occurrenceMove may have overwritten t.date
+      //       to a new desired date. An instance that was NEVER placed on its original
+      //       past day must still become 'missed' — the original date is authoritative.
+      // When scheduled_at IS set, t.date (derived from it) is trustworthy; use it.
+      var effectiveDate = t.date;
+      if (t.recurring && rawRowPast.scheduled_at == null && rawRowPast.date) {
+        effectiveDate = isoToDateKey(String(rawRowPast.date).split('T')[0]);
+      }
+      if (!effectiveDate || effectiveDate === 'TBD') return;
+
+      var td = parseDate(effectiveDate);
       if (!td || td >= today) return;  // not past
       // Already handled by placement persistence above
       if (placementByTaskId[t.id]) return;
-      // Already marked unscheduled in Phase 8 — don't overwrite with midnight
-      if (unplacedIds[t.id]) return;
-
-      var rawRowPast = rawRowById[t.id];
-      if (!rawRowPast) return;  // not a real DB task
+      // PATH C fix (BUG-142): The unplacedIds guard prevents Plan C from auto-missing
+      // instances the scheduler tried this run. For a recurring instance that was NEVER
+      // placed (scheduled_at=NULL) and whose day is definitively past, this guard must
+      // not block auto-miss — the instance is stuck and must become 'missed'.
+      // All other unplaced tasks (non-recurring, future/today, previously placed)
+      // still skip through here as before.
+      if (unplacedIds[t.id]) {
+        if (!t.recurring || rawRowPast.scheduled_at != null) return;
+        // Recurring + never-placed + definitively past: fall through.
+        // The timeFlex window check below makes the final call.
+      }
 
       // Fixed tasks are user-anchored — never move them, even if past.
       if (t.placementMode === PLACEMENT_MODES.FIXED) return;
@@ -1666,9 +1694,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
         var windowClose = computeWindowCloseUtc(t, today, TIMEZONE);
         // scheduled_at must be non-null for terminal statuses (DB CHECK constraint).
         // For instances that were never placed (no scheduledAt), fall back to midnight
-        // of the task's intended date — it's when the occurrence was supposed to happen.
+        // of the occurrence's intended date — it's when the day was supposed to happen.
         var missedAt = windowClose
-          || localToUtc(t.date, '12:00 AM', TIMEZONE)
+          || localToUtc(effectiveDate, '12:00 AM', TIMEZONE)
           || _runScheduleCommand.clockNow();
         pendingUpdates.push({
           id: t.id,
@@ -1676,14 +1704,15 @@ async function runScheduleAndPersist(userId, _retries, options) {
             status: 'missed',
             scheduled_at: missedAt,
             completed_at: missedAt,
+            unscheduled: null,
             updated_at: _runScheduleCommand.clockNow()
           }
         });
         updatedTasks.push({
           id: t.id,
           text: t.text,
-          from: t.date,
-          to: t.date,
+          from: effectiveDate,
+          to: effectiveDate,
           patch: { status: 'missed' }
         });
       } else {

@@ -1145,3 +1145,520 @@ describe('BUG-700 regression: PATH B must never write overdue=1 for floating tas
     expect(row.overdue).toBe(0); // must stay 0: !original.deadline guard at :1520 covers chain-members
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// BUG-142 characterization / RED tests
+//
+// Traceability: .planning/kermit/jug-recur-instances-stuck/TRACEABILITY.md BUG-142
+//
+// DECIDED BEHAVIOR (user decision 2026-06-16, brain #72164):
+//   AC1: A RECURRING instance for a day that has already passed, never placed
+//        (unscheduled=1, scheduled_at=NULL, status=''), OUTSIDE its timeFlex window
+//        → after a scheduler run its status becomes 'missed' (with non-null
+//        scheduled_at/completed_at, satisfying the DB CHECK constraint).
+//
+//   AC2: A RECURRING instance for TODAY or a FUTURE day, currently unplaceable
+//        → stays status='' + unscheduled=1; NOT 'missed'. The scheduler must NOT
+//        prematurely auto-miss a not-yet-past instance.
+//
+//   AC3: The presence of a stuck/missed past recurring instance does NOT prevent
+//        OTHER placeable tasks from being scheduled in the same run.
+//
+//   AC4: Non-recurring past-dated tasks still roll forward to today (existing
+//        behavior); recurring instances are NOT rolled forward (no roll-forward,
+//        per SCHEDULER.md). This pins existing correct behavior around AC1.
+//
+// ROOT CAUSE ANALYSIS (two code-traced paths, both produce the same failure):
+//
+//   PATH A — reconcile deletion (primary failure for date=NULL instances):
+//     runSchedule.js:844-852 — `toDeleteIds` includes any existingPendingId
+//     whose id is NOT in desiredIds AND whose row.date is not beyond expandEnd.
+//     A never-placed instance has row.date=NULL → the `rowDate > expandEnd` guard
+//     (line 847-850) does not fire → instance is in toDeleteIds → DELETED before
+//     Plan C runs. The instance is removed from the DB; status never becomes 'missed'.
+//     Evidence: buildExistingGroups(:78) only includes groups with `g.dateObj`;
+//     date=NULL → g.dateObj=null → excluded from `remaining` → no match possible →
+//     falls through to toDeleteIds.
+//
+//   PATH B — rowToTask date=null skip (for date-set instances that survive PATH A):
+//     A never-placed instance with scheduled_at=NULL → rowToTask (taskMappers.js:188)
+//     only sets `date` from `utcToLocal(row.scheduled_at, tz)` — when scheduled_at
+//     is NULL, date stays null. Plan C guard (runSchedule.js:1642):
+//       `if (!t.date || t.date === 'TBD') return;`
+//     This returns early, skipping the auto-miss logic entirely.
+//
+//   PATH C — unplacedIds skip (for instances the scheduler tries to place but fails):
+//     If the scheduler does reach the instance and puts it in result.unplaced
+//     (runSchedule.js:1603-1604), the guard at line 1648:
+//       `if (unplacedIds[t.id]) return;`
+//     also skips Plan C for that instance.
+//
+// STATUS BEFORE FIX:
+//   AC1: RED — never-placed past recurring instance is deleted (PATH A) or
+//              skipped (PATH B/C) — never auto-missed.
+//   AC2: GREEN — today/future instances with unscheduled=1 stay pending.
+//   AC3: GREEN — other tasks are placed independently.
+//   AC4: GREEN — non-recurring tasks roll forward; pinned here to guard regression.
+//
+// WHAT BERT MUST FIX (to make AC1 GREEN):
+//   The fix must intercept BEFORE the reconcile deletion (PATH A) or add a
+//   parallel sweep: when a pending recurring instance's `date` is in the past
+//   and outside timeFlex, mark it 'missed' (with scheduled_at fallback to
+//   midnight of that date) BEFORE the reconcile deletes it. Alternatively,
+//   the reconcile `toDeleteIds` filter must exclude past instances that should
+//   be auto-missed rather than silently deleted.
+//   Plan C in runSchedule.js:1642 also needs: fall back to `row.date` from the
+//   DB when `t.date` is null (scheduled_at=NULL) to avoid the PATH B skip.
+//
+// ═══════════════════════════════════════════════════════════════
+
+describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () => {
+  // A fixed past date used across all BUG-142 tests.
+  // Must be far enough in the past that timeFlex=0 is clearly outside the window.
+  var PAST_DATE_KEY = '2026-06-01';       // local-tz calendar key (YYYY-MM-DD)
+  var PAST_DATE_UTC = '2026-06-01 00:00:00'; // midnight UTC approximation for scheduled_at
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BUG-142-AC1 (ACCEPTED LEGACY CLEANUP — Oscar ruling 2026-06-16):
+  //
+  // A RECURRING instance with `date=NULL` and `scheduled_at=NULL` is an
+  // ANOMALOUS / LEGACY state. Modern Phase 1 pre-insert (expandRecurring)
+  // always writes a non-null occurrence date; date=NULL rows only arise from
+  // old code that pre-dates that invariant.
+  //
+  // The reconciler's toDeleteIds path (runSchedule.js:844-852) DELETES these
+  // rows because:
+  //   row.date=NULL → the `if (row && row.date)` grandfather guard is falsy
+  //   → no match in `desiredIds` → toDeleteIds includes the id → DELETE.
+  //
+  // Oscar ruling: this deletion is ACCEPTABLE orphan cleanup, NOT the
+  // 999.142 bug. The bug (PATH B) is a date-SET instance that survived the
+  // reconciler but was skipped by Plan C — fixed by bert's rawRowPast
+  // date-fallback (Plan C now uses rawRowPast.date when scheduled_at=NULL).
+  //
+  // This test PINS the accepted behavior: a date=NULL recurring instance is
+  // deleted by the reconciler after a scheduler run. It must NOT be treated
+  // as a test failure — deletion here is the correct/expected outcome.
+  //
+  // NOTE: if a future leg wants to rescue date=NULL orphans (e.g. by writing
+  // them to 'missed' rather than deleting them), that is a new backlog item,
+  // not a fix to 999.142. Oscar should backlog that if desired.
+  // ─────────────────────────────────────────────────────────────────────────
+  test('AC1 (ACCEPTED LEGACY): date=NULL recurring instance is cleaned up (deleted) by the reconciler — not the 999.142 bug', async () => {
+    if (!available) return;
+
+    // Template with recur_end in the past → expandRecurring generates NO future
+    // desired occurrences → the instance has no match in desiredIds.
+    await db('task_masters').insert({
+      id: 'b142-tmpl-ac1',
+      user_id: USER_ID,
+      text: 'BUG-142 AC1 legacy date=NULL recurring',
+      dur: 30,
+      status: '',
+      recurring: 1,
+      recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU' }),
+      recur_start: '2026-06-01',   // anchored in past
+      recur_end: '2026-06-01',     // ended in past → no future desired occurrences
+      time_flex: 0,
+      when: 'morning',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    // LEGACY/ANOMALOUS state: date=NULL + scheduled_at=NULL.
+    // Modern expandRecurring always writes a non-null date; this state only
+    // arises from old code. The reconciler treats this as an unmatched orphan.
+    await db('task_instances').insert({
+      id: 'b142-inst-ac1',
+      master_id: 'b142-tmpl-ac1',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      scheduled_at: null,    // never placed
+      date: null,            // LEGACY: no date column value
+      status: '',
+      unscheduled: 1,
+      overdue: 0,
+      dur: 30,
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    // ASSERTION (AC1 — ACCEPTED LEGACY CLEANUP):
+    // The reconciler deletes a date=NULL pending recurring instance because
+    // it cannot be matched to any desired occurrence (the grandfather guard
+    // at runSchedule.js:847 requires row.date to be non-null). This is
+    // correct orphan cleanup behavior — Oscar ruling 2026-06-16.
+    //
+    // Assert the row is GONE (deletion is the expected outcome here):
+    var row = await db('task_instances').where('id', 'b142-inst-ac1').first();
+    expect(row).toBeUndefined(); // reconciler deleted the orphan — correct
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BUG-142-AC1b (RED on current code — PATH B variant):
+  //
+  // Same scenario as AC1 but with `date` set on the instance row (simulating
+  // a partial-init state where reconcileOccurrences wrote the date column but
+  // the scheduler still failed to find a slot). This instance COULD survive the
+  // reconciler's toDeleteIds filter (since g.dateObj is non-null from row.date)
+  // but then gets moved to a future date via occurrenceMove. Even if it survives,
+  // Plan C skips it because rowToTask returns t.date=null (scheduled_at=NULL
+  // causes taskMappers.js:188 to leave date=null, ignoring row.date).
+  //
+  // This test pins the PATH B / reconcile-move sub-case.
+  // ─────────────────────────────────────────────────────────────────────────
+  test('AC1b (RED): never-placed past recurring instance with date set (scheduled_at=NULL) becomes status=missed', async () => {
+    if (!available) return;
+
+    // Template with a broader recur window so the reconciler CAN generate
+    // desired occurrences and may try to MOVE the past instance to a future date.
+    // This exercises the reconcile-move path (PATH B + occurrenceMove).
+    // The template recurs daily but started in the past; the instance should
+    // still become 'missed' even if the reconciler tries to reuse it for the future.
+    await db('task_masters').insert({
+      id: 'b142-tmpl-ac1b',
+      user_id: USER_ID,
+      text: 'BUG-142 AC1b date-set never-placed',
+      dur: 30,
+      status: '',
+      recurring: 1,
+      recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU' }),
+      recur_start: PAST_DATE_KEY,
+      // No recur_end → generates future desired occurrences; reconciler may move instance
+      time_flex: 0,
+      when: 'morning',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    // Instance has `date` set to the past but `scheduled_at=NULL` (never placed).
+    // buildExistingGroups will see g.dateObj from row.date → includes in `remaining`.
+    // matchOccurrences may match this to a future desired date → occurrenceMove.
+    // In-memory: t.date gets set to future date → Plan C td >= today → skips.
+    // OR if not matched: toDeleteIds → deleted.
+    // Either way: AC1 behavior (status='missed') is not achieved.
+    await db('task_instances').insert({
+      id: 'b142-inst-ac1b',
+      master_id: 'b142-tmpl-ac1b',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      scheduled_at: null,          // NEVER PLACED
+      date: PAST_DATE_KEY,         // date IS set — the partial-init state
+      status: '',
+      unscheduled: 1,
+      overdue: 0,
+      dur: 30,
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    // ASSERTION (AC1b — RED pre-fix):
+    // Either the instance was deleted (PATH A after reconcile moved another one),
+    // or the reconciler moved it to a future date and it's still pending,
+    // or Plan C skipped it (PATH B). None produce status='missed'.
+    //
+    // Post-fix: the past recurring instance with date < today and scheduled_at=NULL
+    // must be status='missed' with non-null scheduled_at.
+    var row = await db('task_instances').where('id', 'b142-inst-ac1b').first();
+
+    if (!row) {
+      // PATH A / reconcile-deletion variant: instance was deleted
+      throw new Error(
+        '[BUG-142-AC1b] FAIL: instance b142-inst-ac1b was DELETED (reconcile moved ' +
+        'it to a future desired slot, then another path removed it, or it went ' +
+        'directly to toDeleteIds). Must be preserved as status=\'missed\'.'
+      );
+    }
+
+    // If the reconciler moved it to a future date → status='', date=future.
+    // If Plan C skipped it → status='' still.
+    // Post-fix: must be 'missed'.
+    expect(row.status).toBe('missed'); // FAILS pre-fix: '' or row moved/deleted
+    expect(row.scheduled_at).not.toBeNull();
+    expect(row.completed_at).not.toBeNull();
+    // WARN-1 pin (bert fix): Plan C must also clear the unscheduled flag so the
+    // terminal missed row is {status:'missed', unscheduled:null/0, scheduled_at:non-null}.
+    // Pre-bert-WARN-1: unscheduled was left as 1 — the row retained its "never-placed"
+    // flag even after becoming terminal. DB null (JS null) or 0 are both falsy.
+    expect(row.unscheduled).toBeFalsy(); // FAILS if WARN-1 fix is reverted
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BUG-142-AC2 (GREEN — must stay GREEN before AND after fix):
+  //
+  // A RECURRING instance for TODAY or a FUTURE day, currently unplaceable
+  // (unscheduled=1), must NOT be auto-missed. The scheduler must leave it
+  // as status='' (pending) so a later run can place it when a slot opens.
+  //
+  // This test pins the "don't prematurely miss future/today instances" constraint.
+  // If the fix over-suppresses (marks all unscheduled recurring instances as
+  // missed regardless of date), this test FAILS.
+  // ─────────────────────────────────────────────────────────────────────────
+  test('AC2 (GREEN guard): today/future unplaceable recurring instance stays pending (NOT missed)', async () => {
+    if (!available) return;
+
+    // Compute tomorrow's date key (YYYY-MM-DD) from the real clock so this
+    // test remains correct as the repo ages.
+    var tomorrow = new Date();
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    var y = tomorrow.getUTCFullYear(), m = tomorrow.getUTCMonth() + 1, d = tomorrow.getUTCDate();
+    var tomorrowKey = y + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
+
+    await db('task_masters').insert({
+      id: 'b142-tmpl-ac2',
+      user_id: USER_ID,
+      text: 'BUG-142 AC2 future unplaceable',
+      dur: 30,
+      status: '',
+      recurring: 1,
+      recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU' }),
+      recur_start: tomorrowKey,
+      // No recur_end — template is ongoing
+      time_flex: 0,
+      when: '_invalid_window_',   // Strategy A: unplaceable (no matching time block)
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    // Instance for TOMORROW — not yet past. The scheduler must NOT mark it missed.
+    await db('task_instances').insert({
+      id: 'b142-inst-ac2',
+      master_id: 'b142-tmpl-ac2',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      scheduled_at: null,
+      date: tomorrowKey,     // future date — NOT past
+      status: '',
+      unscheduled: 1,
+      overdue: 0,
+      dur: 30,
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    // ASSERTION (AC2 GREEN guard): future/today instance must NOT be auto-missed.
+    // The Plan C guard `if (!td || td >= today) return;` (runSchedule.js:1644)
+    // must protect future instances — this must stay GREEN before AND after the fix.
+    var row = await db('task_instances').where('id', 'b142-inst-ac2').first();
+    // Row may or may not exist (reconciler may have replaced with a desired instance)
+    // but if it exists, status must NOT be 'missed'.
+    if (row) {
+      expect(row.status).not.toBe('missed'); // GREEN guard: future instance is never auto-missed
+    }
+    // If the reconciler moved/deleted this instance and replaced with another:
+    // assert NO missed recurring instances exist for this template.
+    var missedForTemplate = await db('task_instances')
+      .where({ user_id: USER_ID, master_id: 'b142-tmpl-ac2', status: 'missed' });
+    expect(missedForTemplate.length).toBe(0); // no instance for this future template should be 'missed'
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BUG-142-AC3 (GREEN guard — must stay GREEN before AND after fix):
+  //
+  // The presence of a stuck/missed past recurring instance does NOT prevent
+  // OTHER placeable tasks from being scheduled in the same scheduler run.
+  // Tests that Plan C / the fix do not cascade and block placement.
+  // ─────────────────────────────────────────────────────────────────────────
+  test('AC3 (GREEN guard): stuck past recurring instance does NOT block other tasks from being placed', async () => {
+    if (!available) return;
+
+    // Stuck past recurring instance (same setup as AC1)
+    await db('task_masters').insert({
+      id: 'b142-tmpl-ac3-stuck',
+      user_id: USER_ID,
+      text: 'BUG-142 AC3 stuck recurring',
+      dur: 30,
+      status: '',
+      recurring: 1,
+      recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU' }),
+      recur_start: PAST_DATE_KEY,
+      recur_end: PAST_DATE_KEY,  // past-ended → no desired occurrences
+      time_flex: 0,
+      when: 'morning',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+    await db('task_instances').insert({
+      id: 'b142-inst-ac3-stuck',
+      master_id: 'b142-tmpl-ac3-stuck',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      scheduled_at: null,
+      date: null,
+      status: '',
+      unscheduled: 1,
+      overdue: 0,
+      dur: 30,
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    // A separate, placeable non-recurring task in the same run.
+    await seedTask({
+      id: 'b142-placeable-ac3',
+      text: 'BUG-142 AC3 placeable task',
+      dur: 30,
+      when: 'morning',
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    // ASSERTION (AC3 GREEN guard): the stuck instance must NOT block the placeable task.
+    var placeableRow = await db('tasks_v').where('id', 'b142-placeable-ac3').first();
+    expect(placeableRow).toBeTruthy();
+    expect(placeableRow.scheduled_at).toBeTruthy(); // placed — stuck instance did not block it
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BUG-142-AC4 (GREEN guard — must stay GREEN before AND after fix):
+  //
+  // Non-recurring past-dated tasks still roll forward to today (existing behavior).
+  // Recurring instances are NOT rolled forward — no roll-forward per SCHEDULER.md.
+  // This pins the roll-forward behavior for non-recurring tasks alongside the
+  // recurring auto-miss fix so the fix cannot accidentally break it.
+  // ─────────────────────────────────────────────────────────────────────────
+  test('AC4 (GREEN guard): non-recurring past-dated task rolls forward to today; NOT a recurring instance', async () => {
+    if (!available) return;
+
+    // Non-recurring task with a past scheduled_at — the scheduler should
+    // roll its scheduled_at forward to today (Plan C non-recurring branch,
+    // runSchedule.js:1689-1697: sets scheduled_at = todayMidnight).
+    // WARN-2 note: bert gated the rawRowPast.date fallback (effectiveDate assignment
+    // at runSchedule.js:1660) on `t.recurring` — so the non-recurring path here is
+    // unchanged; effectiveDate derives from t.date (from scheduled_at) as before.
+    // AC4 already exercises the non-recurring path cleanly; no additional assertion needed.
+    await seedTask({
+      id: 'b142-nonrecur-ac4',
+      text: 'BUG-142 AC4 non-recurring past roll-forward',
+      dur: 30,
+      when: 'morning',
+      scheduled_at: PAST_DATE_UTC,  // placed in the past
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    // ASSERTION (AC4 GREEN guard): non-recurring past task is re-placed (date moves forward).
+    // The scheduler's Plan C non-recurring branch sets scheduled_at = todayMidnight.
+    // A subsequent placement pass then assigns a real slot.
+    var row = await db('tasks_v').where('id', 'b142-nonrecur-ac4').first();
+    expect(row).toBeTruthy();
+    // After the run, scheduled_at must be >= today (rolled forward)
+    var today = new Date();
+    var y2 = today.getUTCFullYear(), m2 = today.getUTCMonth() + 1, d2 = today.getUTCDate();
+    var todayKey = y2 + '-' + (m2 < 10 ? '0' : '') + m2 + '-' + (d2 < 10 ? '0' : '') + d2;
+    var scheduledDate = (row.scheduled_at || '').slice(0, 10);
+    expect(scheduledDate >= todayKey).toBe(true); // rolled forward to today or later
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // BUG-142-AC5 (WARN-3 MUTANT KILL — within-timeFlex → NOT missed):
+  //
+  // A RECURRING instance for a PAST day that was never placed (scheduled_at=NULL,
+  // unscheduled=1) BUT with timeFlex large enough that the day is STILL WITHIN
+  // the placement window must NOT be auto-missed by Plan C.
+  //
+  // The guard at runSchedule.js:~1691:
+  //   `if (flex >= daysPast * 1440) return;  // still within window, don't mark`
+  // is the surviving mutant that zoe's mutation analysis flagged — deleting this
+  // line left all existing BUG-142 tests GREEN because every existing test uses
+  // timeFlex=0 (always outside the window). This test closes that gap.
+  //
+  // Setup:
+  //   - PAST_DATE_KEY (2026-06-01) is daysPast days ago (≥1 day, typically ≥15).
+  //   - time_flex = daysPast_actual * 1440 + 1440 (at least 1 extra day of flex)
+  //     so that flex >= daysPast * 1440 evaluates TRUE → early return → NOT missed.
+  //   - After the scheduler run: instance status must remain '' (pending).
+  //
+  // MUTANT CATCH VERIFICATION:
+  //   If the guard `if (flex >= daysPast * 1440) return;` is deleted/replaced with
+  //   `if (false) return;`, the instance falls through to the 'missed' write.
+  //   This test then FAILS (status='missed' instead of ''). Thus the test genuinely
+  //   catches that mutant — it is not a vacuous green.
+  //
+  // WARN-2 note: the effectiveDate fallback is gated on `t.recurring` (line 1660)
+  // so the non-recurring path is not affected by this test (AC4 covers that).
+  // ─────────────────────────────────────────────────────────────────────────
+  test('AC5 (WARN-3 mutant kill): within-timeFlex past recurring instance is NOT auto-missed', async () => {
+    if (!available) return;
+
+    // DESIGN: This test must survive reconcile so Plan C actually evaluates the timeFlex guard.
+    // Using no recur_end (like AC1b) causes the reconciler to match the past instance to a new
+    // desired future date (occurrenceMove). Bert's rawRowPast.date fix (WARN-2, line 1660)
+    // means Plan C uses rawRowPast.date=PAST_DATE_KEY as effectiveDate regardless of the
+    // in-memory t.date being updated to a future slot. Plan C thus sees this instance as
+    // "past" and evaluates the timeFlex guard. With large timeFlex → guard fires → NOT missed.
+    // Without no recur_end (using recur_end=PAST_DATE_KEY), the reconciler deletes the instance
+    // via toDeleteIds before Plan C runs → test vacuously passes (no instance, no 'missed').
+
+    // Compute how many days PAST_DATE_KEY is from today (real clock).
+    var todayDate = new Date();
+    var pastDate = new Date(PAST_DATE_KEY + 'T00:00:00Z');
+    var daysPast = Math.max(1, Math.round((todayDate.getTime() - pastDate.getTime()) / 86400000));
+    // Set flex to daysPast days expressed in minutes, plus 1440 extra (one buffer day).
+    // This guarantees: flex >= daysPast * 1440  → guard fires → early return → NOT missed.
+    var timeFlex = daysPast * 1440 + 1440;
+
+    await db('task_masters').insert({
+      id: 'b142-tmpl-ac5',
+      user_id: USER_ID,
+      text: 'BUG-142 AC5 within-timeFlex should NOT be missed',
+      dur: 30,
+      status: '',
+      recurring: 1,
+      recur: JSON.stringify({ type: 'daily', days: 'MTWRFSU' }),
+      recur_start: PAST_DATE_KEY,
+      // No recur_end — generates future desired occurrences so the reconciler
+      // moves (rather than deletes) the past instance, keeping it in scope for Plan C.
+      time_flex: timeFlex,       // large flex → still within window → must NOT miss
+      when: '_invalid_window_',  // unplaceable (no matching time block)
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    await db('task_instances').insert({
+      id: 'b142-inst-ac5',
+      master_id: 'b142-tmpl-ac5',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      scheduled_at: null,          // never placed — triggers rawRowPast.date fallback
+      date: PAST_DATE_KEY,         // past date, but within timeFlex window
+      status: '',
+      unscheduled: 1,
+      overdue: 0,
+      dur: 30,
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    // ASSERTION (AC5 — WARN-3 mutant kill):
+    // Plan C uses rawRowPast.date=PAST_DATE_KEY as effectiveDate (bert's WARN-2 fallback).
+    // The timeFlex guard at runSchedule.js:~1691 evaluates: flex >= daysPast * 1440 → TRUE
+    // → returns early → instance is NOT marked 'missed'.
+    //
+    // MUTANT CATCH: deleting `if (flex >= daysPast * 1440) return;` causes the instance
+    // to fall through to the missed write → status='missed' → this assertion FAILS RED.
+    // The test verified RED-on-mutant during telly authoring (see TEST-CATALOG.md § AC5
+    // mutant-catch verification).
+    var missedRows = await db('task_instances')
+      .where({ user_id: USER_ID, master_id: 'b142-tmpl-ac5', status: 'missed' });
+    expect(missedRows.length).toBe(0); // FAILS if timeFlex guard is removed (mutant kill)
+  });
+});
