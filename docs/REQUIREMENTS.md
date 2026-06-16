@@ -344,6 +344,7 @@ _Maintained by docs-sync from the Scooter KG + code. Last synced: 2026-06-15 (gr
 | R32.4 | Scheduler | US-6 | The system MUST auto-apply `missed` status to past recurring instances whose timeFlex window has expired; users MUST NOT set `missed` directly (403). | **Happy:** Given a past recurring instance whose timeFlex window has expired, when the scheduler or cal-history-cron runs, then `status: "missed"` is set with `scheduled_at: windowClose`. **Unhappy:** Given a user attempt to set `status: "missed"`, then 403 is returned. | implemented | `juggler-backend/src/slices/task/application/commands/UpdateTaskStatus.js` | `tests/slices/task/application/commands-status-delete-misc.test.js` | SCHEDULER-RULES §4.4 |
 | R32.5 | Scheduler | US-6 | The system MUST soft-skip a recurring instance on delete (set `status: "skip"`) rather than hard-deleting it. | **Happy:** Given a recurring instance, when DELETE is called, then the instance is soft-skipped (`status: "skip"`). | implemented | `juggler-backend/src/slices/task/facade.js` | `tests/slices/task/application/commands-status-delete-misc.test.js` | SCHEDULER-RULES §4.4 |
 | R32.6 | Scheduler | US-6 | The system MUST cascade-delete a recurring template: pending instances are hard-deleted, completed instances are archived, and the template is deleted. | **Happy:** Given a recurring template, when DELETE is called, then pending instances are deleted, completed instances are archived, and the template is deleted. | implemented | `juggler-backend/src/slices/task/facade.js` | `tests/slices/task/application/commands-status-delete-misc.test.js` | SCHEDULER-RULES §4.4 |
+| R32.7 | Scheduler | US-6 | The system MUST day-lock non-TPC recurring instances to their occurrence date (`isDayLocked=true` when `!isFlexibleTpc`): the scheduler searches `earliest=latest=anchorDate` so the instance cannot roll to any other day. When the instance is ANYTIME mode and its anchor time has already passed on today, the system MUST place it at the latest available slot on today (via `preferLatestSlot → findLatestSlot`) so the user can still mark it done. Past-date occurrences (occurrence date before today) that cannot be placed are left unplaced, not rolled forward. | **Happy:** Given a non-TPC recurring instance with `anchorDate=today` and `anchorMin < nowMins`, when the scheduler runs, then the instance is placed at the latest available slot on today. **Happy:** Given a non-TPC recurring instance with `anchorDate=today` and day fully blocked, when the scheduler runs, then the instance is unplaced (not rolled to tomorrow). **Unhappy:** Given a non-TPC recurring instance with `anchorDate` in the past, when the scheduler runs, then the instance is left unplaced (not placed on today). | implemented | `juggler-backend/src/scheduler/unifiedScheduleV2.js` (lines 415, 464–469, 834–851, 978–998) | `tests/schedulerScenarios.test.js` (Tier 11, S51/S52) · `tests/characterization/scheduler/goldenMaster.h6.test.js` (S3 day-lock mutation tests) | migrated from juggler/CLAUDE.md |
 
 ### R33 — Rolling Anchor
 
@@ -558,7 +559,7 @@ Three primary use cases are recorded in the Scooter KG (`has_use_case` facts) an
 | US-3 | R8.1–R8.8 | 8 | 8 impl |
 | US-4 | R9.1–R9.3 | 3 | 0 impl, 3 partial |
 | US-5 | R11.1–R11.22, R21.1–R21.3, R26.1–R26.4, R37.1–R37.3, R39.1–R39.5, R40.1–R40.3, R41.1–R41.5 | 40 | 34 impl, 6 partial |
-| US-6 | R18.1–R18.8, R32.1–R32.6, R33.1–R33.5, R34.1–R34.5 | 24 | 24 impl |
+| US-6 | R18.1–R18.8, R32.1–R32.7, R33.1–R33.5, R34.1–R34.5 | 25 | 25 impl |
 | US-7 | R19.1–R19.7, R35.1–R35.6 | 13 | 13 impl |
 | US-8 | R7.1–R7.8, R30.1–R30.2 | 10 | 10 impl |
 | US-9 | R15.1–R15.5 | 5 | 5 impl |
@@ -575,10 +576,10 @@ Three primary use cases are recorded in the Scooter KG (`has_use_case` facts) an
 
 | Status | Count | Requirements |
 |--------|-------|--------------|
-|| `implemented` | 206 | R1.1–R1.5, R1.7–R1.10, R2.1–R2.7, R3.1–R3.3, R4.1–R4.5, R5.1, R6.2–R6.5, R7.1–R7.8, R8.1–R8.8, R11.1–R11.9, R11.11–R11.22, R15.1–R15.5, R18.1–R18.8, R19.1–R19.7, R20.1–R20.4, R21.1–R21.3, R22.1–R22.4, R23.1–R23.2, R23.4, R24.1–R24.6, R25.1–R25.5, R26.1–R26.4, R27.1–R27.3, R28.1–R28.2, R29.1–R29.2, R30.1–R30.2, R31.1–R31.5, R32.1–R32.6, R33.1–R33.5, R34.1–R34.5, R35.2–R35.5, R39.1–R39.5, R40.1–R40.3, R41.1–R41.2, R41.4–R41.5, R42.1–R42.4, R43.1–R43.11, R44.1–R44.7, R45.1–R45.2, R46.1–R46.2, R47.1, R48.1–R48.2 |
+|| `implemented` | 207 | R1.1–R1.5, R1.7–R1.10, R2.1–R2.7, R3.1–R3.3, R4.1–R4.5, R5.1, R6.2–R6.5, R7.1–R7.8, R8.1–R8.8, R11.1–R11.9, R11.11–R11.22, R15.1–R15.5, R18.1–R18.8, R19.1–R19.7, R20.1–R20.4, R21.1–R21.3, R22.1–R22.4, R23.1–R23.2, R23.4, R24.1–R24.6, R25.1–R25.5, R26.1–R26.4, R27.1–R27.3, R28.1–R28.2, R29.1–R29.2, R30.1–R30.2, R31.1–R31.5, R32.1–R32.7, R33.1–R33.5, R34.1–R34.5, R35.2–R35.5, R39.1–R39.5, R40.1–R40.3, R41.1–R41.2, R41.4–R41.5, R42.1–R42.4, R43.1–R43.11, R44.1–R44.7, R45.1–R45.2, R46.1–R46.2, R47.1, R48.1–R48.2 |
 || `partial` | 19 | R1.6, R2.8, R6.1, R6.6, R9.1–R9.3, R10.3–R10.5, R11.10, R16.3, R17.1–R17.2, R22.5, R23.3, R28.3, R29.3, R35.1, R35.6, R36.1–R36.3, R37.1–R37.3, R38.1–R38.4, R41.3 |
 | `planned` | 3 | R12.1, R13.1, R14.1 |
-| **Total** | **228** | |
+| **Total** | **229** | |
 
 ### Partial Requirements — Acceptance Gaps
 
@@ -631,7 +632,7 @@ Non-functional requirements applicable to this service are fully specified in `j
 | Domain | Count | Requirements |
 |--------|-------|-------------|
 | Task Management | 56 | R1.1–R1.10, R2.1–R2.8, R3.1–R3.3, R4.1–R4.5, R5.1, R6.1–R6.6, R20.1–R20.4, R21.1–R21.3, R23.1–R23.4, R27.1–R27.3, R29.1–R29.3, R31.1–R31.5 |
-| Scheduler | 103 | R10.1–R10.5, R11.1–R11.22, R18.1–R18.8, R19.1–R19.7, R26.1–R26.4, R32.1–R32.6, R33.1–R33.5, R34.1–R34.5, R35.1–R35.6, R36.1–R36.3, R37.1–R37.3, R39.1–R39.5, R40.1–R40.3, R41.1–R41.5 |
+| Scheduler | 104 | R10.1–R10.5, R11.1–R11.22, R18.1–R18.8, R19.1–R19.7, R26.1–R26.4, R32.1–R32.7, R33.1–R33.5, R34.1–R34.5, R35.1–R35.6, R36.1–R36.3, R37.1–R37.3, R39.1–R39.5, R40.1–R40.3, R41.1–R41.5 |
 | Calendar Sync | 10 | R7.1–R7.8, R30.1–R30.2 |
 | Calendar Views | 11 | R8.1–R8.8, R9.1–R9.3 |
 | AI | 5 | R15.1–R15.5 |

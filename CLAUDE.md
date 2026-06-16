@@ -26,7 +26,7 @@ npm run lint && npm test              # Quality gate
 | `recurring instance` | One occurrence of a repeating task |
 | `split chunk` | A piece of a task split across time blocks |
 
-**Recurring tasks:** See R32 (instance lifecycle) and R33 (rolling anchor) for complete behavior rules. Recurring instances are day-locked to their occurrence date when that date is today or future; past occurrences may be placed today at the latest available slot.
+**Recurring tasks:** See R32 (instance lifecycle, incl. day-lock placement) and R33 (rolling anchor) for complete behavior rules.
 
 **⚠️ Caution:** Scheduler bugs cascade and corrupt all task data. Test exhaustively before deploying any scheduler change. The `unifiedScheduleV2.js` is the main entry point.
 
