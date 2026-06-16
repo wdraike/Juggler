@@ -53,6 +53,91 @@ describe('ExportData (== exportData)', () => {
     expect(res.body.schedFloor).toBe(480);
     expect(res.body.schedCeiling).toBe(1380);
   });
+
+  // ── R22.5: Feature gate for export/import ─────────────────────────────────
+  test('R22.5: Export returns correct data shape with all expected fields', async () => {
+    var repo = new InMemoryConfigRepository({
+      locations: [{ user_id: USER, location_id: 'l1', name: 'Home', icon: '', sort_order: 0 }],
+      tools: [{ user_id: USER, tool_id: 't1', name: 'Laptop', icon: '💻', sort_order: 0 }],
+      projects: [{ user_id: USER, id: 1, name: 'Work', color: '#f00', icon: null, sort_order: 0 }],
+      config: [{ user_id: USER, config_key: 'preferences', config_value: JSON.stringify({ gridZoom: 90 }) }]
+    });
+    var fetchTasks = function () { return Promise.resolve([{ id: 'tk1', status: 'active', text: 'Test' }]); };
+    var rowToTask = function (r) { return { id: r.id, status: r.status, text: r.text }; };
+    var res = await new App.ExportData({ repo: repo, fetchTasks: fetchTasks, rowToTask: rowToTask, now: function () { return 'NOW'; } })
+      .execute({ userId: USER });
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('v7');
+    expect(res.body).toHaveProperty('extraTasks');
+    expect(res.body).toHaveProperty('statuses');
+    expect(res.body).toHaveProperty('locations');
+    expect(res.body).toHaveProperty('tools');
+    expect(res.body).toHaveProperty('projects');
+    expect(res.body).toHaveProperty('gridZoom');
+    expect(res.body).toHaveProperty('updated');
+    expect(Array.isArray(res.body.extraTasks)).toBe(true);
+    expect(Array.isArray(res.body.locations)).toBe(true);
+    expect(Array.isArray(res.body.tools)).toBe(true);
+    expect(Array.isArray(res.body.projects)).toBe(true);
+  });
+
+  test('R22.5: Export returns 200 with empty data when user has no data', async () => {
+    var repo = new InMemoryConfigRepository();
+    var res = await new App.ExportData({
+      repo: repo, fetchTasks: function () { return Promise.resolve([]); }, rowToTask: function (r) { return r; }
+    }).execute({ userId: USER });
+    expect(res.status).toBe(200);
+    expect(res.body.extraTasks).toEqual([]);
+    expect(res.body.locations).toEqual([]);
+    expect(res.body.tools).toEqual([]);
+    expect(res.body.projects).toEqual([]);
+  });
+
+  test('R22.5: Import with valid data returns 200 with counts', async () => {
+    var calls = { wipe: [], tasks: [] };
+    var repo = new InMemoryConfigRepository({
+      config: [{ user_id: USER, config_key: 'preferences', config_value: '{}' }]
+    });
+    var res = await new App.ImportData({
+      repo: repo,
+      wipeTasks: function (trxRepo, uid) { calls.wipe.push(uid); return Promise.resolve(); },
+      insertTask: function (trxRepo, row) { calls.tasks.push(row); return Promise.resolve(); },
+      buildTaskRow: function (t, uid) { return { id: t.id, user_id: uid }; }
+    }).execute({
+      userId: USER, confirm: 'delete_all',
+      data: {
+        extraTasks: [{ id: 't1', text: 'Imported task' }],
+        locations: [{ id: 'l1', name: 'Office' }]
+      }
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('counts');
+    expect(res.body.counts.tasks).toBe(1);
+    expect(res.body.counts.locations).toBe(1);
+  });
+
+  test('R22.5: Import without confirm=delete_all returns 400 (destructive guard)', async () => {
+    var repo = new InMemoryConfigRepository();
+    var res = await new App.ImportData({
+      repo: repo,
+      wipeTasks: function () { return Promise.resolve(); },
+      insertTask: function () { return Promise.resolve(); },
+      buildTaskRow: function (t) { return { id: t.id }; }
+    }).execute({ userId: USER, data: { extraTasks: [] }, confirm: undefined });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/DELETE all existing/);
+  });
+
+  test('R22.5: Import with missing extraTasks returns 400', async () => {
+    var res = await new App.ImportData({
+      repo: new InMemoryConfigRepository(),
+      wipeTasks: function () { return Promise.resolve(); },
+      insertTask: function () { return Promise.resolve(); },
+      buildTaskRow: function (t) { return { id: t.id }; }
+    }).execute({ userId: USER, data: { notExtraTasks: [] }, confirm: 'delete_all' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid import data/);
+  });
 });
 
 // ── ImportData (== importData, H2 — destructive wipe + bulk insert) ──────────

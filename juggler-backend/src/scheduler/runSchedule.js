@@ -14,7 +14,6 @@ var tasksWrite = require('../lib/tasks-write');
 var { computeChunks } = require('../lib/reconcile-splits');
 var unifiedScheduleV2 = require('./unifiedScheduleV2');
 var constants = require('./constants');
-var { roundCoord } = require('../controllers/weather.controller');
 var { TERMINAL_STATUSES } = require('../lib/task-status');
 
 // v2 is the only scheduler. Kept as a thin wrapper so call sites don't have
@@ -70,10 +69,10 @@ function validateScheduledAt(allTasks) {
   }
 }
 
-function runSchedulerWithShadow(allTasks, statuses, todayKey, nowMins, cfg /*, userId, context */) {
+function runSchedulerWithShadow(allTasks, statuses, todayKey, nowMins, cfg, clock /*, userId, context */) {
   // Wave C: scheduled_at-required guard
   validateScheduledAt(allTasks);
-  return unifiedScheduleV2(allTasks, statuses, todayKey, nowMins, cfg);
+  return unifiedScheduleV2(allTasks, statuses, todayKey, nowMins, cfg, clock);
 }
 var DEFAULT_TIME_BLOCKS = constants.DEFAULT_TIME_BLOCKS;
 var DEFAULT_TOOL_MATRIX = constants.DEFAULT_TOOL_MATRIX;
@@ -178,9 +177,9 @@ function computeWindowCloseUtc(task, _today, _tz) {
 /**
  * Get current date/time in user's timezone
  */
-function getNowInTimezone(timezone) {
+function getNowInTimezone(timezone, clock) {
   var tz = timezone || DEFAULT_TIMEZONE;
-  var now = new Date();
+  var now = clock ? clock.now() : new Date();
   var parts = new Intl.DateTimeFormat('en-US', {
     timeZone: tz,
     year: 'numeric', month: 'numeric', day: 'numeric',
@@ -267,44 +266,27 @@ async function releaseSchedulerLock(userId) {
   try { await cache.getClient().del(lockKey); } catch (e) { /* fail open */ }
 }
 
-async function loadWeatherForHorizon(locations, db) {
-  var weatherByDateHour = {};
-  var locWithCoords = (locations || []).find(function(l) {
-    return typeof l.lat === 'number' && typeof l.lon === 'number';
-  });
-  if (!locWithCoords) return weatherByDateHour;
+// Weather provider injection - default to the real SchedulerWeatherProvider
+// but allow injection of FakeWeatherProvider for testing
+var SchedulerWeatherProvider = require('../slices/scheduler/adapters/SchedulerWeatherProvider');
+var _weatherProvider = new SchedulerWeatherProvider();
 
-  var latGrid = roundCoord(locWithCoords.lat);
-  var lonGrid = roundCoord(locWithCoords.lon);
-
-  var row = await db('weather_cache')
-    .where('lat_grid', latGrid)
-    .where('lon_grid', lonGrid)
-    .orderBy('fetched_at', 'desc')
-    .first();
-
-  if (!row) return weatherByDateHour; // fail-open: no data ever fetched
-
-  var forecast;
-  try { forecast = JSON.parse(row.forecast_json); } catch (e) { return weatherByDateHour; }
-
-  var hourly = forecast.hourly;
-  if (!hourly || !hourly.time) return weatherByDateHour;
-
-  for (var i = 0; i < hourly.time.length; i++) {
-    var dt = hourly.time[i]; // "2026-05-05T14:00"
-    var dateKey = dt.slice(0, 10);
-    var hour = parseInt(dt.slice(11, 13), 10);
-    if (!weatherByDateHour[dateKey]) weatherByDateHour[dateKey] = {};
-    weatherByDateHour[dateKey][hour] = {
-      temp:       hourly.temperature_2m              ? hourly.temperature_2m[i]              : null,
-      precipProb: hourly.precipitation_probability   ? hourly.precipitation_probability[i]   : 0,
-      cloudcover: hourly.cloudcover                  ? hourly.cloudcover[i]                  : 0,
-      humidity:   hourly.relativehumidity_2m         ? hourly.relativehumidity_2m[i]         : null,
-    };
+/**
+ * Set a custom weather provider for testing purposes
+ * @param {WeatherProviderPort} provider - Weather provider implementing WeatherProviderPort interface
+ */
+function setWeatherProvider(provider) {
+  if (provider && typeof provider.loadWeatherForHorizon === 'function') {
+    _weatherProvider = provider;
   }
+}
 
-  return weatherByDateHour;
+/**
+ * Get the current weather provider
+ * @returns {WeatherProviderPort} Current weather provider
+ */
+function getWeatherProvider() {
+  return _weatherProvider;
 }
 
 // ── DELTA-WRITE comparison (H6 W2) ───────────────────────────────────────────
@@ -566,7 +548,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   });
 
   // 4. Get current date/time in user's timezone
-  var timeInfo = getNowInTimezone(TIMEZONE);
+  var timeInfo = getNowInTimezone(TIMEZONE, _runScheduleCommand.clock);
 
   // 5. Config was loaded in parallel with tasks above.
   var cfg = _preloadedCfg;
@@ -583,7 +565,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   //
   // This replaces the prior two-pass design (expand-then-split-reconcile) that
   // thrashed because the expand pass deleted chunk rows it didn't recognize.
-  var today = parseDate(timeInfo.todayKey) || new Date();
+  var today = parseDate(timeInfo.todayKey) || _runScheduleCommand.clockNow();
   var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + RECUR_EXPAND_DAYS);
 
   // Index existing recurring_instance rows. Track pending (placeable) and the
@@ -1031,7 +1013,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // Use an ISO string for created_at/updated_at here: the DB rows were stamped
     // with a JS Date (H6/W3 P1: _runScheduleCommand.clockNow()); rowToTask wants a
     // parseable string for the changeset projection, so normalize to ISO.
-    var nowISO = new Date().toISOString();
+    var nowISO = _runScheduleCommand.clockNow().toISOString();
     chunkInsertRows.forEach(function(r) {
       phase1InsertedById[r.id] = Object.assign({}, r, { created_at: nowISO, updated_at: nowISO });
     });
@@ -1175,7 +1157,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   });
   if (hasWeatherTasks && cfg.locations && cfg.locations.length > 0) {
     try {
-      cfg.weatherByDateHour = await loadWeatherForHorizon(cfg.locations, db);
+      cfg.weatherByDateHour = await _weatherProvider.loadWeatherForHorizon(cfg.locations, db);
     } catch (e) {
       cfg.weatherByDateHour = {}; // fail-open: proceed without weather data
     }
@@ -1184,7 +1166,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // 6. Run scheduler (primary chosen by SCHEDULER_V2 env var; shadow runs
   //    in parallel when SCHEDULER_V2_SHADOW=true).
   var result = runSchedulerWithShadow(
-    allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg, userId, 'main'
+    allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg, _runScheduleCommand.clock, userId, 'main'
   );
   tPerf.scheduleEnd = Date.now() - tPerfStart;
 
@@ -1930,7 +1912,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
  */
 async function getSchedulePlacements(userId, options) {
   var TIMEZONE = (options && options.timezone) || DEFAULT_TIMEZONE;
-  var timeInfo = getNowInTimezone(TIMEZONE);
+  var timeInfo = getNowInTimezone(TIMEZONE, _runScheduleCommand.clock);
 
   // Fast path: check cache freshness with minimal DB queries BEFORE loading all tasks
   var cacheRow = await db('user_config').where({ user_id: userId, config_key: 'schedule_cache' }).first();
@@ -2042,7 +2024,7 @@ async function getSchedulePlacements(userId, options) {
   allTasks.forEach(function(t) { statuses[t.id] = t.status || ''; });
 
   // Expand recurring so generated instances can be hydrated from cache
-  var today = parseDate(timeInfo.todayKey) || new Date();
+  var today = parseDate(timeInfo.todayKey) || _runScheduleCommand.clockNow();
   var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + RECUR_EXPAND_DAYS);
   var expanded = expandRecurring(allTasks, today, expandEnd, { statuses: statuses, pendingBookedByDate: pendingBookedByDate2 });
   if (expanded.length > 0) {
@@ -2286,11 +2268,11 @@ async function getSchedulePlacements(userId, options) {
   var cfg = await loadConfig(userId);
   cfg.timezone = TIMEZONE;
   var result = runSchedulerWithShadow(
-    allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg, userId, 'cache-hydrate'
+    allTasks, statuses, timeInfo.todayKey, timeInfo.nowMins, cfg, _runScheduleCommand.clock, userId, 'cache-hydrate'
   );
 
   // Save cache
-  var newCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: new Date().toISOString(), timezone: TIMEZONE, schedulerVersion: SCHEDULER_VERSION };
+  var newCache = { dayPlacements: {}, unplaced: [], score: result.score, warnings: result.warnings || [], generatedAt: _runScheduleCommand.clockNow().toISOString(), timezone: TIMEZONE, schedulerVersion: SCHEDULER_VERSION };
   Object.keys(result.dayPlacements).forEach(function(dk) {
     newCache.dayPlacements[dk] = result.dayPlacements[dk].map(function(p) {
       var entry = { taskId: p.task ? p.task.id : null, start: p.start, dur: p.dur };
@@ -2360,4 +2342,10 @@ async function getSchedulePlacements(userId, options) {
   };
 }
 
-module.exports = { runScheduleAndPersist, getSchedulePlacements, computeWindowCloseUtc };
+module.exports = { 
+  runScheduleAndPersist, 
+  getSchedulePlacements, 
+  computeWindowCloseUtc,
+  setWeatherProvider,
+  getWeatherProvider
+};

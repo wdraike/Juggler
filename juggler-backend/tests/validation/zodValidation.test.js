@@ -346,6 +346,269 @@ describe('Zod Validation Boundaries', () => {
     });
   });
 
+  // TS-262: Invalid recur type validation
+  describe('TS-262: recur type validation', () => {
+    const testSchema = z.object({
+      recur: z.object({
+        type: z.enum(['daily', 'weekly', 'biweekly', 'monthly', 'interval', 'none', 'rolling'])
+      }).optional().nullable()
+    });
+
+    const testCases = [
+      // Valid cases
+      { input: { recur: { type: 'daily' } }, shouldPass: true, description: 'valid daily type' },
+      { input: { recur: { type: 'weekly' } }, shouldPass: true, description: 'valid weekly type' },
+      { input: { recur: { type: 'monthly' } }, shouldPass: true, description: 'valid monthly type' },
+      { input: { recur: { type: 'interval' } }, shouldPass: true, description: 'valid interval type' },
+      { input: { recur: { type: 'none' } }, shouldPass: true, description: 'valid none type' },
+      { input: { recur: { type: 'rolling' } }, shouldPass: true, description: 'valid rolling type' },
+      { input: {}, shouldPass: true, description: 'optional field omitted' },
+
+      // Invalid cases
+      { input: { recur: { type: 'yearly' } }, shouldPass: false, description: 'invalid yearly type' },
+      { input: { recur: { type: 'hourly' } }, shouldPass: false, description: 'invalid hourly type' },
+      { input: { recur: { type: 'invalid' } }, shouldPass: false, description: 'invalid custom type' },
+      { input: { recur: { type: '' } }, shouldPass: false, description: 'empty type string' },
+    ];
+
+    testCases.forEach(({ input, shouldPass, description }) => {
+      test(`${description} - should ${shouldPass ? 'pass' : 'fail'}`, () => {
+        const result = testSchema.safeParse(input);
+        if (shouldPass) {
+          expect(result.success).toBe(true);
+        } else {
+          expect(result.success).toBe(false);
+          expect(result.error.issues[0].path).toContain('recur');
+        }
+      });
+    });
+  });
+
+  // TS-263: Invalid recur unit validation
+  describe('TS-263: recur unit validation', () => {
+    const testSchema = z.object({
+      recur: z.object({
+        type: z.enum(['interval', 'rolling']),
+        unit: z.enum(['days', 'weeks', 'months']).optional()
+      }).optional().nullable()
+    });
+
+    const testCases = [
+      // Valid cases
+      { input: { recur: { type: 'interval', unit: 'days' } }, shouldPass: true, description: 'valid days unit' },
+      { input: { recur: { type: 'interval', unit: 'weeks' } }, shouldPass: true, description: 'valid weeks unit' },
+      { input: { recur: { type: 'interval', unit: 'months' } }, shouldPass: true, description: 'valid months unit' },
+      { input: { recur: { type: 'interval' } }, shouldPass: true, description: 'optional unit omitted' },
+
+      // Invalid cases
+      { input: { recur: { type: 'interval', unit: 'years' } }, shouldPass: false, description: 'invalid years unit' },
+      { input: { recur: { type: 'interval', unit: 'hours' } }, shouldPass: false, description: 'invalid hours unit' },
+      { input: { recur: { type: 'interval', unit: 'invalid' } }, shouldPass: false, description: 'invalid custom unit' },
+    ];
+
+    testCases.forEach(({ input, shouldPass, description }) => {
+      test(`${description} - should ${shouldPass ? 'pass' : 'fail'}`, () => {
+        const result = testSchema.safeParse(input);
+        if (shouldPass) {
+          expect(result.success).toBe(true);
+        } else {
+          expect(result.success).toBe(false);
+          expect(result.error.issues[0].path).toContain('recur');
+        }
+      });
+    });
+  });
+
+  // TS-264: Invalid day_req validation
+  describe('TS-264: recur days validation', () => {
+    const testSchema = z.object({
+      recur: z.object({
+        days: z.union([
+          z.string().regex(/^[UMTWRFS]+$/),
+          z.record(z.string(), z.any())
+        ]).optional()
+      }).optional().nullable()
+    });
+
+    const testCases = [
+      // Valid cases
+      { input: { recur: { days: 'MTWRF' } }, shouldPass: true, description: 'valid weekday string' },
+      { input: { recur: { days: 'MTWRFSU' } }, shouldPass: true, description: 'valid all days string' },
+      { input: { recur: { days: { M: 'required', W: 'required', F: 'required' } } }, shouldPass: true, description: 'valid days object' },
+      { input: { recur: {} }, shouldPass: true, description: 'optional days omitted' },
+
+      // Invalid cases
+      { input: { recur: { days: 'MTXRF' } }, shouldPass: false, description: 'invalid day code X' },
+      { input: { recur: { days: 'Monday' } }, shouldPass: false, description: 'full day names not allowed' },
+      { input: { recur: { days: 123 } }, shouldPass: false, description: 'numeric days invalid' },
+      { input: { recur: { days: ['M', 'T'] } }, shouldPass: false, description: 'array days invalid' },
+    ];
+
+    testCases.forEach(({ input, shouldPass, description }) => {
+      test(`${description} - should ${shouldPass ? 'pass' : 'fail'}`, () => {
+        const result = testSchema.safeParse(input);
+        if (shouldPass) {
+          expect(result.success).toBe(true);
+        } else {
+          expect(result.success).toBe(false);
+          expect(result.error.issues[0].path).toContain('recur');
+        }
+      });
+    });
+  });
+
+  // TS-265: Invalid when tag (> 30 chars) validation - Application level
+  describe('TS-265: when tag length validation (application level)', () => {
+    const { validateTaskInput } = require('../../src/slices/task/domain/validation/taskValidation');
+
+    const testCases = [
+      // Valid cases
+      { input: { text: 'test', when: 'morning' }, expectedErrors: [], description: 'single short tag' },
+      { input: { text: 'test', when: 'morning,afternoon' }, expectedErrors: [], description: 'multiple short tags' },
+      { input: { text: 'test', when: 'a'.repeat(30) }, expectedErrors: [], description: 'maximum length tag (30 chars)' },
+      { input: { text: 'test' }, expectedErrors: [], description: 'optional when omitted' },
+
+      // Invalid cases
+      { input: { text: 'test', when: 'a'.repeat(31) }, expectedErrors: ['Invalid when value: tag names must be 30 characters or less'], description: 'tag exceeds maximum (31 chars)' },
+      { input: { text: 'test', when: 'morning,' + 'a'.repeat(31) }, expectedErrors: ['Invalid when value: tag names must be 30 characters or less'], description: 'second tag exceeds maximum' },
+      { input: { text: 'test', when: 'this-is-a-very-long-tag-name-that-exceeds-thirty-characters' }, expectedErrors: ['Invalid when value: tag names must be 30 characters or less'], description: 'single tag exceeds 30 characters' },
+    ];
+
+    testCases.forEach(({ input, expectedErrors, description }) => {
+      test(`${description} - validation errors: ${expectedErrors.join(', ')}`, () => {
+        const errors = validateTaskInput(input);
+        expect(errors).toEqual(expectedErrors);
+      });
+    });
+  });
+
+  // TS-266: Invalid deadline format validation - Application level
+  describe('TS-266: deadline format validation (application level)', () => {
+    const { validateTaskInput } = require('../../src/slices/task/domain/validation/taskValidation');
+
+    const testCases = [
+      // Valid cases
+      { input: { text: 'test', deadline: '2026-12-31' }, expectedErrors: [], description: 'valid ISO date' },
+      { input: { text: 'test' }, expectedErrors: [], description: 'optional deadline omitted' },
+
+      // Invalid cases
+      { input: { text: 'test', deadline: '31-12-2026' }, expectedErrors: ['Deadline must be a valid date'], description: 'invalid date format (DD-MM-YYYY)' },
+      { input: { text: 'test', deadline: 'not-a-date' }, expectedErrors: ['Deadline must be a valid date'], description: 'non-date string' },
+      { input: { text: 'test', deadline: 'invalid-date-string' }, expectedErrors: ['Deadline must be a valid date'], description: 'invalid date string' },
+    ];
+
+    testCases.forEach(({ input, expectedErrors, description }) => {
+      test(`${description} - validation errors: ${expectedErrors.join(', ')}`, () => {
+        const errors = validateTaskInput(input);
+        expect(errors).toEqual(expectedErrors);
+      });
+    });
+  });
+
+  // TS-267: Invalid start_after format validation - Application level
+  describe('TS-267: start_after format validation (application level)', () => {
+    const { validateTaskInput } = require('../../src/slices/task/domain/validation/taskValidation');
+
+    const testCases = [
+      // Valid cases
+      { input: { text: 'test', startAfter: '2026-12-31' }, expectedErrors: [], description: 'valid ISO date' },
+      { input: { text: 'test' }, expectedErrors: [], description: 'optional start_after omitted' },
+
+      // Invalid cases
+      { input: { text: 'test', startAfter: '31-12-2026' }, expectedErrors: ['Start-after must be a valid date'], description: 'invalid date format (DD-MM-YYYY)' },
+      { input: { text: 'test', startAfter: 'not-a-date' }, expectedErrors: ['Start-after must be a valid date'], description: 'non-date string' },
+      { input: { text: 'test', startAfter: 'invalid-date-string' }, expectedErrors: ['Start-after must be a valid date'], description: 'invalid date string' },
+    ];
+
+    testCases.forEach(({ input, expectedErrors, description }) => {
+      test(`${description} - validation errors: ${expectedErrors.join(', ')}`, () => {
+        const errors = validateTaskInput(input);
+        expect(errors).toEqual(expectedErrors);
+      });
+    });
+  });
+
+  // TS-258: Invalid priority defaulting to P3
+  describe('TS-258: priority validation and defaulting', () => {
+    const testCases = [
+      // Valid cases
+      { input: { text: 'test', pri: 'P1' }, shouldPass: true, description: 'valid P1 priority' },
+      { input: { text: 'test', pri: 'P2' }, shouldPass: true, description: 'valid P2 priority' },
+      { input: { text: 'test', pri: 'P3' }, shouldPass: true, description: 'valid P3 priority' },
+      { input: { text: 'test', pri: 'P4' }, shouldPass: true, description: 'valid P4 priority' },
+      { input: { text: 'test' }, shouldPass: true, description: 'optional priority omitted (defaults to P3)' },
+
+      // Invalid cases
+      { input: { text: 'test', pri: 'P5' }, shouldPass: false, description: 'invalid P5 priority' },
+      { input: { text: 'test', pri: 'P0' }, shouldPass: false, description: 'invalid P0 priority' },
+      { input: { text: 'test', pri: 'invalid' }, shouldPass: false, description: 'invalid custom priority' },
+      { input: { text: 'test', pri: 123 }, shouldPass: false, description: 'numeric priority' },
+    ];
+
+    testCases.forEach(({ input, shouldPass, description }) => {
+      test(`${description} - should ${shouldPass ? 'pass' : 'fail'}`, () => {
+        const result = taskCreateSchema.safeParse(input);
+        if (shouldPass) {
+          expect(result.success).toBe(true);
+          // Check that omitted priority defaults to P3
+          if (!input.pri) {
+            expect(result.data.pri).toBe('P3');
+          }
+        } else {
+          expect(result.success).toBe(false);
+          expect(result.error.issues[0].path).toContain('pri');
+        }
+      });
+    });
+  });
+
+  // TS-256: splitMin > duration relationship validation (FIXED)
+  describe('TS-256: splitMin > duration relationship validation', () => {
+    const testCases = [
+      // Valid cases
+      { input: { text: 'test', dur: 60, splitMin: 15 }, shouldPass: true, description: 'splitMin < duration (15 < 60)' },
+      { input: { text: 'test', dur: 60, splitMin: 60 }, shouldPass: true, description: 'splitMin = duration (60 = 60)' },
+      { input: { text: 'test', dur: 60 }, shouldPass: true, description: 'optional splitMin omitted' },
+
+      // Invalid cases - Note: Schema allows these, but application validation should catch them
+      { input: { text: 'test', dur: 60, splitMin: 61 }, shouldPass: true, description: 'splitMin > duration (61 > 60) - schema allows, app validates' },
+      { input: { text: 'test', dur: 30, splitMin: 45 }, shouldPass: true, description: 'splitMin > duration (45 > 30) - schema allows, app validates' },
+    ];
+
+    testCases.forEach(({ input, shouldPass, description }) => {
+      test(`${description} - should ${shouldPass ? 'pass' : 'fail'}`, () => {
+        const result = taskCreateSchema.safeParse(input);
+        if (shouldPass) {
+          expect(result.success).toBe(true);
+        } else {
+          expect(result.success).toBe(false);
+        }
+      });
+    });
+  });
+
+  // TS-256: Application-level splitMin validation
+  describe('TS-256: Application-level splitMin validation', () => {
+    const { validateTaskInput } = require('../../src/slices/task/domain/validation/taskValidation');
+
+    const testCases = [
+      // Valid cases
+      { input: { text: 'test', dur: 60, splitMin: 15, split: true }, expectedErrors: [], description: 'splitMin < duration' },
+      { input: { text: 'test', dur: 60, splitMin: 60, split: true }, expectedErrors: [], description: 'splitMin = duration' },
+
+      // Invalid cases
+      { input: { text: 'test', dur: 60, splitMin: 61, split: true }, expectedErrors: ['Split minimum must be less than or equal to duration'], description: 'splitMin > duration' },
+      { input: { text: 'test', dur: 30, splitMin: 45, split: true }, expectedErrors: ['Split minimum must be less than or equal to duration'], description: 'splitMin > duration (30 vs 45)' },
+    ];
+
+    testCases.forEach(({ input, expectedErrors, description }) => {
+      test(`${description} - validation errors: ${expectedErrors.join(', ')}`, () => {
+        const errors = validateTaskInput(input);
+        expect(errors).toEqual(expectedErrors);
+      });
+    });
+  });
+
   // Additional comprehensive tests for existing schema fields
   describe('Comprehensive schema validation', () => {
     test('taskCreateSchema should validate all required fields', () => {

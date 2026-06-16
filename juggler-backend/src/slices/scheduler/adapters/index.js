@@ -11,7 +11,9 @@ module.exports = {
   SchedulerTaskProvider: require('./SchedulerTaskProvider'),
   SchedulerCalendarProvider: require('./SchedulerCalendarProvider'),
   SchedulerWeatherProvider: require('./SchedulerWeatherProvider'),
+  FakeWeatherProvider: require('./FakeWeatherProvider'),
   KnexScheduleRepository: require('./KnexScheduleRepository'),
   InMemoryScheduleRepository: require('./InMemoryScheduleRepository'),
-  MysqlClockAdapter: require('./MysqlClockAdapter')
+  MysqlClockAdapter: require('./MysqlClockAdapter'),
+  FakeClockAdapter: require('./FakeClockAdapter')
 };

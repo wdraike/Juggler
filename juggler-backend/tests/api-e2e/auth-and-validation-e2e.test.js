@@ -90,6 +90,57 @@ describe('Auth + Validation — E2E', () => {
     expect(res.body).toHaveProperty('error');
   }, harnessProbe));
 
+  // ── R16.3: All JWT token types ────────────────────────────────────────────
+
+  test('R16.3: valid JWT with juggler app claim → 200', requireDB(async () => {
+    const res = await request(app)
+      .get('/api/tasks')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('tasks');
+  }, harnessProbe));
+
+  test('R16.3: valid JWT with missing app claim → 403', requireDB(async () => {
+    const noAppsToken = await harness.makeJWT({ apps: [] });
+    const res = await request(app)
+      .get('/api/tasks')
+      .set('Authorization', `Bearer ${noAppsToken}`);
+    expect(res.status).toBe(403);
+    expect(res.body).toHaveProperty('error');
+  }, harnessProbe));
+
+  test('R16.3: valid JWT with invalid app claim (wrong app) → 403', requireDB(async () => {
+    const wrongAppToken = await harness.makeJWT({ apps: ['other-app'] });
+    const res = await request(app)
+      .get('/api/tasks')
+      .set('Authorization', `Bearer ${wrongAppToken}`);
+    expect(res.status).toBe(403);
+    expect(res.body).toHaveProperty('error');
+  }, harnessProbe));
+
+  test('R16.3: expired JWT → 401', requireDB(async () => {
+    const expiredToken = await harness.makeJWT({ expired: true });
+    const res = await request(app)
+      .get('/api/tasks')
+      .set('Authorization', `Bearer ${expiredToken}`);
+    expect(res.status).toBe(401);
+    expect(res.body).toHaveProperty('error');
+  }, harnessProbe));
+
+  test('R16.3: malformed JWT → 401', requireDB(async () => {
+    const res = await request(app)
+      .get('/api/tasks')
+      .set('Authorization', 'Bearer not.a.real.jwt');
+    expect(res.status).toBe(401);
+    expect(res.body).toHaveProperty('error');
+  }, harnessProbe));
+
+  test('R16.3: missing Authorization header → 401', requireDB(async () => {
+    const res = await request(app).get('/api/tasks');
+    expect(res.status).toBe(401);
+    expect(res.body).toHaveProperty('error');
+  }, harnessProbe));
+
   // ── 200: Valid token ───────────────────────────────────────────────────────
 
   test('valid RS256 token with correct claims → 200', requireDB(async () => {

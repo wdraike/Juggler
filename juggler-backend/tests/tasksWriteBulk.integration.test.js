@@ -188,3 +188,147 @@ describe('deleteInstancesWhere — instance-only deletes', () => {
     expect(await db('task_masters').where('id', tid).first()).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// R23.3: Deadlock retry scenarios
+// ---------------------------------------------------------------------------
+describe('R23.3: Deadlock retry scenarios', () => {
+  test('R23.3: BatchCreateTasks retries on transient deadlock error', async () => {
+    if (!available) return;
+    // The BatchCreateTasks use-case wraps the transaction in a MAX_RETRIES loop.
+    // We test the retry logic by injecting a mock that simulates a deadlock
+    // on the first attempt and succeeds on retry.
+    var BatchCreateTasks = require('../../src/slices/task/application/commands/BatchCreateTasks');
+    var MAX_RETRIES = BatchCreateTasks.MAX_RETRIES || 3;
+
+    var attemptCount = 0;
+    var mockRepo = {
+      runInTransaction: jest.fn(async function (fn) {
+        attemptCount++;
+        if (attemptCount === 1) {
+          var err = new Error('Deadlock found when trying to get lock');
+          err.code = 'ER_LOCK_DEADLOCK';
+          throw err;
+        }
+        // Second attempt succeeds
+        await fn({ insert: jest.fn() });
+      }),
+      ensureProject: jest.fn(function () { return Promise.resolve(); }),
+      applySplitDefault: jest.fn(function () { return Promise.resolve(); })
+    };
+
+    var cmd = new BatchCreateTasks({
+      repo: mockRepo,
+      isLocked: function () { return Promise.resolve(false); },
+      enqueueWrite: function () { return Promise.resolve(); },
+      safeTimezone: function () { return 'America/New_York'; },
+      sleep: function () { return Promise.resolve(); }
+    });
+
+    var result = await cmd.execute({
+      userId: USER_A,
+      tasks: [{ text: 'Retry task', dur: 30, pri: 'P3' }]
+    });
+
+    // Should have retried and succeeded
+    expect(attemptCount).toBe(2);
+    expect(result.status).toBe(201);
+    expect(mockRepo.runInTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  test('R23.3: Max retries exceeded throws deadlock error', async () => {
+    if (!available) return;
+    var BatchCreateTasks = require('../../src/slices/task/application/commands/BatchCreateTasks');
+    var MAX_RETRIES = BatchCreateTasks.MAX_RETRIES || 3;
+
+    var attemptCount = 0;
+    var mockRepo = {
+      runInTransaction: jest.fn(async function () {
+        attemptCount++;
+        var err = new Error('Deadlock found when trying to get lock');
+        err.code = 'ER_LOCK_DEADLOCK';
+        throw err;
+      }),
+      ensureProject: jest.fn(function () { return Promise.resolve(); }),
+      applySplitDefault: jest.fn(function () { return Promise.resolve(); })
+    };
+
+    var cmd = new BatchCreateTasks({
+      repo: mockRepo,
+      isLocked: function () { return Promise.resolve(false); },
+      enqueueWrite: function () { return Promise.resolve(); },
+      safeTimezone: function () { return 'America/New_York'; },
+      sleep: function () { return Promise.resolve(); }
+    });
+
+    await expect(cmd.execute({
+      userId: USER_A,
+      tasks: [{ text: 'Fail task', dur: 30, pri: 'P3' }]
+    })).rejects.toThrow(/Deadlock/);
+
+    // Should have attempted MAX_RETRIES + 1 times
+    expect(attemptCount).toBe(MAX_RETRIES + 1);
+  });
+
+  test('R23.3: Non-deadlock error is NOT retried (re-thrown immediately)', async () => {
+    if (!available) return;
+    var BatchCreateTasks = require('../../src/slices/task/application/commands/BatchCreateTasks');
+
+    var attemptCount = 0;
+    var mockRepo = {
+      runInTransaction: jest.fn(async function () {
+        attemptCount++;
+        var err = new Error('Duplicate entry for key PRIMARY');
+        err.code = 'ER_DUP_ENTRY';
+        throw err;
+      }),
+      ensureProject: jest.fn(function () { return Promise.resolve(); }),
+      applySplitDefault: jest.fn(function () { return Promise.resolve(); })
+    };
+
+    var cmd = new BatchCreateTasks({
+      repo: mockRepo,
+      isLocked: function () { return Promise.resolve(false); },
+      enqueueWrite: function () { return Promise.resolve(); },
+      safeTimezone: function () { return 'America/New_York'; },
+      sleep: function () { return Promise.resolve(); }
+    });
+
+    await expect(cmd.execute({
+      userId: USER_A,
+      tasks: [{ text: 'Dup task', dur: 30, pri: 'P3' }]
+    })).rejects.toThrow(/Duplicate entry/);
+
+    // Should NOT have retried — only 1 attempt
+    expect(attemptCount).toBe(1);
+  });
+
+  test('R23.3: Concurrent batch operations do not interfere', async () => {
+    if (!available) return;
+    // Create two independent batch operations that should both succeed
+    var id1 = uuidv7(), id2 = uuidv7();
+
+    await tw.insertTask(db, {
+      id: id1, user_id: USER_A, text: 'batch-op-1', task_type: 'task',
+      dur: 30, pri: 'P3', created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    await tw.insertTask(db, {
+      id: id2, user_id: USER_A, text: 'batch-op-2', task_type: 'task',
+      dur: 30, pri: 'P3', created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+
+    // Run two batch updates concurrently
+    var results = await Promise.allSettled([
+      tw.updateTasksWhere(db, USER_A, function(q) { return q.where('id', id1); }, { text: 'updated-1', updated_at: db.fn.now() }),
+      tw.updateTasksWhere(db, USER_A, function(q) { return q.where('id', id2); }, { text: 'updated-2', updated_at: db.fn.now() })
+    ]);
+
+    expect(results[0].status).toBe('fulfilled');
+    expect(results[1].status).toBe('fulfilled');
+
+    var row1 = await db('task_masters').where('id', id1).first();
+    var row2 = await db('task_masters').where('id', id2).first();
+    expect(row1.text).toBe('updated-1');
+    expect(row2.text).toBe('updated-2');
+  });
+});
