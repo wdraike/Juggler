@@ -84,6 +84,29 @@ var parseDate = dateHelpers.parseDate;
 var formatDateKey = dateHelpers.formatDateKey;
 var isoToDateKey = dateHelpers.isoToDateKey;
 var parseTimeToMinutes = dateHelpers.parseTimeToMinutes;
+
+/**
+ * computeIsPastDue — single source of truth for the floating-exclusion gate.
+ * 999.671: floating tasks (no deadline, overdue=0) have no firm commitment;
+ * a stale past date is NOT "past due". Only deadline-bearing or already-flagged
+ * (overdue=1) tasks can be isPastDue.
+ *
+ * Both synthesis sites (primary :1825 and cache :2202) call this helper so they
+ * CANNOT silently diverge.
+ *
+ * @param {object} t           - task object (fields: deadline, overdue, date, time)
+ * @param {number|null} scheduledMins - parsed minutes from t.time (null if no time)
+ * @param {object} timeInfo    - scheduler time context (todayKey, nowMins)
+ * @returns {boolean}
+ */
+function computeIsPastDue(t, scheduledMins, timeInfo) {
+  return (t.deadline || t.overdue) &&
+    scheduledMins != null &&
+    t.date != null &&
+    t.date !== 'TBD' &&
+    (t.date < timeInfo.todayKey ||
+      (t.date === timeInfo.todayKey && scheduledMins < timeInfo.nowMins));
+}
 var formatMinutesToTime = dateHelpers.formatMinutesToTime;
 var formatMinutesToTimeDb = dateHelpers.formatMinutesToTimeDb;
 var localToUtc = dateHelpers.localToUtc;
@@ -1800,8 +1823,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var st = statuses[t.id] || '';
     var isFinished = st === 'done' || st === 'cancel' || st === 'skip';
     var scheduledMins = t.time ? parseTimeToMinutes(t.time) : null;
-    var isPastDue = scheduledMins != null && t.date != null && t.date !== 'TBD' &&
-      (t.date < timeInfo.todayKey || (t.date === timeInfo.todayKey && scheduledMins < timeInfo.nowMins));
+    // 999.671: single source of truth — computeIsPastDue() encapsulates the
+    // floating-exclusion gate so this site and the cache path below CANNOT diverge.
+    var isPastDue = computeIsPastDue(t, scheduledMins, timeInfo);
     var isOverdueTask = !!t.overdue || isPastDue;
     if (!isFinished && !isOverdueTask) return;
     if (!t.date || t.date === 'TBD') return;
@@ -2173,8 +2197,9 @@ async function getSchedulePlacements(userId, options) {
       var st = statuses[t.id] || '';
       var isFinished = st === 'done' || st === 'cancel' || st === 'skip';
       var scheduledMins = t.time ? parseTimeToMinutes(t.time) : null;
-      var isPastDue = scheduledMins != null && t.date != null && t.date !== 'TBD' &&
-        (t.date < timeInfo.todayKey || (t.date === timeInfo.todayKey && scheduledMins < timeInfo.nowMins));
+      // 999.671: single source of truth — computeIsPastDue() encapsulates the
+      // floating-exclusion gate so this site and the primary path above CANNOT diverge.
+      var isPastDue = computeIsPastDue(t, scheduledMins, timeInfo);
       var isOverdueTask = !!t.overdue || isPastDue;
       if (!isFinished && !isOverdueTask) return;
       if (!t.date || t.date === 'TBD') return;
@@ -2342,10 +2367,11 @@ async function getSchedulePlacements(userId, options) {
   };
 }
 
-module.exports = { 
-  runScheduleAndPersist, 
-  getSchedulePlacements, 
+module.exports = {
+  runScheduleAndPersist,
+  getSchedulePlacements,
   computeWindowCloseUtc,
+  computeIsPastDue,
   setWeatherProvider,
   getWeatherProvider
 };

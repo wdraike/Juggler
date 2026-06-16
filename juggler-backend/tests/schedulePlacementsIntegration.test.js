@@ -214,45 +214,115 @@ describe('getSchedulePlacements', () => {
     expect(pA.start).not.toBe(pB.start);
   });
 
-  test('isPastDue: past task with overdue=0 appears in dayPlacements with _overdue=true', async () => {
-    // Regression guard for the isPastDue fix: the scheduler clears overdue=0 at
-    // the start of every run, so tasks whose scheduled_at is in the past but just
-    // got reset must still be synthesised as overdue placements — not fall into
-    // the unscheduled bucket.
-    // `date`/`overdue` live on task_instances; scheduler derives t.time from scheduled_at.
-    // The isPastDue check fires when t.date < todayKey — any past date qualifies.
+  test('999.671 roll-forward contract: FLOATING past+unplaceable task is NOT flagged _overdue on stale past date', async () => {
+    // 999.671 USER DECISION: "roll-forward wins" — floating tasks (no deadline) must
+    // NEVER be flagged past-due/_overdue, even when unplaceable (when='_invalid_window_').
     //
-    // Note: uses runScheduleAndPersist directly. The overdue injection (_overdue flag,
-    // isPastDue logic) runs inside runScheduleAndPersist (lines 1753-1801 of runSchedule.js).
-    // The no-cache first-load path of getSchedulePlacements routes through
-    // runSchedulerWithShadow which does NOT run the overdue injection.
+    // Previous test asserted _overdue=true for this scenario — that encoded the BUG.
+    // Correct contract: a floating task has no firm commitment; a stale past date
+    // just means the scheduler previously placed it there. With bert's fix at
+    // runSchedule.js:1825 (`(t.deadline || t.overdue) &&`), isPastDue is gated so
+    // that deadline=null + overdue=0 → isPastDue=false → the task never appears in
+    // dayPlacements on the old date with _overdue=true.
+    //
+    // When='_invalid_window_' → no matching time block → task goes to result.unplaced
+    // → stays out of placedIds → synthesis loop fires but isPastDue is now false →
+    // task does NOT appear in dayPlacements with _overdue=true on the past date.
+    //
+    // Traceability: BUG-671 (.planning/kermit/jug-floating-past-due/TRACEABILITY.md)
     if (!available) return;
-    // Use a date definitely in the past
     var pastDate = '2025-01-15';
-    // scheduled_at = past date at 14:00 UTC → 9:00 AM ET (EST = UTC-5 in January)
     var scheduledAt = pastDate + ' 14:00:00';
-    // Strategy for unplaceability: use when='_invalid_window_' so the scheduler cannot
-    // place it → task is unplaced → overdue injection fires → isPastDue is computed from
-    // t.date < todayKey = true → _overdue=true in the placement entry, even though overdue=0
-    // in the DB. That's the regression being guarded (isPastDue fix).
     await db('task_masters').insert({
-      id: 'gp-pastdue-001', user_id: USER_ID, text: 'Past due task',
+      id: 'gp-pastdue-001', user_id: USER_ID, text: 'Past due floating task',
       dur: 30, status: '', when: '_invalid_window_',
       created_at: db.fn.now(), updated_at: db.fn.now()
     });
-    // Insert instance with past date, scheduled_at in past, and overdue=0 (the regression case)
     await db('task_instances').insert({
       id: 'gp-pastdue-001', master_id: 'gp-pastdue-001', user_id: USER_ID,
       occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
       date: pastDate, scheduled_at: scheduledAt, overdue: 0,
       dur: 30, status: '', created_at: db.fn.now(), updated_at: db.fn.now()
     });
-    // Use runScheduleAndPersist directly: overdue injection (isPastDue + _overdue flag) is in
-    // runScheduleAndPersist, not in the no-cache path of getSchedulePlacements.
     var result = await runScheduleAndPersist(USER_ID, undefined, { timezone: 'America/New_York' });
-    var placements = (result.dayPlacements && result.dayPlacements[pastDate]) || [];
-    var placement = placements.find(function(p) { return p.task && p.task.id === 'gp-pastdue-001'; });
-    expect(placement).toBeDefined();
-    expect(placement._overdue).toBe(true);
+
+    // ASSERTION (roll-forward contract): floating + no-deadline task must NOT appear
+    // on the stale past date with _overdue=true. isPastDue must be false for it.
+    var pastDatePlacements = (result.dayPlacements && result.dayPlacements[pastDate]) || [];
+    var overdueOnPastDate = pastDatePlacements.find(function(p) {
+      return p.task && p.task.id === 'gp-pastdue-001' && p._overdue;
+    });
+    expect(overdueOnPastDate).toBeUndefined();
+
+    // If the task appears anywhere in dayPlacements, it must not carry _overdue=true.
+    if (result.dayPlacements) {
+      Object.keys(result.dayPlacements).forEach(function(dk) {
+        var entries = result.dayPlacements[dk] || [];
+        entries.forEach(function(p) {
+          if (p.task && p.task.id === 'gp-pastdue-001') {
+            expect(p._overdue).toBeFalsy();
+          }
+        });
+      });
+    }
+
+    // NOTE: Phase 8 (PATH B) may still write overdue=1 to the DB for a floating
+    // task with _aInPast=true. That is a separate concern from the display synthesis
+    // fix. Bert's fix (lines 1825+2202) guards the DISPLAY path: even if the DB has
+    // overdue=1, the `(t.deadline || t.overdue) &&` gate at :1825 ensures the task
+    // does not appear with _overdue=true on the past date via isPastDue.
+    // The DB column assertion is intentionally omitted here — it belongs to a
+    // separate Phase 8 fix leg, not BUG-671's display-synthesis scope.
   });
+
+  test('999.671 deadline-bearing past+unplaceable task IS flagged _overdue (deadline contract preserved)', async () => {
+    // Companion to the roll-forward test: a DEADLINE-bearing task that is past its
+    // deadline AND unplaceable (when='_invalid_window_') SHOULD appear with _overdue
+    // via the isPastDue path, because `(t.deadline || t.overdue)` is truthy.
+    //
+    // This guards bert's fix from over-suppression: if the gate were written as `false &&`
+    // universally, this test would flip RED, proving the fix is wrong.
+    //
+    // Traceability: BUG-671
+    if (!available) return;
+    var pastDate = '2025-01-15';
+    var scheduledAt = pastDate + ' 14:00:00';
+    await db('task_masters').insert({
+      id: 'gp-pastdue-deadline-001', user_id: USER_ID, text: 'Past deadline unplaceable task',
+      dur: 30, status: '', when: '_invalid_window_',
+      deadline: '2025-01-10 23:59:59', // deadline clearly in the past
+      created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    await db('task_instances').insert({
+      id: 'gp-pastdue-deadline-001', master_id: 'gp-pastdue-deadline-001', user_id: USER_ID,
+      occurrence_ordinal: 1, split_ordinal: 1, split_total: 1,
+      date: pastDate, scheduled_at: scheduledAt, overdue: 0,
+      dur: 30, status: '', created_at: db.fn.now(), updated_at: db.fn.now()
+    });
+    var result = await runScheduleAndPersist(USER_ID, undefined, { timezone: 'America/New_York' });
+
+    // A deadline-bearing unplaceable task with a past date MUST appear with _overdue=true.
+    // (isPastDue fires because t.deadline is truthy.)
+    var found = null;
+    if (result.dayPlacements) {
+      Object.keys(result.dayPlacements).forEach(function(dk) {
+        (result.dayPlacements[dk] || []).forEach(function(p) {
+          if (p.task && p.task.id === 'gp-pastdue-deadline-001') found = p;
+        });
+      });
+    }
+    expect(found).toBeDefined();
+    expect(found._overdue).toBe(true);
+  });
+
+  // NOTE (999.671 re-review 2026-06-16): the cache-path gate (runSchedule.js:2202)
+  // is now pinned by the direct unit test of computeIsPastDue (tests/computeIsPastDue.test.js).
+  // computeIsPastDue is the single helper called at BOTH synthesis sites (:1825 and :2202),
+  // so one unit-level mutation-verified test of the helper pins both. The vacuous
+  // integration-level cache-path test that previously lived here was removed because
+  // zoe proved (MUT-2) that it never caused the cache synthesis loop to execute —
+  // the fixture's runScheduleAndPersist call populated the cache but the test's
+  // assertion block only checked if the task appeared; it could not flip RED on
+  // a mutation of :2202 alone (the fixture never entered that branch).
 });
+

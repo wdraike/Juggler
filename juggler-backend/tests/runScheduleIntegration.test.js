@@ -407,3 +407,299 @@ describe('runScheduleAndPersist: scheduled_at validation', () => {
     expect(taskRow.scheduled_at).toBeTruthy();
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// BUG-671 regression: floating tasks must never be shown as overdue
+//
+// Root cause (two paths):
+//
+// PATH A — display synthesis (primary / user-visible):
+//   runSchedule.js:1821-1823 (runScheduleAndPersist) and :2194-2196
+//   (getSchedulePlacements cache path). Both compute:
+//     isPastDue = scheduledMins!=null && t.date < todayKey
+//   with NO exclusion for floating tasks (no deadline, no concept of past-due).
+//   A floating task with a stale past t.date and a t.time from a prior run
+//   satisfies isPastDue → appears in dayPlacements with _overdue=true on the
+//   OLD past date, even though it was re-placed on a future date this run.
+//   This is the PRIMARY user-visible bug: the task appears on the old date
+//   with a "past scheduled date" indicator.
+//
+// PATH B — DB overdue flag (Phase 8 ANYTIME guard):
+//   runSchedule.js:1516-1526. When a floating ANYTIME task appears in
+//   result.unplaced AND original.date < todayKey (_aInPast=true), the guard
+//   at line 1520 does NOT return early → falls through to Case B → writes
+//   overdue=1 to the DB and preserves the stale past scheduled_at.
+//   This path requires the task to be genuinely unplaceable (result.unplaced).
+//
+// Desired behavior (behavior_contract):
+//   - Floating task NEVER receives overdue=1 from Phase 8 (regardless of date)
+//   - Floating task with stale past scheduled_at MUST be placed today/forward,
+//     NOT shown on the old date with _overdue=true
+//   - display isPastDue synthesis MUST exclude floating tasks (no deadline)
+//   - Hard-deadline tasks past their deadline MUST still show as overdue (AC3)
+//   - Recurring missed instances MUST NOT roll forward (AC4)
+//
+// Traceability: .planning/kermit/jug-floating-past-due/TRACEABILITY.md BUG-671
+// ═══════════════════════════════════════════════════════════════
+
+describe('BUG-671 regression: floating tasks must never be flagged overdue', () => {
+  // Fixed past date — always in the past as the repo ages.
+  var STALE_DATE_UTC = '2026-06-10 00:00:00'; // 6+ days before leg authoring date
+  var STALE_DATE_KEY = '2026-06-10';           // YYYY-MM-DD form used by scheduler
+
+  // Helper: get today's key from the real clock (YYYY-MM-DD in UTC).
+  // Tests run against the real scheduler clock; we can't freeze it here.
+  function todayKey() {
+    var d = new Date();
+    var m = d.getUTCMonth() + 1, day = d.getUTCDate();
+    return d.getUTCFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  }
+
+  // Helper: find a task's entry in dayPlacements (searches all date keys)
+  function findInPlacements(dayPlacements, taskId) {
+    for (var dk in dayPlacements) {
+      var entries = dayPlacements[dk] || [];
+      for (var i = 0; i < entries.length; i++) {
+        if (entries[i].task && entries[i].task.id === taskId) return { dateKey: dk, entry: entries[i] };
+      }
+    }
+    return null;
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // BUG-671-AC1 — PRIMARY RED TEST (Path A: display synthesis)
+  //
+  // Root cause (code-traced):
+  //   runSchedule.js:1821-1823 (runScheduleAndPersist synthesis loop):
+  //     var isPastDue = scheduledMins != null && t.date != null && t.date !== 'TBD' &&
+  //       (t.date < timeInfo.todayKey || ...);
+  //     var isOverdueTask = !!t.overdue || isPastDue;
+  //
+  //   For a floating task (no deadline, non-recurring) with stale t.date < todayKey
+  //   and non-null t.time: isPastDue=true → isOverdueTask=true → the synthesis
+  //   creates a placement entry on the OLD past date with _overdue=true. This is
+  //   WRONG — a floating task has no commitment; a past date just means the
+  //   scheduler previously placed it there.
+  //
+  // How to trigger the synthesis loop (line 1815-1828):
+  //   The synthesis loop runs for tasks NOT in placedIds. To force the floating
+  //   task into this path, use when='_invalid_window_' — the scheduler cannot
+  //   find any time block for this when-tag, so the task enters result.unplaced
+  //   and is excluded from placedIds. The synthesis loop then fires at line 1815.
+  //   (Same technique used in schedulePlacementsIntegration.test.js:234-236.)
+  //
+  // PRE-FIX FAILURE:
+  //   isPastDue=true (t.date=STALE_DATE_KEY < todayKey, t.time non-null from prior run)
+  //   → isOverdueTask=true → task appears on STALE_DATE_KEY with _overdue=true
+  //   → foundOnStaleDate=true, found.entry._overdue=true
+  //   Both assertions below FAIL on pre-fix code.
+  // ─────────────────────────────────────────────────────────────────
+
+  // BUG-671-AC1 (PRIMARY RED TEST — display synthesis):
+  // A floating task (anytime, no deadline, non-recurring) that cannot be placed
+  // (forced via when='_invalid_window_') and has a stale past date+time MUST NOT
+  // appear in dayPlacements on the old past date with _overdue=true.
+  //
+  // FAILS on pre-fix code: isPastDue fires at runSchedule.js:1821-1823 with no
+  // exclusion for floating (deadline=null) tasks.
+  // PASSES after fix: the fix adds `&& (t.deadline || t.overdue)` (or equivalent)
+  // to gate isPastDue so floating tasks are exempt from overdue synthesis.
+  test('AC1 (RED): floating task with stale past date is NOT flagged overdue in dayPlacements when unplaceable', async () => {
+    if (!available) return;
+
+    // when='_invalid_window_' forces the task into result.unplaced (no matching
+    // time block exists), triggering the synthesis loop at runSchedule.js:1815.
+    await db('task_masters').insert({
+      id: 'floating-red-master',
+      user_id: USER_ID,
+      text: 'Floating RED test task',
+      dur: 30,
+      status: '',
+      when: '_invalid_window_',    // unplaceable: no time block matches this tag
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+    // Insert instance with stale past date and a non-null scheduled_at
+    // (simulating a prior scheduler run that placed it at 9 AM on STALE_DATE_KEY)
+    await db('task_instances').insert({
+      id: 'floating-red-001',
+      master_id: 'floating-red-master',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      date: STALE_DATE_KEY,                    // stale past date
+      scheduled_at: STALE_DATE_KEY + ' 14:00:00', // 9 AM ET (UTC-5 Jan = UTC-4 June → 13:00, but 14:00 also past)
+      overdue: 0,                               // not yet flagged (DB reset)
+      dur: 30,
+      status: '',                               // non-recurring, non-terminal
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    var result = await runScheduleAndPersist(USER_ID);
+
+    // ASSERTION 1 (RED): The floating task must NOT appear on the stale past date
+    // with _overdue=true. Pre-fix: isPastDue=true → appears here with _overdue=true.
+    var staleDateEntries = result.dayPlacements[STALE_DATE_KEY] || [];
+    var foundOnStaleDate = staleDateEntries.some(function(e) {
+      return e.task && e.task.id === 'floating-red-001';
+    });
+    expect(foundOnStaleDate).toBe(false); // FAILS pre-fix
+
+    // ASSERTION 2 (RED): If the task appears anywhere in dayPlacements, it must
+    // NOT carry _overdue=true. The fix excludes deadline=null tasks from isPastDue.
+    var found = findInPlacements(result.dayPlacements, 'floating-red-001');
+    if (found) {
+      expect(found.entry._overdue).toBeFalsy(); // FAILS pre-fix
+    }
+  });
+
+  // BUG-671-AC2: After scheduler run, floating task with a NORMAL when-tag
+  // (placeable) gets its scheduled_at rolled forward to today or later.
+  // This is a GREEN guard — verifies the roll-forward path works correctly.
+  test('AC2 (guard): placeable floating task with stale past date rolls forward to today or later', async () => {
+    if (!available) return;
+
+    await seedTask({
+      id: 'floating-roll',
+      text: 'Floating roll forward',
+      placement_mode: 'anytime',
+      deadline: null,
+      recurring: 0,
+      dur: 30,
+      when: '',
+      scheduled_at: STALE_DATE_UTC,
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    var row = await db('tasks_v').where('id', 'floating-roll').first();
+    expect(row.scheduled_at).toBeTruthy();
+    var scheduledDate = row.scheduled_at.slice(0, 10);
+    var today = todayKey();
+    expect(scheduledDate >= today).toBe(true);
+    expect(row.overdue).toBeFalsy(); // must stay 0
+  });
+
+  // BUG-671-AC3 — GUARD TEST (must remain GREEN before and after fix).
+  // A deadline-bearing task whose deadline has passed AND that is UNPLACEABLE
+  // (forced via when='_invalid_window_') MUST appear in dayPlacements with
+  // _overdue=true via the synthesis/isPastDue path.
+  //
+  // STRENGTHENED (999.671 zoe BLOCK): original AC3 used a PLACED task, so the
+  // synthesis loop at runSchedule.js:1815 was never reached — the test stayed
+  // green even under a universal `false &&` suppression. The new version uses
+  // when='_invalid_window_' to force the task through the same synthesis/isPastDue
+  // path the floating task uses. This makes AC3 a real guard: if the fix
+  // over-suppresses (hides deadline overdue), AC3 flips RED.
+  //
+  // Proof of real guard: replacing bert's `(t.deadline || t.overdue) &&` with
+  // `false &&` at runSchedule.js:1825 causes isPastDue=false for this task →
+  // isOverdueTask=false → synthesis skips it → found===null → AC3 FAILS.
+  test('AC3 (guard): deadline-bearing UNPLACEABLE task past its deadline IS _overdue via synthesis path', async () => {
+    if (!available) return;
+
+    // when='_invalid_window_' → no matching time block → scheduler cannot place it
+    // → task goes to result.unplaced → NOT in placedIds → synthesis loop at :1815 fires
+    // → t.deadline is truthy → isPastDue=true → _overdue=true in placement entry.
+    await db('task_masters').insert({
+      id: 'deadline-past-unplaceable',
+      user_id: USER_ID,
+      text: 'Past deadline unplaceable task',
+      dur: 30,
+      status: '',
+      when: '_invalid_window_',       // unplaceable: forces synthesis loop
+      deadline: '2025-06-01 23:59:59', // clearly past deadline
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+    await db('task_instances').insert({
+      id: 'deadline-past-unplaceable',
+      master_id: 'deadline-past-unplaceable',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      date: STALE_DATE_KEY,                         // stale past date
+      scheduled_at: STALE_DATE_KEY + ' 14:00:00',  // non-null time → scheduledMins non-null
+      overdue: 0,
+      dur: 30,
+      status: '',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    var result = await runScheduleAndPersist(USER_ID);
+
+    // ASSERTION (AC3 real guard): deadline-bearing unplaceable past task MUST appear
+    // with _overdue=true. If the gate over-suppresses (false &&), this fails.
+    var found = findInPlacements(result.dayPlacements, 'deadline-past-unplaceable');
+    expect(found).not.toBeNull();
+    expect(found.entry._overdue).toBe(true);
+  });
+
+  // BUG-671-AC4 — GUARD TEST (must remain GREEN before and after fix).
+  // A recurring instance that has already been marked missed MUST NOT be
+  // rolled forward or have its status changed by a subsequent scheduler run.
+  // Per SCHEDULER.md §8 Rule 2, missed recurring instances keep their status
+  // and are not perpetually rescheduled.
+  //
+  // Implementation note: the reconciler deletes "stale" pending recurring
+  // instances that don't match the template's expected ID scheme. We therefore
+  // test an instance that is ALREADY in status='missed' (a terminal state the
+  // reconciler respects and leaves intact) and verify a second scheduler run
+  // does not alter it.
+  test('AC4 (guard): already-missed recurring instance is NOT altered by a subsequent scheduler run', async () => {
+    if (!available) return;
+
+    await seedTemplate({ id: 'tmpl-ac4', text: 'AC4 recurring', dur: 30 });
+
+    // Seed an explicit recurring instance directly so this test CANNOT vacuously
+    // skip (zoe AC4 refer: the original `if (!todayInst) return;` was a silent
+    // pass escape when the template didn't expand). We insert the instance with
+    // status='' (pending) into the past so the scheduler sees it as a past instance.
+    // The seedInstance helper creates a task_masters + task_instances row.
+    await seedInstance('tmpl-ac4', {
+      id: 'ac4-inst-seeded',
+      source_id: 'tmpl-ac4',
+      date: '2026-01-15',
+      scheduled_at: '2026-01-15 10:00:00',
+      status: '',
+      overdue: 0,
+      dur: 30,
+    });
+
+    // First run: verify the scheduler doesn't touch or roll the already-past instance.
+    var result1 = await runScheduleAndPersist(USER_ID); // eslint-disable-line no-unused-vars
+
+    // The seeded instance is our concrete missed instance — mark it missed to
+    // simulate a day passing without completion.
+    var todayInst = await db('task_instances').where('id', 'ac4-inst-seeded').first();
+    expect(todayInst).toBeTruthy(); // seeded instance MUST exist — not vacuous
+
+    var MISSED_SCHED = STALE_DATE_UTC; // force scheduled_at into past
+    await db('task_instances').where('id', todayInst.id).update({
+      status: 'missed',
+      scheduled_at: MISSED_SCHED,
+      completed_at: MISSED_SCHED,
+      updated_at: db.fn.now(),
+    });
+
+    // Second scheduler run
+    await runScheduleAndPersist(USER_ID);
+
+    // The missed instance must NOT have been altered — still missed, still at past date
+    var row = await db('task_instances').where('id', todayInst.id).first();
+    expect(row).toBeTruthy();
+    expect(row.status).toBe('missed');
+
+    // scheduled_at must not have been rolled to today or later
+    var scheduledDate = (row.scheduled_at || '').slice(0, 10);
+    var today = todayKey();
+    expect(scheduledDate < today).toBe(true); // not rolled forward
+
+    // Must NOT have overdue=1 (missed instances use status='missed', not the overdue DB flag)
+    expect(row.overdue).toBeFalsy();
+  });
+});
