@@ -394,14 +394,14 @@ describe('runScheduleAndPersist: scheduled_at validation', () => {
 
   test('allows regular tasks without scheduled_at (new tasks)', async () => {
     if (!available) return;
-    
+
     // Insert a regular task without scheduled_at (this is normal for new tasks)
     await seedTask({ id: 'new-task', text: 'New task', dur: 30, when: 'morning' });
-    
+
     // Should not throw - new tasks are allowed to lack scheduled_at
     var result = await runScheduleAndPersist(USER_ID);
     expect(result).toHaveProperty('updated');
-    
+
     // Verify the task now has scheduled_at after scheduling
     var taskRow = await db('tasks_v').where('id', 'new-task').first();
     expect(taskRow.scheduled_at).toBeTruthy();
@@ -701,5 +701,447 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
 
     // Must NOT have overdue=1 (missed instances use status='missed', not the overdue DB flag)
     expect(row.overdue).toBeFalsy();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// BUG-700 regression: PATH B must never write overdue=1 for floating
+// (no-deadline) tasks.
+//
+// Policy 999.671: floating tasks (deadline=null) are NEVER past-due / NEVER
+// overdue=1. PATH B in runSchedule.js result.unplaced.forEach (~lines 1485-1588)
+// has two holes that violate this policy:
+//
+//   HOLE 1 -- non-anytime placement modes (time_window / time_blocks):
+//     The no-deadline guard at ~line 1521 fires ONLY for
+//     placementMode==='anytime'. A floating task in time_window or time_blocks
+//     mode skips the guard entirely and falls to Case B -> overdue=1.
+//
+//   HOLE 2 -- anytime-in-past:
+//     The guard fires for anytime, but only returns early when !_aInPast AND
+//     !_aDeadlinePassed. If the task was placed on a prior day (_aInPast=true),
+//     the guard does NOT return early -> Case B -> overdue=1.
+//
+// Traceability: .planning/kermit/jug-pathb-floating-overdue/TRACEABILITY.md BUG-700
+//
+// AC1 (RED on current code):
+//   Floating task, non-anytime placement mode (time_window / time_blocks),
+//   previously placed in past, unplaceable this run -> overdue MUST be 0 in DB.
+// AC2 (RED on current code):
+//   Floating task already has overdue=1 in DB from prior bad run -> the fix
+//   must WRITE overdue=0 (clearing it), not leave it as 1.
+// AC3 (GREEN guard -- must stay GREEN before AND after fix):
+//   Deadline-bearing task (time_blocks), deadline passed, unplaceable -> overdue=1.
+// AC4 (GREEN guard -- must stay GREEN before AND after fix):
+//   Deadline-bearing ANYTIME task, never placed -> Case C (unscheduled=1), no overdue.
+//
+// METHODOLOGY for making tasks genuinely unplaceable:
+//
+//   Strategy A (time_blocks / anytime): when='_invalid_window_'.
+//     No time block has this tag -> scheduler cannot find a slot -> result.unplaced.
+//     Same technique as BUG-671 tests above.
+//
+//   Strategy B (time_window): time_flex=0 degrades time_window mode.
+//     unifiedScheduleV2.js: `if (flex > 0 && flex <= 480)` -- with flex=0 this
+//     is FALSE -> isWindowMode=false -> scheduler falls back to when-tag placement.
+//     Then when='_invalid_window_' makes it unplaceable via Strategy A.
+//     Without this, a time_window task with a valid preferred_time_mins ignores
+//     the `when` tag and is placed (not unplaced), so PATH B never fires.
+// ═══════════════════════════════════════════════════════════════
+
+describe('BUG-700 regression: PATH B must never write overdue=1 for floating tasks', () => {
+  var STALE_DATE_UTC = '2026-06-08 14:00:00'; // always-past UTC datetime
+
+  // ─────────────────────────────────────────────────────────────
+  // AC1-HOLE1a -- RED pre-fix: time_window floating task, past+unplaceable
+  //
+  // Pre-fix failure path (runSchedule.js ~1521):
+  //   Guard `if (original.placementMode === PLACEMENT_MODES.ANYTIME)` is FALSE
+  //   for time_window -> guard body skipped -> Case B -> overdue=1.
+  //
+  // Strategy B: time_flex=0 -> isWindowMode=false -> falls back to when tags
+  // -> when='_invalid_window_' -> unplaceable -> PATH B fires -> Case B -> overdue=1.
+  // ─────────────────────────────────────────────────────────────
+
+  test('AC1-HOLE1a (RED): floating time_window task, past+unplaceable, must NOT get overdue=1', async () => {
+    if (!available) return;
+
+    await db('task_masters').insert({
+      id: 'b700-tw-master',
+      user_id: USER_ID,
+      text: 'BUG-700 time_window floating',
+      dur: 30,
+      status: '',
+      placement_mode: 'time_window',
+      preferred_time_mins: 540,  // 9 AM -- irrelevant once flex=0 degrades mode
+      time_flex: 0,              // Strategy B: flex=0 -> isWindowMode=false -> uses when tags
+      when: '_invalid_window_',  // Strategy A: unplaceable after fallback to when-tag placement
+      deadline: null,            // FLOATING -- the key condition
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+    await db('task_instances').insert({
+      id: 'b700-tw-inst',
+      master_id: 'b700-tw-master',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      scheduled_at: STALE_DATE_UTC, // prior placement on past date -> hasScheduledAt=true -> Case B
+      overdue: 0,
+      dur: 30,
+      status: '',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    // ASSERTION (RED pre-fix): PATH B writes overdue=1 for time_window floating task.
+    // Post-fix: the fix must apply the no-deadline guard to ALL placement modes.
+    var row = await db('task_instances').where('id', 'b700-tw-inst').first();
+    expect(row).toBeTruthy();
+    // task_instances.overdue is tinyint NOT NULL DEFAULT 0 — never null. toBe(0) is exact.
+    expect(row.overdue).toBe(0); // FAILS pre-fix: overdue=1 written by Case B (HOLE 1)
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // AC1-HOLE1b -- RED pre-fix: time_blocks floating task, past+unplaceable
+  //
+  // Strategy A: time_blocks respects when-tags -> when='_invalid_window_' -> unplaceable.
+  // ─────────────────────────────────────────────────────────────
+
+  test('AC1-HOLE1b (RED): floating time_blocks task, past+unplaceable, must NOT get overdue=1', async () => {
+    if (!available) return;
+
+    await db('task_masters').insert({
+      id: 'b700-tb-master',
+      user_id: USER_ID,
+      text: 'BUG-700 time_blocks floating',
+      dur: 30,
+      status: '',
+      placement_mode: 'time_blocks',
+      when: '_invalid_window_',  // Strategy A: no matching time block -> unplaceable
+      deadline: null,            // FLOATING
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+    await db('task_instances').insert({
+      id: 'b700-tb-inst',
+      master_id: 'b700-tb-master',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      scheduled_at: STALE_DATE_UTC, // prior placement -> hasScheduledAt=true -> Case B
+      overdue: 0,
+      dur: 30,
+      status: '',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    var row = await db('task_instances').where('id', 'b700-tb-inst').first();
+    expect(row).toBeTruthy();
+    // task_instances.overdue is tinyint NOT NULL DEFAULT 0 — never null. toBe(0) is exact.
+    expect(row.overdue).toBe(0); // FAILS pre-fix: HOLE 1 -- guard skipped for time_blocks -> Case B -> overdue=1
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // AC1-HOLE2 -- RED pre-fix: anytime floating task placed in past
+  //
+  // HOLE 2: placementMode===ANYTIME, _aInPast=true (STALE date < todayKey).
+  // Guard at ~line 1525 requires BOTH !_aInPast AND !_aDeadlinePassed.
+  // _aInPast=true -> guard does NOT return early -> Case B -> overdue=1.
+  // Strategy A: when='_invalid_window_' forces result.unplaced for anytime mode.
+  // ─────────────────────────────────────────────────────────────
+
+  test('AC1-HOLE2 (RED): floating anytime task placed in past, unplaceable now, must NOT get overdue=1', async () => {
+    if (!available) return;
+
+    await db('task_masters').insert({
+      id: 'b700-any-past-master',
+      user_id: USER_ID,
+      text: 'BUG-700 anytime floating in-past',
+      dur: 30,
+      status: '',
+      placement_mode: 'anytime',
+      when: '_invalid_window_',  // Strategy A: unplaceable
+      deadline: null,            // FLOATING -- no deadline
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+    await db('task_instances').insert({
+      id: 'b700-any-past-inst',
+      master_id: 'b700-any-past-master',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      scheduled_at: STALE_DATE_UTC, // PAST date -> original.date < todayKey -> _aInPast=true
+      overdue: 0,
+      dur: 30,
+      status: '',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    // ASSERTION (RED pre-fix): HOLE 2 -- _aInPast=true causes the ANYTIME guard to
+    // skip the early return -> Case B fires -> overdue=1.
+    var row = await db('task_instances').where('id', 'b700-any-past-inst').first();
+    expect(row).toBeTruthy();
+    // task_instances.overdue is tinyint NOT NULL DEFAULT 0 — never null. toBe(0) is exact.
+    expect(row.overdue).toBe(0); // FAILS pre-fix: overdue=1 written by Case B
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // AC2 -- RED pre-fix: stale overdue=1 on floating task is CLEARED
+  //
+  // Pre-fix: wasAlreadyOverdue=true + unscheduled=0 -> "Already in final state"
+  //   branch (runSchedule.js ~1544) -> only slack_mins checked -> overdue=1 remains.
+  // Post-fix: the no-deadline guard must actively write overdue=0.
+  //
+  // Strategy B (time_flex=0) ensures the task is genuinely unplaceable, not
+  // placed and auto-cleared by the normal placement update path.
+  // ─────────────────────────────────────────────────────────────
+
+  test('AC2 (RED): floating task already overdue=1 in DB -- run must write overdue=0', async () => {
+    if (!available) return;
+
+    await db('task_masters').insert({
+      id: 'b700-clear-master',
+      user_id: USER_ID,
+      text: 'BUG-700 clear stale overdue',
+      dur: 30,
+      status: '',
+      placement_mode: 'time_window',
+      preferred_time_mins: 540,
+      time_flex: 0,              // Strategy B: degrade time_window -> falls back to when tags
+      when: '_invalid_window_',  // Strategy A: unplaceable
+      deadline: null,            // FLOATING
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+    await db('task_instances').insert({
+      id: 'b700-clear-inst',
+      master_id: 'b700-clear-master',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      scheduled_at: STALE_DATE_UTC,
+      overdue: 1,      // STALE overdue flag from a prior bad run
+      unscheduled: 0,  // Case B state: pinned to calendar position
+      dur: 30,
+      status: '',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    // ASSERTION (RED pre-fix): stale overdue=1 must be cleared to 0.
+    // Pre-fix: "already final state" branch fires -> overdue=1 remains unchanged.
+    // Post-fix: the floating-task guard writes overdue=0 explicitly.
+    var row = await db('task_instances').where('id', 'b700-clear-inst').first();
+    expect(row).toBeTruthy();
+    expect(row.overdue).toBe(0); // FAILS pre-fix: overdue stays 1
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // AC3 -- GREEN guard: deadline-bearing task STILL gets overdue=1
+  //
+  // Verifies the fix does not over-suppress deadline-bearing tasks.
+  // Uses time_blocks + Strategy A (genuinely unplaceable via when tag).
+  // If the fix naively makes all non-ANYTIME tasks "floating-exempt", AC3 fails.
+  // ─────────────────────────────────────────────────────────────
+
+  test('AC3 (guard, GREEN): deadline-bearing time_blocks task, past deadline, unplaceable -- gets overdue=1', async () => {
+    if (!available) return;
+
+    await db('task_masters').insert({
+      id: 'b700-dl-master',
+      user_id: USER_ID,
+      text: 'BUG-700 deadline task guard',
+      dur: 30,
+      status: '',
+      placement_mode: 'time_blocks',  // HOLE 1 mode; no ANYTIME guard
+      when: '_invalid_window_',       // Strategy A: unplaceable
+      deadline: '2025-01-01 23:59:59', // clearly past deadline (not floating)
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+    await db('task_instances').insert({
+      id: 'b700-dl-inst',
+      master_id: 'b700-dl-master',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      scheduled_at: STALE_DATE_UTC, // prior placement -> hasScheduledAt=true -> Case B
+      overdue: 0,
+      dur: 30,
+      status: '',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    // ASSERTION (GREEN guard): deadline-bearing, past-deadline, unplaceable task
+    // MUST still get overdue=1 after the fix.
+    var row = await db('task_instances').where('id', 'b700-dl-inst').first();
+    expect(row).toBeTruthy();
+    expect(row.overdue).toBe(1); // must be GREEN before fix AND after fix
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // AC4 -- GREEN guard: never-placed task goes to Case C, not Case B
+  //
+  // A deadline-bearing ANYTIME task that was NEVER placed (no scheduled_at)
+  // and cannot be placed this run -> goes to Case C (unscheduled=1), not Case B.
+  // Case C never writes overdue=1. Ensures the fix doesn't accidentally inject
+  // overdue writes into Case C.
+  // ─────────────────────────────────────────────────────────────
+
+  test('AC4 (guard, GREEN): deadline-bearing anytime task, never placed -- Case C: unscheduled=1, no overdue', async () => {
+    if (!available) return;
+
+    await db('task_masters').insert({
+      id: 'b700-ac4-master',
+      user_id: USER_ID,
+      text: 'BUG-700 AC4 never-placed deadline guard',
+      dur: 30,
+      status: '',
+      placement_mode: 'anytime',
+      when: '_invalid_window_',         // unplaceable -> result.unplaced
+      deadline: '2099-12-31 23:59:59', // has a deadline (NOT floating)
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+    await db('task_instances').insert({
+      id: 'b700-ac4-inst',
+      master_id: 'b700-ac4-master',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      // No scheduled_at: never placed -> hasScheduledAt=false -> Case C (not Case B)
+      overdue: 0,
+      dur: 30,
+      status: '',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    // ASSERTION (GREEN guard): Case C path -> unscheduled=1, no overdue=1 written.
+    // Both before and after the fix (Case C never writes overdue).
+    var row = await db('task_instances').where('id', 'b700-ac4-inst').first();
+    expect(row).toBeTruthy();
+    expect(row.overdue).toBeFalsy(); // Case C: no overdue -- must stay GREEN
+    expect(row.unscheduled).toBe(1); // Case C: moves to unscheduled lane
+  });
+
+  // ─────────────────────────────────────────────────────────────
+  // AC1-HOLE-CHAIN — GREEN guard (zoe WARN#1 resolution):
+  // Floating CHAIN-MEMBER task (depends_on non-empty, no deadline, previously
+  // placed, unplaceable this run) MUST NOT get overdue=1 via PATH B Case B.
+  //
+  // Code path: runSchedule.js:1511 comment "One-off / chain-member task."
+  //   Chain members (task_type='task' with depends_on) are NOT filtered by the
+  //   recurring_template / FIXED / marker / recurring_instance guards above.
+  //   They fall through to the hasScheduledAt Case B block at line 1514.
+  //   The mode-agnostic `!original.deadline` guard at line 1520 protects them
+  //   (same guard that protects one-offs). This test pins that protection.
+  //
+  // Strategy: seed a "blocker" task also with when='_invalid_window_' so the
+  //   scheduler cannot place it. The chain-member depends on the blocker — the
+  //   scheduler leaves the chain-member in result.unplaced (dep unsatisfied +
+  //   when-tag unplaceable). The chain-member has a past scheduled_at
+  //   (hasScheduledAt=true) → PATH B Case B fires. With deadline=null, the
+  //   `!original.deadline` guard returns early → no overdue=1 written.
+  //
+  // Pre-fix equivalent: if the guard were mode-restricted to ANYTIME only (the
+  //   pre-BUG-700 state), time_blocks chain-members would bypass it → Case B →
+  //   overdue=1. This test would fail on that pre-fix code and pins the guard's
+  //   chain-member coverage for regression.
+  // ─────────────────────────────────────────────────────────────
+
+  test('AC1-HOLE-CHAIN: floating chain-member (depends_on, no deadline), past+unplaceable, must NOT get overdue=1', async () => {
+    if (!available) return;
+
+    // Blocker task: unplaceable, no deadline (its own overdue state is not under test)
+    await db('task_masters').insert({
+      id: 'b700-chain-blocker-master',
+      user_id: USER_ID,
+      text: 'BUG-700 chain blocker',
+      dur: 30,
+      status: '',
+      placement_mode: 'time_blocks',
+      when: '_invalid_window_',  // unplaceable -> stays in result.unplaced
+      deadline: null,
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+    await db('task_instances').insert({
+      id: 'b700-chain-blocker-inst',
+      master_id: 'b700-chain-blocker-master',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      // No scheduled_at: never placed -> Case C (unscheduled=1), not Case B
+      overdue: 0,
+      dur: 30,
+      status: '',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    // Chain member: depends on blocker, has a prior past placement, no deadline.
+    // depends_on stored as JSON array in task_masters.
+    await db('task_masters').insert({
+      id: 'b700-chain-member-master',
+      user_id: USER_ID,
+      text: 'BUG-700 chain member floating',
+      dur: 30,
+      status: '',
+      placement_mode: 'time_blocks',
+      when: '_invalid_window_',         // Strategy A: unplaceable even if blocker were placed
+      deadline: null,                   // FLOATING -- the key condition
+      depends_on: JSON.stringify(['b700-chain-blocker-inst']), // chain member
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+    await db('task_instances').insert({
+      id: 'b700-chain-member-inst',
+      master_id: 'b700-chain-member-master',
+      user_id: USER_ID,
+      occurrence_ordinal: 1,
+      split_ordinal: 1,
+      split_total: 1,
+      scheduled_at: STALE_DATE_UTC, // prior placement -> hasScheduledAt=true -> PATH B Case B
+      overdue: 0,
+      dur: 30,
+      status: '',
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    // ASSERTION: The `!original.deadline` guard at runSchedule.js:1520 must protect
+    // the chain-member (task_type='task', dependsOn non-empty) the same way it
+    // protects one-off tasks. overdue MUST remain 0 after the run.
+    // task_instances.overdue is tinyint NOT NULL DEFAULT 0 — never null. toBe(0) is exact.
+    var row = await db('task_instances').where('id', 'b700-chain-member-inst').first();
+    expect(row).toBeTruthy();
+    expect(row.overdue).toBe(0); // must stay 0: !original.deadline guard at :1520 covers chain-members
   });
 });

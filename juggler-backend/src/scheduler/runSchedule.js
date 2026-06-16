@@ -1512,6 +1512,18 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var rawRow = rawRowById[t.id];
     var hasScheduledAt = rawRow ? !!rawRow.scheduled_at : !!(original.date || original.scheduledAt);
     if (hasScheduledAt) {
+      // 999.700: floating tasks (no deadline) are NEVER past-due (999.671 roll-forward policy).
+      // A stale past placement does not make a no-deadline task overdue. Applies to every
+      // placement mode (the prior ANYTIME-only guard left non-anytime + anytime-in-past holes).
+      // Also CLEAR a stale overdue=1 so a previously-mis-flagged floating task does not stick
+      // past-due across runs (defeats computeIsPastDue's ||t.overdue branch otherwise).
+      if (!original.deadline) {
+        if (rawRow && rawRow.overdue) {
+          pendingUpdates.push({ id: t.id, dbUpdate: { overdue: 0, updated_at: _runScheduleCommand.clockNow() } });
+        }
+        cleared++;
+        return;
+      }
       // Guard: ANYTIME tasks without a passed deadline are not overdue when they
       // can't fit in today's time grid — the calendar is simply full right now.
       // Only mark overdue if (a) the task was placed on a prior day (rolled over
