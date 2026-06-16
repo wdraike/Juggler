@@ -45,6 +45,17 @@ beforeAll(async () => {
 afterAll(async () => {
   if (!await isDbAvailable()) return;
   await cleanup();
+  // 999.455 — RESTORE the shared schema. The `down()` test below DROPs
+  // task_masters.status/completed_at/scheduled_at from the SHARED juggler_test;
+  // without restoring, every other suite that writes task_masters.status (via
+  // tasks-write.js insertTask, which carries `status` in MASTER_FIELDS) then
+  // fails with "Unknown column 'status'". Re-apply up() to recreate the columns,
+  // then drop the MISPLACED terminal CHECK (exactly as migration 20260609120000
+  // does in the real chain) so the canonical post-migrate state is restored —
+  // status/completed_at/scheduled_at present, chk_task_masters_scheduled_at_for_terminal
+  // absent. (Full parallel isolation for migration-replay suites remains 999.306.)
+  await migration.up(db).catch(() => {});
+  await db.raw('ALTER TABLE task_masters DROP CHECK chk_task_masters_scheduled_at_for_terminal').catch(() => {});
   await db.destroy();
 });
 
