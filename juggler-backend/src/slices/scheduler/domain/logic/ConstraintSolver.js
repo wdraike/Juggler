@@ -3,11 +3,12 @@
  * (H6 W1 domain core).
  *
  * HOUSES the constraint-ordering primitives MOVED out of
- * `src/scheduler/unifiedScheduleV2.js`, byte-for-byte:
+ * `src/scheduler/unifiedScheduleV2.js`:
  *   - `compareItems`        — the S1 placement order: slack asc, pri asc, dur desc, id
  *   - `effectiveDuration`   — clamp/normalize a task's working duration
  *   - `recurringCycleDays`  — cycle length used to cap flexible-recurring search
- *   - `parseDayReq`         — day-of-week eligibility set
+ *   - `parseDayReq`         — day-of-week eligibility set (single implementation;
+ *                             unifiedScheduleV2 aliases it — there is no second copy)
  * plus the S2 severity ranking (`severityRank`) over `Constraint.severity()`.
  *
  * `unifiedScheduleV2.js` imports and delegates to these — this class is now the
@@ -82,9 +83,46 @@ function recurringCycleDays(recur) {
 var DOW_CODE_TO_IDX = { U: 0, Su: 0, M: 1, T: 2, W: 3, R: 4, F: 5, Sa: 6, S: 6 };
 
 /**
+ * Greedy longest-match tokenizer for a concatenated DOW string (no commas).
+ * At each position tries the 2-char code (Su, Sa) first, then the 1-char code.
+ * Returns a set of DOW indices on success, or null if any character cannot be
+ * mapped (treat the whole token as unrecognised — no partial junk parsing).
+ * @param {string} token — a non-empty string with no commas
+ * @returns {?Object} map of { dowIndex: true } or null if any char unrecognised
+ */
+function parseConcatToken(token) {
+  var set = {};
+  var i = 0;
+  while (i < token.length) {
+    // Try 2-char code first (Su, Sa)
+    if (i + 1 < token.length && DOW_CODE_TO_IDX[token.slice(i, i + 2)] != null) {
+      set[DOW_CODE_TO_IDX[token.slice(i, i + 2)]] = true;
+      i += 2;
+    } else if (DOW_CODE_TO_IDX[token[i]] != null) {
+      set[DOW_CODE_TO_IDX[token[i]]] = true;
+      i += 1;
+    } else {
+      // Unrecognised character — treat whole token as junk
+      return null;
+    }
+  }
+  return set;
+}
+
+/**
  * Parse `task.dayReq` into a set of allowed day-of-week indices, or null when all
  * days are allowed (undefined/empty/'any'/all-7).
- * BYTE-IDENTICAL port of `unifiedScheduleV2.parseDayReq`.
+ *
+ * Supports two token formats:
+ *   - Comma-separated: each token is looked up directly in DOW_CODE_TO_IDX
+ *     (e.g. 'M,W,F', 'Sa,Su'). This is the original format and is preserved exactly.
+ *   - Concatenated: a single token not in DOW_CODE_TO_IDX is decomposed via a
+ *     greedy longest-match scan (e.g. 'MTWRF', 'SaSu', 'UMTWRF'). If any
+ *     character fails to match a code the entire token is treated as unrecognised.
+ *
+ * unifiedScheduleV2 aliases this function (see local binding below) — there is ONE
+ * implementation; the stale "BYTE-IDENTICAL port" comment no longer applies.
+ *
  * @param {*} dayReq
  * @returns {?Object} map of { dowIndex: true } or null for unconstrained
  */
@@ -97,7 +135,21 @@ function parseDayReq(dayReq) {
   var set = {};
   var count = 0;
   parts.forEach(function(p) {
-    if (DOW_CODE_TO_IDX[p] != null) { set[DOW_CODE_TO_IDX[p]] = true; count++; }
+    if (DOW_CODE_TO_IDX[p] != null) {
+      // Direct lookup: handles comma-separated codes including two-char (Su, Sa)
+      set[DOW_CODE_TO_IDX[p]] = true;
+      count++;
+    } else {
+      // Unrecognised as a direct code — try greedy concat tokenizer
+      var concatSet = parseConcatToken(p);
+      if (concatSet !== null) {
+        Object.keys(concatSet).forEach(function(idx) {
+          set[idx] = true;
+          count++;
+        });
+      }
+      // If concatSet is null, the token is unrecognised junk — skip it (count stays unchanged)
+    }
   });
   if (count === 0 || count >= 7) return null; // no parses recognized or all days → unconstrained
   return set;

@@ -371,6 +371,62 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     // of allowed day-of-week indexes (Sun=0..Sat=6). Null => any day.
     var allowedDows = parseDayReq(t.dayReq);
 
+    // RC-B (BUG-143-B): for recurring tasks, derive a weekday constraint from
+    // recur.days and COMBINE it with allowedDows via null-aware intersection:
+    //   intersect(null, X) = X   (null means unconstrained)
+    //   intersect(X, null) = X
+    //   intersect(X, Y)   = X ∩ Y  (may be empty — no valid placement day)
+    // This ensures flexible-TPC instances (isFlexibleTpc=true, isDayLocked=false)
+    // that roam within their cycleDays window are still gated to the days their
+    // recurrence pattern allows (e.g. recur.days='MTWRF' forbids Sat/Sun).
+    // Non-recurring tasks skip this block entirely (AC4 golden-master).
+    // Types that carry no weekday pattern (daily, monthly, interval without days)
+    // produce no recurDows constraint and leave allowedDows unchanged.
+    if (recurring && t.recur) {
+      var recurObj = t.recur;
+      if (typeof recurObj === 'string') {
+        try { recurObj = JSON.parse(recurObj); } catch (e) { recurObj = null; }
+      }
+      if (recurObj && recurObj.days != null) {
+        var recurType = recurObj.type;
+        // Only weekly/biweekly carry a meaningful days pattern (DOW codes).
+        // daily/monthly/interval have no DOW-code day-set → no constraint.
+        if (recurType === 'weekly' || recurType === 'biweekly') {
+          var recurDows = null;
+          var rd = recurObj.days;
+          if (typeof rd === 'string') {
+            // String format: 'MTWRF' or 'M,W,F' — run through parseDayReq
+            recurDows = parseDayReq(rd);
+          } else if (rd && typeof rd === 'object' && !Array.isArray(rd)) {
+            // Object-map format: { M: true, W: true, F: true }
+            var rdSet = {};
+            var rdCount = 0;
+            var DOW_IDX = ConstraintSolver.DOW_CODE_TO_IDX;
+            Object.keys(rd).forEach(function(k) {
+              if (rd[k] && DOW_IDX[k] != null) {
+                rdSet[DOW_IDX[k]] = true;
+                rdCount++;
+              }
+            });
+            recurDows = (rdCount === 0 || rdCount >= 7) ? null : rdSet;
+          }
+          // Null-aware intersection: intersect(null,X)=X, intersect(X,null)=X, intersect(X,Y)=X∩Y
+          if (recurDows !== null) {
+            if (allowedDows === null) {
+              allowedDows = recurDows;
+            } else {
+              // True set intersection — may result in empty object (no valid day)
+              var intersected = {};
+              Object.keys(allowedDows).forEach(function(idx) {
+                if (recurDows[idx]) intersected[idx] = true;
+              });
+              allowedDows = intersected; // empty object enforces "no valid day" → unplaced
+            }
+          }
+        }
+      }
+    }
+
     // Recurring cycle length (days) + roaming eligibility. A recurring
     // instance may roam across its cycle (within dayReq) only when the
     // recurrence uses timesPerCycle to PICK a subset of the selected days:
