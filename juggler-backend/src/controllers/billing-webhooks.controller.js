@@ -126,7 +126,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
                 ? JSON.parse(other.depends_on || '[]') : (other.depends_on || []);
               var newDeps = deps.filter(function(d) { return d !== taskId; });
               await tasksWrite.updateTaskById(trx, other.id, {
-                depends_on: JSON.stringify(newDeps), updated_at: getDb().fn.now()
+                depends_on: JSON.stringify(newDeps), updated_at: now
               }, userId);
             }
           }

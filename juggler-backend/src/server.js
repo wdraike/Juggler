@@ -56,16 +56,32 @@ async function start() {
   // Load JWT secrets
   await loadJWTSecrets();
 
-  // B9: validate AI slice DB config at boot — surfaces misconfig immediately
-  // rather than deferring to the first AI request.
+  // Boot-init all slice facades that expose an async init() hook.
   //
-  // 999.427: this is INTENTIONALLY redundant with `require('./db')` at the top of
-  // this file (line ~28), which already triggers getDefaultDb() and would abort
-  // boot on a bad DB config first. We keep facade.init() anyway as an EXPLICIT,
-  // testable assertion of the AI slice's own DB dependency — it pins the B9
-  // fail-fast contract and survives someone reordering or removing the top-level
-  // require. getDefaultDb() is idempotent (cached), so the second call is a no-op.
-  await require('./slices/ai-enrichment/facade').init();
+  // 999.428: iterate over a list instead of hardcoding per-slice init() calls.
+  // H0-H4 slices load lazily (no init cost at boot), but slices that validate
+  // a DB dependency (like ai-enrichment, B9 / 999.421) expose init() to fail
+  // fast on misconfig. Add new slices here when they grow an init() hook.
+  //
+  // 999.427: the ai-enrichment init() call is INTENTIONALLY redundant with
+  // `require('./db')` at the top of this file (line ~28), which already triggers
+  // getDefaultDb() and would abort boot on a bad DB config first. We keep the
+  // facade.init() anyway as an EXPLICIT, testable assertion of the AI slice's
+  // own DB dependency — it pins the B9 fail-fast contract and survives someone
+  // reordering or removing the top-level require. getDefaultDb() is idempotent
+  // (cached), so the second call is a no-op.
+  var BOOT_SLICES = [
+    { path: './slices/ai-enrichment/facade', label: 'ai-enrichment' },
+  ];
+  for (var bsi = 0; bsi < BOOT_SLICES.length; bsi++) {
+    var slice = BOOT_SLICES[bsi];
+    try {
+      await require(slice.path).init();
+    } catch (initErr) {
+      serverLogger.error('Slice boot-init failed', { slice: slice.label, error: initErr });
+      throw initErr; // fail-fast — boot halts on any slice init error
+    }
+  }
 
   server = app.listen(PORT, () => {
     serverLogger.info('Raike & Sons backend running', { port: PORT });

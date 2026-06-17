@@ -88,6 +88,14 @@ function fabricateName(originalName, usedSet) {
 }
 
 /**
+ * Guard against __proto__ or other prototype-key pollution when using a plain
+ * object as a hash set (999.496). Returns true if the key is safe to store.
+ */
+function isSafeHashKey(key) {
+  return key !== '__proto__' && key !== 'constructor' && key !== 'prototype';
+}
+
+/**
  * @param {Object} input
  * @param {string} input.userId
  * @param {*} input.data       the v7 import body.
@@ -147,17 +155,17 @@ MergeImportData.prototype.execute = async function execute(input) {
     // ── TASKS (additive; re-key colliding ids) ────────────────────────────────
     var existingIds = await self.listTaskIds(trxRepo, userId);
     var usedTaskIds = {};
-    existingIds.forEach(function (id) { usedTaskIds[id] = true; });
+    existingIds.forEach(function (id) { if (isSafeHashKey(id)) usedTaskIds[id] = true; });
 
     for (var i = 0; i < uniqueTasks.length; i++) {
       var t = uniqueTasks[i];
       var rekeyed = false;
       var newId = t.id;
-      if (usedTaskIds[t.id]) {
+      if (isSafeHashKey(t.id) && usedTaskIds[t.id]) {
         newId = fabricateTaskId(t.id, usedTaskIds);
         rekeyed = true;
       }
-      usedTaskIds[newId] = true;
+      if (isSafeHashKey(newId)) usedTaskIds[newId] = true;
       // build the row, then override the id so a re-keyed task inserts as a NEW row.
       var row = self.buildTaskRow(t, userId, tz, {});
       row.id = newId;
@@ -172,13 +180,13 @@ MergeImportData.prototype.execute = async function execute(input) {
       var usedProjectNames = {};
       var maxProjectSort = -1;
       existingProjects.forEach(function (p) {
-        usedProjectNames[p.name] = true;
+        if (isSafeHashKey(p.name)) usedProjectNames[p.name] = true;
         if (p.sort_order != null && p.sort_order > maxProjectSort) maxProjectSort = p.sort_order;
       });
       var projectRows = mergedProjects.map(function (p, idx) {
         var name = p.name;
-        if (usedProjectNames[name]) name = fabricateName(p.name, usedProjectNames);
-        usedProjectNames[name] = true;
+        if (isSafeHashKey(name) && usedProjectNames[name]) name = fabricateName(p.name, usedProjectNames);
+        if (isSafeHashKey(name)) usedProjectNames[name] = true;
         return {
           user_id: userId,
           name: name,

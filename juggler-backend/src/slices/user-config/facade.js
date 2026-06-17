@@ -455,12 +455,22 @@ function exportData(input) { return _exportData.execute(input); }
  * @param {string} [input.timezoneHeader]  raw x-timezone header.
  * @returns {Promise<{ status: number, body: Object }>}
  */
+/**
+ * Max tasks per import (DoS defense — 999.495).
+ */
+var MAX_IMPORT_TASKS = 5000;
+
 async function dispatchImport(input) {
   var data = input.data;
 
   // 1. LEGACY SHAPE GUARD FIRST — owns H2-6's "Invalid import data" message.
   if (!data || !data.extraTasks) {
     return { status: 400, body: { error: 'Invalid import data — expected v7 format with extraTasks' } };
+  }
+
+  // 1b. TASK COUNT CAP — DoS defense (999.495).
+  if (data.extraTasks.length > MAX_IMPORT_TASKS) {
+    return { status: 400, body: { error: 'Import rejected: too many tasks (' + data.extraTasks.length + '). Maximum allowed is ' + MAX_IMPORT_TASKS + '.' } };
   }
 
   // 2. RESOLVE MODE (fail-safe — unknown never falls through; absent never wipes/merges silently).
