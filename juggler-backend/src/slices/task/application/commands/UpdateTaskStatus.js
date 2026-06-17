@@ -166,6 +166,16 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
     update.completed_at = null;
   }
 
+  // 999.586: On todo→wip transition, populate time_remaining with estimated
+  // duration (dur) when the caller doesn't supply an explicit value.
+  if (status === 'wip' && existing.status !== 'wip') {
+    if (body.time_remaining != null) {
+      update.time_remaining = body.time_remaining;
+    } else {
+      update.time_remaining = existing.dur || 30;
+    }
+  }
+
   if (status === 'done' && !isIngested) {
     var completedAt = body.completedAt;
     if (completedAt && completedAt !== 'now' && completedAt !== 'scheduled') {

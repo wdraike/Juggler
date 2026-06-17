@@ -167,6 +167,12 @@ UpdateTask.prototype.execute = async function execute(input) {
   var guard = this.validation.checkCalSyncEditGuard(existing, body);
   if (guard) return { status: 403, body: guard };
 
+  // 999.558: cross-field startAfter > deadline check (partial patch merges with existing)
+  var crossFieldErr = this.validation.validateStartAfterDeadlineCrossField(body, existing);
+  if (crossFieldErr) {
+    return { status: 400, body: { error: crossFieldErr } };
+  }
+
   var tz = this.safeTimezone(input.timezoneHeader);
   var anchorDateVal = body.anchorDate;
   var bodyWithoutAnchor = Object.assign({}, body);
@@ -287,6 +293,12 @@ UpdateTask.prototype._fastPath = async function _fastPath(input) {
   if (guard) return { status: 403, body: guard };
 
   this.validation.guardFixedCalendarWhen(fastRow, fastExisting, { allowUnfix: !!body._allowUnfix });
+
+  // 999.558: cross-field startAfter > deadline check (partial patch merges with existing)
+  var crossFieldErr = this.validation.validateStartAfterDeadlineCrossField(body, fastExisting);
+  if (crossFieldErr) {
+    return { status: 400, body: { error: crossFieldErr } };
+  }
 
   if (fastExisting.recurring || fastExisting.task_type === 'recurring_template' || fastExisting.task_type === 'recurring_instance') {
     delete fastRow.depends_on;

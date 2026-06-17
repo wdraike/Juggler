@@ -4,7 +4,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import apiClient from '../../services/apiClient';
-import { getTheme } from '../../theme/colors';
+import { getTheme, BRAND } from '../../theme/colors';
 
 /* ── ICS helpers ──────────────────────────────────────── */
 
@@ -673,7 +673,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={handleICSImportConfirm} disabled={icsImporting} style={{
                   border: 'none', borderRadius: 2, padding: '8px 16px',
-                  background: theme.success, color: '#FDFAF5', fontWeight: 600, fontSize: 12,
+                  background: theme.success, color: BRAND.cream, fontWeight: 600, fontSize: 12,
                   cursor: 'pointer', fontFamily: 'inherit', opacity: icsImporting ? 0.5 : 1
                 }}>
                   {icsImporting ? 'Importing...' : 'Import ' + icsPreview.tasks.length + ' Events'}
@@ -712,7 +712,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
             <button ref={importTriggerRef} onClick={handleImport} disabled={importing || !importText.trim()} style={{
               border: 'none', borderRadius: 2, padding: '10px 20px',
-              background: theme.success, color: '#FDFAF5', fontWeight: 600, fontSize: 13,
+              background: theme.success, color: BRAND.cream, fontWeight: 600, fontSize: 13,
               cursor: 'pointer', fontFamily: 'inherit',
               opacity: importing || !importText.trim() ? 0.5 : 1
             }}>
@@ -766,7 +766,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
                   fontFamily: 'inherit', opacity: importing ? 0.5 : 1,
                   outline: 'none'
                 }}
-                onFocus={function(e) { e.currentTarget.style.boxShadow = '0 0 0 2px #FDFAF5, 0 0 0 4px #1A2B4A'; }}
+                onFocus={function(e) { e.currentTarget.style.boxShadow = '0 0 0 2px ' + BRAND.cream + ', 0 0 0 4px ' + BRAND.navy; }}
                 onBlur={function(e) { e.currentTarget.style.boxShadow = 'none'; }}
               >
                 <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 3 }}>
@@ -790,7 +790,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
                   fontFamily: 'inherit', opacity: importing ? 0.5 : 1,
                   outline: 'none'
                 }}
-                onFocus={function(e) { e.currentTarget.style.boxShadow = '0 0 0 2px #FDFAF5, 0 0 0 4px #1A2B4A'; }}
+                onFocus={function(e) { e.currentTarget.style.boxShadow = '0 0 0 2px ' + BRAND.cream + ', 0 0 0 4px ' + BRAND.navy; }}
                 onBlur={function(e) { e.currentTarget.style.boxShadow = 'none'; }}
               >
                 <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 3, color: theme.redText }}>
@@ -815,7 +815,7 @@ export default function ImportExportPanel({ onClose, darkMode, showToast, allTas
                   opacity: importing ? 0.5 : 1,
                   outline: 'none'
                 }}
-                onFocus={function(e) { e.currentTarget.style.boxShadow = '0 0 0 2px #FDFAF5, 0 0 0 4px #1A2B4A'; }}
+                onFocus={function(e) { e.currentTarget.style.boxShadow = '0 0 0 2px ' + BRAND.cream + ', 0 0 0 4px ' + BRAND.navy; }}
                 onBlur={function(e) { e.currentTarget.style.boxShadow = 'none'; }}
               >
                 {importing ? 'Importing...' : 'Cancel'}

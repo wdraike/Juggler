@@ -635,3 +635,158 @@ describe('UpdateTask — reference existence validation (999.586)', function () 
     });
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 999.558 — startAfter > deadline cross-field validation on task update
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('UpdateTask — startAfter > deadline cross-field (999.558)', function () {
+  // Seed a task with a deadline but no startAfter
+  function seedWithDeadline() {
+    return new InMemoryTaskRepository({ rows: [
+      { id: 't1', user_id: USER, task_type: 'task', text: 'has deadline', pri: 'P3', status: '',
+        deadline: new Date('2026-06-30'), start_after_at: null, updated_at: new Date('2026-06-01T00:00:00Z') }
+    ] });
+  }
+  // Seed a task with a startAfter but no deadline
+  function seedWithStartAfter() {
+    return new InMemoryTaskRepository({ rows: [
+      { id: 't2', user_id: USER, task_type: 'task', text: 'has startAfter', pri: 'P3', status: '',
+        deadline: null, start_after_at: new Date('2026-06-15'), updated_at: new Date('2026-06-01T00:00:00Z') }
+    ] });
+  }
+  // Seed a task with both fields set to valid values
+  function seedWithBoth() {
+    return new InMemoryTaskRepository({ rows: [
+      { id: 't3', user_id: USER, task_type: 'task', text: 'has both', pri: 'P3', status: '',
+        deadline: new Date('2026-06-30'), start_after_at: new Date('2026-06-01'), updated_at: new Date('2026-06-01T00:00:00Z') }
+    ] });
+  }
+
+  function updateDeps(repo, extra) {
+    return H.baseDeps(Object.assign({
+      repo: repo,
+      cache: H.makeCacheFake(),
+      events: H.makeEventsSpy(),
+      enqueueScheduleRun: H.makeTriggerSpy(),
+      recurCleanup: function () { return Promise.resolve(); }
+    }, extra || {}));
+  }
+
+  test('FAST PATH: setting startAfter after existing deadline → 400', function () {
+    // Task has deadline=2026-06-30. Setting startAfter=2026-07-01 exceeds it.
+    var repo = seedWithDeadline();
+    var trigger = H.makeTriggerSpy();
+    var updateSpy = jest.spyOn(repo, 'updateTaskById');
+    var deps = updateDeps(repo, { enqueueScheduleRun: trigger });
+    return new UpdateTask(deps).execute({ id: 't1', userId: USER, body: { startAfter: '2026-07-01' } }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/Deadline must be on or after start-after date/);
+      expect(updateSpy).not.toHaveBeenCalled();
+      expect(trigger.calls.length).toBe(0);
+    });
+  });
+
+  test('FAST PATH: setting deadline before existing startAfter → 400', function () {
+    // Task has start_after_at=2026-06-15. Setting deadline=2026-06-10 is before it.
+    var repo = seedWithStartAfter();
+    var trigger = H.makeTriggerSpy();
+    var updateSpy = jest.spyOn(repo, 'updateTaskById');
+    var deps = updateDeps(repo, { enqueueScheduleRun: trigger });
+    return new UpdateTask(deps).execute({ id: 't2', userId: USER, body: { deadline: '2026-06-10' } }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/Deadline must be on or after start-after date/);
+      expect(updateSpy).not.toHaveBeenCalled();
+      expect(trigger.calls.length).toBe(0);
+    });
+  });
+
+  test('FAST PATH: setting startAfter before existing deadline → 200 (valid)', function () {
+    var repo = seedWithDeadline();
+    var deps = updateDeps(repo);
+    return new UpdateTask(deps).execute({ id: 't1', userId: USER, body: { startAfter: '2026-06-15' } }).then(function (out) {
+      expect(out.status).toBe(200);
+    });
+  });
+
+  test('FAST PATH: setting deadline after existing startAfter → 200 (valid)', function () {
+    var repo = seedWithStartAfter();
+    var deps = updateDeps(repo);
+    return new UpdateTask(deps).execute({ id: 't2', userId: USER, body: { deadline: '2026-07-01' } }).then(function (out) {
+      expect(out.status).toBe(200);
+    });
+  });
+
+  test('COMPLEX PATH: setting startAfter after existing deadline → 400', function () {
+    // `when` forces the complex path; startAfter exceeds existing deadline.
+    var repo = seedWithDeadline();
+    var trigger = H.makeTriggerSpy();
+    var deps = updateDeps(repo, { enqueueScheduleRun: trigger });
+    return new UpdateTask(deps).execute({ id: 't1', userId: USER, body: { when: 'morning', startAfter: '2026-07-01' } }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/Deadline must be on or after start-after date/);
+      expect(trigger.calls.length).toBe(0);
+    });
+  });
+
+  test('COMPLEX PATH: setting deadline before existing startAfter → 400', function () {
+    // `when` forces the complex path; deadline is before existing startAfter.
+    var repo = seedWithStartAfter();
+    var trigger = H.makeTriggerSpy();
+    var deps = updateDeps(repo, { enqueueScheduleRun: trigger });
+    return new UpdateTask(deps).execute({ id: 't2', userId: USER, body: { when: 'morning', deadline: '2026-06-10' } }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/Deadline must be on or after start-after date/);
+      expect(trigger.calls.length).toBe(0);
+    });
+  });
+
+  test('both fields in body with startAfter > deadline → 400 (even without existing)', function () {
+    var repo = seedWithBoth();
+    var trigger = H.makeTriggerSpy();
+    var deps = updateDeps(repo, { enqueueScheduleRun: trigger });
+    return new UpdateTask(deps).execute({ id: 't3', userId: USER, body: { startAfter: '2026-08-01', deadline: '2026-07-01' } }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/Deadline must be on or after start-after date/);
+    });
+  });
+
+  test('clearing startAfter with empty string resolves conflict → 200', function () {
+    // Task has impossible window (startAfter > deadline). Clearing startAfter
+    // should allow the update since the constraint no longer applies.
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 't4', user_id: USER, task_type: 'task', text: 'impossible', pri: 'P3', status: '',
+        deadline: new Date('2026-06-15'), start_after_at: new Date('2026-07-01'), updated_at: new Date('2026-06-01T00:00:00Z') }
+    ] });
+    var deps = updateDeps(repo);
+    return new UpdateTask(deps).execute({ id: 't4', userId: USER, body: { startAfter: '' } }).then(function (out) {
+      expect(out.status).toBe(200);
+    });
+  });
+
+  test('clearing deadline with null resolves conflict → 200', function () {
+    // Task has impossible window. Clearing deadline should allow the update.
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 't5', user_id: USER, task_type: 'task', text: 'impossible', pri: 'P3', status: '',
+        deadline: new Date('2026-06-15'), start_after_at: new Date('2026-07-01'), updated_at: new Date('2026-06-01T00:00:00Z') }
+    ] });
+    var deps = updateDeps(repo);
+    return new UpdateTask(deps).execute({ id: 't5', userId: USER, body: { deadline: null } }).then(function (out) {
+      expect(out.status).toBe(200);
+    });
+  });
+
+  test('neither field touched → no conflict check (existing bad data is not retroactively rejected)', function () {
+    // A task with existing startAfter > deadline — if neither field is in the PATCH,
+    // we don't reject (the existing data predates the validation rule).
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 't6', user_id: USER, task_type: 'task', text: 'legacy bad data', pri: 'P3', status: '',
+        deadline: new Date('2026-06-15'), start_after_at: new Date('2026-07-01'), updated_at: new Date('2026-06-01T00:00:00Z') }
+    ] });
+    var deps = updateDeps(repo);
+    // Only changing text — startAfter/deadline unchanged
+    return new UpdateTask(deps).execute({ id: 't6', userId: USER, body: { text: 'updated' } }).then(function (out) {
+      expect(out.status).toBe(200);
+    });
+  });
+});

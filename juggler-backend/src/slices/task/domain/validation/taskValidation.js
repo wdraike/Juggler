@@ -146,7 +146,8 @@ function validateTaskInput(body) {
     var saDate = new Date(body.startAfter);
     if (isNaN(saDate.getTime())) errors.push('Start-after must be a valid date');
   }
-  // cross-field: deadline >= startAfter
+  // cross-field: deadline >= startAfter (body-only check; for updates that
+  // patch only one field, use validateStartAfterDeadlineCrossField below)
   if (body.deadline && body.startAfter) {
     var dlD = new Date(body.deadline);
     var saD = new Date(body.startAfter);
@@ -267,8 +268,68 @@ function validateTaskInput(body) {
   return errors;
 }
 
+/**
+ * Cross-field validation for startAfter > deadline that accounts for
+ * partially-patched updates. When only one of startAfter/deadline is supplied
+ * in the body, the OTHER value is read from the existing task row. Returns an
+ * error string if the merged values produce an impossible window
+ * (startAfter > deadline), or null if valid. (999.558)
+ *
+ * Clearing semantics: if the body explicitly sets a field to '' or null,
+ * that field is being CLEARED (removed), and we should not fall through to
+ * the existing value — a cleared field removes the constraint.
+ *
+ * @param {Object} body   The request body (partial patch).
+ * @param {Object} [existing] The existing task row (DB shape: start_after_at, deadline).
+ * @returns {?string} Error string or null.
+ */
+function validateStartAfterDeadlineCrossField(body, existing) {
+  // Only run the cross-field check when at least one of the two fields is
+  // being modified in this PATCH. If neither field is in the body, we do NOT
+  // retroactively validate existing data that predates this rule.
+  if (!('startAfter' in body) && !('deadline' in body)) return null;
+
+  // Determine whether each field is being explicitly set (including cleared).
+  // A field is "explicitly present in the body" if the key exists, even if the
+  // value is empty string or null (which means "clear the field").
+  // If the key is absent, fall through to existing.
+  var startAfterExplicit = 'startAfter' in body;
+  var deadlineExplicit = 'deadline' in body;
+
+  // Resolve effective startAfter: body value if set (even if cleared),
+  // otherwise existing value. Cleared fields → null.
+  var effectiveStartAfter;
+  if (startAfterExplicit) {
+    effectiveStartAfter = (body.startAfter !== null && body.startAfter !== '') ? body.startAfter : null;
+  } else {
+    effectiveStartAfter = (existing && existing.start_after_at) ? existing.start_after_at : null;
+  }
+
+  // Resolve effective deadline: body value if set (even if cleared),
+  // otherwise existing value. Cleared fields → null.
+  var effectiveDeadline;
+  if (deadlineExplicit) {
+    effectiveDeadline = (body.deadline !== null && body.deadline !== '') ? body.deadline : null;
+  } else {
+    effectiveDeadline = (existing && existing.deadline) ? existing.deadline : null;
+  }
+
+  // Both must be present and non-null to compare.
+  if (!effectiveStartAfter || !effectiveDeadline) return null;
+
+  var saDate = new Date(effectiveStartAfter);
+  var dlDate = new Date(effectiveDeadline);
+  if (isNaN(saDate.getTime()) || isNaN(dlDate.getTime())) return null;
+
+  if (dlDate < saDate) {
+    return 'Deadline must be on or after start-after date';
+  }
+  return null;
+}
+
 module.exports = {
   validateTaskInput,
+  validateStartAfterDeadlineCrossField,
   checkCalSyncEditGuard,
   guardFixedCalendarWhen,
   VALID_WHEN_KEYWORDS,

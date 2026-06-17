@@ -118,6 +118,90 @@ describe('UpdateTaskStatus (updateTaskStatus)', function () {
       expect(out.body.error).toMatch(/can only be paused or unpaused/);
     });
   });
+
+  // ── 999.586: time_remaining populated from estimated_duration on todo→wip ──
+  test('todo→wip without time_remaining sets time_remaining to dur (999.586)', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'tr1', user_id: USER, task_type: 'task', status: '', dur: 45, scheduled_at: new Date('2026-06-02T15:00:00Z'), updated_at: new Date() }
+    ] });
+    var uc = new UpdateTaskStatus(statusDeps(repo, H.makeTriggerSpy(), H.makeEventsSpy()));
+    return uc.execute({ id: 'tr1', userId: USER, body: { status: 'wip' } }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(out.body.task.status).toBe('wip');
+      return repo.fetchTaskWithEventIds('tr1', USER).then(function (r) {
+        expect(r.status).toBe('wip');
+        expect(r.time_remaining).toBe(45);
+      });
+    });
+  });
+
+  test('todo→wip with explicit time_remaining uses caller value (999.586)', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'tr2', user_id: USER, task_type: 'task', status: '', dur: 60, scheduled_at: new Date('2026-06-02T15:00:00Z'), updated_at: new Date() }
+    ] });
+    var uc = new UpdateTaskStatus(statusDeps(repo, H.makeTriggerSpy(), H.makeEventsSpy()));
+    return uc.execute({ id: 'tr2', userId: USER, body: { status: 'wip', time_remaining: 20 } }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(out.body.task.status).toBe('wip');
+      return repo.fetchTaskWithEventIds('tr2', USER).then(function (r) {
+        expect(r.status).toBe('wip');
+        expect(r.time_remaining).toBe(20);
+      });
+    });
+  });
+
+  test('todo→wip with zero time_remaining uses caller value 0 (999.586)', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'tr3', user_id: USER, task_type: 'task', status: '', dur: 60, scheduled_at: new Date('2026-06-02T15:00:00Z'), updated_at: new Date() }
+    ] });
+    var uc = new UpdateTaskStatus(statusDeps(repo, H.makeTriggerSpy(), H.makeEventsSpy()));
+    return uc.execute({ id: 'tr3', userId: USER, body: { status: 'wip', time_remaining: 0 } }).then(function (out) {
+      expect(out.status).toBe(200);
+      return repo.fetchTaskWithEventIds('tr3', USER).then(function (r) {
+        expect(r.time_remaining).toBe(0);
+      });
+    });
+  });
+
+  test('todo→wip without dur defaults time_remaining to 30 (999.586)', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'tr4', user_id: USER, task_type: 'task', status: '', dur: null, scheduled_at: new Date('2026-06-02T15:00:00Z'), updated_at: new Date() }
+    ] });
+    var uc = new UpdateTaskStatus(statusDeps(repo, H.makeTriggerSpy(), H.makeEventsSpy()));
+    return uc.execute({ id: 'tr4', userId: USER, body: { status: 'wip' } }).then(function (out) {
+      expect(out.status).toBe(200);
+      return repo.fetchTaskWithEventIds('tr4', USER).then(function (r) {
+        expect(r.time_remaining).toBe(30);
+      });
+    });
+  });
+
+  test('wip→wip (re-send) does NOT overwrite time_remaining (999.586)', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'tr5', user_id: USER, task_type: 'task', status: 'wip', dur: 60, time_remaining: 15, scheduled_at: new Date('2026-06-02T15:00:00Z'), updated_at: new Date() }
+    ] });
+    var uc = new UpdateTaskStatus(statusDeps(repo, H.makeTriggerSpy(), H.makeEventsSpy()));
+    return uc.execute({ id: 'tr5', userId: USER, body: { status: 'wip' } }).then(function (out) {
+      expect(out.status).toBe(200);
+      return repo.fetchTaskWithEventIds('tr5', USER).then(function (r) {
+        // time_remaining should remain 15, not overwritten to dur (60)
+        expect(r.time_remaining).toBe(15);
+      });
+    });
+  });
+
+  test('paused→wip populates time_remaining from dur when not provided (999.586)', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'tr6', user_id: USER, task_type: 'task', status: 'pause', dur: 90, time_remaining: null, scheduled_at: new Date('2026-06-02T15:00:00Z'), updated_at: new Date() }
+    ] });
+    var uc = new UpdateTaskStatus(statusDeps(repo, H.makeTriggerSpy(), H.makeEventsSpy()));
+    return uc.execute({ id: 'tr6', userId: USER, body: { status: 'wip' } }).then(function (out) {
+      expect(out.status).toBe(200);
+      return repo.fetchTaskWithEventIds('tr6', USER).then(function (r) {
+        expect(r.time_remaining).toBe(90);
+      });
+    });
+  });
 });
 
 // ── W5-2: triggerCalSync.sync spy (BLOCK gap closed) ─────────────────────────
