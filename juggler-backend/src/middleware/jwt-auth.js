@@ -22,6 +22,12 @@ const authenticateJWT = async (req, res, next) => {
   jwtMiddleware(req, res, async (err) => {
     if (err) return next(err);
     if (!req.user?.email) return; // jwtMiddleware already sent 401
+    // Explicit 403 for tokens without the 'juggler' app claim (999.588)
+    // Defense-in-depth: even if auth-client's behavior changes, tokens missing
+    // the required app claim are rejected here with a clear 403.
+    if (!req.auth?.apps?.includes(APP_ID)) {
+      return res.status(403).json({ error: 'No access to this application' });
+    }
     try {
       const localUser = await db('users').where('email', req.user.email).first();
       if (localUser) {

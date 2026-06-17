@@ -27,21 +27,44 @@ function getDepsStatus(task, allTasks, statuses) {
 function topoSortTasks(tasks) {
   var taskMap = {};
   tasks.forEach(function(t) { taskMap[t.id] = t; });
-  var visited = {}, result = [], temp = {};
+  var visited = {}, result = [];
+  var inCurrentPath = {}; // tracks nodes on the current DFS path
+  var pathStack = [];     // ordered list of node IDs on the current path
+  var cycleIds = [];      // accumulated cycle node IDs
+
   function visit(t) {
-    if (temp[t.id]) return;
     if (visited[t.id]) return;
-    temp[t.id] = true;
+    // Cycle detected: t is already on the current DFS path
+    if (inCurrentPath[t.id]) {
+      // All nodes from t.id to the end of pathStack are in a cycle
+      var recording = false;
+      for (var pi = 0; pi < pathStack.length; pi++) {
+        if (pathStack[pi] === t.id) recording = true;
+        if (recording) {
+          if (cycleIds.indexOf(pathStack[pi]) === -1) {
+            cycleIds.push(pathStack[pi]);
+          }
+        }
+      }
+      return;
+    }
+    inCurrentPath[t.id] = true;
+    pathStack.push(t.id);
     var deps = getTaskDeps(t);
     deps.forEach(function(depId) {
       if (taskMap[depId]) visit(taskMap[depId]);
     });
-    temp[t.id] = false;
+    pathStack.pop();
+    delete inCurrentPath[t.id];
     visited[t.id] = true;
     result.push(t);
   }
+
   tasks.forEach(function(t) { visit(t); });
-  return result;
+
+  var sorted = result;
+  sorted.cycles = cycleIds;
+  return sorted;
 }
 
 function getDependents(taskId, allTasks) {

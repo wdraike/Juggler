@@ -167,17 +167,19 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Without Redis, SSE fan-out degrades to local-only and the AI rate limiter
-// falls back to per-instance counters.
+// Without Redis, SSE fan-out degrades to local-only and the API/AI rate limiters
+// fall back to per-instance counters.
 if (!process.env.REDIS_URL) {
-  logger.warn('[startup] REDIS_URL not set - SSE fan-out and AI rate limiter will be local-only (single-instance safe, not multi-instance safe)');
+  logger.warn('[startup] REDIS_URL not set - SSE fan-out and API/AI rate limiters will be local-only (single-instance safe, not multi-instance safe)');
 }
 
-// Broad limiters stay per-instance by design (Category 4f — shared counters
-// across instances would synchronize on every request at 1000/min with no
-// meaningful protection gain). Only the strict AI limiter uses Redis.
+// Broad limiters: apiLimiter uses Redis for shared counters across Cloud Run
+// instances (999.626). The strict AI limiter also uses Redis. Other limiters
+// (MCP, OAuth callback, billing webhooks, health) stay per-instance by design
+// (Category 4f — shared counters would synchronize on every request with no
+// meaningful protection gain for those low-traffic paths).
 const LIMITER_DEFAULTS = { windowMs: 60 * 1000, standardHeaders: true, legacyHeaders: false };
-const apiLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 1000 });
+const apiLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 1000, store: maybeRedisStore('jugrl-api:') });
 const aiLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 20, store: maybeRedisStore('jugrl-ai:') });
 const mcpLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 300 });
 const oauthCallbackLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 20, message: { error: 'Too many requests, please wait.' } });
