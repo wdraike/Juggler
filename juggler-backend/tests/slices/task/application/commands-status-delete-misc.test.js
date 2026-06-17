@@ -303,7 +303,8 @@ describe('DeleteTask (deleteTask)', function () {
       loadCalSyncSettings: function () { return Promise.resolve({}); },
       findProviderLedgerRow: function () { return Promise.resolve(null); },
       cascadeRecurringDelete: function () { return Promise.resolve({ deletedCount: 0, keptCount: 0, pendingIds: [], keptIds: [] }); },
-      standardDelete: function (ctx) { return ctx.trxRepo.deleteTaskById(ctx.id, ctx.userId); }
+      standardDelete: function (ctx) { return ctx.trxRepo.deleteTaskById(ctx.id, ctx.userId); },
+      thisAndFutureDelete: function () { return Promise.resolve({ deletedCount: 0, keptCount: 0, pendingIds: [], keptIds: [] }); }
     }, extra || {}));
   }
 
@@ -359,11 +360,130 @@ describe('DeleteTask (deleteTask)', function () {
     }));
     return uc.execute({ id: 'tplD', userId: USER, cascade: 'recurring' }).then(function (out) {
       expect(out.status).toBe(200);
-      expect(out.body.message).toBe('Recurring deleted');
+      expect(out.body.message).toBe('Recurring series deleted');
       expect(out.body.deletedInstances).toBe(3);
       expect(out.body.keptInstances).toBe(1);
       expect(cascadeCalls).toEqual(['tplD']);
       expect(trigger.calls[0].source).toBe('api:deleteTask:cascade');
+    });
+  });
+
+  // ── 999.680: delete scope tests ───────────────────────────────────────────
+
+  test('scope=instance: hard-deletes the task row, does NOT soft-skip (recurring_instance)', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'ri-inst', user_id: USER, task_type: 'recurring_instance', source_id: 'm1', master_id: 'm1', status: '', updated_at: new Date() }
+    ] });
+    var trigger = H.makeTriggerSpy();
+    var uc = new DeleteTask(deleteDeps(repo, trigger));
+    return uc.execute({ id: 'ri-inst', userId: USER, scope: 'instance' }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(out.body.message).toBe('Instance deleted');
+      expect(trigger.calls[0].source).toBe('api:deleteTask:instance');
+      return repo.fetchTaskWithEventIds('ri-inst', USER).then(function (r) { expect(r).toBeNull(); });
+    });
+  });
+
+  test('scope=instance: non-recurring task deletes normally', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'nr-inst', user_id: USER, task_type: 'task', status: '', updated_at: new Date() }
+    ] });
+    var trigger = H.makeTriggerSpy();
+    var uc = new DeleteTask(deleteDeps(repo, trigger));
+    return uc.execute({ id: 'nr-inst', userId: USER, scope: 'instance' }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(out.body.message).toBe('Instance deleted');
+      return repo.fetchTaskWithEventIds('nr-inst', USER).then(function (r) { expect(r).toBeNull(); });
+    });
+  });
+
+  test('scope=series: runs cascadeRecurringDelete with templateId, 200 series', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'tplS', user_id: USER, task_type: 'recurring_template', recurring: 1, status: '', updated_at: new Date() }
+    ] });
+    var trigger = H.makeTriggerSpy();
+    var cascadeCallIds = [];
+    var uc = new DeleteTask(deleteDeps(repo, trigger, {
+      cascadeRecurringDelete: function (ctx) {
+        cascadeCallIds.push(ctx.templateId);
+        return Promise.resolve({ deletedCount: 5, keptCount: 2, pendingIds: ['p1','p2','p3','p4','p5'], keptIds: ['k1','k2'] });
+      }
+    }));
+    return uc.execute({ id: 'tplS', userId: USER, scope: 'series' }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(out.body.message).toBe('Recurring series deleted');
+      expect(out.body.deletedInstances).toBe(5);
+      expect(out.body.keptInstances).toBe(2);
+      expect(cascadeCallIds).toEqual(['tplS']);
+      expect(trigger.calls[0].source).toBe('api:deleteTask:cascade');
+    });
+  });
+
+  test('scope=this_and_future: runs thisAndFutureDelete in txn, 200', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'tplTF', user_id: USER, task_type: 'recurring_template', recurring: 1, status: '', updated_at: new Date() }
+    ] });
+    var trigger = H.makeTriggerSpy();
+    var tfCallIds = [];
+    var uc = new DeleteTask(deleteDeps(repo, trigger, {
+      thisAndFutureDelete: function (ctx) {
+        tfCallIds.push({ id: ctx.id, templateId: ctx.templateId });
+        return Promise.resolve({ deletedCount: 3, keptCount: 4, pendingIds: ['tf1','tf2','tf3'], keptIds: ['tk1','tk2','tk3','tk4'] });
+      }
+    }));
+    return uc.execute({ id: 'tplTF', userId: USER, scope: 'this_and_future' }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(out.body.message).toBe('This and future instances deleted');
+      expect(out.body.deletedInstances).toBe(3);
+      expect(out.body.keptInstances).toBe(4);
+      expect(tfCallIds).toEqual([{ id: 'tplTF', templateId: 'tplTF' }]);
+      expect(trigger.calls[0].source).toBe('api:deleteTask:thisAndFuture');
+    });
+  });
+
+  test('scope=this_and_future on recurring_instance: resolves templateId from source_id', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'ri-tf', user_id: USER, task_type: 'recurring_instance', source_id: 'm99', master_id: 'm99', status: '', updated_at: new Date() }
+    ] });
+    var trigger = H.makeTriggerSpy();
+    var tfCallData = [];
+    var uc = new DeleteTask(deleteDeps(repo, trigger, {
+      thisAndFutureDelete: function (ctx) {
+        tfCallData.push({ id: ctx.id, templateId: ctx.templateId });
+        return Promise.resolve({ deletedCount: 2, keptCount: 1, pendingIds: ['ri-tf','ri2'], keptIds: ['ri3'] });
+      }
+    }));
+    return uc.execute({ id: 'ri-tf', userId: USER, scope: 'this_and_future' }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(tfCallData[0].templateId).toBe('m99');
+      expect(trigger.calls[0].source).toBe('api:deleteTask:thisAndFuture');
+    });
+  });
+
+  test('invalid scope → 400', function () {
+    var repo = new InMemoryTaskRepository();
+    var uc = new DeleteTask(deleteDeps(repo, H.makeTriggerSpy()));
+    return uc.execute({ id: 'x', userId: USER, scope: 'invalid' }).then(function (out) {
+      expect(out.status).toBe(400);
+      expect(out.body.error).toMatch(/Invalid scope/);
+    });
+  });
+
+  test('scope=series with recurring_instance: resolves templateId from source_id', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'ri-s', user_id: USER, task_type: 'recurring_instance', source_id: 'm55', master_id: 'm55', status: '', updated_at: new Date() }
+    ] });
+    var trigger = H.makeTriggerSpy();
+    var cascadeIds = [];
+    var uc = new DeleteTask(deleteDeps(repo, trigger, {
+      cascadeRecurringDelete: function (ctx) {
+        cascadeIds.push(ctx.templateId);
+        return Promise.resolve({ deletedCount: 1, keptCount: 0, pendingIds: ['ri-s'], keptIds: [] });
+      }
+    }));
+    return uc.execute({ id: 'ri-s', userId: USER, scope: 'series' }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(cascadeIds).toEqual(['m55']);
     });
   });
 });

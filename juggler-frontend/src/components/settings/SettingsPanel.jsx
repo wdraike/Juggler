@@ -31,6 +31,66 @@ var TABS = [
   { id: 'preferences', label: 'Preferences', tip: 'Preferences — font size, grid zoom, task defaults' },
 ];
 
+// ─── HelpIcon — click-to-toggle contextual help tooltip ────────
+
+function HelpIcon({ children, text, theme, style }) {
+  var [open, setOpen] = useState(false);
+  var ref = useRef(null);
+
+  useEffect(function() {
+    if (!open) return;
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return function() { document.removeEventListener('mousedown', handleClick); };
+  }, [open]);
+
+  useEffect(function() {
+    if (!open) return;
+    function handleKey(e) {
+      if (e.key === 'Escape') { setOpen(false); }
+    }
+    document.addEventListener('keydown', handleKey);
+    return function() { document.removeEventListener('keydown', handleKey); };
+  }, [open]);
+
+  return (
+    <span ref={ref} style={Object.assign({ position: 'relative', display: 'inline-flex', alignItems: 'center' }, style || {})}>
+      {children}
+      <button
+        onClick={function(e) { e.stopPropagation(); e.preventDefault(); setOpen(function(p) { return !p; }); }}
+        onKeyDown={function(e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(function(p) { return !p; }); } }}
+        title="Show help"
+        aria-label="Show help"
+        style={{
+          border: '1px solid ' + (open ? theme.accent : theme.border),
+          borderRadius: '50%', width: 16, height: 16,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          background: open ? theme.accent + '20' : 'transparent',
+          color: open ? theme.accent : theme.textMuted,
+          fontSize: 10, fontWeight: 700, cursor: 'pointer',
+          padding: 0, lineHeight: 1, fontFamily: 'inherit', flexShrink: 0,
+          marginLeft: 4, transition: 'all 0.15s'
+        }}
+      >?</button>
+      {open && (
+        <div role="tooltip" style={{
+          position: 'absolute', left: 20, top: -6,
+          background: theme.bgSecondary, border: '1px solid ' + theme.border,
+          borderRadius: 6, padding: '6px 10px', fontSize: 11,
+          color: theme.text, lineHeight: 1.45,
+          boxShadow: '0 2px 10px ' + theme.shadow,
+          zIndex: 500, maxWidth: 260, minWidth: 160,
+          pointerEvents: 'auto'
+        }}>
+          {text}
+        </div>
+      )}
+    </span>
+  );
+}
+
 export default function SettingsPanel({ onClose, darkMode, config, allProjectNames, allTasks, isMobile, onRenameProject, showToast }) {
   var theme = getTheme(darkMode);
   var [tab, setTab] = useState('locations');
@@ -66,15 +126,17 @@ export default function SettingsPanel({ onClose, darkMode, config, allProjectNam
           borderBottom: `1px solid ${theme.border}`, overflowX: 'auto'
         }}>
           {TABS.map(t => (
-            <button key={t.id} onClick={() => setTab(t.id)} title={t.tip} style={{
-              border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
-              background: tab === t.id ? theme.accent : 'transparent',
-              color: tab === t.id ? '#FDFAF5' : theme.textSecondary,
-              fontSize: 12, fontWeight: tab === t.id ? 600 : 400, fontFamily: 'inherit',
-              whiteSpace: 'nowrap'
-            }}>
-              {t.label}
-            </button>
+          <button key={t.id} onClick={() => setTab(t.id)} title={t.tip} style={{
+            border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
+            background: tab === t.id ? theme.accent : 'transparent',
+            color: tab === t.id ? '#FDFAF5' : theme.textSecondary,
+            fontSize: 12, fontWeight: tab === t.id ? 600 : 400, fontFamily: 'inherit',
+            whiteSpace: 'nowrap'
+          }}>
+            <HelpIcon text={t.tip} theme={theme} style={{ display: 'inline-flex', marginRight: 4, verticalAlign: 'middle' }}>
+              <span>{t.label}</span>
+            </HelpIcon>
+          </button>
           ))}
         </div>
 
@@ -324,7 +386,11 @@ function LocationsTab({ config, theme }) {
 
   return (
     <div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>Locations</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>
+        <HelpIcon text="Locations — define places you work (home, office, gym, etc.) and optionally set their coordinates for weather data" theme={theme}>
+          <span>Locations</span>
+        </HelpIcon>
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
         {config.locations.map(function(loc, i) {
           return <LocationRow key={loc.id} loc={loc} config={config} theme={theme} />;
@@ -364,7 +430,11 @@ function ToolsTab({ config, theme }) {
 
   return (
     <div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>Tools</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>
+        <HelpIcon text="Tools — define the tools you use (laptop, phone, etc.). Each tool can be assigned to specific locations in the Tool Matrix tab." theme={theme}>
+          <span>Tools</span>
+        </HelpIcon>
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
         {config.tools.map((tool, i) => (
           <div key={tool.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: theme.bgTertiary, borderRadius: 6, fontSize: 13 }}>
@@ -389,7 +459,11 @@ function ToolsTab({ config, theme }) {
 function MatrixTab({ config, theme }) {
   return (
     <div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>Tool Availability Matrix</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 8 }}>
+        <HelpIcon text="Tool Matrix — control which tools are available at each location. Toggle each tool for each location on/off." theme={theme}>
+          <span>Tool Availability Matrix</span>
+        </HelpIcon>
+      </div>
       <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 12 }}>Which tools are available at each location</div>
       {config.locations.map(loc => (
         <div key={loc.id} style={{ marginBottom: 12 }}>
@@ -605,7 +679,9 @@ function ProjectsTab({ config, theme, allProjectNames, allTasks, onRenameProject
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>Projects</div>
+        <HelpIcon text="Projects — manage project names and colors. Sort and filter to find what you need." theme={theme}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: theme.text }}>Projects</div>
+        </HelpIcon>
         <span style={{ fontSize: 11, color: theme.textMuted }}>({config.projects.length + taskOnlyNames.length})</span>
       </div>
 
@@ -792,13 +868,20 @@ function PreferencesTab({ config, theme }) {
 
   return (
     <div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 12 }}>Preferences</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 12 }}>
+        <HelpIcon text="Preferences — font size, grid zoom, task defaults, timezone, and scheduling behavior." theme={theme}>
+          <span>Preferences</span>
+        </HelpIcon>
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
         <div style={{ fontSize: 12, color: theme.text }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <span style={{ fontWeight: 500 }}>Timezone:</span>
-            <div style={{ flex: 1, position: 'relative' }}>
+          <HelpIcon text="Override the auto-detected timezone. All times will be displayed in this timezone." theme={theme}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <span style={{ fontWeight: 500 }}>Timezone:</span>
+            </div>
+          </HelpIcon>
+          <div style={{ flex: 1, position: 'relative' }}>
               <input
                 list="tz-list"
                 value={config.timezoneOverride ? config.timezoneOverride.replace(/_/g, ' ') : ''}
@@ -835,26 +918,36 @@ function PreferencesTab({ config, theme }) {
           </div>
         </div>
 
-        <label title="Scale the entire UI font size" style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
-          Font size:
+        <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <HelpIcon text="Scale the entire UI font size. Range: 80%–140%." theme={theme}>
+            <span>Font size:</span>
+          </HelpIcon>
           <input type="range" min={80} max={140} value={config.fontSize} onChange={e => { var v = parseInt(e.target.value); config.setFontSize(v); savePrefs({ fontSize: v }); }} />
           <span style={{ fontSize: 11, color: theme.textMuted }}>{config.fontSize}%</span>
         </label>
-        <label title="Height in pixels per hour on the timeline grid" style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
-          Grid zoom (px/hour):
+        <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <HelpIcon text="Height in pixels per hour on the timeline grid. Higher values show more detail but require more scrolling." theme={theme}>
+            <span>Grid zoom (px/hour):</span>
+          </HelpIcon>
           <input type="range" min={30} max={120} value={config.gridZoom} onChange={e => { var v = parseInt(e.target.value); config.setGridZoom(v); savePrefs({ gridZoom: v }); }} />
           <span style={{ fontSize: 11, color: theme.textMuted }}>{config.gridZoom}px</span>
         </label>
-        <label title="When enabled, new tasks default to splittable (can be broken into chunks)" style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <HelpIcon text="When enabled, new tasks default to splittable (can be broken into chunks on the timeline)." theme={theme}>
+            <span>Split tasks by default</span>
+          </HelpIcon>
           <input type="checkbox" checked={config.splitDefault} onChange={e => { var v = e.target.checked; config.setSplitDefault(v); savePrefs({ splitDefault: v }); }} />
-          Split tasks by default
         </label>
-        <label title="Smallest chunk size when splitting tasks" style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
-          Min chunk (min):
+        <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <HelpIcon text="Smallest chunk size when splitting tasks (minutes). Chunks smaller than this will not be split further." theme={theme}>
+            <span>Min chunk (min):</span>
+          </HelpIcon>
           <input type="number" value={config.splitMinDefault} onChange={e => { var v = parseInt(e.target.value) || 15; config.setSplitMinDefault(v); savePrefs({ splitMinDefault: v }); }} style={{ width: 60, padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }} />
         </label>
-        <label title="The scheduler won't place tasks earlier than this time" style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
-          Earliest scheduling time:
+        <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <HelpIcon text="The scheduler won't place tasks earlier than this time. Useful to set your morning start." theme={theme}>
+            <span>Earliest scheduling time:</span>
+          </HelpIcon>
           <select value={config.schedFloor} onChange={e => { var v = parseInt(e.target.value); config.setSchedFloor(v); savePrefs({ schedFloor: v }); }}
             style={{ padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }}>
             {[360,420,480,540,600,660,720].map(m => (
@@ -862,8 +955,10 @@ function PreferencesTab({ config, theme }) {
             ))}
           </select>
         </label>
-        <label title="The scheduler won't place tasks later than this time" style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
-          Latest scheduling time:
+        <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <HelpIcon text="The scheduler won't place tasks later than this time. Useful to set your evening cut-off." theme={theme}>
+            <span>Latest scheduling time:</span>
+          </HelpIcon>
           <select value={config.schedCeiling} onChange={e => { var v = parseInt(e.target.value); config.setSchedCeiling(v); savePrefs({ schedCeiling: v }); }}
             style={{ padding: '4px 6px', border: `1px solid ${theme.inputBorder}`, borderRadius: 4, background: theme.input, color: theme.text, fontSize: 12 }}>
             {[1080,1140,1200,1260,1320,1380,1440].map(m => (
@@ -871,16 +966,19 @@ function PreferencesTab({ config, theme }) {
             ))}
           </select>
         </label>
-        <label title="When enabled, tasks pull forward less aggressively when the calendar has plenty of free time"
-          style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <input type="checkbox"
-            checked={config.pullForwardDampening || false}
-            onChange={e => { var v = e.target.checked; config.setPullForwardDampening(v); savePrefs({ pullForwardDampening: v }); }} />
-          Dampen pull-forward (less aggressive when calendar is open)
+        <label style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <HelpIcon text="When enabled, tasks pull forward less aggressively when the calendar has plenty of free time, reducing schedule churn." theme={theme}>
+            <input type="checkbox"
+              checked={config.pullForwardDampening || false}
+              onChange={e => { var v = e.target.checked; config.setPullForwardDampening(v); savePrefs({ pullForwardDampening: v }); }} />
+            <span>Dampen pull-forward (less aggressive when calendar is open)</span>
+          </HelpIcon>
         </label>
 
-        <div style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }} title="Display unit for weather temperatures. Internal storage and scheduling decisions are always Fahrenheit.">
-          <span style={{ fontWeight: 500 }}>Temperature unit:</span>
+        <div style={{ fontSize: 12, color: theme.text, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <HelpIcon text="Display unit for weather temperatures. Internal storage and scheduling decisions are always Fahrenheit." theme={theme}>
+            <span style={{ fontWeight: 500 }}>Temperature unit:</span>
+          </HelpIcon>
           <div style={{ display: 'flex', gap: 4 }}>
             {['F', 'C'].map(function(u) {
               var active = (config.tempUnitPref || 'F') === u;
@@ -902,7 +1000,9 @@ function PreferencesTab({ config, theme }) {
         </div>
 
         <div style={{ fontSize: 12, color: theme.text }}>
-          <span style={{ fontWeight: 500 }}>Done tasks on calendar:</span>
+          <HelpIcon text="Controls what happens to calendar events when a synced task is marked done. 'Mark as done' clears it, 'Remove from calendar' deletes it, 'Keep as-is' leaves it unchanged." theme={theme}>
+            <span style={{ fontWeight: 500 }}>Done tasks on calendar:</span>
+          </HelpIcon>
           <select
             value={config.calCompletedBehavior || 'update'}
             onChange={function(e) { var v = e.target.value; config.setCalCompletedBehavior(v); savePrefs({ calCompletedBehavior: v }); }}
@@ -1658,11 +1758,19 @@ function UnifiedTemplateTab({ config, theme, showToast, allTasks }) {
 
   return (
     <div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 4 }}>Schedule Templates</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: theme.text, marginBottom: 4 }}>
+        <HelpIcon text="Templates — define daily time blocks with locations, then assign a default template to each day of the week. Use date overrides for holidays or special days." theme={theme}>
+          <span>Schedule Templates</span>
+        </HelpIcon>
+      </div>
       <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 12 }}>Define time blocks and locations for each template</div>
 
       {/* Day Defaults */}
-      <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6 }}>Day Defaults</div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6 }}>
+        <HelpIcon text="Assign a default template to each day of the week. Each day automatically uses the selected template." theme={theme}>
+          <span>Day Defaults</span>
+        </HelpIcon>
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginBottom: 16 }}>
         {DAYS.map(function(d) {
           var current = (config.templateDefaults || {})[d] || 'weekday';
@@ -1683,7 +1791,11 @@ function UnifiedTemplateTab({ config, theme, showToast, allTasks }) {
       </div>
 
       {/* Template list */}
-      <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6 }}>Templates</div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6 }}>
+        <HelpIcon text="Create and manage schedule templates. Each template defines a set of time blocks with associated locations." theme={theme}>
+          <span>Templates</span>
+        </HelpIcon>
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 10 }}>
         {templateIds.map(function(id) {
           var s = templates[id];
@@ -1740,7 +1852,11 @@ function UnifiedTemplateTab({ config, theme, showToast, allTasks }) {
       {/* Block list + editor */}
       {tmpl && (
         <div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6 }}>Blocks</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6 }}>
+            <HelpIcon text="Time blocks define the hours and locations for a schedule template. Each block has a name, start/end time, location, and color." theme={theme}>
+              <span>Blocks</span>
+            </HelpIcon>
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
             {blocks.slice().sort(function(a, b) { return a.start - b.start || a.end - b.end; }).map(function(b) {
               var i = blocks.indexOf(b);
@@ -1833,7 +1949,11 @@ function UnifiedTemplateTab({ config, theme, showToast, allTasks }) {
       )}
 
       {/* Date Overrides */}
-      <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6, marginTop: 8 }}>Date Overrides</div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: theme.text, marginBottom: 6, marginTop: 8 }}>
+        <HelpIcon text="Override the default template for specific dates — useful for holidays, vacations, or special schedules." theme={theme}>
+          <span>Date Overrides</span>
+        </HelpIcon>
+      </div>
       <div style={{ fontSize: 11, color: theme.textMuted, marginBottom: 8 }}>Override the default template for specific dates</div>
       {overrideEntries.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 8 }}>

@@ -661,6 +661,75 @@ async function standardDelete(ctx) {
   await twrite.deleteTaskById(trx, id, userId);
 }
 
+// deleteTask this_and_future delete block (999.680). For recurring templates: deletes
+// the current instance (the one matching `id`), plus all future (pending, status='')
+// instances, plus the template master. Completed/past instances are kept.
+// Returns { deletedCount, keptCount, pendingIds, keptIds }.
+async function thisAndFutureDelete(ctx) {
+  var trx = ctx.trxRepo.db;
+  var twrite = ctx.trxRepo.tasksWrite;
+  var userId = ctx.userId;
+  var id = ctx.id;
+  var templateId = ctx.templateId;
+  var task = ctx.task;
+  var deletedCount = 0;
+  var keptCount = 0;
+  var pendingIds = [];
+  var keptIds = [];
+
+  // Fetch all instances of this template
+  var instances = await trx('tasks_with_sync_v')
+    .where({ user_id: userId, source_id: templateId })
+    .select('id', 'status', 'gcal_event_id', 'msft_event_id');
+
+  // Instances that are open/pending (not done/cancel/skip) — these are "future"
+  pendingIds = instances
+    .filter(function (inst) {
+      if (inst.id === id) return true; // always include the current instance
+      var st = inst.status || '';
+      return st !== 'done' && st !== 'cancel' && st !== 'skip';
+    })
+    .map(function (inst) { return inst.id; });
+
+  if (pendingIds.length > 0) {
+    // Clean ledger for deleted instances
+    await trx('cal_sync_ledger')
+      .where('user_id', userId)
+      .whereIn('task_id', pendingIds)
+      .where('status', 'active')
+      .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
+      .catch(function (err) { logger.error('[silent-catch]', err.message); });
+
+    await twrite.deleteTasksWhere(trx, userId, function (q) {
+      return q.whereIn('id', pendingIds);
+    });
+    deletedCount = pendingIds.length;
+  }
+
+  // Kept instances (completed/past)
+  keptIds = instances
+    .filter(function (inst) {
+      return pendingIds.indexOf(inst.id) === -1;
+    })
+    .map(function (inst) { return inst.id; });
+  keptCount = keptIds.length;
+
+  // Delete the template master itself
+  var template = await trx('tasks_with_sync_v').where({ id: templateId, user_id: userId }).first();
+  if (template) {
+    if (template.gcal_event_id || template.msft_event_id) {
+      await trx('cal_sync_ledger')
+        .where({ user_id: userId, task_id: templateId })
+        .where('status', 'active')
+        .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
+        .catch(function (err) { logger.error('[silent-catch]', err.message); });
+    }
+    await twrite.deleteTaskById(trx, templateId, userId);
+  }
+
+  return { deletedCount: deletedCount, keptCount: keptCount, pendingIds: pendingIds, keptIds: keptIds };
+}
+
 // batchUpdateTasks LOCKED-path block (verbatim — controller L1990-2050). Returns
 // { updatedCount, queuedCount, idsToCheck, calSyncGuard? }.
 async function lockedBatchUpdate(ctx) {
@@ -978,7 +1047,8 @@ var _splitTask = new app.SplitTask({ createTask: _createTask, updateTask: _updat
 var _deleteTask = new app.DeleteTask({
   repo: _repo, cache: _cache, enqueueScheduleRun: enqueueScheduleRun,
   loadCalSyncSettings: loadCalSyncSettings, findProviderLedgerRow: findProviderLedgerRow,
-  cascadeRecurringDelete: cascadeRecurringDelete, standardDelete: standardDelete
+  cascadeRecurringDelete: cascadeRecurringDelete, standardDelete: standardDelete,
+  thisAndFutureDelete: thisAndFutureDelete
 });
 
 var _batchCreateTasks = new app.BatchCreateTasks({

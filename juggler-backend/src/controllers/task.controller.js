@@ -119,13 +119,18 @@ async function updateTask(req, res) {
 
 /**
  * DELETE /api/tasks/:id — delete task
+ * Query params:
+ *   ?scope=instance      — delete just this one row
+ *   ?scope=series        — delete template + all instances
+ *   ?scope=this_and_future — delete current + future instances + template
  */
 async function deleteTask(req, res) {
   try {
     var result = await facade.deleteTask({
       id: req.params.id,
       userId: req.user.id,
-      cascade: req.query.cascade
+      cascade: req.query.cascade,
+      scope: req.query.scope
     });
     return sendEnvelope(res, result);
   } catch (error) {
