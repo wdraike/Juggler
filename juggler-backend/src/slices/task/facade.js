@@ -270,9 +270,6 @@ async function recurCleanup(ctx) {
 
     if (templateUpdate.recur !== undefined) {
       await twrite.resetRecurringInstances(trx, userId, existing.source_id, '[RECUR] cycle reset via instance edit');
-      if (templateUpdate.recur === null) {
-        await twrite.archiveCompletedInstances(trx, userId, existing.source_id);
-      }
     }
 
     if (Object.keys(instanceUpdate).length > 0) {
@@ -288,7 +285,6 @@ async function recurCleanup(ctx) {
     if (needsCleanup) {
       if (row.recurring === 0) {
         await twrite.resetRecurringInstances(trx, userId, id, '[RECUR] toggle-off: recurring=false');
-        await twrite.archiveCompletedInstances(trx, userId, id);
         await trx('task_instances')
           .insert({
             id: id,
@@ -323,9 +319,6 @@ async function recurCleanup(ctx) {
 
         if (recurChanged) {
           await twrite.resetRecurringInstances(trx, userId, id, '[RECUR] cycle reset');
-          if (oldRecur && !newRecur) {
-            await twrite.archiveCompletedInstances(trx, userId, id);
-          }
         } else {
           var _dateMatch = require('../../../shared/scheduler/dateMatchesRecurrence');
           var srcDateStr = updatedTmpl.recur_start
@@ -603,7 +596,12 @@ async function cascadeRecurringDelete(ctx) {
     })
     .map(function (inst) { return inst.id; });
   if (keptIds.length > 0) {
-    await twrite.archiveInstances(trx, userId, keptIds);
+    // Archive feature removed (999.676): completed instances of deleted recurring
+    // templates are now hard-deleted along with pending ones. The FK ON DELETE SET NULL
+    // still applies at the DB level, but we no longer re-parent to an archival master.
+    await twrite.deleteTasksWhere(trx, userId, function (q) {
+      return q.whereIn('id', keptIds);
+    });
   }
   keptCount = keptIds.length;
 
@@ -870,9 +868,6 @@ async function batchUpdateTxn(ctx) {
       }
       if (templateUpdate.recur !== undefined || templateUpdate.recurring === 0) {
         await twrite.resetRecurringInstances(trx, userId, existing.source_id, '[BATCH] cycle reset');
-        if (templateUpdate.recur === null || templateUpdate.recurring === 0) {
-          await twrite.archiveCompletedInstances(trx, userId, existing.source_id);
-        }
       }
       if (Object.keys(instanceUpdate).length > 0) {
         await twrite.updateTaskById(trx, id, instanceUpdate, userId);
@@ -887,9 +882,6 @@ async function batchUpdateTxn(ctx) {
       await twrite.updateTaskById(trx, id, row, userId);
       if (taskType === 'recurring_template' && (row.recur !== undefined || row.recurring === 0)) {
         await twrite.resetRecurringInstances(trx, userId, id, '[BATCH] cycle reset on template');
-        if (row.recur === null || row.recurring === 0) {
-          await twrite.archiveCompletedInstances(trx, userId, id);
-        }
       }
     }
     updatedCount++;

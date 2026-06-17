@@ -137,7 +137,7 @@ class InMemoryTaskRepository {
       section: task.section || null,
       notes: task.notes || null,
       url: task.url || null,
-      start_after_at: task.start_after_at || null,
+      earliest_start_at: task.earliest_start_at || null,
       location: task.location || '[]',
       tools: task.tools || '[]',
       when: task.when || null,

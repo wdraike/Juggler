@@ -10,8 +10,6 @@ declare const TaskStatus: {
     readonly SKIP: 'skip';
     readonly PAUSE: 'pause';
     readonly MISSED: 'missed';
-    readonly ARCHIVED: 'archived';
-    readonly RESTORED: 'restored';
 };
 
 declare const TASK_STATUSES: readonly [
@@ -21,9 +19,7 @@ declare const TASK_STATUSES: readonly [
     'cancel',
     'skip',
     'pause',
-    'missed',
-    'archived',
-    'restored'
+    'missed'
 ];
 
 declare const TERMINAL_STATUSES: readonly [
@@ -31,9 +27,7 @@ declare const TERMINAL_STATUSES: readonly [
     'cancel',
     'skip',
     'pause',
-    'missed',
-    'archived',
-    'restored'
+    'missed'
 ];
 
 declare const ACTIVE_STATUSES: readonly ['', 'wip'];
@@ -45,9 +39,7 @@ declare const STATUS_OPTIONS: readonly [
     'cancel',
     'skip',
     'pause',
-    'missed',
-    'archived',
-    'restored'
+    'missed'
 ];
 
 declare const CalHistoryStatus: {

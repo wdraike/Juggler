@@ -18,9 +18,6 @@ var ALL_STATUSES = [
   { value: 'skip',   icon: '\u21ED', label: 'Skip',     activeBg: '#F1F5F9', activeBgDark: '#1E293B', color: '#475569', colorDark: '#94A3B8' },
   { value: 'pause',  icon: '\u23F8', label: 'Pause',    activeBg: '#E0E7FF', activeBgDark: '#1E1B4B', color: '#4338CA', colorDark: '#A5B4FC' },
   { value: 'missed', icon: '\u29BB', label: 'Missed',   activeBg: '#FEF3C7', activeBgDark: '#3A2A08', color: '#B45309', colorDark: '#FCD34D', systemOnly: true },
-  // juggler-cal-history Plan B: new history-related statuses
-  { value: 'archived', icon: '\uD83D\uDDC1', label: 'Archive', activeBg: '#E5E7EB', activeBgDark: '#374151', color: '#6B7280', colorDark: '#9CA3AF' },
-  { value: 'restored', icon: '\u267B', label: 'Restore', activeBg: '#DBEAFE', activeBgDark: '#1E3A8A', color: '#1E40AF', colorDark: '#93C5FD' },
 ];
 
 function DeleteButton({ onDelete, size, fontSize, darkMode }) {

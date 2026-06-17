@@ -86,8 +86,6 @@ Checks if a transition from currentStatus to newStatus is valid based on the sta
 | SKIP | 'skip' | Task temporarily bypassed |
 | PAUSE | 'pause' | Recurring task paused |
 | MISSED | 'missed' | Resolution window passed without action |
-| ARCHIVED | 'archived' | Task moved to history/archive |
-| RESTORED | 'restored' | Task restored from history/archive |
 
 ## State Transition Rules
 

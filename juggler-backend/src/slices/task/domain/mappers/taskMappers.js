@@ -182,7 +182,7 @@ function rowToTask(row, timezone, sourceMap, logger) {
   var date = null;
   var time = null;
   var day = null;
-  var startAfter = null;
+  var earliestStart = null;
 
   var displayTz = timezone || null;
   if (displayTz && row.scheduled_at) {
@@ -207,11 +207,12 @@ function rowToTask(row, timezone, sourceMap, logger) {
       ? row.deadline.toISOString().split('T')[0]
       : String(row.deadline).split('T')[0];
   }
-  // Derive startAfter from start_after_at DATE column
-  if (row.start_after_at) {
-    startAfter = fromDateISO(row.start_after_at instanceof Date
-      ? row.start_after_at.toISOString().split('T')[0]
-      : String(row.start_after_at).split('T')[0]);
+  // Derive earliestStart from earliest_start_at DATE column
+  // (DB column was renamed from start_after_at; this reads the new name)
+  if (row.earliest_start_at) {
+    earliestStart = fromDateISO(row.earliest_start_at instanceof Date
+      ? row.earliest_start_at.toISOString().split('T')[0]
+      : String(row.earliest_start_at).split('T')[0]);
   }
   return {
     id: row.id,
@@ -235,7 +236,7 @@ function rowToTask(row, timezone, sourceMap, logger) {
     section: row.section,
     notes: row.notes,
     url: row.url || null,
-    startAfter: startAfter,
+    earliestStart: earliestStart,
     location: safeParseJSON(row.location, []),
     tools: safeParseJSON(row.tools, []),
     when: row.when,
@@ -295,8 +296,8 @@ function rowToTask(row, timezone, sourceMap, logger) {
 
 /**
  * Map API task to DB row. (controller ~512)
- * Converts date+time → scheduled_at (UTC) and deadline/startAfter →
- * deadline/start_after_at.
+ * Converts date+time → scheduled_at (UTC) and deadline/earliestStart →
+ * deadline/earliest_start_at.
  *
  * P1 NOTE (flagged for W3): this mapper sets `row.updated_at = new Date()` (a JS
  * Date — P1-COMPLIANT). It is the WRITE-row builder; the legacy controller's
@@ -329,8 +330,8 @@ function taskToRow(task, userId, timezone, _currentTask) {
   if (task.deadline !== undefined) {
     row.deadline = task.deadline ? toDateISO(task.deadline) || task.deadline : null;
   }
-  if (task.startAfter !== undefined) {
-    row.start_after_at = task.startAfter ? toDateISO(task.startAfter) || null : null;
+  if (task.earliestStart !== undefined) {
+    row.earliest_start_at = task.earliestStart ? toDateISO(task.earliestStart) || null : null;
   }
   if (task.location !== undefined) row.location = JSON.stringify(task.location);
   if (task.tools !== undefined) row.tools = JSON.stringify(task.tools);

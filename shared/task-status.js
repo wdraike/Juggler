@@ -14,9 +14,7 @@ const TaskStatus = Object.freeze({
   CANCEL: 'cancel',    // Task cancelled by user
   SKIP: 'skip',        // Task skipped (temporarily bypassed)
   PAUSE: 'pause',      // Task paused (recurring tasks only)
-  MISSED: 'missed',    // Task was missed (resolution window passed without action)
-  ARCHIVED: 'archived', // Task moved to history/archive
-  RESTORED: 'restored'  // Task restored from history/archive
+  MISSED: 'missed'     // Task was missed (resolution window passed without action)
 });
 
 const TASK_STATUSES = Object.freeze([
@@ -26,9 +24,7 @@ const TASK_STATUSES = Object.freeze([
   TaskStatus.CANCEL,
   TaskStatus.SKIP,
   TaskStatus.PAUSE,
-  TaskStatus.MISSED,
-  TaskStatus.ARCHIVED,
-  TaskStatus.RESTORED
+  TaskStatus.MISSED
 ]);
 
 const TERMINAL_STATUSES = Object.freeze([
@@ -36,9 +32,7 @@ const TERMINAL_STATUSES = Object.freeze([
   TaskStatus.CANCEL,
   TaskStatus.SKIP,
   TaskStatus.PAUSE,
-  TaskStatus.MISSED,
-  TaskStatus.ARCHIVED,
-  TaskStatus.RESTORED
+  TaskStatus.MISSED
 ]);
 
 const ACTIVE_STATUSES = Object.freeze([
@@ -53,9 +47,7 @@ const STATUS_OPTIONS = Object.freeze([
   TaskStatus.CANCEL,
   TaskStatus.SKIP,
   TaskStatus.PAUSE,
-  TaskStatus.MISSED,
-  TaskStatus.ARCHIVED,
-  TaskStatus.RESTORED
+  TaskStatus.MISSED
 ]);
 
 // Cal History Statuses (juggler-cal-history Plan C)
@@ -130,10 +122,6 @@ function getTaskStatusDisplayName(status) {
       return 'Paused';
     case TaskStatus.MISSED:
       return 'Missed';
-    case TaskStatus.ARCHIVED:
-      return 'Archived';
-    case TaskStatus.RESTORED:
-      return 'Restored';
     default:
       return 'Unknown';
   }
@@ -160,10 +148,6 @@ function getTaskStatusDescription(status) {
       return 'Recurring task paused';
     case TaskStatus.MISSED:
       return 'Resolution window passed without action';
-    case TaskStatus.ARCHIVED:
-      return 'Task moved to history/archive';
-    case TaskStatus.RESTORED:
-      return 'Task restored from history/archive';
     default:
       return 'Unknown status';
   }

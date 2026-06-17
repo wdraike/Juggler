@@ -21,7 +21,7 @@
  *
  * Column order (must match tasks-csv.js COLUMNS exactly):
  *   id, text, taskType, status, pri, project, dur, scheduledAt, date, time,
- *   deadline, startAfter, recurring, location, tools, notes, url, completedAt
+ *   deadline, earliestStart, recurring, location, tools, notes, url, completedAt
  *
  * Reverse-encoding rules (applied per cell, AFTER RFC-4180 unescaping):
  *   1. Empty cell          → field omitted from task object (not null, not '')

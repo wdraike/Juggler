@@ -24,7 +24,7 @@ const logger = createLogger('tasks-write');
 var MASTER_FIELDS = [
   'id', 'user_id', 'text', 'project', 'section', 'notes', 'url',
   'dur', 'pri',
-  'desired_at', 'deadline', 'start_after_at',
+  'desired_at', 'deadline', 'earliest_start_at',
   'when', 'day_req', 'time_flex', 'flex_when', 'placement_mode',
   'preferred_time_mins', 'tz',
   'recurring', 'recur', 'recur_start', 'recur_end',
@@ -54,7 +54,7 @@ var INSTANCE_FIELDS = [
 // Fields in the `tasks`-shape row that update MASTER only (template fields).
 var MASTER_UPDATE_FIELDS = [
   'text', 'project', 'section', 'notes', 'url', 'dur', 'pri',
-  'desired_at', 'deadline', 'start_after_at',
+  'desired_at', 'deadline', 'earliest_start_at',
   'when', 'day_req', 'time_flex', 'flex_when', 'placement_mode',
   'preferred_time_mins', 'tz',
   'recurring', 'recur', 'recur_start', 'recur_end',
@@ -310,66 +310,6 @@ async function insertTasksBatch(dbOrTrx, rows) {
   }
 }
 
-/**
- * Per-user "__archived__" master used to host completed instances of
- * a deleted recurring template. Creates the archival master lazily on first
- * use. Returns its id.
- *
- * Why: prior to this, the FK ON DELETE SET NULL would orphan completed
- * instances with master_id=NULL, and the view's LEFT JOIN would return
- * NULL for text/pri/project — a poor user experience. Re-parenting to an
- * archival master gives those rows consistent non-null fields.
- */
-var ARCHIVED_TEXT = '[Archived]';
-async function getOrCreateArchivedMasterId(dbOrTrx, userId) {
-  requireUserId(userId, 'getOrCreateArchivedMasterId');
-  // Convention: archival master id = '__archived__:<userId>'. Idempotent lookup.
-  var archivedId = '__archived__:' + userId;
-  var existing = await dbOrTrx('task_masters').where('id', archivedId).first();
-  if (existing) return archivedId;
-  await dbOrTrx('task_masters').insert({
-    id: archivedId,
-    user_id: userId,
-    text: ARCHIVED_TEXT,
-    pri: 'P4',
-    recurring: 0,
-    flex_when: 0, placement_mode: PLACEMENT_MODES.ANYTIME,
-    dur: 30,
-    created_at: dbOrTrx.fn.now(),
-    updated_at: dbOrTrx.fn.now()
-  });
-  return archivedId;
-}
-
-/**
- * Re-parent a list of instance ids to the user's archival master.
- * Assigns new sequential occurrence_ordinals starting after the current
- * MAX so the unique (master_id, occurrence_ordinal, split_ordinal) constraint
- * is preserved.
- */
-async function archiveInstances(dbOrTrx, userId, instanceIds) {
-  requireUserId(userId, 'archiveInstances');
-  if (!instanceIds || instanceIds.length === 0) return 0;
-  var archivedId = await getOrCreateArchivedMasterId(dbOrTrx, userId);
-  var maxRow = await dbOrTrx('task_instances')
-    .where('master_id', archivedId)
-    .max('occurrence_ordinal as max_ord')
-    .first();
-  var nextOrd = (maxRow && maxRow.max_ord ? Number(maxRow.max_ord) : 0) + 1;
-  // Per-row updates because each gets a unique new ordinal. For 100s of
-  // archived rows this is O(N) writes — acceptable for a one-time-per-delete cost.
-  for (var i = 0; i < instanceIds.length; i++) {
-    await dbOrTrx('task_instances')
-      .where({ id: instanceIds[i], user_id: userId })
-      .update({
-        master_id: archivedId,
-        occurrence_ordinal: nextOrd + i,
-        updated_at: dbOrTrx.fn.now()
-      });
-  }
-  return instanceIds.length;
-}
-
 function requireUserId(userId, fn) {
   if (!userId || typeof userId !== 'string') {
     throw new Error(fn + ': userId is required (tenancy safety). Got: ' + JSON.stringify(userId));
@@ -476,27 +416,9 @@ async function resetRecurringInstances(dbOrTrx, userId, masterId, logTag) {
   return pendingIds.length;
 }
 
-/**
- * Re-parent all completed (done/cancel/skip) instances for a recurring template
- * to the archival master. Used when recurring is turned off so history doesn't
- * display as orphaned task-type rows in the main list.
- * Returns the number of instances re-parented.
- */
-async function archiveCompletedInstances(dbOrTrx, userId, masterId) {
-  requireUserId(userId, 'archiveCompletedInstances');
-  var doneIds = await dbOrTrx('task_instances')
-    .where({ master_id: masterId, user_id: userId })
-    .whereIn('status', ['done', 'cancel', 'skip'])
-    .pluck('id');
-  if (doneIds.length === 0) return 0;
-  return await archiveInstances(dbOrTrx, userId, doneIds);
-}
-
 module.exports = {
   insertTask: insertTask,
   insertTasksBatch: insertTasksBatch,
-  archiveInstances: archiveInstances,
-  archiveCompletedInstances: archiveCompletedInstances,
   resetRecurringInstances: resetRecurringInstances,
   updateTaskById: updateTaskById,
   deleteTaskById: deleteTaskById,

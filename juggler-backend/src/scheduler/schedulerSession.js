@@ -197,7 +197,7 @@ function _computeStep(s, stepIndex) {
     task: task ? {
       id: task.id, text: task.text, project: task.project, pri: task.pri,
       dur: task.dur, when: task.when, deadline: task.deadline,
-      startAfter: task.startAfter, recurring: !!task.recurring,
+      earliestStart: task.earliestStart, recurring: !!task.recurring,
       split: !!task.split, splitMin: task.splitMin,
       location: task.location, tools: task.tools,
       slackMins: s.slackByTaskId[task.id] != null ? s.slackByTaskId[task.id] : null

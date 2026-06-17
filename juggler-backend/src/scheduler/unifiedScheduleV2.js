@@ -490,7 +490,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
       anchorDate: anchorDate,
       anchorMin: anchorMin,
       deadlineDate: deadlineDate,
-      startAfterDate: toKey(t.startAfter),
+      earliestStartDate: toKey(t.earliestStart),
       dependsOn: depsOn,
       isWindowMode: isWindowMode,
       isMissedWindow: isMissedWindow,
@@ -600,8 +600,8 @@ function computeSlack(item, dates, dayWindows, dayBlocks, dayOcc, dayOccPrefix) 
   if (!item.deadlineDate) return Infinity;
 
   var earliestIdx = 0;
-  if (item.startAfterDate) {
-    var si = indexOfDate(dates, item.startAfterDate);
+  if (item.earliestStartDate) {
+    var si = indexOfDate(dates, item.earliestStartDate);
     if (si > 0) earliestIdx = si;
   }
   var deadlineIdx = indexOfDate(dates, item.deadlineDate);
@@ -854,8 +854,8 @@ function weatherOk(task, dateKey, startMin, weatherByDateHour) {
 // slots that start before a dep completes are rejected.
 function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   var earliestIdx = 0;
-  if (item.startAfterDate) {
-    var si = indexOfDate(dates, item.startAfterDate);
+  if (item.earliestStartDate) {
+    var si = indexOfDate(dates, item.earliestStartDate);
     if (si > 0) earliestIdx = si;
   }
   var latestIdx = dates.length - 1;
@@ -1166,8 +1166,8 @@ function placeSplitInline(item, remaining, splitMin, dates, dayWindows, dayBlock
   var earliestIdx = 0;
   var latestIdx = dates.length - 1;
 
-  if (item.startAfterDate) {
-    var sai = indexOfDate(dates, item.startAfterDate);
+  if (item.earliestStartDate) {
+    var sai = indexOfDate(dates, item.earliestStartDate);
     if (sai > 0) earliestIdx = sai;
   }
   if (item.deadlineDate) {
@@ -1499,8 +1499,8 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
 
   function rangeIncludesDate(item, dateIdx) {
     var start = 0;
-    if (item.startAfterDate) {
-      var si = indexOfDate(dates, item.startAfterDate);
+    if (item.earliestStartDate) {
+      var si = indexOfDate(dates, item.earliestStartDate);
       if (si > 0) start = si;
     }
     var end = dates.length - 1;

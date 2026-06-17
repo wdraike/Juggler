@@ -210,8 +210,6 @@ describe('Zod Validation Boundaries', () => {
       { input: { status: 'skip' }, shouldPass: true, description: 'skip status' },
       { input: { status: 'pause' }, shouldPass: true, description: 'pause status' },
       { input: { status: 'missed' }, shouldPass: true, description: 'missed status' },
-      { input: { status: 'archived' }, shouldPass: true, description: 'archived status' },
-      { input: { status: 'restored' }, shouldPass: true, description: 'restored status' },
       
       // Invalid cases
       { input: { status: 'invalid' }, shouldPass: false, description: 'invalid status value' },

@@ -525,7 +525,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   //   weekly   → 6 days  (Mon→Sun anchor)
   //   monthly  → 27 days (~end of month)
   //   every_N  → N-1 days
-  // start_after = occurrence date; due = start_after + flex.
+  // earliest_start = occurrence date; due = earliest_start + flex.
   allTasks.forEach(function(t) {
     if (t.taskType !== 'recurring_instance' || !t.sourceId) return;
     var master = srcMap[t.sourceId];
@@ -556,10 +556,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
       flex = Math.max(0, every - 1);
     }
     var dueDate = new Date(occ); dueDate.setDate(dueDate.getDate() + flex);
-    t.startAfter = formatDateKey(occ);
+    t.earliestStart = formatDateKey(occ);
     t.deadline = formatDateKey(dueDate);
     if (!t.date) {
-      t.date = t.startAfter;
+      t.date = t.earliestStart;
       t.day = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][occ.getDay()];
     }
   });
@@ -707,7 +707,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (!master) return;
     var recur = master.recur || {};
     if (!recur.timesPerCycle || recur.timesPerCycle <= 0) return;
-    var occDate = t._candidateDate || t.date || t.startAfter;
+    var occDate = t._candidateDate || t.date || t.earliestStart;
     if (!occDate) return;
     var nextKey = nextTpcOccDateByKey[t.sourceId + '|' + occDate];
     if (!nextKey) return;
@@ -759,7 +759,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       var d = parseDate(mv.newDate);
       if (d) t.day = DAY_NAMES[d.getDay()];
       t.time = null;
-      t.startAfter = null;
+      t.earliestStart = null;
       t.deadline = null;
       t.scheduledAt = null;
     });
@@ -960,7 +960,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
         var d2 = parseDate(mv.newDate);
         if (d2) t.day = DAY_NAMES[d2.getDay()];
         t.time = null;
-        t.startAfter = null;
+        t.earliestStart = null;
         t.deadline = null;
         t.scheduledAt = null;
       });
@@ -1098,7 +1098,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       splitTotal: row.split_total,
       splitGroup: row.split_group || null,
       occurrenceOrdinal: row.occurrence_ordinal,
-      startAfter: null,
+      earliestStart: null,
       deadline: null,
       scheduledAt: null,
       unscheduled: false,
@@ -1115,12 +1115,12 @@ async function runScheduleAndPersist(userId, _retries, options) {
     logger.info('[SCHED] in-memory: added ' + inMemoryChunks.length + ' chunk tasks for scheduling');
   }
 
-  // Re-apply placement brackets (startAfter/deadline) for all recurring instances
+  // Re-apply placement brackets (earliestStart/deadline) for all recurring instances
   // including in-memory chunks. This was done in step 2b but only for tasks that
   // existed at that point — in-memory chunks need it too.
   allTasks.forEach(function(t) {
     if (t.taskType !== 'recurring_instance' || !t.sourceId) return;
-    if (t.startAfter && t.deadline) return; // already set from step 2b
+    if (t.earliestStart && t.deadline) return; // already set from step 2b
     var master = masterById[t.sourceId];
     if (!master) { master = srcMap[t.sourceId]; }
     if (!master) return;
@@ -1146,7 +1146,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       flex = Math.max(0, every - 1);
     }
     var dueDate = new Date(occ); dueDate.setDate(dueDate.getDate() + flex);
-    t.startAfter = formatDateKey(occ);
+    t.earliestStart = formatDateKey(occ);
     t.deadline = formatDateKey(dueDate);
     // For in-memory split chunks (ordinal 2+) of tpc tasks, cap deadline to the
     // day before the next occurrence so they don't compete with it for slots.
@@ -1162,7 +1162,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       }
     }
     if (!t.date) {
-      t.date = t.startAfter;
+      t.date = t.earliestStart;
       t.day = DAY_NAMES[occ.getDay()];
     }
     if (t.when == null || t.when === '') t.when = ALL_WINDOWS;

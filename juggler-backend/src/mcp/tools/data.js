@@ -233,14 +233,14 @@ function registerDataTools(server, userId) {
         }
       }
 
-      // 8. Impossible constraints: startAfter > deadline
+      // 8. Impossible constraints: earliestStart > deadline
       var impossible = await db('task_masters').where('user_id', userId)
-        .whereNotNull('start_after_at')
+        .whereNotNull('earliest_start_at')
         .whereNotNull('deadline')
-        .whereRaw('start_after_at > deadline')
-        .select('id', 'text', 'start_after_at', 'deadline');
+        .whereRaw('earliest_start_at > deadline')
+        .select('id', 'text', 'earliest_start_at', 'deadline');
       if (impossible.length > 0) {
-        issues.push({ type: 'impossible_constraint', count: impossible.length, details: impossible.slice(0, 20).map(function(r) { return { id: r.id, text: r.text, startAfter: r.start_after_at, deadline: r.deadline }; }) });
+        issues.push({ type: 'impossible_constraint', count: impossible.length, details: impossible.slice(0, 20).map(function(r) { return { id: r.id, text: r.text, earliestStart: r.earliest_start_at, deadline: r.deadline }; }) });
       }
 
       return {

@@ -10,7 +10,7 @@
  *
  * Column order (fixed):
  *   id, text, taskType, status, pri, project, dur, scheduledAt, date, time,
- *   deadline, startAfter, recurring, location, tools, notes, url, completedAt
+ *   deadline, earliestStart, recurring, location, tools, notes, url, completedAt
  *
  * Encoding rules (applied in order):
  *   1. null/undefined  → empty cell (no quotes, no content)
@@ -38,7 +38,7 @@ var COLUMNS = [
   ['date',        'date'],
   ['time',        'time'],
   ['deadline',    'deadline'],
-  ['startAfter',  'startAfter'],
+  ['earliestStart',  'earliestStart'],
   ['recurring',   'recurring'],
   ['location',    'location'],
   ['tools',       'tools'],

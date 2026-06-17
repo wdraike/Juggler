@@ -141,17 +141,17 @@ function validateTaskInput(body) {
     var dlDate = new Date(body.deadline);
     if (isNaN(dlDate.getTime())) errors.push('Deadline must be a valid date');
   }
-  // startAfter validation
-  if (body.startAfter !== undefined && body.startAfter !== null && body.startAfter !== '') {
-    var saDate = new Date(body.startAfter);
-    if (isNaN(saDate.getTime())) errors.push('Start-after must be a valid date');
+  // earliestStart validation
+  if (body.earliestStart !== undefined && body.earliestStart !== null && body.earliestStart !== '') {
+    var saDate = new Date(body.earliestStart);
+    if (isNaN(saDate.getTime())) errors.push('Earliest start must be a valid date');
   }
-  // cross-field: deadline >= startAfter (body-only check; for updates that
-  // patch only one field, use validateStartAfterDeadlineCrossField below)
-  if (body.deadline && body.startAfter) {
+  // cross-field: deadline >= earliestStart (body-only check; for updates that
+  // patch only one field, use validateEarliestStartDeadlineCrossField below)
+  if (body.deadline && body.earliestStart) {
     var dlD = new Date(body.deadline);
-    var saD = new Date(body.startAfter);
-    if (!isNaN(dlD.getTime()) && !isNaN(saD.getTime()) && dlD < saD) errors.push('Deadline must be on or after start-after date');
+    var saD = new Date(body.earliestStart);
+    if (!isNaN(dlD.getTime()) && !isNaN(saD.getTime()) && dlD < saD) errors.push('Deadline must be on or after earliest start date');
   }
   // recur config validation
   if (body.recur && typeof body.recur === 'object') {
@@ -269,40 +269,40 @@ function validateTaskInput(body) {
 }
 
 /**
- * Cross-field validation for startAfter > deadline that accounts for
- * partially-patched updates. When only one of startAfter/deadline is supplied
+ * Cross-field validation for earliestStart > deadline that accounts for
+ * partially-patched updates. When only one of earliestStart/deadline is supplied
  * in the body, the OTHER value is read from the existing task row. Returns an
  * error string if the merged values produce an impossible window
- * (startAfter > deadline), or null if valid. (999.558)
+ * (earliestStart > deadline), or null if valid. (999.558)
  *
  * Clearing semantics: if the body explicitly sets a field to '' or null,
  * that field is being CLEARED (removed), and we should not fall through to
  * the existing value — a cleared field removes the constraint.
  *
  * @param {Object} body   The request body (partial patch).
- * @param {Object} [existing] The existing task row (DB shape: start_after_at, deadline).
+ * @param {Object} [existing] The existing task row (DB shape: earliest_start_at, deadline).
  * @returns {?string} Error string or null.
  */
-function validateStartAfterDeadlineCrossField(body, existing) {
+function validateEarliestStartDeadlineCrossField(body, existing) {
   // Only run the cross-field check when at least one of the two fields is
   // being modified in this PATCH. If neither field is in the body, we do NOT
   // retroactively validate existing data that predates this rule.
-  if (!('startAfter' in body) && !('deadline' in body)) return null;
+  if (!('earliestStart' in body) && !('deadline' in body)) return null;
 
   // Determine whether each field is being explicitly set (including cleared).
   // A field is "explicitly present in the body" if the key exists, even if the
   // value is empty string or null (which means "clear the field").
   // If the key is absent, fall through to existing.
-  var startAfterExplicit = 'startAfter' in body;
+  var earliestStartExplicit = 'earliestStart' in body;
   var deadlineExplicit = 'deadline' in body;
 
-  // Resolve effective startAfter: body value if set (even if cleared),
+  // Resolve effective earliestStart: body value if set (even if cleared),
   // otherwise existing value. Cleared fields → null.
-  var effectiveStartAfter;
-  if (startAfterExplicit) {
-    effectiveStartAfter = (body.startAfter !== null && body.startAfter !== '') ? body.startAfter : null;
+  var effectiveEarliestStart;
+  if (earliestStartExplicit) {
+    effectiveEarliestStart = (body.earliestStart !== null && body.earliestStart !== '') ? body.earliestStart : null;
   } else {
-    effectiveStartAfter = (existing && existing.start_after_at) ? existing.start_after_at : null;
+    effectiveEarliestStart = (existing && existing.earliest_start_at) ? existing.earliest_start_at : null;
   }
 
   // Resolve effective deadline: body value if set (even if cleared),
@@ -315,21 +315,22 @@ function validateStartAfterDeadlineCrossField(body, existing) {
   }
 
   // Both must be present and non-null to compare.
-  if (!effectiveStartAfter || !effectiveDeadline) return null;
+  if (!effectiveEarliestStart || !effectiveDeadline) return null;
 
-  var saDate = new Date(effectiveStartAfter);
+  var saDate = new Date(effectiveEarliestStart);
   var dlDate = new Date(effectiveDeadline);
   if (isNaN(saDate.getTime()) || isNaN(dlDate.getTime())) return null;
 
   if (dlDate < saDate) {
-    return 'Deadline must be on or after start-after date';
+    return 'Deadline must be on or after earliest start date';
   }
   return null;
 }
 
 module.exports = {
   validateTaskInput,
-  validateStartAfterDeadlineCrossField,
+  validateEarliestStartDeadlineCrossField,
+  validateStartAfterDeadlineCrossField: validateEarliestStartDeadlineCrossField,
   checkCalSyncEditGuard,
   guardFixedCalendarWhen,
   VALID_WHEN_KEYWORDS,

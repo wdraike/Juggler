@@ -66,10 +66,6 @@ function getStatusReason(t, status) {
       return t.skipReason ? 'skipped: ' + t.skipReason : 'skipped for today';
     case 'pause':
       return t.pauseReason ? 'paused: ' + t.pauseReason : 'temporarily paused';
-    case 'archived':
-      return t.archiveReason ? 'archived: ' + t.archiveReason : 'moved to history';
-    case 'restored':
-      return t.restoreReason ? 'restored: ' + t.restoreReason : 'brought back from history';
     default:
       return null; // 'done' and 'wip' don't typically have automatic reasons
   }

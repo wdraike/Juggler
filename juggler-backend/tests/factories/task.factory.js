@@ -66,7 +66,7 @@ function createTask(userId, options = {}) {
     when: options.when || 'morning,lunch,afternoon,evening,night',
     day_req: options.day_req || 'any',
     deadline: options.deadline || null,
-    start_after_at: options.start_after_at || null,
+    earliest_start_at: options.earliest_start_at || null,
     desired_at: options.desired_at || null,
     desired_date: options.desired_date || null,
     depends_on: options.depends_on || null,

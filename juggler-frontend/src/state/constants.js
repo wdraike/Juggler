@@ -23,9 +23,6 @@ export const STATUS_OPTIONS = [
   { value: "skip", label: "\u23ED", bg: "#E8E0D0", bgDark: "#2C2B28", color: "#5C5A55", colorDark: "#B0A898", tip: "Skip — not today, keep the schedule" },
   { value: "missed", label: "\u26A0", bg: "#FEF3E0", bgDark: "#3A2818", color: "#A16207", colorDark: "#FCD34D", tip: "Missed — system flagged (no resolution before window closed)" },
   { value: "pause", label: "\u23F8", bg: "#E0E7FF", bgDark: "#1E1B4B", color: "#4338CA", colorDark: "#A5B4FC", tip: "Pause — temporarily inactive" },
-  // juggler-cal-history Plan B: new history-related statuses
-  { value: "archived", label: "\uD83D\uDDC1", bg: "#E5E7EB", bgDark: "#374151", color: "#6B7280", colorDark: "#9CA3AF", tip: "Archived — moved to history" },
-  { value: "restored", label: "\u267B", bg: "#DBEAFE", bgDark: "#1E3A8A", color: "#1E40AF", colorDark: "#93C5FD", tip: "Restored — brought back from history" },
 ];
 
 // juggler-cal-history Plan B: faded opacity for past terminal-state tasks (D-10).
@@ -35,7 +32,7 @@ export const STATUS_MAP = Object.fromEntries(STATUS_OPTIONS.map(s => [s.value, s
 
 export const TASK_DEFAULTS = {
   where: "anywhere", when: "morning,lunch,afternoon,evening,night",
-  dayReq: "any", dur: 30, notes: "", deadline: "", startAfter: "",
+  dayReq: "any", dur: 30, notes: "", deadline: "", earliestStart: "",
   section: "", dependsOn: []
 };
 

@@ -176,7 +176,7 @@ function importBuildTaskRow(t, userId, tz, statuses) {
   }
 
   var deadline = t.deadline ? toDateISO(t.deadline) || null : null;
-  var startAfterDate = (t.startAfter || t.start_after) ? toDateISO(t.startAfter || t.start_after) || null : null;
+  var earliestStartDate = (t.earliestStart || t.earliest_start) ? toDateISO(t.earliestStart || t.earliest_start) || null : null;
   var st = statuses || {};
 
   return {
@@ -192,7 +192,7 @@ function importBuildTaskRow(t, userId, tz, statuses) {
     section: t.section || null,
     notes: t.notes || null,
     deadline: deadline,
-    start_after_at: startAfterDate,
+    earliest_start_at: earliestStartDate,
     location: JSON.stringify(locationArr),
     tools: JSON.stringify(t.tools || []),
     when: t.when || null,

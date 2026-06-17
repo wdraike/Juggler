@@ -9,7 +9,7 @@ var PRI_RANK = require('../slices/scheduler/domain/constants').PRI_RANK;
 
 var TASK_DEFAULTS = {
   where: "anywhere", when: "morning,lunch,afternoon,evening,night",
-  dayReq: "any", dur: 30, notes: "", due: "", startAfter: "",
+  dayReq: "any", dur: 30, notes: "", due: "", earliestStart: "",
   section: "", dependsOn: []
 };
 
