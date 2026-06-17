@@ -247,7 +247,10 @@ InMemoryTaskRepository.prototype.getUserSplitPreference = function getUserSplitP
 InMemoryTaskRepository.prototype.insertTask = function insertTask(row) {
   if (row) {
     P1_DATE_COLUMNS.forEach(function (col) {
-      if (row[col] !== undefined) assertDate(row[col], col);
+      if (row[col] !== undefined && row[col] !== null) {
+        if (typeof row[col] === 'string') row[col] = new Date(row[col]);
+        assertDate(row[col], col);
+      }
     });
   }
   var stored = Object.assign({}, row);
@@ -275,8 +278,13 @@ InMemoryTaskRepository.prototype.insertTasksBatch = function insertTasksBatch(ro
 InMemoryTaskRepository.prototype.updateTaskById = function updateTaskById(id, changes, userId) {
   var c = Object.assign({}, changes);
   // Assert all P1 date columns supplied by the caller (FIX W3-1: column-complete guard).
+  // Allow null for nullable date cols (completed_at, scheduled_at).
+  // Convert ISO strings back to Date (action log deep-clone can stringify).
   P1_DATE_COLUMNS.forEach(function (col) {
-    if (col !== 'updated_at' && c[col] !== undefined) assertDate(c[col], col);
+    if (col !== 'updated_at' && c[col] !== undefined && c[col] !== null) {
+      if (typeof c[col] === 'string') c[col] = new Date(c[col]);
+      assertDate(c[col], col);
+    }
   });
   if (c.updated_at !== undefined) assertDate(c.updated_at, 'updated_at');
   else c.updated_at = new Date(); // P1

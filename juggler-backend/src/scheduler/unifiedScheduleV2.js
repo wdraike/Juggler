@@ -468,7 +468,12 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     // so chunks spread across the interval window naturally without competing with
     // the next occurrence. Daily tpc splits self-cap via cycleDays=1 in the
     // placement window (ai + cycleDays - 1 = ai → same day regardless).
-    var isDayLocked = recurring && (pm === PLACEMENT_MODES.FIXED || !isFlexibleTpc);
+    // Recurring split chunks (splitTotal > 1) are NOT day-locked — they can
+    // span multiple days within their cycle window (999.098). The cycle cap
+    // (anchor + cycleDays - 1) in findEarliestSlot / placeSplitInline prevents
+    // them from overflowing into the next cycle (999.547). Non-split recurring
+    // tasks remain day-locked as before.
+    var isDayLocked = recurring && (pm === PLACEMENT_MODES.FIXED || !isFlexibleTpc) && !(splitTot > 1);
 
     items.push({
       task: t,
@@ -1156,8 +1161,10 @@ var compareItems = ConstraintSolver.compareItems;
 //
 // Returns: { placed: [{dateKey, start, dur}], remaining: number }
 //
-// For recurring split tasks: restricted to the anchorDate only (isDayLocked).
-// For non-recurring: searches across the eligible date range.
+// For recurring split tasks: restricted to the cycle window (anchor + cycleDays - 1)
+// so chunks don't overflow into the next occurrence. Split chunks are NOT day-locked
+// (999.098) — they can span multiple days within the cycle cap (999.547).
+// For non-recurring: searches across the eligible date range up to the deadline.
 function placeSplitInline(item, remaining, splitMin, dates, dayWindows, dayBlocks, dayOcc, cfg) {
   var placed = [];
   var STEP = 15; // placement granularity
@@ -1521,8 +1528,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       // Inline split expansion: tasks with split===true that can't fit as a
       // single contiguous block are placed greedily in chunks of >= splitMin.
       // Each chunk is a separate placement entry sharing the same task object.
-      // Recurring split chunks stay day-locked (isDayLocked drives the search);
-      // non-recurring splits may span days up to the deadline.
+      // Non-recurring splits may span days up to the deadline.
       if (item.task && item.task.split && !item.isRecurring && (item.splitOrdinal === 1 || item.splitOrdinal == null)) {
         var splitMin = (item.task.splitMin != null ? item.task.splitMin : null) ||
                        (cfg && cfg.splitMinDefault) || 15;
@@ -1543,8 +1549,9 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
           noteMasterPlacement(env, item, splitPlacedFirst.dateKey);
           queuePlacedCount += splitResult.placed.length;
           if (splitResult.remaining > 0) {
-            // Partial placement: mark as partial_split in unplaced.
-            item.task._unplacedReason = 'partial_split';
+            // Remaining unplaced chunks are treated as normal unscheduled tasks
+            // (999.144) — no special partial_split flag. They go to unplaced for
+            // user review like any other task that didn't fit.
             unplaced.push(item);
           }
           // Recompute slack for affected items (use first chunk's date).
