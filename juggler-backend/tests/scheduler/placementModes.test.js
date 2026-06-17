@@ -4,7 +4,7 @@
  * Comprehensive test suite for ANYTIME placement mode covering:
  * - Earliest slot selection
  * - Deadline constraints
- * - startAfter constraints
+ * - earliestStart constraints
  * - dayReq constraints
  * - when-tags filtering
  * - flexWhen relaxation
@@ -155,37 +155,37 @@ describe('Placement Modes — ANYTIME mode (TS-01 to TS-22)', () => {
     expect(p.start).toBeGreaterThanOrEqual(DAY_START);
   });
 
-  // ── TS-05: startAfter constraint ────────────────────────────────────
-  test('TS-05: ANYTIME task with startAfter placed after specified date', () => {
+  // ── TS-05: earliestStart constraint ────────────────────────────────────
+  test('TS-05: ANYTIME task with earliestStart placed after specified date', () => {
     const task = makeTask({
       id: 'ts05',
       text: 'Start after task',
       dur: 15,
-      startAfter: '2026-06-11' // Tomorrow
+      earliestStart: '2026-06-11' // Tomorrow
     });
 
     const result = run([task]);
     const p = findPlacement(result, 'ts05');
 
     expect(p).not.toBeNull();
-    expect(p.dateKey).toBe('2026-06-11'); // Should be placed on or after startAfter date
+    expect(p.dateKey).toBe('2026-06-11'); // Should be placed on or after earliestStart date
   });
 
-  // ── TS-06: startAfter with buffer ────────────────────────────────────
-  test('TS-06: ANYTIME task with startAfter and buffer', () => {
+  // ── TS-06: earliestStart with buffer ────────────────────────────────────
+  test('TS-06: ANYTIME task with earliestStart and buffer', () => {
     const task = makeTask({
       id: 'ts06',
       text: 'Start after with buffer',
       dur: 15,
-      startAfter: '2026-06-11', // Tomorrow
-      startAfterBuffer: 30 // 30 minutes buffer
+      earliestStart: '2026-06-11', // Tomorrow
+      earliestStartBuffer: 30 // 30 minutes buffer
     });
 
     const result = run([task]);
     const p = findPlacement(result, 'ts06');
 
     expect(p).not.toBeNull();
-    expect(p.dateKey).toBe('2026-06-11'); // Should be placed on or after startAfter date
+    expect(p.dateKey).toBe('2026-06-11'); // Should be placed on or after earliestStart date
   });
 
   // ── TS-07: dayReq constraint (weekday) ────────────────────────────

@@ -72,28 +72,28 @@ function findPlacement(result, taskId) {
 // ── Earliest-Start Base Tests (TS-142 to TS-146) ────────────────────────────
 
 describe('Earliest-Start Base Tests', () => {
-  describe('TS-142: Basic startAfter placement', () => {
-    test('Task with startAfter should be placed on or after specified date', () => {
+  describe('TS-142: Basic earliestStart placement', () => {
+    test('Task with earliestStart should be placed on or after specified date', () => {
       const task = makeTask({
         id: 'ts142a',
         text: 'Start after task',
         dur: 60,
-        startAfter: '2026-06-11' // Tomorrow
+        earliestStart: '2026-06-11' // Tomorrow
       });
       
       const result = run([task]);
       const placement = findPlacement(result, 'ts142a');
       
       expect(placement).not.toBeNull();
-      expect(placement.dateKey).toBe('2026-06-11'); // Should be placed on or after startAfter date
+      expect(placement.dateKey).toBe('2026-06-11'); // Should be placed on or after earliestStart date
     });
 
-    test('Task with startAfter at today should be placed in first available slot', () => {
+    test('Task with earliestStart at today should be placed in first available slot', () => {
       const task = makeTask({
         id: 'ts142b',
         text: 'Start after today',
         dur: 60,
-        startAfter: '2026-06-10' // Today
+        earliestStart: '2026-06-10' // Today
       });
       
       const result = run([task]);
@@ -104,13 +104,13 @@ describe('Earliest-Start Base Tests', () => {
     });
   });
 
-  describe('TS-143: startAfter with time blocks', () => {
-    test('Task with startAfter should respect time block constraints', () => {
+  describe('TS-143: earliestStart with time blocks', () => {
+    test('Task with earliestStart should respect time block constraints', () => {
       const task = makeTask({
         id: 'ts143a',
         text: 'Time block start after',
         dur: 60,
-        startAfter: '2026-06-10',
+        earliestStart: '2026-06-10',
         when: 'afternoon' // Afternoon blocks start at 12:00 PM
       });
       
@@ -124,20 +124,20 @@ describe('Earliest-Start Base Tests', () => {
     });
   });
 
-  describe('TS-144: startAfter priority ordering', () => {
-    test('Multiple tasks with different startAfter dates should be ordered correctly', () => {
+  describe('TS-144: earliestStart priority ordering', () => {
+    test('Multiple tasks with different earliestStart dates should be ordered correctly', () => {
       const earlyTask = makeTask({
         id: 'ts144a',
         text: 'Early task',
         dur: 60,
-        startAfter: '2026-06-10' // Today
+        earliestStart: '2026-06-10' // Today
       });
       
       const lateTask = makeTask({
         id: 'ts144b',
         text: 'Late task',
         dur: 60,
-        startAfter: '2026-06-12' // Day after tomorrow
+        earliestStart: '2026-06-12' // Day after tomorrow
       });
       
       const result = run([earlyTask, lateTask]);
@@ -151,14 +151,14 @@ describe('Earliest-Start Base Tests', () => {
     });
   });
 
-  describe('TS-145: startAfter with priority conflicts', () => {
-    test('High priority task should override startAfter of lower priority task', () => {
+  describe('TS-145: earliestStart with priority conflicts', () => {
+    test('High priority task should override earliestStart of lower priority task', () => {
       const highPriorityEarly = makeTask({
         id: 'ts145a',
         text: 'High priority early',
         dur: 120,
         pri: 'P1',
-        startAfter: '2026-06-11' // Tomorrow
+        earliestStart: '2026-06-11' // Tomorrow
       });
       
       const lowPriorityNormal = makeTask({
@@ -166,7 +166,7 @@ describe('Earliest-Start Base Tests', () => {
         text: 'Low priority normal',
         dur: 60,
         pri: 'P4',
-        startAfter: '2026-06-10' // Today
+        earliestStart: '2026-06-10' // Today
       });
       
       const result = run([highPriorityEarly, lowPriorityNormal]);
@@ -177,21 +177,21 @@ describe('Earliest-Start Base Tests', () => {
       expect(highPlacement).not.toBeNull();
       expect(lowPlacement).not.toBeNull();
       
-      // High priority task should get its startAfter respected
+      // High priority task should get its earliestStart respected
       expect(highPlacement.dateKey).toBe('2026-06-11');
       
-      // Low priority task should be placed on its startAfter date
+      // Low priority task should be placed on its earliestStart date
       expect(lowPlacement.dateKey).toBe('2026-06-10');
     });
   });
 
-  describe('TS-146: startAfter edge cases', () => {
-    test('Task with startAfter in the past should be placed immediately', () => {
+  describe('TS-146: earliestStart edge cases', () => {
+    test('Task with earliestStart in the past should be placed immediately', () => {
       const task = makeTask({
         id: 'ts146a',
         text: 'Past start after',
         dur: 60,
-        startAfter: '2026-06-09' // Yesterday
+        earliestStart: '2026-06-09' // Yesterday
       });
       
       const result = run([task]);
@@ -202,12 +202,12 @@ describe('Earliest-Start Base Tests', () => {
       expect(placement.dateKey).toBe('2026-06-10');
     });
 
-    test('Task with startAfter far in future should be placed on that date', () => {
+    test('Task with earliestStart far in future should be placed on that date', () => {
       const task = makeTask({
         id: 'ts146b',
         text: 'Far future start after',
         dur: 60,
-        startAfter: '2026-06-15' // 5 days from now
+        earliestStart: '2026-06-15' // 5 days from now
       });
       
       const result = run([task]);
@@ -222,13 +222,13 @@ describe('Earliest-Start Base Tests', () => {
 // ── Earliest-Start x Template/Split Tests (TS-147 to TS-150) ────────────────
 
 describe('Earliest-Start x Template/Split Tests', () => {
-  describe('TS-147: startAfter with schedule templates', () => {
-    test('Task with startAfter should respect template time constraints', () => {
+  describe('TS-147: earliestStart with schedule templates', () => {
+    test('Task with earliestStart should respect template time constraints', () => {
       const task = makeTask({
         id: 'ts147a',
         text: 'Template start after',
         dur: 60,
-        startAfter: '2026-06-10',
+        earliestStart: '2026-06-10',
         when: 'afternoon' // Afternoon blocks start at 12:00 PM
       });
       
@@ -242,13 +242,13 @@ describe('Earliest-Start x Template/Split Tests', () => {
     });
   });
 
-  describe('TS-148: startAfter with split tasks', () => {
-    test('Split task with startAfter should have first part respect constraint', () => {
+  describe('TS-148: earliestStart with split tasks', () => {
+    test('Split task with earliestStart should have first part respect constraint', () => {
       const task = makeTask({
         id: 'ts148a',
         text: 'Split start after',
         dur: 180,
-        startAfter: '2026-06-10',
+        earliestStart: '2026-06-10',
         split: true
       });
       
@@ -257,17 +257,17 @@ describe('Earliest-Start x Template/Split Tests', () => {
       
       expect(placement).not.toBeNull();
       expect(placement.dateKey).toBe('2026-06-10');
-      // Should be placed on or after startAfter date
+      // Should be placed on or after earliestStart date
     });
   });
 
-  describe('TS-149: startAfter with deadline interaction', () => {
-    test('Task with both startAfter and deadline should respect both constraints', () => {
+  describe('TS-149: earliestStart with deadline interaction', () => {
+    test('Task with both earliestStart and deadline should respect both constraints', () => {
       const task = makeTask({
         id: 'ts149a',
         text: 'Both constraints',
         dur: 120,
-        startAfter: '2026-06-10',
+        earliestStart: '2026-06-10',
         deadline: '2026-06-10 15:00' // 3:00 PM
       });
       
@@ -285,7 +285,7 @@ describe('Earliest-Start x Template/Split Tests', () => {
         id: 'ts149b',
         text: 'Conflicting constraints',
         dur: 120,
-        startAfter: '2026-06-10',
+        earliestStart: '2026-06-10',
         deadline: '2026-06-10 10:00' // 10:00 AM (only 2 hours after start of day, but task needs 2 hours)
       });
       
@@ -301,13 +301,13 @@ describe('Earliest-Start x Template/Split Tests', () => {
     });
   });
 
-  describe('TS-150: startAfter with time-based placement', () => {
-    test('Task with startAfter should work with different time-based placement modes', () => {
+  describe('TS-150: earliestStart with time-based placement', () => {
+    test('Task with earliestStart should work with different time-based placement modes', () => {
       const timeWindowTask = makeTask({
         id: 'ts150a',
         text: 'Time window start after',
         dur: 60,
-        startAfter: '2026-06-10',
+        earliestStart: '2026-06-10',
         when: 'afternoon' // Afternoon time window
       });
       
@@ -326,13 +326,13 @@ describe('Earliest-Start x Template/Split Tests', () => {
 // ── Earliest-Start Advanced Tests (TS-151 to TS-154) ────────────────────────
 
 describe('Earliest-Start Advanced Tests', () => {
-  describe('TS-151: startAfter with dependencies', () => {
-    test('Dependent task should respect startAfter of dependency completion', () => {
+  describe('TS-151: earliestStart with dependencies', () => {
+    test('Dependent task should respect earliestStart of dependency completion', () => {
       const taskA = makeTask({
         id: 'ts151a',
         text: 'Task A',
         dur: 60,
-        startAfter: '2026-06-10'
+        earliestStart: '2026-06-10'
       });
       
       const taskB = makeTask({
@@ -340,7 +340,7 @@ describe('Earliest-Start Advanced Tests', () => {
         text: 'Task B',
         dur: 60,
         dependsOn: ['ts151a'],
-        startAfter: '2026-06-10'
+        earliestStart: '2026-06-10'
       });
       
       const result = run([taskA, taskB]);
@@ -351,7 +351,7 @@ describe('Earliest-Start Advanced Tests', () => {
       expect(placementA).not.toBeNull();
       expect(placementB).not.toBeNull();
       
-      // Both tasks should be on or after startAfter date
+      // Both tasks should be on or after earliestStart date
       expect(placementA.dateKey).toBe('2026-06-10');
       expect(placementB.dateKey).toBe('2026-06-10');
       
@@ -360,13 +360,13 @@ describe('Earliest-Start Advanced Tests', () => {
     });
   });
 
-  describe('TS-152: startAfter with recurring tasks', () => {
-    test('Recurring task with startAfter should handle instance constraints', () => {
+  describe('TS-152: earliestStart with recurring tasks', () => {
+    test('Recurring task with earliestStart should handle instance constraints', () => {
       const task = makeTask({
         id: 'ts152a',
         text: 'Recurring start after',
         dur: 60,
-        startAfter: '2026-06-10'
+        earliestStart: '2026-06-10'
       });
       
       const result = run([task]);
@@ -377,14 +377,14 @@ describe('Earliest-Start Advanced Tests', () => {
     });
   });
 
-  describe('TS-153: startAfter batch processing', () => {
-    test('Multiple tasks with same startAfter should be processed in priority order', () => {
+  describe('TS-153: earliestStart batch processing', () => {
+    test('Multiple tasks with same earliestStart should be processed in priority order', () => {
       const p1Task = makeTask({
         id: 'ts153a',
         text: 'P1 same start after',
         dur: 60,
         pri: 'P1',
-        startAfter: '2026-06-10'
+        earliestStart: '2026-06-10'
       });
       
       const p3Task = makeTask({
@@ -392,7 +392,7 @@ describe('Earliest-Start Advanced Tests', () => {
         text: 'P3 same start after',
         dur: 60,
         pri: 'P3',
-        startAfter: '2026-06-10'
+        earliestStart: '2026-06-10'
       });
       
       const result = run([p1Task, p3Task]);
@@ -403,7 +403,7 @@ describe('Earliest-Start Advanced Tests', () => {
       expect(p1Placement).not.toBeNull();
       expect(p3Placement).not.toBeNull();
       
-      // Both should be on the startAfter date
+      // Both should be on the earliestStart date
       expect(p1Placement.dateKey).toBe('2026-06-10');
       expect(p3Placement.dateKey).toBe('2026-06-10');
       
@@ -412,14 +412,14 @@ describe('Earliest-Start Advanced Tests', () => {
     });
   });
 
-  describe('TS-154: startAfter system integration', () => {
-    test('Complex scenario with multiple constraints and startAfter', () => {
+  describe('TS-154: earliestStart system integration', () => {
+    test('Complex scenario with multiple constraints and earliestStart', () => {
       const highPriorityEarly = makeTask({
         id: 'ts154a',
         text: 'High priority early',
         dur: 120,
         pri: 'P1',
-        startAfter: '2026-06-10'
+        earliestStart: '2026-06-10'
       });
       
       const mediumPriorityNormal = makeTask({
@@ -427,7 +427,7 @@ describe('Earliest-Start Advanced Tests', () => {
         text: 'Medium priority normal',
         dur: 60,
         pri: 'P2',
-        startAfter: '2026-06-10'
+        earliestStart: '2026-06-10'
       });
       
       const lowPriorityLate = makeTask({
@@ -435,7 +435,7 @@ describe('Earliest-Start Advanced Tests', () => {
         text: 'Low priority late',
         dur: 30,
         pri: 'P3',
-        startAfter: '2026-06-11' // Next day
+        earliestStart: '2026-06-11' // Next day
       });
       
       const result = run([highPriorityEarly, mediumPriorityNormal, lowPriorityLate]);
@@ -448,7 +448,7 @@ describe('Earliest-Start Advanced Tests', () => {
       expect(mediumPlacement).not.toBeNull();
       expect(lowPlacement).not.toBeNull();
       
-      // Tasks should respect their startAfter constraints
+      // Tasks should respect their earliestStart constraints
       expect(highPlacement.dateKey).toBe('2026-06-10');
       expect(mediumPlacement.dateKey).toBe('2026-06-10');
       expect(lowPlacement.dateKey).toBe('2026-06-11');

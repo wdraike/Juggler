@@ -649,7 +649,7 @@ describe('UpdateTask — earliestStart > deadline cross-field (999.558)', functi
     ] });
   }
   // Seed a task with a earliestStart but no deadline
-  function seedWithStartAfter() {
+  function seedWithEarliestStart() {
     return new InMemoryTaskRepository({ rows: [
       { id: 't2', user_id: USER, task_type: 'task', text: 'has earliestStart', pri: 'P3', status: '',
         deadline: null, earliest_start_at: new Date('2026-06-15'), updated_at: new Date('2026-06-01T00:00:00Z') }
@@ -689,7 +689,7 @@ describe('UpdateTask — earliestStart > deadline cross-field (999.558)', functi
 
   test('FAST PATH: setting deadline before existing earliestStart → 400', function () {
     // Task has earliest_start_at=2026-06-15. Setting deadline=2026-06-10 is before it.
-    var repo = seedWithStartAfter();
+    var repo = seedWithEarliestStart();
     var trigger = H.makeTriggerSpy();
     var updateSpy = jest.spyOn(repo, 'updateTaskById');
     var deps = updateDeps(repo, { enqueueScheduleRun: trigger });
@@ -710,7 +710,7 @@ describe('UpdateTask — earliestStart > deadline cross-field (999.558)', functi
   });
 
   test('FAST PATH: setting deadline after existing earliestStart → 200 (valid)', function () {
-    var repo = seedWithStartAfter();
+    var repo = seedWithEarliestStart();
     var deps = updateDeps(repo);
     return new UpdateTask(deps).execute({ id: 't2', userId: USER, body: { deadline: '2026-07-01' } }).then(function (out) {
       expect(out.status).toBe(200);
@@ -731,7 +731,7 @@ describe('UpdateTask — earliestStart > deadline cross-field (999.558)', functi
 
   test('COMPLEX PATH: setting deadline before existing earliestStart → 400', function () {
     // `when` forces the complex path; deadline is before existing earliestStart.
-    var repo = seedWithStartAfter();
+    var repo = seedWithEarliestStart();
     var trigger = H.makeTriggerSpy();
     var deps = updateDeps(repo, { enqueueScheduleRun: trigger });
     return new UpdateTask(deps).execute({ id: 't2', userId: USER, body: { when: 'morning', deadline: '2026-06-10' } }).then(function (out) {

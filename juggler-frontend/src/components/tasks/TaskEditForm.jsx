@@ -114,7 +114,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [endTimeError, setEndTimeError] = useState(null);
   var [timeRemaining, setTimeRemaining] = useState(isCreate ? '' : (task.timeRemaining != null ? task.timeRemaining : ''));
   var [deadline, setDeadline] = useState(isCreate ? '' : toDateISO(task.deadline));
-  var [startAfter, setStartAfter] = useState(isCreate ? '' : toDateISO(task.startAfter));
+  var [earliestStart, setEarliestStart] = useState(isCreate ? '' : toDateISO(task.earliestStart));
   var [notes, setNotes] = useState(isCreate ? '' : (task.notes || ''));
   var [url, setUrl] = useState(isCreate ? '' : (task.url || ''));
   var [when, setWhen] = useState(function() {
@@ -270,7 +270,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       text: t.text || '', project: t.project || '', pri: t.pri || 'P3',
       date: toDateISO(t.date) || '', time: toTime24(t.time) || '',
       dur: t.dur || 30, timeRemaining: t.timeRemaining != null ? t.timeRemaining : '',
-      deadline: toDateISO(t.deadline) || '', startAfter: toDateISO(t.startAfter) || '',
+      deadline: toDateISO(t.deadline) || '', earliestStart: toDateISO(t.earliestStart) || '',
       notes: t.notes || '', url: t.url || '', when: t.when || '', dayReq: t.dayReq || 'any',
       recurring: !!t.recurring, rigid: !!t.rigid,
       timeFlex: t.timeFlex != null ? t.timeFlex : null,
@@ -323,7 +323,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setEndTime(newSnap.time ? addMinutesTo24h(newSnap.time, newSnap.dur || 0) : '');
     setEndTimeError(null);
     setTimeRemaining(newSnap.timeRemaining); setDeadline(newSnap.deadline);
-    setStartAfter(newSnap.startAfter); setNotes(newSnap.notes);
+    setEarliestStart(newSnap.earliestStart); setNotes(newSnap.notes);
     setUrl(newSnap.url || '');
     setWhen(newSnap.when); setDayReq(newSnap.dayReq);
     // Re-derive scheduling mode from synced value
@@ -364,7 +364,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       dur: parseInt(dur) || 30,
       timeRemaining: timeRemaining === '' ? null : parseInt(timeRemaining),
       deadline: fromDateISO(deadline),
-      startAfter: fromDateISO(startAfter),
+      earliestStart: fromDateISO(earliestStart),
       notes,
       url: (url && url.trim()) ? url.trim() : null,
       // Scheduling mode — sent explicitly to backend; backend writes directly to placement_mode ENUM column.
@@ -421,7 +421,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       weatherHumidityMin: weatherHumidityMin !== '' && weatherHumidityMin !== null ? parseInt(weatherHumidityMin) : null,
       weatherHumidityMax: weatherHumidityMax !== '' && weatherHumidityMax !== null ? parseInt(weatherHumidityMax) : null
     };
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, exactTime, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, earliestStart, notes, url, when, dayReq, recurring, exactTime, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, isCreate, task, taskTz, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   // Build only the fields that changed from the initial snapshot (prevents marking unchanged fields dirty)
   var buildChangedFields = useCallback(function() {
@@ -460,7 +460,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (date !== (snap.date || '')) { changed.date = all.date; changed.day = all.day; }
     if (time !== (snap.time || '')) changed.time = all.time;
     if (deadline !== (snap.deadline || '')) changed.deadline = all.deadline;
-    if (startAfter !== (snap.startAfter || '')) changed.startAfter = all.startAfter;
+    if (earliestStart !== (snap.earliestStart || '')) changed.earliestStart = all.earliestStart;
     // Timezone change — also sends converted date/time
     if (taskTz !== (snap.tz || '')) { changed.tz = all.tz; changed.date = all.date; changed.day = all.day; changed.time = all.time; }
     // timeRemaining
@@ -497,7 +497,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       changed._timezone = all._timezone;
     }
     return Object.keys(changed).length > 0 ? changed : null;
-  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, exactTime, dur, timeRemaining, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, date, time, deadline, startAfter, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [buildFields, text, project, pri, notes, url, when, dayReq, recurring, exactTime, dur, timeRemaining, timeFlex, split, splitMin, travelBefore, travelAfter, marker, flexWhen, date, time, deadline, earliestStart, taskLoc, taskTools, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   // Dirty detection — compare current fields to snapshot
   var [isDirty, setIsDirty] = useState(false);
@@ -507,7 +507,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     userDirtyRef.current = true;
     var changed = buildChangedFields();
     setIsDirty(!!changed);
-  }, [text, project, pri, date, time, dur, timeRemaining, deadline, startAfter, notes, url, when, dayReq, recurring, exactTime, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
+  }, [text, project, pri, date, time, dur, timeRemaining, deadline, earliestStart, notes, url, when, dayReq, recurring, exactTime, timeFlex, split, splitMin, travelBefore, travelAfter, taskLoc, taskTools, marker, flexWhen, recurType, recurDays, recurTimesPerCycle, recurFillPolicy, recurEvery, recurUnit, recurMonthDays, taskTz, recurStart, recurEnd, placementMode, weatherPrecip, weatherCloud, weatherTempMin, weatherTempMax, weatherHumidityMin, weatherHumidityMax]);
 
   function handleSave() {
     // Suppress save while the start/finish pair is invalid — keeps the user's
@@ -725,7 +725,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             recurIsAnchorDependent={recurIsAnchorDependent}
             configWarnings={configWarnings}
             deadline={deadline} onDeadlineChange={setDeadline}
-            startAfter={startAfter} onStartAfterChange={setStartAfter}
+            earliestStart={earliestStart} onEarliestStartChange={setEarliestStart}
             split={split} onSplitChange={setSplit}
             splitMin={splitMin} onSplitMinChange={setSplitMin}
             travelBefore={travelBefore} onTravelBeforeChange={setTravelBefore}

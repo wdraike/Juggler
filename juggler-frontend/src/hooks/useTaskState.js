@@ -62,7 +62,7 @@ function hydratePlacements(data) {
 // Fields that map to task object properties for partial saves
 var SAVE_FIELDS = [
   'text', 'status', 'date', 'time', 'dur', 'timeRemaining',
-  'pri', 'project', 'section', 'notes', 'due', 'startAfter',
+  'pri', 'project', 'section', 'notes', 'due', 'earliestStart',
   'location', 'tools', 'when', 'dayReq', 'recurring', 'rigid',
   'split', 'splitMin', 'travelBefore', 'travelAfter', 'recur', 'dependsOn', 'datePinned',
   'preferredTime', 'tz', '_timezone', 'anchorDate'

@@ -49,7 +49,7 @@ function makeRow(overrides) {
     section: null,
     notes: '',
     deadline: null,
-    start_after_at: null,
+    earliest_start_at: null,
     location: '[]',
     tools: '[]',
     when: '',
@@ -152,17 +152,17 @@ describe('rowToTask: UTC derivation', () => {
     expect(task.deadline).toBe('2026-04-10');
   });
 
-  test('derives startAfter from start_after_at', () => {
-    var row = makeRow({ start_after_at: '2026-04-06' });
+  test('derives earliestStart from earliest_start_at', () => {
+    var row = makeRow({ earliest_start_at: '2026-04-06' });
     var task = rowToTask(row, TZ, {});
-    expect(task.startAfter).toBe('2026-04-06');
+    expect(task.earliestStart).toBe('2026-04-06');
   });
 
-  test('handles null deadline and start_after_at', () => {
-    var row = makeRow({ deadline: null, start_after_at: null });
+  test('handles null deadline and earliest_start_at', () => {
+    var row = makeRow({ deadline: null, earliest_start_at: null });
     var task = rowToTask(row, TZ, {});
     expect(task.deadline).toBeNull();
-    expect(task.startAfter).toBeNull();
+    expect(task.earliestStart).toBeNull();
   });
 });
 

@@ -171,7 +171,7 @@ function DetailPanel({ step, summary }) {
         {task.project != null && <><span style={{ color: '#8899aa' }}>Project</span><span>{task.project}</span></>}
         {task.when != null && <><span style={{ color: '#8899aa' }}>When</span><span>{task.when}</span></>}
         {task.deadline != null && <><span style={{ color: '#8899aa' }}>Deadline</span><span>{task.deadline}</span></>}
-        {task.startAfter != null && <><span style={{ color: '#8899aa' }}>Start after</span><span>{task.startAfter}</span></>}
+        {task.earliestStart != null && <><span style={{ color: '#8899aa' }}>Start after</span><span>{task.earliestStart}</span></>}
         {(function() {
           // Two slack numbers come out of the scheduler:
           //   orderingSlack = slack at sort time (set in Phases 1/2)

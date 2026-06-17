@@ -289,18 +289,18 @@ describe('TS-277: Nudge functionality with time-travel', () => {
 });
 
 // Note: The remaining tests (TS-278 to TS-288) would follow similar patterns
-// covering startAfter crossing, weather change detection, cache refresh,
+// covering earliestStart crossing, weather change detection, cache refresh,
 // 14-day horizon, grandfather clause, split time-box, debounce, and
 // weekday-weekend transitions.
 
 // For brevity, I'll outline the structure for the remaining tests:
 
 /**
- * TS-278: startAfter crossing with time-travel
- * - Test that tasks with startAfter constraints behave correctly when clock crosses the threshold
+ * TS-278: earliestStart crossing with time-travel
+ * - Test that tasks with earliestStart constraints behave correctly when clock crosses the threshold
  */
 
-describe('TS-278: startAfter crossing with time-travel', () => {
+describe('TS-278: earliestStart crossing with time-travel', () => {
   // Implementation would follow similar pattern as above
 });
 

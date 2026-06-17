@@ -8,14 +8,14 @@
  *   2. text > 500 chars       → error "Task name must be 500 characters or less"
  *   3. dur ≤ 0                → error "Duration must be greater than 0"
  *   4. splitMin > dur         → error "Split minimum must be less than or equal to duration"
- *   5. deadline < startAfter  → error "Deadline must be on or after start-after date"
+ *   5. deadline < earliestStart  → error "Deadline must be on or after earliest start date"
  *   6. invalid recur type     → error "Invalid recurrence type"
  *   7. timeFlex < 0           → error "Time flex must be between 0 and 480 minutes"
  *   8. timeFlex > 480         → error "Time flex must be between 0 and 480 minutes"
  *   9. Boundary: text exactly 500 chars → accepted
  *  10. Boundary: dur = 1      → accepted
  *  11. Boundary: splitMin = dur → accepted (equal is allowed)
- *  12. Boundary: deadline = startAfter → accepted (same-day is allowed)
+ *  12. Boundary: deadline = earliestStart → accepted (same-day is allowed)
  *  13. Boundary: timeFlex = 0 → accepted
  *  14. Boundary: timeFlex = 480 → accepted
  *  15. Valid recur type       → accepted
@@ -194,7 +194,7 @@ function makeSuccessRow(overrides) {
     desired_at: null,
     tz: null,
     deadline: null,
-    start_after_at: null,
+    earliest_start_at: null,
     recur_start: null,
     recur_end: null,
     location: '[]',
@@ -373,64 +373,64 @@ describe('create_task boundary — splitMin vs dur', function() {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. deadline < startAfter → error
+// 5. deadline < earliestStart → error
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('create_task boundary — deadline vs startAfter', function() {
+describe('create_task boundary — deadline vs earliestStart', function() {
 
-  test('deadline before startAfter → isError=true', async function() {
+  test('deadline before earliestStart → isError=true', async function() {
     var result = await captureHandlers()['create_task']({
       text: 'Task',
       deadline: '2026-06-01',
-      startAfter: '2026-06-15'
+      earliestStart: '2026-06-15'
     });
     expect(result.isError).toBe(true);
-    expect(errorText(result)).toMatch(/deadline must be on or after start-after date/i);
+    expect(errorText(result)).toMatch(/deadline must be on or after earliest start date/i);
   });
 
-  test('deadline 1 day before startAfter → isError=true', async function() {
+  test('deadline 1 day before earliestStart → isError=true', async function() {
     var result = await captureHandlers()['create_task']({
       text: 'Task',
       deadline: '2026-06-14',
-      startAfter: '2026-06-15'
+      earliestStart: '2026-06-15'
     });
     expect(result.isError).toBe(true);
-    expect(errorText(result)).toMatch(/deadline must be on or after start-after date/i);
+    expect(errorText(result)).toMatch(/deadline must be on or after earliest start date/i);
   });
 
-  test('deadline same as startAfter → accepted (same-day is allowed)', async function() {
+  test('deadline same as earliestStart → accepted (same-day is allowed)', async function() {
     mockCreatedRow = makeSuccessRow({
       text: 'Task',
       deadline: '2026-06-15',
-      start_after_at: '2026-06-15'
+      earliest_start_at: '2026-06-15'
     });
     var result = await captureHandlers()['create_task']({
       text: 'Task',
       deadline: '2026-06-15',
-      startAfter: '2026-06-15'
+      earliestStart: '2026-06-15'
     });
     expect(result.isError).toBeFalsy();
   });
 
-  test('deadline after startAfter → accepted', async function() {
+  test('deadline after earliestStart → accepted', async function() {
     mockCreatedRow = makeSuccessRow({
       text: 'Task',
       deadline: '2026-06-20',
-      start_after_at: '2026-06-15'
+      earliest_start_at: '2026-06-15'
     });
     var result = await captureHandlers()['create_task']({
       text: 'Task',
       deadline: '2026-06-20',
-      startAfter: '2026-06-15'
+      earliestStart: '2026-06-15'
     });
     expect(result.isError).toBeFalsy();
   });
 
-  test('deadline before startAfter → insertTask NOT called', async function() {
+  test('deadline before earliestStart → insertTask NOT called', async function() {
     await captureHandlers()['create_task']({
       text: 'Task',
       deadline: '2026-06-01',
-      startAfter: '2026-06-15'
+      earliestStart: '2026-06-15'
     });
     expect(mockInsertCalls.length).toBe(0);
   });
@@ -584,7 +584,7 @@ describe('create_task boundary — isError flag and side-effect suppression', fu
       { text: 'Task', dur: 0 },
       { text: 'Task', timeFlex: -1 },
       { text: 'Task', split: true, dur: 10, splitMin: 20 },
-      { text: 'Task', deadline: '2026-01-01', startAfter: '2026-06-01' },
+      { text: 'Task', deadline: '2026-01-01', earliestStart: '2026-06-01' },
       { text: 'Task', recur: { type: 'fortnightly' } },
       { text: 'x'.repeat(501) }
     ];

@@ -34,7 +34,7 @@ function masterDefaults(userId, props) {
     desired_at:   props.desiredAt    || null,
     desired_date: props.desiredDate  || null,
     due_at:       props.dueAt        || null,
-    start_after_at: props.startAfter || null,
+    earliest_start_at: props.earliestStart || null,
     when:         props.when     != null ? props.when : '',
     day_req:      props.dayReq   || null,
     time_flex:    props.timeFlex != null ? props.timeFlex : null,

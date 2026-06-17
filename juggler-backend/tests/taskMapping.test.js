@@ -27,7 +27,7 @@ describe('task mapping', () => {
     section: 'sec',
     notes: 'some notes',
     deadline: '2026-03-20',
-    start_after_at: '2026-03-10',
+    earliest_start_at: '2026-03-10',
     location: '["home","work"]',
     tools: '["phone"]',
     when: 'morning',
@@ -73,7 +73,7 @@ describe('task mapping', () => {
       expect(task.datePinned).toBeUndefined();
       expect(task.gcalEventId).toBe('gcal_123');
       expect(task.deadline).toBe('2026-03-20');
-      expect(task.startAfter).toBe('2026-03-10');
+      expect(task.earliestStart).toBe('2026-03-10');
     });
 
     it('handles already-parsed JSON fields', () => {

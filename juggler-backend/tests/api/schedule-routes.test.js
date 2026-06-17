@@ -112,7 +112,7 @@ jest.mock('../../src/scheduler/schedulerSession', () => ({
     snapshots: [
       { stepIndex: 0, phase: 'V2: Immovable', taskId: 't1', taskText: 'Task 1', orderingSlack: 0, placement: { dateKey: '2026-05-15', start: 540, dur: 30 } }
     ],
-    tasksById: { t1: { id: 't1', text: 'Task 1', project: null, pri: 'P2', dur: 30, when: null, deadline: null, startAfter: null, recurring: false, split: false, splitMin: null, location: [], tools: [] } },
+    tasksById: { t1: { id: 't1', text: 'Task 1', project: null, pri: 'P2', dur: 30, when: null, deadline: null, earliestStart: null, recurring: false, split: false, splitMin: null, location: [], tools: [] } },
     unplaced: [],
     score: {},
     warnings: [],

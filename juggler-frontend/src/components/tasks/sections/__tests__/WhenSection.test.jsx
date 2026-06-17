@@ -13,7 +13,7 @@ var BASE = {
   recurring: false, rigid: false, timeFlex: 60,
   recurType: 'none', recurDays: 'MTWRF', recurEvery: 1, recurTpc: 1,
   recurStart: '', recurEnd: '',
-  deadline: '', startAfter: '', split: false, splitMin: 15,
+  deadline: '', earliestStart: '', split: false, splitMin: 15,
   travelBefore: 0, travelAfter: 0, marker: false, flexWhen: false,
   dayReq: 'any', when: '', timeRemaining: '',
   taskTz: 'America/New_York',
@@ -30,7 +30,7 @@ var COMMON_HANDLERS = {
   onRigidChange: noop, onTimeFlexChange: noop, onRecurTypeChange: noop,
   onRecurDaysChange: noop, onRecurEveryChange: noop, onRecurTpcChange: noop,
   onRecurStartChange: noop, onRecurEndChange: noop,
-  onDeadlineChange: noop, onStartAfterChange: noop,
+  onDeadlineChange: noop, onEarliestStartChange: noop,
   onSplitChange: noop, onSplitMinChange: noop,
   onTravelBeforeChange: noop, onTravelAfterChange: noop,
   onMarkerChange: noop, onFlexWhenChange: noop,
@@ -697,16 +697,16 @@ it('onDeadlineChange called when deadline input changes', () => {
   expect(called).toBe('2026-07-01');
 });
 
-it('onStartAfterChange called when start after input changes', () => {
+it('onEarliestStartChange called when start after input changes', () => {
   var called = null;
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
-    startAfter=""
+    earliestStart=""
     collapse={{ when_recurrence: false, when_constraints: true }}
-    onStartAfterChange={function(v) { called = v; }}
+    onEarliestStartChange={function(v) { called = v; }}
   />);
-  var startAfterLabel = screen.getByText('Start after').closest('label');
-  var startAfterInput = startAfterLabel.querySelector('input');
-  fireEvent.change(startAfterInput, { target: { value: '2026-06-10' } });
+  var earliestStartLabel = screen.getByText('Start after').closest('label');
+  var earliestStartInput = earliestStartLabel.querySelector('input');
+  fireEvent.change(earliestStartInput, { target: { value: '2026-06-10' } });
   expect(called).toBe('2026-06-10');
 });
 

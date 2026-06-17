@@ -66,7 +66,7 @@ function makeTask(overrides) {
     dur: 30,
     when: 'morning',
     deadline: null,
-    startAfter: null,
+    earliestStart: null,
     recurring: false,
     split: false,
     splitMin: null,

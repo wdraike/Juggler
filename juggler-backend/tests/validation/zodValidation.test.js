@@ -509,13 +509,13 @@ describe('Zod Validation Boundaries', () => {
 
     const testCases = [
       // Valid cases
-      { input: { text: 'test', startAfter: '2026-12-31' }, expectedErrors: [], description: 'valid ISO date' },
+      { input: { text: 'test', earliestStart: '2026-12-31' }, expectedErrors: [], description: 'valid ISO date' },
       { input: { text: 'test' }, expectedErrors: [], description: 'optional start_after omitted' },
 
       // Invalid cases
-      { input: { text: 'test', startAfter: '31-12-2026' }, expectedErrors: ['Start-after must be a valid date'], description: 'invalid date format (DD-MM-YYYY)' },
-      { input: { text: 'test', startAfter: 'not-a-date' }, expectedErrors: ['Start-after must be a valid date'], description: 'non-date string' },
-      { input: { text: 'test', startAfter: 'invalid-date-string' }, expectedErrors: ['Start-after must be a valid date'], description: 'invalid date string' },
+      { input: { text: 'test', earliestStart: '31-12-2026' }, expectedErrors: ['Earliest start must be a valid date'], description: 'invalid date format (DD-MM-YYYY)' },
+      { input: { text: 'test', earliestStart: 'not-a-date' }, expectedErrors: ['Earliest start must be a valid date'], description: 'non-date string' },
+      { input: { text: 'test', earliestStart: 'invalid-date-string' }, expectedErrors: ['Earliest start must be a valid date'], description: 'invalid date string' },
     ];
 
     testCases.forEach(({ input, expectedErrors, description }) => {

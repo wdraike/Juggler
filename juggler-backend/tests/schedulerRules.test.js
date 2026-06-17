@@ -431,11 +431,11 @@ describe('Scheduler Rules', () => {
     });
   });
 
-  // ─── GROUP 14: startAfter constraint ───
-  describe('Group 14: startAfter constraint', () => {
-    test('tasks placed on or after startAfter date', () => {
+  // ─── GROUP 14: earliestStart constraint ───
+  describe('Group 14: earliestStart constraint', () => {
+    test('tasks placed on or after earliestStart date', () => {
       var tasks = [
-        makeTask({ id: 'future_task', pri: 'P1', dur: 30, startAfter: dateKey(3), text: 'Future task' }),
+        makeTask({ id: 'future_task', pri: 'P1', dur: 30, earliestStart: dateKey(3), text: 'Future task' }),
       ];
       var result = run(tasks);
 
@@ -443,8 +443,8 @@ describe('Scheduler Rules', () => {
       expect(isOnToday(result, 'future_task')).toBe(false);
       var day = placedDay(result, 'future_task');
       var placedDate = parseDateKey(day);
-      var startAfterDate = parseDateKey(dateKey(3));
-      expect(placedDate >= startAfterDate).toBe(true);
+      var earliestStartDate = parseDateKey(dateKey(3));
+      expect(placedDate >= earliestStartDate).toBe(true);
     });
   });
 
@@ -688,7 +688,7 @@ describe('Scheduler Rules', () => {
       var tasks = [
         makeTask({ id: 'try_suit', pri: 'P2', dur: 30, text: 'Try on suit' }),
         makeTask({ id: 'tailor', pri: 'P2', dur: 60, dependsOn: ['try_suit'], dayReq: 'weekday', text: 'Tailor suit' }),
-        makeTask({ id: 'pickup', pri: 'P2', dur: 30, dependsOn: ['tailor'], startAfter: dateKey(2), text: 'Pick up suit' }),
+        makeTask({ id: 'pickup', pri: 'P2', dur: 30, dependsOn: ['tailor'], earliestStart: dateKey(2), text: 'Pick up suit' }),
         makeTask({ id: 'buy_gift', pri: 'P2', dur: 120, text: 'Buy wedding gift' }),
         makeTask({ id: 'wrap_gift', pri: 'P3', dur: 30, dependsOn: ['buy_gift'], text: 'Wrap gift' }),
         makeTask({ id: 'get_card', pri: 'P2', dur: 20, text: 'Get wedding card' }),
@@ -702,7 +702,7 @@ describe('Scheduler Rules', () => {
       expect(placedBefore(result, 'tailor', 'pickup')).toBe(true);
       expect(placedBefore(result, 'buy_gift', 'wrap_gift')).toBe(true);
 
-      // startAfter respected
+      // earliestStart respected
       var pickupDay = placedDay(result, 'pickup');
       if (pickupDay) {
         var pickupDate = parseDateKey(pickupDay);
@@ -993,20 +993,20 @@ describe('Scheduler Rules', () => {
 
   // GROUP 38: removed (PARKING/TO BE SCHEDULED section filtering no longer exists)
 
-  // ─── GROUP 39: startAfter + due date (constrained window) ───
-  describe('Group 39: Task with both startAfter and due date', () => {
-    test('task places within the startAfter-to-due window', () => {
+  // ─── GROUP 39: earliestStart + due date (constrained window) ───
+  describe('Group 39: Task with both earliestStart and due date', () => {
+    test('task places within the earliestStart-to-due window', () => {
       var tasks = [
-        makeTask({ id: 'windowed', pri: 'P2', dur: 60, startAfter: dateKey(2), deadline: dateKey(5), text: 'Windowed task' }),
+        makeTask({ id: 'windowed', pri: 'P2', dur: 60, earliestStart: dateKey(2), deadline: dateKey(5), text: 'Windowed task' }),
       ];
       var result = run(tasks);
 
       expect(isPlaced(result, 'windowed')).toBe(true);
       var parts = findPlacements(result, 'windowed');
       var placedDate = parseDateKey(parts[0].dateKey);
-      var startAfterDate = parseDateKey(dateKey(2));
+      var earliestStartDate = parseDateKey(dateKey(2));
       var dueDate = parseDateKey(dateKey(5));
-      expect(placedDate.getTime()).toBeGreaterThanOrEqual(startAfterDate.getTime());
+      expect(placedDate.getTime()).toBeGreaterThanOrEqual(earliestStartDate.getTime());
       expect(placedDate.getTime()).toBeLessThanOrEqual(dueDate.getTime());
     });
   });
@@ -1541,11 +1541,11 @@ describe('Scheduler Rules', () => {
     });
   });
 
-  // ─── GROUP 68: Impossible startAfter + due combination ───
-  describe('Group 68: Impossible startAfter > due date', () => {
-    test('task with startAfter after due date handled gracefully', () => {
+  // ─── GROUP 68: Impossible earliestStart + due combination ───
+  describe('Group 68: Impossible earliestStart > due date', () => {
+    test('task with earliestStart after due date handled gracefully', () => {
       var tasks = [
-        makeTask({ id: 'impossible_window', pri: 'P2', dur: 30, startAfter: dateKey(5), deadline: dateKey(2), text: 'Impossible window' }),
+        makeTask({ id: 'impossible_window', pri: 'P2', dur: 30, earliestStart: dateKey(5), deadline: dateKey(2), text: 'Impossible window' }),
       ];
       var result = run(tasks);
       // Should not crash; task likely unplaced

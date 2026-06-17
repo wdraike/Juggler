@@ -176,7 +176,7 @@ export default function WhenSection(props) {
     // datePinned and onDatePinnedChange are intentionally omitted — removed in When-mode redesign
     configWarnings,
     deadline, onDeadlineChange,
-    startAfter, onStartAfterChange,
+    earliestStart, onEarliestStartChange,
     split, onSplitChange,
     splitMin, onSplitMinChange,
     travelBefore, onTravelBeforeChange,
@@ -791,7 +791,7 @@ export default function WhenSection(props) {
           </label>
           <label style={lStyle}>
             Start after
-            <input type="date" value={startAfter} onChange={e => onStartAfterChange(e.target.value)}
+            <input type="date" value={earliestStart} onChange={e => onEarliestStartChange(e.target.value)}
               style={{ ...iStyle, width: 130 }} />
           </label>
         </div>

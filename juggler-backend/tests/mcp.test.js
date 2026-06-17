@@ -84,14 +84,14 @@ describe('validateTaskInput', () => {
     expect(validateTaskInput({ deadline: '2026-04-20' })).toEqual([]);
   });
 
-  test('startAfter must be valid date', () => {
-    expect(validateTaskInput({ startAfter: 'garbage' }).length).toBe(1);
-    expect(validateTaskInput({ startAfter: '2026-04-15' })).toEqual([]);
+  test('earliestStart must be valid date', () => {
+    expect(validateTaskInput({ earliestStart: 'garbage' }).length).toBe(1);
+    expect(validateTaskInput({ earliestStart: '2026-04-15' })).toEqual([]);
   });
 
-  test('deadline >= startAfter', () => {
-    expect(validateTaskInput({ deadline: '2026-04-10', startAfter: '2026-04-15' }).length).toBe(1);
-    expect(validateTaskInput({ deadline: '2026-04-20', startAfter: '2026-04-15' })).toEqual([]);
+  test('deadline >= earliestStart', () => {
+    expect(validateTaskInput({ deadline: '2026-04-10', earliestStart: '2026-04-15' }).length).toBe(1);
+    expect(validateTaskInput({ deadline: '2026-04-20', earliestStart: '2026-04-15' })).toEqual([]);
   });
 
   test('recur.type must be known', () => {

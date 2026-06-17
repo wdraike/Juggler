@@ -123,10 +123,7 @@ jest.mock('../../src/lib/tasks-write', () => ({
   updateTasksWhere: jest.fn(() => Promise.resolve()),
   updateInstancesWhere: jest.fn(() => Promise.resolve()),
   insertTasksBatch: jest.fn(() => Promise.resolve()),
-  archiveInstances: jest.fn(() => Promise.resolve()),
-  getOrCreateArchivedMasterId: jest.fn(() => Promise.resolve('archive-master-id')),
   resetRecurringInstances: jest.fn(() => Promise.resolve()),
-  archiveCompletedInstances: jest.fn(() => Promise.resolve())
 }));
 
 jest.mock('../../src/middleware/entity-limits', () => ({
@@ -179,7 +176,7 @@ function makeTaskRow(overrides) {
     notes: null,
     url: null,
     deadline: null,
-    start_after_at: null,
+    earliest_start_at: null,
     location: '[]',
     tools: '[]',
     when: null,

@@ -205,7 +205,7 @@ function makeRow(overrides) {
     overdue: 0,
     slack_mins: null,
     deadline: null,
-    start_after_at: null,
+    earliest_start_at: null,
     time_remaining: null,
     gcal_event_id: null,
     msft_event_id: null,

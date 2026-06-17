@@ -34,7 +34,7 @@ var PRE_FIX_COLUMNS = [
   'time_flex', 'flex_when', 'split', 'split_min', 'recur', 'recur_start',
   'recur_end', 'marker', 'preferred_time_mins', 'placement_mode',
   'travel_before', 'travel_after', 'depends_on', 'desired_at', 'disabled_at',
-  'disabled_reason', 'deadline', 'start_after_at', 'tz', 'weather_precip',
+  'disabled_reason', 'deadline', 'earliest_start_at', 'tz', 'weather_precip',
   'weather_cloud', 'weather_temp_min', 'weather_temp_max', 'weather_temp_unit',
   'weather_humidity_min', 'weather_humidity_max', 'source_id', 'scheduled_at',
   'date', 'day', 'time', 'status', 'time_remaining', 'unscheduled', 'overdue',

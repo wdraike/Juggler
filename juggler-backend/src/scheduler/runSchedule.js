@@ -84,6 +84,8 @@ var parseDate = dateHelpers.parseDate;
 var formatDateKey = dateHelpers.formatDateKey;
 var isoToDateKey = dateHelpers.isoToDateKey;
 var parseTimeToMinutes = dateHelpers.parseTimeToMinutes;
+var timeBlockHelpers = require('./timeBlockHelpers');
+var getBlocksForDate = timeBlockHelpers.getBlocksForDate;
 
 /**
  * computeIsPastDue — single source of truth for the floating-exclusion gate.
@@ -131,6 +133,40 @@ var RunScheduleCommand = require('../slices/scheduler/application/RunScheduleCom
 var _runScheduleCommand = new RunScheduleCommand();
 var expandRecurringShared = require('../../../shared/scheduler/expandRecurring');
 var expandRecurring = expandRecurringShared.expandRecurring;
+
+// 999.013: compute dayMinutes from cfg.timeBlocks — maps dateKey strings to total
+// available minutes on that day (sum of all time block durations). Returns null
+// when timeBlocks is absent/unusable so expandRecurring skips budget capping.
+function computeDayMinutes(timeBlocks, startDate, endDate, cfg) {
+  if (!timeBlocks || typeof timeBlocks !== 'object') return null;
+  var result = {};
+  var cursor = new Date(startDate);
+  cursor.setHours(0, 0, 0, 0);
+  var end = new Date(endDate);
+  end.setHours(23, 59, 59, 999);
+  while (cursor <= end) {
+    var dk = formatDateKey(cursor);
+    var dayName = DAY_NAMES[cursor.getDay()];
+    var blocks = timeBlocks[dayName];
+    // Use getBlocksForDate to respect schedule overrides when cfg is provided
+    if (cfg && (cfg.scheduleTemplates || cfg.locScheduleOverrides)) {
+      blocks = getBlocksForDate(dk, timeBlocks, cfg);
+    }
+    if (!blocks || !blocks.length) {
+      blocks = DEFAULT_TIME_BLOCKS[dayName] || [];
+    }
+    var total = 0;
+    for (var bi = 0; bi < blocks.length; bi++) {
+      var b = blocks[bi];
+      if (b && typeof b.start === 'number' && typeof b.end === 'number') {
+        total += Math.max(0, b.end - b.start);
+      }
+    }
+    result[dk] = total;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return result;
+}
 var reconcile = require('./reconcileOccurrences');
 var cache = require('../lib/redis');
 var syncLock = require('../lib/sync-lock');
@@ -660,10 +696,14 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (t.taskType !== 'recurring_instance') return true;
     return !existingPendingIds[t.id];
   });
+  // 999.013: compute dayMinutes from cfg.timeBlocks for budget-aware TPC expansion
+  var dayMinutesMap = computeDayMinutes(cfg.timeBlocks, today, expandEnd, cfg);
+
   var desiredOccurrences = expandRecurring(allTasksForExpand, today, expandEnd, {
     statuses: statuses,
     maxOrdBySource: maxOrdByMaster,
-    pendingBookedByDate: pendingBookedByDate
+    pendingBookedByDate: pendingBookedByDate,
+    dayMinutes: dayMinutesMap
   });
   var MAX_EXPANDED = 500;
   if (desiredOccurrences.length > MAX_EXPANDED) {
@@ -2093,7 +2133,11 @@ async function getSchedulePlacements(userId, options) {
   // Expand recurring so generated instances can be hydrated from cache
   var today = parseDate(timeInfo.todayKey) || _runScheduleCommand.clockNow();
   var expandEnd = new Date(today); expandEnd.setDate(expandEnd.getDate() + RECUR_EXPAND_DAYS);
-  var expanded = expandRecurring(allTasks, today, expandEnd, { statuses: statuses, pendingBookedByDate: pendingBookedByDate2 });
+  // 999.013: load cfg for dayMinutes computation (budget-aware TPC expansion)
+  var cacheHydrateCfg = await loadConfig(userId);
+  cacheHydrateCfg.timezone = TIMEZONE;
+  var cacheHydrateDayMinutes = computeDayMinutes(cacheHydrateCfg.timeBlocks, today, expandEnd, cacheHydrateCfg);
+  var expanded = expandRecurring(allTasks, today, expandEnd, { statuses: statuses, pendingBookedByDate: pendingBookedByDate2, dayMinutes: cacheHydrateDayMinutes });
   if (expanded.length > 0) {
     allTasks = allTasks.concat(expanded);
     expanded.forEach(function(t) { statuses[t.id] = ''; });

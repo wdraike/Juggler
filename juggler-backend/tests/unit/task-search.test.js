@@ -92,10 +92,7 @@ jest.mock('../../src/lib/tasks-write', () => ({
   updateTasksWhere: jest.fn(() => Promise.resolve()),
   updateInstancesWhere: jest.fn(() => Promise.resolve()),
   insertTasksBatch: jest.fn(() => Promise.resolve()),
-  archiveInstances: jest.fn(() => Promise.resolve()),
-  getOrCreateArchivedMasterId: jest.fn(() => Promise.resolve('archive-master-id')),
   resetRecurringInstances: jest.fn(() => Promise.resolve()),
-  archiveCompletedInstances: jest.fn(() => Promise.resolve()),
 }));
 
 jest.mock('../../src/middleware/entity-limits', () => ({
@@ -360,7 +357,7 @@ describe('SearchTasks with real mappers', () => {
       disabled_at: null,
       disabled_reason: null,
       deadline: null,
-      start_after_at: null,
+      earliest_start_at: null,
       tz: null,
       weather_precip: null,
       weather_cloud: null,

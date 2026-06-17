@@ -189,7 +189,7 @@ function buildICS(tasks, statuses) {
     if (t.split) lines.push('X-JUGGLER-SPLIT:TRUE');
     if (t.splitMin) lines.push('X-JUGGLER-SPLITMIN:' + t.splitMin);
     if (t.deadline) lines.push('X-JUGGLER-DEADLINE:' + t.deadline);
-    if (t.startAfter) lines.push('X-JUGGLER-STARTAFTER:' + t.startAfter);
+    if (t.earliestStart) lines.push('X-JUGGLER-STARTAFTER:' + t.earliestStart);
     if (t.tools && t.tools.length > 0) lines.push('X-JUGGLER-TOOLS:' + t.tools.join(','));
     if (t.timeRemaining != null && t.timeRemaining !== t.dur) lines.push('X-JUGGLER-TIMEREMAINING:' + t.timeRemaining);
 
@@ -327,7 +327,7 @@ function icsEventsToTasks(events, existingIds) {
     var split = ev['X-JUGGLER-SPLIT'] === 'TRUE';
     var splitMin = ev['X-JUGGLER-SPLITMIN'] ? parseInt(ev['X-JUGGLER-SPLITMIN']) : undefined;
     var deadline = ev['X-JUGGLER-DEADLINE'] || ev['X-JUGGLER-DUE'] || '';
-    var startAfter = ev['X-JUGGLER-STARTAFTER'] || '';
+    var earliestStart = ev['X-JUGGLER-STARTAFTER'] || '';
     var tools = ev['X-JUGGLER-TOOLS'] ? ev['X-JUGGLER-TOOLS'].split(',') : [];
     var timeRemaining = ev['X-JUGGLER-TIMEREMAINING'] ? parseInt(ev['X-JUGGLER-TIMEREMAINING']) : undefined;
 
@@ -377,7 +377,7 @@ function icsEventsToTasks(events, existingIds) {
       split: split,
       recur: recur || undefined,
       deadline: deadline || undefined,
-      startAfter: startAfter || undefined,
+      earliestStart: earliestStart || undefined,
       status: status
     };
     if (splitMin) task.splitMin = splitMin;

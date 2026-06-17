@@ -174,7 +174,7 @@ const VALID_TOKEN = 'valid-test-token';
  * Uses the real 18-column header to match the controller's csvToTasks call exactly.
  */
 const MINIMAL_CSV =
-  'id,text,taskType,status,pri,project,dur,scheduledAt,date,time,deadline,startAfter,recurring,location,tools,notes,url,completedAt\r\n' +
+  'id,text,taskType,status,pri,project,dur,scheduledAt,date,time,deadline,earliestStart,recurring,location,tools,notes,url,completedAt\r\n' +
   'task-csv-1,Buy groceries,one-off,active,P2,Personal,30,,2026-06-15,09:00,,,false,Home,,,,\r\n';
 
 /**
@@ -329,7 +329,7 @@ describe('POST /api/data/import?format=csv (AC1)', () => {
 describe('POST /api/data/import — malformed CSV (AC4)', () => {
   it('AC4: unbalanced quote in CSV body → 400 response', async () => {
     const malformedCsv =
-      'id,text,taskType,status,pri,project,dur,scheduledAt,date,time,deadline,startAfter,recurring,location,tools,notes,url,completedAt\r\n' +
+      'id,text,taskType,status,pri,project,dur,scheduledAt,date,time,deadline,earliestStart,recurring,location,tools,notes,url,completedAt\r\n' +
       '"unclosed quote,task,one-off,active,P1,,,,,,,,false,,,,,\r\n';
 
     const res = await request(app)
@@ -343,7 +343,7 @@ describe('POST /api/data/import — malformed CSV (AC4)', () => {
 
   it('AC4: unbalanced quote → response has error field', async () => {
     const malformedCsv =
-      'id,text,taskType,status,pri,project,dur,scheduledAt,date,time,deadline,startAfter,recurring,location,tools,notes,url,completedAt\r\n' +
+      'id,text,taskType,status,pri,project,dur,scheduledAt,date,time,deadline,earliestStart,recurring,location,tools,notes,url,completedAt\r\n' +
       '"unclosed,task,one-off,active,P1,,,,,,,,false,,,,,\r\n';
 
     const res = await request(app)
@@ -358,7 +358,7 @@ describe('POST /api/data/import — malformed CSV (AC4)', () => {
 
   it('AC4: unbalanced quote → facade.importData NOT called (zero DB writes)', async () => {
     const malformedCsv =
-      'id,text,taskType,status,pri,project,dur,scheduledAt,date,time,deadline,startAfter,recurring,location,tools,notes,url,completedAt\r\n' +
+      'id,text,taskType,status,pri,project,dur,scheduledAt,date,time,deadline,earliestStart,recurring,location,tools,notes,url,completedAt\r\n' +
       '"unclosed,task,one-off,active,P1,,,,,,,,false,,,,,\r\n';
 
     await request(app)
@@ -374,7 +374,7 @@ describe('POST /api/data/import — malformed CSV (AC4)', () => {
   it('AC4: ragged row (missing column) → 400, facade NOT called', async () => {
     // Header has 18 cols; data row has only 2 → ragged
     const raggedCsv =
-      'id,text,taskType,status,pri,project,dur,scheduledAt,date,time,deadline,startAfter,recurring,location,tools,notes,url,completedAt\r\n' +
+      'id,text,taskType,status,pri,project,dur,scheduledAt,date,time,deadline,earliestStart,recurring,location,tools,notes,url,completedAt\r\n' +
       'task-1,Buy milk\r\n';
 
     const res = await request(app)

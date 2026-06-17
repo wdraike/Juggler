@@ -84,7 +84,7 @@ function makeSessionObj(snapshotCount, overrides) {
       dur: 30,
       when: '',
       deadline: null,
-      startAfter: null,
+      earliestStart: null,
       recurring: false,
       split: false,
       splitMin: null,

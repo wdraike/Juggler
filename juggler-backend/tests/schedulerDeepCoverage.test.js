@@ -165,18 +165,18 @@ describe('UC-11: Pull-Forward & Dampening', function() {
     // Without dampening, should be pulled closer to today
   });
 
-  test('UC-11.4: startAfter respected even with pull-forward', function() {
+  test('UC-11.4: earliestStart respected even with pull-forward', function() {
     var tc = timeControl('4/6/2026');
     tc.setTime('8:00 AM');
-    var startAfter = tc.dateKey(5);
+    var earliestStart = tc.dateKey(5);
     var due = tc.dateKey(10);
     var tasks = [
-      makeDeadlineTask({ id: 'dl', text: 'Deadline', dur: 60, date: tc.dateKey(8), deadline: due, startAfter: startAfter, pri: 'P1' })
+      makeDeadlineTask({ id: 'dl', text: 'Deadline', dur: 60, date: tc.dateKey(8), deadline: due, earliestStart: earliestStart, pri: 'P1' })
     ];
     var result = run(tasks, tc.todayKey, tc.nowMins);
     var p = findPlacement(result, 'dl');
     expect(p).not.toBeNull();
-    // Should not be placed before startAfter date
+    // Should not be placed before earliestStart date
   });
 });
 

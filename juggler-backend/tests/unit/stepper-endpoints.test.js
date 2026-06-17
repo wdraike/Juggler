@@ -100,8 +100,6 @@ jest.mock('../../src/lib/sse-emitter', () => ({
 jest.mock('../../src/lib/tasks-write', () => ({
   insertTask: jest.fn(() => Promise.resolve()),
   insertTasksBatch: jest.fn(() => Promise.resolve()),
-  archiveInstances: jest.fn(() => Promise.resolve()),
-  archiveCompletedInstances: jest.fn(() => Promise.resolve()),
   resetRecurringInstances: jest.fn(() => Promise.resolve()),
   updateTaskById: jest.fn(() => Promise.resolve(1)),
   deleteTaskById: jest.fn(() => Promise.resolve(1)),
@@ -647,7 +645,7 @@ describe('R44.6 — GET /api/schedule/step/:sessionId/:stepIndex (individual ste
       nowMins: 540,
       timezone: 'America/New_York',
       snapshots: [{ stepIndex: 0, phase: 'V2: Unconstrained', taskId: 't1', taskText: 'Task 1', project: 'proj', pri: 'P3', orderingSlack: 120, placement: { dateKey: '2026-06-16', start: 480, dur: 30 } }],
-      tasksById: { t1: { id: 't1', text: 'Task 1', project: 'proj', pri: 'P3', dur: 30, when: '', deadline: null, startAfter: null, recurring: false, split: false, splitMin: null, location: [], tools: [] } },
+      tasksById: { t1: { id: 't1', text: 'Task 1', project: 'proj', pri: 'P3', dur: 30, when: '', deadline: null, earliestStart: null, recurring: false, split: false, splitMin: null, location: [], tools: [] } },
       unplaced: [],
       score: {},
       warnings: [],

@@ -103,7 +103,7 @@ function makeDBRow(overrides) {
     id: 'db_' + (++_n), task_type: 'task', user_id: 'u1', text: 'DB Task',
     scheduled_at: new Date('2026-04-07T14:00:00Z'), original_scheduled_at: null,
     dur: 30, time_remaining: null, pri: 'P3', project: null, status: '',
-    section: null, notes: '', deadline: null, start_after_at: null,
+    section: null, notes: '', deadline: null, earliest_start_at: null,
     location: '[]', tools: '[]', when: '', day_req: 'any',
     recurring: 0, rigid: 0, time_flex: null, split: 0, split_min: null,
     recur: null, source_id: null, generated: 0, gcal_event_id: null,

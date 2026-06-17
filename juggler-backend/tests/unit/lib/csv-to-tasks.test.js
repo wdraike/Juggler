@@ -18,7 +18,7 @@ const { tasksToCsv } = require('../../../src/lib/tasks-csv');
 // Column index helper (matches COLUMNS order in tasks-csv.js)
 const COLS = [
   'id','text','taskType','status','pri','project','dur','scheduledAt',
-  'date','time','deadline','startAfter','recurring','location','tools',
+  'date','time','deadline','earliestStart','recurring','location','tools',
   'notes','url','completedAt'
 ];
 const colIdx = (name) => COLS.indexOf(name);
@@ -192,7 +192,7 @@ describe('csvToTasks — ROUND-TRIP anchor with tasksToCsv', () => {
       date: '2026-06-15',
       time: '09:00',
       deadline: '2026-06-16',
-      startAfter: null,
+      earliestStart: null,
       recurring: false,
       location: ['Home'],
       tools: ['Notion'],
@@ -427,7 +427,7 @@ describe('csvToTasks — regression: ernie-jcsv-01 — no-trailing-newline + emp
     // All 18 header columns are present in the parsed row (verifies correct cell count)
     const ALL_18 = [
       'id', 'text', 'taskType', 'status', 'pri', 'project', 'dur',
-      'scheduledAt', 'date', 'time', 'deadline', 'startAfter', 'recurring',
+      'scheduledAt', 'date', 'time', 'deadline', 'earliestStart', 'recurring',
       'location', 'tools', 'notes', 'url', 'completedAt',
     ];
     // The parser only sets a field if the cell is non-empty; id='1' and text='hi'

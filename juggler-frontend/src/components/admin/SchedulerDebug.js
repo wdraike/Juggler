@@ -75,7 +75,7 @@ function DetailPanel({ item, onClose }) {
         {item.project && <Row label="Project" value={item.project} />}
         {item.when && <Row label="When" value={item.when} />}
         {item.dayReq && item.dayReq !== 'any' && <Row label="Day Req" value={item.dayReq} />}
-        {item.startAfter && <Row label="Start After" value={item.startAfter} />}
+        {item.earliestStart && <Row label="Start After" value={item.earliestStart} />}
         {item.location && item.location.length > 0 && <Row label="Location" value={item.location.join(', ')} />}
         {item.tools && item.tools.length > 0 && <Row label="Tools" value={item.tools.join(', ')} />}
         {item.split && <Row label="Split" value={item.splitPart ? ('Part ' + item.splitPart + '/' + item.splitTotal) : 'Yes'} />}

@@ -100,8 +100,6 @@ jest.mock('../../src/lib/sse-emitter', () => ({
 jest.mock('../../src/lib/tasks-write', () => ({
   insertTask: jest.fn(() => Promise.resolve()),
   insertTasksBatch: jest.fn(() => Promise.resolve()),
-  archiveInstances: jest.fn(() => Promise.resolve()),
-  archiveCompletedInstances: jest.fn(() => Promise.resolve()),
   resetRecurringInstances: jest.fn(() => Promise.resolve()),
   updateTaskById: jest.fn(() => Promise.resolve(1)),
   deleteTaskById: jest.fn(() => Promise.resolve(1)),
@@ -156,7 +154,6 @@ beforeEach(() => {
   tasksWrite.insertTask.mockResolvedValue(undefined);
   tasksWrite.deleteTasksWhere.mockResolvedValue(undefined);
   tasksWrite.resetRecurringInstances.mockResolvedValue(undefined);
-  tasksWrite.archiveCompletedInstances.mockResolvedValue(undefined);
 
   const writeQueue = require('../../src/lib/task-write-queue');
   writeQueue.isLocked.mockResolvedValue(false);

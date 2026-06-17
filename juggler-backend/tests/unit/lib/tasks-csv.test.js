@@ -85,7 +85,7 @@ function splitCsvLines(csv) {
 
 const EXPECTED_HEADERS = [
   'id', 'text', 'taskType', 'status', 'pri', 'project', 'dur',
-  'scheduledAt', 'date', 'time', 'deadline', 'startAfter', 'recurring',
+  'scheduledAt', 'date', 'time', 'deadline', 'earliestStart', 'recurring',
   'location', 'tools', 'notes', 'url', 'completedAt'
 ];
 
@@ -135,7 +135,7 @@ describe('tasksToCsv — empty / null inputs', () => {
     const task = {
       id: null, text: null, taskType: null, status: null,
       pri: null, project: null, dur: null, scheduledAt: null,
-      date: null, time: null, deadline: null, startAfter: null,
+      date: null, time: null, deadline: null, earliestStart: null,
       recurring: null, location: null, tools: null, notes: null,
       url: null, completedAt: null
     };

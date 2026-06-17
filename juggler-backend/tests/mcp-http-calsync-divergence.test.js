@@ -51,7 +51,7 @@ function makeTask(overrides) {
     desired_at: null,
     tz: null,
     deadline: null,
-    start_after_at: null,
+    earliest_start_at: null,
     location: '[]',
     tools: '[]',
     when: null,
