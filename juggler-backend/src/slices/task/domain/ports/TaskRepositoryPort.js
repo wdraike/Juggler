@@ -83,6 +83,13 @@
  *   (`config_key='preferences'`), or null. Drives `applySplitDefault`. (Legacy:
  *   applySplitDefault ~739.)
  *
+ * @property {(userId: string, query: string) => Promise<Object[]>} searchTasks
+ *   FULLTEXT search across task descriptions and notes using MySQL
+ *   MATCH…AGAINST IN BOOLEAN MODE on the `ft_tasks_search` index
+ *   (task_masters.text, task_masters.notes). Returns task_masters rows
+ *   enriched with calendar event ids, same shape as fetchTasksWithEventIds.
+ *   (999.253)
+ *
  * ── WRITES (all timestamps via new Date() — INVARIANT P1) ────────────────────
  *
  * @property {(row: Object) => Promise<void>} insertTask
@@ -166,6 +173,19 @@ TaskRepositoryPort.prototype.getUserSplitPreference = function getUserSplitPrefe
   throw new Error('TaskRepositoryPort.getUserSplitPreference not implemented');
 };
 
+/**
+ * FULLTEXT search across task descriptions and notes (999.253).
+ * Uses MySQL MATCH…AGAINST on the `ft_tasks_search` FULLTEXT index.
+ * Returns task_masters rows enriched with calendar event ids,
+ * same shape as fetchTasksWithEventIds (rowToTask-mappable).
+ * @param {string} _userId
+ * @param {string} _query  BOOLEAN MODE search string
+ * @returns {Promise<Object[]>}
+ */
+TaskRepositoryPort.prototype.searchTasks = function searchTasks(_userId, _query) {
+  throw new Error('TaskRepositoryPort.searchTasks not implemented');
+};
+
 // ── writes ───────────────────────────────────────────────────────────────────
 
 TaskRepositoryPort.prototype.insertTask = function insertTask(_row) {
@@ -219,6 +239,8 @@ var TASK_REPOSITORY_PORT_METHODS = Object.freeze([
   'getRecurringTemplateRows',
   'expandToAllInstanceIds',
   'getUserSplitPreference',
+  // search
+  'searchTasks',
   // writes
   'insertTask',
   'insertTasksBatch',

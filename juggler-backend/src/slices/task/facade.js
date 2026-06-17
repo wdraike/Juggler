@@ -928,6 +928,7 @@ var _listTasks = new app.ListTasks({ repo: _repo, cache: _cache, mappers: mapper
 var _getTask = new app.GetTask({ repo: _repo, mappers: mappers });
 var _getVersion = new app.GetVersion({ repo: _repo, cache: _cache });
 var _getDisabledTasks = new app.GetDisabledTasks({ repo: _repo, mappers: mappers });
+var _searchTasks = new app.SearchTasks({ repo: _repo, mappers: mappers });
 
 var _createTask = new app.CreateTask({
   repo: _repo, cache: _cache, events: _events,
@@ -1022,6 +1023,12 @@ async function getDisabledTasks(input) {
   return { status: 200, body: result };
 }
 
+/** searchTasks → SearchTasks (200 { tasks }). */
+async function searchTasks(input) {
+  var result = await _searchTasks.execute(input);
+  return { status: 200, body: result };
+}
+
 /** createTask → CreateTask ({ status, body }). */
 function createTask(input) { return _createTask.execute(input); }
 
@@ -1078,6 +1085,7 @@ module.exports = {
   getTask: getTask,
   getVersion: getVersion,
   getDisabledTasks: getDisabledTasks,
+  searchTasks: searchTasks,
   createTask: createTask,
   updateTask: updateTask,
   deleteTask: deleteTask,

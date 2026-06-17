@@ -17,6 +17,7 @@ router.use(authenticateJWT, resolvePlanFeatures);
 router.get('/', taskController.getAllTasks);
 router.get('/version', taskController.getVersion);
 router.get('/disabled', taskController.getDisabledTasks);
+router.get('/search', taskController.searchTasks);
 
 /**
  * GET /api/tasks/suggest-icon?text=<task text>

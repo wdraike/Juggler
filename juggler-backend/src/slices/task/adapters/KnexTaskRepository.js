@@ -265,6 +265,104 @@ KnexTaskRepository.prototype.fetchTasksWithEventIds = function fetchTasksWithEve
 };
 
 /**
+ * FULLTEXT search across task descriptions and notes (999.253).
+ *
+ * Uses MySQL MATCH…AGAINST IN BOOLEAN MODE on the `ft_tasks_search`
+ * FULLTEXT index (task_masters.text, task_masters.notes). The search
+ * hits `task_masters` directly because FULLTEXT indexes cannot be
+ * placed on views. Since `tasks_v` UNIONs task_masters with
+ * task_instances↔task_masters (where text/notes always come from
+ * task_masters), matching task_masters covers all tasks.
+ *
+ * Returns the same row shape as `fetchTasksWithEventIds` (tasks_v rows
+ * + folded calendar event ids), so the caller can map them through
+ * `rowToTask` identically to the list endpoint.
+ *
+ * @param {string} userId
+ * @param {string} query  The search string (BOOLEAN MODE operators +,-,* are honored)
+ * @returns {Promise<Object[]>}
+ */
+KnexTaskRepository.prototype.searchTasks = function searchTasks(userId, query) {
+  var dbOrTrx = this.db;
+  var searchExpr = '+(' + query.split(/\s+/).filter(Boolean).map(function (w) {
+    return '+' + w + '*';
+  }).join(' ') + ')';
+
+  return Promise.all([
+    dbOrTrx.raw(
+      'SELECT m.*, ' +
+      'MATCH(m.text, m.notes) AGAINST (? IN BOOLEAN MODE) AS _score ' +
+      'FROM task_masters m ' +
+      'WHERE m.user_id = ? AND MATCH(m.text, m.notes) AGAINST (? IN BOOLEAN MODE) ' +
+      'ORDER BY _score DESC',
+      [searchExpr, userId, searchExpr]
+    ).then(function (res) {
+      // MySQL2 wraps in [rows, fields] — normalize
+      var rows = Array.isArray(res) && Array.isArray(res[0]) ? res[0] : res;
+      // MySQL2 with dateStrings returns a plain array
+      if (Array.isArray(rows) && rows.length > 0 && rows[0]._score !== undefined) {
+        return rows;
+      }
+      // mysql2 .raw() may return { [0]: rows, [1]: fields } shape
+      if (rows[0] && rows[0]._score !== undefined) {
+        return rows;
+      }
+      return Array.isArray(rows) ? rows : [];
+    }),
+    dbOrTrx('cal_sync_ledger')
+      .where({ user_id: userId, status: 'active' })
+      .select('task_id', 'provider', 'provider_event_id', 'origin', 'event_url'),
+    dbOrTrx('user_calendars')
+      .where({ user_id: userId, provider: 'apple', enabled: true })
+      .select('calendar_id', 'display_name')
+  ]).then(function (res) {
+    var masterRows = res[0];
+    var ledgerRows = res[1];
+    var appleCalRows = res[2];
+    var appleCalMap = {};
+    for (var ac = 0; ac < appleCalRows.length; ac++) {
+      if (appleCalRows[ac].calendar_id && appleCalRows[ac].display_name) {
+        appleCalMap[appleCalRows[ac].calendar_id] = appleCalRows[ac].display_name;
+      }
+    }
+    var byTask = {};
+    for (var j = 0; j < ledgerRows.length; j++) {
+      var lr = ledgerRows[j];
+      if (!lr.task_id) continue;
+      var slot = byTask[lr.task_id] || (byTask[lr.task_id] = {});
+      if (lr.provider === 'gcal') slot.gcal_event_id = lr.provider_event_id;
+      else if (lr.provider === 'msft') slot.msft_event_id = lr.provider_event_id;
+      else if (lr.provider === 'apple') {
+        slot.apple_event_id = lr.provider_event_id;
+        if (lr.calendar_id) {
+          slot.apple_calendar_name = appleCalMap[lr.calendar_id] || slot.apple_calendar_name || null;
+        }
+      }
+      if (!slot.cal_sync_origin || slot.cal_sync_origin === 'juggler') {
+        slot.cal_sync_origin = lr.origin || null;
+        slot.cal_event_url = lr.event_url || null;
+      }
+    }
+    // Build tasks_v-style rows from the master rows, enriched with event ids.
+    // Master-only fields come directly; instance-only fields are null (matching
+    // the recurring_template branch of tasks_v).
+    for (var i = 0; i < masterRows.length; i++) {
+      var r = masterRows[i];
+      var ev = byTask[r.id];
+      r.gcal_event_id = ev && ev.gcal_event_id || null;
+      r.msft_event_id = ev && ev.msft_event_id || null;
+      r.apple_event_id = ev && ev.apple_event_id || null;
+      r.cal_sync_origin = ev && ev.cal_sync_origin || null;
+      r.cal_event_url = ev && ev.cal_event_url || null;
+      r.apple_calendar_name = ev && ev.apple_calendar_name || null;
+      // Remove internal score column — not part of the tasks_v row shape
+      delete r._score;
+    }
+    return masterRows;
+  });
+};
+
+/**
  * Cache-busting version token. Verbatim relocation of `getTasksVersion`
  * (controller ~645). `MAX(updated_at) || '0'` + ':' + `COUNT(*)`.
  * @param {string} userId

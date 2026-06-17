@@ -200,6 +200,26 @@ async function getDisabledTasks(req, res) {
 }
 
 /**
+ * GET /api/tasks/search?q=... — FULLTEXT search across task descriptions and notes (999.253)
+ */
+async function searchTasks(req, res) {
+  try {
+    var q = (req.query.q || '').trim();
+    if (!q) {
+      return res.status(400).json({ error: 'Search query parameter "q" is required' });
+    }
+    if (q.length > 200) {
+      q = q.substring(0, 200);
+    }
+    var result = await facade.searchTasks({ userId: req.user.id, q: q });
+    return sendEnvelope(res, result);
+  } catch (error) {
+    logger.error('Search tasks error:', error);
+    res.status(500).json({ error: 'Failed to search tasks' });
+  }
+}
+
+/**
  * PUT /api/tasks/:id/re-enable — re-enable a disabled task
  */
 async function reEnableTask(req, res) {
@@ -243,6 +263,7 @@ module.exports = {
   batchCreateTasks,
   batchUpdateTasks,
   getDisabledTasks,
+  searchTasks,
   reEnableTask,
   takeOwnership,
 

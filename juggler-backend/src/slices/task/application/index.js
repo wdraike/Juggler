@@ -31,6 +31,7 @@ module.exports = {
   GetTask: require('./queries/GetTask'),
   GetVersion: require('./queries/GetVersion'),
   GetDisabledTasks: require('./queries/GetDisabledTasks'),
+  SearchTasks: require('./queries/SearchTasks'),
   // commands (WBS-named)
   CreateTask: require('./commands/CreateTask'),
   UpdateTask: require('./commands/UpdateTask'),
