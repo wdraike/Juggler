@@ -174,6 +174,9 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
   // duration (dur) when the caller doesn't supply an explicit value.
   if (status === 'wip' && existing.status !== 'wip') {
     if (body.time_remaining != null) {
+      if (body.time_remaining < 0) {
+        return { status: 400, body: { error: 'time_remaining must be non-negative' } };
+      }
       update.time_remaining = body.time_remaining;
     } else {
       update.time_remaining = existing.dur || 30;
