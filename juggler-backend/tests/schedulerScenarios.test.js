@@ -799,10 +799,11 @@ describe('Tier 11: Recurring + Split (day-boundary rule)', () => {
     expect(isUnplaced(r, 'rec_stretch')).toBe(false);
   });
 
-  // SKIP: real scheduler bug (999.307) — unifiedScheduleV2.js:1499 `!item.isRecurring`
-  // guard starves recurring split tasks of the inline-split path. Fix deferred to a
-  // focused scheduler leg (fragile core — needs exhaustive validation per CLAUDE.md).
-  test.skip('S48: Recurring split — partial fit, leftover chunks dropped (not rolled)', () => {
+  // FIXED (999.307) — Removed `!item.isRecurring` guard from the inline-split
+  // path in unifiedScheduleV2.js:1532. placeSplitInline already handles recurring
+  // with a cycle-window cap (anchor + cycleDays - 1), so recurring split tasks
+  // can now be partially placed within their occurrence window.
+  test('S48: Recurring split — partial fit, leftover chunks dropped (not rolled)', () => {
     // Morning block on weekdays is 6:00-8:00 (120 min). Consume 90 min of
     // it with a fixed task, leaving exactly 30 min free. The 60-min
     // split task should fit 30 min (2 chunks) and report the other 30

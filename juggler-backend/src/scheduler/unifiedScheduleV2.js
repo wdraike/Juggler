@@ -1529,7 +1529,10 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       // single contiguous block are placed greedily in chunks of >= splitMin.
       // Each chunk is a separate placement entry sharing the same task object.
       // Non-recurring splits may span days up to the deadline.
-      if (item.task && item.task.split && !item.isRecurring && (item.splitOrdinal === 1 || item.splitOrdinal == null)) {
+      // Recurring splits also enter this path — placeSplitInline handles them
+      // with a cycle-window cap (anchor + cycleDays - 1) so chunks stay within
+      // the current occurrence's window and don't overflow (999.098, 999.547).
+      if (item.task && item.task.split && (item.splitOrdinal === 1 || item.splitOrdinal == null)) {
         var splitMin = (item.task.splitMin != null ? item.task.splitMin : null) ||
                        (cfg && cfg.splitMinDefault) || 15;
         var splitResult = placeSplitInline(item, item.dur, splitMin, dates, dayWindows, dayBlocks, dayOcc, cfg);
@@ -1549,9 +1552,9 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
           noteMasterPlacement(env, item, splitPlacedFirst.dateKey);
           queuePlacedCount += splitResult.placed.length;
           if (splitResult.remaining > 0) {
-            // Remaining unplaced chunks are treated as normal unscheduled tasks
-            // (999.144) — no special partial_split flag. They go to unplaced for
-            // user review like any other task that didn't fit.
+            // Remaining unplaced chunks are treated as partial_split for
+            // diagnostic visibility — the task was partially scheduled.
+            item.task._unplacedReason = 'partial_split';
             unplaced.push(item);
           }
           // Recompute slack for affected items (use first chunk's date).

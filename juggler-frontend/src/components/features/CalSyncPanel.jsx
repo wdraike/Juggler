@@ -142,9 +142,12 @@ export default function CalSyncPanel({
   var [gcalConnected, setGcalConnected] = useState(null);
   var [gcalConnecting, setGcalConnecting] = useState(false);
   var [gcalTokenExpired, setGcalTokenExpired] = useState(false);
+  var [gcalEmail, setGcalEmail] = useState(null);
   var [msftConnected, setMsftConnected] = useState(null);
   var [msftConnecting, setMsftConnecting] = useState(false);
   var [msftTokenExpired, setMsftTokenExpired] = useState(false);
+  var [msftEmail, setMsftEmail] = useState(null);
+  var [appleEmail, setAppleEmail] = useState(null);
 
   // Check connection status on mount
   useEffect(() => {
@@ -152,14 +155,21 @@ export default function CalSyncPanel({
       .then(function(r) {
         setGcalConnected(r.data.connected);
         setGcalTokenExpired(!!r.data.tokenExpired);
+        if (r.data.connected && r.data.email) setGcalEmail(r.data.email);
       })
       .catch(function() { setGcalConnected(false); });
     apiClient.get('/msft-cal/status')
       .then(function(r) {
         setMsftConnected(r.data.connected);
         setMsftTokenExpired(!!r.data.tokenExpired);
+        if (r.data.connected && r.data.email) setMsftEmail(r.data.email);
       })
       .catch(function() { setMsftConnected(false); });
+    apiClient.get('/apple-cal/status')
+      .then(function(r) {
+        if (r.data.connected && r.data.username) setAppleEmail(r.data.username);
+      })
+      .catch(function() { /* not connected */ });
     // Load connected Apple calendars
     if (appleConnected) {
       loadAppleCalendars();
@@ -522,7 +532,7 @@ export default function CalSyncPanel({
     background: theme.bgPrimary, color: theme.text, cursor: 'pointer'
   };
 
-  function renderProvider(label, connected, connecting, accentColor, autoSync, onConnect, onDisconnect, onToggleAutoSync, tokenExpired, providerId) {
+  function renderProvider(label, connected, connecting, accentColor, autoSync, onConnect, onDisconnect, onToggleAutoSync, tokenExpired, providerId, email) {
     var provSettings = (calSyncSettings || {})[providerId] || { mode: 'full', frequency: 120 };
     var statusColor = tokenExpired ? '#C8942A' : connected ? '#2D6A4F' : theme.border;
     return (
@@ -557,6 +567,11 @@ export default function CalSyncPanel({
         </div>
         {connected === true && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+            {email && (
+              <div style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 2 }}>
+                {email}
+              </div>
+            )}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: 11, color: theme.textMuted }}>Sync mode</span>
               <select value={provSettings.mode} onChange={function(e) {
@@ -622,9 +637,9 @@ export default function CalSyncPanel({
 
         {/* Provider sections */}
         {renderProvider('Google Calendar', gcalConnected, gcalConnecting, theme.accent,
-          gcalAutoSync, handleGcalConnect, handleGcalDisconnect, handleGcalAutoSync, gcalTokenExpired, 'gcal')}
+          gcalAutoSync, handleGcalConnect, handleGcalDisconnect, handleGcalAutoSync, gcalTokenExpired, 'gcal', gcalEmail)}
         {renderProvider('Microsoft Calendar', msftConnected, msftConnecting, '#2E4A7A',
-          msftAutoSync, handleMsftConnect, handleMsftDisconnect, handleMsftAutoSync, msftTokenExpired, 'msft')}
+          msftAutoSync, handleMsftConnect, handleMsftDisconnect, handleMsftAutoSync, msftTokenExpired, 'msft', msftEmail)}
 
         {/* Apple Calendar — custom section (CalDAV credential auth, not OAuth) */}
         <div style={{ padding: '12px 0', borderBottom: '1px solid ' + theme.border }}>
@@ -638,6 +653,11 @@ export default function CalSyncPanel({
 
           {appleConnected ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+              {appleEmail && (
+                <div style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 2 }}>
+                  {appleEmail}
+                </div>
+              )}
               {/* Connected calendars list */}
               {connectedAppleCalendars.length > 0 && connectedAppleCalendars.map(function(cal) {
                 var isEnabled = !!cal.enabled;

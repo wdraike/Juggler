@@ -100,7 +100,10 @@ function isSafeHashKey(key) {
  * @param {string} input.userId
  * @param {*} input.data       the v7 import body.
  * @param {string} [input.timezoneHeader]  raw x-timezone header.
- * @returns {Promise<{ status: number, body: Object }>}
+ * @returns {Promise<{ status: number, body: Object, scheduleAfter?: {userId: string, source: string} }>}
+ *   `scheduleAfter` (when present) tells the W6 controller to fire
+ *   enqueueScheduleRun(userId, source) AFTER it sends the response —
+ *   preserving the legacy after-response ordering (999.486).
  */
 MergeImportData.prototype.execute = async function execute(input) {
   var self = this;
@@ -252,13 +255,17 @@ MergeImportData.prototype.execute = async function execute(input) {
     // KEEP-MINE: intentionally NO config / statuses write here (Brain decision #59583).
   });
 
+  // After a merge import, all scheduling inputs may have changed (new tasks,
+  // locations, tools, projects) — enqueue one re-run AFTER responding.
+  // Mirrors ImportData's scheduleAfter pattern (999.486).
   return {
     status: 200,
     body: {
       message: 'Merge import successful',
       mode: 'merge',
       counts: counts
-    }
+    },
+    scheduleAfter: { userId: userId, source: 'config:import' }
   };
 };
 

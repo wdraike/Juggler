@@ -173,7 +173,7 @@ ImportData.prototype.execute = async function execute(input) {
         projects: mergedProjects.length
       }
     },
-    scheduleAfter: { userId: userId, source: 'import' }
+    scheduleAfter: { userId: userId, source: 'config:import' }
   };
 };
 
