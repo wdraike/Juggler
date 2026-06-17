@@ -13,5 +13,6 @@ module.exports = {
   CalendarProviderPort: require('./CalendarProviderPort'),
   ScheduleRepositoryPort: require('./ScheduleRepositoryPort'),
   WeatherProviderPort: require('./WeatherProviderPort'),
-  ClockPort: require('./ClockPort')
+  ClockPort: require('./ClockPort'),
+  ScheduleCachePort: require('./ScheduleCachePort')
 };

@@ -40,7 +40,7 @@ function getFlushQueueInLock() {
 }
 var _runScheduleAndPersist;
 function getRunScheduleAndPersist() {
-  if (!_runScheduleAndPersist) _runScheduleAndPersist = require('./runSchedule').runScheduleAndPersist;
+  if (!_runScheduleAndPersist) _runScheduleAndPersist = require('../slices/scheduler/facade').runScheduleAndPersist;
   return _runScheduleAndPersist;
 }
 var _withLock;

@@ -15,5 +15,6 @@ module.exports = {
   KnexScheduleRepository: require('./KnexScheduleRepository'),
   InMemoryScheduleRepository: require('./InMemoryScheduleRepository'),
   MysqlClockAdapter: require('./MysqlClockAdapter'),
-  FakeClockAdapter: require('./FakeClockAdapter')
+  FakeClockAdapter: require('./FakeClockAdapter'),
+  RedisScheduleCache: require('./RedisScheduleCache')
 };

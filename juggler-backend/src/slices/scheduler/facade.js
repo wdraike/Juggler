@@ -59,6 +59,7 @@ var adapters = require('./adapters');
 var CalendarProviderPort = require('./domain/ports/CalendarProviderPort');
 var ClockPort = require('./domain/ports/ClockPort');
 var ScheduleRepositoryPort = require('./domain/ports/ScheduleRepositoryPort');
+var ScheduleCachePort = require('./domain/ports/ScheduleCachePort');
 var TaskProviderPort = require('./domain/ports/TaskProviderPort');
 var WeatherProviderPort = require('./domain/ports/WeatherProviderPort');
 
@@ -90,6 +91,7 @@ module.exports = {
   CalendarProviderPort: CalendarProviderPort,
   ClockPort: ClockPort,
   ScheduleRepositoryPort: ScheduleRepositoryPort,
+  ScheduleCachePort: ScheduleCachePort,
   TaskProviderPort: TaskProviderPort,
   WeatherProviderPort: WeatherProviderPort,
 
@@ -100,4 +102,5 @@ module.exports = {
   KnexScheduleRepository: adapters.KnexScheduleRepository,
   InMemoryScheduleRepository: adapters.InMemoryScheduleRepository,
   MysqlClockAdapter: adapters.MysqlClockAdapter,
+  RedisScheduleCache: adapters.RedisScheduleCache,
 };

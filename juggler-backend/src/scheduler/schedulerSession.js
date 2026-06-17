@@ -49,7 +49,7 @@ if (sweepTimer.unref) sweepTimer.unref();
  */
 async function startSession(userId, options) {
   var opts = options || {};
-  var unifiedSchedule = require('./unifiedScheduleV2');
+  var unifiedSchedule = require('../slices/scheduler/facade').unifiedScheduleV2;
   var constants = require('./constants');
   var rowToTask = require('../controllers/task.controller').rowToTask;
 
