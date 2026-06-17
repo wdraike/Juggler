@@ -29,19 +29,23 @@
  *   zod-free (W6 supplies the schema).
  * @property {(lat: number, lon: number) => Promise<string>} reverseGeocode
  *   the reverseGeocodeDisplayName collaborator (weather controller) — injected.
+ * @property {Function} enqueueScheduleRun  (userId, source, options) — the background
+ *   reschedule trigger (injected). Called directly after the replace completes so the
+ *   scheduler re-runs with the updated locations (999.491).
  */
 
 'use strict';
 
 /** @param {ReplaceLocationsDeps} deps */
 function ReplaceLocations(deps) {
-  if (!deps || !deps.repo || !deps.cache || !deps.parseBody || !deps.reverseGeocode) {
-    throw new Error('ReplaceLocations: { repo, cache, parseBody, reverseGeocode } are required');
+  if (!deps || !deps.repo || !deps.cache || !deps.parseBody || !deps.reverseGeocode || !deps.enqueueScheduleRun) {
+    throw new Error('ReplaceLocations: { repo, cache, parseBody, reverseGeocode, enqueueScheduleRun } are required');
   }
   this.repo = deps.repo;
   this.cache = deps.cache;
   this.parseBody = deps.parseBody;
   this.reverseGeocode = deps.reverseGeocode;
+  this.enqueueScheduleRun = deps.enqueueScheduleRun;
 }
 
 /**
@@ -87,9 +91,11 @@ ReplaceLocations.prototype.execute = async function execute(input) {
   });
 
   await this.cache.invalidateConfig(userId);
-  // Replacing locations changes weather/location scheduling inputs — trigger re-run
-  // via the same scheduleAfter directive pattern used by UpdateConfig (BUG-2 / 999.464).
-  return { status: 200, body: { locations: enriched }, scheduleAfter: { userId: userId, source: 'locations:replaced' } };
+  // Replacing locations changes weather/location scheduling inputs — trigger a
+  // background scheduler re-run (999.491). The source includes the userId as the
+  // options array so the scheduler knows which user's tasks to re-process.
+  this.enqueueScheduleRun(userId, 'config:locations-replace', [userId]);
+  return { status: 200, body: { locations: enriched } };
 };
 
 module.exports = ReplaceLocations;
