@@ -18,9 +18,8 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
   var todayKey = formatDateKey(todayDate || new Date());
 
   var filteredTasks = useMemo(() => {
-    // Exclude recurring templates — only show instances.
-    // Deduplicate recurringTasks: for each recurring text, pick the best representative instance.
-    // Prefer open instances over done/skipped/cancelled ones so today's recurring task is shown.
+    // For recurring tasks: deduplicate by text — pick best representative instance.
+    // For split tasks: show only the first ordinal (splitOrdinal=1) to avoid clutter.
     var recurringBest = {};
     allTasks.forEach(t => {
       if (!t.recurring || t.taskType === 'recurring_template') return;
@@ -35,8 +34,12 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
     var recurringKeepIds = {};
     Object.keys(recurringBest).forEach(k => { recurringKeepIds[recurringBest[k].id] = true; });
     var deduped = allTasks.filter(t => {
+      // Exclude recurring templates
       if (t.taskType === 'recurring_template') return false;
+      // Deduplicate recurring instances
       if (t.recurring) return !!recurringKeepIds[t.id];
+      // For split chunks, show only the first ordinal (999.678)
+      if (t.split && t.splitOrdinal > 1) return false;
       return true;
     });
 

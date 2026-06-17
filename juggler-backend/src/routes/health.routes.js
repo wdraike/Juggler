@@ -85,7 +85,7 @@ router.get('/detailed', async (req, res) => {
     healthStatus.services.database = 'operational';
   } catch (error) {
     healthStatus.services.database = 'error';
-    healthStatus.detail.database = error.message;
+    healthStatus.detail.database = 'Database unavailable';
   }
 
   // Scheduler: two true-failure signals replace the old "time since last run" check.
