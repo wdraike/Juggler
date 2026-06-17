@@ -47,8 +47,9 @@ export default function WeekStrip({ weekStripDates, selectedDate, dayOffset, set
                 color: isSelected ? theme.bg : isToday ? theme.accent : theme.text,
                 fontWeight: isSelected || isToday ? 600 : 400,
                 fontSize: 12, fontFamily: 'inherit', textAlign: 'center',
-                minWidth: isMobile ? 38 : 48, position: 'relative',
-                minHeight: isMobile ? 36 : undefined
+                minWidth: isMobile ? 28 : 48, position: 'relative',
+                minHeight: isMobile ? 36 : undefined,
+                flex: isMobile ? 1 : undefined
               }}>
               <div style={{ fontSize: 10, opacity: 0.7 }}>{isMobile ? SHORT_DAY[d.getDay()] : DAY_NAMES[d.getDay()]}</div>
               <div>{d.getDate()}</div>

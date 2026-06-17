@@ -84,7 +84,9 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
       display: 'flex', alignItems: 'center', gap: isMobile ? 6 : 12,
       padding: isMobile ? '6px 8px' : '8px 16px',
       background: theme.headerBg, borderBottom: '2px solid ' + theme.accent + '4D',
-      position: 'sticky', top: 0, zIndex: 300, overflow: 'hidden', minWidth: 0
+      position: 'sticky', top: 0, zIndex: 300,
+      overflow: isMobile ? 'visible' : 'hidden', minWidth: 0,
+      flexWrap: isMobile ? 'wrap' : 'nowrap'
     }}>
       <a href={homeUrl} style={{ textDecoration: 'none', display: 'inline-flex' }}>
       {!isMobile && <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, padding: '4px 10px', borderLeft: '2px solid ' + theme.accent }}>
