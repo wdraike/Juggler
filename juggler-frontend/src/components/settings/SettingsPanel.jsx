@@ -100,7 +100,7 @@ export default function SettingsPanel({ onClose, darkMode, config, allProjectNam
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
       background: 'rgba(0,0,0,0.5)', zIndex: 300, display: 'flex',
       alignItems: 'center', justifyContent: 'center'
-    }} onClick={onClose}>
+    }} onClick={onClose} role="dialog" aria-modal="true" aria-label="Settings">
       <div style={{
         background: theme.bgSecondary, borderRadius: isMobile ? 0 : 12,
         width: isMobile ? '100%' : 700, maxWidth: isMobile ? '100%' : '95vw',
@@ -117,16 +117,16 @@ export default function SettingsPanel({ onClose, darkMode, config, allProjectNam
           <button onClick={onClose} style={{
             border: 'none', background: 'transparent', color: theme.textMuted,
             fontSize: 20, cursor: 'pointer'
-          }}>&times;</button>
+          }} aria-label="Close settings">&times;</button>
         </div>
 
         {/* Tabs */}
         <div style={{
           display: 'flex', gap: 2, padding: '8px 16px',
           borderBottom: `1px solid ${theme.border}`, overflowX: 'auto'
-        }}>
+        }} role="tablist" aria-label="Settings tabs">
           {TABS.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} title={t.tip} style={{
+          <button key={t.id} onClick={() => setTab(t.id)} title={t.tip} role="tab" aria-selected={tab === t.id} aria-label={t.label} style={{
             border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
             background: tab === t.id ? theme.accent : 'transparent',
             color: tab === t.id ? '#FDFAF5' : theme.textSecondary,

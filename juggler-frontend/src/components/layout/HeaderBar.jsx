@@ -175,13 +175,13 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
           </span>
         )}
 
-        {onAddTask && <button onClick={onAddTask} style={{ ...btnStyle(theme, isMobile), fontSize: 20, fontWeight: 700, color: '#2D6A4F' }} title="Add task">+</button>}
+        {onAddTask && <button onClick={onAddTask} style={{ ...btnStyle(theme, isMobile), fontSize: 20, fontWeight: 700, color: '#2D6A4F' }} title="Add task" aria-label="Add task">+</button>}
 
         {/* Desktop: show all buttons inline */}
         {!useOverflow && (
           <>
-            <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings — locations, tools, templates, and preferences"><Settings size={16} /></button>
-            <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export — save or load tasks as JSON">&#x1F4E6;</button>
+            <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings — locations, tools, templates, and preferences" aria-label="Settings"><Settings size={16} /></button>
+            <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export — save or load tasks as JSON" aria-label="Import or Export">&#x1F4E6;</button>
             {(onShowGCalSync || onShowMsftCalSync) && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 {(function() {
@@ -215,7 +215,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
                 )}
               </div>
             )}
-            {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help guide — how the scheduler works, task properties, keyboard shortcuts">&#x2753;</button>}
+            {onShowHelp && <button onClick={onShowHelp} style={btnStyle(theme, isMobile)} title="Help guide — how the scheduler works, task properties, keyboard shortcuts" aria-label="Help guide">&#x2753;</button>}
             {activeTimezone && (
               <span title={activeTimezone + ' (' + (tzSource || 'auto') + ')'}
                 style={{
@@ -228,7 +228,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
               </span>
             )}
             <FontSizeControl theme={theme} isMobile={isMobile} />
-            <button onClick={() => setDarkMode(d => !d)} style={btnStyle(theme, isMobile)} title="Toggle dark mode">
+            <button onClick={() => setDarkMode(d => !d)} style={btnStyle(theme, isMobile)} title="Toggle dark mode" aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
               {darkMode ? '☀️' : '🌙'}
             </button>
             <UserDropdown user={user} theme={theme} isMobile={isMobile} onShowSettings={onShowSettings} logout={logout} onReportIssue={function() { setShowFeedback(true); }} />
@@ -238,7 +238,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
         {/* Compact (mobile + tablet-narrow): overflow menu button */}
         {useOverflow && (
           <div ref={overflowRef} style={{ position: 'relative' }}>
-            <button onClick={function() { setShowOverflow(function(v) { return !v; }); }} style={{ ...btnStyle(theme, isMobile), fontSize: 18, fontWeight: 700 }} title="More options">
+            <button onClick={function() { setShowOverflow(function(v) { return !v; }); }} style={{ ...btnStyle(theme, isMobile), fontSize: 18, fontWeight: 700 }} title="More options" aria-label="More options">
               &#x22EF;
             </button>
             {showOverflow && (

@@ -52,9 +52,13 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
   return (
     <div
       data-testid="task-card-root"
+      role="button"
+      tabIndex={0}
       draggable={draggable || false}
       onDragStart={draggable ? function(e) { e.dataTransfer.setData('text/plain', task.id); e.dataTransfer.effectAllowed = 'move'; } : undefined}
       onClick={function() { if (onExpand) onExpand(task.id); }}
+      onKeyDown={function(e) { if ((e.key === 'Enter' || e.key === ' ') && onExpand) { e.preventDefault(); onExpand(task.id); } }}
+      aria-label={task.text ? 'Task: ' + task.text + (task.project ? ' (' + task.project + ')' : '') : 'Task card'}
       style={{
         borderRadius: 6, cursor: 'pointer', overflow: 'hidden',
         background: theme.bgCard,

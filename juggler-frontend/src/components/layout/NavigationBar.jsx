@@ -179,6 +179,7 @@ export default function NavigationBar({ viewMode, setViewMode, filter, setFilter
       <div style={{ display: 'flex', gap: isMobile ? 0 : 2, flex: isMobile ? '1 1 100%' : undefined, justifyContent: isMobile ? 'space-between' : undefined }}>
         {VIEW_MODES.map(v => (
           <button key={v.id} onClick={() => setViewMode(v.id)}
+            aria-label={isMobile ? v.label + ' view' : undefined}
             style={{
               border: 'none', borderRadius: 2, padding: isMobile ? '5px 0' : '5px 10px', cursor: 'pointer',
               background: viewMode === v.id ? theme.accent : 'transparent',

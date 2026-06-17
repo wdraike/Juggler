@@ -838,7 +838,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         <button onClick={onClose} style={{
           border: 'none', background: 'transparent', color: TH.accent,
           fontSize: 20, cursor: 'pointer', padding: '2px 4px', lineHeight: 1
-        }}>{'←'}</button>
+        }} aria-label="Go back">{'←'}</button>
         <div style={{
           fontFamily: "'Playfair Display', serif",
           fontWeight: 700, fontSize: 16, color: TH.headerText, lineHeight: 1.1
@@ -866,7 +866,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         <button onClick={onClose} style={{
           border: 'none', background: 'transparent', color: TH.textMuted,
           fontSize: 22, cursor: 'pointer', padding: '2px 4px', lineHeight: 1
-        }}>{'×'}</button>
+        }} aria-label="Close">{'×'}</button>
       </div>
       {dialogContent}
     </div>

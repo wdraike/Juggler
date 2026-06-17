@@ -309,27 +309,32 @@ export default function CalendarView({
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: 8 }}>
         <button onClick={function () { setMonthOffset(function (o) { return o - 1; }); }}
           style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: theme.text, fontSize: 18, padding: '4px 8px', fontFamily: 'inherit' }}
-          title="Previous month">&lsaquo;</button>
-        <span style={{ fontSize: isMobile ? 16 : 18, fontWeight: 600, color: theme.text, minWidth: 140, textAlign: 'center' }}>
+          title="Previous month" aria-label="Previous month">&lsaquo;</button>
+        <h2 style={{
+          fontSize: isMobile ? 16 : 18, fontWeight: 600, color: theme.text, minWidth: 140, textAlign: 'center', margin: 0
+        }}>
           {MONTH_NAMES[month]} {year}
-        </span>
+        </h2>
         <button onClick={function () { setMonthOffset(function (o) { return o + 1; }); }}
           style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: theme.text, fontSize: 18, padding: '4px 8px', fontFamily: 'inherit' }}
-          title="Next month">&rsaquo;</button>
+          title="Next month" aria-label="Next month">&rsaquo;</button>
         {monthOffset !== 0 && (
           <button onClick={function () { setMonthOffset(0); setDayOffset(0); }}
             style={{ border: '1px solid ' + theme.border, borderRadius: 6, background: 'transparent', cursor: 'pointer', color: theme.textMuted, fontSize: 11, padding: '2px 8px', fontFamily: 'inherit' }}
-            title="Back to today">Today</button>
+            title="Back to today" aria-label="Back to today">Today</button>
         )}
       </div>
 
       {/* Calendar table — fixed layout forces equal column widths */}
       <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'separate', borderSpacing: 1, flex: 1 }}>
+        <caption style={{ position: 'absolute', left: -9999, width: 1, height: 1, overflow: 'hidden' }}>
+          {MONTH_NAMES[month]} {year} calendar
+        </caption>
         <thead>
           <tr>
             {DAY_NAMES.map(function (dn, i) {
               return (
-                <th key={dn} style={{
+                <th key={dn} scope="col" style={{
                   textAlign: 'center', fontSize: isMobile ? 10 : 12, fontWeight: 600,
                   color: (i === 0 || i === 6) ? theme.accent : theme.textMuted,
                   padding: '4px 0'
