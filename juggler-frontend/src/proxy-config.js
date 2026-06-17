@@ -27,7 +27,7 @@ const ENVIRONMENTS = {
       bugs:    { url: 'https://bugs.localdev.raikegroup.com' },
     },
     cookieDomain: '.raikegroup.com',
-    homeUrl: 'https://auth.localdev.raikegroup.com',
+    homeUrl: 'https://raikegroup.localdev.raikegroup.com',
   },
   production: {
     suffix: '.raikegroup.com',
@@ -44,6 +44,7 @@ const ENVIRONMENTS = {
   localhost: {
     suffix: null,
     services: {
+      landing: { frontend: 'http://localhost:3005' },
       auth:    { frontend: 'http://localhost:3001', backend: 'http://localhost:5010' },
       juggler: { frontend: 'http://localhost:3002', backend: 'http://localhost:5002' },
       resume:  { frontend: 'http://localhost:3000', backend: 'http://localhost:5001' },
@@ -51,7 +52,7 @@ const ENVIRONMENTS = {
       bugs:    { frontend: 'http://localhost:3004', backend: 'http://localhost:5030' },
     },
     cookieDomain: 'localhost',
-    homeUrl: 'http://localhost:3001',
+    homeUrl: 'http://localhost:3005',
   },
 };
 

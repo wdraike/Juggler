@@ -32,7 +32,6 @@ import PriorityView from '../views/PriorityView';
 import ConflictsView from '../views/ConflictsView';
 import DependencyView from '../views/DependencyView';
 import TimelineView from '../views/TimelineView';
-import SCurveView from '../views/SCurveView';
 import CalendarView from '../views/CalendarView';
 import DailyView from '../views/DailyView';
 
@@ -1228,21 +1227,6 @@ export default function AppLayout() {
               onZoomChange={handleZoomChange}
               isMobile={isMobile}
               onMarkerDrag={handleMarkerDrag}
-              weatherByDate={weatherByDate}
-            />
-          )}
-          {viewMode === 'scurve' && (
-            <SCurveView
-              selectedDate={selectedDate} selectedDateKey={selectedDateKey}
-              placements={filteredDayPlacements[selectedDateKey] || []}
-              statuses={statuses}
-              onStatusChange={handleStatusChange} onDelete={requestDelete} onExpand={handleExpand}
-              darkMode={darkMode} schedCfg={schedCfg} nowMins={nowMins} isToday={isToday}
-              blockedTaskIds={blockedTaskIds}
-              locSchedules={config.locSchedules}
-              onUpdateLocScheduleOverrides={config.updateTemplateOverrides}
-              allTasks={allTasks} onBatchRecurringsDone={handleBatchRecurringDone}
-              isMobile={isMobile}
               weatherByDate={weatherByDate}
             />
           )}

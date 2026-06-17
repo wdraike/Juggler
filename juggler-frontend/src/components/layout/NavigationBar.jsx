@@ -15,7 +15,6 @@ const VIEW_MODES = [
   { id: 'timeline', label: 'Timeline', icon: '\u2194', tip: 'Timeline view — horizontal left-to-right timeline with cards above and below' },
   { id: 'list', label: 'List', icon: '\u2261', tip: 'List view — all tasks grouped by date' },
   { id: 'priority', label: 'Priority', icon: 'P', tip: 'Priority view — P1-P4 kanban columns' },
-  { id: 'scurve', label: 'Clock', icon: '\u25D1', tip: 'Clock view — dual-circle timeline with morning and afternoon clocks' },
   { id: 'deps', label: 'Deps', icon: '\u2192', tip: 'Dependencies view — DAG graph of task dependencies, filter by project' },
   { id: 'conflicts', label: 'Issues', icon: '!', tip: 'Issues view — unplaced tasks, conflicts, and deadline misses' },
 ];
@@ -35,7 +34,7 @@ const FILTERS = [
 ];
 
 // Which filter controls are relevant per view
-var GRID_VIEWS = { '3day': 1, week: 1, timeline: 1, scurve: 1 };
+var GRID_VIEWS = { '3day': 1, week: 1, timeline: 1 };
 var FILTER_VISIBILITY = {
   // Status pills only make sense for task-list views, not time grids
   showStatusFilters: function(v) { return !GRID_VIEWS[v] && v !== 'conflicts'; },

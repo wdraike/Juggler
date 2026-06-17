@@ -51,7 +51,7 @@ const BASE_PROPS = {
 // Expected VIEW_MODES from NavigationBar.jsx (id → label/icon/tip triples)
 // tip values are the exact title= attribute strings rendered by the component.
 // SYNC: keep in sync with VIEW_MODES in NavigationBar.jsx. If a mode is added or
-// renamed there, update this array and the button count assertion (expect 11) below.
+// renamed there, update this array and the button count assertion (expect 10) below.
 const VIEW_MODES = [
   { id: 'daily',     label: 'Day',      icon: '📄', tip: 'Day view — plain hour grid with hover details' },
   { id: 'day',       label: 'Flex',     icon: '↔',  tip: 'Flex view — single-day timeline with bezier connectors' },
@@ -61,7 +61,6 @@ const VIEW_MODES = [
   { id: 'timeline',  label: 'Timeline', icon: '↔',  tip: 'Timeline view — horizontal left-to-right timeline with cards above and below' },
   { id: 'list',      label: 'List',     icon: '≡',  tip: 'List view — all tasks grouped by date' },
   { id: 'priority',  label: 'Priority', icon: 'P',  tip: 'Priority view — P1-P4 kanban columns' },
-  { id: 'scurve',    label: 'Clock',    icon: '◑',  tip: 'Clock view — dual-circle timeline with morning and afternoon clocks' },
   { id: 'deps',      label: 'Deps',     icon: '→',  tip: 'Dependencies view — DAG graph of task dependencies, filter by project' },
   { id: 'conflicts', label: 'Issues',   icon: '!',  tip: 'Issues view — unplaced tasks, conflicts, and deadline misses' },
 ];
@@ -150,9 +149,9 @@ describe('TC-W001 — NavigationBar mode-selector structural overflow guards', (
     });
   });
 
-  // ── 4. All 11 VIEW_MODES are rendered ────────────────────────────────
+  // ── 4. All 10 VIEW_MODES are rendered ────────────────────────────────
   describe('mode-button count', () => {
-    it('desktop: renders all 11 view-mode buttons with label text', () => {
+    it('desktop: renders all 10 view-mode buttons with label text', () => {
       renderNav({ isMobile: false });
       for (const mode of VIEW_MODES) {
         // Use the exact tip string as the title= attribute value.
@@ -164,7 +163,7 @@ describe('TC-W001 — NavigationBar mode-selector structural overflow guards', (
       }
     });
 
-    it('mobile: renders all 11 view-mode buttons with icon content', () => {
+    it('mobile: renders all 10 view-mode buttons with icon content', () => {
       renderNav({ isMobile: true });
       for (const mode of VIEW_MODES) {
         const btn = screen.getByTitle(mode.tip);
@@ -181,7 +180,7 @@ describe('TC-W001 — NavigationBar mode-selector structural overflow guards', (
       const wrapper = renderNav({ isMobile: true });
       const row = getModeRow(wrapper);
       const buttons = Array.from(row.querySelectorAll('button'));
-      expect(buttons.length).toBe(VIEW_MODES.length); // all 11 present
+      expect(buttons.length).toBe(VIEW_MODES.length); // all 10 present
       for (const btn of buttons) {
         expect(btn.style.flex).toBe('1');
       }
@@ -277,10 +276,10 @@ describe('TC-W001 — per-viewport CSS invariants', () => {
         expect(row.style.flex).toBe(vp.isMobile ? '1 1 100%' : '');
       });
 
-      it('all 11 mode buttons are present', () => {
+      it('all 10 mode buttons are present', () => {
         const row = getModeRow(wrapper);
         const buttons = row.querySelectorAll('button');
-        expect(buttons.length).toBe(11);
+        expect(buttons.length).toBe(10);
       });
     });
   }
