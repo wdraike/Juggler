@@ -9,6 +9,7 @@ import { getTheme } from '../../theme/colors';
 import { DAY_NAMES, MONTH_NAMES, PRI_COLORS, STATUS_MAP, locIcon, PAST_OPACITY } from '../../state/constants';
 import { isTerminalStatus } from '../../shared/task-status';
 import { formatDateKey } from '../../scheduler/dateHelpers';
+import { isAllDayTask } from '../../utils/isAllDayTask';
 
 /* ── Main CalendarView ── */
 import WeatherBadge from '../features/WeatherBadge';
@@ -183,6 +184,9 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
   var priColor = PRI_COLORS[t.pri] || PRI_COLORS.P3;
   var isDone = isTerminalStatus(status);
   var isMarker = !!t.marker;
+  var isAllDay = isAllDayTask(t);
+  var isMultiday = isAllDay && t.endDate && t.date && t.endDate !== t.date;
+  var daySpan = isMultiday ? Math.round((new Date(t.endDate + 'T00:00:00') - new Date(t.date + 'T00:00:00')) / 86400000) + 1 : 0;
   var isWhenRelaxed = !!item._whenRelaxed;
   var isOverdue = !!item._overdue && !isDone;
   var borderColor = isOverdue ? theme.error : (isWhenRelaxed ? '#F59E0B' : (isMarker ? '#8B5CF6' : priColor));
@@ -217,7 +221,7 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
           borderLeft: '3px solid ' + borderColor,
           border: '1px ' + (isMarker ? 'dotted' : 'solid') + ' ' + borderColor + (isMarker ? '40' : '00'),
           borderLeftWidth: 3, borderLeftColor: borderColor,
-          background: show ? borderColor + '22' : borderColor + '10',
+          background: isAllDay ? (show ? '#C8942A' + '30' : '#C8942A' + '18') : (show ? borderColor + '22' : borderColor + '10'),
           color: isDone ? theme.textMuted : theme.text,
           textDecoration: isDone ? 'line-through' : 'none',
           whiteSpace: 'normal', overflow: 'hidden', wordBreak: 'break-word',
@@ -228,6 +232,8 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
           opacity: fadeOpacity != null ? fadeOpacity : (isMarker ? 0.65 : 1)
         }}
       >
+        {isAllDay && <span style={{ fontSize: 8, marginRight: 1 }}>{'☀️'}</span>}
+        {isMultiday && <span style={{ fontSize: 8, marginRight: 1, fontWeight: 600, color: '#C8942A' }}>{daySpan + 'd'}</span>}
         {isOverdue && <span style={{ fontSize: 8, color: theme.error, fontWeight: 700 }}>{'\u26A0'} </span>}
         {isWhenRelaxed && !isOverdue && <span style={{ fontSize: 8, color: '#F59E0B', fontWeight: 700 }}>{'~'} </span>}
         {isMarker && !isWhenRelaxed && !isOverdue && <span style={{ fontSize: 8, opacity: 0.7 }}>{'\u25C7'} </span>}{t.text}

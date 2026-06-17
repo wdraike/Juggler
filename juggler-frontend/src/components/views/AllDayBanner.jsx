@@ -64,6 +64,8 @@ export default function AllDayBanner({ allTasks, dateKey, statuses, onExpand, da
           var st = statuses[t.id] || '';
           var isDone = isTerminalStatus(st);
           var fixed = isFixed(t);
+          var isMultiday = t.endDate && t.date && t.endDate !== t.date;
+          var daySpan = isMultiday ? Math.round((new Date(t.endDate + 'T00:00:00') - new Date(t.date + 'T00:00:00')) / 86400000) + 1 : 0;
           return (
             <div
               key={t.id}
@@ -71,9 +73,9 @@ export default function AllDayBanner({ allTasks, dateKey, statuses, onExpand, da
               onClick={function () { if (onExpand) onExpand(t.id); }}
               style={{
                 padding: '3px 8px', borderRadius: 6, cursor: 'pointer', fontSize: 12,
-                background: isDone ? theme.badgeBg : theme.projectBadgeBg,
-                color: isDone ? theme.textMuted : theme.projectBadgeText,
-                border: '1px solid ' + (isDone ? theme.border : theme.projectBadgeText + '40'),
+                background: isDone ? theme.badgeBg : (isMultiday ? '#C8942A' + '20' : theme.projectBadgeBg),
+                color: isDone ? theme.textMuted : (isMultiday ? '#C8942A' : theme.projectBadgeText),
+                border: '1px solid ' + (isDone ? theme.border : (isMultiday ? '#C8942A' + '60' : theme.projectBadgeText + '40')),
                 opacity: (isDone && isPastDay) ? PAST_OPACITY : (isDone ? 0.5 : 1),
                 textDecoration: isDone ? 'line-through' : 'none'
               }}
@@ -83,6 +85,7 @@ export default function AllDayBanner({ allTasks, dateKey, statuses, onExpand, da
               {st === 'cancel' && <span style={{ fontSize: 9, marginRight: 2 }}>{'✗'}</span>}
               {st === 'missed' && <span style={{ fontSize: 9, marginRight: 2 }}>{'⚠'}</span>}
               {fixed && <span style={{ fontSize: 9, marginRight: 2 }}>{'📌'}</span>}
+              {isMultiday && <span style={{ fontSize: 9, marginRight: 2, fontWeight: 600 }}>{daySpan + 'd'}</span>}
               {t.text}
             </div>
           );

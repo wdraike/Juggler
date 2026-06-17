@@ -22,6 +22,7 @@ import { DAY_NAMES, applyDefaults } from '../../state/constants';
 import { useAuth } from '../auth/AuthProvider';
 import { useTimezone } from '../../hooks/useTimezone';
 import { getNowInTimezone } from '../../utils/timezone';
+import { isAllDayTask } from '../../utils/isAllDayTask';
 
 // Views
 import DayView from '../views/DayView';
@@ -693,13 +694,24 @@ export default function AppLayout() {
 
   // Recurring recurring expansion is handled server-side in runSchedule.js
 
-  // Tasks by date map
+  // Tasks by date map — includes multiday all-day tasks on every date in their range (999.096)
   var tasksByDate = useMemo(() => {
     var map = {};
     allTasks.forEach(t => {
       var key = t.date || 'TBD';
       if (!map[key]) map[key] = [];
       map[key].push(t);
+      // Multiday all-day task: add to every date in [date, endDate] range
+      if (isAllDayTask(t) && t.endDate && t.date && t.endDate > t.date) {
+        var start = new Date(t.date + 'T00:00:00');
+        var end = new Date(t.endDate + 'T00:00:00');
+        for (var d = new Date(start.getTime() + 86400000); d <= end; d.setDate(d.getDate() + 1)) {
+          var dk = formatDateKey(d);
+          if (!map[dk]) map[dk] = [];
+          // Avoid duplicate if the task was already added via its own date
+          if (dk !== key) map[dk].push(t);
+        }
+      }
     });
     return map;
   }, [allTasks]);
