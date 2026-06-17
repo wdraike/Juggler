@@ -1013,7 +1013,6 @@ function PreferencesTab({ config, theme }) {
           </select>
         </div>
       </div>
-    </div>
   );
 }
 
@@ -1481,7 +1480,7 @@ function ExpandedLocationEditor({ blocks, locOverrides, locations, theme, onLocO
       position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
       background: 'rgba(0,0,0,0.6)', zIndex: 400,
       display: 'flex', alignItems: 'center', justifyContent: 'center'
-    }} onClick={onClose}>
+    }} onClick={onClose} role="dialog" aria-modal="true" aria-label="Settings">
       <div style={{
         background: theme.bgSecondary, borderRadius: 12,
         width: 650, maxWidth: '95vw', maxHeight: '80vh',
