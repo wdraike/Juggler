@@ -106,6 +106,14 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
   // skip → repeat" loop.
   var pendingBookedByDate = (opts && opts.pendingBookedByDate) || {};
 
+  // Budget-aware TPC (999.013): dayMinutes maps date strings to available
+  // minutes on that day. When provided, the TPC picker caps slotsNeeded per
+  // cycle so that total instance duration doesn't exceed available time.
+  // Instances that exceed the budget are still emitted but marked
+  // _tpcBudgetUnscheduled=true so the caller can decide how to handle them
+  // (e.g. create DB rows but skip placement).
+  var dayMinutes = (opts && opts.dayMinutes) || null;
+
   // Helper: compute the number of candidate slots per cycle for a recurrence config
   function getSelectedDayCount(r) {
     if (r.type === 'weekly' || r.type === 'biweekly') {
@@ -252,6 +260,37 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
           slotsNeeded = hasSkipInCycle ? 0 : Math.max(0, tpc - existingInCycle);
         }
 
+        // Budget-aware TPC (999.013): cap slotsNeeded so that total instance
+        // duration doesn't exceed available time across candidate days in this
+        // cycle. If dayMinutes is provided, sum available minutes for each
+        // candidate day, subtract time already booked by this master's existing
+        // instances, then compute how many new instances (each of duration
+        // src.dur) can fit. Unfitted instances are tracked so we can emit them
+        // as _tpcBudgetUnscheduled.
+        var budgetSlotsNeeded = slotsNeeded; // uncapped default
+        var budgetExceededCount = 0;
+        if (dayMinutes && slotsNeeded > 0 && src.dur > 0) {
+          // Total available minutes across candidate days in this cycle.
+          var totalCycleMinutes = 0;
+          cycleCandidates.forEach(function(cd) {
+            var dm = dayMinutes[cd.key];
+            if (typeof dm === 'number' && dm > 0) {
+              totalCycleMinutes += dm;
+            }
+          });
+          // Already-booked instances consume dur minutes each (approximate —
+          // some may be done with a different effective duration, but we use
+          // the master dur as a consistent budget unit).
+          var bookedMinutes = existingInCycle * src.dur;
+          var remainingMinutes = totalCycleMinutes - bookedMinutes;
+          if (remainingMinutes < 0) remainingMinutes = 0;
+          var maxNewInstances = Math.floor(remainingMinutes / src.dur);
+          if (maxNewInstances < slotsNeeded) {
+            budgetExceededCount = slotsNeeded - maxNewInstances;
+            budgetSlotsNeeded = Math.max(0, maxNewInstances);
+          }
+        }
+
         // Pick pool: candidates that are not already booked (neither
         // terminal nor pending). No point picking a date that already has
         // a pending instance — it'd just produce a no-op target.
@@ -259,12 +298,12 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
           return !bookedKeys[cd.key];
         });
 
-        if (slotsNeeded > 0 && available.length > 0) {
+        if (budgetSlotsNeeded > 0 && available.length > 0) {
           // Greedy pick: closest candidate to lastPlaced + targetInterval.
           // First pick (no lastPlaced) targets the cycle start — which equals
           // anchor in cycle 0 — so the first instance lands on/near the anchor.
           var ref = lastPlaced || null;
-          for (var pi = 0; pi < slotsNeeded && available.length > 0; pi++) {
+          for (var pi = 0; pi < budgetSlotsNeeded && available.length > 0; pi++) {
             var idealDate;
             if (ref) {
               idealDate = new Date(ref);
@@ -282,6 +321,41 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
             ref = available[bestIdx].date;
             lastPlaced = ref;
             available.splice(bestIdx, 1);
+          }
+        }
+
+        // Budget-aware TPC (999.013): emit unscheduled instances for the
+        // portion of slotsNeeded that exceeded the available time budget.
+        // These instances get _tpcBudgetUnscheduled=true and _tpcCycleStart
+        // so the caller can create DB rows (for UI visibility) but skip
+        // placement. We space them using target-interval steering from the
+        // last placed date so they appear at natural intervals.
+        if (budgetExceededCount > 0 && dayMinutes) {
+          // Collect remaining available dates (not already picked/booked).
+          // Reuse the `available` array which was spliced during the greedy
+          // pick — remaining entries are still unbooked candidates.
+          var unscheduledRef = lastPlaced || null;
+          for (var uei = 0; uei < budgetExceededCount && available.length > 0; uei++) {
+            var unscheduledIdeal;
+            if (unscheduledRef) {
+              unscheduledIdeal = new Date(unscheduledRef);
+              unscheduledIdeal.setDate(unscheduledIdeal.getDate() + Math.round(targetInterval));
+            } else {
+              unscheduledIdeal = new Date(cycleStart);
+            }
+            var uBestIdx = 0;
+            var uBestDist = Infinity;
+            for (var uai = 0; uai < available.length; uai++) {
+              var uDist = Math.abs(Math.round((available[uai].date.getTime() - unscheduledIdeal.getTime()) / 86400000));
+              if (uDist < uBestDist) { uBestDist = uDist; uBestIdx = uai; }
+            }
+            // Mark as budget-unscheduled in picked but with the flag so the
+            // main iteration loop below can set _tpcBudgetUnscheduled on the
+            // generated instance.
+            picked[available[uBestIdx].key] = '_tpcBudgetUnscheduled';
+            unscheduledRef = available[uBestIdx].date;
+            lastPlaced = unscheduledRef;
+            available.splice(uBestIdx, 1);
           }
         }
 
@@ -407,10 +481,17 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
 
       // timesPerCycle: pre-computed optimal dates are in tpcPickedDates.
       // If this source has tpc filtering, only generate on picked dates.
+      // Budget-unscheduled instances (picked[date] === '_tpcBudgetUnscheduled')
+      // are still generated but flagged so the scheduler can skip placement.
       var selectedDayCount = getSelectedDayCount(r);
       var tpc = r.timesPerCycle || 0;
+      var isTpcBudgetUnscheduled = false;
       if (tpc > 0 && tpc < selectedDayCount) {
         if (!tpcPickedDates[src.id] || !tpcPickedDates[src.id][dateStr]) return;
+        // Check if this instance is budget-unscheduled (not enough time in cycle)
+        if (tpcPickedDates[src.id][dateStr] === '_tpcBudgetUnscheduled') {
+          isTpcBudgetUnscheduled = true;
+        }
       }
 
       // Respect day_req: skip days that don't match the constraint
@@ -470,7 +551,8 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         placement_mode: src.placement_mode,
         taskType: 'generated', sourceId: src.id, generated: true,
         _candidateDate: dateStr,
-        _occurrenceOrdinal: nextOrdBySource[src.id]
+        _occurrenceOrdinal: nextOrdBySource[src.id],
+        _tpcBudgetUnscheduled: isTpcBudgetUnscheduled || false
       });
     });
 

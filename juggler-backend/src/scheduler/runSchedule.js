@@ -825,7 +825,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
         split_total: chunks.length,
         split_group: chunks.length > 1 ? primaryId : null,
         dur: c.dur,
-        _candidateDate: occ._candidateDate || occ.date
+        _candidateDate: occ._candidateDate || occ.date,
+        _tpcBudgetUnscheduled: occ._tpcBudgetUnscheduled || false
       });
     });
   });
@@ -1102,7 +1103,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
       scheduledAt: null,
       unscheduled: false,
       _candidateDate: row._candidateDate || row.date,
-      _inMemoryChunk: true // flag for persist step
+      _inMemoryChunk: true, // flag for persist step
+      _tpcBudgetUnscheduled: row._tpcBudgetUnscheduled || false
     };
     inMemoryChunks.push(chunk);
   });

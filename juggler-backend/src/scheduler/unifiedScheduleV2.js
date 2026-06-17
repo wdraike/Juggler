@@ -1405,6 +1405,16 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       missedPreferredTimeItems.push(item);
       return;
     }
+    // Budget-unscheduled TPC instances: the cycle doesn't have enough time
+    // to place all requested instances. These go to unplaced with a reason
+    // but are NOT placed on the calendar. They still appear in the task list
+    // so the user can see "3 of 5 scheduled" and understand why some are off.
+    if (item.task && item.task._tpcBudgetUnscheduled) {
+      item.task._unplacedReason = 'tpc_budget';
+      item.task._unplacedDetail = 'Not enough time in cycle for all instances';
+      unplaced.push(item);
+      return;
+    }
     var isRigidWithAnchor = item.isRecurring && item.isRigid && item.anchorMin != null;
     var isImmovable =
       (item.isMarker && item.anchorDate && item.anchorMin != null) ||
@@ -1605,6 +1615,152 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   }
 
   captureSnapshot('queue_done');
+
+  // ── Recurring split time-boxing pass (999.547) ──────────────────────
+  // After all placements, identify recurring split chunks whose placement
+  // overflows into the next cycle. All chunks of a recurring split must
+  // finish before the next occurrence of the same master starts; any
+  // chunk placed past that boundary is removed from dayPlacements and
+  // flagged as unplaced with _unplacedReason='recurring_split_overflow'.
+  //
+  // Also flags chunks that went to unplaced during the main loop (not
+  // placed at all) with the same reason when they belong to a recurring
+  // split group whose cycle boundary is known.
+  (function timeBoxRecurringSplits() {
+    // Collect placed recurring split chunks grouped by masterId.
+    var splitChunksByMaster = {};
+    Object.keys(dayPlacements).forEach(function(dk) {
+      (dayPlacements[dk] || []).forEach(function(p) {
+        if (!p.task || !p.task.recurring) return;
+        var splitTotal = p.task.splitTotal != null ? Number(p.task.splitTotal) : 1;
+        if (splitTotal <= 1) return; // not a split chunk
+        var mid = p.task.sourceId || p.task.master_id || null;
+        if (!mid) return;
+        if (!splitChunksByMaster[mid]) splitChunksByMaster[mid] = [];
+        splitChunksByMaster[mid].push({ dateKey: dk, start: p.start, dur: p.dur, task: p.task, entry: p });
+      });
+    });
+
+    // For each master, determine the cycle boundary and identify overflow chunks.
+    Object.keys(splitChunksByMaster).forEach(function(mid) {
+      var chunks = splitChunksByMaster[mid];
+      if (chunks.length === 0) return;
+
+      // Determine the cycle length for this master from the first chunk's recur.
+      var sampleChunk = chunks[0].task;
+      var recur = sampleChunk.recur;
+      if (typeof recur === 'string') { try { recur = JSON.parse(recur); } catch (e) { return; } }
+      var cycleLen = recurringCycleDays(recur);
+      if (cycleLen <= 0) return; // unknown cycle — can't enforce time-boxing
+
+      // Find the earliest anchor date for this master's chunks. This is the
+      // occurrence start for the current cycle. Chunks must finish before
+      // anchor + cycleLen days.
+      var earliestAnchor = null;
+      chunks.forEach(function(c) {
+        var ad = c.task.date ? toKey(c.task.date) : (c.task._candidateDate || null);
+        if (ad && (earliestAnchor === null || ad < earliestAnchor)) earliestAnchor = ad;
+      });
+      // Also check items from buildItems that belong to this master but
+      // may not have been placed (their anchorDate helps find the true
+      // cycle start even if no chunks were placed on that date).
+      items.forEach(function(item) {
+        if (!item.isRecurring) return;
+        var splitTotal = item.splitTotal != null ? Number(item.splitTotal) : 1;
+        if (splitTotal <= 1) return;
+        var imid = item.masterId;
+        if (imid !== mid) return;
+        var ad = item.anchorDate;
+        if (ad && (earliestAnchor === null || ad < earliestAnchor)) earliestAnchor = ad;
+      });
+      if (!earliestAnchor) return;
+
+      // Compute the boundary date: anchor + cycleLen days. Any chunk placed
+      // on or after this date overflows into the next cycle.
+      var anchorDate = parseDate(earliestAnchor);
+      if (!anchorDate) return;
+      var boundaryDate = new Date(anchorDate);
+      boundaryDate.setDate(boundaryDate.getDate() + cycleLen);
+      var boundaryKey = formatDateKey(boundaryDate);
+
+      // Remove overflow chunks from dayPlacements and flag as unplaced.
+      var overflowEntries = [];
+      chunks.forEach(function(c) {
+        if (c.dateKey >= boundaryKey) {
+          // This chunk overflows into the next cycle.
+          overflowEntries.push(c);
+        }
+      });
+
+      if (overflowEntries.length > 0) {
+        overflowEntries.forEach(function(c) {
+          // Remove from dayPlacements
+          var dk = c.dateKey;
+          if (dayPlacements[dk]) {
+            dayPlacements[dk] = dayPlacements[dk].filter(function(p) {
+              return p !== c.entry;
+            });
+          }
+          // Remove from dayPlaced
+          if (dayPlaced[dk]) {
+            dayPlaced[dk] = dayPlaced[dk].filter(function(p) {
+              return p !== c.entry;
+            });
+          }
+          // Release occupancy: clear the chunk's time range (including
+          // travel buffers) from the occupancy grid so freed slots become
+          // available for the retry pass. Only clear minutes that this
+          // chunk exclusively held — other overlapping placements keep
+          // their occupancy.
+          var occ = dayOcc[dk];
+          if (occ && c.dur > 0) {
+            var tb = c.entry.travelBefore || 0;
+            var ta = c.entry.travelAfter || 0;
+            var s = Math.max(0, c.start - tb);
+            var e = Math.min(c.start + c.dur + ta, 1440);
+            var otherPlacements = (dayPlacements[dk] || []).filter(function(p) { return p !== c.entry; });
+            for (var m = s; m < e; m++) {
+              var isOccupiedByOther = false;
+              for (var op = 0; op < otherPlacements.length; op++) {
+                var opEntry = otherPlacements[op];
+                var opTb = opEntry.travelBefore || 0;
+                var opTa = opEntry.travelAfter || 0;
+                if (m >= Math.max(0, opEntry.start - opTb) && m < Math.min(opEntry.start + opEntry.dur + opTa, 1440)) {
+                  isOccupiedByOther = true;
+                  break;
+                }
+              }
+              if (!isOccupiedByOther) delete occ[m];
+            }
+            rebuildPrefix(occ, dayOccPrefix[dk]);
+          }
+          // Remove from placedById
+          if (c.task && c.task.id && placedById[c.task.id]) {
+            delete placedById[c.task.id];
+          }
+          // Flag as unplaced with reason
+          c.task._unplacedReason = 'recurring_split_overflow';
+          unplaced.push({ task: c.task, id: c.task.id, _overflowFromTimeBox: true });
+          warnings.push({ type: 'recurring_split_overflow', taskId: c.task.id, masterId: mid });
+        });
+      }
+    });
+
+    // Also flag unplaced recurring split chunks that never got placed at all,
+    // if they belong to a known recurring master with a cycle boundary.
+    // These chunks were correctly prevented from overflowing (the scheduler
+    // kept them within bounds), but they should carry the specific reason
+    // rather than a generic unplaced tag.
+    unplaced.forEach(function(entry) {
+      var task = entry && entry.task ? entry.task : entry;
+      if (!task) return;
+      if (!task.recurring) return;
+      if (task._unplacedReason) return; // already has a reason
+      var splitTotal = task.splitTotal != null ? Number(task.splitTotal) : 1;
+      if (splitTotal <= 1) return; // not a split chunk
+      task._unplacedReason = 'recurring_split_overflow';
+    });
+  })();
 
   // Retry pass: items that deferred because of unmet deps may now be
   // placeable — their deps could have landed later in the main pass (e.g.
