@@ -9,7 +9,7 @@
     "migrate": "node scripts/migrate-guard.js migrate:latest",
     "migrate:rollback": "node scripts/migrate-guard.js migrate:rollback",
     "migrate:status": "npx knex migrate:status",
-    "test": "jest --forceExit",
+    "test": "jest --forceExit --runInBand",
     "test:adapter": "node scripts/test-adapter.js",
     "verify-sync": "node ../shared/verify-sync.js",
     "audit:knip": "knip --reporter json 2>/dev/null | sed -n '/^[\\[{]/,$p' > ../../.planning/phases/juggler-code-review/baseline/knip-backend.json || true",
