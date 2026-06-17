@@ -32,6 +32,27 @@
 // updateConfig validKeys (lines 97-103). 'temp_unit_pref' has its own F/C guard
 // in the controller; the full list is kept here so the domain can validate a key
 // before it reaches the DB (the controller relied on this inline array).
+//
+// ── AUDIT (999.687) ──────────────────────────────────────────────────────────
+// All 12 keys are ACTIVE — consumed by scheduler, frontend, cal-sync, or export.
+//   tool_matrix             — scheduler (runSchedule), MCP config, export/import
+//   time_blocks             — scheduler, entity-limits, export/import, route guard
+//   loc_schedules           — scheduler, export/import
+//   loc_schedule_defaults   — scheduler, export/import
+//   loc_schedule_overrides  — scheduler, export/import
+//   hour_location_overrides — scheduler, export/import
+//   preferences             — scheduler (splitDefault/splitMinDefault),
+//                             cal-sync (calCompletedBehavior), task creation,
+//                             export/import, frontend (gridZoom/fontSize/…)
+//   schedule_templates      — scheduler, orphan-when-tag scan, export/import
+//   template_defaults       — scheduler, export/import
+//   template_overrides      — scheduler, export/import
+//   cal_sync_settings       — cal-sync controller (ingest mode), DeleteTask
+//                             (ingest-block), MCP tasks tool. Was missing from
+//                             GetConfig/ExportData/MCP — FIXED in 999.687.
+//   temp_unit_pref          — GetConfig (default 'F'), UpdateConfig (F/C guard),
+//                             frontend weather display. UI-only; scheduler is
+//                             F-only internally (migration 20260509000400).
 var VALID_KEYS = Object.freeze([
   'tool_matrix', 'time_blocks', 'loc_schedules',
   'loc_schedule_defaults', 'loc_schedule_overrides',

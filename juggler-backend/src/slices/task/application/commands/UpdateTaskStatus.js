@@ -12,7 +12,7 @@
  *   - rc_<sourceId>_<digits> on-demand materialization (repo.insertTask of the
  *     instance row) when the generated instance has no DB row yet.
  *   - 404 / disabled-403.
- *   - recurring_template: pause/unpause only (→ template-pause cleanup collaborator).
+ *   - recurring_template: pause/unpause with cascade to instances (999.590).
  *   - terminal-requires-schedule guard (rolling-instance exemption via injected
  *     `loadMaster`) → 400.
  *   - status update build (completed_at, done scheduled_at preservation, terminal
@@ -119,23 +119,25 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
     return { status: 403, body: { error: 'This item is disabled. Use the re-enable endpoint to restore it.', code: 'TASK_DISABLED' } };
   }
 
-  // recurring_template: pause/unpause only (handler L1683-1721)
+  // recurring_template: pause/unpause — cascade to instances (999.590)
   if (existing.task_type === 'recurring_template') {
     if (status !== 'pause' && status !== '') {
       return { status: 400, body: { error: 'Recurring templates can only be paused or unpaused' } };
     }
     await this.repo.updateTaskById(id, { status: status || '' }, userId);
-    var instanceIds = await this.handleTemplatePause({ id: id, userId: userId, status: status, repo: this.repo });
+    var cascadeResult = await this.handleTemplatePause({ id: id, userId: userId, status: status, repo: this.repo });
     var tmplRows = await this.repo.getRecurringTemplateRows(userId);
     var srcMapT = this.mappers.buildSourceMap(tmplRows);
     await this.cache.invalidateTasks(userId);
-    this.enqueueScheduleRun(userId, 'api:updateTaskStatus:template', [id].concat(instanceIds || []));
+    var cascadedIds = (cascadeResult.pausedIds || []).concat(cascadeResult.unpausedIds || []);
+    this.enqueueScheduleRun(userId, 'api:updateTaskStatus:template', [id].concat(cascadedIds));
     var updatedTemplate = await this.repo.fetchTaskWithEventIds(id, userId);
     return {
       status: 200,
       body: {
         task: this.mappers.rowToTask(updatedTemplate, null, srcMapT),
-        instancesRemoved: status === 'pause' ? (instanceIds || []).length : 0
+        instancesPaused: cascadeResult.pausedCount || 0,
+        instancesUnpaused: cascadeResult.unpausedCount || 0
       }
     };
   }

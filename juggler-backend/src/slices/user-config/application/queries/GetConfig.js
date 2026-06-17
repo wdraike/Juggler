@@ -103,7 +103,8 @@ GetConfig.prototype.execute = async function execute(input) {
     tempUnitPref: config.temp_unit_pref || 'F',
     scheduleTemplates: config.schedule_templates || null,
     templateDefaults: config.template_defaults || null,
-    templateOverrides: config.template_overrides || null
+    templateOverrides: config.template_overrides || null,
+    calSyncSettings: config.cal_sync_settings || null
   };
   await this.cache.set(cacheKey, result, 3600); // 1 hour TTL
   return { status: 200, body: result };

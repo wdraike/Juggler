@@ -43,7 +43,7 @@ function statusDeps(repo, trigger, events, extra) {
     enqueueScheduleRun: trigger,
     statusUpdateSchema: statusUpdateSchema,
     materializeRcInstance: function () { return Promise.resolve(null); },
-    handleTemplatePause: function () { return Promise.resolve([]); },
+    handleTemplatePause: function () { return Promise.resolve({ pausedCount: 0, pausedIds: [], unpausedCount: 0, unpausedIds: [] }); },
     loadMaster: function () { return Promise.resolve(null); },
     isRollingMaster: function () { return false; },
     applyRollingAnchor: function () { return Promise.resolve(); },
@@ -116,6 +116,45 @@ describe('UpdateTaskStatus (updateTaskStatus)', function () {
     return uc.execute({ id: 'tpl1', userId: USER, body: { status: 'wip' } }).then(function (out) {
       expect(out.status).toBe(400);
       expect(out.body.error).toMatch(/can only be paused or unpaused/);
+    });
+  });
+
+  // ── 999.590: Cascade pause/disable status to recurring instances ──
+
+  test('recurring_template pause: cascade calls handleTemplatePause and returns instancesPaused (999.590)', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'tpl-pause', user_id: USER, task_type: 'recurring_template', recurring: 1, status: '', updated_at: new Date() }
+    ] });
+    var trigger = H.makeTriggerSpy();
+    var pauseResult = { pausedCount: 3, pausedIds: ['inst1', 'inst2', 'inst3'], unpausedCount: 0, unpausedIds: [] };
+    var uc = new UpdateTaskStatus(statusDeps(repo, trigger, H.makeEventsSpy(), {
+      handleTemplatePause: function () { return Promise.resolve(pauseResult); }
+    }));
+    return uc.execute({ id: 'tpl-pause', userId: USER, body: { status: 'pause' } }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(out.body.task.status).toBe('pause');
+      expect(out.body.instancesPaused).toBe(3);
+      expect(out.body.instancesUnpaused).toBe(0);
+      // The cascaded IDs should appear in the scheduler trigger
+      expect(trigger.calls[0].ids).toContain('tpl-pause');
+      expect(trigger.calls[0].ids).toContain('inst1');
+    });
+  });
+
+  test('recurring_template unpause: cascade calls handleTemplatePause and returns instancesUnpaused (999.590)', function () {
+    var repo = new InMemoryTaskRepository({ rows: [
+      { id: 'tpl-unpause', user_id: USER, task_type: 'recurring_template', recurring: 1, status: 'pause', updated_at: new Date() }
+    ] });
+    var trigger = H.makeTriggerSpy();
+    var unpauseResult = { pausedCount: 0, pausedIds: [], unpausedCount: 2, unpausedIds: ['inst4', 'inst5'] };
+    var uc = new UpdateTaskStatus(statusDeps(repo, trigger, H.makeEventsSpy(), {
+      handleTemplatePause: function () { return Promise.resolve(unpauseResult); }
+    }));
+    return uc.execute({ id: 'tpl-unpause', userId: USER, body: { status: '' } }).then(function (out) {
+      expect(out.status).toBe(200);
+      expect(out.body.task.status).toBe('');
+      expect(out.body.instancesPaused).toBe(0);
+      expect(out.body.instancesUnpaused).toBe(2);
     });
   });
 

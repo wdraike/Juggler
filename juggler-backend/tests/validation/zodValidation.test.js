@@ -635,9 +635,9 @@ describe('Zod Validation Boundaries', () => {
 
     test('preferencesSchema should validate config boundaries', () => {
       const validPrefs = {
-        defaultDuration: 30,
-        weekStartsOn: 1, // Monday
-        temperatureUnit: 'C'
+        splitDefault: true,
+        splitMinDefault: 15, // 15-minute minimum chunk
+        gridZoom: 60
       };
       
       const result = preferencesSchema.safeParse(validPrefs);

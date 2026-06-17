@@ -44,7 +44,12 @@ function registerConfigTools(server, userId) {
         locScheduleDefaults: config.loc_schedule_defaults || null,
         locScheduleOverrides: config.loc_schedule_overrides || null,
         hourLocationOverrides: config.hour_location_overrides || null,
-        preferences: config.preferences || null
+        preferences: config.preferences || null,
+        tempUnitPref: config.temp_unit_pref || 'F',
+        scheduleTemplates: config.schedule_templates || null,
+        templateDefaults: config.template_defaults || null,
+        templateOverrides: config.template_overrides || null,
+        calSyncSettings: config.cal_sync_settings || null
       };
 
       return { content: [{ type: 'text', text: safeStringify(result) }] };

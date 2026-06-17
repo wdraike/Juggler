@@ -31,7 +31,7 @@
  *     constants, the zod schemas (batchCreate/batchUpdate/statusUpdate).
  *   - the raw-table side-effect BLOCKS the repo port does NOT model — lifted
  *     VERBATIM from the legacy handlers (recurCleanup, materializeRcInstance,
- *     handleTemplatePause, loadMaster/isRollingMaster/applyRollingAnchor,
+ *     handleTemplatePause (cascade pause/unpause to instances), loadMaster/isRollingMaster/applyRollingAnchor,
  *     loadSplitSiblings, triggerCalSync, reactivateDoneFrozen, loadCalSyncSettings,
  *     findProviderLedgerRow, cascadeRecurringDelete, standardDelete,
  *     lockedBatchUpdate, batchUpdateTxn, detachLedger, entity counters).
@@ -415,36 +415,69 @@ async function materializeRcInstance(ctx) {
   return repo.fetchTaskWithEventIds(id, userId);
 }
 
-// updateTaskStatus recurring_template pause cleanup (verbatim — controller L1690-1713).
-// Returns the list of deleted future-instance ids (for the schedule-run broadcast).
+// updateTaskStatus recurring_template pause/unpause cascade (999.590).
+// On pause: cascade pause status to all future open instances of the template.
+// On unpause: cascade '' (active) status to all paused instances of the template.
+// Returns { pausedCount, pausedIds } on pause or { unpausedCount, unpausedIds } on unpause.
 async function handleTemplatePause(ctx) {
   var id = ctx.id;
   var userId = ctx.userId;
   var status = ctx.status;
-  var instanceIds = [];
+
   if (status === 'pause') {
+    // Cascade pause to all open (status='') future instances of this template.
+    // This keeps the instances in the system (identified as unscheduled per user
+    // ruling) rather than deleting them, matching the pattern used by billing
+    // downgrade's cascade of 'disabled' to instances.
+    var pausedIds = [];
     var futureInstances = await getDb()('tasks_with_sync_v')
       .where({ source_id: id, user_id: userId })
       .where('status', '')
       .where('scheduled_at', '>', new Date())
       .select('id', 'gcal_event_id');
 
-    instanceIds = futureInstances.map(function (i) { return i.id; });
+    pausedIds = futureInstances.map(function (i) { return i.id; });
 
-    if (instanceIds.length > 0) {
+    if (pausedIds.length > 0) {
+      // Mark cal_sync ledger entries as deleted_local so paused instances don't
+      // create stale calendar events — the same cleanup the old delete path used.
       await getDb()('cal_sync_ledger')
         .where('user_id', userId)
-        .whereIn('task_id', instanceIds)
+        .whereIn('task_id', pausedIds)
         .where('status', 'active')
         .update({ status: 'deleted_local', task_id: null, synced_at: getDb().fn.now() })
         .catch(function (err) { logger.error('[silent-catch]', err.message); });
 
-      await tasksWrite.deleteTasksWhere(getDb(), userId, function (q) {
-        return q.whereIn('id', instanceIds);
-      });
+      // Cascade pause status to the instances (matching the billing downgrade pattern
+      // that sets status='disabled' on instances via tasksWrite.updateInstancesWhere).
+      await tasksWrite.updateInstancesWhere(getDb(), userId, function (q) {
+        return q.whereIn('id', pausedIds);
+      }, { status: 'pause' });
     }
+
+    return { pausedCount: pausedIds.length, pausedIds: pausedIds };
   }
-  return instanceIds;
+
+  // Unpause: re-activate all instances that were paused because the template was paused.
+  // This mirrors the ReEnableTask pattern that sets status='' on disabled instances.
+  if (status === '') {
+    var pausedInstances = await getDb()('tasks_with_sync_v')
+      .where({ source_id: id, user_id: userId })
+      .where('status', 'pause')
+      .select('id');
+
+    var unpausedIds = pausedInstances.map(function (i) { return i.id; });
+
+    if (unpausedIds.length > 0) {
+      await tasksWrite.updateInstancesWhere(getDb(), userId, function (q) {
+        return q.whereIn('id', unpausedIds);
+      }, { status: '' });
+    }
+
+    return { unpausedCount: unpausedIds.length, unpausedIds: unpausedIds };
+  }
+
+  return { pausedCount: 0, pausedIds: [], unpausedCount: 0, unpausedIds: [] };
 }
 
 // updateTaskStatus rolling-master load (verbatim — controller L1727).

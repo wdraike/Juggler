@@ -101,6 +101,7 @@ ExportData.prototype.execute = async function execute(input) {
     splitMinDefault: prefs.splitMinDefault || 15,
     schedFloor: prefs.schedFloor || 480,
     schedCeiling: prefs.schedCeiling || 1380,
+    calSyncSettings: config.cal_sync_settings || {},
     updated: this._now()
   };
   return { status: 200, body: body };

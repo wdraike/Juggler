@@ -113,15 +113,15 @@ describe('project schema', () => {
 
 describe('preferences schema', () => {
   it('passes valid preferences', () => {
-    const req = { body: { temperatureUnit: 'C', weekStartsOn: 1 } };
+    const req = { body: { splitDefault: true, splitMinDefault: 15 } };
     const res = makeRes();
     let called = false;
     validate(preferencesSchema)(req, res, () => { called = true; });
     expect(called).toBe(true);
   });
 
-  it('rejects invalid temperatureUnit', () => {
-    const req = { body: { temperatureUnit: 'K' } };
+  it('rejects invalid splitDefault (string instead of boolean)', () => {
+    const req = { body: { splitDefault: 'not-a-boolean' } };
     const res = makeRes();
     validate(preferencesSchema)(req, res, () => {});
     expect(res._code).toBe(400);

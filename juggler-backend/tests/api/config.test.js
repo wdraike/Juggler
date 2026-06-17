@@ -147,7 +147,7 @@ describe('GET /api/config', () => {
     resolveQueue.push([
       { config_key: 'time_blocks', config_value: JSON.stringify(timeBlocks) },
       { config_key: 'tool_matrix', config_value: JSON.stringify(toolMatrix) },
-      { config_key: 'preferences', config_value: JSON.stringify({ weekStartsOn: 1 }) }
+      { config_key: 'preferences', config_value: JSON.stringify({ splitDefault: true }) }
     ]); // user_config
 
     const res = await request(app)
@@ -157,7 +157,7 @@ describe('GET /api/config', () => {
     expect(res.status).toBe(200);
     expect(res.body.timeBlocks).toEqual(timeBlocks);
     expect(res.body.toolMatrix).toEqual(toolMatrix);
-    expect(res.body.preferences).toEqual({ weekStartsOn: 1 });
+    expect(res.body.preferences).toEqual({ splitDefault: true });
     expect(Array.isArray(res.body.projects)).toBe(true);
     expect(res.body.projects[0].name).toBe('Home');
   });
@@ -208,11 +208,11 @@ describe('PUT /api/config/:key', () => {
     const res = await request(app)
       .put('/api/config/preferences')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
-      .send({ value: { weekStartsOn: 1, defaultDuration: 30 } });
+      .send({ value: { splitDefault: true, splitMinDefault: 15 } });
 
     expect(res.status).toBe(200);
     expect(res.body.key).toBe('preferences');
-    expect(res.body.value).toEqual({ weekStartsOn: 1, defaultDuration: 30 });
+    expect(res.body.value).toEqual({ splitDefault: true, splitMinDefault: 15 });
   });
 
   test('rejects invalid config key', async () => {
@@ -225,14 +225,14 @@ describe('PUT /api/config/:key', () => {
     expect(res.body.error).toMatch(/Invalid config key/);
   });
 
-  test('rejects preferences when body top-level field fails Zod type (weekStartsOn as string)', async () => {
+  test('rejects preferences when body top-level field fails Zod type (splitDefault as string)', async () => {
     // The route calls validate(preferencesSchema) on req.body directly.
-    // weekStartsOn at the TOP level of req.body must be a number — sending a string fails.
-    // (This is distinct from { value: { weekStartsOn } } — the schema validates the wrapper.)
+    // splitDefault at the TOP level of req.body must be a boolean — sending a string fails.
+    // (This is distinct from { value: { splitDefault } } — the schema validates the wrapper.)
     const res = await request(app)
       .put('/api/config/preferences')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
-      .send({ weekStartsOn: 'not-a-number' }); // top-level: fails z.number()
+      .send({ splitDefault: 'not-a-boolean' }); // top-level: fails z.boolean()
 
     expect(res.status).toBe(400);
   });
