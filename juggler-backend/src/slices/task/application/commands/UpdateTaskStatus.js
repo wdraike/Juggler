@@ -54,7 +54,8 @@ function UpdateTaskStatus(deps) {
   var required = ['repo', 'cache', 'events', 'enqueueScheduleRun', 'mappers',
     'statusUpdateSchema', 'safeTimezone', 'dateHelpers', 'isTerminalStatus',
     'materializeRcInstance', 'handleTemplatePause', 'loadMaster', 'isRollingMaster',
-    'applyRollingAnchor', 'loadSplitSiblings', 'triggerCalSync', 'reactivateDoneFrozen'];
+    'applyRollingAnchor', 'loadSplitSiblings', 'triggerCalSync', 'reactivateDoneFrozen',
+    'recordAction'];
   assertDeps('UpdateTaskStatus', deps, required);
   this.repo = deps.repo;
   this.cache = deps.cache;
@@ -73,6 +74,7 @@ function UpdateTaskStatus(deps) {
   this.loadSplitSiblings = deps.loadSplitSiblings;
   this.triggerCalSync = deps.triggerCalSync;
   this.reactivateDoneFrozen = deps.reactivateDoneFrozen;
+  this.recordAction = deps.recordAction;
   this.logger = deps.logger || { error: function () {} };
 }
 
@@ -194,6 +196,25 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
   if ((status === 'cancel' || status === 'skip') && isFutureScheduled && !isIngested) {
     update.scheduled_at = new Date();
   }
+
+  // ── 999.681: Record action for undo BEFORE persisting the change ──
+  var beforeSnapshot = {
+    status: existing.status || '',
+    completed_at: existing.completed_at || null,
+    time_remaining: existing.time_remaining != null ? existing.time_remaining : null
+  };
+  var afterSnapshot = {
+    status: update.status != null ? update.status : existing.status,
+    completed_at: update.completed_at !== undefined ? update.completed_at : (existing.completed_at || null),
+    time_remaining: update.time_remaining !== undefined ? update.time_remaining : (existing.time_remaining != null ? existing.time_remaining : null)
+  };
+  await this.recordAction.execute({
+    taskId: id,
+    userId: userId,
+    actionType: 'status_change',
+    before: beforeSnapshot,
+    after: afterSnapshot
+  });
 
   await this.repo.updateTaskById(id, update, userId);
 

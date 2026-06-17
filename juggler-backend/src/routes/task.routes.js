@@ -67,6 +67,7 @@ router.put('/batch', taskController.batchUpdateTasks);
 router.put('/:id/status', taskController.updateTaskStatus);
 router.put('/:id/re-enable', taskController.reEnableTask);
 router.post('/:id/take-ownership', taskController.takeOwnership);
+router.post('/:id/undo', taskController.undoTask);
 router.put('/:id', validate(taskUpdateSchema), taskController.updateTask);
 router.delete('/:id', taskController.deleteTask);
 

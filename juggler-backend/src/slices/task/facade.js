@@ -930,6 +930,15 @@ var _getVersion = new app.GetVersion({ repo: _repo, cache: _cache });
 var _getDisabledTasks = new app.GetDisabledTasks({ repo: _repo, mappers: mappers });
 var _searchTasks = new app.SearchTasks({ repo: _repo, mappers: mappers });
 
+// ── 999.681: Action logging for undo ──────────────────────────────────────────
+var KnexActionLogRepository = require('./adapters/KnexActionLogRepository');
+var _actionLog = new KnexActionLogRepository();
+
+var _recordAction = new app.RecordAction({
+  actionLog: _actionLog,
+  uuidv7: uuidv7
+});
+
 var _createTask = new app.CreateTask({
   repo: _repo, cache: _cache, events: _events,
   enqueueScheduleRun: enqueueScheduleRun,
@@ -959,7 +968,8 @@ var _updateTaskStatus = new app.UpdateTaskStatus({
   materializeRcInstance: materializeRcInstance, handleTemplatePause: handleTemplatePause,
   loadMaster: loadMaster, isRollingMaster: isRollingMaster, applyRollingAnchor: applyRollingAnchor,
   loadSplitSiblings: loadSplitSiblings, triggerCalSync: triggerCalSync,
-  reactivateDoneFrozen: reactivateDoneFrozen, logger: logger
+  reactivateDoneFrozen: reactivateDoneFrozen, logger: logger,
+  recordAction: _recordAction
 });
 
 var _completeTask = new app.CompleteTask({ updateTaskStatus: _updateTaskStatus });
@@ -994,6 +1004,15 @@ var _reEnableTask = new app.ReEnableTask({
 var _takeOwnership = new app.TakeOwnership({
   repo: _repo, cache: _cache, enqueueScheduleRun: enqueueScheduleRun, mappers: mappers,
   detachLedger: detachLedger, placementModes: PLACEMENT_MODES
+});
+
+// ── 999.681: Undo Last Action ─────────────────────────────────────────────────
+var _undoTask = new app.UndoTask({
+  actionLog: _actionLog,
+  repo: _repo, cache: _cache,
+  enqueueScheduleRun: enqueueScheduleRun,
+  mappers: mappers, isTerminalStatus: isTerminalStatus,
+  logger: logger
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1059,6 +1078,12 @@ function completeTask(input) { return _completeTask.execute(input); }
 /** splitTask → SplitTask (WBS-named; split forced true). */
 function splitTask(input) { return _splitTask.execute(input); }
 
+/** recordAction → RecordAction (999.681: logs a state-changing action for undo). */
+function recordAction(input) { return _recordAction.execute(input); }
+
+/** undoTask → UndoTask (999.681: reverses the last action on a task). */
+function undoTask(input) { return _undoTask.execute(input); }
+
 // ── pure helper re-exports the controller MUST keep (consumed by scheduler,
 // mcp tools, schedule.routes, task-write-queue, and the golden master's direct
 // `require('../../src/controllers/task.controller').rowToTask` etc.). Sourced
@@ -1097,6 +1122,9 @@ module.exports = {
   // WBS-named commands (not separate routes; exposed for completeness/tests)
   completeTask: completeTask,
   splitTask: splitTask,
+  // 999.681: undo operations
+  recordAction: recordAction,
+  undoTask: undoTask,
 
   // pure helper re-exports the controller keeps for its external consumers
   rowToTask: mappers.rowToTask,
@@ -1116,9 +1144,12 @@ module.exports = {
   TaskRepositoryPort: TaskRepositoryPort,
   TaskCachePort: TaskCachePort,
   TaskEventPort: TaskEventPort,
+  ActionLogPort: require('./domain/ports/ActionLogPort'),
   KnexTaskRepository: KnexTaskRepository,
   InMemoryTaskRepository: InMemoryTaskRepository,
   RedisTaskCache: RedisTaskCache,
   EventBusTaskEvents: EventBusTaskEvents,
+  KnexActionLogRepository: KnexActionLogRepository,
+  InMemoryActionLogRepository: require('./adapters/InMemoryActionLogRepository'),
   PlacementMode: PlacementMode,
 };

@@ -51,6 +51,13 @@ async function getValidAccessToken(user) {
     update.gcal_token_expiry = new Date(credentials.expiry_date);
   }
 
+  // Google may rotate the refresh_token on each refresh when prompt=consent
+  // was used during authorization. Persist the new refresh_token if provided
+  // so the connection stays alive indefinitely (999.668).
+  if (credentials.refresh_token) {
+    update.gcal_refresh_token = credentials.refresh_token;
+  }
+
   await db('users').where('id', user.id).update(update);
 
   return credentials.access_token;
