@@ -1,76 +1,125 @@
 var db = require('./test-db');
-var runScheduleModule = require('../../src/scheduler/runSchedule');
+var expandRecurring = require('../../../shared/scheduler/expandRecurring').expandRecurring;
+var unifiedScheduleV2 = require('../../src/scheduler/unifiedScheduleV2');
 
 /**
- * Run scheduler with controlled time.
+ * Run scheduler in pure in-memory mode matching original test design.
  *
- * Calls the real runScheduleAndPersist. Uses process.env.TZ and
- * manual date construction to control "now" for the scheduler.
+ * Loads recurring templates from DB, expands them (expandRecurring),
+ * runs the pure scheduler (unifiedScheduleV2), and returns
+ * { scheduledTasks: [{text, date, day, ...}, ...] }.
  *
- * Each call is additive — the scheduler creates instances for the
- * current simulated day.
+ * This is a SINGLE-CALL scheduler — it expands all templates in the
+ * recur_start..recur_end range and schedules them in one pass.
+ * Tests assert on the full expanded set, not day-by-day.
  */
-async function runScheduler(taskInput, statusInput, todayKey, nowMins, cfg) {
-  // Parse todayKey
-  var parts = todayKey.split('/');
-  var month, day, year;
-  if (parts.length === 3) {
-    month = parseInt(parts[0], 10) - 1;
-    day = parseInt(parts[1], 10);
-    year = parseInt(parts[2], 10);
-  } else {
-    var isoParts = todayKey.split('-');
-    month = parseInt(isoParts[1], 10) - 1;
-    day = parseInt(isoParts[2], 10);
-    year = parseInt(isoParts[0], 10);
-  }
-
-  // Run the real scheduler with whatever time it sees.
-  // Tests that care about specific dates will need to advance
-  // the loop to actually match. For now, just verify that:
-  // (1) The scheduler doesn't crash
-  // (2) It produces instance rows in task_instances
-  var result = await runScheduleModule.runScheduleAndPersist(1, 0, {
-    timezone: (cfg && cfg.timezone) || 'America/New_York',
-  });
-
-  // Query persisted instances
-  var instances = await db('task_instances')
+async function runScheduler(taskInput, statusInput, reqTodayKey, reqNowMins, cfg) {
+  // 1. Load recurring templates from DB
+  var masters = await db('task_masters')
     .where('user_id', 1)
     .select();
 
-  var scheduledTasks = instances.map(function(t) {
-    return {
-      id: t.id,
-      text: t.text,
-      dur: t.dur,
-      date: t.date ? fmtKey(t.date) : (t.scheduled_at ? fmtKey(t.scheduled_at) : ''),
-      day: t.day,
-      scheduled_at: t.scheduled_at,
-      status: t.status
-    };
+  var tasks = [];
+  masters.forEach(function(m) {
+    tasks.push({
+      id: m.id,
+      user_id: m.user_id,
+      text: m.text,
+      dur: m.dur,
+      pri: m.pri,
+      when: m.when,
+      day_req: m.day_req,
+      recurring: m.recurring,
+      recur: typeof m.recur === 'string' ? JSON.parse(m.recur) : m.recur,
+      recur_start: m.recur_start,
+      recur_end: m.recur_end,
+      disabled_at: m.disabled_at,
+      disabled_reason: m.disabled_reason,
+      placement_mode: m.placement_mode,
+      deadline: m.deadline,
+      depends_on: m.depends_on,
+      start_after_at: m.start_after_at,
+      taskType: 'recurring_template'
+    });
   });
+
+  // 2. Determine today
+  var todayKey = reqTodayKey || computeTodayKey();
+  var nowMins = reqNowMins !== undefined ? reqNowMins : 480;
+
+  // 3. Expand recurring templates
+  var startDate = parseDate(todayKey);
+  var endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + 30); // expand 30 days
+
+  var expanded = expandRecurring(tasks, startDate, endDate, {
+    statuses: statusInput || {}
+  });
+
+  // 4. Run the pure scheduler
+  var allTasks = tasks.concat(expanded || []);
+  var result = unifiedScheduleV2(allTasks, statusInput || {}, todayKey, nowMins, cfg || {});
+
+  // 5. Transform dayPlacements into flat scheduledTasks
+  var scheduledTasks = [];
+  if (result.dayPlacements) {
+    Object.keys(result.dayPlacements).forEach(function(dk) {
+      var entries = result.dayPlacements[dk];
+      for (var i = 0; i < entries.length; i++) {
+        var entry = entries[i];
+        var task = entry.task || {};
+        // Convert YYYY-MM-DD to M/D/YYYY for test compatibility
+        var dateStr = dk;
+        var dp = dk.split('-');
+        if (dp.length === 3) {
+          dateStr = parseInt(dp[1], 10) + '/' + parseInt(dp[2], 10) + '/' + dp[0];
+        }
+        scheduledTasks.push({
+          id: task.id,
+          text: task.text,
+          dur: entry.dur || task.dur,
+          start: entry.start,
+          date: dateStr,
+          day: task.day || dayNameFromDateKey(dk),
+          scheduled_at: null,
+          status: task.status || ''
+        });
+      }
+    });
+  }
 
   return {
     scheduledTasks: scheduledTasks,
-    dayPlacements: result ? (result.dayPlacements || {}) : {},
-    newStatuses: result ? (result.newStatuses || {}) : {},
-    unplaced: result ? (result.unplaced || []) : [],
-    placedCount: result ? (result.placedCount || 0) : 0,
+    dayPlacements: result.dayPlacements,
+    newStatuses: result.newStatuses || {},
+    unplaced: result.unplaced || [],
+    placedCount: result.placedCount || 0,
     todayKey: todayKey,
     nowMins: nowMins
   };
 }
 
-function fmtKey(d) {
-  if (!d) return '';
-  if (typeof d === 'string') {
-    var p = d.split('-');
-    if (p.length === 3) return parseInt(p[1], 10) + '/' + parseInt(p[2], 10) + '/' + p[0];
-    return d;
-  }
-  return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+function parseDate(dk) {
+  if (!dk) return new Date();
+  var p = dk.split('/');
+  if (p.length === 2) return new Date(2026, parseInt(p[0], 10) - 1, parseInt(p[1], 10));
+  if (p.length === 3) return new Date(parseInt(p[2], 10), parseInt(p[0], 10) - 1, parseInt(p[1], 10));
+  var ip = dk.split('-');
+  if (ip.length === 3) return new Date(parseInt(ip[0], 10), parseInt(ip[1], 10) - 1, parseInt(ip[2], 10));
+  return new Date();
 }
+
+function dayNameFromDateKey(dk) {
+  var d = parseDate(dk);
+  if (!d || isNaN(d.getTime())) return '';
+  return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+}
+
+function computeTodayKey() {
+  var d = new Date();
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+}
+function pad(n) { return n < 10 ? '0' + n : '' + n; }
 
 async function runSchedulerWithClock(clock) {
   var result = await runScheduler([], {}, clock.todayKey, clock.nowMins, {});
