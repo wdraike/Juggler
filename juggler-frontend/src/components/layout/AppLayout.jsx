@@ -23,6 +23,15 @@ import { useAuth } from '../auth/AuthProvider';
 import { useTimezone } from '../../hooks/useTimezone';
 import { getNowInTimezone } from '../../utils/timezone';
 import { isAllDayTask } from '../../utils/isAllDayTask';
+import useDocumentTitle from '../../hooks/useDocumentTitle';
+
+// 999.103: browser tab titles in the shared Raike & Sons format ("View — StriveRS").
+// Maps the viewMode id (NavigationBar VIEWS) → the human label used in the tab.
+var VIEW_TITLES = {
+  daily: 'Day', day: 'Flex', '3day': '3-Day', week: 'Week', month: 'Month',
+  timeline: 'Timeline', list: 'List', priority: 'Priority', deps: 'Dependencies',
+  conflicts: 'Issues'
+};
 
 // Views
 import DayView from '../views/DayView';
@@ -89,6 +98,8 @@ export default function AppLayout() {
     return saved !== null ? saved === 'true' : true;
   });
   var [viewMode, setViewModeRaw] = useState(_savedUI.viewMode || 'daily');
+  // 999.103: keep the browser tab title in sync with the active view.
+  useDocumentTitle(VIEW_TITLES[viewMode] || 'StriveRS');
   var [filter, setFilter] = useState(_savedUI.filter || 'open');
   var [search, setSearch] = useState(_savedUI.search || '');
   var [projectFilter, setProjectFilter] = useState(_savedUI.projectFilter || '');
