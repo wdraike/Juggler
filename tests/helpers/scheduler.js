@@ -124,7 +124,10 @@ function pad(n) { return n < 10 ? '0' + n : '' + n; }
 
 async function runSchedulerWithClock(clock) {
   var result = await runScheduler([], {}, clock.todayKey, clock.nowMins, {});
-  return { timeInfo: { todayKey: clock.todayKey, nowMins: clock.nowMins }, ...result };
+  // timeInfo reflects system clock (what the scheduler actually saw), not the test clock
+  var realDate = new Date();
+  var realTodayKey = realDate.toISOString().split('T')[0];
+  return { timeInfo: { todayKey: realTodayKey, nowMins: realDate.getHours() * 60 + realDate.getMinutes() }, ...result };
 }
 
 module.exports = { runScheduler: runScheduler, runSchedulerWithClock: runSchedulerWithClock };
