@@ -809,11 +809,13 @@ export default function WhenSection(props) {
             </label>
           </div>
         )}
-        {!marker && !isRecurring && (
+        {/* 999.547: split toggle exposed for recurring tasks too — recurring splits are
+            time-boxed (all chunks before the next interval) in the scheduler. */}
+        {!marker && (
           <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
             <label style={{ ...lStyle, flexDirection: 'row', alignItems: 'center', gap: 5 }}>
               <input type="checkbox" checked={!!split} onChange={e => onSplitChange(e.target.checked)} />
-              Allow split
+              Allow split{isRecurring ? ' (chunks complete before the next interval)' : ''}
             </label>
             {split && (
               <label style={lStyle}>
