@@ -312,10 +312,8 @@ function getLastSyncedColumn() {
 function buildMsftEventBody(task, year, tz, _opts) {
   var dur = task.dur || 30;
   // Phase 15: Migrated to placement_mode='all_day' exclusively
-  // Legacy when='allday' fallback re-enabled for backward compatibility
   var isAllDay = task.placementMode === PLACEMENT_MODES.ALL_DAY ||
-                 task.placement_mode === PLACEMENT_MODES.ALL_DAY ||
-                 task.when === 'allday';
+                 task.placement_mode === PLACEMENT_MODES.ALL_DAY;
 
   var descParts = [];
   if (task.project) descParts.push('Project: ' + task.project);

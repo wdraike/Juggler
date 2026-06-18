@@ -8,13 +8,12 @@
  *
  * Migration note (999.011): placement_mode (snake_case, from backend ENUM) and
  * placementMode (camelCase, from frontend state) are the canonical sources.
- * The `when === 'allday'` check is retained for backward compatibility with
- * legacy task rows that haven't been migrated to placement_mode.
+ * The legacy `when === 'allday'` check has been removed — all task rows
+ * should now have placement_mode set.
  */
 export function isAllDayTask(task) {
   if (!task) return false;
   return task.placementMode === 'all_day'
     || task.placement_mode === 'all_day'
-    || task.isAllDay === true
-    || task.when === 'allday';
+    || task.isAllDay === true;
 }

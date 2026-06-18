@@ -9,10 +9,11 @@ var SCHED_CFG = { timeBlocks: [], locScheduleOverrides: {}, locScheduleDefaults:
 var WEDNESDAY = '2026-05-20';
 var SELECTED_DATE = new Date(2026, 4, 19); // Monday May 19 (week contains May 20)
 
+// placement_mode-based contract (Phase 15+); legacy when='allday' fallback removed.
 var ALL_DAY_TASK = {
   id: 'ad1',
   text: 'All-day Wednesday',
-  when: 'allday',
+  placement_mode: 'all_day',
   date: WEDNESDAY,
 };
 

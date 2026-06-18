@@ -2,6 +2,8 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import AllDayBanner from '../AllDayBanner';
 
+// Task fixtures use placement_mode-based contract (Phase 15+).
+// Legacy when='allday' fallback was removed; tests use placement_mode='all_day'.
 var TASKS = [
   { id: 't1', text: 'Morning run', when: 'morning', date: '2026-05-18' },
   { id: 't2', text: 'All-day meditation', placementMode: 'all_day', date: '2026-05-18' },
@@ -100,11 +102,13 @@ test('banner container has data-testid=all-day-banner', () => {
 });
 
 test('shows fixed pin indicator for placementMode=fixed all-day tasks', () => {
+  // Fixed all-day: placementMode='fixed' drives the pin; isAllDay=true drives banner inclusion.
+  // (Legacy when='allday' removed — must use isAllDay or placement_mode='all_day'.)
   render(
     <AllDayBanner
       allTasks={[
-        { id: 't1', text: 'Fixed meeting', when: 'allday', date: '2026-05-18', placementMode: 'fixed' },
-        { id: 't2', text: 'Regular all-day', when: 'allday', date: '2026-05-18' }
+        { id: 't1', text: 'Fixed meeting', isAllDay: true, date: '2026-05-18', placementMode: 'fixed' },
+        { id: 't2', text: 'Regular all-day', placementMode: 'all_day', date: '2026-05-18' }
       ]}
       dateKey="2026-05-18"
       statuses={{}}
@@ -118,10 +122,11 @@ test('shows fixed pin indicator for placementMode=fixed all-day tasks', () => {
 });
 
 test('shows fixed pin indicator for placement_mode=fixed all-day tasks (snake_case)', () => {
+  // Fixed all-day snake_case: placement_mode='fixed' for pin; isAllDay=true for banner inclusion.
   render(
     <AllDayBanner
       allTasks={[
-        { id: 't1', text: 'Fixed via snake', when: 'allday', date: '2026-05-18', placement_mode: 'fixed' }
+        { id: 't1', text: 'Fixed via snake', isAllDay: true, date: '2026-05-18', placement_mode: 'fixed' }
       ]}
       dateKey="2026-05-18"
       statuses={{}}
