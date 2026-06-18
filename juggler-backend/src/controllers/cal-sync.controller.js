@@ -340,7 +340,10 @@ async function sync(req, res) {
       .select();
 
     var { fetchTasksWithEventIds } = require('./task.controller');
-    var allTaskRows = await fetchTasksWithEventIds(getDb(), userId, function(q) {
+    // 999.488/489: signature is (userId, queryBuilder) — the legacy
+    // (db, userId, queryBuilder) shape put getDb() in the userId slot →
+    // ER_NO_TABLES_USED ((select *) subquery on cal_sync_ledger/tasks_v).
+    var allTaskRows = await fetchTasksWithEventIds(userId, function(q) {
       q.whereNotNull('scheduled_at')
         .where(function() { this.whereNull('unscheduled').orWhere('unscheduled', 0); });
     });
@@ -2441,7 +2444,9 @@ async function audit(req, res) {
 
     // Load Strive tasks in window
     var { fetchTasksWithEventIds } = require('./task.controller');
-    var taskRows = await fetchTasksWithEventIds(getDb(), userId, function(q) {
+    // 999.488/489: signature is (userId, queryBuilder) — see note at the other
+    // call site; the legacy 3-arg shape caused ER_NO_TABLES_USED.
+    var taskRows = await fetchTasksWithEventIds(userId, function(q) {
       q.whereNotNull('scheduled_at')
         .where('scheduled_at', '>=', now).where('scheduled_at', '<=', end)
         .whereNot('status', 'done').whereNot('status', 'cancel').whereNot('status', 'skip')

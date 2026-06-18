@@ -134,14 +134,19 @@ function renameTasks(trxRepo, userId, oldName, name) {
   }, { project: name, updated_at: trxRepo.db.fn.now() });
 }
 
-// ExportData task read (data.controller.js:218-220) — task slice's
-// fetchTasksWithEventIds over getDb(). rowToTask is the task mapper.
+// ExportData task read (999.354 promotion 2/3) — promoted behind CalSyncPort.
+// The adapter delegates to the TASK SLICE FACADE (not the legacy controller) and
+// uses the CORRECT 2-arg fetchTasksWithEventIds(userId, queryBuilder) signature.
+// The prior code reached into controllers/task.controller AND passed getDb() as
+// the first arg, which serialized to an empty (select *) subquery →
+// ER_NO_TABLES_USED (999.488/489) and a silently-empty export. Fixed here.
+var TaskSliceCalSyncAdapter = require('./adapters/TaskSliceCalSyncAdapter');
+var _calSync = new TaskSliceCalSyncAdapter();
 function exportFetchTasks(userId, orderBy) {
-  var taskController = require('../../controllers/task.controller');
-  return taskController.fetchTasksWithEventIds(getDb(), userId, orderBy);
+  return _calSync.fetchTasksWithEventIds(userId, orderBy);
 }
 function exportRowToTask(row, tz) {
-  return require('../../controllers/task.controller').rowToTask(row, tz);
+  return _calSync.rowToTask(row, tz);
 }
 
 // ImportData task collaborators (data.controller.js:75, :128-131, :77-126).

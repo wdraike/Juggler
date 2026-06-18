@@ -25,7 +25,10 @@ function registerDataTools(server, userId) {
 
       var { fetchTasksWithEventIds } = require('../../controllers/task.controller');
       var [taskRows, locationRows, toolRows, projectRows, configRows] = await Promise.all([
-        fetchTasksWithEventIds(db, userId, function(q) { q.orderBy('created_at', 'asc'); }),
+        // 999.488/489: signature is (userId, queryBuilder); the legacy 3-arg
+        // (db, userId, queryBuilder) shape put `db` in the userId slot →
+        // ER_NO_TABLES_USED ((select *) subquery) → silently-empty MCP export.
+        fetchTasksWithEventIds(userId, function(q) { q.orderBy('created_at', 'asc'); }),
         db('locations').where('user_id', userId).orderBy('sort_order'),
         db('tools').where('user_id', userId).orderBy('sort_order'),
         db('projects').where('user_id', userId).orderBy('sort_order'),
