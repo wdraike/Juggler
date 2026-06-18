@@ -57,7 +57,10 @@ const USER_ID = 'ctrl-fire-user';
 
 /** Minimal Express-like req/res fakes */
 function fakeReq(overrides) {
-  return Object.assign({ user: { id: USER_ID }, body: {}, query: {}, headers: {}, params: {} }, overrides);
+  // is(): Express content-type matcher. The data.controller importData CSV path
+  // (data.controller.js:50 `req.is('text/csv')`) calls it; these regression cases
+  // all send JSON bodies, so the stub returns false → JSON import path. (999.746)
+  return Object.assign({ user: { id: USER_ID }, body: {}, query: {}, headers: {}, params: {}, is: function () { return false; } }, overrides);
 }
 
 function fakeRes() {
