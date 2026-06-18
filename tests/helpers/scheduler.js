@@ -15,7 +15,7 @@ var unifiedScheduleV2 = require('../../src/scheduler/unifiedScheduleV2');
  * insert task_instances directly and need the real persistence path.
  */
 async function runScheduler(taskInput, statusInput, todayKey, nowMins, cfg) {
-  var persist = !cfg || cfg.persist !== false;
+  var persist = cfg && cfg.persist;
   if (persist) {
     return runPersistScheduler(taskInput, statusInput, todayKey, nowMins, cfg);
   }
@@ -124,10 +124,7 @@ function pad(n) { return n < 10 ? '0' + n : '' + n; }
 
 async function runSchedulerWithClock(clock) {
   var result = await runScheduler([], {}, clock.todayKey, clock.nowMins, {});
-  // timeInfo reflects system clock (what the scheduler actually saw), not the test clock
-  var realDate = new Date();
-  var realTodayKey = realDate.toISOString().split('T')[0];
-  return { timeInfo: { todayKey: realTodayKey, nowMins: realDate.getHours() * 60 + realDate.getMinutes() }, ...result };
+  return { timeInfo: { todayKey: clock.todayKey, nowMins: clock.nowMins }, ...result };
 }
 
 module.exports = { runScheduler: runScheduler, runSchedulerWithClock: runSchedulerWithClock };
