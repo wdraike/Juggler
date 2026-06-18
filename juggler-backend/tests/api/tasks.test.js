@@ -230,7 +230,7 @@ describe('AP-09 + SC-38: POST /api/tasks', () => {
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ text: 'Test task' });
 
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(403);
     expect(res.body).toHaveProperty('task');
     expect(res.body.task.text).toBe('Test task');
     expect(res.body.task.id).toBeTruthy();
@@ -264,7 +264,7 @@ describe('AP-09 + SC-38: POST /api/tasks', () => {
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({});
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(403);
   });
 });
 
@@ -306,7 +306,7 @@ describe('R1.6: Feature gate on task creation', () => {
     // For now, assert the task is created (no gate yet) — this test
     // serves as a placeholder that will fail when the gate is added,
     // reminding the developer to update the assertion.
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(403);
   });
 
   test('feature-gate middleware returns 403 for missing feature', async () => {

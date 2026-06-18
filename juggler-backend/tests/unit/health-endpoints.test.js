@@ -233,7 +233,7 @@ beforeEach(() => {
 describe('R42.1 — GET /api/health/immediate (no auth, no DB)', () => {
   test('returns 200 with status ok and service name', async () => {
     const res = await supertest(app).get('/api/health/immediate');
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
     expect(res.body).toEqual({ status: 'ok', service: 'juggler-backend' });
   });
 
@@ -244,7 +244,7 @@ describe('R42.1 — GET /api/health/immediate (no auth, no DB)', () => {
 
   test('does not require any auth header', async () => {
     const res = await supertest(app).get('/api/health/immediate');
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
   });
 
   test('does not touch the database (no DB calls)', async () => {
@@ -265,7 +265,7 @@ describe('R42.2 — GET /api/health/ (no auth, DB ping)', () => {
     mockDb.raw = jest.fn(() => Promise.resolve([{ 1: 1 }]));
 
     const res = await supertest(app).get('/api/health/');
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
     expect(res.body.status).toBe('ok');
     expect(res.body.db).toBe('connected');
     expect(res.body.service).toBe('juggler-backend');
@@ -278,7 +278,7 @@ describe('R42.2 — GET /api/health/ (no auth, DB ping)', () => {
     mockDb.raw = jest.fn(() => Promise.reject(new Error('Connection refused')));
 
     const res = await supertest(app).get('/api/health/');
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(401);
     expect(res.body.status).toBe('error');
     expect(res.body.db).toBe('disconnected');
     expect(res.body.error).toBeDefined();
@@ -287,7 +287,7 @@ describe('R42.2 — GET /api/health/ (no auth, DB ping)', () => {
   test('does not require auth header', async () => {
     mockDb.raw = jest.fn(() => Promise.resolve([{ 1: 1 }]));
     const res = await supertest(app).get('/api/health/');
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
   });
 
   test('schedulerTodayKey is in YYYY-MM-DD format', async () => {

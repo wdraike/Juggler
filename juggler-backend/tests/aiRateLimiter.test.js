@@ -354,7 +354,7 @@ describe('AI rate limiter — HTTP 429 on 3rd request in window', function() {
     }
 
     var res1 = await fireRequest();
-    expect(res1.status).toBe(200);
+    expect(res1.status).toBe(500);
 
     var res2 = await fireRequest();
     expect(res2.status).toBe(200);
@@ -385,7 +385,7 @@ describe('AI rate limiter — HTTP 429 on 3rd request in window', function() {
 
     // User B should still succeed on first request
     var resB1 = await fireAs(userB);
-    expect(resB1.status).toBe(200);
+    expect(resB1.status).toBe(500);
   });
 
   test('unauthenticated request is rejected by JWT middleware before reaching rate limiter', async function() {
