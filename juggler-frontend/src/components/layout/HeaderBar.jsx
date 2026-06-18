@@ -18,7 +18,7 @@ import { Settings, CreditCard, Bug, LogOut } from 'lucide-react';
 import { services, homeUrl } from '../../proxy-config';
 var BILLING_URL = services.billing.frontend;
 
-export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, calSyncProgress, schedulerRunning, onShowCalSync, onShowHelp, onAddTask, isMobile, isCompact, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today, activeTimezone, tzSource, onManageDisabled, onCompactChange }) {
+export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateKey, statuses, tasksByDate, onShowSettings, onShowExport, onShowGCalSync, gcalSyncing, onShowMsftCalSync, msftCalSyncing, calSyncing, calSyncProgress, schedulerRunning, onShowCalSync, onShowHelp, onAddTask, onUndo, isMobile, isCompact, aiPanel, weekStripDates, selectedDate, dayOffset, setDayOffset, today, activeTimezone, tzSource, onManageDisabled, onCompactChange }) {
   // Measure the actual header container width with ResizeObserver so the layout
   // reacts correctly when sidebars/panels open and narrow the header — window.innerWidth
   // based breakpoints miss that case entirely.
@@ -175,6 +175,7 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
           </span>
         )}
 
+        {onUndo && <button onClick={onUndo} style={btnStyle(theme, isMobile)} title="Undo last action (Ctrl/Cmd+Z)" aria-label="Undo last action">&#x21A9;</button>}
         {onAddTask && <button onClick={onAddTask} style={{ ...btnStyle(theme, isMobile), fontSize: 20, fontWeight: 700, color: '#2D6A4F' }} title="Add task" aria-label="Add task">+</button>}
 
         {/* Desktop: show all buttons inline */}

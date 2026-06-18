@@ -86,6 +86,15 @@ export default function AppLayout() {
   var [headerCompact, setHeaderCompact] = useState(isCompact);
   var { toast, toastHistory, showToast } = useToast();
   var { pushUndo, popUndo } = useUndo(taskStateRef, dispatch, dispatchPersist);
+  // 999.681: single-step undo affordance — pops the most recent action off the
+  // undo stack (same path as Ctrl/Cmd+Z) and toasts the result. The stack lives
+  // in a ref (non-reactive), so the button is always visible and handles the
+  // empty case here rather than relying on a reactive canUndo().
+  var handleUndo = useCallback(function() {
+    var label = popUndo();
+    if (label) showToast('Undid: ' + label, 'success');
+    else showToast('Nothing to undo', 'info');
+  }, [popUndo, showToast]);
 
   // ── Persisted UI state ──
   var _savedUI = useMemo(function () {
@@ -1152,6 +1161,7 @@ export default function AppLayout() {
           onShowCalSync={() => setShowCalSync(true)}
           onShowHelp={() => setShowHelp(true)}
           onAddTask={() => { setShowCreateForm(true); setExpandedTasks([]); }}
+          onUndo={handleUndo}
           isMobile={isMobile}
           isCompact={isCompact}
           onCompactChange={setHeaderCompact}
