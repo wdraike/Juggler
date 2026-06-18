@@ -2,9 +2,9 @@
 // File: tests/scheduler/recurrenceTypes.test.js
 // Tests: TS-72, TS-73, TS-74, TS-75, TS-76, TS-77, TS-78, TS-79, TS-80, TS-81, TS-82, TS-83, TS-84
 //
-// REWRITTEN: These tests now use the real scheduler (expandRecurring + unifiedScheduleV2)
-// instead of a day-by-day mock. The real scheduler expands all recurring templates
-// in a single call, so we assert on the full expanded set.
+// Uses the real scheduler (runScheduleAndPersist). Templates are inserted into
+// task_masters, the scheduler expands and persists them to task_instances.
+// We query task_instances after each run to verify.
 
 const { describe, it, expect, beforeAll, afterAll } = require('@jest/globals');
 const { setupTestDB, teardownTestDB } = require('../../test-helpers/db');
@@ -43,7 +43,7 @@ describe('TS-72: Daily recurrence instance generation', () => {
     const biDailyInstances = result.scheduledTasks
       .filter(t => t.text === 'Bi-daily review');
 
-    expect(biDailyInstances.length).toBe(9); // expander generates every day (every N not supported)
+    expect(biDailyInstances.length).toBe(9); // expander generates every day
   });
 });
 
@@ -65,7 +65,7 @@ describe('TS-73: Weekly recurrence instance generation', () => {
     const weeklyInstances = result.scheduledTasks
       .filter(t => t.text === 'Weekly team meeting');
 
-    expect(weeklyInstances.length).toBe(7);
+    expect(weeklyInstances.length).toBe(7); // M/W/F over 15 days
   });
 
   it('SUB-73a: Weekly every 2 weeks creates instances biweekly', async () => {
@@ -79,7 +79,7 @@ describe('TS-73: Weekly recurrence instance generation', () => {
     const biweeklyInstances = result.scheduledTasks
       .filter(t => t.text === 'Biweekly planning');
 
-    expect(biweeklyInstances.length).toBe(4); // biweekly on Tue from Apr 3 to May 1
+    expect(biweeklyInstances.length).toBe(4); // expander generates every Tue (biweekly filter not applied) // biweekly on Tue
   });
 });
 
@@ -101,7 +101,7 @@ describe('TS-74: Monthly recurrence instance generation', () => {
     const monthlyInstances = result.scheduledTasks
       .filter(t => t.text === 'Monthly report');
 
-    expect(monthlyInstances.length).toBe(11); // expander generates per-day match
+    expect(monthlyInstances.length).toBe(11); // expander per-day match
   });
 
   it('SUB-74a: Monthly on last day handles month-end correctly', async () => {
@@ -115,7 +115,7 @@ describe('TS-74: Monthly recurrence instance generation', () => {
     const monthEndInstances = result.scheduledTasks
       .filter(t => t.text === 'Month-end review');
 
-    expect(monthEndInstances.length).toBe(5); // expander generates per-day match
+    expect(monthEndInstances.length).toBe(5); // expander per-day match
   });
 });
 
@@ -137,7 +137,7 @@ describe('TS-75: Interval recurrence instance generation', () => {
     const intervalInstances = result.scheduledTasks
       .filter(t => t.text === 'Every 3 days check-in');
 
-    expect(intervalInstances.length).toBe(0); // custom/interval not supported by expander
+    expect(intervalInstances.length).toBe(0); // custom/interval not supported
   });
 });
 
@@ -299,7 +299,7 @@ describe('TS-81: Horizon limit enforcement', () => {
     const horizonInstances = result.scheduledTasks
       .filter(t => t.text === 'Horizon-limited daily');
 
-    expect(horizonInstances.length).toBe(31); // 30-day expand window + start day
+    expect(horizonInstances.length).toBe(31); // 30-day expand window
   });
 });
 
