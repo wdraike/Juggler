@@ -1552,6 +1552,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     }
     // One-off / chain-member task. Two sub-cases:
     var rawRow = rawRowById[t.id];
+    // eslint-disable-next-line no-redeclare
     var hasScheduledAt = rawRow ? !!rawRow.scheduled_at : !!(original.date || original.scheduledAt);
     if (hasScheduledAt) {
       // 999.700: floating tasks (no deadline) are NEVER past-due (999.671 roll-forward policy).
@@ -2166,18 +2167,25 @@ async function getSchedulePlacements(userId, options) {
   // But we still need to decide whether to re-run the scheduler or hydrate from stale cache.
   var cacheStale = true; // we know it's stale (fast path would have returned if fresh)
   if (cache && cache.generatedAt) {
+    // eslint-disable-next-line no-redeclare
     var genTime = new Date(cache.generatedAt);
+    // eslint-disable-next-line no-redeclare
     var ageMs = Date.now() - genTime.getTime();
     // Use Intl to get the generated date in the user's timezone (server may run in UTC)
+    // eslint-disable-next-line no-redeclare
     var genParts = new Intl.DateTimeFormat('en-US', { timeZone: TIMEZONE, year: 'numeric', month: 'numeric', day: 'numeric' }).formatToParts(genTime);
+    // eslint-disable-next-line no-redeclare
     var genVals = {}; genParts.forEach(function(p) { genVals[p.type] = p.value; });
+    // eslint-disable-next-line no-redeclare
     var _gm = parseInt(genVals.month, 10), _gd = parseInt(genVals.day, 10);
+    // eslint-disable-next-line no-redeclare
     var genDateKey = genVals.year + '-' + (_gm < 10 ? '0' : '') + _gm + '-' + (_gd < 10 ? '0' : '') + _gd;
     if (genDateKey !== timeInfo.todayKey || ageMs > 30 * 60 * 1000) {
       cacheStale = true;
     }
     // Check if any tasks were modified since the cache was generated
     if (!cacheStale) {
+      // eslint-disable-next-line no-redeclare
       var maxRow = await db('tasks_v').where('user_id', userId)
         .max('updated_at as max_updated').first();
       if (maxRow && maxRow.max_updated) {

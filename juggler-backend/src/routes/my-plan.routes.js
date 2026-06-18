@@ -81,7 +81,7 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
         // Still fetch actual count for unlimited users (for display)
         let used = 0;
         if (entityCounters[key]) {
-          try { used = await entityCounters[key](userId); } catch {} /* fall through to used=0 */
+          try { used = await entityCounters[key](userId); } catch (_) { /* fall through to used=0 */ }
         }
         usage[key] = { used, limit: null, unlimited: true, resets_at: null };
         continue;

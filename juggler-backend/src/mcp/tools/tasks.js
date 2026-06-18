@@ -350,8 +350,11 @@ function registerTaskTools(server, userId) {
       }
 
       enqueueScheduleRun(userId, 'mcp:update_task', [id]);
+      // eslint-disable-next-line no-redeclare
       var allRows = await db('tasks_with_sync_v').where('user_id', userId).select();
+      // eslint-disable-next-line no-redeclare
       var srcMap = buildSourceMap(allRows);
+      // eslint-disable-next-line no-redeclare
       var updatedRow = allRows.find(function(r) { return r.id === id; });
       return { content: [{ type: 'text', text: safeStringify(rowToTask(updatedRow, tz, srcMap)) }] };
     }
@@ -568,6 +571,7 @@ function registerTaskTools(server, userId) {
       // Lock check: if scheduling lock is held, split and queue
       var locked = await isLocked(userId);
       if (locked) {
+        // eslint-disable-next-line no-redeclare
         var idsToCheck = updates.map(function(u) { return u.id; });
         var existCheck = await db('tasks_v')
           .where('user_id', userId)

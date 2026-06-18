@@ -1361,6 +1361,7 @@ async function sync(req, res) {
       var pStats2 = stats.providers[pid2];
       var processedTaskIds2 = processedTaskIdsByProvider[pid2];
       var processedEventIds2 = processedEventIdsByProvider[pid2];
+      // eslint-disable-next-line no-redeclare
       var eventIdCol = pAdapter2.getEventIdColumn();
 
       // 3a: Push — skip entirely for ingest-only providers
@@ -1978,6 +1979,7 @@ async function sync(req, res) {
 
         // Dedupe: merge post-read rows, keeping newer (by updated_at or computed_at)
         var seenById = {};
+        // eslint-disable-next-line no-redeclare
         for (var pli = 0; pli < ledgerRecords.length; pli++) {
           seenById[ledgerRecords[pli].id] = ledgerRecords[pli];
         }

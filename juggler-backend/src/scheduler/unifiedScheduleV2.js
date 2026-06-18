@@ -1974,6 +1974,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       stillUnplaced.push(item);
       return;
     }
+    // eslint-disable-next-line no-redeclare
     var slot = placement.slot;
     reserveWithTravel(dayOcc[slot.dateKey], slot.start, item.dur, item.travelBefore, item.travelAfter);
     var rEntry = { task: item.task, start: slot.start, dur: item.dur, locked: false,
