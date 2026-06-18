@@ -1398,6 +1398,7 @@ export default function AppLayout() {
                     onClose={function() { setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== taskId; }); }); }}
                     onShowChain={function() { setViewMode('deps'); setProjectFilter(taskObj.project || ''); setExpandedTasks([]); }}
                     allProjectNames={allProjectNames}
+                    allTasks={allTasks}
                     locations={config.locations}
                     tools={config.tools}
                     uniqueTags={uniqueTags}
@@ -1465,6 +1466,7 @@ export default function AppLayout() {
             onClose={function() { setExpandedTasks(function(prev) { return prev.filter(function(x) { return x !== taskId; }); }); }}
             onShowChain={function() { setViewMode('deps'); setProjectFilter(taskObj.project || ''); setExpandedTasks([]); }}
             allProjectNames={allProjectNames}
+            allTasks={allTasks}
             locations={config.locations}
             tools={config.tools}
             uniqueTags={uniqueTags}

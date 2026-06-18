@@ -46,7 +46,7 @@ function writeCollapseState(state) {
   try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(state)); } catch (e) { /* quota */ }
 }
 
-export default function TaskEditForm({ task, status, onUpdate, onStatusChange, onDelete, onClose, onShowChain, allProjectNames, locations, tools, uniqueTags, scheduleTemplates, templateDefaults, calSyncSettings, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex, onRecurDayConflict, activeTimezone, tempUnitPref }) {
+export default function TaskEditForm({ task, status, onUpdate, onStatusChange, onDelete, onClose, onShowChain, allProjectNames, allTasks, locations, tools, uniqueTags, scheduleTemplates, templateDefaults, calSyncSettings, darkMode, isMobile, mode, onCreate, initialDate, initialProject, stackIndex, onRecurDayConflict, activeTimezone, tempUnitPref }) {
   var isCreate = mode === 'create';
   var TH = getTheme(darkMode);
   var [collapse, setCollapse] = useState(readCollapseState);
@@ -795,7 +795,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           onToggle={toggleCollapse}
           badge={task && task.dependsOn && task.dependsOn.length > 0 ? task.dependsOn.length + ' dep' + (task.dependsOn.length > 1 ? 's' : '') : null}
           TH={TH}>
-          <DependsOnSection task={task} onShowChain={onShowChain} TH={TH} isMobile={isMobile} />
+          <DependsOnSection task={task} onShowChain={onShowChain} TH={TH} isMobile={isMobile} allTasks={allTasks} onUpdate={onUpdate} />
         </CollapsibleSection>
       )}
 
