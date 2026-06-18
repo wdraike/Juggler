@@ -114,7 +114,7 @@ jest.mock('../../../src/middleware/jwt-auth', () => ({
     } else {
       req.user = { id: 'gm-h4-001', email: 'user@test.com', name: 'Golden H4', timezone: 'America/New_York' };
     }
-    req.auth = { plans: {} };
+    req.auth = { plans: {}, apps: ['juggler'] };
     next();
   },
   verifyToken: jest.fn()

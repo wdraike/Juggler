@@ -52,7 +52,7 @@ jest.mock('../src/middleware/jwt-auth', () => ({
       return res.status(401).json({ error: 'Invalid token' });
     }
     req.user = { ...TEST_USER };
-    req.auth = { plans: {} };
+    req.auth = { plans: {}, apps: ['juggler'] };
     next();
   },
   validateRefreshToken: (req, res) => res.status(410).json({ error: 'Use auth-service' }),

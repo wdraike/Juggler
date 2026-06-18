@@ -30,7 +30,7 @@ jest.mock('../../src/middleware/jwt-auth', () => ({
     } else {
       req.user = { ...TEST_USER };
     }
-    req.auth = { plans: {} };
+    req.auth = { plans: {}, apps: ['juggler'] };
     next();
   },
   verifyToken: jest.fn()

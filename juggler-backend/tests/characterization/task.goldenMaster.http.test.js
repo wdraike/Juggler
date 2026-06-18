@@ -64,7 +64,7 @@ jest.mock('../../src/middleware/jwt-auth', () => ({
     if (!auth || !auth.startsWith('Bearer '))
       return res.status(401).json({ error: 'Auth required' });
     req.user = { ...TEST_USER };
-    req.auth = { plans: {} };
+    req.auth = { plans: {}, apps: ['juggler'] };
     next();
   },
   verifyToken: jest.fn()
