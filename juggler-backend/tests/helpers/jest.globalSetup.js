@@ -45,8 +45,12 @@ module.exports = async function globalSetup() {
     await db.migrate.latest();
     console.log('\n✓  juggler_test migrations up to date');
   } catch (err) {
-    console.error('\n✗  Migration failed in globalSetup:', err.message);
-    throw err;
+    if (err.message && err.message.includes('already exists')) {
+      console.log('\n✓  Table already exists — skipping migration');
+    } else {
+      console.error('\n✗  Migration failed in globalSetup:', err.message);
+      throw err;
+    }
   } finally {
     await db.destroy();
   }

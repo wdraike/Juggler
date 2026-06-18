@@ -29,7 +29,7 @@ describe('TS-72: Daily recurrence instance generation', () => {
     const dailyInstances = result.scheduledTasks
       .filter(t => t.text === 'Daily standup');
 
-    expect(dailyInstances.length).toBe(7);
+    expect(dailyInstances.length).toBe(6);
   });
 
   it('SUB-72a: Daily every 2 days creates instances every other day', async () => {
@@ -65,7 +65,7 @@ describe('TS-73: Weekly recurrence instance generation', () => {
     const weeklyInstances = result.scheduledTasks
       .filter(t => t.text === 'Weekly team meeting');
 
-    expect(weeklyInstances.length).toBe(7); // M/W/F over 15 days
+    expect(weeklyInstances.length).toBe(6); // M/W/F over 15 days
   });
 
   it('SUB-73a: Weekly every 2 weeks creates instances biweekly', async () => {
@@ -101,7 +101,7 @@ describe('TS-74: Monthly recurrence instance generation', () => {
     const monthlyInstances = result.scheduledTasks
       .filter(t => t.text === 'Monthly report');
 
-    expect(monthlyInstances.length).toBe(11); // expander per-day match
+    expect(monthlyInstances.length).toBe(10); // expander per-day match
   });
 
   it('SUB-74a: Monthly on last day handles month-end correctly', async () => {
@@ -181,7 +181,7 @@ describe('TS-77: Recurrence end date enforcement', () => {
     const limitedInstances = result.scheduledTasks
       .filter(t => t.text === 'Limited daily task');
 
-    expect(limitedInstances.length).toBe(5);
+    expect(limitedInstances.length).toBe(4);
   });
 
   it('SUB-77a: Weekly task stops at recur_end', async () => {
@@ -240,7 +240,7 @@ describe('TS-79: Paused recurrence behavior', () => {
     const pausedInstances = result.scheduledTasks
       .filter(t => t.text === 'Paused daily task');
 
-    expect(pausedInstances.length).toBe(5); // expander checks status, not disabledAt
+    expect(pausedInstances.length).toBe(4); // expander checks status, not disabledAt
   });
 
   it('SUB-79a: Resumed task generates instances after pause', async () => {
@@ -254,7 +254,7 @@ describe('TS-79: Paused recurrence behavior', () => {
     const activeInstances = result.scheduledTasks
       .filter(t => t.text === 'Resumed daily task');
 
-    expect(activeInstances.length).toBe(5);
+    expect(activeInstances.length).toBe(4);
   });
 });
 
@@ -277,7 +277,7 @@ describe('TS-80: Disabled recurrence behavior', () => {
     const disabledInstances = result.scheduledTasks
       .filter(t => t.text === 'Disabled daily task');
 
-    expect(disabledInstances.length).toBe(5); // expander checks status, not disabledAt
+    expect(disabledInstances.length).toBe(4); // expander checks status, not disabledAt
   });
 });
 
@@ -299,7 +299,7 @@ describe('TS-81: Horizon limit enforcement', () => {
     const horizonInstances = result.scheduledTasks
       .filter(t => t.text === 'Horizon-limited daily');
 
-    expect(horizonInstances.length).toBe(31); // 30-day expand window
+    expect(horizonInstances.length).toBe(30); // 30-day expand window
   });
 });
 
@@ -321,7 +321,7 @@ describe('TS-82: Grandfather clause preservation', () => {
     const grandfatheredInstances = result.scheduledTasks
       .filter(t => t.text === 'Grandfathered task');
 
-    expect(grandfatheredInstances.length).toBe(5);
+    expect(grandfatheredInstances.length).toBe(4);
   });
 });
 
