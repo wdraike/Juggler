@@ -15,7 +15,7 @@ var unifiedScheduleV2 = require('../../src/scheduler/unifiedScheduleV2');
  * insert task_instances directly and need the real persistence path.
  */
 async function runScheduler(taskInput, statusInput, todayKey, nowMins, cfg) {
-  var persist = cfg && cfg.persist;
+  var persist = !cfg || cfg.persist !== false;
   if (persist) {
     return runPersistScheduler(taskInput, statusInput, todayKey, nowMins, cfg);
   }
