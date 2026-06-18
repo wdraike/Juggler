@@ -151,13 +151,16 @@ function hasSchedulingFields(row) {
   return Object.keys(splitFields(row).schedulingFields).length > 0;
 }
 
-// ── ensureProject (verbatim — controller L729-735) ───────────────────────────
-async function ensureProject(userId, projectName) {
-  if (!projectName) return;
-  var exists = await getDb()('projects').where({ user_id: userId, name: projectName }).first();
-  if (!exists) {
-    await getDb()('projects').insert({ user_id: userId, name: projectName });
-  }
+// ── ensureProject (999.354: promoted to ProjectsPort) ────────────────────────
+// The projects-table upsert now lives behind KnexProjectsRepository (ProjectsPort).
+// This free function is a thin delegate kept ONLY so the facade re-export
+// (consumed by task.controller → MCP tools) keeps the same signature. The
+// CreateTask/UpdateTask/BatchCreateTasks use-cases depend on the port (_projects),
+// not on this function.
+var KnexProjectsRepository = require('./adapters/KnexProjectsRepository');
+var _projects = new KnexProjectsRepository({ getDb: getDb });
+function ensureProject(userId, projectName) {
+  return _projects.ensureProject(userId, projectName);
 }
 
 // ── validateTaskReferences (999.586) ─────────────────────────────────────────
@@ -1013,7 +1016,7 @@ var _createTask = new app.CreateTask({
   enqueueScheduleRun: enqueueScheduleRun,
   mappers: mappers, validation: validation,
   validateReferences: validateTaskReferences,
-  ensureProject: ensureProject, isLocked: isLocked, enqueueWrite: enqueueWrite,
+  projects: _projects, isLocked: isLocked, enqueueWrite: enqueueWrite,
   uuidv7: uuidv7, safeTimezone: safeTimezone, placementModes: PLACEMENT_MODES,
   logger: logger
 });
@@ -1024,7 +1027,7 @@ var _updateTask = new app.UpdateTask({
   mappers: mappers, validation: validation,
   validateReferences: validateTaskReferences,
   hasSchedulingFields: hasSchedulingFields, splitFieldsLib: splitFieldsLib,
-  ensureProject: ensureProject, isLocked: isLocked, enqueueWrite: enqueueWrite,
+  projects: _projects, isLocked: isLocked, enqueueWrite: enqueueWrite,
   safeTimezone: safeTimezone, dateHelpers: dateHelpers, placementModes: PLACEMENT_MODES,
   recurCleanup: recurCleanup, logger: logger
 });
@@ -1054,7 +1057,7 @@ var _deleteTask = new app.DeleteTask({
 var _batchCreateTasks = new app.BatchCreateTasks({
   repo: _repo, cache: _cache, enqueueScheduleRun: enqueueScheduleRun,
   mappers: mappers, validation: validation, batchCreateSchema: batchCreateSchema,
-  ensureProject: ensureProject, isLocked: isLocked, enqueueWrite: enqueueWrite,
+  projects: _projects, isLocked: isLocked, enqueueWrite: enqueueWrite,
   safeTimezone: safeTimezone, sleep: sleep
 });
 
@@ -1221,5 +1224,8 @@ module.exports = {
   EventBusTaskEvents: EventBusTaskEvents,
   KnexActionLogRepository: KnexActionLogRepository,
   InMemoryActionLogRepository: require('./adapters/InMemoryActionLogRepository'),
+  ProjectsPort: require('./domain/ports/ProjectsPort'),
+  KnexProjectsRepository: KnexProjectsRepository,
+  InMemoryProjectsRepository: require('./adapters/InMemoryProjectsRepository'),
   PlacementMode: PlacementMode,
 };

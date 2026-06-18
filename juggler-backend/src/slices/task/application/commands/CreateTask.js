@@ -48,8 +48,8 @@
  *   SOLE scheduler trigger (S4/S6); injected so W6 wires the real one.
  * @property {Object} mappers  W2 pure mappers (taskToRow, rowToTask).
  * @property {Object} validation  W2 pure validation (validateTaskInput).
- * @property {Function} ensureProject (userId, projectName) — projects-table upsert
- *   (outside the repo port; injected).
+ * @property {import('../../domain/ports/ProjectsPort')} projects  projects-table
+ *   port (ensureProject upsert; the `projects` table is outside the repo port).
  * @property {Function} isLocked (userId) — scheduler-lock check (injected).
  * @property {Function} enqueueWrite (userId, id, op, row, source) — write-queue
  *   enqueue during a lock (injected).
@@ -65,7 +65,7 @@ var assertDeps = require('../_assertDeps');
 /** @param {CreateTaskDeps} deps */
 function CreateTask(deps) {
   var required = ['repo', 'cache', 'events', 'enqueueScheduleRun', 'mappers',
-    'validation', 'validateReferences', 'ensureProject', 'isLocked', 'enqueueWrite', 'uuidv7',
+    'validation', 'validateReferences', 'projects', 'isLocked', 'enqueueWrite', 'uuidv7',
     'safeTimezone', 'placementModes'];
   assertDeps('CreateTask', deps, required);
   this.repo = deps.repo;
@@ -75,7 +75,7 @@ function CreateTask(deps) {
   this.mappers = deps.mappers;
   this.validation = deps.validation;
   this.validateReferences = deps.validateReferences;
-  this.ensureProject = deps.ensureProject;
+  this.projects = deps.projects;
   this.isLocked = deps.isLocked;
   this.enqueueWrite = deps.enqueueWrite;
   this.uuidv7 = deps.uuidv7;
@@ -156,8 +156,8 @@ CreateTask.prototype.execute = async function execute(input) {
     row.split = splitDefault ? 1 : 0;
   }
 
-  // 5. ensureProject (injected — projects table) (handler L911)
-  await this.ensureProject(userId, body.project);
+  // 5. ensureProject (projects port — projects table) (handler L911)
+  await this.projects.ensureProject(userId, body.project);
 
   // 6. lock check (handler L913-921)
   var locked = await this.isLocked(userId);

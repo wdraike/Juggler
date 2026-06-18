@@ -44,7 +44,7 @@
  * @property {Object} mappers  (taskToRow)
  * @property {Object} validation  (validateTaskInput)
  * @property {Object} batchCreateSchema  zod schema (safeParse).
- * @property {Function} ensureProject
+ * @property {import('../../domain/ports/ProjectsPort')} projects  projects-table port
  * @property {Function} isLocked
  * @property {Function} enqueueWrite
  * @property {Function} safeTimezone
@@ -60,7 +60,7 @@ var MAX_RETRIES = 3;
 /** @param {BatchCreateTasksDeps} deps */
 function BatchCreateTasks(deps) {
   var required = ['repo', 'cache', 'enqueueScheduleRun', 'mappers', 'validation',
-    'batchCreateSchema', 'ensureProject', 'isLocked', 'enqueueWrite', 'safeTimezone',
+    'batchCreateSchema', 'projects', 'isLocked', 'enqueueWrite', 'safeTimezone',
     'sleep'];
   assertDeps('BatchCreateTasks', deps, required);
   this.repo = deps.repo;
@@ -69,7 +69,7 @@ function BatchCreateTasks(deps) {
   this.mappers = deps.mappers;
   this.validation = deps.validation;
   this.batchCreateSchema = deps.batchCreateSchema;
-  this.ensureProject = deps.ensureProject;
+  this.projects = deps.projects;
   this.isLocked = deps.isLocked;
   this.enqueueWrite = deps.enqueueWrite;
   this.safeTimezone = deps.safeTimezone;
@@ -137,7 +137,7 @@ BatchCreateTasks.prototype.execute = async function execute(input) {
     if (t.project && !seen[t.project]) { projectNames.push(t.project); seen[t.project] = true; }
   });
   for (var pi = 0; pi < projectNames.length; pi++) {
-    await this.ensureProject(userId, projectNames[pi]);
+    await this.projects.ensureProject(userId, projectNames[pi]);
   }
 
   // 7. lock check (handler L1924-1934)

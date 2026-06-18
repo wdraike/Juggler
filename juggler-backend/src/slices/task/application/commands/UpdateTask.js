@@ -48,7 +48,7 @@
  * @property {Object} validation   (validateTaskInput, checkCalSyncEditGuard, guardFixedCalendarWhen)
  * @property {Function} hasSchedulingFields (row) — scheduling-field predicate (pure; injected).
  * @property {Object} splitFieldsLib  { splitFields } (write-queue helper; injected).
- * @property {Function} ensureProject
+ * @property {import('../../domain/ports/ProjectsPort')} projects  projects-table port
  * @property {Function} isLocked
  * @property {Function} enqueueWrite
  * @property {Function} safeTimezone
@@ -65,7 +65,7 @@ var assertDeps = require('../_assertDeps');
 /** @param {UpdateTaskDeps} deps */
 function UpdateTask(deps) {
   var required = ['repo', 'cache', 'events', 'enqueueScheduleRun', 'mappers',
-    'validation', 'validateReferences', 'hasSchedulingFields', 'splitFieldsLib', 'ensureProject',
+    'validation', 'validateReferences', 'hasSchedulingFields', 'splitFieldsLib', 'projects',
     'isLocked', 'enqueueWrite', 'safeTimezone', 'dateHelpers', 'placementModes',
     'recurCleanup'];
   assertDeps('UpdateTask', deps, required);
@@ -78,7 +78,7 @@ function UpdateTask(deps) {
   this.validateReferences = deps.validateReferences;
   this.hasSchedulingFields = deps.hasSchedulingFields;
   this.splitFields = deps.splitFieldsLib.splitFields;
-  this.ensureProject = deps.ensureProject;
+  this.projects = deps.projects;
   this.isLocked = deps.isLocked;
   this.enqueueWrite = deps.enqueueWrite;
   this.safeTimezone = deps.safeTimezone;
@@ -207,7 +207,7 @@ UpdateTask.prototype.execute = async function execute(input) {
     }
   }
 
-  if (body.project) await this.ensureProject(userId, body.project);
+  if (body.project) await this.projects.ensureProject(userId, body.project);
 
   // fixed-mode date/time guard (handler L1124-1131)
   if (row.placement_mode === PLACEMENT_MODES.FIXED) {
@@ -272,7 +272,7 @@ UpdateTask.prototype._fastPath = async function _fastPath(input) {
   delete fastBody.anchorDate;
 
   var fastExistingPromise = this.repo.fetchTaskWithEventIds(id, userId);
-  var fastEnsureProject = body.project ? this.ensureProject(userId, body.project) : Promise.resolve();
+  var fastEnsureProject = body.project ? this.projects.ensureProject(userId, body.project) : Promise.resolve();
   var results = await Promise.all([fastExistingPromise, fastEnsureProject]);
   var fastExisting = results[0];
 

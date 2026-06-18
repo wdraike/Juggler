@@ -430,7 +430,7 @@ describe('CreateTask — ensureProject called when body.project is set (W5-2)', 
       events: events,
       enqueueScheduleRun: trigger,
       uuidv7: function () { return 'proj-task-1'; },
-      ensureProject: ensureProjectSpy
+      projects: ensureProjectSpy
     });
     var uc = new CreateTask(deps);
     return uc.execute({ userId: USER, body: { text: 'Task for Project Alpha', project: 'Project Alpha' } }).then(function (out) {

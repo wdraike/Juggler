@@ -62,17 +62,19 @@ function makeEventsSpy() {
   };
 }
 
-// ── ensureProject spy (records calls — W5-2) ─────────────────────────────────
-// Returns a recording function AND a `calls` array. Dropping the `ensureProject`
-// call from a use-case FAILS any test that checks calls.length > 0.
+// ── ProjectsPort spy (records calls — W5-2 / 999.354) ────────────────────────
+// Returns a ProjectsPort-shaped object ({ ensureProject } + a `calls` array).
+// Dropping the `projects.ensureProject` call from a use-case FAILS any test that
+// checks calls.length > 0.
 function makeEnsureProjectSpy() {
   var calls = [];
-  function ensureProject(userId, project) {
-    calls.push({ userId: userId, project: project });
-    return Promise.resolve();
-  }
-  ensureProject.calls = calls;
-  return ensureProject;
+  return {
+    calls: calls,
+    ensureProject: function ensureProject(userId, project) {
+      calls.push({ userId: userId, project: project });
+      return Promise.resolve();
+    }
+  };
 }
 
 // ── triggerCalSync spy (records .sync calls — W5-2) ──────────────────────────
@@ -111,7 +113,7 @@ function baseDeps(extra) {
     // returns no errors). Tests that exercise the reference check pass an `extra`
     // override returning specific error strings.
     validateReferences: function () { return Promise.resolve([]); },
-    ensureProject: function () { return Promise.resolve(); },
+    projects: { ensureProject: function () { return Promise.resolve(); } },
     isLocked: function () { return Promise.resolve(false); },
     enqueueWrite: function () { return Promise.resolve(); },
     // 999.681: RecordAction port for undo — no-op by default in tests
