@@ -31,26 +31,43 @@ async function runScheduler(taskInput, statusInput, reqTodayKey, reqNowMins, cfg
       day_req: m.day_req,
       recurring: m.recurring,
       recur: typeof m.recur === 'string' ? JSON.parse(m.recur) : m.recur,
-      recur_start: m.recur_start,
-      recur_end: m.recur_end,
-      disabled_at: m.disabled_at,
-      disabled_reason: m.disabled_reason,
-      placement_mode: m.placement_mode,
+      recurStart: m.recur_start,
+      recurEnd: m.recur_end,
+      disabledAt: m.disabled_at,
+      disabledReason: m.disabled_reason,
+      placementMode: m.placement_mode,
       deadline: m.deadline,
-      depends_on: m.depends_on,
-      start_after_at: m.start_after_at,
+      dependsOn: m.depends_on,
+      startAfterAt: m.start_after_at,
       taskType: 'recurring_template'
     });
   });
 
-  // 2. Determine today
+  // 2. Determine today — convert M/D/YYYY to YYYY-MM-DD for scheduler
   var todayKey = reqTodayKey || computeTodayKey();
+  var tkParts = todayKey.split('/');
+  if (tkParts.length === 3 && tkParts[2].length === 4) {
+    todayKey = tkParts[2] + '-' + (tkParts[0].length < 2 ? '0' : '') + tkParts[0] + '-' + (tkParts[1].length < 2 ? '0' : '') + tkParts[1];
+  }
   var nowMins = reqNowMins !== undefined ? reqNowMins : 480;
 
-  // 3. Expand recurring templates
+  // 3. Expand recurring templates — use the template's recur_end if available
   var startDate = parseDate(todayKey);
   var endDate = new Date(startDate);
-  endDate.setDate(endDate.getDate() + 30); // expand 30 days
+  // Find the furthest recur_end among all templates
+  var maxEnd = null;
+  tasks.forEach(function(t) {
+    if (t.recurEnd) {
+      var e = parseDate(t.recurEnd);
+      if (e && (!maxEnd || e > maxEnd)) maxEnd = e;
+    }
+  });
+  if (maxEnd) {
+    endDate = new Date(maxEnd);
+    endDate.setDate(endDate.getDate() + 1);
+  } else {
+    endDate.setDate(endDate.getDate() + 30);
+  }
 
   var expanded = expandRecurring(tasks, startDate, endDate, {
     statuses: statusInput || {}
