@@ -29,23 +29,22 @@
  *   zod-free (W6 supplies the schema).
  * @property {(lat: number, lon: number) => Promise<string>} reverseGeocode
  *   the reverseGeocodeDisplayName collaborator (weather controller) — injected.
- * @property {Function} enqueueScheduleRun  (userId, source, options) — the background
- *   reschedule trigger (injected). Called directly after the replace completes so the
- *   scheduler re-runs with the updated locations (999.491).
+ *
+ * On success (200) the result carries a `scheduleAfter:{userId, source}` directive;
+ * the W6 controller fires enqueueScheduleRun AFTER sending the response (999.491).
  */
 
 'use strict';
 
 /** @param {ReplaceLocationsDeps} deps */
 function ReplaceLocations(deps) {
-  if (!deps || !deps.repo || !deps.cache || !deps.parseBody || !deps.reverseGeocode || !deps.enqueueScheduleRun) {
-    throw new Error('ReplaceLocations: { repo, cache, parseBody, reverseGeocode, enqueueScheduleRun } are required');
+  if (!deps || !deps.repo || !deps.cache || !deps.parseBody || !deps.reverseGeocode) {
+    throw new Error('ReplaceLocations: { repo, cache, parseBody, reverseGeocode } are required');
   }
   this.repo = deps.repo;
   this.cache = deps.cache;
   this.parseBody = deps.parseBody;
   this.reverseGeocode = deps.reverseGeocode;
-  this.enqueueScheduleRun = deps.enqueueScheduleRun;
 }
 
 /**
@@ -91,11 +90,10 @@ ReplaceLocations.prototype.execute = async function execute(input) {
   });
 
   await this.cache.invalidateConfig(userId);
-  // Replacing locations changes weather/location scheduling inputs — trigger a
-  // background scheduler re-run (999.491). The source includes the userId as the
-  // options array so the scheduler knows which user's tasks to re-process.
-  this.enqueueScheduleRun(userId, 'config:locations-replace', [userId]);
-  return { status: 200, body: { locations: enriched } };
+  // Replacing locations changes weather/location scheduling inputs — return a
+  // scheduleAfter directive so the W6 controller fires enqueueScheduleRun AFTER
+  // responding (mirrors UpdateConfig/ImportData pattern, 999.491).
+  return { status: 200, body: { locations: enriched }, scheduleAfter: { userId: userId, source: 'locations:replaced' } };
 };
 
 module.exports = ReplaceLocations;

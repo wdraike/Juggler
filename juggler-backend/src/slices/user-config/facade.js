@@ -57,8 +57,6 @@ var KnexConfigRepository = require('./adapters/KnexConfigRepository');
 var InMemoryConfigRepository = require('./adapters/InMemoryConfigRepository');
 var PaymentServiceEntitlementAdapter = require('./adapters/PaymentServiceEntitlementAdapter');
 var MockEntitlementAdapter = require('./adapters/MockEntitlementAdapter');
-var enqueueScheduleRun = require('../../scheduler/scheduleQueue').enqueueScheduleRun;
-
 // ── ports (for the public type surface / named exports) ──────────────────────
 var ConfigRepositoryPort = require('./domain/ports/ConfigRepositoryPort');
 var EntitlementPort = require('./domain/ports/EntitlementPort');
@@ -327,8 +325,7 @@ var _reorderProjects = new app.ReorderProjects({ repo: _repo, cache: cache });
 var _replaceLocations = new app.ReplaceLocations({
   repo: _repo, cache: cache,
   parseBody: function (body) { return locationsBodySchema.safeParse(body); },
-  reverseGeocode: reverseGeocode,
-  enqueueScheduleRun: enqueueScheduleRun
+  reverseGeocode: reverseGeocode
 });
 var _replaceTools = new app.ReplaceTools({
   repo: _repo, cache: cache,
