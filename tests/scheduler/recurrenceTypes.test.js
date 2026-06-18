@@ -57,7 +57,7 @@ describe('TS-73: Weekly recurrence instance generation', () => {
   it('Main scenario: Weekly task on specific days creates instances', async () => {
     await createRecurringTask({
       text: 'Weekly team meeting', dur: 60, pri: 'P1', when: 'morning',
-      recur: { type: 'weekly', every: 1, days: ['Mon', 'Wed', 'Fri'] },
+      recur: { type: 'weekly', every: 1, days: ['M', 'W', 'F'] },
       recur_start: '2026-04-03', recur_end: '2026-04-17'
     });
 
@@ -71,7 +71,7 @@ describe('TS-73: Weekly recurrence instance generation', () => {
   it('SUB-73a: Weekly every 2 weeks creates instances biweekly', async () => {
     await createRecurringTask({
       text: 'Biweekly planning', dur: 90, pri: 'P2', when: 'afternoon',
-      recur: { type: 'weekly', every: 2, days: ['Tue'] },
+      recur: { type: 'weekly', every: 2, days: ['T'] },
       recur_start: '2026-04-03', recur_end: '2026-05-01'
     });
 
@@ -187,7 +187,7 @@ describe('TS-77: Recurrence end date enforcement', () => {
   it('SUB-77a: Weekly task stops at recur_end', async () => {
     await createRecurringTask({
       text: 'Limited weekly task', dur: 60, pri: 'P2', when: 'afternoon',
-      recur: { type: 'weekly', every: 1, days: ['Wed'] },
+      recur: { type: 'weekly', every: 1, days: ['W'] },
       recur_start: '2026-04-01', recur_end: '2026-04-15'
     });
 
@@ -335,7 +335,7 @@ describe('TS-83: Biweekly recurrence instance generation', () => {
   it('Main scenario: Biweekly task creates instances every 2 weeks', async () => {
     await createRecurringTask({
       text: 'Biweekly sync', dur: 60, pri: 'P2', when: 'afternoon',
-      recur: { type: 'biweekly', every: 2, days: ['Tue'] },
+      recur: { type: 'biweekly', every: 2, days: ['T'] },
       recur_start: '2026-04-03', recur_end: '2026-05-01'
     });
 
