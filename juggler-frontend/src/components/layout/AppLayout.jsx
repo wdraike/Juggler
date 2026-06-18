@@ -25,14 +25,6 @@ import { getNowInTimezone } from '../../utils/timezone';
 import { isAllDayTask } from '../../utils/isAllDayTask';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 
-// 999.103: browser tab titles in the shared Raike & Sons format ("View — StriveRS").
-// Maps the viewMode id (NavigationBar VIEWS) → the human label used in the tab.
-var VIEW_TITLES = {
-  daily: 'Day', day: 'Flex', '3day': '3-Day', week: 'Week', month: 'Month',
-  timeline: 'Timeline', list: 'List', priority: 'Priority', deps: 'Dependencies',
-  conflicts: 'Issues'
-};
-
 // Views
 import DayView from '../views/DayView';
 import ThreeDayView from '../views/ThreeDayView';
@@ -63,6 +55,14 @@ import AppFooter from './AppFooter';
 import apiClient from '../../services/apiClient';
 import ImpersonationBanner from '../admin/ImpersonationBanner';
 import useWeather from '../../hooks/useWeather';
+
+// 999.103: browser tab titles in the shared Raike & Sons format ("View — StriveRS").
+// Maps the viewMode id (NavigationBar VIEWS) → the human label used in the tab.
+var VIEW_TITLES = {
+  daily: 'Day', day: 'Flex', '3day': '3-Day', week: 'Week', month: 'Month',
+  timeline: 'Timeline', list: 'List', priority: 'Priority', deps: 'Dependencies',
+  conflicts: 'Issues'
+};
 
 export default function AppLayout() {
   // Auth & timezone
