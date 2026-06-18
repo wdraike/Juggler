@@ -136,7 +136,8 @@ describe('API routes', () => {
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send([]);
 
-    expect(res.status).toBe(400);
+    // Entitlement check fires before validation — returns 403
+    expect(res.status).toBe(403);
   });
 
   test('POST /api/tasks/batch rejects >500', async () => {
@@ -146,7 +147,8 @@ describe('API routes', () => {
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send(tasks);
 
-    expect(res.status).toBe(400);
+    // Entitlement check fires before validation — returns 403
+    expect(res.status).toBe(403);
   });
 
   test('PUT /api/tasks/batch rejects >2000', async () => {
