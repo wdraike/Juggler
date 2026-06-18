@@ -276,6 +276,55 @@ returns `{ status, body }` (or `{ status: null }` for an allow→next gate).
 
 ---
 
+## Scheduler Re-run Trigger (`scheduleAfter` directive)
+
+A config write that changes a **scheduling input** must trigger a scheduler re-run, and
+every such trigger routes through the single primitive `enqueueScheduleRun(userId, source)`
+(juggler R41 invariant E-1: that direct call is the *sole* trigger — the task event bus must
+never trigger the scheduler, and the scheduler must not trigger itself recursively).
+
+This slice uses the **W6 "scheduleAfter directive" pattern** to stay hexagonally pure: the
+application use-case does **not** reach into the scheduler. Instead, on a successful (200)
+write it RETURNS a directive on the result object:
+
+```js
+return { status: 200, body: { ... }, scheduleAfter: { userId: userId, source: '<source>' } };
+```
+
+and the **W6 controller / MCP adapter** (the outer edge) fires the enqueue from it:
+
+```js
+if (result.scheduleAfter) {
+  enqueueScheduleRun(result.scheduleAfter.userId, result.scheduleAfter.source);
+}
+```
+
+The 400 / error path returns **no** `scheduleAfter`, so a validation failure never reschedules.
+Consumers that fire the directive: `config.controller.js`, `data.controller.js`,
+`mcp/tools/config.js`. **Any new adapter that invokes one of these use-cases must also fire
+the directive**, or that write path will silently fail to reschedule (the asymmetric-trigger
+bug class from audit 999.463).
+
+| Use-case | Returns `scheduleAfter`? | `source` string |
+|----------|--------------------------|-----------------|
+| `UpdateConfig` | yes, only when the key ∈ `SCHED_KEYS` | `'config:' + key` |
+| `ReplaceLocations` | yes (on 200) | `'locations:replaced'` |
+| `ImportData` / `MergeImportData` | yes (on 200) | `'config:import'` |
+| `ReplaceTools` | **no — deliberate no-op** | — |
+
+**`ReplaceTools` is intentionally excluded.** It writes only the `tools` *display catalog*
+(tool_id / name / icon / sort_order). The scheduling constraint is `config.tool_matrix` — a
+separate `SCHED_KEYS` entry written via `UpdateConfig` and read by the scheduler at
+`runSchedule.js` (`config.tool_matrix`); the scheduler never reads the `tools` table. So a
+tools-catalog replace changes no scheduling input and correctly does not reschedule (999.492,
+confirmed deliberate no-op).
+
+`SCHED_KEYS` (the keys whose `UpdateConfig` write reschedules) is single-sourced from
+`UpdateConfig.SCHED_KEYS` and re-exported via this facade; the MCP `update_config` path gates
+on the same set (a drift-guard test enforces MCP-keys == `SCHED_KEYS`).
+
+---
+
 ## Usage
 
 ### Importing the facade
