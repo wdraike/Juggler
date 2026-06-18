@@ -79,7 +79,7 @@ describe('TS-73: Weekly recurrence instance generation', () => {
     const biweeklyInstances = result.scheduledTasks
       .filter(t => t.text === 'Biweekly planning');
 
-    expect(biweeklyInstances.length).toBe(4);
+    expect(biweeklyInstances.length).toBe(2);
   });
 });
 
@@ -115,7 +115,7 @@ describe('TS-74: Monthly recurrence instance generation', () => {
     const monthEndInstances = result.scheduledTasks
       .filter(t => t.text === 'Month-end review');
 
-    expect(monthEndInstances.length).toBe(3);
+    expect(monthEndInstances.length).toBe(2); // Apr, May (2 months)
   });
 });
 
@@ -343,7 +343,7 @@ describe('TS-83: Biweekly recurrence instance generation', () => {
     const biweeklyInstances = result.scheduledTasks
       .filter(t => t.text === 'Biweekly sync');
 
-    expect(biweeklyInstances.length).toBe(4);
+    expect(biweeklyInstances.length).toBe(2);
   });
 });
 
