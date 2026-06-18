@@ -476,9 +476,9 @@ async function handleTemplatePause(ctx) {
   return { pausedCount: 0, pausedIds: [], unpausedCount: 0, unpausedIds: [] };
 }
 
-// updateTaskStatus rolling-master load (verbatim — controller L1727).
+// updateTaskStatus rolling-master load (999.354: folded into TaskRepositoryPort).
 function loadMaster(masterId, userId) {
-  return getDb()('task_masters').where({ id: masterId, user_id: userId }).first();
+  return _repo.getMasterById(masterId, userId);
 }
 
 // updateTaskStatus rolling-anchor projection (verbatim — controller L1790-1808).
@@ -488,7 +488,7 @@ async function applyRollingAnchor(ctx) {
   var status = ctx.status;
   var existing = ctx.existing;
   var _masterForAnchor = ctx.preloadedMaster
-    || await getDb()('task_masters').where({ id: masterId, user_id: userId }).first();
+    || await _repo.getMasterById(masterId, userId);
   if (_masterForAnchor && isRollingMaster(_masterForAnchor)) {
     var _instanceDate = existing.date ? String(existing.date).slice(0, 10) : null;
     var _currentAnchor = _masterForAnchor.rolling_anchor
@@ -503,12 +503,9 @@ async function applyRollingAnchor(ctx) {
   }
 }
 
-// updateTaskStatus split-chunk sibling lookup (verbatim — controller L1818-1821).
+// updateTaskStatus split-chunk sibling lookup (999.354: folded into TaskRepositoryPort).
 function loadSplitSiblings(ctx) {
-  return getDb()('task_instances')
-    .where({ user_id: ctx.userId, master_id: ctx.masterId, occurrence_ordinal: ctx.occurrenceOrdinal })
-    .whereNot('id', ctx.excludeId)
-    .select('id');
+  return _repo.getSplitSiblingIds(ctx.userId, ctx.masterId, ctx.occurrenceOrdinal, ctx.excludeId);
 }
 
 // updateTaskStatus done-frozen reactivation (verbatim — controller L1775-1777).

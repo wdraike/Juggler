@@ -90,6 +90,17 @@
  *   enriched with calendar event ids, same shape as fetchTasksWithEventIds.
  *   (999.253)
  *
+ * @property {(masterId: string, userId: string) => Promise<?Object>} getMasterById
+ *   The raw `task_masters` row for (masterId, userId), or null. Used by the
+ *   updateTaskStatus rolling-anchor projection (needs the `rolling_anchor`
+ *   column off the master, not the tasks_v view). (Legacy: loadMaster ~1727 +
+ *   the applyRollingAnchor preload ~1790.) 999.354 (recurrence-read fold).
+ *
+ * @property {(userId: string, masterId: string, occurrenceOrdinal: number, excludeId: string) => Promise<Object[]>} getSplitSiblingIds
+ *   The `{ id }` rows of a task's split siblings — same (user, master,
+ *   occurrence_ordinal), excluding `excludeId`. (Legacy: loadSplitSiblings
+ *   ~1818.) 999.354 (recurrence-read fold).
+ *
  * ── WRITES (all timestamps via new Date() — INVARIANT P1) ────────────────────
  *
  * @property {(row: Object) => Promise<void>} insertTask
@@ -182,6 +193,14 @@ TaskRepositoryPort.prototype.getUserSplitPreference = function getUserSplitPrefe
  * @param {string} _query  BOOLEAN MODE search string
  * @returns {Promise<Object[]>}
  */
+TaskRepositoryPort.prototype.getMasterById = function getMasterById(_masterId, _userId) {
+  throw new Error('TaskRepositoryPort.getMasterById not implemented');
+};
+
+TaskRepositoryPort.prototype.getSplitSiblingIds = function getSplitSiblingIds(_userId, _masterId, _occurrenceOrdinal, _excludeId) {
+  throw new Error('TaskRepositoryPort.getSplitSiblingIds not implemented');
+};
+
 TaskRepositoryPort.prototype.searchTasks = function searchTasks(_userId, _query) {
   throw new Error('TaskRepositoryPort.searchTasks not implemented');
 };
@@ -239,6 +258,8 @@ var TASK_REPOSITORY_PORT_METHODS = Object.freeze([
   'getRecurringTemplateRows',
   'expandToAllInstanceIds',
   'getUserSplitPreference',
+  'getMasterById',
+  'getSplitSiblingIds',
   // search
   'searchTasks',
   // writes

@@ -462,6 +462,38 @@ KnexTaskRepository.prototype.getUserSplitPreference = function getUserSplitPrefe
     .then(function (row) { return row || null; });
 };
 
+/**
+ * The raw task_masters row for (masterId, userId), or null. Verbatim relocation
+ * of the loadMaster / applyRollingAnchor master read (controller ~1727/1790).
+ * 999.354 (recurrence-read fold).
+ * @param {string} masterId
+ * @param {string} userId
+ * @returns {Promise<?Object>}
+ */
+KnexTaskRepository.prototype.getMasterById = function getMasterById(masterId, userId) {
+  return this.db('task_masters')
+    .where({ id: masterId, user_id: userId })
+    .first()
+    .then(function (row) { return row || null; });
+};
+
+/**
+ * The `{ id }` rows of a task's split siblings — same (user, master,
+ * occurrence_ordinal), excluding `excludeId`. Verbatim relocation of
+ * loadSplitSiblings (controller ~1818). 999.354 (recurrence-read fold).
+ * @param {string} userId
+ * @param {string} masterId
+ * @param {number} occurrenceOrdinal
+ * @param {string} excludeId
+ * @returns {Promise<Object[]>}
+ */
+KnexTaskRepository.prototype.getSplitSiblingIds = function getSplitSiblingIds(userId, masterId, occurrenceOrdinal, excludeId) {
+  return this.db('task_instances')
+    .where({ user_id: userId, master_id: masterId, occurrence_ordinal: occurrenceOrdinal })
+    .whereNot('id', excludeId)
+    .select('id');
+};
+
 // ── WRITES (delegate to lib/tasks-write; P1 new Date() timestamps) ────────────
 
 /**

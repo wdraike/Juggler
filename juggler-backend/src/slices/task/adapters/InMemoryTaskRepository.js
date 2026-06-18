@@ -208,6 +208,24 @@ InMemoryTaskRepository.prototype.getRecurringTemplateRows = function getRecurrin
   return Promise.resolve(rows.map(function (r) { return Object.assign({}, r); }));
 };
 
+// 999.354 (recurrence-read fold): raw master row by id, or null.
+InMemoryTaskRepository.prototype.getMasterById = function getMasterById(masterId, userId) {
+  var row = this._rows[masterId];
+  if (!row || row.user_id !== userId) return Promise.resolve(null);
+  return Promise.resolve(Object.assign({}, row));
+};
+
+// 999.354 (recurrence-read fold): split-sibling ids (same user/master/occurrence,
+// excluding excludeId).
+InMemoryTaskRepository.prototype.getSplitSiblingIds = function getSplitSiblingIds(userId, masterId, occurrenceOrdinal, excludeId) {
+  var rows = this._allFor(userId).filter(function (r) {
+    return r.master_id === masterId
+      && r.occurrence_ordinal === occurrenceOrdinal
+      && r.id !== excludeId;
+  });
+  return Promise.resolve(rows.map(function (r) { return { id: r.id }; }));
+};
+
 InMemoryTaskRepository.prototype.expandToAllInstanceIds = function expandToAllInstanceIds(userId, ids) {
   if (!Array.isArray(ids) || ids.length === 0) return Promise.resolve(ids || []);
   var store = this._rows;
