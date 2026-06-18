@@ -115,13 +115,16 @@ router.get('/detailed', async (req, res) => {
         healthStatus.detail.scheduler = stuckCount + ' stuck claim(s) in schedule_queue';
       } else if (recentError) {
         healthStatus.services.scheduler = 'error';
-        healthStatus.detail.scheduler = 'recent scheduler error: ' + lastErr.message;
+        // 999.683: do NOT leak the raw error message to the user-facing health
+        // popup — surface plain language only (the technical detail is in logs).
+        healthStatus.detail.scheduler = 'A recent scheduler error occurred';
       } else {
         healthStatus.services.scheduler = 'operational';
       }
     } catch (error) {
       healthStatus.services.scheduler = 'error';
-      healthStatus.detail.scheduler = error.message;
+      // 999.683: plain language, not error.message (no technical leak in the popup).
+      healthStatus.detail.scheduler = 'Scheduler status unavailable';
     }
   } else {
     healthStatus.services.scheduler = 'unknown';
