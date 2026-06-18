@@ -202,6 +202,6 @@ exports.up = async function(knex) {
   `);
 };
 
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   throw new Error('Down not implemented — rebuilding views without rolling_anchor requires restoring prior view definition manually.');
 };

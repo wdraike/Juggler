@@ -671,7 +671,7 @@ async function thisAndFutureDelete(ctx) {
   var userId = ctx.userId;
   var id = ctx.id;
   var templateId = ctx.templateId;
-  var task = ctx.task;
+  var _task = ctx.task;
   var deletedCount = 0;
   var keptCount = 0;
   var pendingIds = [];

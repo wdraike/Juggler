@@ -174,6 +174,6 @@ exports.up = async function(knex) {
   `);
 };
 
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   throw new Error('Down not supported; re-run 20260415011000 to restore prior view shape.');
 };

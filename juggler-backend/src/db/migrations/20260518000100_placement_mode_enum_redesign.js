@@ -268,7 +268,7 @@ exports.up = async function(knex) {
   });
 };
 
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   throw new Error(
     'Down migration for placement_mode_enum_redesign not implemented — reverting ' +
     'requires reconstructing all old enum values from context that no longer exists.'

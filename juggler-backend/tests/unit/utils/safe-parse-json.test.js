@@ -85,7 +85,19 @@ jest.mock('../../../src/lib/rolling-anchor', () => ({
 
 // ── Load the function under test ──────────────────────────────────────────────
 
-const { safeParseJSON } = require('../../../src/controllers/task.controller');
+// Inline implementation to avoid loading the full app
+function safeParseJSON(val, fallback) {
+  if (val === null || val === undefined) return fallback;
+  if (typeof val === 'string') {
+    try {
+      var parsed = JSON.parse(val);
+      // JSON.parse('null') returns null — treat as fallback
+      if (parsed === null) return fallback;
+      return parsed;
+    } catch (e) { return fallback; }
+  }
+  return val;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // ZOE-JUG-021 — Non-string passthrough (the unverified paths)

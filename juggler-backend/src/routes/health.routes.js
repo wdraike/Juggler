@@ -83,7 +83,7 @@ router.get('/detailed', async (req, res) => {
   try {
     await db.raw('SELECT 1');
     healthStatus.services.database = 'operational';
-  } catch (error) {
+  } catch (_error) {
     healthStatus.services.database = 'error';
     healthStatus.detail.database = 'Database unavailable';
   }
@@ -139,7 +139,7 @@ router.get('/detailed', async (req, res) => {
     } else {
       healthStatus.services.sse = 'operational';
     }
-  } catch (error) {
+  } catch (_error) {
     healthStatus.services.sse = 'unknown';
   }
 

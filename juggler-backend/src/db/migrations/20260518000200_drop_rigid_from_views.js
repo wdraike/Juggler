@@ -196,7 +196,7 @@ exports.up = async function(knex) {
   });
 };
 
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   throw new Error(
     'Down migration for drop_rigid_from_views not implemented — ' +
     'rigid column was a legacy alias; re-adding it is intentional regression.'

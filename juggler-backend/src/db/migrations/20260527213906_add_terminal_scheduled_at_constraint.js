@@ -18,12 +18,12 @@
  *   - juggler-backend/docs/TASK-STATE-MATRIX.md
  */
 
-const { TERMINAL_STATUSES } = require('../../lib/task-status');
+const { _TERMINAL_STATUSES } = require('../../lib/task-status');
 
 async function dropCheckIfExists(knex, table, name) {
   try {
     await knex.raw('ALTER TABLE ?? DROP CHECK ??', [table, name]);
-  } catch (e) {
+  } catch (_e) {
     // Constraint may not exist — idempotency guard
   }
 }

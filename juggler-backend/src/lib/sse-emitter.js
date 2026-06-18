@@ -37,7 +37,7 @@ function getSubscriber() {
     if (!subs || subs.size === 0) return;
     subs.forEach(function(res) {
       try { res.write(message); }
-      catch (e) { subs.delete(res); }
+      catch (_e) { subs.delete(res); }
     });
   });
   subscriber.on('error', function(err) {
@@ -86,7 +86,7 @@ function addClient(userId, res) {
           logger.warn('[sse-emitter] subscribe failed for', userId + ':', e.message);
         });
       }
-    } catch (e) { /* Redis unavailable — local-only mode */ }
+    } catch (_e) { /* Redis unavailable — local-only mode */ }
   }
 
   res.on('close', function() {
@@ -101,7 +101,7 @@ function addClient(userId, res) {
               logger.warn('[sse-emitter] unsubscribe failed:', e.message);
             });
           }
-        } catch (e) { /* ignore */ }
+        } catch (_e) { /* ignore */ }
       }
     }
   });
@@ -129,7 +129,7 @@ function _emitLocal(userId, payload) {
   if (!subs || subs.size === 0) return;
   subs.forEach(function(res) {
     try { res.write(payload); }
-    catch (e) { subs.delete(res); }
+    catch (_e) { subs.delete(res); }
   });
 }
 

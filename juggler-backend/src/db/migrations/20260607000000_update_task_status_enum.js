@@ -122,21 +122,21 @@ exports.down = async function(knex) {
     // Remove the updated scheduled_at constraint
     try {
       await trx.raw('ALTER TABLE task_masters DROP CONSTRAINT chk_task_masters_scheduled_at_for_terminal');
-    } catch (e) {
+    } catch (_e) {
       console.warn('Constraint chk_task_masters_scheduled_at_for_terminal not found, skipping...');
     }
     
     // Remove the updated status enum constraint from task_instances
     try {
       await trx.raw('ALTER TABLE task_instances DROP CHECK chk_task_instances_status');
-    } catch (e) {
+    } catch (_e) {
       console.warn('Constraint chk_task_instances_status not found on task_instances, skipping...');
     }
     
     // Remove the updated status enum constraint from task_masters
     try {
       await trx.raw('ALTER TABLE task_masters DROP CONSTRAINT chk_task_masters_status_enum');
-    } catch (e) {
+    } catch (_e) {
       console.warn('Constraint chk_task_masters_status_enum not found, skipping...');
     }
     
@@ -147,7 +147,7 @@ exports.down = async function(knex) {
         ADD CONSTRAINT chk_task_instances_status
         CHECK (status IN ('','wip','done','cancel','skip','pause','disabled','missed'))
       `);
-    } catch (e) {
+    } catch (_e) {
       console.warn('Failed to restore original task_instances status constraint');
     }
     
@@ -158,7 +158,7 @@ exports.down = async function(knex) {
         ADD CONSTRAINT chk_task_masters_status_enum
         CHECK (status IN ('', 'pending', 'done', 'skip', 'cancel', 'missed') OR status IS NULL)
       `);
-    } catch (e) {
+    } catch (_e) {
       console.warn('Failed to restore original task_masters status enum constraint');
     }
     
@@ -172,7 +172,7 @@ exports.down = async function(knex) {
           (status IS NULL OR status = '')
         )
       `);
-    } catch (e) {
+    } catch (_e) {
       console.warn('Failed to restore original scheduled_at constraint');
     }
   });

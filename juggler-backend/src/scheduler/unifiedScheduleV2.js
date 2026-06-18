@@ -57,7 +57,7 @@ var parseWhen = timeBlockHelpers.parseWhen;
 // var expandRecurring = expandRecurringMod.expandRecurring; // unused
 
 var locationHelpers = require('./locationHelpers');
-var canTaskRunAtMin = locationHelpers.canTaskRunAtMin;
+var _canTaskRunAtMin = locationHelpers.canTaskRunAtMin;
 var canTaskRunAtMinCached = locationHelpers.canTaskRunAtMinCached;
 var resolveLocationId = locationHelpers.resolveLocationId;
 
@@ -129,7 +129,7 @@ var normalizePri = ConstraintSolver.normalizePri;
 var reserve = ConflictResolver.reserve;
 var reserveWithTravel = ConflictResolver.reserveWithTravel;
 var rebuildPrefix = ConflictResolver.rebuildPrefix;
-var isFree = ConflictResolver.isFree;
+var _isFree = ConflictResolver.isFree;
 var isFreeWithTravel = ConflictResolver.isFreeWithTravel;
 
 // Hard safety cap. Any task that can't find a slot within a year is almost
@@ -227,7 +227,7 @@ var recurringCycleDays = ConstraintSolver.recurringCycleDays;
 // produced duplicates: its dedup key `sourceId + date` excludes unplaced
 // pending instances (they lack a date), so it regenerated them as fresh
 // items.
-function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
+function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
   // Normalize todayKey to ISO form for consistent comparisons — it may arrive
   // as legacy M/D format from test helpers (e.g. '4/3' instead of '2026-04-03').
   var todayIsoKey = dates.length > 0 ? dates[0].key : toKey(todayKey);
@@ -307,7 +307,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     var depsOn = [];
     if (Array.isArray(t.dependsOn)) depsOn = t.dependsOn.slice();
     else if (t.dependsOn && typeof t.dependsOn === 'string') {
-      try { depsOn = JSON.parse(t.dependsOn) || []; } catch (e) { depsOn = []; }
+      try { depsOn = JSON.parse(t.dependsOn) || []; } catch (_e) { depsOn = []; }
     }
     // Dep names for placement reason annotations (E4).
     var depNames = depsOn.map(function(depId) {
@@ -385,7 +385,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     if (recurring && t.recur) {
       var recurObj = t.recur;
       if (typeof recurObj === 'string') {
-        try { recurObj = JSON.parse(recurObj); } catch (e) { recurObj = null; }
+        try { recurObj = JSON.parse(recurObj); } catch (_e) { recurObj = null; }
       }
       if (recurObj && recurObj.days != null) {
         var recurType = recurObj.type;
@@ -439,7 +439,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, cfg) {
     var isFlexibleTpc = (function() {
       if (!recurring) return false;
       var r = t.recur;
-      if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e) { return false; } }
+      if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_e) { return false; } }
       if (!r || !r.timesPerCycle || r.timesPerCycle <= 0) return false;
       // Need to know how many days are selected in the cycle to decide if tpc
       // is actually filtering. If tpc >= selectedDays, every selected day gets
@@ -664,7 +664,7 @@ function emitStepRecord(cfg, phase, item, start, dur, dateKey, locked, dayPlaced
     });
   });
   var locAtStart = null;
-  try { locAtStart = resolveLocationId(dateKey, start, cfg, null); } catch (e) { /* ignore */ }
+  try { locAtStart = resolveLocationId(dateKey, start, cfg, null); } catch (_e) { /* ignore */ }
   var slackVal = (item.slack != null && isFinite(item.slack)) ? Math.round(item.slack) : null;
   rec.push({
     stepIndex: rec.length,
@@ -1165,7 +1165,7 @@ var compareItems = ConstraintSolver.compareItems;
 // so chunks don't overflow into the next occurrence. Split chunks are NOT day-locked
 // (999.098) — they can span multiple days within the cycle cap (999.547).
 // For non-recurring: searches across the eligible date range up to the deadline.
-function placeSplitInline(item, remaining, splitMin, dates, dayWindows, dayBlocks, dayOcc, cfg) {
+function placeSplitInline(item, remaining, splitMin, dates, dayWindows, dayBlocks, dayOcc, _cfg) {
   var placed = [];
   var STEP = 15; // placement granularity
 
@@ -1659,7 +1659,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       // Determine the cycle length for this master from the first chunk's recur.
       var sampleChunk = chunks[0].task;
       var recur = sampleChunk.recur;
-      if (typeof recur === 'string') { try { recur = JSON.parse(recur); } catch (e) { return; } }
+      if (typeof recur === 'string') { try { recur = JSON.parse(recur); } catch (_e) { return; } }
       var cycleLen = recurringCycleDays(recur);
       if (cycleLen <= 0) return; // unknown cycle — can't enforce time-boxing
 

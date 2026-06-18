@@ -10,7 +10,7 @@ var msftCalApi = require('../lib/msft-cal-api');
 // --- Token management (canonical implementation in adapter) ---
 
 var { getJwtSecret, verifyStateToken } = require('../lib/jwt-secret');
-var { getValidAccessToken } = require('../slices/calendar/facade').getAdapter('msft');
+var { _getValidAccessToken } = require('../slices/calendar/facade').getAdapter('msft');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('msft-cal.controller');
 
@@ -122,7 +122,7 @@ async function callback(req, res) {
     try {
       var result = await verifyStateToken(state);
       decoded = result.payload;
-    } catch (e) {
+    } catch (_e) {
       return res.status(400).send('Invalid or expired state parameter');
     }
 

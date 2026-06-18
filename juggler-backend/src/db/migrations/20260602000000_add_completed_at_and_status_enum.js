@@ -39,14 +39,14 @@ exports.down = async function(knex) {
   // Remove constraints from task_instances
   try {
     await knex.raw('ALTER TABLE task_instances DROP CONSTRAINT chk_task_instances_status_enum');
-  } catch (e) {
+  } catch (_e) {
     console.warn('Constraint chk_task_instances_status_enum not found, skipping...');
   }
   
   // Remove constraints from task_masters
   try {
     await knex.raw('ALTER TABLE task_masters DROP CONSTRAINT chk_task_masters_status_enum');
-  } catch (e) {
+  } catch (_e) {
     console.warn('Constraint chk_task_masters_status_enum not found, skipping...');
   }
   

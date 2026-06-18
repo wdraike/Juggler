@@ -110,7 +110,7 @@ function isoToJugglerDate(isoString, timezone) {
       date: year + '-' + (month < 10 ? '0' : '') + month + '-' + (day < 10 ? '0' : '') + day,
       time: hour + ':' + minute + ' ' + dayPeriod
     };
-  } catch (e) {
+  } catch (_e) {
     var mo = d.getMonth() + 1;
     var da = d.getDate();
     var h = d.getHours();

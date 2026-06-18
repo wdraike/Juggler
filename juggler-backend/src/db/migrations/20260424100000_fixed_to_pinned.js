@@ -23,7 +23,7 @@ exports.up = async function(knex) {
   console.log('[MIGRATION] fixed→pinned: updated ' + masterIds.length + ' masters, set date_pinned on their instances');
 };
 
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   // Reverse: find masters that were changed (date_pinned instances without 'fixed' in when)
   // This is lossy — we can't perfectly reverse which masters had 'fixed'
   console.log('[MIGRATION] fixed→pinned down: manual review needed');

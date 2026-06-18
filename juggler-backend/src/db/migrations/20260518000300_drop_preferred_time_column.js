@@ -207,7 +207,7 @@ exports.up = async function(knex) {
   `);
 };
 
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   throw new Error(
     'Down migration for drop_preferred_time_column not implemented — ' +
     'the column was redundant and its data is unrecoverable without the original boolean writes.'

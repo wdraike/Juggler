@@ -88,7 +88,7 @@ async function loadJWTSecrets() {
  * Validate refresh token — now delegates to auth-service API
  * Kept for backwards compatibility but refresh should go through auth-service
  */
-const validateRefreshToken = async (req, res, next) => {
+const validateRefreshToken = async (req, res, _next) => {
   // Refresh tokens are now handled by auth-service directly
   // This middleware should not be called in the new flow
   return res.status(410).json({

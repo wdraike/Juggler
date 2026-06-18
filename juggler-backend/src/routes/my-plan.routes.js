@@ -26,7 +26,7 @@ async function getPlanName(planId) {
       const plan = data.plans?.find(p => p.planId === planId);
       return plan?.name || planId;
     }
-  } catch {}
+  } catch { /* empty */}
   return planId;
 }
 
@@ -81,7 +81,7 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
         // Still fetch actual count for unlimited users (for display)
         let used = 0;
         if (entityCounters[key]) {
-          try { used = await entityCounters[key](userId); } catch {}
+          try { used = await entityCounters[key](userId); } catch {} /* fall through to used=0 */
         }
         usage[key] = { used, limit: null, unlimited: true, resets_at: null };
         continue;
@@ -136,7 +136,7 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
           trialEnd = sub.trial_end;
         }
       }
-    } catch {}
+    } catch { /* empty */}
 
     // Count disabled items so the frontend can show a badge/notification
     let disabledCount = 0;
@@ -145,7 +145,7 @@ router.get('/', authenticateJWT, resolvePlanFeatures, async (req, res) => {
         .where({ user_id: userId, status: 'disabled' })
         .count('* as count').first();
       disabledCount = parseInt(disabledRow.count, 10);
-    } catch {}
+    } catch { /* empty */}
 
     res.json({
       plan_name: planName,

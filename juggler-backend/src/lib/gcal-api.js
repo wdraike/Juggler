@@ -220,7 +220,7 @@ async function batchRequest(accessToken, requests) {
     var bodyMatch = part.match(/\r?\n\r?\n\{[\s\S]*$/);
     var body = null;
     if (bodyMatch) {
-      try { body = JSON.parse(bodyMatch[0].trim()); } catch (e) { /* not JSON */ }
+      try { body = JSON.parse(bodyMatch[0].trim()); } catch (_e) { /* not JSON */ }
     }
 
     return { id: id, status: status, body: body };

@@ -16,7 +16,7 @@ function isRollingMaster(masterRow) {
       ? JSON.parse(masterRow.recur)
       : masterRow.recur;
     return recur && recur.type === 'rolling';
-  } catch (e) {
+  } catch (_e) {
     return false;
   }
 }

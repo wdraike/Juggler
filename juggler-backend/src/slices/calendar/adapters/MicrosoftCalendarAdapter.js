@@ -124,7 +124,7 @@ async function getValidAccessToken(user) {
 /**
  * Fetch events from Microsoft Calendar and normalize to unified shape.
  */
-async function listEvents(token, timeMin, timeMax, userId) {
+async function listEvents(token, timeMin, timeMax, _userId) {
   var result = await msftCalApi.listEvents(token, timeMin, timeMax);
   var events = (result && result.items) || [];
   return events.map(normalizeEvent);
@@ -309,7 +309,7 @@ function getLastSyncedColumn() {
 
 // --- Internal helpers ---
 
-function buildMsftEventBody(task, year, tz, opts) {
+function buildMsftEventBody(task, year, tz, _opts) {
   var dur = task.dur || 30;
   // Phase 15: Migrated to placement_mode='all_day' exclusively
   // Legacy when='allday' fallback re-enabled for backward compatibility

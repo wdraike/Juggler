@@ -137,8 +137,8 @@ async function graphFetch(accessToken, path, options) {
       continue;
     }
     if (!res.ok) {
-      var text = await res.text();
-      throw new Error('Graph API error ' + res.status + ': ' + text);
+      var errorBody = await res.text();
+      throw new Error('Graph API error ' + res.status + ': ' + errorBody);
     }
     if (res.status === 204) return null;
     return res.json();

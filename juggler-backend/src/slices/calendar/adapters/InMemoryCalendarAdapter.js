@@ -182,7 +182,7 @@ async function deleteEvent(token, eventId, userId) {
   return { deleted: existed };
 }
 
-async function sync(token, user) {
+async function sync(_token, _user) {
   // The in-memory store never changes out from under the caller, so there are
   // never remote-side changes to pull. Match the CalendarPort sync() shape.
   return { hasChanges: false };

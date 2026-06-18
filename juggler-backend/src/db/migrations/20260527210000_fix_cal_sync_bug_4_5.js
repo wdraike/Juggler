@@ -102,7 +102,7 @@ exports.up = async function(knex) {
 /**
  * @param {Knex} knex
  */
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   // Irreversible: data corruption fix
   console.warn('[BUG-CLEANUP] Down migration not supported: data corruption fix is one-way');
 };

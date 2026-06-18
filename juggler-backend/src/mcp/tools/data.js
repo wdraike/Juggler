@@ -100,7 +100,7 @@ function registerDataTools(server, userId) {
           var fakeReq = { user: user };
           var fakeRes = {
             json: function(data) { resolve(data); },
-            status: function(code) { return { json: function(data) { reject(new Error(data.error || 'Sync failed')); } }; }
+            status: function(_code) { return { json: function(data) { reject(new Error(data.error || 'Sync failed')); } }; }
           };
           calSyncController.sync(fakeReq, fakeRes);
         });
@@ -186,7 +186,7 @@ function registerDataTools(server, userId) {
       allMasters.forEach(function(r) {
         if (!r.depends_on) return;
         var deps;
-        try { deps = typeof r.depends_on === 'string' ? JSON.parse(r.depends_on) : r.depends_on; } catch(e) { return; }
+        try { deps = typeof r.depends_on === 'string' ? JSON.parse(r.depends_on) : r.depends_on; } catch(_e) { return; }
         if (!Array.isArray(deps)) return;
         var broken = deps.filter(function(d) { return !masterIds.has(d); });
         if (broken.length > 0) brokenDeps.push({ taskId: r.id, brokenIds: broken });
@@ -199,7 +199,7 @@ function registerDataTools(server, userId) {
             var master = allMasters.find(function(m) { return m.id === bd.taskId; });
             if (!master) continue;
             var deps2;
-            try { deps2 = typeof master.depends_on === 'string' ? JSON.parse(master.depends_on) : master.depends_on; } catch(e) { continue; }
+            try { deps2 = typeof master.depends_on === 'string' ? JSON.parse(master.depends_on) : master.depends_on; } catch(_e) { continue; }
             var cleaned = deps2.filter(function(d) { return masterIds.has(d); });
             await db('task_masters').where('id', bd.taskId).update({ depends_on: JSON.stringify(cleaned), updated_at: db.fn.now() });
           }

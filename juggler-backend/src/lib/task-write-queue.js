@@ -290,7 +290,7 @@ async function _doFlush(userId) {
     try {
       var expand = require('../controllers/task.controller').expandToAllInstanceIds;
       if (typeof expand === 'function') broadcastIds = await expand(userId, affectedIds);
-    } catch (e) { /* fall back to affectedIds */ }
+    } catch (_e) { /* fall back to affectedIds */ }
     var payload = { source: 'write-queue-flush', timestamp: Date.now() };
     payload.ids = broadcastIds;
     getSseEmitter().emit(userId, 'tasks:changed', payload);

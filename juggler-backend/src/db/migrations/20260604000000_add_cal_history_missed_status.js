@@ -62,7 +62,7 @@ exports.down = async function(knex) {
   try {
     await knex.raw('ALTER TABLE cal_history DROP CONSTRAINT chk_cal_history_status');
     console.log('Dropped updated status constraint');
-  } catch (e) {
+  } catch (_e) {
     console.warn('Constraint chk_cal_history_status not found, skipping...');
   }
   

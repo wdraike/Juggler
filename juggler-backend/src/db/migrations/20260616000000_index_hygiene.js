@@ -57,7 +57,7 @@ async function indexExists(knex, table, keyName) {
   try {
     var rows = await knex.raw('SHOW INDEX FROM ?? WHERE Key_name = ?', [table, keyName]);
     return rows[0].length > 0;
-  } catch (e) {
+  } catch (_e) {
     // Table may not exist on a bare DB; let the caller decide.
     return false;
   }

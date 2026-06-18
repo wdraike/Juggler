@@ -176,7 +176,7 @@ class Logger {
       // Format additional metadata
       let metaStr = '';
       const metaEntries = Object.entries(meta)
-        .filter(([key, value]) => value !== undefined && !(value instanceof Error));
+        .filter(([_key, value]) => value !== undefined && !(value instanceof Error));
       
       if (metaEntries.length > 0) {
         metaStr = ' ' + JSON.stringify(Object.fromEntries(metaEntries));

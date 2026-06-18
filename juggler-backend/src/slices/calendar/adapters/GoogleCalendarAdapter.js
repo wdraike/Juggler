@@ -18,7 +18,7 @@ var gcalApi = require('../../../lib/gcal-api');
 var { jugglerDateToISO, isoToJugglerDate, computeDurationMinutes } = require('../../../controllers/cal-sync-helpers');
 var { localToUtc } = require('../../../scheduler/dateHelpers');
 var { PLACEMENT_MODES } = require('../../../lib/placementModes');
-var { isAllDayTaskBackend } = require('../../../lib/isAllDayTaskBackend');
+var { _isAllDayTaskBackend } = require('../../../lib/isAllDayTaskBackend');
 var { isTerminalStatus } = require('../../../lib/task-status');
 
 var providerId = 'gcal';
@@ -234,7 +234,7 @@ function getLastSyncedColumn() {
 
 // --- Internal helpers ---
 
-function buildEventBody(task, year, tz, opts) {
+function buildEventBody(task, year, tz, _opts) {
   var startISO = jugglerDateToISO(task.date, task.time, year);
   var dur = task.dur || 30;
   // Phase 15: Migrated to placement_mode='all_day' exclusively

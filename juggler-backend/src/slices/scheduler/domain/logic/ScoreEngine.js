@@ -63,7 +63,7 @@ function priWeight(pri) {
  * @param {Array}  allTasks       All task objects that were considered
  * @returns {{ total: number, breakdown: Object, details: Array }}
  */
-function score(dayPlacements, unplaced, allTasks) {
+function score(dayPlacements, unplaced, _allTasks) {
   var breakdown = {
     unplaced:      0,
     deadlineMiss:  0,

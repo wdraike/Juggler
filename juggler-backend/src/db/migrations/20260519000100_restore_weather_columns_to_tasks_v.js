@@ -217,7 +217,7 @@ exports.up = async function(knex) {
   });
 };
 
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   throw new Error(
     'Down migration for restore_weather_columns_to_tasks_v not implemented — ' +
     'removing weather columns would re-introduce the scheduler bypass bug.'

@@ -123,7 +123,7 @@ var SchedulerTaskProvider = require('../slices/scheduler/adapters/SchedulerTaskP
 var _taskProvider = new SchedulerTaskProvider();
 var rowToTask = _taskProvider.rowToTask;
 var buildSourceMap = _taskProvider.buildSourceMap;
-var taskToRow = _taskProvider.taskToRow;
+var _taskToRow = _taskProvider.taskToRow;
 // H6 / W3 — the sole persist I/O orchestrator. Every scheduler DB write below
 // routes through this command's W2 adapters (writeChanged / deleteTasksWhere /
 // backfillRollingAnchorIfNull / now); the inline knex flush + the 19 inline
@@ -318,11 +318,11 @@ async function loadConfig(userId) {
  * Returns stats: { updated, cleared, tasks: [...] }
  */
 // Per-user mutex to prevent concurrent scheduler runs (Redis-based for multi-process safety)
-var LOCK_TTL_MS = 30000; // 30s max lock hold time
-async function acquireSchedulerLock(userId) { /* unused */ }
-async function releaseSchedulerLock(userId) {
+var _LOCK_TTL_MS = 30000; // 30s max lock hold time
+async function _acquireSchedulerLock(_userId) { /* unused */ }
+async function _releaseSchedulerLock(userId) {
   var lockKey = 'sched_lock:' + userId;
-  try { await cache.getClient().del(lockKey); } catch (e) { /* fail open */ }
+  try { await cache.getClient().del(lockKey); } catch (_e) { /* fail open */ }
 }
 
 // Weather provider injection - default to the real SchedulerWeatherProvider
@@ -1176,7 +1176,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var occ = parseDate(occDate);
     if (!occ) return;
     var recur = (master.recur || master.recur_json) || {};
-    if (typeof recur === 'string') { try { recur = JSON.parse(recur); } catch(e) { recur = {}; } }
+    if (typeof recur === 'string') { try { recur = JSON.parse(recur); } catch(_e) { recur = {}; } }
     var type = (recur.type || '').toLowerCase();
     var flex = 0;
     if (type === 'weekly') flex = 6;
@@ -1223,7 +1223,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   if (hasWeatherTasks && cfg.locations && cfg.locations.length > 0) {
     try {
       cfg.weatherByDateHour = await _weatherProvider.loadWeatherForHorizon(cfg.locations, db);
-    } catch (e) {
+    } catch (_e) {
       cfg.weatherByDateHour = {}; // fail-open: proceed without weather data
     }
   }
@@ -2026,8 +2026,8 @@ async function getSchedulePlacements(userId, options) {
   var cache = null;
   if (cacheRow) {
     try {
-      cache = typeof cacheRow.config_value === 'string' ? (function() { try { return JSON.parse(cacheRow.config_value); } catch(e) { return cacheRow.config_value; } })() : cacheRow.config_value;
-    } catch (e) { cache = null; }
+      cache = typeof cacheRow.config_value === 'string' ? (function() { try { return JSON.parse(cacheRow.config_value); } catch(_e) { return cacheRow.config_value; } })() : cacheRow.config_value;
+    } catch (_e) { cache = null; }
   }
 
   // Quick staleness check — only needs cache metadata + one lightweight query
@@ -2242,7 +2242,7 @@ async function getSchedulePlacements(userId, options) {
       if (freshCacheRow) {
         try {
           cache = typeof freshCacheRow.config_value === 'string' ? JSON.parse(freshCacheRow.config_value) : freshCacheRow.config_value;
-        } catch (e) { /* fall through */ }
+        } catch (_e) { /* fall through */ }
       }
     }
   }
@@ -2256,7 +2256,7 @@ async function getSchedulePlacements(userId, options) {
       cache.dayPlacements[dk].forEach(function(p) {
         var task = taskById[p.taskId];
         if (!task) return; // task was deleted since last run
-        var st = statuses[p.taskId] || '';
+        var _st = statuses[p.taskId] || '';
         var hydrated = { task: task, start: p.start, dur: p.dur };
         if (p.scheduledAtUtc) hydrated.scheduledAtUtc = p.scheduledAtUtc;
         if (p.locked) hydrated.locked = true;

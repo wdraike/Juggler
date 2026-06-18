@@ -10,7 +10,7 @@ var gcalApi = require('../lib/gcal-api');
 // --- Token management (canonical implementation in adapter) ---
 
 var { getJwtSecret, verifyStateToken } = require('../lib/jwt-secret');
-var { getValidAccessToken } = require('../slices/calendar/facade').getAdapter('gcal');
+var { _getValidAccessToken } = require('../slices/calendar/facade').getAdapter('gcal');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('gcal.controller');
 
@@ -91,7 +91,7 @@ async function callback(req, res) {
     try {
       var result = await verifyStateToken(state);
       decoded = result.payload;
-    } catch (e) {
+    } catch (_e) {
       return res.status(400).send('Invalid or expired state parameter');
     }
 

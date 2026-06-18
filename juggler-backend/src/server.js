@@ -17,10 +17,10 @@ if (process.env.NODE_ENV !== 'production') {
       .toString().trim().split('\n').filter(Boolean).map(Number)
       .filter(function(p) { return p !== myPid && p > 0; });
     if (pids.length > 0) {
-      pids.forEach(function(p) { try { process.kill(p, 'SIGKILL'); } catch (e) { /* already dead */ } });
+      pids.forEach(function(p) { try { process.kill(p, 'SIGKILL'); } catch (_e) { /* already dead */ } });
       serverLogger.info('Killed zombie processes', { count: pids.length, port, pids: pids.join(', ') });
     }
-  } catch (e) { /* lsof not available, skip */ }
+  } catch (_e) { /* lsof not available, skip */ }
 }
 
 const app = require('./app');
@@ -51,7 +51,7 @@ async function start() {
       .where('acquired_at', '<', db.raw('DATE_SUB(NOW(), INTERVAL 10 MINUTE)'))
       .del();
     if (cleared > 0) serverLogger.info('Cleared expired sync locks', { count: cleared });
-  } catch (e) { /* table might not exist yet */ }
+  } catch (_e) { /* table might not exist yet */ }
 
   // Load JWT secrets
   await loadJWTSecrets();

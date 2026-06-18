@@ -56,7 +56,7 @@ exports.up = async function(knex) {
   }
 };
 
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   // No-op: converting back to 0900_ai_ci would be destructive and is not
   // reversible safely. Rollback is a no-op by design.
 };

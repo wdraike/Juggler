@@ -17,7 +17,7 @@
  *       -> master + instance (both share row.id). ordinal (1, 1, 1).
  */
 
-var { PLACEMENT_MODES } = require('./placementModes');
+var { _PLACEMENT_MODES } = require('./placementModes');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('tasks-write');
 
@@ -43,7 +43,7 @@ var MASTER_FIELDS = [
 
 // Fields that live on task_instances. `dur` lives on both — copied from
 // master at insert, can be overridden per-chunk once splits are real rows.
-var INSTANCE_FIELDS = [
+var _INSTANCE_FIELDS = [
   'id', 'master_id', 'user_id',
   'occurrence_ordinal', 'split_ordinal', 'split_total',
   'scheduled_at', 'dur',

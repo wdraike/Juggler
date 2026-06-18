@@ -6,8 +6,8 @@ var express = require('express');
 var router = express.Router();
 var calSyncController = require('../controllers/cal-sync.controller');
 var { authenticateJWT } = require('../middleware/jwt-auth');
-var { resolvePlanFeatures } = require('../middleware/plan-features.middleware');
-var { requireFeature } = require('../middleware/feature-gate');
+var { _resolvePlanFeatures } = require('../middleware/plan-features.middleware');
+var { _requireFeature } = require('../middleware/feature-gate');
 // Lightweight check: did anything change on the calendar since last sync?
 router.get('/has-changes', authenticateJWT, calSyncController.hasChanges);
 

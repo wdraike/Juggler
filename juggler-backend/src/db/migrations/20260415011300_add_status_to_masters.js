@@ -175,6 +175,6 @@ exports.up = async function(knex) {
   `);
 };
 
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   throw new Error('Down not supported.');
 };

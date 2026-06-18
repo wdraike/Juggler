@@ -6,7 +6,7 @@
  * password over HTTPS to caldav.icloud.com.
  */
 
-var { createDAVClient, DAVNamespace } = require('tsdav');
+var { createDAVClient, _DAVNamespace } = require('tsdav');
 var ICAL = require('ical.js');
 var { PLACEMENT_MODES } = require('./placementModes');
 var { libAppleLogger } = require('./logger');
@@ -208,7 +208,7 @@ function toUtcICALTime(input) {
 /**
  * Build an iCalendar (ICS) string from a task.
  */
-function buildVEvent(task, year, tz) {
+function buildVEvent(task, year, _tz) {
   var cal = new ICAL.Component(['vcalendar', [], []]);
   cal.addPropertyWithValue('prodid', '-//Raike & Sons//Juggler//EN');
   cal.addPropertyWithValue('version', '2.0');
@@ -331,7 +331,7 @@ async function createEvent(client, calendarUrl, task, year, tz) {
       if (existing && existing[0] && existing[0].etag) {
         currentEtag = existing[0].etag;
       }
-    } catch (fetchErr) {
+    } catch (_fetchErr) {
       // proceed without ETag — server may accept unconditional overwrite
     }
     var updateResponse = await client.updateCalendarObject({
@@ -385,7 +385,7 @@ async function updateEvent(client, eventUrl, task, year, tz, etag) {
       if (existing && existing[0] && existing[0].etag) {
         freshEtag = existing[0].etag;
       }
-    } catch (fetchErr) {
+    } catch (_fetchErr) {
       // proceed without ETag
     }
     var retryResponse = await client.updateCalendarObject({
@@ -440,7 +440,7 @@ async function checkForChanges(client, calendarUrl, storedSyncToken) {
       return { hasChanges: true, syncToken: currentToken };
     }
     return { hasChanges: false, syncToken: currentToken };
-  } catch (e) {
+  } catch (_e) {
     // If check fails, assume changes
     return { hasChanges: true };
   }

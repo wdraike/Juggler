@@ -11,7 +11,7 @@ var crypto = require('crypto');
 
 var ALGORITHM = 'aes-256-gcm';
 var IV_LENGTH = 12;
-var TAG_LENGTH = 16;
+var _TAG_LENGTH = 16;
 
 function getKey() {
   var hex = process.env.CREDENTIAL_ENCRYPTION_KEY;

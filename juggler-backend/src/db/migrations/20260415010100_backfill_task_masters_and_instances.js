@@ -14,7 +14,7 @@
  * depends_on arrays on masters are rewritten through the old_id -> master_id map,
  * because dependencies are a master-level concept in the new schema.
  */
-var { v7: uuidv7 } = require('uuid');
+var { v7: _uuidv7 } = require('uuid');
 
 exports.up = async function(knex) {
   var allTasks = await knex('tasks').select('*');
@@ -53,7 +53,7 @@ exports.up = async function(knex) {
   function parseJson(v) {
     if (v === null || v === undefined) return null;
     if (typeof v !== 'string') return v;
-    try { return JSON.parse(v); } catch (e) { return null; }
+    try { return JSON.parse(v); } catch (_e) { return null; }
   }
 
   function rewriteDeps(deps) {

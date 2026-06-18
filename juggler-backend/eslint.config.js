@@ -42,7 +42,7 @@ module.exports = [
     rules: {
       'no-unused-vars': 'off',
       'unused-imports/no-unused-imports': 'error',
-      'unused-imports/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      'unused-imports/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' }],
       'no-unused-labels': 'warn',
       'no-empty': 'warn',
       'no-constant-condition': 'warn',

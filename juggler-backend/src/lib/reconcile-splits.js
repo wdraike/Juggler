@@ -126,7 +126,7 @@ async function reconcileOccurrence(trx, masterId, master, occOrd, existingRows) 
 
   // Insert missing chunks (when desired > existing)
   if (desired.length > existingRows.length) {
-    var template = existingRows[0]; // carry scheduling fields from occurrence's primary row
+    var _template = existingRows[0]; // carry scheduling fields from occurrence's primary row
     for (var j = existingRows.length; j < desired.length; j++) {
       var d2 = desired[j];
       await trx('task_instances').insert({

@@ -47,7 +47,7 @@ exports.up = async function(knex) {
   }
 };
 
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   // Converting back to 0900_ai_ci would be destructive — no-op down migration.
   // If rollback is needed, review table usage before converting.
 };

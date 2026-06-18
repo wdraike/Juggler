@@ -9,7 +9,7 @@ exports.up = function(knex) {
     .update({ original_scheduled_at: null });
 };
 
-exports.down = function(knex) {
+exports.down = function(_knex) {
   // Cannot restore values — this is a one-way data cleanup
   return Promise.resolve();
 };

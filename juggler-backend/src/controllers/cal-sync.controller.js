@@ -540,7 +540,7 @@ async function sync(req, res) {
             });
           });
         }
-      } catch (e) { /* ignore parse errors */ }
+      } catch (_e) { /* ignore parse errors */ }
     }
 
     // Apply placed duration to each task — match by scheduled_at to find the
@@ -593,12 +593,12 @@ async function sync(req, res) {
           .where({ user_id: userId, provider: 'apple', enabled: true });
         var appleWriteCal = appleCals
           .slice()
-          .sort(function(a, b) { return a.sync_direction === 'full' ? -1 : 1; })[0] || null;
+          .sort(function(a, _b) { return a.sync_direction === 'full' ? -1 : 1; })[0] || null;
         appleCalendarLabel = appleWriteCal ? (appleWriteCal.display_name || null) : null;
         appleCals.forEach(function(c) {
           calIngestModeMap[c.calendar_id] = c.ingest_mode || 'task';
         });
-      } catch (e) { /* ignore — label is display-only */ }
+      } catch (_e) { /* ignore — label is display-only */ }
     }
     var calendarLabels = { apple: appleCalendarLabel };
 
@@ -1340,7 +1340,7 @@ async function sync(req, res) {
     // === Phase 3: Push new tasks to providers (skip for ingest-only) ===
     // Load task IDs with error ledger records so we skip them in push.
     // A manual sync clears error records to allow fresh retries.
-    var errorLedgerTaskIds = new Set();
+    var _errorLedgerTaskIds = new Set();
     var errorLedgerRows = await getDb()('cal_sync_ledger')
       .where('user_id', userId)
       .where('status', 'error')
@@ -1496,7 +1496,7 @@ async function sync(req, res) {
 
       // Batch create if adapter supports it, otherwise fall back to sequential
       if (pushQueue.length > 0 && pAdapter2.batchCreateEvents) {
-        var provLabel = PROVIDER_NAMES[pid2] || pid2;
+        var _provLabel = PROVIDER_NAMES[pid2] || pid2;
         emitProgress('push', 'Pushing ' + pushQueue.length + ' tasks...', 50 + (pi2 * 20), { provider: pid2, calendar: calendarLabels[pid2] || null });
         try {
           var batchResults = await pAdapter2.batchCreateEvents(pToken2, pushQueue, year, tz);
@@ -2257,7 +2257,7 @@ async function sync(req, res) {
           return { type: 'pull', text: h.task_text, message: 'Conflict resolved — accepted ' + provLabel + ' version' };
         case 'error': {
           var errDetail = null;
-          try { if (h.error_detail) errDetail = JSON.parse(h.error_detail); } catch (pe) { /* Ignore JSON parse errors in error_detail */ }
+          try { if (h.error_detail) errDetail = JSON.parse(h.error_detail); } catch (_pe) { /* Ignore JSON parse errors in error_detail */ }
           return { type: 'error', text: h.task_text, message: errDetail ? errDetail.summary : (h.detail || 'Sync error'), errorDetail: errDetail || undefined, hasIssue: true };
         }
         default:
@@ -2425,7 +2425,7 @@ async function audit(req, res) {
   try {
     var userId = req.user.id;
     var userRow = await getDb()('users').where('id', userId).first();
-    var tz = userRow.timezone || DEFAULT_TIMEZONE;
+    var _tz = userRow.timezone || DEFAULT_TIMEZONE;
 
     var days = Math.min(parseInt(req.query.days, 10) || 7, 60);
     var now = new Date();

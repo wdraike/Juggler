@@ -1,3 +1,4 @@
+/* global window */
 /**
  * Service URL Resolution — Shared across all Raike frontends & backends
  *

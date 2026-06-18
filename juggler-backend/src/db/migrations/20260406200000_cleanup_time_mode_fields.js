@@ -32,7 +32,7 @@ exports.up = async function(knex) {
   }
 };
 
-exports.down = function(knex) {
+exports.down = function(_knex) {
   // Cannot restore values — this is a one-way data cleanup
   return Promise.resolve();
 };

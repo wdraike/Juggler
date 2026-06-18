@@ -16,7 +16,7 @@ exports.up = async function(knex) {
   try {
     var idxRows = await knex.raw("SHOW INDEX FROM cal_sync_ledger WHERE Key_name = 'idx_csl_provider_status_task'");
     ledgerIdxExists = idxRows[0].length > 0;
-  } catch (e) { /* table may not exist on a fresh DB; let create handle it */ }
+  } catch (_e) { /* table may not exist on a fresh DB; let create handle it */ }
   if (!ledgerIdxExists) {
     await knex.raw(
       'CREATE INDEX idx_csl_provider_status_task ON cal_sync_ledger (provider, status, task_id) ' +
@@ -28,7 +28,7 @@ exports.up = async function(knex) {
   try {
     var idxRows2 = await knex.raw("SHOW INDEX FROM task_masters WHERE Key_name = 'idx_tm_user_split'");
     masterIdxExists = idxRows2[0].length > 0;
-  } catch (e) { /* same */ }
+  } catch (_e) { /* same */ }
   if (!masterIdxExists) {
     await knex.raw(
       'CREATE INDEX idx_tm_user_split ON task_masters (user_id, split) ' +

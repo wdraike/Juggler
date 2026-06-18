@@ -272,7 +272,7 @@ async function claimAndRun(userId) {
 
     // Success: sweep the queue and notify frontend
     await dequeueScheduleRun(userId);
-    try { getSseEmitter().emit(userId, 'schedule:changed', {}); } catch (e) { /* non-fatal */ }
+    try { getSseEmitter().emit(userId, 'schedule:changed', {}); } catch (_e) { /* non-fatal */ }
     return { claimed: true, success: true };
   } catch (err) {
     // On failure, release the claim so someone else can retry
@@ -421,7 +421,7 @@ function stopPollLoop() {
 }
 
 // ── Constants ──
-var SOURCE_APP = 'scheduleQueue';
+var _SOURCE_APP = 'scheduleQueue';
 var MAX_DIRTY_USERS_PER_POLL = 50;
 var CLAIM_TTL_SECONDS = 60; // Reclaim after 60s of no heartbeat
 

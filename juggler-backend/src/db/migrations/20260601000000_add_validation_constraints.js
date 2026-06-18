@@ -94,7 +94,7 @@ exports.down = async function(knex) {
   // Remove constraints from cal_history
   try {
     await knex.raw('ALTER TABLE cal_history DROP CONSTRAINT chk_cal_history_status');
-  } catch (e) {
+  } catch (_e) {
     console.warn('Constraint chk_cal_history_status not found, skipping...');
   }
   
@@ -108,7 +108,7 @@ exports.down = async function(knex) {
   // Remove constraints from task_instances
   try {
     await knex.raw('ALTER TABLE task_instances DROP CONSTRAINT chk_task_instances_status');
-  } catch (e) {
+  } catch (_e) {
     console.warn('Constraint chk_task_instances_status not found, skipping...');
   }
   
@@ -121,32 +121,32 @@ exports.down = async function(knex) {
   
   try {
     await knex.raw('ALTER TABLE task_instances DROP CONSTRAINT chk_task_instances_unscheduled');
-  } catch (e) {
+  } catch (_e) {
     console.warn('Constraint chk_task_instances_unscheduled not found, skipping...');
   }
   
   // Remove constraints from task_masters
   try {
     await knex.raw('ALTER TABLE task_masters DROP CONSTRAINT chk_task_masters_status');
-  } catch (e) {
+  } catch (_e) {
     console.warn('Constraint chk_task_masters_status not found, skipping...');
   }
   
   try {
     await knex.raw('ALTER TABLE task_masters DROP CONSTRAINT chk_task_masters_split');
-  } catch (e) {
+  } catch (_e) {
     console.warn('Constraint chk_task_masters_split not found, skipping...');
   }
   
   try {
     await knex.raw('ALTER TABLE task_masters DROP CONSTRAINT chk_task_masters_recurring');
-  } catch (e) {
+  } catch (_e) {
     console.warn('Constraint chk_task_masters_recurring not found, skipping...');
   }
   
   try {
     await knex.raw('ALTER TABLE task_masters DROP CONSTRAINT chk_task_masters_marker');
-  } catch (e) {
+  } catch (_e) {
     console.warn('Constraint chk_task_masters_marker not found, skipping...');
   }
   
@@ -159,7 +159,7 @@ exports.down = async function(knex) {
   
   try {
     await knex.raw('ALTER TABLE task_masters DROP CONSTRAINT chk_task_masters_flex_when');
-  } catch (e) {
+  } catch (_e) {
     console.warn('Constraint chk_task_masters_flex_when not found, skipping...');
   }
   

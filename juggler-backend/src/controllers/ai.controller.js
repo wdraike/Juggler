@@ -133,7 +133,8 @@ exports.handleCommand = async (req, res) => {
         // is safe in any future HTML sink. Allowlist-encode: replace each HTML-special
         // or control character with its decimal HTML entity, rather than denylist-strip
         // (the prior /[<>&"']/ strip was incomplete — backtick, =, /, control chars passed).
-        var safeRaw = cleaned.substring(0, 500).replace(/[&<>"'`=\/\x00-\x1F\x7F]/g, function(ch) {
+        // eslint-disable-next-line no-control-regex
+        var safeRaw = cleaned.substring(0, 500).replace(/[&<>"'`=/\x00-\x1F\x7F]/g, function(ch) {
           return '&#' + ch.charCodeAt(0) + ';';
         });
         return res.status(422).json({ error: 'Bad JSON from AI', raw: safeRaw });

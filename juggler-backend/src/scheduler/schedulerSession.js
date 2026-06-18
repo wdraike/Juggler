@@ -80,7 +80,7 @@ async function startSession(userId, options) {
   var cfg = {};
   configRows.forEach(function(r) {
     try { cfg[r.config_key] = JSON.parse(r.config_value); }
-    catch (e) { cfg[r.config_key] = r.config_value; }
+    catch (_e) { cfg[r.config_key] = r.config_value; }
   });
 
   var stepRecorder = [];

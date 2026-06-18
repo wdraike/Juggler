@@ -31,7 +31,7 @@ exports.up = async function(knex) {
   await knex.schema.dropTableIfExists('tasks');
 };
 
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   // Non-reversible: rebuilding the legacy tasks table from master/instance
   // would require re-creating the old flat shape (including deprecated
   // gcal_event_id / msft_event_id / apple_event_id columns that have moved

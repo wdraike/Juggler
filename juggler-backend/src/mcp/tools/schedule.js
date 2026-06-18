@@ -2,7 +2,6 @@
  * MCP Schedule Tools — expose scheduler as MCP tools
  */
 
-const { z } = require('zod');
 const safeStringify = require('../safeStringify');
 const { runScheduleAndPersist, getSchedulePlacements } = require('../../slices/scheduler/facade');
 const { withLock } = require('../../lib/sync-lock');

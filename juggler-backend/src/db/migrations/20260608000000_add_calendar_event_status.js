@@ -116,14 +116,14 @@ exports.down = async function(knex) {
     try {
       await trx.raw('ALTER TABLE cal_sync_ledger DROP CONSTRAINT chk_cal_sync_ledger_scheduled_at_required');
       console.log('Dropped scheduled_at validation constraint');
-    } catch (e) {
+    } catch (_e) {
       console.warn('Scheduled_at validation constraint not found, skipping...');
     }
     
     try {
       await trx.raw('ALTER TABLE cal_sync_ledger DROP CONSTRAINT chk_cal_sync_ledger_event_status_enum');
       console.log('Dropped event_status enum constraint');
-    } catch (e) {
+    } catch (_e) {
       console.warn('Event_status enum constraint not found, skipping...');
     }
     

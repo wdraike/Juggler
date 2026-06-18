@@ -62,7 +62,7 @@ function effectiveDuration(t) {
 function recurringCycleDays(recur) {
   if (!recur) return 0;
   var r = recur;
-  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e) { return 0; } }
+  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_e) { return 0; } }
   var type = r && r.type;
   if (type === 'weekly') return 7;
   if (type === 'biweekly') return 14;

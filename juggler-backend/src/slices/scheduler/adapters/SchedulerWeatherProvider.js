@@ -54,7 +54,7 @@ SchedulerWeatherProvider.prototype.loadWeatherForHorizon = async function loadWe
   if (!row) return weatherByDateHour; // fail-open: no data ever fetched
 
   var forecast;
-  try { forecast = JSON.parse(row.forecast_json); } catch (e) { return weatherByDateHour; }
+  try { forecast = JSON.parse(row.forecast_json); } catch (_e) { return weatherByDateHour; }
 
   var hourly = forecast.hourly;
   if (!hourly || !hourly.time) return weatherByDateHour;

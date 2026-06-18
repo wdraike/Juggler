@@ -85,7 +85,7 @@ function computeSchedulerHash() {
   var h = crypto.createHash('sha256');
   files.forEach(function(f) {
     try { h.update(fs.readFileSync(f)); }
-    catch (e) { /* missing file — skip rather than fail startup */ }
+    catch (_e) { /* missing file — skip rather than fail startup */ }
   });
   return h.digest('hex').slice(0, 10);
 }

@@ -168,7 +168,7 @@ exports.up = async function(knex) {
   `);
 };
 
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   // No clean reversal: previous view lacked the ordinal columns. Restore via
   // the prior migration if needed.
   throw new Error('Down not supported; re-run 20260415010800 to restore prior view shape.');

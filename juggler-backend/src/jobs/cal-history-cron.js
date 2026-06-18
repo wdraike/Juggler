@@ -1,5 +1,5 @@
 // Cal History Cron Job - Class-based version for server integration
-const { purgeOldEntries, runCalHistoryCron } = require('../cron/cal-history-cron');
+const { runCalHistoryCron } = require('../cron/cal-history-cron');
 const { createLogger } = require('../lib/logger');
 
 const logger = createLogger('cron.cal-history-job');

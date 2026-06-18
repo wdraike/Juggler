@@ -50,7 +50,7 @@
 
 var assertDeps = require('../_assertDeps');
 
-var TERMINAL_STATUSES = ['done', 'skip', 'cancel'];
+var _TERMINAL_STATUSES = ['done', 'skip', 'cancel'];
 var UNDOABLE_ACTION_TYPES = ['status_change', 'field_update', 'delete'];
 
 /**
@@ -198,7 +198,7 @@ UndoTask.prototype._undoStatusChange = async function _undoStatusChange(id, user
  */
 UndoTask.prototype._undoFieldUpdate = async function _undoFieldUpdate(id, userId, logEntry) {
   var before = logEntry.before || {};
-  var after = logEntry.after || {};
+  var _after = logEntry.after || {};
 
   // U3: Verify the task exists
   var current = await this.repo.fetchTaskWithEventIds(id, userId);
@@ -210,7 +210,7 @@ UndoTask.prototype._undoFieldUpdate = async function _undoFieldUpdate(id, userId
   // Build the revert update from the before snapshot — only restorable fields
   var revertUpdate = {};
   RESTORABLE_FIELDS.forEach(function (field) {
-    if (before.hasOwnProperty(field)) {
+    if (Object.prototype.hasOwnProperty.call(before, field)) {
       revertUpdate[field] = before[field];
     }
   });

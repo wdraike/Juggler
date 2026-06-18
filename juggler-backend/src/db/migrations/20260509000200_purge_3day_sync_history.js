@@ -8,6 +8,6 @@ exports.up = async function(knex) {
     .del();
 };
 
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   // no-op — data already deleted; cannot restore
 };

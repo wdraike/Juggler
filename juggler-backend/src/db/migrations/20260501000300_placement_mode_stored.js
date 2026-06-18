@@ -213,7 +213,7 @@ exports.up = async function(knex) {
   `);
 };
 
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   throw new Error(
     'Down migration for placement_mode_stored not implemented — ' +
     'restoring dropped columns requires data reconstruction from placement_mode.'

@@ -30,7 +30,7 @@ function registerConfigTools(server, userId) {
 
       const config = {};
       configRows.forEach(row => {
-        const val = typeof row.config_value === 'string' ? (function() { try { return JSON.parse(row.config_value); } catch(e) { return row.config_value; } })() : row.config_value;
+        const val = typeof row.config_value === 'string' ? (function() { try { return JSON.parse(row.config_value); } catch(_e) { return row.config_value; } })() : row.config_value;
         config[row.config_key] = val;
       });
 

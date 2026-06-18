@@ -25,7 +25,7 @@ async function getStatus(req, res) {
     try {
       allCalendars = await getDb()('user_calendars')
         .where({ user_id: req.user.id, provider: 'apple' });
-    } catch (e) {
+    } catch (_e) {
       // Table may not exist if migration hasn't run yet
     }
 

@@ -153,42 +153,42 @@ exports.down = async function(knex) {
     // Remove scheduled_at constraint
     try {
       await trx.raw('ALTER TABLE task_masters DROP CONSTRAINT chk_task_masters_scheduled_at_for_terminal');
-    } catch (e) {
+    } catch (_e) {
       console.warn('Constraint chk_task_masters_scheduled_at_for_terminal not found, skipping...');
     }
     
     // Remove status index
     try {
       await trx.raw('ALTER TABLE task_masters DROP INDEX idx_task_masters_status');
-    } catch (e) {
+    } catch (_e) {
       console.warn('Index idx_task_masters_status not found, skipping...');
     }
     
     // Remove status enum constraint
     try {
       await trx.raw('ALTER TABLE task_masters DROP CONSTRAINT chk_task_masters_status_enum');
-    } catch (e) {
+    } catch (_e) {
       console.warn('Constraint chk_task_masters_status_enum not found, skipping...');
     }
     
     // Remove scheduled_at column
     try {
       await trx.raw('ALTER TABLE task_masters DROP COLUMN scheduled_at');
-    } catch (e) {
+    } catch (_e) {
       console.warn('Column scheduled_at not found on task_masters, skipping...');
     }
     
     // Remove completed_at column
     try {
       await trx.raw('ALTER TABLE task_masters DROP COLUMN completed_at');
-    } catch (e) {
+    } catch (_e) {
       console.warn('Column completed_at not found on task_masters, skipping...');
     }
     
     // Remove status column
     try {
       await trx.raw('ALTER TABLE task_masters DROP COLUMN status');
-    } catch (e) {
+    } catch (_e) {
       console.warn('Column status not found on task_masters, skipping...');
     }
   });

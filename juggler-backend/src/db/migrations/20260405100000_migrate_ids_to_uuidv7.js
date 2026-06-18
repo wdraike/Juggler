@@ -48,7 +48,7 @@ exports.up = async function(knex) {
       if (!t2.depends_on) continue;
       var deps;
       try { deps = typeof t2.depends_on === 'string' ? JSON.parse(t2.depends_on) : t2.depends_on; }
-      catch(e) { continue; }
+      catch(_e) { continue; }
       if (!Array.isArray(deps) || deps.length === 0) continue;
 
       var changed = false;
@@ -82,7 +82,7 @@ exports.up = async function(knex) {
   }
 };
 
-exports.down = async function(knex) {
+exports.down = async function(_knex) {
   // Cannot reverse UUIDv7 migration — IDs are one-way
   console.log('[MIGRATION] UUIDv7 migration cannot be reversed. Old IDs are lost.');
 };

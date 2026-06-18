@@ -8,7 +8,7 @@
 
 const getDb = () => require('../db');
 const tasksWrite = require('../lib/tasks-write');
-const { countRecurringTemplates } = require('../middleware/entity-limits');
+const { _countRecurringTemplates } = require('../middleware/entity-limits');
 const cache = require('../lib/redis');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('billing-webhooks.controller');
@@ -59,7 +59,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
           }, { status: 'disabled', disabled_at: now, disabled_reason: 'downgrade', updated_at: now });
 
           // Disable all open instances of these templates (instance-level status)
-          var disabledInstances = await tasksWrite.updateInstancesWhere(trx, userId, function(q) {
+          var _disabledInstances = await tasksWrite.updateInstancesWhere(trx, userId, function(q) {
             return q.whereIn('master_id', recurringIds).where('status', '');
           }, { status: 'disabled', updated_at: now });
 

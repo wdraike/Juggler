@@ -113,7 +113,7 @@ RedisScheduleCache.prototype.invalidateUser = async function invalidateUser(user
     var keys = await scanKeys(pattern);
     if (keys.length === 0) return true;
     return this._cache.del.apply(this._cache, keys);
-  } catch (_err) {
+  } catch (__err) {
     return false;
   }
 };

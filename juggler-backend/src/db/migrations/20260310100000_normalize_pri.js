@@ -5,7 +5,7 @@ exports.up = function(knex) {
   return knex.raw("UPDATE tasks SET pri = CONCAT('P', pri) WHERE pri REGEXP '^[1-4]$'");
 };
 
-exports.down = function(knex) {
+exports.down = function(_knex) {
   // No-op: P1-P4 format is the canonical form
   return Promise.resolve();
 };

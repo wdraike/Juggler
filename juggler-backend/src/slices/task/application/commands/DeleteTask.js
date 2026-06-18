@@ -86,7 +86,7 @@ DeleteTask.prototype.execute = async function execute(input) {
   // When scope=instance is specified for a recurring_instance, skip the soft-skip
   // and do a hard delete instead (delete just this one instance).
   // For non-recurring tasks, scope makes no difference — single delete.
-  var isRecurringTemplate = task.task_type === 'recurring_template' || (task.recurring && task.task_type !== 'recurring_instance');
+  var _isRecurringTemplate = task.task_type === 'recurring_template' || (task.recurring && task.task_type !== 'recurring_instance');
   var isRecurringInstance = task.task_type === 'recurring_instance';
 
   // ingest-only block (handler L1386-1401) — skip for scope=instance (just deleting one row)
