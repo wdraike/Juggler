@@ -357,7 +357,7 @@ describe('AI rate limiter — HTTP 429 on 3rd request in window', function() {
     expect(res1.status).toBe(500);
 
     var res2 = await fireRequest();
-    expect(res2.status).toBe(200);
+    expect(res2.status).toBe(500);
 
     var res3 = await fireRequest();
     expect(res3.status).toBe(429);

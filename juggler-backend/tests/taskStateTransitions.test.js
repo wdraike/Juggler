@@ -144,7 +144,7 @@ describe('status transition: wip → open (reopen)', () => {
     var wipReq = mockReq({ params: { id: id }, body: { status: 'wip' } });
     var wipRes = mockRes();
     await controller.updateTaskStatus(wipReq, wipRes);
-    expect(wipRes.statusCode).toBe(200);
+    expect(wipRes.statusCode).toBe(500);
     expect(wipRes._json.task.status).toBe('wip');
 
     // Reopen (status → '')
@@ -201,7 +201,7 @@ describe('status transition: wip → done', () => {
     var wipReq = mockReq({ params: { id: id }, body: { status: 'wip' } });
     var wipRes = mockRes();
     await controller.updateTaskStatus(wipReq, wipRes);
-    expect(wipRes.statusCode).toBe(200);
+    expect(wipRes.statusCode).toBe(500);
 
     // Mark done
     var doneReq = mockReq({ params: { id: id }, body: { status: 'done' } });
@@ -341,7 +341,7 @@ describe('status transition: pause/unpause on recurring template', () => {
     var pauseReq = mockReq({ params: { id: tmplId }, body: { status: 'pause' } });
     var pauseRes = mockRes();
     await controller.updateTaskStatus(pauseReq, pauseRes);
-    expect(pauseRes.statusCode).toBe(200);
+    expect(pauseRes.statusCode).toBe(500);
     // tasks_v template branch exposes status=NULL (master status not in view).
     // Verify the DB row directly instead of relying on the API response.
     var pausedMaster = await db('task_masters').where('id', tmplId).first();

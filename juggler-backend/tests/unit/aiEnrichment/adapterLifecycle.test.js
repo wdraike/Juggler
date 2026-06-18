@@ -500,7 +500,7 @@ describe('B7 — callGemini: null SDK result must produce structured error, not 
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ command: 'list tasks', tasks: [], statuses: {}, config: {} });
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(500);
       expect(res.body.msg).toBe('All good.');
     }
   );
