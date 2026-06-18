@@ -40,6 +40,7 @@ function maybeRedisStore(prefix) {
   // builds the real store on first use after Redis is ready, then delegates
   // all subsequent calls to the real store.
   var realStore = null;
+  var initOptions = null; // captured from express-rate-limit's init(); replayed when the store builds lazily
 
   function buildRealStore() {
     if (realStore) return realStore;
@@ -51,6 +52,12 @@ function maybeRedisStore(prefix) {
       },
       prefix: prefix || 'jugrl:'
     });
+    // CRITICAL: RedisStore needs init(options) to set windowMs. When Redis is not 'ready' at
+    // express-rate-limit's init() call (the common async-connect race), the store builds later
+    // inside increment() — so replay the captured options here. Without this, RedisStore.increment
+    // throws `Cannot read properties of undefined (reading 'toString')` on this.windowMs.toString(),
+    // 500-ing every rate-limited route (all of /api/*).
+    if (initOptions && realStore.init) realStore.init(initOptions);
     return realStore;
   }
 
@@ -59,8 +66,9 @@ function maybeRedisStore(prefix) {
   // store.resetKey(key), store.resetAll(), and store.init(options).
   return {
     init: function(options) {
-      // Called by express-rate-limit at setup. No-op here; real store inits
-      // itself when constructed on first use.
+      // Called by express-rate-limit at setup. Capture options so a lazily-built real store
+      // (Redis not ready yet) still gets init'd with windowMs when it's constructed later.
+      initOptions = options;
       var s = buildRealStore();
       if (s && s.init) s.init(options);
     },
