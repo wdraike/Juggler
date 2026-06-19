@@ -173,6 +173,7 @@ KnexTaskRepository.prototype.fetchTaskWithEventIds = function fetchTaskWithEvent
     row.cal_sync_origin = null;
     row.cal_event_url = null;
     row.apple_calendar_name = null;
+    row.cal_locked = 0;
     var appleCalendarId = null;
     for (var i = 0; i < ledgerRows.length; i++) {
       var p = ledgerRows[i].provider;
@@ -186,6 +187,10 @@ KnexTaskRepository.prototype.fetchTaskWithEventIds = function fetchTaskWithEvent
       if (!row.cal_sync_origin || row.cal_sync_origin === 'juggler') {
         row.cal_sync_origin = ledgerRows[i].origin || null;
         row.cal_event_url = ledgerRows[i].event_url || null;
+      }
+      // cal_locked: task is calendar-born if any active ledger row has a provider origin
+      if (ledgerRows[i].origin && ledgerRows[i].origin !== 'juggler') {
+        row.cal_locked = 1;
       }
     }
     if (appleCalendarId) {
@@ -235,7 +240,7 @@ KnexTaskRepository.prototype.fetchTasksWithEventIds = function fetchTasksWithEve
     for (var j = 0; j < ledgerRows.length; j++) {
       var lr = ledgerRows[j];
       if (!lr.task_id) continue;
-      var slot = byTask[lr.task_id] || (byTask[lr.task_id] = {});
+      var slot = byTask[lr.task_id] || (byTask[lr.task_id] = { cal_locked: 0 });
       if (lr.provider === 'gcal') slot.gcal_event_id = lr.provider_event_id;
       else if (lr.provider === 'msft') slot.msft_event_id = lr.provider_event_id;
       else if (lr.provider === 'apple') {
@@ -249,6 +254,10 @@ KnexTaskRepository.prototype.fetchTasksWithEventIds = function fetchTasksWithEve
         slot.cal_sync_origin = lr.origin || null;
         slot.cal_event_url = lr.event_url || null;
       }
+      // cal_locked: task is calendar-born if any active ledger row has a provider origin
+      if (lr.origin && lr.origin !== 'juggler') {
+        slot.cal_locked = 1;
+      }
     }
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i];
@@ -259,6 +268,7 @@ KnexTaskRepository.prototype.fetchTasksWithEventIds = function fetchTasksWithEve
       r.cal_sync_origin = ev && ev.cal_sync_origin || null;
       r.cal_event_url = ev && ev.cal_event_url || null;
       r.apple_calendar_name = ev && ev.apple_calendar_name || null;
+      r.cal_locked = ev ? ev.cal_locked : 0;
     }
     return rows;
   });

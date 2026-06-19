@@ -251,6 +251,7 @@ function rowToTask(row, timezone, sourceMap, logger) {
     gcalEventId: row.gcal_event_id,
     msftEventId: row.msft_event_id,
     appleEventId: row.apple_event_id,
+    calLocked: !!row.cal_locked,
     appleCalendarName: row.apple_calendar_name || null,
     calSyncOrigin: row.cal_sync_origin || null,
     calEventUrl: row.cal_event_url || null,

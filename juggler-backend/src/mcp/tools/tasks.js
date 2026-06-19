@@ -253,8 +253,14 @@ function registerTaskTools(server, userId) {
         return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
       }
 
-      // Guard: calendar-synced tasks — only status and notes are editable
-      var isCalSynced = !!(existing.gcal_event_id || existing.msft_event_id || existing.apple_event_id);
+      // Guard: only CALENDAR-BORN tasks are restricted to status/notes — a task is calendar-born
+      // when it has an active cal_sync_ledger row whose origin is a provider (not 'juggler').
+      // origin='juggler' means the task pre-existed in Juggler (pushed-out/adopted) → stays editable.
+      var calBornRow = await db('cal_sync_ledger')
+        .where({ user_id: userId, task_id: id, status: 'active' })
+        .whereNot('origin', 'juggler')
+        .first();
+      var isCalSynced = !!calBornRow;
       if (isCalSynced) {
         var allowedKeys = ['status', 'notes'];
         var blocked = Object.keys(fields).filter(function(k) { return allowedKeys.indexOf(k) === -1; });
@@ -538,7 +544,9 @@ function registerTaskTools(server, userId) {
         return { content: [{ type: 'text', text: 'Error: Batch limited to 200 items' }], isError: true };
       }
 
-      // Guard: calendar-synced tasks — only status and notes are editable
+      // Guard: only CALENDAR-BORN tasks are restricted to status/notes — calendar-born = has an
+      // active cal_sync_ledger row whose origin is a provider (not 'juggler'). Tasks Juggler
+      // pushed-out/adopted (origin='juggler') stay fully editable.
       var idsToCheck = updates.map(function(u) { return u.id; });
       var syncCheck = await db('tasks_with_sync_v')
         .where('user_id', userId)
@@ -546,12 +554,18 @@ function registerTaskTools(server, userId) {
         .select('id', 'gcal_event_id', 'msft_event_id', 'apple_event_id');
       var syncById = {};
       syncCheck.forEach(function(r) { syncById[r.id] = r; });
+      var calBornRows = await db('cal_sync_ledger')
+        .where({ user_id: userId, status: 'active' })
+        .whereIn('task_id', idsToCheck)
+        .whereNot('origin', 'juggler')
+        .distinct('task_id');
+      var calBornIds = new Set(calBornRows.map(function(r) { return r.task_id; }));
       for (var si = 0; si < updates.length; si++) {
         var sUpdate = updates[si];
         var sId = sUpdate.id;
         var sExisting = syncById[sId];
         if (!sExisting) continue;
-        var isCalSynced = !!(sExisting.gcal_event_id || sExisting.msft_event_id || sExisting.apple_event_id);
+        var isCalSynced = calBornIds.has(sId);
         if (isCalSynced) {
           var allowedKeys = ['status', 'notes'];
           var sFields = {};

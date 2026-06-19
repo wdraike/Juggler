@@ -1852,7 +1852,7 @@ async function sync(req, res) {
               provider: pid2,
               task_id: dupTask.id,
               provider_event_id: newEvent.id,
-              origin: pid2,
+              origin: JUGGLER_ORIGIN,
               last_pushed_hash: taskHash(dupTask),
               last_user_hash: userHash(dupTask),
               last_pulled_hash: pAdapter2.eventHash(newEvent),

@@ -118,7 +118,8 @@ function InMemoryTaskRepository(deps) {
 // Event-id columns surfaced (as null by default) to match fetchTaskWithEventIds.
 var EVENT_ID_FIELDS = [
   'gcal_event_id', 'msft_event_id', 'apple_event_id',
-  'cal_sync_origin', 'cal_event_url', 'apple_calendar_name'
+  'cal_sync_origin', 'cal_event_url', 'apple_calendar_name',
+  'cal_locked'
 ];
 
 InMemoryTaskRepository.prototype._withEventIds = function _withEventIds(row) {
