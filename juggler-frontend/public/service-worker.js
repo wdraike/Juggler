@@ -172,14 +172,99 @@ self.addEventListener('message', (event) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PUSH NOTIFICATIONS — reserved for backlog 999.252.
+// PUSH NOTIFICATIONS — backlog 999.252.
 //
-// Add the push-related event listeners HERE. They are independent of the
-// caching logic above and require no changes to it. Expected handlers:
-//
-//   self.addEventListener('push', (event) => { ... });
-//   self.addEventListener('notificationclick', (event) => { ... });
-//   self.addEventListener('pushsubscriptionchange', (event) => { ... });
-//
-// (Intentionally not implemented in 999.258.)
+// Independent of the caching logic above. The backend (notify-reminder.js) sends
+// a JSON payload of shape:
+//   { type:'task-reminder', taskId, title, body, url }
+// via Web Push. We show an OS notification on `push`, and focus/deep-link the app
+// on `notificationclick`.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Default fields used when a push arrives with no/garbled payload.
+const PUSH_DEFAULT_TITLE = 'Juggler reminder';
+const PUSH_ICON = '/favicon.svg';
+const PUSH_BADGE = '/favicon.svg';
+
+self.addEventListener('push', (event) => {
+  // Parse the payload defensively — a malformed push must still notify, not throw.
+  let payload = {};
+  if (event.data) {
+    try {
+      payload = event.data.json();
+    } catch (e) {
+      payload = { body: event.data.text() };
+    }
+  }
+
+  const title = payload.title || PUSH_DEFAULT_TITLE;
+  const options = {
+    body: payload.body || '',
+    icon: PUSH_ICON,
+    badge: PUSH_BADGE,
+    // tag de-dupes repeated reminders for the same task into one notification.
+    tag: payload.taskId ? `task-${payload.taskId}` : undefined,
+    renotify: !!payload.taskId,
+    // Stash the deep-link URL + task id for the click handler.
+    data: {
+      url: payload.url || '/',
+      taskId: payload.taskId || null,
+    },
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Resolve a notification's deep-link to a SAME-ORIGIN url only — defense in
+// depth against an open-redirect / attacker URL reaching openWindow/navigate
+// (elmo WARN, 999.252). Anything off-origin (or a `//host` protocol-relative
+// url, or javascript:) collapses to the app root.
+function safeNotificationUrl(raw) {
+  try {
+    const resolved = new URL(raw || '/', self.location.origin);
+    return resolved.origin === self.location.origin ? resolved.pathname + resolved.search : '/';
+  } catch (e) {
+    return '/';
+  }
+}
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const targetUrl = safeNotificationUrl(event.notification.data && event.notification.data.url);
+
+  event.waitUntil(
+    (async () => {
+      const allClients = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      });
+
+      // If an app tab is already open, focus it (and navigate it if it can).
+      for (const client of allClients) {
+        // Same-origin app tab — focus and try to deep-link.
+        if (client.url && new URL(client.url).origin === self.location.origin) {
+          await client.focus();
+          if ('navigate' in client && targetUrl !== '/') {
+            try { await client.navigate(targetUrl); } catch (e) { /* navigation blocked — focus is enough */ }
+          }
+          return;
+        }
+      }
+
+      // No open tab — open a new one at the deep-link.
+      if (self.clients.openWindow) {
+        await self.clients.openWindow(targetUrl);
+      }
+    })()
+  );
+});
+
+// Browser rotated the subscription — the page will re-subscribe on next load via
+// the opt-in helper. We cannot re-POST here without the user's auth token, so we
+// simply let it lapse; getSubscriptionState() on next visit reflects the change.
+self.addEventListener('pushsubscriptionchange', () => {
+  // Intentionally a no-op beyond letting the browser drop the old subscription.
+  // Re-subscription is driven by the authenticated page (pushNotifications.js),
+  // which holds the JWT needed to persist the new endpoint on the server.
+});

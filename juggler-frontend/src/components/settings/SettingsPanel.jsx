@@ -6,6 +6,12 @@ import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { getTheme } from '../../theme/colors';
 import { DEFAULT_WEEKDAY_BLOCKS, DEFAULT_WEEKEND_BLOCKS } from '../../state/constants';
 import { TZ_OVERRIDE_KEY } from '../../services/apiClient';
+import {
+  isPushSupported,
+  getSubscriptionState,
+  subscribeToPush,
+  unsubscribeFromPush,
+} from '../../services/pushNotifications';
 
 // Deduplicated preset blocks from weekday + weekend defaults
 var PRESET_BLOCKS = (function() {
@@ -29,6 +35,7 @@ var TABS = [
   { id: 'templates', label: 'Templates', tip: 'Templates — define daily time blocks, locations, and schedule structure' },
   { id: 'projects', label: 'Projects', tip: 'Projects — manage project names and colors' },
   { id: 'preferences', label: 'Preferences', tip: 'Preferences — font size, grid zoom, task defaults' },
+  { id: 'notifications', label: 'Notifications', tip: 'Notifications — enable browser push notifications for task reminders' },
 ];
 
 // ─── HelpIcon — click-to-toggle contextual help tooltip ────────
@@ -147,8 +154,138 @@ export default function SettingsPanel({ onClose, darkMode, config, allProjectNam
           {tab === 'matrix' && <MatrixTab config={config} theme={theme} />}
           {tab === 'projects' && <ProjectsTab config={config} theme={theme} allProjectNames={allProjectNames} allTasks={allTasks || []} onRenameProject={onRenameProject} />}
           {tab === 'preferences' && <PreferencesTab config={config} theme={theme} />}
+          {tab === 'notifications' && <NotificationsTab theme={theme} showToast={showToast} />}
           {tab === 'templates' && <UnifiedTemplateTab config={config} theme={theme} showToast={showToast} allTasks={allTasks} />}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Notifications Tab — Web Push opt-in (backlog 999.252) ───────
+
+function NotificationsTab({ theme, showToast }) {
+  var [supported] = useState(function() { return isPushSupported(); });
+  var [permission, setPermission] = useState('default');
+  var [subscribed, setSubscribed] = useState(false);
+  var [busy, setBusy] = useState(false);
+  var [loaded, setLoaded] = useState(false);
+
+  useEffect(function() {
+    var cancelled = false;
+    getSubscriptionState().then(function(state) {
+      if (cancelled) return;
+      setPermission(state.permission);
+      setSubscribed(state.subscribed);
+      setLoaded(true);
+    }).catch(function() {
+      if (!cancelled) setLoaded(true);
+    });
+    return function() { cancelled = true; };
+  }, []);
+
+  function notify(msg, type) {
+    if (typeof showToast === 'function') showToast(msg, type);
+  }
+
+  async function handleEnable() {
+    setBusy(true);
+    try {
+      await subscribeToPush();
+      setSubscribed(true);
+      setPermission('granted');
+      notify('Push notifications enabled', 'success');
+    } catch (err) {
+      // Reflect a denied permission so the UI shows the blocked state.
+      if (typeof Notification !== 'undefined') setPermission(Notification.permission);
+      notify(err && err.message ? err.message : 'Could not enable notifications', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDisable() {
+    setBusy(true);
+    try {
+      await unsubscribeFromPush();
+      setSubscribed(false);
+      notify('Push notifications disabled', 'info');
+    } catch (err) {
+      notify(err && err.message ? err.message : 'Could not disable notifications', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  var cardStyle = {
+    border: '1px solid ' + theme.border, borderRadius: 8, padding: 16,
+    background: theme.bgCard, maxWidth: 520
+  };
+  var pStyle = { color: theme.textSecondary, fontSize: 13, lineHeight: 1.5, margin: '8px 0 0' };
+
+  if (!supported) {
+    return (
+      <div style={cardStyle}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: theme.text }}>Browser notifications</div>
+        <p style={pStyle}>
+          This browser does not support push notifications. Reminders will still
+          appear in-app while Juggler is open.
+        </p>
+      </div>
+    );
+  }
+
+  var denied = permission === 'denied';
+  var btnBase = {
+    border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13,
+    fontWeight: 600, fontFamily: 'inherit', cursor: busy ? 'wait' : 'pointer',
+    opacity: busy ? 0.6 : 1
+  };
+
+  return (
+    <div style={cardStyle}>
+      <div style={{ fontSize: 15, fontWeight: 600, color: theme.text }}>Browser notifications</div>
+      <p style={pStyle}>
+        Get a notification when a task reminder fires — even when Juggler is not
+        the active tab. In-app reminders always work; this adds OS-level alerts.
+      </p>
+
+      {denied && (
+        <p style={Object.assign({}, pStyle, { color: theme.danger || '#C0392B' })}>
+          Notifications are blocked for this site. Enable them in your browser's
+          site settings, then reload this page.
+        </p>
+      )}
+
+      <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+        {!loaded ? (
+          <span style={{ color: theme.textMuted, fontSize: 13 }}>Checking status…</span>
+        ) : subscribed ? (
+          <>
+            <span style={{ color: theme.success || '#1E7E34', fontSize: 13, fontWeight: 600 }}>
+              ✓ Enabled on this device
+            </span>
+            <button
+              onClick={handleDisable}
+              disabled={busy}
+              style={Object.assign({}, btnBase, { background: 'transparent', color: theme.textSecondary, border: '1px solid ' + theme.border })}
+            >
+              {busy ? 'Working…' : 'Disable'}
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={handleEnable}
+            disabled={busy || denied}
+            style={Object.assign({}, btnBase, {
+              background: denied ? theme.border : theme.accent,
+              color: denied ? theme.textMuted : '#FDFAF5',
+              cursor: denied ? 'not-allowed' : (busy ? 'wait' : 'pointer')
+            })}
+          >
+            {busy ? 'Enabling…' : 'Enable notifications'}
+          </button>
+        )}
       </div>
     </div>
   );

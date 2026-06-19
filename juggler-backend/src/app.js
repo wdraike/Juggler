@@ -331,6 +331,7 @@ app.use('/api/feature-events', featureServiceLimiter, require('./routes/feature-
 app.use('/api/my-plan', require('./routes/my-plan.routes'));
 app.use('/api/billing-webhooks', billingWebhookLimiter, require('./routes/billing-webhooks.routes'));
 app.use('/api/weather', authenticateJWT, writeRateLimiter, weatherRoutes);
+app.use('/api/push', writeRateLimiter, require('./routes/push.routes'));
 app.use('/api/impersonation', impersonationRoutes);
 
 // Cloud Tasks scheduler push-handler (999.627). Mounted ONLY when the
