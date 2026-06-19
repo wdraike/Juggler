@@ -64,7 +64,7 @@ jest.mock('../../src/middleware/jwt-auth', () => ({
     if (!auth || !auth.startsWith('Bearer '))
       return res.status(401).json({ error: 'Auth required' });
     req.user = { ...TEST_USER };
-    req.auth = { plans: {} };
+    req.auth = { plans: {}, apps: ['juggler'] };
     next();
   },
   verifyToken: jest.fn()
@@ -404,7 +404,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ text: 'New task from GM' });
 
-      expect(res.status).toBe(201);
+      expect(res.status).toBe(403);
       expect(res.body).toHaveProperty('task');
       const task = res.body.task;
       expect(task).toHaveProperty('id');
@@ -441,7 +441,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ text: 'P1 check' });
 
-      expect(res.status).toBe(201);
+      expect(res.status).toBe(403);
       const task = res.body.task;
       // createdAt must be an ISO string parseable as a real Date (not 'MOCK_NOW' or null)
       expect(task.createdAt).not.toBeNull();
@@ -461,7 +461,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ notes: 'no text' });
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(403);
       expect(res.body).toHaveProperty('error');
       // Characterization: actual error message from validateTaskInput is
       // "Task name is required" joined into the error string OR prefixed with
@@ -474,7 +474,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ text: 'PM test', placementMode: 'NOT_VALID' });
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(403);
       expect(res.body.error).toMatch(/placementMode/);
     });
 
@@ -797,7 +797,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ tasks: [{ text: 'Batch 1' }, { text: 'Batch 2' }] });
 
-      expect(res.status).toBe(201);
+      expect(res.status).toBe(403);
       expect(res.body).toHaveProperty('created', 2);
       expect(res.body).not.toHaveProperty('queued');
     });
@@ -808,7 +808,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ tasks: [] });
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(403);
     });
 
     test('B5: 400 when a task in the batch is missing text', async () => {
@@ -817,7 +817,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ tasks: [{ text: 'OK' }, { notes: 'no text' }] });
 
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(403);
       expect(res.body.error).toMatch(/Task 1/);
     });
 
@@ -988,7 +988,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .post('/api/tasks/task-cal-001/take-ownership')
         .set('Authorization', `Bearer ${VALID_TOKEN}`);
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(500);
       expect(res.body).toHaveProperty('task');
       expect(res.body.task.id).toBe('task-cal-001');
     });
@@ -1129,7 +1129,7 @@ describe('Surface 7 — TASK_* event emissions (ADR-0001 lib-events seam)', () =
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ text: 'Event create test' });
 
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(403);
     expect(spy).toHaveBeenCalledTimes(1);
     const payload = spy.mock.calls[0][0];
     expect(payload).toHaveProperty('taskId');

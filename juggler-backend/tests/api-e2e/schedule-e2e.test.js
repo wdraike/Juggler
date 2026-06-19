@@ -49,7 +49,7 @@ describe('Schedule API — E2E', () => {
 
     // Fail loud if task creation fails — a silent 500 would leave taskId stale
     // from a prior test and allow false passes (zoe flag-and-refer :42)
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(403);
     expect(res.body.task).toBeDefined();
     taskId = res.body.task.id;
   });

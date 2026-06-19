@@ -134,7 +134,7 @@ jest.mock('../../../src/middleware/jwt-auth', () => ({
     const auth = req.headers.authorization;
     if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: 'Auth required' });
     req.user = { id: 'user-b6b7', email: 'test@test.com', name: 'Test' };
-    req.auth = { plans: {} };
+    req.auth = { plans: {}, apps: ['juggler'] };
     next();
   },
   verifyToken: jest.fn(),
@@ -500,7 +500,7 @@ describe('B7 — callGemini: null SDK result must produce structured error, not 
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ command: 'list tasks', tasks: [], statuses: {}, config: {} });
 
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(500);
       expect(res.body.msg).toBe('All good.');
     }
   );

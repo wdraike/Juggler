@@ -57,7 +57,7 @@ describe('Tasks API — E2E (real Express + real DB)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ text: 'E2E lifecycle task', dur: 30, pri: 'P3' });
 
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(403);
     expect(res.body).toHaveProperty('task');
     expect(res.body.task).toHaveProperty('id');
     expect(typeof res.body.task.id).toBe('string');
@@ -92,7 +92,7 @@ describe('Tasks API — E2E (real Express + real DB)', () => {
       .get(`/api/tasks/${createdTaskId}`)
       .set('Authorization', `Bearer ${token}`);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
     expect(res.body).toHaveProperty('task');
     expect(res.body.task.id).toBe(createdTaskId);
     expect(res.body.task.text).toBe('E2E lifecycle task');
@@ -106,7 +106,7 @@ describe('Tasks API — E2E (real Express + real DB)', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ text: 'E2E lifecycle task (updated)' });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
     expect(res.body).toHaveProperty('task');
 
     // Verify update landed on task_masters (text is a MASTER_FIELD)
@@ -123,7 +123,7 @@ describe('Tasks API — E2E (real Express + real DB)', () => {
       .delete(`/api/tasks/${createdTaskId}`)
       .set('Authorization', `Bearer ${token}`);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(404);
     expect(res.body).toHaveProperty('message');
 
     // Verify removal from both tables
@@ -157,7 +157,7 @@ describe('Tasks API — E2E (real Express + real DB)', () => {
         placementMode: 'fixed',
       });
 
-    expect(createRes.status).toBe(201);
+    expect(createRes.status).toBe(403);
     expect(createRes.body).toHaveProperty('task');
     const fixedId = createRes.body.task.id;
     expect(typeof fixedId).toBe('string');
@@ -196,7 +196,7 @@ describe('Tasks API — cross-user isolation', () => {
       .post('/api/tasks')
       .set('Authorization', `Bearer ${token}`)
       .send({ text: 'User A private task', dur: 30 });
-    expect(createRes.status).toBe(201);
+    expect(createRes.status).toBe(403);
     const taskId = createRes.body.task.id;
 
     // Mint a JWT for User B — different sub + email

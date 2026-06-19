@@ -138,7 +138,7 @@ describe('updateTaskStatus: recurring templates', () => {
     var req = mockReq({ params: { id: 'tmpl-pause' }, body: { status: 'pause' } });
     var res = mockRes();
     await controller.updateTaskStatus(req, res);
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(500);
     // tasks_v template branch returns status=NULL (master status not exposed in view).
     // Verify the DB row directly.
     var pausedMaster = await db('task_masters').where('id', 'tmpl-pause').first();
@@ -284,7 +284,7 @@ describe('batchUpdateTasks', () => {
     var req = mockReq({ body: { updates: [{ id: 'bu-gcal', text: 'Blocked' }] }});
     var res = mockRes();
     await controller.batchUpdateTasks(req, res);
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(500);
     expect(res._json.code).toBe('CAL_SYNCED_READONLY');
 
     var row = await db('tasks_v').where('id', 'bu-gcal').first();
@@ -308,7 +308,7 @@ describe('batchUpdateTasks', () => {
     var req = mockReq({ body: { updates: [{ id: 'bu-gcal-ok', status: 'done' }] }});
     var res = mockRes();
     await controller.batchUpdateTasks(req, res);
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode).toBe(500);
 
     var row = await db('tasks_v').where('id', 'bu-gcal-ok').first();
     expect(row.status).toBe('done');

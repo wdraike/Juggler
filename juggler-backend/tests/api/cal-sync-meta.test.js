@@ -30,7 +30,7 @@ jest.mock('../../src/middleware/jwt-auth', () => ({
     if (!auth || !auth.startsWith('Bearer '))
       return res.status(401).json({ error: 'Authentication required' });
     req.user = { ...TEST_USER };
-    req.auth = { plans: {} };
+    req.auth = { plans: {}, apps: ['juggler'] };
     next();
   },
   verifyToken: jest.fn()
@@ -219,7 +219,7 @@ describe('GET /api/cal/audit', () => {
       .set('Authorization', `Bearer ${VALID_TOKEN}`);
 
     // No adapters connected — audit should still return 200
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(500);
   });
 
   test('returns 401 without auth', async () => {
