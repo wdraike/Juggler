@@ -336,10 +336,20 @@ for each item in slack-sorted order:
    place item forward from max(today, start_after_at):
       walk days from earliest → effective_deadline, picking the
       earliest slot that fits (when-window, capacity, day-of-week,
-      location, tools, dependency ordering via depsMetByDate)
+      location, tools, dependency-ready floor via computeDepReadyAbs)
    if placed: record in globalPlacedEnd
    else: leave for retry/rollback passes
 ```
+
+#### Dependency-ready floor (`computeDepReadyAbs` / `depReadyAbs`)
+
+Dependency satisfaction during placement is enforced via an absolute-time *floor*, not a per-day boolean. The implementation lives in `juggler-backend/src/scheduler/unifiedScheduleV2.js`:
+
+- **`computeDepReadyAbs(item, placedById, statuses, dates)`** (`unifiedScheduleV2.js:788`) walks the item's live (pending, non-terminal) dependencies and returns the maximum absolute end-minute across them — i.e. the earliest absolute time at which all predecessors are finished. It returns `-Infinity` when the item has no live deps and `Infinity` when any live dependency is itself unplaced (so the item cannot place yet and is deferred to the retry/rollback passes).
+- **`depReadyAbs` is computed once per scan, not per slot.** Both `findEarliestSlot` (`:923`) and `findLatestSlot` (`:1066`) hoist a single `depReadyAbs = checkDeps ? computeDepReadyAbs(...) : -Infinity` at the top of the scan. Every candidate slot then does an O(1) comparison `absoluteMin(date, slot) < depReadyAbs → skip` (`:1012`, `:1020`, `:1094`) rather than recomputing dependency state. This is the **scan-constancy invariant (A-001)**: within a single `findEarliestSlot`/`findLatestSlot` call, `placedById` and `statuses` are treated as read-only snapshots — placements are written by the *caller* after the scan returns, so the dependency floor cannot shift mid-scan and slot decisions remain internally consistent.
+- **`_testOnly` export.** `computeDepReadyAbs` (with `indexOfDate`, `absoluteMin`, `weatherOk`, `hasWeatherConstraint`) is re-exported under `module.exports._testOnly` (`:2019`) so unit tests can exercise the dependency-floor computation directly without driving a full schedule run — the only reachable path for past-dateKey deps, which never appear in `placedById` via the full scheduler.
+
+(Historical note: this floor supersedes the earlier per-day `depsMetByDate` boolean check.)
 
 ### 4c-4. Retry pass
 Some items may not place on the first pass because dependencies weren't placed yet (e.g., diamond DAGs where the sort order doesn't perfectly match topological order). After the main pass, retry all unplaced items — their deps may now be satisfied.

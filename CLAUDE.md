@@ -12,7 +12,31 @@ React (port 3002) | Node.js/Express (port 5002) | MySQL + Knex.js | MCP server (
 ```bash
 npm run lint && npm test              # Quality gate
 # Start services individually from juggler-backend/ and juggler-frontend/
+npm run migrate                       # knex migrate:latest (prod-guarded — see below)
+npm run migrate:rollback              # knex migrate:rollback (prod-guarded)
 ```
+
+**Production migrate guard (999.302):** `migrate` and `migrate:rollback` run through
+`juggler-backend/scripts/migrate-guard.js`, which **refuses** to migrate when it detects a
+production target — specifically when `DB_PORT=3307` (GCP Cloud SQL Proxy) **or**
+`CLOUD_SQL_CONNECTION_NAME` is set. The guard exits 1 with a remediation message and never
+spawns knex. To migrate intentionally against such a target, opt in with `ALLOW_PROD_MIGRATE=1`
+(only the exact string `1` is accepted): `ALLOW_PROD_MIGRATE=1 npm run migrate`. The guard lives
+in the CLI wrapper, not `knexfile.js` (which the running app imports and must never throw on import).
+`migrate:status` is **not** guarded (read-only).
+
+### Migrations — transitional views & editing applied migrations (999.733)
+- **`20260509000300_add_missed_status_and_completed_at.js`** is a *transitional view* migration:
+  besides adding the `missed` status to the `task_instances`/`task_masters` CHECK constraints and a
+  `completed_at` column (+ backfill from `updated_at` for terminal rows), its `up()` **drops and
+  recreates the `tasks_v` view** so the unified template+instance read model exposes the new
+  `completed_at` column. Schema changes that alter the shape of `tasks_v` MUST recreate the view in
+  the same migration (DROP VIEW IF EXISTS → CREATE VIEW) so the read model never lags the tables.
+- **Policy: never edit an already-applied migration.** Migrations are immutable once they have run
+  in any shared environment. To change a schema, add a **new** migration — editing an applied file
+  leaves environments that already ran the old version silently inconsistent (knex records it as
+  applied and will not re-run it). Beware idempotent rename/`hasColumn` guards: they silently no-op
+  if the table/column name is wrong, so verify the target exists rather than assuming the guard ran.
 
 ## Scheduler — Critical Architecture
 

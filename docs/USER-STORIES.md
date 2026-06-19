@@ -1,7 +1,7 @@
 ---
-version: 1.0.0
+version: 1.1.0
 status: active
-last_updated: 2026-06-15
+last_updated: 2026-06-18
 service: juggler
 ---
 
@@ -11,23 +11,23 @@ service: juggler
 
 | ID | Story | Requirements | Priority | Status |
 |----|-------|-------------|----------|--------|
-| US-1 | Create and manage tasks | R1, R2, R3, R6, R16, R23, R29 | P1 — Core | Partial |
-| US-2 | Organize work into projects | R4, R5 | P1 — Core | Implemented |
-| US-3 | View schedule in multiple calendar layouts | R8 | P2 — Important | Implemented |
-| US-4 | Interact with the calendar via drag-and-drop | R9 | P2 — Important | Partial |
-| US-5 | Run the daily scheduler | R11, R21, R26, R37, R39, R40, R41 | P1 — Core | Partial |
-| US-6 | Set up recurring tasks | R18, R32, R33, R34 | P2 — Important | Implemented |
-| US-7 | Split large tasks across time blocks | R19, R35 | P2 — Important | Partial |
-| US-8 | Sync with external calendars | R7, R30 | P1 — Core | Implemented |
-| US-9 | Use AI to manage tasks with natural language | R15 | P3 — Enhancement | Implemented |
-| US-10 | Export and import my data | R22 | P3 — Enhancement | Implemented |
-| US-11 | Configure locations, tools, and weather constraints | R20, R25, R27, R38 | P2 — Important | Partial |
-| US-12 | Control Juggler via MCP tools | R17 | P3 — Enhancement | Partial |
-| US-13 | Manage my subscription plan | R24 | P3 — Enhancement | Implemented |
-| US-14 | Administer the system | R28 | P4 — Admin | Partial |
-| US-15 | Customize my preferences | R31 | P2 — Important | Implemented |
-| US-16 | Chain tasks with dependencies | R10, R36 | P2 — Important | Partial |
-| US-17 | Generate reports on time and workload | R12, R13, R14 | P4 — Planned | Planned |
+| US-1 | Create and manage tasks | R1.1–R1.10, R2.1–R2.8, R3.1–R3.3, R6.1–R6.6, R16.1–R16.3, R23.1–R23.4, R29.1–R29.3 | P1 — Core | Partial |
+| US-2 | Organize work into projects | R4.1–R4.5, R5.1 | P1 — Core | Implemented |
+| US-3 | View schedule in multiple calendar layouts | R8.1–R8.8 | P2 — Important | Implemented |
+| US-4 | Interact with the calendar via drag-and-drop | R9.1–R9.3 | P2 — Important | Partial |
+| US-5 | Run the daily scheduler | R11.1–R11.22, R21.1–R21.3, R26.1–R26.4, R37.1–R37.3, R39.1–R39.5, R40.1–R40.3, R41.1–R41.5 | P1 — Core | Partial |
+| US-6 | Set up recurring tasks | R18.1–R18.8, R32.1–R32.7, R33.1–R33.5, R34.1–R34.5 | P2 — Important | Implemented |
+| US-7 | Split large tasks across time blocks | R19.1–R19.7, R35.1–R35.6 | P2 — Important | Partial |
+| US-8 | Sync with external calendars | R7.1–R7.8, R30.1–R30.2 | P1 — Core | Implemented |
+| US-9 | Use AI to manage tasks with natural language | R15.1–R15.5 | P3 — Enhancement | Implemented |
+| US-10 | Export and import my data | R22.1–R22.5 | P3 — Enhancement | Implemented |
+| US-11 | Configure locations, tools, and weather constraints | R20.1–R20.4, R25.1–R25.5, R27.1–R27.3, R38.1–R38.4 | P2 — Important | Partial |
+| US-12 | Control Juggler via MCP tools | R17.1–R17.2 | P3 — Enhancement | Partial |
+| US-13 | Manage my subscription plan | R24.1–R24.6 | P3 — Enhancement | Implemented |
+| US-14 | Administer the system | R28.1–R28.3 | P4 — Admin | Partial |
+| US-15 | Customize my preferences | R31.1–R31.5 | P2 — Important | Implemented |
+| US-16 | Chain tasks with dependencies | R10.1–R10.5, R36.1–R36.3 | P2 — Important | Partial |
+| US-17 | Generate reports on time and workload | R12.1, R13.1, R14.1 | P4 — Planned | Planned |
 
 ## Stories
 
@@ -44,10 +44,10 @@ service: juggler
 - I can change a task's status through its lifecycle: todo → in-progress → done (or paused/cancelled/disabled)
 - I can see how much time remains on an in-progress task against my original estimate
 - I can disable a task to hide it temporarily and re-enable it later when I have capacity
-- I can create or update up to 500 tasks in a single batch operation
+- I can create up to 500 tasks or update up to 2000 tasks in a single batch operation
 - I can authenticate once and access all task features without re-entering credentials
 
-**Mapped requirements:** R1, R2, R3, R6, R16, R23, R29
+**Mapped requirements:** R1.1–R1.10, R2.1–R2.8, R3.1–R3.3, R6.1–R6.6, R16.1–R16.3, R23.1–R23.4, R29.1–R29.3
 
 **Priority:** P1 — Core
 **Status:** Partial
@@ -67,7 +67,7 @@ service: juggler
 - When I batch-create tasks referencing a new project name, the project is created automatically
 - I can filter my task list and calendar views by project
 
-**Mapped requirements:** R4, R5
+**Mapped requirements:** R4.1–R4.5, R5.1
 
 **Priority:** P1 — Core
 **Status:** Implemented
@@ -88,7 +88,7 @@ service: juggler
 - In the dependency graph view, I can see which tasks block others as a visual chain
 - Synced external calendar events appear alongside my tasks in every chronological view
 
-**Mapped requirements:** R8
+**Mapped requirements:** R8.1–R8.8
 
 **Priority:** P2 — Important
 **Status:** Implemented
@@ -107,7 +107,7 @@ service: juggler
 - I can drag a connector from one task node to another in the dependency graph to create a "depends on" link
 - After any drag operation, the change is persisted and reflected in all views
 
-**Mapped requirements:** R9
+**Mapped requirements:** R9.1–R9.3
 
 **Priority:** P2 — Important
 **Status:** Partial
@@ -131,7 +131,7 @@ service: juggler
 - When I change my working hours or task constraints, the schedule re-runs automatically
 - The scheduler considers all my constraints together: time blocks, locations, tools, weather, travel time, dependencies, and recurring patterns
 
-**Mapped requirements:** R11, R21, R26, R37, R39, R40, R41
+**Mapped requirements:** R11.1–R11.22, R21.1–R21.3, R26.1–R26.4, R37.1–R37.3, R39.1–R39.5, R40.1–R40.3, R41.1–R41.5
 
 **Priority:** P1 — Core
 **Status:** Partial
@@ -153,7 +153,7 @@ service: juggler
 - I can override a single instance's text or time without affecting the rest of the series
 - I can cancel a recurring series and all future instances are removed while past completed ones are preserved
 
-**Mapped requirements:** R18, R32, R33, R34
+**Mapped requirements:** R18.1–R18.8, R32.1–R32.7, R33.1–R33.5, R34.1–R34.5
 
 **Priority:** P2 — Important
 **Status:** Implemented
@@ -174,7 +174,7 @@ service: juggler
 - If chunks can't all fit, the remaining portion is flagged so I know the task isn't fully scheduled
 - I can set my preferred default split size in settings so new tasks inherit it
 
-**Mapped requirements:** R19, R35
+**Mapped requirements:** R19.1–R19.7, R35.1–R35.6
 
 **Priority:** P2 — Important
 **Status:** Partial
@@ -196,7 +196,7 @@ service: juggler
 - When I sync, changes flow both ways — new external events come in, new Juggler tasks go out
 - If I want to reschedule a meeting that came from my external calendar, I can "take ownership" of it to detach it from the source and move it freely
 
-**Mapped requirements:** R7, R30
+**Mapped requirements:** R7.1–R7.8, R30.1–R30.2
 
 **Priority:** P1 — Core
 **Status:** Implemented
@@ -215,7 +215,7 @@ service: juggler
 - I can use AI commands up to 50 times per day without hitting a limit
 - If I exceed the daily quota, I get a clear message telling me when I can use it again
 
-**Mapped requirements:** R15
+**Mapped requirements:** R15.1–R15.5
 
 **Priority:** P3 — Enhancement
 **Status:** Implemented
@@ -234,7 +234,7 @@ service: juggler
 - If my import file has errors, I get specific messages about what's wrong so I can fix it
 - The import validates the data structure so I don't accidentally corrupt my account
 
-**Mapped requirements:** R22
+**Mapped requirements:** R22.1–R22.5
 
 **Priority:** P3 — Enhancement
 **Status:** Implemented
@@ -257,7 +257,7 @@ service: juggler
 - I can set a task to "dry weather only" and the scheduler skips rainy time slots
 - When weather data is unavailable, weather-constrained tasks are flagged rather than placed blindly
 
-**Mapped requirements:** R20, R25, R27, R38
+**Mapped requirements:** R20.1–R20.4, R25.1–R25.5, R27.1–R27.3, R38.1–R38.4
 
 **Priority:** P2 — Important
 **Status:** Partial
@@ -277,7 +277,7 @@ service: juggler
 - I can export my data and check calendar sync status via MCP
 - All MCP operations are scoped to my user account — I can only see and modify my own tasks
 
-**Mapped requirements:** R17
+**Mapped requirements:** R17.1–R17.2
 
 **Priority:** P3 — Enhancement
 **Status:** Partial
@@ -297,7 +297,7 @@ service: juggler
 - When I upgrade, new features and higher limits take effect immediately
 - When I downgrade, excess items are gracefully disabled (newest first) rather than deleted
 
-**Mapped requirements:** R24
+**Mapped requirements:** R24.1–R24.6
 
 **Priority:** P3 — Enhancement
 **Status:** Implemented
@@ -316,7 +316,7 @@ service: juggler
 - I can stop impersonating and return to my own account at any time
 - I can review a log of all impersonation events — who impersonated whom and when
 
-**Mapped requirements:** R28
+**Mapped requirements:** R28.1–R28.3
 
 **Priority:** P4 — Admin
 **Status:** Partial
@@ -337,7 +337,7 @@ service: juggler
 - I can adjust the font size for readability
 - When I change time-related settings, my schedule re-runs automatically to reflect the new constraints
 
-**Mapped requirements:** R31
+**Mapped requirements:** R31.1–R31.5
 
 **Priority:** P2 — Important
 **Status:** Implemented
@@ -358,7 +358,7 @@ service: juggler
 - I can see all my dependency chains visualized as a graph with directional arrows
 - I cannot add dependencies to recurring tasks (the system tells me why)
 
-**Mapped requirements:** R10, R36
+**Mapped requirements:** R10.1–R10.5, R36.1–R36.3
 
 **Priority:** P2 — Important
 **Status:** Partial
@@ -377,7 +377,7 @@ service: juggler
 - I can see a capacity report showing how many free hours I have each day versus how many are already committed
 - Reports are based on my actual task data — durations, completion dates, and schedule placements
 
-**Mapped requirements:** R12, R13, R14
+**Mapped requirements:** R12.1, R13.1, R14.1
 
 **Priority:** P4 — Planned
 **Status:** Planned
