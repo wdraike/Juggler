@@ -185,6 +185,10 @@ const mcpLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 300 });
 const oauthCallbackLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 20, message: { error: 'Too many requests, please wait.' } });
 const billingWebhookLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 120, message: { error: 'Too many webhook calls.' } });
 const healthLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 300 });
+// Dedicated brute-force limiter for the service-key feature endpoints
+// (/api/feature-catalog, /api/feature-events). The global apiLimiter (1000/min)
+// is too loose to protect the service key on these paths (999.293 finding A2).
+const featureServiceLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 60, message: { error: 'Too many requests, please wait.' } });
 // Per-user write limiter — keys by user ID so shared NAT/proxies don't hit a common bucket.
 // skip() passes through safe read-only methods so GETs aren't throttled.
 const writeRateLimiter = rateLimit({
@@ -322,8 +326,8 @@ app.use('/api/msft-cal', msftCalRoutes);
 app.use('/api/apple-cal', appleCalRoutes);
 app.use('/api/cal', calSyncRoutes);
 app.use('/api/schedule', scheduleRoutes);
-app.use('/api/feature-catalog', require('./routes/feature-catalog.routes'));
-app.use('/api/feature-events', require('./routes/feature-events.routes'));
+app.use('/api/feature-catalog', featureServiceLimiter, require('./routes/feature-catalog.routes'));
+app.use('/api/feature-events', featureServiceLimiter, require('./routes/feature-events.routes'));
 app.use('/api/my-plan', require('./routes/my-plan.routes'));
 app.use('/api/billing-webhooks', billingWebhookLimiter, require('./routes/billing-webhooks.routes'));
 app.use('/api/weather', authenticateJWT, writeRateLimiter, weatherRoutes);
