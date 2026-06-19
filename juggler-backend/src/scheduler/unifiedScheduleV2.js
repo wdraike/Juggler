@@ -1262,7 +1262,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   if (dates.length === 0) {
     return {
       dayPlacements: {}, newStatuses: Object.assign({}, statuses),
-      unplaced: [], deadlineMisses: [], placedCount: 0, score: scoreSchedule({}, [], allTasks),
+      unplaced: [], placedCount: 0, score: scoreSchedule({}, [], allTasks),
       warnings: [{ type: 'v2_no_dates' }], timezone: cfg.timezone || null,
       spacingStats: {}, slackByTaskId: {}
     };
@@ -1998,7 +1998,6 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     dayPlacements: dayPlacements,
     newStatuses: Object.assign({}, statuses),
     unplaced: unplacedTasks,
-    deadlineMisses: [],
     placedCount: placedCount,
     score: scoreSchedule(dayPlacements, unplacedTasks, allTasks),
     warnings: warnings,
