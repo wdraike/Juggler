@@ -46,7 +46,13 @@ export default function LoginPage() {
 
   function handleLogin() {
     setLoginError(null);
-    login(); // Redirects to auth-service
+    // FIX(ernie F-2): login() is async — attach .catch so a PKCE generation failure
+    // (e.g. crypto.subtle unavailable on a non-secure origin) surfaces as a visible
+    // error message rather than an unhandled rejection and a silently dead button.
+    login().catch(function(err) {
+      console.error('[LoginPage] Sign-in failed:', err);
+      setLoginError('Sign-in could not be started. Please ensure you are using a secure connection (HTTPS) and try again.');
+    });
   }
 
   return (

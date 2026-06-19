@@ -15,6 +15,30 @@ const AUTH_SERVICE_URL = authServiceUrl;
 const AUTH_FRONTEND_URL = authFrontendUrl;
 const APP_URL = window.location.origin;
 
+// PKCE (RFC 7636) — juggler is the public client that redeems the auth code, so it owns
+// the verifier. It generates verifier+challenge, passes the challenge through auth-frontend
+// to the authorize endpoint, and sends the verifier at /oauth/token. This satisfies the
+// auth-service AC5 guard (token.js) via PKCE rather than a client_secret.
+const PKCE_VERIFIER_KEY = 'juggler-pkce-verifier';
+
+function base64UrlEncode(bytes) {
+  let str = '';
+  const arr = new Uint8Array(bytes);
+  for (let i = 0; i < arr.length; i++) str += String.fromCharCode(arr[i]);
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function generateCodeVerifier() {
+  const bytes = new Uint8Array(32);
+  window.crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
+}
+
+async function deriveCodeChallenge(verifier) {
+  const digest = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  return base64UrlEncode(digest);
+}
+
 export function useAuth() {
   return useContext(AuthContext);
 }
@@ -38,14 +62,19 @@ export default function AuthProvider({ children }) {
       }
       codeExchangeRef.current = true;
 
+      // PKCE: retrieve the verifier stashed by login() before the auth-frontend redirect.
+      const codeVerifier = sessionStorage.getItem(PKCE_VERIFIER_KEY);
+      sessionStorage.removeItem(PKCE_VERIFIER_KEY);
+
       // Exchange authorization code for tokens
       fetch(`${AUTH_SERVICE_URL}/oauth/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          grant_type: 'authorization_code', 
+        body: JSON.stringify({
+          grant_type: 'authorization_code',
           code: code,
-          client_id: 'auth-frontend'
+          client_id: 'auth-frontend',
+          ...(codeVerifier ? { code_verifier: codeVerifier } : {})
         })
       })
         .then(res => res.json())
@@ -214,9 +243,29 @@ export default function AuthProvider({ children }) {
   }, [user]);
 
   // Redirect to auth-service login page
-  const login = useCallback(() => {
+  const login = useCallback(async () => {
     const callbackUrl = `${APP_URL}/auth/callback`;
-    window.location.href = `${AUTH_FRONTEND_URL}/login?app=${APP_ID}&redirect=${encodeURIComponent(callbackUrl)}`;
+    // PKCE: generate the verifier, stash it for the callback, pass the challenge along.
+    // FIX(ernie F-1/F-2): wrap crypto.subtle usage in try/catch — window.crypto.subtle
+    // is undefined on non-secure (plain http, non-localhost) origins, which would produce
+    // an unhandled rejection and a silently dead Sign-In button. On failure we surface
+    // the error to the caller (rethrow) so LoginPage.jsx can show user-visible feedback.
+    // We do NOT silently redirect without PKCE — that would skip the AC5 verifier check
+    // and reintroduce the login loop for PKCE-bound codes.
+    let verifier, challenge;
+    try {
+      verifier = generateCodeVerifier();
+      challenge = await deriveCodeChallenge(verifier);
+    } catch (err) {
+      console.error('[AuthProvider] PKCE generation failed — crypto.subtle may be unavailable (non-secure origin):', err);
+      throw err;
+    }
+    sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+    const url = `${AUTH_FRONTEND_URL}/login?app=${APP_ID}`
+      + `&redirect=${encodeURIComponent(callbackUrl)}`
+      + `&code_challenge=${encodeURIComponent(challenge)}`
+      + `&code_challenge_method=S256`;
+    window.location.href = url;
   }, []);
 
   const logout = useCallback(async () => {
