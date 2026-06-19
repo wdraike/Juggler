@@ -1651,7 +1651,11 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       });
     });
 
-    // For each master, determine the cycle boundary and identify overflow chunks.
+    // For each master, determine the cycle boundary PER OCCURRENCE and identify
+    // overflow chunks. Each occurrence's chunks must finish within cycleLen days
+    // of THAT occurrence's own anchor date — not the master's globally-earliest
+    // anchor. A chunk sitting on its own occurrence's anchor day (daily) or
+    // within its own occurrence's cycle window (weekly etc.) must never be flagged.
     Object.keys(splitChunksByMaster).forEach(function(mid) {
       var chunks = splitChunksByMaster[mid];
       if (chunks.length === 0) return;
@@ -1663,41 +1667,65 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       var cycleLen = recurringCycleDays(recur);
       if (cycleLen <= 0) return; // unknown cycle — can't enforce time-boxing
 
-      // Find the earliest anchor date for this master's chunks. This is the
-      // occurrence start for the current cycle. Chunks must finish before
-      // anchor + cycleLen days.
-      var earliestAnchor = null;
-      chunks.forEach(function(c) {
-        var ad = c.task.date ? toKey(c.task.date) : (c.task._candidateDate || null);
-        if (ad && (earliestAnchor === null || ad < earliestAnchor)) earliestAnchor = ad;
-      });
-      // Also check items from buildItems that belong to this master but
-      // may not have been placed (their anchorDate helps find the true
-      // cycle start even if no chunks were placed on that date).
+      // Build a set of known occurrence anchor dates for this master from the
+      // items array (buildItems sets anchorDate = toKey(t.date) per occurrence).
+      // These are the valid occurrence-start dates within the horizon; used below
+      // to resolve a chunk's occurrence anchor when the chunk's own date is not
+      // a registered anchor (e.g. a late chunk placed beyond its anchor date).
+      var knownOccurrenceAnchors = [];
       items.forEach(function(item) {
         if (!item.isRecurring) return;
         var splitTotal = item.splitTotal != null ? Number(item.splitTotal) : 1;
         if (splitTotal <= 1) return;
-        var imid = item.masterId;
-        if (imid !== mid) return;
+        if (item.masterId !== mid) return;
         var ad = item.anchorDate;
-        if (ad && (earliestAnchor === null || ad < earliestAnchor)) earliestAnchor = ad;
+        if (ad && knownOccurrenceAnchors.indexOf(ad) === -1) knownOccurrenceAnchors.push(ad);
       });
-      if (!earliestAnchor) return;
+      knownOccurrenceAnchors.sort(); // ascending so we can binary-search below
 
-      // Compute the boundary date: anchor + cycleLen days. Any chunk placed
-      // on or after this date overflows into the next cycle.
-      var anchorDate = parseDate(earliestAnchor);
-      if (!anchorDate) return;
-      var boundaryDate = new Date(anchorDate);
-      boundaryDate.setDate(boundaryDate.getDate() + cycleLen);
-      var boundaryKey = formatDateKey(boundaryDate);
+      // For each placed chunk, resolve its occurrence anchor and compute a
+      // per-occurrence boundary. A chunk overflows only if its dateKey falls
+      // on or after (its own occurrence's anchor + cycleLen).
+      //
+      // Occurrence anchor resolution for a chunk:
+      //   1. Use the chunk's own task.date (or _candidateDate) if it matches a
+      //      known occurrence anchor exactly — this is the normal case.
+      //   2. Otherwise walk knownOccurrenceAnchors to find the latest anchor that
+      //      is <= chunk.dateKey — the chunk was placed after its anchor day (only
+      //      meaningful for multi-day cycles like weekly).
+      //   3. Fall back to the chunk's own date as anchor if no known anchors exist
+      //      (e.g. for fixtures that bypass buildItems). This is safe: a chunk on
+      //      its own date always has dateKey == occurrenceAnchor < anchor+cycleLen
+      //      for any cycleLen >= 1, so it will never be wrongly flagged.
+      function resolveOccurrenceAnchor(c) {
+        var chunkDate = c.task.date ? toKey(c.task.date) : (c.task._candidateDate || null);
+        if (!chunkDate) return null;
+        // If chunk date is a registered occurrence anchor, use it directly.
+        if (knownOccurrenceAnchors.length === 0 || knownOccurrenceAnchors.indexOf(chunkDate) !== -1) {
+          return chunkDate;
+        }
+        // Find the latest known anchor that is <= chunkDate (for cross-day placement
+        // within a multi-day cycle, e.g. a weekly chunk placed the day after its anchor).
+        var best = null;
+        for (var i = 0; i < knownOccurrenceAnchors.length; i++) {
+          if (knownOccurrenceAnchors[i] <= chunkDate) best = knownOccurrenceAnchors[i];
+          else break;
+        }
+        return best || chunkDate; // last resort: treat chunk's own date as anchor
+      }
 
       // Remove overflow chunks from dayPlacements and flag as unplaced.
       var overflowEntries = [];
       chunks.forEach(function(c) {
+        var occurrenceAnchor = resolveOccurrenceAnchor(c);
+        if (!occurrenceAnchor) return; // cannot determine anchor — skip, do not flag
+        var anchorDate = parseDate(occurrenceAnchor);
+        if (!anchorDate) return;
+        var boundaryDate = new Date(anchorDate);
+        boundaryDate.setDate(boundaryDate.getDate() + cycleLen);
+        var boundaryKey = formatDateKey(boundaryDate);
         if (c.dateKey >= boundaryKey) {
-          // This chunk overflows into the next cycle.
+          // This chunk overflows into the next occurrence's cycle.
           overflowEntries.push(c);
         }
       });

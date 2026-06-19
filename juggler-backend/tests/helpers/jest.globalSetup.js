@@ -9,29 +9,39 @@ process.env.NODE_ENV = 'test';
 var knex = require('knex');
 var knexConfig = require('../../knexfile');
 
-// ── SAFETY GUARD ────────────────────────────────────────────────────────────
-// The `test` knexfile config inherits DB_PORT from .env via dotenv. The project
-// .env points at the production Cloud SQL Proxy (port 3307 / db `juggler`), so a
-// bare `npx jest` (without DB_PORT=3407) would run migrate.latest() AND data-
-// writing tests against PRODUCTION. Refuse to run if the target looks like prod.
-// Tests MUST target test-bed (DB_PORT=3407) — use `cd test-bed && make test-juggler`.
-function assertNotProduction(conn) {
-  var port = String(conn && conn.port);
-  var reasons = [];
-  if (port === '3307') reasons.push('DB_PORT=3307 is the production Cloud SQL Proxy');
-  if (process.env.CLOUD_SQL_CONNECTION_NAME) reasons.push('CLOUD_SQL_CONNECTION_NAME is set (production)');
-  if (reasons.length) {
-    throw new Error(
-      '\n\n🛑 REFUSING TO RUN TESTS AGAINST PRODUCTION.\n' +
-      '   ' + reasons.join('; ') + '.\n' +
-      '   Tests must target test-bed MySQL on 3407.\n' +
-      '   Run:  cd test-bed && make test-juggler   (or set DB_PORT=3407 explicitly).\n'
-    );
-  }
+// ── SAFETY GUARD (999.751) ──────────────────────────────────────────────────
+// The `test` knexfile config inherits DB_PORT/DB_NAME from .env via dotenv. A
+// bare `npx jest` with a *dev* .env present (DB_NAME=juggler, DB_PORT=3308) would
+// run migrate.latest() AND data-writing test setup/teardown against the live DEV
+// database — wiping task_instances/masters (this happened 2026-06-19). The prior
+// guard only refused prod (3307); it did NOT refuse dev (3308). So instead of an
+// allow-prod blocklist, REQUIRE a genuine test target: port 3407 (test-bed) OR a
+// database name ending in `_test`. Anything else (dev 3308, prod 3307, or an
+// unrecognised target) is refused. Tests MUST target test-bed — use
+// `cd test-bed && make test-juggler`.
+function assertSafeTestTarget(conn) {
+  var port = String((conn && conn.port) || '');
+  var database = String((conn && conn.database) || '');
+  var isTestbedPort = port === '3407';
+  var isTestDbName = /_test$/.test(database);
+  var prodSignals = [];
+  if (port === '3307') prodSignals.push('DB_PORT=3307 is the production Cloud SQL Proxy');
+  if (process.env.CLOUD_SQL_CONNECTION_NAME) prodSignals.push('CLOUD_SQL_CONNECTION_NAME is set (production)');
+  // Safe only when the target is unambiguously a test target AND carries no prod signal.
+  if (isTestbedPort && isTestDbName && prodSignals.length === 0) return;
+  var reasons = prodSignals.slice();
+  if (!isTestbedPort) reasons.push('DB_PORT=' + (port || '(unset)') + ' is not the test-bed port 3407');
+  if (!isTestDbName) reasons.push('DB_NAME=' + (database || '(unset)') + ' does not end in `_test` (refusing to write to a non-test database)');
+  throw new Error(
+    '\n\n🛑 REFUSING TO RUN TESTS AGAINST A NON-TEST DATABASE.\n' +
+    '   ' + reasons.join('; ') + '.\n' +
+    '   Tests must target test-bed MySQL on 3407 with a `*_test` database.\n' +
+    '   Run:  cd test-bed && make test-juggler   (or set DB_PORT=3407 + a `*_test` DB_NAME explicitly).\n'
+  );
 }
 
 module.exports = async function globalSetup() {
-  assertNotProduction(knexConfig.test.connection);
+  assertSafeTestTarget(knexConfig.test.connection);
   var db = knex(knexConfig.test);
   try {
     await db.raw('SELECT 1');
