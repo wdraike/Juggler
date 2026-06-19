@@ -333,6 +333,16 @@ app.use('/api/billing-webhooks', billingWebhookLimiter, require('./routes/billin
 app.use('/api/weather', authenticateJWT, writeRateLimiter, weatherRoutes);
 app.use('/api/impersonation', impersonationRoutes);
 
+// Cloud Tasks scheduler push-handler (999.627). Mounted ONLY when the
+// cloud-tasks backend is selected (JUGGLER_QUEUE_DRIVER=cloud-tasks); the
+// DB-queue default never mounts it. The route has its own auth (OIDC /
+// shared-secret) — it is intentionally OUTSIDE the JWT-guarded /api tree
+// because Cloud Tasks is not a JWT-bearing user agent.
+if ((process.env.JUGGLER_QUEUE_DRIVER || 'db').toLowerCase() === 'cloud-tasks') {
+  app.use('/tasks', require('./routes/scheduler-tasks.routes'));
+  logger.info('[app] mounted Cloud Tasks scheduler push-handler at /tasks');
+}
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found', path: req.path });

@@ -53,6 +53,13 @@ function getSseEmitter() {
   if (!_sseEmitter) _sseEmitter = require('../lib/sse-emitter');
   return _sseEmitter;
 }
+// Swappable queue backend (999.627). Lazy require so the cloud-tasks client is
+// only loaded when JUGGLER_QUEUE_DRIVER=cloud-tasks selects it.
+var _queueBackend;
+function getQueueBackend() {
+  if (!_queueBackend) _queueBackend = require('./queue-backend');
+  return _queueBackend;
+}
 
 // ── Configuration ──
 var DEBOUNCE_MS    = 2000;   // quiet period before scheduler runs
@@ -169,13 +176,40 @@ async function enqueueScheduleRun(userId, source, options) {
     logger.error('[SCHED-QUEUE] Failed to enqueue for user', { userId, error: e });
   }
 
-  // Immediate trigger for test environments or urgent updates
-  if (shouldRun) {
+  // ── Cloud Tasks dispatch (999.627) ──
+  // When JUGGLER_QUEUE_DRIVER=cloud-tasks, ALSO push a task to Cloud Tasks. The
+  // DB row above is retained as a safety net + dedup record: the push-handler
+  // and the poll loop both go through the atomic DB claim (tryClaim), so
+  // whichever fires first wins and there is never a double-run. If the
+  // cloud-tasks enqueue fails we have already written the DB row, so the poll
+  // loop picks it up — a trigger is never dropped. Off-flag: this is a no-op.
+  var dispatchedCloudTasks = false;
+  var backend = getQueueBackend();
+  if (backend.isCloudTasks()) {
+    try {
+      var d = await backend.dispatchScheduleRun(userId, source);
+      dispatchedCloudTasks = !!(d && d.dispatched);
+    } catch (e) {
+      logger.error('[SCHED-QUEUE] cloud-tasks dispatch threw for ' + userId, { error: e });
+    }
+  }
+
+  // Immediate trigger for test environments or urgent updates. Suppressed in
+  // cloud-tasks mode when the task was successfully enqueued — the push-handler
+  // will run it (avoids a redundant in-process run racing the push).
+  if (shouldRun && !dispatchedCloudTasks) {
     processUser(userId);
   }
 
-  logger.info('[SCHED-QUEUE] enqueued for ' + userId + ' source=' + (source || 'unknown'));
-  return { enqueued: true, rateLimited: rateLimited };
+  logger.info('[SCHED-QUEUE] enqueued for ' + userId + ' source=' + (source || 'unknown')
+    + (dispatchedCloudTasks ? ' (cloud-tasks)' : ''));
+  // Return shape preserves the legacy { enqueued, rateLimited } contract for the
+  // DB default path (existing tests assert it exactly). `cloudTasks` is only
+  // added when a task was actually dispatched (cloud-tasks mode), so off-flag
+  // behavior is byte-identical.
+  var ret = { enqueued: true, rateLimited: rateLimited };
+  if (dispatchedCloudTasks) ret.cloudTasks = true;
+  return ret;
 }
 
 /**
@@ -429,10 +463,44 @@ function getLastError() {
   return _lastError;
 }
 
+/**
+ * Run the scheduler for a user in response to a Cloud Tasks push (999.627).
+ *
+ * The Cloud Tasks push-handler calls this. Unlike processUser() it does NOT
+ * apply the in-memory DEBOUNCE quiet-period — the task itself was the debounce
+ * (it sat in the queue), and the in-memory _lastEnqueueTime is per-instance so
+ * it isn't meaningful on a worker that didn't receive the original mutation.
+ * It still goes through claimAndRun → tryClaim, so the atomic DB claim is the
+ * cross-runner mutex: if the poll loop already claimed+ran this user, the push
+ * is a no-op (claimed:false), and vice-versa. No double-run.
+ *
+ * Returns the claimAndRun result: { claimed, success?, reason?, error? }.
+ */
+async function runScheduleForPush(userId) {
+  // Respect single-flight within this instance.
+  if (_running.has(userId)) {
+    return { claimed: false, reason: 'already_running_locally' };
+  }
+  var promise = (async function () {
+    return claimAndRun(userId);
+  })();
+  _running.set(userId, promise);
+  try {
+    var result = await promise;
+    _running.delete(userId);
+    return result;
+  } catch (e) {
+    _running.delete(userId);
+    _lastError = { timestamp: Date.now(), message: e.message };
+    return { claimed: false, reason: 'exception', error: e.message };
+  }
+}
+
 module.exports = {
   enqueueScheduleRun,
   dequeueScheduleRun,
   processUser,
+  runScheduleForPush,
   startPollLoop,
   stopPollLoop,
   getPollLoopState,
