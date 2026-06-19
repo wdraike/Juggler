@@ -45,3 +45,23 @@ Open product questions (these need a decision before archiving is finished — s
 template-delete cascade marking completed instances; the standalone "archive a task / view
 archive / restore" workflow is not implemented. A follow-up backlog item tracks completing or
 formally descoping it.
+
+## DECISION — formally DESCOPED (999.749, 2026-06-18)
+
+Archiving is **formally descoped** (not "in progress"). Rationale:
+- **No demonstrated user need.** There is no request or use case driving a standalone
+  archive→view→restore workflow; tasks already have terminal states (`done`/`cancel`/`skip`)
+  and a `disabled`→re-enable path for entitlement-driven hiding. Archiving would duplicate
+  much of that surface for an unproven benefit.
+- **Cost/risk is non-trivial.** Completing it requires: scheduler-terminal recognition of
+  `'archived'`, an `ArchiveTask`/`RestoreTask` use-case pair, an `Archived` view filter + restore
+  action, and a defined dependency policy (the open questions above) — a multi-slice feature on a
+  scheduler-adjacent surface, for low value.
+- **No cleanup required.** The `'archived'`/`'restored'` enum values are RETAINED in the
+  `task_instances.status` CHECK constraint (harmless; removing them would need a migration and
+  could reject legacy rows). They are simply unused by any operational path. The R32 cascade
+  behavior is unchanged.
+
+**If revisited:** treat this doc's "Intended behavior" section as the starting spec; ratify the
+three open product questions first, then re-open a scoped feature item. Until then, archiving is
+out of scope and this is the decision of record.
