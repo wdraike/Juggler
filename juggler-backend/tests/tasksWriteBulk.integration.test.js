@@ -198,7 +198,7 @@ describe('R23.3: Deadlock retry scenarios', () => {
     // The BatchCreateTasks use-case wraps the transaction in a MAX_RETRIES loop.
     // We test the retry logic by injecting a mock that simulates a deadlock
     // on the first attempt and succeeds on retry.
-    var BatchCreateTasks = require('../../src/slices/task/application/commands/BatchCreateTasks');
+    var BatchCreateTasks = require('../../../src/slices/task/application/commands/BatchCreateTasks');
     var MAX_RETRIES = BatchCreateTasks.MAX_RETRIES || 3;
 
     var attemptCount = 0;
@@ -238,7 +238,7 @@ describe('R23.3: Deadlock retry scenarios', () => {
 
   test('R23.3: Max retries exceeded throws deadlock error', async () => {
     if (!available) return;
-    var BatchCreateTasks = require('../../src/slices/task/application/commands/BatchCreateTasks');
+    var BatchCreateTasks = require('../../../src/slices/task/application/commands/BatchCreateTasks');
     var MAX_RETRIES = BatchCreateTasks.MAX_RETRIES || 3;
 
     var attemptCount = 0;
@@ -272,7 +272,7 @@ describe('R23.3: Deadlock retry scenarios', () => {
 
   test('R23.3: Non-deadlock error is NOT retried (re-thrown immediately)', async () => {
     if (!available) return;
-    var BatchCreateTasks = require('../../src/slices/task/application/commands/BatchCreateTasks');
+    var BatchCreateTasks = require('../../../src/slices/task/application/commands/BatchCreateTasks');
 
     var attemptCount = 0;
     var mockRepo = {

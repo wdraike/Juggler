@@ -53,7 +53,7 @@ describe('999.559a — juggler-mcp stdio client: error handling', function () {
     global.fetch = jest.fn().mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:5002'));
 
     // Re-require the module to pick up the new fetch mock
-    var jugglerMcp = require('../../juggler-mcp/index');
+    var jugglerMcp = require('../../../juggler-mcp/index');
 
     // apiCall is not exported, so we test via a tool handler that calls it.
     // We capture the tool handler from the McpServer registration.
@@ -90,7 +90,7 @@ describe('999.559a — juggler-mcp stdio client: error handling', function () {
     global.fetch = jest.fn().mockRejectedValue(new Error('connect ECONNREFUSED'));
 
     try {
-      var mod = require('../../juggler-mcp/index');
+      var mod = require('../../../juggler-mcp/index');
     } catch (e) {
       // Expected if process.exit is called
     }
@@ -130,7 +130,7 @@ describe('999.559a — juggler-mcp stdio client: error handling', function () {
     });
 
     try {
-      var mod = require('../../juggler-mcp/index');
+      var mod = require('../../../juggler-mcp/index');
     } catch (e) { /* ignore */ }
 
     var handler = capturedHandlers['list_tasks'];
@@ -168,7 +168,7 @@ describe('999.559a — juggler-mcp stdio client: error handling', function () {
     });
 
     try {
-      var mod = require('../../juggler-mcp/index');
+      var mod = require('../../../juggler-mcp/index');
     } catch (e) { /* ignore */ }
 
     var handler = capturedHandlers['list_tasks'];
@@ -203,7 +203,7 @@ describe('999.559a — juggler-mcp stdio client: error handling', function () {
     global.fetch = jest.fn();
 
     try {
-      var mod = require('../../juggler-mcp/index');
+      var mod = require('../../../juggler-mcp/index');
     } catch (e) { /* ignore */ }
 
     var handler = capturedHandlers['create_task'];
