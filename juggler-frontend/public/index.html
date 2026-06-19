@@ -6,6 +6,8 @@
   <meta name="theme-color" content="#1A2B4A" />
   <meta name="description" content="Raike & Sons — old school hustle, new school AI" />
   <link rel="icon" href="%PUBLIC_URL%/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="%PUBLIC_URL%/favicon.svg" />
+  <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
   <title>StriveRS by Raike & Sons — AI Task Manager</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -47,16 +49,12 @@
   </style>
 </head>
 <body>
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(function(regs) {
-        regs.forEach(function(r) { r.unregister(); });
-      });
-      caches.keys().then(function(names) {
-        names.forEach(function(name) { caches.delete(name); });
-      });
-    }
-  </script>
+  <!--
+    Service worker registration is handled in src/serviceWorkerRegistration.js
+    (production-only, fail-silent). The previous inline kill-switch that
+    unregistered all SWs and cleared all caches on every load was removed for
+    backlog 999.258 — it would have immediately killed the new conservative SW.
+  -->
   <div id="root"></div>
 </body>
 </html>

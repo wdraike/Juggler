@@ -4,6 +4,7 @@ import { polyfill } from 'mobile-drag-drop';
 import { scrollBehaviourDragImageTranslateOverride } from 'mobile-drag-drop/scroll-behaviour';
 import App from './App';
 import { installErrorReporter } from './bugminerReporter';
+import { register as registerServiceWorker } from './serviceWorkerRegistration';
 
 // Passive browser-error capture → POST /api/client-errors → log-triage backlog. Fail-silent.
 installErrorReporter({ app: 'juggler' });
@@ -28,3 +29,8 @@ root.render(
     <App />
   </React.StrictMode>
 );
+
+// Conservative offline support (backlog 999.258). Production-only and
+// fail-silent — see src/serviceWorkerRegistration.js. Default update flow
+// auto-activates a new SW and reloads onto fresh assets across deploys.
+registerServiceWorker();
