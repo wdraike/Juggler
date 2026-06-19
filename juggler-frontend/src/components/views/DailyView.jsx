@@ -242,7 +242,9 @@ function FixedPopup({ mousePos, item, status, theme, darkMode, cardRect, complet
 var MIN_BLOCK_H = 22;
 var BLOCK_GAP = 2;
 
-function computeColumns(placements, hourHeight) {
+// Exported for unit testing of the adjacent-same-task chunk merge (M-SCH-2,
+// backlog 999.579). Not part of the public component API.
+export function computeColumns(placements, hourHeight) {
   // Minimum visual duration in minutes — ensures MIN_BLOCK_H blocks
   // are treated as overlapping during clustering
   var minVisualMin = hourHeight > 0 ? (MIN_BLOCK_H / hourHeight) * 60 : 0;

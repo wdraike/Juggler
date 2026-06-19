@@ -20,6 +20,7 @@ var {
   seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes, getGCalToken, getMsftToken
 } = require('./helpers/test-setup');
 var { requireDB } = require('../helpers/requireDB');
+var { testWithCreds } = require('./helpers/credentialGate');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, makeGCalEvent, makeMSFTEvent, deleteGCalEvent, deleteMSFTEvent } = require('./helpers/test-fixtures');
 var { getGCalEvent, waitForPropagation } = require('./helpers/api-helpers');
@@ -94,8 +95,7 @@ function tomorrowDateStr() {
 
 describe('Sync Pull: Calendar -> Strive', () => {
 
-  test('new GCal event -> task created with correct fields', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'new GCal event -> task created with correct fields', requireDB(async () => {
     user = await seedTestUser();
 
     var event = await makeGCalEvent(gcalToken, {
@@ -119,8 +119,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     expect(task.when).toBe('fixed');
   }));
 
-  test('new MSFT event -> task created', requireDB(async () => {
-    if (!hasMsftCredentials()) return;
+  testWithCreds(() => hasMsftCredentials(), 'new MSFT event -> task created', requireDB(async () => {
     user = await seedTestUser({ gcal_refresh_token: null });
 
     var event = await makeMSFTEvent(msftToken, {
@@ -149,8 +148,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     expect(task.when).toBe('fixed');
   }));
 
-  test('event title -> task.text', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'event title -> task.text', requireDB(async () => {
     user = await seedTestUser();
 
     var event = await makeGCalEvent(gcalToken, {
@@ -170,8 +168,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
   }));
 
-  test('event duration -> task.dur', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'event duration -> task.dur', requireDB(async () => {
     user = await seedTestUser();
 
     var event = await makeGCalEvent(gcalToken, {
@@ -191,8 +188,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
   }));
 
-  test('event start time -> task.scheduled_at (UTC)', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'event start time -> task.scheduled_at (UTC)', requireDB(async () => {
     user = await seedTestUser();
 
     var event = await makeGCalEvent(gcalToken, {
@@ -216,8 +212,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
   }));
 
-  test('transparent event -> task.marker = true', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'transparent event -> task.marker = true', requireDB(async () => {
     user = await seedTestUser();
 
     var event = await makeGCalEvent(gcalToken, {
@@ -238,8 +233,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
   }));
 
-  test('all-day event -> when=allday', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'all-day event -> when=allday', requireDB(async () => {
     user = await seedTestUser();
 
     var event = await makeGCalEvent(gcalToken, {
@@ -259,8 +253,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     assertPulledTaskMatchesGCalEvent(task, event, TEST_TIMEZONE);
   }));
 
-  test('ledger entry created with origin=provider', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'ledger entry created with origin=provider', requireDB(async () => {
     user = await seedTestUser();
 
     var event = await makeGCalEvent(gcalToken, {
@@ -284,8 +277,7 @@ describe('Sync Pull: Calendar -> Strive', () => {
     expect(ledger.last_pulled_hash).toBeTruthy();
   }));
 
-  test('duplicate prevention: event with same text+date not imported twice', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'duplicate prevention: event with same text+date not imported twice', requireDB(async () => {
     user = await seedTestUser();
 
     var tomorrowDate = new Date();

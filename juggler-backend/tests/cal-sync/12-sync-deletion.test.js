@@ -21,6 +21,7 @@ var {
   seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes, getGCalToken
 } = require('./helpers/test-setup');
 var { requireDB } = require('../helpers/requireDB');
+var { testWithCreds } = require('./helpers/credentialGate');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, makeTaskId, makeLedgerRow, deleteGCalEvent } = require('./helpers/test-fixtures');
 var { getGCalEvent, waitForPropagation } = require('./helpers/api-helpers');
@@ -63,8 +64,7 @@ function tomorrow(hours, minutes) {
 
 describe('Sync Deletion Scenarios', () => {
 
-  test('event deleted from GCal: miss_count increments', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'event deleted from GCal: miss_count increments', requireDB(async () => {
     user = await seedTestUser();
 
     // Create task + push it to get an event
@@ -108,8 +108,7 @@ describe('Sync Deletion Scenarios', () => {
     expect(taskStill).toBeTruthy();
   }));
 
-  test('after 3 syncs with event deleted: task deleted', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'after 3 syncs with event deleted: task deleted', requireDB(async () => {
     user = await seedTestUser();
 
     var task = await makeTask({
@@ -156,8 +155,7 @@ describe('Sync Deletion Scenarios', () => {
     expect(ledgerAfter.status).toBe('deleted_remote');
   }));
 
-  test('task deleted from Strive: event deleted from GCal', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'task deleted from Strive: event deleted from GCal', requireDB(async () => {
     user = await seedTestUser();
 
     var task = await makeTask({
@@ -199,8 +197,7 @@ describe('Sync Deletion Scenarios', () => {
     expect(!event || event.status === 'cancelled').toBeTruthy();
   }));
 
-  test('ingest-only: task deletion blocked', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'ingest-only: task deletion blocked', requireDB(async () => {
     user = await seedTestUser();
 
     // Set ingest-only mode
@@ -239,8 +236,7 @@ describe('Sync Deletion Scenarios', () => {
     expect(taskStill).toBeTruthy();
   }));
 
-  test('dependency transfer on deletion', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'dependency transfer on deletion', requireDB(async () => {
     user = await seedTestUser();
 
     // Create taskB (will be deleted) and taskA (depends on taskB)
@@ -298,8 +294,7 @@ describe('Sync Deletion Scenarios', () => {
     expect(deps).not.toContain(taskB.id);
   }), 120000);
 
-  test('event outside sync window NOT counted as miss', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'event outside sync window NOT counted as miss', requireDB(async () => {
     user = await seedTestUser();
 
     // Push a real task first so the ledger has the correct last_pushed_hash.

@@ -26,6 +26,7 @@ var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, makeTaskId, deleteAllGCalTestEvents, makeGCalEvent } = require('./helpers/test-fixtures');
 var { getGCalEvent, listGCalEvents, waitForPropagation } = require('./helpers/api-helpers');
 var { sync } = require('../../src/controllers/cal-sync.controller');
+var { describeWithCreds } = require('./helpers/credentialGate');
 
 var token = null;
 var user = null;
@@ -65,12 +66,8 @@ afterAll(async () => {
   await db.destroy();
 });
 
-describe('Full Lifecycle E2E', () => {
-  var shouldSkip = () => !user || !token;
-
+describeWithCreds(() => hasGCalCredentials(), 'Full Lifecycle E2E', () => {
   test('1. create 5 tasks -> sync -> 5 events on GCal', async () => {
-    if (shouldSkip()) return;
-
     for (var i = 0; i < 5; i++) {
       var tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
@@ -114,7 +111,7 @@ describe('Full Lifecycle E2E', () => {
   });
 
   test('2. move 1 event on GCal -> sync -> task promoted to fixed', async () => {
-    if (shouldSkip() || !movedTaskId) return;
+    if (!movedTaskId) return;
 
     var ledger = await db('cal_sync_ledger')
       .where({ user_id: TEST_USER_ID, task_id: movedTaskId, provider: 'gcal', status: 'active' })
@@ -147,7 +144,7 @@ describe('Full Lifecycle E2E', () => {
   });
 
   test('3. delete 1 event on GCal -> sync 3x -> task deleted', async () => {
-    if (shouldSkip() || !deletedTaskId) return;
+    if (!deletedTaskId) return;
 
     var ledger = await db('cal_sync_ledger')
       .where({ user_id: TEST_USER_ID, task_id: deletedTaskId, provider: 'gcal', status: 'active' })
@@ -174,7 +171,7 @@ describe('Full Lifecycle E2E', () => {
   });
 
   test('4. edit task title -> sync -> event title updated', async () => {
-    if (shouldSkip() || !editedTaskId) return;
+    if (!editedTaskId) return;
 
     // Change task text in DB
     await tasksWrite.updateTaskById(db, editedTaskId, {
@@ -201,7 +198,7 @@ describe('Full Lifecycle E2E', () => {
   });
 
   test('5. delete task -> sync -> event deleted from GCal', async () => {
-    if (shouldSkip() || !deleteFromDbTaskId) return;
+    if (!deleteFromDbTaskId) return;
 
     // Get the event ID before deleting the task
     var ledger = await db('cal_sync_ledger')
@@ -227,8 +224,6 @@ describe('Full Lifecycle E2E', () => {
   });
 
   test('6. create event on GCal -> sync -> new task in DB', async () => {
-    if (shouldSkip()) return;
-
     // Create event directly on GCal
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 2);
@@ -263,8 +258,6 @@ describe('Full Lifecycle E2E', () => {
   });
 
   test('7. sync_history contains all actions', async () => {
-    if (shouldSkip()) return;
-
     var history = await db('sync_history')
       .where('user_id', TEST_USER_ID)
       .orderBy('id', 'asc')

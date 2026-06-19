@@ -29,6 +29,7 @@ var { assertDbAvailable } = require('../helpers/requireDB');
 var { makeTask, deleteAllGCalTestEvents } = require('./helpers/test-fixtures');
 var { getGCalEvent, listGCalEvents, waitForPropagation } = require('./helpers/api-helpers');
 var { sync } = require('../../src/controllers/cal-sync.controller');
+var { describeWithCreds } = require('./helpers/credentialGate');
 
 var GCAL_ONLY = { msft_cal_refresh_token: null, apple_cal_username: null, apple_cal_password: null, apple_cal_server_url: null, apple_cal_calendar_url: null };
 var token = null;
@@ -137,12 +138,8 @@ async function runSync() {
 
 // ─── Path A: Real Chunk Rows ────────────────────────────────────────────────
 
-describe('Split: Real Chunk Rows (Path A)', () => {
-  var shouldSkip = () => !user || !token;
-
+describeWithCreds(() => hasGCalCredentials(), 'Split: Real Chunk Rows (Path A)', () => {
   test('contiguous chunks merge into single GCal event with total duration', async () => {
-    if (shouldSkip()) return;
-
     // chunk1: 9–10 AM EDT (UTC 13–14), chunk2: 10–11 AM EDT (UTC 14–15)
     var task = await makeSplitTask({
       text: 'Test Split Task Contiguous',
@@ -178,8 +175,6 @@ describe('Split: Real Chunk Rows (Path A)', () => {
   });
 
   test('non-contiguous chunks push as separate events with (X/N) suffix', async () => {
-    if (shouldSkip()) return;
-
     // chunk1: 9–10 AM EDT (UTC 13), chunk2: 2–3 PM EDT (UTC 18)
     var task = await makeSplitTask({
       text: 'Test Split Task NonContig',
@@ -218,8 +213,6 @@ describe('Split: Real Chunk Rows (Path A)', () => {
   });
 
   test('second sync is a no-op: hash match prevents re-push', async () => {
-    if (shouldSkip()) return;
-
     var task = await makeSplitTask({
       text: 'Test Split Task Stable',
       chunks: [
@@ -242,8 +235,6 @@ describe('Split: Real Chunk Rows (Path A)', () => {
   });
 
   test('contiguous chunk follower has no separate ledger entry', async () => {
-    if (shouldSkip()) return;
-
     var task = await makeSplitTask({
       text: 'Test Split Task Follower Clean',
       chunks: [
@@ -289,12 +280,8 @@ async function seedScheduleCache(cacheValue) {
   });
 }
 
-describe('Split Task Expansion (legacy cache path)', () => {
-  var shouldSkip = () => !user || !token;
-
+describeWithCreds(() => hasGCalCredentials(), 'Split Task Expansion (legacy cache path)', () => {
   test('120min task with 4x30min placements creates 4 calendar events', async () => {
-    if (shouldSkip()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(9, 0, 0, 0);
@@ -341,8 +328,6 @@ describe('Split Task Expansion (legacy cache path)', () => {
   });
 
   test('each split part has correct duration', async () => {
-    if (shouldSkip()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(9, 0, 0, 0);
@@ -395,8 +380,6 @@ describe('Split Task Expansion (legacy cache path)', () => {
   });
 
   test('non-split ledger replaced when task becomes split', async () => {
-    if (shouldSkip()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(10, 0, 0, 0);

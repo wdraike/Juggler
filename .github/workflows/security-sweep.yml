@@ -57,6 +57,14 @@ jobs:
       # working-directory or a matrix here (tracked 999.381 per-service tuning).
       - run: npm ci || npm install || true
       - run: npm audit --audit-level=high || true
+      # juggler-backend production-dependency audit (999.629). package.json lives in
+      # juggler-backend/, so the root npm audit above does not cover it. --omit=dev is
+      # the modern equivalent of the deprecated --production; --audit-level=high skips
+      # low-sev noise. Soft-fail (|| true) with visible output to match sibling steps —
+      # this is a reporting baseline, not a gate (Oscar is the gate, per CLAUDE.md).
+      - name: npm audit (juggler-backend, production deps)
+        working-directory: juggler-backend
+        run: npm audit --omit=dev --audit-level=high || true
       - name: Stryker full mutation (only if a stryker config exists)
         run: |
           if ls stryker.conf.* .stryker.conf.* 2>/dev/null | head -1 | grep -q .; then

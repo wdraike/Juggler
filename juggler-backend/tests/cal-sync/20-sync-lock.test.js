@@ -24,6 +24,7 @@ var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, deleteAllGCalTestEvents } = require('./helpers/test-fixtures');
 var { waitForPropagation } = require('./helpers/api-helpers');
 var { sync } = require('../../src/controllers/cal-sync.controller');
+var { describeWithCreds } = require('./helpers/credentialGate');
 
 var GCAL_ONLY = { msft_cal_refresh_token: null, apple_cal_username: null, apple_cal_password: null, apple_cal_server_url: null, apple_cal_calendar_url: null };
 var token = null;
@@ -53,12 +54,8 @@ afterAll(async () => {
   await db.destroy();
 });
 
-describe('Sync Lock / Concurrency', () => {
-  var shouldSkip = () => !user || !token;
-
+describeWithCreds(() => hasGCalCredentials(), 'Sync Lock / Concurrency', () => {
   test('write phase acquires and releases lock', async () => {
-    if (shouldSkip()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(10, 0, 0, 0);
@@ -81,8 +78,6 @@ describe('Sync Lock / Concurrency', () => {
   });
 
   test('mid-sync task edit detected by watermark', async () => {
-    if (shouldSkip()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(10, 0, 0, 0);
@@ -133,8 +128,6 @@ describe('Sync Lock / Concurrency', () => {
   });
 
   test('lock released on error', async () => {
-    if (shouldSkip()) return;
-
     // Corrupt the user's gcal_refresh_token to force a token refresh error
     // during the fetch phase, which should still result in lock cleanup
     var originalUser = await db('users').where('id', TEST_USER_ID).first();

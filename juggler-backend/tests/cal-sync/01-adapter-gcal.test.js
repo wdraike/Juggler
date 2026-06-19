@@ -15,6 +15,7 @@ var { getGCalEvent, listGCalEvents, waitForPropagation } = require('./helpers/ap
 
 var gcalAdapter = require('../../src/lib/cal-adapters/gcal.adapter');
 var { PLACEMENT_MODES } = require('../../src/lib/placementModes');
+var { describeWithCreds } = require('./helpers/credentialGate');
 
 jest.setTimeout(30000);
 
@@ -32,14 +33,10 @@ beforeAll(async function () {
   try {
     token = await getGCalToken();
   } catch (e) {
-    skip = true;
-    console.warn('Skipping GCal adapter tests — token refresh failed:', e.message);
-    return;
+    throw new Error('[TEST-FR-002] GCal live credentials present but token/client acquisition failed: ' + e.message);
   }
   if (!token) {
-    skip = true;
-    console.warn('Skipping GCal adapter tests — could not get access token');
-    return;
+    throw new Error('[TEST-FR-002] GCal live credentials present but could not acquire access token/client');
   }
   // Clean up any leftover test events from previous runs
   await deleteAllGCalTestEvents(token);
@@ -54,19 +51,10 @@ afterAll(async function () {
   await deleteAllGCalTestEvents(token);
 });
 
-function skipIfNoCreds() {
-  if (skip) {
-    return true;
-  }
-  return false;
-}
-
 // ─── 1. normalizeEvent ───
 
-describe('GCal adapter — normalizeEvent', function () {
+describeWithCreds(hasGCalCredentials, 'GCal adapter — normalizeEvent', function () {
   it('should normalize a real GCal timed event to unified shape', async function () {
-    if (skipIfNoCreds()) return;
-
     var raw = await makeGCalEvent(token, {
       summary: 'Test Event Normalize',
       description: 'desc for normalize test'
@@ -89,8 +77,6 @@ describe('GCal adapter — normalizeEvent', function () {
   });
 
   it('should normalize an all-day event correctly', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     var dateStr = tomorrow.getFullYear() + '-' +
@@ -113,10 +99,8 @@ describe('GCal adapter — normalizeEvent', function () {
 
 // ─── 2. eventHash ───
 
-describe('GCal adapter — eventHash', function () {
+describeWithCreds(hasGCalCredentials, 'GCal adapter — eventHash', function () {
   it('should produce a consistent 32-char MD5 hex hash', function () {
-    if (skipIfNoCreds()) return;
-
     var event = {
       title: 'Hash Test',
       startDateTime: '2026-04-14T10:00:00',
@@ -134,8 +118,6 @@ describe('GCal adapter — eventHash', function () {
   });
 
   it('should change when fields change', function () {
-    if (skipIfNoCreds()) return;
-
     var event1 = {
       title: 'Hash A',
       startDateTime: '2026-04-14T10:00:00',
@@ -154,10 +136,8 @@ describe('GCal adapter — eventHash', function () {
 
 // ─── 3. buildEventBody ───
 
-describe('GCal adapter — buildEventBody', function () {
+describeWithCreds(hasGCalCredentials, 'GCal adapter — buildEventBody', function () {
   it('should build a timed event body', function () {
-    if (skipIfNoCreds()) return;
-
     var task = { id: 'test-1', text: 'Timed Task', date: '4/15', time: '2:30 PM', dur: 45, when: 'afternoon' };
     var body = gcalAdapter.buildEventBody(task, 2026, TEST_TIMEZONE);
 
@@ -169,8 +149,6 @@ describe('GCal adapter — buildEventBody', function () {
   });
 
   it('should build an all-day event body', function () {
-    if (skipIfNoCreds()) return;
-
     var task = { id: 'test-2', text: 'All Day Task', date: '4/15', when: 'allday', dur: 30 };
     var body = gcalAdapter.buildEventBody(task, 2026, TEST_TIMEZONE);
 
@@ -180,8 +158,6 @@ describe('GCal adapter — buildEventBody', function () {
   });
 
   it('should mark done tasks as transparent', function () {
-    if (skipIfNoCreds()) return;
-
     var task = { id: 'test-3', text: 'Done Task', date: '4/15', time: '9:00 AM', dur: 30, status: 'done', when: 'morning' };
     var body = gcalAdapter.buildEventBody(task, 2026, TEST_TIMEZONE);
 
@@ -190,8 +166,6 @@ describe('GCal adapter — buildEventBody', function () {
   });
 
   it('should mark marker tasks as transparent', function () {
-    if (skipIfNoCreds()) return;
-
     var task = { id: 'test-4', text: 'Marker Task', date: '4/15', time: '9:00 AM', dur: 30, marker: true, when: 'morning' };
     var body = gcalAdapter.buildEventBody(task, 2026, TEST_TIMEZONE);
 
@@ -201,10 +175,8 @@ describe('GCal adapter — buildEventBody', function () {
 
 // ─── 4. applyEventToTaskFields ───
 
-describe('GCal adapter — applyEventToTaskFields', function () {
+describeWithCreds(hasGCalCredentials, 'GCal adapter — applyEventToTaskFields', function () {
   it('should promote to fixed when time changes', function () {
-    if (skipIfNoCreds()) return;
-
     var event = {
       title: 'Moved Task',
       startDateTime: '2026-04-15T14:00:00',
@@ -221,8 +193,6 @@ describe('GCal adapter — applyEventToTaskFields', function () {
   });
 
   it('should set date_pinned when date changes', function () {
-    if (skipIfNoCreds()) return;
-
     var event = {
       title: 'Date Moved',
       startDateTime: '2026-04-16T09:00:00',
@@ -240,8 +210,6 @@ describe('GCal adapter — applyEventToTaskFields', function () {
   });
 
   it('should promote allday-to-timed to fixed', function () {
-    if (skipIfNoCreds()) return;
-
     var event = {
       title: 'Was AllDay',
       startDateTime: '2026-04-15T10:00:00',
@@ -258,8 +226,6 @@ describe('GCal adapter — applyEventToTaskFields', function () {
   });
 
   it('should clear marker when event is no longer transparent', function () {
-    if (skipIfNoCreds()) return;
-
     var event = {
       title: 'Not Marker Anymore',
       startDateTime: '2026-04-15T10:00:00',
@@ -328,10 +294,8 @@ describe('GCal adapter — applyEventToTaskFields REMINDER→FIXED ordering', fu
 
 // ─── 5. createEvent + getEvent ───
 
-describe('GCal adapter — createEvent', function () {
+describeWithCreds(hasGCalCredentials, 'GCal adapter — createEvent', function () {
   it('should create an event and verify via direct API', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     var month = tomorrow.getMonth() + 1;
@@ -363,10 +327,8 @@ describe('GCal adapter — createEvent', function () {
 
 // ─── 6. updateEvent ───
 
-describe('GCal adapter — updateEvent', function () {
+describeWithCreds(hasGCalCredentials, 'GCal adapter — updateEvent', function () {
   it('should create an event, update title, and verify', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     var month = tomorrow.getMonth() + 1;
@@ -398,10 +360,8 @@ describe('GCal adapter — updateEvent', function () {
 
 // ─── 7. deleteEvent ───
 
-describe('GCal adapter — deleteEvent', function () {
+describeWithCreds(hasGCalCredentials, 'GCal adapter — deleteEvent', function () {
   it('should create an event, delete it, and verify it is gone', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     var month = tomorrow.getMonth() + 1;
@@ -432,10 +392,8 @@ describe('GCal adapter — deleteEvent', function () {
 
 // ─── 8. batchCreateEvents ───
 
-describe('GCal adapter — batchCreateEvents', function () {
+describeWithCreds(hasGCalCredentials, 'GCal adapter — batchCreateEvents', function () {
   it('should create 3 events in a batch and verify all exist', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     var month = tomorrow.getMonth() + 1;
@@ -469,10 +427,8 @@ describe('GCal adapter — batchCreateEvents', function () {
 
 // ─── 9. batchDeleteEvents ───
 
-describe('GCal adapter — batchDeleteEvents', function () {
+describeWithCreds(hasGCalCredentials, 'GCal adapter — batchDeleteEvents', function () {
   it('should delete 3 events in a batch', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 2);
     var month = tomorrow.getMonth() + 1;
@@ -509,10 +465,8 @@ describe('GCal adapter — batchDeleteEvents', function () {
 
 // ─── 10. batchUpdateEvents ───
 
-describe('GCal adapter — batchUpdateEvents', function () {
+describeWithCreds(hasGCalCredentials, 'GCal adapter — batchUpdateEvents', function () {
   it('should create 3 events, batch update titles, and verify', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 2);
     var month = tomorrow.getMonth() + 1;
@@ -558,10 +512,8 @@ describe('GCal adapter — batchUpdateEvents', function () {
 
 // ─── 11. listEvents ───
 
-describe('GCal adapter — listEvents', function () {
+describeWithCreds(hasGCalCredentials, 'GCal adapter — listEvents', function () {
   it('should create 2 events and list them in the correct time window', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 3);
     var month = tomorrow.getMonth() + 1;
@@ -596,10 +548,8 @@ describe('GCal adapter — listEvents', function () {
 
 // ─── 12. hasChanges ───
 
-describe('GCal adapter — hasChanges', function () {
+describeWithCreds(hasGCalCredentials, 'GCal adapter — hasChanges', function () {
   it('should detect changes after creating a new event', async function () {
-    if (skipIfNoCreds()) return;
-
     // First, do a listEvents to establish a sync token
     var now = new Date();
     var start = new Date(now);

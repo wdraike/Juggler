@@ -30,6 +30,7 @@ var { makeTask, makeTaskId, makeLedgerRow, deleteAllGCalTestEvents } = require('
 var { listGCalEvents, waitForPropagation } = require('./helpers/api-helpers');
 var { sync } = require('../../src/controllers/cal-sync.controller');
 var gcalAdapter = require('../../src/lib/cal-adapters/gcal.adapter');
+var { describeWithCreds } = require('./helpers/credentialGate');
 
 var GCAL_ONLY = { msft_cal_refresh_token: null, apple_cal_username: null, apple_cal_password: null, apple_cal_server_url: null, apple_cal_calendar_url: null };
 var token = null;
@@ -56,12 +57,8 @@ afterAll(async () => {
   await db.destroy();
 });
 
-describe('Recurring Instance Handling', () => {
-  var shouldSkip = () => !user || !token;
-
+describeWithCreds(() => hasGCalCredentials(), 'Recurring Instance Handling', () => {
   test('recurring instance with empty text inherits template text', async () => {
-    if (shouldSkip()) return;
-
     var templateId = makeTaskId('tmpl');
     var instanceId = makeTaskId('inst');
 
@@ -113,8 +110,6 @@ describe('Recurring Instance Handling', () => {
   test.todo('instance with own text uses own text — tasks_v always uses master text; instance-level text override not implemented in data model');
 
   test('template itself NOT synced (scheduled_at is NULL)', async () => {
-    if (shouldSkip()) return;
-
     var templateId = makeTaskId('tmpl');
 
     // Create template only (no instance)

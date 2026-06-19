@@ -26,6 +26,7 @@ var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, deleteAllGCalTestEvents } = require('./helpers/test-fixtures');
 var { waitForPropagation } = require('./helpers/api-helpers');
 var { sync } = require('../../src/controllers/cal-sync.controller');
+var { describeWithCreds } = require('./helpers/credentialGate');
 
 var token = null;
 var user = null;
@@ -84,12 +85,8 @@ async function createTestTasks(count) {
   return tasks;
 }
 
-describe('Sync Performance Benchmarks', () => {
-  var shouldSkip = () => !user || !token;
-
+describeWithCreds(() => hasGCalCredentials(), 'Sync Performance Benchmarks', () => {
   test('full sync with real APIs completes in <30s (20 tasks)', async () => {
-    if (shouldSkip()) return;
-
     await createTestTasks(20);
 
     user = await db('users').where('id', TEST_USER_ID).first();
@@ -115,8 +112,6 @@ describe('Sync Performance Benchmarks', () => {
   });
 
   test('steady-state sync (no changes) completes fastest', async () => {
-    if (shouldSkip()) return;
-
     // Seed 10 tasks and do initial sync
     await createTestTasks(10);
 
@@ -144,8 +139,6 @@ describe('Sync Performance Benchmarks', () => {
   });
 
   test('sync with 50 new tasks (batch push) completes in <30s', async () => {
-    if (shouldSkip()) return;
-
     await createTestTasks(50);
 
     user = await db('users').where('id', TEST_USER_ID).first();
@@ -171,8 +164,6 @@ describe('Sync Performance Benchmarks', () => {
   });
 
   test('per-phase timing breakdown (consecutive syncs)', async () => {
-    if (shouldSkip()) return;
-
     await createTestTasks(15);
 
     // First sync (cold — all new pushes)

@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import DailyView from '../DailyView';
+import DailyView, { computeColumns } from '../DailyView';
 
 // Mock the dependencies that DailyView uses
 jest.mock('../../../theme/colors', () => ({
@@ -239,5 +239,109 @@ describe('DailyView Component', () => {
     );
     
     expect(true).toBe(true); // Should still render
+  });
+});
+
+/*
+ * M-SCH-2 (backlog 999.579) — adjacent same-task chunk collapse.
+ *
+ * computeColumns() merges visually-adjacent split chunks of the SAME task into a
+ * single block. Two chunks merge when (a) they share a source identity
+ * (task.sourceId or task.splitGroup) AND (b) the next chunk starts exactly where
+ * the previous one ends (curr.start === prev.end). The merged block spans the
+ * full range and carries `_mergedChunks` = the count of chunks folded in.
+ *
+ * hourHeight = 60 → 1 minute == 1px, so layout math is trivial to reason about.
+ */
+describe('computeColumns — adjacent same-task chunk collapse (M-SCH-2 / 999.579)', () => {
+  const HOUR_H = 60; // 1px per minute
+
+  function chunk(sourceId, start, end, extra) {
+    return Object.assign({ start, end, task: { id: sourceId, sourceId, dur: end - start } }, extra || {});
+  }
+
+  test('merges two adjacent chunks of the same task into one block', () => {
+    const placements = [
+      chunk('A', 480, 510), // 8:00–8:30
+      chunk('A', 510, 540), // 8:30–9:00 (adjacent → merge)
+    ];
+    const result = computeColumns(placements, HOUR_H);
+
+    expect(result).toHaveLength(1);
+    const block = result[0];
+    expect(block.p.task.sourceId).toBe('A');
+    expect(block.p._mergedChunks).toBe(2);
+    // Spans the full 60 minutes → 60px tall at 1px/min.
+    expect(block.height).toBe(60);
+  });
+
+  test('merges three consecutive adjacent chunks into one block', () => {
+    const placements = [
+      chunk('A', 480, 510),
+      chunk('A', 510, 540),
+      chunk('A', 540, 570),
+    ];
+    const result = computeColumns(placements, HOUR_H);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].p._mergedChunks).toBe(3);
+    expect(result[0].height).toBe(90); // 480→570 = 90 min
+  });
+
+  test('does NOT merge chunks of the same task that are NOT time-adjacent (a gap)', () => {
+    const placements = [
+      chunk('A', 480, 510), // 8:00–8:30
+      chunk('A', 540, 570), // 9:00–9:30 (30-min gap → keep separate)
+    ];
+    const result = computeColumns(placements, HOUR_H);
+
+    expect(result).toHaveLength(2);
+    result.forEach((b) => expect(b.p._mergedChunks).toBeUndefined());
+  });
+
+  test('does NOT merge adjacent chunks belonging to DIFFERENT tasks', () => {
+    const placements = [
+      chunk('A', 480, 510),
+      chunk('B', 510, 540), // adjacent in time but different source → keep separate
+    ];
+    const result = computeColumns(placements, HOUR_H);
+
+    expect(result).toHaveLength(2);
+    // Different sources at the same time slot → laid out in separate columns.
+    expect(result.map((b) => b.p.task.sourceId).sort()).toEqual(['A', 'B']);
+  });
+
+  test('merges on splitGroup when sourceId is absent', () => {
+    const placements = [
+      { start: 480, end: 510, task: { id: 'x1', splitGroup: 'G' } },
+      { start: 510, end: 540, task: { id: 'x2', splitGroup: 'G' } },
+    ];
+    const result = computeColumns(placements, HOUR_H);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].p._mergedChunks).toBe(2);
+  });
+
+  test('chunks with no source identity never merge (one-off tasks)', () => {
+    const placements = [
+      { start: 480, end: 510, task: { id: 'o1' } },
+      { start: 510, end: 540, task: { id: 'o2' } },
+    ];
+    const result = computeColumns(placements, HOUR_H);
+
+    expect(result).toHaveLength(2);
+    result.forEach((b) => expect(b.p._mergedChunks).toBeUndefined());
+  });
+
+  test('derives chunk end from start + task.dur when end is omitted', () => {
+    const placements = [
+      { start: 480, task: { id: 'A', sourceId: 'A', dur: 30 } }, // 480–510
+      { start: 510, task: { id: 'A', sourceId: 'A', dur: 30 } }, // 510–540 adjacent
+    ];
+    const result = computeColumns(placements, HOUR_H);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].p._mergedChunks).toBe(2);
+    expect(result[0].height).toBe(60);
   });
 });

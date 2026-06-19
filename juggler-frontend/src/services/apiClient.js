@@ -3,6 +3,16 @@
  * Access token persisted in localStorage for session survival across page reloads.
  */
 
+// TESTING NOTE (backlog 999.499): axios 1.x ships ESM (`import` syntax) that
+// Jest cannot evaluate, because CRA (react-scripts) hard-codes
+// `transformIgnorePatterns: [/node_modules/...]` so node_modules is never
+// Babel-transformed. The SANCTIONED fix is the package.json jest
+// `moduleNameMapper` entry `"^axios$" -> node_modules/axios/dist/node/axios.cjs`,
+// which resolves every `import axios from 'axios'` to axios's own prebuilt
+// CommonJS bundle (no transform needed). This is preferred over loosening
+// transformIgnorePatterns to Babel-transpile axios: the .cjs bundle is faster,
+// avoids transpiling axios's internal ESM deps, and is verified green across the
+// frontend suite. Do not remove the moduleNameMapper without replacing it.
 import axios from 'axios';
 import { getBrowserTimezone } from '../utils/timezone';
 

@@ -15,6 +15,7 @@ var { waitForPropagation } = require('./helpers/api-helpers');
 var appleAdapter = require('../../src/lib/cal-adapters/apple.adapter');
 var appleCalApi = require('../../src/lib/apple-cal-api');
 var { PLACEMENT_MODES } = require('../../src/lib/placementModes');
+var { describeWithCreds } = require('./helpers/credentialGate');
 
 jest.setTimeout(30000);
 
@@ -33,14 +34,10 @@ beforeAll(async function () {
   try {
     client = await getAppleClient();
   } catch (e) {
-    skip = true;
-    console.warn('Skipping Apple adapter tests — CalDAV auth failed:', e.message);
-    return;
+    throw new Error('[TEST-FR-002] Apple live credentials present but token/client acquisition failed: ' + e.message);
   }
   if (!client) {
-    skip = true;
-    console.warn('Skipping Apple adapter tests — could not create CalDAV client');
-    return;
+    throw new Error('[TEST-FR-002] Apple live credentials present but could not acquire access token/client');
   }
   calendarUrl = process.env.TEST_APPLE_CALENDAR_URL;
 });
@@ -62,17 +59,10 @@ afterAll(async function () {
   }
 });
 
-function skipIfNoCreds() {
-  if (skip) return true;
-  return false;
-}
-
 // ─── 1. normalizeEvent ───
 
-describe('Apple adapter — normalizeEvent', function () {
+describeWithCreds(hasAppleCredentials, 'Apple adapter — normalizeEvent', function () {
   it('should normalize a CalDAV event to unified shape with id fallback to _url', function () {
-    if (skipIfNoCreds()) return;
-
     var rawEvent = {
       id: '',
       title: 'Test Event Apple Norm',
@@ -103,8 +93,6 @@ describe('Apple adapter — normalizeEvent', function () {
   });
 
   it('should preserve id when present', function () {
-    if (skipIfNoCreds()) return;
-
     var rawEvent = {
       id: 'real-uid-123',
       title: 'Has UID',
@@ -123,10 +111,8 @@ describe('Apple adapter — normalizeEvent', function () {
 
 // ─── 2. eventHash ───
 
-describe('Apple adapter — eventHash', function () {
+describeWithCreds(hasAppleCredentials, 'Apple adapter — eventHash', function () {
   it('should produce a consistent 32-char MD5 hex hash', function () {
-    if (skipIfNoCreds()) return;
-
     var event = {
       title: 'Hash Test Apple',
       startDateTime: '2026-04-14T10:00:00',
@@ -144,8 +130,6 @@ describe('Apple adapter — eventHash', function () {
   });
 
   it('should change when fields change', function () {
-    if (skipIfNoCreds()) return;
-
     var event1 = {
       title: 'Hash Apple A',
       startDateTime: '2026-04-14T10:00:00',
@@ -164,10 +148,8 @@ describe('Apple adapter — eventHash', function () {
 
 // ─── 3. applyEventToTaskFields ───
 
-describe('Apple adapter — applyEventToTaskFields', function () {
+describeWithCreds(hasAppleCredentials, 'Apple adapter — applyEventToTaskFields', function () {
   it('should promote to fixed when time changes', function () {
-    if (skipIfNoCreds()) return;
-
     var event = {
       title: 'Moved Task Apple',
       startDateTime: '2026-04-15T14:00:00',
@@ -184,8 +166,6 @@ describe('Apple adapter — applyEventToTaskFields', function () {
   });
 
   it('should set date_pinned when date changes', function () {
-    if (skipIfNoCreds()) return;
-
     var event = {
       title: 'Date Moved Apple',
       startDateTime: '2026-04-16T09:00:00',
@@ -203,8 +183,6 @@ describe('Apple adapter — applyEventToTaskFields', function () {
   });
 
   it('should promote allday-to-timed to fixed', function () {
-    if (skipIfNoCreds()) return;
-
     var event = {
       title: 'Was AllDay Apple',
       startDateTime: '2026-04-15T10:00:00',
@@ -221,8 +199,6 @@ describe('Apple adapter — applyEventToTaskFields', function () {
   });
 
   it('should clear marker when event is no longer transparent', function () {
-    if (skipIfNoCreds()) return;
-
     var event = {
       title: 'Not Marker Apple',
       startDateTime: '2026-04-15T10:00:00',
@@ -271,10 +247,8 @@ describe('Apple adapter — applyEventToTaskFields REMINDER→FIXED ordering', f
 
 // ─── 4. createEvent (CalDAV) ───
 
-describe('Apple adapter — createEvent', function () {
+describeWithCreds(hasAppleCredentials, 'Apple adapter — createEvent', function () {
   it('should create an event on iCloud and return providerEventId', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     var month = tomorrow.getMonth() + 1;
@@ -305,10 +279,8 @@ describe('Apple adapter — createEvent', function () {
 
 // ─── 5. updateEvent (CalDAV) ───
 
-describe('Apple adapter — updateEvent', function () {
+describeWithCreds(hasAppleCredentials, 'Apple adapter — updateEvent', function () {
   it('should create an event, update it, and verify via list', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     var month = tomorrow.getMonth() + 1;
@@ -344,10 +316,8 @@ describe('Apple adapter — updateEvent', function () {
 
 // ─── 6. deleteEvent (CalDAV) ───
 
-describe('Apple adapter — deleteEvent', function () {
+describeWithCreds(hasAppleCredentials, 'Apple adapter — deleteEvent', function () {
   it('should create an event, delete it, and verify it is gone', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     var month = tomorrow.getMonth() + 1;
@@ -381,10 +351,8 @@ describe('Apple adapter — deleteEvent', function () {
 
 // ─── 7. batchCreateEvents (sequential) ───
 
-describe('Apple adapter — batchCreateEvents', function () {
+describeWithCreds(hasAppleCredentials, 'Apple adapter — batchCreateEvents', function () {
   it('should create 3 events sequentially and return results', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     var month = tomorrow.getMonth() + 1;
@@ -426,10 +394,8 @@ describe('Apple adapter — batchCreateEvents', function () {
 
 // ─── 8. batchDeleteEvents (sequential) ───
 
-describe('Apple adapter — batchDeleteEvents', function () {
+describeWithCreds(hasAppleCredentials, 'Apple adapter — batchDeleteEvents', function () {
   it('should delete 3 events sequentially', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 2);
     var month = tomorrow.getMonth() + 1;
@@ -466,10 +432,8 @@ describe('Apple adapter — batchDeleteEvents', function () {
 
 // ─── 9. listEvents ───
 
-describe('Apple adapter — listEvents', function () {
+describeWithCreds(hasAppleCredentials, 'Apple adapter — listEvents', function () {
   it('should create 2 events and list them in the correct time window', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 3);
     var month = tomorrow.getMonth() + 1;
@@ -510,10 +474,8 @@ describe('Apple adapter — listEvents', function () {
 
 // ─── 10. hasChanges ───
 
-describe('Apple adapter — hasChanges', function () {
+describeWithCreds(hasAppleCredentials, 'Apple adapter — hasChanges', function () {
   it('should report hasChanges=true when no sync token exists', async function () {
-    if (skipIfNoCreds()) return;
-
     var user = { id: TEST_USER_ID, apple_cal_sync_token: null, apple_cal_calendar_url: calendarUrl };
     var result = await appleAdapter.hasChanges(client, user);
 
@@ -521,8 +483,6 @@ describe('Apple adapter — hasChanges', function () {
   });
 
   it('should detect changes after creating a new event', async function () {
-    if (skipIfNoCreds()) return;
-
     await seedTestUser();
 
     // Do a full list to establish a sync token

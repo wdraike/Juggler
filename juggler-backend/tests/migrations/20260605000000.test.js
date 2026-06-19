@@ -18,6 +18,14 @@ var db = require('../../src/db');
 var migration = require('../../src/db/migrations/20260605000000_add_task_status_enum_and_timestamps');
 var { requireDB } = require('../helpers/requireDB');
 
+// 999.739: Knex 3.x surfaces MySQL CHECK-constraint violations as a rejected
+// promise (error.code === 'ER_CHECK_CONSTRAINT_VIOLATED'). A bare
+// .rejects.toThrow() passes for ANY rejection, so the "rejects bad value"
+// assertions below pin the rejection to the CHECK constraint specifically —
+// otherwise an incidental error (e.g. value too long for the column, NOT NULL)
+// would make the test pass without ever exercising the enum/terminal CHECK.
+var CHECK_VIOLATION = /ER_CHECK_CONSTRAINT_VIOLATED|check constraint/i;
+
 var _dbAvailable = null;
 async function isDbAvailable() {
   if (_dbAvailable !== null) return _dbAvailable;
@@ -124,20 +132,27 @@ describe('migration 20260605000000_add_task_status_enum_and_timestamps', () => {
   }));
 
   test('status enum constraint prevents invalid status values', requireDB(async () => {
-    // Try to insert with invalid status - should fail
+    // 999.739: Use a SHORT invalid value ('bogus', 5 chars). The status column
+    // is varchar(10) in the live schema, so a long sentinel like
+    // 'invalid-status' (14 chars) would reject with ER_DATA_TOO_LONG BEFORE the
+    // enum CHECK is ever evaluated — a tautological pass. 'bogus' fits the
+    // column but is not in the allowed enum, so the rejection is genuinely the
+    // chk_task_masters_status_enum CHECK constraint (asserted below).
     await expect(db('task_masters').insert({
       id: 'test-master-invalid',
       user_id: 'test-user-status',
       text: 'Test task with invalid status',
-      status: 'invalid-status',
+      status: 'bogus',
+      scheduled_at: db.fn.now(),
       pri: 'P3',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    })).rejects.toThrow();
+    })).rejects.toThrow(CHECK_VIOLATION);
   }));
 
   test('scheduled_at constraint requires value for terminal statuses', requireDB(async () => {
     // Try to insert with terminal status but no scheduled_at - should fail
+    // with the chk_task_masters_scheduled_at_for_terminal CHECK constraint.
     await expect(db('task_masters').insert({
       id: 'test-master-missing-scheduled',
       user_id: 'test-user-status',
@@ -147,7 +162,7 @@ describe('migration 20260605000000_add_task_status_enum_and_timestamps', () => {
       pri: 'P3',
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    })).rejects.toThrow();
+    })).rejects.toThrow(CHECK_VIOLATION);
   }));
 
   test('completed_at column is available', requireDB(async () => {

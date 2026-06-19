@@ -82,6 +82,23 @@ async function isDbAvailable() {
 }
 
 // -----------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------
+
+/**
+ * 999.739: Knex 3.x DOES surface MySQL CHECK-constraint violations as a
+ * rejected promise (verified empirically against mysql2 3.x / MySQL 8 on the
+ * test-bed: error.code === 'ER_CHECK_CONSTRAINT_VIOLATED', errno 3819).
+ *
+ * A bare `.rejects.toThrow()` would PASS for ANY rejection — including an
+ * incidental failure (FK violation, wrong column count, NOT NULL) that has
+ * nothing to do with the boolean CHECK. To keep these assertions genuine
+ * (non-tautological), every "rejects bad value" test asserts the rejection is
+ * specifically the CHECK-constraint violation, not just "something threw".
+ */
+var CHECK_VIOLATION = /ER_CHECK_CONSTRAINT_VIOLATED|check constraint/i;
+
+// -----------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------
 
@@ -186,21 +203,21 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
       await expect(db.raw(`
         INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
         VALUES (?, ?, 'test', '', 'P3', 2, 0, NOW(), NOW())
-      `, [uid('fw2'), userId])).rejects.toThrow();
+      `, [uid('fw2'), userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
 
     test('rejects value -1 (outside {0,1})', requireDB(async () => {
       await expect(db.raw(`
         INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
         VALUES (?, ?, 'test', '', 'P3', -1, 0, NOW(), NOW())
-      `, [uid('fwn1'), userId])).rejects.toThrow();
+      `, [uid('fwn1'), userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
 
     test('rejects value 127 (outside {0,1})', requireDB(async () => {
       await expect(db.raw(`
         INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
         VALUES (?, ?, 'test', '', 'P3', 127, 0, NOW(), NOW())
-      `, [uid('fw127'), userId])).rejects.toThrow();
+      `, [uid('fw127'), userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
   });
 
@@ -240,14 +257,14 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
       await expect(db.raw(`
         INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
         VALUES (?, ?, 'test', '', 'P3', 0, 2, NOW(), NOW())
-      `, [uid('rec2'), userId])).rejects.toThrow();
+      `, [uid('rec2'), userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
 
     test('rejects value -1 (outside {0,1})', requireDB(async () => {
       await expect(db.raw(`
         INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, created_at, updated_at)
         VALUES (?, ?, 'test', '', 'P3', 0, -1, NOW(), NOW())
-      `, [uid('recn1'), userId])).rejects.toThrow();
+      `, [uid('recn1'), userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
   });
 
@@ -297,14 +314,14 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
       await expect(db.raw(`
         INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, split, created_at, updated_at)
         VALUES (?, ?, 'test', '', 'P3', 0, 0, 2, NOW(), NOW())
-      `, [uid('spl2'), userId])).rejects.toThrow();
+      `, [uid('spl2'), userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
 
     test('rejects value -1 (outside {0,1,NULL})', requireDB(async () => {
       await expect(db.raw(`
         INSERT INTO task_masters (id, user_id, text, status, pri, flex_when, recurring, split, created_at, updated_at)
         VALUES (?, ?, 'test', '', 'P3', 0, 0, -1, NOW(), NOW())
-      `, [uid('spln1'), userId])).rejects.toThrow();
+      `, [uid('spln1'), userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
   });
 
@@ -355,14 +372,14 @@ describe('A) CHECK constraints on boolean columns (from migration 20260601000000
       await expect(db.raw(`
         INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, unscheduled, created_at, updated_at)
         VALUES (?, ?, ?, '', 1, 1, 1, 2, NOW(), NOW())
-      `, [uid('unsch2'), masterId, userId])).rejects.toThrow();
+      `, [uid('unsch2'), masterId, userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
 
     test('rejects value -1 (outside {0,1,NULL})', requireDB(async () => {
       await expect(db.raw(`
         INSERT INTO task_instances (id, master_id, user_id, status, occurrence_ordinal, split_ordinal, split_total, unscheduled, created_at, updated_at)
         VALUES (?, ?, ?, '', 1, 1, 1, -1, NOW(), NOW())
-      `, [uid('unschn1'), masterId, userId])).rejects.toThrow();
+      `, [uid('unschn1'), masterId, userId])).rejects.toThrow(CHECK_VIOLATION);
     }, isDbAvailable));
   });
 });

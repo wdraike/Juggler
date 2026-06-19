@@ -13,6 +13,12 @@ var db = require('../../src/db');
 var migration = require('../../src/db/migrations/20260606000000_add_missed_status_to_task_instances');
 var { requireDB } = require('../helpers/requireDB');
 
+// 999.739: pin the "rejects 'missed'" assertion to the CHECK constraint. After
+// down() restores the constraint that excludes 'missed', the insert must be
+// rejected by chk_task_instances_status (ER_CHECK_CONSTRAINT_VIOLATED) — not by
+// some incidental error. A bare .rejects.toThrow() would pass either way.
+var CHECK_VIOLATION = /ER_CHECK_CONSTRAINT_VIOLATED|check constraint/i;
+
 var _dbAvailable = null;
 async function isDbAvailable() {
   if (_dbAvailable !== null) return _dbAvailable;
@@ -74,13 +80,16 @@ describe('migration 20260606000000_add_missed_status_to_task_instances', () => {
     });
 
     // Insert a task_instance with 'missed' status - this should succeed.
-    // date_pinned is a boolean flag (tinyint 1), NOT a date integer.
+    // 999.739: the legacy `date_pinned` column no longer exists in the
+    // task_instances schema (removed by a later migration). Use the real `date`
+    // column instead, otherwise the insert fails with "Unknown column
+    // 'date_pinned'" and the test asserts nothing about the missed-status CHECK.
     await db('task_instances').insert({
       id: 'test-instance-missed',
       master_id: 'test-master-missed',
       user_id: 'test-user-missed',
       status: 'missed',
-      date_pinned: 1,
+      date: '2026-06-06',
       scheduled_at: db.fn.now(),
       created_at: db.fn.now(),
       updated_at: db.fn.now()
@@ -107,11 +116,11 @@ describe('migration 20260606000000_add_missed_status_to_task_instances', () => {
       master_id: 'test-master-missed',
       user_id: 'test-user-missed',
       status: 'missed',
-      date_pinned: 1,
+      date: '2026-06-06',
       scheduled_at: db.fn.now(),
       created_at: db.fn.now(),
       updated_at: db.fn.now()
-    })).rejects.toThrow();
+    })).rejects.toThrow(CHECK_VIOLATION);
   }));
 
   test('up() is idempotent', requireDB(async () => {

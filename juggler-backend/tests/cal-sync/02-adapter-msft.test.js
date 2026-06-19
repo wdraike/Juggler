@@ -13,6 +13,7 @@ var { getMSFTEvent, listMSFTEvents, waitForPropagation } = require('./helpers/ap
 
 var msftAdapter = require('../../src/lib/cal-adapters/msft.adapter');
 var { PLACEMENT_MODES } = require('../../src/lib/placementModes');
+var { describeWithCreds } = require('./helpers/credentialGate');
 
 jest.setTimeout(30000);
 
@@ -26,11 +27,13 @@ beforeAll(async function () {
     console.warn('Skipping MSFT adapter tests — no credentials');
     return;
   }
-  token = await getMsftToken();
+  try {
+    token = await getMsftToken();
+  } catch (e) {
+    throw new Error('[TEST-FR-002] MSFT live credentials present but token/client acquisition failed: ' + e.message);
+  }
   if (!token) {
-    skip = true;
-    console.warn('Skipping MSFT adapter tests — could not get access token');
-    return;
+    throw new Error('[TEST-FR-002] MSFT live credentials present but could not acquire access token/client');
   }
   await deleteAllMSFTTestEvents(token);
 });
@@ -43,17 +46,10 @@ afterAll(async function () {
   await deleteAllMSFTTestEvents(token);
 });
 
-function skipIfNoCreds() {
-  if (skip) return true;
-  return false;
-}
-
 // ─── 1. normalizeEvent ───
 
-describe('MSFT adapter — normalizeEvent', function () {
+describeWithCreds(hasMsftCredentials, 'MSFT adapter — normalizeEvent', function () {
   it('should normalize a real MSFT event to unified shape', async function () {
-    if (skipIfNoCreds()) return;
-
     var raw = await makeMSFTEvent(token, {
       subject: 'Test Event Normalize MSFT',
       body: { contentType: 'text', content: 'msft desc test' }
@@ -76,8 +72,6 @@ describe('MSFT adapter — normalizeEvent', function () {
   });
 
   it('should map showAs=free to isTransparent', async function () {
-    if (skipIfNoCreds()) return;
-
     var raw = await makeMSFTEvent(token, {
       subject: 'Test Event Transparent MSFT',
       showAs: 'free'
@@ -89,8 +83,6 @@ describe('MSFT adapter — normalizeEvent', function () {
   });
 
   it('should handle 7-digit fractional seconds via truncateDateTime', async function () {
-    if (skipIfNoCreds()) return;
-
     // MSFT Graph often returns 7-digit fractional seconds
     var fakeEvent = {
       id: 'test-truncate',
@@ -114,14 +106,12 @@ describe('MSFT adapter — normalizeEvent', function () {
 
 // ─── 2. eventHash ───
 
-describe('MSFT adapter — eventHash', function () {
+describeWithCreds(hasMsftCredentials, 'MSFT adapter — eventHash', function () {
   it('should produce a consistent 64-char SHA-256 hex hash', function () {
     // NOTE: The implementation uses SHA-256 (64 hex chars), not MD5 (32 hex chars).
     // KNOWN PRODUCTION BUG: last_pulled_hash column is VARCHAR(32) which silently
     // truncates SHA-256 hashes — see cal-sync change detection. This test documents
     // the current implementation; the column width needs a migration to fix.
-    if (skipIfNoCreds()) return;
-
     var event = {
       title: 'Hash Test MSFT',
       startDateTime: '2026-04-14T10:00:00',
@@ -139,8 +129,6 @@ describe('MSFT adapter — eventHash', function () {
   });
 
   it('should change when fields change', function () {
-    if (skipIfNoCreds()) return;
-
     var event1 = {
       title: 'Hash MSFT A',
       startDateTime: '2026-04-14T10:00:00',
@@ -159,10 +147,8 @@ describe('MSFT adapter — eventHash', function () {
 
 // ─── 3. buildMsftEventBody ───
 
-describe('MSFT adapter — buildMsftEventBody', function () {
+describeWithCreds(hasMsftCredentials, 'MSFT adapter — buildMsftEventBody', function () {
   it('should build a timed event body with Windows timezone', function () {
-    if (skipIfNoCreds()) return;
-
     var task = { id: 'test-m1', text: 'Timed Task MSFT', date: '4/15', time: '2:30 PM', dur: 45, when: 'afternoon' };
     var body = msftAdapter.buildMsftEventBody(task, 2026, TEST_TIMEZONE);
 
@@ -174,8 +160,6 @@ describe('MSFT adapter — buildMsftEventBody', function () {
   });
 
   it('should build an all-day event body', function () {
-    if (skipIfNoCreds()) return;
-
     var task = { id: 'test-m2', text: 'All Day MSFT', date: '4/15', when: 'allday', dur: 30 };
     var body = msftAdapter.buildMsftEventBody(task, 2026, TEST_TIMEZONE);
 
@@ -185,8 +169,6 @@ describe('MSFT adapter — buildMsftEventBody', function () {
   });
 
   it('should set showAs=free for done tasks', function () {
-    if (skipIfNoCreds()) return;
-
     var task = { id: 'test-m3', text: 'Done Task MSFT', date: '4/15', time: '9:00 AM', dur: 30, status: 'done', when: 'morning' };
     var body = msftAdapter.buildMsftEventBody(task, 2026, TEST_TIMEZONE);
 
@@ -195,8 +177,6 @@ describe('MSFT adapter — buildMsftEventBody', function () {
   });
 
   it('should set showAs=free for marker tasks', function () {
-    if (skipIfNoCreds()) return;
-
     var task = { id: 'test-m4', text: 'Marker MSFT', date: '4/15', time: '9:00 AM', dur: 30, marker: true, when: 'morning' };
     var body = msftAdapter.buildMsftEventBody(task, 2026, TEST_TIMEZONE);
 
@@ -204,8 +184,6 @@ describe('MSFT adapter — buildMsftEventBody', function () {
   });
 
   it('should use UTC when scheduledAt is provided', function () {
-    if (skipIfNoCreds()) return;
-
     var task = {
       id: 'test-m5', text: 'UTC Task', date: '4/15', time: '2:00 PM', dur: 60,
       when: 'afternoon', scheduledAt: '2026-04-15T18:00:00.000Z'
@@ -219,10 +197,8 @@ describe('MSFT adapter — buildMsftEventBody', function () {
 
 // ─── 4. applyEventToTaskFields ───
 
-describe('MSFT adapter — applyEventToTaskFields', function () {
+describeWithCreds(hasMsftCredentials, 'MSFT adapter — applyEventToTaskFields', function () {
   it('should promote to fixed when time changes', function () {
-    if (skipIfNoCreds()) return;
-
     var event = {
       title: 'Moved Task MSFT',
       startDateTime: '2026-04-15T14:00:00',
@@ -242,8 +218,6 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
   });
 
   it('should set placement_mode to fixed when date changes', function () {
-    if (skipIfNoCreds()) return;
-
     var event = {
       title: 'Date Moved MSFT',
       startDateTime: '2026-04-16T09:00:00',
@@ -263,8 +237,6 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
   });
 
   it('should promote allday-to-timed to fixed', function () {
-    if (skipIfNoCreds()) return;
-
     var event = {
       title: 'Was AllDay MSFT',
       startDateTime: '2026-04-15T10:00:00',
@@ -284,8 +256,6 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
   });
 
   it('should clear marker when event is no longer transparent', function () {
-    if (skipIfNoCreds()) return;
-
     var event = {
       title: 'Not Marker MSFT',
       startDateTime: '2026-04-15T10:00:00',
@@ -305,10 +275,8 @@ describe('MSFT adapter — applyEventToTaskFields', function () {
 
 // ─── 5. createEvent + getEvent ───
 
-describe('MSFT adapter — createEvent', function () {
+describeWithCreds(hasMsftCredentials, 'MSFT adapter — createEvent', function () {
   it('should create an event and verify via direct API', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     var month = tomorrow.getMonth() + 1;
@@ -340,10 +308,8 @@ describe('MSFT adapter — createEvent', function () {
 
 // ─── 6. updateEvent ───
 
-describe('MSFT adapter — updateEvent', function () {
+describeWithCreds(hasMsftCredentials, 'MSFT adapter — updateEvent', function () {
   it('should create an event, update title, and verify', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     var month = tomorrow.getMonth() + 1;
@@ -375,10 +341,8 @@ describe('MSFT adapter — updateEvent', function () {
 
 // ─── 7. deleteEvent ───
 
-describe('MSFT adapter — deleteEvent', function () {
+describeWithCreds(hasMsftCredentials, 'MSFT adapter — deleteEvent', function () {
   it('should create an event, delete it, and verify it is gone', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     var month = tomorrow.getMonth() + 1;
@@ -407,10 +371,8 @@ describe('MSFT adapter — deleteEvent', function () {
 
 // ─── 8. batchCreateEvents ───
 
-describe('MSFT adapter — batchCreateEvents', function () {
+describeWithCreds(hasMsftCredentials, 'MSFT adapter — batchCreateEvents', function () {
   it('should create 3 events in a batch and verify all exist', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     var month = tomorrow.getMonth() + 1;
@@ -444,10 +406,8 @@ describe('MSFT adapter — batchCreateEvents', function () {
 
 // ─── 9. batchDeleteEvents ───
 
-describe('MSFT adapter — batchDeleteEvents', function () {
+describeWithCreds(hasMsftCredentials, 'MSFT adapter — batchDeleteEvents', function () {
   it('should delete 3 events in a batch', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 2);
     var month = tomorrow.getMonth() + 1;
@@ -483,10 +443,8 @@ describe('MSFT adapter — batchDeleteEvents', function () {
 
 // ─── 10. batchUpdateEvents ───
 
-describe('MSFT adapter — batchUpdateEvents', function () {
+describeWithCreds(hasMsftCredentials, 'MSFT adapter — batchUpdateEvents', function () {
   it('should create 3 events, batch update titles, and verify', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 2);
     var month = tomorrow.getMonth() + 1;
@@ -532,10 +490,8 @@ describe('MSFT adapter — batchUpdateEvents', function () {
 
 // ─── 11. listEvents ───
 
-describe('MSFT adapter — listEvents', function () {
+describeWithCreds(hasMsftCredentials, 'MSFT adapter — listEvents', function () {
   it('should create 2 events and list them in the correct time window', async function () {
-    if (skipIfNoCreds()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 3);
     var month = tomorrow.getMonth() + 1;
@@ -570,10 +526,8 @@ describe('MSFT adapter — listEvents', function () {
 
 // ─── 12. hasChanges ───
 
-describe('MSFT adapter — hasChanges', function () {
+describeWithCreds(hasMsftCredentials, 'MSFT adapter — hasChanges', function () {
   it('should report hasChanges when no delta link exists', async function () {
-    if (skipIfNoCreds()) return;
-
     // With no delta link, hasChanges should return true (needs full sync)
     var user = { id: TEST_USER_ID, msft_cal_delta_link: null };
     var result = await msftAdapter.hasChanges(token, user);

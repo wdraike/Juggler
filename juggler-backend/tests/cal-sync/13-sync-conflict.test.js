@@ -21,6 +21,7 @@ var {
   seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes, getGCalToken, gcalApi
 } = require('./helpers/test-setup');
 var { requireDB } = require('../helpers/requireDB');
+var { testWithCreds } = require('./helpers/credentialGate');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, makeGCalEvent, deleteGCalEvent } = require('./helpers/test-fixtures');
 var { getGCalEvent, waitForPropagation } = require('./helpers/api-helpers');
@@ -70,8 +71,7 @@ function tomorrowEndISO(hours, minutes, durMinutes) {
 
 describe('Sync Conflict Resolution', () => {
 
-  test('fixed task always wins', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'fixed task always wins', requireDB(async () => {
     user = await seedTestUser(GCAL_ONLY);
 
     // Create a fixed task and push it
@@ -121,8 +121,7 @@ describe('Sync Conflict Resolution', () => {
     expect(event.summary).toBe('Fixed Task Updated In Strive');
   }));
 
-  test('last-modified: task newer -> event updated', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'last-modified: task newer -> event updated', requireDB(async () => {
     user = await seedTestUser(GCAL_ONLY);
 
     // Create a non-fixed task and push
@@ -171,8 +170,7 @@ describe('Sync Conflict Resolution', () => {
     expect(event.summary).toBe('Strive Version Newer');
   }));
 
-  test('last-modified: event newer -> task updated', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'last-modified: event newer -> task updated', requireDB(async () => {
     user = await seedTestUser(GCAL_ONLY);
 
     var task = await makeTask({
@@ -212,8 +210,7 @@ describe('Sync Conflict Resolution', () => {
     expect(updatedTask.text).toBe('Calendar Version Newer');
   }));
 
-  test('ingest-only: provider always wins', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'ingest-only: provider always wins', requireDB(async () => {
     user = await seedTestUser(GCAL_ONLY);
 
     // Set ingest-only mode
@@ -269,8 +266,7 @@ describe('Sync Conflict Resolution', () => {
     expect(taskAfter.text).toBe('Calendar Edit Ingest');
   }));
 
-  test('sync_history logs conflict_juggler or conflict_provider', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'sync_history logs conflict_juggler or conflict_provider', requireDB(async () => {
     user = await seedTestUser(GCAL_ONLY);
 
     // Non-fixed task so last-modified wins (not fixed-always-wins)

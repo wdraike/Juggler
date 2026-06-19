@@ -26,6 +26,7 @@ var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, deleteAllGCalTestEvents, deleteAllMSFTTestEvents } = require('./helpers/test-fixtures');
 var { getGCalEvent, getMSFTEvent, waitForPropagation } = require('./helpers/api-helpers');
 var { sync } = require('../../src/controllers/cal-sync.controller');
+var { describeWithCreds } = require('./helpers/credentialGate');
 
 var NO_APPLE = { apple_cal_username: null, apple_cal_password: null, apple_cal_server_url: null, apple_cal_calendar_url: null };
 var gcalToken = null;
@@ -56,12 +57,8 @@ afterAll(async () => {
   await db.destroy();
 });
 
-describe('Multi-Provider Sync', () => {
-  var shouldSkip = () => !user || !gcalToken || !msftToken;
-
+describeWithCreds(() => hasGCalCredentials() && hasMsftCredentials(), 'Multi-Provider Sync', () => {
   test('task pushed to both GCal and MSFT', async () => {
-    if (shouldSkip()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(10, 0, 0, 0);
@@ -101,8 +98,6 @@ describe('Multi-Provider Sync', () => {
   });
 
   test('event changed on GCal -> task updated -> MSFT updated on next sync', async () => {
-    if (shouldSkip()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(10, 0, 0, 0);
@@ -169,8 +164,6 @@ describe('Multi-Provider Sync', () => {
   });
 
   test('event deleted on one provider -> task deleted -> other provider cleaned up', async () => {
-    if (shouldSkip()) return;
-
     var tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(10, 0, 0, 0);

@@ -20,6 +20,7 @@ var {
   seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes, getGCalToken, getMsftToken
 } = require('./helpers/test-setup');
 var { requireDB } = require('../helpers/requireDB');
+var { testWithCreds } = require('./helpers/credentialGate');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, makeTaskId, makeLedgerRow } = require('./helpers/test-fixtures');
 var { getGCalEvent, getMSFTEvent, waitForPropagation } = require('./helpers/api-helpers');
@@ -72,8 +73,7 @@ function tomorrow(hours, minutes) {
 
 describe('Sync Push: Strive -> Calendar', () => {
 
-  test('new task with scheduled_at -> event created on GCal', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'new task with scheduled_at -> event created on GCal', requireDB(async () => {
     user = await seedTestUser();
     var task = await makeTask({
       text: 'Test Task GCal Push',
@@ -101,8 +101,7 @@ describe('Sync Push: Strive -> Calendar', () => {
     expect(event.summary).toBe('Test Task GCal Push');
   }));
 
-  test('new task -> event created on MSFT', requireDB(async () => {
-    if (!hasMsftCredentials()) return;
+  testWithCreds(() => hasMsftCredentials(), 'new task -> event created on MSFT', requireDB(async () => {
     user = await seedTestUser({ gcal_refresh_token: null });
     var task = await makeTask({
       text: 'Test Task MSFT Push',
@@ -128,8 +127,7 @@ describe('Sync Push: Strive -> Calendar', () => {
     expect(event.subject).toBe('Test Task MSFT Push');
   }));
 
-  test('done tasks NOT pushed', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'done tasks NOT pushed', requireDB(async () => {
     user = await seedTestUser();
     var task = await makeTask({
       text: 'Test Task Done',
@@ -147,8 +145,7 @@ describe('Sync Push: Strive -> Calendar', () => {
     expect(updated.gcal_event_id).toBeFalsy();
   }));
 
-  test('recurring_template NOT pushed', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'recurring_template NOT pushed', requireDB(async () => {
     user = await seedTestUser();
     var task = await makeTask({
       text: 'Test Recurring Template',
@@ -167,8 +164,7 @@ describe('Sync Push: Strive -> Calendar', () => {
     expect(updated.gcal_event_id).toBeFalsy();
   }));
 
-  test('task without scheduled_at NOT pushed', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'task without scheduled_at NOT pushed', requireDB(async () => {
     user = await seedTestUser();
     var task = await makeTask({
       text: 'Test Task No Date',
@@ -185,8 +181,7 @@ describe('Sync Push: Strive -> Calendar', () => {
     expect(updated.gcal_event_id).toBeFalsy();
   }));
 
-  test('past task NOT pushed', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'past task NOT pushed', requireDB(async () => {
     user = await seedTestUser();
     var pastDate = new Date();
     pastDate.setDate(pastDate.getDate() - 5);
@@ -207,8 +202,7 @@ describe('Sync Push: Strive -> Calendar', () => {
     expect(updated.gcal_event_id).toBeFalsy();
   }));
 
-  test('batch push of 5+ tasks', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'batch push of 5+ tasks', requireDB(async () => {
     user = await seedTestUser();
     var tasks = [];
     for (var i = 0; i < 5; i++) {
@@ -235,8 +229,7 @@ describe('Sync Push: Strive -> Calendar', () => {
     }
   }));
 
-  test('ledger entry created after push', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'ledger entry created after push', requireDB(async () => {
     user = await seedTestUser();
     var task = await makeTask({
       text: 'Test Task Ledger Check',
@@ -309,8 +302,7 @@ describe('Sync Push: field-level assertions', () => {
     user = await seedTestUser();
   });
 
-  test('title: event.summary matches task.text exactly', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'title: event.summary matches task.text exactly', requireDB(async () => {
     var task = await makeTask({
       text: 'Field Assertion — Title Check',
       date: tomorrowDateStr(),
@@ -324,8 +316,7 @@ describe('Sync Push: field-level assertions', () => {
     assertGCalEventMatchesTask(event, taskRow, TEST_TIMEZONE);
   }));
 
-  test('start + end + duration: event spans exactly task.dur minutes', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'start + end + duration: event spans exactly task.dur minutes', requireDB(async () => {
     var task = await makeTask({
       text: 'Field Assertion — Duration Check',
       date: tomorrowDateStr(),
@@ -340,8 +331,7 @@ describe('Sync Push: field-level assertions', () => {
     assertGCalEventMatchesTask(event, taskRow, TEST_TIMEZONE);
   }));
 
-  test('description: project + notes + url all present; footer always present', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'description: project + notes + url all present; footer always present', requireDB(async () => {
     var task = await makeTask({
       text: 'Field Assertion — Description Check',
       date: tomorrowDateStr(),
@@ -362,8 +352,7 @@ describe('Sync Push: field-level assertions', () => {
     assertGCalEventMatchesTask(event, taskRow, TEST_TIMEZONE);
   }));
 
-  test('description: no spurious fields when project/notes/url are absent', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'description: no spurious fields when project/notes/url are absent', requireDB(async () => {
     var task = await makeTask({
       text: 'Field Assertion — Empty Description',
       date: tomorrowDateStr(),
@@ -384,8 +373,7 @@ describe('Sync Push: field-level assertions', () => {
     assertGCalEventMatchesTask(event, taskRow, TEST_TIMEZONE);
   }));
 
-  test('done task: summary has ✓ prefix and transparency=transparent', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'done task: summary has ✓ prefix and transparency=transparent', requireDB(async () => {
     // Phase 3 (new-task push) skips done tasks, so we must push it as pending
     // first, then mark done and re-sync so Phase 2 (update path) propagates.
     var task = await makeTask({
@@ -421,8 +409,7 @@ describe('Sync Push: field-level assertions', () => {
     // future done tasks, so the event start intentionally differs from the DB value.
   }));
 
-  test('marker task: transparency=transparent', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'marker task: transparency=transparent', requireDB(async () => {
     var task = await makeTask({
       text: 'Field Assertion — Marker Task',
       date: tomorrowDateStr(),
@@ -438,8 +425,7 @@ describe('Sync Push: field-level assertions', () => {
     assertGCalEventMatchesTask(event, taskRow, TEST_TIMEZONE);
   }));
 
-  test('normal task: no transparency (opaque or absent)', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'normal task: no transparency (opaque or absent)', requireDB(async () => {
     var task = await makeTask({
       text: 'Field Assertion — Normal Task',
       date: tomorrowDateStr(),
@@ -455,8 +441,7 @@ describe('Sync Push: field-level assertions', () => {
     assertGCalEventMatchesTask(event, taskRow, TEST_TIMEZONE);
   }));
 
-  test('timezone: event start.timeZone matches user timezone', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'timezone: event start.timeZone matches user timezone', requireDB(async () => {
     var task = await makeTask({
       text: 'Field Assertion — Timezone Check',
       date: tomorrowDateStr(),
@@ -470,8 +455,7 @@ describe('Sync Push: field-level assertions', () => {
     expect(event.end.timeZone).toBe(TEST_TIMEZONE);
   }));
 
-  test('update: edit task -> all changed fields reflected on GCal', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'update: edit task -> all changed fields reflected on GCal', requireDB(async () => {
     var task = await makeTask({
       text: 'Field Assertion — Pre-Edit',
       date: tomorrowDateStr(),

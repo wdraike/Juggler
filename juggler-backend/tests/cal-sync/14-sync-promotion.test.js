@@ -20,6 +20,7 @@ var {
   seedTestUser, cleanupTestData, destroyTestUser, mockReq, mockRes, getGCalToken, gcalApi
 } = require('./helpers/test-setup');
 var { requireDB } = require('../helpers/requireDB');
+var { testWithCreds } = require('./helpers/credentialGate');
 var tasksWrite = require('../../src/lib/tasks-write');
 var { makeTask, makeTaskId, deleteGCalEvent } = require('./helpers/test-fixtures');
 var { getGCalEvent, waitForPropagation } = require('./helpers/api-helpers');
@@ -84,8 +85,7 @@ function dayAfterEndISO(hours, minutes, durMinutes) {
 
 describe('Sync Promotion: Event Moves', () => {
 
-  test('event moved same day -> when=fixed', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'event moved same day -> when=fixed', requireDB(async () => {
     user = await seedTestUser(GCAL_ONLY);
 
     var task = await makeTask({
@@ -127,8 +127,7 @@ describe('Sync Promotion: Event Moves', () => {
     expect(Math.abs(newSched - expected)).toBeLessThan(2 * 60 * 1000);
   }));
 
-  test('event moved different day -> fixed + date_pinned=1', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'event moved different day -> fixed + date_pinned=1', requireDB(async () => {
     user = await seedTestUser(GCAL_ONLY);
 
     var task = await makeTask({
@@ -170,8 +169,7 @@ describe('Sync Promotion: Event Moves', () => {
     expect(Math.abs(newSched - expected)).toBeLessThan(2 * 60 * 1000);
   }));
 
-  test('all-day -> timed -> promoted', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'all-day -> timed -> promoted', requireDB(async () => {
     user = await seedTestUser(GCAL_ONLY);
 
     // Create all-day task
@@ -214,8 +212,7 @@ describe('Sync Promotion: Event Moves', () => {
     expect(Math.abs(newSched - expected)).toBeLessThan(2 * 60 * 1000);
   }));
 
-  test('promoted task preserves original when tag', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'promoted task preserves original when tag', requireDB(async () => {
     user = await seedTestUser(GCAL_ONLY);
 
     var task = await makeTask({
@@ -255,8 +252,7 @@ describe('Sync Promotion: Event Moves', () => {
     expect(updatedTask.when).toBe('morning');
   }));
 
-  test('backwardsDep warning', requireDB(async () => {
-    if (!hasGCalCredentials()) return;
+  testWithCreds(() => hasGCalCredentials(), 'backwardsDep warning', requireDB(async () => {
     user = await seedTestUser(GCAL_ONLY);
 
     // taskA is at 10 AM; taskB depends on taskA and is at 11 AM
