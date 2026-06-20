@@ -366,7 +366,7 @@ it('no "Date is pinned" banner — datePinned UI has been removed', () => {
 });
 
 it('shows calendar-managed lockout banner when placementMode is fixed and task is calendar-linked', () => {
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ gcalEventId: 'gcal_x' }} />);
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ calLocked: true, gcalEventId: 'gcal_x' }} />);
   expect(screen.getByText(/Calendar-managed/)).toBeInTheDocument();
 });
 
@@ -377,33 +377,33 @@ it('no lockout banner when placementMode is fixed but task has no calendar link'
 });
 
 it('shows Google Calendar source in calendar-managed banner', () => {
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ gcalEventId: 'gcal_123' }} />);
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ calLocked: true, gcalEventId: 'gcal_123' }} />);
   expect(screen.getByText(/by Google Calendar/)).toBeInTheDocument();
 });
 
 it('shows Microsoft Calendar source in calendar-managed banner', () => {
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ msftEventId: 'msft_456' }} />);
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ calLocked: true, msftEventId: 'msft_456' }} />);
   expect(screen.getByText(/by Microsoft Calendar/)).toBeInTheDocument();
 });
 
 it('shows Apple Calendar source in calendar-managed banner when no calendar name', () => {
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ appleEventId: 'apple_789' }} />);
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ calLocked: true, appleEventId: 'apple_789' }} />);
   expect(screen.getByText(/by Apple Calendar/)).toBeInTheDocument();
 });
 
 it('shows Apple Calendar with calendar name when appleCalendarName provided', () => {
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ appleEventId: 'apple_789', appleCalendarName: 'Home' }} />);
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ calLocked: true, appleEventId: 'apple_789', appleCalendarName: 'Home' }} />);
   expect(screen.getByText(/by Apple Calendar: Home/)).toBeInTheDocument();
 });
 
 it('apple calendar name ignored when appleEventId absent — gcal provider wins instead', () => {
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ gcalEventId: 'g1', appleCalendarName: 'Home' }} />);
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ calLocked: true, gcalEventId: 'g1', appleCalendarName: 'Home' }} />);
   expect(screen.getByText(/by Google Calendar/)).toBeInTheDocument();
   expect(screen.queryByText(/Apple Calendar/)).not.toBeInTheDocument();
 });
 
 it('gcal wins over msft when both event ids present', () => {
-  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ gcalEventId: 'g1', msftEventId: 'm1' }} />);
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="fixed" task={{ calLocked: true, gcalEventId: 'g1', msftEventId: 'm1' }} />);
   expect(screen.getByText(/by Google Calendar/)).toBeInTheDocument();
   expect(screen.queryByText(/by Microsoft/)).not.toBeInTheDocument();
 });
@@ -425,6 +425,29 @@ it('no calendar-managed banner when placementMode=fixed but task has no event ID
 it('does not show lockout banner when isFixed is false', () => {
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} datePinned={false} placementMode="anytime" />);
   expect(screen.queryByText(/Date is pinned/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Calendar-managed/)).not.toBeInTheDocument();
+});
+
+// --- BUG-999.773 discrimination tests ---
+// These two tests FAIL on the pre-fix component (event-id-keyed lock) and PASS on the
+// fixed component (calLocked-keyed lock). They prove the lock signal is calLocked, not
+// the presence of a provider event-id.
+
+it('BUG-999.773 POSITIVE: calLocked alone (no event-id) drives the calendar-managed banner', () => {
+  // A calendar-born task may not surface a provider event-id to the frontend but MUST still
+  // be locked — calLocked is the origin-aware signal from the backend (WhenSection.jsx:236).
+  // Pre-fix (event-id-keyed): no gcalEventId/msftEventId/appleEventId → isCalManaged=false → banner absent → FAIL.
+  // Fixed (calLocked-keyed): task.calLocked=true → isCalManaged=true → banner present → PASS.
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} placementMode="fixed" task={{ calLocked: true }} />);
+  expect(screen.getByText(/Calendar-managed/)).toBeInTheDocument();
+});
+
+it('BUG-999.773 NEGATIVE: gcalEventId without calLocked must NOT show the calendar-managed banner', () => {
+  // A juggler-origin task pushed to Google Calendar carries gcalEventId but stays editable
+  // because it was never INGESTED from the calendar — Juggler owns it (WhenSection.jsx:232-235, BUG-999.773).
+  // Pre-fix (event-id-keyed): gcalEventId present → isCalManaged=true → banner shown → FAIL.
+  // Fixed (calLocked-keyed): calLocked absent → isCalManaged=false → no banner → PASS.
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} placementMode="fixed" task={{ gcalEventId: 'gcal_pushed_by_juggler' }} />);
   expect(screen.queryByText(/Calendar-managed/)).not.toBeInTheDocument();
 });
 

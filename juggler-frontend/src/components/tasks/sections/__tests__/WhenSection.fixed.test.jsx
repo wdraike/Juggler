@@ -108,19 +108,19 @@ describe('TC-W002: Fixed button active when placementMode=fixed, no calendar lin
 // ─── TC-W003 ───────────────────────────────────────────────────────────────────
 
 describe('TC-W003: Fixed + calendar-managed → mode selector locked, calendar banner visible', () => {
-  it('shows Calendar-managed banner when gcalEventId is set', () => {
-    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { gcalEventId: 'gcal_x' } })} />);
+  it('shows Calendar-managed banner when calLocked is true', () => {
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { calLocked: true, gcalEventId: 'gcal_x' } })} />);
     expect(screen.getByText(/Calendar-managed/)).toBeInTheDocument();
   });
 
   it('mode selector is locked via pointerEvents:none when calendar-managed', () => {
-    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { gcalEventId: 'gcal_x' } })} />);
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { calLocked: true, gcalEventId: 'gcal_x' } })} />);
     var btn = screen.getByTitle(/No time restriction/);
     expect(btn.closest('div')).toHaveStyle({ pointerEvents: 'none' });
   });
 
   it('mode buttons have tabIndex=-1 when calendar-managed', () => {
-    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { gcalEventId: 'gcal_x' } })} />);
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { calLocked: true, gcalEventId: 'gcal_x' } })} />);
     expect(screen.getByTitle(/No time restriction/)).toHaveAttribute('tabIndex', '-1');
     expect(screen.getByTitle(/Schedule near a preferred time/)).toHaveAttribute('tabIndex', '-1');
     expect(screen.getByTitle(/Restrict to named time block windows/)).toHaveAttribute('tabIndex', '-1');
@@ -253,7 +253,7 @@ describe('TC-W007: Recurring + fixed + no calendar link → shows "not available
   });
 
   it('with calendar link present → shows "Calendar-managed" banner, not "not available" message', () => {
-    render(<WhenSection {...buildRecurringFixedProps({ task: { gcalEventId: 'gcal_x' } })} />);
+    render(<WhenSection {...buildRecurringFixedProps({ task: { calLocked: true, gcalEventId: 'gcal_x' } })} />);
     expect(screen.getByText(/Calendar-managed/)).toBeInTheDocument();
     expect(screen.queryByText(/Fixed mode is not available/)).not.toBeInTheDocument();
   });

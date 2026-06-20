@@ -115,7 +115,7 @@ describe('WhenSection mode matrix', () => {
 
             it('isFixed derivation is correct', () => {
               render(<WhenSection {...props} />);
-              var isCalManaged = !!(props.task && (props.task.gcalEventId || props.task.msftEventId || props.task.appleEventId));
+              var isCalManaged = !!(props.task && props.task.calLocked);
               // datePinned no longer contributes to isFixed — only cal-linked fixed mode locks the UI
               var expectedIsFixed = placementMode === 'fixed' && isCalManaged;
               var labelEl = screen.queryByText('Scheduling mode');
@@ -176,7 +176,7 @@ describe('WhenSection Fixed mode button', () => {
 
 describe('WhenSection fixed mode specifics', () => {
   it('fixed mode dims mode selector and disables pointer events when calendar-managed', () => {
-    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { gcalEventId: 'gcal_x' } })} />);
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { calLocked: true, gcalEventId: 'gcal_x' } })} />);
     var anytimeBtn = screen.getByText(/Anytime/);
     expect(anytimeBtn).toBeInTheDocument();
     expect(anytimeBtn.closest('div')).toHaveStyle({ pointerEvents: 'none' });
@@ -272,7 +272,7 @@ describe('WhenSection deep interactions — no silent lockouts', () => {
   });
 
   it('cal-managed fixed mode disables mode buttons via pointerEvents and tabIndex', () => {
-    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { gcalEventId: 'gcal_x' } })} />);
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { calLocked: true, gcalEventId: 'gcal_x' } })} />);
     var btn = screen.getByTitle(/No time restriction/);
     expect(btn.closest('div')).toHaveStyle({ pointerEvents: 'none' });
     expect(btn).toHaveAttribute('tabIndex', '-1');
@@ -281,13 +281,13 @@ describe('WhenSection deep interactions — no silent lockouts', () => {
   it('cal-managed fixed + placementMode=fixed locks time-window sub-panel via pointerEvents', () => {
     // Verify that when isFixed=true (cal-linked + fixed mode), the mode selector is locked.
     // datePinned no longer drives locking — only cal-linked fixed mode does.
-    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { gcalEventId: 'gcal_x' } })} />);
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { calLocked: true, gcalEventId: 'gcal_x' } })} />);
     var btn = screen.getByTitle(/No time restriction/);
     expect(btn.closest('div')).toHaveStyle({ pointerEvents: 'none' });
   });
 
   it('placementMode=fixed + calendar link disables mode buttons via pointerEvents and tabIndex', () => {
-    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { gcalEventId: 'gcal_x' } })} />);
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { calLocked: true, gcalEventId: 'gcal_x' } })} />);
     var btn = screen.getByTitle(/No time restriction/);
     expect(btn.closest('div')).toHaveStyle({ pointerEvents: 'none' });
     expect(btn).toHaveAttribute('tabIndex', '-1');
@@ -309,7 +309,7 @@ describe('WhenSection deep interactions — no silent lockouts', () => {
   });
 
   it('shows correct banner text for fixed-mode lockout when calendar-managed', () => {
-    render(<WhenSection {...buildProps({ placementMode: 'fixed', datePinned: false, task: { gcalEventId: 'gcal_x' } })} />);
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', datePinned: false, task: { calLocked: true, gcalEventId: 'gcal_x' } })} />);
     expect(screen.getByText(/Calendar-managed/)).toBeInTheDocument();
     expect(screen.queryByText(/Date is pinned/)).not.toBeInTheDocument();
   });
@@ -328,7 +328,7 @@ describe('WhenSection deep interactions — no silent lockouts', () => {
 
   it('Day requirement picker is removed from DOM when isFixed (cal-managed fixed)', () => {
     // isFixed = placementMode==='fixed' && isCalManaged — datePinned no longer drives this
-    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { gcalEventId: 'gcal_x' } })} />);
+    render(<WhenSection {...buildProps({ placementMode: 'fixed', task: { calLocked: true, gcalEventId: 'gcal_x' } })} />);
     expect(screen.queryByText(/Day requirement/)).not.toBeInTheDocument();
   });
 
@@ -342,7 +342,7 @@ describe('WhenSection deep interactions — no silent lockouts', () => {
 // placementMode='fixed' + isCalManaged=true, a path the main matrix never hits
 // because it always passes task=undefined (so isCalManaged=false).
 describe('WhenSection mode matrix — with calendar task', () => {
-  var CALENDAR_TASK = { gcalEventId: 'gcal_x' };
+  var CALENDAR_TASK = { calLocked: true, gcalEventId: 'gcal_x' };
 
   MODES.forEach(function(placementMode) {
     it('mode selector buttons are present for placementMode=' + placementMode + ' with calendar link', () => {
@@ -496,7 +496,7 @@ describe('WhenSection mode matrix — isMobile=true', function() {
 
   it('cal-managed fixed mode locks buttons on mobile (tabIndex=-1)', function() {
     render(<WhenSection
-      {...buildProps({ placementMode: 'fixed', datePinned: false, task: { gcalEventId: 'gcal_x' }, isMobile: true })}
+      {...buildProps({ placementMode: 'fixed', datePinned: false, task: { calLocked: true, gcalEventId: 'gcal_x' }, isMobile: true })}
     />);
     var btn = screen.getByTitle(/No time restriction/);
     expect(btn).toHaveAttribute('tabIndex', '-1');
