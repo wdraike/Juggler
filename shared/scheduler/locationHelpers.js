@@ -104,6 +104,47 @@ function canTaskRun(task, dayLocId, toolMatrix) {
   return true;
 }
 
+// FR1 / AC1.1 — structured-diagnostic counterpart of canTaskRun. Same predicate,
+// but instead of a bare boolean it returns WHY a task can't run at a resolved
+// location so the scheduler can attribute a specific _unplacedReason/_unplacedDetail.
+//
+// SPEC open-decision #2 RESOLVED: parallel helper — canTaskRun keeps its bare-boolean
+// contract verbatim (every existing caller — canTaskRunAtMin, canTaskRunAtMinCached,
+// isTaskBlockedPure — relies on truthy-on-success / falsy-on-fail, and the A-002
+// golden master pins it). This PARALLEL helper is the lower-blast-radius path: it
+// adds the structured cause without touching any boolean call site.
+//
+// Returns:
+//   { ok: true }                                 — task can run (no cause)
+//   { ok: false, cause: 'location_mismatch', detail }  — required location not the day's location
+//   { ok: false, cause: 'tool_conflict',    detail }   — a required tool isn't available here
+// Location is checked first (mirrors canTaskRun's guard order) so a task failing
+// BOTH location and tool reports 'location_mismatch' (AC1.1-g).
+function whyCannotRun(task, dayLocId, toolMatrix) {
+  var t = migrateTask(task);
+  if (t.location.length > 0 && t.location.indexOf(dayLocId) === -1) {
+    return {
+      ok: false,
+      cause: 'location_mismatch',
+      detail: 'Needs location ' + t.location.join(' or ') +
+        '; resolved location is ' + dayLocId
+    };
+  }
+  if (t.tools && t.tools.length > 0) {
+    var available = (toolMatrix && toolMatrix[dayLocId]) || [];
+    for (var i = 0; i < t.tools.length; i++) {
+      if (available.indexOf(t.tools[i]) === -1) {
+        return {
+          ok: false,
+          cause: 'tool_conflict',
+          detail: 'Needs ' + t.tools[i] + '; not available at ' + dayLocId
+        };
+      }
+    }
+  }
+  return { ok: true };
+}
+
 function canTaskRunAtMin(task, dateStr, minute, cfg, toolMatrix, blocks) {
   var locId = resolveLocationId(dateStr, minute, cfg, blocks);
   return canTaskRun(task, locId, toolMatrix);
@@ -163,6 +204,7 @@ module.exports = {
   getLocObj,
   resolveDayLocation,
   canTaskRun,
+  whyCannotRun,
   canTaskRunAtMin,
   canTaskRunAtMinCached,
   getLocationForDatePure,

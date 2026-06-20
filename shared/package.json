@@ -13,7 +13,8 @@
     "./scheduler/locationHelpers": "./scheduler/locationHelpers.js",
     "./scheduler/timeBlockHelpers": "./scheduler/timeBlockHelpers.js",
     "./scheduler/dateMatchesRecurrence": "./scheduler/dateMatchesRecurrence.js",
-    "./scheduler/missedHelpers": "./scheduler/missedHelpers.js"
+    "./scheduler/missedHelpers": "./scheduler/missedHelpers.js",
+    "./scheduler/reasonCodes": "./scheduler/reasonCodes.js"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

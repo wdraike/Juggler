@@ -227,22 +227,21 @@ describe('I1 CHARACTERIZATION — findEarliestSlot failure (current bare null re
     expect(isUnplaced).toBe(true);
   });
 
-  test('CHAR-B3: unplaced task currently has no _unplacedReason field (pin the BUG — pre-impl)', () => {
-    // This pins the CURRENT BROKEN state: no failReason on the bare {slot:null} path.
-    // The impl (AC1.2 / FR1) will add it; this char test will then be updated or replaced
-    // by the RED tests in Section B. For now it confirms the starting point.
+  test('CHAR-B3: impossible-location task carries a specific _unplacedReason (impl landed)', () => {
+    // BUG-PIN WAS: no failReason on the bare {slot:null} path.
+    // IMPL LANDED (AC1.2 / I3): now the reason engine sets a code.
+    // A task with location=['nowhere'] gets 'location_mismatch' (no matching slot ever found).
+    // This replaces the old broken-state pin — Section B GREEN tests now serve as the primary
+    // coverage; this CHAR test guards the regression that the reason is never undefined.
     var result = run([makeTask({ id: 'char-b3', location: ['nowhere'] })], makeCfg());
     var unplacedItem = (result.unplaced || []).find(function(t) { return t && t.id === 'char-b3'; });
     expect(unplacedItem).toBeDefined();
-    // Current code: _unplacedReason is either undefined or set by a separate (unrelated) path.
-    // We pin that the main no-slot path does NOT currently set a tool/location-specific reason.
-    // After impl this pin is replaced by the GREEN assertion from Section B.
+    // After impl: reason is a valid, non-null, non-undefined code.
     var reason = unplacedItem && unplacedItem._unplacedReason;
-    // Accept undefined, null, or any non-tool/location-specific code (the broken state).
-    // The presence of 'tool_conflict' or 'location_mismatch' here would mean the impl
-    // already shipped — in which case remove this CHAR test and rely on Section B.
-    expect(reason === undefined || reason === null || reason === 'recurring_split_overflow' ||
-      reason === 'no_slot').toBe(true);
+    expect(reason).toBeDefined();
+    expect(reason).not.toBeNull();
+    expect(typeof reason).toBe('string');
+    expect(reason.length).toBeGreaterThan(0);
   });
 });
 
@@ -255,40 +254,41 @@ describe('I1 CHARACTERIZATION — findEarliestSlot failure (current bare null re
 // the test will turn GREEN and serve as a regression guard.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('I1 RED — AC1.1: canTaskRun returns structured failure cause (not bare boolean)', () => {
+describe('I1 RED — AC1.1: whyCannotRun returns structured failure cause (parallel to bare-boolean canTaskRun)', () => {
 
-  // AC1.1 requires canTaskRun to return a structured result distinguishing
-  // location-mismatch from tool-unavailable, while remaining truthy-on-success
-  // so existing callers (canTaskRunAtMin, canTaskRunAtMinCached) stay correct.
+  // AC1.1 back-compat decision (SPEC open-decision #2): canTaskRun KEEPS its bare-boolean
+  // contract (CHAR-A2–A9 + all existing callers depend on truthy-on-success), and the
+  // structured failure cause is surfaced by a PARALLEL helper whyCannotRun (lower blast
+  // radius — no boolean call site changes). whyCannotRun distinguishes location-mismatch
+  // from tool-unavailable, naming the missing tool + the resolved location.
 
-  test.failing('RED-AC1.1-a: location mismatch → result.cause === "location_mismatch"', () => {
-    // Expects canTaskRun to return an object with cause:'location_mismatch'
+  test('RED-AC1.1-a: location mismatch → result.cause === "location_mismatch"', () => {
+    // Expects whyCannotRun to return an object with cause:'location_mismatch'
     // when the task's required location is not the day location.
-    var result = locationHelpers.canTaskRun(
+    var result = locationHelpers.whyCannotRun(
       makeTask({ location: ['work'] }),
       'home',
       DEFAULT_TOOL_MATRIX
     );
-    // After impl: result is a structured object, falsy or with ok:false + cause.
     expect(result).toMatchObject({ ok: false, cause: 'location_mismatch' });
   });
 
-  test.failing('RED-AC1.1-b: location mismatch → result.detail names the required vs resolved location', () => {
-    var result = locationHelpers.canTaskRun(
+  test('RED-AC1.1-b: location mismatch → result.detail names the required vs resolved location', () => {
+    var result = locationHelpers.whyCannotRun(
       makeTask({ location: ['biz'] }),
       'home',
       DEFAULT_TOOL_MATRIX
     );
-    // After impl: detail includes the required location ('biz') and the resolved day location ('home').
+    // detail includes the required location ('biz') and the resolved day location ('home').
     expect(result).toMatchObject({ ok: false, cause: 'location_mismatch' });
     expect(typeof result.detail).toBe('string');
     expect(result.detail).toMatch(/biz/);
     expect(result.detail).toMatch(/home/);
   });
 
-  test.failing('RED-AC1.1-c: tool unavailable → result.cause === "tool_conflict"', () => {
+  test('RED-AC1.1-c: tool unavailable → result.cause === "tool_conflict"', () => {
     // personal_pc not available at 'work' (only at 'home' per DEFAULT_TOOL_MATRIX).
-    var result = locationHelpers.canTaskRun(
+    var result = locationHelpers.whyCannotRun(
       makeTask({ location: [], tools: ['personal_pc'] }),
       'work',
       DEFAULT_TOOL_MATRIX
@@ -296,9 +296,9 @@ describe('I1 RED — AC1.1: canTaskRun returns structured failure cause (not bar
     expect(result).toMatchObject({ ok: false, cause: 'tool_conflict' });
   });
 
-  test.failing('RED-AC1.1-d: tool conflict → result.detail names the missing tool and the resolved location', () => {
+  test('RED-AC1.1-d: tool conflict → result.detail names the missing tool and the resolved location', () => {
     // AC1.1: "naming the missing tool + resolved location"
-    var result = locationHelpers.canTaskRun(
+    var result = locationHelpers.whyCannotRun(
       makeTask({ location: [], tools: ['personal_pc'] }),
       'work',
       DEFAULT_TOOL_MATRIX
@@ -343,11 +343,11 @@ describe('I1 RED — AC1.1: canTaskRun returns structured failure cause (not bar
     }
   });
 
-  test.failing('RED-AC1.1-g: location mismatch takes precedence over tool check when both fail', () => {
+  test('RED-AC1.1-g: location mismatch takes precedence over tool check when both fail', () => {
     // Task needs 'biz' location AND 'personal_pc' tool (not at biz/work).
-    // Location mismatch fires first (L97 in current code); structured result should
-    // report cause:'location_mismatch', not cause:'tool_conflict'.
-    var result = locationHelpers.canTaskRun(
+    // Location mismatch fires first (mirrors canTaskRun's guard order); structured
+    // result should report cause:'location_mismatch', not cause:'tool_conflict'.
+    var result = locationHelpers.whyCannotRun(
       makeTask({ location: ['biz'], tools: ['personal_pc'] }),
       'home',
       DEFAULT_TOOL_MATRIX
@@ -362,10 +362,10 @@ describe('I1 RED — AC1.2: tryPlaceQueued/findEarliestSlot returns {slot:null, 
   // not just {slot:null}.  The diagnostic is accumulated across candidate slots so
   // the DOMINANT rejection reason (tool/location vs capacity vs window-past) is surfaced.
 
-  test.failing('RED-AC1.2-a: impossible location → {slot:null, failReason:"location_mismatch"}', () => {
+  test('RED-AC1.2-a: impossible location → {slot:null, failReason:"location_mismatch"}', () => {
     // A task that requires 'nowhere' location can never be placed.
-    // After impl: the scheduler result carries the task with _unplacedReason set,
-    // AND (if we can access tryPlaceQueued directly) it returns failReason.
+    // IMPL LANDED (I3): the scheduler result now carries _unplacedReason='location_mismatch'.
+    // Converted from test.failing — RED→GREEN transition confirmed 2026-06-20.
     // We test at the scheduler output level (unplaced item) as the integration surface:
     var result = run([makeTask({ id: 'red-ac12-a', location: ['nowhere'] })], makeCfg());
     var unplacedItem = (result.unplaced || []).find(function(t) { return t && t.id === 'red-ac12-a'; });
@@ -375,9 +375,18 @@ describe('I1 RED — AC1.2: tryPlaceQueued/findEarliestSlot returns {slot:null, 
     expect(unplacedItem._unplacedDetail.length).toBeGreaterThan(0);
   });
 
-  test.failing('RED-AC1.2-b: tool conflict → {slot:null, failReason:"tool_conflict"}', () => {
+  test('RED-AC1.2-b: tool conflict → {slot:null, failReason:"tool_conflict"}', () => {
     // All slots forced to 'work' (hourLocationOverrides) but task needs 'personal_pc'
     // (only at home) → every candidate slot rejected with tool_conflict.
+    //
+    // SETUP FIX (test-setup issue, not impl gap): the original setup used only TODAY's
+    // hourLocationOverrides but a plain (non-generated) task can roll forward to Sunday where
+    // home slots exist — Sunday has no override, so personal_pc is available there → placed.
+    // Fix: use generated:true + deadline:TODAY to day-lock the task to TODAY only (scheduler
+    // isGenerated && anchorMin==null path clamps earliestIdx=latestIdx=anchorDate's index).
+    // With all TODAY hours overridden to 'work', personal_pc is unavailable everywhere →
+    // unplaced with _unplacedReason='tool_conflict'.
+    // Converted from test.failing — RED→GREEN transition confirmed 2026-06-20.
     var cfg = makeCfg({
       hourLocationOverrides: (function() {
         var h = {};
@@ -386,7 +395,11 @@ describe('I1 RED — AC1.2: tryPlaceQueued/findEarliestSlot returns {slot:null, 
         return h;
       })()
     });
-    var result = run([makeTask({ id: 'red-ac12-b', location: [], tools: ['personal_pc'] })], cfg);
+    var result = run([makeTask({
+      id: 'red-ac12-b', location: [], tools: ['personal_pc'],
+      generated: true,    // day-locks the task to TODAY (isGenerated && anchorMin==null)
+      deadline: TODAY     // secondary guard: no ignoreDeadline extension past TODAY
+    })], cfg);
     var unplacedItem = (result.unplaced || []).find(function(t) { return t && t.id === 'red-ac12-b'; });
     expect(unplacedItem).toBeDefined();
     expect(unplacedItem._unplacedReason).toBe('tool_conflict');
@@ -394,7 +407,7 @@ describe('I1 RED — AC1.2: tryPlaceQueued/findEarliestSlot returns {slot:null, 
     expect(unplacedItem._unplacedDetail).toMatch(/personal_pc/);
   });
 
-  test.failing('RED-AC1.2-c: failDetail names the resolved location for a location_mismatch', () => {
+  test('RED-AC1.2-c: failDetail names the resolved location for a location_mismatch', () => {
     var result = run([makeTask({ id: 'red-ac12-c', location: ['biz'] })], makeCfg());
     var unplacedItem = (result.unplaced || []).find(function(t) { return t && t.id === 'red-ac12-c'; });
     expect(unplacedItem).toBeDefined();
@@ -403,34 +416,69 @@ describe('I1 RED — AC1.2: tryPlaceQueued/findEarliestSlot returns {slot:null, 
     expect(unplacedItem._unplacedDetail).toMatch(/biz/);
   });
 
-  test.failing('RED-AC1.2-d: no-capacity rejection (all slots full) → failReason:"no_slot"', () => {
-    // Fill the entire day with an immovable blocker, then try to place a home-location task.
-    // The task's location IS satisfiable but capacity is exhausted → no_slot.
+  test('RED-AC1.2-d: no-capacity rejection (all slots full) → failReason:"no_slot"', () => {
+    // Prove no_slot by exhausting the only available window on a day.
+    //
+    // SETUP FIX (test-setup issue, not impl gap): the original setup tried a large datePinned
+    // blocker but the scheduler re-orders tasks by constraint and doesn't guarantee the blocker
+    // occupies slots before the target. Also, plain tasks with deadline=TODAY get
+    // ignoreDeadline retry when slack<0 and roll to the next day.
+    //
+    // Fix: use a TINY custom time block (only 30 min on Saturday: 480-510) and two
+    // generated+day-locked tasks. generated:true + no anchorMin → isGenerated path in
+    // findEarliestSlot clamps earliest=latest=anchorDate index (TODAY only). Blocker is P0
+    // (placed first by compareItems; most constrained wins), fills the only slot.
+    // Target is P3 (lower priority, placed second) → no free slot → no_slot.
+    // No location/tool constraints on either task → checkLoc=false → populateFailDiag
+    // produces no_slot (not location_mismatch or tool_conflict).
+    //
+    // Converted from test.failing — RED→GREEN transition confirmed 2026-06-20.
+    var TINY_BLOCKS = {
+      Sat: [{ id: 'tiny', tag: 'morning', name: 'Tiny', start: 480, end: 510, color: '#F59E0B', loc: 'home' }]
+    };
+    var cfg = makeCfg({ timeBlocks: TINY_BLOCKS });
     var blocker = makeTask({
-      id: 'blocker-001', location: [], tools: [], dur: 1020 - 360, // fills entire morning-evening span
-      date: TODAY, datePinned: true
+      id: 'blocker-d', location: [], tools: [], dur: 30, pri: 'P0',
+      generated: true, date: TODAY, deadline: TODAY
     });
-    var target = makeTask({ id: 'red-ac12-d', location: [], tools: [], dur: 30 });
-    var statuses = { 'blocker-001': '', 'red-ac12-d': '' };
-    var result = unifiedSchedule([blocker, target], statuses, TODAY, NOW_MINS, makeCfg());
+    var target = makeTask({
+      id: 'red-ac12-d', location: [], tools: [], dur: 30, pri: 'P3',
+      generated: true, date: TODAY, deadline: TODAY
+    });
+    var statuses = { 'blocker-d': '', 'red-ac12-d': '' };
+    var result = unifiedSchedule([blocker, target], statuses, TODAY, NOW_MINS, cfg);
     var unplacedItem = (result.unplaced || []).find(function(t) { return t && t.id === 'red-ac12-d'; });
-    // Note: if both are placed (blocker doesn't actually pin all slots), this test may need
-    // tuning — we're testing the failReason shape, not the exact capacity scenario.
+    // HARD GUARD: if target is placed the scenario is broken; fail loudly.
     if (!unplacedItem) {
-      // If the target was placed, we can't test the failReason — skip via expect never reached.
-      // In that case the scenario needs a tighter blocker setup (handled by the impl developer).
-      throw new Error('Target task was placed — blocker scenario needs tightening');
+      throw new Error('Target task was placed — capacity scenario broken; check TINY_BLOCKS covers only one slot');
     }
     expect(unplacedItem._unplacedReason).toBe('no_slot');
     expect(typeof unplacedItem._unplacedDetail).toBe('string');
+    expect(unplacedItem._unplacedDetail.length).toBeGreaterThan(0);
   });
 
-  test.failing('RED-AC1.2-e: _unplacedReason is never undefined on any unplaced item (R11.16)', () => {
-    // ALL paths must set a reason. Run with a mix of impossible-location, tool-conflict,
-    // and a genuinely full-day scenario. Every item in result.unplaced must have a reason.
+  test('RED-AC1.2-e: _unplacedReason is never undefined on any unplaced item (R11.16)', () => {
+    // ALL paths must set a reason. Run with a GENUINE mix of two distinct failure paths:
+    //   mix-001 — impossible location ('nowhere') → location_mismatch
+    //   mix-002 — tool conflict (personal_pc on all-'work' day) → tool_conflict
+    //
+    // DAY-LOCK BOTH tasks via generated:true + deadline:TODAY.
+    // Without this, mix-002 (plain task) would roll forward to 2026-06-21 (Sunday)
+    // where personal_pc IS available at home and get PLACED — leaving only mix-001
+    // in result.unplaced. That makes the forEach single-item: it would validate
+    // only the location_mismatch path and silently miss tool_conflict (the bug zoe caught).
+    // generated:true + deadline:TODAY uses the isGenerated&&anchorMin==null path in
+    // findEarliestSlot to clamp earliestIdx=latestIdx=anchorDate's index (TODAY only).
+    //
+    // SELF-MUTATION: removing generated:true from mix-002 → it rolls to Sunday (placed)
+    // → result.unplaced.length < 2 → the hard guard below throws → FAILS.
+    // SELF-MUTATION: removing the tool check in locationHelpers → mix-002 placed on TODAY
+    // → length < 2 → hard guard → FAILS.
+    // SELF-MUTATION: changing the reason engine to emit 'no_slot' for tool conflicts →
+    // mix-002 reason !== 'tool_conflict' → FAILS.
     var tasks = [
-      makeTask({ id: 'mix-001', location: ['nowhere'] }),
-      makeTask({ id: 'mix-002', tools: ['personal_pc'] })
+      makeTask({ id: 'mix-001', location: ['nowhere'], generated: true, deadline: TODAY }),
+      makeTask({ id: 'mix-002', tools: ['personal_pc'], generated: true, deadline: TODAY })
     ];
     var cfg = makeCfg({
       hourLocationOverrides: (function() {
@@ -441,6 +489,42 @@ describe('I1 RED — AC1.2: tryPlaceQueued/findEarliestSlot returns {slot:null, 
       })()
     });
     var result = run(tasks, cfg);
+
+    // HARD GUARD: both tasks must be unplaced. If either is placed, the scenario is
+    // broken (day-lock failed or tool/location check missing) — fail loudly so the
+    // forEach below cannot run on a single item and silently pass.
+    if ((result.unplaced || []).length < 2) {
+      var placedIds = [];
+      var days = result.dayPlacements ? Object.keys(result.dayPlacements) : [];
+      days.forEach(function(d) {
+        (result.dayPlacements[d] || []).forEach(function(block) {
+          if (block && block.task) placedIds.push(block.task.id + '@' + d);
+        });
+      });
+      throw new Error(
+        'AC1.2-e scenario broken: expected 2 unplaced items but got ' +
+        (result.unplaced || []).length + '. Placed: ' + JSON.stringify(placedIds)
+      );
+    }
+
+    // SPECIFIC per-item assertions: each path must carry its OWN distinct reason code.
+    // A generic "reason is defined" loop cannot catch a regression where one code
+    // silently replaces the other — these assertions WILL.
+    var item001 = (result.unplaced || []).find(function(t) { return t && t.id === 'mix-001'; });
+    var item002 = (result.unplaced || []).find(function(t) { return t && t.id === 'mix-002'; });
+
+    expect(item001).toBeDefined();
+    expect(item001._unplacedReason).toBe('location_mismatch');
+    expect(typeof item001._unplacedDetail).toBe('string');
+    expect(item001._unplacedDetail.length).toBeGreaterThan(0);
+
+    expect(item002).toBeDefined();
+    expect(item002._unplacedReason).toBe('tool_conflict');
+    expect(typeof item002._unplacedDetail).toBe('string');
+    expect(item002._unplacedDetail).toMatch(/personal_pc/);
+
+    // UNIVERSAL LOOP (R11.16): every unplaced item across the whole result must carry
+    // a non-null reason AND detail — proves the floor holds regardless of scenario shape.
     (result.unplaced || []).forEach(function(item) {
       expect(item._unplacedReason).toBeDefined();
       expect(item._unplacedReason).not.toBeNull();

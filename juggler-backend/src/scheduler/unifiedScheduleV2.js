@@ -60,8 +60,15 @@ var locationHelpers = require('./locationHelpers');
 var _canTaskRunAtMin = locationHelpers.canTaskRunAtMin;
 var canTaskRunAtMinCached = locationHelpers.canTaskRunAtMinCached;
 var resolveLocationId = locationHelpers.resolveLocationId;
+var whyCannotRun = locationHelpers.whyCannotRun;
 
 var { PLACEMENT_MODES } = require('../lib/placementModes');
+
+// Canonical reason-code enum — eliminates magic strings at every _unplacedReason
+// assignment site. String VALUES are byte-identical to what tests pin; only the
+// call sites are updated. See shared/scheduler/reasonCodes.js for the full taxonomy.
+var reasonCodesMod = require('../../../shared/scheduler/reasonCodes');
+var REASON_CODES = reasonCodesMod.REASON_CODES;
 
 // H6 W1: the pure ordering/occupancy primitives now live in the scheduler domain
 // core. unifiedScheduleV2 DELEGATES to them so the algorithm has a single source
@@ -934,6 +941,35 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   var weatherByDateHour = cfg && cfg.weatherByDateHour;
   var checkWeather = weatherByDateHour && item.task && hasWeatherConstraint(item.task);
 
+  // FR1 / AC1.2 — placement-failure diagnostic accumulator. The caller passes an
+  // optional `opts.diag` sink (an object); as the scan rejects candidate slots we
+  // record WHY, then on a no-slot return the dominant reason is surfaced so the
+  // scheduler can attribute a specific _unplacedReason/_unplacedDetail instead of
+  // a bare null. We do NOT change the success return shape ({dateKey,start}) or the
+  // null-on-failure contract — the diagnostic rides on the caller-provided sink.
+  // Precedence (matches SPEC taxonomy): a real free slot blocked ONLY by
+  // tool/location → location_mismatch / tool_conflict (the task can never run in
+  // its eligible windows); otherwise, windows existed but capacity/timing left no
+  // room → no_slot. location_mismatch beats tool_conflict (whyCannotRun's order).
+  var diag = (opts && opts.diag) || null;
+  var locToolDiag = null;   // {cause, detail} from the first loc/tool rejection seen
+  var locToolIsLocation = false; // a location_mismatch was seen (outranks tool)
+  var sawEligibleWindow = false; // at least one eligible window existed on some day
+  var sawCapacityBlock = false;  // a slot was free-shaped but full (or dep/weather blocked)
+  function recordLocTool(dateKey, startMin, blocksForDay) {
+    if (!diag || !checkLoc) return;
+    var locId = resolveLocationId(dateKey, startMin, cfg, blocksForDay);
+    var why = whyCannotRun(item.task, locId, toolMatrix);
+    if (why && why.ok === false) {
+      if (why.cause === 'location_mismatch') {
+        locToolIsLocation = true;
+        locToolDiag = why; // location always wins; keep the latest location detail
+      } else if (!locToolIsLocation && !locToolDiag) {
+        locToolDiag = why; // first tool_conflict seen (only if no location seen)
+      }
+    }
+  }
+
   // Infinite-slack tasks (no deadline, no recurring anchor) are allowed to
   // extend the search past the initial date list — up to MAX_SEARCH_DAYS.
   // `env` carries the maps extendDatesTo needs to build new day entries
@@ -997,6 +1033,7 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
     if (spacingMinKey && d.key < spacingMinKey) { i++; continue; }
     var wins = eligibleWindows(item, d.key, dayWindows, dayBlocks, relaxWhen);
     if (wins.length) {
+      sawEligibleWindow = true;
       var occ = dayOcc[d.key] || {};
       var blocks = dayBlocks[d.key];
       for (var w = 0; w < wins.length; w++) {
@@ -1008,25 +1045,66 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
           ? Math.max(winStart, item.preferredTimeMins)
           : winStart;
         for (var s = prefStart; s + item.dur <= winEnd; s += 15) {
-          if (!isFreeWithTravel(occ, s, item.dur, item.travelBefore, item.travelAfter)) continue;
-          if (checkDeps && absoluteMin(i, s) < depReadyAbs) continue;
-          if (checkLoc && !canTaskRunAtMinCached(item.task, d.key, s, cfg, toolMatrix, blocks, locCache)) continue;
-          if (checkWeather && !weatherOk(item.task, d.key, s, weatherByDateHour)) continue;
+          if (!isFreeWithTravel(occ, s, item.dur, item.travelBefore, item.travelAfter)) { sawCapacityBlock = true; continue; }
+          if (checkDeps && absoluteMin(i, s) < depReadyAbs) { sawCapacityBlock = true; continue; }
+          if (checkLoc && !canTaskRunAtMinCached(item.task, d.key, s, cfg, toolMatrix, blocks, locCache)) { recordLocTool(d.key, s, blocks); continue; }
+          if (checkWeather && !weatherOk(item.task, d.key, s, weatherByDateHour)) { sawCapacityBlock = true; continue; }
           return { dateKey: d.key, start: s };
         }
         // Fallback: try earlier slots between winStart and prefStart (e.g. window fully booked after preferred).
         for (var sf = winStart; sf < prefStart; sf += 15) {
-          if (!isFreeWithTravel(occ, sf, item.dur, item.travelBefore, item.travelAfter)) continue;
-          if (checkDeps && absoluteMin(i, sf) < depReadyAbs) continue;
-          if (checkLoc && !canTaskRunAtMinCached(item.task, d.key, sf, cfg, toolMatrix, blocks, locCache)) continue;
-          if (checkWeather && !weatherOk(item.task, d.key, sf, weatherByDateHour)) continue;
+          if (!isFreeWithTravel(occ, sf, item.dur, item.travelBefore, item.travelAfter)) { sawCapacityBlock = true; continue; }
+          if (checkDeps && absoluteMin(i, sf) < depReadyAbs) { sawCapacityBlock = true; continue; }
+          if (checkLoc && !canTaskRunAtMinCached(item.task, d.key, sf, cfg, toolMatrix, blocks, locCache)) { recordLocTool(d.key, sf, blocks); continue; }
+          if (checkWeather && !weatherOk(item.task, d.key, sf, weatherByDateHour)) { sawCapacityBlock = true; continue; }
           return { dateKey: d.key, start: sf };
         }
       }
     }
     i++;
   }
+  if (diag) populateFailDiag(diag, {
+    checkLoc: checkLoc,
+    locToolDiag: locToolDiag,
+    sawEligibleWindow: sawEligibleWindow,
+    sawCapacityBlock: sawCapacityBlock
+  });
   return null;
+}
+
+// FR1 / AC1.2 — translate the accumulated scan signals into a {failReason, failDetail}
+// on the caller's diag sink. Precedence:
+//   1. A tool/location rejection was the only thing standing between the task and a
+//      free slot in its eligible windows → that specific cause (location_mismatch /
+//      tool_conflict). This is the "Submit Weekly UI Claim" symptom: personal_pc not
+//      available where/when the day resolves.
+//   2. Eligible windows existed but were full / dep- / weather-blocked → no_slot.
+//   3. No eligible window ever (when-block fully unavailable, search window empty) →
+//      no_slot with a window-class detail.
+// The sink is only written when not already set, so the FIRST findSlot pass (the
+// strictest) owns the reason; later relaxed retries don't overwrite it. R11.16: a
+// reason is ALWAYS produced for a real placement failure.
+function populateFailDiag(diag, sig) {
+  if (diag.failReason) return; // first pass wins
+  if (sig.checkLoc && sig.locToolDiag && !sig.sawCapacityBlock) {
+    diag.failReason = sig.locToolDiag.cause;     // 'location_mismatch' | 'tool_conflict'
+    diag.failDetail = sig.locToolDiag.detail;
+    return;
+  }
+  if (sig.checkLoc && sig.locToolDiag && sig.sawCapacityBlock) {
+    // Mixed: some slots full, some loc/tool-blocked. The loc/tool constraint is the
+    // structural blocker (capacity may have been incidental), so surface it.
+    diag.failReason = sig.locToolDiag.cause;
+    diag.failDetail = sig.locToolDiag.detail;
+    return;
+  }
+  if (sig.sawEligibleWindow) {
+    diag.failReason = 'no_slot';
+    diag.failDetail = 'No free slot in the eligible windows (capacity exhausted)';
+    return;
+  }
+  diag.failReason = 'no_slot';
+  diag.failDetail = 'No eligible time window available for this task';
 }
 
 // Mirror of findEarliestSlot that searches from the end of the day backwards,
@@ -1078,11 +1156,32 @@ function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   var env = opts && opts.env;
   var locCache = env ? (env._locCache || (env._locCache = Object.create(null))) : null;
 
+  // FR1 / AC1.2 — same diagnostic accumulation as findEarliestSlot (see comments there).
+  var diag = (opts && opts.diag) || null;
+  var locToolDiag = null;
+  var locToolIsLocation = false;
+  var sawEligibleWindow = false;
+  var sawCapacityBlock = false;
+  function recordLocTool(dateKey, startMin, blocksForDay) {
+    if (!diag || !checkLoc) return;
+    var locId = resolveLocationId(dateKey, startMin, cfg, blocksForDay);
+    var why = whyCannotRun(item.task, locId, toolMatrix);
+    if (why && why.ok === false) {
+      if (why.cause === 'location_mismatch') {
+        locToolIsLocation = true;
+        locToolDiag = why;
+      } else if (!locToolIsLocation && !locToolDiag) {
+        locToolDiag = why;
+      }
+    }
+  }
+
   for (var i = latestIdx; i >= earliestIdx; i--) {
     var d = dates[i];
     if (item.allowedDows && !item.allowedDows[d.isoDow]) continue;
     var wins = eligibleWindows(item, d.key, dayWindows, dayBlocks, relaxWhen);
     if (!wins.length) continue;
+    sawEligibleWindow = true;
     var occ = dayOcc[d.key] || {};
     var blocks = dayBlocks[d.key];
     for (var w = wins.length - 1; w >= 0; w--) {
@@ -1090,14 +1189,20 @@ function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
       var winEnd = wins[w][1];
       var startMax = Math.floor((winEnd - item.dur) / 15) * 15;
       for (var s = startMax; s >= winStart; s -= 15) {
-        if (!isFreeWithTravel(occ, s, item.dur, item.travelBefore, item.travelAfter)) continue;
-        if (checkDeps && absoluteMin(i, s) < depReadyAbs) continue;
-        if (checkLoc && !canTaskRunAtMinCached(item.task, d.key, s, cfg, toolMatrix, blocks, locCache)) continue;
-        if (checkWeather && !weatherOk(item.task, d.key, s, weatherByDateHour)) continue;
+        if (!isFreeWithTravel(occ, s, item.dur, item.travelBefore, item.travelAfter)) { sawCapacityBlock = true; continue; }
+        if (checkDeps && absoluteMin(i, s) < depReadyAbs) { sawCapacityBlock = true; continue; }
+        if (checkLoc && !canTaskRunAtMinCached(item.task, d.key, s, cfg, toolMatrix, blocks, locCache)) { recordLocTool(d.key, s, blocks); continue; }
+        if (checkWeather && !weatherOk(item.task, d.key, s, weatherByDateHour)) { sawCapacityBlock = true; continue; }
         return { dateKey: d.key, start: s };
       }
     }
   }
+  if (diag) populateFailDiag(diag, {
+    checkLoc: checkLoc,
+    locToolDiag: locToolDiag,
+    sawEligibleWindow: sawEligibleWindow,
+    sawCapacityBlock: sawCapacityBlock
+  });
   return null;
 }
 
@@ -1111,7 +1216,12 @@ function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
 //   4. If both: drop deadline AND relax when (last resort)
 function tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, statuses, cfg, env) {
   var relaxDepsFlag = !!(env && env.relaxDeps);
-  var base = { placedById: placedById, statuses: statuses, cfg: cfg, env: env, relaxDeps: relaxDepsFlag };
+  // FR1 / AC1.2 — single diag sink shared across all fallback-ladder attempts.
+  // findEarliestSlot/findLatestSlot write the FIRST (strictest) pass's reason and
+  // leave it untouched on later relaxed retries (populateFailDiag is first-pass-wins),
+  // so the surfaced reason reflects why the primary placement failed.
+  var diag = {};
+  var base = { placedById: placedById, statuses: statuses, cfg: cfg, env: env, relaxDeps: relaxDepsFlag, diag: diag };
   var overdueApplicable = item.slack != null && isFinite(item.slack) && item.slack < 0;
   var flexApplicable = !!item.flexWhen;
   var findSlot = item.preferLatestSlot ? findLatestSlot : findEarliestSlot;
@@ -1146,7 +1256,46 @@ function tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, 
     if (slot) return { slot: slot, relaxed: true };
   }
 
-  return { slot: null };
+  // AC1.2 — no slot found across all ladder attempts. Surface the accumulated
+  // diagnostic (always set by populateFailDiag) so the reject path can attribute a
+  // specific _unplacedReason/_unplacedDetail instead of a bare null.
+  return { slot: null, failReason: diag.failReason || null, failDetail: diag.failDetail || null };
+}
+
+// FR2 — attribute an unplaced task's reason from a tryPlaceQueued failure result.
+// Precedence:
+//   1. A reason already set upstream (e.g. partial_split) is never clobbered.
+//   2. Weather-constrained tasks keep the 'weather' heuristic (SPEC open-decision #1 DEFERRED —
+//      the rename to 'weather_unavailable' is deferred; recorded in SPEC §AC2.6). Detail added.
+//   3. Otherwise the FR1 diagnostic reason+detail from findEarliestSlot is applied
+//      (tool_conflict / location_mismatch / no_slot). This is the AC2.1/AC2.3/AC2.4 fix:
+//      the main no-slot path no longer leaves _unplacedReason undefined.
+//   4. Defensive floor (should not trigger — populateFailDiag always sets a reason):
+//      'no_slot' so R11.16 holds for ALL paths (AC2.7 — never undefined).
+function applyPlacementFailReason(task, placement) {
+  if (!task) return;
+  if (task._unplacedReason) {
+    if (!task._unplacedDetail && placement && placement.failDetail) {
+      task._unplacedDetail = placement.failDetail;
+    }
+    return;
+  }
+  if (hasWeatherConstraint(task)) {
+    task._unplacedReason = REASON_CODES.WEATHER;
+    if (!task._unplacedDetail) {
+      task._unplacedDetail = (placement && placement.failDetail) ||
+        'Weather constraint not satisfied (missing or blocking forecast)';
+    }
+    return;
+  }
+  if (placement && placement.failReason) {
+    task._unplacedReason = placement.failReason;
+    task._unplacedDetail = placement.failDetail ||
+      'Could not be placed in any eligible window';
+    return;
+  }
+  task._unplacedReason = REASON_CODES.NO_SLOT;
+  task._unplacedDetail = 'Could not be placed in any eligible window';
 }
 
 // compareItems — the S1 most-constrained→least ordering — MOVED to
@@ -1417,7 +1566,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     // but are NOT placed on the calendar. They still appear in the task list
     // so the user can see "3 of 5 scheduled" and understand why some are off.
     if (item.task && item.task._tpcBudgetUnscheduled) {
-      item.task._unplacedReason = 'tpc_budget';
+      item.task._unplacedReason = REASON_CODES.TPC_BUDGET;
       item.task._unplacedDetail = 'Not enough time in cycle for all instances';
       unplaced.push(item);
       return;
@@ -1554,7 +1703,10 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
           if (splitResult.remaining > 0) {
             // Remaining unplaced chunks are treated as partial_split for
             // diagnostic visibility — the task was partially scheduled.
-            item.task._unplacedReason = 'partial_split';
+            item.task._unplacedReason = REASON_CODES.PARTIAL_SPLIT;
+            // R11.16 / AC2.7 — partial placements also carry a human detail.
+            item.task._unplacedDetail = 'Placed ' + splitResult.placed.length +
+              ' chunk(s); ' + splitResult.remaining + ' min could not be placed';
             unplaced.push(item);
           }
           // Recompute slack for affected items (use first chunk's date).
@@ -1577,8 +1729,12 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       // Might be dep-blocked; retry pass below will give it another chance
       // once deps settle. Tag so the retry can identify what was deferred.
       item._deferred = true;
-      // Heuristic: attribute to weather if task has weather constraints; may be capacity failure
-      if (hasWeatherConstraint(item.task)) item.task._unplacedReason = 'weather';
+      // FR2 — attribute the failure. Weather-constrained tasks keep the weather
+      // heuristic (SPEC open-decision #1 DEFERRED: code emits 'weather'); everything else
+      // takes the FR1 diagnostic reason+detail (tool_conflict / location_mismatch /
+      // no_slot) so the main no-slot path no longer emits an undefined reason
+      // (AC2.1, R11.16). The retry pass may refine this if deps later settle.
+      applyPlacementFailReason(item.task, placement);
       unplaced.push(item);
       continue;
     }
@@ -1777,7 +1933,9 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
             delete placedById[c.task.id];
           }
           // Flag as unplaced with reason
-          c.task._unplacedReason = 'recurring_split_overflow';
+          c.task._unplacedReason = REASON_CODES.RECURRING_SPLIT_OVERFLOW;
+          // R11.16 / AC2.7 — overflow chunks carry a human detail too.
+          if (!c.task._unplacedDetail) c.task._unplacedDetail = 'Split chunk exceeds the recurring time-box for this cycle';
           unplaced.push({ task: c.task, id: c.task.id, _overflowFromTimeBox: true });
           warnings.push({ type: 'recurring_split_overflow', taskId: c.task.id, masterId: mid });
         });
@@ -1796,7 +1954,8 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       if (task._unplacedReason) return; // already has a reason
       var splitTotal = task.splitTotal != null ? Number(task.splitTotal) : 1;
       if (splitTotal <= 1) return; // not a split chunk
-      task._unplacedReason = 'recurring_split_overflow';
+      task._unplacedReason = REASON_CODES.RECURRING_SPLIT_OVERFLOW;
+      if (!task._unplacedDetail) task._unplacedDetail = 'Split chunk could not be placed within the recurring time-box';
     });
   })();
 
@@ -1812,8 +1971,8 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     delete item._deferred;
     var placement = tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, effectiveStatuses, cfg, env);
     if (!placement.slot) {
-      // Heuristic: attribute to weather if task has weather constraints; may be capacity failure
-      if (hasWeatherConstraint(item.task)) item.task._unplacedReason = 'weather';
+      // FR2 / AC2.2 — same diagnostic-derived attribution as the main reject path.
+      applyPlacementFailReason(item.task, placement);
       stillUnplaced.push(item);
       return;
     }
@@ -1843,7 +2002,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   // to unplaced only — no dual grid placement (they don't have a time window
   // to anchor a visible calendar slot).
   missedPreferredTimeItems.forEach(function(item) {
-    item.task._unplacedReason = 'missed';
+    item.task._unplacedReason = REASON_CODES.MISSED;
     item.task._unplacedDetail = 'Preferred-time window has passed';
     stillUnplaced.push(item);
   });
@@ -1862,7 +2021,7 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   missedWindowItems.forEach(function(item) {
     var task = item.task;
     // Mark missed on the task object for unplaced output.
-    task._unplacedReason = 'missed';
+    task._unplacedReason = REASON_CODES.MISSED;
     task._unplacedDetail = 'Flex window has passed';
     // Also push to unplaced list for ConflictsView / pastDue pickup.
     stillUnplaced.push(item);

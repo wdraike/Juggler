@@ -65,6 +65,34 @@ function isTerminalStatus(s) {
 // warn call shape when a logger is injected.
 var NOOP_LOGGER = { warn: function () {} };
 
+/**
+ * Normalize a DB DATE column value to a canonical "YYYY-MM-DD" string.
+ *
+ * The `date` column on task_instances/task_masters comes back from knex EITHER as
+ * a "YYYY-MM-DD" string (dateStrings mode) OR as a JS Date pinned to UTC midnight
+ * (default mode). Both must collapse to the same calendar day with NO timezone
+ * shift — the DATE column has no time-of-day, so applying the display timezone
+ * (which `utcToLocal` does for `scheduled_at`) would wrongly roll a UTC-midnight
+ * Date back to the previous day west of UTC. We therefore read the Date's UTC
+ * components directly, and parse the leading YYYY-MM-DD out of a string verbatim.
+ *
+ * Returns null for null/undefined/unparseable input (no fallback — a bad date
+ * column surfaces as null rather than a silently substituted value).
+ */
+function dateColumnToISO(val) {
+  if (val === null || val === undefined) return null;
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return null;
+    var y = val.getUTCFullYear();
+    var m = val.getUTCMonth() + 1;
+    var d = val.getUTCDate();
+    return y + '-' + (m < 10 ? '0' : '') + m + '-' + (d < 10 ? '0' : '') + d;
+  }
+  var s = String(val);
+  var match = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? match[1] + '-' + match[2] + '-' + match[3] : null;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
  * Fields that live on the source template and are inherited by recurring
  * instances. SINGLE source of truth — verbatim from task.controller.js ~line 192.
@@ -192,6 +220,19 @@ function rowToTask(row, timezone, sourceMap, logger) {
     if (local.day) day = local.day;
   }
 
+  // Bug A (FR3 / AC3.1): an UNPLACED recurring instance has scheduled_at=NULL but
+  // still carries its target calendar day in the `date` DATE column (set by
+  // expandRecurring / reconcileOccurrences). Without this the scheduler sees
+  // date=null and can't assign the right cycle window → wrong/absent unplaced
+  // reason. Derive task.date from row.date ONLY when scheduled_at is null, ONLY
+  // for recurring_instance rows (task_type guard — templates and non-recurring
+  // rows are unaffected, AC3.2), and ONLY when the date column is non-null.
+  // Placed instances (scheduled_at set) keep deriving date from scheduled_at above.
+  if (date === null && row.scheduled_at == null && row.task_type === 'recurring_instance') {
+    var instDate = dateColumnToISO(row.date);
+    if (instDate) date = instDate;
+  }
+
   if (src && src.preferred_time_mins != null && row.status !== 'disabled') {
     var ptH = Math.floor(src.preferred_time_mins / 60);
     var ptM = src.preferred_time_mins % 60;
@@ -288,9 +329,20 @@ function rowToTask(row, timezone, sourceMap, logger) {
     // Anchor date (date-only, YYYY-MM-DD): for instances, from the template; for templates, from self
     anchorDate: (function() {
       var sa = src ? src.scheduled_at : row.scheduled_at;
-      if (!sa) return null;
-      var iso = scheduledAtToISO(sa);
-      return iso ? iso.slice(0, 10) : null;
+      if (sa) {
+        var iso = scheduledAtToISO(sa);
+        return iso ? iso.slice(0, 10) : null;
+      }
+      // Bug A (AC3.3): an UNPLACED recurring instance whose template has no
+      // scheduled_at (a never-yet-placed recurring) gets its anchorDate from the
+      // instance's own `date` DATE column — the same source task.date now uses.
+      // This gives the reason classifier the correct cycle anchor instead of null.
+      // Guarded to recurring_instance rows with scheduled_at=null so placed
+      // instances (sa present above) and other row types are unaffected (AC3.3-b).
+      if (row.scheduled_at == null && row.task_type === 'recurring_instance') {
+        return dateColumnToISO(row.date);
+      }
+      return null;
     })()
   };
 }

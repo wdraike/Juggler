@@ -13,6 +13,7 @@ import { parseDate, formatDateKey } from '../../scheduler/dateHelpers';
 import { getDepsStatus } from '../../scheduler/dependencyHelpers';
 import { isTerminalStatus } from '../../shared/task-status';
 import WeatherBadge from '../features/WeatherBadge';
+import { labelFor } from '../../scheduler/reasonCodes';
 
 var STORAGE_KEY = 'juggler-issues-collapsed';
 
@@ -190,11 +191,34 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
                       allTasks={allTasks} statuses={statuses}
                       todayDate={todayDate}
                     />
-                    {t._unplacedReason === 'weather' && (
-                      <div style={{ fontSize: 10, color: theme.textMuted, marginLeft: 8, marginBottom: 4 }}>
-                        🌤 No suitable weather window in the next 14 days
+                    {t._unplacedReason && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 8px 0', flexWrap: 'wrap' }}>
+                        {/* AC4.2 — friendly reason label chip for every reason code */}
+                        <span style={{
+                          fontSize: 9, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+                          background: theme.amberBg,
+                          color: theme.amberText,
+                          border: '1px solid ' + theme.amberBorder,
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {(t._unplacedReason === 'weather' || t._unplacedReason === 'weather_unavailable') ? '🌤 ' : ''}
+                          {labelFor(t._unplacedReason)}
+                        </span>
+                        {/* AC4.1 — where/when the instance wanted to be placed */}
+                        {(t.date || t.earliestStart || t.when) && (
+                          <span style={{ fontSize: 9, color: theme.textMuted, whiteSpace: 'nowrap' }}>
+                            {'wanted: '}
+                            {(t.date || t.earliestStart) && (
+                              <span style={{ fontWeight: 500 }}>{t.date || t.earliestStart}</span>
+                            )}
+                            {t.when && t.when.trim() !== '' && (
+                              <span>{(t.date || t.earliestStart) ? ' · ' : ''}{t.when}</span>
+                            )}
+                          </span>
+                        )}
                       </div>
                     )}
+                    {/* AC4.3 — detail string rendered for all reason codes */}
                     {t._unplacedDetail && (
                       <div style={{ fontSize: 10, color: theme.textMuted, padding: '2px 12px', marginTop: -2 }}>
                         <span>{t._unplacedDetail}</span>

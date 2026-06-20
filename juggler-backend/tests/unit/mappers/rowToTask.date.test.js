@@ -130,19 +130,16 @@ describe('I2 CHARACTERIZATION — rowToTask (current behaviour, must not regress
     expect(task.date).toBeNull();
   });
 
-  // CHAR-C3: THE BUG — unplaced recurring instance with scheduled_at=NULL, date='2026-06-25'
-  // → CURRENT code returns task.date=null (the bug).
-  // We pin this as the CURRENT (broken) state so the refactor can verify it changes.
-  test('CHAR-C3 (pins BUG): unplaced recurring instance — task.date is currently null even with row.date set', () => {
-    // This test DOCUMENTS THE BUG. It pins the broken state.
-    // After AC3.1 impl, this pin is REPLACED by the RED test RED-AC3.1-a in Section B.
-    // DO NOT remove this CHAR test until the RED test is known-green (impl shipped).
+  // CHAR-C3: FIXED — unplaced recurring instance with scheduled_at=NULL, date='2026-06-25'
+  // → after AC3.1 impl, task.date derives from row.date. This pin was the BUG marker;
+  // per its original contract it is REPLACED by the now-green RED test RED-AC3.1-a in
+  // Section B, and re-asserted here as a regression guard for the fixed behaviour.
+  test('CHAR-C3: unplaced recurring instance — task.date derives from row.date (AC3.1 fixed)', () => {
     var row = makeUnplacedInstanceRow();
     var src = makeTemplateRow();
     var task = rowToTask(row, TZ, makeSourceMap(src));
-    // Current broken state: date is null even though row.date='2026-06-25'.
-    // SELF-MUTATION: if we add row.date fallback before running test, expect null fails → proves pin.
-    expect(task.date).toBeNull();
+    // Fixed state: date comes from row.date ('2026-06-25') when scheduled_at is null.
+    expect(task.date).toBe('2026-06-25');
   });
 
   // CHAR-C4: Placed instance with non-null date col → date still comes from scheduled_at.
@@ -166,13 +163,15 @@ describe('I2 CHARACTERIZATION — rowToTask (current behaviour, must not regress
     expect(task.anchorDate).toBe('2026-06-01');
   });
 
-  // CHAR-C6: anchorDate — for unplaced instance (scheduled_at=null), anchorDate is currently null.
-  test('CHAR-C6 (pins BUG): unplaced instance — anchorDate is currently null (template has no scheduled_at)', () => {
-    // src.scheduled_at=null → anchorDate=null (Bug A consequence — no date fallback).
+  // CHAR-C6: FIXED — for an unplaced instance (scheduled_at=null) whose template also
+  // has no scheduled_at, anchorDate now derives from the instance's row.date (AC3.3).
+  // This pin was the BUG marker; it is REPLACED by the now-green RED-AC3.3-a and
+  // re-asserted here as a regression guard for the fixed behaviour.
+  test('CHAR-C6: unplaced instance — anchorDate derives from row.date (AC3.3 fixed)', () => {
     var row = makeUnplacedInstanceRow();
     var src = makeTemplateRow({ scheduled_at: null });
     var task = rowToTask(row, TZ, makeSourceMap(src));
-    expect(task.anchorDate).toBeNull();
+    expect(task.anchorDate).toBe('2026-06-25');
   });
 
   // CHAR-C7: split chunk — dur comes from the chunk row, not the template.
@@ -222,7 +221,7 @@ describe('I2 RED — AC3.1: rowToTask derives task.date from row.date when sched
   // The core bug fix: for a recurring_instance with scheduled_at=NULL and row.date set,
   // task.date must come from row.date.
 
-  test.failing('RED-AC3.1-a: unplaced recurring_instance — task.date = row.date (not null)', () => {
+  test('RED-AC3.1-a: unplaced recurring_instance — task.date = row.date (not null)', () => {
     // row.date='2026-06-25', scheduled_at=null.
     // After AC3.1 fix: task.date = '2026-06-25'.
     // BEFORE fix: task.date = null (CHAR-C3 pins this).
@@ -232,7 +231,7 @@ describe('I2 RED — AC3.1: rowToTask derives task.date from row.date when sched
     expect(task.date).toBe('2026-06-25');
   });
 
-  test.failing('RED-AC3.1-b: unplaced instance with different row.date — task.date matches row.date', () => {
+  test('RED-AC3.1-b: unplaced instance with different row.date — task.date matches row.date', () => {
     // Parameterized check: different date value to prevent any hardcoded literal sneaking in.
     var row = makeUnplacedInstanceRow({ date: '2026-07-04' });
     var src = makeTemplateRow();
@@ -240,7 +239,7 @@ describe('I2 RED — AC3.1: rowToTask derives task.date from row.date when sched
     expect(task.date).toBe('2026-07-04');
   });
 
-  test.failing('RED-AC3.1-c: unplaced instance — task.date is a YYYY-MM-DD string (not a Date object)', () => {
+  test('RED-AC3.1-c: unplaced instance — task.date is a YYYY-MM-DD string (not a Date object)', () => {
     // row.date may come back from knex as a Date object (date column type).
     // rowToTask must normalise it to a YYYY-MM-DD string.
     var row = makeUnplacedInstanceRow({ date: new Date('2026-06-25T00:00:00Z') });
@@ -250,7 +249,7 @@ describe('I2 RED — AC3.1: rowToTask derives task.date from row.date when sched
     expect(task.date).toBe('2026-06-25');
   });
 
-  test.failing('RED-AC3.1-d: unplaced instance with no timezone — task.date still derives from row.date', () => {
+  test('RED-AC3.1-d: unplaced instance with no timezone — task.date still derives from row.date', () => {
     // No timezone passed (null). date should still come from row.date.
     var row = makeUnplacedInstanceRow();
     var src = makeTemplateRow();
@@ -322,7 +321,7 @@ describe('I2 RED — AC3.3: legacy date-encoded IDs and anchorDate correctness',
   // use it as anchorDate / cycle-window input. anchorDate for unplaced instances
   // must come from row.date (via the same fix path) when scheduled_at is null.
 
-  test.failing('RED-AC3.3-a: unplaced instance — anchorDate derives from row.date after fix', () => {
+  test('RED-AC3.3-a: unplaced instance — anchorDate derives from row.date after fix', () => {
     // Currently anchorDate=null for unplaced instances (CHAR-C6 pins the bug).
     // After fix: the anchorDate derivation (taskMappers.js:289-294) should also fall back
     // to row.date when src.scheduled_at is null (or the fix adjusts the anchorDate logic).
@@ -348,7 +347,7 @@ describe('I2 RED — AC3.3: legacy date-encoded IDs and anchorDate correctness',
     expect(task.anchorDate).toBe('2026-06-01');
   });
 
-  test.failing('RED-AC3.3-c: legacy date-encoded ID format still parses correctly', () => {
+  test('RED-AC3.3-c: legacy date-encoded ID format still parses correctly', () => {
     // runSchedule.js:1169-1173 encodes date into the task ID as a suffix.
     // Verify that rowToTask with a date-suffixed ID still returns the correct date.
     // The ID encoding is: '<uuid>_<YYYYMMDD>' for some legacy paths.
@@ -365,7 +364,7 @@ describe('I2 RED — AC3.3: legacy date-encoded IDs and anchorDate correctness',
     expect(task.date).toBe('2026-06-25');
   });
 
-  test.failing('RED-AC3.3-d: row.date as JS Date object normalised to YYYY-MM-DD for anchorDate', () => {
+  test('RED-AC3.3-d: row.date as JS Date object normalised to YYYY-MM-DD for anchorDate', () => {
     // knex may return date columns as JS Date objects. Both task.date and task.anchorDate
     // must be YYYY-MM-DD strings.
     var row = makeUnplacedInstanceRow({ date: new Date('2026-06-25T00:00:00Z') });
