@@ -226,11 +226,12 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var [hasPreferredTime, setRecurringHasPreferredTime] = useState(function() {
     if (isCreate) return false;
     if (!recurring || !task) return false;
-    // Use tag-count heuristic for preferred-time detection
-    var w = task.when || '';
-    if (!w || w === 'fixed' || w === 'allday' || w === 'anytime') return false;
-    var tags = w.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-    return tags.length === 1;
+    // Preferred-time display is driven by the CANONICAL placement_mode, not a
+    // tag-count heuristic. A time_blocks task with a single tag (e.g. 'biz') must
+    // render the block grid with that tag selected — matching the stored data —
+    // not be mis-coerced into preferred-time mode. Only time_window has a
+    // preferred time. (Mirrors handleModeChange's mode === 'time_window' sync.)
+    return task.placementMode === 'time_window';
   });
 
   // --- placementMode state ---
@@ -291,7 +292,8 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       weatherTempMin: t.weatherTempMin != null ? t.weatherTempMin : null,
       weatherTempMax: t.weatherTempMax != null ? t.weatherTempMax : null,
       weatherHumidityMin: t.weatherHumidityMin != null ? t.weatherHumidityMin : null,
-      weatherHumidityMax: t.weatherHumidityMax != null ? t.weatherHumidityMax : null
+      weatherHumidityMax: t.weatherHumidityMax != null ? t.weatherHumidityMax : null,
+      placementMode: t.placementMode || 'anytime'
     };
   }
   if (!taskSnapshotRef.current && !isCreate && task) {
@@ -326,9 +328,10 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     setEarliestStart(newSnap.earliestStart); setNotes(newSnap.notes);
     setUrl(newSnap.url || '');
     setWhen(newSnap.when); setDayReq(newSnap.dayReq);
-    // Re-derive scheduling mode from synced value
-    var syncTags = (newSnap.when || '').split(',').filter(Boolean);
-    setRecurringHasPreferredTime(syncTags.length === 1 && newSnap.recurring);
+    // Re-derive preferred-time display from the CANONICAL placement_mode, not a
+    // tag-count heuristic — a time_blocks task with one tag must show the block
+    // grid (tag selected), matching the stored data. Only time_window is preferred-time.
+    setRecurringHasPreferredTime(newSnap.placementMode === 'time_window');
     setRecurring(newSnap.recurring); setExactTime(newSnap.rigid); setTimeFlex(newSnap.timeFlex);
     setSplit(newSnap.split); setSplitMin(newSnap.splitMin);
     setTaskLoc(newSnap.location); setTaskTools(newSnap.tools);

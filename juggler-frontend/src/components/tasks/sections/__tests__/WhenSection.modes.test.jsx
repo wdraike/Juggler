@@ -382,6 +382,95 @@ describe('WhenSection mode matrix — with calendar task', () => {
   });
 });
 
+// ── W2: Time-blocks clobber guard (juggler-when-display-mismatch, 2026-06-20) ─
+// BUG-2 fix (`<=1`→`===0`) lives ONLY in the two RECURRING branches of WhenSection.jsx
+// (~line 461 and ~line 492). The non-recurring guard at line ~329 was ALREADY `===0`
+// at HEAD before this leg — it was NOT changed by this leg.
+//
+// Regression pin for BUG-2:
+//   ONLY the "recurring: one tag set does NOT clobber" test below is a genuine
+//   regression test (RED pre-fix, GREEN post-fix). Confirmed: on pre-fix code,
+//   this test fails because the recurring guard was `<=1` — so clicking "Time blocks"
+//   with one tag still fired onWhenChange and clobbered it.
+//
+// Correct-behavior coverage (already held at HEAD before this leg):
+//   The non-recurring tests and the "ZERO tags" tests below verify correct component
+//   behavior that existed before this leg's diff. They are guard-characterization
+//   tests — they ensure we do not accidentally regress the non-recurring path or the
+//   empty-input clobber path in future work. They are NOT regression coverage for BUG-2.
+//
+// WARN-3 note: WhenSection is a controlled component — `placementMode` and `when` props
+// don't update in response to a mode-button click (the parent holds state). After clicking
+// "Time blocks" (noop onModeChange), effectiveMode stays 'anytime' and the tag buttons do
+// not render. The `toBeNull()` callback check proves onWhenChange was not called.
+// To additionally verify the stored tag WOULD render selected (selection state proof),
+// we render the component directly in time_blocks mode with when='biz' (the state the
+// parent would set after the no-clobber mode switch) and assert the Biz button has 2px solid.
+var BIZ_TAGS = [
+  { tag: 'biz', name: 'Biz', icon: 'B', color: '#2E4A7A' },
+  { tag: 'morning', name: 'Morning', icon: 'M', color: '#C8942A' },
+];
+
+describe('WhenSection W2 — Time-blocks clobber guard', function() {
+  // ── Non-recurring characterization (already correct at HEAD before this leg) ──
+  it('non-recurring: clicking Time blocks with one tag already set does NOT call onWhenChange (clobber guard holds)', function() {
+    // Correct-behavior coverage — the non-recurring guard (WhenSection.jsx ~line 329) was
+    // already `=== 0` at HEAD. This test is a characterization pin against future regression,
+    // NOT a BUG-2 regression test for this leg.
+    var whenCalled = null;
+    var { unmount } = render(<WhenSection {...buildProps({ placementMode: 'anytime', when: 'biz', uniqueTags: BIZ_TAGS })} onWhenChange={function(w) { whenCalled = w; }} />);
+    fireEvent.click(screen.getByTitle(/Restrict to named time block windows/));
+    // onWhenChange must NOT be called — the stored 'biz' tag is preserved
+    expect(whenCalled).toBeNull();
+    unmount();
+    // Selection-state proof: render in time_blocks mode (the post-switch state the parent would
+    // set) and assert Biz block still shows as selected (2px solid border).
+    render(<WhenSection {...buildProps({ placementMode: 'time_blocks', when: 'biz', uniqueTags: BIZ_TAGS })} />);
+    var bizBtn = screen.getByText(/B Biz/).closest('button');
+    expect(/2px solid/.test(bizBtn.getAttribute('style') || '')).toBe(true);
+    var morningBtn = screen.getByText(/M Morning/).closest('button');
+    expect(/2px solid/.test(morningBtn.getAttribute('style') || '')).toBe(false);
+  });
+
+  it('non-recurring: clicking Time blocks with ZERO tags applies the 5-block default (clobber guard correct-behavior)', function() {
+    // Correct-behavior coverage — the zero-tags path was already correct at HEAD.
+    var whenCalled = null;
+    render(<WhenSection {...buildProps({ placementMode: 'anytime', when: '' })} onWhenChange={function(w) { whenCalled = w; }} />);
+    fireEvent.click(screen.getByTitle(/Restrict to named time block windows/));
+    expect(whenCalled).toBe('morning,lunch,afternoon,evening,night');
+  });
+
+  // ── BUG-2 REGRESSION PIN: recurring branch (~line 461 and ~line 492) ──
+  // This is the ONLY test in the W2 block that is a genuine regression pin.
+  // Pre-fix (<=1 guard): when='biz' (1 tag), clicking "📅 Time blocks" fires
+  // onWhenChange → clobbers tag. Post-fix (===0 guard): does NOT fire → tag preserved.
+  it('recurring: clicking Time blocks with one tag set does NOT clobber — BUG-2 regression pin (RED pre-fix)', function() {
+    // Regression pin for BUG-2: this test FAILS on pre-fix WhenSection.jsx (<=1 guard)
+    // and PASSES on post-fix code (===0 guard). Confirmed by /tmp-backup revert.
+    var whenCalled = null;
+    var { unmount } = render(<WhenSection {...buildProps({ recurring: true, placementMode: 'anytime', when: 'biz', uniqueTags: BIZ_TAGS })} onWhenChange={function(w) { whenCalled = w; }} />);
+    // Recurring branch: button text "📅 Time blocks" (no title attribute in recurring buttons)
+    fireEvent.click(screen.getByText(/📅 Time blocks/));
+    // onWhenChange must NOT be called — the stored 'biz' tag is preserved (proves ===0 guard)
+    expect(whenCalled).toBeNull();
+    unmount();
+    // Selection-state proof: render in time_blocks mode (the post-switch parent state) and
+    // assert Biz still renders selected — distinguishes "kept the tag" from "did nothing and
+    // something else lost it".
+    render(<WhenSection {...buildProps({ recurring: true, placementMode: 'time_blocks', when: 'biz', uniqueTags: BIZ_TAGS })} />);
+    var bizBtn = screen.getByText(/B Biz/).closest('button');
+    expect(/2px solid/.test(bizBtn.getAttribute('style') || '')).toBe(true);
+  });
+
+  it('recurring: clicking Time blocks with ZERO tags applies the 5-block default (correct-behavior coverage)', function() {
+    // Correct-behavior coverage — not a BUG-2 regression pin (this path was already correct).
+    var whenCalled = null;
+    render(<WhenSection {...buildProps({ recurring: true, placementMode: 'anytime', when: '' })} onWhenChange={function(w) { whenCalled = w; }} />);
+    fireEvent.click(screen.getByText(/📅 Time blocks/));
+    expect(whenCalled).toBe('morning,lunch,afternoon,evening,night');
+  });
+});
+
 // ── ZOE-JUG-034: mobile-specific block ───────────────────────────────────────
 // The main matrix has zero isMobile:true combinations. isMobile only affects
 // button sizing (BTN_H/fontSize/padding), not which buttons appear. These tests

@@ -372,7 +372,7 @@ export default function WhenSection(props) {
               {(uniqueTags || []).map(function(tb) {
                 var isOn = activeTags.indexOf(tb.tag) !== -1;
                 return (
-                  <button key={tb.tag} title={tb.name + ' time window'} onClick={function() {
+                  <button key={tb.tag} title={tb.name + ' time window'} aria-pressed={isOn} onClick={function() {
                     var cur = activeTags.slice();
                     if (isOn) { cur = cur.filter(function(v) { return v !== tb.tag; }); } else { cur.push(tb.tag); }
                     onWhenChange(cur.length === 0 ? '' : cur.join(','));
@@ -458,7 +458,7 @@ export default function WhenSection(props) {
                   onHasPreferredTimeChange(false);
                   onTimeChange('');
                   onRigidChange(false);
-                  if (activeTags.length <= 1) onWhenChange('morning,lunch,afternoon,evening,night');
+                  if (activeTags.length === 0) onWhenChange('morning,lunch,afternoon,evening,night');
                 }} style={togStyle(false, '#4338CA')}>📅 Time blocks</button>
                 <button title="Spans the entire day" aria-pressed={false} onClick={function() {
                   onModeChange('all_day');
@@ -489,7 +489,7 @@ export default function WhenSection(props) {
               onHasPreferredTimeChange(false);
               onTimeChange('');
               onRigidChange(false);
-              if (activeTags.length <= 1) onWhenChange('morning,lunch,afternoon,evening,night');
+              if (activeTags.length === 0) onWhenChange('morning,lunch,afternoon,evening,night');
             }} style={togStyle(effectiveMode === 'time_blocks', '#4338CA')}>📅 Time blocks</button>
             <button title="Spans the entire day"
               aria-pressed={effectiveMode === 'all_day'}
@@ -531,7 +531,7 @@ export default function WhenSection(props) {
               {(uniqueTags || []).map(function(tb) {
                 var isOn = activeTags.indexOf(tb.tag) !== -1;
                 return (
-                  <button key={tb.tag} title={tb.name + ' time window'} onClick={function() {
+                  <button key={tb.tag} title={tb.name + ' time window'} aria-pressed={isOn} onClick={function() {
                     var cur = activeTags.slice();
                     if (isOn) { cur = cur.filter(function(v) { return v !== tb.tag; }); } else { cur.push(tb.tag); }
                     onWhenChange(cur.length === 0 ? '' : cur.join(','));
