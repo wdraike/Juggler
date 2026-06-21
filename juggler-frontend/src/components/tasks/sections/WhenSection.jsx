@@ -2,6 +2,7 @@ import React from 'react';
 import CollapsibleSection from '../CollapsibleSection';
 import { getTimezoneAbbr, getUtcOffset } from '../../../utils/timezone';
 import { CAL_PROVIDER_NAMES } from '../../../state/constants';
+import { BRAND } from '../../../theme/colors';
 
 var ALL_TIMEZONES = (function() {
   try {
@@ -315,12 +316,12 @@ export default function WhenSection(props) {
               aria-pressed={effectiveMode === 'anytime'}
               tabIndex={isFixed ? -1 : 0}
               onClick={function() { onModeChange('anytime'); onWhenChange(''); }}
-              style={togStyle(effectiveMode === 'anytime', '#2D6A4F')}>🔄 Anytime</button>
+              style={togStyle(effectiveMode === 'anytime', BRAND.success)}>🔄 Anytime</button>
             <button title="Schedule near a preferred time ± a flex window"
               aria-pressed={effectiveMode === 'time_window'}
               tabIndex={isFixed ? -1 : 0}
               onClick={function() { onModeChange('time_window'); }}
-              style={togStyle(effectiveMode === 'time_window', '#C8942A')}>⏰ Time window</button>
+              style={togStyle(effectiveMode === 'time_window', BRAND.gold)}>⏰ Time window</button>
             <button title="Restrict to named time block windows (morning, afternoon, etc.)"
               aria-pressed={effectiveMode === 'time_blocks'}
               tabIndex={isFixed ? -1 : 0}
@@ -328,17 +329,17 @@ export default function WhenSection(props) {
                 onModeChange('time_blocks');
                 if (activeTags.length === 0) onWhenChange('morning,lunch,afternoon,evening,night');
               }}
-              style={togStyle(effectiveMode === 'time_blocks', '#4338CA')}>📅 Time blocks</button>
+              style={togStyle(effectiveMode === 'time_blocks', BRAND.indigo)}>📅 Time blocks</button>
             <button title="Spans the entire day"
               aria-pressed={effectiveMode === 'all_day'}
               tabIndex={isFixed ? -1 : 0}
               onClick={function() { onModeChange('all_day'); onWhenChange(''); onSplitChange(false); onTravelBeforeChange(0); onTravelAfterChange(0); }}
-              style={togStyle(effectiveMode === 'all_day', '#C8942A')}>☀️ All Day</button>
+              style={togStyle(effectiveMode === 'all_day', BRAND.gold)}>☀️ All Day</button>
             <button title="Exact date and time — immovable"
               aria-pressed={effectiveMode === 'fixed'}
               tabIndex={isFixed ? -1 : 0}
               onClick={function() { onModeChange('fixed'); onWhenChange(''); onSplitChange(false); onTravelBeforeChange(0); onTravelAfterChange(0); }}
-              style={togStyle(effectiveMode === 'fixed', '#7C3AED')}>📌 Fixed</button>
+              style={togStyle(effectiveMode === 'fixed', TH.purpleBorder)}>📌 Fixed</button>
           </div>
 
           {/* Time window: time input + ± window select (shown when placementMode === 'time_window') */}
@@ -384,21 +385,24 @@ export default function WhenSection(props) {
                   <span style={{ width: 1, height: 18, background: TH.border, margin: '0 2px' }} />
                   <button title={flexWhen ? 'Flex: scheduler tries other slots if selected windows are full' : 'Strict: only placed in selected windows'}
                     onClick={function() { onFlexWhenChange(!flexWhen); }}
-                    style={togStyle(flexWhen, '#C8942A')}>
+                    style={togStyle(flexWhen, BRAND.gold)}>
                     {flexWhen ? '~ Flex' : 'Strict'}
                   </button>
                 </>
               )}
             </div>
           )}
+          {effectiveMode === 'time_blocks' && activeTags.length === 1 && (
+            <div style={{ fontSize: 9, color: TH.textMuted, marginTop: 2 }}>Single block kept — switching modes preserves your selection.</div>
+          )}
 
           {!isFixed && (
             <label style={{ ...lStyle, marginBottom: 5 }}>
               <span title="Restrict which days the scheduler can place this task.">Day requirement</span>
               <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                <button title="No day restriction" onClick={function() { onDayReqChange('any'); }} style={togStyle(dayReq === 'any', '#2D6A4F')}>Any</button>
-                <button title="Monday through Friday only" onClick={function() { onDayReqChange(dayReq === 'weekday' ? 'any' : 'weekday'); }} style={togStyle(dayReq === 'weekday', '#4338CA')}>Wkday</button>
-                <button title="Saturday or Sunday only" onClick={function() { onDayReqChange(dayReq === 'weekend' ? 'any' : 'weekend'); }} style={togStyle(dayReq === 'weekend', '#4338CA')}>Wkend</button>
+                <button title="No day restriction" onClick={function() { onDayReqChange('any'); }} style={togStyle(dayReq === 'any', BRAND.success)}>Any</button>
+                <button title="Monday through Friday only" onClick={function() { onDayReqChange(dayReq === 'weekday' ? 'any' : 'weekday'); }} style={togStyle(dayReq === 'weekday', BRAND.indigo)}>Wkday</button>
+                <button title="Saturday or Sunday only" onClick={function() { onDayReqChange(dayReq === 'weekend' ? 'any' : 'weekend'); }} style={togStyle(dayReq === 'weekend', BRAND.indigo)}>Wkend</button>
                 {[['Su','Su'],['M','Mo'],['T','Tu'],['W','We'],['R','Th'],['F','Fr'],['Sa','Sa']].map(function(pair) {
                   var code = pair[0], label = pair[1];
                   var selected = dayReq ? dayReq.split(',') : [];
@@ -447,26 +451,26 @@ export default function WhenSection(props) {
                   onTimeChange('');
                   onRigidChange(false);
                   onWhenChange('');
-                }} style={togStyle(false, '#2D6A4F')}>🔄 Anytime</button>
+                }} style={togStyle(false, BRAND.success)}>🔄 Anytime</button>
                 <button aria-pressed={false} onClick={function() {
                   onModeChange('time_window');
                   onHasPreferredTimeChange(true);
                   if (activeTags.length !== 1) onWhenChange('morning');
-                }} style={togStyle(false, '#C8942A')}>⏰ Time window</button>
+                }} style={togStyle(false, BRAND.gold)}>⏰ Time window</button>
                 <button aria-pressed={false} onClick={function() {
                   onModeChange('time_blocks');
                   onHasPreferredTimeChange(false);
                   onTimeChange('');
                   onRigidChange(false);
                   if (activeTags.length === 0) onWhenChange('morning,lunch,afternoon,evening,night');
-                }} style={togStyle(false, '#4338CA')}>📅 Time blocks</button>
+                }} style={togStyle(false, BRAND.indigo)}>📅 Time blocks</button>
                 <button title="Spans the entire day" aria-pressed={false} onClick={function() {
                   onModeChange('all_day');
                   onHasPreferredTimeChange(false);
                   onTimeChange('');
                   onRigidChange(false);
                   onWhenChange('');
-                }} style={togStyle(false, '#C8942A')}>☀️ All Day</button>
+                }} style={togStyle(false, BRAND.gold)}>☀️ All Day</button>
               </div>
             </div>
             )
@@ -478,19 +482,19 @@ export default function WhenSection(props) {
               onTimeChange('');
               onRigidChange(false);
               onWhenChange('');
-            }} style={togStyle(effectiveMode === 'anytime', '#2D6A4F')}>🔄 Anytime</button>
+            }} style={togStyle(effectiveMode === 'anytime', BRAND.success)}>🔄 Anytime</button>
             <button aria-pressed={effectiveMode === 'time_window'} onClick={function() {
               onModeChange('time_window');
               onHasPreferredTimeChange(true);
               if (activeTags.length !== 1) onWhenChange('morning');
-            }} style={togStyle(effectiveMode === 'time_window', '#C8942A')}>⏰ Time window</button>
+            }} style={togStyle(effectiveMode === 'time_window', BRAND.gold)}>⏰ Time window</button>
             <button aria-pressed={effectiveMode === 'time_blocks'} onClick={function() {
               onModeChange('time_blocks');
               onHasPreferredTimeChange(false);
               onTimeChange('');
               onRigidChange(false);
               if (activeTags.length === 0) onWhenChange('morning,lunch,afternoon,evening,night');
-            }} style={togStyle(effectiveMode === 'time_blocks', '#4338CA')}>📅 Time blocks</button>
+            }} style={togStyle(effectiveMode === 'time_blocks', BRAND.indigo)}>📅 Time blocks</button>
             <button title="Spans the entire day"
               aria-pressed={effectiveMode === 'all_day'}
               onClick={function() {
@@ -500,7 +504,7 @@ export default function WhenSection(props) {
                 onRigidChange(false);
                 onWhenChange('');
               }}
-              style={togStyle(effectiveMode === 'all_day', '#C8942A')}>☀️ All Day</button>
+              style={togStyle(effectiveMode === 'all_day', BRAND.gold)}>☀️ All Day</button>
           </div>
           )}
 
@@ -575,8 +579,8 @@ export default function WhenSection(props) {
               <label style={lStyle}>
                 Eligible days
                 <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <button onClick={function() { onRecurDaysChange('MTWRF'); }} style={togStyle(recurDays === 'MTWRF', '#4338CA')}>Wkday</button>
-                  <button onClick={function() { onRecurDaysChange('SU'); }} style={togStyle(recurDays === 'SU' || recurDays === 'US', '#4338CA')}>Wkend</button>
+                  <button onClick={function() { onRecurDaysChange('MTWRF'); }} style={togStyle(recurDays === 'MTWRF', BRAND.indigo)}>Wkday</button>
+                  <button onClick={function() { onRecurDaysChange('SU'); }} style={togStyle(recurDays === 'SU' || recurDays === 'US', BRAND.indigo)}>Wkend</button>
                   <span style={{ width: 1, height: 18, background: TH.border, margin: '0 1px' }} />
                   {[['U','Su'],['M','Mo'],['T','Tu'],['W','We'],['R','Th'],['F','Fr'],['S','Sa']].map(function(pair) {
                     var code = pair[0], label = pair[1];
@@ -598,12 +602,12 @@ export default function WhenSection(props) {
                         <button
                           onClick={function() { onRecurTpcChange(selectedCount); }}
                           aria-pressed={isAllMode}
-                          style={togStyle(isAllMode, '#2D6A4F')}
+                          style={togStyle(isAllMode, BRAND.success)}
                         >All {selectedCount} days</button>
                         <button
                           onClick={function() { if (isAllMode) onRecurTpcChange(selectedCount - 1); }}
                           aria-pressed={!isAllMode}
-                          style={togStyle(!isAllMode, '#C8942A')}
+                          style={togStyle(!isAllMode, BRAND.gold)}
                         >Flexible quota</button>
                       </div>
                       {!isAllMode && (
@@ -618,7 +622,7 @@ export default function WhenSection(props) {
                               return <option key={n} value={n}>{n}</option>;
                             })}
                           </select>
-                          <span style={{ fontSize: 9, color: '#C8942A' }}>
+                          <span style={{ fontSize: 9, color: BRAND.gold }}>
                             ≈every {Math.round(((recurType === 'biweekly' ? 14 : 7) / (recurTpc || (selectedCount - 1))) * 10) / 10} days
                           </span>
                         </div>
@@ -663,7 +667,7 @@ export default function WhenSection(props) {
                       })}
                     </select>
                     {(recurTpc > 0 && recurTpc < mdCount) && (
-                      <span style={{ fontSize: 9, color: '#C8942A' }}>≈every {Math.round(30 / recurTpc * 10) / 10} days</span>
+                      <span style={{ fontSize: 9, color: BRAND.gold }}>≈every {Math.round(30 / recurTpc * 10) / 10} days</span>
                     )}
                   </div>
                 )}

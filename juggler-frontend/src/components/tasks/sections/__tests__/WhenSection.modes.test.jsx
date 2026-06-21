@@ -471,6 +471,32 @@ describe('WhenSection W2 — Time-blocks clobber guard', function() {
   });
 });
 
+// ── T-4: single-tag micro-copy hint (WhenSection.jsx ~line 396) ─────────────
+// The hint "Single block kept — switching modes preserves your selection." is rendered
+// only when effectiveMode === 'time_blocks' AND activeTags.length === 1.
+// activeTags = when.split(',') filtered for non-sentinel values; so `when='biz'` → 1 tag.
+describe('WhenSection T-4 — single-tag micro-copy hint', function() {
+  it('shows the hint when time_blocks mode has exactly one active tag', function() {
+    render(<WhenSection {...buildProps({ placementMode: 'time_blocks', when: 'biz', uniqueTags: BIZ_TAGS })} />);
+    expect(screen.getByText(/Single block kept/i)).toBeInTheDocument();
+  });
+
+  it('does NOT show the hint when time_blocks has zero active tags', function() {
+    render(<WhenSection {...buildProps({ placementMode: 'time_blocks', when: '', uniqueTags: BIZ_TAGS })} />);
+    expect(screen.queryByText(/Single block kept/i)).toBeNull();
+  });
+
+  it('does NOT show the hint when time_blocks has two or more active tags', function() {
+    render(<WhenSection {...buildProps({ placementMode: 'time_blocks', when: 'biz,morning', uniqueTags: BIZ_TAGS })} />);
+    expect(screen.queryByText(/Single block kept/i)).toBeNull();
+  });
+
+  it('does NOT show the hint when placementMode is not time_blocks (one tag in when)', function() {
+    render(<WhenSection {...buildProps({ placementMode: 'anytime', when: 'biz', uniqueTags: BIZ_TAGS })} />);
+    expect(screen.queryByText(/Single block kept/i)).toBeNull();
+  });
+});
+
 // ── ZOE-JUG-034: mobile-specific block ───────────────────────────────────────
 // The main matrix has zero isMobile:true combinations. isMobile only affects
 // button sizing (BTN_H/fontSize/padding), not which buttons appear. These tests

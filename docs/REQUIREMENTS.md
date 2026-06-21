@@ -2,7 +2,7 @@
 type: reference
 status: active
 version: 2.1.0
-Last-updated: 2026-06-18
+Last-updated: 2026-06-21
 service: juggler
 ---
 
@@ -163,6 +163,25 @@ _Maintained by docs-sync from the Scooter KG + code. Last synced: 2026-06-18 (24
 | R11.21 | Scheduler | US-5 | The system MUST handle `reminder` mode: tasks are placed as non-blocking reminders that do not consume time-block capacity. | **Happy:** Given a task with `placement_mode: "reminder"`, when the scheduler runs, then the task is placed as a reminder without consuming capacity from time blocks. | implemented | `juggler-backend/src/scheduler/unifiedScheduleV2.js` | `tests/unifiedSchedule.test.js` | KG |
 | R11.22 | Scheduler | US-5 | The system MUST handle `anytime` mode: tasks are placed in any available gap without time-block or window constraints. | **Happy:** Given a task with `placement_mode: "anytime"`, when the scheduler runs, then the task is placed in the first available gap of sufficient duration. | implemented | `juggler-backend/src/scheduler/unifiedScheduleV2.js` | `tests/unifiedSchedule.test.js` | KG |
 
+#### R11.23 — Unplaced Reason Code Taxonomy
+
+When a task cannot be placed, the scheduler sets `_unplacedReason` (one of the codes below) and `_unplacedDetail` (a human-readable string) on the output item (R11.16). The canonical source of truth is `shared/scheduler/reasonCodes.js` — **do not define or compare codes as string literals elsewhere; always import that module.** The comment block in that file instructs: "NEVER change the string VALUES — they are pinned by tests."
+
+| Code | Label | Meaning | Source requirement |
+|------|-------|---------|-------------------|
+| `tool_conflict` | Tool unavailable | A tool required by the task is not available at any candidate slot (tool matrix rules out all slots). | R11.16 (R11.9 constraint; added by leg juggler-recur-nextcycle-unplaced) |
+| `location_mismatch` | Location mismatch | No candidate slot matches the task's required location. | R11.16 (R11.8 constraint; added by leg juggler-recur-nextcycle-unplaced) |
+| `no_slot` | No free slot | Sufficient free capacity exists in principle but no contiguous gap of the required duration was found after all other constraints are applied. | R11.16 (added by leg juggler-recur-nextcycle-unplaced) |
+| `impossible_window` | Impossible time window | The task's `time_window` constraint produces a window that contains no schedulable minutes (e.g., the window falls entirely outside `schedFloor`/`schedCeiling`). | R37.2 |
+| `weather_unavailable` | Weather | Weather data could not be fetched for the required location; the task cannot be safely placed without it. Note: this code is the target name per AC2.6; see `weather` below. | R38.2 |
+| `weather` | Weather | Alias of `weather_unavailable` emitted by the current scheduler implementation while the AC2.6 rename is deferred (open-decision #1 in the juggler-recur-nextcycle-unplaced SPEC). Both codes carry the same label and meaning; once AC2.6 is resolved, `weather` will be removed and all emitters will use `weather_unavailable` exclusively. | R38.2 |
+| `partial_split` | Partially placed | A split task could not be placed in full — some but not all chunks were placed. The task appears in the unplaced list with details on how many chunks were placed vs. total. | R19.7 |
+| `recurring_split_overflow` | Recurrence overflow | A recurring task generated more instances than the scheduler's per-cycle budget allows; overflow instances are unplaced for that cycle. | R35.6 |
+| `missed` | Preferred time passed | The task's preferred time (e.g., a `time_window` anchor) is already in the past and no later fallback slot was found. | R11.16 (preferred-time-passed path) |
+| `tpc_budget` | Not enough cycle time | The task's `timesPerCycle` budget for the current recurrence cycle is exhausted — the scheduler has already placed the maximum allowed instances for this cycle. | R35.6 (times-per-cycle budget enforcement) |
+
+_Source file: `shared/scheduler/reasonCodes.js`. New codes MUST be added to that file first and this table updated in the same commit._
+
 ### R12 — Time Reports
 
 | ID | Domain | Story | Requirement (RFC-2119) | Acceptance Criteria | Status | Code | Tests | Source |
@@ -299,6 +318,8 @@ _Maintained by docs-sync from the Scooter KG + code. Last synced: 2026-06-18 (24
 | R26.2 | Scheduler | US-5 | The system MUST allow unfixing a task: when `placement_mode` is changed from `fixed` to `anytime`, the scheduler may move it in subsequent runs. | **Happy:** Given a fixed task, when the user sets `placement_mode: "anytime"`, then the scheduler may move it in subsequent runs. | implemented | `juggler-frontend/src/components/tasks/sections/WhenSection.jsx` (placement mode toggles) | `tests/api/facade-fnnow-pin.test.js` | audit |
 | R26.3 | Scheduler | US-5 | The system MUST block recurring+fixed combination: the UI shows "not available" and the scheduler falls back to `anytime`. | **Unhappy:** Given a recurring task with `placement_mode: "fixed"`, when the UI renders, then a "not available" message is shown and the scheduler falls back to `anytime`. | implemented | `juggler-frontend/src/components/tasks/sections/WhenSection.jsx` · `juggler-backend/src/scheduler/unifiedScheduleV2.js` | `tests/api/facade-fnnow-pin.test.js` | audit |
 | R26.4 | Scheduler | US-5 | The system MUST lock calendar-synced tasks to fixed mode: mode change requires `takeOwnership` (R30) first. | **Happy:** Given a calendar-synced task, when the user tries to change placement mode, then the request is blocked until `takeOwnership` is called. | implemented | `juggler-frontend/src/components/tasks/sections/WhenSection.jsx` · `juggler-backend/src/routes/task.routes.js:67` | `tests/slices/task/application/commands-status-delete-misc.test.js` | audit |
+
+> **Display-mode derivation (docs-check note — 2026-06-21):** `WhenSection` derives the scheduling mode displayed to the user from the canonical `placement_mode` field stored on the task (ref leg juggler-when-display-mismatch, commit d16d77f). A docs-check performed on 2026-06-21 confirmed that no prior juggler document described an alternative display-derivation mechanism (such as a tag-count heuristic); no doc required updating as a result of this fix.
 
 ### R27 — Tools
 

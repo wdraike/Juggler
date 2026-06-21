@@ -6,7 +6,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { applyDefaults, CAL_PROVIDER_NAMES } from '../../state/constants';
 import { toTime24, fromTime24, toDateISO, fromDateISO, formatDateKey, parseDate } from '../../scheduler/dateHelpers';
 import { isAnchorDependentRecur } from '../../scheduler/expandRecurring';
-import { getTheme } from '../../theme/colors';
+import { getTheme, BRAND } from '../../theme/colors';
 import { convertTimeForDisplay } from '../../utils/timezone';
 import { addMinutesTo24h } from './sections/WhenSection';
 import CollapsibleSection from './CollapsibleSection';
@@ -746,7 +746,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
             collapse={collapse} toggleCollapse={toggleCollapse}
           />
           {saveError && (
-            <div role="alert" style={{ fontSize: 11, color: '#b91c1c', background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 4, padding: '4px 8px', marginTop: 4 }}>
+            <div role="alert" style={{ fontSize: 11, color: TH.redText, background: TH.redBg, border: '1px solid ' + TH.redBorder, borderRadius: 4, padding: '4px 8px', marginTop: 4 }}>
               {saveError}
             </div>
           )}
@@ -857,13 +857,13 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
           <button onClick={handleCreate} style={{
             fontSize: 11, fontWeight: 700, padding: '5px 14px',
             border: 'none', borderRadius: 4,
-            background: '#2D6A4F', color: '#FDFAF5', cursor: 'pointer'
+            background: BRAND.success, color: BRAND.cream, cursor: 'pointer'
           }}>{'+ Create'}</button>
         ) : (
           isDirty && <button onClick={handleSave} style={{
             fontSize: 11, fontWeight: 700, padding: '5px 14px',
             border: 'none', borderRadius: 4,
-            background: TH.accent, color: '#FDFAF5', cursor: 'pointer'
+            background: TH.accent, color: BRAND.cream, cursor: 'pointer'
           }}>{'✔ Save'}</button>
         )}
         <button onClick={onClose} style={{
