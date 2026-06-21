@@ -239,6 +239,56 @@ function computeWindowCloseUtc(task, _today, _tz) {
   return new Date(saDate.getTime() + flexMin * 60 * 1000);
 }
 
+var _ConstraintSolver = require('../slices/scheduler/domain/logic/ConstraintSolver');
+var recurringCycleDays = _ConstraintSolver.recurringCycleDays;
+
+/**
+ * R50.0 — the recurrence-PERIOD boundary is a recurring instance's IMPLIED
+ * deadline (recurring instances carry no explicit `deadline`). It is the value the
+ * overdue/missed logic acts on:
+ *   - Day-locked instance (timesPerCycle ≥ selected days, or no TPC) → end of its
+ *     OCCURRENCE DAY: the deadline is the next day (cycle = 1).
+ *   - Flexible-TPC instance (timesPerCycle < selected days → it may roam within the
+ *     cycle) → end of its CYCLE: occurrence + cycleLen. It is NOT missed until the
+ *     whole cycle has passed (it could still be completed on a later cycle day).
+ * Day-locked instance (timesPerCycle ≥ selected days, or no TPC) → end of its
+ * occurrence DAY (cycle = 1). Flexible-TPC instance (timesPerCycle < selected
+ * days → may roam within the cycle) → end of its CYCLE (occurrence + cycleLen).
+ * Returns the dateKey of the FIRST day past the period (instance is live through
+ * periodEnd−1, missed ON periodEnd). Null when not recurring or no occurrence date.
+ * (The separate timeFlex placement window is applied by the caller alongside this.)
+ */
+function recurringPeriodEndKey(recur, occurrenceDateKey) {
+  var occ = parseDate(occurrenceDateKey);
+  if (!occ) return null;
+  var r = recur;
+  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_e) { r = null; } }
+  var cycleDays = 1; // day-locked default: deadline = end of the occurrence day
+  if (r && r.timesPerCycle && r.timesPerCycle > 0) {
+    // selectedDays = how many days the recurrence picks from. The `r.days ||
+    // 'MTWRF'` / `r.monthDays || [1,15]` shape-defaults are NOT data fallbacks —
+    // they are byte-identical to unifiedScheduleV2's isFlexibleTpc (:457/:462), the
+    // single source for flexible-vs-day-locked classification; a missing field is a
+    // malformed recur and these defaults only affect that classification (never
+    // corrupt data). Unrecognised types (incl. `interval`) → selectedDays 1 → never
+    // flexible → day-locked, matching isFlexibleTpc.
+    var selectedDays;
+    if (r.type === 'daily') selectedDays = 7;
+    else if (r.type === 'weekly' || r.type === 'biweekly') {
+      var days = r.days || 'MTWRF';
+      selectedDays = (typeof days === 'object' && !Array.isArray(days)) ? Object.keys(days).length
+        : (typeof days === 'string' ? days.length : 0);
+    } else if (r.type === 'monthly') { selectedDays = (r.monthDays || [1, 15]).length; }
+    else { selectedDays = 1; }
+    if (r.timesPerCycle < selectedDays) { // flexible-TPC → roams within the cycle
+      cycleDays = recurringCycleDays(r) || 1;
+    }
+  }
+  var end = new Date(occ.getTime());
+  end.setDate(end.getDate() + cycleDays);
+  return formatDateKey(end);
+}
+
 /**
  * Get current date/time in user's timezone
  */
@@ -1733,11 +1783,19 @@ async function runScheduleAndPersist(userId, _retries, options) {
       if (t.marker) return;
 
       if (t.recurring) {
-        // Past recurring — check placement window before auto-marking missed.
-        // If still within timeFlex range, the scheduler can place it today.
+        // Past recurring — not "missed" while it can still be completed. Two live
+        // windows, either of which keeps it from being missed:
+        //  (1) the timeFlex placement window (scheduler may still place it late), and
+        //  (2) R50.0: the recurrence-PERIOD boundary — a flexible-TPC instance may
+        //      roam within its cycle (e.g. a 3×/week task is not missed until the
+        //      week ends), so its implied deadline is the end of the cycle, not the
+        //      occurrence day.
         var flex = t.timeFlex != null ? t.timeFlex : 60;
         var daysPast = Math.round((today.getTime() - td.getTime()) / 86400000);
-        if (flex >= daysPast * 1440) return; // still within window, don't mark
+        if (flex >= daysPast * 1440) return; // still within the timeFlex window
+        var periodEndKey = recurringPeriodEndKey(t.recur, effectiveDate);
+        var periodEnd = periodEndKey ? parseDate(periodEndKey) : null;
+        if (periodEnd && today < periodEnd) return; // still within the recurrence cycle
         // Outside placement window — day was missed, mark as 'missed' (juggler-cal-history
         // Plan C; was 'skip'). Distinguishes user-initiated skip from system-applied missed.
         var windowClose = computeWindowCloseUtc(t, today, TIMEZONE);
@@ -2476,6 +2534,7 @@ module.exports = {
   runScheduleAndPersist,
   getSchedulePlacements,
   computeWindowCloseUtc,
+  recurringPeriodEndKey,
   computeIsPastDue,
   setWeatherProvider,
   getWeatherProvider
