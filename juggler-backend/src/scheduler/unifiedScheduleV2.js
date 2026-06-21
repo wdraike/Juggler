@@ -299,6 +299,14 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
     if ((pm === PLACEMENT_MODES.FIXED || pm === PLACEMENT_MODES.TIME_WINDOW) && t.preferredTimeMins != null && anchorMin == null) {
       anchorMin = t.preferredTimeMins;
     }
+    // R52 frozen invariant: a STARTED (wip) instance pins to its LIVE placement
+    // regardless of placement mode. Its t.time was derived from the current
+    // scheduled_at (the user is actively working it) — authoritative, NOT the
+    // stale-cache case the ANYTIME exclusion above guards against. Anchor it so it
+    // routes through the immovable path and is never re-placed.
+    if (anchorMin == null && st === 'wip' && t.time) {
+      anchorMin = parseTimeToMinutes(t.time);
+    }
 
     // Deadline: user deadline; recurring instances use their scheduled day
     // as the implicit deadline end (4.4 will refine chain backprop + cycle
@@ -495,6 +503,13 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
       // isGenerated — see findEarliestSlot for the clamping logic.
       isGenerated: !!t.generated && !recurring,
       isRigid: pm === PLACEMENT_MODES.FIXED,
+      // Frozen invariant (R52): a STARTED instance (status 'wip') is immovable —
+      // the user began it, so the scheduler must never re-place it. Pinned at its
+      // existing slot when it has one (anchorDate+anchorMin are derived from
+      // scheduled_at via rowToTask). ponytail: only started-WITH-a-placement is
+      // protected here (the confirmed regression); an unanchored wip keeps current
+      // behavior — no slot to pin to, out of scope.
+      isStarted: st === 'wip',
       isRecurring: recurring,
       isMarker: isMarker,
       flexWhen: flexWhen,
@@ -1565,7 +1580,11 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     // R50.1 (999.796): a past FIXED/ingested event (e.g. a flight that already
     // departed) must stay at its date as overdue, not jump to the horizon end.
     if (item.anchorDate && item.anchorDate < todayIsoKey &&
-        (item.isRecurring || (item.isFixedWhen && item.anchorMin != null))) {
+        (item.isRecurring || (item.isFixedWhen && item.anchorMin != null) ||
+         (item.isStarted && item.anchorMin != null))) {
+      // R52 frozen invariant: a past STARTED instance stays pinned at its
+      // original date as overdue — never re-placed forward (same as a past
+      // fixed/ingested commitment).
       pastAnchoredPreQueue.push(item);
       return;
     }
@@ -1587,10 +1606,14 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       return;
     }
     var isRigidWithAnchor = item.isRecurring && item.isRigid && item.anchorMin != null;
+    // R52 frozen invariant: a started (wip) instance with a placement reserves
+    // its existing slot via tryPlaceAtTime and is never recomputed/moved.
+    var isStartedWithAnchor = item.isStarted && item.anchorDate && item.anchorMin != null;
     var isImmovable =
       (item.isMarker && item.anchorDate && item.anchorMin != null) ||
       item.isRigid ||
-      isRigidWithAnchor;
+      isRigidWithAnchor ||
+      isStartedWithAnchor;
     if (isImmovable) {
       // For rigid recurrings: check whether the anchor slot is already occupied
       // by a previously placed task (not merely by the nowMins time-boundary).
