@@ -1086,4 +1086,44 @@ describe('rolling recurrence integration', () => {
     const result = computeRollingAnchor('skip', '2026-05-25', '2026-05-18');
     expect(result).toBe('2026-05-25');
   });
+
+  // ── R50.1/R50.2 (999.796): a PAST-dated fixed/ingested event stays pinned at ──
+  // its original date as OVERDUE — it is NOT re-placed forward (was landing at the
+  // scheduling-horizon end) and NOT demoted to the unscheduled lane. (The "Nathan
+  // Flies In" case: a flight that already departed.)
+  function fullPlacement(result, taskId) {
+    for (var dk in result.dayPlacements) {
+      for (var p of result.dayPlacements[dk]) {
+        if (p.task && p.task.id === taskId) return Object.assign({ day: dk }, p);
+      }
+    }
+    return null;
+  }
+
+  test('R50: past-dated fixed event → pinned overdue at its date, not forward, not unscheduled', () => {
+    var pastDay = dateKey(-2); // 2026-04-05, before TODAY 2026-04-07
+    var r = schedule([
+      task({ id: 'flight', placementMode: 'fixed', date: pastDay, time: '11:00 AM', datePinned: true, dur: 60 })
+    ], 600);
+
+    var pl = fullPlacement(r, 'flight');
+    expect(pl).not.toBeNull();
+    expect(pl.day).toBe(pastDay);          // stays on its ORIGINAL day, not rolled forward
+    expect(pl._overdue).toBe(true);        // flagged overdue
+    expect(pl._conflict).toBeUndefined();  // not a bogus overlap conflict
+    expect(isUnplaced(r, 'flight')).toBe(false); // not in the unscheduled lane
+    // No spurious recurringConflict warning for a late (non-overlapping) event.
+    expect((r.warnings || []).some(function(w) { return w.type === 'recurringConflict' && w.taskId === 'flight'; })).toBe(false);
+  });
+
+  test('R50: FUTURE fixed event is unaffected — placed at its date, NOT overdue', () => {
+    var futureDay = dateKey(3); // 2026-04-10, after TODAY
+    var r = schedule([
+      task({ id: 'mtg', placementMode: 'fixed', date: futureDay, time: '11:00 AM', datePinned: true, dur: 60 })
+    ], 600);
+    var pl = fullPlacement(r, 'mtg');
+    expect(pl).not.toBeNull();
+    expect(pl.day).toBe(futureDay);
+    expect(pl._overdue).toBeUndefined();   // future event is not overdue
+  });
 });

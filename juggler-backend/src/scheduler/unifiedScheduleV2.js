@@ -1549,8 +1549,14 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   // retry pass (below) without entering the placement queue or the dual-place path.
   var missedPreferredTimeItems = [];
   items.forEach(function(item) {
-    // Past-anchored recurring: skip the queue entirely — handled by a dedicated pass later.
-    if (item.isRecurring && item.anchorDate && item.anchorDate < todayIsoKey) {
+    // Past-anchored recurring OR fixed/ingested: skip the queue entirely — never
+    // re-place a past commitment forward into the future. Routed to the dedicated
+    // pass (→ stillUnplaced), where runSchedule's overdue synthesis pins it at its
+    // original date/time as overdue (computeIsPastDue treats fixed as a hard due).
+    // R50.1 (999.796): a past FIXED/ingested event (e.g. a flight that already
+    // departed) must stay at its date as overdue, not jump to the horizon end.
+    if (item.anchorDate && item.anchorDate < todayIsoKey &&
+        (item.isRecurring || (item.isFixedWhen && item.anchorMin != null))) {
       pastAnchoredPreQueue.push(item);
       return;
     }
@@ -2114,25 +2120,38 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       }
     }
 
-    // Mark task overdue if its forced time is in the past on today.
-    var forceIsOverdue = forceDate === todayIsoKey && nowMins != null && forceStart < nowMins;
+    // Mark task overdue if its forced slot is in the past: any PRIOR day is
+    // overdue, and today is overdue once the forced start time has passed.
+    // R50.2 (999.796): a force-placed fixed/recurring item anchored to a past day
+    // must carry the overdue flag (previously only same-day-passed was flagged).
+    var forceIsOverdue = forceDate < todayIsoKey ||
+      (forceDate === todayIsoKey && nowMins != null && forceStart < nowMins);
     if (forceIsOverdue) task._overdue = true;
 
+    // R50 (999.796): a past-anchored item force-placed onto its OWN past day is
+    // OVERDUE, not an overlap conflict — it didn't collide with anything, its day
+    // simply passed. Only a present/future forced placement is a real overlap
+    // conflict; suppress the _conflict flag + recurringConflict warning for the
+    // overdue case (otherwise a late fixed event shows a bogus "Recurring conflict"
+    // in the Issues tab).
+    var isOverlapConflict = !forceIsOverdue;
     if (!dayPlacements[forceDate]) dayPlacements[forceDate] = [];
     var forceEntry = {
       task: task,
       start: forceStart,
       dur: forceDur,
       locked: true,
-      _conflict: true,
       travelBefore: 0,
       travelAfter: 0,
-      _placementReason: 'Rigid recurring: ' + (fBlockName || task.when || 'block') + ' (overlap)',
+      _placementReason: forceIsOverdue
+        ? 'Fixed/recurring event (overdue — its date has passed)'
+        : ('Rigid recurring: ' + (fBlockName || task.when || 'block') + ' (overlap)'),
     };
+    if (isOverlapConflict) forceEntry._conflict = true;
     if (forceIsOverdue) forceEntry._overdue = true;
     dayPlacements[forceDate].push(forceEntry);
-    // Emit a recurringConflict warning so callers can surface UI feedback.
-    warnings.push({ type: 'recurringConflict', taskId: task.id });
+    // Emit a recurringConflict warning only for a real overlap (not the overdue case).
+    if (isOverlapConflict) warnings.push({ type: 'recurringConflict', taskId: task.id });
   });
   stillUnplaced = remainingUnplaced;
   captureSnapshot('rigid_forced');
