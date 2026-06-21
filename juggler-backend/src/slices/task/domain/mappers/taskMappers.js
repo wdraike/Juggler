@@ -49,6 +49,16 @@
 
 var dateHelpers = require('../../../../scheduler/dateHelpers');
 var TaskStatus = require('../value-objects/TaskStatus');
+// W4 (R50.8): shared now-contract — pure, no I/O. Used by the computed-on-read
+// overdue predicate in rowToTask. Kept at module level so the shared/ module is
+// loaded once (CJS singleton); rowToTask remains pure (now injected via optional
+// 5th arg; default computes from this shared contract using the row's timezone).
+// Path: mappers/ → domain/ → task/ → slices/ → src/ → juggler-backend/ → juggler/ → shared/
+// (6 parent dirs up from mappers/ to reach juggler/, then into shared/)
+var _getNowInTimezone = require('../../../../../../shared/scheduler/getNowInTimezone').getNowInTimezone;
+// Path: mappers/ → domain/ → task/ → slices/ → src/ → lib/
+// (4 parent dirs up from mappers/ to reach src/, then into lib/)
+var _PLACEMENT_MODES = require('../../../../lib/placementModes').PLACEMENT_MODES;
 
 var utcToLocal = dateHelpers.utcToLocal;
 var toDateISO = dateHelpers.toDateISO;
@@ -175,9 +185,13 @@ function buildSourceMap(rows) {
  * @param {{warn: Function}} [logger] OPTIONAL injected logger (default no-op) —
  *   keeps the legacy orphaned-instance warn without coupling the domain to a
  *   logger require. Output is byte-identical regardless of which logger is passed.
+ * @param {{todayKey:string,nowMins:number}} [nowInfo] OPTIONAL injected now-context
+ *   (W4 R50.8) — used by the computed-on-read overdue predicate. When absent,
+ *   defaults to computing from the shared contract using the row's timezone. Inject
+ *   a fixed now-context in tests to keep the predicate deterministic.
  * @returns {Object} the API task object.
  */
-function rowToTask(row, timezone, sourceMap, logger) {
+function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
   var log = logger || NOOP_LOGGER;
   // Merge template fields from source for thin recurring instances.
   var src = sourceMap && row.source_id ? sourceMap[row.source_id] : null;
@@ -312,7 +326,68 @@ function rowToTask(row, timezone, sourceMap, logger) {
     preferredTimeMins: row.preferred_time_mins != null ? row.preferred_time_mins : null,
     desiredAt: row.desired_at ? new Date(row.desired_at).toISOString() : null,
     unscheduled: !!row.unscheduled,
-    overdue: !!row.overdue,
+    overdue: (function() {
+      // W4 (R50.6): computed-on-read overdue — OR-ed with the stored flag so a
+      // past-due item shows overdue at read time even before the scheduler runs.
+      // Preserves ALL wrong-for-naive cases (999.671 contract):
+      //   • Floating / no deadline / no implied_deadline / non-FIXED → stored flag only
+      //   • Terminal status → suppress (isTerminalStatus clamp applied above already
+      //     clamps scheduled_at; we also suppress the computed path here)
+      //   • FIXED: scheduled_at IS the hard due — use task.date/time derived above
+      //   • Recurring with no materialized implied_deadline → no computed overdue
+      //   • ANYTIME without hard commitment → no computed overdue (same gate as
+      //     computeIsPastDue: requires deadline OR implied_deadline OR FIXED)
+      if (!!row.overdue) return true; // short-circuit: stored flag wins
+      // Suppress computed path for terminal-status rows
+      var st = row.status || '';
+      if (isTerminalStatus(st)) return false;
+      // Suppress computed path for disabled (frozen) instances — disabled is not
+      // in TERMINAL_STATUSES (intentionally: it behaves differently elsewhere),
+      // but a frozen recurring instance must never compute as overdue (B1 fix).
+      if (st === 'disabled') return false;
+      // Resolve now-context: inject for tests, default to shared contract for the row's tz
+      var _now = nowInfo || _getNowInTimezone(timezone || null);
+      // hasHardCommitment mirrors computeIsPastDue's gate exactly (runSchedule.js:109):
+      //   deadline OR implied_deadline OR FIXED placementMode
+      // Reuse dateColumnToISO (defined at :92) to avoid duplicating Date/string parsing inline.
+      var impliedDeadlineISO = dateColumnToISO(row.implied_deadline);
+      var hasHardCommitment = !!(row.deadline || impliedDeadlineISO ||
+        row.placement_mode === _PLACEMENT_MODES.FIXED);
+      if (!hasHardCommitment) return false;
+      // Determine the effective due date key and time (minutes).
+      // For FIXED: use the derived task.date (same as the task object being built above).
+      // For deadline: prefer deadline; then implied_deadline; then task date.
+      var dueKey = dateColumnToISO(row.deadline) || impliedDeadlineISO;
+      // For FIXED with no deadline/implied_deadline: the task's effective date IS its due
+      if (!dueKey && row.placement_mode === _PLACEMENT_MODES.FIXED) {
+        // `date` was derived above from scheduled_at — recompute from row directly
+        if (row.scheduled_at) {
+          var _local = utcToLocal(row.scheduled_at, timezone || null);
+          dueKey = _local ? _local.date : null;
+        }
+      }
+      if (!dueKey || dueKey === 'TBD') return false;
+      // For time-precision (FIXED or scheduled): derive scheduled minutes.
+      // For deadline/implied_deadline: no time check — past-day is sufficient.
+      var scheduledMins = null;
+      if (row.placement_mode === _PLACEMENT_MODES.FIXED && row.scheduled_at) {
+        var _fixedLocal = utcToLocal(row.scheduled_at, timezone || null);
+        if (_fixedLocal && _fixedLocal.time) {
+          var _tm = /^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i.exec(_fixedLocal.time);
+          if (_tm) {
+            var _h = parseInt(_tm[1], 10); var _m = parseInt(_tm[2], 10);
+            var _ap = (_tm[3] || '').toUpperCase();
+            if (_ap === 'PM' && _h < 12) _h += 12;
+            if (_ap === 'AM' && _h === 12) _h = 0;
+            scheduledMins = _h * 60 + _m;
+          }
+        }
+      }
+      // Past-due check: day in the past, OR same day with time passed (FIXED only).
+      if (dueKey < _now.todayKey) return true;
+      if (dueKey === _now.todayKey && scheduledMins !== null && scheduledMins < _now.nowMins) return true;
+      return false;
+    })(),
     slackMins: row.slack_mins != null ? Number(row.slack_mins) : null,
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
     recurStart: row.recur_start || null,

@@ -131,27 +131,27 @@ export function hydrateTaskTimezones(tasks, timezone) {
   return tasks;
 }
 
+// Default timezone — matches the shared backend contract (shared/scheduler/getNowInTimezone.js)
+// so that null/undefined tz produces identical todayKey/nowMins on both sides (R50.8 W2 fix).
+var DEFAULT_TIMEZONE = 'America/New_York';
+
 /**
  * Get "today" and "now" in the given timezone.
- * Falls back to browser local time if timezone is null/undefined.
+ * When timezone is null/undefined, defaults to America/New_York to match the shared
+ * backend contract (shared/scheduler/getNowInTimezone.js) — R50.8 parity requirement.
  *
  * @param {string|null} timezone - IANA timezone (e.g. 'America/New_York')
  * @returns {{ todayKey: string, todayDate: Date, nowMins: number }}
  */
 export function getNowInTimezone(timezone) {
   var now = new Date();
-
-  if (!timezone) {
-    return {
-      todayKey: formatDateKey(now),
-      todayDate: new Date(now.getFullYear(), now.getMonth(), now.getDate()),
-      nowMins: now.getHours() * 60 + now.getMinutes()
-    };
-  }
+  // Apply the same default as the shared backend module — never use browser-local clock
+  // for the no-tz branch (that would break R50.8 parity at day boundaries).
+  var tz = timezone || DEFAULT_TIMEZONE;
 
   var parts = {};
   new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone, year: 'numeric', month: 'numeric', day: 'numeric',
+    timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric',
     hour: 'numeric', minute: 'numeric', hourCycle: 'h23'
   }).formatToParts(now).forEach(function(p) { parts[p.type] = parseInt(p.value, 10); });
 

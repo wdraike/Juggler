@@ -290,31 +290,12 @@ function recurringPeriodEndKey(recur, occurrenceDateKey) {
 }
 
 /**
- * Get current date/time in user's timezone
+ * Get current date/time in user's timezone — delegated to the shared contract
+ * (shared/scheduler/getNowInTimezone.js, W1 R50.8). The local duplicate is
+ * removed; all callers continue to receive {todayKey, nowMins} unchanged.
+ * (todayDate is also available but unused by the scheduler path.)
  */
-function getNowInTimezone(timezone, clock) {
-  var tz = timezone || DEFAULT_TIMEZONE;
-  var now = clock ? clock.now() : new Date();
-  var parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz,
-    year: 'numeric', month: 'numeric', day: 'numeric',
-    hour: 'numeric', minute: 'numeric', hourCycle: 'h23'
-  }).formatToParts(now);
-
-  var vals = {};
-  parts.forEach(function(p) { vals[p.type] = parseInt(p.value, 10); });
-
-  var month = vals.month;
-  var day = vals.day;
-  var hour = vals.hour % 24;
-  var minute = vals.minute;
-
-  var todayKey = vals.year + '-' + (month < 10 ? '0' : '') + month + '-' + (day < 10 ? '0' : '') + day;
-  return {
-    todayKey: todayKey,
-    nowMins: hour * 60 + minute
-  };
-}
+var getNowInTimezone = require('../../../shared/scheduler/getNowInTimezone').getNowInTimezone;
 
 /**
  * Load user config values from DB and assemble into scheduler cfg object
@@ -1091,6 +1072,14 @@ async function runScheduleAndPersist(userId, _retries, options) {
         var occDateObj = parseDate(occDate);
         if (occDateObj) occDay = DAY_NAMES[occDateObj.getDay()];
       }
+      // W3 (R50.7): materialize the recurring implied deadline onto the row so
+      // the read-time overdue predicate (W4) can compare against it without
+      // re-running recurrence logic. Null when not recurring or no occDate.
+      // recurringPeriodEndKey handles JSON-string recur internally (line 265).
+      var masterRow = srcMap[row.sourceId];
+      var impliedDeadline = (masterRow && occDate)
+        ? recurringPeriodEndKey(masterRow.recur, occDate)
+        : null;
       return {
         id: row.id,
         user_id: userId,
@@ -1108,6 +1097,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
         time: null,
         unscheduled: null,
         status: '',
+        implied_deadline: impliedDeadline,
         created_at: _runScheduleCommand.clockNow(),
         updated_at: _runScheduleCommand.clockNow()
       };

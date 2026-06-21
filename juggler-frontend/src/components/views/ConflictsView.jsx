@@ -62,14 +62,22 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
       if (isTerminalStatus(st)) return;
       // Recurring templates are blueprints, not actionable — skip for issues
       if (t.taskType === 'recurring_template') return;
-      // Generated/expanded recurring instances are managed by the scheduler
-      if (t.generated) return;
+      // W5 (R50.6): generated recurring instances are ordinarily managed by the
+      // scheduler, but a materialized instance that carries a computed overdue flag
+      // (from the backend read-path W4) MUST appear in the Overdue list so the user
+      // sees it without a scheduler run. The blanket `if (t.generated) return` is
+      // replaced by a targeted guard: generated instances are skipped UNLESS they
+      // carry t.overdue (which now reflects the computed-on-read predicate). Floating
+      // generated instances with no hard/implied due still have t.overdue===false and
+      // are excluded below (isOverdue stays false → stale check applies if applicable).
+      if (t.generated && !t.overdue) return;
 
-      // True overdue: an explicit due date in the past, OR the backend overdue
-      // flag. R50.3 (999.796): a fixed/ingested event past its scheduled date — or
-      // a past recurring instance — carries overdue=1 even with NO deadline; it
-      // belongs in the Overdue action list, not the informational "Past Scheduled
-      // Date" bucket below.
+      // True overdue: an explicit due date in the past, OR the backend overdue flag
+      // (R50.3 / W4: now includes computed-on-read overdue for recurring instances
+      // with a materialized implied_deadline past due). R50.3 (999.796): a
+      // fixed/ingested event past its scheduled date — or a past recurring instance
+      // — carries overdue=true even with NO hard deadline; it belongs in the Overdue
+      // action list, not the informational "Past Scheduled Date" bucket below.
       var isOverdue = false;
       if (t.deadline) {
         var dd = parseDate(t.deadline);
