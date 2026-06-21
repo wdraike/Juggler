@@ -1,5 +1,5 @@
 ---
-type: explanation
+type: adr
 status: active
 version: leg/juggler-overdue-computed-status @ 2026-06-21
 Last-updated: 2026-06-21
@@ -19,10 +19,12 @@ Last-updated: 2026-06-21
 1. [Problem](#1-problem)
 2. [Decision — HYBRID approach](#2-decision--hybrid-approach)
 3. [Rationale](#3-rationale)
-4. [Wrong-for-naive cases — edge-case contract](#4-wrong-for-naive-cases--edge-case-contract)
-5. [Non-goals and deferred work](#5-non-goals-and-deferred-work)
-6. [Implementing code](#6-implementing-code)
-7. [Traceability](#7-traceability)
+4. [Consequences](#4-consequences)
+5. [Alternatives considered](#5-alternatives-considered)
+6. [Wrong-for-naive cases — edge-case contract](#6-wrong-for-naive-cases--edge-case-contract)
+7. [Non-goals and deferred work](#7-non-goals-and-deferred-work)
+8. [Implementing code](#8-implementing-code)
+9. [Traceability](#9-traceability)
 
 ---
 
@@ -135,7 +137,42 @@ shape, injectable clock for tests) eliminates the class entirely.
 
 ---
 
-## 4. Wrong-for-naive cases — edge-case contract
+## 4. Consequences
+
+**Positive:**
+- Past-due items show `overdue:true` in the UI immediately after the deadline passes, without waiting for a scheduler run. Eliminates the stale-flag display gap.
+- The solver's existing severity signal (`task_instances.overdue` stored flag) and idempotency anchor are preserved without modification. No scheduler behavior changes.
+- One canonical `getNowInTimezone` implementation eliminates the entire class of off-by-a-day bugs at midnight and DST transitions for any future consumer.
+- `implied_deadline` is now queryable in SQL (e.g., for future analytics, reporting, or server-side overdue filtering) without recomputing JS recurrence logic.
+
+**Negative / trade-offs:**
+- Schema migration required: `task_instances.implied_deadline` DATE column + `tasks_v` view recreation. Pre-existing instance rows receive `NULL` (fail-safe — the stored `overdue` flag covers them).
+- The frontend ESM copy of `getNowInTimezone` must be kept in sync with the shared spec manually (CRA cannot import from the backend's CommonJS `shared/` tree). The spec is now documented; divergence is a future risk.
+- `rowToTask` now has a 5th optional `nowInfo` argument for clock injection. Callers that do not pass it receive wall-clock `now`; test suites must inject a fixed clock to get deterministic results.
+- The `implied_deadline` backfill for pre-existing rows is deferred (NULL is the safe default — the stored overdue flag covers them). A future migration can backfill if needed.
+
+---
+
+## 5. Alternatives considered
+
+**Alternative A — Pure computed (no stored flag, no migration)**
+Derive `overdue` entirely from a JS predicate at read time; delete the stored `task_instances.overdue` column. Rejected: the solver uses the stored flag as a severity signal for ranking unplaced tasks, and the run uses it as an idempotency anchor. Removing it would require the solver to recompute the same predicate (duplication and drift) and would break idempotency.
+
+**Alternative B — More-frequent scheduler runs**
+Tighten the scheduler debounce / cron interval to reduce the stale-display window. Rejected: the scheduler is rate-limited by design (expensive, enqueues Cloud Tasks, modifies task state). Tightening the run frequency couples display freshness to scheduling cost and does not address the root cause (implied deadline not persisted, two diverged now-impls).
+
+**Alternative C — MySQL generated column for `implied_deadline`**
+Express `implied_deadline` as a generated (virtual or stored) column in SQL so no application code writes it. Rejected: the `recurringPeriodEndKey` formula depends on recurrence type, `timesPerCycle`, and the selected-day count — all encoded as JS logic over a JSON recurrence rule. This logic cannot be expressed in SQL. Any SQL approximation would duplicate and then diverge from the in-run logic.
+
+**Alternative D — Secondary query in the read mapper**
+Recompute `recurringPeriodEndKey` in `rowToTask` by fetching recurrence-rule data on demand. Rejected: would add a secondary DB query per task row on every read, an unacceptable performance regression for a listing endpoint that returns many rows.
+
+**Alternative E — Server "now" endpoint for the frontend**
+Replace the frontend's local `getNowInTimezone` with a network call to a backend endpoint returning the server's current time. Rejected (for this leg): the two implementations had drifted in spec, not just in server/client time. Fixing the spec (same fields, same formatting, same default) is sufficient. A server-provided timestamp is a separate decision and is deferred.
+
+---
+
+## 6. Wrong-for-naive cases — edge-case contract
 
 These are the cases where a naive "is today past the deadline?" predicate produces the
 wrong answer. Every one MUST be handled by the computed read path.
@@ -151,7 +188,7 @@ wrong answer. Every one MUST be handled by the computed read path.
 
 ---
 
-## 5. Non-goals and deferred work
+## 7. Non-goals and deferred work
 
 The following are explicitly out of scope for this leg and must not be inferred from
 this design:
@@ -169,7 +206,7 @@ provided "now" timestamp. That is a separate decision and is deferred.
 
 ---
 
-## 6. Implementing code
+## 8. Implementing code
 
 | File | Role | What changed |
 |------|------|-------------|
@@ -182,7 +219,7 @@ provided "now" timestamp. That is a separate decision and is deferred.
 
 ---
 
-## 7. Traceability
+## 9. Traceability
 
 | Requirement | Statement summary | Status | Code pointer |
 |-------------|------------------|--------|-------------|
