@@ -121,7 +121,7 @@ export const THEME_LIGHT = {
   greenText: '#2D6A4F',
   greenBorder: '#2D6A4F',
   amberBg: '#FEF3C7',
-  amberText: '#9E6B3B',
+  amberText: '#7A4E24', // darkened brand copper — 6.41:1 on amberBg #FEF3C7 (WCAG AA); was #9E6B3B @ 4.08:1 (fail)
   amberBorder: '#C8942A',
   redBg: '#FEE2E2',
   redText: '#8B2635',
