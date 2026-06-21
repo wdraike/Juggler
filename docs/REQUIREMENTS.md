@@ -516,6 +516,16 @@ These system-level requirements describe behavior the platform MUST exhibit acro
 | R49.3 | Admin | US-14 | The system MUST degrade gracefully per the NFR degradation matrix — when a dependency (database, scheduler, SSE, calendar sync, or weather) is impaired, the system reports a `DEGRADED` (vs `ERROR`/`OK`) rollup and continues serving unaffected functionality rather than failing wholesale. | **Happy:** Given a degraded dependency (e.g., stale weather cache or stale sync ledger), when GET /api/health/detailed is called, then that service reports `degraded` and the overall rollup is `DEGRADED` while other services remain `OK`. **Unhappy:** Given a hard dependency failure (DB down), when health is checked, then the rollup is `ERROR`. | partial | `juggler-backend/src/routes/health.routes.js:52-270` (per-service status + OK/DEGRADED/ERROR rollup) | No dedicated test | audit |
 | R49.4 | Admin | US-14 | The system SHOULD maintain an audit log of significant data changes capturing `user_id`, timestamp, action, and before/after state, so privileged or destructive operations are reconstructable. | **Happy:** Given a significant data change (create/update/delete or a privileged action), when it completes, then an audit row records `user_id`, timestamp, action, and before/after state. **Unhappy:** Given an attempt to read another user's audit trail, then access is denied. | partial | Only impersonation events are audited today (`juggler-backend/src/slices/user-config/application/commands/Impersonate.js:64-78` → `impersonation_log`); no general data-change audit log exists. | `tests/slices/user-config/application/dataWebhookImpersonationUseCases.test.js` (impersonation audit only) | audit |
 
+### R50 — Overdue / Past-Due Item Handling
+
+> **Scope boundary (reconciliation with R32.7):** R50 governs any item that **has or had an assigned date/time** (`scheduled_at` set) which is now in the past and still incomplete (`status = ''`). R32.7's "past-date occurrence … left unplaced, not rolled forward" governs the *complementary* case — recurring occurrences that **never received** a `scheduled_at`. The two do not conflict: an item with an assigned time is retained on that time (R50); an item that was never assigned a slot stays unplaced (R32.7). Directive: David, 2026-06-21.
+
+| ID | Domain | Story | Requirement (RFC-2119) | Acceptance Criteria | Status | Code | Tests | Source |
+| R50.1 | Scheduler | US-5 | The system MUST NOT demote to "unscheduled"/"unplaced" any task that has (or had) an assigned date/time (`scheduled_at` set) which is now in the past and is still incomplete (`status = ''`). Such an item MUST remain pinned at its assigned date/time. This applies to ALL placement modes and task types — fixed one-off events, recurring instances, plain one-offs, and chain members alike — not only recurring instances. | **Happy:** Given a fixed event with `scheduled_at = yesterday 11:00` and `status = ''`, when the scheduler runs today, then the event remains at yesterday 11:00 and does NOT appear in the unscheduled lane. **Unhappy:** Given the same event, when the scheduler runs, then it is NOT silently dropped from output. | planned | Currently violated: `juggler-backend/src/scheduler/unifiedScheduleV2.js:156-181` (`buildDates` is today-forward only — no past day bucket) → `:709-710` (`tryPlaceAtTime` fails when `dayOcc[anchorDate]` absent) → `juggler-backend/src/scheduler/runSchedule.js:1532` (unplaced handler early-returns for `placementMode === FIXED`). | No test (behavior is the bug). | Directive 2026-06-21 |
+| R50.2 | Calendar Views | US-5 | The system MUST render such past-due items on the calendar at their original assigned date/time, visually flagged as past-due / overdue (consistent with the existing frontend overdue inference `date < today AND status = ''`). | **Happy:** Given a past-due assigned item, when the user views the calendar on its assigned date, then the item appears at its time with a past-due/overdue indicator. | planned | Partial precedent for recurring instances: `juggler-backend/src/scheduler/runSchedule.js:1535-1537` (overdue inferred on frontend for instances with `scheduled_at` set). Fixed events not covered. | No test. | Directive 2026-06-21 |
+| R50.3 | Calendar Views | US-5 | The system MUST ALSO surface every such past-due item in a dedicated "Past due" / "Overdue" list or section, distinct from the generic "Unscheduled" bucket, showing each item's real assigned date/time. | **Happy:** Given one or more past-due assigned items, when the user opens the issues/overdue view, then they are listed under a "Past due" section (not "Unscheduled") with their original date/time shown. | planned | No dedicated past-due section today; such items currently land in the unscheduled/unplaced lane. | No test. | Directive 2026-06-21 |
+| R50.4 | Scheduler | US-5 | To satisfy R50.1, the scheduler MUST be able to retain/place an item on its past assigned day: the placement day-range MUST include the assigned day of any incomplete item with a past `scheduled_at`, and the unplaced handler MUST NOT skip fixed tasks such that a past fixed event silently falls to unplaced. | **Happy:** Given a fixed event anchored to a past date, when the scheduler runs, then a placement entry is produced for that past date (or the existing `scheduled_at` is retained) rather than the item being unplaced. | planned | `juggler-backend/src/scheduler/unifiedScheduleV2.js:156-181,709-710` · `juggler-backend/src/scheduler/runSchedule.js:1532` | No test. | Directive 2026-06-21 |
+
 ---
 
 ## Use cases
@@ -580,7 +590,7 @@ Three primary use cases are recorded in the Scooter KG (`has_use_case` facts) an
 | US-2 | R4.1–R4.5, R5.1, R8.9, R47.1 | 8 | 8 impl |
 | US-3 | R8.1–R8.8 | 8 | 8 impl |
 | US-4 | R9.1–R9.3 | 3 | 0 impl, 3 partial |
-| US-5 | R11.1–R11.22, R21.1–R21.3, R26.1–R26.4, R37.1–R37.3, R39.1–R39.5, R40.1–R40.3, R41.1–R41.6, R44.1–R44.7 | 53 | 43 impl, 10 partial |
+| US-5 | R11.1–R11.22, R21.1–R21.3, R26.1–R26.4, R37.1–R37.3, R39.1–R39.5, R40.1–R40.3, R41.1–R41.6, R44.1–R44.7, R50.1–R50.4 | 57 | 43 impl, 10 partial, 4 planned |
 | US-6 | R18.1–R18.8, R32.1–R32.8, R33.1–R33.5, R34.1–R34.5 | 26 | 25 impl, 1 planned |
 | US-7 | R19.1–R19.7, R35.1–R35.7 | 14 | 13 impl, 1 partial |
 | US-8 | R7.1–R7.10, R30.1–R30.2, R43.1–R43.11 | 23 | 21 impl, 2 partial |
@@ -593,8 +603,8 @@ Three primary use cases are recorded in the Scooter KG (`has_use_case` facts) an
 | US-15 | R31.1–R31.5 | 5 | 5 impl |
 | US-16 | R10.1–R10.5, R36.1–R36.3 | 8 | 5 impl, 3 partial |
 | US-17 | R12.1, R13.1, R14.1 | 3 | 0 impl, 0 partial, 3 planned |
-| **Total** | | **244** | **200 impl, 38 partial, 6 planned** |
-| **Total** | | **244** | **200 impl, 38 partial, 6 planned** |
+| **Total** | | **248** | **200 impl, 38 partial, 10 planned** |
+| **Total** | | **248** | **200 impl, 38 partial, 10 planned** |
 
 ### Traceability Summary
 
@@ -603,7 +613,7 @@ Three primary use cases are recorded in the Scooter KG (`has_use_case` facts) an
 | `implemented` | 200 | R1.1–R1.5, R1.7–R1.10, R2.1–R2.8, R3.1–R3.3, R4.1–R4.5, R5.1, R6.1–R6.5, R6.7, R7.1–R7.8, R8.1–R8.9, R10.1–R10.5, R11.1–R11.9, R11.11–R11.22, R15.1–R15.5, R16.1–R16.4, R18.1–R18.8, R19.1–R19.7, R20.1–R20.4, R21.1–R21.3, R22.1–R22.5, R23.1–R23.4, R24.1–R24.6, R25.1–R25.5, R26.1–R26.4, R27.1–R27.3, R28.1–R28.2, R29.1–R29.3, R30.1–R30.2, R31.1–R31.5, R32.1–R32.7, R33.1–R33.5, R34.1–R34.5, R35.1–R35.6, R39.1–R39.5, R40.1–R40.3, R41.1–R41.5, R43.1–R43.11, R44.1–R44.2, R45.1–R45.2, R47.1, R48.1–R48.2, R49.2 |
 | `partial` | 38 | R1.6, R6.6, R7.9–R7.10, R9.1–R9.3, R11.10, R17.1–R17.2, R28.3, R35.7, R36.1–R36.3, R37.1–R37.3, R38.1–R38.5, R41.6, R42.1–R42.4, R44.3–R44.7, R46.1–R46.2, R49.1, R49.3–R49.4 |
 | `planned` | 6 | R12.1, R13.1, R14.1, R22.6, R24.7, R32.8 |
-| **Total** | **244** | |
+| **Total** | **248** | |
 
 ### Partial Requirements — Acceptance Gaps
 
@@ -670,9 +680,9 @@ Where an NFR quality *target* is realised by a concrete functional *behavior*, t
 | Domain | Count | Requirements |
 |--------|-------|-------------|
 | Task Management | 61 | R1.1–R1.10, R2.1–R2.8, R3.1–R3.3, R4.1–R4.5, R5.1, R6.1–R6.7, R20.1–R20.4, R21.1–R21.3, R23.1–R23.4, R27.1–R27.3, R29.1–R29.3, R31.1–R31.5, R46.1–R46.2, R47.1, R48.1–R48.2 |
-| Scheduler | 98 | R10.1–R10.5, R11.1–R11.22, R18.1–R18.8, R19.1–R19.7, R26.1–R26.4, R32.1–R32.8, R33.1–R33.5, R34.1–R34.5, R35.1–R35.7, R36.1–R36.3, R37.1–R37.3, R39.1–R39.5, R40.1–R40.3, R41.1–R41.6, R44.1–R44.7 |
+| Scheduler | 100 | R10.1–R10.5, R11.1–R11.22, R18.1–R18.8, R19.1–R19.7, R26.1–R26.4, R32.1–R32.8, R33.1–R33.5, R34.1–R34.5, R35.1–R35.7, R36.1–R36.3, R37.1–R37.3, R39.1–R39.5, R40.1–R40.3, R41.1–R41.6, R44.1–R44.7, R50.1, R50.4 |
 | Calendar Sync | 23 | R7.1–R7.10, R30.1–R30.2, R43.1–R43.11 |
-| Calendar Views | 12 | R8.1–R8.9, R9.1–R9.3 |
+| Calendar Views | 14 | R8.1–R8.9, R9.1–R9.3, R50.2, R50.3 |
 | AI | 5 | R15.1–R15.5 |
 | Auth | 4 | R16.1–R16.4 |
 | MCP | 2 | R17.1–R17.2 |
@@ -681,7 +691,7 @@ Where an NFR quality *target* is realised by a concrete functional *behavior*, t
 | Weather | 10 | R25.1–R25.5, R38.1–R38.5 |
 | Admin | 13 | R28.1–R28.3, R42.1–R42.4, R45.1–R45.2, R49.1–R49.4 |
 | Reporting | 3 | R12.1, R13.1, R14.1 |
-| **Total** | **244** | |
+| **Total** | **248** | |
 
 ---
 
