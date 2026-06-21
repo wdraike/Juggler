@@ -1153,36 +1153,40 @@ const { REASON_CODES } = require('../../shared/scheduler/reasonCodes');
 describe('R11.16 — legacy reason-code scenarios (999.782)', () => {
 
   // ──────────────────────────────────────────────────────────────
-  // TPC_BUDGET: un-triggerable via the unifiedSchedule harness.
+  // TPC_BUDGET: a recurring instance the cycle has no time-budget for is flagged
+  // `_tpcBudgetUnscheduled` upstream (runSchedule TPC reconciler, runSchedule.js:925/
+  // 1203). The scheduler routes it to unplaced with the tpc_budget reason and does
+  // NOT place it on the calendar (unifiedScheduleV2.js:1583).
   //
-  // Evidence (PRODUCTION CODE BUG — BLOCK finding, do NOT commit
-  // the scheduler without fixing):
-  //
-  // The TPC_BUDGET emission at unifiedScheduleV2.js:1578–1582 runs
-  // inside the `items.forEach` loop that starts at line 1555.  The
-  // `unplaced` array is declared with `var unplaced = []` at line
-  // 1650, AFTER the forEach loop closes at line 1617.
-  //
-  // In JavaScript, `var` is hoisted — the variable is in scope from
-  // the function top — but its VALUE is `undefined` until the
-  // assignment at line 1650 runs.  The `items.forEach` callback
-  // executes synchronously before line 1650, so `unplaced` is
-  // `undefined` when line 1581 calls `unplaced.push(item)`.  This
-  // throws `TypeError: Cannot read properties of undefined (reading
-  // 'push')`, crashing the entire scheduler call.
-  //
-  // The bug is latent only because `_tpcBudgetUnscheduled` is set
-  // by runSchedule.js's DB-layer reconciler, which filters these
-  // tasks OUT before they reach unifiedSchedule in the production
-  // path (runSchedule.js supplies them as "already-unscheduled" rows,
-  // not as live items for the scheduler).  A direct call with the
-  // flag set crashes immediately.
-  //
-  // Fix required in production code (out of scope for this test-only
-  // leg): move `var unplaced = []` to before the `items.forEach`
-  // loop (before line 1555) so the push at line 1581 has a target.
+  // Regression for 999.801: this branch pushed to `unplaced` from inside the
+  // immovables loop, but `var unplaced = []` was declared AFTER that loop — hoisting
+  // left it undefined, so the push threw `TypeError` and crashed the whole scheduler
+  // call. The declaration is now hoisted above the loop. Before the fix this test
+  // throws (RED); after, it asserts the reason (GREEN) — that is the anti-tautology
+  // proof (the input flag is mapped to the output reason by the code under test).
   // ──────────────────────────────────────────────────────────────
-  test.todo('TPC_BUDGET: blocked by production code defect — unplaced array declared AFTER items.forEach loop (unifiedScheduleV2.js:1650 vs :1555); calling unifiedSchedule with _tpcBudgetUnscheduled=true crashes with TypeError. Fix: move var unplaced=[] to before line 1555. See inline evidence above.');
+  test('TPC_BUDGET: a TPC-budget-unscheduled instance → unplaced with tpc_budget reason, not placed (999.801)', () => {
+    var r = schedule([
+      task({
+        id: 'tpc_over',
+        text: 'Recurring instance over the cycle TPC budget',
+        recurring: true,
+        generated: true,
+        placementMode: 'anytime',
+        when: 'morning',
+        dur: 30,
+        date: TODAY,
+        _tpcBudgetUnscheduled: true,
+      }),
+    ], 300); // 5:00 AM — morning window fully ahead, so only the TPC flag keeps it unplaced
+
+    var u = (r.unplaced || []).find(function(t) { return t.id === 'tpc_over'; });
+    expect(u).toBeDefined();
+    // The scheduler (not the test) maps the budget flag to the reason code.
+    expect(u._unplacedReason).toBe(REASON_CODES.TPC_BUDGET);
+    // Budget-unscheduled instances are surfaced in the list but NOT on the calendar.
+    expect(isPlaced(r, 'tpc_over')).toBe(false);
+  });
 
   // ──────────────────────────────────────────────────────────────
   // PARTIAL_SPLIT: a split task that can only partially fit in the

@@ -1552,6 +1552,11 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   // Items flagged isMissedPreferredTime are collected here; handled after the
   // retry pass (below) without entering the placement queue or the dual-place path.
   var missedPreferredTimeItems = [];
+  // Unplaced accumulator — declared BEFORE this loop because the TPC-budget branch
+  // below (item.task._tpcBudgetUnscheduled) pushes to it. Previously `var unplaced`
+  // was declared after this loop, so hoisting left it undefined here and the push
+  // threw a TypeError, crashing the scheduler on that path (999.801).
+  var unplaced = [];
   items.forEach(function(item) {
     // Past-anchored recurring OR fixed/ingested: skip the queue entirely — never
     // re-place a past commitment forward into the future. Routed to the dedicated
@@ -1647,7 +1652,8 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   // operations (~600k) — well under our scheduler latency budget. A
   // min-heap would reduce this to N² log N vs N log N, but correctness
   // takes priority over micro-optimization at this stage.
-  var unplaced = [];
+  // (`unplaced` is declared above the immovables loop — it already collected any
+  // TPC-budget-unscheduled items; do NOT re-initialize it here or those are lost.)
   var slackByTaskId = {};
   var queuePlacedCount = 0; // for periodic snapshots in debug mode
   // placedById tracks every placement — immovables from Phase 0 plus every
