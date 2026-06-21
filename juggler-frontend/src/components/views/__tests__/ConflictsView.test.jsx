@@ -500,3 +500,50 @@ describe('ConflictsView — Data Issues warnings (no blank rows)', () => {
     expect(blankStyledLeaves).toBe(0);
   });
 });
+
+// ── R50.3 (999.796): a backend-overdue item (fixed/ingested event past its date, ──
+// overdue=1, NO deadline) belongs in the "Overdue" action list — NOT the
+// informational "Past Scheduled Date" bucket (which is for floating no-deadline
+// tasks the scheduler rolls forward).
+describe('ConflictsView — R50.3 overdue bucketing (past fixed event)', () => {
+  function openOverdue() {
+    localStorage.setItem('juggler-issues-collapsed', JSON.stringify({
+      actionGroup: false, infoGroup: false, overdue: false, unplaced: true,
+      dataIssues: true, stale: false, blocked: true, unscheduled: true
+    }));
+  }
+  afterEach(() => { localStorage.clear(); });
+
+  function sectionHeader(container, title) {
+    return Array.prototype.find.call(container.querySelectorAll('span'),
+      function(s) { return s.textContent === title; });
+  }
+
+  it('past fixed event with overdue=1 (no deadline) → Overdue badge count ≥ 1', () => {
+    openOverdue();
+    var pastFixed = { id: 'flight', text: 'Nathan Flies In', overdue: 1,
+      date: '2026-06-15', deadline: null, placementMode: 'fixed', taskType: 'task' };
+    var { container } = render(<ConflictsView {...makeProps({ allTasks: [pastFixed] })} />);
+
+    // It renders in the Overdue section (TaskCard mock prints the task text).
+    expect(screen.getByText('Nathan Flies In')).toBeInTheDocument();
+    // The Overdue header carries a non-zero count badge (its sibling).
+    var hdr = sectionHeader(container, 'Overdue');
+    expect(hdr).toBeTruthy();
+    var badge = hdr.nextElementSibling;
+    expect(badge && badge.textContent).toBe('1');
+    // SELF-MUTATION: drop the `if (t.overdue) isOverdue = true` line → the task
+    // falls to "Past Scheduled Date" and the Overdue badge reads (0) → FAILS.
+  });
+
+  it('floating no-deadline past task (overdue=0) stays OUT of Overdue', () => {
+    openOverdue();
+    var floating = { id: 'tidy', text: 'Tidy Garage', overdue: 0,
+      date: '2026-06-15', deadline: null, placementMode: 'anytime', taskType: 'task' };
+    var { container } = render(<ConflictsView {...makeProps({ allTasks: [floating] })} />);
+    // Overdue badge stays (0) — a floating task is not overdue (999.671 preserved).
+    var hdr = sectionHeader(container, 'Overdue');
+    var badge = hdr.nextElementSibling;
+    expect(badge && badge.textContent).toBe('(0)');
+  });
+});

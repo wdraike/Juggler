@@ -65,14 +65,23 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
       // Generated/expanded recurring instances are managed by the scheduler
       if (t.generated) return;
 
-      // True overdue: explicit due date in the past
+      // True overdue: an explicit due date in the past, OR the backend overdue
+      // flag. R50.3 (999.796): a fixed/ingested event past its scheduled date — or
+      // a past recurring instance — carries overdue=1 even with NO deadline; it
+      // belongs in the Overdue action list, not the informational "Past Scheduled
+      // Date" bucket below.
+      var isOverdue = false;
       if (t.deadline) {
         var dd = parseDate(t.deadline);
-        if (dd && dd < today) overdue.push(t);
+        if (dd && dd < today) isOverdue = true;
       }
+      if (t.overdue) isOverdue = true;
 
-      // Past scheduled date: no due date, but scheduled date is in the past
-      if (!t.deadline && t.date && t.date !== 'TBD') {
+      if (isOverdue) {
+        overdue.push(t);
+      } else if (!t.deadline && t.date && t.date !== 'TBD') {
+        // Past scheduled date (informational): no deadline, not overdue, date past.
+        // A floating task the scheduler will roll forward — not actually late.
         var td = parseDate(t.date);
         if (td && td < today) stale.push(t);
       }
@@ -90,8 +99,8 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
   var actionSections = [
     {
       key: 'overdue', title: 'Overdue', tasks: issues.overdue, color: theme.redText,
-      tip: 'Tasks past their due date that aren\'t done',
-      help: 'These tasks are past their due date and still open. Mark them done, reschedule to a new date, or cancel them.'
+      tip: 'Tasks past their due date/time that aren\'t done',
+      help: 'These tasks are past their due date/time and still open — including calendar events and recurring occurrences whose date has already passed. They stay pinned on the calendar at their original time, flagged overdue. Mark them done, reschedule to a new date, or cancel them.'
     },
     {
       key: 'unplaced', title: 'Unplaced', tasks: unplaced || [], color: theme.amberText,
