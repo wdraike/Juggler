@@ -88,4 +88,38 @@ describe('computeIsPastDue — BUG-671 floating-exclusion gate', function() {
     expect(computeIsPastDue(t, null, TIME_INFO)).toBeFalsy();
   });
 
+  // ── R50.0: a fixed / ingested-calendar event's scheduled_at IS its hard due ──
+  // date/time, so it is past-due once that time passes — even with NO deadline
+  // and overdue=0 (the exact "Nathan Flies In" case). This is the gap R50 closes;
+  // before the fix a fixed event fell through to unplaced/dropped.
+
+  // 9. fixed (no deadline, overdue:0) + past date → truthy (was the R50 bug)
+  it('R50: fixed (no deadline, overdue:0) + past date → truthy', function() {
+    var t = task({ placementMode: 'fixed', date: '2026-06-10', time: '11:00 AM' });
+    var scheduledMins = 11 * 60; // 660
+    expect(computeIsPastDue(t, scheduledMins, TIME_INFO)).toBeTruthy();
+  });
+
+  // 10. fixed + today, time already passed → truthy (hard commitment, time gone)
+  it('R50: fixed + today before nowMins → truthy', function() {
+    var t = task({ placementMode: 'fixed', date: '2026-06-16', time: '09:00 AM' });
+    var scheduledMins = 540; // 9 AM < nowMins=600
+    expect(computeIsPastDue(t, scheduledMins, TIME_INFO)).toBeTruthy();
+  });
+
+  // 11. fixed + FUTURE date → falsy (AC4 — future fixed event is NOT overdue)
+  it('R50: fixed + future date → falsy', function() {
+    var t = task({ placementMode: 'fixed', date: '2026-06-20', time: '11:00 AM' });
+    var scheduledMins = 660;
+    expect(computeIsPastDue(t, scheduledMins, TIME_INFO)).toBeFalsy();
+  });
+
+  // 12. NON-fixed floating + past date stays falsy — the fix must NOT leak to
+  //     floating tasks (999.671 preserved; placementMode 'anytime', no deadline).
+  it('R50: anytime floating (no deadline) + past date → still falsy', function() {
+    var t = task({ placementMode: 'anytime', date: '2026-06-10', time: '11:00 AM' });
+    var scheduledMins = 660;
+    expect(computeIsPastDue(t, scheduledMins, TIME_INFO)).toBeFalsy();
+  });
+
 });

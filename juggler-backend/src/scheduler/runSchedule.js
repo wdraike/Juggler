@@ -102,7 +102,13 @@ var getBlocksForDate = timeBlockHelpers.getBlocksForDate;
  * @returns {boolean}
  */
 function computeIsPastDue(t, scheduledMins, timeInfo) {
-  return (t.deadline || t.overdue) &&
+  // R50.0: a fixed / ingested-calendar event's scheduled_at IS its hard due
+  // date/time — it becomes past-due the moment that time passes, even with no
+  // explicit deadline. So `fixed` is a hard commitment alongside deadline/overdue.
+  // Floating tasks (no deadline, not fixed, overdue=0) stay excluded per 999.671.
+  var hasHardCommitment = t.deadline || t.overdue ||
+    t.placementMode === PLACEMENT_MODES.FIXED;
+  return hasHardCommitment &&
     scheduledMins != null &&
     t.date != null &&
     t.date !== 'TBD' &&
@@ -1918,7 +1924,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var dur = t.dur || 30;
     // Bug 2 fix: for overdue today-tasks whose original time has passed, snap to last
     // time-block boundary so they appear at the latest slot rather than buried in the past.
-    if (isOverdueTask && t.date === timeInfo.todayKey && startMin < timeInfo.nowMins) {
+    // R50: NEVER snap a FIXED event — it is immovable and must stay at its anchor time
+    // even when overdue (#67598/#67654); the snap is a floating/flex affordance only.
+    if (isOverdueTask && t.placementMode !== PLACEMENT_MODES.FIXED && t.date === timeInfo.todayKey && startMin < timeInfo.nowMins) {
       var dateObj = parseDate(t.date);
       var dayName = dateObj ? DAY_NAMES[dateObj.getDay()] : null;
       var blocks = (dayName && cfg.timeBlocks && cfg.timeBlocks[dayName]) ? cfg.timeBlocks[dayName] : null;
@@ -2303,7 +2311,9 @@ async function getSchedulePlacements(userId, options) {
       var dur = t.dur || 30;
       // Bug 2 fix: for overdue today-tasks whose original time has passed, snap to last
       // time-block boundary so they appear at the latest slot rather than buried in the past.
-      if (isOverdueTask && t.date === timeInfo.todayKey && startMin < timeInfo.nowMins) {
+      // R50: NEVER snap a FIXED event — immovable, must stay at its anchor time even when
+      // overdue (#67598/#67654); the snap is a floating/flex affordance only.
+      if (isOverdueTask && t.placementMode !== PLACEMENT_MODES.FIXED && t.date === timeInfo.todayKey && startMin < timeInfo.nowMins) {
         var dateObj2 = parseDate(t.date);
         var dayName2 = dateObj2 ? DAY_NAMES[dateObj2.getDay()] : null;
         var blocks2 = (dayName2 && DEFAULT_TIME_BLOCKS[dayName2]) ? DEFAULT_TIME_BLOCKS[dayName2] : null;
