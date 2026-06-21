@@ -716,7 +716,10 @@ function tryPlaceAtTime(item, dates, dayOcc, dayPlaced, dayPlacements, cfg, env)
       return p.locked && p.start < start + item.dur && p.start + p.dur > start;
     });
     if (existingFixed.length > 0) {
-      warnings.push({ type: 'fixedOverlap', taskIds: [item.id].concat(existingFixed.map(function(p) { return p.task && p.task.id; })) });
+      // ConflictsView (Data Issues) renders the pair "w.taskA and w.taskB on w.dateKey".
+      // Emit those fields (not just taskIds) so the row shows names + the day, not blanks (999.792).
+      var overlapIds = [item.id].concat(existingFixed.map(function(p) { return p.task && p.task.id; }));
+      warnings.push({ type: 'fixedOverlap', taskIds: overlapIds, taskA: item.id, taskB: overlapIds[1], dateKey: item.anchorDate });
     }
   }
 
@@ -1525,7 +1528,9 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
         if (!dep || !dep.anchorDate) return;
         // Backwards: item must be after dep but item's date ≤ dep's date.
         if (item.anchorDate < dep.anchorDate) {
-          warnings.push({ type: 'backwardsDep', taskId: item.id, depId: depId });
+          // ConflictsView renders the dates "(w.taskDate)" and "(w.depDate)"; emit them so
+          // the Data Issues row shows the conflicting dates, not blanks (999.792).
+          warnings.push({ type: 'backwardsDep', taskId: item.id, depId: depId, taskDate: item.anchorDate, depDate: dep.anchorDate });
         }
       });
     });

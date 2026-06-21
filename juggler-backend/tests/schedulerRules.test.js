@@ -1568,6 +1568,14 @@ describe('Scheduler Rules', () => {
       expect(Array.isArray(result.warnings)).toBe(true);
       var backwardsWarnings = result.warnings.filter(function(w) { return w.type === 'backwardsDep'; });
       expect(backwardsWarnings.length).toBeGreaterThan(0);
+      // 999.792: ConflictsView renders (w.taskDate) and (w.depDate). The backend must emit
+      // them or the Data Issues row shows blank dates.
+      var bw = backwardsWarnings[0];
+      expect(typeof bw.taskDate).toBe('string');
+      expect(typeof bw.depDate).toBe('string');
+      expect(bw.taskDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(bw.depDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(bw.taskDate < bw.depDate).toBe(true); // backwards: task pinned before its dependency
     });
   });
 

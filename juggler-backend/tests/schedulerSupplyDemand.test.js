@@ -196,6 +196,12 @@ describe('Category B: Overlapping Fixed & Rigid Items', () => {
     // Should have fixedOverlap warning
     const warning = (result.warnings || []).find(w => w.type === 'fixedOverlap');
     expect(warning).toBeDefined();
+    // 999.792: ConflictsView renders the pair (w.taskA "and" w.taskB) "on {w.dateKey}".
+    // The backend must emit these fields, else the Data Issues row shows blank names + blank date.
+    expect(warning.taskA).toBeDefined();
+    expect(warning.taskB).toBeDefined();
+    expect([warning.taskA, warning.taskB].sort()).toEqual(['mtg1', 'mtg2']);
+    expect(warning.dateKey).toBe(TODAY);
   });
 
   test('B2: Three rigid recurringTasks in same 30m block — overflow with _conflict', () => {
