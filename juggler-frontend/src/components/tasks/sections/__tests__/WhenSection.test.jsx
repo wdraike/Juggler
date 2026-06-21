@@ -795,12 +795,16 @@ it('Allow split checkbox present for non-recurring non-marker task', () => {
   expect(screen.getByRole('checkbox').checked).toBe(false);
 });
 
-it('Allow split checkbox not shown for recurring tasks', () => {
+it('Allow split checkbox IS shown for recurring tasks (999.547)', () => {
+  // 999.547 intentionally exposed the split toggle for recurring tasks so a
+  // recurring task can be chunked within its interval (WhenSection.jsx:819,823 —
+  // gated on !marker only, not !isRecurring). The recurring variant carries a
+  // clarifying label.
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
     recurring={true} recurType="weekly" marker={false} split={false}
     collapse={{ when_recurrence: false, when_constraints: true }}
   />);
-  expect(screen.queryByText(/Allow split/)).not.toBeInTheDocument();
+  expect(screen.getByText(/Allow split \(chunks complete before the next interval\)/)).toBeInTheDocument();
 });
 
 it('Allow split checkbox not shown for marker tasks', () => {

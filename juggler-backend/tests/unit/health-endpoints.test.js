@@ -1,8 +1,10 @@
 /**
  * Health endpoint tests — R42.1–R42.4
  *
- * R42.1: GET /api/health/immediate returns 200 with { status: "ok", service: "juggler-backend" }
- * R42.2: GET /api/health/ returns full health with DB ping, scheduler timezone info, server UTC
+ * R42.1: GET /health/immediate (un-prefixed, public LB probe) returns 200 with { status: "ok", service: "juggler-backend" }
+ * R42.2: GET /health/ (un-prefixed, public) returns full health with DB ping, scheduler timezone info, server UTC
+ *        NOTE: /api/health/* is the SAME router re-mounted behind authenticateJWT (app.js:312) for the
+ *        authenticated frontend apiClient (/api/health/detailed); the public probe path is un-prefixed /health/*.
  * R42.3: GET /api/health/detailed returns per-service health with rollup (auth required)
  * R42.4: GET /api/feature-events/ returns feature event analytics (service-key auth)
  *
@@ -230,26 +232,26 @@ beforeEach(() => {
 
 // ── R42.1: GET /api/health/immediate ──────────────────────────────────────────
 
-describe('R42.1 — GET /api/health/immediate (no auth, no DB)', () => {
+describe('R42.1 — GET /health/immediate (no auth, no DB)', () => {
   test('returns 200 with status ok and service name', async () => {
-    const res = await supertest(app).get('/api/health/immediate');
-    expect(res.status).toBe(401);
+    const res = await supertest(app).get('/health/immediate');
+    expect(res.status).toBe(200);
     expect(res.body).toEqual({ status: 'ok', service: 'juggler-backend' });
   });
 
   test('returns JSON content type', async () => {
-    const res = await supertest(app).get('/api/health/immediate');
+    const res = await supertest(app).get('/health/immediate');
     expect(res.headers['content-type']).toMatch(/application\/json/);
   });
 
   test('does not require any auth header', async () => {
-    const res = await supertest(app).get('/api/health/immediate');
-    expect(res.status).toBe(401);
+    const res = await supertest(app).get('/health/immediate');
+    expect(res.status).toBe(200);
   });
 
   test('does not touch the database (no DB calls)', async () => {
     const dbSpy = jest.spyOn(mockDb, 'raw');
-    await supertest(app).get('/api/health/immediate');
+    await supertest(app).get('/health/immediate');
     expect(dbSpy).not.toHaveBeenCalled();
     dbSpy.mockRestore();
   });
@@ -257,15 +259,15 @@ describe('R42.1 — GET /api/health/immediate (no auth, no DB)', () => {
 
 // ── R42.2: GET /api/health/ ───────────────────────────────────────────────────
 
-describe('R42.2 — GET /api/health/ (no auth, DB ping)', () => {
+describe('R42.2 — GET /health/ (no auth, DB ping)', () => {
   test('returns 200 with status, db, serverUtc, schedulerTodayKey, schedulerNowMins when DB is up', async () => {
     // db.raw('SELECT 1') succeeds — mockDb.raw returns the SQL string, not a promise.
     // The health route calls db.raw('SELECT 1') directly, not through the chain.
     // We need to mock db.raw to resolve successfully.
     mockDb.raw = jest.fn(() => Promise.resolve([{ 1: 1 }]));
 
-    const res = await supertest(app).get('/api/health/');
-    expect(res.status).toBe(401);
+    const res = await supertest(app).get('/health/');
+    expect(res.status).toBe(200);
     expect(res.body.status).toBe('ok');
     expect(res.body.db).toBe('connected');
     expect(res.body.service).toBe('juggler-backend');
@@ -277,8 +279,8 @@ describe('R42.2 — GET /api/health/ (no auth, DB ping)', () => {
   test('returns 503 with status error and db disconnected when DB is down', async () => {
     mockDb.raw = jest.fn(() => Promise.reject(new Error('Connection refused')));
 
-    const res = await supertest(app).get('/api/health/');
-    expect(res.status).toBe(401);
+    const res = await supertest(app).get('/health/');
+    expect(res.status).toBe(503);
     expect(res.body.status).toBe('error');
     expect(res.body.db).toBe('disconnected');
     expect(res.body.error).toBeDefined();
@@ -286,19 +288,19 @@ describe('R42.2 — GET /api/health/ (no auth, DB ping)', () => {
 
   test('does not require auth header', async () => {
     mockDb.raw = jest.fn(() => Promise.resolve([{ 1: 1 }]));
-    const res = await supertest(app).get('/api/health/');
-    expect(res.status).toBe(401);
+    const res = await supertest(app).get('/health/');
+    expect(res.status).toBe(200);
   });
 
   test('schedulerTodayKey is in YYYY-MM-DD format', async () => {
     mockDb.raw = jest.fn(() => Promise.resolve([{ 1: 1 }]));
-    const res = await supertest(app).get('/api/health/');
+    const res = await supertest(app).get('/health/');
     expect(res.body.schedulerTodayKey).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   test('schedulerNowMins is a non-negative integer', async () => {
     mockDb.raw = jest.fn(() => Promise.resolve([{ 1: 1 }]));
-    const res = await supertest(app).get('/api/health/');
+    const res = await supertest(app).get('/health/');
     expect(Number.isInteger(res.body.schedulerNowMins)).toBe(true);
     expect(res.body.schedulerNowMins).toBeGreaterThanOrEqual(0);
     expect(res.body.schedulerNowMins).toBeLessThan(1440);

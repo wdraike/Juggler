@@ -67,8 +67,7 @@ var { PLACEMENT_MODES } = require('../lib/placementModes');
 // Canonical reason-code enum — eliminates magic strings at every _unplacedReason
 // assignment site. String VALUES are byte-identical to what tests pin; only the
 // call sites are updated. See shared/scheduler/reasonCodes.js for the full taxonomy.
-var reasonCodesMod = require('../../../shared/scheduler/reasonCodes');
-var REASON_CODES = reasonCodesMod.REASON_CODES;
+var { REASON_CODES } = require('../../../shared/scheduler/reasonCodes');
 
 // H6 W1: the pure ordering/occupancy primitives now live in the scheduler domain
 // core. unifiedScheduleV2 DELEGATES to them so the algorithm has a single source
