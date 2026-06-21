@@ -1725,6 +1725,31 @@ async function runScheduleAndPersist(userId, _retries, options) {
     pendingUpdates.push({ id: r.id, dbUpdate: { overdue: 0, updated_at: _runScheduleCommand.clockNow() } });
   });
 
+  // 8.5 — R50.1/R50.2 (999.796): PERSIST overdue=1 for a past-due FIXED/ingested
+  // event. The placement loop skips fixed tasks (user-anchored) and Phase 8/9
+  // early-return them, so without this the DB keeps overdue=0/unscheduled and the
+  // frontend shows the late event in the Unscheduled lane / "Past Scheduled Date"
+  // instead of on its day flagged overdue. (computeIsPastDue treats a fixed event's
+  // scheduled_at as its hard due date.)
+  allTasks.forEach(function(t) {
+    if (t.generated || t.taskType === 'recurring_template') return;
+    if (t.recurring) return; // recurring handled by their own lifecycle (Phase 9)
+    if (t.placementMode !== PLACEMENT_MODES.FIXED) return;
+    var stFx = statuses[t.id] || '';
+    if (stFx === 'done' || stFx === 'cancel' || stFx === 'skip' || stFx === 'pause' || stFx === 'disabled' || stFx === 'missed') return;
+    var rawFx = rawRowById[t.id];
+    if (!rawFx) return;
+    var schedMinsFx = t.time ? parseTimeToMinutes(t.time) : null;
+    if (!computeIsPastDue(t, schedMinsFx, timeInfo)) return; // not past its due date/time
+    var fxUpd = {};
+    if (!rawFx.overdue) fxUpd.overdue = 1;
+    if (rawFx.unscheduled) fxUpd.unscheduled = 0;
+    if (Object.keys(fxUpd).length > 0) {
+      fxUpd.updated_at = _runScheduleCommand.clockNow();
+      pendingUpdates.push({ id: t.id, dbUpdate: fxUpd });
+    }
+  });
+
   // 9. Move remaining past-dated tasks to today
   //    Past recurringTasks missed their day — mark as 'missed' (juggler-cal-history Plan C; was 'skip').
   //    Past non-recurringTasks that weren't placed — move date to today.
