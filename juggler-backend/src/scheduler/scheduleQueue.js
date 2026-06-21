@@ -309,7 +309,11 @@ async function claimAndRun(userId) {
     try { getSseEmitter().emit(userId, 'schedule:changed', {}); } catch (_e) { /* non-fatal */ }
     return { claimed: true, success: true };
   } catch (err) {
-    // On failure, release the claim so someone else can retry
+    // On failure, release the claim so someone else can retry.
+    // Log the real error server-side (999.683: technical detail lives in logs;
+    // the health popup shows plain language only). Without this the error went
+    // ONLY to the in-memory _lastError and was never recorded anywhere.
+    logger.error('scheduler run failed (claimAndRun)', { userId: userId, error: err.message, stack: err.stack });
     _lastError = { timestamp: Date.now(), message: err.message };
     await releaseClaim(userId, INSTANCE_ID);
     return { claimed: true, success: false, error: err.message };
@@ -491,6 +495,8 @@ async function runScheduleForPush(userId) {
     return result;
   } catch (e) {
     _running.delete(userId);
+    // Record the real error server-side (999.683: detail in logs, not the popup).
+    logger.error('scheduler run failed (runScheduleForPush)', { userId: userId, error: e.message, stack: e.stack });
     _lastError = { timestamp: Date.now(), message: e.message };
     return { claimed: false, reason: 'exception', error: e.message };
   }

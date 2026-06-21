@@ -4,6 +4,19 @@ const db = require('../db');
 const { authenticateJWT } = require('../middleware/jwt-auth');
 const { getLastError } = require('../scheduler/scheduleQueue');
 const { roundCoord } = require('../controllers/weather.controller');
+const { createLogger } = require('@raike/lib-logger');
+const logger = createLogger('health.routes');
+
+// 999.683 / leg fixy-health-copy: the health popup is user-facing — it shows
+// plain language only. Raw error text / SQL / internal table names go to the
+// server log, never to detail.*. These are the friendly strings the popup shows.
+const FRIENDLY = {
+  schedulerError: 'The scheduler hit a temporary problem and is retrying. If it persists, reload the app.',
+  schedulerUnavailable: 'Scheduler status is unavailable right now.',
+  syncError: 'Calendar sync is having trouble right now.',
+  syncRetry: 'Calendar sync is retrying after a temporary hiccup.',
+  syncUnavailable: 'Sync status is unavailable right now.'
+};
 
 // Mount-level auth guard: apply JWT auth to all routes except public endpoints
 router.use((req, res, next) => {
@@ -111,20 +124,23 @@ router.get('/detailed', async (req, res) => {
       const recentError = lastErr && (Date.now() - lastErr.timestamp) < TEN_MIN_MS;
 
       if (stuckCount > 0) {
+        // Internal table name + count stay in the log; user sees plain language.
+        logger.warn('scheduler health: stuck claims detected', { stuckCount: stuckCount });
         healthStatus.services.scheduler = 'error';
-        healthStatus.detail.scheduler = stuckCount + ' stuck claim(s) in schedule_queue';
+        healthStatus.detail.scheduler = FRIENDLY.schedulerError;
       } else if (recentError) {
+        // 999.683: the raw message never reaches the popup. It was already logged
+        // at the throw site (scheduleQueue claimAndRun/runScheduleForPush catch).
         healthStatus.services.scheduler = 'error';
-        // 999.683: do NOT leak the raw error message to the user-facing health
-        // popup — surface plain language only (the technical detail is in logs).
-        healthStatus.detail.scheduler = 'A recent scheduler error occurred';
+        healthStatus.detail.scheduler = FRIENDLY.schedulerError;
       } else {
         healthStatus.services.scheduler = 'operational';
       }
     } catch (error) {
+      // The health probe itself failed — log the real reason, show plain language.
+      logger.error('scheduler health probe failed', { error: error.message, stack: error.stack });
       healthStatus.services.scheduler = 'error';
-      // 999.683: plain language, not error.message (no technical leak in the popup).
-      healthStatus.detail.scheduler = 'Scheduler status unavailable';
+      healthStatus.detail.scheduler = FRIENDLY.schedulerUnavailable;
     }
   } else {
     healthStatus.services.scheduler = 'unknown';
@@ -197,10 +213,17 @@ router.get('/detailed', async (req, res) => {
           healthStatus.services.sync = 'degraded';
         }
       }
+      // Plain-language detail for the popup (the per-provider counts above are the
+      // structured data; this is the human sentence).
+      if (healthStatus.services.sync === 'error') healthStatus.detail.sync = FRIENDLY.syncError;
+      else if (healthStatus.services.sync === 'degraded') healthStatus.detail.sync = FRIENDLY.syncRetry;
       if (!healthStatus.services.sync) healthStatus.services.sync = 'operational';
     } catch (error) {
+      // Was leaking the raw error/SQL into the popup (detail.sync = error.message)
+      // — the 999.683 leak, fixed for scheduler but missed here. Log it; show plain.
+      logger.error('sync health probe failed', { error: error.message, stack: error.stack });
       healthStatus.services.sync = 'unknown';
-      healthStatus.detail.sync = error.message;
+      healthStatus.detail.sync = FRIENDLY.syncUnavailable;
     }
   } else {
     healthStatus.services.sync = 'unknown';
@@ -246,8 +269,10 @@ router.get('/detailed', async (req, res) => {
         }
       }
     } catch (error) {
+      // Same leak class as sync/scheduler: keep raw error/SQL out of the popup.
+      logger.error('weather health probe failed', { error: error.message, stack: error.stack });
       healthStatus.services.weather = 'unknown';
-      healthStatus.detail.weather = error.message;
+      healthStatus.detail.weather = 'Weather status is unavailable right now.';
     }
   } else {
     healthStatus.services.weather = 'unknown';

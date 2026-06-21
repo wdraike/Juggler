@@ -411,6 +411,60 @@ describe('R42.3 — GET /api/health/detailed (auth required, per-service health)
   });
 });
 
+// ── leg fixy-health-copy: plain-English health detail (no technical leak) ──────
+// Regression for #1: the popup showed a useless generic ("A recent scheduler
+// error occurred"), leaked an internal table name ("N stuck claim(s) in
+// schedule_queue"), and leaked raw error/SQL (detail.sync = error.message).
+// All detail.* shown to the user must be plain language; technical text → logs.
+describe('health detail is plain-English (leg fixy-health-copy)', () => {
+  const scheduleQueueMock = require('../../src/scheduler/scheduleQueue');
+  afterEach(() => { scheduleQueueMock.getLastError.mockReturnValue(null); });
+
+  test('stuck-claim scheduler error: friendly text, no internal table name', async () => {
+    mockDb.raw = jest.fn(() => Promise.resolve([{ 1: 1 }]));
+    resolveQueue.push({ cnt: 3 });                         // schedule_queue stuck count
+    resolveQueue.push({ id: TEST_USER.id, gcal_refresh_token: null, msft_cal_refresh_token: null, apple_cal_password: null });
+    resolveQueue.push([]);                                 // cal_sync_ledger
+    resolveQueue.push(null);                               // locations
+
+    const res = await supertest(app).get('/api/health/detailed').set('Authorization', `Bearer ${VALID_TOKEN}`);
+    expect(res.body.services.scheduler).toBe('error');
+    expect(res.body.detail.scheduler).toBe('The scheduler hit a temporary problem and is retrying. If it persists, reload the app.');
+    expect(res.body.detail.scheduler).not.toMatch(/schedule_queue|claim/i);
+  });
+
+  test('recent scheduler error: friendly text, raw error/SQL NOT leaked', async () => {
+    scheduleQueueMock.getLastError.mockReturnValue({
+      timestamp: Date.now(),
+      message: "update `task_masters` set `status` = 'done' ... Check constraint 'chk_task_masters_scheduled_at_for_terminal' is violated"
+    });
+    mockDb.raw = jest.fn(() => Promise.resolve([{ 1: 1 }]));
+    resolveQueue.push({ cnt: 0 });
+    resolveQueue.push({ id: TEST_USER.id, gcal_refresh_token: null, msft_cal_refresh_token: null, apple_cal_password: null });
+    resolveQueue.push([]);
+    resolveQueue.push(null);
+
+    const res = await supertest(app).get('/api/health/detailed').set('Authorization', `Bearer ${VALID_TOKEN}`);
+    expect(res.body.services.scheduler).toBe('error');
+    expect(res.body.detail.scheduler).toBe('The scheduler hit a temporary problem and is retrying. If it persists, reload the app.');
+    // The exact leak this fixes: no SQL / table / constraint text in the popup.
+    expect(res.body.detail.scheduler).not.toMatch(/task_masters|constraint|update|chk_/i);
+  });
+
+  test('sync permanent error: friendly text, raw error_detail NOT leaked', async () => {
+    mockDb.raw = jest.fn(() => Promise.resolve([{ 1: 1 }]));
+    resolveQueue.push({ cnt: 0 });                         // no stuck claims
+    resolveQueue.push({ id: TEST_USER.id, gcal_refresh_token: 'tok', msft_cal_refresh_token: null, apple_cal_password: null }); // gcal connected
+    resolveQueue.push([{ provider: 'gcal', status: 'error', error_detail: "SQLSTATE[HY000]: secret-ish internal failure", synced_at: new Date() }]);
+    resolveQueue.push(null);                               // locations
+
+    const res = await supertest(app).get('/api/health/detailed').set('Authorization', `Bearer ${VALID_TOKEN}`);
+    expect(res.body.services.sync).toBe('error');
+    expect(res.body.detail.sync).toBe('Calendar sync is having trouble right now.');
+    expect(res.body.detail.sync).not.toMatch(/SQLSTATE|internal failure/i);
+  });
+});
+
 // ── R42.4: GET /api/feature-events/ ───────────────────────────────────────────
 
 describe('R42.4 — GET /api/feature-events/ (service-key auth, analytics)', () => {
