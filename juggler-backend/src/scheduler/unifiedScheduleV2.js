@@ -1967,7 +1967,12 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       var task = entry && entry.task ? entry.task : entry;
       if (!task) return;
       if (!task.recurring) return;
-      if (task._unplacedReason) return; // already has a reason
+      // Promote ONLY a generic no_slot tag (or no reason yet) to the specific
+      // recurring_split_overflow — an unplaced recurring split chunk is a cycle
+      // time-box overflow (R35.6, 999.802). A more-specific reason already set
+      // (partial_split, weather, tool_conflict, location_mismatch, …) is correct
+      // as-is and must NOT be clobbered by the overflow classification.
+      if (task._unplacedReason && task._unplacedReason !== REASON_CODES.NO_SLOT) return;
       var splitTotal = task.splitTotal != null ? Number(task.splitTotal) : 1;
       if (splitTotal <= 1) return; // not a split chunk
       task._unplacedReason = REASON_CODES.RECURRING_SPLIT_OVERFLOW;

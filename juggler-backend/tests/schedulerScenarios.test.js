@@ -1246,36 +1246,14 @@ describe('R11.16 — legacy reason-code scenarios (999.782)', () => {
   });
 
   // ──────────────────────────────────────────────────────────────
-  // RECURRING_SPLIT_OVERFLOW: un-triggerable via the unifiedSchedule
-  // harness in isolation.
-  //
-  // Evidence:
-  //  - The FIRST emission path (line 1946) removes placed chunks that
-  //    land at dateKey >= occurrenceAnchor + cycleLen.  However,
-  //    placeSplitInline (for inline splits) caps the search range at
-  //    anchor + cycleDays - 1, and findEarliestSlot (for pre-split
-  //    ordinals) applies the same cap (lines 914, 1133).  No code path
-  //    in unifiedSchedule itself places a recurring split chunk BEYOND
-  //    anchor + cycleDays - 1, so the overflow detector finds nothing
-  //    to remove.
-  //  - The SECOND emission path (line 1967) fires for recurring split
-  //    tasks in `unplaced` with no _unplacedReason.  But
-  //    applyPlacementFailReason (line 1299) always sets at least
-  //    NO_SLOT before the task reaches unplaced.  The guard at line
-  //    1964 (`if (task._unplacedReason) return`) then skips line 1967.
-  //  - The overflow emission is a safety net for runSchedule's
-  //    pre-split-row injection path (runSchedule.js:925/1203), which
-  //    supplies DB-reconciled chunks with externally computed dates.
-  //    That path is not accessible from the pure unifiedSchedule
-  //    function signature used by this harness.
-  //
-  // Conclusion: RECURRING_SPLIT_OVERFLOW cannot be triggered via
-  // unifiedSchedule(tasks, statuses, today, nowMins, cfg) without
-  // reaching into runSchedule's DB layer.  The code is legitimate (it
-  // guards against future regressions in the runSchedule caller) but
-  // is not independently testable at this layer.
+  // RECURRING_SPLIT_OVERFLOW is covered by tests/scheduler/split-containment-edges.test.js
+  // R35.6 ('a recurring split chunk that cannot fit before the next occurrence is flagged
+  // recurring_split_overflow'). It was previously un-triggerable here because the second
+  // emission pass skipped any task that already carried a reason, and applyPlacementFailReason
+  // always set NO_SLOT first. 999.802 fixed that precedence (NO_SLOT is now promoted to the
+  // specific recurring_split_overflow for unplaced recurring split chunks), so R35.6 passes.
+  // Not duplicated here — that test owns the scenario (it needs a custom single-block weekly cfg).
   // ──────────────────────────────────────────────────────────────
-  test.todo('RECURRING_SPLIT_OVERFLOW: not triggerable via unifiedSchedule harness (see inline evidence above — safety net for runSchedule DB layer only)');
 
   // ──────────────────────────────────────────────────────────────
   // MISSED — path A (isMissedPreferredTime):
