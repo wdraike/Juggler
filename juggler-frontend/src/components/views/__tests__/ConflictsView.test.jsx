@@ -434,3 +434,69 @@ describe('AC4 integration — reason chip + where/when + detail all render toget
     });
   });
 });
+
+// ─── Data Issues rendering — every warning type renders visible text ──────────
+// Regression: the Data Issues list rendered EMPTY yellow bars for scheduler
+// warning types that had no render branch (recurringConflict,
+// recurring_split_overflow). The backend emits these (unifiedScheduleV2.js
+// :757/:2135 and :1940) but ConflictsView only handled 4 of the 6 types, so the
+// outer amber div rendered with no inner text. Fix added the two branches + a
+// catch-all so no type ever renders blank.
+describe('ConflictsView — Data Issues warnings (no blank rows)', () => {
+  // Open the Data Issues subsection (defaults collapsed: dataIssues=true) while
+  // keeping the action group open (actionGroup=false). Same localStorage path the
+  // component reads on mount (STORAGE_KEY 'juggler-issues-collapsed').
+  function openDataIssues() {
+    localStorage.setItem('juggler-issues-collapsed', JSON.stringify({
+      actionGroup: false, infoGroup: true, overdue: true, unplaced: true, dataIssues: false
+    }));
+  }
+
+  afterEach(() => { localStorage.clear(); });
+
+  it('renders descriptive text for recurringConflict and recurring_split_overflow (was blank)', () => {
+    openDataIssues();
+    var allTasks = [
+      { id: 't-standup', text: 'Daily Standup' },
+      { id: 't-workout', text: 'Workout' }
+    ];
+    var schedulerWarnings = [
+      { type: 'recurringConflict', taskId: 't-standup' },
+      { type: 'recurring_split_overflow', taskId: 't-workout', masterId: 'm-workout' }
+    ];
+    render(<ConflictsView {...makeProps({ allTasks: allTasks, schedulerWarnings: schedulerWarnings })} />);
+
+    // The friendly labels render...
+    expect(screen.getByText(/Recurring conflict:/)).toBeInTheDocument();
+    expect(screen.getByText(/Recurring split overflow:/)).toBeInTheDocument();
+    // ...and the affected task names are surfaced (resolved from allTasks by taskId).
+    expect(screen.getByText('Daily Standup')).toBeInTheDocument();
+    expect(screen.getByText('Workout')).toBeInTheDocument();
+    // SELF-MUTATION: delete either new branch in ConflictsView → its label span
+    // disappears → getByText FAILS. (Pre-fix these rows were empty → also FAILS.)
+  });
+
+  it('renders a catch-all row (never blank) for an unrecognized warning type', () => {
+    openDataIssues();
+    var schedulerWarnings = [{ type: 'someBrandNewType', taskId: 't-x' }];
+    var { container } = render(<ConflictsView {...makeProps({
+      allTasks: [{ id: 't-x', text: 'Mystery Task' }],
+      schedulerWarnings: schedulerWarnings
+    })} />);
+
+    // Unknown type still produces a labeled, non-empty row (the anti-blank guard).
+    expect(screen.getByText(/Scheduling constraint:/)).toBeInTheDocument();
+    expect(screen.getByText(/someBrandNewType/)).toBeInTheDocument();
+    // SELF-MUTATION: remove the KNOWN_DATA_ISSUE_TYPES catch-all → unknown type
+    // renders an empty amber div → both assertions FAIL (the exact original bug).
+
+    // No amber data-issue row is blank: every styled leaf div has text content.
+    // (Pre-fix the unhandled type produced exactly such an empty styled div.)
+    var blankStyledLeaves = 0;
+    container.querySelectorAll('div').forEach(function(d) {
+      if (d.children.length === 0 && d.textContent.trim() === '' &&
+          /rgb\(/.test(d.getAttribute('style') || '')) blankStyledLeaves++;
+    });
+    expect(blankStyledLeaves).toBe(0);
+  });
+});

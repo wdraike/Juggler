@@ -261,6 +261,11 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
     var isOpen = !collapsed.dataIssues;
     var count = warnings.length;
     if (count === 0) return null;
+    // Every warning type MUST have a render branch below; KNOWN_DATA_ISSUE_TYPES
+    // gates the catch-all so a future/unhandled type never renders as a blank
+    // yellow bar (the symptom this list fixes). Keep in sync with the branches.
+    var KNOWN_DATA_ISSUE_TYPES = ['backwardsDep', 'fixedOverlap', 'impossibleDayReq',
+      'orphanedWhenTag', 'recurringConflict', 'recurring_split_overflow'];
     var dataHelp = 'Conflicting or impossible constraints detected in your task data. The scheduler works around these, but fixing them will improve your schedule.';
     var dataTip = 'Task data that contains conflicting constraints the scheduler had to work around';
     return (
@@ -340,6 +345,33 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
                         <span style={{ color: theme.textMuted }}> has when="{w.originalWhen}"</span>
                         <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>
                           This tag doesn't match any time block in your schedule templates. The scheduler is treating it as "anytime". Update the task's time preference or add a matching template.
+                        </div>
+                      </div>
+                    )}
+                    {w.type === 'recurringConflict' && (
+                      <div>
+                        <span style={{ fontWeight: 600 }}>Recurring conflict: </span>
+                        <span style={taskLinkStyle} onClick={function() { if (w.taskId && onExpand) onExpand(w.taskId); }} title="Open task details">{taskA ? taskA.text : w.taskId}</span>
+                        <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>
+                          A recurring occurrence couldn't be placed without colliding with another fixed or recurring task on the same day, so the scheduler left it unplaced. Adjust its time, day requirement, or recurrence so it has a free slot.
+                        </div>
+                      </div>
+                    )}
+                    {w.type === 'recurring_split_overflow' && (
+                      <div>
+                        <span style={{ fontWeight: 600 }}>Recurring split overflow: </span>
+                        <span style={taskLinkStyle} onClick={function() { if (w.taskId && onExpand) onExpand(w.taskId); }} title="Open task details">{taskA ? taskA.text : w.taskId}</span>
+                        <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>
+                          This recurring task is split into more chunks than fit before its deadline, so some chunks couldn't be scheduled. Allow more time, extend the deadline, or split the task less finely.
+                        </div>
+                      </div>
+                    )}
+                    {KNOWN_DATA_ISSUE_TYPES.indexOf(w.type) === -1 && (
+                      <div>
+                        <span style={{ fontWeight: 600 }}>Scheduling constraint: </span>
+                        <span style={taskLinkStyle} onClick={function() { if (w.taskId && onExpand) onExpand(w.taskId); }} title="Open task details">{taskA ? taskA.text : (w.taskId || w.type)}</span>
+                        <div style={{ fontSize: 10, color: theme.textMuted, marginTop: 2 }}>
+                          The scheduler flagged a constraint it had to work around ({w.type}). Open this task to review and resolve it.
                         </div>
                       </div>
                     )}
