@@ -1126,4 +1126,16 @@ describe('rolling recurrence integration', () => {
     expect(pl.day).toBe(futureDay);
     expect(pl._overdue).toBeUndefined();   // future event is not overdue
   });
+
+  test('R50: past rigid recurring instance → also pinned overdue at its date (not forward)', () => {
+    var pastDay = dateKey(-2);
+    var r = schedule([
+      task({ id: 'meds', recurring: true, generated: true, placementMode: 'fixed',
+        date: pastDay, time: '8:00 AM', dur: 20 })
+    ], 600);
+    var pl = fullPlacement(r, 'meds');
+    expect(pl).not.toBeNull();
+    expect(pl.day).toBe(pastDay);          // stays on its occurrence day
+    expect(pl._overdue).toBe(true);        // flagged overdue (forceIsOverdue past-day fix)
+  });
 });
