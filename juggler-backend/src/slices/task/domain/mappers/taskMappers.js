@@ -56,6 +56,7 @@ var TaskStatus = require('../value-objects/TaskStatus');
 // Path: mappers/ → domain/ → task/ → slices/ → src/ → juggler-backend/ → juggler/ → shared/
 // (6 parent dirs up from mappers/ to reach juggler/, then into shared/)
 var _getNowInTimezone = require('../../../../../../shared/scheduler/getNowInTimezone').getNowInTimezone;
+var _DEFAULT_TIMEZONE = require('../../../../../../shared/scheduler/getNowInTimezone').DEFAULT_TIMEZONE;
 // Path: mappers/ → domain/ → task/ → slices/ → src/ → lib/
 // (4 parent dirs up from mappers/ to reach src/, then into lib/)
 var _PLACEMENT_MODES = require('../../../../lib/placementModes').PLACEMENT_MODES;
@@ -362,7 +363,7 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
       if (!dueKey && row.placement_mode === _PLACEMENT_MODES.FIXED) {
         // `date` was derived above from scheduled_at — recompute from row directly
         if (row.scheduled_at) {
-          var _local = utcToLocal(row.scheduled_at, timezone || null);
+          var _local = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE);
           dueKey = _local ? _local.date : null;
         }
       }
@@ -371,7 +372,7 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
       // For deadline/implied_deadline: no time check — past-day is sufficient.
       var scheduledMins = null;
       if (row.placement_mode === _PLACEMENT_MODES.FIXED && row.scheduled_at) {
-        var _fixedLocal = utcToLocal(row.scheduled_at, timezone || null);
+        var _fixedLocal = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE);
         if (_fixedLocal && _fixedLocal.time) {
           var _tm = /^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i.exec(_fixedLocal.time);
           if (_tm) {
