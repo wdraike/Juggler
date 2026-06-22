@@ -284,7 +284,9 @@ async function recurCleanup(ctx) {
     await twrite.updateTaskById(trx, id, row, userId);
 
     var needsCleanup = row.recur !== undefined || row.recur_start !== undefined || row.recur_end !== undefined
-      || row.recurring === 0;
+      || row.recurring === 0
+      // R53: a split/split_min change reshapes chunk count/size — refabricate future instances.
+      || row.split !== undefined || row.split_min !== undefined;
     if (needsCleanup) {
       if (row.recurring === 0) {
         await twrite.resetRecurringInstances(trx, userId, id, '[RECUR] toggle-off: recurring=false');
@@ -320,8 +322,12 @@ async function recurCleanup(ctx) {
           (oldRecur && !newRecur)
         );
 
-        if (recurChanged) {
-          await twrite.resetRecurringInstances(trx, userId, id, '[RECUR] cycle reset');
+        // R53: split/split_min change also reshapes the instance set.
+        var splitChanged = (row.split !== undefined && Number(row.split) !== Number(existing.split))
+          || (row.split_min !== undefined && Number(row.split_min) !== Number(existing.split_min));
+
+        if (recurChanged || splitChanged) {
+          await twrite.resetRecurringInstances(trx, userId, id, '[RECUR] cycle reset (recur/split change)');
         } else {
           var _dateMatch = require('../../../shared/scheduler/dateMatchesRecurrence');
           var srcDateStr = updatedTmpl.recur_start

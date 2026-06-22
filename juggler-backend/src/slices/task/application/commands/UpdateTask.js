@@ -142,6 +142,20 @@ UpdateTask.prototype.execute = async function execute(input) {
     return { status: 400, body: { error: referenceErrors.join('; ') } };
   }
 
+  // R53: a split/split_min edit reshapes the instance set (chunk count/size) —
+  // route it through the complex path so future instances are refabricated. But
+  // ONLY for a RECURRING task: a non-recurring task has no occurrences to reshape,
+  // so its split-enable must stay on the fast path (the complex path's
+  // recurring_template branch would mishandle it — S7 regression).
+  var splitFieldChanged = body.split !== undefined || body.splitMin !== undefined || body.split_min !== undefined;
+  var splitNeedsComplex = false;
+  if (splitFieldChanged) {
+    var splitRecRow = await this.repo.fetchTaskRecurring(id, userId);
+    splitNeedsComplex = !!(splitRecRow && (splitRecRow.recurring
+      || splitRecRow.task_type === 'recurring_template'
+      || splitRecRow.task_type === 'recurring_instance'));
+  }
+
   // needsComplexPath (handler L962-973)
   var needsComplexPath = body.recur !== undefined
     || body.recurStart !== undefined
@@ -151,6 +165,7 @@ UpdateTask.prototype.execute = async function execute(input) {
     || body._allowUnfix
     || body.allDay !== undefined
     || (body.recurring !== undefined && !body.recurring)
+    || splitNeedsComplex
     || (body.time !== undefined && body.date === undefined && body.scheduledAt === undefined);
 
   if (!needsComplexPath) {

@@ -393,27 +393,41 @@ async function updateInstancesWhere(dbOrTrx, userId, applyWhere, changes) {
 }
 
 /**
- * Delete all pending (status='') instances for a recurring template, cleaning
- * the cal_sync_ledger first so the next sync doesn't re-ingest their events.
- * Returns the number of instances deleted.
+ * Drop + reshape a recurring template's FUTURE not-started instances on a
+ * cadence/split edit (R53), cleaning the cal_sync_ledger first so the next sync
+ * doesn't re-ingest their events. Returns the number of instances dropped.
+ *
+ * R53 "past untouched": only FUTURE not-started instances (status='' AND
+ * (scheduled_at IS NULL OR scheduled_at >= now)) are dropped — a PAST pending
+ * instance is an overdue/missed record (R50) and is preserved. The scheduler's
+ * next expand pass regenerates the future per the new cadence; survivors keep
+ * their occurrence_ordinal (only the dropped rows' ordinals are vacated).
+ *
+ * R55 no-hard-delete: dropped instances are SOFT-cancelled (status='cancelled',
+ * rows kept as record), NOT physically deleted. They are non-terminal so an
+ * unplaced (scheduled_at NULL) future instance can be cancelled without
+ * violating terminal_scheduled_at, and are excluded from the scheduler load.
  */
 async function resetRecurringInstances(dbOrTrx, userId, masterId, logTag) {
   requireUserId(userId, 'resetRecurringInstances');
-  var pendingIds = await dbOrTrx('task_instances')
+  var futureIds = await dbOrTrx('task_instances')
     .where({ master_id: masterId, user_id: userId, status: '' })
+    .where(function () {
+      this.whereNull('scheduled_at').orWhere('scheduled_at', '>=', dbOrTrx.fn.now());
+    })
     .pluck('id');
-  if (pendingIds.length === 0) return 0;
+  if (futureIds.length === 0) return 0;
   await dbOrTrx('cal_sync_ledger')
     .where('user_id', userId)
-    .whereIn('task_id', pendingIds)
+    .whereIn('task_id', futureIds)
     .where('status', 'active')
     .update({ status: 'deleted_local', task_id: null, synced_at: dbOrTrx.fn.now() })
     .catch(function(err) { logger.error('[silent-catch]', err.message); });
-  await deleteInstancesWhere(dbOrTrx, userId, function(q) {
-    return q.whereIn('id', pendingIds);
+  await softCancelWhere(dbOrTrx, userId, function(q) {
+    return q.whereIn('id', futureIds);
   });
-  if (logTag) logger.info(logTag + ': deleted ' + pendingIds.length + ' pending instances for ' + masterId);
-  return pendingIds.length;
+  if (logTag) logger.info(logTag + ': soft-cancelled ' + futureIds.length + ' future pending instances for ' + masterId);
+  return futureIds.length;
 }
 
 /**
