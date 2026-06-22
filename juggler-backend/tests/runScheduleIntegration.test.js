@@ -323,14 +323,9 @@ describe('runScheduleAndPersist: terminal tasks', () => {
     expect(result.updated).toBe(0);
   });
 
-  // SKIPPED pending 999.816 (schema-rot): seeding status:'pause' is rejected by a STALE
-  // duplicate chk_task_masters_status_enum on the test DB whose value set omits 'pause'
-  // (the current/correct chk_task_masters_status DOES include 'pause'; 'pause' is a
-  // legitimate NON-terminal status). The right fix is to drop the stale duplicate
-  // constraint in the 999.816 CRUD-rot leg — NOT to downgrade this to status:'skip'
-  // (that would silently destroy paused-not-placed coverage). Restored the correct
-  // 'pause' seed and skipped until the stale constraint is dropped.
-  test.skip('paused tasks are not placed (blocked by 999.816 stale status_enum constraint)', async () => {
+  // Previously skipped pending 999.816 (RC3): the stale chk_task_masters_status_enum
+  // omitted 'pause'. Fixed in migration 20260624000000_fix_stale_status_enum_constraints.js.
+  test('paused tasks are not placed', async () => {
     if (!available) return;
     await seedTask({ id: 'pause-t', text: 'Paused', status: 'pause', dur: 30 });
     var result = await runScheduleAndPersist(USER_ID);
