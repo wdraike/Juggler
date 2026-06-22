@@ -131,6 +131,29 @@ export function hydrateTaskTimezones(tasks, timezone) {
   return tasks;
 }
 
+/**
+ * Build the serverClock object used by AppLayout to apply server-time offset.
+ * Extracted here so both AppLayout and its AC3 tests import the real function —
+ * keeping them in sync and eliminating copy-drift (AC3 zoe W1 fix).
+ *
+ * AC3 (999.809): offset = serverEpochMs - capturedNow; clock.now() returns a
+ * server-corrected Date. Degraded mode: when serverEpochMs is not a number,
+ * returns a clock with offset=0 (real client clock — approved fallback, AC3).
+ *
+ * @param {number|any} serverEpochMs - value from /api/now res.data.epochMs
+ * @param {number} [capturedNow=Date.now()] - Date.now() captured at fetch time (injectable for tests)
+ * @returns {{ now: () => Date }}
+ */
+export function buildServerClock(serverEpochMs, capturedNow) {
+  var t = capturedNow !== undefined ? capturedNow : Date.now();
+  if (typeof serverEpochMs !== 'number') {
+    // degraded mode: offset = 0, use real client clock
+    return { now: function() { return new Date(); } };
+  }
+  var offset = serverEpochMs - t;
+  return { now: function() { return new Date(Date.now() + offset); } };
+}
+
 // Default timezone — matches the shared backend contract (shared/scheduler/getNowInTimezone.js)
 // so that null/undefined tz produces identical todayKey/nowMins on both sides (R50.8 W2 fix).
 var DEFAULT_TIMEZONE = 'America/New_York';
@@ -161,11 +184,17 @@ export function resolveDisplayTimezone(opts) {
  * When timezone is null/undefined, defaults to America/New_York to match the shared
  * backend contract (shared/scheduler/getNowInTimezone.js) — R50.8 parity requirement.
  *
+ * AC2 (999.809): mirrors shared/scheduler/getNowInTimezone.js signature exactly.
+ * When clock is provided, uses clock.now() instead of new Date() so the FE overdue
+ * computation can run against canonical server time (AC3 serverClock). Single-arg
+ * callers are unchanged — clock defaults to undefined → real new Date().
+ *
  * @param {string|null} timezone - IANA timezone (e.g. 'America/New_York')
+ * @param {{ now: () => Date }|null|undefined} clock - optional injected clock
  * @returns {{ todayKey: string, todayDate: Date, nowMins: number }}
  */
-export function getNowInTimezone(timezone) {
-  var now = new Date();
+export function getNowInTimezone(timezone, clock) {
+  var now = clock ? clock.now() : new Date();
   // Apply the same default as the shared backend module — never use browser-local clock
   // for the no-tz branch (that would break R50.8 parity at day boundaries).
   var tz = timezone || DEFAULT_TIMEZONE;

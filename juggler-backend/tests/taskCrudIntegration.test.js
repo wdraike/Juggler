@@ -631,9 +631,14 @@ describe('updateTaskStatus', () => {
     // create the rows directly (bypassing createTask) so the test exercises
     // updateTaskStatus's sibling-propagation path without going through the
     // full recurring expansion pipeline.
-    var masterId = crypto.randomUUID();
-    var chunk1Id = masterId + '-20260416';
-    var chunk2Id = masterId + '-20260416-2';
+    //
+    // NOTE: action_log.task_id is VARCHAR(36). Using a full UUID (36 chars)
+    // as masterId and appending '-20260416' would exceed that limit (45 chars).
+    // Use a short deterministic prefix so chunk IDs stay within 36 chars.
+    var masterShort = 'sc-' + crypto.randomUUID().slice(0, 28); // 31 chars
+    var masterId = masterShort;
+    var chunk1Id = masterShort.slice(0, 27) + '-c1'; // 30 chars
+    var chunk2Id = masterShort.slice(0, 27) + '-c2'; // 30 chars
     var now = new Date();
 
     await db('task_masters').insert({

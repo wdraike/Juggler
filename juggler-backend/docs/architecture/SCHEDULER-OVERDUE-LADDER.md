@@ -30,7 +30,22 @@ Issue #23 asked to review how v2 handles tasks that cannot be placed within thei
 | 3 | `item.flexWhen` | Relax `when` to `anytime`. For tasks the user explicitly flagged as "prefer this window but any is fine". Emits `whenRelaxed` flag. |
 | 4 | `slack < 0 && flexWhen` | Both relaxations at once. Last resort. |
 
-If all four fail, the item goes to `unplaced` and then Phase 8 marks it `unscheduled=1` (non-recurring) or leaves recurring instances visible at their last proposed `scheduled_at`.
+If all four fail, the item goes to `unplaced` and then Phase 8 marks it `unscheduled=1` (non-recurring) or leaves recurring instances visible at their last real `scheduled_at`.
+
+## Phase-9 — Recurring missed-freeze
+
+After the placement ladder, `runSchedule.js` Phase 9 auto-applies `status: "missed"` to past recurring instances whose timeFlex window AND recurrence-period boundary (R50.0 `recurringPeriodEndKey`) have both expired. The freeze slot for `scheduled_at` and `completed_at` follows a priority ladder:
+
+| Priority | Source | Condition |
+|----------|--------|-----------|
+| 1 | `rawRowPast.scheduled_at` (last real placed slot) | Instance was placed at least once — `scheduled_at != null` in the DB row |
+| 2 | `computeWindowCloseUtc(t, today, TIMEZONE)` | Never placed, but has a timeFlex window to close |
+| 3 | `localToUtc(effectiveDate, '12:00 AM', TIMEZONE)` | Never placed and no computed window close |
+| 4 | `clockNow()` | Fallback (should not be reached in practice) |
+
+**Rule (LOCKED design, 999.808, W. David Raike 2026-06-19):** A missed PLACED instance freezes at its **last real `scheduled_at`** — the slot where the user actually had the task. A never-placed instance falls back to the period-deadline / `windowClose` / midnight of the occurrence date.
+
+This refines R32.4 (which previously described the freeze slot as `windowClose` regardless of placement). The terminal-`scheduled_at` DB CHECK constraint is satisfied in both branches.
 
 ## Options considered, and why we're not adding them
 

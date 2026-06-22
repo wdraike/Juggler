@@ -272,6 +272,14 @@ app.get('/api/auth/me', authenticateJWT, async (req, res) => {
   });
 });
 
+// Server canonical time — AC1 (999.809): returns server's Date.now() so the FE can
+// compute clock offset and eliminate client-skew from overdue calculations.
+// No user data, no secrets, no fallback — server new Date() only.
+app.get('/api/now', authenticateJWT, (req, res) => {
+  const d = new Date();
+  res.json({ epochMs: d.getTime(), iso: d.toISOString() });
+});
+
 // SSE endpoint — real-time event stream for connected frontends
 // EventSource doesn't support custom headers, so accept token as query param
 const sseEmitter = require('./lib/sse-emitter');

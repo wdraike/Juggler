@@ -313,12 +313,18 @@ describe('runScheduleAndPersist: terminal tasks', () => {
 
   test('skip/cancel tasks are not placed', async () => {
     if (!available) return;
-    await seedTask({ id: 'skip-t', text: 'Skipped', status: 'skip', dur: 30 });
-    await seedTask({ id: 'cancel-t', text: 'Cancelled', status: 'cancel', dur: 30 });
+    // Terminal statuses (skip/cancel) require non-null scheduled_at per
+    // chk_task_instances_terminal_scheduled (migration 20260527213906).
+    // Use a past timestamp — the scheduler property being tested is that these
+    // terminal rows are NOT re-placed (scheduled_at stays unchanged).
+    await seedTask({ id: 'skip-t', text: 'Skipped', status: 'skip', scheduled_at: '2026-04-01 10:00:00', dur: 30 });
+    await seedTask({ id: 'cancel-t', text: 'Cancelled', status: 'cancel', scheduled_at: '2026-04-01 10:00:00', dur: 30 });
     var result = await runScheduleAndPersist(USER_ID);
     expect(result.updated).toBe(0);
   });
 
+  // Previously skipped pending 999.816 (RC3): the stale chk_task_masters_status_enum
+  // omitted 'pause'. Fixed in migration 20260624000000_fix_stale_status_enum_constraints.js.
   test('paused tasks are not placed', async () => {
     if (!available) return;
     await seedTask({ id: 'pause-t', text: 'Paused', status: 'pause', dur: 30 });

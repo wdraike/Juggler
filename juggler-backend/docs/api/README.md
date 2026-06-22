@@ -2,8 +2,8 @@
 type: api-reference
 service: juggler
 status: active
-last_updated: 2026-06-14
-version: leg/jug-csv-import @ 2026-06-14
+last_updated: 2026-06-22
+version: leg/fixy-now @ 2026-06-22
 tags:
   - type/api-reference
   - service/juggler
@@ -14,7 +14,7 @@ tags:
 
 # Juggler Backend — API Reference
 
-**Last Updated:** 2026-06-14
+**Last Updated:** 2026-06-22
 **Base URL:** `http://localhost:5002` (dev)
 
 ---
@@ -201,6 +201,44 @@ Authorization: Bearer <JWT>
 ```
 
 Returns `{ user: { id, email, name, picture } }`.
+
+---
+
+## Server Time
+
+```http
+GET /api/now
+Authorization: Bearer <JWT>
+```
+
+Returns the server's canonical current time. The frontend uses this to compute a clock offset (`serverTime - clientTime`) and passes it into `getNowInTimezone`'s injectable clock, eliminating client-clock skew from overdue-status calculations (R50.8 family).
+
+**Auth:** `authenticateJWT` (JWT required). Not rate-limited (registered before the `apiLimiter` mount, same as `/api/auth/me`).
+
+**Request:** no parameters, no body.
+
+**Response — 200 OK**
+
+```json
+{
+  "epochMs": 1750598400000,
+  "iso": "2026-06-22T16:00:00.000Z"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `epochMs` | integer | Server `Date.now()` — milliseconds since Unix epoch |
+| `iso` | string | Same instant as ISO-8601 UTC (`toISOString()`) |
+
+Both fields are derived from a single `new Date()` capture and are therefore consistent with each other.
+
+**Error responses**
+
+| Status | Condition |
+|--------|-----------|
+| `401` | Missing or expired JWT |
+| `500` | Internal server error |
 
 ---
 

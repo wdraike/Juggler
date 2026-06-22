@@ -347,6 +347,12 @@ describe('DeleteTask (deleteTask)', function () {
   });
 
   test('cascade=recurring: runs cascadeRecurringDelete in a transaction + 200 "Recurring deleted"', function () {
+    // R55 soft-cancel contract: cascadeRecurringDelete no longer hard-deletes rows.
+    // Instead it soft-cancels (status='cancelled') pending instances and the template.
+    // The use-case orchestration contract is unchanged: it forwards deletedCount/keptCount
+    // from the facade implementation. deletedCount = number of pending rows soft-cancelled;
+    // keptCount = number of terminal (done/cancel/skip) rows retained with their status.
+    // The stub here exercises the orchestration layer (not the DB implementation).
     var repo = new InMemoryTaskRepository({ rows: [
       { id: 'tplD', user_id: USER, task_type: 'recurring_template', recurring: 1, status: '', updated_at: new Date() }
     ] });
@@ -355,6 +361,8 @@ describe('DeleteTask (deleteTask)', function () {
     var uc = new DeleteTask(deleteDeps(repo, trigger, {
       cascadeRecurringDelete: function (ctx) {
         cascadeCalls.push(ctx.templateId);
+        // R55: deletedCount = soft-cancelled pending count (rows kept, status='cancelled')
+        // R55: keptCount = terminal rows retained with original status (done/cancel/skip)
         return Promise.resolve({ deletedCount: 3, keptCount: 1, pendingIds: ['p1', 'p2', 'p3'], keptIds: ['k1'] });
       }
     }));

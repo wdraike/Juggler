@@ -245,7 +245,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
     if (!t || !t.id) return;
     // Skip done/cancel/skip/pause/disabled — they don't need placement.
     var st = statuses[t.id] || t.status || '';
-    if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'pause' || st === 'disabled') return;
+    if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'pause' || st === 'disabled' || st === 'cancelled') return;
 
     var pm = t.placementMode || PLACEMENT_MODES.ANYTIME;
     var isMarker = pm === PLACEMENT_MODES.REMINDER;
@@ -306,6 +306,24 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
     // routes through the immovable path and is never re-placed.
     if (anchorMin == null && st === 'wip' && t.time) {
       anchorMin = parseTimeToMinutes(t.time);
+    }
+    // Defensive guard: if anchorMin is STILL null for a wip with a live
+    // scheduled_at (t.time was unparseable — e.g. unexpected format), derive
+    // anchorMin from scheduled_at via tz-aware utcToLocal so the item is never
+    // silently de-anchored. Do NOT use a || fallback — only attempt this when
+    // the wip + scheduled_at condition is confirmed.
+    if (anchorMin == null && st === 'wip' && t.scheduledAt && t.tz) {
+      var saLocal = dateHelpers.utcToLocal(new Date(t.scheduledAt), t.tz);
+      if (saLocal && saLocal.time) {
+        var saMin = parseTimeToMinutes(saLocal.time);
+        if (saMin != null) {
+          anchorMin = saMin;
+        } else {
+          console.warn('[unifiedScheduleV2] wip anchor: could not parse scheduled_at local time for task', t.id, 'saLocal.time=', saLocal.time);
+        }
+      } else {
+        console.warn('[unifiedScheduleV2] wip anchor: utcToLocal returned no time for task', t.id, 'scheduledAt=', t.scheduledAt, 'tz=', t.tz);
+      }
     }
 
     // Deadline: user deadline; recurring instances use their scheduled day
@@ -816,7 +834,7 @@ function computeDepReadyAbs(item, placedById, statuses, dates) {
     var depId = item.dependsOn[j];
     var st = statuses[depId];
     if (st === undefined) continue;
-    if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'disabled' || st === 'pause') continue;
+    if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'disabled' || st === 'pause' || st === 'cancelled') continue;
     var placed = placedById[depId];
     if (!placed) return Infinity; // unplaced live dep — item is blocked this scan
     var depDateIdx = indexOfDate(dates, placed.dateKey);

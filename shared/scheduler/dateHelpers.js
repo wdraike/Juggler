@@ -101,6 +101,8 @@ function parseTimeToMinutes(timeStr) {
     if (rh >= 1 && rh <= 5) rh += 12;
     return rh * 60 + rm;
   }
+  var m24 = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (m24) { var h24 = parseInt(m24[1]), mn24 = parseInt(m24[2]); if (h24 >= 0 && h24 <= 23 && mn24 >= 0 && mn24 <= 59) return h24 * 60 + mn24; }
   return null;
 }
 

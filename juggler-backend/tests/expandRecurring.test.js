@@ -723,6 +723,58 @@ describe('expandRecurring', () => {
   });
 });
 
+// ── BUG-814 repro: cancelled/disabled recurring_template must produce ZERO instances ──
+//
+// Root cause: expandRecurring.js:85 filter did not include 'cancelled' in the
+// skip-list (only 'pause' and 'disabled'). A template with status='cancelled'
+// (R55 soft-cancel) was treated as a live source and kept emitting fabricated
+// instances, allowing the scheduler to resume a cancelled series.
+//
+// Fix applied: expandRecurring.js:85 adds `|| st === 'cancelled'` to the guard.
+//
+// Self-mutation note: removing 'cancelled' from the guard (reverting line 85)
+// causes makeSource({status:'cancelled'}) to pass the filter and emit instances,
+// flipping the `toHaveLength(0)` assertion to FAIL → RED.
+describe('BUG-814 repro: cancelled/disabled recurring_template filtered in expandRecurring', () => {
+  test('BUG-814-RED: template with status=cancelled produces zero fabricated instances', () => {
+    // PRE-FIX: 'cancelled' was not in the skip-list → template treated as live source → emits instances.
+    // POST-FIX: 'cancelled' is in the skip-list → filtered, zero instances emitted.
+    const src = makeSource({ id: 'cancelled-tmpl', status: 'cancelled' });
+    const result = expandRecurring([src], new Date(2026, 2, 20), new Date(2026, 2, 25));
+    // POST-FIX: no instances generated for a cancelled template.
+    expect(result).toHaveLength(0);
+  });
+
+  test('BUG-814-RED: template with status via statuses-map=cancelled produces zero instances', () => {
+    // The statuses map (opts.statuses) overrides t.status in the filter.
+    // runSchedule passes a statuses map to expandRecurring; this covers the
+    // map-lookup path (st = statuses[t.id] || t.status || '').
+    const src = makeSource({ id: 'tmpl-statmap', status: '' }); // raw status is '' (active)
+    const result = expandRecurring(
+      [src],
+      new Date(2026, 2, 20), new Date(2026, 2, 25),
+      { statuses: { 'tmpl-statmap': 'cancelled' } }  // statuses map overrides to 'cancelled'
+    );
+    // POST-FIX: statuses map says 'cancelled' → filtered, zero instances.
+    expect(result).toHaveLength(0);
+  });
+
+  test('golden-master: active template (status="") still emits instances (filter does not over-exclude)', () => {
+    // Regression guard: the fix must NOT exclude active (status='') templates.
+    const src = makeSource({ id: 'active-tmpl', status: '' });
+    const result = expandRecurring([src], new Date(2026, 2, 20), new Date(2026, 2, 25));
+    // Active template: 3/21..3/25 = 5 instances (3/20 is source date, skipped).
+    expect(result).toHaveLength(5);
+  });
+
+  test('disabled template also produces zero instances (paired with cancelled coverage)', () => {
+    // 'disabled' was already in the skip-list pre-fix; confirm it still is post-fix.
+    const src = makeSource({ id: 'disabled-tmpl', status: 'disabled' });
+    const result = expandRecurring([src], new Date(2026, 2, 20), new Date(2026, 2, 25));
+    expect(result).toHaveLength(0);
+  });
+});
+
 describe('isAnchorDependentRecur — rolling', () => {
   test('rolling type is anchor-dependent', () => {
     const { isAnchorDependentRecur } = require('../../shared/scheduler/expandRecurring');

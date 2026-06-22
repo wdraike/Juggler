@@ -55,8 +55,12 @@ var TaskStatus = require('../value-objects/TaskStatus');
 // 5th arg; default computes from this shared contract using the row's timezone).
 // Path: mappers/ → domain/ → task/ → slices/ → src/ → juggler-backend/ → juggler/ → shared/
 // (6 parent dirs up from mappers/ to reach juggler/, then into shared/)
-var _getNowInTimezone = require('../../../../../../shared/scheduler/getNowInTimezone').getNowInTimezone;
-var _DEFAULT_TIMEZONE = require('../../../../../../shared/scheduler/getNowInTimezone').DEFAULT_TIMEZONE;
+var _getNowInTimezoneModule = require('../../../../../../shared/scheduler/getNowInTimezone');
+var _getNowInTimezone = _getNowInTimezoneModule.getNowInTimezone;
+// R50.8 canonical default — approved fallback for null-tz rows (WBS-fixy-crud-rot RC2).
+// Any row with no stored timezone falls back to America/New_York, matching the shared
+// module's own default (getNowInTimezone.js:30) and the project DEFAULT_TIMEZONE constant.
+var _DEFAULT_TIMEZONE = _getNowInTimezoneModule.DEFAULT_TIMEZONE;
 // Path: mappers/ → domain/ → task/ → slices/ → src/ → lib/
 // (4 parent dirs up from mappers/ to reach src/, then into lib/)
 var _PLACEMENT_MODES = require('../../../../lib/placementModes').PLACEMENT_MODES;
@@ -248,7 +252,7 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
     if (instDate) date = instDate;
   }
 
-  if (src && src.preferred_time_mins != null && row.status !== 'disabled') {
+  if (src && src.preferred_time_mins != null && row.status !== 'disabled' && !(row.status === 'wip' && row.scheduled_at)) {
     var ptH = Math.floor(src.preferred_time_mins / 60);
     var ptM = src.preferred_time_mins % 60;
     var ptAmpm = ptH >= 12 ? 'PM' : 'AM';
@@ -347,7 +351,7 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
       // but a frozen recurring instance must never compute as overdue (B1 fix).
       if (st === 'disabled') return false;
       // Resolve now-context: inject for tests, default to shared contract for the row's tz
-      var _now = nowInfo || _getNowInTimezone(timezone || null);
+      var _now = nowInfo || _getNowInTimezone(timezone || _DEFAULT_TIMEZONE); // RC2: null tz → R50.8 default
       // hasHardCommitment mirrors computeIsPastDue's gate exactly (runSchedule.js:109):
       //   deadline OR implied_deadline OR FIXED placementMode
       // Reuse dateColumnToISO (defined at :92) to avoid duplicating Date/string parsing inline.
@@ -363,7 +367,7 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
       if (!dueKey && row.placement_mode === _PLACEMENT_MODES.FIXED) {
         // `date` was derived above from scheduled_at — recompute from row directly
         if (row.scheduled_at) {
-          var _local = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE);
+          var _local = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE); // RC2: null tz → R50.8 default
           dueKey = _local ? _local.date : null;
         }
       }
@@ -372,7 +376,7 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
       // For deadline/implied_deadline: no time check — past-day is sufficient.
       var scheduledMins = null;
       if (row.placement_mode === _PLACEMENT_MODES.FIXED && row.scheduled_at) {
-        var _fixedLocal = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE);
+        var _fixedLocal = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE); // RC2: null tz → R50.8 default
         if (_fixedLocal && _fixedLocal.time) {
           var _tm = /^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i.exec(_fixedLocal.time);
           if (_tm) {

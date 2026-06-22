@@ -123,7 +123,8 @@ async function insertTask(taskData) {
     split_ordinal: 1,
     split_total: 1,
     status: taskData.status || '',
-    date_pinned: taskData.datePinned ? 1 : 0,
+    // date_pinned column was DROPPED by migration 20260526000000 — removed from insert.
+    // Fixed placement is expressed via placement_mode='fixed' on the master row instead.
     generated: taskData.generated ? 1 : 0,
     created_at: now,
     updated_at: now
@@ -174,11 +175,15 @@ describe('UC-15: DB Persistence', function() {
   test('UC-15.5: Task status preserved across scheduler runs', async function() {
     if (!dbAvailable) return;
 
+    // chk_task_instances_terminal_scheduled (mig 20260527213906) requires non-null
+    // scheduled_at for terminal statuses. Seed a past timestamp; the assertion under
+    // test is that status='done' is PRESERVED, not the timestamp value.
     await insertTask({
       id: 'done_task',
       text: 'Already Done',
       dur: 30,
-      status: 'done'
+      status: 'done',
+      scheduledAt: '2026-04-01 10:00:00'
     });
 
     var inst = await knex('task_instances').where('master_id', 'done_task').first();
@@ -200,12 +205,16 @@ describe('UC-18: Full DB Pipeline', function() {
   test('UC-18.4: Done instance not re-scheduled', async function() {
     if (!dbAvailable) return;
 
+    // chk_task_instances_terminal_scheduled (mig 20260527213906) requires non-null
+    // scheduled_at for terminal statuses. Seed a past timestamp; the assertion under
+    // test is that the done instance is NOT re-scheduled (status + recurring stay intact).
     await insertTask({
       id: 'recur_done',
       text: 'Recurring Done',
       taskType: 'recurring_instance',
       dur: 30,
       status: 'done',
+      scheduledAt: '2026-04-01 10:00:00',
       recurring: true,
       sourceId: 'ht_test'
     });

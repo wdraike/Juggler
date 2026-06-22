@@ -22,7 +22,7 @@ import { formatDateKey, getWeekStart, parseDate, parseTimeToMinutes } from '../.
 import { DAY_NAMES, applyDefaults } from '../../state/constants';
 import { useAuth } from '../auth/AuthProvider';
 import { useTimezone } from '../../hooks/useTimezone';
-import { getNowInTimezone } from '../../utils/timezone';
+import { getNowInTimezone, buildServerClock } from '../../utils/timezone';
 import { isAllDayTask } from '../../utils/isAllDayTask';
 import useDocumentTitle from '../../hooks/useDocumentTitle';
 
@@ -71,6 +71,29 @@ export default function AppLayout() {
   var config = useConfig();
   var { activeTimezone, source: tzSource, browserTimezone } = useTimezone(config);
   var userTimezone = activeTimezone;
+
+  // AC3 (999.809): server-time clock — fetched once at app load so overdue computation
+  // uses canonical server time, not the client clock, eliminating clock-skew false-positives.
+  // offset = serverEpochMs - Date.now() at fetch time; serverClock.now() applies that offset.
+  // On fetch failure: offset=0 (degraded mode, AC3 approved fallback — clock-skew correction
+  // simply unavailable; real client clock used instead; never a wrong value for a present one).
+  var [serverClock, setServerClock] = useState(null);
+  useEffect(function() {
+    apiClient.get('/now').then(function(res) {
+      var serverEpochMs = res.data && res.data.epochMs;
+      if (typeof serverEpochMs !== 'number') {
+        console.warn('[server-clock] /api/now returned unexpected shape; using client clock (degraded mode, AC3)');
+        setServerClock(buildServerClock(serverEpochMs));
+        return;
+      }
+      setServerClock(buildServerClock(serverEpochMs));
+    }).catch(function(err) {
+      // AC3 approved fallback: log and fall back to real client clock (offset=0).
+      // Clock-skew correction is unavailable; overdue display may be off by client drift.
+      console.warn('[server-clock] Failed to fetch /api/now; using client clock (degraded mode, AC3)', err);
+      setServerClock(buildServerClock(null));
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // State
   var { taskState, dispatch, dispatchPersist, loading, saving, loadTasks, placements, loadPlacements, setStatus, updateTask, addTasks, deleteTask, createTask, taskStateRef, setPlacements, flushNow } = useTaskState();
@@ -456,8 +479,8 @@ export default function AppLayout() {
 
   // Derived dates
   var today = useMemo(() => {
-    return getNowInTimezone(userTimezone).todayDate;
-  }, [userTimezone]);
+    return getNowInTimezone(userTimezone, serverClock).todayDate;
+  }, [userTimezone, serverClock]);
 
   var selectedDate = useMemo(() => {
     var d = new Date(today); d.setDate(d.getDate() + dayOffset); return d;
@@ -582,7 +605,7 @@ export default function AppLayout() {
   // Blocked tasks: open tasks with at least one overdue undone dependency
   var blockedTaskIds = useMemo(() => {
     var ids = new Set();
-    var today = getNowInTimezone(userTimezone).todayDate;
+    var today = getNowInTimezone(userTimezone, serverClock).todayDate;
     var taskMap = {};
     visibleTasks.forEach(function(t) { taskMap[t.id] = t; });
     visibleTasks.forEach(t => {
@@ -601,7 +624,7 @@ export default function AppLayout() {
       if (hasOverdueDep) ids.add(t.id);
     });
     return ids;
-  }, [visibleTasks, statuses]);
+  }, [visibleTasks, statuses, serverClock, userTimezone]);
 
   // Past-due tasks: due date or scheduled date in the past, still open.
   // Recurring instances ARE eligible — an evening-medication task still
@@ -621,7 +644,7 @@ export default function AppLayout() {
   }
   var pastDueIds = useMemo(() => {
     var ids = new Set();
-    var now = getNowInTimezone(userTimezone);
+    var now = getNowInTimezone(userTimezone, serverClock);
     var today = now.todayDate;
     var nowMins = now.nowMins;
     var todayKey = now.todayKey;
@@ -653,11 +676,11 @@ export default function AppLayout() {
       }
     });
     return ids;
-  }, [visibleTasks, statuses, userTimezone, unplaced]);
+  }, [visibleTasks, statuses, userTimezone, serverClock, unplaced]);
 
   var overdueIds = useMemo(() => {
     var ids = new Set();
-    var now = getNowInTimezone(userTimezone);
+    var now = getNowInTimezone(userTimezone, serverClock);
     var today = now.todayDate;
     var nowMins = now.nowMins;
     var todayKey = now.todayKey;
@@ -683,7 +706,7 @@ export default function AppLayout() {
       }
     });
     return ids;
-  }, [visibleTasks, statuses, userTimezone, unplaced]);
+  }, [visibleTasks, statuses, userTimezone, serverClock, unplaced]);
 
   // Fixed tasks: placement_mode='fixed' (post-Phase 9 enum redesign)
   var fixedIds = useMemo(() => {
@@ -739,15 +762,15 @@ export default function AppLayout() {
 
   // Now minutes (ET) — update every minute
   var [nowMins, setNowMins] = useState(() => {
-    return getNowInTimezone(userTimezone).nowMins;
+    return getNowInTimezone(userTimezone, serverClock).nowMins;
   });
 
   useEffect(() => {
     var id = setInterval(() => {
-      setNowMins(getNowInTimezone(userTimezone).nowMins);
+      setNowMins(getNowInTimezone(userTimezone, serverClock).nowMins);
     }, 60000);
     return () => clearInterval(id);
-  }, []);
+  }, [userTimezone, serverClock]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // All unique tags — derived from scheduleTemplates if available, else legacy timeBlocks
   var uniqueTags = useMemo(() => {
@@ -1132,7 +1155,7 @@ export default function AppLayout() {
     );
   }
 
-  var isToday = selectedDateKey === getNowInTimezone(userTimezone).todayKey;
+  var isToday = selectedDateKey === getNowInTimezone(userTimezone, serverClock).todayKey;
   var expandedTaskObjs = expandedTasks.map(function(id) {
     // Prefer API-fetched detail (always complete) over task list
     if (expandedTaskData[id]) return expandedTaskData[id];
