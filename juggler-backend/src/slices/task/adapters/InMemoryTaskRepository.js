@@ -227,6 +227,18 @@ InMemoryTaskRepository.prototype.getSplitSiblingIds = function getSplitSiblingId
   return Promise.resolve(rows.map(function (r) { return { id: r.id }; }));
 };
 
+// In-memory counterpart of KnexTaskRepository.fetchOneShottedInstanceId.
+// Finds the surviving (occurrence_ordinal=1, split_ordinal=1) instance id for
+// a master that was just toggled off; returns the id string or null.
+InMemoryTaskRepository.prototype.fetchOneShottedInstanceId = function fetchOneShottedInstanceId(masterId, userId) {
+  var rows = this._allFor(userId).filter(function (r) {
+    return r.master_id === masterId
+      && r.occurrence_ordinal === 1
+      && r.split_ordinal === 1;
+  });
+  return Promise.resolve(rows.length > 0 ? rows[0].id : null);
+};
+
 InMemoryTaskRepository.prototype.expandToAllInstanceIds = function expandToAllInstanceIds(userId, ids) {
   if (!Array.isArray(ids) || ids.length === 0) return Promise.resolve(ids || []);
   var store = this._rows;

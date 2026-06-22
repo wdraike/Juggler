@@ -306,7 +306,7 @@ async function recurCleanup(ctx) {
             created_at: new Date(),
             updated_at: new Date()
           })
-          .onConflict('id').ignore();
+          .onConflict(['master_id', 'occurrence_ordinal', 'split_ordinal']).ignore();
       } else {
         var updatedTmpl = Object.assign({}, existing, row);
         var newRecur = typeof updatedTmpl.recur === 'string' ? JSON.parse(updatedTmpl.recur || 'null') : updatedTmpl.recur;

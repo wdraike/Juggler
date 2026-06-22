@@ -504,6 +504,25 @@ KnexTaskRepository.prototype.getSplitSiblingIds = function getSplitSiblingIds(us
     .select('id');
 };
 
+/**
+ * After a recurring→one-shot toggle-off with .ignore(), the INSERT at
+ * (master_id, occurrence_ordinal=1, split_ordinal=1) is skipped when a
+ * pre-existing instance already owns that ordinal slot. This method finds the
+ * surviving instance's OWN id so UpdateTask can re-read via tasks_v by the
+ * correct id (not the master id, which is no longer in tasks_v after recurring=0).
+ * Returns the instance id string, or null if no such row exists.
+ * @param {string} masterId
+ * @param {string} userId
+ * @returns {Promise<?string>}
+ */
+KnexTaskRepository.prototype.fetchOneShottedInstanceId = function fetchOneShottedInstanceId(masterId, userId) {
+  return this.db('task_instances')
+    .where({ master_id: masterId, user_id: userId, occurrence_ordinal: 1, split_ordinal: 1 })
+    .select('id')
+    .first()
+    .then(function (r) { return r ? r.id : null; });
+};
+
 // ── WRITES (delegate to lib/tasks-write; P1 new Date() timestamps) ────────────
 
 /**

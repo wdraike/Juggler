@@ -273,6 +273,15 @@ UpdateTask.prototype.execute = async function execute(input) {
 
   // narrow re-read (handler L1351-1357)
   var updatedRow = await this.repo.fetchTaskWithEventIds(id, userId);
+  // Toggle-off (recurring→0) edge case: the master row disappears from tasks_v
+  // (branch-1 filters recurring=1 only). If a pre-existing (1,1) instance kept its
+  // own id (INSERT .ignore() skipped our INSERT), re-read by that instance's id.
+  if (!updatedRow && existing.recurring === 1 && row.recurring === 0) {
+    var oneShottedId = await this.repo.fetchOneShottedInstanceId(id, userId);
+    if (oneShottedId) {
+      updatedRow = await this.repo.fetchTaskWithEventIds(oneShottedId, userId);
+    }
+  }
   var templateRows = await this.repo.getRecurringTemplateRows(userId);
   var srcMap = this.mappers.buildSourceMap(templateRows);
   await this.cache.invalidateTasks(userId);
