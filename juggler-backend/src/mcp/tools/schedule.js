@@ -3,7 +3,7 @@
  */
 
 const safeStringify = require('../safeStringify');
-const { runScheduleAndPersist, deriveSchedulePlacements } = require('../../slices/scheduler/facade');
+const { runScheduleAndPersist, getSchedulePlacements } = require('../../slices/scheduler/facade');
 const { withLock } = require('../../lib/sync-lock');
 const db = require('../../db');
 
@@ -21,7 +21,7 @@ function registerScheduleTools(server, userId) {
     {},
     async () => {
       var tz = await getUserTimezone();
-      const result = await deriveSchedulePlacements(userId, { timezone: tz });
+      const result = await getSchedulePlacements(userId, { timezone: tz });
       return { content: [{ type: 'text', text: safeStringify(result) }] };
     }
   );

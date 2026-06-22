@@ -225,7 +225,7 @@ functions, same signatures). It does not rewrite the scheduler.
 | Export | Description |
 |--------|-------------|
 | `runScheduleAndPersist(userId, ids, opts)` | Run the scheduler + persist the changed-row delta (S5). Returns `{ dayPlacements, unplaced, … }`. Used by POST /run and MCP `run_schedule`. |
-| `deriveSchedulePlacements(userId, opts)` | Read-only placement view DERIVED from the task read model (GET /api/tasks); does NOT mutate tasks. Used by MCP `get_schedule`. Replaced `getSchedulePlacements` + the `schedule_cache` read path (W3/W4). |
+| `getSchedulePlacements(userId, opts)` | Read-only placement computation; does NOT mutate tasks. Used by GET /placements and MCP `get_schedule`. |
 | `unifiedScheduleV2(...)` | Pure scheduling entry point. Used by the admin debug route for phase snapshots. |
 | `computeWindowCloseUtc` | Window-close UTC helper (parity with legacy entry module). |
 | `RunScheduleCommand` | Application orchestrator (the sole delta-write seam, S5). |
@@ -300,8 +300,8 @@ const { scheduler } = require('./slices/scheduler');
 const result = await scheduler.runScheduleAndPersist(userId, ids, opts);
 // { dayPlacements, unplaced, ... }
 
-// Read-only placement view (MCP get_schedule) — DERIVED from GET /api/tasks
-const placements = await scheduler.deriveSchedulePlacements(userId, opts);
+// Read-only (GET /placements, MCP get_schedule)
+const placements = await scheduler.getSchedulePlacements(userId, opts);
 ```
 
 ---
