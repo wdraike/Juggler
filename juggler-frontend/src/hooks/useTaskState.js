@@ -10,18 +10,22 @@
 
 import { useReducer, useCallback, useRef, useEffect, useState } from 'react';
 import taskReducer, { TASK_STATE_INIT } from '../state/taskReducer';
-import apiClient, { TZ_OVERRIDE_KEY, getAccessToken } from '../services/apiClient';
+import apiClient, { TZ_OVERRIDE_KEY, USER_TZ_KEY, getAccessToken } from '../services/apiClient';
 import { apiBase } from '../proxy-config';
-import { getBrowserTimezone, hydrateTaskTimezones, convertTimeForDisplay } from '../utils/timezone';
+import { hydrateTaskTimezones, convertTimeForDisplay, resolveDisplayTimezone } from '../utils/timezone';
 import { parseTimeToMinutes } from '../scheduler/dateHelpers';
 import { isTerminalStatus } from '../state/constants';
 
 function getHydrationTimezone() {
+  // Display in the user's CONFIGURED timezone, never the browser's (A1 /
+  // TZ-DISPLAY-1/3): explicit override → configured users.timezone → NY default.
+  var override = null;
+  var userTz = null;
   try {
-    var override = localStorage.getItem(TZ_OVERRIDE_KEY);
-    if (override) return override;
+    override = localStorage.getItem(TZ_OVERRIDE_KEY);
+    userTz = localStorage.getItem(USER_TZ_KEY);
   } catch (e) { /* ignore */ }
-  return getBrowserTimezone() || 'America/New_York';
+  return resolveDisplayTimezone({ override: override, userTimezone: userTz });
 }
 
 /**

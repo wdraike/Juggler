@@ -73,6 +73,20 @@ describe('GetConfig (== getAllConfig, H1-1/H1-3)', () => {
     expect(cache._calls.set[0][0]).toBe('user:' + USER + ':config');
   });
 
+  test('userTimezone surfaces the configured users.timezone for FE display (A1)', async () => {
+    var repo = new InMemoryConfigRepository({ userTimezones: { [USER]: 'America/New_York' } });
+    var uc = new App.GetConfig({ repo: repo, cache: fakeCache() });
+    var res = await uc.execute({ userId: USER });
+    expect(res.body.userTimezone).toBe('America/New_York');
+  });
+
+  test('userTimezone is null when the user has no configured timezone (A1)', async () => {
+    var repo = new InMemoryConfigRepository();
+    var uc = new App.GetConfig({ repo: repo, cache: fakeCache() });
+    var res = await uc.execute({ userId: USER });
+    expect(res.body.userTimezone).toBeNull();
+  });
+
   test('tempUnitPref defaults to "F" + null fields when no config rows (H1-3)', async () => {
     var repo = new InMemoryConfigRepository();
     var uc = new App.GetConfig({ repo: repo, cache: fakeCache() });

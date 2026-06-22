@@ -223,6 +223,12 @@ ConfigRepositoryPort.prototype.getConfigRows = function getConfigRows(_userId) {
   throw new Error('ConfigRepositoryPort.getConfigRows not implemented');
 };
 
+// The user's configured timezone (users.timezone), or null when unset (A1).
+// Surfaced to the frontend so display uses the configured tz over the browser's.
+ConfigRepositoryPort.prototype.getUserTimezone = function getUserTimezone(_userId) {
+  throw new Error('ConfigRepositoryPort.getUserTimezone not implemented');
+};
+
 ConfigRepositoryPort.prototype.getUserConfig = function getUserConfig(_userId, _configKey) {
   throw new Error('ConfigRepositoryPort.getUserConfig not implemented');
 };
@@ -358,6 +364,7 @@ var CONFIG_REPOSITORY_PORT_METHODS = Object.freeze([
   'getUserConfig',
   'getConfigRow',
   'upsertConfig',
+  'getUserTimezone',
   // projects
   'getProjects',
   'getMaxProjectSortOrder',

@@ -136,6 +136,27 @@ export function hydrateTaskTimezones(tasks, timezone) {
 var DEFAULT_TIMEZONE = 'America/New_York';
 
 /**
+ * Resolve the timezone to DISPLAY task times in. The user's configured timezone
+ * (users.timezone, surfaced as config.userTimezone) is authoritative over the
+ * browser's — fixes A1, where a 12:00-UTC task rendered 9:00 PM for a NY user on
+ * a +9-offset browser because hydration fell back to getBrowserTimezone().
+ * Contract TZ-DISPLAY-1 / R31.3.
+ *
+ * Order: explicit per-user override → configured user timezone →
+ * America/New_York default. Per TZ-DISPLAY-3, an unset user displays in
+ * America/New_York (NOT the browser tz — the browser is never authoritative
+ * for display). users.timezone carries a non-null NY DB default, so a real
+ * unset user resolves to NY here anyway.
+ *
+ * @param {{override?:?string, userTimezone?:?string}} opts
+ * @returns {string} IANA timezone
+ */
+export function resolveDisplayTimezone(opts) {
+  var o = opts || {};
+  return o.override || o.userTimezone || DEFAULT_TIMEZONE;
+}
+
+/**
  * Get "today" and "now" in the given timezone.
  * When timezone is null/undefined, defaults to America/New_York to match the shared
  * backend contract (shared/scheduler/getNowInTimezone.js) — R50.8 parity requirement.

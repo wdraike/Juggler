@@ -63,12 +63,16 @@ GetConfig.prototype.execute = async function execute(input) {
     this.repo.getLocations(userId),
     this.repo.getTools(userId),
     this.repo.getProjects(userId),
-    this.repo.getConfigRows(userId)
+    this.repo.getConfigRows(userId),
+    this.repo.getUserTimezone(userId)
   ]);
   var locations = res[0];
   var tools = res[1];
   var projects = res[2];
   var configRows = res[3];
+  // A1: the user's configured timezone (users.timezone), null when unset. The
+  // frontend uses this over the browser tz for task-time display (TZ-DISPLAY-1).
+  var userTimezone = res[4];
 
   var config = {};
   configRows.forEach(function (row) {
@@ -104,7 +108,8 @@ GetConfig.prototype.execute = async function execute(input) {
     scheduleTemplates: config.schedule_templates || null,
     templateDefaults: config.template_defaults || null,
     templateOverrides: config.template_overrides || null,
-    calSyncSettings: config.cal_sync_settings || null
+    calSyncSettings: config.cal_sync_settings || null,
+    userTimezone: userTimezone || null
   };
   await this.cache.set(cacheKey, result, 3600); // 1 hour TTL
   return { status: 200, body: result };
