@@ -46,7 +46,16 @@ router.post('/run', authenticateJWT, schedulerLimiter, withSyncLock(async functi
 }));
 
 /**
- * GET /api/schedule/placements — read-only: return scheduler placements
+ * GET /api/schedule/placements — read-only: return scheduler placements.
+ *
+ * W3 (DB single source): the JUGGLER FRONTEND no longer calls this endpoint —
+ * it now derives placements from the already-loaded /tasks data (each task
+ * carries server-converted local date/time; see useTaskState.derivePlacements).
+ * The route is RETAINED because the external juggler-mcp server (ClimbRS
+ * integration) still calls GET /api/schedule/placements over HTTP, and the
+ * in-process MCP get_schedule tool (src/mcp/tools/schedule.js) calls
+ * getSchedulePlacements directly. Deleting this read path is deferred until
+ * those MCP consumers are migrated (W3 follow-up, NOT this leg).
  */
 router.get('/placements', authenticateJWT, async function(req, res) {
   try {

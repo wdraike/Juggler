@@ -12,9 +12,9 @@ import { useReducer, useCallback, useRef, useEffect, useState } from 'react';
 import taskReducer, { TASK_STATE_INIT } from '../state/taskReducer';
 import apiClient, { TZ_OVERRIDE_KEY, USER_TZ_KEY, getAccessToken } from '../services/apiClient';
 import { apiBase } from '../proxy-config';
-import { hydrateTaskTimezones, convertTimeForDisplay, resolveDisplayTimezone } from '../utils/timezone';
-import { parseTimeToMinutes } from '../scheduler/dateHelpers';
+import { hydrateTaskTimezones, resolveDisplayTimezone } from '../utils/timezone';
 import { isTerminalStatus } from '../state/constants';
+import { derivePlacements } from '../utils/derivePlacements';
 
 function getHydrationTimezone() {
   // Display in the user's CONFIGURED timezone, never the browser's (A1 /
@@ -26,41 +26,6 @@ function getHydrationTimezone() {
     userTz = localStorage.getItem(USER_TZ_KEY);
   } catch (e) { /* ignore */ }
   return resolveDisplayTimezone({ override: override, userTimezone: userTz });
-}
-
-/**
- * Convert placement start times from UTC (scheduledAtUtc) to local minutes
- * in the browser timezone, and regroup by local dateKey.
- */
-function hydratePlacements(data) {
-  var tz = getHydrationTimezone();
-  var srcPlacements = data.dayPlacements || {};
-  var localPlacements = {};
-
-  Object.keys(srcPlacements).forEach(function(dk) {
-    var arr = srcPlacements[dk];
-    if (!arr) return;
-    arr.forEach(function(p) {
-      if (!p.task) return; // Skip orphaned placements (task was deleted)
-      if (p.scheduledAtUtc) {
-        var local = convertTimeForDisplay(p.scheduledAtUtc, tz);
-        if (local && local.time) {
-          var localMins = parseTimeToMinutes(local.time);
-          if (localMins !== null) p.start = localMins;
-          // Regroup by local dateKey (may differ from scheduler's dateKey)
-          var localDk = local.date || dk;
-          if (!localPlacements[localDk]) localPlacements[localDk] = [];
-          localPlacements[localDk].push(p);
-          return;
-        }
-      }
-      // Fallback: keep original dateKey and start
-      if (!localPlacements[dk]) localPlacements[dk] = [];
-      localPlacements[dk].push(p);
-    });
-  });
-
-  return { dayPlacements: localPlacements, unplaced: data.unplaced || [], warnings: data.warnings || [], hasPastTasks: data.hasPastTasks };
 }
 
 // Fields that map to task object properties for partial saves
@@ -124,15 +89,12 @@ export default function useTaskState() {
     return kept;
   }
 
-  // Load placements from backend scheduler
+  // Derive placements from the already-loaded /tasks data (W3 — DB single
+  // source). No /schedule/placements fetch: each task already carries its
+  // server-converted LOCAL date/time, so we just regroup the current tasks.
   const loadPlacements = useCallback(async () => {
-    if (placementTimerRef.current) clearTimeout(placementTimerRef.current);
-    try {
-      const res = await apiClient.get('/schedule/placements');
-      setPlacements(hydratePlacements(res.data));
-    } catch (error) {
-      console.error('Failed to load placements:', error);
-    }
+    const tasks = (taskStateRef.current && taskStateRef.current.tasks) || [];
+    setPlacements(derivePlacements(tasks));
   }, []);
 
   // Core save logic — sends only dirty fields per task to server
@@ -623,6 +585,17 @@ export default function useTaskState() {
       nudgePendingRef.current = null;
     };
   }, [loadPlacements]);
+
+  // Keep derived placements in sync with tasks (W3 — DB single source).
+  // Placements are now a pure function of the loaded tasks, so re-derive
+  // whenever the task list changes — after loadTasks() INIT, SSE upserts/
+  // patches/removals, optimistic adds, etc. This makes the explicit
+  // loadPlacements() calls in the SSE handlers redundant-but-harmless and
+  // guarantees the grid never lags the task state even if a handler forgets
+  // to call it.
+  useEffect(() => {
+    setPlacements(derivePlacements(taskState.tasks));
+  }, [taskState.tasks]);
 
   // Cleanup
   useEffect(() => {
