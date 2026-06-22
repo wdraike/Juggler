@@ -19,6 +19,7 @@ import { weatherIconUrl } from '../../utils/weatherIcons';
 import { getTheme } from '../../theme/colors';
 import { resolveLocationId } from '../../scheduler/locationHelpers';
 import { isAllDayTask } from '../../utils/isAllDayTask';
+import { coalesceAdjacentSplitChunks } from '../../utils/coalesceSplits';
 import { getBlocksForDate } from '../../scheduler/timeBlockHelpers';
 import ScheduleCard from './ScheduleCard';
 
@@ -165,6 +166,9 @@ export default function CalendarGrid({
   // Scheduler emits isAllDay placements with [DAY_START, DAY_END] windows
   // which would otherwise render as full-grid blocks.
   placements = (placements || []).filter(function(p) { return !p.isAllDay && !isAllDayTask(p.task); });
+  // R56: render-only — merge adjacent identical-master split chunks into one
+  // display block (carries _coalescedIds for edit fan-out). DB rows untouched.
+  placements = coalesceAdjacentSplitChunks(placements);
 
   // On mobile, enforce a minimum zoom so taller cards have room to spread
   if (isMobile && mode !== 'mini' && baseHourHeight < 80) baseHourHeight = 80;
@@ -631,8 +635,15 @@ export default function CalendarGrid({
                   <ScheduleCard
                     item={e.item}
                     status={statuses[e.item.task.id] || ''}
-                    onStatusChange={function(val) { onStatusChange(e.item.task.id, val); }}
-                onDelete={onDelete ? function() { onDelete(e.item.task.id); } : null}
+                    onStatusChange={function(val) {
+                      // R56: a status change on a merged split block fans out to every underlying chunk.
+                      var ids = (e.item._coalescedIds && e.item._coalescedIds.length > 1) ? e.item._coalescedIds : [e.item.task.id];
+                      ids.forEach(function(cid) { onStatusChange(cid, val); });
+                    }}
+                onDelete={onDelete ? function() {
+                      var ids = (e.item._coalescedIds && e.item._coalescedIds.length > 1) ? e.item._coalescedIds : [e.item.task.id];
+                      ids.forEach(function(cid) { onDelete(cid); });
+                    } : null}
                     onExpand={function() { onExpand(e.item.task.id); }}
                     darkMode={darkMode}
                     isBlocked={blockedTaskIds && blockedTaskIds.has(e.item.task.id)}
