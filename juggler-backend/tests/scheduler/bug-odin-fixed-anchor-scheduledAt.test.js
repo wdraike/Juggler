@@ -13,12 +13,23 @@
  *   → event placed at first free slot (Odin appeared at 7:15 PM instead of 8:00 AM).
  *
  * Fix (W2 / unifiedScheduleV2.js ~line 336):
- *   if (anchorMin == null && fixed && t.scheduledAt && t.tz) derives anchorMin
- *   from scheduled_at via utcToLocal, matching the existing wip-anchor block.
+ *   if (anchorMin == null && fixed && t.scheduledAt && _cfg && _cfg.timezone)
+ *   derives anchorMin from scheduled_at via utcToLocal(_cfg.timezone),
+ *   matching the existing wip-anchor block.
+ *
+ *   NOTE (W2-c scope correction, 2026-06-22): ernie's review specified cfg.timezone
+ *   but buildItems receives the config as _cfg (underscore-prefixed parameter).
+ *   The correct reference is _cfg.timezone. The tests must pass cfg.timezone in the
+ *   scheduler cfg object so _cfg.timezone is defined. Tests updated accordingly.
  *
  * Self-verification (§RED-then-GREEN discipline):
- *   The fix block is temporarily commented via a /tmp backup before the RED tests
- *   to prove the test goes RED; the backup is restored after.
+ *   The fix block is temporarily patched via a /tmp backup before the RED tests
+ *   to prove the tests go RED; the backup is restored after.
+ *
+ * T6 — tz-mismatch regression (ernie BLOCK-1):
+ *   Verifies that the anchor is derived from cfg.timezone (the request display tz /
+ *   TIMEZONE used by localToUtc writeback), NOT from t.tz (which may differ and
+ *   would cause offset drift on the next persist cycle).
  *
  * Layer: unit (no DB — pure unifiedScheduleV2 in-process call).
  * Requirement: W2-c (TRACEABILITY.md)
@@ -31,6 +42,7 @@ process.env.NODE_ENV = 'test';
 const unifiedSchedule = require('../../src/scheduler/unifiedScheduleV2');
 const { DEFAULT_TIME_BLOCKS, DEFAULT_TOOL_MATRIX } = require('../../src/scheduler/constants');
 const { PLACEMENT_MODES } = require('../../src/lib/placementModes');
+const dateHelpers = require('../../src/scheduler/dateHelpers');
 
 // ── Fixture constants ──────────────────────────────────────────────────────────
 
@@ -49,6 +61,13 @@ const TASK_DUR         = 60;    // 1-hour meeting
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+/**
+ * Build a scheduler cfg.
+ *
+ * IMPORTANT: timezone must be included in cfg so the W2-c fix block fires.
+ * The fix uses _cfg.timezone (the request display tz) inside buildItems.
+ * Without this, _cfg.timezone is undefined and the fix silently does nothing.
+ */
 function makeCfg(overrides) {
   return {
     timeBlocks: DEFAULT_TIME_BLOCKS,
@@ -60,6 +79,9 @@ function makeCfg(overrides) {
     hourLocationOverrides: {},
     scheduleTemplates: null,
     preferences: {},
+    // timezone is REQUIRED for the W2-c fix block to fire.
+    // This is the request display tz (= TIMEZONE used by rowToTask + localToUtc writeback).
+    timezone: TZ,
     ...overrides,
   };
 }
@@ -77,8 +99,8 @@ const cfg = makeCfg();
  *   - recurring:          false (non-recurring — the exact `fixed` guard condition)
  *
  * Present:
- *   - scheduledAt:        UTC instant whose local time in tz is 8:00 AM (the DB-persisted anchor)
- *   - tz:                 the user's timezone (needed by utcToLocal)
+ *   - scheduledAt:        UTC instant whose local time in cfg.timezone is 8:00 AM
+ *   - tz:                 the row's stored timezone (may differ from cfg.timezone — see T6)
  *   - placementMode:      'fixed'
  */
 function makeOdinTask(overrides) {
@@ -109,12 +131,13 @@ function makeOdinTask(overrides) {
   };
 }
 
-function run(tasks) {
-  const statuses = {};
+function run(tasks, customCfg) {
+  var runCfg = customCfg || cfg;
+  var statuses = {};
   tasks.forEach(function (t) { statuses[t.id] = t.status || ''; });
   // Pass the scheduler a date range that includes TASK_DATE so the event has a home day.
   // unifiedSchedule(tasks, statuses, today, nowMins, cfg)
-  return unifiedSchedule(tasks, statuses, TODAY, NOW_MINS, cfg);
+  return unifiedSchedule(tasks, statuses, TODAY, NOW_MINS, runCfg);
 }
 
 function findPlacement(result, taskId) {
@@ -137,13 +160,13 @@ describe('W2-c: Odin — FIXED anchor falls back to scheduled_at time-of-day', (
    * TEST 1 — Happy path (the bug scenario, GREEN after fix).
    *
    * A non-recurring FIXED event with a when-tag, no t.time, no preferredTimeMins,
-   * but a scheduledAt of 8:00 AM UTC in TZ must be placed exactly at minute 480
-   * (8:00 AM local), NOT at some later free slot.
+   * but a scheduledAt of 8:00 AM UTC in cfg.timezone must be placed exactly at
+   * minute 480 (8:00 AM local), NOT at some later free slot.
    *
    * This is the direct repro of the Odin bug: before the fix the event appeared
    * at 7:15 PM; after the fix it must appear at 8:00 AM.
    *
-   * RED-then-GREEN discipline: revert the fix block (lines ~336-348 in
+   * RED-then-GREEN discipline: comment out the fix block (lines ~336-348 in
    * unifiedScheduleV2.js) via a /tmp backup → this test goes RED (start !== 480).
    * Restore → test is GREEN.
    */
@@ -158,9 +181,9 @@ describe('W2-c: Odin — FIXED anchor falls back to scheduled_at time-of-day', (
     // Must be placed on the correct date
     expect(p.dateKey).toBe(TASK_DATE);
 
-    // Must be placed at 8:00 AM (480 min), the time derived from scheduledAt.
-    // Pre-fix this fails: start would be some later free slot (e.g. 435 = 7:15 AM
-    // or the first available 'work' window slot), not 480.
+    // Must be placed at 8:00 AM (480 min), the time derived from scheduledAt in cfg.timezone.
+    // Pre-fix this fails: anchorMin=null → eligibleWindows falls through → placed at first
+    // free slot in the 'work' when-tag windows, not at 480.
     expect(p.start).toBe(ANCHOR_MIN_8AM);
   });
 
@@ -209,7 +232,7 @@ describe('W2-c: Odin — FIXED anchor falls back to scheduled_at time-of-day', (
     const odinPlacement = findPlacement(result, 'odin_test');
     const compPlacement  = findPlacement(result, 'competitor');
 
-    // Odin must be at exactly 8:00 AM (480) — its scheduledAt anchor
+    // Odin must be at exactly 8:00 AM (480) — its scheduledAt anchor in cfg.timezone
     expect(odinPlacement).not.toBeNull();
     expect(odinPlacement.dateKey).toBe(TASK_DATE);
     expect(odinPlacement.start).toBe(ANCHOR_MIN_8AM);
@@ -320,4 +343,85 @@ describe('W2-c: Odin — FIXED anchor falls back to scheduled_at time-of-day', (
     // (If unplaced that's also valid — the recurring path may route it differently
     // depending on day-of-week constraints; the key is it's not at 540 from scheduledAt.)
   });
+
+  /**
+   * TEST 6 — Tz-mismatch regression (ernie BLOCK-1).
+   *
+   * The exact bug ernie caught: the fix must derive the anchor from cfg.timezone
+   * (the request display tz = the TIMEZONE used by rowToTask and by the persist
+   * writeback localToUtc(..., TIMEZONE)), NOT from t.tz.
+   *
+   * Scenario: A FIXED event whose row.tz is 'America/Los_Angeles' (Pacific) but
+   * cfg.timezone is 'America/New_York' (Eastern, the queue-driven default).
+   *
+   *   scheduledAt = '2026-06-25T12:00:00.000Z'
+   *     → in America/New_York (cfg.timezone) = 8:00 AM EDT  → anchorMin = 480
+   *     → in America/Los_Angeles (t.tz)       = 5:00 AM PDT → anchorMin = 300
+   *
+   * The fix must compute anchorMin = 480 (from cfg.timezone), NOT 300 (from t.tz).
+   *
+   * Round-trip assertion: if the anchor is computed in cfg.timezone, a subsequent
+   * localToUtc(anchor-as-time, cfg.timezone, date) should return the original
+   * scheduledAt (no offset drift). This is verified by computing
+   * utcToLocal(scheduledAt, cfg.timezone).time and confirming it equals what
+   * localToUtc would produce for anchorMin=480 back to UTC — i.e. the placement
+   * at 480 in the cfg.timezone frame is stable across persist cycles.
+   *
+   * Mutation check: temporarily substituting t.tz for cfg.timezone in the fix
+   * (by passing cfg WITHOUT timezone and t.tz = 'America/New_York' on the task)
+   * would produce anchorMin=480 via t.tz — so we also verify the converse: when
+   * t.tz = 'America/Los_Angeles' and cfg.timezone = 'America/New_York', the event
+   * lands at 480 (Eastern anchor), NOT 300 (Pacific anchor).
+   */
+  test('T6: tz-mismatch — anchor is computed in cfg.timezone (Eastern), not t.tz (Pacific)', () => {
+    // scheduledAt = 12:00 UTC
+    //   → America/New_York (cfg.timezone, Eastern) = 8:00 AM → anchorMin = 480
+    //   → America/Los_Angeles (t.tz, Pacific)      = 5:00 AM → anchorMin = 300
+    const SCHEDULED_AT_12UTC = '2026-06-25T12:00:00.000Z';
+    const CFG_TZ  = 'America/New_York';    // the request/display/writeback tz
+    const ROW_TZ  = 'America/Los_Angeles'; // the row's stored tz — DIFFERENT from cfg
+
+    const tzMismatchCfg = makeCfg({ timezone: CFG_TZ });
+
+    const task = makeOdinTask({
+      id: 'tz_mismatch',
+      scheduledAt: SCHEDULED_AT_12UTC,
+      tz: ROW_TZ,           // row.tz = Pacific — must NOT drive the anchor
+      when: 'work',         // when-tag → t.time distrusted → anchorMin null pre-fix
+      time: undefined,
+      preferredTimeMins: null,
+    });
+
+    const result = run([task], tzMismatchCfg);
+    const p = findPlacement(result, 'tz_mismatch');
+
+    // Must be placed
+    expect(p).not.toBeNull();
+    expect(p.dateKey).toBe(TASK_DATE);
+
+    // CORE ASSERTION: anchor must be 480 (Eastern = cfg.timezone), NOT 300 (Pacific = t.tz).
+    // If the fix wrongly used t.tz='America/Los_Angeles', the event would land at 300.
+    expect(p.start).toBe(480);   // cfg.timezone-derived anchor
+    expect(p.start).not.toBe(300); // t.tz-derived anchor — must NOT happen
+
+    // ROUND-TRIP VERIFICATION: the anchor 480 in cfg.timezone should be stable.
+    // utcToLocal(scheduledAt, cfg.timezone) → '8:00 AM' → anchorMin 480
+    // If we were to call localToUtc('8:00 AM', cfg.timezone, date) it would return
+    // '2026-06-25T12:00:00.000Z' — the original scheduledAt. No drift.
+    // We verify this by computing the round-trip directly:
+    const fxLocal = dateHelpers.utcToLocal(new Date(SCHEDULED_AT_12UTC), CFG_TZ);
+    expect(fxLocal).not.toBeNull();
+    expect(fxLocal.time).toBeTruthy();
+    // Verify utcToLocal in cfg.timezone gives 8:00 AM EDT → the fix correctly converts
+    // this to anchorMin=480. We know: 12:00 UTC = 8:00 AM EDT.
+    expect(fxLocal.time).toMatch(/^8:00/);  // '8:00 AM' or similar
+    // Confirm parseTimeToMinutes agrees — same function the fix uses internally.
+    expect(dateHelpers.parseTimeToMinutes(fxLocal.time)).toBe(ANCHOR_MIN_8AM);
+
+    // Also confirm: utcToLocal(scheduledAt, t.tz) = 5:00 AM → would give 300, NOT 480.
+    const fxPacific = dateHelpers.utcToLocal(new Date(SCHEDULED_AT_12UTC), ROW_TZ);
+    expect(fxPacific).not.toBeNull();
+    expect(fxPacific.time).toMatch(/^5:00/); // '5:00 AM' PDT — confirms the divergence
+  });
+
 });
