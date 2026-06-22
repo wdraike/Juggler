@@ -256,41 +256,10 @@ describe('runScheduleAndPersist: recurring instances', () => {
 // Cache management
 // ═══════════════════════════════════════════════════════════════
 
-describe('runScheduleAndPersist: cache', () => {
-  test('writes schedule_cache to user_config', async () => {
-    if (!available) return;
-    await seedTask({ text: 'Cache test', dur: 30 });
-    await runScheduleAndPersist(USER_ID);
-
-    var cacheRow = await db('user_config')
-      .where({ user_id: USER_ID, config_key: 'schedule_cache' }).first();
-    expect(cacheRow).toBeDefined();
-    var cache = typeof cacheRow.config_value === 'string' ? JSON.parse(cacheRow.config_value) : cacheRow.config_value;
-    expect(cache.generatedAt).toBeTruthy();
-    expect(cache.dayPlacements).toBeDefined();
-    expect(cache.timezone).toBe(TZ);
-  });
-
-  test('cache updates on subsequent runs', async () => {
-    if (!available) return;
-    await seedTask({ text: 'Cache update', dur: 30 });
-    await runScheduleAndPersist(USER_ID);
-    var cache1 = await db('user_config')
-      .where({ user_id: USER_ID, config_key: 'schedule_cache' }).first();
-    var c1 = typeof cache1.config_value === 'string' ? JSON.parse(cache1.config_value) : cache1.config_value;
-    var gen1 = c1.generatedAt;
-
-    // Wait a moment then run again
-    await new Promise(r => setTimeout(r, 50));
-    await runScheduleAndPersist(USER_ID);
-    var cache2 = await db('user_config')
-      .where({ user_id: USER_ID, config_key: 'schedule_cache' }).first();
-    var c2 = typeof cache2.config_value === 'string' ? JSON.parse(cache2.config_value) : cache2.config_value;
-    var gen2 = c2.generatedAt;
-
-    expect(new Date(gen2).getTime()).toBeGreaterThan(new Date(gen1).getTime());
-  });
-});
+// NOTE: the `runScheduleAndPersist: cache` block was removed in the W3/W4
+// DB-single-source refactor. The separate `user_config` schedule_cache blob is
+// gone — placement views are now DERIVED on read from the /tasks read model via
+// deriveSchedulePlacements(). See src/slices/scheduler/README.md (W3/W4).
 
 // ═══════════════════════════════════════════════════════════════
 // Terminal status tasks

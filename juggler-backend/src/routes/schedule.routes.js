@@ -7,7 +7,7 @@ var rateLimit = require('express-rate-limit');
 var router = express.Router();
 var { authenticateJWT } = require('../middleware/jwt-auth');
 var authenticateAdmin = require('../middleware/authenticateAdmin');
-var { runScheduleAndPersist, getSchedulePlacements } = require('../slices/scheduler/facade');
+var { runScheduleAndPersist } = require('../slices/scheduler/facade');
 var { withSyncLock } = require('../lib/sync-lock');
 var schedulerSession = require('../scheduler/schedulerSession');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
@@ -45,28 +45,12 @@ router.post('/run', authenticateJWT, schedulerLimiter, withSyncLock(async functi
   }
 }));
 
-/**
- * GET /api/schedule/placements — read-only: return scheduler placements.
- *
- * W3 (DB single source): the JUGGLER FRONTEND no longer calls this endpoint —
- * it now derives placements from the already-loaded /tasks data (each task
- * carries server-converted local date/time; see useTaskState.derivePlacements).
- * The route is RETAINED because the external juggler-mcp server (ClimbRS
- * integration) still calls GET /api/schedule/placements over HTTP, and the
- * in-process MCP get_schedule tool (src/mcp/tools/schedule.js) calls
- * getSchedulePlacements directly. Deleting this read path is deferred until
- * those MCP consumers are migrated (W3 follow-up, NOT this leg).
- */
-router.get('/placements', authenticateJWT, async function(req, res) {
-  try {
-    var opts = { timezone: req.headers['x-timezone'] || 'America/New_York' };
-    var placements = await getSchedulePlacements(req.user.id, opts);
-    res.json(placements);
-  } catch (error) {
-    logger.error('Schedule placements error:', error);
-    res.status(500).json({ error: 'Failed to get placements' });
-  }
-});
+// GET /api/schedule/placements was REMOVED (W3/W4 — DB single source).
+// Placements are now DERIVED from the task read model: the juggler frontend
+// derives from GET /api/tasks (useTaskState.derivePlacements), the in-process
+// MCP get_schedule tool calls deriveSchedulePlacements (scheduler facade), and
+// the external juggler-mcp server derives from GET /api/tasks in-process. The
+// separate schedule_cache read/write path was deleted with it.
 
 // POST /api/schedule/nudge — enqueue a scheduler run when an active task's end time passes
 router.post('/nudge', authenticateJWT, schedulerLimiter, async function(req, res) {

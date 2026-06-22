@@ -8,7 +8,7 @@
  *   const res = await scheduler.runScheduleAndPersist(userId, undefined, opts);
  *
  *   // direct named
- *   const { getSchedulePlacements, RunScheduleCommand } = require('./slices/scheduler');
+ *   const { deriveSchedulePlacements, RunScheduleCommand } = require('./slices/scheduler');
  *
  * No logic lives here — it is a flat re-export of facade.js (mirrors
  * slices/task/index.js + slices/weather/index.js).

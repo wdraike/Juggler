@@ -59,6 +59,58 @@ async function apiCall(method, endpoint, body) {
   return JSON.parse(text);
 }
 
+// ── Placement derivation (W3/W4 — DB single source) ──
+// The backend no longer exposes GET /api/schedule/placements; the read-only
+// placement view is DERIVED from the task read model. This is the same ~12-line
+// derive the juggler frontend and the in-process MCP tool use, ported inline
+// here because this MCP server is a separate Node package (no shared import).
+
+/**
+ * Parse a task `time` string into minutes-since-midnight. Tasks from
+ * GET /api/tasks carry `time` as "H:MM AM/PM" (e.g. "9:05 AM", "1:30 PM").
+ * Returns null for empty/unparseable values.
+ */
+function parseTimeToMinutes(timeStr) {
+  if (!timeStr) return null;
+  const m = String(timeStr).trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM|am|pm|a|p)/i);
+  if (m) {
+    let h = parseInt(m[1], 10);
+    const min = parseInt(m[2], 10);
+    const ap = m[3].toLowerCase();
+    if ((ap === 'pm' || ap === 'p') && h !== 12) h += 12;
+    if ((ap === 'am' || ap === 'a') && h === 12) h = 0;
+    return h * 60 + min;
+  }
+  const m24 = String(timeStr).trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (m24) {
+    const h = parseInt(m24[1], 10);
+    const min = parseInt(m24[2], 10);
+    if (h >= 0 && h <= 23 && min >= 0 && min <= 59) return h * 60 + min;
+  }
+  return null;
+}
+
+/**
+ * Group tasks (from GET /api/tasks) into { dayPlacements, unplaced }.
+ * Mirrors juggler-frontend/src/utils/derivePlacements.js.
+ */
+function deriveSchedulePlacements(tasks) {
+  const dayPlacements = {};
+  const unplaced = [];
+  (tasks || []).forEach((t) => {
+    if (!t) return;
+    if (t.unscheduled || (t._unplacedReason && !t.scheduledAt)) { unplaced.push(t); return; }
+    if (t.date && t.time) {
+      const start = parseTimeToMinutes(t.time);
+      if (start != null) {
+        if (!dayPlacements[t.date]) dayPlacements[t.date] = [];
+        dayPlacements[t.date].push({ task: t, start, end: start + (t.dur || 0) });
+      }
+    }
+  });
+  return { dayPlacements, unplaced, warnings: [] };
+}
+
 const SERVICE_NAME = process.env.SERVICE_NAME || 'strivers';
 const server = new McpServer({ name: SERVICE_NAME, version: '1.0.0' });
 
@@ -237,8 +289,11 @@ server.tool(
   'Get current schedule placements (read-only).',
   {},
   async () => {
-    const data = await apiCall('GET', '/api/schedule/placements');
-    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    // W3/W4 (DB single source): derive placements from the task read model
+    // instead of the removed GET /api/schedule/placements cache endpoint.
+    const data = await apiCall('GET', '/api/tasks');
+    const result = deriveSchedulePlacements(data && data.tasks);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   }
 );
 

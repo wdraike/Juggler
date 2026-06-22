@@ -43,8 +43,8 @@
  * `KnexScheduleRepository` for the call, so all writes participate in the
  * caller's `db.transaction(...)` (commit/rollback together). This command never
  * opens its own transaction. Deadlock-retry (MAX_RETRIES=3 on ER_LOCK_DEADLOCK)
- * and the sync-lock claim stay in the caller (`runScheduleAndPersist` /
- * `getSchedulePlacements`), NOT here — the retry must re-open the WHOLE
+ * and the sync-lock claim stay in the caller (`runScheduleAndPersist`),
+ * NOT here — the retry must re-open the WHOLE
  * transaction (read + compute + write), which only the caller can do.
  *
  * ── INVARIANT P1 (new Date(), never the Knex now-builder) ────────────────────
