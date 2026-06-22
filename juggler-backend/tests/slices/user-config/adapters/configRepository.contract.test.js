@@ -375,7 +375,7 @@ Object.keys(ADAPTERS).forEach(function (name) {
       await A.seedTasks(repo, [
         taskRow({ status: '', task_type: 'task' }),                 // active
         taskRow({ status: 'wip', task_type: 'task' }),              // active
-        taskRow({ status: 'done', task_type: 'task' }),             // inactive — excluded
+        taskRow({ status: 'done', task_type: 'task', scheduled_at: '2026-04-01 10:00:00' }),             // inactive — excluded
         taskRow({ status: '', task_type: 'recurring_template' }),   // excluded (template)
         taskRow({ status: '', task_type: 'task', user_id: OTHER_USER }) // other tenant
       ]);
@@ -418,7 +418,7 @@ Object.keys(ADAPTERS).forEach(function (name) {
       await A.seedTasks(repo, [
         taskRow({ status: '', when: 'morning' }),       // included
         taskRow({ status: 'wip', when: 'evening' }),    // included
-        taskRow({ status: 'done', when: 'morning' }),   // excluded (done)
+        taskRow({ status: 'done', when: 'morning', scheduled_at: '2026-04-01 10:00:00' }),   // excluded (done)
         taskRow({ status: '', when: 'anytime' }),       // excluded (anytime)
         taskRow({ status: '', when: '' }),              // excluded (empty)
         taskRow({ status: '', when: null })             // excluded (null)

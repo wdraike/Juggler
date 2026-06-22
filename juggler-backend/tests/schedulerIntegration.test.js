@@ -10,76 +10,79 @@
  * - Idempotency: running scheduler twice produces same results
  * - Reset logic: original_scheduled_at is restored before each run
  *
- * Skip these tests if no MySQL is available (CI without Docker).
+ * TEST-FR-001: DB-unavailability FAILS LOUD — never silently passes.
+ * If the DB is unreachable, beforeAll throws and the whole suite fails,
+ * rather than allowing zero-assertion bodies to report a false PASS.
+ * Model: configRepository.contract.test.js / requireDB.js assertDbAvailable.
  */
 
 var { assertDbAvailable } = require('./helpers/requireDB');
+var { runScheduleAndPersist } = require('../src/scheduler/runSchedule');
 
 var knex;
-var runScheduleModule;
 
 // Check if test DB is available before running.
-// Defaults target test-bed (MySQL @3407, root/rootpass). NEVER default to 3307
-// (Cloud SQL Proxy = production) — an integration test must not touch prod.
-var DB_HOST = process.env.TEST_DB_HOST || '127.0.0.1';
-var DB_PORT = process.env.TEST_DB_PORT || 3407;
-var DB_NAME = process.env.TEST_DB_NAME || 'juggler_test';
-var DB_USER = process.env.TEST_DB_USER || 'root';
-var DB_PASS = process.env.TEST_DB_PASSWORD || 'rootpass';
-
-var dbAvailable = false;
+// Uses DB_NAME (the Oscar/test-bed standard env var, per knexfile.js test config).
+// Falls back to TEST_DB_NAME for legacy invocations, then 'juggler_test' as a last
+// resort — keeping the single-env-var contract: pass DB_NAME and the whole suite uses it.
+// NEVER defaults to 3307 (Cloud SQL Proxy = production).
+var DB_HOST = process.env.DB_HOST || process.env.TEST_DB_HOST || '127.0.0.1';
+var DB_PORT = process.env.DB_PORT || process.env.TEST_DB_PORT || 3407;
+var DB_NAME = process.env.DB_NAME || process.env.TEST_DB_NAME || 'juggler_test';
+var DB_USER = process.env.DB_USER || process.env.TEST_DB_USER || 'root';
+var DB_PASS = process.env.DB_PASSWORD || process.env.TEST_DB_PASSWORD || 'rootpass';
 
 beforeAll(async function() {
+  // TEST-FR-001: assertDbAvailable() throws (fail-loud) if the DB is unreachable.
+  // It does NOT set a flag — it propagates the error to Jest, which marks the suite
+  // as failed and prevents any test body from running (and passing with 0 assertions).
   await assertDbAvailable();
-  try {
-    knex = require('knex')({
-      client: 'mysql2',
-      connection: {
-        host: DB_HOST,
-        port: DB_PORT,
-        user: DB_USER,
-        password: DB_PASS,
-        database: DB_NAME,
-        charset: 'utf8mb4',
-        timezone: '+00:00',
-        dateStrings: true
-      },
-      migrations: {
-        directory: './src/db/migrations',
-        tableName: 'knex_migrations'
-      }
-    });
 
-    // Test connection
-    await knex.raw('SELECT 1');
-    dbAvailable = true;
-
-    // Run migrations
-    await knex.migrate.latest();
-
-    // Seed test user
-    var userId = 'test-user-scheduler-integration';
-    await knex('users').insert({
-      id: userId,
-      email: 'scheduler-test@juggler.local',
-      name: 'Scheduler Test User',
-      timezone: 'America/New_York'
-    }).onConflict('id').merge();
-
-    // Seed config
-    var configs = [
-      { user_id: userId, config_key: 'time_blocks', config_value: JSON.stringify(require('./helpers/real-config-fixtures').REAL_TIME_BLOCKS) },
-      { user_id: userId, config_key: 'tool_matrix', config_value: JSON.stringify(require('./helpers/real-config-fixtures').REAL_TOOL_MATRIX) },
-      { user_id: userId, config_key: 'loc_schedules', config_value: JSON.stringify(require('./helpers/real-config-fixtures').REAL_LOC_SCHEDULES) },
-      { user_id: userId, config_key: 'loc_schedule_defaults', config_value: JSON.stringify(require('./helpers/real-config-fixtures').REAL_LOC_SCHEDULE_DEFAULTS) },
-      { user_id: userId, config_key: 'preferences', config_value: JSON.stringify({ pullForwardDampening: true, splitDefault: false, splitMinDefault: 15 }) }
-    ];
-    for (var i = 0; i < configs.length; i++) {
-      await knex('user_config').insert(configs[i]).onConflict(['user_id', 'config_key']).merge();
+  knex = require('knex')({
+    client: 'mysql2',
+    connection: {
+      host: DB_HOST,
+      port: DB_PORT,
+      user: DB_USER,
+      password: DB_PASS,
+      database: DB_NAME,
+      charset: 'utf8mb4',
+      timezone: '+00:00',
+      dateStrings: true
+    },
+    migrations: {
+      directory: './src/db/migrations',
+      tableName: 'knex_migrations'
     }
-  } catch (e) {
-    console.warn('Test DB not available (' + e.message + '). Skipping integration tests.');
-    dbAvailable = false;
+  });
+
+  // Verify this pool can actually reach the named DB (assertDbAvailable uses the
+  // default juggler_test pool; this pool uses the leg-specific DB_NAME). If this
+  // throws, the error propagates — never swallowed.
+  await knex.raw('SELECT 1');
+
+  // Run migrations
+  await knex.migrate.latest();
+
+  // Seed test user
+  var userId = 'test-user-scheduler-integration';
+  await knex('users').insert({
+    id: userId,
+    email: 'scheduler-test@juggler.local',
+    name: 'Scheduler Test User',
+    timezone: 'America/New_York'
+  }).onConflict('id').merge();
+
+  // Seed config
+  var configs = [
+    { user_id: userId, config_key: 'time_blocks', config_value: JSON.stringify(require('./helpers/real-config-fixtures').REAL_TIME_BLOCKS) },
+    { user_id: userId, config_key: 'tool_matrix', config_value: JSON.stringify(require('./helpers/real-config-fixtures').REAL_TOOL_MATRIX) },
+    { user_id: userId, config_key: 'loc_schedules', config_value: JSON.stringify(require('./helpers/real-config-fixtures').REAL_LOC_SCHEDULES) },
+    { user_id: userId, config_key: 'loc_schedule_defaults', config_value: JSON.stringify(require('./helpers/real-config-fixtures').REAL_LOC_SCHEDULE_DEFAULTS) },
+    { user_id: userId, config_key: 'preferences', config_value: JSON.stringify({ pullForwardDampening: true, splitDefault: false, splitMinDefault: 15 }) }
+  ];
+  for (var i = 0; i < configs.length; i++) {
+    await knex('user_config').insert(configs[i]).onConflict(['user_id', 'config_key']).merge();
   }
 }, 30000);
 
@@ -149,45 +152,66 @@ async function cleanTasks() {
 describe('UC-15: DB Persistence', function() {
 
   beforeEach(async function() {
-    if (!dbAvailable) return;
     await cleanTasks();
   });
 
   test('UC-15.1: Scheduler idempotent — two runs produce same placement', async function() {
-    if (!dbAvailable) return;
-
-    // Insert a simple task for today
-    var now = new Date();
-    var todayISO = now.toISOString().split('T')[0];
+    // Seed an ACTIVE task with no scheduled_at — the scheduler must place it.
     await insertTask({
       id: 'idem_t1',
       text: 'Idempotent Test',
-      dur: 30,
-      scheduledAt: todayISO + ' 14:00:00'
+      dur: 30
+      // no scheduledAt — scheduler will assign it
     });
 
-    // Read back and verify it's there
-    var row = await knex('task_masters').where('id', 'idem_t1').first();
-    expect(row).toBeDefined();
-    expect(row.text).toBe('Idempotent Test');
+    // First run: scheduler places the task.
+    await runScheduleAndPersist(TEST_USER);
+    var inst1 = await knex('task_instances').where('master_id', 'idem_t1').first();
+    expect(inst1).toBeDefined();
+    var placedAt1 = inst1.scheduled_at;
+    // The scheduler MUST have placed the task — assert a real, non-null timestamp.
+    // A null here means the scheduler failed to place it; that is itself a failure
+    // and the idempotency assertion below would be vacuously null===null.
+    expect(placedAt1).not.toBeNull();
+    expect(typeof placedAt1).toBe('string');
+    expect(placedAt1.length).toBeGreaterThan(0);
+
+    // Second run: must produce IDENTICAL placement (exact equality, not just truthy).
+    await runScheduleAndPersist(TEST_USER);
+    var inst2 = await knex('task_instances').where('master_id', 'idem_t1').first();
+    expect(inst2).toBeDefined();
+    expect(inst2.scheduled_at).toBe(placedAt1);
   });
 
   test('UC-15.5: Task status preserved across scheduler runs', async function() {
-    if (!dbAvailable) return;
-
     // chk_task_instances_terminal_scheduled (mig 20260527213906) requires non-null
     // scheduled_at for terminal statuses. Seed a past timestamp; the assertion under
-    // test is that status='done' is PRESERVED, not the timestamp value.
+    // test is that BOTH status='done' AND the exact scheduled_at timestamp are
+    // PRESERVED (unchanged) after the scheduler runs.
+    var SEEDED_SCHEDULED_AT = '2026-04-01 10:00:00';
     await insertTask({
       id: 'done_task',
       text: 'Already Done',
       dur: 30,
       status: 'done',
-      scheduledAt: '2026-04-01 10:00:00'
+      scheduledAt: SEEDED_SCHEDULED_AT
     });
 
-    var inst = await knex('task_instances').where('master_id', 'done_task').first();
-    expect(inst.status).toBe('done');
+    // Capture the pre-run state to have an exact baseline for the timestamp.
+    var instBefore = await knex('task_instances').where('master_id', 'done_task').first();
+    var scheduledAtBefore = instBefore.scheduled_at;
+    // Confirm the seed took — must be a real persisted value, not null.
+    expect(scheduledAtBefore).not.toBeNull();
+    expect(scheduledAtBefore).toBeTruthy();
+
+    // Invoke the real scheduler — it must NOT modify done instances.
+    await runScheduleAndPersist(TEST_USER);
+
+    var instAfter = await knex('task_instances').where('master_id', 'done_task').first();
+    expect(instAfter.status).toBe('done');
+    // scheduled_at must be EXACTLY preserved — not just truthy, but the identical
+    // timestamp the scheduler found. Any mutation (null, update, shift) is a FAIL.
+    expect(instAfter.scheduled_at).toBe(scheduledAtBefore);
   });
 });
 
@@ -198,36 +222,39 @@ describe('UC-15: DB Persistence', function() {
 describe('UC-18: Full DB Pipeline', function() {
 
   beforeEach(async function() {
-    if (!dbAvailable) return;
     await cleanTasks();
   });
 
-  test('UC-18.4: Done instance not re-scheduled', async function() {
-    if (!dbAvailable) return;
-
+  test('UC-18.4: Done recurring instance not re-scheduled', async function() {
     // chk_task_instances_terminal_scheduled (mig 20260527213906) requires non-null
     // scheduled_at for terminal statuses. Seed a past timestamp; the assertion under
-    // test is that the done instance is NOT re-scheduled (status + recurring stay intact).
+    // test is that the done recurring instance is NOT re-placed (status, scheduled_at,
+    // and master.recurring are all unchanged after the scheduler runs).
     await insertTask({
       id: 'recur_done',
       text: 'Recurring Done',
-      taskType: 'recurring_instance',
       dur: 30,
       status: 'done',
       scheduledAt: '2026-04-01 10:00:00',
-      recurring: true,
-      sourceId: 'ht_test'
+      recurring: true
     });
 
+    // Capture the pre-run state.
+    var instBefore = await knex('task_instances').where('master_id', 'recur_done').first();
+    var scheduledAtBefore = instBefore.scheduled_at;
+
+    // Invoke the real scheduler.
+    await runScheduleAndPersist(TEST_USER);
+
+    // Post-run: status and scheduled_at must be unchanged; master.recurring must be 1.
     var master = await knex('task_masters').where('id', 'recur_done').first();
-    var inst = await knex('task_instances').where('master_id', 'recur_done').first();
-    expect(inst.status).toBe('done');
+    var instAfter = await knex('task_instances').where('master_id', 'recur_done').first();
+    expect(instAfter.status).toBe('done');
+    expect(instAfter.scheduled_at).toBe(scheduledAtBefore);
     expect(master.recurring).toBe(1);
   });
 
   test('UC-18.7: Config loads from DB correctly', async function() {
-    if (!dbAvailable) return;
-
     var row = await knex('user_config')
       .where({ user_id: TEST_USER, config_key: 'time_blocks' })
       .first();
@@ -241,10 +268,3 @@ describe('UC-18: Full DB Pipeline', function() {
   });
 });
 
-// Skip message for when DB is not available
-test('Integration tests require Docker MySQL on port 3307', function() {
-  if (!dbAvailable) {
-    console.warn('Skipped: run `cd test-bed && make up` first');
-  }
-  expect(true).toBe(true);
-});
