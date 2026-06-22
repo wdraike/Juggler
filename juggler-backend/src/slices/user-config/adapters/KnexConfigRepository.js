@@ -140,6 +140,19 @@ KnexConfigRepository.prototype.getConfigRows = function getConfigRows(userId) {
 };
 
 /**
+ * The user's configured timezone (users.timezone), or null when unset (A1).
+ * @param {string} userId
+ * @returns {Promise<?string>}
+ */
+KnexConfigRepository.prototype.getUserTimezone = function getUserTimezone(userId) {
+  return this.db('users')
+    .where('id', userId)
+    .select('timezone')
+    .first()
+    .then(function (row) { return row && row.timezone ? row.timezone : null; });
+};
+
+/**
  * Single config record mapped to the W2 UserConfig entity, or null. Verbatim
  * relocation of updateConfig's existence probe (config.controller.js:121).
  * @param {string} userId

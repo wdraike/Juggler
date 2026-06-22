@@ -14,10 +14,13 @@
 // avoids transpiling axios's internal ESM deps, and is verified green across the
 // frontend suite. Do not remove the moduleNameMapper without replacing it.
 import axios from 'axios';
-import { getBrowserTimezone } from '../utils/timezone';
+import { resolveDisplayTimezone } from '../utils/timezone';
 
 import { apiBase, authServiceUrl, appId as _appId } from '../proxy-config';
 const TZ_OVERRIDE_KEY = 'juggler-tz-override';
+// Configured user timezone (users.timezone) synced from the config payload (A1).
+// Authoritative over the browser tz for both display and the X-Timezone header.
+const USER_TZ_KEY = 'juggler-user-tz';
 const API_BASE = apiBase;
 const AUTH_SERVICE_URL = authServiceUrl;
 const TOKEN_KEY = 'juggler-access-token';
@@ -49,18 +52,22 @@ export function clearAccessToken() {
 }
 
 /**
- * Get the active timezone for API requests.
- * Priority: manual override (localStorage) > browser detection > fallback.
+ * Get the active timezone for API requests (X-Timezone header).
+ * Priority: explicit override > configured user timezone > America/New_York.
+ * The configured user timezone (A1) is authoritative; the browser is never sent
+ * (TZ-DISPLAY-3) so the backend never computes in a stray browser zone.
  */
 function getActiveTimezone() {
+  var override = null;
+  var userTz = null;
   try {
-    var override = localStorage.getItem(TZ_OVERRIDE_KEY);
-    if (override) return override;
+    override = localStorage.getItem(TZ_OVERRIDE_KEY);
+    userTz = localStorage.getItem(USER_TZ_KEY);
   } catch (e) { /* ignore */ }
-  return getBrowserTimezone() || 'America/New_York';
+  return resolveDisplayTimezone({ override: override, userTimezone: userTz });
 }
 
-export { TZ_OVERRIDE_KEY };
+export { TZ_OVERRIDE_KEY, USER_TZ_KEY };
 
 // Request interceptor — attach Bearer token + timezone
 apiClient.interceptors.request.use(config => {

@@ -10,6 +10,7 @@ import { DAY_NAMES, MONTH_NAMES, PRI_COLORS, STATUS_MAP, locIcon, PAST_OPACITY }
 import { isTerminalStatus } from '../../shared/task-status';
 import { formatDateKey } from '../../scheduler/dateHelpers';
 import { isAllDayTask } from '../../utils/isAllDayTask';
+import { isTaskOverdue } from '../../utils/overdue';
 
 /* ── Main CalendarView ── */
 import WeatherBadge from '../features/WeatherBadge';
@@ -188,7 +189,7 @@ function TaskEntry({ item, status, onExpand, onDragStart, theme, darkMode, isMob
   var isMultiday = isAllDay && t.endDate && t.date && t.endDate !== t.date;
   var daySpan = isMultiday ? Math.round((new Date(t.endDate + 'T00:00:00') - new Date(t.date + 'T00:00:00')) / 86400000) + 1 : 0;
   var isWhenRelaxed = !!item._whenRelaxed;
-  var isOverdue = !!item._overdue && !isDone;
+  var isOverdue = isTaskOverdue(t, isDone);
   var borderColor = isOverdue ? theme.error : (isWhenRelaxed ? '#F59E0B' : (isMarker ? '#8B5CF6' : priColor));
   var [show, setShow] = useState(false);
   var entryRef = useRef(null);

@@ -14,6 +14,7 @@ import { resolveLocationId, getLocationForDatePure } from '../../scheduler/locat
 import StatusToggle from '../schedule/StatusToggle';
 import WeatherBadge from '../features/WeatherBadge';
 import { getTaskIcon } from '../../utils/taskIcon';
+import { isTaskOverdue } from '../../utils/overdue';
 import { checkWeatherMatch, hasWeatherRestrictions } from '../../utils/weatherMatch';
 import { weatherIconUrl } from '../../utils/weatherIcons';
 import AllDayBanner from './AllDayBanner';
@@ -341,7 +342,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
   var dvTodayKey = formatDateKey(new Date());
   var isPast = !!t.scheduledAt && formatDateKey(new Date(t.scheduledAt)) < dvTodayKey;
   var weatherResult = hasWeatherRestrictions(t) ? checkWeatherMatch(t, weatherDay) : null;
-  var isOverdue = !!item._overdue && !isDone;
+  var isOverdue = isTaskOverdue(t, isDone);
   var [show, setShow] = useState(false);
   var innerRef = useRef(null);
   var [mousePos, setMousePos] = useState(null);

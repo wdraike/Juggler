@@ -3,7 +3,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import apiClient, { TZ_OVERRIDE_KEY } from '../services/apiClient';
+import apiClient, { TZ_OVERRIDE_KEY, USER_TZ_KEY } from '../services/apiClient';
 import {
   DEFAULT_LOCATIONS, DEFAULT_TOOLS, DEFAULT_TOOL_MATRIX,
   DEFAULT_TIME_BLOCKS, DEFAULT_WEEKDAY_BLOCKS,
@@ -123,6 +123,7 @@ export default function useConfig() {
   var [fontSize, setFontSize] = useState(100);
   var [pullForwardDampening, setPullForwardDampening] = useState(false);
   var [timezoneOverride, setTimezoneOverride] = useState(null);
+  var [userTimezone, setUserTimezone] = useState(null);
   var [calCompletedBehavior, setCalCompletedBehavior] = useState('update');
   var [tempUnitPref, setTempUnitPref] = useState('F');
   var [calSyncSettings, setCalSyncSettings] = useState({
@@ -165,6 +166,17 @@ export default function useConfig() {
           else localStorage.removeItem(TZ_OVERRIDE_KEY);
         } catch (e) { /* ignore */ }
       }
+    }
+
+    // A1: configured users.timezone (top-level), authoritative over the browser
+    // for display + the X-Timezone header. Synced to localStorage so the
+    // non-React getHydrationTimezone()/getActiveTimezone() readers pick it up.
+    if (config.userTimezone !== undefined) {
+      setUserTimezone(config.userTimezone);
+      try {
+        if (config.userTimezone) localStorage.setItem(USER_TZ_KEY, config.userTimezone);
+        else localStorage.removeItem(USER_TZ_KEY);
+      } catch (e) { /* ignore */ }
     }
 
     if (config.tempUnitPref === 'C' || config.tempUnitPref === 'F') {
@@ -345,7 +357,7 @@ export default function useConfig() {
     locations, tools, toolMatrix, timeBlocks, projects,
     locSchedules, locScheduleDefaults, locScheduleOverrides,
     hourLocationOverrides, splitDefault, splitMinDefault,
-    gridZoom, schedFloor, schedCeiling, fontSize, pullForwardDampening, timezoneOverride, calCompletedBehavior, calSyncSettings,
+    gridZoom, schedFloor, schedCeiling, fontSize, pullForwardDampening, timezoneOverride, userTimezone, calCompletedBehavior, calSyncSettings,
     tempUnitPref,
     scheduleTemplates, templateDefaults, templateOverrides,
     setLocations, setTools, setToolMatrix, setTimeBlocks, setProjects,
