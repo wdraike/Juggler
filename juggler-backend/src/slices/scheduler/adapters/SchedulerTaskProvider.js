@@ -49,12 +49,41 @@ function SchedulerTaskProvider(deps) {
  * Load the scheduler's working set from `tasks_v` (verbatim — runSchedule.js
  * ~324-329): status ''/'wip'/NULL OR task_type='recurring_template', scoped to
  * the user. `db` may be a trx handle.
+ *
+ * BUG-814 (R55): recurring_template rows always have status=NULL in tasks_v
+ * (the view hardcodes NULL for the master branch). A cancelled or disabled
+ * master is therefore indistinguishable from an active one via tasks_v.status.
+ * We exclude cancelled/disabled masters by checking task_masters.status
+ * directly via a NOT EXISTS subquery on the master_id join key.
  */
 SchedulerTaskProvider.prototype.loadSchedulableRows = function loadSchedulableRows(db, userId) {
+  // BUG-814 (R55): tasks_v always exposes status=NULL for recurring_template rows
+  // regardless of the real task_masters.status. The original query's
+  // `orWhereNull('status')` branch therefore matches both active AND cancelled
+  // templates — a cancelled series re-enters the placement pool.
+  //
+  // Fix: split NULL-status into two branches:
+  //   (a) non-template rows with NULL status — pass as before
+  //   (b) recurring_template rows — pass ONLY if task_masters.status is not
+  //       'cancelled' or 'disabled' (checked via NOT EXISTS on master_id)
   return db('tasks_v').where('user_id', userId)
     .where(function() {
-      this.where('status', '').orWhere('status', 'wip').orWhereNull('status')
-        .orWhere('task_type', 'recurring_template');
+      // Live non-template tasks (status='' or 'wip')
+      this.where('status', '').orWhere('status', 'wip')
+        // Non-template rows with NULL status (legacy / one-shot tasks never given a status)
+        .orWhere(function() {
+          this.whereNull('status').whereNot('task_type', 'recurring_template');
+        })
+        // recurring_template rows whose master is not cancelled/disabled
+        .orWhere(function() {
+          this.where('task_type', 'recurring_template')
+            .whereNotExists(function() {
+              this.select(db.raw('1'))
+                .from('task_masters')
+                .whereRaw('`task_masters`.`id` = `tasks_v`.`master_id`')
+                .whereIn('task_masters.status', ['cancelled', 'disabled']);
+            });
+        });
     })
     .select();
 };

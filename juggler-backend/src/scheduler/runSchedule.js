@@ -2181,7 +2181,12 @@ async function getSchedulePlacements(userId, options) {
   var taskRows = await db('tasks_v').where('user_id', userId)
     .where(function() {
       this.where('status', '').orWhere('status', 'wip').orWhereNull('status')
-        .orWhere('task_type', 'recurring_template');
+        // R55: a soft-cancelled or disabled recurring_template must NOT be loaded
+        // for expansion — cancel-series stops fabrication while keeping past rows.
+        .orWhere(function() {
+          this.where('task_type', 'recurring_template')
+            .whereNotIn('status', ['cancelled', 'disabled']);
+        });
     })
     .select();
   var terminalDedupRows2 = await db('task_instances').where('user_id', userId)

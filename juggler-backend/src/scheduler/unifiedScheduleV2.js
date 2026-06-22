@@ -245,7 +245,7 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
     if (!t || !t.id) return;
     // Skip done/cancel/skip/pause/disabled — they don't need placement.
     var st = statuses[t.id] || t.status || '';
-    if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'pause' || st === 'disabled') return;
+    if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'pause' || st === 'disabled' || st === 'cancelled') return;
 
     var pm = t.placementMode || PLACEMENT_MODES.ANYTIME;
     var isMarker = pm === PLACEMENT_MODES.REMINDER;
@@ -816,7 +816,7 @@ function computeDepReadyAbs(item, placedById, statuses, dates) {
     var depId = item.dependsOn[j];
     var st = statuses[depId];
     if (st === undefined) continue;
-    if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'disabled' || st === 'pause') continue;
+    if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'disabled' || st === 'pause' || st === 'cancelled') continue;
     var placed = placedById[depId];
     if (!placed) return Infinity; // unplaced live dep — item is blocked this scan
     var depDateIdx = indexOfDate(dates, placed.dateKey);

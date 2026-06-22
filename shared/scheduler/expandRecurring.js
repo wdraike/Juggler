@@ -82,7 +82,7 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
     if (!t.recur || t.recur.type === 'none') return false;
     if (t.taskType === 'recurring_instance') return false;
     var st = statuses[t.id] || t.status || '';
-    if (st === 'pause' || st === 'disabled') return false;
+    if (st === 'pause' || st === 'disabled' || st === 'cancelled') return false;
     return true;
   });
   if (sources.length === 0) return [];
