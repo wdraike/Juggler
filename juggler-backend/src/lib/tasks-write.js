@@ -74,7 +74,10 @@ var INSTANCE_UPDATE_FIELDS = [
   'status', 'time_remaining', 'unscheduled', 'overdue', 'generated',
   'split_group',
   // juggler-cal-history Plan A/C: completed_at column on task_instances.
-  'completed_at'
+  'completed_at',
+  // DB-single-source (W1): scheduler persists the per-instance unplaced reason
+  // onto the row so the Unplaced view reads it from the DB (not the placements cache).
+  'unplaced_reason', 'unplaced_detail'
 ];
 
 function isTemplate(row) {

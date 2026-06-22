@@ -454,6 +454,17 @@ function placementMatchesDbRow(dbUpdate, rawRow) {
   if (_flagOf(dbUpdate.unscheduled) !== _flagOf(rawRow.unscheduled)) return false;
   if (_flagOf(dbUpdate.overdue) !== _flagOf(rawRow.overdue)) return false;
 
+  // DB-single-source (W1) partition-leak fix (ernie/cookie): a row reaching this
+  // PLACEMENT skip is being placed → it carries no unplaced reason. The placement
+  // dbUpdate doesn't set these cols; the batched persist clears them to null on
+  // write. So a stale non-null reason left on the DB row from a prior run (when it
+  // was unplaceable) must count as a MISMATCH here — otherwise the skip drops the
+  // clearing write and the placed row keeps a phantom reason (one-row-one-state
+  // violation). Comparing against the dbUpdate's (absent → null) value forces the
+  // write once, then matches on the next run (idempotent-on-stable invariant kept).
+  if ((dbUpdate.unplaced_reason || null) !== (rawRow.unplaced_reason || null)) return false;
+  if ((dbUpdate.unplaced_detail || null) !== (rawRow.unplaced_detail || null)) return false;
+
   // dur (only when the dbUpdate writes it).
   if (Object.prototype.hasOwnProperty.call(dbUpdate, 'dur')) {
     if (Number(dbUpdate.dur) !== Number(rawRow.dur)) return false;
@@ -1601,7 +1612,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       var rawRec = rawRowById[t.id];
       var hasScheduledAt = rawRec ? !!rawRec.scheduled_at : !!original.scheduledAt;
       if (hasScheduledAt) return;
-      var unplacedChunkUpdate = { unscheduled: 1, updated_at: _runScheduleCommand.clockNow() };
+      var unplacedChunkUpdate = { unscheduled: 1, unplaced_reason: t._unplacedReason || null, unplaced_detail: t._unplacedDetail || null, updated_at: _runScheduleCommand.clockNow() };
       if (result.slackByTaskId && t.id in result.slackByTaskId) {
         unplacedChunkUpdate.slack_mins = result.slackByTaskId[t.id];
       }
@@ -1667,6 +1678,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
         // Newly overdue OR unscheduled flag needs fixing.
         overdueDbUpdate.unscheduled = 0;
         overdueDbUpdate.overdue = 1;
+        // DB-single-source (W1): overdue = pinned on the grid, NOT unplaced. Clear any
+        // reason carried over from a prior run where this row was UNPLACEABLE, so the
+        // partition stays mutually exclusive (one row, one state).
+        overdueDbUpdate.unplaced_reason = null;
+        overdueDbUpdate.unplaced_detail = null;
         overdueDbUpdate.updated_at = _runScheduleCommand.clockNow();
         if (result.slackByTaskId && t.id in result.slackByTaskId) {
           overdueDbUpdate.slack_mins = result.slackByTaskId[t.id];
@@ -1692,7 +1708,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
       }
     } else {
       // Case C: never placed — move to unscheduled lane.
-      var unplacedDbUpdate = { unscheduled: 1, updated_at: _runScheduleCommand.clockNow() };
+      // DB-single-source (W1): persist why it's unplaced so the Unplaced view reads
+      // the reason from the row (DB read model), not the deleted placements cache.
+      var unplacedDbUpdate = { unscheduled: 1, unplaced_reason: t._unplacedReason || null, unplaced_detail: t._unplacedDetail || null, updated_at: _runScheduleCommand.clockNow() };
       if (result.slackByTaskId && t.id in result.slackByTaskId) {
         unplacedDbUpdate.slack_mins = result.slackByTaskId[t.id];
       }
@@ -1715,7 +1733,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
     var raw = rawRowById[t.id];
     if (!raw || !raw.unscheduled) return; // already clear
     if (!raw.scheduled_at) return; // truly nothing to show on calendar
-    pendingUpdates.push({ id: t.id, dbUpdate: { unscheduled: null, updated_at: _runScheduleCommand.clockNow() } });
+    // DB-single-source (W1) partition-leak fix (ernie F3): this sweep revives a
+    // recurring instance from unplaced (unscheduled=1) to placed-on-calendar and
+    // bypasses the placement skip path — clear the reason too, else a row unplaced
+    // -with-reason in run N stays placed-with-stale-reason in run N+1 (6th clear site).
+    pendingUpdates.push({ id: t.id, dbUpdate: { unscheduled: null, unplaced_reason: null, unplaced_detail: null, updated_at: _runScheduleCommand.clockNow() } });
   });
 
   // 8.6. Clear stale overdue flag on tasks that were overdue in the DB but are
@@ -1725,7 +1747,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
   taskRows.forEach(function(r) {
     if (!r.overdue) return; // already clear in DB — nothing to do
     if (unplacedIds[r.id]) return; // still unplaced — §8 handles this
-    pendingUpdates.push({ id: r.id, dbUpdate: { overdue: 0, updated_at: _runScheduleCommand.clockNow() } });
+    // DB-single-source (W1): constraint resolved, row is placed again — clear the reason too.
+    pendingUpdates.push({ id: r.id, dbUpdate: { overdue: 0, unplaced_reason: null, unplaced_detail: null, updated_at: _runScheduleCommand.clockNow() } });
   });
 
   // 8.5 — R50.1/R50.2 (999.796): PERSIST overdue=1 for a past-due FIXED/ingested
@@ -1748,6 +1771,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (!rawFx.overdue) fxUpd.overdue = 1;
     if (rawFx.unscheduled) fxUpd.unscheduled = 0;
     if (Object.keys(fxUpd).length > 0) {
+      // DB-single-source (W1): a past-due FIXED event is OVERDUE on its day, not
+      // unplaced — clear any stale reason alongside the flag fix.
+      fxUpd.unplaced_reason = null;
+      fxUpd.unplaced_detail = null;
       fxUpd.updated_at = _runScheduleCommand.clockNow();
       pendingUpdates.push({ id: t.id, dbUpdate: fxUpd });
     }
@@ -1852,6 +1879,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
             scheduled_at: missedAt,
             completed_at: missedAt,
             unscheduled: null,
+            unplaced_reason: t._unplacedReason || null,
+            unplaced_detail: t._unplacedDetail || null,
             updated_at: _runScheduleCommand.clockNow()
           }
         });
@@ -2582,5 +2611,8 @@ module.exports = {
   recurringPeriodEndKey,
   computeIsPastDue,
   setWeatherProvider,
-  getWeatherProvider
+  getWeatherProvider,
+  // Test-only export — pure-function seam for unit tests.
+  // Never call from production code.
+  _placementMatchesDbRow: process.env.NODE_ENV === 'test' ? placementMatchesDbRow : undefined
 };

@@ -124,7 +124,10 @@ KnexScheduleRepository.prototype.writeChanged = async function writeChanged(delt
     var chunk = scheduledAtUpdates.slice(ci, ci + CHUNK);
     var ids = chunk.map(function (pu) { return pu.id; });
 
-    var updateFields = { unscheduled: null, overdue: 0, updated_at: this.clock.now() };
+    // DB-single-source (W1): a row in the batched scheduled_at/dur path is being
+    // PLACED — clear any stale unplaced reason from a prior run alongside the
+    // unscheduled/overdue flags, so a now-placed instance never carries a reason.
+    var updateFields = { unscheduled: null, overdue: 0, unplaced_reason: null, unplaced_detail: null, updated_at: this.clock.now() };
 
     var saChunk = chunk.filter(function (pu) { return !!pu.dbUpdate.scheduled_at; });
     if (saChunk.length > 0) {

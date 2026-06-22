@@ -406,6 +406,13 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
     splitOrdinal: row.split_ordinal != null ? Number(row.split_ordinal) : undefined,
     splitTotal: row.split_total != null ? Number(row.split_total) : undefined,
     splitGroup: row.split_group || null,
+    // DB-single-source (W1): the scheduler persists why an instance is unplaced onto
+    // the row (task_instances.unplaced_reason/_detail). Surface them as the same
+    // _unplacedReason/_unplacedDetail the in-memory scheduler set, so the Unplaced
+    // view (ConflictsView) and schedulerSession read the reason from the DB read
+    // model instead of the deleted /schedule/placements cache. Null for placed rows.
+    _unplacedReason: row.unplaced_reason || null,
+    _unplacedDetail: row.unplaced_detail || null,
     // Anchor date (date-only, YYYY-MM-DD): for instances, from the template; for templates, from self
     anchorDate: (function() {
       var sa = src ? src.scheduled_at : row.scheduled_at;
