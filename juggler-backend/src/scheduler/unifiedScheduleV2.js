@@ -325,6 +325,27 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
         console.warn('[unifiedScheduleV2] wip anchor: utcToLocal returned no time for task', t.id, 'scheduledAt=', t.scheduledAt, 'tz=', t.tz);
       }
     }
+    // DB-single-source (W2 / Odin): a non-recurring FIXED calendar event whose
+    // anchorMin is STILL null — t.time was distrusted (when-tag present, line 294)
+    // and there is no preferred_time_mins — must anchor at its PERSISTED placement.
+    // scheduled_at is the authoritative fixed time the user/calendar-sync set;
+    // without this the event gets no anchor and the scheduler drops it at the next
+    // free slot (Odin showed 7:15 PM instead of its 8:00 AM scheduled_at). Mirror
+    // the wip tz-aware derive above; NOT a || fallback — only when fixed +
+    // scheduled_at + tz are all confirmed.
+    if (anchorMin == null && fixed && t.scheduledAt && t.tz) {
+      var fxLocal = dateHelpers.utcToLocal(new Date(t.scheduledAt), t.tz);
+      if (fxLocal && fxLocal.time) {
+        var fxMin = parseTimeToMinutes(fxLocal.time);
+        if (fxMin != null) {
+          anchorMin = fxMin;
+        } else {
+          console.warn('[unifiedScheduleV2] fixed anchor: could not parse scheduled_at local time for task', t.id, 'fxLocal.time=', fxLocal.time);
+        }
+      } else {
+        console.warn('[unifiedScheduleV2] fixed anchor: utcToLocal returned no time for task', t.id, 'scheduledAt=', t.scheduledAt, 'tz=', t.tz);
+      }
+    }
 
     // Deadline: user deadline; recurring instances use their scheduled day
     // as the implicit deadline end (4.4 will refine chain backprop + cycle

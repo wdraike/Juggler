@@ -1,74 +1,63 @@
 {
   "$contract": "muppet-output/v1",
   "agent": "ernie",
-  "leg_id": "juggler-test-failloud-residual",
+  "leg_id": "juggler-tz-display-a1",
   "mode": "bugfix",
   "depth": "standard",
   "status": "DONE",
-  "summary": "4 silent skip-pass sites -> in-body await assertDbAvailable() (TEST-FR-001). Helper async+awaited; lifecycle dbAvailable guards intact; B4 pure-unit untouched; no dead code; no prod code. No BLOCK/WARN.",
+  "summary": "TZ display fix correct: override>configured>browser>NY, override still wins, Promise.all res[4] wiring verified. 2 WARN: unset fallback diverges from TZ-DISPLAY-3 (browser-not-NY) + dead under DB default; undefined-guard staleness.",
   "steps": {
     "line_by_line": "done",
-    "scooter_consult": "n/a"
+    "scooter_consult": "done"
   },
   "findings": [
     {
-      "id": "ernie-failloud-1",
+      "id": "tzdisp-w1-unset-fallback",
+      "severity": "WARN",
+      "dimension": "logic",
+      "file": "juggler-frontend/src/utils/timezone.js",
+      "line": 154,
+      "claim": "Unset-user display fallback resolves to browser before NY, diverging from documented TZ-DISPLAY-3 (NY default); branch is also largely dead because users.timezone has a non-null DB default of America/New_York.",
+      "evidence": "resolveDisplayTimezone returns o.override||o.userTimezone||o.browser||DEFAULT_TIMEZONE; TIMEZONE-RULES.md:50-51 (TZ-DISPLAY-3) says unset => America/New_York not browser; 20260301000000_initial_schema.js:13 'timezone' defaultTo('America/New_York') so getUserTimezone returns NY for unset prod users, never null, making the browser tier unreachable for real rows.",
+      "fix": "Either align unset fallback to NY (drop browser tier) per TZ-DISPLAY-3, or record a decision superseding TZ-DISPLAY-3 for the display path. Confirm no real row has NULL timezone; if none, browser tier is dead code.",
+      "confidence": "high"
+    },
+    {
+      "id": "tzdisp-w2-undefined-guard-staleness",
+      "severity": "WARN",
+      "dimension": "logic",
+      "file": "juggler-frontend/src/hooks/useConfig.js",
+      "line": 174,
+      "claim": "localStorage USER_TZ_KEY sync is gated on config.userTimezone !== undefined; a payload that omits the field leaves a stale key, so non-React readers keep a wrong configured tz.",
+      "evidence": "if (config.userTimezone !== undefined) { setUserTimezone(...); set/removeItem(USER_TZ_KEY) }. set-vs-remove branch is correct (truthy set, falsy remove); the undefined-guard is the gap. Mitigated: GetConfig.js always emits userTimezone (null when unset), so it is never undefined from the current backend.",
+      "fix": "Acceptable as-is (backend always sends the key). If the field could ever be dropped, clear USER_TZ_KEY on absence rather than skipping.",
+      "confidence": "med"
+    },
+    {
+      "id": "tzdisp-i1-empty-string-handling",
       "severity": "INFO",
-      "dimension": "error-handling",
-      "file": "juggler-backend/tests/unit/aiEnrichment/quotaTOCTOU.test.js",
-      "line": 169,
-      "claim": "Helper imported and used correctly; assertDbAvailable is async and awaited at all 4 sites",
-      "evidence": "requireDB.js:93 'async function assertDbAvailable'. Call sites quotaTOCTOU:169,268 and timeoutAbort:259,297 all use 'await assertDbAvailable()'. Throws [TEST-FR-001] on DB-down -> RED, not vacuous green.",
+      "dimension": "logic",
+      "file": "juggler-frontend/src/hooks/useConfig.js",
+      "line": 178,
+      "claim": "Empty-string userTimezone correctly treated as unset (removeItem + falls through resolver).",
+      "evidence": "else branch removeItem(USER_TZ_KEY) on falsy ''; resolveDisplayTimezone '' || ... skips it. Consistent and intended.",
       "fix": "none",
       "confidence": "high"
     },
     {
-      "id": "ernie-failloud-2",
+      "id": "tzdisp-i2-config-cache-staleness",
       "severity": "INFO",
       "dimension": "logic",
-      "file": "juggler-backend/tests/unit/aiEnrichment/quotaTOCTOU.test.js",
-      "line": 142,
-      "claim": "Lifecycle dbAvailable guards intact; no ReferenceError; correct ordering",
-      "evidence": "let dbAvailable declared (quotaTOCTOU:113, timeoutAbort:227), set in beforeAll, still referenced by afterAll (if dbAvailable) and beforeEach (if !dbAvailable return). Only in-body guards removed. On DB-down, beforeEach early-returns (no DB call) then body assertDbAvailable() throws RED.",
-      "fix": "none",
-      "confidence": "high"
-    },
-    {
-      "id": "ernie-failloud-3",
-      "severity": "INFO",
-      "dimension": "logic",
-      "file": "juggler-backend/tests/unit/aiEnrichment/timeoutAbortConsequences.test.js",
+      "file": "juggler-backend/src/slices/user-config/application/queries/GetConfig.js",
       "line": 115,
-      "claim": "B4 pure-unit describe not touched / not made DB-dependent",
-      "evidence": "Lines 115-184 use mocked enqueue spy (mockEnqueueFn), no DB. File-level assertDbAvailable import (line 73) is unused by B4; adds no DB dependency. B4 stays Docker-free.",
-      "fix": "none",
-      "confidence": "high"
-    },
-    {
-      "id": "ernie-failloud-4",
-      "severity": "INFO",
-      "dimension": "logic",
-      "file": "juggler-backend/tests/unit/aiEnrichment/timeoutAbortConsequences.test.js",
-      "line": 251,
-      "claim": "No leftover dead variables or unreachable code from guard removal",
-      "evidence": "dbAvailable still consumed by 3 hooks per suite. Removed console.warn skip blocks left no orphan. beforeEach comment accurate: DB-down throws in-body before any DB call in the body.",
-      "fix": "none",
-      "confidence": "high"
-    },
-    {
-      "id": "ernie-failloud-5",
-      "severity": "INFO",
-      "dimension": "logic",
-      "file": "juggler-backend/tests/unit/aiEnrichment/quotaTOCTOU.test.js",
-      "line": null,
-      "claim": "No production code touched",
-      "evidence": "git diff --name-only returns exactly the 2 named test files; git diff --cached empty.",
-      "fix": "none",
+      "claim": "userTimezone is cached in the 1h-TTL config result; a tz change is not reflected until cache invalidation, same window as all config fields (not new to this diff).",
+      "evidence": "result includes userTimezone then cache.set(cacheKey, result, 3600).",
+      "fix": "REFER->telly for cache-invalidation-on-tz-change coverage if absent.",
       "confidence": "high"
     }
   ],
   "refers": [
-    { "to": "zoe", "why": "test-quality judgments (assertion strength, mutation-kill, CI-RED confirmation) are zoe's column, not ernie's" },
-    { "to": "elmo", "why": "security column owner; none triggered by this diff" }
+    { "to": "telly", "why": "Confirm coverage of backend getUserTimezone + useConfig localStorage-sync paths and cache-invalidation-on-tz-change; ernie does not count coverage." },
+    { "to": "bird", "why": "Product/UX call: should a brand-new unconfigured user see browser-local or NY task times (the W1 unset-fallback semantics)." }
   ]
 }
