@@ -247,7 +247,7 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
     if (instDate) date = instDate;
   }
 
-  if (src && src.preferred_time_mins != null && row.status !== 'disabled') {
+  if (src && src.preferred_time_mins != null && row.status !== 'disabled' && !(row.status === 'wip' && row.scheduled_at)) {
     var ptH = Math.floor(src.preferred_time_mins / 60);
     var ptM = src.preferred_time_mins % 60;
     var ptAmpm = ptH >= 12 ? 'PM' : 'AM';

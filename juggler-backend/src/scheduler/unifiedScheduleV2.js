@@ -307,6 +307,24 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
     if (anchorMin == null && st === 'wip' && t.time) {
       anchorMin = parseTimeToMinutes(t.time);
     }
+    // Defensive guard: if anchorMin is STILL null for a wip with a live
+    // scheduled_at (t.time was unparseable — e.g. unexpected format), derive
+    // anchorMin from scheduled_at via tz-aware utcToLocal so the item is never
+    // silently de-anchored. Do NOT use a || fallback — only attempt this when
+    // the wip + scheduled_at condition is confirmed.
+    if (anchorMin == null && st === 'wip' && t.scheduledAt && t.tz) {
+      var saLocal = dateHelpers.utcToLocal(new Date(t.scheduledAt), t.tz);
+      if (saLocal && saLocal.time) {
+        var saMin = parseTimeToMinutes(saLocal.time);
+        if (saMin != null) {
+          anchorMin = saMin;
+        } else {
+          console.warn('[unifiedScheduleV2] wip anchor: could not parse scheduled_at local time for task', t.id, 'saLocal.time=', saLocal.time);
+        }
+      } else {
+        console.warn('[unifiedScheduleV2] wip anchor: utcToLocal returned no time for task', t.id, 'scheduledAt=', t.scheduledAt, 'tz=', t.tz);
+      }
+    }
 
     // Deadline: user deadline; recurring instances use their scheduled day
     // as the implicit deadline end (4.4 will refine chain backprop + cycle
