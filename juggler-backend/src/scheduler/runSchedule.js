@@ -930,6 +930,14 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (row && row.date) {
       var rowDate = parseDate(row.date);
       if (rowDate && rowDate > expandEnd) return false;
+      // Spare past pending recurring instances so Phase-9 can freeze them as
+      // 'missed' (LOCKED design 999.808 LC-1/LC-2).
+      // Any recurring instance (placed or never-placed) that is in the past and
+      // still pending must survive to Phase-9 auto-miss — deleting it here would
+      // produce "executing 0 DB updates" and lose the slot record entirely.
+      // Only protect past recurring instances; future/non-recurring rows continue
+      // to follow the normal deletion path.
+      if (rowDate && rowDate < today && row.task_type === 'recurring_instance') return false;
     }
     return true;
   });
@@ -1822,7 +1830,19 @@ async function runScheduleAndPersist(userId, _retries, options) {
         // scheduled_at must be non-null for terminal statuses (DB CHECK constraint).
         // For instances that were never placed (no scheduledAt), fall back to midnight
         // of the occurrence's intended date — it's when the day was supposed to happen.
-        var missedAt = windowClose
+        // LOCKED design (999.808): freeze a missed PLACED instance at its last real slot.
+        // Parse the placed slot as UTC. tasks_v with dateStrings:true yields a bare
+        // string ('2026-06-14 15:00:00') — append 'Z' so Node parses it as UTC, not local
+        // (ernie W1 defense-in-depth: if a future row-source ever hands back a Date, use it
+        // as-is rather than `new Date(Date + 'Z')` which would be Invalid Date).
+        var lastRealSlot = null;
+        if (rawRowPast.scheduled_at != null) {
+          lastRealSlot = (rawRowPast.scheduled_at instanceof Date)
+            ? rawRowPast.scheduled_at
+            : new Date(String(rawRowPast.scheduled_at) + 'Z');
+        }
+        var missedAt = lastRealSlot
+          || windowClose
           || localToUtc(effectiveDate, '12:00 AM', TIMEZONE)
           || _runScheduleCommand.clockNow();
         pendingUpdates.push({
