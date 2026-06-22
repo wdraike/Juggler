@@ -35,7 +35,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
       var currentRecurrings = await trx('tasks_v')
         .where('user_id', userId)
         .where('task_type', 'recurring_template')
-        .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
+        .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled', 'cancelled'])
         .count('* as count').first();
       var recurringCount = parseInt(currentRecurrings.count, 10);
 
@@ -45,7 +45,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
         var recurringToDisable = await trx('tasks_v')
           .where('user_id', userId)
           .where('task_type', 'recurring_template')
-          .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
+          .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled', 'cancelled'])
           .orderBy('created_at', 'desc')
           .limit(excess)
           .select('id');
@@ -90,7 +90,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
       // Re-count after disabling recurring instances (they count toward active tasks)
       var currentTasks = await trx('tasks_v')
         .where('user_id', userId)
-        .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
+        .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled', 'cancelled'])
         .where(function() {
           this.whereNull('task_type').orWhereNot('task_type', 'recurring_template');
         })
@@ -102,7 +102,7 @@ async function enforceDowngradeLimits(userId, planFeatures) {
         // Get newest regular tasks to disable (exclude recurring instances — those are handled with templates)
         var tasksToDisable = await trx('tasks_v')
           .where('user_id', userId)
-          .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
+          .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled', 'cancelled'])
           .where(function() {
             this.whereNull('task_type').orWhere('task_type', 'task');
           })

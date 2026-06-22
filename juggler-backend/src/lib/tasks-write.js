@@ -416,12 +416,42 @@ async function resetRecurringInstances(dbOrTrx, userId, masterId, logTag) {
   return pendingIds.length;
 }
 
+/**
+ * SOFT-cancel a task by id (R55, no hard delete). Sets status='cancelled' on
+ * both tables (mirrors deleteTaskById's both-table reach) so the row PERSISTS as
+ * a record. 'cancelled' is non-terminal → no terminal_scheduled_at constraint,
+ * so an unplaced (scheduled_at NULL) row can be cancelled. The scheduler load
+ * filter (status not in ''|'wip'|NULL) excludes it automatically.
+ */
+async function softCancelById(dbOrTrx, id, userId) {
+  var changes = { status: 'cancelled', updated_at: dbOrTrx.fn.now() };
+  var iWhere = { id: id }; if (userId) iWhere.user_id = userId;
+  var instanceCancelled = await dbOrTrx('task_instances').where(iWhere).update(changes);
+  var mWhere = { id: id }; if (userId) mWhere.user_id = userId;
+  var masterCancelled = await dbOrTrx('task_masters').where(mWhere).update(changes);
+  return { instanceCancelled: instanceCancelled, masterCancelled: masterCancelled };
+}
+
+/**
+ * SOFT-cancel rows matching a where-builder (R55). Counterpart to
+ * deleteTasksWhere — sets status='cancelled' on both tables instead of .del().
+ */
+async function softCancelWhere(dbOrTrx, userId, applyWhere) {
+  requireUserId(userId, 'softCancelWhere');
+  var changes = { status: 'cancelled', updated_at: dbOrTrx.fn.now() };
+  var instanceCancelled = await applyWhere(dbOrTrx('task_instances').where('user_id', userId)).update(changes);
+  var masterCancelled = await applyWhere(dbOrTrx('task_masters').where('user_id', userId)).update(changes);
+  return { instanceCancelled: instanceCancelled, masterCancelled: masterCancelled };
+}
+
 module.exports = {
   insertTask: insertTask,
   insertTasksBatch: insertTasksBatch,
   resetRecurringInstances: resetRecurringInstances,
   updateTaskById: updateTaskById,
   deleteTaskById: deleteTaskById,
+  softCancelById: softCancelById,
+  softCancelWhere: softCancelWhere,
   updateTasksWhere: updateTasksWhere,
   deleteTasksWhere: deleteTasksWhere,
   deleteInstancesWhere: deleteInstancesWhere,

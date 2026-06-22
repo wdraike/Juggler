@@ -364,7 +364,7 @@ KnexConfigRepository.prototype.replaceTools = function replaceTools(userId, rows
 KnexConfigRepository.prototype.countActiveTasks = function countActiveTasks(userId) {
   return this.db('tasks_v')
     .where('user_id', userId)
-    .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
+    .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled', 'cancelled'])
     .where(function () {
       this.whereNull('task_type').orWhereNot('task_type', 'recurring_template');
     })
@@ -388,7 +388,7 @@ KnexConfigRepository.prototype.countRecurringTemplates = function countRecurring
   return this.db('tasks_v')
     .where('user_id', userId)
     .where('task_type', 'recurring_template')
-    .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled'])
+    .whereNotIn('status', ['done', 'cancel', 'skip', 'disabled', 'cancelled'])
     .count('* as count')
     .first()
     .then(function (result) { return parseInt(result.count, 10); });
@@ -432,7 +432,7 @@ KnexConfigRepository.prototype.countLocations = function countLocations(userId) 
 KnexConfigRepository.prototype.getActiveWhenTaggedTasks = function getActiveWhenTaggedTasks(userId) {
   return this.db('tasks_v')
     .where('user_id', userId)
-    .whereNotIn('status', ['done', 'cancel', 'skip', 'pause'])
+    .whereNotIn('status', ['done', 'cancel', 'skip', 'pause', 'cancelled'])
     .whereNotNull('when')
     .where('when', '!=', '')
     .where('when', '!=', 'anytime')

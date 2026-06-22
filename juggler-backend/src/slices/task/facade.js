@@ -583,7 +583,9 @@ async function cascadeRecurringDelete(ctx) {
       .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
       .catch(function (err) { logger.error('[silent-catch]', err.message); });
 
-    await twrite.deleteTasksWhere(trx, userId, function (q) {
+    // R55 no-hard-delete: soft-cancel (status='cancelled', keep rows as record)
+    // instead of .del(). The ledger cleanup above still removes external cal events.
+    await twrite.softCancelWhere(trx, userId, function (q) {
       return q.whereIn('id', pendingIds);
     });
     deletedCount = pendingIds.length;
@@ -595,14 +597,9 @@ async function cascadeRecurringDelete(ctx) {
       return st === 'done' || st === 'cancel' || st === 'skip';
     })
     .map(function (inst) { return inst.id; });
-  if (keptIds.length > 0) {
-    // Archive feature removed (999.676): completed instances of deleted recurring
-    // templates are now hard-deleted along with pending ones. The FK ON DELETE SET NULL
-    // still applies at the DB level, but we no longer re-parent to an archival master.
-    await twrite.deleteTasksWhere(trx, userId, function (q) {
-      return q.whereIn('id', keptIds);
-    });
-  }
+  // R55 no-hard-delete: completed/terminal instances (done/cancel/skip) are KEPT
+  // verbatim as the historical record — never deleted. They are already terminal
+  // and excluded from the scheduler write-set, so no status change is needed.
   keptCount = keptIds.length;
 
   var template = await trx('tasks_with_sync_v').where({ id: templateId, user_id: userId }).first();
@@ -614,7 +611,7 @@ async function cascadeRecurringDelete(ctx) {
         .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
         .catch(function (err) { logger.error('[silent-catch]', err.message); });
     }
-    await twrite.deleteTaskById(trx, templateId, userId);
+    await twrite.softCancelById(trx, templateId, userId); // R55 soft-cancel master, keep as record
   }
 
   return { deletedCount: deletedCount, keptCount: keptCount, pendingIds: pendingIds, keptIds: keptIds };
@@ -658,7 +655,7 @@ async function standardDelete(ctx) {
       .catch(function (err) { logger.error('[silent-catch]', err.message); });
   }
 
-  await twrite.deleteTaskById(trx, id, userId);
+  await twrite.softCancelById(trx, id, userId); // R55 no-hard-delete: soft-cancel single task, keep as record
 }
 
 // deleteTask this_and_future delete block (999.680). For recurring templates: deletes
@@ -700,7 +697,9 @@ async function thisAndFutureDelete(ctx) {
       .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
       .catch(function (err) { logger.error('[silent-catch]', err.message); });
 
-    await twrite.deleteTasksWhere(trx, userId, function (q) {
+    // R55 no-hard-delete: soft-cancel (status='cancelled', keep rows as record)
+    // instead of .del(). The ledger cleanup above still removes external cal events.
+    await twrite.softCancelWhere(trx, userId, function (q) {
       return q.whereIn('id', pendingIds);
     });
     deletedCount = pendingIds.length;
@@ -724,7 +723,7 @@ async function thisAndFutureDelete(ctx) {
         .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
         .catch(function (err) { logger.error('[silent-catch]', err.message); });
     }
-    await twrite.deleteTaskById(trx, templateId, userId);
+    await twrite.softCancelById(trx, templateId, userId); // R55 soft-cancel master, keep as record
   }
 
   return { deletedCount: deletedCount, keptCount: keptCount, pendingIds: pendingIds, keptIds: keptIds };

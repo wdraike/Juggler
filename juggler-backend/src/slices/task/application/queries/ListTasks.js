@@ -56,6 +56,10 @@ ListTasks.prototype.execute = function execute(input) {
   return this.cache.getTasks(userId).then(function (cached) {
     if (cached) return cached;
     return self.repo.fetchTasksWithEventIds(userId, function (q) {
+      // R55 no-hard-delete: a soft-cancelled task is the "deleted" state — it must
+      // NOT appear in the active task list (unlike done/cancel/skip, which the UI
+      // still shows). The row persists in the DB as a record, queryable elsewhere.
+      q.whereNot('status', 'cancelled');
       q.orderByRaw('(scheduled_at IS NULL) ASC, scheduled_at ASC');
       if (query.limit) q.limit(parseInt(query.limit) || 1000);
       if (query.offset) q.offset(parseInt(query.offset) || 0);

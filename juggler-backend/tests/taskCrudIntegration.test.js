@@ -555,8 +555,11 @@ describe('deleteTask', () => {
     expect(res2.statusCode).toBe(200);
     expect(res2._json.message).toBe('Task deleted');
 
+    // R55 no-hard-delete: the task is KEPT as a record, soft-cancelled
+    // (status='cancelled'), not physically removed.
     var row = await db('tasks_v').where('id', id).first();
-    expect(row).toBeUndefined();
+    expect(row).toBeDefined();
+    expect(row.status).toBe('cancelled');
   });
 
   test('returns 404 for non-existent task', async () => {

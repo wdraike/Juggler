@@ -500,7 +500,12 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var _p_taskRows = trx('tasks_v').where('user_id', userId)
     .where(function() {
       this.where('status', '').orWhere('status', 'wip').orWhereNull('status')
-        .orWhere('task_type', 'recurring_template');
+        // R55: a soft-cancelled or disabled recurring_template must NOT be loaded
+        // for expansion — cancel-series stops fabrication while keeping past rows.
+        .orWhere(function() {
+          this.where('task_type', 'recurring_template')
+            .whereNotIn('status', ['cancelled', 'disabled']);
+        });
     })
     .select();
   // Pull scheduled_at alongside date so we can fall back when date is NULL.
