@@ -119,15 +119,29 @@ UpdateTask.prototype.execute = async function execute(input) {
   // recurring state is `body.recurring` when the update sets it, else the task's
   // EXISTING state — a partial PATCH that omits `recurring` on an already-recurring
   // task must not false-reject a stale dependsOn that will be stripped (ernie WARN-2).
+  // 999.818: both the dependsOn-recurring check and the split check below need
+  // the task's existing recurring state. Fetch the row at most ONCE, lazily, and
+  // reuse it — the prior code issued two identical fetchTaskRecurring reads on the
+  // combined (recurring-omitted + dependsOn + split-changed) path.
+  var _recRow; // undefined = not yet fetched
+  var fetchRecRowOnce = async function () {
+    if (_recRow === undefined) {
+      _recRow = await self.repo.fetchTaskRecurring(id, userId);
+    }
+    return _recRow;
+  };
+  var isRecurringRow = function (row) {
+    return !!(row && (row.recurring
+      || row.task_type === 'recurring_template'
+      || row.task_type === 'recurring_instance'));
+  };
+
   var refBody = body;
   if (Array.isArray(body.dependsOn) && body.dependsOn.length > 0) {
     var willBeRecurring = body.recurring === true;
     if (!willBeRecurring && body.recurring === undefined) {
       // unchanged recurring state — consult the existing row (cheap, deps-only path)
-      var cur = await this.repo.fetchTaskRecurring(id, userId);
-      willBeRecurring = !!(cur && (cur.recurring
-        || cur.task_type === 'recurring_template'
-        || cur.task_type === 'recurring_instance'));
+      willBeRecurring = isRecurringRow(await fetchRecRowOnce());
     }
     if (willBeRecurring) {
       refBody = Object.assign({}, body);
@@ -150,10 +164,7 @@ UpdateTask.prototype.execute = async function execute(input) {
   var splitFieldChanged = body.split !== undefined || body.splitMin !== undefined || body.split_min !== undefined;
   var splitNeedsComplex = false;
   if (splitFieldChanged) {
-    var splitRecRow = await this.repo.fetchTaskRecurring(id, userId);
-    splitNeedsComplex = !!(splitRecRow && (splitRecRow.recurring
-      || splitRecRow.task_type === 'recurring_template'
-      || splitRecRow.task_type === 'recurring_instance'));
+    splitNeedsComplex = isRecurringRow(await fetchRecRowOnce());
   }
 
   // needsComplexPath (handler L962-973)
