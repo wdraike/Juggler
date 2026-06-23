@@ -19,6 +19,12 @@
  */
 import { parseTimeToMinutes } from '../scheduler/dateHelpers';
 
+// Terminal/resolved statuses (mirrors the DB terminal_scheduled_at CHECK set).
+// Kept local — the shared task-status module is a symlinked pkg jest won't
+// transform, and this is the only status check this pure util needs.
+var TERMINAL_STATUSES = { done: 1, skip: 1, cancel: 1, missed: 1 };
+function isTerminalStatus(s) { return !!TERMINAL_STATUSES[s]; }
+
 /**
  * @param {Array} tasks — array of task objects from GET /tasks (may be null/undefined)
  * @returns {{ dayPlacements: Object, unplaced: Array, warnings: Array }}
@@ -28,6 +34,21 @@ export function derivePlacements(tasks) {
   var unplaced = [];
   (tasks || []).forEach(function(t) {
     if (!t) return;
+    // A terminal task (done/skip/cancel/missed) is never "unplaced" — it's
+    // resolved, not pending-unplaceable. Such a row may still carry unscheduled=1
+    // (e.g. an orphaned split chunk completed via sibling propagation); it must
+    // NOT appear in the Unplaced list. With a slot it falls through to the grid;
+    // without one it drops out of both. (999.x — done tasks shown as unplaced.)
+    if (isTerminalStatus(t.status)) {
+      if (t.date && t.time) {
+        var ts = parseTimeToMinutes(t.time);
+        if (ts != null) {
+          if (!dayPlacements[t.date]) dayPlacements[t.date] = [];
+          dayPlacements[t.date].push({ task: t, start: ts, end: ts + (t.dur || 0) });
+        }
+      }
+      return;
+    }
     if (t.unscheduled || (t._unplacedReason && !t.scheduledAt)) { unplaced.push(t); return; }
     if (t.date && t.time) {                       // placed: server gave local date+time
       var start = parseTimeToMinutes(t.time);

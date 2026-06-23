@@ -336,3 +336,33 @@ describe('derivePlacements — mixed task array', () => {
     expect(allGridded.map(p => p.task)).not.toContain(backlog);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Terminal status: a done/skip/missed task is NEVER unplaced (bug: done tasks
+// shown in the Unplaced list — orphaned split chunks with unscheduled=1)
+// ---------------------------------------------------------------------------
+describe('derivePlacements — terminal-status tasks are never unplaced', () => {
+  it('done + unscheduled=1 → NOT in unplaced (with a slot, grids instead)', () => {
+    const doneUnsched = { id: 'd1', text: 'Pay for COBRA', status: 'done', unscheduled: true, date: '2026-05-31', time: '10:45 AM', dur: 30 };
+    const result = derivePlacements([doneUnsched]);
+    expect(result.unplaced).not.toContain(doneUnsched);
+    expect(result.dayPlacements['2026-05-31']).toHaveLength(1);
+  });
+
+  it('skip + unscheduled=1 + no slot → in neither array (not unplaced)', () => {
+    const skipOrphan = { id: 's1', text: 'Apply for Jobs', status: 'skip', unscheduled: true, date: null, time: null };
+    const result = derivePlacements([skipOrphan]);
+    expect(result.unplaced).not.toContain(skipOrphan);
+    expect(Object.keys(result.dayPlacements)).toHaveLength(0);
+  });
+
+  it('missed + unscheduled=1 → NOT in unplaced', () => {
+    const missed = { id: 'm1', text: 'Take Meds', status: 'missed', unscheduled: true, date: null, time: null };
+    expect(derivePlacements([missed]).unplaced).not.toContain(missed);
+  });
+
+  it('a NON-terminal unscheduled task still goes to unplaced (guard not over-broad)', () => {
+    const pending = { id: 'p9', text: 'Real unplaced', status: '', unscheduled: true };
+    expect(derivePlacements([pending]).unplaced).toContain(pending);
+  });
+});
