@@ -111,4 +111,36 @@ describe('999.841 — split chunks persist as separate rows (not merge-deleted)'
       .select('split_ordinal');
     expect(rows.length).toBe(4);
   });
+
+  // The whole-occurrence-loss regression (the 2026-06 "Apply for Jobs" hole):
+  // a PAST pending split occurrence must keep ALL its chunk rows after a run —
+  // proves the hole can't reopen. Two former delete paths, both now closed:
+  //   - secondaries via the post-placement merge-delete (this leg / 999.841)
+  //   - the PRIMARY via the reconciler's past-pending hard-delete (d8fa69a:
+  //     never-hard-delete a past incomplete recurring instance)
+  it('a PAST (yesterday) pending split occurrence keeps all 4 chunk rows after a run', async () => {
+    await seedSplitMaster();
+    var y = new Date(); y.setDate(y.getDate() - 1);
+    var yISO = y.getFullYear() + '-' + String(y.getMonth() + 1).padStart(2, '0') + '-' + String(y.getDate()).padStart(2, '0');
+    // Seed 4 pending chunks for yesterday (so1 placed, so2-4 split parts).
+    for (var k = 1; k <= 4; k++) {
+      await db('task_instances').insert({
+        id: MASTER_ID + '-y-' + k, user_id: USER_ID, master_id: MASTER_ID,
+        occurrence_ordinal: 50, split_ordinal: k, split_total: 4, split_group: MASTER_ID + '-y',
+        dur: 60, status: '', date: yISO,
+        scheduled_at: k === 1 ? yISO + ' 09:00:00' : null,
+        unscheduled: k === 1 ? null : 1,
+        created_at: db.fn.now(), updated_at: db.fn.now()
+      });
+    }
+
+    await runScheduleAndPersist(USER_ID);
+
+    var rows = await db('task_instances')
+      .where({ user_id: USER_ID, master_id: MASTER_ID, occurrence_ordinal: 50 })
+      .select('split_ordinal', 'status');
+    // All 4 chunk rows must SURVIVE (not hard-deleted) — '' or 'missed', never gone.
+    expect(rows.length).toBe(4);
+    rows.forEach(function (r) { expect(['', 'missed']).toContain(r.status); });
+  });
 });
