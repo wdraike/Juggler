@@ -356,15 +356,24 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
       //   deadline OR implied_deadline OR FIXED placementMode
       // Reuse dateColumnToISO (defined at :92) to avoid duplicating Date/string parsing inline.
       var impliedDeadlineISO = dateColumnToISO(row.implied_deadline);
+      // R50: a PLACED recurring instance is committed to its scheduled slot — once
+      // its scheduled date+time passes incomplete it pins overdue (a daily habit's
+      // recurrence period IS the occurrence day). A floating ONE-OFF (no recurrence,
+      // no deadline) is NOT committed → stays excluded so 999.671 roll-forward holds.
+      // (Flexible-TPC roam-until-cycle-end is honored once implied_deadline is
+      // materialized: dueKey then prefers it, so this same-day check only fires when
+      // the period is the occurrence day.)
+      var isPlacedRecurringInstance = !!(row.task_type === 'recurring_instance' &&
+        row.scheduled_at && row.placement_mode !== _PLACEMENT_MODES.FIXED);
       var hasHardCommitment = !!(row.deadline || impliedDeadlineISO ||
-        row.placement_mode === _PLACEMENT_MODES.FIXED);
+        row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance);
       if (!hasHardCommitment) return false;
       // Determine the effective due date key and time (minutes).
       // For FIXED: use the derived task.date (same as the task object being built above).
       // For deadline: prefer deadline; then implied_deadline; then task date.
       var dueKey = dateColumnToISO(row.deadline) || impliedDeadlineISO;
       // For FIXED with no deadline/implied_deadline: the task's effective date IS its due
-      if (!dueKey && row.placement_mode === _PLACEMENT_MODES.FIXED) {
+      if (!dueKey && (row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance)) {
         // `date` was derived above from scheduled_at — recompute from row directly
         if (row.scheduled_at) {
           var _local = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE); // RC2: null tz → R50.8 default
@@ -375,7 +384,7 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
       // For time-precision (FIXED or scheduled): derive scheduled minutes.
       // For deadline/implied_deadline: no time check — past-day is sufficient.
       var scheduledMins = null;
-      if (row.placement_mode === _PLACEMENT_MODES.FIXED && row.scheduled_at) {
+      if ((row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance) && row.scheduled_at) {
         var _fixedLocal = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE); // RC2: null tz → R50.8 default
         if (_fixedLocal && _fixedLocal.time) {
           var _tm = /^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i.exec(_fixedLocal.time);
