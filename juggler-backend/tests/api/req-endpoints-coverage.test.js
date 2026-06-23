@@ -5,7 +5,8 @@
  * triaged as lacking a DEDICATED endpoint test (prior coverage was only indirect
  * via characterization/boundary suites):
  *
- *   R44.1  GET  /api/schedule/placements      (auth; read-only placements)
+ *   R44.1  GET  /api/schedule/placements      — REMOVED (W3: route deleted; MCP uses
+ *                                               deriveSchedulePlacements server-side)
  *   R44.2  POST /api/schedule/nudge           (auth; enqueue nudge, { queued:true })
  *   R45.1  GET  /api/impersonation/targets    (auth + admin; list targets; non-admin 403)
  *   R45.2  POST /api/weather/ingest           (auth; populate weather cache)
@@ -95,9 +96,9 @@ jest.mock('../../src/scheduler/scheduleQueue', () => ({
   enqueueScheduleRun: jest.fn(() => Promise.resolve({ queued: true })),
   stopPollLoop: jest.fn()
 }));
+// W3: getSchedulePlacements removed; route GET /api/schedule/placements deleted.
 jest.mock('../../src/scheduler/runSchedule', () => ({
-  runScheduleAndPersist: jest.fn(() => Promise.resolve({ dayPlacements: {}, unplaced: [], score: { total: 100 }, warnings: [] })),
-  getSchedulePlacements: jest.fn(() => Promise.resolve({ dayPlacements: { '2026-06-06': [{ taskId: 't1' }] }, unplaced: [], score: { total: 42 }, warnings: [] }))
+  runScheduleAndPersist: jest.fn(() => Promise.resolve({ dayPlacements: {}, unplaced: [], score: { total: 100 }, warnings: [] }))
 }));
 
 // ── Slice facade mock — tools, project delete, impersonation targets ───────────
@@ -136,29 +137,10 @@ beforeEach(() => {
   jest.clearAllMocks();
 });
 
-// ════════════════════════════════════════════════════════════════════════════
-// R44.1 — GET /api/schedule/placements (auth required; read-only placements)
-// ════════════════════════════════════════════════════════════════════════════
-describe('R44.1 — GET /api/schedule/placements', () => {
-  test('auth user → 200 with read-only placements, no persisting run triggered', async () => {
-    const runSchedule = require('../../src/scheduler/runSchedule');
-    const res = await request(app)
-      .get('/api/schedule/placements')
-      .set('Authorization', `Bearer ${VALID_TOKEN}`);
-
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('dayPlacements');
-    expect(res.body.dayPlacements).toEqual({ '2026-06-06': [{ taskId: 't1' }] });
-    // Read-only: the read-only getter is used, NOT the persisting runner.
-    expect(runSchedule.getSchedulePlacements).toHaveBeenCalledTimes(1);
-    expect(runSchedule.runScheduleAndPersist).not.toHaveBeenCalled();
-  });
-
-  test('no token → 401', async () => {
-    const res = await request(app).get('/api/schedule/placements');
-    expect(res.status).toBe(401);
-  });
-});
+// R44.1 — GET /api/schedule/placements: ROUTE DELETED (W3 DB single source).
+// The MCP get_schedule tool now calls deriveSchedulePlacements server-side.
+// No route test needed; coverage of the new helper lives in
+// tests/scheduler/deriveSchedulePlacements.test.js.
 
 // ════════════════════════════════════════════════════════════════════════════
 // R44.2 — POST /api/schedule/nudge (auth; enqueue nudge → { queued: true })

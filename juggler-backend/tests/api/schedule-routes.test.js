@@ -78,14 +78,9 @@ jest.mock('../../src/scheduler/scheduleQueue', () => ({
 }));
 
 // runSchedule mock — prevents actual DB-heavy scheduler execution
+// W3: getSchedulePlacements was removed; only runScheduleAndPersist remains.
 jest.mock('../../src/scheduler/runSchedule', () => ({
   runScheduleAndPersist: jest.fn(() => Promise.resolve({
-    dayPlacements: {},
-    unplaced: [],
-    score: { total: 100 },
-    warnings: []
-  })),
-  getSchedulePlacements: jest.fn(() => Promise.resolve({
     dayPlacements: {},
     unplaced: [],
     score: { total: 100 },
@@ -215,23 +210,9 @@ describe('POST /api/schedule/run', () => {
   });
 });
 
-// ─── GET /api/schedule/placements ────────────────────────────────────────────
-
-describe('GET /api/schedule/placements', () => {
-  test('returns placements for authenticated user', async () => {
-    const res = await request(app)
-      .get('/api/schedule/placements')
-      .set('Authorization', `Bearer ${VALID_TOKEN}`);
-
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('dayPlacements');
-  });
-
-  test('returns 401 without auth', async () => {
-    const res = await request(app).get('/api/schedule/placements');
-    expect(res.status).toBe(401);
-  });
-});
+// GET /api/schedule/placements — REMOVED (W3 DB single source).
+// Route deleted in W3-backend. MCP consumers now call deriveSchedulePlacements
+// server-side; the frontend uses utils/derivePlacements.js directly from GET /api/tasks.
 
 // ─── POST /api/schedule/nudge ─────────────────────────────────────────────────
 

@@ -253,7 +253,9 @@ describe('R17.2 — MCP tool JWT authorization enforcement', function () {
       update_task: { method: 'PUT', endpoint: '/api/tasks/' },
       set_task_status: { method: 'PUT', endpoint: '/api/tasks/' },
       delete_task: { method: 'DELETE', endpoint: '/api/tasks/' },
-      get_schedule: { method: 'GET', endpoint: '/api/schedule/placements' },
+      // W3: get_schedule now uses deriveSchedulePlacements server-side (not /api/schedule/placements).
+      // The tool calls GET /api/tasks internally via taskFacade.getAllTasks.
+      get_schedule: { method: 'GET', endpoint: '/api/tasks' },
       run_schedule: { method: 'POST', endpoint: '/api/schedule/run' },
       get_config: { method: 'GET', endpoint: '/api/config' },
       list_projects: { method: 'GET', endpoint: '/api/projects' },

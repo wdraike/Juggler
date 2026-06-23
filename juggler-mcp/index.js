@@ -232,13 +232,69 @@ server.tool(
 
 // ── Schedule tools ──
 
+const DEFAULT_TIMEZONE = 'America/New_York';
+
+// Derive the LOCAL date-key (YYYY-MM-DD) and start-minutes-of-day from a UTC
+// scheduledAt ISO string, in the given IANA timezone. Mirrors the backend
+// deriveSchedulePlacements.js fix: ListTasks calls rowToTask(row, null) so
+// task.date/task.time are always null over HTTP — placement must come from
+// scheduledAt, not t.time. Node has full ICU, so Intl.DateTimeFormat resolves
+// the wall-clock parts in the user's tz. Returns null when scheduledAt is
+// absent/unparseable (caller skips the grid entry — a data anomaly).
+function deriveLocalPlacement(scheduledAt, tz) {
+  if (!scheduledAt) return null;
+  const d = new Date(scheduledAt);
+  if (isNaN(d.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false
+  }).formatToParts(d);
+  const p = {};
+  parts.forEach((part) => { if (part.type !== 'literal') p[part.type] = part.value; });
+  if (!p.year || !p.month || !p.day || p.hour == null || p.minute == null) return null;
+  const date = `${p.year}-${p.month}-${p.day}`;
+  // hour12:false can emit '24' for midnight in some ICU builds — normalize to 0.
+  let hour = parseInt(p.hour, 10);
+  if (hour === 24) hour = 0;
+  const start = hour * 60 + parseInt(p.minute, 10);
+  if (isNaN(start)) return null;
+  return { date, start };
+}
+
 server.tool(
   'get_schedule',
-  'Get current schedule placements (read-only).',
+  'Get current schedule placements (read-only). Derived from the task list (DB single source) — no separate schedule endpoint.',
   {},
   async () => {
-    const data = await apiCall('GET', '/api/schedule/placements');
-    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+    // W3 (DB single source): derive placements from GET /api/tasks the same way
+    // the juggler frontend (utils/derivePlacements.js) and the backend helper
+    // (deriveSchedulePlacements.js) do. NOTE: over HTTP, ListTasks calls
+    // rowToTask(row, null) with NO timezone, so each task's `date`/`time` are
+    // NULL — only the frontend hydrates them client-side. So we derive the local
+    // date + start-minutes from `t.scheduledAt` (a UTC ISO string) using the
+    // USER'S timezone (GET /api/config → userTimezone), exactly like the backend
+    // helper. Routing on t.date/t.time here would drop every placed task.
+    const config = await apiCall('GET', '/api/config');
+    const tz = (config && config.userTimezone) || DEFAULT_TIMEZONE;
+
+    const data = await apiCall('GET', '/api/tasks');
+    const tasks = (data && data.tasks) || [];
+    const dayPlacements = {};
+    const unplaced = [];
+    tasks.forEach((t) => {
+      if (!t) return;
+      if (t.unscheduled || (t._unplacedReason && !t.scheduledAt)) { unplaced.push(t); return; }
+      if (t.scheduledAt) {
+        const local = deriveLocalPlacement(t.scheduledAt, tz);
+        if (local && local.start != null) {
+          if (!dayPlacements[local.date]) dayPlacements[local.date] = [];
+          dayPlacements[local.date].push({ task: t, start: local.start, end: local.start + (t.dur || 0) });
+        }
+      }
+    });
+    const result = { dayPlacements, unplaced, warnings: [] };
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   }
 );
 

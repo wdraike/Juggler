@@ -3,8 +3,11 @@
  *
  * Covers:
  *   POST /api/schedule/run   → runs scheduler synchronously, returns { dayPlacements, unplaced, ... }
- *   GET  /api/schedule/placements → reads persisted placements
  *   POST /api/schedule/nudge → enqueues a scheduler run; returns { queued: true }
+ *
+ * W3 (DB single source): GET /api/schedule/placements was removed. MCP consumers
+ * now call deriveSchedulePlacements server-side; the juggler frontend uses
+ * utils/derivePlacements.js from GET /api/tasks.
  *
  * All tests FAIL LOUD when the test DB is unavailable (TEST-FR-001).
  *
@@ -150,25 +153,9 @@ describe('Schedule API — E2E', () => {
     expect(instanceRow.date).toBe(placementDayKey);
   }, harnessProbe), 20000);
 
-  // ── GET /api/schedule/placements ──────────────────────────────────────────
-
-  test('GET /api/schedule/placements returns 200 with placements structure', requireDB(async () => {
-    // Run first so placements cache is populated
-    await request(app)
-      .post('/api/schedule/run')
-      .set('Authorization', `Bearer ${token}`)
-      .set('x-timezone', 'America/New_York');
-
-    const res = await request(app)
-      .get('/api/schedule/placements')
-      .set('Authorization', `Bearer ${token}`)
-      .set('x-timezone', 'America/New_York');
-
-    expect(res.status).toBe(200);
-    // Response is the same shape as /run: { dayPlacements, unplaced, ... }
-    expect(res.body).toHaveProperty('dayPlacements');
-    expect(typeof res.body.dayPlacements).toBe('object');
-  }, harnessProbe), 20000);
+  // GET /api/schedule/placements — ROUTE DELETED (W3 DB single source).
+  // Placement reads now via deriveSchedulePlacements (server-side helper for MCP)
+  // or utils/derivePlacements.js (frontend). See tests/scheduler/deriveSchedulePlacements.test.js.
 
   // ── POST /api/schedule/nudge ───────────────────────────────────────────────
 
