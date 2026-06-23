@@ -235,10 +235,12 @@ describe('Tier 2: Recurrings with Preferred Time', () => {
     var r = schedule([
       task({ id: 'bf', text: 'Breakfast', recurring: true, placementMode: 'time_window', when: 'morning', time: '7:00 AM', preferredTimeMins: 420, timeFlex: 60, dur: 30, generated: true }),
     ], 540); // 9am
-    // Still reported as missed (shows in ConflictsView / pastDue list)
-    expect(isMissed(r, 'bf')).toBe(true);
-    // AND kept on the calendar at its original 7 AM slot with an overdue flag
-    // so the user can mark it done/skip without leaving the day view.
+    // W2 placed-XOR-unplaced (DESIGN-RULING-overdue-vs-unplaceable, David 2026-06-22): a
+    // missed-window task with a when-block is OVERDUE on the grid ONLY — it is NO LONGER also
+    // pushed to unplaced[] (the old dual-place is superseded). Display reads task.overdue
+    // (R50.6 / ConflictsView routes overdue items to the Overdue list), not unplaced[] membership.
+    expect(isMissed(r, 'bf')).toBe(false);
+    // Kept on the calendar at its original 7 AM slot with an overdue flag.
     var p = placement(r, 'bf');
     expect(p).not.toBeNull();
     expect(p.start).toBe(mins(7));
@@ -1326,13 +1328,12 @@ describe('R11.16 — legacy reason-code scenarios (999.782)', () => {
       }),
     ], 600); // 10:00 AM — window [510,570] entirely past
 
-    // Must appear in unplaced with 'missed' reason.
+    // W2 placed-XOR-unplaced (DESIGN-RULING-overdue-vs-unplaceable): a missed TIME_WINDOW task
+    // with a when-block is OVERDUE on the grid ONLY — it is NOT in unplaced[] (the old dual-place
+    // is superseded). Display reads task.overdue (R50.6), not unplaced[] membership.
     var u = (r.unplaced || []).find(function(t) { return t.id === 'standup'; });
-    expect(u).toBeDefined();
-    expect(u._unplacedReason).toBe(REASON_CODES.MISSED);
-    // TIME_WINDOW missed tasks are also dual-placed on the grid as overdue
-    // (when they have a when-block) so the user can mark them done.
-    // Verify the dual-placement exists with _overdue=true.
+    expect(u).toBeUndefined();
+    // It IS pinned on the grid as overdue.
     var overdueEntry = null;
     Object.keys(r.dayPlacements || {}).forEach(function(dk) {
       (r.dayPlacements[dk] || []).forEach(function(p) {
