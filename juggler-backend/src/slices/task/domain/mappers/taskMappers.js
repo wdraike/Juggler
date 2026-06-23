@@ -400,9 +400,28 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
           }
         }
       }
-      // Past-due check: day in the past, OR same day with time passed (FIXED only).
+      // Past-due check: day in the past, OR same day with intra-day threshold passed.
+      // Threshold semantics (LOCKED design AC2/AC4):
+      //   FIXED: overdue when scheduled slot time is past (scheduledMins < nowMins).
+      //   Windowed daily recurring (isPlacedRecurringInstance + time_flex > 0):
+      //     overdue when WINDOW CLOSES = scheduledMins + time_flex (not at the slot).
+      //     The instance is roamable until the window closes — a 08:00 slot with 3h
+      //     window closes at 11:00; at 09:00 the window is still open → NOT overdue.
+      //   Window-less daily recurring (time_flex null/0, e.g. anytime):
+      //     no intra-day overdue before midnight — falls through to false here; overdue
+      //     fires the next day when dueKey < todayKey (period-boundary = midnight).
       if (dueKey < _now.todayKey) return true;
-      if (dueKey === _now.todayKey && scheduledMins !== null && scheduledMins < _now.nowMins) return true;
+      if (dueKey === _now.todayKey && scheduledMins !== null) {
+        if (row.placement_mode === _PLACEMENT_MODES.FIXED) {
+          // FIXED: overdue once the scheduled slot is past
+          if (scheduledMins < _now.nowMins) return true;
+        } else if (isPlacedRecurringInstance && row.time_flex > 0) {
+          // Windowed daily: overdue when the window closes (slot + timeFlex minutes)
+          var windowCloseMins = scheduledMins + row.time_flex;
+          if (_now.nowMins >= windowCloseMins) return true;
+        }
+        // Window-less daily (time_flex null): no intra-day overdue — falls through
+      }
       return false;
     })(),
     slackMins: row.slack_mins != null ? Number(row.slack_mins) : null,
