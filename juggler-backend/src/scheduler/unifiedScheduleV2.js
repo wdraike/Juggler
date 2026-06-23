@@ -2189,14 +2189,13 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   });
   missedWindowItems.forEach(function(item) {
     var task = item.task;
-    // Mark missed on the task object for unplaced output.
+    // Mark missed on the task object.
     task._unplacedReason = REASON_CODES.MISSED;
     task._unplacedDetail = 'Flex window has passed';
-    // Also push to unplaced list for ConflictsView / pastDue pickup.
-    stillUnplaced.push(item);
-    // Dual-place on the grid only when the task has a when-block anchor.
-    // Tasks with no when-tag have no obvious calendar slot to anchor the
-    // overdue entry, so they stay unplaced-only.
+    // W2 placed-XOR-unplaced (DESIGN-RULING-overdue-vs-unplaceable, David 2026-06-22):
+    // a missed-window task is OVERDUE — pinned on the grid ONLY when it has a when-block
+    // anchor; otherwise unplaced-only. It is NEVER both (no dual-place). Display reads the
+    // grid entry's _overdue / task.overdue (R50.6/W1), not the unplaced list.
     if (item.when && item.when.trim() !== '') {
       var overdueDateKey = item.anchorDate || dates[0].key;
       if (!dayPlacements[overdueDateKey]) dayPlacements[overdueDateKey] = [];
@@ -2210,6 +2209,9 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
         travelAfter: 0,
         _placementReason: 'Recurring window missed — placed for completion',
       });
+    } else {
+      // No when-block anchor → no calendar slot to pin → unplaced-only.
+      stillUnplaced.push(item);
     }
   });
 
