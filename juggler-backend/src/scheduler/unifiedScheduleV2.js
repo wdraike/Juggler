@@ -268,7 +268,46 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
     // TIME_WINDOW tasks from prior days still go through the missed-window path
     // so they can be force-placed with _overdue on their original day.
     // FIXED tasks from prior days still go through the force-placement pass.
-    if (t.recurring && pm === PLACEMENT_MODES.ANYTIME && t.date && toKey(t.date) < todayIsoKey) return;
+    // EXCEPTION (R50.0): flexible-TPC ANYTIME recurring instances whose recurrence
+    // period has NOT yet ended must NOT be dropped here — they will be forward-rolled
+    // by the pastAnchoredPreQueue bypass below. Day-locked instances still drop.
+    if (t.recurring && pm === PLACEMENT_MODES.ANYTIME && t.date && toKey(t.date) < todayIsoKey) {
+      // Compute flexible-TPC inline (mirrors isFlexibleTpc at line 496).
+      var _isFlexTpcCheck = (function() {
+        var _r = t.recur;
+        if (typeof _r === 'string') { try { _r = JSON.parse(_r); } catch (_e) { return false; } }
+        if (!_r || !_r.timesPerCycle || _r.timesPerCycle <= 0) return false;
+        var _sel;
+        if (_r.type === 'daily') _sel = 7;
+        else if (_r.type === 'weekly' || _r.type === 'biweekly') {
+          var _days = _r.days || 'MTWRF';
+          _sel = (typeof _days === 'object' && !Array.isArray(_days)) ? Object.keys(_days).length
+            : (typeof _days === 'string' ? _days.length : 0);
+        } else if (_r.type === 'monthly') { _sel = (_r.monthDays || [1, 15]).length; }
+        else { _sel = 1; }
+        return _r.timesPerCycle < _sel;
+      })();
+      if (_isFlexTpcCheck) {
+        // Flexible-TPC: check if the recurrence period has ended.
+        var _cycleLen = recurringCycleDays(t.recur) || 1;
+        var _anchor = parseDate(toKey(t.date));
+        if (_anchor) {
+          var _periodEnd = new Date(_anchor.getTime());
+          _periodEnd.setDate(_periodEnd.getDate() + _cycleLen);
+          var _todayDate = parseDate(todayIsoKey);
+          if (_todayDate && _todayDate < _periodEnd) {
+            // Within period — do NOT drop; let it flow through to build its item
+            // so the pastAnchoredPreQueue bypass can forward-roll it.
+          } else {
+            return; // Period ended — drop as before
+          }
+        } else {
+          return; // Cannot parse anchor date — drop as before
+        }
+      } else {
+        return; // Day-locked — drop as before
+      }
+    }
     var pri = normalizePri(t.pri);
     var priRank = PRI_RANK[pri] || 50;
     // fixed = true only for non-recurring calendar events in FIXED mode.
@@ -1282,7 +1321,12 @@ function tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, 
   // so the surfaced reason reflects why the primary placement failed.
   var diag = {};
   var base = { placedById: placedById, statuses: statuses, cfg: cfg, env: env, relaxDeps: relaxDepsFlag, diag: diag };
-  var overdueApplicable = item.slack != null && isFinite(item.slack) && item.slack < 0;
+  // _periodEndCap: set by the forward-roll path when deadlineDate was clamped to the
+  // period-end boundary. The cap is a HARD cycle boundary — overdue-retry (ignoreDeadline)
+  // must never fire for these items because it would bypass the cap and bleed the instance
+  // into the next cycle, defeating the fix entirely. The instance must be unplaced/overdue
+  // instead (the scheduler's correct output when no in-period slot exists).
+  var overdueApplicable = item.slack != null && isFinite(item.slack) && item.slack < 0 && !item._periodEndCap;
   var flexApplicable = !!item.flexWhen;
   var findSlot = item.preferLatestSlot ? findLatestSlot : findEarliestSlot;
 
@@ -1622,14 +1666,69 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     // original date/time as overdue (computeIsPastDue treats fixed as a hard due).
     // R50.1 (999.796): a past FIXED/ingested event (e.g. a flight that already
     // departed) must stay at its date as overdue, not jump to the horizon end.
+    //
+    // EXCEPTION (R50.0 — forward-roll): a flexible-TPC recurring instance (timesPerCycle
+    // < selectedDays → roamable) whose anchorDate is in the past but whose recurrence
+    // PERIOD has NOT yet ended is NOT pinned — it is re-presented to the normal placement
+    // queue as a fresh item so the scheduler can find the next valid slot within the cycle
+    // (R32.7 guard: day-locked non-TPC instances are never forward-rolled).
     if (item.anchorDate && item.anchorDate < todayIsoKey &&
         (item.isRecurring || (item.isFixedWhen && item.anchorMin != null) ||
          (item.isStarted && item.anchorMin != null))) {
       // R52 frozen invariant: a past STARTED instance stays pinned at its
       // original date as overdue — never re-placed forward (same as a past
       // fixed/ingested commitment).
-      pastAnchoredPreQueue.push(item);
-      return;
+      //
+      // Forward-roll gate: flexible-TPC recurring within its recurrence period.
+      // isStarted and isFixedWhen are never forward-rolled (pinned by R52 / R50.1).
+      if (item.isRecurring && item.isFlexibleTpc && !item.isStarted && !item.isFixedWhen) {
+        var _cycleLen2 = recurringCycleDays(item.task && item.task.recur != null ? item.task.recur : null) || 1;
+        var _anchorParsed = parseDate(item.anchorDate);
+        if (_anchorParsed) {
+          var _periodEndDate = new Date(_anchorParsed.getTime());
+          _periodEndDate.setDate(_periodEndDate.getDate() + _cycleLen2);
+          var _todayParsed = parseDate(todayIsoKey);
+          if (_todayParsed && _todayParsed < _periodEndDate) {
+            // Within period — forward-roll: clear the dead anchor so the instance
+            // enters the placement queue as a fresh unanchored item. The queue will
+            // find the best available slot on today or a future date within the cycle.
+            // The old dead-day slot is abandoned (no longer shown on the dead day).
+            item.anchorDate = null;
+            item.anchorMin = null;
+            // Cap the search window to the LAST valid day of the recurrence period
+            // (anchor + cycleLen - 1, INCLUSIVE — _periodEndDate is the exclusive boundary)
+            // so a forward-rolled instance can NEVER bleed into the next cycle. deadlineDate
+            // drives latestIdx in findEarliestSlot (line 973-975). The cap must be applied
+            // UNCONDITIONALLY when the existing deadlineDate is absent, PAST (the stale
+            // anchorDate fallback from line 397 is < today and would otherwise survive and
+            // defeat the cap — the original BLOCK), or looser than the cap; only a genuine
+            // tighter future user deadline is preserved.
+            var _lastValidDate = new Date(_periodEndDate.getTime());
+            _lastValidDate.setDate(_lastValidDate.getDate() - 1);
+            var _capKey = formatDateKey(_lastValidDate);
+            if (!item.deadlineDate || item.deadlineDate > _capKey || item.deadlineDate < todayIsoKey) {
+              item.deadlineDate = _capKey;
+            }
+            // Mark the deadline as a hard period-end cap so tryPlaceQueued does NOT
+            // use the overdue-retry (ignoreDeadline) path for this item. The period-end
+            // cap is a hard boundary — an overdue-retry that ignores it would bleed the
+            // instance into the next cycle, defeating the cap entirely.
+            item._periodEndCap = true;
+            // Fall through to the normal queue path below (do NOT push to pastAnchoredPreQueue).
+          } else {
+            // Period ended — pin as overdue at the dead slot.
+            pastAnchoredPreQueue.push(item);
+            return;
+          }
+        } else {
+          // Cannot parse anchor — fall back to pin.
+          pastAnchoredPreQueue.push(item);
+          return;
+        }
+      } else {
+        pastAnchoredPreQueue.push(item);
+        return;
+      }
     }
     // Missed preferred-time: recurring task whose preferred-time window has
     // entirely passed but is not in TIME_WINDOW mode (which has its own
@@ -2107,14 +2206,13 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
   });
   missedWindowItems.forEach(function(item) {
     var task = item.task;
-    // Mark missed on the task object for unplaced output.
+    // Mark missed on the task object.
     task._unplacedReason = REASON_CODES.MISSED;
     task._unplacedDetail = 'Flex window has passed';
-    // Also push to unplaced list for ConflictsView / pastDue pickup.
-    stillUnplaced.push(item);
-    // Dual-place on the grid only when the task has a when-block anchor.
-    // Tasks with no when-tag have no obvious calendar slot to anchor the
-    // overdue entry, so they stay unplaced-only.
+    // W2 placed-XOR-unplaced (DESIGN-RULING-overdue-vs-unplaceable, David 2026-06-22):
+    // a missed-window task is OVERDUE — pinned on the grid ONLY when it has a when-block
+    // anchor; otherwise unplaced-only. It is NEVER both (no dual-place). Display reads the
+    // grid entry's _overdue / task.overdue (R50.6/W1), not the unplaced list.
     if (item.when && item.when.trim() !== '') {
       var overdueDateKey = item.anchorDate || dates[0].key;
       if (!dayPlacements[overdueDateKey]) dayPlacements[overdueDateKey] = [];
@@ -2128,6 +2226,9 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
         travelAfter: 0,
         _placementReason: 'Recurring window missed — placed for completion',
       });
+    } else {
+      // No when-block anchor → no calendar slot to pin → unplaced-only.
+      stillUnplaced.push(item);
     }
   });
 

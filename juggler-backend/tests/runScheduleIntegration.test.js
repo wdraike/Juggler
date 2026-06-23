@@ -1668,3 +1668,87 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
     expect(missedRows.length).toBe(0); // FAILS if timeFlex guard is removed (mutant kill)
   });
 });
+
+// ═══════════════════════════════════════════════════════════════
+// §8 preserve-path — juggler-overdue-reschedule bugfix
+//
+// runSchedule.js:1576-1586 (§8): recurring instances with a DB-stored
+// scheduled_at hit `if (hasScheduledAt) return` and are skipped in the
+// pendingUpdates loop. Before the unifiedScheduleV2 forward-roll fix
+// (bert Round 1), this caused a flexible-TPC instance to be silently
+// kept at its past dead slot — the scheduler placed it on a future day
+// in memory but never wrote the new slot back to the DB because §8
+// short-circuited on `rawRec.scheduled_at !== null`.
+//
+// After the fix: the forward-rolled placement must be persisted.
+// This test seeds a flexible-TPC instance with a past scheduled_at and
+// confirms that after runScheduleAndPersist the DB row has a future
+// scheduled_at (or at least a different/cleared one — not the old dead slot).
+//
+// Traceability: .planning/kermit/juggler-overdue-reschedule/TRACEABILITY.md — AC1
+// REFER source: BERT-LOG.md Round-1 "REFER→telly: runSchedule.js:1576-1586"
+// ═══════════════════════════════════════════════════════════════
+
+describe('§8 preserve-path: flexible-TPC past scheduled_at → forward-rolled on DB persist', () => {
+  test('flexible-TPC instance with past DB scheduled_at gets updated to future slot after runScheduleAndPersist', async () => {
+    if (!available) return;
+
+    // Seed a recurring template: weekly, timesPerCycle=1 (flexible-TPC), 7 days.
+    // placement_mode: time_blocks (non-ANYTIME so it flows through the
+    // pastAnchoredPreQueue routing path rather than the buildItems:274 ANYTIME drop-filter).
+    // Use seedTemplate/seedInstance helpers so tasksWrite handles the master/instance split.
+    var tmplId = 'sec8-tmpl-001';
+    await seedTemplate({
+      id: tmplId,
+      text: 'Call Mom (sec8 test)',
+      dur: 30,
+      placement_mode: 'time_blocks',
+      flex_when: 1,
+      recur: { type: 'weekly', days: 'MTWRFSU', timesPerCycle: 1 }
+    });
+
+    // Use today-3 as the dead anchor so the recurrence period end (anchor+7 = today+4)
+    // is still in the future — the instance is within-period and eligible for forward-roll.
+    var now = new Date();
+    var pastDate = new Date(now);
+    pastDate.setDate(pastDate.getDate() - 3);
+    var pastDateKey = pastDate.toISOString().slice(0, 10);      // YYYY-MM-DD
+    var pastScheduledAt = pastDateKey + ' 14:00:00';            // 2pm UTC on dead day
+
+    var instId = tmplId + '-' + pastDateKey.replace(/-/g, '');
+    // seedInstance inserts into task_masters + task_instances correctly.
+    await seedInstance(tmplId, {
+      id: instId,
+      placement_mode: 'time_blocks',
+      flex_when: 1,
+      recur: { type: 'weekly', days: 'MTWRFSU', timesPerCycle: 1 },
+      date: pastDateKey,             // dead anchor date (in the past)
+      scheduled_at: pastScheduledAt, // past DB scheduled_at — triggers §8 hasScheduledAt=true
+      occurrence_ordinal: 1
+    });
+
+    // Verify the row exists with the past scheduled_at before the run.
+    // tasks_v joins master + instance; scheduled_at comes from task_instances.
+    var before = await db('task_instances').where('id', instId).first();
+    expect(before.scheduled_at).toBe(pastScheduledAt);
+
+    // Run the full scheduler pipeline.
+    await runScheduleAndPersist(USER_ID);
+
+    // ASSERTION (§8 forward-roll): the flexible-TPC instance must NOT keep its
+    // dead past scheduled_at. The scheduler forward-rolled it in memory; the §8
+    // path must NOT short-circuit on `hasScheduledAt=true` for roamable instances
+    // — the new slot must be written back to the DB.
+    //
+    // Acceptable outcomes post-fix:
+    //   (a) scheduled_at updated to a future date (ideal — forward-rolled and persisted).
+    //   (b) scheduled_at cleared to null (no slot found in cycle, but dead slot released).
+    //
+    // NOT acceptable: scheduled_at === pastScheduledAt (§8 short-circuited; dead slot kept).
+    //
+    // MUTANT CATCH: if the §8 path still returns early for flexible-TPC instances,
+    // scheduled_at stays === pastScheduledAt and this assertion FAILS RED.
+    var after = await db('task_instances').where('id', instId).first();
+    expect(after.scheduled_at).not.toBe(pastScheduledAt);
+  });
+});
