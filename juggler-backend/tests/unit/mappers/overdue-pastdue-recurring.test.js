@@ -132,28 +132,30 @@ describe('BUG (RED) — recurring_instance time_window past TODAY not flagged ov
     // placement_mode!=='fixed') → early return false; same-day time check never reached.
     const row = makeBaseRow({
       placement_mode: 'time_window',
+      recur: '{"type":"daily"}',                // DAILY habit — period is the occurrence day
       scheduled_at: '2026-06-22 11:30:00',  // 07:30 EDT (UTC-4)
       deadline: null,
       implied_deadline: null,
       overdue: null
     });
     const task = rowToTask(row, TZ, null, null, NOW_21_00);
-    // EXPECTED (correct behavior): overdue===true (scheduled today at 07:30, now 21:00 → past)
-    // ACTUAL on buggy code: overdue===false (hasHardCommitment gate fails)
+    // EXPECTED (correct behavior): overdue===true (daily, scheduled today 07:30, now 21:00 → past)
     expect(task.overdue).toBe(true);
   });
 
-  test('CASE-1b-RED: time_blocks recurring, scheduled today 07:30, now 21:00 → overdue===true', () => {
-    // Same bug surface for time_blocks placement mode.
+  test('CASE-1b: WEEKLY/flexible recurring (roams the cycle, reschedulable) past today → overdue===FALSE', () => {
+    // David: "Call Mom can be rescheduled". A weekly/timesPerCycle recurrence can
+    // still be done in a later slot this cycle → NOT overdue until the cycle boundary.
     const row = makeBaseRow({
       placement_mode: 'time_blocks',
-      scheduled_at: '2026-06-22 11:30:00',
+      recur: '{"type":"weekly","days":"MTWRFUS","fillPolicy":"any"}',
+      scheduled_at: '2026-06-22 16:15:00',
       deadline: null,
       implied_deadline: null,
       overdue: null
     });
     const task = rowToTask(row, TZ, null, null, NOW_21_00);
-    expect(task.overdue).toBe(true);
+    expect(task.overdue).toBe(false);
   });
 });
 
@@ -317,6 +319,7 @@ describe('Past-DAY recurring — yesterday instance → overdue===true', () => {
     // On current code: hasHardCommitment=false → returns false (the bug).
     const row = makeBaseRow({
       placement_mode: 'time_window',
+      recur: '{"type":"daily"}',
       scheduled_at: '2026-06-21 11:30:00',  // yesterday 07:30 EDT
       deadline: null,
       implied_deadline: null,

@@ -356,15 +356,18 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
       //   deadline OR implied_deadline OR FIXED placementMode
       // Reuse dateColumnToISO (defined at :92) to avoid duplicating Date/string parsing inline.
       var impliedDeadlineISO = dateColumnToISO(row.implied_deadline);
-      // R50: a PLACED recurring instance is committed to its scheduled slot — once
-      // its scheduled date+time passes incomplete it pins overdue (a daily habit's
-      // recurrence period IS the occurrence day). A floating ONE-OFF (no recurrence,
-      // no deadline) is NOT committed → stays excluded so 999.671 roll-forward holds.
-      // (Flexible-TPC roam-until-cycle-end is honored once implied_deadline is
-      // materialized: dueKey then prefers it, so this same-day check only fires when
-      // the period is the occurrence day.)
+      // R50: a PLACED **daily** recurring instance is committed to its scheduled
+      // slot — its recurrence period IS the occurrence day, so once today's time
+      // passes incomplete it pins overdue (can't do today's breakfast tomorrow).
+      // A WEEKLY/flexible-TPC recurrence (timesPerCycle/fillPolicy, roams across the
+      // cycle's days — e.g. "Call Mom" 3×/week) can still be RESCHEDULED to a later
+      // slot in its cycle, so it is NOT overdue until the cycle boundary (honored via
+      // implied_deadline once materialized). A floating one-off (no recurrence, no
+      // deadline) is never committed → 999.671 roll-forward holds.
+      var _recurObj = (typeof row.recur === 'string') ? safeParseJSON(row.recur, null) : row.recur;
+      var _isDailyRecur = !!(_recurObj && _recurObj.type === 'daily');
       var isPlacedRecurringInstance = !!(row.task_type === 'recurring_instance' &&
-        row.scheduled_at && row.placement_mode !== _PLACEMENT_MODES.FIXED);
+        row.scheduled_at && row.placement_mode !== _PLACEMENT_MODES.FIXED && _isDailyRecur);
       var hasHardCommitment = !!(row.deadline || impliedDeadlineISO ||
         row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance);
       if (!hasHardCommitment) return false;
