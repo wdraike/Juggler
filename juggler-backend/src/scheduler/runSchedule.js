@@ -1345,74 +1345,15 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // not N short tiles/events. If the scheduler placed chunks with gaps between
   // them the chunks remain separate (gap > 0 means the user could fill the gap
   // with something else and the visual split is meaningful).
-  var mergedOutIds = []; // secondary chunk IDs whose DB rows should be deleted
-  Object.keys(dayPlacements).forEach(function(dateKey) {
-    var placements = dayPlacements[dateKey];
-    if (!placements || placements.length < 2) return;
-
-    // Track per-day merged IDs to filter only the current day's merged chunks
-    var dayMergedIds = [];
-
-    // Collect split-chunk placements grouped by splitGroup.
-    // Non-split placements (splitGroup null/undefined) are left untouched.
-    var byGroup = {}; // splitGroup → [placementEntry, ...]
-    placements.forEach(function(p) {
-      if (!p.task) return;
-      var sg = p.task.splitGroup;
-      if (!sg) return; // not a split chunk
-      if (!byGroup[sg]) byGroup[sg] = [];
-      byGroup[sg].push(p);
-    });
-
-    Object.keys(byGroup).forEach(function(sg) {
-      var group = byGroup[sg];
-      if (group.length < 2) return; // nothing to merge
-
-      // Sort by start time ascending so we can scan for adjacent pairs.
-      group.sort(function(a, b) { return a.start - b.start; });
-
-      // Linear scan: merge consecutive zero-gap pairs.
-      // Walk forward; whenever two entries are back-to-back, fold the second
-      // into the first (accumulate dur) and mark the second for deletion.
-      var i = 0;
-      while (i < group.length - 1) {
-        var curr = group[i];
-        var next = group[i + 1];
-        if (curr.start + curr.dur === next.start) {
-          // Zero gap — merge next into curr.
-          curr.dur += next.dur;
-          // Record next's task ID for DB row deletion.
-          if (next.task && next.task.id) {
-            dayMergedIds.push(next.task.id);
-            mergedOutIds.push(next.task.id);
-          }
-          // Remove next from the group so the scan can continue (handles 3+ chunks).
-          group.splice(i + 1, 1);
-          // Do NOT advance i: re-check curr against the new group[i+1].
-        } else {
-          i++;
-        }
-      }
-      // Note: `group` entries are the same object references as in `placements`,
-      // so mutating curr.dur already updated the placement list in-place.
-      // Entries removed from `group` via splice are still in `placements` — we
-      // filter those out below.
-    });
-
-    // Remove merged-out entries from the day's placement list so they don't
-    // receive a scheduled_at update and don't appear in the outgoing cache/SSE.
-    if (dayMergedIds.length > 0) {
-      var mergedOutSet = {};
-      dayMergedIds.forEach(function(id) { mergedOutSet[id] = true; });
-      dayPlacements[dateKey] = placements.filter(function(p) {
-        return !(p.task && p.task.id && mergedOutSet[p.task.id]);
-      });
-    }
-  });
-
-  if (mergedOutIds.length > 0) {
-    logger.info('[SCHED] split-chunk merge: collapsed ' + mergedOutIds.length + ' adjacent chunk(s) into primary rows');
-  }
+  // 999.841 (David ruling 2026-06-23): split chunks persist as SEPARATE rows,
+  // each with its OWN scheduled_at — the scheduler must NEVER merge-delete chunk
+  // rows, so it can redistribute incomplete chunks to other slots/days later. The
+  // visual+mathematical merge of contiguous same-occurrence chunks is now a
+  // DISPLAY concern owned by the UI (juggler-frontend), not a DB mutation here.
+  // (The former post-placement merge folded contiguous chunks into the primary
+  // and hard-deleted the secondaries — that destroyed the per-chunk rows and lost
+  // minutes via the drift-fix. Removed.)
+  var mergedOutIds = []; // kept empty — no DB-side merge/delete (see above)
 
   Object.keys(dayPlacements).forEach(function(dateKey) {
     var placements = dayPlacements[dateKey];
