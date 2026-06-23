@@ -1690,12 +1690,19 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
             // The old dead-day slot is abandoned (no longer shown on the dead day).
             item.anchorDate = null;
             item.anchorMin = null;
-            // Cap the search window to the recurrence period end so the instance
-            // doesn't bleed into the next cycle. deadlineDate drives latestIdx in
-            // findEarliestSlot (line 973-975).
-            var _periodEndKey = formatDateKey(_periodEndDate);
-            if (!item.deadlineDate || item.deadlineDate > _periodEndKey) {
-              item.deadlineDate = _periodEndKey;
+            // Cap the search window to the LAST valid day of the recurrence period
+            // (anchor + cycleLen - 1, INCLUSIVE — _periodEndDate is the exclusive boundary)
+            // so a forward-rolled instance can NEVER bleed into the next cycle. deadlineDate
+            // drives latestIdx in findEarliestSlot (line 973-975). The cap must be applied
+            // UNCONDITIONALLY when the existing deadlineDate is absent, PAST (the stale
+            // anchorDate fallback from line 397 is < today and would otherwise survive and
+            // defeat the cap — the original BLOCK), or looser than the cap; only a genuine
+            // tighter future user deadline is preserved.
+            var _lastValidDate = new Date(_periodEndDate.getTime());
+            _lastValidDate.setDate(_lastValidDate.getDate() - 1);
+            var _capKey = formatDateKey(_lastValidDate);
+            if (!item.deadlineDate || item.deadlineDate > _capKey || item.deadlineDate < todayIsoKey) {
+              item.deadlineDate = _capKey;
             }
             // Fall through to the normal queue path below (do NOT push to pastAnchoredPreQueue).
           } else {
