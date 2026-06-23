@@ -913,7 +913,36 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // produce "executing 0 DB updates" and lose the slot record entirely.
       // Only protect past recurring instances; future/non-recurring rows continue
       // to follow the normal deletion path.
-      if (rowDate && rowDate < today && row.task_type === 'recurring_instance') return false;
+      // Use <= today (not <) so a today-dated instance whose occurrence is not in
+      // desiredIds is also spared — today == today is still "at or past" and must
+      // reach Phase-9, not be hard-deleted here.
+      if (rowDate && rowDate <= today && row.task_type === 'recurring_instance') return false;
+    }
+    // PATH-B grandfather: spare past pending recurring instances even when date=NULL
+    // (never-placed / unscheduled=1).  The `if (row && row.date)` gate above is
+    // falsy for these rows, so the horizon spare and the date-based grandfather both
+    // silently skip them — they fall through to `return true` and are hard-deleted.
+    // Fix: check task_type OUTSIDE the date gate.  Use scheduled_at as the effective
+    // date fallback (dateStrings:true → bare UTC string; append 'Z' for correct parse).
+    // If BOTH date and scheduled_at are null the instance was never placed on any day;
+    // spare it unconditionally — it must reach Phase-9 to be frozen/missed rather than
+    // silently erased. (R32.4 / R50.1 / LOCKED design 999.808)
+    if (row && row.task_type === 'recurring_instance') {
+      if (!row.date) {
+        var effectiveDateForGrandfather = null;
+        if (row.scheduled_at != null) {
+          // dateStrings:true yields a bare UTC string; append 'Z' so new Date() parses
+          // it as UTC rather than local time (see juggler dateStrings trap).
+          var satStr = String(row.scheduled_at);
+          effectiveDateForGrandfather = new Date(satStr.endsWith('Z') ? satStr : satStr + 'Z');
+          if (isNaN(effectiveDateForGrandfather.getTime())) effectiveDateForGrandfather = null;
+        }
+        // Spare if: (a) the derived effective date is at-or-before today, meaning the
+        // occurrence is past (Phase-9 will freeze it as missed), OR (b) no date can be
+        // derived at all — a never-placed, never-scheduled pending recurring instance
+        // must never be hard-deleted here regardless.
+        if (!effectiveDateForGrandfather || effectiveDateForGrandfather <= today) return false;
+      }
     }
     return true;
   });
