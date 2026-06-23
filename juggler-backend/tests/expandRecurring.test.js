@@ -368,6 +368,37 @@ describe('expandRecurring', () => {
         expect(dates).not.toContain(d);
       });
     });
+
+    test('over-materialization cap: surplus pending beyond tpc are pruned (no phantom unplaced)', () => {
+      // Cycle 1 (4/21-4/27): 2 done + 3 pending = 5 booked > tpc=4. Without the
+      // cap, all 3 pending are kept (5 occurrences for a 4x/week task) and the
+      // surplus surfaces as phantom "unplaced". With the cap, only tpc−terminal
+      // = 4−2 = 2 (earliest) pending are kept; the 3rd is pruned by reconcile.
+      const src = {
+        id: 'ex', text: 'Exercise', taskType: 'recurring_template',
+        date: '2026-04-21', dur: 30, pri: 'P2', recurring: true,
+        recur: { type: 'weekly', days: 'MTWRFSU', timesPerCycle: 4 },
+        recurStart: '2026-04-21', dayReq: 'any'
+      };
+      const done1 = { id: 'ex-d1', sourceId: 'ex', taskType: 'recurring_instance', date: '2026-04-21', text: 'Exercise', status: 'done' };
+      const done2 = { id: 'ex-d2', sourceId: 'ex', taskType: 'recurring_instance', date: '2026-04-22', text: 'Exercise', status: 'done' };
+      const pendingBookedByDate = {
+        'ex|2026-04-23': true, 'ex|2026-04-24': true, 'ex|2026-04-25': true
+      };
+      const result = expandRecurring(
+        [src, done1, done2],
+        new Date(2026, 3, 21), // 4/21
+        new Date(2026, 3, 27), // 4/27 (one cycle)
+        { pendingBookedByDate: pendingBookedByDate }
+      );
+      const ours = result.filter(r => r.sourceId === 'ex');
+      const dates = ours.map(r => r._candidateDate || r.date);
+      // 2 earliest pending kept; 3rd pruned; no new picks (already at budget).
+      expect(dates).toContain('2026-04-23');
+      expect(dates).toContain('2026-04-24');
+      expect(dates).not.toContain('2026-04-25');
+      expect(ours.length).toBeLessThanOrEqual(2);
+    });
   });
 
   describe('caller-normalized ISO dates block re-emission', () => {

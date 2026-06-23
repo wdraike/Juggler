@@ -223,12 +223,24 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         });
         var existingInCycle = Object.keys(bookedKeys).length;
 
-        // Pre-fill `picked` with existing pending dates so they emit as desired
-        // occurrences. Without this the reconcile diff would treat them as
-        // "not desired" and DELETE them — even though the user still wants
-        // them. Pending are already tpc-budgeted, so they belong in picked
-        // regardless of slot math.
-        Object.keys(pendingKeys).forEach(function(k) { picked[k] = true; });
+        // Pre-fill `picked` with existing pending dates so the reconcile diff
+        // keeps them (doesn't DELETE a date the user still wants) — but CAP to the
+        // cycle budget. Terminal occurrences (done/skip/cancel) are history and are
+        // counted but never pruned; pending are kept only up to `tpc − terminal`.
+        // Surplus pending beyond the budget are NOT re-picked → the reconcile diff
+        // prunes them, so a flexible-TPC cycle never over-materializes past
+        // timesPerCycle and surfaces phantom "unplaced" days (the roamable task is
+        // placed wherever it fits; only the real budget's worth is materialized).
+        // Earliest pending kept first (chronological Object.keys order). Only
+        // FULFILLED terminal (done/cancel) consume the budget — a `skip` is a
+        // declined slot, not a session, so it must NOT shrink the pending budget
+        // (else a skipped Fri would wrongly prune a legit Mon-Thu pending).
+        var _fulfilledInCycle = Object.keys(bookedKeys).filter(function(k) {
+          if (pendingKeys[k]) return false; // pending, not terminal
+          return (instanceStatusBySourceDate[src.id + '|' + k] || '') !== 'skip';
+        }).length;
+        var _pendingBudget = Math.max(0, tpc - _fulfilledInCycle);
+        Object.keys(pendingKeys).slice(0, _pendingBudget).forEach(function(k) { picked[k] = true; });
 
         // Fill policy (#26). Per-task setting on the recurrence:
         //   'keep'     (default) — any skip in the cycle freezes new picks;
