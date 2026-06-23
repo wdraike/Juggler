@@ -108,4 +108,13 @@ describe('W2 partition — placed XOR unplaced (AC-W2.3) + deadline-based partit
     expect(onGrid.has('mw_task')).toBe(true);     // pinned on its day
     expect(unplaced.has('mw_task')).toBe(false);  // RED today: it is ALSO unplaced
   });
+
+  // AC-W2.3 (recurring) — the :2098 dual-place path is described for a RECURRING missed-window
+  // task with a when-block (appears in unplaced AND grid). Assert disjointness for that case too.
+  test('AC-W2.3 (recurring): recurring missed-window task not in BOTH grid and unplaced[]', () => {
+    const t = makeMissedWindowTask({ id: 'mw_recur', recurring: true });
+    const result = run([t], 600);
+    const both = [...idsOnGrid(result)].filter((id) => idsUnplaced(result).has(id));
+    expect(both).toEqual([]); // characterizes the recurring dual-place path
+  });
 });
