@@ -1274,4 +1274,126 @@ describe('AC3-cap — no next-cycle bleed: forward-roll never places on or after
     expect(badDates).toEqual([]);
   });
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // AC3-cap-regression — the REAL regression guard for the cap-bleed fix.
+  //
+  // PROBLEM WITH EXISTING TESTS (zoe BLOCK 2026-06-23):
+  //   AC3-cap (dur=1440): regressed cap sets latestIdx to a PAST index →
+  //     instance placed nowhere → placedOnDates=[] → badDates=[] trivially.
+  //   AC3-cap-exact (dur=30): P0 `time_blocks` blockers don't saturate
+  //     deterministically for a when-constrained 30min roamable → instance
+  //     lands in-period on Jun-24, never near Jun-29 either way.
+  //   Both tests therefore STAY GREEN even without the fix — false passes.
+  //
+  // THIS TEST DESIGN (tractable saturation per fix_recipe):
+  //   todayKey = '2026-06-28' (Sunday = anchor + cycleLen - 1, the LAST
+  //   in-period day). Only 1 in-period day needs saturating.
+  //
+  //   Roamable: when='morning', flexWhen:false → constrained to morning
+  //   block ONLY. Jun-28 is Sunday → morning block = 7:00 AM–12:00 PM
+  //   (420–720 min, 300 min total). dur=30.
+  //
+  //   Blocker: placementMode='fixed', date='2026-06-28', preferredTimeMins=420,
+  //   dur=300 → immovably fills the ENTIRE Jun-28 morning block. No morning
+  //   slot remains for the roamable on the only in-period day visible to it.
+  //
+  //   Jun-29+ mornings are FREE (no blockers). So:
+  //     WITHOUT fix: deadlineDate is stale/absent → latestIdx is not capped
+  //       at Jun-28 → findEarliestSlot searches Jun-29+ → BLEEDS (RED).
+  //     WITH fix: deadlineDate = '2026-06-28' → latestIdx stops at Jun-28 →
+  //       no slot found → instance is unplaced/overdue → NOT on Jun-29+.
+  //
+  // SELF-MUTATION CONTRACT: this test MUST go RED when the clause
+  //   `|| item.deadlineDate < todayIsoKey`  is removed from line ~1704 of
+  //   unifiedScheduleV2.js. Verified via /tmp backup (never git checkout).
+  //   See TEST-CATALOG.md RED-on-revert proof.
+  // ─────────────────────────────────────────────────────────────────────────
+  test('AC3-cap-regression: when-constrained roamable, Jun-28 morning saturated → MUST NOT bleed to Jun-29+ (fail-on-revert of cap clause)', function() {
+    // Fixed today = last in-period day so only one day needs saturating.
+    var CAP_TODAY_KEY = '2026-06-28';  // Sunday = anchor(Jun-22) + cycleLen(7) - 1
+    var PERIOD_END_KEY = '2026-06-29'; // EXCLUSIVE period boundary
+
+    // ── Roamable instance ──────────────────────────────────────────────────
+    // weekly flexible-TPC, anchor=Jun-22, cycleLen=7.
+    // when='morning', flexWhen:false → ONLY morning blocks eligible.
+    // dur=30 → fits easily in morning IF a slot is available.
+    var roamable = makeTask({
+      id: 'cap-regression-roamable',
+      taskType: 'recurring_instance',
+      text: 'Cap Regression Roamable',
+      recurring: true,
+      generated: true,
+      placementMode: 'time_blocks',
+      when: 'morning',
+      flexWhen: false,
+      recur: { type: 'weekly', days: 'MTWRFSU', timesPerCycle: 1 },
+      recurStart: '2026-06-22',
+      date: '2026-06-22',     // past anchor → enters forward-roll path
+      day: 'Mon',
+      dur: 30,
+      pri: 'P3',
+      status: '',
+      overdue: null,
+      deadline: null,
+      impliedDeadline: null
+    });
+
+    // ── Immovable morning blocker on the ONLY remaining in-period day ──────
+    // FIXED (non-recurring) → isRigid=true → immovable.
+    // date='2026-06-28' (Sunday), preferredTimeMins=420 (7:00 AM), dur=300.
+    // Jun-28 Sunday morning block: start=420, end=720 (300 min total).
+    // A 300-min FIXED task starting at 420 occupies the ENTIRE morning block.
+    // The roamable (when='morning', flexWhen:false) has NO eligible slot left
+    // on the only in-period day (Jun-28 = CAP_TODAY_KEY).
+    var morningBlocker = makeTask({
+      id: 'cap-regression-blocker',
+      taskType: 'task',
+      text: 'Fixed Morning Event',
+      recurring: false,
+      placementMode: 'fixed',
+      when: '',            // no when-tag → anchorMin derived from preferredTimeMins
+      flexWhen: false,
+      date: '2026-06-28',
+      day: 'Sun',
+      dur: 300,            // 5 hours = entire Sunday morning block (420–720)
+      preferredTimeMins: 420, // 7:00 AM = start of Sunday morning block
+      pri: 'P0',
+      status: '',
+      overdue: null
+    });
+
+    // Run with todayKey=Jun-28 and nowMins=0 (midnight) so the full morning
+    // block is nominally available (not past due to nowMins truncation).
+    var result = runScheduler(
+      [morningBlocker, roamable],
+      CAP_TODAY_KEY,
+      0,              // nowMins=0 → no past-time truncation on Jun-28
+      makeCfg()
+    );
+
+    var roamableDates = placedOnDates(result, 'cap-regression-roamable');
+
+    // ── PRIMARY assertion: must NOT bleed to or past period-end ───────────
+    // WITHOUT the cap fix the scheduler finds a free morning slot on Jun-29
+    // (the next Sunday after cap_today). WITH the fix it is capped at Jun-28.
+    var badDates = roamableDates.filter(function(d) { return d >= PERIOD_END_KEY; });
+    expect(badDates).toEqual([]);
+
+    // ── SECONDARY assertion: positive accountability ───────────────────────
+    // The instance must be accounted for — either placed in-period (Jun-28
+    // only, which we just asserted is impossible due to saturation, so it
+    // should be unplaced/overdue) OR present in result.unplaced[].
+    // This prevents the dur=1440 vacuous-pass trap: if the instance is simply
+    // "placed nowhere" due to a different bug, badDates is trivially empty
+    // and the test gives a false green. We require it to be accounted for.
+    var unplacedIds = (result.unplaced || []).map(function(u) {
+      return u.task ? u.task.id : u.id;
+    });
+    var inPeriodDates = roamableDates.filter(function(d) { return d < PERIOD_END_KEY; });
+    var isAccountedFor = (inPeriodDates.length > 0) || (unplacedIds.indexOf('cap-regression-roamable') >= 0);
+    // Must be accounted for (either placed in-period or unplaced/overdue) —
+    // NOT silently vanished (which would make badDates vacuously empty).
+    expect(isAccountedFor).toBe(true);
+  });
+
 });

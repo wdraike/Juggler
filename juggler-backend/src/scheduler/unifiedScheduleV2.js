@@ -1321,7 +1321,12 @@ function tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, 
   // so the surfaced reason reflects why the primary placement failed.
   var diag = {};
   var base = { placedById: placedById, statuses: statuses, cfg: cfg, env: env, relaxDeps: relaxDepsFlag, diag: diag };
-  var overdueApplicable = item.slack != null && isFinite(item.slack) && item.slack < 0;
+  // _periodEndCap: set by the forward-roll path when deadlineDate was clamped to the
+  // period-end boundary. The cap is a HARD cycle boundary — overdue-retry (ignoreDeadline)
+  // must never fire for these items because it would bypass the cap and bleed the instance
+  // into the next cycle, defeating the fix entirely. The instance must be unplaced/overdue
+  // instead (the scheduler's correct output when no in-period slot exists).
+  var overdueApplicable = item.slack != null && isFinite(item.slack) && item.slack < 0 && !item._periodEndCap;
   var flexApplicable = !!item.flexWhen;
   var findSlot = item.preferLatestSlot ? findLatestSlot : findEarliestSlot;
 
@@ -1704,6 +1709,11 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
             if (!item.deadlineDate || item.deadlineDate > _capKey || item.deadlineDate < todayIsoKey) {
               item.deadlineDate = _capKey;
             }
+            // Mark the deadline as a hard period-end cap so tryPlaceQueued does NOT
+            // use the overdue-retry (ignoreDeadline) path for this item. The period-end
+            // cap is a hard boundary — an overdue-retry that ignores it would bleed the
+            // instance into the next cycle, defeating the cap entirely.
+            item._periodEndCap = true;
             // Fall through to the normal queue path below (do NOT push to pastAnchoredPreQueue).
           } else {
             // Period ended — pin as overdue at the dead slot.
