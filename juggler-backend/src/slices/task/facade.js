@@ -574,10 +574,16 @@ async function cascadeRecurringDelete(ctx) {
     .where({ user_id: userId, source_id: templateId })
     .select('id', 'status', 'gcal_event_id', 'msft_event_id');
 
+  // 999.844 Guard 1: a series-delete must KEEP every history-bearing instance
+  // verbatim — done/cancel/skip AND pause/missed. Only genuinely-active/pending
+  // instances are soft-cancelled (status='cancelled') to stop the series. Before
+  // this, pause/missed were treated as pending and overwritten to 'cancelled',
+  // losing the original terminal state.
+  var TERMINAL_KEEP = ['done', 'cancel', 'skip', 'pause', 'missed'];
+
   pendingIds = instances
     .filter(function (inst) {
-      var st = inst.status || '';
-      return st !== 'done' && st !== 'cancel' && st !== 'skip';
+      return TERMINAL_KEEP.indexOf(inst.status || '') === -1;
     })
     .map(function (inst) { return inst.id; });
 
@@ -599,13 +605,13 @@ async function cascadeRecurringDelete(ctx) {
 
   keptIds = instances
     .filter(function (inst) {
-      var st = inst.status || '';
-      return st === 'done' || st === 'cancel' || st === 'skip';
+      return TERMINAL_KEEP.indexOf(inst.status || '') !== -1;
     })
     .map(function (inst) { return inst.id; });
-  // R55 no-hard-delete: completed/terminal instances (done/cancel/skip) are KEPT
-  // verbatim as the historical record — never deleted. They are already terminal
-  // and excluded from the scheduler write-set, so no status change is needed.
+  // R55 + 999.844: history-bearing instances (done/cancel/skip/pause/missed) are
+  // KEPT verbatim as the historical record — never deleted, never overwritten.
+  // They are already terminal/frozen and excluded from the scheduler write-set,
+  // so no status change is needed.
   keptCount = keptIds.length;
 
   var template = await trx('tasks_with_sync_v').where({ id: templateId, user_id: userId }).first();
