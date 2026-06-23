@@ -90,23 +90,24 @@ function idsUnplaced(result) {
 }
 
 describe('W2 partition — placed XOR unplaced (AC-W2.3) + deadline-based partition (AC-W2.1)', () => {
-  // AC-W2.3 — the disjointness invariant. The dual-place path violates this.
-  test('AC-W2.3: no task appears in BOTH dayPlacements and unplaced[]', () => {
+  // CHARACTERIZATION (not a regression guard): a NON-recurring TIME_WINDOW missed-window task
+  // never entered the recurring dual-place branch, so the partition was already correct for it —
+  // these two pass on pre-fix code. The real regression guard is the RECURRING test below
+  // ('AC-W2.3 (recurring)'), which IS RED on pre-fix code (zoe WARN-2, 2026-06-23).
+  test('AC-W2.3 (non-recurring, characterization): no task in BOTH grid and unplaced[]', () => {
     const result = run([makeMissedWindowTask()], 600); // now = 10:00, window past
     const onGrid = idsOnGrid(result);
     const unplaced = idsUnplaced(result);
     const both = [...onGrid].filter((id) => unplaced.has(id));
-    expect(both).toEqual([]); // RED today: 'mw_task' is in both
+    expect(both).toEqual([]);
   });
 
-  // AC-W2.1 — a missed-window (deadline-past, can't re-slot today) task is OVERDUE on the
-  // grid only, never also in unplaced[].
-  test('AC-W2.1: missed-window task is OVERDUE on grid only, NOT in unplaced[]', () => {
+  test('AC-W2.1 (non-recurring, characterization): missed-window task OVERDUE on grid only', () => {
     const result = run([makeMissedWindowTask()], 600);
     const onGrid = idsOnGrid(result);
     const unplaced = idsUnplaced(result);
     expect(onGrid.has('mw_task')).toBe(true);     // pinned on its day
-    expect(unplaced.has('mw_task')).toBe(false);  // RED today: it is ALSO unplaced
+    expect(unplaced.has('mw_task')).toBe(false);
   });
 
   // AC-W2.3 (recurring) — the :2098 dual-place path is described for a RECURRING missed-window
