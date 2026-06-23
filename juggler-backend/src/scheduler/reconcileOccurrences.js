@@ -63,12 +63,18 @@ function buildExistingGroups(taskRows, parseDate, normalizeDate) {
  *        `_reconMatched = true`.
  * @param {Object} existingGroupsByMaster output of buildExistingGroups
  * @param {Function} parseDate M/D → Date
+ * @param {Function} [shouldFreezePast] optional predicate (masterId, group) →
+ *        bool. When it returns true the existing occurrence is never
+ *        forward-moved onto a different desired date — it freezes at its
+ *        original slot (999.842). Used to pin a definitively-past (recurrence
+ *        period ENDED) instance so its history slot is preserved, while a
+ *        flexible-TPC instance still within its period stays forward-movable.
  * @returns {Object} {
  *   occIdOverrides: { originalDesiredId: existingOccId },
  *   occurrenceMoves: [{ masterId, newDate, chunkIds }]
  * }
  */
-function matchOccurrences(desiredOccurrences, existingGroupsByMaster, parseDate) {
+function matchOccurrences(desiredOccurrences, existingGroupsByMaster, parseDate, shouldFreezePast) {
   var occIdOverrides = {};
   var occurrenceMoves = [];
 
@@ -100,11 +106,20 @@ function matchOccurrences(desiredOccurrences, existingGroupsByMaster, parseDate)
       if (remaining.length === 0) return;
       var desiredDate = parseDate(desired.date);
       if (!desiredDate) return;
-      var bestIdx = 0, bestDist = Infinity;
+      var bestIdx = -1, bestDist = Infinity;
       for (var ei = 0; ei < remaining.length; ei++) {
+        // 999.842: never forward-move a definitively-past occurrence (recurrence
+        // period ENDED) onto a different date — it must freeze at its original slot
+        // (R50.1/R32.7/R52) to preserve the history record (e.g. a missed medication
+        // dose). Such a group is left unmatched: the reconcile grandfather spares it
+        // from deletion and Phase-9 freezes it as 'missed' at its real slot. A
+        // flexible-TPC instance still WITHIN its period is NOT frozen — it stays
+        // forward-movable (the §8 forward-roll preserve-path).
+        if (shouldFreezePast && shouldFreezePast(masterId, remaining[ei])) continue;
         var d = Math.abs(Math.round((remaining[ei].dateObj.getTime() - desiredDate.getTime()) / 86400000));
         if (d < bestDist) { bestDist = d; bestIdx = ei; }
       }
+      if (bestIdx === -1) return; // all remaining are past → desired becomes a fresh insert
       var g = remaining[bestIdx];
       occIdOverrides[desired.id] = g.occId;
       occurrenceMoves.push({

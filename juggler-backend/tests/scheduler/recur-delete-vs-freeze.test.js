@@ -627,17 +627,50 @@ describe('AC2 — missed-freeze: spared past instance reaches status=missed with
     expect(['', 'missed']).toContain(surviving.status);
   });
 
-  it.todo(
-    'AC2-tightened: date-set past instance scheduled_at PRESERVED at original yesterday slot ' +
-    '(NOT forward-moved to today) — FAILS on current code: reconciler matchOccurrences reassigns ' +
-    'the occurrence to today\'s slot (runSchedule.js:786-824). DISTINCT BUG from the delete fix; ' +
-    'scope = overdue-lifecycle / forward-roll (R50.1/R50.4). File follow-up before closing this todo.'
-  );
+  // 999.842 — reconciler matchOccurrences must NOT forward-move a past pending
+  // recurring instance to today's slot. It must freeze at its original slot so
+  // the medication-history record (date + scheduled_at) is preserved
+  // (R50.1/R32.7/R52). Phase-9 then freezes it as 'missed' at that slot.
+  it('AC2-tightened: date-set past instance scheduled_at PRESERVED at original yesterday slot (NOT forward-moved to today)', async () => {
+    var master = await seedMaster({ id: 'rdm-ac2t1-master' });
+    var instance = await seedInstance(master.id, {
+      id: master.id + '-ac2t1',
+      date: yesterdayISO(),
+      scheduled_at: yesterdayAt08Datetime(),
+      occurrence_ordinal: 9
+    });
 
-  it.todo(
-    'AC2-tightened: date-set past instance date column PRESERVED at original yesterday ' +
-    '(NOT date=today) — same root cause as scheduled_at forward-move above. ' +
-    'Probe evidence: probe-ac2-m-ac2 date=2026-06-23 scheduled_at=2026-06-23 17:45:00 ' +
-    'after run on 2026-06-23 (seeded: date=2026-06-22, scheduled_at=2026-06-22 08:00:00).'
-  );
+    await runScheduleAndPersist(USER_ID);
+
+    var surviving = await db('task_instances')
+      .where({ id: instance.id })
+      .select('id', 'status', 'date', 'scheduled_at')
+      .first();
+
+    expect(surviving).toBeDefined();
+    expect(surviving.scheduled_at).not.toBeNull();
+    // Must still point at the original yesterday slot, NOT today.
+    expect(String(surviving.scheduled_at)).toContain(yesterdayISO());
+  });
+
+  it('AC2-tightened: date-set past instance date column PRESERVED at original yesterday (NOT date=today)', async () => {
+    var master = await seedMaster({ id: 'rdm-ac2t2-master' });
+    var instance = await seedInstance(master.id, {
+      id: master.id + '-ac2t2',
+      date: yesterdayISO(),
+      scheduled_at: yesterdayAt08Datetime(),
+      occurrence_ordinal: 10
+    });
+
+    await runScheduleAndPersist(USER_ID);
+
+    var surviving = await db('task_instances')
+      .where({ id: instance.id })
+      .select('id', 'status', 'date')
+      .first();
+
+    expect(surviving).toBeDefined();
+    // date must remain yesterday, not be reassigned to today's occurrence slot.
+    expect(String(surviving.date)).toContain(yesterdayISO());
+  });
 });

@@ -783,7 +783,22 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // rows (gcal/msft) bypass this pool — they pass through the id-based diff
   // unchanged so outbound sync stays correct.
   var existingGroupsByMaster = reconcile.buildExistingGroups(taskRows, parseDate, isoToDateKey);
-  var reconResult = reconcile.matchOccurrences(desiredOccurrences, existingGroupsByMaster, parseDate);
+  // 999.842 — freeze a definitively-past occurrence (recurrence period ENDED) at
+  // its original slot rather than forward-moving it: preserves the history record
+  // (e.g. a missed medication dose). A flexible-TPC instance still within its
+  // period is NOT frozen (it may still forward-roll — §8 preserve-path).
+  function shouldFreezePastOccurrence(masterId, group) {
+    if (!group || !group.dateObj) return false;
+    if (group.dateObj.getTime() >= today.getTime()) return false; // not past → eligible to move
+    var master = srcMap[masterId];
+    var periodEndKey = master ? recurringPeriodEndKey(master.recur, group.date) : null;
+    if (!periodEndKey) return true; // no period info → preserve the past slot (safe default)
+    var periodEnd = parseDate(periodEndKey);
+    if (!periodEnd) return true;
+    // recurringPeriodEndKey returns the first day PAST the period → missed when today >= it.
+    return today.getTime() >= periodEnd.getTime();
+  }
+  var reconResult = reconcile.matchOccurrences(desiredOccurrences, existingGroupsByMaster, parseDate, shouldFreezePastOccurrence);
   var occIdOverrides = reconResult.occIdOverrides;
   var occurrenceMoves = reconResult.occurrenceMoves;
 
