@@ -3,7 +3,6 @@
 
 const crypto = require('crypto');
 const { TERMINAL_STATUSES } = require('../lib/task-status');
-const { CalHistoryStatus } = require('../constants/status-enum');
 const { shouldAutoMarkMissed } = require('../../../shared/scheduler/missedHelpers');
 const dbModule = require('../lib/db');
 const { createLogger } = require('../lib/logger');
@@ -109,31 +108,22 @@ async function markMissedTasks() {
       let markedCount = 0;
 
       for (const task of tasksToMark) {
-        if (shouldAutoMarkMissed(task, currentTime)) {
+        // Leg D / no-auto-miss (David, 2026-06-24: "there should not be any auto-miss
+        // feature"). This cron was a SECOND auto-miss path (the scheduler's was removed
+        // in runSchedule.js Phase-9). A past-due incomplete instance is NEVER terminal-
+        // marked 'missed' — per R50 + the never-missing invariant it stays a LIVE,
+        // VISIBLE commitment: flag it OVERDUE (status unchanged, non-terminal), pinned
+        // on its day. Skip if already flagged. No cal_history 'missed' event — there is
+        // no missed event anymore.
+        if (shouldAutoMarkMissed(task, currentTime) && !task.overdue) {
           await knex('task_instances')
             .where('id', task.id)
-            .update({
-              status: 'missed',
-              completed_at: currentTime
-            });
-
-          // Add to cal_history
-          await knex('cal_history').insert({
-            task_id: task.id,
-            user_id: task.user_id,
-            scheduled_at: task.scheduled_at,
-            completed_at: currentTime,
-            status: CalHistoryStatus.MISSED,
-            previous_status: task.status,
-            status_reason: 'Auto-marked as missed after resolution window',
-            created_by: 'system:cal-history-cron'
-          });
-
+            .update({ overdue: 1 });
           markedCount++;
         }
       }
 
-      logger.info(`Marked ${markedCount} tasks as missed`);
+      logger.info(`Flagged ${markedCount} past-due tasks overdue`);
     } catch (error) {
       logger.error('Error in markMissedTasks:', error);
     } finally {

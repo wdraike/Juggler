@@ -87,11 +87,11 @@ describe('cal-history cron leader election (999.555)', () => {
     expect(row).toBeFalsy();
   });
 
-  test('in-process single-flight: two concurrent runs mark a missed task exactly once', async () => {
+  test('in-process single-flight: two concurrent runs flag a past-due task overdue, never missed', async () => {
     // markMissedTasks is wired into TWO crons in the same process (server.js), so it can be
-    // called concurrently with the same INSTANCE_ID — the cross-instance cron_locks mutex
-    // would NOT stop them. Seed one overdue instance, fire two concurrent runs, and assert
-    // exactly ONE cal_history row (no duplicate) — proving the single-flight guard.
+    // called concurrently with the same INSTANCE_ID. Post Leg D (no auto-miss), it flags
+    // past-due incomplete OVERDUE (idempotent), never terminal 'missed', and emits NO
+    // cal_history 'missed' event. Two concurrent runs leave consistent state, not missed.
     const past = new Date(Date.now() - 48 * 60 * 60 * 1000); // 48h ago → past the 24h window
     await db('users').insert({ id: TEST_USER, email: TEST_USER + '@test.com' });
     await db('task_masters').insert({ id: 'cron-lock-task', user_id: TEST_USER });
@@ -102,9 +102,11 @@ describe('cal-history cron leader election (999.555)', () => {
 
     await Promise.all([cron.markMissedTasks(), cron.markMissedTasks()]);
 
+    // No 'missed' cal_history events — auto-miss removed.
     const history = await db('cal_history').where('user_id', TEST_USER).where('status', 'MISSED');
-    expect(history).toHaveLength(1); // exactly one row, not two
+    expect(history).toHaveLength(0);
     const inst = await db('task_instances').where('id', 'cron-lock-task').first();
-    expect(inst.status).toBe('missed');
+    expect(inst.status).not.toBe('missed');
+    expect(!!inst.overdue).toBe(true);
   });
 });

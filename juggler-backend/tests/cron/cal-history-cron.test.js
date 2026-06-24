@@ -53,7 +53,11 @@ describe('Cal History Cron Job', () => {
     expect(remaining).not.toContain('ch-old');
   });
 
-  test('markMissedTasks marks a past-due non-terminal instance missed and records cal_history', async () => {
+  // Leg D / no-auto-miss (David 2026-06-24): the cron must NEVER terminal-mark a past
+  // task 'missed' — that's the auto-miss feature Leg D removed from the scheduler, and
+  // this cron was a second auto-miss path. Past-due incomplete stays a LIVE, VISIBLE
+  // commitment: flagged overdue (status unchanged, non-terminal), never closed.
+  test('markMissedTasks flags a past-due non-terminal instance OVERDUE, never terminal missed', async () => {
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
     await db('task_masters').insert({ id: 'cm-master-1', user_id: TEST_USER, text: 'Cron mark-missed master' });
     await db('task_instances').insert({
@@ -64,12 +68,14 @@ describe('Cal History Cron Job', () => {
     await markMissedTasks();
 
     const inst = await db('task_instances').where('id', 'cm-inst-1').first();
-    expect(inst.status).toBe('missed');
-    expect(inst.completed_at).toBeTruthy();
+    expect(inst.status).not.toBe('missed');   // never auto-missed
+    expect(inst.status).toBe('wip');           // status unchanged (non-terminal)
+    expect(!!inst.overdue).toBe(true);         // flagged overdue — visible, never-missing
+    expect(inst.completed_at).toBeFalsy();     // not closed
 
+    // No 'missed' cal_history event — there is no missed event anymore.
     const hist = await db('cal_history').where({ task_id: 'cm-inst-1', status: 'missed' }).first();
-    expect(hist).toBeTruthy();
-    expect(hist.previous_status).toBe('wip');
+    expect(hist).toBeFalsy();
   });
 
   test('markMissedTasks leaves a recently-scheduled instance untouched (within resolution window)', async () => {
