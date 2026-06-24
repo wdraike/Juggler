@@ -1136,6 +1136,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
         unscheduled: null,
         status: '',
         implied_deadline: impliedDeadline,
+        // Leg A (instance-owns-window): SOFT earliest-start floor, defaulting to the
+        // occurrence's spaced target day. Stored now as the window foundation; the
+        // scheduler does NOT yet read it (wiring + the relax-to-week-start behavior
+        // land in Leg C with their own tests). Additive — no placement change here.
+        earliest_start: occDate,
         created_at: _runScheduleCommand.clockNow(),
         updated_at: _runScheduleCommand.clockNow()
       };
