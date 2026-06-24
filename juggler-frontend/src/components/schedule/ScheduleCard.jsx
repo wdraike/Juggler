@@ -31,6 +31,11 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
   var weatherResult = hasWeatherRestrictions(task) ? checkWeatherMatch(task, weatherDay) : null;
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = isTerminalStatus(status);
+  // Leg E (scheduler-recurring-rework §5): 'missed' is terminal but must NOT look
+  // COMPLETED — it was never user-completed. Visual "done" cues (strikethrough,
+  // muted border, fade) apply to genuinely-resolved states (done/skip/cancel/pause),
+  // never to 'missed', which renders as a flagged-but-open item (⚠, no strikethrough).
+  var isCompletedLook = isDone && status !== 'missed';
   // juggler-cal-history Plan E — past-fade (D-10).
   var scTodayKey = formatDateKey(new Date());
   var scIsPast = !!task.scheduledAt && formatDateKey(new Date(task.scheduledAt)) < scTodayKey;
@@ -47,18 +52,18 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
   // so the user acknowledges it; suppress when the task is already terminal.
   var isOverdue = !!item._overdue && !isDone;
   var containerStyle = React.useMemo(function() {
-    var baseBorder = '1px ' + (task.recurring ? 'dashed' : 'solid') + ' ' + (isDone ? theme.border : priColor + '40');
+    var baseBorder = '1px ' + (task.recurring ? 'dashed' : 'solid') + ' ' + (isCompletedLook ? theme.border : priColor + '40');
     return {
       width: '100%', height: '100%', borderRadius: 6, overflow: 'hidden',
       background: theme.bgCard,
       border: isOverdue ? ('2px solid ' + theme.error) : baseBorder,
       borderLeft: isOverdue ? ('3px solid ' + theme.error) : ('3px solid ' + priColor),
-      cursor: 'pointer', opacity: (isDone && scIsPast) ? PAST_OPACITY : (isDone ? 0.5 : 1),
+      cursor: 'pointer', opacity: (isCompletedLook && scIsPast) ? PAST_OPACITY : (isCompletedLook ? 0.5 : 1),
       display: 'flex', flexDirection: 'column', justifyContent: 'center',
       boxShadow: '0 1px 3px ' + theme.shadow, boxSizing: 'border-box',
       position: 'relative'
     };
-  }, [theme, task.recurring, isDone, scIsPast, priColor, isOverdue]);
+  }, [theme, task.recurring, isCompletedLook, scIsPast, priColor, isOverdue]);
   var durLabel = item.splitTotal > 1
     ? item.dur + ' of ' + task.dur + 'm'
     : (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm');
@@ -132,7 +137,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
       }}>
         <span style={{
           flex: 1, minWidth: 0, fontWeight: 600, color: theme.text,
-          overflow: 'hidden', textDecoration: isDone ? 'line-through' : 'none',
+          overflow: 'hidden', textDecoration: isCompletedLook ? 'line-through' : 'none',
           ...(isMobile && !compact ? {
             display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
             whiteSpace: 'normal', lineHeight: 1.3
