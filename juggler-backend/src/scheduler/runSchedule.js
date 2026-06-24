@@ -139,6 +139,7 @@ var RunScheduleCommand = require('../slices/scheduler/application/RunScheduleCom
 var _runScheduleCommand = new RunScheduleCommand();
 var expandRecurringShared = require('../../../shared/scheduler/expandRecurring');
 var expandRecurring = expandRecurringShared.expandRecurring;
+var { REASON_CODES } = require('../../../shared/scheduler/reasonCodes');
 
 // 999.013: compute dayMinutes from cfg.timeBlocks — maps dateKey strings to total
 // available minutes on that day (sum of all time block durations). Returns null
@@ -223,31 +224,35 @@ var recurringCycleDays = _ConstraintSolver.recurringCycleDays;
  * periodEnd−1, missed ON periodEnd). Null when not recurring or no occurrence date.
  * (The separate timeFlex placement window is applied by the caller alongside this.)
  */
+// Flexible-TPC classification — the SINGLE source shared by recurringPeriodEndKey
+// (deadline) and the persist-loop roam guard (999.848). A flexible-TPC instance
+// (timesPerCycle < selected days) may roam to ANY allowed day within its cycle;
+// every other recurring is day-locked. The `r.days || 'MTWRF'` / `r.monthDays ||
+// [1,15]` shape-defaults are NOT data fallbacks — they are byte-identical to
+// unifiedScheduleV2's isFlexibleTpc, so a missing field is a malformed recur whose
+// default only affects classification (never corrupts data). Unrecognised types
+// (incl. `interval`) → selectedDays 1 → never flexible → day-locked.
+function isFlexibleTpcRecur(recur) {
+  var r = recur;
+  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_e) { return false; } }
+  if (!r || !r.timesPerCycle || r.timesPerCycle <= 0) return false;
+  var selectedDays;
+  if (r.type === 'daily') selectedDays = 7;
+  else if (r.type === 'weekly' || r.type === 'biweekly') {
+    var days = r.days || 'MTWRF';
+    selectedDays = (typeof days === 'object' && !Array.isArray(days)) ? Object.keys(days).length
+      : (typeof days === 'string' ? days.length : 0);
+  } else if (r.type === 'monthly') { selectedDays = (r.monthDays || [1, 15]).length; }
+  else { selectedDays = 1; }
+  return r.timesPerCycle < selectedDays;
+}
+
 function recurringPeriodEndKey(recur, occurrenceDateKey) {
   var occ = parseDate(occurrenceDateKey);
   if (!occ) return null;
-  var r = recur;
-  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_e) { r = null; } }
   var cycleDays = 1; // day-locked default: deadline = end of the occurrence day
-  if (r && r.timesPerCycle && r.timesPerCycle > 0) {
-    // selectedDays = how many days the recurrence picks from. The `r.days ||
-    // 'MTWRF'` / `r.monthDays || [1,15]` shape-defaults are NOT data fallbacks —
-    // they are byte-identical to unifiedScheduleV2's isFlexibleTpc (:457/:462), the
-    // single source for flexible-vs-day-locked classification; a missing field is a
-    // malformed recur and these defaults only affect that classification (never
-    // corrupt data). Unrecognised types (incl. `interval`) → selectedDays 1 → never
-    // flexible → day-locked, matching isFlexibleTpc.
-    var selectedDays;
-    if (r.type === 'daily') selectedDays = 7;
-    else if (r.type === 'weekly' || r.type === 'biweekly') {
-      var days = r.days || 'MTWRF';
-      selectedDays = (typeof days === 'object' && !Array.isArray(days)) ? Object.keys(days).length
-        : (typeof days === 'string' ? days.length : 0);
-    } else if (r.type === 'monthly') { selectedDays = (r.monthDays || [1, 15]).length; }
-    else { selectedDays = 1; }
-    if (r.timesPerCycle < selectedDays) { // flexible-TPC → roams within the cycle
-      cycleDays = recurringCycleDays(r) || 1;
-    }
+  if (isFlexibleTpcRecur(recur)) { // flexible-TPC → roams within the cycle
+    cycleDays = recurringCycleDays(recur) || 1;
   }
   var end = new Date(occ.getTime());
   end.setDate(end.getDate() + cycleDays);
@@ -1418,10 +1423,23 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (original.recurring && dateChanged && original._preReconDate == null) {
       var origTd = parseDate(original.date);
       var isBehind = origTd && origTd < today;
-      var recurFlex = original.timeFlex != null ? original.timeFlex : 60;
-      var recurDaysPast = origTd ? Math.round((today.getTime() - origTd.getTime()) / 86400000) : 0;
-      if (!isBehind || recurFlex < recurDaysPast * 1440) continue;
-      // Within placement window — allow the date move to today
+      // 999.848 — flexible-TPC forward roam: a flexible-TPC recurring instance is
+      // NOT day-locked — the scheduler may legitimately place it on any allowed day
+      // within its cycle (placement.dateKey != its nominal `date`). That roam MUST be
+      // persisted. Previously this guard treated ALL recurring date moves as spurious
+      // drift and `continue`d (skipping the write) unless the instance was past-and-
+      // within-window. A roamed FUTURE flexible-TPC occurrence therefore had its
+      // scheduled_at left NULL while it sat in placementByTaskId (not unplaced) — so
+      // it never got unscheduled=1 and vanished (placed on no day, absent from the
+      // Unplaced list). Allow the write for a flexible-TPC roam; the dbUpdate below
+      // stores scheduled_at/date/time at the roamed slot. (Day-locked recurrings never
+      // roam — the scheduler clamps them to their anchor — so they never reach here.)
+      if (!isFlexibleTpcRecur(original.recur)) {
+        var recurFlex = original.timeFlex != null ? original.timeFlex : 60;
+        var recurDaysPast = origTd ? Math.round((today.getTime() - origTd.getTime()) / 86400000) : 0;
+        if (!isBehind || recurFlex < recurDaysPast * 1440) continue;
+      }
+      // Flexible-TPC roam OR past-recurring-within-window — allow the date move
     }
     // Rigid recurringTasks keep their preferred time (unless redirected from past above).
     if (original.recurring && original.placementMode === PLACEMENT_MODES.FIXED && !dateChanged) continue;
@@ -1876,6 +1894,32 @@ async function runScheduleAndPersist(userId, _retries, options) {
   // rows from pendingUpdates, so this writes only what changed. T-TX: trx-bound,
   // so it commits/rolls back with the caller's transaction. instanceOnly:true
   // preserves the legacy "never overwrite user-set master.dur" routing.
+  // 9.6 — NO-LIMBO INVARIANT (999.848, David's rule): a pending recurring instance
+  // must end every run EITHER placed (scheduled_at set) OR in the Unplaced list
+  // (unscheduled=1) OR resolved (terminal status) — NEVER in limbo (scheduled_at NULL
+  // AND unscheduled NULL AND non-terminal), which renders on no day and is absent from
+  // Unplaced (invisible). The root fix above persists legitimate roams; this is the
+  // defense-in-depth backstop: any recurring instance that still has a NULL final
+  // scheduled_at and was neither flagged nor resolved this run is a dropped placement —
+  // flag it unscheduled so it surfaces in Unplaced rather than vanishing.
+  //
+  // IMPORTANT: rawRowById is built from taskRows which is loaded BEFORE Phase 1's INSERT.
+  // Phase 1 pre-inserts new recurring instance rows (scheduled_at=null) that are NOT in
+  // rawRowById. phase1InsertedById tracks exactly those rows. The merged lookup
+  // rawRowById[id] || phase1InsertedById[id] covers both cases so a roamed-and-dropped
+  // Phase-1 instance (placed in-memory by the scheduler, skipped by L1's persist guard)
+  // is correctly caught here rather than silently left in limbo.
+  var pendingById = {};
+  pendingUpdates.forEach(function(p) {
+    pendingById[p.id] = Object.assign(pendingById[p.id] || {}, p.dbUpdate);
+  });
+  var noLimboUpdates = computeNoLimboUpdates(
+    allTasks, rawRowById, phase1InsertedById, pendingById, statuses, today, expandEnd, _runScheduleCommand.clockNow()
+  );
+  noLimboUpdates.forEach(function(u) { pendingUpdates.push(u); });
+  var limboFlagged = noLimboUpdates.length;
+  if (limboFlagged > 0) logger.info('[SCHED] no-limbo invariant: flagged ' + limboFlagged + ' dropped recurring instance(s) as unplaced');
+
   logger.info('[SCHED] executing ' + pendingUpdates.length + ' DB updates');
   await _runScheduleCommand.persistDelta(trx, userId, pendingUpdates, { instanceOnly: true });
 
@@ -2096,6 +2140,61 @@ async function runScheduleAndPersist(userId, _retries, options) {
   }
 }
 
+/**
+ * computeNoLimboUpdates — pure helper for the 9.6 no-limbo safety-net sweep.
+ *
+ * Exported so telly can unit-test L2 directly with a crafted in-memory
+ * limbo input, without needing a full integration run (L1 prevents L2 from
+ * firing in normal operation, so integration tests cannot exercise it once L1
+ * is healthy). The inline sweep above calls this; no production caller should
+ * import it directly.
+ *
+ * @param {Array}  allTasks          - All task objects for this run (from allTasks)
+ * @param {Object} rawRowById        - id → raw DB row (from taskRows, pre-Phase-1)
+ * @param {Object} phase1InsertedById - id → raw row for rows inserted in Phase 1 this run
+ * @param {Object} pendingById       - id → merged dbUpdate object (accumulated pendingUpdates)
+ * @param {Object} statuses          - id → status string (from statuses map)
+ * @param {Date}   today             - Start of the scheduling window (today midnight, local)
+ * @param {Date}   expandEnd         - End of the scheduling window (today + RECUR_EXPAND_DAYS)
+ * @param {Date}   now               - Clock value for updated_at stamps
+ * @returns {Array} Array of { id, dbUpdate } objects to append to pendingUpdates
+ */
+function computeNoLimboUpdates(allTasks, rawRowById, phase1InsertedById, pendingById, statuses, today, expandEnd, now) {
+  var updates = [];
+  allTasks.forEach(function(t) {
+    if (!t || t.taskType !== 'recurring_instance') return;
+    // Accept rows from the pre-Phase-1 snapshot OR rows inserted by Phase 1 this
+    // run. Phase 1 rows are missing from rawRowById because taskRows was loaded
+    // before the INSERT — falling back to phase1InsertedById fills that gap.
+    var raw = rawRowById[t.id] || phase1InsertedById[t.id];
+    if (!raw) return; // not a DB-persisted row — nothing to persist
+    // Scope to the active scheduling window [today, expandEnd]. PAST instances are
+    // Phase-9's domain (auto-miss/freeze); instances grandfathered BEYOND expandEnd
+    // (from a prior larger horizon) were never placement candidates this run, so a
+    // NULL scheduled_at there is expected, not limbo. Only today→horizon occurrences
+    // are eligible for the no-limbo flag.
+    var nominalDate = raw.date ? parseDate(raw.date) : null;
+    if (!nominalDate || nominalDate < today || nominalDate > expandEnd) return;
+    var pu = pendingById[t.id] || {};
+    // Resolve the FINAL state this run would leave on the row (pendingUpdate wins).
+    var finalStatus = ('status' in pu) ? pu.status : (statuses[t.id] || raw.status || '');
+    if (TERMINAL_STATUSES.indexOf(finalStatus) >= 0) return; // resolved, not pending
+    var finalSched = ('scheduled_at' in pu) ? pu.scheduled_at : raw.scheduled_at;
+    if (finalSched != null) return; // placed — not limbo
+    var finalUnsched = ('unscheduled' in pu) ? pu.unscheduled : raw.unscheduled;
+    if (finalUnsched) return; // already in the Unplaced list
+    // LIMBO → flag unplaced so the frontend renders it in Unplaced, never nowhere.
+    var limboUpdate = Object.assign({}, pu, {
+      unscheduled: 1,
+      unplaced_reason: t._unplacedReason || REASON_CODES.NO_SLOT,
+      unplaced_detail: t._unplacedDetail || 'No available slot in the recurrence window',
+      updated_at: now
+    });
+    updates.push({ id: t.id, dbUpdate: limboUpdate });
+  });
+  return updates;
+}
+
 module.exports = {
   runScheduleAndPersist,
   computeWindowCloseUtc,
@@ -2103,7 +2202,8 @@ module.exports = {
   computeIsPastDue,
   setWeatherProvider,
   getWeatherProvider,
-  // Test-only export — pure-function seam for unit tests.
+  // Test-only exports — pure-function seams for unit tests.
   // Never call from production code.
-  _placementMatchesDbRow: process.env.NODE_ENV === 'test' ? placementMatchesDbRow : undefined
+  _placementMatchesDbRow: process.env.NODE_ENV === 'test' ? placementMatchesDbRow : undefined,
+  _computeNoLimboUpdates: process.env.NODE_ENV === 'test' ? computeNoLimboUpdates : undefined
 };
