@@ -228,6 +228,47 @@ function validateTaskInput(body) {
         errors.push('Recurrence start date cannot be cleared on biweekly, interval, or times-per-cycle patterns');
       }
     }
+    // dayReq ∉ recur.days conflict guard. For weekly/biweekly, expandRecurring picks
+    // candidates from recur.days then HARD-filters them by dayReq (expandRecurring.js:509-521).
+    // If dayReq's day-of-week set and recur.days' set don't intersect, EVERY candidate is
+    // rejected → zero instances materialize → the task silently vanishes (never-missing
+    // violation; real case: Certify-NJ had recur.days='MTWRF' + dayReq='Su'). Reject the combo.
+    if ((rType === 'weekly' || rType === 'biweekly') &&
+        body.dayReq !== undefined && body.dayReq !== null && String(body.dayReq) !== 'any') {
+      var DAYREQ_DOW = { M: 1, T: 2, W: 3, R: 4, F: 5, Sa: 6, Su: 0, S: 6, U: 0 };
+      var RECURDAY_DOW = { U: 0, M: 1, T: 2, W: 3, R: 4, F: 5, S: 6 };
+      var reqDows = {};
+      var drStr = String(body.dayReq).trim();
+      if (drStr === 'weekday') { [1, 2, 3, 4, 5].forEach(function (d) { reqDows[d] = true; }); }
+      else if (drStr === 'weekend') { [0, 6].forEach(function (d) { reqDows[d] = true; }); }
+      else {
+        drStr.split(',').forEach(function (p) {
+          var d = DAYREQ_DOW[p.trim()];
+          if (d !== undefined) reqDows[d] = true;
+        });
+      }
+      var recurDows = {};
+      var rDays = (r.days === undefined || r.days === null) ? 'MTWRF' : r.days;
+      if (typeof rDays === 'string') {
+        rDays.split('').forEach(function (c) {
+          var d = RECURDAY_DOW[c];
+          if (d !== undefined) recurDows[d] = true;
+        });
+      } else if (typeof rDays === 'object') {
+        Object.keys(rDays).forEach(function (k) {
+          var d = RECURDAY_DOW[k];
+          if (d !== undefined) recurDows[d] = true;
+        });
+      }
+      var reqKeys = Object.keys(reqDows);
+      var hasOverlap = reqKeys.some(function (d) { return recurDows[d]; });
+      // Only flag a genuine, parseable conflict: both sets non-empty and no overlap.
+      if (reqKeys.length > 0 && Object.keys(recurDows).length > 0 && !hasOverlap) {
+        errors.push('dayReq "' + drStr + '" never matches recur.days "' +
+          (typeof rDays === 'string' ? rDays : Object.keys(rDays).join('')) +
+          '" — the task would never schedule. Align the recurrence days with the day requirement.');
+      }
+    }
   }
   // placementMode enum validation
   if (body.placementMode !== undefined) {
