@@ -2,56 +2,50 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import ThreeDayView from '../ThreeDayView';
 
-// Mock the dependencies that ThreeDayView uses
-jest.mock('../../../theme/colors', () => ({
-  getTheme: jest.fn().mockReturnValue({
-    bg: '#ffffff',
-    bgCard: '#f8f9fa',
-    text: '#212529',
-    textMuted: '#6c757d',
-    border: '#dee2e6',
-    accent: '#0d6efd',
-    shadow: 'rgba(0, 0, 0, 0.1)',
-    projectBadgeBg: '#e7f1ff',
-    projectBadgeText: '#004085',
-    bgTertiary: '#f1f3f5',
-    error: '#dc3545',
-    amberText: '#ffc107'
-  })
-}));
+// Use the real theme module. NOTE: a factory mock of the form
+// `() => ({ getTheme: jest.fn().mockReturnValue({...}) })` silently returns
+// undefined under this CRA/jest+babel-hoist setup (the chained mock config is
+// lost at hoist time), which made getTheme() -> undefined -> theme.border crash.
+// theme/colors is a plain pure function (getTheme(darkMode)) always present in
+// the real app, so pass it through unmocked.
+jest.mock('../../../theme/colors', () => jest.requireActual('../../../theme/colors'));
 
 jest.mock('../../../state/constants', () => ({
   DAY_NAMES: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 }));
 
+// NOTE: under this repo's CRA/jest setup, babel-plugin-jest-hoist neuters
+// jest.fn() calls written inside a hoisted mock factory — both
+// `jest.fn().mockReturnValue(x)` and `jest.fn(() => x)` lose their value and
+// yield undefined. Use plain functions in the factory so mocks actually return.
 jest.mock('../../../scheduler/dateHelpers', () => ({
-  formatDateKey: jest.fn().mockImplementation((date) => {
+  formatDateKey: (date) => {
     if (!date) return '';
     return date.toISOString().split('T')[0];
-  })
+  }
 }));
 
 jest.mock('../../../scheduler/locationHelpers', () => ({
-  getLocationForDatePure: jest.fn().mockReturnValue({ icon: '🏠', name: 'Home' })
+  getLocationForDatePure: () => ({ icon: '🏠', name: 'Home' })
 }));
 
 jest.mock('../../schedule/CalendarGrid', () => ({
   __esModule: true,
-  default: jest.fn(({ dateKey, placements }) => (
+  default: ({ dateKey, placements }) => (
     <div data-testid="calendar-grid" data-date={dateKey}>
       {placements.length} tasks
     </div>
-  ))
+  )
 }));
 
 jest.mock('../AllDayBanner', () => ({
   __esModule: true,
-  default: jest.fn(() => <div data-testid="all-day-banner">All Day Banner</div>)
+  default: () => <div data-testid="all-day-banner">All Day Banner</div>
 }));
 
 jest.mock('../../features/WeatherBadge', () => ({
   __esModule: true,
-  default: jest.fn(() => <div data-testid="weather-badge">Weather</div>)
+  default: () => <div data-testid="weather-badge">Weather</div>
 }));
 
 const mockTasks = [

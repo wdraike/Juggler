@@ -2,23 +2,13 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import TimelineView from '../TimelineView';
 
-// Mock the dependencies that TimelineView uses
-jest.mock('../../../theme/colors', () => ({
-  getTheme: jest.fn().mockReturnValue({
-    bg: '#ffffff',
-    bgCard: '#f8f9fa',
-    text: '#212529',
-    textMuted: '#6c757d',
-    border: '#dee2e6',
-    accent: '#0d6efd',
-    shadow: 'rgba(0, 0, 0, 0.1)',
-    projectBadgeBg: '#e7f1ff',
-    projectBadgeText: '#004085',
-    bgTertiary: '#f1f3f5',
-    error: '#dc3545',
-    amberText: '#ffc107'
-  })
-}));
+// Use the real theme module. NOTE: a factory mock of the form
+// `() => ({ getTheme: jest.fn().mockReturnValue({...}) })` silently returns
+// undefined under this CRA/jest+babel-hoist setup (the chained mock config is
+// lost at hoist time), which made getTheme() -> undefined -> theme.border crash.
+// theme/colors is a plain pure function (getTheme(darkMode)) always present in
+// the real app, so pass it through unmocked.
+jest.mock('../../../theme/colors', () => jest.requireActual('../../../theme/colors'));
 
 jest.mock('../../../state/constants', () => ({
   MONTH_NAMES: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
@@ -26,22 +16,26 @@ jest.mock('../../../state/constants', () => ({
   DAY_NAMES: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 }));
 
+// NOTE: under this repo's CRA/jest setup, babel-plugin-jest-hoist neuters
+// jest.fn() calls written inside a hoisted mock factory — both
+// `jest.fn().mockReturnValue(x)` and `jest.fn(() => x)` lose their value and
+// yield undefined. Use plain functions in the factory so mocks actually return.
 jest.mock('../../../scheduler/locationHelpers', () => ({
-  getLocationForDatePure: jest.fn().mockReturnValue({ icon: '🏠', name: 'Home' })
+  getLocationForDatePure: () => ({ icon: '🏠', name: 'Home' })
 }));
 
 jest.mock('../../schedule/HorizontalTimeline', () => ({
   __esModule: true,
-  default: jest.fn(({ placements }) => (
+  default: ({ placements }) => (
     <div data-testid="horizontal-timeline">
       {placements.length} tasks on timeline
     </div>
-  ))
+  )
 }));
 
 jest.mock('../../features/WeatherBadge', () => ({
   __esModule: true,
-  default: jest.fn(() => <div data-testid="weather-badge">Weather</div>)
+  default: () => <div data-testid="weather-badge">Weather</div>
 }));
 
 const mockTasks = [
@@ -171,9 +165,11 @@ describe('TimelineView Component', () => {
       />
     );
     
-    // Should show progress (1/1 tasks done, 2.0h / 2.0h)
+    // Should show progress (1/1 tasks done, (2h / 2h)). The component rounds
+    // hours via Math.round(mins/60*10)/10, so 120min -> 2 (not "2.0"), and
+    // renders the duration span wrapped in parens: "(2h / 2h)".
     expect(screen.getByText('1/1')).toBeInTheDocument();
-    expect(screen.getByText('2.0h / 2.0h')).toBeInTheDocument();
+    expect(screen.getByText('(2h / 2h)')).toBeInTheDocument();
   });
 
   test('handles different grid zoom levels', () => {

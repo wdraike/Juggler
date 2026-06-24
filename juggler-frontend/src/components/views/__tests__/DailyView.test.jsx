@@ -2,89 +2,70 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import DailyView, { computeColumns } from '../DailyView';
 
-// Mock the dependencies that DailyView uses
-jest.mock('../../../theme/colors', () => ({
-  getTheme: jest.fn().mockReturnValue({
-    bg: '#ffffff',
-    bgCard: '#f8f9fa',
-    text: '#212529',
-    textMuted: '#6c757d',
-    border: '#dee2e6',
-    accent: '#0d6efd',
-    shadow: 'rgba(0, 0, 0, 0.1)',
-    projectBadgeBg: '#e7f1ff',
-    projectBadgeText: '#004085',
-    bgTertiary: '#f1f3f5',
-    error: '#dc3545',
-    amberText: '#ffc107'
-  })
-}));
+// Use the real theme module. NOTE: a factory mock of the form
+// `() => ({ getTheme: jest.fn().mockReturnValue({...}) })` silently returns
+// undefined under this CRA/jest+babel-hoist setup (the chained mock config is
+// lost at hoist time), which made getTheme() -> undefined -> theme.border crash.
+// theme/colors is a plain pure function (getTheme(darkMode)) always present in
+// the real app, so pass it through unmocked.
+jest.mock('../../../theme/colors', () => jest.requireActual('../../../theme/colors'));
 
-jest.mock('../../../state/constants', () => ({
-  GRID_START: 6,
-  GRID_END: 22,
-  PRI_COLORS: {
-    P1: '#dc3545',
-    P2: '#fd7e14',
-    P3: '#0d6efd',
-    P4: '#6c757d'
-  },
-  STATUS_MAP: {},
-  MONTH_NAMES: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
-  DAY_NAMES_FULL: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
-  DAY_NAMES: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
-  locIcon: jest.fn().mockReturnValue('📍'),
-  LOC_TINT: jest.fn().mockReturnValue('#ffffff'),
-  locBgTint: jest.fn().mockReturnValue('#f8f9fa'),
-  WHEN_TAG_ICONS: {},
-  DEFAULT_TOOLS: [],
-  PAST_OPACITY: 0.35
-}));
+// Use the real constants module. The previous hand-rolled subset dropped
+// exports (e.g. STATUS_OPTIONS) that the real child component tree
+// (StatusToggle via shared/task-status) depends on, causing crashes once the
+// view rendered its real children. constants.js is a pure value/helper module.
+jest.mock('../../../state/constants', () => jest.requireActual('../../../state/constants'));
 
+// NOTE: under this repo's CRA/jest setup, babel-plugin-jest-hoist neuters
+// jest.fn() calls written inside a hoisted mock factory — both
+// `jest.fn().mockReturnValue(x)` and `jest.fn(() => x)` lose their return value
+// and yield undefined. Value-returning helpers must therefore be plain
+// functions (or jest.requireActual passthroughs) in the factory.
 jest.mock('../../../scheduler/dateHelpers', () => ({
-  formatHour: jest.fn().mockImplementation((h) => `${h}:00`),
-  formatDateKey: jest.fn().mockImplementation((date) => {
+  formatHour: (h) => `${h}:00`,
+  formatDateKey: (date) => {
     if (!date) return '';
     return date.toISOString().split('T')[0];
-  }),
-  parseDate: jest.fn().mockImplementation((str) => new Date(str))
+  },
+  parseDate: (str) => new Date(str)
 }));
 
 jest.mock('../../../scheduler/timeBlockHelpers', () => ({
-  getBlocksForDate: jest.fn().mockReturnValue([]),
-  parseWhen: jest.fn().mockReturnValue([])
+  getBlocksForDate: () => [],
+  parseWhen: () => []
 }));
 
 jest.mock('../../../scheduler/locationHelpers', () => ({
-  resolveLocationId: jest.fn().mockReturnValue('home'),
-  getLocationForDatePure: jest.fn().mockReturnValue({ icon: '🏠', name: 'Home' })
+  resolveLocationId: () => 'home',
+  getLocationForDatePure: () => ({ icon: '🏠', name: 'Home' })
 }));
 
-jest.mock('../../../shared/task-status', () => ({
-  isTerminalStatus: jest.fn().mockReturnValue(false)
-}));
+// Use the real task-status module. The previous subset mock dropped
+// TERMINAL_STATUSES, which StatusToggle (rendered via the real child tree)
+// dereferences — yielding `undefined.indexOf` crashes. It is a pure module.
+jest.mock('../../../shared/task-status', () => jest.requireActual('../../../shared/task-status'));
 
 jest.mock('../../../utils/taskIcon', () => ({
-  getTaskIcon: jest.fn().mockReturnValue(null)
+  getTaskIcon: () => null
 }));
 
 jest.mock('../../../utils/weatherMatch', () => ({
-  checkWeatherMatch: jest.fn().mockReturnValue({ ok: true }),
-  hasWeatherRestrictions: jest.fn().mockReturnValue(false)
+  checkWeatherMatch: () => ({ ok: true }),
+  hasWeatherRestrictions: () => false
 }));
 
 jest.mock('../../../utils/weatherIcons', () => ({
-  weatherIconUrl: jest.fn().mockReturnValue('')
+  weatherIconUrl: () => ''
 }));
 
 jest.mock('../../../utils/isAllDayTask', () => ({
-  isAllDayTask: jest.fn().mockReturnValue(false)
+  isAllDayTask: () => false
 }));
 
 // Mock ReactDOM.createPortal
 jest.mock('react-dom', () => ({
   ...jest.requireActual('react-dom'),
-  createPortal: jest.fn((children) => children)
+  createPortal: (children) => children
 }));
 
 const mockTasks = [
