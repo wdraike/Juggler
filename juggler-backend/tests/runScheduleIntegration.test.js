@@ -689,6 +689,10 @@ describe('BUG-671 regression: floating tasks must never be flagged overdue', () 
       status: 'missed',
       scheduled_at: MISSED_SCHED,
       completed_at: MISSED_SCHED,
+      // A clean terminal missed row has overdue cleared. (Leg D: run1 may flag a placed
+      // past instance overdue=1; this manual missed-creation supersedes that with a proper
+      // terminal row, mirroring how a real terminal transition clears the overdue flag.)
+      overdue: 0,
       updated_at: db.fn.now(),
     });
 
@@ -1317,7 +1321,7 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
   //
   // This test pins the PATH B / reconcile-move sub-case.
   // ─────────────────────────────────────────────────────────────────────────
-  test('AC1b (RED): never-placed past recurring instance with date set (scheduled_at=NULL) becomes status=missed', async () => {
+  test('AC1b: never-placed past recurring instance (scheduled_at=NULL) → unscheduled (visible), never missed [Leg D]', async () => {
     if (!available) return;
 
     // Template with a broader recur window so the reconciler CAN generate
@@ -1384,17 +1388,13 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
       );
     }
 
-    // If the reconciler moved it to a future date → status='', date=future.
-    // If Plan C skipped it → status='' still.
-    // Post-fix: must be 'missed'.
-    expect(row.status).toBe('missed'); // FAILS pre-fix: '' or row moved/deleted
-    expect(row.scheduled_at).not.toBeNull();
-    expect(row.completed_at).not.toBeNull();
-    // WARN-1 pin (bert fix): Plan C must also clear the unscheduled flag so the
-    // terminal missed row is {status:'missed', unscheduled:null/0, scheduled_at:non-null}.
-    // Pre-bert-WARN-1: unscheduled was left as 1 — the row retained its "never-placed"
-    // flag even after becoming terminal. DB null (JS null) or 0 are both falsy.
-    expect(row.unscheduled).toBeFalsy(); // FAILS if WARN-1 fix is reverted
+    // UPDATED for Leg D (scheduler-recurring-rework §4 — auto-miss REMOVED, David 2026-06-24).
+    // A never-placed past recurring instance is NO LONGER auto-marked terminal 'missed'.
+    // Per the never-missing invariant it must remain VISIBLE: status stays non-terminal and
+    // it is surfaced in the Unplaced list (unscheduled=1), never deleted, never missed.
+    expect(row.status).not.toBe('missed');
+    expect(['', 'wip']).toContain(row.status || '');
+    expect(!!row.unscheduled).toBe(true); // visible in Unplaced (never absent)
   });
 
   // ─────────────────────────────────────────────────────────────────────────

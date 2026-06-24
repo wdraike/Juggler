@@ -188,8 +188,10 @@ var DEFAULT_TIMEZONE = constants.DEFAULT_TIMEZONE;
 /**
  * juggler-cal-history Plan C — compute window-close UTC for a recurring instance.
  * Returns Date when scheduled_at + timeFlex marks the moment the placement window closed.
- * Used by the past-window auto-mark block (status: 'missed' write below) and exported for
- * the cal-history cron's matching logic in `shared/scheduler/missedHelpers.js`.
+ * Exported for the cal-history cron's matching logic in
+ * `shared/scheduler/missedHelpers.js`. (The in-scheduler auto-mark block that once
+ * consumed this was removed in Leg D — the scheduler no longer auto-marks recurring
+ * instances terminal; past-incomplete recurring stay overdue/unscheduled, never missed.)
  *
  * @param task — task object with `scheduledAt` (camelCase, rowToTask) or `scheduled_at` (snake_case, raw row)
  * @param _today — current date (kept for parity with caller signatures; not used)
@@ -1824,46 +1826,39 @@ async function runScheduleAndPersist(userId, _retries, options) {
         var periodEndKey = recurringPeriodEndKey(t.recur, effectiveDate);
         var periodEnd = periodEndKey ? parseDate(periodEndKey) : null;
         if (periodEnd && today < periodEnd) return; // still within the recurrence cycle
-        // Outside placement window — day was missed, mark as 'missed' (juggler-cal-history
-        // Plan C; was 'skip'). Distinguishes user-initiated skip from system-applied missed.
-        var windowClose = computeWindowCloseUtc(t, today, TIMEZONE);
-        // scheduled_at must be non-null for terminal statuses (DB CHECK constraint).
-        // For instances that were never placed (no scheduledAt), fall back to midnight
-        // of the occurrence's intended date — it's when the day was supposed to happen.
-        // LOCKED design (999.808): freeze a missed PLACED instance at its last real slot.
-        // Parse the placed slot as UTC. tasks_v with dateStrings:true yields a bare
-        // string ('2026-06-14 15:00:00') — append 'Z' so Node parses it as UTC, not local
-        // (ernie W1 defense-in-depth: if a future row-source ever hands back a Date, use it
-        // as-is rather than `new Date(Date + 'Z')` which would be Invalid Date).
-        var lastRealSlot = null;
+        // Leg D (scheduler-recurring-rework §4) — AUTO-MISS REMOVED.
+        // A past-incomplete recurring instance is NEVER auto-marked terminal 'missed'
+        // by the system (David, 2026-06-24: "there should not be any auto-miss feature").
+        // Per R50 + the never-missing invariant (memory: juggler-never-missing-invariant),
+        // it stays a LIVE, VISIBLE commitment:
+        //   - has a placement (scheduled_at set) → flag OVERDUE, pinned on its day. Do NOT
+        //     move it, do NOT close it. The user may still manually skip/cancel.
+        //   - never placed (scheduled_at NULL) → surface it in the Unplaced list here. The
+        //     §9.6 no-limbo sweep scopes to [today, expandEnd] and does NOT cover this past
+        //     occurrence, so without this flag it would end NULL/NULL/non-terminal = a
+        //     never-missing VIOLATION. Flag unscheduled so it is always visible.
+        // (Was: 999.808 freeze-as-missed at last real slot — retired with auto-miss.)
         if (rawRowPast.scheduled_at != null) {
-          lastRealSlot = (rawRowPast.scheduled_at instanceof Date)
-            ? rawRowPast.scheduled_at
-            : new Date(String(rawRowPast.scheduled_at) + 'Z');
-        }
-        var missedAt = lastRealSlot
-          || windowClose
-          || localToUtc(effectiveDate, '12:00 AM', TIMEZONE)
-          || _runScheduleCommand.clockNow();
-        pendingUpdates.push({
-          id: t.id,
-          dbUpdate: {
-            status: 'missed',
-            scheduled_at: missedAt,
-            completed_at: missedAt,
-            unscheduled: null,
-            unplaced_reason: t._unplacedReason || null,
-            unplaced_detail: t._unplacedDetail || null,
-            updated_at: _runScheduleCommand.clockNow()
+          if (!rawRowPast.overdue) {
+            pendingUpdates.push({
+              id: t.id,
+              dbUpdate: { overdue: 1, unscheduled: null, updated_at: _runScheduleCommand.clockNow() }
+            });
+            updatedTasks.push({
+              id: t.id, text: t.text, from: effectiveDate, to: effectiveDate, patch: { overdue: true }
+            });
           }
-        });
-        updatedTasks.push({
-          id: t.id,
-          text: t.text,
-          from: effectiveDate,
-          to: effectiveDate,
-          patch: { status: 'missed' }
-        });
+        } else if (!rawRowPast.unscheduled) {
+          pendingUpdates.push({
+            id: t.id,
+            dbUpdate: {
+              unscheduled: 1,
+              unplaced_reason: t._unplacedReason || REASON_CODES.NO_SLOT,
+              unplaced_detail: t._unplacedDetail || 'Past occurrence — no slot was available',
+              updated_at: _runScheduleCommand.clockNow()
+            }
+          });
+        }
       } else {
         // Past non-recurring — move date forward to today
         pendingUpdates.push({
