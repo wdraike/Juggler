@@ -15,6 +15,7 @@ const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
 const { isLocked, enqueueWrite, splitFields } = require('../../lib/task-write-queue');
 const tasksWrite = require('../../lib/tasks-write');
 const { isRollingMaster, computeRollingAnchor } = require('../../lib/rolling-anchor');
+const { getNowInTimezone } = require('../../../../shared/scheduler/getNowInTimezone');
 const { createLogger } = require('../../lib/logger');
 
 const logger = createLogger('mcp.tools.tasks');
@@ -392,7 +393,9 @@ function registerTaskTools(server, userId) {
         if (_mcpMaster && isRollingMaster(_mcpMaster)) {
           var _mcpDate = existing.date ? String(existing.date).slice(0, 10) : null;
           var _mcpCurrentAnchor = _mcpMaster.rolling_anchor ? String(_mcpMaster.rolling_anchor).slice(0, 10) : null;
-          var _mcpNewAnchor = computeRollingAnchor(status, _mcpDate, _mcpCurrentAnchor);
+          // Option B: anchor `done` to the actual completion date (today in user tz).
+          var _mcpCompletionDate = getNowInTimezone(_mcpMaster.tz).todayKey;
+          var _mcpNewAnchor = computeRollingAnchor(status, _mcpDate, _mcpCurrentAnchor, _mcpCompletionDate);
           if (_mcpNewAnchor) {
             await db('task_masters')
               .where({ id: _mcpMasterId, user_id: userId })

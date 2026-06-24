@@ -25,37 +25,47 @@ function isRollingMaster(masterRow) {
  * Compute the new rolling_anchor for a terminal status event.
  *
  * Rules:
- *   done   → instanceDate (anchor from when task was scheduled/done)
- *   skip   → instanceDate (full reanchor from skip date)
+ *   done   → completionDate (the ACTUAL day it was marked done, in the user's tz) so a
+ *            LATE completion pushes the next occurrence out from when it was really done.
+ *            Falls back to instanceDate when completionDate is not supplied. (David
+ *            2026-06-24 "Option B": anchor to actual completion, not the schedule.)
+ *   skip   → instanceDate (skip is NOT a completion — keep the scheduled-date reanchor)
  *   missed → instanceDate + 1 day (soft nudge)
  *   cancel → null (no anchor change)
  *
- * Guard: if instanceDate < currentAnchor, return null (stale event, skip).
+ * Guard: never move the anchor backwards — if the chosen date < currentAnchor, return
+ * null (stale/duplicate event).
  *
  * @param {string} status - 'done' | 'skip' | 'missed' | 'cancel'
- * @param {string} instanceDate - ISO date string 'YYYY-MM-DD' of the instance
+ * @param {string} instanceDate - ISO date 'YYYY-MM-DD' of the instance (scheduled day)
  * @param {string|null} currentAnchor - current rolling_anchor from task_masters
+ * @param {string} [completionDate] - ISO date 'YYYY-MM-DD' the task was actually marked
+ *        done (today in the user's tz). Used for `done`; ignored for skip/missed.
  * @returns {string|null} new anchor ISO date, or null if no update needed
  */
-function computeRollingAnchor(status, instanceDate, currentAnchor) {
+function computeRollingAnchor(status, instanceDate, currentAnchor, completionDate) {
   if (!instanceDate) return null;
   if (status === 'cancel') return null;
   if (!isTerminalStatus(status)) return null;
 
-  // Guard: stale event
-  if (currentAnchor && instanceDate < currentAnchor) return null;
-
-  if (status === 'done' || status === 'skip') {
-    return instanceDate;
+  var candidate;
+  if (status === 'done') {
+    candidate = completionDate || instanceDate;
+  } else if (status === 'skip') {
+    candidate = instanceDate;
+  } else {
+    // missed: +1 day from the scheduled day
+    var d = new Date(instanceDate + 'T00:00:00');
+    d.setDate(d.getDate() + 1);
+    var y = d.getFullYear();
+    var m = d.getMonth() + 1;
+    var day = d.getDate();
+    candidate = y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
   }
 
-  // missed: +1 day
-  var d = new Date(instanceDate + 'T00:00:00');
-  d.setDate(d.getDate() + 1);
-  var y = d.getFullYear();
-  var m = d.getMonth() + 1;
-  var day = d.getDate();
-  return y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  // Guard: never move the anchor backwards (stale/duplicate event).
+  if (currentAnchor && candidate < currentAnchor) return null;
+  return candidate;
 }
 
 module.exports = { isRollingMaster, computeRollingAnchor };

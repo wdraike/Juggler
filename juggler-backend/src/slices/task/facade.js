@@ -91,6 +91,7 @@ var tasksWrite = require('../../lib/tasks-write');
 var { PLACEMENT_MODES } = require('../../lib/placementModes');
 var { isTerminalStatus } = require('../../lib/task-status');
 var { isRollingMaster, computeRollingAnchor } = require('../../lib/rolling-anchor');
+var { getNowInTimezone } = require('../../../../shared/scheduler/getNowInTimezone');
 var { createLogger } = require('@raike/lib-logger');
 var logger = createLogger('task.facade');
 
@@ -500,7 +501,10 @@ async function applyRollingAnchor(ctx) {
     var _currentAnchor = _masterForAnchor.rolling_anchor
       ? String(_masterForAnchor.rolling_anchor).slice(0, 10)
       : null;
-    var _newAnchor = computeRollingAnchor(status, _instanceDate, _currentAnchor);
+    // Option B: anchor `done` to the ACTUAL completion date (today in the user's tz),
+    // not the scheduled date, so a late completion pushes the next occurrence out.
+    var _completionDate = getNowInTimezone(ctx.tz || _masterForAnchor.tz).todayKey;
+    var _newAnchor = computeRollingAnchor(status, _instanceDate, _currentAnchor, _completionDate);
     if (_newAnchor) {
       await getDb()('task_masters')
         .where({ id: masterId, user_id: userId })

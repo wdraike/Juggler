@@ -42,4 +42,23 @@ describe('computeRollingAnchor', () => {
   test('null currentAnchor: no guard applied', () => {
     expect(computeRollingAnchor('done', '2026-05-10', null)).toBe('2026-05-10');
   });
+
+  // Option B (David 2026-06-24): anchor rolling tasks to the ACTUAL completion date,
+  // not the scheduled date, so a LATE completion pushes the next occurrence out from
+  // when it was really done.
+  test('done with completionDate: anchors to actual completion date, not the scheduled date', () => {
+    expect(computeRollingAnchor('done', '2026-05-20', currentAnchor, '2026-05-23')).toBe('2026-05-23');
+  });
+
+  test('done without completionDate: falls back to scheduled date (back-compat)', () => {
+    expect(computeRollingAnchor('done', '2026-05-20', currentAnchor)).toBe('2026-05-20');
+  });
+
+  test('skip ignores completionDate (skip is not a completion)', () => {
+    expect(computeRollingAnchor('skip', '2026-05-20', currentAnchor, '2026-05-23')).toBe('2026-05-20');
+  });
+
+  test('guard: completionDate before currentAnchor returns null (never move backwards)', () => {
+    expect(computeRollingAnchor('done', '2026-05-20', currentAnchor, '2026-05-10')).toBe(null);
+  });
 });
