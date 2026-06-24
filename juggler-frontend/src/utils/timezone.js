@@ -5,8 +5,6 @@
  * "today", "now", and UTC ↔ local conversions.
  */
 
-import { formatDateKey } from '../scheduler/dateHelpers';
-
 /**
  * Detect the browser's IANA timezone.
  * @returns {string|null} e.g. 'America/New_York', or null if detection fails

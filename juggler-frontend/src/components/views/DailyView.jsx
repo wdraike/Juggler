@@ -8,6 +8,7 @@ import ReactDOM from 'react-dom';
 import { getTheme } from '../../theme/colors';
 import { GRID_START, GRID_END, PRI_COLORS, STATUS_MAP, MONTH_NAMES, DAY_NAMES_FULL, DAY_NAMES, locIcon, LOC_TINT, locBgTint, WHEN_TAG_ICONS, DEFAULT_TOOLS, PAST_OPACITY } from '../../state/constants';
 import { isTerminalStatus } from '../../shared/task-status';
+import UnplacedReason from './UnplacedReason';
 import { formatHour, formatDateKey, parseDate } from '../../scheduler/dateHelpers';
 import { getBlocksForDate, parseWhen } from '../../scheduler/timeBlockHelpers';
 import { resolveLocationId, getLocationForDatePure } from '../../scheduler/locationHelpers';
@@ -706,6 +707,8 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme,
         )}
       </div>
       {show && <FixedPopup mousePos={mousePos} item={{ task: task, start: null, end: null }} status={status} theme={theme} darkMode={darkMode} cardRect={cardRect} completedAt={task?.completedAt} statusReason={getStatusReason(task, status)} />}
+      {/* Why this task is unscheduled — shown anywhere a task is surfaced as unscheduled. */}
+      {!isDone && <UnplacedReason task={task} theme={theme} />}
     </div>
   );
 }

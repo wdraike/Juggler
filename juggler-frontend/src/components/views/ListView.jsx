@@ -4,6 +4,7 @@
 
 import React, { useMemo, useState } from 'react';
 import TaskCard from '../tasks/TaskCard';
+import UnplacedReason from './UnplacedReason';
 import QuickAddTask from '../tasks/QuickAddTask';
 import { getTheme } from '../../theme/colors';
 import { DAY_NAMES, MONTH_NAMES } from '../../state/constants';
@@ -139,19 +140,22 @@ export default function ListView({ allTasks, statuses, filter, search, projectFi
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {tasks.map(t => (
-                <TaskCard
-                  key={t.id}
-                  task={t}
-                  status={statuses[t.id] || ''}
-                  onStatusChange={onStatusChange}
-                  onDelete={onDelete}
-                  onExpand={onExpand}
-                  darkMode={darkMode}
-                  isBlocked={blockedTaskIds && blockedTaskIds.has(t.id)}
-                  isMobile={isMobile}
-                  allTasks={allTasks} statuses={statuses}
-                  todayDate={todayDate}
-                />
+                <div key={t.id}>
+                  <TaskCard
+                    task={t}
+                    status={statuses[t.id] || ''}
+                    onStatusChange={onStatusChange}
+                    onDelete={onDelete}
+                    onExpand={onExpand}
+                    darkMode={darkMode}
+                    isBlocked={blockedTaskIds && blockedTaskIds.has(t.id)}
+                    isMobile={isMobile}
+                    allTasks={allTasks} statuses={statuses}
+                    todayDate={todayDate}
+                  />
+                  {/* Why unscheduled — shown for any task surfaced as unplaced. */}
+                  {unplacedIds && unplacedIds.has(t.id) && <UnplacedReason task={t} theme={theme} />}
+                </div>
               ))}
             </div>
             {d && filter !== 'done' && <QuickAddTask date={d} onCreate={onCreate} darkMode={darkMode} isMobile={isMobile} />}
