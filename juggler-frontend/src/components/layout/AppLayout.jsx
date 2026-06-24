@@ -724,13 +724,20 @@ export default function AppLayout() {
   var pastDueCount = pastDueIds.size;
   var fixedCount = fixedIds.size;
   var warningCount = schedulerWarnings.length;
-  var overdueCount = overdueIds.size;
   // The Issues indicator lights whenever the Issues page has anything actionable
   // (David, 2026-06-24: "when there are issues the issue tab should show an
-  // indicator"). Counts every issue bucket the page surfaces — overdue, scheduler
-  // warnings, past-due, unplaced, and dependency-blocked. (Fixed tasks are not a
-  // problem state, so they don't count.)
-  var issuesCount = overdueCount + warningCount + pastDueCount + unplacedCount + blockedCount;
+  // indicator"). Count UNIQUE tasks across the issue buckets the page surfaces —
+  // overdue, past-due, unplaced, dependency-blocked — plus scheduler warnings.
+  // A single task can land in more than one bucket (e.g. overdue + past-due), but
+  // the Issues page shows it once; summing the bucket sizes double-counts and made
+  // the badge read "2" while only one item showed. (Fixed tasks aren't a problem
+  // state, so they don't count.)
+  var _issueIds = new Set();
+  overdueIds.forEach(function(id) { _issueIds.add(id); });
+  pastDueIds.forEach(function(id) { _issueIds.add(id); });
+  blockedTaskIds.forEach(function(id) { _issueIds.add(id); });
+  unplaced.forEach(function(u) { _issueIds.add(u.id || (u.task && u.task.id) || u); });
+  var issuesCount = _issueIds.size + warningCount;
 
   // Unplaced task IDs set for fast lookup
   var unplacedIds = useMemo(() => {
