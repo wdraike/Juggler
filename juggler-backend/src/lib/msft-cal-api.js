@@ -145,6 +145,16 @@ async function graphFetch(accessToken, path, options) {
   }
 }
 
+/**
+ * Fetch the signed-in Microsoft account's identity (for display in the
+ * Calendar Sync modal). Uses the User.Read scope already requested at connect.
+ * Returns the account's primary email/UPN, never the local Raike account email.
+ */
+async function getUserInfo(accessToken) {
+  var me = await graphFetch(accessToken, '/me');
+  return { email: (me && (me.mail || me.userPrincipalName)) || null };
+}
+
 async function listEvents(accessToken, startDateTime, endDateTime) {
   var allItems = [];
   var params = new URLSearchParams({
@@ -278,6 +288,7 @@ module.exports = {
   getAuthUrl,
   getTokensFromCode,
   refreshAccessToken,
+  getUserInfo,
   listEvents,
   checkForChanges,
   insertEvent,

@@ -10,7 +10,11 @@ var msftCalApi = require('../lib/msft-cal-api');
 // --- Token management (canonical implementation in adapter) ---
 
 var { getJwtSecret, verifyStateToken } = require('../lib/jwt-secret');
-var { _getValidAccessToken } = require('../slices/calendar/facade').getAdapter('msft');
+// Resolved lazily (inside getStatus) to avoid an adapter-registration load-order
+// dependency at module require time.
+function getMsftAdapter() {
+  return require('../slices/calendar/facade').getAdapter('msft');
+}
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('msft-cal.controller');
 
@@ -65,6 +69,24 @@ async function getStatus(req, res) {
       connected = true;
     }
 
+    // Show the connected Microsoft account, never the local Raike account email
+    // (999.859). Lazily backfill msft_cal_email for connections made before the
+    // column existed — best-effort so a Graph/token hiccup never fails status.
+    var msftEmail = req.user.msft_cal_email || null;
+    if (connected && !msftEmail) {
+      try {
+        var token = await getMsftAdapter().getValidAccessToken(req.user);
+        var info = await msftCalApi.getUserInfo(token);
+        if (info && info.email) {
+          msftEmail = info.email;
+          await getDb()('users').where('id', req.user.id)
+            .update({ msft_cal_email: msftEmail, updated_at: getDb().fn.now() });
+        }
+      } catch (e) {
+        logger.warn('MSFT account email lazy backfill failed (non-fatal):', e.message);
+      }
+    }
+
     var autoSyncRow = await getDb()('user_config')
       .where({ user_id: req.user.id, config_key: 'msft_cal_auto_sync' })
       .first();
@@ -78,7 +100,7 @@ async function getStatus(req, res) {
     res.json({
       connected: connected,
       tokenExpired: tokenExpired,
-      email: req.user.email,
+      email: msftEmail,
       lastSyncedAt: lastSyncedAt,
       autoSync: autoSync
     });
@@ -145,6 +167,15 @@ async function callback(req, res) {
     }
     if (tokens.expiresOn) {
       update.msft_cal_token_expiry = new Date(tokens.expiresOn);
+    }
+
+    // Capture the Microsoft account identity for the Calendar Sync modal (999.859).
+    // Best-effort: a Graph hiccup must not break an otherwise-successful connect.
+    try {
+      var info = await msftCalApi.getUserInfo(tokens.accessToken);
+      if (info && info.email) update.msft_cal_email = info.email;
+    } catch (e) {
+      logger.warn('MSFT account email capture failed (non-fatal):', e.message);
     }
 
     await getDb()('users').where('id', userId).update(update);

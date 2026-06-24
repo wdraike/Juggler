@@ -9,9 +9,8 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import TaskCard from '../tasks/TaskCard';
 import { getTheme } from '../../theme/colors';
 import { getTaskIcon } from '../../utils/taskIcon';
-import { parseDate, formatDateKey } from '../../scheduler/dateHelpers';
-import { getDepsStatus } from '../../scheduler/dependencyHelpers';
-import { isTerminalStatus } from '../../shared/task-status';
+import { formatDateKey } from '../../scheduler/dateHelpers';
+import { computeConflictBuckets } from '../../scheduler/conflictBuckets';
 import WeatherBadge from '../features/WeatherBadge';
 import { labelFor } from '../../scheduler/reasonCodes';
 
@@ -52,57 +51,15 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
     });
   }, []);
 
-  var issues = useMemo(() => {
-    var overdue = [];
-    var stale = [];
-    var blocked = [];
+  // Single source of truth shared with the Issues-tab badge (999.862) — see
+  // scheduler/conflictBuckets.js. The badge and this page consume the identical
+  // computation, so they can never disagree on what counts as an issue.
+  var issues = useMemo(
+    () => computeConflictBuckets({ allTasks, statuses, unplaced, backlog, schedulerWarnings, today }),
+    [allTasks, statuses, unplaced, backlog, schedulerWarnings, today]
+  );
 
-    allTasks.forEach(t => {
-      var st = statuses[t.id] || '';
-      if (isTerminalStatus(st)) return;
-      // Recurring templates are blueprints, not actionable — skip for issues
-      if (t.taskType === 'recurring_template') return;
-      // W5 (R50.6): generated recurring instances are ordinarily managed by the
-      // scheduler, but a materialized instance that carries a computed overdue flag
-      // (from the backend read-path W4) MUST appear in the Overdue list so the user
-      // sees it without a scheduler run. The blanket `if (t.generated) return` is
-      // replaced by a targeted guard: generated instances are skipped UNLESS they
-      // carry t.overdue (which now reflects the computed-on-read predicate). Floating
-      // generated instances with no hard/implied due still have t.overdue===false and
-      // are excluded below (isOverdue stays false → stale check applies if applicable).
-      if (t.generated && !t.overdue) return;
-
-      // True overdue: an explicit due date in the past, OR the backend overdue flag
-      // (R50.3 / W4: now includes computed-on-read overdue for recurring instances
-      // with a materialized implied_deadline past due). R50.3 (999.796): a
-      // fixed/ingested event past its scheduled date — or a past recurring instance
-      // — carries overdue=true even with NO hard deadline; it belongs in the Overdue
-      // action list, not the informational "Past Scheduled Date" bucket below.
-      var isOverdue = false;
-      if (t.deadline) {
-        var dd = parseDate(t.deadline);
-        if (dd && dd < today) isOverdue = true;
-      }
-      if (t.overdue) isOverdue = true;
-
-      if (isOverdue) {
-        overdue.push(t);
-      } else if (!t.deadline && t.date && t.date !== 'TBD') {
-        // Past scheduled date (informational): no deadline, not overdue, date past.
-        // A floating task the scheduler will roll forward — not actually late.
-        var td = parseDate(t.date);
-        if (td && td < today) stale.push(t);
-      }
-
-      var deps = getDepsStatus(t, allTasks, statuses);
-      if (!deps.satisfied) blocked.push(t);
-
-    });
-
-    return { overdue, stale, blocked };
-  }, [allTasks, statuses, today]);
-
-  var warnings = schedulerWarnings || [];
+  var warnings = issues.warnings;
 
   var actionSections = [
     {

@@ -56,6 +56,7 @@ import AppFooter from './AppFooter';
 import apiClient from '../../services/apiClient';
 import ImpersonationBanner from '../admin/ImpersonationBanner';
 import useWeather from '../../hooks/useWeather';
+import { computeConflictBuckets } from '../../scheduler/conflictBuckets';
 
 // 999.103: browser tab titles in the shared Raike & Sons format ("View — StriveRS").
 // Maps the viewMode id (NavigationBar VIEWS) → the human label used in the tab.
@@ -678,36 +679,6 @@ export default function AppLayout() {
     return ids;
   }, [visibleTasks, statuses, userTimezone, serverClock, unplaced]);
 
-  var overdueIds = useMemo(() => {
-    var ids = new Set();
-    var now = getNowInTimezone(userTimezone, serverClock);
-    var today = now.todayDate;
-    var nowMins = now.nowMins;
-    var todayKey = now.todayKey;
-    (unplaced || []).forEach(u => {
-      if (u && u.id && u._unplacedReason === 'missed') ids.add(u.id);
-    });
-    visibleTasks.forEach(t => {
-      var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip' || st === 'missed') return;
-      if (t.deadline) {
-        var dd = parseDate(t.deadline);
-        if (dd && dd < today) { ids.add(t.id); return; }
-      }
-      // Intraday overdue: only time-locked tasks (placementMode:'fixed') whose window
-      // has fully elapsed. Flexible tasks are re-placed; their apparent
-      // past-time placement is a stale-data artifact, not a missed slot.
-      if (t.date === todayKey && t.time && isTimeLocked(t)) {
-        var startMins = parseTimeToMinutes(t.time);
-        if (startMins != null) {
-          var dur = Number(t.dur) || 0;
-          if (startMins + dur <= nowMins) ids.add(t.id);
-        }
-      }
-    });
-    return ids;
-  }, [visibleTasks, statuses, userTimezone, serverClock, unplaced]);
-
   // Fixed tasks: placement_mode='fixed' (post-Phase 9 enum redesign)
   var fixedIds = useMemo(() => {
     var ids = new Set();
@@ -723,21 +694,20 @@ export default function AppLayout() {
   var blockedCount = blockedTaskIds.size;
   var pastDueCount = pastDueIds.size;
   var fixedCount = fixedIds.size;
-  var warningCount = schedulerWarnings.length;
   // The Issues indicator lights whenever the Issues page has anything actionable
   // (David, 2026-06-24: "when there are issues the issue tab should show an
-  // indicator"). Count UNIQUE tasks across the issue buckets the page surfaces —
-  // overdue, past-due, unplaced, dependency-blocked — plus scheduler warnings.
-  // A single task can land in more than one bucket (e.g. overdue + past-due), but
-  // the Issues page shows it once; summing the bucket sizes double-counts and made
-  // the badge read "2" while only one item showed. (Fixed tasks aren't a problem
-  // state, so they don't count.)
-  var _issueIds = new Set();
-  overdueIds.forEach(function(id) { _issueIds.add(id); });
-  pastDueIds.forEach(function(id) { _issueIds.add(id); });
-  blockedTaskIds.forEach(function(id) { _issueIds.add(id); });
-  unplaced.forEach(function(u) { _issueIds.add(u.id || (u.task && u.task.id) || u); });
-  var issuesCount = _issueIds.size + warningCount;
+  // indicator"). Derive the badge from the SAME computation the Issues page uses
+  // (scheduler/conflictBuckets.js) so the number can never disagree with what the
+  // page actually shows — the badge = the page's "Action Required" count (overdue
+  // + unplaced + scheduler warnings). Past-scheduled-date, blocked-by-deps, and
+  // backlog are informational, not action-required, so they don't light the badge.
+  var issuesCount = useMemo(
+    () => computeConflictBuckets({
+      allTasks: visibleTasks, statuses, unplaced,
+      backlog: backlogTasks, schedulerWarnings, today
+    }).actionCount,
+    [visibleTasks, statuses, unplaced, backlogTasks, schedulerWarnings, today]
+  );
 
   // Unplaced task IDs set for fast lookup
   var unplacedIds = useMemo(() => {

@@ -18,6 +18,23 @@ function parseDbDate(str) {
   return new Date(s);
 }
 
+// Pick the most-recent last-synced timestamp among CONNECTED providers only
+// (999.861). entries: [{ connected, ts }]. A disconnected provider's stale
+// timestamp (e.g. a Google connection that was removed) must never win, and an
+// active provider (incl. Apple) must be considered. Returns the winning raw DB
+// string, or null if nothing connected has synced.
+export function mostRecentSyncedAt(entries) {
+  var best = null;
+  var bestMs = -Infinity;
+  (entries || []).forEach(function(e) {
+    if (!e || !e.connected || !e.ts) return;
+    var d = parseDbDate(e.ts);
+    if (!d || isNaN(d.getTime())) return;
+    if (d.getTime() > bestMs) { bestMs = d.getTime(); best = e.ts; }
+  });
+  return best;
+}
+
 function formatRelativeTime(isoString) {
   if (!isoString) return 'Never';
   var d = parseDbDate(isoString);
@@ -233,8 +250,12 @@ export default function CalSyncPanel({
     return function() { window.removeEventListener('message', handleMessage); };
   }, [showToast]);
 
-  var anyConnected = gcalConnected || msftConnected;
-  var lastSynced = gcalLastSyncedAt || msftLastSyncedAt;
+  var anyConnected = gcalConnected || msftConnected || appleConnected;
+  var lastSynced = mostRecentSyncedAt([
+    { connected: gcalConnected, ts: gcalLastSyncedAt },
+    { connected: msftConnected, ts: msftLastSyncedAt },
+    { connected: appleConnected, ts: appleLastSyncedAt }
+  ]);
 
   // --- GCal handlers ---
   async function handleGcalConnect() {
