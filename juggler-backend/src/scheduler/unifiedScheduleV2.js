@@ -1010,6 +1010,17 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
         // with that cycle's own pick.
         var capIdx = ai + item.cycleDays - 1;
         if (capIdx < latestIdx) latestIdx = capIdx;
+        // Leg C (scheduler-recurring-rework §3): RELAX the soft earliest-start
+        // backward to the cycle start so a flexible-TPC session can take an EARLIER
+        // open day within its cycle when its spaced-day-forward window is full.
+        // The spaced day stays PREFERRED (scan starts low, but the spacing guard +
+        // earliest-fit keep placements spread); the deadline cap (latestIdx) stays
+        // HARD. Bounded to >= 0 — never before today (the horizon start), so it never
+        // relaxes into the past.
+        if (opts && opts.relaxEarliestStart) {
+          var relIdx = ai - (item.cycleDays - 1);
+          earliestIdx = relIdx > 0 ? relIdx : 0;
+        }
       } else {
         // Unknown cycle (shouldn't happen for a recurring with anchorDate) —
         // fall back to day-locked to preserve v1's no-roll-forward rule.
@@ -1358,6 +1369,19 @@ function tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, 
     slot = findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc,
       Object.assign({}, base, { relaxWhen: true }));
     if (slot) return { slot: slot, relaxed: true };
+  }
+
+  // Leg C (scheduler-recurring-rework §3) — flexible-TPC EARLIEST-START RELAX.
+  // The spaced-day-forward search failed; retry over the WHOLE cycle (relax the soft
+  // earliest-start back to the cycle start) so a congested session lands on an EARLIER
+  // open day instead of going unplaced/vanishing. Deadline cap stays HARD; the
+  // cross-cycle spacing guard still prevents same-series clustering/double-up. Only for
+  // non-day-locked recurring (day-locked never roams). Runs last so the preferred spaced
+  // placement always wins when it fits.
+  if (item.isFlexibleTpc && !item.isDayLocked) {
+    slot = findSlot(item, dates, dayWindows, dayBlocks, dayOcc,
+      Object.assign({}, base, { relaxEarliestStart: true }));
+    if (slot) return { slot: slot };
   }
 
   // AC1.2 — no slot found across all ladder attempts. Surface the accumulated
