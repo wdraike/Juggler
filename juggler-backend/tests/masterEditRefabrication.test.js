@@ -45,13 +45,13 @@ async function insInst(id, ord, status, scheduledAt) {
 }
 
 describe('master-edit refabrication (R53): resetRecurringInstances', () => {
-  test('drops FUTURE not-started (soft-cancel); keeps past pending, past done, and future started', async () => {
+  test('HARD-DELETES future not-started; keeps past pending, past done, and future started', async () => {
     if (!available) return;
     await insMaster();
     await insInst('past-done', 1, 'done', '2026-06-01 10:00:00');   // terminal past → keep
     await insInst('past-pending', 2, '', '2026-06-05 10:00:00');     // past overdue (status='') → keep (R50)
-    await insInst('future-pending', 3, '', '2026-07-20 10:00:00');   // future not-started → drop (soft)
-    await insInst('future-unplaced', 4, '', null);                   // future unplaced → drop (soft)
+    await insInst('future-pending', 3, '', '2026-07-20 10:00:00');   // future not-started → DELETE
+    await insInst('future-unplaced', 4, '', null);                   // future unplaced → DELETE
     await insInst('future-started', 5, 'wip', '2026-07-21 10:00:00'); // started → keep (frozen, R52)
 
     var dropped = await tasksWrite.resetRecurringInstances(db, USER_ID, 'M', '[test]');
@@ -66,10 +66,14 @@ describe('master-edit refabrication (R53): resetRecurringInstances', () => {
     expect(byId['past-pending'].occurrence_ordinal).toBe(2);
     expect(byId['future-started'].status).toBe('wip');
 
-    // future not-started dropped via SOFT-cancel (rows KEPT as record, not deleted)
-    expect(byId['future-pending'].status).toBe('cancelled');
-    expect(byId['future-unplaced'].status).toBe('cancelled');
-    // all 5 rows still present (no hard delete)
-    expect(Object.keys(byId).length).toBe(5);
+    // future not-started HARD-DELETED — David 2026-06-24: future instances are "pencil",
+    // deletable on refabrication. (No future-done allowed except same-date now-or-earlier, so
+    // an untouched future row holds no record worth keeping.) Soft-cancelling them instead left
+    // a 'cancelled' tombstone that BLOCKED expandRecurring from regenerating the date → the
+    // recurring task silently lost its future and dropped off the priority view.
+    expect(byId['future-pending']).toBeUndefined();
+    expect(byId['future-unplaced']).toBeUndefined();
+    // only the 3 survivors remain
+    expect(Object.keys(byId).length).toBe(3);
   }, 30000);
 });

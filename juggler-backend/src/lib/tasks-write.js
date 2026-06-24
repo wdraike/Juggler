@@ -412,10 +412,14 @@ async function updateInstancesWhere(dbOrTrx, userId, applyWhere, changes) {
  * next expand pass regenerates the future per the new cadence; survivors keep
  * their occurrence_ordinal (only the dropped rows' ordinals are vacated).
  *
- * R55 no-hard-delete: dropped instances are SOFT-cancelled (status='cancelled',
- * rows kept as record), NOT physically deleted. They are non-terminal so an
- * unplaced (scheduled_at NULL) future instance can be cancelled without
- * violating terminal_scheduled_at, and are excluded from the scheduler load.
+ * Future not-started instances are HARD-DELETED (David 2026-06-24): future
+ * instances are "pencil, not pen" — deletable on refabrication. They are never
+ * marked done (no future-done except same-date now-or-earlier), so an untouched
+ * future row holds no record worth keeping. (R55's no-hard-delete protects
+ * ACTED-ON history — done/skip past rows, kept above — not these placeholders.)
+ * Soft-cancelling them instead left a 'cancelled' tombstone that BLOCKED
+ * expandRecurring from regenerating the date (existingBySourceDate), so the
+ * recurring task silently lost its future and dropped off the priority view.
  */
 async function resetRecurringInstances(dbOrTrx, userId, masterId, logTag) {
   requireUserId(userId, 'resetRecurringInstances');
@@ -432,10 +436,10 @@ async function resetRecurringInstances(dbOrTrx, userId, masterId, logTag) {
     .where('status', 'active')
     .update({ status: 'deleted_local', task_id: null, synced_at: dbOrTrx.fn.now() })
     .catch(function(err) { logger.error('[silent-catch]', err.message); });
-  await softCancelWhere(dbOrTrx, userId, function(q) {
+  await deleteInstancesWhere(dbOrTrx, userId, function(q) {
     return q.whereIn('id', futureIds);
   });
-  if (logTag) logger.info(logTag + ': soft-cancelled ' + futureIds.length + ' future pending instances for ' + masterId);
+  if (logTag) logger.info(logTag + ': hard-deleted ' + futureIds.length + ' future pending instances for ' + masterId);
   return futureIds.length;
 }
 
