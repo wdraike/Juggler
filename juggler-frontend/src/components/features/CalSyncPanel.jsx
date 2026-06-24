@@ -165,6 +165,10 @@ export default function CalSyncPanel({
   var [msftTokenExpired, setMsftTokenExpired] = useState(false);
   var [msftEmail, setMsftEmail] = useState(null);
   var [appleEmail, setAppleEmail] = useState(null);
+  // The actually-synced Apple calendar (users.apple_cal_calendar_url). Used to
+  // derive checked-state for the synced calendar WITHOUT writing enabled in the
+  // DB (999.860 — a display fix must never activate a sync/push).
+  var [appleSyncedUrl, setAppleSyncedUrl] = useState(null);
 
   // Check connection status on mount
   useEffect(() => {
@@ -186,6 +190,7 @@ export default function CalSyncPanel({
       .then(function(r) {
         if (r.data.connected) {
           if (r.data.username) setAppleEmail(r.data.username);
+          if (r.data.calendarUrl) setAppleSyncedUrl(r.data.calendarUrl);
           if (onAppleConnectedChange) onAppleConnectedChange(true);
           loadAppleCalendars();
         }
@@ -694,7 +699,11 @@ export default function CalSyncPanel({
                       }}>&#x21bb; Refresh</button>
                     </div>
                     {connectedAppleCalendars.map(function(cal) {
-                      var isEnabled = !!cal.enabled;
+                      // Derive checked-state from enabled OR the actually-synced
+                      // calendar (apple_cal_calendar_url) — so the synced calendar
+                      // shows checked even if its enabled flag lags, with NO DB
+                      // write/push activation (999.860).
+                      var isEnabled = !!cal.enabled || (!!appleSyncedUrl && cal.calendar_id === appleSyncedUrl);
                       return (
                         <div key={cal.id} style={{
                           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
