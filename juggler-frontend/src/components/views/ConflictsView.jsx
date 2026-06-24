@@ -208,7 +208,9 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
                       allTasks={allTasks} statuses={statuses}
                       todayDate={todayDate}
                     />
-                    {t._unplacedReason && (
+                    {/* Every unplaced task shows a reason chip — fall back to no_slot when
+                        the backend left it unset (legacy rows; new rows always carry one). */}
+                    {(
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 8px 0', flexWrap: 'wrap' }}>
                         {/* AC4.2 — friendly reason label chip for every reason code */}
                         <span style={{
@@ -219,7 +221,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
                           whiteSpace: 'nowrap'
                         }}>
                           {(t._unplacedReason === 'weather' || t._unplacedReason === 'weather_unavailable') ? '🌤 ' : ''}
-                          {labelFor(t._unplacedReason)}
+                          {labelFor(t._unplacedReason || 'no_slot')}
                         </span>
                         {/* AC4.1 — where/when the instance wanted to be placed */}
                         {(t.date || t.earliestStart || t.when) && (

@@ -573,7 +573,7 @@ export default function AppLayout() {
     if (!t || !t.id || _unplacedIdSet[t.id]) return false;
     if (t.taskType === 'recurring_template') return false;
     var st = statuses[t.id] || '';
-    if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'disabled' || st === 'pause' || st === 'missed') return false;
+    if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip' || st === 'disabled' || st === 'pause' || st === 'missed') return false;
     return !t.scheduledAt && !t.date;
   });
   var schedulerWarnings = placements.warnings || [];
@@ -611,7 +611,7 @@ export default function AppLayout() {
     visibleTasks.forEach(t => {
       if (!t.dependsOn || t.dependsOn.length === 0) return;
       var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed') return;
+      if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip' || st === 'missed') return;
       var hasOverdueDep = t.dependsOn.some(function(depId) {
         if ((statuses[depId] || '') === 'done') return false;
         var dep = taskMap[depId];
@@ -654,7 +654,7 @@ export default function AppLayout() {
     });
     visibleTasks.forEach(t => {
       var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed') return;
+      if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip' || st === 'missed') return;
       // (a) day-level deadline passed
       if (t.deadline) {
         var dd = parseDate(t.deadline);
@@ -689,7 +689,7 @@ export default function AppLayout() {
     });
     visibleTasks.forEach(t => {
       var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed') return;
+      if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip' || st === 'missed') return;
       if (t.deadline) {
         var dd = parseDate(t.deadline);
         if (dd && dd < today) { ids.add(t.id); return; }
@@ -713,7 +713,7 @@ export default function AppLayout() {
     var ids = new Set();
     allTasks.forEach(t => {
       var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'skip' || st === 'missed') return;
+      if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip' || st === 'missed') return;
       if (t.placementMode === 'fixed' || t.placement_mode === 'fixed') ids.add(t.id);
     });
     return ids;
@@ -725,9 +725,12 @@ export default function AppLayout() {
   var fixedCount = fixedIds.size;
   var warningCount = schedulerWarnings.length;
   var overdueCount = overdueIds.size;
-  // Badge only counts Action Required items (overdue + warnings).
-  // Unplaced and backlog are informational — they shouldn't alarm the user.
-  var issuesCount = overdueCount + warningCount;
+  // The Issues indicator lights whenever the Issues page has anything actionable
+  // (David, 2026-06-24: "when there are issues the issue tab should show an
+  // indicator"). Counts every issue bucket the page surfaces — overdue, scheduler
+  // warnings, past-due, unplaced, and dependency-blocked. (Fixed tasks are not a
+  // problem state, so they don't count.)
+  var issuesCount = overdueCount + warningCount + pastDueCount + unplacedCount + blockedCount;
 
   // Unplaced task IDs set for fast lookup
   var unplacedIds = useMemo(() => {

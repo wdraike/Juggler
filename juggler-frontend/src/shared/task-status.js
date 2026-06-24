@@ -9,7 +9,8 @@ const TaskStatus = Object.freeze({
   EMPTY: '',           // Default/empty status (task created but not started)
   WIP: 'wip',          // Work In Progress (task is actively being worked on)
   DONE: 'done',        // Task completed successfully
-  CANCEL: 'cancel',    // Task cancelled by user
+  CANCEL: 'cancel',    // Task cancelled by user (instance action)
+  CANCELLED: 'cancelled', // Series/instance cancelled (backend cancel path — tasks-write.js); terminal
   SKIP: 'skip',        // Task skipped (temporarily bypassed)
   PAUSE: 'pause',      // Task paused (recurring tasks only)
   MISSED: 'missed'     // Task was missed (resolution window passed without action)
@@ -20,6 +21,7 @@ const TASK_STATUSES = Object.freeze([
   TaskStatus.WIP,
   TaskStatus.DONE,
   TaskStatus.CANCEL,
+  TaskStatus.CANCELLED,
   TaskStatus.SKIP,
   TaskStatus.PAUSE,
   TaskStatus.MISSED
@@ -28,6 +30,7 @@ const TASK_STATUSES = Object.freeze([
 const TERMINAL_STATUSES = Object.freeze([
   TaskStatus.DONE,
   TaskStatus.CANCEL,
+  TaskStatus.CANCELLED,
   TaskStatus.SKIP,
   TaskStatus.PAUSE,
   TaskStatus.MISSED

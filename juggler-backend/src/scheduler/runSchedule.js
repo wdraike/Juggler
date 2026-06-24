@@ -1587,7 +1587,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       var rawRec = rawRowById[t.id];
       var hasScheduledAt = rawRec ? !!rawRec.scheduled_at : !!original.scheduledAt;
       if (hasScheduledAt) return;
-      var unplacedChunkUpdate = { unscheduled: 1, unplaced_reason: t._unplacedReason || null, unplaced_detail: t._unplacedDetail || null, updated_at: _runScheduleCommand.clockNow() };
+      var unplacedChunkUpdate = { unscheduled: 1, unplaced_reason: t._unplacedReason || REASON_CODES.NO_SLOT, unplaced_detail: t._unplacedDetail || 'No available slot in the schedule', updated_at: _runScheduleCommand.clockNow() };
       if (result.slackByTaskId && t.id in result.slackByTaskId) {
         unplacedChunkUpdate.slack_mins = result.slackByTaskId[t.id];
       }
@@ -1685,7 +1685,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // Case C: never placed — move to unscheduled lane.
       // DB-single-source (W1): persist why it's unplaced so the Unplaced view reads
       // the reason from the row (DB read model), not the deleted placements cache.
-      var unplacedDbUpdate = { unscheduled: 1, unplaced_reason: t._unplacedReason || null, unplaced_detail: t._unplacedDetail || null, updated_at: _runScheduleCommand.clockNow() };
+      var unplacedDbUpdate = { unscheduled: 1, unplaced_reason: t._unplacedReason || REASON_CODES.NO_SLOT, unplaced_detail: t._unplacedDetail || 'No available slot in the schedule', updated_at: _runScheduleCommand.clockNow() };
       if (result.slackByTaskId && t.id in result.slackByTaskId) {
         unplacedDbUpdate.slack_mins = result.slackByTaskId[t.id];
       }
