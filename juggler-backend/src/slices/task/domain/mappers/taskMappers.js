@@ -198,6 +198,10 @@ function buildSourceMap(rows) {
  */
 function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
   var log = logger || NOOP_LOGGER;
+  // Null-safety: a missing/not-found row (e.g. a re-read that returns no row)
+  // must not be dereferenced. Return null so callers can treat it as not-found
+  // rather than crashing on `row.source_id`.
+  if (row == null) return null;
   // Merge template fields from source for thin recurring instances.
   var src = sourceMap && row.source_id ? sourceMap[row.source_id] : null;
   if (!src && row.source_id && sourceMap && row.task_type === 'recurring_instance') {
@@ -267,12 +271,13 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
       ? row.deadline.toISOString().split('T')[0]
       : String(row.deadline).split('T')[0];
   }
-  // Derive earliestStart from earliest_start_at DATE column
-  // (DB column was renamed from start_after_at; this reads the new name)
-  if (row.earliest_start_at) {
-    earliestStart = fromDateISO(row.earliest_start_at instanceof Date
-      ? row.earliest_start_at.toISOString().split('T')[0]
-      : String(row.earliest_start_at).split('T')[0]);
+  // Derive earliestStart from the task_masters DATE column. The live column name
+  // is `start_after_at` (the planned rename never landed on task_masters — writing
+  // the phantom name throws ER_BAD_FIELD_ERROR). 999.866.
+  if (row.start_after_at) {
+    earliestStart = fromDateISO(row.start_after_at instanceof Date
+      ? row.start_after_at.toISOString().split('T')[0]
+      : String(row.start_after_at).split('T')[0]);
   }
   return {
     id: row.id,
@@ -468,7 +473,7 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
 /**
  * Map API task to DB row. (controller ~512)
  * Converts date+time → scheduled_at (UTC) and deadline/earliestStart →
- * deadline/earliest_start_at.
+ * deadline/start_after_at.
  *
  * P1 NOTE (flagged for W3): this mapper sets `row.updated_at = new Date()` (a JS
  * Date — P1-COMPLIANT). It is the WRITE-row builder; the legacy controller's
@@ -502,7 +507,8 @@ function taskToRow(task, userId, timezone, _currentTask) {
     row.deadline = task.deadline ? toDateISO(task.deadline) || task.deadline : null;
   }
   if (task.earliestStart !== undefined) {
-    row.earliest_start_at = task.earliestStart ? toDateISO(task.earliestStart) || null : null;
+    // task_masters column is `start_after_at` (see read mapper note, 999.866).
+    row.start_after_at = task.earliestStart ? toDateISO(task.earliestStart) || null : null;
   }
   if (task.location !== undefined) row.location = JSON.stringify(task.location);
   if (task.tools !== undefined) row.tools = JSON.stringify(task.tools);

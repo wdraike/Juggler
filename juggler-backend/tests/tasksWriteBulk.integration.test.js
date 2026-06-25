@@ -198,11 +198,12 @@ describe('R23.3: Deadlock retry scenarios', () => {
     // The BatchCreateTasks use-case wraps the transaction in a MAX_RETRIES loop.
     // We test the retry logic by injecting a mock that simulates a deadlock
     // on the first attempt and succeeds on retry.
-    var BatchCreateTasks = require('../../../src/slices/task/application/commands/BatchCreateTasks');
+    var BatchCreateTasks = require('../src/slices/task/application/commands/BatchCreateTasks');
     var MAX_RETRIES = BatchCreateTasks.MAX_RETRIES || 3;
 
     var attemptCount = 0;
     var mockRepo = {
+      getUserSplitPreference: jest.fn(function () { return Promise.resolve(null); }),
       runInTransaction: jest.fn(async function (fn) {
         attemptCount++;
         if (attemptCount === 1) {
@@ -211,14 +212,18 @@ describe('R23.3: Deadlock retry scenarios', () => {
           throw err;
         }
         // Second attempt succeeds
-        await fn({ insert: jest.fn() });
-      }),
-      ensureProject: jest.fn(function () { return Promise.resolve(); }),
-      applySplitDefault: jest.fn(function () { return Promise.resolve(); })
+        await fn({ insertTask: jest.fn() });
+      })
     };
 
     var cmd = new BatchCreateTasks({
       repo: mockRepo,
+      cache: { invalidateTasks: jest.fn(function () { return Promise.resolve(); }) },
+      enqueueScheduleRun: jest.fn(),
+      mappers: { taskToRow: function (t) { return { id: uuidv7(), text: t.text }; } },
+      validation: { validateTaskInput: function () { return []; } },
+      batchCreateSchema: { safeParse: function () { return { success: true }; } },
+      projects: { ensureProject: function () { return Promise.resolve(); } },
       isLocked: function () { return Promise.resolve(false); },
       enqueueWrite: function () { return Promise.resolve(); },
       safeTimezone: function () { return 'America/New_York'; },
@@ -227,7 +232,7 @@ describe('R23.3: Deadlock retry scenarios', () => {
 
     var result = await cmd.execute({
       userId: USER_A,
-      tasks: [{ text: 'Retry task', dur: 30, pri: 'P3' }]
+      body: { tasks: [{ text: 'Retry task', dur: 30, pri: 'P3' }] }
     });
 
     // Should have retried and succeeded
@@ -238,23 +243,28 @@ describe('R23.3: Deadlock retry scenarios', () => {
 
   test('R23.3: Max retries exceeded throws deadlock error', async () => {
     if (!available) return;
-    var BatchCreateTasks = require('../../../src/slices/task/application/commands/BatchCreateTasks');
+    var BatchCreateTasks = require('../src/slices/task/application/commands/BatchCreateTasks');
     var MAX_RETRIES = BatchCreateTasks.MAX_RETRIES || 3;
 
     var attemptCount = 0;
     var mockRepo = {
+      getUserSplitPreference: jest.fn(function () { return Promise.resolve(null); }),
       runInTransaction: jest.fn(async function () {
         attemptCount++;
         var err = new Error('Deadlock found when trying to get lock');
         err.code = 'ER_LOCK_DEADLOCK';
         throw err;
-      }),
-      ensureProject: jest.fn(function () { return Promise.resolve(); }),
-      applySplitDefault: jest.fn(function () { return Promise.resolve(); })
+      })
     };
 
     var cmd = new BatchCreateTasks({
       repo: mockRepo,
+      cache: { invalidateTasks: jest.fn(function () { return Promise.resolve(); }) },
+      enqueueScheduleRun: jest.fn(),
+      mappers: { taskToRow: function (t) { return { id: uuidv7(), text: t.text }; } },
+      validation: { validateTaskInput: function () { return []; } },
+      batchCreateSchema: { safeParse: function () { return { success: true }; } },
+      projects: { ensureProject: function () { return Promise.resolve(); } },
       isLocked: function () { return Promise.resolve(false); },
       enqueueWrite: function () { return Promise.resolve(); },
       safeTimezone: function () { return 'America/New_York'; },
@@ -263,7 +273,7 @@ describe('R23.3: Deadlock retry scenarios', () => {
 
     await expect(cmd.execute({
       userId: USER_A,
-      tasks: [{ text: 'Fail task', dur: 30, pri: 'P3' }]
+      body: { tasks: [{ text: 'Fail task', dur: 30, pri: 'P3' }] }
     })).rejects.toThrow(/Deadlock/);
 
     // Should have attempted MAX_RETRIES + 1 times
@@ -272,22 +282,27 @@ describe('R23.3: Deadlock retry scenarios', () => {
 
   test('R23.3: Non-deadlock error is NOT retried (re-thrown immediately)', async () => {
     if (!available) return;
-    var BatchCreateTasks = require('../../../src/slices/task/application/commands/BatchCreateTasks');
+    var BatchCreateTasks = require('../src/slices/task/application/commands/BatchCreateTasks');
 
     var attemptCount = 0;
     var mockRepo = {
+      getUserSplitPreference: jest.fn(function () { return Promise.resolve(null); }),
       runInTransaction: jest.fn(async function () {
         attemptCount++;
         var err = new Error('Duplicate entry for key PRIMARY');
         err.code = 'ER_DUP_ENTRY';
         throw err;
-      }),
-      ensureProject: jest.fn(function () { return Promise.resolve(); }),
-      applySplitDefault: jest.fn(function () { return Promise.resolve(); })
+      })
     };
 
     var cmd = new BatchCreateTasks({
       repo: mockRepo,
+      cache: { invalidateTasks: jest.fn(function () { return Promise.resolve(); }) },
+      enqueueScheduleRun: jest.fn(),
+      mappers: { taskToRow: function (t) { return { id: uuidv7(), text: t.text }; } },
+      validation: { validateTaskInput: function () { return []; } },
+      batchCreateSchema: { safeParse: function () { return { success: true }; } },
+      projects: { ensureProject: function () { return Promise.resolve(); } },
       isLocked: function () { return Promise.resolve(false); },
       enqueueWrite: function () { return Promise.resolve(); },
       safeTimezone: function () { return 'America/New_York'; },
@@ -296,7 +311,7 @@ describe('R23.3: Deadlock retry scenarios', () => {
 
     await expect(cmd.execute({
       userId: USER_A,
-      tasks: [{ text: 'Dup task', dur: 30, pri: 'P3' }]
+      body: { tasks: [{ text: 'Dup task', dur: 30, pri: 'P3' }] }
     })).rejects.toThrow(/Duplicate entry/);
 
     // Should NOT have retried — only 1 attempt

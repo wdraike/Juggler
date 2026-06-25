@@ -31,11 +31,11 @@ const MysqlClockAdapter = require('../../../src/slices/scheduler/adapters/MysqlC
 
 const taskFacade = require('../../../src/slices/task/facade');
 
-describe('H6 W2 — five ports are defined', () => {
-  test('the ports barrel exposes all five contracts', () => {
+describe('H6 W2 — driven ports are defined', () => {
+  test('the ports barrel exposes all driven-port contracts', () => {
     expect(Object.keys(ports).sort()).toEqual([
-      'CalendarProviderPort', 'ClockPort', 'ScheduleRepositoryPort',
-      'TaskProviderPort', 'WeatherProviderPort'
+      'CalendarProviderPort', 'ClockPort', 'ScheduleCachePort',
+      'ScheduleRepositoryPort', 'TaskProviderPort', 'WeatherProviderPort'
     ]);
   });
 });

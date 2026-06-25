@@ -20,6 +20,20 @@ jest.mock('../src/db', function() {
   mock.fn = fn;
   mock.where = function() { return mock; };
   mock.whereIn = function() { return mock; };
+  mock.whereNot = function() { return mock; };
+  // cal_sync_ledger calendar-born lookup: the batch guard does
+  //   db('cal_sync_ledger').where(...).whereIn(...).whereNot('origin','juggler').distinct('task_id')
+  // A task is "calendar-born" when it has an active non-juggler ledger row. The test
+  // signals this via _tasksWithSyncRows entries that carry an external event id.
+  mock.distinct = function() {
+    if (mock._table === 'cal_sync_ledger') {
+      var calBorn = (mock._tasksWithSyncRows || []).filter(function(r) {
+        return r.gcal_event_id || r.msft_event_id || r.apple_event_id;
+      });
+      return Promise.resolve(calBorn.map(function(r) { return { task_id: r.id }; }));
+    }
+    return Promise.resolve([]);
+  };
   mock.select = function() {
     var arr = mock._table === 'tasks_with_sync_v' ? (mock._tasksWithSyncRows || []) : [];
     var p = Promise.resolve(arr);

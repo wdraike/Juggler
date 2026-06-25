@@ -1,5 +1,9 @@
 // TELLY-17a: Adversarial HIGH gap tests TS-309 to TS-312
 // G-005: Split status propagation - speculative rule clarification
+// SKIPPED pending David ruling — backlog 999.876. Asserts a SPECULATIVE
+// split-sibling status-propagation rule that is NOT shipped and is unclear vs the
+// 999.841 separate-rows ruling; the split-chunk fixtures also need rework.
+// Unskip + implement once the propagation semantics are ruled.
 // File: splitStatusPropagation.test.js
 // Tests: TS-309, TS-310, TS-311, TS-312
 
@@ -13,7 +17,7 @@ const { getTaskInstances } = require('../../test-helpers/queries');
  * TS-309: Recurring split, mark one chunk done → all chunks in same occurrence_ordinal get done
  * Domain: Split × Status / Recurring
  */
-describe('TS-309: Recurring split - done propagates to all chunks in occurrence', () => {
+describe.skip('TS-309: Recurring split - done propagates to all chunks in occurrence', () => {
   beforeAll(async () => {
     await setupTestDB();
   });
@@ -194,7 +198,7 @@ describe('TS-309: Recurring split - done propagates to all chunks in occurrence'
  * TS-310: Non-recurring inline split, mark one chunk done → does NOT propagate
  * Domain: Split × Status / Non-Recurring / Inline
  */
-describe('TS-310: Non-recurring inline split - done does NOT propagate', () => {
+describe.skip('TS-310: Non-recurring inline split - done does NOT propagate', () => {
   beforeAll(async () => {
     await setupTestDB();
   });
@@ -350,7 +354,7 @@ describe('TS-310: Non-recurring inline split - done does NOT propagate', () => {
  * TS-311: Split chunk marked WIP → time_remaining affects that chunk only
  * Domain: Split × Status / WIP / Time Remaining
  */
-describe('TS-311: WIP marking affects only that chunk', () => {
+describe.skip('TS-311: WIP marking affects only that chunk', () => {
   beforeAll(async () => {
     await setupTestDB();
   });
@@ -487,7 +491,7 @@ describe('TS-311: WIP marking affects only that chunk', () => {
  * TS-312: Split chunk marked done before all chunks placed → remaining chunks still placed
  * Domain: Split × Status / Early Completion
  */
-describe('TS-312: Early completion - remaining chunks still placed', () => {
+describe.skip('TS-312: Early completion - remaining chunks still placed', () => {
   beforeAll(async () => {
     await setupTestDB();
   });

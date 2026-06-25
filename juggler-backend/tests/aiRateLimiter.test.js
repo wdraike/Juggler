@@ -353,11 +353,15 @@ describe('AI rate limiter — HTTP 429 on 3rd request in window', function() {
         .send({ command: 'add a task', tasks: [] });
     }
 
+    // gemini-tracked-call is mocked to resolve { ops:[], msg:'Done.' }, so the first
+    // two in-window requests succeed (ai.controller success path → 200). The 3rd
+    // trips the rate limiter → 429. (Prior `toBe(500)` was a mechanical test-rot
+    // collapse — commit 1a132cc — contradicting the mocked-success setup.)
     var res1 = await fireRequest();
-    expect(res1.status).toBe(500);
+    expect(res1.status).toBe(200);
 
     var res2 = await fireRequest();
-    expect(res2.status).toBe(500);
+    expect(res2.status).toBe(200);
 
     var res3 = await fireRequest();
     expect(res3.status).toBe(429);
@@ -383,9 +387,10 @@ describe('AI rate limiter — HTTP 429 on 3rd request in window', function() {
     var resA3 = await fireAs(userA);
     expect(resA3.status).toBe(429);
 
-    // User B should still succeed on first request
+    // User B should still succeed on first request (200 — mocked Gemini success;
+    // prior `toBe(500)` was the same test-rot collapse).
     var resB1 = await fireAs(userB);
-    expect(resB1.status).toBe(500);
+    expect(resB1.status).toBe(200);
   });
 
   test('unauthenticated request is rejected by JWT middleware before reaching rate limiter', async function() {

@@ -36,18 +36,28 @@ var FREE_FEATURES = {
   ai: { enrich: false, natural_language_commands: false }
 };
 
+// Usage limits (ai_commands_per_month) live under `limits.` — that is the canonical
+// key the feature catalog declares (feature-catalog.controller.js:34 →
+// 'limits.ai_commands_per_month') and the only place resolveUsageLimit looks
+// (featureGate.resolveUsageLimit prepends 'limits.' to the limitKey, then falls
+// back to the bare key — NOT to an `ai.` sub-object). The prior fixtures put it
+// under `ai.`, where resolveUsageLimit never finds it → undefined → treated as
+// unlimited → the 429 path was unreachable. Corrected to match the real plan shape.
 var STARTER_FEATURES = {
-  limits: { active_tasks: 50, recurring_templates: 10, projects: 10, locations: 5, schedule_templates: 10 },
+  limits: { active_tasks: 50, recurring_templates: 10, projects: 10, locations: 5, schedule_templates: 10, ai_commands_per_month: 100 },
   data: { export: true, import: true },
   tasks: { placementMode: ['fixed', 'float'] },
-  ai: { enrich: true, natural_language_commands: true, ai_commands_per_month: 100 }
+  ai: { enrich: true, natural_language_commands: true }
 };
 
 var PRO_FEATURES = {
-  limits: { active_tasks: -1, recurring_templates: -1, projects: -1, locations: -1, schedule_templates: -1 },
+  limits: { active_tasks: -1, recurring_templates: -1, projects: -1, locations: -1, schedule_templates: -1, ai_commands_per_month: -1 },
   data: { export: true, import: true },
-  tasks: { placementMode: ['fixed', 'float', 'flex'] },
-  ai: { enrich: true, natural_language_commands: true, ai_commands_per_month: -1 }
+  // Unlimited plan: 'all' is the sentinel meaning every placement option is allowed
+  // (featureGate.decideRequireFeatureIncludes: an allowedValues array containing
+  // 'all' allows any requested value — see the "requireFeatureIncludes 'all'" test).
+  tasks: { placementMode: ['all'] },
+  ai: { enrich: true, natural_language_commands: true }
 };
 
 function catalogSource(features) {
@@ -186,13 +196,19 @@ describe('999.689b — Free plan blockers', function () {
   });
 
   test('free plan: recurring template limit is 1', async function () {
-    var repo = new InMemoryConfigRepository({
-      tasks: [
-        { user_id: 'u1', id: 'a', status: '', task_type: 'recurring_template' }
-      ]
-    });
+    // The recurring-template limit is enforced via the BATCH path, where the
+    // attempted-add count comes from the incoming items (recurringTasks.length),
+    // NOT from countRecurringTemplates. countRecurringTemplates is structurally 0
+    // (tasks_v hardcodes a recurring_template master's status to NULL, so the
+    // legacy whereNotIn('status', INACTIVE) — NULL NOT IN (...) → NULL — always
+    // excludes it; InMemoryConfigRepository reproduces this quirk verbatim). So a
+    // single-add via checkTaskOrRecurring can never trip the limit; adding 2
+    // templates against a limit of 1 (current 0 + 2 > 1) is the real deny path.
+    var repo = new InMemoryConfigRepository();
     var uc = new App.EnforceEntityLimit({ repo: repo });
-    var deny = await uc.checkTaskOrRecurring(makeCtx(FREE_FEATURES), 'recurring_template');
+    var deny = await uc.checkBatch(makeCtx(FREE_FEATURES), [
+      { task_type: 'recurring_template' }, { task_type: 'recurring_template' }
+    ]);
     expect(deny.status).toBe(403);
     expect(deny.body.limit_key).toBe('limits.recurring_templates');
   });
@@ -448,8 +464,17 @@ describe('999.689i — Schedule templates limit', function () {
 
 describe('999.689j — Batch entity limit enforcement', function () {
   test('checkBatch enforces both limits with distinct messages', async function () {
+    // FREE active_tasks limit is 5. checkBatch denies when current + batch > limit:
+    // 4 existing active tasks + a batch of 2 = 6 > 5 → 403 on limits.active_tasks.
+    // (Prior fixture seeded only 1 task → 1 + 2 = 3, under the limit of 5, so it
+    // could never deny — an incorrect fixture, not a code bug.)
     var repo = new InMemoryConfigRepository({
-      tasks: [{ user_id: 'u1', id: 'a', status: '', task_type: 'task' }]
+      tasks: [
+        { user_id: 'u1', id: 'a', status: '', task_type: 'task' },
+        { user_id: 'u1', id: 'b', status: '', task_type: 'task' },
+        { user_id: 'u1', id: 'c', status: '', task_type: 'task' },
+        { user_id: 'u1', id: 'd', status: '', task_type: 'task' }
+      ]
     });
     var uc = new App.EnforceEntityLimit({ repo: repo });
     var deny = await uc.checkBatch(makeCtx(FREE_FEATURES), [

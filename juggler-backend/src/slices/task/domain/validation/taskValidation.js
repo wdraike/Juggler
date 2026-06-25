@@ -306,6 +306,14 @@ function validateTaskInput(body) {
       errors.push('placementMode "fixed" requires a date, time, or scheduledAt');
     }
   }
+  // 999.867: fixed + recurring is a contradiction — a recurring template cannot be
+  // pinned to a single fixed slot. The UI blocks this combination; the backend must
+  // enforce it too (create/update/MCP/import all flow through validateTaskInput).
+  // Emit the machine-readable code 'invalid_combination' as the SOLE error so the
+  // use-case's `errors.join('; ')` yields exactly { error: 'invalid_combination' }.
+  if (body.placementMode === 'fixed' && body.recurring === true) {
+    return ['invalid_combination'];
+  }
   return errors;
 }
 
@@ -321,7 +329,7 @@ function validateTaskInput(body) {
  * the existing value — a cleared field removes the constraint.
  *
  * @param {Object} body   The request body (partial patch).
- * @param {Object} [existing] The existing task row (DB shape: earliest_start_at, deadline).
+ * @param {Object} [existing] The existing task row (DB shape: start_after_at, deadline).
  * @returns {?string} Error string or null.
  */
 function validateEarliestStartDeadlineCrossField(body, existing) {
@@ -343,7 +351,8 @@ function validateEarliestStartDeadlineCrossField(body, existing) {
   if (earliestStartExplicit) {
     effectiveEarliestStart = (body.earliestStart !== null && body.earliestStart !== '') ? body.earliestStart : null;
   } else {
-    effectiveEarliestStart = (existing && existing.earliest_start_at) ? existing.earliest_start_at : null;
+    // task_masters column is `start_after_at` (999.866).
+    effectiveEarliestStart = (existing && existing.start_after_at) ? existing.start_after_at : null;
   }
 
   // Resolve effective deadline: body value if set (even if cleared),

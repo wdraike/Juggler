@@ -496,7 +496,7 @@ describe('PATH-B — date=NULL AND scheduled_at=past-slot: instance SPARES and r
     expect(surviving).toBeDefined();
   });
 
-  it('PATH-B-2: date=NULL, scheduled_at=yesterday → status becomes missed (Phase-9 freeze)', async () => {
+  it('PATH-B-2: date=NULL, scheduled_at=yesterday → stays a live OVERDUE commitment (never-missing; auto-miss retired)', async () => {
     var master = await seedMaster({ id: 'rdm-pb2-master' });
     var sat = yesterdayAt08Datetime();
     var instance = await seedInstance(master.id, {
@@ -510,16 +510,22 @@ describe('PATH-B — date=NULL AND scheduled_at=past-slot: instance SPARES and r
 
     var surviving = await db('task_instances')
       .where({ id: instance.id })
-      .select('id', 'status', 'scheduled_at')
+      .select('id', 'status', 'scheduled_at', 'overdue', 'unscheduled')
       .first();
 
-    // Phase-9 should freeze it as 'missed'.
-    // Per R32.4/999.808: the spared-past pending recurring instance must reach
-    // missed freeze — status='missed' and scheduled_at is the original past slot
-    // (rawRowPast.scheduled_at), NOT nulled.
+    // Leg D (scheduler-recurring-rework §4, David 2026-06-24): AUTO-MISS REMOVED.
+    // A past-incomplete recurring instance is NEVER auto-marked terminal 'missed'
+    // by the system (never-missing invariant). A spared past instance that WAS
+    // placed (scheduled_at set) stays a live, visible commitment: flagged OVERDUE,
+    // status stays open (''), pinned on its slot — NOT frozen/missed, NOT nulled.
+    // (Was: 999.808 freeze-as-missed at last real slot — retired with auto-miss;
+    //  runSchedule.js:1834-1850.)
     expect(surviving).toBeDefined();
-    expect(surviving.status).toBe('missed');
-    // scheduled_at must be preserved (the frozen last-real-slot), not nulled.
+    // NOT auto-missed — status remains open so the user can still complete it.
+    expect(surviving.status).toBe('');
+    // Flagged overdue so it surfaces as a past-due live commitment.
+    expect(surviving.overdue).toBe(1);
+    // scheduled_at must be preserved (the original past slot), not nulled.
     expect(surviving.scheduled_at).not.toBeNull();
     // Verify it matches the originally-seeded scheduled_at value.
     // dateStrings:true returns the string as-is from MySQL; compare the date part.

@@ -141,6 +141,11 @@ describe('GET /api/config', () => {
   test('returns structured config with parsed timeBlocks and toolMatrix', async () => {
     const timeBlocks = { Mon: [] };
     const toolMatrix = { home: ['phone'] };
+    // GetConfig now runs FIVE parallel reads (getUserTimezone added). The repo's
+    // getUserTimezone() chains .select().first().then(...) whose inner .then fires
+    // synchronously at call time, consuming the FIRST queue item before the
+    // Promise.all awaits pop the rest. Push timezone first, then the 4 reads.
+    resolveQueue.push(null); // getUserTimezone: users first() (eager inner .then)
     resolveQueue.push([]); // locations
     resolveQueue.push([]); // tools
     resolveQueue.push([{ id: 'p1', name: 'Home', color: '#abc', icon: null, sort_order: 0 }]); // projects

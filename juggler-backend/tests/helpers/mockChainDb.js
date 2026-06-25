@@ -16,9 +16,12 @@ function createMockChainDb() {
   function makeChain(resolveVal) {
     const chain = jest.fn(() => chain);
     ['where', 'whereRaw', 'whereNotNull', 'whereNull', 'whereNot', 'whereNotIn',
-     'whereIn', 'orWhere', 'orWhereNot', 'orderBy', 'orderByRaw', 'limit',
-     'offset', 'join', 'leftJoin', 'count', 'max', 'clearSelect', 'clearOrder',
-     'clone', 'groupBy', 'having'].forEach(m => { chain[m] = jest.fn(() => chain); });
+     'whereIn', 'orWhere', 'orWhereNot', 'orWhereNull', 'orWhereIn', 'andWhere',
+     'orderBy', 'orderByRaw', 'limit',
+     'offset', 'join', 'leftJoin', 'innerJoin', 'rightJoin', 'count', 'countDistinct',
+     'min', 'max', 'sum', 'avg', 'distinct', 'distinctOn', 'pluck', 'clearSelect',
+     'clearOrder', 'clearWhere', 'clone', 'groupBy', 'groupByRaw', 'having',
+     'havingRaw', 'returning', 'onConflict', 'forUpdate', 'forShare'].forEach(m => { chain[m] = jest.fn(() => chain); });
 
     function nextResolve(fallback) {
       return resolveQueue.length > 0 ? resolveQueue.shift() : fallback;

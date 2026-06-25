@@ -119,6 +119,7 @@ var mockDb = (function() {
   db.whereIn    = function() { return db; };
   db.whereRaw   = function() { return db; };
   db.whereNot   = function() { return db; };
+  db.distinct   = function() { return db; };
   db.whereNull  = function() { return db; };
   db.orWhere    = function() { return db; };
   db.orWhereNull = function() { return db; };

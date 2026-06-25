@@ -673,7 +673,7 @@ describe('Category E: Placement Reasons', () => {
     expect(result.phaseSnapshots).toBeUndefined();
   });
 
-  test('E8a: Flexible recurring with flex window entirely past → missed + placed overdue at preferred time', () => {
+  test('E8a: Flexible recurring with flex window entirely past + when-block → placed OVERDUE (placed-XOR-unplaced, NOT dual-listed)', () => {
     // Preferred time 7:00am (420m), flex ±60m → window 360-480.
     // nowMins=480 (8am) → entire window is past.
     const tasks = [
@@ -683,13 +683,15 @@ describe('Category E: Placement Reasons', () => {
     const unifiedSchedule = require('../src/scheduler/unifiedScheduleV2');
     const result = unifiedSchedule(tasks, statuses, TODAY, 480, cfg);
 
-    // Still surfaces as missed in unplaced (ConflictsView / pastDue pick it up)
-    const missed = result.unplaced.find(t => t.id === 'breakfast');
-    expect(missed).toBeDefined();
-    expect(missed._unplacedReason).toBe('missed');
-    expect(missed._unplacedDetail).toContain('has passed');
-    // AND kept on today's grid at 7:00 AM with the overdue flag so the user
-    // can mark done/skip directly from the day view.
+    // W2 placed-XOR-unplaced (DESIGN-RULING-overdue-vs-unplaceable, David 2026-06-22;
+    // commit 9bb62bb "missed-window recurring no longer dual-placed"): a missed-window
+    // recurring WITH a when-block anchor ('morning') is pinned on the grid as OVERDUE so
+    // the user can mark it done from the day view. It is NEVER ALSO listed in unplaced —
+    // placed XOR unplaced, never both. (Was: dual-listed with _unplacedReason 'missed'.)
+    const dup = result.unplaced.find(t => t.id === 'breakfast');
+    expect(dup).toBeUndefined(); // NOT in the unplaced list — it is placed-overdue instead
+
+    // Kept on today's grid at 7:00 AM (preferred time) with the overdue flag.
     let placed = null;
     for (const dk in result.dayPlacements) {
       for (const p of result.dayPlacements[dk]) {
@@ -699,6 +701,10 @@ describe('Category E: Placement Reasons', () => {
     expect(placed).not.toBeNull();
     expect(placed.start).toBe(420);
     expect(placed._overdue).toBe(true);
+    // The task object still carries the 'missed' reason annotation (display reads the
+    // grid entry's _overdue, not the unplaced list).
+    expect(placed.task._unplacedReason).toBe('missed');
+    expect(placed.task._unplacedDetail).toContain('passed');
   });
 
   test('E8b: Flexible recurring with flex window partially remaining → placed normally', () => {

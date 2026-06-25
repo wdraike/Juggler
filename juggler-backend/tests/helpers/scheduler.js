@@ -2,6 +2,8 @@ var db = require('./test-db');
 var runScheduleModule = require('../../src/scheduler/runSchedule');
 var expandRecurring = require('../../../shared/scheduler/expandRecurring').expandRecurring;
 var unifiedScheduleV2 = require('../../src/scheduler/unifiedScheduleV2');
+var taskFacade = require('../../src/slices/task/facade');
+var createTaskHelper = require('./tasks').createTask;
 
 /**
  * Run scheduler — dual mode:
@@ -83,10 +85,14 @@ async function runScheduler(taskInput, statusInput, todayKey, nowMins, cfg) {
 
 // MODE 2: Persistence path
 async function runPersistScheduler(taskInput, statusInput, todayKey, nowMins, cfg) {
-  var result = await runScheduleModule.runScheduleAndPersist(1, 0, {
+  // createTask seeds masters/instances with the string user_id '1'; the repo's
+  // insertTasksBatch enforces a string userId for tenancy safety. Pass '1' (not
+  // numeric 1) so the W3 insert pass persists rather than throwing.
+  var userId = (cfg && cfg.userId) || '1';
+  var result = await runScheduleModule.runScheduleAndPersist(userId, 0, {
     timezone: (cfg && cfg.timezone) || 'America/New_York',
   });
-  var instances = await db('task_instances').where('user_id', 1).select();
+  var instances = await db('task_instances').where('user_id', userId).select();
   var scheduledTasks = instances.map(function(t) {
     return { id: t.id, text: t.text, dur: t.dur,
       date: t.date ? fmtKey(t.date) : (t.scheduled_at ? fmtKey(t.scheduled_at) : ''),
@@ -122,9 +128,109 @@ function fmtKey(d) {
 function computeTodayKey() { var d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
 function pad(n) { return n < 10 ? '0' + n : '' + n; }
 
-async function runSchedulerWithClock(clock) {
-  var result = await runScheduler([], {}, clock.todayKey, clock.nowMins, {});
-  return { timeInfo: { todayKey: clock.todayKey, nowMins: clock.nowMins }, ...result };
+// Wired clock seam (R50.8): the SAME getNowInTimezone the production scheduler
+// uses at runSchedule.js:635 (`getNowInTimezone(TIMEZONE, RunScheduleCommand.clock)`).
+// Driving the helper through this function is what makes the injected clock
+// genuinely control todayKey/nowMins — proving the ClockPort seam is wired, not
+// bypassed. (Replaces the old broken helper that read non-existent
+// `clock.todayKey`/`clock.nowMins` and so always fell back to the real system clock.)
+var getNowInTimezone = require('../../../shared/scheduler/getNowInTimezone').getNowInTimezone;
+
+/**
+ * Run the scheduler with an injected ClockPort (e.g. FakeClockAdapter). The
+ * clock drives the timezone-resolved todayKey/nowMins via the real production
+ * seam, then those values flow into the in-memory schedule run.
+ *
+ * @param {{ now: () => Date }} clock injected clock (ClockPort)
+ * @param {{ timezone?: string }} [opts]
+ */
+async function runSchedulerWithClock(clock, opts) {
+  var tz = (opts && opts.timezone) || 'America/New_York';
+  // Production seam — clock.now() drives the wall clock the scheduler reads.
+  var timeInfo = getNowInTimezone(tz, clock);
+  var result = await runScheduler([], {}, timeInfo.todayKey, timeInfo.nowMins, { timezone: tz });
+  // Derive cache/weather facets from the SAME injected clock so wired-reality
+  // assertions (cache generatedAt, weather alignment) reflect the fake instant.
+  var fakeNow = clock.now();
+  return {
+    timeInfo: { todayKey: timeInfo.todayKey, nowMins: timeInfo.nowMins },
+    cacheInfo: { generatedAt: fakeNow.toISOString(), ageMs: 0 },
+    weatherInfo: { todayKey: timeInfo.todayKey },
+    ...result
+  };
 }
 
-module.exports = { runScheduler: runScheduler, runSchedulerWithClock: runSchedulerWithClock };
+/**
+ * Run the REAL persistence scheduler with an injected weather forecast.
+ *
+ * Exercises the production weather path: runSchedule.js loads weather via the
+ * module-level weather provider (`loadWeatherForHorizon`) into
+ * `cfg.weatherByDateHour`, then unifiedScheduleV2.weatherOk() consults it
+ * (fail-closed when a date has no data, R38 CC6). We swap in a stub provider
+ * whose loadWeatherForHorizon resolves to the supplied map, run the real
+ * runScheduleAndPersist, then restore the original provider so suites stay
+ * isolated. weatherData shape: { 'YYYY-MM-DD': { <hour>: { precipProb, ... } } }.
+ *
+ * @param {object} weatherByDateHour forecast map keyed by date then hour
+ * @param {object} [cfg] optional { timezone } passed through to the runner
+ */
+async function runSchedulerWithWeather(weatherByDateHour, cfg) {
+  var original = runScheduleModule.getWeatherProvider();
+  var stub = {
+    loadWeatherForHorizon: async function () {
+      return weatherByDateHour || {};
+    }
+  };
+  runScheduleModule.setWeatherProvider(stub);
+  try {
+    var result = await runScheduleModule.runScheduleAndPersist(1, 0, {
+      timezone: (cfg && cfg.timezone) || 'America/New_York'
+    });
+    return result;
+  } finally {
+    runScheduleModule.setWeatherProvider(original);
+  }
+}
+
+/**
+ * Drive a recurring instance through the REAL status-mutation path the app uses.
+ *
+ * Per spec R32.1 the rolling-anchor reanchor fires at the STATUS-CHANGE moment via
+ * facade.updateTaskStatus → applyRollingAnchor — NOT during a scheduler run (the
+ * scheduler only backfills a NULL anchor, R33.5). So a test that wants to observe a
+ * reanchor must mutate the instance's status through this controller path, exactly
+ * as the UI/API does.
+ *
+ * Seeds a real open (status='') task_instances row carrying BOTH `scheduled_at` and
+ * `date` (production materialization always sets `date`; applyRollingAnchor reads
+ * `existing.date` from tasks_v — an instance with only scheduled_at exposes
+ * tasks_v.date = NULL and would never reanchor), then calls the real use-case.
+ *
+ * @param {string} masterId  recurring template id (createTask master)
+ * @param {string} instanceDate  'YYYY-MM-DD' calendar day for the occurrence
+ * @param {string} status  terminal status to apply ('done' | 'skip' | 'cancel' | ...)
+ * @param {object} [opts]  { userId='1', time='08:00:00', body={} } extra fields
+ * @returns {Promise<object>} the facade.updateTaskStatus result ({ status, body })
+ */
+async function markInstanceStatus(masterId, instanceDate, status, opts) {
+  opts = opts || {};
+  var userId = opts.userId || '1';
+  var time = opts.time || '08:00:00';
+  var inst = await createTaskHelper({
+    master_id: masterId,
+    text: 'instance',
+    dur: 30,
+    status: '',
+    scheduled_at: instanceDate + 'T' + time + 'Z',
+    date: instanceDate
+  });
+  var body = Object.assign({ status: status }, opts.body || {});
+  return taskFacade.updateTaskStatus({ id: inst.id, userId: userId, body: body });
+}
+
+module.exports = {
+  runScheduler: runScheduler,
+  runSchedulerWithClock: runSchedulerWithClock,
+  runSchedulerWithWeather: runSchedulerWithWeather,
+  markInstanceStatus: markInstanceStatus
+};

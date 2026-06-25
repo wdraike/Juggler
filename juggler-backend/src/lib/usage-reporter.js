@@ -19,7 +19,7 @@ const { initServiceAuth } = require('../../vendor/service-auth');
 initServiceAuth({ serviceName: PRODUCT_LABEL }).then(() => {
   _serviceAuthReady = true;
 }).catch(err => {
-  libUsageReporterLogger.warn('Service auth init failed, using legacy key', { error: err });
+  if (libUsageReporterLogger) libUsageReporterLogger.warn('Service auth init failed, using legacy key', { error: err });
 });
 } catch { /* service-auth not available */ }
 
@@ -68,7 +68,7 @@ async function flush() {
       });
     }
   } catch (err) {
-    libUsageReporterLogger.warn('Failed to flush events', { eventCount: events.length, error: err });
+    if (libUsageReporterLogger) libUsageReporterLogger.warn('Failed to flush events', { eventCount: events.length, error: err });
   }
 }
 
@@ -79,4 +79,13 @@ if (!flushTimer) {
 
 process.on('beforeExit', flush);
 
-module.exports = { reportUsage, flush };
+// Test-isolation seam: stop the background flush interval + detach the
+// beforeExit listener so a stray flush() can't fire after a jest suite tears
+// down (the logger binding would be gone → "Cannot read 'warn' of undefined"
+// crashing the run). No-op-safe; production never calls this.
+function _stopForTests() {
+  if (flushTimer) { clearInterval(flushTimer); flushTimer = null; }
+  try { process.removeListener('beforeExit', flush); } catch (e) { /* no-op */ }
+}
+
+module.exports = { reportUsage, flush, _stopForTests };

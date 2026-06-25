@@ -49,6 +49,23 @@ beforeAll(async () => {
 afterAll(async () => {
   if (!await isDbAvailable()) return;
   await cleanup();
+  // Cross-suite-pollution fix: this suite's down()/up() round-trip rewrites
+  // chk_task_instances_status to the NARROW set that OMITS 'cancelled' (and
+  // 'archived'/'restored'). The R55 soft-delete path writes
+  // task_instances.status='cancelled', so every later cancel-themed suite
+  // (deleteCalendarLinked, cancelSoftDelete, bug814-*) then dies with
+  // ER_CHECK_CONSTRAINT_VIOLATED. migration.up() only re-adds 'missed', not
+  // 'cancelled'. migrate:latest does NOT repair it (the widen migration
+  // 20260624160000 is already recorded as applied → knex skips it). Re-apply
+  // the authoritative widen migration explicitly to restore the canonical HEAD
+  // constraints (superset incl. cancelled) on BOTH task_masters and
+  // task_instances.
+  try {
+    var widen = require('../../src/db/migrations/20260624160000_widen_task_masters_status_constraint');
+    await widen.up(db);
+  } catch (e) {
+    /* best-effort schema restore — must not redden teardown */
+  }
   await db.destroy();
 });
 

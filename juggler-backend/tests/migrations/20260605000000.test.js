@@ -57,12 +57,24 @@ afterAll(async () => {
   // task_masters.status/completed_at/scheduled_at from the SHARED juggler_test;
   // without restoring, every other suite that writes task_masters.status (via
   // tasks-write.js insertTask, which carries `status` in MASTER_FIELDS) then
-  // fails with "Unknown column 'status'". Re-apply up() to recreate the columns,
-  // then drop the MISPLACED terminal CHECK (exactly as migration 20260609120000
-  // does in the real chain) so the canonical post-migrate state is restored —
-  // status/completed_at/scheduled_at present, chk_task_masters_scheduled_at_for_terminal
-  // absent. (Full parallel isolation for migration-replay suites remains 999.306.)
+  // fails with "Unknown column 'status'".
+  //
+  // Cross-suite-pollution fix: re-applying ONLY migration.up() restores the
+  // 2026-06-05-era chk_task_masters_status_enum, which is the NARROW set
+  // `status IN ('','pending','done','skip','cancel','missed')` — it OMITS 'wip'
+  // (and 'pause'/'disabled'/'cancelled'). Every later suite that writes
+  // task_masters.status='wip' then dies with ER_CHECK_CONSTRAINT_VIOLATED.
+  // `migrate:latest` does NOT repair this: the widening migration
+  // (20260624160000) is already recorded as applied, so knex skips it. We must
+  // therefore re-apply the authoritative widen migration explicitly to restore
+  // the canonical HEAD constraint (superset incl. wip/pause/disabled/cancelled).
   await migration.up(db).catch(() => {});
+  try {
+    var widen = require('../../src/db/migrations/20260624160000_widen_task_masters_status_constraint');
+    await widen.up(db);
+  } catch (e) {
+    /* best-effort schema restore — must not redden teardown */
+  }
   await db.raw('ALTER TABLE task_masters DROP CHECK chk_task_masters_scheduled_at_for_terminal').catch(() => {});
   await db.destroy();
 });

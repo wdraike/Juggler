@@ -7,13 +7,20 @@
  *
  * Assertions:
  *   up:   implied_deadline column exists, is nullable DATE, tasks_v exposes it
- *   down: single-batch rollback drops the column + restores prior view shape
+ *   down: this migration's down() drops the column + restores prior view shape
  *   re-up: column restored after re-apply (round-trip clean)
  *
- * Uses single-batch rollback (not full-reset) to isolate only this migration.
+ * Exercises THIS migration's own down()/up() directly rather than
+ * db.migrate.rollback(). knex's rollback reverses only the LAST applied BATCH,
+ * and once later migrations exist (they do — 20260622+, 20260624*), the
+ * implied_deadline migration is no longer in the last batch, so a batch
+ * rollback would leave its column in place (the round-trip would be a no-op for
+ * this column). Driving the migration module directly is order-independent and
+ * tests the actual reversibility contract of this migration.
  */
 
 const { assertDbAvailable } = require('../helpers/requireDB');
+const migration = require('../../src/db/migrations/20260621000000_add_implied_deadline_to_task_instances');
 
 describe('migration 20260621000000 — implied_deadline column (W2 R50.7)', function() {
   var db;
@@ -26,8 +33,8 @@ describe('migration 20260621000000 — implied_deadline column (W2 R50.7)', func
   });
 
   afterAll(async function() {
-    // Ensure the migration is re-applied even if a test rolled it back
-    await db.migrate.latest().catch(function() {});
+    // Ensure the migration's schema is restored even if a test rolled it back
+    await migration.up(db).catch(function() {});
     if (db) await db.destroy();
   });
 
@@ -44,22 +51,23 @@ describe('migration 20260621000000 — implied_deadline column (W2 R50.7)', func
     expect(result).toBeDefined();
   });
 
-  it('down + re-up: single-batch rollback drops column; re-apply restores it', async function() {
-    // Roll back ONE batch (the implied_deadline migration)
-    await db.migrate.rollback();
+  it('down + re-up: down() drops column; re-apply restores it', async function() {
+    // Run THIS migration's own down() (order-independent — does not depend on
+    // implied_deadline being in knex's last applied batch).
+    await migration.down(db);
 
-    // Post-rollback: column must be gone
+    // Post-down: column must be gone
     var infoAfterDown = await db('task_instances').columnInfo();
     expect(infoAfterDown.implied_deadline).toBeUndefined();
 
-    // Post-rollback: tasks_v must NOT expose implied_deadline
+    // Post-down: tasks_v must NOT expose implied_deadline
     var viewThrew = false;
     try { await db.raw('SELECT implied_deadline FROM tasks_v LIMIT 0'); }
     catch (_e) { viewThrew = true; }
     expect(viewThrew).toBe(true);
 
     // Re-apply (up again)
-    await db.migrate.latest();
+    await migration.up(db);
 
     // Post-re-up: column must be restored
     var infoAfterReUp = await db('task_instances').columnInfo();

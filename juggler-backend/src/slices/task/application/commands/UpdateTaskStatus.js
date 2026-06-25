@@ -256,6 +256,10 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
   }
 
   var updated = await this.repo.fetchTaskWithEventIds(id, userId);
+  // Null-safety: the row was present at `existing` (404-guarded above) but the
+  // re-read can come back empty if the row was concurrently removed. Treat a
+  // missing re-read as not-found rather than dereferencing null in rowToTask.
+  if (!updated) return { status: 404, body: { error: 'Task not found' } };
   var tmplRows2 = await this.repo.getRecurringTemplateRows(userId);
   var srcMap = this.mappers.buildSourceMap(tmplRows2);
   await this.cache.invalidateTasks(userId);

@@ -1,11 +1,42 @@
 const request = require('supertest');
 const express = require('express');
 
-jest.mock('../db', () => {
+// The impersonation controller is a THIN adapter over slices/user-config/facade
+// (Phase H4/W6 refactor). It performs ZERO direct DB access — the audit-log insert
+// and the target/log list queries run through KnexConfigRepository, whose knex is
+// resolved via `lib/db.getDefaultDb()` (NOT src/db.js — ADR-0002 / W5 single-pool).
+// So the test mocks `../lib/db`. The mock knex exposes `_insert` (the audit-row
+// insert spy) and `__setChain` (installs a per-test chain for the list queries).
+// Everything lives inside the factory (jest hoists jest.mock above all module-scope
+// code, so the factory may not close over out-of-scope vars).
+jest.mock('../lib/db', () => {
   const insert = jest.fn().mockResolvedValue([1]);
-  const db = jest.fn(() => ({ insert }));
-  db._insert = insert;
-  return db;
+  let nextChain = null;
+  function makeDefaultChain() {
+    const clone = {
+      clearSelect: jest.fn().mockReturnThis(),
+      clearOrder: jest.fn().mockReturnThis(),
+      count: jest.fn().mockResolvedValue([{ count: 0 }]),
+      where: jest.fn().mockReturnThis(),
+    };
+    return {
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      leftJoin: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      offset: jest.fn().mockResolvedValue([]),
+      clone: jest.fn(() => clone),
+      insert,
+    };
+  }
+  const knex = jest.fn(() => {
+    if (nextChain) { const c = nextChain; nextChain = null; return c; }
+    return makeDefaultChain();
+  });
+  knex._insert = insert;
+  knex.__setChain = (chain) => { nextChain = chain; };
+  return { getDefaultDb: () => knex };
 });
 
 jest.mock('../proxy-config', () => ({
@@ -26,10 +57,10 @@ global.fetch = jest.fn();
 
 const { startImpersonation, stopImpersonation, getImpersonationTargets } = require('../controllers/impersonation.controller');
 
-function makeApp(handler, user = { id: 'admin-1', email: 'admin@test.com' }) {
+function makeApp(handler, user = { id: 'admin-1', email: 'admin@test.com' }, auth = undefined) {
   const app = express();
   app.use(express.json());
-  app.use((req, res, next) => { req.user = user; next(); });
+  app.use((req, res, next) => { req.user = user; if (auth) req.auth = auth; next(); });
   app.post('/test', handler);
   app.get('/test', handler);
   return app;
@@ -71,8 +102,8 @@ describe('startImpersonation', () => {
     expect(res.status).toBe(200);
     expect(res.body.accessToken).toBe('imp-tok');
     expect(res.body.impersonating.id).toBe('u2');
-    const db = require('../db');
-    expect(db._insert).toHaveBeenCalledWith(expect.objectContaining({
+    const knex = require('../lib/db').getDefaultDb();
+    expect(knex._insert).toHaveBeenCalledWith(expect.objectContaining({
       admin_user_id: 'admin-1',
       target_user_id: 'u2',
       action: 'start_impersonation'
@@ -101,21 +132,38 @@ describe('startImpersonation', () => {
 });
 
 describe('stopImpersonation', () => {
-  it('records audit row and returns message', async () => {
+  // The /stop handler reads admin/target from the impersonation-token context
+  // (req.auth.actingAsAdmin). Per the 999.553 audit-misattribution fix
+  // (StopImpersonation use-case), an audit row is recorded ONLY when an active
+  // impersonation token is present (actingAsAdmin set): admin=actingAsAdmin,
+  // target=req.user.id. A plain authenticated user (no token) gets 200 with NO row.
+  it('records audit row when stopping an active impersonation', async () => {
+    const user = { id: 'u2', email: 'user@test.com' };
+    const auth = { actingAsAdmin: 'admin-1' };
+    const res = await request(makeApp(stopImpersonation, user, auth)).post('/test').send({});
+    expect(res.status).toBe(200);
+    expect(res.body.message).toBeDefined();
+    const knex = require('../lib/db').getDefaultDb();
+    expect(knex._insert).toHaveBeenCalledWith(expect.objectContaining({
+      admin_user_id: 'admin-1',
+      target_user_id: 'u2',
+      action: 'stop_impersonation'
+    }));
+  });
+
+  it('does NOT record an audit row for a plain stop (no active impersonation)', async () => {
     const res = await request(makeApp(stopImpersonation)).post('/test').send({});
     expect(res.status).toBe(200);
     expect(res.body.message).toBeDefined();
-    const db = require('../db');
-    expect(db._insert).toHaveBeenCalledWith(expect.objectContaining({
-      admin_user_id: 'admin-1',
-      action: 'stop_impersonation'
-    }));
+    const knex = require('../lib/db').getDefaultDb();
+    expect(knex._insert).not.toHaveBeenCalled();
   });
 });
 
 describe('getImpersonationTargets', () => {
+  // Installs a one-shot knex chain for the repo's listImpersonationTargets query
+  // (db('users').select().clone().clearSelect().count() then .orderBy().limit().offset()).
   function makeTargetsDb(users = [], count = 0) {
-    const db = require('../db');
     // Build a clone object that handles clearSelect().count()
     const makeClone = () => ({
       clearSelect: jest.fn().mockReturnThis(),
@@ -130,7 +178,7 @@ describe('getImpersonationTargets', () => {
       offset: jest.fn().mockResolvedValue(users),
       clone: jest.fn(makeClone),
     };
-    db.mockReturnValueOnce(chain);
+    require('../lib/db').getDefaultDb().__setChain(chain);
     return chain;
   }
 

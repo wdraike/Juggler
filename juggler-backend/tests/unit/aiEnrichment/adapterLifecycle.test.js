@@ -304,6 +304,11 @@ describe('B6 — suggest-icon: NOT-CONFIGURED path must NOT call logger.error', 
   beforeEach(() => {
     resolveQueue = [];
     jest.clearAllMocks();
+    // clearAllMocks() clears call records but NOT queued mockResolvedValueOnce
+    // implementations. Fully reset the tracked-Gemini mock so a once-value queued
+    // by one B6 test can never be shifted by the next (the source of the cascade
+    // when B6-red's queued state leaked into B6-guard → undefined result).
+    mockTrackedGeminiCall.mockReset();
     // Reset the facade singleton so the adapter is rebuilt on next call.
     // This prevents a configured adapter from a prior test leaking into this test.
     const facade = require('../../../src/slices/ai-enrichment/facade');
@@ -360,7 +365,13 @@ describe('B6 — suggest-icon: NOT-CONFIGURED path must NOT call logger.error', 
       //   which the route maps to {icon:null}).
       //   → mockErrorSpy.mock.calls.length === 0 → assertion PASSES → GREEN.
       expect(mockErrorSpy).not.toHaveBeenCalled();
-    }
+    },
+    // This case spins up the full express app (require('../../../src/app')) and
+    // issues a real supertest request; cold app boot measures ~4s, which flakes
+    // past Jest's 5s default under full-suite load and then cascades stale mock
+    // state into B6-guard. Give it explicit headroom — the assertions are
+    // unchanged; only the timeout budget accommodates the measured boot cost.
+    15000
   );
 
   test(
@@ -500,7 +511,11 @@ describe('B7 — callGemini: null SDK result must produce structured error, not 
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ command: 'list tasks', tasks: [], statuses: {}, config: {} });
 
-      expect(res.status).toBe(500);
+      // A well-formed result.text response returns 200 with the parsed { ops, msg }
+      // (ai.controller success path: res.json({ ops, msg })). The prior `toBe(500)`
+      // was a mechanical test-rot collapse (commit a05a4d2) contradicting this test's
+      // own GUARD-GREEN intent + the body.msg assertion below.
+      expect(res.status).toBe(200);
       expect(res.body.msg).toBe('All good.');
     }
   );

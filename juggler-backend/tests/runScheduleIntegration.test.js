@@ -1229,32 +1229,24 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
   var PAST_DATE_UTC = '2026-06-01 00:00:00'; // midnight UTC approximation for scheduled_at
 
   // ─────────────────────────────────────────────────────────────────────────
-  // BUG-142-AC1 (ACCEPTED LEGACY CLEANUP — Oscar ruling 2026-06-16):
+  // BUG-142-AC1 (NEVER-MISSING — supersedes the 2026-06-16 delete ruling):
   //
   // A RECURRING instance with `date=NULL` and `scheduled_at=NULL` is an
   // ANOMALOUS / LEGACY state. Modern Phase 1 pre-insert (expandRecurring)
   // always writes a non-null occurrence date; date=NULL rows only arise from
   // old code that pre-dates that invariant.
   //
-  // The reconciler's toDeleteIds path (runSchedule.js:844-852) DELETES these
-  // rows because:
-  //   row.date=NULL → the `if (row && row.date)` grandfather guard is falsy
-  //   → no match in `desiredIds` → toDeleteIds includes the id → DELETE.
-  //
-  // Oscar ruling: this deletion is ACCEPTABLE orphan cleanup, NOT the
-  // 999.142 bug. The bug (PATH B) is a date-SET instance that survived the
-  // reconciler but was skipped by Plan C — fixed by bert's rawRowPast
-  // date-fallback (Plan C now uses rawRowPast.date when scheduled_at=NULL).
-  //
-  // This test PINS the accepted behavior: a date=NULL recurring instance is
-  // deleted by the reconciler after a scheduler run. It must NOT be treated
-  // as a test failure — deletion here is the correct/expected outcome.
-  //
-  // NOTE: if a future leg wants to rescue date=NULL orphans (e.g. by writing
-  // them to 'missed' rather than deleting them), that is a new backlog item,
-  // not a fix to 999.142. Oscar should backlog that if desired.
+  // SUPERSEDED RULING: the original 2026-06-16 Oscar ruling held that the
+  // reconciler DELETING such an orphan was "acceptable cleanup". That ruling
+  // was overturned by the NEVER-MISSING invariant (David, 2026-06-24): no task
+  // is ever absent — every row is always materialized and surfaced as placed |
+  // overdue | unscheduled. The "never hard-delete a past incomplete recurring
+  // instance" fix (runSchedule.js commit 4dfca2d) + auto-miss removal (7b9e0f6)
+  // mean the reconciler now SPARES this orphan instead of deleting it. The row
+  // survives, stays open (status=''), and is flagged `unscheduled` so it remains
+  // visible in the Unplaced view — never silently dropped.
   // ─────────────────────────────────────────────────────────────────────────
-  test('AC1 (ACCEPTED LEGACY): date=NULL recurring instance is cleaned up (deleted) by the reconciler — not the 999.142 bug', async () => {
+  test('AC1 (NEVER-MISSING): date=NULL recurring orphan SURVIVES and stays visible (unscheduled) — not deleted', async () => {
     if (!available) return;
 
     // Template with recur_end in the past → expandRecurring generates NO future
@@ -1297,15 +1289,14 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
 
     await runScheduleAndPersist(USER_ID);
 
-    // ASSERTION (AC1 — ACCEPTED LEGACY CLEANUP):
-    // The reconciler deletes a date=NULL pending recurring instance because
-    // it cannot be matched to any desired occurrence (the grandfather guard
-    // at runSchedule.js:847 requires row.date to be non-null). This is
-    // correct orphan cleanup behavior — Oscar ruling 2026-06-16.
-    //
-    // Assert the row is GONE (deletion is the expected outcome here):
+    // ASSERTION (AC1 — NEVER-MISSING):
+    // The reconciler must NOT hard-delete this orphan (commit 4dfca2d). The row
+    // survives, stays open (not auto-missed — auto-miss retired, 7b9e0f6), and
+    // is surfaced as unscheduled so it stays visible. Never silently dropped.
     var row = await db('task_instances').where('id', 'b142-inst-ac1').first();
-    expect(row).toBeUndefined(); // reconciler deleted the orphan — correct
+    expect(row).toBeDefined();          // never-missing: the row must still exist
+    expect(row.status).toBe('');        // not auto-marked terminal 'missed'
+    expect(row.unscheduled).toBe(1);    // surfaced as unscheduled → stays visible
   });
 
   // ─────────────────────────────────────────────────────────────────────────

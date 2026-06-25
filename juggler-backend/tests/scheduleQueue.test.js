@@ -8,7 +8,11 @@
  * so the 2-second quiet-period guard is satisfied.
  */
 
-jest.mock('../src/scheduler/runSchedule', () => ({
+// scheduleQueue.js lazily requires runScheduleAndPersist from the scheduler
+// facade (src/slices/scheduler/facade), NOT directly from runSchedule, since the
+// hexagonal refactor. Mock the facade so processUser() resolves the test double
+// instead of loading the real scheduler require-closure.
+jest.mock('../src/slices/scheduler/facade', () => ({
   runScheduleAndPersist: jest.fn()
 }));
 
@@ -26,7 +30,7 @@ jest.mock('../src/lib/sse-emitter', () => ({
 
 const db = require('../src/db');
 const { enqueueScheduleRun, processUser, stopPollLoop, _lastEnqueueTime } = require('../src/scheduler/scheduleQueue');
-const { runScheduleAndPersist } = require('../src/scheduler/runSchedule');
+const { runScheduleAndPersist } = require('../src/slices/scheduler/facade');
 const { withLock } = require('../src/lib/sync-lock');
 const { assertDbAvailable } = require('./helpers/requireDB');
 

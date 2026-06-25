@@ -161,7 +161,7 @@ describe('Auth + Validation — E2E', () => {
       // taskCreateSchema: text must be string min(1), dur must be number int
       .send({ text: 123, dur: 'not-a-number' });
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(400);
     expect(res.body).toHaveProperty('error');
   }, harnessProbe));
 
@@ -174,7 +174,7 @@ describe('Auth + Validation — E2E', () => {
       // taskCreateSchema: text must be min(1) — empty string fails
       .send({ text: '' });
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(400);
     expect(res.body).toHaveProperty('error');
   }, harnessProbe));
 
@@ -186,7 +186,7 @@ describe('Auth + Validation — E2E', () => {
       .post('/api/tasks')
       .set('Authorization', `Bearer ${token}`)
       .send({ text: 'validation-target', dur: 30 });
-    expect(createRes.status).toBe(403);
+    expect(createRes.status).toBe(201);
     const id = createRes.body.task.id;
 
     // taskUpdateSchema: status must be one of ['', 'wip', 'done', 'cancel', 'skip', 'pause']
@@ -207,7 +207,7 @@ describe('Auth + Validation — E2E', () => {
       .post('/api/tasks')
       .set('Authorization', `Bearer ${token}`)
       .send({ text: 'User A only task', dur: 30 });
-    expect(createRes.status).toBe(403);
+    expect(createRes.status).toBe(201);
     const taskId = createRes.body.task.id;
 
     // User B token — different email, no matching DB row
@@ -232,7 +232,7 @@ describe('Auth + Validation — E2E', () => {
       .post('/api/tasks')
       .set('Authorization', `Bearer ${token}`)
       .send({ text: 'User A deletion-isolation task', dur: 30 });
-    expect(createRes.status).toBe(403);
+    expect(createRes.status).toBe(201);
     const taskId = createRes.body.task.id;
 
     // Attempt delete as User B

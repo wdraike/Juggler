@@ -546,9 +546,16 @@ describe('B5: cache staleness — stale rows returned by scheduler, filtered by 
    *       repo unit test (knex-weather-cache-repository.unit.test.js).
    */
 
-  it('B5-1: runSchedule.js loadWeatherForHorizon query has NO expires_at filter (source pin)', () => {
+  it('B5-1: scheduler loadWeatherForHorizon query has NO expires_at filter (source pin)', () => {
+    // Re-bless: the scheduler hexagonal extraction moved loadWeatherForHorizon out of
+    // runSchedule.js (which now calls _weatherProvider.loadWeatherForHorizon, a
+    // WeatherProviderPort) and into the SchedulerWeatherProvider adapter — VERBATIM per
+    // its header. The pinned invariant is unchanged (scheduler weather load returns ANY
+    // cached row regardless of staleness); only its source home moved.
     const fs = require('fs');
-    const src = fs.readFileSync(require.resolve('../../src/scheduler/runSchedule.js'), 'utf8');
+    const src = fs.readFileSync(
+      require.resolve('../../src/slices/scheduler/adapters/SchedulerWeatherProvider.js'), 'utf8'
+    );
 
     // Find the loadWeatherForHorizon function block
     const fnStart = src.indexOf('async function loadWeatherForHorizon');
@@ -769,18 +776,26 @@ describe('B7: thin-controller call-count — weather.controller.js AFTER W3 refa
     ]);
   });
 
-  it('B7-4: roundCoord is imported by both runSchedule.js and health.routes.js (cross-module dep pin)', () => {
+  it('B7-4: roundCoord is shared by the scheduler weather path and health.routes.js (cross-module dep pin)', () => {
+    // Re-bless: the scheduler/weather hexagonal extraction moved the scheduler's
+    // roundCoord dependency out of runSchedule.js and into the SchedulerWeatherProvider
+    // adapter, which sources roundCoord from the canonical slices/weather/facade
+    // (the same coord-grid rounder weather.controller re-exports). health.routes.js still
+    // imports roundCoord directly from weather.controller. The pinned invariant — a single
+    // shared roundCoord across the scheduler weather load path and the health probe — is
+    // preserved; only the scheduler-side import site moved to the slice adapter.
     const fs = require('fs');
-    const runScheduleSrc = fs.readFileSync(
-      require.resolve('../../src/scheduler/runSchedule.js'), 'utf8'
+    const schedulerProviderSrc = fs.readFileSync(
+      require.resolve('../../src/slices/scheduler/adapters/SchedulerWeatherProvider.js'), 'utf8'
     );
     const healthSrc = fs.readFileSync(
       require.resolve('../../src/routes/health.routes.js'), 'utf8'
     );
 
-    // Golden: both files import roundCoord from weather.controller
-    expect(runScheduleSrc).toContain("require('../controllers/weather.controller')");
-    expect(runScheduleSrc).toContain('roundCoord');
+    // Golden: scheduler weather adapter sources roundCoord from the weather slice facade.
+    expect(schedulerProviderSrc).toContain("require('../../weather/facade')");
+    expect(schedulerProviderSrc).toContain('roundCoord');
+    // Golden: the health route imports roundCoord from weather.controller.
     expect(healthSrc).toContain("require('../controllers/weather.controller')");
     expect(healthSrc).toContain('roundCoord');
   });

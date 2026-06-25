@@ -27,7 +27,7 @@ describe('task mapping', () => {
     section: 'sec',
     notes: 'some notes',
     deadline: '2026-03-20',
-    earliest_start_at: '2026-03-10',
+    start_after_at: '2026-03-10',
     location: '["home","work"]',
     tools: '["phone"]',
     when: 'morning',

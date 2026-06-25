@@ -200,23 +200,24 @@ const DB_TASK_ROW = {
 /**
  * Push the 7-slot resolveQueue for a successful exportData call.
  *
- * Slot consumption ORDER (empirically verified via chain.then/select call counts):
- *   KnexTaskRepository.fetchTasksWithEventIds fires synchronously:
- *     slot 0: chain.select(cal_sync_ledger fields)   ← select fires synchronously
- *     slot 1: chain.select(user_calendars fields)    ← select fires synchronously
- *     slot 2: chain.then(tasks_v q)                  ← then registered by Promise.all([q,...])
+ * Slot consumption ORDER (mockChainDb: .select()/.first() are CHAINABLE, NOT
+ * terminal — only .then resolves a queue item, in Promise.all array order):
+ *   KnexTaskRepository.fetchTasksWithEventIds → Promise.all([ q, ledger, userCal ]):
+ *     slot 0: tasks_v q             ← FIRST in the inner Promise.all array
+ *     slot 1: cal_sync_ledger       (.select() is chainable → resolves via .then)
+ *     slot 2: user_calendars        (.select() is chainable → resolves via .then)
  *   ExportData outer Promise.all then registers:
- *     slot 3: chain.then(locations)
- *     slot 4: chain.then(tools)
- *     slot 5: chain.then(projects)
- *     slot 6: chain.then(user_config)
+ *     slot 3: locations
+ *     slot 4: tools
+ *     slot 5: projects
+ *     slot 6: user_config
  *
- * taskRows go into slot 2 (tasks_v), NOT slot 0.
+ * taskRows go into slot 0 (tasks_v) — it is the FIRST element of the inner Promise.all.
  */
 function pushExportQueue(taskRows) {
-  resolveQueue.push([]);        // slot 0: cal_sync_ledger (select — fires first)
-  resolveQueue.push([]);        // slot 1: user_calendars (select — fires second)
-  resolveQueue.push(taskRows);  // slot 2: tasks_v (then — registered by inner Promise.all)
+  resolveQueue.push(taskRows);  // slot 0: tasks_v (first in inner Promise.all)
+  resolveQueue.push([]);        // slot 1: cal_sync_ledger
+  resolveQueue.push([]);        // slot 2: user_calendars
   resolveQueue.push([]);        // slot 3: locations
   resolveQueue.push([]);        // slot 4: tools
   resolveQueue.push([]);        // slot 5: projects

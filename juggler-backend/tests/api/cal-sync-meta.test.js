@@ -218,8 +218,11 @@ describe('GET /api/cal/audit', () => {
       .get('/api/cal/audit')
       .set('Authorization', `Bearer ${VALID_TOKEN}`);
 
-    // No adapters connected — audit should still return 200
-    expect(res.status).toBe(500);
+    // No adapters connected — audit should still return 200 with an empty providers map
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('providers');
+    expect(res.body.providers).toEqual({});
+    expect(res.body).toHaveProperty('window');
   });
 
   test('returns 401 without auth', async () => {

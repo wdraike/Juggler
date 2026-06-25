@@ -253,7 +253,7 @@ describe('LC-1: placed recurring instance freezes at last real scheduled_at (RED
    * Requirement: R32.4 refined — missed recurring instance freezes at LAST REAL slot
    */
   test(
-    'LC-1 (RED): placed instance auto-missed by Phase-9 stores original slot, not deleted or windowClose',
+    'LC-1: placed past recurring instance survives, stays live (status=""), flagged overdue at original slot — auto-miss retired',
     async () => {
       if (!available) {
         throw new Error('[TEST-FR-001] Required DB (test-bed @3407) is unreachable — cannot run LC-1 regression test.');
@@ -281,28 +281,26 @@ describe('LC-1: placed recurring instance freezes at last real scheduled_at (RED
       var afterRow = await db('task_instances').where('id', instId).first();
 
       // ── LC-1 ASSERTION (a): instance must NOT be deleted ──────────────────────
-      // On current code: toDeleteIds includes instId (not in desiredIds, date not
-      // future) → reconciler deletes it → afterRow is undefined.
-      // This assertion fails first on current code.
-      expect(afterRow).toBeTruthy(); // RED (a) on current code: row was deleted
+      // The reconciler spares placed past instances (PATH A protection) so the
+      // never-missing invariant can keep them visible. afterRow must survive.
+      expect(afterRow).toBeTruthy();
 
-      // ── LC-1 ASSERTION (b): must be missed ──────────────────────────────────
-      expect(afterRow.status).toBe('missed'); // RED if Phase-9 wasn't reached
+      // ── LC-1 ASSERTION (b): status stays LIVE, never auto-marked 'missed' ─────
+      // Leg D (scheduler-recurring-rework §4): AUTO-MISS REMOVED (David 2026-06-24:
+      // "there should not be any auto-miss feature"). runSchedule.js:1829-1850. A
+      // past-incomplete PLACED recurring instance is NOT marked terminal 'missed';
+      // it stays a live, visible commitment flagged OVERDUE on its day. The old
+      // 999.808 freeze-as-missed design was retired with auto-miss.
+      expect(afterRow.status).toBe('');
 
-      // ── LC-1 RED ASSERTION (c): scheduled_at must be PLACED_SLOT_UTC ──────────
-      //
-      // CURRENT (buggy) code path if (a) were fixed:
-      //   missedAt = windowClose = new Date('2026-06-14 15:00:00') + 120 min
-      //            = '2026-06-14 17:00:00'
-      //
-      // CORRECT (post-fix):
-      //   missedAt = rawRowPast.scheduled_at = '2026-06-14 15:00:00'
-      //
-      // This assertion fails on buggy code (b): stored value is windowClose not slot.
-      expect(afterRow.scheduled_at).toBe(PLACED_SLOT_UTC); // RED (b): got windowClose
+      // ── LC-1 ASSERTION (c): flagged overdue, pinned at its original slot ──────
+      // runSchedule.js:1841-1850 — placed past recurring → overdue=1, NOT moved.
+      // scheduled_at stays the original user slot (NOT windowClose, NOT today).
+      expect(Number(afterRow.overdue)).toBe(1);
+      expect(afterRow.scheduled_at).toBe(PLACED_SLOT_UTC);
 
-      // completed_at must equal the last real slot (same invariant)
-      expect(afterRow.completed_at).toBe(PLACED_SLOT_UTC); // RED (b) on buggy code
+      // Not terminal → completed_at stays null (it was never completed).
+      expect(afterRow.completed_at).toBeNull();
     }
   );
 });
@@ -336,7 +334,7 @@ describe('LC-2: never-placed recurring instance still gets non-null missedAt (GU
    * Requirement: DB CHECK constraint — terminal status requires non-null scheduled_at
    */
   test(
-    'LC-2 (GUARD): never-placed instance auto-missed with non-null scheduled_at (CHECK satisfied)',
+    'LC-2: never-placed past recurring instance survives, stays live (status=""), surfaced as unscheduled — auto-miss retired',
     async () => {
       if (!available) {
         throw new Error('[TEST-FR-001] Required DB (test-bed @3407) is unreachable — cannot run LC-2 guard test.');
@@ -366,25 +364,26 @@ describe('LC-2: never-placed recurring instance still gets non-null missedAt (GU
       var afterRow = await db('task_instances').where('id', instId).first();
 
       // ── LC-2 GUARD: instance must NOT be deleted ──────────────────────────────
-      // Same PATH A protection needed as LC-1. On current code the instance is deleted.
-      expect(afterRow).toBeTruthy(); // RED on current code: row deleted by reconciler
+      // Same PATH A protection as LC-1 — the never-placed past instance survives the
+      // reconciler so the never-missing invariant can surface it.
+      expect(afterRow).toBeTruthy();
 
-      // Must be missed
-      expect(afterRow.status).toBe('missed');
+      // ── LC-2 GUARD: status stays LIVE, never auto-marked 'missed' ─────────────
+      // Leg D AUTO-MISS REMOVED (David 2026-06-24). runSchedule.js:1851-1861 — a
+      // never-placed past recurring instance is NOT terminal-'missed'; it is surfaced
+      // in the Unplaced list (unscheduled=1) so it stays visible per the never-missing
+      // invariant. The old 999.808 freeze-as-missed-with-non-null-scheduled_at design
+      // was retired with auto-miss.
+      expect(afterRow.status).toBe('');
 
-      // ── LC-2 GUARD: scheduled_at must be non-null (CHECK constraint) ──────────
-      // The fallback chain: windowClose=null (scheduled_at was null) →
-      //   midnight of occurrence date (localToUtc(OCCURRENCE_DATE_KEY, '12:00 AM', TZ))
-      //     OR clockNow()
-      // Either provides a non-null value.
-      expect(afterRow.scheduled_at).not.toBeNull();
-      expect(afterRow.scheduled_at).toBeTruthy();
-      expect(afterRow.completed_at).not.toBeNull();
-      expect(afterRow.completed_at).toBeTruthy();
+      // ── LC-2 GUARD: surfaced as unscheduled with an unplaced reason ───────────
+      expect(Number(afterRow.unscheduled)).toBe(1);
+      expect(afterRow.unplaced_reason).toBeTruthy();
 
-      // Sanity: valid date string
-      var parsedAt = new Date(afterRow.scheduled_at);
-      expect(isNaN(parsedAt.getTime())).toBe(false);
+      // Never placed + non-terminal → scheduled_at and completed_at stay NULL.
+      // (The terminal-requires-non-null-scheduled_at CHECK does not apply: status='').
+      expect(afterRow.scheduled_at).toBeNull();
+      expect(afterRow.completed_at).toBeNull();
     }
   );
 });

@@ -69,6 +69,29 @@ var RESTORABLE_FIELDS = [
   'preferred_time_mins', 'tz'
 ];
 
+/**
+ * Date-valued task columns. Action-log before/after snapshots are persisted as
+ * JSON (Knex JSON column; InMemory via JSON.parse(JSON.stringify(...))), which
+ * serializes Date instances to ISO strings. The task repositories enforce that
+ * date columns are real JS Date objects (P1 invariant — never a raw string), so
+ * any date restored from a snapshot must be coerced back to a Date before write.
+ */
+var DATE_FIELDS = ['completed_at', 'created_at', 'updated_at', 'scheduled_at'];
+
+/**
+ * Coerce ISO-string date values (from a JSON-persisted snapshot) back to Date.
+ * Mutates `obj` in place; leaves null and already-Date values untouched.
+ */
+function coerceSnapshotDates(obj) {
+  DATE_FIELDS.forEach(function (field) {
+    var v = obj[field];
+    if (typeof v === 'string' && v.length > 0) {
+      obj[field] = new Date(v);
+    }
+  });
+  return obj;
+}
+
 /** @param {UndoTaskDeps} deps */
 function UndoTask(deps) {
   var required = ['actionLog', 'repo', 'cache', 'enqueueScheduleRun', 'mappers', 'isTerminalStatus'];
@@ -169,6 +192,9 @@ UndoTask.prototype._undoStatusChange = async function _undoStatusChange(id, user
     revertUpdate.time_remaining = before.time_remaining;
   }
 
+  // Snapshot dates round-trip through JSON as ISO strings; coerce back to Date.
+  coerceSnapshotDates(revertUpdate);
+
   // Apply the revert
   await this.repo.updateTaskById(id, revertUpdate, userId);
 
@@ -214,6 +240,9 @@ UndoTask.prototype._undoFieldUpdate = async function _undoFieldUpdate(id, userId
       revertUpdate[field] = before[field];
     }
   });
+
+  // Snapshot dates round-trip through JSON as ISO strings; coerce back to Date.
+  coerceSnapshotDates(revertUpdate);
 
   // If no restorable fields changed, there's nothing to undo
   if (Object.keys(revertUpdate).length === 0) {
@@ -263,6 +292,9 @@ UndoTask.prototype._undoDelete = async function _undoDelete(id, userId, logEntry
   var row = Object.assign({}, before);
   row.id = id;
   row.user_id = userId;
+  // Snapshot dates round-trip through JSON as ISO strings; coerce back to Date
+  // before the repo's P1 Date invariant rejects them.
+  coerceSnapshotDates(row);
   row.updated_at = new Date();
   // created_at should be the original creation time, not now
   if (!row.created_at) row.created_at = new Date();

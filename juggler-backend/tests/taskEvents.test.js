@@ -66,7 +66,7 @@ jest.mock('../src/middleware/jwt-auth', () => ({
 jest.mock('../src/middleware/plan-features.middleware', () => ({
   resolvePlanFeatures: (req, res, next) => {
     req.planId = 'enterprise';
-    req.planFeatures = { limits: { active_tasks: -1 }, calendar: { max_providers: -1 }, scheduling: {}, tasks: {} };
+    req.planFeatures = { limits: { active_tasks: -1 }, calendar: { max_providers: -1 }, scheduling: {}, tasks: { create: true } };
     next();
   },
   PRODUCT_ID: 'juggler',
@@ -182,7 +182,7 @@ describe('W3 publishing — task lifecycle events', () => {
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ text: 'Test task' });
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(201);
     expect(spy).toHaveBeenCalledTimes(1);
     const payload = spy.mock.calls[0][0];
     expect(payload.taskId).toBe('task-abc');
@@ -324,7 +324,7 @@ describe('W3 error isolation — throwing subscriber cannot break the write', ()
       .send({ text: 'Test task' });
 
     // Response unchanged despite the throwing subscriber.
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(201);
     expect(res.body).toHaveProperty('task');
     expect(res.body.task.id).toBe('task-abc');
     expect(res.body.task.text).toBe('Test task');

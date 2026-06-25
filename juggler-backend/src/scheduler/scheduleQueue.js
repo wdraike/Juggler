@@ -57,7 +57,16 @@ function getSseEmitter() {
 // only loaded when JUGGLER_QUEUE_DRIVER=cloud-tasks selects it.
 var _queueBackend;
 function getQueueBackend() {
-  if (!_queueBackend) _queueBackend = require('./queue-backend');
+  // Defensive re-resolve (test-isolation hardening): a neighboring suite's
+  // jest.resetModules() can blow away the module registry while a timer/closure
+  // from THIS module's pre-reset instance still holds a stale `_queueBackend`
+  // whose `isCloudTasks` is no longer a function — surfacing as the cross-suite
+  // "backend.isCloudTasks is not a function" crash. Validate the cached backend
+  // and re-require if it is missing or half-loaded. In production this is a
+  // no-op: the cache is populated once with a valid module and never invalidated.
+  if (!_queueBackend || typeof _queueBackend.isCloudTasks !== 'function') {
+    _queueBackend = require('./queue-backend');
+  }
   return _queueBackend;
 }
 
@@ -185,7 +194,12 @@ async function enqueueScheduleRun(userId, source, options) {
   // loop picks it up — a trigger is never dropped. Off-flag: this is a no-op.
   var dispatchedCloudTasks = false;
   var backend = getQueueBackend();
-  if (backend.isCloudTasks()) {
+  // Call-site guard: if the registry was torn down mid-test (a leaked timer from a
+  // prior suite firing after jest.resetModules), `backend` can be a half-loaded
+  // module with no `isCloudTasks`. Treat that as the default (non-cloud-tasks) DB
+  // path rather than throwing — the DB row is already written above, so the poll
+  // loop still picks it up. Production always has a fully-loaded backend.
+  if (backend && typeof backend.isCloudTasks === 'function' && backend.isCloudTasks()) {
     try {
       var d = await backend.dispatchScheduleRun(userId, source);
       dispatchedCloudTasks = !!(d && d.dispatched);
@@ -443,6 +457,13 @@ function startPollLoop() {
   // Start the scheduler poll loop. Returns cleanup function.
   POLL_ACTIVE = true;
   POLL_LOOP_INSTANCE = setInterval(pollOnce, POLL_MS);
+  // Do not let the poll interval keep the process alive (or fire during jest's
+  // forceExit teardown window). In production the server has the HTTP listener
+  // holding the loop open, so unref does not change runtime behavior; it only
+  // prevents a stray tick from outliving a torn-down test suite.
+  if (POLL_LOOP_INSTANCE && typeof POLL_LOOP_INSTANCE.unref === 'function') {
+    POLL_LOOP_INSTANCE.unref();
+  }
   logger.info('[SCHED-QUEUE] Poll loop started (instance=' + INSTANCE_ID + ')');
   return function() {
     POLL_ACTIVE = false;

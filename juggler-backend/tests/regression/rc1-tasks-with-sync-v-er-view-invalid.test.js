@@ -66,6 +66,26 @@ afterAll(async () => {
     await db('task_instances').where('user_id', USER_ID).del().catch(() => {});
     await db('task_masters').where('user_id', USER_ID).del().catch(() => {});
     await db('users').where('id', USER_ID).del().catch(() => {});
+
+    // CROSS-SUITE HYGIENE: this suite exercises the tasks_v / tasks_with_sync_v
+    // view chain that the 20260623000000 migration restores end_date into. If
+    // anything in this process left the view in an ER_VIEW_INVALID state (a
+    // dropped column, a half-applied migration, an interleaved migration test),
+    // later suites' view reads would break in the combined run. Guarantee the
+    // view chain is valid on the way out by re-running migrate:latest (idempotent
+    // — already-applied migrations are skipped) and confirming the view is
+    // queryable. All failures swallowed: this teardown must never redden a suite.
+    try {
+      await db.migrate.latest();
+    } catch (e) {
+      /* no-op: migrations already current or unavailable */
+    }
+    try {
+      await db('tasks_with_sync_v').limit(1).select();
+    } catch (e) {
+      /* no-op: nothing further we can safely do in teardown */
+    }
+
     await db.destroy();
   }
 });

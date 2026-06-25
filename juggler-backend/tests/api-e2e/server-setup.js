@@ -43,7 +43,7 @@ const E2E_PLAN_FEATURES = {
   ai: { natural_language_commands: true, bulk_project_creation: true },
   calendar: { max_providers: -1, auto_sync: true },
   scheduling: { dependencies: true, travel_time: true },
-  tasks: { rigid: true },
+  tasks: { rigid: true, create: true },
   data: { export: true, import: true, mcp_access: true }
 };
 

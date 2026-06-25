@@ -221,6 +221,13 @@ const VALID_TOKEN = 'valid-test-token';
 let app, supertest;
 
 beforeAll(() => {
+  // Test-isolation guard: the suite runs single-worker (maxWorkers:1) with NO
+  // resetModules between files, so an upstream suite that already required
+  // src/app caches it wired against *its* mocks (e.g. an unmocked scheduleQueue
+  // or a differently-mocked src/db) — making this file's `require` a no-op cache
+  // hit and /api/health/detailed return a 500 with no `services` block. Reset the
+  // registry so src/app is rebuilt against THIS file's hoisted jest.mock()s.
+  jest.resetModules();
   app = require('../../src/app');
   supertest = require('supertest');
 });
@@ -419,8 +426,13 @@ describe('R42.3 — GET /api/health/detailed (auth required, per-service health)
 // schedule_queue"), and leaked raw error/SQL (detail.sync = error.message).
 // All detail.* shown to the user must be plain language; technical text → logs.
 describe('health detail is plain-English (leg fixy-health-copy)', () => {
-  const scheduleQueueMock = require('../../src/scheduler/scheduleQueue');
-  afterEach(() => { scheduleQueueMock.getLastError.mockReturnValue(null); });
+  // Resolve the scheduleQueue mock LAZILY (at test time), not at describe-eval:
+  // the top-level beforeAll runs jest.resetModules() before re-requiring src/app,
+  // which rebuilds the scheduleQueue mock instance. A reference captured here at
+  // collection time would be the pre-reset instance — stale vs the one src/app
+  // actually reads. Re-require per call so we always poke the live instance.
+  const getScheduleQueueMock = () => require('../../src/scheduler/scheduleQueue');
+  afterEach(() => { getScheduleQueueMock().getLastError.mockReturnValue(null); });
 
   test('stuck-claim scheduler error: friendly text, no internal table name', async () => {
     mockDb.raw = jest.fn(() => Promise.resolve([{ 1: 1 }]));
@@ -436,7 +448,7 @@ describe('health detail is plain-English (leg fixy-health-copy)', () => {
   });
 
   test('recent scheduler error: friendly text, raw error/SQL NOT leaked', async () => {
-    scheduleQueueMock.getLastError.mockReturnValue({
+    getScheduleQueueMock().getLastError.mockReturnValue({
       timestamp: Date.now(),
       message: "update `task_masters` set `status` = 'done' ... Check constraint 'chk_task_masters_scheduled_at_for_terminal' is violated"
     });

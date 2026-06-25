@@ -12,10 +12,22 @@
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
+var path = require('path');
+
 var mockToolRegistry = {};
 
-// Mock the MCP SDK before requiring the module
-jest.mock('@modelcontextprotocol/sdk/server/mcp.js', function () {
+// The module under test, juggler-mcp/index.js, lives in a SIBLING package
+// (../../../juggler-mcp) that has its OWN node_modules. Its
+// `require('@modelcontextprotocol/sdk/...')` therefore resolves to
+// juggler-mcp/node_modules — a DIFFERENT absolute path than the copy a bare
+// jest.mock('@modelcontextprotocol/...') (resolved from juggler-backend) would
+// intercept. Jest keys module mocks by resolved path, so we must mock the SDK
+// at the exact path juggler-mcp resolves, using jest.doMock with that path.
+var MCP_DIR = path.resolve(__dirname, '../../../juggler-mcp');
+var SDK_MCP_PATH = require.resolve('@modelcontextprotocol/sdk/server/mcp.js', { paths: [MCP_DIR] });
+var SDK_STDIO_PATH = require.resolve('@modelcontextprotocol/sdk/server/stdio.js', { paths: [MCP_DIR] });
+
+jest.doMock(SDK_MCP_PATH, function () {
   var mockServer = {
     tool: jest.fn(function (name, description, schema, handler) {
       mockToolRegistry[name] = { name: name, description: description, schema: schema, handler: handler };
@@ -27,7 +39,7 @@ jest.mock('@modelcontextprotocol/sdk/server/mcp.js', function () {
   };
 });
 
-jest.mock('@modelcontextprotocol/sdk/server/stdio.js', function () {
+jest.doMock(SDK_STDIO_PATH, function () {
   return {
     StdioServerTransport: jest.fn(function () { return {}; })
   };
@@ -42,14 +54,14 @@ describe('R17.1 — MCP tool registration (all 20 tools)', function () {
 
   beforeAll(function () {
     jest.isolateModules(function () {
-      // We require the MCP index which registers tools on import
-      // In test mode, the env check triggers the AUTH_INSTRUCTIONS early exit,
-      // so tool registration happens but the startup main() may exit early.
-      // We wrap in try/catch since startup may call process.exit
+      // We require the MCP index which registers tools on import.
+      // In test mode, the env check triggers the AUTH_INSTRUCTIONS console
+      // warning but does NOT exit; tool registration happens at module top
+      // level. We wrap in try/catch as a defensive guard.
       try {
-        mcpModule = require('../../juggler-mcp/index');
+        mcpModule = require('../../../juggler-mcp/index');
       } catch (e) {
-        // Expected if process.exit is called due to no token — tools are still registered
+        // Defensive — tools register on import regardless of token state.
       }
     });
   });

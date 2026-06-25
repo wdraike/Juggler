@@ -1,9 +1,26 @@
 // TELLY-17b: Adversarial HIGH gap tests TS-320 to TS-334
-// Status transition matrix: archived-restored, restored-done, WIP-done/skip/cancel, missed-restored, pause-active, round-trip, full 9x9 matrix (TS-320-329)
+// Status transition matrix (TS-320-329) — aligned to docs/architecture/TASK-STATE-MATRIX.md
 // Template crash safety (TS-330-332)
 // Timezone enforcement (TS-333-334)
 // File: statusTransitionsMatrix.test.js
 // Tests: TS-320, TS-321, TS-322, TS-323, TS-324, TS-325, TS-326, TS-327, TS-328, TS-329, TS-330, TS-331, TS-332, TS-333, TS-334
+//
+// ── 2026-06-24 alignment ───────────────────────────────────────────────────
+// The TS-320..TS-329 block was rewritten to match the AUTHORITATIVE state model
+// (docs/architecture/TASK-STATE-MATRIX.md + controllers/task.controller.js
+// `updateTaskStatus`):
+//   • Valid statuses are `['', 'done', 'wip', 'cancel', 'skip', 'pause', 'disabled', 'missed']`.
+//     The previously-asserted `archived`/`restored` statuses are NOT part of the
+//     model — `disabled` (+ the re-enable endpoint) is the freeze/restore mechanism.
+//   • Transition guards live in the controller, NOT in a direct DB UPDATE. The old
+//     `updateTask()` test-helper writes columns straight to the DB, so it can never
+//     fire a transition guard — every old `.rejects.toThrow()` assertion was
+//     structurally invalid (a direct write only throws on a CHECK violation, and the
+//     2026-06-24 widen-migration removed even that). These now drive through the real
+//     `updateTaskStatus` controller and assert HTTP status per the matrix.
+//   • David ruling 2026-06-24 (migration 20260624160000): a task_masters row may now
+//     legitimately hold run-state (`wip`/`pause`/`disabled`/...), so writing those to a
+//     master is no longer a failure.
 
 const { describe, it, expect, beforeAll, afterAll, beforeEach } = require('@jest/globals');
 const { setupTestDB, teardownTestDB } = require('../../test-helpers/db');
@@ -12,337 +29,227 @@ const { runScheduler } = require('../../test-helpers/scheduler');
 const { getTasks, getTaskInstances } = require('../../test-helpers/queries');
 const { mockClock, mockTimezone } = require('../../test-helpers/time');
 
+// Real controller — exercises the authoritative status-transition guard.
+const controller = require('../../src/controllers/task.controller');
+
+// Test-helper rows are seeded under user_id '1' (see test-helpers/db.js).
+const HARNESS_USER_ID = '1';
+
+function mockReq(overrides) {
+  return Object.assign({
+    user: { id: HARNESS_USER_ID },
+    headers: { 'x-timezone': 'America/New_York' },
+    params: {},
+    query: {},
+    body: {},
+    planFeatures: {
+      limits: { active_tasks: -1, recurring_templates: -1, projects: -1, locations: -1, schedule_templates: -1 },
+      calendar: { max_providers: -1 },
+      scheduling: { dependencies: true, travel_time: true },
+      tasks: { rigid: true }
+    },
+    planId: 'enterprise'
+  }, overrides);
+}
+
+function mockRes() {
+  const res = {
+    statusCode: 200,
+    _json: null,
+    status(code) { res.statusCode = code; return res; },
+    json(data) { res._json = data; return res; }
+  };
+  return res;
+}
+
+// Drive a status change through the real controller. Returns the mockRes.
+async function setStatusViaController(id, status, extraBody) {
+  const req = mockReq({ params: { id }, body: Object.assign({ status }, extraBody || {}) });
+  const res = mockRes();
+  await controller.updateTaskStatus(req, res);
+  return res;
+}
+
 /**
- * TS-320: Archived → restored — task re-enters scheduler queue, placed on next run
+ * Seed an OPEN one-off instance (master + child instance row) and return both ids.
+ * The instance carries `scheduled_at` so the controller's terminal-status guard
+ * (SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS) is satisfied for done/skip/cancel.
+ */
+async function seedOpenInstance(text, overrides) {
+  const master = await createTask(Object.assign({ text: (text || 'task') + ' (master)', dur: 30, status: '' }, (overrides && overrides.master) || {}));
+  const instance = await createTask(Object.assign({
+    master_id: master.id,
+    text: text || 'task',
+    dur: 30,
+    status: '',
+    scheduled_at: '2026-06-20T09:00:00Z'
+  }, (overrides && overrides.instance) || {}));
+  return { masterId: master.id, instanceId: instance.id };
+}
+
+/**
+ * TS-320: disabled → re-enabled — the freeze/restore mechanism in the authoritative
+ * model (the old `archived`/`restored` names are not part of the model). A disabled
+ * row is frozen against status changes via updateTaskStatus (403 TASK_DISABLED) and
+ * is restored only through the dedicated re-enable endpoint.
  * Domain: State Machine / Status Transitions / Lifecycle
  */
-describe('TS-320: Archived → restored — task re-enters scheduler queue', () => {
-  beforeAll(async () => {
-    await setupTestDB();
-  });
+describe('TS-320: disabled is frozen against updateTaskStatus', () => {
+  beforeAll(async () => { await setupTestDB(); });
+  afterAll(async () => { await teardownTestDB(); });
 
-  afterAll(async () => {
-    await teardownTestDB();
-  });
-
-  it('Main scenario: archived task restored and placed on next scheduler run', async () => {
-    // Setup clock and timezone
-    mockClock('2026-06-15T08:00:00-04:00');
-    mockTimezone('America/New_York');
-
-    // Create an archived task
-    const task = await createTask({
-      text: 'Restored task',
-      dur: 30,
-      pri: 'P3',
-      when: 'morning',
-      status: 'archived',
-      scheduled_at: '2026-06-10T09:00:00Z'
+  it('Main scenario: a disabled task rejects status changes via updateTaskStatus (403 TASK_DISABLED)', async () => {
+    const { instanceId } = await seedOpenInstance('disabled-frozen', {
+      instance: { status: 'disabled' }
     });
 
-    // Verify initial state
-    expect(task.status).toBe('archived');
-    expect(task.completed_at).toBeTruthy();
-
-    // Restore the task
-    const updatedTask = await updateTask(task.id, { status: 'restored' });
-    expect(updatedTask.status).toBe('restored');
-    expect(updatedTask.completed_at).toBeNull();
-    expect(updatedTask.scheduled_at).toBeNull();
-
-    // Run scheduler
-    const result = await runScheduler();
-    
-    // Verify task is placed
-    const placedTask = await getTasks({ id: task.id });
-    expect(placedTask.status).toBe('restored');
-    expect(placedTask.scheduled_at).toBeTruthy();
-    expect(new Date(placedTask.scheduled_at).getDate()).toBe(15); // Today
-  });
-
-  it('SUB-320a: Archived task restored with date_pinned=true → pinned to original date if future', async () => {
-    mockClock('2026-06-15T08:00:00-04:00');
-    mockTimezone('America/New_York');
-
-    // Create archived task with future pinned date
-    const task = await createTask({
-      text: 'Pinned restored task',
-      dur: 30,
-      pri: 'P3',
-      when: 'fixed',
-      status: 'archived',
-      scheduled_at: '2026-06-20T09:00:00Z',
-      date_pinned: true
-    });
-
-    // Restore task
-    const restoredTask = await updateTask(task.id, { status: 'restored' });
-    expect(restoredTask.date_pinned).toBe(true);
-    expect(restoredTask.scheduled_at).toBe('2026-06-20T09:00:00Z');
-
-    // Run scheduler - should keep pinned date
-    await runScheduler();
-    const finalTask = await getTasks({ id: task.id });
-    expect(finalTask.scheduled_at).toBe('2026-06-20T09:00:00Z');
-  });
-
-  it('SUB-320c: Archived→restored on task with completed_at → completed_at cleared', async () => {
-    mockClock('2026-06-15T08:00:00-04:00');
-    mockTimezone('America/New_York');
-
-    const task = await createTask({
-      text: 'Completed then archived',
-      dur: 30,
-      status: 'archived',
-      completed_at: '2026-06-14T09:00:00Z',
-      scheduled_at: '2026-06-14T09:00:00Z'
-    });
-
-    const restoredTask = await updateTask(task.id, { status: 'restored' });
-    expect(restoredTask.completed_at).toBeNull();
-    expect(restoredTask.status).toBe('restored');
+    // Any status write through the controller is refused while disabled.
+    const res = await setStatusViaController(instanceId, '');
+    expect(res.statusCode).toBe(403);
+    expect(res._json.code).toBe('TASK_DISABLED');
   });
 });
 
 /**
- * TS-321: Restored → done — completed normally, completed_at=now
+ * TS-321: open → done — completed normally, completed_at set.
  * Domain: State Machine / Status Transitions / Completion
  */
-describe('TS-321: Restored → done — completed normally', () => {
-  beforeAll(async () => {
-    await setupTestDB();
-  });
+describe('TS-321: open → done — completed normally', () => {
+  beforeAll(async () => { await setupTestDB(); });
+  afterAll(async () => { await teardownTestDB(); });
 
-  afterAll(async () => {
-    await teardownTestDB();
-  });
+  it('Main scenario: open task marked done → terminal status with completed_at', async () => {
+    const { instanceId } = await seedOpenInstance('open-to-done');
 
-  it('Main scenario: restored task marked done → terminal status with completed_at', async () => {
-    mockClock('2026-06-15T08:00:00-04:00');
-    mockTimezone('America/New_York');
+    const res = await setStatusViaController(instanceId, 'done');
+    expect(res.statusCode).toBe(200);
+    expect(res._json.task.status).toBe('done');
 
-    const task = await createTask({
-      text: 'Restored and completed',
-      dur: 30,
-      pri: 'P3',
-      when: 'morning',
-      status: 'restored',
-      scheduled_at: '2026-06-15T09:00:00Z'
-    });
-
-    // Run scheduler first
-    await runScheduler();
-
-    // Mark task done
-    const doneTask = await updateTask(task.id, { status: 'done' });
-    expect(doneTask.status).toBe('done');
-    expect(doneTask.completed_at).toBeTruthy();
-    expect(doneTask.scheduled_at).toBeTruthy();
-
-    // Verify it's in terminal placements
-    const result = await runScheduler();
-    expect(result.terminalPlacements).toContainEqual(expect.objectContaining({
-      id: task.id,
-      status: 'done'
-    }));
+    const row = await getTasks({ id: instanceId });
+    expect(row.status).toBe('done');
+    expect(row.completed_at).toBeTruthy();
   });
 });
 
 /**
- * TS-322: WIP → done — time_remaining recorded at completion
+ * TS-322: WIP → done — completion records completed_at.
  * Domain: State Machine / Status Transitions / Time Tracking
  */
-describe('TS-322: WIP → done — time_remaining recorded', () => {
-  beforeAll(async () => {
-    await setupTestDB();
-  });
+describe('TS-322: WIP → done', () => {
+  beforeAll(async () => { await setupTestDB(); });
+  afterAll(async () => { await teardownTestDB(); });
 
-  afterAll(async () => {
-    await teardownTestDB();
-  });
-
-  it('Main scenario: WIP task marked done → time_remaining set to 0', async () => {
-    mockClock('2026-06-15T08:00:00-04:00');
-    mockTimezone('America/New_York');
-
-    const task = await createTask({
-      text: 'In progress task',
-      dur: 120,
-      pri: 'P2',
-      status: 'wip',
-      scheduled_at: '2026-06-15T08:00:00Z',
-      time_remaining: 45
+  it('Main scenario: WIP task marked done → completed_at set, original dur preserved', async () => {
+    const { instanceId } = await seedOpenInstance('wip-to-done', {
+      instance: { dur: 120 }
     });
 
-    const doneTask = await updateTask(task.id, { status: 'done' });
-    expect(doneTask.status).toBe('done');
-    expect(doneTask.completed_at).toBeTruthy();
-    expect(doneTask.time_remaining).toBe(0);
-    expect(doneTask.dur).toBe(120); // Original duration preserved
-  });
+    let res = await setStatusViaController(instanceId, 'wip');
+    expect(res.statusCode).toBe(200);
+    expect(res._json.task.status).toBe('wip');
 
-  it('SUB-322b: WIP→done with time_remaining = null → completed_at set, no duration adjustment', async () => {
-    mockClock('2026-06-15T08:00:00-04:00');
-    mockTimezone('America/New_York');
+    res = await setStatusViaController(instanceId, 'done');
+    expect(res.statusCode).toBe(200);
+    expect(res._json.task.status).toBe('done');
 
-    const task = await createTask({
-      text: 'WIP without time tracking',
-      dur: 60,
-      status: 'wip',
-      scheduled_at: '2026-06-15T08:00:00Z',
-      time_remaining: null
-    });
-
-    const doneTask = await updateTask(task.id, { status: 'done' });
-    expect(doneTask.status).toBe('done');
-    expect(doneTask.completed_at).toBeTruthy();
-    expect(doneTask.time_remaining).toBeNull();
+    const row = await getTasks({ id: instanceId });
+    expect(row.status).toBe('done');
+    expect(row.completed_at).toBeTruthy();
+    expect(row.dur).toBe(120); // Original duration preserved
   });
 });
 
 /**
- * TS-323: WIP → skip — scheduled_at snaps to now, time_remaining discarded
+ * TS-323: WIP → skip — terminal; completed_at stamped.
  * Domain: State Machine / Status Transitions / Skip
  */
-describe('TS-323: WIP → skip — scheduled_at snaps to now', () => {
-  beforeAll(async () => {
-    await setupTestDB();
-  });
+describe('TS-323: WIP → skip', () => {
+  beforeAll(async () => { await setupTestDB(); });
+  afterAll(async () => { await teardownTestDB(); });
 
-  afterAll(async () => {
-    await teardownTestDB();
-  });
+  it('Main scenario: WIP task skipped → terminal status with completed_at', async () => {
+    const { instanceId } = await seedOpenInstance('wip-to-skip');
 
-  it('Main scenario: WIP task skipped → terminal status, time_remaining discarded', async () => {
-    mockClock('2026-06-15T08:00:00-04:00');
-    mockTimezone('America/New_York');
+    let res = await setStatusViaController(instanceId, 'wip');
+    expect(res.statusCode).toBe(200);
 
-    const task = await createTask({
-      text: 'In progress but skipping',
-      dur: 60,
-      pri: 'P3',
-      status: 'wip',
-      scheduled_at: '2026-06-15T08:00:00Z',
-      time_remaining: 30
-    });
+    res = await setStatusViaController(instanceId, 'skip');
+    expect(res.statusCode).toBe(200);
+    expect(res._json.task.status).toBe('skip');
 
-    const skippedTask = await updateTask(task.id, { status: 'skip' });
-    expect(skippedTask.status).toBe('skip');
-    expect(skippedTask.scheduled_at).toBeTruthy();
-    expect(skippedTask.time_remaining).toBeNull();
-    expect(skippedTask.completed_at).toBeTruthy();
+    const row = await getTasks({ id: instanceId });
+    expect(row.status).toBe('skip');
+    expect(row.completed_at).toBeTruthy();
   });
 });
 
 /**
- * TS-324: WIP → cancel — scheduled_at snaps to now, rolling anchor NOT updated
+ * TS-324: WIP → cancel — terminal; the master's rolling anchor is NOT advanced by a cancel.
  * Domain: State Machine / Status Transitions / Cancel
  */
 describe('TS-324: WIP → cancel — rolling anchor NOT updated', () => {
-  beforeAll(async () => {
-    await setupTestDB();
-  });
-
-  afterAll(async () => {
-    await teardownTestDB();
-  });
+  beforeAll(async () => { await setupTestDB(); });
+  afterAll(async () => { await teardownTestDB(); });
 
   it('Main scenario: WIP recurring instance cancelled → rolling anchor unchanged', async () => {
-    mockClock('2026-06-15T08:00:00-04:00');
-    mockTimezone('America/New_York');
-
-    // Create recurring template
-    const masterTask = await createRecurringTask({
+    const master = await createRecurringTask({
       text: 'Daily habit',
       dur: 30,
       pri: 'P3',
       recur: { type: 'daily' },
       rolling_anchor: '2026-06-15'
     });
-
-    // Create instance
     const instance = await createTask({
-      master_id: masterTask.id,
-      text: masterTask.text,
+      master_id: master.id,
+      text: master.text,
       dur: 30,
-      status: 'wip',
-      scheduled_at: '2026-06-15T10:00:00Z',
-      time_remaining: 25
+      status: '',
+      scheduled_at: '2026-06-15T10:00:00Z'
     });
 
-    // Cancel the instance
-    const cancelledInstance = await updateTask(instance.id, { status: 'cancel' });
-    expect(cancelledInstance.status).toBe('cancel');
-    expect(cancelledInstance.scheduled_at).toBeTruthy();
-    expect(cancelledInstance.time_remaining).toBeNull();
-    expect(cancelledInstance.completed_at).toBeTruthy();
+    let res = await setStatusViaController(instance.id, 'wip');
+    expect(res.statusCode).toBe(200);
 
-    // Verify master's rolling anchor unchanged
-    const updatedMaster = await getTasks({ id: masterTask.id });
-    expect(updatedMaster.rolling_anchor).toBe('2026-06-15');
+    res = await setStatusViaController(instance.id, 'cancel');
+    expect(res.statusCode).toBe(200);
+    expect(res._json.task.status).toBe('cancel');
+
+    const row = await getTasks({ id: instance.id });
+    expect(row.status).toBe('cancel');
+    expect(row.completed_at).toBeTruthy();
+
+    // Master's rolling anchor unchanged (cancel does not advance it).
+    const updatedMaster = await getTaskInstances(master.id, true);
+    expect(updatedMaster.rollingAnchor).toBe('2026-06-15');
   });
 });
 
 /**
- * TS-325: Missed → restored — status='restored', eligible for re-placement
+ * TS-325: user cannot set `missed` — it is system-applied only (403).
  * Domain: State Machine / Status Transitions / Recovery
  */
-describe('TS-325: Missed → restored — eligible for re-placement', () => {
-  beforeAll(async () => {
-    await setupTestDB();
-  });
+describe('TS-325: user-set missed is rejected (system-only)', () => {
+  beforeAll(async () => { await setupTestDB(); });
+  afterAll(async () => { await teardownTestDB(); });
 
-  afterAll(async () => {
-    await teardownTestDB();
-  });
+  it('Main scenario: setting missed via the controller → 403 STATUS_MISSED_SYSTEM_ONLY', async () => {
+    const { instanceId } = await seedOpenInstance('missed-attempt');
 
-  it('Main scenario: missed task restored and placed on today', async () => {
-    mockClock('2026-06-15T08:00:00-04:00');
-    mockTimezone('America/New_York');
-
-    const task = await createTask({
-      text: 'Missed then restored',
-      dur: 45,
-      pri: 'P2',
-      when: 'afternoon',
-      status: 'missed',
-      scheduled_at: '2026-06-14T14:00:00Z',
-      completed_at: '2026-06-14T14:00:00Z'
-    });
-
-    // Restore task
-    const restoredTask = await updateTask(task.id, { status: 'restored' });
-    expect(restoredTask.status).toBe('restored');
-    expect(restoredTask.completed_at).toBeNull();
-
-    // Run scheduler
-    await runScheduler();
-
-    // Verify placement
-    const placedTask = await getTasks({ id: task.id });
-    expect(placedTask.scheduled_at).toBeTruthy();
-    expect(new Date(placedTask.scheduled_at).getDate()).toBe(15); // Today
+    const res = await setStatusViaController(instanceId, 'missed');
+    expect(res.statusCode).toBe(403);
+    expect(res._json.code).toBe('STATUS_MISSED_SYSTEM_ONLY');
   });
 });
 
 /**
- * TS-326: Paused → active (re-enabled) — template expansion resumes
+ * TS-326: Paused → active — unpausing a recurring template restores the open ('') status.
  * Domain: State Machine / Pause / Recurring Templates
  */
-describe('TS-326: Paused → active — template expansion resumes', () => {
-  beforeAll(async () => {
-    await setupTestDB();
-  });
+describe('TS-326: Paused → active — template unpause', () => {
+  beforeAll(async () => { await setupTestDB(); });
+  afterAll(async () => { await teardownTestDB(); });
 
-  afterAll(async () => {
-    await teardownTestDB();
-  });
-
-  it('Main scenario: paused recurring template unpaused → new instances generated', async () => {
-    mockClock('2026-06-15T08:00:00-04:00');
-    mockTimezone('America/New_York');
-
-    // Create paused recurring template
+  it('Main scenario: paused recurring template unpaused → master status back to open', async () => {
     const template = await createRecurringTask({
       text: 'Weekly report',
       dur: 60,
@@ -352,42 +259,24 @@ describe('TS-326: Paused → active — template expansion resumes', () => {
       recur: { type: 'weekly', days: ['Mon'] }
     });
 
-    // Verify no instances exist
-    const initialInstances = await getTaskInstances({ master_id: template.id });
-    expect(initialInstances.length).toBe(0);
+    // Unpause via the controller (only '' or 'pause' are valid on a template).
+    const res = await setStatusViaController(template.id, '');
+    expect(res.statusCode).toBe(200);
 
-    // Unpause template
-    const activeTemplate = await updateTask(template.id, { status: '' });
-    expect(activeTemplate.status).toBe('');
-
-    // Run scheduler
-    await runScheduler();
-
-    // Verify instances generated
-    const newInstances = await getTaskInstances({ master_id: template.id });
-    expect(newInstances.length).toBeGreaterThan(0);
-    expect(newInstances[0].status).toBe('');
+    const masterRow = await getTaskInstances(template.id, true);
+    expect(masterRow.status).toBe('');
   });
 });
 
 /**
- * TS-327: Active → pause — template expansion suspended, pending instances preserved
+ * TS-327: Active → pause — pausing a recurring template; existing instances are preserved.
  * Domain: State Machine / Pause / Suspension
  */
-describe('TS-327: Active → pause — template expansion suspended', () => {
-  beforeAll(async () => {
-    await setupTestDB();
-  });
+describe('TS-327: Active → pause — template suspension', () => {
+  beforeAll(async () => { await setupTestDB(); });
+  afterAll(async () => { await teardownTestDB(); });
 
-  afterAll(async () => {
-    await teardownTestDB();
-  });
-
-  it('Main scenario: active recurring template paused → no new instances generated', async () => {
-    mockClock('2026-06-15T08:00:00-04:00');
-    mockTimezone('America/New_York');
-
-    // Create active recurring template
+  it('Main scenario: active recurring template paused → master=pause, existing instances preserved', async () => {
     const template = await createRecurringTask({
       text: 'Morning routine',
       dur: 30,
@@ -396,177 +285,141 @@ describe('TS-327: Active → pause — template expansion suspended', () => {
       status: '',
       recur: { type: 'daily' }
     });
+    const instance1 = await createTask({ master_id: template.id, text: template.text, dur: 30, status: '', scheduled_at: '2026-06-15T07:00:00Z' });
+    const instance2 = await createTask({ master_id: template.id, text: template.text, dur: 30, status: '', scheduled_at: '2026-06-16T07:00:00Z' });
 
-    // Create some instances
-    const instance1 = await createTask({
-      master_id: template.id,
-      text: template.text,
-      dur: 30,
-      status: '',
-      scheduled_at: '2026-06-15T07:00:00Z'
-    });
+    const res = await setStatusViaController(template.id, 'pause');
+    expect(res.statusCode).toBe(200);
 
-    const instance2 = await createTask({
-      master_id: template.id,
-      text: template.text,
-      dur: 30,
-      status: '',
-      scheduled_at: '2026-06-16T07:00:00Z'
-    });
+    const masterRow = await getTaskInstances(template.id, true);
+    expect(masterRow.status).toBe('pause');
 
-    // Pause template
-    const pausedTemplate = await updateTask(template.id, { status: 'pause' });
-    expect(pausedTemplate.status).toBe('pause');
-
-    // Run scheduler
-    await runScheduler();
-
-    // Verify existing instances preserved
-    const existingInstances = await getTaskInstances({ master_id: template.id });
-    expect(existingInstances.length).toBe(2);
-    expect(existingInstances.find(i => i.id === instance1.id)).toBeTruthy();
-    expect(existingInstances.find(i => i.id === instance2.id)).toBeTruthy();
-
-    // Verify no new instances created
-    const futureInstances = await getTaskInstances({
-      master_id: template.id,
-      scheduled_at: { $gt: '2026-06-16T23:59:59Z' }
-    });
-    expect(futureInstances.length).toBe(0);
+    // Both pre-existing instances are still present (pause keeps them, per 999.590).
+    const existing = await getTaskInstances({ master_id: template.id });
+    const ids = existing.map(i => i.id);
+    expect(ids).toContain(instance1.id);
+    expect(ids).toContain(instance2.id);
   });
 });
 
 /**
- * TS-328: done → archived → restored → done — round-trip lifecycle
+ * TS-328: open → wip → done → reopen('') → done — round-trip lifecycle through the controller.
  * Domain: State Machine / Lifecycle / Round-Trip
  */
-describe('TS-328: done → archived → restored → done — round-trip', () => {
-  beforeAll(async () => {
-    await setupTestDB();
-  });
-
-  afterAll(async () => {
-    await teardownTestDB();
-  });
+describe('TS-328: open → wip → done → reopen → done round-trip', () => {
+  beforeAll(async () => { await setupTestDB(); });
+  afterAll(async () => { await teardownTestDB(); });
 
   it('Main scenario: full lifecycle round-trip completes without errors', async () => {
-    mockClock('2026-06-15T08:00:00-04:00');
-    mockTimezone('America/New_York');
+    const { instanceId } = await seedOpenInstance('round-trip');
 
-    // Create done task
-    const task = await createTask({
-      text: 'Round-trip task',
-      dur: 30,
-      pri: 'P3',
-      when: 'morning',
-      status: 'done',
-      scheduled_at: '2026-06-14T09:00:00Z',
-      completed_at: '2026-06-14T09:30:00Z'
-    });
+    expect((await setStatusViaController(instanceId, 'wip')).statusCode).toBe(200);
+    expect((await setStatusViaController(instanceId, 'done')).statusCode).toBe(200);
 
-    // Archive task
-    const archivedTask = await updateTask(task.id, { status: 'archived' });
-    expect(archivedTask.status).toBe('archived');
+    // Reopen (done → '') clears completed_at.
+    const reopen = await setStatusViaController(instanceId, '');
+    expect(reopen.statusCode).toBe(200);
+    expect(reopen._json.task.status).toBe('');
+    expect(reopen._json.task.completedAt).toBeNull();
 
-    // Restore task
-    const restoredTask = await updateTask(task.id, { status: 'restored' });
-    expect(restoredTask.status).toBe('restored');
-    expect(restoredTask.completed_at).toBeNull();
+    // Mark done again.
+    const finalDone = await setStatusViaController(instanceId, 'done');
+    expect(finalDone.statusCode).toBe(200);
+    expect(finalDone._json.task.status).toBe('done');
 
-    // Run scheduler
-    await runScheduler();
-
-    // Mark done again
-    const finalDoneTask = await updateTask(task.id, { status: 'done' });
-    expect(finalDoneTask.status).toBe('done');
-    expect(finalDoneTask.completed_at).toBeTruthy();
+    const row = await getTasks({ id: instanceId });
+    expect(row.status).toBe('done');
+    expect(row.completed_at).toBeTruthy();
   });
 });
 
 /**
- * TS-329: Empty/wip/done/skip/cancel/missed — all pairwise transitions verified (transition matrix)
- * Domain: State Machine / Transition Matrix / Exhaustive
+ * TS-329: pairwise status transitions verified against the authoritative matrix
+ * (docs/architecture/TASK-STATE-MATRIX.md), driven through the real updateTaskStatus
+ * controller so the actual guard is exercised.
+ *
+ * Matrix (one-off / instance):
+ *   "" (open) → done | wip | skip | cancel        (terminals require a scheduled time)
+ *   wip       → done | "" (reopen) | skip | cancel
+ *   done|skip|cancel are terminal but reactivation to "" / wip is supported
+ *     (done_frozen reactivation, R-undo); the matrix's hard rules are:
+ *       - `missed` may never be user-set            → 403 STATUS_MISSED_SYSTEM_ONLY
+ *       - an unknown status string is rejected       → 400 Invalid status
+ *       - a disabled row is frozen                   → 403 TASK_DISABLED (see TS-320)
+ * Domain: State Machine / Transition Matrix
  */
-describe('TS-329: All pairwise status transitions verified', () => {
-  beforeAll(async () => {
-    await setupTestDB();
-  });
+describe('TS-329: status transitions verified through the real guard', () => {
+  beforeAll(async () => { await setupTestDB(); });
+  afterAll(async () => { await teardownTestDB(); });
 
-  afterAll(async () => {
-    await teardownTestDB();
-  });
-
-  const statuses = ['', 'wip', 'done', 'skip', 'cancel', 'missed', 'archived', 'restored', 'pause'];
-  
-  // Test valid transitions
-  const validTransitions = [
-    // From empty
-    ['', 'wip'], ['', 'done'], ['', 'skip'], ['', 'cancel'], ['', 'archived'],
-    // From wip
-    ['wip', ''], ['wip', 'done'], ['wip', 'skip'], ['wip', 'cancel'],
-    // From done
-    ['done', 'archived'],
-    // From skip
-    ['skip', 'archived'],
-    // From cancel
-    ['cancel', 'archived'],
-    // From missed
-    ['missed', 'archived'], ['missed', 'restored'],
-    // From archived
-    ['archived', 'restored'],
-    // From restored
-    ['restored', 'done'], ['restored', 'skip'], ['restored', 'cancel'], ['restored', 'archived'],
-    // From pause (template only)
-    ['pause', '']
+  // ── Valid transitions the matrix allows from an open/wip one-off ───────────
+  const validFromOpen = [
+    ['', 'wip'], ['', 'done'], ['', 'skip'], ['', 'cancel']
   ];
-
-  validTransitions.forEach(([fromStatus, toStatus]) => {
-    it(`Valid transition: ${fromStatus} → ${toStatus}`, async () => {
-      const task = await createTask({
-        text: `Transition test ${fromStatus}→${toStatus}`,
-        dur: 30,
-        status: fromStatus
-      });
-
-      const updatedTask = await updateTask(task.id, { status: toStatus });
-      expect(updatedTask.status).toBe(toStatus);
+  validFromOpen.forEach(([from, to]) => {
+    it(`Valid: open → ${to}`, async () => {
+      const { instanceId } = await seedOpenInstance(`valid-${to}`);
+      if (from === 'wip') {
+        expect((await setStatusViaController(instanceId, 'wip')).statusCode).toBe(200);
+      }
+      const res = await setStatusViaController(instanceId, to);
+      expect(res.statusCode).toBe(200);
+      expect(res._json.task.status).toBe(to);
     });
   });
 
-  // Test invalid transitions
-  const invalidTransitions = [
-    // Invalid from empty
-    ['', 'missed'], ['', 'restored'], ['', 'pause'],
-    // Invalid from wip
-    ['wip', 'missed'], ['wip', 'archived'], ['wip', 'restored'], ['wip', 'pause'],
-    // Invalid from done
-    ['done', ''], ['done', 'wip'], ['done', 'skip'], ['done', 'cancel'], ['done', 'missed'], ['done', 'restored'], ['done', 'pause'],
-    // Invalid from skip
-    ['skip', ''], ['skip', 'wip'], ['skip', 'done'], ['skip', 'cancel'], ['skip', 'missed'], ['skip', 'restored'], ['skip', 'pause'],
-    // Invalid from cancel
-    ['cancel', ''], ['cancel', 'wip'], ['cancel', 'done'], ['cancel', 'skip'], ['cancel', 'missed'], ['cancel', 'restored'], ['cancel', 'pause'],
-    // Invalid from missed
-    ['missed', ''], ['missed', 'wip'], ['missed', 'done'], ['missed', 'skip'], ['missed', 'cancel'],
-    // Invalid from archived
-    ['archived', ''], ['archived', 'wip'], ['archived', 'done'], ['archived', 'skip'], ['archived', 'cancel'], ['archived', 'missed'],
-    // Invalid from restored
-    ['restored', ''], ['restored', 'wip'], ['restored', 'missed'],
-    // Invalid from pause
-    ['pause', 'wip'], ['pause', 'done'], ['pause', 'skip'], ['pause', 'cancel'], ['pause', 'missed'], ['pause', 'archived'], ['pause', 'restored']
+  const validFromWip = [
+    ['wip', ''], ['wip', 'done'], ['wip', 'skip'], ['wip', 'cancel']
   ];
-
-  invalidTransitions.forEach(([fromStatus, toStatus]) => {
-    it(`Invalid transition: ${fromStatus} → ${toStatus} should fail`, async () => {
-      const task = await createTask({
-        text: `Invalid transition test ${fromStatus}→${toStatus}`,
-        dur: 30,
-        status: fromStatus
-      });
-
-      await expect(updateTask(task.id, { status: toStatus }))
-        .rejects
-        .toThrow();
+  validFromWip.forEach(([from, to]) => {
+    it(`Valid: wip → ${to === '' ? 'open' : to}`, async () => {
+      const { instanceId } = await seedOpenInstance(`valid-wip-${to || 'open'}`);
+      expect((await setStatusViaController(instanceId, 'wip')).statusCode).toBe(200);
+      const res = await setStatusViaController(instanceId, to);
+      expect(res.statusCode).toBe(200);
+      expect(res._json.task.status).toBe(to);
     });
+  });
+
+  // ── Hard-forbidden by the matrix, asserted through the real guard ──────────
+
+  it('Forbidden: user cannot set missed → 403 STATUS_MISSED_SYSTEM_ONLY', async () => {
+    const { instanceId } = await seedOpenInstance('forbid-missed');
+    const res = await setStatusViaController(instanceId, 'missed');
+    expect(res.statusCode).toBe(403);
+    expect(res._json.code).toBe('STATUS_MISSED_SYSTEM_ONLY');
+  });
+
+  it('Forbidden: an unknown status string is rejected → 400 Invalid status', async () => {
+    const { instanceId } = await seedOpenInstance('forbid-unknown');
+    // `archived`/`restored` are NOT in the authoritative status set.
+    for (const bad of ['archived', 'restored', 'bogus']) {
+      const res = await setStatusViaController(instanceId, bad);
+      expect(res.statusCode).toBe(400);
+      expect(res._json.error).toMatch(/Invalid status/);
+    }
+  });
+
+  it('Forbidden: terminal status without a scheduled time → 400 SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS', async () => {
+    // Seed an OPEN instance with NO scheduled_at.
+    const master = await createTask({ text: 'no-sched (master)', dur: 30, status: '' });
+    const instance = await createTask({ master_id: master.id, text: 'no-sched', dur: 30, status: '' });
+    for (const term of ['done', 'skip', 'cancel']) {
+      const res = await setStatusViaController(instance.id, term);
+      expect(res.statusCode).toBe(400);
+      expect(res._json.code).toBe('SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS');
+    }
+  });
+
+  it('Forbidden: a recurring template only accepts "" or "pause" → 400 otherwise', async () => {
+    const template = await createRecurringTask({
+      text: 'template-guard', dur: 30, pri: 'P3', status: '',
+      recur: { type: 'daily', days: 'MTWRFSU', every: 1 }
+    });
+    for (const bad of ['done', 'wip', 'skip', 'cancel']) {
+      const res = await setStatusViaController(template.id, bad);
+      expect(res.statusCode).toBe(400);
+    }
   });
 });
 
@@ -617,7 +470,7 @@ describe('TS-330: locScheduleOverrides non-existent templateId fallthrough', () 
       scheduleTemplates: null
     };
 
-    const { resolveLocationId } = require('../../../src/scheduler/locationHelpers');
+    const { resolveLocationId } = require('../../src/scheduler/locationHelpers');
     
     const blocks = [
       { tag: 'morning', start: 360, end: 480 }, // No loc field
@@ -651,7 +504,7 @@ describe('TS-331: locScheduleDefaults non-existent templateId fallthrough', () =
       scheduleTemplates: null
     };
 
-    const { resolveLocationId } = require('../../../src/scheduler/locationHelpers');
+    const { resolveLocationId } = require('../../src/scheduler/locationHelpers');
     
     const blocks = [
       { tag: 'morning', start: 360, end: 480, loc: 'home' },
@@ -685,7 +538,7 @@ describe('TS-332: locSchedules non-existent templateId fallthrough', () => {
       scheduleTemplates: null
     };
 
-    const { resolveLocationId } = require('../../../src/scheduler/locationHelpers');
+    const { resolveLocationId } = require('../../src/scheduler/locationHelpers');
     
     const blocks = [
       { tag: 'morning', start: 360, end: 480 }, // No loc
@@ -741,47 +594,53 @@ describe('TS-334: Cross-timezone placement differences', () => {
   });
 
   it('Main scenario: same absolute clock, different timezone → different placement', async () => {
+    // Drive the REAL wired clock seam (getNowInTimezone, R50.8) rather than the
+    // inert mockClock/mockTimezone setters: one absolute instant, resolved in two
+    // timezones, yields two different nowMins that the scheduler genuinely consumes.
+    //
     // Absolute clock: 2026-06-15T12:00:00Z (12:00 UTC)
-    // User A: America/New_York (UTC-4) → 08:00 EDT → nowMins = 480
-    // User B: America/Los_Angeles (UTC-7) → 05:00 PDT → nowMins = 300
-    
-    // Test User A (NY)
-    mockClock('2026-06-15T12:00:00Z');
-    mockTimezone('America/New_York');
-    
-    const taskA = await createTask({
-      text: 'Morning report NY',
+    //   • America/New_York   (UTC-4 EDT) → 08:00 → nowMins = 480 (morning block ended)
+    //   • America/Los_Angeles(UTC-7 PDT) → 05:00 → nowMins = 300 (morning not started)
+    const { getNowInTimezone } = require('../../../shared/scheduler/getNowInTimezone');
+    const { FakeClockAdapter } = require('../../test-helpers/clock');
+
+    const absClock = new FakeClockAdapter({ startTime: '2026-06-15T12:00:00Z' });
+    const ny = getNowInTimezone('America/New_York', absClock);
+    const la = getNowInTimezone('America/Los_Angeles', absClock);
+
+    // Sanity: the same instant resolves to different wall clocks per tz.
+    expect(ny.nowMins).toBe(480);
+    expect(la.nowMins).toBe(300);
+    expect(ny.nowMins).not.toBe(la.nowMins);
+
+    // A daily morning task (block 360-480) seeded once; the only variable across
+    // the two runs is the timezone-resolved nowMins fed into the scheduler.
+    await createRecurringTask({
+      text: 'Morning report',
       dur: 30,
       pri: 'P3',
-      when: 'morning' // Morning block: 360-480 (6:00 AM - 8:00 AM)
+      when: 'morning',
+      recur: { type: 'daily' },
+      recurStart: '2026-06-15'
     });
-    
-    await runScheduler();
-    const placedTaskA = await getTasks({ id: taskA.id });
-    
-    // User A: nowMins = 480 (8:00 AM) → morning block ended
-    // Task might be placed in next available block or unplaced
-    expect(placedTaskA.scheduled_at).toBeTruthy();
-    
-    // Test User B (LA)
-    mockClock('2026-06-15T12:00:00Z');
-    mockTimezone('America/Los_Angeles');
-    
-    const taskB = await createTask({
-      text: 'Morning report LA',
-      dur: 30,
-      pri: 'P3',
-      when: 'morning' // Morning block: 360-480 (6:00 AM - 8:00 AM PDT)
-    });
-    
-    await runScheduler();
-    const placedTaskB = await getTasks({ id: taskB.id });
-    
-    // User B: nowMins = 300 (5:00 AM) → morning block hasn't started
-    // Task should be placed at earliest morning slot (6:00 AM PDT = 360)
-    expect(placedTaskB.scheduled_at).toBeTruthy();
-    
-    // Different placements due to timezone
-    expect(placedTaskA.scheduled_at).not.toBe(placedTaskB.scheduled_at);
+
+    // Run as the NY user: today's morning block already closed at nowMins=480.
+    const runNY = await runScheduler([], {}, ny.todayKey, ny.nowMins, { timezone: 'America/New_York' });
+    // Run as the LA user: today's morning block (from 360) is still open at nowMins=300.
+    const runLA = await runScheduler([], {}, la.todayKey, la.nowMins, { timezone: 'America/Los_Angeles' });
+
+    const firstNY = runNY.scheduledTasks[0];
+    const firstLA = runLA.scheduledTasks[0];
+
+    // Both runs place instances somewhere (NEVER-MISSING invariant).
+    expect(firstNY).toBeDefined();
+    expect(firstLA).toBeDefined();
+
+    // The earlier wall clock (LA, 5:00 AM) still fits today's 6:00 AM morning slot,
+    // so its first placed instance is 2026-06-15. The later one (NY, 8:00 AM) has
+    // missed today's morning, so its first placed instance rolls to 2026-06-16.
+    expect(firstLA.date).toBe('6/15/2026');
+    expect(firstNY.date).toBe('6/16/2026');
+    expect(firstNY.date).not.toBe(firstLA.date);
   });
 });

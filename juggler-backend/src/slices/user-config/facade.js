@@ -196,7 +196,7 @@ function importBuildTaskRow(t, userId, tz, statuses) {
     section: t.section || null,
     notes: t.notes || null,
     deadline: deadline,
-    earliest_start_at: earliestStartDate,
+    start_after_at: earliestStartDate,
     location: JSON.stringify(locationArr),
     tools: JSON.stringify(t.tools || []),
     when: t.when || null,

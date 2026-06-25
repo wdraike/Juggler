@@ -140,11 +140,13 @@ describe('status transition: wip → open (reopen)', () => {
     expect(createRes.statusCode).toBe(201);
     var id = createRes._json.task.id;
 
-    // Set to wip
+    // Set to wip — master now legitimately holds run-state (David ruling
+    // 2026-06-24 / migration 20260624160000 widened the CHECK), so this is a
+    // valid 200, not the old constraint-violation 500.
     var wipReq = mockReq({ params: { id: id }, body: { status: 'wip' } });
     var wipRes = mockRes();
     await controller.updateTaskStatus(wipReq, wipRes);
-    expect(wipRes.statusCode).toBe(500);
+    expect(wipRes.statusCode).toBe(200);
     expect(wipRes._json.task.status).toBe('wip');
 
     // Reopen (status → '')
@@ -197,11 +199,12 @@ describe('status transition: wip → done', () => {
     await controller.createTask(createReq, createRes);
     var id = createRes._json.task.id;
 
-    // Set wip
+    // Set wip — valid 200 under the widened master CHECK (David ruling
+    // 2026-06-24 / migration 20260624160000), not the old 500.
     var wipReq = mockReq({ params: { id: id }, body: { status: 'wip' } });
     var wipRes = mockRes();
     await controller.updateTaskStatus(wipReq, wipRes);
-    expect(wipRes.statusCode).toBe(500);
+    expect(wipRes.statusCode).toBe(200);
 
     // Mark done
     var doneReq = mockReq({ params: { id: id }, body: { status: 'done' } });
@@ -304,7 +307,7 @@ describe('status transition: skip', () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe('status transition: pause/unpause on recurring template', () => {
-  test('pause on template deletes future open instances', async () => {
+  test('pause on template suspends future open instances (kept as status=pause, per 999.590)', async () => {
 
 
     var tmplId = 'tmpl-pause-test-' + Date.now();
@@ -341,22 +344,35 @@ describe('status transition: pause/unpause on recurring template', () => {
     var pauseReq = mockReq({ params: { id: tmplId }, body: { status: 'pause' } });
     var pauseRes = mockRes();
     await controller.updateTaskStatus(pauseReq, pauseRes);
-    expect(pauseRes.statusCode).toBe(500);
+    // Pausing a recurring template is a valid template lifecycle action under the
+    // widened master CHECK (David ruling 2026-06-24 / migration 20260624160000) —
+    // a 200, not the old constraint-violation 500.
+    expect(pauseRes.statusCode).toBe(200);
     // tasks_v template branch exposes status=NULL (master status not in view).
     // Verify the DB row directly instead of relying on the API response.
     var pausedMaster = await db('task_masters').where('id', tmplId).first();
     expect(pausedMaster.status).toBe('pause');
 
-    // All future open instances should be deleted
-    var remaining = await db('task_instances')
+    // Authoritative behavior (999.590 / SCHEDULER-RULES §5.2 / SCHEDULER-SPEC B-TERM.6):
+    // pause KEEPS future instances but flips them to status='pause' — it does NOT
+    // delete them. So no future instance remains in the open ('') state...
+    var remainingOpen = await db('task_instances')
       .where('master_id', tmplId)
       .where('status', '')
       .where('scheduled_at', '>', now)
       .select('id');
-    expect(remaining.length).toBe(0);
+    expect(remainingOpen.length).toBe(0);
 
-    // Response should report instancesRemoved
-    expect(pauseRes._json.instancesRemoved).toBeGreaterThanOrEqual(0);
+    // ...and all three are still present, now marked 'pause'.
+    var pausedInstances = await db('task_instances')
+      .where('master_id', tmplId)
+      .where('status', 'pause')
+      .where('scheduled_at', '>', now)
+      .select('id');
+    expect(pausedInstances.length).toBe(3);
+
+    // Response reports how many instances were paused (field: instancesPaused).
+    expect(pauseRes._json.instancesPaused).toBe(3);
   });
 
   test('unpause: setting status to empty triggers schedule regeneration', async () => {

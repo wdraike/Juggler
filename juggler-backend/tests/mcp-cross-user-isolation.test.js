@@ -168,6 +168,14 @@ var mock = (function() {
     return Promise.resolve(rows.length > 0 ? rows[0] : null);
   };
 
+  // distinct() — terminal for the calendar-born guard:
+  //   db('cal_sync_ledger').where(...).whereIn(...).whereNot('origin','juggler').distinct('task_id')
+  // resolve() returns [] for cal_sync_ledger (these fixtures use non-synced tasks),
+  // so no task is treated as calendar-born and the guard does not block.
+  db.distinct = function() {
+    return Promise.resolve(resolve());
+  };
+
   // select() — returns a Promise (thenable) AND exposes .first() on that promise
   // so db('t').where(...).select('col').first() works.
   db.select = function() {

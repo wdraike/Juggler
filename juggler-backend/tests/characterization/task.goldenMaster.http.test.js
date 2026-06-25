@@ -77,7 +77,13 @@ jest.mock('../../src/middleware/plan-features.middleware', () => ({
       limits: { active_tasks: -1, recurring_templates: -1 },
       calendar: { max_providers: -1 },
       scheduling: {},
-      tasks: {}
+      // The 'enterprise' plan this mock represents enables task creation. The
+      // route-level requireFeature('tasks.create') gate (src/routes/task.routes.js,
+      // added by a23e5af "feature-gate task creation — 999.585") reads
+      // planFeatures.tasks.create; an empty {} here would deny with 403. Grant it
+      // so the create/batch success-path characterizations below exercise the real
+      // controller behavior (the gate's own deny path is covered elsewhere).
+      tasks: { create: true }
     };
     next();
   },
@@ -124,6 +130,11 @@ jest.mock('../../src/lib/tasks-write', () => ({
   updateInstancesWhere: jest.fn(() => Promise.resolve()),
   insertTasksBatch: jest.fn(() => Promise.resolve()),
   resetRecurringInstances: jest.fn(() => Promise.resolve()),
+  // R55 no-hard-delete: the standard single-task delete path soft-cancels the row
+  // via softCancelById (src/slices/task/facade.js standardDelete → tasks-write.js:453).
+  // Added to tasks-write after this golden's mock was first written; without the stub
+  // the delete path throws "twrite.softCancelById is not a function" → 500.
+  softCancelById: jest.fn(() => Promise.resolve(1)),
 }));
 
 jest.mock('../../src/middleware/entity-limits', () => ({
@@ -276,15 +287,16 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
   describe('GET /api/tasks (getAllTasks)', () => {
     test('B1: returns { tasks, version } envelope with tasks array', async () => {
       const row = makeTaskRow();
-      // H3-W6: getAllTasks routes through ListTasks → repo.fetchTasksWithEventIds,
-      // which runs the 3 reads in a Promise.all; the two .select() calls
-      // (cal_sync_ledger, user_calendars) shift from the queue BEFORE the awaited
-      // tasks_v list builder, so the order is: ledger, user_calendars, tasks_v list,
-      // version. (Scaffold ordering only — no assertion changed; the W5 read path
-      // was gated in W5.)
-      resolveQueue.push([]);                        // cal_sync_ledger select (bulk)
-      resolveQueue.push([]);                        // user_calendars apple
-      resolveQueue.push([row]);                     // tasks_v list (awaited builder)
+      // H3-W6: getAllTasks routes through ListTasks → repo.fetchTasksWithEventIds
+      // (KnexTaskRepository.fetchTasksWithEventIds), which runs the 3 reads in a
+      // single Promise.all([ tasks_v, cal_sync_ledger, user_calendars ]). Promise.all
+      // attaches .then to each thenable in ARRAY order, and the mock resolves FIFO,
+      // so the shift order is: tasks_v list, cal_sync_ledger, user_calendars, then the
+      // separate getTasksVersion read. (Verified against KnexTaskRepository.js:217-274;
+      // the prior comment claiming ledger/user_calendars shift first was stale.)
+      resolveQueue.push([row]);                     // tasks_v list (Promise.all[0])
+      resolveQueue.push([]);                        // cal_sync_ledger select (Promise.all[1])
+      resolveQueue.push([]);                        // user_calendars apple (Promise.all[2])
       resolveQueue.push({ max_updated: '2026-06-10 00:00:00', cnt: 1 }); // getTasksVersion
 
       const res = await request(app)
@@ -404,7 +416,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ text: 'New task from GM' });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(201);
       expect(res.body).toHaveProperty('task');
       const task = res.body.task;
       expect(task).toHaveProperty('id');
@@ -441,7 +453,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ text: 'P1 check' });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(201);
       const task = res.body.task;
       // createdAt must be an ISO string parseable as a real Date (not 'MOCK_NOW' or null)
       expect(task.createdAt).not.toBeNull();
@@ -461,7 +473,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ notes: 'no text' });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(400);
       expect(res.body).toHaveProperty('error');
       // Characterization: actual error message from validateTaskInput is
       // "Task name is required" joined into the error string OR prefixed with
@@ -474,7 +486,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ text: 'PM test', placementMode: 'NOT_VALID' });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/placementMode/);
     });
 
@@ -574,8 +586,12 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
       resolveQueue.push([]);      // fetchTaskWithEventIds: ledger select
       // provider-origin check: cal_sync_ledger first() → null (juggler-origin)
       resolveQueue.push(null);
-      // transaction: tasks_v depends_on scan + delete
-      // cal_sync_ledger update (no gcal/msft/apple event ids on this task)
+      // in-transaction standardDelete: tasks_v depends_on dependants scan
+      // (facade.js standardDelete → trx('tasks_v').whereRaw(JSON_CONTAINS).select()).
+      // No cal_sync_ledger.update() (this task has no gcal/msft/apple event ids), and
+      // softCancelById is the mocked tasks-write (no queue shift). This scan entry was
+      // missing from the original scaffold.
+      resolveQueue.push([]);      // depends_on dependants scan → none
 
       const res = await request(app)
         .delete('/api/tasks/task-del-001')
@@ -617,9 +633,10 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
 
     test('Surface 8: deleteTask triggers enqueueScheduleRun (SSE emit)', async () => {
       const task = makeTaskRow({ id: 'task-del-002' });
-      resolveQueue.push(task);
-      resolveQueue.push([]);
-      resolveQueue.push(null);
+      resolveQueue.push(task);    // fetchTaskWithEventIds tasks_v
+      resolveQueue.push([]);      // fetchTaskWithEventIds ledger
+      resolveQueue.push(null);    // provider-origin check (juggler-origin)
+      resolveQueue.push([]);      // in-txn depends_on dependants scan (see above)
 
       await request(app)
         .delete('/api/tasks/task-del-002')
@@ -671,14 +688,21 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         scheduled_at: '2026-06-01 14:00:00',
         status: ''
       });
-      // For wip: no rolling-master check (only done/skip/missed), no split siblings
+      // For wip: no rolling-master check (only done/skip/missed), no split siblings.
       resolveQueue.push(existing);   // fetchTaskWithEventIds tasks_v
       resolveQueue.push([]);         // ledger
+      // 999.681 undo recording (recordAction → KnexActionLogRepository.record) runs
+      // BEFORE the write (UpdateTaskStatus.js:214). record() does action_log.del()
+      // then action_log.insert() — two queue shifts. Added after this golden was first
+      // authored, which is why the scaffold previously fell one+ entries short and the
+      // post-update fetch read past the seeded wip row (got null → status="").
+      resolveQueue.push(1);          // action_log delete (prior entry, single-undo)
+      resolveQueue.push([1]);        // action_log insert
       // NO rolling-master check for wip (only for done/skip/missed)
       // NO siblings: split_total is null
       resolveQueue.push({ ...existing, status: 'wip' });  // fetchTaskWithEventIds (updated)
       resolveQueue.push([]);         // ledger (updated)
-      resolveQueue.push([]);         // srcMap tasks_v select
+      resolveQueue.push([]);         // srcMap tasks_v select (getRecurringTemplateRows)
 
       const res = await request(app)
         .put('/api/tasks/task-st-002/status')
@@ -797,7 +821,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ tasks: [{ text: 'Batch 1' }, { text: 'Batch 2' }] });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(201);
       expect(res.body).toHaveProperty('created', 2);
       expect(res.body).not.toHaveProperty('queued');
     });
@@ -808,7 +832,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ tasks: [] });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(400);
     });
 
     test('B5: 400 when a task in the batch is missing text', async () => {
@@ -817,7 +841,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ tasks: [{ text: 'OK' }, { notes: 'no text' }] });
 
-      expect(res.status).toBe(403);
+      expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/Task 1/);
     });
 
@@ -978,7 +1002,13 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
       // fetchTaskWithEventIds: tasks_v + ledger
       resolveQueue.push(calTask);
       resolveQueue.push([{ provider: 'gcal', provider_event_id: 'gcal-evt-001', status: 'active' }]);
-      // srcMap
+      // In-transaction detachLedger: cal_sync_ledger.update() (facade.js:979) — one
+      // queue shift. The updateTaskById inside the txn is the mocked tasks-write
+      // (no shift). This entry was missing from the original scaffold, which pushed
+      // the empty getRecurringTemplateRows array into the detachLedger slot, leaving
+      // buildSourceMap to receive a non-array → "rows.forEach is not a function" → 500.
+      resolveQueue.push(1);          // detachLedger cal_sync_ledger update
+      // srcMap source (getRecurringTemplateRows → buildSourceMap; must be an array)
       resolveQueue.push([]);
       // fetchTaskWithEventIds (post-update): tasks_v + ledger
       resolveQueue.push({ ...calTask, gcal_event_id: null, placement_mode: 'anytime', when: '' });
@@ -988,7 +1018,7 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         .post('/api/tasks/task-cal-001/take-ownership')
         .set('Authorization', `Bearer ${VALID_TOKEN}`);
 
-      expect(res.status).toBe(500);
+      expect(res.status).toBe(200);
       expect(res.body).toHaveProperty('task');
       expect(res.body.task.id).toBe('task-cal-001');
     });
@@ -1006,11 +1036,12 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
 
     test('Surface 8: takeOwnership triggers enqueueScheduleRun (SSE emit)', async () => {
       const calTask = makeTaskRow({ id: 'task-cal-002', gcal_event_id: 'gcal-002' });
-      resolveQueue.push(calTask);
-      resolveQueue.push([]);
-      resolveQueue.push([]);
-      resolveQueue.push({ ...calTask, gcal_event_id: null, placement_mode: 'anytime' });
-      resolveQueue.push([]);
+      resolveQueue.push(calTask);    // fetchTaskWithEventIds tasks_v
+      resolveQueue.push([]);         // fetchTaskWithEventIds ledger
+      resolveQueue.push(1);          // in-txn detachLedger cal_sync_ledger update (see above)
+      resolveQueue.push([]);         // getRecurringTemplateRows → buildSourceMap
+      resolveQueue.push({ ...calTask, gcal_event_id: null, placement_mode: 'anytime' }); // post-update tasks_v
+      resolveQueue.push([]);         // post-update ledger
 
       await request(app)
         .post('/api/tasks/task-cal-002/take-ownership')
@@ -1129,7 +1160,7 @@ describe('Surface 7 — TASK_* event emissions (ADR-0001 lib-events seam)', () =
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ text: 'Event create test' });
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(201);
     expect(spy).toHaveBeenCalledTimes(1);
     const payload = spy.mock.calls[0][0];
     expect(payload).toHaveProperty('taskId');

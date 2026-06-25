@@ -51,6 +51,10 @@ FakeClockAdapter.prototype.tick = function tick() {
   return this.advance(60 * 1000); // 1 minute in milliseconds
 };
 
+FakeClockAdapter.prototype.skipHours = function skipHours(hours) {
+  return this.advance(hours * 60 * 60 * 1000); // hours → milliseconds
+};
+
 FakeClockAdapter.prototype.skipDays = function skipDays(days) {
   return this.advance(days * 24 * 60 * 60 * 1000); // days → milliseconds
 };

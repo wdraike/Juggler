@@ -438,6 +438,7 @@ async function handleTemplatePause(ctx) {
       .where('status', '')
       .where('scheduled_at', '>', new Date())
       .select('id', 'gcal_event_id');
+    if (!Array.isArray(futureInstances)) futureInstances = [];
 
     pausedIds = futureInstances.map(function (i) { return i.id; });
 
@@ -468,6 +469,7 @@ async function handleTemplatePause(ctx) {
       .where({ source_id: id, user_id: userId })
       .where('status', 'pause')
       .select('id');
+    if (!Array.isArray(pausedInstances)) pausedInstances = [];
 
     var unpausedIds = pausedInstances.map(function (i) { return i.id; });
 

@@ -89,9 +89,12 @@ function splitUpdateFields(changes) {
 var P1_DATE_COLUMNS = ['created_at', 'updated_at', 'completed_at', 'scheduled_at'];
 
 function assertDate(v, field) {
-  if (!(v instanceof Date)) {
+  // Mirror KnexTaskRepository.assertDate: null passes (nullable cols), any other
+  // non-Date (string, number, raw builder) is a fail-loud P1 violation — NO silent
+  // string→Date coercion (the double must be behaviorally equivalent to Knex).
+  if (v !== null && !(v instanceof Date)) {
     throw new TypeError(
-      'InMemoryTaskRepository: ' + field + ' must be a JS Date (INVARIANT P1 — new Date(), never db.fn.now())'
+      'InMemoryTaskRepository: ' + field + ' must be a JS Date or null (INVARIANT P1 — new Date()/null, never db.fn.now())'
     );
   }
 }
@@ -273,15 +276,40 @@ InMemoryTaskRepository.prototype.getUserSplitPreference = function getUserSplitP
   return Promise.resolve(pref !== undefined ? pref : null);
 };
 
+/**
+ * In-memory counterpart of KnexTaskRepository.searchTasks. Knex uses a MySQL
+ * FULLTEXT MATCH over (text, notes); the double approximates that with a
+ * token-prefix (AND) match over the same two columns, scoped to the user, and
+ * folds event ids via the same _withEventIds path. Returns matching rows (with
+ * event-id columns surfaced), highest naive score first.
+ */
+InMemoryTaskRepository.prototype.searchTasks = function searchTasks(userId, query) {
+  var self = this;
+  var terms = String(query == null ? '' : query)
+    .toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return Promise.resolve([]);
+  var matches = this._allFor(userId).map(function (r) {
+    var hay = ((r.text || '') + ' ' + (r.notes || '')).toLowerCase();
+    var score = 0;
+    var all = terms.every(function (t) {
+      var hit = hay.indexOf(t) !== -1;
+      if (hit) score++;
+      return hit;
+    });
+    return { row: r, score: score, all: all };
+  }).filter(function (m) { return m.all; });
+  matches.sort(function (a, b) { return b.score - a.score; });
+  return Promise.resolve(matches.map(function (m) { return self._withEventIds(m.row); }));
+};
+
 // ── WRITES (P1: new Date() timestamps) ───────────────────────────────────────
 
 InMemoryTaskRepository.prototype.insertTask = function insertTask(row) {
   if (row) {
+    // Match Knex: assert every present P1 column is a Date (or null). No string
+    // coercion — a non-Date is a fail-loud P1 violation, not a value to fix up.
     P1_DATE_COLUMNS.forEach(function (col) {
-      if (row[col] !== undefined && row[col] !== null) {
-        if (typeof row[col] === 'string') row[col] = new Date(row[col]);
-        assertDate(row[col], col);
-      }
+      if (row[col] !== undefined) assertDate(row[col], col);
     });
   }
   var stored = Object.assign({}, row);
@@ -309,13 +337,9 @@ InMemoryTaskRepository.prototype.insertTasksBatch = function insertTasksBatch(ro
 InMemoryTaskRepository.prototype.updateTaskById = function updateTaskById(id, changes, userId) {
   var c = Object.assign({}, changes);
   // Assert all P1 date columns supplied by the caller (FIX W3-1: column-complete guard).
-  // Allow null for nullable date cols (completed_at, scheduled_at).
-  // Convert ISO strings back to Date (action log deep-clone can stringify).
+  // Match Knex: assert if present (null passes for nullable cols), NO string coercion.
   P1_DATE_COLUMNS.forEach(function (col) {
-    if (col !== 'updated_at' && c[col] !== undefined && c[col] !== null) {
-      if (typeof c[col] === 'string') c[col] = new Date(c[col]);
-      assertDate(c[col], col);
-    }
+    if (col !== 'updated_at' && c[col] !== undefined) assertDate(c[col], col);
   });
   if (c.updated_at !== undefined) assertDate(c.updated_at, 'updated_at');
   else c.updated_at = new Date(); // P1

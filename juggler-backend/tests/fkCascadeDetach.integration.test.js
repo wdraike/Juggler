@@ -110,8 +110,13 @@ describe('FK ON DELETE SET NULL on task_instances.master_id', () => {
     expect(rawInst.status).toBe('done');
   });
 
-  test('archival master: completed instances re-parented to __archived__:<userId> with new ordinals', async () => {
-    var tw = require('../src/lib/tasks-write');
+  // The archival re-parenting flow (__archived__:<userId> master, [Archived] text,
+  // ordinal reassignment) was intentionally removed in 999.676 ("remove archive",
+  // commit e1fe270) — tasks-write no longer exports archiveInstances. The current
+  // contract on master deletion is plain FK ON DELETE SET NULL detachment:
+  // completed instances survive in task_instances with master_id = NULL and drop
+  // out of the tasks_v INNER JOIN. (No __archived__ master is created.)
+  test('deleting master detaches completed instances (master_id NULL); no __archived__ master is created', async () => {
     var tid = uuidv7();
     await insertTask(db, {
       id: tid, user_id: USER_ID, text: 'soon-to-archive',
@@ -128,30 +133,26 @@ describe('FK ON DELETE SET NULL on task_instances.master_id', () => {
     await insertTask(db, Object.assign({}, base, { id: doneA, status: 'done', scheduled_at: new Date('2026-08-01T10:00:00Z') }));
     await insertTask(db, Object.assign({}, base, { id: doneB, status: 'done', scheduled_at: new Date('2026-08-02T10:00:00Z') }));
 
-    await db.transaction(async function(trx) {
-      await tw.archiveInstances(trx, USER_ID, [doneA, doneB]);
-      await deleteTaskById(trx, tid, USER_ID);
-    });
+    await deleteTaskById(db, tid, USER_ID);
 
+    // No archival master is fabricated (feature removed in 999.676).
     var archivedId = '__archived__:' + USER_ID;
     var archMaster = await db('task_masters').where('id', archivedId).first();
-    expect(archMaster).toBeTruthy();
-    expect(archMaster.text).toBe('[Archived]');
+    expect(archMaster).toBeUndefined();
 
+    // Completed instances survive, detached via FK ON DELETE SET NULL.
     var rowA = await db('task_instances').where('id', doneA).first();
     var rowB = await db('task_instances').where('id', doneB).first();
-    expect(rowA.master_id).toBe(archivedId);
-    expect(rowB.master_id).toBe(archivedId);
-    // Sequential ordinals starting at 1
-    expect([rowA.occurrence_ordinal, rowB.occurrence_ordinal].sort()).toEqual([1, 2]);
+    expect(rowA).toBeDefined();
+    expect(rowB).toBeDefined();
+    expect(rowA.master_id).toBeNull();
+    expect(rowB.master_id).toBeNull();
+    expect(rowA.status).toBe('done');
+    expect(rowB.status).toBe('done');
 
-    // View now returns text='[Archived]' for these rows (instead of NULL)
+    // Detached rows (master_id NULL) drop out of the tasks_v INNER JOIN.
     var viewA = await db('tasks_v').where('id', doneA).first();
-    expect(viewA.text).toBe('[Archived]');
-
-    // Cleanup the archival master to keep test isolation
-    await db('task_instances').where('master_id', archivedId).del();
-    await db('task_masters').where('id', archivedId).del();
+    expect(viewA).toBeUndefined();
   });
 
   test('non-recurring task delete: removes both master and instance', async () => {

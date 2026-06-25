@@ -24,7 +24,7 @@ const logger = createLogger('tasks-write');
 var MASTER_FIELDS = [
   'id', 'user_id', 'text', 'project', 'section', 'notes', 'url',
   'dur', 'pri',
-  'desired_at', 'deadline', 'earliest_start_at',
+  'desired_at', 'deadline', 'start_after_at',
   'when', 'day_req', 'time_flex', 'flex_when', 'placement_mode',
   'preferred_time_mins', 'tz',
   'recurring', 'recur', 'recur_start', 'recur_end',
@@ -54,7 +54,7 @@ var _INSTANCE_FIELDS = [
 // Fields in the `tasks`-shape row that update MASTER only (template fields).
 var MASTER_UPDATE_FIELDS = [
   'text', 'project', 'section', 'notes', 'url', 'dur', 'pri',
-  'desired_at', 'deadline', 'earliest_start_at',
+  'desired_at', 'deadline', 'start_after_at',
   'when', 'day_req', 'time_flex', 'flex_when', 'placement_mode',
   'preferred_time_mins', 'tz',
   'recurring', 'recur', 'recur_start', 'recur_end',

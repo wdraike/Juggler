@@ -283,15 +283,15 @@ describe('validateEarliestStartDeadlineCrossField — 999.558', () => {
   test('body.earliestStart > existing.deadline → error (partial patch)', () => {
     const err = validateEarliestStartDeadlineCrossField(
       { earliestStart: '2026-07-01' },
-      { deadline: new Date('2026-06-15'), earliest_start_at: new Date('2026-06-01') }
+      { deadline: new Date('2026-06-15'), start_after_at: new Date('2026-06-01') }
     );
     expect(err).toBe('Deadline must be on or after earliest start date');
   });
 
-  test('body.deadline < existing.earliest_start_at → error (partial patch)', () => {
+  test('body.deadline < existing.start_after_at → error (partial patch)', () => {
     const err = validateEarliestStartDeadlineCrossField(
       { deadline: '2026-06-10' },
-      { earliest_start_at: new Date('2026-06-15'), deadline: new Date('2026-06-30') }
+      { start_after_at: new Date('2026-06-15'), deadline: new Date('2026-06-30') }
     );
     expect(err).toBe('Deadline must be on or after earliest start date');
   });
@@ -299,15 +299,15 @@ describe('validateEarliestStartDeadlineCrossField — 999.558', () => {
   test('body.earliestStart < existing.deadline → null (valid partial patch)', () => {
     const err = validateEarliestStartDeadlineCrossField(
       { earliestStart: '2026-06-01' },
-      { deadline: new Date('2026-06-15'), earliest_start_at: new Date('2026-05-01') }
+      { deadline: new Date('2026-06-15'), start_after_at: new Date('2026-05-01') }
     );
     expect(err).toBeNull();
   });
 
-  test('body.deadline > existing.earliest_start_at → null (valid partial patch)', () => {
+  test('body.deadline > existing.start_after_at → null (valid partial patch)', () => {
     const err = validateEarliestStartDeadlineCrossField(
       { deadline: '2026-07-01' },
-      { earliest_start_at: new Date('2026-06-15'), deadline: new Date('2026-06-20') }
+      { start_after_at: new Date('2026-06-15'), deadline: new Date('2026-06-20') }
     );
     expect(err).toBeNull();
   });
@@ -320,7 +320,7 @@ describe('validateEarliestStartDeadlineCrossField — 999.558', () => {
   test('body.earliestStart empty string, existing has values → null (clearing earliestStart)', () => {
     const err = validateEarliestStartDeadlineCrossField(
       { earliestStart: '' },
-      { earliest_start_at: new Date('2026-07-01'), deadline: new Date('2026-06-15') }
+      { start_after_at: new Date('2026-07-01'), deadline: new Date('2026-06-15') }
     );
     expect(err).toBeNull();
   });
@@ -328,20 +328,20 @@ describe('validateEarliestStartDeadlineCrossField — 999.558', () => {
   test('body.deadline null, existing has values → null (clearing deadline)', () => {
     const err = validateEarliestStartDeadlineCrossField(
       { deadline: null },
-      { earliest_start_at: new Date('2026-07-01'), deadline: new Date('2026-06-15') }
+      { start_after_at: new Date('2026-07-01'), deadline: new Date('2026-06-15') }
     );
     expect(err).toBeNull();
   });
 
-  test('existing has earliest_start_at but no deadline → null (no comparison possible)', () => {
+  test('existing has start_after_at but no deadline → null (no comparison possible)', () => {
     const err = validateEarliestStartDeadlineCrossField(
       {},
-      { earliest_start_at: new Date('2026-06-01') }
+      { start_after_at: new Date('2026-06-01') }
     );
     expect(err).toBeNull();
   });
 
-  test('existing has deadline but no earliest_start_at, body has earliestStart → error if earliestStart > existing.deadline', () => {
+  test('existing has deadline but no start_after_at, body has earliestStart → error if earliestStart > existing.deadline', () => {
     const err = validateEarliestStartDeadlineCrossField(
       { earliestStart: '2026-07-01' },
       { deadline: new Date('2026-06-15') }
@@ -360,7 +360,7 @@ describe('validateEarliestStartDeadlineCrossField — 999.558', () => {
   test('neither field in body → null (no retroactive check on existing data)', () => {
     const err = validateEarliestStartDeadlineCrossField(
       { text: 'just a text edit' },
-      { earliest_start_at: new Date('2026-07-01'), deadline: new Date('2026-06-15') }
+      { start_after_at: new Date('2026-07-01'), deadline: new Date('2026-06-15') }
     );
     expect(err).toBeNull();
   });

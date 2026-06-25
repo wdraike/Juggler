@@ -237,13 +237,14 @@ function registerDataTools(server, userId) {
       }
 
       // 8. Impossible constraints: earliestStart > deadline
+      // task_masters column is `start_after_at` (999.866).
       var impossible = await db('task_masters').where('user_id', userId)
-        .whereNotNull('earliest_start_at')
+        .whereNotNull('start_after_at')
         .whereNotNull('deadline')
-        .whereRaw('earliest_start_at > deadline')
-        .select('id', 'text', 'earliest_start_at', 'deadline');
+        .whereRaw('start_after_at > deadline')
+        .select('id', 'text', 'start_after_at', 'deadline');
       if (impossible.length > 0) {
-        issues.push({ type: 'impossible_constraint', count: impossible.length, details: impossible.slice(0, 20).map(function(r) { return { id: r.id, text: r.text, earliestStart: r.earliest_start_at, deadline: r.deadline }; }) });
+        issues.push({ type: 'impossible_constraint', count: impossible.length, details: impossible.slice(0, 20).map(function(r) { return { id: r.id, text: r.text, earliestStart: r.start_after_at, deadline: r.deadline }; }) });
       }
 
       return {

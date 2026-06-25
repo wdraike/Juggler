@@ -631,7 +631,7 @@ describe('getAllTasks', () => {
 // ═══════════════════════════════════════════════════════════════
 
 describe('Recurring toggle-off cleanup', () => {
-  test('converts recurring to one-off: soft-cancels future pending instances, keeps as record (R53/R55)', async () => {
+  test('converts recurring to one-off: hard-deletes future pending instances (pencil rule, R53)', async () => {
     if (!available) return;
     // Insert recurring template + 2 pending unplaced instances (scheduled_at=null → future/unplaced)
     await tasksWrite.insertTask(db, {
@@ -660,16 +660,17 @@ describe('Recurring toggle-off cleanup', () => {
     var res = mockRes();
     await controller.updateTask(req, res);
 
-    // R53/R55: future pending instances are SOFT-CANCELLED (status='cancelled'), NOT hard-deleted.
-    // Rows are kept as a record. Assert rows exist and have the correct cancelled status.
+    // Pencil rule (R53, juggler 19ad07e): toggle-off routes through
+    // resetRecurringInstances, which HARD-DELETES future not-started instances
+    // (status='', scheduled_at null/future) so they cannot block expandRecurring
+    // regeneration. The two pending instances must be gone.
     var inst1 = await db('task_instances').where({ id: 'tog-inst-1', user_id: USER_ID }).first();
     var inst2 = await db('task_instances').where({ id: 'tog-inst-2', user_id: USER_ID }).first();
-    expect(inst1).toBeDefined();  // row kept as record — NOT deleted
-    expect(inst2).toBeDefined();  // row kept as record — NOT deleted
-    expect(inst1.status).toBe('cancelled');
-    expect(inst2.status).toBe('cancelled');
+    expect(inst1).toBeUndefined();  // future pending instance hard-deleted
+    expect(inst2).toBeUndefined();  // future pending instance hard-deleted
 
-    // No pending instances remain (status='') — they are cancelled, not pending.
+    // Only the self-linked instance (id === master_id) remains for the template;
+    // no other pending instance rows survive.
     var stillPending = await db('task_instances')
       .where({ master_id: 'tog-tmpl', user_id: USER_ID, status: '' })
       .whereNot('id', 'tog-tmpl');

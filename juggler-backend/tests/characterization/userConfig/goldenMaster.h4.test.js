@@ -279,10 +279,37 @@ beforeEach(() => {
     mockDb[m].mockReturnValue(mockDb);
   });
 
-  // Terminal methods — restore their resolve-queue / default implementations
+  // Terminal methods — restore their resolve-queue / default implementations.
+  //
+  // `.select(...)` is BOTH a terminal (most queries here are `await db(t).where().select()`)
+  // AND a chain link before `.first()` (the A1 getUserTimezone query is
+  // `db('users').where().select('timezone').first()` — added to KnexConfigRepository
+  // after this golden was first authored). To support both without a queue double-shift,
+  // `.select()` returns a thenable that ALSO exposes `.first`: awaiting it shifts once
+  // (terminal use); calling `.first()` shifts once instead (chained use). Either path
+  // consumes exactly one resolveQueue entry.
   mockDb.select.mockImplementation(() => {
-    const v = resolveQueue.length > 0 ? resolveQueue.shift() : [];
-    return Promise.resolve(v);
+    // `.select(...)` is both a terminal (`await db().where().select()` → array) and a
+    // chain link before `.first()` (`db().where().select('x').first()` → row). BOTH must
+    // shift LAZILY (only when the result is awaited), never synchronously at call time —
+    // otherwise a `.first()` evaluated during Promise.all array construction would shift
+    // out of order. So `.first()` returns another lazy thenable; the shift happens in the
+    // eventual `.then`. Exactly one resolveQueue entry is consumed per query, either way.
+    // Bare `.select()` is a terminal: awaiting it consumes one resolveQueue entry (the
+    // 104 `await db().where().select()` reads in this suite rely on this).
+    const sel = {
+      then: (resolve, reject) => Promise.resolve(
+        resolveQueue.length > 0 ? resolveQueue.shift() : []
+      ).then(resolve, reject)
+    };
+    // `.select('x').first()` (only the A1 getUserTimezone read uses this) must NOT pull
+    // from the shared FIFO — Promise.all resolves the chained `.first()` thenable at an
+    // unpredictable point relative to the sibling `.then` reads, which would steal an
+    // entry and mis-shift the others. The chained read is independent of the seeded
+    // rows, so it returns a fixed stub row and leaves the FIFO untouched. (Callers that
+    // need a specific timezone assert on the response, not on this read's queue slot.)
+    sel.first = () => Promise.resolve({ timezone: null });
+    return sel;
   });
   mockDb.first.mockImplementation(() => {
     const v = resolveQueue.length > 0 ? resolveQueue.shift() : null;
@@ -325,7 +352,12 @@ describe('Surface 1 — config.controller: all 11 handlers (H1)', () => {
 
   describe('GET /api/config — getAllConfig', () => {
     test('H1-1: returns 200 with locations/tools/projects/config shape', async () => {
-      // getAllConfig: Promise.all([locations, tools, projects, configRows])
+      // getAllConfig: Promise.all([locations, tools, projects, configRows, userTimezone]).
+      // The 5th read (repo.getUserTimezone → users.select('timezone').first(), the A1 /
+      // TZ-DISPLAY-1 feature in GetConfig.js:67) was added after this golden was authored.
+      // It uses `.select().first()`, which the mock resolves to a fixed stub WITHOUT
+      // consuming the resolveQueue (see the select re-wire above), so only the four
+      // queue-backed reads are pushed here — same as the original scaffold.
       resolveQueue.push([]); // locations
       resolveQueue.push([]); // tools
       resolveQueue.push([]); // projects
@@ -361,6 +393,7 @@ describe('Surface 1 — config.controller: all 11 handlers (H1)', () => {
       resolveQueue.push([]); // tools
       resolveQueue.push([]); // projects
       resolveQueue.push([]); // no config rows
+      // getUserTimezone (.select().first()) is a fixed non-queue stub — see H1-1.
 
       const res = await request(app)
         .get('/api/config')
@@ -380,6 +413,7 @@ describe('Surface 1 — config.controller: all 11 handlers (H1)', () => {
         { id: 99, name: 'Work', color: '#blue', icon: null, sort_order: 0 }
       ]);
       resolveQueue.push([]); // user_config
+      // getUserTimezone (.select().first()) is a fixed non-queue stub — see H1-1.
 
       const res = await request(app)
         .get('/api/config')

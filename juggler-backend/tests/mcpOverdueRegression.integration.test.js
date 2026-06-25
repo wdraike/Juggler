@@ -120,14 +120,17 @@ describe('MCP create_task: overdue regression (Phase 19)', () => {
     expect(Number(row.overdue)).toBe(0);
   });
 
-  test('past FIXED task remains at its anchored position, not marked overdue — D-08 guard', async () => {
+  test('past FIXED task remains anchored at its position AND is flagged overdue — R50.1/R50.2 (D-08 guard)', async () => {
 
-    // PHASE 19 — Scheduler behavior: FIXED tasks are user-anchored.
-    // The §8 unplaced loop (runSchedule.js line 1362) explicitly skips FIXED tasks:
-    // they stay at their pinned position as a historical record and are never marked
-    // overdue by the scheduler. The §9 past-task mover also skips FIXED tasks.
-    // This test guards that a FIXED past task keeps its original scheduled_at intact
-    // and overdue stays 0 (the scheduler never touched it).
+    // R50.1/R50.2 (999.796) — past-due FIXED events stay pinned past-due.
+    // FIXED tasks are user-anchored: the §8 unplaced loop and the §9 past-task
+    // mover both skip them, so the scheduler never MOVES a past FIXED task off
+    // its scheduled_at. But block 8.5 (runSchedule.js:1729-1756) explicitly
+    // PERSISTS overdue=1 for a past-due, non-terminal, non-recurring FIXED event
+    // (computeIsPastDue treats a fixed event's scheduled_at as its hard due date)
+    // so the frontend shows it on its day flagged overdue rather than dropping it
+    // into the Unscheduled lane. This test guards that a FIXED past task keeps its
+    // original scheduled_at intact (anchored) AND lands overdue=1.
     var t = await seedTask({
       id: 'mcp-19-fixed-' + Math.random().toString(36).slice(2, 8),
       text: 'Phase 19 past fixed task',
@@ -137,8 +140,10 @@ describe('MCP create_task: overdue regression (Phase 19)', () => {
     });
     await runScheduleAndPersist(USER_ID);
     var row = await db('task_instances').where('id', t.id).first();
-    // FIXED past task: scheduler skips it in both §8 and §9. overdue stays 0.
-    expect(Number(row.overdue)).toBe(0);
+    // Anchored: scheduler never moved the FIXED task off its original position.
+    expect(row.scheduled_at).toBe('2026-05-18 18:00:00');
+    // Past-due FIXED event is flagged overdue=1 (block 8.5, R50.1/R50.2).
+    expect(Number(row.overdue)).toBe(1);
   });
 
 });

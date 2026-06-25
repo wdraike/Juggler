@@ -100,10 +100,12 @@ function resetStore(overrides) {
 var mockDb = (function() {
   var _table = null;
   var _where = {};
+  var _whereNot = {};
 
   function db(tableName) {
     _table = tableName;
     _where = {};
+    _whereNot = {};
     return db;
   }
 
@@ -122,7 +124,10 @@ var mockDb = (function() {
   };
   db.whereIn    = function() { return db; };
   db.whereRaw   = function() { return db; };
-  db.whereNot   = function() { return db; };
+  db.whereNot   = function(field, val) {
+    if (typeof field === 'string' && val !== undefined) { _whereNot[field] = val; }
+    return db;
+  };
   db.whereNull  = function() { return db; };
   db.orWhere    = function() { return db; };
   db.orWhereNull = function() { return db; };
@@ -145,6 +150,22 @@ var mockDb = (function() {
       return [{ config_key: 'preferences', config_value: JSON.stringify({ splitDefault: false }) }];
     }
     if (t === 'projects' || t === 'task_masters' || t === 'sync_locks') { return []; }
+    // cal_sync_ledger — the cal-sync guard queries:
+    //   db('cal_sync_ledger').where({user_id, task_id, status:'active'}).whereNot('origin','juggler').first()
+    // A task is "calendar-born" when it has an active non-juggler ledger row. The
+    // fixtures signal this by setting an external event id on the stored task row.
+    if (t === 'cal_sync_ledger') {
+      var ledgerTaskId = w.task_id;
+      var ledgerTask = ledgerTaskId ? taskStore[ledgerTaskId] : null;
+      if (ledgerTask && (ledgerTask.gcal_event_id || ledgerTask.msft_event_id || ledgerTask.apple_event_id)) {
+        var origin = ledgerTask.cal_sync_origin || (ledgerTask.gcal_event_id ? 'gcal' : (ledgerTask.msft_event_id ? 'msft' : 'apple'));
+        // Honor the guard's .whereNot('origin','juggler'): juggler-origin ledger rows
+        // (tasks Juggler pushed outward) are NOT calendar-born and must not be returned.
+        if (_whereNot.origin !== undefined && origin === _whereNot.origin) return [];
+        return [{ task_id: ledgerTaskId, origin: origin, status: 'active' }];
+      }
+      return [];
+    }
     if (t === 'tasks_v' || t === 'tasks_with_sync_v') {
       var id  = w.id;
       var uid = w.user_id;
@@ -162,6 +183,9 @@ var mockDb = (function() {
   db.first = function() {
     var rows = resolve();
     return Promise.resolve(rows.length > 0 ? rows[0] : null);
+  };
+  db.distinct = function() {
+    return Promise.resolve(resolve().map(function(r) { return { task_id: r.task_id }; }));
   };
   db.select = function() {
     var rows = resolve();
@@ -298,10 +322,12 @@ describe('ZOE-JUG-025 — MCP: calendar-synced task rejects disallowed fields', 
     expect(result.isError).toBeFalsy();
   });
 
-  test('MCP guard uses event id presence — even juggler-origin tasks with event id are blocked', async function() {
-    // MCP checks gcal_event_id presence, NOT cal_sync_origin.
-    // A juggler-origin task that was synced outward (has event id, origin=juggler)
-    // is still blocked by the MCP guard. HTTP would NOT block it (HTTP checks origin).
+  test('MCP guard is origin-aware — juggler-origin tasks with event id stay editable', async function() {
+    // The MCP guard reads cal_sync_ledger and only blocks tasks whose active ledger
+    // row has a NON-juggler origin (.whereNot('origin','juggler')). A juggler-origin
+    // task that Juggler synced outward (has event id, origin=juggler) is NOT
+    // calendar-born, so the guard does not fire and any field may be edited.
+    // (origin-aware guard, juggler dc5a2a6 — converges MCP with HTTP on origin.)
     resetStore({
       gcal_event_id: 'gcal-evt-juggler-sync',
       cal_sync_origin: 'juggler'   // juggler-originated, synced outward
@@ -309,8 +335,7 @@ describe('ZOE-JUG-025 — MCP: calendar-synced task rejects disallowed fields', 
     var result = await captureMcpHandlers()['update_task']({
       id: 'task-001', text: 'Change title'
     });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/synced from an external calendar/i);
+    expect(result.isError).toBeFalsy();
   });
 });
 
@@ -412,7 +437,11 @@ describe('ZOE-JUG-025 — Divergence contract: _allowUnfix on synced task', func
     expect(mcpResult.isError).toBe(true); // MCP: blocked
   });
 
-  test('origin-awareness: juggler-synced task — HTTP allows any field, MCP blocks', async function() {
+  test('origin-awareness: juggler-origin task — both HTTP and MCP allow any field', async function() {
+    // Both guards are now origin-aware and CONVERGE for juggler-origin tasks:
+    // a task Juggler synced outward (origin='juggler') is not calendar-born, so
+    // neither path blocks it. (MCP origin-awareness landed in juggler dc5a2a6 —
+    // its active-ledger query filters .whereNot('origin','juggler').)
     // HTTP: juggler-origin bypasses the guard → allowed
     var existing = makeTask({
       gcal_event_id: 'gcal-evt-001',
@@ -421,12 +450,12 @@ describe('ZOE-JUG-025 — Divergence contract: _allowUnfix on synced task', func
     var httpGuard = checkCalSyncEditGuard(existing, { text: 'New text' });
     expect(httpGuard).toBeNull(); // HTTP: bypassed because origin is 'juggler'
 
-    // MCP: event id present → blocked regardless of origin
+    // MCP: ledger origin is 'juggler' → not calendar-born → allowed
     resetStore({ gcal_event_id: 'gcal-evt-001', cal_sync_origin: 'juggler' });
     var mcpResult = await captureMcpHandlers()['update_task']({
       id: 'task-001', text: 'New text'
     });
-    expect(mcpResult.isError).toBe(true); // MCP: blocked because gcal_event_id is set
+    expect(mcpResult.isError).toBeFalsy(); // MCP: not blocked (origin is juggler)
   });
 });
 

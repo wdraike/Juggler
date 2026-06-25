@@ -39,6 +39,13 @@ function createChainMock() {
 
 const mockDb = createChainMock();
 jest.mock('../src/db', () => mockDb);
+// The hexagonal task slice (KnexTaskRepository) does NOT require ../src/db —
+// it obtains its knex via require('../../../lib/db').getDefaultDb(). Mock that
+// too so the slice's queries hit the same resolveQueue-backed chain.
+jest.mock('../src/lib/db', () => {
+  const actual = jest.requireActual('../src/lib/db');
+  return { ...actual, getDefaultDb: () => mockDb };
+});
 
 // Mock JWT
 const TEST_USER = { id: 'user-123', email: 'test@test.com', name: 'Test', timezone: 'America/New_York' };
@@ -120,8 +127,9 @@ describe('Mutation guards for disabled items', () => {
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ text: 'Updated text' });
 
-    // No disabled-task guard at route level
-    expect(res.status).toBe(404);
+    // Disabled tasks reject mutation with 403 TASK_DISABLED.
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('TASK_DISABLED');
   });
 
   test('PUT /api/tasks/:id/status rejects status change on disabled task', async () => {
@@ -133,8 +141,9 @@ describe('Mutation guards for disabled items', () => {
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ status: 'done' });
 
-    // No disabled-task guard at route level
-    expect(res.status).toBe(404);
+    // Disabled tasks reject status changes with 403 TASK_DISABLED.
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('TASK_DISABLED');
   });
 
   test('PUT /api/tasks/:id/status rejects status change on disabled recurring template', async () => {
@@ -145,8 +154,9 @@ describe('Mutation guards for disabled items', () => {
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ status: 'pause' });
 
-    // No disabled-task guard at route level
-    expect(res.status).toBe(404);
+    // Disabled recurring templates reject status changes with 403 TASK_DISABLED.
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('TASK_DISABLED');
   });
 
   test('DELETE /api/tasks/:id still works on disabled task', async () => {
@@ -158,7 +168,7 @@ describe('Mutation guards for disabled items', () => {
       .delete('/api/tasks/t01')
       .set('Authorization', `Bearer ${VALID_TOKEN}`);
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
     expect(res.body.message).toBe('Task deleted');
   });
 
@@ -182,8 +192,8 @@ describe('Mutation guards for disabled items', () => {
       .delete('/api/tasks/ht01?cascade=recurring')
       .set('Authorization', `Bearer ${VALID_TOKEN}`);
 
-    expect(res.status).toBe(404);
-    expect(res.body.message).toBe('Recurring deleted');
+    expect(res.status).toBe(200);
+    expect(res.body.message).toBe('Recurring series deleted');
   });
 });
 
@@ -249,7 +259,7 @@ describe('PUT /api/tasks/:id/re-enable', () => {
       .put('/api/tasks/t01/re-enable')
       .set('Authorization', `Bearer ${VALID_TOKEN}`);
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/not disabled/);
   });
 
@@ -267,7 +277,7 @@ describe('PUT /api/tasks/:id/re-enable', () => {
       .put('/api/tasks/t05/re-enable')
       .set('Authorization', `Bearer ${VALID_TOKEN}`);
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
     expect(res.body.task.status).toBe('');
     expect(res.body.task.disabledAt).toBeNull();
   });
@@ -290,7 +300,7 @@ describe('PUT /api/tasks/:id/re-enable', () => {
       .put('/api/tasks/t10/re-enable')
       .set('Authorization', `Bearer ${VALID_TOKEN}`);
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
     expect(res.body.code).toBe('ENTITY_LIMIT_REACHED');
     expect(res.body.limit).toBe(5);
   });
@@ -321,7 +331,7 @@ describe('PUT /api/tasks/:id/re-enable', () => {
       .put('/api/tasks/ht01/re-enable')
       .set('Authorization', `Bearer ${VALID_TOKEN}`);
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
     expect(res.body.task.status).toBe('');
   });
 
@@ -346,7 +356,7 @@ describe('PUT /api/tasks/:id/re-enable', () => {
       .put('/api/tasks/ht01/re-enable')
       .set('Authorization', `Bearer ${VALID_TOKEN}`);
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
     expect(res.body.code).toBe('ENTITY_LIMIT_REACHED');
     expect(res.body.limit_key).toBe('limits.active_tasks');
     expect(res.body.attempting_to_add).toBe(15);

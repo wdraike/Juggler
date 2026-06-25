@@ -55,10 +55,18 @@ jest.mock('../../src/middleware/jwt-auth', () => ({
   verifyToken: jest.fn()
 }));
 
+// Mutable per-test plan-features override. The express app captures the mounted
+// middleware closure at require time, so a per-test swap must be a variable the
+// closure reads (reassigning the mocked export post-mount has no effect). Default
+// is an enterprise plan with task creation enabled; R1.6 swaps it to a plan
+// lacking tasks.create to exercise the requireFeature('tasks.create') gate.
+// (must be `mock`-prefixed to be referenceable inside the jest.mock factory)
+let mockTasksPlanFeatures = { limits: { active_tasks: -1 }, calendar: { max_providers: -1 }, scheduling: {}, tasks: { create: true } };
+let mockTasksPlanId = 'enterprise';
 jest.mock('../../src/middleware/plan-features.middleware', () => ({
   resolvePlanFeatures: (req, res, next) => {
-    req.planId = 'enterprise';
-    req.planFeatures = { limits: { active_tasks: -1 }, calendar: { max_providers: -1 }, scheduling: {}, tasks: {} };
+    req.planId = mockTasksPlanId;
+    req.planFeatures = mockTasksPlanFeatures;
     next();
   },
   PRODUCT_ID: 'juggler',
@@ -95,10 +103,12 @@ jest.mock('../../src/lib/task-write-queue', () => ({
   flushQueue: jest.fn(() => Promise.resolve())
 }));
 
-// tasks-write: stub insertTask + deleteTaskById so the DB mock isn't burdened
+// tasks-write: stub insertTask + delete/soft-cancel writers so the DB mock isn't burdened.
+// R55 no-hard-delete: standard single-task delete now soft-cancels via softCancelById.
 jest.mock('../../src/lib/tasks-write', () => ({
   insertTask: jest.fn(() => Promise.resolve()),
   deleteTaskById: jest.fn(() => Promise.resolve(1)),
+  softCancelById: jest.fn(() => Promise.resolve(1)),
   deleteTasksWhere: jest.fn(() => Promise.resolve()),
   updateTaskById: jest.fn(() => Promise.resolve(1)),
   updateTasksWhere: jest.fn(() => Promise.resolve()),
@@ -128,6 +138,10 @@ beforeEach(() => {
   resolveQueue = [];
   updateCalls = [];
   jest.clearAllMocks();
+  // Reset plan-features to the default enterprise plan so a per-test swap (R1.6)
+  // never leaks into the next test.
+  mockTasksPlanFeatures = { limits: { active_tasks: -1 }, calendar: { max_providers: -1 }, scheduling: {}, tasks: { create: true } };
+  mockTasksPlanId = 'enterprise';
 });
 
 // ---------------------------------------------------------------------------
@@ -230,7 +244,7 @@ describe('AP-09 + SC-38: POST /api/tasks', () => {
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ text: 'Test task' });
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(201);
     expect(res.body).toHaveProperty('task');
     expect(res.body.task.text).toBe('Test task');
     expect(res.body.task.id).toBeTruthy();
@@ -264,7 +278,7 @@ describe('AP-09 + SC-38: POST /api/tasks', () => {
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({});
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(400);
   });
 });
 
@@ -273,40 +287,24 @@ describe('AP-09 + SC-38: POST /api/tasks', () => {
 // ---------------------------------------------------------------------------
 describe('R1.6: Feature gate on task creation', () => {
   test('returns 403 when plan lacks task-creation feature', async () => {
-    // Override planFeatures to simulate a plan without task creation
-    // The feature-gate middleware checks req.planFeatures for the feature path.
-    // We mock the plan-features middleware to return a plan with no task feature.
-    const planFeatures = require('../../src/middleware/plan-features.middleware');
-    const origResolve = planFeatures.resolvePlanFeatures;
-    planFeatures.resolvePlanFeatures = (req, res, next) => {
-      req.planId = 'free';
-      req.planFeatures = {
-        limits: { active_tasks: 1 },
-        tasks: {}, // no task creation feature
-        calendar: { max_providers: 0 },
-        scheduling: {}
-      };
-      next();
+    // Swap the mounted plan-features mock to a free plan WITHOUT tasks.create.
+    // POST /api/tasks now runs requireFeature('tasks.create') (task.routes.js:64),
+    // which short-circuits with 403 FEATURE_NOT_AVAILABLE before any DB read.
+    mockTasksPlanId = 'free';
+    mockTasksPlanFeatures = {
+      limits: { active_tasks: 1 },
+      tasks: {}, // no task creation feature
+      calendar: { max_providers: 0 },
+      scheduling: {}
     };
-
-    resolveQueue.push(null);  // applySplitDefault: user_config first()
-    resolveQueue.push(null);  // fetchTaskWithEventIds: tasks_v first() → not found (shouldn't reach)
 
     const res = await request(app)
       .post('/api/tasks')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ text: 'Feature-gated task' });
 
-    // Restore original
-    planFeatures.resolvePlanFeatures = origResolve;
-
-    // The current route does NOT have a feature gate on POST /api/tasks,
-    // so this documents the current behavior. When the gate is added,
-    // this test should assert 403.
-    // For now, assert the task is created (no gate yet) — this test
-    // serves as a placeholder that will fail when the gate is added,
-    // reminding the developer to update the assertion.
     expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ code: 'FEATURE_NOT_AVAILABLE', feature: 'tasks.create' });
   });
 
   test('feature-gate middleware returns 403 for missing feature', async () => {
@@ -384,7 +382,7 @@ describe('AP-10: DELETE /api/tasks/:id', () => {
     //      b. cal_sync_ledger select() → []
     //   2. ingest-mode check: skipped (no gcal/msft event ids)
     //   3. provider-origin check: db('cal_sync_ledger').where(...).first() → null
-    //   4. tasksWrite.deleteTaskById (mocked)
+    //   4. tasksWrite.softCancelById (mocked) — R55 no-hard-delete: standard delete soft-cancels
     //   5. enqueueScheduleRun
     const taskRow = { ...BASE_TASK_ROW, gcal_event_id: null, msft_event_id: null, apple_event_id: null };
     resolveQueue.push(taskRow);   // fetchTaskWithEventIds: tasks_v first()
@@ -396,8 +394,9 @@ describe('AP-10: DELETE /api/tasks/:id', () => {
       .set('Authorization', `Bearer ${VALID_TOKEN}`);
 
     expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ message: 'Task deleted', id: 'task-abc' });
 
     const tasksWrite = require('../../src/lib/tasks-write');
-    expect(tasksWrite.deleteTaskById).toHaveBeenCalled();
+    expect(tasksWrite.softCancelById).toHaveBeenCalled();
   });
 });

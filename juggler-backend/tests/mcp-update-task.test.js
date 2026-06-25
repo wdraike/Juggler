@@ -136,6 +136,19 @@ var mockDb = (function() {
       return [{ config_key: 'preferences', config_value: JSON.stringify({ splitDefault: false }) }];
     }
     if (t === 'projects' || t === 'task_masters' || t === 'sync_locks') { return []; }
+    // cal_sync_ledger — the cal-sync guard queries:
+    //   db('cal_sync_ledger').where({user_id, task_id, status:'active'}).whereNot('origin','juggler').first()
+    // A task is "calendar-born" when it has an active non-juggler ledger row. The
+    // fixtures signal this by setting an external event id on the stored task row.
+    if (t === 'cal_sync_ledger') {
+      var ledgerTaskId = _where.task_id;
+      var ledgerTask = ledgerTaskId ? taskStore[ledgerTaskId] : null;
+      if (ledgerTask && (ledgerTask.gcal_event_id || ledgerTask.msft_event_id || ledgerTask.apple_event_id)) {
+        var origin = ledgerTask.gcal_event_id ? 'gcal' : (ledgerTask.msft_event_id ? 'msft' : 'apple');
+        return [{ task_id: ledgerTaskId, origin: origin, status: 'active' }];
+      }
+      return [];
+    }
     if (t === 'tasks_v' || t === 'tasks_with_sync_v') {
       var id  = w.id;
       var uid = w.user_id;
@@ -153,6 +166,9 @@ var mockDb = (function() {
   db.first = function() {
     var rows = resolve();
     return Promise.resolve(rows.length > 0 ? rows[0] : null);
+  };
+  db.distinct = function() {
+    return Promise.resolve(resolve().map(function(r) { return { task_id: r.task_id }; }));
   };
   db.select = function() {
     var rows = resolve();

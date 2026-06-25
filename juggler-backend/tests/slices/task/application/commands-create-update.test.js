@@ -645,21 +645,21 @@ describe('UpdateTask — earliestStart > deadline cross-field (999.558)', functi
   function seedWithDeadline() {
     return new InMemoryTaskRepository({ rows: [
       { id: 't1', user_id: USER, task_type: 'task', text: 'has deadline', pri: 'P3', status: '',
-        deadline: new Date('2026-06-30'), earliest_start_at: null, updated_at: new Date('2026-06-01T00:00:00Z') }
+        deadline: new Date('2026-06-30'), start_after_at: null, updated_at: new Date('2026-06-01T00:00:00Z') }
     ] });
   }
   // Seed a task with a earliestStart but no deadline
   function seedWithEarliestStart() {
     return new InMemoryTaskRepository({ rows: [
       { id: 't2', user_id: USER, task_type: 'task', text: 'has earliestStart', pri: 'P3', status: '',
-        deadline: null, earliest_start_at: new Date('2026-06-15'), updated_at: new Date('2026-06-01T00:00:00Z') }
+        deadline: null, start_after_at: new Date('2026-06-15'), updated_at: new Date('2026-06-01T00:00:00Z') }
     ] });
   }
   // Seed a task with both fields set to valid values
   function seedWithBoth() {
     return new InMemoryTaskRepository({ rows: [
       { id: 't3', user_id: USER, task_type: 'task', text: 'has both', pri: 'P3', status: '',
-        deadline: new Date('2026-06-30'), earliest_start_at: new Date('2026-06-01'), updated_at: new Date('2026-06-01T00:00:00Z') }
+        deadline: new Date('2026-06-30'), start_after_at: new Date('2026-06-01'), updated_at: new Date('2026-06-01T00:00:00Z') }
     ] });
   }
 
@@ -688,7 +688,7 @@ describe('UpdateTask — earliestStart > deadline cross-field (999.558)', functi
   });
 
   test('FAST PATH: setting deadline before existing earliestStart → 400', function () {
-    // Task has earliest_start_at=2026-06-15. Setting deadline=2026-06-10 is before it.
+    // Task has start_after_at=2026-06-15. Setting deadline=2026-06-10 is before it.
     var repo = seedWithEarliestStart();
     var trigger = H.makeTriggerSpy();
     var updateSpy = jest.spyOn(repo, 'updateTaskById');
@@ -756,7 +756,7 @@ describe('UpdateTask — earliestStart > deadline cross-field (999.558)', functi
     // should allow the update since the constraint no longer applies.
     var repo = new InMemoryTaskRepository({ rows: [
       { id: 't4', user_id: USER, task_type: 'task', text: 'impossible', pri: 'P3', status: '',
-        deadline: new Date('2026-06-15'), earliest_start_at: new Date('2026-07-01'), updated_at: new Date('2026-06-01T00:00:00Z') }
+        deadline: new Date('2026-06-15'), start_after_at: new Date('2026-07-01'), updated_at: new Date('2026-06-01T00:00:00Z') }
     ] });
     var deps = updateDeps(repo);
     return new UpdateTask(deps).execute({ id: 't4', userId: USER, body: { earliestStart: '' } }).then(function (out) {
@@ -768,7 +768,7 @@ describe('UpdateTask — earliestStart > deadline cross-field (999.558)', functi
     // Task has impossible window. Clearing deadline should allow the update.
     var repo = new InMemoryTaskRepository({ rows: [
       { id: 't5', user_id: USER, task_type: 'task', text: 'impossible', pri: 'P3', status: '',
-        deadline: new Date('2026-06-15'), earliest_start_at: new Date('2026-07-01'), updated_at: new Date('2026-06-01T00:00:00Z') }
+        deadline: new Date('2026-06-15'), start_after_at: new Date('2026-07-01'), updated_at: new Date('2026-06-01T00:00:00Z') }
     ] });
     var deps = updateDeps(repo);
     return new UpdateTask(deps).execute({ id: 't5', userId: USER, body: { deadline: null } }).then(function (out) {
@@ -781,7 +781,7 @@ describe('UpdateTask — earliestStart > deadline cross-field (999.558)', functi
     // we don't reject (the existing data predates the validation rule).
     var repo = new InMemoryTaskRepository({ rows: [
       { id: 't6', user_id: USER, task_type: 'task', text: 'legacy bad data', pri: 'P3', status: '',
-        deadline: new Date('2026-06-15'), earliest_start_at: new Date('2026-07-01'), updated_at: new Date('2026-06-01T00:00:00Z') }
+        deadline: new Date('2026-06-15'), start_after_at: new Date('2026-07-01'), updated_at: new Date('2026-06-01T00:00:00Z') }
     ] });
     var deps = updateDeps(repo);
     // Only changing text — earliestStart/deadline unchanged
