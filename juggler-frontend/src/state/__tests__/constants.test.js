@@ -32,6 +32,20 @@ describe('state/constants — juggler-cal-history Plan B', () => {
     expect(STATUS_MAP.restored).toBeUndefined();
   });
 
+  // 999.882 — 'cancelled' (backend series/instance cancel) is a display-only alias
+  // of 'cancel' in STATUS_MAP so the calendar grid can render its status badge, but
+  // it must NOT leak into the user-selectable STATUS_OPTIONS toggle set.
+  test("STATUS_MAP.cancelled is a display alias mirroring cancel (badge styling present)", () => {
+    expect(STATUS_MAP.cancelled).toBeDefined();
+    expect(STATUS_MAP.cancelled.bg).toBe(STATUS_MAP.cancel.bg);
+    expect(STATUS_MAP.cancelled.color).toBe(STATUS_MAP.cancel.color);
+    expect(STATUS_MAP.cancelled.value).toBe('cancelled');
+  });
+
+  test("'cancelled' is NOT added to the user-selectable STATUS_OPTIONS toggle", () => {
+    expect(STATUS_OPTIONS.find((s) => s.value === 'cancelled')).toBeUndefined();
+  });
+
   test('isTerminalStatus(missed) === true', () => {
     expect(isTerminalStatus('missed')).toBe(true);
   });

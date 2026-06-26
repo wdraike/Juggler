@@ -30,6 +30,16 @@ export const PAST_OPACITY = 0.60;
 
 export const STATUS_MAP = Object.fromEntries(STATUS_OPTIONS.map(s => [s.value, s]));
 
+// Display-only alias: 'cancelled' is a backend-set series/instance-cancel terminal
+// status (shared/task-status.js) that is NOT a user-selectable STATUS_OPTIONS toggle
+// choice. It must still render a styled status badge (mirroring user 'cancel') wherever
+// STATUS_MAP drives display — e.g. the calendar grid card + status popup — now that the
+// grid shows every lifecycle state (999.882). Aliased here, not added to STATUS_OPTIONS,
+// so the toggle UI is unchanged.
+if (!STATUS_MAP.cancelled && STATUS_MAP.cancel) {
+  STATUS_MAP.cancelled = { ...STATUS_MAP.cancel, value: 'cancelled', tip: 'Cancelled — series/instance cancelled' };
+}
+
 export const TASK_DEFAULTS = {
   where: "anywhere", when: "morning,lunch,afternoon,evening,night",
   dayReq: "any", dur: 30, notes: "", deadline: "", earliestStart: "",

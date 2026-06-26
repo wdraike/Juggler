@@ -366,3 +366,37 @@ describe('derivePlacements — terminal-status tasks are never unplaced', () => 
     expect(derivePlacements([pending]).unplaced).toContain(pending);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 999.882 — TERMINAL_STATUSES must match shared/task-status.js (which includes
+// 'cancelled' and 'pause'). A placed cancelled/pause task carrying unscheduled=1
+// must be treated as terminal (→ grid when it has a slot, NOT unplaced), exactly
+// like done/skip/missed. RED-first: the local set omits cancelled + pause.
+// ---------------------------------------------------------------------------
+describe('derivePlacements — 999.882 cancelled + pause are terminal', () => {
+  it("cancelled + unscheduled=1 → NOT in unplaced", () => {
+    const cancelled = { id: 'c1', text: 'Call off', status: 'cancelled', unscheduled: true, date: null, time: null };
+    expect(derivePlacements([cancelled]).unplaced).not.toContain(cancelled);
+  });
+
+  it("pause + unscheduled=1 → NOT in unplaced", () => {
+    const paused = { id: 'pz1', text: 'On hold', status: 'pause', unscheduled: true, date: null, time: null };
+    expect(derivePlacements([paused]).unplaced).not.toContain(paused);
+  });
+
+  it("placed cancelled task (date+time) routes to the grid, not unplaced", () => {
+    const cancelled = { id: 'c2', text: 'Cancelled meeting', status: 'cancelled', date: '2026-06-22', time: '9:00 AM', dur: 30, unscheduled: true };
+    const result = derivePlacements([cancelled]);
+    expect(result.unplaced).not.toContain(cancelled);
+    expect(result.dayPlacements['2026-06-22']).toBeDefined();
+    expect(result.dayPlacements['2026-06-22'][0].task).toBe(cancelled);
+  });
+
+  it("placed pause task (date+time) routes to the grid, not unplaced", () => {
+    const paused = { id: 'pz2', text: 'Paused chore', status: 'pause', date: '2026-06-22', time: '10:00 AM', dur: 30, unscheduled: true };
+    const result = derivePlacements([paused]);
+    expect(result.unplaced).not.toContain(paused);
+    expect(result.dayPlacements['2026-06-22']).toBeDefined();
+    expect(result.dayPlacements['2026-06-22'][0].task).toBe(paused);
+  });
+});

@@ -326,3 +326,91 @@ describe('computeColumns — adjacent same-task chunk collapse (M-SCH-2 / 999.57
     expect(result[0].height).toBe(60);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 999.882 — calendar time-grid must render ALL lifecycle states, DECOUPLED
+// from the open/done LIST filter. The grid shows what happened in each slot
+// regardless of the list filter; terminal states render styled/dimmed + icon.
+// RED-first: on current code the grid drops terminal states when filter!=='all'
+// (DailyView.jsx:933) and pause/cancelled aren't even terminal in derivePlacements.
+// ---------------------------------------------------------------------------
+describe('DailyView — 999.882 calendar shows all lifecycle states (grid decoupled from list filter)', () => {
+  // A FUTURE day so isPast === false — the bug only manifests when the
+  // `isPast && isTerminalStatus` bypass (line 932) does NOT fire, i.e. the
+  // grid must show terminal states on its own, not because the day is past.
+  var FUTURE_KEY = '2030-06-15';
+  var FUTURE_DATE = new Date('2030-06-15T12:00:00');
+
+  // One placement per lifecycle state, each at a distinct slot (no overlap).
+  function lifecyclePlacements() {
+    return [
+      { start: 480, end: 510, task: { id: 'open1', text: 'Open task', date: FUTURE_KEY, dur: 30 } },
+      { start: 540, end: 570, task: { id: 'wip1', text: 'Started task', date: FUTURE_KEY, dur: 30 } },
+      { start: 600, end: 630, task: { id: 'done1', text: 'Done task', date: FUTURE_KEY, dur: 30 } },
+      { start: 660, end: 690, task: { id: 'skip1', text: 'Skipped task', date: FUTURE_KEY, dur: 30 } },
+      { start: 720, end: 750, task: { id: 'missed1', text: 'Missed task', date: FUTURE_KEY, dur: 30 } },
+      { start: 780, end: 810, task: { id: 'cancelled1', text: 'Cancelled task', date: FUTURE_KEY, dur: 30 } },
+      { start: 840, end: 870, task: { id: 'pause1', text: 'Paused task', date: FUTURE_KEY, dur: 30 } },
+    ];
+  }
+  var lifecycleStatuses = {
+    open1: '', wip1: 'wip', done1: 'done', skip1: 'skip',
+    missed1: 'missed', cancelled1: 'cancelled', pause1: 'pause',
+  };
+
+  function renderGrid(filter) {
+    var placements = lifecyclePlacements();
+    return render(
+      <DailyView
+        selectedDate={FUTURE_DATE}
+        selectedDateKey={FUTURE_KEY}
+        placements={placements}
+        allTasks={placements.map(function (p) { return p.task; })}
+        statuses={lifecycleStatuses}
+        filter={filter}
+        onStatusChange={() => {}}
+        onDelete={() => {}}
+        onExpand={() => {}}
+        darkMode={false}
+        schedCfg={mockSchedCfg}
+        nowMins={0}
+        isToday={false}
+        blockedTaskIds={new Set()}
+        unplacedIds={new Set()}
+        pastDueIds={new Set()}
+        fixedIds={new Set()}
+        isMobile={false}
+        weatherByDate={{}}
+      />
+    );
+  }
+
+  test('with list filter=open, the GRID renders EVERY lifecycle state block (terminal states not dropped)', () => {
+    renderGrid('open');
+    // Active states already render today — these are the regression guards.
+    expect(screen.getByText('Open task')).toBeInTheDocument();
+    expect(screen.getByText('Started task')).toBeInTheDocument();
+    // Terminal states — DROPPED by the buggy filter coupling (RED before fix).
+    expect(screen.getByText('Done task')).toBeInTheDocument();
+    expect(screen.getByText('Skipped task')).toBeInTheDocument();
+    expect(screen.getByText('Missed task')).toBeInTheDocument();
+    expect(screen.getByText('Cancelled task')).toBeInTheDocument();
+    expect(screen.getByText('Paused task')).toBeInTheDocument();
+  });
+
+  test('each terminal lifecycle state shows its status icon on the grid card', () => {
+    renderGrid('open');
+    expect(screen.getAllByText('✓').length).toBeGreaterThan(0);   // done ✓
+    expect(screen.getAllByText('⏭').length).toBeGreaterThan(0);   // skip ⏭
+    expect(screen.getAllByText('⚠').length).toBeGreaterThan(0);   // missed ⚠
+    expect(screen.getAllByText('⏸').length).toBeGreaterThan(0);   // pause ⏸
+    expect(screen.getAllByText('✗').length).toBeGreaterThan(0);   // cancelled ✗
+  });
+
+  test('grid is decoupled from the list filter: terminal blocks render under filter=wip too', () => {
+    renderGrid('wip');
+    expect(screen.getByText('Done task')).toBeInTheDocument();
+    expect(screen.getByText('Missed task')).toBeInTheDocument();
+    expect(screen.getByText('Paused task')).toBeInTheDocument();
+  });
+});
