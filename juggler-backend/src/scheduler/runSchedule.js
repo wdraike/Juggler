@@ -523,12 +523,24 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var _loadStart = Date.now();
   var _p_taskRows = trx('tasks_v').where('user_id', userId)
     .where(function() {
-      this.where('status', '').orWhere('status', 'wip').orWhereNull('status')
-        // R55: a soft-cancelled or disabled recurring_template must NOT be loaded
-        // for expansion — cancel-series stops fabrication while keeping past rows.
+      this.where('status', '').orWhere('status', 'wip')
+        // Non-template rows with NULL status (legacy / one-shot tasks never given a status).
+        .orWhere(function() {
+          this.whereNull('status').whereNot('task_type', 'recurring_template');
+        })
+        // R55 / BUG-814: recurring_template rows always have status=NULL in tasks_v
+        // (the view hardcodes NULL for the master branch), so the real cancel/disable
+        // state lives in task_masters.status. Load a template ONLY if its master is
+        // not cancelled/disabled — checked via NOT EXISTS on the master_id join key.
+        // (The prior orWhereNull + whereNotIn was dead: NULL NOT IN (...) never excludes.)
         .orWhere(function() {
           this.where('task_type', 'recurring_template')
-            .whereNotIn('status', ['cancelled', 'disabled']);
+            .whereNotExists(function() {
+              this.select(trx.raw('1'))
+                .from('task_masters')
+                .whereRaw('`task_masters`.`id` = `tasks_v`.`master_id`')
+                .whereIn('task_masters.status', ['cancelled', 'disabled']);
+            });
         });
     })
     .select();
@@ -2208,8 +2220,12 @@ function computeNoLimboUpdates(allTasks, rawRowById, phase1InsertedById, pending
     // (from a prior larger horizon) were never placement candidates this run, so a
     // NULL scheduled_at there is expected, not limbo. Only today→horizon occurrences
     // are eligible for the no-limbo flag.
+    // Exception (999.843, NEVER-MISSING): a NULL-date orphan ghost (date=NULL AND
+    // scheduled_at=NULL, non-terminal) has NO domain in Phase-9 (it bails with no
+    // anchor) — it must fall through here to be surfaced unscheduled. Only skip a
+    // row that HAS a date and falls outside the window; never skip a null-date row.
     var nominalDate = raw.date ? parseDate(raw.date) : null;
-    if (!nominalDate || nominalDate < today || nominalDate > expandEnd) return;
+    if (nominalDate && (nominalDate < today || nominalDate > expandEnd)) return;
     var pu = pendingById[t.id] || {};
     // Resolve the FINAL state this run would leave on the row (pendingUpdate wins).
     var finalStatus = ('status' in pu) ? pu.status : (statuses[t.id] || raw.status || '');
