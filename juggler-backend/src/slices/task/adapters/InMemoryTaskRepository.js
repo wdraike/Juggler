@@ -155,7 +155,7 @@ InMemoryTaskRepository.prototype.fetchTaskWithEventIds = function fetchTaskWithE
 InMemoryTaskRepository.prototype.fetchTaskRecurring = function fetchTaskRecurring(id, userId) {
   var row = this._rows[id];
   if (!row || row.user_id !== userId) return Promise.resolve(null);
-  return Promise.resolve({ recurring: row.recurring, task_type: row.task_type });
+  return Promise.resolve({ recurring: row.recurring, task_type: row.task_type, placement_mode: row.placement_mode });
 };
 
 /**

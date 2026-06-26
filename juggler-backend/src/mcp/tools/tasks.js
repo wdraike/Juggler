@@ -10,6 +10,7 @@ const { z } = require('zod');
 const safeStringify = require('../safeStringify');
 const db = require('../../db');
 const { rowToTask, taskToRow, guardFixedCalendarWhen, ensureProject, applySplitDefault, buildSourceMap, TEMPLATE_FIELDS, validateTaskInput } = require('../../controllers/task.controller');
+const { isFixedRecurringConflict } = require('../../slices/task/domain/validation/taskValidation');
 const { PLACEMENT_MODES } = require('../../lib/placementModes');
 const { enqueueScheduleRun } = require('../../scheduler/scheduleQueue');
 const { isLocked, enqueueWrite, splitFields } = require('../../lib/task-write-queue');
@@ -252,6 +253,20 @@ function registerTaskTools(server, userId) {
       var existing = await db('tasks_with_sync_v').where({ id: id, user_id: userId }).first();
       if (!existing) {
         return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
+      }
+
+      // 999.875: merged-state XOR check — effective values by KEY PRESENCE, not by
+      // matching the conflicting literal. Only run when exactly one side is in the
+      // body; validateTaskInput above already caught the both-present conflict.
+      var _mHasPM = 'placementMode' in fields;
+      var _mHasRec = 'recurring' in fields;
+      if (_mHasPM !== _mHasRec) {
+        var _mIsExistingRecurring = !!(existing.recurring || existing.task_type === 'recurring_template' || existing.task_type === 'recurring_instance');
+        var _mEffPM = _mHasPM ? fields.placementMode : existing.placement_mode;
+        var _mEffRec = _mHasRec ? !!fields.recurring : _mIsExistingRecurring;
+        if (isFixedRecurringConflict({ placementMode: _mEffPM, recurring: _mEffRec })) {
+          return { content: [{ type: 'text', text: 'Validation error: invalid_combination' }], isError: true };
+        }
       }
 
       // Guard: only CALENDAR-BORN tasks are restricted to status/notes — a task is calendar-born

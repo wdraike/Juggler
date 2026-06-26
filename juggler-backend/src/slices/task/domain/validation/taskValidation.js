@@ -85,6 +85,21 @@ function guardFixedCalendarWhen(row, guardTarget, opts) {
 }
 
 /**
+ * Returns true when the EFFECTIVE placementMode + recurring combination violates
+ * the fixed/recurring XOR rule: a task cannot be BOTH fixed AND recurring.
+ *
+ * This is the SINGLE source of the XOR decision. All code paths that enforce
+ * 999.867 (create, HTTP update, import, MCP update) call this helper instead of
+ * inlining `placementMode==='fixed' && recurring===true`.
+ *
+ * @param {{ placementMode?: string, recurring?: * }} opts
+ * @returns {boolean}
+ */
+function isFixedRecurringConflict(opts) {
+  return opts.placementMode === 'fixed' && !!opts.recurring;
+}
+
+/**
  * Validate a task input body, returning an array of error strings (empty = valid).
  * VERBATIM from task.controller.js ~749. (controller ~749)
  * @param {Object} body
@@ -311,7 +326,7 @@ function validateTaskInput(body) {
   // enforce it too (create/update/MCP/import all flow through validateTaskInput).
   // Emit the machine-readable code 'invalid_combination' as the SOLE error so the
   // use-case's `errors.join('; ')` yields exactly { error: 'invalid_combination' }.
-  if (body.placementMode === 'fixed' && body.recurring === true) {
+  if (isFixedRecurringConflict({ placementMode: body.placementMode, recurring: body.recurring })) {
     return ['invalid_combination'];
   }
   return errors;
@@ -378,6 +393,7 @@ function validateEarliestStartDeadlineCrossField(body, existing) {
 }
 
 module.exports = {
+  isFixedRecurringConflict,
   validateTaskInput,
   validateEarliestStartDeadlineCrossField,
   validateStartAfterDeadlineCrossField: validateEarliestStartDeadlineCrossField,

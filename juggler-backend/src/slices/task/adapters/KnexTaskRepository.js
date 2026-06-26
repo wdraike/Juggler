@@ -398,12 +398,12 @@ KnexTaskRepository.prototype.getTasksVersion = function getTasksVersion(userId) 
  * are read; user-scoped. Returns null if the task is not the user's.
  * @param {string} id
  * @param {string} userId
- * @returns {Promise<{recurring:number, task_type:string}|null>}
+ * @returns {Promise<{recurring:number, task_type:string, placement_mode:string|null}|null>}
  */
 KnexTaskRepository.prototype.fetchTaskRecurring = function fetchTaskRecurring(id, userId) {
   return this.db('tasks_v')
     .where({ id: id, user_id: userId })
-    .first('recurring', 'task_type');
+    .first('recurring', 'task_type', 'placement_mode');
 };
 
 /**
