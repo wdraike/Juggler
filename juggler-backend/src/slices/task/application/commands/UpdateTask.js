@@ -136,6 +136,23 @@ UpdateTask.prototype.execute = async function execute(input) {
       || row.task_type === 'recurring_instance'));
   };
 
+  // 999.867: merged-state XOR check — effective values computed by KEY PRESENCE,
+  // not by matching the conflicting literal. This avoids collapsing "field ABSENT"
+  // with "field explicitly set to a non-conflicting value": e.g.
+  // {placementMode:'fixed', recurring:false} has BOTH keys present — validateTaskInput
+  // already ran above and found no conflict, so we skip. When exactly one side is
+  // in the body the other side must come from the existing row.
+  var _hasPM = 'placementMode' in body;
+  var _hasRec = 'recurring' in body;
+  if (_hasPM !== _hasRec) {
+    var _xorRow = await fetchRecRowOnce();
+    var _effPM = _hasPM ? body.placementMode : (_xorRow ? _xorRow.placement_mode : null);
+    var _effRec = _hasRec ? !!body.recurring : isRecurringRow(_xorRow);
+    if (self.validation.isFixedRecurringConflict({ placementMode: _effPM, recurring: _effRec })) {
+      return { status: 400, body: { error: 'invalid_combination' } };
+    }
+  }
+
   var refBody = body;
   if (Array.isArray(body.dependsOn) && body.dependsOn.length > 0) {
     var willBeRecurring = body.recurring === true;

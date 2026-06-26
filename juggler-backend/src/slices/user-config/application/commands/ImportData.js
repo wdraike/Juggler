@@ -41,6 +41,8 @@
 
 'use strict';
 
+var taskValidation = require('../../../task/domain/validation/taskValidation');
+
 /** @param {ImportDataDeps} deps */
 function ImportData(deps) {
   if (!deps || !deps.repo || !deps.wipeTasks || !deps.insertTask || !deps.buildTaskRow) {
@@ -111,6 +113,16 @@ ImportData.prototype.execute = async function execute(input) {
   var mergedProjects = explicitProjects.concat(
     Array.from(extractedNames).map(function (name) { return { name: name, color: null, icon: null }; })
   );
+
+  // 4b. 999.867: fixed+recurring XOR enforcement — validate before the destructive
+  // transaction. Import tasks are full create-shaped objects (API field names), so
+  // the same-request isFixedRecurringConflict check suffices (no merge with existing needed).
+  for (var xvi = 0; xvi < uniqueTasks.length; xvi++) {
+    var _xt = uniqueTasks[xvi];
+    if (taskValidation.isFixedRecurringConflict({ placementMode: _xt.placementMode, recurring: _xt.recurring })) {
+      return { status: 400, body: { error: 'invalid_combination' } };
+    }
+  }
 
   // 5. transaction (handler L68-191) — config via repo, tasks via injected.
   await this.repo.runInTransaction(async function (trxRepo) {
