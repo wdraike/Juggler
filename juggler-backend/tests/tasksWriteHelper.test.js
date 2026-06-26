@@ -197,9 +197,15 @@ describe('tasks-write helper', () => {
     test('status update lands on both tables (template-level + instance-level)', async () => {
       if (!available) return;
       var id = uuidv7();
+      // The DB CHECK constraint chk_task_instances_terminal_scheduled requires a
+      // non-null scheduled_at before an instance row can carry a terminal status
+      // ('done') — on every write path. (The HTTP app-layer UpdateTaskStatus mirrors
+      // this as a graceful 400; this raw write-helper path has no such guard.) Seed
+      // scheduled_at so the done transition produces a valid row.
       await insertTask(db, {
         id: id, user_id: USER_ID, text: 't', task_type: 'task',
         dur: 20, pri: 'P3', status: '',
+        scheduled_at: new Date('2026-06-10T08:00:00Z'),
         created_at: db.fn.now(), updated_at: db.fn.now()
       });
       var r = await updateTaskById(db, id, { status: 'done' });

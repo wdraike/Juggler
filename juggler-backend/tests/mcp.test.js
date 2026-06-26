@@ -175,7 +175,11 @@ describe('Task CRUD via MCP code paths', () => {
   });
 
   test('status change persists', async () => {
-    var task = await testDb.seedTask({ text: 'Mark done' });
+    // The DB CHECK constraint chk_task_instances_terminal_scheduled requires scheduled_at
+    // for a terminal status on every write path (the HTTP app-layer UpdateTaskStatus also
+    // returns a graceful 400; this raw helper path has no such guard) — seed it so 'done'
+    // produces a valid row.
+    var task = await testDb.seedTask({ text: 'Mark done', scheduled_at: new Date('2026-06-10T08:00:00Z') });
     var db = testDb.getDb();
     var tasksWrite = require('../src/lib/tasks-write');
     await tasksWrite.updateTaskById(db, task.id, { status: 'done' }, 'test-user-001');

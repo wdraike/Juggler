@@ -436,7 +436,13 @@ Object.keys(ADAPTERS).forEach(function (name) {
     // field-routing wrong (e.g. if it accidentally writes master columns).
     test('updateInstancesWhere updates matching instance rows and returns count', async function () {
       var repo = await A.makeRepo();
-      var a = makeRow({ text: 'inst-a', status: 'wip' });
+      // The DB CHECK constraint chk_task_instances_terminal_scheduled (migration
+      // 20260527213906) enforces, on EVERY write path, that an instance with a terminal
+      // status (done/skip/cancel/missed) has a non-null scheduled_at. (The HTTP app-layer
+      // UpdateTaskStatus additionally turns this into a graceful 400, but the constraint
+      // is the universal enforcer.) This raw repo path has no app guard, so a row marked
+      // 'done' must already be scheduled — seed scheduled_at to make the row valid.
+      var a = makeRow({ text: 'inst-a', status: 'wip', scheduled_at: new Date('2026-06-10T08:00:00Z') });
       var b = makeRow({ text: 'inst-b', status: '' });
       await repo.insertTask(a);
       await repo.insertTask(b);

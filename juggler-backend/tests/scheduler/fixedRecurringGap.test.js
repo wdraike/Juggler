@@ -266,13 +266,12 @@ describe('TS-302: HTTP path rejects fixed+recurring (invalid_combination)', () =
  * TS-303: fixed+recurring via MCP.
  *  - MCP create REJECTS (validateTaskInput runs in create_task) → real error text
  *    "Validation error: invalid_combination".
- *  - MCP UPDATE (recurring→fixed) does NOT reject — a REAL REMAINING DIVERGENCE:
- *    update_task validates only the patch fields, and a patch carrying just
- *    placementMode='fixed' (no `recurring`) never trips the combination rule, so the
- *    MCP path persists a fixed+recurring master that the HTTP path would reject.
- *    Asserted as-is (not faked) so the divergence is documented, not masked.
+ *  - MCP UPDATE (recurring→fixed) now ALSO REJECTS — the former divergence is CLOSED.
+ *    update_task validates the MERGED record (not just the patch), so a patch carrying
+ *    placementMode='fixed' against a recurring master trips the combination rule, exactly
+ *    like the HTTP path (SUB-302c). The MCP/HTTP gap no longer exists.
  */
-describe('TS-303: MCP fixed+recurring — create rejects, update diverges', () => {
+describe('TS-303: MCP fixed+recurring — create rejects, update also rejects (gap closed)', () => {
   beforeAll(async () => {
     await setupTestDB();
   });
@@ -298,7 +297,7 @@ describe('TS-303: MCP fixed+recurring — create rejects, update diverges', () =
     expect(await countMastersByText('MCP fixed recurring 303a')).toBe(0);
   });
 
-  it('SUB-303b: MCP update_task recurring→fixed → NOT rejected (real backend divergence)', async () => {
+  it('SUB-303b: MCP update_task recurring→fixed → rejected (divergence closed; matches HTTP)', async () => {
     // Create a valid recurring anytime master via MCP.
     const created = await mcpCall('create_task', {
       text: 'MCP recurring 303b',
@@ -309,21 +308,22 @@ describe('TS-303: MCP fixed+recurring — create rejects, update diverges', () =
     });
     expect(created.id).toBeDefined();
 
-    // DIVERGENCE: the HTTP path rejects this exact change (see SUB-302c), but the MCP
-    // update_task handler validates only the patch (which omits `recurring`) and so
-    // accepts it, persisting an invalid fixed+recurring master. This is the real,
-    // unmitigated MCP-update gap — assert what the handler actually does.
-    const updated = await mcpCall('update_task', {
+    // The former MCP-update gap (update_task validated only the patch and so accepted
+    // recurring→fixed, persisting an invalid fixed+recurring master) is now CLOSED:
+    // update_task validates the MERGED record, so this transition is rejected with
+    // invalid_combination — matching the HTTP path (SUB-302c). Assert the rejection.
+    await expect(mcpCall('update_task', {
       id: created.id,
       placementMode: 'fixed',
       time: '10:00 AM'
+    })).rejects.toMatchObject({
+      isError: true,
+      error: 'Validation error: invalid_combination'
     });
-    expect(updated.placementMode).toBe('fixed');
-    expect(updated.recurring).toBe(true);
 
-    // Confirm the divergent state actually landed in the master row.
+    // The master row stays unchanged — still recurring anytime, not fixed.
     const after = await db('task_masters').where({ id: created.id }).first();
-    expect(after.placement_mode).toBe('fixed');
+    expect(after.placement_mode).toBe('anytime');
     expect(!!after.recurring).toBe(true);
   });
 });
