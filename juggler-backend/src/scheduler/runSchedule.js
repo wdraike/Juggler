@@ -405,6 +405,47 @@ function _flagOf(v) {
   return Number(v) ? 1 : 0;
 }
 
+// Largest value we will ever treat as a genuine occurrence_ordinal when read
+// out of an instance ID. occurrence_ordinal is a signed MySQL INT (max
+// 2,147,483,647) and is semantically a small per-master occurrence counter
+// (1..N, bounded by the expansion window). A ceiling of 10,000,000 (≈ 27,000
+// years of daily occurrences) is far above any real count yet safely below
+// both a realistic YYYYMMDD date suffix (20YYMMDD ≈ 2.0e7) and a 12-digit numeric
+// uuid node segment (~1e12). Anything above this is NOT an ordinal — it is a
+// date-format suffix or part of the sourceId, and must never be promoted into
+// the ordinal space (doing so overflows the INT column on insert — 999.878).
+var MAX_PLAUSIBLE_ORDINAL = 10000000;
+
+// Extract the genuine occurrence-ordinal encoded in a recurring-instance ID.
+//
+// Instance IDs are "<sourceId>-<ordinal>" or, for split chunks,
+// "<sourceId>-<ordinal>-<splitOrdinal>". sourceId is a uuid v7. The naive
+// /-(\d+)(?:-\d+)?$/ regex is greedy + leftmost-anchored, so when a uuid's
+// final node segment is ALL decimal digits (e.g. "...-481234567890-3") it
+// captures the 12-digit uuid node as the "ordinal" and mistakes the real
+// trailing "-3" ordinal for a split tail — yielding ~4.8e11, which overflows
+// occurrence_ordinal's signed INT column (999.878: "decimal-tail" IDs).
+//
+// Fix: when the first captured numeric segment is implausibly large (a uuid
+// node or a YYYYMMDD date), it cannot be an ordinal — fall back to the trailing
+// numeric segment, which is the real ordinal. Returns null when no plausible
+// ordinal suffix is present (so callers leave maxOrdByMaster untouched rather
+// than poisoning it).
+function ordinalSuffixOf(id) {
+  var m = String(id).match(/-(\d+)(?:-(\d+))?$/);
+  if (!m) return null;
+  var first = Number(m[1]);
+  var second = m[2] != null ? Number(m[2]) : null;
+  if (Number.isInteger(first) && first >= 0 && first <= MAX_PLAUSIBLE_ORDINAL) {
+    return first;
+  }
+  // first segment is part of the sourceId (numeric uuid node) or a date suffix.
+  if (second != null && Number.isInteger(second) && second >= 0 && second <= MAX_PLAUSIBLE_ORDINAL) {
+    return second;
+  }
+  return null;
+}
+
 function placementMatchesDbRow(dbUpdate, rawRow) {
   if (!rawRow) return false; // no DB row to compare → must write
 
@@ -685,11 +726,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // an existing ID suffix, the new desired occurrence gets an ID that
       // matches an existing pending instance — existingPendingIds rejects it,
       // silently dropping the new instance from the calendar.
-      var idSuffix = String(r.id).match(/-(\d+)(?:-\d+)?$/);
-      if (idSuffix) {
-        var idNum = Number(idSuffix[1]);
-        if (idNum > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = idNum;
-      }
+      var idNum = ordinalSuffixOf(r.id);
+      if (idNum != null && idNum > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = idNum;
     }
     // Record pending dates so tpc slot accounting can count them as booked.
     if (mid && (!r.status || r.status === '') && r.date) {
@@ -707,11 +745,8 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (!mid) return;
     var o = Number(r.occurrence_ordinal) || 0;
     if (o > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = o;
-    var idSuffix = String(r.id).match(/-(\d+)(?:-\d+)?$/);
-    if (idSuffix) {
-      var idNum = Number(idSuffix[1]);
-      if (idNum > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = idNum;
-    }
+    var idNum = ordinalSuffixOf(r.id);
+    if (idNum != null && idNum > (maxOrdByMaster[mid] || 0)) maxOrdByMaster[mid] = idNum;
   });
 
   // expandRecurring skips generating an instance whose (sourceId, date) already
@@ -2205,5 +2240,6 @@ module.exports = {
   // Test-only exports — pure-function seams for unit tests.
   // Never call from production code.
   _placementMatchesDbRow: process.env.NODE_ENV === 'test' ? placementMatchesDbRow : undefined,
-  _computeNoLimboUpdates: process.env.NODE_ENV === 'test' ? computeNoLimboUpdates : undefined
+  _computeNoLimboUpdates: process.env.NODE_ENV === 'test' ? computeNoLimboUpdates : undefined,
+  _ordinalSuffixOf: process.env.NODE_ENV === 'test' ? ordinalSuffixOf : undefined
 };
