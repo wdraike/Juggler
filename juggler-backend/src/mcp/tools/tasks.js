@@ -67,6 +67,22 @@ var taskInputFields = {
   preferredTimeMins: z.number().optional().describe('Preferred time as minutes from midnight in user local timezone (e.g. 720 = 12:00 PM, 420 = 7:00 AM). For recurring tasks in Time Window mode.')
 };
 
+var TERMINAL_REQUIRES_SCHEDULE = ['done', 'skip', 'cancel'];
+// Mirror of the HTTP terminal-requires-schedule guard (UpdateTaskStatus.js:147-160):
+// a task cannot move to a terminal status without a scheduled time, UNLESS it is a
+// rolling-recurring instance (anchor-based, exempt). Returns the rejection message
+// string when blocked, else null.
+async function terminalScheduleBlock(existing, status, willBeScheduled, userId) {
+  if (TERMINAL_REQUIRES_SCHEDULE.indexOf(status) === -1) return null;
+  if (willBeScheduled) return null;
+  var masterId = existing.master_id || existing.source_id;
+  if (masterId) {
+    var master = await db('task_masters').where({ id: masterId, user_id: userId }).first();
+    if (master && isRollingMaster(master)) return null;
+  }
+  return 'Cannot mark task ' + status + ' without a scheduled time. Schedule it first.';
+}
+
 function registerTaskTools(server, userId) {
 
   // Helper: get user timezone
@@ -328,6 +344,12 @@ function registerTaskTools(server, userId) {
         }
       }
 
+      var _willBeScheduled = !!existing.scheduled_at
+        || (fields.scheduledAt !== undefined && fields.scheduledAt !== null && fields.scheduledAt !== '')
+        || (fields.date !== undefined && fields.date !== null && fields.date !== '');
+      var _termBlock = await terminalScheduleBlock(existing, fields.status, _willBeScheduled, userId);
+      if (_termBlock) { return { content: [{ type: 'text', text: _termBlock }], isError: true }; }
+
       // Lock check: if scheduling lock is held, split and queue
       var locked = await isLocked(userId);
       if (locked) {
@@ -396,6 +418,9 @@ function registerTaskTools(server, userId) {
       if (!existing) {
         return { content: [{ type: 'text', text: 'Error: Task not found' }], isError: true };
       }
+
+      var _termBlock = await terminalScheduleBlock(existing, status, !!existing.scheduled_at, userId);
+      if (_termBlock) { return { content: [{ type: 'text', text: _termBlock }], isError: true }; }
 
       var update = { status: status || '', updated_at: db.fn.now() };
 

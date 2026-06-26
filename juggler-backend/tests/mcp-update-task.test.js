@@ -299,7 +299,7 @@ describe('update_task — cal-sync guard', function() {
   });
 
   test('gcal-synced task with only status → allowed', async function() {
-    resetStore({ gcal_event_id: 'gcal-evt-abc' });
+    resetStore({ gcal_event_id: 'gcal-evt-abc', scheduled_at: '2026-12-01 15:00:00' });
     var result = await captureHandlers()['update_task']({ id: 'task-001', status: 'done' });
     expect(result.isError).toBeFalsy();
   });
@@ -486,20 +486,20 @@ describe('update_task — TEMPLATE_FIELDS routing for recurring instances', func
 
   var SOURCE_ID = 'source-template-001';
 
-  function setupRecurringInstance(templateOverrides) {
+  function setupRecurringInstance(templateOverrides, instanceOverrides) {
     taskStore[SOURCE_ID] = makeTask(Object.assign({
       id: SOURCE_ID,
       task_type: 'recurring_template',
       text: 'Template text',
       gcal_event_id: null
     }, templateOverrides || {}));
-    taskStore['task-001'] = makeTask({
+    taskStore['task-001'] = makeTask(Object.assign({
       id: 'task-001',
       task_type: 'recurring_instance',
       source_id: SOURCE_ID,
       text: 'Instance text',
       gcal_event_id: null
-    });
+    }, instanceOverrides || {}));
   }
 
   test('text update on recurring_instance → written to template (source), not instance', async function() {
@@ -511,7 +511,7 @@ describe('update_task — TEMPLATE_FIELDS routing for recurring instances', func
   });
 
   test('status update on recurring_instance → written to instance, not template', async function() {
-    setupRecurringInstance();
+    setupRecurringInstance(null, { scheduled_at: '2026-12-01 15:00:00' });
     await captureHandlers()['update_task']({ id: 'task-001', status: 'done' });
     // status is NOT in TEMPLATE_FIELDS — a status-only update must not write to the template at all
     var templateWrite = findWrite(SOURCE_ID);
@@ -827,7 +827,7 @@ describe('update_task — _allowUnfix MCP behaviour (ZOE-JUG-023-W3)', function(
 
   test('gcal-synced task with ONLY status update → allowed even when _allowUnfix is absent', async function() {
     // Baseline confirmation: cal-synced tasks accept status updates without _allowUnfix.
-    resetStore({ gcal_event_id: 'gcal-evt-002', placement_mode: 'fixed' });
+    resetStore({ gcal_event_id: 'gcal-evt-002', placement_mode: 'fixed', scheduled_at: '2026-12-01 15:00:00' });
     var result = await captureHandlers()['update_task']({ id: 'task-001', status: 'done' });
     expect(result.isError).toBeFalsy();
   });

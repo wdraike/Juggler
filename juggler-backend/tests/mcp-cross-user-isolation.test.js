@@ -345,6 +345,7 @@ describe('MCP cross-user isolation — delete_task', function() {
 describe('MCP cross-user isolation — set_task_status', function() {
 
   test('User A can set status on their own task', async function() {
+    taskStore[TASK_ID].scheduled_at = '2026-12-01 15:00:00';
     var handlers = captureHandlers(USER_A);
     var result = await handlers['set_task_status']({ id: TASK_ID, status: 'done' });
     expect(result.isError).toBeFalsy();

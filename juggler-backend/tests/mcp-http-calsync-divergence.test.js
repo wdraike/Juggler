@@ -298,7 +298,7 @@ describe('ZOE-JUG-025 — MCP: calendar-synced task rejects disallowed fields', 
 
   test('(d) MCP update_task on synced task with status only → allowed', async function() {
     // status is in the MCP allowed list
-    resetStore({ gcal_event_id: 'gcal-evt-001', cal_sync_origin: 'gcal' });
+    resetStore({ gcal_event_id: 'gcal-evt-001', cal_sync_origin: 'gcal', scheduled_at: '2026-12-01 15:00:00' });
     var result = await captureMcpHandlers()['update_task']({
       id: 'task-001', status: 'done'
     });

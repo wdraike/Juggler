@@ -19,7 +19,7 @@
  *    task object, mirroring what an MCP client would receive.
  */
 
-var { registerTaskTools } = require('../src/mcp/tools/tasks');
+var { registerTaskTools } = require('../../src/mcp/tools/tasks');
 
 var DEFAULT_USER_ID = '1';
 
