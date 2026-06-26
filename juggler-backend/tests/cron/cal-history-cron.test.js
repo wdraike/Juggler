@@ -41,6 +41,17 @@ describe('Cal History Cron Job', () => {
   test('purgeOldEntries deletes cal_history rows older than 12 months and keeps recent ones', async () => {
     const thirteenMonthsAgo = new Date();
     thirteenMonthsAgo.setMonth(thirteenMonthsAgo.getMonth() - 13);
+    // cal_history.task_id FK → task_instances(id) (fk_cal_history_task_id, added by
+    // a later migration). Production cal_history rows always reference a real
+    // instance; seed the parent master + instances so the fixture satisfies the FK.
+    await db('task_masters').insert({ id: 'ch-master', user_id: TEST_USER, text: 'Cal-history purge master' });
+    // Distinct occurrence_ordinal per instance — uq_instance_ordinals is
+    // (master_id, occurrence_ordinal, split_ordinal), both default 1, so two
+    // instances under one master collide unless the ordinal differs.
+    await db('task_instances').insert([
+      { id: 'ch-old', master_id: 'ch-master', user_id: TEST_USER, scheduled_at: thirteenMonthsAgo, status: 'wip', occurrence_ordinal: 1 },
+      { id: 'ch-new', master_id: 'ch-master', user_id: TEST_USER, scheduled_at: new Date(), status: 'wip', occurrence_ordinal: 2 },
+    ]);
     await db('cal_history').insert([
       { task_id: 'ch-old', user_id: TEST_USER, status: 'missed', created_by: 'test', scheduled_at: thirteenMonthsAgo, created_at: thirteenMonthsAgo },
       { task_id: 'ch-new', user_id: TEST_USER, status: 'missed', created_by: 'test', scheduled_at: new Date(), created_at: new Date() },

@@ -26,7 +26,14 @@
 function stopLoop() {
   try {
     var scheduleQueue = require('../src/scheduler/scheduleQueue');
-    if (scheduleQueue && typeof scheduleQueue.stopPollLoop === 'function') {
+    // Prefer the full reset (999.869): besides stopping the poll loop it force-
+    // clears leaked claim-heartbeat intervals, drops the cached _queueBackend (so
+    // a neighbour's jest.resetModules can't leave a stale cross-suite binding),
+    // and clears the in-memory dirty/running/rate-limit maps — so no timer or
+    // module state outlives this file. Fall back to stopPollLoop on older builds.
+    if (scheduleQueue && typeof scheduleQueue._resetForTests === 'function') {
+      scheduleQueue._resetForTests();
+    } else if (scheduleQueue && typeof scheduleQueue.stopPollLoop === 'function') {
       scheduleQueue.stopPollLoop();
     }
   } catch (e) {

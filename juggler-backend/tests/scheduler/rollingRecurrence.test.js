@@ -29,6 +29,21 @@ const TZ = 'America/New_York';
 // done-driven anchor lands on today, computed here from the real clock (no hardcoding).
 const TODAY = getNowInTimezone(TZ).todayKey;
 
+// Forward-occurrence keys, always strictly after TODAY. Several tests prove the
+// "skip re-anchors fully forward and a later `done` (completion date = TODAY) does
+// NOT drag it back" monotonic-guard contract. That contract only holds when the
+// skip date is in the future relative to TODAY; the original file hardcoded
+// 2026-06-27/06-28, which silently rot into the past once the wall clock passes
+// them (a same-day `done` would then win and fail the assertion). Deriving them
+// from TODAY keeps the SAME contract assertion deterministic on any run date.
+function addDaysKey(key, n) {
+  const d = new Date(key + 'T00:00:00');
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+const FWD1 = addDaysKey(TODAY, 7); // skipped/forward occurrence (anchor lands here)
+const FWD2 = addDaysKey(TODAY, 8); // a later cancel/done occurrence (no backward drag)
+
 function rollingTask(extra) {
   return createTask(Object.assign({
     text: 'Rolling test',
@@ -99,13 +114,13 @@ describe('TS-86: Rolling anchor - skip fully reanchors', () => {
   it('SUB-86a: skip then done - each applies its own rule in order', async () => {
     const task = await rollingTask({ rollingAnchor: '2026-06-15' });
 
-    // skip(06-27) reanchors to 06-27; a later done anchors to the completion date (today).
-    // Today (06-25) < 06-27, so the monotonic guard keeps the skip anchor.
-    await markInstanceStatus(task.id, '2026-06-27', 'skip');
-    await markInstanceStatus(task.id, '2026-06-28', 'done');
+    // skip(FWD1) reanchors to FWD1; a later done anchors to the completion date (today).
+    // Today < FWD1, so the monotonic guard keeps the skip anchor.
+    await markInstanceStatus(task.id, FWD1, 'skip');
+    await markInstanceStatus(task.id, FWD2, 'done');
 
     const updatedTask = await getTaskInstances(task.id, true);
-    expect(updatedTask.rollingAnchor).toBe('2026-06-27');
+    expect(updatedTask.rollingAnchor).toBe(FWD1);
   });
 });
 
@@ -389,8 +404,8 @@ describe('TS-97: Rolling recurrence backfill with mixed status (persisting path)
     });
 
     await markInstanceStatus(task.id, '2026-06-15', 'done');  // re-anchors to today
-    await markInstanceStatus(task.id, '2026-06-27', 'skip');  // re-anchors to 06-27 (>today)
-    await markInstanceStatus(task.id, '2026-06-28', 'cancel'); // no anchor change
+    await markInstanceStatus(task.id, FWD1, 'skip');          // re-anchors to FWD1 (>today)
+    await markInstanceStatus(task.id, FWD2, 'cancel');        // no anchor change
 
     await runScheduler(undefined, undefined, undefined, undefined,
       { persist: true, fillPolicy: 'backfill' });
@@ -403,10 +418,10 @@ describe('TS-97: Rolling recurrence backfill with mixed status (persisting path)
     expect(statusCounts['skip']).toBe(1);
     expect(statusCounts['cancel']).toBe(1);
 
-    // skip(06-27) is the latest forward anchor move; done(today=06-25) < 06-27 so the
+    // skip(FWD1) is the latest forward anchor move; done(today) < FWD1 so the
     // monotonic guard keeps the anchor at the skip date.
     const updatedTask = await getTaskInstances(task.id, true);
-    expect(updatedTask.rollingAnchor).toBe('2026-06-27');
+    expect(updatedTask.rollingAnchor).toBe(FWD1);
 
     // New open instances materialize (was impossible under in-memory MODE 1).
     expect((statusCounts[''] || 0)).toBeGreaterThan(0);
@@ -497,13 +512,13 @@ describe('TS-100: Rolling recurrence comprehensive integration', () => {
     });
 
     await markInstanceStatus(task.id, '2026-06-15', 'done');   // -> anchor = today
-    await markInstanceStatus(task.id, '2026-06-27', 'skip');   // -> anchor = 06-27 (forward)
-    await markInstanceStatus(task.id, '2026-06-28', 'cancel'); // -> no change
+    await markInstanceStatus(task.id, FWD1, 'skip');           // -> anchor = FWD1 (forward)
+    await markInstanceStatus(task.id, FWD2, 'cancel');         // -> no change
     // 'missed' is intentionally omitted: no live path applies it (see TS-87).
 
     const updatedTask = await getTaskInstances(task.id, true);
-    // skip(06-27) is the furthest-forward anchor move; the monotonic guard holds it.
-    expect(updatedTask.rollingAnchor).toBe('2026-06-27');
+    // skip(FWD1) is the furthest-forward anchor move; the monotonic guard holds it.
+    expect(updatedTask.rollingAnchor).toBe(FWD1);
 
     await runScheduler(undefined, undefined, undefined, undefined,
       { persist: true, fillPolicy: 'backfill' });

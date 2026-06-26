@@ -91,6 +91,12 @@ var RATE_LIMIT_WINDOW_MS  = 60000;  // 60s window
 var POLL_LOOP_INSTANCE;
 var INSTANCE_ID = crypto.randomUUID();
 var POLL_ACTIVE = false;
+// Track every live claim-heartbeat interval so a fire-and-forget claimAndRun that
+// is still in flight at suite teardown cannot leave a 30s setInterval ticking into
+// the next suite (the 999.869 cross-suite timer leak). Normally claimAndRun's
+// finally clears its own heartbeat; this set is the safety net cleared by
+// _resetForTests() / shutdown.
+var _heartbeats = new Set();
 
 // ── State ──
 var _dirty = new Set();               // users with pending changes (write-side hint)
@@ -332,7 +338,7 @@ async function claimAndRun(userId) {
     await releaseClaim(userId, INSTANCE_ID);
     return { claimed: true, success: false, error: err.message };
   } finally {
-    clearInterval(heartbeat);
+    clearClaimHeartbeat(heartbeat);
   }
 }
 
@@ -392,7 +398,7 @@ async function processUser(userId) {
 // ── Claim maintenance ──
 
 function startClaimHeartbeat(userId) {
-  return setInterval(async function() {
+  var hb = setInterval(async function() {
     try {
       await db('schedule_queue')
         .where('user_id', userId)
@@ -402,6 +408,17 @@ function startClaimHeartbeat(userId) {
       logger.error('[SCHED-QUEUE] Heartbeat failed for user ' + userId, { error: e });
     }
   }, 30000); // every 30s
+  // Don't let a heartbeat keep the process alive or fire during jest's forceExit
+  // window (test-isolation hardening, 999.869). In production the HTTP listener
+  // holds the loop open, so unref is a runtime no-op there.
+  if (hb && typeof hb.unref === 'function') hb.unref();
+  _heartbeats.add(hb);
+  return hb;
+}
+
+function clearClaimHeartbeat(hb) {
+  clearInterval(hb);
+  _heartbeats.delete(hb);
 }
 
 async function releaseClaim(userId, instanceId) {
@@ -479,6 +496,37 @@ function stopPollLoop() {
   }
 }
 
+/**
+ * Full module shutdown / test-isolation reset (999.869).
+ *
+ * stopPollLoop() alone only stops the poll interval — it leaves the per-suite
+ * module state behind: live claim-heartbeat intervals, the cached _queueBackend
+ * (which a neighbouring suite's jest.resetModules() can leave pointing at a
+ * torn-down module whose isCloudTasks is no longer a function), and the in-memory
+ * dirty / running / rate-limit maps. Carried across runInBand suites, those leak
+ * timers and bleed state into later files. This drops ALL of it so the module is
+ * indistinguishable from a fresh require:
+ *   - stop the poll loop and force-clear any leaked heartbeat intervals,
+ *   - null the cached queue backend so the next getQueueBackend() re-resolves a
+ *     valid module instead of a stale cross-suite binding,
+ *   - clear every in-memory map and reset the injectable clock / last-error.
+ * Idempotent and safe to call when nothing is running. Wired into the per-file
+ * jest teardown (test-helpers/afterEachFile.js).
+ */
+function _resetForTests() {
+  stopPollLoop();
+  _heartbeats.forEach(function (hb) { try { clearInterval(hb); } catch (e) { /* no-op */ } });
+  _heartbeats.clear();
+  _queueBackend = undefined; // drop any stale cross-suite cached backend
+  _dirty.clear();
+  _lastEnqueueTime.clear();
+  _running.clear();
+  _rateWindows.clear();
+  _lastError = null;
+  _lastPollTime = 0;
+  _now = function () { return Date.now(); };
+}
+
 // ── Constants ──
 var _SOURCE_APP = 'scheduleQueue';
 var MAX_DIRTY_USERS_PER_POLL = 50;
@@ -530,6 +578,7 @@ module.exports = {
   runScheduleForPush,
   startPollLoop,
   stopPollLoop,
+  _resetForTests,
   getPollLoopState,
   getLastError,
   // Internal exports for tests
@@ -546,6 +595,12 @@ module.exports = {
     setClock: function (fn) { _now = fn || function () { return Date.now(); }; },
     resetRateLimit: function () { _rateWindows.clear(); },
     RATE_LIMIT_MAX,
-    RATE_LIMIT_WINDOW_MS
+    RATE_LIMIT_WINDOW_MS,
+    // Backend-cache test seam (999.869): inject a stale/half-loaded `_queueBackend` to
+    // simulate the cross-suite registry race (a neighbour's jest.resetModules left the
+    // cached backend without a valid isCloudTasks). Lets a unit pin the defensive
+    // re-resolve in getQueueBackend() + the enqueue call-site guard. Test-only.
+    setQueueBackendForTests: function (b) { _queueBackend = b; },
+    getQueueBackendForTests: function () { return _queueBackend; }
   }
 };
