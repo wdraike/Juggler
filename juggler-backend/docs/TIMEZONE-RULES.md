@@ -3,7 +3,7 @@
 **Document:** TIMEZONE-RULES.md
 **Service:** juggler
 **Status:** active
-**Last Updated:** 2026-06-17
+**Last Updated:** 2026-06-26
 
 ## Purpose
 
@@ -28,9 +28,28 @@ a time (e.g., `date` column on tasks) store the date in the user's local
 timezone context at the time of creation. The date string `2026-06-17` means
 "June 17 in whatever timezone the user was in when the task was created."
 
+**Rule TZ-SCHEMA-1 (users.timezone NOT NULL — migration 20260626000000):** The
+`users.timezone` column is schema-level `NOT NULL DEFAULT 'America/New_York'
+COLLATE utf8mb4_unicode_ci` (migration
+`20260626000000_users_timezone_not_null.js`). All pre-existing NULL values were
+backfilled to `'America/New_York'` on migration up. For any existing `users`
+row, `timezone` is therefore always non-null. Readers of `users.timezone` do
+NOT need a column-null fallback; the `America/New_York` default is enforced at
+both the schema level (DEFAULT) and the application level.
+
+**Application-layer nuance:** `KnexConfigRepository.getUserTimezone` may still
+return `null` at the application layer when the user's timezone is treated as
+"unset" by the A1 contract (used by the frontend display path). This `null` is
+an application-level signal, not a DB-null column. Post-backfill, an
+un-configured user's `timezone` column reads as `'America/New_York'`; whether
+to reintroduce a distinct "unconfigured" signal is an open question not resolved
+by this migration.
+
 **Rationale:** UTC storage eliminates ambiguity across server locations, DST
 transitions, and multi-timezone teams. Date-only fields are an exception because
-they represent a calendar day boundary, not an instant in time.
+they represent a calendar day boundary, not an instant in time. The NOT NULL
+DEFAULT contract (TZ-SCHEMA-1) moves the America/New_York fallback from
+application code into the schema, enforcing it as a single-source invariant.
 
 ---
 
@@ -40,7 +59,9 @@ they represent a calendar day boundary, not an instant in time.
 MUST be converted from UTC to the user's configured timezone before display.
 The user's timezone is determined by the `timezone` field on the `users` table
 (or the `x-timezone` request header, which takes precedence for the current
-request).
+request). As of migration `20260626000000`, `users.timezone` is schema-level
+NOT NULL — any existing row always carries a non-null IANA timezone value (see
+TZ-SCHEMA-1).
 
 **Rule TZ-DISPLAY-2 (Header Override):** The `x-timezone` HTTP header, when
 present on a request, overrides the user's stored timezone for that request
@@ -48,7 +69,12 @@ only. This allows the frontend to send the browser's detected timezone without
 persisting it.
 
 **Rule TZ-DISPLAY-3 (Fallback):** If neither the user's stored timezone nor the
-`x-timezone` header is available, the system defaults to `America/New_York`.
+`x-timezone` header is available, the system defaults to `America/New_York`. As
+of migration `20260626000000` (TZ-SCHEMA-1), a null `users.timezone` column
+cannot occur for any existing row; this fallback now covers only: an absent user
+row, or a missing `x-timezone` header. (Handling of an invalid stored IANA name
+is not currently validated by the code and is tracked separately — see
+TZ-ERR-1.)
 
 **Rule TZ-DISPLAY-4 (IANA Names):** All timezone identifiers MUST be IANA
 timezone names (e.g., `America/New_York`, `Europe/London`, `Asia/Tokyo`).
@@ -208,6 +234,7 @@ the `x-timezone` header. Routes that use it:
 | Calendar sync helpers | `src/calendar/cal-sync-helpers.js` | TZ-SYNC-1 through TZ-SYNC-6 |
 | Apple CalDAV parser | `src/calendar/apple-cal-api.js` | TZ-SYNC-3 (BF-5 fix) |
 | User config schema | `src/schemas/config.schema.js` | TZ-DISPLAY-4 (timezoneOverride) |
+| Schema migration | `src/db/migrations/20260626000000_users_timezone_not_null.js` | TZ-SCHEMA-1 |
 
 ---
 
@@ -220,6 +247,7 @@ the `x-timezone` header. Routes that use it:
 | `tests/unit/scheduler-core-gaps.test.js` | TZ-CROSS-1, TZ-CROSS-2 |
 | `tests/unit/recurring-override.test.js` | TZ-RECUR-1, TZ-RECUR-2 |
 | `tests/unit/tpc-budget-aware.test.js` | TZ-RECUR-5 |
+| `tests/migrations/20260626000000_users_timezone_not_null.test.js` | TZ-SCHEMA-1 (NOT NULL enforcement + NULL backfill) |
 
 ---
 
@@ -229,9 +257,12 @@ the `x-timezone` header. Routes that use it:
 `x-timezone` header contains an invalid IANA timezone name, the system MUST
 fall back to `America/New_York` and log a warning. The request MUST NOT fail.
 
-**Rule TZ-ERR-2 (Missing Timezone):** If no timezone is available (no user
-profile, no header), the system MUST use the default `America/New_York` and
-proceed normally. The request MUST NOT fail.
+**Rule TZ-ERR-2 (Missing Timezone):** If no timezone is available (no user row,
+or no `x-timezone` header), the system MUST use the default `America/New_York`
+and proceed normally. The request MUST NOT fail. A null `users.timezone` column
+is no longer a trigger for this fallback — TZ-SCHEMA-1 ensures the column is
+non-null for any existing row; the remaining triggers are an absent user row or
+a missing `x-timezone` header.
 
 **Rule TZ-ERR-3 (Ambiguous Time):** During a fall-back DST transition, if a
 local time is ambiguous (occurs twice), the system MUST use the first

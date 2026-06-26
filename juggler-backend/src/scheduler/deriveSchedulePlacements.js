@@ -45,7 +45,7 @@ async function resolveTimezone(userId, options) {
   if (options && options.timezone) return options.timezone;
   try {
     var row = await db('users').where('id', userId).select('timezone').first();
-    if (row && row.timezone) return row.timezone;
+    if (row) return row.timezone; // users.timezone is NOT NULL (migration 20260626000000)
   } catch (_e) { /* fall through */ }
   return DEFAULT_TIMEZONE;
 }

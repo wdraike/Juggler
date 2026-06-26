@@ -11,7 +11,7 @@ function registerScheduleTools(server, userId) {
 
   async function getUserTimezone() {
     var user = await db('users').where('id', userId).select('timezone').first();
-    return (user && user.timezone) || 'America/New_York';
+    return user ? user.timezone : 'America/New_York'; // users.timezone is NOT NULL (migration 20260626000000)
   }
 
   // ── get_schedule ──
