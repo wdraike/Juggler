@@ -115,7 +115,21 @@ function decideResolvePlan(realPlanId, catalog) {
   var planId = realPlanId;
 
   if (!features) {
-    // legacy: warn + fall back to 'free'
+    // BUG-891 (999.891): when the user's real plan slug is truthy but NOT found in the
+    // catalog features map, return 'unavailable' instead of silently downgrading to 'free'.
+    // A silent downgrade shows the "Upgrade" dialog to a paying user. The 503 forces the
+    // next request to retry the catalog fetch fresh, rather than serving stale data.
+    if (realPlanId !== 'free') {
+      return {
+        outcome: 'unavailable',
+        status: 503,
+        code: null,
+        planId: null,
+        planFeatures: null
+      };
+    }
+    // Only for an explicitly 'free' planId that's missing from the catalog: retry the
+    // free-fallback path (existing behavior for partial catalog configs).
     features = all['free'];
     planId = 'free';
   }
