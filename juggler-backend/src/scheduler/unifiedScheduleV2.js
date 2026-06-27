@@ -617,6 +617,9 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
       splitTotal: splitTot,
       depNames: depNames,
       slack: null, // filled later
+      // Multi-step spacing (999.874): target date and deadline from expandRecurring
+      _targetDate: t._targetDate || null,
+      _deadlineDate: t._deadlineDate || null,
       // ANYTIME recurring tasks whose scheduled time has already passed today
       // get pushed to the latest available slot so they stay visible on the
       // day grid and the user can still mark them done before end of day.
@@ -874,6 +877,124 @@ function noteMasterPlacement(env, item, dateKey) {
   if (!prev || dateKey > prev) env.lastByMaster[item.masterId] = dateKey;
 }
 
+// R4 — Average spacing recalculation (999.874 sub-item 2).
+// After each flexible TPC instance is placed, recalculate the average
+// spacing across all placed instances of that master. Then update the
+// remaining unplaced instances' _targetDate and _deadlineDate to
+// maintain that average spacing.
+// R5 — Recursive relaxation cascade: remaining instances that can't place
+// on their new target will be handled by the normal tryPlaceQueued fallback.
+function recalcFlexibleTpcSpacing(masterId, queue, dates, env, cycleDays) {
+  if (!env || !env.lastByMaster || !env.lastByMaster[masterId]) return;
+  // Collect all placed dates for this master from lastByMaster history.
+  // We only have the most recent placement in lastByMaster, so we need
+  // to reconstruct the sequence from the queue items that have been placed.
+  // For simplicity, we use the lastByMaster as the anchor and space forward.
+  var lastPlacedKey = env.lastByMaster[masterId];
+  if (!lastPlacedKey) return;
+  var minGap = Math.max(1, Math.floor(cycleDays * 0.5));
+
+  // Find all remaining unplaced items in the queue for this master.
+  var masterItems = [];
+  queue.forEach(function(qi) {
+    if (qi.masterId === masterId && qi.isFlexibleTpc) {
+      masterItems.push(qi);
+    }
+  });
+  if (masterItems.length === 0) return;
+
+  // Sort remaining items by their current _targetDate (or anchorDate) so
+  // we assign targets in a deterministic order.
+  masterItems.sort(function(a, b) {
+    var aDate = a._targetDate || a.anchorDate || '';
+    var bDate = b._targetDate || b.anchorDate || '';
+    return aDate < bDate ? -1 : (aDate > bDate ? 1 : 0);
+  });
+
+  // Recalculate targets: each subsequent instance gets target = previous + minGap.
+  var prevTarget = parseDate(lastPlacedKey);
+  if (!prevTarget) return;
+  masterItems.forEach(function(mi) {
+    var newTarget = new Date(prevTarget);
+    newTarget.setDate(newTarget.getDate() + minGap);
+    var newTargetKey = formatDateKey(newTarget);
+    mi._targetDate = newTargetKey;
+    // Deadline = target + minGap days
+    var newDeadline = new Date(newTarget);
+    newDeadline.setDate(newDeadline.getDate() + minGap);
+    mi._deadlineDate = formatDateKey(newDeadline);
+    // Also update the task object so downstream code can see it
+    if (mi.task) {
+      mi.task._targetDate = newTargetKey;
+      mi.task._deadlineDate = formatDateKey(newDeadline);
+    }
+    prevTarget = newTarget;
+  });
+}
+
+// R3 — Start-on relaxation (999.874 sub-item 2).
+// If placement on _targetDate failed, relax forward one day at a time.
+// Skip days already occupied by another instance of the same master
+// (check env.lastByMaster or a per-master occupied-days set).
+// Returns { dateKey, start } or null.
+function relaxFlexibleTpcTarget(item, dates, dayWindows, dayBlocks, dayOcc, base, env) {
+  if (!item._targetDate || !item.isFlexibleTpc) return null;
+  var ti = indexOfDate(dates, item._targetDate);
+  if (ti < 0) return null;
+
+  // Determine the search cap: deadlineDate or cycle end.
+  var latestIdx = dates.length - 1;
+  if (item.deadlineDate) {
+    var di = indexOfDate(dates, item.deadlineDate);
+    if (di >= 0 && di < latestIdx) latestIdx = di;
+  }
+  if (item.cycleDays > 0) {
+    var ai = indexOfDate(dates, item.anchorDate);
+    if (ai >= 0) {
+      var capIdx = ai + item.cycleDays - 1;
+      if (capIdx < latestIdx) latestIdx = capIdx;
+    }
+  }
+
+  // Walk forward from target date, skipping days occupied by same master.
+  for (var i = ti; i <= latestIdx; i++) {
+    var d = dates[i];
+    // Skip days not in allowed DOW set
+    if (item.allowedDows && !item.allowedDows[d.isoDow]) continue;
+    // Skip days already occupied by another instance of the same master
+    if (env && env.lastByMaster && item.masterId) {
+      var lastKey = env.lastByMaster[item.masterId];
+      if (lastKey && d.key <= lastKey) continue;
+    }
+    // Try to find a slot on this day
+    var wins = eligibleWindows(item, d.key, dayWindows, dayBlocks, base.relaxWhen);
+    if (!wins.length) continue;
+    var occ = dayOcc[d.key] || {};
+    var blocks = dayBlocks[d.key];
+    for (var w = 0; w < wins.length; w++) {
+      var winStart = wins[w][0];
+      var winEnd = wins[w][1];
+      for (var s = winStart; s + item.dur <= winEnd; s += 15) {
+        if (!isFreeWithTravel(occ, s, item.dur, item.travelBefore, item.travelAfter)) continue;
+        // Check deps
+        if (base.placedById && item.dependsOn && item.dependsOn.length > 0) {
+          var depReadyAbs = computeDepReadyAbs(item, base.placedById, base.statuses || {}, dates);
+          if (depReadyAbs > 0 && absoluteMin(i, s) < depReadyAbs) continue;
+        }
+        // Check loc/tools
+        if (base.cfg && item.task) {
+          var toolMatrix = base.cfg.toolMatrix;
+          var checkLoc = (Array.isArray(item.task.location) && item.task.location.length > 0) ||
+                         (Array.isArray(item.task.tools) && item.task.tools.length > 0);
+          if (checkLoc && !canTaskRunAtMinCached(item.task, d.key, s, base.cfg, toolMatrix, blocks, null)) continue;
+        }
+        return { dateKey: d.key, start: s };
+      }
+    }
+  }
+  return null;
+}
+
 // Absolute "minutes from horizon start" for a placement. Lets us compare
 // dep completion to candidate start across day boundaries without faffing
 // with per-day math.
@@ -1098,14 +1219,12 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
   var canExtend = env && !item.isRecurring && !item.deadlineDate && !(opts && opts.ignoreDeadline);
 
   var allowedDows = item.allowedDows;
-  // Cross-cycle spacing guard for flexible tpc recurring. Skip any candidate
-  // day whose date is within `minGap` days of this master's most recent
-  // placement (from DB history seeded at entry, updated as this run commits).
-  // Prevents the "placed Sat 4/25, next week places Fri 5/1 → 6-day gap"
-  // drift, and the worst-case "Thu 4/30, Fri 5/1 → 1-day gap" cluster.
-  // See docs/RECURRING-SPACING-DESIGN.md.
+  // Multi-step spacing (999.874 sub-item 2): target-date-aware placement for
+  // flexible TPC recurring tasks. When _targetDate is set, prefer it as the
+  // starting search day. The old spacing guard is skipped in this case —
+  // _targetDate IS the spacing mechanism now.
   var spacingMinKey = null;
-  if (item.isFlexibleTpc && item.masterId && env && env.lastByMaster) {
+  if (item.isFlexibleTpc && item.masterId && env && env.lastByMaster && !item._targetDate) {
     var lastKey = env.lastByMaster[item.masterId];
     if (lastKey && item.cycleDays > 1) {
       var minGap = Math.max(1, Math.floor(item.cycleDays * 0.5));
@@ -1115,6 +1234,17 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
         minAllowed.setDate(minAllowed.getDate() + minGap);
         spacingMinKey = formatDateKey(minAllowed);
       }
+    }
+  }
+
+  // R2: If _targetDate is set, prefer it as the starting search day.
+  // The target date is the ideal placement day from expandRecurring.
+  if (item._targetDate && item.isFlexibleTpc) {
+    var ti = indexOfDate(dates, item._targetDate);
+    if (ti >= 0 && ti < earliestIdx) {
+      // Target is before earliest — keep earliest (don't go into the past)
+    } else if (ti >= 0 && ti <= latestIdx) {
+      earliestIdx = ti;
     }
   }
 
@@ -1352,6 +1482,15 @@ function tryPlaceQueued(item, dates, dayWindows, dayBlocks, dayOcc, placedById, 
   var slot = findSlot(item, dates, dayWindows, dayBlocks, dayOcc, base);
   if (slot) return { slot: slot };
 
+  // R3 — Start-on relaxation (999.874 sub-item 2).
+  // If placement on _targetDate failed, relax forward one day at a time.
+  // Skip days already occupied by another instance of the same master.
+  // Only applies to flexible TPC items with a _targetDate.
+  if (item.isFlexibleTpc && item._targetDate && !item.isDayLocked) {
+    var relaxSlot = relaxFlexibleTpcTarget(item, dates, dayWindows, dayBlocks, dayOcc, base, env);
+    if (relaxSlot) return { slot: relaxSlot };
+  }
+
   if (overdueApplicable) {
     slot = findSlot(item, dates, dayWindows, dayBlocks, dayOcc,
       Object.assign({}, base, { ignoreDeadline: true }));
@@ -1422,6 +1561,14 @@ function applyPlacementFailReason(task, placement) {
       task._unplacedDetail = (placement && placement.failDetail) ||
         'Weather constraint not satisfied (missing or blocking forecast)';
     }
+    return;
+  }
+  // R6 — Unscheduled fallback (999.874 sub-item 2).
+  // Flexible TPC items with a _targetDate that couldn't be placed after
+  // all relaxation attempts get a specific spacing_blocked reason.
+  if (task._targetDate && task.isFlexibleTpc) {
+    task._unplacedReason = REASON_CODES.SPACING_BLOCKED;
+    task._unplacedDetail = 'No available slot within the recurrence cycle after spacing relaxation';
     return;
   }
   if (placement && placement.failReason) {
@@ -1962,6 +2109,16 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     dayPlacements[slot.dateKey].push(entry);
     placedById[item.id] = { dateKey: slot.dateKey, start: slot.start, dur: item.dur };
     noteMasterPlacement(env, item, slot.dateKey);
+
+    // R4 — Average spacing recalculation (999.874 sub-item 2).
+    // After each flexible TPC instance is placed, recalculate the average
+    // spacing across all placed instances of that master. Then update the
+    // remaining unplaced instances' _targetDate and _deadlineDate to
+    // maintain that average spacing.
+    if (item.isFlexibleTpc && item.masterId && env && env.lastByMaster) {
+      recalcFlexibleTpcSpacing(item.masterId, queue, dates, env, item.cycleDays);
+    }
+
     emitStepRecord(cfg,
       (item.slack != null && isFinite(item.slack)) ? 'V2: Constrained' : 'V2: Unconstrained',
       item, slot.start, item.dur, slot.dateKey, false, dayPlaced,

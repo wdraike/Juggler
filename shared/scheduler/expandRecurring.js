@@ -96,6 +96,10 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
   // target-interval steering (collect candidates, then pick best N per cycle).
   // Key: sourceId → { 'M/D': true }
   var tpcPickedDates = {};
+  // Multi-step spacing (999.874): for each picked date, store the assigned
+  // _targetDate (ideal placement day) and _deadlineDate (last acceptable day).
+  // Key: sourceId → { 'M/D': { target: 'YYYY-MM-DD', deadline: 'YYYY-MM-DD' } }
+  var tpcTargetDates = {};
 
   // Caller (runSchedule) passes a map of pending recurring_instance dates so
   // the tpc slot accounting can count them as booked. Without this, pending
@@ -375,6 +379,35 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
       }
     }
 
+    // Multi-step spacing (999.874): compute _targetDate and _deadlineDate
+    // for each picked date. The first instance's target = first eligible day
+    // of the cycle. Each subsequent instance's target = previous target + minGap.
+    // minGap = max(1, floor(cycleDays * 0.5)).
+    var minGap = Math.max(1, Math.floor(cycleDays * 0.5));
+    var targetDates = {};
+    var sortedPicked = Object.keys(picked).sort();
+    var prevTarget = null;
+    sortedPicked.forEach(function(pk) {
+      var pickedDate = parseDate(pk);
+      if (!pickedDate) return;
+      var target;
+      if (prevTarget) {
+        target = new Date(prevTarget);
+        target.setDate(target.getDate() + minGap);
+      } else {
+        // First instance: target = first eligible day of the cycle
+        target = new Date(pickedDate);
+      }
+      var targetKey = formatDateKey(target);
+      // Deadline = target + minGap days (or cycle end, whichever is sooner)
+      var deadline = new Date(target);
+      deadline.setDate(deadline.getDate() + minGap);
+      var deadlineKey = formatDateKey(deadline);
+      targetDates[pk] = { target: targetKey, deadline: deadlineKey };
+      prevTarget = target;
+    });
+    tpcTargetDates[src.id] = targetDates;
+
     tpcPickedDates[src.id] = picked;
   });
 
@@ -564,7 +597,12 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         taskType: 'generated', sourceId: src.id, generated: true,
         _candidateDate: dateStr,
         _occurrenceOrdinal: nextOrdBySource[src.id],
-        _tpcBudgetUnscheduled: isTpcBudgetUnscheduled || false
+        _tpcBudgetUnscheduled: isTpcBudgetUnscheduled || false,
+        // Multi-step spacing (999.874): target date and deadline for flexible TPC
+        _targetDate: (tpc > 0 && tpc < selectedDayCount && tpcTargetDates[src.id] && tpcTargetDates[src.id][dateStr])
+          ? tpcTargetDates[src.id][dateStr].target : null,
+        _deadlineDate: (tpc > 0 && tpc < selectedDayCount && tpcTargetDates[src.id] && tpcTargetDates[src.id][dateStr])
+          ? tpcTargetDates[src.id][dateStr].deadline : null
       });
     });
 

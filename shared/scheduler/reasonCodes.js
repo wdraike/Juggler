@@ -27,6 +27,9 @@ var REASON_CODES = Object.freeze({
   RECURRING_SPLIT_OVERFLOW:  'recurring_split_overflow',
   MISSED:                    'missed',
   TPC_BUDGET:                'tpc_budget',
+  // 999.874 sub-item 2: flexible TPC instance could not be placed within
+  // its recurrence cycle after exhausting all relaxation attempts.
+  SPACING_BLOCKED:           'spacing_blocked',
 });
 
 var REASON_LABELS = Object.freeze({
@@ -40,6 +43,7 @@ var REASON_LABELS = Object.freeze({
   [REASON_CODES.RECURRING_SPLIT_OVERFLOW]: 'Recurrence overflow',
   [REASON_CODES.MISSED]:                   'Preferred time passed',
   [REASON_CODES.TPC_BUDGET]:               'Not enough cycle time',
+  [REASON_CODES.SPACING_BLOCKED]:          'No available slot within recurrence cycle',
 });
 
 /**
