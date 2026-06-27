@@ -38,7 +38,7 @@
  *   inheritance). (Legacy: `taskController.buildSourceMap`.)
  *
  * @property {(db: Function, userId: string) => Promise<Object[]>} loadSchedulableRows
- *   Load the scheduler's working set from `tasks_v`: rows with status ''/'wip'/
+ *   Load the scheduler's working set from `tasks_v`: rows with status ''/
  *   NULL OR task_type='recurring_template', scoped to the user. (Legacy:
  *   runSchedule.js ~324 `trx('tasks_v')…select()`.) `db` may be a trx handle so
  *   the read participates in the caller's transaction snapshot.

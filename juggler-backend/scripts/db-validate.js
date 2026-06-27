@@ -265,7 +265,7 @@ async function checkDataQuality() {
   // 2d. task_instances.status must be valid
   var invalidStatus = await db.raw(`
     SELECT id, master_id, status FROM task_instances
-    WHERE status NOT IN ('','wip','done','cancel','skip','pause','disabled')
+    WHERE status NOT IN ('','done','cancel','skip','pause','disabled')
   `);
   var isRows = invalidStatus[0] || [];
   check(

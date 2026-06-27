@@ -354,7 +354,7 @@ describe('DailyView — 999.882 calendar shows all lifecycle states (grid decoup
     ];
   }
   var lifecycleStatuses = {
-    open1: '', wip1: 'wip', done1: 'done', skip1: 'skip',
+    open1: '', done1: 'done', skip1: 'skip',
     missed1: 'missed', cancelled1: 'cancelled', pause1: 'pause',
   };
 
@@ -407,8 +407,8 @@ describe('DailyView — 999.882 calendar shows all lifecycle states (grid decoup
     expect(screen.getAllByText('✗').length).toBeGreaterThan(0);   // cancelled ✗
   });
 
-  test('grid is decoupled from the list filter: terminal blocks render under filter=wip too', () => {
-    renderGrid('wip');
+  test('grid is decoupled from the list filter: terminal blocks render under filter=action too', () => {
+    renderGrid('action');
     expect(screen.getByText('Done task')).toBeInTheDocument();
     expect(screen.getByText('Missed task')).toBeInTheDocument();
     expect(screen.getByText('Paused task')).toBeInTheDocument();

@@ -293,7 +293,6 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
       if (filter === 'all') return true;
       if (filter === 'open') return !isTerminalStatus(s);
       if (filter === 'done') return s === 'done';
-      if (filter === 'wip') return s === 'wip';
       if (filter === 'pause') return s === 'pause';
       if (filter === 'missed') return s === 'missed';
       if (filter === 'blocked') return s !== 'done' && s !== 'cancel';

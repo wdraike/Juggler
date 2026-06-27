@@ -41,7 +41,7 @@ async function run() {
     .whereNotNull('master_id')
     .whereNotNull('date')
     .where(function() {
-      this.whereNull('status').orWhere('status', '').orWhere('status', 'wip');
+      this.whereNull('status').orWhere('status', '');
     })
     .groupBy('user_id', 'master_id', 'date', 'occurrence_ordinal', 'split_ordinal')
     .having('cnt', '>', 1);

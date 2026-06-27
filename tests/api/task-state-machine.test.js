@@ -224,12 +224,12 @@ function makeInstance(overrides) {
 }
 
 // ---------------------------------------------------------------------------
-// SM-18: wip → '' (reopen) clears completed_at
+// SM-18: done → '' (reopen) clears completed_at
 // ---------------------------------------------------------------------------
 
-describe('SM-18: wip → reopen (status = empty string)', () => {
-  test('returns 200 and allows transition from wip to empty status', async () => {
-    const task = makeTask({ id: 'sm18-task', status: 'wip', completed_at: null });
+describe('SM-18: done → reopen (status = empty string)', () => {
+  test('returns 200 and allows transition from done to empty status', async () => {
+    const task = makeTask({ id: 'sm18-task', status: 'done', completed_at: '2026-05-15T14:00:00Z' });
     seedExisting(task);
 
     const res = await request(app)
@@ -261,12 +261,12 @@ describe('SM-18: wip → reopen (status = empty string)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// SM-19: wip → done (requires scheduled_at)
+// SM-19: '' → done (requires scheduled_at)
 // ---------------------------------------------------------------------------
 
-describe('SM-19: wip → done (task must have scheduled_at)', () => {
+describe('SM-19: todo → done (task must have scheduled_at)', () => {
   test('returns 200 when task has scheduled_at set', async () => {
-    const task = makeTask({ id: 'sm19-task', status: 'wip', scheduled_at: '2026-05-15 14:00:00', master_id: null });
+    const task = makeTask({ id: 'sm19-task', status: '', scheduled_at: '2026-05-15 14:00:00', master_id: null });
     seedExisting(task);
 
     const res = await request(app)
@@ -279,7 +279,7 @@ describe('SM-19: wip → done (task must have scheduled_at)', () => {
   });
 
   test('returns 400 with SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS when scheduled_at is null', async () => {
-    const task = makeTask({ id: 'sm19-unsched', status: 'wip', scheduled_at: null });
+    const task = makeTask({ id: 'sm19-unsched', status: '', scheduled_at: null });
     seedExisting(task);
 
     const res = await request(app)
@@ -291,8 +291,8 @@ describe('SM-19: wip → done (task must have scheduled_at)', () => {
     expect(res.body.code).toBe('SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS');
   });
 
-  test('writes completed_at on wip → done transition', async () => {
-    const task = makeTask({ id: 'sm19-ct', status: 'wip', scheduled_at: '2026-05-15 14:00:00' });
+  test('writes completed_at on todo → done transition', async () => {
+    const task = makeTask({ id: 'sm19-ct', status: '', scheduled_at: '2026-05-15 14:00:00' });
     seedExisting(task);
 
     await request(app)
@@ -459,7 +459,7 @@ describe('SM-22: disabled status guard', () => {
     const res = await request(app)
       .put('/api/tasks/sm22-disabled/status')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
-      .send({ status: 'wip' });
+      .send({ status: 'done' });
 
     expect(res.status).toBe(403);
     expect(res.body.code).toBe('TASK_DISABLED');
@@ -647,72 +647,6 @@ describe('SM-25: Terminal-status idempotency (done → done = 200)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// R6.1: time_remaining edge cases
-// ---------------------------------------------------------------------------
-describe('R6.1: time_remaining edge cases on todo→wip transition', () => {
-  test('todo→wip with zero time_remaining is accepted', async () => {
-    const task = makeTask({ id: 'r61-zero', status: '', scheduled_at: '2026-05-15 14:00:00' });
-    seedExisting(task);
-
-    const res = await request(app)
-      .put('/api/tasks/r61-zero/status')
-      .set('Authorization', `Bearer ${VALID_TOKEN}`)
-      .send({ status: 'wip', time_remaining: 0 });
-
-    expect(res.status).toBe(200);
-  });
-
-  test('todo→wip with negative time_remaining is rejected', async () => {
-    const task = makeTask({ id: 'r61-neg', status: '', scheduled_at: '2026-05-15 14:00:00' });
-    seedExisting(task);
-
-    const res = await request(app)
-      .put('/api/tasks/r61-neg/status')
-      .set('Authorization', `Bearer ${VALID_TOKEN}`)
-      .send({ status: 'wip', time_remaining: -5 });
-
-    // Negative time_remaining should be rejected with 400
-    expect(res.status).toBe(400);
-  });
-
-  test('todo→wip with very large time_remaining is accepted', async () => {
-    const task = makeTask({ id: 'r61-large', status: '', scheduled_at: '2026-05-15 14:00:00' });
-    seedExisting(task);
-
-    const res = await request(app)
-      .put('/api/tasks/r61-large/status')
-      .set('Authorization', `Bearer ${VALID_TOKEN}`)
-      .send({ status: 'wip', time_remaining: 999999 });
-
-    expect(res.status).toBe(200);
-  });
-
-  test('todo→wip without time_remaining defaults to task dur', async () => {
-    const task = makeTask({ id: 'r61-default', status: '', scheduled_at: '2026-05-15 14:00:00', dur: 30 });
-    seedExisting(task);
-
-    const res = await request(app)
-      .put('/api/tasks/r61-default/status')
-      .set('Authorization', `Bearer ${VALID_TOKEN}`)
-      .send({ status: 'wip' });
-
-    expect(res.status).toBe(200);
-  });
-
-  test('todo→wip with time_remaining greater than dur is accepted', async () => {
-    const task = makeTask({ id: 'r61-over', status: '', scheduled_at: '2026-05-15 14:00:00', dur: 30 });
-    seedExisting(task);
-
-    const res = await request(app)
-      .put('/api/tasks/r61-over/status')
-      .set('Authorization', `Bearer ${VALID_TOKEN}`)
-      .send({ status: 'wip', time_remaining: 60 });
-
-    expect(res.status).toBe(200);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // R6.6: Clock-in/out endpoint tests
 // ---------------------------------------------------------------------------
 describe('R6.6: Clock-in/out endpoints', () => {
@@ -751,7 +685,7 @@ describe('R6.6: Clock-in/out endpoints', () => {
   });
 
   test('POST /api/tasks/:id/clock-out returns 200 for existing task', async () => {
-    const task = makeTask({ id: 'r66-clockout', status: 'wip', scheduled_at: '2026-05-15 14:00:00' });
+    const task = makeTask({ id: 'r66-clockout', status: '', scheduled_at: '2026-05-15 14:00:00' });
     seedExisting(task);
 
     const res = await request(app)

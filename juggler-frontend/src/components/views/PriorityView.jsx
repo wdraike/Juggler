@@ -46,9 +46,8 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
     return deduped.filter(t => {
       var st = statuses[t.id] || '';
       if (filter === 'open') return !isTerminalStatus(st);
-      if (filter === 'action') return st === '' || st === 'wip';
+      if (filter === 'action') return st === '';
       if (filter === 'done') return st === 'done';
-      if (filter === 'wip') return st === 'wip';
       if (filter === 'pause') return st === 'pause';
       if (filter === 'missed') return st === 'missed';
       if (filter === 'pastdue') return pastDueIds && pastDueIds.has(t.id);

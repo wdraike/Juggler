@@ -44,7 +44,7 @@ var { z } = require('zod');
 var USER = 'r41-user';
 
 var statusUpdateSchema = z.object({
-  status: z.enum(['', 'done', 'wip', 'cancel', 'skip', 'pause', 'disabled', 'missed']),
+  status: z.enum(['', 'done', 'cancel', 'skip', 'pause', 'disabled', 'missed']),
   completedAt: z.string().optional(),
   direction: z.string().optional()
 }).passthrough();

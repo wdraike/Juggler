@@ -592,7 +592,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
   var _loadStart = Date.now();
   var _p_taskRows = trx('tasks_v').where('user_id', userId)
     .where(function() {
-      this.where('status', '').orWhere('status', 'wip')
+      this.where('status', '')
         // Non-template rows with NULL status (legacy / one-shot tasks never given a status).
         .orWhere(function() {
           this.whereNull('status').whereNot('task_type', 'recurring_template');

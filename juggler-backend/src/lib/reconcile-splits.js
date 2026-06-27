@@ -102,12 +102,19 @@ async function reconcileOccurrence(trx, masterId, master, occOrd, existingRows) 
   // Sort existing by split_ordinal
   existingRows.sort(function(a, b) { return a.split_ordinal - b.split_ordinal; });
 
+  // Split into terminal (done/cancel/skip/pause/missed) and pending.
+  // Terminal chunks are never updated or deleted — they are historical records.
+  // Only pending chunks are reconciled against the desired plan.
+  var TERMINAL = ['done', 'cancel', 'skip', 'pause', 'missed'];
+  var pending = existingRows.filter(function(r) { return TERMINAL.indexOf(r.status || '') === -1; });
+  var terminal = existingRows.filter(function(r) { return TERMINAL.indexOf(r.status || '') !== -1; });
+
   var inserted = 0, deleted = 0, updated = 0;
 
-  // Update survivors (matching split_ordinal 1..min(existing, desired))
-  var overlap = Math.min(existingRows.length, desired.length);
+  // Update survivors (matching split_ordinal 1..min(pending, desired))
+  var overlap = Math.min(pending.length, desired.length);
   for (var i = 0; i < overlap; i++) {
-    var e = existingRows[i];
+    var e = pending[i];
     var d = desired[i];
     if (e.split_ordinal !== d.splitOrdinal ||
         Number(e.split_total) !== desired.length ||
@@ -124,10 +131,10 @@ async function reconcileOccurrence(trx, masterId, master, occOrd, existingRows) 
     }
   }
 
-  // Insert missing chunks (when desired > existing)
-  if (desired.length > existingRows.length) {
-    var _template = existingRows[0]; // carry scheduling fields from occurrence's primary row
-    for (var j = existingRows.length; j < desired.length; j++) {
+  // Insert missing chunks (when desired > pending)
+  if (desired.length > pending.length) {
+    var _template = pending[0] || terminal[0]; // carry scheduling fields from any existing row
+    for (var j = pending.length; j < desired.length; j++) {
       var d2 = desired[j];
       await trx('task_instances').insert({
         id: masterId + '-occ' + occOrd + '-' + d2.splitOrdinal,
@@ -151,9 +158,9 @@ async function reconcileOccurrence(trx, masterId, master, occOrd, existingRows) 
     }
   }
 
-  // Delete extras (when existing > desired) — delete from the tail (highest split_ordinal)
-  if (existingRows.length > desired.length) {
-    var toDel = existingRows.slice(desired.length).map(function(r) { return r.id; });
+  // Delete extras (when pending > desired) — delete from the tail (highest split_ordinal)
+  if (pending.length > desired.length) {
+    var toDel = pending.slice(desired.length).map(function(r) { return r.id; });
     await trx('task_instances').whereIn('id', toDel).del();
     deleted += toDel.length;
   }
@@ -163,14 +170,17 @@ async function reconcileOccurrence(trx, masterId, master, occOrd, existingRows) 
 
 /**
  * Collapse: master is no longer split. Keep split_ordinal=1 rows, delete the rest.
- * Reset split_total=1 on survivors.
+ * Reset split_total=1 on survivors. Terminal chunks (done/cancel/skip/pause/missed)
+ * are never deleted — they are historical records.
  */
 async function collapseChunks(trx, masterId, master, existing) {
   var deleted = 0, updated = 0;
+  var TERMINAL = ['done', 'cancel', 'skip', 'pause', 'missed'];
   var survivors = [];
   var toDel = [];
   existing.forEach(function(r) {
     if (r.split_ordinal === 1) survivors.push(r);
+    else if (TERMINAL.indexOf(r.status || '') !== -1) survivors.push(r); // keep terminal history
     else toDel.push(r.id);
   });
   if (toDel.length > 0) {

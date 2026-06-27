@@ -162,13 +162,12 @@ async function openTaskForm(page) {
  * Change a task's status via the StatusToggle buttons.
  * StatusToggle renders title-labelled buttons (Open, Complete, Start, Cancel, Skip, Pause).
  * @param {import('@playwright/test').Page} page
- * @param {'done'|'wip'|'cancel'|'skip'|'pause'|''} status
+ * @param {'done'|'cancel'|'skip'|'pause'|''} status
  */
 async function setStatus(page, status) {
   const labelMap = {
     '': 'Open',
     done: 'Complete',
-    wip: 'Start',
     cancel: 'Cancel',
     skip: 'Skip',
     pause: 'Pause',

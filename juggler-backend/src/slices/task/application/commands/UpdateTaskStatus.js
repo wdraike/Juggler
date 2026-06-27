@@ -47,7 +47,7 @@
 var assertDeps = require('../_assertDeps');
 
 var TERMINAL_REQUIRES_SCHEDULE = ['done', 'skip', 'cancel'];
-var VALID_STATUSES = ['', 'done', 'wip', 'cancel', 'skip', 'pause', 'disabled', 'missed'];
+var VALID_STATUSES = ['', 'done', 'cancel', 'skip', 'pause', 'disabled', 'missed'];
 
 /** @param {UpdateTaskStatusDeps} deps */
 function UpdateTaskStatus(deps) {
@@ -170,16 +170,14 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
     update.completed_at = null;
   }
 
-  // 999.586: On todo→wip transition, populate time_remaining with estimated
+  // 999.586: On todo→done transition, populate time_remaining with estimated
   // duration (dur) when the caller doesn't supply an explicit value.
-  if (status === 'wip' && existing.status !== 'wip') {
+  if (status === 'done' && existing.status !== 'done') {
     if (body.time_remaining != null) {
       if (body.time_remaining < 0) {
         return { status: 400, body: { error: 'time_remaining must be non-negative' } };
       }
       update.time_remaining = body.time_remaining;
-    } else {
-      update.time_remaining = existing.dur || 30;
     }
   }
 
@@ -188,6 +186,11 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
     if (completedAt && completedAt !== 'now' && completedAt !== 'scheduled') {
       var customDate = new Date(completedAt);
       update.scheduled_at = customDate > new Date() ? new Date() : customDate;
+    }
+    // Future-done: snap scheduled_at to now so the user can mark a future
+    // task as done without leaving a stale future placement.
+    if (existing.scheduled_at && new Date(existing.scheduled_at) > new Date()) {
+      update.scheduled_at = new Date();
     }
   }
 

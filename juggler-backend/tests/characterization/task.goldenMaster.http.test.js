@@ -682,35 +682,34 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
       expect(typeof res.body.siblingsUpdated).toBe('number');
     });
 
-    test('B4 + Surface 4: status=wip returns task', async () => {
+    test('B4 + Surface 4: status=done returns task', async () => {
       const existing = makeTaskRow({
         id: 'task-st-002',
         scheduled_at: '2026-06-01 14:00:00',
         status: ''
       });
-      // For wip: no rolling-master check (only done/skip/missed), no split siblings.
+      // For done: rolling-master check, no split siblings.
       resolveQueue.push(existing);   // fetchTaskWithEventIds tasks_v
       resolveQueue.push([]);         // ledger
       // 999.681 undo recording (recordAction → KnexActionLogRepository.record) runs
       // BEFORE the write (UpdateTaskStatus.js:214). record() does action_log.del()
-      // then action_log.insert() — two queue shifts. Added after this golden was first
-      // authored, which is why the scaffold previously fell one+ entries short and the
-      // post-update fetch read past the seeded wip row (got null → status="").
+      // then action_log.insert() — two queue shifts.
       resolveQueue.push(1);          // action_log delete (prior entry, single-undo)
       resolveQueue.push([1]);        // action_log insert
-      // NO rolling-master check for wip (only for done/skip/missed)
+      // rolling-master check
+      resolveQueue.push(null);       // task_masters first() (rolling-master)
       // NO siblings: split_total is null
-      resolveQueue.push({ ...existing, status: 'wip' });  // fetchTaskWithEventIds (updated)
+      resolveQueue.push({ ...existing, status: 'done' });  // fetchTaskWithEventIds (updated)
       resolveQueue.push([]);         // ledger (updated)
       resolveQueue.push([]);         // srcMap tasks_v select (getRecurringTemplateRows)
 
       const res = await request(app)
         .put('/api/tasks/task-st-002/status')
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
-        .send({ status: 'wip' });
+        .send({ status: 'done' });
 
       expect(res.status).toBe(200);
-      expect(res.body.task.status).toBe('wip');
+      expect(res.body.task.status).toBe('done');
     });
 
     test('B4 + Surface 4: terminal status requires scheduled_at', async () => {
@@ -789,17 +788,20 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
         scheduled_at: '2026-06-01 14:00:00',
         status: ''
       });
-      // wip path: no rolling-master check, no siblings
+      // done path: no rolling-master check, no siblings
       resolveQueue.push(existing);
       resolveQueue.push([]);
-      resolveQueue.push({ ...existing, status: 'wip' });
+      resolveQueue.push(1);          // action_log delete
+      resolveQueue.push([1]);        // action_log insert
+      resolveQueue.push(null);       // rolling-master check
+      resolveQueue.push({ ...existing, status: 'done' });
       resolveQueue.push([]);
       resolveQueue.push([]);
 
       await request(app)
         .put('/api/tasks/task-st-007/status')
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
-        .send({ status: 'wip' });
+        .send({ status: 'done' });
 
       const sseEmitter = require('../../src/lib/sse-emitter');
       expect(sseEmitter.emit).toHaveBeenCalledWith(
@@ -1242,29 +1244,36 @@ describe('Surface 7 — TASK_* event emissions (ADR-0001 lib-events seam)', () =
     unsub2();
   });
 
-  test('B9: updateTaskStatus(wip) publishes TASK_UPDATED (not TASK_COMPLETED)', async () => {
+  test('B9: updateTaskStatus(done) publishes TASK_COMPLETED (not TASK_UPDATED)', async () => {
     const { spy: completeSpy, unsubscribe: unsub1 } = spyOnEvent(EventTypes.TASK_COMPLETED);
     const { spy: updSpy, unsubscribe: unsub2 } = spyOnEvent(EventTypes.TASK_UPDATED);
 
     const existing = makeTaskRow({
-      id: 'evt-wip-001',
+      id: 'evt-done-001',
       scheduled_at: '2026-06-01 14:00:00',
       status: ''
     });
-    // wip path: no rolling-master check, no siblings, 5 queue items total
+    // done path: rolling-master check, no siblings, 7 queue items total
     resolveQueue.push(existing);                         // fetchTaskWithEventIds (existing)
     resolveQueue.push([]);                               // ledger (existing)
-    resolveQueue.push({ ...existing, status: 'wip' });   // fetchTaskWithEventIds (updated)
+    resolveQueue.push(1);                                // action_log delete
+    resolveQueue.push([1]);                              // action_log insert
+    resolveQueue.push(null);                             // rolling-master check
+    resolveQueue.push({ ...existing, status: 'done' }); // fetchTaskWithEventIds (updated)
     resolveQueue.push([]);                               // ledger (updated)
     resolveQueue.push([]);                               // srcMap tasks_v
 
     await request(app)
-      .put('/api/tasks/evt-wip-001/status')
+      .put('/api/tasks/evt-done-001/status')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
-      .send({ status: 'wip' });
+      .send({ status: 'done' });
 
-    expect(completeSpy).toHaveBeenCalledTimes(0);
-    expect(updSpy).toHaveBeenCalledTimes(1);
+    expect(completeSpy).toHaveBeenCalledTimes(1);
+    expect(updSpy).toHaveBeenCalledTimes(0); // done → TASK_COMPLETED, not TASK_UPDATED
+
+    const payload = completeSpy.mock.calls[0][0];
+    expect(payload.taskId).toBe('evt-done-001');
+    expect(payload.userId).toBe(TEST_USER.id);
     unsub1();
     unsub2();
   });
@@ -1362,17 +1371,20 @@ describe('Surface 8 + S4/S6 — enqueueScheduleRun call shape and S4/S6 isolatio
       scheduled_at: '2026-06-01 14:00:00',
       status: ''
     });
-    // wip path: 5 queue items
+    // done path: 8 queue items
     resolveQueue.push(existing);
     resolveQueue.push([]);
-    resolveQueue.push({ ...existing, status: 'wip' });
+    resolveQueue.push(1);          // action_log delete
+    resolveQueue.push([1]);        // action_log insert
+    resolveQueue.push(null);       // rolling-master check
+    resolveQueue.push({ ...existing, status: 'done' });
     resolveQueue.push([]);
     resolveQueue.push([]);
 
     await request(app)
       .put('/api/tasks/task-s6-001/status')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
-      .send({ status: 'wip' });
+      .send({ status: 'done' });
 
     const sseEmitter = require('../../src/lib/sse-emitter');
     // Exactly ONE tasks:changed SSE (from enqueueScheduleRun wrapper).

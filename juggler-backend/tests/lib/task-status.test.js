@@ -10,8 +10,8 @@ describe('Task Status Library', () => {
     expect(isTerminalStatus('missed')).toBe(true);
   });
 
-  test('isTerminalStatus returns false for wip', () => {
-    expect(isTerminalStatus('wip')).toBe(false);
+  test('isTerminalStatus returns false for empty status', () => {
+    expect(isTerminalStatus('')).toBe(false);
   });
 
   test('TERMINAL_STATUSES is frozen', () => {

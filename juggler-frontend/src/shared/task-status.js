@@ -7,7 +7,6 @@
 
 const TaskStatus = Object.freeze({
   EMPTY: '',           // Default/empty status (task created but not started)
-  WIP: 'wip',          // Work In Progress (task is actively being worked on)
   DONE: 'done',        // Task completed successfully
   CANCEL: 'cancel',    // Task cancelled by user (instance action)
   CANCELLED: 'cancelled', // Series/instance cancelled (backend cancel path — tasks-write.js); terminal
@@ -18,7 +17,6 @@ const TaskStatus = Object.freeze({
 
 const TASK_STATUSES = Object.freeze([
   TaskStatus.EMPTY,
-  TaskStatus.WIP,
   TaskStatus.DONE,
   TaskStatus.CANCEL,
   TaskStatus.CANCELLED,
@@ -37,8 +35,7 @@ const TERMINAL_STATUSES = Object.freeze([
 ]);
 
 const ACTIVE_STATUSES = Object.freeze([
-  TaskStatus.EMPTY,
-  TaskStatus.WIP
+  TaskStatus.EMPTY
 ]);
 
 /**
@@ -80,8 +77,6 @@ function getTaskStatusDisplayName(status) {
   switch (status) {
     case TaskStatus.EMPTY:
       return 'Not Started';
-    case TaskStatus.WIP:
-      return 'In Progress';
     case TaskStatus.DONE:
       return 'Completed';
     case TaskStatus.CANCEL:

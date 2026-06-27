@@ -122,13 +122,13 @@ describe('updateTasksWhere — field routing', () => {
     // text is master-only, status is instance-only, dur is both
     await tw.updateTasksWhere(db, USER_A, function(q) {
       return q.where('id', id);
-    }, { text: 'new', status: 'wip', dur: 60, updated_at: db.fn.now() });
+    }, { text: 'new', status: 'done', dur: 60, updated_at: db.fn.now() });
 
     var m = await db('task_masters').where('id', id).first();
     var i = await db('task_instances').where('id', id).first();
     expect(m.text).toBe('new');
     expect(m.dur).toBe(60);
-    expect(i.status).toBe('wip');
+    expect(i.status).toBe('done');
     expect(i.dur).toBe(60);
   });
 });
@@ -158,10 +158,10 @@ describe('updateInstancesWhere — instance-only filters', () => {
 
     var n = await tw.updateInstancesWhere(db, USER_A, function(q) {
       return q.where({ master_id: tid, status: '' });
-    }, { status: 'wip', updated_at: db.fn.now() });
+    }, { status: 'done', updated_at: db.fn.now() });
     expect(n).toBe(2);
-    expect((await db('task_instances').where('id', iid1).first()).status).toBe('wip');
-    expect((await db('task_instances').where('id', iid2).first()).status).toBe('wip');
+    expect((await db('task_instances').where('id', iid1).first()).status).toBe('done');
+    expect((await db('task_instances').where('id', iid2).first()).status).toBe('done');
   });
 });
 

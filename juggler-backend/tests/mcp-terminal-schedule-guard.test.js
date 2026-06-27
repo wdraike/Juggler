@@ -20,7 +20,7 @@
  *       isError), DB status becomes 'done'. Passes now and after fix (guard
  *       only fires when scheduled_at is null).
  *
- *   R3  set_task_status({id, status:'wip'|''}) on UNSCHEDULED task → success.
+ *   R3  set_task_status({id, status:''}) on UNSCHEDULED task → success.
  *       Non-terminal statuses must never be blocked. Passes now and after fix.
  *
  *   R4  set_task_status({id, status:'done'}) on a SCHEDULED ROLLING-recurring
@@ -272,22 +272,11 @@ describe('R2 — set_task_status: terminal on SCHEDULED task → success', () =>
 // R3 — set_task_status: non-terminal on unscheduled → success (guard must not fire)
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-// Passes now and after fix. Non-terminal statuses (wip, '') are never restricted.
+// Passes now and after fix. Non-terminal statuses ('') are never restricted.
 
 describe('R3 — set_task_status: non-terminal on unscheduled task → always succeeds', () => {
 
-  it('R3a: set_task_status wip on unscheduled → no isError, DB status = wip', async () => {
-    var result = await handlers['set_task_status']({ id: WIP_UNSCHEDULED_ID, status: 'wip' });
-
-    expect(result.isError).toBeFalsy();
-
-    var row = await db('task_instances')
-      .where({ id: WIP_UNSCHEDULED_ID, user_id: USER_ID }).first();
-    expect(row.status).toBe('wip');
-  });
-
-  it('R3b: set_task_status empty-string on unscheduled → no isError, DB status = \'\'', async () => {
-    // Resets the task back to active (idempotent; also tests the '' path through the guard).
+  it('R3a: set_task_status empty-string on unscheduled -> no isError, DB status = empty', async () => {
     var result = await handlers['set_task_status']({ id: WIP_UNSCHEDULED_ID, status: '' });
 
     expect(result.isError).toBeFalsy();

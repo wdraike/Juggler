@@ -4,7 +4,6 @@
 
 declare const TaskStatus: {
     readonly EMPTY: '';
-    readonly WIP: 'wip';
     readonly DONE: 'done';
     readonly CANCEL: 'cancel';
     readonly SKIP: 'skip';
@@ -14,7 +13,6 @@ declare const TaskStatus: {
 
 declare const TASK_STATUSES: readonly [
     '',
-    'wip',
     'done',
     'cancel',
     'skip',
@@ -30,11 +28,10 @@ declare const TERMINAL_STATUSES: readonly [
     'missed'
 ];
 
-declare const ACTIVE_STATUSES: readonly ['', 'wip'];
+declare const ACTIVE_STATUSES: readonly [''];
 
 declare const STATUS_OPTIONS: readonly [
     '',
-    'wip',
     'done',
     'cancel',
     'skip',

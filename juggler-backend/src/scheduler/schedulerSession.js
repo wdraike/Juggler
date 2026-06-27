@@ -73,7 +73,7 @@ async function startSession(userId, options) {
   // templates and never expand any recurrings).
   var tasks = await db('tasks_v').where('user_id', userId)
     .where(function() {
-      this.where('status', '').orWhere('status', 'wip').orWhereNull('status')
+      this.where('status', '').orWhereNull('status')
         .orWhere('task_type', 'recurring_template');
     })
     .select();

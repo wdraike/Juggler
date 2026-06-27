@@ -93,17 +93,6 @@ describe('migration 20260605000000_add_task_status_enum_and_timestamps', () => {
     });
 
     await db('task_masters').insert({
-      id: 'test-master-wip',
-      user_id: 'test-user-status',
-      text: 'Test task with WIP status',
-      status: 'wip',
-      pri: 'P3',
-      created_at: db.fn.now(),
-      updated_at: db.fn.now()
-    });
-
-    // Test inserting with terminal status and scheduled_at (should succeed)
-    await db('task_masters').insert({
       id: 'test-master-done',
       user_id: 'test-user-status',
       text: 'Test task with done status',
@@ -118,10 +107,6 @@ describe('migration 20260605000000_add_task_status_enum_and_timestamps', () => {
     var emptyTask = await db('task_masters').where('id', 'test-master-empty').first();
     expect(emptyTask).toBeTruthy();
     expect(emptyTask.status).toBe('');
-
-    var wipTask = await db('task_masters').where('id', 'test-master-wip').first();
-    expect(wipTask).toBeTruthy();
-    expect(wipTask.status).toBe('wip');
 
     var doneTask = await db('task_masters').where('id', 'test-master-done').first();
     expect(doneTask).toBeTruthy();

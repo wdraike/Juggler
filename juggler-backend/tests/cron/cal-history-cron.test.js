@@ -49,8 +49,8 @@ describe('Cal History Cron Job', () => {
     // (master_id, occurrence_ordinal, split_ordinal), both default 1, so two
     // instances under one master collide unless the ordinal differs.
     await db('task_instances').insert([
-      { id: 'ch-old', master_id: 'ch-master', user_id: TEST_USER, scheduled_at: thirteenMonthsAgo, status: 'wip', occurrence_ordinal: 1 },
-      { id: 'ch-new', master_id: 'ch-master', user_id: TEST_USER, scheduled_at: new Date(), status: 'wip', occurrence_ordinal: 2 },
+      { id: 'ch-old', master_id: 'ch-master', user_id: TEST_USER, scheduled_at: thirteenMonthsAgo, status: '', occurrence_ordinal: 1 },
+      { id: 'ch-new', master_id: 'ch-master', user_id: TEST_USER, scheduled_at: new Date(), status: '', occurrence_ordinal: 2 },
     ]);
     await db('cal_history').insert([
       { task_id: 'ch-old', user_id: TEST_USER, status: 'missed', created_by: 'test', scheduled_at: thirteenMonthsAgo, created_at: thirteenMonthsAgo },
@@ -73,14 +73,14 @@ describe('Cal History Cron Job', () => {
     await db('task_masters').insert({ id: 'cm-master-1', user_id: TEST_USER, text: 'Cron mark-missed master' });
     await db('task_instances').insert({
       id: 'cm-inst-1', master_id: 'cm-master-1', user_id: TEST_USER,
-      scheduled_at: threeDaysAgo, status: 'wip',
+      scheduled_at: threeDaysAgo, status: '',
     });
 
     await markMissedTasks();
 
     const inst = await db('task_instances').where('id', 'cm-inst-1').first();
     expect(inst.status).not.toBe('missed');   // never auto-missed
-    expect(inst.status).toBe('wip');           // status unchanged (non-terminal)
+    expect(inst.status).toBe('');              // status unchanged (non-terminal)
     expect(!!inst.overdue).toBe(true);         // flagged overdue — visible, never-missing
     expect(inst.completed_at).toBeFalsy();     // not closed
 
@@ -94,13 +94,13 @@ describe('Cal History Cron Job', () => {
     await db('task_masters').insert({ id: 'cm-master-2', user_id: TEST_USER, text: 'Recent master' });
     await db('task_instances').insert({
       id: 'cm-inst-2', master_id: 'cm-master-2', user_id: TEST_USER,
-      scheduled_at: oneHourAgo, status: 'wip',
+      scheduled_at: oneHourAgo, status: '',
     });
 
     await markMissedTasks();
 
     const inst = await db('task_instances').where('id', 'cm-inst-2').first();
-    expect(inst.status).toBe('wip');
+    expect(inst.status).toBe('');
   });
 
   test('runCalHistoryCron runs mark + purge end-to-end without throwing', async () => {

@@ -146,21 +146,21 @@ describe('999.567 — Project filtering (M-R3)', () => {
   });
 
   describe('project filter combined with status filter', () => {
-    test('filtering by project and status (wip) returns only matching tasks', () => {
-      // Mark some tasks as wip
-      var t1 = tasks[0]; t1.status = 'wip';
-      var t2 = tasks[1]; t2.status = 'wip';
-      var t4 = tasks[3]; t4.status = 'wip';
+    test('filtering by project and done status returns only done tasks in that project', () => {
+      // Mark some tasks as done
+      var t1 = tasks[0]; t1.status = 'done';
+      var t2 = tasks[1]; t2.status = 'done';
+      var t4 = tasks[3]; t4.status = 'done';
 
       // Filter by project first, then by status
       var byProject = filterByProject(tasks, 'Work');
-      var wipInWork = byProject.filter(function(t) { return t.status === 'wip'; });
+      var doneInWork = byProject.filter(function(t) { return t.status === 'done'; });
 
-      expect(wipInWork.length).toBe(1);
-      expect(wipInWork[0].id).toBe('t1');
+      expect(doneInWork.length).toBe(1);
+      expect(doneInWork[0].id).toBe('t1');
     });
 
-    test('filtering by project and done status returns only done tasks in that project', () => {
+    test('filtering by project and done status returns only done tasks in Personal project', () => {
       var t3 = tasks[2]; t3.status = 'done';
       var t6 = tasks[5]; t6.status = 'done';
 

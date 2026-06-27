@@ -13,7 +13,7 @@ var BASE_TASK = {
   location: ['home'],
   deadline: '2026-05-20',
   overdue: true,
-  status: 'wip',
+  status: '',
   timeRemaining: 15,
   recurring: false,
   marker: false,
@@ -27,7 +27,7 @@ function renderCard(overrides) {
     <div style={{ width: 320 }}>
       <TaskCard
         task={task}
-        status="wip"
+        status=""
         onStatusChange={null}
         onDelete={null}
         onExpand={null}

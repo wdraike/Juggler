@@ -69,7 +69,7 @@ function getStatusReason(t, status) {
     case 'pause':
       return t.pauseReason ? 'paused: ' + t.pauseReason : 'temporarily paused';
     default:
-      return null; // 'done' and 'wip' don't typically have automatic reasons
+      return null; // 'done' doesn't typically have automatic reasons
   }
 }
 

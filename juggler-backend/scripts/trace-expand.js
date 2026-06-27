@@ -12,7 +12,7 @@ var RECUR_EXPAND_DAYS = require('../src/scheduler/constants').RECUR_EXPAND_DAYS;
   if (!userId) { console.error('Usage: node scripts/trace-expand.js <userId>'); process.exit(2); }
   var taskRows = await db('tasks_v').where('user_id', userId)
     .where(function() {
-      this.where('status', '').orWhere('status', 'wip').orWhereNull('status')
+      this.where('status', '').orWhereNull('status')
         .orWhere('task_type', 'recurring_template');
     })
     .select();

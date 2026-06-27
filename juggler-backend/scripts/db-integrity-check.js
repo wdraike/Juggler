@@ -61,7 +61,7 @@ async function run() {
 
   // ── 3. Invalid status ──
   log('3. Checking status values...');
-  var validStatuses = ['', 'done', 'wip', 'cancel', 'skip', 'pause', 'disabled'];
+  var validStatuses = ['', 'done', 'cancel', 'skip', 'pause', 'disabled'];
   allTasks.forEach(function(t) {
     var st = t.status || '';
     if (validStatuses.indexOf(st) < 0) {

@@ -448,7 +448,7 @@ async function resetRecurringInstances(dbOrTrx, userId, masterId, logTag) {
  * both tables (mirrors deleteTaskById's both-table reach) so the row PERSISTS as
  * a record. 'cancelled' is non-terminal → no terminal_scheduled_at constraint,
  * so an unplaced (scheduled_at NULL) row can be cancelled. The scheduler load
- * filter (status not in ''|'wip'|NULL) excludes it automatically.
+ * filter (status not in ''|NULL) excludes it automatically.
  */
 async function softCancelById(dbOrTrx, id, userId) {
   var changes = { status: 'cancelled', updated_at: dbOrTrx.fn.now() };

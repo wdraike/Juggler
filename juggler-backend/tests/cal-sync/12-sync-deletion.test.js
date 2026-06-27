@@ -414,7 +414,7 @@ describe('Done-task reactivation — done_frozen reset (D-04)', () => {
 
     var statusReq = mockReq(user, {
       params: { id: task.id },
-      body: { status: 'wip' }
+      body: { status: 'done' }
     });
     var statusRes = mockRes();
     await updateTaskStatus(statusReq, statusRes);

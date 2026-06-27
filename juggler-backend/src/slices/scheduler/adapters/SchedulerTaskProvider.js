@@ -47,7 +47,7 @@ function SchedulerTaskProvider(deps) {
 
 /**
  * Load the scheduler's working set from `tasks_v` (verbatim — runSchedule.js
- * ~324-329): status ''/'wip'/NULL OR task_type='recurring_template', scoped to
+ * ~324-329): status ''/NULL OR task_type='recurring_template', scoped to
  * the user. `db` may be a trx handle.
  *
  * BUG-814 (R55): recurring_template rows always have status=NULL in tasks_v
@@ -68,8 +68,8 @@ SchedulerTaskProvider.prototype.loadSchedulableRows = function loadSchedulableRo
   //       'cancelled' or 'disabled' (checked via NOT EXISTS on master_id)
   return db('tasks_v').where('user_id', userId)
     .where(function() {
-      // Live non-template tasks (status='' or 'wip')
-      this.where('status', '').orWhere('status', 'wip')
+      // Live non-template tasks (status='')
+      this.where('status', '')
         // Non-template rows with NULL status (legacy / one-shot tasks never given a status)
         .orWhere(function() {
           this.whereNull('status').whereNot('task_type', 'recurring_template');

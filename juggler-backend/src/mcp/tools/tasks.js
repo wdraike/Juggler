@@ -97,7 +97,7 @@ function registerTaskTools(server, userId) {
     'list_tasks',
     'List tasks. Excludes completed ("done") tasks by default so the agent sees the active working set. Pass `status="done"` or `includeDone: true` to see completed history.',
     {
-      status: z.string().optional().describe('Filter by exact status: "" (pending), "wip", "done", "skip", "cancel", "disabled", "pause". When provided, this overrides the default done-exclusion.'),
+      status: z.string().optional().describe('Filter by exact status: "" (pending), "done", "skip", "cancel", "disabled", "pause". When provided, this overrides the default done-exclusion.'),
       includeDone: z.boolean().optional().describe('Include tasks with status="done" in the default list. Default: false — done tasks are filtered out to keep the active working set focused.'),
       project: z.string().optional().describe('Filter by project name'),
       date: z.string().optional().describe('Filter by date (M/D format, e.g. "3/8") — matched against derived local date'),
@@ -539,7 +539,7 @@ function registerTaskTools(server, userId) {
     'Search tasks by text across task names and notes. Excludes "done" tasks by default — pass status="done" or includeDone=true to see completed history.',
     {
       query: z.string().describe('Search text (case-insensitive, matched against task text and notes)'),
-      status: z.string().optional().describe('Filter by exact status: "" (pending), "wip", "done", "skip", "cancel", "disabled", "pause". Overrides the default done-exclusion.'),
+      status: z.string().optional().describe('Filter by exact status: "" (pending), "done", "skip", "cancel", "disabled", "pause". Overrides the default done-exclusion.'),
       includeDone: z.boolean().optional().describe('Include tasks with status="done" in the default results. Default: false.'),
       project: z.string().optional().describe('Filter by project name'),
       limit: z.number().optional().describe('Max results (default 20)')

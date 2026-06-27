@@ -12,7 +12,7 @@ var TEMPLATE_ID = 't1776649350872m2xp';
   var userId = '019d29f9-9ef9-74eb-af2d-0418237d0bd9';
   var taskRows = await db('tasks_v').where('user_id', userId)
     .where(function() {
-      this.where('status', '').orWhere('status', 'wip').orWhereNull('status')
+      this.where('status', '').orWhereNull('status')
         .orWhere('task_type', 'recurring_template');
     })
     .select();

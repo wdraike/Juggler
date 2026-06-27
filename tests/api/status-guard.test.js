@@ -5,7 +5,6 @@
  *   - PUT /api/tasks/:id/status with status='done' on unscheduled task returns 400 + code
  *     SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS
  *   - Same for 'skip' and 'cancel'
- *   - 'wip' (non-terminal) on unscheduled task is allowed (no guard)
  *   - User-supplied 'missed' rejected with 403 + STATUS_MISSED_SYSTEM_ONLY (system-only status)
  *   - Recurring template + 'pause' is allowed regardless of scheduled_at
  *   - completed_at is written when status flips to a terminal value
@@ -143,15 +142,6 @@ describe('PUT /api/tasks/:id/status — juggler-cal-history Plan C scheduled_at 
       .send({ status: 'cancel' });
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS');
-  });
-
-  test('allows wip on unscheduled task (non-terminal not gated)', async () => {
-    seedExisting({ id: 'task-4', user_id: TEST_USER.id, task_type: 'task', status: '', scheduled_at: null });
-    const res = await request(app)
-      .put('/api/tasks/task-4/status')
-      .set('Authorization', `Bearer ${VALID_TOKEN}`)
-      .send({ status: 'wip' });
-    expect(res.status).not.toBe(400);
   });
 
   test('rejects user-supplied missed with 403', async () => {

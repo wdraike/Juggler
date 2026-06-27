@@ -206,7 +206,7 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
             {'📌'}
           </span>
         )}
-        {status === 'wip' && task.timeRemaining != null && (
+        {task.timeRemaining != null && (
           <span style={{
             fontSize: 9, fontWeight: 700,
             color: theme.amberText,

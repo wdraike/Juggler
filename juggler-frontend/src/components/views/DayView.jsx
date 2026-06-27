@@ -28,9 +28,8 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
       if (isPast && isTerminalStatus(st)) return true;
       return !isTerminalStatus(st);
     }
-    if (filter === 'action') return st === '' || st === 'wip';
+    if (filter === 'action') return st === '';
     if (filter === 'done') return st === 'done';
-    if (filter === 'wip') return st === 'wip';
     if (filter === 'pause') return st === 'pause';
     if (filter === 'missed') return st === 'missed';
     if (filter === 'pastdue') return pastDueIds && pastDueIds.has(taskId);

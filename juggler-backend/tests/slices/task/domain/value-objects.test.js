@@ -73,7 +73,7 @@ describe('TaskStatus — closed enum (characterized from STATUS_OPTIONS)', () =>
 
   test('isTerminal matches lib TERMINAL_STATUSES exactly', () => {
     TERMINAL_STATUSES.forEach((s) => expect(new TaskStatus(s).isTerminal()).toBe(true));
-    ['', 'wip'].forEach((s) => expect(new TaskStatus(s).isTerminal()).toBe(false));
+    [''].forEach((s) => expect(new TaskStatus(s).isTerminal()).toBe(false));
   });
 });
 

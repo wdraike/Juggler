@@ -1202,7 +1202,6 @@ scenarios['status-filtering'] = function() {
     makeTask({ id: 'done_task', text: 'Already done', pri: 'P1', dur: 60 }),
     makeTask({ id: 'cancel_task', text: 'Cancelled', pri: 'P2', dur: 60 }),
     makeTask({ id: 'skip_task', text: 'Skipped', pri: 'P3', dur: 60 }),
-    makeTask({ id: 'wip_task', text: 'In progress', pri: 'P2', dur: 60 }),
     makeTask({ id: 'active_task', text: 'Active', pri: 'P3', dur: 60 }),
     // Task depending on done task — should be placed fine
     makeTask({ id: 'after_done', text: 'After done task', pri: 'P2', dur: 30, dependsOn: ['done_task'] }),
@@ -1212,7 +1211,6 @@ scenarios['status-filtering'] = function() {
     done_task: 'done',
     cancel_task: 'cancel',
     skip_task: 'skip',
-    wip_task: 'wip',
     active_task: '',
     after_done: ''
   };
@@ -1870,30 +1868,6 @@ scenarios['hill-climb-deps'] = function() {
   var cfg = makeCfg();
   var result = unifiedSchedule(tasks, statuses, todayKey, 0, cfg);
   validate(result, tasks, cfg, 'Hill-climb dep preservation', { statuses: statuses });
-};
-
-// ── Scenario 36: WIP tasks use timeRemaining ──
-scenarios['wip-time-remaining'] = function() {
-  var tasks = [
-    makeTask({ id: 'wip_big', text: 'WIP big task', pri: 'P2', dur: 120, timeRemaining: 30 }),
-    makeTask({ id: 'wip_normal', text: 'WIP normal', pri: 'P2', dur: 60, timeRemaining: 60 }),
-    makeTask({ id: 'active', text: 'Active task', pri: 'P3', dur: 60 }),
-  ];
-
-  var statuses = { wip_big: 'wip', wip_normal: 'wip', active: '' };
-  var cfg = makeCfg();
-  var result = unifiedSchedule(tasks, statuses, todayKey, 0, cfg);
-  validate(result, tasks, cfg, 'WIP tasks use timeRemaining', { statuses: statuses });
-
-  // WIP task with 30m remaining should be placed for at most 30m
-  Object.keys(result.dayPlacements).forEach(function(dk) {
-    result.dayPlacements[dk].forEach(function(p) {
-      if (p.task && p.task.id === 'wip_big' && p.dur > 30) {
-        console.log('  FAIL: wip_big placed for ' + p.dur + 'm but only 30m remaining');
-        totalFailed++;
-      }
-    });
-  });
 };
 
 // ── Scenario 37: Dependency with startAfter ──

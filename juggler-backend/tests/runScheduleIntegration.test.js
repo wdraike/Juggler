@@ -1384,7 +1384,7 @@ describe('BUG-142 regression: past recurring instance auto-miss (Plan C)', () =>
     // Per the never-missing invariant it must remain VISIBLE: status stays non-terminal and
     // it is surfaced in the Unplaced list (unscheduled=1), never deleted, never missed.
     expect(row.status).not.toBe('missed');
-    expect(['', 'wip']).toContain(row.status || '');
+    expect(['']).toContain(row.status || '');
     expect(!!row.unscheduled).toBe(true); // visible in Unplaced (never absent)
   });
 

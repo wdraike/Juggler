@@ -5,7 +5,7 @@
  * `src/lib/task-status.js`'s frozen `STATUS_OPTIONS`, which is the single source
  * of truth the controller already uses (`isTerminalStatus` is imported from it
  * and `rowToTask` surfaces `status: row.status || ''`). Verified against:
- *   - src/lib/task-status.js  STATUS_OPTIONS = ['', 'wip', 'done', 'cancel',
+ *   - src/lib/task-status.js  STATUS_OPTIONS = ['', 'done', 'cancel',
  *                                               'skip', 'pause', 'missed']
  *   - the W1 golden-master makeTaskRow default `status: ''` and the
  *     updateTaskStatus('done') / terminal-status paths.

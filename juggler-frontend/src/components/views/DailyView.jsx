@@ -96,7 +96,7 @@ function getStatusReason(t, status) {
     case 'pause':
       return t.pauseReason ? 'paused: ' + t.pauseReason : 'temporarily paused';
     default:
-      return null; // 'done' and 'wip' don't typically have automatic reasons
+      return null; // 'done' doesn't typically have automatic reasons
   }
 }
 
@@ -576,7 +576,7 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
           if (depCount > 0) items.push({ key: 'deps', node: (
             <span>{'\u26D3'} {depCount}</span>
           )});
-          if (status === 'wip' && t.timeRemaining != null) items.push({ key: 'remaining', node: (
+          if (t.timeRemaining != null) items.push({ key: 'remaining', node: (
             <span style={{ fontWeight: 700, color: theme.amberText }}>{t.timeRemaining}m left</span>
           )});
           if (isWhenRelaxed) items.push({ key: 'relaxed', node: (
@@ -918,11 +918,10 @@ export default function DailyView({
       if (isPast && isTerminalStatus(st)) return true;
       return !isTerminalStatus(st);
     }
-    if (filter === 'action') return st === '' || st === 'wip';
+    if (filter === 'action') return st === '';
     if (filter === 'done') return st === 'done';
     if (filter === 'pause') return st === 'pause';
     if (filter === 'missed') return st === 'missed';
-    if (filter === 'wip') return st === 'wip';
     if (filter === 'pastdue') return pastDueIds && pastDueIds.has(taskId);
     if (filter === 'fixed') return fixedIds && fixedIds.has(taskId);
     if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(taskId);

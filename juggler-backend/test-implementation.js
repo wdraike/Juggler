@@ -4,7 +4,7 @@ const { CalHistoryStatus, isValidCalHistoryStatus, isTerminalCalHistoryStatus } 
 console.log('=== Task Status Library Tests ===');
 console.log('TERMINAL_STATUSES:', TERMINAL_STATUSES);
 console.log('isTerminalStatus("missed"):', isTerminalStatus('missed'));
-console.log('isTerminalStatus("wip"):', isTerminalStatus('wip'));
+console.log('isTerminalStatus("done"):', isTerminalStatus('done'));
 console.log('TERMINAL_STATUSES includes missed:', TERMINAL_STATUSES.includes('missed'));
 
 console.log('\n=== Status Enum Tests ===');
@@ -23,7 +23,7 @@ const { isTaskMissed, shouldAutoMarkMissed } = require('../shared/scheduler/miss
 
 const testTask = {
   scheduled_at: new Date(Date.now() - 25 * 60 * 60 * 1000), // 25 hours ago
-  status: 'wip'
+  status: ''
 };
 
 console.log('isTaskMissed(testTask):', isTaskMissed(testTask, new Date()));

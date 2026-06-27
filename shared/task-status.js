@@ -9,7 +9,6 @@
 
 const TaskStatus = Object.freeze({
   EMPTY: '',           // Default/empty status (task created but not started)
-  WIP: 'wip',          // Work In Progress (task is actively being worked on)
   DONE: 'done',        // Task completed successfully
   CANCEL: 'cancel',    // Task cancelled by user
   SKIP: 'skip',        // Task skipped (temporarily bypassed)
@@ -19,7 +18,6 @@ const TaskStatus = Object.freeze({
 
 const TASK_STATUSES = Object.freeze([
   TaskStatus.EMPTY,
-  TaskStatus.WIP,
   TaskStatus.DONE,
   TaskStatus.CANCEL,
   TaskStatus.SKIP,
@@ -36,13 +34,11 @@ const TERMINAL_STATUSES = Object.freeze([
 ]);
 
 const ACTIVE_STATUSES = Object.freeze([
-  TaskStatus.EMPTY,
-  TaskStatus.WIP
+  TaskStatus.EMPTY
 ]);
 
 const STATUS_OPTIONS = Object.freeze([
   TaskStatus.EMPTY,
-  TaskStatus.WIP,
   TaskStatus.DONE,
   TaskStatus.CANCEL,
   TaskStatus.SKIP,
@@ -110,8 +106,6 @@ function getTaskStatusDisplayName(status) {
   switch (status) {
     case TaskStatus.EMPTY:
       return 'Not Started';
-    case TaskStatus.WIP:
-      return 'In Progress';
     case TaskStatus.DONE:
       return 'Completed';
     case TaskStatus.CANCEL:
@@ -136,8 +130,6 @@ function getTaskStatusDescription(status) {
   switch (status) {
     case TaskStatus.EMPTY:
       return 'Task created but not yet started';
-    case TaskStatus.WIP:
-      return 'Task is actively being worked on';
     case TaskStatus.DONE:
       return 'Task completed successfully';
     case TaskStatus.CANCEL:
@@ -220,12 +212,8 @@ function canTransition(currentStatus, newStatus) {
   // Special transition rules based on current status
   switch (currentStatus) {
     case TaskStatus.EMPTY:
-      // EMPTY can transition to: done, wip, skip, cancel, pause
-      return ['done', 'wip', 'skip', 'cancel', 'pause'].indexOf(newStatus) !== -1;
-
-    case TaskStatus.WIP:
-      // WIP can transition to: done, EMPTY (reopen), skip, cancel
-      return ['done', '', 'skip', 'cancel'].indexOf(newStatus) !== -1;
+      // EMPTY can transition to: done, skip, cancel, pause
+      return ['done', 'skip', 'cancel', 'pause'].indexOf(newStatus) !== -1;
 
     default:
       // For any other status (shouldn't happen since we checked terminal above)

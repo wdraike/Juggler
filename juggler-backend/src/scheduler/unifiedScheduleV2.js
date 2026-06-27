@@ -338,32 +338,6 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
     if ((pm === PLACEMENT_MODES.FIXED || pm === PLACEMENT_MODES.TIME_WINDOW) && t.preferredTimeMins != null && anchorMin == null) {
       anchorMin = t.preferredTimeMins;
     }
-    // R52 frozen invariant: a STARTED (wip) instance pins to its LIVE placement
-    // regardless of placement mode. Its t.time was derived from the current
-    // scheduled_at (the user is actively working it) — authoritative, NOT the
-    // stale-cache case the ANYTIME exclusion above guards against. Anchor it so it
-    // routes through the immovable path and is never re-placed.
-    if (anchorMin == null && st === 'wip' && t.time) {
-      anchorMin = parseTimeToMinutes(t.time);
-    }
-    // Defensive guard: if anchorMin is STILL null for a wip with a live
-    // scheduled_at (t.time was unparseable — e.g. unexpected format), derive
-    // anchorMin from scheduled_at via tz-aware utcToLocal so the item is never
-    // silently de-anchored. Do NOT use a || fallback — only attempt this when
-    // the wip + scheduled_at condition is confirmed.
-    if (anchorMin == null && st === 'wip' && t.scheduledAt && t.tz) {
-      var saLocal = dateHelpers.utcToLocal(new Date(t.scheduledAt), t.tz);
-      if (saLocal && saLocal.time) {
-        var saMin = parseTimeToMinutes(saLocal.time);
-        if (saMin != null) {
-          anchorMin = saMin;
-        } else {
-          console.warn('[unifiedScheduleV2] wip anchor: could not parse scheduled_at local time for task', t.id, 'saLocal.time=', saLocal.time);
-        }
-      } else {
-        console.warn('[unifiedScheduleV2] wip anchor: utcToLocal returned no time for task', t.id, 'scheduledAt=', t.scheduledAt, 'tz=', t.tz);
-      }
-    }
     // DB-single-source (W2 / Odin): a non-recurring FIXED calendar event whose
     // anchorMin is STILL null — t.time was distrusted (when-tag present, line 294)
     // and there is no preferred_time_mins — must anchor at its PERSISTED placement.
@@ -585,13 +559,6 @@ function buildItems(allTasks, statuses, dates, todayKey, nowMins, _cfg) {
       // isGenerated — see findEarliestSlot for the clamping logic.
       isGenerated: !!t.generated && !recurring,
       isRigid: pm === PLACEMENT_MODES.FIXED,
-      // Frozen invariant (R52): a STARTED instance (status 'wip') is immovable —
-      // the user began it, so the scheduler must never re-place it. Pinned at its
-      // existing slot when it has one (anchorDate+anchorMin are derived from
-      // scheduled_at via rowToTask). ponytail: only started-WITH-a-placement is
-      // protected here (the confirmed regression); an unanchored wip keeps current
-      // behavior — no slot to pin to, out of scope.
-      isStarted: st === 'wip',
       isRecurring: recurring,
       isMarker: isMarker,
       flexWhen: flexWhen,
@@ -1852,15 +1819,11 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
     // queue as a fresh item so the scheduler can find the next valid slot within the cycle
     // (R32.7 guard: day-locked non-TPC instances are never forward-rolled).
     if (item.anchorDate && item.anchorDate < todayIsoKey &&
-        (item.isRecurring || (item.isFixedWhen && item.anchorMin != null) ||
-         (item.isStarted && item.anchorMin != null))) {
-      // R52 frozen invariant: a past STARTED instance stays pinned at its
-      // original date as overdue — never re-placed forward (same as a past
-      // fixed/ingested commitment).
+        (item.isRecurring || (item.isFixedWhen && item.anchorMin != null))) {
       //
       // Forward-roll gate: flexible-TPC recurring within its recurrence period.
-      // isStarted and isFixedWhen are never forward-rolled (pinned by R52 / R50.1).
-      if (item.isRecurring && item.isFlexibleTpc && !item.isStarted && !item.isFixedWhen) {
+      // isFixedWhen is never forward-rolled (pinned by R50.1).
+      if (item.isRecurring && item.isFlexibleTpc && !item.isFixedWhen) {
         var _cycleLen2 = recurringCycleDays(item.task && item.task.recur != null ? item.task.recur : null) || 1;
         var _anchorParsed = parseDate(item.anchorDate);
         if (_anchorParsed) {
@@ -1927,14 +1890,10 @@ function unifiedScheduleV2(allTasks, statuses, effectiveTodayKey, nowMins, cfg) 
       return;
     }
     var isRigidWithAnchor = item.isRecurring && item.isRigid && item.anchorMin != null;
-    // R52 frozen invariant: a started (wip) instance with a placement reserves
-    // its existing slot via tryPlaceAtTime and is never recomputed/moved.
-    var isStartedWithAnchor = item.isStarted && item.anchorDate && item.anchorMin != null;
     var isImmovable =
       (item.isMarker && item.anchorDate && item.anchorMin != null) ||
       item.isRigid ||
-      isRigidWithAnchor ||
-      isStartedWithAnchor;
+      isRigidWithAnchor;
     if (isImmovable) {
       // For rigid recurrings: check whether the anchor slot is already occupied
       // by a previously placed task (not merely by the nowMins time-boundary).

@@ -65,7 +65,7 @@ describe('state/constants — juggler-cal-history Plan B', () => {
   });
 
   test('isTerminalStatus returns false for non-terminal values', () => {
-    ['', 'wip', 'disabled'].forEach((s) => {
+    ['', 'disabled'].forEach((s) => {
       expect(isTerminalStatus(s)).toBe(false);
     });
   });

@@ -64,7 +64,6 @@ function icalToPri(val) {
 function statusToIcal(st) {
   if (st === 'done') return 'COMPLETED';
   if (st === 'cancel') return 'CANCELLED';
-  if (st === 'wip') return 'IN-PROCESS';
   return 'NEEDS-ACTION';
 }
 
@@ -73,7 +72,6 @@ function icalToStatus(val) {
   var v = val.toUpperCase();
   if (v === 'COMPLETED') return 'done';
   if (v === 'CANCELLED') return 'cancel';
-  if (v === 'IN-PROCESS') return 'wip';
   return '';
 }
 

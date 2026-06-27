@@ -204,7 +204,6 @@ describe('Zod Validation Boundaries', () => {
     const testCases = [
       // Valid cases
       { input: { status: '' }, shouldPass: true, description: 'empty status (valid)' },
-      { input: { status: 'wip' }, shouldPass: true, description: 'wip status' },
       { input: { status: 'done' }, shouldPass: true, description: 'done status' },
       { input: { status: 'cancel' }, shouldPass: true, description: 'cancel status' },
       { input: { status: 'skip' }, shouldPass: true, description: 'skip status' },

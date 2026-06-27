@@ -35,7 +35,6 @@ export default function useKeyboardShortcuts({
       var f = stateRef.current.filter;
       if (f === 'open') return st !== 'done' && st !== 'cancel' && st !== 'skip' && st !== 'pause';
       if (f === 'done') return st === 'done';
-      if (f === 'wip') return st === 'wip';
       if (f === 'pause') return st === 'pause';
       return true;
     }
@@ -89,7 +88,7 @@ export default function useKeyboardShortcuts({
 
       // S: cycle status on expanded task
       if (e.key === 's' && st.expandedTask) {
-        var cycle = ['', 'wip', 'done'];
+        var cycle = ['', 'done'];
         // For recurring templates opened via an instance, use the instance ID for status
         var statusTarget = (st.expandedInstanceMap && st.expandedInstanceMap[st.expandedTask]) || st.expandedTask;
         var ct = st.allTasks.find(t => t.id === statusTarget);
