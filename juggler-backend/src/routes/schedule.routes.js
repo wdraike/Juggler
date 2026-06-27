@@ -12,7 +12,7 @@ var { withSyncLock } = require('../lib/sync-lock');
 var schedulerSession = require('../scheduler/schedulerSession');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 const { createLogger } = require('@raike/lib-logger');
-const { safeTimezone } = require('../../shared/scheduler/dateHelpers');
+const { safeTimezone } = require('../../../shared/scheduler/dateHelpers');
 const logger = createLogger('schedule.routes');
 
 // Rate limit scheduler endpoints — expensive operations
