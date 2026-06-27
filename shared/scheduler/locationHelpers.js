@@ -94,7 +94,7 @@ function resolveDayLocation(dateStr, cfg, blocks) {
 
 function canTaskRun(task, dayLocId, toolMatrix) {
   var t = migrateTask(task);
-  if (t.location.length > 0 && t.location.indexOf(dayLocId) === -1) return false;
+  if (t.location.length > 0 && t.location.map(function(l) { return l.toLowerCase(); }).indexOf((dayLocId || '').toLowerCase()) === -1) return false;
   if (t.tools && t.tools.length > 0) {
     var available = (toolMatrix && toolMatrix[dayLocId]) || [];
     for (var i = 0; i < t.tools.length; i++) {
@@ -122,7 +122,7 @@ function canTaskRun(task, dayLocId, toolMatrix) {
 // BOTH location and tool reports 'location_mismatch' (AC1.1-g).
 function whyCannotRun(task, dayLocId, toolMatrix) {
   var t = migrateTask(task);
-  if (t.location.length > 0 && t.location.indexOf(dayLocId) === -1) {
+  if (t.location.length > 0 && t.location.map(function(l) { return l.toLowerCase(); }).indexOf((dayLocId || '').toLowerCase()) === -1) {
     return {
       ok: false,
       cause: 'location_mismatch',

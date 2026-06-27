@@ -1431,8 +1431,11 @@ async function runScheduleAndPersist(userId, _retries, options) {
     try {
       cfg.weatherByDateHour = await _weatherProvider.loadWeatherForHorizon(cfg.locations, db);
     } catch (_e) {
-      cfg.weatherByDateHour = {}; // fail-open: proceed without weather data
+      cfg.weatherByDateHour = {}; // fail-closed: no data → weatherOk rejects every slot → tasks go to Unplaced
     }
+  } else {
+    // No locations configured — weather-constrained tasks can't be placed
+    cfg.weatherByDateHour = {};
   }
 
   // 6. Run scheduler (primary chosen by SCHEDULER_V2 env var; shadow runs

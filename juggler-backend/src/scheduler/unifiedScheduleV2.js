@@ -1049,11 +1049,11 @@ function findEarliestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
     (Array.isArray(item.task.tools) && item.task.tools.length > 0)
   );
   var weatherByDateHour = cfg && cfg.weatherByDateHour;
-  // Fail-OPEN on no weather data: an empty map ({}) is truthy but carries no
-  // forecast, so weatherOk would reject every date (fail-closed) and push
-  // weather-constrained tasks to Unplaced. Only enforce the weather constraint
-  // when the map actually has entries (matches runSchedule.js:281-282,1318 intent).
-  var checkWeather = weatherByDateHour && Object.keys(weatherByDateHour).length > 0
+  // FAIL-CLOSED (999.881 / R38 CC6): a weather-constrained task MUST NOT be
+  // placed when the weather data needed to satisfy its constraint is absent.
+  // Previously the `Object.keys(weatherByDateHour).length > 0` guard skipped the
+  // check entirely on missing data — weatherOk is already fail-closed below.
+  var checkWeather = weatherByDateHour
     && item.task && hasWeatherConstraint(item.task);
 
   // FR1 / AC1.2 — placement-failure diagnostic accumulator. The caller passes an
@@ -1265,10 +1265,9 @@ function findLatestSlot(item, dates, dayWindows, dayBlocks, dayOcc, opts) {
     (Array.isArray(item.task.tools) && item.task.tools.length > 0)
   );
   var weatherByDateHour = cfg && cfg.weatherByDateHour;
-  // Fail-OPEN on no weather data (see findEarliestSlot above): only enforce the
-  // weather constraint when the map actually has forecast entries; an empty {}
-  // map would otherwise reject every date and push tasks to Unplaced.
-  var checkWeather = weatherByDateHour && Object.keys(weatherByDateHour).length > 0
+  // FAIL-CLOSED (999.881 / R38 CC6): same as findEarliestSlot — weather-constrained
+  // tasks must NOT be placed when weather data is absent.
+  var checkWeather = weatherByDateHour
     && item.task && hasWeatherConstraint(item.task);
 
   // A-002: same per-run location cache as findEarliestSlot (env reused across the run).
