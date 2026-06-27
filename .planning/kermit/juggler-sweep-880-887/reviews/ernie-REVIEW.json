@@ -1,0 +1,15 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "ernie",
+  "leg_id": "juggler-sweep-880-887",
+  "mode": "chore",
+  "depth": "quick",
+  "status": "DONE",
+  "summary": "Two pure UI removals clean: CompletionMetricsWidget (import+render+file) has 0 orphan refs, allTasks/statuses/theme still used; HeaderBar gear button removed, Settings import + onShowSettings prop still live (overflow L70 + UserDropdown L234); JSX balance intact.",
+  "steps": {
+    "line_by_line": "done",
+    "scooter_consult": "n/a"
+  },
+  "findings": [],
+  "refers": []
+}

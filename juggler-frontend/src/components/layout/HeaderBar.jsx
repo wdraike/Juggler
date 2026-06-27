@@ -181,7 +181,6 @@ export default function HeaderBar({ darkMode, setDarkMode, saving, selectedDateK
         {/* Desktop: show all buttons inline */}
         {!useOverflow && (
           <>
-            <button onClick={onShowSettings} style={btnStyle(theme, isMobile)} title="Settings — locations, tools, templates, and preferences" aria-label="Settings"><Settings size={16} /></button>
             <button onClick={onShowExport} style={btnStyle(theme, isMobile)} title="Import/Export — save or load tasks as JSON" aria-label="Import or Export">&#x1F4E6;</button>
             {(onShowGCalSync || onShowMsftCalSync) && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

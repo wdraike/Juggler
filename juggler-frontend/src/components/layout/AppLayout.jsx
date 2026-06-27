@@ -8,7 +8,6 @@ import ErrorBoundary from '../ErrorBoundary';
 import HeaderBar from './HeaderBar';
 import WeekStrip from './WeekStrip';
 import NavigationBar from './NavigationBar';
-import CompletionMetricsWidget from './CompletionMetricsWidget';
 import ToastNotification, { useToast } from './ToastNotification';
 import useTaskState from '../../hooks/useTaskState';
 import useConfig from '../../hooks/useConfig';
@@ -1193,9 +1192,6 @@ export default function AppLayout() {
           isMobile={isMobile}
         />
       </div>
-
-      {/* 999.256: compact task-completion metrics widget (derived from loaded tasks). */}
-      {!isMobile && <CompletionMetricsWidget tasks={allTasks} statuses={statuses} theme={theme} />}
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative', minHeight: 0 }}>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>

@@ -1,0 +1,26 @@
+{
+  "$contract": "leg-meta/v1",
+  "leg_id": "juggler-sweep-880-887",
+  "mode": "chore",
+  "lane": "trivial",
+  "depth": "quick",
+  "legs_since_retro": 0,
+  "retro_n": 1,
+  "triggers": {
+    "security_surface": false,
+    "infra_surface": false,
+    "frontend": true,
+    "data_migration": false,
+    "code_surface": true,
+    "docs_only": false,
+    "interface_change": false
+  },
+  "wbs_files": [
+    "juggler-frontend/src/components/layout/CompletionMetricsWidget.jsx",
+    "juggler-frontend/src/components/layout/AppLayout.jsx",
+    "juggler-frontend/src/components/layout/HeaderBar.jsx"
+  ],
+  "verdict": "PASS",
+  "fix_loop_iters": 0,
+  "muppets_dispatched": ["ernie"]
+}
