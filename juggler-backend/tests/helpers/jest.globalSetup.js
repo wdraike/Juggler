@@ -26,6 +26,10 @@ function assertSafeTestTarget(conn) {
   // (3410-3417, test-bed/scripts/instance.sh). The safety invariant is unchanged
   // — still requires a `_test` DB name and no prod signal — only the recognised
   // test-port set widened. Dev (3308) and prod (3307) remain refused.
+  // ⚠ COUPLED to POOL_SIZE=8 in test-bed/scripts/instance.sh: the `341[0-7]` band
+  //   matches slots 0-7 (ports 3410-3417). If the pool grows past 8 slots, widen
+  //   this regex too — otherwise the new slots' ports are REFUSED (fails safe, but
+  //   surprising). Keep the two in sync.
   var isTestbedPort = port === '3407' || /^341[0-7]$/.test(port);
   var isTestDbName = /_test$/.test(database);
   var prodSignals = [];
