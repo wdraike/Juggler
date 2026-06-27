@@ -6,13 +6,14 @@ const { z } = require('zod');
 const safeStringify = require('../safeStringify');
 const db = require('../../db');
 const { rowToTask } = require('../../controllers/task.controller');
+const { safeTimezone } = require('../../../../shared/scheduler/dateHelpers');
 
 function registerDataTools(server, userId) {
 
   // Helper: get user timezone
   async function getUserTimezone() {
     var user = await db('users').where('id', userId).select('timezone').first();
-    return user ? user.timezone : 'America/New_York'; // users.timezone is NOT NULL (migration 20260626000000)
+    return safeTimezone(user ? user.timezone : null, 'America/New_York');
   }
 
   // ── export_data ──

@@ -6,12 +6,13 @@ const safeStringify = require('../safeStringify');
 const { runScheduleAndPersist, deriveSchedulePlacements } = require('../../slices/scheduler/facade');
 const { withLock } = require('../../lib/sync-lock');
 const db = require('../../db');
+const { safeTimezone } = require('../../../../shared/scheduler/dateHelpers');
 
 function registerScheduleTools(server, userId) {
 
   async function getUserTimezone() {
     var user = await db('users').where('id', userId).select('timezone').first();
-    return user ? user.timezone : 'America/New_York'; // users.timezone is NOT NULL (migration 20260626000000)
+    return safeTimezone(user ? user.timezone : null, 'America/New_York');
   }
 
   // ── get_schedule ──

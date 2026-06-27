@@ -17,6 +17,7 @@ const { isLocked, enqueueWrite, splitFields } = require('../../lib/task-write-qu
 const tasksWrite = require('../../lib/tasks-write');
 const { isRollingMaster, computeRollingAnchor } = require('../../lib/rolling-anchor');
 const { getNowInTimezone } = require('../../../../shared/scheduler/getNowInTimezone');
+const { safeTimezone } = require('../../../../shared/scheduler/dateHelpers');
 const { createLogger } = require('../../lib/logger');
 
 const logger = createLogger('mcp.tools.tasks');
@@ -88,7 +89,7 @@ function registerTaskTools(server, userId) {
   // Helper: get user timezone
   async function getUserTimezone() {
     var user = await db('users').where('id', userId).select('timezone').first();
-    return user ? user.timezone : 'America/New_York'; // users.timezone is NOT NULL (migration 20260626000000)
+    return safeTimezone(user ? user.timezone : null, 'America/New_York');
   }
 
   // ── list_tasks ──

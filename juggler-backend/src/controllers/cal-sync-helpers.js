@@ -5,6 +5,7 @@
 
 var crypto = require('crypto');
 var { libCalAdapterLogger } = require('../lib/logger');
+var { safeTimezone } = require('../../shared/scheduler/dateHelpers');
 
 var DEFAULT_TIMEZONE = require('../scheduler/constants').DEFAULT_TIMEZONE;
 
@@ -84,7 +85,7 @@ function jugglerDateToISO(date, time, year) {
  */
 function isoToJugglerDate(isoString, timezone) {
   if (!isoString) return { date: null, time: null };
-  var tz = timezone || DEFAULT_TIMEZONE;
+  var tz = safeTimezone(timezone, DEFAULT_TIMEZONE);
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(isoString)) {
     return { date: isoString, time: null };

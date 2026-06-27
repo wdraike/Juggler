@@ -20,6 +20,7 @@
 var crypto = require('crypto');
 var db = require('../db');
 var { createLogger } = require('@raike/lib-logger');
+var { safeTimezone } = require('../../../shared/scheduler/dateHelpers');
 var logger = createLogger('schedulerSession');
 
 var SESSION_TTL_MS = 60 * 60 * 1000; // 1h
@@ -53,7 +54,7 @@ async function startSession(userId, options) {
   var constants = require('./constants');
   var rowToTask = require('../controllers/task.controller').rowToTask;
 
-  var TIMEZONE = opts.timezone || 'America/New_York';
+  var TIMEZONE = safeTimezone(opts.timezone, 'America/New_York');
   var nowDt = new Date();
   var parts = new Intl.DateTimeFormat('en-US', {
     timeZone: TIMEZONE, year: 'numeric', month: 'numeric', day: 'numeric',

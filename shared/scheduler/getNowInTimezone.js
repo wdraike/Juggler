@@ -25,9 +25,10 @@
  * @returns {{ todayKey: string, nowMins: number, todayDate: Date }}
  */
 var DEFAULT_TIMEZONE = 'America/New_York';
+var { safeTimezone } = require('./dateHelpers');
 
 function getNowInTimezone(timezone, clock) {
-  var tz = timezone || DEFAULT_TIMEZONE;
+  var tz = safeTimezone(timezone, DEFAULT_TIMEZONE);
   var now = clock ? clock.now() : new Date();
 
   var parts = new Intl.DateTimeFormat('en-US', {

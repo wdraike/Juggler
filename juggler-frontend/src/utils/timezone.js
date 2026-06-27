@@ -18,6 +18,31 @@ export function getBrowserTimezone() {
 }
 
 /**
+ * Check if a string is a valid IANA timezone name.
+ * @param {string|null|undefined} tz
+ * @returns {boolean}
+ */
+function isValidTimezone(tz) {
+  if (!tz) return false;
+  try {
+    var zones = Intl.supportedValuesOf('timeZone');
+    return zones.indexOf(tz) !== -1;
+  } catch (e) {
+    return true; // older runtimes: allow through
+  }
+}
+
+/**
+ * Validate a timezone string; fall back to America/New_York if invalid.
+ * @param {string|null|undefined} tz - IANA timezone to validate
+ * @param {string} [fallback='America/New_York'] - fallback on invalid
+ * @returns {string} validated IANA timezone
+ */
+export function safeTimezone(tz, fallback) {
+  return isValidTimezone(tz) ? tz : (fallback || 'America/New_York');
+}
+
+/**
  * Convert a UTC ISO string to local date/time in a target timezone.
  * Used by the "View in..." dropdown for task-level timezone conversion.
  *
@@ -29,9 +54,10 @@ export function convertTimeForDisplay(isoString, timezone) {
   if (!isoString || !timezone) return { date: null, time: null, day: null };
   var d = new Date(isoString);
   if (isNaN(d.getTime())) return { date: null, time: null, day: null };
+  var tz = safeTimezone(timezone);
   var parts = {};
   new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone, year: 'numeric', month: 'numeric', day: 'numeric',
+    timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric',
     hour: 'numeric', minute: 'numeric', hourCycle: 'h23', weekday: 'short'
   }).formatToParts(d).forEach(function(p) { parts[p.type] = p.value; });
   var h = parseInt(parts.hour) % 24;
@@ -55,10 +81,12 @@ export function convertTimeForDisplay(isoString, timezone) {
  */
 export function getTimezoneAbbr(timezone) {
   if (!timezone) return '';
+  var tz = safeTimezone(timezone, '');
+  if (!tz) return timezone;
   try {
     var now = new Date();
     var parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone, timeZoneName: 'short'
+      timeZone: tz, timeZoneName: 'short'
     }).formatToParts(now);
     var tzPart = parts.find(function(p) { return p.type === 'timeZoneName'; });
     return tzPart ? tzPart.value : timezone;
@@ -74,12 +102,14 @@ export function getTimezoneAbbr(timezone) {
  */
 export function getUtcOffset(timezone) {
   if (!timezone) return '';
+  var tz = safeTimezone(timezone, '');
+  if (!tz) return '';
   try {
     var now = new Date();
     // Get local time in the target timezone
     var inTz = {};
     new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone, year: 'numeric', month: 'numeric', day: 'numeric',
+      timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric',
       hour: 'numeric', minute: 'numeric', hourCycle: 'h23'
     }).formatToParts(now).forEach(function(p) { inTz[p.type] = parseInt(p.value, 10); });
     // Get UTC time

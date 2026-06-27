@@ -12,6 +12,7 @@ var { withSyncLock } = require('../lib/sync-lock');
 var schedulerSession = require('../scheduler/schedulerSession');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 const { createLogger } = require('@raike/lib-logger');
+const { safeTimezone } = require('../../shared/scheduler/dateHelpers');
 const logger = createLogger('schedule.routes');
 
 // Rate limit scheduler endpoints — expensive operations
@@ -35,7 +36,7 @@ var debugLimiter = rateLimit({
  */
 router.post('/run', authenticateJWT, schedulerLimiter, withSyncLock(async function(req, res) {
   try {
-    var opts = { timezone: req.headers['x-timezone'] || 'America/New_York' };
+    var opts = { timezone: safeTimezone(req.headers['x-timezone'], 'America/New_York') };
     var result = await runScheduleAndPersist(req.user.id, undefined, opts);
     // result now includes dayPlacements and unplaced from the same run (cached)
     res.json(result);
@@ -70,7 +71,7 @@ router.post('/debug', authenticateJWT, authenticateAdmin, debugLimiter, async fu
   try {
     var unifiedSchedule = require('../slices/scheduler/facade').unifiedScheduleV2;
     var db = require('../db');
-    var TIMEZONE = req.headers['x-timezone'] || 'America/New_York';
+    var TIMEZONE = safeTimezone(req.headers['x-timezone'], 'America/New_York');
     var userId = req.user.id;
 
     // Resolve date context in user's timezone
@@ -163,7 +164,7 @@ var stepperLimiter = rateLimit({
 
 router.post('/step/start', authenticateJWT, authenticateAdmin, stepperLimiter, async function(req, res) {
   try {
-    var tz = req.headers['x-timezone'] || 'America/New_York';
+    var tz = safeTimezone(req.headers['x-timezone'], 'America/New_York');
     var info = await schedulerSession.startSession(req.user.id, { timezone: tz });
     res.json(info);
   } catch (err) {

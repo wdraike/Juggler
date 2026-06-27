@@ -15,6 +15,7 @@ var { getConnectedAdapters } = require('../slices/calendar/facade');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 var { rowToTask, safeParseJSON } = require('./task.controller');
 var { localToUtc, utcToLocal } = require('../scheduler/dateHelpers');
+var { safeTimezone } = require('../../shared/scheduler/dateHelpers');
 var { taskHash, userHash, isoToJugglerDate, toMySQLDate, DEFAULT_TIMEZONE, callWithRateLimit } = require('./cal-sync-helpers');
 var sseEmitter = require('../lib/sse-emitter');
 var { acquireLock, releaseLock, refreshLock } = require('../lib/sync-lock');
@@ -133,7 +134,7 @@ async function sync(req, res) {
   try {
     var userId = req.user.id;
     var userRow = await getDb()('users').where('id', userId).select('timezone').first();
-    var tz = (userRow && userRow.timezone) || DEFAULT_TIMEZONE;
+    var tz = safeTimezone((userRow && userRow.timezone) || null, DEFAULT_TIMEZONE);
     var year = new Date().getFullYear();
     var now = new Date();
 

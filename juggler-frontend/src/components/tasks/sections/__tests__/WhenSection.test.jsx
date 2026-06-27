@@ -511,6 +511,58 @@ it('changing endTime to valid value calls onDurChange with correct duration', ()
   expect(durCalled).toBe(60);
 });
 
+// --- BUG-999.896: End-time→dur path must clamp to [DUR_MIN=5, DUR_MAX=480] ---
+
+it('BUG-999.896: endTime producing duration below DUR_MIN (5) clamps to DUR_MIN', () => {
+  // time=14:00, endTime=14:02 → 2 min computed, should clamp to 5
+  var durCalled = null;
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    time="14:00" endTime="14:30" dur={30}
+    onDurChange={function(v) { durCalled = v; }}
+  />);
+  var endInput = screen.getByDisplayValue('14:30');
+  fireEvent.change(endInput, { target: { value: '14:02' } });
+  // 14:02 - 14:00 = 2 min → clamped to DUR_MIN=5
+  expect(durCalled).toBe(5);
+});
+
+it('BUG-999.896: endTime producing duration above DUR_MAX (480) clamps to DUR_MAX', () => {
+  // time=09:00, endTime=18:00 → 540 min computed, should clamp to 480
+  var durCalled = null;
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    time="09:00" endTime="10:00" dur={60}
+    onDurChange={function(v) { durCalled = v; }}
+  />);
+  var endInput = screen.getByDisplayValue('10:00');
+  fireEvent.change(endInput, { target: { value: '18:00' } });
+  // 18:00 - 09:00 = 540 min → clamped to DUR_MAX=480
+  expect(durCalled).toBe(480);
+});
+
+it('BUG-999.896: endTime producing duration exactly at DUR_MIN (5) passes through unchanged', () => {
+  // time=14:00, endTime=14:05 → 5 min, should pass through as 5
+  var durCalled = null;
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    time="14:00" endTime="14:30" dur={30}
+    onDurChange={function(v) { durCalled = v; }}
+  />);
+  var endInput = screen.getByDisplayValue('14:30');
+  fireEvent.change(endInput, { target: { value: '14:05' } });
+  expect(durCalled).toBe(5);
+});
+
+it('BUG-999.896: endTime producing duration exactly at DUR_MAX (480) passes through unchanged', () => {
+  // time=08:00, endTime=16:00 → 480 min, should pass through as 480
+  var durCalled = null;
+  render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+    time="08:00" endTime="10:00" dur={120}
+    onDurChange={function(v) { durCalled = v; }}
+  />);
+  var endInput = screen.getByDisplayValue('10:00');
+  fireEvent.change(endInput, { target: { value: '16:00' } });
+  expect(durCalled).toBe(480);
+});
+
 it('changing endTime to a different valid value computes correct duration', () => {
   var durCalled = null;
   render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}

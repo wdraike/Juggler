@@ -7,9 +7,10 @@ var DAY_NAMES = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 function inferYear(month, timezone) {
   var now = new Date();
   var currentMonth, year;
-  if (timezone) {
+  var tz = safeTimezone(timezone, null);
+  if (tz) {
     var parts = {};
-    new Intl.DateTimeFormat('en-US', { timeZone: timezone, month: 'numeric', year: 'numeric' })
+    new Intl.DateTimeFormat('en-US', { timeZone: tz, month: 'numeric', year: 'numeric' })
       .formatToParts(now).forEach(function(p) { parts[p.type] = parseInt(p.value, 10); });
     currentMonth = parts.month;
     year = parts.year;
@@ -175,9 +176,10 @@ function localToUtc(dateStr, timeStr, timezone) {
   var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
   var localISO = year + '-' + pad(month + 1) + '-' + pad(day) + 'T' + pad(hours) + ':' + pad(mins) + ':00';
   // Use Intl to find the UTC offset for this local time in the given timezone
+  var tz = safeTimezone(timezone, 'America/New_York');
   var tempDate = new Date(localISO + 'Z'); // treat as UTC temporarily
   var formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone, year: 'numeric', month: 'numeric', day: 'numeric',
+    timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric',
     hour: 'numeric', minute: 'numeric', second: 'numeric', hourCycle: 'h23'
   });
   // Binary search for offset: find UTC time that displays as our target local time
@@ -225,9 +227,10 @@ function utcToLocal(utcDate, timezone) {
     d = new Date(utcDate);
   }
   if (isNaN(d.getTime())) return { date: null, time: null, day: null };
+  var tz = safeTimezone(timezone, 'America/New_York');
   var parts = {};
   new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone, year: 'numeric', month: 'numeric', day: 'numeric',
+    timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric',
     hour: 'numeric', minute: 'numeric', hourCycle: 'h23', weekday: 'short'
   }).formatToParts(d).forEach(function(p) { parts[p.type] = p.value; });
   var h = parseInt(parts.hour) % 24;
