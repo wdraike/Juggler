@@ -1,0 +1,27 @@
+{
+  "$contract": "size-classify/v1",
+  "mode": "bugfix",
+  "recommended": {
+    "lane": "full",
+    "depth": "quick",
+    "test_depth": "targeted"
+  },
+  "size": {
+    "total": 30,
+    "method": "added-lines",
+    "confidence": "high"
+  },
+  "risky": false,
+  "surfaces": [],
+  "triggers": {
+    "security_surface": false,
+    "infra_surface": false,
+    "frontend": false,
+    "data_migration": false,
+    "code_surface": true,
+    "docs_only": false,
+    "interface_change": false
+  },
+  "rationale": "30 lines (<= 80), non-risky bugfix — full lane, quick depth (default-lazy)",
+  "ts": "2026-06-26T21:01:29Z"
+}

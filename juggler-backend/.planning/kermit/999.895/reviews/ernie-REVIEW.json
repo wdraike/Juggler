@@ -1,0 +1,49 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "ernie",
+  "leg_id": "999.895",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "MCP terminal-schedule guard faithfully mirrors HTTP UpdateTaskStatus:147-160 (short-circuit order, master_id||source_id, task_masters lookup, isRollingMaster). No BLOCK/WARN. zoe item is pre-existing cross-path, out of scope.",
+  "steps": {
+    "line_by_line": "done",
+    "scooter_consult": "done"
+  },
+  "findings": [
+    {
+      "id": "ern-895-i1",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "src/mcp/tools/tasks.js",
+      "line": 76,
+      "claim": "Unscheduled rolling instance marked terminal returns null (allow) then violates DB CHECK chk_task_instances_terminal_scheduled (raw throw); whether the exemption should backfill scheduled_at is unaddressed.",
+      "evidence": "Helper returns null on rolling match (tasks.js:81). HTTP UpdateTaskStatus.js sets scheduled_at only on custom completedAt (L190) or isFutureScheduled cancel/skip (L199-200) — neither fires for an unscheduled rolling instance, so HTTP hits the SAME CHECK. Recorded decision brain:fact#79254 sanctions the exemption allowing terminal-without-schedule. Behavior is identical on both paths and pre-exists this leg; the leg's goal is parity, which is achieved.",
+      "fix": "Out of scope for this parity leg. File a separate backlog item to reconcile fact#79254 exemption with the DB CHECK constraint on BOTH HTTP and MCP paths.",
+      "confidence": "high"
+    },
+    {
+      "id": "ern-895-i2",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "src/mcp/tools/tasks.js",
+      "line": 347,
+      "claim": "_willBeScheduled counts existing.scheduled_at, fields.scheduledAt, fields.date but not fields.time; this is correct parity and correct logic.",
+      "evidence": "HTTP guard (UpdateTaskStatus.js:155) considers only existing.scheduled_at + body.scheduledAt. A time-only update with no date and no existing scheduled_at cannot produce a complete scheduled_at, so the conservative block is the intended outcome. MCP is a superset of HTTP (adds fields.date). No false block on a row that would actually be scheduled.",
+      "fix": "No action.",
+      "confidence": "high"
+    },
+    {
+      "id": "ern-895-i3",
+      "severity": "INFO",
+      "dimension": "input-validation",
+      "file": "src/mcp/tools/tasks.js",
+      "line": 415,
+      "claim": "set_task_status accepts status: z.string() and lacks HTTP's VALID_STATUSES check + 'missed' system-only 403; pre-existing, separate from this leg's guard.",
+      "evidence": "UpdateTaskStatus.js:104-109 validates status and rejects 'missed'. MCP set_task_status has neither. This is a distinct guard from the terminal-schedule guard added here; TERMINAL_REQUIRES_SCHEDULE correctly excludes 'missed' exactly as HTTP does. Not introduced by this change.",
+      "fix": "Out of scope; optionally backlog a separate MCP status-validation parity item.",
+      "confidence": "med"
+    }
+  ],
+  "refers": []
+}

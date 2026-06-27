@@ -1,3 +1,4 @@
+// @covers screen:month
 const { test, expect } = require('@playwright/test');
 
 test.describe('999.189 — Calendar render smoke', () => {

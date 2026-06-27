@@ -1,0 +1,51 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "zoe",
+  "leg_id": "999.892-tz-notnull",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Tests 1/5/6/7 are truthful RED-genuine (proven by source mutation: A neuters NOT NULL -> 1/5/7 RED; B alters backfill value -> test 6 RED). No tautologies/false-passes. 1 WARN: backfill whereNull selectivity unpinned (mutation C clobbers all rows, 7/7 still pass).",
+  "steps": {
+    "adversarial_pass": "done",
+    "spot_mutation": "3 mutations executed; tree reverted byte-clean"
+  },
+  "findings": [
+    {
+      "id": "zoe892w1",
+      "severity": "WARN",
+      "dimension": "false-pass",
+      "file": "tests/migrations/20260626000000_users_timezone_not_null.test.js",
+      "line": null,
+      "claim": "Backfill is fully covered (TEST-CATALOG branch-enumeration claims the whereNull backfill is pinned by test 6)",
+      "evidence": "Mutation C removed `.whereNull('timezone')` so up() overwrites EVERY users row to 'America/New_York' -> all 7 tests still PASS. No test seeds an existing non-null timezone (e.g. 'Europe/London') to prove the backfill leaves it untouched; a regression that clobbers real user timezones would false-pass.",
+      "fix": "Add a test: insert one user timezone='Europe/London' + one timezone=NULL, run down->insert->up, assert London preserved and NULL backfilled to 'America/New_York'.",
+      "confidence": "high"
+    },
+    {
+      "id": "zoe892i1",
+      "severity": "INFO",
+      "dimension": "shallow-assertion",
+      "file": "tests/migrations/20260626000000_users_timezone_not_null.test.js",
+      "line": null,
+      "claim": "Tests 2,3,4 contribute RED->GREEN coverage",
+      "evidence": "Tests 2,3,4 pass in both pre- and post-migration states (DEFAULT + COLLATION already correct in initial schema) so cannot go RED pre-migration; preservation guards only. Telly disclosed this honestly.",
+      "fix": "None - by design.",
+      "confidence": "high"
+    },
+    {
+      "id": "zoe892i2",
+      "severity": "INFO",
+      "dimension": "shallow-assertion",
+      "file": "tests/migrations/20260626000000_users_timezone_not_null.test.js",
+      "line": 384,
+      "claim": "Reversibility test 7 fully verifies down() state",
+      "evidence": "Down phase asserts only IS_NULLABLE; DEFAULT + COLLATION are not re-asserted after rollback, so a down() that dropped them would not be caught (low risk - down() ALTER is explicit).",
+      "fix": "Optional: assert COLUMN_DEFAULT + COLLATION_NAME in the down state.",
+      "confidence": "med"
+    }
+  ],
+  "refers": [
+    { "to": "telly", "why": "W1 coverage gap (preserve-existing-timezone backfill test) is telly's to author" }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "leg_id": "999.894",
+  "intent": "Document the fixed-XOR-recurring invariant in TASK-PROPERTIES.md + TASK-STATE-MATRIX.md (from leg 999.867)",
+  "mode": "chore",
+  "lanes": ["trivial"],
+  "depth": "quick",
+  "scope": ["juggler-backend"],
+  "branch": "sweep/juggler-2026-06-26",
+  "status": "in_progress",
+  "wbs": ".planning/kermit/WBS-999.894.md",
+  "spec": ".planning/kermit/999.894/SPEC.md",
+  "traceability": ".planning/kermit/999.894/TRACEABILITY.md",
+  "verdict": null,
+  "owner": null,
+  "opened": "2026-06-26T22:00:00Z",
+  "last_update": "2026-06-26T22:00:00Z"
+}

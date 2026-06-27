@@ -1,0 +1,65 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "telly",
+  "leg_id": "999.895",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Regression test for MCP terminal-schedule guard bug. 4 RED (R1/R5 isError), 9 GREEN (R2/R3/R4/R5b). DB constraint chk_task_instances_terminal_scheduled fires before app guard; fix must add guard before DB write.",
+  "steps": {
+    "failing_test_red": "done",
+    "coverage_reviewed": "done"
+  },
+  "findings": [
+    {
+      "id": "f1-set-task-status-no-guard",
+      "severity": "BLOCK",
+      "dimension": "missing-regression",
+      "file": "src/mcp/tools/tasks.js",
+      "line": 393,
+      "claim": "set_task_status has no terminal-requires-schedule guard",
+      "evidence": "Handler at L393-426 writes {status, updated_at} directly; no check for scheduled_at IS NULL before the DB write. DB constraint chk_task_instances_terminal_scheduled fires and propagates as raw MySQL error. Tests R1a/R1b/R1c confirm RED: handler throws instead of returning isError:true.",
+      "fix": "Add guard before updateTaskById call: if status in TERMINAL_REQUIRES_SCHEDULE AND !existing.scheduled_at AND !isRollingInstance → return isError. Mirror UpdateTaskStatus.js:147-160.",
+      "confidence": "high"
+    },
+    {
+      "id": "f2-update-task-no-guard",
+      "severity": "BLOCK",
+      "dimension": "missing-regression",
+      "file": "src/mcp/tools/tasks.js",
+      "line": 246,
+      "claim": "update_task has no terminal-requires-schedule guard when status is terminal",
+      "evidence": "Handler at L246-382 performs taskToRow() + updateTaskById() without checking: is status terminal AND is scheduled_at null in both existing row and the update call? DB constraint fires unhandled. Test R5a confirms RED.",
+      "fix": "Add guard: if fields.status in TERMINAL_REQUIRES_SCHEDULE AND !existing.scheduled_at AND !fields.date AND !fields.scheduledAt → return isError. Allow when date/scheduledAt provided in same call (R5b must still pass).",
+      "confidence": "high"
+    },
+    {
+      "id": "f3-helper-path-broken",
+      "severity": "INFO",
+      "dimension": "missing-regression",
+      "file": "tests/helpers/mcp.js",
+      "line": 22,
+      "claim": "Broken require path in mcp.js helper prevented any test from using captureHandlers via this helper",
+      "evidence": "require('../src/mcp/tools/tasks') from tests/helpers/ resolves to tests/src/... (non-existent). fixedRecurringGap.test.js:22 explicitly documented this. Fixed to ../../src/mcp/tools/tasks.",
+      "fix": "Fixed in this leg.",
+      "confidence": "high"
+    },
+    {
+      "id": "f4-unscheduled-rolling-db-constraint",
+      "severity": "INFO",
+      "dimension": "missing-edge-case",
+      "file": "src/mcp/tools/tasks.js",
+      "line": 393,
+      "claim": "Unscheduled rolling instances also blocked by DB constraint — not tested",
+      "evidence": "chk_task_instances_terminal_scheduled applies to all rows including rolling instances. App-level exemption alone is not sufficient; scheduled_at must be set. Bert must decide: set scheduled_at=NOW() for rolling instances, or document that unscheduled rolling instances cannot be terminal.",
+      "fix": "REFER→bert: design decision for unscheduled rolling instances on the MCP path.",
+      "confidence": "high"
+    }
+  ],
+  "refers": [
+    {
+      "to": "bert",
+      "why": "Implement guard in set_task_status and update_task before the DB write; design decision needed for unscheduled rolling instances and DB constraint satisfaction"
+    }
+  ]
+}

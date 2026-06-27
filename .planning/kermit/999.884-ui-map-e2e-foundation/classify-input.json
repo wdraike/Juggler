@@ -1,0 +1,21 @@
+{
+  "mode": "new",
+  "project_root": "juggler-frontend",
+  "base_ref": "",
+  "files": [
+    "juggler-frontend/e2e/ui-map.json",
+    "juggler-frontend/e2e/UI-MAP.md",
+    "juggler-frontend/e2e/coverage/ui-coverage.js",
+    "juggler-frontend/e2e/coverage/ui-coverage.test.js",
+    "juggler-frontend/e2e/coverage/collect-coverage.js",
+    "juggler-frontend/e2e/DECOMPOSITION.md",
+    "juggler-frontend/playwright.config.js",
+    "juggler-frontend/e2e/specs/login.spec.js",
+    "juggler-frontend/e2e/specs/day-view.spec.js",
+    "juggler-frontend/e2e/specs/settings-panel.spec.js"
+  ],
+  "added_lines": null,
+  "acceptance_criteria": 5,
+  "new_files": 10,
+  "wbs_text": "Foundation of 999.884: UI map artifact, TDD pure coverage calculator, coverage collector+report, Playwright scaffold with representative coverage-tagged specs, decomposition. New tooling, not risky surface (no auth/payments/migration). No live browser run."
+}

@@ -1,0 +1,76 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "abby",
+  "leg_id": "999.894",
+  "mode": "chore",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Documented fixed-XOR-recurring invariant (leg 999.867) in TASK-PROPERTIES.md (corrected orthogonality note + XOR subsection) and TASK-STATE-MATRIX.md (invariant section + footnote caveat on Recurrence/Fixed cell).",
+  "steps": {
+    "docs_authored": "done",
+    "changelog": "n/a"
+  },
+  "findings": [
+    {
+      "id": "abby-894-tp-orthogonality-correction",
+      "severity": "INFO",
+      "dimension": "doc-updated",
+      "file": "docs/architecture/TASK-PROPERTIES.md",
+      "line": 34,
+      "claim": "Corrected inaccurate orthogonality note: 'any mode can be recurring' → 'any mode EXCEPT fixed may be recurring'; note now points to new XOR subsection.",
+      "evidence": "docs/architecture/TASK-PROPERTIES.md — orthogonality note updated; new 'Fixed–Recurring Exclusion (XOR invariant)' subsection added under Scheduling Modes.",
+      "fix": null,
+      "confidence": "high"
+    },
+    {
+      "id": "abby-894-tp-xor-subsection",
+      "severity": "INFO",
+      "dimension": "doc-updated",
+      "file": "docs/architecture/TASK-PROPERTIES.md",
+      "line": 36,
+      "claim": "Added 'Fixed–Recurring Exclusion (XOR invariant)' subsection: exact invariant definition, isFixedRecurringConflict cite at taskValidation.js:98, all 4 chokepoints, invalid_combination outcome, flip-handling note, leg 999.867 reference.",
+      "evidence": "docs/architecture/TASK-PROPERTIES.md — new subsection between Scheduling Modes note and Status Effects section.",
+      "fix": null,
+      "confidence": "high"
+    },
+    {
+      "id": "abby-894-tsm-invariant-section",
+      "severity": "INFO",
+      "dimension": "doc-updated",
+      "file": "docs/architecture/TASK-STATE-MATRIX.md",
+      "line": 179,
+      "claim": "Added 'Fixed–Recurring XOR Invariant' section after Regular Task Scheduling Modes: exact invariant statement, taskValidation.js:98 citation, 4-chokepoint table, invalid_combination outcome, leg 999.867 reference.",
+      "evidence": "docs/architecture/TASK-STATE-MATRIX.md — new section inserted before Drag-to-Pin State Machine.",
+      "fix": null,
+      "confidence": "high"
+    },
+    {
+      "id": "abby-894-tsm-recurrence-cell-caveat",
+      "severity": "INFO",
+      "dimension": "doc-updated",
+      "file": "docs/architecture/TASK-STATE-MATRIX.md",
+      "line": 296,
+      "claim": "Added footnote ¹ caveat to 🔁 Recurrence / Fixed cell in Field Visibility Matrix → Regular Tasks: backend rejects combination server-side; frontend control-visibility explicitly stated as NOT verified by this leg.",
+      "evidence": "docs/architecture/TASK-STATE-MATRIX.md — cell changed to '✅ ¹'; footnote block added below table.",
+      "fix": null,
+      "confidence": "high"
+    },
+    {
+      "id": "abby-894-tsm-legacy-when-terminology",
+      "severity": "INFO",
+      "dimension": "doc-gap",
+      "file": "docs/architecture/TASK-STATE-MATRIX.md",
+      "line": 169,
+      "claim": "Regular Task Scheduling Modes section still uses legacy 'when = \"fixed\"' terminology; current code uses placement_mode = 'fixed'. Out of scope for leg 999.894.",
+      "evidence": "TASK-STATE-MATRIX.md lines 169–173 reference 'when = \"fixed\"'; TASK-PROPERTIES.md and code use placement_mode.",
+      "fix": "Future chore: update Regular Task Scheduling Modes section to use placement_mode terminology throughout.",
+      "confidence": "high"
+    }
+  ],
+  "refers": [
+    {
+      "to": "prairie",
+      "why": "verify accuracy and completeness of authored XOR invariant sections in both docs"
+    }
+  ]
+}

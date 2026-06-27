@@ -1,0 +1,38 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "telly",
+  "leg_id": "999.892-tz-notnull",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Re-review: zoe WARN (Mutation C unpinned) resolved. Test 6 strengthened — Europe/London row asserts selectivity. Mutation C caught at line 365. 7/7 GREEN.",
+  "steps": {
+    "failing_test_red": "done",
+    "coverage_reviewed": "done — mutation C now caught; .whereNull selectivity pinned at test 6 line 365"
+  },
+  "findings": [
+    {
+      "id": "a1b2c3d4",
+      "severity": "INFO",
+      "dimension": "coverage-gap",
+      "file": "tests/migrations/20260626000000_users_timezone_not_null.test.js",
+      "line": null,
+      "claim": "Tests 2, 3, 4 pass in pre-migration state — asserting already-correct behavior",
+      "evidence": "users.timezone already has COLUMN_DEFAULT='America/New_York' and COLLATION='utf8mb4_unicode_ci' in the initial schema; these assertions will also be green after migration (validating preservation, not new behavior)",
+      "fix": "None — by design; the assertions confirm the migration does not regress existing defaults",
+      "confidence": "high"
+    },
+    {
+      "id": "e5f6g7h8",
+      "severity": "INFO",
+      "dimension": "missing-edge-case",
+      "file": "tests/migrations/20260626000000_users_timezone_not_null.test.js",
+      "line": 365,
+      "claim": "zoe WARN resolved: backfill selectivity (WHERE timezone IS NULL) is now pinned",
+      "evidence": "Mutation C (removing .whereNull from up()) now causes test 6 to FAIL: Expected 'Europe/London' Received 'America/New_York' at line 365 — confirmed in mutation run, exit code 1",
+      "fix": "Applied — insertUserWithTimezone helper added; test 6 seeds both NULL row and Europe/London row; asserts Europe/London unchanged after up()",
+      "confidence": "high"
+    }
+  ],
+  "refers": []
+}

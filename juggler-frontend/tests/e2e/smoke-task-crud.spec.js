@@ -1,3 +1,6 @@
+// @covers modal:quick-add
+// @covers path:11
+// @covers modal:task-editor
 const { test, expect } = require('@playwright/test');
 
 test.describe('999.188 — Task CRUD smoke', () => {

@@ -1,0 +1,49 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "bert",
+  "leg_id": "999.884-ui-map-e2e-foundation",
+  "mode": "new",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Applied WARN-1 (stale e2e/coverage→e2e/report docstrings in 2 files) and WARN-2 (baseURL fail-closed IIFE in playwright.config.js). 7/7 tests green.",
+  "steps": {
+    "applied_blocks": "n/a",
+    "applied_warns": "done"
+  },
+  "findings": [
+    {
+      "id": "warn-1a",
+      "severity": "WARN",
+      "dimension": "fix-applied",
+      "file": "juggler-frontend/e2e/report/collect-coverage.js",
+      "line": 8,
+      "claim": "Finding #1: header docstring Run: command referenced stale e2e/coverage/ directory",
+      "evidence": "Line 8: changed '* Run:  node e2e/coverage/collect-coverage.js' to '* Run:  node e2e/report/collect-coverage.js'",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "warn-1b",
+      "severity": "WARN",
+      "dimension": "fix-applied",
+      "file": "juggler-frontend/e2e/report/ui-coverage.test.js",
+      "line": 5,
+      "claim": "Finding #1: header docstring node --test command referenced stale e2e/coverage/ directory",
+      "evidence": "Line 5: changed 'node --test e2e/coverage/ui-coverage.test.js' to 'node --test e2e/report/ui-coverage.test.js'",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "warn-2",
+      "severity": "WARN",
+      "dimension": "fix-applied",
+      "file": "juggler-frontend/playwright.config.js",
+      "line": 46,
+      "claim": "Finding #2: baseURL defaulted to 'http://localhost:3002' (dev server) when neither PLAYWRIGHT_BASE_URL nor FRONTEND_URL was set — fails open",
+      "evidence": "Lines 46-56: replaced '|| process.env.FRONTEND_URL || \\'http://localhost:3002\\'' with an IIFE that reads PLAYWRIGHT_BASE_URL||FRONTEND_URL and throws Error('...must be set to a SAFE ephemeral/test target...defaulting to localhost:3002 is forbidden...') if neither is set",
+      "fix": "applied",
+      "confidence": "high"
+    }
+  ],
+  "refers": []
+}

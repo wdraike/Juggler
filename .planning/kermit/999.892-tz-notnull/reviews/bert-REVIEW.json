@@ -1,0 +1,71 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "bert",
+  "leg_id": "999.892-tz-notnull",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "W1: created migration 20260626000000 (backfill+NOT NULL ALTER, 7/7 green). W2: removed 4 redundant column-null guards (CS1-CS4); row-absence/DB-error guards preserved.",
+  "steps": {
+    "applied_blocks": "done",
+    "applied_warns": "done"
+  },
+  "findings": [
+    {
+      "id": "892-W1-migration",
+      "severity": "BLOCK",
+      "dimension": "fix-applied",
+      "file": "src/db/migrations/20260626000000_users_timezone_not_null.js",
+      "line": null,
+      "claim": "W1: Knex migration — make users.timezone NOT NULL with backfill",
+      "evidence": "New file created. up(): UPDATE WHERE NULL backfill then knex.raw ALTER TABLE MODIFY NOT NULL DEFAULT 'America/New_York' COLLATE utf8mb4_unicode_ci. down(): knex.raw ALTER TABLE MODIFY NULL preserving DEFAULT+collation. 7/7 telly test assertions PASS.",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "892-W2-CS1",
+      "severity": "WARN",
+      "dimension": "fix-applied",
+      "file": "src/scheduler/deriveSchedulePlacements.js",
+      "line": 48,
+      "claim": "W2-CS1: resolveTimezone() had redundant column-null guard `if (row && row.timezone)` — column is now NOT NULL",
+      "evidence": "Changed `if (row && row.timezone) return row.timezone;` to `if (row) return row.timezone;` at line 48. Surrounding try/catch (DB-error) and final `return DEFAULT_TIMEZONE` (row-absence) preserved unchanged.",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "892-W2-CS2",
+      "severity": "WARN",
+      "dimension": "fix-applied",
+      "file": "src/mcp/tools/schedule.js",
+      "line": 14,
+      "claim": "W2-CS2: getUserTimezone() had redundant column-null fallback `(user && user.timezone) || 'America/New_York'`",
+      "evidence": "Changed to `user ? user.timezone : 'America/New_York';` at line 14. Row-absence guard preserved.",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "892-W2-CS3",
+      "severity": "WARN",
+      "dimension": "fix-applied",
+      "file": "src/mcp/tools/tasks.js",
+      "line": 91,
+      "claim": "W2-CS3: getUserTimezone() had redundant column-null fallback `(user && user.timezone) || 'America/New_York'`",
+      "evidence": "Changed to `user ? user.timezone : 'America/New_York';` at line 91. Row-absence guard preserved.",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "892-W2-CS4",
+      "severity": "WARN",
+      "dimension": "fix-applied",
+      "file": "src/mcp/tools/data.js",
+      "line": 15,
+      "claim": "W2-CS4: getUserTimezone() had redundant column-null fallback `(user && user.timezone) || 'America/New_York'`",
+      "evidence": "Changed to `user ? user.timezone : 'America/New_York';` at line 15. Row-absence guard preserved.",
+      "fix": "applied",
+      "confidence": "high"
+    }
+  ],
+  "refers": []
+}

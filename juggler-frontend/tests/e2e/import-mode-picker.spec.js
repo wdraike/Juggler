@@ -18,6 +18,7 @@
  * Run:
  *   PW_BASE_URL=http://localhost:3012 npx playwright test import-mode-picker.spec.js
  */
+// @covers modal:import-export
 const { test, expect } = require('@playwright/test');
 
 const BASE_URL = process.env.PW_BASE_URL || 'http://localhost:3012';

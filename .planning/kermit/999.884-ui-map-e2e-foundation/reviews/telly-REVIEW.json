@@ -1,0 +1,49 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "telly",
+  "leg_id": "999.884-ui-map-e2e-foundation",
+  "mode": "new",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "7/7 unit tests PASS for computeCoverage; all SPEC-required AC cases covered; collect-coverage exits 0; 1 WARN (stale traceability paths), 2 INFO.",
+  "steps": {
+    "failing_test_red": "n/a",
+    "coverage_reviewed": "done"
+  },
+  "findings": [
+    {
+      "id": "f1-stale-traceability-paths",
+      "severity": "WARN",
+      "dimension": "coverage-gap",
+      "file": ".planning/kermit/999.884-ui-map-e2e-foundation/TRACEABILITY.md",
+      "line": null,
+      "claim": "TRACEABILITY.md R2/R3 Code column references e2e/coverage/ but files are at e2e/report/",
+      "evidence": "R2 Code column: 'juggler-frontend/e2e/coverage/ui-coverage.js'; actual path confirmed: juggler-frontend/e2e/report/ui-coverage.js",
+      "fix": "Update TRACEABILITY.md R2/R3 Code column from e2e/coverage/ to e2e/report/ — done in this leg",
+      "confidence": "high"
+    },
+    {
+      "id": "f2-missing-error-throw-test",
+      "severity": "INFO",
+      "dimension": "missing-edge-case",
+      "file": "juggler-frontend/e2e/report/ui-coverage.js",
+      "line": 39,
+      "claim": "idsOf() throws on a map entry with a missing or non-string id; this error path has no test",
+      "evidence": "Line 39-44: throws Error('ui-map entry missing string id: ...') when entry.id is absent or not a string; no test exercises this path",
+      "fix": "Add test: computeCoverage({ screens: [{ name: 'no-id' }], modals: [], paths: [] }, []) should throw with message containing 'missing string id'",
+      "confidence": "high"
+    },
+    {
+      "id": "f3-global-regex-latent-risk",
+      "severity": "INFO",
+      "dimension": "missing-edge-case",
+      "file": "juggler-frontend/e2e/report/collect-coverage.js",
+      "line": 37,
+      "claim": "COVERS_RE is a module-level /g regex reused across file reads; works correctly now but is a latent bug if the while loop is ever broken out of early",
+      "evidence": "Line 37: const COVERS_RE = /@covers.../g at module scope; used in while(exec) loop across multiple files — lastIndex resets on null return but not on early break",
+      "fix": "Move COVERS_RE definition inside collectCoveredIds() to make it local and eliminate the global-state risk",
+      "confidence": "med"
+    }
+  ],
+  "refers": []
+}

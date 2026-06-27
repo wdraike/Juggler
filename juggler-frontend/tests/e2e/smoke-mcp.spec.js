@@ -1,3 +1,4 @@
+// @covers none (MCP backend integration, not a UI surface)
 const { test, expect } = require('@playwright/test');
 
 test.describe('999.190 — MCP endpoint smoke', () => {

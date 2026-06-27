@@ -1,3 +1,5 @@
+// @covers screen:login
+// @covers path:15
 const { test, expect } = require('@playwright/test');
 
 test.describe('999.187 — Login → Dashboard smoke', () => {

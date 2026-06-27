@@ -1,0 +1,50 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "zoe",
+  "leg_id": "999.895",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "RE-REVIEW: telly's R4b CLOSES the BLOCK. Independent mutation (neuter isRollingMaster block) -> R4b RED (1 failed/13 passed); restore byte-identical -> 14/14 green, 0 residue. Both prior findings resolved.",
+  "steps": { "adversarial_pass": "done", "spot_mutation": "done", "flake_rerun": "done", "re_review": "done" },
+  "findings": [
+    {
+      "id": "zoe-895-r4-false-green",
+      "severity": "BLOCK",
+      "dimension": "false-pass",
+      "file": "tests/mcp-terminal-schedule-guard.test.js",
+      "line": 308,
+      "status": "RESOLVED",
+      "claim": "R4 proves the rolling-recurring exemption (SPEC R4).",
+      "evidence": "ORIGINAL: R4 seeds a SCHEDULED rolling instance; terminalScheduleBlock short-circuits at `if (willBeScheduled) return null;` before the masterId->isRollingMaster exemption; deleting tasks.js:78-82 left all 13 tests GREEN. RESOLUTION (2026-06-26): telly added R4b (test:362-385) seeding an UNSCHEDULED rolling instance (ROLLING_UNSC_INST_ID, scheduled_at:null, rolling master ROLLING_MASTER_ID). zoe re-ran the mutation independently: neutering the `if (masterId){...isRollingMaster...}` block -> R4b turns RED (1 failed, 13 passed); the other 13 unaffected. Restore from /tmp backup -> 14/14 green; git diff --stat = 25 insertions (bert's guard only), grep ZOE-MUTATION = 0 residue. R4b is the genuine pin for the exemption branch.",
+      "fix": "DONE — R4b added and mutation-verified as the discriminating pin for the isRollingMaster exemption branch.",
+      "confidence": "high"
+    },
+    {
+      "id": "zoe-895-r4-requirement-drift",
+      "severity": "WARN",
+      "dimension": "unchallenged-claim",
+      "file": "tests/mcp-terminal-schedule-guard.test.js",
+      "line": 29,
+      "status": "RESOLVED",
+      "claim": "TEST-CATALOG.md:18/86 claim R4 covers the master_id->isRollingMaster branch.",
+      "evidence": "ORIGINAL: TEST-CATALOG overclaimed R4 covers the isRollingMaster branch. RESOLUTION: TEST-CATALOG.md:18 now states R4 'does NOT reach the masterId->isRollingMaster branch'; line 92 marks R4 'does NOT reach masterId->isRollingMaster branch (zoe false-green catch)'; lines 19/93 reattribute the branch to R4b ('mutation-verified RED under neutered exemption'). TEST-REVIEW.md:35 documents the correction. DB-constraint vs app-guard tension surfaced explicitly in TEST-CATALOG.md:26-29.",
+      "fix": "DONE — overclaim corrected; isRollingMaster branch reattributed to R4b.",
+      "confidence": "high"
+    },
+    {
+      "id": "zoe-895-exemption-inert-refer",
+      "severity": "INFO",
+      "dimension": "unchallenged-claim",
+      "file": "src/mcp/tools/tasks.js",
+      "line": 78,
+      "claim": "The rolling exemption allows marking an unscheduled rolling instance terminal.",
+      "evidence": "For an unscheduled rolling instance the guard returns null (exempt) but the subsequent terminal write with scheduled_at=null still violates chk_task_instances_terminal_scheduled -> raw DB throw; the app-level exemption never yields a successful terminal-marking on its own. Functional correctness of the exemption is production logic (ernie's column).",
+      "fix": "REFER->ernie: assess whether the exemption should also set scheduled_at=NOW() or is effectively inert given the DB constraint.",
+      "confidence": "med"
+    }
+  ],
+  "refers": [
+    { "to": "ernie", "why": "STILL OPEN: rolling exemption (tasks.js:78-82) may be functionally inert given chk_task_instances_terminal_scheduled blocks unscheduled-terminal regardless; R4b proves the exemption FIRES but the DB constraint then rejects — design question (should it set scheduled_at=NOW()?) remains ernie's column" }
+  ]
+}

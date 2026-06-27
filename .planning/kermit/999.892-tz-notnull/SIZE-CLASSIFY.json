@@ -1,0 +1,30 @@
+{
+  "$contract": "size-classify/v1",
+  "mode": "bugfix",
+  "recommended": {
+    "lane": "full",
+    "depth": "deep",
+    "test_depth": "cross-service"
+  },
+  "size": {
+    "total": 120,
+    "method": "added-lines",
+    "confidence": "high"
+  },
+  "risky": true,
+  "surfaces": [
+    "data-migration",
+    "cross-service"
+  ],
+  "triggers": {
+    "security_surface": false,
+    "infra_surface": false,
+    "frontend": false,
+    "data_migration": true,
+    "code_surface": true,
+    "docs_only": false,
+    "interface_change": false
+  },
+  "rationale": "risky surface present — full lane, depth floored >= standard (never trivial/quick)",
+  "ts": "2026-06-26T22:11:38Z"
+}

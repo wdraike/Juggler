@@ -1,0 +1,17 @@
+{
+  "mode": "bugfix",
+  "project_root": "juggler-backend",
+  "base_ref": "",
+  "files": [
+    "juggler-backend/src/db/migrations/20260626000000_users_timezone_not_null.js",
+    "juggler-backend/tests/migrations/20260626000000_users_timezone_not_null.test.js",
+    "juggler-backend/src/scheduler/deriveSchedulePlacements.js",
+    "juggler-backend/src/mcp/tools/schedule.js",
+    "juggler-backend/src/mcp/tools/tasks.js",
+    "juggler-backend/src/mcp/tools/data.js"
+  ],
+  "added_lines": 120,
+  "acceptance_criteria": null,
+  "new_files": 2,
+  "wbs_text": "Adopt single-source UTC contract: backfill NULL users.timezone to America/New_York then ALTER column NOT NULL DEFAULT America/New_York (COLLATE utf8mb4_unicode_ci) with correct down(); migration test proving NOT NULL+default+backfill; call-site audit removing now-redundant column-null fallbacks while preserving legitimate row-absence/DB-error guards."
+}

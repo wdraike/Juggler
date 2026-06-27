@@ -1,0 +1,123 @@
+{
+  "$contract": "intake-brief/v1",
+  "leg_id": "999.892-tz-notnull",
+  "mode": "bugfix",
+  "skipped": false,
+  "summary": "users.timezone nullable (no NOT NULL in any migration). 4 call sites have column-null fallbacks safe to clean; 1 A1 null contract must stay. Backfill-before-ALTER required; A1 behavioral-change is a flagged risk.",
+  "affected_files": [
+    "juggler-backend/src/db/migrations/20260301000000_initial_schema.js",
+    "juggler-backend/src/db/migrations/20260626000000_users_timezone_not_null.js",
+    "juggler-backend/src/scheduler/deriveSchedulePlacements.js",
+    "juggler-backend/src/mcp/tools/schedule.js",
+    "juggler-backend/src/mcp/tools/tasks.js",
+    "juggler-backend/src/mcp/tools/data.js",
+    "juggler-backend/src/slices/user-config/adapters/KnexConfigRepository.js"
+  ],
+  "risk_flags": [
+    "data-migration: shared Cloud SQL (DB_NAME=juggler, same instance as RO) — backfill MUST run before ALTER NOT NULL or the ALTER fails on existing NULL rows; migration must have a clean down() (ALTER MODIFY back to nullable)",
+    "A1-behavioral-change: after backfill, KnexConfigRepository.getUserTimezone returns 'America/New_York' instead of null for users who never explicitly set timezone — TZ-DISPLAY-1 null=unset contract on the frontend may be affected; needs ruling whether this is acceptable or whether the frontend must be updated to treat 'America/New_York' as indistinguishable from 'not configured'",
+    "mcp-auth auto-provision insert omits timezone: auth-service/shared/mcp-auth.js:227-233 inserts {id, email, name, created_at, updated_at} with no timezone field — after NOT NULL, the MySQL column DEFAULT 'America/New_York' fires (safe), but this must be confirmed not to require an explicit insert value"
+  ],
+  "prior_decisions": [
+    {
+      "ref": "brain#77683",
+      "summary": "If no timezone is available (no user profile, no header), system MUST use 'America/New_York' and proceed normally — request MUST NOT fail. Supports NOT NULL with DEFAULT, not scattered code fallbacks."
+    },
+    {
+      "ref": "brain#59664",
+      "summary": "R31: user-configurable preferences including timezone via config API. The column should be canonical source; scattered fallbacks undermine this."
+    }
+  ],
+  "repro": {
+    "steps": [
+      "1. Inspect migration 20260301000000_initial_schema.js:13 — `table.string('timezone', 100).defaultTo('America/New_York')` has no .notNullable()",
+      "2. Grep all 160+ migrations for any later NOT NULL addition to users.timezone — none found",
+      "3. On test-bed (3407): SELECT COUNT(*) FROM users WHERE timezone IS NULL — any row is a live repro of the bug class",
+      "4. Observe that 4 call sites compensate with || 'America/New_York' fallbacks, proving the column can be NULL in production data"
+    ],
+    "failing_test_cmd": "DB_PORT=3407 DB_NAME=juggler_test npx jest --testPathPattern='users.*timezone|timezone.*not.*null' (seed: INSERT INTO users (id, email, timezone) VALUES (uuid(), 'test@test.com', NULL))",
+    "observed": "users.timezone NULLABLE — MySQL accepts NULL; call sites scattered with || 'America/New_York' fallbacks to compensate; column DEFAULT fires on INSERT omit but explicit NULL bypasses it",
+    "expected": "users.timezone NOT NULL DEFAULT 'America/New_York' — DB enforces the invariant; column-null fallbacks in app code are redundant and can be removed safely"
+  },
+  "root_cause": {
+    "region": "juggler-backend/src/db/migrations/20260301000000_initial_schema.js:13",
+    "evidence": "table.string('timezone', 100).defaultTo('America/New_York') — no .notNullable() call; Knex omitting notNullable() means MySQL creates the column as NULL-allowed. Grepped all 160+ subsequent migrations (20260301100000 through 20260625000000) for any ALTER/modifyColumn on users.timezone — none found. Confirmed nullable by three other migrations that use `|| 'America/New_York'` as evidence of live NULL rows: 20260308100000:24, 20260308200000:33, 20260406400000:30.",
+    "confidence": "high"
+  },
+  "ambiguities": [
+    {
+      "question": "After NOT NULL + backfill, KnexConfigRepository.getUserTimezone returns 'America/New_York' for users who never explicitly configured their timezone. The A1 contract (line 143-152) intentionally returns null for 'unset'. Does the frontend TZ-DISPLAY-1 feature rely on null to mean 'user has not configured timezone' (showing detected/browser tz instead), or does it treat any non-null value as the user's preference?",
+      "why_blocking": "If TZ-DISPLAY-1 shows detected timezone when getUserTimezone returns null but shows 'America/New_York' when it returns the backfilled value, the behavior silently changes for users in non-ET timezones who never explicitly set a preference. KnexConfigRepository.js:143 says the null contract is deliberate (A1); the backfill eliminates the null case entirely. Needs ruling: is this acceptable, or does the frontend need a separate 'timezone_is_default' flag, or is the backfill acceptable because 'America/New_York' is the correct default behavior anyway?"
+    }
+  ],
+  "edge_cases": [
+    "mcp-auth auto-provision path (mcp-auth.js:222-235) inserts users WITHOUT timezone — after NOT NULL, MySQL DEFAULT fires; safe, but verify no explicit NULL is passed anywhere in provisioning",
+    "Migration down() must revert NOT NULL to nullable — ALTER TABLE users MODIFY COLUMN timezone VARCHAR(100) DEFAULT 'America/New_York' — without losing the backfilled data",
+    "Existing NULL rows must be UPDATE-d before ALTER NOT NULL or MySQL will reject the DDL with 'Column cannot be null'",
+    "deriveSchedulePlacements.js:49 has a try/catch around the DB query that falls through to DEFAULT_TIMEZONE on any DB error — this DB-error guard must be preserved regardless of the column-null simplification"
+  ],
+  "call_site_verdicts": [
+    {
+      "id": "CS1",
+      "file": "juggler-backend/src/scheduler/deriveSchedulePlacements.js",
+      "line": "48",
+      "pattern": "if (row && row.timezone) return row.timezone;",
+      "verdict": "REMOVE-SAFE (column-null check only)",
+      "simplification": "Change to `if (row) return row.timezone;` — removes `.timezone` truthiness check (column-null guard); row-absence guard (`row`) and DB-error guard (try/catch + fallback DEFAULT_TIMEZONE:50) both remain",
+      "user_id_origin": "userId passed from MCP auth path (transport.js:80 createMcpServerForUser(authResult.userId)) → authenticated JWT; authenticateMcpRequest:248 returns null when no user row → 401 before tools are called; row guaranteed at auth time"
+    },
+    {
+      "id": "CS2",
+      "file": "juggler-backend/src/mcp/tools/schedule.js",
+      "line": "14",
+      "pattern": "(user && user.timezone) || 'America/New_York'",
+      "verdict": "REMOVE-SAFE (column-null aspect); rewrite to make row-absence guard explicit",
+      "simplification": "Change to `user ? user.timezone : 'America/New_York'` — removes implicit column-null coercion; keeps explicit row-absence guard (theoretical post-auth deletion race; row was present at auth time per transport.js:65-80)",
+      "user_id_origin": "Same as CS1 — captured in registerScheduleTools(server, userId) closure at transport.js:80"
+    },
+    {
+      "id": "CS3",
+      "file": "juggler-backend/src/mcp/tools/tasks.js",
+      "line": "90-91",
+      "pattern": "(user && user.timezone) || 'America/New_York'",
+      "verdict": "REMOVE-SAFE (column-null aspect); rewrite to make row-absence guard explicit",
+      "simplification": "Change to `user ? user.timezone : 'America/New_York'` — same rationale as CS2",
+      "user_id_origin": "Same as CS1 — captured in registerTaskTools(server, userId) closure at transport.js:80"
+    },
+    {
+      "id": "CS4",
+      "file": "juggler-backend/src/mcp/tools/data.js",
+      "line": "14",
+      "pattern": "(user && user.timezone) || 'America/New_York'",
+      "verdict": "REMOVE-SAFE (column-null aspect); rewrite to make row-absence guard explicit",
+      "simplification": "Change to `user ? user.timezone : 'America/New_York'` — same rationale as CS2",
+      "user_id_origin": "Same as CS1 — captured in registerDataTools(server, userId) closure at transport.js:80"
+    },
+    {
+      "id": "CS5",
+      "file": "juggler-backend/src/slices/user-config/adapters/KnexConfigRepository.js",
+      "line": "147-152",
+      "pattern": "row && row.timezone ? row.timezone : null",
+      "verdict": "LEAVE UNTOUCHED — A1 deliberate null contract, NOT a column-null fallback",
+      "simplification": "None — this is an intentional design: returns null to signal 'user has not configured timezone', distinct from a default. Behavioral change after backfill is flagged as ambiguity above.",
+      "user_id_origin": "N/A — returns null by design; surfaced by GetConfig.js as userTimezone for TZ-DISPLAY-1"
+    }
+  ],
+  "migration_notes": {
+    "latest_migration": "20260625000000_restore_unplaced_reason_in_tasks_v.js",
+    "new_migration_name": "20260626000000_users_timezone_not_null.js",
+    "up_sequence": [
+      "1. UPDATE users SET timezone = 'America/New_York' WHERE timezone IS NULL",
+      "2. ALTER TABLE users MODIFY COLUMN timezone VARCHAR(100) NOT NULL DEFAULT 'America/New_York'"
+    ],
+    "down_sequence": [
+      "ALTER TABLE users MODIFY COLUMN timezone VARCHAR(100) DEFAULT 'America/New_York'"
+    ]
+  },
+  "recommended_routing": {
+    "lane": "full",
+    "depth": "standard",
+    "rationale": "Data-migration on shared prod Cloud SQL (real risk, backfill-before-ALTER required) locks in full lane. Depth standard not deep: root cause is a single missing .notNullable() confirmed by reading 160+ migrations; code changes are mechanical simplifications across 4 files (~20 LOC); A1 ambiguity needs a ruling but does not expand the investigation surface. Cross-service test depth is not warranted — all changes are in juggler-backend only; shared Cloud SQL means migration must be validated on test-bed (3407) but no RO code changes."
+  },
+  "ts": "2026-06-26T22:15:00Z"
+}

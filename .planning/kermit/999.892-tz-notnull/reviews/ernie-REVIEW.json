@@ -1,0 +1,84 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "ernie",
+  "leg_id": "999.892-tz-notnull",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Migration backfills NULLs before NOT NULL ALTER; raw MODIFY preserves VARCHAR(100)/DEFAULT/COLLATE; down() reverts to nullable w/o data loss. All 4 call sites keep row-absence/DB-error guards; no new fallback. No BLOCK/WARN.",
+  "steps": {
+    "line_by_line": "done",
+    "scooter_consult": "done"
+  },
+  "findings": [
+    {
+      "id": "ernie-892-01",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/src/db/migrations/20260626000000_users_timezone_not_null.js",
+      "line": 26,
+      "claim": "up() backfills NULLs before NOT NULL ALTER; ordering correct",
+      "evidence": "line 22 `knex('users').whereNull('timezone').update(...)` precedes line 26 raw `ALTER TABLE users MODIFY timezone VARCHAR(100) NOT NULL DEFAULT 'America/New_York' COLLATE utf8mb4_unicode_ci`; ALTER would otherwise fail on existing NULLs",
+      "fix": "none - confirmation",
+      "confidence": "high"
+    },
+    {
+      "id": "ernie-892-02",
+      "severity": "INFO",
+      "dimension": "maintainability",
+      "file": "juggler-backend/src/db/migrations/20260626000000_users_timezone_not_null.js",
+      "line": 26,
+      "claim": "explicit COLLATE utf8mb4_unicode_ci normalizes the column from the knex/MySQL-8 default; intentional, beneficial, collation-stable across up/down",
+      "evidence": "original col `string('timezone',100)` (20260301000000:13) carried no explicit collation -> MySQL8 default utf8mb4_0900_ai_ci; both up() and down() set utf8mb4_unicode_ci, aligning with the CLAUDE.md collation rule",
+      "fix": "none - note collation normalization in leg summary",
+      "confidence": "high"
+    },
+    {
+      "id": "ernie-892-03",
+      "severity": "INFO",
+      "dimension": "error-handling",
+      "file": "juggler-backend/src/scheduler/deriveSchedulePlacements.js",
+      "line": 48,
+      "claim": "resolveTimezone keeps try/catch DB-error guard and final return DEFAULT_TIMEZONE; only redundant `&& row.timezone` removed",
+      "evidence": "`if (row) return row.timezone;` inside try, `catch (_e) { /* fall through */ }`, then `return DEFAULT_TIMEZONE;` - both guards preserved; removed check is now guaranteed non-null by NOT NULL",
+      "fix": "none - confirmation",
+      "confidence": "high"
+    },
+    {
+      "id": "ernie-892-04",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/src/mcp/tools/data.js",
+      "line": 15,
+      "claim": "MCP getUserTimezone keeps row-absence guard `user ?`, no `|| default` re-added; same pattern in schedule.js:14 and tasks.js:91",
+      "evidence": "`return user ? user.timezone : 'America/New_York';` with comment citing migration 20260626000000; absence of surrounding try/catch is pre-existing and unchanged by this leg",
+      "fix": "none - confirmation",
+      "confidence": "high"
+    },
+    {
+      "id": "ernie-892-05",
+      "severity": "INFO",
+      "dimension": "coupling",
+      "file": "juggler-backend/src/slices/user-config/adapters/KnexConfigRepository.js",
+      "line": 152,
+      "claim": "KnexConfigRepository.getUserTimezone correctly OUT of scope and NOT in diff; intentional null-when-unset contract (A1) and downstream || _DEFAULT_TIMEZONE guards correctly untouched",
+      "evidence": "line 152 maps `row && row.timezone ? row.timezone : null`; downstream guards taskMappers.js:359/387/396, schedulerSession.js:56, runSchedule.js:501 depend on that null contract and were left in place - scope discipline verified",
+      "fix": "none - confirmation",
+      "confidence": "high"
+    },
+    {
+      "id": "ernie-892-06",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/tests/migrations/20260626000000_users_timezone_not_null.test.js",
+      "line": null,
+      "claim": "migration test exists; verifying it asserts backfill-before-ALTER and up->down->up reversibility is coverage ownership",
+      "evidence": "test file present alongside the new migration; assertion quality is telly's column",
+      "fix": "REFER->telly",
+      "confidence": "high"
+    }
+  ],
+  "refers": [
+    { "to": "telly", "why": "verify migration test asserts backfill-before-ALTER ordering and up->down->up reversibility" }
+  ]
+}

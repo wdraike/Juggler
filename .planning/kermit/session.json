@@ -1,17 +1,16 @@
 {
-  "leg_id": "juggler-sweep-duration",
-  "intent": "Task-sidebar Duration field: free-type (999.889) + enforce/surface min5-max480 range (999.889) + indicate minutes unit (999.890); same field, batched. Sweep branch, local only.",
+  "leg_id": "999.884-ui-map-e2e-foundation",
+  "intent": "Foundation of 999.884: UI map + E2E coverage tooling for juggler-frontend (UI map artifact, TDD coverage-% calculator, Playwright scaffold + representative coverage-tagged specs, decomposition). No live browser run.",
   "mode": "new",
   "lanes": [],
   "depth": "standard",
   "scope": ["juggler-frontend"],
   "branch": "sweep/juggler-2026-06-26",
   "status": "in_progress",
-  "wbs": ".planning/kermit/WBS-juggler-sweep-duration.md",
-  "spec": ".planning/kermit/juggler-sweep-duration/SPEC.md",
-  "traceability": ".planning/kermit/juggler-sweep-duration/TRACEABILITY.md",
+  "wbs": ".planning/kermit/WBS-999.884-ui-map-e2e-foundation.md",
+  "spec": ".planning/kermit/999.884-ui-map-e2e-foundation/SPEC.md",
+  "traceability": ".planning/kermit/999.884-ui-map-e2e-foundation/TRACEABILITY.md",
   "verdict": null,
-  "owner": { "sse_port": 0, "host": "Williams-MacBook-Pro.local", "started": "2026-06-26T00:00:00Z" },
-  "opened": "2026-06-26T00:00:00Z",
-  "last_update": "2026-06-26T00:00:00Z"
+  "owner": { "sse_port": 13674, "host": "Williams-MacBook-Pro.local", "started": "2026-06-27T03:16:22Z" },
+  "opened": "2026-06-27T03:16:22Z", "last_update": "2026-06-27T03:16:22Z"
 }

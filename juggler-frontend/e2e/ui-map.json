@@ -1,0 +1,214 @@
+{
+  "$schema": "juggler-ui-map/v1",
+  "generatedFrom": "static derivation from App.js/AppLayout.jsx view-switch state + src/theme",
+  "screens": [
+    {
+      "id": "screen:daily",
+      "label": "Day View",
+      "component": "DayView.jsx",
+      "evidence": "AppLayout.jsx:1279",
+      "select": "setViewMode('daily') via NavigationBar"
+    },
+    {
+      "id": "screen:day",
+      "label": "Flex View",
+      "component": "DayView.jsx",
+      "evidence": "AppLayout.jsx:1198",
+      "select": "setViewMode('day') via NavigationBar"
+    },
+    {
+      "id": "screen:3day",
+      "label": "3-Day View",
+      "component": "ThreeDayView.jsx",
+      "evidence": "AppLayout.jsx:1221",
+      "select": "setViewMode('3day') via NavigationBar"
+    },
+    {
+      "id": "screen:week",
+      "label": "Week View",
+      "component": "WeekView.jsx",
+      "evidence": "AppLayout.jsx:1235",
+      "select": "setViewMode('week') via NavigationBar"
+    },
+    {
+      "id": "screen:month",
+      "label": "Calendar View",
+      "component": "CalendarView.jsx",
+      "evidence": "AppLayout.jsx:1269",
+      "select": "setViewMode('month') via NavigationBar"
+    },
+    {
+      "id": "screen:timeline",
+      "label": "Timeline View",
+      "component": "TimelineView.jsx",
+      "evidence": "AppLayout.jsx:1249",
+      "select": "setViewMode('timeline') via NavigationBar"
+    },
+    {
+      "id": "screen:list",
+      "label": "List View",
+      "component": "ListView.jsx",
+      "evidence": "AppLayout.jsx:1306",
+      "select": "setViewMode('list') via NavigationBar"
+    },
+    {
+      "id": "screen:priority",
+      "label": "Priority / Kanban",
+      "component": "PriorityView.jsx",
+      "evidence": "AppLayout.jsx:1317",
+      "select": "setViewMode('priority') via NavigationBar"
+    },
+    {
+      "id": "screen:deps",
+      "label": "Dependencies DAG",
+      "component": "DependencyView.jsx",
+      "evidence": "AppLayout.jsx:1328",
+      "select": "setViewMode('deps') via NavigationBar"
+    },
+    {
+      "id": "screen:conflicts",
+      "label": "Issues / Unplaced",
+      "component": "ConflictsView.jsx",
+      "evidence": "AppLayout.jsx:1338",
+      "select": "setViewMode('conflicts') via NavigationBar"
+    },
+    {
+      "id": "screen:login",
+      "label": "Login",
+      "component": "components/auth/LoginPage.jsx",
+      "evidence": "App.js:65",
+      "select": "rendered when useAuth().user is falsy"
+    },
+    {
+      "id": "screen:auth-callback",
+      "label": "OAuth Callback (loading)",
+      "component": "App.js inline",
+      "evidence": "App.js:29-44",
+      "select": "url /auth/callback"
+    },
+    {
+      "id": "screen:admin-scheduler-debug",
+      "label": "Scheduler Debug",
+      "component": "SchedulerDebug.jsx",
+      "evidence": "App.js:17-20",
+      "select": "url /admin/scheduler-debug"
+    },
+    {
+      "id": "screen:admin-scheduler-stepper",
+      "label": "Scheduler Stepper",
+      "component": "SchedulerStepper.jsx",
+      "evidence": "App.js:21-24",
+      "select": "url /admin/scheduler-stepper"
+    },
+    {
+      "id": "screen:admin-impersonation",
+      "label": "Impersonation",
+      "component": "ImpersonationPage.jsx",
+      "evidence": "App.js:25-28",
+      "select": "url /admin/impersonation"
+    }
+  ],
+  "modals": [
+    {
+      "id": "modal:task-editor",
+      "label": "Task Editor",
+      "component": "TaskEditForm.jsx",
+      "evidence": "AppLayout.jsx:1420",
+      "trigger": "task card click -> expandedTasks"
+    },
+    {
+      "id": "modal:settings",
+      "label": "Settings",
+      "component": "SettingsPanel.jsx",
+      "evidence": "AppLayout.jsx:1486",
+      "trigger": "HeaderBar gear"
+    },
+    {
+      "id": "modal:import-export",
+      "label": "Import / Export",
+      "component": "ImportExportPanel.jsx",
+      "evidence": "AppLayout.jsx:1495",
+      "trigger": "settings / menu"
+    },
+    {
+      "id": "modal:calendar-sync",
+      "label": "Calendar Sync",
+      "component": "CalSyncPanel.jsx",
+      "evidence": "AppLayout.jsx:1504",
+      "trigger": "settings button / OAuth callback"
+    },
+    {
+      "id": "modal:help",
+      "label": "Help",
+      "component": "HelpModal.jsx",
+      "evidence": "AppLayout.jsx:1543",
+      "trigger": "HeaderBar ? / Cmd+?"
+    },
+    {
+      "id": "modal:disabled-items",
+      "label": "Disabled Items",
+      "component": "DisabledItemsPanel.jsx",
+      "evidence": "AppLayout.jsx:1550",
+      "trigger": "plan-limit banner"
+    },
+    {
+      "id": "modal:confirm-delete",
+      "label": "Confirm Delete",
+      "component": "ConfirmDialog.jsx",
+      "evidence": "AppLayout.jsx:1570",
+      "trigger": "task delete"
+    },
+    {
+      "id": "modal:recurring-delete",
+      "label": "Recurring Delete",
+      "component": "RecurringDeleteDialog.jsx",
+      "evidence": "AppLayout.jsx:1580",
+      "trigger": "delete recurring instance"
+    },
+    {
+      "id": "modal:completion-time",
+      "label": "Completion Time",
+      "component": "CompletionTimePicker.jsx",
+      "evidence": "AppLayout.jsx:1590",
+      "trigger": "mark done"
+    },
+    {
+      "id": "modal:ai-command",
+      "label": "AI Command",
+      "component": "AiCommandPanel.jsx",
+      "evidence": "AppLayout.jsx:1600",
+      "trigger": "Cmd+Shift+K"
+    },
+    {
+      "id": "modal:quick-add",
+      "label": "Quick Add Task",
+      "component": "QuickAddTask.jsx",
+      "evidence": "AppLayout.jsx:1470",
+      "trigger": "+ button / Cmd+N"
+    },
+    {
+      "id": "modal:toast-history",
+      "label": "Toast History",
+      "component": "ToastNotification.jsx",
+      "evidence": "AppLayout.jsx:1183",
+      "trigger": "toast area click"
+    }
+  ],
+  "paths": [
+    { "id": "path:1", "from": "screen:daily", "action": "click task", "to": "modal:task-editor" },
+    { "id": "path:2", "from": "any-view", "action": "NavigationBar tab", "to": "screen (view switch)" },
+    { "id": "path:3", "from": "any-view", "action": "filter pill", "to": "filter applied, stays on view" },
+    { "id": "path:4", "from": "any-view", "action": "click status badge", "to": "status change" },
+    { "id": "path:5", "from": "any-view", "action": "drag task to slot", "to": "reschedule" },
+    { "id": "path:6", "from": "any-view", "action": "Cmd+Shift+K", "to": "modal:ai-command" },
+    { "id": "path:7", "from": "modal:settings", "action": "Calendar Sync", "to": "modal:calendar-sync" },
+    { "id": "path:8", "from": "screen:conflicts", "action": "unplaced row", "to": "modal:task-editor" },
+    { "id": "path:9", "from": "screen:deps", "action": "task node", "to": "modal:task-editor" },
+    { "id": "path:10", "from": "screen:priority", "action": "drag between columns", "to": "status change" },
+    { "id": "path:11", "from": "any-view", "action": "+ / Cmd+N", "to": "modal:quick-add" },
+    { "id": "path:12", "from": "any-view", "action": "delete icon", "to": "modal:confirm-delete" },
+    { "id": "path:13", "from": "any-view", "action": "mark done", "to": "modal:completion-time" },
+    { "id": "path:14", "from": "any-view", "action": "gear", "to": "modal:settings" },
+    { "id": "path:15", "from": "screen:login", "action": "Sign In", "to": "screen:auth-callback -> AppLayout" }
+  ]
+}

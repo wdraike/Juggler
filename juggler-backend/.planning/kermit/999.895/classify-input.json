@@ -1,0 +1,10 @@
+{
+  "mode": "bugfix",
+  "project_root": ".",
+  "base_ref": "",
+  "files": ["src/mcp/tools/tasks.js"],
+  "added_lines": 30,
+  "acceptance_criteria": null,
+  "new_files": null,
+  "wbs_text": "Mirror the HTTP terminal-requires-schedule guard (UpdateTaskStatus.js) into the MCP set_task_status and update_task tools so MCP clients (ClimbRS) cannot mark a task done/skip/cancel without a scheduled time (rolling-instance exempt)."
+}

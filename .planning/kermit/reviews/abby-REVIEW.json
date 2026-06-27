@@ -1,68 +1,43 @@
 {
   "$contract": "muppet-output/v1",
   "agent": "abby",
-  "leg_id": "juggler-chore-requirements-register",
-  "mode": "chore",
+  "leg_id": "999.892-tz-notnull",
+  "mode": "bugfix",
   "depth": "standard",
   "status": "DONE",
-  "summary": "Authored juggler/docs/REQUIREMENTS.md: first living per-service requirements register with R1–R17, acceptance criteria, code+test traceability, 3 use cases, traceability summary.",
+  "summary": "Updated TIMEZONE-RULES.md: added TZ-SCHEMA-1 (NOT NULL DEFAULT schema contract + A1 nuance), tightened TZ-DISPLAY-1/3 and TZ-ERR-2 fallback scopes, extended Section 8/9 tables.",
   "steps": {
     "docs_authored": "done",
     "changelog": "n/a"
   },
   "findings": [
     {
-      "id": "abby-req-1",
-      "severity": "WARN",
-      "dimension": "doc-created",
-      "file": "juggler/docs/REQUIREMENTS.md",
-      "line": null,
-      "claim": "R6 (time tracking) is partial: time_remaining+WIP status exist but dedicated clock-in/clock-out endpoints and actual-vs-estimated reporting are not implemented",
-      "evidence": "juggler/docs/REQUIREMENTS.md:R6 — grepped codebase for actual_dur, clock_in, clock_out, timer_start, logTime; none found. time_remaining field exists in DB schema (20260301000000_initial_schema.js:26).",
-      "fix": "Track clock-in/clock-out as planned backlog item; no doc fix needed.",
-      "confidence": "high"
-    },
-    {
-      "id": "abby-req-2",
-      "severity": "WARN",
-      "dimension": "doc-created",
-      "file": "juggler/docs/REQUIREMENTS.md",
-      "line": null,
-      "claim": "R9 (drag-and-drop scheduling) is partial: handleGridDrop implemented in AppLayout.jsx but no unit test for the drop handler logic",
-      "evidence": "juggler/docs/REQUIREMENTS.md:R9 — CalendarGrid.jsx:366 + AppLayout.jsx handleGridDrop found; no corresponding test file covers drop scheduling logic.",
-      "fix": "REFER→telly: add unit test for handleGridDrop scheduling handler.",
-      "confidence": "high"
-    },
-    {
-      "id": "abby-req-3",
-      "severity": "WARN",
-      "dimension": "doc-created",
-      "file": "juggler/docs/REQUIREMENTS.md",
-      "line": null,
-      "claim": "R17 (MCP server) is partial: 20 tools implemented but no dedicated MCP-layer per-client isolation test",
-      "evidence": "juggler/docs/REQUIREMENTS.md:R17 — juggler-mcp/index.js has 20 server.tool registrations; no test file found under juggler-mcp/ covering MCP-layer user-isolation.",
-      "fix": "REFER→telly: add MCP per-client auth isolation test.",
-      "confidence": "high"
-    },
-    {
-      "id": "abby-req-4",
+      "id": "abby-tz-1",
       "severity": "INFO",
-      "dimension": "doc-created",
-      "file": "juggler/docs/REQUIREMENTS.md",
+      "dimension": "doc-updated",
+      "file": "juggler-backend/docs/TIMEZONE-RULES.md",
       "line": null,
-      "claim": "R12, R13, R14 (time reports, burn-down, capacity planning) are planned with no code or tests — correctly documented",
-      "evidence": "juggler/docs/REQUIREMENTS.md:R12-R14 — grepped all route files, frontend src for report/burndown/capacity-planning; none found.",
+      "claim": "TZ-SCHEMA-1 added; TZ-DISPLAY-1 extended with schema cross-ref; TZ-DISPLAY-3 and TZ-ERR-2 fallback triggers narrowed to absent-row/invalid-header/invalid-IANA only; A1 application-layer nuance preserved inline",
+      "evidence": "juggler-backend/docs/TIMEZONE-RULES.md:TZ-SCHEMA-1 + TZ-DISPLAY-1 + TZ-DISPLAY-3 + TZ-ERR-2 — sourced from migration 20260626000000_users_timezone_not_null.js and A1 KnexConfigRepository.getUserTimezone contract as supplied in leg description",
+      "fix": "none",
+      "confidence": "high"
+    },
+    {
+      "id": "abby-tz-2",
+      "severity": "INFO",
+      "dimension": "doc-updated",
+      "file": "juggler-backend/docs/TIMEZONE-RULES.md",
+      "line": null,
+      "claim": "Open question noted: post-backfill an un-configured user reads as America/New_York from the column; reintroducing a distinct unconfigured signal is not resolved by this migration",
+      "evidence": "juggler-backend/docs/TIMEZONE-RULES.md:TZ-SCHEMA-1 application-layer nuance paragraph",
+      "fix": "Track as open product decision if a distinct unset state is ever needed",
       "confidence": "high"
     }
   ],
   "refers": [
     {
       "to": "prairie",
-      "why": "verify juggler/docs/REQUIREMENTS.md against BASE-DOCUMENTATION-RUBRIC §0 requirements row and BASE-REQUIREMENTS-STANDARD §9 structure"
-    },
-    {
-      "to": "telly",
-      "why": "R9 drag-and-drop handler and R17 MCP per-client isolation have no unit tests — coverage gaps identified during requirements authoring"
+      "why": "verify updated TIMEZONE-RULES.md rules against BASE-DOCUMENTATION-RUBRIC accuracy criteria"
     }
   ]
 }

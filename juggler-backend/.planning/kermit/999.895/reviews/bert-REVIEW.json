@@ -1,0 +1,49 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "bert",
+  "leg_id": "999.895",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Added terminalScheduleBlock helper + guards in set_task_status and update_task; mirrors HTTP guard in UpdateTaskStatus.js:147-160. All 13 tests pass.",
+  "steps": {
+    "applied_blocks": "done",
+    "applied_warns": "n/a"
+  },
+  "findings": [
+    {
+      "id": "895-f1",
+      "severity": "BLOCK",
+      "dimension": "fix-applied",
+      "file": "src/mcp/tools/tasks.js",
+      "line": 70,
+      "claim": "MCP tools bypass HTTP terminal-requires-schedule guard — raw DB constraint fires instead of clean isError",
+      "evidence": "Added module-level TERMINAL_REQUIRES_SCHEDULE=['done','skip','cancel'] and async terminalScheduleBlock(existing,status,willBeScheduled,userId) above registerTaskTools; returns rejection message string or null (rolling-exempt via isRollingMaster lookup on master_id||source_id)",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "895-f2",
+      "severity": "BLOCK",
+      "dimension": "fix-applied",
+      "file": "src/mcp/tools/tasks.js",
+      "line": 416,
+      "claim": "set_task_status: no guard before DB write for terminal status on unscheduled task",
+      "evidence": "Inserted `var _termBlock = await terminalScheduleBlock(existing, status, !!existing.scheduled_at, userId); if (_termBlock) { return { content:[{type:'text',text:_termBlock}], isError:true }; }` before `var update = { status: ... }`",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "895-f3",
+      "severity": "BLOCK",
+      "dimension": "fix-applied",
+      "file": "src/mcp/tools/tasks.js",
+      "line": 353,
+      "claim": "update_task: no guard before DB write for terminal status on unscheduled task",
+      "evidence": "Inserted _willBeScheduled computation (covers existing.scheduled_at OR fields.scheduledAt OR fields.date) and terminalScheduleBlock call before the isLocked branch, so both locked and unlocked write paths are blocked",
+      "fix": "applied",
+      "confidence": "high"
+    }
+  ],
+  "refers": []
+}

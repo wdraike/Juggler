@@ -1,0 +1,69 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "ernie",
+  "leg_id": "999.884-ui-map-e2e-foundation",
+  "mode": "new",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Pure computeCoverage correct (div-by-zero guarded, deduped, unmatched excluded, no data fallbacks); 7/7 tests green; ui-map.json coherent. 2 WARN (stale doc paths, baseURL fails-open to dev port), 2 INFO.",
+  "steps": {
+    "line_by_line": "done",
+    "scooter_consult": "done"
+  },
+  "findings": [
+    {
+      "id": "ernie-884-1",
+      "severity": "WARN",
+      "dimension": "maintainability",
+      "file": "juggler-frontend/e2e/report/collect-coverage.js",
+      "line": 7,
+      "claim": "Header docstrings reference stale directory e2e/coverage; files live in e2e/report",
+      "evidence": "Lines 7/19 say 'node e2e/coverage/collect-coverage.js' and 'e2e/coverage/*'; ui-coverage.test.js:7 says 'node --test e2e/coverage/ui-coverage.test.js'. Actual path is e2e/report/. Copy-pasted commands fail.",
+      "fix": "Replace e2e/coverage with e2e/report in the doc comments.",
+      "confidence": "high"
+    },
+    {
+      "id": "ernie-884-2",
+      "severity": "WARN",
+      "dimension": "input-validation",
+      "file": "juggler-frontend/playwright.config.js",
+      "line": 53,
+      "claim": "baseURL defaults to the dev frontend port the file's own header forbids targeting",
+      "evidence": "baseURL: PLAYWRIGHT_BASE_URL || FRONTEND_URL || 'http://localhost:3002'. The header + live-UAT hazard (281 junk rows in dev DB) mandate NEVER hitting dev; with no env set the runner aims at dev:3002. Config fails open instead of closed.",
+      "fix": "throw if neither PLAYWRIGHT_BASE_URL nor FRONTEND_URL is set rather than defaulting to the dev port.",
+      "confidence": "med"
+    },
+    {
+      "id": "ernie-884-3",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-frontend/e2e/specs/login.spec.js",
+      "line": 62,
+      "claim": "Branding assertions are vacuous as authored (always pass)",
+      "evidence": "getComputedStyle().backgroundColor returns rgb(), so bg.startsWith('#') is false, the ternary substitutes the expected BRAND token, and expect([...]).toContain(BRAND.x) is trivially true. Same pattern in day-view.spec.js:55 and settings-panel.spec.js:50. In-code comment admits it is a placeholder.",
+      "fix": "REFER to zoe/telly: convert rgb->hex in a real helper and assert the actual computed color before the suite is greenlit.",
+      "confidence": "high"
+    },
+    {
+      "id": "ernie-884-4",
+      "severity": "INFO",
+      "dimension": "concurrency-safety",
+      "file": "juggler-frontend/e2e/report/collect-coverage.js",
+      "line": 62,
+      "claim": "Module-level /g regex shares lastIndex across files; safe now, fragile to a future break",
+      "evidence": "COVERS_RE = /.../g at line 36 is reused via .exec in a while loop per file. Each loop currently runs to exhaustion (resets lastIndex), so it is correct today; adding a break would carry stale lastIndex into the next file and skip its leading annotations.",
+      "fix": "Reset COVERS_RE.lastIndex=0 per file, or use String.matchAll / a fresh regex per file.",
+      "confidence": "high"
+    }
+  ],
+  "refers": [
+    {
+      "to": "zoe",
+      "why": "Branding assertions in the 3 spec scaffolds pass vacuously (test-truthfulness) — harden before the suite runs."
+    },
+    {
+      "to": "telly",
+      "why": "Branding assertion authoring: real rgb->hex helper needed for the spec scaffolds."
+    }
+  ]
+}
