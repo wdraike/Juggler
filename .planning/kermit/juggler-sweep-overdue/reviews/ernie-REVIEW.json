@@ -1,0 +1,74 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "ernie",
+  "leg_id": "juggler-sweep-overdue",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Re-review: F1 RESOLVED — bert changed the combine to max (De Morgan dual of the original OR guards); overdue only when past BOTH, R50.0 period-boundary extension restored; null-handling + call-site comparison verified consistent. 0 unresolved BLOCK.",
+  "steps": {
+    "line_by_line": "done",
+    "scooter_consult": "n/a (R50.0 + 999.671 read as LOCKED from SPEC governing rules + memory juggler-never-missing-invariant; F1 contradicts R50.0)"
+  },
+  "findings": [
+    {
+      "id": "ernie-jso-f1",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/src/scheduler/runSchedule.js",
+      "line": 235,
+      "claim": "RESOLVED (was BLOCK): computeEffectiveDeadline now returns max(periodBoundary, windowClose), the De Morgan dual of the original two-guard OR semantics — overdue only when past BOTH deadlines; R50.0 period-boundary extension restored.",
+      "evidence": "Helper :240 `return periodBoundary > windowClose ? periodBoundary : windowClose` (later of two non-null); :238-239 ignore nulls (one null->the other, both null->null). Call-site :1943 `if (!effectiveDeadline || today < effectiveDeadline) return` => overdue iff today >= max(periodEnd, windowClose) = past BOTH, consistent with max. R50.0: periodEnd > windowClose => effectiveDeadline = periodEnd, flexible-TPC instance stays live until cycle boundary. grep confirms no residual min/'earlier' semantics; doc :220-228 + call-site comment :1932-1937 corrected to max/De Morgan.",
+      "fix": "None — resolved by bert. SPEC AC-840-4 (which prescribed min) still needs Kermit/Scooter reconciliation to match the shipped max; tracked via F1 refer to kermit.",
+      "confidence": "high"
+    },
+    {
+      "id": "ernie-jso-f2",
+      "severity": "INFO",
+      "dimension": "input-validation",
+      "file": "juggler-backend/src/slices/task/domain/mappers/taskMappers.js",
+      "line": 427,
+      "claim": "time_flex != null admits negative flex, which would make window-close precede the slot and fire overdue prematurely.",
+      "evidence": "taskValidation.js:152 rejects tfVal<0 (range 0..480) at the API boundary, so negatives cannot persist through the supported path; defense-in-depth note only.",
+      "fix": "No change required; relies on the documented validation invariant.",
+      "confidence": "high"
+    },
+    {
+      "id": "ernie-jso-f3",
+      "severity": "INFO",
+      "dimension": "type-safety",
+      "file": "juggler-backend/src/scheduler/runSchedule.js",
+      "line": 253,
+      "claim": "checkPlacementDisjointness silently under-reports when an entry has missing/NaN dur or start (NaN > next.start === false).",
+      "evidence": "aEnd = prev.start + prev.dur; if prev.dur is undefined aEnd is NaN and the comparison is false, so a malformed placement produces no warn. Off-by-one is correct (> not >=, touching allowed); single-entry/empty/null/unsorted all handled.",
+      "fix": "Optional: coerce/guard prev.dur and start to numbers and warn on non-numeric. Acceptable for a non-blocking diagnostic.",
+      "confidence": "high"
+    },
+    {
+      "id": "ernie-jso-f4",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/src/scheduler/runSchedule.js",
+      "line": 1937,
+      "claim": "The F1 regression scenario (periodEnd later than windowClose, with windowClose < today < periodEnd) has no covering test, which is why the min/max inversion passed green.",
+      "evidence": "BERT-LOG: 'no existing test covers the flexible-TPC-with-timeFlex scenario; behavior for day-locked instances unchanged.'",
+      "fix": "REFER->telly: add a regression test that goes RED on the current min() and asserts the instance stays live until periodEnd.",
+      "confidence": "high"
+    },
+    {
+      "id": "ernie-jso-f5",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/src/scheduler/runSchedule.js",
+      "line": 211,
+      "claim": "computeWindowCloseUtc treats preferred_time_mins as UTC-minutes-since-midnight; a local-tz stored value would skew the window-close in the cal-history cron consumer.",
+      "evidence": "Function anchors to saDate UTC midnight + preferredMins; comment asserts UTC-pure. The in-scheduler auto-mark consumer was removed in Leg D, leaving only the missedHelpers cron.",
+      "fix": "Pre-existing/acknowledged; note only.",
+      "confidence": "med"
+    }
+  ],
+  "refers": [
+    { "to": "kermit", "why": "SPEC AC-840-4 prescribes min(), which contradicts LOCKED R50.0; reconcile before bert re-fixes F1." },
+    { "to": "telly", "why": "Missing flexible-TPC period-boundary regression test that would catch the F1 min/max inversion." }
+  ]
+}

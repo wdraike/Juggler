@@ -1,0 +1,59 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "zoe",
+  "leg_id": "juggler-sweep-overdue",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "No false-pass/tautology. 5/5 source mutations flip the expected test RED (both oracle un-skips, disjointness boundary, weather ceiling, effective-deadline max). 2 WARN: stale min/earlier + Skipped comments.",
+  "steps": { "adversarial_pass": "done", "spot_mutation": "done", "flake_rerun": "done" },
+  "findings": [
+    {
+      "id": "zoe-840-4-stale-min-comment",
+      "severity": "WARN",
+      "dimension": "shallow-assertion",
+      "file": "juggler-backend/tests/unit/scheduler/effective-deadline.test.js",
+      "line": 3,
+      "claim": "computeEffectiveDeadline both-set returns the later (max) value",
+      "evidence": "Assertions are CORRECT (MUTATION max->min flips tests 1-3 RED) but header line 3 says 'the earlier of the two non-null values' and test name line 63 says 'min of equal = either' — stale min-era prose contradicts the asserted max; a maintainer could invert the assertion to match the comment and reintroduce the R50.0 regression SPEC AC-840-4 corrected.",
+      "fix": "Update header line 3 and test name line 63 to MAX/later wording, aligned to SPEC AC-840-4 determination.",
+      "confidence": "high"
+    },
+    {
+      "id": "zoe-oracle-stale-skipped-comment",
+      "severity": "WARN",
+      "dimension": "shallow-assertion",
+      "file": "juggler-backend/tests/unit/mappers/overdue-pastdue-recurring.test.js",
+      "line": 177,
+      "claim": "CASE-1a-preferred and CASE-10a are the leg's active regression oracles",
+      "evidence": "Lines 177 and 591 still read 'Skipped so main stays green; un-skip when the follow-up lands' directly above the now-un-skipped, GREEN-running oracle tests — misleading, implies inert tests that are in fact the primary pre-fix RED reproduction.",
+      "fix": "Remove the stale 'Skipped ...' comment lines above the active oracle tests.",
+      "confidence": "high"
+    },
+    {
+      "id": "zoe-disjoint-multi-entry-gap",
+      "severity": "INFO",
+      "dimension": "unchallenged-claim",
+      "file": "juggler-backend/tests/unit/scheduler/placement-disjointness.test.js",
+      "line": null,
+      "claim": "checkPlacementDisjointness pins all same-day overlaps",
+      "evidence": "Suite covers only 2-entry days; the impl compares adjacent sorted pairs only (runSchedule.js:260-264), so a 3+-entry day where a long early task overlaps a non-adjacent later task is unpinned. Not a false-pass in existing tests — an edge-completeness gap.",
+      "fix": "Add a 3-entry-per-day overlap case to telly's suite.",
+      "confidence": "med"
+    },
+    {
+      "id": "zoe-traceability-stale-840-4",
+      "severity": "INFO",
+      "dimension": "unchallenged-claim",
+      "file": ".planning/kermit/juggler-sweep-overdue/TRACEABILITY.md",
+      "line": 6,
+      "claim": "AC-840-4 = min(period-boundary, window-close), test pending",
+      "evidence": "Row still reads min() and 'pending (bert authors)' while SPEC AC-840-4 DETERMINATION corrected it to max() and effective-deadline.test.js now exists and is GREEN.",
+      "fix": "Kermit: update AC-840-4 traceability row to max() and the real test path.",
+      "confidence": "high"
+    }
+  ],
+  "refers": [
+    { "to": "telly", "why": "Stale min/earlier + Skipped comments and a 3-entry disjointness edge gap in telly-owned test files" }
+  ]
+}

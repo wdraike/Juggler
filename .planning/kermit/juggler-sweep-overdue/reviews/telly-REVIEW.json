@@ -1,0 +1,60 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "telly",
+  "leg_id": "juggler-sweep-overdue",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "RED baselines set: 2 oracle tests un-skipped (AC-840-1, AC-840-2); 3 disjointness tests RED (function missing); 3 weather tests GREEN (no code defect).",
+  "steps": {
+    "failing_test_red": "done",
+    "coverage_reviewed": "n/a — step-0 RED baseline only; coverage at re-review post-fix"
+  },
+  "findings": [
+    {
+      "id": "ac840-1-window-close",
+      "severity": "BLOCK",
+      "dimension": "missing-regression",
+      "file": "tests/unit/mappers/overdue-pastdue-recurring.test.js",
+      "line": 209,
+      "claim": "CASE-1a-preferred RED: window-close uses scheduledMins+timeFlex instead of preferredTimeMins+timeFlex",
+      "evidence": "Expected: false, Received: true — code windowClose=420+180=600; now=630>=600 → true; spec requires preferred=480+flex=180=660; now=630<660 → false",
+      "fix": "bert: fix taskMappers.js overdue IIFE to use preferred_time_mins ?? scheduledMins for window-close base",
+      "confidence": "high"
+    },
+    {
+      "id": "ac840-2-flex-zero",
+      "severity": "BLOCK",
+      "dimension": "missing-regression",
+      "file": "tests/unit/mappers/overdue-pastdue-recurring.test.js",
+      "line": 614,
+      "claim": "CASE-10a RED: guard time_flex > 0 excludes time_flex=0; falls through to anytime path → overdue=false",
+      "evidence": "Expected: true, Received: false — guard `row.time_flex > 0` at taskMappers.js ~423 must become `row.time_flex != null && row.time_flex >= 0`",
+      "fix": "bert: change flex guard in taskMappers.js from `> 0` to `!= null && >= 0` (or add explicit === 0 branch)",
+      "confidence": "high"
+    },
+    {
+      "id": "ac840-3-disjointness-missing",
+      "severity": "BLOCK",
+      "dimension": "missing-regression",
+      "file": "tests/unit/scheduler/placement-disjointness.test.js",
+      "line": null,
+      "claim": "checkPlacementDisjointness not yet in runSchedule.js exports; all 3 tests throw TypeError",
+      "evidence": "TypeError: checkPlacementDisjointness is not a function at all 3 test bodies (lines 52, 68, 84)",
+      "fix": "bert: implement checkPlacementDisjointness(dayPlacements) and add to module.exports in runSchedule.js; see TEST-CATALOG.md for full signature contract",
+      "confidence": "high"
+    },
+    {
+      "id": "ac881-2-weather-green",
+      "severity": "INFO",
+      "dimension": "coverage-gap",
+      "file": "tests/unit/scheduler/weather-temp-ceiling.test.js",
+      "line": null,
+      "claim": "weatherOk already exported and correct; 3 regression-lock tests GREEN; no code defect",
+      "evidence": "All 3 pass: temp(30)>max(25)→false; temp(20)<=max(25)→true; max=null→true. Export: module.exports._testOnly.weatherOk (unifiedScheduleV2.js:2443)",
+      "fix": "No fix needed. If _testOnly export removed in future, suite turns RED (intended).",
+      "confidence": "high"
+    }
+  ],
+  "refers": []
+}

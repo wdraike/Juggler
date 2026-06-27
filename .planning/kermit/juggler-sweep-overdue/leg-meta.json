@@ -1,0 +1,31 @@
+{
+  "$contract": "leg-meta/v1",
+  "leg_id": "juggler-sweep-overdue",
+  "mode": "bugfix",
+  "lane": "full",
+  "depth": "standard",
+  "legs_since_retro": 0,
+  "retro_n": 5,
+  "triggers": {
+    "security_surface": false,
+    "infra_surface": false,
+    "frontend": true,
+    "data_migration": false,
+    "code_surface": true,
+    "docs_only": false,
+    "interface_change": false
+  },
+  "wbs_files": [
+    "juggler-backend/src/slices/task/domain/mappers/taskMappers.js",
+    "juggler-backend/src/scheduler/runSchedule.js",
+    "juggler-backend/tests/unit/mappers/overdue-pastdue-recurring.test.js",
+    "juggler-backend/tests/unit/scheduler/effective-deadline.test.js",
+    "juggler-backend/tests/unit/scheduler/placement-disjointness.test.js",
+    "juggler-backend/tests/unit/scheduler/weather-temp-ceiling.test.js",
+    "juggler-frontend/src/components/views/ConflictsView.jsx"
+  ],
+  "verdict": "PASS",
+  "fix_loop_iters": 1,
+  "muppets_dispatched": ["telly", "bert", "ernie", "bird", "zoe"],
+  "docs_deferred": { "deferred": true, "reason": "bugfix; no public API/schema/architecture/runbook change. Only user-facing surface is an in-app help string (ConflictsView stale-bucket text) reviewed by bird; no doc artifact to update." }
+}

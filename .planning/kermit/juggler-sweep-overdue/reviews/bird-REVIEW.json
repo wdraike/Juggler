@@ -1,0 +1,76 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "bird",
+  "leg_id": "juggler-sweep-overdue",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Re-review: bird-001 and bird-002 RESOLVED by bert. All 4 findings closed. No open BLOCKs or WARNs. David sign-off on wording still required (product/copy decision, not a UX gate).",
+  "steps": {
+    "inputs_check": "done",
+    "brand_guide_loaded": "done",
+    "design_tokens_loaded": "done — helpStyle unchanged by diff",
+    "scope_confirmed": "done — 1 file, 1 string, line 81",
+    "sibling_voice_comparison": "done — lines 64-93 read",
+    "factual_accuracy": "done — new text correct; old text was wrong",
+    "length_overflow_check": "done — replacement text within sibling range",
+    "viewports_checked": "skipped — copy-only change, no layout impact",
+    "branding_check": "done — re-review confirms both WARNs resolved",
+    "a11y_automated": "skipped — no structural/contrast change",
+    "a11y_manual": "skipped — no interactive element change",
+    "interaction_testing": "skipped — static text only",
+    "env_i18n": "skipped — copy-only, theme token unchanged",
+    "re_review": "done — diff read; bert applied exact recommended phrasing"
+  },
+  "findings": [
+    {
+      "id": "bird-001",
+      "severity": "WARN",
+      "dimension": "branding",
+      "file": "juggler-frontend/src/components/views/ConflictsView.jsx",
+      "line": 81,
+      "claim": "Opening noun 'items' broke sibling pattern; all other sections use 'tasks'",
+      "evidence": "Re-review: new text opens 'These tasks have a past scheduled date...' — matches all sibling help texts. RESOLVED by bert.",
+      "fix": "RESOLVED — 'These tasks' applied",
+      "confidence": "high",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "bird-002",
+      "severity": "WARN",
+      "dimension": "branding",
+      "file": "juggler-frontend/src/components/views/ConflictsView.jsx",
+      "line": 81,
+      "claim": "'committed items' was unexplained scheduler jargon; violated plain-language brand voice",
+      "evidence": "Re-review: 'committed items' replaced with 'fixed-time tasks and calendar-linked events stay pinned at their original date' — plain English, no internal vocabulary. RESOLVED by bert.",
+      "fix": "RESOLVED — plain-English description applied",
+      "confidence": "high",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "bird-003",
+      "severity": "INFO",
+      "dimension": "branding",
+      "file": "juggler-frontend/src/components/views/ConflictsView.jsx",
+      "line": 81,
+      "claim": "Missing actionable close — siblings consistently end with what the user can do",
+      "evidence": "Re-review: 'Reschedule manually when you're ready.' appended — actionable close restored. RESOLVED by bert.",
+      "fix": "RESOLVED — CTA appended",
+      "confidence": "high",
+      "status": "RESOLVED"
+    },
+    {
+      "id": "bird-004",
+      "severity": "INFO",
+      "dimension": "branding",
+      "file": "juggler-frontend/src/components/views/ConflictsView.jsx",
+      "line": 81,
+      "claim": "Minor grammar roughness: plural subject with singular 'their date'",
+      "evidence": "Re-review: 'their date' replaced with 'their original date'. RESOLVED by bert.",
+      "fix": "RESOLVED — 'their original date' applied",
+      "confidence": "high",
+      "status": "RESOLVED"
+    }
+  ],
+  "refers": []
+}

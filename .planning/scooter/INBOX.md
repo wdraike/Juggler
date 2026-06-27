@@ -18,7 +18,14 @@ Each notice follows the schema below. Scooter reconciles these into the KG.
 
 ## Notices
 
-(No pending notices)
+## 2026-06-26T00:00:00Z — 999.892-tz-notnull — abby
+- type: standard
+- artifact: juggler-backend/docs/TIMEZONE-RULES.md:TZ-SCHEMA-1
+- change: users.timezone is now NOT NULL DEFAULT 'America/New_York' COLLATE utf8mb4_unicode_ci (migration 20260626000000_users_timezone_not_null.js); all pre-existing NULLs were backfilled; column-null fallbacks removed at reader call sites (deriveSchedulePlacements + 3 MCP getUserTimezone helpers); remaining America/New_York fallbacks (TZ-DISPLAY-3, TZ-ERR-2) now cover only: absent user row, missing/invalid x-timezone header, or invalid IANA value — not null column. A1 getUserTimezone null contract (application-layer "unset" signal) is unchanged.
+- rationale: Single-source UTC contract: schema enforces the America/New_York default so no reader code can diverge from it by omitting a null check. Application-layer null (A1 contract) is a separate signal from DB-null and is preserved.
+- supersedes: none
+- challenge-id: none
+- resolves: none
 
 ## 2026-06-12T00:00:00Z — juggler-h5-fixes W3 — ernie
 - type: process-decision
@@ -116,3 +123,17 @@ date: 2026-06-12T23:05:01Z
 lesson: The Step-7.1 HEAD-drift guard (added prior retro) is single-repo only; multi-service legs commit per-submodule and lacked the equivalent branch-verify.
 agent_edit: ~/.claude/skills/kermit/SKILL.md Multi-Service "Commit order" bullet — added a per-submodule "verify on leg/<leg_id> before git add" check (multi-service analog of the Step-7.1 guard). Lint PASS.
 project_fact: payment + bug-reporter prod DB also connect via socketPath (CLOUD_SQL_CONNECTION_NAME); their TCP+TLS knexfile branches were dead, removed in 999.440. Same socketPath pattern now confirmed across juggler/payment/bug-reporter; auth + resume-optimizer use rejectUnauthorized:true (CA-verified / system trust).
+
+## 2026-06-26T13:00:00Z — juggler-sweep-overdue — oscar
+- type: decision
+- artifact: juggler-backend/src/scheduler/runSchedule.js computeEffectiveDeadline
+- change: effective-deadline for a recurring instance = MAX(period-boundary, window-close), not min. Overdue only when past BOTH (De Morgan dual of the original two independent OR early-return guards). Preserves R50.0 period-boundary extension for flexible-TPC recurring instances.
+- rationale: backlog 999.840(4) text said "min" but ernie proved min() makes the period-boundary extension dead (time_flex capped 0..480 → windowClose always earlier) and flags flexible-TPC recurring instances overdue mid-cycle — a R50.0 regression. max() is behavior-preserving (full scheduler regression stayed green).
+- supersedes: none
+
+## 2026-06-26T13:00:01Z — juggler-sweep-overdue — oscar
+- type: decision
+- artifact: juggler-backend/src/slices/task/domain/mappers/taskMappers.js overdue IIFE (339-371)
+- change: AFFIRMED (not changed) — a floating one-off (no recurrence, no deadline, not FIXED) past its date stays roll-forward / NOT overdue (999.671 contract); it belongs in the stale "past scheduled date" Issues bucket, not the overdue bucket. R50 governs visibility/pinning, not the overdue label. Treating such items as overdue (backlog 999.879 (1)(2)(3)) is a settled-decision REVERSAL requiring a David ruling (AMB-A) — deferred, not done this leg.
+- rationale: Scooter consult + in-code provenance (taskMappers.js:370 comment). Prevents future relitigation of the 999.671 floating-one-off exclusion.
+- supersedes: none

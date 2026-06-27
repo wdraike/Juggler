@@ -1,0 +1,87 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "bert",
+  "leg_id": "juggler-sweep-overdue",
+  "mode": "bugfix",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Applied FIX-1..5: preferred_time_mins window-close (AC-840-1), time_flex=0 gate (AC-840-2), computeEffectiveDeadline+computeWindowCloseUtc AC2b (AC-840-4), checkPlacementDisjointness WARN (AC-840-3/881-1), stale help text reword (AC-879-4). 28/28 tests GREEN.",
+  "steps": {
+    "applied_blocks": "done",
+    "applied_warns": "done"
+  },
+  "findings": [
+    {
+      "id": "fix1-ac840-1",
+      "severity": "BLOCK",
+      "dimension": "fix-applied",
+      "file": "juggler-backend/src/slices/task/domain/mappers/taskMappers.js",
+      "line": 423,
+      "claim": "FIX-1 / AC-840-1: window-close used scheduledMins+time_flex instead of preferred_time_mins+time_flex",
+      "evidence": "Changed windowed branch to compute preferredTimeMins = (row.preferred_time_mins != null ? row.preferred_time_mins : scheduledMins) then windowCloseMins = preferredTimeMins + row.time_flex. CASE-1a-preferred flips GREEN.",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "fix2-ac840-2",
+      "severity": "BLOCK",
+      "dimension": "fix-applied",
+      "file": "juggler-backend/src/slices/task/domain/mappers/taskMappers.js",
+      "line": 423,
+      "claim": "FIX-2 / AC-840-2: guard `row.time_flex > 0` excluded time_flex=0 (zero-width window) from windowed path",
+      "evidence": "Changed guard from `row.time_flex > 0` to `row.time_flex != null` so time_flex=0 enters windowed branch. CASE-10a (now=09:00 > slot=08:00, flex=0) flips GREEN; CASE-10null still false (falls through).",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "fix3a-ac840-4-computeWindowCloseUtc",
+      "severity": "WARN",
+      "dimension": "fix-applied",
+      "file": "juggler-backend/src/scheduler/runSchedule.js",
+      "line": 201,
+      "claim": "FIX-3a / AC-840-4: computeWindowCloseUtc used scheduled_at+timeFlex; must use preferred_time_mins+timeFlex consistent with FIX-1",
+      "evidence": "Rewrote to derive utcMidnight from saDate, then baseMins = preferredMins ?? utcSlotMins, returns utcMidnight + baseMins + flex ms. 4 existing past-window-missed.test.js tests remain GREEN.",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "fix3b-ac840-4-effectiveDeadline",
+      "severity": "WARN",
+      "dimension": "fix-applied",
+      "file": "juggler-backend/src/scheduler/runSchedule.js",
+      "line": 1870,
+      "claim": "FIX-3b / AC-840-4: two independent sequential guards for period-boundary and window-close; no named effective-deadline helper",
+      "evidence": "Added computeEffectiveDeadline({periodBoundary, windowClose}) = min(non-null values) as named pure helper; replaced two guards (flex>=daysPast*1440 return + periodEnd check) with single: windowCloseDate = td+flex ms; effectiveDeadline = computeEffectiveDeadline({periodBoundary:periodEnd, windowClose:windowCloseDate}); if (!effectiveDeadline || today < effectiveDeadline) return. Exported in module.exports.",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "fix4-ac840-3-disjointness",
+      "severity": "BLOCK",
+      "dimension": "fix-applied",
+      "file": "juggler-backend/src/scheduler/runSchedule.js",
+      "line": null,
+      "claim": "FIX-4 / AC-840-3 / AC-881-1: checkPlacementDisjointness not exported; no overlap WARN at persist boundary",
+      "evidence": "Added checkPlacementDisjointness(dayPlacements) pure helper (sort by start per dateKey, flag prev.start+prev.dur > next.start); exported as first-class named export; wired WARN-only forEach before persistDelta. OVERLAP/DISJOINT/MULTI-DAY tests all GREEN (28/28).",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "fix5-ac879-4-helptext",
+      "severity": "WARN",
+      "dimension": "fix-applied",
+      "file": "juggler-frontend/src/components/views/ConflictsView.jsx",
+      "line": 81,
+      "claim": "FIX-5 / AC-879-4: stale-bucket help text inaccurate — 'The scheduler will move them to today' wrong for pinned/committed items",
+      "evidence": "Reworded to: 'These items have a scheduled date in the past and no hard deadline. The scheduler rolls eligible ones forward on its next run; committed items stay pinned to their date.'",
+      "fix": "applied",
+      "confidence": "high"
+    }
+  ],
+  "refers": [
+    {
+      "to": "david",
+      "why": "FIX-5 ConflictsView.jsx:81 — stale-bucket help text reword is accurate and factual but subjective UX copy; spec requires David sign-off before ship"
+    }
+  ]
+}
