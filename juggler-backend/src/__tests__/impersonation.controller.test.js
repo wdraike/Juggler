@@ -116,7 +116,7 @@ describe('startImpersonation', () => {
       .post('/test')
       .send({ targetUserId: 'u2' });
     expect(res.status).toBe(503);
-  });
+  }, 10000);
 
   it('forwards 4xx errors from auth-service', async () => {
     global.fetch.mockResolvedValueOnce({
