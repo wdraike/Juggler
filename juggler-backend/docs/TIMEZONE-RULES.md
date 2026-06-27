@@ -37,13 +37,14 @@ row, `timezone` is therefore always non-null. Readers of `users.timezone` do
 NOT need a column-null fallback; the `America/New_York` default is enforced at
 both the schema level (DEFAULT) and the application level.
 
-**Application-layer nuance:** `KnexConfigRepository.getUserTimezone` may still
-return `null` at the application layer when the user's timezone is treated as
-"unset" by the A1 contract (used by the frontend display path). This `null` is
-an application-level signal, not a DB-null column. Post-backfill, an
-un-configured user's `timezone` column reads as `'America/New_York'`; whether
-to reintroduce a distinct "unconfigured" signal is an open question not resolved
-by this migration.
+**Application-layer nuance:** As of 999.899, the user's timezone is auto-detected
+from the browser's `x-timezone` header on every authenticated request. On first
+login the detected timezone is set as the user's timezone immediately; on
+subsequent requests, if the browser reports a different valid IANA timezone, it
+is updated silently (fire-and-forget). The `America/New_York` default is only
+used when the header is absent or contains an invalid IANA name. There is no
+longer an "unconfigured" signal — the timezone is always set to a real value
+based on the user's browser.
 
 **Rationale:** UTC storage eliminates ambiguity across server locations, DST
 transitions, and multi-timezone teams. Date-only fields are an exception because
