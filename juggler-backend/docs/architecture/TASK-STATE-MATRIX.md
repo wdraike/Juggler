@@ -45,6 +45,31 @@ disabled ───┬──→ "" (via re-enable endpoint, checks plan limits)
             └──→ (no other transitions — frozen)
 ```
 
+## Task Action Buttons (StatusToggle)
+
+Status buttons are rendered by `StatusToggle` (`juggler-frontend/src/components/schedule/StatusToggle.jsx`) as a row of icon buttons driven by the `ALL_STATUSES` array (`StatusToggle.jsx:13–21`). Two entries cause frequent confusion — they appear in the same row but are categorically different:
+
+| Button | `value` | `systemOnly` | Nature | Initiator |
+|--------|---------|-------------|--------|-----------|
+| **Start** | `wip` (`StatusToggle.jsx:16`) | `false` | User-initiated write action | User click |
+| **Missed** | `missed` (`StatusToggle.jsx:20`) | `true` | Read-only system badge | Backend cron only |
+
+### Start
+
+Clicking calls `onChange('wip')` (`StatusToggle.jsx:71`), wired through `onStatusChange` (`TaskCard.jsx:123`, `ScheduleCard.jsx:189`) to `apiClient.put('/tasks/:id/status', { status: 'wip' })` (`useTaskState.js:225`). `wip` is in `VALID_STATUSES` (`UpdateTaskStatus.js:50`); the `"" → wip` transition also populates `time_remaining` from the estimate (`UpdateTaskStatus.js:173–175`). `wip` means "in progress" (`shared/task-status.js:16`).
+
+**Visibility:** shown for all task types except `recurring_template` — templates are restricted to Open/Pause only (`StatusToggle.jsx:54–56`). Never disabled by the `disableTerminal` guard, which covers only `done/cancel/skip/pause/missed` (`StatusToggle.jsx:46,66`); Start is always clickable when shown.
+
+### Missed
+
+`systemOnly: true` (`StatusToggle.jsx:20`). Rendered `disabled`; `onClick` is a guarded no-op (`StatusToggle.jsx:71–72`); tooltip reads "Missed — auto-applied by scheduler" (`StatusToggle.jsx:73`). Appears **only** when the task's current status is already `missed` — the render filter `!s.systemOnly || (value||'') === s.value` (`StatusToggle.jsx:53`) hides it for every other task.
+
+The backend hard-rejects any user attempt to set `missed` with **HTTP 403 `STATUS_MISSED_SYSTEM_ONLY`** (`UpdateTaskStatus.js:107–108`). The status is applied exclusively by the cal-history cron `markMissedTasks` (`juggler-backend/src/cron/cal-history-cron.js:79`) via `shouldAutoMarkMissed` (`shared/scheduler/missedHelpers.js:77–87`) — task is past its 24h resolution window after `scheduled_at` and still not `done/cancel/skip`. Note: the in-scheduler auto-mark block was removed in Leg D; the main scheduler no longer marks recurring instances terminal (`juggler-backend/src/scheduler/runSchedule.js:191–195`). `missed` means "resolution window passed without action" (`shared/task-status.js:120`).
+
+### Why both exist
+
+Start is a user WRITE (transitions task to `wip`). Missed is a system-only READ-ONLY badge surfacing an already-applied state. The frontend `systemOnly` flag exactly mirrors the backend 403 guard — collapsing them would conflate "user can do this" with "system did this". Whether a disabled system badge belongs inside the action-button row or as a separate status chip is a UX-presentation question outside the scope of this state/transition reference.
+
 ## Scheduling Constraint Precedence
 
 **Preferred time + placement window TRUMPS time window tags.**
