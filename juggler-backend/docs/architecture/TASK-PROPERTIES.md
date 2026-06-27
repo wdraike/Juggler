@@ -31,7 +31,40 @@ A task's scheduling constraint is set directly via the `placement_mode` column. 
 | **Time Blocks** | `'time_blocks'` | Constrained to user-named `when` tag windows only (e.g. `morning`, `lunch`, `evening`). Uses `flexWhen` for retry. |
 | **Anytime** | `'anytime'` | No constraint. Placed wherever fits by priority/slack order. |
 
-> **Recurrence is orthogonal** — any mode can be recurring. Use the `recurring` flag to check if a task is recurring; do not infer recurrence from `placement_mode`.
+> **Recurrence is orthogonal to placement mode** for every mode *except* `fixed`. Any mode other than `fixed` may be recurring (`reminder`, `all_day`, `time_window`, `time_blocks`, `anytime`). Setting `placement_mode = 'fixed'` while `recurring` is truthy is an **illegal combination** rejected by the backend — see [Fixed–Recurring Exclusion (XOR invariant)](#fixedrecurring-exclusion-xor-invariant) below. Use the `recurring` flag to check if a task is recurring; do not infer recurrence from `placement_mode`.
+
+### Fixed–Recurring Exclusion (XOR invariant)
+
+A task is **either** fixed **or** recurring — never both (leg 999.867, commit `60a9e81`).
+
+- **Fixed** means `placement_mode === 'fixed'`.
+- **Recurring** means the `recurring` flag is truthy (equivalently, `task_type` is `recurring_template` or `recurring_instance`).
+- The **illegal state** is precisely `placement_mode === 'fixed'` AND `recurring` truthy.
+
+**Enforcing code:** `isFixedRecurringConflict(opts)` in `src/slices/task/domain/validation/taskValidation.js:98`
+
+```js
+function isFixedRecurringConflict(opts) {
+  return opts.placementMode === 'fixed' && !!opts.recurring;
+}
+```
+
+This helper is the **sole source** of the XOR decision. Every enforcement path delegates to it — no inlined literal.
+
+**Violation outcome:** the write is **rejected** with the machine-readable error code `invalid_combination` (HTTP 400 / MCP validation error). Nothing is persisted; there is no silent coercion.
+
+**Enforcement chokepoints** (all call the helper):
+
+| Path | Location | Result on violation |
+|------|----------|---------------------|
+| Create / general validation | `validateTaskInput` → `taskValidation.js:329` | returns `['invalid_combination']` |
+| HTTP `PUT /api/tasks/:id` | `UpdateTask.execute` → `src/slices/task/application/commands/UpdateTask.js:151–152` | `{ status: 400, body: { error: 'invalid_combination' } }` |
+| MCP `update_task` | `src/mcp/tools/tasks.js:283–284` | `Validation error: invalid_combination` (isError) |
+| Bulk `ImportData` | `src/slices/user-config/application/commands/ImportData.js:122–123` | `{ status: 400, body: { error: 'invalid_combination' } }` (validated before the destructive transaction) |
+
+**Flip handling:** the HTTP-update and MCP-update paths evaluate the rule against the **effective merged** `{placementMode, recurring}` — incoming body merged over the existing row, by key presence — so a flip is caught in either direction: setting `placement_mode = 'fixed'` on an already-recurring task, OR setting `recurring = true` on an already-fixed task.
+
+> See also: [`recurring`](#recurrence) in the Recurrence property table; `placement_mode` in [When & Where](#when--where-placement-constraints).
 
 ## Status Effects
 

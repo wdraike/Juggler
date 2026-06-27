@@ -2,7 +2,7 @@
 type: design
 service: juggler
 status: active
-last_updated: 2026-05-19
+last_updated: 2026-06-26
 tags:
   - type/design
   - service/juggler
@@ -13,7 +13,7 @@ tags:
 
 # Task & Habit State Matrix
 
-**Last Updated:** 2026-05-19
+**Last Updated:** 2026-06-26
 
 > Complete reference for how every combination of task type, scheduling mode,
 > and user action maps to UI controls and scheduler behavior.
@@ -177,6 +177,25 @@ The `habit` flag gates scheduler behaviors (flex windows, missed detection, temp
 
 ---
 
+## Fixed–Recurring XOR Invariant
+
+A task may use `placement_mode = 'fixed'` OR have `recurring = true`, but **never both** (leg 999.867, commit `60a9e81`).
+
+The **illegal state** is `placement_mode === 'fixed'` AND `recurring` truthy. Any write in that state is **rejected** by the backend with the machine-readable error code `invalid_combination` (HTTP 400 / MCP validation error); nothing is persisted — there is no silent coercion.
+
+**Enforcing code:** `isFixedRecurringConflict(opts)` in `src/slices/task/domain/validation/taskValidation.js:98` — the single source of the XOR decision, called by all four write chokepoints:
+
+| Path | Location | Result |
+|------|----------|--------|
+| Create / general validation | `validateTaskInput` → `taskValidation.js:329` | `['invalid_combination']` |
+| HTTP `PUT /api/tasks/:id` | `UpdateTask.execute` → `UpdateTask.js:151–152` | HTTP 400 `{ error: 'invalid_combination' }` |
+| MCP `update_task` | `src/mcp/tools/tasks.js:283–284` | `Validation error: invalid_combination` (isError) |
+| Bulk `ImportData` | `ImportData.js:122–123` | HTTP 400 `{ error: 'invalid_combination' }` (validated before the destructive transaction) |
+
+> See also: `TASK-PROPERTIES.md` — Fixed–Recurring Exclusion (XOR invariant) for the full invariant definition, flip-handling semantics, and property-table cross-references.
+
+---
+
 ## Drag-to-Pin State Machine
 
 ### Regular Task (when ≠ fixed)
@@ -293,10 +312,12 @@ The guard in the frontend (`AppLayout.jsx`) enforces this using ISO date key com
 | ✂ Split OK | ✅ | ✅ | ❌ | ❌ |
 | 📅 Due | ✅ | ✅ | ❌ (grayed) | ✅ |
 | ⏳ Start after | ✅ | ✅ | ❌ (grayed) | ✅ |
-| 🔁 Recurrence | ✅ | ✅ | ✅ | ✅ |
+| 🔁 Recurrence | ✅ | ✅ | ✅ ¹ | ✅ |
 | 🚗 Travel | ✅ | ✅ | ✅ | ❌ |
 | 📍 Location / Tools | ✅ | ✅ | ✅ | ✅ |
 | Placement window | ❌ (not a habit) | ❌ | ❌ | ❌ |
+
+> ¹ **Backend XOR invariant (leg 999.867):** The server rejects any write with `placement_mode = 'fixed'` AND `recurring = true`, returning `{ error: 'invalid_combination' }` (HTTP 400 / MCP validation error) — nothing is persisted. Whether the UI currently suppresses the Recurrence control under Fixed mode has **not** been verified by leg 999.867, which is backend enforcement only. If the control is accessible and the combination is submitted, it will fail server-side. See [Fixed–Recurring XOR Invariant](#fixedrecurring-xor-invariant).
 
 ---
 
