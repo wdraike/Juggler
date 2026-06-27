@@ -104,7 +104,7 @@ function getDb() { return libDb.getDefaultDb(); }
 var taskPatchSchema = z.object({
   id: z.string().optional(),
   text: z.string().max(500).optional(),
-  dur: z.number().int().min(1).max(1440).optional(),
+  dur: z.number().int().min(1).max(480).optional(),
   pri: z.enum(['P1', 'P2', 'P3', 'P4']).optional(),
   status: z.string().optional(),
   notes: z.string().max(10000).optional(),

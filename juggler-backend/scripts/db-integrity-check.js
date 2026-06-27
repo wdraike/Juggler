@@ -178,8 +178,8 @@ async function run() {
 
   // ── 13. dur out of range ──
   allTasks.forEach(function(t) {
-    if (t.dur != null && (t.dur <= 0 || t.dur > 1440)) {
-      issue('range', 'Task ' + t.id + ' dur=' + t.dur + ' (valid: 1-1440)', t);
+    if (t.dur != null && (t.dur <= 0 || t.dur > 480)) {
+      issue('range', 'Task ' + t.id + ' dur=' + t.dur + ' (valid: 1-480)', t);
     }
   });
 

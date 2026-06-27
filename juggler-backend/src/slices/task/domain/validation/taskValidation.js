@@ -139,6 +139,7 @@ function validateTaskInput(body) {
   if (body.dur !== undefined && body.dur !== null) {
     var durVal = Number(body.dur);
     if (isNaN(durVal) || durVal <= 0) errors.push('Duration must be greater than 0');
+    else if (durVal > 480) errors.push('Duration must not exceed 480 minutes (8 hours)');
   }
   // split validation
   if (body.split && body.splitMin !== undefined) {
