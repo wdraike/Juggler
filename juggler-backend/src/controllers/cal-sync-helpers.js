@@ -5,7 +5,7 @@
 
 var crypto = require('crypto');
 var { libCalAdapterLogger } = require('../lib/logger');
-var { safeTimezone } = require('../../shared/scheduler/dateHelpers');
+var { safeTimezone } = require('../../../shared/scheduler/dateHelpers');
 
 var DEFAULT_TIMEZONE = require('../scheduler/constants').DEFAULT_TIMEZONE;
 
