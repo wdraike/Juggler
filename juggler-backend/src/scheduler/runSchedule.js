@@ -204,7 +204,76 @@ function computeWindowCloseUtc(task, _today, _tz) {
   var saDate = new Date(sa);
   if (isNaN(saDate.getTime())) return null;
   var flexMin = (task.timeFlex != null) ? task.timeFlex : 60;
-  return new Date(saDate.getTime() + flexMin * 60 * 1000);
+  // AC2b consistency (R50): window-close base = preferred_time_mins when set,
+  // otherwise fall back to the scheduled slot. Both are treated as minutes-since-UTC-midnight
+  // (UTC-pure: this function does not receive timezone info). Mirrors taskMappers.js FIX-1:
+  // (preferred_time_mins ?? scheduledMins) + time_flex.
+  var preferredMins = (task.preferredTimeMins != null) ? task.preferredTimeMins
+    : (task.preferred_time_mins != null ? task.preferred_time_mins : null);
+  var utcMidnight = new Date(saDate);
+  utcMidnight.setUTCHours(0, 0, 0, 0);
+  var baseMins = preferredMins != null ? preferredMins
+    : (saDate.getUTCHours() * 60 + saDate.getUTCMinutes());
+  return new Date(utcMidnight.getTime() + baseMins * 60 * 1000 + flexMin * 60 * 1000);
+}
+
+/**
+ * AC-840-4: Combine a recurring period-boundary and a flex window-close into a
+ * single explicit effective deadline (the later of the two non-null values).
+ * A recurring instance stays live while today < effectiveDeadline.
+ *
+ * Returns the MAXIMUM (later) of the two non-null deadlines — overdue only when
+ * past BOTH. This is the De Morgan dual of the original two independent OR guards
+ * (instance live if within EITHER window): max not min, preserves R50.0
+ * period-boundary extension.
+ *
+ * @param {Object}  opts
+ * @param {Date|null} opts.periodBoundary  — end of the recurrence cycle (from recurringPeriodEndKey)
+ * @param {Date|null} opts.windowClose     — timeFlex window close (occurrence date + timeFlex minutes)
+ * @returns {Date|null} max(periodBoundary, windowClose), or whichever is non-null, or null if both null.
+ */
+function computeEffectiveDeadline(opts) {
+  var periodBoundary = opts.periodBoundary;
+  var windowClose = opts.windowClose;
+  if (periodBoundary == null) return windowClose != null ? windowClose : null;
+  if (windowClose == null) return periodBoundary;
+  return periodBoundary > windowClose ? periodBoundary : windowClose;
+}
+
+/**
+ * AC-840-3 / AC-881-1: Fail-loud disjointness assertion — pure helper.
+ * Checks each day's placements for overlapping time slots.
+ *
+ * @param {Object} dayPlacements — { 'YYYY-MM-DD': [ { task: { id }, start: int, dur: int } ] }
+ * @returns {Array<{ date, a, b, aStart, aEnd, bStart }>} — one entry per violation.
+ *   A violation is when prev.start + prev.dur > next.start (strictly greater; touching is allowed).
+ *   Comparisons are strictly per-dateKey — never cross-day.
+ */
+function checkPlacementDisjointness(dayPlacements) {
+  var violations = [];
+  if (!dayPlacements) return violations;
+  Object.keys(dayPlacements).forEach(function(dateKey) {
+    var entries = dayPlacements[dateKey];
+    if (!entries || entries.length < 2) return;
+    // Sort ascending by start time within the day.
+    var sorted = entries.slice().sort(function(a, b) { return a.start - b.start; });
+    for (var i = 0; i < sorted.length - 1; i++) {
+      var prev = sorted[i];
+      var next = sorted[i + 1];
+      var aEnd = prev.start + prev.dur;
+      if (aEnd > next.start) {
+        violations.push({
+          date: dateKey,
+          a: prev.task && prev.task.id,
+          b: next.task && next.task.id,
+          aStart: prev.start,
+          aEnd: aEnd,
+          bStart: next.start
+        });
+      }
+    }
+  });
+  return violations;
 }
 
 var _ConstraintSolver = require('../slices/scheduler/domain/logic/ConstraintSolver');
@@ -1860,19 +1929,18 @@ async function runScheduleAndPersist(userId, _retries, options) {
       if (t.marker) return;
 
       if (t.recurring) {
-        // Past recurring — not "missed" while it can still be completed. Two live
-        // windows, either of which keeps it from being missed:
-        //  (1) the timeFlex placement window (scheduler may still place it late), and
-        //  (2) R50.0: the recurrence-PERIOD boundary — a flexible-TPC instance may
-        //      roam within its cycle (e.g. a 3×/week task is not missed until the
-        //      week ends), so its implied deadline is the end of the cycle, not the
-        //      occurrence day.
+        // AC-840-4: use the explicit effective deadline = max(period-boundary, window-close).
+        // A past recurring instance stays live (not overdue) while today < effectiveDeadline.
+        //  (1) timeFlex window: occurrence date + timeFlex minutes (scheduler may still place it late).
+        //  (2) R50.0 recurrence-PERIOD boundary: a flexible-TPC instance may roam within its cycle
+        //      (e.g. a 3×/week task is not missed until the week ends).
+        // effectiveDeadline = max(windowClose, periodEnd) — overdue only when past BOTH (De Morgan of original OR guards).
         var flex = t.timeFlex != null ? t.timeFlex : 60;
-        var daysPast = Math.round((today.getTime() - td.getTime()) / 86400000);
-        if (flex >= daysPast * 1440) return; // still within the timeFlex window
+        var windowCloseDate = new Date(td.getTime() + flex * 60 * 1000);
         var periodEndKey = recurringPeriodEndKey(t.recur, effectiveDate);
         var periodEnd = periodEndKey ? parseDate(periodEndKey) : null;
-        if (periodEnd && today < periodEnd) return; // still within the recurrence cycle
+        var effectiveDeadline = computeEffectiveDeadline({ periodBoundary: periodEnd, windowClose: windowCloseDate });
+        if (!effectiveDeadline || today < effectiveDeadline) return; // still within effective deadline
         // Leg D (scheduler-recurring-rework §4) — AUTO-MISS REMOVED.
         // A past-incomplete recurring instance is NEVER auto-marked terminal 'missed'
         // by the system (David, 2026-06-24: "there should not be any auto-miss feature").
@@ -1966,6 +2034,13 @@ async function runScheduleAndPersist(userId, _retries, options) {
   noLimboUpdates.forEach(function(u) { pendingUpdates.push(u); });
   var limboFlagged = noLimboUpdates.length;
   if (limboFlagged > 0) logger.info('[SCHED] no-limbo invariant: flagged ' + limboFlagged + ' dropped recurring instance(s) as unplaced');
+
+  // AC-840-3 / AC-881-1: fail-loud disjointness check at persist boundary (WARN-only).
+  // Overlapping placements are surfaced here so they never silently reach the DB.
+  var disjointViolations = checkPlacementDisjointness(dayPlacements);
+  disjointViolations.forEach(function(v) {
+    logger.warn('[SCHED] disjoint placement violation: ' + v.date + ' ' + v.a + '(' + v.aStart + '-' + v.aEnd + ') overlaps ' + v.b + '(start ' + v.bStart + ')');
+  });
 
   logger.info('[SCHED] executing ' + pendingUpdates.length + ' DB updates');
   await _runScheduleCommand.persistDelta(trx, userId, pendingUpdates, { instanceOnly: true });
@@ -2249,6 +2324,8 @@ function computeNoLimboUpdates(allTasks, rawRowById, phase1InsertedById, pending
 module.exports = {
   runScheduleAndPersist,
   computeWindowCloseUtc,
+  computeEffectiveDeadline,
+  checkPlacementDisjointness,
   recurringPeriodEndKey,
   computeIsPastDue,
   setWeatherProvider,

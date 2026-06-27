@@ -78,7 +78,7 @@ export default function ConflictsView({ allTasks, statuses, unplaced, backlog, s
     {
       key: 'stale', title: 'Past Scheduled Date', tasks: issues.stale, color: theme.amberText,
       tip: 'Tasks whose scheduled date has passed but have no hard deadline',
-      help: 'These tasks were scheduled for a past date but have no due date, so they aren\'t actually overdue. The scheduler will move them to today on its next run, or you can reschedule them manually.'
+      help: "These tasks have a past scheduled date and no hard deadline. Flexible tasks roll forward on the next scheduler run; fixed-time tasks and calendar-linked events stay pinned at their original date. Reschedule manually when you're ready."
     },
     {
       key: 'blocked', title: 'Blocked by Dependencies', tasks: issues.blocked, color: theme.purpleText,

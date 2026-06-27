@@ -408,11 +408,15 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
       // Past-due check: day in the past, OR same day with intra-day threshold passed.
       // Threshold semantics (LOCKED design AC2/AC4):
       //   FIXED: overdue when scheduled slot time is past (scheduledMins < nowMins).
-      //   Windowed daily recurring (isPlacedRecurringInstance + time_flex > 0):
-      //     overdue when WINDOW CLOSES = scheduledMins + time_flex (not at the slot).
-      //     The instance is roamable until the window closes — a 08:00 slot with 3h
+      //   Windowed daily recurring (isPlacedRecurringInstance + time_flex != null):
+      //     overdue when WINDOW CLOSES = (preferred_time_mins ?? scheduledMins) + time_flex (AC2b).
+      //     time_flex==0: zero-width window → overdue at the slot (or preferred) minute itself (AC2c).
+      //     The instance is roamable until the window closes — a 08:00 preferred with 3h
       //     window closes at 11:00; at 09:00 the window is still open → NOT overdue.
-      //   Window-less daily recurring (time_flex null/0, e.g. anytime):
+      //     preferred_time_mins (AC2b): window anchors to the preferred time, not the
+      //     placed slot — the task may be placed early but the window is open until
+      //     preferred_time_mins + time_flex.
+      //   Window-less daily recurring (time_flex null, e.g. anytime):
       //     no intra-day overdue before midnight — falls through to false here; overdue
       //     fires the next day when dueKey < todayKey (period-boundary = midnight).
       if (dueKey < _now.todayKey) return true;
@@ -420,9 +424,12 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
         if (row.placement_mode === _PLACEMENT_MODES.FIXED) {
           // FIXED: overdue once the scheduled slot is past
           if (scheduledMins < _now.nowMins) return true;
-        } else if (isPlacedRecurringInstance && row.time_flex > 0) {
-          // Windowed daily: overdue when the window closes (slot + timeFlex minutes)
-          var windowCloseMins = scheduledMins + row.time_flex;
+        } else if (isPlacedRecurringInstance && row.time_flex != null) {
+          // AC2b/AC2c (R50): overdue when the window closes.
+          // window-close = (preferred_time_mins ?? scheduledMins) + time_flex.
+          // time_flex==0: zero-width window → overdue at the slot/preferred minute (AC2c).
+          var preferredTimeMins = (row.preferred_time_mins != null ? row.preferred_time_mins : scheduledMins);
+          var windowCloseMins = preferredTimeMins + row.time_flex;
           if (_now.nowMins >= windowCloseMins) return true;
         }
         // Window-less daily (time_flex null): no intra-day overdue — falls through
