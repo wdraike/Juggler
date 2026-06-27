@@ -32,15 +32,32 @@ const authenticateJWT = async (req, res, next) => {
       const localUser = await db('users').where('email', req.user.email).first();
       if (localUser) {
         req.user = { ...localUser, authServiceId: req.user.id };
+        // Auto-detect timezone from browser x-timezone header (999.899).
+        // If the browser reports a different valid IANA timezone than what's
+        // stored, update it silently (fire-and-forget — never blocks the request).
+        var browserTz = req.headers['x-timezone'];
+        if (browserTz && typeof browserTz === 'string' && browserTz !== localUser.timezone) {
+          try {
+            Intl.DateTimeFormat(undefined, { timeZone: browserTz });
+            db('users').where('id', localUser.id).update({ timezone: browserTz }).catch(function() {});
+          } catch (_e) { /* invalid IANA name — skip */ }
+        }
       } else {
         // First login — provision user in local DB using auth-service claims
         const newId = req.user.id; // use auth-service ID as local ID
+        // Auto-detect timezone from browser x-timezone header (999.899)
+        var detectedTz = req.headers['x-timezone'];
+        if (detectedTz && typeof detectedTz === 'string') {
+          try { Intl.DateTimeFormat(undefined, { timeZone: detectedTz }); }
+          catch (_e) { detectedTz = null; } // invalid IANA name → skip
+        }
         try {
           await db('users').insert({
             id: newId,
             email: req.user.email,
             name: req.user.name,
             picture_url: req.user.picture || null,
+            timezone: detectedTz || 'America/New_York',
           });
         } catch (insertErr) {
           // Concurrent request raced us — duplicate email insert; ignore and fetch below
