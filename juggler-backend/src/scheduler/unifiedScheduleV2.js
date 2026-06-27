@@ -1566,7 +1566,7 @@ function applyPlacementFailReason(task, placement) {
   // R6 — Unscheduled fallback (999.874 sub-item 2).
   // Flexible TPC items with a _targetDate that couldn't be placed after
   // all relaxation attempts get a specific spacing_blocked reason.
-  if (task._targetDate && task.isFlexibleTpc) {
+  if (task._targetDate) {
     task._unplacedReason = REASON_CODES.SPACING_BLOCKED;
     task._unplacedDetail = 'No available slot within the recurrence cycle after spacing relaxation';
     return;
