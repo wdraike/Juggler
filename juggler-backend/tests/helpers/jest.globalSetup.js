@@ -22,7 +22,11 @@ var knexConfig = require('../../knexfile');
 function assertSafeTestTarget(conn) {
   var port = String((conn && conn.port) || '');
   var database = String((conn && conn.database) || '');
-  var isTestbedPort = port === '3407';
+  // Test-bed ports: the fixed instance (3407) plus the ephemeral pool band
+  // (3410-3417, test-bed/scripts/instance.sh). The safety invariant is unchanged
+  // — still requires a `_test` DB name and no prod signal — only the recognised
+  // test-port set widened. Dev (3308) and prod (3307) remain refused.
+  var isTestbedPort = port === '3407' || /^341[0-7]$/.test(port);
   var isTestDbName = /_test$/.test(database);
   var prodSignals = [];
   if (port === '3307') prodSignals.push('DB_PORT=3307 is the production Cloud SQL Proxy');
