@@ -1,0 +1,115 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "bert",
+  "leg_id": "juggler-sweep-duration",
+  "mode": "new",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Run 1: Duration constants+state+onBlur+hint (6 INFO). Run 2: UX WARN fixes — textMuted hint, fontSize 11, aria-describedby, durNote clamp alert; 385/385 pass.",
+  "steps": {
+    "applied_blocks": "n/a (0 BLOCKs across both runs)",
+    "applied_warns": "done (4 WARN from UX-REVIEW.md, run 2)"
+  },
+  "findings": [
+    {
+      "id": "dur-001",
+      "severity": "INFO",
+      "dimension": "fix-applied",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 28,
+      "claim": "TEST-REVIEW.md finding #1/#2: min={1} and no max — backend taskUpdateSchema min(5)/max(480) not reflected",
+      "evidence": "Added export var DUR_MIN = 5 and export var DUR_MAX = 480 at lines 26-29 with schema citation comment; applied as min={DUR_MIN} max={DUR_MAX} on the input",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "dur-002",
+      "severity": "INFO",
+      "dimension": "fix-applied",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 202,
+      "claim": "TEST-REVIEW.md finding #3: Math.max(1, parseInt||1) snaps controlled value mid-keystroke; no local display state",
+      "evidence": "Added durDraftState=React.useState(String(dur)), durDraft/setDurDraft destructure, and React.useEffect(fn,[dur]) sync at top of WhenSection body (lines 202-205)",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "dur-003",
+      "severity": "INFO",
+      "dimension": "fix-applied",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 296,
+      "claim": "TEST-REVIEW.md finding #4: label text is 'Duration' with no unit indicator",
+      "evidence": "Label text changed to 'Duration (min)' at line 296",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "dur-004",
+      "severity": "INFO",
+      "dimension": "fix-applied",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 297,
+      "claim": "TEST-REVIEW.md finding #5/#3: no onBlur handler; no local draft state; snap-to-1 on empty",
+      "evidence": "Replaced entire Duration input: value={durDraft}, onChange free-types draft + conditionally commits valid in-range integers, onBlur clamps parseInt(durDraft) to [DUR_MIN,DUR_MAX] and calls onDurChange+onEndTimeChange, onKeyDown Enter->blur (lines 297-321)",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "dur-005",
+      "severity": "INFO",
+      "dimension": "fix-applied",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 322,
+      "claim": "TEST-REVIEW.md finding #6: no visible range hint",
+      "evidence": "Added range hint span; subsequently updated in run 2 (dur-ux-001)",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "dur-ux-001",
+      "severity": "WARN",
+      "dimension": "fix-applied",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 330,
+      "claim": "UX-REVIEW.md WARN-1: range hint uses TH.amberText — amber is reserved for error/caution states in this component; passive guidance must use muted color",
+      "evidence": "Changed color on range hint span from TH.amberText to TH.textMuted at line 330; key verified in THEME_DARK (#8A8070) and THEME_LIGHT (#5C5A55)",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "dur-ux-002",
+      "severity": "WARN",
+      "dimension": "fix-applied",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 330,
+      "claim": "UX-REVIEW.md WARN-2: fontSize:9 below brand-minimum readable text size for UI guidance",
+      "evidence": "Changed fontSize on range hint span from 9 to 11 at line 330",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "dur-ux-003",
+      "severity": "WARN",
+      "dimension": "fix-applied",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 328,
+      "claim": "UX-REVIEW.md WARN-3: range hint not programmatically linked to duration input; AT users do not hear range on focus (WCAG 1.3.1)",
+      "evidence": "Added aria-describedby=\"dur-range-hint\" to input at line 328; added id=\"dur-range-hint\" to hint span at line 330",
+      "fix": "applied",
+      "confidence": "high"
+    },
+    {
+      "id": "dur-ux-004",
+      "severity": "WARN",
+      "dimension": "fix-applied",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": null,
+      "claim": "UX-REVIEW.md WARN-4: blur-clamp correction is silent — value changes with no explanation to the user",
+      "evidence": "Added durNote state (lines 207-209); setDurNote('') in onChange (line 308); typed/note detection in onBlur (lines 324-325): if parseInt(durDraft) is out of [DUR_MIN,DUR_MAX] sets 'Adjusted to 5–480 min range' else clears; amber role=alert div rendered at line 331 when durNote non-empty",
+      "fix": "applied",
+      "confidence": "high"
+    }
+  ],
+  "refers": []
+}

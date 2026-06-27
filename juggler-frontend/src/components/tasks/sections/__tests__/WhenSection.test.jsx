@@ -854,3 +854,250 @@ it('onSplitMinChange called when min chunk input changes', () => {
   fireEvent.change(input, { target: { value: '20' } });
   expect(called).toBe(20);
 });
+
+// ==========================================
+// Duration field improvements — TDD RED tests (999.889/890)
+//
+// RED phase: these tests are authored BEFORE the implementation. Every test in this
+// describe block is expected to FAIL on the current code (lines 288–294 of
+// WhenSection.jsx) and go GREEN only after the implementation lands.
+//
+// Why a stateful harness is required for R1 / R2-blur / R4-blur:
+//   The Duration input is a controlled React component bound to the `dur` prop.
+//   Using the COMMON_HANDLERS noop onDurChange keeps the prop pinned regardless
+//   of what is typed, making it impossible to distinguish "snap-to-1" from
+//   "free-type". The DurHarness below holds `dur` in local React state and
+//   passes `onDurChange={setDur}` so that whatever WhenSection calls back
+//   actually updates the DOM — which lets us observe snap vs free-type.
+// ==========================================
+describe('Duration field (999.889/890)', function() {
+  function DurHarness({ onDurChangeSpy, onEndTimeChangeSpy }) {
+    var stateArr = React.useState(30);
+    var durState = stateArr[0];
+    var setDurState = stateArr[1];
+    return (
+      <WhenSection
+        {...BASE}
+        {...COMMON_HANDLERS}
+        TH={TH}
+        time="14:00"
+        endTime="14:30"
+        dur={durState}
+        onDurChange={function(v) { setDurState(v); if (onDurChangeSpy) onDurChangeSpy(v); }}
+        onEndTimeChange={function(v) { if (onEndTimeChangeSpy) onEndTimeChangeSpy(v); }}
+      />
+    );
+  }
+
+  // ------------------------------------------------------------------
+  // R1: Free-type — no snap-to-1 mid-keystroke
+  // ------------------------------------------------------------------
+
+  it('R1: clearing the duration field shows empty string — no snap-to-1', function() {
+    // Current code onChange(''): Math.max(1, parseInt('',10)||1) = 1
+    //   → onDurChange(1) → setDurState(1) → re-render with dur=1 → input.value='1'
+    // Expected (new code): local display state='' → input.value=''
+    render(<DurHarness />);
+    var input = screen.getByDisplayValue('30');
+    fireEvent.change(input, { target: { value: '' } });
+    expect(input.value).toBe('');
+  });
+
+  it('R1: clearing the duration field does NOT call onDurChange(1) (no snap-to-1 callback)', function() {
+    // Current code: parseInt('',10)||1 = 1 → Math.max(1,1) = 1 → onDurChange(1) called.
+    // New code: empty string → no callback; commit happens only on blur.
+    var spy = jest.fn();
+    render(<DurHarness onDurChangeSpy={spy} />);
+    var input = screen.getByDisplayValue('30');
+    fireEvent.change(input, { target: { value: '' } });
+    expect(spy).not.toHaveBeenCalledWith(1);
+  });
+
+  it('R1: after clearing and retyping a value, input shows the typed value', function() {
+    // End-to-end free-typing demonstration with the stateful harness.
+    // Typing '' then '45' should show '45' (not '1' from a snap-on-clear).
+    render(<DurHarness />);
+    var input = screen.getByDisplayValue('30');
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.change(input, { target: { value: '45' } });
+    expect(input.value).toBe('45');
+  });
+
+  // ------------------------------------------------------------------
+  // R2: Range enforce (min 5 / max 480) + range surfaced
+  // ------------------------------------------------------------------
+
+  it('R2: duration input has min attribute "5" (mirrors backend taskUpdateSchema min(5))', function() {
+    // Current code: min={1} → getAttribute('min') returns '1', not '5'.
+    render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} />);
+    var input = screen.getByDisplayValue('30');
+    expect(input.getAttribute('min')).toBe('5');
+  });
+
+  it('R2: duration input has max attribute "480" (mirrors backend taskUpdateSchema max(480))', function() {
+    // Current code: no max attribute → getAttribute('max') returns null, not '480'.
+    render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} />);
+    var input = screen.getByDisplayValue('30');
+    expect(input.getAttribute('max')).toBe('480');
+  });
+
+  it('R2: blurring after typing a below-min value (2) clamps and calls onDurChange(5)', function() {
+    // Current code: no onBlur handler → spy receives 0 calls after mockClear. FAIL.
+    // New code: onBlur clamps 2 → 5 and calls onDurChange(5). PASS.
+    var spy = jest.fn();
+    render(<DurHarness onDurChangeSpy={spy} />);
+    var input = screen.getByDisplayValue('30');
+    fireEvent.change(input, { target: { value: '2' } });
+    spy.mockClear(); // ignore any onChange call; isolate the blur contribution
+    fireEvent.blur(input);
+    expect(spy).toHaveBeenCalledWith(5);
+  });
+
+  it('R2: blurring after typing an above-max value (999) clamps and calls onDurChange(480)', function() {
+    // Current code: no onBlur handler → spy has 0 calls after mockClear. FAIL.
+    var spy = jest.fn();
+    render(<DurHarness onDurChangeSpy={spy} />);
+    var input = screen.getByDisplayValue('30');
+    fireEvent.change(input, { target: { value: '999' } });
+    spy.mockClear();
+    fireEvent.blur(input);
+    expect(spy).toHaveBeenCalledWith(480);
+  });
+
+  it('R2: valid range hint containing "5" and "480" is visible in the rendered output', function() {
+    // Current code: no range hint rendered → container text has no "5...480". FAIL.
+    // New code: a visible "5–480" hint (or similar) is rendered near the field. PASS.
+    var renderResult = render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} />);
+    expect(renderResult.container.textContent).toMatch(/5.{0,10}480/);
+  });
+
+  // ------------------------------------------------------------------
+  // R3: Minutes unit label
+  // ------------------------------------------------------------------
+
+  it('R3: duration label contains "min" to indicate the unit (e.g. "Duration (min)")', function() {
+    // Assertion is ISOLATED to the label caption (first text node of <label>), excluding
+    // the #dur-range-hint span and the input value. The span "5–480 min" lives inside the
+    // same <label>, so label.textContent matches /min/ even if "(min)" is stripped from the
+    // caption — that is a non-isolating false pass (zoe T2). Checking the first text node
+    // directly means removing "(min)" from the caption text FAILS this test.
+    render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} />);
+    var input = screen.getByDisplayValue('30');
+    var label = input.closest('label');
+    var captionNode = Array.from(label.childNodes).find(function(n) { return n.nodeType === 3; });
+    expect(captionNode.textContent.trim()).toMatch(/min/i);
+  });
+
+  // ------------------------------------------------------------------
+  // R4: End-time projection preserved on blur (non-regression + blur guard)
+  // ------------------------------------------------------------------
+
+  it('R4: blurring after typing a valid in-range value calls onDurChange with that value', function() {
+    // Current code: no onBlur handler → after spy.mockClear() blur contributes nothing. FAIL.
+    // New code: onBlur commits the value and calls onDurChange(45). PASS.
+    var spy = jest.fn();
+    render(<DurHarness onDurChangeSpy={spy} />);
+    var input = screen.getByDisplayValue('30');
+    fireEvent.change(input, { target: { value: '45' } });
+    spy.mockClear(); // isolate blur: test only what the blur handler contributes
+    fireEvent.blur(input);
+    expect(spy).toHaveBeenCalledWith(45);
+  });
+
+  it('R4: blurring after typing a valid in-range value triggers onEndTimeChange (projection preserved)', function() {
+    // Current code: no onBlur handler → endSpy receives no calls after mockClear. FAIL.
+    // New code: onBlur recomputes end time → onEndTimeChange('14:45') (14:00 + 45 min). PASS.
+    var endSpy = jest.fn();
+    render(<DurHarness onEndTimeChangeSpy={endSpy} />);
+    var input = screen.getByDisplayValue('30');
+    fireEvent.change(input, { target: { value: '45' } });
+    endSpy.mockClear();
+    fireEvent.blur(input);
+    expect(endSpy).toHaveBeenCalledWith('14:45');
+  });
+
+  it('R4 (onChange live-commit): typing a valid in-range value immediately calls onDurChange + onEndTimeChange — no blur required', function() {
+    // Pins the onChange live-commit branch (WhenSection.jsx onChange handler, lines ~311-314):
+    //   if (!isNaN(n) && String(n) === raw && n >= DUR_MIN && n <= DUR_MAX) {
+    //     onDurChange(n);
+    //     if (time) onEndTimeChange(addMinutesTo24h(time, n));
+    //   }
+    // Discriminating: removing those two callback lines leaves both spies un-called → FAIL.
+    // No blur is fired and no mockClear is called, so the onChange-commit path is tested
+    // directly and independently of the onBlur path (zoe T1 gap).
+    var durSpy = jest.fn();
+    var endSpy = jest.fn();
+    render(
+      <WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH}
+        onDurChange={durSpy}
+        onEndTimeChange={endSpy}
+      />
+    );
+    var input = screen.getByDisplayValue('30');
+    fireEvent.change(input, { target: { value: '60' } });
+    // Assert onChange-path commit — no blur, no mockClear
+    expect(durSpy).toHaveBeenCalledWith(60);
+    expect(endSpy).toHaveBeenCalledWith('15:00'); // 14:00 + 60 min
+  });
+
+  // ------------------------------------------------------------------
+  // a11y: aria-describedby linking input to range hint (R2 / R3)
+  // ------------------------------------------------------------------
+
+  it('a11y: duration input has aria-describedby="dur-range-hint" referencing the hint element, hint contains "5–480 min"', function() {
+    // Asserts: input.aria-describedby points to the span#dur-range-hint, and that span
+    // contains the range "5–480 min" so screen-reader users hear the range on focus.
+    var renderResult = render(<WhenSection {...BASE} {...COMMON_HANDLERS} TH={TH} />);
+    var input = screen.getByDisplayValue('30');
+    expect(input.getAttribute('aria-describedby')).toBe('dur-range-hint');
+    var hint = renderResult.container.querySelector('#dur-range-hint');
+    expect(hint).not.toBeNull();
+    expect(hint.textContent).toContain('5');
+    expect(hint.textContent).toContain('480 min');
+  });
+
+  // ------------------------------------------------------------------
+  // Clamp notice (non-silent correction) — R2
+  // ------------------------------------------------------------------
+
+  it('clamp-notice: blurring after typing an out-of-range value (2) shows role="alert" with adjustment message', function() {
+    // The non-silent correction: user types '2', blurs, sees amber alert "Adjusted to 5–480 min range".
+    render(<DurHarness />);
+    var input = screen.getByDisplayValue('30');
+    fireEvent.change(input, { target: { value: '2' } });
+    fireEvent.blur(input);
+    var alertEl = screen.getByRole('alert');
+    expect(alertEl.textContent).toMatch(/Adjusted to 5.{0,5}480 min range/);
+  });
+
+  it('clamp-notice: blurring after typing an out-of-range value (999) shows role="alert" with adjustment message', function() {
+    render(<DurHarness />);
+    var input = screen.getByDisplayValue('30');
+    fireEvent.change(input, { target: { value: '999' } });
+    fireEvent.blur(input);
+    var alertEl = screen.getByRole('alert');
+    expect(alertEl.textContent).toMatch(/Adjusted to 5.{0,5}480 min range/);
+  });
+
+  it('clamp-notice: blurring after typing an in-range value (45) does NOT show a role="alert"', function() {
+    // No clamp occurred — alert must be absent.
+    render(<DurHarness />);
+    var input = screen.getByDisplayValue('30');
+    fireEvent.change(input, { target: { value: '45' } });
+    fireEvent.blur(input);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('clamp-notice: typing again (onChange) after an out-of-range blur clears the alert', function() {
+    // onChange calls setDurNote('') which removes the role="alert" element immediately.
+    render(<DurHarness />);
+    var input = screen.getByDisplayValue('30');
+    // Step 1 — trigger the clamp notice
+    fireEvent.change(input, { target: { value: '2' } });
+    fireEvent.blur(input);
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    // Step 2 — any onChange clears it
+    fireEvent.change(input, { target: { value: '4' } });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});

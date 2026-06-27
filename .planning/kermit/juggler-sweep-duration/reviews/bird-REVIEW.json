@@ -1,0 +1,106 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "bird",
+  "leg_id": "juggler-sweep-duration",
+  "mode": "new",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Re-review: all 4 prior WARNs resolved by bert (textMuted, fontSize:11, aria-describedby wired, role=alert durNote). 3 INFO unchanged. No BLOCKs. No new regressions.",
+  "steps": {
+    "inputs_check": "done",
+    "brand_guide_loaded": "done",
+    "design_tokens_loaded": "done",
+    "scope_confirmed": "done",
+    "diff_reviewed": "done",
+    "viewports_checked": "static-analysis-only — no live server per review brief; visual check at 375px still recommended (no regression introduced)",
+    "branding_check": "done",
+    "a11y_static": "done",
+    "interaction_check": "done",
+    "re_review": "done — 4 prior WARNs verified resolved; regression scan clean"
+  },
+  "findings": [
+    {
+      "id": "bird-w1",
+      "severity": "RESOLVED",
+      "dimension": "branding",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 330,
+      "claim": "Range hint color was TH.amberText (semantic misuse for neutral guidance)",
+      "evidence": "Re-review: line 330 now reads color: TH.textMuted. Confirmed resolved.",
+      "fix": "Applied.",
+      "confidence": "high"
+    },
+    {
+      "id": "bird-w2",
+      "severity": "RESOLVED",
+      "dimension": "branding",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 330,
+      "claim": "Range hint fontSize was 9, below brand minimum",
+      "evidence": "Re-review: line 330 now reads fontSize: 11. Matches other inline guidance in file (lines 227, 747). Confirmed resolved.",
+      "fix": "Applied.",
+      "confidence": "high"
+    },
+    {
+      "id": "bird-w3",
+      "severity": "RESOLVED",
+      "dimension": "a11y-visual",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 328,
+      "claim": "Duration input had no aria-describedby; hint span had no id",
+      "evidence": "Re-review: line 328 input has aria-describedby=\"dur-range-hint\"; line 330 span has id=\"dur-range-hint\". Values match exactly. Wiring correct per WCAG 1.3.1. Confirmed resolved.",
+      "fix": "Applied.",
+      "confidence": "high"
+    },
+    {
+      "id": "bird-w4",
+      "severity": "RESOLVED",
+      "dimension": "interaction",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 331,
+      "claim": "Out-of-range blur-snap was silent with no user feedback",
+      "evidence": "Re-review: durNote state declared lines 207-209. onBlur line 325 sets durNote to 'Adjusted to 5–480 min range' when typed value is out of range; clears otherwise. Line 331 renders durNote as <div role=\"alert\" style={{ fontSize:11, color: TH.amberText }}>. Correction is non-silent. Amber-for-alert / muted-for-hint semantics are clean and non-conflicting. onChange (line 308) clears note on next keystroke. Confirmed resolved.",
+      "fix": "Applied.",
+      "confidence": "high"
+    },
+    {
+      "id": "bird-i1",
+      "severity": "INFO",
+      "dimension": "branding",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 299,
+      "claim": "'min' abbreviation is standard and consistent with adjacent fields",
+      "evidence": "Duration (min) matches Travel before (min) at line 833 and Travel after (min) at line 836. No action needed.",
+      "fix": "None required.",
+      "confidence": "high"
+    },
+    {
+      "id": "bird-i2",
+      "severity": "INFO",
+      "dimension": "viewport",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 330,
+      "claim": "marginLeft:4 on hint span has no visual effect in flex-column parent",
+      "evidence": "lStyle (line 218) has flexDirection:'column'. marginLeft:4 on the span creates 4px left indent rather than horizontal gap from input. Hint still appears below input and is readable. Cosmetic only. Unchanged from original review.",
+      "fix": "Visual check to confirm rendering is as intended. No action required.",
+      "confidence": "med"
+    },
+    {
+      "id": "bird-i3",
+      "severity": "INFO",
+      "dimension": "interaction",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 202,
+      "claim": "durDraft useState + useEffect sync is React logic",
+      "evidence": "Lines 202-205 introduce draft state pattern; correctness is ernie's scope.",
+      "fix": "REFER to ernie.",
+      "confidence": "high"
+    }
+  ],
+  "refers": [
+    {
+      "to": "ernie",
+      "why": "durDraft useState + useEffect dep-array pattern (lines 202-205) — React logic correctness outside bird scope"
+    }
+  ]
+}

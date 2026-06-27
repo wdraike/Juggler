@@ -1,0 +1,77 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "zoe",
+  "leg_id": "juggler-sweep-duration",
+  "mode": "new",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "RE-REVIEW: T1 (BLOCK) + T2 (WARN) RESOLVED. New R4 live-commit test pins onChange/stepper commit (re-mutation of jsx:312-313 FAILS it); reworked R3 isolates caption text node (stripping '(min)' FAILS it). No new false-pass. Only open items are bird WARN B1/B2 (static a11y/viewport evidence).",
+  "steps": {
+    "adversarial_pass": "done",
+    "spot_mutation": "initial: 4 mutations (A/B false-pass, C/D controls). re-review: 2 re-mutations confirm T1+T2 fixes discriminating; tree reverted clean (0 ZOE-MUT residue)",
+    "re_review": "done",
+    "bird_audit": "done"
+  },
+  "findings": [
+    {
+      "id": "zoe-T1",
+      "severity": "INFO",
+      "status": "RESOLVED",
+      "dimension": "false-pass",
+      "file": "juggler-frontend/src/components/tasks/sections/__tests__/WhenSection.test.jsx",
+      "line": 1019,
+      "claim": "RESOLVED (was BLOCK): onChange live-commit / native-stepper commit path was unpinned",
+      "evidence": "telly added R4 (onChange live-commit) test (lines 1019-1041): fireEvent.change->'60', asserts onDurChange(60)+onEndTimeChange('15:00') with NO blur, NO mockClear. zoe re-mutation: neutering WhenSection.jsx:312-313 (onDurChange(n)+onEndTimeChange) makes THIS test FAIL ('Number of calls: 0'); PASSES on clean source. Genuinely discriminating; path now pinned.",
+      "fix": "Done by telly.",
+      "confidence": "high"
+    },
+    {
+      "id": "zoe-T2",
+      "severity": "INFO",
+      "status": "RESOLVED",
+      "dimension": "tautological-test",
+      "file": "juggler-frontend/src/components/tasks/sections/__tests__/WhenSection.test.jsx",
+      "line": 978,
+      "claim": "RESOLVED (was WARN): R3 label test was non-isolating (matched 'min' from the range-hint span)",
+      "evidence": "R3 now reads the label's first TEXT node (childNodes.find(nodeType===3)), excluding #dur-range-hint. zoe re-mutation: stripping '(min)' from caption (Duration (min)->Duration) makes the test FAIL ('Received \"Duration\"' vs /min/i); PASSES on clean source. Caption now isolated and discriminating.",
+      "fix": "Done by telly.",
+      "confidence": "high"
+    },
+    {
+      "id": "zoe-T3",
+      "severity": "INFO",
+      "dimension": "shallow-assertion",
+      "file": "juggler-frontend/src/components/tasks/sections/__tests__/WhenSection.test.jsx",
+      "line": 916,
+      "claim": "R1 test #3 demonstrates free-typing",
+      "evidence": "Mutation D (restore old snap-to-1) confirmed test #3 passes on pre-impl code — non-discriminating. telly disclosed this transparently in TEST-REVIEW.md. #1/#2 carry the real R1 proof (they fail RED on snap code).",
+      "fix": "None — honest positive guard.",
+      "confidence": "high"
+    },
+    {
+      "id": "zoe-B1",
+      "severity": "WARN",
+      "dimension": "unchallenged-claim",
+      "file": ".planning/kermit/juggler-sweep-duration/reviews/UX-REVIEW.md",
+      "line": 129,
+      "claim": "bird: a11y PASS — color contrast AA verified both themes; screen-reader PASS; status messages PASS",
+      "evidence": "Every a11y row is static source inspection. 'contrast verified both themes' cites no ratio; no axe run, no live AT, no Playwright. Re-run not possible in this static brief. Mitigation: aria-describedby wiring independently re-verified via telly's executable a11y test #12 (genuine).",
+      "fix": "Run axe + contrast tool on the live field (dark+light); record actual ratios + violation count before a production a11y PASS.",
+      "confidence": "med"
+    },
+    {
+      "id": "zoe-B2",
+      "severity": "WARN",
+      "dimension": "unchallenged-claim",
+      "file": ".planning/kermit/juggler-sweep-duration/reviews/UX-REVIEW.md",
+      "line": 106,
+      "claim": "bird: 7-viewport coverage PASS (reflow/zoom/target-size)",
+      "evidence": "All 7 viewport rows marked 'static'; no browser render. Reflow/zoom/target-size PASS inferred from source. Bird honestly downgrades Responsive Design to 'partial' and recommends a 375px check, but the table still reads verified.",
+      "fix": "One real render at 375px + 320px reflow before claiming viewport PASS.",
+      "confidence": "med"
+    }
+  ],
+  "refers": [
+    { "to": "ernie", "why": "durDraft useState + [dur] useEffect resync (WhenSection.jsx:202-205) is React state-logic correctness, not test/UX truthfulness — already referred by bird INFO-7." }
+  ]
+}

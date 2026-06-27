@@ -1,0 +1,27 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "telly",
+  "leg_id": "juggler-sweep-duration",
+  "mode": "new",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "TDD step 0 complete. 11 tests authored (R1–R4); 10 RED on current code, 375 existing tests unbroken. Awaiting implementation.",
+  "steps": {
+    "failing_test_red": "done",
+    "coverage_reviewed": "done"
+  },
+  "findings": [
+    {
+      "id": "f1a2b3c4",
+      "severity": "INFO",
+      "dimension": "coverage-gap",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 290,
+      "claim": "min={1} — HTML min attribute is 1, not 5; no max attribute; snap-to-1 on empty; no onBlur handler; label has no unit indicator; no range hint",
+      "evidence": "getAttribute('min')='1' (expected '5'); getAttribute('max')=null (expected '480'); label.textContent='Duration' (no 'min'); container text has no '5...480'; no onBlur handler so blur clamp tests produce 0 spy calls",
+      "fix": "Implementation: local string state + onBlur clamp to [5,480] + min={5} max={480} attrs + 'Duration (min)' label + '5–480' range hint element",
+      "confidence": "high"
+    }
+  ],
+  "refers": []
+}

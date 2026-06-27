@@ -137,3 +137,12 @@ project_fact: payment + bug-reporter prod DB also connect via socketPath (CLOUD_
 - change: AFFIRMED (not changed) — a floating one-off (no recurrence, no deadline, not FIXED) past its date stays roll-forward / NOT overdue (999.671 contract); it belongs in the stale "past scheduled date" Issues bucket, not the overdue bucket. R50 governs visibility/pinning, not the overdue label. Treating such items as overdue (backlog 999.879 (1)(2)(3)) is a settled-decision REVERSAL requiring a David ruling (AMB-A) — deferred, not done this leg.
 - rationale: Scooter consult + in-code provenance (taskMappers.js:370 comment). Prevents future relitigation of the 999.671 floating-one-off exclusion.
 - supersedes: none
+
+## 2026-06-26T00:00:00Z — juggler-sweep-duration — oscar
+- type: architecture
+- artifact: juggler-backend/docs/architecture/TASK-PROPERTIES.md (Duration & Effective Time table, `dur` row)
+- change: Task duration unit = minutes; canonical valid range = 5–480 (authority task.schema.js taskUpdateSchema dur min(5).max(480), the PUT /api/tasks/:id sidebar save path). Sidebar Duration input is now free-typeable with blur-clamp to nearest bound + minutes indication.
+- rationale: 999.889/890 — surface+enforce the real save-path constraint in the UI; the doc + brain previously held a stale "720m cap". Known latent cross-layer disagreement (480 vs facade 1440 vs domain unbounded vs brain #120 720) flagged as a David follow-up, not resolved here.
+- supersedes: brain fact #120 ("duration capped at 720 minutes")
+- challenge-id: none
+- resolves: none

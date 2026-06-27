@@ -23,6 +23,11 @@ var ALL_TIMEZONES = (function() {
   ];
 })();
 
+// Duration min/max mirror juggler-backend/src/schemas/task.schema.js taskUpdateSchema
+// (dur z.number().int().min(5).max(480)) — the PUT /api/tasks/:id sidebar save path.
+export var DUR_MIN = 5;
+export var DUR_MAX = 480;
+
 export function addMinutesTo24h(hhmm, mins) {
   if (!hhmm) return '';
   var parts = String(hhmm).split(':');
@@ -194,6 +199,15 @@ export default function WhenSection(props) {
     collapse, toggleCollapse,
   } = props;
 
+  var durDraftState = React.useState(String(dur));
+  var durDraft = durDraftState[0];
+  var setDurDraft = durDraftState[1];
+  React.useEffect(function () { setDurDraft(String(dur)); }, [dur]);
+
+  var durNoteState = React.useState('');
+  var durNote = durNoteState[0];
+  var setDurNote = durNoteState[1];
+
   var BTN_H = isMobile ? 30 : 26;
   var iStyle = {
     fontSize: isMobile ? 13 : 11, padding: isMobile ? '6px 8px' : '3px 4px',
@@ -286,12 +300,35 @@ export default function WhenSection(props) {
             }} style={{ ...iStyle, width: 90 }} />
           </label>
           <label style={lStyle}>
-            Duration
-            <input type="number" min={1} value={dur} onChange={e => {
-              var v = Math.max(1, parseInt(e.target.value, 10) || 1);
-              onDurChange(v);
-              if (time) onEndTimeChange(addMinutesTo24h(time, v));
-            }} style={{ ...iStyle, width: 65 }} />
+            Duration (min)
+            <input type="number" min={DUR_MIN} max={DUR_MAX} value={durDraft}
+              onChange={e => {
+                var raw = e.target.value;
+                setDurDraft(raw);
+                setDurNote('');
+                if (raw !== '') {
+                  var n = parseInt(raw, 10);
+                  if (!isNaN(n) && String(n) === raw && n >= DUR_MIN && n <= DUR_MAX) {
+                    onDurChange(n);
+                    if (time) onEndTimeChange(addMinutesTo24h(time, n));
+                  }
+                }
+              }}
+              onBlur={() => {
+                var n = parseInt(durDraft, 10);
+                if (isNaN(n)) n = dur;            // empty/garbage reverts to last committed value — NOT a magic default
+                var clamped = Math.min(DUR_MAX, Math.max(DUR_MIN, n));
+                setDurDraft(String(clamped));
+                onDurChange(clamped);
+                if (time) onEndTimeChange(addMinutesTo24h(time, clamped));
+                var typed = parseInt(durDraft, 10);
+                if (!isNaN(typed) && (typed < DUR_MIN || typed > DUR_MAX)) { setDurNote('Adjusted to ' + DUR_MIN + '–' + DUR_MAX + ' min range'); } else { setDurNote(''); }
+              }}
+              onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); }}
+              aria-describedby="dur-range-hint"
+              style={{ ...iStyle, width: 65 }} />
+            <span id="dur-range-hint" style={{ fontSize: 11, color: TH.textMuted, marginLeft: 4 }}>{DUR_MIN}–{DUR_MAX} min</span>
+            {durNote && <div role="alert" style={{ fontSize: 11, color: TH.amberText, marginTop: 2 }}>{durNote}</div>}
           </label>
         </>)}
       </div>

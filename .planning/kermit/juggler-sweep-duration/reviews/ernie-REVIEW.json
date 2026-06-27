@@ -1,0 +1,97 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "ernie",
+  "leg_id": "juggler-sweep-duration",
+  "mode": "new",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "WhenSection duration free-type+clamp(5-480) correct: draft/effect resync sound, guard+onBlur clamp safe, revert-to-dur not a magic default. No BLOCK/WARN. End-time path (L287, pre-existing) bypasses clamp; brain fact #120 (720) contested vs schema 480.",
+  "steps": {
+    "line_by_line": "done",
+    "scooter_consult": "done"
+  },
+  "findings": [
+    {
+      "id": "ern-f1-hookdeps",
+      "severity": "INFO",
+      "dimension": "react",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 205,
+      "claim": "useState(String(dur)) + useEffect(...,[dur]) draft resync is correct, no infinite loop or stale closure",
+      "evidence": "Dep array [dur] complete; effect writes durDraft which is not a dep so cannot re-trigger; React bails on unchanged value; resyncs on External End-time->dur (L287) and snapshot revert (TaskEditForm L323); hooks before any early return",
+      "fix": "none — verified correct",
+      "confidence": "high"
+    },
+    {
+      "id": "ern-f2-onchange-guard",
+      "severity": "INFO",
+      "dimension": "input-validation",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 306,
+      "claim": "onChange live-commit guard !isNaN && String(n)===raw && range is conservative and safe",
+      "evidence": "'05','+5','1e3','-',whitespace all fail String(n)===raw and defer to onBlur instead of mis-committing; parseInt(raw,10) radix present",
+      "fix": "none — verified correct",
+      "confidence": "high"
+    },
+    {
+      "id": "ern-f3-onblur-revert",
+      "severity": "INFO",
+      "dimension": "input-validation",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 314,
+      "claim": "onBlur 'if(isNaN(n)) n=dur' reverts to last-committed value, sound nearest-bound clamp, not an unapproved fallback",
+      "evidence": "dur is the genuine current committed number not a magic constant; Math.min(MAX,Math.max(MIN,n)) gives nearest bound; rare dur==='' coerces to safe in-range 5",
+      "fix": "none — judged sound",
+      "confidence": "high"
+    },
+    {
+      "id": "ern-f4-coverage",
+      "severity": "INFO",
+      "dimension": "testing",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": null,
+      "claim": "New draft/guard/clamp/Enter-blur branches change the testable surface",
+      "evidence": "Existing WhenSection*.test.jsx suite covers this component; new branches: in-range live commit, out-of-range deferral, empty->revert, clamp-to-bound, End-time resync",
+      "fix": "REFER->telly to confirm new branches covered",
+      "confidence": "med"
+    },
+    {
+      "id": "ern-f5-visual",
+      "severity": "INFO",
+      "dimension": "ux",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 322,
+      "claim": "Duration (min) label + amber range hint span are visual/branding choices",
+      "evidence": "font 9, TH.amberText hint '{DUR_MIN}-{DUR_MAX} min'",
+      "fix": "REFER->bird visual/UX",
+      "confidence": "high"
+    },
+    {
+      "id": "ern-f6-endtime-bypass",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-frontend/src/components/tasks/sections/WhenSection.jsx",
+      "line": 287,
+      "claim": "Pre-existing End-time->dur path can set dur outside [5,480], bypassing the new clamp and failing backend zod on save",
+      "evidence": "onDurChange(endMins - startMins) is untouched by this diff; a 3-min or 600-min span writes dur out of range; only one of two dur-writing inputs is range-enforced",
+      "fix": "optional follow-up backlog item to clamp End-time-derived dur; out of this leg's scope",
+      "confidence": "high"
+    },
+    {
+      "id": "ern-f7-contested-invariant",
+      "severity": "INFO",
+      "dimension": "logic",
+      "file": "juggler-backend/src/schemas/task.schema.js",
+      "line": 17,
+      "claim": "Brain fact #120 (duration cap 720) is stale vs authoritative zod max(480); code correctly follows 480",
+      "evidence": "task.schema.js:17 dur z.number().int().min(5).max(480); config.schema.js:22 corroborates 480; fact #120 score 0.34 file-derived",
+      "fix": "REFER->scooter reconcile (supersede 720 fact); no code change",
+      "confidence": "high"
+    }
+  ],
+  "refers": [
+    {"to": "telly", "why": "confirm new draft/guard/clamp/Enter-blur branches are covered in WhenSection*.test.jsx"},
+    {"to": "bird", "why": "visual/UX of 'Duration (min)' label + amber range hint span"},
+    {"to": "scooter", "why": "reconcile contested brain fact #120 (720) vs authoritative schema max(480)"}
+  ]
+}

@@ -2,7 +2,7 @@
 type: design
 service: juggler
 status: active
-last_updated: 2026-05-25
+last_updated: 2026-06-26
 tags:
   - type/design
   - service/juggler
@@ -14,7 +14,7 @@ tags:
 
 # Task Properties — Scheduler Reference
 
-**Last Updated:** 2026-05-25
+**Last Updated:** 2026-06-26
 
 How every property on a task object affects scheduling.
 
@@ -62,7 +62,7 @@ A task's scheduling constraint is set directly via the `placement_mode` column. 
 
 | Property | DB | JS | Type | Set By | Scheduler Effect |
 |----------|-----|-----|------|--------|-----------------|
-| Duration | `dur` | `dur` | int (minutes) | User | Capped at 720m. How much time the task occupies. |
+| Duration | `dur` | `dur` | int (minutes), valid range **5–480** | User | How much time the task occupies. Unit is minutes. Valid range enforced by the REST API: min 5, max 480 (authority: `src/schemas/task.schema.js` `taskUpdateSchema`, PUT /api/tasks/:id). The task-sidebar "Duration (min)" field is free-typeable; values outside 5–480 are clamped to the nearest bound on blur with an amber notice. **Cross-layer note (David follow-up):** the hexagonal task facade (`src/slices/task/facade.js`) enforces min=1 max=1440, the MCP tool definition is unbounded, and an older doc cited 720m — all four caps disagree and should be reconciled into a single authoritative limit. |
 | Time Remaining | `time_remaining` | `timeRemaining` | int or null | User | If set (WIP tasks), overrides `dur`. `effectiveDur = timeRemaining ?? dur`. |
 | Split | `split` | `split` | bool | User | If true + `splitMin > 0`, task can be broken into chunks across slots. |
 | Split Min | `split_min` | `splitMin` | int (minutes) | User | Minimum chunk size for in-scheduler splitting. |

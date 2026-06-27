@@ -1,0 +1,54 @@
+{
+  "$contract": "muppet-output/v1",
+  "agent": "abby",
+  "leg_id": "juggler-sweep-duration",
+  "mode": "new",
+  "depth": "standard",
+  "status": "DONE",
+  "summary": "Updated TASK-PROPERTIES.md dur row: 720m→5–480 range, unit, free-type+clamp UI behaviour. Cross-layer cap disagreement noted for David. No frontend user-facing field doc exists.",
+  "steps": {
+    "docs_authored": "done",
+    "changelog": "n/a"
+  },
+  "findings": [
+    {
+      "id": "abby-001",
+      "severity": "INFO",
+      "dimension": "doc-updated",
+      "file": "juggler-backend/docs/architecture/TASK-PROPERTIES.md",
+      "line": 65,
+      "claim": "dur row updated: unit=minutes, valid range 5-480, free-typeable sidebar, blur-clamp with amber notice; cross-layer cap disagreement documented",
+      "evidence": "juggler-backend/docs/architecture/TASK-PROPERTIES.md §Duration & Effective Time; authority: src/schemas/task.schema.js line 17",
+      "fix": null,
+      "confidence": "high"
+    },
+    {
+      "id": "abby-002",
+      "severity": "INFO",
+      "dimension": "doc-gap",
+      "file": "juggler-frontend/docs/",
+      "line": null,
+      "claim": "No user-facing field-reference doc exists in juggler-frontend — only internal review artifacts found",
+      "evidence": "find juggler-frontend -name '*.md' returned CODE-REVIEW.md, OSCAR-REVIEW.md, TEST-REVIEW.md, UX-REVIEW.md, ZOE-REVIEW.md, ERNIE-CODE-REVIEW.md, TASK-EDIT-UX-AUDIT.md, ZOE-TEST-AUDIT.md — all internal",
+      "fix": "Oscar to record docs_deferred if a user-help doc for task fields is wanted",
+      "confidence": "high"
+    },
+    {
+      "id": "abby-003",
+      "severity": "INFO",
+      "dimension": "doc-gap",
+      "file": "juggler-backend/src/slices/task/facade.js",
+      "line": 107,
+      "claim": "Hexagonal task facade enforces dur min=1 max=1440; REST schema enforces min=5 max=480; MCP tool is unbounded — three-way cross-layer disagreement unresolved",
+      "evidence": "task.schema.js:17, facade.js:107, mcp/tools/tasks.js:29",
+      "fix": "David follow-up to adjudicate canonical cap; do not resolve autonomously",
+      "confidence": "high"
+    }
+  ],
+  "refers": [
+    {
+      "to": "prairie",
+      "why": "verify TASK-PROPERTIES.md update accuracy and structure"
+    }
+  ]
+}
