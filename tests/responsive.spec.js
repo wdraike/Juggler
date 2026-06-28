@@ -3,25 +3,31 @@ const { test, expect } = require('@playwright/test');
 const { setupAuth } = require('./helpers/playwright-helpers');
 
 // ── Device definitions ───────────────────────────────────────────────
-// Covers the most common real-world form factors:
-//   phones (small + large), tablets (portrait + landscape), desktop
+// Full viewport sweep — large desktop down to small mobile browser.
+// Covers real-world devices plus standard breakpoint sizes for CI.
 const DEVICES = [
-  // Phones
-  { name: 'iPhone SE',         width: 375,  height: 667,  mobile: true  },
-  { name: 'iPhone 14',         width: 390,  height: 844,  mobile: true  },
-  { name: 'iPhone 14 Pro Max', width: 430,  height: 932,  mobile: true  },
-  { name: 'Pixel 7',           width: 412,  height: 915,  mobile: true  },
-  { name: 'Pixel 7 Pro',       width: 412,  height: 892,  mobile: true  },
-  { name: 'Samsung Galaxy S23', width: 360, height: 780,  mobile: true  },
-  // Tablets
-  { name: 'iPad Mini',         width: 744,  height: 1133, mobile: false },
-  { name: 'iPad Air',          width: 820,  height: 1180, mobile: false },
-  { name: 'iPad Pro 11"',      width: 834,  height: 1194, mobile: false },
-  { name: 'iPad Pro 12.9"',    width: 1024, height: 1366, mobile: false },
-  { name: 'iPad landscape',    width: 1180, height: 820,  mobile: false },
-  // Desktop
-  { name: 'Laptop 1366x768',   width: 1366, height: 768,  mobile: false },
-  { name: 'Desktop 1920x1080', width: 1920, height: 1080, mobile: false },
+  // Phones — small to large
+  { name: 'iPhone SE 1st (320x568)',  width: 320,  height: 568,  mobile: true  },
+  { name: 'Samsung Galaxy S23',       width: 360,  height: 780,  mobile: true  },
+  { name: 'iPhone SE',                width: 375,  height: 667,  mobile: true  },
+  { name: 'iPhone 14',                width: 390,  height: 844,  mobile: true  },
+  { name: 'iPhone XR / 11 (414x896)', width: 414,  height: 896,  mobile: true  },
+  { name: 'Pixel 7',                  width: 412,  height: 915,  mobile: true  },
+  { name: 'Pixel 7 Pro',              width: 412,  height: 892,  mobile: true  },
+  { name: 'iPhone 14 Pro Max',        width: 430,  height: 932,  mobile: true  },
+  // Tablets — portrait + landscape
+  { name: 'iPad Portrait (768x1024)',  width: 768,  height: 1024, mobile: false },
+  { name: 'iPad Mini',                 width: 744,  height: 1133, mobile: false },
+  { name: 'iPad Air',                  width: 820,  height: 1180, mobile: false },
+  { name: 'iPad Pro 11"',              width: 834,  height: 1194, mobile: false },
+  { name: 'iPad Pro 12.9"',            width: 1024, height: 1366, mobile: false },
+  { name: 'iPad Landscape (1024x768)', width: 1024, height: 768,  mobile: false },
+  { name: 'iPad landscape',            width: 1180, height: 820,  mobile: false },
+  // Desktop — laptop to large display
+  { name: 'Laptop 1366x768',    width: 1366, height: 768,  mobile: false },
+  { name: 'Laptop 1440x900',    width: 1440, height: 900,  mobile: false },
+  { name: 'Desktop 1920x1080',  width: 1920, height: 1080, mobile: false },
+  { name: 'Large Desktop 2560x1440', width: 2560, height: 1440, mobile: false },
 ];
 
 for (const device of DEVICES) {
@@ -141,6 +147,24 @@ for (const device of DEVICES) {
 
         // On mobile: icon visible, label hidden (or label may exist but icon takes priority)
         expect(iconVisible || !labelVisible).toBe(true);
+      });
+
+      test('mobile — touch targets meet minimum size', async ({ page }) => {
+        // ponytail: WCAG 2.5.5 / Apple HIG recommend 44px minimum touch targets.
+        // Current nav buttons are ~30px at 320px width — below the recommendation.
+        // Threshold set to 28px to catch regressions without failing on the known gap.
+        // Ceiling: when buttons are bumped to 44px, raise this to 42.
+        const navButtons = page.locator('button').filter({ hasText: /^(1|3|7|M|≡|P|!|↔|…|⋯)$/ });
+        const count = await navButtons.count();
+        let checked = 0;
+        for (let i = 0; i < count; i++) {
+          const box = await navButtons.nth(i).boundingBox();
+          if (box && box.width > 0 && box.height > 0) {
+            expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(28);
+            checked++;
+          }
+        }
+        expect(checked).toBeGreaterThan(0);
       });
     }
 
