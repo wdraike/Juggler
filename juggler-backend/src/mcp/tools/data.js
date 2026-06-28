@@ -156,17 +156,17 @@ function registerDataTools(server, userId) {
         issues.push({ type: 'split_ordinal_exceeds_total', count: badSplit.length, ids: badSplit.map(function(r) { return r.id; }).slice(0, 20) });
       }
 
-      // 4. Orphaned calendar_sync rows (task deleted but sync record remains)
-      var orphanedSync = await db('calendar_sync as cs')
+      // 4. Orphaned cal_sync_ledger rows (task deleted but sync record remains)
+      var orphanedSync = await db('cal_sync_ledger as cs')
         .leftJoin('task_instances as i', 'cs.task_id', 'i.id')
         .where('cs.user_id', userId)
-        .whereNull('cs.deleted_at')
+        .where('cs.status', 'active')
         .whereNull('i.id')
         .select('cs.id', 'cs.task_id', 'cs.provider');
       if (orphanedSync.length > 0) {
         issues.push({ type: 'orphaned_sync', count: orphanedSync.length, details: orphanedSync.slice(0, 20).map(function(r) { return { syncId: r.id, taskId: r.task_id, provider: r.provider }; }) });
         if (fix) {
-          await db('calendar_sync').whereIn('id', orphanedSync.map(function(r) { return r.id; })).update({ deleted_at: db.fn.now() });
+          await db('cal_sync_ledger').whereIn('id', orphanedSync.map(function(r) { return r.id; })).update({ status: 'deleted' });
           fixed.push('Soft-deleted ' + orphanedSync.length + ' orphaned sync records');
         }
       }

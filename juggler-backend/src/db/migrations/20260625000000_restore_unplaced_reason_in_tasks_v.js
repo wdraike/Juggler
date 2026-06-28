@@ -24,15 +24,55 @@
  * (master) branch maps NULL with explicit utf8mb4_unicode_ci collation, matching
  * the pattern of every other NULL master-branch text column.
  *
- * tasks_with_sync_v is intentionally NOT patched: no app read path for the
- * Unplaced/calendar views uses it (the task slice queries tasks_v directly), same
- * scope as 20260622020000 and the completed_at migration.
+ * FIX 999.825: tasks_with_sync_v is also recreated here because dropping tasks_v
+ * invalidates the dependent tasks_with_sync_v view (ERROR 1356). The sync view
+ * shape matches 20260623000000's SYNC_V_SQL.
  *
  * DDL (CREATE/DROP VIEW) causes MySQL implicit commits — non-transactional so knex
  * does not wrap in a misleading transaction.
  */
 
 exports.config = { transaction: false };
+
+// tasks_with_sync_v DDL — same shape as 20260623000000 SYNC_V_SQL
+const SYNC_V_SQL = `CREATE VIEW \`tasks_with_sync_v\` AS
+  SELECT
+    v.id, v.user_id, v.task_type, v.text, v.dur, v.pri, v.project, v.section,
+    v.notes, v.url, v.location, v.tools, v.\`when\`, v.day_req, v.recurring,
+    v.time_flex, v.flex_when, v.split, v.split_min, v.recur, v.recur_start,
+    v.recur_end, v.end_date, v.marker, v.preferred_time_mins, v.placement_mode,
+    v.travel_before, v.travel_after,
+    v.depends_on, v.desired_at, v.disabled_at, v.disabled_reason,
+    v.deadline, v.start_after_at, v.tz,
+    v.weather_precip, v.weather_cloud, v.weather_temp_min, v.weather_temp_max,
+    v.weather_temp_unit, v.weather_humidity_min, v.weather_humidity_max,
+    v.source_id, v.scheduled_at,
+    v.\`date\`, v.\`day\`, v.\`time\`, v.\`status\`, v.time_remaining,
+    v.unscheduled, v.overdue, v.slack_mins, v.occurrence_ordinal, v.split_ordinal, v.split_total,
+    v.split_group, v.\`generated\`, v.depends_on AS depends_on_json,
+    v.created_at, v.updated_at, v.master_id,
+    gcl.provider_event_id AS gcal_event_id,
+    mcl.provider_event_id AS msft_event_id,
+    acl.provider_event_id AS apple_event_id
+  FROM tasks_v v
+  LEFT JOIN (
+    SELECT task_id, ANY_VALUE(provider_event_id) AS provider_event_id
+    FROM cal_sync_ledger
+    WHERE status = 'active' AND provider = 'gcal' AND task_id IS NOT NULL
+    GROUP BY task_id
+  ) gcl ON gcl.task_id = v.id
+  LEFT JOIN (
+    SELECT task_id, ANY_VALUE(provider_event_id) AS provider_event_id
+    FROM cal_sync_ledger
+    WHERE status = 'active' AND provider = 'msft' AND task_id IS NOT NULL
+    GROUP BY task_id
+  ) mcl ON mcl.task_id = v.id
+  LEFT JOIN (
+    SELECT task_id, ANY_VALUE(provider_event_id) AS provider_event_id
+    FROM cal_sync_ledger
+    WHERE status = 'active' AND provider = 'apple' AND task_id IS NOT NULL
+    GROUP BY task_id
+  ) acl ON acl.task_id = v.id`;
 
 exports.up = async function up(knex) {
   const viewResult = await knex.raw('SHOW CREATE VIEW tasks_v');
@@ -64,8 +104,13 @@ exports.up = async function up(knex) {
     );
   }
 
+  // Drop dependent view first, then the base view
+  await knex.raw('DROP VIEW IF EXISTS tasks_with_sync_v');
   await knex.raw('DROP VIEW IF EXISTS tasks_v');
+  // Recreate tasks_v with unplaced columns injected
   await knex.raw(sql);
+  // Recreate tasks_with_sync_v (was invalidated by the DROP)
+  await knex.raw(SYNC_V_SQL);
 };
 
 exports.down = async function down(knex) {
@@ -78,6 +123,9 @@ exports.down = async function down(knex) {
     .replace(/,\s*\n?\s*\(convert\(NULL\s+using\s+utf8mb4\)\s+collate\s+utf8mb4_unicode_ci\)\s+AS\s+`?unplaced_reason`?/i, '')
     .replace(/,\s*\n?\s*\(convert\(NULL\s+using\s+utf8mb4\)\s+collate\s+utf8mb4_unicode_ci\)\s+AS\s+`?unplaced_detail`?/i, '');
 
+  // Drop dependent view first, then the base view
+  await knex.raw('DROP VIEW IF EXISTS tasks_with_sync_v');
   await knex.raw('DROP VIEW IF EXISTS tasks_v');
   await knex.raw(sql);
+  await knex.raw(SYNC_V_SQL);
 };
