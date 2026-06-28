@@ -1,12 +1,14 @@
 /**
- * R1.6: Feature gate on task creation — end-to-end via API
+ * R1.6: Task creation routes — end-to-end via API
  *
- * Tests that the requireFeature('tasks.create') middleware correctly
- * blocks/allows task creation based on the user's plan features.
+ * The requireFeature('tasks.create') gate was removed because no plan in the
+ * catalog has a tasks.create key (they have tasks.rigid), so the gate always
+ * returned 403 for every user on every plan. Task creation is a core feature
+ * on all plans; the real limits are enforced by checkTaskOrRecurringLimit /
+ * checkBatchTaskLimits (limits.active_tasks).
  *
- * 999.585: The gate was added to POST /api/tasks and POST /api/tasks/batch.
- * This test verifies 403 when plan lacks tasks.create, 201 when allowed,
- * and 401 when unauthenticated.
+ * These tests verify that task creation works regardless of plan (no feature
+ * gate), and that 401 is returned when unauthenticated.
  */
 
 process.env.NODE_ENV = 'test';
@@ -105,11 +107,11 @@ jest.mock('../../src/middleware/entity-limits', () => ({
 // This must be mocked BEFORE requiring the app so the route registration
 // picks up our mock.
 const mockResolvePlanFeatures = jest.fn((req, res, next) => {
-  // Default: enterprise plan with tasks.create enabled
+  // Default: enterprise plan
   req.planId = 'enterprise';
   req.planFeatures = {
     limits: { active_tasks: -1 },
-    tasks: { create: true },
+    tasks: { rigid: true },
     calendar: { max_providers: 1 },
     scheduling: {}
   };
@@ -132,12 +134,12 @@ beforeEach(() => {
   resolveQueue = [];
   updateCalls = [];
   jest.clearAllMocks();
-  // Reset mock to default (enterprise with tasks.create)
+  // Reset mock to default (enterprise)
   mockResolvePlanFeatures.mockImplementation((req, res, next) => {
     req.planId = 'enterprise';
     req.planFeatures = {
       limits: { active_tasks: -1 },
-      tasks: { create: true },
+      tasks: { rigid: true },
       calendar: { max_providers: 1 },
       scheduling: {}
     };
@@ -167,35 +169,37 @@ const BASE_TASK_ROW = {
 // ---------------------------------------------------------------------------
 // R1.6: Feature gate end-to-end via API
 // ---------------------------------------------------------------------------
-describe('R1.6: Feature gate on task creation — E2E via API', () => {
-  test('POST /api/tasks with feature-gated feature → 403 when plan lacks feature (999.585)', async () => {
-    // Override mock: plan WITHOUT tasks.create
+describe('R1.6: Task creation — E2E via API', () => {
+  test('POST /api/tasks on free plan → 201 (no feature gate, 999.585 gate removed)', async () => {
+    // The requireFeature('tasks.create') gate was removed because no plan has
+    // a tasks.create key. Free plan users can create tasks — the real limit
+    // is enforced by checkTaskOrRecurringLimit (limits.active_tasks).
     mockResolvePlanFeatures.mockImplementation((req, res, next) => {
       req.planId = 'free';
       req.planFeatures = {
-        limits: { active_tasks: 1 },
-        tasks: {}, // no task creation feature
-        calendar: { max_providers: 0 },
+        limits: { active_tasks: 50 },
+        tasks: { rigid: true },
+        calendar: { max_providers: 1 },
         scheduling: {}
       };
       next();
     });
 
-    resolveQueue.push(null);  // applySplitDefault: user_config first()
-    resolveQueue.push(null);  // fetchTaskWithEventIds: tasks_v first()
+    resolveQueue.push(null);             // applySplitDefault: user_config first()
+    resolveQueue.push(BASE_TASK_ROW);   // fetchTaskWithEventIds: tasks_v first()
+    resolveQueue.push([]);              // fetchTaskWithEventIds: cal_sync_ledger select()
 
     const res = await request(app)
       .post('/api/tasks')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
-      .send({ text: 'Feature-gated task' });
+      .send({ text: 'Free plan task' });
 
-    // 999.585: requireFeature('tasks.create') is now on the route.
-    // Plan without tasks.create feature → 403 Forbidden.
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(201);
+    expect(res.body).toHaveProperty('task');
   });
 
-  test('POST /api/tasks with allowed feature → 201 (999.585)', async () => {
-    // Default mock: enterprise plan WITH tasks.create (set in beforeEach)
+  test('POST /api/tasks on enterprise plan → 201', async () => {
+    // Default mock: enterprise plan
     resolveQueue.push(null);             // applySplitDefault: user_config first()
     resolveQueue.push(BASE_TASK_ROW);   // fetchTaskWithEventIds: tasks_v first()
     resolveQueue.push([]);              // fetchTaskWithEventIds: cal_sync_ledger select()

@@ -4,7 +4,6 @@ const taskController = require('../controllers/task.controller');
 const { authenticateJWT } = require('../middleware/jwt-auth');
 const { resolvePlanFeatures } = require('../middleware/plan-features.middleware');
 const { checkTaskOrRecurringLimit, checkBatchTaskLimits } = require('../middleware/entity-limits');
-const { requireFeature } = require('../middleware/feature-gate');
 const { validate } = require('../middleware/validate');
 const { taskCreateSchema, taskUpdateSchema } = require('../schemas/task.schema');
 const aiEnrichment = require('../slices/ai-enrichment/facade');
@@ -61,8 +60,13 @@ router.get('/suggest-icon', async (req, res) => {
 });
 
 router.get('/:id', taskController.getTask);
-router.post('/', requireFeature('tasks.create'), checkTaskOrRecurringLimit, validate(taskCreateSchema), taskController.createTask);
-router.post('/batch', requireFeature('tasks.create'), checkBatchTaskLimits, taskController.batchCreateTasks);
+// ponytail: tasks.create was gated via requireFeature('tasks.create') but no plan
+// in the catalog has a tasks.create key (they have tasks.rigid), so the gate always
+// returned 403 FEATURE_NOT_AVAILABLE for every user on every plan. Task creation is
+// a core feature on all plans including free; the real limits are enforced by
+// checkTaskOrRecurringLimit / checkBatchTaskLimits (limits.active_tasks).
+router.post('/', checkTaskOrRecurringLimit, validate(taskCreateSchema), taskController.createTask);
+router.post('/batch', checkBatchTaskLimits, taskController.batchCreateTasks);
 router.put('/batch', taskController.batchUpdateTasks);
 router.put('/:id/status', taskController.updateTaskStatus);
 router.put('/:id/re-enable', taskController.reEnableTask);

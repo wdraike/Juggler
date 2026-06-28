@@ -283,28 +283,32 @@ describe('AP-09 + SC-38: POST /api/tasks', () => {
 });
 
 // ---------------------------------------------------------------------------
-// R1.6: Feature gate on task creation — 403 when plan lacks required feature
+// R1.6: Task creation — no feature gate (999.585 gate removed)
 // ---------------------------------------------------------------------------
-describe('R1.6: Feature gate on task creation', () => {
-  test('returns 403 when plan lacks task-creation feature', async () => {
-    // Swap the mounted plan-features mock to a free plan WITHOUT tasks.create.
-    // POST /api/tasks now runs requireFeature('tasks.create') (task.routes.js:64),
-    // which short-circuits with 403 FEATURE_NOT_AVAILABLE before any DB read.
+describe('R1.6: Task creation on any plan', () => {
+  test('returns 201 on free plan (no tasks.create feature gate)', async () => {
+    // The requireFeature('tasks.create') gate was removed because no plan in
+    // the catalog has a tasks.create key. Task creation is a core feature on
+    // all plans; the real limit is enforced by checkTaskOrRecurringLimit.
     mockTasksPlanId = 'free';
     mockTasksPlanFeatures = {
-      limits: { active_tasks: 1 },
-      tasks: {}, // no task creation feature
-      calendar: { max_providers: 0 },
+      limits: { active_tasks: 50 },
+      tasks: { rigid: true },
+      calendar: { max_providers: 1 },
       scheduling: {}
     };
+
+    resolveQueue.push(null);             // applySplitDefault: user_config first()
+    resolveQueue.push(BASE_TASK_ROW);   // fetchTaskWithEventIds: tasks_v first()
+    resolveQueue.push([]);              // fetchTaskWithEventIds: cal_sync_ledger select()
 
     const res = await request(app)
       .post('/api/tasks')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
-      .send({ text: 'Feature-gated task' });
+      .send({ text: 'Free plan task' });
 
-    expect(res.status).toBe(403);
-    expect(res.body).toMatchObject({ code: 'FEATURE_NOT_AVAILABLE', feature: 'tasks.create' });
+    expect(res.status).toBe(201);
+    expect(res.body).toHaveProperty('task');
   });
 
   test('feature-gate middleware returns 403 for missing feature', async () => {

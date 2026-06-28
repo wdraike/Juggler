@@ -77,13 +77,11 @@ jest.mock('../../src/middleware/plan-features.middleware', () => ({
       limits: { active_tasks: -1, recurring_templates: -1 },
       calendar: { max_providers: -1 },
       scheduling: {},
-      // The 'enterprise' plan this mock represents enables task creation. The
-      // route-level requireFeature('tasks.create') gate (src/routes/task.routes.js,
-      // added by a23e5af "feature-gate task creation — 999.585") reads
-      // planFeatures.tasks.create; an empty {} here would deny with 403. Grant it
-      // so the create/batch success-path characterizations below exercise the real
-      // controller behavior (the gate's own deny path is covered elsewhere).
-      tasks: { create: true }
+      // The requireFeature('tasks.create') gate was removed from the task
+      // routes — no plan in the catalog has a tasks.create key. Task creation
+      // is a core feature on all plans; limits are enforced by
+      // checkTaskOrRecurringLimit (limits.active_tasks).
+      tasks: { rigid: true }
     };
     next();
   },
