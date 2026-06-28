@@ -32,7 +32,7 @@ function assertSafeTestTarget(conn) {
   //   this regex too — otherwise the new slots' ports are REFUSED (fails safe, but
   //   surprising). Keep the two in sync.
   var isTestbedPort = port === '3407' || port === '3507' || /^341[0-7]$/.test(port);
-  var isTestDbName = /_test$/.test(database);
+  var isTestDbName = /_test$/.test(database) || (port === '3507' && /_uat$/.test(database));
   var prodSignals = [];
   if (port === '3307') prodSignals.push('DB_PORT=3307 is the production Cloud SQL Proxy');
   if (process.env.CLOUD_SQL_CONNECTION_NAME) prodSignals.push('CLOUD_SQL_CONNECTION_NAME is set (production)');
