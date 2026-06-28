@@ -8,7 +8,6 @@ declare const TaskStatus: {
     readonly CANCEL: 'cancel';
     readonly SKIP: 'skip';
     readonly PAUSE: 'pause';
-    readonly MISSED: 'missed';
 };
 
 declare const TASK_STATUSES: readonly [
@@ -16,16 +15,14 @@ declare const TASK_STATUSES: readonly [
     'done',
     'cancel',
     'skip',
-    'pause',
-    'missed'
+    'pause'
 ];
 
 declare const TERMINAL_STATUSES: readonly [
     'done',
     'cancel',
     'skip',
-    'pause',
-    'missed'
+    'pause'
 ];
 
 declare const ACTIVE_STATUSES: readonly [''];
@@ -35,8 +32,7 @@ declare const STATUS_OPTIONS: readonly [
     'done',
     'cancel',
     'skip',
-    'pause',
-    'missed'
+    'pause'
 ];
 
 declare const CalHistoryStatus: {

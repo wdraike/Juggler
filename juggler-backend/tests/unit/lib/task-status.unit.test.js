@@ -23,22 +23,22 @@ describe('lib/task-status', function() {
       expect(Array.isArray(taskStatus.TERMINAL_STATUSES)).toBe(true);
       expect(Object.isFrozen(taskStatus.TERMINAL_STATUSES)).toBe(true);
       expect(taskStatus.TERMINAL_STATUSES).toEqual(
-        expect.arrayContaining(['done', 'cancel', 'skip', 'pause', 'missed'])
+        expect.arrayContaining(['done', 'cancel', 'skip', 'pause'])
       );
     });
 
-    test('TERMINAL_STATUSES has exactly 5 entries (no accidental additions)', function() {
-      expect(taskStatus.TERMINAL_STATUSES.length).toBe(5);
+    test('TERMINAL_STATUSES has exactly 4 entries (no accidental additions)', function() {
+      expect(taskStatus.TERMINAL_STATUSES.length).toBe(4);
     });
 
     test('isTerminalStatus returns true for all terminal values', function() {
-      ['done', 'cancel', 'skip', 'pause', 'missed'].forEach(function(s) {
+      ['done', 'cancel', 'skip', 'pause'].forEach(function(s) {
         expect(taskStatus.isTerminalStatus(s)).toBe(true);
       });
     });
 
     test('isTerminalStatus returns false for non-terminal values', function() {
-      ['', 'wip', 'disabled', null, undefined, 'bogus'].forEach(function(s) {
+      ['', 'wip', 'disabled', 'missed', null, undefined, 'bogus'].forEach(function(s) {
         expect(taskStatus.isTerminalStatus(s)).toBe(false);
       });
     });

@@ -7,7 +7,7 @@
  *   SM-20: skip a recurring instance (skip one occurrence)
  *   SM-21: pause on recurring template is accepted
  *   SM-22: disabled status guard — user cannot write other fields to disabled task
- *   SM-23: missed status is system-only (user cannot set → 403)
+ *   SM-23: missed status is no longer valid (user cannot set → 400)
  *           NOTE: already covered in status-guard.test.js; this test asserts the
  *           complementary aspect — missed cannot be set via PUT /api/tasks/:id either
  *           (the `updateTask` path also checks disabled guard, not missed specifically,
@@ -502,17 +502,16 @@ describe('SM-22: disabled status guard', () => {
 });
 
 // ---------------------------------------------------------------------------
-// SM-23: missed status is system-only (403)
+// SM-23: missed status is no longer valid (400)
 //
-// NOTE: The core guard (PUT /api/tasks/:id/status { status: 'missed' } → 403)
-// is already fully covered in tests/api/status-guard.test.js. This describe
-// block asserts a complementary aspect: the 403+code is stable regardless of
-// whether the task has scheduled_at set or not (guard fires before the
-// scheduled_at check).
+// NOTE: 'missed' has been removed from VALID_STATUSES. A PUT with status='missed'
+// now returns 400 (generic invalid status) instead of the former 403
+// STATUS_MISSED_SYSTEM_ONLY. This describe block asserts that the 400 is
+// returned regardless of whether the task has scheduled_at set or not.
 // ---------------------------------------------------------------------------
 
-describe('SM-23: missed status — system-only guard fires before scheduled_at check', () => {
-  test('returns 403 STATUS_MISSED_SYSTEM_ONLY for scheduled task', async () => {
+describe('SM-23: missed status — invalid status (400)', () => {
+  test('returns 400 for scheduled task', async () => {
     const task = makeTask({ id: 'sm23-sched', status: '', scheduled_at: '2026-05-15 14:00:00' });
     seedExisting(task);
 
@@ -521,13 +520,11 @@ describe('SM-23: missed status — system-only guard fires before scheduled_at c
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ status: 'missed' });
 
-    expect(res.status).toBe(403);
-    expect(res.body.code).toBe('STATUS_MISSED_SYSTEM_ONLY');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid status/);
   });
 
-  test('returns 403 STATUS_MISSED_SYSTEM_ONLY for unscheduled task (guard fires first)', async () => {
-    // Even though an unscheduled task would hit SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS
-    // for 'done', the 'missed' guard fires before any scheduled_at check.
+  test('returns 400 for unscheduled task', async () => {
     const task = makeTask({ id: 'sm23-unsched', status: '', scheduled_at: null });
     seedExisting(task);
 
@@ -536,8 +533,8 @@ describe('SM-23: missed status — system-only guard fires before scheduled_at c
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
       .send({ status: 'missed' });
 
-    expect(res.status).toBe(403);
-    expect(res.body.code).toBe('STATUS_MISSED_SYSTEM_ONLY');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid status/);
   });
 });
 

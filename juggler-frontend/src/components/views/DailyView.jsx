@@ -66,7 +66,6 @@ function labelForStatus(s) {
   if (s === 'done') return 'Done at';
   if (s === 'skip') return 'Skipped at';
   if (s === 'cancel' || s === 'cancelled') return 'Cancelled at';
-  if (s === 'missed') return 'Missed at';
   if (s === 'pause') return 'Paused at';
   return 'Resolved at';
 }
@@ -84,11 +83,6 @@ function getStatusReason(t, status) {
   if (!t || !status) return null;
 
   switch (status) {
-    case 'missed':
-      if (!t.scheduledAt) return null;
-      var flexMin = (t.timeFlex != null) ? t.timeFlex : 60;
-      var windowClose = new Date(new Date(t.scheduledAt).getTime() + flexMin * 60 * 1000);
-      return 'missed because no resolution by ' + formatCompletedAt(windowClose.toISOString());
     case 'cancel':
       return t.cancelReason ? 'cancelled: ' + t.cancelReason : 'cancelled by user';
     case 'skip':
@@ -483,7 +477,6 @@ function TaskBlock({ item, status, top, height, col, totalCols, onExpand, onStat
             {status === 'skip' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u23ED'}</span>}
             {status === 'cancel' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2717'}</span>}
             {status === 'cancelled' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2717'}</span>}
-            {status === 'missed' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u26A0'}</span>}
             {status === 'pause' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u23F8'}</span>}
             {weatherResult && (
               <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 14, height: 14, flexShrink: 0 }}
@@ -694,7 +687,6 @@ function UnschedEntry({ task, status, onExpand, onStatusChange, onDelete, theme,
         {status === 'skip' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u23ED'}</span>}
         {status === 'cancel' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2717'}</span>}
         {status === 'cancelled' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u2717'}</span>}
-        {status === 'missed' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u26A0'}</span>}
         {status === 'pause' && <span style={{ fontSize: 9, flexShrink: 0 }}>{'\u23F8'}</span>}
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {(function(){ var ic = getTaskIcon(task.text); return ic ? <span style={{marginRight:2,flexShrink:0}}>{ic}</span> : null; })()}{task.text}
@@ -921,7 +913,6 @@ export default function DailyView({
     if (filter === 'action') return st === '';
     if (filter === 'done') return st === 'done';
     if (filter === 'pause') return st === 'pause';
-    if (filter === 'missed') return st === 'missed';
     if (filter === 'pastdue') return pastDueIds && pastDueIds.has(taskId);
     if (filter === 'fixed') return fixedIds && fixedIds.has(taskId);
     if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(taskId);
@@ -931,7 +922,7 @@ export default function DailyView({
 
   // The calendar time-grid is DECOUPLED from the open/done LIST filter (999.882):
   // it shows what actually happened in each slot — every lifecycle state
-  // (open/wip/done/skip/missed/started/cancelled/pause) — regardless of which
+  // (open/wip/done/skip/started/cancelled/pause) — regardless of which
   // status filter is applied to the task LIST. The list filter still filters the
   // unscheduled task list below (via `matchesFilter`); it must NOT hide a placed
   // task's block from the grid. Terminal blocks render styled/dimmed + status

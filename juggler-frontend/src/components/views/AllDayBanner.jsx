@@ -83,7 +83,6 @@ export default function AllDayBanner({ allTasks, dateKey, statuses, onExpand, da
               {st === 'done' && <span style={{ fontSize: 9, marginRight: 2 }}>{'✓'}</span>}
               {st === 'skip' && <span style={{ fontSize: 9, marginRight: 2 }}>{'⏭'}</span>}
               {st === 'cancel' && <span style={{ fontSize: 9, marginRight: 2 }}>{'✗'}</span>}
-              {st === 'missed' && <span style={{ fontSize: 9, marginRight: 2 }}>{'⚠'}</span>}
               {fixed && <span style={{ fontSize: 9, marginRight: 2 }}>{'📌'}</span>}
               {isMultiday && <span style={{ fontSize: 9, marginRight: 2, fontWeight: 600 }}>{daySpan + 'd'}</span>}
               {t.text}

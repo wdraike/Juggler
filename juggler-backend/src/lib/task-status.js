@@ -1,5 +1,5 @@
-const STATUS_OPTIONS = Object.freeze(['', 'done', 'cancel', 'skip', 'pause', 'missed']);
-const TERMINAL_STATUSES = Object.freeze(['done', 'cancel', 'skip', 'pause', 'missed']);
+const STATUS_OPTIONS = Object.freeze(['', 'done', 'cancel', 'skip', 'pause']);
+const TERMINAL_STATUSES = Object.freeze(['done', 'cancel', 'skip', 'pause']);
 
 function isTerminalStatus(s) {
   return TERMINAL_STATUSES.indexOf(s) !== -1;

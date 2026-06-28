@@ -6,7 +6,7 @@
  * of truth the controller already uses (`isTerminalStatus` is imported from it
  * and `rowToTask` surfaces `status: row.status || ''`). Verified against:
  *   - src/lib/task-status.js  STATUS_OPTIONS = ['', 'done', 'cancel',
- *                                               'skip', 'pause', 'missed']
+ *                                               'skip', 'pause']
  *   - the W1 golden-master makeTaskRow default `status: ''` and the
  *     updateTaskStatus('done') / terminal-status paths.
  *
@@ -56,7 +56,7 @@ function TaskStatus(value) {
 TaskStatus.VALUES = VALUES;
 
 /**
- * The terminal subset (done/cancel/skip/pause/missed) — characterized from
+ * The terminal subset (done/cancel/skip/pause) — characterized from
  * TERMINAL_STATUSES.
  * @type {ReadonlyArray<string>}
  */

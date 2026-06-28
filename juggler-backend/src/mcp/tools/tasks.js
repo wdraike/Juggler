@@ -429,7 +429,7 @@ function registerTaskTools(server, userId) {
 
       // Rolling anchor update
       var _mcpMasterId = existing.master_id || existing.source_id;
-      if (_mcpMasterId && ['done', 'skip', 'missed'].includes(status)) {
+      if (_mcpMasterId && ['done', 'skip'].includes(status)) {
         var _mcpMaster = await db('task_masters').where({ id: _mcpMasterId, user_id: userId }).first();
         if (_mcpMaster && isRollingMaster(_mcpMaster)) {
           var _mcpDate = existing.date ? String(existing.date).slice(0, 10) : null;

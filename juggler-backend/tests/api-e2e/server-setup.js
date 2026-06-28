@@ -117,15 +117,15 @@ async function _seedSessionKey(sub) {
 // These must be set here (at require time) so that module-level caches in
 // auth-client.js (_jwks) and plan-features.middleware.js pick them up correctly.
 // The actual values are filled in by _initKeysAndJwksServer / _initPaymentServer.
-process.env.NODE_ENV = 'test'; // picks up juggler_test DB at port 3407 via knexfile
-process.env.DB_HOST = '127.0.0.1';
-process.env.DB_PORT = '3407';
-process.env.DB_USER = 'root';
+process.env.NODE_ENV = 'test'; // picks up juggler_test DB via knexfile
+process.env.DB_HOST = process.env.DB_HOST || '127.0.0.1';
+process.env.DB_PORT = process.env.DB_PORT || '3407';
+process.env.DB_USER = process.env.DB_USER || 'root';
 // test-bed MySQL root requires 'rootpass' (MYSQL_ROOT_PASSWORD). Respect an
 // explicit override (e.g. make test-juggler) but default to the test-bed value
 // — an empty password fails auth against test-bed and silently skips e2e.
 process.env.DB_PASSWORD = process.env.DB_PASSWORD || 'rootpass';
-process.env.DB_NAME = 'juggler_test';
+process.env.DB_NAME = process.env.DB_NAME || 'juggler_test';
 // Encryption key placeholder — required by some modules at load time
 process.env.CREDENTIAL_ENCRYPTION_KEY = process.env.CREDENTIAL_ENCRYPTION_KEY || '0'.repeat(64);
 // Suppress scheduler warnings in test output

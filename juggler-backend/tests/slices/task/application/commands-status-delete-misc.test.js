@@ -30,7 +30,7 @@ var { z } = require('zod');
 var USER = 'sd-user';
 
 var statusUpdateSchema = z.object({
-  status: z.enum(['', 'done', 'cancel', 'skip', 'pause', 'disabled', 'missed']),
+  status: z.enum(['', 'done', 'cancel', 'skip', 'pause', 'disabled']),
   completedAt: z.string().optional(),
   direction: z.string().optional()
 }).passthrough();
@@ -88,12 +88,12 @@ describe('UpdateTaskStatus (updateTaskStatus)', function () {
     });
   });
 
-  test('user-supplied "missed" → 403 STATUS_MISSED_SYSTEM_ONLY', function () {
+  test('user-supplied "missed" → 400 (invalid status)', function () {
     var repo = seedScheduled();
     var uc = new UpdateTaskStatus(statusDeps(repo, H.makeTriggerSpy(), H.makeEventsSpy()));
     return uc.execute({ id: 's1', userId: USER, body: { status: 'missed' } }).then(function (out) {
-      expect(out.status).toBe(403);
-      expect(out.body.code).toBe('STATUS_MISSED_SYSTEM_ONLY');
+      expect(out.status).toBe(400);
+      expect(out.body).toHaveProperty('error');
     });
   });
 

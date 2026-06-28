@@ -730,15 +730,15 @@ describe('Surface 6 + Surface 1 — 12 handler response shapes', () => {
       expect(res.body).toHaveProperty('code', 'SCHEDULE_REQUIRED_FOR_TERMINAL_STATUS');
     });
 
-    test('B4 + Surface 4: status=missed is rejected (system-only)', async () => {
-      // missed cannot be set by user — system cron only
+    test('B4 + Surface 4: status=missed is rejected (invalid status)', async () => {
+      // missed is no longer a valid status — returns 400 (generic invalid status)
       const res = await request(app)
         .put('/api/tasks/task-st-004/status')
         .set('Authorization', `Bearer ${VALID_TOKEN}`)
         .send({ status: 'missed' });
 
-      expect(res.status).toBe(403);
-      expect(res.body).toHaveProperty('code', 'STATUS_MISSED_SYSTEM_ONLY');
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty('error');
     });
 
     test('B4 + Surface 4: invalid status value returns 400', async () => {

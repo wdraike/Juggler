@@ -105,7 +105,7 @@ async function reconcileOccurrence(trx, masterId, master, occOrd, existingRows) 
   // Split into terminal (done/cancel/skip/pause/missed) and pending.
   // Terminal chunks are never updated or deleted — they are historical records.
   // Only pending chunks are reconciled against the desired plan.
-  var TERMINAL = ['done', 'cancel', 'skip', 'pause', 'missed'];
+  var TERMINAL = ['done', 'cancel', 'skip', 'pause'];
   var pending = existingRows.filter(function(r) { return TERMINAL.indexOf(r.status || '') === -1; });
   var terminal = existingRows.filter(function(r) { return TERMINAL.indexOf(r.status || '') !== -1; });
 
@@ -175,7 +175,7 @@ async function reconcileOccurrence(trx, masterId, master, occOrd, existingRows) 
  */
 async function collapseChunks(trx, masterId, master, existing) {
   var deleted = 0, updated = 0;
-  var TERMINAL = ['done', 'cancel', 'skip', 'pause', 'missed'];
+  var TERMINAL = ['done', 'cancel', 'skip', 'pause'];
   var survivors = [];
   var toDel = [];
   existing.forEach(function(r) {

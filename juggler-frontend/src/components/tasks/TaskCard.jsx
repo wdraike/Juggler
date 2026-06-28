@@ -16,7 +16,6 @@ var TERMINAL_BORDER_COLORS = {
   done:   { light: '#2D6A4F', dark: '#6EE7B7' },
   cancel: { light: '#8B2635', dark: '#FCA5A5' },
   skip:   { light: '#475569', dark: '#94A3B8' },
-  missed: { light: '#B45309', dark: '#FCD34D' },
   pause:  { light: '#4338CA', dark: '#A5B4FC' },
 };
 
@@ -83,7 +82,6 @@ function TaskCard({ task, status, onStatusChange, onDelete, onExpand, darkMode, 
           {status === 'done' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u2713'}</span>}
           {status === 'skip' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u23ED'}</span>}
           {status === 'cancel' && <span style={{ fontSize: 9, marginRight: 2 }}>{'\u2717'}</span>}
-          {status === 'missed' && <span style={{ fontSize: 9, marginRight: 2, color: '#B45309' }}>{'\u29bb'}</span>}
           {(function(){ var ic = getTaskIcon(task.text); return ic ? <span style={{marginRight:2,flexShrink:0}}>{ic}</span> : null; })()}{task.text}
         </span>
         {task.url && /^https?:\/\//i.test(task.url) && (

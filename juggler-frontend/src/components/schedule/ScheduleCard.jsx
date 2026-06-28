@@ -31,11 +31,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
   var weatherResult = hasWeatherRestrictions(task) ? checkWeatherMatch(task, weatherDay) : null;
   var priColor = PRI_COLORS[task.pri] || PRI_COLORS.P3;
   var isDone = isTerminalStatus(status);
-  // Leg E (scheduler-recurring-rework §5): 'missed' is terminal but must NOT look
-  // COMPLETED — it was never user-completed. Visual "done" cues (strikethrough,
-  // muted border, fade) apply to genuinely-resolved states (done/skip/cancel/pause),
-  // never to 'missed', which renders as a flagged-but-open item (⚠, no strikethrough).
-  var isCompletedLook = isDone && status !== 'missed';
+  var isCompletedLook = isDone;
   // juggler-cal-history Plan E — past-fade (D-10).
   var scTodayKey = formatDateKey(new Date());
   var scIsPast = !!task.scheduledAt && formatDateKey(new Date(task.scheduledAt)) < scTodayKey;
@@ -67,7 +63,7 @@ export default React.memo(function ScheduleCard({ item, status, onStatusChange, 
   var durLabel = item.splitTotal > 1
     ? item.dur + ' of ' + task.dur + 'm'
     : (task.dur >= 60 ? Math.round(task.dur / 60 * 10) / 10 + 'h' : task.dur + 'm');
-  var statusIcon = status === 'done' ? '\u2713' : status === 'wip' ? '\u231B' : status === 'cancel' ? '\u2715' : status === 'skip' ? '\u21ED' : status === 'pause' ? '\u23F8' : status === 'missed' ? '\u26A0' : null;
+  var statusIcon = status === 'done' ? '\u2713' : status === 'wip' ? '\u231B' : status === 'cancel' ? '\u2715' : status === 'skip' ? '\u21ED' : status === 'pause' ? '\u23F8' : null;
   var startLabel = item.start != null ? formatStartTime(item.start) : null;
   var typeBadges = [];
   if (task.recurring) typeBadges.push({ icon: '\uD83D\uDD01', title: 'Recurring — recurring daily task' });

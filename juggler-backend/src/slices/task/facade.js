@@ -119,7 +119,7 @@ var batchUpdateSchema = z.object({
   updates: z.array(taskPatchSchema.extend({ id: z.string().min(1) })).min(1).max(2000),
 });
 var statusUpdateSchema = z.object({
-  status: z.enum(['', 'done', 'cancel', 'skip', 'pause', 'disabled', 'missed']),
+  status: z.enum(['', 'wip', 'done', 'cancel', 'skip', 'pause', 'disabled']),
   completedAt: z.string().optional(),
   direction: z.string().optional(),
 }).passthrough();
@@ -585,7 +585,7 @@ async function cascadeRecurringDelete(ctx) {
   // instances are soft-cancelled (status='cancelled') to stop the series. Before
   // this, pause/missed were treated as pending and overwritten to 'cancelled',
   // losing the original terminal state.
-  var TERMINAL_KEEP = ['done', 'cancel', 'skip', 'pause', 'missed'];
+  var TERMINAL_KEEP = ['done', 'cancel', 'skip', 'pause'];
 
   pendingIds = instances
     .filter(function (inst) {

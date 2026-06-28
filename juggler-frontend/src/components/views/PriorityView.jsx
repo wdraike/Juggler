@@ -49,7 +49,6 @@ export default function PriorityView({ allTasks, statuses, filter, search, proje
       if (filter === 'action') return st === '';
       if (filter === 'done') return st === 'done';
       if (filter === 'pause') return st === 'pause';
-      if (filter === 'missed') return st === 'missed';
       if (filter === 'pastdue') return pastDueIds && pastDueIds.has(t.id);
       if (filter === 'fixed') return fixedIds && fixedIds.has(t.id);
       if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(t.id);

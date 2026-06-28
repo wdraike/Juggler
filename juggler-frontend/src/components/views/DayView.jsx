@@ -31,7 +31,6 @@ export default function DayView({ selectedDate, selectedDateKey, placements, sta
     if (filter === 'action') return st === '';
     if (filter === 'done') return st === 'done';
     if (filter === 'pause') return st === 'pause';
-    if (filter === 'missed') return st === 'missed';
     if (filter === 'pastdue') return pastDueIds && pastDueIds.has(taskId);
     if (filter === 'fixed') return fixedIds && fixedIds.has(taskId);
     if (filter === 'blocked') return blockedTaskIds && blockedTaskIds.has(taskId);

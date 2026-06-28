@@ -25,8 +25,6 @@ console.log('isActiveStatus("done"):', taskStatus.isActiveStatus('done'));
 // Test display functions
 console.log('\nDisplay Tests:');
 console.log('getTaskStatusDisplayName("done"):', taskStatus.getTaskStatusDisplayName('done'));
-console.log('getTaskStatusDisplayName("missed"):', taskStatus.getTaskStatusDisplayName('missed'));
-console.log('getTaskStatusDescription("missed"):', taskStatus.getTaskStatusDescription('missed'));
 
 // Test transition logic
 console.log('\nTransition Tests:');

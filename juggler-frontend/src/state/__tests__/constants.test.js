@@ -5,19 +5,9 @@
 import { STATUS_OPTIONS, STATUS_MAP, isTerminalStatus, PAST_OPACITY } from '../constants';
 
 describe('state/constants — juggler-cal-history Plan B', () => {
-  test('STATUS_OPTIONS contains a missed entry', () => {
+  test('STATUS_OPTIONS does not contain a missed entry (removed)', () => {
     const m = STATUS_OPTIONS.find((s) => s.value === 'missed');
-    expect(m).toBeTruthy();
-  });
-
-  test('missed entry has bg/bgDark/color/colorDark/label/tip', () => {
-    const m = STATUS_OPTIONS.find((s) => s.value === 'missed');
-    expect(typeof m.bg).toBe('string');
-    expect(typeof m.bgDark).toBe('string');
-    expect(typeof m.color).toBe('string');
-    expect(typeof m.colorDark).toBe('string');
-    expect(typeof m.label).toBe('string');
-    expect(typeof m.tip).toBe('string');
+    expect(m).toBeUndefined();
   });
 
   test('STATUS_OPTIONS does not contain archived or restored entries', () => {
@@ -46,12 +36,12 @@ describe('state/constants — juggler-cal-history Plan B', () => {
     expect(STATUS_OPTIONS.find((s) => s.value === 'cancelled')).toBeUndefined();
   });
 
-  test('isTerminalStatus(missed) === true', () => {
-    expect(isTerminalStatus('missed')).toBe(true);
+  test('isTerminalStatus(missed) === false (removed status)', () => {
+    expect(isTerminalStatus('missed')).toBe(false);
   });
 
   test('isTerminalStatus preserves existing terminal classifications', () => {
-    ['done', 'cancel', 'skip', 'pause', 'missed'].forEach((s) => {
+    ['done', 'cancel', 'skip', 'pause'].forEach((s) => {
       expect(isTerminalStatus(s)).toBe(true);
     });
   });
@@ -65,7 +55,7 @@ describe('state/constants — juggler-cal-history Plan B', () => {
   });
 
   test('isTerminalStatus returns false for non-terminal values', () => {
-    ['', 'disabled'].forEach((s) => {
+    ['', 'disabled', 'missed'].forEach((s) => {
       expect(isTerminalStatus(s)).toBe(false);
     });
   });

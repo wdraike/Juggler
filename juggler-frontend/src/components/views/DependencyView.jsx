@@ -294,7 +294,6 @@ export default function DependencyView({ allTasks, statuses, projectFilter, filt
       if (filter === 'open') return !isTerminalStatus(s);
       if (filter === 'done') return s === 'done';
       if (filter === 'pause') return s === 'pause';
-      if (filter === 'missed') return s === 'missed';
       if (filter === 'blocked') return s !== 'done' && s !== 'cancel';
       if (filter === 'action') return s !== 'done' && s !== 'cancel' && s !== 'skip' && s !== 'pause';
       if (filter === 'pastdue') return pastDueIds && pastDueIds.has(t.id);

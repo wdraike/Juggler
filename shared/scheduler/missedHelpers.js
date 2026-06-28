@@ -76,13 +76,13 @@ function isTaskMissed(task, currentTime) {
 
 function shouldAutoMarkMissed(task, currentTime) {
   if (!task.scheduled_at) return false;
-  if (task.status === 'missed') return false; // Already marked
   if (task.status === 'done' || task.status === 'cancel' || task.status === 'skip') return false;
-  
-  // Auto-mark as missed if past the resolution window
+
+  // Auto-flag overdue if past the resolution window (24h after scheduled_at).
+  // The 'missed' status no longer exists — the cron now sets overdue=1 instead.
   const scheduledTime = new Date(task.scheduled_at);
-  const resolutionWindow = new Date(scheduledTime.getTime() + (24 * 60 * 60 * 1000)); // 24 hours after scheduled time
-  
+  const resolutionWindow = new Date(scheduledTime.getTime() + (24 * 60 * 60 * 1000));
+
   return currentTime > resolutionWindow;
 }
 

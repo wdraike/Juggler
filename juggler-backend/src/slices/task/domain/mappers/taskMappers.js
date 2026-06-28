@@ -256,7 +256,12 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
     if (instDate) date = instDate;
   }
 
-  if (src && src.preferred_time_mins != null && row.status !== 'disabled') {
+  // BUG-811: preferred_time_mins must NOT overwrite the live time for WIP tasks.
+  // WIP tasks have a live scheduled_at — the time was already derived from it above.
+  // Only apply preferred_time_mins for statuses that don't have a live scheduled_at
+  // (unplaced instances with status='' or 'todo'). Excluding 'wip' (and other
+  // placed statuses) prevents the template time from overwriting the live slot.
+  if (src && src.preferred_time_mins != null && row.status !== 'disabled' && !time) {
     var ptH = Math.floor(src.preferred_time_mins / 60);
     var ptM = src.preferred_time_mins % 60;
     var ptAmpm = ptH >= 12 ? 'PM' : 'AM';

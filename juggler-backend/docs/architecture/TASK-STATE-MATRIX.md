@@ -43,32 +43,40 @@ wip ────────┬──→ done
 
 disabled ───┬──→ "" (via re-enable endpoint, checks plan limits)
             └──→ (no other transitions — frozen)
+
+overdue ──── (not a status — computed-on-read flag, R50.6)
+              past-due + incomplete → pinned at due date, flagged overdue
+              scheduler excludes from placement, calendar shows overdue badge
 ```
 
 ## Task Action Buttons (StatusToggle)
 
-Status buttons are rendered by `StatusToggle` (`juggler-frontend/src/components/schedule/StatusToggle.jsx`) as a row of icon buttons driven by the `ALL_STATUSES` array (`StatusToggle.jsx:13–21`). Two entries cause frequent confusion — they appear in the same row but are categorically different:
+Status buttons are rendered by `StatusToggle` (`juggler-frontend/src/components/schedule/StatusToggle.jsx`) as a row of icon buttons driven by the `ALL_STATUSES` array (`StatusToggle.jsx:13–21`). The row shows status changes only — Delete is NOT in this row (see Delete below).
 
 | Button | `value` | `systemOnly` | Nature | Initiator |
 |--------|---------|-------------|--------|-----------|
 | **Start** | `wip` (`StatusToggle.jsx:16`) | `false` | User-initiated write action | User click |
-| **Missed** | `missed` (`StatusToggle.jsx:20`) | `true` | Read-only system badge | Backend cron only |
+
+### Delete
+
+Delete is a destructive data operation (hard row removal, R3), not a status change. It is NOT rendered in the StatusToggle button row on calendar cards. Delete lives in the `TaskDetailHeader` (expanded edit form, `TaskDetailHeader.jsx:30-41`) where destructive actions are visually separated from non-destructive status buttons. Cancel (status='cancel', R32) covers "I don't want this" and keeps the row — it stays in the status row.
 
 ### Start
 
 Clicking calls `onChange('wip')` (`StatusToggle.jsx:71`), wired through `onStatusChange` (`TaskCard.jsx:123`, `ScheduleCard.jsx:189`) to `apiClient.put('/tasks/:id/status', { status: 'wip' })` (`useTaskState.js:225`). `wip` is in `VALID_STATUSES` (`UpdateTaskStatus.js:50`); the `"" → wip` transition also populates `time_remaining` from the estimate (`UpdateTaskStatus.js:173–175`). `wip` means "in progress" (`shared/task-status.js:16`).
 
-**Visibility:** shown for all task types except `recurring_template` — templates are restricted to Open/Pause only (`StatusToggle.jsx:54–56`). Never disabled by the `disableTerminal` guard, which covers only `done/cancel/skip/pause/missed` (`StatusToggle.jsx:46,66`); Start is always clickable when shown.
+**Visibility:** shown for all task types except `recurring_template` — templates are restricted to Open/Pause only (`StatusToggle.jsx:54–56`). Never disabled by the `disableTerminal` guard, which covers only `done/cancel/skip/pause` (`StatusToggle.jsx:45,79`); Start is always clickable when shown.
 
-### Missed
+### Modal button disabling
 
-`systemOnly: true` (`StatusToggle.jsx:20`). Rendered `disabled`; `onClick` is a guarded no-op (`StatusToggle.jsx:71–72`); tooltip reads "Missed — auto-applied by scheduler" (`StatusToggle.jsx:73`). Appears **only** when the task's current status is already `missed` — the render filter `!s.systemOnly || (value||'') === s.value` (`StatusToggle.jsx:53`) hides it for every other task.
+Status buttons are modal — only valid transitions are enabled. The `VALID_TRANSITIONS` map in `StatusToggle.jsx` (and a parallel map in `TaskDetailHeader.jsx`) encodes the state matrix:
 
-The backend hard-rejects any user attempt to set `missed` with **HTTP 403 `STATUS_MISSED_SYSTEM_ONLY`** (`UpdateTaskStatus.js:107–108`). The status is applied exclusively by the cal-history cron `markMissedTasks` (`juggler-backend/src/cron/cal-history-cron.js:79`) via `shouldAutoMarkMissed` (`shared/scheduler/missedHelpers.js:77–87`) — task is past its 24h resolution window after `scheduled_at` and still not `done/cancel/skip`. Note: the in-scheduler auto-mark block was removed in Leg D; the main scheduler no longer marks recurring instances terminal (`juggler-backend/src/scheduler/runSchedule.js:191–195`). `missed` means "resolution window passed without action" (`shared/task-status.js:120`).
+- The current status's own button is always disabled (no self-transition).
+- From "" (open): done, wip, skip, cancel, pause are enabled.
+- From wip: done, "" (reopen), skip, cancel are enabled.
+- From terminal (done/cancel/skip/pause): only "" (reopen) is enabled — no terminal-to-terminal transitions.
 
-### Why both exist
-
-Start is a user WRITE (transitions task to `wip`). Missed is a system-only READ-ONLY badge surfacing an already-applied state. The frontend `systemOnly` flag exactly mirrors the backend 403 guard — collapsing them would conflate "user can do this" with "system did this". Whether a disabled system badge belongs inside the action-button row or as a separate status chip is a UX-presentation question outside the scope of this state/transition reference.
+Invalid buttons render at 45% opacity with `cursor: not-allowed` and a tooltip reading "Current status" (for the active one) or the button label.
 
 ## Scheduling Constraint Precedence
 
@@ -88,7 +96,7 @@ The `habit` field is an internal boolean auto-derived from recurrence:
 - `recur === null` → `habit = false` (one-off task)
 
 The UI never shows a "Habit" toggle. Recurrence is the only user-facing control.
-The `habit` flag gates scheduler behaviors (flex windows, missed detection, template inheritance, Phase 0/5 handling).
+The `habit` flag gates scheduler behaviors (flex windows, overdue detection, template inheritance, Phase 0/5 handling).
 
 ## Recurring Task Scheduling Modes
 
@@ -124,7 +132,7 @@ The `habit` flag gates scheduler behaviors (flex windows, missed detection, temp
 1. Flex window = `[preferredTime - flex, preferredTime + flex]`
 2. If flex window has room → place within it
 3. If flex window is full → **skip this day** (not drift to 11am)
-4. If flex window entirely in the past → **mark as missed** (unplaced)
+4. If flex window entirely in the past → **flag as overdue** (unplaced, pinned at due date)
 5. Never falls back to broad when-window
 
 **Examples:**
@@ -365,11 +373,11 @@ The guard in the frontend (`AppLayout.jsx`) enforces this using ISO date key com
 
 ---
 
-## Missed / Unplaced Handling
+## Overdue / Unplaced Handling
 
 | Scenario | Behavior | User sees |
 |----------|----------|-----------|
-| Preferred-time habit, flex window passed | Marked `missed`, not placed | "Preferred window (6–8 AM) has passed" in unplaced list |
+| Preferred-time habit, flex window passed | Flagged overdue, not placed | "Preferred window (6–8 AM) has passed" in unplaced list |
 | Preferred-time habit, flex window full | Skipped on that day, not drifted | "Flex window full" in unplaced list |
 | Flexible habit, all blocks full | Unplaced | "All [block] slots full" + suggestions |
 | Flexible habit, flexWhen + all blocks full | Placed via relaxation (anytime) | Placed with `_whenRelaxed` flag |

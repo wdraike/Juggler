@@ -8,7 +8,7 @@
  *
  * Branches reproduced:
  *   - zod statusUpdateSchema.safeParse (injected) → 400.
- *   - VALID_STATUSES guard → 400; user-supplied 'missed' → 403.
+ *   - VALID_STATUSES guard → 400 (invalid status, incl. removed 'missed').
  *   - rc_<sourceId>_<digits> on-demand materialization (repo.insertTask of the
  *     instance row) when the generated instance has no DB row yet.
  *   - 404 / disabled-403.
@@ -47,7 +47,7 @@
 var assertDeps = require('../_assertDeps');
 
 var TERMINAL_REQUIRES_SCHEDULE = ['done', 'skip', 'cancel'];
-var VALID_STATUSES = ['', 'done', 'cancel', 'skip', 'pause', 'disabled', 'missed'];
+var VALID_STATUSES = ['', 'wip', 'done', 'cancel', 'skip', 'pause', 'disabled'];
 
 /** @param {UpdateTaskStatusDeps} deps */
 function UpdateTaskStatus(deps) {
@@ -103,9 +103,6 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
 
   if (status !== undefined && VALID_STATUSES.indexOf(status) === -1) {
     return { status: 400, body: { error: 'Invalid status. Valid values: ' + VALID_STATUSES.join(', ') } };
-  }
-  if (status === 'missed') {
-    return { status: 403, body: { error: "Status 'missed' is system-applied; cannot be set directly.", code: 'STATUS_MISSED_SYSTEM_ONLY' } };
   }
 
   var existing = await this.repo.fetchTaskWithEventIds(id, userId);
@@ -172,11 +169,12 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
 
   // 999.586: On todo→done transition, populate time_remaining with estimated
   // duration (dur) when the caller doesn't supply an explicit value.
+  // 999.910: Reject negative time_remaining on ANY status transition (not just done).
+  if (body.time_remaining != null && body.time_remaining < 0) {
+    return { status: 400, body: { error: 'time_remaining must be non-negative' } };
+  }
   if (status === 'done' && existing.status !== 'done') {
     if (body.time_remaining != null) {
-      if (body.time_remaining < 0) {
-        return { status: 400, body: { error: 'time_remaining must be non-negative' } };
-      }
       update.time_remaining = body.time_remaining;
     }
   }
@@ -226,7 +224,7 @@ UpdateTaskStatus.prototype.execute = async function execute(input) {
 
   // rolling-anchor projection (handler L1789-1808) — delegated.
   var _anchorMasterId = existing.master_id || existing.source_id;
-  if (_anchorMasterId && ['done', 'skip', 'missed'].includes(status)) {
+  if (_anchorMasterId && ['done', 'skip'].includes(status)) {
     await this.applyRollingAnchor({
       masterId: _anchorMasterId,
       userId: userId,

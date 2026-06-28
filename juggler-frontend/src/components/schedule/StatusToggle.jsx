@@ -17,27 +17,26 @@ var ALL_STATUSES = [
   { value: 'cancel', icon: '\u2715', label: 'Cancel',   activeBg: '#FEE2E2', activeBgDark: '#3A0A10', color: '#8B2635', colorDark: '#FCA5A5' },
   { value: 'skip',   icon: '\u21ED', label: 'Skip',     activeBg: '#F1F5F9', activeBgDark: '#1E293B', color: '#475569', colorDark: '#94A3B8' },
   { value: 'pause',  icon: '\u23F8', label: 'Pause',    activeBg: '#E0E7FF', activeBgDark: '#1E1B4B', color: '#4338CA', colorDark: '#A5B4FC' },
-  { value: 'missed', icon: '\u29BB', label: 'Missed',   activeBg: '#FEF3C7', activeBgDark: '#3A2A08', color: '#B45309', colorDark: '#FCD34D', systemOnly: true },
 ];
 
-function DeleteButton({ onDelete, size, fontSize, darkMode }) {
-  return (
-    <button
-      onClick={function(e) { e.stopPropagation(); onDelete(); }}
-      title="Delete"
-      style={{
-        width: size, height: size, borderRadius: 4,
-        border: '1px solid ' + (darkMode ? '#475569' : '#94A3B8'),
-        cursor: 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: fontSize, fontWeight: 700, padding: 0,
-        background: darkMode ? '#1E293B' : '#F5F0E8',
-        color: darkMode ? '#64748B' : '#6B7280',
-        transition: 'all 0.15s',
-        flexShrink: 0
-      }}
-    >{'\uD83D\uDDD1'}</button>
-  );
+// Valid status transitions. A button is disabled if the transition from the
+// current status to the button's status is not in this map. A status always
+// maps to the set of statuses it can transition TO (not including itself).
+//   "" (open) → done, wip, skip, cancel, pause
+//   wip       → done, "" (reopen), skip, cancel
+//   terminal  → "" (reopen only)
+var VALID_TRANSITIONS = {
+  '':      { 'done': 1, 'wip': 1, 'skip': 1, 'cancel': 1, 'pause': 1 },
+  'wip':   { 'done': 1, '': 1, 'skip': 1, 'cancel': 1 },
+  'done':  { '': 1 },
+  'cancel': { '': 1 },
+  'skip':  { '': 1 },
+  'pause': { '': 1 },
+};
+
+function canTransitionTo(current, target) {
+  var map = VALID_TRANSITIONS[current || ''];
+  return !!(map && map[target]);
 }
 
 // juggler-cal-history Plan C — D-15: terminal transitions require scheduled_at.
@@ -50,7 +49,7 @@ export default React.memo(function StatusToggle({ value, onChange, onDelete, dar
   var fontSize = compact ? 8 : (isMobile ? 14 : 12);
 
   // Filter statuses based on task type
-  var statuses = ALL_STATUSES.filter(function(s) { return !s.systemOnly || (value || '') === s.value; });
+  var statuses = ALL_STATUSES;
   if (taskType === 'recurring_template') {
     // Templates can only be paused or unpaused
     statuses = statuses.filter(function(s) { return s.value === '' || s.value === 'pause'; });
@@ -59,18 +58,32 @@ export default React.memo(function StatusToggle({ value, onChange, onDelete, dar
     statuses = statuses.filter(function(s) { return s.value !== 'pause'; });
   }
 
+  // ponytail: Delete removed from the status-button row. Delete is a destructive
+  // data operation (hard row removal, R3), not a status change. Cancel (status='cancel',
+  // R32) already covers "I don't want this" and keeps the record. Delete lives in the
+  // TaskDetailHeader (expanded edit form) where destructive actions belong, separated
+  // from the non-destructive status buttons. The onDelete prop is retained for the
+  // TaskDetailHeader path; the compact card row no longer renders it.
+
+  var currentStatus = value || '';
+
   return (
     <div style={{ display: 'flex', gap: compact ? 1 : 3, alignItems: 'center' }}>
       {statuses.map(function(s) {
-        var active = (value || '') === s.value;
-        var isDisabled = !!disableTerminal && TERMINAL_REQUIRES_SCHEDULE.indexOf(s.value) !== -1;
-        var isSystem = !!s.systemOnly;
+        var active = currentStatus === s.value;
+        // Disable if: (a) this IS the current status (no self-transition),
+        //              (b) the transition is not valid per the state matrix,
+        //              (c) terminal target requires scheduled_at and task has none.
+        var isCurrent = active;
+        var noTransition = !canTransitionTo(currentStatus, s.value);
+        var needsSchedule = !!disableTerminal && TERMINAL_REQUIRES_SCHEDULE.indexOf(s.value) !== -1;
+        var isDisabled = isCurrent || noTransition || needsSchedule;
         return (
           <button
             key={s.value || 'open'}
-            onClick={function(e) { e.stopPropagation(); if (!isDisabled && !isSystem) onChange(s.value); }}
-            disabled={isDisabled || isSystem}
-            title={isSystem ? 'Missed — auto-applied by scheduler' : (isDisabled ? 'Schedule task before resolving' : s.label)}
+            onClick={function(e) { e.stopPropagation(); if (!isDisabled) onChange(s.value); }}
+            disabled={isDisabled}
+            title={isCurrent ? 'Current status' : needsSchedule ? 'Schedule task before resolving' : s.label}
             style={{
               width: size, height: size,
               borderRadius: 4,
@@ -93,7 +106,6 @@ export default React.memo(function StatusToggle({ value, onChange, onDelete, dar
           </button>
         );
       })}
-      {onDelete && <DeleteButton onDelete={onDelete} size={size} fontSize={fontSize} darkMode={darkMode} compact={compact} isMobile={isMobile} />}
     </div>
   );
 })

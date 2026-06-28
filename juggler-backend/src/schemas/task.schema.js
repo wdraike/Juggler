@@ -3,7 +3,7 @@
 const { z } = require('zod');
 
 const VALID_PRI = ['P1', 'P2', 'P3', 'P4'];
-const VALID_STATUS = ['', 'done', 'cancel', 'skip', 'pause', 'missed'];
+const VALID_STATUS = ['', 'done', 'cancel', 'skip', 'pause'];
 const VALID_PRECIP = ['any', 'wet_ok', 'light_ok', 'dry_only'];
 const VALID_CLOUD = ['any', 'overcast_ok', 'partly_ok', 'clear'];
 const VALID_TEMP_UNIT = ['F', 'C'];

@@ -1724,7 +1724,40 @@ async function runScheduleAndPersist(userId, _retries, options) {
       // placement mode (the prior ANYTIME-only guard left non-anytime + anytime-in-past holes).
       // Also CLEAR a stale overdue=1 so a previously-mis-flagged floating task does not stick
       // past-due across runs (defeats computeIsPastDue's ||t.overdue branch otherwise).
+      //
+      // CONSTRAINT-VIOLATION EXCEPTION: if the task was unplaced due to a structural
+      // constraint failure (weather, tool_conflict, location_mismatch, impossible_window),
+      // the stale position may itself violate those constraints — preserving it would
+      // show the task at a slot where it CANNOT run (e.g. 8 PM when the `when` tags say
+      // morning/afternoon, or outdoors when humidity exceeds the limit). Move it to the
+      // unscheduled lane with the reason preserved instead. Capacity-only failures
+      // (no_slot — calendar full) keep the old position: the task might fit later.
       if (!original.deadline) {
+        var _constraintReason = t._unplacedReason && (
+          t._unplacedReason === REASON_CODES.WEATHER ||
+          t._unplacedReason === REASON_CODES.WEATHER_UNAVAILABLE ||
+          t._unplacedReason === REASON_CODES.TOOL_CONFLICT ||
+          t._unplacedReason === REASON_CODES.LOCATION_MISMATCH ||
+          t._unplacedReason === REASON_CODES.IMPOSSIBLE_WINDOW
+        );
+        if (_constraintReason) {
+          // ponytail: reuse Case C's unscheduled-lane write — no point duplicating it.
+          var _constraintDbUpdate = {
+            unscheduled: 1,
+            unplaced_reason: t._unplacedReason,
+            unplaced_detail: t._unplacedDetail || 'No available slot in the schedule',
+            updated_at: _runScheduleCommand.clockNow()
+          };
+          if (rawRow && rawRow.overdue) {
+            _constraintDbUpdate.overdue = 0;
+          }
+          if (result.slackByTaskId && t.id in result.slackByTaskId) {
+            _constraintDbUpdate.slack_mins = result.slackByTaskId[t.id];
+          }
+          pendingUpdates.push({ id: t.id, dbUpdate: _constraintDbUpdate });
+          cleared++;
+          return;
+        }
         if (rawRow && rawRow.overdue) {
           pendingUpdates.push({ id: t.id, dbUpdate: { overdue: 0, updated_at: _runScheduleCommand.clockNow() } });
         }
@@ -1856,7 +1889,7 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (t.recurring) return; // recurring handled by their own lifecycle (Phase 9)
     if (t.placementMode !== PLACEMENT_MODES.FIXED) return;
     var stFx = statuses[t.id] || '';
-    if (stFx === 'done' || stFx === 'cancel' || stFx === 'skip' || stFx === 'pause' || stFx === 'disabled' || stFx === 'missed') return;
+    if (stFx === 'done' || stFx === 'cancel' || stFx === 'skip' || stFx === 'pause' || stFx === 'disabled') return;
     var rawFx = rawRowById[t.id];
     if (!rawFx) return;
     var schedMinsFx = t.time ? parseTimeToMinutes(t.time) : null;

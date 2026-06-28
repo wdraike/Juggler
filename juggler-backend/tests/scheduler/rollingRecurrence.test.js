@@ -20,7 +20,6 @@ const { createTask } = require('../../test-helpers/tasks');
 const { runScheduler, markInstanceStatus } = require('../../test-helpers/scheduler');
 const { getTaskInstances } = require('../../test-helpers/queries');
 const { getNowInTimezone } = require('../../../shared/scheduler/getNowInTimezone');
-const { computeRollingAnchor } = require('../../src/lib/rolling-anchor');
 
 const TZ = 'America/New_York';
 // The REAL `done` reanchor uses the actual completion date (today in the user's tz),
@@ -125,41 +124,23 @@ describe('TS-86: Rolling anchor - skip fully reanchors', () => {
 });
 
 /**
- * TS-87: missed reanchor — NEEDS-RULING (no live application path).
+ * TS-87: missed reanchor — 'missed' status removed.
  * Domain: Rolling Recurrence / Anchor Update / Missed
  *
- * computeRollingAnchor('missed', ...) returns instanceDate + 1 day (R33.3) and is a real,
- * unit-proven product function. BUT there is no live code path that applies status
- * 'missed' to an instance and then reanchors:
- *   - facade.updateTaskStatus returns 403 for user-supplied 'missed'
- *     (STATUS_MISSED_SYSTEM_ONLY — UpdateTaskStatus.js:107).
- *   - The auto-miss feature was REMOVED (runSchedule.js:1829-1840, "Leg D ... AUTO-MISS
- *     REMOVED", David 2026-06-24) per the NEVER-MISSING invariant: a past-incomplete
- *     recurring instance is flagged OVERDUE, never auto-marked terminal 'missed'.
- *     markMissedTasks (cal-history-cron.js:114-121) only sets overdue=1.
- * So the integration assertion "a missed instance reanchors the master" cannot be driven
- * through any real path. We assert the REAL product contract that DOES exist (the pure
- * computeRollingAnchor function) and document the live-path conflict for ruling.
+ * The 'missed' status has been removed from VALID_STATUSES and the missed branch
+ * in computeRollingAnchor (the +1 day rule) has been removed. A user-supplied
+ * status='missed' now returns 400 (generic invalid status). There is no live
+ * code path that applies 'missed' to an instance.
  */
-describe('TS-87: Rolling anchor - missed rule (pure contract; integration NEEDS-RULING)', () => {
+describe('TS-87: Rolling anchor - missed is rejected (invalid status)', () => {
   beforeAll(async () => { await setupTestDB(); });
   afterAll(async () => { await teardownTestDB(); });
 
-  it('Main scenario: computeRollingAnchor missed = instanceDate + 1 day (R33.3)', () => {
-    expect(computeRollingAnchor('missed', '2026-06-17', '2026-06-15')).toBe('2026-06-18');
-  });
-
-  it('SUB-87a: missed on the anchor date shifts to the next day', () => {
-    expect(computeRollingAnchor('missed', '2026-06-15', '2026-06-15')).toBe('2026-06-16');
-  });
-
-  it('SUB-87b: user-supplied missed is rejected (system-only) — no live reanchor path', async () => {
+  it('user-supplied missed is rejected (400) — no live reanchor path', async () => {
     const task = await rollingTask();
     const res = await markInstanceStatus(task.id, '2026-06-27', 'missed');
-    // missed is system-applied only; the controller refuses it (403). Per the
-    // NEVER-MISSING invariant + auto-miss removal there is no live path that applies
-    // 'missed' and reanchors. Master anchor is therefore unchanged.
-    expect(res.status).toBe(403);
+    // 'missed' is no longer a valid status; the controller returns 400.
+    expect(res.status).toBe(400);
     const updatedTask = await getTaskInstances(task.id, true);
     expect(updatedTask.rollingAnchor).toBe('2026-06-15');
   });
@@ -365,18 +346,18 @@ describe('TS-94: Rolling recurrence target interval steering (NEEDS-RULING)', ()
 });
 
 /**
- * TS-96: missed-threshold reanchor — NEEDS-RULING (see TS-87; no live missed path).
+ * TS-96: missed-threshold reanchor — no live missed path (see TS-87).
  * Domain: Rolling Recurrence / Missed Threshold
  */
-describe('TS-96: Rolling recurrence missed threshold (NEEDS-RULING)', () => {
+describe('TS-96: Rolling recurrence missed threshold (no live missed path)', () => {
   beforeAll(async () => { await setupTestDB(); });
   afterAll(async () => { await teardownTestDB(); });
 
-  it('user-supplied missed is rejected; anchor unchanged (no live missed path)', async () => {
+  it('user-supplied missed is rejected (400); anchor unchanged', async () => {
     const task = await rollingTask({ recur: { type: 'rolling', intervalDays: 7, timesPerCycle: 3 } });
 
     const res = await markInstanceStatus(task.id, '2026-06-27', 'missed');
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(400);
 
     const updatedTask = await getTaskInstances(task.id, true);
     expect(updatedTask.rollingAnchor).toBe('2026-06-15');

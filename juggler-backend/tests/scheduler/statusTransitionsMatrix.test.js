@@ -9,7 +9,7 @@
 // The TS-320..TS-329 block was rewritten to match the AUTHORITATIVE state model
 // (docs/architecture/TASK-STATE-MATRIX.md + controllers/task.controller.js
 // `updateTaskStatus`):
-//   • Valid statuses are `['', 'done', 'wip', 'cancel', 'skip', 'pause', 'disabled', 'missed']`.
+//   • Valid statuses are `['', 'done', 'wip', 'cancel', 'skip', 'pause', 'disabled']`.
 //     The previously-asserted `archived`/`restored` statuses are NOT part of the
 //     model — `disabled` (+ the re-enable endpoint) is the freeze/restore mechanism.
 //   • Transition guards live in the controller, NOT in a direct DB UPDATE. The old
@@ -225,19 +225,19 @@ describe('TS-324: WIP → cancel — rolling anchor NOT updated', () => {
 });
 
 /**
- * TS-325: user cannot set `missed` — it is system-applied only (403).
+ * TS-325: user cannot set `missed` — it is no longer a valid status (400).
  * Domain: State Machine / Status Transitions / Recovery
  */
-describe('TS-325: user-set missed is rejected (system-only)', () => {
+describe('TS-325: user-set missed is rejected (invalid status)', () => {
   beforeAll(async () => { await setupTestDB(); });
   afterAll(async () => { await teardownTestDB(); });
 
-  it('Main scenario: setting missed via the controller → 403 STATUS_MISSED_SYSTEM_ONLY', async () => {
+  it('Main scenario: setting missed via the controller → 400 Invalid status', async () => {
     const { instanceId } = await seedOpenInstance('missed-attempt');
 
     const res = await setStatusViaController(instanceId, 'missed');
-    expect(res.statusCode).toBe(403);
-    expect(res._json.code).toBe('STATUS_MISSED_SYSTEM_ONLY');
+    expect(res.statusCode).toBe(400);
+    expect(res._json.error).toMatch(/Invalid status/);
   });
 });
 
@@ -343,7 +343,6 @@ describe('TS-328: open → wip → done → reopen → done round-trip', () => {
  *   wip       → done | "" (reopen) | skip | cancel
  *   done|skip|cancel are terminal but reactivation to "" / wip is supported
  *     (done_frozen reactivation, R-undo); the matrix's hard rules are:
- *       - `missed` may never be user-set            → 403 STATUS_MISSED_SYSTEM_ONLY
  *       - an unknown status string is rejected       → 400 Invalid status
  *       - a disabled row is frozen                   → 403 TASK_DISABLED (see TS-320)
  * Domain: State Machine / Transition Matrix
@@ -383,11 +382,11 @@ describe('TS-329: status transitions verified through the real guard', () => {
 
   // ── Hard-forbidden by the matrix, asserted through the real guard ──────────
 
-  it('Forbidden: user cannot set missed → 403 STATUS_MISSED_SYSTEM_ONLY', async () => {
+  it('Forbidden: user cannot set missed → 400 Invalid status', async () => {
     const { instanceId } = await seedOpenInstance('forbid-missed');
     const res = await setStatusViaController(instanceId, 'missed');
-    expect(res.statusCode).toBe(403);
-    expect(res._json.code).toBe('STATUS_MISSED_SYSTEM_ONLY');
+    expect(res.statusCode).toBe(400);
+    expect(res._json.error).toMatch(/Invalid status/);
   });
 
   it('Forbidden: an unknown status string is rejected → 400 Invalid status', async () => {

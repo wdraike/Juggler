@@ -38,8 +38,7 @@ function isTaskPast(item, todayKey) {
 function labelForStatus(s) {
   if (s === 'done') return 'Done at';
   if (s === 'skip') return 'Skipped at';
-  if (s === 'cancel') return 'Cancelled at';
-  if (s === 'missed') return 'Missed at';
+  if (s === 'cancel' || s === 'cancelled') return 'Cancelled at';
   if (s === 'pause') return 'Paused at';
   return 'Resolved at';
 }
@@ -57,11 +56,6 @@ function getStatusReason(t, status) {
   if (!t || !status) return null;
 
   switch (status) {
-    case 'missed':
-      if (!t.scheduledAt) return null;
-      var flexMin = (t.timeFlex != null) ? t.timeFlex : 60;
-      var windowClose = new Date(new Date(t.scheduledAt).getTime() + flexMin * 60 * 1000);
-      return 'missed because no resolution by ' + formatCompletedAt(windowClose.toISOString());
     case 'cancel':
       return t.cancelReason ? 'cancelled: ' + t.cancelReason : 'cancelled by user';
     case 'skip':

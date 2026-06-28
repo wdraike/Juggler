@@ -555,11 +555,11 @@ describe('status transition: disabled → re-enable (real DB)', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// Block 6: missed status — system-only guard
+// Block 6: missed status — invalid status (400)
 // ═══════════════════════════════════════════════════════════════
 
-describe('status transition: missed status — system-only guard', () => {
-  test('user-supplied status=missed → 403 STATUS_MISSED_SYSTEM_ONLY', async () => {
+describe('status transition: missed status — invalid status (400)', () => {
+  test('user-supplied status=missed → 400 Invalid status', async () => {
 
 
     var createReq = mockReq({ body: { text: 'user-missed-attempt', scheduledAt: '2026-05-01T08:00:00Z' } });
@@ -570,8 +570,8 @@ describe('status transition: missed status — system-only guard', () => {
     var missedReq = mockReq({ params: { id: id }, body: { status: 'missed' } });
     var missedRes = mockRes();
     await controller.updateTaskStatus(missedReq, missedRes);
-    expect(missedRes.statusCode).toBe(403);
-    expect(missedRes._json.code).toBe('STATUS_MISSED_SYSTEM_ONLY');
+    expect(missedRes.statusCode).toBe(400);
+    expect(missedRes._json.error).toMatch(/Invalid status/);
   });
 
   test('a row with status=missed written by the DB is readable and renders correctly', async () => {

@@ -105,18 +105,33 @@ export default function TaskDetailHeader({
             <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
               {STATUS_OPTIONS.map(function(s) {
                 var isActive = (status || '') === s.value;
+                // Same transition rules as StatusToggle — disable current status
+                // and invalid transitions. Terminal → reopen only.
+                var currentStatus = status || '';
+                var transitions = {
+                  '':      { 'done': 1, 'cancel': 1, 'skip': 1, 'pause': 1 },
+                  'done':  { '': 1 },
+                  'cancel': { '': 1 },
+                  'skip':  { '': 1 },
+                  'pause': { '': 1 },
+                };
+                var canTransit = !!(transitions[currentStatus] && transitions[currentStatus][s.value]);
+                var isDisabled = isActive || !canTransit;
                 var sBg = darkMode ? s.bgDark : s.bg;
                 var sColor = darkMode ? s.colorDark : s.color;
                 return (
-                  <button key={s.value} onClick={() => { if (onStatusChange) onStatusChange(s.value); }}
-                    title={s.tip}
+                  <button key={s.value} onClick={() => { if (onStatusChange && !isDisabled) onStatusChange(s.value); }}
+                    disabled={isDisabled}
+                    title={isActive ? 'Current status' : s.tip}
                     style={{
                       border: '1px solid ' + (isActive ? sColor : TH.btnBorder),
-                      borderRadius: 4, padding: '3px 8px', cursor: 'pointer',
+                      borderRadius: 4, padding: '3px 8px',
+                      cursor: isDisabled ? 'not-allowed' : 'pointer',
                       background: isActive ? sBg : 'transparent',
                       color: isActive ? sColor : TH.textMuted,
                       fontSize: 10, fontWeight: isActive ? 700 : 500, fontFamily: 'inherit',
-                      height: BTN_H, boxSizing: 'border-box'
+                      height: BTN_H, boxSizing: 'border-box',
+                      opacity: isDisabled ? 0.45 : 1
                     }}>
                     {s.label} {s.tip.split(' — ')[0]}
                   </button>

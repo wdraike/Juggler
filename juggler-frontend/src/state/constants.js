@@ -20,7 +20,6 @@ export const STATUS_OPTIONS = [
   { value: "done", label: "\u2713", bg: "#D1FAE5", bgDark: "#0A3622", color: "#2D6A4F", colorDark: "#6EE7B7", tip: "Complete — mark this task finished" },
   { value: "cancel", label: "\u2715", bg: "#FEE2E2", bgDark: "#3A0A10", color: "#8B2635", colorDark: "#FCA5A5", tip: "Cancel — won't do" },
   { value: "skip", label: "\u23ED", bg: "#E8E0D0", bgDark: "#2C2B28", color: "#5C5A55", colorDark: "#B0A898", tip: "Skip — not today, keep the schedule" },
-  { value: "missed", label: "\u26A0", bg: "#FEF3E0", bgDark: "#3A2818", color: "#A16207", colorDark: "#FCD34D", tip: "Missed — system flagged (no resolution before window closed)" },
   { value: "pause", label: "\u23F8", bg: "#E0E7FF", bgDark: "#1E1B4B", color: "#4338CA", colorDark: "#A5B4FC", tip: "Pause — temporarily inactive" },
 ];
 

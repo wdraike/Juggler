@@ -30,17 +30,16 @@ function isRollingMaster(masterRow) {
  *            Falls back to instanceDate when completionDate is not supplied. (David
  *            2026-06-24 "Option B": anchor to actual completion, not the schedule.)
  *   skip   → instanceDate (skip is NOT a completion — keep the scheduled-date reanchor)
- *   missed → instanceDate + 1 day (soft nudge)
  *   cancel → null (no anchor change)
  *
  * Guard: never move the anchor backwards — if the chosen date < currentAnchor, return
  * null (stale/duplicate event).
  *
- * @param {string} status - 'done' | 'skip' | 'missed' | 'cancel'
+ * @param {string} status - 'done' | 'skip' | 'cancel'
  * @param {string} instanceDate - ISO date 'YYYY-MM-DD' of the instance (scheduled day)
  * @param {string|null} currentAnchor - current rolling_anchor from task_masters
  * @param {string} [completionDate] - ISO date 'YYYY-MM-DD' the task was actually marked
- *        done (today in the user's tz). Used for `done`; ignored for skip/missed.
+ *        done (today in the user's tz). Used for `done`; ignored for skip/cancel.
  * @returns {string|null} new anchor ISO date, or null if no update needed
  */
 function computeRollingAnchor(status, instanceDate, currentAnchor, completionDate) {
@@ -51,16 +50,9 @@ function computeRollingAnchor(status, instanceDate, currentAnchor, completionDat
   var candidate;
   if (status === 'done') {
     candidate = completionDate || instanceDate;
-  } else if (status === 'skip') {
-    candidate = instanceDate;
   } else {
-    // missed: +1 day from the scheduled day
-    var d = new Date(instanceDate + 'T00:00:00');
-    d.setDate(d.getDate() + 1);
-    var y = d.getFullYear();
-    var m = d.getMonth() + 1;
-    var day = d.getDate();
-    candidate = y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+    // skip: anchor to the scheduled day
+    candidate = instanceDate;
   }
 
   // Guard: never move the anchor backwards (stale/duplicate event).

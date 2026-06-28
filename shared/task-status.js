@@ -13,7 +13,6 @@ const TaskStatus = Object.freeze({
   CANCEL: 'cancel',    // Task cancelled by user
   SKIP: 'skip',        // Task skipped (temporarily bypassed)
   PAUSE: 'pause',      // Task paused (recurring tasks only)
-  MISSED: 'missed'     // Task was missed (resolution window passed without action)
 });
 
 const TASK_STATUSES = Object.freeze([
@@ -21,16 +20,14 @@ const TASK_STATUSES = Object.freeze([
   TaskStatus.DONE,
   TaskStatus.CANCEL,
   TaskStatus.SKIP,
-  TaskStatus.PAUSE,
-  TaskStatus.MISSED
+  TaskStatus.PAUSE
 ]);
 
 const TERMINAL_STATUSES = Object.freeze([
   TaskStatus.DONE,
   TaskStatus.CANCEL,
   TaskStatus.SKIP,
-  TaskStatus.PAUSE,
-  TaskStatus.MISSED
+  TaskStatus.PAUSE
 ]);
 
 const ACTIVE_STATUSES = Object.freeze([
@@ -42,8 +39,7 @@ const STATUS_OPTIONS = Object.freeze([
   TaskStatus.DONE,
   TaskStatus.CANCEL,
   TaskStatus.SKIP,
-  TaskStatus.PAUSE,
-  TaskStatus.MISSED
+  TaskStatus.PAUSE
 ]);
 
 // Cal History Statuses (juggler-cal-history Plan C)
@@ -114,8 +110,6 @@ function getTaskStatusDisplayName(status) {
       return 'Skipped';
     case TaskStatus.PAUSE:
       return 'Paused';
-    case TaskStatus.MISSED:
-      return 'Missed';
     default:
       return 'Unknown';
   }
@@ -138,8 +132,6 @@ function getTaskStatusDescription(status) {
       return 'Task temporarily bypassed';
     case TaskStatus.PAUSE:
       return 'Recurring task paused';
-    case TaskStatus.MISSED:
-      return 'Resolution window passed without action';
     default:
       return 'Unknown status';
   }

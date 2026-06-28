@@ -264,6 +264,7 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
   var taskSnapshotRef = useRef(null);
   var userDirtyRef = useRef(false); // true when user has unsaved edits
   var saveCooldownRef = useRef(false); // suppress external sync briefly after save
+  var pendingSyncRef = useRef(null); // task snapshot suppressed during cooldown — re-applied when it expires
 
   // Build a comparable snapshot from a task object (same shape as form state)
   function snapshotFromTask(t) {
@@ -314,7 +315,12 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
     if (userDirtyRef.current) return; // don't overwrite user's in-progress edits
     if (saveCooldownRef.current) {
       // After a save, suppress scheduler-driven re-sync — just update the snapshot
-      // so the next real external change will be detected correctly
+      // so the next real external change will be detected correctly.
+      // Remember the new snapshot so we can re-apply it once the cooldown expires
+      // (the scheduler emits schedule:changed ~2s after save, which often lands
+      // inside the 3s cooldown window — without this, the form never sees the
+      // scheduler's updated placement until a manual refresh).
+      pendingSyncRef.current = newSnap;
       taskSnapshotRef.current = newSnap;
       return;
     }
@@ -585,6 +591,22 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
         setIsDirty(false);
         saveCooldownRef.current = true;
         setTimeout(function() { saveCooldownRef.current = false; }, 10000);
+        setTimeout(function() {
+          // Re-apply any external sync that was suppressed during the cooldown.
+          // The scheduler's schedule:changed SSE often arrives inside the window.
+          if (pendingSyncRef.current && !userDirtyRef.current) {
+            var snap = pendingSyncRef.current;
+            pendingSyncRef.current = null;
+            taskSnapshotRef.current = snap;
+            setText(snap.text); setProject(snap.project); setPri(snap.pri);
+            setDate(snap.date); setTime(snap.time); setDur(snap.dur);
+            setEndTime(snap.time ? addMinutesTo24h(snap.time, snap.dur || 0) : '');
+            setEndTimeError(null);
+            setTimeRemaining(snap.timeRemaining); setDeadline(snap.deadline);
+            setEarliestStart(snap.earliestStart); setNotes(snap.notes);
+            setUrl(snap.url || '');
+          }
+        }, 10100);
         return;
       }
       // Update snapshot so next save only sends new changes
@@ -595,6 +617,25 @@ export default function TaskEditForm({ task, status, onUpdate, onStatusChange, o
       // Suppress external sync for 3s after save — scheduler response shouldn't disrupt the form
       saveCooldownRef.current = true;
       setTimeout(function() { saveCooldownRef.current = false; }, 3000);
+      setTimeout(function() {
+        // Re-apply any external sync that was suppressed during the cooldown.
+        // The scheduler emits schedule:changed ~2s after save (2s debounce),
+        // which often lands inside this 3s window — without re-applying, the
+        // form never sees the scheduler's updated placement (date/time/unscheduled)
+        // until a manual refresh.
+        if (pendingSyncRef.current && !userDirtyRef.current) {
+          var snap = pendingSyncRef.current;
+          pendingSyncRef.current = null;
+          taskSnapshotRef.current = snap;
+          setText(snap.text); setProject(snap.project); setPri(snap.pri);
+          setDate(snap.date); setTime(snap.time); setDur(snap.dur);
+          setEndTime(snap.time ? addMinutesTo24h(snap.time, snap.dur || 0) : '');
+          setEndTimeError(null);
+          setTimeRemaining(snap.timeRemaining); setDeadline(snap.deadline);
+          setEarliestStart(snap.earliestStart); setNotes(snap.notes);
+          setUrl(snap.url || '');
+        }
+      }, 3100);
       setTimeout(function() { setSaveStatus(null); }, 1500);
     });
   }

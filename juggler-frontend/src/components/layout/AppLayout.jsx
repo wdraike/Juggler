@@ -573,7 +573,7 @@ export default function AppLayout() {
     if (!t || !t.id || _unplacedIdSet[t.id]) return false;
     if (t.taskType === 'recurring_template') return false;
     var st = statuses[t.id] || '';
-    if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip' || st === 'disabled' || st === 'pause' || st === 'missed') return false;
+    if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip' || st === 'disabled' || st === 'pause') return false;
     return !t.scheduledAt && !t.date;
   });
   var schedulerWarnings = placements.warnings || [];
@@ -611,7 +611,7 @@ export default function AppLayout() {
     visibleTasks.forEach(t => {
       if (!t.dependsOn || t.dependsOn.length === 0) return;
       var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip' || st === 'missed') return;
+      if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip') return;
       var hasOverdueDep = t.dependsOn.some(function(depId) {
         if ((statuses[depId] || '') === 'done') return false;
         var dep = taskMap[depId];
@@ -654,7 +654,7 @@ export default function AppLayout() {
     });
     visibleTasks.forEach(t => {
       var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip' || st === 'missed') return;
+      if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip') return;
       // (a) day-level deadline passed
       if (t.deadline) {
         var dd = parseDate(t.deadline);
@@ -683,7 +683,7 @@ export default function AppLayout() {
     var ids = new Set();
     allTasks.forEach(t => {
       var st = statuses[t.id] || '';
-      if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip' || st === 'missed') return;
+      if (st === 'done' || st === 'cancel' || st === 'cancelled' || st === 'skip') return;
       if (t.placementMode === 'fixed' || t.placement_mode === 'fixed') ids.add(t.id);
     });
     return ids;
