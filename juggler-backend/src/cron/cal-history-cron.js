@@ -103,6 +103,7 @@ async function markMissedTasks() {
         .whereNotNull('task_instances.scheduled_at')
         .whereNotIn('task_instances.status', TERMINAL_STATUSES)
         .where(knex.raw('task_instances.scheduled_at < ?', [new Date(currentTime.getTime() - 24 * 60 * 60 * 1000)]))
+        .where(knex.raw('task_instances.scheduled_at < NOW() - INTERVAL 1 HOUR'))
         .select('task_instances.*');
 
       let markedCount = 0;
