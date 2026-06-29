@@ -875,6 +875,124 @@ async function runScheduleAndPersist(userId, _retries, options) {
   }
   tPerf.expandEnd = Date.now() - tPerfStart;
 
+  // R-FR2: id-keyed map storing the forward-roll last-valid-day deadline for each stranded
+  // instance. Declared in outer scope so it survives the rowToTask rebuild that happens when
+  // reconcileChanged=true. Populated by the IIFE below; consumed by the re-apply mirror (~1341).
+  var forwardRollDeadlineById = {};
+
+  // R-FR2 / R-FR3: forward-roll injection for rolling past-due stranded instances.
+  // expandRecurring emits occurrences within [today..expandEnd] only. When a rolling
+  // task's next arithmetic slot falls beyond expandEnd (e.g. intervalDays=60 with
+  // anchor=today-30 → next slot=today+30 > expandEnd=today+14), no desired occurrence
+  // is emitted and the reconciler has nothing to match — the stranded instance never
+  // moves. For each rolling master with no desired occurrence AND a stranded past-due
+  // active instance (date < today, cycle NOT ended), inject a synthetic desired
+  // occurrence at today so the reconciler can move the existing row forward.
+  // The reconciler's occIdOverrides replaces the synthetic id with the existing
+  // instance's id — preserving single-active (R-FR3: same row moves, no new row created).
+  (function() {
+    var desiredSourceIds = {};
+    desiredOccurrences.forEach(function(d) { desiredSourceIds[d.sourceId] = true; });
+    allTasks.forEach(function(t) {
+      if (t.taskType !== 'recurring_template') return;
+      var r = t.recur;
+      if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_e) { return; } }
+      if (!r || r.type !== 'rolling') return;
+      // Find a stranded past-due active instance BEFORE checking desiredSourceIds.
+      // We need the stranded instance's date to compute the cycle boundary so we can
+      // determine whether any existing desired occurrence is within the current cycle
+      // (R-FR2 check below). Short-circuit to avoid the scan for masters with no
+      // pending instance at all — that's the common non-stranded case.
+      var stranded = null;
+      for (var _fi = 0; _fi < allTasks.length; _fi++) {
+        var _inst = allTasks[_fi];
+        if (_inst.taskType !== 'recurring_instance') continue;
+        if (_inst.sourceId !== t.id) continue;
+        // R-FR3 / BLOCK-2: cal-linked rows (gcal/msft) are excluded by
+        // reconcile.buildExistingGroups — a synthetic occurrence for them would be
+        // unmatched → fanout INSERT → duplicate active row (AC2 violation). Skip them;
+        // their existing cal-sync reconcile path already manages their placement.
+        if (_inst.gcalEventId || _inst.msftEventId) continue;
+        var _ist = statuses[_inst.id] || _inst.status || '';
+        if (_ist && _ist !== '') continue; // terminal — not stranded
+        var _instDate = parseDate(_inst.date);
+        if (!_instDate || _instDate >= today) continue; // not in the past
+        stranded = _inst;
+        break;
+      }
+      if (!stranded) return;
+      // Only forward-roll when the cycle has NOT ended (R-FR5: no slot → Phase 9 pins overdue).
+      var _frPeriodEndKey = recurringPeriodEndKey(t.recur, stranded.date);
+      var _frPeriodEnd = _frPeriodEndKey ? parseDate(_frPeriodEndKey) : null;
+      if (!_frPeriodEnd || today.getTime() >= _frPeriodEnd.getTime()) return; // cycle ended
+      // R-FR2 enforcement: expandRecurring runs against allTasksForExpand which excludes
+      // all pending instances so the scheduler can do a clean expand. This means the
+      // single-active guard inside expandRecurring does not see the stranded instance as
+      // "active", and it projects the next anchor-grid occurrence — which may fall
+      // OUTSIDE the current cycle (e.g. a weekly rolling task stranded at past-3 has
+      // cycle [past-3, today+4) but anchor+35 = today+5 is past the boundary).
+      //
+      // When desiredSourceIds[t.id] is true it means expandRecurring DID emit at least
+      // one desired occurrence. Check if any of those occurrences fall within the current
+      // cycle (< _frPeriodEnd):
+      //   - If yes → reconciler will move the stranded instance to that occurrence, which
+      //     is within the cycle. Return; no synthetic injection needed.
+      //   - If no  → all emitted occurrences are out-of-cycle. Remove them to prevent the
+      //     reconciler from creating a new next-cycle row (R-FR3 single-active violation),
+      //     then fall through to inject the synthetic today occurrence instead.
+      if (desiredSourceIds[t.id]) {
+        var _hasInCycle = false;
+        var _outOfCycleIndices = [];
+        for (var _di = 0; _di < desiredOccurrences.length; _di++) {
+          if (desiredOccurrences[_di].sourceId !== t.id) continue;
+          var _dDate = parseDate(desiredOccurrences[_di].date);
+          if (_dDate && _dDate < _frPeriodEnd) {
+            _hasInCycle = true;
+            break;
+          }
+          _outOfCycleIndices.push(_di);
+        }
+        if (_hasInCycle) return; // in-cycle occurrence exists — reconciler handles it
+        // All desired occurrences are outside the current cycle: remove them to prevent
+        // a new next-cycle row from being created (violates R-FR3 single-active).
+        for (var _rj = _outOfCycleIndices.length - 1; _rj >= 0; _rj--) {
+          desiredOccurrences.splice(_outOfCycleIndices[_rj], 1);
+        }
+      }
+      // R-FR2: compute the inclusive last valid placement day for this cycle.
+      // _frPeriodEndKey is the START of the next cycle (exclusive upper bound);
+      // the last valid day is one calendar day before it. Store it on the stranded
+      // task object so the reconcile application step can preserve the deadline
+      // (the re-apply placement-bracket step recomputes deadline from _candidateDate
+      // using flex=0 for rolling type, which collapses the window to a single day;
+      // by also setting earliestStart in the reconcile apply step we ensure the
+      // re-apply guard sees both truthy and skips the overwrite — see line 1053).
+      var _frPeriodEndDate = parseDate(_frPeriodEndKey);
+      var _frLastValidDate = new Date(_frPeriodEndDate.getTime());
+      _frLastValidDate.setDate(_frLastValidDate.getDate() - 1);
+      stranded._forwardRollDeadline = formatDateKey(_frLastValidDate);
+      forwardRollDeadlineById[stranded.id] = stranded._forwardRollDeadline; // survives rowToTask rebuild
+      // Inject synthetic desired occurrence at today. The reconciler matches it to
+      // the stranded instance via nearest-first and produces an occurrenceMove
+      // (stranded.date → today). priorDate(_preReconDate) < todayKey causes the
+      // placement persistence to write overdue=1 (R-FR1).
+      desiredOccurrences.push({
+        id: t.id + '-roll-fwd-' + timeInfo.todayKey,
+        sourceId: t.id,
+        date: timeInfo.todayKey,
+        _candidateDate: timeInfo.todayKey,
+        taskType: 'recurring_instance',
+        text: t.text,
+        dur: t.dur,
+        pri: t.pri,
+        dayReq: 'any',
+        when: t.when,
+        placement_mode: t.placementMode || t.placement_mode
+      });
+      logger.info('[SCHED] roll-fwd: master ' + t.id + ' stranded at ' + stranded.date + ' → synthetic target ' + timeInfo.todayKey + ' (cycle ends ' + _frPeriodEndKey + ')');
+    });
+  })();
+
   // Build next-tpc-occurrence map so split chunk deadlines can be capped to the
   // interval boundary (day before next occurrence) instead of the full flex window.
   // Without this, a Mon chunk of a Mon/Thu 2x-weekly task could roam all the way
@@ -977,8 +1095,16 @@ async function runScheduleAndPersist(userId, _retries, options) {
       var d = parseDate(mv.newDate);
       if (d) t.day = DAY_NAMES[d.getDay()];
       t.time = null;
-      t.earliestStart = null;
-      t.deadline = null;
+      // R-FR2: for forward-rolled rolling instances the IIFE pre-computed the last
+      // valid placement day of the original cycle and stored it as _forwardRollDeadline.
+      // Set BOTH earliestStart (= newDate/today) AND deadline (= _forwardRollDeadline)
+      // so the re-apply placement-bracket step at line 1464 sees both truthy and skips
+      // overwriting — otherwise it recalculates from the rolling flex=0 formula and
+      // collapses the window to a single day (today only), discarding the cycle bound.
+      // For all other reconcile moves (flexible-TPC, user-driven), both remain null so
+      // re-apply runs normally.
+      t.earliestStart = t._forwardRollDeadline != null ? mv.newDate : null;
+      t.deadline = t._forwardRollDeadline != null ? t._forwardRollDeadline : null;
       t.scheduledAt = null;
     });
     logger.info('[SCHED] reconcile: matched ' + occurrenceMoves.length + ' existing occurrence(s) to new target date(s)');
@@ -1215,8 +1341,15 @@ async function runScheduleAndPersist(userId, _retries, options) {
         var d2 = parseDate(mv.newDate);
         if (d2) t.day = DAY_NAMES[d2.getDay()];
         t.time = null;
-        t.earliestStart = null;
-        t.deadline = null;
+        // R-FR2: read forward-roll deadline from forwardRollDeadlineById (id-keyed, set at
+        // injection time in the IIFE). The in-memory prop t._forwardRollDeadline is NOT present
+        // after rowToTask reconstructs allTasks from DB rows, so it cannot be read here.
+        // Re-stash on t so the persist path and any later in-memory reads see the value.
+        // For normal reconcile moves forwardRollDeadlineById has no entry → _fwd=null → both null.
+        var _fwd = forwardRollDeadlineById[t.id] != null ? forwardRollDeadlineById[t.id] : null;
+        t._forwardRollDeadline = _fwd;
+        t.earliestStart = _fwd != null ? mv.newDate : null;
+        t.deadline = _fwd != null ? _fwd : null;
         t.scheduledAt = null;
       });
     }
@@ -1615,13 +1748,24 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // Derive day-of-week for the DB write
     var parsedNewDate = parseDate(newDate);
     var newDay = parsedNewDate ? DAY_NAMES[parsedNewDate.getDay()] : null;
+
+    // R-FR1 durability (BLOCK-1 fix): detect whether this recurring instance is
+    // already flagged overdue=1 in the DB from a prior forward-roll. When it is,
+    // overdue=1 must be PRESERVED until the instance is completed (terminal). We
+    // reflect this in the main dbUpdate so placementMatchesDbRow can return true
+    // (idempotent skip) when all placement fields — including overdue — are stable.
+    // The batch path in writeChanged hardcodes overdue:0 regardless of dbUpdate, so
+    // the secondary pendingUpdate below still overrides it when a write IS needed.
+    var _rawRow = rawRowById[taskId];
+    var _rawRowOverdue = (original.recurring && _rawRow && _flagOf(_rawRow.overdue)) ? 1 : 0;
+
     var dbUpdate = {
       scheduled_at: newScheduledAt,
       date: newDate || null,
       day: newDay,
       time: newTime || null,
       unscheduled: null,
-      overdue: 0,
+      overdue: _rawRowOverdue, // 1 for already-rolled overdue instances, 0 otherwise
       updated_at: _runScheduleCommand.clockNow()
     };
     // Don't overwrite instance.dur when time_remaining drives the effective
@@ -1641,6 +1785,9 @@ async function runScheduleAndPersist(userId, _retries, options) {
     // (rawRowById[taskId]). If all match, the write is a no-op → skip it. Any
     // field that differs, or any field we can't confidently compare, falls
     // through to a real write (conservative — never skips a genuine change).
+    // NOTE: for already-rolled overdue instances, dbUpdate.overdue=1 matches
+    // rawRow.overdue=1, so this skip fires correctly and the batch is not triggered
+    // on stable runs — achieving true idempotency without spurious writes.
     if (placementMatchesDbRow(dbUpdate, rawRowById[taskId])) {
       // No DB change needed. Still emit the SSE patch below on a date/time move
       // is impossible here (a move would have differed), so nothing to push.
@@ -1651,6 +1798,30 @@ async function runScheduleAndPersist(userId, _retries, options) {
       id: taskId,
       dbUpdate: dbUpdate
     });
+
+    // R-FR1: a recurring instance forward-rolled from a past-due slot must carry
+    // overdue=1 even after placement. The scheduled_at batch path in
+    // KnexScheduleRepository.writeChanged hardcodes overdue:0 for all placed rows
+    // (it cannot per-instance override it in the CASE expression). A separate
+    // overdue-only pendingUpdate routes to the per-row path (otherUpdates) which
+    // writes the individual value — applying AFTER the batch within the same
+    // transaction so the net DB state is overdue=1.
+    //
+    // Two conditions trigger this secondary push:
+    //   (a) Moving run: this run is the one moving the instance from a past slot
+    //       (_preReconDate != null, priorDateIso < todayKey).
+    //   (b) Subsequent runs: the DB already has overdue=1 from a prior roll
+    //       (_rawRowOverdue===1). The batch path would reset it; the secondary
+    //       push preserves it. Combined with the idempotent dbUpdate.overdue=1
+    //       above, stable-placement runs skip this entirely (placementMatchesDbRow
+    //       returns true above); this only fires when some other field changed.
+    if ((original.recurring && original._preReconDate != null && priorDateIso < timeInfo.todayKey) ||
+        (original.recurring && _rawRowOverdue === 1)) {
+      pendingUpdates.push({
+        id: taskId,
+        dbUpdate: { overdue: 1, updated_at: _runScheduleCommand.clockNow() }
+      });
+    }
 
     if (dateChanged || timeChanged) {
       // Derive day-of-week label for the patch so the frontend can render
@@ -1679,7 +1850,10 @@ async function runScheduleAndPersist(userId, _retries, options) {
       var priorSlackMins = original.slackMins != null ? original.slackMins : null;
       if (newSlackMins !== priorSlackMins) patch.slackMins = newSlackMins;
       if (original.unscheduled) patch.unscheduled = false; // only send on transition
-      if (original.overdue) patch.overdue = false; // only send on transition
+      // Only signal overdue:false when overdue is genuinely clearing. For
+      // forward-rolled instances (_rawRowOverdue=1 means we are preserving
+      // overdue=1), suppress the false signal — the task stays overdue.
+      if (original.overdue && _rawRowOverdue === 0) patch.overdue = false; // only send on transition
 
       updatedTasks.push({
         id: taskId,
@@ -1727,7 +1901,21 @@ async function runScheduleAndPersist(userId, _retries, options) {
     if (original.taskType === 'recurring_instance') {
       var rawRec = rawRowById[t.id];
       var hasScheduledAt = rawRec ? !!rawRec.scheduled_at : !!original.scheduledAt;
-      if (hasScheduledAt) return;
+      if (hasScheduledAt) {
+        // R-FR5: past-due rolling instance that couldn't be placed this run.
+        // If its original DB date is in the past the instance is overdue and must be
+        // flagged overdue=1 (pinned on the calendar, NEVER pushed to the next cycle).
+        // Without this write §8 PATH A silently exits and DB stays at overdue=0.
+        var _origDateRaw = rawRec && rawRec.date ? String(rawRec.date).split('T')[0] : null;
+        if (_origDateRaw && _origDateRaw < timeInfo.todayKey) {
+          var _noSlotOverdueUpd = { overdue: 1, unscheduled: null, updated_at: _runScheduleCommand.clockNow() };
+          if (result.slackByTaskId && t.id in result.slackByTaskId) {
+            _noSlotOverdueUpd.slack_mins = result.slackByTaskId[t.id];
+          }
+          pendingUpdates.push({ id: t.id, dbUpdate: _noSlotOverdueUpd });
+        }
+        return;
+      }
       var unplacedChunkUpdate = { unscheduled: 1, unplaced_reason: t._unplacedReason || REASON_CODES.NO_SLOT, unplaced_detail: t._unplacedDetail || 'No available slot in the schedule', updated_at: _runScheduleCommand.clockNow() };
       if (result.slackByTaskId && t.id in result.slackByTaskId) {
         unplacedChunkUpdate.slack_mins = result.slackByTaskId[t.id];
@@ -1896,6 +2084,12 @@ async function runScheduleAndPersist(userId, _retries, options) {
   taskRows.forEach(function(r) {
     if (!r.overdue) return; // already clear in DB — nothing to do
     if (unplacedIds[r.id]) return; // still unplaced — §8 handles this
+    // R-FR1 durability: recurring instance overdue is managed by the forward-roll
+    // persist path (§7 R-FR1) and Phase 9 — do not reset it here. When a rolling
+    // instance was forward-rolled and pinned overdue=1, that flag must survive every
+    // subsequent run until the instance goes terminal (done/skip/cancel). §8.6 is
+    // only correct for non-recurring tasks whose unplaceable constraint has resolved.
+    if (r.task_type === 'recurring_instance') return;
     // DB-single-source (W1): constraint resolved, row is placed again — clear the reason too.
     pendingUpdates.push({ id: r.id, dbUpdate: { overdue: 0, unplaced_reason: null, unplaced_detail: null, updated_at: _runScheduleCommand.clockNow() } });
   });
