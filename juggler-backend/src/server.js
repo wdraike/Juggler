@@ -53,6 +53,43 @@ async function start() {
     if (cleared > 0) serverLogger.info('Cleared expired sync locks', { count: cleared });
   } catch (_e) { /* table might not exist yet */ }
 
+  // Redis connectivity health check (999.954). Non-fatal: SSE degrades gracefully.
+  if (process.env.REDIS_URL) {
+    try {
+      var redisLib = require('./lib/redis');
+      var client = redisLib.getClient();
+      if (client && client.status === 'ready') {
+        await client.ping();
+        serverLogger.info('Redis connectivity OK');
+      } else if (client) {
+        // Client exists but not yet ready — wait briefly for connection
+        await new Promise(function(resolve) {
+          var onReady = function() {
+            client.ping().then(function() {
+              serverLogger.info('Redis connectivity OK (after connect)');
+            }).catch(function(e) {
+              serverLogger.warn('Redis ping failed after connect', { error: e.message });
+            }).finally(resolve);
+            client.off('ready', onReady);
+          };
+          client.on('ready', onReady);
+          // Timeout after 3s
+          setTimeout(function() {
+            client.off('ready', onReady);
+            serverLogger.warn('Redis did not become ready within 3s — SSE fan-out and rate limiters will be local-only');
+            resolve();
+          }, 3000);
+        });
+      } else {
+        serverLogger.warn('Redis client not available — SSE fan-out and rate limiters will be local-only');
+      }
+    } catch (e) {
+      serverLogger.warn('Redis connectivity check failed', { error: e.message });
+    }
+  } else {
+    serverLogger.info('REDIS_URL not set — skipping Redis connectivity check');
+  }
+
   // Load JWT secrets
   await loadJWTSecrets();
 
