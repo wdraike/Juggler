@@ -2,6 +2,8 @@
  * Write-path for the master/instance task model. All application code
  * mutating tasks goes through this module.
  *
+ * Implements TaskWritePort (lib/ports/TaskWritePort.js).
+ *
  * Row-shape contract:
  *   The `row` / `changes` object uses the same column names the former
  *   `tasks` table exposed (what `taskToRow()` in task.controller produces).
