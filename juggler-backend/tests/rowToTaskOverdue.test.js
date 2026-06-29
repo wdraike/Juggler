@@ -283,6 +283,55 @@ describe('rowToTask — W4 computed-on-read overdue (R50.6)', function() {
     expect(task.overdue).toBe(false);
   });
 
+  // ─── 11b. Future-DATE placement + STALE past implied_deadline → overdue:false ─
+  // 999.810 bug ("future tasks shown as overdue"): the scheduler rolls an instance
+  // forward to a future day but leaves implied_deadline (a derived recurrence-period
+  // artifact) in the past. A strictly-future placement must supersede it — a task
+  // scheduled for tomorrow cannot be overdue today, and it has no explicit deadline.
+  // Placement = 2026-06-23 (NOW_INFO today = 2026-06-21), implied_deadline = past.
+  it('plain task placed on a FUTURE date + past implied_deadline + no deadline → overdue:false', function() {
+    var row = baseRow({
+      placement_mode: 'anytime',
+      scheduled_at: '2026-06-23 14:00:00', // 2026-06-23 10:00 EDT (future day)
+      date: '2026-06-23',
+      deadline: null,
+      implied_deadline: '2026-06-20', // stale past artifact
+      overdue: 0
+    });
+    var task = rowToTask(row, TZ, null, null, NOW_INFO);
+    expect(task.overdue).toBe(false);
+  });
+
+  it('recurring instance placed on a FUTURE date + past implied_deadline → overdue:false', function() {
+    var row = baseRow({
+      task_type: 'recurring_instance',
+      placement_mode: 'time_window',
+      scheduled_at: '2026-06-23 22:30:00', // future day
+      date: '2026-06-23',
+      deadline: null,
+      implied_deadline: '2026-06-19', // stale past artifact
+      time_flex: null,
+      overdue: 0
+    });
+    var task = rowToTask(row, TZ, null, null, NOW_INFO);
+    expect(task.overdue).toBe(false);
+  });
+
+  // Regression guard: placed-TODAY with a past implied_deadline STAYS overdue
+  // (a catch-up slot today after the period boundary passed — locked case #1).
+  it('placed TODAY + past implied_deadline → overdue:true (unchanged)', function() {
+    var row = baseRow({
+      placement_mode: 'anytime',
+      scheduled_at: '2026-06-21 14:00:00', // today
+      date: '2026-06-21',
+      deadline: null,
+      implied_deadline: '2026-06-20',
+      overdue: 0
+    });
+    var task = rowToTask(row, TZ, null, null, NOW_INFO);
+    expect(task.overdue).toBe(true);
+  });
+
   // ─── 12. No nowInfo supplied: default must not throw ────────────────────────
   it('rowToTask without nowInfo param does not throw and returns a boolean overdue', function() {
     var row = baseRow({ deadline: '2026-01-01', overdue: 0 });

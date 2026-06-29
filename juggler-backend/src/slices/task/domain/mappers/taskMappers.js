@@ -382,15 +382,35 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
         row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance);
       if (!hasHardCommitment) return false;
       // Determine the effective due date key and time (minutes).
-      // For FIXED: use the derived task.date (same as the task object being built above).
+      // For FIXED: the task's scheduled date IS its due — use it directly.
+      //   implied_deadline is a scheduler artifact for non-FIXED tasks; using it
+      //   here causes a cross-day comparison when the scheduler sets it to a
+      //   different day than the actual scheduled_at (ponytail: 999.810 bug).
       // For deadline: prefer deadline; then implied_deadline; then task date.
-      var dueKey = dateColumnToISO(row.deadline) || impliedDeadlineISO;
-      // For FIXED with no deadline/implied_deadline: the task's effective date IS its due
-      if (!dueKey && (row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance)) {
-        // `date` was derived above from scheduled_at — recompute from row directly
+      var dueKey;
+      if (row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance) {
         if (row.scheduled_at) {
           var _local = utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE); // RC2: null tz → R50.8 default
           dueKey = _local ? _local.date : null;
+        }
+      }
+      if (!dueKey) {
+        // Explicit, user-set deadline is authoritative.
+        dueKey = dateColumnToISO(row.deadline);
+      }
+      if (!dueKey && impliedDeadlineISO) {
+        // implied_deadline is a DERIVED scheduler artifact (recurrence-period
+        // boundary), NOT a user commitment. When the scheduler rolls an instance
+        // forward it can leave implied_deadline in the PAST while the task is now
+        // placed on a FUTURE day — using it raw then marks a future-dated task
+        // overdue (999.810: "future tasks shown as overdue"). A strictly-future
+        // placement supersedes the stale artifact; placed-today / placed-past /
+        // unplaced keep the original behavior (R50.6 case #1).
+        var _implLocal = row.scheduled_at ? utcToLocal(row.scheduled_at, timezone || _DEFAULT_TIMEZONE) : null;
+        var _placedDateKey = _implLocal ? _implLocal.date
+          : (row.date && row.date !== 'TBD' ? row.date : null);
+        if (!_placedDateKey || _placedDateKey <= _now.todayKey) {
+          dueKey = impliedDeadlineISO;
         }
       }
       if (!dueKey || dueKey === 'TBD') return false;
