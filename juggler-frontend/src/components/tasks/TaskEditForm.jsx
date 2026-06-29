@@ -7,9 +7,9 @@
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { CAL_PROVIDER_NAMES } from '../../state/constants';
-import { toTime24, toDateISO, fromDateISO, formatDateKey, parseDate } from '../../scheduler/dateHelpers';
+import { toTime24, toDateISO, formatDateKey, fromTime24 } from '../../scheduler/dateHelpers';
 import { isAnchorDependentRecur } from '../../scheduler/expandRecurring';
-import { getTheme, BRAND } from '../../theme/colors';
+import { getTheme } from '../../theme/colors';
 import { convertTimeForDisplay } from '../../utils/timezone';
 import { addMinutesTo24h } from './sections/WhenSection';
 import CollapsibleSection from './CollapsibleSection';

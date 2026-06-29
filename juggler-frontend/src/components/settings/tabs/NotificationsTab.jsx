@@ -2,7 +2,7 @@
  * NotificationsTab — extracted from SettingsPanel (999.965).
  */
 import React, { useState, useEffect } from 'react';
-import { isPushSupported, getSubscriptionState, subscribeToPush, unsubscribeFromPush } from '../../services/pushNotifications';
+import { isPushSupported, getSubscriptionState, subscribeToPush, unsubscribeFromPush } from '../../../services/pushNotifications';
 
 export default function NotificationsTab({ theme, showToast }) {
   var [supported] = useState(function() { return isPushSupported(); });

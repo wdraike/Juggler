@@ -3,7 +3,7 @@
  * Stub — full implementation was in SettingsPanel.jsx.
  */
 import React from 'react';
-import { TZ_OVERRIDE_KEY } from '../../services/apiClient';
+import { TZ_OVERRIDE_KEY } from '../../../services/apiClient';
 import HelpIcon from '../HelpIcon';
 
 var commonTimezones = [
