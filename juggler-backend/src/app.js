@@ -290,11 +290,51 @@ app.get('/api/now', authenticateJWT, (req, res) => {
 });
 
 // SSE endpoint — real-time event stream for connected frontends
-// EventSource doesn't support custom headers, so accept token as query param
+// EventSource doesn't support custom headers, so accept token as query param.
+// The token can be either a JWT (existing) or a short-lived opaque token
+// obtained from POST /api/events/token (999.946).
+const crypto = require('crypto');
 const sseEmitter = require('./lib/sse-emitter');
+
+// In-memory store for short-lived opaque SSE tokens (999.946).
+// Map<token, { userId, expiresAt }> — tokens are consumed on first use.
+var sseTokens = new Map();
+
+// Periodic cleanup of expired tokens (every 30s).
+setInterval(function() {
+  var now = Date.now();
+  sseTokens.forEach(function(val, key) {
+    if (val.expiresAt <= now) sseTokens.delete(key);
+  });
+}, 30000);
+
+/**
+ * POST /api/events/token — issue a short-lived (60s) one-time opaque token
+ * for SSE connections. Requires JWT auth. The returned token can be passed
+ * as ?token=<opaque> to GET /api/events, avoiding JWT exposure in URLs.
+ */
+app.post('/api/events/token', authenticateJWT, function(req, res) {
+  var token = crypto.randomUUID();
+  sseTokens.set(token, {
+    userId: req.user.id,
+    expiresAt: Date.now() + 60000 // 60 seconds
+  });
+  res.json({ token: token });
+});
+
 app.get('/api/events', (req, res, next) => {
-  // Accept token from query param (EventSource limitation) or Authorization header
+  // Accept token from query param (EventSource limitation) or Authorization header.
+  // If the token is an opaque SSE token (not a JWT), resolve it to a userId and
+  // set req.user so the connection proceeds without JWT verification.
   if (req.query.token && !req.headers.authorization) {
+    var sseToken = sseTokens.get(req.query.token);
+    if (sseToken && sseToken.expiresAt > Date.now()) {
+      // Opaque token hit — consume it (one-time use) and set req.user
+      sseTokens.delete(req.query.token);
+      req.user = { id: sseToken.userId };
+      return next();
+    }
+    // Not an opaque token — treat as JWT (existing behavior)
     req.headers.authorization = 'Bearer ' + req.query.token;
   }
   next();
