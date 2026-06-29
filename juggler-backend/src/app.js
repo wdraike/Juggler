@@ -207,7 +207,13 @@ const writeRateLimiter = rateLimit({
 
 // OAuth proxy + discovery routes (auth-service handles Google SSO, etc.)
 // Dev mode: auto-approve OAuth for MCP client testing
+// 999.951: startup guard — refuse to start if NODE_ENV=development is set on a
+// production-like target (DB_PORT=3307 or CLOUD_SQL_CONNECTION_NAME).
 if (process.env.NODE_ENV === 'development') {
+  if (process.env.DB_PORT === '3307' || process.env.CLOUD_SQL_CONNECTION_NAME) {
+    logger.error('[startup] FATAL: NODE_ENV=development with production DB target (DB_PORT=3307 or CLOUD_SQL_CONNECTION_NAME). OAuth dev auto-approval would bypass auth in production. Set NODE_ENV=production or use a non-production DB target.');
+    process.exit(1);
+  }
   app.get('/oauth/authorize', (req, res) => {
     const redirectUri = req.query.redirect_uri;
     const state = req.query.state;
