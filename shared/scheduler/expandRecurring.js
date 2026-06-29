@@ -61,6 +61,11 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
   // Status per (sourceId, date) — lets the 'backfill' fill policy distinguish
   // skipped instances (replaceable) from done/cancel/pending (fulfilled).
   var instanceStatusBySourceDate = {};
+  // R5 rolling single-active: which masters already have a NON-TERMINAL (active)
+  // instance. A rolling master with an active instance must not project the next
+  // one — that happens only when the active completes (anchor advances).
+  var ROLLING_TERMINAL = { done: 1, cancelled: 1, cancel: 1, skip: 1, skipped: 1, missed: 1, replaced: 1 };
+  var existingActiveBySource = {};
   allTasks.forEach(function(t) {
     // Skip recurring templates — they're sources, not placed tasks.
     // Their date is the anchor, not an instance that should block generation.
@@ -69,6 +74,9 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
     if (t.sourceId && t.date) {
       existingBySourceDate[t.sourceId + '|' + t.date] = true;
       instanceStatusBySourceDate[t.sourceId + '|' + t.date] = t.status || '';
+    }
+    if (t.taskType === 'recurring_instance' && t.sourceId && !ROLLING_TERMINAL[t.status || '']) {
+      existingActiveBySource[t.sourceId] = true;
     }
   });
 
@@ -415,6 +423,10 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
   sources.forEach(function(src) {
     var r = src.recur;
     if (!r || r.type !== 'rolling') return;
+    // R5: only ONE active rolling instance at a time. If the master already has a
+    // non-terminal instance, do NOT project the next — it is generated only when the
+    // active one completes (which advances rolling_anchor → this guard clears).
+    if (existingActiveBySource[src.id]) return;
     var rollingInterval;
     if (r.intervalDays != null && Number(r.intervalDays) >= 1) {
       rollingInterval = Math.max(1, Number(r.intervalDays));
@@ -458,6 +470,10 @@ function expandRecurring(allTasks, startDate, endDate, opts) {
         placement_mode: src.placement_mode,
         occurrence_ordinal: nextOrdBySource[src.id]
       });
+      // R5: emit ONLY the single active instance per run. The next is projected on a
+      // later run after this one completes (anchor advances, guard above clears).
+      existingActiveBySource[src.id] = true;
+      break;
     }
   });
 

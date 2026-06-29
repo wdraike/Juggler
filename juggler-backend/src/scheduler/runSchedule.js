@@ -318,11 +318,33 @@ function isFlexibleTpcRecur(recur) {
   return r.timesPerCycle < selectedDays;
 }
 
+// Rolling interval in days — mirrors expandRecurring's rolling section
+// (intervalDays, else every×unit, else 7). A rolling instance is NOT day-locked
+// (dayReq='any'); its window IS the interval, so its period boundary = occ + interval.
+function rollingIntervalDays(recur) {
+  var r = recur;
+  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_e) { return 7; } }
+  if (!r) return 7;
+  if (r.intervalDays != null && Number(r.intervalDays) >= 1) return Math.max(1, Number(r.intervalDays));
+  if (r.every != null && r.unit) {
+    var everyN = Math.max(1, parseInt(r.every, 10) || 1);
+    if (r.unit === 'weeks') return everyN * 7;
+    if (r.unit === 'months') return everyN * 30;
+    return everyN; // 'days'
+  }
+  return 7;
+}
+
 function recurringPeriodEndKey(recur, occurrenceDateKey) {
   var occ = parseDate(occurrenceDateKey);
   if (!occ) return null;
   var cycleDays = 1; // day-locked default: deadline = end of the occurrence day
-  if (isFlexibleTpcRecur(recur)) { // flexible-TPC → roams within the cycle
+  var r = recur;
+  if (typeof r === 'string') { try { r = JSON.parse(r); } catch (_e) { r = null; } }
+  if (r && r.type === 'rolling') {
+    // Rolling: window = the recurrence interval (R5). Not day-locked.
+    cycleDays = rollingIntervalDays(r);
+  } else if (isFlexibleTpcRecur(recur)) { // flexible-TPC → roams within the cycle
     cycleDays = recurringCycleDays(recur) || 1;
   }
   var end = new Date(occ.getTime());

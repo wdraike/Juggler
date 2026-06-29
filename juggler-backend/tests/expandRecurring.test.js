@@ -645,7 +645,12 @@ describe('expandRecurring', () => {
       };
     }
 
-    test('7-day interval generates instances at anchor+7, +14, +21', () => {
+    // R5 (David 2026-06-29): a rolling task has only ONE active instance at a time —
+    // "only scheduled at completion of the active instance; when completed, the next is
+    // generated." So expandRecurring emits ONLY the next instance (anchor+interval), NOT
+    // the whole horizon. Subsequent occurrences appear on later runs after completion
+    // advances rolling_anchor. (Was: anchor+7,+14,+21 all at once — pre-R5 behavior.)
+    test('7-day interval emits ONLY the next active instance (anchor+7)', () => {
       const src = makeRolling(7, null); // falls back to recurStart
       const result = expandRecurring(
         [src],
@@ -653,12 +658,12 @@ describe('expandRecurring', () => {
         new Date(2026, 5, 1)   // 6/1
       );
       const dates = result.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
-      expect(dates).toContain('2026-05-25');
-      expect(dates).toContain('2026-06-01');
+      expect(dates).toEqual(['2026-05-25']); // single active instance only
+      expect(dates).not.toContain('2026-06-01'); // next one waits for completion
       expect(dates).not.toContain('2026-05-18'); // anchor itself not emitted
     });
 
-    test('3.5-day interval: rounds per-N correctly (4, 7, 11, 14)', () => {
+    test('3.5-day interval: emits ONLY the next active instance (anchor+4, rounded)', () => {
       const src = makeRolling(3.5, null);
       const result = expandRecurring(
         [src],
@@ -666,10 +671,7 @@ describe('expandRecurring', () => {
         new Date(2026, 5, 1)
       );
       const dates = result.filter(r => r.sourceId === 'r1').map(r => r.date || r._candidateDate);
-      expect(dates).toContain('2026-05-22'); // +4
-      expect(dates).toContain('2026-05-25'); // +7
-      expect(dates).toContain('2026-05-29'); // +11
-      expect(dates).toContain('2026-06-01'); // +14
+      expect(dates).toEqual(['2026-05-22']); // round(3.5) = +4; single active instance only
     });
 
     test('rollingAnchor overrides recurStart', () => {

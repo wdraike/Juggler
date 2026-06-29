@@ -79,7 +79,10 @@ var INSTANCE_UPDATE_FIELDS = [
   'completed_at',
   // DB-single-source (W1): scheduler persists the per-instance unplaced reason
   // onto the row so the Unplaced view reads it from the DB (not the placements cache).
-  'unplaced_reason', 'unplaced_detail'
+  'unplaced_reason', 'unplaced_detail',
+  // instance-owns-window: per-instance start floor + cycle-boundary due must update
+  // on re-runs (a later scheduler pass recomputes the window), not just on insert.
+  'earliest_start', 'implied_deadline'
 ];
 
 function isTemplate(row) {
@@ -129,12 +132,14 @@ function pickInstance(row, id, masterId, occOrdinal) {
   if (row.day !== undefined) out.day = row.day;
   if (row.time !== undefined) out.time = row.time;
   if (row.split_group !== undefined) out.split_group = row.split_group;
-  // Leg A (instance-owns-window): persist the SOFT earliest-start floor when the
-  // caller supplies it. Additive — nothing reads this column yet (scheduler wiring
-  // is Leg C). NOTE: implied_deadline is ALSO set by the scheduler's prefab insert
-  // but is NOT in this allowlist — it is silently dropped here (pre-existing; filed
-  // for the materialization/overdue legs that depend on it).
+  // instance-owns-window: persist the SOFT earliest-start floor AND the HARD
+  // implied_deadline (cycle boundary) when the caller supplies them. Both columns
+  // are materialized by the scheduler's expand/reconcile insert pass (runSchedule W3)
+  // — implied_deadline was previously dropped here (the missing allowlist entry that
+  // left standard recurring instances with NULL due); the instance-date-rework leg
+  // adds it so overdue/forward-roll read a real cycle boundary off the row.
   if (row.earliest_start !== undefined) out.earliest_start = row.earliest_start;
+  if (row.implied_deadline !== undefined) out.implied_deadline = row.implied_deadline;
   if (row.created_at !== undefined) out.created_at = row.created_at;
   if (row.updated_at !== undefined) out.updated_at = row.updated_at;
   return out;
