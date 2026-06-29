@@ -153,13 +153,16 @@ app.use(morgan(':method :url-redacted :status :response-time ms - :res[content-l
 }));
 app.set('redactTokenInUrl', redactTokenInUrl);
 
-// Sanitize error responses in production
+// Sanitize error responses in production (999.947)
+// Strips both body.message and body.error so controllers that use
+// res.status(500).json({ error: ... }) also get sanitized.
 if (process.env.NODE_ENV === 'production') {
   app.use((req, res, next) => {
     const originalJson = res.json.bind(res);
     res.json = function(body) {
-      if (res.statusCode >= 500 && body && body.message) {
-        body.message = 'An error occurred processing your request';
+      if (res.statusCode >= 500 && body) {
+        if (body.message) body.message = 'An error occurred processing your request';
+        if (body.error) body.error = 'An error occurred processing your request';
       }
       return originalJson(body);
     };

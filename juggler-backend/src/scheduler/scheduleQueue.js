@@ -99,7 +99,6 @@ var POLL_ACTIVE = false;
 var _heartbeats = new Set();
 
 // ── State ──
-var _dirty = new Set();               // users with pending changes (write-side hint)
 var _lastEnqueueTime = new Map();       // user_id → timestamp
 var _running = new Map();             // user_id → promise (single-flight within instance)
 var _lastPollTime = 0;
