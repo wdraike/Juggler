@@ -1,6 +1,8 @@
 /**
  * Per-user lock backed by the database.
  *
+ * Implements LockPort (lib/ports/LockPort.js).
+ *
  * Gates all scheduling-relevant writers: the scheduler, cal-sync,
  * and (via task-write-queue) user/MCP task mutations. Only one of
  * these can modify scheduling-relevant task fields at a time.
