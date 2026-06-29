@@ -290,6 +290,25 @@ async function recurCleanup(ctx) {
       || row.split !== undefined || row.split_min !== undefined;
     if (needsCleanup) {
       if (row.recurring === 0) {
+        // 999.967(a): Clean cal_sync_ledger for ALL instances of this template
+        // (not just future pending ones handled by resetRecurringInstances).
+        var _allToggleIds = await trx('task_instances')
+          .where({ master_id: id, user_id: userId })
+          .pluck('id');
+        if (_allToggleIds.length > 0) {
+          await trx('cal_sync_ledger')
+            .where('user_id', userId)
+            .whereIn('task_id', _allToggleIds)
+            .where('status', 'active')
+            .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
+            .catch(function (err) { logger.error('[silent-catch]', err.message); });
+        }
+
+        // 999.967(b): Archive done instances before deletion so they are preserved.
+        await trx('task_instances')
+          .where({ master_id: id, user_id: userId, status: 'done' })
+          .update({ status: 'archived', updated_at: trx.fn.now() });
+
         await twrite.resetRecurringInstances(trx, userId, id, '[RECUR] toggle-off: recurring=false');
         await trx('task_instances')
           .insert({
@@ -967,6 +986,23 @@ async function batchUpdateTxn(ctx) {
       }
       await twrite.updateTaskById(trx, id, row, userId);
       if (taskType === 'recurring_template' && (row.recur !== undefined || row.recurring === 0)) {
+        // 999.967(a/b): Same ledger cleanup + archive-done fix as the single-task toggle-off path.
+        if (row.recurring === 0) {
+          var _batchToggleIds = await trx('task_instances')
+            .where({ master_id: id, user_id: userId })
+            .pluck('id');
+          if (_batchToggleIds.length > 0) {
+            await trx('cal_sync_ledger')
+              .where('user_id', userId)
+              .whereIn('task_id', _batchToggleIds)
+              .where('status', 'active')
+              .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
+              .catch(function (err) { logger.error('[silent-catch]', err.message); });
+          }
+          await trx('task_instances')
+            .where({ master_id: id, user_id: userId, status: 'done' })
+            .update({ status: 'archived', updated_at: trx.fn.now() });
+        }
         await twrite.resetRecurringInstances(trx, userId, id, '[BATCH] cycle reset on template');
       }
     }
