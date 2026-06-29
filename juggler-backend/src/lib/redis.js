@@ -1,6 +1,8 @@
 /**
  * Redis client for StriveRS
  *
+ * Implements RedisPort (lib/ports/RedisPort.js).
+ *
  * Connects to Redis for read caching. Fails open — if Redis is unavailable,
  * all operations return null/false and the app falls through to MySQL.
  *
