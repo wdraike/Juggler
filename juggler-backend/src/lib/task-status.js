@@ -1,12 +1,8 @@
-const STATUS_OPTIONS = Object.freeze(['', 'done', 'cancel', 'skip', 'pause']);
-const TERMINAL_STATUSES = Object.freeze(['done', 'cancel', 'skip', 'pause']);
-
-function isTerminalStatus(s) {
-  return TERMINAL_STATUSES.indexOf(s) !== -1;
-}
-
-module.exports = {
-  STATUS_OPTIONS,
-  TERMINAL_STATUSES,
-  isTerminalStatus
-};
+/**
+ * Task status library — re-exports from shared/task-status.js
+ *
+ * The canonical source of truth lives in shared/task-status.js.
+ * This file is a back-compat re-export shim so existing importers
+ * (require('../lib/task-status')) continue to work without changes.
+ */
+module.exports = require('../../../shared/task-status');

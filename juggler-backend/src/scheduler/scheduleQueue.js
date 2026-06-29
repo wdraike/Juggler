@@ -432,33 +432,25 @@ async function releaseClaim(userId, instanceId) {
 async function pollOnce() {
   _lastPollTime = Date.now();
 
-  // Fast path: process dirty users first (local optimization)
-  var dirtyUsers = Array.from(_dirty).slice(0, MAX_DIRTY_USERS_PER_POLL);
-  for (var i = 0; i < dirtyUsers.length; i++) {
-    await processUser(dirtyUsers[i]);
-  }
-
-  // Safety sweep: also poll the DB for any unclaimed rows that might have
-  // been left behind if this instance crashed and restarted.
+  // DB-only poll: query for unclaimed rows that have been in the queue
+  // long enough to avoid racing the enqueue INSERT.
   try {
-    var stale = new Date(Date.now() - (CLAIM_TTL_SECONDS * 1000));
     var pending = await db('schedule_queue')
-      .whereNull('claimed_by')
-      .orWhere('claimed_at', '<', stale)
+      .whereNull('claimed_at')
+      .where('created_at', '<', db.raw('NOW() - INTERVAL 2 SECOND'))
       .orderBy('created_at', 'asc')
       .limit(MAX_DIRTY_USERS_PER_POLL)
       .select('user_id');
 
     for (var j = 0; j < pending.length; j++) {
-      var user = pending[j].user_id;
-      _dirty.add(user); // Mark dirty so we process it next poll
+      await processUser(pending[j].user_id);
     }
 
-    var schedPending = await db('schedule_queue').whereNull('claimed_by').orWhere('claimed_at', '<', stale).count('* as c');
+    var schedPending = await db('schedule_queue').whereNull('claimed_at').where('created_at', '<', db.raw('NOW() - INTERVAL 2 SECOND')).count('* as c');
     var writePending = await db('task_write_queue').count('* as c');
     var total = await db('tasks_v').distinct('user_id');
     if (pending.length > 0 || schedPending[0].c > 0) {
-      logger.info('[SCHED-QUEUE] startup scan: ' + total.length + ' user(s) with pending entries (schedule=' + schedPending[0].c + ' writes=' + writePending[0].c + ')');
+      logger.info('[SCHED-QUEUE] poll: ' + total.length + ' user(s) with pending entries (schedule=' + schedPending[0].c + ' writes=' + writePending[0].c + ')');
     }
   } catch (e) {
     logger.error('[SCHED-QUEUE] DB poll failed', { error: e });
@@ -513,7 +505,6 @@ function _resetForTests() {
   _heartbeats.forEach(function (hb) { try { clearInterval(hb); } catch (e) { /* no-op */ } });
   _heartbeats.clear();
   _queueBackend = undefined; // drop any stale cross-suite cached backend
-  _dirty.clear();
   _lastEnqueueTime.clear();
   _running.clear();
   _rateWindows.clear();
@@ -577,7 +568,6 @@ module.exports = {
   getPollLoopState,
   getLastError,
   // Internal exports for tests
-  _dirty,
   _lastEnqueueTime,
   _running,
   // Test seam: atomic-claim helpers (extracted for scheduleQueueClaiming.test.js)
