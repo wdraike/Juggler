@@ -80,7 +80,7 @@ var LOCK_RETRY_MS  = 2000;   // wait between lock acquisition retries
 // scheduler RUNS a single user can trigger over time — a user mutating tasks
 // every few seconds could drive unbounded runs. This is a per-user sliding
 // window: at most RATE_LIMIT_MAX enqueues per RATE_LIMIT_WINDOW_MS. In-memory
-// (matching the existing in-process _dirty / _lastEnqueueTime state); a clean
+// (matching the existing in-process _lastEnqueueTime state); a clean
 // fit because the DB row is per-user-deduplicated and the real cost being
 // bounded here is the local enqueue → poll → run cascade on THIS instance.
 var RATE_LIMIT_MAX        = 10;     // max enqueues per window per user
@@ -134,8 +134,7 @@ function getPollLoopState() {
   return {
     active: POLL_ACTIVE,
     lastPollTime: _lastPollTime,
-    runningCount: _running.size,
-    dirtyCount: _dirty.size
+    runningCount: _running.size
   };
 }
 
@@ -145,8 +144,7 @@ function getPollLoopState() {
  * Mark a user as needing a schedule run. Debounced: if called repeatedly
  * within DEBOUNCE_MS, only the last call matters.
  *
- * The DB row is the source of truth; the _dirty set is just an optimization
- * so we don't have to poll the DB for every local mutation.
+ * The DB row is the source of truth.
  */
 async function enqueueScheduleRun(userId, source, options) {
   // ── Per-user rate limit (999.591) ──
@@ -165,7 +163,6 @@ async function enqueueScheduleRun(userId, source, options) {
   }
 
   var now = _now();
-  _dirty.add(userId);
   _lastEnqueueTime.set(userId, now);
 
   // Insert or update queue row (the actual work queue). An immediate run is
@@ -236,7 +233,6 @@ async function enqueueScheduleRun(userId, source, options) {
  * Called by the scheduler when it finishes a run (success or failure).
  */
 async function dequeueScheduleRun(userId) {
-  _dirty.delete(userId);
   _lastEnqueueTime.delete(userId);
   _running.delete(userId);
 

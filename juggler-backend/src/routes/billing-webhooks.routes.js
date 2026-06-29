@@ -9,6 +9,7 @@ const logger = createLogger('billing-webhooks.routes');
 // Signs req.rawBody (the original wire bytes captured by express.raw() in app.js).
 // If rawBody is absent, the middleware in app.js failed — reject immediately.
 // This matches what payment-service signs on the sending side.
+// 999.949: confirmed — HMAC verification uses req.rawBody (raw buffer), not JSON.stringify(req.body).
 const FRESHNESS_WINDOW_MS = 5 * 60 * 1000;
 function verifySignature(req, res, next) {
   const sig = req.headers['x-billing-signature'];
