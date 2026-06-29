@@ -178,16 +178,15 @@ if (!process.env.REDIS_URL) {
 
 // Broad limiters: apiLimiter uses Redis for shared counters across Cloud Run
 // instances (999.626). The strict AI limiter also uses Redis. Other limiters
-// (MCP, OAuth callback, billing webhooks, health) stay per-instance by design
-// (Category 4f — shared counters would synchronize on every request with no
-// meaningful protection gain for those low-traffic paths).
+// (MCP, OAuth callback, billing webhooks, health) now also use Redis via
+// maybeRedisStore for multi-instance safety (999.953).
 const LIMITER_DEFAULTS = { windowMs: 60 * 1000, standardHeaders: true, legacyHeaders: false };
 const apiLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 1000, store: maybeRedisStore('jugrl-api:') });
 const aiLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 20, store: maybeRedisStore('jugrl-ai:') });
-const mcpLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 300 });
-const oauthCallbackLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 20, message: { error: 'Too many requests, please wait.' } });
-const billingWebhookLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 120, message: { error: 'Too many webhook calls.' } });
-const healthLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 300 });
+const mcpLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 300, store: maybeRedisStore('jugrl-mcp:') });
+const oauthCallbackLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 20, message: { error: 'Too many requests, please wait.' }, store: maybeRedisStore('jugrl-oauth:') });
+const billingWebhookLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 120, message: { error: 'Too many webhook calls.' }, store: maybeRedisStore('jugrl-billing:') });
+const healthLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 300, store: maybeRedisStore('jugrl-health:') });
 // Dedicated brute-force limiter for the service-key feature endpoints
 // (/api/feature-catalog, /api/feature-events). The global apiLimiter (1000/min)
 // is too loose to protect the service key on these paths (999.293 finding A2).
