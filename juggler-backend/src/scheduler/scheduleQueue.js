@@ -446,10 +446,26 @@ async function pollOnce() {
       await processUser(pending[j].user_id);
     }
 
-    var schedPending = await db('schedule_queue').whereNull('claimed_at').where('created_at', '<', db.raw('NOW() - INTERVAL 2 SECOND')).count('* as c');
-    var writePending = await db('task_write_queue').count('* as c');
-    var total = await db('tasks_v').distinct('user_id');
-    if (pending.length > 0 || schedPending[0].c > 0) {
+    // Idle-path short-circuit (999.955): these three diagnostic queries feed
+    // ONLY the logger.info() below, whose condition is
+    //   pending.length > 0 || schedPending[0].c > 0.
+    // `schedPending` uses the IDENTICAL WHERE clause as the primary `pending`
+    // SELECT above (whereNull('claimed_at') AND created_at < NOW()-2s); `pending`
+    // merely adds orderBy/limit/select. So when pending.length === 0,
+    // schedPending[0].c is necessarily 0 too, and the log condition reduces to
+    // pending.length > 0. Gating on that lets the idle tick (the dominant case on
+    // every POLL_MS tick of every Cloud Run instance) issue ZERO extra queries —
+    // notably skipping the expensive full `tasks_v` DISTINCT scan — while the
+    // SAME log fires with the SAME data whenever work actually exists.
+    // Scheduling behavior is unchanged (processUser already ran above). The only
+    // edge: NOW() is re-evaluated later in the schedPending COUNT, so a row aging
+    // past the 2s threshold BETWEEN the two queries could have logged on the old
+    // code while pending was still empty — a single diagnostic-log line, no
+    // scheduling/data effect; that row is picked up on the next poll tick.
+    if (pending.length > 0) {
+      var schedPending = await db('schedule_queue').whereNull('claimed_at').where('created_at', '<', db.raw('NOW() - INTERVAL 2 SECOND')).count('* as c');
+      var writePending = await db('task_write_queue').count('* as c');
+      var total = await db('tasks_v').distinct('user_id');
       logger.info('[SCHED-QUEUE] poll: ' + total.length + ' user(s) with pending entries (schedule=' + schedPending[0].c + ' writes=' + writePending[0].c + ')');
     }
   } catch (e) {
@@ -564,6 +580,9 @@ module.exports = {
   runScheduleForPush,
   startPollLoop,
   stopPollLoop,
+  // Test seam (999.955): the poll tick, so a unit can assert the idle-path
+  // short-circuit issues zero diagnostic queries when the queue is empty.
+  pollOnce,
   _resetForTests,
   getPollLoopState,
   getLastError,
