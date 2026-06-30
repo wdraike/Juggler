@@ -7,7 +7,8 @@
  * "Today" is 2026-06-21, nowMins=600 (10:00 AM).
  *
  * Covers all wrong-for-naive cases (SPEC.md binding contract):
- *   1. Past materialized implied_deadline + row.overdue=0 → overdue:true
+ *   1. Past materialized implied_deadline + row.overdue=0 (non-recurring) → overdue:false
+ *      (R-OD2, David 2026-06-30: implied_deadline is overdue-signal only for recurring_instance)
  *   2. Past hard deadline + row.overdue=0           → overdue:true
  *   3. Stored flag row.overdue=1, no other due      → overdue:true (short-circuit)
  *   4. Floating / no deadline / no implied_deadline → overdue:false
@@ -101,11 +102,17 @@ function baseRow(overrides) {
 
 describe('rowToTask — W4 computed-on-read overdue (R50.6)', function() {
 
-  // ─── 1. Past materialized implied_deadline + row.overdue=0 → overdue:true ───
-  it('past implied_deadline + row.overdue=0 → overdue:true', function() {
+  // ─── 1. Past materialized implied_deadline + row.overdue=0 → overdue:false ──
+  // R-OD2 ruling (leg juggy3, David 2026-06-30): implied_deadline confers overdue
+  // only for recurring_instance; a non-recurring task (task_type='task') is NEVER
+  // overdue from a derived implied_deadline. Supersedes the original R50.6 case-1
+  // for non-recurring tasks.
+  // (baseRow default: task_type='task' — non-recurring, no deadline)
+  it('past implied_deadline + row.overdue=0 (non-recurring task) → overdue:false (R-OD2)', function() {
     var row = baseRow({ implied_deadline: '2026-06-20', overdue: 0 });
     var task = rowToTask(row, TZ, null, null, NOW_INFO);
-    expect(task.overdue).toBe(true);
+    // R-OD2: _isRecurringInstance=false → hasHardCommitment=false → returns false.
+    expect(task.overdue).toBe(false);
   });
 
   // ─── 2. Past hard deadline + row.overdue=0 → overdue:true ──────────────────
@@ -317,9 +324,11 @@ describe('rowToTask — W4 computed-on-read overdue (R50.6)', function() {
     expect(task.overdue).toBe(false);
   });
 
-  // Regression guard: placed-TODAY with a past implied_deadline STAYS overdue
-  // (a catch-up slot today after the period boundary passed — locked case #1).
-  it('placed TODAY + past implied_deadline → overdue:true (unchanged)', function() {
+  // R-OD2 ruling (leg juggy3, David 2026-06-30): implied_deadline confers overdue
+  // only for recurring_instance; a non-recurring task (task_type='task') is NEVER
+  // overdue from a derived implied_deadline. Supersedes the original R50.6 case-1
+  // for non-recurring tasks. The catch-up contract (R50.6) is KEPT for recurring.
+  it('placed TODAY (non-recurring task) + past implied_deadline → overdue:false (R-OD2)', function() {
     var row = baseRow({
       placement_mode: 'anytime',
       scheduled_at: '2026-06-21 14:00:00', // today
@@ -327,8 +336,31 @@ describe('rowToTask — W4 computed-on-read overdue (R50.6)', function() {
       deadline: null,
       implied_deadline: '2026-06-20',
       overdue: 0
+      // task_type: 'task' (default) — non-recurring
     });
     var task = rowToTask(row, TZ, null, null, NOW_INFO);
+    // R-OD2: _isRecurringInstance=false → hasHardCommitment=false → returns false.
+    expect(task.overdue).toBe(false);
+  });
+
+  // R-OD3 ruling (leg juggy3, David 2026-06-30, "Keep overdue — revert Exercise fix"):
+  // a RECURRING instance placed today with a past implied_deadline IS overdue.
+  // R50.6 catch-up contract KEPT. Pins the recurring half of the ruling.
+  it('placed TODAY (recurring_instance) + past implied_deadline → overdue:true (R50.6 catch-up; R-OD3 ruling)', function() {
+    var row = baseRow({
+      task_type: 'recurring_instance',
+      recurring: 1,
+      recur: JSON.stringify({ type: 'weekly', timesPerCycle: 4 }),
+      placement_mode: 'anytime',
+      scheduled_at: '2026-06-21 14:00:00', // today
+      date: '2026-06-21',
+      deadline: null,
+      implied_deadline: '2026-06-20', // past — genuine R50.6 overdue signal for recurring
+      overdue: 0
+    });
+    var task = rowToTask(row, TZ, null, null, NOW_INFO);
+    // R-OD3: _isRecurringInstance=true → hasHardCommitment=true; placed today (<=todayKey)
+    // → dueKey='2026-06-20' < todayKey='2026-06-21' → overdue:true (catch-up correct).
     expect(task.overdue).toBe(true);
   });
 

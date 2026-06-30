@@ -378,7 +378,12 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
       var _isDailyRecur = !!(_recurObj && _recurObj.type === 'daily');
       var isPlacedRecurringInstance = !!(row.task_type === 'recurring_instance' &&
         row.scheduled_at && row.placement_mode !== _PLACEMENT_MODES.FIXED && _isDailyRecur);
-      var hasHardCommitment = !!(row.deadline || impliedDeadlineISO ||
+      // R-OD2: implied_deadline is a derived scheduler artifact, not a user commitment.
+      // It should only confer hasHardCommitment for recurring instances (where it represents
+      // the recurrence-period/cycle boundary). A non-recurring flexible task with no user
+      // deadline must never be overdue from a derived implied_deadline alone.
+      var _isRecurringInstance = row.task_type === 'recurring_instance';
+      var hasHardCommitment = !!(row.deadline || (_isRecurringInstance && impliedDeadlineISO) ||
         row.placement_mode === _PLACEMENT_MODES.FIXED || isPlacedRecurringInstance);
       if (!hasHardCommitment) return false;
       // Determine the effective due date key and time (minutes).
@@ -410,6 +415,11 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
         var _placedDateKey = _implLocal ? _implLocal.date
           : (row.date && row.date !== 'TBD' ? row.date : null);
         if (!_placedDateKey || _placedDateKey <= _now.todayKey) {
+          // R-OD3 RULING (David 2026-06-30, "Keep overdue (revert Exercise fix)"): a
+          // recurring instance's past implied_deadline (recurrence-period boundary) IS a
+          // real overdue signal even when placed today — the R50.6 catch-up contract is
+          // KEPT, no today-placed stale-suppression. Non-recurring tasks never reach this
+          // branch (R-OD2 gates implied_deadline on recurring_instance above).
           dueKey = impliedDeadlineISO;
         }
       }

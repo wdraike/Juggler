@@ -906,3 +906,362 @@ describe('ERNIE-WARN-1 — co-occurrence: forwardRollDeadlineById survives recon
     expect(inst).not.toBeUndefined();
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// juggy3 / W1 / R-OD1 — AC1a-AC1d
+// Shape C: recur = {type:'rolling', intervalDays:60}, rolling_anchor=NULL
+//
+// Live prod repro (INTAKE-BRIEF, 2026-06-30):
+//   master t1776552724322p19k 'Get a Haircut', recur={type:rolling,intervalDays:60},
+//   rolling_anchor=NULL, no completed instance.
+//   Single active instance dated 2026-06-24 (= TODAY-6), stored overdue=1
+//   (set by a prior scheduler run's sweep), updated_at=2026-06-30 11:29
+//   (scheduler DID run today), but date NOT moved forward — still 2026-06-24.
+//   Cycle end = recurringPeriodEndKey(rolling/60, 2026-06-24) = 2026-08-23 > today
+//   → cycle NOT ended → forward-roll SHOULD have fired.
+//
+// Key difference from existing Shape A/B tests: rolling_anchor=NULL.
+// When rolling_anchor is set, the anchor-grid produces an out-of-cycle slot that
+// the IIFE correctly splices out and replaces with a synthetic TODAY occurrence;
+// the reconciler then moves the stranded row forward.
+// When rolling_anchor=NULL, this splice/inject/move path silently no-ops (candidate
+// drop site: IIFE stranded-search in-cycle gate OR reconcile.matchOccurrences not
+// pairing the synthetic occurrence — see W1-INVESTIGATION.md).
+//
+// PRIMARY RED assertion: AC1a — inst.date < TODAY (date not moved; expect ≥ today).
+// SECONDARY assertion: AC1a — inst.overdue=1 (the §8.6 sweep or prior run may set
+//   this even without a date move; verify it is preserved post-fix too).
+//
+// NEVER-MISSING invariant (R50): row must always exist.
+//
+// Cycle boundary: PAST_6 + 60 = TODAY+54 (= addDays(TODAY, 54)).
+// Cycle NOT ended → forward-roll must fire (AC1a).
+//
+// AC1c (cycle-ended) and AC1d (non-past-due regression) are covered by the
+// existing AC4/AC5 and ERNIE-WARN-1 describe blocks above respectively —
+// those cases are not anchor-dependent so no separate Shape C version is needed.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// today-6 = the exact live instance date for 'Get a Haircut' (2026-06-24 when today=2026-06-30)
+const PAST_6 = addDays(TODAY, -6);
+// Upper-bound for AC1b: cycle boundary = PAST_6 + 60 = TODAY+54.
+const NEXT_CYCLE_C = addDays(TODAY, 54);
+
+describe('juggy3/W1/R-OD1/AC1a — Shape C {rolling_anchor:null, intervalDays:60}: date must forward-roll (PRIMARY RED pre-fix)', () => {
+  let masterC, instanceC;
+
+  beforeAll(async () => {
+    await setupTestDB();
+    // rolling_anchor=NULL: replicate the live condition.
+    // Override the createRollingMaster helper's default rollingAnchor=ANCHOR (today-30)
+    // by passing {rollingAnchor: null} in the extra param — Object.assign overwrites it.
+    // recur_start=ANCHOR provides context for expandRecurring without imposing an anchor.
+    masterC = await createRollingMaster('Get a Haircut Repro', {
+      type: 'rolling', intervalDays: 60
+    }, { rollingAnchor: null }); // <-- NULL anchor: the critical live condition
+    // Single active instance at PAST_6 (= TODAY-6 = live 2026-06-24 condition).
+    // No completed instances (no prior done/skip/missed rows for this master).
+    // Seeded with overdue=0 to show the first-run behaviour cleanly; the primary
+    // RED assertion is the date not moving (not the overdue value).
+    instanceC = await createStrandedInstance(masterC.id, PAST_6);
+    await runScheduler([], {}, TODAY, 480, { persist: true });
+  });
+  afterAll(teardownTestDB);
+
+  /**
+   * AC1a PRIMARY: instance date must be moved forward to today or later.
+   *
+   * The 877d173 forward-roll IIFE fires (cycle-not-ended guard at runSchedule.js:927
+   * passes — PAST_6+60 = TODAY+54 > today). But when rolling_anchor=NULL the
+   * synthetic-occurrence injection's reconcile move is silently dropped (candidate
+   * drop: buildExistingGroups not pairing the synthetic occurrence to the stranded
+   * group, OR the in-cycle gate returning early without injecting).
+   * Date stays at PAST_6 with no move written.
+   *
+   * @expect FAIL pre-fix (PRIMARY RED) — inst.date = PAST_6 (< TODAY). Date not moved.
+   * @expect PASS post-fix — inst.date >= TODAY (forward-rolled to earliest in-cycle slot).
+   */
+  it('AC1a (juggy3 Shape C): instance date moves to TODAY or later after scheduler run (PRIMARY RED pre-fix)', async () => {
+    const inst = await db('task_instances').where({ id: instanceC.id }).first();
+    expect(inst).toBeTruthy(); // NEVER-MISSING
+    // PRIMARY RED assertion: date must be moved forward.
+    // Pre-fix: inst.date = PAST_6 (= TODAY-6); this assertion fails.
+    expect(inst.date >= TODAY).toBe(true);
+  });
+
+  /**
+   * AC1a SECONDARY: overdue=1 stored after scheduler run.
+   *
+   * Two possible pre-fix behaviours:
+   *   - If §8.6 sweep / pastAnchoredPreQueue path writes overdue=1 even without a
+   *     date move (live prod observation): this assertion is GREEN pre-fix.
+   *   - If no overdue path fires (fresh seed overdue=0): this assertion is RED pre-fix.
+   * Either way it MUST be true post-fix (R-FR1 sets it when the date moves).
+   *
+   * Not the primary RED indicator — see date assertion above.
+   */
+  it('AC1a (juggy3 Shape C): overdue=1 stored after scheduler run', async () => {
+    const inst = await db('task_instances').where({ id: instanceC.id }).first();
+    expect(inst).toBeTruthy(); // NEVER-MISSING
+    expect(inst.overdue).toBe(1);
+  });
+
+  /**
+   * AC1b: forward-rolled slot must not overshoot the current cycle.
+   * Cycle boundary = PAST_6 + 60 = TODAY+54. Post-fix: inst.date < TODAY+54.
+   * Pre-fix: inst.date = PAST_6 < TODAY+54 — passes pre-fix too (no overshoot).
+   * This is a post-fix correctness guard, not a RED indicator.
+   */
+  it('AC1b (juggy3 Shape C): forward-rolled slot stays within current cycle (< TODAY+54)', async () => {
+    const inst = await db('task_instances').where({ id: instanceC.id }).first();
+    expect(inst).toBeTruthy();
+    expect(inst.date < NEXT_CYCLE_C).toBe(true);
+  });
+
+  /**
+   * AC1a / NEVER-MISSING: single active row, same id preserved (no duplication).
+   * Pre-fix: row not moved, stays single → passes pre-fix (for wrong reason).
+   * Post-fix: must also be single row (move-in-place, not a new INSERT).
+   */
+  it('AC1a (juggy3 Shape C): exactly one active row for master, same id preserved', async () => {
+    const allInst = await db('task_instances').where({ master_id: masterC.id }).select();
+    const activeInst = allInst.filter(r => !isTerminal(r.status));
+    expect(activeInst).toHaveLength(1);
+    expect(activeInst[0].id).toBe(instanceC.id);
+  });
+
+  /**
+   * NEVER-MISSING: row must still exist after scheduler run (R50).
+   */
+  it('AC1a (juggy3 Shape C): instance row still exists after scheduler run (NEVER-MISSING)', async () => {
+    const inst = await db('task_instances').where({ id: instanceC.id }).first();
+    expect(inst).not.toBeNull();
+    expect(inst).not.toBeUndefined();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Shape C-2: Live-faithful replica of 'Get a Haircut'
+// time_blocks placement + location=['home'] + live recur_start alignment
+//
+// recur_start = PAST_6 - 60 (= TODAY-66) so that recur_start+60 = PAST_6
+// (the stranded instance date). This matches live: recur_start=2026-04-25,
+// 4/25+60=6/24=stranded date. expandRecurring emits NO occurrence in
+// [today..today+14] (the next arithmetic occurrence after 6/24 is 8/23 which
+// is outside the expand window → IIFE synthetic-injection path exercised).
+//
+// Two scenarios:
+//   C2-P (Placeable): DEFAULT time_blocks used (no user_config row seeded).
+//     DEFAULT weekday blocks include morning (360-480, loc=home) and evening
+//     (1020-1260, loc=home). At nowMins=480 morning is expired; evening has
+//     240 min free → dur=90 fits → task IS placed → date moves.
+//   C2-U (Unplaceable): All blocks set to loc='work'. Task with location=['home']
+//     finds NO matching block → placement fails → goes to result.unplaced →
+//     section 8 (path A: hasScheduledAt=true) writes only overdue=1, NOT date.
+//     Date stays at PAST_6. R50+NEVER-MISSING: row still exists but date wrong.
+//
+// This scenario isolates the W1 runSchedule.js bug:
+//   Reconcile mutates t.date=TODAY in memory (line 1093) but the persistence path
+//   for an UNPLACED recurring_instance with hasScheduledAt (section 8 path A,
+//   lines 1904-1918) only writes overdue=1 and returns — the reconcile-initiated
+//   date move is NEVER persisted when placement fails.
+//
+// The live condition ('Get a Haircut' ran at 11:29 AM with no available home slot)
+// is the unplaceable scenario: date stayed at 2026-06-24 with only overdue=1 written.
+//
+// PRIMARY RED: C2-U assert(inst.date >= TODAY) FAILS → date pinned at PAST_6.
+// C2-P is GREEN (date moves when placement succeeds — proves reconcile+placement works).
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Live-aligned recur_start: PAST_6 - 60d so that recur_start+60 = PAST_6 (stranded date).
+const RECUR_START_C2 = addDays(TODAY, -66);
+const NEXT_CYCLE_C2 = addDays(TODAY, 54); // PAST_6 + 60: same as NEXT_CYCLE_C
+
+// DEFAULT_WEEKDAY_BLOCKS from constants — used to build an all-work override.
+const { DEFAULT_WEEKDAY_BLOCKS: _DEF_WD } = require('../../src/scheduler/constants');
+
+/**
+ * Seed the live-faithful 'Get a Haircut' master:
+ * - time_blocks placement, location=['home'], when='morning,lunch,afternoon,evening'
+ * - dur=90, rolling/60d, rolling_anchor=NULL, recur_start=RECUR_START_C2
+ * - Matches live master: t1776552724322p19k
+ */
+async function createC2Master() {
+  return createTask({
+    text: 'Get a Haircut (C2 live-faithful)',
+    dur: 90,
+    pri: 'P2',
+    recurring: true,
+    recur: { type: 'rolling', intervalDays: 60 },
+    recurStart: RECUR_START_C2,
+    rollingAnchor: null,         // critical: live condition
+    placementMode: 'time_blocks',
+    when: 'morning,lunch,afternoon,evening',
+    location: JSON.stringify(['home']), // pre-stringify: Knex passes arrays via .toString() → 'home' not '["home"]'
+    dayReq: 'any',
+    tz: 'America/New_York',
+    split: 0
+  });
+}
+
+/**
+ * Seed the live-faithful stranded instance:
+ * - date=PAST_6, scheduled_at set, overdue=1 (matches live: scheduler already ran and
+ *   set overdue=1 but did NOT move the date — this is the pre-fix DB state).
+ */
+async function createC2Instance(masterId) {
+  return createTask({
+    master_id: masterId,
+    date: PAST_6,
+    scheduled_at: PAST_6 + 'T17:00:00Z', // placed (real UTC); hasScheduledAt=true in raw row
+    status: '',
+    overdue: 1  // already flagged overdue from a prior run (live condition)
+  });
+}
+
+// ── Shape C-2 Placeable (GREEN baseline) ─────────────────────────────────────
+// DEFAULT time_blocks: no user_config row → scheduler falls back to DEFAULT_TIME_BLOCKS
+// which has home in evening (1020-1260). At nowMins=480 evening is reachable.
+// date MOVES to TODAY. Proves reconcile+persist works when placement succeeds.
+
+describe('juggy3/W1/R-OD1/AC1a — Shape C-2 PLACEABLE {time_blocks,home-avail}: date must forward-roll', () => {
+  let masterC2P, instanceC2P;
+
+  beforeAll(async () => {
+    await setupTestDB();
+    // No user_config seeded → scheduler uses DEFAULT_TIME_BLOCKS (evening home block available).
+    masterC2P = await createC2Master();
+    instanceC2P = await createC2Instance(masterC2P.id);
+    await runScheduler([], {}, TODAY, 480, { persist: true });
+  });
+  afterAll(teardownTestDB);
+
+  /**
+   * C2-P: date moves to TODAY or later after scheduler run.
+   * Baseline (GREEN expected on current code): with a placeable home block,
+   * the reconcile+placement path writes the date change.
+   *
+   * @expect GREEN (confirms reconcile move works when placement succeeds).
+   */
+  it('juggy3 C2-P: date moves to TODAY or later (GREEN baseline — reconcile+placement path works)', async () => {
+    const inst = await db('task_instances').where({ id: instanceC2P.id }).first();
+    expect(inst).toBeTruthy(); // NEVER-MISSING
+    expect(inst.date >= TODAY).toBe(true);
+  });
+
+  it('juggy3 C2-P: overdue=1 preserved after scheduler run', async () => {
+    const inst = await db('task_instances').where({ id: instanceC2P.id }).first();
+    expect(inst).toBeTruthy();
+    expect(inst.overdue).toBe(1);
+  });
+
+  it('juggy3 C2-P: date stays within cycle (<= NEXT_CYCLE_C2)', async () => {
+    const inst = await db('task_instances').where({ id: instanceC2P.id }).first();
+    expect(inst).toBeTruthy();
+    expect(inst.date < NEXT_CYCLE_C2).toBe(true);
+  });
+});
+
+// ── Shape C-2 Unplaceable (PRIMARY RED) ──────────────────────────────────────
+// All time_blocks set to loc='work'. Task with location=['home'] finds no match.
+// Placement fails → result.unplaced → section 8 path A (hasScheduledAt=true):
+// writes only overdue=1, does NOT write date. Date stays at PAST_6.
+// This is the live bug: scheduler runs, sets overdue=1, date NOT moved forward.
+
+describe('juggy3/W1/R-OD1/AC1a — Shape C-2 UNPLACEABLE {time_blocks,no-home-block}: date must forward-roll (PRIMARY RED pre-fix)', () => {
+  let masterC2U, instanceC2U;
+
+  beforeAll(async () => {
+    await setupTestDB();
+    // Override time_blocks: all blocks loc='work' → task with location=['home'] cannot be placed.
+    // Uses snake_case config_key 'time_blocks' matching what loadConfig reads (runSchedule.js:397).
+    const allWorkBlocks = _DEF_WD.map(function(b) {
+      return Object.assign({}, b, { loc: 'work' });
+    });
+    const allWorkTimeBlocks = {
+      Mon: allWorkBlocks, Tue: allWorkBlocks, Wed: allWorkBlocks,
+      Thu: allWorkBlocks, Fri: allWorkBlocks, Sat: allWorkBlocks, Sun: allWorkBlocks
+    };
+    await db('user_config').insert({
+      user_id: '1',
+      config_key: 'time_blocks',
+      config_value: JSON.stringify(allWorkTimeBlocks),
+      created_at: new Date(),
+      updated_at: new Date()
+    });
+    masterC2U = await createC2Master();
+    instanceC2U = await createC2Instance(masterC2U.id);
+    await runScheduler([], {}, TODAY, 480, { persist: true });
+  });
+  afterAll(teardownTestDB);
+
+  /**
+   * NEVER-MISSING: the instance row must still exist (task not deleted).
+   *
+   * @expect GREEN both pre-fix and post-fix (row must always exist).
+   */
+  it('juggy3 C2-U: instance row still exists (NEVER-MISSING)', async () => {
+    const inst = await db('task_instances').where({ id: instanceC2U.id }).first();
+    expect(inst).toBeTruthy();
+  });
+
+  /**
+   * C2-U PRIMARY RED: date must be moved forward even when placement cannot succeed.
+   *
+   * Pre-fix mechanism (runSchedule.js section 8, lines 1904-1918):
+   *   The stranded instance has rawRec.scheduled_at set → hasScheduledAt=true.
+   *   Section 8 path A: writes only {overdue: 1} and returns.
+   *   The reconcile-initiated date change (t.date=TODAY set at line 1093) is NEVER
+   *   persisted via the unplaced path → date stays at PAST_6.
+   *
+   * Post-fix: the section 8 path A must also persist the reconcile date-move when
+   *   _preReconDate != null (i.e. when the instance was forward-rolled by the IIFE).
+   *
+   * @expect FAIL pre-fix (RED) — inst.date = PAST_6 (< TODAY). Date not moved.
+   * @expect PASS post-fix — inst.date >= TODAY.
+   */
+  it('juggy3 C2-U: date moves to >= TODAY even when no home block available (PRIMARY RED pre-fix)', async () => {
+    const inst = await db('task_instances').where({ id: instanceC2U.id }).first();
+    expect(inst).toBeTruthy(); // NEVER-MISSING
+    // PRIMARY RED assertion: reconcile-initiated date move must be persisted
+    // even when placement fails (time_blocks has no matching home slot).
+    // Pre-fix: inst.date = PAST_6 (< TODAY) → this assertion FAILS.
+    expect(inst.date >= TODAY).toBe(true);
+  });
+
+  /**
+   * C2-U: overdue=1 must be preserved (section 8 path A already writes this).
+   * Expected GREEN both pre-fix and post-fix.
+   */
+  it('juggy3 C2-U: overdue=1 preserved when unplaceable', async () => {
+    const inst = await db('task_instances').where({ id: instanceC2U.id }).first();
+    expect(inst).toBeTruthy();
+    expect(inst.overdue).toBe(1);
+  });
+
+  /**
+   * C2-U SINGLE-ACTIVE (R-OD1 / AC1a / WARN-2): exactly ONE non-terminal row for
+   * the master after the scheduler run, and it MUST be the same row (same id) —
+   * the W1 fix writes an in-place UPDATE, never an INSERT.
+   *
+   * The W1 fix path (section 8 path A extended) adds `date: timeInfo.todayKey` to
+   * the existing pendingUpdates entry (id=instanceC2U.id). A buggy variant that
+   * INSERTed a new row at todayKey would produce two active rows for this master;
+   * this assertion catches that duplicate-INSERT regression.
+   *
+   * Pre-fix: section 8 path A writes only {overdue:1} — no INSERT, no new row.
+   *   → single active row exists (passes pre-fix for the wrong reason: no new row
+   *     because the fix itself didn't run, but the fixture row is still the only one).
+   * Post-fix: the date UPDATE writes to the same id; still exactly one active row.
+   *   → single active row with the original id (NEVER-MISSING + single-active contract).
+   *
+   * @expect GREEN both pre-fix and post-fix. Would FAIL if fix inadvertently INSERTs
+   *   a new row instead of UPDATEing the existing one.
+   */
+  it('juggy3 C2-U: exactly one active row for master after run, same id preserved (no duplicate INSERT)', async () => {
+    const allInst = await db('task_instances').where({ master_id: masterC2U.id }).select();
+    const activeInst = allInst.filter(r => !isTerminal(r.status));
+    expect(activeInst).toHaveLength(1);
+    expect(activeInst[0].id).toBe(instanceC2U.id);
+  });
+});

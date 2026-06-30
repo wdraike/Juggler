@@ -1908,6 +1908,31 @@ async function runScheduleAndPersist(userId, _retries, options) {
         // Without this write §8 PATH A silently exits and DB stays at overdue=0.
         var _origDateRaw = rawRec && rawRec.date ? String(rawRec.date).split('T')[0] : null;
         if (_origDateRaw && _origDateRaw < timeInfo.todayKey) {
+          // R-OD1 / W1 fix: when the forward-roll IIFE moved this instance in-memory
+          // (forwardRollDeadlineById[t.id] is set), reconcile set t.date=todayKey but
+          // placement failed. Persist the date-move so the row advances to today and
+          // appears in the unscheduled lane (overdue=1, unscheduled=1, scheduled_at=null).
+          // Without this only overdue=1 was written and the date stayed at the stale past
+          // date — the live 'Get a Haircut' stuck-at-6/24 symptom (R-OD1 / juggy3 W1).
+          // When NO forward-roll is pending (forwardRollDeadlineById not set — cycle-ended
+          // or plain unplaced), fall through to the original R-FR5 pin: overdue=1, date
+          // unchanged. AC4/AC1c (cycle-ended stays at past date) rely on this path.
+          if (forwardRollDeadlineById[t.id] != null) {
+            var _frUnplacedUpd = {
+              date: timeInfo.todayKey,
+              scheduled_at: null,
+              overdue: 1,
+              unscheduled: 1,
+              unplaced_reason: t._unplacedReason || REASON_CODES.NO_SLOT,
+              unplaced_detail: t._unplacedDetail || 'No available slot in the schedule',
+              updated_at: _runScheduleCommand.clockNow()
+            };
+            if (result.slackByTaskId && t.id in result.slackByTaskId) {
+              _frUnplacedUpd.slack_mins = result.slackByTaskId[t.id];
+            }
+            pendingUpdates.push({ id: t.id, dbUpdate: _frUnplacedUpd });
+            return;
+          }
           var _noSlotOverdueUpd = { overdue: 1, unscheduled: null, updated_at: _runScheduleCommand.clockNow() };
           if (result.slackByTaskId && t.id in result.slackByTaskId) {
             _noSlotOverdueUpd.slack_mins = result.slackByTaskId[t.id];
