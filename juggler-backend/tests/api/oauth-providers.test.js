@@ -14,6 +14,7 @@ process.env.NODE_ENV = 'test';
 const { createMockChainDb } = require('../helpers/mockChainDb');
 const { mockDb, resolveQueue } = createMockChainDb();
 jest.mock('../../src/db', () => mockDb);
+jest.mock('../../src/lib/db', () => ({ getDefaultDb: () => mockDb }));
 
 // JWT mock
 const TEST_USER = {
@@ -188,6 +189,12 @@ describe('GCal — POST /api/gcal/disconnect', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ disconnected: true });
+    // Pin the user-id delegation: the facade must scope the token-clearing
+    // UPDATE to the AUTHENTICATED user's id (a string), not the whole req.user
+    // object. Without this, passing req.user instead of req.user.id is a silent
+    // no-op disconnect (tokens never cleared) that the response-shape assertion
+    // above cannot detect, since gcalDisconnect returns a constant. (zoe)
+    expect(mockDb.where).toHaveBeenCalledWith('id', TEST_USER.id);
   });
 
   test('returns 401 without auth', async () => {
@@ -207,6 +214,12 @@ describe('GCal — POST /api/gcal/auto-sync', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('autoSync', true);
+    // Pin the user-id delegation: the config row must be scoped to the
+    // AUTHENTICATED user's id (string), not the whole req.user object. A
+    // req.user/req.user.id swap on the first facade arg writes the config
+    // under a malformed user_id and is otherwise invisible (the autoSync
+    // value above is the SECOND arg). (zoe)
+    expect(mockDb.where).toHaveBeenCalledWith({ user_id: TEST_USER.id, config_key: 'gcal_auto_sync' });
   });
 
   test('toggles auto-sync off when row exists (update path)', async () => {
@@ -235,6 +248,19 @@ describe('GCal — GET /api/gcal/connect', () => {
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('authUrl');
     expect(typeof res.body.authUrl).toBe('string');
+    // Pin user-object delegation: gcalConnect(user) takes the FULL user object so
+    // the signed state JWT encodes { userId: user.id }.  A req.user→req.user.id
+    // swap in the controller makes facade receive a string, so user.id===undefined
+    // inside the facade — the JWT then encodes { userId: undefined } and the
+    // jwtVerify assertion below flips RED.  Verified: mutating gcalConnect arg in
+    // gcal.controller.js to `req.user.id` → this test RED; revert → GREEN. (telly WARN-3 closeout)
+    const gcalApiMock = require('../../src/lib/gcal-api');
+    expect(gcalApiMock.getAuthUrl).toHaveBeenCalledTimes(1);
+    const stateJwt = gcalApiMock.getAuthUrl.mock.calls[0][1];
+    const { jwtVerify } = require('jose');
+    const secretKey = new TextEncoder().encode('local-dev-jwt-secret-juggler');
+    const { payload } = await jwtVerify(stateJwt, secretKey);
+    expect(payload.userId).toBe(TEST_USER.id);
   });
 
   test('returns 401 without auth', async () => {

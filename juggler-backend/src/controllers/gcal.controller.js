@@ -1,62 +1,20 @@
 /**
- * Google Calendar Controller — OAuth flow, status, and auto-sync settings.
- * Sync is handled by the unified cal-sync.controller.js.
+ * Google Calendar Controller — THIN HTTP adapter over the calendar slice facade
+ * (999.943).
+ *
+ * All OAuth flow, status, and auto-sync logic now lives in
+ * `src/slices/calendar/facade.js`. This module holds ONLY the HTTP req->args
+ * mapping and response/error mapping. ZERO direct DB access.
  */
 
-var { SignJWT } = require('jose');
-const getDb = () => require('../db');
-var gcalApi = require('../lib/gcal-api');
-
-// --- Token management (canonical implementation in adapter) ---
-
-var { getJwtSecret, verifyStateToken } = require('../lib/jwt-secret');
-var { _getValidAccessToken } = require('../slices/calendar/facade').getAdapter('gcal');
+var facade = require('../slices/calendar/facade');
 const { createLogger } = require('@raike/lib-logger');
 const logger = createLogger('gcal.controller');
 
-// --- Endpoints ---
-
 async function getStatus(req, res) {
   try {
-    var hasToken = !!req.user.gcal_refresh_token;
-    var lastSyncedAt = req.user.gcal_last_synced_at || null;
-    var connected = false;
-    var tokenExpired = false;
-
-    if (hasToken) {
-      // Don't refresh the token on status check — just verify it exists.
-      // Token refresh happens lazily when sync actually needs it.
-      // This makes the status endpoint instant instead of blocking on
-      // Google's auth server (which can take seconds or timeout).
-      connected = true;
-      if (req.user.gcal_token_expiry) {
-        var expiryStr = String(req.user.gcal_token_expiry);
-        var expiry = new Date(expiryStr.endsWith('Z') ? expiryStr : expiryStr + 'Z');
-        if (expiry.getTime() < Date.now()) {
-          // Token expired but refresh token exists — still "connected",
-          // will refresh lazily on next sync
-          connected = true;
-        }
-      }
-    }
-
-    var autoSyncRow = await getDb()('user_config')
-      .where({ user_id: req.user.id, config_key: 'gcal_auto_sync' })
-      .first();
-    var autoSync = false;
-    if (autoSyncRow) {
-      var val = typeof autoSyncRow.config_value === 'string'
-        ? JSON.parse(autoSyncRow.config_value) : autoSyncRow.config_value;
-      autoSync = !!val;
-    }
-
-    res.json({
-      connected: connected,
-      tokenExpired: tokenExpired,
-      email: req.user.email,
-      lastSyncedAt: lastSyncedAt,
-      autoSync: autoSync
-    });
+    var result = await facade.getGcalStatus(req.user);
+    res.json(result);
   } catch (error) {
     logger.error('GCal status error:', error);
     res.status(500).json({ error: 'Failed to check GCal status' });
@@ -65,13 +23,8 @@ async function getStatus(req, res) {
 
 async function connect(req, res) {
   try {
-    var oauth2Client = gcalApi.createOAuth2Client();
-    var state = await new SignJWT({ userId: req.user.id })
-      .setProtectedHeader({ alg: 'HS256' })
-      .setExpirationTime('10m')
-      .sign(getJwtSecret());
-    var authUrl = gcalApi.getAuthUrl(oauth2Client, state);
-    res.json({ authUrl: authUrl });
+    var result = await facade.gcalConnect(req.user);
+    res.json(result);
   } catch (error) {
     logger.error('GCal connect error:', error);
     res.status(500).json({ error: 'Failed to generate auth URL' });
@@ -80,44 +33,11 @@ async function connect(req, res) {
 
 async function callback(req, res) {
   try {
-    var code = req.query.code;
-    var state = req.query.state;
-
-    if (!code || !state) {
-      return res.status(400).send('Missing code or state parameter');
+    var result = await facade.gcalCallback(req.query.code, req.query.state, req.user);
+    if (result.redirect) {
+      return res.redirect(result.redirect);
     }
-
-    var decoded;
-    try {
-      var result = await verifyStateToken(state);
-      decoded = result.payload;
-    } catch (_e) {
-      return res.status(400).send('Invalid or expired state parameter');
-    }
-
-    var userId = decoded.userId;
-    // Verify the OAuth flow is for the authenticated user (prevent IDOR)
-    if (req.user && req.user.id !== userId) {
-      return res.status(403).send('OAuth state does not match authenticated user');
-    }
-    var oauth2Client = gcalApi.createOAuth2Client();
-    var tokens = await gcalApi.getTokensFromCode(oauth2Client, code);
-
-    var update = {
-      gcal_access_token: tokens.access_token,
-      updated_at: getDb().fn.now()
-    };
-    if (tokens.refresh_token) {
-      update.gcal_refresh_token = tokens.refresh_token;
-    }
-    if (tokens.expiry_date) {
-      update.gcal_token_expiry = new Date(tokens.expiry_date);
-    }
-
-    await getDb()('users').where('id', userId).update(update);
-
-    var frontendUrl = require('../proxy-config').services.juggler.frontend;
-    res.redirect(frontendUrl + '/?gcal=connected');
+    res.status(result.status).send(result.body);
   } catch (error) {
     logger.error('GCal callback error:', error);
     res.status(500).send('Failed to complete Google Calendar authorization');
@@ -126,13 +46,8 @@ async function callback(req, res) {
 
 async function disconnect(req, res) {
   try {
-    await getDb()('users').where('id', req.user.id).update({
-      gcal_access_token: null,
-      gcal_refresh_token: null,
-      gcal_token_expiry: null,
-      updated_at: getDb().fn.now()
-    });
-    res.json({ disconnected: true });
+    var result = await facade.gcalDisconnect(req.user.id);
+    res.json(result);
   } catch (error) {
     logger.error('GCal disconnect error:', error);
     res.status(500).json({ error: 'Failed to disconnect GCal' });
@@ -141,27 +56,8 @@ async function disconnect(req, res) {
 
 async function setAutoSync(req, res) {
   try {
-    var enabled = req.body.enabled;
-    var userId = req.user.id;
-    var value = !!enabled;
-
-    var existing = await getDb()('user_config')
-      .where({ user_id: userId, config_key: 'gcal_auto_sync' })
-      .first();
-
-    if (existing) {
-      await getDb()('user_config')
-        .where({ user_id: userId, config_key: 'gcal_auto_sync' })
-        .update({ config_value: JSON.stringify(value), updated_at: getDb().fn.now() });
-    } else {
-      await getDb()('user_config').insert({
-        user_id: userId,
-        config_key: 'gcal_auto_sync',
-        config_value: JSON.stringify(value)
-      });
-    }
-
-    res.json({ autoSync: value });
+    var result = await facade.setGcalAutoSync(req.user.id, req.body.enabled);
+    res.json(result);
   } catch (error) {
     logger.error('GCal auto-sync error:', error);
     res.status(500).json({ error: 'Failed to update auto-sync setting' });
