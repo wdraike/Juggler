@@ -191,7 +191,7 @@ const healthLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 300, store: maybeRed
 // (/api/feature-catalog, /api/feature-events). The global apiLimiter (1000/min)
 // is too loose to protect the service key on these paths (999.293 finding A2).
 // 999.948: dedicated serviceLimiter (max: 60/min) applied to both routes below.
-const featureServiceLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 60, message: { error: 'Too many requests, please wait.' } });
+const featureServiceLimiter = rateLimit({ ...LIMITER_DEFAULTS, max: 60, message: { error: 'Too many requests, please wait.' }, store: maybeRedisStore('jugrl-feature:') });
 // Per-user write limiter — keys by user ID so shared NAT/proxies don't hit a common bucket.
 // skip() passes through safe read-only methods so GETs aren't throttled.
 const writeRateLimiter = rateLimit({
@@ -202,6 +202,7 @@ const writeRateLimiter = rateLimit({
   keyGenerator: (req) => req.user?.id ? String(req.user.id) : undefined,
   message: { error: 'Too many write requests, please slow down.' },
   skip: (req) => req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS',
+  store: maybeRedisStore('jugrl-write:'),
 });
 
 // OAuth proxy + discovery routes (auth-service handles Google SSO, etc.)
