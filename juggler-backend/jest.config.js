@@ -11,6 +11,16 @@ module.exports = {
   testEnvironment: 'node',
   testMatch: ['**/tests/**/*.test.js', '**/src/__tests__/**/*.test.js'],
   collectCoverageFrom: ['src/**/*.js', '!src/server.js'],
+  coverageReporters: ['text', 'text-summary', 'json-summary', 'lcov'],
+  // Coverage thresholds — baseline minus 2% buffer to catch regressions.
+  coverageThreshold: {
+    global: {
+      branches: 10,
+      functions: 10,
+      lines: 10,
+      statements: 10
+    }
+  },
   moduleNameMapper: {
     '^uuid$': '<rootDir>/tests/helpers/uuid-mock.js'
   },
