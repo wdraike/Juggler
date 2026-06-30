@@ -144,6 +144,22 @@ beforeAll(async () => {
 beforeEach(() => {
   resolveQueue.length = 0;
   jest.clearAllMocks();
+  // 999.992 (jug992 re-review fix): the shared mockChainDb's `chain.raw` returns a
+  // plain string (`(s) => s`), fine for the embedded-SQL-fragment usage every other
+  // consumer of this file exercises, but NOT thenable/catchable. The new
+  // gcalMarkCodeUsed()/msftMarkCodeUsed() guard (facade.js) does
+  // `await db.raw(...).catch(fn)` — matching real Knex's `.raw()`, which IS
+  // thenable+catchable — so against the plain-string mock it threw
+  // "db.raw(...).catch is not a function", turning the callback success/tampered-state
+  // paths into 500s (was 302/400). No other facade.js gcal* function calls db.raw()
+  // (confirmed via grep), so this override is scoped to the callback tests in THIS
+  // file only — it does not touch the shared helper (tests/helpers/mockChainDb.js,
+  // 25 other consumers) or production code. Resolves to a generic successful
+  // INSERT-IGNORE result shape so gcalMarkCodeUsed/msftMarkCodeUsed treat every test
+  // code as "first use" (not a duplicate), which is the correct behavior for these
+  // success/error-path characterization tests (they are not testing the dedup
+  // contract itself — that's gcalCalDedup.test.js/msftCalDedup.test.js).
+  mockDb.raw = jest.fn(() => Promise.resolve([{ affectedRows: 1 }]));
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

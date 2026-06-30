@@ -169,9 +169,29 @@ async function gcalConnect(user) {
   return { authUrl: authUrl };
 }
 
+async function gcalMarkCodeUsed(code) {
+  var key = code.substring(0, 40);
+  var hash = require('crypto').createHash('sha256').update(key).digest('hex');
+
+  await db.raw('DELETE FROM oauth_code_nonces WHERE expires_at < NOW()').catch(function() {});
+
+  var result = await db.raw(
+    'INSERT IGNORE INTO oauth_code_nonces (code_hash, expires_at) ' +
+    'VALUES (?, DATE_ADD(NOW(), INTERVAL 2 MINUTE))',
+    [hash]
+  );
+  return result[0].affectedRows === 1;
+}
+
 async function gcalCallback(code, state, reqUser) {
   if (!code || !state) {
     return { status: 400, body: 'Missing code or state parameter' };
+  }
+
+  if (!(await gcalMarkCodeUsed(code))) {
+    logger.info('[GCAL CALLBACK] Duplicate code detected, redirecting without re-exchange');
+    var frontUrl = require('../../proxy-config').services.juggler.frontend;
+    return { status: 302, redirect: frontUrl + '/?gcal=connected' };
   }
 
   var decoded;
@@ -782,6 +802,7 @@ module.exports = {
   msftDisconnect: msftDisconnect,
   setMsftAutoSync: setMsftAutoSync,
   msftMarkCodeUsed: msftMarkCodeUsed,
+  gcalMarkCodeUsed: gcalMarkCodeUsed,
   appleGetStatus: appleGetStatus,
   appleConnect: appleConnect,
   appleSelectCalendar: appleSelectCalendar,

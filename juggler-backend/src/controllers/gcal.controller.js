@@ -69,5 +69,7 @@ module.exports = {
   connect,
   callback,
   disconnect,
-  setAutoSync
+  setAutoSync,
+  // Test-only: direct access to markCodeUsed for unit testing without HTTP stack
+  _internal: { markCodeUsed: facade.gcalMarkCodeUsed }
 };
