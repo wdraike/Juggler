@@ -295,10 +295,15 @@ async function recurCleanup(ctx) {
       || row.split !== undefined || row.split_min !== undefined;
     if (needsCleanup) {
       if (row.recurring === 0) {
-        // 999.967(a): Clean cal_sync_ledger for ALL instances of this template
-        // (not just future pending ones handled by resetRecurringInstances).
+        // 999.967(a) (David ruling 2026-07-01: done instances keep status='done',
+        // NOT 'archived' — see 999.833 test (b)). Ledger cleanup therefore
+        // EXCLUDES done instances too: their calendar-sync history is left
+        // alone, matching "preserved" (999.833 test (e)). Only clean the
+        // ledger for non-done instances (pending ones resetRecurringInstances
+        // doesn't otherwise touch).
         var _allToggleIds = await trx('task_instances')
           .where({ master_id: id, user_id: userId })
+          .whereNot('status', 'done')
           .pluck('id');
         if (_allToggleIds.length > 0) {
           await trx('cal_sync_ledger')
@@ -309,10 +314,8 @@ async function recurCleanup(ctx) {
             .catch(function (err) { logger.error('[silent-catch]', err.message); });
         }
 
-        // 999.967(b): Archive done instances before deletion so they are preserved.
-        await trx('task_instances')
-          .where({ master_id: id, user_id: userId, status: 'done' })
-          .update({ status: 'archived', updated_at: trx.fn.now() });
+        // 999.967(b) (David ruling: done instances stay 'done', not
+        // 'archived' — no archival step; this was removed).
 
         await twrite.resetRecurringInstances(trx, userId, id, '[RECUR] toggle-off: recurring=false');
         await trx('task_instances')
@@ -991,10 +994,13 @@ async function batchUpdateTxn(ctx) {
       }
       await twrite.updateTaskById(trx, id, row, userId);
       if (taskType === 'recurring_template' && (row.recur !== undefined || row.recurring === 0)) {
-        // 999.967(a/b): Same ledger cleanup + archive-done fix as the single-task toggle-off path.
+        // 999.967(a/b): same ledger cleanup as the single-task toggle-off path
+        // (David ruling 2026-07-01: done instances keep status='done' and their
+        // ledger rows are preserved — no archive step, ledger cleanup excludes them).
         if (row.recurring === 0) {
           var _batchToggleIds = await trx('task_instances')
             .where({ master_id: id, user_id: userId })
+            .whereNot('status', 'done')
             .pluck('id');
           if (_batchToggleIds.length > 0) {
             await trx('cal_sync_ledger')
@@ -1004,9 +1010,6 @@ async function batchUpdateTxn(ctx) {
               .update({ status: 'deleted_local', task_id: null, synced_at: trx.fn.now() })
               .catch(function (err) { logger.error('[silent-catch]', err.message); });
           }
-          await trx('task_instances')
-            .where({ master_id: id, user_id: userId, status: 'done' })
-            .update({ status: 'archived', updated_at: trx.fn.now() });
         }
         await twrite.resetRecurringInstances(trx, userId, id, '[BATCH] cycle reset on template');
       }
