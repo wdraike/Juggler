@@ -752,6 +752,65 @@ async function setAppleAutoSync(userId, enabled) {
   return { autoSync: value };
 }
 
+// ── 999.942 W1/W2: cal-sync controller read-path facade methods ──
+// hasChanges/getSyncHistory (cal-sync.controller.js) previously ran these
+// queries via a raw inline `getDb()('tasks_v'|'sync_history')` call. This
+// re-exposes the SAME exact queries behind the facade boundary — no
+// orchestration logic, no shape change (REFACTOR mode — no behavior change).
+//
+// Uses `../../db` (src/db.js) rather than the `lib/db.getDefaultDb()` var
+// used above: src/db.js simply re-exports lib/db's getDefaultDb() singleton
+// verbatim, so this is the byte-identical connection in production — it
+// matches what the controller's pre-existing `getDb()` already resolved to.
+var srcDb = require('../../db');
+
+/**
+ * Count tasks_v rows for a user updated after a given timestamp (used by
+ * hasChanges' local-change detection). Exact query previously inlined in
+ * cal-sync.controller.js:hasChanges.
+ */
+async function countLocalChangesSince(userId, sinceTimestamp) {
+  return srcDb('tasks_v')
+    .where('user_id', userId)
+    .whereNotNull('scheduled_at')
+    .where('updated_at', '>', sinceTimestamp)
+    .count('* as cnt')
+    .first();
+}
+
+/**
+ * Read the recent sync_history runs (grouped run IDs + detail rows) for a
+ * user. Exact two-query sequence previously inlined in
+ * cal-sync.controller.js:getSyncHistory — grouping/shaping stays in the
+ * controller, only the raw reads move behind the facade.
+ */
+async function getSyncHistory(userId, opts) {
+  opts = opts || {};
+  var runLimit = opts.runLimit;
+
+  var recentRuns = await srcDb('sync_history')
+    .where('user_id', userId)
+    .select('sync_run_id')
+    .max('created_at as run_time')
+    .groupBy('sync_run_id')
+    .orderBy('run_time', 'desc')
+    .limit(runLimit);
+
+  if (recentRuns.length === 0) {
+    return { recentRuns: recentRuns, rows: [] };
+  }
+
+  var runIds = recentRuns.map(function(r) { return r.sync_run_id; });
+
+  var rows = await srcDb('sync_history')
+    .where('user_id', userId)
+    .whereIn('sync_run_id', runIds)
+    .orderBy('id', 'asc')
+    .select();
+
+  return { recentRuns: recentRuns, rows: rows };
+}
+
 module.exports = {
   // initializer (thin, side-effect-free)
   initialize: initialize,
@@ -814,4 +873,8 @@ module.exports = {
   appleRefreshCalendars: appleRefreshCalendars,
   appleDisconnect: appleDisconnect,
   setAppleAutoSync: setAppleAutoSync,
+
+  // 999.942: cal-sync controller read-path facade methods
+  countLocalChangesSince: countLocalChangesSince,
+  getSyncHistory: getSyncHistory,
 };

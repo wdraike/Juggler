@@ -12,6 +12,7 @@ var crypto = require('crypto');
 const getDb = () => require('../db');
 var tasksWrite = require('../lib/tasks-write');
 var { getConnectedAdapters } = require('../slices/calendar/facade');
+var calendarFacade = require('../slices/calendar/facade');
 var { enqueueScheduleRun } = require('../scheduler/scheduleQueue');
 var { rowToTask, safeParseJSON } = require('./task.controller');
 var { localToUtc, utcToLocal } = require('../scheduler/dateHelpers');
@@ -2328,12 +2329,7 @@ async function hasChanges(req, res) {
       req.user.apple_cal_last_synced_at,
     ].filter(Boolean).sort().pop() || null;
     if (lastSynced) {
-      var localChanges = await getDb()('tasks_v')
-        .where('user_id', userId)
-        .whereNotNull('scheduled_at')
-        .where('updated_at', '>', lastSynced)
-        .count('* as cnt')
-        .first();
+      var localChanges = await calendarFacade.countLocalChangesSince(userId, lastSynced);
       if (localChanges && parseInt(localChanges.cnt) > 0) {
         result.hasChanges = true;
         result.localChanges = parseInt(localChanges.cnt);
@@ -2356,26 +2352,16 @@ async function getSyncHistory(req, res) {
     var userId = req.user.id;
     var runLimit = Math.min(parseInt(req.query.runs) || 20, 50);
 
-    // Get the most recent distinct sync run IDs with their timestamps
-    var recentRuns = await getDb()('sync_history')
-      .where('user_id', userId)
-      .select('sync_run_id')
-      .max('created_at as run_time')
-      .groupBy('sync_run_id')
-      .orderBy('run_time', 'desc')
-      .limit(runLimit);
+    // Get the most recent distinct sync run IDs with their timestamps, plus
+    // their detail rows — routed through the calendar slice facade.
+    var historyResult = await calendarFacade.getSyncHistory(userId, { runLimit: runLimit });
+    var recentRuns = historyResult.recentRuns;
 
     if (recentRuns.length === 0) {
       return res.json({ runs: [] });
     }
 
-    var runIds = recentRuns.map(function(r) { return r.sync_run_id; });
-
-    var rows = await getDb()('sync_history')
-      .where('user_id', userId)
-      .whereIn('sync_run_id', runIds)
-      .orderBy('id', 'asc')
-      .select();
+    var rows = historyResult.rows;
 
     rows.forEach(function(r) {
       r.old_values   = safeParseJSON(r.old_values,   r.old_values);
