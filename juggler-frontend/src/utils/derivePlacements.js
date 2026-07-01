@@ -46,8 +46,19 @@ export function derivePlacements(tasks) {
       if (t.date && t.time) {
         var ts = parseTimeToMinutes(t.time);
         if (ts != null) {
+          // JUG-CLOSE-NOW (David ruling: actual elapsed, not estimated):
+          // when the terminal transition carries a completion time, show
+          // start->completedAt instead of start->start+dur. Guard against a
+          // completion that rolled past midnight (completedAtTime would then
+          // parse to an earlier minute-of-day than start, producing a
+          // negative/backwards block) by falling back to the estimated end.
+          var terminalEnd = ts + (t.dur || 0);
+          if (t.completedAtTime) {
+            var completedTs = parseTimeToMinutes(t.completedAtTime);
+            if (completedTs != null && completedTs >= ts) terminalEnd = completedTs;
+          }
           if (!dayPlacements[t.date]) dayPlacements[t.date] = [];
-          dayPlacements[t.date].push({ task: t, start: ts, end: ts + (t.dur || 0) });
+          dayPlacements[t.date].push({ task: t, start: ts, end: terminalEnd });
         }
       }
       return;

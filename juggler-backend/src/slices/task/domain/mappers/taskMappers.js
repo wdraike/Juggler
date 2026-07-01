@@ -292,6 +292,10 @@ function rowToTask(row, timezone, sourceMap, logger, nowInfo) {
     scheduledAt: scheduledAtToISO(row.scheduled_at),
     // juggler-cal-history Plan A/E — completion timestamp on terminal transition.
     completedAt: row.completed_at ? scheduledAtToISO(row.completed_at) : null,
+    // JUG-CLOSE-NOW (David ruling: actual elapsed, not estimated): local
+    // "H:MM AM/PM" string, same shape as `time` above — derivePlacements
+    // needs this format (parseTimeToMinutes), not the UTC ISO `completedAt`.
+    completedAtTime: (displayTz && row.completed_at) ? (utcToLocal(row.completed_at, displayTz).time || null) : null,
     tz: row.tz || null,
     deadline: deadlineISO,
     // Derived local convenience fields

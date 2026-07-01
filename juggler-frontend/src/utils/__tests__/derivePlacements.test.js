@@ -349,6 +349,27 @@ describe('derivePlacements — terminal-status tasks are never unplaced', () => 
     expect(result.dayPlacements['2026-05-31']).toHaveLength(1);
   });
 
+  // JUG-CLOSE-NOW (David ruling: actual elapsed, not estimated).
+  it('done with completedAtTime → end = actual elapsed, not start+dur', () => {
+    const closedNow = { id: 'd2', text: '5-min task closed after 2h', status: 'done', date: '2026-05-31', time: '9:00 AM', dur: 5, completedAtTime: '11:00 AM' };
+    const result = derivePlacements([closedNow]);
+    expect(result.dayPlacements['2026-05-31'][0].start).toBe(540); // 9:00 AM
+    expect(result.dayPlacements['2026-05-31'][0].end).toBe(660);   // 11:00 AM, not 545
+  });
+
+  it('done with completedAtTime before start (midnight rollover) → falls back to estimated end', () => {
+    const rollover = { id: 'd3', text: 'crossed midnight', status: 'done', date: '2026-05-31', time: '11:30 PM', dur: 30, completedAtTime: '12:15 AM' };
+    const result = derivePlacements([rollover]);
+    expect(result.dayPlacements['2026-05-31'][0].start).toBe(1410); // 11:30 PM
+    expect(result.dayPlacements['2026-05-31'][0].end).toBe(1440);   // 11:30 PM + 30 (estimated fallback)
+  });
+
+  it('done without completedAtTime → end = start+dur (unchanged legacy behavior)', () => {
+    const legacy = { id: 'd4', text: 'no completedAtTime', status: 'done', date: '2026-05-31', time: '9:00 AM', dur: 30 };
+    const result = derivePlacements([legacy]);
+    expect(result.dayPlacements['2026-05-31'][0].end).toBe(570); // 9:30 AM
+  });
+
   it('skip + unscheduled=1 + no slot → in neither array (not unplaced)', () => {
     const skipOrphan = { id: 's1', text: 'Apply for Jobs', status: 'skip', unscheduled: true, date: null, time: null };
     const result = derivePlacements([skipOrphan]);
