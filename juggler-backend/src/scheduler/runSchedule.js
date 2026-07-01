@@ -1801,6 +1801,40 @@ async function runScheduleAndPersist(userId, _retries, options) {
       dbUpdate: dbUpdate
     });
 
+    // 999.990: recompute implied_deadline on every real write for a recurring
+    // instance. Phase 1 (chunk pre-insert, ~:1417) materializes implied_deadline
+    // ONCE at INSERT time; it was never recomputed afterward, so a later roam/
+    // reschedule left the cycle-boundary deadline stale. Per R6 (instance-date-
+    // rules.test.js:528-539), the cycle window is measured from the OCCURRENCE
+    // ANCHOR (earliestStart), NOT the placed date — using newDate here would
+    // give the wrong (later) deadline on a flexible-TPC roam. Routed as a
+    // SEPARATE pendingUpdate (mirroring the R-FR1 overdue pattern immediately
+    // below): the batched CASE-expression path in KnexScheduleRepository.
+    // writeChanged hand-builds its field list and does not generically copy
+    // implied_deadline off dbUpdate, so folding it into the main dbUpdate above
+    // would be silently dropped on every real move. The per-row otherUpdates
+    // path (tasksWrite.updateTaskById → splitUpdateFields) does write it —
+    // INSTANCE_UPDATE_FIELDS already includes implied_deadline.
+    if (original.recurring && original.recur) {
+      var _impliedAnchor = original.earliestStart || newDate;
+      var _recomputedDeadline = recurringPeriodEndKey(original.recur, _impliedAnchor);
+      // Skip the write when it's a no-op (matches the main dbUpdate's
+      // placementMatchesDbRow discipline above): most real writes here are
+      // driven by an unrelated field (dur/slack_mins/overdue), not a cycle-
+      // boundary move, so recomputing without comparing would fire an extra
+      // per-row UPDATE on every one of them. Also guards the edge case where
+      // both earliestStart and newDate are absent (_recomputedDeadline=null)
+      // from ever clobbering a previously-valid stored deadline — only a
+      // computed value that actually differs from the current row is written.
+      var _rawImplied = _rawRow ? (_rawRow.implied_deadline || null) : undefined;
+      if (_rawImplied === undefined || _recomputedDeadline !== _rawImplied) {
+        pendingUpdates.push({
+          id: taskId,
+          dbUpdate: { implied_deadline: _recomputedDeadline, updated_at: _runScheduleCommand.clockNow() }
+        });
+      }
+    }
+
     // R-FR1: a recurring instance forward-rolled from a past-due slot must carry
     // overdue=1 even after placement. The scheduled_at batch path in
     // KnexScheduleRepository.writeChanged hardcodes overdue:0 for all placed rows

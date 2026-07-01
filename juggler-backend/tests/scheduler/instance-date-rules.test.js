@@ -34,6 +34,14 @@
  */
 'use strict';
 
+// Part B's many describe blocks each run setupTestDB() (clearAll + scheduler runs)
+// in their own beforeAll; under concurrent DB load this occasionally exceeds
+// jest's default 5000ms hook timeout on an otherwise-passing block (observed
+// intermittently hitting different describe blocks across runs — R1-DB,
+// INV-6-DB — not a real failure). Match the timeout convention used by the
+// cal-sync DB-integration suites (jest.setTimeout(30000)/(60000)).
+jest.setTimeout(30000);
+
 // ── Imports ────────────────────────────────────────────────────────────────────
 const { setupTestDB, teardownTestDB } = require('../../test-helpers/db');
 const db = require('../../test-helpers/test-db');
@@ -537,6 +545,54 @@ describe('R6-DB: flexible-quota weekly — implied_deadline = full cycle window'
         expect(toDateStr(inst.implied_deadline)).toBe(addDays(anchor, 7));
       }
     });
+  });
+});
+
+// ─── R8: implied_deadline recompute-on-move (999.990) ─────────────────────────
+// Phase 1 (chunk pre-insert, runSchedule.js:~1417) materializes implied_deadline
+// ONCE at INSERT time; prior to 999.990 it was never recomputed when the
+// instance's occurrence anchor later moved. This proves the persist-time
+// secondary pendingUpdate (runSchedule.js, right after the main dbUpdate push)
+// recomputes it using the NEW anchor, not the stale insert-time value.
+
+describe('R8-DB: implied_deadline recompute-on-move', () => {
+  beforeAll(async () => { await setupTestDB(); });
+  afterAll(async () => { await teardownTestDB(); });
+
+  it('recomputes implied_deadline when a past-placed rolling instance forward-rolls to today', async () => {
+    const master = await createTask({
+      text: 'R8 rolling recompute-on-move',
+      dur: 30,
+      recurring: true,
+      recur: { type: 'rolling', intervalDays: 7 },
+      recurStart: addDays(TODAY, -10),
+      rollingAnchor: addDays(TODAY, -10)
+    });
+
+    const pastOcc = PAST_3;
+    await createTask({
+      master_id: master.id,
+      date: pastOcc,
+      scheduled_at: pastOcc + ' 09:00:00',
+      status: '',
+      // Deliberately wrong/stale implied_deadline — as if computed once at
+      // insert time and never refreshed. Does not match OCC+7 for any real
+      // anchor, so a passing test proves an actual recompute happened.
+      implied_deadline: '2000-01-01'
+    });
+
+    // Run scheduler — the past-placed rolling instance should forward-roll to today.
+    await runScheduler([], {}, TODAY, 480, { persist: true });
+
+    const inst = await db('task_instances').where({ master_id: master.id }).first();
+    expect(inst).toBeTruthy();
+    const newAnchor = toDateStr(inst.earliest_start) || toDateStr(inst.date);
+    expect(newAnchor).toBe(TODAY); // confirms the instance actually moved
+
+    // The stale sentinel must be gone, and implied_deadline must reflect the
+    // NEW anchor's cycle window (OCC+intervalDays=7), not the original insert.
+    expect(toDateStr(inst.implied_deadline)).not.toBe('2000-01-01');
+    expect(toDateStr(inst.implied_deadline)).toBe(addDays(newAnchor, 7));
   });
 });
 
