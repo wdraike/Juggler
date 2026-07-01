@@ -98,8 +98,14 @@ async function markMissedTasks() {
       // `status` columns, so a bare SELECT * across the join clobbers the instance's
       // values with the master's (NULL scheduled_at) — which made shouldAutoMarkMissed
       // see scheduled_at=null and mark NOTHING. (999.555 — third latent cron bug.)
+      // overdue = 0 mirrors the `!task.overdue` guard in the loop below — already-
+      // overdue rows are never updated, so filtering them here leaves the UPDATE set
+      // byte-identical (never-missing preserved) while letting the new composite index
+      // idx_task_instances_missed_scan (overdue, scheduled_at) serve an equality+range
+      // scan instead of a full-table scan (999.956).
       const tasksToMark = await knex('task_instances')
         .join('task_masters', 'task_instances.master_id', 'task_masters.id')
+        .where('task_instances.overdue', 0)
         .whereNotNull('task_instances.scheduled_at')
         .whereNotIn('task_instances.status', TERMINAL_STATUSES)
         .where(knex.raw('task_instances.scheduled_at < ?', [new Date(currentTime.getTime() - 24 * 60 * 60 * 1000)]))
